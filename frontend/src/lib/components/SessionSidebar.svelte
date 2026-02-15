@@ -104,7 +104,7 @@
           <div
             role="button"
             tabindex="0"
-            class="group flex items-center gap-2 px-2 py-2 mx-1 rounded-lg cursor-pointer transition-colors
+            class="session-item group flex items-center gap-2 px-2 py-2 mx-1 rounded-lg cursor-pointer transition-colors
                    {sessionStore.activeSessionId === session.id ? 'bg-[var(--color-surface-3)]' : 'hover:bg-[var(--color-surface-2)]'}"
             onclick={() => currentSessionId = session.id}
             onkeydown={(e) => { if (e.key === 'Enter') currentSessionId = session.id; }}

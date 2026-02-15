@@ -462,6 +462,20 @@ pre {
   transition: border-color 0.15s ease;
 }
 
+/* Non-selectable session items to avoid text highlighting when clicking */
+.session-item {
+  user-select: none;
+  -webkit-user-select: none;
+  -ms-user-select: none;
+  cursor: pointer;
+}
+
+/* Bring command input above the feed so it isn't covered by other layout elements */
+.command-input {
+  position: relative;
+  z-index: 5;
+}
+
 .input:focus {
   outline: none;
   border-color: var(--color-accent);

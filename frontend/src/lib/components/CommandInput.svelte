@@ -44,7 +44,7 @@
 
   let availableModels = $derived(() => {
     const models: Array<{ label: string; value: string; provider: string }> = [
-      { label: '✨ Auto (Kory decides)', value: 'auto', provider: '' },
+      { label: 'Auto (Kory decides)', value: 'auto', provider: '' },
     ];
     for (const p of wsStore.providers) {
       if (p.authenticated) {
@@ -106,7 +106,7 @@
 
 <svelte:window onclick={handleClickOutside} />
 
-<div class="px-4 py-3">
+<div class="command-input px-4 py-3">
   <!-- Controls row: Model picker + Reasoning toggle -->
   <div class="flex items-center gap-3 mb-3">
     <!-- Model selector -->
