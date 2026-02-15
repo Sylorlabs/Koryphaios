@@ -4,6 +4,7 @@
 import type { KoryphaiosConfig } from "@koryphaios/shared";
 import { ConfigError } from "./errors";
 import { serverLog } from "./logger";
+import { resolveModel } from "./providers/types";
 
 /**
  * Validates the loaded configuration against expected schema
@@ -38,10 +39,49 @@ export function validateConfig(config: Partial<KoryphaiosConfig>): void {
     }
   }
 
+  // Validate assignments config
+  if (config.assignments) {
+    for (const [domain, assignment] of Object.entries(config.assignments)) {
+      if (typeof assignment !== "string" || !assignment.includes(":")) {
+        errors.push(`assignments.${domain} must be a string in "provider:model" format`);
+        continue;
+      }
+      const [, modelId] = assignment.split(":");
+      const modelDef = resolveModel(modelId);
+      if (!modelDef) {
+        errors.push(`assignments.${domain} references unknown model "${modelId}" — check MODEL_CATALOG for valid IDs`);
+      }
+    }
+  }
+
+  // Validate fallbacks config
+  if (config.fallbacks) {
+    if (typeof config.fallbacks !== "object" || Array.isArray(config.fallbacks)) {
+      errors.push("fallbacks must be an object mapping modelId -> array of modelIds");
+    } else {
+      for (const [fromModel, toModels] of Object.entries(config.fallbacks)) {
+        if (!resolveModel(fromModel)) {
+          errors.push(`fallbacks key "${fromModel}" references unknown model — check MODEL_CATALOG`);
+        }
+        if (!Array.isArray(toModels)) {
+          errors.push(`fallbacks.${fromModel} must be an array of model ID strings`);
+          continue;
+        }
+        for (const m of toModels) {
+          if (typeof m !== "string") {
+            errors.push(`fallbacks.${fromModel} contains non-string value`);
+          } else if (!resolveModel(m)) {
+            errors.push(`fallbacks.${fromModel} references unknown model "${m}" — check MODEL_CATALOG`);
+          }
+        }
+      }
+    }
+  }
+
   // Validate providers config
   if (config.providers) {
     const validProviders = new Set([
-      "anthropic", "openai", "gemini", "copilot", "codex", "openrouter",
+      "anthropic", "openai", "codex", "google", "copilot", "openrouter",
       "groq", "xai", "azure", "bedrock", "vertexai", "local"
     ]);
 
@@ -171,10 +211,14 @@ export function validateEnvironment(): void {
     errors.push("AWS_SECRET_ACCESS_KEY is required when AWS_ACCESS_KEY_ID is set");
   }
 
-  // Log warnings
+  // Log warnings — in development log as debug to avoid noisy console output; warn in production
   if (warnings.length > 0) {
     for (const warning of warnings) {
-      serverLog.warn(warning);
+      if (process.env.NODE_ENV === "production") {
+        serverLog.warn(warning);
+      } else {
+        serverLog.debug(warning);
+      }
     }
   }
 
