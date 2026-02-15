@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { sessionStore } from '$lib/stores/sessions.svelte';
+  import { wsStore } from '$lib/stores/websocket.svelte';
   import { Plus, Search, Pencil, Trash2, Check, X, MessageSquare } from 'lucide-svelte';
 
   interface Props {
@@ -28,6 +29,13 @@
       sessionStore.activeSessionId = currentSessionId;
     }
   });
+
+  async function selectSession(id: string) {
+    currentSessionId = id;
+    // Load historical messages into the feed
+    const messages = await sessionStore.fetchMessages(id);
+    wsStore.loadSessionMessages(id, messages);
+  }
 
   function startRename(id: string, currentTitle: string) {
     editingId = id;
@@ -87,7 +95,8 @@
       <input
         type="text"
         placeholder="Search sessions..."
-        class="input pl-8 text-xs h-8"
+        class="input text-xs h-8"
+        style="padding-left: 44px;"
         bind:value={sessionStore.searchQuery}
       />
     </div>
@@ -104,10 +113,9 @@
           <div
             role="button"
             tabindex="0"
-            class="session-item group flex items-center gap-2 px-2 py-2 mx-1 rounded-lg cursor-pointer transition-colors
-                   {sessionStore.activeSessionId === session.id ? 'bg-[var(--color-surface-3)]' : 'hover:bg-[var(--color-surface-2)]'}"
-            onclick={() => currentSessionId = session.id}
-            onkeydown={(e) => { if (e.key === 'Enter') currentSessionId = session.id; }}
+            class="session-item group flex items-center gap-2 px-2 py-2 mx-1 rounded-lg cursor-pointer transition-colors {sessionStore.activeSessionId === session.id ? 'active-session' : 'hover:bg-[var(--color-surface-2)]'}"
+            onclick={() => selectSession(session.id)}
+            onkeydown={(e) => { if (e.key === 'Enter') selectSession(session.id); }}
             ondblclick={() => startRename(session.id, session.title)}
           >
             {#if editingId === session.id}
