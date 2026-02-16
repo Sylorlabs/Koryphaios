@@ -1,5 +1,6 @@
 <script lang="ts">
   import { wsStore } from "$lib/stores/websocket.svelte";
+  import { sessionStore } from "$lib/stores/sessions.svelte";
   import { AlertTriangle, X, Check, Shield, ShieldAlert, ShieldCheck, ArrowRight } from "lucide-svelte";
 
   function getRiskColor(risk: string): string {
@@ -39,7 +40,7 @@
     return "low";
   }
 
-  let pendingPermissions = $derived(wsStore.pendingPermissions);
+  let pendingPermissions = $derived(wsStore.pendingPermissions.filter(p => p.sessionId === sessionStore.activeSessionId));
 
   function approve(id: string) {
     wsStore.respondToPermission(id, true);

@@ -26,6 +26,14 @@ const BLOCKED_PATTERNS = [
   /\breboot\b/,
   /\binit\s+[0-6]\b/,
   /\bsystemctl\s+(stop|disable|mask)\b/,
+  /\bgcloud\s+auth\b/,                             // Block gcloud auth (spawns browser)
+  /\bclaude\s+login\b/,                            // Block claude login (spawns browser)
+  /\bclaude\s+auth\b/,                             // Block claude auth
+  /\bcodex\s+auth\b/,                              // Block codex auth
+  /\bcodex\s+login\b/,                             // Block codex login
+  /\bopenai\s+login\b/,                            // Block openai login
+  /\bxdg-open\b/,                                  // Block xdg-open (opens browser/apps)
+  /\bopen\b\s+https?:\/\//,                        // Block 'open http...'
 ];
 
 const BLOCKED_EXACT = new Set([

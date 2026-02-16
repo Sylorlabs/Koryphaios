@@ -14,7 +14,7 @@ type ReqOpts = {
 };
 
 function request(path: string, opts: ReqOpts = {}) {
-  const args = ["-sS", "-X", opts.method ?? "GET", "-o", "-", "-w", "\n%{http_code}", `${BASE_URL}${path}`];
+  const args = ["-sS", "--path-as-is", "-X", opts.method ?? "GET", "-o", "-", "-w", "\n%{http_code}", `${BASE_URL}${path}`];
   const headers = opts.headers ?? {};
   for (const [k, v] of Object.entries(headers)) {
     args.push("-H", `${k}: ${v}`);
@@ -224,7 +224,7 @@ describe("API Integration Tests", () => {
 
   describe("Input Validation", () => {
     test("rejects invalid session ID", async () => {
-      const res = request("/api/sessions/invalid/../path");
+      const res = request("/api/sessions/invalid$$$");
 
       expect(res.status).toBe(400);
       expect(res.json?.ok).toBe(false);

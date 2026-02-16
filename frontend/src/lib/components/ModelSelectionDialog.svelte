@@ -1,11 +1,11 @@
 <script lang="ts">
-  import { X, Search, Check, Info } from 'lucide-svelte';
+  import { X, Search, Check, Info, Sparkles } from 'lucide-svelte';
   import { fade, scale } from 'svelte/transition';
-  import type { ProviderName } from '@koryphaios/shared';
+  import type { ProviderName, ModelDef } from '@koryphaios/shared';
 
   interface Props {
     providerName: ProviderName;
-    availableModels: string[];
+    availableModels: ModelDef[];
     selectedModels: string[];
     onSave: (selected: string[], hideSelector: boolean) => void;
     onClose: () => void;
@@ -20,12 +20,15 @@
   // Initialize and sync local selection
   $effect(() => {
     if (availableModels.length > 0 && localSelected.length === 0) {
-      localSelected = selectedModels.length > 0 ? [...selectedModels] : [...availableModels];
+      localSelected = selectedModels.length > 0 ? [...selectedModels] : availableModels.map(m => m.id);
     }
   });
 
   let filteredModels = $derived(
-    (availableModels || []).filter(m => m.toLowerCase().includes(searchQuery.toLowerCase()))
+    (availableModels || []).filter(m => 
+      m.id.toLowerCase().includes(searchQuery.toLowerCase()) || 
+      m.name.toLowerCase().includes(searchQuery.toLowerCase())
+    )
   );
 
   function toggleModel(id: string) {
@@ -37,7 +40,7 @@
   }
 
   function selectAll() {
-    localSelected = [...(availableModels || [])];
+    localSelected = availableModels.map(m => m.id);
   }
 
   function selectNone() {
@@ -49,7 +52,7 @@
   }
 
   function skip() {
-    onSave(availableModels || [], dontAskAgain);
+    onSave(availableModels.map(m => m.id), dontAskAgain);
   }
 </script>
 
@@ -88,7 +91,7 @@
           <button class="text-[10px] uppercase tracking-wider font-bold hover:text-red-400 transition-colors" onclick={selectNone}>Select None</button>
         </div>
         <span class="text-[10px] font-medium" style="color: var(--color-text-muted);">
-          {localSelected.length} of {(availableModels || []).length} selected
+          {localSelected.length} of {availableModels.length} selected
         </span>
       </div>
     </div>
@@ -99,23 +102,36 @@
         {#each filteredModels as model}
           <button 
             class="w-full flex items-center justify-between p-3 rounded-xl transition-all border
-                   {localSelected.includes(model) ? 'bg-[var(--color-accent)]/5 border-[var(--color-accent)]/30' : 'bg-transparent border-transparent hover:bg-[var(--color-surface-2)]'}"
-            onclick={() => toggleModel(model)}
+                   {localSelected.includes(model.id) ? 'bg-[var(--color-accent)]/5 border-[var(--color-accent)]/30' : 'bg-transparent border-transparent hover:bg-[var(--color-surface-2)]'}"
+            onclick={() => toggleModel(model.id)}
           >
             <div class="flex items-center gap-3">
               <div class="w-5 h-5 rounded-md border flex items-center justify-center transition-colors
-                          {localSelected.includes(model) ? 'bg-[var(--color-accent)] border-[var(--color-accent)]' : 'border-white/10'}">
-                {#if localSelected.includes(model)}
+                          {localSelected.includes(model.id) ? 'bg-[var(--color-accent)] border-[var(--color-accent)]' : 'border-white/10'}">
+                {#if localSelected.includes(model.id)}
                   <Check size={14} class="text-white" />
                 {/if}
               </div>
-              <span class="text-sm font-medium" style="color: {localSelected.includes(model) ? 'var(--color-text-primary)' : 'var(--color-text-secondary)'};">
-                {model}
-              </span>
+              <div class="flex flex-col items-start">
+                <span class="text-sm font-medium" style="color: {localSelected.includes(model.id) ? 'var(--color-text-primary)' : 'var(--color-text-secondary)'};">
+                  {model.name}
+                </span>
+                <span class="text-[10px] opacity-40">{model.id}</span>
+              </div>
             </div>
-            {#if model.includes('pro') || model.includes('max')}
-              <span class="text-[9px] uppercase font-black px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-500 border border-amber-500/20">Premium</span>
-            {/if}
+            <div class="flex gap-1.5">
+              {#if model.isGeneric}
+                <span class="text-[9px] font-bold px-1.5 py-0.5 rounded bg-blue-500/10 text-blue-400 border border-blue-500/20 flex items-center gap-1">
+                  <Sparkles size={10} /> NEW
+                </span>
+              {/if}
+              {#if model.canReason}
+                <span class="text-[9px] font-bold px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">AUTO</span>
+              {/if}
+              {#if model.name.includes('Pro') || model.name.includes('Max') || model.tier === 'flagship'}
+                <span class="text-[9px] uppercase font-black px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-500 border border-amber-500/20">Flagship</span>
+              {/if}
+            </div>
           </button>
         {/each}
       </div>

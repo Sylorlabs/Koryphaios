@@ -1,7 +1,8 @@
 <script lang="ts">
   import { Send, ChevronDown, Sparkles } from 'lucide-svelte';
   import { wsStore } from '$lib/stores/websocket.svelte';
-  import { getReasoningConfig, hasReasoningSupport, getDefaultReasoning } from '@koryphaios/shared';
+  import { shortcutStore } from '$lib/stores/shortcuts.svelte';
+  import { getReasoningConfig, hasReasoningSupport } from '@koryphaios/shared';
   import BrainIcon from '$lib/components/icons/BrainIcon.svelte';
 
   interface Props {
@@ -13,6 +14,18 @@
   let input = $state('');
   let showModelPicker = $state(false);
   let selectedModel = $state<string>('auto');
+
+  function providerLabel(provider: string): string {
+    if (provider === 'openai') return 'OpenAI';
+    if (provider === 'codex') return 'Codex';
+    if (provider === 'anthropic') return 'Anthropic';
+    if (provider === 'google') return 'Google';
+    if (provider === 'xai') return 'xAI';
+    if (provider === 'openrouter') return 'OpenRouter';
+    if (provider === 'vertexai') return 'Vertex AI';
+    if (provider === 'copilot') return 'Copilot';
+    return provider.charAt(0).toUpperCase() + provider.slice(1);
+  }
   
   // Reasoning state - now tracks provider AND model
   let reasoningLevel = $state('medium');
@@ -55,12 +68,12 @@
 
   let availableModels = $derived(() => {
     const models: Array<{ label: string; value: string; provider: string; isAuto?: boolean }> = [
-      { label: 'Auto (Kory decides)', value: 'auto', provider: '', isAuto: true },
+      { label: 'Auto (Smart Selection)', value: 'auto', provider: '', isAuto: true },
     ];
     for (const p of wsStore.providers) {
       if (p.authenticated) {
         for (const m of p.models) {
-          models.push({ label: m, value: `${p.name}:${m}`, provider: p.name });
+          models.push({ label: `(${providerLabel(p.name)}) ${m}`, value: `${p.name}:${m}`, provider: p.name });
         }
       }
     }
@@ -69,11 +82,16 @@
 
   let selectedModelLabel = $derived(() => {
     if (selectedModel === 'auto') return 'Auto';
-    return parseModelSelection(selectedModel).model ?? selectedModel;
+    const parsed = parseModelSelection(selectedModel);
+    if (!parsed.model || !parsed.provider) return selectedModel;
+    return `(${providerLabel(parsed.provider)}) ${parsed.model}`;
   });
 
   function handleKeydown(e: KeyboardEvent) {
-    if (e.key === 'Enter' && !e.shiftKey) {
+    if (shortcutStore.matches('send', e)) {
+      e.preventDefault();
+      send();
+    } else if (e.key === 'Enter' && !e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey) {
       e.preventDefault();
       send();
     }
@@ -114,6 +132,7 @@
   }
 
   let modelDisplayName = $derived(() => {
+    if (selectedModel === 'auto') return 'Auto';
     const modelId = currentModel();
     if (!modelId) return currentProvider().charAt(0).toUpperCase() + currentProvider().slice(1);
     
@@ -165,9 +184,6 @@
                 <Sparkles size={14} class="text-amber-400 shrink-0" />
               {/if}
               <span>{model.label}</span>
-              {#if model.provider}
-                <span class="text-xs ml-auto opacity-60" style="color: var(--color-text-muted);">({model.provider})</span>
-              {/if}
             </button>
           {/each}
         </div>
@@ -181,7 +197,7 @@
           class="flex items-center gap-2 px-3 h-9 rounded-lg text-sm font-medium transition-all hover:brightness-110 active:scale-[0.98]"
           style="background: var(--color-surface-3); color: var(--color-text-primary); border: 1px solid var(--color-border);"
           onclick={() => showReasoningMenu = !showReasoningMenu}
-          title="Set reasoning effort"
+          title="Set auto effort"
         >
           <BrainIcon {reasoningLevel} size={20} class="text-[#c890ab]" />
           <span>{reasoningLabel(reasoningLevel)}</span>
@@ -194,7 +210,7 @@
             style="background: var(--color-surface-2-alpha, rgba(30, 30, 35, 0.9)); border-color: var(--color-border);"
           >
             <div class="px-4 py-3 text-xs font-bold uppercase tracking-widest opacity-70" style="color: var(--color-text-muted); border-bottom: 1px solid var(--color-border); background: rgba(255,255,255,0.03);">
-              {modelDisplayName()} · Reasoning
+              {selectedModel === 'auto' ? 'Auto' : `${modelDisplayName()} · Auto`}
             </div>
             <div class="py-1">
               {#each reasoningConfig.options as opt}
@@ -232,6 +248,7 @@
       placeholder="Describe what you want to build..."
       rows="1"
       class="input flex-1"
+      class:yolo-active={wsStore.isYoloMode}
       style="resize: none; min-height: 52px; max-height: 200px; font-size: 15px; padding: 14px 16px;"
     ></textarea>
     <button
@@ -252,3 +269,10 @@
     {/if}
   </div>
 </div>
+
+<style>
+  .yolo-active {
+    border-color: #ef4444 !important;
+    box-shadow: 0 0 0 1px #ef4444;
+  }
+</style>

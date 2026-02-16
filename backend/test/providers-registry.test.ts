@@ -55,12 +55,13 @@ describe("ProviderRegistry auth modes", () => {
     }
   });
 
-  test("decrypts encrypted env API keys on startup", () => {
+  test("decrypts encrypted env API keys on startup", async () => {
     const original = process.env.OPENAI_API_KEY;
     process.env.OPENAI_API_KEY = encryptApiKey("sk-test-valid-looking");
     try {
       const registry = new ProviderRegistry(minimalConfig());
-      const status = registry.getStatus().find((p) => p.name === "openai");
+      const statuses = await registry.getStatus();
+      const status = statuses.find((p) => p.name === "openai");
       expect(status?.enabled).toBe(true);
       expect(status?.authenticated).toBe(true);
     } finally {

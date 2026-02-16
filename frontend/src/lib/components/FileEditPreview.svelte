@@ -2,6 +2,7 @@
   import { wsStore } from '$lib/stores/websocket.svelte';
   import { FileCode, X, Pencil, FilePlus } from 'lucide-svelte';
   import { tick } from 'svelte';
+  import FileIcon from './icons/FileIcon.svelte';
 
   let codeContainer = $state<HTMLPreElement>();
   let collapsed = $state<Set<string>>(new Set());
@@ -55,11 +56,7 @@
           style="background: var(--color-surface-2);"
           onclick={() => toggleCollapse(edit.path)}
         >
-          {#if edit.operation === 'create'}
-            <FilePlus size={13} class="text-emerald-400 shrink-0" />
-          {:else}
-            <Pencil size={13} class="text-amber-400 shrink-0" />
-          {/if}
+          <FileIcon path={edit.path} size={14} />
           <span class="text-xs font-mono truncate" style="color: var(--color-text-primary);">
             {getFileName(edit.path)}
           </span>

@@ -94,6 +94,86 @@ export class RateLimitError extends KoryphaiosError {
   }
 }
 
+type ErrorStackFrame = {
+  functionName?: string;
+  file?: string;
+  line?: number;
+  column?: number;
+  raw: string;
+};
+
+type SerializedError = {
+  name: string;
+  message: string;
+  stack?: string;
+  frames: ErrorStackFrame[];
+  topFrame?: ErrorStackFrame;
+  cause?: unknown;
+};
+
+function parseStackFrames(stack?: string): ErrorStackFrame[] {
+  if (!stack) return [];
+  const lines = stack.split("\n").slice(1);
+  const frames: ErrorStackFrame[] = [];
+
+  for (const raw of lines) {
+    const line = raw.trim();
+    // Common Node/Bun formats:
+    // at fn (/path/file.ts:10:20)
+    // at /path/file.ts:10:20
+    const withFn = /^at\s+(.+?)\s+\((.+):(\d+):(\d+)\)$/.exec(line);
+    if (withFn) {
+      frames.push({
+        functionName: withFn[1],
+        file: withFn[2],
+        line: Number(withFn[3]),
+        column: Number(withFn[4]),
+        raw: line,
+      });
+      continue;
+    }
+    const noFn = /^at\s+(.+):(\d+):(\d+)$/.exec(line);
+    if (noFn) {
+      frames.push({
+        file: noFn[1],
+        line: Number(noFn[2]),
+        column: Number(noFn[3]),
+        raw: line,
+      });
+      continue;
+    }
+    frames.push({ raw: line });
+  }
+
+  return frames;
+}
+
+function selectTopProjectFrame(frames: ErrorStackFrame[]): ErrorStackFrame | undefined {
+  return frames.find((f) => {
+    const file = f.file ?? "";
+    return file.includes("/backend/src/") || file.includes("/shared/src/") || file.includes("/frontend/src/");
+  }) ?? frames[0];
+}
+
+export function serializeError(err: unknown): SerializedError {
+  if (err instanceof Error) {
+    const frames = parseStackFrames(err.stack);
+    return {
+      name: err.name,
+      message: err.message,
+      stack: err.stack,
+      frames,
+      topFrame: selectTopProjectFrame(frames),
+      cause: (err as any).cause,
+    };
+  }
+  return {
+    name: "UnknownError",
+    message: typeof err === "string" ? err : String(err),
+    frames: [],
+  };
+}
+
 /**
  * Error handler that logs and returns appropriate response
  */
@@ -102,12 +182,14 @@ export function handleError(err: unknown, context?: Record<string, unknown>): {
   code: string;
   statusCode: number;
 } {
+  const serialized = serializeError(err);
+
   if (err instanceof KoryphaiosError) {
     serverLog.error({
       code: err.code,
-      message: err.message,
+      message: serialized.message,
       context: { ...err.context, ...context },
-      stack: err.stack,
+      error: serialized,
     }, "Koryphaios error");
     
     return {
@@ -119,9 +201,9 @@ export function handleError(err: unknown, context?: Record<string, unknown>): {
 
   if (err instanceof Error) {
     serverLog.error({
-      message: err.message,
+      message: serialized.message,
       context,
-      stack: err.stack,
+      error: serialized,
     }, "Unexpected error");
     
     return {
@@ -131,7 +213,7 @@ export function handleError(err: unknown, context?: Record<string, unknown>): {
     };
   }
 
-  serverLog.error({ err, context }, "Unknown error type");
+  serverLog.error({ err: serialized, context }, "Unknown error type");
   return {
     message: "Internal server error",
     code: "UNKNOWN_ERROR",

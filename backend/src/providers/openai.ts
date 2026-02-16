@@ -2,7 +2,9 @@
 // Also used as base for Groq, OpenRouter, xAI (OpenAI-compatible endpoints).
 
 import OpenAI from "openai";
-import type { ProviderConfig, ProviderName } from "@koryphaios/shared";
+import type { ProviderConfig, ProviderName, ModelDef } from "@koryphaios/shared";
+import { detectCodexToken } from "./auth-utils";
+
 import {
   type Provider,
   type ProviderEvent,
@@ -10,29 +12,71 @@ import {
   type ProviderContentBlock,
   getModelsForProvider,
   resolveModel,
+  createGenericModel,
 } from "./types";
+import { withRetry } from "./utils";
 
 export class OpenAIProvider implements Provider {
-  protected client: OpenAI;
+  private _client: OpenAI | null = null;
 
   constructor(
     readonly config: ProviderConfig,
     readonly name: ProviderName = "openai",
-    baseUrl?: string,
-  ) {
-    this.client = new OpenAI({
-      apiKey: config.apiKey,
-      baseURL: baseUrl ?? config.baseUrl,
-      defaultHeaders: config.headers,
-    });
+    private baseUrl?: string,
+  ) {}
+
+  protected get client(): OpenAI {
+    if (!this._client) {
+      const apiKey = this.config.apiKey || this.config.authToken;
+      this._client = new OpenAI({
+        apiKey: apiKey || "placeholder",
+        baseURL: this.baseUrl ?? this.config.baseUrl,
+        defaultHeaders: this.config.headers,
+      });
+    }
+    return this._client;
   }
 
   isAvailable(): boolean {
-    return !this.config.disabled && !!this.config.apiKey;
+    return !this.config.disabled && !!(this.config.apiKey || this.config.authToken);
   }
 
-  listModels() {
-    return getModelsForProvider(this.name);
+  private cachedModels: ModelDef[] | null = null;
+  private lastFetch = 0;
+
+  async listModels(): Promise<ModelDef[]> {
+    const localModels = getModelsForProvider(this.name);
+    
+    if (!this.isAvailable()) {
+      return localModels;
+    }
+
+    if (this.cachedModels && Date.now() - this.lastFetch < 5 * 60 * 1000) {
+      return this.cachedModels;
+    }
+
+    try {
+      const response = await withRetry(() => this.client.models.list());
+      
+      const remoteModels: ModelDef[] = [];
+      for await (const model of response) {
+        const id = model.id;
+        const existing = localModels.find(m => m.apiModelId === id || m.id === id);
+        if (existing) continue;
+        
+        // Filter for chat models
+        const lowerId = id.toLowerCase();
+        if (lowerId.includes("gpt") || lowerId.includes("o1") || lowerId.includes("o3") || lowerId.includes("o4")) {
+          remoteModels.push(createGenericModel(id, this.name));
+        }
+      }
+      
+      this.cachedModels = [...localModels, ...remoteModels];
+      this.lastFetch = Date.now();
+      return this.cachedModels;
+    } catch (err) {
+      return localModels;
+    }
   }
 
   async *streamResponse(request: StreamRequest): AsyncGenerator<ProviderEvent> {
@@ -49,6 +93,8 @@ export class OpenAIProvider implements Provider {
     // Check if the specific model supports reasoning
     const modelDef = resolveModel(request.model);
     const canReason = modelDef?.canReason ?? false;
+    const reasoningEffort = request.reasoningLevel?.toLowerCase();
+    const supportedEfforts = ["none", "minimal", "low", "medium", "high", "xhigh"];
 
     const params: OpenAI.ChatCompletionCreateParamsStreaming = {
       model: modelDef?.apiModelId ?? request.model,
@@ -58,16 +104,18 @@ export class OpenAIProvider implements Provider {
       ...(request.maxTokens && { max_completion_tokens: request.maxTokens }),
       ...(request.temperature !== undefined && { temperature: request.temperature }),
       ...(tools?.length && { tools }),
-      // Only send reasoning_effort if the model supports it
-      ...(canReason && request.reasoningLevel && ["low", "medium", "high"].includes(request.reasoningLevel) && { 
-        reasoning_effort: request.reasoningLevel as any 
+      // Only send reasoning_effort if model + selected level supports it.
+      ...(canReason && reasoningEffort && supportedEfforts.includes(reasoningEffort) && {
+        reasoning_effort: reasoningEffort as any
       }),
     };
 
     try {
-      const stream = await this.client.chat.completions.create(params, {
-        signal: request.signal,
-      });
+      const stream = await withRetry(() =>
+        this.client.chat.completions.create(params, {
+          signal: request.signal,
+        })
+      );
 
       const toolCallBuffers = new Map<number, { id: string; name: string; args: string }>();
 
@@ -79,6 +127,7 @@ export class OpenAIProvider implements Provider {
               type: "usage_update",
               tokensIn: chunk.usage.prompt_tokens,
               tokensOut: chunk.usage.completion_tokens,
+              tokensCache: (chunk.usage as any).prompt_tokens_details?.cached_tokens,
             };
           }
           continue;

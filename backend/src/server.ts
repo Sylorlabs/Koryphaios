@@ -1,349 +1,34 @@
 // Koryphaios Backend Server — Bun HTTP + WebSocket server.
 // This is the main entry point that wires everything together.
 
-import type { WSMessage, KoryphaiosConfig, APIResponse, SendMessageRequest, CreateSessionRequest, Session } from "@koryphaios/shared";
+import type { WSMessage, APIResponse, SendMessageRequest, CreateSessionRequest, StoredMessage } from "@koryphaios/shared";
 import { ProviderRegistry } from "./providers";
 import { startCopilotDeviceAuth, pollCopilotDeviceAuth } from "./providers/copilot";
 import { ToolRegistry, BashTool, ReadFileTool, WriteFileTool, EditFileTool, GrepTool, GlobTool, LsTool, WebSearchTool, WebFetchTool, DeleteFileTool, MoveFileTool, DiffTool, PatchTool } from "./tools";
+import { AskUserTool, AskManagerTool } from "./tools/interaction";
 import { KoryManager } from "./kory/manager";
 import { TelegramBridge } from "./telegram/bot";
 import { MCPManager } from "./mcp/client";
 import { wsBroker } from "./pubsub";
 import { serverLog } from "./logger";
 import { getCorsHeaders, validateSessionId, validateProviderName, sanitizeString, encryptApiKey, RateLimiter } from "./security";
-import { ConfigError, ValidationError, SessionError, handleError, safeJsonParse } from "./errors";
-import { SESSION, MESSAGE, ID, RATE_LIMIT, SERVER, FS, AGENT, DEFAULT_CONTEXT_PATHS } from "./constants";
-import { validateConfig, validateEnvironment } from "./config-schema";
+import { ValidationError, SessionError, handleError, generateCorrelationId } from "./errors";
+import { SESSION, MESSAGE, ID, RATE_LIMIT } from "./constants";
+import { validateEnvironment } from "./config-schema";
 import { nanoid } from "nanoid";
 import { existsSync, readFileSync, mkdirSync, writeFileSync, unlinkSync, readdirSync } from "fs";
 import { join } from "path";
-import { homedir } from "os";
+import { GoogleAuthManager, googleAuth } from "./providers/google-auth";
+import { cliAuth } from "./providers/cli-auth";
+import { initDb } from "./db/sqlite";
+import { PROJECT_ROOT, BACKEND_ROOT } from "./runtime/paths";
+import { loadConfig } from "./runtime/config";
+import { persistEnvVar, clearEnvVar } from "./runtime/env";
+import { SessionStore } from "./stores/session-store";
+import { MessageStore } from "./stores/message-store";
+import { WSManager } from "./ws/ws-manager";
 
 // ─── Configuration Loading ──────────────────────────────────────────────────
-
-function loadConfig(): KoryphaiosConfig {
-  const configPaths = [
-    join(process.cwd(), "koryphaios.json"),
-    join(homedir(), ".config", "koryphaios", "config.json"),
-    join(homedir(), ".koryphaios.json"),
-  ];
-
-  let fileConfig: Partial<KoryphaiosConfig> = {};
-
-  for (const path of configPaths) {
-    if (existsSync(path)) {
-      try {
-        const rawConfig = readFileSync(path, "utf-8");
-        fileConfig = safeJsonParse(rawConfig, {}, { path });
-        if (Object.keys(fileConfig).length > 0) {
-          serverLog.info({ path }, "Loaded config");
-          break;
-        }
-      } catch (err) {
-        serverLog.warn({ path, err }, "Failed to parse config");
-        throw new ConfigError(`Invalid config file: ${path}`, { path, error: String(err) });
-      }
-    }
-  }
-
-  const config: KoryphaiosConfig = {
-    providers: fileConfig.providers ?? {},
-    agents: fileConfig.agents ?? {
-      manager: { model: AGENT.DEFAULT_MANAGER_MODEL, reasoningLevel: AGENT.DEFAULT_REASONING_LEVEL },
-      coder: { model: AGENT.DEFAULT_CODER_MODEL, maxTokens: AGENT.CODER_MAX_TOKENS },
-      task: { model: AGENT.DEFAULT_TASK_MODEL, maxTokens: AGENT.DEFAULT_MAX_TOKENS },
-    },
-    server: {
-      port: Number(process.env.KORYPHAIOS_PORT ?? fileConfig.server?.port ?? SERVER.DEFAULT_PORT),
-      host: process.env.KORYPHAIOS_HOST ?? fileConfig.server?.host ?? SERVER.DEFAULT_HOST,
-    },
-    telegram: fileConfig.telegram ?? (process.env.TELEGRAM_BOT_TOKEN
-      ? {
-          botToken: process.env.TELEGRAM_BOT_TOKEN,
-          adminId: Number(process.env.TELEGRAM_ADMIN_ID ?? 0),
-          secretToken: process.env.TELEGRAM_SECRET_TOKEN,
-        }
-      : undefined),
-    mcpServers: fileConfig.mcpServers,
-    contextPaths: fileConfig.contextPaths ?? DEFAULT_CONTEXT_PATHS,
-    dataDirectory: fileConfig.dataDirectory ?? FS.DEFAULT_DATA_DIR,
-  };
-
-  // Validate configuration
-  validateConfig(config);
-
-  return config;
-}
-
-// ─── .env Persistence ───────────────────────────────────────────────────────
-
-function persistEnvVar(key: string, value: string) {
-  const envPath = join(process.cwd(), ".env");
-  let content = "";
-  try {
-    content = readFileSync(envPath, "utf-8");
-  } catch (err) {
-    serverLog.debug({ key, error: String(err) }, "No existing .env file, creating new one");
-  }
-
-  // Also set it in the current process
-  process.env[key] = value;
-
-  const lines = content.split("\n");
-  const existingIdx = lines.findIndex((l) => l.startsWith(`${key}=`));
-  if (existingIdx >= 0) {
-    lines[existingIdx] = `${key}=${value}`;
-  } else {
-    lines.push(`${key}=${value}`);
-  }
-
-  try {
-    writeFileSync(envPath, lines.join("\n"));
-    serverLog.debug({ key }, "Persisted environment variable");
-  } catch (err) {
-    serverLog.error({ key, error: String(err) }, "Failed to persist environment variable");
-  }
-}
-
-function clearEnvVar(key: string) {
-  const envPath = join(process.cwd(), ".env");
-  let content = "";
-  try {
-    content = readFileSync(envPath, "utf-8");
-  } catch {
-    delete process.env[key];
-    return;
-  }
-
-  delete process.env[key];
-  const lines = content
-    .split("\n")
-    .filter((line) => !line.startsWith(`${key}=`));
-  try {
-    writeFileSync(envPath, lines.join("\n"));
-    serverLog.debug({ key }, "Cleared environment variable");
-  } catch (err) {
-    serverLog.error({ key, error: String(err) }, "Failed to clear environment variable");
-  }
-}
-
-// ─── Session Store (in-memory + file persistence) ───────────────────────────
-
-class SessionStore {
-  private sessions = new Map<string, Session>();
-  private dataDir: string;
-
-  constructor(dataDir: string) {
-    this.dataDir = join(dataDir, FS.SESSIONS_DIR);
-    mkdirSync(this.dataDir, { recursive: true });
-    this.loadFromDisk();
-  }
-
-  create(title?: string, parentId?: string): Session {
-    const session: Session = {
-      id: nanoid(ID.SESSION_ID_LENGTH),
-      title: title ?? SESSION.DEFAULT_TITLE,
-      parentSessionId: parentId,
-      messageCount: 0,
-      totalTokensIn: 0,
-      totalTokensOut: 0,
-      totalCost: 0,
-      createdAt: Date.now(),
-      updatedAt: Date.now(),
-    };
-    this.sessions.set(session.id, session);
-    this.saveToDisk(session);
-    return session;
-  }
-
-  get(id: string): Session | undefined {
-    return this.sessions.get(id);
-  }
-
-  list(): Session[] {
-    return [...this.sessions.values()].sort((a, b) => b.updatedAt - a.updatedAt);
-  }
-
-  update(id: string, updates: Partial<Session>): Session | undefined {
-    const session = this.sessions.get(id);
-    if (!session) return undefined;
-    Object.assign(session, updates, { updatedAt: Date.now() });
-    this.saveToDisk(session);
-    return session;
-  }
-
-  delete(id: string) {
-    this.sessions.delete(id);
-    try {
-      unlinkSync(join(this.dataDir, `${id}${FS.SESSION_FILE_SUFFIX}`));
-    } catch (err) {
-      serverLog.warn({ sessionId: id, error: String(err) }, "Failed to delete session file");
-    }
-    // Also delete messages file
-    try {
-      unlinkSync(join(this.dataDir, `${id}${FS.MESSAGES_FILE_SUFFIX}`));
-    } catch (err) {
-      serverLog.warn({ sessionId: id, error: String(err) }, "Failed to delete messages file");
-    }
-  }
-
-  private saveToDisk(session: Session) {
-    try {
-      writeFileSync(join(this.dataDir, `${session.id}${FS.SESSION_FILE_SUFFIX}`), JSON.stringify(session, null, 2));
-    } catch (err) {
-      serverLog.error({ sessionId: session.id, error: String(err) }, "Failed to save session to disk");
-    }
-  }
-
-  private loadFromDisk() {
-    try {
-      const files = readdirSync(this.dataDir).filter(
-        (f: string) => f.endsWith(FS.SESSION_FILE_SUFFIX) && !f.endsWith(FS.MESSAGES_FILE_SUFFIX)
-      );
-      for (const file of files) {
-        try {
-          const rawData = readFileSync(join(this.dataDir, file), "utf-8");
-          const data = safeJsonParse<Session>(rawData, null as any, { file });
-          if (data?.id) {
-            this.sessions.set(data.id, data);
-          }
-        } catch (err) {
-          serverLog.warn({ file, error: String(err) }, "Failed to load session file");
-        }
-      }
-      serverLog.info({ count: this.sessions.size }, "Loaded sessions from disk");
-    } catch (err) {
-      serverLog.warn({ error: String(err) }, "Failed to read sessions directory");
-    }
-  }
-}
-
-// ─── Message Store (per-session persistence) ────────────────────────────────
-
-interface StoredMessage {
-  id: string;
-  sessionId: string;
-  role: "user" | "assistant" | "system";
-  content: string;
-  model?: string;
-  provider?: string;
-  tokensIn?: number;
-  tokensOut?: number;
-  cost?: number;
-  createdAt: number;
-}
-
-class MessageStore {
-  private dataDir: string;
-  private cache = new Map<string, StoredMessage[]>();
-
-  constructor(dataDir: string) {
-    this.dataDir = join(dataDir, FS.SESSIONS_DIR);
-    mkdirSync(this.dataDir, { recursive: true });
-  }
-
-  add(sessionId: string, msg: StoredMessage): void {
-    const messages = this.getAll(sessionId);
-    messages.push(msg);
-    this.cache.set(sessionId, messages);
-    this.saveToDisk(sessionId, messages);
-  }
-
-  getAll(sessionId: string): StoredMessage[] {
-    if (this.cache.has(sessionId)) return this.cache.get(sessionId)!;
-    try {
-      const rawData = readFileSync(join(this.dataDir, `${sessionId}${FS.MESSAGES_FILE_SUFFIX}`), "utf-8");
-      const messages = safeJsonParse<StoredMessage[]>(rawData, [], { sessionId });
-      this.cache.set(sessionId, messages);
-      return messages;
-    } catch (err) {
-      serverLog.debug({ sessionId, error: String(err) }, "No messages file found, returning empty array");
-      return [];
-    }
-  }
-
-  getRecent(sessionId: string, limit: number = 10): StoredMessage[] {
-    const all = this.getAll(sessionId);
-    return all.slice(-limit);
-  }
-
-  private saveToDisk(sessionId: string, messages: StoredMessage[]): void {
-    try {
-      writeFileSync(join(this.dataDir, `${sessionId}${FS.MESSAGES_FILE_SUFFIX}`), JSON.stringify(messages, null, 2));
-    } catch (err) {
-      serverLog.error({ sessionId, error: String(err) }, "Failed to save messages to disk");
-    }
-  }
-}
-
-// ─── WebSocket Client Manager ───────────────────────────────────────────────
-
-interface WSClient {
-  ws: any;
-  subscribedSessions: Set<string>;
-}
-
-class WSManager {
-  private clients = new Map<string, WSClient>();
-
-  add(ws: any) {
-    const id = ws.data.id;
-    this.clients.set(id, { ws, subscribedSessions: new Set() });
-    serverLog.debug({ clientId: id, totalClients: this.clients.size }, "WebSocket client added");
-  }
-
-  remove(ws: any) {
-    const id = ws.data.id;
-    this.clients.delete(id);
-    serverLog.debug({ clientId: id, totalClients: this.clients.size }, "WebSocket client removed");
-  }
-
-  broadcast(message: WSMessage) {
-    const data = JSON.stringify(message);
-    let successCount = 0;
-    let failCount = 0;
-    
-    for (const [, client] of this.clients) {
-      try {
-        if (client.ws.readyState === 1) {
-          client.ws.send(data);
-          successCount++;
-        }
-      } catch (err) {
-        failCount++;
-        serverLog.warn({ error: String(err) }, "Failed to send WebSocket message to client");
-      }
-    }
-    
-    if (failCount > 0) {
-      serverLog.debug({ successCount, failCount }, "Broadcast complete with failures");
-    }
-  }
-
-  broadcastToSession(sessionId: string, message: WSMessage) {
-    const data = JSON.stringify(message);
-    let targetCount = 0;
-    
-    for (const [, client] of this.clients) {
-      if (client.subscribedSessions.has(sessionId) || client.subscribedSessions.size === 0) {
-        try {
-          if (client.ws.readyState === 1) {
-            client.ws.send(data);
-            targetCount++;
-          }
-        } catch (err) {
-          serverLog.warn({ sessionId, error: String(err) }, "Failed to send session message to client");
-        }
-      }
-    }
-    
-    serverLog.debug({ sessionId, targetCount }, "Session broadcast complete");
-  }
-
-  get clientCount() {
-    return this.clients.size;
-  }
-}
 
 // ─── Main Server ────────────────────────────────────────────────────────────
 
@@ -356,11 +41,10 @@ async function main() {
   // Validate environment variables
   validateEnvironment();
 
-  const config = loadConfig();
+  const config = loadConfig(PROJECT_ROOT);
 
-  // Initialize data directory
-  const dataDir = join(process.cwd(), config.dataDirectory);
-  mkdirSync(dataDir, { recursive: true });
+  // Initialize SQLite Database
+  initDb(join(PROJECT_ROOT, config.dataDirectory));
 
   // Initialize providers (auth hub)
   const providers = new ProviderRegistry(config);
@@ -380,6 +64,11 @@ async function main() {
   tools.register(new LsTool());
   tools.register(new WebSearchTool());
   tools.register(new WebFetchTool());
+  tools.register(new AskUserTool());
+  tools.register(new AskManagerTool());
+
+  // Load local plugins
+  await loadPlugins(tools);
 
   // Initialize MCP connections
   const mcpManager = new MCPManager();
@@ -399,11 +88,11 @@ async function main() {
   }
 
   // Initialize sessions
-  const sessions = new SessionStore(dataDir);
-  const messages = new MessageStore(dataDir);
+  const sessions = new SessionStore();
+  const messages = new MessageStore();
 
   // Initialize Kory
-  const kory = new KoryManager(providers, tools, process.cwd(), sessions, messages);
+  const kory = new KoryManager(providers, tools, PROJECT_ROOT, config, sessions, messages);
 
   // Initialize WebSocket manager
   const wsManager = new WSManager();
@@ -447,20 +136,30 @@ async function main() {
       const url = new URL(req.url);
       const method = req.method;
       const origin = req.headers.get("origin");
+      const requestId = generateCorrelationId();
 
-      // CORS — origin allowlist (not *)
-      const corsHeaders = getCorsHeaders(origin);
+      try {
+        serverLog.debug({ requestId, method, path: url.pathname }, "Incoming request");
 
-      if (method === "OPTIONS") {
-        return new Response(null, { status: 204, headers: corsHeaders });
-      }
+        // Guard against path traversal sequences that may be normalized by URL parsing.
+        if (req.url.includes("/api/sessions/") && req.url.includes("..")) {
+          const corsHeaders = getCorsHeaders(origin);
+          return json({ ok: false, error: "Invalid session ID" }, 400, corsHeaders);
+        }
 
-      // Rate limiting
-      const clientIp = req.headers.get("x-forwarded-for") ?? "local";
-      const rateCheck = rateLimiter.check(clientIp);
-      if (!rateCheck.allowed) {
-        return json({ ok: false, error: "Rate limit exceeded" }, 429, corsHeaders);
-      }
+        // CORS — origin allowlist (not *)
+        const corsHeaders = getCorsHeaders(origin);
+
+        if (method === "OPTIONS") {
+          return new Response(null, { status: 204, headers: corsHeaders });
+        }
+
+        // Rate limiting
+        const clientIp = req.headers.get("x-forwarded-for") ?? "local";
+        const rateCheck = rateLimiter.check(clientIp);
+        if (!rateCheck.allowed) {
+          return json({ ok: false, error: "Rate limit exceeded" }, 429, corsHeaders);
+        }
 
       // ── WebSocket upgrade ──
       if (url.pathname === "/ws") {
@@ -497,7 +196,8 @@ async function main() {
 
       if (url.pathname === "/api/sessions" && method === "POST") {
         const body = await req.json() as CreateSessionRequest;
-        const session = sessions.create(body.title, body.parentSessionId);
+        const title = sanitizeString(body.title, SESSION.MAX_TITLE_LENGTH);
+        const session = sessions.create(title ?? undefined, body.parentSessionId);
         return json({ ok: true, data: session }, 201, corsHeaders);
       }
 
@@ -508,28 +208,30 @@ async function main() {
         const subResource = segments[4]; // "messages", "auto-title", or undefined
 
         if (!id) return json({ ok: false, error: "Session ID required" }, 400, corsHeaders);
+        const validatedId = validateSessionId(id);
+        if (!validatedId) return json({ ok: false, error: "Invalid session ID" }, 400, corsHeaders);
 
         // GET /api/sessions/:id/messages — fetch message history
         if (subResource === "messages" && method === "GET") {
-          const sessionMessages = messages.getAll(id);
+          const sessionMessages = messages.getAll(validatedId);
           return json({ ok: true, data: sessionMessages }, 200, corsHeaders);
         }
 
         // POST /api/sessions/:id/auto-title — generate title from first message
         if (subResource === "auto-title" && method === "POST") {
-          const sessionMessages = messages.getAll(id);
+          const sessionMessages = messages.getAll(validatedId);
           const firstUserMsg = sessionMessages.find(m => m.role === "user");
           if (firstUserMsg) {
             // Simple title: first 50 chars of first message, cleaned up
             const rawTitle = firstUserMsg.content.replace(/\n/g, " ").trim();
             const title = rawTitle.length > 50 ? rawTitle.slice(0, 47) + "..." : rawTitle;
-            const updated = sessions.update(id, { title });
+            const updated = sessions.update(validatedId, { title });
             if (updated) {
               wsManager.broadcast({
                 type: "session.updated",
                 payload: { session: updated },
                 timestamp: Date.now(),
-                sessionId: id,
+                sessionId: validatedId,
               } satisfies WSMessage);
             }
             return json({ ok: true, data: { title } }, 200, corsHeaders);
@@ -540,7 +242,7 @@ async function main() {
         // No sub-resource — operate on session itself
         if (!subResource) {
           if (method === "GET") {
-            const session = sessions.get(id);
+            const session = sessions.get(validatedId);
             if (!session) return json({ ok: false, error: "Session not found" }, 404, corsHeaders);
             return json({ ok: true, data: session }, 200, corsHeaders);
           }
@@ -549,27 +251,33 @@ async function main() {
             const body = await req.json() as { title?: string };
             const title = sanitizeString(body.title, SESSION.MAX_TITLE_LENGTH);
             if (!title) return json({ ok: false, error: "title is required" }, 400, corsHeaders);
-            const updated = sessions.update(id, { title });
+            const updated = sessions.update(validatedId, { title });
             if (!updated) return json({ ok: false, error: "Session not found" }, 404, corsHeaders);
             wsManager.broadcast({
               type: "session.updated",
               payload: { session: updated },
               timestamp: Date.now(),
-              sessionId: id,
+              sessionId: validatedId,
             } satisfies WSMessage);
             return json({ ok: true, data: updated }, 200, corsHeaders);
           }
 
           if (method === "DELETE") {
-            sessions.delete(id);
+            kory.cancelSessionWorkers(validatedId);
+            sessions.delete(validatedId);
             wsManager.broadcast({
               type: "session.deleted",
               payload: { sessionId: id },
               timestamp: Date.now(),
-              sessionId: id,
+              sessionId: validatedId,
             } satisfies WSMessage);
             return json({ ok: true }, 200, corsHeaders);
           }
+        }
+
+        // GET /api/sessions/:id/running — check if session is running workers
+        if (subResource === "running" && method === "GET") {
+          return json({ ok: true, data: { running: kory.isSessionRunning(validatedId) } }, 200, corsHeaders);
         }
       }
 
@@ -640,7 +348,7 @@ async function main() {
 
       // Provider status
       if (url.pathname === "/api/providers" && method === "GET") {
-        return json({ ok: true, data: providers.getStatus() }, 200, corsHeaders);
+        return json({ ok: true, data: await providers.getStatus() }, 200, corsHeaders);
       }
 
       // Start Copilot browser device auth flow
@@ -682,18 +390,87 @@ async function main() {
             return json({ ok: false, error: verification.error ?? "Copilot verification failed" }, 400, corsHeaders);
           }
 
-          persistEnvVar(providers.getExpectedEnvVar("copilot", "authToken"), encryptApiKey(poll.accessToken));
+          persistEnvVar(PROJECT_ROOT, providers.getExpectedEnvVar("copilot", "authToken"), encryptApiKey(poll.accessToken));
           providers.refreshProvider("copilot");
 
           wsManager.broadcast({
             type: "provider.status",
-            payload: { providers: providers.getStatus() },
+            payload: { providers: await providers.getStatus() },
             timestamp: Date.now(),
           } satisfies WSMessage);
 
           return json({ ok: true, data: { status: "connected" } }, 200, corsHeaders);
         } catch (err: any) {
           return json({ ok: false, error: err.message ?? "Failed to complete Copilot auth" }, 400, corsHeaders);
+        }
+      }
+
+      // Google/Gemini Auth Routes
+      if (url.pathname === "/api/providers/google/auth/cli" && method === "POST") {
+        try {
+          const result = await googleAuth.startGeminiCLIAuth();
+          return json({ ok: true, data: result }, 200, corsHeaders);
+        } catch (err: any) {
+          return json({ ok: false, error: err.message }, 500, corsHeaders);
+        }
+      }
+
+      // In-memory store for pending auth sessions
+      const pendingAntigravityAuth = new Map<string, Promise<{ success: boolean; token?: string; error?: string }>>();
+
+      if (url.pathname === "/api/providers/google/auth/antigravity" && method === "POST") {
+        try {
+          const startResult = await googleAuth.startAntigravityAuth();
+          const authId = nanoid();
+          
+          // Start listener in background and store the promise
+          const promise = googleAuth.waitForAntigravityCallback();
+          pendingAntigravityAuth.set(authId, promise);
+          
+          // Auto-clean after 6 minutes
+          setTimeout(() => pendingAntigravityAuth.delete(authId), 360_000);
+
+          return json({ ok: true, data: { ...startResult, authId } }, 200, corsHeaders);
+        } catch (err: any) {
+          return json({ ok: false, error: err.message }, 500, corsHeaders);
+        }
+      }
+
+      if (url.pathname === "/api/providers/google/auth/antigravity/poll" && method === "GET") {
+        const authId = url.searchParams.get("authId");
+        if (!authId || !pendingAntigravityAuth.has(authId)) {
+          return json({ ok: false, error: "Invalid or expired auth session" }, 404, corsHeaders);
+        }
+
+        try {
+          const result = await pendingAntigravityAuth.get(authId);
+          pendingAntigravityAuth.delete(authId);
+          
+          if (result?.success) {
+            return json({ ok: true, data: { success: true, token: result.token } }, 200, corsHeaders);
+          } else {
+            return json({ ok: false, error: result?.error || "Authentication failed" }, 400, corsHeaders);
+          }
+        } catch (err: any) {
+          return json({ ok: false, error: err.message }, 500, corsHeaders);
+        }
+      }
+
+      if (url.pathname === "/api/providers/anthropic/auth/cli" && method === "POST") {
+        try {
+          const result = await cliAuth.authenticateClaude();
+          return json({ ok: true, data: result }, 200, corsHeaders);
+        } catch (err: any) {
+          return json({ ok: false, error: err.message }, 500, corsHeaders);
+        }
+      }
+
+      if (url.pathname === "/api/providers/openai/auth/codex" && method === "POST") {
+        try {
+          const result = await cliAuth.authenticateCodex();
+          return json({ ok: true, data: result }, 200, corsHeaders);
+        } catch (err: any) {
+          return json({ ok: false, error: err.message }, 500, corsHeaders);
         }
       }
 
@@ -711,10 +488,14 @@ async function main() {
         const baseUrl = sanitizeString(body.baseUrl, 500);
         const authMode = sanitizeString(body.authMode, 50);
 
-        // Handle special CLI auth modes (codex, gemini cli, claude code)
-        if (authMode === "codex" || authMode === "cli" || authMode === "claude_code") {
-          const cliName = authMode === "codex" ? "codex" : authMode === "cli" ? "gemini" : "claude";
-          const targetProvider = authMode === "codex" ? "codex" : authMode === "cli" ? "gemini" : "anthropic";
+        // Handle special CLI auth modes (codex, gemini cli, antigravity, claude code)
+        if (authMode === "codex" || authMode === "cli" || authMode === "antigravity" || authMode === "claude_code") {
+          const cliName = authMode === "codex" ? "codex" : authMode === "claude_code" ? "claude" : "gemini";
+          const targetProvider =
+            authMode === "codex" ? "codex" :
+            authMode === "claude_code" ? "anthropic" :
+            // For unified Google card, store CLI auth directly on the canonical google provider
+            "google";
 
           // Verify CLI is installed and accessible
           const whichProc = Bun.spawnSync(["which", cliName], { stdout: "pipe", stderr: "pipe" });
@@ -722,31 +503,46 @@ async function main() {
             return json({ ok: false, error: `${cliName} CLI not found in PATH. Install it first.` }, 400, corsHeaders);
           }
 
-          // Verify CLI auth by running a lightweight command
-          const verifyProc = Bun.spawnSync([cliName, "--version"], { stdout: "pipe", stderr: "pipe", timeout: 10_000 });
-          if (verifyProc.exitCode !== 0) {
-            const stderr = verifyProc.stderr ? new TextDecoder().decode(verifyProc.stderr).trim() : "";
-            return json({ ok: false, error: `${cliName} CLI check failed: ${stderr || `exit code ${verifyProc.exitCode}`}` }, 400, corsHeaders);
+          // Mark provider as CLI-authenticated temporarily to verify
+          const authValue = authMode === "antigravity" ? "cli:antigravity" : `cli:${cliName}`;
+          
+          const verification = await providers.verifyConnection(targetProvider as any, {
+            authToken: authValue
+          });
+
+          if (!verification.success) {
+            return json({ ok: false, error: verification.error || `${cliName} CLI auth failed` }, 400, corsHeaders);
           }
 
-          // Mark provider as CLI-authenticated
+          // Verification passed, set and persist
           const result = providers.setCredentials(targetProvider as any, {
-            authToken: `cli:${cliName}`,
+            authToken: authValue,
           });
+          
           if (!result.success) {
             return json({ ok: false, error: result.error }, 400, corsHeaders);
           }
 
-          persistEnvVar(providers.getExpectedEnvVar(targetProvider as any, "authToken"), `cli:${cliName}`);
+          persistEnvVar(
+            PROJECT_ROOT,
+            providers.getExpectedEnvVar(targetProvider as any, "authToken"),
+            authValue,
+          );
 
           wsManager.broadcast({
             type: "provider.status",
-            payload: { providers: providers.getStatus() },
+            payload: { providers: await providers.getStatus() },
             timestamp: Date.now(),
           } satisfies WSMessage);
 
           return json({ ok: true, data: { provider: targetProvider, status: "connected", authMode } }, 200, corsHeaders);
         }
+
+        const isPreferencesOnlyUpdate =
+          !apiKey &&
+          !authToken &&
+          !baseUrl &&
+          (body.selectedModels !== undefined || body.hideModelSelector !== undefined);
 
         const result = providers.setCredentials(providerName as any, {
           ...(apiKey && { apiKey }),
@@ -759,34 +555,149 @@ async function main() {
           return json({ ok: false, error: result.error }, 400, corsHeaders);
         }
 
-        const verification = await providers.verifyConnection(providerName as any, {
-          ...(apiKey && { apiKey }),
-          ...(authToken && { authToken }),
-          ...(baseUrl && { baseUrl }),
-        });
-        if (!verification.success) {
-          providers.removeApiKey(providerName as any);
-          return json({ ok: false, error: verification.error ?? "Provider verification failed" }, 400, corsHeaders);
+        if (!isPreferencesOnlyUpdate) {
+          const verification = await providers.verifyConnection(providerName as any, {
+            ...(apiKey && { apiKey }),
+            ...(authToken && { authToken }),
+            ...(baseUrl && { baseUrl }),
+          });
+          if (!verification.success) {
+            providers.removeApiKey(providerName as any);
+            return json({ ok: false, error: verification.error ?? "Provider verification failed" }, 400, corsHeaders);
+          }
         }
 
         if (apiKey) {
-          persistEnvVar(providers.getExpectedEnvVar(providerName as any, "apiKey"), encryptApiKey(apiKey));
+          persistEnvVar(PROJECT_ROOT, providers.getExpectedEnvVar(providerName as any, "apiKey"), encryptApiKey(apiKey));
         }
         if (authToken) {
-          persistEnvVar(providers.getExpectedEnvVar(providerName as any, "authToken"), encryptApiKey(authToken));
+          persistEnvVar(PROJECT_ROOT, providers.getExpectedEnvVar(providerName as any, "authToken"), encryptApiKey(authToken));
         }
         if (baseUrl) {
-          persistEnvVar(providers.getExpectedEnvVar(providerName as any, "baseUrl"), baseUrl);
+          persistEnvVar(PROJECT_ROOT, providers.getExpectedEnvVar(providerName as any, "baseUrl"), baseUrl);
         }
 
         // Broadcast updated provider status via WebSocket
         wsManager.broadcast({
           type: "provider.status",
-          payload: { providers: providers.getStatus() },
+          payload: { providers: await providers.getStatus() },
           timestamp: Date.now(),
         } satisfies WSMessage);
 
         return json({ ok: true, data: { provider: providerName, status: "connected" } }, 200, corsHeaders);
+      }
+
+      // ─── Git Integration ───
+      
+      // Status
+      if (url.pathname === "/api/git/status" && method === "GET") {
+        const status = await kory.git.getStatus();
+        const branch = await kory.git.getBranch();
+        return json({ ok: true, data: { status, branch } }, 200, corsHeaders);
+      }
+
+      // Diff
+      if (url.pathname === "/api/git/diff" && method === "GET") {
+        const file = url.searchParams.get("file");
+        const staged = url.searchParams.get("staged") === "true";
+        if (!file) return json({ ok: false, error: "file parameter required" }, 400, corsHeaders);
+        const diff = await kory.git.getDiff(file, staged);
+        return json({ ok: true, data: { diff } }, 200, corsHeaders);
+      }
+
+      // Stage/Unstage
+      if (url.pathname === "/api/git/stage" && method === "POST") {
+        const body = await req.json() as { file: string; unstage?: boolean };
+        if (!body.file) return json({ ok: false, error: "file required" }, 400, corsHeaders);
+        const success = body.unstage 
+          ? await kory.git.unstageFile(body.file)
+          : await kory.git.stageFile(body.file);
+        return json({ ok: success }, success ? 200 : 500, corsHeaders);
+      }
+
+      // Restore (Discard)
+      if (url.pathname === "/api/git/restore" && method === "POST") {
+        const body = await req.json() as { file: string };
+        if (!body.file) return json({ ok: false, error: "file required" }, 400, corsHeaders);
+        const success = await kory.git.restoreFile(body.file);
+        return json({ ok: success }, success ? 200 : 500, corsHeaders);
+      }
+
+      // Commit
+      if (url.pathname === "/api/git/commit" && method === "POST") {
+        const body = await req.json() as { message: string };
+        if (!body.message) return json({ ok: false, error: "message required" }, 400, corsHeaders);
+        const success = await kory.git.commit(body.message);
+        return json({ ok: success }, success ? 200 : 500, corsHeaders);
+      }
+
+      // Branches
+      if (url.pathname === "/api/git/branches" && method === "GET") {
+        const { output } = (kory.git as any).runGit(["branch", "--format=%(refname:short)"]);
+        const branches = output.split("\n").filter(Boolean);
+        return json({ ok: true, data: { branches } }, 200, corsHeaders);
+      }
+
+      // Checkout
+      if (url.pathname === "/api/git/checkout" && method === "POST") {
+        const body = await req.json() as { branch: string; create?: boolean };
+        if (!body.branch) return json({ ok: false, error: "branch required" }, 400, corsHeaders);
+        const success = await kory.git.checkout(body.branch, body.create);
+        return json({ ok: success }, success ? 200 : 500, corsHeaders);
+      }
+
+      // Merge
+      if (url.pathname === "/api/git/merge" && method === "POST") {
+        const body = await req.json() as { branch: string };
+        if (!body.branch) return json({ ok: false, error: "branch required" }, 400, corsHeaders);
+        const result = await kory.git.merge(body.branch);
+        const conflicts = result.hasConflicts ? await kory.git.getConflicts() : [];
+        return json({ ok: result.success, data: { output: result.output, conflicts, hasConflicts: result.hasConflicts } }, 200, corsHeaders);
+      }
+
+      // Push
+      if (url.pathname === "/api/git/push" && method === "POST") {
+        const result = await kory.git.push();
+        return json({ ok: result.success, error: result.output }, result.success ? 200 : 500, corsHeaders);
+      }
+
+      // Pull
+      if (url.pathname === "/api/git/pull" && method === "POST") {
+        const result = await kory.git.pull();
+        const hasConflicts = result.output.includes("CONFLICT") || result.output.includes("Automatic merge failed");
+        const conflicts = hasConflicts ? await kory.git.getConflicts() : [];
+        return json({ ok: result.success, data: { output: result.output, conflicts, hasConflicts } }, 200, corsHeaders);
+      }
+
+      // Set worker assignments
+      if (url.pathname === "/api/assignments" && method === "GET") {
+        return json({ ok: true, data: { assignments: config.assignments ?? {} } }, 200, corsHeaders);
+      }
+
+      if (url.pathname === "/api/assignments" && method === "PUT") {
+        const body = await req.json() as { assignments: Record<string, string> };
+        if (!body.assignments || typeof body.assignments !== "object") {
+          return json({ ok: false, error: "assignments object is required" }, 400, corsHeaders);
+        }
+
+        // Update config in memory
+        config.assignments = { ...config.assignments, ...body.assignments };
+
+        // Persist to koryphaios.json if it exists
+        const configPath = join(PROJECT_ROOT, "koryphaios.json");
+        try {
+          let currentConfig: any = {};
+          if (existsSync(configPath)) {
+            currentConfig = JSON.parse(readFileSync(configPath, "utf-8"));
+          }
+          currentConfig.assignments = config.assignments;
+          writeFileSync(configPath, JSON.stringify(currentConfig, null, 2));
+          serverLog.info("Updated worker assignments in koryphaios.json");
+        } catch (err) {
+          serverLog.warn({ err }, "Failed to persist assignments to koryphaios.json");
+        }
+
+        return json({ ok: true, data: { assignments: config.assignments } }, 200, corsHeaders);
       }
 
       // Remove provider API key
@@ -797,13 +708,45 @@ async function main() {
           return json({ ok: false, error: "Invalid provider name" }, 400, corsHeaders);
         }
         providers.removeApiKey(providerName as any);
-        clearEnvVar(providers.getExpectedEnvVar(providerName as any, "apiKey"));
-        clearEnvVar(providers.getExpectedEnvVar(providerName as any, "authToken"));
-        clearEnvVar(providers.getExpectedEnvVar(providerName as any, "baseUrl"));
+        clearEnvVar(PROJECT_ROOT, providers.getExpectedEnvVar(providerName as any, "apiKey"));
+        clearEnvVar(PROJECT_ROOT, providers.getExpectedEnvVar(providerName as any, "authToken"));
+        clearEnvVar(PROJECT_ROOT, providers.getExpectedEnvVar(providerName as any, "baseUrl"));
+
+        // Persist provider disconnect state so auto-detected CLI/env auth does not
+        // immediately re-enable on next restart unless user explicitly reconnects.
+        try {
+          config.providers = config.providers ?? {};
+          const existing = config.providers[providerName as keyof typeof config.providers] ?? { name: providerName as any };
+          config.providers[providerName as keyof typeof config.providers] = {
+            ...existing,
+            name: providerName as any,
+            apiKey: undefined,
+            authToken: undefined,
+            baseUrl: undefined,
+            disabled: true,
+          } as any;
+
+          const configPath = join(PROJECT_ROOT, "koryphaios.json");
+          if (existsSync(configPath)) {
+            const currentConfig = JSON.parse(readFileSync(configPath, "utf-8"));
+            currentConfig.providers = currentConfig.providers ?? {};
+            currentConfig.providers[providerName] = {
+              ...(currentConfig.providers[providerName] ?? {}),
+              name: providerName,
+              disabled: true,
+            };
+            delete currentConfig.providers[providerName].apiKey;
+            delete currentConfig.providers[providerName].authToken;
+            delete currentConfig.providers[providerName].baseUrl;
+            writeFileSync(configPath, JSON.stringify(currentConfig, null, 2));
+          }
+        } catch (err) {
+          serverLog.warn({ provider: providerName, err }, "Failed to persist provider disconnect state");
+        }
 
         wsManager.broadcast({
           type: "provider.status",
-          payload: { providers: providers.getStatus() },
+          payload: { providers: await providers.getStatus() },
           timestamp: Date.now(),
         } satisfies WSMessage);
 
@@ -812,7 +755,7 @@ async function main() {
 
       // Agent status
       if (url.pathname === "/api/agents/status" && method === "GET") {
-        return json({ ok: true, data: kory.getStatus() }, 200, corsHeaders);
+        return json({ ok: true, data: { workers: kory.getStatus() } }, 200, corsHeaders);
       }
 
       // Cancel all
@@ -867,20 +810,44 @@ async function main() {
         });
       }
 
-      return json({ ok: false, error: "Not found" }, 404, corsHeaders);
+        return json({ ok: false, error: "Not found" }, 404, corsHeaders);
+      } catch (err) {
+        const handled = handleError(err, {
+          requestId,
+          method,
+          path: url.pathname,
+          query: url.search,
+        });
+        const corsHeaders = getCorsHeaders(origin);
+        return json(
+          { ok: false, error: `${handled.message} (requestId=${requestId})` },
+          handled.statusCode,
+          corsHeaders,
+        );
+      }
     },
 
     websocket: {
       open(ws: any) {
-        wsManager.add(ws);
-        serverLog.info({ clients: wsManager.clientCount }, "WS client connected");
+        try {
+          wsManager.add(ws);
+          serverLog.info({ clientId: ws.data.id, clients: wsManager.clientCount }, "WS client connected");
 
-        // Send initial state
-        ws.send(JSON.stringify({
-          type: "provider.status",
-          payload: { providers: providers.getStatus() },
-          timestamp: Date.now(),
-        } satisfies WSMessage));
+          // Send initial state
+          void providers.getStatus()
+            .then((initialStatus) => {
+              ws.send(JSON.stringify({
+                type: "provider.status",
+                payload: { providers: initialStatus },
+                timestamp: Date.now(),
+              } satisfies WSMessage));
+            })
+            .catch((err) => {
+              handleError(err, { event: "ws.open.init_status", clientId: ws?.data?.id });
+            });
+        } catch (err) {
+          handleError(err, { event: "ws.open", clientId: ws?.data?.id });
+        }
       },
 
       message(ws: any, message: string | Buffer) {
@@ -889,10 +856,19 @@ async function main() {
 
           // Handle client commands
           if (msg.type === "subscribe_session") {
-            const client = wsManager["clients"].get(ws.data.id);
-            if (client) client.subscribedSessions.add(msg.sessionId);
+            wsManager.subscribeClientToSession(ws.data.id, msg.sessionId);
+          } else if (msg.type === "user_input") {
+            kory.handleUserInput(msg.sessionId, msg.selection, msg.text);
+          } else if (msg.type === "session.accept_changes") {
+            kory.handleSessionResponse(msg.sessionId, true);
+          } else if (msg.type === "session.reject_changes") {
+            kory.handleSessionResponse(msg.sessionId, false);
+          } else if (msg.type === "toggle_yolo") {
+            kory.setYoloMode(!!msg.enabled);
           }
-        } catch {}
+        } catch (err) {
+          handleError(err, { event: "ws.message", clientId: ws?.data?.id, raw: String(message).slice(0, 500) });
+        }
       },
 
       close(ws: any) {
@@ -983,6 +959,54 @@ function json(data: APIResponse, status: number, headers: Record<string, string>
       ...headers,
     },
   });
+}
+
+/**
+ * Load local plugins from valid plugin directories
+ */
+async function loadPlugins(registry: ToolRegistry) {
+  const candidates = [
+    join(BACKEND_ROOT, "src", "plugins"),
+    join(PROJECT_ROOT, "plugins"),
+  ];
+
+  const loaded = new Set<string>();
+
+  for (const pluginsDir of candidates) {
+    if (!existsSync(pluginsDir)) continue;
+
+    try {
+      const files = readdirSync(pluginsDir);
+      
+      for (const file of files) {
+        if ((file.endsWith(".ts") || file.endsWith(".js")) && !file.endsWith(".d.ts")) {
+          try {
+            const modulePath = join(pluginsDir, file);
+            const module = await import(modulePath);
+            const ToolClass = module.default;
+
+            if (ToolClass && typeof ToolClass === 'function') {
+              const toolInstance = new ToolClass();
+              if (toolInstance.name && typeof toolInstance.run === 'function') {
+                if (loaded.has(toolInstance.name)) continue;
+                registry.register(toolInstance);
+                loaded.add(toolInstance.name);
+                serverLog.debug({ plugin: toolInstance.name, path: pluginsDir }, "Loaded local plugin");
+              }
+            }
+          } catch (err) {
+            serverLog.warn({ file, err }, "Failed to load plugin");
+          }
+        }
+      }
+    } catch (err) {
+      serverLog.warn({ pluginsDir, err }, "Error scanning plugins directory");
+    }
+  }
+  
+  if (loaded.size > 0) {
+    serverLog.info({ count: loaded.size }, "Loaded local plugins");
+  }
 }
 
 // ─── Start ──────────────────────────────────────────────────────────────────

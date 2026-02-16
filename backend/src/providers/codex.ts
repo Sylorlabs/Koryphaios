@@ -1,7 +1,7 @@
 // Codex CLI provider — wraps the `codex` CLI as a child process.
 // Used for authenticated Codex access via ChatGPT subscription.
 
-import type { ProviderConfig } from "@koryphaios/shared";
+import type { ProviderConfig, ModelDef } from "@koryphaios/shared";
 import {
   type Provider,
   type ProviderEvent,
@@ -26,7 +26,7 @@ export class CodexProvider implements Provider {
     return this.cliAvailable;
   }
 
-  listModels() {
+  async listModels(): Promise<ModelDef[]> {
     return getModelsForProvider("codex");
   }
 

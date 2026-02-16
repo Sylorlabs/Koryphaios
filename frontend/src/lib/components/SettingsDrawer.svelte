@@ -3,7 +3,6 @@
   import { wsStore } from '$lib/stores/websocket.svelte';
   import { theme } from '$lib/stores/theme.svelte';
   import { toastStore } from '$lib/stores/toast.svelte';
-  import { shortcutStore } from '$lib/stores/shortcuts.svelte';
   import {
     Key,
     Palette,
@@ -25,7 +24,7 @@
   }
 
   let { open = false, onClose }: Props = $props();
-  let activeTab = $state<'providers' | 'assignments' | 'appearance' | 'shortcuts'>('providers');
+  let activeTab = $state<'providers' | 'appearance' | 'shortcuts'>('providers');
 
   let showModelSelector = $state(false);
   let selectorTarget = $state<any>(null);
@@ -35,15 +34,7 @@
   }
 
   // ─── Provider Management ──────────────────────────────────────────────
-  type ProviderCard = {
-    key: string;
-    label: string;
-    placeholder: string;
-    isAuthOnly?: boolean;
-    needsUrl?: boolean;
-  };
-
-  const providerCategories: Array<{ label: string; icon: any; providers: ProviderCard[] }> = [
+  const providerCategories = [
     {
       label: 'Frontier',
       icon: Zap,
@@ -108,7 +99,7 @@
   let selectedAuthMode = $state<Record<string, string>>({});
 
   function getProviderCaps(name: string) {
-    const status = getProviderStatusExact(name);
+    const status = getProviderStatus(name);
     if (status) return status;
     // Fallback to minimal defaults if not yet loaded
     return { 
@@ -123,31 +114,8 @@
     };
   }
 
-  function getProviderStatusExact(name: string) {
-    return wsStore.providers.find(p => p.name === name);
-  }
-
   function getProviderStatus(name: string) {
-    const related = providerGroup(name);
-    const statuses = related
-      .map((key) => getProviderStatusExact(key))
-      .filter(Boolean);
-    if (statuses.length === 0) return undefined;
-    return statuses.find((s) => s?.authenticated) ?? statuses.find((s) => s?.enabled) ?? statuses[0];
-  }
-
-  function providerGroup(name: string): string[] {
-    if (name === 'anthropic') return ['anthropic', 'claude-code'];
-    if (name === 'openai') return ['openai', 'codex'];
-    if (name === 'google') return ['google', 'google-cli', 'google-antigravity'];
-    return [name];
-  }
-
-  function modeProviderKey(cardKey: string, modeId: string): string {
-    if (cardKey === 'openai' && modeId === 'codex') return 'codex';
-    if (cardKey === 'anthropic' && modeId === 'claude_code') return 'anthropic';
-    if (cardKey === 'google' && (modeId === 'cli' || modeId === 'antigravity')) return 'google';
-    return cardKey;
+    return wsStore.providers.find(p => p.name === name);
   }
 
   async function connectProvider(name: string) {
@@ -158,7 +126,7 @@
     const authMode = selectedAuthMode[name];
 
     // Handle special CLI auth modes
-    if (authMode === 'codex' || authMode === 'cli' || authMode === 'antigravity' || authMode === 'claude_code') {
+    if (authMode === 'codex' || authMode === 'cli' || authMode === 'claude_code') {
       saving = name;
       try {
         const res = await fetch(`/api/providers/${name}`, {
@@ -169,13 +137,7 @@
         const data = await res.json();
         if (data.ok) {
           expandedProvider = null;
-          const label = authMode === 'codex'
-            ? 'Codex'
-            : authMode === 'antigravity'
-              ? 'Antigravity'
-              : authMode === 'cli'
-                ? 'Gemini'
-                : 'Claude Code';
+          const label = authMode === 'codex' ? 'Codex' : authMode === 'cli' ? 'Gemini' : 'Claude Code';
           toastStore.success(`${name} connected via ${label} CLI auth`);
         } else {
           toastStore.error(data.error ?? 'Connection failed');
@@ -408,120 +370,9 @@
     stopCopilotPolling();
   });
 
-  async function launchGeminiAuth() {
-    saving = 'google';
+  async function disconnectProvider(name: string) {
     try {
-      const res = await fetch('/api/providers/google/auth/cli', { method: 'POST' });
-      const data = await res.json();
-      if (data.ok) {
-        if (data.data.url) {
-          window.open(data.data.url, '_blank', 'noopener,noreferrer');
-          toastStore.info('Opened auth page. Complete login then click Verify.');
-        } else {
-          toastStore.success(data.data.message);
-        }
-      } else {
-        toastStore.error(data.error || 'Auth launch failed');
-      }
-    } catch (err: any) {
-      toastStore.error(err.message);
-    } finally {
-      saving = null;
-    }
-  }
-
-  async function launchAntigravityAuth() {
-    saving = 'google-antigravity';
-    try {
-      const res = await fetch('/api/providers/google/auth/antigravity', { method: 'POST' });
-      const data = await res.json();
-      if (data.ok) {
-        if (data.data.url) {
-          window.open(data.data.url, '_blank', 'noopener,noreferrer');
-          toastStore.info('Opened Antigravity portal. Ensure you have the plugin installed.');
-        } else {
-          toastStore.success(data.data.message);
-        }
-      } else {
-        toastStore.error(data.error || 'Antigravity launch failed');
-      }
-    } catch (err: any) {
-      toastStore.error(err.message);
-    } finally {
-      saving = null;
-    }
-  }
-
-  async function launchClaudeAuth() {
-    saving = 'claude-code';
-    try {
-      const res = await fetch('/api/providers/anthropic/auth/cli', { method: 'POST' });
-      const data = await res.json();
-      if (data.ok) {
-        if (data.data.url) {
-          window.open(data.data.url, '_blank', 'noopener,noreferrer');
-          toastStore.info('Opened auth page. Complete login in browser.');
-        } else {
-          toastStore.success(data.data.message);
-        }
-      } else {
-        toastStore.error(data.error || 'Auth launch failed');
-      }
-    } catch (err: any) {
-      toastStore.error(err.message);
-    } finally {
-      saving = null;
-    }
-  }
-
-  async function launchCodexAuth() {
-    saving = 'codex';
-    try {
-      const res = await fetch('/api/providers/openai/auth/codex', { method: 'POST' });
-      const data = await res.json();
-      if (data.ok) {
-        if (data.data.url) {
-          window.open(data.data.url, '_blank', 'noopener,noreferrer');
-          toastStore.info('Opened auth page. Complete login in browser.');
-        } else {
-          toastStore.success(data.data.message);
-        }
-      } else {
-        toastStore.error(data.error || 'Auth launch failed');
-      }
-    } catch (err: any) {
-      toastStore.error(err.message);
-    } finally {
-      saving = null;
-    }
-  }
-
-  async function launchClaudeCodeAuth() {
-    saving = 'claude-code';
-    try {
-      const res = await fetch('/api/providers/anthropic/auth/cli', { method: 'POST' });
-      const data = await res.json();
-      if (data.ok) {
-        if (data.data.url) {
-          window.open(data.data.url, '_blank', 'noopener,noreferrer');
-          toastStore.info('Opened auth page. Complete login in browser.');
-        } else {
-          toastStore.success(data.data.message);
-        }
-      } else {
-        toastStore.error(data.error || 'Auth launch failed');
-      }
-    } catch (err: any) {
-      toastStore.error(err.message);
-    } finally {
-      saving = null;
-    }
-  }
-
-  async function disconnectProvider(name: string, grouped = true) {
-    try {
-      const names = grouped ? providerGroup(name) : [name];
-      await Promise.all(names.map((provider) => fetch(`/api/providers/${provider}`, { method: 'DELETE' })));
+      await fetch(`/api/providers/${name}`, { method: 'DELETE' });
       toastStore.info(`${name} disconnected`);
     } catch {}
   }
@@ -532,79 +383,34 @@
     setTimeout(() => copiedEndpoint = false, 2000);
   }
 
-  // ─── Worker Assignments ──────────────────────────────────────────────
-  let assignments = $state<Record<string, string>>({});
-  let loadingAssignments = $state(false);
-
-  async function loadAssignments() {
-    loadingAssignments = true;
-    try {
-      const res = await fetch('/api/assignments');
-      const data = await res.json();
-      if (data.ok) {
-        assignments = data.data.assignments;
-      }
-    } catch (err) {
-      console.error('Failed to load assignments:', err);
-    } finally {
-      loadingAssignments = false;
-    }
+  // ─── Keyboard Shortcuts (editable, persisted) ──────────────────────────
+  interface Shortcut {
+    id: string;
+    keys: string[];
+    action: string;
   }
 
-  async function updateAssignment(domain: string, value: string) {
-    try {
-      const res = await fetch('/api/assignments', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ assignments: { [domain]: value } }),
-      });
-      const data = await res.json();
-      if (data.ok) {
-        assignments[domain] = value;
-        toastStore.success(`Assigned ${domain} to ${value.split(':')[1] || value}`);
-      }
-    } catch (err) {
-      toastStore.error('Failed to update assignment');
-    }
-  }
-
-  $effect(() => {
-    if (open && activeTab === 'assignments') {
-      loadAssignments();
-    }
-  });
-
-  const workerDomains = [
-    { id: 'ui', label: 'UI Specialist', icon: Palette, description: 'Frontend, CSS, Svelte, design components' },
-    { id: 'backend', label: 'Backend Specialist', icon: Server, description: 'C++, APIs, DSP, systems logic' },
-    { id: 'critic', label: 'The Critic', icon: Check, description: 'Final quality audit, stub detection (Harshest)' },
-    { id: 'general', label: 'Generalist', icon: Zap, description: 'Refactoring, docs, miscellaneous tasks' },
-    { id: 'test', label: 'Test Engineer', icon: Check, description: 'Writing and verifying test suites' },
+  const defaultShortcuts: Shortcut[] = [
+    { id: 'send', keys: ['Ctrl', 'Enter'], action: 'Send message' },
+    { id: 'settings', keys: ['Ctrl', ','], action: 'Open settings' },
+    { id: 'new_session', keys: ['Ctrl', 'N'], action: 'New session' },
+    { id: 'focus_input', keys: ['Ctrl', 'K'], action: 'Focus input' },
+    { id: 'close', keys: ['Esc'], action: 'Close dialogs' },
   ];
 
-  function getAllModels() {
-    const models: Array<{ id: string; name: string; provider: string }> = [];
-    for (const p of wsStore.providers) {
-      if (p.authenticated) {
-        for (const m of p.models) {
-          models.push({ id: `${p.name}:${m}`, name: m, provider: p.name });
-        }
-      }
-    }
-    return models;
+  function loadShortcuts(): Shortcut[] {
+    try {
+      const stored = localStorage.getItem('koryphaios-shortcuts');
+      if (stored) return JSON.parse(stored);
+    } catch {}
+    return structuredClone(defaultShortcuts);
   }
 
-  // ─── Keyboard Shortcuts (editable, persisted via shared store) ──────────
-  let shortcuts = $derived(shortcutStore.list);
+  let shortcuts = $state<Shortcut[]>(loadShortcuts());
   let editingShortcutId = $state<string | null>(null);
   let capturedKeys = $state<string[]>([]);
 
   function startEditShortcut(id: string) {
-    if (editingShortcutId === id) {
-      editingShortcutId = null;
-      capturedKeys = [];
-      return;
-    }
     editingShortcutId = id;
     capturedKeys = [];
   }
@@ -630,11 +436,11 @@
 
     // If a non-modifier key was pressed, commit the binding
     if (!['Control', 'Shift', 'Alt', 'Meta'].includes(key)) {
-      const idx = shortcutStore.list.findIndex(s => s.id === editingShortcutId);
+      const idx = shortcuts.findIndex(s => s.id === editingShortcutId);
       if (idx >= 0) {
-        shortcutStore.list[idx] = { ...shortcutStore.list[idx], keys: capturedKeys };
-        shortcutStore.list = [...shortcutStore.list];
-        shortcutStore.save();
+        shortcuts[idx] = { ...shortcuts[idx], keys: capturedKeys };
+        shortcuts = [...shortcuts];
+        localStorage.setItem('koryphaios-shortcuts', JSON.stringify(shortcuts));
       }
       editingShortcutId = null;
       capturedKeys = [];
@@ -642,7 +448,8 @@
   }
 
   function resetShortcuts() {
-    shortcutStore.reset();
+    shortcuts = structuredClone(defaultShortcuts);
+    localStorage.removeItem('koryphaios-shortcuts');
     toastStore.info('Shortcuts reset to defaults');
   }
 </script>
@@ -692,13 +499,6 @@
         </button>
         <button
           class="flex-1 flex items-center justify-center gap-1.5 py-2 text-xs rounded-md transition-colors
-                 {activeTab === 'assignments' ? 'bg-[var(--color-surface-3)] text-[var(--color-text-primary)] font-medium' : 'text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)]'}"
-          onclick={() => activeTab = 'assignments'}
-        >
-          <Cpu size={13} /> Assignments
-        </button>
-        <button
-          class="flex-1 flex items-center justify-center gap-1.5 py-2 text-xs rounded-md transition-colors
                  {activeTab === 'appearance' ? 'bg-[var(--color-surface-3)] text-[var(--color-text-primary)] font-medium' : 'text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)]'}"
           onclick={() => activeTab = 'appearance'}
         >
@@ -709,7 +509,7 @@
                  {activeTab === 'shortcuts' ? 'bg-[var(--color-surface-3)] text-[var(--color-text-primary)] font-medium' : 'text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)]'}"
           onclick={() => activeTab = 'shortcuts'}
         >
-          <Keyboard size={13} /> Shortcuts
+          <Keyboard size={13} /> Keys
         </button>
       </div>
 
@@ -755,147 +555,109 @@
 
               {#if expandedProvider === prov.key}
                 <div class="px-2.5 pb-2.5 space-y-2">
-                  {#if caps.extraAuthModes}
-                    <div class="flex gap-1 p-0.5 rounded-md mb-2" style="background: var(--color-surface-2);">
-                      {#each caps.extraAuthModes as mode}
-                        <button
-                          class="flex-1 text-[10px] py-1 rounded transition-colors
-                                 {(selectedAuthMode[prov.key] ?? caps.extraAuthModes[0].id) === mode.id
-                                   ? 'bg-[var(--color-surface-4)] text-[var(--color-text-primary)] font-medium'
-                                   : 'text-[var(--color-text-muted)]'}"
-                          onclick={() => { selectedAuthMode[prov.key] = mode.id; selectedAuthMode = {...selectedAuthMode}; }}
+                  {#if status?.authenticated}
+                    <div class="flex items-center justify-between">
+                      <div class="flex items-center gap-2">
+                        <span class="text-[10px] text-emerald-400 font-medium flex items-center gap-1"><Check size={10} /> Connected</span>
+                        <button 
+                          onclick={() => { selectorTarget = status; showModelSelector = true; }}
+                          class="text-[10px] opacity-60 hover:opacity-100 underline decoration-dotted underline-offset-2"
                         >
-                          {mode.label}
+                          Manage Models
                         </button>
+                      </div>
+                      <button
+                        onclick={() => disconnectProvider(prov.key)}
+                        class="text-[10px] text-red-400 hover:text-red-300 transition-colors"
+                      >
+                        Disconnect
+                      </button>
+                    </div>
+                    <!-- Model list -->
+                    <div class="space-y-0.5 mt-1">
+                      {#each status.models as model}
+                        <div class="flex items-center justify-between px-2 py-1 rounded" style="background: var(--color-surface-2);">
+                          <span class="text-[11px]" style="color: var(--color-text-secondary);">{model}</span>
+                        </div>
                       {/each}
                     </div>
-                    {@const currentMode = selectedAuthMode[prov.key] ?? caps.extraAuthModes[0].id}
-                    {@const modeProvider = modeProviderKey(prov.key, currentMode)}
-                    {@const modeStatus = getProviderStatusExact(modeProvider)}
-
-                    {#if modeStatus?.authenticated}
-                      <div class="flex items-center justify-between">
-                        <div class="flex items-center gap-2">
-                          <span class="text-[10px] text-emerald-400 font-medium flex items-center gap-1"><Check size={10} /> Connected</span>
-                          <button
-                            onclick={() => { selectorTarget = modeStatus; showModelSelector = true; }}
-                            class="text-[10px] opacity-60 hover:opacity-100 underline decoration-dotted underline-offset-2"
-                          >
-                            Manage Models
-                          </button>
-                        </div>
-                        <button
-                          onclick={() => disconnectProvider(modeProvider, false)}
-                          class="text-[10px] text-red-400 hover:text-red-300 transition-colors"
-                        >
-                          Disconnect
-                        </button>
-                      </div>
-                      <div class="space-y-0.5 mt-1">
-                        {#each modeStatus.models as model}
-                          <div class="flex items-center justify-between px-2 py-1 rounded" style="background: var(--color-surface-2);">
-                            <span class="text-[11px]" style="color: var(--color-text-secondary);">{model}</span>
-                          </div>
-                        {/each}
-                      </div>
-                    {:else if currentMode === 'codex'}
-                      <div class="text-[10px] mb-1" style="color: var(--color-text-muted);">
-                        Uses existing Codex CLI session. Run <code class="px-1 py-0.5 rounded" style="background: var(--color-surface-3);">codex auth</code> first.
-                      </div>
-                      <div class="flex gap-2">
-                        <button
-                          onclick={launchCodexAuth}
-                          disabled={saving === prov.key}
-                          class="btn btn-secondary flex-1"
-                        >
-                          Launch Auth
-                        </button>
-                        <button
-                          onclick={() => connectProvider(prov.key)}
-                          disabled={saving === prov.key}
-                          class="btn btn-primary flex-1"
-                        >
-                          {saving === prov.key ? 'Verifying...' : 'Verify'}
-                        </button>
-                      </div>
-                    {:else if currentMode === 'claude_code'}
-                      <div class="text-[10px] mb-1" style="color: var(--color-text-muted);">
-                        Uses existing Claude Code session. Run <code class="px-1 py-0.5 rounded" style="background: var(--color-surface-3);">claude auth</code> first.
-                      </div>
-                      <div class="flex gap-2">
-                        <button
-                          onclick={launchClaudeCodeAuth}
-                          disabled={saving === prov.key}
-                          class="btn btn-secondary flex-1"
-                        >
-                          Launch Auth
-                        </button>
-                        <button
-                          onclick={() => connectProvider(prov.key)}
-                          disabled={saving === prov.key}
-                          class="btn btn-primary flex-1"
-                        >
-                          {saving === prov.key ? 'Verifying...' : 'Verify'}
-                        </button>
-                      </div>
-                    {:else if currentMode === 'cli'}
-                      <div class="text-[10px] mb-1" style="color: var(--color-text-muted);">
-                        Authenticate via Google Cloud / Gemini CLI (ADC).
-                      </div>
-                      <div class="flex gap-2">
-                        <button
-                          onclick={launchGeminiAuth}
-                          disabled={saving === prov.key}
-                          class="btn btn-secondary flex-1"
-                        >
-                          Launch Auth
-                        </button>
-                        <button
-                          onclick={() => connectProvider(prov.key)}
-                          disabled={saving === prov.key}
-                          class="btn btn-primary flex-1"
-                        >
-                          {saving === prov.key ? 'Verifying...' : 'Verify'}
-                        </button>
-                      </div>
-                    {:else if currentMode === 'antigravity'}
-                      <div class="text-[10px] mb-1" style="color: var(--color-text-muted);">
-                        Connect to Google's internal Antigravity agent platform.
-                      </div>
-                      <div class="flex gap-2">
-                        <button
-                          onclick={launchAntigravityAuth}
-                          disabled={saving === prov.key}
-                          class="btn btn-secondary flex-1"
-                        >
-                          Connect Portal
-                        </button>
-                        <button
-                          onclick={() => connectProvider(prov.key)}
-                          disabled={saving === prov.key}
-                          class="btn btn-primary flex-1"
-                        >
-                          {saving === prov.key ? 'Verifying...' : 'Verify'}
-                        </button>
-                      </div>
-                    {:else}
-                      <input
-                        type="password"
-                        placeholder={prov.placeholder}
-                        bind:value={keyInputs[prov.key]}
-                        onkeydown={(e) => { if (e.key === 'Enter') connectProvider(prov.key); }}
-                        class="input"
-                        style="font-size: 12px;"
-                      />
-                      <button
-                        onclick={() => connectProvider(prov.key)}
-                        disabled={saving === prov.key}
-                        class="btn btn-primary w-full"
-                      >
-                        {saving === prov.key ? 'Connecting...' : 'Connect'}
-                      </button>
-                    {/if}
                   {:else}
+                    <!-- Auth mode selector for providers with multiple auth options -->
+                      {#if caps.extraAuthModes}
+                        <div class="flex gap-1 p-0.5 rounded-md mb-2" style="background: var(--color-surface-2);">
+                          {#each caps.extraAuthModes as mode}
+                            <button
+                              class="flex-1 text-[10px] py-1 rounded transition-colors
+                                     {(selectedAuthMode[prov.key] ?? caps.extraAuthModes[0].id) === mode.id
+                                       ? 'bg-[var(--color-surface-4)] text-[var(--color-text-primary)] font-medium'
+                                       : 'text-[var(--color-text-muted)]'}"
+                              onclick={() => { selectedAuthMode[prov.key] = mode.id; selectedAuthMode = {...selectedAuthMode}; }}
+                            >
+                              {mode.label}
+                            </button>
+                          {/each}
+                        </div>
+                        {@const currentMode = selectedAuthMode[prov.key] ?? caps.extraAuthModes[0].id}
+                        {#if currentMode === 'codex'}
+                          <div class="text-[10px] mb-1" style="color: var(--color-text-muted);">
+                            Uses existing Codex CLI session. Run <code class="px-1 py-0.5 rounded" style="background: var(--color-surface-3);">codex auth</code> first.
+                          </div>
+                          <button
+                            onclick={() => connectProvider(prov.key)}
+                            disabled={saving === prov.key}
+                            class="btn btn-primary w-full"
+                          >
+                            {saving === prov.key ? 'Verifying...' : 'Verify Codex Auth'}
+                          </button>
+                        {:else if currentMode === 'claude_code'}
+                          <div class="text-[10px] mb-1" style="color: var(--color-text-muted);">
+                            Uses existing Claude Code session. Run <code class="px-1 py-0.5 rounded" style="background: var(--color-surface-3);">claude auth</code> first.
+                          </div>
+                          <div class="flex gap-2">
+                            <button
+                              onclick={() => openAuthPortal(prov.key)}
+                              class="btn btn-secondary flex-1"
+                            >
+                              Claude Website
+                            </button>
+                            <button
+                              onclick={() => connectProvider(prov.key)}
+                              disabled={saving === prov.key}
+                              class="btn btn-primary flex-1"
+                            >
+                              {saving === prov.key ? 'Verifying...' : 'Verify'}
+                            </button>
+                          </div>
+                        {:else if currentMode === 'cli'}
+                          <div class="text-[10px] mb-1" style="color: var(--color-text-muted);">
+                            Uses existing Gemini CLI session. Run <code class="px-1 py-0.5 rounded" style="background: var(--color-surface-3);">gemini auth</code> first.
+                          </div>
+                          <button
+                            onclick={() => connectProvider(prov.key)}
+                            disabled={saving === prov.key}
+                            class="btn btn-primary w-full"
+                          >
+                            {saving === prov.key ? 'Verifying...' : 'Verify Gemini CLI Auth'}
+                          </button>
+                        {:else}
+                        <!-- Standard API key input -->
+                        <input
+                          type="password"
+                          placeholder={prov.placeholder}
+                          bind:value={keyInputs[prov.key]}
+                          onkeydown={(e) => { if (e.key === 'Enter') connectProvider(prov.key); }}
+                          class="input"
+                          style="font-size: 12px;"
+                        />
+                        <button
+                          onclick={() => connectProvider(prov.key)}
+                          disabled={saving === prov.key}
+                          class="btn btn-primary w-full"
+                        >
+                          {saving === prov.key ? 'Connecting...' : 'Connect'}
+                        </button>
+                      {/if}
+                    {:else}
                       <!-- Providers without multi-auth-mode -->
                       {#if caps.supportsApiKey}
                         <input
@@ -919,7 +681,7 @@
                       {/if}
                       {#if caps.authMode === 'auth_only'}
                         <div class="text-[10px] mb-1" style="color: var(--color-text-muted);">
-                          Authenticate via professional CLI / Portal flow.
+                          Authenticate in your browser, then verify the connection.
                         </div>
                         {#if prov.key === 'copilot'}
                           <button
@@ -944,26 +706,6 @@
                               {saving === 'copilot' ? 'Checking...' : 'Complete Authorization'}
                             </button>
                           {/if}
-                        {:else if prov.key === 'google-cli'}
-                          <div class="flex gap-2">
-                            <button onclick={launchGeminiAuth} class="btn btn-secondary flex-1">Launch Auth</button>
-                            <button onclick={() => connectProvider(prov.key)} class="btn btn-primary flex-1">Verify</button>
-                          </div>
-                        {:else if prov.key === 'google-antigravity'}
-                          <div class="flex gap-2">
-                            <button onclick={launchAntigravityAuth} class="btn btn-secondary flex-1">Connect Portal</button>
-                            <button onclick={() => connectProvider(prov.key)} class="btn btn-primary flex-1">Verify</button>
-                          </div>
-                        {:else if prov.key === 'claude-code'}
-                          <div class="flex gap-2">
-                            <button onclick={launchClaudeAuth} class="btn btn-secondary flex-1">Launch Auth</button>
-                            <button onclick={() => connectProvider(prov.key)} class="btn btn-primary flex-1">Verify</button>
-                          </div>
-                        {:else if prov.key === 'codex'}
-                          <div class="flex gap-2">
-                            <button onclick={launchCodexAuth} class="btn btn-secondary flex-1">Launch Auth</button>
-                            <button onclick={() => connectProvider(prov.key)} class="btn btn-primary flex-1">Verify</button>
-                          </div>
                         {:else if authPortalUrls[prov.key]}
                           <button
                             onclick={() => openAuthPortal(prov.key)}
@@ -997,6 +739,7 @@
                         </button>
                       {/if}
                     {/if}
+                  {/if}
                 </div>
               {/if}
             </div>
@@ -1016,62 +759,6 @@
           {#if copiedEndpoint}<Check size={13} />{:else}<Copy size={13} />{/if}
         </button>
       </div>
-    </div>
-
-  {:else if activeTab === 'assignments'}
-    <div class="space-y-4">
-      <div class="p-3 rounded-lg bg-blue-500/10 border border-blue-500/20 mb-4">
-        <p class="text-[11px] text-blue-400">
-          Assign specific models to specialized roles. Manager chooses "Auto" based on these assignments.
-          The Critic is the final gatekeeper for all code changes.
-        </p>
-      </div>
-
-      {#if loadingAssignments}
-        <div class="flex items-center justify-center py-10">
-          <div class="animate-spin rounded-full h-5 w-5 border-b-2 border-[var(--color-accent)]"></div>
-        </div>
-      {:else}
-        <div class="grid grid-cols-1 gap-3">
-          {#each workerDomains as domain}
-            {@const DomainIcon = domain.icon}
-            <div class="p-3 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-2)] flex flex-col gap-3">
-              <div class="flex items-start justify-between">
-                <div class="flex gap-2.5">
-                  <div class="mt-0.5 p-1.5 rounded-lg bg-[var(--color-surface-3)]" style="color: var(--color-text-secondary);">
-                    <DomainIcon size={16} />
-                  </div>
-                  <div>
-                    <h3 class="text-xs font-semibold" style="color: var(--color-text-primary);">{domain.label}</h3>
-                    <p class="text-[10px]" style="color: var(--color-text-muted);">{domain.description}</p>
-                  </div>
-                </div>
-              </div>
-
-              <div class="relative">
-                <select
-                  class="w-full bg-[var(--color-surface-3)] text-xs rounded-lg px-3 py-2 border-none ring-1 ring-inset ring-[var(--color-border)] focus:ring-2 focus:ring-[var(--color-accent)] appearance-none cursor-pointer"
-                  style="color: var(--color-text-primary);"
-                  value={assignments[domain.id] || ''}
-                  onchange={(e) => updateAssignment(domain.id, (e.target as HTMLSelectElement).value)}
-                >
-                  <option value="">Default (Manager's Choice)</option>
-                  {#each getAllModels() as model}
-                    <option value={model.id}>
-                      {model.provider.toUpperCase()}: {model.name}
-                    </option>
-                  {/each}
-                </select>
-                <div class="absolute inset-y-0 right-0 flex items-center pr-3 pointer-events-none opacity-50">
-                  <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
-                  </svg>
-                </div>
-              </div>
-            </div>
-          {/each}
-        </div>
-      {/if}
     </div>
 
   {:else if activeTab === 'appearance'}

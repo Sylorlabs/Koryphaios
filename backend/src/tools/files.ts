@@ -2,8 +2,23 @@
 // Ported from OpenCode's tools/file.go, view.go, write.go, edit.go, grep.go, glob.go, ls.go.
 
 import { readFileSync, writeFileSync, existsSync, statSync, readdirSync, mkdirSync, unlinkSync, renameSync, copyFileSync } from "fs";
-import { join, relative, dirname, basename } from "path";
+import { join, relative, dirname, basename, resolve } from "path";
 import type { Tool, ToolContext, ToolCallInput, ToolCallOutput } from "./registry";
+
+/**
+ * Helper to enforce scoped filesystem access.
+ * Returns true if the path is allowed, or if no restrictions are set.
+ */
+function checkPathAccess(absPath: string, ctx: ToolContext): boolean {
+  if (!ctx.allowedPaths || ctx.allowedPaths.length === 0) return true;
+  
+  const normalizedPath = resolve(absPath);
+  return ctx.allowedPaths.some(p => {
+    const absAllowed = resolve(ctx.workingDirectory, p);
+    // Allow if it's the exact file or inside the allowed directory
+    return normalizedPath === absAllowed || normalizedPath.startsWith(absAllowed + "/");
+  });
+}
 
 // ─── Read File ──────────────────────────────────────────────────────────────
 
@@ -29,6 +44,16 @@ export class ReadFileTool implements Tool {
     };
 
     const absPath = filePath.startsWith("/") ? filePath : join(ctx.workingDirectory, filePath);
+
+    if (!checkPathAccess(absPath, ctx)) {
+      return { 
+        callId: call.id, 
+        name: this.name, 
+        output: `Error: Access denied. This agent is not authorized to read path: ${filePath}. Ask the Manager for access.`, 
+        isError: true, 
+        durationMs: 0 
+      };
+    }
 
     if (!existsSync(absPath)) {
       return { callId: call.id, name: this.name, output: `File not found: ${absPath}`, isError: true, durationMs: 0 };
@@ -73,6 +98,16 @@ export class WriteFileTool implements Tool {
     const { path: filePath, content } = call.input as { path: string; content: string };
     const absPath = filePath.startsWith("/") ? filePath : join(ctx.workingDirectory, filePath);
 
+    if (!checkPathAccess(absPath, ctx)) {
+      return { 
+        callId: call.id, 
+        name: this.name, 
+        output: `Error: Access denied. This agent is not authorized to write to path: ${filePath}.`, 
+        isError: true, 
+        durationMs: 0 
+      };
+    }
+
     try {
       mkdirSync(dirname(absPath), { recursive: true });
 
@@ -96,6 +131,15 @@ export class WriteFileTool implements Tool {
 
       if (ctx.emitFileComplete) {
         ctx.emitFileComplete({ path: absPath, totalLines: lines, operation: "create" });
+      }
+
+      if (ctx.recordChange) {
+        ctx.recordChange({
+          path: absPath,
+          linesAdded: lines,
+          linesDeleted: 0,
+          operation: "create",
+        });
       }
 
       return {
@@ -134,6 +178,16 @@ export class EditFileTool implements Tool {
       new_str: string;
     };
     const absPath = filePath.startsWith("/") ? filePath : join(ctx.workingDirectory, filePath);
+
+    if (!checkPathAccess(absPath, ctx)) {
+      return { 
+        callId: call.id, 
+        name: this.name, 
+        output: `Error: Access denied. This agent is not authorized to edit path: ${filePath}.`, 
+        isError: true, 
+        durationMs: 0 
+      };
+    }
 
     if (!existsSync(absPath)) {
       return { callId: call.id, name: this.name, output: `File not found: ${absPath}`, isError: true, durationMs: 0 };
@@ -176,6 +230,15 @@ export class EditFileTool implements Tool {
 
       if (ctx.emitFileComplete) {
         ctx.emitFileComplete({ path: absPath, totalLines: newContent.split("\n").length, operation: "edit" });
+      }
+
+      if (ctx.recordChange) {
+        ctx.recordChange({
+          path: absPath,
+          linesAdded: new_str.split("\n").length,
+          linesDeleted: old_str.split("\n").length,
+          operation: "edit",
+        });
       }
 
       return {
@@ -366,6 +429,16 @@ export class DeleteFileTool implements Tool {
     const { path: filePath } = call.input as { path: string };
     const absPath = filePath.startsWith("/") ? filePath : join(ctx.workingDirectory, filePath);
 
+    if (!checkPathAccess(absPath, ctx)) {
+      return { 
+        callId: call.id, 
+        name: this.name, 
+        output: `Error: Access denied. This agent is not authorized to delete path: ${filePath}.`, 
+        isError: true, 
+        durationMs: 0 
+      };
+    }
+
     if (!existsSync(absPath)) {
       return { callId: call.id, name: this.name, output: `Path not found: ${absPath}`, isError: true, durationMs: 0 };
     }
@@ -382,7 +455,20 @@ export class DeleteFileTool implements Tool {
         return { callId: call.id, name: this.name, output: `Deleted empty directory: ${absPath}`, isError: false, durationMs: 0 };
       }
 
+      const content = readFileSync(absPath, "utf-8");
+      const lines = content.split("\n").length;
+      
       unlinkSync(absPath);
+
+      if (ctx.recordChange) {
+        ctx.recordChange({
+          path: absPath,
+          linesAdded: 0,
+          linesDeleted: lines,
+          operation: "delete",
+        });
+      }
+
       return { callId: call.id, name: this.name, output: `Deleted file: ${absPath}`, isError: false, durationMs: 0 };
     } catch (err: any) {
       return { callId: call.id, name: this.name, output: `Error deleting: ${err.message}`, isError: true, durationMs: 0 };
@@ -409,6 +495,16 @@ export class MoveFileTool implements Tool {
     const { source, destination } = call.input as { source: string; destination: string };
     const absSrc = source.startsWith("/") ? source : join(ctx.workingDirectory, source);
     const absDest = destination.startsWith("/") ? destination : join(ctx.workingDirectory, destination);
+
+    if (!checkPathAccess(absSrc, ctx) || !checkPathAccess(absDest, ctx)) {
+      return { 
+        callId: call.id, 
+        name: this.name, 
+        output: `Error: Access denied. Authorized paths for this agent: ${ctx.allowedPaths?.join(', ') || 'none'}`, 
+        isError: true, 
+        durationMs: 0 
+      };
+    }
 
     if (!existsSync(absSrc)) {
       return { callId: call.id, name: this.name, output: `Source not found: ${absSrc}`, isError: true, durationMs: 0 };
@@ -546,6 +642,16 @@ export class PatchTool implements Tool {
 
     const absPath = filePath.startsWith("/") ? filePath : join(ctx.workingDirectory, filePath);
 
+    if (!checkPathAccess(absPath, ctx)) {
+      return { 
+        callId: call.id, 
+        name: this.name, 
+        output: `Error: Access denied. Path ${filePath} is not in your authorized scope.`, 
+        isError: true, 
+        durationMs: 0 
+      };
+    }
+
     if (!existsSync(absPath)) {
       return { callId: call.id, name: this.name, output: `File not found: ${absPath}`, isError: true, durationMs: 0 };
     }
@@ -569,11 +675,25 @@ export class PatchTool implements Tool {
       }
 
       // Apply all edits
+      let totalAdded = 0;
+      let totalDeleted = 0;
       for (const edit of edits) {
+        totalAdded += edit.new_str.split("\n").length;
+        totalDeleted += edit.old_str.split("\n").length;
         content = content.replace(edit.old_str, edit.new_str);
       }
 
       writeFileSync(absPath, content, "utf-8");
+
+      if (ctx.recordChange) {
+        ctx.recordChange({
+          path: absPath,
+          linesAdded: totalAdded,
+          linesDeleted: totalDeleted,
+          operation: "edit",
+        });
+      }
+
       return {
         callId: call.id,
         name: this.name,

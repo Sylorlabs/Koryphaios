@@ -3,57 +3,73 @@
 // Supports both API key and Claude Code OAuth token (Pro/Max subscription).
 
 import Anthropic from "@anthropic-ai/sdk";
-import type { ProviderConfig } from "@koryphaios/shared";
-import {
+import type { ProviderConfig, ModelDef } from "@koryphaios/shared";
+import { 
   type Provider,
   type ProviderEvent,
   type StreamRequest,
   type ProviderContentBlock,
   getModelsForProvider,
+  createGenericModel,
 } from "./types";
-import { readFileSync, existsSync } from "fs";
-import { join } from "path";
-import { homedir } from "os";
-
-export function detectClaudeCodeToken(): string | null {
-  const configPaths = [
-    join(homedir(), ".claude", ".credentials.json"),
-  ];
-
-  for (const path of configPaths) {
-    if (!existsSync(path)) continue;
-    try {
-      const data = JSON.parse(readFileSync(path, "utf-8"));
-      // credentials.json has { "authToken": "..." } or { "oauth_token": "..." }
-      if (data?.authToken) return data.authToken;
-      if (data?.oauth_token) return data.oauth_token;
-    } catch {
-      continue;
-    }
-  }
-
-  // Also check environment
-  return process.env.CLAUDE_CODE_OAUTH_TOKEN ?? null;
-}
+import { withRetry } from "./utils";
+import { detectClaudeCodeToken } from "./auth-utils";
 
 export class AnthropicProvider implements Provider {
-  readonly name = "anthropic" as const;
-  private client: Anthropic;
+  readonly name: "anthropic";
+  private _client: Anthropic | null = null;
 
   constructor(readonly config: ProviderConfig) {
-    this.client = new Anthropic({
-      apiKey: config.apiKey,
-      authToken: config.authToken,
-      ...(config.baseUrl && { baseURL: config.baseUrl }),
-    });
+    this.name = "anthropic";
+  }
+
+  protected get client(): Anthropic {
+    if (!this._client) {
+      this._client = new Anthropic({
+        apiKey: this.config.apiKey,
+        authToken: this.config.authToken,
+        ...(this.config.baseUrl && { baseURL: this.config.baseUrl }),
+      });
+    }
+    return this._client;
   }
 
   isAvailable(): boolean {
     return !this.config.disabled && !!(this.config.apiKey || this.config.authToken);
   }
 
-  listModels() {
-    return getModelsForProvider("anthropic");
+  private cachedModels: ModelDef[] | null = null;
+  private lastFetch = 0;
+
+  async listModels(): Promise<ModelDef[]> {
+    const localModels = getModelsForProvider(this.name);
+    
+    if (!this.isAvailable()) {
+      return localModels;
+    }
+
+    if (this.cachedModels && Date.now() - this.lastFetch < 5 * 60 * 1000) {
+      return this.cachedModels;
+    }
+
+    try {
+      const response = await withRetry(() => this.client.models.list());
+      
+      const remoteModels: ModelDef[] = [];
+      for (const model of response.data) {
+        const id = model.id;
+        const existing = localModels.find(m => m.apiModelId === id || m.id === id);
+        if (existing) continue;
+        
+        remoteModels.push(createGenericModel(id, this.name));
+      }
+      
+      this.cachedModels = [...localModels, ...remoteModels];
+      this.lastFetch = Date.now();
+      return this.cachedModels;
+    } catch (err) {
+      return localModels;
+    }
   }
 
   async *streamResponse(request: StreamRequest): AsyncGenerator<ProviderEvent> {
@@ -75,14 +91,25 @@ export class AnthropicProvider implements Provider {
 
     // Enable extended thinking for reasoning models — ensure budget allows for output
     if (request.reasoningLevel) {
+      const level = String(request.reasoningLevel).toLowerCase();
       const outputTokens = request.maxTokens ?? 16_384;
-      let thinkingBudget = 8192; // Default medium
+      let thinkingBudget = 8192; // Default "on" budget
 
-      if (request.reasoningLevel === "low") thinkingBudget = 4096;
-      else if (request.reasoningLevel === "medium") thinkingBudget = 8192;
-      else if (request.reasoningLevel === "high") thinkingBudget = 32768;
-      else if (request.reasoningLevel === "max" || request.reasoningLevel === "xhigh") thinkingBudget = 65536;
-      else if (!isNaN(Number(request.reasoningLevel))) thinkingBudget = Number(request.reasoningLevel);
+      if (level === "off" || level === "none" || level === "0") {
+        thinkingBudget = 0;
+      } else if (level === "on") {
+        thinkingBudget = 8192;
+      } else if (level === "low") {
+        thinkingBudget = 4096;
+      } else if (level === "medium") {
+        thinkingBudget = 8192;
+      } else if (level === "high") {
+        thinkingBudget = 32768;
+      } else if (level === "max" || level === "xhigh") {
+        thinkingBudget = 65536;
+      } else if (!isNaN(Number(level))) {
+        thinkingBudget = Number(level);
+      }
 
       if (thinkingBudget > 0) {
         (params as any).thinking = {
@@ -95,9 +122,9 @@ export class AnthropicProvider implements Provider {
     }
 
     try {
-      const stream = this.client.messages.stream(params, {
+      const stream = await withRetry(() => this.client.messages.stream(params, {
         signal: request.signal,
-      });
+      }));
 
       let currentToolCallId = "";
       let currentToolName = "";
@@ -174,6 +201,8 @@ export class AnthropicProvider implements Provider {
               type: "usage_update",
               tokensIn: usage.input_tokens,
               tokensOut: usage.output_tokens,
+              // Anthropic reports cache reads in usage.cache_read_input_tokens
+              tokensCache: (usage as any).cache_read_input_tokens,
             };
             break;
           }

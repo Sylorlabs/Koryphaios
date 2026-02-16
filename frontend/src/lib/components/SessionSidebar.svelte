@@ -2,8 +2,10 @@
   import { onMount } from 'svelte';
   import { sessionStore } from '$lib/stores/sessions.svelte';
   import { wsStore } from '$lib/stores/websocket.svelte';
+  import { toastStore } from '$lib/stores/toast.svelte';
   import { Plus, Search, Pencil, Trash2, Check, X, MessageSquare } from 'lucide-svelte';
   import AnimatedStatusIcon from './AnimatedStatusIcon.svelte';
+  import ConfirmDialog from './ConfirmDialog.svelte';
 
   interface Props {
     currentSessionId?: string;
@@ -14,6 +16,8 @@
   let editingId = $state<string>('');
   let editTitle = $state<string>('');
   let confirmDeleteId = $state<string>('');
+  let showConfirmDialog = $state<boolean>(false);
+  let sessionToDeleteId = $state<string>('');
 
   onMount(() => {
     sessionStore.fetchSessions();
@@ -58,13 +62,42 @@
 
   function confirmDelete(e: MouseEvent, id: string) {
     e.stopPropagation();
-    if (e.shiftKey || confirmDeleteId === id) {
+    
+    // Shift-click bypasses all confirmation
+    if (e.shiftKey) {
+      sessionStore.deleteSession(id);
+      return;
+    }
+
+    const isRunning = wsStore.isSessionRunning(id);
+    
+    if (isRunning) {
+      sessionToDeleteId = id;
+      showConfirmDialog = true;
+      return;
+    }
+
+    // Standard double-click for idle sessions
+    if (confirmDeleteId === id) {
       sessionStore.deleteSession(id);
       confirmDeleteId = '';
     } else {
       confirmDeleteId = id;
       setTimeout(() => { if (confirmDeleteId === id) confirmDeleteId = ''; }, 3000);
     }
+  }
+
+  function handleConfirmDelete() {
+    if (sessionToDeleteId) {
+      sessionStore.deleteSession(sessionToDeleteId);
+      sessionToDeleteId = '';
+    }
+    showConfirmDialog = false;
+  }
+
+  function handleCancelDelete() {
+    sessionToDeleteId = '';
+    showConfirmDialog = false;
   }
 
   function formatTime(ts: number): string {
@@ -191,3 +224,14 @@
     {/if}
   </div>
 </div>
+
+<ConfirmDialog
+  open={showConfirmDialog}
+  title="Delete Active Session?"
+  message="This session is currently running. Deleting it will cancel all active workers and their progress. Are you sure you want to continue?"
+  confirmLabel="Delete Session"
+  cancelLabel="Cancel"
+  variant="danger"
+  onConfirm={handleConfirmDelete}
+  onCancel={handleCancelDelete}
+/>

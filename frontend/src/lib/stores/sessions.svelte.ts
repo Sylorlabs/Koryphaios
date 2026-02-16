@@ -17,6 +17,12 @@ async function fetchSessions() {
   
   try {
     const res = await fetch('/api/sessions');
+    if (!res.ok) {
+      const text = await res.text();
+      console.error('fetchSessions failed', { status: res.status, body: text });
+      toastStore.error(`Failed to load sessions (${res.status})`);
+      return;
+    }
     const data = await res.json();
     if (data.ok) {
       sessions = data.data;
@@ -29,6 +35,7 @@ async function fetchSessions() {
       }
     }
   } catch (err) {
+    console.error('fetchSessions exception', err);
     toastStore.error('Failed to load sessions');
   }
 }

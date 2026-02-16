@@ -3,21 +3,113 @@
 // ─── Provider & Model Definitions ───────────────────────────────────────────
 
 export const ProviderName = {
+  // Frontier (Major providers)
   Anthropic: "anthropic",
   OpenAI: "openai",
   Google: "google",
-  Copilot: "copilot",
-  Codex: "codex",
+  XAI: "xai",
+  // Aggregators
   OpenRouter: "openrouter",
   Groq: "groq",
-  XAI: "xai",
+  Copilot: "copilot",
+  // Enterprise
   Azure: "azure",
   Bedrock: "bedrock",
   VertexAI: "vertexai",
+  // Local
   Local: "local",
+  Ollama: "ollama",
+  LMStudio: "lmstudio",
+  LlamaCpp: "llamacpp",
+  OllamaCloud: "ollamacloud",
+  // Chinese AI Providers
+  DeepSeek: "deepseek",
+  MiniMax: "minimax",
+  MoonshotAI: "moonshot",
+  ZAI: "zai",
+  Cortecs: "cortecs",
+  StepFun: "stepfun",
+  // High Performance / Speed
+  Cerebras: "cerebras",
+  FireworksAI: "fireworks",
+  DeepInfra: "deepinfra",
+  IO: "ionet",
+  Hyperbolic: "hyperbolic",
+  // Open Source Platforms
+  HuggingFace: "huggingface",
+  Replicate: "replicate",
+  Modal: "modal",
+  // AI Gateways
+  Vercel: "vercel",
+  Cloudflare: "cloudflare",
+  CloudflareWorkers: "cloudflareworkers",
+  Baseten: "baseten",
+  Helicone: "helicone",
+  Portkey: "portkey",
+  // European Providers
+  Scaleway: "scaleway",
+  OVHcloud: "ovhcloud",
+  STACKIT: "stackit",
+  Nebius: "nebius",
+  // Subscription-based
+  TogetherAI: "togetherai",
+  VeniceAI: "venice",
+  ZenMux: "zenmux",
+  OpenCodeZen: "opencodezen",
+  Firmware: "firmware",
+  A302AI: "302ai",
+  // Specialized
+  MistralAI: "mistralai",
+  Cohere: "cohere",
+  Perplexity: "perplexity",
+  Luma: "luma",
+  Fal: "fal",
+  // Audio/Speech
+  ElevenLabs: "elevenlabs",
+  AssemblyAI: "assemblyai",
+  Deepgram: "deepgram",
+  Gladia: "gladia",
+  LMNT: "lmnt",
+  // Enterprise
+  AzureCognitive: "azurecognitive",
+  SAPAI: "sapai",
+  // Developer Platforms
+  GitLab: "gitlab",
+  // NVIDIA
+  NVIDIA: "nvidia",
+  NIM: "nim",
+  // Friendli
+  FriendliAI: "friendliai",
+  // Embeddings
+  VoyageAI: "voyageai",
+  Mixedbread: "mixedbread",
+  // Memory
+  Mem0: "mem0",
+  Letta: "letta",
+  // Qwen
+  Qwen: "qwen",
+  Alibaba: "alibaba",
+  // Chrome
+  ChromeAI: "chromeai",
+  // Requesty
+  Requesty: "requesty",
+  // AIHubMix
+  AIHubMix: "aihubmix",
+  AIMLAPI: "aimlapi",
+  // Black Forest Labs
+  BlackForestLabs: "blackforestlabs",
+  // Kling AI
+  KlingAI: "klingai",
+  // Prodia
+  Prodia: "prodia",
+  // Legacy
+  Codex: "codex",
+  Antigravity: "antigravity",
 } as const;
 
 export type ProviderName = (typeof ProviderName)[keyof typeof ProviderName];
+
+export type ModelTier = "flagship" | "fast" | "cheap" | "reasoning";
 
 export interface ModelDef {
   id: string;
@@ -29,9 +121,13 @@ export interface ModelDef {
   maxOutputTokens: number;
   costPerMInputTokens: number;
   costPerMOutputTokens: number;
+  costPerMInputCached?: number;
+  costPerMOutputCached?: number;
   canReason: boolean;
   supportsAttachments: boolean;
   supportsStreaming: boolean;
+  tier?: ModelTier;
+  isGeneric?: boolean;
 }
 
 export interface ProviderConfig {
@@ -51,11 +147,11 @@ export type ProviderAuthMode = "api_key" | "auth_only" | "api_key_or_auth" | "ba
 
 // ─── Agent & Worker Types ───────────────────────────────────────────────────
 
-export type AgentRole = "manager" | "coder" | "task" | "reviewer" | "title" | "summarizer";
+export type AgentRole = "manager" | "coder" | "task" | "reviewer" | "title" | "summarizer" | "critic";
 
-export type AgentStatus = "idle" | "thinking" | "tool_calling" | "streaming" | "verifying" | "compacting" | "waiting_user" | "error" | "done" | "reading" | "writing";
+export type AgentStatus = "idle" | "thinking" | "tool_calling" | "streaming" | "verifying" | "compacting" | "waiting_user" | "error" | "done" | "reading" | "writing" | "criticizing";
 
-export type WorkerDomain = "ui" | "backend" | "general" | "review" | "test";
+export type WorkerDomain = "frontend" | "backend" | "general" | "review" | "test" | "critic";
 
 export interface AgentIdentity {
   id: string;
@@ -84,6 +180,8 @@ export type ToolName =
   | "ls"
   | "web_fetch"
   | "web_search"
+  | "ask_user"
+  | "ask_manager"
   | "agent"
   | string; // MCP tools use dynamic names
 
@@ -119,6 +217,20 @@ export interface Message {
   sessionId: string;
   role: "user" | "assistant" | "system";
   content: ContentBlock[];
+  model?: string;
+  provider?: ProviderName;
+  tokensIn?: number;
+  tokensOut?: number;
+  cost?: number;
+  createdAt: number;
+}
+
+/** Flattened message structure for database storage */
+export interface StoredMessage {
+  id: string;
+  sessionId: string;
+  role: "user" | "assistant" | "system";
+  content: string; // JSON string of ContentBlock[] or raw text
   model?: string;
   provider?: ProviderName;
   tokensIn?: number;
@@ -169,6 +281,7 @@ export type WSEventType =
   | "stream.thinking"
   | "stream.tool_call"
   | "stream.tool_result"
+  | "stream.usage"
   | "stream.complete"
   // File edit streaming (Cursor-style per-token preview)
   | "stream.file_delta"
@@ -177,6 +290,8 @@ export type WSEventType =
   | "session.created"
   | "session.updated"
   | "session.deleted"
+  | "session.changes"
+  | "session.accept_changes"
   // Permission events
   | "permission.request"
   | "permission.response"
@@ -189,7 +304,8 @@ export type WSEventType =
   | "kory.thought"
   | "kory.routing"
   | "kory.verification"
-  | "kory.task_breakdown";
+  | "kory.task_breakdown"
+  | "kory.ask_user";
 
 export interface WSMessage<T = unknown> {
   type: WSEventType;
@@ -234,6 +350,21 @@ export interface StreamToolResultPayload {
   toolResult: ToolResult;
 }
 
+export interface StreamUsagePayload {
+  agentId: string;
+  model: string;
+  provider: ProviderName;
+  tokensIn: number;
+  tokensOut: number;
+  tokensUsed: number;
+  /** True only when provider returns usage counters. */
+  usageKnown: boolean;
+  /** Context window size for this model (if trustworthy). */
+  contextWindow?: number;
+  /** True only when context window is verified for this model/provider. */
+  contextKnown: boolean;
+}
+
 export interface StreamFileDeltaPayload {
   agentId: string;
   path: string;
@@ -273,14 +404,32 @@ export interface KoryTaskBreakdownPayload {
   }>;
 }
 
+export interface KoryAskUserPayload {
+  question: string;
+  options: string[];
+  allowOther: boolean;
+}
+
+export interface ChangeSummary {
+  path: string;
+  linesAdded: number;
+  linesDeleted: number;
+  operation: "create" | "edit" | "delete";
+}
+
+export interface KorySessionChangesPayload {
+  changes: ChangeSummary[];
+}
+
 export interface ProviderStatusPayload {
   providers: Array<{
     name: ProviderName;
     enabled: boolean;
     authenticated: boolean;
+    authSource?: "API Key" | "Subscription" | "CLI session" | "Antigravity";
     models: string[];
-    /** All possible models for this provider, even if not selected. */
-    allAvailableModels: string[];
+    /** All possible models for this provider, even if not selected. Returns full definitions for UI reflection. */
+    allAvailableModels: ModelDef[];
     /** The IDs of models currently selected/enabled by the user. */
     selectedModels: string[];
     hideModelSelector: boolean;
@@ -290,6 +439,7 @@ export interface ProviderStatusPayload {
     requiresBaseUrl: boolean;
     extraAuthModes?: Array<{ id: string; label: string; description: string }>;
     error?: string;
+    circuitOpen?: boolean;
   }>;
 }
 
@@ -302,6 +452,12 @@ export interface KoryphaiosConfig {
     coder: { model: string; maxTokens?: number; reasoningLevel?: string };
     task: { model: string; maxTokens?: number };
   };
+  /** Mapping of worker domains to specific models. Example: "ui": "openai:gpt-4.1" */
+  assignments?: Partial<Record<WorkerDomain, string>>;
+  /** Per-model fallback chains. When a model's provider is unavailable or quota-limited,
+   *  try these models in order before falling back to other available providers.
+   *  Example: { "gemini-2.5-pro": ["gpt-4.1", "claude-sonnet-4-5"] } */
+  fallbacks?: Record<string, string[]>;
   mcpServers?: Record<string, MCPServerConfig>;
   telegram?: {
     botToken: string;
@@ -357,179 +513,311 @@ export interface ReasoningConfig {
   parameter: string;
   options: { value: string; label: string; description: string }[];
   defaultValue: string;
-  supportsModelSpecific: boolean;
+  supportsModelSpecific?: boolean;
 }
 
-export const PROVIDER_REASONING: Record<string, ReasoningConfig | null> = {
-  // Anthropic Claude - effort (Opus 4.5+, Sonnet 3.7+)
-  anthropic: {
-    parameter: 'effort',
-    options: [
-      { value: 'low', label: 'Low', description: 'Fast responses with basic reasoning' },
-      { value: 'medium', label: 'Medium', description: 'Balanced depth and speed' },
-      { value: 'high', label: 'High', description: 'Thorough reasoning for complex tasks' },
-      { value: 'max', label: 'xhigh', description: 'Deepest possible thinking budget' },
-    ],
-    defaultValue: 'high',
-    supportsModelSpecific: false,
-  },
+type ReasoningOption = { value: string; label: string; description: string };
 
-  // OpenAI - varies significantly by model
-  // o1/o3 series: low/medium/high
-  // GPT-5 series: none/minimal/low/medium/high/xhigh (varies by model)
-  openai: {
-    parameter: 'reasoning.effort',
-    options: [
-      { value: 'low', label: 'Low', description: 'Quick thinking for simple logic' },
-      { value: 'medium', label: 'Medium', description: 'Standard reasoning effort' },
-      { value: 'high', label: 'High', description: 'Maximum reasoning intensity' },
-    ],
-    defaultValue: 'medium',
-    supportsModelSpecific: true,
-  },
+export const STANDARD_REASONING_OPTIONS = {
+  none: { value: "none", label: "None", description: "Standard generation without explicit reasoning" },
+  low: { value: "low", label: "Low", description: "Minimal reasoning effort for speed" },
+  medium: { value: "medium", label: "Medium", description: "Balanced depth and speed" },
+  high: { value: "high", label: "High", description: "Thorough reasoning for complex tasks" },
+  xhigh: { value: "xhigh", label: "xhigh", description: "Deepest possible reasoning budget" },
+  adaptive: { value: "adaptive", label: "Auto", description: "Model automatically decides reasoning level based on task" },
+} as const;
 
-  // Google - thinkingBudget tokens or thinkingLevel
-  google: {
-    parameter: 'thinkingConfig.thinkingBudget',
-    options: [
-      { value: '0', label: 'Off', description: 'Standard generation without thinking' },
-      { value: '1024', label: 'Low', description: 'Minimal thinking budget (~1k tokens)' },
-      { value: '8192', label: 'Medium', description: 'Balanced thinking budget (~8k tokens)' },
-      { value: '24576', label: 'High', description: 'Deep thinking budget (~24k tokens)' },
-    ],
-    defaultValue: '8192',
-    supportsModelSpecific: false,
-  },
+const REASONING_OPTIONS = {
+  ...STANDARD_REASONING_OPTIONS,
+  minimal: { value: "minimal", label: "Minimal", description: "Lightest available explicit reasoning effort" },
+  off: { value: "off", label: "Off", description: "Disable explicit reasoning mode" },
+  on: { value: "on", label: "On", description: "Enable default reasoning mode" },
+  default: { value: "default", label: "Default", description: "Provider default reasoning mode" },
+  budget_0: { value: "0", label: "Off", description: "Disable thinking budget" },
+  budget_1024: { value: "1024", label: "Low", description: "Thinking budget: 1,024 tokens" },
+  budget_8192: { value: "8192", label: "Medium", description: "Thinking budget: 8,192 tokens" },
+  budget_24576: { value: "24576", label: "High", description: "Thinking budget: 24,576 tokens" },
+} as const;
 
-  // Groq - varies by model family
-  // Qwen models: none/default
-  // GPT-OSS models: low/medium/high
-  groq: {
-    parameter: 'reasoning_effort',
-    options: [
-      { value: 'low', label: 'Low', description: 'Small reasoning effort' },
-      { value: 'medium', label: 'Medium', description: 'Balanced (default)' },
-      { value: 'high', label: 'High', description: 'Maximum reasoning effort' },
-    ],
-    defaultValue: 'medium',
-    supportsModelSpecific: true,
-  },
-
-  // xAI Grok - only low/high for Grok 3
-  xai: {
-    parameter: 'reasoning_effort',
-    options: [
-      { value: 'low', label: 'Low', description: 'Lower reasoning' },
-      { value: 'high', label: 'High', description: 'Higher reasoning (default)' },
-    ],
-    defaultValue: 'high',
-    supportsModelSpecific: false,
-  },
-
-  // Azure OpenAI - same as OpenAI
-  azure: {
-    parameter: 'reasoning.effort',
-    options: [
-      { value: 'low', label: 'Low', description: 'Less reasoning' },
-      { value: 'medium', label: 'Medium', description: 'Balanced (default)' },
-      { value: 'high', label: 'High', description: 'More reasoning' },
-    ],
-    defaultValue: 'medium',
-    supportsModelSpecific: true,
-  },
-
-  // No reasoning control exposed
-  copilot: null,
-  openrouter: null,
-  bedrock: null,
-  vertexai: null,
-  local: null,
-};
-
-// Model-specific reasoning options (for providers that vary by model)
-export const MODEL_REASONING_OVERRIDES: Array<{
-  pattern: RegExp;
+interface ReasoningRule {
   provider: string;
-  options: { value: string; label: string; description: string }[];
-  defaultValue: string;
-}> = [
-    // OpenAI GPT-5 series - supports xhigh
-    {
-      pattern: /^gpt-5/, provider: 'openai', options: [
-        { value: 'none', label: 'None', description: 'No explicit reasoning' },
-        { value: 'minimal', label: 'Minimal', description: 'Minimal effort' },
-        { value: 'low', label: 'Low', description: 'Low effort' },
-        { value: 'medium', label: 'Medium', description: 'Balanced' },
-        { value: 'high', label: 'High', description: 'High effort' },
-        { value: 'xhigh', label: 'xhigh', description: 'Maximum effort' },
-      ], defaultValue: 'high'
-    },
+  modelPattern?: RegExp;
+  config: ReasoningConfig | null;
+}
 
-    // OpenAI o1-mini - NO reasoning_effort (not supported)
-    { pattern: /^o1-mini/, provider: 'openai', options: [], defaultValue: '' },
-
-    // OpenAI o1/o3/o4 series - supports low/medium/high
-    {
-      pattern: /^(o1|o3|o4)/, provider: 'openai', options: [
-        { value: 'low', label: 'Low', description: 'Less reasoning' },
-        { value: 'medium', label: 'Medium', description: 'Balanced (default)' },
-        { value: 'high', label: 'High', description: 'More reasoning' },
-      ], defaultValue: 'medium'
+const DEFAULT_REASONING_RULES: ReasoningRule[] = [
+  {
+    provider: "auto",
+    config: {
+      parameter: "reasoning",
+      options: Object.values(STANDARD_REASONING_OPTIONS),
+      defaultValue: "medium",
+    }
+  },
+  {
+    provider: "anthropic",
+    modelPattern: /^claude-opus-4-6/i,
+    config: {
+      parameter: "thinking.effort",
+      options: [REASONING_OPTIONS.none, REASONING_OPTIONS.low, REASONING_OPTIONS.medium, REASONING_OPTIONS.high, REASONING_OPTIONS.xhigh],
+      defaultValue: "medium",
     },
-
-    // Groq Qwen models - only none/default
-    {
-      pattern: /^qwen/, provider: 'groq', options: [
-        { value: 'none', label: 'None', description: 'Disable reasoning' },
-        { value: 'default', label: 'Default', description: 'Enable reasoning' },
-      ], defaultValue: 'default'
+  },
+  {
+    provider: "anthropic",
+    config: {
+      parameter: "thinking.type",
+      options: [REASONING_OPTIONS.off, REASONING_OPTIONS.on],
+      defaultValue: "on",
     },
-
-    // Groq GPT-OSS models - low/medium/high
-    {
-      pattern: /^gpt-oss/, provider: 'groq', options: [
-        { value: 'low', label: 'Low', description: 'Low effort' },
-        { value: 'medium', label: 'Medium', description: 'Balanced (default)' },
-        { value: 'high', label: 'High', description: 'High effort' },
-      ], defaultValue: 'medium'
+  },
+  {
+    provider: "openai",
+    modelPattern: /^o1-mini/i,
+    config: null,
+  },
+  {
+    provider: "openai",
+    modelPattern: /^gpt-5/i,
+    config: {
+      parameter: "reasoning.effort",
+      options: [REASONING_OPTIONS.none, REASONING_OPTIONS.minimal, REASONING_OPTIONS.low, REASONING_OPTIONS.medium, REASONING_OPTIONS.high, REASONING_OPTIONS.xhigh],
+      defaultValue: "medium",
     },
-
-    // Gemini 2.5/3 - thinkingLevel option
-    {
-      pattern: /^(gemini-2\.5|gemini-3)/, provider: 'google', options: [
-        { value: '0', label: 'Off', description: 'No thinking' },
-        { value: 'low', label: 'Low', description: 'Low thinking' },
-        { value: 'high', label: 'High', description: 'High thinking' },
-      ], defaultValue: 'high'
+  },
+  {
+    provider: "openai",
+    modelPattern: /^(o1|o3|o4)/i,
+    config: {
+      parameter: "reasoning.effort",
+      options: [REASONING_OPTIONS.low, REASONING_OPTIONS.medium, REASONING_OPTIONS.high],
+      defaultValue: "medium",
     },
-  ];
+  },
+  {
+    provider: "openai",
+    config: null,
+  },
+  {
+    provider: "azure",
+    modelPattern: /(^azure\.)?o1-mini/i,
+    config: null,
+  },
+  {
+    provider: "azure",
+    modelPattern: /(^azure\.)?gpt-5/i,
+    config: {
+      parameter: "reasoning.effort",
+      options: [REASONING_OPTIONS.none, REASONING_OPTIONS.minimal, REASONING_OPTIONS.low, REASONING_OPTIONS.medium, REASONING_OPTIONS.high, REASONING_OPTIONS.xhigh],
+      defaultValue: "medium",
+    },
+  },
+  {
+    provider: "azure",
+    modelPattern: /(^azure\.)?(o1|o3|o4)/i,
+    config: {
+      parameter: "reasoning.effort",
+      options: [REASONING_OPTIONS.low, REASONING_OPTIONS.medium, REASONING_OPTIONS.high],
+      defaultValue: "medium",
+    },
+  },
+  {
+    provider: "azure",
+    config: null,
+  },
+  {
+    provider: "google",
+    modelPattern: /^gemini-3/i,
+    config: {
+      parameter: "thinkingConfig.thinkingLevel",
+      options: [REASONING_OPTIONS.low, REASONING_OPTIONS.medium, REASONING_OPTIONS.high],
+      defaultValue: "medium",
+    },
+  },
+  {
+    provider: "google",
+    modelPattern: /^gemini-2\.5/i,
+    config: {
+      parameter: "thinkingConfig.thinkingBudget",
+      options: [REASONING_OPTIONS.budget_0, REASONING_OPTIONS.budget_1024, REASONING_OPTIONS.budget_8192, REASONING_OPTIONS.budget_24576],
+      defaultValue: "8192",
+    },
+  },
+  {
+    provider: "google",
+    config: {
+      parameter: "thinkingConfig.thinkingBudget",
+      options: [REASONING_OPTIONS.budget_0, REASONING_OPTIONS.budget_1024, REASONING_OPTIONS.budget_8192, REASONING_OPTIONS.budget_24576],
+      defaultValue: "8192",
+    },
+  },
+  {
+    provider: "vertexai",
+    modelPattern: /^vertexai\.gemini-2\.5/i,
+    config: {
+      parameter: "thinkingConfig.thinkingBudget",
+      options: [REASONING_OPTIONS.budget_0, REASONING_OPTIONS.budget_1024, REASONING_OPTIONS.budget_8192, REASONING_OPTIONS.budget_24576],
+      defaultValue: "8192",
+    },
+  },
+  {
+    provider: "vertexai",
+    modelPattern: /^gemini-3/i,
+    config: {
+      parameter: "thinkingConfig.thinkingLevel",
+      options: [REASONING_OPTIONS.low, REASONING_OPTIONS.medium, REASONING_OPTIONS.high],
+      defaultValue: "medium",
+    },
+  },
+  {
+    provider: "vertexai",
+    config: {
+      parameter: "thinkingConfig.thinkingBudget",
+      options: [REASONING_OPTIONS.budget_0, REASONING_OPTIONS.budget_1024, REASONING_OPTIONS.budget_8192, REASONING_OPTIONS.budget_24576],
+      defaultValue: "8192",
+    },
+  },
+  {
+    provider: "groq",
+    modelPattern: /^qwen/i,
+    config: {
+      parameter: "reasoning_effort",
+      options: [REASONING_OPTIONS.none, REASONING_OPTIONS.default],
+      defaultValue: "default",
+    },
+  },
+  {
+    provider: "groq",
+    config: null,
+  },
+  {
+    provider: "xai",
+    modelPattern: /^grok-3-mini/i,
+    config: {
+      parameter: "reasoning_effort",
+      options: [REASONING_OPTIONS.low, REASONING_OPTIONS.high],
+      defaultValue: "high",
+    },
+  },
+  {
+    provider: "xai",
+    config: null,
+  },
+  {
+    provider: "openrouter",
+    modelPattern: /^openrouter\.(o1|o3|o4)/i,
+    config: {
+      parameter: "reasoning.effort",
+      options: [REASONING_OPTIONS.low, REASONING_OPTIONS.medium, REASONING_OPTIONS.high],
+      defaultValue: "medium",
+    },
+  },
+  {
+    provider: "openrouter",
+    config: null,
+  },
+  { provider: "copilot", config: null },
+  { 
+    provider: "copilot", 
+    modelPattern: /codex/i,
+    config: {
+      parameter: "reasoning.effort",
+      options: [REASONING_OPTIONS.adaptive, REASONING_OPTIONS.none, REASONING_OPTIONS.low, REASONING_OPTIONS.medium, REASONING_OPTIONS.high],
+      defaultValue: "adaptive",
+    },
+  },
+  { 
+    provider: "codex", 
+    config: {
+      parameter: "reasoning.effort",
+      options: [REASONING_OPTIONS.adaptive, REASONING_OPTIONS.none, REASONING_OPTIONS.low, REASONING_OPTIONS.medium, REASONING_OPTIONS.high],
+      defaultValue: "adaptive",
+    },
+  },
+  { provider: "bedrock", config: null },
+  { provider: "local", config: null },
+  // New providers - most OpenAI-compatible APIs don't have explicit reasoning config
+  { provider: "deepseek", config: null },
+  { provider: "togetherai", config: null },
+  { provider: "cerebras", config: null },
+  { provider: "fireworks", config: null },
+  { provider: "huggingface", config: null },
+  { provider: "baseten", config: null },
+  { provider: "cloudflare", config: null },
+  { provider: "vercel", config: null },
+  { provider: "ollama", config: null },
+  { provider: "ollamacloud", config: null },
+  { provider: "lmstudio", config: null },
+  { provider: "llamacpp", config: null },
+  { provider: "minimax", config: null },
+  { provider: "moonshot", config: null },
+  { provider: "nebius", config: null },
+  { provider: "venice", config: null },
+  { provider: "deepinfra", config: null },
+  { provider: "scaleway", config: null },
+  { provider: "ovhcloud", config: null },
+  { provider: "sapai", config: null },
+  { provider: "stackit", config: null },
+  { provider: "ionet", config: null },
+  { provider: "zai", config: null },
+  { provider: "zenmux", config: null },
+  { provider: "opencodezen", config: null },
+  { provider: "firmware", config: null },
+  { provider: "cortecs", config: null },
+  { provider: "azurecognitive", config: null },
+  { provider: "gitlab", config: null },
+  { provider: "antigravity", config: null },
+  // Additional new providers
+  { provider: "mistralai", config: null },
+  { provider: "cohere", config: null },
+  { provider: "perplexity", config: null },
+  { provider: "luma", config: null },
+  { provider: "fal", config: null },
+  { provider: "replicate", config: null },
+  { provider: "modal", config: null },
+  { provider: "hyperbolic", config: null },
+  { provider: "stepfun", config: null },
+  { provider: "qwen", config: null },
+  { provider: "alibaba", config: null },
+  { provider: "cloudflareworkers", config: null },
+  { provider: "helicone", config: null },
+  { provider: "portkey", config: null },
+  { provider: "elevenlabs", config: null },
+  { provider: "deepgram", config: null },
+  { provider: "gladia", config: null },
+  { provider: "lmnt", config: null },
+  { provider: "nvidia", config: null },
+  { provider: "nim", config: null },
+  { provider: "friendliai", config: null },
+  { provider: "voyageai", config: null },
+  { provider: "mixedbread", config: null },
+  { provider: "mem0", config: null },
+  { provider: "letta", config: null },
+  { provider: "chromeai", config: null },
+  { provider: "requesty", config: null },
+  { provider: "aihubmix", config: null },
+  { provider: "aimlapi", config: null },
+  { provider: "blackforestlabs", config: null },
+  { provider: "klingai", config: null },
+  { provider: "prodia", config: null },
+  { provider: "302ai", config: null },
+  { provider: "a302ai", config: null },
+  { provider: "assemblyai", config: null },
+];
+
+function normalizeProvider(provider?: string): string | undefined {
+  return provider;
+}
 
 export function getReasoningConfig(provider?: string, model?: string): ReasoningConfig | null {
-  if (!provider) return PROVIDER_REASONING.anthropic; // Default to anthropic for 'auto' or missing provider
+  const normalizedProvider = normalizeProvider(provider) || "auto";
 
-  const providerConfig = PROVIDER_REASONING[provider];
-  if (!providerConfig) return null;
-
-  // If no model specified or provider doesn't have model-specific options
-  if (!model || !providerConfig.supportsModelSpecific) {
-    return providerConfig;
+  for (const rule of DEFAULT_REASONING_RULES) {
+    if (rule.provider !== normalizedProvider) continue;
+    if (rule.modelPattern && !rule.modelPattern.test(model ?? "")) continue;
+    return rule.config;
   }
-
-  // Check for model-specific overrides
-  for (const override of MODEL_REASONING_OVERRIDES) {
-    if (override.pattern.test(model) && (override.provider === provider)) {
-      if (override.options.length === 0) {
-        return null; // Model doesn't support reasoning (e.g., o1-mini)
-      }
-      return {
-        ...providerConfig,
-        options: override.options,
-        defaultValue: override.defaultValue,
-      };
-    }
-  }
-
-  return providerConfig;
+  return null;
 }
 
 export function hasReasoningSupport(provider?: string, model?: string): boolean {
@@ -540,4 +828,97 @@ export function hasReasoningSupport(provider?: string, model?: string): boolean 
 export function getDefaultReasoning(provider?: string, model?: string): string {
   const config = getReasoningConfig(provider, model);
   return config?.defaultValue ?? 'medium';
+}
+
+export function normalizeReasoningLevel(
+  provider: string | undefined,
+  model: string | undefined,
+  reasoningLevel: string | undefined,
+): string | undefined {
+  if (!reasoningLevel) return undefined;
+  
+  // Adaptive means let the model decide - return undefined to use provider default
+  const normalizedLevel = reasoningLevel.toLowerCase().trim();
+  if (normalizedLevel === "adaptive") {
+    return undefined;
+  }
+  
+  // Auto means manager decides based on task complexity - return undefined to let manager handle it
+  if (normalizedLevel === "auto") {
+    return "auto";
+  }
+  
+  // If provider is specified, we try to map the standardized level to the provider's native value
+  if (provider && provider !== "auto") {
+    const level = normalizedLevel;
+    
+    // ─── Gemini (Budget-based) ─────────────────────────────────────────────
+    if (provider === "google" || provider === "vertexai") {
+      const isGemini3 = model ? /gemini-3/i.test(model) : false;
+      if (isGemini3) {
+        if (level === "none") return "low"; // Minimum for Gemini 3
+        if (["low", "medium", "high", "xhigh"].includes(level)) return level === "xhigh" ? "high" : level;
+      } else {
+        if (level === "none") return "0";
+        if (level === "low") return "1024";
+        if (level === "medium") return "8192";
+        if (level === "high") return "24576";
+        if (level === "xhigh") return "65536";
+      }
+    }
+
+    // ─── OpenAI / Anthropic / Groq (Effort-based) ──────────────────────────
+    if (["openai", "anthropic", "groq", "xai", "azure", "openrouter"].includes(provider)) {
+      if (level === "none") return "none";
+      if (level === "xhigh") return "high"; // Standardize xhigh to high for effort-based
+      return level; // low, medium, high are standard
+    }
+  }
+
+  // Fallback: search in config options
+  const config = getReasoningConfig(provider, model);
+  if (!config || config.options.length === 0) return undefined;
+
+  const value = reasoningLevel.trim().toLowerCase();
+  const option = config.options.find((opt) => opt.value.toLowerCase() === value);
+  if (!option) return config.defaultValue;
+  return option.value;
+}
+
+/**
+ * Determine reasoning level based on task complexity.
+ * Used when reasoningLevel is "auto" - the manager decides the appropriate level.
+ */
+export function determineAutoReasoningLevel(taskDescription: string): string {
+  const lower = taskDescription.toLowerCase();
+  
+  // High complexity tasks - need deep reasoning
+  const highComplexityPatterns = [
+    /multi-?step/i, /complex/i, /architect/i, /design/i, /refactor/i,
+    /debug/i, /troubleshoot/i, /optimize/i, /implement/i, /create.*from.*scratch/i,
+    /build.*system/i, /rewrite/i, /migrate/i, /restructure/i,
+    /explain.*complex/i, /analyze.*entire/i, /review.*entire/i,
+  ];
+  
+  // Low complexity tasks - quick responses sufficient
+  const lowComplexityPatterns = [
+    /simple/i, /quick/i, /basic/i, /small/i, /fix.*typo/i,
+    /add.*comment/i, /format/i, /lint/i, /brief/i, /what.*is/i,
+    /how.*do/i, /list/i, /show.*me/i, /read.*file/i,
+  ];
+  
+  for (const pattern of highComplexityPatterns) {
+    if (pattern.test(lower)) {
+      return "high";
+    }
+  }
+  
+  for (const pattern of lowComplexityPatterns) {
+    if (pattern.test(lower)) {
+      return "low";
+    }
+  }
+  
+  // Default to medium for everything else
+  return "medium";
 }

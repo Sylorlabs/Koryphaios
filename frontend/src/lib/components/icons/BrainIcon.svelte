@@ -10,9 +10,25 @@
   let { reasoningLevel, size = 20, class: className = '' }: Props = $props();
 
   function getTier(level: string): number {
-    switch (level.toLowerCase()) {
-      case 'none': return 0;
+    const normalized = String(level).toLowerCase().trim();
+
+    // Token-budget style reasoning levels (e.g. Google thinking budgets)
+    if (/^\d+$/.test(normalized)) {
+      const budget = Number(normalized);
+      if (budget <= 0) return 0;
+      if (budget <= 2048) return 1;
+      if (budget <= 12000) return 2;
+      return 3;
+    }
+
+    switch (normalized) {
+      case 'off':
+      case '0':
+      case 'none':
+        return 0;
+      case 'minimal':
       case 'low': return 1;
+      case 'default':
       case 'medium': return 2;
       case 'high': return 3;
       case 'xhigh': return 4;

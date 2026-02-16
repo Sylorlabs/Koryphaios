@@ -44,6 +44,19 @@
       "maxTokens": 8192
     }
   },
+
+  "assignments": {
+    "frontend": "openai:gpt-4.1",
+    "backend": "google:gemini-2.5-pro",
+    "critic": "anthropic:claude-sonnet-4-5",
+    "general": "google:gemini-2.5-flash"
+  },
+
+  "fallbacks": {
+    "gemini-2.5-pro": ["gpt-4.1", "claude-sonnet-4-5"],
+    "gpt-4.1": ["gemini-2.5-flash"],
+    "claude-sonnet-4-5": ["gpt-4.1"]
+  },
   
   "server": {
     "port": 3000,

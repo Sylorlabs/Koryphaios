@@ -1,6 +1,7 @@
 <script lang="ts">
   import { wsStore } from '$lib/stores/websocket.svelte';
   import { FileText, FolderOpen, Edit3, Eye } from 'lucide-svelte';
+  import FileIcon from './icons/FileIcon.svelte';
 
   interface FileContext {
     path: string;
@@ -88,11 +89,7 @@
     <div class="flex-1 overflow-y-auto p-2 space-y-1">
       {#each files as file (file.path)}
         <div class="flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-surface-3 transition-colors group">
-          {#if file.type === 'read'}
-            <Eye size={14} class="text-text-muted shrink-0" />
-          {:else}
-            <Edit3 size={14} class="text-success shrink-0" />
-          {/if}
+          <FileIcon path={file.path} size={14} />
           <div class="flex-1 min-w-0">
             <div class="text-xs text-text-primary truncate font-mono">
               {getFileName(file.path)}

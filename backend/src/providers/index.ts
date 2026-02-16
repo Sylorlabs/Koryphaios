@@ -5,3 +5,4 @@ export { GeminiProvider, GeminiCLIProvider } from "./gemini";
 export { CopilotProvider } from "./copilot";
 export { CodexProvider } from "./codex";
 export * from "./types";
+export * from "./models";

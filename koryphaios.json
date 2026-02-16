@@ -1,6 +1,19 @@
 {
   "$schema": "./koryphaios-schema.json",
-  "providers": {},
+  "providers": {
+    "anthropic": {
+      "name": "anthropic",
+      "disabled": true
+    },
+    "codex": {
+      "name": "codex",
+      "disabled": true
+    },
+    "google": {
+      "name": "google",
+      "disabled": true
+    }
+  },
   "agents": {
     "manager": {
       "model": "claude-sonnet-4-5",
@@ -16,8 +29,8 @@
     }
   },
   "server": {
-    "port": 3000,
-    "host": "localhost"
+    "port": 3001,
+    "host": "127.0.0.1"
   },
   "dataDirectory": ".koryphaios",
   "contextPaths": [
