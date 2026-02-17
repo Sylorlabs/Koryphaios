@@ -267,10 +267,10 @@ pre {
   background: var(--color-surface-0);
   border: 1px solid var(--color-border);
   border-radius: 8px;
-  padding: 12px 16px;
+  padding: 16px;
   overflow-x: auto;
-  font-size: 13px;
-  line-height: 1.6;
+  font-size: 14px; /* Increased from 13px */
+  line-height: 1.7; /* Increased from 1.6 */
 }
 
 /* Drawer / Modal Backdrop */

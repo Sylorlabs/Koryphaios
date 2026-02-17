@@ -5,10 +5,10 @@
     status: AgentStatus;
     size?: number;
     isManager?: boolean;
-    static?: boolean;
+    isStatic?: boolean;
   }
 
-  let { status, size = 20, isManager = false, static: isStatic = false }: Props = $props();
+  let { status, size = 20, isManager = false, isStatic = false }: Props = $props();
 </script>
 
 <!-- Animated status icons with distinct animations per agent state -->

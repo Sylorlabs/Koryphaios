@@ -3,13 +3,17 @@
   import { wsStore } from '$lib/stores/websocket.svelte';
   import { theme } from '$lib/stores/theme.svelte';
   import { sessionStore } from '$lib/stores/sessions.svelte';
+  import { authStore } from '$lib/stores/auth.svelte';
+  import { appStore } from '$lib/stores/app.svelte';
   import { toastStore } from '$lib/stores/toast.svelte';
   import ManagerFeed from '$lib/components/ManagerFeed.svelte';
   import FileEditPreview from '$lib/components/FileEditPreview.svelte';
   import WorkerCard from '$lib/components/WorkerCard.svelte';
   import CommandInput from '$lib/components/CommandInput.svelte';
+  import Sidebar from '$lib/components/Sidebar.svelte';
   import SessionSidebar from '$lib/components/SessionSidebar.svelte';
   import SourceControlPanel from '$lib/components/SourceControlPanel.svelte';
+  import DiffEditor from '$lib/components/DiffEditor.svelte';
   import PermissionDialog from '$lib/components/PermissionDialog.svelte';
   import QuestionDialog from '$lib/components/QuestionDialog.svelte';
   import ChangesSummary from '$lib/components/ChangesSummary.svelte';
@@ -17,6 +21,8 @@
   import ToastContainer from '$lib/components/ToastContainer.svelte';
   import CommandPalette from '$lib/components/CommandPalette.svelte';
   import { shortcutStore } from '$lib/stores/shortcuts.svelte';
+  import { gitStore } from '$lib/stores/git.svelte';
+  import { getModKeyName } from '$lib/utils/platform';
   import {
     Settings,
     Activity,
@@ -26,6 +32,9 @@
     GitBranch,
     Zap,
     Search,
+    SunMoon,
+    Check,
+    X,
   } from 'lucide-svelte';
 
   let showSettings = $state(false);
@@ -36,6 +45,7 @@
   let showAgentsBeforeZen = $state(false);
   let showGitBeforeZen = $state(false);
   let showCommandPalette = $state(false);
+  let showThemeQuickMenu = $state(false);
   let zenMode = $state(false);
   let inputRef = $state<HTMLTextAreaElement>();
   let projectFileInput = $state<HTMLInputElement>();
@@ -137,8 +147,9 @@ Release notes
 
   onMount(() => {
     theme.init();
-    wsStore.connect();
-    sessionStore.fetchSessions();
+    appStore.initialize(authStore, sessionStore).then(() => {
+      wsStore.connect();
+    });
     loadRecentProjects();
     loadLayoutPrefs();
 
@@ -151,6 +162,14 @@ Release notes
     };
   });
 
+  // Automatically subscribe WebSocket to the active session when it changes
+  $effect(() => {
+    const activeId = sessionStore.activeSessionId;
+    if (activeId && wsStore.status === 'connected') {
+      wsStore.subscribeToSession(activeId);
+    }
+  });
+
   function handleWindowClick(e: MouseEvent) {
     const target = e.target as HTMLElement | null;
     if (target?.closest('[data-top-menu]')) return;
@@ -158,25 +177,31 @@ Release notes
   }
 
   function handleGlobalKeydown(e: KeyboardEvent) {
+    if (e.key === 'Escape' && showThemeQuickMenu) {
+      showThemeQuickMenu = false;
+      return;
+    }
+
     if (e.key === 'Escape' && openMenu) {
       openMenu = null;
       return;
     }
 
-    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
+    if (shortcutStore.matches('toggle_palette', e)) {
       e.preventDefault();
       showCommandPalette = !showCommandPalette;
       return;
     }
 
-    if (e.ctrlKey && e.key.toLowerCase() === 'y') {
+    if (shortcutStore.matches('toggle_zen_mode', e)) {
       e.preventDefault();
-      wsStore.toggleYolo();
-      if (wsStore.isYoloMode) {
-        toastStore.warning('YOLO Mode Active');
-      } else {
-        toastStore.success('YOLO Mode Disabled');
-      }
+      handleMenuAction('toggle_zen_mode');
+      return;
+    }
+
+    if (shortcutStore.matches('toggle_yolo', e)) {
+      e.preventDefault();
+      setYoloMode(!wsStore.isYoloMode);
       return;
     }
 
@@ -196,6 +221,73 @@ Release notes
 
   function toggleMenu(menu: 'file' | 'edit' | 'view') {
     openMenu = openMenu === menu ? null : menu;
+  }
+
+  function setYoloMode(enabled: boolean) {
+    wsStore.setYoloMode(enabled);
+    if (enabled) {
+      toastStore.warning('YOLO Mode Active');
+    } else {
+      toastStore.success('YOLO Mode Disabled');
+    }
+  }
+
+  function requestSessionCompact() {
+    const sessionId = sessionStore.activeSessionId;
+    if (!sessionId) {
+      toastStore.error('No active session to compact');
+      return;
+    }
+
+    wsStore.sendMessage(
+      sessionId,
+      [
+        'Compact the session for context efficiency.',
+        'Return:',
+        '1) one short project summary,',
+        '2) current status,',
+        '3) key decisions,',
+        '4) open issues,',
+        '5) next actions.',
+        'Keep it concise and implementation-focused.',
+      ].join('\n')
+    );
+    toastStore.info('Compaction request sent to manager');
+  }
+
+  async function handleSlashCommand(command: string): Promise<boolean> {
+    const parts = command.trim().slice(1).split(/\s+/).filter(Boolean);
+    const root = parts[0]?.toLowerCase();
+
+    if (!root) return false;
+
+    if (root === 'help') {
+      toastStore.info('Commands: /new, /compact, /yolo');
+      return true;
+    }
+
+    if (root === 'new') {
+      await sessionStore.createSession();
+      inputRef?.focus();
+      return true;
+    }
+
+    if (root === 'compact') {
+      requestSessionCompact();
+      return true;
+    }
+
+    if (root === 'yolo') {
+      if (parts.length > 1) {
+        toastStore.error('Usage: /yolo');
+      } else {
+        setYoloMode(!wsStore.isYoloMode);
+      }
+      return true;
+    }
+
+    toastStore.error(`Unknown command: /${root}. Use /help`);
+    return true;
   }
 
   function loadRecentProjects() {
@@ -320,6 +412,8 @@ Release notes
       source: options?.source ?? 'new',
       fileName: options?.fileName,
     });
+
+    inputRef?.focus();
   }
 
   async function handleProjectFileSelected(e: Event) {
@@ -442,6 +536,7 @@ Release notes
         break;
       case 'new_session':
         await sessionStore.createSession();
+        inputRef?.focus();
         break;
       case 'focus_input':
         inputRef?.focus();
@@ -457,15 +552,13 @@ Release notes
         showGit = !showGit;
         break;
       case 'toggle_theme':
-        theme.setPreset(theme.isDark ? 'light' : 'midnight');
+        showThemeQuickMenu = true;
         break;
       case 'toggle_yolo':
-        wsStore.toggleYolo();
-        if (wsStore.isYoloMode) {
-          toastStore.warning('YOLO Mode Active');
-        } else {
-          toastStore.success('YOLO Mode Disabled');
-        }
+        setYoloMode(!wsStore.isYoloMode);
+        break;
+      case 'session_compact':
+        requestSessionCompact();
         break;
       case 'toggle_sidebar':
         showSidebar = !showSidebar;
@@ -547,7 +640,10 @@ Release notes
         </button>
       </div>
       <div class="flex-1 overflow-hidden">
-        <SessionSidebar currentSessionId={sessionStore.activeSessionId} />
+        <SessionSidebar 
+          currentSessionId={sessionStore.activeSessionId} 
+          onNewSession={() => inputRef?.focus()}
+        />
       </div>
       <!-- Sidebar footer -->
       <div class="px-3 h-10 border-t flex items-center justify-between shrink-0" style="border-color: var(--color-border);">
@@ -600,7 +696,7 @@ Release notes
                   <button class="w-full text-left px-2.5 py-1.5 text-xs rounded-md hover:bg-[var(--color-surface-3)]" style="color: var(--color-text-primary);" onclick={() => handleMenuAction('new_project')}>New Project</button>
                   <button class="w-full text-left px-2.5 py-1.5 text-xs rounded-md hover:bg-[var(--color-surface-3)]" style="color: var(--color-text-primary);" onclick={() => handleMenuAction('open_project_file')}>Open Project From File...</button>
                   <div class="h-px my-1" style="background: var(--color-border);"></div>
-                  <div class="px-2.5 py-1.5 text-[10px] uppercase tracking-wider" style="color: var(--color-text-muted);">Recent Projects</div>
+                  <div class="px-2.5 py-1.5 text-[10px] uppercase tracking-wider" style="color: var(--color-text-muted);">Recent projects</div>
                   {#if recentProjects.length > 0}
                     {#each recentProjects.slice(0, 6) as project (project.id)}
                       <button class="w-full flex items-center justify-between gap-2 text-left px-2.5 py-1.5 text-xs rounded-md hover:bg-[var(--color-surface-3)]" style="color: var(--color-text-primary);" onclick={() => openRecentProject(project.id)}>
@@ -655,10 +751,9 @@ Release notes
               {#if openMenu === 'view'}
                 <div class="absolute left-0 top-8 z-30 min-w-[200px] rounded-lg border p-1" style="background: var(--color-surface-2); border-color: var(--color-border);">
                   <button class="w-full text-left px-2.5 py-1.5 text-xs rounded-md hover:bg-[var(--color-surface-3)]" style="color: var(--color-text-primary);" onclick={() => handleMenuAction('toggle_sidebar')}>{showSidebar ? 'Hide' : 'Show'} Sidebar</button>
-                  <button class="w-full text-left px-2.5 py-1.5 text-xs rounded-md hover:bg-[var(--color-surface-3)]" style="color: var(--color-text-primary);" onclick={() => handleMenuAction('toggle_file_context')}>{showFileContext ? 'Hide' : 'Show'} Files Sidebar</button>
                   <button class="w-full text-left px-2.5 py-1.5 text-xs rounded-md hover:bg-[var(--color-surface-3)]" style="color: var(--color-text-primary);" onclick={() => handleMenuAction('toggle_zen_mode')}>{zenMode ? 'Disable' : 'Enable'} Zen Mode</button>
                   <button class="w-full text-left px-2.5 py-1.5 text-xs rounded-md hover:bg-[var(--color-surface-3)]" style="color: var(--color-text-primary);" onclick={() => handleMenuAction('toggle_agents')}>{showAgents ? 'Hide' : 'Show'} Active Agents</button>
-                  <button class="w-full text-left px-2.5 py-1.5 text-xs rounded-md hover:bg-[var(--color-surface-3)]" style="color: var(--color-text-primary);" onclick={() => handleMenuAction('toggle_theme')}>Toggle Light/Dark Theme</button>
+                  <button class="w-full text-left px-2.5 py-1.5 text-xs rounded-md hover:bg-[var(--color-surface-3)]" style="color: var(--color-text-primary);" onclick={() => handleMenuAction('toggle_theme')}>Switch Theme...</button>
                   <button class="w-full text-left px-2.5 py-1.5 text-xs rounded-md hover:bg-[var(--color-surface-3)]" style="color: var(--color-text-primary);" onclick={() => handleMenuAction('open_settings')}>Open Settings</button>
                 </div>
               {/if}
@@ -677,7 +772,7 @@ Release notes
           {#if wsStore.isYoloMode}
             <div class="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-red-500/10 border border-red-500/20 text-red-400">
               <Zap size={12} fill="currentColor" />
-              <span class="text-[10px] font-bold tracking-wider uppercase">YOLO Mode</span>
+              <span class="text-[10px] font-bold tracking-wider uppercase">YOLO mode</span>
             </div>
           {/if}
         </div>
@@ -704,11 +799,11 @@ Release notes
             class="flex items-center gap-1.5 px-2 py-1 rounded-md transition-colors hover:bg-[var(--color-surface-3)]"
             style="color: var(--color-text-muted);"
             onclick={() => showCommandPalette = true}
-            title="Command Palette (Ctrl+K)"
+            title="Command Palette ({getModKeyName()}K)"
           >
             <Search size={14} />
             <span class="text-[10px] font-medium uppercase tracking-wider">Commands</span>
-            <kbd class="text-[9px] px-1 py-0.5 rounded bg-[var(--color-surface-3)] border border-[var(--color-border)] opacity-60">⌘K</kbd>
+            <kbd class="text-[9px] px-1 py-0.5 rounded bg-[var(--color-surface-3)] border border-[var(--color-border)] opacity-60">{getModKeyName()}K</kbd>
           </button>
 
           {#if activeAgents.length > 0}
@@ -726,7 +821,7 @@ Release notes
             class="p-2 rounded-lg transition-colors hover:bg-[var(--color-surface-3)] flex items-center justify-center"
             style="color: var(--color-text-muted);"
             onclick={() => showSettings = true}
-            title="Settings (Ctrl+,)"
+            title="Settings ({getModKeyName()},)"
           >
             <Settings size={18} />
           </button>
@@ -734,7 +829,7 @@ Release notes
       </header>
     {:else}
       <button
-        class="absolute top-2 right-4 z-20 px-2.5 py-1 rounded-md text-xs border transition-all duration-200 hover:bg-[var(--color-surface-3)] hover:border-[var(--color-border-bright)] hover:scale-105 active:scale-95"
+        class="absolute top-1 right-4 z-20 px-2.5 py-1 rounded-md text-xs border transition-all duration-200 hover:bg-[var(--color-surface-3)] hover:border-[var(--color-border-bright)] hover:scale-105 active:scale-95"
         style="background: var(--color-surface-2); border-color: var(--color-border); color: var(--color-text-secondary);"
         onclick={() => handleMenuAction('toggle_zen_mode')}
       >
@@ -764,22 +859,35 @@ Release notes
 
     <!-- Chat / Feed area -->
     <div class="flex-1 overflow-hidden flex flex-col">
-      <ManagerFeed />
+      {#if gitStore.state.activeDiff}
+        <DiffEditor />
+      {:else}
+        <ManagerFeed />
+      {/if}
     </div>
 
-    <!-- Context window usage (only when trustworthy) -->
-    {#if wsStore.contextUsage.isReliable}
+    <!-- Context window usage -->
+    {#if wsStore.contextUsage.status !== 'unknown'}
       <div class="shrink-0 px-4 py-1.5 flex items-center gap-3" style="border-top: 1px solid var(--color-border); background: var(--color-surface-1);">
-        <span class="text-[10px] shrink-0" style="color: var(--color-text-muted);">Context</span>
+        <span class="text-[10px] shrink-0" style="color: var(--color-text-muted);">
+          {wsStore.contextUsage.label}
+        </span>
         <div class="flex-1 h-1.5 rounded-full overflow-hidden" style="background: var(--color-surface-3);">
           <div
             class="h-full rounded-full transition-all duration-500"
-            style="width: {wsStore.contextUsage.percent}%; background: {wsStore.contextUsage.percent > 85 ? '#ef4444' : wsStore.contextUsage.percent > 65 ? '#f59e0b' : 'var(--color-accent)'};"
+            style="width: {wsStore.contextUsage.percent}%; background: {
+              wsStore.contextUsage.status === 'multi_agent' ? 'var(--color-text-muted)' :
+              wsStore.contextUsage.percent > 85 ? '#ef4444' : 
+              wsStore.contextUsage.percent > 65 ? '#f59e0b' : 
+              'var(--color-accent)'
+            };"
           ></div>
         </div>
-        <span class="text-[10px] shrink-0 tabular-nums" style="color: var(--color-text-muted);">
-          {wsStore.contextUsage.used >= 1000 ? `${(wsStore.contextUsage.used / 1000).toFixed(1)}k` : wsStore.contextUsage.used} / {(wsStore.contextUsage.max / 1000).toFixed(0)}k
-        </span>
+        {#if wsStore.contextUsage.max > 0}
+          <span class="text-[10px] shrink-0 tabular-nums" style="color: var(--color-text-muted);">
+            {wsStore.contextUsage.used >= 1000 ? `${(wsStore.contextUsage.used / 1000).toFixed(1)}k` : wsStore.contextUsage.used} / {(wsStore.contextUsage.max / 1000).toFixed(0)}k
+          </span>
+        {/if}
       </div>
     {/if}
 
@@ -788,6 +896,7 @@ Release notes
       <CommandInput
         bind:inputRef
         onSend={handleSend}
+        onCommand={handleSlashCommand}
       />
     </div>
   </div>
@@ -803,6 +912,60 @@ Release notes
 <PermissionDialog />
 <QuestionDialog />
 <ChangesSummary />
+
+{#if showThemeQuickMenu}
+  <div
+    class="fixed inset-0 z-[95] flex items-start justify-center pt-[12vh] px-4 backdrop-blur-sm"
+    style="background: rgba(0,0,0,0.45);"
+    onmousedown={() => showThemeQuickMenu = false}
+    role="presentation"
+  >
+    <div
+      class="w-full max-w-md rounded-xl border shadow-2xl overflow-hidden"
+      style="background: var(--color-surface-1); border-color: var(--color-border);"
+      onmousedown={e => e.stopPropagation()}
+      role="presentation"
+    >
+      <div class="flex items-center justify-between px-4 py-3 border-b" style="border-color: var(--color-border);">
+        <div class="flex items-center gap-2">
+          <SunMoon size={15} style="color: var(--color-text-secondary);" />
+          <div class="text-sm font-medium" style="color: var(--color-text-primary);">Switch Theme</div>
+        </div>
+        <button
+          class="p-1 rounded transition-colors hover:bg-[var(--color-surface-3)]"
+          style="color: var(--color-text-muted);"
+          onclick={() => showThemeQuickMenu = false}
+          aria-label="Close theme picker"
+        >
+          <X size={14} />
+        </button>
+      </div>
+
+      <div class="p-3">
+        <div class="text-[10px] uppercase tracking-wider mb-2" style="color: var(--color-text-muted);">Theme Preset</div>
+        <div class="grid grid-cols-2 gap-1.5">
+          {#each theme.presets as preset}
+            <button
+              class="flex items-center justify-between gap-2 px-3 py-2 rounded-lg text-xs transition-all border
+                     {theme.preset === preset.id
+                       ? 'border-[var(--color-accent)] bg-[var(--color-accent)]/10 text-[var(--color-text-primary)]'
+                       : 'border-transparent bg-[var(--color-surface-2)] text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-3)]'}"
+              onclick={() => {
+                theme.setPreset(preset.id);
+              }}
+            >
+              <span>{preset.label}</span>
+              {#if theme.preset === preset.id}
+                <Check size={12} style="color: var(--color-accent);" />
+              {/if}
+            </button>
+          {/each}
+        </div>
+      </div>
+    </div>
+  </div>
+{/if}
+
 <SettingsDrawer open={showSettings} onClose={() => showSettings = false} />
 <CommandPalette bind:open={showCommandPalette} onAction={handleMenuAction} />
 <ToastContainer />

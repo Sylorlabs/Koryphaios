@@ -16,8 +16,7 @@
 		"@koryphaios/shared": "workspace:*",
 		"highlight.js": "^11.11.1",
 		"lucide-svelte": "^0.564.0",
-		"marked": "^17.0.2",
-		"simple-icons": "^16.9.0"
+		"marked": "^17.0.2"
 	},
 	"devDependencies": {
 		"@sveltejs/adapter-auto": "^7.0.0",

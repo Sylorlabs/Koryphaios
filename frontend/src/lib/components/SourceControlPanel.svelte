@@ -2,8 +2,8 @@
   import { onMount } from 'svelte';
   import { gitStore } from '$lib/stores/git.svelte';
   import { RefreshCw, GitCommit, ArrowUp, ArrowDown, Plus, Minus, Check, Undo, MoreHorizontal, ChevronDown, GitBranch, AlertCircle } from 'lucide-svelte';
+  import { isMac, getModKeyName } from '$lib/utils/platform';
   import FileIcon from './icons/FileIcon.svelte';
-  import FileDiffModal from './FileDiffModal.svelte';
   import GitConflictDialog from './GitConflictDialog.svelte';
 
   let message = $state('');
@@ -25,8 +25,6 @@
     deleted: gitStore.state.status.filter(f => f.status === 'deleted').length,
   });
 
-  let showDiff = $state<{ file: string; staged: boolean } | null>(null);
-
   onMount(() => {
     gitStore.refreshStatus();
   });
@@ -35,6 +33,10 @@
     if (!message.trim()) return;
     const success = await gitStore.commit(message);
     if (success) message = '';
+  }
+
+  function handleFileClick(file: string, staged: boolean) {
+    gitStore.openDiff(file, staged);
   }
 
   function getStatusIcon(status: string) {
@@ -85,6 +87,16 @@
         >
           <GitBranch size={10} />
           {gitStore.state.branch || '...'}
+          {#if gitStore.state.ahead > 0 || gitStore.state.behind > 0}
+            <span class="flex items-center gap-0.5 ml-1 px-1 rounded bg-[var(--color-surface-4)] text-[9px]">
+              {#if gitStore.state.behind > 0}
+                <span class="flex items-center"><ArrowDown size={8} /> {gitStore.state.behind}</span>
+              {/if}
+              {#if gitStore.state.ahead > 0}
+                <span class="flex items-center"><ArrowUp size={8} /> {gitStore.state.ahead}</span>
+              {/if}
+            </span>
+          {/if}
           <ChevronDown size={10} />
         </button>
         
@@ -134,9 +146,12 @@
   <div class="p-3 border-b border-[var(--color-border)]">
     <textarea
       bind:value={message}
-      placeholder="Message (Ctrl+Enter to commit)"
+      placeholder="Message ({getModKeyName()}+Enter to commit)"
       class="input w-full text-xs h-20 resize-none mb-2 bg-[var(--color-surface-2)] font-sans"
-      onkeydown={(e) => { if (e.ctrlKey && e.key === 'Enter') handleCommit(); }}
+      onkeydown={(e) => { 
+        const modPressed = isMac() ? e.metaKey : e.ctrlKey;
+        if (modPressed && e.key === 'Enter') handleCommit(); 
+      }}
     ></textarea>
     <button
       onclick={handleCommit}
@@ -177,8 +192,11 @@
       </div>
       {#each stagedFiles as file}
         <div 
-          class="flex items-center gap-2 px-3 py-1.5 hover:bg-[var(--color-surface-2)] group text-xs cursor-pointer"
-          onclick={() => showDiff = { file: file.path, staged: true }}
+          class="w-full flex items-center gap-2 px-3 py-1.5 hover:bg-[var(--color-surface-2)] group text-xs cursor-pointer text-left border-none bg-transparent font-sans"
+          onclick={() => handleFileClick(file.path, true)}
+          onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') handleFileClick(file.path, true); }}
+          role="button"
+          tabindex="0"
         >
           <FileIcon path={file.path} size={14} />
           <div class="flex-1 min-w-0 flex items-center gap-2">
@@ -199,9 +217,9 @@
             {getStatusIcon(file.status)}
           </div>
           <div class="flex items-center opacity-0 group-hover:opacity-100">
-            <button class="p-1 text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] rounded hover:bg-[var(--color-surface-3)]" onclick={(e) => { e.stopPropagation(); gitStore.unstageFile(file.path); }} title="Unstage">
+            <span class="p-1 text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] rounded hover:bg-[var(--color-surface-3)] cursor-pointer" onclick={(e) => { e.stopPropagation(); gitStore.unstageFile(file.path); }} title="Unstage" role="button" tabindex="0" onkeydown={(e) => { if (e.key === 'Enter') { e.stopPropagation(); gitStore.unstageFile(file.path); }}}>
               <Minus size={12} />
-            </button>
+            </span>
           </div>
         </div>
       {/each}
@@ -225,8 +243,11 @@
     {/if}
     {#each changedFiles as file}
       <div 
-        class="flex items-center gap-2 px-3 py-1.5 hover:bg-[var(--color-surface-2)] group text-xs cursor-pointer"
-        onclick={() => showDiff = { file: file.path, staged: false }}
+        class="w-full flex items-center gap-2 px-3 py-1.5 hover:bg-[var(--color-surface-2)] group text-xs cursor-pointer text-left border-none bg-transparent font-sans"
+        onclick={() => handleFileClick(file.path, false)}
+        onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') handleFileClick(file.path, false); }}
+        role="button"
+        tabindex="0"
       >
         <FileIcon path={file.path} size={14} />
         <div class="flex-1 min-w-0 flex items-center gap-2">
@@ -258,14 +279,6 @@
     {/each}
   </div>
 </div>
-
-{#if showDiff}
-  <FileDiffModal
-    file={showDiff.file}
-    staged={showDiff.staged}
-    onClose={() => showDiff = null}
-  />
-{/if}
 
 {#if showConflictDialog && gitStore.state.conflicts.length > 0}
   <GitConflictDialog

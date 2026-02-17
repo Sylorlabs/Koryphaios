@@ -9,13 +9,9 @@
     Keyboard,
     Check,
     Copy,
-    Zap,
-    Server,
-    Globe,
-    Cpu,
+    Search,
     X,
   } from 'lucide-svelte';
-  import ProviderIcon from './icons/ProviderIcon.svelte';
   import ModelSelectionDialog from './ModelSelectionDialog.svelte';
 
   interface Props {
@@ -25,6 +21,7 @@
 
   let { open = false, onClose }: Props = $props();
   let activeTab = $state<'providers' | 'appearance' | 'shortcuts'>('providers');
+  let settingsSearch = $state('');
 
   let showModelSelector = $state(false);
   let selectorTarget = $state<any>(null);
@@ -33,41 +30,189 @@
     if (e.key === 'Escape' && open && onClose) onClose();
   }
 
+  function providerMatchesSearch(
+    provider: ProviderCard,
+    categoryLabel: string,
+    query: string,
+  ): boolean {
+    const q = query.trim().toLowerCase();
+    if (!q) return true;
+    
+    // Check provider key, label, and category
+    if (provider.label.toLowerCase().includes(q) ||
+        provider.key.toLowerCase().includes(q) ||
+        categoryLabel.toLowerCase().includes(q)) {
+      return true;
+    }
+    
+    // Check extra auth modes (sub-providers like codex, antigravity, claude_code)
+    const caps = getProviderCaps(provider.key);
+    if (caps.extraAuthModes) {
+      for (const mode of caps.extraAuthModes) {
+        if (mode.label.toLowerCase().includes(q) ||
+            mode.description?.toLowerCase().includes(q) ||
+            mode.id.toLowerCase().includes(q)) {
+          return true;
+        }
+      }
+    }
+    
+    return false;
+  }
+
+  type ProviderCard = {
+    key: string;
+    label: string;
+    placeholder?: string;
+    isAuthOnly?: boolean;
+    needsUrl?: boolean;
+  };
+
   // ─── Provider Management ──────────────────────────────────────────────
-  const providerCategories = [
+  const providerCategories: Array<{ label: string; providers: ProviderCard[] }> = [
     {
       label: 'Frontier',
-      icon: Zap,
       providers: [
         { key: 'anthropic', label: 'Anthropic', placeholder: 'sk-ant-...' },
         { key: 'openai', label: 'OpenAI', placeholder: 'sk-...' },
-        { key: 'google', label: 'Google', placeholder: 'AIza...' },
+        { key: 'google', label: 'Google Gemini', placeholder: 'AIza...' },
         { key: 'xai', label: 'xAI', placeholder: 'xai-...' },
       ],
     },
     {
       label: 'Aggregators',
-      icon: Globe,
       providers: [
         { key: 'openrouter', label: 'OpenRouter', placeholder: 'sk-or-...' },
-        { key: 'copilot', label: 'GitHub Copilot', placeholder: 'gho_...' },
+        { key: 'cline', label: 'Cline', placeholder: 'workos:...' },
+        { key: 'copilot', label: 'GitHub Copilot', isAuthOnly: true },
         { key: 'groq', label: 'Groq', placeholder: 'gsk_...' },
+        { key: 'togetherai', label: 'Together AI', placeholder: 'sk-...' },
+        { key: 'opencodezen', label: 'OpenCode Zen', placeholder: 'sk-...' },
+      ],
+    },
+    {
+      label: 'AI Gateways',
+      providers: [
+        { key: 'cloudflare', label: 'Cloudflare AI Gateway', placeholder: 'API Token', needsUrl: true },
+        { key: 'vercel', label: 'Vercel AI Gateway', placeholder: 'API Token' },
+        { key: 'baseten', label: 'Baseten', placeholder: 'API Key' },
+        { key: 'helicone', label: 'Helicone', placeholder: 'API Key' },
+        { key: 'portkey', label: 'Portkey', placeholder: 'API Key' },
+      ],
+    },
+    {
+      label: 'High Performance',
+      providers: [
+        { key: 'cerebras', label: 'Cerebras', placeholder: 'API Key' },
+        { key: 'fireworks', label: 'Fireworks AI', placeholder: 'API Key' },
+        { key: 'deepinfra', label: 'Deep Infra', placeholder: 'API Key' },
+        { key: 'hyperbolic', label: 'Hyperbolic', placeholder: 'API Key' },
+        { key: 'ionet', label: 'IO.NET', placeholder: 'API Key' },
+      ],
+    },
+    {
+      label: 'Chinese AI',
+      providers: [
+        { key: 'deepseek', label: 'DeepSeek', placeholder: 'sk-...' },
+        { key: 'moonshot', label: 'Moonshot AI (Kimi)', placeholder: 'API Key' },
+        { key: 'minimax', label: 'MiniMax', placeholder: 'API Key' },
+        { key: 'nebius', label: 'Nebius', placeholder: 'API Key', needsUrl: true },
+        { key: 'cortecs', label: 'Cortecs', placeholder: 'API Key' },
+        { key: 'stepfun', label: 'StepFun', placeholder: 'API Key' },
+        { key: 'qwen', label: 'Qwen', placeholder: 'API Key' },
+        { key: 'alibaba', label: 'Alibaba Cloud', placeholder: 'API Key' },
+        { key: 'zhipuai', label: 'Zhipu AI', placeholder: 'API Key' },
+        { key: 'modelscope', label: 'ModelScope', placeholder: 'API Key' },
+      ],
+    },
+    {
+      label: 'Open Source Platforms',
+      providers: [
+        { key: 'huggingface', label: 'Hugging Face', placeholder: 'HF Token' },
+        { key: 'replicate', label: 'Replicate', placeholder: 'API Key' },
+        { key: 'modal', label: 'Modal', placeholder: 'API Key' },
+        { key: 'scaleway', label: 'Scaleway', placeholder: 'API Key' },
+        { key: 'venice', label: 'Venice AI', placeholder: 'API Key' },
+        { key: 'zenmux', label: 'ZenMux', placeholder: 'API Key' },
+        { key: 'firmware', label: 'Firmware AI', placeholder: 'API Key' },
       ],
     },
     {
       label: 'Enterprise',
-      icon: Server,
       providers: [
-        { key: 'azure', label: 'Azure OpenAI', placeholder: 'key...', needsUrl: true },
-        { key: 'bedrock', label: 'AWS Bedrock', placeholder: 'AKIA...' },
-        { key: 'vertexai', label: 'Vertex AI', placeholder: '/path/to/creds.json' },
+        { key: 'azure', label: 'Azure OpenAI', placeholder: 'API Key', needsUrl: true },
+        { key: 'azurecognitive', label: 'Azure Cognitive', placeholder: 'API Key', needsUrl: true },
+        { key: 'bedrock', label: 'AWS Bedrock', placeholder: 'AWS Credentials (env)' },
+        { key: 'vertexai', label: 'Vertex AI', placeholder: 'GCP Credentials (env)' },
+        { key: 'sapai', label: 'SAP AI Core', placeholder: 'Service Key JSON' },
+        { key: 'stackit', label: 'STACKIT', placeholder: 'Auth Token' },
+        { key: 'ovhcloud', label: 'OVHcloud', placeholder: 'API Key' },
       ],
     },
     {
-      label: 'Local',
-      icon: Cpu,
+      label: 'Self-Hosted',
       providers: [
-        { key: 'local', label: 'Local/Ollama', placeholder: 'http://localhost:1234', needsUrl: true },
+        { key: 'local', label: 'Local (Generic)', placeholder: 'http://localhost:1234', needsUrl: true },
+        { key: 'ollama', label: 'Ollama', placeholder: 'http://localhost:11434', needsUrl: true },
+        { key: 'ollamacloud', label: 'Ollama Cloud', placeholder: 'API Key' },
+        { key: 'lmstudio', label: 'LM Studio', placeholder: 'http://localhost:1234', needsUrl: true },
+        { key: 'llamacpp', label: 'llama.cpp', placeholder: 'http://localhost:8080', needsUrl: true },
+      ],
+    },
+    {
+      label: 'Specialized',
+      providers: [
+        { key: 'chromeai', label: 'Chrome AI (Gemini Nano)', isAuthOnly: true },
+        { key: 'gitlab', label: 'GitLab Duo', placeholder: 'glpat-...' },
+        { key: 'mistralai', label: 'Mistral AI', placeholder: 'API Key' },
+        { key: 'cohere', label: 'Cohere', placeholder: 'API Key' },
+        { key: 'perplexity', label: 'Perplexity', placeholder: 'API Key' },
+        { key: 'luma', label: 'Luma AI', placeholder: 'API Key' },
+        { key: 'fal', label: 'Fal.ai', placeholder: 'API Key' },
+      ],
+    },
+    {
+      label: 'Audio/Speech',
+      providers: [
+        { key: 'elevenlabs', label: 'ElevenLabs', placeholder: 'API Key' },
+        { key: 'deepgram', label: 'Deepgram', placeholder: 'API Key' },
+        { key: 'gladia', label: 'Gladia', placeholder: 'API Key' },
+        { key: 'assemblyai', label: 'AssemblyAI', placeholder: 'API Key' },
+        { key: 'lmnt', label: 'LMNT', placeholder: 'API Key' },
+      ],
+    },
+    {
+      label: 'Other',
+      providers: [
+        { key: 'nvidia', label: 'NVIDIA NIM', placeholder: 'API Key' },
+        { key: 'nim', label: 'NVIDIA NIM (API)', placeholder: 'API Key' },
+        { key: 'friendliai', label: 'FriendliAI', placeholder: 'API Key' },
+        { key: 'friendli', label: 'Friendli', placeholder: 'API Key' },
+        { key: 'voyageai', label: 'Voyage AI', placeholder: 'API Key' },
+        { key: 'mixedbread', label: 'Mixedbread', placeholder: 'API Key' },
+        { key: 'mem0', label: 'Mem0', placeholder: 'API Key' },
+        { key: 'letta', label: 'Letta', placeholder: 'API Key' },
+        { key: 'blackforestlabs', label: 'Black Forest Labs', placeholder: 'API Key' },
+        { key: 'klingai', label: 'Kling AI', placeholder: 'API Key' },
+        { key: 'prodia', label: 'Prodia', placeholder: 'API Key' },
+        { key: 'a302ai', label: '302.AI', placeholder: 'API Key' },
+        { key: 'cloudflareworkers', label: 'Cloudflare Workers AI', placeholder: 'API Token' },
+        { key: 'novita-ai', label: 'Novita AI', placeholder: 'API Key' },
+        { key: 'upstage', label: 'Upstage AI', placeholder: 'API Key' },
+        { key: 'v0', label: 'v0', placeholder: 'API Key' },
+        { key: 'siliconflow', label: 'SiliconFlow', placeholder: 'API Key' },
+        { key: 'abacus', label: 'Abacus AI', placeholder: 'API Key' },
+        { key: 'llama', label: 'Llama', placeholder: 'API Key' },
+        { key: 'vultr', label: 'Vultr', placeholder: 'API Key' },
+        { key: 'wandb', label: 'Weights & Biases', placeholder: 'API Key' },
+        { key: 'poe', label: 'Poe', placeholder: 'API Key' },
+        { key: 'github-models', label: 'GitHub Models', placeholder: 'API Token' },
+        { key: 'requesty', label: 'Requesty', placeholder: 'API Key' },
+        { key: 'inference', label: 'Inference', placeholder: 'API Key' },
+        { key: 'submodel', label: 'Submodel', placeholder: 'API Key' },
+        { key: 'synthetic', label: 'Synthetic', placeholder: 'API Key' },
+        { key: 'moark', label: 'Moark', placeholder: 'API Key' },
+        { key: 'nova', label: 'Nova', placeholder: 'API Key' },
       ],
     },
   ];
@@ -110,7 +255,7 @@
       enabled: false,
       authenticated: false,
       models: [] as string[],
-      extraAuthModes: undefined as undefined | Array<{id: string; label: string}>,
+      extraAuthModes: undefined as undefined | Array<{id: string; label: string; description?: string}>,
     };
   }
 
@@ -370,9 +515,79 @@
     stopCopilotPolling();
   });
 
-  async function disconnectProvider(name: string) {
+  // ─── Antigravity Auth ────────────────────────────────────────────────
+  async function startAntigravityAuth() {
+    saving = 'google';
     try {
-      await fetch(`/api/providers/${name}`, { method: 'DELETE' });
+      const res = await fetch('/api/providers/google/auth/antigravity', {
+        method: 'POST',
+      });
+      const data = await res.json();
+      if (!data.ok) {
+        toastStore.error(data.error ?? 'Failed to start Antigravity auth');
+        return;
+      }
+
+      const authUrl = data.data?.authUrl;
+      const authId = data.data?.authId;
+      
+      if (authUrl && authId) {
+        window.open(authUrl, '_blank', 'noopener,noreferrer');
+        toastStore.info('Opened Antigravity auth in browser. Waiting for completion...');
+        
+        // Poll for completion
+        pollAntigravityAuth(authId);
+      } else {
+        toastStore.error('Invalid auth response from server');
+      }
+    } catch (err: any) {
+      toastStore.error(err.message ?? 'Failed to start Antigravity auth');
+    } finally {
+      saving = null;
+    }
+  }
+
+  async function pollAntigravityAuth(authId: string, attempts = 0) {
+    if (attempts > 60) {
+      toastStore.error('Antigravity auth timed out');
+      return;
+    }
+
+    try {
+      const res = await fetch(`/api/providers/google/auth/antigravity/poll?authId=${authId}`);
+      const data = await res.json();
+      
+      if (data.ok && data.data?.success) {
+        toastStore.success('Google Antigravity connected');
+        expandedProvider = null;
+      } else if (data.error?.includes('Invalid or expired')) {
+        if (attempts < 60) {
+          setTimeout(() => pollAntigravityAuth(authId, attempts + 1), 2000);
+        } else {
+          toastStore.error('Antigravity auth expired');
+        }
+      } else {
+        toastStore.error(data.error ?? 'Antigravity auth failed');
+      }
+    } catch (err: any) {
+      if (attempts < 60) {
+        setTimeout(() => pollAntigravityAuth(authId, attempts + 1), 2000);
+      } else {
+        toastStore.error('Antigravity auth failed');
+      }
+    }
+  }
+
+  function providerGroup(name: string): string[] {
+    if (name === 'openai') return ['openai', 'codex'];
+    if (name === 'google') return ['google']; // could include gemini-cli if separate
+    return [name];
+  }
+
+  async function disconnectProvider(name: string, grouped = true) {
+    try {
+      const names = grouped ? providerGroup(name) : [name];
+      await Promise.all(names.map(n => fetch(`/api/providers/${n}`, { method: 'DELETE' })));
       toastStore.info(`${name} disconnected`);
     } catch {}
   }
@@ -383,30 +598,10 @@
     setTimeout(() => copiedEndpoint = false, 2000);
   }
 
+  import { shortcutStore } from '$lib/stores/shortcuts.svelte';
+  import { isMac, formatKey } from '$lib/utils/platform';
+
   // ─── Keyboard Shortcuts (editable, persisted) ──────────────────────────
-  interface Shortcut {
-    id: string;
-    keys: string[];
-    action: string;
-  }
-
-  const defaultShortcuts: Shortcut[] = [
-    { id: 'send', keys: ['Ctrl', 'Enter'], action: 'Send message' },
-    { id: 'settings', keys: ['Ctrl', ','], action: 'Open settings' },
-    { id: 'new_session', keys: ['Ctrl', 'N'], action: 'New session' },
-    { id: 'focus_input', keys: ['Ctrl', 'K'], action: 'Focus input' },
-    { id: 'close', keys: ['Esc'], action: 'Close dialogs' },
-  ];
-
-  function loadShortcuts(): Shortcut[] {
-    try {
-      const stored = localStorage.getItem('koryphaios-shortcuts');
-      if (stored) return JSON.parse(stored);
-    } catch {}
-    return structuredClone(defaultShortcuts);
-  }
-
-  let shortcuts = $state<Shortcut[]>(loadShortcuts());
   let editingShortcutId = $state<string | null>(null);
   let capturedKeys = $state<string[]>([]);
 
@@ -421,10 +616,16 @@
     e.stopPropagation();
 
     const keys: string[] = [];
-    if (e.ctrlKey) keys.push('Ctrl');
+    const isMacPlatform = isMac();
+
+    // Capture primary modifier as 'Mod'
+    const modPressed = isMacPlatform ? e.metaKey : e.ctrlKey;
+    const secondaryModPressed = isMacPlatform ? e.ctrlKey : e.metaKey;
+
+    if (modPressed) keys.push('Mod');
+    if (secondaryModPressed) keys.push(isMacPlatform ? 'Ctrl' : 'Meta');
     if (e.shiftKey) keys.push('Shift');
     if (e.altKey) keys.push('Alt');
-    if (e.metaKey) keys.push('Meta');
 
     const key = e.key;
     if (!['Control', 'Shift', 'Alt', 'Meta'].includes(key)) {
@@ -436,11 +637,11 @@
 
     // If a non-modifier key was pressed, commit the binding
     if (!['Control', 'Shift', 'Alt', 'Meta'].includes(key)) {
-      const idx = shortcuts.findIndex(s => s.id === editingShortcutId);
+      const idx = shortcutStore.list.findIndex(s => s.id === editingShortcutId);
       if (idx >= 0) {
-        shortcuts[idx] = { ...shortcuts[idx], keys: capturedKeys };
-        shortcuts = [...shortcuts];
-        localStorage.setItem('koryphaios-shortcuts', JSON.stringify(shortcuts));
+        shortcutStore.list[idx] = { ...shortcutStore.list[idx], keys: capturedKeys };
+        shortcutStore.list = [...shortcutStore.list];
+        shortcutStore.save();
       }
       editingShortcutId = null;
       capturedKeys = [];
@@ -448,9 +649,14 @@
   }
 
   function resetShortcuts() {
-    shortcuts = structuredClone(defaultShortcuts);
-    localStorage.removeItem('koryphaios-shortcuts');
+    shortcutStore.reset();
     toastStore.info('Shortcuts reset to defaults');
+  }
+
+  function previewFontFamily(id: string): string {
+    if (id === 'geist') return "'Geist', 'Inter', -apple-system, sans-serif";
+    if (id === 'jetbrains') return "'JetBrains Mono', 'SF Mono', monospace";
+    return "'Inter', -apple-system, BlinkMacSystemFont, sans-serif";
   }
 </script>
 
@@ -466,7 +672,7 @@
   >
     <!-- Modal -->
     <div
-      class="relative w-[90vw] max-w-3xl max-h-[85vh] rounded-2xl shadow-2xl flex flex-col overflow-hidden"
+      class="relative w-[92vw] max-w-4xl max-h-[90vh] rounded-2xl shadow-2xl flex flex-col overflow-hidden"
       style="background: var(--color-surface-1); border: 1px solid var(--color-border);"
       onclick={(e) => e.stopPropagation()}
       onkeydown={(e) => { if (!editingShortcutId) e.stopPropagation(); }}
@@ -514,74 +720,90 @@
       </div>
 
       <!-- Content (scrollable) -->
-      <div class="flex-1 overflow-y-auto px-6 py-5">
+      <div class="flex-1 overflow-y-auto px-4 py-3">
 
   {#if activeTab === 'providers'}
-    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+    <div class="mb-3 relative">
+      <Search size={13} class="absolute left-2.5 top-1/2 -translate-y-1/2" style="color: var(--color-text-muted);" />
+      <input
+        type="text"
+        bind:value={settingsSearch}
+        placeholder="Search providers..."
+        class="w-full h-8 pl-8 pr-8 rounded-md text-xs border outline-none focus:ring-1 focus:ring-[var(--color-accent)]"
+        style="background: var(--color-surface-2); border-color: var(--color-border); color: var(--color-text-primary);"
+      />
+      {#if settingsSearch.trim().length > 0}
+        <button
+          class="absolute right-1.5 top-1/2 -translate-y-1/2 px-1.5 py-0.5 rounded text-[10px] hover:bg-[var(--color-surface-3)]"
+          style="color: var(--color-text-muted);"
+          onclick={() => settingsSearch = ''}
+        >
+          Clear
+        </button>
+      {/if}
+    </div>
+    <div class="space-y-4">
     {#each providerCategories as category}
-      {@const CategoryIcon = category.icon}
-      <div>
-        <div class="flex items-center gap-1.5 mb-2 px-1">
-          <CategoryIcon size={12} style="color: var(--color-text-muted);" />
-          <span class="text-[10px] font-medium uppercase tracking-wider" style="color: var(--color-text-muted);">
-            {category.label}
-          </span>
-        </div>
-        <div class="space-y-0.5">
-          {#each category.providers as prov}
-            {@const status = getProviderStatus(prov.key)}
-            {@const caps = getProviderCaps(prov.key)}
-            <div class="rounded-lg transition-colors {expandedProvider === prov.key ? 'bg-[var(--color-surface-3)]' : 'hover:bg-[var(--color-surface-2)]'}">
-              <button
-                onclick={() => { expandedProvider = expandedProvider === prov.key ? null : prov.key; }}
-                class="w-full flex items-center justify-between py-2 px-2.5 text-left"
-              >
-                <div class="flex items-center gap-2">
-                  <ProviderIcon provider={prov.key} size={16} />
+      {@const visibleProviders = category.providers.filter((prov) => providerMatchesSearch(prov, category.label, settingsSearch))}
+      {#if visibleProviders.length > 0}
+        <section class="rounded-lg border p-2" style="border-color: var(--color-border); background: var(--color-surface-0);">
+          <div class="mb-1 px-0.5">
+            <span class="text-[10px] font-medium uppercase tracking-wider" style="color: var(--color-text-muted);">
+              {category.label}
+            </span>
+          </div>
+          <div class="space-y-0.5">
+            {#each visibleProviders as prov}
+              {@const status = getProviderStatus(prov.key)}
+              {@const caps = getProviderCaps(prov.key)}
+              <div class="rounded-lg transition-colors {expandedProvider === prov.key ? 'bg-[var(--color-surface-3)]' : 'hover:bg-[var(--color-surface-2)]'}">
+                <button
+                  onclick={() => { expandedProvider = expandedProvider === prov.key ? null : prov.key; }}
+                  class="w-full flex items-center justify-between py-1.5 px-2 text-left"
+                >
                   <span class="text-xs font-medium" style="color: var(--color-text-primary);">{prov.label}</span>
-                </div>
-                <div class="flex items-center gap-1.5">
-                  {#if status?.authenticated}
-                    <span class="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
-                    <span class="text-[10px]" style="color: var(--color-text-muted);">{status.models.length} models</span>
-                  {:else if status?.enabled}
-                    <span class="w-1.5 h-1.5 rounded-full bg-amber-500"></span>
-                    <span class="text-[10px] text-amber-400">needs auth</span>
-                  {:else}
-                    <span class="w-1.5 h-1.5 rounded-full" style="background: var(--color-surface-4);"></span>
-                  {/if}
-                </div>
-              </button>
+                  <div class="flex items-center gap-1.5">
+                    {#if status?.authenticated}
+                      <span class="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
+                      <span class="text-[10px]" style="color: var(--color-text-muted);">{status.models.length} models</span>
+                    {:else if status?.enabled}
+                      <span class="w-1.5 h-1.5 rounded-full bg-amber-500"></span>
+                      <span class="text-[10px] text-amber-400">needs auth</span>
+                    {:else}
+                      <span class="w-1.5 h-1.5 rounded-full" style="background: var(--color-surface-4);"></span>
+                    {/if}
+                  </div>
+                </button>
 
-              {#if expandedProvider === prov.key}
-                <div class="px-2.5 pb-2.5 space-y-2">
-                  {#if status?.authenticated}
-                    <div class="flex items-center justify-between">
-                      <div class="flex items-center gap-2">
-                        <span class="text-[10px] text-emerald-400 font-medium flex items-center gap-1"><Check size={10} /> Connected</span>
-                        <button 
-                          onclick={() => { selectorTarget = status; showModelSelector = true; }}
-                          class="text-[10px] opacity-60 hover:opacity-100 underline decoration-dotted underline-offset-2"
+                {#if expandedProvider === prov.key}
+                  <div class="px-2 pb-2 space-y-1.5">
+                    {#if status?.authenticated}
+                      <div class="flex items-center justify-between">
+                        <div class="flex items-center gap-2">
+                          <span class="text-[10px] text-emerald-400 font-medium flex items-center gap-1"><Check size={10} /> Connected</span>
+                          <button 
+                            onclick={() => { selectorTarget = status; showModelSelector = true; }}
+                            class="text-[10px] opacity-60 hover:opacity-100 underline decoration-dotted underline-offset-2"
+                          >
+                            Manage Models
+                          </button>
+                        </div>
+                        <button
+                          onclick={() => disconnectProvider(prov.key)}
+                          class="text-[10px] text-red-400 hover:text-red-300 transition-colors"
                         >
-                          Manage Models
+                          Disconnect
                         </button>
                       </div>
-                      <button
-                        onclick={() => disconnectProvider(prov.key)}
-                        class="text-[10px] text-red-400 hover:text-red-300 transition-colors"
-                      >
-                        Disconnect
-                      </button>
-                    </div>
-                    <!-- Model list -->
-                    <div class="space-y-0.5 mt-1">
-                      {#each status.models as model}
-                        <div class="flex items-center justify-between px-2 py-1 rounded" style="background: var(--color-surface-2);">
-                          <span class="text-[11px]" style="color: var(--color-text-secondary);">{model}</span>
-                        </div>
-                      {/each}
-                    </div>
-                  {:else}
+                      <!-- Model list -->
+                      <div class="space-y-0.5 mt-1">
+                        {#each status.models as model}
+                          <div class="flex items-center justify-between px-2 py-1 rounded" style="background: var(--color-surface-2);">
+                            <span class="text-[11px]" style="color: var(--color-text-secondary);">{model}</span>
+                          </div>
+                        {/each}
+                      </div>
+                    {:else}
                     <!-- Auth mode selector for providers with multiple auth options -->
                       {#if caps.extraAuthModes}
                         <div class="flex gap-1 p-0.5 rounded-md mb-2" style="background: var(--color-surface-2);">
@@ -638,6 +860,17 @@
                             class="btn btn-primary w-full"
                           >
                             {saving === prov.key ? 'Verifying...' : 'Verify Gemini CLI Auth'}
+                          </button>
+                        {:else if currentMode === 'antigravity'}
+                          <div class="text-[10px] mb-1" style="color: var(--color-text-muted);">
+                            OAuth flow for Google Antigravity. Opens browser for authentication.
+                          </div>
+                          <button
+                            onclick={() => startAntigravityAuth()}
+                            disabled={saving === prov.key}
+                            class="btn btn-primary w-full"
+                          >
+                            {saving === prov.key ? 'Authenticating...' : 'Start Antigravity Auth'}
                           </button>
                         {:else}
                         <!-- Standard API key input -->
@@ -739,13 +972,14 @@
                         </button>
                       {/if}
                     {/if}
-                  {/if}
-                </div>
-              {/if}
-            </div>
-          {/each}
-        </div>
-      </div>
+                    {/if}
+                  </div>
+                {/if}
+              </div>
+            {/each}
+          </div>
+        </section>
+      {/if}
     {/each}
     </div>
 
@@ -813,10 +1047,18 @@
                        : 'border-transparent bg-[var(--color-surface-2)] hover:bg-[var(--color-surface-3)]'}"
               onclick={() => theme.setFont(font.id)}
             >
-              <span style="color: var(--color-text-primary);">{font.label}</span>
-              {#if theme.font === font.id}
-                <Check size={12} style="color: var(--color-accent);" />
-              {/if}
+              <span style="color: var(--color-text-primary); font-family: {previewFontFamily(font.id)};">{font.label}</span>
+              <div class="flex items-center gap-2">
+                <span
+                  class="text-[10px] opacity-70"
+                  style="color: var(--color-text-muted); font-family: {previewFontFamily(font.id)};"
+                >
+                  Aa
+                </span>
+                {#if theme.font === font.id}
+                  <Check size={12} style="color: var(--color-accent);" />
+                {/if}
+              </div>
             </button>
           {/each}
         </div>
@@ -828,7 +1070,7 @@
       <p class="text-[10px] mb-3" style="color: var(--color-text-muted);">
         Click a shortcut to rebind it. Press the new key combination to save.
       </p>
-      {#each shortcuts as shortcut (shortcut.id)}
+      {#each shortcutStore.list as shortcut (shortcut.id)}
         <div
           class="flex items-center justify-between py-2 px-3 rounded-lg transition-colors cursor-pointer
                  {editingShortcutId === shortcut.id ? 'ring-1 ring-[var(--color-accent)]' : 'hover:bg-[var(--color-surface-3)]'}"
@@ -843,14 +1085,14 @@
             {#if editingShortcutId === shortcut.id}
               {#if capturedKeys.length > 0}
                 {#each capturedKeys as key}
-                  <span class="kbd" style="color: var(--color-accent);">{key}</span>
+                  <span class="kbd" style="color: var(--color-accent);">{formatKey(key)}</span>
                 {/each}
               {:else}
                 <span class="text-[10px] animate-pulse" style="color: var(--color-accent);">Press keys...</span>
               {/if}
             {:else}
               {#each shortcut.keys as key}
-                <span class="kbd">{key}</span>
+                <span class="kbd">{formatKey(key)}</span>
               {/each}
             {/if}
           </div>

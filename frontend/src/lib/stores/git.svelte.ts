@@ -16,6 +16,10 @@ export interface GitState {
   loading: boolean;
   selectedFile: string | null;
   currentDiff: string | null;
+  activeDiff: { file: string; staged: boolean } | null;
+  currentFileContent: string | null;
+  ahead: number;
+  behind: number;
 }
 
 let state = $state<GitState>({
@@ -26,6 +30,10 @@ let state = $state<GitState>({
   loading: false,
   selectedFile: null,
   currentDiff: null,
+  activeDiff: null,
+  currentFileContent: null,
+  ahead: 0,
+  behind: 0,
 });
 
 async function refreshStatus() {
@@ -36,6 +44,8 @@ async function refreshStatus() {
     if (data.ok) {
       state.status = data.data.status;
       state.branch = data.data.branch;
+      state.ahead = data.data.ahead ?? 0;
+      state.behind = data.data.behind ?? 0;
       await fetchBranches();
     }
   } catch (err) {
@@ -103,15 +113,36 @@ async function merge(branch: string) {
 async function loadDiff(file: string, staged: boolean) {
   state.selectedFile = file;
   state.currentDiff = null;
+  state.currentFileContent = null;
+  
   try {
+    // Try getting diff first
     const res = await fetch(`/api/git/diff?file=${encodeURIComponent(file)}&staged=${staged}`);
     const data = await res.json();
-    if (data.ok) {
+    if (data.ok && data.data.diff) {
       state.currentDiff = data.data.diff;
+    } else {
+      // If no diff (e.g. untracked or binary), try getting content
+      const contentRes = await fetch(`/api/git/file?path=${encodeURIComponent(file)}`);
+      const contentData = await contentRes.json();
+      if (contentData.ok) {
+        state.currentFileContent = contentData.data.content;
+      }
     }
   } catch (err) {
-    console.error('Failed to load diff', err);
+    console.error('Failed to load diff/content', err);
   }
+}
+
+function openDiff(file: string, staged: boolean) {
+  state.activeDiff = { file, staged };
+  loadDiff(file, staged);
+}
+
+function closeDiff() {
+  state.activeDiff = null;
+  state.currentDiff = null;
+  state.currentFileContent = null;
 }
 
 async function stageFile(file: string) {
@@ -227,6 +258,8 @@ export const gitStore = {
   get state() { return state; },
   refreshStatus,
   loadDiff,
+  openDiff,
+  closeDiff,
   stageFile,
   unstageFile,
   discardChanges,

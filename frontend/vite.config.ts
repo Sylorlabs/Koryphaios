@@ -28,19 +28,14 @@ function loadBackendTargetFromConfig() {
 	return null;
 }
 
-const backendFromConfig = loadBackendTargetFromConfig();
-const backendPort = process.env.KORYPHAIOS_PORT ?? '3001';
-const backendHttp = process.env.KORY_BACKEND_URL ?? backendFromConfig ?? `http://127.0.0.1:${backendPort}`;
-const backendWs = backendHttp.replace(/^http/, 'ws');
-
 export default defineConfig({
 	plugins: [tailwindcss(), sveltekit()],
 	server: {
-		host: '127.0.0.1',
+		host: '0.0.0.0',
 		proxy: {
-			'/api': backendHttp,
+			'/api': 'http://127.0.0.1:3001',
 			'/ws': {
-				target: backendWs,
+				target: 'ws://127.0.0.1:3001',
 				ws: true,
 			},
 		},

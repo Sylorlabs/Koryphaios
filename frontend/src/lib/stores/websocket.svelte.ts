@@ -24,6 +24,7 @@ import type {
   Session,
 } from "@koryphaios/shared";
 import { sessionStore } from './sessions.svelte';
+import { authStore } from './auth.svelte';
 import { browser } from '$app/environment';
 
 // ─── Agent State ────────────────────────────────────────────────────────────
@@ -512,17 +513,32 @@ let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 let reconnectAttempts = 0;
 let wsCandidates: string[] = [];
 let wsCandidateIndex = 0;
+let connectionIdCounter = 0; // Unique ID for each connection attempt
 
 function buildWsCandidates(preferredUrl?: string): string[] {
   const scheme = window.location.protocol === "https:" ? "wss" : "ws";
   const currentHost = window.location.host;
   const primary = preferredUrl ?? `${scheme}://${currentHost}/ws`;
-  return [primary];
+  const token = authStore.token;
+  const tokenParam = token ? `?token=${encodeURIComponent(token)}` : '';
+  return [primary + tokenParam];
 }
 
 function connect(url?: string) {
   if (!browser) return;
-  if (wsConnection?.readyState === WebSocket.OPEN || wsConnection?.readyState === WebSocket.CONNECTING) return;
+  
+  // strict state check: if we are already connected or connecting, do nothing.
+  if (connectionStatus === "connected" || connectionStatus === "connecting") {
+    // If the socket is actually closed/closing but state says otherwise (inconsistent), force close first.
+    if (wsConnection && (wsConnection.readyState === WebSocket.CLOSING || wsConnection.readyState === WebSocket.CLOSED)) {
+      disconnect();
+    } else {
+      return;
+    }
+  }
+
+  // Generate a new ID for this attempt. Stale closures will see a mismatch.
+  const currentAttemptId = ++connectionIdCounter;
 
   // Reset candidates if a new URL is provided or list is empty
   if (url || wsCandidates.length === 0) {
@@ -544,26 +560,52 @@ function connect(url?: string) {
     const ws = new WebSocket(wsUrl);
 
     ws.onopen = () => {
+      // If this attempt is stale (e.g. user manually disconnected, or a new connect came in), abort.
+      if (currentAttemptId !== connectionIdCounter) {
+        ws.close();
+        return;
+      }
+
       connectionStatus = "connected";
       reconnectAttempts = 0;
       wsConnection = ws;
+
+      // Resubscribe to active session if one exists
+      const activeId = sessionStore.activeSessionId;
+      if (activeId) {
+        ws.send(JSON.stringify({ type: "subscribe_session", sessionId: activeId }));
+      }
     };
 
     ws.onmessage = (event) => {
+      if (currentAttemptId !== connectionIdCounter) return;
+
       try {
-        const msg = JSON.parse(event.data) as WSMessage;
+        const raw = JSON.parse(event.data);
+        if (raw.type === "ping") {
+          ws.send(JSON.stringify({ type: "pong" }));
+          return;
+        }
+
+        const msg = raw as WSMessage;
         handleMessage(msg);
       } catch { }
     };
 
-    ws.onclose = () => {
+    ws.onclose = (ev) => {
+      if (currentAttemptId !== connectionIdCounter) return;
+
       connectionStatus = "disconnected";
       wsConnection = null;
+
+      // Don't reconnect if it was a clean close (1000) or we are explicitly disconnecting? 
+      // Actually, for a resilient app, we almost always want to reconnect unless the user logged out.
+      // But if we are cycling candidates, we proceed.
 
       // Rotate through candidates if we haven't exhausted them
       if (wsCandidateIndex < wsCandidates.length - 1) {
         wsCandidateIndex++;
-        setTimeout(() => connect(), 200); // Slightly longer delay for stability
+        setTimeout(() => connect(), 200); 
       } else {
         wsCandidateIndex = 0;
         scheduleReconnect();
@@ -571,24 +613,40 @@ function connect(url?: string) {
     };
 
     ws.onerror = () => {
+      if (currentAttemptId !== connectionIdCounter) return;
       connectionStatus = "error";
+      // onclose will fire after onerror, so we handle reconnection there.
     };
   } catch {
-    connectionStatus = "error";
-    scheduleReconnect();
+    if (currentAttemptId === connectionIdCounter) {
+      connectionStatus = "error";
+      scheduleReconnect();
+    }
   }
 }
 
 function scheduleReconnect(url?: string) {
   if (reconnectTimer) clearTimeout(reconnectTimer);
-  const delay = Math.min(1000 * Math.pow(2, reconnectAttempts), 30000);
+  const delay = Math.min(1000 * Math.pow(1.5, reconnectAttempts), 10000); // Backoff: 1.5x, max 10s
   reconnectAttempts++;
   reconnectTimer = setTimeout(() => connect(url), delay);
 }
 
 function disconnect() {
+  // Bump ID to invalidate any pending connection attempts
+  connectionIdCounter++;
+  
   if (reconnectTimer) clearTimeout(reconnectTimer);
-  wsConnection?.close();
+  
+  if (wsConnection) {
+    // Remove listeners to prevent "onclose" from triggering a reconnect
+    wsConnection.onclose = null;
+    wsConnection.onerror = null;
+    wsConnection.onmessage = null;
+    wsConnection.onopen = null;
+    wsConnection.close();
+  }
+  
   wsConnection = null;
   connectionStatus = "disconnected";
 }
@@ -597,7 +655,10 @@ function sendMessage(sessionId: string, content: string, model?: string, reasoni
   addUserMessage(sessionId, content);
   fetch("/api/messages", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: {
+      "Content-Type": "application/json",
+      ...(authStore.token ? { "Authorization": `Bearer ${authStore.token}` } : {}),
+    },
     body: JSON.stringify({ sessionId, content, model, reasoningLevel }),
   }).catch(() => { });
 }
@@ -702,27 +763,51 @@ function getManagerStatus(): AgentStatus {
   return 'idle';
 }
 
-function getContextUsage(): { used: number; max: number; percent: number; isReliable: boolean; reason?: string } {
+function getContextUsage(): { 
+  used: number; 
+  max: number; 
+  percent: number; 
+  status: 'reliable' | 'estimating' | 'unknown' | 'multi_agent';
+  label: string;
+} {
   const activeSessionId = sessionStore.activeSessionId;
-  const candidates = [...agents.values()].filter((a) => a.sessionId === activeSessionId && a.hasUsageData);
+  const sessionAgents = [...agents.values()].filter((a) => a.sessionId === activeSessionId);
+  const candidates = sessionAgents.filter(a => a.hasUsageData);
 
-  // Exact session context is only reliable when we have one authoritative usage source.
   if (candidates.length === 0) {
-    return { used: 0, max: 0, percent: 0, isReliable: false, reason: "usage_unknown" };
+    return { used: 0, max: 0, percent: 0, status: 'unknown', label: 'Context usage unknown' };
   }
+
   if (candidates.length > 1) {
-    return { used: 0, max: 0, percent: 0, isReliable: false, reason: "multi_agent_usage" };
+    // For multi-agent, we show the highest usage as a conservative estimate
+    const highest = candidates.reduce((prev, curr) => (curr.tokensUsed > prev.tokensUsed) ? curr : prev);
+    const used = highest.tokensUsed;
+    const max = highest.contextMax || 128000;
+    const percent = Math.min(100, Math.round((used / max) * 100));
+    return { 
+      used, 
+      max, 
+      percent, 
+      status: 'multi_agent', 
+      label: `Estimated Usage (Max of ${candidates.length} agents)` 
+    };
   }
 
   const agent = candidates[0];
   if (!agent.contextKnown || agent.contextMax <= 0) {
-    return { used: 0, max: 0, percent: 0, isReliable: false, reason: "context_unknown" };
+    return { used: agent.tokensUsed, max: 0, percent: 0, status: 'estimating', label: 'Calculating context window...' };
   }
 
   const used = Math.max(0, agent.tokensUsed);
   const max = agent.contextMax;
   const percent = Math.min(100, Math.round((used / max) * 100));
-  return { used, max, percent, isReliable: true };
+  return { 
+    used, 
+    max, 
+    percent, 
+    status: 'reliable', 
+    label: 'Context Window' 
+  };
 }
 
 function isSessionRunning(sessionId: string): boolean {
@@ -769,13 +854,23 @@ function clearFeed() {
 }
 
 function toggleYolo() {
-  isYoloMode = !isYoloMode;
+  setYoloMode(!isYoloMode);
+}
+
+function setYoloMode(enabled: boolean) {
+  isYoloMode = enabled;
   if (wsConnection?.readyState === WebSocket.OPEN) {
     wsConnection.send(JSON.stringify({
       type: "toggle_yolo",
-      enabled: isYoloMode,
+      enabled,
       timestamp: Date.now(),
     }));
+  }
+}
+
+function subscribeToSession(sessionId: string) {
+  if (wsConnection?.readyState === WebSocket.OPEN) {
+    wsConnection.send(JSON.stringify({ type: "subscribe_session", sessionId }));
   }
 }
 
@@ -802,10 +897,12 @@ export const wsStore = {
   disconnect,
   sendMessage,
   sendUserInput,
+  subscribeToSession,
   respondToChanges,
   loadSessionMessages,
   removeEntries,
   respondToPermission,
   clearFeed,
   toggleYolo,
+  setYoloMode,
 };

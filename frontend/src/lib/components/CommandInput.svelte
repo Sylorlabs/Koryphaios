@@ -7,13 +7,22 @@
 
   interface Props {
     onSend: (message: string, model?: string, reasoningLevel?: string) => void;
+    onCommand?: (command: string) => boolean | Promise<boolean>;
     inputRef?: HTMLTextAreaElement;
   }
 
-  let { onSend, inputRef = $bindable() }: Props = $props();
+  let { onSend, onCommand, inputRef = $bindable() }: Props = $props();
   let input = $state('');
   let showModelPicker = $state(false);
   let selectedModel = $state<string>('auto');
+  let selectedCommandIndex = $state(0);
+
+  const slashCommands: Array<{ value: string; description: string }> = [
+    { value: '/help', description: 'Show available slash commands' },
+    { value: '/new', description: 'Create a new session' },
+    { value: '/compact', description: 'Compact the current session context' },
+    { value: '/yolo', description: 'Toggle YOLO mode' },
+  ];
 
   function providerLabel(provider: string): string {
     if (provider === 'openai') return 'OpenAI';
@@ -87,7 +96,45 @@
     return `(${providerLabel(parsed.provider)}) ${parsed.model}`;
   });
 
+  let slashQuery = $derived(input.trim().toLowerCase());
+  let commandSuggestions = $derived(() => {
+    if (!slashQuery.startsWith('/')) return [];
+    return slashCommands.filter((cmd) => cmd.value.startsWith(slashQuery) || cmd.value.includes(slashQuery));
+  });
+  let showCommandSuggestions = $derived(commandSuggestions().length > 0 && input.trim().startsWith('/'));
+
+  $effect(() => {
+    slashQuery;
+    selectedCommandIndex = 0;
+  });
+
   function handleKeydown(e: KeyboardEvent) {
+    if (showCommandSuggestions) {
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        selectedCommandIndex = Math.min(selectedCommandIndex + 1, commandSuggestions().length - 1);
+        return;
+      }
+      if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        selectedCommandIndex = Math.max(selectedCommandIndex - 1, 0);
+        return;
+      }
+      if (e.key === 'Tab') {
+        e.preventDefault();
+        applyCommandSuggestion(commandSuggestions()[selectedCommandIndex]);
+        return;
+      }
+      if (e.key === 'Enter' && !e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        const selected = commandSuggestions()[selectedCommandIndex];
+        if (selected && input.trim() !== selected.value) {
+          e.preventDefault();
+          applyCommandSuggestion(selected);
+          return;
+        }
+      }
+    }
+
     if (shortcutStore.matches('send', e)) {
       e.preventDefault();
       send();
@@ -97,9 +144,17 @@
     }
   }
 
-  function send() {
+  async function send() {
     const trimmed = input.trim();
     if (!trimmed) return;
+    if (trimmed.startsWith('/')) {
+      const handled = await onCommand?.(trimmed);
+      if (handled) {
+        input = '';
+        if (inputRef) inputRef.style.height = 'auto';
+        return;
+      }
+    }
     onSend(trimmed, selectedModel, reasoningLevel);
     input = '';
     if (inputRef) inputRef.style.height = 'auto';
@@ -109,6 +164,12 @@
     if (!inputRef) return;
     inputRef.style.height = 'auto';
     inputRef.style.height = Math.min(inputRef.scrollHeight, 200) + 'px';
+  }
+
+  function applyCommandSuggestion(suggestion?: { value: string }) {
+    if (!suggestion) return;
+    input = suggestion.value;
+    autoResize();
   }
 
   function selectModel(value: string) {
@@ -245,7 +306,7 @@
       bind:value={input}
       oninput={autoResize}
       onkeydown={handleKeydown}
-      placeholder="Describe what you want to build..."
+      placeholder="Describe what you want to build...  (/new, /compact, /yolo)"
       rows="1"
       class="input flex-1"
       class:yolo-active={wsStore.isYoloMode}
@@ -261,6 +322,24 @@
       Send
     </button>
   </div>
+
+  {#if showCommandSuggestions}
+    <div
+      class="mt-2 rounded-lg border overflow-hidden"
+      style="border-color: var(--color-border); background: var(--color-surface-2);"
+    >
+      {#each commandSuggestions() as suggestion, i}
+        <button
+          class="w-full text-left px-3 py-2 border-b last:border-b-0 flex items-center justify-between gap-3 hover:bg-[var(--color-surface-3)] {i === selectedCommandIndex ? 'bg-[var(--color-surface-3)]' : ''}"
+          style="border-color: var(--color-border);"
+          onclick={() => applyCommandSuggestion(suggestion)}
+        >
+          <span class="text-xs font-mono" style="color: var(--color-text-primary);">{suggestion.value}</span>
+          <span class="text-[10px] shrink-0" style="color: var(--color-text-muted);">{suggestion.description}</span>
+        </button>
+      {/each}
+    </div>
+  {/if}
 
   <div class="flex items-center justify-between mt-2">
     <span class="text-xs" style="color: var(--color-text-muted);">Enter to send · Shift+Enter for new line</span>

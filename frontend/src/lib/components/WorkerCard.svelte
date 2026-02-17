@@ -73,7 +73,7 @@
   <!-- Header -->
   <div class="flex items-center justify-between {isActive ? 'mb-1.5' : 'mb-0'}">
     <div class="flex items-center gap-1.5">
-      <AnimatedStatusIcon status={agent.status} size={isActive ? 16 : 14} {isManager} static={!isActive} />
+      <AnimatedStatusIcon status={agent.status} size={isActive ? 16 : 14} {isManager} isStatic={!isActive} />
       <span class="text-xs font-medium {isActive ? 'opacity-100' : 'opacity-70'}" style="color: var(--color-text-primary);">{agent.identity.name}</span>
     </div>
     <div class="flex items-center gap-1">

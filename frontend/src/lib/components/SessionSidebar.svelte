@@ -1,17 +1,20 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { sessionStore } from '$lib/stores/sessions.svelte';
+  import { authStore } from '$lib/stores/auth.svelte';
   import { wsStore } from '$lib/stores/websocket.svelte';
   import { toastStore } from '$lib/stores/toast.svelte';
+  import { getModKeyName } from '$lib/utils/platform';
   import { Plus, Search, Pencil, Trash2, Check, X, MessageSquare } from 'lucide-svelte';
   import AnimatedStatusIcon from './AnimatedStatusIcon.svelte';
   import ConfirmDialog from './ConfirmDialog.svelte';
 
   interface Props {
     currentSessionId?: string;
+    onNewSession?: () => void;
   }
 
-  let { currentSessionId = $bindable('') }: Props = $props();
+  let { currentSessionId = $bindable(''), onNewSession }: Props = $props();
 
   let editingId = $state<string>('');
   let editTitle = $state<string>('');
@@ -20,13 +23,16 @@
   let sessionToDeleteId = $state<string>('');
 
   onMount(() => {
-    sessionStore.fetchSessions();
   });
+
+  // Track last synced session to prevent re-loading
+  let lastSyncedSessionId = $state('');
 
   // Sync activeSessionId to local currentSessionId
   $effect(() => {
-    if (sessionStore.activeSessionId && sessionStore.activeSessionId !== currentSessionId) {
+    if (sessionStore.activeSessionId && sessionStore.activeSessionId !== currentSessionId && sessionStore.activeSessionId !== lastSyncedSessionId) {
       currentSessionId = sessionStore.activeSessionId;
+      lastSyncedSessionId = sessionStore.activeSessionId;
       // Load historical messages if we just switched to this session from outside (e.g. initial load)
       void loadHistory(sessionStore.activeSessionId);
     }
@@ -100,6 +106,11 @@
     showConfirmDialog = false;
   }
 
+  async function handleCreateSession() {
+    await sessionStore.createSession();
+    onNewSession?.();
+  }
+
   function formatTime(ts: number): string {
     const d = new Date(ts);
     const now = new Date();
@@ -117,8 +128,8 @@
     <button
       class="p-1.5 rounded-lg transition-colors hover:bg-[var(--color-surface-3)] flex items-center justify-center"
       style="color: var(--color-text-secondary);"
-      onclick={() => sessionStore.createSession()}
-      title="New session (Ctrl+N)"
+      onclick={handleCreateSession}
+      title="New session ({getModKeyName()}N)"
     >
       <Plus size={16} />
     </button>
