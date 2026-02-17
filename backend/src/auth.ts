@@ -1,7 +1,7 @@
 // Session token authentication
 // Simple JWT-like token system for session authentication
 
-import { createHmac, randomBytes } from "crypto";
+import { createHmac, randomBytes, timingSafeEqual } from "crypto";
 import { serverLog } from "./logger";
 import { ValidationError } from "./errors";
 
@@ -57,7 +57,10 @@ export function verifySessionToken(token: string): TokenPayload {
       .update(payloadBase64)
       .digest("base64url");
 
-    if (signature !== expectedSignature) {
+    if (
+      signature.length !== expectedSignature.length ||
+      !timingSafeEqual(Buffer.from(signature), Buffer.from(expectedSignature))
+    ) {
       throw new ValidationError("Invalid token signature");
     }
 

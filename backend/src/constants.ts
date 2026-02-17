@@ -204,6 +204,29 @@ export const TIMEOUT = {
 } as const;
 
 /**
+ * Antigravity (Google OAuth) configuration.
+ * Client credentials must be provided via environment variables.
+ */
+export const ANTIGRAVITY = {
+  CLIENT_ID: process.env.ANTIGRAVITY_CLIENT_ID ?? "",
+  CLIENT_SECRET: process.env.ANTIGRAVITY_CLIENT_SECRET ?? "",
+  REDIRECT_URI: process.env.ANTIGRAVITY_REDIRECT_URI ?? "http://localhost:51121/oauth-callback",
+  SCOPES: [
+    "https://www.googleapis.com/auth/cloud-platform",
+    "https://www.googleapis.com/auth/userinfo.email",
+    "https://www.googleapis.com/auth/userinfo.profile",
+    "https://www.googleapis.com/auth/cclog",
+    "https://www.googleapis.com/auth/experimentsandconfigs",
+  ],
+  ENDPOINTS: {
+    DAILY: "https://daily-cloudcode-pa.sandbox.googleapis.com",
+    PROD: "https://cloudcode-pa.googleapis.com",
+    AUTH: "https://accounts.google.com/o/oauth2/v2/auth",
+    TOKEN: "https://oauth2.googleapis.com/token",
+  },
+} as const;
+
+/**
  * Worker Domain Configuration
  */
 export const DOMAIN = {

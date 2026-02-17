@@ -7,6 +7,7 @@ import type { ProviderAuthMode, ProviderConfig, ProviderName, KoryphaiosConfig }
 import type { Provider } from "./types";
 import { AnthropicProvider, detectClaudeCodeToken } from "./anthropic";
 import { OpenAIProvider, GroqProvider, OpenRouterProvider, XAIProvider, AzureProvider } from "./openai";
+import { ClineProvider, normalizeClineAuthToken } from "./cline";
 import { GeminiProvider, GeminiCLIProvider } from "./gemini";
 import { CopilotProvider, detectCopilotToken, resolveCopilotBearerToken } from "./copilot";
 import { CodexProvider } from "./codex";
@@ -33,6 +34,7 @@ const ENV_URL_MAP: Partial<Record<ProviderName, string>> = {
 const ENV_AUTH_TOKEN_MAP: Partial<Record<ProviderName, string[]>> = {
   anthropic: ["ANTHROPIC_AUTH_TOKEN", "CLAUDE_CODE_OAUTH_TOKEN"],
   copilot: ["GITHUB_COPILOT_TOKEN", "GITHUB_TOKEN"],
+  cline: ["CLINE_AUTH_TOKEN"],
   azure: ["AZURE_OPENAI_AUTH_TOKEN"],
 };
 
@@ -41,6 +43,7 @@ const PROVIDER_AUTH_MODE: Record<ProviderName, ProviderAuthMode> = {
   openai: "api_key",
   google: "api_key_or_auth",
   copilot: "auth_only",
+  cline: "auth_only",
   codex: "auth_only",
   openrouter: "api_key",
   groq: "api_key",
@@ -253,6 +256,17 @@ export class ProviderRegistry {
               "Editor-Plugin-Version": "copilot-chat/0.27.0",
               "Copilot-Integration-Id": "vscode-chat",
               "User-Agent": "Koryphaios/1.0",
+            },
+          });
+        }
+        case "cline": {
+          if (!authToken) return { success: false, error: "Missing authToken" };
+          const normalizedToken = normalizeClineAuthToken(authToken);
+          return this.verifyHttp("https://api.cline.bot/api/v1/users/me", {
+            headers: {
+              Authorization: `Bearer ${normalizedToken}`,
+              "HTTP-Referer": "https://cline.bot",
+              "X-Title": "Koryphaios",
             },
           });
         }
@@ -483,6 +497,8 @@ export class ProviderRegistry {
 
       case "copilot":
         return new CopilotProvider(config);
+      case "cline":
+        return new ClineProvider(config);
       case "codex":
         return new CodexProvider(config);
       case "openrouter":

@@ -26,6 +26,14 @@ const BLOCKED_PATTERNS = [
   /\breboot\b/,
   /\binit\s+[0-6]\b/,
   /\bsystemctl\s+(stop|disable|mask)\b/,
+  /\bgcloud\s+auth\b/,                             // Block gcloud auth (spawns browser)
+  /\bclaude\s+login\b/,                            // Block claude login (spawns browser)
+  /\bclaude\s+auth\b/,                             // Block claude auth
+  /\bcodex\s+auth\b/,                              // Block codex auth
+  /\bcodex\s+login\b/,                             // Block codex login
+  /\bopenai\s+login\b/,                            // Block openai login
+  /\bxdg-open\b/,                                  // Block xdg-open (opens browser/apps)
+  /\bopen\b\s+https?:\/\//,                        // Block 'open http...'
 ];
 
 const BLOCKED_EXACT = new Set([
@@ -75,16 +83,17 @@ export function validateSessionId(id: unknown): string | null {
   return id;
 }
 
-export function validateProviderName(name: unknown): string | null {
+import type { ProviderName } from "@koryphaios/shared";
+
+export function validateProviderName(name: unknown): ProviderName | null {
   const VALID_PROVIDERS = new Set([
     "anthropic", "openai", "google", "gemini", "copilot", "codex", "openrouter",
-    "groq", "xai", "azure", "bedrock", "vertexai", "local",
+    "groq", "xai", "azure", "bedrock", "vertexai", "local", "cline",
   ]);
   if (typeof name !== "string") return null;
   if (!VALID_PROVIDERS.has(name)) return null;
-  // Normalize aliases to canonical registry names
-  if (name === "gemini") return "google";
-  return name;
+  if (name === "gemini") return "google" as ProviderName;
+  return name as ProviderName;
 }
 
 // ─── API Key Encryption at Rest ─────────────────────────────────────────────
@@ -140,11 +149,20 @@ export function getCorsHeaders(origin?: string | null): Record<string, string> {
 
 export class RateLimiter {
   private hits = new Map<string, { count: number; resetAt: number }>();
+  private pruneTimer: ReturnType<typeof setInterval>;
 
   constructor(
     private maxRequests: number = 60,
     private windowMs: number = 60_000,
-  ) {}
+  ) {
+    // Auto-prune stale entries every 5 minutes
+    this.pruneTimer = setInterval(() => {
+      const now = Date.now();
+      for (const [key, entry] of this.hits) {
+        if (now >= entry.resetAt) this.hits.delete(key);
+      }
+    }, 5 * 60_000);
+  }
 
   check(key: string): { allowed: boolean; remaining: number; resetIn: number } {
     const now = Date.now();
@@ -163,4 +181,40 @@ export class RateLimiter {
       resetIn: entry.resetAt - now,
     };
   }
+
+  destroy() {
+    clearInterval(this.pruneTimer);
+    this.hits.clear();
+  }
+}
+
+// ─── Token Generation (Secure) ───────────────────────────────────────────────
+
+/**
+ * Generate a secure random token
+ */
+export function generateSecureToken(bytes: number = 32): string {
+  return randomBytes(bytes).toString("hex");
+}
+
+/**
+ * Write token to a secure file instead of console
+ */
+export function writeTokenToFile(token: string, sessionId: string): string {
+  const { join } = require("path");
+  const { mkdirSync, writeFileSync, existsSync } = require("fs");
+
+  const tokenDir = join(process.cwd(), ".koryphaios");
+  mkdirSync(tokenDir, { recursive: true });
+
+  const tokenFile = join(tokenDir, ".root-token");
+
+  writeFileSync(tokenFile, JSON.stringify({
+    token,
+    sessionId,
+    createdAt: new Date().toISOString(),
+    expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(), // 24h
+  }, null, 2), { mode: 0o600 });
+
+  return tokenFile;
 }
