@@ -405,6 +405,7 @@ export interface KoryTaskBreakdownPayload {
 }
 
 export interface KoryAskUserPayload {
+  requestId?: string;
   question: string;
   options: string[];
   allowOther: boolean;
