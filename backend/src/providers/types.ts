@@ -43,7 +43,7 @@ export interface ProviderToolDef {
 // ─── Message format for provider calls ──────────────────────────────────────
 
 export interface ProviderMessage {
-  role: "user" | "assistant" | "system";
+  role: "user" | "assistant" | "system" | "tool";
   content: string | ProviderContentBlock[];
 }
 

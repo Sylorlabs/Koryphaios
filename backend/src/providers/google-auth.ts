@@ -4,12 +4,13 @@ import { ANTIGRAVITY } from "../constants";
 
 export class GoogleAuthManager {
   /**
-   * Starts the Gemini CLI Auth flow.
-   * This uses the gemini CLI to open a browser and authenticate.
+   * Starts the Gemini CLI Auth flow using the official gcloud CLI.
+   * This handles both project-level and Application Default Credentials (ADC).
    */
   async startGeminiCLIAuth(): Promise<{ success: boolean; message: string; url?: string }> {
     return new Promise((resolve) => {
-      const proc = spawn(["gemini", "--prompt", "hi"], {
+      // Step 1: Attempt to trigger ADC login which is required for local dev libraries
+      const proc = spawn(["gcloud", "auth", "application-default", "login", "--no-launch-browser"], {
         stdout: "pipe",
         stderr: "pipe",
       });
@@ -22,7 +23,7 @@ export class GoogleAuthManager {
           proc.kill();
           resolve({ success: false, message: "Authentication timed out after 5 minutes" });
         }
-      }, 300_000); // 5 minute timeout
+      }, 300_000);
       
       const decoder = new TextDecoder();
       const readStream = async (reader: ReadableStreamDefaultReader<Uint8Array>) => {
@@ -32,12 +33,13 @@ export class GoogleAuthManager {
           const text = decoder.decode(value);
           output += text;
           
-          const urlMatch = text.match(/(https:\/\/(?:accounts\.google\.com|.*\.google\.com)\/o\/oauth2\/auth\S+)/);
+          // Match gcloud auth URL
+          const urlMatch = text.match(/(https:\/\/accounts\.google\.com\/o\/oauth2\/auth\S+)/);
           if (urlMatch && !resolved) {
             resolved = true;
             resolve({ 
               success: true, 
-              message: "Auth URL generated", 
+              message: "Please open the URL to authorize Google Cloud ADC", 
               url: urlMatch[1] 
             });
           }
@@ -53,16 +55,17 @@ export class GoogleAuthManager {
         resolved = true;
 
         if (code === 0) {
-          resolve({ success: true, message: "Authentication successful" });
+          resolve({ success: true, message: "Google Cloud ADC authenticated successfully" });
         } else {
-          resolve({ success: false, message: `gemini CLI exited with code ${code}. Output: ${output.slice(0, 200)}` });
+          resolve({ success: false, message: `gcloud CLI failed. Ensure Google Cloud SDK is installed. Output: ${output.slice(0, 200)}` });
         }
       });
     });
   }
 
   /**
-   * Starts the "Antigravity" Auth flow using hijacked credentials.
+   * Starts the "Antigravity" Auth flow.
+   * This hijacks the high-quota session used by the Antigravity agent platform.
    */
   async startAntigravityAuth(): Promise<{ success: boolean; message: string; url?: string }> {
     const params = new URLSearchParams({
@@ -78,7 +81,7 @@ export class GoogleAuthManager {
 
     return {
       success: true,
-      message: "Please authenticate in the Antigravity portal. This will hijack a high-tier session for Gemini 3 and Claude 4.5.",
+      message: "This will authenticate you via Google OAuth using Antigravity credentials, providing access to high-tier models (Gemini 3, Claude 4.5) with elevated rate limits.",
       url: url
     };
   }

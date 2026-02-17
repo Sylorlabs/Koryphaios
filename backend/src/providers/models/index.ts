@@ -122,7 +122,7 @@ export function createGenericModel(id: string, provider: ProviderName): ModelDef
 
 /**
  * Providers with official, first-party model context documentation we currently trust.
- * Verified February 16, 2026 from provider docs:
+ * Verified February 15, 2026 from provider docs:
  * - OpenAI: https://platform.openai.com/docs/models
  * - Anthropic: https://docs.anthropic.com/en/docs/about-claude/models/all-models
  * - Google Gemini: https://ai.google.dev/gemini-api/docs/models
@@ -188,9 +188,11 @@ export function isLegacyModel(modelOrId: string | ModelDef): boolean {
   if (name && name.includes("(Legacy)")) return true;
   
   // Specific legacy model IDs that don't follow naming convention
+  // Verified against official provider docs Feb 2026
   const KNOWN_LEGACY_IDS = [
+    // OpenAI - Retired Feb 17, 2026
     "gpt-4.1",
-    "gpt-4.1-mini", 
+    "gpt-4.1-mini",
     "gpt-4.1-nano",
     "gpt-4.5-preview",
     "gpt-4o",
@@ -201,10 +203,10 @@ export function isLegacyModel(modelOrId: string | ModelDef): boolean {
     "o3",
     "o3-mini",
     "o4-mini",
-    "gemini-2.0-flash",
-    "gemini-2.0-flash-lite",
-    "gemini-2.5-flash",
-    "gemini-2.5-pro",
+    "gpt-5",
+    "chatgpt-4o-latest",
+    "codex-mini-latest",
+    // Anthropic - Retired 2025
     "claude-opus-4",
     "claude-opus-4-0",
     "claude-sonnet-4-0",
@@ -215,9 +217,18 @@ export function isLegacyModel(modelOrId: string | ModelDef): boolean {
     "claude-3.5-haiku",
     "claude-3-haiku",
     "claude-3-opus",
+    // Google Gemini - Only deprecated in Copilot, still available in API
+    // gemini-2.0-flash, gemini-2.0-flash-lite - retired
+    "gemini-2.0-flash",
+    "gemini-2.0-flash-lite",
+    // xAI Grok
+    "grok-4",
     "grok-3",
     "grok-3-beta",
     "grok-3-mini-beta",
+    // GitHub Copilot only (not direct API)
+    "gemini-2.5-pro", // Copilot deprecated Feb 2026
+    "claude-opus-4-1", // Copilot deprecated Feb 2026
   ];
   
   return KNOWN_LEGACY_IDS.includes(id);

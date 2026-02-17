@@ -112,38 +112,29 @@ export function detectCodexToken(): string | null {
   return process.env.CODEX_AUTH_TOKEN || null;
 }
 
-/**
- * Detects Google Cloud / Gemini CLI auth state.
- */
 export function detectGeminiCLIToken(): string | null {
-  // 1. Try 'gcloud' (Semantic Auth)
+  if (process.env.GOOGLE_CLI_TOKEN) return process.env.GOOGLE_CLI_TOKEN;
+
   const gcloud = spawnSync(["gcloud", "auth", "print-access-token"], { stdout: "pipe", stderr: "pipe" });
   if (gcloud.exitCode === 0) {
     const token = gcloud.stdout.toString().trim();
-    if (token) return token;
+    if (token && token.length > 10) return token;
   }
 
-  // 2. Fallback to file-based (detecting existence of creds)
   const paths = [
-    join(homedir(), ".gemini", "oauth_creds.json"),
-    join(getConfigDir(), "gcloud", "credentials.db"),
-    join(getConfigDir(), "gcloud", "access_tokens.db"),
     join(getConfigDir(), "gcloud", "application_default_credentials.json"),
   ];
 
   for (const p of paths) {
     if (!existsSync(p)) continue;
     try {
-      if (p.endsWith(".json")) {
-        const data = JSON.parse(readFileSync(p, "utf-8"));
-        if (data?.access_token) return data.access_token;
-      }
-      return "cli:detected";
+      const data = JSON.parse(readFileSync(p, "utf-8"));
+      if (data?.access_token) return data.access_token;
     } catch {
       continue;
     }
   }
-  return process.env.GOOGLE_CLI_TOKEN || null;
+  return null;
 }
 
 /**

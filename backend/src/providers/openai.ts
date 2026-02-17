@@ -17,7 +17,7 @@ import {
 import { withRetry } from "./utils";
 
 export class OpenAIProvider implements Provider {
-  private _client: OpenAI | null = null;
+  protected _client: OpenAI | null = null;
 
   constructor(
     readonly config: ProviderConfig,
@@ -64,9 +64,14 @@ export class OpenAIProvider implements Provider {
         const existing = localModels.find(m => m.apiModelId === id || m.id === id);
         if (existing) continue;
         
-        // Filter for chat models
+        // OpenAI proper has many non-chat IDs; Cline/OpenAI-compatible endpoints should expose full model lists.
         const lowerId = id.toLowerCase();
-        if (lowerId.includes("gpt") || lowerId.includes("o1") || lowerId.includes("o3") || lowerId.includes("o4")) {
+        const includeModel = this.name !== "openai"
+          || lowerId.includes("gpt")
+          || lowerId.includes("o1")
+          || lowerId.includes("o3")
+          || lowerId.includes("o4");
+        if (includeModel) {
           remoteModels.push(createGenericModel(id, this.name));
         }
       }
