@@ -14,7 +14,7 @@ Koryphaios is a full-stack application that orchestrates AI agents across multip
 
 ### Key Features
 
-- **Multi-Provider Support** — Seamlessly integrate with 11+ AI providers including Anthropic, OpenAI, Gemini, Groq, xAI, and more
+- **Multi-Provider Support** — 6 native provider integrations (Anthropic, OpenAI, Gemini, Copilot, Codex, GeminiCLI) plus 80+ models via OpenAI-compatible adapters (Groq, xAI, Ollama, and more)
 - **Intelligent Agent Routing** — Automatic model selection based on task domain and provider availability
 - **Real-Time Communication** — WebSocket-based streaming with SSE fallback for live updates
 - **MCP Integration** — Model Context Protocol support for extensible tool systems
@@ -65,7 +65,7 @@ Koryphaios is a full-stack application that orchestrates AI agents across multip
 2. **Backend** (`/backend`)
    - Bun HTTP/WebSocket server
    - Kory orchestration engine
-   - Provider abstraction layer (11+ providers)
+   - Provider abstraction layer (6 native + 80+ via OpenAI-compatible adapters)
    - Tool execution system
    - File-based session persistence
 

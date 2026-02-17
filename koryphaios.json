@@ -1,5 +1,4 @@
 {
-  "$schema": "./koryphaios-schema.json",
   "providers": {
     "anthropic": {
       "name": "anthropic",
@@ -11,6 +10,10 @@
     },
     "google": {
       "name": "google",
+      "disabled": true
+    },
+    "copilot": {
+      "name": "copilot",
       "disabled": true
     }
   },
@@ -28,9 +31,14 @@
       "maxTokens": 8192
     }
   },
+  "safety": {
+    "maxTokensPerTurn": 4096,
+    "maxFileSizeBytes": 10000000,
+    "toolExecutionTimeoutMs": 60000
+  },
   "server": {
     "port": 3001,
-    "host": "127.0.0.1"
+    "host": "0.0.0.0"
   },
   "dataDirectory": ".koryphaios",
   "contextPaths": [

@@ -14,110 +14,44 @@ Contact the maintainers directly at: [security contact - TBD]
 
 ---
 
-## Current Security Measures
+## Implemented Security Measures
 
-### API Key Management
+### 1. Authentication & Authorization
+- **Session Tokens (JWT):** All API endpoints (except health checks) require a valid session token signed with `HS256`.
+- **Root Access Control:** The server generates a unique "Root Token" on startup, printed only to the server console. This token is required to initialize client sessions.
+- **WebSocket Auth:** WebSocket upgrades are protected by token validation (`?token=...`).
 
-1. **Encryption at Rest**
-   - API keys are encrypted before storage in `.env`
-   - Uses symmetric encryption with derived key
-   - Keys are decrypted only in memory at runtime
+### 2. Encryption at Rest (AES-256-GCM)
+- **Strong Key Derivation:** API keys stored in `.env` are encrypted using `AES-256-GCM`.
+- **PBKDF2 Hashing:** The encryption key is derived from a user-provided `KORY_APP_SECRET` using PBKDF2 (100,000 iterations), ensuring resistance against brute-force attacks.
+- **Fail-Secure:** If `KORY_APP_SECRET` is missing, the server will refuse to start in production mode (or warn loudly in dev).
 
-2. **Environment Isolation**
-   - Keys stored in `.env` (gitignored)
-   - Never logged or exposed in error messages
-   - Separate keys per environment (dev/staging/prod)
+### 3. Filesystem Scope Enforcement
+- **Fail-Close Default:** All file operations (read, write, delete, list) are denied by default.
+- **Strict Allow-List:** The agent is restricted to operating *only* within the project root directory (or configured workspace).
+- **Path Traversal Prevention:** All paths are normalized and resolved. Attempts to access `../` or absolute system paths (e.g., `/etc/passwd`) are blocked at the application level.
 
-3. **In-Transit Protection**
-   - HTTPS required for production deployments
-   - WebSocket connections use WSS in production
-   - No keys transmitted to frontend
-
-### Access Control
-
-1. **CORS Policy**
-   - Origin allowlist (not wildcard `*`)
-   - Configured in `security.ts`
-   - Rejects unauthorized origins
-
-2. **Rate Limiting**
-   - **Current:** 120 requests/minute per IP
-   - Applied to all API endpoints
-   - Returns 429 Too Many Requests when exceeded
-
-3. **Input Validation**
-   - Session IDs: alphanumeric, length-limited
-   - Provider names: enum validation
-   - Content: sanitized, max 100KB per message
-   - Paths: normalized to prevent traversal
-
-### Data Protection
-
-1. **Session Isolation**
-   - Each session has unique ID
-   - Messages scoped to session
-   - No cross-session data leakage
-
-2. **File System Access**
-   - Tools restricted to current working directory
-   - Path normalization prevents `../` attacks
-   - Read-only mode available (future)
-
-3. **Logging**
-   - Structured logging with Pino
-   - API keys redacted from logs
-   - Sensitive data filtered
+### 4. Network Security
+- **CORS Allowlist:** Strict origin checking prevents unauthorized browser requests.
+- **Rate Limiting:** IP-based rate limiting with a "penalty box" mechanism for abusive clients.
 
 ---
 
-## Security Best Practices
+## Getting Started Securely
 
-### For Deployment
-
-1. **Environment Variables**
+1. **Generate Secrets:**
+   Run the helper script to generate a strong application secret. This is required for secure encryption.
    ```bash
-   # Never commit .env to version control
-   echo ".env" >> .gitignore
-   
-   # Use strong, unique keys per environment
-   # Rotate keys quarterly
+   bun run scripts/generate-secret.ts
    ```
 
-2. **Network Configuration**
+2. **Start the Server:**
    ```bash
-   # Production should use reverse proxy (nginx/Caddy)
-   # Enable HTTPS/TLS
-   # Use firewall to restrict access
+   bun run start
    ```
 
-3. **Monitoring**
-   ```bash
-   # Monitor for unusual patterns:
-   # - High rate limit triggers
-   # - Failed authentication attempts
-   # - Large file operations
-   ```
-
-### For Development
-
-1. **Local Development**
-   - Use separate API keys for dev (lower rate limits)
-   - Never share `.env` files
-   - Review `.gitignore` before committing
-
-2. **Code Review**
-   - Check for hardcoded secrets
-   - Validate input sanitization
-   - Review permission checks
-
-3. **Dependencies**
-   ```bash
-   # Regularly audit dependencies
-   bun audit
-   
-   # Keep runtime updated
-   bun upgrade
-   ```
+3. **Authenticate:**
+   Copy the **Root Token** displayed in the console output. You will need this to connect your frontend or CLI client.
 
 ---
 
@@ -125,101 +59,28 @@ Contact the maintainers directly at: [security contact - TBD]
 
 ### Current Implementation
 
-1. **Encryption Key Derivation**
-   - ⚠️ Uses basic symmetric encryption
-   - ⚠️ Key derived from static seed
-   - **TODO:** Migrate to proper KMS or vault
+1. **Bash Execution**
+   - ⚠️ While file operations are sandboxed, `bash` command execution runs as the user.
+   - **Mitigation:** Destructive commands (`rm -rf /`, `mkfs`) are blocked, but this is a heuristic.
+   - **Recommendation:** Run the server inside a container (Docker/Podman) for true isolation if you intend to execute untrusted code.
 
-2. **Session Authentication**
-   - ⚠️ No user authentication system
-   - ⚠️ Sessions accessible to anyone with ID
-   - **TODO:** Add session tokens/JWT
-
-3. **Rate Limiting**
-   - ⚠️ IP-based only (can be spoofed with proxies)
-   - ⚠️ No per-user or per-session limits
-   - **TODO:** Multi-factor rate limiting
-
-4. **File System Access**
-   - ⚠️ Tools have full read/write to CWD
-   - ⚠️ No granular permission system
-   - **TODO:** Sandbox file operations
+2. **GDPR/CCPA**
+   - ⚠️ Not currently compliant (single-user system).
+   - Data is stored locally in `.koryphaios/` and sent to AI providers per their terms.
 
 ---
 
-## Threat Model
+## Best Practices for Deployment
 
-### In Scope
+1. **Environment Variables**
+   - Never commit `.env` to version control.
+   - Use `KORY_APP_SECRET` with high entropy (use the generator script).
 
-- API key theft/exposure
-- Unauthorized API access
-- Session hijacking
-- Path traversal attacks
-- Denial of service (rate limit bypass)
-- XSS/injection via user input
-
-### Out of Scope
-
-- Physical access to server
-- Social engineering
-- Provider-side vulnerabilities
-- Client-side malware
+2. **Network Configuration**
+   - Always run behind a reverse proxy (Nginx/Caddy) with HTTPS enabled in production.
+   - Do not expose the port (default 3000) directly to the public internet.
 
 ---
 
-## Compliance
-
-### Data Handling
-
-- **Conversation History:** Stored locally in `.koryphaios/`
-- **Retention:** No automatic cleanup (manual deletion required)
-- **Third Parties:** Data sent to configured AI providers per their terms
-- **GDPR/CCPA:** Not currently compliant (single-user system)
-
-### Audit Trail
-
-- All API requests logged with timestamps
-- Tool executions recorded per session
-- Provider authentications logged
-- No PII collected by default
-
----
-
-## Roadmap
-
-### Near Term (v0.2)
-
-- [ ] Migrate to proper key derivation (PBKDF2/Argon2)
-- [ ] Add environment variable validation on startup
-- [ ] Implement session token authentication
-- [ ] Add per-session rate limiting
-- [ ] Security headers middleware
-
-### Medium Term (v0.3)
-
-- [ ] File system sandboxing
-- [ ] User authentication system
-- [ ] API key rotation mechanism
-- [ ] Audit log export
-- [ ] Permission system for tool execution
-
-### Long Term (v1.0)
-
-- [ ] Integration with secrets managers (Vault, AWS Secrets)
-- [ ] Multi-tenancy support
-- [ ] End-to-end encryption for sessions
-- [ ] Compliance certifications (SOC2, etc.)
-
----
-
-## References
-
-- [OWASP Top 10](https://owasp.org/www-project-top-ten/)
-- [Bun Security Best Practices](https://bun.sh/docs/runtime/security)
-- [Anthropic API Security](https://docs.anthropic.com/claude/docs/security)
-- [OpenAI API Security](https://platform.openai.com/docs/guides/safety-best-practices)
-
----
-
-**Last Updated:** 2026-02-15  
+**Last Updated:** 2026-02-16
 **Version:** 0.1.0
