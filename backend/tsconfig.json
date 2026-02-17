@@ -1,0 +1,16 @@
+{
+  "extends": "../tsconfig.json",
+  "compilerOptions": {
+    "rootDir": "..",
+    "outDir": "build",
+    "types": ["bun"],
+    "noEmit": true,
+    "paths": {
+      "@koryphaios/shared/*": ["../shared/src/*"],
+      "@koryphaios/shared": ["../shared/src/index.ts"],
+      "@/*": ["./src/*"]
+    }
+  },
+  "include": ["src/**/*.ts", "../shared/src/**/*.ts"],
+  "exclude": ["node_modules", "build"]
+}

@@ -1,0 +1,30 @@
+# Dependencies
+node_modules/
+.bun/
+
+# Build output
+build/
+.svelte-kit/
+
+# Data
+.koryphaios/
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Reference (keep for now, remove later)
+# opencode-reference/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+opencode-reference/
+opencode-reference/
