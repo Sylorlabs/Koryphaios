@@ -1,0 +1,311 @@
+bun test v1.2.14 (6a363a38)
+
+backend/test/providers-registry.test.ts:
+
+# Unhandled error between tests
+-------------------------------
+1 | (function (entry, fetcher)
+              ^
+SyntaxError: Export named 'detectClaudeCodeToken' not found in module '/app/backend/src/providers/anthropic.ts'.
+      at loadAndEvaluateModule (1:11)
+-------------------------------
+
+
+backend/test/auth.test.ts:
+(pass) Session Token Authentication > generateSessionToken > generates a valid token [1.38ms]
+(pass) Session Token Authentication > generateSessionToken > generates different tokens for different sessions [0.15ms]
+(pass) Session Token Authentication > verifySessionToken > verifies valid token [0.25ms]
+(pass) Session Token Authentication > verifySessionToken > rejects tampered token [0.27ms]
+(pass) Session Token Authentication > verifySessionToken > rejects expired token [0.12ms]
+(pass) Session Token Authentication > verifySessionToken > rejects invalid format [0.13ms]
+(pass) Session Token Authentication > extractTokenFromRequest > extracts from Authorization header [0.21ms]
+(pass) Session Token Authentication > extractTokenFromRequest > extracts from X-Session-Token header [0.05ms]
+(pass) Session Token Authentication > extractTokenFromRequest > extracts from query parameter [0.05ms]
+(pass) Session Token Authentication > extractTokenFromRequest > returns null when no token present [0.04ms]
+(pass) Session Token Authentication > extractTokenFromRequest > prioritizes Authorization header [0.04ms]
+(pass) Session Token Authentication > Token roundtrip > generate -> verify -> extract works end-to-end [0.13ms]
+
+backend/test/orchestration.test.ts:
+
+# Unhandled error between tests
+-------------------------------
+1 | (function (entry, fetcher)
+              ^
+SyntaxError: Export named 'detectClaudeCodeToken' not found in module '/app/backend/src/providers/anthropic.ts'.
+      at loadAndEvaluateModule (1:11)
+-------------------------------
+
+
+backend/test/api.test.ts:
+[21:29:48] [33mWARN[39m: [36mSESSION_TOKEN_SECRET not set, using random key (tokens won't persist across restarts)[39m
+    [35mservice[39m: "koryphaios"
+    [35mmodule[39m: "server"
+
+# Unhandled error between tests
+-------------------------------
+52 |     } catch {
+53 |       // Retry until timeout
+54 |     }
+55 |     await new Promise((r) => setTimeout(r, 250));
+56 |   }
+57 |   throw new Error(`Backend did not become ready on ${BASE_URL} within ${timeoutMs}ms`);
+             ^
+error: Backend did not become ready on http://127.0.0.1:3301 within 20000ms
+      at waitForServerReady (/app/backend/test/api.test.ts:57:9)
+      at <anonymous> (/app/backend/test/api.test.ts:80:3)
+      at /app/backend/test/api.test.ts:79:1
+      at loadAndEvaluateModule (2:1)
+-------------------------------
+
+(fail) API Integration Tests > GET /api/health > returns health status
+24 |   }
+25 |
+26 |   const proc = Bun.spawnSync(["curl", ...args], { stdout: "pipe", stderr: "pipe" });
+27 |   if (proc.exitCode !== 0) {
+28 |     const stderr = proc.stderr ? new TextDecoder().decode(proc.stderr) : "";
+29 |     throw new Error(stderr || `curl exited ${proc.exitCode}`);
+               ^
+error: curl: (7) Failed to connect to 127.0.0.1 port 3301 after 0 ms: Couldn't connect to server
+
+      at request (/app/backend/test/api.test.ts:29:11)
+      at <anonymous> (/app/backend/test/api.test.ts:95:19)
+      at <anonymous> (/app/backend/test/api.test.ts:94:54)
+(fail) API Integration Tests > Sessions API > POST /api/sessions creates a new session [10.92ms]
+24 |   }
+25 |
+26 |   const proc = Bun.spawnSync(["curl", ...args], { stdout: "pipe", stderr: "pipe" });
+27 |   if (proc.exitCode !== 0) {
+28 |     const stderr = proc.stderr ? new TextDecoder().decode(proc.stderr) : "";
+29 |     throw new Error(stderr || `curl exited ${proc.exitCode}`);
+               ^
+error: curl: (7) Failed to connect to 127.0.0.1 port 3301 after 0 ms: Couldn't connect to server
+
+      at request (/app/backend/test/api.test.ts:29:11)
+      at <anonymous> (/app/backend/test/api.test.ts:110:19)
+      at <anonymous> (/app/backend/test/api.test.ts:109:50)
+(fail) API Integration Tests > Sessions API > GET /api/sessions lists all sessions [31.01ms]
+24 |   }
+25 |
+26 |   const proc = Bun.spawnSync(["curl", ...args], { stdout: "pipe", stderr: "pipe" });
+27 |   if (proc.exitCode !== 0) {
+28 |     const stderr = proc.stderr ? new TextDecoder().decode(proc.stderr) : "";
+29 |     throw new Error(stderr || `curl exited ${proc.exitCode}`);
+               ^
+error: curl: (7) Failed to connect to 127.0.0.1 port 3301 after 0 ms: Couldn't connect to server
+
+      at request (/app/backend/test/api.test.ts:29:11)
+      at <anonymous> (/app/backend/test/api.test.ts:119:19)
+      at <anonymous> (/app/backend/test/api.test.ts:118:59)
+(fail) API Integration Tests > Sessions API > GET /api/sessions/:id returns session details [10.97ms]
+24 |   }
+25 |
+26 |   const proc = Bun.spawnSync(["curl", ...args], { stdout: "pipe", stderr: "pipe" });
+27 |   if (proc.exitCode !== 0) {
+28 |     const stderr = proc.stderr ? new TextDecoder().decode(proc.stderr) : "";
+29 |     throw new Error(stderr || `curl exited ${proc.exitCode}`);
+               ^
+error: curl: (7) Failed to connect to 127.0.0.1 port 3301 after 0 ms: Couldn't connect to server
+
+      at request (/app/backend/test/api.test.ts:29:11)
+      at <anonymous> (/app/backend/test/api.test.ts:128:19)
+      at <anonymous> (/app/backend/test/api.test.ts:126:59)
+(fail) API Integration Tests > Sessions API > PATCH /api/sessions/:id updates session title [11.08ms]
+24 |   }
+25 |
+26 |   const proc = Bun.spawnSync(["curl", ...args], { stdout: "pipe", stderr: "pipe" });
+27 |   if (proc.exitCode !== 0) {
+28 |     const stderr = proc.stderr ? new TextDecoder().decode(proc.stderr) : "";
+29 |     throw new Error(stderr || `curl exited ${proc.exitCode}`);
+               ^
+error: curl: (7) Failed to connect to 127.0.0.1 port 3301 after 0 ms: Couldn't connect to server
+
+      at request (/app/backend/test/api.test.ts:29:11)
+      at <anonymous> (/app/backend/test/api.test.ts:140:19)
+      at <anonymous> (/app/backend/test/api.test.ts:139:58)
+(fail) API Integration Tests > Sessions API > GET /api/sessions/:id/messages returns array [10.41ms]
+24 |   }
+25 |
+26 |   const proc = Bun.spawnSync(["curl", ...args], { stdout: "pipe", stderr: "pipe" });
+27 |   if (proc.exitCode !== 0) {
+28 |     const stderr = proc.stderr ? new TextDecoder().decode(proc.stderr) : "";
+29 |     throw new Error(stderr || `curl exited ${proc.exitCode}`);
+               ^
+error: curl: (7) Failed to connect to 127.0.0.1 port 3301 after 6 ms: Couldn't connect to server
+
+      at request (/app/backend/test/api.test.ts:29:11)
+      at <anonymous> (/app/backend/test/api.test.ts:148:19)
+      at <anonymous> (/app/backend/test/api.test.ts:147:54)
+(fail) API Integration Tests > Sessions API > DELETE /api/sessions/:id deletes session [16.47ms]
+24 |   }
+25 |
+26 |   const proc = Bun.spawnSync(["curl", ...args], { stdout: "pipe", stderr: "pipe" });
+27 |   if (proc.exitCode !== 0) {
+28 |     const stderr = proc.stderr ? new TextDecoder().decode(proc.stderr) : "";
+29 |     throw new Error(stderr || `curl exited ${proc.exitCode}`);
+               ^
+error: curl: (7) Failed to connect to 127.0.0.1 port 3301 after 0 ms: Couldn't connect to server
+
+      at request (/app/backend/test/api.test.ts:29:11)
+      at <anonymous> (/app/backend/test/api.test.ts:159:19)
+      at <anonymous> (/app/backend/test/api.test.ts:158:56)
+(fail) API Integration Tests > Providers API > GET /api/providers returns provider status [11.11ms]
+24 |   }
+25 |
+26 |   const proc = Bun.spawnSync(["curl", ...args], { stdout: "pipe", stderr: "pipe" });
+27 |   if (proc.exitCode !== 0) {
+28 |     const stderr = proc.stderr ? new TextDecoder().decode(proc.stderr) : "";
+29 |     throw new Error(stderr || `curl exited ${proc.exitCode}`);
+               ^
+error: curl: (7) Failed to connect to 127.0.0.1 port 3301 after 0 ms: Couldn't connect to server
+
+      at request (/app/backend/test/api.test.ts:29:11)
+      at <anonymous> (/app/backend/test/api.test.ts:167:19)
+      at <anonymous> (/app/backend/test/api.test.ts:166:67)
+(fail) API Integration Tests > Providers API > PUT /api/providers/copilot rejects apiKey (auth-only) [10.70ms]
+24 |   }
+25 |
+26 |   const proc = Bun.spawnSync(["curl", ...args], { stdout: "pipe", stderr: "pipe" });
+27 |   if (proc.exitCode !== 0) {
+28 |     const stderr = proc.stderr ? new TextDecoder().decode(proc.stderr) : "";
+29 |     throw new Error(stderr || `curl exited ${proc.exitCode}`);
+               ^
+error: curl: (7) Failed to connect to 127.0.0.1 port 3301 after 0 ms: Couldn't connect to server
+
+      at request (/app/backend/test/api.test.ts:29:11)
+      at <anonymous> (/app/backend/test/api.test.ts:179:19)
+      at <anonymous> (/app/backend/test/api.test.ts:178:62)
+(fail) API Integration Tests > Providers API > PUT /api/providers/openai rejects missing apiKey [9.54ms]
+24 |   }
+25 |
+26 |   const proc = Bun.spawnSync(["curl", ...args], { stdout: "pipe", stderr: "pipe" });
+27 |   if (proc.exitCode !== 0) {
+28 |     const stderr = proc.stderr ? new TextDecoder().decode(proc.stderr) : "";
+29 |     throw new Error(stderr || `curl exited ${proc.exitCode}`);
+               ^
+error: curl: (7) Failed to connect to 127.0.0.1 port 3301 after 0 ms: Couldn't connect to server
+
+      at request (/app/backend/test/api.test.ts:29:11)
+      at <anonymous> (/app/backend/test/api.test.ts:191:19)
+      at <anonymous> (/app/backend/test/api.test.ts:190:88)
+(fail) API Integration Tests > Providers API > PUT /api/providers/anthropic accepts dual-mode payload shape and validates [10.66ms]
+24 |   }
+25 |
+26 |   const proc = Bun.spawnSync(["curl", ...args], { stdout: "pipe", stderr: "pipe" });
+27 |   if (proc.exitCode !== 0) {
+28 |     const stderr = proc.stderr ? new TextDecoder().decode(proc.stderr) : "";
+29 |     throw new Error(stderr || `curl exited ${proc.exitCode}`);
+               ^
+error: curl: (7) Failed to connect to 127.0.0.1 port 3301 after 0 ms: Couldn't connect to server
+
+      at request (/app/backend/test/api.test.ts:29:11)
+      at <anonymous> (/app/backend/test/api.test.ts:203:19)
+      at <anonymous> (/app/backend/test/api.test.ts:202:55)
+(fail) API Integration Tests > Providers API > PUT /api/providers/local requires baseUrl [11.00ms]
+24 |   }
+25 |
+26 |   const proc = Bun.spawnSync(["curl", ...args], { stdout: "pipe", stderr: "pipe" });
+27 |   if (proc.exitCode !== 0) {
+28 |     const stderr = proc.stderr ? new TextDecoder().decode(proc.stderr) : "";
+29 |     throw new Error(stderr || `curl exited ${proc.exitCode}`);
+               ^
+error: curl: (7) Failed to connect to 127.0.0.1 port 3301 after 0 ms: Couldn't connect to server
+
+      at request (/app/backend/test/api.test.ts:29:11)
+      at <anonymous> (/app/backend/test/api.test.ts:217:19)
+      at <anonymous> (/app/backend/test/api.test.ts:216:57)
+(fail) API Integration Tests > Agents API > GET /api/agents/status returns agent status [9.66ms]
+24 |   }
+25 |
+26 |   const proc = Bun.spawnSync(["curl", ...args], { stdout: "pipe", stderr: "pipe" });
+27 |   if (proc.exitCode !== 0) {
+28 |     const stderr = proc.stderr ? new TextDecoder().decode(proc.stderr) : "";
+29 |     throw new Error(stderr || `curl exited ${proc.exitCode}`);
+               ^
+error: curl: (7) Failed to connect to 127.0.0.1 port 3301 after 0 ms: Couldn't connect to server
+
+      at request (/app/backend/test/api.test.ts:29:11)
+      at <anonymous> (/app/backend/test/api.test.ts:227:19)
+      at <anonymous> (/app/backend/test/api.test.ts:226:40)
+(fail) API Integration Tests > Input Validation > rejects invalid session ID [11.43ms]
+24 |   }
+25 |
+26 |   const proc = Bun.spawnSync(["curl", ...args], { stdout: "pipe", stderr: "pipe" });
+27 |   if (proc.exitCode !== 0) {
+28 |     const stderr = proc.stderr ? new TextDecoder().decode(proc.stderr) : "";
+29 |     throw new Error(stderr || `curl exited ${proc.exitCode}`);
+               ^
+error: curl: (7) Failed to connect to 127.0.0.1 port 3301 after 0 ms: Couldn't connect to server
+
+      at request (/app/backend/test/api.test.ts:29:11)
+      at <anonymous> (/app/backend/test/api.test.ts:235:19)
+      at <anonymous> (/app/backend/test/api.test.ts:233:59)
+(fail) API Integration Tests > Input Validation > rejects oversized session title by truncating [11.26ms]
+24 |   }
+25 |
+26 |   const proc = Bun.spawnSync(["curl", ...args], { stdout: "pipe", stderr: "pipe" });
+27 |   if (proc.exitCode !== 0) {
+28 |     const stderr = proc.stderr ? new TextDecoder().decode(proc.stderr) : "";
+29 |     throw new Error(stderr || `curl exited ${proc.exitCode}`);
+               ^
+error: curl: (7) Failed to connect to 127.0.0.1 port 3301 after 0 ms: Couldn't connect to server
+
+      at request (/app/backend/test/api.test.ts:29:11)
+      at <anonymous> (/app/backend/test/api.test.ts:248:19)
+      at <anonymous> (/app/backend/test/api.test.ts:247:47)
+(fail) API Integration Tests > CORS Headers > handles preflight OPTIONS request [10.88ms]
+
+backend/test/security.test.ts:
+(pass) validateBashCommand > allows safe commands [0.58ms]
+(pass) validateBashCommand > blocks dangerous commands [0.20ms]
+(pass) sanitizeString > trims and limits length [0.25ms]
+(pass) sanitizeString > handles non-string input [0.10ms]
+[21:30:08] [32mINFO[39m: [36mEncryption key loaded from key file[39m
+    [35mservice[39m: "koryphaios"
+    [35mmodule[39m: "server"
+(pass) validateSessionId > accepts valid session IDs [0.09ms]
+(pass) validateSessionId > rejects invalid session IDs [0.05ms]
+(pass) validateProviderName > accepts valid provider names [0.78ms]
+(pass) validateProviderName > rejects invalid provider names [0.14ms]
+78 | describe("API key encryption", () => {
+79 |   test("encrypts and decrypts correctly", () => {
+80 |     const original = "sk-test-api-key-12345";
+81 |     const encrypted = encryptApiKey(original);
+82 |
+83 |     expect(encrypted).toContain("v1:");
+                           ^
+error: expect(received).toContain(expected)
+
+Expected to contain: "v1:"
+Received: "v2:e903ca609b1353217892bac809af9acf:97fbb4d06c1c2976d93f040e993f8fcf:ca1e80f9256ab73624f8b32c5d4a9afdb1dcb6519f"
+
+      at <anonymous> (/app/backend/test/security.test.ts:83:23)
+(fail) API key encryption > encrypts and decrypts correctly [0.55ms]
+(pass) API key encryption > handles unencrypted keys [0.16ms]
+(pass) RateLimiter > allows requests within limit [0.27ms]
+(pass) RateLimiter > blocks requests exceeding limit [0.06ms]
+(pass) RateLimiter > resets after window expires [150.51ms]
+
+19 tests failed:
+(fail) API Integration Tests > GET /api/health > returns health status
+(fail) API Integration Tests > Sessions API > POST /api/sessions creates a new session [10.92ms]
+(fail) API Integration Tests > Sessions API > GET /api/sessions lists all sessions [31.01ms]
+(fail) API Integration Tests > Sessions API > GET /api/sessions/:id returns session details [10.97ms]
+(fail) API Integration Tests > Sessions API > PATCH /api/sessions/:id updates session title [11.08ms]
+(fail) API Integration Tests > Sessions API > GET /api/sessions/:id/messages returns array [10.41ms]
+(fail) API Integration Tests > Sessions API > DELETE /api/sessions/:id deletes session [16.47ms]
+(fail) API Integration Tests > Providers API > GET /api/providers returns provider status [11.11ms]
+(fail) API Integration Tests > Providers API > PUT /api/providers/copilot rejects apiKey (auth-only) [10.70ms]
+(fail) API Integration Tests > Providers API > PUT /api/providers/openai rejects missing apiKey [9.54ms]
+(fail) API Integration Tests > Providers API > PUT /api/providers/anthropic accepts dual-mode payload shape and validates [10.66ms]
+(fail) API Integration Tests > Providers API > PUT /api/providers/local requires baseUrl [11.00ms]
+(fail) API Integration Tests > Agents API > GET /api/agents/status returns agent status [9.66ms]
+(fail) API Integration Tests > Input Validation > rejects invalid session ID [11.43ms]
+(fail) API Integration Tests > Input Validation > rejects oversized session title by truncating [11.26ms]
+(fail) API Integration Tests > CORS Headers > handles preflight OPTIONS request [10.88ms]
+(fail) API key encryption > encrypts and decrypts correctly [0.55ms]
+
+ 24 pass
+ 19 fail
+ 3 errors
+ 62 expect() calls
+Ran 43 tests across 5 files. [20.58s]

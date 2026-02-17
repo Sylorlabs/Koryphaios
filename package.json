@@ -1,0 +1,14 @@
+{
+  "name": "koryphaios",
+  "version": "0.1.0",
+  "private": true,
+  "workspaces": ["backend", "frontend", "shared"],
+  "scripts": {
+    "dev": "bash -lc 'trap \"kill 0\" EXIT; bun run dev:backend & bun run dev:frontend & wait'",
+    "dev:backend": "bun run --filter backend dev",
+    "dev:frontend": "bun run --filter frontend dev",
+    "build": "bun run --filter '*' build",
+    "typecheck": "bun run --filter '*' typecheck",
+    "check": "bun run --filter backend typecheck && bun run --filter frontend check:strict"
+  }
+}
