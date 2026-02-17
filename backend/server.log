@@ -1,0 +1,47 @@
+[23:01:36] [32mINFO[39m: [36m═══════════════════════════════════════[39m
+    [35mservice[39m: "koryphaios"
+    [35mmodule[39m: "server"
+[23:01:36] [32mINFO[39m: [36m       KORYPHAIOS v0.1.0[39m
+    [35mservice[39m: "koryphaios"
+    [35mmodule[39m: "server"
+[23:01:36] [32mINFO[39m: [36m  AI Agent Orchestration Dashboard[39m
+    [35mservice[39m: "koryphaios"
+    [35mmodule[39m: "server"
+[23:01:36] [32mINFO[39m: [36m═══════════════════════════════════════[39m
+    [35mservice[39m: "koryphaios"
+    [35mmodule[39m: "server"
+[23:01:36] [33mWARN[39m: [36mNo provider API keys found in environment. You'll need to configure providers via the UI.[39m
+    [35mservice[39m: "koryphaios"
+    [35mmodule[39m: "server"
+[23:01:36] [32mINFO[39m: [36mEnvironment validation passed[39m
+    [35mservice[39m: "koryphaios"
+    [35mmodule[39m: "server"
+[23:01:36] [32mINFO[39m: [36mLoaded config[39m
+    [35mservice[39m: "koryphaios"
+    [35mmodule[39m: "server"
+    [35mpath[39m: "/home/micah/Desktop/sylorlabs projects/Koryphaios/koryphaios.json"
+[23:01:36] [32mINFO[39m: [36mProviders ready[39m
+    [35mservice[39m: "koryphaios"
+    [35mmodule[39m: "providers"
+    [35mproviders[39m: [
+      "anthropic",
+      "google",
+      "codex"
+    ]
+[23:01:36] [32mINFO[39m: [36mLoaded sessions from disk[39m
+    [35mservice[39m: "koryphaios"
+    [35mmodule[39m: "server"
+    [35mcount[39m: 2
+[23:01:36] [32mINFO[39m: [36mServer running[39m
+    [35mservice[39m: "koryphaios"
+    [35mmodule[39m: "server"
+    [35mhost[39m: "localhost"
+    [35mport[39m: 3000
+[23:01:36] [32mINFO[39m: [36mWebSocket ready[39m
+    [35mservice[39m: "koryphaios"
+    [35mmodule[39m: "server"
+    [35murl[39m: "ws://localhost:3000/ws"
+[23:01:36] [32mINFO[39m: [36mSSE fallback ready[39m
+    [35mservice[39m: "koryphaios"
+    [35mmodule[39m: "server"
+    [35murl[39m: "http://localhost:3000/api/events"
