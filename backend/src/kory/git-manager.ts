@@ -1,4 +1,6 @@
 import { spawnSync } from "bun";
+import { join } from "path";
+import { existsSync, readFileSync } from "fs";
 import { koryLog } from "../logger";
 
 export interface GitFileStatus {
@@ -104,6 +106,22 @@ export class GitManager {
     return this.runGit(args).output;
   }
 
+  async getFileContent(path: string): Promise<string | null> {
+    const { success, output } = this.runGit(["show", `HEAD:${path}`]);
+    // Fallback to local file if not in git yet (added/untracked)
+    if (!success) {
+      try {
+        const fullPath = join(this.workingDirectory, path);
+        if (existsSync(fullPath)) {
+          return readFileSync(fullPath, "utf-8");
+        }
+      } catch {
+        return null;
+      }
+    }
+    return output;
+  }
+
   async stageFile(path: string): Promise<boolean> {
     return this.runGit(["add", path]).success;
   }
@@ -135,6 +153,11 @@ export class GitManager {
     return output.trim();
   }
 
+  async getBranches(): Promise<string[]> {
+    const { output } = this.runGit(["branch", "--format=%(refname:short)"]);
+    return output.split("\n").filter(Boolean);
+  }
+
   async checkout(branch: string, create = false): Promise<boolean> {
     const args = ["checkout"];
     if (create) args.push("-b");
@@ -152,6 +175,21 @@ export class GitManager {
     const { success, output } = this.runGit(["diff", "--name-only", "--diff-filter=U"]);
     if (!success) return [];
     return output.split("\n").filter(Boolean);
+  }
+
+  async getAheadBehind(): Promise<{ ahead: number; behind: number }> {
+    if (!this.isGitRepo()) return { ahead: 0, behind: 0 };
+    
+    // Check if we have an upstream configured
+    const { success } = this.runGit(["rev-parse", "--abbrev-ref", "@{u}"]);
+    if (!success) return { ahead: 0, behind: 0 };
+
+    const { output } = this.runGit(["rev-list", "--left-right", "--count", "HEAD...@{u}"]);
+    const parts = output.trim().split(/\s+/);
+    if (parts.length === 2) {
+      return { ahead: parseInt(parts[0]) || 0, behind: parseInt(parts[1]) || 0 };
+    }
+    return { ahead: 0, behind: 0 };
   }
 
   /** Create a shadow commit to track changes for a specific session/task */

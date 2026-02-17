@@ -7,6 +7,12 @@ import { serverLog } from "../logger";
 import { safeJsonParse, ConfigError } from "../errors";
 import { AGENT, DEFAULT_CONTEXT_PATHS, FS, SERVER } from "../constants";
 
+const DEFAULT_SAFETY = {
+  maxTokensPerTurn: 4096,
+  maxFileSizeBytes: 10_000_000, // 10MB
+  toolExecutionTimeoutMs: 60_000, // 60 seconds
+} as const;
+
 export function loadConfig(projectRoot: string): KoryphaiosConfig {
   const configPaths = [
     join(projectRoot, "koryphaios.json"),
@@ -38,6 +44,11 @@ export function loadConfig(projectRoot: string): KoryphaiosConfig {
       manager: { model: AGENT.DEFAULT_MANAGER_MODEL, reasoningLevel: AGENT.DEFAULT_REASONING_LEVEL },
       coder: { model: AGENT.DEFAULT_CODER_MODEL, maxTokens: AGENT.CODER_MAX_TOKENS },
       task: { model: AGENT.DEFAULT_TASK_MODEL, maxTokens: AGENT.DEFAULT_MAX_TOKENS },
+    },
+    safety: {
+      maxTokensPerTurn: fileConfig.safety?.maxTokensPerTurn ?? DEFAULT_SAFETY.maxTokensPerTurn,
+      maxFileSizeBytes: fileConfig.safety?.maxFileSizeBytes ?? DEFAULT_SAFETY.maxFileSizeBytes,
+      toolExecutionTimeoutMs: fileConfig.safety?.toolExecutionTimeoutMs ?? DEFAULT_SAFETY.toolExecutionTimeoutMs,
     },
     server: {
       port: Number(process.env.KORYPHAIOS_PORT ?? fileConfig.server?.port ?? SERVER.DEFAULT_PORT),

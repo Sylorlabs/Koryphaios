@@ -1,24 +1,69 @@
+import type { ServerWebSocket } from "bun";
 import type { WSMessage } from "@koryphaios/shared";
 import { serverLog } from "../logger";
 
+interface WSClientData {
+  id: string;
+  sessionId: string;
+}
+
 interface WSClient {
-  ws: any;
+  ws: ServerWebSocket<WSClientData>;
   subscribedSessions: Set<string>;
+  isAlive: boolean;
 }
 
 export class WSManager {
   private clients = new Map<string, WSClient>();
+  private heartbeatInterval: Timer;
 
-  add(ws: any) {
+  constructor() {
+    // Check for stale connections every 30 seconds
+    this.heartbeatInterval = setInterval(() => this.heartbeat(), 30000);
+  }
+
+  add(ws: ServerWebSocket<WSClientData>) {
     const id = ws.data.id;
-    this.clients.set(id, { ws, subscribedSessions: new Set() });
+    this.clients.set(id, { ws, subscribedSessions: new Set(), isAlive: true });
     serverLog.debug({ clientId: id, totalClients: this.clients.size }, "WebSocket client added");
   }
 
-  remove(ws: any) {
+  remove(ws: ServerWebSocket<WSClientData>) {
     const id = ws.data.id;
     this.clients.delete(id);
     serverLog.debug({ clientId: id, totalClients: this.clients.size }, "WebSocket client removed");
+  }
+
+  handlePong(clientId: string) {
+    const client = this.clients.get(clientId);
+    if (client) {
+      client.isAlive = true;
+    }
+  }
+
+   private heartbeat() {
+    try {
+      for (const [id, client] of this.clients) {
+        if (client.isAlive === false) {
+          serverLog.debug({ clientId: id }, "Terminating inactive WebSocket client");
+          try { client.ws.close(); } catch {}
+          this.clients.delete(id);
+          continue;
+        }
+
+        client.isAlive = false;
+        try {
+          client.ws.send(JSON.stringify({ type: "ping" }));
+        } catch (err) {
+          // If send fails, assume dead and remove next tick
+          serverLog.warn({ clientId: id, error: String(err) }, "Failed to send ping");
+          this.clients.delete(id);
+          try { client.ws.close(); } catch {}
+        }
+      }
+    } catch (err) {
+      serverLog.error({ error: String(err) }, "Heartbeat loop error");
+    }
   }
 
   subscribeClientToSession(clientId: string, sessionId: string) {
@@ -72,3 +117,5 @@ export class WSManager {
     return this.clients.size;
   }
 }
+
+export type { WSClientData };

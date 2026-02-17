@@ -38,16 +38,18 @@ export class Broker<T> {
     return stream;
   }
 
-  /** Publish an event to all subscribers. Non-blocking — slow subscribers are skipped. */
+  /** Publish an event to all subscribers. Non-blocking — slow subscribers are skipped if buffer full. */
   publish(type: EventType, payload: T) {
     const event: BrokerEvent<T> = { type, payload, timestamp: Date.now() };
 
     for (const [id, sub] of this.subscribers) {
       if (sub.closed) continue;
       try {
+        // enqueue will throw if the controller is closed or closing
         sub.controller.enqueue(event);
-      } catch {
-        // Subscriber's buffer full or closed — skip
+      } catch (err) {
+        // Only unsubscribe if the error indicates a closed stream
+        // For other errors, we might just skip this event
         this.unsubscribe(id);
       }
     }

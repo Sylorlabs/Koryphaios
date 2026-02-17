@@ -51,9 +51,10 @@ export function initDb(dataDir: string) {
       session_id TEXT NOT NULL,
       description TEXT NOT NULL,
       domain TEXT,
-      status TEXT DEFAULT 'pending',
+      status TEXT DEFAULT 'pending', -- pending, active, done, failed, interrupted
+      plan TEXT,
       assigned_model TEXT,
-      allowed_paths TEXT, -- JSON array of whitelisted paths
+      allowed_paths TEXT,
       result TEXT,
       error TEXT,
       created_at INTEGER,

@@ -9,6 +9,7 @@ export interface ISessionStore {
   list(): Session[];
   update(id: string, updates: Partial<Session>): Session | undefined;
   delete(id: string): void;
+  clear(): void;
 }
 
 export class SessionStore implements ISessionStore {
@@ -90,5 +91,9 @@ export class SessionStore implements ISessionStore {
 
   delete(id: string) {
     getDb().run("DELETE FROM sessions WHERE id = ?", [id]);
+  }
+
+  clear() {
+    getDb().run("DELETE FROM sessions");
   }
 }

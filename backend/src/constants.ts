@@ -69,6 +69,10 @@ export const SECURITY = {
   ALLOWED_ORIGINS: [
     "http://localhost:5173", // Vite dev server
     "http://localhost:3000", // Bun dev server
+    "http://localhost:3001", // Bun dev server (alternate)
+    "http://127.0.0.1:5173", // Vite dev server (IPv4)
+    "http://127.0.0.1:3000", // Bun dev server (IPv4)
+    "http://127.0.0.1:3001", // Bun dev server (IPv4 alternate)
   ],
 } as const;
 
@@ -90,18 +94,19 @@ export const FS = {
  * Agent Configuration
  */
 export const AGENT = {
-  /** Default models per role if not configured */
-  DEFAULT_MANAGER_MODEL: "claude-sonnet-4-5",
+  DEFAULT_MANAGER_MODEL: "claude-opus-4-6",
   DEFAULT_CODER_MODEL: "claude-sonnet-4-5",
-  DEFAULT_TASK_MODEL: "o4-mini",
-  
-  /** Default token limits */
+  DEFAULT_TASK_MODEL: "gpt-5.2-instant",
   DEFAULT_MAX_TOKENS: 8192,
   CODER_MAX_TOKENS: 16384,
-  
-  /** Default reasoning level */
-  DEFAULT_REASONING_LEVEL: "high" as const,
-} as const;
+  DEFAULT_REASONING_LEVEL: "auto" as const,
+  DEFAULT_FALLBACKS: {
+    "claude-opus-4-6": ["gpt-5.3-codex", "gpt-5.2-pro"],
+    "claude-sonnet-4-5": ["gpt-5.2-pro", "gemini-3-pro"],
+    "gpt-5.3-codex": ["claude-opus-4-6", "gpt-5.2-pro"],
+    "gpt-5.2-pro": ["claude-sonnet-4-5", "gemini-3-pro"],
+  },
+};
 
 /**
  * Configuration File Paths (in order of precedence)
@@ -192,6 +197,29 @@ export const WS = {
 } as const;
 
 /**
+ * Antigravity (Google Internal/Unified Gateway) Configuration
+ * Client credentials must be provided via environment variables.
+ */
+export const ANTIGRAVITY = {
+  CLIENT_ID: process.env.ANTIGRAVITY_CLIENT_ID ?? "",
+  CLIENT_SECRET: process.env.ANTIGRAVITY_CLIENT_SECRET ?? "",
+  REDIRECT_URI: process.env.ANTIGRAVITY_REDIRECT_URI ?? "http://localhost:51121/oauth-callback",
+  SCOPES: [
+    "https://www.googleapis.com/auth/cloud-platform",
+    "https://www.googleapis.com/auth/userinfo.email",
+    "https://www.googleapis.com/auth/userinfo.profile",
+    "https://www.googleapis.com/auth/cclog",
+    "https://www.googleapis.com/auth/experimentsandconfigs",
+  ],
+  ENDPOINTS: {
+    DAILY: "https://daily-cloudcode-pa.sandbox.googleapis.com",
+    PROD: "https://cloudcode-pa.googleapis.com",
+    AUTH: "https://accounts.google.com/o/oauth2/v2/auth",
+    TOKEN: "https://oauth2.googleapis.com/token",
+  }
+} as const;
+
+/**
  * Timeouts
  */
 export const TIMEOUT = {
@@ -208,38 +236,38 @@ export const TIMEOUT = {
  */
 export const DOMAIN = {
   KEYWORDS: {
-    ui: [
-      "skia", "flutter", "ui", "widget", "button", "layout", "css", "style",
-      "animation", "render", "frontend", "component", "svelte", "react", "view",
-      "canvas", "draw", "paint", "theme", "color", "font", "icon", "design",
-      "responsive", "mobile", "dark mode", "light mode", "sidebar", "modal",
+    frontend: [
+      "frontend", "component", "svelte", "react", "vue", "html", "css", "style",
+      "design", "ux", "ui", "widget", "button", "layout", "animation", "render",
+      "canvas", "theme", "color", "font", "icon", "responsive", "mobile",
+      "tailwind", "bootstrap", "shadcn", "modal", "sidebar", "navbar",
     ],
     backend: [
-      "c++", "cpp", "cmake", "makefile", "gtest", "boost", "llvm", "clang",
-      "server", "api", "database", "sql", "grpc", "protobuf", "socket",
-      "memory", "pointer", "thread", "mutex", "algorithm", "data structure",
-      "compiler", "linker", "binary", "build", "performance", "optimization",
-      "kernel", "driver", "system", "dsp", "audio", "midi", "signal",
+      "server", "api", "database", "sql", "nosql", "redis", "cache", "auth",
+      "middleware", "routing", "controller", "service", "orm", "prisma", "drizzle",
+      "docker", "kubernetes", "infra", "deploy", "ci/cd", "performance",
+      "optimization", "threading", "concurrency", "socket", "grpc", "protobuf",
+      "c++", "cpp", "rust", "go", "python", "node", "java", "logic",
     ],
     general: [
       "refactor", "rename", "move", "organize", "clean", "lint", "format",
       "documentation", "readme", "comment", "explain", "review", "improve",
-      "typescript", "javascript", "python", "rust", "go",
+      "typescript", "javascript", "script", "bash", "shell", "git",
     ],
-    review: ["review", "audit", "check", "verify", "validate"],
-    test: ["test", "spec", "gtest", "jest", "vitest", "mocha", "pytest"],
-    critic: ["critic", "critique", "audit", "review", "gate", "quality"],
+    review: ["review", "audit", "check", "verify", "validate", "quality", "security"],
+    test: ["test", "spec", "unit", "integration", "e2e", "jest", "vitest", "mocha", "pytest", "cypress"],
+    critic: ["critic", "critique", "audit", "review", "gate", "quality", "architect"],
   },
   DEFAULT_MODELS: {
-    ui: "gpt-4.1",
-    backend: "gemini-2.5-pro",
-    general: "gemini-2.5-flash",
-    review: "gpt-4.1",
-    test: "gpt-4.1",
-    critic: "claude-sonnet-4-5",
+    frontend: "gpt-5.2-pro",
+    backend: "claude-sonnet-4-5",
+    general: "gemini-3-flash",
+    review: "gpt-5.2-pro",
+    test: "gpt-5.2-pro",
+    critic: "claude-opus-4-6",
   },
   GLOW_COLORS: {
-    ui: "rgba(0,255,255,0.5)",       // Cyan
+    frontend: "rgba(0,255,255,0.5)",       // Cyan
     backend: "rgba(128,0,128,0.5)",  // Deep Purple
     general: "rgba(255,165,0,0.5)",  // Orange (Claude)
     review: "rgba(255,165,0,0.5)",   // Orange
