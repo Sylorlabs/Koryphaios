@@ -71,7 +71,7 @@ export class TelegramBridge {
       }
 
       const lines = workers.map((w) =>
-        `• **${w.agent.name}** (${w.agent.model})\n  Status: ${w.status}\n  Task: ${w.task.slice(0, 100)}`
+        `• **${w.identity.name}** (${w.identity.model})\n  Status: ${w.status}\n  Task: ${w.task.slice(0, 100)}`
       );
 
       await ctx.reply(`📊 Active Workers:\n\n${lines.join("\n\n")}`, { parse_mode: "Markdown" });
