@@ -27,6 +27,7 @@ import type { IMessageStore } from "../stores/message-store";
 import { SnapshotManager } from "./snapshot-manager";
 import { GitManager } from "./git-manager";
 import { TaskStore, type ITaskStore } from "../stores/task-store";
+import { z } from "zod";
 
 // ─── Conversation Types ────────────────────────────────────────────────────
 
@@ -139,6 +140,84 @@ export interface KoryTask {
 }
 
 type TaskComplexity = "SIMPLE" | "COMPLEX";
+
+const CLARIFICATION_SYSTEM_PROMPT = `You are a deterministic intent-clarification gate.
+Return JSON only. No markdown. No prose outside JSON.
+
+Output must be EXACTLY one schema:
+1) {"action":"proceed"}
+2) {"action":"clarify","questions":["..."],"reason":"...","assumptions":["..."]}
+
+Rules:
+- Ask clarification only if request is underspecified/ambiguous for safe execution.
+- Questions must be short, specific, and answerable in one message.
+- Avoid yes/no-only questions unless they unlock a major branch (example: existing project or new?).
+- Maximum questions is provided by user prompt; never exceed it.`;
+
+const ClarifyProceedSchema = z.object({ action: z.literal("proceed") });
+const ClarifyQuestionSchema = z.string().trim().min(1).max(140);
+const ClarifySchema = z.object({
+  action: z.literal("clarify"),
+  questions: z.array(ClarifyQuestionSchema).min(1),
+  reason: z.string().trim().min(1),
+  assumptions: z.array(z.string().trim().min(1)).default([]),
+});
+
+type ClarificationDecision = z.infer<typeof ClarifyProceedSchema> | z.infer<typeof ClarifySchema>;
+
+const MAJOR_BRANCH_QUESTION_PATTERNS = [
+  /existing\s+project\s+or\s+new/i,
+  /new\s+or\s+existing/i,
+  /from\s+scratch\s+or\s+existing/i,
+  /web\s+or\s+mobile/i,
+  /frontend\s+or\s+backend/i,
+  /local\s+or\s+production/i,
+];
+
+const YES_NO_ONLY_START = /^(is|are|do|does|did|can|could|should|would|will|have|has|had|was|were|may)\b/i;
+
+function extractJsonObject(raw: string): string {
+  const trimmed = raw.trim();
+  if (trimmed.startsWith("{") && trimmed.endsWith("}")) return trimmed;
+  const first = trimmed.indexOf("{");
+  const last = trimmed.lastIndexOf("}");
+  if (first >= 0 && last > first) return trimmed.slice(first, last + 1);
+  return trimmed;
+}
+
+function isMajorBranchYesNoQuestion(question: string): boolean {
+  return MAJOR_BRANCH_QUESTION_PATTERNS.some((pattern) => pattern.test(question));
+}
+
+function isDisallowedYesNoOnlyQuestion(question: string): boolean {
+  const normalized = question.trim();
+  if (!normalized.endsWith("?")) return false;
+  if (!YES_NO_ONLY_START.test(normalized)) return false;
+  if (/\bor\b/i.test(normalized)) return false;
+  return !isMajorBranchYesNoQuestion(normalized);
+}
+
+export function parseClarificationDecision(raw: string, maxQuestions: number): ClarificationDecision | null {
+  try {
+    const parsed = JSON.parse(extractJsonObject(raw));
+
+    const proceed = ClarifyProceedSchema.safeParse(parsed);
+    if (proceed.success) return proceed.data;
+
+    const clarify = ClarifySchema.safeParse(parsed);
+    if (!clarify.success) return null;
+
+    if (clarify.data.questions.length > maxQuestions) return null;
+    if (clarify.data.questions.some((question) => isDisallowedYesNoOnlyQuestion(question))) return null;
+    return clarify.data;
+  } catch {
+    return null;
+  }
+}
+
+export function resolveClarificationDecision(raw: string, maxQuestions: number): ClarificationDecision {
+  return parseClarificationDecision(raw, maxQuestions) ?? { action: "proceed" };
+}
 
 export class KoryManager {
   private activeWorkers = new Map<string, { agent: AgentIdentity; status: AgentStatus; task: KoryTask; abort: AbortController; sessionId: string }>();
@@ -319,7 +398,10 @@ export class KoryManager {
 
   /**
    * Main entry point for processing a task.
-   * Decides whether to do it immediately (Fast Path) or delegate (Worker Path).
+   * Pipeline:
+   * 1) Optional clarification gate (ask targeted questions for vague prompts)
+   * 2) Complexity classification
+   * 3) Fast path (manager direct execution) or complex worker workflow
    */
   async processTask(sessionId: string, userMessage: string, preferredModel?: string, reasoningLevel?: string): Promise<void> {
     this.isProcessing = true;
@@ -330,9 +412,11 @@ export class KoryManager {
 
     try {
       this.emitThought(sessionId, "analyzing", `Analyzing intent...`);
+
+      const executionMessage = (await this.maybeClarify(sessionId, userMessage, routing)).enrichedMessage;
       
       const taskStart = performance.now();
-      const complexity = await this.classifyComplexity(sessionId, userMessage, routing);
+      const complexity = await this.classifyComplexity(sessionId, executionMessage, routing);
       const complexityDuration = performance.now() - taskStart;
       emitTrace(KORY_IDENTITY.id, "complexity_classification", { complexity, durationMs: complexityDuration });
       this.emitThought(sessionId, "planning", `Task classified as: ${complexity}`);
@@ -340,10 +424,10 @@ export class KoryManager {
       if (complexity === "SIMPLE") {
         // FAST PATH: Manager does it directly using tools
         this.updateWorkflowState(sessionId, "executing");
-        await this.executeDirectly(sessionId, userMessage, routing);
+        await this.executeDirectly(sessionId, executionMessage, routing);
       } else {
         // SLOW PATH: Delegate to Specialist Worker
-        await this.handleComplexWorkflow(sessionId, userMessage, preferredModel, reasoningLevel, routing);
+        await this.handleComplexWorkflow(sessionId, executionMessage, preferredModel, reasoningLevel, routing);
       }
 
       // Notify changes
@@ -357,6 +441,114 @@ export class KoryManager {
       this.isProcessing = false; 
       this.updateWorkflowState(sessionId, "idle");
     }
+  }
+
+  private shouldTryClarification(message: string): boolean {
+    const trimmed = message.trim();
+    const lower = trimmed.toLowerCase();
+    const likelyAmbiguousShort = trimmed.length < 10 && /\b(fix|make|build|help)\b/.test(lower);
+    if (likelyAmbiguousShort) return true;
+
+    const clearlySimple = trimmed.length < 20 && (lower.includes("fix") || lower.includes("typo"));
+    if (clearlySimple) return false;
+
+    return true;
+  }
+
+  private async maybeClarify(
+    sessionId: string,
+    userMessage: string,
+    routing: { model: string; provider?: ProviderName }
+  ): Promise<{ enrichedMessage: string; asked: boolean; questions?: string[]; answers?: string[] }> {
+    const clarifyEnabled = this.config.interaction?.clarifyFirstEnabled ?? false;
+    const maxQuestions = Math.min(Math.max(this.config.interaction?.maxClarifyQuestions ?? 4, 1), 4);
+
+    if (!clarifyEnabled || !this.shouldTryClarification(userMessage)) {
+      return { enrichedMessage: userMessage, asked: false };
+    }
+
+    const provider = await this.providers.resolveProvider(routing.model, routing.provider);
+    if (!provider) return { enrichedMessage: userMessage, asked: false };
+
+    let rawDecision = "";
+    const abortController = new AbortController();
+    const timeout = setTimeout(() => abortController.abort(), 10_000);
+
+    try {
+      const stream = provider.streamResponse({
+        model: routing.model,
+        systemPrompt: CLARIFICATION_SYSTEM_PROMPT,
+        messages: [{
+          role: "user",
+          content: `User request:\n${userMessage}\n\nMax questions: ${maxQuestions}. Return JSON only.`,
+        }],
+        maxTokens: 300,
+        signal: abortController.signal,
+      });
+
+      for await (const event of stream) {
+        if (event.type === "content_delta") rawDecision += event.content ?? "";
+      }
+    } catch (err) {
+      koryLog.warn({ err }, "Clarification gate failed, continuing without clarification");
+      return { enrichedMessage: userMessage, asked: false };
+    } finally {
+      clearTimeout(timeout);
+    }
+
+    const decision = resolveClarificationDecision(rawDecision, maxQuestions);
+    if (decision.action === "proceed") {
+      return { enrichedMessage: userMessage, asked: false };
+    }
+
+    this.emitThought(sessionId, "analyzing", `Need clarification: ${decision.reason}`);
+    const answers: string[] = [];
+
+    try {
+      for (const question of decision.questions) {
+        const answer = await this.askUser(sessionId, {
+          question,
+          options: [],
+          allowOther: true,
+        });
+        answers.push(answer);
+      }
+    } catch (err) {
+      koryLog.warn({ err }, "Clarification Q&A failed, continuing without clarification");
+      return { enrichedMessage: userMessage, asked: false };
+    }
+
+    const clarifications = decision.questions.map((question, index) => `- Q${index + 1}: ${question}\n- A${index + 1}: ${answers[index] ?? ""}`).join("\n");
+    const assumptions = decision.assumptions.length > 0
+      ? `\n\nAssumptions:\n${decision.assumptions.map((assumption) => `- ${assumption}`).join("\n")}`
+      : "";
+
+    return {
+      enrichedMessage: `${userMessage}\n\nClarifications:\n${clarifications}${assumptions}`,
+      asked: true,
+      questions: decision.questions,
+      answers,
+    };
+  }
+
+  private async askUser(sessionId: string, payload: KoryAskUserPayload): Promise<string> {
+    this.updateWorkflowState(sessionId, "waiting_user");
+    this.emitWSMessage(sessionId, "kory.ask_user", payload);
+
+    const key = `${sessionId}`;
+    return new Promise((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        this.pendingUserInputs.delete(key);
+        this.updateWorkflowState(sessionId, "analyzing");
+        reject(new Error("Timed out waiting for user clarification input"));
+      }, 120_000);
+
+      this.pendingUserInputs.set(key, (selection: string) => {
+        clearTimeout(timeout);
+        this.updateWorkflowState(sessionId, "analyzing");
+        resolve(selection);
+      });
+    });
   }
 
   private async classifyComplexity(sessionId: string, message: string, routing: { model: string; provider?: ProviderName }): Promise<TaskComplexity> {
