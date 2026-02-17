@@ -1,18 +1,40 @@
 <script lang="ts">
   import { Send, ChevronDown, Sparkles } from 'lucide-svelte';
   import { wsStore } from '$lib/stores/websocket.svelte';
-  import { getReasoningConfig, hasReasoningSupport, getDefaultReasoning } from '@koryphaios/shared';
+  import { shortcutStore } from '$lib/stores/shortcuts.svelte';
+  import { getReasoningConfig, hasReasoningSupport } from '@koryphaios/shared';
   import BrainIcon from '$lib/components/icons/BrainIcon.svelte';
 
   interface Props {
     onSend: (message: string, model?: string, reasoningLevel?: string) => void;
+    onCommand?: (command: string) => boolean | Promise<boolean>;
     inputRef?: HTMLTextAreaElement;
   }
 
-  let { onSend, inputRef = $bindable() }: Props = $props();
+  let { onSend, onCommand, inputRef = $bindable() }: Props = $props();
   let input = $state('');
   let showModelPicker = $state(false);
   let selectedModel = $state<string>('auto');
+  let selectedCommandIndex = $state(0);
+
+  const slashCommands: Array<{ value: string; description: string }> = [
+    { value: '/help', description: 'Show available slash commands' },
+    { value: '/new', description: 'Create a new session' },
+    { value: '/compact', description: 'Compact the current session context' },
+    { value: '/yolo', description: 'Toggle YOLO mode' },
+  ];
+
+  function providerLabel(provider: string): string {
+    if (provider === 'openai') return 'OpenAI';
+    if (provider === 'codex') return 'Codex';
+    if (provider === 'anthropic') return 'Anthropic';
+    if (provider === 'google') return 'Google';
+    if (provider === 'xai') return 'xAI';
+    if (provider === 'openrouter') return 'OpenRouter';
+    if (provider === 'vertexai') return 'Vertex AI';
+    if (provider === 'copilot') return 'Copilot';
+    return provider.charAt(0).toUpperCase() + provider.slice(1);
+  }
   
   // Reasoning state - now tracks provider AND model
   let reasoningLevel = $state('medium');
@@ -55,12 +77,12 @@
 
   let availableModels = $derived(() => {
     const models: Array<{ label: string; value: string; provider: string; isAuto?: boolean }> = [
-      { label: 'Auto (Kory decides)', value: 'auto', provider: '', isAuto: true },
+      { label: 'Auto (Smart Selection)', value: 'auto', provider: '', isAuto: true },
     ];
     for (const p of wsStore.providers) {
       if (p.authenticated) {
         for (const m of p.models) {
-          models.push({ label: m, value: `${p.name}:${m}`, provider: p.name });
+          models.push({ label: `(${providerLabel(p.name)}) ${m}`, value: `${p.name}:${m}`, provider: p.name });
         }
       }
     }
@@ -69,19 +91,70 @@
 
   let selectedModelLabel = $derived(() => {
     if (selectedModel === 'auto') return 'Auto';
-    return parseModelSelection(selectedModel).model ?? selectedModel;
+    const parsed = parseModelSelection(selectedModel);
+    if (!parsed.model || !parsed.provider) return selectedModel;
+    return `(${providerLabel(parsed.provider)}) ${parsed.model}`;
+  });
+
+  let slashQuery = $derived(input.trim().toLowerCase());
+  let commandSuggestions = $derived(() => {
+    if (!slashQuery.startsWith('/')) return [];
+    return slashCommands.filter((cmd) => cmd.value.startsWith(slashQuery) || cmd.value.includes(slashQuery));
+  });
+  let showCommandSuggestions = $derived(commandSuggestions().length > 0 && input.trim().startsWith('/'));
+
+  $effect(() => {
+    slashQuery;
+    selectedCommandIndex = 0;
   });
 
   function handleKeydown(e: KeyboardEvent) {
-    if (e.key === 'Enter' && !e.shiftKey) {
+    if (showCommandSuggestions) {
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        selectedCommandIndex = Math.min(selectedCommandIndex + 1, commandSuggestions().length - 1);
+        return;
+      }
+      if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        selectedCommandIndex = Math.max(selectedCommandIndex - 1, 0);
+        return;
+      }
+      if (e.key === 'Tab') {
+        e.preventDefault();
+        applyCommandSuggestion(commandSuggestions()[selectedCommandIndex]);
+        return;
+      }
+      if (e.key === 'Enter' && !e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        const selected = commandSuggestions()[selectedCommandIndex];
+        if (selected && input.trim() !== selected.value) {
+          e.preventDefault();
+          applyCommandSuggestion(selected);
+          return;
+        }
+      }
+    }
+
+    if (shortcutStore.matches('send', e)) {
+      e.preventDefault();
+      send();
+    } else if (e.key === 'Enter' && !e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey) {
       e.preventDefault();
       send();
     }
   }
 
-  function send() {
+  async function send() {
     const trimmed = input.trim();
     if (!trimmed) return;
+    if (trimmed.startsWith('/')) {
+      const handled = await onCommand?.(trimmed);
+      if (handled) {
+        input = '';
+        if (inputRef) inputRef.style.height = 'auto';
+        return;
+      }
+    }
     onSend(trimmed, selectedModel, reasoningLevel);
     input = '';
     if (inputRef) inputRef.style.height = 'auto';
@@ -91,6 +164,12 @@
     if (!inputRef) return;
     inputRef.style.height = 'auto';
     inputRef.style.height = Math.min(inputRef.scrollHeight, 200) + 'px';
+  }
+
+  function applyCommandSuggestion(suggestion?: { value: string }) {
+    if (!suggestion) return;
+    input = suggestion.value;
+    autoResize();
   }
 
   function selectModel(value: string) {
@@ -114,6 +193,7 @@
   }
 
   let modelDisplayName = $derived(() => {
+    if (selectedModel === 'auto') return 'Auto';
     const modelId = currentModel();
     if (!modelId) return currentProvider().charAt(0).toUpperCase() + currentProvider().slice(1);
     
@@ -165,9 +245,6 @@
                 <Sparkles size={14} class="text-amber-400 shrink-0" />
               {/if}
               <span>{model.label}</span>
-              {#if model.provider}
-                <span class="text-xs ml-auto opacity-60" style="color: var(--color-text-muted);">({model.provider})</span>
-              {/if}
             </button>
           {/each}
         </div>
@@ -181,7 +258,7 @@
           class="flex items-center gap-2 px-3 h-9 rounded-lg text-sm font-medium transition-all hover:brightness-110 active:scale-[0.98]"
           style="background: var(--color-surface-3); color: var(--color-text-primary); border: 1px solid var(--color-border);"
           onclick={() => showReasoningMenu = !showReasoningMenu}
-          title="Set reasoning effort"
+          title="Set auto effort"
         >
           <BrainIcon {reasoningLevel} size={20} class="text-[#c890ab]" />
           <span>{reasoningLabel(reasoningLevel)}</span>
@@ -194,7 +271,7 @@
             style="background: var(--color-surface-2-alpha, rgba(30, 30, 35, 0.9)); border-color: var(--color-border);"
           >
             <div class="px-4 py-3 text-xs font-bold uppercase tracking-widest opacity-70" style="color: var(--color-text-muted); border-bottom: 1px solid var(--color-border); background: rgba(255,255,255,0.03);">
-              {modelDisplayName()} · Reasoning
+              {selectedModel === 'auto' ? 'Auto' : `${modelDisplayName()} · Auto`}
             </div>
             <div class="py-1">
               {#each reasoningConfig.options as opt}
@@ -229,9 +306,10 @@
       bind:value={input}
       oninput={autoResize}
       onkeydown={handleKeydown}
-      placeholder="Describe what you want to build..."
+      placeholder="Describe what you want to build...  (/new, /compact, /yolo)"
       rows="1"
       class="input flex-1"
+      class:yolo-active={wsStore.isYoloMode}
       style="resize: none; min-height: 52px; max-height: 200px; font-size: 15px; padding: 14px 16px;"
     ></textarea>
     <button
@@ -245,6 +323,24 @@
     </button>
   </div>
 
+  {#if showCommandSuggestions}
+    <div
+      class="mt-2 rounded-lg border overflow-hidden"
+      style="border-color: var(--color-border); background: var(--color-surface-2);"
+    >
+      {#each commandSuggestions() as suggestion, i}
+        <button
+          class="w-full text-left px-3 py-2 border-b last:border-b-0 flex items-center justify-between gap-3 hover:bg-[var(--color-surface-3)] {i === selectedCommandIndex ? 'bg-[var(--color-surface-3)]' : ''}"
+          style="border-color: var(--color-border);"
+          onclick={() => applyCommandSuggestion(suggestion)}
+        >
+          <span class="text-xs font-mono" style="color: var(--color-text-primary);">{suggestion.value}</span>
+          <span class="text-[10px] shrink-0" style="color: var(--color-text-muted);">{suggestion.description}</span>
+        </button>
+      {/each}
+    </div>
+  {/if}
+
   <div class="flex items-center justify-between mt-2">
     <span class="text-xs" style="color: var(--color-text-muted);">Enter to send · Shift+Enter for new line</span>
     {#if input.length > 0}
@@ -252,3 +348,10 @@
     {/if}
   </div>
 </div>
+
+<style>
+  .yolo-active {
+    border-color: #ef4444 !important;
+    box-shadow: 0 0 0 1px #ef4444;
+  }
+</style>

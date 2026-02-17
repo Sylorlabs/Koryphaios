@@ -14,12 +14,25 @@
     task: string;
     tokensUsed: number;
     contextMax: number;
+    contextKnown: boolean;
   }
 
   let { agent }: { agent: AgentState } = $props();
 
+  function providerLabel(provider: string): string {
+    if (provider === 'openai') return 'OpenAI';
+    if (provider === 'codex') return 'Codex';
+    if (provider === 'anthropic') return 'Anthropic';
+    if (provider === 'google') return 'Google';
+    if (provider === 'xai') return 'xAI';
+    if (provider === 'openrouter') return 'OpenRouter';
+    if (provider === 'vertexai') return 'Vertex AI';
+    if (provider === 'copilot') return 'Copilot';
+    return provider.charAt(0).toUpperCase() + provider.slice(1);
+  }
+
   let glowClass = $derived(
-    agent.identity.domain === 'ui' ? 'glow-codex' :
+    agent.identity.domain === 'frontend' ? 'glow-codex' :
     agent.identity.domain === 'backend' ? 'glow-google' :
     agent.identity.domain === 'test' ? 'glow-test' :
     'glow-claude'
@@ -60,7 +73,7 @@
   <!-- Header -->
   <div class="flex items-center justify-between {isActive ? 'mb-1.5' : 'mb-0'}">
     <div class="flex items-center gap-1.5">
-      <AnimatedStatusIcon status={agent.status} size={isActive ? 16 : 14} {isManager} static={!isActive} />
+      <AnimatedStatusIcon status={agent.status} size={isActive ? 16 : 14} {isManager} isStatic={!isActive} />
       <span class="text-xs font-medium {isActive ? 'opacity-100' : 'opacity-70'}" style="color: var(--color-text-primary);">{agent.identity.name}</span>
     </div>
     <div class="flex items-center gap-1">
@@ -90,11 +103,11 @@
       <span class="text-[11px]" style="color: {agent.status === 'done' ? 'var(--color-success)' : agent.status === 'error' ? 'var(--color-error)' : 'var(--color-text-secondary)'};">
         {statusText}
       </span>
-      <span class="text-[10px]" style="color: var(--color-text-muted);">{agent.identity.model.split('-').slice(0, 2).join('-')}</span>
+      <span class="text-[10px]" style="color: var(--color-text-muted);">({providerLabel(agent.identity.provider)}) {agent.identity.model}</span>
     </div>
 
     <!-- Context window bar -->
-    {#if agent.tokensUsed > 0}
+    {#if agent.tokensUsed > 0 && agent.contextKnown && agent.contextMax > 0}
       <div class="mb-1">
         <div class="flex items-center justify-between mb-0.5">
           <span class="text-[9px]" style="color: var(--color-text-muted);">Context</span>

@@ -3,6 +3,7 @@
 
 import type { Session } from '@koryphaios/shared';
 import { toastStore } from './toast.svelte';
+import { authStore } from './auth.svelte';
 import { browser } from '$app/environment';
 
 let sessions = $state<Session[]>([]);
@@ -16,7 +17,15 @@ async function fetchSessions() {
   if (!browser) return;
   
   try {
-    const res = await fetch('/api/sessions');
+    const res = await fetch('/api/sessions', {
+      headers: authStore.token ? { 'Authorization': `Bearer ${authStore.token}` } : {},
+    });
+    if (!res.ok) {
+      const text = await res.text();
+      console.error('fetchSessions failed', { status: res.status, body: text });
+      toastStore.error(`Failed to load sessions (${res.status})`);
+      return;
+    }
     const data = await res.json();
     if (data.ok) {
       sessions = data.data;
@@ -29,6 +38,7 @@ async function fetchSessions() {
       }
     }
   } catch (err) {
+    console.error('fetchSessions exception', err);
     toastStore.error('Failed to load sessions');
   }
 }
@@ -37,7 +47,10 @@ async function createSession(): Promise<string | null> {
   try {
     const res = await fetch('/api/sessions', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        ...(authStore.token ? { 'Authorization': `Bearer ${authStore.token}` } : {}),
+      },
       body: JSON.stringify({ title: 'New Session' }),
     });
     const data = await res.json();
@@ -56,7 +69,10 @@ async function renameSession(id: string, title: string) {
   try {
     const res = await fetch(`/api/sessions/${id}`, {
       method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        ...(authStore.token ? { 'Authorization': `Bearer ${authStore.token}` } : {}),
+      },
       body: JSON.stringify({ title }),
     });
     const data = await res.json();
@@ -71,7 +87,10 @@ async function renameSession(id: string, title: string) {
 
 async function deleteSession(id: string) {
   try {
-    await fetch(`/api/sessions/${id}`, { method: 'DELETE' });
+    await fetch(`/api/sessions/${id}`, {
+      method: 'DELETE',
+      headers: authStore.token ? { 'Authorization': `Bearer ${authStore.token}` } : {},
+    });
     sessions = sessions.filter(s => s.id !== id);
     if (activeSessionId === id) {
       activeSessionId = sessions[0]?.id ?? '';
@@ -84,7 +103,9 @@ async function deleteSession(id: string) {
 
 async function fetchMessages(sessionId: string): Promise<Array<{ id: string; role: string; content: string; createdAt: number; model?: string; cost?: number }>> {
   try {
-    const res = await fetch(`/api/sessions/${sessionId}/messages`);
+    const res = await fetch(`/api/sessions/${sessionId}/messages`, {
+      headers: authStore.token ? { 'Authorization': `Bearer ${authStore.token}` } : {},
+    });
     const data = await res.json();
     if (data.ok) return data.data;
   } catch {}
@@ -107,14 +128,14 @@ function groupByDate(sessionList: Session[]): SessionGroup[] {
   const groups: Record<string, Session[]> = {
     'Today': [],
     'Yesterday': [],
-    'This Week': [],
+    'This week': [],
     'Older': [],
   };
 
   for (const s of sessionList) {
     if (s.updatedAt >= today) groups['Today'].push(s);
     else if (s.updatedAt >= yesterday) groups['Yesterday'].push(s);
-    else if (s.updatedAt >= weekAgo) groups['This Week'].push(s);
+    else if (s.updatedAt >= weekAgo) groups['This week'].push(s);
     else groups['Older'].push(s);
   }
 

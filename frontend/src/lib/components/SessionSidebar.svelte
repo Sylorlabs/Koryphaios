@@ -1,28 +1,38 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { sessionStore } from '$lib/stores/sessions.svelte';
+  import { authStore } from '$lib/stores/auth.svelte';
   import { wsStore } from '$lib/stores/websocket.svelte';
+  import { toastStore } from '$lib/stores/toast.svelte';
+  import { getModKeyName } from '$lib/utils/platform';
   import { Plus, Search, Pencil, Trash2, Check, X, MessageSquare } from 'lucide-svelte';
   import AnimatedStatusIcon from './AnimatedStatusIcon.svelte';
+  import ConfirmDialog from './ConfirmDialog.svelte';
 
   interface Props {
     currentSessionId?: string;
+    onNewSession?: () => void;
   }
 
-  let { currentSessionId = $bindable('') }: Props = $props();
+  let { currentSessionId = $bindable(''), onNewSession }: Props = $props();
 
   let editingId = $state<string>('');
   let editTitle = $state<string>('');
   let confirmDeleteId = $state<string>('');
+  let showConfirmDialog = $state<boolean>(false);
+  let sessionToDeleteId = $state<string>('');
 
   onMount(() => {
-    sessionStore.fetchSessions();
   });
+
+  // Track last synced session to prevent re-loading
+  let lastSyncedSessionId = $state('');
 
   // Sync activeSessionId to local currentSessionId
   $effect(() => {
-    if (sessionStore.activeSessionId && sessionStore.activeSessionId !== currentSessionId) {
+    if (sessionStore.activeSessionId && sessionStore.activeSessionId !== currentSessionId && sessionStore.activeSessionId !== lastSyncedSessionId) {
       currentSessionId = sessionStore.activeSessionId;
+      lastSyncedSessionId = sessionStore.activeSessionId;
       // Load historical messages if we just switched to this session from outside (e.g. initial load)
       void loadHistory(sessionStore.activeSessionId);
     }
@@ -58,13 +68,47 @@
 
   function confirmDelete(e: MouseEvent, id: string) {
     e.stopPropagation();
-    if (e.shiftKey || confirmDeleteId === id) {
+    
+    // Shift-click bypasses all confirmation
+    if (e.shiftKey) {
+      sessionStore.deleteSession(id);
+      return;
+    }
+
+    const isRunning = wsStore.isSessionRunning(id);
+    
+    if (isRunning) {
+      sessionToDeleteId = id;
+      showConfirmDialog = true;
+      return;
+    }
+
+    // Standard double-click for idle sessions
+    if (confirmDeleteId === id) {
       sessionStore.deleteSession(id);
       confirmDeleteId = '';
     } else {
       confirmDeleteId = id;
       setTimeout(() => { if (confirmDeleteId === id) confirmDeleteId = ''; }, 3000);
     }
+  }
+
+  function handleConfirmDelete() {
+    if (sessionToDeleteId) {
+      sessionStore.deleteSession(sessionToDeleteId);
+      sessionToDeleteId = '';
+    }
+    showConfirmDialog = false;
+  }
+
+  function handleCancelDelete() {
+    sessionToDeleteId = '';
+    showConfirmDialog = false;
+  }
+
+  async function handleCreateSession() {
+    await sessionStore.createSession();
+    onNewSession?.();
   }
 
   function formatTime(ts: number): string {
@@ -84,8 +128,8 @@
     <button
       class="p-1.5 rounded-lg transition-colors hover:bg-[var(--color-surface-3)] flex items-center justify-center"
       style="color: var(--color-text-secondary);"
-      onclick={() => sessionStore.createSession()}
-      title="New session (Ctrl+N)"
+      onclick={handleCreateSession}
+      title="New session ({getModKeyName()}N)"
     >
       <Plus size={16} />
     </button>
@@ -191,3 +235,14 @@
     {/if}
   </div>
 </div>
+
+<ConfirmDialog
+  open={showConfirmDialog}
+  title="Delete Active Session?"
+  message="This session is currently running. Deleting it will cancel all active workers and their progress. Are you sure you want to continue?"
+  confirmLabel="Delete Session"
+  cancelLabel="Cancel"
+  variant="danger"
+  onConfirm={handleConfirmDelete}
+  onCancel={handleCancelDelete}
+/>
