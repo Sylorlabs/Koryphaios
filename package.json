@@ -9,6 +9,9 @@
     "dev:frontend": "bun run --filter frontend dev",
     "build": "bun run --filter '*' build",
     "typecheck": "bun run --filter '*' typecheck",
-    "check": "bun run --filter backend typecheck && bun run --filter frontend check:strict"
+    "check": "bun run --filter backend typecheck && bun run --filter frontend check:strict",
+    "test": "bun run --filter backend test",
+    "test:all": "bun run --filter backend test:all",
+    "eval": "bun run scripts/run-eval.ts"
   }
 }
