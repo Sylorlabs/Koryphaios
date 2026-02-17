@@ -4,21 +4,7 @@
 import { readFileSync, writeFileSync, existsSync, statSync, readdirSync, mkdirSync, unlinkSync, renameSync, copyFileSync } from "fs";
 import { join, relative, dirname, basename, resolve } from "path";
 import type { Tool, ToolContext, ToolCallInput, ToolCallOutput } from "./registry";
-
-/**
- * Helper to enforce scoped filesystem access.
- * Returns true if the path is allowed, or if no restrictions are set.
- */
-function checkPathAccess(absPath: string, ctx: ToolContext): boolean {
-  if (!ctx.allowedPaths || ctx.allowedPaths.length === 0) return true;
-  
-  const normalizedPath = resolve(absPath);
-  return ctx.allowedPaths.some(p => {
-    const absAllowed = resolve(ctx.workingDirectory, p);
-    // Allow if it's the exact file or inside the allowed directory
-    return normalizedPath === absAllowed || normalizedPath.startsWith(absAllowed + "/");
-  });
-}
+import { validatePathAccess } from "../security";
 
 // ─── Read File ──────────────────────────────────────────────────────────────
 
@@ -44,12 +30,14 @@ export class ReadFileTool implements Tool {
     };
 
     const absPath = filePath.startsWith("/") ? filePath : join(ctx.workingDirectory, filePath);
+    const allowedRoots = ctx.isSandboxed ? ctx.allowedPaths : ["/"];
+    const access = validatePathAccess(absPath, allowedRoots);
 
-    if (!checkPathAccess(absPath, ctx)) {
+    if (!access.allowed) {
       return { 
         callId: call.id, 
         name: this.name, 
-        output: `Error: Access denied. This agent is not authorized to read path: ${filePath}. Ask the Manager for access.`, 
+        output: `Error: Access denied. ${access.reason}`, 
         isError: true, 
         durationMs: 0 
       };
@@ -97,12 +85,14 @@ export class WriteFileTool implements Tool {
   async run(ctx: ToolContext, call: ToolCallInput): Promise<ToolCallOutput> {
     const { path: filePath, content } = call.input as { path: string; content: string };
     const absPath = filePath.startsWith("/") ? filePath : join(ctx.workingDirectory, filePath);
+    const allowedRoots = ctx.isSandboxed ? ctx.allowedPaths : ["/"];
+    const access = validatePathAccess(absPath, allowedRoots);
 
-    if (!checkPathAccess(absPath, ctx)) {
+    if (!access.allowed) {
       return { 
         callId: call.id, 
         name: this.name, 
-        output: `Error: Access denied. This agent is not authorized to write to path: ${filePath}.`, 
+        output: `Error: Access denied. ${access.reason}`, 
         isError: true, 
         durationMs: 0 
       };
@@ -178,12 +168,14 @@ export class EditFileTool implements Tool {
       new_str: string;
     };
     const absPath = filePath.startsWith("/") ? filePath : join(ctx.workingDirectory, filePath);
+    const allowedRoots = ctx.isSandboxed ? ctx.allowedPaths : ["/"];
+    const access = validatePathAccess(absPath, allowedRoots);
 
-    if (!checkPathAccess(absPath, ctx)) {
+    if (!access.allowed) {
       return { 
         callId: call.id, 
         name: this.name, 
-        output: `Error: Access denied. This agent is not authorized to edit path: ${filePath}.`, 
+        output: `Error: Access denied. ${access.reason}`, 
         isError: true, 
         durationMs: 0 
       };
@@ -376,6 +368,12 @@ export class LsTool implements Tool {
       ? dirPath.startsWith("/") ? dirPath : join(ctx.workingDirectory, dirPath)
       : ctx.workingDirectory;
 
+    // Check directory access (read-only is fine for ls, but still needs scope check)
+    const access = validatePathAccess(absPath, ctx.allowedPaths);
+    if (!access.allowed) {
+      return { callId: call.id, name: this.name, output: `Error: Access denied. ${access.reason}`, isError: true, durationMs: 0 };
+    }
+
     if (!existsSync(absPath)) {
       return { callId: call.id, name: this.name, output: `Path not found: ${absPath}`, isError: true, durationMs: 0 };
     }
@@ -428,12 +426,14 @@ export class DeleteFileTool implements Tool {
   async run(ctx: ToolContext, call: ToolCallInput): Promise<ToolCallOutput> {
     const { path: filePath } = call.input as { path: string };
     const absPath = filePath.startsWith("/") ? filePath : join(ctx.workingDirectory, filePath);
+    const allowedRoots = ctx.isSandboxed ? ctx.allowedPaths : ["/"];
+    const access = validatePathAccess(absPath, allowedRoots);
 
-    if (!checkPathAccess(absPath, ctx)) {
+    if (!access.allowed) {
       return { 
         callId: call.id, 
         name: this.name, 
-        output: `Error: Access denied. This agent is not authorized to delete path: ${filePath}.`, 
+        output: `Error: Access denied. ${access.reason}`, 
         isError: true, 
         durationMs: 0 
       };
@@ -496,11 +496,14 @@ export class MoveFileTool implements Tool {
     const absSrc = source.startsWith("/") ? source : join(ctx.workingDirectory, source);
     const absDest = destination.startsWith("/") ? destination : join(ctx.workingDirectory, destination);
 
-    if (!checkPathAccess(absSrc, ctx) || !checkPathAccess(absDest, ctx)) {
+    const accessSrc = validatePathAccess(absSrc, ctx.allowedPaths);
+    const accessDest = validatePathAccess(absDest, ctx.allowedPaths);
+
+    if (!accessSrc.allowed || !accessDest.allowed) {
       return { 
         callId: call.id, 
         name: this.name, 
-        output: `Error: Access denied. Authorized paths for this agent: ${ctx.allowedPaths?.join(', ') || 'none'}`, 
+        output: `Error: Access denied. Source or destination is outside allowed scope.`, 
         isError: true, 
         durationMs: 0 
       };
@@ -562,6 +565,10 @@ export class DiffTool implements Tool {
     };
 
     const absA = path_a.startsWith("/") ? path_a : join(ctx.workingDirectory, path_a);
+    // Note: Diff is read-only, but still check scope for security
+    const accessA = validatePathAccess(absA, ctx.allowedPaths);
+    if (!accessA.allowed) return { callId: call.id, name: this.name, output: `Access denied: ${accessA.reason}`, isError: true, durationMs: 0 };
+
 
     if (!existsSync(absA)) {
       return { callId: call.id, name: this.name, output: `File not found: ${absA}`, isError: true, durationMs: 0 };
@@ -571,6 +578,9 @@ export class DiffTool implements Tool {
       if (path_b) {
         // Diff two files using system diff
         const absB = path_b.startsWith("/") ? path_b : join(ctx.workingDirectory, path_b);
+        const accessB = validatePathAccess(absB, ctx.allowedPaths);
+        if (!accessB.allowed) return { callId: call.id, name: this.name, output: `Access denied: ${accessB.reason}`, isError: true, durationMs: 0 };
+
         if (!existsSync(absB)) {
           return { callId: call.id, name: this.name, output: `File not found: ${absB}`, isError: true, durationMs: 0 };
         }
@@ -641,12 +651,14 @@ export class PatchTool implements Tool {
     };
 
     const absPath = filePath.startsWith("/") ? filePath : join(ctx.workingDirectory, filePath);
+    const allowedRoots = ctx.isSandboxed ? ctx.allowedPaths : ["/"];
+    const access = validatePathAccess(absPath, allowedRoots);
 
-    if (!checkPathAccess(absPath, ctx)) {
+    if (!access.allowed) {
       return { 
         callId: call.id, 
         name: this.name, 
-        output: `Error: Access denied. Path ${filePath} is not in your authorized scope.`, 
+        output: `Error: Access denied. ${access.reason}`, 
         isError: true, 
         durationMs: 0 
       };

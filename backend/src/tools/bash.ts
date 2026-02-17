@@ -5,6 +5,7 @@ import { resolve, relative, isAbsolute } from "path";
 import type { Tool, ToolContext, ToolCallInput, ToolCallOutput } from "./registry";
 import { validateBashCommand } from "../security";
 import { toolLog } from "../logger";
+import { shellManager } from "./shell-manager";
 
 const MAX_OUTPUT_BYTES = 512_000; // 512KB output limit per command
 
@@ -44,17 +45,27 @@ Network access via curl/wget is blocked unless explicitly authorized.`;
       },
       timeout: {
         type: "number",
-        description: "Timeout in seconds. Defaults to 120.",
+        description: "Timeout in seconds for foreground commands. Defaults to 120.",
+      },
+      isBackground: {
+        type: "boolean",
+        description: "Whether to run the command in the background and keep it running. Use for long-lived processes like servers.",
+      },
+      processName: {
+        type: "string",
+        description: "Optional descriptive name for the background process.",
       },
     },
     required: ["command"],
   };
 
   async run(ctx: ToolContext, call: ToolCallInput): Promise<ToolCallOutput> {
-    const { command, workingDirectory, timeout } = call.input as {
+    const { command, workingDirectory, timeout, isBackground, processName } = call.input as {
       command: string;
       workingDirectory?: string;
       timeout?: number;
+      isBackground?: boolean;
+      processName?: string;
     };
 
     // 1. Resolve and Validate Working Directory
@@ -62,11 +73,10 @@ Network access via curl/wget is blocked unless explicitly authorized.`;
       ? (isAbsolute(workingDirectory) ? workingDirectory : resolve(ctx.workingDirectory, workingDirectory))
       : ctx.workingDirectory;
 
-    // Ensure CWD is within project root (always enforced for sub-agents)
-    const rel = relative(ctx.workingDirectory, requestedCwd);
-    const isInsideProject = !rel.startsWith("..") && !isAbsolute(rel);
-    
-    // Only Manager or explicitly unsandboxed agents can break out of project root
+    // Check if requested path is inside project
+    const isInsideProject = requestedCwd.startsWith(ctx.workingDirectory);
+
+    // Only enforce project root check if sandboxed
     if (ctx.isSandboxed && !isInsideProject) {
       return {
         callId: call.id,
@@ -78,7 +88,7 @@ Network access via curl/wget is blocked unless explicitly authorized.`;
     }
 
     // 2. Validate Command Content
-    const validation = validateBashCommand(command);
+    const validation = validateBashCommand(command, ctx.isSandboxed);
     if (!validation.safe) {
       toolLog.warn({ command: command.slice(0, 100), reason: validation.reason }, "Blocked dangerous command");
       return {
@@ -106,6 +116,19 @@ Network access via curl/wget is blocked unless explicitly authorized.`;
           durationMs: 0,
         };
       }
+    }
+
+    // 4. Background Execution
+    if (isBackground) {
+      toolLog.info({ command: command.slice(0, 200), name: processName }, "Starting background process");
+      const bgProc = shellManager.startProcess(processName || "bg-proc", command, requestedCwd);
+      return {
+        callId: call.id,
+        name: this.name,
+        output: `Background process started.\nID: ${bgProc.id}\nName: ${bgProc.name}\nPID: ${bgProc.pid}\nUse shell_manage to view logs or kill the process.`,
+        isError: false,
+        durationMs: 0,
+      };
     }
 
     const timeoutMs = (timeout ?? 120) * 1000;
