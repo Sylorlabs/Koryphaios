@@ -28,6 +28,15 @@
       submit(otherValue);
     }
   }
+
+  $effect(() => {
+    if (!pendingQuestion) {
+      showOther = false;
+      otherValue = "";
+      return;
+    }
+    showOther = pendingQuestion.allowOther && pendingQuestion.options.length === 0;
+  });
 </script>
 
 {#if pendingQuestion}

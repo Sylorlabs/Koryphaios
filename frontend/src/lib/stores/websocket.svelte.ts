@@ -71,7 +71,7 @@ let koryThought = $state<string>("");
 let koryPhase = $state<string>("");
 let isYoloMode = $state<boolean>(false);
 let pendingPermissions = $state<PermissionRequest[]>([]);
-let pendingQuestion = $state<{ question: string; options: string[]; allowOther: boolean } | null>(null);
+let pendingQuestion = $state<{ requestId?: string; question: string; options: string[]; allowOther: boolean } | null>(null);
 let sessionChanges = $state<Map<string, ChangeSummary[]>>(new Map());
 
 // Initialize manager agent state
@@ -437,6 +437,7 @@ function handleMessage(msg: WSMessage) {
     case "kory.ask_user": {
       const p = msg.payload as any;
       pendingQuestion = {
+        requestId: p.requestId,
         question: p.question,
         options: p.options,
         allowOther: p.allowOther,
@@ -739,6 +740,7 @@ function sendUserInput(sessionId: string, selection: string, text?: string) {
     wsConnection.send(JSON.stringify({
       type: "user_input",
       sessionId,
+      requestId: pendingQuestion?.requestId,
       selection,
       text,
       timestamp: Date.now(),

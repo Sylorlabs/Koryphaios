@@ -225,7 +225,7 @@ export class KoryManager {
   private memoryDir: string;
   private isProcessing = false;
   private isYoloMode = false;
-  private pendingUserInputs = new Map<string, (selection: string) => void>();
+  private pendingUserInputs = new Map<string, { sessionId: string; resolve: (selection: string) => void }>();
   private sessionChanges = new Map<string, ChangeSummary[]>();
   private snapshotManager: SnapshotManager;
   public readonly git: GitManager;
@@ -303,10 +303,24 @@ export class KoryManager {
     getDb().run("UPDATE sessions SET workflow_state = ? WHERE id = ?", [state, sessionId]);
   }
 
-  handleUserInput(sessionId: string, selection: string, text?: string) {
-    const key = `${sessionId}`;
-    const resolver = this.pendingUserInputs.get(key);
-    if (resolver) { resolver(text || selection); this.pendingUserInputs.delete(key); }
+  handleUserInput(sessionId: string, selection: string, text?: string, requestId?: string) {
+    const reply = text || selection;
+    if (requestId) {
+      const exact = this.pendingUserInputs.get(requestId);
+      if (exact?.sessionId === sessionId) {
+        exact.resolve(reply);
+        this.pendingUserInputs.delete(requestId);
+        return;
+      }
+    }
+
+    // Backward-compatible fallback for older clients that don't send requestId.
+    const fallbackKey = Array.from(this.pendingUserInputs.entries()).find(([, pending]) => pending.sessionId === sessionId)?.[0];
+    if (!fallbackKey) return;
+    const pending = this.pendingUserInputs.get(fallbackKey);
+    if (!pending) return;
+    pending.resolve(reply);
+    this.pendingUserInputs.delete(fallbackKey);
   }
 
   handleSessionResponse(sessionId: string, accepted: boolean) {
@@ -449,6 +463,22 @@ export class KoryManager {
     const likelyAmbiguousShort = trimmed.length < 10 && /\b(fix|make|build|help)\b/.test(lower);
     if (likelyAmbiguousShort) return true;
 
+    const specificityMarkers = [
+      /`[^`]+`/g, // inline code
+      /```[\s\S]*?```/g, // fenced code
+      /\b[a-z0-9_\-/]+\.(ts|tsx|js|jsx|py|go|rs|java|kt|cpp|c|h|hpp|json|yml|yaml|md)\b/gi, // file names
+      /\b(src|backend|frontend|api|components|services|tests?)\//gi, // paths
+      /\b(port|localhost|127\.0\.0\.1|http:\/\/|https:\/\/|npm|bun|pnpm|yarn|cargo|pytest|jest|vitest)\b/gi, // runtime/tool anchors
+      /\b(function|class|method|interface|endpoint|route|schema|migration)\s+[A-Za-z_][\w-]*/g, // named symbols
+      /^\s*[-*]\s+/gm, // bullet lists
+      /^\s*\d+[.)]\s+/gm, // numbered lists
+    ].reduce((count, pattern) => count + ((trimmed.match(pattern) ?? []).length > 0 ? 1 : 0), 0);
+
+    if (trimmed.length > 80 && specificityMarkers >= 2) return false;
+
+    const hasConcreteAnchors = specificityMarkers >= 2;
+    if (hasConcreteAnchors) return false;
+
     const clearlySimple = trimmed.length < 20 && (lower.includes("fix") || lower.includes("typo"));
     if (clearlySimple) return false;
 
@@ -467,6 +497,7 @@ export class KoryManager {
       return { enrichedMessage: userMessage, asked: false };
     }
 
+    emitTrace(KORY_IDENTITY.id, "clarification_attempted", { enabled: clarifyEnabled });
     const provider = await this.providers.resolveProvider(routing.model, routing.provider);
     if (!provider) return { enrichedMessage: userMessage, asked: false };
 
@@ -490,6 +521,7 @@ export class KoryManager {
         if (event.type === "content_delta") rawDecision += event.content ?? "";
       }
     } catch (err) {
+      emitTrace(KORY_IDENTITY.id, "clarification_fallback", { reason: "provider_error" });
       koryLog.warn({ err }, "Clarification gate failed, continuing without clarification");
       return { enrichedMessage: userMessage, asked: false };
     } finally {
@@ -498,9 +530,11 @@ export class KoryManager {
 
     const decision = resolveClarificationDecision(rawDecision, maxQuestions);
     if (decision.action === "proceed") {
+      emitTrace(KORY_IDENTITY.id, "clarification_proceeded", { action: decision.action });
       return { enrichedMessage: userMessage, asked: false };
     }
 
+    emitTrace(KORY_IDENTITY.id, "clarification_asked_count", { count: decision.questions.length });
     this.emitThought(sessionId, "analyzing", `Need clarification: ${decision.reason}`);
     const answers: string[] = [];
 
@@ -514,6 +548,7 @@ export class KoryManager {
         answers.push(answer);
       }
     } catch (err) {
+      emitTrace(KORY_IDENTITY.id, "clarification_fallback", { reason: "user_input_failed" });
       koryLog.warn({ err }, "Clarification Q&A failed, continuing without clarification");
       return { enrichedMessage: userMessage, asked: false };
     }
@@ -532,21 +567,25 @@ export class KoryManager {
   }
 
   private async askUser(sessionId: string, payload: KoryAskUserPayload): Promise<string> {
+    const requestId = `${sessionId}:${nanoid(8)}`;
     this.updateWorkflowState(sessionId, "waiting_user");
-    this.emitWSMessage(sessionId, "kory.ask_user", payload);
+    this.emitWSMessage(sessionId, "kory.ask_user", { ...payload, requestId });
 
-    const key = `${sessionId}`;
     return new Promise((resolve, reject) => {
       const timeout = setTimeout(() => {
-        this.pendingUserInputs.delete(key);
+        this.pendingUserInputs.delete(requestId);
         this.updateWorkflowState(sessionId, "analyzing");
+        emitTrace(KORY_IDENTITY.id, "clarification_timeout", { requestId });
         reject(new Error("Timed out waiting for user clarification input"));
       }, 120_000);
 
-      this.pendingUserInputs.set(key, (selection: string) => {
+      this.pendingUserInputs.set(requestId, {
+        sessionId,
+        resolve: (selection: string) => {
         clearTimeout(timeout);
         this.updateWorkflowState(sessionId, "analyzing");
         resolve(selection);
+        }
       });
     });
   }

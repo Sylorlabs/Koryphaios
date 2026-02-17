@@ -23,4 +23,16 @@ describe("clarification gate decision parsing", () => {
     const decision = resolveClarificationDecision("not-json-response", 4);
     expect(decision).toEqual({ action: "proceed" });
   });
+
+  test("rejects disallowed yes/no-only clarification questions", () => {
+    const raw = JSON.stringify({
+      action: "clarify",
+      questions: ["Is this okay?"],
+      reason: "Need user direction",
+      assumptions: [],
+    });
+
+    const decision = parseClarificationDecision(raw, 4);
+    expect(decision).toBeNull();
+  });
 });

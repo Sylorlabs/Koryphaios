@@ -941,7 +941,7 @@ async function main() {
           const msg = JSON.parse(String(message));
           if (msg.type === "pong") { wsManager.handlePong(ws.data.id); return; }
           if (msg.type === "subscribe_session") { wsManager.subscribeClientToSession(ws.data.id, msg.sessionId); }
-          else if (msg.type === "user_input") { kory.handleUserInput(msg.sessionId, msg.selection, msg.text); }
+          else if (msg.type === "user_input") { kory.handleUserInput(msg.sessionId, msg.selection, msg.text, msg.requestId); }
           else if (msg.type === "session.accept_changes") { kory.handleSessionResponse(msg.sessionId, true); }
           else if (msg.type === "session.reject_changes") { kory.handleSessionResponse(msg.sessionId, false); }
           else if (msg.type === "toggle_yolo") { kory.setYoloMode(!!msg.enabled); }
