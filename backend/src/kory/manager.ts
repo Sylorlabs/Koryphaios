@@ -154,14 +154,14 @@ Rules:
 - Avoid yes/no-only questions unless they unlock a major branch (example: existing project or new?).
 - Maximum questions is provided by user prompt; never exceed it.`;
 
-const ClarifyProceedSchema = z.object({ action: z.literal("proceed") });
+const ClarifyProceedSchema = z.object({ action: z.literal("proceed") }).strict();
 const ClarifyQuestionSchema = z.string().trim().min(1).max(140);
 const ClarifySchema = z.object({
   action: z.literal("clarify"),
   questions: z.array(ClarifyQuestionSchema).min(1),
   reason: z.string().trim().min(1),
   assumptions: z.array(z.string().trim().min(1)).default([]),
-});
+}).strict();
 
 type ClarificationDecision = z.infer<typeof ClarifyProceedSchema> | z.infer<typeof ClarifySchema>;
 
@@ -178,7 +178,16 @@ const YES_NO_ONLY_START = /^(is|are|do|does|did|can|could|should|would|will|have
 
 function extractJsonObject(raw: string): string {
   const trimmed = raw.trim();
+  if (!trimmed) return trimmed;
+  const fencedMatch = trimmed.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
+  if (fencedMatch?.[1]) {
+    const fenced = fencedMatch[1].trim();
+    if (fenced.startsWith("{") && fenced.endsWith("}")) return fenced;
+  }
   if (trimmed.startsWith("{") && trimmed.endsWith("}")) return trimmed;
+  const objectStarts = (trimmed.match(/\{/g) ?? []).length;
+  const objectEnds = (trimmed.match(/\}/g) ?? []).length;
+  if (objectStarts > 1 && objectEnds > 1) return "";
   const first = trimmed.indexOf("{");
   const last = trimmed.lastIndexOf("}");
   if (first >= 0 && last > first) return trimmed.slice(first, last + 1);
@@ -281,7 +290,14 @@ export class KoryManager {
         this.taskStore.update(state.task.id, { status: "interrupted" });
       }
     }
+    this.clearPendingUserInputsForSession(sessionId);
     koryLog.info({ sessionId }, "Cancelled all session workers");
+  }
+
+  private clearPendingUserInputsForSession(sessionId: string) {
+    for (const [requestId, pending] of this.pendingUserInputs) {
+      if (pending.sessionId === sessionId) this.pendingUserInputs.delete(requestId);
+    }
   }
 
   getStatus() {
@@ -315,8 +331,14 @@ export class KoryManager {
     }
 
     // Backward-compatible fallback for older clients that don't send requestId.
-    const fallbackKey = Array.from(this.pendingUserInputs.entries()).find(([, pending]) => pending.sessionId === sessionId)?.[0];
-    if (!fallbackKey) return;
+    const sessionKeys = Array.from(this.pendingUserInputs.entries())
+      .filter(([, pending]) => pending.sessionId === sessionId)
+      .map(([key]) => key);
+    if (sessionKeys.length === 0) return;
+    const fallbackKey = sessionKeys[sessionKeys.length - 1]!;
+    if (sessionKeys.length > 1) {
+      koryLog.warn({ sessionId, pendingCount: sessionKeys.length }, "Received user input without requestId while multiple prompts are pending; using latest prompt");
+    }
     const pending = this.pendingUserInputs.get(fallbackKey);
     if (!pending) return;
     pending.resolve(reply);

@@ -35,4 +35,16 @@ describe("clarification gate decision parsing", () => {
     const decision = parseClarificationDecision(raw, 4);
     expect(decision).toBeNull();
   });
+
+  test("rejects responses with extra keys (strict schema)", () => {
+    const raw = JSON.stringify({ action: "proceed", foo: "bar" });
+    const decision = parseClarificationDecision(raw, 4);
+    expect(decision).toBeNull();
+  });
+
+  test("rejects ambiguous output containing multiple JSON objects", () => {
+    const raw = '{"action":"proceed"}\n{"action":"proceed"}';
+    const decision = parseClarificationDecision(raw, 4);
+    expect(decision).toBeNull();
+  });
 });
