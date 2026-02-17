@@ -1,7 +1,7 @@
 // Session token authentication
 // Simple JWT-like token system for session authentication
 
-import { createHmac, randomBytes } from "crypto";
+import { createHmac, randomBytes, timingSafeEqual } from "crypto";
 import { serverLog } from "./logger";
 import { ValidationError } from "./errors";
 
@@ -57,7 +57,10 @@ export function verifySessionToken(token: string): TokenPayload {
       .update(payloadBase64)
       .digest("base64url");
 
-    if (signature !== expectedSignature) {
+    // Timing-safe comparison to prevent timing attacks
+    const sigBuf = Buffer.from(signature, "base64url");
+    const expectedBuf = Buffer.from(expectedSignature, "base64url");
+    if (sigBuf.length !== expectedBuf.length || !timingSafeEqual(sigBuf, expectedBuf)) {
       throw new ValidationError("Invalid token signature");
     }
 
@@ -104,19 +107,30 @@ export function extractTokenFromRequest(req: Request): string | null {
   return null;
 }
 
+export class AuthError extends Error {
+  constructor(message: string, public statusCode: number = 401) {
+    super(message);
+    this.name = "AuthError";
+  }
+}
+
 /**
  * Middleware to require session token authentication
- * Returns sessionId if valid, throws ValidationError if not
+ * Returns sessionId if valid, throws AuthError if not
  */
 export function requireSessionAuth(req: Request): string {
   const token = extractTokenFromRequest(req);
   
   if (!token) {
-    throw new ValidationError("Authentication required", { code: "AUTH_REQUIRED" });
+    throw new AuthError("Missing session token");
   }
 
-  const payload = verifySessionToken(token);
-  return payload.sessionId;
+  try {
+    const payload = verifySessionToken(token);
+    return payload.sessionId;
+  } catch (err) {
+    throw new AuthError("Invalid or expired session token");
+  }
 }
 
 /**
