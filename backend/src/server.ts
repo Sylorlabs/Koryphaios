@@ -197,14 +197,25 @@ async function main() {
 
       // Sessions
       if (url.pathname === "/api/sessions" && method === "GET") {
-        return json({ ok: true, data: sessions.list() }, 200, corsHeaders);
+        try {
+          const data = sessions.list();
+          return json({ ok: true, data }, 200, corsHeaders);
+        } catch (err) {
+          serverLog.error("Error fetching sessions:", err);
+          return json({ ok: false, error: "Failed to fetch sessions" }, 500, corsHeaders);
+        }
       }
 
       if (url.pathname === "/api/sessions" && method === "POST") {
-        const body = await req.json() as CreateSessionRequest;
-        const title = sanitizeString(body.title, SESSION.MAX_TITLE_LENGTH);
-        const session = sessions.create(title ?? undefined, body.parentSessionId);
-        return json({ ok: true, data: session }, 201, corsHeaders);
+        try {
+          const body = await req.json() as CreateSessionRequest;
+          const title = sanitizeString(body.title, SESSION.MAX_TITLE_LENGTH);
+          const session = sessions.create(title ?? undefined, body.parentSessionId);
+          return json({ ok: true, data: session }, 201, corsHeaders);
+        } catch (err) {
+          serverLog.error("Error creating session:", err);
+          return json({ ok: false, error: "Failed to create session" }, 500, corsHeaders);
+        }
       }
 
       // Session by ID routes — parse path segments

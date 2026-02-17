@@ -114,6 +114,8 @@ function createThemeStore() {
     const accentVars = ACCENT_COLORS[accent];
     const root = document.documentElement;
 
+    if (!vars || !accentVars) return;
+
     for (const [key, val] of Object.entries(vars)) {
       root.style.setProperty(key, val);
     }

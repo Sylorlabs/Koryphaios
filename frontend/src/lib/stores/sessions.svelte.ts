@@ -15,16 +15,18 @@ let loading = $state<boolean>(false);
 async function fetchSessions() {
   if (!browser) return;
   
+  loading = true;
   try {
-    const res = await fetch('/api/sessions');
+    const res = await fetch('/api/sessions', { signal: AbortSignal.timeout(5000) });
     if (!res.ok) {
       const text = await res.text();
       console.error('fetchSessions failed', { status: res.status, body: text });
       toastStore.error(`Failed to load sessions (${res.status})`);
+      loading = false;
       return;
     }
     const data = await res.json();
-    if (data.ok) {
+    if (data.ok && Array.isArray(data.data)) {
       sessions = data.data;
       // Auto-select first session if none active
       if (!activeSessionId && sessions.length > 0) {
@@ -37,6 +39,8 @@ async function fetchSessions() {
   } catch (err) {
     console.error('fetchSessions exception', err);
     toastStore.error('Failed to load sessions');
+  } finally {
+    loading = false;
   }
 }
 
