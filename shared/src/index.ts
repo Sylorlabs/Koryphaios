@@ -10,6 +10,7 @@ export const ProviderName = {
   XAI: "xai",
   // Aggregators
   OpenRouter: "openrouter",
+  Cline: "cline",
   Groq: "groq",
   Copilot: "copilot",
   // Enterprise
@@ -89,6 +90,8 @@ export const ProviderName = {
   // Qwen
   Qwen: "qwen",
   Alibaba: "alibaba",
+  ZhipuAI: "zhipuai",
+  ModelScope: "modelscope",
   // Chrome
   ChromeAI: "chromeai",
   // Requesty
@@ -102,6 +105,23 @@ export const ProviderName = {
   KlingAI: "klingai",
   // Prodia
   Prodia: "prodia",
+  // Additional providers from models.dev
+  NovitaAI: "novita-ai",
+  Upstage: "upstage",
+  V0: "v0",
+  SiliconFlow: "siliconflow",
+  Abacus: "abacus",
+  Llama: "llama",
+  Vultr: "vultr",
+  WandB: "wandb",
+  Poe: "poe",
+  GithubModels: "github-models",
+  Inference: "inference",
+  Submodel: "submodel",
+  Synthetic: "synthetic",
+  Moark: "moark",
+  Nova: "nova",
+  Friendli: "friendli",
   // Legacy
   Codex: "codex",
   Antigravity: "antigravity",
@@ -119,13 +139,13 @@ export interface ModelDef {
   apiModelId?: string;
   contextWindow: number;
   maxOutputTokens: number;
-  costPerMInputTokens: number;
-  costPerMOutputTokens: number;
+  costPerMInputTokens?: number;
+  costPerMOutputTokens?: number;
   costPerMInputCached?: number;
   costPerMOutputCached?: number;
-  canReason: boolean;
-  supportsAttachments: boolean;
-  supportsStreaming: boolean;
+  canReason?: boolean;
+  supportsAttachments?: boolean;
+  supportsStreaming?: boolean;
   tier?: ModelTier;
   isGeneric?: boolean;
 }
@@ -305,7 +325,8 @@ export type WSEventType =
   | "kory.routing"
   | "kory.verification"
   | "kory.task_breakdown"
-  | "kory.ask_user";
+  | "kory.ask_user"
+  | "session.git_commit";
 
 export interface WSMessage<T = unknown> {
   type: WSEventType;
@@ -452,6 +473,15 @@ export interface KoryphaiosConfig {
     coder: { model: string; maxTokens?: number; reasoningLevel?: string };
     task: { model: string; maxTokens?: number };
   };
+  /** Safety limits for agent execution */
+  safety?: {
+    /** Maximum tokens per turn for LLM output (default: 4096) */
+    maxTokensPerTurn?: number;
+    /** Maximum file size in bytes for file operations (default: 10MB) */
+    maxFileSizeBytes?: number;
+    /** Tool execution timeout in milliseconds (default: 60000) */
+    toolExecutionTimeoutMs?: number;
+  };
   /** Mapping of worker domains to specific models. Example: "ui": "openai:gpt-4.1" */
   assignments?: Partial<Record<WorkerDomain, string>>;
   /** Per-model fallback chains. When a model's provider is unavailable or quota-limited,
@@ -488,6 +518,10 @@ export interface APIResponse<T = unknown> {
   ok: boolean;
   data?: T;
   error?: string;
+  message?: string;
+  status?: string;
+  sessionId?: string;
+  checks?: unknown;
 }
 
 export interface SendMessageRequest {
