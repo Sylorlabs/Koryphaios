@@ -6,7 +6,7 @@ node_modules/
 build/
 .svelte-kit/
 
-# Data
+# Data & secrets
 .koryphaios/
 
 # Environment
@@ -14,17 +14,21 @@ build/
 .env.local
 .env.*.local
 
+# Logs
+*.log
+*.log.*
+backend/server*.log
+frontend/frontend*.log
+
 # OS
 .DS_Store
 Thumbs.db
-
-# Reference (keep for now, remove later)
-# opencode-reference/
 
 # IDE
 .vscode/
 .idea/
 *.swp
 *.swo
-opencode-reference/
+
+# Reference (excluded from repo)
 opencode-reference/

@@ -1,7 +1,8 @@
 // File tools — read, write, edit, list, grep, glob.
 // Ported from OpenCode's tools/file.go, view.go, write.go, edit.go, grep.go, glob.go, ls.go.
 
-import { readFileSync, writeFileSync, existsSync, statSync, readdirSync, mkdirSync, unlinkSync, renameSync, copyFileSync } from "fs";
+import { readFileSync, existsSync, statSync, readdirSync, mkdirSync, unlinkSync, renameSync, copyFileSync } from "fs";
+import { writeFile } from "fs/promises";
 import { join, relative, dirname, basename, resolve } from "path";
 import type { Tool, ToolContext, ToolCallInput, ToolCallOutput } from "./registry";
 
@@ -126,7 +127,7 @@ export class WriteFileTool implements Tool {
         }
       }
 
-      writeFileSync(absPath, content, "utf-8");
+      await writeFile(absPath, content, "utf-8");
       const lines = content.split("\n").length;
 
       if (ctx.emitFileComplete) {
@@ -226,7 +227,7 @@ export class EditFileTool implements Tool {
         }
       }
 
-      writeFileSync(absPath, newContent, "utf-8");
+      await writeFile(absPath, newContent, "utf-8");
 
       if (ctx.emitFileComplete) {
         ctx.emitFileComplete({ path: absPath, totalLines: newContent.split("\n").length, operation: "edit" });
@@ -683,7 +684,7 @@ export class PatchTool implements Tool {
         content = content.replace(edit.old_str, edit.new_str);
       }
 
-      writeFileSync(absPath, content, "utf-8");
+      await writeFile(absPath, content, "utf-8");
 
       if (ctx.recordChange) {
         ctx.recordChange({

@@ -188,6 +188,85 @@ export class RateLimiter {
   }
 }
 
+// ─── URL Validation (SSRF Prevention) ───────────────────────────────────────
+
+import { lookup } from "dns/promises";
+import { isIP } from "net";
+
+/**
+ * Validates a URL to prevent SSRF and arbitrary file read.
+ *
+ * Checks:
+ * 1. Protocol must be http or https.
+ * 2. Hostname must not be a private/loopback IP.
+ * 3. Hostname must resolve to a public IP (DNS check).
+ *
+ * Fails closed: if DNS resolution fails, the URL is blocked.
+ */
+export async function validateUrl(urlStr: string): Promise<{ safe: boolean; reason?: string }> {
+  try {
+    const url = new URL(urlStr);
+
+    if (!["http:", "https:"].includes(url.protocol)) {
+      return { safe: false, reason: "Only HTTP and HTTPS protocols are allowed" };
+    }
+
+    let hostname = url.hostname;
+
+    // Handle IPv6 literals in brackets (e.g., [::1])
+    if (hostname.startsWith("[") && hostname.endsWith("]")) {
+      hostname = hostname.slice(1, -1);
+    }
+
+    // Check if hostname is an IP address
+    if (isIP(hostname)) {
+      if (isPrivateIP(hostname)) {
+        return { safe: false, reason: "Access to private IP addresses is restricted" };
+      }
+    } else {
+      // Resolve hostname — fail closed if DNS fails
+      try {
+        const { address } = await lookup(hostname);
+        if (isPrivateIP(address)) {
+          return { safe: false, reason: "Host resolves to a restricted IP address" };
+        }
+      } catch {
+        return { safe: false, reason: "DNS resolution failed — cannot verify host safety" };
+      }
+    }
+
+    return { safe: true };
+  } catch {
+    return { safe: false, reason: "Invalid URL format" };
+  }
+}
+
+function isPrivateIP(ip: string): boolean {
+  if (ip === "localhost") return true;
+
+  // IPv4
+  const parts = ip.split(".");
+  if (parts.length === 4) {
+    const first = parseInt(parts[0], 10);
+    const second = parseInt(parts[1], 10);
+
+    if (first === 127) return true;           // 127.0.0.0/8 loopback
+    if (first === 10) return true;            // 10.0.0.0/8 private
+    if (first === 192 && second === 168) return true; // 192.168.0.0/16 private
+    if (first === 172 && second >= 16 && second <= 31) return true; // 172.16.0.0/12 private
+    if (first === 169 && second === 254) return true; // 169.254.0.0/16 link-local
+    if (first === 0) return true;             // 0.0.0.0/8
+  }
+
+  // IPv6
+  if (ip === "::1" || ip === "0:0:0:0:0:0:0:1") return true; // loopback
+  const lower = ip.toLowerCase();
+  if (lower.startsWith("fc") || lower.startsWith("fd")) return true; // fc00::/7 unique local
+  if (lower.startsWith("fe80:")) return true; // fe80::/10 link-local
+
+  return false;
+}
+
 // ─── Token Generation (Secure) ───────────────────────────────────────────────
 
 /**
