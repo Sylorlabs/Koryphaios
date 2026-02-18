@@ -1,0 +1,17 @@
+bun test v1.2.14 (6a363a38)
+
+backend/src/errors.test.ts:
+(pass) serializeError > serializes a standard Error [3.17ms]
+(pass) serializeError > serializes a KoryphaiosError [0.22ms]
+(pass) serializeError > serializes a string error [0.06ms]
+(pass) serializeError > serializes a number error [0.03ms]
+(pass) serializeError > serializes an object that is not an Error [0.04ms]
+(pass) serializeError > serializes an error with a cause [0.07ms]
+(pass) serializeError > parses stack frames correctly (Node/Bun format with function name) [0.19ms]
+(pass) serializeError > identifies top project frame correctly [0.16ms]
+(pass) serializeError > falls back to first frame if no project frame found [0.07ms]
+
+ 9 pass
+ 0 fail
+ 26 expect() calls
+Ran 9 tests across 1 files. [81.00ms]

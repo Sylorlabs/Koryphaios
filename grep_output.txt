@@ -1,0 +1,10 @@
+backend/src/providers/anthropic.ts:import { detectClaudeCodeToken } from "./auth-utils";
+backend/src/providers/auth-utils.ts:export function detectClaudeCodeToken(): string | null {
+backend/src/providers/registry.ts:import { detectClaudeCodeToken } from "./auth-utils";
+backend/src/providers/registry.ts:        (pn === "anthropic" && (!!detectClaudeCodeToken() || isClaudeCodeCLI)) ||
+backend/src/providers/registry.ts:        (pn === "claude-code" && (!!detectClaudeCodeToken() || isClaudeCodeCLI)) ||
+backend/src/providers/registry.ts:        const isClaudeCodeAuth = config?.authToken?.startsWith("cli:claude") || detectClaudeCodeToken() !== null;
+backend/src/providers/registry.ts:      const isClaudeCodeAuth = config?.authToken?.startsWith("cli:claude") || detectClaudeCodeToken() !== null;
+backend/src/providers/registry.ts:        if (name === "anthropic" && detectClaudeCodeToken()) {
+backend/src/providers/registry.ts:        || (name === "anthropic" && !!detectClaudeCodeToken());
+backend/src/providers/registry.ts:          const claudeCodeToken = detectClaudeCodeToken();

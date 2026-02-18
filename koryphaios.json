@@ -1,0 +1,42 @@
+{
+  "providers": {
+    "anthropic": {
+      "name": "anthropic",
+      "disabled": true
+    },
+    "codex": {
+      "name": "codex",
+      "disabled": true
+    },
+    "google": {
+      "name": "google",
+      "disabled": true
+    }
+  },
+  "agents": {
+    "manager": {
+      "model": "claude-sonnet-4-5",
+      "reasoningLevel": "high"
+    },
+    "coder": {
+      "model": "claude-sonnet-4-5",
+      "maxTokens": 16384
+    },
+    "task": {
+      "model": "o4-mini",
+      "maxTokens": 8192
+    }
+  },
+  "server": {
+    "port": 3001,
+    "host": "127.0.0.1"
+  },
+  "dataDirectory": ".koryphaios",
+  "contextPaths": [
+    ".cursorrules",
+    "CLAUDE.md",
+    "AGENTS.md",
+    ".opencode.json",
+    "CONVENTIONS.md"
+  ]
+}
