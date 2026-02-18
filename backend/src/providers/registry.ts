@@ -18,18 +18,148 @@ import { resolveModel, getModelsForProvider } from "./types";
 // ─── Environment Variable Mapping (from OpenCode's config.go) ───────────────
 
 const ENV_API_KEY_MAP: Partial<Record<ProviderName, string[]>> = {
+  // Frontier (Major providers)
   anthropic: ["ANTHROPIC_API_KEY"],
   openai: ["OPENAI_API_KEY"],
   google: ["GEMINI_API_KEY", "GOOGLE_API_KEY"],
-  openrouter: ["OPENROUTER_API_KEY"],
-  groq: ["GROQ_API_KEY"],
   xai: ["XAI_API_KEY"],
+  // Aggregators
+  openrouter: ["OPENROUTER_API_KEY"],
+  cline: ["CLINE_API_KEY"],
+  groq: ["GROQ_API_KEY"],
+  copilot: [], // auth only
+  // Enterprise
   azure: ["AZURE_OPENAI_API_KEY"],
+  bedrock: ["AWS_ACCESS_KEY_ID"],
+  vertexai: ["GOOGLE_VERTEX_AI_API_KEY"],
+  // Local
+  local: [],
+  ollama: [],
+  lmstudio: [],
+  llamacpp: [],
+  ollamacloud: ["OLLAMA_CLOUD_API_KEY"],
+  // Chinese AI Providers
+  deepseek: ["DEEPSEEK_API_KEY"],
+  minimax: ["MINIMAX_API_KEY"],
+  moonshot: ["MOONSHOT_API_KEY"],
+  zai: ["ZAI_API_KEY"],
+  cortecs: ["CORTECS_API_KEY"],
+  stepfun: ["STEPFUN_API_KEY"],
+  // High Performance / Speed
+  cerebras: ["CEREBRAS_API_KEY"],
+  fireworks: ["FIREWORKS_API_KEY"],
+  deepinfra: ["DEEPINFRA_API_KEY"],
+  ionet: ["IONET_API_KEY"],
+  hyperbolic: ["HYPERBOLIC_API_KEY"],
+  // Open Source Platforms
+  huggingface: ["HUGGINGFACE_API_KEY"],
+  replicate: ["REPLICATE_API_TOKEN"],
+  modal: ["MODAL_API_KEY"],
+  // AI Gateways
+  vercel: ["VERCEL_AI_API_KEY"],
+  cloudflare: ["CLOUDFLARE_AI_API_KEY"],
+  cloudflareworkers: ["CLOUDFLARE_WORKERS_AI_API_KEY"],
+  baseten: ["BASETEN_API_KEY"],
+  helicone: ["HELICONE_API_KEY"],
+  portkey: ["PORTKEY_API_KEY"],
+  // European Providers
+  scaleway: ["SCALEWAY_API_KEY"],
+  ovhcloud: ["OVHAI_API_KEY"],
+  stackit: ["STACKIT_API_KEY"],
+  nebius: ["NEBIUS_API_KEY"],
+  // Subscription-based
+  togetherai: ["TOGETHER_AI_API_KEY"],
+  venice: ["VENICE_API_KEY"],
+  zenmux: ["ZENMUX_API_KEY"],
+  opencodezen: ["OPICODEZEN_API_KEY"],
+  firmware: ["FIRMWARE_API_KEY"],
+  "302ai": ["A302AI_API_KEY"],
+  // Specialized
+  mistralai: ["MISTRAL_API_KEY"],
+  cohere: ["COHERE_API_KEY"],
+  perplexity: ["PERPLEXITY_API_KEY"],
+  luma: ["LUMA_API_KEY"],
+  fal: ["FAL_API_KEY"],
+  // Audio/Speech
+  elevenlabs: ["ELEVENLABS_API_KEY"],
+  assemblyai: ["ASSEMBLYAI_API_KEY"],
+  deepgram: ["DEEPGRAM_API_KEY"],
+  gladia: ["GLADIA_API_KEY"],
+  lmnt: ["LMNT_API_KEY"],
+  // Enterprise
+  azurecognitive: ["AZURE_COGNITIVE_SERVICES_KEY"],
+  sapai: ["SAP_AI_API_KEY"],
+  // Developer Platforms
+  gitlab: ["GITLAB_API_KEY"],
+  // NVIDIA
+  nvidia: ["NVIDIA_API_KEY"],
+  nim: ["NVIDIA_NIM_API_KEY"],
+  // Friendli
+  friendliai: ["FRIENDLI_AI_API_KEY"],
+  // Embeddings
+  voyageai: ["VOYAGE_API_KEY"],
+  mixedbread: ["MIXEDBREAD_API_KEY"],
+  // Memory
+  mem0: ["MEM0_API_KEY"],
+  letta: ["LETTA_API_KEY"],
+  // Qwen
+  qwen: ["QWEN_API_KEY"],
+  alibaba: ["ALIBABA_API_KEY"],
+  // Chrome
+  chromeai: [],
+  // Requesty
+  requesty: ["REQUESTY_API_KEY"],
+  // AIHubMix
+  aihubmix: ["AIHUBMIX_API_KEY"],
+  aimlapi: ["AIMLAPI_API_KEY"],
+  // Black Forest Labs
+  blackforestlabs: ["BLACKFORESTLABS_API_KEY"],
+  // Kling AI
+  klingai: ["KLINGAI_API_KEY"],
+  // Prodia
+  prodia: ["PRODIA_API_KEY"],
+  // Legacy
+  codex: [], // auth only
+  antigravity: ["ANTIGRAVITY_API_KEY"],
+  // Additional providers
+  novita: ["NOVITA_API_KEY"],
+  banbri: ["BANBRI_API_KEY"],
 };
 
 const ENV_URL_MAP: Partial<Record<ProviderName, string>> = {
   azure: "AZURE_OPENAI_ENDPOINT",
   local: "LOCAL_ENDPOINT",
+  ollama: "OLLAMA_BASE_URL",
+  lmstudio: "LMSTUDIO_BASE_URL",
+  llamacpp: "LLAMACPP_BASE_URL",
+  ollamacloud: "OLLAMA_CLOUD_BASE_URL",
+  deepinfra: "DEEPINFRA_BASE_URL",
+  hyperbolic: "HYPERBOLIC_BASE_URL",
+  togetherai: "TOGETHER_AI_BASE_URL",
+  openrouter: "OPENROUTER_BASE_URL",
+  novita: "NOVITA_BASE_URL",
+  banbri: "BANBRI_BASE_URL",
+  fireworks: "FIREWORKS_BASE_URL",
+  cerebras: "CEREBRAS_BASE_URL",
+  ionet: "IONET_BASE_URL",
+  replicate: "REPLICATE_BASE_URL",
+  modal: "MODAL_BASE_URL",
+  vercel: "VERCEL_AI_BASE_URL",
+  cloudflare: "CLOUDFLARE_AI_BASE_URL",
+  portkey: "PORTKEY_BASE_URL",
+  helicone: "HELICONE_BASE_URL",
+  baseten: "BASETEN_BASE_URL",
+  venice: "VENICE_BASE_URL",
+  zenmux: "ZENMUX_BASE_URL",
+  opencodezen: "OPICODEZEN_BASE_URL",
+  firmware: "FIRMWARE_BASE_URL",
+  "302ai": "A302AI_BASE_URL",
+  perplexity: "PERPLEXITY_BASE_URL",
+  prodia: "PRODIA_BASE_URL",
+  fal: "FAL_BASE_URL",
+  luma: "LUMA_BASE_URL",
+  klingai: "KLINGAI_BASE_URL",
+  blackforestlabs: "BLACKFORESTLABS_BASE_URL",
 };
 
 const ENV_AUTH_TOKEN_MAP: Partial<Record<ProviderName, string[]>> = {
@@ -37,22 +167,118 @@ const ENV_AUTH_TOKEN_MAP: Partial<Record<ProviderName, string[]>> = {
   copilot: ["GITHUB_COPILOT_TOKEN", "GITHUB_TOKEN"],
   cline: ["CLINE_AUTH_TOKEN"],
   azure: ["AZURE_OPENAI_AUTH_TOKEN"],
+  codex: ["CODEX_AUTH_TOKEN"],
+  google: ["GEMINI_AUTH_TOKEN"],
+  antigravity: ["ANTIGRAVITY_AUTH_TOKEN"],
 };
 
 const PROVIDER_AUTH_MODE: Record<ProviderName, ProviderAuthMode> = {
+  // Frontier (Major providers)
   anthropic: "api_key_or_auth",
   openai: "api_key",
   google: "api_key_or_auth",
-  copilot: "auth_only",
-  cline: "auth_only",
-  codex: "auth_only",
-  openrouter: "api_key",
-  groq: "api_key",
   xai: "api_key",
+  // Aggregators
+  openrouter: "api_key",
+  cline: "auth_only",
+  groq: "api_key",
+  copilot: "auth_only",
+  // Enterprise
   azure: "api_key_or_auth",
   bedrock: "env_auth",
   vertexai: "env_auth",
+  // Local
   local: "base_url_only",
+  ollama: "base_url_only",
+  lmstudio: "base_url_only",
+  llamacpp: "base_url_only",
+  ollamacloud: "api_key",
+  // Chinese AI Providers
+  deepseek: "api_key",
+  minimax: "api_key",
+  moonshot: "api_key",
+  zai: "api_key",
+  cortecs: "api_key",
+  stepfun: "api_key",
+  // High Performance / Speed
+  cerebras: "api_key",
+  fireworks: "api_key",
+  deepinfra: "api_key",
+  ionet: "api_key",
+  hyperbolic: "api_key",
+  // Open Source Platforms
+  huggingface: "api_key",
+  replicate: "api_key",
+  modal: "api_key",
+  // AI Gateways
+  vercel: "api_key",
+  cloudflare: "api_key",
+  cloudflareworkers: "api_key",
+  baseten: "api_key",
+  helicone: "api_key",
+  portkey: "api_key",
+  // European Providers
+  scaleway: "api_key",
+  ovhcloud: "api_key",
+  stackit: "api_key",
+  nebius: "api_key",
+  // Subscription-based
+  togetherai: "api_key",
+  venice: "api_key",
+  zenmux: "api_key",
+  opencodezen: "api_key",
+  firmware: "api_key",
+  "302ai": "api_key",
+  // Specialized
+  mistralai: "api_key",
+  cohere: "api_key",
+  perplexity: "api_key",
+  luma: "api_key",
+  fal: "api_key",
+  // Audio/Speech
+  elevenlabs: "api_key",
+  assemblyai: "api_key",
+  deepgram: "api_key",
+  gladia: "api_key",
+  lmnt: "api_key",
+  // Enterprise
+  azurecognitive: "api_key_or_auth",
+  sapai: "api_key",
+  // Developer Platforms
+  gitlab: "api_key",
+  // NVIDIA
+  nvidia: "api_key",
+  nim: "api_key",
+  // Friendli
+  friendliai: "api_key",
+  // Embeddings
+  voyageai: "api_key",
+  mixedbread: "api_key",
+  // Memory
+  mem0: "api_key",
+  letta: "api_key",
+  // Qwen
+  qwen: "api_key",
+  alibaba: "api_key",
+  // Chrome
+  chromeai: "env_auth",
+  // Requesty
+  requesty: "api_key",
+  // AIHubMix
+  aihubmix: "api_key",
+  aimlapi: "api_key",
+  // Black Forest Labs
+  blackforestlabs: "api_key",
+  // Kling AI
+  klingai: "api_key",
+  // Prodia
+  prodia: "api_key",
+  // Legacy
+  codex: "auth_only",
+  antigravity: "api_key",
+  // Additional providers
+  novita: "api_key",
+  banbri: "api_key",
 };
 
 const EXTRA_AUTH_MODES: Partial<Record<ProviderName, Array<{ id: string; label: string; description: string }>>> = {
@@ -114,19 +340,19 @@ export class ProviderRegistry {
       const isProviderAvailable = provider?.isAvailable() ?? false;
       const isEnabled = config ? !config.disabled : false;
       const isClaudeCodeCLI = config?.authToken?.startsWith("cli:claude");
-      const isAuthenticated = isProviderAvailable || 
+      const isAuthenticated = isProviderAvailable ||
         (pn === "anthropic" && (!!detectClaudeCodeToken() || isClaudeCodeCLI)) ||
         (pn === "claude-code" && (!!detectClaudeCodeToken() || isClaudeCodeCLI)) ||
         (pn === "copilot" && !!detectCopilotToken());
-      
+
       // Only show models if the provider is enabled AND authenticated
       let allModels: string[] = [];
       if (isEnabled && isAuthenticated) {
         const modelProviderId = pn === "claude-code" ? "anthropic" : pn;
-        allModels = provider?.listModels().map((m) => m.id) 
+        allModels = provider?.listModels().map((m) => m.id)
           ?? getModelsForProvider(modelProviderId).map((m) => m.id);
       }
-      
+
       const selectedModels = config?.selectedModels ?? [];
       const hideModelSelector = config?.hideModelSelector ?? false;
 
@@ -143,7 +369,7 @@ export class ProviderRegistry {
       }
 
       // The 'models' field returned to UI should only be the ENABLED ones
-      const enabledModels = (selectedModels.length > 0) 
+      const enabledModels = (selectedModels.length > 0)
         ? allModels.filter(id => selectedModels.includes(id))
         : allModels;
 
@@ -169,7 +395,7 @@ export class ProviderRegistry {
     for (const provider of this.getAvailable()) {
       const config = this.providerConfigs.get(provider.name);
       const selected = config?.selectedModels ?? [];
-      
+
       // If user has selected specific models, only allow those
       if (selected.length > 0 && !selected.includes(modelId)) {
         continue;
@@ -192,7 +418,7 @@ export class ProviderRegistry {
   /** Resolve the provider that should handle a model, with fallback chain. */
   resolveProvider(modelId: string, preferredProvider?: ProviderName): Provider | undefined {
     const modelDef = resolveModel(modelId);
-    
+
     // If the model is explicitly in our catalog, we MUST respect its assigned provider
     // (e.g. Codex models must use the Codex CLI provider)
     if (modelDef) {
@@ -629,10 +855,10 @@ export class ProviderRegistry {
   /** Identify if an error is a quota/rate limit error that should trigger a reroute. */
   isQuotaError(error: any): boolean {
     const msg = String(error?.message || error || "").toLowerCase();
-    const isQuota = 
-      msg.includes("quota") || 
-      msg.includes("rate limit") || 
-      msg.includes("429") || 
+    const isQuota =
+      msg.includes("quota") ||
+      msg.includes("rate limit") ||
+      msg.includes("429") ||
       msg.includes("insufficient_quota") ||
       msg.includes("credit balance");
     return isQuota;

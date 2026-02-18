@@ -106,6 +106,9 @@ export const ProviderName = {
   // Legacy
   Codex: "codex",
   Antigravity: "antigravity",
+  // Additional providers (to match OpenCode coverage)
+  Novita: "novita",
+  Banbri: "banbri",
 } as const;
 
 export type ProviderName = (typeof ProviderName)[keyof typeof ProviderName];
@@ -718,8 +721,8 @@ const DEFAULT_REASONING_RULES: ReasoningRule[] = [
     config: null,
   },
   { provider: "copilot", config: null },
-  { 
-    provider: "copilot", 
+  {
+    provider: "copilot",
     modelPattern: /codex/i,
     config: {
       parameter: "reasoning.effort",
@@ -727,8 +730,8 @@ const DEFAULT_REASONING_RULES: ReasoningRule[] = [
       defaultValue: "adaptive",
     },
   },
-  { 
-    provider: "codex", 
+  {
+    provider: "codex",
     config: {
       parameter: "reasoning.effort",
       options: [REASONING_OPTIONS.adaptive, REASONING_OPTIONS.none, REASONING_OPTIONS.low, REASONING_OPTIONS.medium, REASONING_OPTIONS.high],
@@ -837,22 +840,22 @@ export function normalizeReasoningLevel(
   reasoningLevel: string | undefined,
 ): string | undefined {
   if (!reasoningLevel) return undefined;
-  
+
   // Adaptive means let the model decide - return undefined to use provider default
   const normalizedLevel = reasoningLevel.toLowerCase().trim();
   if (normalizedLevel === "adaptive") {
     return undefined;
   }
-  
+
   // Auto means manager decides based on task complexity - return undefined to let manager handle it
   if (normalizedLevel === "auto") {
     return "auto";
   }
-  
+
   // If provider is specified, we try to map the standardized level to the provider's native value
   if (provider && provider !== "auto") {
     const level = normalizedLevel;
-    
+
     // ─── Gemini (Budget-based) ─────────────────────────────────────────────
     if (provider === "google" || provider === "vertexai") {
       const isGemini3 = model ? /gemini-3/i.test(model) : false;
@@ -892,7 +895,7 @@ export function normalizeReasoningLevel(
  */
 export function determineAutoReasoningLevel(taskDescription: string): string {
   const lower = taskDescription.toLowerCase();
-  
+
   // High complexity tasks - need deep reasoning
   const highComplexityPatterns = [
     /multi-?step/i, /complex/i, /architect/i, /design/i, /refactor/i,
@@ -900,26 +903,26 @@ export function determineAutoReasoningLevel(taskDescription: string): string {
     /build.*system/i, /rewrite/i, /migrate/i, /restructure/i,
     /explain.*complex/i, /analyze.*entire/i, /review.*entire/i,
   ];
-  
+
   // Low complexity tasks - quick responses sufficient
   const lowComplexityPatterns = [
     /simple/i, /quick/i, /basic/i, /small/i, /fix.*typo/i,
     /add.*comment/i, /format/i, /lint/i, /brief/i, /what.*is/i,
     /how.*do/i, /list/i, /show.*me/i, /read.*file/i,
   ];
-  
+
   for (const pattern of highComplexityPatterns) {
     if (pattern.test(lower)) {
       return "high";
     }
   }
-  
+
   for (const pattern of lowComplexityPatterns) {
     if (pattern.test(lower)) {
       return "low";
     }
   }
-  
+
   // Default to medium for everything else
   return "medium";
 }
