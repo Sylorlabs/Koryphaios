@@ -1,0 +1,85 @@
+npm warn config ignoring workspace config at /app/frontend/.npmrc
+
+> frontend@0.0.1 dev
+> vite dev
+
+9:06:36 PM [vite] (client) Forced re-optimization of dependencies
+
+  VITE v7.3.1  ready in 2344 ms
+
+  ➜  Local:   http://localhost:5173/
+  ➜  Network: http://192.168.0.2:5173/
+9:08:01 PM [vite] (ssr) Error when evaluating SSR module /src/routes/+layout.svelte: Cannot find module '$lib/utils/error-monitor' imported from '/app/frontend/src/routes/+layout.svelte'
+      at fetchModule (file:///app/node_modules/vite/dist/node/chunks/config.js:33980:34)
+      at RunnableDevEnvironment.fetchModule (file:///app/node_modules/vite/dist/node/chunks/config.js:34826:10)
+      at fetchModule (file:///app/node_modules/vite/dist/node/chunks/config.js:34784:17)
+      at handleInvoke (file:///app/node_modules/vite/dist/node/chunks/config.js:25834:27)
+      at EventEmitter.listenerForInvokeHandler (file:///app/node_modules/vite/dist/node/chunks/config.js:25889:19)
+      at EventEmitter.emit (node:events:519:28)
+      at Object.send (file:///app/node_modules/vite/dist/node/chunks/config.js:15052:39)
+      at Object.invoke (file:///app/node_modules/vite/dist/node/module-runner.js:535:31)
+      at Object.invoke (file:///app/node_modules/vite/dist/node/module-runner.js:584:31)
+      at SSRCompatModuleRunner.getModuleInformation (file:///app/node_modules/vite/dist/node/module-runner.js:1086:28)
+
+[1;31m[500] GET /[0m
+Error: Cannot find module '$lib/utils/error-monitor' imported from '/app/frontend/src/routes/+layout.svelte'
+    at fetchModule (file:///app/node_modules/vite/dist/node/chunks/config.js:33980:34)
+    at RunnableDevEnvironment.fetchModule (file:///app/node_modules/vite/dist/node/chunks/config.js:34826:10)
+    at fetchModule (file:///app/node_modules/vite/dist/node/chunks/config.js:34784:17)
+    at handleInvoke (file:///app/node_modules/vite/dist/node/chunks/config.js:25834:27)
+    at EventEmitter.listenerForInvokeHandler (file:///app/node_modules/vite/dist/node/chunks/config.js:25889:19)
+    at EventEmitter.emit (node:events:519:28)
+    at Object.send (file:///app/node_modules/vite/dist/node/chunks/config.js:15052:39)
+    at Object.invoke (file:///app/node_modules/vite/dist/node/module-runner.js:535:31)
+    at Object.invoke (file:///app/node_modules/vite/dist/node/module-runner.js:584:31)
+    at SSRCompatModuleRunner.getModuleInformation (file:///app/node_modules/vite/dist/node/module-runner.js:1086:28)
+
+[1;31m[500] GET /[0m
+Error: Cannot find module '$lib/utils/error-monitor' imported from '/app/frontend/src/routes/+layout.svelte'
+    at fetchModule (file:///app/node_modules/vite/dist/node/chunks/config.js:33980:34)
+    at RunnableDevEnvironment.fetchModule (file:///app/node_modules/vite/dist/node/chunks/config.js:34826:10)
+    at fetchModule (file:///app/node_modules/vite/dist/node/chunks/config.js:34784:17)
+    at handleInvoke (file:///app/node_modules/vite/dist/node/chunks/config.js:25834:27)
+    at EventEmitter.listenerForInvokeHandler (file:///app/node_modules/vite/dist/node/chunks/config.js:25889:19)
+    at EventEmitter.emit (node:events:519:28)
+    at Object.send (file:///app/node_modules/vite/dist/node/chunks/config.js:15052:39)
+    at Object.invoke (file:///app/node_modules/vite/dist/node/module-runner.js:535:31)
+    at Object.invoke (file:///app/node_modules/vite/dist/node/module-runner.js:584:31)
+    at SSRCompatModuleRunner.getModuleInformation (file:///app/node_modules/vite/dist/node/module-runner.js:1086:28)
+9:08:01 PM [vite] (ssr) Error when evaluating SSR module /src/routes/+page.svelte: Cannot find module '$lib/utils/platform' imported from '/app/frontend/src/lib/components/ManagerFeed.svelte'
+      at fetchModule (file:///app/node_modules/vite/dist/node/chunks/config.js:33980:34)
+      at RunnableDevEnvironment.fetchModule (file:///app/node_modules/vite/dist/node/chunks/config.js:34826:10)
+      at fetchModule (file:///app/node_modules/vite/dist/node/chunks/config.js:34784:17)
+      at handleInvoke (file:///app/node_modules/vite/dist/node/chunks/config.js:25834:27)
+      at EventEmitter.listenerForInvokeHandler (file:///app/node_modules/vite/dist/node/chunks/config.js:25889:19)
+      at EventEmitter.emit (node:events:519:28)
+      at Object.send (file:///app/node_modules/vite/dist/node/chunks/config.js:15052:39)
+      at Object.invoke (file:///app/node_modules/vite/dist/node/module-runner.js:535:31)
+      at Object.invoke (file:///app/node_modules/vite/dist/node/module-runner.js:584:31)
+      at SSRCompatModuleRunner.getModuleInformation (file:///app/node_modules/vite/dist/node/module-runner.js:1086:28)
+
+[1;31m[500] GET /[0m
+Error: Cannot find module '$lib/utils/error-monitor' imported from '/app/frontend/src/routes/+layout.svelte'
+    at fetchModule (file:///app/node_modules/vite/dist/node/chunks/config.js:33980:34)
+    at RunnableDevEnvironment.fetchModule (file:///app/node_modules/vite/dist/node/chunks/config.js:34826:10)
+    at fetchModule (file:///app/node_modules/vite/dist/node/chunks/config.js:34784:17)
+    at handleInvoke (file:///app/node_modules/vite/dist/node/chunks/config.js:25834:27)
+    at EventEmitter.listenerForInvokeHandler (file:///app/node_modules/vite/dist/node/chunks/config.js:25889:19)
+    at EventEmitter.emit (node:events:519:28)
+    at Object.send (file:///app/node_modules/vite/dist/node/chunks/config.js:15052:39)
+    at Object.invoke (file:///app/node_modules/vite/dist/node/module-runner.js:535:31)
+    at Object.invoke (file:///app/node_modules/vite/dist/node/module-runner.js:584:31)
+    at SSRCompatModuleRunner.getModuleInformation (file:///app/node_modules/vite/dist/node/module-runner.js:1086:28)
+
+[1;31m[500] GET /[0m
+Error: Cannot find module '$lib/utils/error-monitor' imported from '/app/frontend/src/routes/+layout.svelte'
+    at fetchModule (file:///app/node_modules/vite/dist/node/chunks/config.js:33980:34)
+    at RunnableDevEnvironment.fetchModule (file:///app/node_modules/vite/dist/node/chunks/config.js:34826:10)
+    at fetchModule (file:///app/node_modules/vite/dist/node/chunks/config.js:34784:17)
+    at handleInvoke (file:///app/node_modules/vite/dist/node/chunks/config.js:25834:27)
+    at EventEmitter.listenerForInvokeHandler (file:///app/node_modules/vite/dist/node/chunks/config.js:25889:19)
+    at EventEmitter.emit (node:events:519:28)
+    at Object.send (file:///app/node_modules/vite/dist/node/chunks/config.js:15052:39)
+    at Object.invoke (file:///app/node_modules/vite/dist/node/module-runner.js:535:31)
+    at Object.invoke (file:///app/node_modules/vite/dist/node/module-runner.js:584:31)
+    at SSRCompatModuleRunner.getModuleInformation (file:///app/node_modules/vite/dist/node/module-runner.js:1086:28)
