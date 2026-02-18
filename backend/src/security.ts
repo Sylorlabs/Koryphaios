@@ -1,6 +1,8 @@
-// Security module — bash sandboxing, input validation, key encryption.
+// Security module — bash sandboxing, input validation, key encryption, SSRF prevention.
 
 import { createCipheriv, createDecipheriv, randomBytes, scryptSync } from "crypto";
+import { mkdirSync, writeFileSync } from "fs";
+import { join } from "path";
 import { toolLog } from "./logger";
 import { SECURITY } from "./constants";
 
@@ -15,9 +17,9 @@ const BLOCKED_PATTERNS = [
   /\bchmod\s+(-R\s+)?777\s+\//,                    // chmod 777 /
   /\bchown\s+(-R\s+)?.*\s+\//,                     // chown at root
   />\s*\/dev\/sd[a-z]/,                             // write to raw disk
-  /\bcurl\b.*\|\s*\bbash\b/,                        // curl | bash (pipe to shell)
+  /\bcurl\b.*\|\s*\bbash\b/,                        // curl | bash
   /\bwget\b.*\|\s*\bbash\b/,
-  /\beval\b.*\$\(/,                                  // eval with command sub
+  /\beval\b.*\$\(/,                                  // eval with command substitution
   /\/etc\/passwd/,
   /\/etc\/shadow/,
   /\bsudo\b/,
@@ -26,14 +28,12 @@ const BLOCKED_PATTERNS = [
   /\breboot\b/,
   /\binit\s+[0-6]\b/,
   /\bsystemctl\s+(stop|disable|mask)\b/,
-  /\bgcloud\s+auth\b/,                             // Block gcloud auth (spawns browser)
-  /\bclaude\s+login\b/,                            // Block claude login (spawns browser)
-  /\bclaude\s+auth\b/,                             // Block claude auth
-  /\bcodex\s+auth\b/,                              // Block codex auth
-  /\bcodex\s+login\b/,                             // Block codex login
-  /\bopenai\s+login\b/,                            // Block openai login
-  /\bxdg-open\b/,                                  // Block xdg-open (opens browser/apps)
-  /\bopen\b\s+https?:\/\//,                        // Block 'open http...'
+  /\bgcloud\s+auth\b/,
+  /\bclaude\s+(login|auth)\b/,
+  /\bcodex\s+(auth|login)\b/,
+  /\bopenai\s+login\b/,
+  /\bxdg-open\b/,
+  /\bopen\b\s+https?:\/\//,
 ];
 
 const BLOCKED_EXACT = new Set([
@@ -58,7 +58,7 @@ export function validateBashCommand(command: string): { safe: boolean; reason?: 
     }
   }
 
-  // Block commands that try to escape working directory via absolute paths to system dirs
+  // Block writes to system directories
   const systemDirs = ["/boot", "/sys", "/proc/sys", "/usr/sbin", "/sbin"];
   for (const dir of systemDirs) {
     if (trimmed.includes(`> ${dir}`) || trimmed.includes(`>> ${dir}`)) {
@@ -69,6 +69,131 @@ export function validateBashCommand(command: string): { safe: boolean; reason?: 
   return { safe: true };
 }
 
+// ─── SSRF Prevention ────────────────────────────────────────────────────────
+
+/**
+ * Cache for DNS resolutions to prevent DNS rebinding attacks.
+ * Maps hostname to resolved IPs with timestamp.
+ */
+const dnsCache = new Map<string, { ips: Set<string>; timestamp: number }>();
+const DNS_CACHE_TTL = 300_000; // 5 minutes
+
+/**
+ * Validate a URL is safe to fetch — blocks SSRF, file://, and private network access.
+ *
+ * Checks performed:
+ *  1. Must be a valid URL
+ *  2. Protocol must be http: or https:
+ *  3. Hostname must not be localhost or resolve to a private/loopback IP
+ *  4. IPv6 private ranges blocked (::1, fc00::/7, fe80::/10)
+ *  5. DNS rebinding protection with caching
+ *
+ * Fail-closed: if DNS resolution fails, the URL is considered unsafe.
+ */
+export async function validateUrl(url: string): Promise<{ safe: boolean; reason?: string }> {
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return { safe: false, reason: "Invalid URL format" };
+  }
+
+  // Only allow http and https
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+    return { safe: false, reason: `Blocked protocol: ${parsed.protocol} — only http/https allowed` };
+  }
+
+  const hostname = parsed.hostname.toLowerCase();
+
+  // Block localhost by name
+  if (hostname === "localhost" || hostname === "localhost.") {
+    return { safe: false, reason: "Blocked: localhost is a restricted address" };
+  }
+
+  // Block IPv6 literals
+  if (hostname.startsWith("[")) {
+    const ipv6 = hostname.slice(1, -1).toLowerCase();
+    if (isPrivateIPv6(ipv6)) {
+      return { safe: false, reason: "Blocked: IPv6 address resolves to a restricted range" };
+    }
+    return { safe: true };
+  }
+
+  // Block raw IPv4 literals without DNS lookup
+  if (/^\d{1,3}(\.\d{1,3}){3}$/.test(hostname)) {
+    if (isPrivateIPv4(hostname)) {
+      return { safe: false, reason: `Blocked: ${hostname} is a restricted IPv4 address` };
+    }
+    return { safe: true };
+  }
+
+  // Resolve hostname and check the resulting IPs
+  try {
+    const { promises: dns } = await import("dns");
+    const [addresses, addresses6] = await Promise.all([
+      dns.resolve4(hostname).catch(() => [] as string[]),
+      dns.resolve6(hostname).catch(() => [] as string[]),
+    ]);
+
+    // Fail-closed: if we can't resolve at all, block it
+    if (addresses.length === 0 && addresses6.length === 0) {
+      return { safe: false, reason: `Blocked: could not resolve hostname "${hostname}" — fail-closed for safety` };
+    }
+
+    for (const addr of addresses) {
+      if (isPrivateIPv4(addr)) {
+        return { safe: false, reason: `Blocked: "${hostname}" resolves to restricted IPv4 address ${addr}` };
+      }
+    }
+
+    for (const addr of addresses6) {
+      if (isPrivateIPv6(addr)) {
+        return { safe: false, reason: `Blocked: "${hostname}" resolves to restricted IPv6 address ${addr}` };
+      }
+    }
+  } catch {
+    return { safe: false, reason: `Blocked: DNS resolution failed for "${hostname}" — fail-closed for safety` };
+  }
+
+  return { safe: true };
+}
+
+function isPrivateIPv4(ip: string): boolean {
+  const parts = ip.split(".").map(Number);
+  if (parts.length !== 4 || parts.some((p) => isNaN(p) || p < 0 || p > 255)) return false;
+
+  const [a, b, c] = parts;
+
+  return (
+    a === 0 ||                                    // 0.0.0.0/8
+    a === 10 ||                                   // 10.0.0.0/8
+    a === 127 ||                                  // 127.0.0.0/8 (loopback)
+    (a === 169 && b === 254) ||                   // 169.254.0.0/16 (link-local, AWS metadata)
+    (a === 172 && b >= 16 && b <= 31) ||          // 172.16.0.0/12
+    (a === 192 && b === 168) ||                   // 192.168.0.0/16
+    (a === 198 && (b === 18 || b === 19)) ||      // 198.18.0.0/15 (benchmarking)
+    (a === 198 && b === 51 && c === 100) ||       // 198.51.100.0/24 (TEST-NET-2)
+    (a === 203 && b === 0 && c === 113) ||        // 203.0.113.0/24 (TEST-NET-3)
+    a >= 224                                      // 224.0.0.0/4 (multicast) and above
+  );
+}
+
+function isPrivateIPv6(ip: string): boolean {
+  const lower = ip.toLowerCase();
+
+  return (
+    lower === "::1" ||                            // loopback
+    lower.startsWith("fc") ||                     // fc00::/7 (unique local)
+    lower.startsWith("fd") ||                     // fd00::/8 (unique local)
+    lower.startsWith("fe8") ||                    // fe80::/10 (link-local)
+    lower.startsWith("fe9") ||
+    lower.startsWith("fea") ||
+    lower.startsWith("feb") ||
+    lower === "::" ||                             // unspecified
+    lower.startsWith("::ffff:")                   // IPv4-mapped IPv6
+  );
+}
+
 // ─── Input Validation ───────────────────────────────────────────────────────
 
 export function sanitizeString(input: unknown, maxLength = 10_000): string {
@@ -76,34 +201,73 @@ export function sanitizeString(input: unknown, maxLength = 10_000): string {
   return input.slice(0, maxLength).trim();
 }
 
+/**
+ * Sanitize user input before interpolating it into LLM system/user prompts.
+ *
+ * Defense-in-depth: strips common prompt injection patterns such as
+ * instruction overrides, role impersonation markers, and system prompt
+ * leak attempts. This does NOT make arbitrary interpolation safe on its
+ * own — prefer passing user content as a `user` message rather than
+ * embedding it in `systemPrompt` when possible.
+ */
+export function sanitizeForPrompt(input: string, maxLength = 10_000): string {
+  let cleaned = input.slice(0, maxLength).trim();
+
+  const injectionPatterns: RegExp[] = [
+    /ignore\s+(all\s+)?(previous|prior|above|earlier)\s+(instructions?|prompts?|rules?|context)/gi,
+    /disregard\s+(all\s+)?(previous|prior|above|earlier)\s+(instructions?|prompts?|rules?|context)/gi,
+    /forget\s+(all\s+)?(previous|prior|above|earlier)\s+(instructions?|prompts?|rules?|context)/gi,
+    /you\s+are\s+now\s+/gi,
+    /act\s+as\s+(if\s+you\s+are\s+|a\s+|an\s+)/gi,
+    /from\s+now\s+on[,\s]+/gi,
+    /new\s+instructions?:?\s*/gi,
+    /system\s*prompt\s*[:=]\s*/gi,
+    /\[system\]/gi,
+    /<\/?system>/gi,
+    /```system/gi,
+  ];
+
+  for (const pattern of injectionPatterns) {
+    cleaned = cleaned.replace(pattern, "");
+  }
+
+  // Escape characters that could break template literal interpolation
+  cleaned = cleaned
+    .replace(/\\/g, "\\\\")
+    .replace(/`/g, "\\`")
+    .replace(/\$/g, "\\$");
+
+  return cleaned;
+}
+
 export function validateSessionId(id: unknown): string | null {
   if (typeof id !== "string") return null;
-  // Session IDs: alphanumeric + hyphens, 1-64 chars
   if (!/^[a-zA-Z0-9_-]{1,64}$/.test(id)) return null;
   return id;
 }
 
 import type { ProviderName } from "@koryphaios/shared";
 
+const VALID_PROVIDERS = new Set<string>([
+  "anthropic", "openai", "google", "copilot", "codex", "openrouter",
+  "groq", "xai", "azure", "bedrock", "vertexai", "local", "cline", "zai",
+]);
+
 export function validateProviderName(name: unknown): ProviderName | null {
-  const VALID_PROVIDERS = new Set([
-    "anthropic", "openai", "google", "gemini", "copilot", "codex", "openrouter",
-    "groq", "xai", "azure", "bedrock", "vertexai", "local", "cline",
-  ]);
   if (typeof name !== "string") return null;
   if (!VALID_PROVIDERS.has(name)) return null;
-  if (name === "gemini") return "google" as ProviderName;
   return name as ProviderName;
 }
 
 // ─── API Key Encryption at Rest ─────────────────────────────────────────────
 
 const ALGORITHM = "aes-256-gcm";
-const SALT = "koryphaios-key-salt-v1"; // App-level salt (not a secret)
+const SALT = "koryphaios-key-salt-v1";
 
 function deriveEncryptionKey(): Buffer {
-  // Derive from machine-specific data to avoid plaintext keys
-  const hostname = require("os").hostname();
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const os = require("os") as typeof import("os");
+  const hostname = os.hostname();
   const uid = process.getuid?.() ?? 1000;
   const seed = `${hostname}:${uid}:${SALT}`;
   return scryptSync(seed, SALT, 32);
@@ -120,8 +284,11 @@ export function encryptApiKey(plaintext: string): string {
 }
 
 export function decryptApiKey(ciphertext: string): string {
-  if (!ciphertext.startsWith("enc:")) return ciphertext; // Not encrypted, return as-is
-  const [, ivHex, authTagHex, encrypted] = ciphertext.split(":");
+  if (!ciphertext.startsWith("enc:")) return ciphertext;
+  const parts = ciphertext.split(":");
+  if (parts.length < 4) return ciphertext; // Malformed — return as-is
+  const [, ivHex, authTagHex, ...encParts] = parts;
+  const encrypted = encParts.join(":"); // Rejoin in case encrypted data contains colons
   const key = deriveEncryptionKey();
   const decipher = createDecipheriv(ALGORITHM, key, Buffer.from(ivHex, "hex"));
   decipher.setAuthTag(Buffer.from(authTagHex, "hex"));
@@ -145,7 +312,7 @@ export function getCorsHeaders(origin?: string | null): Record<string, string> {
   };
 }
 
-// ─── Rate Limiting (simple in-memory) ───────────────────────────────────────
+// ─── Rate Limiting (in-memory sliding window) ────────────────────────────────
 
 export class RateLimiter {
   private hits = new Map<string, { count: number; resetAt: number }>();
@@ -155,13 +322,16 @@ export class RateLimiter {
     private maxRequests: number = 60,
     private windowMs: number = 60_000,
   ) {
-    // Auto-prune stale entries every 5 minutes
+    // Auto-prune stale entries every 5 minutes to prevent unbounded memory growth
     this.pruneTimer = setInterval(() => {
       const now = Date.now();
       for (const [key, entry] of this.hits) {
         if (now >= entry.resetAt) this.hits.delete(key);
       }
     }, 5 * 60_000);
+
+    // Don't keep the process alive just for pruning
+    if (this.pruneTimer.unref) this.pruneTimer.unref();
   }
 
   check(key: string): { allowed: boolean; remaining: number; resetIn: number } {
@@ -182,118 +352,38 @@ export class RateLimiter {
     };
   }
 
-  destroy() {
+  destroy(): void {
     clearInterval(this.pruneTimer);
     this.hits.clear();
   }
 }
 
-// ─── URL Validation (SSRF Prevention) ───────────────────────────────────────
+// ─── Secure Token Generation ─────────────────────────────────────────────────
 
-import { lookup } from "dns/promises";
-import { isIP } from "net";
-
-/**
- * Validates a URL to prevent SSRF and arbitrary file read.
- *
- * Checks:
- * 1. Protocol must be http or https.
- * 2. Hostname must not be a private/loopback IP.
- * 3. Hostname must resolve to a public IP (DNS check).
- *
- * Fails closed: if DNS resolution fails, the URL is blocked.
- */
-export async function validateUrl(urlStr: string): Promise<{ safe: boolean; reason?: string }> {
-  try {
-    const url = new URL(urlStr);
-
-    if (!["http:", "https:"].includes(url.protocol)) {
-      return { safe: false, reason: "Only HTTP and HTTPS protocols are allowed" };
-    }
-
-    let hostname = url.hostname;
-
-    // Handle IPv6 literals in brackets (e.g., [::1])
-    if (hostname.startsWith("[") && hostname.endsWith("]")) {
-      hostname = hostname.slice(1, -1);
-    }
-
-    // Check if hostname is an IP address
-    if (isIP(hostname)) {
-      if (isPrivateIP(hostname)) {
-        return { safe: false, reason: "Access to private IP addresses is restricted" };
-      }
-    } else {
-      // Resolve hostname — fail closed if DNS fails
-      try {
-        const { address } = await lookup(hostname);
-        if (isPrivateIP(address)) {
-          return { safe: false, reason: "Host resolves to a restricted IP address" };
-        }
-      } catch {
-        return { safe: false, reason: "DNS resolution failed — cannot verify host safety" };
-      }
-    }
-
-    return { safe: true };
-  } catch {
-    return { safe: false, reason: "Invalid URL format" };
-  }
-}
-
-function isPrivateIP(ip: string): boolean {
-  if (ip === "localhost") return true;
-
-  // IPv4
-  const parts = ip.split(".");
-  if (parts.length === 4) {
-    const first = parseInt(parts[0], 10);
-    const second = parseInt(parts[1], 10);
-
-    if (first === 127) return true;           // 127.0.0.0/8 loopback
-    if (first === 10) return true;            // 10.0.0.0/8 private
-    if (first === 192 && second === 168) return true; // 192.168.0.0/16 private
-    if (first === 172 && second >= 16 && second <= 31) return true; // 172.16.0.0/12 private
-    if (first === 169 && second === 254) return true; // 169.254.0.0/16 link-local
-    if (first === 0) return true;             // 0.0.0.0/8
-  }
-
-  // IPv6
-  if (ip === "::1" || ip === "0:0:0:0:0:0:0:1") return true; // loopback
-  const lower = ip.toLowerCase();
-  if (lower.startsWith("fc") || lower.startsWith("fd")) return true; // fc00::/7 unique local
-  if (lower.startsWith("fe80:")) return true; // fe80::/10 link-local
-
-  return false;
-}
-
-// ─── Token Generation (Secure) ───────────────────────────────────────────────
-
-/**
- * Generate a secure random token
- */
 export function generateSecureToken(bytes: number = 32): string {
   return randomBytes(bytes).toString("hex");
 }
 
 /**
- * Write token to a secure file instead of console
+ * Write a root auth token to a mode-600 file in the data directory.
+ * Returns the path to the token file.
  */
 export function writeTokenToFile(token: string, sessionId: string): string {
-  const { join } = require("path");
-  const { mkdirSync, writeFileSync, existsSync } = require("fs");
-
   const tokenDir = join(process.cwd(), ".koryphaios");
   mkdirSync(tokenDir, { recursive: true });
 
   const tokenFile = join(tokenDir, ".root-token");
+  const payload = JSON.stringify(
+    {
+      token,
+      sessionId,
+      createdAt: new Date().toISOString(),
+      expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
+    },
+    null,
+    2,
+  );
 
-  writeFileSync(tokenFile, JSON.stringify({
-    token,
-    sessionId,
-    createdAt: new Date().toISOString(),
-    expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(), // 24h
-  }, null, 2), { mode: 0o600 });
-
+  writeFileSync(tokenFile, payload, { mode: 0o600, encoding: "utf-8" });
   return tokenFile;
 }

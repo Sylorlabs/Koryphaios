@@ -1,9 +1,9 @@
 // File tools — read, write, edit, list, grep, glob.
 // Ported from OpenCode's tools/file.go, view.go, write.go, edit.go, grep.go, glob.go, ls.go.
 
-import { readFileSync, existsSync, statSync, readdirSync, mkdirSync, unlinkSync, renameSync, copyFileSync } from "fs";
+import { readFileSync, existsSync, statSync, readdirSync, mkdirSync, rmdirSync, unlinkSync, renameSync, copyFileSync } from "fs";
 import { writeFile } from "fs/promises";
-import { join, relative, dirname, basename, resolve } from "path";
+import { join, dirname, resolve, sep } from "path";
 import type { Tool, ToolContext, ToolCallInput, ToolCallOutput } from "./registry";
 
 /**
@@ -16,8 +16,8 @@ function checkPathAccess(absPath: string, ctx: ToolContext): boolean {
   const normalizedPath = resolve(absPath);
   return ctx.allowedPaths.some(p => {
     const absAllowed = resolve(ctx.workingDirectory, p);
-    // Allow if it's the exact file or inside the allowed directory
-    return normalizedPath === absAllowed || normalizedPath.startsWith(absAllowed + "/");
+    // Allow if it's the exact file or inside the allowed directory (cross-platform separator)
+    return normalizedPath === absAllowed || normalizedPath.startsWith(absAllowed + sep);
   });
 }
 
@@ -451,7 +451,6 @@ export class DeleteFileTool implements Tool {
         if (entries.length > 0) {
           return { callId: call.id, name: this.name, output: `Cannot delete non-empty directory: ${absPath} (${entries.length} entries). Remove contents first.`, isError: true, durationMs: 0 };
         }
-        const { rmdirSync } = await import("fs");
         rmdirSync(absPath);
         return { callId: call.id, name: this.name, output: `Deleted empty directory: ${absPath}`, isError: false, durationMs: 0 };
       }
