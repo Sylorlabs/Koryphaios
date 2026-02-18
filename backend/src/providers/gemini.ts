@@ -147,16 +147,16 @@ export class GeminiCLIProvider implements Provider {
       .map((m) => (typeof m.content === "string" ? m.content : ""))
       .join("\n");
 
-    const proc = Bun.spawn(["gemini", "--model", cliModel, "--prompt", prompt], {
-      stdout: "pipe",
-      stderr: "pipe",
-      env: { ...process.env, ...this.config.headers },
-    });
-
-    const reader = proc.stdout.getReader();
-    const decoder = new TextDecoder();
-
     try {
+      const proc = Bun.spawn(["gemini", "--model", cliModel, "--prompt", prompt], {
+        stdout: "pipe",
+        stderr: "pipe",
+        env: { ...process.env, ...this.config.headers },
+      });
+
+      const reader = proc.stdout.getReader();
+      const decoder = new TextDecoder();
+
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
@@ -165,7 +165,7 @@ export class GeminiCLIProvider implements Provider {
       }
       yield { type: "complete", finishReason: "end_turn" };
     } catch (err: any) {
-      yield { type: "error", error: err.message ?? String(err) };
+      yield { type: "error", error: "Gemini CLI error: " + (err.message ?? String(err)) };
     }
   }
 }
