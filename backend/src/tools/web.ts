@@ -2,6 +2,7 @@
 // Agents perform significantly better when they can verify facts online.
 
 import type { Tool, ToolCallInput, ToolContext, ToolCallOutput } from "./registry";
+import { validateUrl } from "../security";
 
 /** Web search using DuckDuckGo HTML (no API key required). */
 export class WebSearchTool implements Tool {
@@ -71,14 +72,59 @@ export class WebFetchTool implements Tool {
     const maxLength = (call.input.maxLength as number) || 10000;
 
     try {
-      const resp = await fetch(url, {
+      // 1. Validate initial URL before fetching (SSRF prevention)
+      let currentUrl = url;
+      let validation = await validateUrl(currentUrl);
+      if (!validation.safe) {
+        return { callId: call.id, name: this.name, output: `Access denied: ${validation.reason}`, isError: true, durationMs: 0 };
+      }
+
+      // 2. Fetch with manual redirect handling to prevent SSRF via open redirects
+      let resp = await fetch(currentUrl, {
         headers: {
           "User-Agent": "Koryphaios/1.0 (AI Agent Web Fetch)",
           Accept: "text/html, application/json, text/plain",
         },
         signal: ctx.signal,
-        redirect: "follow",
+        redirect: "manual",
       });
+
+      // Follow redirects manually, validating each hop (max 5)
+      let redirectCount = 0;
+      const maxRedirects = 5;
+
+      while (resp.status >= 300 && resp.status < 400 && redirectCount < maxRedirects) {
+        const location = resp.headers.get("location");
+        if (!location) break;
+
+        try {
+          const nextUrl = new URL(location, currentUrl).toString();
+
+          // Validate each redirect target
+          validation = await validateUrl(nextUrl);
+          if (!validation.safe) {
+            return { callId: call.id, name: this.name, output: `Access denied (redirect): ${validation.reason}`, isError: true, durationMs: 0 };
+          }
+
+          currentUrl = nextUrl;
+          redirectCount++;
+
+          resp = await fetch(currentUrl, {
+            headers: {
+              "User-Agent": "Koryphaios/1.0 (AI Agent Web Fetch)",
+              Accept: "text/html, application/json, text/plain",
+            },
+            signal: ctx.signal,
+            redirect: "manual",
+          });
+        } catch {
+          return { callId: call.id, name: this.name, output: `Invalid redirect URL: ${location}`, isError: true, durationMs: 0 };
+        }
+      }
+
+      if (resp.status >= 300 && resp.status < 400) {
+        return { callId: call.id, name: this.name, output: `Fetch failed: Too many redirects or missing Location header`, isError: true, durationMs: 0 };
+      }
 
       if (!resp.ok) {
         return { callId: call.id, name: this.name, output: `Fetch failed: ${resp.status} ${resp.statusText}`, isError: true, durationMs: 0 };
