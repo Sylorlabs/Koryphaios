@@ -200,22 +200,18 @@ export class CopilotProvider extends OpenAIProvider {
 
   constructor(config: ProviderConfig) {
     const ghToken = config.authToken ?? detectCopilotToken();
-    const bearer = ghToken ? exchangeGitHubTokenForCopilot(ghToken) : null;
-
-    const client = new OpenAI({
-      apiKey: bearer || "sk-placeholder-not-configured",
-      baseURL: COPILOT_CHAT_URL,
-      defaultHeaders: { ...COPILOT_HEADERS },
-    });
 
     super(
-      { ...config, apiKey: bearer ?? undefined, authToken: ghToken ?? undefined },
+      {
+        ...config,
+        apiKey: "placeholder-will-be-fetched-async",
+        authToken: ghToken ?? undefined,
+        headers: { ...config.headers, ...COPILOT_HEADERS }
+      },
       "copilot",
       COPILOT_CHAT_URL,
     );
 
-    this.client = client;
-    this.bearerToken = bearer;
     this.githubToken = ghToken;
   }
 
@@ -225,6 +221,45 @@ export class CopilotProvider extends OpenAIProvider {
 
   override isAvailable(): boolean {
     return !this.config.disabled && !!(this.config.authToken || detectCopilotToken());
+  }
+
+  private _copilotClient: OpenAI | null = null;
+
+  protected override get client(): OpenAI {
+    if (!this._copilotClient) {
+      this._copilotClient = new OpenAI({
+        apiKey: this.bearerToken || "placeholder-awaiting-async-init",
+        baseURL: COPILOT_CHAT_URL,
+        defaultHeaders: { ...this.config.headers, ...COPILOT_HEADERS },
+      });
+    }
+    return this._copilotClient;
+  }
+
+  override async *streamResponse(request: import("./types").StreamRequest): AsyncGenerator<import("./types").ProviderEvent> {
+    await this.ensureBearerToken();
+    yield* super.streamResponse(request);
+  }
+
+  private async ensureBearerToken() {
+    if (this.bearerToken) return;
+
+    if (!this.githubToken) {
+       this.githubToken = detectCopilotToken();
+    }
+
+    if (!this.githubToken) {
+      throw new Error("GitHub Copilot token not found. Please authenticate.");
+    }
+
+    const bearer = await exchangeGitHubTokenForCopilotAsync(this.githubToken);
+    if (bearer) {
+      this.bearerToken = bearer;
+      // Force recreation of client with new token
+      this._copilotClient = null;
+    } else {
+      throw new Error("Failed to exchange GitHub token for Copilot bearer token.");
+    }
   }
 }
 

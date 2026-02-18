@@ -45,16 +45,16 @@ export class CodexProvider implements Provider {
     // Add prompt as the final positional argument
     args.push(prompt);
 
-    const proc = Bun.spawn(["codex", ...args], {
-      stdout: "pipe",
-      stderr: "pipe",
-      env: { ...process.env },
-    });
-
-    const reader = proc.stdout.getReader();
-    const decoder = new TextDecoder();
-
     try {
+      const proc = Bun.spawn(["codex", ...args], {
+        stdout: "pipe",
+        stderr: "pipe",
+        env: { ...process.env },
+      });
+
+      const reader = proc.stdout.getReader();
+      const decoder = new TextDecoder();
+
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
@@ -74,7 +74,7 @@ export class CodexProvider implements Provider {
         yield { type: "complete", finishReason: "end_turn" };
       }
     } catch (err: any) {
-      yield { type: "error", error: err.message ?? String(err) };
+      yield { type: "error", error: "Codex CLI error: " + (err.message ?? String(err)) };
     }
   }
 }

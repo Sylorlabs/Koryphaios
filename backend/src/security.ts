@@ -76,6 +76,31 @@ export function sanitizeString(input: unknown, maxLength = 10_000): string {
   return input.slice(0, maxLength).trim();
 }
 
+export function sanitizeForPrompt(input: string, maxLength: number = 100_000): string {
+  let sanitized = sanitizeString(input, maxLength);
+
+  // Strip common jailbreak patterns (simple heuristic)
+  const blocklist = [
+    /Ignore all previous instructions/gi,
+    /You are now/gi,
+    /From now on/gi,
+    /Forget all prior rules/gi,
+    /<system>/gi,
+    /<\/system>/gi,
+    /\[system\]/gi,
+    /system prompt:/gi,
+  ];
+
+  for (const pattern of blocklist) {
+    sanitized = sanitized.replace(pattern, "");
+  }
+
+  // Escape template literal markers
+  sanitized = sanitized.replace(/\${/g, "\\${");
+
+  return sanitized;
+}
+
 export function validateSessionId(id: unknown): string | null {
   if (typeof id !== "string") return null;
   // Session IDs: alphanumeric + hyphens, 1-64 chars
@@ -101,7 +126,18 @@ export function validateProviderName(name: unknown): ProviderName | null {
 const ALGORITHM = "aes-256-gcm";
 const SALT = "koryphaios-key-salt-v1"; // App-level salt (not a secret)
 
+let warnedAboutInsecureKey = false;
+
 function deriveEncryptionKey(): Buffer {
+  if (process.env.KORYPHAIOS_MASTER_KEY) {
+    return scryptSync(process.env.KORYPHAIOS_MASTER_KEY, "koryphaios-master-salt", 32);
+  }
+
+  if (!warnedAboutInsecureKey) {
+    console.warn("SECURITY WARNING: Using insecure fallback encryption key. Set KORYPHAIOS_MASTER_KEY env var to secure your API keys.");
+    warnedAboutInsecureKey = true;
+  }
+
   // Derive from machine-specific data to avoid plaintext keys
   const hostname = require("os").hostname();
   const uid = process.getuid?.() ?? 1000;
@@ -190,7 +226,7 @@ export class RateLimiter {
 
 // ─── URL Validation (SSRF Prevention) ───────────────────────────────────────
 
-import { lookup } from "dns/promises";
+import { resolve4, resolve6 } from "dns/promises";
 import { isIP } from "net";
 
 /**
@@ -202,6 +238,9 @@ import { isIP } from "net";
  * 3. Hostname must resolve to a public IP (DNS check).
  *
  * Fails closed: if DNS resolution fails, the URL is blocked.
+ *
+ * Note: Vulnerable to DNS rebinding attacks (TOCTOU) because we cannot
+ * pin the resolved IP in Bun's fetch implementation easily.
  */
 export async function validateUrl(urlStr: string): Promise<{ safe: boolean; reason?: string }> {
   try {
@@ -224,11 +263,22 @@ export async function validateUrl(urlStr: string): Promise<{ safe: boolean; reas
         return { safe: false, reason: "Access to private IP addresses is restricted" };
       }
     } else {
-      // Resolve hostname — fail closed if DNS fails
+      // Resolve hostname — fail closed if DNS fails. Check ALL resolved IPs (IPv4 and IPv6).
       try {
-        const { address } = await lookup(hostname);
-        if (isPrivateIP(address)) {
-          return { safe: false, reason: "Host resolves to a restricted IP address" };
+        const [ipv4, ipv6] = await Promise.all([
+          resolve4(hostname).catch(() => [] as string[]),
+          resolve6(hostname).catch(() => [] as string[]),
+        ]);
+        const addresses = [...ipv4, ...ipv6];
+
+        if (addresses.length === 0) {
+           return { safe: false, reason: "DNS resolution failed — no records found" };
+        }
+
+        for (const address of addresses) {
+          if (isPrivateIP(address)) {
+            return { safe: false, reason: "Host resolves to a restricted IP address: " + address };
+          }
         }
       } catch {
         return { safe: false, reason: "DNS resolution failed — cannot verify host safety" };

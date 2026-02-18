@@ -5,7 +5,8 @@ import { providerLog } from "../logger";
 
 import type { ProviderAuthMode, ProviderConfig, ProviderName, KoryphaiosConfig } from "@koryphaios/shared";
 import type { Provider } from "./types";
-import { AnthropicProvider, detectClaudeCodeToken } from "./anthropic";
+import { AnthropicProvider } from "./anthropic";
+import { detectClaudeCodeToken } from "./auth-utils";
 import { OpenAIProvider, GroqProvider, OpenRouterProvider, XAIProvider, AzureProvider } from "./openai";
 import { ClineProvider, normalizeClineAuthToken } from "./cline";
 import { GeminiProvider, GeminiCLIProvider } from "./gemini";
@@ -88,7 +89,7 @@ export class ProviderRegistry {
   }
 
   /** Get provider status for all configured providers. */
-  getStatus(): Array<{
+  async getStatus(): Promise<Array<{
     name: ProviderName;
     enabled: boolean;
     authenticated: boolean;
@@ -102,8 +103,8 @@ export class ProviderRegistry {
     requiresBaseUrl: boolean;
     extraAuthModes?: Array<{ id: string; label: string; description: string }>;
     error?: string;
-  }> {
-    return Object.keys(PROVIDER_AUTH_MODE).map((name) => {
+  }>> {
+    return Promise.all(Object.keys(PROVIDER_AUTH_MODE).map(async (name) => {
       const pn = name as ProviderName;
       const provider = this.providers.get(pn);
       const config = this.providerConfigs.get(pn);
@@ -122,8 +123,8 @@ export class ProviderRegistry {
       let allModels: string[] = [];
       if (isEnabled && isAuthenticated) {
         const modelProviderId = pn === "claude-code" ? "anthropic" : pn;
-        allModels = provider?.listModels().map((m) => m.id) 
-          ?? getModelsForProvider(modelProviderId).map((m) => m.id);
+        const models = provider ? await provider.listModels() : getModelsForProvider(modelProviderId);
+        allModels = models.map((m) => m.id);
       }
       
       const selectedModels = config?.selectedModels ?? [];
@@ -160,7 +161,7 @@ export class ProviderRegistry {
         requiresBaseUrl: authMode === "base_url_only" || pn === "azure",
         extraAuthModes: EXTRA_AUTH_MODES[pn],
       };
-    });
+    }));
   }
 
   /** Find the best available provider for a given model ID. */
