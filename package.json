@@ -1,8 +1,12 @@
 {
   "name": "koryphaios",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "private": true,
-  "workspaces": ["backend", "frontend", "shared"],
+  "workspaces": [
+    "backend",
+    "frontend",
+    "shared"
+  ],
   "scripts": {
     "dev": "bash -lc 'trap \"kill 0\" EXIT; bun run dev:backend & bun run dev:frontend & wait'",
     "dev:backend": "bun run --filter backend dev",

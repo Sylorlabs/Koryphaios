@@ -5,7 +5,8 @@ import { providerLog } from "../logger";
 
 import type { ProviderAuthMode, ProviderConfig, ProviderName, KoryphaiosConfig } from "@koryphaios/shared";
 import type { Provider } from "./types";
-import { AnthropicProvider, detectClaudeCodeToken } from "./anthropic";
+import { AnthropicProvider } from "./anthropic";
+import { detectClaudeCodeToken } from "./auth-utils";
 import { OpenAIProvider, GroqProvider, OpenRouterProvider, XAIProvider, AzureProvider } from "./openai";
 import { ClineProvider, normalizeClineAuthToken } from "./cline";
 import { GeminiProvider, GeminiCLIProvider } from "./gemini";

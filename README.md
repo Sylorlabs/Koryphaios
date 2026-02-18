@@ -379,5 +379,5 @@ Built with:
 
 ---
 
-**Version:** 0.1.0  
-**Status:** Active Development
+**Version:** 1.0.0
+**Status:** Production Ready
