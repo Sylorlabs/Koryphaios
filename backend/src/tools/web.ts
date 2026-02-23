@@ -14,6 +14,7 @@ const USER_AGENT = "Koryphaios/1.0 (AI Agent; +https://github.com/micahcooley/Ko
 /** Web search using DuckDuckGo HTML (no API key required). */
 export class WebSearchTool implements Tool {
   readonly name = "web_search";
+  readonly role = "worker" as const; // manager + worker only (not critic)
   readonly description =
     "Search the web for current information. Returns snippets from search results. Use this liberally — agents perform better when they can verify information.";
 
@@ -83,6 +84,7 @@ export class WebSearchTool implements Tool {
  */
 export class WebFetchTool implements Tool {
   readonly name = "web_fetch";
+  readonly role = "worker" as const;
   readonly description =
     "Fetch a URL and extract readable text content. Good for reading documentation, API references, or any web page. Blocked for private/internal network addresses.";
 

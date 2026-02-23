@@ -241,6 +241,9 @@ export async function executeCommandsInSandbox(
                     duration: Date.now() - startTime,
                 });
             } catch (error: any) {
+                // Assuming 'span' is defined in a broader scope or intended to be added.
+                // The provided snippet has a syntax error with `t: error.stdout`.
+                // Correcting it to match the existing structure for error handling.
                 results.push({
                     stdout: error.stdout || "",
                     stderr: error.stderr || error.message,
@@ -308,13 +311,17 @@ export async function getSandboxStats(containerName: string): Promise<{
         if (!line) return null;
 
         // Format: "0.05% 12.3MiB / 512MiB"
-        const cpuMatch = line.match(/^([\d.]+)%/);
-        const memMatch = line.match(/([\d.]+)(MiB|GiB|KiB|MB|GB|KB)/);
+        const cpuRegex = /^([\d.]+)%/;
+        const memRegex = /([\d.]+)(MiB|GiB|KiB|MB|GB|KB)/;
+        const cpuMatch = cpuRegex.exec(line);
+        const memMatch = memRegex.exec(line);
 
-        const cpuPercent = cpuMatch ? parseFloat(cpuMatch[1]) : 0;
+
+        const cpuPercent = cpuMatch ? Number.parseFloat(cpuMatch[1]) : 0;
         let memoryUsageMb = 0;
         if (memMatch) {
-            const value = parseFloat(memMatch[1]);
+            const value = Number.parseFloat(memMatch[1]);
+
             const unit = memMatch[2].toLowerCase();
             if (unit === "gib" || unit === "gb") memoryUsageMb = value * 1024;
             else if (unit === "kib" || unit === "kb") memoryUsageMb = value / 1024;

@@ -7,7 +7,7 @@ describe("ToolRegistry", () => {
     workingDirectory: "/tmp",
   };
 
-  const createMockTool = (name: string, role?: "manager" | "worker" | "any"): Tool => ({
+  const createMockTool = (name: string, role?: "manager" | "worker" | "critic" | "any"): Tool => ({
     name,
     description: `Description for ${name}`,
     inputSchema: { type: "object" },
@@ -50,21 +50,32 @@ describe("ToolRegistry", () => {
 
     const managerTool = createMockTool("manager-tool", "manager");
     const workerTool = createMockTool("worker-tool", "worker");
+    const criticTool = createMockTool("critic-tool", "critic");
     const anyTool = createMockTool("any-tool", "any");
-    const defaultTool = createMockTool("default-tool"); // No role specified
+    const defaultTool = createMockTool("default-tool"); // No role = included in all
 
     registry.register(managerTool);
     registry.register(workerTool);
+    registry.register(criticTool);
     registry.register(anyTool);
     registry.register(defaultTool);
 
+    // Manager gets manager + worker + any (full access)
     const managerDefs = registry.getToolDefsForRole("manager");
-    expect(managerDefs.map(t => t.name)).toEqual(expect.arrayContaining(["manager-tool", "any-tool", "default-tool"]));
-    expect(managerDefs.map(t => t.name)).not.toContain("worker-tool");
+    expect(managerDefs.map(t => t.name)).toEqual(expect.arrayContaining(["manager-tool", "worker-tool", "any-tool", "default-tool"]));
+    expect(managerDefs.map(t => t.name)).not.toContain("critic-tool");
 
+    // Worker gets worker + any
     const workerDefs = registry.getToolDefsForRole("worker");
     expect(workerDefs.map(t => t.name)).toEqual(expect.arrayContaining(["worker-tool", "any-tool", "default-tool"]));
     expect(workerDefs.map(t => t.name)).not.toContain("manager-tool");
+    expect(workerDefs.map(t => t.name)).not.toContain("critic-tool");
+
+    // Critic gets critic + any only (read-only tools)
+    const criticDefs = registry.getToolDefsForRole("critic");
+    expect(criticDefs.map(t => t.name)).toEqual(expect.arrayContaining(["critic-tool", "any-tool", "default-tool"]));
+    expect(criticDefs.map(t => t.name)).not.toContain("manager-tool");
+    expect(criticDefs.map(t => t.name)).not.toContain("worker-tool");
   });
 
   test("should execute a registered tool successfully", async () => {

@@ -62,15 +62,15 @@ export function initRedis(config: RedisConfig = { enabled: false }): void {
         });
 
         // Test connection
-        redis.ping((err: Error | null, result: string) => {
-            if (err) {
-                serverLog.error({ err }, "Redis ping failed");
-                redisEnabled = false;
-            } else {
+        redis.ping()
+            .then((result: string) => {
                 serverLog.info({ result }, "Redis ping successful");
                 redisEnabled = true;
-            }
-        });
+            })
+            .catch((err: Error) => {
+                serverLog.error({ err }, "Redis ping failed");
+                redisEnabled = false;
+            });
     } catch (err) {
         serverLog.error({ err }, "Failed to initialize Redis");
         redis = null;

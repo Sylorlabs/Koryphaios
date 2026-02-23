@@ -182,6 +182,10 @@ function createThemeStore() {
         { id: 'jetbrains', label: 'JetBrains Mono' },
       ];
     },
+    /** Font-family CSS value for a font id (for previews so each option shows in its own typeface). */
+    getFontFamily(id: FontFamily): string {
+      return FONT_FAMILIES[id];
+    },
 
     init() {
       if (!browser) return;

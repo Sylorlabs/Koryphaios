@@ -1,5 +1,8 @@
 // Backend Constants — Extract magic numbers and configuration defaults
 
+/** Application version (single source of truth) */
+export const VERSION = "1.0.0";
+
 /**
  * Session and Message Limits
  */
@@ -37,10 +40,14 @@ export const ID = {
  * Rate Limiting
  */
 export const RATE_LIMIT = {
-  /** Requests per window */
+  /** Requests per window (general API) */
   MAX_REQUESTS: 120,
   /** Time window in milliseconds (1 minute) */
   WINDOW_MS: 60_000,
+  /** Auth endpoints (login, register, refresh) per IP per minute */
+  AUTH_PER_MINUTE: 15,
+  /** Credential-setting (PUT /api/providers) per IP per minute */
+  CREDENTIAL_PER_MINUTE: 20,
 } as const;
 
 /**
@@ -65,11 +72,21 @@ export const SECURITY = {
   MAX_API_KEY_LENGTH: 500,
   /** Maximum provider name length */
   MAX_PROVIDER_NAME_LENGTH: 50,
-  /** Allowed CORS origins (production should override) */
+  /** Allowed CORS origins (add more via config.corsOrigins for other dev hosts/ports) */
   ALLOWED_ORIGINS: [
-    "http://localhost:5173", // Vite dev server
-    "http://localhost:3000", // Bun dev server
+    "http://localhost:5173",   // Vite dev default
+    "http://localhost:3000",   // Bun dev server
+    "http://127.0.0.1:5173",
+    "http://127.0.0.1:3000",
   ],
+} as const;
+
+/**
+ * Auth patterns (single source of truth for token format checks).
+ */
+export const AUTH = {
+  /** Claude subscription OAuth token from "claude setup-token" (sk-ant-oat01-...). */
+  CLAUDE_OAUTH_TOKEN_REGEX: /^sk-ant-oat\d{2}-/,
 } as const;
 
 /**
@@ -91,16 +108,27 @@ export const FS = {
  */
 export const AGENT = {
   /** Default models per role if not configured */
-  DEFAULT_MANAGER_MODEL: "claude-sonnet-4-5",
-  DEFAULT_CODER_MODEL: "claude-sonnet-4-5",
-  DEFAULT_TASK_MODEL: "o4-mini",
-  
+  DEFAULT_MANAGER_MODEL: "claude-sonnet-4-6",
+  DEFAULT_CODER_MODEL: "claude-sonnet-4-6",
+  DEFAULT_TASK_MODEL: "gpt-5-mini",
+
   /** Default token limits */
   DEFAULT_MAX_TOKENS: 8192,
   CODER_MAX_TOKENS: 16384,
-  
+
   /** Default reasoning level */
   DEFAULT_REASONING_LEVEL: "high" as const,
+
+  /** Fallback model chains (IDs must exist in MODEL_CATALOG). No retired models (Claude 3.7, Haiku 3.5). */
+  DEFAULT_FALLBACKS: {
+    "claude-sonnet-4-5": ["claude-sonnet-4-6", "gpt-5-mini", "gemini-3.1-pro"],
+    "claude-sonnet-4-6": ["claude-sonnet-4-5", "gpt-5-mini", "gemini-3.1-pro"],
+    "gpt-5-mini": ["gemini-3.1-pro", "claude-haiku-4-5"],
+    "o4-mini": ["gpt-5-mini", "gemini-3.1-pro"],
+  } as Record<string, string[]>,
+
+  /** Max time a single LLM stream can run before being aborted (prevents stuck requests) */
+  LLM_STREAM_TIMEOUT_MS: 600_000, // 10 minutes
 } as const;
 
 /**
@@ -141,7 +169,7 @@ export const LOG = {
 export const PROVIDER = {
   /** Environment variable prefix */
   ENV_VAR_PREFIX: "ANTHROPIC_API_KEY", // Example pattern
-  
+
   /** Expected environment variable names */
   ENV_VARS: {
     ANTHROPIC: "ANTHROPIC_API_KEY",
@@ -254,12 +282,12 @@ export const DOMAIN = {
     critic: ["critic", "critique", "audit", "review", "gate", "quality"],
   },
   DEFAULT_MODELS: {
-    ui: "gpt-4.1",
-    backend: "gemini-2.5-pro",
-    general: "gemini-2.5-flash",
-    review: "gpt-4.1",
-    test: "gpt-4.1",
-    critic: "claude-sonnet-4-5",
+    ui: "gpt-5.2",
+    backend: "gemini-3.1-pro",
+    general: "gemini-3-flash",
+    review: "gpt-5.2",
+    test: "gpt-5.2",
+    critic: "claude-sonnet-4-6",
   },
   GLOW_COLORS: {
     ui: "rgba(0,255,255,0.5)",       // Cyan

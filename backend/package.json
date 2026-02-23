@@ -8,7 +8,9 @@
     "typecheck": "tsc --noEmit",
     "test": "bun test",
     "test:all": "bun test",
-    "test:watch": "bun test --watch"
+    "test:watch": "bun test --watch",
+    "test:endpoints": "bun run scripts/test-all-endpoints.ts",
+    "health": "bun run scripts/health-check.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.39.0",
@@ -35,6 +37,7 @@
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.0",
     "@types/bun": "^1.3.9",
+    "@types/ioredis": "^5.0.0",
     "@types/throttle-debounce": "^5.0.2",
     "typescript": "^5.7.0"
   }

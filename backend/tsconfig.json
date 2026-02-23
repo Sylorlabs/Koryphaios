@@ -1,16 +1,33 @@
 {
   "extends": "../tsconfig.json",
   "compilerOptions": {
-    "rootDir": "..",
+    "baseUrl": ".",
     "outDir": "build",
-    "types": ["bun"],
+    "module": "esnext",
+    "moduleResolution": "node",
+    "types": [
+      "bun",
+      "node"
+    ],
     "noEmit": true,
     "paths": {
-      "@koryphaios/shared/*": ["../shared/src/*"],
-      "@koryphaios/shared": ["../shared/src/index.ts"],
-      "@/*": ["./src/*"]
+      "@koryphaios/shared/*": [
+        "../shared/src/*"
+      ],
+      "@koryphaios/shared": [
+        "../shared/src/index.ts"
+      ],
+      "@/*": [
+        "./src/*"
+      ]
     }
   },
-  "include": ["src/**/*.ts", "../shared/src/**/*.ts"],
-  "exclude": ["node_modules", "build"]
+  "include": [
+    "src/**/*.ts",
+    "../shared/src/**/*.ts"
+  ],
+  "exclude": [
+    "node_modules",
+    "build"
+  ]
 }

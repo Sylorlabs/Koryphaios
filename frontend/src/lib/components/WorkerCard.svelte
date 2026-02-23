@@ -4,6 +4,7 @@
   import { wsStore } from '$lib/stores/websocket.svelte';
   import { Square, RotateCcw } from 'lucide-svelte';
   import { fade } from 'svelte/transition';
+  import { apiFetch } from '$lib/api';
 
   interface AgentState {
     identity: AgentIdentity;
@@ -14,12 +15,26 @@
     task: string;
     tokensUsed: number;
     contextMax: number;
+    contextKnown: boolean;
+    sessionId?: string;
   }
 
   let { agent }: { agent: AgentState } = $props();
 
+  function providerLabel(provider: string): string {
+    if (provider === 'openai') return 'OpenAI';
+    if (provider === 'codex') return 'Codex';
+    if (provider === 'anthropic') return 'Anthropic';
+    if (provider === 'google') return 'Google';
+    if (provider === 'xai') return 'xAI';
+    if (provider === 'openrouter') return 'OpenRouter';
+    if (provider === 'vertexai') return 'Vertex AI';
+    if (provider === 'copilot') return 'Copilot';
+    return provider.charAt(0).toUpperCase() + provider.slice(1);
+  }
+
   let glowClass = $derived(
-    agent.identity.domain === 'ui' ? 'glow-codex' :
+    agent.identity.domain === 'frontend' ? 'glow-codex' :
     agent.identity.domain === 'backend' ? 'glow-google' :
     agent.identity.domain === 'test' ? 'glow-test' :
     'glow-claude'
@@ -66,18 +81,22 @@
     <div class="flex items-center gap-1">
       {#if isActive}
         <span class="text-[10px] capitalize px-1.5 py-0.5 rounded" style="background: var(--color-surface-3); color: var(--color-text-muted); transition: all 0.3s;">{agent.identity.domain}</span>
-        {#if !isManager}
-          <button
-            class="p-0.5 rounded transition-colors hover:bg-red-500/20"
-            style="color: var(--color-text-muted);"
-            title="Cancel this worker"
-            onclick={() => {
-              fetch(`/api/agents/${agent.identity.id}/cancel`, { method: 'POST' }).catch(() => {});
-            }}
-          >
-            <Square size={10} />
-          </button>
-        {/if}
+        <button
+          class="p-0.5 rounded transition-colors hover:bg-red-500/20"
+          style="color: var(--color-text-muted);"
+          title={isManager ? 'Stop manager and workers' : 'Cancel this worker'}
+          onclick={() => {
+            if (isManager && agent.sessionId) {
+              wsStore.markSessionAgentsStopped(agent.sessionId);
+              apiFetch(`/api/sessions/${agent.sessionId}/cancel`, { method: 'POST' }).catch(() => {});
+            } else {
+              wsStore.markAgentStopped(agent.identity.id);
+              apiFetch(`/api/agents/${agent.identity.id}/cancel`, { method: 'POST' }).catch(() => {});
+            }
+          }}
+        >
+          <Square size={10} />
+        </button>
       {:else}
         <span class="text-[9px] opacity-40 uppercase tracking-tighter">{agent.status}</span>
       {/if}
@@ -90,11 +109,11 @@
       <span class="text-[11px]" style="color: {agent.status === 'done' ? 'var(--color-success)' : agent.status === 'error' ? 'var(--color-error)' : 'var(--color-text-secondary)'};">
         {statusText}
       </span>
-      <span class="text-[10px]" style="color: var(--color-text-muted);">{agent.identity.model.split('-').slice(0, 2).join('-')}</span>
+      <span class="text-[10px]" style="color: var(--color-text-muted);">({providerLabel(agent.identity.provider)}) {agent.identity.model}</span>
     </div>
 
     <!-- Context window bar -->
-    {#if agent.tokensUsed > 0}
+    {#if agent.tokensUsed > 0 && agent.contextKnown && agent.contextMax > 0}
       <div class="mb-1">
         <div class="flex items-center justify-between mb-0.5">
           <span class="text-[9px]" style="color: var(--color-text-muted);">Context</span>
