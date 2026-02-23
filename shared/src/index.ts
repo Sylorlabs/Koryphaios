@@ -2,113 +2,67 @@
 
 // ─── Provider & Model Definitions ───────────────────────────────────────────
 
+// REAL PROVIDERS - Only actually implemented providers
+// Fantasy providers removed to stop lying to users
 export const ProviderName = {
-  // Frontier (Major providers)
+  // Frontier (Major providers with full implementations)
   Anthropic: "anthropic",
   OpenAI: "openai",
   Google: "google",
   XAI: "xai",
-  // Aggregators
+  
+  // Aggregators (OpenAI-compatible APIs with implementations)
   OpenRouter: "openrouter",
-  Cline: "cline",
   Groq: "groq",
+  
+  // Auth-only providers (OAuth/CLI based)
+  Claude: "claude",
   Copilot: "copilot",
-  // Enterprise
+  Cline: "cline",
+  Codex: "codex",
+  
+  // Curated coding models
+  OpenCodeZen: "opencodezen",
+  
+  // Enterprise (with implementations)
   Azure: "azure",
   Bedrock: "bedrock",
   VertexAI: "vertexai",
-  // Local
+  
+  // Local/Custom endpoints (OpenAI-compatible)
   Local: "local",
   Ollama: "ollama",
-  LMStudio: "lmstudio",
-  LlamaCpp: "llamacpp",
-  OllamaCloud: "ollamacloud",
-  // Chinese AI Providers
-  DeepSeek: "deepseek",
-  MiniMax: "minimax",
-  MoonshotAI: "moonshot",
-  ZAI: "zai",
-  Cortecs: "cortecs",
-  StepFun: "stepfun",
-  // High Performance / Speed
-  Cerebras: "cerebras",
-  FireworksAI: "fireworks",
-  DeepInfra: "deepinfra",
-  IO: "ionet",
-  Hyperbolic: "hyperbolic",
-  // Open Source Platforms
-  HuggingFace: "huggingface",
-  Replicate: "replicate",
-  Modal: "modal",
-  // AI Gateways
-  Vercel: "vercel",
-  Cloudflare: "cloudflare",
-  CloudflareWorkers: "cloudflareworkers",
-  Baseten: "baseten",
-  Helicone: "helicone",
-  Portkey: "portkey",
-  // European Providers
-  Scaleway: "scaleway",
-  OVHcloud: "ovhcloud",
-  STACKIT: "stackit",
-  Nebius: "nebius",
-  // Subscription-based
-  TogetherAI: "togetherai",
-  VeniceAI: "venice",
-  ZenMux: "zenmux",
-  OpenCodeZen: "opencodezen",
-  Firmware: "firmware",
+  // OpenCode parity
   A302AI: "302ai",
-  // Specialized
-  MistralAI: "mistralai",
-  Cohere: "cohere",
-  Perplexity: "perplexity",
-  Luma: "luma",
-  Fal: "fal",
-  // Audio/Speech
-  ElevenLabs: "elevenlabs",
-  AssemblyAI: "assemblyai",
-  Deepgram: "deepgram",
-  Gladia: "gladia",
-  LMNT: "lmnt",
-  // Enterprise
   AzureCognitive: "azurecognitive",
-  SAPAI: "sapai",
-  // Developer Platforms
+  Baseten: "baseten",
+  Cerebras: "cerebras",
+  Cloudflare: "cloudflare",
+  Cortecs: "cortecs",
+  DeepSeek: "deepseek",
+  DeepInfra: "deepinfra",
+  Firmware: "firmware",
+  Fireworks: "fireworks",
   GitLab: "gitlab",
-  // NVIDIA
-  NVIDIA: "nvidia",
-  NIM: "nim",
-  // Friendli
-  FriendliAI: "friendliai",
-  // Embeddings
-  VoyageAI: "voyageai",
-  Mixedbread: "mixedbread",
-  // Memory
-  Mem0: "mem0",
-  Letta: "letta",
-  // Qwen
-  Qwen: "qwen",
-  Alibaba: "alibaba",
-  // Chrome
-  ChromeAI: "chromeai",
-  // Requesty
-  Requesty: "requesty",
-  // AIHubMix
-  AIHubMix: "aihubmix",
-  AIMLAPI: "aimlapi",
-  // Black Forest Labs
-  BlackForestLabs: "blackforestlabs",
-  // Kling AI
-  KlingAI: "klingai",
-  // Prodia
-  Prodia: "prodia",
-  // Legacy
-  Codex: "codex",
-  Antigravity: "antigravity",
-  // Additional providers (to match OpenCode coverage)
-  Novita: "novita",
-  Banbri: "banbri",
+  HuggingFace: "huggingface",
+  Helicone: "helicone",
+  LlamaCpp: "llamacpp",
+  IoNet: "ionet",
+  LMStudio: "lmstudio",
+  Mistral: "mistral",
+  Moonshot: "moonshot",
+  MiniMax: "minimax",
+  Nebius: "nebius",
+  OllamaCloud: "ollamacloud",
+  SAPAI: "sapai",
+  Stackit: "stackit",
+  OVHcloud: "ovhcloud",
+  Scaleway: "scaleway",
+  TogetherAI: "togetherai",
+  Venice: "venice",
+  Vercel: "vercel",
+  ZAI: "zai",
+  ZenMux: "zenmux",
 } as const;
 
 export type ProviderName = (typeof ProviderName)[keyof typeof ProviderName];
@@ -155,7 +109,7 @@ export type AgentRole = "manager" | "coder" | "task" | "reviewer" | "title" | "s
 
 export type AgentStatus = "idle" | "thinking" | "tool_calling" | "streaming" | "verifying" | "compacting" | "waiting_user" | "error" | "done" | "reading" | "writing" | "criticizing";
 
-export type WorkerDomain = "frontend" | "backend" | "general" | "review" | "test" | "critic";
+export type WorkerDomain = "ui" | "backend" | "general" | "review" | "test" | "critic";
 
 export interface AgentIdentity {
   id: string;
@@ -247,6 +201,7 @@ export interface StoredMessage {
 
 export interface Session {
   id: string;
+  userId: string;
   title: string;
   parentSessionId?: string;
   messageCount: number;
@@ -475,6 +430,8 @@ export interface KoryphaiosConfig {
   };
   contextPaths?: string[];
   dataDirectory: string;
+  /** Allowed CORS origins */
+  corsOrigins?: string[];
 }
 
 export interface MCPServerConfig {
@@ -534,6 +491,7 @@ export const STANDARD_REASONING_OPTIONS = {
 const REASONING_OPTIONS = {
   ...STANDARD_REASONING_OPTIONS,
   minimal: { value: "minimal", label: "Minimal", description: "Lightest available explicit reasoning effort" },
+  max: { value: "max", label: "Max", description: "Maximum capability, no token constraints (Opus 4.6 only)" },
   off: { value: "off", label: "Off", description: "Disable explicit reasoning mode" },
   on: { value: "on", label: "On", description: "Enable default reasoning mode" },
   default: { value: "default", label: "Default", description: "Provider default reasoning mode" },
@@ -558,15 +516,37 @@ const DEFAULT_REASONING_RULES: ReasoningRule[] = [
       defaultValue: "medium",
     }
   },
+  // Opus 4.6: adaptive thinking + effort (low, medium, high, max). Max is Opus 4.6 only.
   {
     provider: "anthropic",
     modelPattern: /^claude-opus-4-6/i,
     config: {
       parameter: "thinking.effort",
-      options: [REASONING_OPTIONS.none, REASONING_OPTIONS.low, REASONING_OPTIONS.medium, REASONING_OPTIONS.high, REASONING_OPTIONS.xhigh],
+      options: [REASONING_OPTIONS.low, REASONING_OPTIONS.medium, REASONING_OPTIONS.high, REASONING_OPTIONS.max],
       defaultValue: "medium",
     },
   },
+  // Sonnet 4.6: adaptive thinking + effort (low, medium, high). No max.
+  {
+    provider: "anthropic",
+    modelPattern: /^claude-sonnet-4-6/i,
+    config: {
+      parameter: "thinking.effort",
+      options: [REASONING_OPTIONS.low, REASONING_OPTIONS.medium, REASONING_OPTIONS.high],
+      defaultValue: "medium",
+    },
+  },
+  // Haiku 4.5: extended thinking with budget_tokens (same API shape as other Claude 4).
+  {
+    provider: "anthropic",
+    modelPattern: /^claude-haiku-4-5/i,
+    config: {
+      parameter: "thinkingConfig.thinkingBudget",
+      options: [REASONING_OPTIONS.budget_0, REASONING_OPTIONS.budget_1024, REASONING_OPTIONS.budget_8192, REASONING_OPTIONS.budget_24576],
+      defaultValue: "8192",
+    },
+  },
+  // Other Anthropic (Sonnet 4.5, 4, 3.7, etc.): thinking on/off with budget.
   {
     provider: "anthropic",
     config: {
@@ -874,8 +854,9 @@ export function normalizeReasoningLevel(
     // ─── OpenAI / Anthropic / Groq (Effort-based) ──────────────────────────
     if (["openai", "anthropic", "groq", "xai", "azure", "openrouter"].includes(provider)) {
       if (level === "none") return "none";
-      if (level === "xhigh") return "high"; // Standardize xhigh to high for effort-based
-      return level; // low, medium, high are standard
+      if (level === "xhigh") return "high"; // map xhigh to high for effort-based APIs
+      // Preserve low, medium, high, max (max is valid for Anthropic Opus 4.6 only)
+      return level;
     }
   }
 

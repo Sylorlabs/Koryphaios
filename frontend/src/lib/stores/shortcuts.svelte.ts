@@ -1,5 +1,7 @@
 // Keyboard shortcuts — editable, persisted to localStorage, Svelte 5 runes
 
+import { browser } from '$app/environment';
+
 export interface Shortcut {
   id: string;
   keys: string[];
@@ -17,6 +19,7 @@ const defaultShortcuts: Shortcut[] = [
 ];
 
 function loadShortcuts(): Shortcut[] {
+  if (!browser) return structuredClone(defaultShortcuts);
   try {
     const stored = localStorage.getItem(STORAGE_KEY);
     if (stored) return JSON.parse(stored);
@@ -32,12 +35,12 @@ function createShortcutStore() {
     set list(v: Shortcut[]) { shortcuts = v; },
 
     save() {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(shortcuts));
+      if (browser) localStorage.setItem(STORAGE_KEY, JSON.stringify(shortcuts));
     },
 
     reset() {
       shortcuts = structuredClone(defaultShortcuts);
-      localStorage.removeItem(STORAGE_KEY);
+      if (browser) localStorage.removeItem(STORAGE_KEY);
     },
 
     /** Check if a KeyboardEvent matches a given shortcut id */

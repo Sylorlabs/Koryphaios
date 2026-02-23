@@ -24,6 +24,7 @@ import type {
   Session,
 } from "@koryphaios/shared";
 import { sessionStore } from './sessions.svelte';
+import { authStore } from './auth.svelte';
 import { browser } from '$app/environment';
 
 // ─── Agent State ────────────────────────────────────────────────────────────
@@ -493,14 +494,23 @@ function handleMessage(msg: WSMessage) {
 
     case "system.error": {
       const p = msg.payload as any;
-      addFeedEntry({
-        timestamp: msg.timestamp,
-        type: "error",
-        agentId: "",
-        agentName: "System",
-        glowClass: "",
-        text: p.error ?? "Unknown system error",
-      });
+      const errorText = p.error ?? "Unknown system error";
+      // Dedupe: skip if the last entry is the same error within 3s (e.g. no-provider sent twice)
+      const last = feed.length > 0 ? feed[feed.length - 1] : null;
+      const isDuplicate =
+        last?.type === "error" &&
+        last.text === errorText &&
+        (msg.timestamp - last.timestamp) < 3000;
+      if (!isDuplicate) {
+        addFeedEntry({
+          timestamp: msg.timestamp,
+          type: "error",
+          agentId: "",
+          agentName: "System",
+          glowClass: "",
+          text: errorText,
+        });
+      }
       break;
     }
   }
@@ -516,8 +526,16 @@ let wsCandidateIndex = 0;
 function buildWsCandidates(preferredUrl?: string): string[] {
   const scheme = window.location.protocol === "https:" ? "wss" : "ws";
   const currentHost = window.location.host;
-  const primary = preferredUrl ?? `${scheme}://${currentHost}/ws`;
-  return [primary];
+  const sameOrigin = `${scheme}://${currentHost}/ws`;
+  const directWs = typeof import.meta.env !== "undefined" && (import.meta.env as { VITE_BACKEND_WS_URL?: string }).VITE_BACKEND_WS_URL;
+
+  const candidates: string[] = [];
+  if (preferredUrl) candidates.push(preferredUrl);
+  // Prefer same-origin first so Vite dev proxy (e.g. ws://localhost:5173/ws → backend) is tried first.
+  if (sameOrigin && !candidates.includes(sameOrigin)) candidates.push(sameOrigin);
+  if (directWs && !candidates.includes(directWs)) candidates.push(directWs);
+  if (candidates.length === 0) candidates.push(sameOrigin);
+  return candidates;
 }
 
 function connect(url?: string) {
@@ -598,6 +616,7 @@ function sendMessage(sessionId: string, content: string, model?: string, reasoni
   fetch("/api/messages", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
+    credentials: "include",
     body: JSON.stringify({ sessionId, content, model, reasoningLevel }),
   }).catch(() => { });
 }
@@ -734,6 +753,27 @@ function isSessionRunning(sessionId: string): boolean {
   return false;
 }
 
+/** Mark all agents for this session as done (optimistic UI when user clicks Stop). */
+function markSessionAgentsStopped(sessionId: string) {
+  let changed = false;
+  for (const a of agents.values()) {
+    if (a.sessionId === sessionId && a.status !== 'idle' && a.status !== 'done') {
+      a.status = 'done';
+      changed = true;
+    }
+  }
+  if (changed) agents = new Map(agents);
+}
+
+/** Mark a single agent as done (optimistic UI when user cancels one worker). */
+function markAgentStopped(agentId: string) {
+  const agent = agents.get(agentId);
+  if (agent && agent.status !== 'idle' && agent.status !== 'done') {
+    agent.status = 'done';
+    agents = new Map(agents);
+  }
+}
+
 function sendUserInput(sessionId: string, selection: string, text?: string) {
   if (wsConnection?.readyState === WebSocket.OPEN) {
     wsConnection.send(JSON.stringify({
@@ -798,6 +838,8 @@ export const wsStore = {
   get managerStatus() { return getManagerStatus(); },
   get contextUsage() { return getContextUsage(); },
   isSessionRunning,
+  markSessionAgentsStopped,
+  markAgentStopped,
   connect,
   disconnect,
   sendMessage,

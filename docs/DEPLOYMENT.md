@@ -14,6 +14,39 @@ This guide covers deploying Koryphaios to production environments.
 
 ---
 
+## Production Readiness Checklist
+
+Before deploying, ensure the following.
+
+### Environment variables
+
+| Variable | Required (production) | Description |
+|----------|------------------------|-------------|
+| `NODE_ENV` | Set to `production` | Enables JWT and security checks. |
+| `JWT_SECRET` | **Yes** (min 32 chars) | Signing secret for session/API tokens. Generate with `openssl rand -base64 32`. |
+| `CORS_ORIGINS` | **Yes** | Comma-separated allowed origins (e.g. `https://app.example.com`). |
+| `ALLOW_REGISTRATION` | Recommended | Set to `false` to disable public sign-up. |
+| `CREATE_DEFAULT_ADMIN` | Optional | Set to `true` once to create default admin; set `false` and change password after. |
+| `REDIS_URL` | Optional | Redis connection URL for rate limiting and session store. If unset, in-memory fallback is used (single-instance only). |
+
+Copy from `.env.example`, then set production values. Never commit `.env`.
+
+### Database
+
+- **SQLite** is used for sessions, credentials, and schema. The database file lives under the configured `dataDirectory` (default `.koryphaios/`).
+- **Migrations run automatically** on backend startup; ensure the data directory exists and is writable by the process user.
+- For production, set a dedicated path in `koryphaios.json` (e.g. `"/var/lib/koryphaios"`) and back it up with your existing backup strategy. WAL files (`.db-wal`, `.db-shm`) are created by SQLite and should be included in backups.
+
+### Redis (optional)
+
+For multi-instance or production-grade rate limiting and session state:
+
+1. Set `REDIS_URL` in `.env` (e.g. `redis://localhost:6379` or your cloud Redis URL).
+2. Ensure the Redis server is running and reachable before starting the backend.
+3. If Redis is not configured, the backend uses in-memory stores (suitable for a single process only).
+
+---
+
 ## Production Build
 
 ### 1. Install Dependencies
@@ -37,14 +70,17 @@ cp config.example.json koryphaios.json
 nano koryphaios.json  # Set production values
 ```
 
-### 3. Build Application
+### 3. Build and Verify
 
 ```bash
 # Build all workspaces
 bun run build
 
-# Verify build
+# Type-check and lint
 bun run check
+
+# Run tests (recommended before deploy)
+bun run test
 ```
 
 ---

@@ -45,6 +45,8 @@ export interface ProviderToolDef {
 export interface ProviderMessage {
   role: "user" | "assistant" | "system" | "tool";
   content: string | ProviderContentBlock[];
+  /** Required for role "tool": ID of the tool call this result belongs to. */
+  tool_call_id?: string;
 }
 
 export interface ProviderContentBlock {
@@ -87,7 +89,7 @@ export interface Provider {
   isAvailable(): boolean;
 
   /** List models available for this provider. */
-  listModels(): Promise<ModelDef[]>;
+  listModels(): ModelDef[];
 }
 
 // ─── Provider factory ───────────────────────────────────────────────────────

@@ -1,14 +1,17 @@
 // OpenTelemetry monitoring and observability.
 // Provides distributed tracing, metrics, and logging integration.
 
-import { trace, context, SpanStatusCode, SpanKind } from "@opentelemetry/api";
+import { trace, context, SpanStatusCode, SpanKind, type Attributes, type Span } from "@opentelemetry/api";
 import { NodeTracerProvider } from "@opentelemetry/sdk-trace-node";
 import { Resource } from "@opentelemetry/resources";
-import { SemanticResourceAttributes } from "@opentelemetry/semantic-conventions";
+import { SEMRESATTRS_SERVICE_NAME, SEMRESATTRS_SERVICE_VERSION, SEMRESATTRS_DEPLOYMENT_ENVIRONMENT } from "@opentelemetry/semantic-conventions";
+
 import { HttpInstrumentation } from "@opentelemetry/instrumentation-http";
 import { OTLPTraceExporter } from "@opentelemetry/exporter-trace-otlp-grpc";
 import { registerInstrumentations } from "@opentelemetry/instrumentation";
 import { serverLog } from "../logger";
+
+
 
 let tracerInitialized = false;
 
@@ -35,11 +38,13 @@ export function initTelemetry(config: {
     try {
         const resource = Resource.default().merge(
             new Resource({
-                [SemanticResourceAttributes.SERVICE_NAME]: config.serviceName || "koryphaios",
-                [SemanticResourceAttributes.SERVICE_VERSION]: process.env.npm_package_version || "1.0.0",
-                [SemanticResourceAttributes.DEPLOYMENT_ENVIRONMENT]: config.environment || process.env.NODE_ENV || "production",
+                [SEMRESATTRS_SERVICE_NAME]: config.serviceName || "koryphaios",
+                [SEMRESATTRS_SERVICE_VERSION]: process.env.npm_package_version || "1.0.0",
+                [SEMRESATTRS_DEPLOYMENT_ENVIRONMENT]: config.environment || process.env.NODE_ENV || "production",
             })
         );
+
+
 
         const provider = new NodeTracerProvider({
             resource,
@@ -69,7 +74,7 @@ export function initTelemetry(config: {
         registerInstrumentations({
             instrumentations: [
                 new HttpInstrumentation({
-                    applyCustomAttributesOnSpan: (span) => {
+                    applyCustomAttributesOnSpan: (span: Span) => {
                         // Add custom attributes to HTTP spans
                         span.setAttribute("custom.attribute", "value");
                     },
@@ -96,9 +101,9 @@ export function getTracer(name: string = "koryphaios") {
  */
 export async function withSpan<T>(
     name: string,
-    fn: (span: ReturnType<typeof trace.getSpan>) => Promise<T>,
+    fn: (span: Span) => Promise<T>,
     options?: {
-        attributes?: Record<string, unknown>;
+        attributes?: Attributes;
         kind?: SpanKind;
     }
 ): Promise<T> {
@@ -130,7 +135,7 @@ export async function withSpan<T>(
 /**
  * Create a child span manually.
  */
-export function createSpan(name: string, parentSpan?: ReturnType<typeof trace.getSpan>) {
+export function createSpan(name: string, parentSpan?: Span) {
     const tracer = getTracer();
     return tracer.startSpan(name, {}, parentSpan ? trace.setSpan(context.active(), parentSpan) : undefined);
 }
@@ -138,7 +143,7 @@ export function createSpan(name: string, parentSpan?: ReturnType<typeof trace.ge
 /**
  * Add attributes to the current span.
  */
-export function setSpanAttributes(attributes: Record<string, unknown>): void {
+export function setSpanAttributes(attributes: Attributes): void {
     const span = trace.getActiveSpan();
     if (span) {
         span.setAttributes(attributes);
@@ -148,7 +153,7 @@ export function setSpanAttributes(attributes: Record<string, unknown>): void {
 /**
  * Add an event to the current span.
  */
-export function addSpanEvent(name: string, attributes?: Record<string, unknown>): void {
+export function addSpanEvent(name: string, attributes?: Attributes): void {
     const span = trace.getActiveSpan();
     if (span) {
         span.addEvent(name, attributes);
@@ -250,8 +255,9 @@ export class PerformanceTimer {
         this.startTime = Date.now();
         this.span = createSpan(name);
         if (attributes && this.span) {
-            this.span.setAttributes(attributes);
+            this.span.setAttributes(attributes as Attributes);
         }
+
     }
 
     stop(): number {

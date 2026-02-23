@@ -4,7 +4,7 @@
 
 import Anthropic from "@anthropic-ai/sdk";
 import type { ProviderConfig, ModelDef } from "@koryphaios/shared";
-import { 
+import {
   type Provider,
   type ProviderEvent,
   type StreamRequest,
@@ -23,11 +23,16 @@ export class AnthropicProvider implements Provider {
     this.name = "anthropic";
   }
 
+  /** Resolved auth: config first, then CLI/env detection so UI "connected" and resolution stay in sync. */
+  private get effectiveAuthToken(): string | undefined {
+    return this.config.authToken ?? detectClaudeCodeToken() ?? undefined;
+  }
+
   protected get client(): Anthropic {
     if (!this._client) {
       this._client = new Anthropic({
         apiKey: this.config.apiKey,
-        authToken: this.config.authToken,
+        authToken: this.effectiveAuthToken,
         ...(this.config.baseUrl && { baseURL: this.config.baseUrl }),
       });
     }
@@ -35,15 +40,15 @@ export class AnthropicProvider implements Provider {
   }
 
   isAvailable(): boolean {
-    return !this.config.disabled && !!(this.config.apiKey || this.config.authToken);
+    return !this.config.disabled && !!(this.config.apiKey || this.config.authToken || detectClaudeCodeToken());
   }
 
   private cachedModels: ModelDef[] | null = null;
   private lastFetch = 0;
 
-  async listModels(): Promise<ModelDef[]> {
+  listModels(): ModelDef[] {
     const localModels = getModelsForProvider(this.name);
-    
+
     if (!this.isAvailable()) {
       return localModels;
     }
@@ -52,24 +57,27 @@ export class AnthropicProvider implements Provider {
       return this.cachedModels;
     }
 
-    try {
-      const response = await withRetry(() => this.client.models.list());
-      
-      const remoteModels: ModelDef[] = [];
-      for (const model of response.data) {
-        const id = model.id;
-        const existing = localModels.find(m => m.apiModelId === id || m.id === id);
-        if (existing) continue;
-        
-        remoteModels.push(createGenericModel(id, this.name));
-      }
-      
-      this.cachedModels = [...localModels, ...remoteModels];
-      this.lastFetch = Date.now();
-      return this.cachedModels;
-    } catch (err) {
-      return localModels;
-    }
+    // Trigger background refresh
+    this.refreshModelsInBackground(localModels);
+    return this.cachedModels ?? localModels;
+  }
+
+  private refreshModelsInBackground(localModels: ModelDef[]) {
+    withRetry(() => this.client.models.list())
+      .then((response) => {
+        const remoteModels: ModelDef[] = [];
+        for (const model of response.data) {
+          const id = model.id;
+          const existing = localModels.find(m => m.apiModelId === id || m.id === id);
+          if (existing) continue;
+          remoteModels.push(createGenericModel(id, this.name));
+        }
+        this.cachedModels = [...localModels, ...remoteModels];
+        this.lastFetch = Date.now();
+      })
+      .catch(() => {
+        if (!this.cachedModels) this.cachedModels = localModels;
+      });
   }
 
   async *streamResponse(request: StreamRequest): AsyncGenerator<ProviderEvent> {
@@ -89,35 +97,54 @@ export class AnthropicProvider implements Provider {
       ...(tools?.length && { tools }),
     };
 
-    // Enable extended thinking for reasoning models — ensure budget allows for output
-    if (request.reasoningLevel) {
-      const level = String(request.reasoningLevel).toLowerCase();
+    // Extended thinking: Opus 4.6 & Sonnet 4.6 use adaptive + output_config.effort (Anthropic API);
+    // Haiku 4.5 and others use thinking.type "enabled" + budget_tokens.
+    const isOpus46 = /^claude-opus-4-6/i.test(request.model || "");
+    const isSonnet46 = /^claude-sonnet-4-6/i.test(request.model || "");
+    const isHaiku45 = /^claude-haiku-4-5/i.test(request.model || "");
+
+    if (request.reasoningLevel !== undefined && request.reasoningLevel !== "") {
+      const level = String(request.reasoningLevel).toLowerCase().trim();
       const outputTokens = request.maxTokens ?? 16_384;
-      let thinkingBudget = 8192; // Default "on" budget
 
-      if (level === "off" || level === "none" || level === "0") {
-        thinkingBudget = 0;
-      } else if (level === "on") {
-        thinkingBudget = 8192;
-      } else if (level === "low") {
-        thinkingBudget = 4096;
-      } else if (level === "medium") {
-        thinkingBudget = 8192;
-      } else if (level === "high") {
-        thinkingBudget = 32768;
-      } else if (level === "max" || level === "xhigh") {
-        thinkingBudget = 65536;
-      } else if (!isNaN(Number(level))) {
-        thinkingBudget = Number(level);
-      }
-
-      if (thinkingBudget > 0) {
-        (params as any).thinking = {
-          type: "enabled",
-          budget_tokens: thinkingBudget,
-        };
-        // Total max_tokens must include both thinking and output
-        params.max_tokens = thinkingBudget + outputTokens;
+      if (isOpus46 || isSonnet46) {
+        // API: output_config.effort (low|medium|high|max), thinking.type "adaptive". Max is Opus 4.6 only.
+        const effort = (["low", "medium", "high", "max"] as const).includes(level as any)
+          ? level
+          : "medium";
+        if (effort === "max" && isSonnet46) {
+          (params as any).output_config = { effort: "high" };
+        } else {
+          (params as any).output_config = { effort };
+        }
+        (params as any).thinking = { type: "adaptive" };
+      } else if (isHaiku45) {
+        // Haiku 4.5: extended thinking with budget_tokens (same API as other Claude 4).
+        const budget = level === "0" || level === "off" ? 0 : Math.max(0, parseInt(level, 10) || 8192);
+        if (budget > 0) {
+          (params as any).thinking = { type: "enabled", budget_tokens: budget };
+          params.max_tokens = budget + outputTokens;
+        }
+      } else {
+        // Other Anthropic (Sonnet 4.5, 4, 3.7, etc.): thinking on/off with budget.
+        let thinkingBudget = 8192;
+        if (level === "off" || level === "none" || level === "0") {
+          thinkingBudget = 0;
+        } else if (level === "on") {
+          thinkingBudget = 8192;
+        } else if (level === "low") {
+          thinkingBudget = 4096;
+        } else if (level === "medium") {
+          thinkingBudget = 8192;
+        } else if (level === "high" || level === "max" || level === "xhigh") {
+          thinkingBudget = 32768;
+        } else if (!isNaN(Number(level))) {
+          thinkingBudget = Number(level);
+        }
+        if (thinkingBudget > 0) {
+          (params as any).thinking = { type: "enabled", budget_tokens: thinkingBudget };
+          params.max_tokens = thinkingBudget + outputTokens;
+        }
       }
     }
 
@@ -219,6 +246,12 @@ export class AnthropicProvider implements Provider {
       .filter((m) => m.role !== "system")
       .map((m) => {
         if (typeof m.content === "string") {
+          if (m.role === "tool") {
+            return {
+              role: "user",
+              content: [{ type: "tool_result", tool_use_id: m.tool_call_id ?? "", content: m.content, is_error: false }],
+            } as Anthropic.MessageParam;
+          }
           return { role: m.role as "user" | "assistant", content: m.content };
         }
 

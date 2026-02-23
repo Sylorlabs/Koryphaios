@@ -68,8 +68,7 @@ export class CLIAuthManager {
   async authenticateClaude(): Promise<{ success: boolean; message: string; url?: string }> {
     // "claude login" typically opens a browser.
     // We check if "claude" is installed first.
-    const check = Bun.spawnSync(["which", "claude"]);
-    if (check.exitCode !== 0) {
+    if (!Bun.which("claude")) {
       return { success: false, message: "Claude CLI not found. Run: npm install -g @anthropic-ai/claude-code" };
     }
 
@@ -82,8 +81,7 @@ export class CLIAuthManager {
   }
 
   async authenticateCodex(): Promise<{ success: boolean; message: string; url?: string }> {
-    const check = Bun.spawnSync(["which", "codex"]);
-    if (check.exitCode !== 0) {
+    if (!Bun.which("codex")) {
       return { success: false, message: "Codex CLI not found. (Assuming standard OpenAI CLI or alias)" };
     }
 

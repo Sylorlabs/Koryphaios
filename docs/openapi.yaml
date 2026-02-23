@@ -1,0 +1,847 @@
+openapi: 3.0.3
+info:
+  title: Koryphaios API
+  description: |
+    Koryphaios Model Hub API - Secure multi-tenant AI model management.
+    
+    ## Authentication
+    
+    The API supports two authentication methods:
+    
+    ### 1. JWT Authentication (Session-based)
+    Obtain a JWT token through the `/api/auth/login` endpoint and include it in the Authorization header:
+    ```
+    Authorization: Bearer <jwt_token>
+    ```
+    
+    ### 2. API Key Authentication (Programmatic)
+    Create an API key through the `/api/v1/keys` endpoint and include it in the Authorization header:
+    ```
+    Authorization: Bearer <api_key>
+    ```
+    
+    API keys have scopes that determine what operations they can perform:
+    - `read`: Read operations
+    - `write`: Write operations (implies read)
+    - `admin`: Administrative operations (implies all)
+    - `provider:*`: Provider-specific operations
+  version: 1.0.0
+  contact:
+    name: Koryphaios Support
+    url: https://github.com/koryphaios/koryphaios
+
+servers:
+  - url: http://localhost:3000
+    description: Local development server
+  - url: https://api.koryphaios.com
+    description: Production server
+
+security:
+  - BearerAuth: []
+
+tags:
+  - name: Authentication
+    description: User authentication and session management
+  - name: Credentials
+    description: Secure storage of provider API keys
+  - name: API Keys
+    description: Programmatic access key management
+  - name: Audit
+    description: Security audit logging
+
+paths:
+  # ────────────────────────────────────────────────────────────────────────────
+  # Authentication
+  # ────────────────────────────────────────────────────────────────────────────
+  
+  /api/auth/login:
+    post:
+      tags: [Authentication]
+      summary: Login with username and password
+      description: Authenticate and receive a JWT access token
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [username, password]
+              properties:
+                username:
+                  type: string
+                password:
+                  type: string
+                deviceId:
+                  type: string
+                  description: Optional device identifier
+      responses:
+        200:
+          description: Login successful
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  accessToken:
+                    type: string
+                  refreshToken:
+                    type: string
+                  expiresIn:
+                    type: integer
+        401:
+          description: Invalid credentials
+
+  /api/auth/register:
+    post:
+      tags: [Authentication]
+      summary: Register a new user
+      description: Create a new user account
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [username, password]
+              properties:
+                username:
+                  type: string
+                password:
+                  type: string
+      responses:
+        201:
+          description: User created successfully
+        409:
+          description: Username already exists
+
+  /api/auth/refresh:
+    post:
+      tags: [Authentication]
+      summary: Refresh access token
+      description: Get a new access token using a refresh token
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [refreshToken]
+              properties:
+                refreshToken:
+                  type: string
+      responses:
+        200:
+          description: New tokens issued
+        401:
+          description: Invalid refresh token
+
+  /api/auth/me:
+    get:
+      tags: [Authentication]
+      summary: Get current user info
+      security:
+        - BearerAuth: []
+      responses:
+        200:
+          description: User information
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id:
+                    type: string
+                  username:
+                    type: string
+                  isAdmin:
+                    type: boolean
+
+  # ────────────────────────────────────────────────────────────────────────────
+  # Credentials
+  # ────────────────────────────────────────────────────────────────────────────
+  
+  /api/v1/credentials:
+    get:
+      tags: [Credentials]
+      summary: List credentials
+      description: Get all credentials for the authenticated user (metadata only, never returns plaintext)
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: provider
+          in: query
+          schema:
+            type: string
+          description: Filter by provider
+        - name: isActive
+          in: query
+          schema:
+            type: boolean
+            default: true
+          description: Filter by active status
+      responses:
+        200:
+          description: List of credentials
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  credentials:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/CredentialMetadata'
+        401:
+          description: Unauthorized
+          
+    post:
+      tags: [Credentials]
+      summary: Store a new credential
+      description: Encrypt and store a provider API key or token
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [provider, credential]
+              properties:
+                provider:
+                  type: string
+                  enum: [openai, anthropic, google, xai, openrouter, groq, azure, bedrock, vertexai, ollama, local]
+                credential:
+                  type: string
+                  description: The API key or token to encrypt
+                metadata:
+                  type: object
+                  description: Optional metadata (name, environment, etc.)
+      responses:
+        201:
+          description: Credential stored successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id:
+                    type: string
+                  message:
+                    type: string
+        400:
+          description: Invalid request
+        403:
+          description: Insufficient permissions
+
+  /api/v1/credentials/{id}:
+    get:
+      tags: [Credentials]
+      summary: Get credential metadata
+      description: Get metadata for a specific credential (does not return the encrypted value)
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        200:
+          description: Credential metadata
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CredentialMetadata'
+        404:
+          description: Credential not found
+          
+    patch:
+      tags: [Credentials]
+      summary: Update credential metadata
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                metadata:
+                  type: object
+      responses:
+        200:
+          description: Credential updated
+        404:
+          description: Credential not found
+          
+    delete:
+      tags: [Credentials]
+      summary: Delete a credential
+      description: Soft delete a credential (can be restored by admin)
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reason:
+                  type: string
+      responses:
+        200:
+          description: Credential deleted
+        404:
+          description: Credential not found
+
+  /api/v1/credentials/{id}/rotate:
+    post:
+      tags: [Credentials]
+      summary: Rotate credential encryption
+      description: Re-encrypt a credential with a new key (useful after password change)
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reason:
+                  type: string
+      responses:
+        200:
+          description: Credential rotated successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                  oldId:
+                    type: string
+                  newId:
+                    type: string
+        404:
+          description: Credential not found
+
+  /api/v1/credentials/{id}/audit:
+    get:
+      tags: [Credentials, Audit]
+      summary: Get credential audit trail
+      description: Get access history for a specific credential (answers "Who accessed my key?")
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        200:
+          description: Audit trail
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  credentialId:
+                    type: string
+                  accessCount:
+                    type: integer
+                  trail:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/AuditEntry'
+
+  # ────────────────────────────────────────────────────────────────────────────
+  # API Keys
+  # ────────────────────────────────────────────────────────────────────────────
+  
+  /api/v1/keys:
+    get:
+      tags: [API Keys]
+      summary: List API keys
+      description: Get all API keys for the authenticated user (does not return full keys)
+      security:
+        - BearerAuth: []
+      responses:
+        200:
+          description: List of API keys
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  keys:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/ApiKeyMetadata'
+                      
+    post:
+      tags: [API Keys]
+      summary: Create API key
+      description: |
+        Create a new API key for programmatic access.
+        **Important:** The key is only returned once in this response.
+        Store it securely as it cannot be retrieved later.
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name:
+                  type: string
+                  description: Human-readable name for the key
+                scopes:
+                  type: array
+                  items:
+                    type: string
+                    enum: [read, write, admin, provider:*]
+                  default: [read]
+                rateLimitTier:
+                  type: string
+                  enum: [free, premium, pro, enterprise]
+                  default: free
+                expiresInDays:
+                  type: integer
+                  description: Number of days until key expires (null for never)
+                metadata:
+                  type: object
+      responses:
+        201:
+          description: API key created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id:
+                    type: string
+                  name:
+                    type: string
+                  key:
+                    type: string
+                    description: The API key (only shown once!)
+                  prefix:
+                    type: string
+                  scopes:
+                    type: array
+                    items:
+                      type: string
+                  rateLimitTier:
+                    type: string
+                  expiresAt:
+                    type: integer
+                    nullable: true
+                  createdAt:
+                    type: integer
+                  warning:
+                    type: string
+        400:
+          description: Invalid request
+
+  /api/v1/keys/{id}:
+    get:
+      tags: [API Keys]
+      summary: Get API key details
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        200:
+          description: API key details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiKeyMetadata'
+        404:
+          description: API key not found
+          
+    patch:
+      tags: [API Keys]
+      summary: Update API key
+      description: Update name, scopes, or rate limit tier
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                scopes:
+                  type: array
+                  items:
+                    type: string
+                rateLimitTier:
+                  type: string
+                  enum: [free, premium, pro, enterprise]
+      responses:
+        200:
+          description: API key updated
+        404:
+          description: API key not found
+          
+    delete:
+      tags: [API Keys]
+      summary: Revoke API key
+      description: Permanently revoke an API key
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        200:
+          description: API key revoked
+        404:
+          description: API key not found
+
+  # ────────────────────────────────────────────────────────────────────────────
+  # Audit
+  # ────────────────────────────────────────────────────────────────────────────
+  
+  /api/v1/audit:
+    get:
+      tags: [Audit]
+      summary: Query audit logs
+      description: Search audit logs with filters (admin can query all users)
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: userId
+          in: query
+          schema:
+            type: string
+          description: Filter by user (admin only can filter other users)
+        - name: action
+          in: query
+          schema:
+            type: string
+          description: Filter by action type
+        - name: resourceType
+          in: query
+          schema:
+            type: string
+          description: Filter by resource type
+        - name: resourceId
+          in: query
+          schema:
+            type: string
+          description: Filter by resource ID
+        - name: startTime
+          in: query
+          schema:
+            type: integer
+          description: Start timestamp (Unix ms)
+        - name: endTime
+          in: query
+          schema:
+            type: integer
+          description: End timestamp (Unix ms)
+        - name: success
+          in: query
+          schema:
+            type: boolean
+          description: Filter by success status
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 100
+            maximum: 1000
+          description: Max results to return
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            default: 0
+          description: Pagination offset
+      responses:
+        200:
+          description: Query results
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  entries:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/AuditEntry'
+                  total:
+                    type: integer
+                  hasMore:
+                    type: boolean
+                  limit:
+                    type: integer
+                  offset:
+                    type: integer
+
+  /api/v1/audit/me:
+    get:
+      tags: [Audit]
+      summary: Get my activity
+      description: Get recent audit log entries for the current user
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 50
+            maximum: 100
+      responses:
+        200:
+          description: User activity
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  userId:
+                    type: string
+                  entries:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/AuditEntry'
+
+  /api/v1/audit/suspicious:
+    get:
+      tags: [Audit]
+      summary: Detect suspicious activity
+      description: Check for suspicious patterns in user activity (admin only)
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: userId
+          in: query
+          required: true
+          schema:
+            type: string
+          description: User to check
+      responses:
+        200:
+          description: Suspicious activity check results
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  userId:
+                    type: string
+                  suspicious:
+                    type: boolean
+                  reasons:
+                    type: array
+                    items:
+                      type: string
+        403:
+          description: Admin access required
+
+# ────────────────────────────────────────────────────────────────────────────
+# Components
+# ────────────────────────────────────────────────────────────────────────────
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT or API key
+      description: |
+        Enter your JWT token or API key.
+        Format: `Bearer <token>`
+
+  schemas:
+    CredentialMetadata:
+      type: object
+      properties:
+        id:
+          type: string
+        provider:
+          type: string
+        type:
+          type: string
+          enum: [apiKey, authToken, baseUrl]
+        isActive:
+          type: boolean
+        createdAt:
+          type: integer
+        updatedAt:
+          type: integer
+        lastUsedAt:
+          type: integer
+          nullable: true
+        expiresAt:
+          type: integer
+          nullable: true
+
+    ApiKeyMetadata:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        prefix:
+          type: string
+          description: First 8 characters of the key for identification
+        scopes:
+          type: array
+          items:
+            type: string
+        rateLimitTier:
+          type: string
+        expiresAt:
+          type: integer
+          nullable: true
+        lastUsedAt:
+          type: integer
+          nullable: true
+        usageCount:
+          type: integer
+        isActive:
+          type: boolean
+        createdAt:
+          type: integer
+
+    AuditEntry:
+      type: object
+      properties:
+        id:
+          type: integer
+        userId:
+          type: string
+          nullable: true
+        action:
+          type: string
+        resourceType:
+          type: string
+          nullable: true
+        resourceId:
+          type: string
+          nullable: true
+        ipAddress:
+          type: string
+          nullable: true
+        userAgent:
+          type: string
+          nullable: true
+        success:
+          type: boolean
+        reason:
+          type: string
+          nullable: true
+        metadata:
+          type: object
+          nullable: true
+        timestamp:
+          type: integer
+
+  responses:
+    UnauthorizedError:
+      description: Access token is missing or invalid
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              error:
+                type: string
+                example: Unauthorized
+
+    ForbiddenError:
+      description: Insufficient permissions
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              error:
+                type: string
+                example: Forbidden
+
+    NotFoundError:
+      description: Resource not found
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              error:
+                type: string
+                example: Not Found
+
+    RateLimitError:
+      description: Rate limit exceeded
+      headers:
+        X-RateLimit-Limit:
+          schema:
+            type: integer
+        X-RateLimit-Remaining:
+          schema:
+            type: integer
+        X-RateLimit-Reset:
+          schema:
+            type: integer
+        Retry-After:
+          schema:
+            type: integer
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              error:
+                type: string
+                example: Rate limit exceeded
+              retryAfter:
+                type: integer

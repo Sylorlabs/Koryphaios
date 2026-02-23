@@ -19,16 +19,20 @@ Contact the maintainers directly at: [security contact - TBD]
 ### API Key Management
 
 1. **Encryption at Rest**
-   - API keys are encrypted before storage in `.env`
-   - Uses symmetric encryption with derived key
-   - Keys are decrypted only in memory at runtime
+   - Envelope encryption (KMS/local) initialized at startup when available
+   - New credentials stored with envelope format; legacy `enc:` format still supported for decryption
+   - Keys decrypted only in memory at runtime; never logged or exposed
 
-2. **Environment Isolation**
+2. **Session Auth**
+   - Browser sessions use HttpOnly, SameSite=Strict cookies (no token in JS/localStorage).
+   - `JWT_SECRET` is required in production (min 32 chars); startup fails if unset when `NODE_ENV=production`.
+
+3. **Environment Isolation**
    - Keys stored in `.env` (gitignored)
    - Never logged or exposed in error messages
    - Separate keys per environment (dev/staging/prod)
 
-3. **In-Transit Protection**
+4. **In-Transit Protection**
    - HTTPS required for production deployments
    - WebSocket connections use WSS in production
    - No keys transmitted to frontend
@@ -41,26 +45,29 @@ Contact the maintainers directly at: [security contact - TBD]
    - Rejects unauthorized origins
 
 2. **Rate Limiting**
-   - **Current:** 120 requests/minute per IP
-   - Applied to all API endpoints
+   - 120 requests/minute per IP (general API)
+   - 15 requests/minute per IP for auth (login, register, refresh)
+   - 20 requests/minute per IP for credential-setting (PUT /api/providers)
+   - Per-user rate limit on critical routes (e.g. POST /api/sessions)
    - Returns 429 Too Many Requests when exceeded
 
 3. **Input Validation**
    - Session IDs: alphanumeric, length-limited
    - Provider names: enum validation
-   - Content: sanitized, max 100KB per message
-   - Paths: normalized to prevent traversal
+   - Content: sanitized, max 100KB per message; JSON body max 1 MB
+   - Paths: resolved and enforced under working directory (no traversal)
+   - Git file paths and branch names validated
 
 ### Data Protection
 
 1. **Session Isolation**
-   - Each session has unique ID
-   - Messages scoped to session
+   - Each session has unique ID and owner (userId)
+   - REST and WebSocket: session access and subscribe/user_input/accept/reject enforce ownership
    - No cross-session data leakage
 
 2. **File System Access**
-   - Tools restricted to current working directory
-   - Path normalization prevents `../` attacks
+   - All file tools resolve paths under working directory; traversal attempts rejected
+   - Optional allowedPaths further restricts worker access when set
    - Read-only mode available (future)
 
 3. **Logging**
@@ -75,13 +82,10 @@ Contact the maintainers directly at: [security contact - TBD]
 ### For Deployment
 
 1. **Environment Variables**
-   ```bash
-   # Never commit .env to version control
-   echo ".env" >> .gitignore
-   
-   # Use strong, unique keys per environment
-   # Rotate keys quarterly
-   ```
+   - `.env` is written with mode `0600` (owner read/write only) by the server.
+   - Never commit `.env` to version control; keep it in `.gitignore`.
+   - Exclude `.env` from backups to untrusted or shared storage.
+   - Use strong, unique keys per environment; rotate keys periodically.
 
 2. **Network Configuration**
    ```bash
@@ -121,29 +125,35 @@ Contact the maintainers directly at: [security contact - TBD]
 
 ---
 
-## Known Limitations
+## Security Improvements (Completed)
 
-### Current Implementation
+### Authentication
+- ✅ **Real user authentication** with username/password
+- ✅ **Argon2id password hashing** (memory-hard, GPU-resistant)
+- ✅ **JWT access tokens** (15-min expiry); **JWT_SECRET** required in production
+- ✅ **Refresh tokens** (7-day expiry), stored in database
+- ✅ **Session ownership** - REST and WebSocket enforce ownership for sessions and actions
+- ✅ **Default admin:** in production, **ADMIN_INITIAL_PASSWORD** (min 16 chars) required when using CREATE_DEFAULT_ADMIN
+- ✅ **Bearer token auth** (JWT or `kor_` API key)
 
-1. **Encryption Key Derivation**
-   - ⚠️ Uses basic symmetric encryption
-   - ⚠️ Key derived from static seed
-   - **TODO:** Migrate to proper KMS or vault
+### Provider System
+- ✅ **Removed 100+ fantasy providers** - only real providers remain
+- ✅ **Circuit breaker pattern** - stops calling failing providers
+- ✅ **Retry logic with exponential backoff** - handles transient failures
 
-2. **Session Authentication**
-   - ⚠️ No user authentication system
-   - ⚠️ Sessions accessible to anyone with ID
-   - **TODO:** Add session tokens/JWT
+### Remaining Limitations
 
-3. **Rate Limiting**
-   - ⚠️ IP-based only (can be spoofed with proxies)
-   - ⚠️ No per-user or per-session limits
-   - **TODO:** Multi-factor rate limiting
+1. **Encryption**
+   - Legacy credentials (pre-envelope) still use host-derived key when envelope init is unavailable
+   - **Recommendation:** Set `KORYPHAIOS_KMS_PROVIDER` (e.g. local with passphrase) in production
 
-4. **File System Access**
-   - ⚠️ Tools have full read/write to CWD
-   - ⚠️ No granular permission system
-   - **TODO:** Sandbox file operations
+2. **Rate Limiting**
+   - IP can be spoofed via `X-Forwarded-For`; use a trusted proxy and single header in production
+   - Per-user limits applied on critical routes; full per-user on all authenticated routes is optional
+
+3. **File System Access**
+   - Tools have read/write under project root (path traversal blocked)
+   - **TODO:** Optional sandbox (e.g. Docker) for untrusted or high-risk tasks
 
 ---
 
@@ -187,21 +197,20 @@ Contact the maintainers directly at: [security contact - TBD]
 
 ## Roadmap
 
-### Near Term (v0.2)
+### Near Term
 
-- [ ] Migrate to proper key derivation (PBKDF2/Argon2)
-- [ ] Add environment variable validation on startup
-- [ ] Implement session token authentication
-- [ ] Add per-session rate limiting
-- [ ] Security headers middleware
+- [x] Envelope encryption init at startup; secureEncrypt for new credentials
+- [x] Environment validation (JWT_SECRET, CORS in production)
+- [x] Session ownership on WebSocket (subscribe, user_input, accept/reject)
+- [x] Per-user rate limiting on critical routes
+- [x] Security headers on API responses
+- [ ] Optional file system sandbox (Docker) for high-risk tool runs
 
-### Medium Term (v0.3)
+### Medium Term
 
-- [ ] File system sandboxing
-- [ ] User authentication system
 - [ ] API key rotation mechanism
 - [ ] Audit log export
-- [ ] Permission system for tool execution
+- [ ] Stricter CORS in production (require explicit origins)
 
 ### Long Term (v1.0)
 
@@ -221,5 +230,5 @@ Contact the maintainers directly at: [security contact - TBD]
 
 ---
 
-**Last Updated:** 2026-02-15  
-**Version:** 0.1.0
+**Last Updated:** 2026-02-21  
+**Version:** 1.0.0

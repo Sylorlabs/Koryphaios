@@ -2,6 +2,7 @@ import { describe, expect, test, mock, beforeEach } from "bun:test";
 import { KoryManager } from "../src/kory/manager";
 import { ProviderRegistry } from "../src/providers";
 import { ToolRegistry } from "../src/tools";
+import { AskUserTool, AskManagerTool, DelegateToWorkerTool } from "../src/tools/interaction";
 import type { Session, AgentIdentity, WSMessage } from "@koryphaios/shared";
 import { DOMAIN } from "../src/constants";
 
@@ -48,18 +49,26 @@ describe("KoryManager Orchestration", () => {
   });
 
   test("should resolve correct routing for domain", () => {
-    // Default
-    const frontendRouting = manager["resolveActiveRouting"](undefined, "frontend");
-    expect(frontendRouting.model).toBe(DOMAIN.DEFAULT_MODELS.frontend);
+    // Default: domain "general" uses DEFAULT_MODELS.general
+    const generalRouting = manager["resolveActiveRouting"](undefined, "general");
+    expect(generalRouting.model).toBe(DOMAIN.DEFAULT_MODELS.general);
 
     // Override via config
-    manager["config"].assignments = { frontend: "openai:gpt-4o" };
-    const overridden = manager["resolveActiveRouting"](undefined, "frontend");
+    manager["config"].assignments = { general: "openai:gpt-4o" };
+    const overridden = manager["resolveActiveRouting"](undefined, "general");
     expect(overridden.model).toBe("gpt-4o");
     expect(overridden.provider).toBe("openai");
   });
 
-  // Note: Testing full async routing loop requires extensive mocking of streams
-  // which is complex in this unit test setup. Ideally, we would integration test
-  // with a local mock provider.
+  test("manager role includes delegate_to_worker as sole way to spawn workers", () => {
+    const registry = new ToolRegistry();
+    registry.register(new AskUserTool());
+    registry.register(new AskManagerTool());
+    registry.register(new DelegateToWorkerTool());
+    const managerDefs = registry.getToolDefsForRole("manager");
+    const names = managerDefs.map((d) => d.name);
+    expect(names).toContain("delegate_to_worker");
+    expect(names).toContain("ask_user");
+    expect(managerDefs.some((d) => d.name === "delegate_to_worker")).toBe(true);
+  });
 });

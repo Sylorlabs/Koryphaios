@@ -17,6 +17,7 @@
   import ToastContainer from '$lib/components/ToastContainer.svelte';
   import CommandPalette from '$lib/components/CommandPalette.svelte';
   import { shortcutStore } from '$lib/stores/shortcuts.svelte';
+  import { apiFetch } from '$lib/api';
   import {
     Settings,
     Activity,
@@ -509,6 +510,13 @@ Release notes
     wsStore.sendMessage(sessionStore.activeSessionId, message, model, reasoningLevel);
   }
 
+  function handleStop() {
+    const id = sessionStore.activeSessionId;
+    if (!id) return;
+    wsStore.markSessionAgentsStopped(id);
+    apiFetch(`/api/sessions/${id}/cancel`, { method: 'POST' }).catch(() => {});
+  }
+
   let activeAgents = $derived([...wsStore.agents.values()].filter(a => 
     a.sessionId === sessionStore.activeSessionId && a.status !== 'done' && a.status !== 'idle'
   ));
@@ -550,18 +558,28 @@ Release notes
         <SessionSidebar currentSessionId={sessionStore.activeSessionId} />
       </div>
       <!-- Sidebar footer -->
-      <div class="px-3 h-10 border-t flex items-center justify-between shrink-0" style="border-color: var(--color-border);">
-        <div class="flex items-center gap-2">
-          <div class="w-2 h-2 rounded-full {connectionDot}"></div>
-          <span class="text-[10px] capitalize leading-none" style="color: var(--color-text-muted);">{wsStore.status}</span>
-        </div>
-        <div class="flex items-center gap-1">
+      <div class="px-3 py-2 border-t shrink-0 flex flex-col gap-1" style="border-color: var(--color-border);">
+        <div class="flex items-center justify-between">
+          <div
+            class="flex items-center gap-2"
+            title={wsStore.status !== 'connected' ? 'WebSocket cannot reach backend. Start it with: bun run dev:backend (from project root)' : 'Connected to backend'}
+          >
+            <div class="w-2 h-2 rounded-full {connectionDot}"></div>
+            <span class="text-[10px] capitalize leading-none" style="color: var(--color-text-muted);">{wsStore.status}</span>
+          </div>
+          <div class="flex items-center gap-1">
           {#if connectedProviders > 0}
             <span class="text-[10px] px-1.5 py-0.5 rounded leading-none" style="background: var(--color-surface-3); color: var(--color-text-muted);">
               {connectedProviders} providers
             </span>
           {/if}
+          </div>
         </div>
+        {#if wsStore.status !== 'connected' && wsStore.status !== 'connecting'}
+          <p class="text-[10px] leading-tight" style="color: var(--color-text-muted);" title="Run from project root: bun run dev:backend">
+            Backend not running? Start with <code class="px-0.5 rounded" style="background: var(--color-surface-3);">bun run dev:backend</code>
+          </p>
+        {/if}
       </div>
     </div>
   {:else if !zenMode}
@@ -734,7 +752,7 @@ Release notes
       </header>
     {:else}
       <button
-        class="absolute top-2 right-4 z-20 px-2.5 py-1 rounded-md text-xs border transition-all duration-200 hover:bg-[var(--color-surface-3)] hover:border-[var(--color-border-bright)] hover:scale-105 active:scale-95"
+        class="absolute top-0.5 right-4 z-20 px-2.5 py-1 rounded-md text-xs border transition-all duration-200 hover:bg-[var(--color-surface-3)] hover:border-[var(--color-border-bright)] hover:scale-105 active:scale-95"
         style="background: var(--color-surface-2); border-color: var(--color-border); color: var(--color-text-secondary);"
         onclick={() => handleMenuAction('toggle_zen_mode')}
       >
@@ -788,6 +806,8 @@ Release notes
       <CommandInput
         bind:inputRef
         onSend={handleSend}
+        isRunning={activeAgents.length > 0}
+        onStop={handleStop}
       />
     </div>
   </div>

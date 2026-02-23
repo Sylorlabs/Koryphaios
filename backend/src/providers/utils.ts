@@ -1,5 +1,51 @@
 import { providerLog } from "../logger";
 
+/**
+ * Returns an AbortSignal that aborts when either the given signal aborts or a timeout elapses.
+ * Prevents LLM streams from hanging indefinitely when the provider is slow or unresponsive.
+ */
+export function withTimeoutSignal(
+  signal: AbortSignal | undefined,
+  timeoutMs: number
+): AbortSignal {
+  const timeoutSignal =
+    typeof AbortSignal !== "undefined" && "timeout" in AbortSignal
+      ? (AbortSignal as any).timeout(timeoutMs)
+      : createTimeoutSignal(timeoutMs);
+
+  if (!signal) return timeoutSignal;
+
+  if (typeof AbortSignal !== "undefined" && "any" in AbortSignal) {
+    return (AbortSignal as any).any([signal, timeoutSignal]);
+  }
+
+  const controller = new AbortController();
+  const abort = (reason?: any) => {
+    try {
+      controller.abort(reason);
+    } catch {
+      // already aborted
+    }
+  };
+  signal.addEventListener("abort", () => abort(signal.reason), { once: true });
+  timeoutSignal.addEventListener("abort", () => abort(timeoutSignal.reason), { once: true });
+  return controller.signal;
+}
+
+function createTimeoutSignal(ms: number): AbortSignal {
+  const controller = new AbortController();
+  const timer = setTimeout(() => {
+    controller.abort(new DOMException(`Stream timed out after ${ms}ms`, "TimeoutError"));
+  }, ms);
+  const signal = controller.signal;
+  signal.addEventListener(
+    "abort",
+    () => clearTimeout(timer),
+    { once: true }
+  );
+  return signal;
+}
+
 export interface RetryOptions {
   maxRetries?: number;
   initialDelayMs?: number;
@@ -8,8 +54,8 @@ export interface RetryOptions {
 }
 
 const DEFAULT_OPTIONS: Required<RetryOptions> = {
-  maxRetries: 8,
-  initialDelayMs: 2000,
+  maxRetries: 3,
+  initialDelayMs: 1000,
   jitterFactor: 0.2,
   shouldRetry: (error: any) => {
     // Check for standard fetch errors or provider-specific error objects
@@ -81,9 +127,9 @@ export async function withRetry<T>(
       const jitterMs = backoffMs * opts.jitterFactor * Math.random();
       let delayMs = backoffMs + jitterMs;
 
-      // If Retry-After was specified and is larger, use that
+      // If Retry-After was specified and is larger, use that (cap at 30s)
       if (retryAfterMs > delayMs) {
-        delayMs = retryAfterMs;
+        delayMs = Math.min(retryAfterMs, 30_000);
       }
 
       providerLog.warn(

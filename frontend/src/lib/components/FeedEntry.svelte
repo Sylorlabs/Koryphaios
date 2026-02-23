@@ -133,7 +133,7 @@
       <div
         class="shrink-0 flex items-center justify-center w-5 h-6 pt-1"
       >
-        <AnimatedStatusIcon status={getStatusForType(entry.type)} size={14} isManager={entry.agentId === 'kory-manager'} />
+        <AnimatedStatusIcon status={getStatusForType(entry.type)} size={14} isManager={entry.agentId === 'kory-manager'} phase={entry.type === 'thought' ? ((entry.metadata?.phase as string) ?? '') : ''} />
       </div>
     {/if}
 

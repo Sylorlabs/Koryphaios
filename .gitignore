@@ -8,6 +8,11 @@ build/
 
 # Data & secrets
 .koryphaios/
+*.db-wal
+*.db-shm
+
+# Local / scratch
+typecheck_output*.txt
 
 # Environment
 .env
@@ -27,6 +32,7 @@ Thumbs.db
 # IDE
 .vscode/
 .idea/
+.cursor/
 *.swp
 *.swo
 

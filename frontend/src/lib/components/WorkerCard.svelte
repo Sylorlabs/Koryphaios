@@ -4,6 +4,7 @@
   import { wsStore } from '$lib/stores/websocket.svelte';
   import { Square, RotateCcw } from 'lucide-svelte';
   import { fade } from 'svelte/transition';
+  import { apiFetch } from '$lib/api';
 
   interface AgentState {
     identity: AgentIdentity;
@@ -15,6 +16,7 @@
     tokensUsed: number;
     contextMax: number;
     contextKnown: boolean;
+    sessionId?: string;
   }
 
   let { agent }: { agent: AgentState } = $props();
@@ -79,18 +81,22 @@
     <div class="flex items-center gap-1">
       {#if isActive}
         <span class="text-[10px] capitalize px-1.5 py-0.5 rounded" style="background: var(--color-surface-3); color: var(--color-text-muted); transition: all 0.3s;">{agent.identity.domain}</span>
-        {#if !isManager}
-          <button
-            class="p-0.5 rounded transition-colors hover:bg-red-500/20"
-            style="color: var(--color-text-muted);"
-            title="Cancel this worker"
-            onclick={() => {
-              fetch(`/api/agents/${agent.identity.id}/cancel`, { method: 'POST' }).catch(() => {});
-            }}
-          >
-            <Square size={10} />
-          </button>
-        {/if}
+        <button
+          class="p-0.5 rounded transition-colors hover:bg-red-500/20"
+          style="color: var(--color-text-muted);"
+          title={isManager ? 'Stop manager and workers' : 'Cancel this worker'}
+          onclick={() => {
+            if (isManager && agent.sessionId) {
+              wsStore.markSessionAgentsStopped(agent.sessionId);
+              apiFetch(`/api/sessions/${agent.sessionId}/cancel`, { method: 'POST' }).catch(() => {});
+            } else {
+              wsStore.markAgentStopped(agent.identity.id);
+              apiFetch(`/api/agents/${agent.identity.id}/cancel`, { method: 'POST' }).catch(() => {});
+            }
+          }}
+        >
+          <Square size={10} />
+        </button>
       {:else}
         <span class="text-[9px] opacity-40 uppercase tracking-tighter">{agent.status}</span>
       {/if}

@@ -62,7 +62,7 @@ export class GoogleAuthManager {
   }
 
   /**
-   * Starts the "Antigravity" Auth flow using hijacked credentials.
+   * Starts the "Antigravity" Auth flow for Google Cloud AI API access.
    */
   async startAntigravityAuth(): Promise<{ success: boolean; message: string; url?: string }> {
     const params = new URLSearchParams({
@@ -78,7 +78,7 @@ export class GoogleAuthManager {
 
     return {
       success: true,
-      message: "Please authenticate in the Antigravity portal. This will hijack a high-tier session for Gemini 3 and Claude 4.5.",
+      message: "Please authenticate in the Antigravity portal to access the Google Cloud AI API.",
       url: url
     };
   }

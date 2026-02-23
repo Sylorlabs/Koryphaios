@@ -1,6 +1,7 @@
 import { describe, test, expect } from "bun:test";
 import { ProviderRegistry } from "../src/providers/registry";
 import { encryptApiKey } from "../src/security";
+import { ProviderName } from "@koryphaios/shared";
 import type { KoryphaiosConfig } from "@koryphaios/shared";
 
 function minimalConfig(): KoryphaiosConfig {
@@ -71,5 +72,17 @@ describe("ProviderRegistry auth modes", () => {
         process.env.OPENAI_API_KEY = original;
       }
     }
+  });
+
+  test("getStatus returns exactly ALL providers (every ProviderName)", () => {
+    const registry = new ProviderRegistry(minimalConfig());
+    const status = registry.getStatus();
+    const expectedNames = new Set(Object.values(ProviderName));
+    const returnedNames = new Set(status.map((s: any) => s.name));
+    const missing = [...expectedNames].filter((n) => !returnedNames.has(n));
+    const extra = [...returnedNames].filter((n) => !expectedNames.has(n));
+    expect(missing, `Missing providers: ${missing.join(", ")}`).toEqual([]);
+    expect(extra, `Unexpected providers: ${extra.join(", ")}`).toEqual([]);
+    expect(status.length).toBe(expectedNames.size);
   });
 });
