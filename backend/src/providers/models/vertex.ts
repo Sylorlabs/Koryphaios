@@ -1,5 +1,10 @@
 import type { ModelDef } from "@koryphaios/shared";
 
+/**
+ * Curated Vertex AI model list (fallback). Vertex uses GCP auth and a different API;
+ * this list is kept in sync with Vertex AI docs. For dynamic discovery, a future
+ * integration could call Vertex AI's list models endpoint.
+ */
 export const VertexAIModels: ModelDef[] = [
   {
     id: "vertexai.gemini-2.5-flash",

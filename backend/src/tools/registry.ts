@@ -18,6 +18,8 @@ export interface ToolContext {
   waitForUserInput?: (question: string, options: string[]) => Promise<string>;
   /** Optional callback to record code changes for summary and keep/reject */
   recordChange?: (change: ChangeSummary) => void;
+  /** Optional: manager-only. When the manager calls delegate_to_worker, this runs the worker pipeline and returns a summary. */
+  delegateToWorker?: (task: string, domain?: string) => Promise<string>;
 }
 
 export interface ToolCallInput {
@@ -38,11 +40,19 @@ export interface Tool {
   readonly name: string;
   readonly description: string;
   readonly inputSchema: Record<string, unknown>;
-  /** Optional role restriction for this tool */
-  readonly role?: "manager" | "worker" | "any";
+  /** Optional role restriction: manager = full access; worker = builders; critic = read-only (read_file, grep, glob, ls); any = all roles */
+  readonly role?: "manager" | "worker" | "critic" | "any";
 
   /** Execute the tool with the given input. */
   run(ctx: ToolContext, call: ToolCallInput): Promise<ToolCallOutput>;
+}
+
+/** Role filter: manager gets manager+worker+any (full); worker gets worker+any; critic gets critic+any (read-only only). */
+function roleIncludesTool(role: "manager" | "worker" | "critic", toolRole?: "manager" | "worker" | "critic" | "any"): boolean {
+  const r = toolRole as string | undefined;
+  if (!r || r === "any") return true;
+  if (role === "manager") return r === "manager" || r === "worker";
+  return r === role;
 }
 
 export class ToolRegistry {
@@ -60,10 +70,10 @@ export class ToolRegistry {
     return [...this.tools.values()];
   }
 
-  /** Get tool definitions formatted for LLM provider calls, optionally filtered by role. */
-  getToolDefsForRole(role: "manager" | "worker") {
+  /** Get tool definitions formatted for LLM provider calls, filtered by role. Manager = full; worker = build tools; critic = read-only (read_file, grep, glob, ls). */
+  getToolDefsForRole(role: "manager" | "worker" | "critic") {
     return this.getAll()
-      .filter((t) => !t.role || t.role === "any" || t.role === role)
+      .filter((t) => roleIncludesTool(role, t.role))
       .map((t) => ({
         name: t.name,
         description: t.description,

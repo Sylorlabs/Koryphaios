@@ -1,11 +1,19 @@
 import type { KoryphaiosConfig } from "@koryphaios/shared";
-import { existsSync, readFileSync } from "fs";
-import { join } from "path";
-import { homedir } from "os";
+import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
+import { homedir } from "node:os";
 import { validateConfig } from "../config-schema";
 import { serverLog } from "../logger";
 import { safeJsonParse, ConfigError } from "../errors";
 import { AGENT, DEFAULT_CONTEXT_PATHS, FS, SERVER } from "../constants";
+
+/** Merge file corsOrigins with CORS_ORIGINS env (comma-separated). Production can set CORS_ORIGINS=https://app.example.com */
+function mergeCorsOrigins(fromFile: string[], envValue?: string): string[] {
+  const fromEnv = envValue
+    ? envValue.split(",").map((s) => s.trim()).filter(Boolean)
+    : [];
+  return [...fromFile, ...fromEnv];
+}
 
 export function loadConfig(projectRoot: string): KoryphaiosConfig {
   const configPaths = [
@@ -45,15 +53,17 @@ export function loadConfig(projectRoot: string): KoryphaiosConfig {
     },
     telegram: fileConfig.telegram ?? (process.env.TELEGRAM_BOT_TOKEN
       ? {
-          botToken: process.env.TELEGRAM_BOT_TOKEN,
-          adminId: Number(process.env.TELEGRAM_ADMIN_ID ?? 0),
-          secretToken: process.env.TELEGRAM_SECRET_TOKEN,
-        }
+        botToken: process.env.TELEGRAM_BOT_TOKEN,
+        adminId: Number(process.env.TELEGRAM_ADMIN_ID ?? 0),
+        secretToken: process.env.TELEGRAM_SECRET_TOKEN,
+      }
       : undefined),
     mcpServers: fileConfig.mcpServers,
     contextPaths: fileConfig.contextPaths ?? DEFAULT_CONTEXT_PATHS,
     dataDirectory: fileConfig.dataDirectory ?? FS.DEFAULT_DATA_DIR,
     fallbacks: fileConfig.fallbacks ?? AGENT.DEFAULT_FALLBACKS,
+    corsOrigins: mergeCorsOrigins(fileConfig.corsOrigins ?? [], process.env.CORS_ORIGINS),
+    assignments: fileConfig.assignments,
   };
 
   validateConfig(config);

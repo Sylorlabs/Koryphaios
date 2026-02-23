@@ -1,5 +1,5 @@
-import { mkdirSync, copyFileSync, readFileSync, writeFileSync, existsSync, readdirSync, rmSync, statSync } from "fs";
-import { join, relative, dirname } from "path";
+import { mkdirSync, copyFileSync, readFileSync, writeFileSync, existsSync, readdirSync, rmSync, statSync } from "node:fs";
+import { join, relative, dirname } from "node:path";
 import { koryLog } from "../logger";
 
 export class SnapshotManager {
@@ -28,12 +28,12 @@ export class SnapshotManager {
         // preserve directory structure inside snapshot
         const relPath = relative(workingDirectory, absPath);
         const destPath = join(snapshotDir, relPath);
-        
+
         mkdirSync(dirname(destPath), { recursive: true });
         copyFileSync(absPath, destPath);
       }
     }
-    
+
     // Save a manifest of what was backed up
     writeFileSync(join(snapshotDir, "manifest.json"), JSON.stringify({
       timestamp: Date.now(),
@@ -56,13 +56,13 @@ export class SnapshotManager {
       // 1. Read manifest to know what *should* be there
       // (Simple restoration: copy files back. Complex: delete new files created? 
       // For now, we mainly care about reverting modifications to existing files.)
-      
+
       const restoreDir = (currentDir: string) => {
         const entries = readdirSync(currentDir, { withFileTypes: true });
         for (const entry of entries) {
           const fullPath = join(currentDir, entry.name);
           const relPath = relative(snapshotDir, fullPath);
-          
+
           if (entry.name === "manifest.json") continue;
 
           const targetPath = join(workingDirectory, relPath);

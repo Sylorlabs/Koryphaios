@@ -175,7 +175,7 @@
             {:else}
               {#if sessionStore.activeSessionId === session.id && wsStore.managerStatus !== 'idle'}
                 <div class="shrink-0 flex items-center justify-center" style="width: 16px; height: 16px;">
-                  <AnimatedStatusIcon status={wsStore.managerStatus} size={14} isManager={true} />
+                  <AnimatedStatusIcon status={wsStore.managerStatus} size={14} isManager={true} phase={wsStore.koryPhase} />
                 </div>
               {:else}
                 <MessageSquare size={14} class="shrink-0 relative top-[-2px]" style="color: var(--color-text-muted);" />

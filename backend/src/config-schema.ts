@@ -6,6 +6,11 @@ import { ConfigError } from "./errors";
 import { serverLog } from "./logger";
 import { resolveModel } from "./providers/types";
 
+/** Whether public registration is allowed. Set ALLOW_REGISTRATION=false in production to disable sign-up. */
+export function getAllowRegistration(): boolean {
+  return process.env.ALLOW_REGISTRATION !== "false";
+}
+
 /**
  * Validates the loaded configuration against expected schema
  */
@@ -81,7 +86,7 @@ export function validateConfig(config: Partial<KoryphaiosConfig>): void {
   // Validate providers config
   if (config.providers) {
     const validProviders = new Set([
-      "anthropic", "openai", "codex", "google", "copilot", "openrouter",
+      "anthropic", "openai", "google", "copilot", "openrouter",
       "groq", "xai", "azure", "bedrock", "vertexai", "local"
     ]);
 
@@ -195,6 +200,13 @@ export function validateEnvironment(): void {
       if (isNaN(adminId) || adminId <= 0) {
         errors.push("TELEGRAM_ADMIN_ID must be a valid positive number");
       }
+    }
+  }
+
+  // In production, warn if CORS_ORIGINS is not explicitly set
+  if (process.env.NODE_ENV === "production") {
+    if (!process.env.CORS_ORIGINS?.trim()) {
+      warnings.push("In production, set CORS_ORIGINS explicitly (defaults include localhost only)");
     }
   }
 

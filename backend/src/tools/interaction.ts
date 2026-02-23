@@ -56,6 +56,40 @@ export class AskUserTool implements Tool {
 }
 
 /**
+ * Tool for the Manager to delegate a task to a specialist worker (coder agent).
+ * Sub-agents run only when the manager explicitly calls this tool—never automatically.
+ */
+export class DelegateToWorkerTool implements Tool {
+  readonly name = "delegate_to_worker";
+  readonly role = "manager" as const;
+  readonly description = "Delegate a task to a specialist worker (sub-agent) only when you have explicitly decided that the task needs a dedicated coder and cannot be handled by you. Sub-agents (general, ui, backend, test, review) run only when you call this tool—never for conversation, clarification, or small edits. Use only for substantial implementation, refactoring, or multi-file work. Provide a clear, self-contained task description. Optional: domain hint (ui | backend | general | test | review).";
+  readonly inputSchema = {
+    type: "object",
+    properties: {
+      task: { type: "string", description: "Clear task description for the worker" },
+      domain: { type: "string", description: "Optional: ui | backend | general | test | review" },
+    },
+    required: ["task"],
+  };
+
+  async run(ctx: ToolContext, call: ToolCallInput): Promise<ToolCallOutput> {
+    const { task, domain } = call.input as { task: string; domain?: string };
+    if (!task || typeof task !== "string" || !task.trim()) {
+      return { callId: call.id, name: this.name, output: "Error: task is required.", isError: true, durationMs: 0 };
+    }
+    if (!ctx.delegateToWorker) {
+      return { callId: call.id, name: this.name, output: "Error: Delegation not available in this context.", isError: true, durationMs: 0 };
+    }
+    try {
+      const result = await ctx.delegateToWorker(task.trim(), domain);
+      return { callId: call.id, name: this.name, output: result, isError: false, durationMs: 0 };
+    } catch (err: any) {
+      return { callId: call.id, name: this.name, output: `Delegation failed: ${err.message ?? String(err)}`, isError: true, durationMs: 0 };
+    }
+  }
+}
+
+/**
  * Tool for Workers to ask the Manager for help or clarification.
  * This will trigger the Manager to perform reasoning or web search.
  */

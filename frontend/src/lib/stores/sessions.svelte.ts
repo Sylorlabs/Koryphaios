@@ -3,6 +3,7 @@
 
 import type { Session } from '@koryphaios/shared';
 import { toastStore } from './toast.svelte';
+import { apiFetch } from '$lib/api';
 import { browser } from '$app/environment';
 
 let sessions = $state<Session[]>([]);
@@ -17,15 +18,19 @@ async function fetchSessions() {
   
   loading = true;
   try {
-    const res = await fetch('/api/sessions', { signal: AbortSignal.timeout(5000) });
+    const res = await apiFetch('/api/sessions', { signal: AbortSignal.timeout(20000) });
+    const text = await res.text();
     if (!res.ok) {
-      const text = await res.text();
-      console.error('fetchSessions failed', { status: res.status, body: text });
-      toastStore.error(`Failed to load sessions (${res.status})`);
+      const msg =
+        res.status >= 500 && !text.trim()
+          ? "Server unavailable. Start the backend and refresh."
+          : `Failed to load sessions (${res.status})`;
+      console.error('fetchSessions failed', { status: res.status, body: text || "(empty)" });
+      toastStore.error(msg);
       loading = false;
       return;
     }
-    const data = await res.json();
+    const data = text ? JSON.parse(text) : { ok: false, data: [] };
     if (data.ok && Array.isArray(data.data)) {
       sessions = data.data;
       // Auto-select first session if none active
@@ -46,7 +51,7 @@ async function fetchSessions() {
 
 async function createSession(): Promise<string | null> {
   try {
-    const res = await fetch('/api/sessions', {
+    const res = await apiFetch('/api/sessions', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ title: 'New Session' }),
@@ -65,7 +70,7 @@ async function createSession(): Promise<string | null> {
 
 async function renameSession(id: string, title: string) {
   try {
-    const res = await fetch(`/api/sessions/${id}`, {
+    const res = await apiFetch(`/api/sessions/${id}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ title }),
@@ -82,7 +87,7 @@ async function renameSession(id: string, title: string) {
 
 async function deleteSession(id: string) {
   try {
-    await fetch(`/api/sessions/${id}`, { method: 'DELETE' });
+    await apiFetch(`/api/sessions/${id}`, { method: 'DELETE' });
     sessions = sessions.filter(s => s.id !== id);
     if (activeSessionId === id) {
       activeSessionId = sessions[0]?.id ?? '';
@@ -95,7 +100,7 @@ async function deleteSession(id: string) {
 
 async function fetchMessages(sessionId: string): Promise<Array<{ id: string; role: string; content: string; createdAt: number; model?: string; cost?: number }>> {
   try {
-    const res = await fetch(`/api/sessions/${sessionId}/messages`);
+    const res = await apiFetch(`/api/sessions/${sessionId}/messages`);
     const data = await res.json();
     if (data.ok) return data.data;
   } catch {}

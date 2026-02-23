@@ -4,10 +4,6 @@
       "name": "anthropic",
       "disabled": true
     },
-    "codex": {
-      "name": "codex",
-      "disabled": true
-    },
     "google": {
       "name": "google",
       "disabled": true
@@ -28,7 +24,7 @@
     }
   },
   "server": {
-    "port": 3001,
+    "port": 3000,
     "host": "127.0.0.1"
   },
   "dataDirectory": ".koryphaios",
