@@ -1,49 +1,15 @@
 // File tools — read, write, edit, list, grep, glob.
 // Ported from OpenCode's tools/file.go, view.go, write.go, edit.go, grep.go, glob.go, ls.go.
 
-import { readFileSync, existsSync, statSync, readdirSync, mkdirSync, rmdirSync, unlinkSync, renameSync, copyFileSync } from "node:fs";
-import { writeFile } from "node:fs/promises";
-import { join, dirname, resolve, sep, relative, isAbsolute } from "node:path";
+import { readFileSync, writeFileSync, existsSync, statSync, readdirSync, mkdirSync, unlinkSync, renameSync, copyFileSync } from "fs";
+import { join, relative, dirname, basename, resolve } from "path";
 import type { Tool, ToolContext, ToolCallInput, ToolCallOutput } from "./registry";
-
-/**
- * Resolve a path and ensure it is under the working directory (prevents path traversal).
- * Returns { allowed, path } or { allowed: false, reason }.
- */
-function resolvePathUnderRoot(workingDirectory: string, filePath: string): { allowed: boolean; path?: string; reason?: string } {
-  const root = resolve(workingDirectory);
-  const absPath = filePath.startsWith("/") ? resolve(filePath) : resolve(root, filePath);
-  const rel = relative(root, absPath);
-  if (rel.startsWith("..") || isAbsolute(rel)) {
-    return { allowed: false, reason: "Path is outside working directory" };
-  }
-  return { allowed: true, path: absPath };
-}
-
-/**
- * Helper to enforce scoped filesystem access.
- * When allowedPaths is empty, only paths under workingDirectory are allowed (via resolvePathUnderRoot).
- * When allowedPaths is set, path must also be under one of the allowed paths.
- */
-function checkPathAccess(absPath: string, ctx: ToolContext): boolean {
-  const normalizedPath = resolve(absPath);
-  const root = resolve(ctx.workingDirectory);
-  const relToRoot = relative(root, normalizedPath);
-  if (relToRoot.startsWith("..") || isAbsolute(relToRoot)) return false;
-
-  if (!ctx.allowedPaths || ctx.allowedPaths.length === 0) return true;
-
-  return ctx.allowedPaths.some(p => {
-    const absAllowed = resolve(ctx.workingDirectory, p);
-    return normalizedPath === absAllowed || normalizedPath.startsWith(absAllowed + sep);
-  });
-}
+import { validatePathAccess } from "../security";
 
 // ─── Read File ──────────────────────────────────────────────────────────────
 
 export class ReadFileTool implements Tool {
   readonly name = "read_file";
-  readonly role = "any" as const; // manager, worker, critic
   readonly description = `Read the contents of a file. Returns the file content with line numbers. Use this to examine source code, configuration files, or any text file.`;
 
   readonly inputSchema = {
@@ -63,25 +29,17 @@ export class ReadFileTool implements Tool {
       endLine?: number;
     };
 
-    const resolved = resolvePathUnderRoot(ctx.workingDirectory, filePath);
-    if (!resolved.allowed || !resolved.path) {
-      return {
-        callId: call.id,
-        name: this.name,
-        output: `Error: ${resolved.reason ?? "Invalid path"}`,
-        isError: true,
-        durationMs: 0,
-      };
-    }
-    const absPath = resolved.path;
+    const absPath = filePath.startsWith("/") ? filePath : join(ctx.workingDirectory, filePath);
+    const allowedRoots = ctx.isSandboxed ? ctx.allowedPaths : ["/"];
+    const access = validatePathAccess(absPath, allowedRoots);
 
-    if (!checkPathAccess(absPath, ctx)) {
-      return {
-        callId: call.id,
-        name: this.name,
-        output: `Error: Access denied. This agent is not authorized to read path: ${filePath}. Ask the Manager for access.`,
-        isError: true,
-        durationMs: 0
+    if (!access.allowed) {
+      return { 
+        callId: call.id, 
+        name: this.name, 
+        output: `Error: Access denied. ${access.reason}`, 
+        isError: true, 
+        durationMs: 0 
       };
     }
 
@@ -113,7 +71,6 @@ export class ReadFileTool implements Tool {
 
 export class WriteFileTool implements Tool {
   readonly name = "write_file";
-  readonly role = "worker" as const; // manager + worker only (not critic)
   readonly description = `Create a new file or overwrite an existing file with the provided content. Creates parent directories if they don't exist.`;
 
   readonly inputSchema = {
@@ -127,25 +84,17 @@ export class WriteFileTool implements Tool {
 
   async run(ctx: ToolContext, call: ToolCallInput): Promise<ToolCallOutput> {
     const { path: filePath, content } = call.input as { path: string; content: string };
-    const resolved = resolvePathUnderRoot(ctx.workingDirectory, filePath);
-    if (!resolved.allowed || !resolved.path) {
-      return {
-        callId: call.id,
-        name: this.name,
-        output: `Error: ${resolved.reason ?? "Invalid path"}`,
-        isError: true,
-        durationMs: 0,
-      };
-    }
-    const absPath = resolved.path;
+    const absPath = filePath.startsWith("/") ? filePath : join(ctx.workingDirectory, filePath);
+    const allowedRoots = ctx.isSandboxed ? ctx.allowedPaths : ["/"];
+    const access = validatePathAccess(absPath, allowedRoots);
 
-    if (!checkPathAccess(absPath, ctx)) {
-      return {
-        callId: call.id,
-        name: this.name,
-        output: `Error: Access denied. This agent is not authorized to write to path: ${filePath}.`,
-        isError: true,
-        durationMs: 0
+    if (!access.allowed) {
+      return { 
+        callId: call.id, 
+        name: this.name, 
+        output: `Error: Access denied. ${access.reason}`, 
+        isError: true, 
+        durationMs: 0 
       };
     }
 
@@ -167,7 +116,7 @@ export class WriteFileTool implements Tool {
         }
       }
 
-      await writeFile(absPath, content, "utf-8");
+      writeFileSync(absPath, content, "utf-8");
       const lines = content.split("\n").length;
 
       if (ctx.emitFileComplete) {
@@ -200,7 +149,6 @@ export class WriteFileTool implements Tool {
 
 export class EditFileTool implements Tool {
   readonly name = "edit_file";
-  readonly role = "worker" as const;
   readonly description = `Edit an existing file by replacing a specific string with new content. The old_str must match exactly one location in the file. Include enough context to make the match unique.`;
 
   readonly inputSchema = {
@@ -219,25 +167,17 @@ export class EditFileTool implements Tool {
       old_str: string;
       new_str: string;
     };
-    const resolved = resolvePathUnderRoot(ctx.workingDirectory, filePath);
-    if (!resolved.allowed || !resolved.path) {
-      return {
-        callId: call.id,
-        name: this.name,
-        output: `Error: ${resolved.reason ?? "Invalid path"}`,
-        isError: true,
-        durationMs: 0,
-      };
-    }
-    const absPath = resolved.path;
+    const absPath = filePath.startsWith("/") ? filePath : join(ctx.workingDirectory, filePath);
+    const allowedRoots = ctx.isSandboxed ? ctx.allowedPaths : ["/"];
+    const access = validatePathAccess(absPath, allowedRoots);
 
-    if (!checkPathAccess(absPath, ctx)) {
-      return {
-        callId: call.id,
-        name: this.name,
-        output: `Error: Access denied. This agent is not authorized to edit path: ${filePath}.`,
-        isError: true,
-        durationMs: 0
+    if (!access.allowed) {
+      return { 
+        callId: call.id, 
+        name: this.name, 
+        output: `Error: Access denied. ${access.reason}`, 
+        isError: true, 
+        durationMs: 0 
       };
     }
 
@@ -278,7 +218,7 @@ export class EditFileTool implements Tool {
         }
       }
 
-      await writeFile(absPath, newContent, "utf-8");
+      writeFileSync(absPath, newContent, "utf-8");
 
       if (ctx.emitFileComplete) {
         ctx.emitFileComplete({ path: absPath, totalLines: newContent.split("\n").length, operation: "edit" });
@@ -310,7 +250,6 @@ export class EditFileTool implements Tool {
 
 export class GrepTool implements Tool {
   readonly name = "grep";
-  readonly role = "any" as const; // manager, worker, critic (read-only)
   readonly description = `Search for a pattern in file contents using ripgrep (rg). Returns matching file paths and lines. Fast parallel search across large codebases.`;
 
   readonly inputSchema = {
@@ -336,11 +275,7 @@ export class GrepTool implements Tool {
       maxResults?: number;
     };
 
-    const pathResolved = resolvePathUnderRoot(ctx.workingDirectory, path ?? ".");
-    if (!pathResolved.allowed || !pathResolved.path) {
-      return { callId: call.id, name: this.name, output: `Error: ${pathResolved.reason ?? "Invalid path"}`, isError: true, durationMs: 0 };
-    }
-    const searchPath = pathResolved.path;
+    const searchPath = path ?? ctx.workingDirectory;
     const args = ["rg", "--no-heading", "--line-number", "--color", "never"];
     if (caseSensitive === false) args.push("-i");
     if (contextLines) args.push(`-C`, String(contextLines));
@@ -372,7 +307,6 @@ export class GrepTool implements Tool {
 
 export class GlobTool implements Tool {
   readonly name = "glob";
-  readonly role = "any" as const; // manager, worker, critic (read-only)
   readonly description = `Find files matching a glob pattern. Returns file paths relative to the working directory.`;
 
   readonly inputSchema = {
@@ -386,11 +320,7 @@ export class GlobTool implements Tool {
 
   async run(ctx: ToolContext, call: ToolCallInput): Promise<ToolCallOutput> {
     const { pattern, path: basePath } = call.input as { pattern: string; path?: string };
-    const pathResolved = resolvePathUnderRoot(ctx.workingDirectory, basePath ?? ".");
-    if (!pathResolved.allowed || !pathResolved.path) {
-      return { callId: call.id, name: this.name, output: `Error: ${pathResolved.reason ?? "Invalid path"}`, isError: true, durationMs: 0 };
-    }
-    const cwd = pathResolved.path;
+    const cwd = basePath ?? ctx.workingDirectory;
 
     try {
       const glob = new Bun.Glob(pattern);
@@ -421,7 +351,6 @@ export class GlobTool implements Tool {
 
 export class LsTool implements Tool {
   readonly name = "ls";
-  readonly role = "any" as const; // manager, worker, critic (read-only)
   readonly description = `List files and directories at a given path. Returns names with type indicators (/ for directories).`;
 
   readonly inputSchema = {
@@ -436,21 +365,21 @@ export class LsTool implements Tool {
   async run(ctx: ToolContext, call: ToolCallInput): Promise<ToolCallOutput> {
     const { path: dirPath, depth } = call.input as { path?: string; depth?: number };
     const absPath = dirPath
-      ? (() => {
-          const res = resolvePathUnderRoot(ctx.workingDirectory, dirPath);
-          return res.allowed && res.path ? res.path : null;
-        })()
+      ? dirPath.startsWith("/") ? dirPath : join(ctx.workingDirectory, dirPath)
       : ctx.workingDirectory;
-    if (dirPath && !absPath) {
-      return { callId: call.id, name: this.name, output: "Error: Path is outside working directory", isError: true, durationMs: 0 };
+
+    // Check directory access (read-only is fine for ls, but still needs scope check)
+    const access = validatePathAccess(absPath, ctx.allowedPaths);
+    if (!access.allowed) {
+      return { callId: call.id, name: this.name, output: `Error: Access denied. ${access.reason}`, isError: true, durationMs: 0 };
     }
 
-    if (!existsSync(absPath!)) {
+    if (!existsSync(absPath)) {
       return { callId: call.id, name: this.name, output: `Path not found: ${absPath}`, isError: true, durationMs: 0 };
     }
 
     try {
-      const entries = this.listDir(absPath!, depth ?? 1, 0);
+      const entries = this.listDir(absPath, depth ?? 1, 0);
       return { callId: call.id, name: this.name, output: entries.join("\n"), isError: false, durationMs: 0 };
     } catch (err: any) {
       return { callId: call.id, name: this.name, output: `Error listing: ${err.message}`, isError: true, durationMs: 0 };
@@ -484,7 +413,6 @@ export class LsTool implements Tool {
 
 export class DeleteFileTool implements Tool {
   readonly name = "delete_file";
-  readonly role = "worker" as const;
   readonly description = `Delete a file or empty directory. Cannot delete non-empty directories for safety.`;
 
   readonly inputSchema = {
@@ -497,25 +425,17 @@ export class DeleteFileTool implements Tool {
 
   async run(ctx: ToolContext, call: ToolCallInput): Promise<ToolCallOutput> {
     const { path: filePath } = call.input as { path: string };
-    const resolved = resolvePathUnderRoot(ctx.workingDirectory, filePath);
-    if (!resolved.allowed || !resolved.path) {
-      return {
-        callId: call.id,
-        name: this.name,
-        output: `Error: ${resolved.reason ?? "Invalid path"}`,
-        isError: true,
-        durationMs: 0,
-      };
-    }
-    const absPath = resolved.path;
+    const absPath = filePath.startsWith("/") ? filePath : join(ctx.workingDirectory, filePath);
+    const allowedRoots = ctx.isSandboxed ? ctx.allowedPaths : ["/"];
+    const access = validatePathAccess(absPath, allowedRoots);
 
-    if (!checkPathAccess(absPath, ctx)) {
-      return {
-        callId: call.id,
-        name: this.name,
-        output: `Error: Access denied. This agent is not authorized to delete path: ${filePath}.`,
-        isError: true,
-        durationMs: 0
+    if (!access.allowed) {
+      return { 
+        callId: call.id, 
+        name: this.name, 
+        output: `Error: Access denied. ${access.reason}`, 
+        isError: true, 
+        durationMs: 0 
       };
     }
 
@@ -530,13 +450,14 @@ export class DeleteFileTool implements Tool {
         if (entries.length > 0) {
           return { callId: call.id, name: this.name, output: `Cannot delete non-empty directory: ${absPath} (${entries.length} entries). Remove contents first.`, isError: true, durationMs: 0 };
         }
+        const { rmdirSync } = await import("fs");
         rmdirSync(absPath);
         return { callId: call.id, name: this.name, output: `Deleted empty directory: ${absPath}`, isError: false, durationMs: 0 };
       }
 
       const content = readFileSync(absPath, "utf-8");
       const lines = content.split("\n").length;
-
+      
       unlinkSync(absPath);
 
       if (ctx.recordChange) {
@@ -559,7 +480,6 @@ export class DeleteFileTool implements Tool {
 
 export class MoveFileTool implements Tool {
   readonly name = "move_file";
-  readonly role = "worker" as const;
   readonly description = `Move or rename a file or directory. Creates parent directories for the destination if needed.`;
 
   readonly inputSchema = {
@@ -573,27 +493,19 @@ export class MoveFileTool implements Tool {
 
   async run(ctx: ToolContext, call: ToolCallInput): Promise<ToolCallOutput> {
     const { source, destination } = call.input as { source: string; destination: string };
-    const resSrc = resolvePathUnderRoot(ctx.workingDirectory, source);
-    const resDest = resolvePathUnderRoot(ctx.workingDirectory, destination);
-    if (!resSrc.allowed || !resSrc.path || !resDest.allowed || !resDest.path) {
-      return {
-        callId: call.id,
-        name: this.name,
-        output: `Error: ${resSrc.reason ?? resDest.reason ?? "Invalid path"}`,
-        isError: true,
-        durationMs: 0,
-      };
-    }
-    const absSrc = resSrc.path;
-    const absDest = resDest.path;
+    const absSrc = source.startsWith("/") ? source : join(ctx.workingDirectory, source);
+    const absDest = destination.startsWith("/") ? destination : join(ctx.workingDirectory, destination);
 
-    if (!checkPathAccess(absSrc, ctx) || !checkPathAccess(absDest, ctx)) {
-      return {
-        callId: call.id,
-        name: this.name,
-        output: `Error: Access denied. Authorized paths for this agent: ${ctx.allowedPaths?.join(', ') || 'none'}`,
-        isError: true,
-        durationMs: 0
+    const accessSrc = validatePathAccess(absSrc, ctx.allowedPaths);
+    const accessDest = validatePathAccess(absDest, ctx.allowedPaths);
+
+    if (!accessSrc.allowed || !accessDest.allowed) {
+      return { 
+        callId: call.id, 
+        name: this.name, 
+        output: `Error: Access denied. Source or destination is outside allowed scope.`, 
+        isError: true, 
+        durationMs: 0 
       };
     }
 
@@ -633,7 +545,6 @@ export class MoveFileTool implements Tool {
 
 export class DiffTool implements Tool {
   readonly name = "diff";
-  readonly role = "worker" as const;
   readonly description = `Show a unified diff between two files, or between the current content and provided new content. Useful for reviewing changes before applying them.`;
 
   readonly inputSchema = {
@@ -653,11 +564,11 @@ export class DiffTool implements Tool {
       new_content?: string;
     };
 
-    const resA = resolvePathUnderRoot(ctx.workingDirectory, path_a);
-    if (!resA.allowed || !resA.path) {
-      return { callId: call.id, name: this.name, output: `Error: ${resA.reason ?? "Invalid path"}`, isError: true, durationMs: 0 };
-    }
-    const absA = resA.path;
+    const absA = path_a.startsWith("/") ? path_a : join(ctx.workingDirectory, path_a);
+    // Note: Diff is read-only, but still check scope for security
+    const accessA = validatePathAccess(absA, ctx.allowedPaths);
+    if (!accessA.allowed) return { callId: call.id, name: this.name, output: `Access denied: ${accessA.reason}`, isError: true, durationMs: 0 };
+
 
     if (!existsSync(absA)) {
       return { callId: call.id, name: this.name, output: `File not found: ${absA}`, isError: true, durationMs: 0 };
@@ -665,11 +576,11 @@ export class DiffTool implements Tool {
 
     try {
       if (path_b) {
-        const resB = resolvePathUnderRoot(ctx.workingDirectory, path_b);
-        if (!resB.allowed || !resB.path) {
-          return { callId: call.id, name: this.name, output: `Error: ${resB.reason ?? "Invalid path"}`, isError: true, durationMs: 0 };
-        }
-        const absB = resB.path;
+        // Diff two files using system diff
+        const absB = path_b.startsWith("/") ? path_b : join(ctx.workingDirectory, path_b);
+        const accessB = validatePathAccess(absB, ctx.allowedPaths);
+        if (!accessB.allowed) return { callId: call.id, name: this.name, output: `Access denied: ${accessB.reason}`, isError: true, durationMs: 0 };
+
         if (!existsSync(absB)) {
           return { callId: call.id, name: this.name, output: `File not found: ${absB}`, isError: true, durationMs: 0 };
         }
@@ -711,7 +622,6 @@ export class DiffTool implements Tool {
 
 export class PatchTool implements Tool {
   readonly name = "patch";
-  readonly role = "worker" as const;
   readonly description = `Apply a multi-edit patch to a file. Each edit specifies old_str to find and new_str to replace it with. All edits are validated before any are applied (atomic). More efficient than multiple edit_file calls.`;
 
   readonly inputSchema = {
@@ -740,25 +650,17 @@ export class PatchTool implements Tool {
       edits: Array<{ old_str: string; new_str: string }>;
     };
 
-    const resolved = resolvePathUnderRoot(ctx.workingDirectory, filePath);
-    if (!resolved.allowed || !resolved.path) {
-      return {
-        callId: call.id,
-        name: this.name,
-        output: `Error: ${resolved.reason ?? "Invalid path"}`,
-        isError: true,
-        durationMs: 0,
-      };
-    }
-    const absPath = resolved.path;
+    const absPath = filePath.startsWith("/") ? filePath : join(ctx.workingDirectory, filePath);
+    const allowedRoots = ctx.isSandboxed ? ctx.allowedPaths : ["/"];
+    const access = validatePathAccess(absPath, allowedRoots);
 
-    if (!checkPathAccess(absPath, ctx)) {
-      return {
-        callId: call.id,
-        name: this.name,
-        output: `Error: Access denied. Path ${filePath} is not in your authorized scope.`,
-        isError: true,
-        durationMs: 0
+    if (!access.allowed) {
+      return { 
+        callId: call.id, 
+        name: this.name, 
+        output: `Error: Access denied. ${access.reason}`, 
+        isError: true, 
+        durationMs: 0 
       };
     }
 
@@ -793,7 +695,7 @@ export class PatchTool implements Tool {
         content = content.replace(edit.old_str, edit.new_str);
       }
 
-      await writeFile(absPath, content, "utf-8");
+      writeFileSync(absPath, content, "utf-8");
 
       if (ctx.recordChange) {
         ctx.recordChange({
