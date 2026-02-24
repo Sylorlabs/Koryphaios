@@ -1,8 +1,8 @@
 // Security module — bash sandboxing, input validation, key encryption, SSRF prevention.
 
 import { createCipheriv, createDecipheriv, randomBytes, scryptSync } from "node:crypto";
-import { mkdirSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { mkdirSync, writeFileSync, realpathSync } from "node:fs";
+import { join, resolve } from "node:path";
 import { toolLog } from "./logger";
 import { SECURITY } from "./constants";
 
@@ -258,6 +258,40 @@ export function validateProviderName(name: unknown): ProviderName | null {
   if (typeof name !== "string") return null;
   if (!VALID_PROVIDERS.has(name)) return null;
   return name as ProviderName;
+}
+
+// ─── Path Access (sandbox / allowed roots) ───────────────────────────────────
+
+/**
+ * Check whether a path is under one of the allowed root directories.
+ * Used by file tools to enforce sandbox when isSandboxed is true.
+ */
+export function validatePathAccess(
+  absolutePath: string,
+  allowedRoots: string[]
+): { allowed: boolean; reason?: string } {
+  if (!allowedRoots.length) return { allowed: false, reason: "No allowed roots configured" };
+  if (allowedRoots.includes("/") && !allowedRoots.some((r) => r !== "/")) return { allowed: true };
+
+  let resolved: string;
+  try {
+    resolved = resolve(absolutePath);
+    try {
+      resolved = realpathSync(resolved);
+    } catch {
+      // File may not exist yet (e.g. write); use resolved path
+    }
+  } catch {
+    return { allowed: false, reason: "Invalid path" };
+  }
+
+  const normalized = resolve(resolved) + (resolved.endsWith("/") ? "" : "");
+  for (const root of allowedRoots) {
+    const rootResolved = resolve(root);
+    const rootNorm = rootResolved + (rootResolved.endsWith("/") ? "" : "/");
+    if (normalized === rootResolved || normalized.startsWith(rootNorm)) return { allowed: true };
+  }
+  return { allowed: false, reason: "Path is outside allowed directories" };
 }
 
 // ─── API Key Encryption at Rest ─────────────────────────────────────────────

@@ -32,12 +32,16 @@ export default defineConfig({
 	plugins: [tailwindcss(), sveltekit()],
 	server: {
 		host: '0.0.0.0',
-		proxy: {
-			'/api': 'http://127.0.0.1:3001',
-			'/ws': {
-				target: 'ws://127.0.0.1:3001',
-				ws: true,
-			},
-		},
+		proxy: (() => {
+			const target = loadBackendTargetFromConfig() ?? 'http://127.0.0.1:3001';
+			const base = target.replace(/^http/, 'ws');
+			return {
+				'/api': target,
+				'/ws': {
+					target: base,
+					ws: true,
+				},
+			};
+		})(),
 	},
 });

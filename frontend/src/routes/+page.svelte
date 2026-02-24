@@ -618,6 +618,16 @@ Release notes
 </svelte:head>
 
 <div class="flex h-screen overflow-hidden" style="background: var(--color-surface-0);">
+  {#if appStore.backendUnreachable}
+    <div
+      class="absolute inset-x-0 top-0 z-50 flex flex-col items-center justify-center gap-2 px-4 py-3 text-sm text-center"
+      style="background: var(--color-error, #ef4444); color: white;"
+    >
+      <span>Backend not running. From the project root run:</span>
+      <code class="rounded bg-black/20 px-2 py-1 font-mono">bun run dev</code>
+      <span class="text-xs opacity-90">Then open the URL the command prints (e.g. http://localhost:5173 or another port).</span>
+    </div>
+  {/if}
   <!-- Sidebar -->
   {#if showSidebar}
     <div class="w-60 min-w-[200px] max-w-[320px] shrink-0 border-r flex flex-col" style="border-color: var(--color-border); background: var(--color-surface-1);">

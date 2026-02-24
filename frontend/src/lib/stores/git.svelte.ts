@@ -40,16 +40,31 @@ async function refreshStatus() {
   state.loading = true;
   try {
     const res = await fetch('/api/git/status');
-    const data = await res.json();
-    if (data.ok) {
-      state.status = data.data.status;
-      state.branch = data.data.branch;
+    const text = await res.text();
+    if (!res.ok) {
+      state.status = [];
+      state.branch = '';
+      return;
+    }
+    if (!text.trim()) return;
+    let data: { ok?: boolean; data?: { status?: unknown[]; branch?: string; ahead?: number; behind?: number } };
+    try {
+      data = JSON.parse(text);
+    } catch {
+      state.status = [];
+      state.branch = '';
+      return;
+    }
+    if (data?.ok && data.data) {
+      state.status = data.data.status ?? [];
+      state.branch = data.data.branch ?? '';
       state.ahead = data.data.ahead ?? 0;
       state.behind = data.data.behind ?? 0;
       await fetchBranches();
     }
-  } catch (err) {
-    console.error('Failed to fetch git status', err);
+  } catch {
+    state.status = [];
+    state.branch = '';
   } finally {
     state.loading = false;
   }
@@ -58,9 +73,14 @@ async function refreshStatus() {
 async function fetchBranches() {
   try {
     const res = await fetch('/api/git/branches');
-    const data = await res.json();
-    if (data.ok) state.branches = data.data.branches;
-  } catch {}
+    if (!res.ok) return;
+    const text = await res.text();
+    if (!text.trim()) return;
+    const data = JSON.parse(text);
+    if (data.ok) state.branches = data.data?.branches ?? [];
+  } catch {
+    state.branches = [];
+  }
 }
 
 async function checkout(branch: string, create = false) {

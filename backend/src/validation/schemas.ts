@@ -67,6 +67,49 @@ export const SetProviderCredentialsRequestSchema = z.object({
     authMode: z.enum(["api_key", "codex", "cli", "antigravity", "claude_code"]).optional(),
 });
 
+/** Alias for SetProviderCredentialsRequestSchema (used by routes). */
+export const UpdateCredentialSchema = SetProviderCredentialsRequestSchema;
+
+export const CreateCredentialSchema = z.object({
+  provider: z.string().min(1),
+  apiKey: z.string().max(500).optional(),
+  authToken: z.string().max(1000).optional(),
+  baseUrl: z.string().url().max(500).optional(),
+});
+
+export const DeleteCredentialSchema = z.object({
+  provider: z.string().min(1),
+});
+
+export const RotateCredentialSchema = z.object({
+  provider: z.string().min(1),
+});
+
+export const CreateApiKeySchema = z.object({
+  name: z.string().min(1).max(100),
+  scopes: z.array(z.string()).optional(),
+});
+
+export const UpdateApiKeySchema = z.object({
+  name: z.string().min(1).max(100).optional(),
+  scopes: z.array(z.string()).optional(),
+});
+
+export const QueryAuditSchema = z.object({
+  limit: z.coerce.number().min(1).max(500).optional(),
+  offset: z.coerce.number().min(0).optional(),
+  action: z.string().optional(),
+  resourceType: z.string().optional(),
+  userId: z.string().optional(),
+  from: z.string().datetime().optional(),
+  to: z.string().datetime().optional(),
+});
+
+export const SuspiciousActivitySchema = z.object({
+  type: z.string(),
+  details: z.record(z.unknown()).optional(),
+});
+
 export const ApplyChangesRequestSchema = z.object({
     acceptAll: z.boolean().optional(),
     rejectAll: z.boolean().optional(),
@@ -118,6 +161,18 @@ export function validate<T>(schema: z.ZodSchema<T>, data: unknown): ValidationRe
         return { success: true, data: result.data };
     }
     return { success: false, errors: result.error };
+}
+
+/** Validate request body with a Zod schema. */
+export function validateBody<T>(schema: z.ZodSchema<T>, data: unknown): ValidationResult<T> {
+    return validate(schema, data);
+}
+
+/** Validate URL search params: converts URLSearchParams to object and parses with schema. */
+export function validateQuery<T>(schema: z.ZodSchema<T>, params: URLSearchParams): ValidationResult<T> {
+    const obj: Record<string, string> = {};
+    params.forEach((v, k) => { obj[k] = v; });
+    return validate(schema, obj);
 }
 
 // ─── Validation Middleware Helper ────────────────────────────────────────────

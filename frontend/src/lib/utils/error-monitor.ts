@@ -40,55 +40,56 @@ function scheduleFlush() {
   flushTimer = setTimeout(flushErrors, 1000); // Batch errors every 1s
 }
 
+let _originalError: typeof console.error;
+let _originalWarn: typeof console.warn;
+
 function logError(error: ErrorLog) {
   errorBuffer.push(error);
-  
-  // Also log to console for immediate visibility
-  console.error('[ERROR MONITOR]', error.message, error);
-  
+  // Use original console so we don't recurse into our own wrapper
+  if (_originalError) _originalError.call(console, '[ERROR MONITOR]', error.message, error);
   scheduleFlush();
 }
 
 export function initErrorMonitoring() {
   if (typeof window === 'undefined') return;
-  
-  // Capture console errors
-  const originalError = console.error;
-  console.error = (...args: any[]) => {
+
+  _originalError = console.error;
+  _originalWarn = console.warn;
+
+  // Capture console errors — must call _originalError so our own logError doesn't recurse
+  console.error = (...args: unknown[]) => {
     const message = args.map(a => {
       if (a instanceof Error) return `${a.name}: ${a.message}\n${a.stack}`;
       if (typeof a === 'object') return JSON.stringify(a);
       return String(a);
     }).join(' ');
-    
-    logError({
+
+    errorBuffer.push({
       timestamp: Date.now(),
       type: 'error',
       message,
       userAgent: navigator.userAgent,
     });
-    
-    originalError.apply(console, args);
+    if (_originalError) _originalError.apply(console, args);
+    scheduleFlush();
   };
-  
+
   // Capture console warnings
-  const originalWarn = console.warn;
-  console.warn = (...args: any[]) => {
+  console.warn = (...args: unknown[]) => {
     const message = args.map(a => String(a)).join(' ');
-    
-    logError({
+    errorBuffer.push({
       timestamp: Date.now(),
       type: 'warn',
       message,
       userAgent: navigator.userAgent,
     });
-    
-    originalWarn.apply(console, args);
+    if (_originalWarn) _originalWarn.apply(console, args);
+    scheduleFlush();
   };
-  
+
   // Capture window errors
   window.addEventListener('error', (event) => {
-    logError({
+    errorBuffer.push({
       timestamp: Date.now(),
       type: 'error',
       message: event.message,
@@ -98,18 +99,18 @@ export function initErrorMonitoring() {
       column: event.colno,
       userAgent: navigator.userAgent,
     });
+    scheduleFlush();
   });
-  
+
   // Capture unhandled promise rejections
   window.addEventListener('unhandledrejection', (event) => {
-    logError({
+    errorBuffer.push({
       timestamp: Date.now(),
       type: 'unhandledrejection',
       message: `Unhandled Promise Rejection: ${event.reason}`,
       stack: event.reason?.stack,
       userAgent: navigator.userAgent,
     });
+    scheduleFlush();
   });
-  
-  console.log('[ERROR MONITOR] Initialized - all console errors will be logged');
 }

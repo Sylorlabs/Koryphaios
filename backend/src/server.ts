@@ -5,7 +5,7 @@ import type { WSMessage, APIResponse, SendMessageRequest, CreateSessionRequest, 
 import type { ServerWebSocket } from "bun";
 import { ProviderRegistry } from "./providers";
 import { startCopilotDeviceAuth, pollCopilotDeviceAuth } from "./providers/copilot";
-import { ToolRegistry, BashTool, ReadFileTool, WriteFileTool, EditFileTool, GrepTool, GlobTool, LsTool, WebSearchTool, WebFetchTool, DeleteFileTool, MoveFileTool, DiffTool, PatchTool } from "./tools";
+import { ToolRegistry, BashTool, ShellManageTool, ReadFileTool, WriteFileTool, EditFileTool, GrepTool, GlobTool, LsTool, WebSearchTool, WebFetchTool, DeleteFileTool, MoveFileTool, DiffTool, PatchTool } from "./tools";
 import { AskUserTool, AskManagerTool, DelegateToWorkerTool } from "./tools/interaction";
 import { KoryManager } from "./kory/manager";
 import { Bot } from "grammy";
@@ -116,6 +116,7 @@ async function main() {
   // Initialize tools
   const tools = new ToolRegistry();
   tools.register(new BashTool());
+  tools.register(new ShellManageTool());
   tools.register(new ReadFileTool());
   tools.register(new WriteFileTool());
   tools.register(new EditFileTool());
@@ -273,8 +274,13 @@ async function main() {
 
         // Current user endpoint — always returns local system user (no sign-in required)
         if (url.pathname === "/api/auth/me" && method === "GET") {
-          const user = await getOrCreateLocalUser();
-          return json({ ok: true, data: { user } }, 200, corsHeaders);
+          try {
+            const user = await getOrCreateLocalUser();
+            return json({ ok: true, data: { user } }, 200, corsHeaders);
+          } catch (err: any) {
+            serverLog.error({ err }, "GET /api/auth/me failed");
+            return json({ ok: false, error: "Auth unavailable", detail: err?.message ?? String(err) }, 500, corsHeaders);
+          }
         }
 
         // Billing / credits (local estimate vs cloud reality, drift) — same shape as v1
@@ -809,9 +815,14 @@ async function main() {
         if (url.pathname === "/api/git/status" && method === "GET") {
           const auth = await requireAuth(req);
           if ("error" in auth) return withCors(auth.error, corsHeaders);
-          const status = await kory.git.getStatus();
-          const branch = await kory.git.getBranch();
-          return json({ ok: true, data: { status, branch } }, 200, corsHeaders);
+          try {
+            const status = await kory.git.getStatus();
+            const branch = await kory.git.getBranch();
+            return json({ ok: true, data: { status, branch } }, 200, corsHeaders);
+          } catch (err: any) {
+            serverLog.error({ err }, "GET /api/git/status failed");
+            return json({ ok: false, error: "Git status failed", detail: err?.message ?? String(err) }, 500, corsHeaders);
+          }
         }
 
         // Diff

@@ -836,7 +836,12 @@ function clearFeed() {
 }
 
 function toggleYolo() {
-  isYoloMode = !isYoloMode;
+  setYoloMode(!isYoloMode);
+}
+
+function setYoloMode(enabled: boolean) {
+  if (isYoloMode === enabled) return;
+  isYoloMode = enabled;
   if (wsConnection?.readyState === WebSocket.OPEN) {
     wsConnection.send(JSON.stringify({
       type: "toggle_yolo",
@@ -878,4 +883,5 @@ export const wsStore = {
   subscribeToSession,
   clearFeed,
   toggleYolo,
+  setYoloMode,
 };

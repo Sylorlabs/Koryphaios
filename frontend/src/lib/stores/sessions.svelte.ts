@@ -13,33 +13,42 @@ let loading = $state<boolean>(false);
 
 // ─── API calls ──────────────────────────────────────────────────────────────
 
-async function fetchSessions() {
-  if (!browser) return;
-  
+/** Returns true if sessions loaded successfully, false otherwise (e.g. backend down). */
+async function fetchSessions(): Promise<boolean> {
+  if (!browser) return false;
   try {
     const res = await fetch('/api/sessions', {
       headers: authStore.token ? { 'Authorization': `Bearer ${authStore.token}` } : {},
     });
+    const text = await res.text();
     if (!res.ok) {
-      const text = await res.text();
-      console.error('fetchSessions failed', { status: res.status, body: text });
+      if (!(res.status === 500 && !text.trim())) {
+        console.error('fetchSessions failed', { status: res.status, body: text || '(empty)' });
+      }
       toastStore.error(`Failed to load sessions (${res.status})`);
-      return;
+      return false;
     }
-    const data = await res.json();
-    if (data.ok) {
+    if (!text.trim()) return false;
+    let data: { ok?: boolean; data?: Session[] };
+    try {
+      data = JSON.parse(text);
+    } catch {
+      return false;
+    }
+    if (data?.ok && Array.isArray(data.data)) {
       sessions = data.data;
-      // Auto-select first session if none active
       if (!activeSessionId && sessions.length > 0) {
         activeSessionId = sessions[0].id;
       } else if (sessions.length === 0) {
-        // Create first session if none exist
         void createSession();
       }
+      return true;
     }
+    return false;
   } catch (err) {
     console.error('fetchSessions exception', err);
     toastStore.error('Failed to load sessions');
+    return false;
   }
 }
 
@@ -53,8 +62,18 @@ async function createSession(): Promise<string | null> {
       },
       body: JSON.stringify({ title: 'New Session' }),
     });
-    const data = await res.json();
-    if (data.ok) {
+    const text = await res.text();
+    if (!res.ok) {
+      toastStore.error(`Failed to create session (${res.status})`);
+      return null;
+    }
+    let data: { ok?: boolean; data?: Session };
+    try {
+      data = text ? JSON.parse(text) : {};
+    } catch {
+      return null;
+    }
+    if (data?.ok && data?.data) {
       sessions = [data.data, ...sessions];
       activeSessionId = data.data.id;
       return data.data.id;
