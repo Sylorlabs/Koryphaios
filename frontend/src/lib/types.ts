@@ -1,16 +1,4 @@
-import type { AgentStatus } from "@koryphaios/shared";
-
-export type FeedEntryType = 
-  | "user_message" 
-  | "thought" 
-  | "content" 
-  | "thinking" 
-  | "tool_call" 
-  | "tool_result" 
-  | "routing" 
-  | "error" 
-  | "system" 
-  | "tool_group";
+export type FeedEntryType = "user_message" | "thought" | "content" | "thinking" | "tool_call" | "tool_result" | "routing" | "error" | "system" | "tool_group";
 
 export interface FeedEntryLocal {
   id: string;
