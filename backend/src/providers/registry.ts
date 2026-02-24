@@ -1,193 +1,270 @@
-// Clean Provider Registry - Only real providers with proper circuit breaker
+import { providerLog } from "../logger";
+// Provider Registry — the universal auth hub.
+// Auto-detects API keys from environment variables, config files, and CLI auth tokens.
+// Mirrors OpenCode's provider initialization order and env var conventions.
 
 import type { ProviderAuthMode, ProviderConfig, ProviderName, KoryphaiosConfig } from "@koryphaios/shared";
-import { providerLog } from "../logger";
-import {
-  buildAuthHeaders,
-  getVerifyUrl,
-  maskApiKey,
-  GEMINI_V1BETA_BASE,
-  GEMINI_V1_BASE,
-  PROVIDER_BASE_URLS,
-} from "./api-endpoints";
+import type { Provider } from "./types";
 import { AnthropicProvider } from "./anthropic";
-import { detectGeminiCLIToken, detectCopilotToken } from "./auth-utils";
 import { OpenAIProvider, GroqProvider, OpenRouterProvider, XAIProvider, AzureProvider } from "./openai";
-
 import { GeminiProvider, GeminiCLIProvider } from "./gemini";
-import { CopilotProvider, exchangeGitHubTokenForCopilotAsync } from "./copilot";
+import { CopilotProvider, detectCopilotToken, resolveCopilotBearerToken } from "./copilot";
+import { CodexProvider } from "./codex";
 import { ClineProvider } from "./cline";
+import { decryptApiKey } from "../security";
+import { resolveModel, getModelsForProvider, isLegacyModel, type StreamRequest, type ProviderEvent } from "./types";
+import { detectClaudeCodeToken, detectCodexToken, detectGeminiCLIToken, detectAntigravityToken } from "./auth-utils";
 
-import { decryptApiKey, secureDecrypt, isUsingSecureEncryption } from "../security";
-import { resolveModel, getModelsForProvider, isLegacyModel, type StreamRequest, type ProviderEvent, type Provider } from "./types";
-import { withRetry } from "./utils";
-import { getDb } from "../db/sqlite";
-import { recordUsage as creditRecordUsage } from "../credit-accountant";
+// ─── Environment Variable Mapping (from OpenCode's config.go) ───────────────
 
-// Environment variable mappings for real providers only
-const ENV_API_KEY_MAP: Record<ProviderName, string[]> = {
+const ENV_API_KEY_MAP: Partial<Record<ProviderName, string[]>> = {
   anthropic: ["ANTHROPIC_API_KEY"],
-  claude: [], // auth only - uses Claude Code CLI
-  cline: [], // auth only - uses Cline CLI
-  codex: [], // auth only - uses Codex CLI
   openai: ["OPENAI_API_KEY"],
   google: ["GEMINI_API_KEY", "GOOGLE_API_KEY"],
-  xai: ["XAI_API_KEY"],
   openrouter: ["OPENROUTER_API_KEY"],
+  cline: ["CLINE_API_KEY"],
   groq: ["GROQ_API_KEY"],
-  copilot: [], // auth only - uses GitHub OAuth
-  opencodezen: ["OPENCODE_ZEN_API_KEY"],
+  xai: ["XAI_API_KEY"],
   azure: ["AZURE_OPENAI_API_KEY"],
-  bedrock: ["AWS_ACCESS_KEY_ID"],
-  vertexai: ["GOOGLE_VERTEX_AI_API_KEY"],
-  local: [],
-  ollama: [],
-  "302ai": ["A302AI_API_KEY"],
-  azurecognitive: ["AZURE_COGNITIVE_API_KEY"],
-  baseten: ["BASETEN_API_KEY"],
-  cerebras: ["CEREBRAS_API_KEY"],
-  cloudflare: ["CLOUDFLARE_API_TOKEN"],
-  cortecs: ["CORTECS_API_KEY"],
+  // Popular alternatives
   deepseek: ["DEEPSEEK_API_KEY"],
-  deepinfra: ["DEEPINFRA_API_KEY"],
-  firmware: ["FIRMWARE_API_KEY"],
+  togetherai: ["TOGETHERAI_API_KEY", "TOGETHER_API_KEY"],
+  cerebras: ["CEREBRAS_API_KEY"],
   fireworks: ["FIREWORKS_API_KEY"],
-  gitlab: ["GITLAB_API_KEY"],
-  huggingface: ["HUGGINGFACE_API_KEY"],
-  helicone: ["HELICONE_API_KEY"],
-  llamacpp: [],
-  ionet: ["IONET_API_KEY"],
-  lmstudio: [],
-  mistral: ["MISTRAL_API_KEY"],
-  moonshot: ["MOONSHOT_API_KEY"],
+  huggingface: ["HUGGINGFACE_API_KEY", "HF_TOKEN"],
+  deepinfra: ["DEEPINFRA_API_KEY"],
   minimax: ["MINIMAX_API_KEY"],
-  nebius: ["NEBIUS_API_KEY"],
+  moonshot: ["MOONSHOT_API_KEY"],
+  ollama: ["OLLAMA_API_KEY"],
   ollamacloud: ["OLLAMA_CLOUD_API_KEY"],
-  sapai: ["AICORE_SERVICE_KEY"],
-  stackit: ["STACKIT_API_KEY"],
-  ovhcloud: ["OVHCLOUD_API_KEY"],
-  scaleway: ["SCALEWAY_API_KEY"],
-  togetherai: ["TOGETHER_API_KEY"],
-  venice: ["VENICE_API_KEY"],
-  vercel: ["VERCEL_AI_API_KEY"],
+  lmstudio: ["LMSTUDIO_API_KEY"],
+  llamacpp: ["LLAMACPP_API_KEY"],
+  local: ["LOCAL_API_KEY"],
+  // AI Gateways
+  cloudflare: ["CLOUDFLARE_API_TOKEN"],
+  cloudflareworkers: ["CLOUDFLARE_WORKERS_API_TOKEN"],
+  vercel: ["VERCEL_API_TOKEN"],
+  baseten: ["BASETEN_API_KEY"],
+  helicone: ["HELICONE_API_KEY"],
+  portkey: ["PORTKEY_API_KEY"],
+  // High Performance
+  hyperbolic: ["HYPERBOLIC_API_KEY"],
+  ionet: ["IONET_API_KEY"],
+  // Chinese AI
+  nebius: ["NEBIUS_API_KEY"],
   zai: ["ZAI_API_KEY"],
+  cortecs: ["CORTECS_API_KEY"],
+  stepfun: ["STEPFUN_API_KEY"],
+  qwen: ["QWEN_API_KEY"],
+  alibaba: ["ALIBABA_API_KEY"],
+  zhipuai: ["ZHIPUAI_API_KEY"],
+  modelscope: ["MODELSCOPE_API_KEY"],
+  // Open Source
+  replicate: ["REPLICATE_API_KEY"],
+  modal: ["MODAL_API_KEY"],
+  scaleway: ["SCALEWAY_API_KEY"],
+  venice: ["VENICE_API_KEY"],
   zenmux: ["ZENMUX_API_KEY"],
+  firmware: ["FIRMWARE_API_KEY"],
+  // Enterprise
+  azurecognitive: ["AZURE_COGNITIVE_API_KEY"],
+  sapai: ["SAPAI_SERVICE_KEY"],
+  stackit: ["STACKIT_AUTH_TOKEN"],
+  ovhcloud: ["OVHCLOUD_API_KEY"],
+  // Developer Platforms
+  gitlab: ["GITLAB_TOKEN"],
+  // Specialized
+  mistralai: ["MISTRALAI_API_KEY"],
+  cohere: ["COHERE_API_KEY"],
+  perplexity: ["PERPLEXITY_API_KEY"],
+  luma: ["LUMA_API_KEY"],
+  fal: ["FAL_API_KEY"],
+  // Audio/Speech
+  elevenlabs: ["ELEVENLABS_API_KEY"],
+  deepgram: ["DEEPGRAM_API_KEY"],
+  gladia: ["GLADIA_API_KEY"],
+  assemblyai: ["ASSEMBLYAI_API_KEY"],
+  lmnt: ["LMNT_API_KEY"],
+  // Other
+  nvidia: ["NVIDIA_API_KEY"],
+  nim: ["NIM_API_KEY"],
+  friendliai: ["FRIENDLI_API_KEY"],
+  friendli: ["FRIENDLI_TOKEN"],
+  voyageai: ["VOYAGE_API_KEY"],
+  mixedbread: ["MIXEDBREAD_API_KEY"],
+  mem0: ["MEM0_API_KEY"],
+  letta: ["LETTA_API_KEY"],
+  blackforestlabs: ["BLACKFORESTLABS_API_KEY"],
+  klingai: ["KLINGAI_API_KEY"],
+  prodia: ["PRODIA_API_KEY"],
+  "302ai": ["A302AI_API_KEY"],
+  opencodezen: ["OPENCODEZEN_API_KEY"],
+  // Additional from models.dev
+  "novita-ai": ["NOVITA_AI_API_KEY"],
+  upstage: ["UPSTAGE_API_KEY"],
+  v0: ["V0_API_KEY"],
+  siliconflow: ["SILICONFLOW_API_KEY"],
+  abacus: ["ABACUS_API_KEY"],
+  llama: ["LLAMA_API_KEY"],
+  vultr: ["VULTR_API_KEY"],
+  wandb: ["WANDB_API_KEY"],
+  poe: ["POE_API_KEY"],
+  // Additional from models.dev
+  "github-models": ["GITHUB_TOKEN"],
+  requesty: ["REQUESTY_API_KEY"],
+  inference: ["INFERENCE_API_KEY"],
+  submodel: ["SUBMODEL_API_KEY"],
+  synthetic: ["SYNTHETIC_API_KEY"],
+  moark: ["MOARK_API_KEY"],
+  nova: ["NOVA_API_KEY"],
 };
 
 const ENV_URL_MAP: Partial<Record<ProviderName, string>> = {
   azure: "AZURE_OPENAI_ENDPOINT",
   local: "LOCAL_ENDPOINT",
-  ollama: "OLLAMA_BASE_URL",
-  openrouter: "OPENROUTER_BASE_URL",
-  azurecognitive: "AZURE_COGNITIVE_RESOURCE_URL",
-  llamacpp: "LLAMACPP_BASE_URL",
-  lmstudio: "LMSTUDIO_BASE_URL",
 };
 
 const ENV_AUTH_TOKEN_MAP: Partial<Record<ProviderName, string[]>> = {
-  anthropic: ["ANTHROPIC_AUTH_TOKEN"],
-  claude: ["CLAUDE_CODE_OAUTH_TOKEN"],
-  cline: ["CLINE_AUTH_TOKEN"],
-  codex: ["CODEX_AUTH_TOKEN"],
+  anthropic: ["ANTHROPIC_AUTH_TOKEN", "CLAUDE_CODE_OAUTH_TOKEN"],
   copilot: ["GITHUB_COPILOT_TOKEN", "GITHUB_TOKEN"],
+  cline: ["CLINE_AUTH_TOKEN"],
   azure: ["AZURE_OPENAI_AUTH_TOKEN"],
-  google: ["GEMINI_AUTH_TOKEN"],
 };
 
-/** Default base URLs for OpenAI-compatible OpenCode parity providers (verify + chat use these). */
-const OPENCODE_DEFAULT_BASE_URL: Partial<Record<ProviderName, string>> = {
-  "302ai": "https://api.302.ai/v1",
-  baseten: "https://api.baseten.co/v1",
-  cerebras: "https://api.cerebras.ai/v1",
-  cloudflare: "https://gateway.ai.cloudflare.com/v1",
-  cortecs: "https://api.cortecs.ai/v1",
-  deepseek: "https://api.deepseek.com",
-  deepinfra: "https://api.deepinfra.com/v1",
-  firmware: "https://api.firmware.ai/v1",
-  fireworks: "https://api.fireworks.ai/inference/v1",
-  gitlab: "https://gitlab.com/api/v4",
-  helicone: "https://oai.hconeai.com/v1",
-  huggingface: "https://api-inference.huggingface.co/v1",
-  ionet: "https://api.io.net/v1",
-  minimax: "https://api.minimax.chat/v1",
-  moonshot: "https://api.moonshot.cn/v1",
-  nebius: "https://api.nebius.com/v1",
-  ollamacloud: "https://api.ollama.com/v1",
-  ovhcloud: "https://ai.endpoints.ovh.net/v1",
-  scaleway: "https://api.scaleway.com/llm/v1",
-  stackit: "https://api.stackit.cloud/ai/v1",
-  togetherai: "https://api.together.xyz/v1",
-  venice: "https://api.venice.ai/v1",
-  vercel: "https://ai.vercel.com/v1",
-  zai: "https://api.z.ai/api/paas/v4",
-  zenmux: "https://api.zenmux.ai/v1",
-};
-const LLAMACPP_DEFAULT = "http://127.0.0.1:8080/v1";
-const LMSTUDIO_DEFAULT = "http://localhost:1234/v1";
-
-const PROVIDER_AUTH_MODE: Record<ProviderName, ProviderAuthMode> = {
-  anthropic: "api_key",
-  claude: "auth_only",
-  cline: "auth_only",
-  codex: "auth_only",
+export const PROVIDER_AUTH_MODE: Record<ProviderName, ProviderAuthMode> = {
+  anthropic: "api_key_or_auth",
   openai: "api_key",
   google: "api_key_or_auth",
-  xai: "api_key",
-  openrouter: "api_key",
-  groq: "api_key",
   copilot: "auth_only",
-  opencodezen: "api_key",
+  codex: "auth_only",
+  openrouter: "api_key",
+  cline: "api_key_or_auth",
+  groq: "api_key",
+  xai: "api_key",
   azure: "api_key_or_auth",
   bedrock: "env_auth",
-  vertexai: "api_key",
+  vertexai: "env_auth",
   local: "base_url_only",
-  ollama: "base_url_only",
-  "302ai": "api_key",
-  azurecognitive: "api_key",
-  baseten: "api_key",
-  cerebras: "api_key",
-  cloudflare: "api_key",
-  cortecs: "api_key",
+  // Popular alternatives
   deepseek: "api_key",
-  deepinfra: "api_key",
-  firmware: "api_key",
+  togetherai: "api_key",
+  cerebras: "api_key",
   fireworks: "api_key",
-  gitlab: "api_key",
   huggingface: "api_key",
-  helicone: "api_key",
-  llamacpp: "base_url_only",
-  ionet: "api_key",
-  lmstudio: "base_url_only",
-  mistral: "api_key",
-  moonshot: "api_key",
+  deepinfra: "api_key",
   minimax: "api_key",
-  nebius: "api_key",
+  moonshot: "api_key",
+  ollama: "api_key",
   ollamacloud: "api_key",
+  lmstudio: "api_key",
+  llamacpp: "api_key",
+  // AI Gateways
+  cloudflare: "api_key",
+  cloudflareworkers: "api_key",
+  vercel: "api_key",
+  baseten: "api_key",
+  helicone: "api_key",
+  portkey: "api_key",
+  // High Performance
+  hyperbolic: "api_key",
+  ionet: "api_key",
+  // Chinese AI
+  nebius: "api_key",
+  zai: "api_key",
+  cortecs: "api_key",
+  stepfun: "api_key",
+  qwen: "api_key",
+  alibaba: "api_key",
+  zhipuai: "api_key",
+  modelscope: "api_key",
+  // Open Source
+  replicate: "api_key",
+  modal: "api_key",
+  scaleway: "api_key",
+  venice: "api_key",
+  zenmux: "api_key",
+  firmware: "api_key",
+  // Enterprise
+  azurecognitive: "api_key",
   sapai: "api_key",
   stackit: "api_key",
   ovhcloud: "api_key",
-  scaleway: "api_key",
-  togetherai: "api_key",
-  venice: "api_key",
-  vercel: "api_key",
-  zai: "api_key",
-  zenmux: "api_key",
+  // Developer Platforms
+  gitlab: "api_key",
+  antigravity: "auth_only",
+  chromeai: "auth_only",
+  // Specialized
+  mistralai: "api_key",
+  cohere: "api_key",
+  perplexity: "api_key",
+  luma: "api_key",
+  fal: "api_key",
+  // Audio/Speech
+  elevenlabs: "api_key",
+  deepgram: "api_key",
+  gladia: "api_key",
+  assemblyai: "api_key",
+  lmnt: "api_key",
+  // Other
+  nvidia: "api_key",
+  nim: "api_key",
+  friendliai: "api_key",
+  friendli: "api_key",
+  voyageai: "api_key",
+  mixedbread: "api_key",
+  mem0: "api_key",
+  letta: "api_key",
+  blackforestlabs: "api_key",
+  klingai: "api_key",
+  prodia: "api_key",
+  "302ai": "api_key",
+  opencodezen: "api_key",
+  // Additional from models.dev
+  "novita-ai": "api_key",
+  upstage: "api_key",
+  v0: "api_key",
+  siliconflow: "api_key",
+  abacus: "api_key",
+  llama: "api_key",
+  vultr: "api_key",
+  wandb: "api_key",
+  poe: "api_key",
+  // Additional from models.dev
+  "github-models": "api_key",
+  requesty: "api_key",
+  inference: "api_key",
+  submodel: "api_key",
+  synthetic: "api_key",
+  moark: "api_key",
+  nova: "api_key",
+  aihubmix: "api_key",
+  aimlapi: "api_key",
 };
 
-// Circuit breaker states
-interface CircuitState {
-  failures: number;
-  lastFailure: number;
-  isOpen: boolean;
-}
+const EXTRA_AUTH_MODES: Partial<Record<ProviderName, Array<{ id: string; label: string; description: string }>>> = {
+  anthropic: [
+    { id: "api_key", label: "API Key", description: "Standard Anthropic API key (sk-ant-...)" },
+    { id: "claude_code", label: "Claude Code", description: "Authenticate via Claude Pro/Max CLI session" },
+  ],
+  openai: [
+    { id: "api_key", label: "API Key", description: "Standard OpenAI API key (sk-...)" },
+    { id: "codex", label: "Codex Auth", description: "Authenticate via codex CLI session" },
+  ],
+  google: [
+    { id: "api_key", label: "API Key", description: "Google AI Studio API key" },
+    { id: "cli", label: "Gemini CLI", description: "Authenticate via gemini CLI session" },
+    { id: "antigravity", label: "Antigravity", description: "Authenticate via Antigravity OAuth" },
+  ],
+};
 
-const CIRCUIT_THRESHOLD = 5;
-const CIRCUIT_TIMEOUT = 60_000; // 1 minute
-
-class ProviderRegistry {
+export class ProviderRegistry {
   private providers = new Map<ProviderName, Provider>();
   private providerConfigs = new Map<ProviderName, ProviderConfig>();
-  private circuitStates = new Map<ProviderName, CircuitState>();
+  private failureCounts = new Map<ProviderName, number>();
+  private trippedUntil = new Map<ProviderName, number>();
+
+  private readonly FAILURE_THRESHOLD = 5;
+  private readonly TRIP_DURATION_MS = 60000; // 1 minute cooldown
 
   constructor(private config?: KoryphaiosConfig) {
     this.initializeAll();
@@ -195,59 +272,56 @@ class ProviderRegistry {
 
   /** Get a specific provider by name. */
   get(name: ProviderName): Provider | undefined {
+    if (this.isTripped(name)) {
+      providerLog.warn({ provider: name }, "Attempted to get tripped provider");
+      return undefined;
+    }
     return this.providers.get(name);
   }
 
-  /** Get all available (authenticated) providers. */
+  /** Get all available (authenticated and healthy) providers. */
   getAvailable(): Provider[] {
-    return [...this.providers.values()].filter((p) => p.isAvailable());
+    return [...this.providers.values()].filter((p) => {
+      const pn = p.name;
+      return p.isAvailable() && !this.isTripped(pn);
+    });
   }
 
-  /** Check if circuit breaker is open for a provider */
-  private isCircuitOpen(name: ProviderName): boolean {
-    const state = this.circuitStates.get(name);
-    if (!state) return false;
-    
-    if (state.isOpen) {
-      // Check if we should close it
-      if (Date.now() - state.lastFailure > CIRCUIT_TIMEOUT) {
-        state.isOpen = false;
-        state.failures = 0;
-        return false;
-      }
+  private isTripped(name: ProviderName): boolean {
+    const until = this.trippedUntil.get(name);
+    if (until && Date.now() < until) {
       return true;
+    }
+    if (until) {
+      // Cooldown expired
+      this.trippedUntil.delete(name);
+      this.failureCounts.set(name, 0);
+      providerLog.info({ provider: name }, "Circuit breaker reset (cooldown expired)");
     }
     return false;
   }
 
-  /** Record a failure for circuit breaker */
-  private recordFailure(name: ProviderName): void {
-    let state = this.circuitStates.get(name);
-    if (!state) {
-      state = { failures: 0, lastFailure: 0, isOpen: false };
-      this.circuitStates.set(name, state);
-    }
-    
-    state.failures++;
-    state.lastFailure = Date.now();
-    
-    if (state.failures >= CIRCUIT_THRESHOLD) {
-      state.isOpen = true;
-      providerLog.warn({ provider: name, failures: state.failures }, "Circuit breaker opened");
+  /** Report a failure to the circuit breaker. */
+  reportFailure(name: ProviderName) {
+    const count = (this.failureCounts.get(name) || 0) + 1;
+    this.failureCounts.set(name, count);
+
+    if (count >= this.FAILURE_THRESHOLD) {
+      const until = Date.now() + this.TRIP_DURATION_MS;
+      this.trippedUntil.set(name, until);
+      providerLog.error({ provider: name, failures: count, duration: this.TRIP_DURATION_MS }, "Circuit breaker TRIPPED");
     }
   }
 
-  /** Record a success for circuit breaker */
-  private recordSuccess(name: ProviderName): void {
-    const state = this.circuitStates.get(name);
-    if (state) {
-      state.failures = 0;
-      state.isOpen = false;
+  /** Report a success to reset failure count. */
+  reportSuccess(name: ProviderName) {
+    if (this.failureCounts.get(name) !== 0) {
+      this.failureCounts.set(name, 0);
     }
   }
 
-  /** Get provider status only for providers the user has authenticated. No hardcoded list. */
-  getStatus(): Array<{
+  /** Get provider status for all configured providers. */
+  async getStatus(): Promise<Array<{
     name: ProviderName;
     enabled: boolean;
     authenticated: boolean;
@@ -259,219 +333,179 @@ class ProviderRegistry {
     supportsApiKey: boolean;
     supportsAuthToken: boolean;
     requiresBaseUrl: boolean;
-    circuitOpen: boolean;
+    extraAuthModes?: Array<{ id: string; label: string; description: string }>;
     error?: string;
-    extraAuthModes?: Array<{ id: string; label: string; description?: string }>;
-  }> {
-    const names = Object.keys(PROVIDER_AUTH_MODE) as ProviderName[];
-    const result: Array<{
-      name: ProviderName;
-      enabled: boolean;
-      authenticated: boolean;
-      models: string[];
-      allAvailableModels: string[];
-      selectedModels: string[];
-      hideModelSelector: boolean;
-      authMode: ProviderAuthMode;
-      supportsApiKey: boolean;
-      supportsAuthToken: boolean;
-      requiresBaseUrl: boolean;
-      circuitOpen: boolean;
-      error?: string;
-      extraAuthModes?: Array<{ id: string; label: string; description?: string }>;
-    }> = [];
-
-    for (const name of names) {
-      const provider = this.providers.get(name);
-      const config = this.providerConfigs.get(name);
-      const authMode = PROVIDER_AUTH_MODE[name];
-      const circuitOpen = this.isCircuitOpen(name);
+  }>> {
+    const statuses = await Promise.all(Object.keys(PROVIDER_AUTH_MODE).map(async (name) => {
+      const pn = name as ProviderName;
+      const provider = this.providers.get(pn);
+      const config = this.providerConfigs.get(pn);
+      const authMode = PROVIDER_AUTH_MODE[pn];
 
       const isProviderAvailable = provider?.isAvailable() ?? false;
-      const isAuthenticated = isProviderAvailable ||
-        (name === "copilot" && !!detectCopilotToken());
-
-      // Include all providers - authenticated or not - so users can configure them
-
       const isEnabled = config ? !config.disabled : false;
+      const isClaudeCodeCLI = config?.authToken?.startsWith("cli:claude");
+      const isAuthenticated = isEnabled && (isProviderAvailable || 
+        (pn === "anthropic" && (!!detectClaudeCodeToken() || isClaudeCodeCLI)) ||
+        (pn === "copilot" && !!detectCopilotToken()));
+      
       let allModels: string[] = [];
-      if (isEnabled) {
-        allModels = provider?.listModels().map((m) => m.id)
-          ?? getModelsForProvider(name).map((m) => m.id);
+      if (isEnabled && isAuthenticated) {
+        const models = await (provider?.listModels() ?? Promise.resolve(getModelsForProvider(pn)));
+        allModels = models.map((m) => m.id);
       }
-
+      
       const selectedModels = config?.selectedModels ?? [];
       const hideModelSelector = config?.hideModelSelector ?? false;
 
+      if (pn === "anthropic") {
+        const isClaudeCodeAuth = config?.authToken?.startsWith("cli:claude") || detectClaudeCodeToken() !== null;
+        if (isClaudeCodeAuth) {
+          const flagshipModels = ["claude-opus-4-6", "claude-sonnet-4-5", "claude-haiku-4-5"];
+          allModels = allModels.filter(id => flagshipModels.includes(id));
+        }
+      }
 
-
-      const enabledModels = (selectedModels.length > 0)
+      // The 'models' field returned to UI should only be the ENABLED ones
+      const enabledModels = (selectedModels.length > 0) 
         ? allModels.filter(id => selectedModels.includes(id))
         : allModels;
 
-      const extraAuthModes = name === "google"
-        ? [
-            { id: "api_key", label: "API key", description: "Use a Gemini API key from Google AI Studio" },
-            { id: "cli", label: "Gemini CLI", description: "Use existing Gemini CLI session or sign in in browser" },
-            { id: "antigravity", label: "Antigravity", description: "Sign in with Google (Antigravity) in browser" },
-          ]
-        : undefined;
-
-      result.push({
-        name,
-        enabled: true,
-        authenticated: isProviderAvailable,
+      return {
+        name: pn,
+        enabled: isEnabled,
+        authenticated: isAuthenticated,
         models: enabledModels,
         allAvailableModels: allModels,
-        selectedModels,
+        selectedModels: selectedModels,
         hideModelSelector,
         authMode,
         supportsApiKey: authMode === "api_key" || authMode === "api_key_or_auth",
         supportsAuthToken: authMode === "api_key_or_auth",
-        requiresBaseUrl: authMode === "base_url_only" || name === "azure",
-        circuitOpen,
-        ...(extraAuthModes && { extraAuthModes }),
-      });
-    }
-
-    return result;
-  }
-
-  /** All provider types that can be added (for "Add provider" UI). Not filtered by auth. */
-  getAvailableProviderTypes(): Array<{ name: ProviderName; authMode: ProviderAuthMode }> {
-    return (Object.keys(PROVIDER_AUTH_MODE) as ProviderName[]).map((name) => ({
-      name,
-      authMode: PROVIDER_AUTH_MODE[name],
+        requiresBaseUrl: authMode === "base_url_only" || pn === "azure",
+        extraAuthModes: EXTRA_AUTH_MODES[pn],
+      };
     }));
+
+    return statuses;
   }
 
   /** Find the best available provider for a given model ID. */
-  findProviderForModel(modelId: string): Provider | undefined {
+  async findProviderForModel(modelId: string): Promise<Provider | undefined> {
     for (const provider of this.getAvailable()) {
-      if (this.isCircuitOpen(provider.name)) continue;
-      
       const config = this.providerConfigs.get(provider.name);
       const selected = config?.selectedModels ?? [];
-
+      
+      // If user has selected specific models, only allow those
       if (selected.length > 0 && !selected.includes(modelId)) {
         continue;
       }
 
-      if (provider.listModels().some((m) => m.id === modelId)) {
+      // Special case for Claude Code: only allow 4.5/4.6 models
+      const isClaudeCodeAuth = config?.authToken?.startsWith("cli:claude") || detectClaudeCodeToken() !== null;
+      if (provider.name === "anthropic" && isClaudeCodeAuth) {
+        const flagshipModels = ["claude-opus-4-6", "claude-sonnet-4-5", "claude-haiku-4-5"];
+        if (!flagshipModels.includes(modelId)) continue;
+      }
+
+      const models = await provider.listModels();
+      if (models.some((m) => m.id === modelId)) {
         return provider;
       }
     }
     return undefined;
   }
 
-  /** Resolve the provider that should handle a model. */
-  resolveProvider(modelId: string, preferredProvider?: ProviderName): Provider | undefined {
-    const modelDef = resolveModel(modelId);
-
-    if (modelDef) {
-      const catalogProvider = this.providers.get(modelDef.provider);
-      if (catalogProvider?.isAvailable() && !this.isCircuitOpen(catalogProvider.name)) return catalogProvider;
-      // Catalog provider missing or unavailable: try user's preferred provider if it can serve this model, then any available provider.
-      if (preferredProvider) {
-        const preferred = this.providers.get(preferredProvider);
-        if (preferred?.isAvailable() && !this.isCircuitOpen(preferredProvider) && preferred.listModels().some((m) => m.id === modelId))
-          return preferred;
-      }
-      return this.findProviderForModel(modelId);
-    }
-
+  /** Resolve the provider that should handle a model, with fallback chain. */
+  async resolveProvider(modelId: string, preferredProvider?: ProviderName): Promise<Provider | undefined> {
+    // 1. If a specific provider was requested AND it's available AND it supports this model, use it!
     if (preferredProvider) {
       const preferred = this.providers.get(preferredProvider);
-      if (preferred?.isAvailable() && !this.isCircuitOpen(preferredProvider)) return preferred;
+      if (preferred?.isAvailable()) {
+        const models = await preferred.listModels();
+        if (models.some(m => m.id === modelId || m.apiModelId === modelId || m.id === `${preferredProvider}.${modelId}`)) {
+          return preferred;
+        }
+      }
     }
-    return this.findProviderForModel(modelId);
+
+    // 2. Check our global catalog for the "official" provider
+    const modelDef = resolveModel(modelId);
+    if (modelDef) {
+      const provider = this.providers.get(modelDef.provider);
+      if (provider?.isAvailable()) return provider;
+      // If the official provider isn't available, we'll continue to find ANY provider
+    }
+
+    // 3. Fallback: search ALL available providers for one that claims to support this model ID
+    return await this.findProviderForModel(modelId);
   }
 
-  /** Return the first available provider and one of its non-legacy models for "auto" fallback. */
-  getFirstAvailableRouting(): { model: string; provider: ProviderName } | undefined {
-    for (const provider of this.getAvailable()) {
-      if (provider.name === "vertexai" || this.isCircuitOpen(provider.name)) continue;
-      const models = provider.listModels().filter((m) => !isLegacyModel(m));
-      const first = models[0];
-      if (first) return { model: first.id, provider: provider.name as ProviderName };
-    }
-    return undefined;
-  }
-
-  /** Execute a stream request with automatic retries and circuit breaker. */
+  /** Execute a stream request with automatic retries and fallback to other models if necessary. */
   async *executeWithRetry(
     request: StreamRequest,
     preferredProvider?: ProviderName,
-    fallbackChain: string[] = []
+    fallbackChain?: string[]
   ): AsyncGenerator<ProviderEvent> {
-    const chain = [request.model, ...fallbackChain];
+    // If no fallback chain provided, just try the requested model
+    const chain = fallbackChain && fallbackChain.length > 0 ? fallbackChain : [request.model];
+    let lastError: any;
 
-    for (let i = 0; i < chain.length; i++) {
-      const currentModel = chain[i];
-      const provider = this.resolveProvider(currentModel, i === 0 ? preferredProvider : undefined);
-
+    for (const modelId of chain) {
+      const provider = await this.resolveProvider(modelId, preferredProvider);
       if (!provider) {
-        if (i === chain.length - 1) {
-          yield { type: "error", error: `No available provider for model: ${currentModel}` };
-          return;
-        }
-        providerLog.warn({ model: currentModel }, "No provider available, trying fallback");
-        continue;
-      }
-
-      // Check circuit breaker
-      if (this.isCircuitOpen(provider.name)) {
-        providerLog.warn({ provider: provider.name }, "Circuit breaker open, skipping");
-        if (i === chain.length - 1) {
-          yield { type: "error", error: `Provider ${provider.name} circuit breaker open` };
-          return;
-        }
+        lastError = new Error(`No available provider for model: ${modelId}`);
         continue;
       }
 
       try {
-        let hasContent = false;
-        let accTokensIn = 0;
-        let accTokensOut = 0;
-        const stream = provider.streamResponse({ ...request, model: currentModel });
+        let success = false;
+        let receivedAnyContent = false;
 
-        for await (const event of stream) {
-          if (this.isContentEvent(event)) hasContent = true;
-          if (event.type === "usage_update") {
-            if (typeof event.tokensIn === "number") accTokensIn = event.tokensIn;
-            if (typeof event.tokensOut === "number") accTokensOut = event.tokensOut;
+        // Execute the stream
+        for await (const event of provider.streamResponse({ ...request, model: modelId })) {
+          if (event.type === "error") {
+            const isQuota = this.isQuotaError(event.error);
+            if (isQuota && !receivedAnyContent) {
+              providerLog.warn({ model: modelId, provider: provider.name }, "Quota exceeded, attempting fallback...");
+              lastError = new Error(event.error);
+              success = false;
+              break; // Try next model in chain
+            }
+            // Yield terminal errors if we can't fallback
+            yield event;
+            return;
           }
+
+          if (event.type === "content_delta" || event.type === "thinking_delta" || event.type === "tool_use_start") {
+            receivedAnyContent = true;
+          }
+
+          if (event.type === "complete") {
+            success = true;
+            this.reportSuccess(provider.name);
+          }
+
           yield event;
         }
 
-        if (hasContent) {
-          if (accTokensIn > 0 || accTokensOut > 0) {
-            creditRecordUsage(currentModel, provider.name, accTokensIn, accTokensOut);
-          }
-          this.recordSuccess(provider.name);
-          return;
-        }
-        
-        providerLog.warn({ model: currentModel, provider: provider.name }, "Empty response, trying fallback");
-        this.recordFailure(provider.name);
+        if (success) return; // Mission accomplished
       } catch (err: any) {
-        providerLog.error({ model: currentModel, provider: provider.name, error: err.message }, "Provider error");
-        this.recordFailure(provider.name);
-        
-        if (i === chain.length - 1) {
-          yield { type: "error", error: err.message || "Unknown error" };
+        this.reportFailure(provider.name);
+        lastError = err;
+        const isQuota = this.isQuotaError(err);
+        if (!isQuota) {
+          yield { type: "error", error: err.message ?? String(err) };
           return;
         }
-        providerLog.info("Trying next model in fallback chain");
+        providerLog.warn({ model: modelId, provider: provider.name, err: err.message }, "Provider error, attempting fallback...");
       }
     }
+
+    yield { type: "error", error: lastError?.message ?? "All fallback attempts failed" };
   }
 
-  private isContentEvent(event: ProviderEvent): boolean {
-    return event.type === "content_delta" || event.type === "thinking_delta" || event.type === "tool_use_start";
-  }
-
-  /** Validate provider credentials. */
+  /** Validate provider credentials by making a lightweight authenticated API call. */
   async verifyConnection(
     name: ProviderName,
     credentials?: { apiKey?: string; authToken?: string; baseUrl?: string },
@@ -485,80 +519,34 @@ class ProviderRegistry {
       switch (name) {
         case "anthropic": {
           if (!apiKey && !authToken) return { success: false, error: "Missing apiKey or authToken" };
-          const { headers } = buildAuthHeaders(name, { apiKey, authToken });
-          const url = getVerifyUrl(name, undefined, { apiKey, authToken }) || `${PROVIDER_BASE_URLS.anthropic}/models`;
-          const res = await this.verifyHttpWithStatus(url, { method: "GET", headers });
-          if (res.success) return { success: true };
-          if (res.status === 401) {
-            this.markKeyInvalid(name, res.error ?? "Unauthorized");
-            const config = this.providerConfigs.get(name);
-            if (config) {
-              config.disabled = true;
-              this.providers.delete(name);
-            }
-          }
-          return { success: false, error: res.error };
+          const headers: Record<string, string> = {
+            "anthropic-version": "2023-06-01",
+            "content-type": "application/json",
+          };
+          if (apiKey) headers["x-api-key"] = apiKey;
+          if (authToken) headers.Authorization = `Bearer ${authToken}`;
+          return await this.verifyHttp("https://api.anthropic.com/v1/models", { method: "GET", headers });
         }
         case "openai":
           return this.verifyBearerGet("https://api.openai.com/v1/models", apiKey);
         case "google": {
+          // If CLI auth token, verify gemini CLI
           if (authToken?.startsWith("cli:") || (!apiKey && !authToken)) {
-            if (!Bun.which("gemini")) {
-              return { success: false, error: "gemini CLI not found in PATH" };
+            const whichProc = Bun.spawnSync(["which", "gemini"], { stdout: "pipe", stderr: "pipe" });
+            if (whichProc.exitCode !== 0) {
+              return { success: false, error: "gemini CLI not found in PATH. Install it first." };
             }
             return { success: true };
           }
           if (!apiKey) return { success: false, error: "Missing apiKey" };
-          // Gemini 3.1 / Thinking: v1beta often required; support ?key= and x-goog-api-key as fallbacks.
-          const creds = { apiKey, authToken };
-          const tryUrl = (base: string, useHeader: boolean) => {
-            const path = `${base.replace(/\/?$/, "")}/models`;
-            if (useHeader) {
-              const { headers } = buildAuthHeaders(name, creds, { useGeminiHeader: true });
-              return this.verifyHttpWithStatus(path, { method: "GET", headers });
-            }
-            const urlWithKey = `${path}?key=${encodeURIComponent(apiKey!)}`;
-            return this.verifyHttpWithStatus(urlWithKey, {
-              method: "GET",
-              headers: { "Content-Type": "application/json", "User-Agent": "Koryphaios/1.0" },
-            });
-          };
-          let result = await tryUrl(GEMINI_V1BETA_BASE, false);
-          if (result.success) return { success: true };
-          if (result.status === 401) {
-            this.markKeyInvalid(name, result.error ?? "Unauthorized");
-            const config = this.providerConfigs.get(name);
-            if (config) {
-              config.disabled = true;
-              this.providers.delete(name);
-            }
-            return { success: false, error: result.error };
-          }
-          if (result.status === 404) {
-            result = await tryUrl(GEMINI_V1BETA_BASE, true);
-            if (result.success) return { success: true };
-            result = await tryUrl(GEMINI_V1_BASE, false);
-            if (result.success) {
-              try {
-                const { getDb } = require("../db/sqlite");
-                getDb()
-                  .prepare(
-                    "INSERT OR REPLACE INTO provider_endpoint_override (provider, base_url, updated_at) VALUES (?, ?, ?)"
-                  )
-                  .run(name, GEMINI_V1_BASE, Date.now());
-              } catch {
-                // DB not initialized
-              }
-              return { success: true };
-            }
-          }
-          return { success: false, error: result.error };
+          return await this.verifyHttp(`https://generativelanguage.googleapis.com/v1beta/models?key=${encodeURIComponent(apiKey)}`);
         }
         case "copilot": {
           const token = authToken ?? detectCopilotToken();
-          if (!token) return { success: false, error: "GitHub Copilot token not found" };
-          const bearer = await exchangeGitHubTokenForCopilotAsync(token);
-          if (!bearer) return { success: false, error: "Failed to exchange GitHub token for Copilot bearer" };
+          if (!token) return { success: false, error: "GitHub Copilot auth token not found. Authenticate with GitHub first." };
+          const bearer = resolveCopilotBearerToken(token);
+          if (!bearer) return { success: false, error: "Failed to exchange GitHub token for Copilot bearer token" };
+          // Copilot API requires IDE headers on ALL requests, including /models
           return this.verifyHttp("https://api.githubcopilot.com/models", {
             headers: {
               Authorization: `Bearer ${bearer}`,
@@ -571,8 +559,8 @@ class ProviderRegistry {
         }
         case "openrouter":
           return this.verifyBearerGet("https://openrouter.ai/api/v1/models", apiKey);
-        case "mistral":
-          return this.verifyBearerGet("https://api.mistral.ai/v1/models", apiKey);
+        case "cline":
+          return this.verifyBearerGet("https://api.cline.bot/api/v1/models", apiKey ?? authToken);
         case "groq":
           return this.verifyBearerGet("https://api.groq.com/openai/v1/models", apiKey);
         case "xai":
@@ -591,100 +579,246 @@ class ProviderRegistry {
           const trimmed = baseUrl.replace(/\/+$/, "");
           return this.verifyHttp(`${trimmed}/models`);
         }
-        case "ollama": {
-          if (!baseUrl) return { success: false, error: "Missing baseUrl (e.g. http://localhost:11434)" };
-          const trimmed = baseUrl.replace(/\/+$/, "");
-          return this.verifyHttp(`${trimmed}/api/tags`);
-        }
+        // Popular alternatives
+        case "deepseek":
+          return this.verifyBearerGet("https://api.deepseek.com/v1/models", apiKey);
+        case "togetherai":
+          return this.verifyBearerGet("https://api.together.ai/v1/models", apiKey);
+        case "cerebras":
+          return this.verifyBearerGet("https://api.cerebras.ai/v1/models", apiKey);
+        case "fireworks":
+          return this.verifyBearerGet("https://api.fireworks.ai/inference/v1/models", apiKey);
+        case "huggingface":
+          return this.verifyBearerGet("https://api-inference.huggingface.co/v1/models", apiKey);
+        case "deepinfra":
+          return this.verifyBearerGet("https://api.deepinfra.com/v1/models", apiKey);
+        case "minimax":
+          return this.verifyBearerGet("https://api.minimax.chat/v1/models", apiKey);
+        case "moonshot":
+          return this.verifyBearerGet("https://api.moonshot.ai/v1/models", apiKey);
+        case "ollama":
+          return this.verifyHttp(process.env.OLLAMA_BASE_URL || "http://localhost:11434/api/tags");
+        case "ollamacloud":
+          return this.verifyBearerGet("https://ollama.com/api/tags", apiKey);
+        case "lmstudio":
+          return this.verifyHttp("http://localhost:1234/v1/models");
+        case "llamacpp":
+          return this.verifyHttp("http://localhost:8080/v1/models");
+        // AI Gateways
+        case "cloudflare":
+          return this.verifyBearerGet("https://api.cloudflare.com/client/v4/accounts", apiKey);
+        case "cloudflareworkers":
+          return this.verifyBearerGet("https://api.cloudflare.com/client/v4/accounts", apiKey);
+        case "vercel":
+          return this.verifyBearerGet("https://api.vercel.com/v6/frameworks", apiKey);
+        case "baseten":
+          return this.verifyBearerGet("https://api.baseten.co/v1/models", apiKey);
+        case "helicone":
+          return this.verifyBearerGet("https://api.helicone.ai/v1/models", apiKey);
+        case "portkey":
+          return this.verifyBearerGet("https://api.portkey.ai/v1/models", apiKey);
+        // High Performance
+        case "hyperbolic":
+          return this.verifyBearerGet("https://api.hyperbolic.xyz/v1/models", apiKey);
+        case "ionet":
+          return this.verifyBearerGet("https://api.intelligence.io.solutions/api/v1/models", apiKey);
+        // Chinese AI
+        case "nebius":
+          return this.verifyBearerGet("https://api.nebius.ai/v1/models", apiKey);
+        case "zai":
+          return this.verifyBearerGet("https://api.z.ai/v1/models", apiKey);
+        case "cortecs":
+          return this.verifyBearerGet("https://api.cortecs.ai/v1/models", apiKey);
+        case "stepfun":
+          return this.verifyBearerGet("https://api.stepfun.com/v1/models", apiKey);
+        case "qwen":
+          return this.verifyBearerGet("https://dashscope.aliyuncs.com/compatible-mode/v1/models", apiKey);
+        case "alibaba":
+          return this.verifyBearerGet("https://dashscope.aliyuncs.com/compatible-mode/v1/models", apiKey);
+        case "zhipuai":
+          return this.verifyBearerGet("https://open.bigmodel.cn/api/paas/v4/models", apiKey);
+        case "modelscope":
+          return this.verifyBearerGet("https://api.modelscope.cn/v1/models", apiKey);
+        // Open Source
+        case "replicate":
+          return this.verifyBearerGet("https://api.replicate.com/v1/models", apiKey);
+        case "modal":
+          return this.verifyBearerGet("https://api.modal.com/v1/models", apiKey);
+        case "scaleway":
+          return this.verifyBearerGet("https://api.scaleway.com/llm/v1/models", apiKey);
+        case "venice":
+          return this.verifyBearerGet("https://api.venice.ai/v1/models", apiKey);
+        case "zenmux":
+          return this.verifyBearerGet("https://zenmux.ai/api/anthropic/v1/models", apiKey);
+        case "firmware":
+          return this.verifyBearerGet("https://api.firmware.ai/v1/models", apiKey);
+        // Enterprise
+        case "azurecognitive":
+          return this.verifyAzureCognitiveEnvironment();
+        case "sapai":
+          return this.verifyBearerGet("https://api.ai.sap.com/v1/models", apiKey);
+        case "stackit":
+          return this.verifyBearerGet("https://LLM.eu1.hana.ondemand.com/v1/models", apiKey);
+        case "ovhcloud":
+          return this.verifyBearerGet("https://deploy.ai.ovh.net/v1/models", apiKey);
+        // Developer Platforms
+        case "gitlab":
+          return { success: true }; // Verified via OAuth
+        case "antigravity":
+          return { success: true }; // Google internal
+        case "chromeai":
+          return { success: true }; // Chrome built-in
+        // Specialized
+        case "mistralai":
+          return this.verifyBearerGet("https://api.mistral.ai/v1/models", apiKey);
+        case "cohere":
+          return this.verifyBearerGet("https://api.cohere.ai/v1/models", apiKey);
+        case "perplexity":
+          return this.verifyBearerGet("https://api.perplexity.ai/v1/models", apiKey);
+        case "luma":
+          return this.verifyBearerGet("https://api.luma.ai/v1/models", apiKey);
+        case "fal":
+          return this.verifyBearerGet("https://queue.fal.run/models", apiKey);
+        // Audio/Speech
+        case "elevenlabs":
+          return this.verifyBearerGet("https://api.elevenlabs.io/v1/models", apiKey);
+        case "deepgram":
+          return this.verifyBearerGet("https://api.deepgram.com/v1/models", apiKey);
+        case "gladia":
+          return this.verifyBearerGet("https://api.gladia.io/v1/models", apiKey);
+        case "assemblyai":
+          return this.verifyBearerGet("https://api.assemblyai.com/v1/models", apiKey);
+        case "lmnt":
+          return this.verifyBearerGet("https://api.lmnt.com/v1/models", apiKey);
+        // Other
+        case "nvidia":
+          return this.verifyBearerGet("https://integrate.api.nvidia.com/v1/models", apiKey);
+        case "nim":
+          return this.verifyBearerGet("https://api.nimbleway.io/v1/models", apiKey);
+        case "friendliai":
+          return this.verifyBearerGet("https://api.friendli.ai/v1/models", apiKey);
+        case "friendli":
+          return this.verifyBearerGet("https://api.friendli.ai/serverless/v1/models", apiKey);
+        case "voyageai":
+          return this.verifyBearerGet("https://api.voyageai.com/v1/models", apiKey);
+        case "mixedbread":
+          return this.verifyBearerGet("https://api.mixedbread.ai/v1/models", apiKey);
+        case "mem0":
+          return this.verifyBearerGet("https://api.mem0.ai/v1/models", apiKey);
+        case "letta":
+          return this.verifyBearerGet("https://api.letta.com/v1/models", apiKey);
+        case "blackforestlabs":
+          return this.verifyBearerGet("https://api.blackforestlabs.ai/v1/models", apiKey);
+        case "klingai":
+          return this.verifyBearerGet("https://api.klingai.com/v1/models", apiKey);
+        case "prodia":
+          return this.verifyBearerGet("https://api.prodia.com/v1/models", apiKey);
+        case "302ai":
+          return this.verifyBearerGet("https://api.302.ai/v1/models", apiKey);
+        case "opencodezen":
+          return this.verifyBearerGet("https://opencode.ai/zen/v1/models", apiKey);
+        // Additional from models.dev
+        case "novita-ai":
+          return this.verifyBearerGet("https://api.novita.ai/openai/v1/models", apiKey);
+        case "upstage":
+          return this.verifyBearerGet("https://api.upstage.ai/v1/solar/models", apiKey);
+        case "v0":
+          return this.verifyBearerGet("https://api.v0.dev/v1/models", apiKey);
+        case "siliconflow":
+          return this.verifyBearerGet("https://api.siliconflow.com/v1/models", apiKey);
+        case "abacus":
+          return this.verifyBearerGet("https://routellm.abacus.ai/v1/models", apiKey);
+        case "llama":
+          return this.verifyBearerGet("https://api.llama.com/compat/v1/models", apiKey);
+        case "vultr":
+          return this.verifyBearerGet("https://api.vultrinference.com/v1/models", apiKey);
+        case "wandb":
+          return this.verifyBearerGet("https://api.inference.wandb.ai/v1/models", apiKey);
+        case "poe":
+          return this.verifyBearerGet("https://api.poe.com/v1/models", apiKey);
+        // Additional from models.dev
+        case "github-models":
+          return this.verifyBearerGet("https://models.github.ai/models", apiKey);
+        case "requesty":
+          return this.verifyBearerGet("https://router.requesty.ai/v1/models", apiKey);
+        case "inference":
+          return this.verifyBearerGet("https://inference.net/v1/models", apiKey);
+        case "submodel":
+          return this.verifyBearerGet("https://llm.submodel.ai/v1/models", apiKey);
+        case "synthetic":
+          return this.verifyBearerGet("https://api.synthetic.new/v1/models", apiKey);
+        case "moark":
+          return this.verifyBearerGet("https://moark.com/v1/models", apiKey);
+        case "nova":
+          return this.verifyBearerGet("https://api.nova.amazon.com/v1/models", apiKey);
         case "bedrock":
           return this.verifyBedrockEnvironment();
         case "vertexai":
-          if (!apiKey) return { success: false, error: "Vertex AI requires an explicit API key (set GOOGLE_VERTEX_AI_API_KEY or add apiKey in settings)" };
-          return { success: true };
-        case "cline": {
-          try {
-            const whichProc = Bun.spawnSync(["which", "cline"], { stdout: "pipe", stderr: "pipe" });
-            if (whichProc.exitCode !== 0) {
-              return { success: false, error: "cline CLI not found in PATH. Run: npm install -g cline" };
-            }
-          } catch {
-            return { success: false, error: "cline CLI not found in PATH. Run: npm install -g cline" };
+          return this.verifyVertexEnvironment();
+        case "codex": {
+          // Verify codex CLI is installed and responsive
+          const whichProc = Bun.spawnSync(["which", "codex"], { stdout: "pipe", stderr: "pipe" });
+          if (whichProc.exitCode !== 0) {
+            return { success: false, error: "codex CLI not found in PATH. Run: npm install -g @openai/codex" };
           }
           return { success: true };
         }
-        case "opencodezen": {
-          if (!apiKey) return { success: false, error: "Missing API key (get one at opencode.ai/auth)" };
-          const base = "https://opencode.ai/zen/v1";
-          return this.verifyBearerGet(`${base}/models`, apiKey);
-        }
-        case "llamacpp": {
-          const url = baseUrl ?? LLAMACPP_DEFAULT;
-          if (!url) return { success: false, error: "Missing baseUrl (e.g. http://127.0.0.1:8080/v1)" };
-          return this.verifyHttp(`${url.replace(/\/v1\/?$/, "")}/v1/models`);
-        }
-        case "lmstudio": {
-          const url = baseUrl ?? LMSTUDIO_DEFAULT;
-          if (!url) return { success: false, error: "Missing baseUrl (e.g. http://localhost:1234/v1)" };
-          return this.verifyHttp(`${url.replace(/\/v1\/?$/, "")}/v1/models`);
-        }
-        case "azurecognitive": {
-          if (!apiKey) return { success: false, error: "Missing API key" };
-          if (!baseUrl) return { success: false, error: "Missing baseUrl (e.g. https://YOUR_RESOURCE.cognitiveservices.azure.com)" };
-          const trimmed = baseUrl.replace(/\/+$/, "");
-          return this.verifyHttp(`${trimmed}/openai/deployments?api-version=2024-02-15-preview`, {
-            headers: { "api-key": apiKey },
-          });
-        }
-        case "sapai": {
-          if (!apiKey) return { success: false, error: "Missing service key (JSON from SAP BTP Cockpit)" };
-          if (!baseUrl) return { success: false, error: "Missing baseUrl from service key (AI_API_URL)" };
-          const trimmed = baseUrl.replace(/\/+$/, "");
-          return this.verifyHttp(`${trimmed}/openai/deployments`, { headers: { Authorization: `Bearer ${apiKey}` } });
-        }
-        case "zai": {
-          // Z.AI uses https://api.z.ai/api/paas/v4 and does not expose GET /models; verify via minimal chat request
-          if (!apiKey) return { success: false, error: "Missing API key" };
-          const base = baseUrl?.replace(/\/+$/, "") ?? "https://api.z.ai/api/paas/v4";
-          return this.verifyHttp(`${base}/chat/completions`, {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              Authorization: `Bearer ${apiKey}`,
-            },
-            body: JSON.stringify({
-              model: "glm-5",
-              messages: [{ role: "user", content: "Hi" }],
-              max_tokens: 1,
-            }),
-          });
-        }
-        default: {
-          const defaultBase = OPENCODE_DEFAULT_BASE_URL[name];
-          if (defaultBase && apiKey) return this.verifyBearerGet(`${defaultBase.replace(/\/?$/, "")}/models`, apiKey);
-          if (defaultBase) return { success: false, error: "Missing API key" };
+        default:
           return { success: false, error: `Unsupported provider: ${name}` };
-        }
       }
     } catch (err: any) {
       return { success: false, error: err?.message ?? String(err) };
     }
   }
 
-  /** Set/update provider credentials. */
+  /** Set/update provider credentials at runtime — re-initializes the provider. */
   setCredentials(
     name: ProviderName,
     credentials: { apiKey?: string; authToken?: string; baseUrl?: string; selectedModels?: string[]; hideModelSelector?: boolean },
   ): { success: boolean; error?: string } {
     try {
       const existing = this.providerConfigs.get(name);
-      const validation = this.validateCredentials(name, credentials, existing);
-      if (!validation.success) return validation;
+      const authMode = PROVIDER_AUTH_MODE[name];
+      const apiKey = credentials.apiKey?.trim();
+      const authToken = credentials.authToken?.trim();
+      const baseUrl = credentials.baseUrl?.trim();
+
+      if (authMode === "auth_only" && apiKey) {
+        return { success: false, error: `${name} uses account auth only and does not accept API keys` };
+      }
+      if (authMode === "auth_only") {
+        const hasAuthToken = !!(authToken || existing?.authToken);
+        const hasDetectedCopilot = name === "copilot" && !!detectCopilotToken();
+        if (!hasAuthToken && !hasDetectedCopilot) {
+          return { success: false, error: "authToken is required" };
+        }
+      }
+      if (authMode === "api_key" && !apiKey) {
+        return { success: false, error: "apiKey is required" };
+      }
+      if (authMode === "api_key_or_auth" && !apiKey && !authToken && !existing?.authToken) {
+        // Check for Claude Code token for anthropic
+        if (name === "anthropic" && detectClaudeCodeToken()) {
+          // OK - will use detected token
+        } else {
+          return { success: false, error: "Provide apiKey or authToken" };
+        }
+      }
+      if (authMode === "env_auth") {
+        const envReady = name === "bedrock" ? this.hasBedrockEnvironment() : this.hasVertexEnvironment();
+        if (!envReady) {
+          return { success: false, error: `${name} environment credentials not detected` };
+        }
+      }
+      if (authMode === "base_url_only" && !baseUrl && !existing?.baseUrl) {
+        return { success: false, error: "baseUrl is required" };
+      }
 
       const providerConfig: ProviderConfig = {
         name,
-        apiKey: credentials.apiKey?.trim() ?? existing?.apiKey,
-        authToken: credentials.authToken?.trim() ?? existing?.authToken,
-        baseUrl: credentials.baseUrl?.trim() ?? existing?.baseUrl,
+        apiKey: apiKey ?? existing?.apiKey,
+        authToken: authToken ?? existing?.authToken,
+        baseUrl: baseUrl ?? existing?.baseUrl,
         selectedModels: credentials.selectedModels ?? existing?.selectedModels,
         hideModelSelector: credentials.hideModelSelector ?? existing?.hideModelSelector,
         disabled: false,
@@ -693,57 +827,17 @@ class ProviderRegistry {
 
       this.providerConfigs.set(name, providerConfig);
 
+      // Re-create the provider instance
       const provider = this.createProvider(name, providerConfig);
       if (provider) {
         this.providers.set(name, provider);
-        this.circuitStates.delete(name); // Reset circuit breaker
-        this.clearKeyInvalid(name); // New key may be valid
-        providerLog.info({ provider: name }, "Provider configured");
+        providerLog.info({ provider: name }, "Configured with new API key");
         return { success: true };
       }
       return { success: false, error: "Failed to initialize provider" };
     } catch (err: any) {
       return { success: false, error: err.message };
     }
-  }
-
-  private validateCredentials(
-    name: ProviderName,
-    credentials: { apiKey?: string; authToken?: string; baseUrl?: string },
-    existing?: ProviderConfig
-  ): { success: boolean; error?: string } {
-    const authMode = PROVIDER_AUTH_MODE[name];
-    const apiKey = credentials.apiKey?.trim();
-    const authToken = credentials.authToken?.trim();
-    const baseUrl = credentials.baseUrl?.trim();
-
-    if (authMode === "auth_only" && apiKey) {
-      return { success: false, error: `${name} uses account auth only and does not accept API keys` };
-    }
-
-    if (authMode === "auth_only") {
-      const hasAuth = !!(authToken || existing?.authToken) || (name === "copilot" && !!detectCopilotToken());
-      if (!hasAuth) return { success: false, error: "authToken is required" };
-    }
-
-    if (authMode === "api_key" && !apiKey) {
-      return { success: false, error: "apiKey is required" };
-    }
-
-    if (authMode === "api_key_or_auth" && !apiKey && !authToken && !existing?.authToken) {
-      return { success: false, error: "Provide apiKey or authToken" };
-    }
-
-    if (authMode === "env_auth") {
-      const envReady = this.hasBedrockEnvironment();
-      if (!envReady) return { success: false, error: `${name} environment credentials not detected` };
-    }
-
-    if (authMode === "base_url_only" && !baseUrl && !existing?.baseUrl) {
-      return { success: false, error: "baseUrl is required" };
-    }
-
-    return { success: true };
   }
 
   /** Force-refresh a provider instance from current stored config. */
@@ -754,7 +848,6 @@ class ProviderRegistry {
       const provider = this.createProvider(name, config);
       if (!provider) return { success: false, error: "Failed to initialize provider" };
       this.providers.set(name, provider);
-      this.circuitStates.delete(name); // Reset circuit breaker on refresh
       return { success: true };
     } catch (err: any) {
       return { success: false, error: err.message ?? String(err) };
@@ -771,8 +864,7 @@ class ProviderRegistry {
       this.providerConfigs.set(name, config);
     }
     this.providers.delete(name);
-    this.circuitStates.delete(name);
-    providerLog.info({ provider: name }, "Provider disconnected");
+    providerLog.info({ provider: name }, "Disconnected");
   }
 
   /** Get the env var name expected for a provider. */
@@ -789,87 +881,89 @@ class ProviderRegistry {
   // ─── Private: Initialize all providers ──────────────────────────────────
 
   private initializeAll() {
+    const configProviders = this.config?.providers ?? {};
+
     for (const name of Object.keys(PROVIDER_AUTH_MODE) as ProviderName[]) {
-      const providerConfig = this.buildProviderConfig(name);
+      const userConfig = configProviders[name];
+      const envKey = this.detectEnvKey(name);
+      const envAuthToken = this.detectEnvAuthToken(name);
+      const envUrl = this.detectEnvUrl(name);
+
+      const providerConfig: ProviderConfig = {
+        name,
+        apiKey: userConfig?.apiKey ?? envKey ?? undefined,
+        authToken: userConfig?.authToken ?? envAuthToken ?? undefined,
+        baseUrl: userConfig?.baseUrl ?? envUrl ?? undefined,
+        selectedModels: userConfig?.selectedModels ?? [],
+        hideModelSelector: userConfig?.hideModelSelector ?? false,
+        disabled: userConfig?.disabled ?? false,
+        headers: userConfig?.headers,
+      };
+
+      const authMode = PROVIDER_AUTH_MODE[name];
+      const hasApi = !!providerConfig.apiKey;
+      const hasAuth = !!providerConfig.authToken
+        || (name === "copilot" && !!detectCopilotToken())
+        || (name === "anthropic" && !!detectClaudeCodeToken());
+      const hasUrl = !!providerConfig.baseUrl;
+      const hasAnyAuth = (authMode === "api_key" && hasApi)
+        || (authMode === "auth_only" && hasAuth)
+        || (authMode === "api_key_or_auth" && (hasApi || hasAuth))
+        || (authMode === "env_auth" && (name === "bedrock" ? this.hasBedrockEnvironment() : this.hasVertexEnvironment()))
+        || (authMode === "base_url_only" && hasUrl);
+
+      // Auto-disable when no usable auth is available
+      // Exception: copilot uses local token detection, anthropic uses Claude Code, gemini/codex use CLI wrappers
+      const isCliWrapper = name === "google" || name === "codex";
+      if (!hasAnyAuth && name !== "copilot" && name !== "anthropic" && !isCliWrapper) {
+        providerConfig.disabled = true;
+      }
+
       this.providerConfigs.set(name, providerConfig);
 
       try {
         const provider = this.createProvider(name, providerConfig);
-        if (provider) this.providers.set(name, provider);
-      } catch (error) {
-        providerLog.error({ provider: name, error }, "Failed to initialize provider");
+        if (provider) {
+          this.providers.set(name, provider);
+        }
+      } catch (err) {
+        providerLog.warn({ provider: name, err }, "Failed to initialize");
       }
     }
+
     this.logProviderStatus();
-  }
-
-  private buildProviderConfig(name: ProviderName): ProviderConfig {
-    const userConfig = this.config?.providers?.[name];
-    // Vertex AI defaults to disabled so GCP env (e.g. gcloud ADC) does not auto-enable it or spawn it as subagents
-    const defaultDisabled = name === "vertexai";
-    const providerConfig: ProviderConfig = {
-      name,
-      apiKey: userConfig?.apiKey ?? this.detectEnvKey(name) ?? undefined,
-      authToken: userConfig?.authToken ?? this.detectEnvAuthToken(name) ?? undefined,
-      baseUrl: userConfig?.baseUrl ?? this.detectEnvUrl(name) ?? undefined,
-      selectedModels: userConfig?.selectedModels ?? [],
-      hideModelSelector: userConfig?.hideModelSelector ?? false,
-      disabled: userConfig?.disabled ?? defaultDisabled,
-      headers: userConfig?.headers,
-    };
-
-    // Providers enabled by default (except vertexai) - auth checked at runtime
-
-    return providerConfig;
-  }
-
-  private hasValidAuth(name: ProviderName, config: ProviderConfig): boolean {
-    const authMode = PROVIDER_AUTH_MODE[name];
-    const hasApi = !!config.apiKey;
-    const hasAuth = !!config.authToken ||
-      (name === "copilot" && !!detectCopilotToken());
-    const hasUrl = !!config.baseUrl;
-
-    const hasAnyAuth =
-      (authMode === "api_key" && hasApi) ||
-      (authMode === "auth_only" && hasAuth) ||
-      (authMode === "api_key_or_auth" && (hasApi || hasAuth)) ||
-      (authMode === "env_auth" && this.hasBedrockEnvironment()) ||
-      (authMode === "base_url_only" && (hasUrl || name === "lmstudio" || name === "llamacpp"));
-
-    if (hasAnyAuth) return true;
-
-    // Provider has no auth — it will fail at runtime when called
-    return false;
   }
 
   private createProvider(name: ProviderName, config: ProviderConfig): Provider | null {
     switch (name) {
       case "anthropic":
+        // Use Claude Code token if no apiKey or authToken provided
+        if (!config.apiKey && !config.authToken) {
+          const claudeCodeToken = detectClaudeCodeToken();
+          if (claudeCodeToken) {
+            return new AnthropicProvider({ ...config, authToken: claudeCodeToken });
+          }
+        }
         return new AnthropicProvider(config);
       case "openai":
         return new OpenAIProvider(config);
       case "google":
-        // API key takes priority — use direct Gemini API
-        if (config.apiKey) return new GeminiProvider(config);
-        // Fall back to CLI if explicitly set or auto-detected
-        if (config.authToken?.startsWith("cli:") || detectGeminiCLIToken()) {
+        // Use CLI wrapper if no API key but gemini CLI is available
+        if (!config.apiKey && (config.authToken?.startsWith("cli:") || !config.apiKey)) {
           const cliProvider = new GeminiCLIProvider(config);
           if (cliProvider.isAvailable()) return cliProvider;
         }
+        if (config.apiKey) return new GeminiProvider(config);
         return null;
+
       case "copilot":
         return new CopilotProvider(config);
-      case "cline":
-        return new ClineProvider(config);
-      case "claude":
-        // TODO: Implement Claude Code CLI provider
-        return null;
       case "codex":
-        // TODO: Implement Codex CLI provider
-        return null;
+        return new CodexProvider(config);
       case "openrouter":
         return new OpenRouterProvider(config);
+      case "cline":
+        return new ClineProvider(config);
       case "groq":
         return new GroqProvider(config);
       case "xai":
@@ -877,50 +971,189 @@ class ProviderRegistry {
       case "azure":
         return new AzureProvider(config);
       case "bedrock":
+        // Bedrock uses AWS SDK default credentials, not API key
         return new OpenAIProvider(config, "bedrock", config.baseUrl);
       case "vertexai":
-        // Requires explicit API key — never auto-enable from GCP environment variables
-        if (config.disabled || !config.apiKey) return null;
         return new GeminiProvider({ ...config, name: "vertexai" });
       case "local":
         if (config.baseUrl) {
           return new OpenAIProvider(config, "local", config.baseUrl);
         }
         return null;
+      // Popular alternatives
+      case "deepseek":
+        return new OpenAIProvider(config, "deepseek", "https://api.deepseek.com/v1");
+      case "togetherai":
+        return new OpenAIProvider(config, "togetherai", "https://api.together.ai/v1");
+      case "cerebras":
+        return new OpenAIProvider(config, "cerebras", "https://api.cerebras.ai/v1");
+      case "fireworks":
+        return new OpenAIProvider(config, "fireworks", "https://api.fireworks.ai/inference/v1");
+      case "huggingface":
+        return new OpenAIProvider(config, "huggingface", "https://api-inference.huggingface.co/v1");
+      case "deepinfra":
+        return new OpenAIProvider(config, "deepinfra", "https://api.deepinfra.com/v1");
+      case "minimax":
+        return new OpenAIProvider(config, "minimax", "https://api.minimax.chat/v1");
+      case "moonshot":
+        return new OpenAIProvider(config, "moonshot", "https://api.moonshot.ai/v1");
       case "ollama":
-        if (config.baseUrl) {
-          return new OpenAIProvider(config, "ollama", config.baseUrl);
-        }
-        return null;
-      case "opencodezen":
-        if (config.apiKey) {
-          return new OpenAIProvider(
-            config,
-            "opencodezen" as ProviderName,
-            config.baseUrl ?? "https://opencode.ai/zen/v1",
-          );
-        }
-        return null;
-      case "llamacpp":
-        if (config.baseUrl) {
-          return new OpenAIProvider(config, "llamacpp", config.baseUrl);
-        }
-        return new OpenAIProvider(config, "llamacpp", LLAMACPP_DEFAULT);
+        return new OpenAIProvider(config, "ollama", process.env.OLLAMA_BASE_URL || "http://localhost:11434/v1");
+      case "ollamacloud":
+        return new OpenAIProvider(config, "ollamacloud", "https://ollama.com/api");
       case "lmstudio":
-        if (config.baseUrl) {
-          return new OpenAIProvider(config, "lmstudio", config.baseUrl);
-        }
-        return new OpenAIProvider(config, "lmstudio", LMSTUDIO_DEFAULT);
-      default: {
-        const defaultBase = OPENCODE_DEFAULT_BASE_URL[name];
-        if (defaultBase && config.apiKey) {
-          return new OpenAIProvider(config, name, config.baseUrl ?? defaultBase);
-        }
-        if (name === "sapai" && config.apiKey && config.baseUrl) {
-          return new OpenAIProvider(config, "sapai", config.baseUrl);
-        }
+        return new OpenAIProvider(config, "lmstudio", "http://localhost:1234/v1");
+      case "llamacpp":
+        return new OpenAIProvider(config, "llamacpp", "http://localhost:8080/v1");
+      // AI Gateways
+      case "cloudflare":
+        return new OpenAIProvider(config, "cloudflare", "https://api.cloudflare.com/client/v4/accounts");
+      case "cloudflareworkers":
+        return new OpenAIProvider(config, "cloudflareworkers", "https://api.cloudflare.com/client/v4/accounts");
+      case "vercel":
+        return new OpenAIProvider(config, "vercel", "https://api.vercel.com");
+      case "baseten":
+        return new OpenAIProvider(config, "baseten", "https://api.baseten.co/v1");
+      case "helicone":
+        return new OpenAIProvider(config, "helicone", "https://api.helicone.ai/v1");
+      case "portkey":
+        return new OpenAIProvider(config, "portkey", "https://api.portkey.ai/v1");
+      // High Performance
+      case "hyperbolic":
+        return new OpenAIProvider(config, "hyperbolic", "https://api.hyperbolic.xyz/v1");
+      case "ionet":
+        return new OpenAIProvider(config, "ionet", "https://api.intelligence.io.solutions/api/v1");
+      // Chinese AI
+      case "nebius":
+        return new OpenAIProvider(config, "nebius", "https://api.nebius.ai/v1");
+      case "zai":
+        return new OpenAIProvider(config, "zai", "https://api.z.ai/v1");
+      case "cortecs":
+        return new OpenAIProvider(config, "cortecs", "https://api.cortecs.ai/v1");
+      case "stepfun":
+        return new OpenAIProvider(config, "stepfun", "https://api.stepfun.com/v1");
+      case "qwen":
+        return new OpenAIProvider(config, "qwen", "https://dashscope.aliyuncs.com/compatible-mode/v1");
+      case "alibaba":
+        return new OpenAIProvider(config, "alibaba", "https://dashscope.aliyuncs.com/compatible-mode/v1");
+      case "zhipuai":
+        return new OpenAIProvider(config, "zhipuai", "https://open.bigmodel.cn/api/paas/v4");
+      case "modelscope":
+        return new OpenAIProvider(config, "modelscope", "https://api.modelscope.cn/v1");
+      // Open Source
+      case "replicate":
+        return new OpenAIProvider(config, "replicate", "https://api.replicate.com/v1");
+      case "modal":
+        return new OpenAIProvider(config, "modal", "https://api.modal.com/v1");
+      case "scaleway":
+        return new OpenAIProvider(config, "scaleway", "https://api.scaleway.com/llm/v1");
+      case "venice":
+        return new OpenAIProvider(config, "venice", "https://api.venice.ai/v1");
+      case "zenmux":
+        return new OpenAIProvider(config, "zenmux", "https://zenmux.ai/api/anthropic/v1");
+      case "firmware":
+        return new OpenAIProvider(config, "firmware", "https://api.firmware.ai/v1");
+      // Enterprise
+      case "azurecognitive":
+        return new OpenAIProvider(config, "azurecognitive", "https://cognitiveservices.azure.com");
+      case "sapai":
+        return new OpenAIProvider(config, "sapai", "https://api.ai.sap.com/v1");
+      case "stackit":
+        return new OpenAIProvider(config, "stackit", "https://LLM.eu1.hana.ondemand.com/v1");
+      case "ovhcloud":
+        return new OpenAIProvider(config, "ovhcloud", "https://deploy.ai.ovh.net/v1");
+      // Developer Platforms
+      case "gitlab":
+        return new OpenAIProvider(config, "gitlab", "https://gitlab.com/api/llm");
+      case "antigravity":
+        return null; // Google internal
+      case "chromeai":
+        return null; // Chrome built-in
+      // Specialized
+      case "mistralai":
+        return new OpenAIProvider(config, "mistralai", "https://api.mistral.ai/v1");
+      case "cohere":
+        return new OpenAIProvider(config, "cohere", "https://api.cohere.ai/v1");
+      case "perplexity":
+        return new OpenAIProvider(config, "perplexity", "https://api.perplexity.ai/v1");
+      case "luma":
+        return new OpenAIProvider(config, "luma", "https://api.luma.ai/v1");
+      case "fal":
+        return new OpenAIProvider(config, "fal", "https://queue.fal.run");
+      // Audio/Speech
+      case "elevenlabs":
+        return new OpenAIProvider(config, "elevenlabs", "https://api.elevenlabs.io/v1");
+      case "deepgram":
+        return new OpenAIProvider(config, "deepgram", "https://api.deepgram.com/v1");
+      case "gladia":
+        return new OpenAIProvider(config, "gladia", "https://api.gladia.io/v1");
+      case "assemblyai":
+        return new OpenAIProvider(config, "assemblyai", "https://api.assemblyai.com/v1");
+      case "lmnt":
+        return new OpenAIProvider(config, "lmnt", "https://api.lmnt.com/v1");
+      // Other
+      case "nvidia":
+        return new OpenAIProvider(config, "nvidia", "https://integrate.api.nvidia.com/v1");
+      case "nim":
+        return new OpenAIProvider(config, "nim", "https://api.nimbleway.io/v1");
+      case "friendliai":
+        return new OpenAIProvider(config, "friendliai", "https://api.friendli.ai/v1");
+      case "friendli":
+        return new OpenAIProvider(config, "friendli", "https://api.friendli.ai/serverless/v1");
+      case "voyageai":
+        return new OpenAIProvider(config, "voyageai", "https://api.voyageai.com/v1");
+      case "mixedbread":
+        return new OpenAIProvider(config, "mixedbread", "https://api.mixedbread.ai/v1");
+      case "mem0":
+        return new OpenAIProvider(config, "mem0", "https://api.mem0.ai/v1");
+      case "letta":
+        return new OpenAIProvider(config, "letta", "https://api.letta.com/v1");
+      case "blackforestlabs":
+        return new OpenAIProvider(config, "blackforestlabs", "https://api.blackforestlabs.ai/v1");
+      case "klingai":
+        return new OpenAIProvider(config, "klingai", "https://api.klingai.com/v1");
+      case "prodia":
+        return new OpenAIProvider(config, "prodia", "https://api.prodia.com/v1");
+      case "302ai":
+        return new OpenAIProvider(config, "302ai", "https://api.302.ai/v1");
+      case "opencodezen":
+        return new OpenAIProvider(config, "opencodezen", "https://opencode.ai/zen/v1");
+      // Additional from models.dev
+      case "novita-ai":
+        return new OpenAIProvider(config, "novita-ai", "https://api.novita.ai/v3/openai");
+      case "upstage":
+        return new OpenAIProvider(config, "upstage", "https://api.upstage.ai/v1/solar");
+      case "v0":
+        return new OpenAIProvider(config, "v0", "https://api.v0.dev/v1");
+      case "siliconflow":
+        return new OpenAIProvider(config, "siliconflow", "https://api.siliconflow.com/v1");
+      case "abacus":
+        return new OpenAIProvider(config, "abacus", "https://routellm.abacus.ai/v1");
+      case "llama":
+        return new OpenAIProvider(config, "llama", "https://api.llama.com/compat/v1");
+      case "vultr":
+        return new OpenAIProvider(config, "vultr", "https://api.vultrinference.com/v1");
+      case "wandb":
+        return new OpenAIProvider(config, "wandb", "https://api.inference.wandb.ai/v1");
+      case "poe":
+        return new OpenAIProvider(config, "poe", "https://api.poe.com/v1");
+      // Additional from models.dev
+      case "github-models":
+        return new OpenAIProvider(config, "github-models", "https://models.github.ai/inference");
+      case "requesty":
+        return new OpenAIProvider(config, "requesty", "https://router.requesty.ai/v1");
+      case "inference":
+        return new OpenAIProvider(config, "inference", "https://inference.net/v1");
+      case "submodel":
+        return new OpenAIProvider(config, "submodel", "https://llm.submodel.ai/v1");
+      case "synthetic":
+        return new OpenAIProvider(config, "synthetic", "https://api.synthetic.new/v1");
+      case "moark":
+        return new OpenAIProvider(config, "moark", "https://moark.com/v1");
+      case "nova":
+        return new OpenAIProvider(config, "nova", "https://api.nova.amazon.com/v1");
+      default:
         return null;
-      }
     }
   }
 
@@ -928,9 +1161,7 @@ class ProviderRegistry {
     const envVars = ENV_API_KEY_MAP[name] ?? [];
     for (const envVar of envVars) {
       const val = process.env[envVar];
-      if (!val) continue;
-      if (val.startsWith("env:")) return null;
-      return decryptApiKey(val);
+      if (val) return decryptApiKey(val);
     }
     return null;
   }
@@ -939,50 +1170,9 @@ class ProviderRegistry {
     const envVars = ENV_AUTH_TOKEN_MAP[name] ?? [];
     for (const envVar of envVars) {
       const val = process.env[envVar];
-      if (!val) continue;
-      if (val.startsWith("env:")) return null;
-      return decryptApiKey(val);
+      if (val) return decryptApiKey(val);
     }
     return null;
-  }
-
-  /** Resolve envelope-encrypted credentials after encryption is initialized. */
-  async initializeEncryptedCredentials(): Promise<void> {
-    if (!isUsingSecureEncryption()) return;
-    for (const name of Object.keys(PROVIDER_AUTH_MODE) as ProviderName[]) {
-      const config = this.providerConfigs.get(name);
-      if (!config) continue;
-      let apiKey = config.apiKey;
-      let authToken = config.authToken;
-      for (const envVar of ENV_API_KEY_MAP[name] ?? []) {
-        const val = process.env[envVar];
-        if (val?.startsWith("env:")) {
-          try {
-            apiKey = await secureDecrypt(val);
-            break;
-          } catch {
-            providerLog.warn({ provider: name, envVar }, "Failed to decrypt stored API key");
-          }
-        }
-      }
-      for (const envVar of ENV_AUTH_TOKEN_MAP[name] ?? []) {
-        const val = process.env[envVar];
-        if (val?.startsWith("env:")) {
-          try {
-            authToken = await secureDecrypt(val);
-            break;
-          } catch {
-            providerLog.warn({ provider: name, envVar }, "Failed to decrypt stored auth token");
-          }
-        }
-      }
-      if (apiKey !== config.apiKey || authToken !== config.authToken) {
-        const updated = { ...config, apiKey, authToken };
-        this.providerConfigs.set(name, updated);
-        const provider = this.createProvider(name, updated);
-        if (provider) this.providers.set(name, provider);
-      }
-    }
   }
 
   private detectEnvUrl(name: ProviderName): string | null {
@@ -995,12 +1185,47 @@ class ProviderRegistry {
     return !!(
       (process.env.AWS_ACCESS_KEY_ID && process.env.AWS_SECRET_ACCESS_KEY)
       || process.env.AWS_PROFILE
+      || process.env.AWS_DEFAULT_PROFILE
+      || process.env.AWS_CONTAINER_CREDENTIALS_RELATIVE_URI
+      || process.env.AWS_CONTAINER_CREDENTIALS_FULL_URI
+    );
+  }
+
+  private hasVertexEnvironment(): boolean {
+    return !!(
+      (process.env.VERTEXAI_PROJECT && process.env.VERTEXAI_LOCATION)
+      || (process.env.GOOGLE_CLOUD_PROJECT && (process.env.GOOGLE_CLOUD_REGION || process.env.GOOGLE_CLOUD_LOCATION))
+      || process.env.GOOGLE_APPLICATION_CREDENTIALS
     );
   }
 
   private verifyBedrockEnvironment(): { success: boolean; error?: string } {
     if (this.hasBedrockEnvironment()) return { success: true };
-    return { success: false, error: "AWS credentials not detected" };
+    return {
+      success: false,
+      error: "AWS credentials not detected (set AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY or AWS_PROFILE).",
+    };
+  }
+
+  private verifyVertexEnvironment(): { success: boolean; error?: string } {
+    if (this.hasVertexEnvironment()) return { success: true };
+    return {
+      success: false,
+      error: "Vertex AI credentials not detected (set VERTEXAI_PROJECT + VERTEXAI_LOCATION or GOOGLE_APPLICATION_CREDENTIALS).",
+    };
+  }
+
+  private verifyAzureCognitiveEnvironment(): { success: boolean; error?: string } {
+    // Azure Cognitive Services requires API key and endpoint
+    const apiKey = process.env.AZURE_COGNITIVE_API_KEY;
+    const endpoint = process.env.AZURE_COGNITIVE_ENDPOINT;
+    if (!apiKey || !endpoint) {
+      return {
+        success: false,
+        error: "Azure Cognitive Services requires AZURE_COGNITIVE_API_KEY and AZURE_COGNITIVE_ENDPOINT environment variables.",
+      };
+    }
+    return { success: true };
   }
 
   private logProviderStatus() {
@@ -1009,129 +1234,86 @@ class ProviderRegistry {
     providerLog.info({ providers: names }, "Providers ready");
 
     if (names.length === 0) {
-      providerLog.warn("No providers configured - set API keys in .env");
+      providerLog.warn("No providers configured");
     }
   }
 
   private async verifyBearerGet(url: string, token?: string | null): Promise<{ success: boolean; error?: string }> {
     if (!token) return { success: false, error: "Missing token" };
-    return this.verifyHttp(url, { headers: { Authorization: `Bearer ${token}` } });
+    return this.verifyHttp(url, {
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    });
+  }
+
+  private async verifyHttp(
+    url: string,
+    init?: RequestInit,
+  ): Promise<{ success: boolean; error?: string }> {
+    try {
+      const headers = new Headers(init?.headers ?? {});
+      if (!headers.has("User-Agent")) {
+        headers.set("User-Agent", "Koryphaios/1.0");
+      }
+
+      const response = await fetch(url, {
+        method: "GET",
+        ...init,
+        headers,
+      });
+      if (response.ok) return { success: true };
+      const body = await response.text();
+      return { success: false, error: `HTTP ${response.status}: ${body.slice(0, 300)}` };
+    } catch {
+      // Some environments block Bun fetch egress while curl is allowed.
+      return this.verifyHttpWithCurl(url, init);
+    }
   }
 
   /** Identify if an error is a quota/rate limit error that should trigger a reroute. */
   isQuotaError(error: any): boolean {
     const msg = String(error?.message || error || "").toLowerCase();
-    const isQuota =
-      msg.includes("quota") ||
-      msg.includes("rate limit") ||
-      msg.includes("429") ||
+    const isQuota = 
+      msg.includes("quota") || 
+      msg.includes("rate limit") || 
+      msg.includes("429") || 
       msg.includes("insufficient_quota") ||
       msg.includes("credit balance");
     return isQuota;
   }
 
-  /**
-   * Dry-run connectivity test for a provider. Sends minimal-cost request (e.g. model list).
-   * Returns 200 OK or specific "Out of Credits" vs timeout/refused. Never logs raw API keys.
-   */
-  async testConnection(name: ProviderName): Promise<{
-    ok: boolean;
-    status?: number;
-    error?: string;
-    outOfCredits?: boolean;
-  }> {
-    const result = await this.verifyConnection(name);
-    if (result.success) return { ok: true, status: 200 };
-    const err = (result.error ?? "").toLowerCase();
-    const outOfCredits =
-      err.includes("quota") ||
-      err.includes("credit") ||
-      err.includes("insufficient") ||
-      err.includes("out of credits");
-    return { ok: false, error: result.error, outOfCredits };
-  }
-
-  /** Persist invalid key state (401). No-op if DB not initialized. */
-  private markKeyInvalid(name: ProviderName, lastError: string): void {
-    try {
-      const { getDb } = require("../db/sqlite");
-      getDb()
-        .prepare(
-          "INSERT OR REPLACE INTO provider_key_invalid (provider, invalid_since, last_error) VALUES (?, ?, ?)"
-        )
-        .run(name, Date.now(), lastError);
-      const config = this.providerConfigs.get(name);
-      providerLog.warn(
-        { provider: name, keyMask: maskApiKey(config?.apiKey ?? config?.authToken) },
-        "API key marked invalid (401); update key in settings"
-      );
-    } catch {
-      // DB not initialized (e.g. tests)
-    }
-  }
-
-  /** Clear invalid key state (e.g. after user updates key). */
-  clearKeyInvalid(name: ProviderName): void {
-    try {
-      const { getDb } = require("../db/sqlite");
-      getDb().run("DELETE FROM provider_key_invalid WHERE provider = ?", name);
-    } catch {
-      // DB not initialized
-    }
-  }
-
-  /** Check if provider was previously marked invalid. */
-  private isKeyMarkedInvalid(name: ProviderName): boolean {
-    try {
-      const db = getDb();
-      const row = db
-        .query("SELECT provider FROM provider_key_invalid WHERE provider = ?")
-        .get(name) as { provider: string } | null;
-      return !!row;
-    } catch {
-      return false;
-    }
-  }
-
-  /** Like verifyHttp but returns status for 401/404 handling. */
-  private async verifyHttpWithStatus(
+  private verifyHttpWithCurl(
     url: string,
-    init?: RequestInit
-  ): Promise<{ success: boolean; status?: number; error?: string }> {
-    const timeoutMs = 5_000;
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), timeoutMs);
-    try {
-      const headers = new Headers(init?.headers ?? {});
-      if (!headers.has("User-Agent")) headers.set("User-Agent", "Koryphaios/1.0");
-      const response = await fetch(url, {
-        method: "GET",
-        ...init,
-        headers,
-        signal: controller.signal,
-      });
-      if (response.ok) return { success: true, status: response.status };
-      const body = await response.text();
-      return {
-        success: false,
-        status: response.status,
-        error: `HTTP ${response.status}: ${body.slice(0, 300)}`,
-      };
-    } catch (err: any) {
-      const msg = err?.message ?? String(err);
-      if (msg.includes("abort") || msg.includes("timeout")) {
-        return { success: false, error: "Request timeout (5s)" };
-      }
-      return { success: false, error: msg };
-    } finally {
-      clearTimeout(timer);
+    init?: RequestInit,
+  ): { success: boolean; error?: string } {
+    const method = init?.method ?? "GET";
+    const headers = new Headers(init?.headers ?? {});
+    if (!headers.has("User-Agent")) {
+      headers.set("User-Agent", "Koryphaios/1.0");
     }
-  }
 
-  private async verifyHttp(url: string, init?: RequestInit): Promise<{ success: boolean; error?: string }> {
-    const res = await this.verifyHttpWithStatus(url, init);
-    return { success: res.success, error: res.error };
+    const args = ["-sS", "-X", method, "-o", "-", "-w", "\n%{http_code}", url];
+    for (const [k, v] of headers.entries()) {
+      args.push("-H", `${k}: ${v}`);
+    }
+
+    const proc = Bun.spawnSync(["curl", ...args], {
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+
+    if (proc.exitCode !== 0) {
+      const stderr = proc.stderr ? new TextDecoder().decode(proc.stderr).trim() : "";
+      return { success: false, error: `curl failed: ${stderr || `exit ${proc.exitCode}`}` };
+    }
+
+    const output = proc.stdout ? new TextDecoder().decode(proc.stdout) : "";
+    const splitAt = output.lastIndexOf("\n");
+    const body = splitAt >= 0 ? output.slice(0, splitAt) : "";
+    const statusRaw = splitAt >= 0 ? output.slice(splitAt + 1).trim() : "";
+    const status = Number(statusRaw);
+    if (status >= 200 && status < 300) return { success: true };
+    return { success: false, error: `HTTP ${status || "unknown"}: ${body.slice(0, 300)}` };
   }
 }
-
-export { ProviderRegistry };

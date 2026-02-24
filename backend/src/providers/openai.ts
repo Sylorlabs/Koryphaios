@@ -3,7 +3,7 @@
 
 import OpenAI from "openai";
 import type { ProviderConfig, ProviderName, ModelDef } from "@koryphaios/shared";
-
+import { detectCodexToken } from "./auth-utils";
 
 import {
   type Provider,
@@ -15,7 +15,6 @@ import {
   createGenericModel,
 } from "./types";
 import { withRetry } from "./utils";
-import { createUsageInterceptingFetch } from "../credit-accountant";
 
 export class OpenAIProvider implements Provider {
   protected _client: OpenAI | null = null;
@@ -23,8 +22,8 @@ export class OpenAIProvider implements Provider {
   constructor(
     readonly config: ProviderConfig,
     readonly name: ProviderName = "openai",
-    private readonly baseUrl?: string,
-  ) { }
+    private baseUrl?: string,
+  ) {}
 
   protected get client(): OpenAI {
     if (!this._client) {
@@ -33,12 +32,9 @@ export class OpenAIProvider implements Provider {
         apiKey: apiKey || "placeholder",
         baseURL: this.baseUrl ?? this.config.baseUrl,
         defaultHeaders: this.config.headers,
-        fetch: createUsageInterceptingFetch(globalThis.fetch),
       });
     }
     return this._client;
-
-
   }
 
   isAvailable(): boolean {
@@ -47,54 +43,45 @@ export class OpenAIProvider implements Provider {
 
   private cachedModels: ModelDef[] | null = null;
   private lastFetch = 0;
-  private fetchInProgress = false;
 
-  listModels(): ModelDef[] {
+  async listModels(): Promise<ModelDef[]> {
     const localModels = getModelsForProvider(this.name);
-
+    
     if (!this.isAvailable()) {
       return localModels;
     }
 
-    // Return cached if fresh
     if (this.cachedModels && Date.now() - this.lastFetch < 5 * 60 * 1000) {
       return this.cachedModels;
     }
 
-    // Trigger background refresh, return what we have now
-    this.refreshModelsInBackground(localModels);
-    return this.cachedModels ?? localModels;
-  }
-
-  private refreshModelsInBackground(localModels: ModelDef[]) {
-    if (this.fetchInProgress) return;
-    this.fetchInProgress = true;
-
-    withRetry(() => this.client.models.list())
-      .then(async (response) => {
-        const remoteModels: ModelDef[] = [];
-        for await (const model of response) {
-          const id = model.id;
-          const existing = localModels.find(m => m.apiModelId === id || m.id === id);
-          if (existing) continue;
-
-          const lowerId = id.toLowerCase();
-          if (lowerId.includes("gpt") || lowerId.includes("o1") || lowerId.includes("o3") || lowerId.includes("o4")) {
-            remoteModels.push(createGenericModel(id, this.name));
-          }
+    try {
+      const response = await withRetry(() => this.client.models.list());
+      
+      const remoteModels: ModelDef[] = [];
+      for await (const model of response) {
+        const id = model.id;
+        const existing = localModels.find(m => m.apiModelId === id || m.id === id);
+        if (existing) continue;
+        
+        // OpenAI proper has many non-chat IDs; Cline/OpenAI-compatible endpoints should expose full model lists.
+        const lowerId = id.toLowerCase();
+        const includeModel = this.name !== "openai"
+          || lowerId.includes("gpt")
+          || lowerId.includes("o1")
+          || lowerId.includes("o3")
+          || lowerId.includes("o4");
+        if (includeModel) {
+          remoteModels.push(createGenericModel(id, this.name));
         }
-
-        this.cachedModels = [...localModels, ...remoteModels];
-        this.lastFetch = Date.now();
-      })
-      .catch(() => {
-        // Keep local models on failure
-        this.cachedModels ??= localModels;
-
-      })
-      .finally(() => {
-        this.fetchInProgress = false;
-      });
+      }
+      
+      this.cachedModels = [...localModels, ...remoteModels];
+      this.lastFetch = Date.now();
+      return this.cachedModels;
+    } catch (err) {
+      return localModels;
+    }
   }
 
   async *streamResponse(request: StreamRequest): AsyncGenerator<ProviderEvent> {
@@ -193,37 +180,26 @@ export class OpenAIProvider implements Provider {
 
         // Completion
         if (choice.finish_reason) {
-          yield* this.flushToolCalls(toolCallBuffers);
+          // Emit all tool call completions
+          for (const [, buf] of toolCallBuffers) {
+            yield {
+              type: "tool_use_stop",
+              toolCallId: buf.id,
+              toolName: buf.name,
+              toolInput: buf.args,
+            };
+          }
+          toolCallBuffers.clear();
+
           yield {
             type: "complete",
-            finishReason: this.mapFinishReason(choice.finish_reason),
+            finishReason: choice.finish_reason === "tool_calls" ? "tool_use" : "end_turn",
           };
         }
       }
     } catch (err: any) {
-      if (err.name === "AbortError" || err.name === "AbortSignal") return;
+      if (err.name === "AbortError") return;
       yield { type: "error", error: err.message ?? String(err) };
-    }
-  }
-
-  private *flushToolCalls(toolCallBuffers: Map<number, { id: string; name: string; args: string }>) {
-    for (const [, buf] of toolCallBuffers) {
-      yield {
-        type: "tool_use_stop",
-        toolCallId: buf.id,
-        toolName: buf.name,
-        toolInput: buf.args,
-      } as ProviderEvent;
-    }
-    toolCallBuffers.clear();
-  }
-
-  private mapFinishReason(reason: string): ProviderEvent["finishReason"] {
-    switch (reason) {
-      case "stop": return "stop";
-      case "length": return "max_tokens";
-      case "tool_calls": return "tool_use";
-      default: return "end_turn";
     }
   }
 
@@ -238,81 +214,54 @@ export class OpenAIProvider implements Provider {
       if (msg.role === "system") continue;
 
       if (typeof msg.content === "string") {
-        if (msg.role === "tool") {
-          result.push({
-            role: "tool",
-            tool_call_id: msg.tool_call_id ?? "",
-            content: msg.content,
-          });
-        } else if (msg.role === "assistant" && msg.tool_calls?.length) {
-          result.push({
-            role: "assistant",
-            content: msg.content || null,
-            tool_calls: msg.tool_calls.map((tc) => ({
-              id: tc.id,
-              type: "function" as const,
-              function: { name: tc.name, arguments: JSON.stringify(tc.input ?? {}) },
-            })),
-          });
-        } else {
-          result.push({ role: msg.role as any, content: msg.content });
-        }
+        result.push({ role: msg.role as any, content: msg.content });
         continue;
       }
 
-
       const blocks = msg.content as ProviderContentBlock[];
       if (msg.role === "assistant") {
-        result.push(this.mapAssistantMessage(blocks));
+        const text = blocks.filter((b) => b.type === "text").map((b) => b.text).join("");
+        const toolCalls = blocks
+          .filter((b) => b.type === "tool_use")
+          .map((b) => ({
+            id: b.toolCallId ?? "",
+            type: "function" as const,
+            function: { name: b.toolName ?? "", arguments: JSON.stringify(b.toolInput ?? {}) },
+          }));
+
+        result.push({
+          role: "assistant",
+          content: text || null,
+          ...(toolCalls.length && { tool_calls: toolCalls }),
+        });
       } else if (msg.role === "user") {
-        this.mapUserMessage(blocks, result);
+        // Check for tool results
+        const toolResults = blocks.filter((b) => b.type === "tool_result");
+        if (toolResults.length) {
+          for (const tr of toolResults) {
+            result.push({
+              role: "tool",
+              tool_call_id: tr.toolCallId ?? "",
+              content: tr.toolOutput ?? "",
+            });
+          }
+        } else {
+          const content: OpenAI.ChatCompletionContentPart[] = blocks.map((b) => {
+            if (b.type === "image") {
+              return {
+                type: "image_url",
+                image_url: { url: `data:${b.imageMimeType};base64,${b.imageData}` },
+              };
+            }
+            return { type: "text", text: b.text ?? "" };
+          });
+          result.push({ role: "user", content });
+        }
       }
     }
 
     return result;
   }
-
-  private mapAssistantMessage(blocks: ProviderContentBlock[]): OpenAI.ChatCompletionAssistantMessageParam {
-    const text = blocks.filter((b) => b.type === "text").map((b) => b.text).join("");
-    const toolCalls = blocks
-      .filter((b) => b.type === "tool_use")
-      .map((b) => ({
-        id: b.toolCallId ?? "",
-        type: "function" as const,
-        function: { name: b.toolName ?? "", arguments: JSON.stringify(b.toolInput ?? {}) },
-      }));
-
-    return {
-      role: "assistant",
-      content: text || null,
-      ...(toolCalls.length && { tool_calls: toolCalls }),
-    };
-  }
-
-  private mapUserMessage(blocks: ProviderContentBlock[], result: OpenAI.ChatCompletionMessageParam[]) {
-    const toolResults = blocks.filter((b) => b.type === "tool_result");
-    if (toolResults.length) {
-      for (const tr of toolResults) {
-        result.push({
-          role: "tool",
-          tool_call_id: tr.toolCallId ?? "",
-          content: tr.toolOutput ?? "",
-        });
-      }
-    } else {
-      const content: OpenAI.ChatCompletionContentPart[] = blocks.map((b) => {
-        if (b.type === "image") {
-          return {
-            type: "image_url",
-            image_url: { url: `data:${b.imageMimeType};base64,${b.imageData}` },
-          };
-        }
-        return { type: "text", text: b.text ?? "" };
-      });
-      result.push({ role: "user", content });
-    }
-  }
-
 }
 
 // ─── OpenAI-Compatible Provider Factories ───────────────────────────────────
