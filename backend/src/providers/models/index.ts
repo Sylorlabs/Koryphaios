@@ -12,6 +12,7 @@ import { BedrockModels } from "./bedrock";
 import { LocalModels } from "./local";
 import { OllamaModels } from "./ollama";
 import { OpenCodeZenModels } from "./opencodezen";
+import { ClineModels } from "./cline";
 
 // Combined list of all known models from REAL providers only
 const ALL_MODELS: ModelDef[] = [
@@ -28,6 +29,7 @@ const ALL_MODELS: ModelDef[] = [
   ...LocalModels,
   ...OllamaModels,
   ...OpenCodeZenModels,
+  ...ClineModels,
 ];
 
 // Map for fast lookup by ID

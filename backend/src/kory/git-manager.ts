@@ -16,7 +16,7 @@ export interface GitFileStatus {
 export class GitManager {
   constructor(private workingDirectory: string) {}
 
-  private runGit(args: string[]): { success: boolean; output: string } {
+  protected runGit(args: string[]): { success: boolean; output: string } {
     const proc = spawnSync(["git", ...args], {
       cwd: this.workingDirectory,
       stdout: "pipe",
@@ -223,5 +223,11 @@ export class GitManager {
   getCurrentHash(): string | null {
     const result = this.runGit(["rev-parse", "HEAD"]);
     return result.success ? result.output.trim() : null;
+  }
+
+  /** Check if there are uncommitted changes */
+  async hasChanges(): Promise<boolean> {
+    const status = await this.getStatus();
+    return status.length > 0;
   }
 }

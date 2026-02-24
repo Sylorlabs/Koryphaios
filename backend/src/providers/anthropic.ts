@@ -14,6 +14,7 @@ import {
 } from "./types";
 import { withRetry } from "./utils";
 import { detectClaudeCodeToken } from "./auth-utils";
+import { createUsageInterceptingFetch } from "../credit-accountant";
 
 export class AnthropicProvider implements Provider {
   readonly name: "anthropic";
@@ -34,6 +35,7 @@ export class AnthropicProvider implements Provider {
         apiKey: this.config.apiKey,
         authToken: this.effectiveAuthToken,
         ...(this.config.baseUrl && { baseURL: this.config.baseUrl }),
+        fetch: createUsageInterceptingFetch(globalThis.fetch),
       });
     }
     return this._client;
@@ -251,6 +253,14 @@ export class AnthropicProvider implements Provider {
               role: "user",
               content: [{ type: "tool_result", tool_use_id: m.tool_call_id ?? "", content: m.content, is_error: false }],
             } as Anthropic.MessageParam;
+          }
+          if (m.role === "assistant" && m.tool_calls?.length) {
+            const blocks: Anthropic.ContentBlockParam[] = [];
+            if (m.content) blocks.push({ type: "text", text: m.content });
+            for (const tc of m.tool_calls) {
+              blocks.push({ type: "tool_use", id: tc.id, name: tc.name, input: tc.input ?? {} });
+            }
+            return { role: "assistant", content: blocks } as Anthropic.MessageParam;
           }
           return { role: m.role as "user" | "assistant", content: m.content };
         }

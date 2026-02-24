@@ -16,6 +16,8 @@ Koryphaios is a full-stack application that orchestrates AI agents across multip
 
 - **Multi-Provider Support** — 6 native provider integrations (Anthropic, OpenAI, Gemini, Copilot, Codex, GeminiCLI) plus 80+ models via OpenAI-compatible adapters (Groq, xAI, Ollama, and more)
 - **Intelligent Agent Routing** — Automatic model selection based on task domain and provider availability
+- **Time Travel (Undo/Redo)** — Shadow Logger creates ghost commits for every AI change, allowing instant recovery to any previous state
+- **Parallel Agent Isolation** — Git worktrees enable concurrent agents without file clobbering
 - **Real-Time Communication** — WebSocket-based streaming with SSE fallback for live updates
 - **MCP Integration** — Model Context Protocol support for extensible tool systems
 - **Session Management** — Persistent conversation history with cost tracking and token accounting
@@ -31,6 +33,7 @@ Koryphaios is a full-stack application that orchestrates AI agents across multip
 │                        Frontend (SvelteKit)                      │
 │  • Real-time UI with WebSocket streaming                        │
 │  • Session management, cost tracking, agent monitoring          │
+│  • Time Travel UI (undo/redo via ghost commits)                 │
 └────────────────────┬────────────────────────────────────────────┘
                      │ WebSocket / REST API
 ┌────────────────────┴────────────────────────────────────────────┐
@@ -46,6 +49,13 @@ Koryphaios is a full-stack application that orchestrates AI agents across multip
 │  │  Registry   │  │  Registry   │  │   (External Tools)  │    │
 │  │  (API Auth) │  │  (Built-in) │  │                     │    │
 │  └─────────────┘  └─────────────┘  └─────────────────────┘    │
+│                                                                  │
+│  ┌─────────────────────┐  ┌────────────────────────────────┐  │
+│  │  Workspace Manager  │  │  Shadow Logger                 │  │
+│  │  (Git Worktrees)    │  │  (Ghost Commits / Time Travel) │  │
+│  │  • Parallel agent   │  │  • Undo/redo via reflog        │  │
+│  │    isolation        │  │  • Metadata via git notes      │  │
+│  └─────────────────────┘  └────────────────────────────────┘  │
 │                                                                  │
 │  ┌──────────────────────────────────────────────────────────┐  │
 │  │  Session Store (File-based persistence)                  │  │

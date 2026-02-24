@@ -39,6 +39,7 @@ import {
   httpMetricsMiddleware,
 } from "../../metrics";
 import type { RateLimitResult } from "../../ratelimit/types";
+import { getReconciliation } from "../../credit-accountant";
 
 // Services initialized lazily (after DB is ready in server main())
 let _apiKeyService: ReturnType<typeof createApiKeyService> | null = null;
@@ -917,6 +918,46 @@ export async function handleAudit(
   return null;
 }
 
+// ─── Billing / Credits Routes ───────────────────────────────────────────────
+
+export async function handleBilling(
+  req: Request,
+  path: string,
+  method: string,
+  requestId: string
+): Promise<Response | null> {
+  const basePath = "/api/v1/billing";
+  if (!path.startsWith(basePath)) return null;
+
+  const auth = await authenticate(req);
+  if (!auth.success) return auth.error!;
+
+  const extraHeaders = { "X-Request-Id": requestId };
+
+  // GET /api/v1/billing/credits — Local estimate vs cloud reality, drift
+  const pathNorm = path.replace(/\/+$/, '') || '/';
+  if (pathNorm === `${basePath}/credits` && method === "GET") {
+    try {
+      const data = getReconciliation();
+      return json(
+        {
+          localEstimate: data.localEstimate,
+          cloudReality: data.cloudReality,
+          driftPercent: data.driftPercent,
+          highlightDrift: data.highlightDrift,
+        },
+        200,
+        extraHeaders
+      );
+    } catch (err: any) {
+      serverLog.error({ err, requestId }, "Failed to get billing credits");
+      return json({ error: "Failed to get billing credits" }, 500, extraHeaders);
+    }
+  }
+
+  return null;
+}
+
 // ─── Main Router ────────────────────────────────────────────────────────────
 
 export async function handleV1Routes(
@@ -938,6 +979,7 @@ export async function handleV1Routes(
       handleCredentials,
       handleApiKeys,
       handleAudit,
+      handleBilling,
     ];
 
     for (const handler of handlers) {

@@ -246,7 +246,7 @@ export function validateSessionId(id: unknown): string | null {
 import type { ProviderName } from "@koryphaios/shared";
 
 const VALID_PROVIDERS = new Set<string>([
-  "anthropic", "openai", "google", "copilot", "openrouter",
+  "anthropic", "cline", "openai", "google", "copilot", "openrouter",
   "groq", "xai", "azure", "bedrock", "vertexai", "local", "ollama", "opencodezen",
   "302ai", "azurecognitive", "baseten", "cerebras", "cloudflare", "cortecs", "deepseek", "deepinfra",
   "firmware", "fireworks", "gitlab", "huggingface", "helicone", "llamacpp", "ionet", "lmstudio",

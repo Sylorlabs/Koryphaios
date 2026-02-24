@@ -25,6 +25,7 @@ import { join } from "node:path";
 import { googleAuth } from "./providers/google-auth";
 import { cliAuth } from "./providers/cli-auth";
 import { initDb } from "./db/sqlite";
+import { initCreditAccountant } from "./credit-accountant";
 
 import { PROJECT_ROOT, BACKEND_ROOT } from "./runtime/paths";
 import { loadConfig } from "./runtime/config";
@@ -36,6 +37,7 @@ import { WSManager, type WSClientData } from "./ws/ws-manager";
 import { requireAuth } from "./middleware";
 import { handleV1Routes } from "./routes/v1";
 import { getMetricsRegistry } from "./metrics";
+import { getReconciliation } from "./credit-accountant";
 import { createUser, getOrCreateLocalUser } from "./auth";
 
 // ─── Configuration Loading ──────────────────────────────────────────────────
@@ -61,6 +63,13 @@ async function main() {
 
   // Initialize SQLite Database (must complete before any request uses getDb())
   await initDb(join(PROJECT_ROOT, config.dataDirectory));
+
+  // Initialize CreditAccountant (sylorlabs.db + optional polling)
+  initCreditAccountant(join(PROJECT_ROOT, config.dataDirectory), {
+    openaiApiKey: process.env.OPENAI_API_KEY,
+    githubEnterpriseId: process.env.GITHUB_ENTERPRISE_ID,
+    githubToken: process.env.GITHUB_TOKEN,
+  });
 
   // Initialize envelope encryption (optional; legacy encryption used if this fails)
   try {
@@ -161,7 +170,7 @@ async function main() {
       while (true) {
         const { done, value } = await wsReader.read();
         if (done) break;
-        wsManager.broadcast(value.payload);
+        wsManager.broadcast(value.payload, { sessionId: value.payload.sessionId });
       }
     } catch (err) {
       serverLog.error({ err }, "WebSocket pub/sub reader error");
@@ -266,6 +275,26 @@ async function main() {
         if (url.pathname === "/api/auth/me" && method === "GET") {
           const user = await getOrCreateLocalUser();
           return json({ ok: true, data: { user } }, 200, corsHeaders);
+        }
+
+        // Billing / credits (local estimate vs cloud reality, drift) — same shape as v1
+        if (url.pathname === "/api/billing/credits" && method === "GET") {
+          try {
+            const data = getReconciliation();
+            return json(
+              {
+                localEstimate: data.localEstimate,
+                cloudReality: data.cloudReality,
+                driftPercent: data.driftPercent,
+                highlightDrift: data.highlightDrift,
+              },
+              200,
+              corsHeaders
+            );
+          } catch (err: any) {
+            serverLog.error({ err }, "Failed to get billing credits");
+            return json({ error: "Failed to get billing credits" }, 500, corsHeaders);
+          }
         }
 
         // Health check endpoint (minimal for public/lb)
