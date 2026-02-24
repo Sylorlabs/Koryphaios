@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Send, ChevronDown, Sparkles } from 'lucide-svelte';
+  import { Send, ChevronDown, Sparkles, Square } from 'lucide-svelte';
   import { wsStore } from '$lib/stores/websocket.svelte';
   import { shortcutStore } from '$lib/stores/shortcuts.svelte';
   import { getReasoningConfig, hasReasoningSupport } from '@koryphaios/shared';
@@ -7,10 +7,13 @@
 
   interface Props {
     onSend: (message: string, model?: string, reasoningLevel?: string) => void;
+    /** When true, show Stop instead of Send; clicking stops manager and workers for the session. */
+    isRunning?: boolean;
+    onStop?: () => void;
     inputRef?: HTMLTextAreaElement;
   }
 
-  let { onSend, inputRef = $bindable() }: Props = $props();
+  let { onSend, isRunning = false, onStop, inputRef = $bindable() }: Props = $props();
   let input = $state('');
   let showModelPicker = $state(false);
   let selectedModel = $state<string>('auto');
@@ -54,17 +57,7 @@
   let reasoningConfig = $derived(getReasoningConfig(currentProvider(), currentModel()));
   let reasoningSupported = $derived(hasReasoningSupport(currentProvider(), currentModel()));
 
-  // Update reasoning when model changes, but only if necessary
-  $effect(() => {
-    const config = getReasoningConfig(currentProvider(), currentModel());
-    if (config) {
-      // If current level isn't in new config options, reset to default
-      const exists = config.options.some(opt => opt.value === reasoningLevel);
-      if (!exists) {
-        reasoningLevel = config.defaultValue;
-      }
-    }
-  });
+  const hasNoProvider = $derived((wsStore.providers ?? []).filter((p) => p.authenticated).length === 0);
 
   let availableModels = $derived(() => {
     const models: Array<{ label: string; value: string; provider: string; isAuto?: boolean }> = [
@@ -87,22 +80,40 @@
     return `(${providerLabel(parsed.provider)}) ${parsed.model}`;
   });
 
+  // Cooldown to prevent duplicate sends (double Enter, key repeat, double-click)
+  const SEND_COOLDOWN_MS = 800;
+  let lastSendAt = $state(0);
+
   function handleKeydown(e: KeyboardEvent) {
+    if (e.repeat) return; // ignore key repeat (e.g. holding Enter)
+    if (isRunning && shortcutStore.matches('send', e)) {
+      e.preventDefault();
+      stop();
+      return;
+    }
     if (shortcutStore.matches('send', e)) {
       e.preventDefault();
       send();
     } else if (e.key === 'Enter' && !e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey) {
       e.preventDefault();
-      send();
+      if (isRunning) stop();
+      else send();
     }
   }
 
   function send() {
     const trimmed = input.trim();
     if (!trimmed) return;
+    const now = Date.now();
+    if (now - lastSendAt < SEND_COOLDOWN_MS) return; // debounce duplicate sends
+    lastSendAt = now;
     onSend(trimmed, selectedModel, reasoningLevel);
     input = '';
     if (inputRef) inputRef.style.height = 'auto';
+  }
+
+  function stop() {
+    onStop?.();
   }
 
   function autoResize() {
@@ -155,6 +166,14 @@
 <svelte:window onclick={handleClickOutside} />
 
 <div class="command-input px-4 py-3">
+  <!-- No provider: show error (Send still works; backend will return the same error) -->
+  {#if hasNoProvider}
+    <div class="mb-3 px-3 py-2.5 rounded-lg text-sm font-medium flex items-center gap-2" style="background: rgba(239, 68, 68, 0.12); border: 1px solid rgba(239, 68, 68, 0.35); color: var(--color-text-primary);">
+      <span class="text-red-400">Error:</span>
+      <span>No provider. No analyzing request. Add a provider in Settings.</span>
+    </div>
+  {/if}
+
   <!-- Controls row: Model picker + Reasoning toggle -->
   <div class="flex items-center gap-3 mb-3">
     <!-- Model selector -->
@@ -210,7 +229,7 @@
             style="background: var(--color-surface-2-alpha, rgba(30, 30, 35, 0.9)); border-color: var(--color-border);"
           >
             <div class="px-4 py-3 text-xs font-bold uppercase tracking-widest opacity-70" style="color: var(--color-text-muted); border-bottom: 1px solid var(--color-border); background: rgba(255,255,255,0.03);">
-              {selectedModel === 'auto' ? 'Auto' : `${modelDisplayName()} · Auto`}
+              {selectedModel === 'auto' ? 'Reasoning' : `${modelDisplayName()} · ${reasoningLabel(reasoningLevel)}`}
             </div>
             <div class="py-1">
               {#each reasoningConfig.options as opt}
@@ -252,13 +271,18 @@
       style="resize: none; min-height: 52px; max-height: 200px; font-size: 15px; padding: 14px 16px;"
     ></textarea>
     <button
-      onclick={send}
-      disabled={!input.trim()}
-      class="btn btn-primary self-end flex items-center justify-center gap-2"
-      style="min-width: 80px; height: 52px; padding: 0 20px; font-size: 14px; font-weight: 600;"
+      onclick={isRunning ? stop : send}
+      disabled={!isRunning && !input.trim()}
+      class="btn self-end flex items-center justify-center gap-2 {isRunning ? 'bg-red-500/90 hover:bg-red-500' : 'btn-primary'}"
+      style="min-width: 80px; height: 52px; padding: 0 20px; font-size: 14px; font-weight: 600; {isRunning ? 'border: none; color: white;' : ''}"
     >
-      <Send size={18} />
-      Send
+      {#if isRunning}
+        <Square size={18} fill="currentColor" />
+        Stop
+      {:else}
+        <Send size={18} />
+        Send
+      {/if}
     </button>
   </div>
 

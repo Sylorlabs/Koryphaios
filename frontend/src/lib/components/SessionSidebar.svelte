@@ -18,18 +18,21 @@
   let confirmDeleteId = $state<string>('');
   let showConfirmDialog = $state<boolean>(false);
   let sessionToDeleteId = $state<string>('');
+  // Track which session we last loaded feed for, so we load when active changes (e.g. new session from +)
+  let lastLoadedSessionId = $state<string>('');
 
   onMount(() => {
     sessionStore.fetchSessions();
   });
 
-  // Sync activeSessionId to local currentSessionId
+  // Whenever the store's active session changes, sync and load its feed (including when + creates a new session)
   $effect(() => {
-    if (sessionStore.activeSessionId && sessionStore.activeSessionId !== currentSessionId) {
-      currentSessionId = sessionStore.activeSessionId;
-      // Load historical messages if we just switched to this session from outside (e.g. initial load)
-      void loadHistory(sessionStore.activeSessionId);
-    }
+    const activeId = sessionStore.activeSessionId;
+    if (!activeId) return;
+    if (activeId !== currentSessionId) currentSessionId = activeId;
+    if (activeId === lastLoadedSessionId) return;
+    lastLoadedSessionId = activeId;
+    void loadHistory(activeId);
   });
 
   async function loadHistory(id: string) {
@@ -39,7 +42,9 @@
 
   async function selectSession(id: string) {
     if (sessionStore.activeSessionId === id) return;
+    lastLoadedSessionId = id;
     sessionStore.activeSessionId = id;
+    wsStore.subscribeToSession(id);
     await loadHistory(id);
   }
 
@@ -175,7 +180,7 @@
             {:else}
               {#if sessionStore.activeSessionId === session.id && wsStore.managerStatus !== 'idle'}
                 <div class="shrink-0 flex items-center justify-center" style="width: 16px; height: 16px;">
-                  <AnimatedStatusIcon status={wsStore.managerStatus} size={14} isManager={true} />
+                  <AnimatedStatusIcon status={wsStore.managerStatus} size={14} isManager={true} phase={wsStore.koryPhase} />
                 </div>
               {:else}
                 <MessageSquare size={14} class="shrink-0 relative top-[-2px]" style="color: var(--color-text-muted);" />

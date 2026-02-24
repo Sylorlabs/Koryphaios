@@ -25,10 +25,14 @@
   });
 
   let filteredModels = $derived(
-    (availableModels || []).filter(m => 
-      m.id.toLowerCase().includes(searchQuery.toLowerCase()) || 
-      m.name.toLowerCase().includes(searchQuery.toLowerCase())
-    )
+    (availableModels || [])
+      .filter(m => m != null && m.id != null)
+      .filter(m => {
+        const id = (m.id ?? '').toLowerCase();
+        const name = (m.name ?? '').toLowerCase();
+        const q = searchQuery.toLowerCase();
+        return id.includes(q) || name.includes(q);
+      })
   );
 
   function toggleModel(id: string) {
