@@ -1,7 +1,12 @@
 {
+  "$schema": "./koryphaios-schema.json",
   "providers": {
     "anthropic": {
       "name": "anthropic",
+      "disabled": true
+    },
+    "codex": {
+      "name": "codex",
       "disabled": true
     },
     "google": {
@@ -24,7 +29,7 @@
     }
   },
   "server": {
-    "port": 3000,
+    "port": 3001,
     "host": "127.0.0.1"
   },
   "dataDirectory": ".koryphaios",
@@ -35,11 +40,8 @@
     ".opencode.json",
     "CONVENTIONS.md"
   ],
-  "_workspace": {
-    "_comment": "Git worktree isolation for parallel agents (uncomment to enable)",
-    "_worktreeLimit_comment": "Max concurrent worktrees. 8GB RAM=3-4, 16GB=6-8, 32GB+=10+",
-    "_worktreeLimit": 4,
-    "_worktreeDir": ".trees",
-    "_copyEnvFiles": false
+  "interaction": {
+    "clarifyFirstEnabled": false,
+    "maxClarifyQuestions": 4
   }
 }

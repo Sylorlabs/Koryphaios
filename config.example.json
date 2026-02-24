@@ -1,6 +1,5 @@
 {
   "$schema": "./koryphaios-schema.json",
-  
   "providers": {
     "anthropic": {
       "name": "anthropic",
@@ -27,7 +26,6 @@
       "baseUrl": "https://api.x.ai/v1"
     }
   },
-  
   "agents": {
     "manager": {
       "model": "claude-sonnet-4-5",
@@ -44,27 +42,29 @@
       "maxTokens": 8192
     }
   },
-
   "assignments": {
     "frontend": "openai:gpt-4.1",
     "backend": "google:gemini-2.5-pro",
     "critic": "anthropic:claude-sonnet-4-5",
     "general": "google:gemini-2.5-flash"
   },
-
   "fallbacks": {
-    "gemini-2.5-pro": ["gpt-4.1", "claude-sonnet-4-5"],
-    "gpt-4.1": ["gemini-2.5-flash"],
-    "claude-sonnet-4-5": ["gpt-4.1"]
+    "gemini-2.5-pro": [
+      "gpt-4.1",
+      "claude-sonnet-4-5"
+    ],
+    "gpt-4.1": [
+      "gemini-2.5-flash"
+    ],
+    "claude-sonnet-4-5": [
+      "gpt-4.1"
+    ]
   },
-  
   "server": {
-    "port": 3001,
+    "port": 3000,
     "host": "localhost"
   },
-  
   "dataDirectory": ".koryphaios",
-  
   "contextPaths": [
     ".cursorrules",
     "CLAUDE.md",
@@ -72,19 +72,25 @@
     ".opencode.json",
     "CONVENTIONS.md"
   ],
-  
   "mcpServers": {
     "_comment": "Example MCP server configurations",
     "_filesystem": {
       "type": "stdio",
       "command": "npx",
-      "args": ["-y", "@modelcontextprotocol/server-filesystem", "/path/to/allowed/directory"],
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-filesystem",
+        "/path/to/allowed/directory"
+      ],
       "env": {}
     },
     "_github": {
       "type": "stdio",
       "command": "npx",
-      "args": ["-y", "@modelcontextprotocol/server-github"],
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-github"
+      ],
       "env": {
         "GITHUB_TOKEN": "your_github_token_here"
       }
@@ -97,7 +103,6 @@
       }
     }
   },
-  
   "telegram": {
     "_comment": "Optional Telegram bot configuration",
     "botToken": "YOUR_BOT_TOKEN_FROM_BOTFATHER",
@@ -105,12 +110,8 @@
     "webhookUrl": "https://your-domain.com/api/telegram/webhook",
     "secretToken": "random_secret_for_webhook_validation"
   },
-
-  "workspace": {
-    "_comment": "Git worktree configuration for parallel agent isolation",
-    "_comment_worktreeLimit": "Max concurrent worktrees. Each uses ~200-500MB RAM. 8GB=3-4, 16GB=6-8, 32GB+=10+",
-    "worktreeLimit": 4,
-    "worktreeDir": ".trees",
-    "copyEnvFiles": false
+  "interaction": {
+    "clarifyFirstEnabled": false,
+    "maxClarifyQuestions": 4
   }
 }

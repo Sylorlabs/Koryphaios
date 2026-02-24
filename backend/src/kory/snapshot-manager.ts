@@ -85,6 +85,42 @@ export class SnapshotManager {
   }
 
   /**
+   * Restore only specific files from a snapshot.
+   * Returns which files were restored and which were missing in snapshot backup.
+   */
+  restoreFiles(
+    sessionId: string,
+    snapshotId: string,
+    workingDirectory: string,
+    filePaths: string[],
+  ): { success: boolean; restored: string[]; missing: string[]; error?: string } {
+    const snapshotDir = join(this.baseDir, sessionId, snapshotId);
+    if (!existsSync(snapshotDir)) {
+      return { success: false, restored: [], missing: filePaths, error: "Snapshot not found" };
+    }
+
+    const restored: string[] = [];
+    const missing: string[] = [];
+    try {
+      for (const relPath of filePaths) {
+        const normalized = relPath.replace(/^\/+/, "");
+        const backupPath = join(snapshotDir, normalized);
+        if (!existsSync(backupPath)) {
+          missing.push(relPath);
+          continue;
+        }
+        const targetPath = join(workingDirectory, normalized);
+        mkdirSync(dirname(targetPath), { recursive: true });
+        copyFileSync(backupPath, targetPath);
+        restored.push(relPath);
+      }
+      return { success: true, restored, missing };
+    } catch (err: any) {
+      return { success: false, restored, missing, error: err.message };
+    }
+  }
+
+  /**
    * Clean up old snapshots
    */
   prune(sessionId: string) {
