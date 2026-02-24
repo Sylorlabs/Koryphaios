@@ -143,6 +143,25 @@ export function validateConfig(config: Partial<KoryphaiosConfig>): void {
     errors.push("dataDirectory must be a string");
   }
 
+  // Validate safety config
+  if (config.safety) {
+    if (config.safety.maxTokensPerTurn !== undefined) {
+      if (typeof config.safety.maxTokensPerTurn !== "number" || config.safety.maxTokensPerTurn < 1 || config.safety.maxTokensPerTurn > 100000) {
+        errors.push("safety.maxTokensPerTurn must be a number between 1 and 100000");
+      }
+    }
+    if (config.safety.maxFileSizeBytes !== undefined) {
+      if (typeof config.safety.maxFileSizeBytes !== "number" || config.safety.maxFileSizeBytes < 1 || config.safety.maxFileSizeBytes > 100_000_000) {
+        errors.push("safety.maxFileSizeBytes must be a number between 1 and 100000000 (100MB)");
+      }
+    }
+    if (config.safety.toolExecutionTimeoutMs !== undefined) {
+      if (typeof config.safety.toolExecutionTimeoutMs !== "number" || config.safety.toolExecutionTimeoutMs < 1000 || config.safety.toolExecutionTimeoutMs > 600_000) {
+        errors.push("safety.toolExecutionTimeoutMs must be a number between 1000 and 600000 (10 minutes)");
+      }
+    }
+  }
+
   // Validate contextPaths
   if (config.contextPaths) {
     if (!Array.isArray(config.contextPaths)) {
