@@ -2,8 +2,10 @@
   import { onMount } from 'svelte';
   import { sessionStore } from '$lib/stores/sessions.svelte';
   import { wsStore } from '$lib/stores/websocket.svelte';
+  import { toastStore } from '$lib/stores/toast.svelte';
   import { Plus, Search, Pencil, Trash2, Check, X, MessageSquare } from 'lucide-svelte';
   import AnimatedStatusIcon from './AnimatedStatusIcon.svelte';
+  import ConfirmDialog from './ConfirmDialog.svelte';
 
   interface Props {
     currentSessionId?: string;
@@ -14,18 +16,23 @@
   let editingId = $state<string>('');
   let editTitle = $state<string>('');
   let confirmDeleteId = $state<string>('');
+  let showConfirmDialog = $state<boolean>(false);
+  let sessionToDeleteId = $state<string>('');
+  // Track which session we last loaded feed for, so we load when active changes (e.g. new session from +)
+  let lastLoadedSessionId = $state<string>('');
 
   onMount(() => {
     sessionStore.fetchSessions();
   });
 
-  // Sync activeSessionId to local currentSessionId
+  // Whenever the store's active session changes, sync and load its feed (including when + creates a new session)
   $effect(() => {
-    if (sessionStore.activeSessionId && sessionStore.activeSessionId !== currentSessionId) {
-      currentSessionId = sessionStore.activeSessionId;
-      // Load historical messages if we just switched to this session from outside (e.g. initial load)
-      void loadHistory(sessionStore.activeSessionId);
-    }
+    const activeId = sessionStore.activeSessionId;
+    if (!activeId) return;
+    if (activeId !== currentSessionId) currentSessionId = activeId;
+    if (activeId === lastLoadedSessionId) return;
+    lastLoadedSessionId = activeId;
+    void loadHistory(activeId);
   });
 
   async function loadHistory(id: string) {
@@ -35,7 +42,9 @@
 
   async function selectSession(id: string) {
     if (sessionStore.activeSessionId === id) return;
+    lastLoadedSessionId = id;
     sessionStore.activeSessionId = id;
+    wsStore.subscribeToSession(id);
     await loadHistory(id);
   }
 
@@ -58,13 +67,42 @@
 
   function confirmDelete(e: MouseEvent, id: string) {
     e.stopPropagation();
-    if (e.shiftKey || confirmDeleteId === id) {
+    
+    // Shift-click bypasses all confirmation
+    if (e.shiftKey) {
+      sessionStore.deleteSession(id);
+      return;
+    }
+
+    const isRunning = wsStore.isSessionRunning(id);
+    
+    if (isRunning) {
+      sessionToDeleteId = id;
+      showConfirmDialog = true;
+      return;
+    }
+
+    // Standard double-click for idle sessions
+    if (confirmDeleteId === id) {
       sessionStore.deleteSession(id);
       confirmDeleteId = '';
     } else {
       confirmDeleteId = id;
       setTimeout(() => { if (confirmDeleteId === id) confirmDeleteId = ''; }, 3000);
     }
+  }
+
+  function handleConfirmDelete() {
+    if (sessionToDeleteId) {
+      sessionStore.deleteSession(sessionToDeleteId);
+      sessionToDeleteId = '';
+    }
+    showConfirmDialog = false;
+  }
+
+  function handleCancelDelete() {
+    sessionToDeleteId = '';
+    showConfirmDialog = false;
   }
 
   function formatTime(ts: number): string {
@@ -142,7 +180,7 @@
             {:else}
               {#if sessionStore.activeSessionId === session.id && wsStore.managerStatus !== 'idle'}
                 <div class="shrink-0 flex items-center justify-center" style="width: 16px; height: 16px;">
-                  <AnimatedStatusIcon status={wsStore.managerStatus} size={14} isManager={true} />
+                  <AnimatedStatusIcon status={wsStore.managerStatus} size={14} isManager={true} phase={wsStore.koryPhase} />
                 </div>
               {:else}
                 <MessageSquare size={14} class="shrink-0 relative top-[-2px]" style="color: var(--color-text-muted);" />
@@ -191,3 +229,14 @@
     {/if}
   </div>
 </div>
+
+<ConfirmDialog
+  open={showConfirmDialog}
+  title="Delete Active Session?"
+  message="This session is currently running. Deleting it will cancel all active workers and their progress. Are you sure you want to continue?"
+  confirmLabel="Delete Session"
+  cancelLabel="Cancel"
+  variant="danger"
+  onConfirm={handleConfirmDelete}
+  onCancel={handleCancelDelete}
+/>
