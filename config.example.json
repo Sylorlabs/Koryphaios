@@ -104,5 +104,13 @@
     "adminId": 123456789,
     "webhookUrl": "https://your-domain.com/api/telegram/webhook",
     "secretToken": "random_secret_for_webhook_validation"
+  },
+
+  "workspace": {
+    "_comment": "Git worktree configuration for parallel agent isolation",
+    "_comment_worktreeLimit": "Max concurrent worktrees. Each uses ~200-500MB RAM. 8GB=3-4, 16GB=6-8, 32GB+=10+",
+    "worktreeLimit": 4,
+    "worktreeDir": ".trees",
+    "copyEnvFiles": false
   }
 }
