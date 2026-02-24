@@ -8,7 +8,8 @@ module.exports = {
       autorestart: true,
       watch: false,
       env: {
-        NODE_ENV: "development"
+        NODE_ENV: "development",
+        KORYPHAIOS_HOST: "0.0.0.0"
       }
     },
     {
