@@ -124,7 +124,7 @@ const OPENCODE_DEFAULT_BASE_URL: Partial<Record<ProviderName, string>> = {
 const LLAMACPP_DEFAULT = "http://127.0.0.1:8080/v1";
 const LMSTUDIO_DEFAULT = "http://localhost:1234/v1";
 
-const PROVIDER_AUTH_MODE: Record<ProviderName, ProviderAuthMode> = {
+export const PROVIDER_AUTH_MODE: Record<ProviderName, ProviderAuthMode> = {
   anthropic: "api_key",
   claude: "auth_only",
   cline: "auth_only",
@@ -679,10 +679,11 @@ class ProviderRegistry {
       const validation = this.validateCredentials(name, credentials, existing);
       if (!validation.success) return validation;
 
+      const resolvedAuthToken = credentials.authToken?.trim() ?? existing?.authToken ?? (name === "cline" ? this.detectEnvAuthToken("cline") : undefined);
       const providerConfig: ProviderConfig = {
         name,
         apiKey: credentials.apiKey?.trim() ?? existing?.apiKey,
-        authToken: credentials.authToken?.trim() ?? existing?.authToken,
+        authToken: resolvedAuthToken,
         baseUrl: credentials.baseUrl?.trim() ?? existing?.baseUrl,
         selectedModels: credentials.selectedModels ?? existing?.selectedModels,
         hideModelSelector: credentials.hideModelSelector ?? existing?.hideModelSelector,
@@ -721,8 +722,14 @@ class ProviderRegistry {
     }
 
     if (authMode === "auth_only") {
-      const hasAuth = !!(authToken || existing?.authToken) || (name === "copilot" && !!detectCopilotToken());
-      if (!hasAuth) return { success: false, error: "authToken is required" };
+      const clineEnvToken = name === "cline" ? this.detectEnvAuthToken("cline") : null;
+      const hasAuth = !!(authToken || existing?.authToken) || (name === "copilot" && !!detectCopilotToken()) || !!clineEnvToken;
+      if (!hasAuth) {
+        const msg = name === "cline"
+          ? "Cline requires CLI auth. Run `cline auth` in your terminal and ensure the backend is started from an environment where CLINE_AUTH_TOKEN is set."
+          : "authToken is required";
+        return { success: false, error: msg };
+      }
     }
 
     if (authMode === "api_key" && !apiKey) {

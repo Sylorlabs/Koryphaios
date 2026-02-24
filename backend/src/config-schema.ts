@@ -86,8 +86,13 @@ export function validateConfig(config: Partial<KoryphaiosConfig>): void {
   // Validate providers config
   if (config.providers) {
     const validProviders = new Set([
-      "anthropic", "openai", "google", "copilot", "openrouter",
-      "groq", "xai", "azure", "bedrock", "vertexai", "local"
+      "anthropic", "openai", "google", "copilot", "codex", "cline", "openrouter",
+      "groq", "xai", "azure", "bedrock", "vertexai", "local", "ollama",
+      "opencodezen", "302ai", "azurecognitive", "baseten", "cerebras", "cloudflare",
+      "cortecs", "deepseek", "deepinfra", "firmware", "fireworks", "gitlab",
+      "huggingface", "helicone", "llamacpp", "ionet", "lmstudio", "mistral",
+      "moonshot", "minimax", "nebius", "ollamacloud", "sapai", "stackit", "ovhcloud",
+      "scaleway", "togetherai", "venice", "vercel", "zai", "zenmux", "claude",
     ]);
 
     for (const [name, providerConfig] of Object.entries(config.providers)) {

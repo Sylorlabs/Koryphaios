@@ -3,7 +3,8 @@ import { shellManager } from "./shell-manager";
 
 export class ShellManageTool implements Tool {
   readonly name = "shell_manage";
-  readonly description = "List, view logs, or kill background processes started via the bash tool.";
+  readonly role = "manager" as const;
+  readonly description = "List, view logs, or kill background processes (terminals) stored by the manager. Use after starting processes with bash (isBackground: true). Actions: list, logs (requires processId), kill (requires processId).";
 
   readonly inputSchema = {
     type: "object",
