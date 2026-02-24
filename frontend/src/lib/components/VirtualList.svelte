@@ -112,7 +112,7 @@
     }
     
     // Measure item heights after render
-    function measureItem(id: string, element: HTMLDivElement) {
+    function measureItem(element: HTMLElement, id: string) {
         const height = element.offsetHeight;
         if (height > 0 && heightCache.get(id) !== height) {
             heightCache.set(id, height);

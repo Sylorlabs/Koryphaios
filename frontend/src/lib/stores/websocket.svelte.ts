@@ -131,7 +131,7 @@ function providerDisplayName(provider: string): string {
 function resolveGlowClass(agent?: AgentIdentity): string {
   if (!agent) return "";
   switch (agent.domain) {
-    case "frontend": return "glow-codex";
+    case "ui": return "glow-codex";
     case "backend": return "glow-google";
     case "general": return "glow-claude";
     case "review": return "glow-claude";
