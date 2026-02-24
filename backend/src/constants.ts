@@ -1,5 +1,8 @@
 // Backend Constants — Extract magic numbers and configuration defaults
 
+/** Application version (single source of truth) */
+export const VERSION = "1.0.0";
+
 /**
  * Session and Message Limits
  */
@@ -37,10 +40,14 @@ export const ID = {
  * Rate Limiting
  */
 export const RATE_LIMIT = {
-  /** Requests per window */
+  /** Requests per window (general API) */
   MAX_REQUESTS: 120,
   /** Time window in milliseconds (1 minute) */
   WINDOW_MS: 60_000,
+  /** Auth endpoints (login, register, refresh) per IP per minute */
+  AUTH_PER_MINUTE: 15,
+  /** Credential-setting (PUT /api/providers) per IP per minute */
+  CREDENTIAL_PER_MINUTE: 20,
 } as const;
 
 /**
@@ -65,15 +72,21 @@ export const SECURITY = {
   MAX_API_KEY_LENGTH: 500,
   /** Maximum provider name length */
   MAX_PROVIDER_NAME_LENGTH: 50,
-  /** Allowed CORS origins (production should override) */
+  /** Allowed CORS origins (add more via config.corsOrigins for other dev hosts/ports) */
   ALLOWED_ORIGINS: [
-    "http://localhost:5173", // Vite dev server
-    "http://localhost:3000", // Bun dev server
-    "http://localhost:3001", // Bun dev server (alternate)
-    "http://127.0.0.1:5173", // Vite dev server (IPv4)
-    "http://127.0.0.1:3000", // Bun dev server (IPv4)
-    "http://127.0.0.1:3001", // Bun dev server (IPv4 alternate)
+    "http://localhost:5173",   // Vite dev default
+    "http://localhost:3000",   // Bun dev server
+    "http://127.0.0.1:5173",
+    "http://127.0.0.1:3000",
   ],
+} as const;
+
+/**
+ * Auth patterns (single source of truth for token format checks).
+ */
+export const AUTH = {
+  /** Claude subscription OAuth token from "claude setup-token" (sk-ant-oat01-...). */
+  CLAUDE_OAUTH_TOKEN_REGEX: /^sk-ant-oat\d{2}-/,
 } as const;
 
 /**
@@ -94,19 +107,29 @@ export const FS = {
  * Agent Configuration
  */
 export const AGENT = {
-  DEFAULT_MANAGER_MODEL: "claude-opus-4-6",
-  DEFAULT_CODER_MODEL: "claude-sonnet-4-5",
-  DEFAULT_TASK_MODEL: "gpt-5.2-instant",
+  /** Default models per role if not configured */
+  DEFAULT_MANAGER_MODEL: "claude-sonnet-4-6",
+  DEFAULT_CODER_MODEL: "claude-sonnet-4-6",
+  DEFAULT_TASK_MODEL: "gpt-5-mini",
+
+  /** Default token limits */
   DEFAULT_MAX_TOKENS: 8192,
   CODER_MAX_TOKENS: 16384,
-  DEFAULT_REASONING_LEVEL: "auto" as const,
+
+  /** Default reasoning level */
+  DEFAULT_REASONING_LEVEL: "high" as const,
+
+  /** Fallback model chains (IDs must exist in MODEL_CATALOG). No retired models (Claude 3.7, Haiku 3.5). */
   DEFAULT_FALLBACKS: {
-    "claude-opus-4-6": ["gpt-5.3-codex", "gpt-5.2-pro"],
-    "claude-sonnet-4-5": ["gpt-5.2-pro", "gemini-3-pro"],
-    "gpt-5.3-codex": ["claude-opus-4-6", "gpt-5.2-pro"],
-    "gpt-5.2-pro": ["claude-sonnet-4-5", "gemini-3-pro"],
-  },
-};
+    "claude-sonnet-4-5": ["claude-sonnet-4-6", "gpt-5-mini", "gemini-3.1-pro"],
+    "claude-sonnet-4-6": ["claude-sonnet-4-5", "gpt-5-mini", "gemini-3.1-pro"],
+    "gpt-5-mini": ["gemini-3.1-pro", "claude-haiku-4-5"],
+    "o4-mini": ["gpt-5-mini", "gemini-3.1-pro"],
+  } as Record<string, string[]>,
+
+  /** Max time a single LLM stream can run before being aborted (prevents stuck requests) */
+  LLM_STREAM_TIMEOUT_MS: 600_000, // 10 minutes
+} as const;
 
 /**
  * Configuration File Paths (in order of precedence)
@@ -146,7 +169,7 @@ export const LOG = {
 export const PROVIDER = {
   /** Environment variable prefix */
   ENV_VAR_PREFIX: "ANTHROPIC_API_KEY", // Example pattern
-  
+
   /** Expected environment variable names */
   ENV_VARS: {
     ANTHROPIC: "ANTHROPIC_API_KEY",
@@ -158,7 +181,7 @@ export const PROVIDER = {
     BEDROCK: "AWS_ACCESS_KEY_ID", // Also needs AWS_SECRET_ACCESS_KEY
     COPILOT: "GITHUB_TOKEN",
     OPENROUTER: "OPENROUTER_API_KEY",
-    VERTEXAI: "GOOGLE_APPLICATION_CREDENTIALS",
+    VERTEXAI: "GOOGLE_VERTEX_AI_API_KEY",
   } as const,
 } as const;
 
@@ -197,7 +220,19 @@ export const WS = {
 } as const;
 
 /**
- * Antigravity (Google Internal/Unified Gateway) Configuration
+ * Timeouts
+ */
+export const TIMEOUT = {
+  /** Tool execution timeout */
+  TOOL_EXECUTION_MS: 300_000, // 5 minutes
+  /** Agent response timeout */
+  AGENT_RESPONSE_MS: 600_000, // 10 minutes
+  /** Provider API timeout */
+  PROVIDER_API_MS: 120_000, // 2 minutes
+} as const;
+
+/**
+ * Antigravity (Google OAuth) configuration.
  * Client credentials must be provided via environment variables.
  */
 export const ANTIGRAVITY = {
@@ -216,19 +251,22 @@ export const ANTIGRAVITY = {
     PROD: "https://cloudcode-pa.googleapis.com",
     AUTH: "https://accounts.google.com/o/oauth2/v2/auth",
     TOKEN: "https://oauth2.googleapis.com/token",
-  }
+  },
 } as const;
 
 /**
- * Timeouts
+ * Workspace / Git Worktree Configuration
+ * Used by WorkspaceManager for parallel agent isolation
  */
-export const TIMEOUT = {
-  /** Tool execution timeout */
-  TOOL_EXECUTION_MS: 300_000, // 5 minutes
-  /** Agent response timeout */
-  AGENT_RESPONSE_MS: 600_000, // 10 minutes
-  /** Provider API timeout */
-  PROVIDER_API_MS: 120_000, // 2 minutes
+export const WORKSPACE = {
+  /** Default max concurrent worktrees */
+  DEFAULT_WORKTREE_LIMIT: 4,
+  /** Default worktree directory (relative to repo root) */
+  DEFAULT_WORKTREE_DIR: ".trees",
+  /** Default: don't copy .env files to worktrees (security) */
+  DEFAULT_COPY_ENV_FILES: false,
+  /** Estimated RAM usage per worktree in MB (for guidance) */
+  RAM_PER_WORKTREE_MB: 300,
 } as const;
 
 /**
@@ -236,38 +274,38 @@ export const TIMEOUT = {
  */
 export const DOMAIN = {
   KEYWORDS: {
-    frontend: [
-      "frontend", "component", "svelte", "react", "vue", "html", "css", "style",
-      "design", "ux", "ui", "widget", "button", "layout", "animation", "render",
-      "canvas", "theme", "color", "font", "icon", "responsive", "mobile",
-      "tailwind", "bootstrap", "shadcn", "modal", "sidebar", "navbar",
+    ui: [
+      "skia", "flutter", "ui", "widget", "button", "layout", "css", "style",
+      "animation", "render", "frontend", "component", "svelte", "react", "view",
+      "canvas", "draw", "paint", "theme", "color", "font", "icon", "design",
+      "responsive", "mobile", "dark mode", "light mode", "sidebar", "modal",
     ],
     backend: [
-      "server", "api", "database", "sql", "nosql", "redis", "cache", "auth",
-      "middleware", "routing", "controller", "service", "orm", "prisma", "drizzle",
-      "docker", "kubernetes", "infra", "deploy", "ci/cd", "performance",
-      "optimization", "threading", "concurrency", "socket", "grpc", "protobuf",
-      "c++", "cpp", "rust", "go", "python", "node", "java", "logic",
+      "c++", "cpp", "cmake", "makefile", "gtest", "boost", "llvm", "clang",
+      "server", "api", "database", "sql", "grpc", "protobuf", "socket",
+      "memory", "pointer", "thread", "mutex", "algorithm", "data structure",
+      "compiler", "linker", "binary", "build", "performance", "optimization",
+      "kernel", "driver", "system", "dsp", "audio", "midi", "signal",
     ],
     general: [
       "refactor", "rename", "move", "organize", "clean", "lint", "format",
       "documentation", "readme", "comment", "explain", "review", "improve",
-      "typescript", "javascript", "script", "bash", "shell", "git",
+      "typescript", "javascript", "python", "rust", "go",
     ],
-    review: ["review", "audit", "check", "verify", "validate", "quality", "security"],
-    test: ["test", "spec", "unit", "integration", "e2e", "jest", "vitest", "mocha", "pytest", "cypress"],
-    critic: ["critic", "critique", "audit", "review", "gate", "quality", "architect"],
+    review: ["review", "audit", "check", "verify", "validate"],
+    test: ["test", "spec", "gtest", "jest", "vitest", "mocha", "pytest"],
+    critic: ["critic", "critique", "audit", "review", "gate", "quality"],
   },
   DEFAULT_MODELS: {
-    frontend: "gpt-5.2-pro",
-    backend: "claude-sonnet-4-5",
+    ui: "gpt-5.2",
+    backend: "gemini-3.1-pro",
     general: "gemini-3-flash",
-    review: "gpt-5.2-pro",
-    test: "gpt-5.2-pro",
-    critic: "claude-opus-4-6",
+    review: "gpt-5.2",
+    test: "gpt-5.2",
+    critic: "claude-sonnet-4-6",
   },
   GLOW_COLORS: {
-    frontend: "rgba(0,255,255,0.5)",       // Cyan
+    ui: "rgba(0,255,255,0.5)",       // Cyan
     backend: "rgba(128,0,128,0.5)",  // Deep Purple
     general: "rgba(255,165,0,0.5)",  // Orange (Claude)
     review: "rgba(255,165,0,0.5)",   // Orange
