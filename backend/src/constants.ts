@@ -181,7 +181,7 @@ export const PROVIDER = {
     BEDROCK: "AWS_ACCESS_KEY_ID", // Also needs AWS_SECRET_ACCESS_KEY
     COPILOT: "GITHUB_TOKEN",
     OPENROUTER: "OPENROUTER_API_KEY",
-    VERTEXAI: "GOOGLE_APPLICATION_CREDENTIALS",
+    VERTEXAI: "GOOGLE_VERTEX_AI_API_KEY",
   } as const,
 } as const;
 
@@ -252,6 +252,21 @@ export const ANTIGRAVITY = {
     AUTH: "https://accounts.google.com/o/oauth2/v2/auth",
     TOKEN: "https://oauth2.googleapis.com/token",
   },
+} as const;
+
+/**
+ * Workspace / Git Worktree Configuration
+ * Used by WorkspaceManager for parallel agent isolation
+ */
+export const WORKSPACE = {
+  /** Default max concurrent worktrees */
+  DEFAULT_WORKTREE_LIMIT: 4,
+  /** Default worktree directory (relative to repo root) */
+  DEFAULT_WORKTREE_DIR: ".trees",
+  /** Default: don't copy .env files to worktrees (security) */
+  DEFAULT_COPY_ENV_FILES: false,
+  /** Estimated RAM usage per worktree in MB (for guidance) */
+  RAM_PER_WORKTREE_MB: 300,
 } as const;
 
 /**

@@ -155,6 +155,21 @@ export function validateConfig(config: Partial<KoryphaiosConfig>): void {
     }
   }
 
+  // Validate workspace config
+  if (config.workspace) {
+    if (config.workspace.worktreeLimit !== undefined) {
+      if (typeof config.workspace.worktreeLimit !== "number" || config.workspace.worktreeLimit < 1 || config.workspace.worktreeLimit > 100) {
+        errors.push("workspace.worktreeLimit must be a number between 1 and 100");
+      }
+    }
+    if (config.workspace.worktreeDir !== undefined && typeof config.workspace.worktreeDir !== "string") {
+      errors.push("workspace.worktreeDir must be a string");
+    }
+    if (config.workspace.copyEnvFiles !== undefined && typeof config.workspace.copyEnvFiles !== "boolean") {
+      errors.push("workspace.copyEnvFiles must be a boolean");
+    }
+  }
+
   if (errors.length > 0) {
     serverLog.error({ errors }, "Configuration validation failed");
     throw new ConfigError(

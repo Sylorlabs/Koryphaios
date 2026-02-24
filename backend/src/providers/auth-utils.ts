@@ -117,37 +117,21 @@ export function detectCodexToken(): string | null {
 }
 
 /**
- * Detects Google Cloud / Gemini CLI auth state.
+ * Detects Gemini CLI auth state (Google AI Studio / Gemini CLI only).
+ * Does NOT touch gcloud, Application Default Credentials, or any GCP-wide credentials —
+ * those belong to Vertex AI which requires explicit configuration.
  */
 export function detectGeminiCLIToken(): string | null {
-  // 1. Try 'gcloud' (Semantic Auth)
-  try {
-    const gcloud = spawnSync(["gcloud", "auth", "print-access-token"], { stdout: "pipe", stderr: "pipe" });
-    if (gcloud.exitCode === 0) {
-      const token = gcloud.stdout.toString().trim();
-      if (token) return token;
-    }
-  } catch { }
-
-  // 2. Fallback to file-based (detecting existence of creds)
-  const paths = [
-    join(homedir(), ".gemini", "oauth_creds.json"),
-    join(getConfigDir(), "gcloud", "credentials.db"),
-    join(getConfigDir(), "gcloud", "access_tokens.db"),
-    join(getConfigDir(), "gcloud", "application_default_credentials.json"),
-  ];
-
-  for (const p of paths) {
-    if (!existsSync(p)) continue;
+  // Only look for Gemini-specific OAuth credentials (not gcloud ADC or GCP credentials)
+  const geminiCredsPath = join(homedir(), ".gemini", "oauth_creds.json");
+  if (existsSync(geminiCredsPath)) {
     try {
-      if (p.endsWith(".json")) {
-        const data = JSON.parse(readFileSync(p, "utf-8"));
-        if (data?.access_token) return data.access_token;
-      }
+      const data = JSON.parse(readFileSync(geminiCredsPath, "utf-8"));
+      if (data?.access_token) return data.access_token;
+      if (data?.tokens?.access_token) return data.tokens.access_token;
+      if (data?.accessToken) return data.accessToken;
       return "cli:detected";
-    } catch {
-      continue;
-    }
+    } catch { }
   }
   return process.env.GOOGLE_CLI_TOKEN || null;
 }

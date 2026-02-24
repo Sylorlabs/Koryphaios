@@ -432,6 +432,23 @@ export interface KoryphaiosConfig {
   dataDirectory: string;
   /** Allowed CORS origins */
   corsOrigins?: string[];
+  /** Workspace/Worktree configuration for parallel agent isolation */
+  workspace?: {
+    /** 
+     * Maximum number of concurrent Git worktrees allowed.
+     * Each worktree consumes RAM (roughly 200-500MB per active agent).
+     * Set based on your system's available memory:
+     * - 8GB RAM: 3-4 worktrees
+     * - 16GB RAM: 6-8 worktrees  
+     * - 32GB+ RAM: 10+ worktrees
+     * @default 4
+     */
+    worktreeLimit?: number;
+    /** Base directory for worktrees (relative to repo root). @default ".trees" */
+    worktreeDir?: string;
+    /** Whether to copy .env files into worktrees. @default false */
+    copyEnvFiles?: boolean;
+  };
 }
 
 export interface MCPServerConfig {

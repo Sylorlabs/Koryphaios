@@ -160,7 +160,8 @@ const KORY_SYSTEM_PROMPT = `You are Kory, the manager agent. The user talks to y
 
 • Handle requests yourself: answer questions, use tools (read_file, grep, bash, web_search, etc.), do small edits. For conversation, clarification, or straightforward work, you are the sole agent.
 • Sub-agents (workers: general, ui, backend, test, review) exist only for you to invoke when you decide a task needs a specialist coder. Call delegate_to_worker only for substantial implementation, refactoring, or multi-step coding—not for chat, simple questions, or minor edits.
-• When you delegate, the worker reports back; you verify and synthesize.`;
+• When you delegate, the worker reports back; you verify and synthesize.
+• IMPORTANT: If you decide to delegate, call delegate_to_worker IMMEDIATELY without generating any explanatory text first. Do not write "I'll delegate this" or similar—just call the tool directly.`;
 const WORKER_SYSTEM_PROMPT = `You are a specialist Worker Agent. EXECUTE the assigned task using tools. QUALITY FIRST. VERIFY.`;
 
 // ─── Kory Manager Class ─────────────────────────────────────────────────────
@@ -488,7 +489,11 @@ export class KoryManager {
         }
       }
 
-      messages.push({ role: "assistant", content: assistantContent });
+      messages.push({
+        role: "assistant",
+        content: assistantContent,
+        tool_calls: completedToolCalls.length ? completedToolCalls.map((tc) => ({ id: tc.id, name: tc.name, input: tc.input })) : undefined,
+      });
       lastContent = assistantContent;
 
       if (completedToolCalls.length === 0) break;
@@ -639,6 +644,8 @@ export class KoryManager {
     let hasToolCalls = false;
     let tokensIn = 0;
     let tokensOut = 0;
+    // Buffer content to avoid streaming if the turn only delegates to worker
+    let contentBuffer = "";
 
     for await (const event of stream) {
       if (signal?.aborted) throw new DOMException("Manager run aborted", "AbortError");
@@ -647,7 +654,7 @@ export class KoryManager {
       }
       if (event.type === "content_delta") {
         assistantContent += event.content ?? "";
-        this.emitWSMessage(sessionId, "stream.delta", { agentId: KORY_IDENTITY.id, content: event.content, model: modelId });
+        contentBuffer += event.content ?? "";
       } else if (event.type === "usage_update") {
         if (typeof event.tokensIn === "number") tokensIn = Math.max(tokensIn, event.tokensIn);
         if (typeof event.tokensOut === "number") tokensOut = Math.max(tokensOut, event.tokensOut);
@@ -670,7 +677,19 @@ export class KoryManager {
       }
     }
 
-    messages.push({ role: "assistant", content: assistantContent });
+    // Only emit content if this turn doesn't solely delegate to a worker
+    const isDelegationOnly = hasToolCalls &&
+      completedToolCalls.length === 1 &&
+      completedToolCalls[0]!.name === "delegate_to_worker";
+    if (!isDelegationOnly && contentBuffer) {
+      this.emitWSMessage(sessionId, "stream.delta", { agentId: KORY_IDENTITY.id, content: contentBuffer, model: modelId });
+    }
+
+    messages.push({
+      role: "assistant",
+      content: assistantContent,
+      tool_calls: hasToolCalls && completedToolCalls.length > 0 ? completedToolCalls.map((tc) => ({ id: tc.id, name: tc.name, input: tc.input })) : undefined,
+    });
 
     if (hasToolCalls && completedToolCalls.length > 0) {
       return { success: true, content: assistantContent, usage: { tokensIn, tokensOut }, completedToolCalls };
@@ -787,7 +806,11 @@ export class KoryManager {
       }
     }
 
-    messages.push({ role: "assistant", content: assistantContent });
+    messages.push({
+      role: "assistant",
+      content: assistantContent,
+      tool_calls: hasToolCalls && completedToolCalls.length > 0 ? completedToolCalls.map((tc) => ({ id: tc.id, name: tc.name, input: tc.input })) : undefined,
+    });
 
     if (hasToolCalls && completedToolCalls.length > 0) {
       for (const tc of completedToolCalls) {
@@ -894,11 +917,12 @@ export class KoryManager {
 
   private loadHistory(sessionId: string): any[] { return this.messages?.getRecent(sessionId, 10).map((m: any) => ({ role: m.role, content: m.content })) || []; }
 
-  /** Build provider messages with tool_call_id for role "tool" so APIs receive valid tool results. */
+  /** Build provider messages with tool_call_id for role "tool" and tool_calls for assistant so APIs accept tool results. */
   private toProviderMessages(messages: any[]): ProviderMessage[] {
     return messages.map((m: any) => {
       const out: ProviderMessage = { role: m.role, content: m.content };
       if (m.role === "tool" && m.tool_call_id != null) out.tool_call_id = m.tool_call_id;
+      if (m.role === "assistant" && m.tool_calls?.length) out.tool_calls = m.tool_calls;
       return out;
     });
   }

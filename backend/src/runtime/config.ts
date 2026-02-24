@@ -5,7 +5,7 @@ import { homedir } from "node:os";
 import { validateConfig } from "../config-schema";
 import { serverLog } from "../logger";
 import { safeJsonParse, ConfigError } from "../errors";
-import { AGENT, DEFAULT_CONTEXT_PATHS, FS, SERVER } from "../constants";
+import { AGENT, DEFAULT_CONTEXT_PATHS, FS, SERVER, WORKSPACE } from "../constants";
 
 /** Merge file corsOrigins with CORS_ORIGINS env (comma-separated). Production can set CORS_ORIGINS=https://app.example.com */
 function mergeCorsOrigins(fromFile: string[], envValue?: string): string[] {
@@ -64,6 +64,11 @@ export function loadConfig(projectRoot: string): KoryphaiosConfig {
     fallbacks: fileConfig.fallbacks ?? AGENT.DEFAULT_FALLBACKS,
     corsOrigins: mergeCorsOrigins(fileConfig.corsOrigins ?? [], process.env.CORS_ORIGINS),
     assignments: fileConfig.assignments,
+    workspace: {
+      worktreeLimit: fileConfig.workspace?.worktreeLimit ?? WORKSPACE.DEFAULT_WORKTREE_LIMIT,
+      worktreeDir: fileConfig.workspace?.worktreeDir ?? WORKSPACE.DEFAULT_WORKTREE_DIR,
+      copyEnvFiles: fileConfig.workspace?.copyEnvFiles ?? WORKSPACE.DEFAULT_COPY_ENV_FILES,
+    },
   };
 
   validateConfig(config);

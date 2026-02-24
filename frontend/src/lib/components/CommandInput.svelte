@@ -2,7 +2,7 @@
   import { Send, ChevronDown, Sparkles, Square } from 'lucide-svelte';
   import { wsStore } from '$lib/stores/websocket.svelte';
   import { shortcutStore } from '$lib/stores/shortcuts.svelte';
-  import { getReasoningConfig, getDefaultReasoning, hasReasoningSupport } from '@koryphaios/shared';
+  import { getReasoningConfig, hasReasoningSupport } from '@koryphaios/shared';
   import BrainIcon from '$lib/components/icons/BrainIcon.svelte';
 
   interface Props {
@@ -57,18 +57,6 @@
   let reasoningConfig = $derived(getReasoningConfig(currentProvider(), currentModel()));
   let reasoningSupported = $derived(hasReasoningSupport(currentProvider(), currentModel()));
 
-  // When user selects a specific model, sync reasoning to that model's default (so we don't keep showing "Auto" from a previous selection).
-  $effect(() => {
-    const provider = currentProvider();
-    const model = currentModel();
-    const config = getReasoningConfig(provider, model);
-    if (!config) return;
-    const inOptions = config.options.some(opt => opt.value === reasoningLevel);
-    if (!inOptions) {
-      reasoningLevel = getDefaultReasoning(provider, model);
-    }
-  });
-
   const hasNoProvider = $derived((wsStore.providers ?? []).filter((p) => p.authenticated).length === 0);
 
   let availableModels = $derived(() => {
@@ -92,7 +80,12 @@
     return `(${providerLabel(parsed.provider)}) ${parsed.model}`;
   });
 
+  // Cooldown to prevent duplicate sends (double Enter, key repeat, double-click)
+  const SEND_COOLDOWN_MS = 800;
+  let lastSendAt = $state(0);
+
   function handleKeydown(e: KeyboardEvent) {
+    if (e.repeat) return; // ignore key repeat (e.g. holding Enter)
     if (isRunning && shortcutStore.matches('send', e)) {
       e.preventDefault();
       stop();
@@ -111,6 +104,9 @@
   function send() {
     const trimmed = input.trim();
     if (!trimmed) return;
+    const now = Date.now();
+    if (now - lastSendAt < SEND_COOLDOWN_MS) return; // debounce duplicate sends
+    lastSendAt = now;
     onSend(trimmed, selectedModel, reasoningLevel);
     input = '';
     if (inputRef) inputRef.style.height = 'auto';

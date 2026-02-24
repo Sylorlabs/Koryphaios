@@ -4,6 +4,7 @@ export { OpenAIProvider, GroqProvider, OpenRouterProvider, XAIProvider, AzurePro
 
 export { GeminiProvider, GeminiCLIProvider } from "./gemini";
 export { CopilotProvider } from "./copilot";
+export { ClineProvider } from "./cline";
 
 export { withTimeoutSignal } from "./utils";
 export * from "./types";

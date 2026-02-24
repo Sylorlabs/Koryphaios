@@ -16,14 +16,19 @@ import { OpenAIProvider, GroqProvider, OpenRouterProvider, XAIProvider, AzurePro
 
 import { GeminiProvider, GeminiCLIProvider } from "./gemini";
 import { CopilotProvider, exchangeGitHubTokenForCopilotAsync } from "./copilot";
+import { ClineProvider } from "./cline";
 
 import { decryptApiKey, secureDecrypt, isUsingSecureEncryption } from "../security";
 import { resolveModel, getModelsForProvider, isLegacyModel, type StreamRequest, type ProviderEvent, type Provider } from "./types";
 import { withRetry } from "./utils";
+import { recordUsage as creditRecordUsage } from "../credit-accountant";
 
 // Environment variable mappings for real providers only
 const ENV_API_KEY_MAP: Record<ProviderName, string[]> = {
   anthropic: ["ANTHROPIC_API_KEY"],
+  claude: [], // auth only - uses Claude Code CLI
+  cline: [], // auth only - uses Cline CLI
+  codex: [], // auth only - uses Codex CLI
   openai: ["OPENAI_API_KEY"],
   google: ["GEMINI_API_KEY", "GOOGLE_API_KEY"],
   xai: ["XAI_API_KEY"],
@@ -80,6 +85,9 @@ const ENV_URL_MAP: Partial<Record<ProviderName, string>> = {
 
 const ENV_AUTH_TOKEN_MAP: Partial<Record<ProviderName, string[]>> = {
   anthropic: ["ANTHROPIC_AUTH_TOKEN"],
+  claude: ["CLAUDE_CODE_OAUTH_TOKEN"],
+  cline: ["CLINE_AUTH_TOKEN"],
+  codex: ["CODEX_AUTH_TOKEN"],
   copilot: ["GITHUB_COPILOT_TOKEN", "GITHUB_TOKEN"],
   azure: ["AZURE_OPENAI_AUTH_TOKEN"],
   google: ["GEMINI_AUTH_TOKEN"],
@@ -118,6 +126,9 @@ const LMSTUDIO_DEFAULT = "http://localhost:1234/v1";
 
 const PROVIDER_AUTH_MODE: Record<ProviderName, ProviderAuthMode> = {
   anthropic: "api_key",
+  claude: "auth_only",
+  cline: "auth_only",
+  codex: "auth_only",
   openai: "api_key",
   google: "api_key_or_auth",
   xai: "api_key",
@@ -127,7 +138,7 @@ const PROVIDER_AUTH_MODE: Record<ProviderName, ProviderAuthMode> = {
   opencodezen: "api_key",
   azure: "api_key_or_auth",
   bedrock: "env_auth",
-  vertexai: "env_auth",
+  vertexai: "api_key",
   local: "base_url_only",
   ollama: "base_url_only",
   "302ai": "api_key",
@@ -249,6 +260,7 @@ class ProviderRegistry {
     requiresBaseUrl: boolean;
     circuitOpen: boolean;
     error?: string;
+    extraAuthModes?: Array<{ id: string; label: string; description?: string }>;
   }> {
     const names = Object.keys(PROVIDER_AUTH_MODE) as ProviderName[];
     const result: Array<{
@@ -265,6 +277,7 @@ class ProviderRegistry {
       requiresBaseUrl: boolean;
       circuitOpen: boolean;
       error?: string;
+      extraAuthModes?: Array<{ id: string; label: string; description?: string }>;
     }> = [];
 
     for (const name of names) {
@@ -295,6 +308,14 @@ class ProviderRegistry {
         ? allModels.filter(id => selectedModels.includes(id))
         : allModels;
 
+      const extraAuthModes = name === "google"
+        ? [
+            { id: "api_key", label: "API key", description: "Use a Gemini API key from Google AI Studio" },
+            { id: "cli", label: "Gemini CLI", description: "Use existing Gemini CLI session or sign in in browser" },
+            { id: "antigravity", label: "Antigravity", description: "Sign in with Google (Antigravity) in browser" },
+          ]
+        : undefined;
+
       result.push({
         name,
         enabled: true,
@@ -308,6 +329,7 @@ class ProviderRegistry {
         supportsAuthToken: authMode === "api_key_or_auth",
         requiresBaseUrl: authMode === "base_url_only" || name === "azure",
         circuitOpen,
+        ...(extraAuthModes && { extraAuthModes }),
       });
     }
 
@@ -367,7 +389,7 @@ class ProviderRegistry {
   /** Return the first available provider and one of its non-legacy models for "auto" fallback. */
   getFirstAvailableRouting(): { model: string; provider: ProviderName } | undefined {
     for (const provider of this.getAvailable()) {
-      if (this.isCircuitOpen(provider.name)) continue;
+      if (provider.name === "vertexai" || this.isCircuitOpen(provider.name)) continue;
       const models = provider.listModels().filter((m) => !isLegacyModel(m));
       const first = models[0];
       if (first) return { model: first.id, provider: provider.name as ProviderName };
@@ -408,14 +430,23 @@ class ProviderRegistry {
 
       try {
         let hasContent = false;
+        let accTokensIn = 0;
+        let accTokensOut = 0;
         const stream = provider.streamResponse({ ...request, model: currentModel });
 
         for await (const event of stream) {
           if (this.isContentEvent(event)) hasContent = true;
+          if (event.type === "usage_update") {
+            if (typeof event.tokensIn === "number") accTokensIn = event.tokensIn;
+            if (typeof event.tokensOut === "number") accTokensOut = event.tokensOut;
+          }
           yield event;
         }
 
         if (hasContent) {
+          if (accTokensIn > 0 || accTokensOut > 0) {
+            creditRecordUsage(currentModel, provider.name, accTokensIn, accTokensOut);
+          }
           this.recordSuccess(provider.name);
           return;
         }
@@ -567,7 +598,19 @@ class ProviderRegistry {
         case "bedrock":
           return this.verifyBedrockEnvironment();
         case "vertexai":
-          return this.verifyVertexEnvironment();
+          if (!apiKey) return { success: false, error: "Vertex AI requires an explicit API key (set GOOGLE_VERTEX_AI_API_KEY or add apiKey in settings)" };
+          return { success: true };
+        case "cline": {
+          try {
+            const whichProc = Bun.spawnSync(["which", "cline"], { stdout: "pipe", stderr: "pipe" });
+            if (whichProc.exitCode !== 0) {
+              return { success: false, error: "cline CLI not found in PATH. Run: npm install -g cline" };
+            }
+          } catch {
+            return { success: false, error: "cline CLI not found in PATH. Run: npm install -g cline" };
+          }
+          return { success: true };
+        }
         case "opencodezen": {
           if (!apiKey) return { success: false, error: "Missing API key (get one at opencode.ai/auth)" };
           const base = "https://opencode.ai/zen/v1";
@@ -691,7 +734,7 @@ class ProviderRegistry {
     }
 
     if (authMode === "env_auth") {
-      const envReady = name === "bedrock" ? this.hasBedrockEnvironment() : this.hasVertexEnvironment();
+      const envReady = this.hasBedrockEnvironment();
       if (!envReady) return { success: false, error: `${name} environment credentials not detected` };
     }
 
@@ -761,6 +804,8 @@ class ProviderRegistry {
 
   private buildProviderConfig(name: ProviderName): ProviderConfig {
     const userConfig = this.config?.providers?.[name];
+    // Vertex AI defaults to disabled so GCP env (e.g. gcloud ADC) does not auto-enable it or spawn it as subagents
+    const defaultDisabled = name === "vertexai";
     const providerConfig: ProviderConfig = {
       name,
       apiKey: userConfig?.apiKey ?? this.detectEnvKey(name) ?? undefined,
@@ -768,11 +813,11 @@ class ProviderRegistry {
       baseUrl: userConfig?.baseUrl ?? this.detectEnvUrl(name) ?? undefined,
       selectedModels: userConfig?.selectedModels ?? [],
       hideModelSelector: userConfig?.hideModelSelector ?? false,
-      disabled: userConfig?.disabled ?? false,
+      disabled: userConfig?.disabled ?? defaultDisabled,
       headers: userConfig?.headers,
     };
 
-    // Providers enabled by default - auth checked at runtime
+    // Providers enabled by default (except vertexai) - auth checked at runtime
 
     return providerConfig;
   }
@@ -788,7 +833,7 @@ class ProviderRegistry {
       (authMode === "api_key" && hasApi) ||
       (authMode === "auth_only" && hasAuth) ||
       (authMode === "api_key_or_auth" && (hasApi || hasAuth)) ||
-      (authMode === "env_auth" && (name === "bedrock" ? this.hasBedrockEnvironment() : this.hasVertexEnvironment())) ||
+      (authMode === "env_auth" && this.hasBedrockEnvironment()) ||
       (authMode === "base_url_only" && (hasUrl || name === "lmstudio" || name === "llamacpp"));
 
     if (hasAnyAuth) return true;
@@ -816,6 +861,12 @@ class ProviderRegistry {
         return new CopilotProvider(config);
       case "cline":
         return new ClineProvider(config);
+      case "claude":
+        // TODO: Implement Claude Code CLI provider
+        return null;
+      case "codex":
+        // TODO: Implement Codex CLI provider
+        return null;
       case "openrouter":
         return new OpenRouterProvider(config);
       case "groq":
@@ -827,6 +878,8 @@ class ProviderRegistry {
       case "bedrock":
         return new OpenAIProvider(config, "bedrock", config.baseUrl);
       case "vertexai":
+        // Requires explicit API key — never auto-enable from GCP environment variables
+        if (config.disabled || !config.apiKey) return null;
         return new GeminiProvider({ ...config, name: "vertexai" });
       case "local":
         if (config.baseUrl) {
@@ -944,21 +997,9 @@ class ProviderRegistry {
     );
   }
 
-  private hasVertexEnvironment(): boolean {
-    return !!(
-      process.env.GOOGLE_APPLICATION_CREDENTIALS
-      || (process.env.GOOGLE_CLOUD_PROJECT && process.env.GOOGLE_CLOUD_REGION)
-    );
-  }
-
   private verifyBedrockEnvironment(): { success: boolean; error?: string } {
     if (this.hasBedrockEnvironment()) return { success: true };
     return { success: false, error: "AWS credentials not detected" };
-  }
-
-  private verifyVertexEnvironment(): { success: boolean; error?: string } {
-    if (this.hasVertexEnvironment()) return { success: true };
-    return { success: false, error: "Vertex AI credentials not detected" };
   }
 
   private logProviderStatus() {

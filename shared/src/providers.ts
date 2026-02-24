@@ -11,7 +11,10 @@ export const ProviderName = {
   OpenRouter: "openrouter",
   Groq: "groq",
   
-  // Auth-only providers
+  // Auth-only providers (CLI-based)
+  Claude: "claude",
+  Cline: "cline",
+  Codex: "codex",
   Copilot: "copilot",
   
   // Curated coding models (OpenCode Zen)
@@ -63,6 +66,9 @@ export type ProviderName = (typeof ProviderName)[keyof typeof ProviderName];
 
 export const IMPLEMENTED_PROVIDERS: ProviderName[] = [
   "anthropic",
+  "claude",
+  "cline",
+  "codex",
   "openai",
   "google",
   "xai",
@@ -148,11 +154,13 @@ export type ProviderAuthMode = "api_key" | "auth_only" | "api_key_or_auth" | "ba
 /** Maps provider names to their authentication modes */
 export const PROVIDER_AUTH_MODES: Record<ProviderName, ProviderAuthMode> = {
   anthropic: "api_key",
+  claude: "auth_only",
+  cline: "auth_only",
+  codex: "auth_only",
   openai: "api_key",
   google: "api_key_or_auth",
   xai: "api_key",
   openrouter: "api_key",
-  cline: "api_key_or_auth",
   groq: "api_key",
   copilot: "auth_only",
   opencodezen: "api_key",
@@ -161,7 +169,6 @@ export const PROVIDER_AUTH_MODES: Record<ProviderName, ProviderAuthMode> = {
   vertexai: "env_auth",
   local: "base_url_only",
   ollama: "base_url_only",
-  codex: "auth_only",
   "302ai": "api_key",
   azurecognitive: "api_key",
   baseten: "api_key",
@@ -202,8 +209,8 @@ export const PROVIDER_ENV_VARS: Record<ProviderName, { apiKey?: string; baseUrl?
   google: { apiKey: "GEMINI_API_KEY", authToken: "GEMINI_AUTH_TOKEN" },
   xai: { apiKey: "XAI_API_KEY" },
   openrouter: { apiKey: "OPENROUTER_API_KEY", baseUrl: "OPENROUTER_BASE_URL" },
-  cline: { authToken: "CLINE_AUTH_TOKEN" },
   groq: { apiKey: "GROQ_API_KEY" },
+  cline: { authToken: "CLINE_AUTH_TOKEN" },
   copilot: { authToken: "GITHUB_TOKEN" },
   opencodezen: { apiKey: "OPENCODE_ZEN_API_KEY" },
   azure: { apiKey: "AZURE_OPENAI_API_KEY", baseUrl: "AZURE_OPENAI_ENDPOINT" },

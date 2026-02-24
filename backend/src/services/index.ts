@@ -4,6 +4,8 @@ export { UserCredentialsService, createUserCredentialsService } from './user-cre
 
 export { AuditLogService, createAuditLogService, SENSITIVE_ACTIONS } from './audit';
 
+export { TimeTravelService } from './timetravel';
+
 export type {
   UserCredential,
   CredentialAuditLog,
@@ -17,3 +19,5 @@ export type {
   AuditLogQueryResult,
   SensitiveAction,
 } from './audit';
+
+export type { TimeTravelState, TimeTravelOptions } from './timetravel';
