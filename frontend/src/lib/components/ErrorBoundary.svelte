@@ -17,8 +17,9 @@
 
     // Handle unhandled promise rejections
     function handleRejection(event: PromiseRejectionEvent) {
-        error = event.reason instanceof Error ? event.reason : new Error(String(event.reason));
-        errorStack = error.stack;
+        const caughtError = event.reason instanceof Error ? event.reason : new Error(String(event.reason));
+        error = caughtError;
+        errorStack = caughtError.stack || null;
         console.error('Unhandled rejection caught by boundary:', event.reason);
 
         event.preventDefault();
