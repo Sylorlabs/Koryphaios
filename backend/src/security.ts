@@ -222,17 +222,22 @@ export function sanitizeForPrompt(input: string, maxLength = 10_000): string {
     /```system/gi,
   ];
 
-  for (const pattern of injectionPatterns) {
-    cleaned = cleaned.replaceAll(pattern, "");
+  // Recursive sanitization to prevent nested pattern bypass
+  let changed = true;
+  while (changed) {
+    const before = cleaned;
+    for (const pattern of injectionPatterns) {
+      cleaned = cleaned.replaceAll(pattern, "");
+    }
+    changed = before !== cleaned;
   }
 
   // Escape characters that could break template literal interpolation
   cleaned = cleaned
     .replaceAll("\\", String.raw`\\`)
     .replaceAll("`", String.raw`\``)
-    .replaceAll("$", String.raw`\$`);
-
-
+    .replaceAll("$", String.raw`\$`)
+    .replaceAll("${", String.raw`\${`);
 
   return cleaned;
 }
@@ -283,10 +288,22 @@ export function validateProviderName(name: unknown): ProviderName | null {
 const ALGORITHM = "aes-256-gcm";
 const SALT = "koryphaios-key-salt-v1";
 
+let warnedAboutInsecureKey = false;
+
 /**
  * @deprecated Use EnvelopeEncryption from './crypto' instead
  */
 function deriveEncryptionKey(): Buffer {
+  if (process.env.KORYPHAIOS_MASTER_KEY) {
+    return scryptSync(process.env.KORYPHAIOS_MASTER_KEY, "koryphaios-master-salt", 32);
+  }
+
+  if (!warnedAboutInsecureKey) {
+    console.warn("SECURITY WARNING: Using insecure fallback encryption key. Set KORYPHAIOS_MASTER_KEY env var to secure your API keys.");
+    warnedAboutInsecureKey = true;
+  }
+
+  // Derive from machine-specific data to avoid plaintext keys
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   const os = require("os") as typeof import("os");
   const hostname = os.hostname();

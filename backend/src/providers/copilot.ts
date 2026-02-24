@@ -61,7 +61,7 @@ export class CopilotProvider extends OpenAIProvider {
     const ghToken = config.authToken ?? detectCopilotToken();
     // Initialize parent without a bearer — token is exchanged lazily on first request
     super(
-      { ...config, apiKey: undefined, authToken: ghToken ?? undefined },
+      { ...config, apiKey: undefined, authToken: ghToken ?? undefined, headers: { ...config.headers, ...COPILOT_HEADERS } },
       "copilot",
       COPILOT_CHAT_URL,
     );
@@ -94,7 +94,7 @@ export class CopilotProvider extends OpenAIProvider {
     this._client = new OpenAI({
       apiKey: bearer,
       baseURL: COPILOT_CHAT_URL,
-      defaultHeaders: { ...COPILOT_HEADERS },
+      defaultHeaders: { ...this.config.headers },
     });
     yield* super.streamResponse(request);
   }
