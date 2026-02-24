@@ -25,11 +25,13 @@ export function detectCopilotToken(): string | null {
   if (process.env.GITHUB_COPILOT_TOKEN) return process.env.GITHUB_COPILOT_TOKEN;
 
   // 1. Try 'gh' CLI (Semantic Auth)
-  const gh = spawnSync(["gh", "auth", "token"], { stdout: "pipe", stderr: "pipe" });
-  if (gh.exitCode === 0) {
-    const token = gh.stdout.toString().trim();
-    if (token) return token;
-  }
+  try {
+    const gh = spawnSync(["gh", "auth", "token"], { stdout: "pipe", stderr: "pipe" });
+    if (gh.exitCode === 0) {
+      const token = gh.stdout.toString().trim();
+      if (token) return token;
+    }
+  } catch {}
 
   // 2. Fallback to file-based detection
   const configDir = getConfigDir();
@@ -61,13 +63,15 @@ export function detectClaudeCodeToken(): string | null {
   // 1. Try 'claude status' (Semantic Auth)
   // Claude Code CLI stores credentials internally; 'status' tells us if we're logged in.
   // Note: We might need to parse JSON if they support --json
-  const status = spawnSync(["claude", "status", "--json"], { stdout: "pipe", stderr: "pipe" });
-  if (status.exitCode === 0) {
-    try {
-      const data = JSON.parse(status.stdout.toString());
-      if (data?.loggedIn && data?.oauthToken) return data.oauthToken;
-    } catch {}
-  }
+  try {
+    const status = spawnSync(["claude", "status", "--json"], { stdout: "pipe", stderr: "pipe" });
+    if (status.exitCode === 0) {
+      try {
+        const data = JSON.parse(status.stdout.toString());
+        if (data?.loggedIn && data?.oauthToken) return data.oauthToken;
+      } catch {}
+    }
+  } catch {}
 
   // 2. Fallback to file-based
   const paths = [
@@ -112,29 +116,40 @@ export function detectCodexToken(): string | null {
   return process.env.CODEX_AUTH_TOKEN || null;
 }
 
+/**
+ * Detects Google Cloud / Gemini CLI auth state.
+ */
 export function detectGeminiCLIToken(): string | null {
-  if (process.env.GOOGLE_CLI_TOKEN) return process.env.GOOGLE_CLI_TOKEN;
+  // 1. Try 'gcloud' (Semantic Auth)
+  try {
+    const gcloud = spawnSync(["gcloud", "auth", "print-access-token"], { stdout: "pipe", stderr: "pipe" });
+    if (gcloud.exitCode === 0) {
+      const token = gcloud.stdout.toString().trim();
+      if (token) return token;
+    }
+  } catch {}
 
-  const gcloud = spawnSync(["gcloud", "auth", "print-access-token"], { stdout: "pipe", stderr: "pipe" });
-  if (gcloud.exitCode === 0) {
-    const token = gcloud.stdout.toString().trim();
-    if (token && token.length > 10) return token;
-  }
-
+  // 2. Fallback to file-based (detecting existence of creds)
   const paths = [
+    join(homedir(), ".gemini", "oauth_creds.json"),
+    join(getConfigDir(), "gcloud", "credentials.db"),
+    join(getConfigDir(), "gcloud", "access_tokens.db"),
     join(getConfigDir(), "gcloud", "application_default_credentials.json"),
   ];
 
   for (const p of paths) {
     if (!existsSync(p)) continue;
     try {
-      const data = JSON.parse(readFileSync(p, "utf-8"));
-      if (data?.access_token) return data.access_token;
+      if (p.endsWith(".json")) {
+        const data = JSON.parse(readFileSync(p, "utf-8"));
+        if (data?.access_token) return data.access_token;
+      }
+      return "cli:detected";
     } catch {
       continue;
     }
   }
-  return null;
+  return process.env.GOOGLE_CLI_TOKEN || null;
 }
 
 /**
