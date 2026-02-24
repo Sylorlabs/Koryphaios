@@ -53,7 +53,7 @@ Choose your limit based on available system memory:
 ## API Usage
 
 ```typescript
-import { WorkspaceManager, WorkspaceError } from "@/kory";
+import { WorkspaceManager } from "@/kory";
 import { loadConfig } from "@/runtime/config";
 
 // Initialize with configuration

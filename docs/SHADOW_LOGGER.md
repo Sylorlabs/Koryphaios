@@ -30,7 +30,7 @@ const timeTravel = new TimeTravelService("/path/to/repo", {
 
 // After AI makes changes
 timeTravel.checkpoint("Fixed login bug", {
-  model: "claude-3-5-sonnet",
+  model: "claude-sonnet-4-5",
   prompt: "Fix the authentication bug in login.ts",
   cost: 0.023,
   tokensIn: 1500,
@@ -58,7 +58,7 @@ const logger = new ShadowLogger("/path/to/repo");
 
 // Create ghost commit
 const ghostHash = logger.createGhostCommit("Added user API endpoint", {
-  model: "gpt-4o",
+  model: "gpt-5",
   prompt: "Create a REST API for user management",
   cost: 0.045,
 });
@@ -170,7 +170,6 @@ const preview = timeTravel.previewTravel(ghostHash);
 | `travelTo(hash)` | `{ success, message, newHash }` | Go to specific state |
 | `previewTravel(hash)` | `{ canTravel, diff, filesChanged }` | Preview changes |
 | `createBranchFromState(hash, branchName)` | `{ success, message }` | Branch from ghost |
-| `prune(days)` | `{ success, message }` | Clean old states |
 | `exportTimeline()` | `JSON object` | Export for backup |
 
 ## Configuration
@@ -213,7 +212,7 @@ timeTravel.checkpoint("Added semicolon", { ... }); // Too granular
 
 ```typescript
 timeTravel.checkpoint("Fixed API bug", {
-  model: "claude-3-5-sonnet",
+  model: "claude-sonnet-4-5",
   prompt: userMessage,        // Full prompt for context
   cost: calculateCost(),      // Track spending
   tokensIn: usage.input,
