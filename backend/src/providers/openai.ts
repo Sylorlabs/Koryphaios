@@ -2,7 +2,9 @@
 // Also used as base for Groq, OpenRouter, xAI (OpenAI-compatible endpoints).
 
 import OpenAI from "openai";
-import type { ProviderConfig, ProviderName } from "@koryphaios/shared";
+import type { ProviderConfig, ProviderName, ModelDef } from "@koryphaios/shared";
+
+
 import {
   type Provider,
   type ProviderEvent,
@@ -10,29 +12,89 @@ import {
   type ProviderContentBlock,
   getModelsForProvider,
   resolveModel,
+  createGenericModel,
 } from "./types";
+import { withRetry } from "./utils";
+import { createUsageInterceptingFetch } from "../credit-accountant";
 
 export class OpenAIProvider implements Provider {
-  protected client: OpenAI;
+  protected _client: OpenAI | null = null;
 
   constructor(
     readonly config: ProviderConfig,
     readonly name: ProviderName = "openai",
-    baseUrl?: string,
-  ) {
-    this.client = new OpenAI({
-      apiKey: config.apiKey,
-      baseURL: baseUrl ?? config.baseUrl,
-      defaultHeaders: config.headers,
-    });
+    private readonly baseUrl?: string,
+  ) { }
+
+  protected get client(): OpenAI {
+    if (!this._client) {
+      const apiKey = this.config.apiKey || this.config.authToken;
+      this._client = new OpenAI({
+        apiKey: apiKey || "placeholder",
+        baseURL: this.baseUrl ?? this.config.baseUrl,
+        defaultHeaders: this.config.headers,
+        fetch: createUsageInterceptingFetch(globalThis.fetch),
+      });
+    }
+    return this._client;
+
+
   }
 
   isAvailable(): boolean {
-    return !this.config.disabled && !!this.config.apiKey;
+    return !this.config.disabled && !!(this.config.apiKey || this.config.authToken);
   }
 
-  listModels() {
-    return getModelsForProvider(this.name);
+  private cachedModels: ModelDef[] | null = null;
+  private lastFetch = 0;
+  private fetchInProgress = false;
+
+  listModels(): ModelDef[] {
+    const localModels = getModelsForProvider(this.name);
+
+    if (!this.isAvailable()) {
+      return localModels;
+    }
+
+    // Return cached if fresh
+    if (this.cachedModels && Date.now() - this.lastFetch < 5 * 60 * 1000) {
+      return this.cachedModels;
+    }
+
+    // Trigger background refresh, return what we have now
+    this.refreshModelsInBackground(localModels);
+    return this.cachedModels ?? localModels;
+  }
+
+  private refreshModelsInBackground(localModels: ModelDef[]) {
+    if (this.fetchInProgress) return;
+    this.fetchInProgress = true;
+
+    withRetry(() => this.client.models.list())
+      .then(async (response) => {
+        const remoteModels: ModelDef[] = [];
+        for await (const model of response) {
+          const id = model.id;
+          const existing = localModels.find(m => m.apiModelId === id || m.id === id);
+          if (existing) continue;
+
+          const lowerId = id.toLowerCase();
+          if (lowerId.includes("gpt") || lowerId.includes("o1") || lowerId.includes("o3") || lowerId.includes("o4")) {
+            remoteModels.push(createGenericModel(id, this.name));
+          }
+        }
+
+        this.cachedModels = [...localModels, ...remoteModels];
+        this.lastFetch = Date.now();
+      })
+      .catch(() => {
+        // Keep local models on failure
+        this.cachedModels ??= localModels;
+
+      })
+      .finally(() => {
+        this.fetchInProgress = false;
+      });
   }
 
   async *streamResponse(request: StreamRequest): AsyncGenerator<ProviderEvent> {
@@ -49,6 +111,8 @@ export class OpenAIProvider implements Provider {
     // Check if the specific model supports reasoning
     const modelDef = resolveModel(request.model);
     const canReason = modelDef?.canReason ?? false;
+    const reasoningEffort = request.reasoningLevel?.toLowerCase();
+    const supportedEfforts = ["none", "minimal", "low", "medium", "high", "xhigh"];
 
     const params: OpenAI.ChatCompletionCreateParamsStreaming = {
       model: modelDef?.apiModelId ?? request.model,
@@ -58,16 +122,18 @@ export class OpenAIProvider implements Provider {
       ...(request.maxTokens && { max_completion_tokens: request.maxTokens }),
       ...(request.temperature !== undefined && { temperature: request.temperature }),
       ...(tools?.length && { tools }),
-      // Only send reasoning_effort if the model supports it
-      ...(canReason && request.reasoningLevel && ["low", "medium", "high"].includes(request.reasoningLevel) && { 
-        reasoning_effort: request.reasoningLevel as any 
+      // Only send reasoning_effort if model + selected level supports it.
+      ...(canReason && reasoningEffort && supportedEfforts.includes(reasoningEffort) && {
+        reasoning_effort: reasoningEffort as any
       }),
     };
 
     try {
-      const stream = await this.client.chat.completions.create(params, {
-        signal: request.signal,
-      });
+      const stream = await withRetry(() =>
+        this.client.chat.completions.create(params, {
+          signal: request.signal,
+        })
+      );
 
       const toolCallBuffers = new Map<number, { id: string; name: string; args: string }>();
 
@@ -79,6 +145,7 @@ export class OpenAIProvider implements Provider {
               type: "usage_update",
               tokensIn: chunk.usage.prompt_tokens,
               tokensOut: chunk.usage.completion_tokens,
+              tokensCache: (chunk.usage as any).prompt_tokens_details?.cached_tokens,
             };
           }
           continue;
@@ -126,26 +193,37 @@ export class OpenAIProvider implements Provider {
 
         // Completion
         if (choice.finish_reason) {
-          // Emit all tool call completions
-          for (const [, buf] of toolCallBuffers) {
-            yield {
-              type: "tool_use_stop",
-              toolCallId: buf.id,
-              toolName: buf.name,
-              toolInput: buf.args,
-            };
-          }
-          toolCallBuffers.clear();
-
+          yield* this.flushToolCalls(toolCallBuffers);
           yield {
             type: "complete",
-            finishReason: choice.finish_reason === "tool_calls" ? "tool_use" : "end_turn",
+            finishReason: this.mapFinishReason(choice.finish_reason),
           };
         }
       }
     } catch (err: any) {
-      if (err.name === "AbortError") return;
+      if (err.name === "AbortError" || err.name === "AbortSignal") return;
       yield { type: "error", error: err.message ?? String(err) };
+    }
+  }
+
+  private *flushToolCalls(toolCallBuffers: Map<number, { id: string; name: string; args: string }>) {
+    for (const [, buf] of toolCallBuffers) {
+      yield {
+        type: "tool_use_stop",
+        toolCallId: buf.id,
+        toolName: buf.name,
+        toolInput: buf.args,
+      } as ProviderEvent;
+    }
+    toolCallBuffers.clear();
+  }
+
+  private mapFinishReason(reason: string): ProviderEvent["finishReason"] {
+    switch (reason) {
+      case "stop": return "stop";
+      case "length": return "max_tokens";
+      case "tool_calls": return "tool_use";
+      default: return "end_turn";
     }
   }
 
@@ -160,54 +238,81 @@ export class OpenAIProvider implements Provider {
       if (msg.role === "system") continue;
 
       if (typeof msg.content === "string") {
-        result.push({ role: msg.role as any, content: msg.content });
+        if (msg.role === "tool") {
+          result.push({
+            role: "tool",
+            tool_call_id: msg.tool_call_id ?? "",
+            content: msg.content,
+          });
+        } else if (msg.role === "assistant" && msg.tool_calls?.length) {
+          result.push({
+            role: "assistant",
+            content: msg.content || null,
+            tool_calls: msg.tool_calls.map((tc) => ({
+              id: tc.id,
+              type: "function" as const,
+              function: { name: tc.name, arguments: JSON.stringify(tc.input ?? {}) },
+            })),
+          });
+        } else {
+          result.push({ role: msg.role as any, content: msg.content });
+        }
         continue;
       }
 
+
       const blocks = msg.content as ProviderContentBlock[];
       if (msg.role === "assistant") {
-        const text = blocks.filter((b) => b.type === "text").map((b) => b.text).join("");
-        const toolCalls = blocks
-          .filter((b) => b.type === "tool_use")
-          .map((b) => ({
-            id: b.toolCallId ?? "",
-            type: "function" as const,
-            function: { name: b.toolName ?? "", arguments: JSON.stringify(b.toolInput ?? {}) },
-          }));
-
-        result.push({
-          role: "assistant",
-          content: text || null,
-          ...(toolCalls.length && { tool_calls: toolCalls }),
-        });
+        result.push(this.mapAssistantMessage(blocks));
       } else if (msg.role === "user") {
-        // Check for tool results
-        const toolResults = blocks.filter((b) => b.type === "tool_result");
-        if (toolResults.length) {
-          for (const tr of toolResults) {
-            result.push({
-              role: "tool",
-              tool_call_id: tr.toolCallId ?? "",
-              content: tr.toolOutput ?? "",
-            });
-          }
-        } else {
-          const content: OpenAI.ChatCompletionContentPart[] = blocks.map((b) => {
-            if (b.type === "image") {
-              return {
-                type: "image_url",
-                image_url: { url: `data:${b.imageMimeType};base64,${b.imageData}` },
-              };
-            }
-            return { type: "text", text: b.text ?? "" };
-          });
-          result.push({ role: "user", content });
-        }
+        this.mapUserMessage(blocks, result);
       }
     }
 
     return result;
   }
+
+  private mapAssistantMessage(blocks: ProviderContentBlock[]): OpenAI.ChatCompletionAssistantMessageParam {
+    const text = blocks.filter((b) => b.type === "text").map((b) => b.text).join("");
+    const toolCalls = blocks
+      .filter((b) => b.type === "tool_use")
+      .map((b) => ({
+        id: b.toolCallId ?? "",
+        type: "function" as const,
+        function: { name: b.toolName ?? "", arguments: JSON.stringify(b.toolInput ?? {}) },
+      }));
+
+    return {
+      role: "assistant",
+      content: text || null,
+      ...(toolCalls.length && { tool_calls: toolCalls }),
+    };
+  }
+
+  private mapUserMessage(blocks: ProviderContentBlock[], result: OpenAI.ChatCompletionMessageParam[]) {
+    const toolResults = blocks.filter((b) => b.type === "tool_result");
+    if (toolResults.length) {
+      for (const tr of toolResults) {
+        result.push({
+          role: "tool",
+          tool_call_id: tr.toolCallId ?? "",
+          content: tr.toolOutput ?? "",
+        });
+      }
+    } else {
+      const content: OpenAI.ChatCompletionContentPart[] = blocks.map((b) => {
+        if (b.type === "image") {
+          return {
+            type: "image_url",
+            image_url: { url: `data:${b.imageMimeType};base64,${b.imageData}` },
+          };
+        }
+        return { type: "text", text: b.text ?? "" };
+      });
+      result.push({ role: "user", content });
+    }
+  }
+
 }
 
 // ─── OpenAI-Compatible Provider Factories ───────────────────────────────────
