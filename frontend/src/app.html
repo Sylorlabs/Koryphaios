@@ -2,10 +2,16 @@
 <html lang="en">
 	<head>
 		<meta charset="utf-8" />
+		<link rel="icon" href="%sveltekit.assets%/favicon.svg" />
 		<meta name="viewport" content="width=device-width, initial-scale=1" />
 		%sveltekit.head%
 	</head>
 	<body data-sveltekit-preload-data="hover">
+		<noscript>
+			<div style="padding: 2rem; background: #0a0a0b; color: #e8e8ed; font-family: system-ui, sans-serif; min-height: 100vh;">
+				<p>Koryphaios requires JavaScript. Please enable it and reload.</p>
+			</div>
+		</noscript>
 		<div style="display: contents">%sveltekit.body%</div>
 	</body>
 </html>

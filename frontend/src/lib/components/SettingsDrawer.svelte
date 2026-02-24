@@ -157,7 +157,7 @@
     // Provider placeholder mappings
     const providerPlaceholders: Record<string, string> = {
       anthropic: 'sk-ant-...',
-      cline: 'CLI authentication',
+      cline: 'Must have authed with CLI first',
       openai: 'sk-...',
       google: 'AIza...',
       xai: 'xai-...',
@@ -1103,7 +1103,11 @@
                       {/if}
                       {#if caps.authMode === 'auth_only'}
                         <div class="text-[10px] mb-1" style="color: var(--color-text-muted);">
-                          Authenticate in your browser, then verify the connection.
+                          {#if prov.key === 'cline'}
+                            Must have authed with CLI first (run <code>cline auth</code> in your terminal), then verify the connection.
+                          {:else}
+                            Authenticate in your browser, then verify the connection.
+                          {/if}
                         </div>
                         {#if prov.key === 'copilot'}
                           <button

@@ -13,6 +13,18 @@ export function initDb(dataDir: string) {
   // Enable WAL mode for better concurrency
   db.exec("PRAGMA journal_mode = WAL;");
 
+  // Users table (required for getOrCreateLocalUser / auth)
+  db.run(`
+    CREATE TABLE IF NOT EXISTS users (
+      id TEXT PRIMARY KEY,
+      username TEXT UNIQUE NOT NULL,
+      password_hash TEXT NOT NULL,
+      is_admin INTEGER DEFAULT 0,
+      created_at INTEGER,
+      updated_at INTEGER
+    )
+  `);
+
   // Create tables
   db.run(`
     CREATE TABLE IF NOT EXISTS sessions (

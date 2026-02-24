@@ -19,29 +19,40 @@ export const authStore = {
   get isInitialized() { return isInitialized; },
   get isAuthenticated() { return !!user; },
 
-  async initialize() {
+  /** Returns true if backend responded (even with no user), false if backend unreachable (5xx or network error). */
+  async initialize(): Promise<boolean> {
     if (!browser) {
       isInitialized = true;
-      return;
+      return true;
     }
-    if (isInitialized) return;
+    if (isInitialized) return true;
 
     try {
       const res = await fetch('/api/auth/me', { credentials: 'include' });
       if (res.ok) {
-        const data = await res.json();
-        if (data?.ok && data?.data?.user) {
-          user = data.data.user;
+        const text = await res.text();
+        if (text.trim()) {
+          try {
+            const data = JSON.parse(text);
+            if (data?.ok && data?.data?.user) user = data.data.user;
+            else user = null;
+          } catch {
+            user = null;
+          }
         } else {
           user = null;
         }
-      } else {
-        user = null;
+        isInitialized = true;
+        return true;
       }
+      user = null;
+      isInitialized = true;
+      return false; // 5xx or 4xx → backend unreachable or auth issue
     } catch {
       user = null;
+      isInitialized = true;
+      return false;
     }
-    isInitialized = true;
   },
 
   setUser(u: AuthUser | null) {
