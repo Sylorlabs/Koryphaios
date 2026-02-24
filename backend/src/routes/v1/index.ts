@@ -13,7 +13,7 @@
 import { createApiKeyService } from "../../apikeys/service";
 import { createUserCredentialsService } from "../../services/user-credentials";
 import { createAuditLogService } from "../../services/audit";
-import { getOrCreateLocalUser, getOrCreateGuestUser } from "../../auth/auth";
+import { getOrCreateLocalUser } from "../../auth/auth";
 import { serverLog } from "../../logger";
 import { initializeRedis, getRedisClient } from "../../redis/client";
 import { SlidingWindowRateLimiter, TokenBucketRateLimiter } from "../../ratelimit";
