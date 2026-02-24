@@ -230,7 +230,7 @@ export class CopilotProvider extends OpenAIProvider {
       this._copilotClient = new OpenAI({
         apiKey: this.bearerToken || "placeholder-awaiting-async-init",
         baseURL: COPILOT_CHAT_URL,
-        defaultHeaders: { ...this.config.headers, ...COPILOT_HEADERS },
+        defaultHeaders: { ...this.config.headers }, // Headers are already merged in constructor
       });
     }
     return this._copilotClient;
