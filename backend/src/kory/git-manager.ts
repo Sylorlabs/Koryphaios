@@ -16,7 +16,7 @@ export interface GitFileStatus {
 export class GitManager {
   constructor(private workingDirectory: string) {}
 
-  protected runGit(args: string[]): { success: boolean; output: string } {
+  public runGit(args: string[]): { success: boolean; output: string } {
     const proc = spawnSync(["git", ...args], {
       cwd: this.workingDirectory,
       stdout: "pipe",

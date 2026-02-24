@@ -283,17 +283,20 @@ async function main() {
             const data = getReconciliation();
             return json(
               {
-                localEstimate: data.localEstimate,
-                cloudReality: data.cloudReality,
-                driftPercent: data.driftPercent,
-                highlightDrift: data.highlightDrift,
+                ok: true,
+                data: {
+                  localEstimate: data.localEstimate,
+                  cloudReality: data.cloudReality,
+                  driftPercent: data.driftPercent,
+                  highlightDrift: data.highlightDrift,
+                },
               },
               200,
               corsHeaders
             );
           } catch (err: any) {
             serverLog.error({ err }, "Failed to get billing credits");
-            return json({ error: "Failed to get billing credits" }, 500, corsHeaders);
+            return json({ ok: false, error: "Failed to get billing credits" }, 500, corsHeaders);
           }
         }
 
@@ -338,7 +341,7 @@ async function main() {
           } catch (err: any) {
             serverLog.error({ err }, "Error fetching sessions");
             return json(
-              { ok: false, error: "Failed to fetch sessions", detail: err?.message ?? String(err) },
+              { ok: false, error: `Failed to fetch sessions: ${err?.message ?? String(err)}` },
               500,
               corsHeaders
             );

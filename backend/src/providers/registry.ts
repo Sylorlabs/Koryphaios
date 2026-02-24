@@ -21,6 +21,7 @@ import { ClineProvider } from "./cline";
 import { decryptApiKey, secureDecrypt, isUsingSecureEncryption } from "../security";
 import { resolveModel, getModelsForProvider, isLegacyModel, type StreamRequest, type ProviderEvent, type Provider } from "./types";
 import { withRetry } from "./utils";
+import { getDb } from "../db/sqlite";
 import { recordUsage as creditRecordUsage } from "../credit-accountant";
 
 // Environment variable mappings for real providers only
@@ -1082,10 +1083,10 @@ class ProviderRegistry {
   /** Check if provider was previously marked invalid. */
   private isKeyMarkedInvalid(name: ProviderName): boolean {
     try {
-      const { getDb } = require("../db/sqlite");
-      const row = getDb()
-        .query<{ provider: string }>("SELECT provider FROM provider_key_invalid WHERE provider = ?")
-        .get(name);
+      const db = getDb();
+      const row = db
+        .query("SELECT provider FROM provider_key_invalid WHERE provider = ?")
+        .get(name) as { provider: string } | null;
       return !!row;
     } catch {
       return false;
