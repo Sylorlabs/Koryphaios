@@ -1,6 +1,6 @@
 <script lang="ts">
-  import {
-    MessageSquare,
+  import { 
+    MessageSquare, 
     Send,
     ChevronRight,
     ChevronDown,
@@ -23,13 +23,13 @@
   };
   marked.setOptions({ renderer });
 
-  let {
-    entry,
-    isSelected,
-    isExpanded,
-    onSelect,
-    onToggleGroup,
-    onDelete
+  let { 
+    entry, 
+    isSelected, 
+    isExpanded, 
+    onSelect, 
+    onToggleGroup, 
+    onDelete 
   } = $props<{
     entry: FeedEntryLocal;
     isSelected: boolean;
@@ -99,8 +99,8 @@
   }
 </script>
 
-<div
-  class="flex flex-col group"
+<div 
+  class="flex flex-col group" 
   in:fly={{ y: 20, duration: (Date.now() - entry.timestamp < 5000) ? 300 : 0 }}
   style="content-visibility: auto; contain-intrinsic-size: 80px;"
 >
@@ -133,7 +133,7 @@
       <div
         class="shrink-0 flex items-center justify-center w-5 h-6 pt-1"
       >
-        <AnimatedStatusIcon status={getStatusForType(entry.type)} size={14} isManager={entry.agentId === 'kory-manager'} phase={entry.type === 'thought' ? ((entry.metadata?.phase as string) ?? '') : ''} />
+        <AnimatedStatusIcon status={getStatusForType(entry.type)} size={14} isManager={entry.agentId === 'kory-manager'} />
       </div>
     {/if}
 
@@ -142,10 +142,10 @@
         {entry.agentName}
       </span>
       {#if entry.type === 'thinking'}
-          <ThinkingBlock
-            text={entry.text}
-            durationMs={entry.durationMs}
-            agentName={entry.agentName}
+          <ThinkingBlock 
+            text={entry.text} 
+            durationMs={entry.durationMs} 
+            agentName={entry.agentName} 
           />
       {:else if entry.type === 'user_message' || entry.type === 'content' || entry.type === 'thought' || entry.type === 'tool_result'}
           <div class="{getEntryColor(entry.type)} break-words mt-1 markdown-content">

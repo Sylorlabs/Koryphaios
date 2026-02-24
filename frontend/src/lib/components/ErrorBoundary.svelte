@@ -10,25 +10,24 @@
         error = event.error;
         errorStack = event.error?.stack || null;
         console.error('Error caught by boundary:', event.error);
-
+        
         // Prevent default error handling
         event.preventDefault();
     }
 
     // Handle unhandled promise rejections
     function handleRejection(event: PromiseRejectionEvent) {
-        const caughtError = event.reason instanceof Error ? event.reason : new Error(String(event.reason));
-        error = caughtError;
-        errorStack = caughtError.stack || null;
+        error = event.reason instanceof Error ? event.reason : new Error(String(event.reason));
+        errorStack = error.stack;
         console.error('Unhandled rejection caught by boundary:', event.reason);
-
+        
         event.preventDefault();
     }
 
     onMount(() => {
         window.addEventListener('error', handleError);
         window.addEventListener('unhandledrejection', handleRejection);
-
+        
         return () => {
             window.removeEventListener('error', handleError);
             window.removeEventListener('unhandledrejection', handleRejection);
@@ -64,17 +63,17 @@
                     <line x1="12" y1="16" x2="12.01" y2="16"/>
                 </svg>
             </div>
-
+            
             <h2>Something went wrong</h2>
             <p class="error-message">{error.message}</p>
-
+            
             {#if errorStack}
                 <details class="error-details">
                     <summary>Stack Trace</summary>
                     <pre>{errorStack}</pre>
                 </details>
             {/if}
-
+            
             <div class="error-actions">
                 <button class="btn btn-primary" onclick={dismiss}>
                     Dismiss

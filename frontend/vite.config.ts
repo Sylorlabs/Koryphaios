@@ -28,26 +28,16 @@ function loadBackendTargetFromConfig() {
 	return null;
 }
 
-const backendFromConfig = loadBackendTargetFromConfig();
-const backendPort = process.env.KORYPHAIOS_PORT ?? '3000';
-const backendHttp = process.env.KORY_BACKEND_URL ?? backendFromConfig ?? `http://127.0.0.1:${backendPort}`;
-const backendWs = backendHttp.replace(/^http/, 'ws');
-const backendWsFull = `${backendWs}/ws`;
-
 export default defineConfig({
 	plugins: [tailwindcss(), sveltekit()],
 	server: {
-		host: '127.0.0.1',
+		host: '0.0.0.0',
 		proxy: {
-			'/api': backendHttp,
+			'/api': 'http://127.0.0.1:3001',
 			'/ws': {
-				target: backendWs,
+				target: 'ws://127.0.0.1:3001',
 				ws: true,
 			},
 		},
-	},
-	define: {
-		// Expose backend WS URL so client can fall back to direct connection if proxy fails (e.g. backend not same host)
-		'import.meta.env.VITE_BACKEND_WS_URL': JSON.stringify(backendWsFull),
 	},
 });
