@@ -34,7 +34,7 @@
   }
 
   let glowClass = $derived(
-    agent.identity.domain === 'frontend' ? 'glow-codex' :
+    agent.identity.domain === 'ui' ? 'glow-codex' :
     agent.identity.domain === 'backend' ? 'glow-google' :
     agent.identity.domain === 'test' ? 'glow-test' :
     'glow-claude'

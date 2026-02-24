@@ -17,6 +17,8 @@ export interface GitState {
   loading: boolean;
   selectedFile: string | null;
   currentDiff: string | null;
+  currentFileContent: string | null;
+  activeDiff: { file: string; staged: boolean } | null;
 }
 
 let state = $state<GitState>({
@@ -27,6 +29,8 @@ let state = $state<GitState>({
   loading: false,
   selectedFile: null,
   currentDiff: null,
+  currentFileContent: null,
+  activeDiff: null,
 });
 
 async function refreshStatus() {
@@ -104,6 +108,7 @@ async function merge(branch: string) {
 async function loadDiff(file: string, staged: boolean) {
   state.selectedFile = file;
   state.currentDiff = null;
+  state.activeDiff = { file, staged };
   try {
     const res = await apiFetch(`/api/git/diff?file=${encodeURIComponent(file)}&staged=${staged}`);
     const data = await res.json();
@@ -113,6 +118,13 @@ async function loadDiff(file: string, staged: boolean) {
   } catch (err) {
     console.error('Failed to load diff', err);
   }
+}
+
+function closeDiff() {
+  state.selectedFile = null;
+  state.currentDiff = null;
+  state.activeDiff = null;
+  state.currentFileContent = null;
 }
 
 async function stageFile(file: string) {
@@ -237,4 +249,5 @@ export const gitStore = {
   checkout,
   merge,
   clearConflicts,
+  closeDiff,
 };

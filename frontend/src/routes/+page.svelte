@@ -33,9 +33,11 @@
   let showAgents = $state(false);
   let showSidebar = $state(true);
   let showGit = $state(false);
+  let showFileContext = $state(false);
   let showSidebarBeforeZen = $state(true);
   let showAgentsBeforeZen = $state(false);
   let showGitBeforeZen = $state(false);
+  let showFileContextBeforeZen = $state(false);
   let showCommandPalette = $state(false);
   let zenMode = $state(false);
   let inputRef = $state<HTMLTextAreaElement>();
@@ -471,20 +473,26 @@ Release notes
       case 'toggle_sidebar':
         showSidebar = !showSidebar;
         break;
+      case 'toggle_file_context':
+        showFileContext = !showFileContext;
+        break;
       case 'toggle_zen_mode':
         if (!zenMode) {
           showSidebarBeforeZen = showSidebar;
           showAgentsBeforeZen = showAgents;
           showGitBeforeZen = showGit;
+          showFileContextBeforeZen = showFileContext;
           showSidebar = false;
           showAgents = false;
           showGit = false;
+          showFileContext = false;
           zenMode = true;
         } else {
           zenMode = false;
           showSidebar = showSidebarBeforeZen;
           showAgents = showAgentsBeforeZen;
           showGit = showGitBeforeZen;
+          showFileContext = showFileContextBeforeZen;
         }
         break;
       case 'open_settings':
