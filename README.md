@@ -16,6 +16,8 @@ Koryphaios is a full-stack application that orchestrates AI agents across multip
 
 - **Multi-Provider Support** — 6 native provider integrations (Anthropic, OpenAI, Gemini, Copilot, Codex, GeminiCLI) plus 80+ models via OpenAI-compatible adapters (Groq, xAI, Ollama, and more)
 - **Intelligent Agent Routing** — Automatic model selection based on task domain and provider availability
+- **Time Travel (Undo/Redo)** — Shadow Logger creates ghost commits for every AI change, allowing instant recovery to any previous state
+- **Parallel Agent Isolation** — Git worktrees enable concurrent agents without file clobbering
 - **Real-Time Communication** — WebSocket-based streaming with SSE fallback for live updates
 - **MCP Integration** — Model Context Protocol support for extensible tool systems
 - **Session Management** — Persistent conversation history with cost tracking and token accounting
@@ -31,14 +33,15 @@ Koryphaios is a full-stack application that orchestrates AI agents across multip
 │                        Frontend (SvelteKit)                      │
 │  • Real-time UI with WebSocket streaming                        │
 │  • Session management, cost tracking, agent monitoring          │
+│  • Time Travel UI (undo/redo via ghost commits)                 │
 └────────────────────┬────────────────────────────────────────────┘
                      │ WebSocket / REST API
 ┌────────────────────┴────────────────────────────────────────────┐
 │                      Backend (Bun Server)                        │
 │  ┌──────────────────────────────────────────────────────────┐  │
 │  │  Kory Manager (Orchestrator)                             │  │
-│  │  • Analyzes tasks and routes to specialized agents       │  │
-│  │  • Manages worker lifecycle and verification             │  │
+│  │  • Full tool access (unsandboxed); asks user unless YOLO  │  │
+│  │  • Routes to workers; sees critic + workers; summarizes │  │
 │  └──────────────────────────────────────────────────────────┘  │
 │                                                                  │
 │  ┌─────────────┐  ┌─────────────┐  ┌─────────────────────┐    │
@@ -46,6 +49,13 @@ Koryphaios is a full-stack application that orchestrates AI agents across multip
 │  │  Registry   │  │  Registry   │  │   (External Tools)  │    │
 │  │  (API Auth) │  │  (Built-in) │  │                     │    │
 │  └─────────────┘  └─────────────┘  └─────────────────────┘    │
+│                                                                  │
+│  ┌─────────────────────┐  ┌────────────────────────────────┐  │
+│  │  Workspace Manager  │  │  Shadow Logger                 │  │
+│  │  (Git Worktrees)    │  │  (Ghost Commits / Time Travel) │  │
+│  │  • Parallel agent   │  │  • Undo/redo via reflog        │  │
+│  │    isolation        │  │  • Metadata via git notes      │  │
+│  └─────────────────────┘  └────────────────────────────────┘  │
 │                                                                  │
 │  ┌──────────────────────────────────────────────────────────┐  │
 │  │  Session Store (File-based persistence)                  │  │
@@ -74,6 +84,12 @@ Koryphaios is a full-stack application that orchestrates AI agents across multip
    - Provider configurations and reasoning parameters
    - WebSocket protocol definitions
    - API contracts
+
+### Agent Roles and Permissions
+
+- **Manager (Kory)** — Full access: can use all tools (bash, read/write files, web search, etc.) **unsandboxed** for simple tasks. Still asks the user for confirmation before executing delegated work unless YOLO mode is on. Sees everything: the critic’s review and sub-agent (worker) activity; synthesizes the final summary for the user.
+- **Workers (builders)** — Sandboxed: only have access to files and paths the manager granted via the plan. Use tools to implement the task; no direct user confirmation (manager handles that before delegating).
+- **Critic** — Read-only: may only use **read_file**, **grep**, **glob**, and **ls** to inspect the codebase. Sees the **full worker transcript** (thinking, tool calls, results) and outputs PASS or FAIL with feedback. The manager sees the critic’s feedback and uses it in the final summary.
 
 ---
 
@@ -145,14 +161,19 @@ See `config.example.json` for all available options.
 
 ### Development
 
+The frontend connects to the backend over WebSocket (`/ws`) and REST (`/api`). **Both must be running** for the app to work.
+
 ```bash
-# Start both backend and frontend in development mode
+# Start both backend and frontend (recommended; works on Windows and Unix)
+bun install   # installs concurrently for dev script
 bun run dev
 
-# Or start individually
-bun run dev:backend   # Backend on http://localhost:3000
-bun run dev:frontend  # Frontend on http://localhost:5173
+# Or start in two terminals
+bun run dev:backend   # Backend on http://127.0.0.1:3000
+bun run dev:frontend  # Frontend on http://127.0.0.1:5173
 ```
+
+If you see "WebSocket connection to '...' failed" in the browser console, start the backend in another terminal with `bun run dev:backend`.
 
 ### Production Build
 
@@ -163,8 +184,14 @@ bun run build
 # Type checking
 bun run typecheck
 
-# Strict validation
+# Strict validation (typecheck + frontend checks)
 bun run check
+
+# Run tests (backend unit and integration)
+bun run test
+
+# Full pre-deploy validation (check + tests)
+bun run check:full
 ```
 
 ---
@@ -195,11 +222,13 @@ bun run check
 - `POST /api/agents/cancel` — Cancel all running agents
 
 #### System
-- `GET /api/health` — Health check with system metrics
+- `GET /api/health` — Health check (no auth)
+- `GET /api/events` — SSE stream (same as WebSocket; **requires auth**: `?access_token=JWT` or `Authorization: Bearer JWT`)
+- `GET /metrics` — Prometheus metrics (**requires auth**: same as above)
 
 ### WebSocket Protocol
 
-Connect to `ws://localhost:3000/ws` for real-time updates.
+Connect to `ws://localhost:3000/ws` for real-time updates. **Requires auth:** pass token in query (`?access_token=JWT`) or `Authorization: Bearer JWT` header.
 
 **Message Format:**
 ```typescript
@@ -228,17 +257,21 @@ See `/shared/src/index.ts` for complete protocol definitions.
 
 ## Tool System
 
+Tools are restricted by role: **manager** (full), **worker** (build tools, sandboxed), **critic** (read-only: read_file, grep, glob, ls only). See [Agent roles](#agent-roles-and-permissions) above.
+
 ### Built-in Tools
 
-- **bash** — Execute shell commands
-- **read_file** — Read file contents
-- **write_file** — Create/overwrite files
-- **edit_file** — Surgical file edits
-- **grep** — Search file contents
-- **glob** — Find files by pattern
-- **ls** — List directory contents
-- **web_search** — Search the web
-- **web_fetch** — Fetch URL content
+- **bash** — Execute shell commands (manager, worker)
+- **read_file** — Read file contents (all roles)
+- **write_file** — Create/overwrite files (manager, worker)
+- **edit_file** — Surgical file edits (manager, worker)
+- **delete_file**, **move_file**, **diff**, **patch** — File ops (manager, worker)
+- **grep** — Search file contents (all roles)
+- **glob** — Find files by pattern (all roles)
+- **ls** — List directory contents (all roles)
+- **web_search**, **web_fetch** — Web (manager, worker)
+- **ask_user** — Manager asks the user (manager only)
+- **ask_manager** — Worker asks the manager (worker only)
 
 ### MCP (Model Context Protocol)
 
@@ -259,6 +292,16 @@ Koryphaios supports MCP servers for extensible tools. Configure in `koryphaios.j
 ---
 
 ## Security
+
+### Authentication
+
+- All API routes (sessions, messages, providers, git, agents) require authentication (JWT or API key).
+- WebSocket connections require a valid token (query `access_token=` or `Authorization: Bearer`).
+- **Production** (`NODE_ENV=production`):
+  - **JWT_SECRET** (min 32 characters) is required; the server will not start without it.
+  - **CORS_ORIGINS**: Comma-separated list of allowed frontend origins (e.g. `https://app.example.com`). Defaults include localhost for dev; add production origins via env or `corsOrigins` in config.
+  - **ALLOW_REGISTRATION**: Set to `false` to disable public sign-up; only existing users or default admin can sign in.
+- Optional: set `CREATE_DEFAULT_ADMIN=true` on first run to create a default `admin` / `admin` user; set it to `false` and change the password immediately after.
 
 ### API Key Management
 
@@ -359,7 +402,7 @@ This is a private project. Contributions are managed internally.
 - Check provider status at `/api/providers`
 - Review logs for detailed errors
 
-For more help, see `docs/TROUBLESHOOTING.md` (coming soon).
+For more help, see `docs/TROUBLESHOOTING.md`.
 
 ---
 
