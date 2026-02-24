@@ -1,5 +1,4 @@
 import { toastStore } from './toast.svelte';
-import { apiFetch } from '$lib/api';
 
 export interface GitFileStatus {
   path: string;
@@ -17,8 +16,10 @@ export interface GitState {
   loading: boolean;
   selectedFile: string | null;
   currentDiff: string | null;
-  currentFileContent: string | null;
   activeDiff: { file: string; staged: boolean } | null;
+  currentFileContent: string | null;
+  ahead: number;
+  behind: number;
 }
 
 let state = $state<GitState>({
@@ -29,18 +30,22 @@ let state = $state<GitState>({
   loading: false,
   selectedFile: null,
   currentDiff: null,
-  currentFileContent: null,
   activeDiff: null,
+  currentFileContent: null,
+  ahead: 0,
+  behind: 0,
 });
 
 async function refreshStatus() {
   state.loading = true;
   try {
-    const res = await apiFetch('/api/git/status');
+    const res = await fetch('/api/git/status');
     const data = await res.json();
     if (data.ok) {
       state.status = data.data.status;
       state.branch = data.data.branch;
+      state.ahead = data.data.ahead ?? 0;
+      state.behind = data.data.behind ?? 0;
       await fetchBranches();
     }
   } catch (err) {
@@ -52,7 +57,7 @@ async function refreshStatus() {
 
 async function fetchBranches() {
   try {
-    const res = await apiFetch('/api/git/branches');
+    const res = await fetch('/api/git/branches');
     const data = await res.json();
     if (data.ok) state.branches = data.data.branches;
   } catch {}
@@ -61,7 +66,7 @@ async function fetchBranches() {
 async function checkout(branch: string, create = false) {
   state.loading = true;
   try {
-    const res = await apiFetch('/api/git/checkout', {
+    const res = await fetch('/api/git/checkout', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ branch, create }),
@@ -82,7 +87,7 @@ async function checkout(branch: string, create = false) {
 async function merge(branch: string) {
   state.loading = true;
   try {
-    const res = await apiFetch('/api/git/merge', {
+    const res = await fetch('/api/git/merge', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ branch }),
@@ -108,28 +113,41 @@ async function merge(branch: string) {
 async function loadDiff(file: string, staged: boolean) {
   state.selectedFile = file;
   state.currentDiff = null;
-  state.activeDiff = { file, staged };
+  state.currentFileContent = null;
+  
   try {
-    const res = await apiFetch(`/api/git/diff?file=${encodeURIComponent(file)}&staged=${staged}`);
+    // Try getting diff first
+    const res = await fetch(`/api/git/diff?file=${encodeURIComponent(file)}&staged=${staged}`);
     const data = await res.json();
-    if (data.ok) {
+    if (data.ok && data.data.diff) {
       state.currentDiff = data.data.diff;
+    } else {
+      // If no diff (e.g. untracked or binary), try getting content
+      const contentRes = await fetch(`/api/git/file?path=${encodeURIComponent(file)}`);
+      const contentData = await contentRes.json();
+      if (contentData.ok) {
+        state.currentFileContent = contentData.data.content;
+      }
     }
   } catch (err) {
-    console.error('Failed to load diff', err);
+    console.error('Failed to load diff/content', err);
   }
 }
 
+function openDiff(file: string, staged: boolean) {
+  state.activeDiff = { file, staged };
+  loadDiff(file, staged);
+}
+
 function closeDiff() {
-  state.selectedFile = null;
-  state.currentDiff = null;
   state.activeDiff = null;
+  state.currentDiff = null;
   state.currentFileContent = null;
 }
 
 async function stageFile(file: string) {
   try {
-    const res = await apiFetch('/api/git/stage', {
+    const res = await fetch('/api/git/stage', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ file }),
@@ -144,7 +162,7 @@ async function stageFile(file: string) {
 
 async function unstageFile(file: string) {
   try {
-    const res = await apiFetch('/api/git/stage', {
+    const res = await fetch('/api/git/stage', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ file, unstage: true }),
@@ -159,7 +177,7 @@ async function unstageFile(file: string) {
 
 async function discardChanges(file: string) {
   try {
-    const res = await apiFetch('/api/git/restore', {
+    const res = await fetch('/api/git/restore', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ file }),
@@ -177,7 +195,7 @@ async function discardChanges(file: string) {
 
 async function commit(message: string) {
   try {
-    const res = await apiFetch('/api/git/commit', {
+    const res = await fetch('/api/git/commit', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ message }),
@@ -198,7 +216,7 @@ async function commit(message: string) {
 
 async function push() {
   try {
-    const res = await apiFetch('/api/git/push', { method: 'POST' });
+    const res = await fetch('/api/git/push', { method: 'POST' });
     const data = await res.json();
     if (data.ok) {
       toastStore.success('Push successful');
@@ -213,7 +231,7 @@ async function push() {
 async function pull() {
   state.loading = true;
   try {
-    const res = await apiFetch('/api/git/pull', { method: 'POST' });
+    const res = await fetch('/api/git/pull', { method: 'POST' });
     const data = await res.json();
     if (data.ok) {
       toastStore.success('Pull successful');
@@ -240,6 +258,8 @@ export const gitStore = {
   get state() { return state; },
   refreshStatus,
   loadDiff,
+  openDiff,
+  closeDiff,
   stageFile,
   unstageFile,
   discardChanges,
@@ -249,5 +269,4 @@ export const gitStore = {
   checkout,
   merge,
   clearConflicts,
-  closeDiff,
 };
