@@ -1,7 +1,9 @@
 import { spawnSync } from "bun";
-import { join } from "path";
-import { existsSync, readFileSync } from "fs";
+import { resolve, relative } from "node:path";
 import { koryLog } from "../logger";
+
+/** Branch names: alphanumeric, hyphen, underscore, slash (for refs/heads/foo). Max 255 chars. */
+const SAFE_BRANCH_REGEX = /^[a-zA-Z0-9/_.-]{1,255}$/;
 
 export interface GitFileStatus {
   path: string;
@@ -14,7 +16,7 @@ export interface GitFileStatus {
 export class GitManager {
   constructor(private workingDirectory: string) {}
 
-  private runGit(args: string[]): { success: boolean; output: string } {
+  protected runGit(args: string[]): { success: boolean; output: string } {
     const proc = spawnSync(["git", ...args], {
       cwd: this.workingDirectory,
       stdout: "pipe",
@@ -99,41 +101,45 @@ export class GitManager {
     }
   }
 
+  /** Resolve path under repo root; return null if outside (path traversal). */
+  resolvePathUnderRepo(filePath: string): string | null {
+    const root = resolve(this.workingDirectory);
+    const abs = filePath.startsWith("/") ? resolve(filePath) : resolve(root, filePath);
+    const rel = relative(root, abs);
+    if (rel.startsWith("..") || rel.startsWith("/")) return null;
+    return abs;
+  }
+
+  /** Validate branch name for checkout/merge. */
+  static validateBranchName(branch: string): boolean {
+    return typeof branch === "string" && branch.length > 0 && SAFE_BRANCH_REGEX.test(branch);
+  }
+
   async getDiff(path: string, staged = false): Promise<string> {
+    const safePath = this.resolvePathUnderRepo(path);
+    if (!safePath) return "";
     const args = ["diff"];
     if (staged) args.push("--cached");
-    args.push("--", path);
+    args.push("--", safePath);
     return this.runGit(args).output;
   }
 
-  async getFileContent(path: string): Promise<string | null> {
-    const { success, output } = this.runGit(["show", `HEAD:${path}`]);
-    // Fallback to local file if not in git yet (added/untracked)
-    if (!success) {
-      try {
-        const fullPath = join(this.workingDirectory, path);
-        if (existsSync(fullPath)) {
-          return readFileSync(fullPath, "utf-8");
-        }
-      } catch {
-        return null;
-      }
-    }
-    return output;
-  }
-
   async stageFile(path: string): Promise<boolean> {
-    return this.runGit(["add", path]).success;
+    const safePath = this.resolvePathUnderRepo(path);
+    if (!safePath) return false;
+    return this.runGit(["add", safePath]).success;
   }
 
   async unstageFile(path: string): Promise<boolean> {
-    return this.runGit(["reset", "HEAD", path]).success;
+    const safePath = this.resolvePathUnderRepo(path);
+    if (!safePath) return false;
+    return this.runGit(["reset", "HEAD", safePath]).success;
   }
 
   async restoreFile(path: string): Promise<boolean> {
-    // For unstaged changes, checkout handles restoring to index
-    // Note: This is destructive for local changes
-    return this.runGit(["checkout", "--", path]).success;
+    const safePath = this.resolvePathUnderRepo(path);
+    if (!safePath) return false;
+    return this.runGit(["checkout", "--", safePath]).success;
   }
 
   async commit(message: string): Promise<boolean> {
@@ -159,6 +165,7 @@ export class GitManager {
   }
 
   async checkout(branch: string, create = false): Promise<boolean> {
+    if (!GitManager.validateBranchName(branch)) return false;
     const args = ["checkout"];
     if (create) args.push("-b");
     args.push(branch);
@@ -166,6 +173,9 @@ export class GitManager {
   }
 
   async merge(branch: string): Promise<{ success: boolean; output: string; hasConflicts: boolean }> {
+    if (!GitManager.validateBranchName(branch)) {
+      return { success: false, output: "Invalid branch name", hasConflicts: false };
+    }
     const result = this.runGit(["merge", branch]);
     const hasConflicts = result.output.includes("CONFLICT") || result.output.includes("Automatic merge failed");
     return { ...result, hasConflicts };
@@ -175,21 +185,6 @@ export class GitManager {
     const { success, output } = this.runGit(["diff", "--name-only", "--diff-filter=U"]);
     if (!success) return [];
     return output.split("\n").filter(Boolean);
-  }
-
-  async getAheadBehind(): Promise<{ ahead: number; behind: number }> {
-    if (!this.isGitRepo()) return { ahead: 0, behind: 0 };
-    
-    // Check if we have an upstream configured
-    const { success } = this.runGit(["rev-parse", "--abbrev-ref", "@{u}"]);
-    if (!success) return { ahead: 0, behind: 0 };
-
-    const { output } = this.runGit(["rev-list", "--left-right", "--count", "HEAD...@{u}"]);
-    const parts = output.trim().split(/\s+/);
-    if (parts.length === 2) {
-      return { ahead: parseInt(parts[0]) || 0, behind: parseInt(parts[1]) || 0 };
-    }
-    return { ahead: 0, behind: 0 };
   }
 
   /** Create a shadow commit to track changes for a specific session/task */
@@ -228,5 +223,11 @@ export class GitManager {
   getCurrentHash(): string | null {
     const result = this.runGit(["rev-parse", "HEAD"]);
     return result.success ? result.output.trim() : null;
+  }
+
+  /** Check if there are uncommitted changes */
+  async hasChanges(): Promise<boolean> {
+    const status = await this.getStatus();
+    return status.length > 0;
   }
 }
