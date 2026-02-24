@@ -1,7 +1,7 @@
 import type { ModelDef, ProviderName } from "@koryphaios/shared";
 import { OpenAIModels } from "./openai";
 import { AnthropicModels } from "./anthropic";
-import { GeminiModels, AntigravityModels } from "./gemini";
+import { GeminiModels } from "./gemini";
 import { VertexAIModels } from "./vertex";
 import { OpenRouterModels } from "./openrouter";
 import { GroqModels } from "./groq";
@@ -9,41 +9,16 @@ import { XAIModels } from "./xai";
 import { AzureModels } from "./azure";
 import { CopilotModels } from "./copilot";
 import { BedrockModels } from "./bedrock";
-import {
-  DeepSeekModels,
-  TogetherAIModels,
-  CerebrasModels,
-  FireworksModels,
-  HuggingFaceModels,
-  DeepInfraModels,
-  MiniMaxModels,
-  MoonshotModels,
-  NebiusModels,
-  VeniceModels,
-  ScalewayModels,
-  IonetModels,
-  ZAIModels,
-  ZenMuxModels,
-  OpenCodeZenModels,
-  OllamaCloudModels,
-  CloudflareModels,
-  VercelModels,
-  GitLabModels,
-  BasetenModels,
-  FirmwareModels,
-  CortecsModels,
-  LocalModels,
-  LMStudioModels,
-  LlamaCppModels,
-  OllamaModels,
-} from "./newproviders";
+import { LocalModels } from "./local";
+import { OllamaModels } from "./ollama";
+import { OpenCodeZenModels } from "./opencodezen";
+import { ClineModels } from "./cline";
 
-// Combined list of all known models
+// Combined list of all known models from REAL providers only
 const ALL_MODELS: ModelDef[] = [
   ...OpenAIModels,
   ...AnthropicModels,
   ...GeminiModels,
-  ...AntigravityModels,
   ...VertexAIModels,
   ...OpenRouterModels,
   ...GroqModels,
@@ -51,33 +26,10 @@ const ALL_MODELS: ModelDef[] = [
   ...AzureModels,
   ...CopilotModels,
   ...BedrockModels,
-  // New providers
-  ...DeepSeekModels,
-  ...TogetherAIModels,
-  ...CerebrasModels,
-  ...FireworksModels,
-  ...HuggingFaceModels,
-  ...DeepInfraModels,
-  ...MiniMaxModels,
-  ...MoonshotModels,
-  ...NebiusModels,
-  ...VeniceModels,
-  ...ScalewayModels,
-  ...IonetModels,
-  ...ZAIModels,
-  ...ZenMuxModels,
-  ...OpenCodeZenModels,
-  ...OllamaCloudModels,
-  ...CloudflareModels,
-  ...VercelModels,
-  ...GitLabModels,
-  ...BasetenModels,
-  ...FirmwareModels,
-  ...CortecsModels,
   ...LocalModels,
-  ...LMStudioModels,
-  ...LlamaCppModels,
   ...OllamaModels,
+  ...OpenCodeZenModels,
+  ...ClineModels,
 ];
 
 // Map for fast lookup by ID
@@ -87,7 +39,6 @@ export const MODEL_CATALOG: Record<string, ModelDef> = Object.fromEntries(
 
 /**
  * Resolve a model ID to its definition.
- * If not found, returns undefined (caller should handle generic fallback).
  */
 export function resolveModel(modelId: string): ModelDef | undefined {
   return MODEL_CATALOG[modelId];
@@ -102,32 +53,25 @@ export function getModelsForProvider(providerName: ProviderName): ModelDef[] {
 
 /**
  * Create a generic model definition for unknown models discovered at runtime.
- * Uses safe defaults.
  */
 export function createGenericModel(id: string, provider: ProviderName): ModelDef {
   return {
     id,
     name: id,
     provider,
-    contextWindow: 0, // Unknown: do not treat as reliable context metadata
+    contextWindow: 0,
     maxOutputTokens: 4_096,
-    costPerMInputTokens: 0, // Unknown
-    costPerMOutputTokens: 0, // Unknown
+    costPerMInputTokens: 0,
+    costPerMOutputTokens: 0,
     canReason: false,
-    supportsAttachments: false, // Safer to assume no
+    supportsAttachments: false,
     supportsStreaming: true,
     isGeneric: true,
   };
 }
 
 /**
- * Providers with official, first-party model context documentation we currently trust.
- * Verified February 16, 2026 from provider docs:
- * - OpenAI: https://platform.openai.com/docs/models
- * - Anthropic: https://docs.anthropic.com/en/docs/about-claude/models/all-models
- * - Google Gemini: https://ai.google.dev/gemini-api/docs/models
- * - Groq: https://console.groq.com/docs/models
- * - xAI: https://docs.x.ai/docs/models
+ * Providers with verified context window documentation.
  */
 const VERIFIED_CONTEXT_PROVIDERS = new Set<ProviderName>([
   "openai",
@@ -139,7 +83,6 @@ const VERIFIED_CONTEXT_PROVIDERS = new Set<ProviderName>([
 
 /**
  * Resolve trustworthy context metadata for UI telemetry.
- * Returns unknown when model/provider metadata cannot be guaranteed.
  */
 export function resolveTrustedContextWindow(modelId: string, provider: ProviderName): { contextWindow?: number; contextKnown: boolean } {
   const model = resolveModel(modelId);
@@ -152,14 +95,12 @@ export function resolveTrustedContextWindow(modelId: string, provider: ProviderN
 }
 
 /**
- * Find an alternative model with similar capabilities (same tier/provider).
- * Useful for 429 rate limit fallbacks.
+ * Find an alternative model with similar capabilities.
  */
 export function findAlternativeModel(failedModelId: string): ModelDef | undefined {
   const original = resolveModel(failedModelId);
   if (!original || !original.tier) return undefined;
 
-  // Look for another model from the same provider in the same tier
   const sameProvider = ALL_MODELS.filter(
     (m) =>
       m.provider === original.provider &&
@@ -169,63 +110,31 @@ export function findAlternativeModel(failedModelId: string): ModelDef | undefine
   );
 
   if (sameProvider.length > 0) return sameProvider[0];
-
   return undefined;
 }
 
 /**
- * Check if a model is a legacy model.
- * Legacy models are deprecated and should not be used in auto mode.
+ * Check if a model is a legacy/deprecated model.
+ * Includes retired models (e.g. Claude 3.7 Sonnet, Haiku 3.5 as of Feb 2026).
  */
 export function isLegacyModel(modelOrId: string | ModelDef): boolean {
   const id = typeof modelOrId === "string" ? modelOrId : modelOrId.id;
-  const name = typeof modelOrId === "string" ? undefined : modelOrId.name;
-  
-  // Check by ID patterns
-  if (id.includes("legacy") || id.includes("-legacy")) return true;
-  
-  // Check by name (if available)
-  if (name && name.includes("(Legacy)")) return true;
-  
-  // Specific legacy model IDs that don't follow naming convention
-  const KNOWN_LEGACY_IDS = [
-    "gpt-4.1",
-    "gpt-4.1-mini", 
-    "gpt-4.1-nano",
-    "gpt-4.5-preview",
-    "gpt-4o",
-    "gpt-4o-mini",
-    "o1",
-    "o1-pro",
-    "o1-mini",
-    "o3",
-    "o3-mini",
-    "o4-mini",
-    "gemini-2.0-flash",
-    "gemini-2.0-flash-lite",
-    "gemini-2.5-flash",
-    "gemini-2.5-pro",
-    "claude-opus-4",
-    "claude-opus-4-0",
-    "claude-sonnet-4-0",
-    "claude-sonnet-3.5",
-    "claude-sonnet-3.7",
-    "claude-sonnet-3.7-thought",
-    "claude-3.5-sonnet",
+  const deprecatedIds = [
+    "gpt-3.5-turbo",
+    "gpt-4",
+    "gpt-4-32k",
+    "claude-1",
+    "claude-2",
+    "claude-instant",
+    "claude-3.7-sonnet",
     "claude-3.5-haiku",
-    "claude-3-haiku",
-    "claude-3-opus",
-    "grok-3",
-    "grok-3-beta",
-    "grok-3-mini-beta",
+    "claude-3.5-sonnet",
   ];
-  
-  return KNOWN_LEGACY_IDS.includes(id);
+  return deprecatedIds.includes(id);
 }
 
 /**
  * Get non-legacy models only.
- * Useful for auto mode to exclude deprecated models.
  */
 export function getNonLegacyModels(): ModelDef[] {
   return ALL_MODELS.filter((m) => !isLegacyModel(m));
