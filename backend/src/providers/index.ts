@@ -1,4 +1,4 @@
-export { ProviderRegistry, PROVIDER_AUTH_MODE } from "./registry";
+export { ProviderRegistry } from "./registry";
 export { AnthropicProvider } from "./anthropic";
 export { OpenAIProvider, GroqProvider, OpenRouterProvider, XAIProvider, AzureProvider } from "./openai";
 

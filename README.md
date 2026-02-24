@@ -23,7 +23,6 @@ Koryphaios is a full-stack application that orchestrates AI agents across multip
 - **Session Management** — Persistent conversation history with cost tracking and token accounting
 - **Telegram Bridge** — Optional bot interface for remote access
 - **Tool Ecosystem** — Built-in tools for bash execution, file operations, web search, and more
-- **Clarification Gate** — Optional pre-execution question pass for vague prompts so Kory refines intent before coding
 
 ---
 
@@ -159,21 +158,6 @@ Create or edit `koryphaios.json` in the project root:
 ```
 
 See `config.example.json` for all available options.
-
-### Clarification Gate (optional)
-
-When enabled, Kory asks up to `interaction.maxClarifyQuestions` targeted questions before planning/execution if a prompt appears underspecified.
-
-```json
-{
-  "interaction": {
-    "clarifyFirstEnabled": true,
-    "maxClarifyQuestions": 4
-  }
-}
-```
-
-If clarification JSON parsing fails or times out, Kory automatically falls back to the normal execution pipeline.
 
 ### Development
 

@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Send, ChevronDown, Sparkles } from 'lucide-svelte';
+  import { Send, ChevronDown, Sparkles, Square } from 'lucide-svelte';
   import { wsStore } from '$lib/stores/websocket.svelte';
   import { shortcutStore } from '$lib/stores/shortcuts.svelte';
   import { getReasoningConfig, hasReasoningSupport } from '@koryphaios/shared';
@@ -7,22 +7,16 @@
 
   interface Props {
     onSend: (message: string, model?: string, reasoningLevel?: string) => void;
-    onCommand?: (command: string) => boolean | Promise<boolean>;
+    /** When true, show Stop instead of Send; clicking stops manager and workers for the session. */
+    isRunning?: boolean;
+    onStop?: () => void;
     inputRef?: HTMLTextAreaElement;
   }
 
-  let { onSend, onCommand, inputRef = $bindable() }: Props = $props();
+  let { onSend, isRunning = false, onStop, inputRef = $bindable() }: Props = $props();
   let input = $state('');
   let showModelPicker = $state(false);
   let selectedModel = $state<string>('auto');
-  let selectedCommandIndex = $state(0);
-
-  const slashCommands: Array<{ value: string; description: string }> = [
-    { value: '/help', description: 'Show available slash commands' },
-    { value: '/new', description: 'Create a new session' },
-    { value: '/compact', description: 'Compact the current session context' },
-    { value: '/yolo', description: 'Toggle YOLO mode' },
-  ];
 
   function providerLabel(provider: string): string {
     if (provider === 'openai') return 'OpenAI';
@@ -63,17 +57,7 @@
   let reasoningConfig = $derived(getReasoningConfig(currentProvider(), currentModel()));
   let reasoningSupported = $derived(hasReasoningSupport(currentProvider(), currentModel()));
 
-  // Update reasoning when model changes, but only if necessary
-  $effect(() => {
-    const config = getReasoningConfig(currentProvider(), currentModel());
-    if (config) {
-      // If current level isn't in new config options, reset to default
-      const exists = config.options.some(opt => opt.value === reasoningLevel);
-      if (!exists) {
-        reasoningLevel = config.defaultValue;
-      }
-    }
-  });
+  const hasNoProvider = $derived((wsStore.providers ?? []).filter((p) => p.authenticated).length === 0);
 
   let availableModels = $derived(() => {
     const models: Array<{ label: string; value: string; provider: string; isAuto?: boolean }> = [
@@ -96,80 +80,46 @@
     return `(${providerLabel(parsed.provider)}) ${parsed.model}`;
   });
 
-  let slashQuery = $derived(input.trim().toLowerCase());
-  let commandSuggestions = $derived(() => {
-    if (!slashQuery.startsWith('/')) return [];
-    return slashCommands.filter((cmd) => cmd.value.startsWith(slashQuery) || cmd.value.includes(slashQuery));
-  });
-  let showCommandSuggestions = $derived(commandSuggestions().length > 0 && input.trim().startsWith('/'));
-
-  $effect(() => {
-    slashQuery;
-    selectedCommandIndex = 0;
-  });
+  // Cooldown to prevent duplicate sends (double Enter, key repeat, double-click)
+  const SEND_COOLDOWN_MS = 800;
+  let lastSendAt = $state(0);
 
   function handleKeydown(e: KeyboardEvent) {
-    if (showCommandSuggestions) {
-      if (e.key === 'ArrowDown') {
-        e.preventDefault();
-        selectedCommandIndex = Math.min(selectedCommandIndex + 1, commandSuggestions().length - 1);
-        return;
-      }
-      if (e.key === 'ArrowUp') {
-        e.preventDefault();
-        selectedCommandIndex = Math.max(selectedCommandIndex - 1, 0);
-        return;
-      }
-      if (e.key === 'Tab') {
-        e.preventDefault();
-        applyCommandSuggestion(commandSuggestions()[selectedCommandIndex]);
-        return;
-      }
-      if (e.key === 'Enter' && !e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey) {
-        const selected = commandSuggestions()[selectedCommandIndex];
-        if (selected && input.trim() !== selected.value) {
-          e.preventDefault();
-          applyCommandSuggestion(selected);
-          return;
-        }
-      }
+    if (e.repeat) return; // ignore key repeat (e.g. holding Enter)
+    if (isRunning && shortcutStore.matches('send', e)) {
+      e.preventDefault();
+      stop();
+      return;
     }
-
     if (shortcutStore.matches('send', e)) {
       e.preventDefault();
       send();
     } else if (e.key === 'Enter' && !e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey) {
       e.preventDefault();
-      send();
+      if (isRunning) stop();
+      else send();
     }
   }
 
-  async function send() {
+  function send() {
     const trimmed = input.trim();
     if (!trimmed) return;
-    if (trimmed.startsWith('/')) {
-      const handled = await onCommand?.(trimmed);
-      if (handled) {
-        input = '';
-        if (inputRef) inputRef.style.height = 'auto';
-        return;
-      }
-    }
+    const now = Date.now();
+    if (now - lastSendAt < SEND_COOLDOWN_MS) return; // debounce duplicate sends
+    lastSendAt = now;
     onSend(trimmed, selectedModel, reasoningLevel);
     input = '';
     if (inputRef) inputRef.style.height = 'auto';
+  }
+
+  function stop() {
+    onStop?.();
   }
 
   function autoResize() {
     if (!inputRef) return;
     inputRef.style.height = 'auto';
     inputRef.style.height = Math.min(inputRef.scrollHeight, 200) + 'px';
-  }
-
-  function applyCommandSuggestion(suggestion?: { value: string }) {
-    if (!suggestion) return;
-    input = suggestion.value;
-    autoResize();
   }
 
   function selectModel(value: string) {
@@ -216,6 +166,14 @@
 <svelte:window onclick={handleClickOutside} />
 
 <div class="command-input px-4 py-3">
+  <!-- No provider: show error (Send still works; backend will return the same error) -->
+  {#if hasNoProvider}
+    <div class="mb-3 px-3 py-2.5 rounded-lg text-sm font-medium flex items-center gap-2" style="background: rgba(239, 68, 68, 0.12); border: 1px solid rgba(239, 68, 68, 0.35); color: var(--color-text-primary);">
+      <span class="text-red-400">Error:</span>
+      <span>No provider. No analyzing request. Add a provider in Settings.</span>
+    </div>
+  {/if}
+
   <!-- Controls row: Model picker + Reasoning toggle -->
   <div class="flex items-center gap-3 mb-3">
     <!-- Model selector -->
@@ -271,7 +229,7 @@
             style="background: var(--color-surface-2-alpha, rgba(30, 30, 35, 0.9)); border-color: var(--color-border);"
           >
             <div class="px-4 py-3 text-xs font-bold uppercase tracking-widest opacity-70" style="color: var(--color-text-muted); border-bottom: 1px solid var(--color-border); background: rgba(255,255,255,0.03);">
-              {selectedModel === 'auto' ? 'Auto' : `${modelDisplayName()} · Auto`}
+              {selectedModel === 'auto' ? 'Reasoning' : `${modelDisplayName()} · ${reasoningLabel(reasoningLevel)}`}
             </div>
             <div class="py-1">
               {#each reasoningConfig.options as opt}
@@ -306,40 +264,27 @@
       bind:value={input}
       oninput={autoResize}
       onkeydown={handleKeydown}
-      placeholder="Describe what you want to build...  (/new, /compact, /yolo)"
+      placeholder="Describe what you want to build..."
       rows="1"
       class="input flex-1"
       class:yolo-active={wsStore.isYoloMode}
       style="resize: none; min-height: 52px; max-height: 200px; font-size: 15px; padding: 14px 16px;"
     ></textarea>
     <button
-      onclick={send}
-      disabled={!input.trim()}
-      class="btn btn-primary self-end flex items-center justify-center gap-2"
-      style="min-width: 80px; height: 52px; padding: 0 20px; font-size: 14px; font-weight: 600;"
+      onclick={isRunning ? stop : send}
+      disabled={!isRunning && !input.trim()}
+      class="btn self-end flex items-center justify-center gap-2 {isRunning ? 'bg-red-500/90 hover:bg-red-500' : 'btn-primary'}"
+      style="min-width: 80px; height: 52px; padding: 0 20px; font-size: 14px; font-weight: 600; {isRunning ? 'border: none; color: white;' : ''}"
     >
-      <Send size={18} />
-      Send
+      {#if isRunning}
+        <Square size={18} fill="currentColor" />
+        Stop
+      {:else}
+        <Send size={18} />
+        Send
+      {/if}
     </button>
   </div>
-
-  {#if showCommandSuggestions}
-    <div
-      class="mt-2 rounded-lg border overflow-hidden"
-      style="border-color: var(--color-border); background: var(--color-surface-2);"
-    >
-      {#each commandSuggestions() as suggestion, i}
-        <button
-          class="w-full text-left px-3 py-2 border-b last:border-b-0 flex items-center justify-between gap-3 hover:bg-[var(--color-surface-3)] {i === selectedCommandIndex ? 'bg-[var(--color-surface-3)]' : ''}"
-          style="border-color: var(--color-border);"
-          onclick={() => applyCommandSuggestion(suggestion)}
-        >
-          <span class="text-xs font-mono" style="color: var(--color-text-primary);">{suggestion.value}</span>
-          <span class="text-[10px] shrink-0" style="color: var(--color-text-muted);">{suggestion.description}</span>
-        </button>
-      {/each}
-    </div>
-  {/if}
 
   <div class="flex items-center justify-between mt-2">
     <span class="text-xs" style="color: var(--color-text-muted);">Enter to send · Shift+Enter for new line</span>
