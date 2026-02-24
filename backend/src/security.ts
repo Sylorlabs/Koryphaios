@@ -91,8 +91,14 @@ export function sanitizeForPrompt(input: string, maxLength: number = 100_000): s
     /system prompt:/gi,
   ];
 
-  for (const pattern of blocklist) {
-    sanitized = sanitized.replace(pattern, "");
+  // Recursive sanitization to prevent nested pattern bypass
+  let changed = true;
+  while (changed) {
+    const before = sanitized;
+    for (const pattern of blocklist) {
+      sanitized = sanitized.replace(pattern, "");
+    }
+    changed = before !== sanitized;
   }
 
   // Escape template literal markers
