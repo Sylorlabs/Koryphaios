@@ -1,76 +1,92 @@
 // Google provider — supports both API calls and google-cli child process wrapper.
 // Uses Google's GenAI SDK for direct API access.
+// Model list is refreshed from the Gemini API when available; static list is fallback only.
 
 import type { ProviderConfig, ModelDef } from "@koryphaios/shared";
-import { detectGeminiCLIToken, detectAntigravityToken } from "./auth-utils";
+import { detectGeminiCLIToken } from "./auth-utils";
 import {
   type Provider,
   type ProviderEvent,
   type StreamRequest,
   getModelsForProvider,
-  createGenericModel,
   resolveModel,
+  createGenericModel,
 } from "./types";
+import { GEMINI_V1BETA_BASE } from "./api-endpoints";
 import { withRetry } from "./utils";
-import { googleAuth } from "./google-auth";
 import { providerLog } from "../logger";
+import { getSafeSubprocessEnv } from "../runtime/safe-env";
 
-// Cache for Antigravity access tokens
-const ANTIGRAVITY_TOKEN_CACHE = new Map<string, { token: string; expires: number }>();
+declare const Bun: any;
 
 export class GeminiProvider implements Provider {
-  readonly name: "google" | "vertexai" | "antigravity";
+  readonly name: "google" | "vertexai";
 
   constructor(readonly config: ProviderConfig) {
-    this.name = (config.name === "vertexai" ? "vertexai" : config.name === "antigravity" ? "antigravity" : "google") as any;
+    this.name = config.name === "vertexai" ? "vertexai" : "google";
   }
 
   isAvailable(): boolean {
-    const hasAuth = !!(this.config.apiKey || this.config.authToken || detectGeminiCLIToken() || detectAntigravityToken());
+    // Vertex AI must not fall back to Gemini CLI / gcloud auto-detection
+    const hasAuth = this.name === "vertexai"
+      ? !!(this.config.apiKey || this.config.authToken)
+      : !!(this.config.apiKey || this.config.authToken || detectGeminiCLIToken());
     return !this.config.disabled && hasAuth;
   }
 
-  async listModels(): Promise<ModelDef[]> {
-    return getModelsForProvider(this.name);
+  private cachedModels: ModelDef[] | null = null;
+  private lastFetch = 0;
+
+  listModels(): ModelDef[] {
+    const localModels = getModelsForProvider(this.name);
+    if (this.name !== "google") return localModels;
+    if (!this.isAvailable()) return localModels;
+    if (this.cachedModels && Date.now() - this.lastFetch < 5 * 60 * 1000) {
+      return this.cachedModels;
+    }
+    this.refreshModelsInBackground(localModels);
+    return this.cachedModels ?? localModels;
+  }
+
+  private refreshModelsInBackground(localModels: ModelDef[]) {
+    const apiKey = this.config.apiKey || this.config.authToken || detectGeminiCLIToken();
+    if (!apiKey) return;
+    const url = `${GEMINI_V1BETA_BASE}/models?key=${encodeURIComponent(apiKey)}`;
+    withRetry(() => fetch(url).then((r) => (r.ok ? r.json() : Promise.reject(new Error(r.statusText)))))
+      .then((body: { models?: Array<{ name?: string }> }) => {
+        const remote: ModelDef[] = [];
+        for (const m of body.models ?? []) {
+          const name = m.name;
+          if (!name || !name.startsWith("models/")) continue;
+          const id = name.replace(/^models\//, "");
+          if (localModels.some((l) => l.id === id || l.apiModelId === id)) continue;
+          const def = createGenericModel(id, "google");
+          def.apiModelId = id;
+          remote.push(def);
+        }
+        this.cachedModels = [...localModels, ...remote];
+        this.lastFetch = Date.now();
+      })
+      .catch(() => {
+        if (!this.cachedModels) this.cachedModels = localModels;
+      });
   }
 
   async *streamResponse(request: StreamRequest): AsyncGenerator<ProviderEvent> {
     const { GoogleGenAI } = await import("@google/genai");
-    
-    let apiKey = this.config.apiKey || this.config.authToken || detectAntigravityToken() || detectGeminiCLIToken();
-    
-    const clientOptions: any = { apiKey: apiKey! };
-    const extraHeaders: Record<string, string> = {};
 
-    // Antigravity hijacking logic
-    const isAntigravity = this.name === "antigravity" || (this.config.baseUrl?.includes("antigravity") || !!detectAntigravityToken()) && !this.config.apiKey;
-    
-    if (isAntigravity && apiKey?.startsWith("1//")) {
-      const cached = ANTIGRAVITY_TOKEN_CACHE.get(apiKey);
-      if (cached && cached.expires > Date.now()) {
-        apiKey = cached.token;
-      } else {
-        try {
-          const result = await googleAuth.refreshAntigravityToken(apiKey);
-          const refreshToken = apiKey;
-          apiKey = result.accessToken;
-          ANTIGRAVITY_TOKEN_CACHE.set(refreshToken, {
-            token: apiKey,
-            expires: Date.now() + (result.expiresIn * 1000) - 60000
-          });
-        } catch (err) {
-          providerLog.error({ err }, "Failed to refresh Antigravity token");
-        }
-      }
+    // Vertex AI requires an explicit API key — never auto-detect from Gemini CLI or GCP credentials
+    const apiKey = this.config.apiKey || this.config.authToken ||
+      (this.name !== "vertexai" ? detectGeminiCLIToken() : null);
+    if (!apiKey) {
+      yield { type: "error", error: this.name === "vertexai" ? "Vertex AI requires an explicit API key (set GOOGLE_VERTEX_AI_API_KEY)" : "No API key available" };
+      return;
     }
 
-    if (isAntigravity || this.config.baseUrl) {
-      clientOptions.baseUrl = this.config.baseUrl || "https://ide.google.com/api/antigravity/v1";
-    }
-
-    if (isAntigravity) {
-      extraHeaders["User-Agent"] = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Antigravity/1.15.8 Chrome/138.0.7204.235 Electron/37.3.1 Safari/537.36";
-      extraHeaders["Client-Metadata"] = JSON.stringify({ ideType: "ANTIGRAVITY", platform: "LINUX", pluginType: "GEMINI" });
+    const clientOptions: any = { apiKey };
+    
+    if (this.config.baseUrl) {
+      clientOptions.baseUrl = this.config.baseUrl;
     }
 
     const client = new GoogleGenAI(clientOptions);
@@ -90,6 +106,18 @@ export class GeminiProvider implements Provider {
 
     const modelDef = resolveModel(request.model);
     const apiModel = modelDef?.apiModelId || request.model;
+    const isGemini3 = /gemini-3/i.test(request.model) || /gemini-3/i.test(apiModel ?? "");
+
+    if (request.reasoningLevel !== undefined && request.reasoningLevel !== "") {
+      const level = String(request.reasoningLevel).trim();
+      if (isGemini3) {
+        const thinkingLevel = ["low", "medium", "high"].includes(level.toLowerCase()) ? level.toUpperCase() : "MEDIUM";
+        generationConfig.thinkingConfig = { thinkingLevel };
+      } else {
+        const budget = level === "0" || level.toLowerCase() === "off" ? 0 : Math.max(0, parseInt(level, 10) || 8192);
+        generationConfig.thinkingConfig = { thinkingBudget: budget };
+      }
+    }
 
     try {
       const response = await client.models.generateContentStream({
@@ -124,20 +152,19 @@ export class GeminiCLIProvider implements Provider {
     const hasAuth = this.config.authToken?.startsWith("cli:") || !!detectGeminiCLIToken();
     if (!hasAuth || this.config.disabled) return false;
     if (this.cliAvailable === null) {
-      const proc = Bun.spawnSync(["which", "gemini"]);
-      this.cliAvailable = proc.exitCode === 0;
+      this.cliAvailable = Bun.which("gemini") !== null;
     }
     return this.cliAvailable;
   }
 
-  async listModels(): Promise<ModelDef[]> {
+  listModels(): ModelDef[] {
     return getModelsForProvider(this.name);
   }
 
   async *streamResponse(request: StreamRequest): AsyncGenerator<ProviderEvent> {
     const modelDef = resolveModel(request.model);
     let cliModel = modelDef?.apiModelId || request.model;
-    
+
     // Explicit CLI Auto Mappings
     if (request.model === "auto-gemini-3") cliModel = "gemini-3";
     if (request.model === "auto-gemini-2.5") cliModel = "gemini-2.5";
@@ -147,16 +174,16 @@ export class GeminiCLIProvider implements Provider {
       .map((m) => (typeof m.content === "string" ? m.content : ""))
       .join("\n");
 
+    const proc = Bun.spawn(["gemini", "--model", cliModel, "--prompt", prompt], {
+      stdout: "pipe",
+      stderr: "pipe",
+      env: getSafeSubprocessEnv(),
+    });
+
+    const reader = proc.stdout.getReader();
+    const decoder = new TextDecoder();
+
     try {
-      const proc = Bun.spawn(["gemini", "--model", cliModel, "--prompt", prompt], {
-        stdout: "pipe",
-        stderr: "pipe",
-        env: { ...process.env, ...this.config.headers },
-      });
-
-      const reader = proc.stdout.getReader();
-      const decoder = new TextDecoder();
-
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
@@ -165,7 +192,10 @@ export class GeminiCLIProvider implements Provider {
       }
       yield { type: "complete", finishReason: "end_turn" };
     } catch (err: any) {
-      yield { type: "error", error: "Gemini CLI error: " + (err.message ?? String(err)) };
+      yield { type: "error", error: err.message ?? String(err) };
+    } finally {
+      reader.releaseLock();
+      proc.kill();
     }
   }
 }
