@@ -147,6 +147,15 @@ function addFeedEntry(entry: Omit<FeedEntry, "id">) {
   feed = [...feed, newEntry].slice(-MAX_FEED_ENTRIES);
 }
 
+/** Remove the ephemeral "Analyzing request..." thought once analysis is done (next phase, routing, or content). */
+function removeAnalyzingThoughtEntries() {
+  const isAnalyzingEntry = (e: FeedEntry) =>
+    e.type === "thought" &&
+    (e.text === "Analyzing request..." || (e.metadata as { phase?: string })?.phase === "analyzing");
+  if (!feed.some(isAnalyzingEntry)) return;
+  feed = feed.filter((e) => !isAnalyzingEntry(e));
+}
+
 // Accumulate streaming text into the last matching feed entry instead of creating one per token
 function accumulateFeedEntry(entry: Omit<FeedEntry, "id">) {
   const lastIdx = feed.length - 1;
@@ -269,6 +278,7 @@ function handleMessage(msg: WSMessage) {
         agents = new Map(agents);
       }
       if (isForActiveSession) {
+        removeAnalyzingThoughtEntries();
         accumulateFeedEntry({
           timestamp: msg.timestamp,
           type: "content",
@@ -406,6 +416,9 @@ function handleMessage(msg: WSMessage) {
       if (isForActiveSession) {
         koryThought = p.thought;
         koryPhase = p.phase;
+        // When moving past "Analyzing request...", remove it from the feed so it doesn't stay
+        const isAnalyzingEntry = p.phase === "analyzing" && p.thought === "Analyzing request...";
+        if (!isAnalyzingEntry) removeAnalyzingThoughtEntries();
         addFeedEntry({
           timestamp: msg.timestamp,
           type: "thought",
@@ -422,6 +435,7 @@ function handleMessage(msg: WSMessage) {
     case "kory.routing": {
       const p = msg.payload as KoryRoutingPayload;
       if (isForActiveSession) {
+        removeAnalyzingThoughtEntries();
         addFeedEntry({
           timestamp: msg.timestamp,
           type: "routing",
@@ -437,11 +451,13 @@ function handleMessage(msg: WSMessage) {
 
     case "kory.ask_user": {
       const p = msg.payload as any;
-      pendingQuestion = {
-        question: p.question,
-        options: p.options,
-        allowOther: p.allowOther,
-      };
+      if (isForActiveSession) {
+        pendingQuestion = {
+          question: p.question,
+          options: p.options,
+          allowOther: p.allowOther,
+        };
+      }
       break;
     }
 
@@ -482,7 +498,9 @@ function handleMessage(msg: WSMessage) {
 
     case "permission.request": {
       const p = msg.payload as PermissionRequest;
-      pendingPermissions = [...pendingPermissions, p];
+      if (isForActiveSession) {
+        pendingPermissions = [...pendingPermissions, p];
+      }
       break;
     }
 
@@ -494,14 +512,24 @@ function handleMessage(msg: WSMessage) {
 
     case "system.error": {
       const p = msg.payload as any;
-      addFeedEntry({
-        timestamp: msg.timestamp,
-        type: "error",
-        agentId: "",
-        agentName: "System",
-        glowClass: "",
-        text: p.error ?? "Unknown system error",
-      });
+      if (!isForActiveSession) break;
+      const errorText = p.error ?? "Unknown system error";
+      // Dedupe: skip if the last entry is the same error within 3s (e.g. no-provider sent twice)
+      const last = feed.length > 0 ? feed[feed.length - 1] : null;
+      const isDuplicate =
+        last?.type === "error" &&
+        last.text === errorText &&
+        (msg.timestamp - last.timestamp) < 3000;
+      if (!isDuplicate) {
+        addFeedEntry({
+          timestamp: msg.timestamp,
+          type: "error",
+          agentId: "",
+          agentName: "System",
+          glowClass: "",
+          text: errorText,
+        });
+      }
       break;
     }
   }
@@ -513,32 +541,25 @@ let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 let reconnectAttempts = 0;
 let wsCandidates: string[] = [];
 let wsCandidateIndex = 0;
-let connectionIdCounter = 0; // Unique ID for each connection attempt
 
 function buildWsCandidates(preferredUrl?: string): string[] {
   const scheme = window.location.protocol === "https:" ? "wss" : "ws";
   const currentHost = window.location.host;
-  const primary = preferredUrl ?? `${scheme}://${currentHost}/ws`;
-  const token = authStore.token;
-  const tokenParam = token ? `?token=${encodeURIComponent(token)}` : '';
-  return [primary + tokenParam];
+  const sameOrigin = `${scheme}://${currentHost}/ws`;
+  const directWs = typeof import.meta.env !== "undefined" && (import.meta.env as { VITE_BACKEND_WS_URL?: string }).VITE_BACKEND_WS_URL;
+
+  const candidates: string[] = [];
+  if (preferredUrl) candidates.push(preferredUrl);
+  // Prefer same-origin first so Vite dev proxy (e.g. ws://localhost:5173/ws → backend) is tried first.
+  if (sameOrigin && !candidates.includes(sameOrigin)) candidates.push(sameOrigin);
+  if (directWs && !candidates.includes(directWs)) candidates.push(directWs);
+  if (candidates.length === 0) candidates.push(sameOrigin);
+  return candidates;
 }
 
 function connect(url?: string) {
   if (!browser) return;
-  
-  // strict state check: if we are already connected or connecting, do nothing.
-  if (connectionStatus === "connected" || connectionStatus === "connecting") {
-    // If the socket is actually closed/closing but state says otherwise (inconsistent), force close first.
-    if (wsConnection && (wsConnection.readyState === WebSocket.CLOSING || wsConnection.readyState === WebSocket.CLOSED)) {
-      disconnect();
-    } else {
-      return;
-    }
-  }
-
-  // Generate a new ID for this attempt. Stale closures will see a mismatch.
-  const currentAttemptId = ++connectionIdCounter;
+  if (wsConnection?.readyState === WebSocket.OPEN || wsConnection?.readyState === WebSocket.CONNECTING) return;
 
   // Reset candidates if a new URL is provided or list is empty
   if (url || wsCandidates.length === 0) {
@@ -560,52 +581,29 @@ function connect(url?: string) {
     const ws = new WebSocket(wsUrl);
 
     ws.onopen = () => {
-      // If this attempt is stale (e.g. user manually disconnected, or a new connect came in), abort.
-      if (currentAttemptId !== connectionIdCounter) {
-        ws.close();
-        return;
-      }
-
       connectionStatus = "connected";
       reconnectAttempts = 0;
       wsConnection = ws;
-
-      // Resubscribe to active session if one exists
-      const activeId = sessionStore.activeSessionId;
-      if (activeId) {
-        ws.send(JSON.stringify({ type: "subscribe_session", sessionId: activeId }));
-      }
+      // Subscribe to the active session so backend can scope messages
+      const activeSid = sessionStore.activeSessionId;
+      if (activeSid) subscribeToSession(activeSid);
     };
 
     ws.onmessage = (event) => {
-      if (currentAttemptId !== connectionIdCounter) return;
-
       try {
-        const raw = JSON.parse(event.data);
-        if (raw.type === "ping") {
-          ws.send(JSON.stringify({ type: "pong" }));
-          return;
-        }
-
-        const msg = raw as WSMessage;
+        const msg = JSON.parse(event.data) as WSMessage;
         handleMessage(msg);
       } catch { }
     };
 
-    ws.onclose = (ev) => {
-      if (currentAttemptId !== connectionIdCounter) return;
-
+    ws.onclose = () => {
       connectionStatus = "disconnected";
       wsConnection = null;
-
-      // Don't reconnect if it was a clean close (1000) or we are explicitly disconnecting? 
-      // Actually, for a resilient app, we almost always want to reconnect unless the user logged out.
-      // But if we are cycling candidates, we proceed.
 
       // Rotate through candidates if we haven't exhausted them
       if (wsCandidateIndex < wsCandidates.length - 1) {
         wsCandidateIndex++;
-        setTimeout(() => connect(), 200); 
+        setTimeout(() => connect(), 200); // Slightly longer delay for stability
       } else {
         wsCandidateIndex = 0;
         scheduleReconnect();
@@ -613,40 +611,29 @@ function connect(url?: string) {
     };
 
     ws.onerror = () => {
-      if (currentAttemptId !== connectionIdCounter) return;
       connectionStatus = "error";
-      // onclose will fire after onerror, so we handle reconnection there.
     };
   } catch {
-    if (currentAttemptId === connectionIdCounter) {
-      connectionStatus = "error";
-      scheduleReconnect();
-    }
+    connectionStatus = "error";
+    scheduleReconnect();
   }
 }
 
 function scheduleReconnect(url?: string) {
   if (reconnectTimer) clearTimeout(reconnectTimer);
-  const delay = Math.min(1000 * Math.pow(1.5, reconnectAttempts), 10000); // Backoff: 1.5x, max 10s
+  const delay = Math.min(1000 * Math.pow(2, reconnectAttempts), 30000);
   reconnectAttempts++;
   reconnectTimer = setTimeout(() => connect(url), delay);
 }
 
+function subscribeToSession(sessionId: string) {
+  if (!sessionId || wsConnection?.readyState !== WebSocket.OPEN) return;
+  wsConnection.send(JSON.stringify({ type: "subscribe_session", sessionId, timestamp: Date.now() }));
+}
+
 function disconnect() {
-  // Bump ID to invalidate any pending connection attempts
-  connectionIdCounter++;
-  
   if (reconnectTimer) clearTimeout(reconnectTimer);
-  
-  if (wsConnection) {
-    // Remove listeners to prevent "onclose" from triggering a reconnect
-    wsConnection.onclose = null;
-    wsConnection.onerror = null;
-    wsConnection.onmessage = null;
-    wsConnection.onopen = null;
-    wsConnection.close();
-  }
-  
+  wsConnection?.close();
   wsConnection = null;
   connectionStatus = "disconnected";
 }
@@ -655,10 +642,8 @@ function sendMessage(sessionId: string, content: string, model?: string, reasoni
   addUserMessage(sessionId, content);
   fetch("/api/messages", {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      ...(authStore.token ? { "Authorization": `Bearer ${authStore.token}` } : {}),
-    },
+    headers: { "Content-Type": "application/json" },
+    credentials: "include",
     body: JSON.stringify({ sessionId, content, model, reasoningLevel }),
   }).catch(() => { });
 }
@@ -763,51 +748,27 @@ function getManagerStatus(): AgentStatus {
   return 'idle';
 }
 
-function getContextUsage(): { 
-  used: number; 
-  max: number; 
-  percent: number; 
-  status: 'reliable' | 'estimating' | 'unknown' | 'multi_agent';
-  label: string;
-} {
+function getContextUsage(): { used: number; max: number; percent: number; isReliable: boolean; reason?: string } {
   const activeSessionId = sessionStore.activeSessionId;
-  const sessionAgents = [...agents.values()].filter((a) => a.sessionId === activeSessionId);
-  const candidates = sessionAgents.filter(a => a.hasUsageData);
+  const candidates = [...agents.values()].filter((a) => a.sessionId === activeSessionId && a.hasUsageData);
 
+  // Exact session context is only reliable when we have one authoritative usage source.
   if (candidates.length === 0) {
-    return { used: 0, max: 0, percent: 0, status: 'unknown', label: 'Context usage unknown' };
+    return { used: 0, max: 0, percent: 0, isReliable: false, reason: "usage_unknown" };
   }
-
   if (candidates.length > 1) {
-    // For multi-agent, we show the highest usage as a conservative estimate
-    const highest = candidates.reduce((prev, curr) => (curr.tokensUsed > prev.tokensUsed) ? curr : prev);
-    const used = highest.tokensUsed;
-    const max = highest.contextMax || 128000;
-    const percent = Math.min(100, Math.round((used / max) * 100));
-    return { 
-      used, 
-      max, 
-      percent, 
-      status: 'multi_agent', 
-      label: `Estimated Usage (Max of ${candidates.length} agents)` 
-    };
+    return { used: 0, max: 0, percent: 0, isReliable: false, reason: "multi_agent_usage" };
   }
 
   const agent = candidates[0];
   if (!agent.contextKnown || agent.contextMax <= 0) {
-    return { used: agent.tokensUsed, max: 0, percent: 0, status: 'estimating', label: 'Calculating context window...' };
+    return { used: 0, max: 0, percent: 0, isReliable: false, reason: "context_unknown" };
   }
 
   const used = Math.max(0, agent.tokensUsed);
   const max = agent.contextMax;
   const percent = Math.min(100, Math.round((used / max) * 100));
-  return { 
-    used, 
-    max, 
-    percent, 
-    status: 'reliable', 
-    label: 'Context Window' 
-  };
+  return { used, max, percent, isReliable: true };
 }
 
 function isSessionRunning(sessionId: string): boolean {
@@ -817,6 +778,27 @@ function isSessionRunning(sessionId: string): boolean {
     }
   }
   return false;
+}
+
+/** Mark all agents for this session as done (optimistic UI when user clicks Stop). */
+function markSessionAgentsStopped(sessionId: string) {
+  let changed = false;
+  for (const a of agents.values()) {
+    if (a.sessionId === sessionId && a.status !== 'idle' && a.status !== 'done') {
+      a.status = 'done';
+      changed = true;
+    }
+  }
+  if (changed) agents = new Map(agents);
+}
+
+/** Mark a single agent as done (optimistic UI when user cancels one worker). */
+function markAgentStopped(agentId: string) {
+  const agent = agents.get(agentId);
+  if (agent && agent.status !== 'idle' && agent.status !== 'done') {
+    agent.status = 'done';
+    agents = new Map(agents);
+  }
 }
 
 function sendUserInput(sessionId: string, selection: string, text?: string) {
@@ -854,23 +836,13 @@ function clearFeed() {
 }
 
 function toggleYolo() {
-  setYoloMode(!isYoloMode);
-}
-
-function setYoloMode(enabled: boolean) {
-  isYoloMode = enabled;
+  isYoloMode = !isYoloMode;
   if (wsConnection?.readyState === WebSocket.OPEN) {
     wsConnection.send(JSON.stringify({
       type: "toggle_yolo",
-      enabled,
+      enabled: isYoloMode,
       timestamp: Date.now(),
     }));
-  }
-}
-
-function subscribeToSession(sessionId: string) {
-  if (wsConnection?.readyState === WebSocket.OPEN) {
-    wsConnection.send(JSON.stringify({ type: "subscribe_session", sessionId }));
   }
 }
 
@@ -893,16 +865,17 @@ export const wsStore = {
   get managerStatus() { return getManagerStatus(); },
   get contextUsage() { return getContextUsage(); },
   isSessionRunning,
+  markSessionAgentsStopped,
+  markAgentStopped,
   connect,
   disconnect,
   sendMessage,
   sendUserInput,
-  subscribeToSession,
   respondToChanges,
   loadSessionMessages,
   removeEntries,
   respondToPermission,
+  subscribeToSession,
   clearFeed,
   toggleYolo,
-  setYoloMode,
 };
