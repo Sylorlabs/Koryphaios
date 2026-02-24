@@ -24,6 +24,7 @@ import type {
   Session,
 } from "@koryphaios/shared";
 import { sessionStore } from './sessions.svelte';
+import { authStore } from './auth.svelte';
 import { browser } from '$app/environment';
 
 // ─── Agent State ────────────────────────────────────────────────────────────
@@ -144,6 +145,15 @@ function resolveGlowClass(agent?: AgentIdentity): string {
 function addFeedEntry(entry: Omit<FeedEntry, "id">) {
   const newEntry: FeedEntry = { ...entry, id: `fe-${++feedIdCounter}` };
   feed = [...feed, newEntry].slice(-MAX_FEED_ENTRIES);
+}
+
+/** Remove the ephemeral "Analyzing request..." thought once analysis is done (next phase, routing, or content). */
+function removeAnalyzingThoughtEntries() {
+  const isAnalyzingEntry = (e: FeedEntry) =>
+    e.type === "thought" &&
+    (e.text === "Analyzing request..." || (e.metadata as { phase?: string })?.phase === "analyzing");
+  if (!feed.some(isAnalyzingEntry)) return;
+  feed = feed.filter((e) => !isAnalyzingEntry(e));
 }
 
 // Accumulate streaming text into the last matching feed entry instead of creating one per token
@@ -268,6 +278,7 @@ function handleMessage(msg: WSMessage) {
         agents = new Map(agents);
       }
       if (isForActiveSession) {
+        removeAnalyzingThoughtEntries();
         accumulateFeedEntry({
           timestamp: msg.timestamp,
           type: "content",
@@ -405,6 +416,9 @@ function handleMessage(msg: WSMessage) {
       if (isForActiveSession) {
         koryThought = p.thought;
         koryPhase = p.phase;
+        // When moving past "Analyzing request...", remove it from the feed so it doesn't stay
+        const isAnalyzingEntry = p.phase === "analyzing" && p.thought === "Analyzing request...";
+        if (!isAnalyzingEntry) removeAnalyzingThoughtEntries();
         addFeedEntry({
           timestamp: msg.timestamp,
           type: "thought",
@@ -421,6 +435,7 @@ function handleMessage(msg: WSMessage) {
     case "kory.routing": {
       const p = msg.payload as KoryRoutingPayload;
       if (isForActiveSession) {
+        removeAnalyzingThoughtEntries();
         addFeedEntry({
           timestamp: msg.timestamp,
           type: "routing",
@@ -436,11 +451,13 @@ function handleMessage(msg: WSMessage) {
 
     case "kory.ask_user": {
       const p = msg.payload as any;
-      pendingQuestion = {
-        question: p.question,
-        options: p.options,
-        allowOther: p.allowOther,
-      };
+      if (isForActiveSession) {
+        pendingQuestion = {
+          question: p.question,
+          options: p.options,
+          allowOther: p.allowOther,
+        };
+      }
       break;
     }
 
@@ -481,7 +498,9 @@ function handleMessage(msg: WSMessage) {
 
     case "permission.request": {
       const p = msg.payload as PermissionRequest;
-      pendingPermissions = [...pendingPermissions, p];
+      if (isForActiveSession) {
+        pendingPermissions = [...pendingPermissions, p];
+      }
       break;
     }
 
@@ -493,14 +512,24 @@ function handleMessage(msg: WSMessage) {
 
     case "system.error": {
       const p = msg.payload as any;
-      addFeedEntry({
-        timestamp: msg.timestamp,
-        type: "error",
-        agentId: "",
-        agentName: "System",
-        glowClass: "",
-        text: p.error ?? "Unknown system error",
-      });
+      if (!isForActiveSession) break;
+      const errorText = p.error ?? "Unknown system error";
+      // Dedupe: skip if the last entry is the same error within 3s (e.g. no-provider sent twice)
+      const last = feed.length > 0 ? feed[feed.length - 1] : null;
+      const isDuplicate =
+        last?.type === "error" &&
+        last.text === errorText &&
+        (msg.timestamp - last.timestamp) < 3000;
+      if (!isDuplicate) {
+        addFeedEntry({
+          timestamp: msg.timestamp,
+          type: "error",
+          agentId: "",
+          agentName: "System",
+          glowClass: "",
+          text: errorText,
+        });
+      }
       break;
     }
   }
@@ -516,8 +545,16 @@ let wsCandidateIndex = 0;
 function buildWsCandidates(preferredUrl?: string): string[] {
   const scheme = window.location.protocol === "https:" ? "wss" : "ws";
   const currentHost = window.location.host;
-  const primary = preferredUrl ?? `${scheme}://${currentHost}/ws`;
-  return [primary];
+  const sameOrigin = `${scheme}://${currentHost}/ws`;
+  const directWs = typeof import.meta.env !== "undefined" && (import.meta.env as { VITE_BACKEND_WS_URL?: string }).VITE_BACKEND_WS_URL;
+
+  const candidates: string[] = [];
+  if (preferredUrl) candidates.push(preferredUrl);
+  // Prefer same-origin first so Vite dev proxy (e.g. ws://localhost:5173/ws → backend) is tried first.
+  if (sameOrigin && !candidates.includes(sameOrigin)) candidates.push(sameOrigin);
+  if (directWs && !candidates.includes(directWs)) candidates.push(directWs);
+  if (candidates.length === 0) candidates.push(sameOrigin);
+  return candidates;
 }
 
 function connect(url?: string) {
@@ -547,6 +584,9 @@ function connect(url?: string) {
       connectionStatus = "connected";
       reconnectAttempts = 0;
       wsConnection = ws;
+      // Subscribe to the active session so backend can scope messages
+      const activeSid = sessionStore.activeSessionId;
+      if (activeSid) subscribeToSession(activeSid);
     };
 
     ws.onmessage = (event) => {
@@ -586,6 +626,11 @@ function scheduleReconnect(url?: string) {
   reconnectTimer = setTimeout(() => connect(url), delay);
 }
 
+function subscribeToSession(sessionId: string) {
+  if (!sessionId || wsConnection?.readyState !== WebSocket.OPEN) return;
+  wsConnection.send(JSON.stringify({ type: "subscribe_session", sessionId, timestamp: Date.now() }));
+}
+
 function disconnect() {
   if (reconnectTimer) clearTimeout(reconnectTimer);
   wsConnection?.close();
@@ -598,6 +643,7 @@ function sendMessage(sessionId: string, content: string, model?: string, reasoni
   fetch("/api/messages", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
+    credentials: "include",
     body: JSON.stringify({ sessionId, content, model, reasoningLevel }),
   }).catch(() => { });
 }
@@ -734,6 +780,27 @@ function isSessionRunning(sessionId: string): boolean {
   return false;
 }
 
+/** Mark all agents for this session as done (optimistic UI when user clicks Stop). */
+function markSessionAgentsStopped(sessionId: string) {
+  let changed = false;
+  for (const a of agents.values()) {
+    if (a.sessionId === sessionId && a.status !== 'idle' && a.status !== 'done') {
+      a.status = 'done';
+      changed = true;
+    }
+  }
+  if (changed) agents = new Map(agents);
+}
+
+/** Mark a single agent as done (optimistic UI when user cancels one worker). */
+function markAgentStopped(agentId: string) {
+  const agent = agents.get(agentId);
+  if (agent && agent.status !== 'idle' && agent.status !== 'done') {
+    agent.status = 'done';
+    agents = new Map(agents);
+  }
+}
+
 function sendUserInput(sessionId: string, selection: string, text?: string) {
   if (wsConnection?.readyState === WebSocket.OPEN) {
     wsConnection.send(JSON.stringify({
@@ -798,6 +865,8 @@ export const wsStore = {
   get managerStatus() { return getManagerStatus(); },
   get contextUsage() { return getContextUsage(); },
   isSessionRunning,
+  markSessionAgentsStopped,
+  markAgentStopped,
   connect,
   disconnect,
   sendMessage,
@@ -806,6 +875,7 @@ export const wsStore = {
   loadSessionMessages,
   removeEntries,
   respondToPermission,
+  subscribeToSession,
   clearFeed,
   toggleYolo,
 };
