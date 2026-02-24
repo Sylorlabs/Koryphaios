@@ -42,9 +42,20 @@ export interface ProviderToolDef {
 
 // ─── Message format for provider calls ──────────────────────────────────────
 
+/** Minimal tool call shape for assistant messages so APIs accept following "tool" messages. */
+export interface ProviderToolCall {
+  id: string;
+  name: string;
+  input: Record<string, unknown>;
+}
+
 export interface ProviderMessage {
   role: "user" | "assistant" | "system" | "tool";
   content: string | ProviderContentBlock[];
+  /** Required for role "tool": ID of the tool call this result belongs to. */
+  tool_call_id?: string;
+  /** Required when following messages have role "tool": assistant must include tool_calls. */
+  tool_calls?: ProviderToolCall[];
 }
 
 export interface ProviderContentBlock {
@@ -87,7 +98,7 @@ export interface Provider {
   isAvailable(): boolean;
 
   /** List models available for this provider. */
-  listModels(): Promise<ModelDef[]>;
+  listModels(): ModelDef[];
 }
 
 // ─── Provider factory ───────────────────────────────────────────────────────
