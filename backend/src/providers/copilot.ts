@@ -20,9 +20,9 @@ const COPILOT_HEADERS = {
   "User-Agent": "Koryphaios/1.0",
 } as const;
 
-// Complete Copilot model catalog — Official GitHub Copilot models as of Feb 2026.
-// Excludes models deprecated on Feb 17, 2026: Claude Opus 4.1, Gemini 2.5 Pro, GPT-5, GPT-5-Codex
-// Excludes models deprecated on Oct 23, 2025: Claude Sonnet 3.5/3.7, GPT-4o, GPT-4o-mini, GPT-4, GPT-3.5 Turbo, o1, o3-mini, o4-mini, Gemini 2.0 Flash
+// Complete Copilot model catalog — mirrors OpenCode's copilot.go definitions.
+// All models are $0 cost (included in GitHub Copilot subscription).
+// API model IDs are unprefixed (e.g., "gpt-4.1" not "copilot.gpt-4.1").
 const COPILOT_MODELS: ModelDef[] = [
   {
     id: "gpt-4.1",
@@ -37,155 +37,11 @@ const COPILOT_MODELS: ModelDef[] = [
     supportsStreaming: true,
   },
   {
-    id: "gpt-5-mini",
-    name: "GPT-5 mini (Copilot)",
-    provider: "copilot",
-    contextWindow: 128_000,
-    maxOutputTokens: 32_768,
-    costPerMInputTokens: 0,
-    costPerMOutputTokens: 0,
-    canReason: true,
-    supportsAttachments: true,
-    supportsStreaming: true,
-  },
-  {
-    id: "gpt-5.1",
-    name: "GPT-5.1 (Copilot)",
-    provider: "copilot",
-    contextWindow: 200_000,
-    maxOutputTokens: 100_000,
-    costPerMInputTokens: 0,
-    costPerMOutputTokens: 0,
-    canReason: true,
-    supportsAttachments: true,
-    supportsStreaming: true,
-  },
-  {
-    id: "gpt-5.1-codex",
-    name: "GPT-5.1 Codex (Copilot)",
-    provider: "copilot",
-    contextWindow: 200_000,
-    maxOutputTokens: 100_000,
-    costPerMInputTokens: 0,
-    costPerMOutputTokens: 0,
-    canReason: true,
-    supportsAttachments: true,
-    supportsStreaming: true,
-  },
-  {
-    id: "gpt-5.1-codex-mini",
-    name: "GPT-5.1 Codex Mini (Copilot)",
-    provider: "copilot",
-    contextWindow: 200_000,
-    maxOutputTokens: 50_000,
-    costPerMInputTokens: 0,
-    costPerMOutputTokens: 0,
-    canReason: true,
-    supportsAttachments: true,
-    supportsStreaming: true,
-  },
-  {
-    id: "gpt-5.1-codex-max",
-    name: "GPT-5.1 Codex Max (Copilot)",
-    provider: "copilot",
-    contextWindow: 200_000,
-    maxOutputTokens: 100_000,
-    costPerMInputTokens: 0,
-    costPerMOutputTokens: 0,
-    canReason: true,
-    supportsAttachments: true,
-    supportsStreaming: true,
-  },
-  {
-    id: "gpt-5.2",
-    name: "GPT-5.2 (Copilot)",
-    provider: "copilot",
-    contextWindow: 200_000,
-    maxOutputTokens: 100_000,
-    costPerMInputTokens: 0,
-    costPerMOutputTokens: 0,
-    canReason: true,
-    supportsAttachments: true,
-    supportsStreaming: true,
-  },
-  {
-    id: "gpt-5.2-codex",
-    name: "GPT-5.2 Codex (Copilot)",
-    provider: "copilot",
-    contextWindow: 200_000,
-    maxOutputTokens: 100_000,
-    costPerMInputTokens: 0,
-    costPerMOutputTokens: 0,
-    canReason: true,
-    supportsAttachments: true,
-    supportsStreaming: true,
-  },
-  {
-    id: "gpt-5.3-codex",
-    name: "GPT-5.3 Codex (Copilot)",
-    provider: "copilot",
-    contextWindow: 200_000,
-    maxOutputTokens: 100_000,
-    costPerMInputTokens: 0,
-    costPerMOutputTokens: 0,
-    canReason: true,
-    supportsAttachments: true,
-    supportsStreaming: true,
-  },
-  {
-    id: "claude-haiku-4-5",
-    name: "Claude Haiku 4.5 (Copilot)",
-    provider: "copilot",
-    contextWindow: 200_000,
-    maxOutputTokens: 8_192,
-    costPerMInputTokens: 0,
-    costPerMOutputTokens: 0,
-    canReason: false,
-    supportsAttachments: true,
-    supportsStreaming: true,
-  },
-  {
-    id: "claude-opus-4-5",
-    name: "Claude Opus 4.5 (Copilot)",
-    provider: "copilot",
-    contextWindow: 200_000,
-    maxOutputTokens: 32_768,
-    costPerMInputTokens: 0,
-    costPerMOutputTokens: 0,
-    canReason: true,
-    supportsAttachments: true,
-    supportsStreaming: true,
-  },
-  {
-    id: "claude-opus-4-6",
-    name: "Claude Opus 4.6 (Copilot)",
-    provider: "copilot",
-    contextWindow: 200_000,
-    maxOutputTokens: 32_768,
-    costPerMInputTokens: 0,
-    costPerMOutputTokens: 0,
-    canReason: true,
-    supportsAttachments: true,
-    supportsStreaming: true,
-  },
-  {
-    id: "claude-opus-4-6-fast",
-    name: "Claude Opus 4.6 Fast (Copilot)",
-    provider: "copilot",
-    contextWindow: 200_000,
-    maxOutputTokens: 32_768,
-    costPerMInputTokens: 0,
-    costPerMOutputTokens: 0,
-    canReason: true,
-    supportsAttachments: true,
-    supportsStreaming: true,
-  },
-  {
-    id: "claude-sonnet-4",
+    id: "claude-sonnet-4-5",
     name: "Claude Sonnet 4 (Copilot)",
     provider: "copilot",
-    contextWindow: 200_000,
-    maxOutputTokens: 16_384,
+    contextWindow: 128_000,
+    maxOutputTokens: 16_000,
     costPerMInputTokens: 0,
     costPerMOutputTokens: 0,
     canReason: false,
@@ -193,8 +49,8 @@ const COPILOT_MODELS: ModelDef[] = [
     supportsStreaming: true,
   },
   {
-    id: "claude-sonnet-4-5",
-    name: "Claude Sonnet 4.5 (Copilot)",
+    id: "claude-3.7-sonnet",
+    name: "Claude 3.7 Sonnet (Copilot)",
     provider: "copilot",
     contextWindow: 200_000,
     maxOutputTokens: 16_384,
@@ -205,10 +61,22 @@ const COPILOT_MODELS: ModelDef[] = [
     supportsStreaming: true,
   },
   {
-    id: "gemini-3-flash",
-    name: "Gemini 3 Flash (Copilot)",
+    id: "claude-3.7-sonnet-thought",
+    name: "Claude 3.7 Sonnet Thinking (Copilot)",
     provider: "copilot",
-    contextWindow: 1_000_000,
+    contextWindow: 200_000,
+    maxOutputTokens: 16_384,
+    costPerMInputTokens: 0,
+    costPerMOutputTokens: 0,
+    canReason: true,
+    supportsAttachments: true,
+    supportsStreaming: true,
+  },
+  {
+    id: "claude-3.5-sonnet",
+    name: "Claude 3.5 Sonnet (Copilot)",
+    provider: "copilot",
+    contextWindow: 90_000,
     maxOutputTokens: 8_192,
     costPerMInputTokens: 0,
     costPerMOutputTokens: 0,
@@ -217,35 +85,107 @@ const COPILOT_MODELS: ModelDef[] = [
     supportsStreaming: true,
   },
   {
-    id: "gemini-3-pro",
-    name: "Gemini 3 Pro (Copilot)",
+    id: "o4-mini",
+    name: "O4 Mini (Copilot)",
     provider: "copilot",
-    contextWindow: 1_000_000,
+    contextWindow: 128_000,
+    maxOutputTokens: 16_384,
+    costPerMInputTokens: 0,
+    costPerMOutputTokens: 0,
+    canReason: true,
+    supportsAttachments: true,
+    supportsStreaming: true,
+  },
+  {
+    id: "o3-mini",
+    name: "O3 Mini (Copilot)",
+    provider: "copilot",
+    contextWindow: 200_000,
+    maxOutputTokens: 100_000,
+    costPerMInputTokens: 0,
+    costPerMOutputTokens: 0,
+    canReason: true,
+    supportsAttachments: false,
+    supportsStreaming: true,
+  },
+  {
+    id: "o1",
+    name: "O1 (Copilot)",
+    provider: "copilot",
+    contextWindow: 200_000,
+    maxOutputTokens: 100_000,
+    costPerMInputTokens: 0,
+    costPerMOutputTokens: 0,
+    canReason: true,
+    supportsAttachments: false,
+    supportsStreaming: true,
+  },
+  {
+    id: "gpt-4o",
+    name: "GPT-4o (Copilot)",
+    provider: "copilot",
+    contextWindow: 128_000,
+    maxOutputTokens: 16_384,
+    costPerMInputTokens: 0,
+    costPerMOutputTokens: 0,
+    canReason: false,
+    supportsAttachments: true,
+    supportsStreaming: true,
+  },
+  {
+    id: "gpt-4o-mini",
+    name: "GPT-4o Mini (Copilot)",
+    provider: "copilot",
+    contextWindow: 128_000,
+    maxOutputTokens: 4_096,
+    costPerMInputTokens: 0,
+    costPerMOutputTokens: 0,
+    canReason: false,
+    supportsAttachments: true,
+    supportsStreaming: true,
+  },
+  {
+    id: "gpt-4",
+    name: "GPT-4 (Copilot)",
+    provider: "copilot",
+    contextWindow: 32_768,
+    maxOutputTokens: 4_096,
+    costPerMInputTokens: 0,
+    costPerMOutputTokens: 0,
+    canReason: false,
+    supportsAttachments: true,
+    supportsStreaming: true,
+  },
+  {
+    id: "gpt-3.5-turbo",
+    name: "GPT-3.5 Turbo (Copilot)",
+    provider: "copilot",
+    contextWindow: 16_384,
+    maxOutputTokens: 4_096,
+    costPerMInputTokens: 0,
+    costPerMOutputTokens: 0,
+    canReason: false,
+    supportsAttachments: true,
+    supportsStreaming: true,
+  },
+  {
+    id: "gemini-2.5-pro",
+    name: "Gemini 2.5 Pro (Copilot)",
+    provider: "copilot",
+    contextWindow: 128_000,
     maxOutputTokens: 64_000,
     costPerMInputTokens: 0,
     costPerMOutputTokens: 0,
-    canReason: true,
+    canReason: false,
     supportsAttachments: true,
     supportsStreaming: true,
   },
   {
-    id: "grok-code-fast-1",
-    name: "Grok Code Fast 1 (Copilot)",
+    id: "gemini-2.0-flash-001",
+    name: "Gemini 2.0 Flash (Copilot)",
     provider: "copilot",
-    contextWindow: 131_072,
-    maxOutputTokens: 32_768,
-    costPerMInputTokens: 0,
-    costPerMOutputTokens: 0,
-    canReason: true,
-    supportsAttachments: true,
-    supportsStreaming: true,
-  },
-  {
-    id: "raptor-mini",
-    name: "Raptor Mini (Copilot)",
-    provider: "copilot",
-    contextWindow: 128_000,
-    maxOutputTokens: 16_384,
+    contextWindow: 1_000_000,
+    maxOutputTokens: 8_192,
     costPerMInputTokens: 0,
     costPerMOutputTokens: 0,
     canReason: false,
@@ -260,31 +200,66 @@ export class CopilotProvider extends OpenAIProvider {
 
   constructor(config: ProviderConfig) {
     const ghToken = config.authToken ?? detectCopilotToken();
-    const bearer = ghToken ? exchangeGitHubTokenForCopilot(ghToken) : null;
 
     super(
-      { ...config, apiKey: bearer ?? undefined, authToken: ghToken ?? undefined },
+      {
+        ...config,
+        apiKey: "placeholder-will-be-fetched-async",
+        authToken: ghToken ?? undefined,
+        headers: { ...config.headers, ...COPILOT_HEADERS }
+      },
       "copilot",
       COPILOT_CHAT_URL,
     );
 
-    // After super(), we can re-initialize the client with Copilot specific headers
-    this._client = new OpenAI({
-      apiKey: bearer || "sk-placeholder-not-configured",
-      baseURL: COPILOT_CHAT_URL,
-      defaultHeaders: { ...COPILOT_HEADERS },
-    });
-
-    this.bearerToken = bearer;
     this.githubToken = ghToken;
   }
 
-  override async listModels(): Promise<ModelDef[]> {
+  override listModels(): ModelDef[] {
     return COPILOT_MODELS;
   }
 
   override isAvailable(): boolean {
     return !this.config.disabled && !!(this.config.authToken || detectCopilotToken());
+  }
+
+  private _copilotClient: OpenAI | null = null;
+
+  protected override get client(): OpenAI {
+    if (!this._copilotClient) {
+      this._copilotClient = new OpenAI({
+        apiKey: this.bearerToken || "placeholder-awaiting-async-init",
+        baseURL: COPILOT_CHAT_URL,
+        defaultHeaders: { ...this.config.headers }, // Headers are already merged in constructor
+      });
+    }
+    return this._copilotClient;
+  }
+
+  override async *streamResponse(request: import("./types").StreamRequest): AsyncGenerator<import("./types").ProviderEvent> {
+    await this.ensureBearerToken();
+    yield* super.streamResponse(request);
+  }
+
+  private async ensureBearerToken() {
+    if (this.bearerToken) return;
+
+    if (!this.githubToken) {
+       this.githubToken = detectCopilotToken();
+    }
+
+    if (!this.githubToken) {
+      throw new Error("GitHub Copilot token not found. Please authenticate.");
+    }
+
+    const bearer = await exchangeGitHubTokenForCopilotAsync(this.githubToken);
+    if (bearer) {
+      this.bearerToken = bearer;
+      // Force recreation of client with new token
+      this._copilotClient = null;
+    } else {
+      throw new Error("Failed to exchange GitHub token for Copilot bearer token.");
+    }
   }
 }
 
@@ -415,15 +390,11 @@ export async function startCopilotDeviceAuth(): Promise<CopilotDeviceAuthStart> 
     headers: {
       Accept: "application/json",
       "Content-Type": "application/x-www-form-urlencoded",
-      "editor-version": "Koryphaios/1.0.0",
-      "editor-plugin-version": "koryphaios/1.0.0",
-      "User-Agent": "Koryphaios/1.0.0",
     },
     body: params.toString(),
   });
   if (!response.ok) {
-    const errorText = await response.text();
-    throw new Error(`Failed to start device auth: HTTP ${response.status} - ${errorText}`);
+    throw new Error(`Failed to start device auth: HTTP ${response.status}`);
   }
 
   const data = await response.json() as {
@@ -457,15 +428,11 @@ export async function pollCopilotDeviceAuth(deviceCode: string): Promise<Copilot
     headers: {
       Accept: "application/json",
       "Content-Type": "application/x-www-form-urlencoded",
-      "editor-version": "Koryphaios/1.0.0",
-      "editor-plugin-version": "koryphaios/1.0.0",
-      "User-Agent": "Koryphaios/1.0.0",
     },
     body: params.toString(),
   });
   if (!response.ok) {
-    const errorText = await response.text();
-    throw new Error(`Failed to poll device auth: HTTP ${response.status} - ${errorText}`);
+    throw new Error(`Failed to poll device auth: HTTP ${response.status}`);
   }
 
   const data = await response.json() as {
