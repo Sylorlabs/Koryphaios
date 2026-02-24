@@ -10,12 +10,12 @@
  * - CriticUtil: Code review and quality gate utilities
  */
 
-export { Manager } from "./manager";
+export { KoryManager as Manager } from "./manager";
 export { TaskManager } from "./task-manager";
 export { GitManager } from "./git-manager";
 export { WorkspaceManager, WorkspaceError } from "./workspace-manager";
 export { SnapshotManager } from "./snapshot-manager";
-export { CriticUtil } from "./critic-util";
+export * as CriticUtil from "./critic-util";
 export { UserInputHandler } from "./user-input-handler";
 export { ShadowLogger, ShadowLoggerError } from "./shadow-logger";
 
