@@ -15,6 +15,7 @@ import {
   createGenericModel,
 } from "./types";
 import { withRetry } from "./utils";
+import { createUsageInterceptingFetch } from "../credit-accountant";
 
 export class OpenAIProvider implements Provider {
   protected _client: OpenAI | null = null;
@@ -32,6 +33,7 @@ export class OpenAIProvider implements Provider {
         apiKey: apiKey || "placeholder",
         baseURL: this.baseUrl ?? this.config.baseUrl,
         defaultHeaders: this.config.headers,
+        fetch: createUsageInterceptingFetch(globalThis.fetch),
       });
     }
     return this._client;
@@ -241,6 +243,16 @@ export class OpenAIProvider implements Provider {
             role: "tool",
             tool_call_id: msg.tool_call_id ?? "",
             content: msg.content,
+          });
+        } else if (msg.role === "assistant" && msg.tool_calls?.length) {
+          result.push({
+            role: "assistant",
+            content: msg.content || null,
+            tool_calls: msg.tool_calls.map((tc) => ({
+              id: tc.id,
+              type: "function" as const,
+              function: { name: tc.name, arguments: JSON.stringify(tc.input ?? {}) },
+            })),
           });
         } else {
           result.push({ role: msg.role as any, content: msg.content });

@@ -18,6 +18,8 @@
     Shield,
     MessageCircle,
     Search,
+    CreditCard,
+    AlertTriangle,
   } from 'lucide-svelte';
   import ModelSelectionDialog from './ModelSelectionDialog.svelte';
   import { apiFetch } from '$lib/api';
@@ -28,7 +30,7 @@
   }
 
   let { open = false, onClose }: Props = $props();
-  let activeTab = $state<'providers' | 'appearance' | 'shortcuts' | 'messaging'>('providers');
+  let activeTab = $state<'providers' | 'appearance' | 'shortcuts' | 'messaging' | 'billing'>('providers');
 
   let showModelSelector = $state(false);
   let selectorTarget = $state<any>(null);
@@ -41,7 +43,7 @@
   // Only show providers the user has authenticated (from backend). No hardcoded list.
   // Display labels for provider names (used when a provider appears in the list or in Add dropdown).
   const PROVIDER_LABELS: Record<string, string> = {
-    anthropic: 'Anthropic', openai: 'OpenAI', google: 'Google', xai: 'xAI',
+    anthropic: 'Anthropic', cline: 'Cline', openai: 'OpenAI', google: 'Google', xai: 'xAI',
     openrouter: 'OpenRouter', groq: 'Groq', copilot: 'GitHub Copilot', azure: 'Azure OpenAI',
     bedrock: 'AWS Bedrock', vertexai: 'Vertex AI', local: 'Local (custom endpoint)', ollama: 'Ollama',
     lmstudio: 'LM Studio', llamacpp: 'Llama.cpp', opencodezen: 'OpenCodeZen',
@@ -72,6 +74,7 @@
     // Provider label mappings
     const providerLabels: Record<string, string> = {
       anthropic: 'Anthropic',
+      cline: 'Cline',
       openai: 'OpenAI',
       google: 'Google',
       xai: 'xAI',
@@ -154,7 +157,7 @@
     // Provider placeholder mappings
     const providerPlaceholders: Record<string, string> = {
       anthropic: 'sk-ant-...',
-
+      cline: 'CLI authentication',
       openai: 'sk-...',
       google: 'AIza...',
       xai: 'xai-...',
@@ -295,6 +298,11 @@
   let copilotAuthMessage = $state<string>('');
   let copilotPollTimer: ReturnType<typeof setTimeout> | null = null;
 
+  // Antigravity (Google) OAuth: start → open URL → poll until backend saves
+  let antigravityAuthId = $state<string | null>(null);
+  let antigravityAuthStatus = $state<'idle' | 'pending' | 'connected' | 'error'>('idle');
+  let antigravityAuthMessage = $state<string>('');
+  let antigravityPollTimer: ReturnType<typeof setTimeout> | null = null;
 
   // Auth mode for providers with multiple auth options
   let selectedAuthMode = $state<Record<string, string>>({});
@@ -305,6 +313,13 @@
     // Provider not yet connected (e.g. "Add provider"): use type from available list
     const type = availableProviderTypes.find((t) => t.name === name);
     const authMode = type?.authMode ?? 'api_key';
+    const extraAuthModes = name === 'google'
+      ? [
+          { id: 'api_key', label: 'API key' },
+          { id: 'cli', label: 'Gemini CLI' },
+          { id: 'antigravity', label: 'Antigravity' },
+        ]
+      : undefined;
     return {
       authMode,
       supportsApiKey: authMode === 'api_key' || authMode === 'api_key_or_auth',
@@ -313,7 +328,7 @@
       enabled: false,
       authenticated: false,
       models: [] as string[],
-      extraAuthModes: undefined as undefined | Array<{ id: string; label: string }>,
+      extraAuthModes: extraAuthModes as undefined | Array<{ id: string; label: string }>,
     };
   }
 
@@ -442,6 +457,94 @@
       return;
     }
     window.open(url, '_blank', 'noopener,noreferrer');
+  }
+
+  function stopAntigravityPolling() {
+    if (antigravityPollTimer) {
+      clearTimeout(antigravityPollTimer);
+      antigravityPollTimer = null;
+    }
+  }
+
+  async function pollAntigravityAuth() {
+    if (!antigravityAuthId) return;
+    try {
+      const res = await apiFetch(`/api/providers/google/auth/antigravity/poll?authId=${encodeURIComponent(antigravityAuthId)}`, { method: 'GET' });
+      const data = await res.json();
+      if (data.ok && data.data?.success) {
+        stopAntigravityPolling();
+        antigravityAuthStatus = 'connected';
+        antigravityAuthMessage = 'Authorized successfully.';
+        antigravityAuthId = null;
+        expandedProvider = null;
+        toastStore.success('Google (Antigravity) connected');
+        return;
+      }
+      if (!data.ok) {
+        stopAntigravityPolling();
+        antigravityAuthStatus = 'error';
+        antigravityAuthMessage = data.error ?? 'Auth failed';
+        toastStore.error(antigravityAuthMessage);
+        return;
+      }
+      antigravityAuthMessage = 'Waiting for you to sign in in the browser...';
+      antigravityPollTimer = setTimeout(pollAntigravityAuth, 2500);
+    } catch (err: any) {
+      antigravityAuthStatus = 'error';
+      antigravityAuthMessage = err.message ?? 'Poll failed';
+      toastStore.error(antigravityAuthMessage);
+    }
+  }
+
+  async function startAntigravityAuth() {
+    try {
+      stopAntigravityPolling();
+      antigravityAuthStatus = 'pending';
+      antigravityAuthMessage = 'Opening sign-in page...';
+      const res = await apiFetch('/api/providers/google/auth/antigravity', { method: 'POST' });
+      const data = await res.json();
+      if (!data.ok) {
+        antigravityAuthStatus = 'error';
+        antigravityAuthMessage = data.error ?? 'Failed to start Antigravity auth';
+        toastStore.error(antigravityAuthMessage);
+        return;
+      }
+      const { url, authId } = data.data ?? {};
+      if (!url || !authId) {
+        antigravityAuthStatus = 'error';
+        antigravityAuthMessage = 'No auth URL returned';
+        toastStore.error(antigravityAuthMessage);
+        return;
+      }
+      antigravityAuthId = authId;
+      window.open(url, '_blank', 'noopener,noreferrer');
+      antigravityAuthMessage = 'Waiting for you to sign in in the browser...';
+      antigravityPollTimer = setTimeout(pollAntigravityAuth, 2500);
+    } catch (err: any) {
+      antigravityAuthStatus = 'error';
+      antigravityAuthMessage = err.message ?? 'Failed to start auth';
+      toastStore.error(antigravityAuthMessage);
+    }
+  }
+
+  async function startGeminiCLIAuth() {
+    try {
+      const res = await apiFetch('/api/providers/google/auth/cli', { method: 'POST' });
+      const data = await res.json();
+      if (!data.ok) {
+        toastStore.error(data.error ?? 'Failed to start Gemini auth');
+        return;
+      }
+      const url = data.data?.url;
+      if (url) {
+        window.open(url, '_blank', 'noopener,noreferrer');
+        toastStore.success('Sign-in page opened. Complete sign-in, then click Verify below.');
+      } else {
+        toastStore.info(data.data?.message ?? 'Check your terminal for the sign-in link.');
+      }
+    } catch (err: any) {
+      toastStore.error(err.message ?? 'Failed to start Gemini auth');
+    }
   }
 
   function stopCopilotPolling() {
@@ -574,6 +677,7 @@
 
   onDestroy(() => {
     stopCopilotPolling();
+    stopAntigravityPolling();
   });
 
   async function disconnectProvider(name: string) {
@@ -619,6 +723,15 @@
   // Messaging tab
   let messagingLoading = $state(false);
   let messagingSaving = $state(false);
+
+  let billingLoading = $state(false);
+  let billingData = $state<{
+    localEstimate: { totalCostUsd: number; tokensIn: number; tokensOut: number; byModel: Array<{ model: string; costUsd: number; tokensIn: number; tokensOut: number }> };
+    cloudReality: Array<{ source: string; ts: number; totalUsedUsd: number | null; totalGrantedUsd: number | null; totalAvailableUsd: number | null; payload: string }>;
+    driftPercent: number | null;
+    highlightDrift: boolean;
+  } | null>(null);
+  let billingError = $state<string | null>(null);
   let telegramEnabled = $state(false);
   let telegramAdminId = $state('');
   let telegramBotToken = $state('');
@@ -679,6 +792,34 @@
       toastStore.error(err instanceof Error ? err.message : 'Failed to save messaging config');
     } finally {
       messagingSaving = false;
+    }
+  }
+
+  async function loadBillingCredits() {
+    billingLoading = true;
+    billingError = null;
+    billingData = null;
+    try {
+      const res = await apiFetch('/api/billing/credits');
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        const msg = (err as { error?: string }).error ?? `HTTP ${res.status}`;
+        billingError = res.status === 404
+          ? 'Billing API not available. Start the backend server (e.g. from repo root) and ensure the frontend proxy targets it.'
+          : msg;
+        return;
+      }
+      const data = await res.json();
+      billingData = {
+        localEstimate: data.localEstimate,
+        cloudReality: data.cloudReality ?? [],
+        driftPercent: data.driftPercent ?? null,
+        highlightDrift: data.highlightDrift === true,
+      };
+    } catch (e) {
+      billingError = e instanceof Error ? e.message : 'Failed to load billing. Ensure the backend is running (e.g. port 3000) and the frontend proxy targets it.';
+    } finally {
+      billingLoading = false;
     }
   }
 
@@ -790,6 +931,13 @@
         >
           <MessageCircle size={13} /> Messaging
         </button>
+        <button
+          class="flex-1 min-w-0 flex items-center justify-center gap-1.5 py-2 text-xs rounded-md transition-colors
+                 {activeTab === 'billing' ? 'bg-[var(--color-surface-3)] text-[var(--color-text-primary)] font-medium' : 'text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)]'}"
+          onclick={() => { activeTab = 'billing'; void loadBillingCredits(); }}
+        >
+          <CreditCard size={13} /> Billing
+        </button>
       </div>
 
       <!-- Content (scrollable) -->
@@ -880,15 +1028,39 @@
                         {@const currentMode = selectedAuthMode[prov.key] ?? caps.extraAuthModes[0].id}
                         {#if currentMode === 'cli'}
                           <div class="text-[10px] mb-1" style="color: var(--color-text-muted);">
-                            Uses existing Gemini CLI session. Run <code class="px-1 py-0.5 rounded" style="background: var(--color-surface-3);">gemini auth</code> first.
+                            Use an existing Gemini CLI session, or sign in in the browser and then verify.
                           </div>
+                          <button
+                            type="button"
+                            onclick={startGeminiCLIAuth}
+                            class="btn btn-secondary w-full"
+                          >
+                            Sign in with Gemini (open browser)
+                          </button>
                           <button
                             onclick={() => connectProvider(prov.key)}
                             disabled={saving === prov.key}
-                            class="btn btn-primary w-full"
+                            class="btn btn-primary w-full mt-1"
                           >
                             {verifying === prov.key ? 'Testing connection...' : saving === prov.key ? 'Saving...' : 'Verify Gemini CLI Auth'}
                           </button>
+                        {:else if currentMode === 'antigravity'}
+                          <div class="text-[10px] mb-1" style="color: var(--color-text-muted);">
+                            Sign in with Google in your browser. No CLI required.
+                          </div>
+                          <button
+                            type="button"
+                            onclick={startAntigravityAuth}
+                            disabled={antigravityAuthStatus === 'pending'}
+                            class="btn btn-secondary w-full"
+                          >
+                            Authorize Antigravity in Browser
+                          </button>
+                          {#if antigravityAuthId || antigravityAuthStatus !== 'idle'}
+                            <div class="rounded-md px-2 py-2 mt-2" style="background: var(--color-surface-2);">
+                              <div class="text-[10px]" style="color: var(--color-text-muted);">{antigravityAuthMessage}</div>
+                            </div>
+                          {/if}
                         {:else}
                         <!-- Standard API key input -->
                         <input
@@ -1201,6 +1373,61 @@
         <p class="text-[10px]" style="color: var(--color-text-muted);">
           Restart the server after saving for Telegram changes to take effect.
         </p>
+      {/if}
+    </div>
+  {:else if activeTab === 'billing'}
+    <div class="space-y-4">
+      <p class="text-sm" style="color: var(--color-text-secondary);">
+        Local estimate (from token usage) vs cloud reality (OpenAI / GitHub Copilot). Drift &gt; 5% is highlighted.
+      </p>
+      {#if billingLoading}
+        <p class="text-sm" style="color: var(--color-text-muted);">Loading…</p>
+      {:else if billingError}
+        <p class="text-sm" style="color: var(--color-error, #dc2626);">{billingError}</p>
+      {:else if billingData}
+        {#if billingData.highlightDrift}
+          <div
+            class="flex items-center gap-2 p-3 rounded-lg border"
+            style="background: var(--color-surface-2); border-color: var(--color-warning, #f59e0b);"
+          >
+            <AlertTriangle size={18} style="color: var(--color-warning, #f59e0b);" />
+            <span class="text-sm font-medium">Drift &gt; 5% — Local estimate and cloud usage differ by {billingData.driftPercent?.toFixed(1) ?? '?'}%.</span>
+          </div>
+        {/if}
+        <div class="grid gap-4 sm:grid-cols-2">
+          <div class="p-4 rounded-lg" style="background: var(--color-surface-2);">
+            <h3 class="text-xs font-semibold uppercase tracking-wider mb-2" style="color: var(--color-text-muted);">Local estimate</h3>
+            <p class="text-lg font-semibold" style="color: var(--color-text-primary);">${billingData.localEstimate.totalCostUsd.toFixed(4)}</p>
+            <p class="text-[10px] mt-1" style="color: var(--color-text-muted);">
+              {billingData.localEstimate.tokensIn.toLocaleString()} in / {billingData.localEstimate.tokensOut.toLocaleString()} out tokens
+            </p>
+            {#if billingData.localEstimate.byModel.length > 0}
+              <ul class="mt-2 space-y-1 text-[10px]" style="color: var(--color-text-muted);">
+                {#each billingData.localEstimate.byModel as row}
+                  <li>{row.model}: ${row.costUsd.toFixed(4)}</li>
+                {/each}
+              </ul>
+            {/if}
+          </div>
+          <div class="p-4 rounded-lg" style="background: var(--color-surface-2);">
+            <h3 class="text-xs font-semibold uppercase tracking-wider mb-2" style="color: var(--color-text-muted);">Cloud reality</h3>
+            {#if billingData.cloudReality.length === 0}
+              <p class="text-sm" style="color: var(--color-text-muted);">No cloud snapshots yet (poll every 15 min).</p>
+            {:else}
+              {#each billingData.cloudReality as cloud}
+                <div class="mb-2 last:mb-0">
+                  <span class="text-xs font-medium" style="color: var(--color-text-secondary);">{cloud.source}</span>
+                  {#if cloud.totalUsedUsd != null}
+                    <p class="text-sm" style="color: var(--color-text-primary);">Used: ${cloud.totalUsedUsd.toFixed(4)}</p>
+                  {/if}
+                  {#if cloud.totalAvailableUsd != null}
+                    <p class="text-[10px]" style="color: var(--color-text-muted);">Available: ${cloud.totalAvailableUsd.toFixed(4)}</p>
+                  {/if}
+                </div>
+              {/each}
+            {/if}
+          </div>
+        </div>
       {/if}
     </div>
   {/if}

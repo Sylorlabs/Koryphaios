@@ -27,7 +27,10 @@ export class GeminiProvider implements Provider {
   }
 
   isAvailable(): boolean {
-    const hasAuth = !!(this.config.apiKey || this.config.authToken || detectGeminiCLIToken());
+    // Vertex AI must not fall back to Gemini CLI / gcloud auto-detection
+    const hasAuth = this.name === "vertexai"
+      ? !!(this.config.apiKey || this.config.authToken)
+      : !!(this.config.apiKey || this.config.authToken || detectGeminiCLIToken());
     return !this.config.disabled && hasAuth;
   }
 
@@ -72,9 +75,11 @@ export class GeminiProvider implements Provider {
   async *streamResponse(request: StreamRequest): AsyncGenerator<ProviderEvent> {
     const { GoogleGenAI } = await import("@google/genai");
 
-    const apiKey = this.config.apiKey || this.config.authToken || detectGeminiCLIToken();
+    // Vertex AI requires an explicit API key — never auto-detect from Gemini CLI or GCP credentials
+    const apiKey = this.config.apiKey || this.config.authToken ||
+      (this.name !== "vertexai" ? detectGeminiCLIToken() : null);
     if (!apiKey) {
-      yield { type: "error", error: "No API key available" };
+      yield { type: "error", error: this.name === "vertexai" ? "Vertex AI requires an explicit API key (set GOOGLE_VERTEX_AI_API_KEY)" : "No API key available" };
       return;
     }
 
