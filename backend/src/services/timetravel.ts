@@ -87,7 +87,7 @@ export class TimeTravelService {
    * 
    * Call this after an AI agent makes changes to save the state.
    */
-  async checkpoint(
+  checkpoint(
     description: string,
     metadata: {
       model?: string;
@@ -97,9 +97,9 @@ export class TimeTravelService {
       tokensOut?: number;
       agentId?: string;
     }
-  ): Promise<{ success: boolean; hash?: string; message: string }> {
+  ): { success: boolean; hash?: string; message: string } {
     // Only checkpoint if there are actual changes
-    const status = await this.gitManager.getStatus();
+    const status = this.gitManager.getStatus();
     if (!status || status.length === 0) {
       return { success: false, message: "No changes to checkpoint" };
     }
@@ -291,3 +291,9 @@ export class TimeTravelService {
   }
 }
 
+// Extend GitManager interface to expose runGit for TimeTravelService
+declare module "@/kory/git-manager" {
+  interface GitManager {
+    runGit(args: string[]): { success: boolean; output: string };
+  }
+}
