@@ -5,30 +5,17 @@
     status: AgentStatus;
     size?: number;
     isManager?: boolean;
-    static?: boolean;
-    /** When "analyzing", show bouncing dots instead of lightbulb for thinking */
-    phase?: string;
+    isStatic?: boolean;
   }
 
-  let { status, size = 20, isManager = false, static: isStatic = false, phase = '' }: Props = $props();
-  let isAnalyzing = $derived(status === 'thinking' && phase === 'analyzing');
+  let { status, size = 20, isManager = false, isStatic = false }: Props = $props();
 </script>
 
 <!-- Animated status icons with distinct animations per agent state -->
 
 <div class="status-icon-container {isStatic ? 'static-mode' : ''}" style="width: {size}px; height: {size}px;">
-{#if isAnalyzing}
-  <!-- Analyzing: three bouncing dots -->
-  <div class="status-icon analyzing" style="width: {size}px; height: {size}px;">
-    <svg viewBox="0 0 24 24" fill="none" width={size} height={size}>
-      <circle cx="6" cy="12" r="2.5" class="text-blue-400 dot dot-1" fill="currentColor"/>
-      <circle cx="12" cy="12" r="2.5" class="text-blue-400 dot dot-2" fill="currentColor"/>
-      <circle cx="18" cy="12" r="2.5" class="text-blue-400 dot dot-3" fill="currentColor"/>
-    </svg>
-  </div>
-
-{:else if status === 'thinking'}
-  <!-- Reasoning: Lightbulb bouncing animation -->
+{#if status === 'thinking'}
+  <!-- Lightbulb bouncing animation -->
   <div class="status-icon thinking" style="width: {size}px; height: {size}px;">
     <svg viewBox="0 0 24 24" fill="none" width={size} height={size}>
       <defs>
@@ -199,16 +186,7 @@
     flex-shrink: 0;
   }
 
-  /* ── Analyzing: three bouncing dots ───────────────── */
-  .analyzing .dot-1 { animation: dot-bounce 0.6s ease-in-out infinite; }
-  .analyzing .dot-2 { animation: dot-bounce 0.6s ease-in-out infinite 0.1s; }
-  .analyzing .dot-3 { animation: dot-bounce 0.6s ease-in-out infinite 0.2s; }
-  @keyframes dot-bounce {
-    0%, 100% { transform: translateY(0); opacity: 0.4; }
-    50% { transform: translateY(-4px); opacity: 1; }
-  }
-
-  /* ── Thinking (reasoning): Lightbulb bounce ────────── */
+  /* ── Thinking: Lightbulb bounce ─────────────────── */
   .thinking {
     animation: lightbulb-bounce 1.2s ease-in-out infinite;
   }

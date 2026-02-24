@@ -32,15 +32,27 @@ Please help me resolve these conflicts. You can read the files to see the confli
   }
 </script>
 
-<div class="fixed inset-0 z-[100] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4" onclick={onClose}>
-  <div class="w-full max-w-md rounded-xl overflow-hidden bg-[var(--color-surface-1)] border border-red-500/30 shadow-2xl" onclick={e => e.stopPropagation()}>
+<div 
+  class="fixed inset-0 z-[100] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4" 
+  onclick={onClose}
+  role="presentation"
+>
+  <div 
+    class="w-full max-w-md rounded-xl overflow-hidden bg-[var(--color-surface-1)] border border-red-500/30 shadow-2xl" 
+    onclick={e => e.stopPropagation()}
+    onkeydown={e => { if (e.key === 'Escape') onClose(); }}
+    role="dialog"
+    aria-modal="true"
+    aria-labelledby="conflict-title"
+    tabindex="-1"
+  >
     <!-- Header -->
     <div class="bg-red-500/10 px-4 py-3 border-b border-red-500/20 flex items-center gap-3">
       <div class="w-8 h-8 rounded-full bg-red-500/20 flex items-center justify-center text-red-500">
         <AlertTriangle size={18} />
       </div>
       <div>
-        <h3 class="text-sm font-bold text-red-500">Merge Conflicts Detected</h3>
+        <h3 id="conflict-title" class="text-sm font-bold text-red-500">Merge Conflicts Detected</h3>
         <p class="text-[10px] text-red-400/80 uppercase tracking-wider font-medium">Automatic merge failed</p>
       </div>
       <button class="ml-auto p-1 hover:bg-red-500/10 rounded text-red-500/50" onclick={onClose}>

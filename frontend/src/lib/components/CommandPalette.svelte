@@ -13,6 +13,7 @@
     FileCode,
     Command
   } from 'lucide-svelte';
+  import { getModKeyName } from '$lib/utils/platform';
 
   let { 
     open = $bindable(false), 
@@ -40,9 +41,10 @@
     { id: 'new_session', label: 'New Session', description: 'Start a fresh conversation', icon: Plus, shortcut: 'N', category: 'Session' },
     { id: 'open_project_file', label: 'Import Project', description: 'Load project from a local file', icon: FileCode, category: 'Project' },
     { id: 'save_snapshot', label: 'Export Snapshot', description: 'Save current session as .kory.json', icon: FileCode, category: 'Project' },
+    { id: 'session_compact', label: 'Compact Session', description: 'Request an implementation-focused session summary', icon: FileCode, category: 'Session' },
     { id: 'toggle_sidebar', label: 'Toggle Sidebar', description: 'Show or hide the session sidebar', icon: Sidebar, shortcut: 'B', category: 'View' },
-    { id: 'toggle_zen_mode', label: 'Toggle Zen Mode', description: 'Focus on the conversation', icon: Layout, shortcut: 'Z', category: 'View' },
-    { id: 'toggle_theme', label: 'Switch Theme', description: 'Toggle light and dark mode', icon: SunMoon, category: 'View' },
+    { id: 'toggle_zen_mode', label: 'Toggle Zen Mode', description: 'Focus on the conversation', icon: Layout, shortcut: 'Shift+Z', category: 'View' },
+    { id: 'toggle_theme', label: 'Switch Theme', description: 'Open quick theme preset picker', icon: SunMoon, category: 'View' },
     { id: 'toggle_yolo', label: 'Toggle YOLO Mode', description: 'Bypass all confirmation dialogs', icon: Zap, shortcut: 'Y', category: 'System' },
     { id: 'open_settings', label: 'Settings', description: 'Configure providers and preferences', icon: Settings, shortcut: ',', category: 'System' },
     { id: 'clear_feed', label: 'Clear Feed', description: 'Remove all messages from view', icon: Trash2, category: 'System' },
@@ -94,12 +96,14 @@
     style="background: rgba(0,0,0,0.5);"
     transition:fade={{ duration: 150 }}
     onmousedown={() => open = false}
+    role="presentation"
   >
     <div 
       class="w-full max-w-xl rounded-xl border shadow-2xl overflow-hidden flex flex-col"
       style="background: var(--color-surface-1); border-color: var(--color-border);"
       transition:fly={{ y: -20, duration: 200 }}
       onmousedown={e => e.stopPropagation()}
+      role="presentation"
     >
       <div class="flex items-center gap-3 px-4 py-3 border-b" style="border-color: var(--color-border);">
         <Search size={18} style="color: var(--color-text-muted);" />
@@ -148,8 +152,10 @@
                 </div>
                 {#if action.shortcut}
                   <div class="flex items-center gap-0.5 shrink-0 opacity-40 group-hover:opacity-100 transition-opacity">
-                    <span class="text-[10px] px-1 py-0.5 rounded border" style="background: var(--color-surface-2); border-color: var(--color-border); color: var(--color-text-muted);">⌘</span>
-                    <span class="text-[10px] px-1 py-0.5 rounded border" style="background: var(--color-surface-2); border-color: var(--color-border); color: var(--color-text-muted);">{action.shortcut}</span>
+                    <span class="text-[10px] px-1 py-0.5 rounded border" style="background: var(--color-surface-2); border-color: var(--color-border); color: var(--color-text-muted);">{getModKeyName()}</span>
+                    {#each action.shortcut.split('+') as part}
+                      <span class="text-[10px] px-1 py-0.5 rounded border" style="background: var(--color-surface-2); border-color: var(--color-border); color: var(--color-text-muted);">{part}</span>
+                    {/each}
                   </div>
                 {/if}
               </button>

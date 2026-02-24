@@ -9,20 +9,10 @@
     Keyboard,
     Check,
     Copy,
-    Zap,
-    Server,
-    Globe,
-    Cpu,
-    X,
-    User,
-    Shield,
-    MessageCircle,
     Search,
-    CreditCard,
-    AlertTriangle,
+    X,
   } from 'lucide-svelte';
   import ModelSelectionDialog from './ModelSelectionDialog.svelte';
-  import { apiFetch } from '$lib/api';
 
   interface Props {
     open?: boolean;
@@ -30,7 +20,8 @@
   }
 
   let { open = false, onClose }: Props = $props();
-  let activeTab = $state<'providers' | 'appearance' | 'shortcuts' | 'messaging' | 'billing'>('providers');
+  let activeTab = $state<'providers' | 'appearance' | 'shortcuts'>('providers');
+  let settingsSearch = $state('');
 
   let showModelSelector = $state(false);
   let selectorTarget = $state<any>(null);
@@ -39,252 +30,203 @@
     if (e.key === 'Escape' && open && onClose) onClose();
   }
 
-  // ─── Provider Management ──────────────────────────────────────────────
-  // Only show providers the user has authenticated (from backend). No hardcoded list.
-  // Display labels for provider names (used when a provider appears in the list or in Add dropdown).
-  const PROVIDER_LABELS: Record<string, string> = {
-    anthropic: 'Anthropic', cline: 'Cline', openai: 'OpenAI', google: 'Google', xai: 'xAI',
-    openrouter: 'OpenRouter', groq: 'Groq', copilot: 'GitHub Copilot', azure: 'Azure OpenAI',
-    bedrock: 'AWS Bedrock', vertexai: 'Vertex AI', local: 'Local (custom endpoint)', ollama: 'Ollama',
-    lmstudio: 'LM Studio', llamacpp: 'Llama.cpp', opencodezen: 'OpenCodeZen',
+  function providerMatchesSearch(
+    provider: ProviderCard,
+    categoryLabel: string,
+    query: string,
+  ): boolean {
+    const q = query.trim().toLowerCase();
+    if (!q) return true;
+    
+    // Check provider key, label, and category
+    if (provider.label.toLowerCase().includes(q) ||
+        provider.key.toLowerCase().includes(q) ||
+        categoryLabel.toLowerCase().includes(q)) {
+      return true;
+    }
+    
+    // Check extra auth modes (sub-providers like codex, antigravity, claude_code)
+    const caps = getProviderCaps(provider.key);
+    if (caps.extraAuthModes) {
+      for (const mode of caps.extraAuthModes) {
+        if (mode.label.toLowerCase().includes(q) ||
+            mode.description?.toLowerCase().includes(q) ||
+            mode.id.toLowerCase().includes(q)) {
+          return true;
+        }
+      }
+    }
+    
+    return false;
+  }
+
+  type ProviderCard = {
+    key: string;
+    label: string;
+    placeholder?: string;
+    isAuthOnly?: boolean;
+    needsUrl?: boolean;
   };
 
-  let availableProviderTypes = $state<Array<{ name: string; authMode: string }>>([]);
-
-  function getProviderDisplayLabel(name: string): string {
-    return PROVIDER_LABELS[name] ?? (name.charAt(0).toUpperCase() + name.slice(1));
-  }
-
-  async function loadAvailableProviders() {
-    try {
-      const res = await apiFetch('/api/providers/available');
-      const data = await res.json();
-      if (data?.ok && Array.isArray(data.data)) {
-        availableProviderTypes = data.data;
-      }
-    } catch {
-      availableProviderTypes = [];
-    }
-  }
-
-  // Build one clean list from all provider types (API). Status comes from wsStore per row.
-  const providerList = $derived.by(() => {
-    const types = availableProviderTypes.length > 0 ? availableProviderTypes : (wsStore.providers ?? []).map((p) => ({ name: p.name, authMode: (p as { authMode?: string }).authMode ?? 'api_key' }));
-    
-    // Provider label mappings
-    const providerLabels: Record<string, string> = {
-      anthropic: 'Anthropic',
-      cline: 'Cline',
-      openai: 'OpenAI',
-      google: 'Google',
-      xai: 'xAI',
-      openrouter: 'OpenRouter',
-      groq: 'Groq',
-      copilot: 'GitHub Copilot',
-      azure: 'Azure OpenAI',
-      bedrock: 'AWS Bedrock',
-      vertexai: 'Vertex AI',
-      local: 'Local (custom endpoint)',
-      ollama: 'Ollama',
-      lmstudio: 'LM Studio',
-      llamacpp: 'Llama.cpp',
-      ollamacloud: 'Ollama Cloud',
-      deepseek: 'DeepSeek',
-      minimax: 'MiniMax',
-      moonshot: 'Moonshot AI',
-      zai: 'ZAI',
-      cortecs: 'Cortecs',
-      stepfun: 'StepFun',
-      cerebras: 'Cerebras',
-      fireworks: 'Fireworks AI',
-      deepinfra: 'DeepInfra',
-      ionet: 'IO.net',
-      hyperbolic: 'Hyperbolic',
-      huggingface: 'HuggingFace',
-      replicate: 'Replicate',
-      modal: 'Modal',
-      vercel: 'Vercel',
-      cloudflare: 'Cloudflare',
-      cloudflareworkers: 'Cloudflare Workers',
-      baseten: 'Baseten',
-      helicone: 'Helicone',
-      portkey: 'Portkey',
-      scaleway: 'Scaleway',
-      ovhcloud: 'OVHcloud',
-      stackit: 'STACKIT',
-      nebius: 'Nebius',
-      togetherai: 'Together AI',
-      venice: 'Venice AI',
-      zenmux: 'ZenMux',
-      opencodezen: 'OpenCodeZen',
-      firmware: 'Firmware',
-      '302ai': '302.ai',
-      mistralai: 'Mistral AI',
-      cohere: 'Cohere',
-      perplexity: 'Perplexity',
-      luma: 'Luma',
-      fal: 'Fal',
-      elevenlabs: 'ElevenLabs',
-      assemblyai: 'AssemblyAI',
-      deepgram: 'Deepgram',
-      gladia: 'Gladia',
-      lmnt: 'LMNT',
-      azurecognitive: 'Azure Cognitive',
-      sapai: 'SAP AI',
-      gitlab: 'GitLab',
-      nvidia: 'NVIDIA',
-      nim: 'NIM',
-      friendliai: 'FriendliAI',
-      voyageai: 'VoyageAI',
-      mixedbread: 'Mixedbread',
-      mem0: 'Mem0',
-      letta: 'Letta',
-      qwen: 'Qwen',
-      alibaba: 'Alibaba',
-      chromeai: 'ChromeAI',
-      requesty: 'Requesty',
-      aihubmix: 'AIHubMix',
-      aimlapi: 'AIMLAPI',
-      blackforestlabs: 'Black Forest Labs',
-      klingai: 'KlingAI',
-      prodia: 'Prodia',
-
-      antigravity: 'Antigravity',
-      novita: 'Novita',
-      banbri: 'Banbri',
-    };
-
-    // Provider placeholder mappings
-    const providerPlaceholders: Record<string, string> = {
-      anthropic: 'sk-ant-...',
-      cline: 'CLI authentication',
-      openai: 'sk-...',
-      google: 'AIza...',
-      xai: 'xai-...',
-      openrouter: 'sk-or-...',
-
-      groq: 'gsk_...',
-      copilot: 'gho_...',
-      azure: 'key...',
-      bedrock: 'AKIA...',
-      vertexai: '/path/to/creds.json',
-      local: 'http://localhost:1234',
-      ollama: 'http://localhost:11434',
-      lmstudio: 'http://localhost:1234',
-      llamacpp: 'http://localhost:8080',
-      ollamacloud: 'sk-...',
-      deepseek: 'sk-...',
-      minimax: 'sk-...',
-      moonshot: 'sk-...',
-      zai: 'sk-...',
-      cortecs: 'sk-...',
-      stepfun: 'sk-...',
-      cerebras: 'sk-...',
-      fireworks: 'sk-...',
-      deepinfra: 'sk-...',
-      ionet: 'sk-...',
-      hyperbolic: 'sk-...',
-      huggingface: 'hf_...',
-      replicate: 'r8_...',
-      modal: 'md-...',
-      vercel: '...',
-      cloudflare: '...',
-      cloudflareworkers: '...',
-      baseten: '...',
-      helicone: 'sk-...',
-      portkey: 'sk-...',
-      scaleway: 'scw_...',
-      ovhcloud: 'ovh-...',
-      stackit: '...',
-      nebius: '',
-      togetherai: 'sk-...',
-      venice: 'sk-...',
-      zenmux: 'sk-...',
-      opencodezen: 'Get key at opencode.ai/auth',
-      firmware: 'sk-...',
-      '302ai': 'sk-...',
-      mistralai: 'sk-...',
-      cohere: 'sk-...',
-      perplexity: 'pplx-...',
-      luma: 'lm-...',
-      fal: 'sk-...',
-      elevenlabs: 'sk-...',
-      assemblyai: 'sk-...',
-      deepgram: 'sk-...',
-      gladia: 'sk-...',
-      lmnt: 'sk-...',
-      azurecognitive: 'sk-...',
-      sapai: 'sk-...',
-      gitlab: 'glpat-...',
-      nvidia: 'nvapi-...',
-      nim: 'nvapi-...',
-      friendliai: '',
-      voyageai: 'sk-...',
-      mixedbread: 'sk-...',
-      mem0: 'm0-...',
-      letta: 'lt-...',
-      qwen: 'sk-...',
-      alibaba: 'sk-...',
-      chromeai: '',
-      requesty: 'sk-...',
-      aihubmix: 'sk-...',
-      aimlapi: 'sk-...',
-      blackforestlabs: 'sk-...',
-      klingai: 'sk-...',
-      prodia: 'sk-...',
-  
-      antigravity: 'sk-...',
-      novita: 'sk-...',
-      banbri: 'sk-...',
-    };
-
-    // Providers that require a base URL
-    const providersNeedingUrl = new Set([
-      'local', 'ollama', 'lmstudio', 'llamacpp', 'azure'
-    ]);
-
-    // One list: all provider types (from API), sorted — same nice list as before
-    const providers = types.map((type) => ({
-      key: type.name,
-      label: providerLabels[type.name] || type.name.charAt(0).toUpperCase() + type.name.slice(1),
-      placeholder: providerPlaceholders[type.name] || 'API key...',
-      needsUrl: providersNeedingUrl.has(type.name),
-    }));
-
-    return providers.sort((a, b) => a.label.localeCompare(b.label));
-  });
-
-  $effect(() => {
-    if (open && activeTab === 'providers' && availableProviderTypes.length === 0) {
-      void loadAvailableProviders();
-    }
-  });
-
-  let providerSearchQuery = $state('');
-  const filteredProviderList = $derived.by(() => {
-    const q = providerSearchQuery.trim().toLowerCase();
-    if (!q) return providerList;
-    return providerList.filter(
-      (p) =>
-        p.label.toLowerCase().includes(q) ||
-        p.key.toLowerCase().includes(q)
-    );
-  });
+  // ─── Provider Management ──────────────────────────────────────────────
+  const providerCategories: Array<{ label: string; providers: ProviderCard[] }> = [
+    {
+      label: 'Frontier',
+      providers: [
+        { key: 'anthropic', label: 'Anthropic', placeholder: 'sk-ant-...' },
+        { key: 'openai', label: 'OpenAI', placeholder: 'sk-...' },
+        { key: 'google', label: 'Google Gemini', placeholder: 'AIza...' },
+        { key: 'xai', label: 'xAI', placeholder: 'xai-...' },
+      ],
+    },
+    {
+      label: 'Aggregators',
+      providers: [
+        { key: 'openrouter', label: 'OpenRouter', placeholder: 'sk-or-...' },
+        { key: 'cline', label: 'Cline', placeholder: 'workos:...' },
+        { key: 'copilot', label: 'GitHub Copilot', isAuthOnly: true },
+        { key: 'groq', label: 'Groq', placeholder: 'gsk_...' },
+        { key: 'togetherai', label: 'Together AI', placeholder: 'sk-...' },
+        { key: 'opencodezen', label: 'OpenCode Zen', placeholder: 'sk-...' },
+      ],
+    },
+    {
+      label: 'AI Gateways',
+      providers: [
+        { key: 'cloudflare', label: 'Cloudflare AI Gateway', placeholder: 'API Token', needsUrl: true },
+        { key: 'vercel', label: 'Vercel AI Gateway', placeholder: 'API Token' },
+        { key: 'baseten', label: 'Baseten', placeholder: 'API Key' },
+        { key: 'helicone', label: 'Helicone', placeholder: 'API Key' },
+        { key: 'portkey', label: 'Portkey', placeholder: 'API Key' },
+      ],
+    },
+    {
+      label: 'High Performance',
+      providers: [
+        { key: 'cerebras', label: 'Cerebras', placeholder: 'API Key' },
+        { key: 'fireworks', label: 'Fireworks AI', placeholder: 'API Key' },
+        { key: 'deepinfra', label: 'Deep Infra', placeholder: 'API Key' },
+        { key: 'hyperbolic', label: 'Hyperbolic', placeholder: 'API Key' },
+        { key: 'ionet', label: 'IO.NET', placeholder: 'API Key' },
+      ],
+    },
+    {
+      label: 'Chinese AI',
+      providers: [
+        { key: 'deepseek', label: 'DeepSeek', placeholder: 'sk-...' },
+        { key: 'moonshot', label: 'Moonshot AI (Kimi)', placeholder: 'API Key' },
+        { key: 'minimax', label: 'MiniMax', placeholder: 'API Key' },
+        { key: 'nebius', label: 'Nebius', placeholder: 'API Key', needsUrl: true },
+        { key: 'cortecs', label: 'Cortecs', placeholder: 'API Key' },
+        { key: 'stepfun', label: 'StepFun', placeholder: 'API Key' },
+        { key: 'qwen', label: 'Qwen', placeholder: 'API Key' },
+        { key: 'alibaba', label: 'Alibaba Cloud', placeholder: 'API Key' },
+        { key: 'zhipuai', label: 'Zhipu AI', placeholder: 'API Key' },
+        { key: 'modelscope', label: 'ModelScope', placeholder: 'API Key' },
+      ],
+    },
+    {
+      label: 'Open Source Platforms',
+      providers: [
+        { key: 'huggingface', label: 'Hugging Face', placeholder: 'HF Token' },
+        { key: 'replicate', label: 'Replicate', placeholder: 'API Key' },
+        { key: 'modal', label: 'Modal', placeholder: 'API Key' },
+        { key: 'scaleway', label: 'Scaleway', placeholder: 'API Key' },
+        { key: 'venice', label: 'Venice AI', placeholder: 'API Key' },
+        { key: 'zenmux', label: 'ZenMux', placeholder: 'API Key' },
+        { key: 'firmware', label: 'Firmware AI', placeholder: 'API Key' },
+      ],
+    },
+    {
+      label: 'Enterprise',
+      providers: [
+        { key: 'azure', label: 'Azure OpenAI', placeholder: 'API Key', needsUrl: true },
+        { key: 'azurecognitive', label: 'Azure Cognitive', placeholder: 'API Key', needsUrl: true },
+        { key: 'bedrock', label: 'AWS Bedrock', placeholder: 'AWS Credentials (env)' },
+        { key: 'vertexai', label: 'Vertex AI', placeholder: 'GCP Credentials (env)' },
+        { key: 'sapai', label: 'SAP AI Core', placeholder: 'Service Key JSON' },
+        { key: 'stackit', label: 'STACKIT', placeholder: 'Auth Token' },
+        { key: 'ovhcloud', label: 'OVHcloud', placeholder: 'API Key' },
+      ],
+    },
+    {
+      label: 'Self-Hosted',
+      providers: [
+        { key: 'local', label: 'Local (Generic)', placeholder: 'http://localhost:1234', needsUrl: true },
+        { key: 'ollama', label: 'Ollama', placeholder: 'http://localhost:11434', needsUrl: true },
+        { key: 'ollamacloud', label: 'Ollama Cloud', placeholder: 'API Key' },
+        { key: 'lmstudio', label: 'LM Studio', placeholder: 'http://localhost:1234', needsUrl: true },
+        { key: 'llamacpp', label: 'llama.cpp', placeholder: 'http://localhost:8080', needsUrl: true },
+      ],
+    },
+    {
+      label: 'Specialized',
+      providers: [
+        { key: 'chromeai', label: 'Chrome AI (Gemini Nano)', isAuthOnly: true },
+        { key: 'gitlab', label: 'GitLab Duo', placeholder: 'glpat-...' },
+        { key: 'mistralai', label: 'Mistral AI', placeholder: 'API Key' },
+        { key: 'cohere', label: 'Cohere', placeholder: 'API Key' },
+        { key: 'perplexity', label: 'Perplexity', placeholder: 'API Key' },
+        { key: 'luma', label: 'Luma AI', placeholder: 'API Key' },
+        { key: 'fal', label: 'Fal.ai', placeholder: 'API Key' },
+      ],
+    },
+    {
+      label: 'Audio/Speech',
+      providers: [
+        { key: 'elevenlabs', label: 'ElevenLabs', placeholder: 'API Key' },
+        { key: 'deepgram', label: 'Deepgram', placeholder: 'API Key' },
+        { key: 'gladia', label: 'Gladia', placeholder: 'API Key' },
+        { key: 'assemblyai', label: 'AssemblyAI', placeholder: 'API Key' },
+        { key: 'lmnt', label: 'LMNT', placeholder: 'API Key' },
+      ],
+    },
+    {
+      label: 'Other',
+      providers: [
+        { key: 'nvidia', label: 'NVIDIA NIM', placeholder: 'API Key' },
+        { key: 'nim', label: 'NVIDIA NIM (API)', placeholder: 'API Key' },
+        { key: 'friendliai', label: 'FriendliAI', placeholder: 'API Key' },
+        { key: 'friendli', label: 'Friendli', placeholder: 'API Key' },
+        { key: 'voyageai', label: 'Voyage AI', placeholder: 'API Key' },
+        { key: 'mixedbread', label: 'Mixedbread', placeholder: 'API Key' },
+        { key: 'mem0', label: 'Mem0', placeholder: 'API Key' },
+        { key: 'letta', label: 'Letta', placeholder: 'API Key' },
+        { key: 'blackforestlabs', label: 'Black Forest Labs', placeholder: 'API Key' },
+        { key: 'klingai', label: 'Kling AI', placeholder: 'API Key' },
+        { key: 'prodia', label: 'Prodia', placeholder: 'API Key' },
+        { key: 'a302ai', label: '302.AI', placeholder: 'API Key' },
+        { key: 'cloudflareworkers', label: 'Cloudflare Workers AI', placeholder: 'API Token' },
+        { key: 'novita-ai', label: 'Novita AI', placeholder: 'API Key' },
+        { key: 'upstage', label: 'Upstage AI', placeholder: 'API Key' },
+        { key: 'v0', label: 'v0', placeholder: 'API Key' },
+        { key: 'siliconflow', label: 'SiliconFlow', placeholder: 'API Key' },
+        { key: 'abacus', label: 'Abacus AI', placeholder: 'API Key' },
+        { key: 'llama', label: 'Llama', placeholder: 'API Key' },
+        { key: 'vultr', label: 'Vultr', placeholder: 'API Key' },
+        { key: 'wandb', label: 'Weights & Biases', placeholder: 'API Key' },
+        { key: 'poe', label: 'Poe', placeholder: 'API Key' },
+        { key: 'github-models', label: 'GitHub Models', placeholder: 'API Token' },
+        { key: 'requesty', label: 'Requesty', placeholder: 'API Key' },
+        { key: 'inference', label: 'Inference', placeholder: 'API Key' },
+        { key: 'submodel', label: 'Submodel', placeholder: 'API Key' },
+        { key: 'synthetic', label: 'Synthetic', placeholder: 'API Key' },
+        { key: 'moark', label: 'Moark', placeholder: 'API Key' },
+        { key: 'nova', label: 'Nova', placeholder: 'API Key' },
+      ],
+    },
+  ];
 
   let expandedProvider = $state<string | null>(null);
   let keyInputs = $state<Record<string, string>>({});
   let tokenInputs = $state<Record<string, string>>({});
   let urlInputs = $state<Record<string, string>>({});
   let saving = $state<string | null>(null);
-  let verifying = $state<string | null>(null);
   let copiedEndpoint = $state(false);
   const authPortalUrls: Record<string, string> = {
-    anthropic: 'https://console.anthropic.com',
-
+    anthropic: 'https://claude.ai/code',
     bedrock: 'https://signin.aws.amazon.com/',
     vertexai: 'https://console.cloud.google.com/',
-
-    opencodezen: 'https://opencode.ai/auth',
   };
   let copilotDeviceAuth = $state<{
     deviceCode: string;
@@ -298,37 +240,22 @@
   let copilotAuthMessage = $state<string>('');
   let copilotPollTimer: ReturnType<typeof setTimeout> | null = null;
 
-  // Antigravity (Google) OAuth: start → open URL → poll until backend saves
-  let antigravityAuthId = $state<string | null>(null);
-  let antigravityAuthStatus = $state<'idle' | 'pending' | 'connected' | 'error'>('idle');
-  let antigravityAuthMessage = $state<string>('');
-  let antigravityPollTimer: ReturnType<typeof setTimeout> | null = null;
-
   // Auth mode for providers with multiple auth options
   let selectedAuthMode = $state<Record<string, string>>({});
 
   function getProviderCaps(name: string) {
     const status = getProviderStatus(name);
     if (status) return status;
-    // Provider not yet connected (e.g. "Add provider"): use type from available list
-    const type = availableProviderTypes.find((t) => t.name === name);
-    const authMode = type?.authMode ?? 'api_key';
-    const extraAuthModes = name === 'google'
-      ? [
-          { id: 'api_key', label: 'API key' },
-          { id: 'cli', label: 'Gemini CLI' },
-          { id: 'antigravity', label: 'Antigravity' },
-        ]
-      : undefined;
-    return {
-      authMode,
-      supportsApiKey: authMode === 'api_key' || authMode === 'api_key_or_auth',
-      supportsAuthToken: authMode === 'api_key_or_auth',
-      requiresBaseUrl: authMode === 'base_url_only',
+    // Fallback to minimal defaults if not yet loaded
+    return { 
+      authMode: 'api_key' as string, 
+      supportsApiKey: true, 
+      supportsAuthToken: false, 
+      requiresBaseUrl: false,
       enabled: false,
       authenticated: false,
       models: [] as string[],
-      extraAuthModes: extraAuthModes as undefined | Array<{ id: string; label: string }>,
+      extraAuthModes: undefined as undefined | Array<{id: string; label: string; description?: string}>,
     };
   }
 
@@ -343,20 +270,20 @@
     const baseUrl = urlInputs[name]?.trim();
     const authMode = selectedAuthMode[name];
 
-    // Handle Gemini CLI auth mode
-    if (authMode === 'cli') {
+    // Handle special CLI auth modes
+    if (authMode === 'codex' || authMode === 'cli' || authMode === 'claude_code') {
       saving = name;
       try {
-        const body: { authMode: string } = { authMode };
-        const res = await apiFetch(`/api/providers/${name}`, {
+        const res = await fetch(`/api/providers/${name}`, {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(body),
+          body: JSON.stringify({ authMode }),
         });
         const data = await res.json();
         if (data.ok) {
           expandedProvider = null;
-          toastStore.success(`${name} connected via Gemini CLI`);
+          const label = authMode === 'codex' ? 'Codex' : authMode === 'cli' ? 'Gemini' : 'Claude Code';
+          toastStore.success(`${name} connected via ${label} CLI auth`);
         } else {
           toastStore.error(data.error ?? 'Connection failed');
         }
@@ -390,20 +317,18 @@
       if (apiKey) body.apiKey = apiKey;
       if (authToken) body.authToken = authToken;
       if (baseUrl) body.baseUrl = baseUrl;
-      verifying = name;
-      const res = await apiFetch(`/api/providers/${name}`, {
+      const res = await fetch(`/api/providers/${name}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
       });
-      verifying = null;
       const data = await res.json();
       if (data.ok) {
         keyInputs[name] = '';
         tokenInputs[name] = '';
         urlInputs[name] = '';
         expandedProvider = null;
-        toastStore.success(`${name} connected ✓`);
+        toastStore.success(`${name} connected`);
 
         // Wait a small bit for wsStore to update if needed, then check status
         setTimeout(() => {
@@ -420,7 +345,6 @@
       toastStore.error(err.message ?? 'Network error');
     } finally {
       saving = null;
-      verifying = null;
     }
   }
 
@@ -429,7 +353,7 @@
     const name = selectorTarget.name;
     
     try {
-      const res = await apiFetch(`/api/providers/${name}`, {
+      const res = await fetch(`/api/providers/${name}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ 
@@ -459,94 +383,6 @@
     window.open(url, '_blank', 'noopener,noreferrer');
   }
 
-  function stopAntigravityPolling() {
-    if (antigravityPollTimer) {
-      clearTimeout(antigravityPollTimer);
-      antigravityPollTimer = null;
-    }
-  }
-
-  async function pollAntigravityAuth() {
-    if (!antigravityAuthId) return;
-    try {
-      const res = await apiFetch(`/api/providers/google/auth/antigravity/poll?authId=${encodeURIComponent(antigravityAuthId)}`, { method: 'GET' });
-      const data = await res.json();
-      if (data.ok && data.data?.success) {
-        stopAntigravityPolling();
-        antigravityAuthStatus = 'connected';
-        antigravityAuthMessage = 'Authorized successfully.';
-        antigravityAuthId = null;
-        expandedProvider = null;
-        toastStore.success('Google (Antigravity) connected');
-        return;
-      }
-      if (!data.ok) {
-        stopAntigravityPolling();
-        antigravityAuthStatus = 'error';
-        antigravityAuthMessage = data.error ?? 'Auth failed';
-        toastStore.error(antigravityAuthMessage);
-        return;
-      }
-      antigravityAuthMessage = 'Waiting for you to sign in in the browser...';
-      antigravityPollTimer = setTimeout(pollAntigravityAuth, 2500);
-    } catch (err: any) {
-      antigravityAuthStatus = 'error';
-      antigravityAuthMessage = err.message ?? 'Poll failed';
-      toastStore.error(antigravityAuthMessage);
-    }
-  }
-
-  async function startAntigravityAuth() {
-    try {
-      stopAntigravityPolling();
-      antigravityAuthStatus = 'pending';
-      antigravityAuthMessage = 'Opening sign-in page...';
-      const res = await apiFetch('/api/providers/google/auth/antigravity', { method: 'POST' });
-      const data = await res.json();
-      if (!data.ok) {
-        antigravityAuthStatus = 'error';
-        antigravityAuthMessage = data.error ?? 'Failed to start Antigravity auth';
-        toastStore.error(antigravityAuthMessage);
-        return;
-      }
-      const { url, authId } = data.data ?? {};
-      if (!url || !authId) {
-        antigravityAuthStatus = 'error';
-        antigravityAuthMessage = 'No auth URL returned';
-        toastStore.error(antigravityAuthMessage);
-        return;
-      }
-      antigravityAuthId = authId;
-      window.open(url, '_blank', 'noopener,noreferrer');
-      antigravityAuthMessage = 'Waiting for you to sign in in the browser...';
-      antigravityPollTimer = setTimeout(pollAntigravityAuth, 2500);
-    } catch (err: any) {
-      antigravityAuthStatus = 'error';
-      antigravityAuthMessage = err.message ?? 'Failed to start auth';
-      toastStore.error(antigravityAuthMessage);
-    }
-  }
-
-  async function startGeminiCLIAuth() {
-    try {
-      const res = await apiFetch('/api/providers/google/auth/cli', { method: 'POST' });
-      const data = await res.json();
-      if (!data.ok) {
-        toastStore.error(data.error ?? 'Failed to start Gemini auth');
-        return;
-      }
-      const url = data.data?.url;
-      if (url) {
-        window.open(url, '_blank', 'noopener,noreferrer');
-        toastStore.success('Sign-in page opened. Complete sign-in, then click Verify below.');
-      } else {
-        toastStore.info(data.data?.message ?? 'Check your terminal for the sign-in link.');
-      }
-    } catch (err: any) {
-      toastStore.error(err.message ?? 'Failed to start Gemini auth');
-    }
-  }
-
   function stopCopilotPolling() {
     if (copilotPollTimer) {
       clearTimeout(copilotPollTimer);
@@ -564,7 +400,7 @@
   async function startCopilotAuth() {
     try {
       stopCopilotPolling();
-      const res = await apiFetch('/api/providers/copilot/device/start', {
+      const res = await fetch('/api/providers/copilot/device/start', {
         method: 'POST',
       });
       const data = await res.json();
@@ -620,7 +456,7 @@
 
     saving = 'copilot';
     try {
-      const res = await apiFetch('/api/providers/copilot/device/poll', {
+      const res = await fetch('/api/providers/copilot/device/poll', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ deviceCode: copilotDeviceAuth.deviceCode }),
@@ -677,12 +513,81 @@
 
   onDestroy(() => {
     stopCopilotPolling();
-    stopAntigravityPolling();
   });
 
-  async function disconnectProvider(name: string) {
+  // ─── Antigravity Auth ────────────────────────────────────────────────
+  async function startAntigravityAuth() {
+    saving = 'google';
     try {
-      await apiFetch(`/api/providers/${name}`, { method: 'DELETE' });
+      const res = await fetch('/api/providers/google/auth/antigravity', {
+        method: 'POST',
+      });
+      const data = await res.json();
+      if (!data.ok) {
+        toastStore.error(data.error ?? 'Failed to start Antigravity auth');
+        return;
+      }
+
+      const authUrl = data.data?.authUrl;
+      const authId = data.data?.authId;
+      
+      if (authUrl && authId) {
+        window.open(authUrl, '_blank', 'noopener,noreferrer');
+        toastStore.info('Opened Antigravity auth in browser. Waiting for completion...');
+        
+        // Poll for completion
+        pollAntigravityAuth(authId);
+      } else {
+        toastStore.error('Invalid auth response from server');
+      }
+    } catch (err: any) {
+      toastStore.error(err.message ?? 'Failed to start Antigravity auth');
+    } finally {
+      saving = null;
+    }
+  }
+
+  async function pollAntigravityAuth(authId: string, attempts = 0) {
+    if (attempts > 60) {
+      toastStore.error('Antigravity auth timed out');
+      return;
+    }
+
+    try {
+      const res = await fetch(`/api/providers/google/auth/antigravity/poll?authId=${authId}`);
+      const data = await res.json();
+      
+      if (data.ok && data.data?.success) {
+        toastStore.success('Google Antigravity connected');
+        expandedProvider = null;
+      } else if (data.error?.includes('Invalid or expired')) {
+        if (attempts < 60) {
+          setTimeout(() => pollAntigravityAuth(authId, attempts + 1), 2000);
+        } else {
+          toastStore.error('Antigravity auth expired');
+        }
+      } else {
+        toastStore.error(data.error ?? 'Antigravity auth failed');
+      }
+    } catch (err: any) {
+      if (attempts < 60) {
+        setTimeout(() => pollAntigravityAuth(authId, attempts + 1), 2000);
+      } else {
+        toastStore.error('Antigravity auth failed');
+      }
+    }
+  }
+
+  function providerGroup(name: string): string[] {
+    if (name === 'openai') return ['openai', 'codex'];
+    if (name === 'google') return ['google']; // could include gemini-cli if separate
+    return [name];
+  }
+
+  async function disconnectProvider(name: string, grouped = true) {
+    try {
+      const names = grouped ? providerGroup(name) : [name];
+      await Promise.all(names.map(n => fetch(`/api/providers/${n}`, { method: 'DELETE' })));
       toastStore.info(`${name} disconnected`);
     } catch {}
   }
@@ -693,135 +598,12 @@
     setTimeout(() => copiedEndpoint = false, 2000);
   }
 
+  import { shortcutStore } from '$lib/stores/shortcuts.svelte';
+  import { isMac, formatKey } from '$lib/utils/platform';
+
   // ─── Keyboard Shortcuts (editable, persisted) ──────────────────────────
-  interface Shortcut {
-    id: string;
-    keys: string[];
-    action: string;
-  }
-
-  const defaultShortcuts: Shortcut[] = [
-    { id: 'send', keys: ['Ctrl', 'Enter'], action: 'Send message' },
-    { id: 'settings', keys: ['Ctrl', ','], action: 'Open settings' },
-    { id: 'new_session', keys: ['Ctrl', 'N'], action: 'New session' },
-    { id: 'focus_input', keys: ['Ctrl', 'K'], action: 'Focus input' },
-    { id: 'close', keys: ['Esc'], action: 'Close dialogs' },
-  ];
-
-  function loadShortcuts(): Shortcut[] {
-    try {
-      const stored = localStorage.getItem('koryphaios-shortcuts');
-      if (stored) return JSON.parse(stored);
-    } catch {}
-    return structuredClone(defaultShortcuts);
-  }
-
-  let shortcuts = $state<Shortcut[]>(loadShortcuts());
   let editingShortcutId = $state<string | null>(null);
   let capturedKeys = $state<string[]>([]);
-
-  // Messaging tab
-  let messagingLoading = $state(false);
-  let messagingSaving = $state(false);
-
-  let billingLoading = $state(false);
-  let billingData = $state<{
-    localEstimate: { totalCostUsd: number; tokensIn: number; tokensOut: number; byModel: Array<{ model: string; costUsd: number; tokensIn: number; tokensOut: number }> };
-    cloudReality: Array<{ source: string; ts: number; totalUsedUsd: number | null; totalGrantedUsd: number | null; totalAvailableUsd: number | null; payload: string }>;
-    driftPercent: number | null;
-    highlightDrift: boolean;
-  } | null>(null);
-  let billingError = $state<string | null>(null);
-  let telegramEnabled = $state(false);
-  let telegramAdminId = $state('');
-  let telegramBotToken = $state('');
-  let telegramBotTokenSet = $state(false);
-
-  async function loadMessaging() {
-    messagingLoading = true;
-    try {
-      const res = await apiFetch('/api/messaging');
-      const data = await res.json();
-      if (data.ok && data.data) {
-        const t = data.data.telegram;
-        telegramEnabled = t?.enabled ?? false;
-        telegramAdminId = t?.adminId ? String(t.adminId) : '';
-        telegramBotTokenSet = t?.botTokenSet ?? false;
-        if (!telegramBotTokenSet) telegramBotToken = '';
-      }
-    } catch {
-      toastStore.error('Failed to load messaging config');
-    } finally {
-      messagingLoading = false;
-    }
-  }
-
-  async function saveMessaging() {
-    const adminId = parseInt(telegramAdminId, 10);
-    if (telegramEnabled && !telegramBotToken.trim() && !telegramBotTokenSet) {
-      toastStore.error('Bot token is required to enable Telegram');
-      return;
-    }
-    if (telegramEnabled && (!Number.isFinite(adminId) || adminId <= 0)) {
-      toastStore.error('Enter a valid Telegram user ID (positive number).');
-      return;
-    }
-    messagingSaving = true;
-    try {
-      const body = {
-        telegram: telegramEnabled && (telegramBotToken.trim() || telegramBotTokenSet) && Number.isFinite(adminId) && adminId > 0
-          ? { botToken: telegramBotToken.trim() || undefined, adminId }
-          : null,
-      };
-      if (body.telegram && !body.telegram.botToken && telegramBotTokenSet) {
-        (body.telegram as Record<string, unknown>).botToken = undefined;
-      }
-      const res = await apiFetch('/api/messaging', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-      });
-      const data = await res.json();
-      if (data.ok) {
-        toastStore.success('Messaging config saved. Restart the server for Telegram changes to take effect.');
-        void loadMessaging();
-      } else {
-        toastStore.error(data.error ?? 'Failed to save');
-      }
-    } catch (err: unknown) {
-      toastStore.error(err instanceof Error ? err.message : 'Failed to save messaging config');
-    } finally {
-      messagingSaving = false;
-    }
-  }
-
-  async function loadBillingCredits() {
-    billingLoading = true;
-    billingError = null;
-    billingData = null;
-    try {
-      const res = await apiFetch('/api/billing/credits');
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
-        const msg = (err as { error?: string }).error ?? `HTTP ${res.status}`;
-        billingError = res.status === 404
-          ? 'Billing API not available. Start the backend server (e.g. from repo root) and ensure the frontend proxy targets it.'
-          : msg;
-        return;
-      }
-      const data = await res.json();
-      billingData = {
-        localEstimate: data.localEstimate,
-        cloudReality: data.cloudReality ?? [],
-        driftPercent: data.driftPercent ?? null,
-        highlightDrift: data.highlightDrift === true,
-      };
-    } catch (e) {
-      billingError = e instanceof Error ? e.message : 'Failed to load billing. Ensure the backend is running (e.g. port 3000) and the frontend proxy targets it.';
-    } finally {
-      billingLoading = false;
-    }
-  }
 
   function startEditShortcut(id: string) {
     editingShortcutId = id;
@@ -834,10 +616,16 @@
     e.stopPropagation();
 
     const keys: string[] = [];
-    if (e.ctrlKey) keys.push('Ctrl');
+    const isMacPlatform = isMac();
+
+    // Capture primary modifier as 'Mod'
+    const modPressed = isMacPlatform ? e.metaKey : e.ctrlKey;
+    const secondaryModPressed = isMacPlatform ? e.ctrlKey : e.metaKey;
+
+    if (modPressed) keys.push('Mod');
+    if (secondaryModPressed) keys.push(isMacPlatform ? 'Ctrl' : 'Meta');
     if (e.shiftKey) keys.push('Shift');
     if (e.altKey) keys.push('Alt');
-    if (e.metaKey) keys.push('Meta');
 
     const key = e.key;
     if (!['Control', 'Shift', 'Alt', 'Meta'].includes(key)) {
@@ -849,11 +637,11 @@
 
     // If a non-modifier key was pressed, commit the binding
     if (!['Control', 'Shift', 'Alt', 'Meta'].includes(key)) {
-      const idx = shortcuts.findIndex(s => s.id === editingShortcutId);
+      const idx = shortcutStore.list.findIndex(s => s.id === editingShortcutId);
       if (idx >= 0) {
-        shortcuts[idx] = { ...shortcuts[idx], keys: capturedKeys };
-        shortcuts = [...shortcuts];
-        localStorage.setItem('koryphaios-shortcuts', JSON.stringify(shortcuts));
+        shortcutStore.list[idx] = { ...shortcutStore.list[idx], keys: capturedKeys };
+        shortcutStore.list = [...shortcutStore.list];
+        shortcutStore.save();
       }
       editingShortcutId = null;
       capturedKeys = [];
@@ -861,9 +649,14 @@
   }
 
   function resetShortcuts() {
-    shortcuts = structuredClone(defaultShortcuts);
-    localStorage.removeItem('koryphaios-shortcuts');
+    shortcutStore.reset();
     toastStore.info('Shortcuts reset to defaults');
+  }
+
+  function previewFontFamily(id: string): string {
+    if (id === 'geist') return "'Geist', 'Inter', -apple-system, sans-serif";
+    if (id === 'jetbrains') return "'JetBrains Mono', 'SF Mono', monospace";
+    return "'Inter', -apple-system, BlinkMacSystemFont, sans-serif";
   }
 </script>
 
@@ -879,7 +672,7 @@
   >
     <!-- Modal -->
     <div
-      class="relative w-[90vw] max-w-3xl max-h-[85vh] rounded-2xl shadow-2xl flex flex-col overflow-hidden"
+      class="relative w-[92vw] max-w-4xl max-h-[90vh] rounded-2xl shadow-2xl flex flex-col overflow-hidden"
       style="background: var(--color-surface-1); border: 1px solid var(--color-border);"
       onclick={(e) => e.stopPropagation()}
       onkeydown={(e) => { if (!editingShortcutId) e.stopPropagation(); }}
@@ -902,114 +695,115 @@
       </div>
 
       <!-- Tab bar -->
-      <div class="flex gap-1 mx-6 mt-4 p-1 rounded-lg shrink-0 flex-wrap" style="background: var(--color-surface-0);">
+      <div class="flex gap-1 mx-6 mt-4 p-1 rounded-lg shrink-0" style="background: var(--color-surface-0);">
         <button
-          class="flex-1 min-w-0 flex items-center justify-center gap-1.5 py-2 text-xs rounded-md transition-colors
+          class="flex-1 flex items-center justify-center gap-1.5 py-2 text-xs rounded-md transition-colors
                  {activeTab === 'providers' ? 'bg-[var(--color-surface-3)] text-[var(--color-text-primary)] font-medium' : 'text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)]'}"
           onclick={() => activeTab = 'providers'}
         >
           <Key size={13} /> Providers
         </button>
         <button
-          class="flex-1 min-w-0 flex items-center justify-center gap-1.5 py-2 text-xs rounded-md transition-colors
+          class="flex-1 flex items-center justify-center gap-1.5 py-2 text-xs rounded-md transition-colors
                  {activeTab === 'appearance' ? 'bg-[var(--color-surface-3)] text-[var(--color-text-primary)] font-medium' : 'text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)]'}"
           onclick={() => activeTab = 'appearance'}
         >
           <Palette size={13} /> Theme
         </button>
         <button
-          class="flex-1 min-w-0 flex items-center justify-center gap-1.5 py-2 text-xs rounded-md transition-colors
+          class="flex-1 flex items-center justify-center gap-1.5 py-2 text-xs rounded-md transition-colors
                  {activeTab === 'shortcuts' ? 'bg-[var(--color-surface-3)] text-[var(--color-text-primary)] font-medium' : 'text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)]'}"
           onclick={() => activeTab = 'shortcuts'}
         >
-          <Keyboard size={13} /> Shortcuts
-        </button>
-        <button
-          class="flex-1 min-w-0 flex items-center justify-center gap-1.5 py-2 text-xs rounded-md transition-colors
-                 {activeTab === 'messaging' ? 'bg-[var(--color-surface-3)] text-[var(--color-text-primary)] font-medium' : 'text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)]'}"
-          onclick={() => { activeTab = 'messaging'; void loadMessaging(); }}
-        >
-          <MessageCircle size={13} /> Messaging
-        </button>
-        <button
-          class="flex-1 min-w-0 flex items-center justify-center gap-1.5 py-2 text-xs rounded-md transition-colors
-                 {activeTab === 'billing' ? 'bg-[var(--color-surface-3)] text-[var(--color-text-primary)] font-medium' : 'text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)]'}"
-          onclick={() => { activeTab = 'billing'; void loadBillingCredits(); }}
-        >
-          <CreditCard size={13} /> Billing
+          <Keyboard size={13} /> Keys
         </button>
       </div>
 
       <!-- Content (scrollable) -->
-      <div class="flex-1 overflow-y-auto px-6 py-5">
+      <div class="flex-1 overflow-y-auto px-4 py-3">
 
   {#if activeTab === 'providers'}
-    <div class="space-y-0.5">
-      <div class="sticky top-0 z-10 -mx-1 px-1 py-2 mb-1" style="background: var(--color-surface-1);">
-        <div class="relative">
-          <Search size={14} class="absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none shrink-0" style="color: var(--color-text-muted);" />
-          <input
-            type="text"
-            placeholder="Search providers..."
-            bind:value={providerSearchQuery}
-            class="input w-full pr-3 py-2 text-sm"
-            style="font-size: 12px; padding-left: 2.75rem;"
-          />
-        </div>
-        {#if providerSearchQuery.trim()}
-          <p class="text-[10px] mt-1" style="color: var(--color-text-muted);">
-            {filteredProviderList.length} provider{filteredProviderList.length !== 1 ? 's' : ''}
-          </p>
-        {/if}
-      </div>
-      {#each filteredProviderList as prov}
-            {@const status = getProviderStatus(prov.key)}
-            {@const caps = getProviderCaps(prov.key)}
-            <div class={`rounded-lg transition-colors ${expandedProvider === prov.key ? 'bg-[var(--color-surface-3)]' : 'hover:bg-[var(--color-surface-2)]'}`}>
-              <button
-                onclick={() => { expandedProvider = expandedProvider === prov.key ? null : prov.key; }}
-                class="w-full flex items-center justify-between py-2 px-2.5 text-left"
-              >
-                <span class="text-xs font-medium" style="color: var(--color-text-primary);">{prov.label}</span>
-                <div class="flex items-center gap-1.5">
-                  {#if status?.authenticated}
-                    <span class="w-1.5 h-1.5 rounded-full bg-green-500" title="Connected"></span>
-                    <span class="text-[10px]" style="color: var(--color-text-muted);">{status.models.length} models</span>
-                  {:else}
-                    <span class="w-1.5 h-1.5 rounded-full bg-yellow-500" title="Auth needed"></span>
-                  {/if}
-                </div>
-              </button>
+    <div class="mb-3 relative">
+      <Search size={13} class="absolute left-2.5 top-1/2 -translate-y-1/2" style="color: var(--color-text-muted);" />
+      <input
+        type="text"
+        bind:value={settingsSearch}
+        placeholder="Search providers..."
+        class="w-full h-8 pl-8 pr-8 rounded-md text-xs border outline-none focus:ring-1 focus:ring-[var(--color-accent)]"
+        style="background: var(--color-surface-2); border-color: var(--color-border); color: var(--color-text-primary);"
+      />
+      {#if settingsSearch.trim().length > 0}
+        <button
+          class="absolute right-1.5 top-1/2 -translate-y-1/2 px-1.5 py-0.5 rounded text-[10px] hover:bg-[var(--color-surface-3)]"
+          style="color: var(--color-text-muted);"
+          onclick={() => settingsSearch = ''}
+        >
+          Clear
+        </button>
+      {/if}
+    </div>
+    <div class="space-y-4">
+    {#each providerCategories as category}
+      {@const visibleProviders = category.providers.filter((prov) => providerMatchesSearch(prov, category.label, settingsSearch))}
+      {#if visibleProviders.length > 0}
+        <section class="rounded-lg border p-2" style="border-color: var(--color-border); background: var(--color-surface-0);">
+          <div class="mb-1 px-0.5">
+            <span class="text-[10px] font-medium uppercase tracking-wider" style="color: var(--color-text-muted);">
+              {category.label}
+            </span>
+          </div>
+          <div class="space-y-0.5">
+            {#each visibleProviders as prov}
+              {@const status = getProviderStatus(prov.key)}
+              {@const caps = getProviderCaps(prov.key)}
+              <div class="rounded-lg transition-colors {expandedProvider === prov.key ? 'bg-[var(--color-surface-3)]' : 'hover:bg-[var(--color-surface-2)]'}">
+                <button
+                  onclick={() => { expandedProvider = expandedProvider === prov.key ? null : prov.key; }}
+                  class="w-full flex items-center justify-between py-1.5 px-2 text-left"
+                >
+                  <span class="text-xs font-medium" style="color: var(--color-text-primary);">{prov.label}</span>
+                  <div class="flex items-center gap-1.5">
+                    {#if status?.authenticated}
+                      <span class="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
+                      <span class="text-[10px]" style="color: var(--color-text-muted);">{status.models.length} models</span>
+                    {:else if status?.enabled}
+                      <span class="w-1.5 h-1.5 rounded-full bg-amber-500"></span>
+                      <span class="text-[10px] text-amber-400">needs auth</span>
+                    {:else}
+                      <span class="w-1.5 h-1.5 rounded-full" style="background: var(--color-surface-4);"></span>
+                    {/if}
+                  </div>
+                </button>
 
-              {#if expandedProvider === prov.key}
-                <div class="px-2.5 pb-2.5 space-y-2">
-                  {#if status?.authenticated}
-                    <div class="flex items-center justify-between">
-                      <div class="flex items-center gap-2">
-                        <span class="text-[10px] text-emerald-400 font-medium flex items-center gap-1"><Check size={10} /> Connected</span>
-                        <button 
-                          onclick={() => { selectorTarget = status; showModelSelector = true; }}
-                          class="text-[10px] opacity-60 hover:opacity-100 underline decoration-dotted underline-offset-2"
+                {#if expandedProvider === prov.key}
+                  <div class="px-2 pb-2 space-y-1.5">
+                    {#if status?.authenticated}
+                      <div class="flex items-center justify-between">
+                        <div class="flex items-center gap-2">
+                          <span class="text-[10px] text-emerald-400 font-medium flex items-center gap-1"><Check size={10} /> Connected</span>
+                          <button 
+                            onclick={() => { selectorTarget = status; showModelSelector = true; }}
+                            class="text-[10px] opacity-60 hover:opacity-100 underline decoration-dotted underline-offset-2"
+                          >
+                            Manage Models
+                          </button>
+                        </div>
+                        <button
+                          onclick={() => disconnectProvider(prov.key)}
+                          class="text-[10px] text-red-400 hover:text-red-300 transition-colors"
                         >
-                          Manage Models
+                          Disconnect
                         </button>
                       </div>
-                      <button
-                        onclick={() => disconnectProvider(prov.key)}
-                        class="text-[10px] text-red-400 hover:text-red-300 transition-colors"
-                      >
-                        Disconnect
-                      </button>
-                    </div>
-                    <!-- Model list -->
-                    <div class="space-y-0.5 mt-1">
-                      {#each status.models as model}
-                        <div class="flex items-center justify-between px-2 py-1 rounded" style="background: var(--color-surface-2);">
-                          <span class="text-[11px]" style="color: var(--color-text-secondary);">{model}</span>
-                        </div>
-                      {/each}
-                    </div>
-                  {:else}
+                      <!-- Model list -->
+                      <div class="space-y-0.5 mt-1">
+                        {#each status.models as model}
+                          <div class="flex items-center justify-between px-2 py-1 rounded" style="background: var(--color-surface-2);">
+                            <span class="text-[11px]" style="color: var(--color-text-secondary);">{model}</span>
+                          </div>
+                        {/each}
+                      </div>
+                    {:else}
                     <!-- Auth mode selector for providers with multiple auth options -->
                       {#if caps.extraAuthModes}
                         <div class="flex gap-1 p-0.5 rounded-md mb-2" style="background: var(--color-surface-2);">
@@ -1026,41 +820,58 @@
                           {/each}
                         </div>
                         {@const currentMode = selectedAuthMode[prov.key] ?? caps.extraAuthModes[0].id}
-                        {#if currentMode === 'cli'}
+                        {#if currentMode === 'codex'}
                           <div class="text-[10px] mb-1" style="color: var(--color-text-muted);">
-                            Use an existing Gemini CLI session, or sign in in the browser and then verify.
+                            Uses existing Codex CLI session. Run <code class="px-1 py-0.5 rounded" style="background: var(--color-surface-3);">codex auth</code> first.
                           </div>
-                          <button
-                            type="button"
-                            onclick={startGeminiCLIAuth}
-                            class="btn btn-secondary w-full"
-                          >
-                            Sign in with Gemini (open browser)
-                          </button>
                           <button
                             onclick={() => connectProvider(prov.key)}
                             disabled={saving === prov.key}
-                            class="btn btn-primary w-full mt-1"
+                            class="btn btn-primary w-full"
                           >
-                            {verifying === prov.key ? 'Testing connection...' : saving === prov.key ? 'Saving...' : 'Verify Gemini CLI Auth'}
+                            {saving === prov.key ? 'Verifying...' : 'Verify Codex Auth'}
+                          </button>
+                        {:else if currentMode === 'claude_code'}
+                          <div class="text-[10px] mb-1" style="color: var(--color-text-muted);">
+                            Uses existing Claude Code session. Run <code class="px-1 py-0.5 rounded" style="background: var(--color-surface-3);">claude auth</code> first.
+                          </div>
+                          <div class="flex gap-2">
+                            <button
+                              onclick={() => openAuthPortal(prov.key)}
+                              class="btn btn-secondary flex-1"
+                            >
+                              Claude Website
+                            </button>
+                            <button
+                              onclick={() => connectProvider(prov.key)}
+                              disabled={saving === prov.key}
+                              class="btn btn-primary flex-1"
+                            >
+                              {saving === prov.key ? 'Verifying...' : 'Verify'}
+                            </button>
+                          </div>
+                        {:else if currentMode === 'cli'}
+                          <div class="text-[10px] mb-1" style="color: var(--color-text-muted);">
+                            Uses existing Gemini CLI session. Run <code class="px-1 py-0.5 rounded" style="background: var(--color-surface-3);">gemini auth</code> first.
+                          </div>
+                          <button
+                            onclick={() => connectProvider(prov.key)}
+                            disabled={saving === prov.key}
+                            class="btn btn-primary w-full"
+                          >
+                            {saving === prov.key ? 'Verifying...' : 'Verify Gemini CLI Auth'}
                           </button>
                         {:else if currentMode === 'antigravity'}
                           <div class="text-[10px] mb-1" style="color: var(--color-text-muted);">
-                            Sign in with Google in your browser. No CLI required.
+                            OAuth flow for Google Antigravity. Opens browser for authentication.
                           </div>
                           <button
-                            type="button"
-                            onclick={startAntigravityAuth}
-                            disabled={antigravityAuthStatus === 'pending'}
-                            class="btn btn-secondary w-full"
+                            onclick={() => startAntigravityAuth()}
+                            disabled={saving === prov.key}
+                            class="btn btn-primary w-full"
                           >
-                            Authorize Antigravity in Browser
+                            {saving === prov.key ? 'Authenticating...' : 'Start Antigravity Auth'}
                           </button>
-                          {#if antigravityAuthId || antigravityAuthStatus !== 'idle'}
-                            <div class="rounded-md px-2 py-2 mt-2" style="background: var(--color-surface-2);">
-                              <div class="text-[10px]" style="color: var(--color-text-muted);">{antigravityAuthMessage}</div>
-                            </div>
-                          {/if}
                         {:else}
                         <!-- Standard API key input -->
                         <input
@@ -1076,7 +887,7 @@
                           disabled={saving === prov.key}
                           class="btn btn-primary w-full"
                         >
-                          {verifying === prov.key ? 'Testing connection...' : saving === prov.key ? 'Saving...' : 'Connect'}
+                          {saving === prov.key ? 'Connecting...' : 'Connect'}
                         </button>
                       {/if}
                     {:else}
@@ -1157,15 +968,19 @@
                           disabled={saving === prov.key}
                           class="btn btn-primary w-full"
                         >
-                          {verifying === prov.key ? 'Testing connection...' : saving === prov.key ? 'Saving...' : (caps.authMode === 'auth_only' || caps.authMode === 'env_auth' ? 'Verify Connection' : 'Connect')}
+                          {saving === prov.key ? 'Connecting...' : (caps.authMode === 'auth_only' || caps.authMode === 'env_auth' ? 'Verify Connection' : 'Connect')}
                         </button>
                       {/if}
                     {/if}
-                  {/if}
-                </div>
-              {/if}
-            </div>
-          {/each}
+                    {/if}
+                  </div>
+                {/if}
+              </div>
+            {/each}
+          </div>
+        </section>
+      {/if}
+    {/each}
     </div>
 
     <div class="pt-4 mt-4" style="border-top: 1px solid var(--color-border);">
@@ -1232,10 +1047,18 @@
                        : 'border-transparent bg-[var(--color-surface-2)] hover:bg-[var(--color-surface-3)]'}"
               onclick={() => theme.setFont(font.id)}
             >
-              <span style="color: var(--color-text-primary); font-family: {theme.getFontFamily(font.id)};">{font.label}</span>
-              {#if theme.font === font.id}
-                <Check size={12} style="color: var(--color-accent);" />
-              {/if}
+              <span style="color: var(--color-text-primary); font-family: {previewFontFamily(font.id)};">{font.label}</span>
+              <div class="flex items-center gap-2">
+                <span
+                  class="text-[10px] opacity-70"
+                  style="color: var(--color-text-muted); font-family: {previewFontFamily(font.id)};"
+                >
+                  Aa
+                </span>
+                {#if theme.font === font.id}
+                  <Check size={12} style="color: var(--color-accent);" />
+                {/if}
+              </div>
             </button>
           {/each}
         </div>
@@ -1247,7 +1070,7 @@
       <p class="text-[10px] mb-3" style="color: var(--color-text-muted);">
         Click a shortcut to rebind it. Press the new key combination to save.
       </p>
-      {#each shortcuts as shortcut (shortcut.id)}
+      {#each shortcutStore.list as shortcut (shortcut.id)}
         <div
           class="flex items-center justify-between py-2 px-3 rounded-lg transition-colors cursor-pointer
                  {editingShortcutId === shortcut.id ? 'ring-1 ring-[var(--color-accent)]' : 'hover:bg-[var(--color-surface-3)]'}"
@@ -1262,14 +1085,14 @@
             {#if editingShortcutId === shortcut.id}
               {#if capturedKeys.length > 0}
                 {#each capturedKeys as key}
-                  <span class="kbd" style="color: var(--color-accent);">{key}</span>
+                  <span class="kbd" style="color: var(--color-accent);">{formatKey(key)}</span>
                 {/each}
               {:else}
                 <span class="text-[10px] animate-pulse" style="color: var(--color-accent);">Press keys...</span>
               {/if}
             {:else}
               {#each shortcut.keys as key}
-                <span class="kbd">{key}</span>
+                <span class="kbd">{formatKey(key)}</span>
               {/each}
             {/if}
           </div>
@@ -1283,152 +1106,6 @@
           Reset to Defaults
         </button>
       </div>
-    </div>
-
-  {:else if activeTab === 'messaging'}
-    <div class="space-y-6 max-w-lg">
-      <p class="text-[10px] uppercase tracking-wider mb-2" style="color: var(--color-text-muted);">
-        Talk to the manager agent via messaging apps. Replies stream back automatically.
-      </p>
-      {#if messagingLoading}
-        <p class="text-xs" style="color: var(--color-text-muted);">Loading…</p>
-      {:else}
-        <!-- Telegram -->
-        <div class="rounded-lg p-4" style="background: var(--color-surface-2); border: 1px solid var(--color-border);">
-          <div class="flex items-center justify-between mb-3">
-            <span class="text-xs font-medium" style="color: var(--color-text-primary);">Telegram</span>
-            {#if telegramEnabled}
-              <span class="flex items-center gap-1.5 text-[10px]" style="color: var(--color-text-muted);">
-                <span class="w-1.5 h-1.5 rounded-full bg-green-500"></span>
-                Connected
-              </span>
-            {:else}
-              <span class="text-[10px]" style="color: var(--color-text-muted);">Not configured</span>
-            {/if}
-          </div>
-          <label class="flex items-center gap-2 mb-2">
-            <input
-              type="checkbox"
-              bind:checked={telegramEnabled}
-              class="rounded"
-            />
-            <span class="text-xs" style="color: var(--color-text-secondary);">Enable Telegram bridge</span>
-          </label>
-          {#if telegramEnabled}
-            <input
-              type="password"
-              placeholder={telegramBotTokenSet ? 'Bot token (leave blank to keep current)' : 'Bot token (from @BotFather)'}
-              bind:value={telegramBotToken}
-              class="input mb-2"
-              style="font-size: 12px;"
-            />
-            <input
-              type="text"
-              placeholder="Your Telegram user ID (admin)"
-              bind:value={telegramAdminId}
-              class="input mb-3"
-              style="font-size: 12px;"
-            />
-            <p class="text-[10px] mb-3" style="color: var(--color-text-muted);">
-              Get your ID from @userinfobot. Only this user can send tasks; replies stream to the same chat.
-            </p>
-          {/if}
-        </div>
-
-        <!-- iMessage -->
-        <div class="rounded-lg p-4" style="background: var(--color-surface-2); border: 1px solid var(--color-border);">
-          <div class="flex items-center justify-between mb-3">
-            <span class="text-xs font-medium" style="color: var(--color-text-primary);">iMessage</span>
-            <span class="text-[10px]" style="color: var(--color-text-muted);">Bridge required</span>
-          </div>
-          <p class="text-[10px] mb-2" style="color: var(--color-text-secondary);">
-            Use your Mac as a bridge: run a small bridge app that forwards iMessage to this server and sends replies back. No server API for iMessage; the bridge runs on your Mac.
-          </p>
-          <p class="text-[10px]" style="color: var(--color-text-muted);">
-            Bridge app: connect to this server, then message the configured number from iMessage to talk to the manager agent.
-          </p>
-        </div>
-
-        <!-- Android Messages -->
-        <div class="rounded-lg p-4" style="background: var(--color-surface-2); border: 1px solid var(--color-border);">
-          <div class="flex items-center justify-between mb-3">
-            <span class="text-xs font-medium" style="color: var(--color-text-primary);">Android Messages</span>
-            <span class="text-[10px]" style="color: var(--color-text-muted);">Bridge required</span>
-          </div>
-          <p class="text-[10px] mb-2" style="color: var(--color-text-secondary);">
-            Use your Android phone as a bridge: run a small bridge app that forwards Messages to this server and sends replies back. No server API for Android Messages; the bridge runs on your device.
-          </p>
-          <p class="text-[10px]" style="color: var(--color-text-muted);">
-            Bridge app: connect to this server, then message the configured number from Android Messages to talk to the manager agent.
-          </p>
-        </div>
-
-        <button
-          class="btn btn-primary"
-          disabled={messagingSaving}
-          onclick={() => saveMessaging()}
-        >
-          {messagingSaving ? 'Saving…' : 'Save messaging config'}
-        </button>
-        <p class="text-[10px]" style="color: var(--color-text-muted);">
-          Restart the server after saving for Telegram changes to take effect.
-        </p>
-      {/if}
-    </div>
-  {:else if activeTab === 'billing'}
-    <div class="space-y-4">
-      <p class="text-sm" style="color: var(--color-text-secondary);">
-        Local estimate (from token usage) vs cloud reality (OpenAI / GitHub Copilot). Drift &gt; 5% is highlighted.
-      </p>
-      {#if billingLoading}
-        <p class="text-sm" style="color: var(--color-text-muted);">Loading…</p>
-      {:else if billingError}
-        <p class="text-sm" style="color: var(--color-error, #dc2626);">{billingError}</p>
-      {:else if billingData}
-        {#if billingData.highlightDrift}
-          <div
-            class="flex items-center gap-2 p-3 rounded-lg border"
-            style="background: var(--color-surface-2); border-color: var(--color-warning, #f59e0b);"
-          >
-            <AlertTriangle size={18} style="color: var(--color-warning, #f59e0b);" />
-            <span class="text-sm font-medium">Drift &gt; 5% — Local estimate and cloud usage differ by {billingData.driftPercent?.toFixed(1) ?? '?'}%.</span>
-          </div>
-        {/if}
-        <div class="grid gap-4 sm:grid-cols-2">
-          <div class="p-4 rounded-lg" style="background: var(--color-surface-2);">
-            <h3 class="text-xs font-semibold uppercase tracking-wider mb-2" style="color: var(--color-text-muted);">Local estimate</h3>
-            <p class="text-lg font-semibold" style="color: var(--color-text-primary);">${billingData.localEstimate.totalCostUsd.toFixed(4)}</p>
-            <p class="text-[10px] mt-1" style="color: var(--color-text-muted);">
-              {billingData.localEstimate.tokensIn.toLocaleString()} in / {billingData.localEstimate.tokensOut.toLocaleString()} out tokens
-            </p>
-            {#if billingData.localEstimate.byModel.length > 0}
-              <ul class="mt-2 space-y-1 text-[10px]" style="color: var(--color-text-muted);">
-                {#each billingData.localEstimate.byModel as row}
-                  <li>{row.model}: ${row.costUsd.toFixed(4)}</li>
-                {/each}
-              </ul>
-            {/if}
-          </div>
-          <div class="p-4 rounded-lg" style="background: var(--color-surface-2);">
-            <h3 class="text-xs font-semibold uppercase tracking-wider mb-2" style="color: var(--color-text-muted);">Cloud reality</h3>
-            {#if billingData.cloudReality.length === 0}
-              <p class="text-sm" style="color: var(--color-text-muted);">No cloud snapshots yet (poll every 15 min).</p>
-            {:else}
-              {#each billingData.cloudReality as cloud}
-                <div class="mb-2 last:mb-0">
-                  <span class="text-xs font-medium" style="color: var(--color-text-secondary);">{cloud.source}</span>
-                  {#if cloud.totalUsedUsd != null}
-                    <p class="text-sm" style="color: var(--color-text-primary);">Used: ${cloud.totalUsedUsd.toFixed(4)}</p>
-                  {/if}
-                  {#if cloud.totalAvailableUsd != null}
-                    <p class="text-[10px]" style="color: var(--color-text-muted);">Available: ${cloud.totalAvailableUsd.toFixed(4)}</p>
-                  {/if}
-                </div>
-              {/each}
-            {/if}
-          </div>
-        </div>
-      {/if}
     </div>
   {/if}
 

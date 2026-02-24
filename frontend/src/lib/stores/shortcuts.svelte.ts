@@ -1,6 +1,6 @@
 // Keyboard shortcuts — editable, persisted to localStorage, Svelte 5 runes
 
-import { browser } from '$app/environment';
+import { isMac } from '$lib/utils/platform';
 
 export interface Shortcut {
   id: string;
@@ -11,18 +11,37 @@ export interface Shortcut {
 const STORAGE_KEY = 'koryphaios-shortcuts';
 
 const defaultShortcuts: Shortcut[] = [
-  { id: 'send', keys: ['Ctrl', 'Enter'], action: 'Send message' },
-  { id: 'settings', keys: ['Ctrl', ','], action: 'Open settings' },
-  { id: 'new_session', keys: ['Ctrl', 'N'], action: 'New session' },
-  { id: 'focus_input', keys: ['Ctrl', 'K'], action: 'Focus input' },
+  { id: 'send', keys: ['Mod', 'Enter'], action: 'Send message' },
+  { id: 'settings', keys: ['Mod', ','], action: 'Open settings' },
+  { id: 'new_session', keys: ['Mod', 'N'], action: 'New session' },
+  { id: 'focus_input', keys: ['Mod', 'Shift', 'K'], action: 'Focus input' },
+  { id: 'toggle_palette', keys: ['Mod', 'K'], action: 'Command palette' },
+  { id: 'toggle_zen_mode', keys: ['Mod', 'Shift', 'Z'], action: 'Toggle Zen mode' },
+  { id: 'toggle_yolo', keys: ['Mod', 'Y'], action: 'Toggle YOLO mode' },
   { id: 'close', keys: ['Esc'], action: 'Close dialogs' },
 ];
 
 function loadShortcuts(): Shortcut[] {
-  if (!browser) return structuredClone(defaultShortcuts);
   try {
     const stored = localStorage.getItem(STORAGE_KEY);
-    if (stored) return JSON.parse(stored);
+    if (stored) {
+      let parsed = JSON.parse(stored) as Shortcut[];
+      
+      // Migrate old 'Ctrl' shortcuts to 'Mod'
+      parsed = parsed.map(s => ({
+        ...s,
+        keys: s.keys.map(k => k === 'Ctrl' ? 'Mod' : k)
+      }));
+
+      // Merge in missing default shortcuts
+      for (const def of defaultShortcuts) {
+        if (!parsed.some(s => s.id === def.id)) {
+          parsed.push(structuredClone(def));
+        }
+      }
+
+      return parsed;
+    }
   } catch {}
   return structuredClone(defaultShortcuts);
 }
@@ -35,12 +54,12 @@ function createShortcutStore() {
     set list(v: Shortcut[]) { shortcuts = v; },
 
     save() {
-      if (browser) localStorage.setItem(STORAGE_KEY, JSON.stringify(shortcuts));
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(shortcuts));
     },
 
     reset() {
       shortcuts = structuredClone(defaultShortcuts);
-      if (browser) localStorage.removeItem(STORAGE_KEY);
+      localStorage.removeItem(STORAGE_KEY);
     },
 
     /** Check if a KeyboardEvent matches a given shortcut id */
@@ -54,23 +73,26 @@ function createShortcutStore() {
 
 /** Check if a KeyboardEvent matches a set of shortcut key strings */
 function keysMatch(keys: string[], e: KeyboardEvent): boolean {
+  const isMacPlatform = isMac();
+  const wantMod = keys.includes('Mod');
   const wantCtrl = keys.includes('Ctrl');
   const wantShift = keys.includes('Shift');
   const wantAlt = keys.includes('Alt');
   const wantMeta = keys.includes('Meta');
 
-  // Accept Ctrl OR Meta for cross-platform compat
-  const modOk = wantCtrl ? (e.ctrlKey || e.metaKey) : !(e.ctrlKey || e.metaKey);
+  // Map 'Mod' to Meta on Mac, Ctrl elsewhere
+  const actualWantCtrl = wantCtrl || (!isMacPlatform && wantMod);
+  const actualWantMeta = wantMeta || (isMacPlatform && wantMod);
+
+  const ctrlOk = actualWantCtrl === e.ctrlKey;
+  const metaOk = actualWantMeta === e.metaKey;
   const shiftOk = wantShift === e.shiftKey;
   const altOk = wantAlt === e.altKey;
-  const metaOk = wantMeta ? e.metaKey : true; // already handled via modOk for Ctrl
 
-  if (!modOk || !shiftOk || !altOk) return false;
-  // If only Meta is wanted (not Ctrl), check it directly
-  if (wantMeta && !wantCtrl && !e.metaKey) return false;
+  if (!ctrlOk || !metaOk || !shiftOk || !altOk) return false;
 
   // Find the non-modifier key in the shortcut
-  const nonModKeys = keys.filter(k => !['Ctrl', 'Shift', 'Alt', 'Meta'].includes(k));
+  const nonModKeys = keys.filter(k => !['Ctrl', 'Shift', 'Alt', 'Meta', 'Mod'].includes(k));
   if (nonModKeys.length === 0) return false;
 
   const target = nonModKeys[0];

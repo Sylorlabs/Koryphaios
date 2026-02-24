@@ -1,6 +1,15 @@
 // Theme system — multiple presets, accent colors, fonts, Svelte 5 runes
 
-export type ThemePreset = 'midnight' | 'nord' | 'dracula' | 'catppuccin' | 'light' | 'system';
+export type ThemePreset =
+  | 'midnight'
+  | 'nord'
+  | 'dracula'
+  | 'catppuccin'
+  | 'gruvbox'
+  | 'tokyo'
+  | 'solarized'
+  | 'light'
+  | 'system';
 export type AccentColor = 'indigo' | 'cyan' | 'emerald' | 'amber' | 'rose' | 'violet';
 export type FontFamily = 'inter' | 'geist' | 'jetbrains';
 
@@ -58,6 +67,42 @@ const THEME_PRESETS: Record<Exclude<ThemePreset, 'system'>, Record<string, strin
     '--color-text-primary': '#cdd6f4',
     '--color-text-secondary': '#a6adc8',
     '--color-text-muted': '#6c7086',
+  },
+  gruvbox: {
+    '--color-surface-0': '#1d2021',
+    '--color-surface-1': '#282828',
+    '--color-surface-2': '#32302f',
+    '--color-surface-3': '#3c3836',
+    '--color-surface-4': '#504945',
+    '--color-border': '#504945',
+    '--color-border-bright': '#665c54',
+    '--color-text-primary': '#ebdbb2',
+    '--color-text-secondary': '#d5c4a1',
+    '--color-text-muted': '#a89984',
+  },
+  tokyo: {
+    '--color-surface-0': '#1a1b26',
+    '--color-surface-1': '#1f2335',
+    '--color-surface-2': '#24283b',
+    '--color-surface-3': '#2a2f45',
+    '--color-surface-4': '#343b58',
+    '--color-border': '#343b58',
+    '--color-border-bright': '#414868',
+    '--color-text-primary': '#c0caf5',
+    '--color-text-secondary': '#a9b1d6',
+    '--color-text-muted': '#7a84a7',
+  },
+  solarized: {
+    '--color-surface-0': '#002b36',
+    '--color-surface-1': '#073642',
+    '--color-surface-2': '#0b3f4a',
+    '--color-surface-3': '#124853',
+    '--color-surface-4': '#1a5563',
+    '--color-border': '#1a5563',
+    '--color-border-bright': '#2b6776',
+    '--color-text-primary': '#93a1a1',
+    '--color-text-secondary': '#839496',
+    '--color-text-muted': '#657b83',
   },
   light: {
     '--color-surface-0': '#ffffff',
@@ -161,6 +206,9 @@ function createThemeStore() {
         { id: 'nord', label: 'Nord' },
         { id: 'dracula', label: 'Dracula' },
         { id: 'catppuccin', label: 'Catppuccin' },
+        { id: 'gruvbox', label: 'Gruvbox' },
+        { id: 'tokyo', label: 'Tokyo Night' },
+        { id: 'solarized', label: 'Solarized Dark' },
         { id: 'light', label: 'Light' },
         { id: 'system', label: 'System' },
       ];
