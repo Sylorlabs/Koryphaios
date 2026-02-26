@@ -253,7 +253,7 @@ export class KoryManager {
     if (resolver) { resolver(text || selection); this.pendingUserInputs.delete(key); }
   }
 
-  handleSessionResponse(sessionId: string, accepted: boolean) {
+  async handleSessionResponse(sessionId: string, accepted: boolean) {
     if (accepted) {
       this.emitThought(sessionId, "synthesizing", "User accepted changes.");
     } else {
@@ -262,7 +262,7 @@ export class KoryManager {
       if (prevHash && this.git.isGitRepo()) {
         this.git.rollback(prevHash);
       } else {
-        this.snapshotManager.restoreSnapshot(sessionId, "latest", this.workingDirectory);
+        await this.snapshotManager.restoreSnapshot(sessionId, "latest", this.workingDirectory);
       }
     }
     this.lastKnownGoodHash.delete(sessionId);
@@ -421,6 +421,20 @@ export class KoryManager {
           const reconcileResult = this.workspaceManager.reconcile(taskId);
           if (!reconcileResult.success) {
             koryLog.warn({ taskId, msg: reconcileResult.message }, "Worktree reconcile failed");
+          } else {
+            // Create ghost commit for time-travel after successful worker reconciliation
+            try {
+              const { ShadowLogger } = await import('./shadow-logger');
+              const shadowLogger = new ShadowLogger(this.workingDirectory);
+              shadowLogger.createGhostCommit(task.slice(0, 72), {
+                agentId: sessionId,
+                model: preferredModel ?? 'unknown',
+                prompt: task.slice(0, 200),
+                cost: 0,
+              });
+            } catch {
+              // Shadow logging is non-critical; don't fail the task if it errors
+            }
           }
         } else {
           this.workspaceManager.cleanup(taskId);
@@ -658,7 +672,24 @@ export class KoryManager {
       this.emitWSMessage(sessionId, "agent.status", { agentId: KORY_IDENTITY.id, status: "done" });
 
       const changes = this.sessionChanges.get(sessionId) || [];
-      if (changes.length > 0) this.emitWSMessage(sessionId, "session.changes", { changes });
+      if (changes.length > 0) {
+        this.emitWSMessage(sessionId, "session.changes", { changes });
+        // Create ghost commit for time-travel after direct manager tool use
+        try {
+          const { ShadowLogger } = await import('./shadow-logger');
+          const shadowLogger = new ShadowLogger(this.workingDirectory);
+          shadowLogger.createGhostCommit(userMessage.slice(0, 72), {
+            agentId: sessionId,
+            model: routing.model,
+            prompt: userMessage.slice(0, 200),
+            tokensIn,
+            tokensOut,
+            cost: 0,
+          });
+        } catch {
+          // Shadow logging is non-critical; don't fail the task if it errors
+        }
+      }
     } finally {
       this.managerAbortBySession.delete(sessionId);
       this.updateWorkflowState(sessionId, "idle");

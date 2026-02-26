@@ -8,6 +8,7 @@ import {
   getUserById,
 } from "../auth";
 import { authLog } from "../logger";
+import { validateCsrfToken } from "../security";
 
 export interface AuthenticatedRequest {
   user: User;
@@ -173,3 +174,36 @@ export function extractBearerToken(req: Request): string | null {
 }
 
 /** @deprecated Use getOrCreateLocalUser directly in local mode */
+
+const CSRF_EXEMPT_PATHS = [
+  "/api/auth/login",
+  "/api/auth/register",
+  "/api/auth/refresh",
+];
+
+/**
+ * Validate CSRF token for state-changing requests (POST/PUT/DELETE/PATCH).
+ * Uses double-submit cookie pattern: cookie value must match X-CSRF-Token header.
+ * Skip for auth routes, WebSocket upgrades, and OPTIONS preflight.
+ */
+export function requireCsrf(req: Request): Response | null {
+  const method = req.method.toUpperCase();
+  if (method === "OPTIONS" || method === "GET" || method === "HEAD") return null;
+
+  const url = new URL(req.url);
+  // Skip WebSocket upgrade path
+  if (url.pathname === "/ws") return null;
+  // Skip auth routes that establish the session/cookie
+  if (CSRF_EXEMPT_PATHS.some((p) => url.pathname === p)) return null;
+
+  const cookieToken = parseCookie(req, "kory_csrf");
+  const headerToken = req.headers.get("x-csrf-token");
+
+  if (!validateCsrfToken(cookieToken, headerToken)) {
+    return new Response(
+      JSON.stringify({ ok: false, error: "Invalid or missing CSRF token" }),
+      { status: 403, headers: { "Content-Type": "application/json" } }
+    );
+  }
+  return null;
+}

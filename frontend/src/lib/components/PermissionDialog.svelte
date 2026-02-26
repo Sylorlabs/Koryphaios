@@ -41,6 +41,30 @@
   }
 
   let pendingPermissions = $derived(wsStore.pendingPermissions.filter(p => p.sessionId === sessionStore.activeSessionId));
+  let dialogEl = $state<HTMLElement | null>(null);
+
+  $effect(() => {
+    if (pendingPermissions.length > 0 && dialogEl) {
+      const focusable = dialogEl.querySelectorAll<HTMLElement>(
+        'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
+      );
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      first?.focus();
+
+      function trapFocus(e: KeyboardEvent) {
+        if (e.key !== 'Tab') return;
+        if (e.shiftKey) {
+          if (document.activeElement === first) { e.preventDefault(); last?.focus(); }
+        } else {
+          if (document.activeElement === last) { e.preventDefault(); first?.focus(); }
+        }
+      }
+
+      dialogEl.addEventListener('keydown', trapFocus);
+      return () => dialogEl?.removeEventListener('keydown', trapFocus);
+    }
+  });
 
   function approve(id: string) {
     wsStore.respondToPermission(id, true);
@@ -59,7 +83,7 @@
 
 {#if pendingPermissions.length > 0}
   <div class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
-    <div class="bg-surface-2 border border-border rounded-2xl shadow-2xl max-w-lg w-full mx-4 overflow-hidden">
+    <div class="bg-surface-2 border border-border rounded-2xl shadow-2xl max-w-lg w-full mx-4 overflow-hidden" bind:this={dialogEl} role="dialog" aria-modal="true">
       <div class="px-5 py-4 border-b border-border flex items-center justify-between">
         <div class="flex items-center gap-2">
           <div class="w-3 h-3 rounded-full bg-yellow-400 animate-pulse"></div>

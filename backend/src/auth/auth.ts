@@ -1,7 +1,7 @@
 // Real Authentication System for Koryphaios
 // JWT-based auth with refresh tokens and proper password hashing
 
-import { randomBytes, createHmac } from "node:crypto";
+import { randomBytes, createHmac, timingSafeEqual } from "node:crypto";
 import { getDb } from "../db/sqlite";
 import { authLog } from "../logger";
 import type { User, JWTPayload } from "./types";
@@ -83,12 +83,12 @@ export function verifyAccessToken(token: string): JWTPayload | null {
     const expectedSignature = createHmac("sha256", getJwtSecret())
       .update(`${headerB64}.${payloadB64}`)
       .digest("base64url");
-    if (signature !== expectedSignature) return null;
+    const sigBuf = Buffer.from(signature, 'base64url');
+    const expectedBuf = Buffer.from(expectedSignature, 'base64url');
+    if (sigBuf.length !== expectedBuf.length || !timingSafeEqual(sigBuf, expectedBuf)) return null;
     
     // Parse payload
     const payload = JSON.parse(Buffer.from(payloadB64, "base64url").toString()) as JWTPayload;
-    
-    // Check expiration
     const now = Math.floor(Date.now() / 1000);
     if (payload.exp < now) return null;
     
@@ -175,6 +175,9 @@ export async function createUser(
   // Validate password
   if (password.length < 12 || !/[A-Z]/.test(password) || !/[a-z]/.test(password) || !/[0-9]/.test(password)) {
     return { error: "Password must be at least 12 characters with uppercase, lowercase, and a digit" };
+  }
+  if (!/[!@#$%^&*()\-_=+\[\]{};':"\\|,.<>/?`~]/.test(password)) {
+    return { error: "Password must contain at least one special character" };
   }
   
   const id = generateToken(16);
@@ -338,6 +341,9 @@ export async function changePassword(
 ): Promise<{ success: boolean; error?: string }> {
   if (newPassword.length < 12 || !/[A-Z]/.test(newPassword) || !/[a-z]/.test(newPassword) || !/[0-9]/.test(newPassword)) {
     return { success: false, error: "Password must be at least 12 characters with uppercase, lowercase, and a digit" };
+  }
+  if (!/[!@#$%^&*()\-_=+\[\]{};':"\\|,.<>/?`~]/.test(newPassword)) {
+    return { success: false, error: "Password must contain at least one special character" };
   }
   
   const db = getDb();

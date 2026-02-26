@@ -8,6 +8,7 @@ import OpenAI from "openai";
 import { readFileSync, existsSync } from "fs";
 import { join } from "path";
 import { homedir } from "os";
+import { CopilotModels } from "./models/copilot";
 
 const COPILOT_CHAT_URL = "https://api.githubcopilot.com";
 
@@ -20,314 +21,16 @@ const COPILOT_HEADERS = {
   "User-Agent": "Koryphaios/1.0",
 } as const;
 
-// Complete Copilot model catalog — per https://docs.github.com/en/copilot/reference/ai-models/supported-models
-// All models are $0 cost (included in GitHub Copilot subscription).
-// API model IDs are unprefixed (e.g., "gpt-4.1" not "copilot.gpt-4.1").
-// Last updated: February 2026
-const COPILOT_MODELS: ModelDef[] = [
-  // OpenAI models
-  // GPT-4.1: Standard model, no explicit reasoning controls
-  {
-    id: "gpt-4.1",
-    name: "GPT-4.1 (Copilot)",
-    provider: "copilot",
-    contextWindow: 128_000,
-    maxOutputTokens: 16_384,
-    costPerMInputTokens: 0,
-    costPerMOutputTokens: 0,
-    canReason: false,
-    supportsAttachments: true,
-    supportsStreaming: true,
-  },
-  // GPT-5 mini: Supports reasoning_effort (minimal, low, medium, high)
-  {
-    id: "gpt-5-mini",
-    name: "GPT-5 mini (Copilot)",
-    provider: "copilot",
-    contextWindow: 128_000,
-    maxOutputTokens: 16_384,
-    costPerMInputTokens: 0,
-    costPerMOutputTokens: 0,
-    canReason: true,
-    supportsAttachments: true,
-    supportsStreaming: true,
-    tier: "fast",
-  },
-  // GPT-5.1: Supports reasoning_effort (minimal, low, medium, high)
-  {
-    id: "gpt-5.1",
-    name: "GPT-5.1 (Copilot)",
-    provider: "copilot",
-    contextWindow: 128_000,
-    maxOutputTokens: 16_384,
-    costPerMInputTokens: 0,
-    costPerMOutputTokens: 0,
-    canReason: true,
-    supportsAttachments: true,
-    supportsStreaming: true,
-  },
-  // GPT-5.1-Codex: Supports reasoning_effort (minimal, low, medium, high, xhigh)
-  {
-    id: "gpt-5.1-codex",
-    name: "GPT-5.1-Codex (Copilot)",
-    provider: "copilot",
-    contextWindow: 128_000,
-    maxOutputTokens: 16_384,
-    costPerMInputTokens: 0,
-    costPerMOutputTokens: 0,
-    canReason: true,
-    supportsAttachments: true,
-    supportsStreaming: true,
-  },
-  // GPT-5.1-Codex-Mini: Fast variant with Adaptive Reasoning (supports reasoning_effort: none/low/medium)
-  {
-    id: "gpt-5.1-codex-mini",
-    name: "GPT-5.1-Codex-Mini (Copilot)",
-    provider: "copilot",
-    contextWindow: 128_000,
-    maxOutputTokens: 16_384,
-    costPerMInputTokens: 0,
-    costPerMOutputTokens: 0,
-    canReason: true,
-    supportsAttachments: true,
-    supportsStreaming: true,
-    tier: "fast",
-  },
-  // GPT-5.1-Codex-Max: Supports reasoning_effort (minimal, low, medium, high, xhigh)
-  {
-    id: "gpt-5.1-codex-max",
-    name: "GPT-5.1-Codex-Max (Copilot)",
-    provider: "copilot",
-    contextWindow: 128_000,
-    maxOutputTokens: 16_384,
-    costPerMInputTokens: 0,
-    costPerMOutputTokens: 0,
-    canReason: true,
-    supportsAttachments: true,
-    supportsStreaming: true,
-  },
-  // GPT-5.2: Supports reasoning_effort (minimal, low, medium, high)
-  {
-    id: "gpt-5.2",
-    name: "GPT-5.2 (Copilot)",
-    provider: "copilot",
-    contextWindow: 128_000,
-    maxOutputTokens: 16_384,
-    costPerMInputTokens: 0,
-    costPerMOutputTokens: 0,
-    canReason: true,
-    supportsAttachments: true,
-    supportsStreaming: true,
-  },
-  // GPT-5.2-Codex: Supports reasoning_effort (minimal, low, medium, high, xhigh)
-  {
-    id: "gpt-5.2-codex",
-    name: "GPT-5.2-Codex (Copilot)",
-    provider: "copilot",
-    contextWindow: 128_000,
-    maxOutputTokens: 16_384,
-    costPerMInputTokens: 0,
-    costPerMOutputTokens: 0,
-    canReason: true,
-    supportsAttachments: true,
-    supportsStreaming: true,
-  },
-  // GPT-5.3-Codex: Supports reasoning_effort (minimal, low, medium, high, xhigh)
-  {
-    id: "gpt-5.3-codex",
-    name: "GPT-5.3-Codex (Copilot)",
-    provider: "copilot",
-    contextWindow: 128_000,
-    maxOutputTokens: 16_384,
-    costPerMInputTokens: 0,
-    costPerMOutputTokens: 0,
-    canReason: true,
-    supportsAttachments: true,
-    supportsStreaming: true,
-  },
-  
-  // Anthropic models
-  {
-    id: "claude-haiku-4.5",
-    name: "Claude Haiku 4.5 (Copilot)",
-    provider: "copilot",
-    contextWindow: 128_000,
-    maxOutputTokens: 8_192,
-    costPerMInputTokens: 0,
-    costPerMOutputTokens: 0,
-    canReason: true,
-    supportsAttachments: true,
-    supportsStreaming: true,
-    tier: "fast",
-  },
-  {
-    id: "claude-opus-4.5",
-    name: "Claude Opus 4.5 (Copilot)",
-    provider: "copilot",
-    contextWindow: 128_000,
-    maxOutputTokens: 16_384,
-    costPerMInputTokens: 0,
-    costPerMOutputTokens: 0,
-    canReason: true,
-    supportsAttachments: true,
-    supportsStreaming: true,
-  },
-  {
-    id: "claude-opus-4.6",
-    name: "Claude Opus 4.6 (Copilot)",
-    provider: "copilot",
-    contextWindow: 128_000,
-    maxOutputTokens: 16_384,
-    costPerMInputTokens: 0,
-    costPerMOutputTokens: 0,
-    canReason: true,
-    supportsAttachments: true,
-    supportsStreaming: true,
-  },
-  {
-    id: "claude-opus-4.6-fast",
-    name: "Claude Opus 4.6 (fast mode) (preview) (Copilot)",
-    provider: "copilot",
-    contextWindow: 128_000,
-    maxOutputTokens: 16_384,
-    costPerMInputTokens: 0,
-    costPerMOutputTokens: 0,
-    canReason: true,
-    supportsAttachments: true,
-    supportsStreaming: true,
-    tier: "fast",
-  },
-  {
-    id: "claude-sonnet-4",
-    name: "Claude Sonnet 4 (Copilot)",
-    provider: "copilot",
-    contextWindow: 128_000,
-    maxOutputTokens: 16_384,
-    costPerMInputTokens: 0,
-    costPerMOutputTokens: 0,
-    canReason: true,
-    supportsAttachments: true,
-    supportsStreaming: true,
-  },
-  {
-    id: "claude-sonnet-4.5",
-    name: "Claude Sonnet 4.5 (Copilot)",
-    provider: "copilot",
-    contextWindow: 128_000,
-    maxOutputTokens: 16_384,
-    costPerMInputTokens: 0,
-    costPerMOutputTokens: 0,
-    canReason: true,
-    supportsAttachments: true,
-    supportsStreaming: true,
-  },
-  {
-    id: "claude-sonnet-4.6",
-    name: "Claude Sonnet 4.6 (Copilot)",
-    provider: "copilot",
-    contextWindow: 128_000,
-    maxOutputTokens: 16_384,
-    costPerMInputTokens: 0,
-    costPerMOutputTokens: 0,
-    canReason: true,
-    supportsAttachments: true,
-    supportsStreaming: true,
-  },
-  
-  // Google models
-  {
-    id: "gemini-2.5-pro",
-    name: "Gemini 2.5 Pro (Copilot)",
-    provider: "copilot",
-    contextWindow: 128_000,
-    maxOutputTokens: 64_000,
-    costPerMInputTokens: 0,
-    costPerMOutputTokens: 0,
-    canReason: true,
-    supportsAttachments: true,
-    supportsStreaming: true,
-  },
-  {
-    id: "gemini-3-flash",
-    name: "Gemini 3 Flash (Copilot)",
-    provider: "copilot",
-    contextWindow: 128_000,
-    maxOutputTokens: 8_192,
-    costPerMInputTokens: 0,
-    costPerMOutputTokens: 0,
-    canReason: true,
-    supportsAttachments: true,
-    supportsStreaming: true,
-    tier: "fast",
-  },
-  {
-    id: "gemini-3-pro",
-    name: "Gemini 3 Pro (Copilot)",
-    provider: "copilot",
-    contextWindow: 128_000,
-    maxOutputTokens: 64_000,
-    costPerMInputTokens: 0,
-    costPerMOutputTokens: 0,
-    canReason: true,
-    supportsAttachments: true,
-    supportsStreaming: true,
-  },
-  {
-    id: "gemini-3.1-pro",
-    name: "Gemini 3.1 Pro (Copilot)",
-    provider: "copilot",
-    contextWindow: 128_000,
-    maxOutputTokens: 64_000,
-    costPerMInputTokens: 0,
-    costPerMOutputTokens: 0,
-    canReason: true,
-    supportsAttachments: true,
-    supportsStreaming: true,
-  },
-  
-  // xAI models
-  {
-    id: "grok-code-fast-1",
-    name: "Grok Code Fast 1 (Copilot)",
-    provider: "copilot",
-    contextWindow: 128_000,
-    maxOutputTokens: 8_192,
-    costPerMInputTokens: 0,
-    costPerMOutputTokens: 0,
-    canReason: true,
-    supportsAttachments: true,
-    supportsStreaming: true,
-    tier: "fast",
-  },
-  
-  // Fine-tuned models
-  {
-    id: "raptor-mini",
-    name: "Raptor mini (Copilot)",
-    provider: "copilot",
-    contextWindow: 128_000,
-    maxOutputTokens: 16_384,
-    costPerMInputTokens: 0,
-    costPerMOutputTokens: 0,
-    canReason: true,
-    supportsAttachments: true,
-    supportsStreaming: true,
-    tier: "fast",
-  },
-  {
-    id: "goldeneye",
-    name: "Goldeneye (Copilot)",
-    provider: "copilot",
-    contextWindow: 128_000,
-    maxOutputTokens: 16_384,
-    costPerMInputTokens: 0,
-    costPerMOutputTokens: 0,
-    canReason: true,
-    supportsAttachments: true,
-    supportsStreaming: true,
-  },
-];
-
+/**
+ * GitHub Copilot Provider
+ * 
+ * Model catalog is defined in ./models/copilot.ts and re-exported here.
+ * This ensures a single source of truth for all Copilot models.
+ * 
+ * Model IDs in the catalog use the format "copilot.{apiModelId}" (e.g., "copilot.gpt-4.1")
+ * but the Copilot API expects unprefixed IDs (e.g., "gpt-4.1").
+ * The apiModelId field contains the unprefixed version for API calls.
+ */
 export class CopilotProvider extends OpenAIProvider {
   private bearerToken: string | null = null;
   private githubToken: string | null = null;
@@ -349,8 +52,12 @@ export class CopilotProvider extends OpenAIProvider {
     this.githubToken = ghToken;
   }
 
+  /**
+   * Returns the Copilot model catalog.
+   * Uses the shared model catalog from ./models/copilot.ts
+   */
   override listModels(): ModelDef[] {
-    return COPILOT_MODELS;
+    return CopilotModels;
   }
 
   override isAvailable(): boolean {

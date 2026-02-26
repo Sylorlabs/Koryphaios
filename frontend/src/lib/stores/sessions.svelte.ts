@@ -32,7 +32,7 @@ async function fetchSessions(): Promise<boolean> {
       if (!(res.status === 500 && !text.trim())) {
         console.error('fetchSessions failed', { status: res.status, body: text || '(empty)' });
       }
-      toastStore.error(friendlyHttpError(res.status, 'load sessions'));
+      toastStore.error(friendlyHttpError(res.status, 'load sessions'), { onRetry: () => void fetchSessions() });
       return false;
     }
     if (!text.trim()) return false;
@@ -54,7 +54,7 @@ async function fetchSessions(): Promise<boolean> {
     return false;
   } catch (err) {
     console.error('fetchSessions exception', err);
-    toastStore.error('Failed to load sessions');
+    toastStore.error('Failed to load sessions', { onRetry: () => void fetchSessions() });
     return false;
   }
 }

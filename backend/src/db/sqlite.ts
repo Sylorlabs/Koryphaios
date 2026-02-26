@@ -129,6 +129,56 @@ export function initDb(dataDir: string) {
     )
   `);
 
+  // Refresh tokens table (for JWT refresh token persistence)
+  db.run(`
+    CREATE TABLE IF NOT EXISTS refresh_tokens (
+      token TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      expires_at INTEGER NOT NULL,
+      created_at INTEGER NOT NULL,
+      revoked INTEGER DEFAULT 0,
+      FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+    )
+  `);
+
+  // API keys table (for programmatic access)
+  db.run(`
+    CREATE TABLE IF NOT EXISTS api_keys (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      name TEXT NOT NULL,
+      prefix TEXT NOT NULL,
+      hashed_key TEXT NOT NULL,
+      scopes TEXT NOT NULL,
+      rate_limit_tier TEXT DEFAULT 'free',
+      expires_at INTEGER,
+      last_used_at INTEGER,
+      usage_count INTEGER DEFAULT 0,
+      is_active INTEGER DEFAULT 1,
+      created_at INTEGER NOT NULL,
+      metadata TEXT,
+      FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+    )
+  `);
+
+  // Audit logs table
+  db.run(`
+    CREATE TABLE IF NOT EXISTS audit_logs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id TEXT,
+      action TEXT NOT NULL,
+      resource_type TEXT,
+      resource_id TEXT,
+      ip_address TEXT,
+      user_agent TEXT,
+      success INTEGER,
+      reason TEXT,
+      metadata TEXT,
+      timestamp INTEGER,
+      FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE SET NULL
+    )
+  `);
+
   // Create indexes for better query performance
   db.run(`CREATE INDEX IF NOT EXISTS idx_active_workers_session ON active_workers(session_id)`);
   db.run(`CREATE INDEX IF NOT EXISTS idx_abort_controllers_session ON abort_controllers(session_id)`);
@@ -137,6 +187,10 @@ export function initDb(dataDir: string) {
   db.run(`CREATE INDEX IF NOT EXISTS idx_messages_session ON messages(session_id, created_at)`);
   db.run(`CREATE INDEX IF NOT EXISTS idx_sessions_updated ON sessions(updated_at DESC)`);
   db.run(`CREATE INDEX IF NOT EXISTS idx_refresh_tokens_user ON refresh_tokens(user_id)`);
+  db.run(`CREATE INDEX IF NOT EXISTS idx_api_keys_prefix ON api_keys(prefix)`);
+  db.run(`CREATE INDEX IF NOT EXISTS idx_api_keys_user ON api_keys(user_id)`);
+  db.run(`CREATE INDEX IF NOT EXISTS idx_audit_user ON audit_logs(user_id)`);
+  db.run(`CREATE INDEX IF NOT EXISTS idx_audit_action ON audit_logs(action)`);
 
   serverLog.info({ dbPath }, "Database initialized (SQLite/WAL)");
 }

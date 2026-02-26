@@ -26,6 +26,15 @@
       >
         <svelte:component this={iconMap[toast.type]} size={18} class="shrink-0 mt-0.5" />
         <p class="text-sm flex-1">{toast.message}</p>
+        {#if toast.onRetry}
+          <button
+            class="text-xs underline opacity-75 hover:opacity-100 ml-2 shrink-0"
+            onclick={() => { toast.onRetry?.(); toastStore.dismiss(toast.id); }}
+            aria-label="Retry action"
+          >
+            Retry
+          </button>
+        {/if}
         <button 
           class="shrink-0 opacity-60 hover:opacity-100 transition-opacity"
           onclick={() => toastStore.dismiss(toast.id)}

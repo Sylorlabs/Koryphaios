@@ -23,6 +23,31 @@
     onCancel,
   }: Props = $props();
 
+  let dialogEl = $state<HTMLElement | null>(null);
+
+  $effect(() => {
+    if (open && dialogEl) {
+      const focusable = dialogEl.querySelectorAll<HTMLElement>(
+        'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
+      );
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      first?.focus();
+
+      function trapFocus(e: KeyboardEvent) {
+        if (e.key !== 'Tab') return;
+        if (e.shiftKey) {
+          if (document.activeElement === first) { e.preventDefault(); last?.focus(); }
+        } else {
+          if (document.activeElement === last) { e.preventDefault(); first?.focus(); }
+        }
+      }
+
+      dialogEl.addEventListener('keydown', trapFocus);
+      return () => dialogEl?.removeEventListener('keydown', trapFocus);
+    }
+  });
+
   function handleKeydown(e: KeyboardEvent) {
     if (e.key === 'Escape' && open && onCancel) {
       onCancel();
@@ -49,7 +74,7 @@
 
 {#if open}
   <div class="dialog-overlay" onmousedown={handleOverlayMouseDown} role="presentation">
-    <div class="dialog" role="alertdialog" aria-modal="true" tabindex="-1">
+    <div class="dialog" role="alertdialog" aria-modal="true" tabindex="-1" bind:this={dialogEl}>
       <div class="dialog-header">
         <div class="flex items-center gap-2">
           {#if variant === 'danger' || variant === 'warning'}

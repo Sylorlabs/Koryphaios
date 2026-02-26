@@ -1,4 +1,4 @@
-import { mkdirSync, copyFileSync, existsSync, readdirSync, rmSync, statSync } from "node:fs";
+import { mkdirSync, existsSync, readdirSync, rmSync, statSync } from "node:fs";
 import { join, relative, dirname } from "node:path";
 import { koryLog } from "../logger";
 
@@ -30,7 +30,7 @@ export class SnapshotManager {
         const destPath = join(snapshotDir, relPath);
 
         mkdirSync(dirname(destPath), { recursive: true });
-        copyFileSync(absPath, destPath);
+        await Bun.write(destPath, Bun.file(absPath));
       }
     }
 
@@ -46,7 +46,7 @@ export class SnapshotManager {
   /**
    * Restore files from a snapshot.
    */
-  restoreSnapshot(sessionId: string, snapshotId: string, workingDirectory: string): { success: boolean; error?: string } {
+  async restoreSnapshot(sessionId: string, snapshotId: string, workingDirectory: string): Promise<{ success: boolean; error?: string }> {
     const snapshotDir = join(this.baseDir, sessionId, snapshotId);
     if (!existsSync(snapshotDir)) {
       return { success: false, error: "Snapshot not found" };
@@ -57,7 +57,7 @@ export class SnapshotManager {
       // (Simple restoration: copy files back. Complex: delete new files created? 
       // For now, we mainly care about reverting modifications to existing files.)
 
-      const restoreDir = (currentDir: string) => {
+      const restoreDir = async (currentDir: string) => {
         const entries = readdirSync(currentDir, { withFileTypes: true });
         for (const entry of entries) {
           const fullPath = join(currentDir, entry.name);
@@ -69,14 +69,14 @@ export class SnapshotManager {
 
           if (entry.isDirectory()) {
             if (!existsSync(targetPath)) mkdirSync(targetPath, { recursive: true });
-            restoreDir(fullPath);
+            await restoreDir(fullPath);
           } else {
-            copyFileSync(fullPath, targetPath);
+            await Bun.write(targetPath, Bun.file(fullPath));
           }
         }
       };
 
-      restoreDir(snapshotDir);
+      await restoreDir(snapshotDir);
       koryLog.info({ sessionId, snapshotId }, "Restored snapshot");
       return { success: true };
     } catch (err: any) {
@@ -111,7 +111,7 @@ export class SnapshotManager {
         }
         const targetPath = join(workingDirectory, normalized);
         mkdirSync(dirname(targetPath), { recursive: true });
-        copyFileSync(backupPath, targetPath);
+        await Bun.write(targetPath, Bun.file(backupPath));
         restored.push(relPath);
       }
       return { success: true, restored, missing };
