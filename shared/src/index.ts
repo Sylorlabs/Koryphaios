@@ -65,7 +65,7 @@ export const ProviderName = {
   ZenMux: "zenmux",
 } as const;
 
-export type ProviderName = (typeof ProviderName)[keyof typeof ProviderName];
+export type ProviderName = (typeof ProviderName)[keyof typeof ProviderName] | string;
 
 export type ModelTier = "flagship" | "fast" | "cheap" | "reasoning";
 
@@ -77,13 +77,13 @@ export interface ModelDef {
   apiModelId?: string;
   contextWindow: number;
   maxOutputTokens: number;
-  costPerMInputTokens: number;
-  costPerMOutputTokens: number;
+  costPerMInputTokens?: number;
+  costPerMOutputTokens?: number;
   costPerMInputCached?: number;
   costPerMOutputCached?: number;
-  canReason: boolean;
-  supportsAttachments: boolean;
-  supportsStreaming: boolean;
+  canReason?: boolean;
+  supportsAttachments?: boolean;
+  supportsStreaming?: boolean;
   tier?: ModelTier;
   isGeneric?: boolean;
 }
@@ -109,7 +109,7 @@ export type AgentRole = "manager" | "coder" | "task" | "reviewer" | "title" | "s
 
 export type AgentStatus = "idle" | "thinking" | "tool_calling" | "streaming" | "verifying" | "compacting" | "waiting_user" | "error" | "done" | "reading" | "writing" | "criticizing";
 
-export type WorkerDomain = "ui" | "backend" | "general" | "review" | "test" | "critic";
+export type WorkerDomain = "ui" | "frontend" | "backend" | "general" | "review" | "test" | "critic";
 
 export interface AgentIdentity {
   id: string;
@@ -201,7 +201,7 @@ export interface StoredMessage {
 
 export interface Session {
   id: string;
-  userId: string;
+  userId?: string;
   title: string;
   parentSessionId?: string;
   messageCount: number;
@@ -396,6 +396,8 @@ export interface ProviderStatusPayload {
     supportsApiKey: boolean;
     supportsAuthToken: boolean;
     requiresBaseUrl: boolean;
+    /** Placeholder for base URL input; backend is single source of truth. */
+    baseUrlPlaceholder?: string;
     extraAuthModes?: Array<{ id: string; label: string; description: string }>;
     error?: string;
     circuitOpen?: boolean;
@@ -463,9 +465,12 @@ export interface MCPServerConfig {
 // ─── REST API Types ─────────────────────────────────────────────────────────
 
 export interface APIResponse<T = unknown> {
-  ok: boolean;
+  ok?: boolean;
   data?: T;
   error?: string;
+  message?: string;
+  detail?: string;
+  [key: string]: unknown;
 }
 
 export interface SendMessageRequest {

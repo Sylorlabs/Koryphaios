@@ -56,7 +56,7 @@ async function refreshStatus() {
       return;
     }
     if (data?.ok && data.data) {
-      state.status = data.data.status ?? [];
+      state.status = (data.data.status as GitFileStatus[] | undefined) ?? [];
       state.branch = data.data.branch ?? '';
       state.ahead = data.data.ahead ?? 0;
       state.behind = data.data.behind ?? 0;

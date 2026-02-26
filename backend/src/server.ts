@@ -21,7 +21,7 @@ import { AUTH, SESSION, MESSAGE, ID, RATE_LIMIT, VERSION } from "./constants";
 import { validateEnvironment, getAllowRegistration } from "./config-schema";
 import { nanoid } from "nanoid";
 import { existsSync, readFileSync, writeFileSync, readdirSync } from "node:fs";
-import { join } from "node:path";
+import { join, basename } from "node:path";
 import { googleAuth } from "./providers/google-auth";
 import { cliAuth } from "./providers/cli-auth";
 import { initDb } from "./db/sqlite";
@@ -29,7 +29,7 @@ import { initCreditAccountant } from "./credit-accountant";
 
 import { PROJECT_ROOT, BACKEND_ROOT } from "./runtime/paths";
 import { loadConfig } from "./runtime/config";
-import { persistEnvVar, clearEnvVar } from "./runtime/env";
+import { loadEnvFromProject, persistEnvVar, clearEnvVar } from "./runtime/env";
 import { SessionStore } from "./stores/session-store";
 import { MessageStore } from "./stores/message-store";
 import { WSManager, type WSClientData } from "./ws/ws-manager";
@@ -37,7 +37,7 @@ import { WSManager, type WSClientData } from "./ws/ws-manager";
 import { requireAuth } from "./middleware";
 import { handleV1Routes } from "./routes/v1";
 import { getMetricsRegistry } from "./metrics";
-import { getReconciliation } from "./credit-accountant";
+import { getReconciliation, stopCreditPolling } from "./credit-accountant";
 import { createUser, getOrCreateLocalUser } from "./auth";
 
 // ─── Configuration Loading ──────────────────────────────────────────────────
@@ -54,6 +54,9 @@ async function main() {
   validateEnvironment();
 
   const config = loadConfig(PROJECT_ROOT);
+
+  // Load .env so persisted provider API keys are available after server restart
+  loadEnvFromProject(PROJECT_ROOT);
 
   // Register any extra CORS origins from config
   if (config.corsOrigins?.length) {
@@ -171,7 +174,7 @@ async function main() {
       while (true) {
         const { done, value } = await wsReader.read();
         if (done) break;
-        wsManager.broadcast(value.payload, { sessionId: value.payload.sessionId });
+        wsManager.broadcast(value.payload);
       }
     } catch (err) {
       serverLog.error({ err }, "WebSocket pub/sub reader error");
@@ -278,8 +281,9 @@ async function main() {
             const user = await getOrCreateLocalUser();
             return json({ ok: true, data: { user } }, 200, corsHeaders);
           } catch (err: any) {
-            serverLog.error({ err }, "GET /api/auth/me failed");
-            return json({ ok: false, error: "Auth unavailable", detail: err?.message ?? String(err) }, 500, corsHeaders);
+            const msg = err?.message ?? String(err);
+            serverLog.error({ err, detail: msg }, "GET /api/auth/me failed");
+            return json({ ok: false, error: "Auth unavailable", detail: msg }, 500, corsHeaders);
           }
         }
 
@@ -308,7 +312,12 @@ async function main() {
           return json({ ok: true, data: { version: VERSION } }, 200, corsHeaders);
         }
 
-        // API v1 Routes (Credentials, API Keys, Audit)
+        // Debug: client error log sink (no-op, avoids 404 from error-monitor)
+        if (url.pathname === "/api/debug/log-error" && method === "POST") {
+          return json({ ok: true }, 200, corsHeaders);
+        }
+
+        // API v1 Routes
         if (url.pathname.startsWith("/api/v1/")) {
           const v1Response = await handleV1Routes(req, url.pathname, method);
           if (v1Response) {
@@ -327,6 +336,14 @@ async function main() {
           }
         }
 
+        // Project context (folder name the backend is operating in)
+        if (url.pathname === "/api/project" && method === "GET") {
+          const auth = await requireAuth(req);
+          if ("error" in auth) return withCors(auth.error, corsHeaders);
+          const projectName = basename(PROJECT_ROOT);
+          return json({ ok: true, data: { projectName } }, 200, corsHeaders);
+        }
+
         // Sessions (Authenticated)
         if (url.pathname === "/api/sessions" && method === "GET") {
           let auth: Awaited<ReturnType<typeof requireAuth>>;
@@ -342,9 +359,10 @@ async function main() {
             const data = sessions.listForUser(auth.user.id);
             return json({ ok: true, data }, 200, corsHeaders);
           } catch (err: any) {
-            serverLog.error({ err }, "Error fetching sessions");
+            const msg = err?.message ?? String(err);
+            serverLog.error({ err, detail: msg }, "Error fetching sessions");
             return json(
-              { ok: false, error: "Failed to fetch sessions", detail: err?.message ?? String(err) },
+              { ok: false, error: "Failed to fetch sessions", detail: msg },
               500,
               corsHeaders
             );
@@ -711,14 +729,14 @@ async function main() {
           const baseUrl = sanitizeString(body.baseUrl, 2048);
           const authMode = sanitizeString(body.authMode, 50);
 
-          // Handle special CLI auth modes (gemini cli, antigravity)
+          // Handle special CLI auth modes (gemini cli, antigravity, codex)
           if (authMode === "cli" || authMode === "antigravity") {
-            const cliName = authMode === "antigravity" ? "antigravity" : "gemini";
-            const targetProvider = (authMode === "antigravity" ? "google" : "google") as ProviderName;
-
-            // Verify CLI is installed and accessible (for CLI-based auth)
-            if (!Bun.which(cliName)) {
-              return json({ ok: false, error: `${cliName} CLI not found in PATH. Install it first.` }, 400, corsHeaders);
+            const targetProvider = "google" as ProviderName;
+            // Antigravity is OAuth (browser start + poll); no CLI. Only "cli" (Gemini CLI) needs the binary.
+            if (authMode === "cli") {
+              if (!Bun.which("gemini")) {
+                return json({ ok: false, error: "Gemini CLI not found in PATH. Install it first." }, 400, corsHeaders);
+              }
             }
 
             // Mark provider as CLI-authenticated temporarily to verify
@@ -729,7 +747,7 @@ async function main() {
             });
 
             if (!verification.success) {
-              return json({ ok: false, error: verification.error || `${cliName} CLI auth failed` }, 400, corsHeaders);
+              return json({ ok: false, error: verification.error || (authMode === "antigravity" ? "Antigravity token not found or invalid" : "Gemini CLI auth failed") }, 400, corsHeaders);
             }
 
             // Verification passed, set and persist
@@ -753,6 +771,29 @@ async function main() {
               timestamp: Date.now(),
             } satisfies WSMessage);
 
+            return json({ ok: true, data: { provider: targetProvider, status: "connected", authMode } }, 200, corsHeaders);
+          }
+
+          if (authMode === "codex") {
+            const targetProvider = "codex" as ProviderName;
+            if (!Bun.which("codex")) {
+              return json({ ok: false, error: "codex CLI not found in PATH. Install it first (e.g. npm install -g codex)." }, 400, corsHeaders);
+            }
+            const authValue = "cli:codex";
+            const verification = await providers.verifyConnection(targetProvider, { authToken: authValue });
+            if (!verification.success) {
+              return json({ ok: false, error: verification.error ?? "codex CLI verification failed" }, 400, corsHeaders);
+            }
+            const result = providers.setCredentials(targetProvider, { authToken: authValue });
+            if (!result.success) {
+              return json({ ok: false, error: result.error }, 400, corsHeaders);
+            }
+            persistEnvVar(PROJECT_ROOT, providers.getExpectedEnvVar(targetProvider, "authToken"), authValue);
+            wsManager.broadcast({
+              type: "provider.status",
+              payload: { providers: await providers.getStatus() },
+              timestamp: Date.now(),
+            } satisfies WSMessage);
             return json({ ok: true, data: { provider: targetProvider, status: "connected", authMode } }, 200, corsHeaders);
           }
 
@@ -1240,7 +1281,7 @@ async function main() {
       message(ws: ServerWebSocket<WSClientData>, message: string | Buffer) {
         try {
           const msg = JSON.parse(String(message));
-          const userId = ws.data.userId;
+          const userId = ws.data.userId ?? "local";
 
           const assertSessionOwnership = (sessionId: string): boolean => {
             if (!sessionId || !validateSessionId(sessionId)) return false;
@@ -1327,7 +1368,10 @@ async function main() {
       // 5b. Stop messaging gateway
       messagingGateway.stop();
 
-      // 6. Clean up rate limiter
+      // 6. Stop credit polling timer (avoid stray intervals)
+      stopCreditPolling();
+
+      // 7. Clean up rate limiter
       rateLimiter.destroy();
 
       serverLog.info("Graceful shutdown complete");

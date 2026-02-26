@@ -1,5 +1,6 @@
 // Codex CLI provider — wraps the `codex` CLI as a child process.
 // Used for authenticated Codex access via ChatGPT subscription.
+// Uses timeout and guaranteed kill/reap to avoid zombie processes.
 
 import type { ProviderConfig, ModelDef } from "@koryphaios/shared";
 import {
@@ -9,6 +10,8 @@ import {
   getModelsForProvider,
 } from "./types";
 
+const CODEX_STREAM_TIMEOUT_MS = 300_000; // 5 min max per stream
+
 export class CodexProvider implements Provider {
   readonly name = "codex" as const;
   private cliAvailable: boolean | null = null;
@@ -17,16 +20,14 @@ export class CodexProvider implements Provider {
 
   isAvailable(): boolean {
     if (this.config.disabled) return false;
-    // Check CLI auth token marker or detect CLI in PATH
     if (this.config.authToken?.startsWith("cli:")) return true;
     if (this.cliAvailable === null) {
-      const proc = Bun.spawnSync(["which", "codex"], { stdout: "pipe", stderr: "pipe" });
-      this.cliAvailable = proc.exitCode === 0;
+      this.cliAvailable = Bun.which("codex") !== null;
     }
     return this.cliAvailable;
   }
 
-  async listModels(): Promise<ModelDef[]> {
+  listModels(): ModelDef[] {
     return getModelsForProvider("codex");
   }
 
@@ -37,21 +38,26 @@ export class CodexProvider implements Provider {
       .join("\n");
 
     const args = ["--model", request.model];
-
-    if (request.systemPrompt) {
-      args.push("--system", request.systemPrompt);
-    }
-
-    // Add prompt as the final positional argument
+    if (request.systemPrompt) args.push("--system", request.systemPrompt);
     args.push(prompt);
 
-    try {
-      const proc = Bun.spawn(["codex", ...args], {
-        stdout: "pipe",
-        stderr: "pipe",
-        env: { ...process.env },
-      });
+    const proc = Bun.spawn(["codex", ...args], {
+      stdout: "pipe",
+      stderr: "pipe",
+      env: { ...process.env },
+    });
 
+    const killAndReap = (): void => {
+      try {
+        proc.kill();
+      } catch {
+        // already exited
+      }
+    };
+
+    const timeoutId = setTimeout(killAndReap, CODEX_STREAM_TIMEOUT_MS);
+
+    try {
       const reader = proc.stdout.getReader();
       const decoder = new TextDecoder();
 
@@ -59,11 +65,10 @@ export class CodexProvider implements Provider {
         const { done, value } = await reader.read();
         if (done) break;
         const text = decoder.decode(value, { stream: true });
-        if (text) {
-          yield { type: "content_delta", content: text };
-        }
+        if (text) yield { type: "content_delta", content: text };
       }
 
+      clearTimeout(timeoutId);
       const exitCode = await proc.exited;
       if (exitCode !== 0) {
         const stderrReader = proc.stderr.getReader();
@@ -74,7 +79,16 @@ export class CodexProvider implements Provider {
         yield { type: "complete", finishReason: "end_turn" };
       }
     } catch (err: any) {
+      killAndReap();
       yield { type: "error", error: "Codex CLI error: " + (err.message ?? String(err)) };
+    } finally {
+      clearTimeout(timeoutId);
+      killAndReap();
+      try {
+        await Promise.race([proc.exited, new Promise((r) => setTimeout(r, 2000))]);
+      } catch {
+        // ignore
+      }
     }
   }
 }

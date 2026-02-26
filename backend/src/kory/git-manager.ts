@@ -1,4 +1,5 @@
 import { spawnSync } from "bun";
+import { readFileSync } from "node:fs";
 import { resolve, relative } from "node:path";
 import { koryLog } from "../logger";
 
@@ -16,7 +17,7 @@ export interface GitFileStatus {
 export class GitManager {
   constructor(private workingDirectory: string) {}
 
-  protected runGit(args: string[]): { success: boolean; output: string } {
+  runGit(args: string[]): { success: boolean; output: string } {
     const proc = spawnSync(["git", ...args], {
       cwd: this.workingDirectory,
       stdout: "pipe",
@@ -157,6 +158,26 @@ export class GitManager {
   async getBranch(): Promise<string> {
     const { output } = this.runGit(["rev-parse", "--abbrev-ref", "HEAD"]);
     return output.trim();
+  }
+
+  async getAheadBehind(): Promise<{ ahead: number; behind: number }> {
+    const { success, output } = this.runGit(["rev-list", "--left-right", "--count", "HEAD...@{upstream}"]);
+    if (!success) return { ahead: 0, behind: 0 };
+    const [aheadRaw, behindRaw] = output.trim().split(/\s+/);
+    return {
+      ahead: Number.parseInt(aheadRaw ?? "0", 10) || 0,
+      behind: Number.parseInt(behindRaw ?? "0", 10) || 0,
+    };
+  }
+
+  async getFileContent(path: string): Promise<string | null> {
+    const safePath = this.resolvePathUnderRepo(path);
+    if (!safePath) return null;
+    try {
+      return readFileSync(safePath, "utf-8");
+    } catch {
+      return null;
+    }
   }
 
   async getBranches(): Promise<string[]> {

@@ -6,9 +6,10 @@
     size?: number;
     isManager?: boolean;
     isStatic?: boolean;
+    phase?: string;
   }
 
-  let { status, size = 20, isManager = false, isStatic = false }: Props = $props();
+  let { status, size = 20, isManager = false, isStatic = false, phase: _phase = undefined }: Props = $props();
 </script>
 
 <!-- Animated status icons with distinct animations per agent state -->

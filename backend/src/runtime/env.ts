@@ -1,6 +1,27 @@
-import { readFileSync, writeFileSync, chmodSync } from "node:fs";
+import { readFileSync, writeFileSync, chmodSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { serverLog } from "../logger";
+
+/** Load .env from project root into process.env (only set if not already set). Call at startup so persisted provider keys are available after restart. */
+export function loadEnvFromProject(projectRoot: string): void {
+  const envPath = join(projectRoot, ".env");
+  if (!existsSync(envPath)) return;
+  try {
+    const content = readFileSync(envPath, "utf-8");
+    for (const line of content.split("\n")) {
+      const trimmed = line.trim();
+      if (!trimmed || trimmed.startsWith("#")) continue;
+      const eq = trimmed.indexOf("=");
+      if (eq <= 0) continue;
+      const key = trimmed.slice(0, eq).trim();
+      const value = trimmed.slice(eq + 1).trim().replace(/^["']|["']$/g, "");
+      if (!process.env[key]) process.env[key] = value;
+    }
+    serverLog.debug("Loaded .env from project root");
+  } catch (err) {
+    serverLog.warn({ path: envPath, error: String(err) }, "Could not load .env");
+  }
+}
 
 /** Restrict .env to owner read/write only (0600). Works on Windows, macOS, and Linux. */
 function restrictEnvFilePermissions(envPath: string) {

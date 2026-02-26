@@ -29,6 +29,7 @@ export function initDb(dataDir: string) {
   db.run(`
     CREATE TABLE IF NOT EXISTS sessions (
       id TEXT PRIMARY KEY,
+      user_id TEXT,
       title TEXT NOT NULL,
       parent_id TEXT,
       message_count INTEGER DEFAULT 0,
@@ -40,6 +41,13 @@ export function initDb(dataDir: string) {
       updated_at INTEGER
     )
   `);
+
+  // Add user_id if missing (migration for existing DBs)
+  try {
+    db.exec(`ALTER TABLE sessions ADD COLUMN user_id TEXT`);
+  } catch {
+    // Column already exists
+  }
 
   db.run(`
     CREATE TABLE IF NOT EXISTS messages (
@@ -74,6 +82,58 @@ export function initDb(dataDir: string) {
       FOREIGN KEY(session_id) REFERENCES sessions(id) ON DELETE CASCADE
     )
   `);
+
+  // Active workers table for persistence
+  db.run(`
+    CREATE TABLE IF NOT EXISTS active_workers (
+      session_id TEXT NOT NULL,
+      task_id TEXT PRIMARY KEY,
+      task_data TEXT NOT NULL,
+      start_time INTEGER NOT NULL,
+      status TEXT NOT NULL DEFAULT 'running',
+      FOREIGN KEY(session_id) REFERENCES sessions(id) ON DELETE CASCADE
+    )
+  `);
+
+  // Abort controllers table for persistence
+  db.run(`
+    CREATE TABLE IF NOT EXISTS abort_controllers (
+      id TEXT PRIMARY KEY,
+      session_id TEXT NOT NULL,
+      reason TEXT,
+      created_at INTEGER NOT NULL,
+      FOREIGN KEY(session_id) REFERENCES sessions(id) ON DELETE CASCADE
+    )
+  `);
+
+  // User inputs table for persistence
+  db.run(`
+    CREATE TABLE IF NOT EXISTS user_inputs (
+      id TEXT PRIMARY KEY,
+      session_id TEXT NOT NULL,
+      input_data TEXT NOT NULL,
+      created_at INTEGER NOT NULL,
+      FOREIGN KEY(session_id) REFERENCES sessions(id) ON DELETE CASCADE
+    )
+  `);
+
+  // Session changes log for tracking modifications
+  db.run(`
+    CREATE TABLE IF NOT EXISTS session_changes (
+      id TEXT PRIMARY KEY,
+      session_id TEXT NOT NULL,
+      change_type TEXT NOT NULL,
+      change_data TEXT NOT NULL,
+      created_at INTEGER NOT NULL,
+      FOREIGN KEY(session_id) REFERENCES sessions(id) ON DELETE CASCADE
+    )
+  `);
+
+  // Create indexes for better query performance
+  db.run(`CREATE INDEX IF NOT EXISTS idx_active_workers_session ON active_workers(session_id)`);
+  db.run(`CREATE INDEX IF NOT EXISTS idx_abort_controllers_session ON abort_controllers(session_id)`);
+  db.run(`CREATE INDEX IF NOT EXISTS idx_user_inputs_session ON user_inputs(session_id)`);
+  db.run(`CREATE INDEX IF NOT EXISTS idx_session_changes_session ON session_changes(session_id)`);
 
   serverLog.info({ dbPath }, "Database initialized (SQLite/WAL)");
 }

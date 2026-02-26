@@ -3,15 +3,17 @@
     // Handles items with dynamic heights (markdown, code blocks, tool results)
     
     import { onMount } from 'svelte';
+    import type { Snippet } from 'svelte';
     
     interface Props {
         items: T[];
         estimateHeight: (item: T) => number;
         overscan?: number;
         onScrollNearBottom?: () => void;
+        row?: Snippet<[T, number]>;
     }
     
-    let { items, estimateHeight, overscan = 5, onScrollNearBottom }: Props = $props();
+    let { items, estimateHeight, overscan = 5, onScrollNearBottom, row }: Props = $props();
     
     // DOM refs
     let containerEl = $state<HTMLDivElement>();
@@ -169,7 +171,7 @@
                 style="position: absolute; top: {position?.top ?? 0}px; left: 0; right: 0;"
                 use:measureItem={item.id}
             >
-                <slot name="item" {item} {index} />
+                {@render row?.(item, index)}
             </div>
         {/each}
     </div>

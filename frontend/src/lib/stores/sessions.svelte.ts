@@ -22,6 +22,12 @@ async function fetchSessions(): Promise<boolean> {
     });
     const text = await res.text();
     if (!res.ok) {
+      let detail = '';
+      try {
+        const body = text ? JSON.parse(text) : {};
+        detail = body.detail ?? body.error ?? '';
+        if (detail) console.error('fetchSessions backend error:', detail);
+      } catch { /* ignore */ }
       if (!(res.status === 500 && !text.trim())) {
         console.error('fetchSessions failed', { status: res.status, body: text || '(empty)' });
       }

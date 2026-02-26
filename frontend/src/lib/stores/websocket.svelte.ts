@@ -542,17 +542,23 @@ let reconnectAttempts = 0;
 let wsCandidates: string[] = [];
 let wsCandidateIndex = 0;
 
+function ensureWsPath(url: string): string {
+  return url.endsWith("/ws") ? url : `${url.replace(/\/?$/, "")}/ws`;
+}
+
 function buildWsCandidates(preferredUrl?: string): string[] {
   const scheme = window.location.protocol === "https:" ? "wss" : "ws";
   const currentHost = window.location.host;
   const sameOrigin = `${scheme}://${currentHost}/ws`;
-  const directWs = typeof import.meta.env !== "undefined" && (import.meta.env as { VITE_BACKEND_WS_URL?: string }).VITE_BACKEND_WS_URL;
+  const rawDirect = typeof import.meta.env !== "undefined" && (import.meta.env as { VITE_BACKEND_WS_URL?: string }).VITE_BACKEND_WS_URL;
+  const directWs = rawDirect ? ensureWsPath(rawDirect) : undefined;
+  const defaultBackendWs = "ws://127.0.0.1:3001/ws";
 
   const candidates: string[] = [];
-  if (preferredUrl) candidates.push(preferredUrl);
-  // Prefer same-origin first so Vite dev proxy (e.g. ws://localhost:5173/ws → backend) is tried first.
+  if (preferredUrl) candidates.push(ensureWsPath(preferredUrl));
   if (sameOrigin && !candidates.includes(sameOrigin)) candidates.push(sameOrigin);
   if (directWs && !candidates.includes(directWs)) candidates.push(directWs);
+  if (defaultBackendWs && !candidates.includes(defaultBackendWs)) candidates.push(defaultBackendWs);
   if (candidates.length === 0) candidates.push(sameOrigin);
   return candidates;
 }
@@ -636,6 +642,20 @@ function disconnect() {
   wsConnection?.close();
   wsConnection = null;
   connectionStatus = "disconnected";
+}
+
+/** Fetch provider status from API so providers and API keys show after refresh (before or without WS). */
+export async function loadProvidersFromApi(): Promise<void> {
+  if (!browser) return;
+  try {
+    const res = await fetch("/api/providers", { credentials: "include" });
+    if (!res.ok) return;
+    const json = await res.json();
+    const list = json?.data;
+    if (Array.isArray(list)) providers = list;
+  } catch {
+    // ignore
+  }
 }
 
 function sendMessage(sessionId: string, content: string, model?: string, reasoningLevel?: string) {
@@ -884,4 +904,5 @@ export const wsStore = {
   clearFeed,
   toggleYolo,
   setYoloMode,
+  loadProvidersFromApi,
 };

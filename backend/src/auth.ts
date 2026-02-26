@@ -145,4 +145,21 @@ export function optionalSessionAuth(req: Request): string | null {
 }
 
 // Re-export user auth so "from './auth'" gets both session and user auth
-export { createUser, getOrCreateLocalUser } from "./auth/auth";
+export {
+  hashPassword,
+  verifyPassword,
+  generateToken,
+  createAccessToken,
+  verifyAccessToken,
+  createRefreshToken,
+  verifyRefreshToken,
+  revokeRefreshToken,
+  revokeAllUserTokens,
+  createUser,
+  authenticateUser,
+  getUserById,
+  getOrCreateGuestUser,
+  getOrCreateLocalUser,
+  changePassword,
+  cleanupExpiredTokens,
+} from "./auth/auth";

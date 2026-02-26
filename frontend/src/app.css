@@ -1,5 +1,5 @@
-/* External fonts: optional, with display=swap so layout isn't blocked. Fallbacks in @theme below. */
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+@import url('https://geistfont.vercel.app/geist.css');
 @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&display=swap');
 
 @import "tailwindcss";
@@ -28,8 +28,8 @@
   --color-error: #ef4444;
   --color-warning: #f59e0b;
 
-  --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-  --font-mono: 'JetBrains Mono', 'SF Mono', 'Consolas', monospace;
+  --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+  --font-mono: 'JetBrains Mono', 'SF Mono', 'Fira Code', monospace;
 }
 
 /* Light theme */
@@ -79,22 +79,18 @@
 
 html {
   color-scheme: dark;
-  /* Fallback so something is visible before theme/JS runs */
-  background: #0a0a0b;
 }
 
 html[data-theme="light"] {
   color-scheme: light;
-  background: #ffffff;
 }
 
 body {
   font-family: var(--font-sans);
-  background: var(--color-surface-0, #0a0a0b);
-  color: var(--color-text-primary, #e8e8ed);
+  background: var(--color-surface-0);
+  color: var(--color-text-primary);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-  min-height: 100vh;
 }
 
 /* Global focus management: Only show outlines when navigating via keyboard (tab) */

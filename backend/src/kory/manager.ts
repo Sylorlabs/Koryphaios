@@ -382,7 +382,7 @@ export class KoryManager {
     }
     this.updateWorkflowState(sessionId, "executing");
     const domainOverride = (domainHint && ["general", "ui", "backend", "test", "review"].includes(domainHint)) ? domainHint as WorkerDomain : undefined;
-    const result = await this.routeToWorker(sessionId, task, preferredModel, reasoningLevel, ["."], domainOverride);
+    const result = await this.routeToWorker(sessionId, task, preferredModel, reasoningLevel, [this.workingDirectory], domainOverride);
     this.updateWorkflowState(sessionId, "idle");
     if (result.success) {
       return result.criticFeedback ?? (result.workerTranscript ? "Worker completed. See transcript." : "Done.");
@@ -395,12 +395,13 @@ export class KoryManager {
     if (domainOverride) domain = domainOverride;
     else try { domain = this.classifyDomainLLM(userMessage); } catch { domain = "general"; }
     const isSandboxed = !this.requiresSystemAccess(userMessage);
+    const effectivePaths = allowedPaths.length > 0 ? allowedPaths : [this.workingDirectory];
 
     if (this.git.isGitRepo()) {
       const hash = this.git.getCurrentHash();
       if (hash) this.lastKnownGoodHash.set(sessionId, hash);
     } else {
-      this.snapshotManager.createSnapshot(sessionId, "latest", allowedPaths.length > 0 ? allowedPaths : ["."], this.workingDirectory);
+      this.snapshotManager.createSnapshot(sessionId, "latest", effectivePaths, this.workingDirectory);
     }
 
     let workerTask = await this.generateWorkerTask(sessionId, userMessage, domain, preferredModel);
@@ -413,7 +414,7 @@ export class KoryManager {
       if (!provider) {
         const alt = this.providers.getAvailable()[0];
         if (!alt) return { success: false };
-        const res = await this.executeWithProvider(sessionId, alt, routing.model, workerTask, domain, reasoningLevel, true, allowedPaths, isSandboxed);
+        const res = await this.executeWithProvider(sessionId, alt, routing.model, workerTask, domain, reasoningLevel, true, effectivePaths, isSandboxed);
         if (res.success) {
           const criticResult = await this.runCriticGate(sessionId, res.workerMessages, preferredModel);
           if (criticResult.passed) return { success: true, workerTranscript: formatMessagesForCriticUtil(res.workerMessages ?? []), criticFeedback: criticResult.feedback };
@@ -421,7 +422,7 @@ export class KoryManager {
         } else return { success: false };
       }
 
-      const result = await this.executeWithProvider(sessionId, provider, routing.model, workerTask, domain, reasoningLevel, true, allowedPaths, isSandboxed);
+      const result = await this.executeWithProvider(sessionId, provider, routing.model, workerTask, domain, reasoningLevel, true, effectivePaths, isSandboxed);
       if (result.success) {
         const criticResult = await this.runCriticGate(sessionId, result.workerMessages, preferredModel);
         if (criticResult.passed) return { success: true, workerTranscript: formatMessagesForCriticUtil(result.workerMessages ?? []), criticFeedback: criticResult.feedback };
@@ -446,7 +447,7 @@ export class KoryManager {
     const criticCtx: ToolContext = {
       sessionId,
       workingDirectory: this.workingDirectory,
-      allowedPaths: [],
+      allowedPaths: [this.workingDirectory],
       isSandboxed: true,
     };
 

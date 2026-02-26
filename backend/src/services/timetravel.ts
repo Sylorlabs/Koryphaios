@@ -99,8 +99,8 @@ export class TimeTravelService {
     }
   ): { success: boolean; hash?: string; message: string } {
     // Only checkpoint if there are actual changes
-    const status = this.gitManager.getStatus();
-    if (!status || status.length === 0) {
+    const status = this.gitManager.runGit(["status", "--porcelain"]).output.trim();
+    if (!status) {
       return { success: false, message: "No changes to checkpoint" };
     }
 
@@ -292,8 +292,3 @@ export class TimeTravelService {
 }
 
 // Extend GitManager interface to expose runGit for TimeTravelService
-declare module "@/kory/git-manager" {
-  interface GitManager {
-    runGit(args: string[]): { success: boolean; output: string };
-  }
-}

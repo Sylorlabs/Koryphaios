@@ -2,7 +2,7 @@
   import { wsStore } from '$lib/stores/websocket.svelte';
   import { sessionStore } from '$lib/stores/sessions.svelte';
   import { isMac } from '$lib/utils/platform';
-  import { tick, onMount } from 'svelte';
+  import { onMount } from 'svelte';
   import { 
     MessageSquare, 
     ArrowDown,
@@ -21,34 +21,21 @@
   let lastSelectedId = $state<string>('');
   let expandedGroups = $state<Set<string>>(new Set());
 
-  // Virtual List State
-  let scrollTop = $state(0);
-  let clientHeight = $state(800); // Default, updates on mount
-  let itemHeight = 100; // Estimated average height
-  const OVERSCAN = 5;
-
   let filteredFeed = $derived(wsStore.groupedFeed as unknown as FeedEntryLocal[]);
-  
-  // Derived Virtualization
-  let startIndex = $derived(Math.max(0, Math.floor(scrollTop / itemHeight) - OVERSCAN));
-  let endIndex = $derived(Math.min(filteredFeed.length, Math.ceil((scrollTop + clientHeight) / itemHeight) + OVERSCAN));
-  let visibleItems = $derived(filteredFeed.slice(startIndex, endIndex));
-  let paddingTop = $derived(startIndex * itemHeight);
-  let paddingBottom = $derived(Math.max(0, (filteredFeed.length - endIndex) * itemHeight));
 
   // Track last feed length to avoid scroll loops
   let lastFeedLength = $state(0);
+  let lastUserScrollAt = $state(0);
 
-  // Auto-scroll effect
+  // Auto-scroll effect: only when new items added and user was already at bottom (not right after they scrolled up)
   $effect(() => {
     const len = filteredFeed.length;
-    // Only scroll if new items were actually added
-    if (autoScroll && feedContainer && len > lastFeedLength) {
+    const justScrolled = Date.now() - lastUserScrollAt < 200;
+    if (autoScroll && feedContainer && len > lastFeedLength && !justScrolled) {
       lastFeedLength = len;
-      // Use requestAnimationFrame for smoother scrolling
       requestAnimationFrame(() => {
         if (feedContainer && autoScroll) {
-          feedContainer.scrollTo({ top: feedContainer.scrollHeight, behavior: 'smooth' });
+          feedContainer.scrollTop = feedContainer.scrollHeight;
         }
       });
     } else if (len !== lastFeedLength) {
@@ -56,27 +43,27 @@
     }
   });
 
-  function handleScroll(e: UIEvent) {
+  function handleScroll(_e: UIEvent) {
     if (!feedContainer) return;
-    scrollTop = feedContainer.scrollTop;
-    
+    lastUserScrollAt = Date.now();
+
     const { scrollHeight, clientHeight: ch } = feedContainer;
-    // Buffer of 50px to determine if user is at bottom
-    // We use the ACTUAL scrollHeight from DOM, not our calculated one, for this check
+    const scrollTop = feedContainer.scrollTop;
     const dist = scrollHeight - scrollTop - ch;
     autoScroll = dist < 50;
   }
   
   onMount(() => {
     if (feedContainer) {
-      clientHeight = feedContainer.clientHeight;
-      // Resize observer to update clientHeight if window resizes
+      const container = feedContainer;
+      // Track container resize and update autoscroll status.
       const ro = new ResizeObserver(entries => {
         for (const entry of entries) {
-          clientHeight = entry.contentRect.height;
+          const dist = container.scrollHeight - container.scrollTop - entry.contentRect.height;
+          autoScroll = dist < 50;
         }
       });
-      ro.observe(feedContainer);
+      ro.observe(container);
       return () => ro.disconnect();
     }
   });
@@ -156,7 +143,7 @@
       {/if}
       {#if !autoScroll}
         <button
-          onclick={() => { autoScroll = true; feedContainer?.scrollTo({ top: feedContainer.scrollHeight, behavior: 'smooth' }); }}
+          onclick={() => { autoScroll = true; if (feedContainer) feedContainer.scrollTop = feedContainer.scrollHeight; }}
           class="btn btn-secondary flex items-center gap-1.5"
           style="padding: 4px 10px; font-size: 11px;"
         >
@@ -169,7 +156,7 @@
   <div
     bind:this={feedContainer}
     onscroll={handleScroll}
-    class="flex-1 overflow-y-auto p-4 space-y-3"
+    class="flex-1 overflow-y-auto p-4 space-y-3 feed-scroll"
   >
     {#if filteredFeed.length === 0}
       <div class="flex-1 flex flex-col items-center justify-center text-center h-full max-w-2xl mx-auto py-12">
@@ -201,19 +188,16 @@
         </div>
       </div>
     {:else}
-      <!-- Virtual List Spacer -->
-      <div style="padding-top: {paddingTop}px; padding-bottom: {paddingBottom}px;">
-        {#each visibleItems as entry (entry.id)}
-          <FeedEntry 
-            {entry}
-            isSelected={selectedEntries.has(entry.id)}
-            isExpanded={expandedGroups.has(entry.id)}
-            onSelect={(e) => handleEntryClick(entry, e)}
-            onToggleGroup={() => toggleGroup(entry.id)}
-            onDelete={() => deleteSingle(entry.id)}
-          />
-        {/each}
-      </div>
+      {#each filteredFeed as entry (entry.id)}
+        <FeedEntry 
+          {entry}
+          isSelected={selectedEntries.has(entry.id)}
+          isExpanded={expandedGroups.has(entry.id)}
+          onSelect={(e) => handleEntryClick(entry, e)}
+          onToggleGroup={() => toggleGroup(entry.id)}
+          onDelete={() => deleteSingle(entry.id)}
+        />
+      {/each}
     {/if}
   </div>
 </div>
@@ -251,5 +235,8 @@
     margin-top: 1.5em; 
     margin-bottom: 0.75em; 
     color: var(--color-text-primary);
+  }
+  .feed-scroll {
+    overscroll-behavior: contain;
   }
 </style>

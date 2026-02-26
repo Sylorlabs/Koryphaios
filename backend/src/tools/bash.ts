@@ -24,6 +24,29 @@ const NETWORK_CMD_BLACKLIST = new Set([
   "nmap", "tcpdump", "wireshark",
 ]);
 
+function isWithinRoot(root: string, target: string): boolean {
+  const rel = relative(root, target);
+  return rel === "" || (!rel.startsWith("..") && !isAbsolute(rel));
+}
+
+function parseBaseCommands(command: string): string[] {
+  const segments = command
+    .split(/(?:\|\||&&|[|;])/g)
+    .map((segment) => segment.trim())
+    .filter(Boolean);
+
+  const bases: string[] = [];
+  for (const segment of segments) {
+    const tokens = segment.split(/\s+/).filter(Boolean);
+    if (tokens.length === 0) continue;
+    const firstExecutable = tokens.find((t) => !t.includes("=") || t.startsWith("./") || t.startsWith("/"));
+    if (!firstExecutable) continue;
+    bases.push(firstExecutable);
+  }
+
+  return bases;
+}
+
 export class BashTool implements Tool {
   readonly name = "bash";
   readonly description = `Execute a shell command on the system.
@@ -74,7 +97,7 @@ Network access via curl/wget is blocked unless explicitly authorized.`;
       : ctx.workingDirectory;
 
     // Check if requested path is inside project
-    const isInsideProject = requestedCwd.startsWith(ctx.workingDirectory);
+    const isInsideProject = isWithinRoot(ctx.workingDirectory, requestedCwd);
 
     // Only enforce project root check if sandboxed
     if (ctx.isSandboxed && !isInsideProject) {
@@ -88,7 +111,7 @@ Network access via curl/wget is blocked unless explicitly authorized.`;
     }
 
     // 2. Validate Command Content
-    const validation = validateBashCommand(command, ctx.isSandboxed);
+    const validation = validateBashCommand(command);
     if (!validation.safe) {
       toolLog.warn({ command: command.slice(0, 100), reason: validation.reason }, "Blocked dangerous command");
       return {
@@ -103,8 +126,9 @@ Network access via curl/wget is blocked unless explicitly authorized.`;
     // 3. Sandbox Constraints
     if (ctx.isSandboxed) {
       // Check against whitelist/blacklist
+      const baseCommands = parseBaseCommands(command);
       const cmdParts = command.trim().split(/\s+/);
-      const baseCmd = cmdParts[0];
+      const baseCmd = baseCommands[0] ?? cmdParts[0] ?? "";
 
       // Blacklist check (Network tools)
       if (NETWORK_CMD_BLACKLIST.has(baseCmd) || cmdParts.some(p => NETWORK_CMD_BLACKLIST.has(p))) {
@@ -112,6 +136,18 @@ Network access via curl/wget is blocked unless explicitly authorized.`;
           callId: call.id,
           name: this.name,
           output: `Access Denied: Network tool '${baseCmd}' is blocked in sandbox mode. Ask Manager to authorize if needed.`,
+          isError: true,
+          durationMs: 0,
+        };
+      }
+
+      // Whitelist check
+      const disallowed = baseCommands.find((cmd) => !SANDBOX_CMD_WHITELIST.has(cmd));
+      if (disallowed) {
+        return {
+          callId: call.id,
+          name: this.name,
+          output: `Access Denied: Command '${disallowed}' is not allowed in sandbox mode.`,
           isError: true,
           durationMs: 0,
         };
