@@ -48,6 +48,7 @@ class InMemoryRedis {
   private data: Map<string, any> = new Map();
   private expirations: Map<string, number> = new Map();
   private timers: Map<string, NodeJS.Timeout> = new Map();
+  private scripts: Map<string, string> = new Map();
 
   async get(key: string): Promise<string | null> {
     this.checkExpiration(key);
@@ -205,21 +206,93 @@ class InMemoryRedis {
     return fields.map(f => hash.get(f) || null);
   }
 
+  async incr(key: string): Promise<number> {
+    this.checkExpiration(key);
+    const current = Number(this.data.get(key) ?? 0);
+    const next = current + 1;
+    this.data.set(key, String(next));
+    return next;
+  }
+
   async script(command: 'LOAD', script: string): Promise<string> {
-    // Return a hash of the script
     let hash = 0;
     for (let i = 0; i < script.length; i++) {
       const char = script.charCodeAt(i);
       hash = ((hash << 5) - hash) + char;
       hash = hash & hash;
     }
-    return hash.toString(16);
+    const sha = Math.abs(hash).toString(16);
+    this.scripts.set(sha, script);
+    return sha;
   }
 
   async evalsha(sha: string | null, numKeys: number, ...args: any[]): Promise<any[]> {
-    // In-memory fallback doesn't support Lua scripts
-    // Return a sensible default
+    const script = sha ? this.scripts.get(sha) : null;
+    const keys = args.slice(0, numKeys);
+    const argv = args.slice(numKeys);
+
+    // Sliding window: uses ZREMRANGEBYSCORE and ZCARD
+    if (script?.includes('ZREMRANGEBYSCORE')) {
+      return this._execSlidingWindow(keys[0], argv);
+    }
+    // Token bucket: uses last_refill hash field
+    if (script?.includes('last_refill')) {
+      return this._execTokenBucket(keys[0], argv);
+    }
     return [1, 10, Date.now() + 60000];
+  }
+
+  private async _execSlidingWindow(key: string, argv: any[]): Promise<any[]> {
+    const windowMs = Number(argv[0]);
+    const maxRequests = Number(argv[1]);
+    const now = Number(argv[2]);
+    const windowStart = now - windowMs;
+
+    await this.zremrangebyscore(key, 0, windowStart);
+    const current = await this.zcard(key);
+
+    if (current < maxRequests) {
+      const count = await this.incr(key + ':counter');
+      await this.zadd(key, now, `${now}:${count}`);
+      await this.expire(key, Math.ceil(windowMs / 1000) + 1);
+      const oldest = await this.zrange(key, 0, 0, 'WITHSCORES');
+      const resetAt = oldest.length >= 2 ? Number(oldest[1]) + windowMs : now + windowMs;
+      return [1, maxRequests - current - 1, resetAt];
+    } else {
+      const oldest = await this.zrange(key, 0, 0, 'WITHSCORES');
+      const resetAt = oldest.length >= 2 ? Number(oldest[1]) + windowMs : now + windowMs;
+      return [0, 0, resetAt];
+    }
+  }
+
+  private async _execTokenBucket(key: string, argv: any[]): Promise<any[]> {
+    const bucketSize = Number(argv[0]);
+    const refillRate = Number(argv[1]);
+    const now = Number(argv[2]);
+    const cost = Number(argv[3]);
+
+    const bucket = await this.hmget(key, 'tokens', 'last_refill');
+    let tokens = bucket[0] !== null ? parseFloat(bucket[0]) : bucketSize;
+    const lastRefill = bucket[1] !== null ? parseFloat(bucket[1]) : now;
+
+    const timePassed = Math.max(0, now - lastRefill) / 1000;
+    tokens = Math.min(bucketSize, tokens + timePassed * refillRate);
+
+    let allowed = 0;
+    let remaining = 0;
+    let retryAfter = 0;
+
+    if (tokens >= cost) {
+      tokens -= cost;
+      allowed = 1;
+      remaining = Math.floor(tokens);
+    } else {
+      retryAfter = Math.ceil((cost - tokens) / refillRate);
+    }
+
+    await this.hmset(key, 'tokens', String(tokens), 'last_refill', String(now));
+    await this.expire(key, 3600);
+    return [allowed, remaining, retryAfter];
   }
 
   async keys(pattern: string): Promise<string[]> {
@@ -234,6 +307,7 @@ class InMemoryRedis {
       clearTimeout(timer);
     }
     this.timers.clear();
+    // Note: scripts are not cleared on flushall (matches Redis behavior)
     return 'OK';
   }
 

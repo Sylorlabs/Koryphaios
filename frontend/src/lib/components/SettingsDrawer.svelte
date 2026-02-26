@@ -22,7 +22,7 @@
     AlertTriangle,
   } from 'lucide-svelte';
   import ModelSelectionDialog from './ModelSelectionDialog.svelte';
-  import { apiFetch, parseJsonResponse } from '$lib/api';
+  import { apiFetch, parseJsonResponse } from '$lib/api.svelte';
 
   interface Props {
     open?: boolean;
