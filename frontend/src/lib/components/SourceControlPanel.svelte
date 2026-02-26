@@ -7,6 +7,7 @@
   import GitConflictDialog from './GitConflictDialog.svelte';
 
   let message = $state('');
+  let commitError = $state(false);
   let showBranchMenu = $state(false);
   let showConflictDialog = $state(false);
   let loading = $derived(gitStore.state.loading);
@@ -30,7 +31,8 @@
   });
 
   async function handleCommit() {
-    if (!message.trim()) return;
+    if (!message.trim()) { commitError = true; return; }
+    commitError = false;
     const success = await gitStore.commit(message);
     if (success) message = '';
   }
@@ -147,12 +149,23 @@
     <textarea
       bind:value={message}
       placeholder="Message ({getModKeyName()}+Enter to commit)"
-      class="input w-full text-xs h-20 resize-none mb-2 bg-[var(--color-surface-2)] font-sans"
+      class="input w-full text-xs h-20 resize-none mb-1 bg-[var(--color-surface-2)] font-sans {commitError ? 'border-red-500' : message.length > 72 ? 'border-yellow-500' : ''}"
+      oninput={() => { if (message.trim()) commitError = false; }}
       onkeydown={(e) => { 
         const modPressed = isMac() ? e.metaKey : e.ctrlKey;
         if (modPressed && e.key === 'Enter') handleCommit(); 
       }}
     ></textarea>
+    <div class="flex items-center justify-between mb-2 text-[10px]">
+      {#if commitError}
+        <span class="text-red-400">Commit message is required</span>
+      {:else if message.length > 72}
+        <span class="text-yellow-400">Long message (git convention: ≤72 chars)</span>
+      {:else}
+        <span></span>
+      {/if}
+      <span style="color: var(--color-text-muted);" class="{message.length > 72 ? 'text-yellow-400' : ''}">{message.length}/72</span>
+    </div>
     <button
       onclick={handleCommit}
       disabled={!message.trim() || stagedFiles.length === 0}
@@ -235,10 +248,11 @@
         <Plus size={12} />
       </button>
     </div>
-    {#if changedFiles.length === 0 && stagedFiles.length === 0}
-      <div class="p-8 text-center flex flex-col items-center justify-center text-[var(--color-text-muted)] opacity-50">
-        <Check size={32} class="mb-2" />
-        <span class="text-xs">No pending changes</span>
+    {#if changedFiles.length === 0 && stagedFiles.length === 0 && !loading}
+      <div class="p-8 text-center flex flex-col items-center justify-center text-[var(--color-text-muted)]">
+        <div class="text-2xl mb-2 opacity-50">✓</div>
+        <p class="text-sm font-medium">Working tree clean</p>
+        <p class="text-xs opacity-50">No changes to commit</p>
       </div>
     {/if}
     {#each changedFiles as file}

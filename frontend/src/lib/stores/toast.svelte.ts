@@ -7,14 +7,15 @@ export interface Toast {
   type: ToastType;
   message: string;
   duration: number;
+  onRetry?: () => void;
 }
 
 let toasts = $state<Toast[]>([]);
 let idCounter = 0;
 
-function add(type: ToastType, message: string, duration = 4000) {
+function add(type: ToastType, message: string, duration = 4000, onRetry?: () => void) {
   const id = `toast-${++idCounter}`;
-  toasts = [...toasts, { id, type, message, duration }];
+  toasts = [...toasts, { id, type, message, duration, onRetry }];
   setTimeout(() => dismiss(id), duration);
 }
 
@@ -25,7 +26,8 @@ function dismiss(id: string) {
 export const toastStore = {
   get toasts() { return toasts; },
   success: (msg: string) => add('success', msg),
-  error: (msg: string) => add('error', msg, 6000),
+  error: (msg: string, options?: { duration?: number; onRetry?: () => void }) =>
+    add('error', msg, options?.duration ?? 6000, options?.onRetry),
   info: (msg: string) => add('info', msg),
   warning: (msg: string) => add('warning', msg, 5000),
   dismiss,

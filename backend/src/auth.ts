@@ -97,13 +97,6 @@ export function extractTokenFromRequest(req: Request): string | null {
     return sessionHeader;
   }
 
-  // Check query parameter (for WebSocket upgrades)
-  const url = new URL(req.url);
-  const tokenParam = url.searchParams.get("token");
-  if (tokenParam) {
-    return tokenParam;
-  }
-
   return null;
 }
 

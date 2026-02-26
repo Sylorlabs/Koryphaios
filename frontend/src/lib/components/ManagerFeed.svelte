@@ -188,11 +188,12 @@
         </div>
       </div>
     {:else}
-      {#each filteredFeed as entry (entry.id)}
+      {#each filteredFeed as entry, i (entry.id)}
         <FeedEntry 
           {entry}
           isSelected={selectedEntries.has(entry.id)}
           isExpanded={expandedGroups.has(entry.id)}
+          isStreaming={i === filteredFeed.length - 1 && (wsStore.managerStatus === 'streaming' || wsStore.managerStatus === 'thinking')}
           onSelect={(e) => handleEntryClick(entry, e)}
           onToggleGroup={() => toggleGroup(entry.id)}
           onDelete={() => deleteSingle(entry.id)}

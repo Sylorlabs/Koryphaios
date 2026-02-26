@@ -124,10 +124,10 @@
       </div>
 
       <div class="max-h-[60vh] overflow-y-auto p-2">
-        {#if filteredActions.length === 0}
+        {#if filteredActions.length === 0 && query}
           <div class="py-12 flex flex-col items-center justify-center text-center opacity-50">
             <Command size={32} class="mb-3" />
-            <p class="text-sm">No commands found for "{query}"</p>
+            <p class="text-sm">No results for "{query}"</p>
           </div>
         {:else}
           {@const categories = [...new Set(filteredActions.map(a => a.category))]}
