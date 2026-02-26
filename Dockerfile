@@ -1,18 +1,12 @@
-# Use Bun's official Docker image
-FROM oven/bun:1-debian
+# Stage 1: Builder
+FROM oven/bun:1-debian AS builder
 
-# Set working directory
 WORKDIR /app
 
-# Install system dependencies needed for native modules
+# Install build dependencies
 RUN apt-get update && apt-get install -y \
-    # For better-sqlite3
     build-essential \
     python3 \
-    # For ripgrep
-    ripgrep \
-    # For git
-    git \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy package files
@@ -34,6 +28,20 @@ COPY .env.example ./
 # Build the application
 ENV NODE_ENV=production
 RUN bun run build
+
+# Stage 2: Runner
+FROM oven/bun:1-debian AS runner
+
+WORKDIR /app
+
+# Install only runtime dependencies
+RUN apt-get update && apt-get install -y \
+    ripgrep \
+    git \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy built artifacts from builder
+COPY --from=builder /app ./
 
 # Create non-root user for security
 RUN addgroup --system --gid 1001 appgroup && \

@@ -1,6 +1,6 @@
 // Security module — bash sandboxing, input validation, key encryption, SSRF prevention.
 
-import { createCipheriv, createDecipheriv, randomBytes, scryptSync } from "node:crypto";
+import { randomBytes } from "node:crypto";
 import { mkdirSync, writeFileSync, realpathSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { toolLog } from "./logger";
@@ -12,7 +12,7 @@ const BLOCKED_PATTERNS = [
   /\brm\s+(-[a-zA-Z]*f[a-zA-Z]*\s+)?\/\s*$/,   // rm -rf /
   /\brm\s+(-[a-zA-Z]*f[a-zA-Z]*\s+)?\/\w/,       // rm -rf /anything at root
   /\bmkfs\b/,
-  /\bdd\b.*\bof=\/dev\//,
+  /\bdd\b/,
   /\b:(){ :|:& };:/,                               // fork bomb
   /\bchmod\s+(-R\s+)?777\s+\//,                    // chmod 777 /
   /\bchown\s+(-R\s+)?.*\s+\//,                     // chown at root
@@ -34,6 +34,16 @@ const BLOCKED_PATTERNS = [
   /\bopenai\s+login\b/,
   /\bxdg-open\b/,
   /\bopen\b\s+https?:\/\//,
+  /\$\(/,                                            // command substitution $(...)
+  /`[^`]*`/,                                         // backtick command substitution
+  /\bpython[23]?\s+-c\b/,                            // python -c (arbitrary code execution)
+  /\bperl\s+-e\b/,                                   // perl -e (arbitrary code execution)
+  /\bruby\s+-e\b/,                                   // ruby -e (arbitrary code execution)
+  /\bnc\b.*-[elp]/,                                  // netcat listeners
+  /\bncat\b/,                                        // ncat
+  /\bsocat\b/,                                       // socat
+  /\bcrontab\b/,                                     // crontab modification
+  /\bat\b\s+/,                                       // at command (scheduled execution)
 ];
 
 const BLOCKED_EXACT = new Set([
@@ -294,76 +304,7 @@ export function validatePathAccess(
   return { allowed: false, reason: "Path is outside allowed directories" };
 }
 
-// ─── API Key Encryption at Rest ─────────────────────────────────────────────
-// 
-// ⚠️ DEPRECATED: These functions use static key derivation and are not secure
-// for production use. They are kept for backward compatibility during migration.
-// 
-// Use the new envelope encryption from `backend/src/crypto/` instead:
-//   import { EnvelopeEncryption, createKMSProviderFromEnv } from './crypto';
-//   
-//   const provider = createKMSProviderFromEnv();
-//   const encryption = new EnvelopeEncryption(provider);
-//   await encryption.initialize();
-//   
-//   // Encrypt
-//   const envelope = await encryption.encrypt(apiKey);
-//   const stored = `env:${encryption.serialize(envelope)}`;
-//   
-//   // Decrypt
-//   const envelope = encryption.parse(stored.slice(4));
-//   const { data, needsRotation } = await encryption.decrypt(envelope);
-
-const ALGORITHM = "aes-256-gcm";
-const SALT = "koryphaios-key-salt-v1";
-
-/**
- * @deprecated Use EnvelopeEncryption from './crypto' instead
- */
-function deriveEncryptionKey(): Buffer {
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const os = require("os") as typeof import("os");
-  const hostname = os.hostname();
-  const uid = process.getuid?.() ?? 1000;
-  const seed = `${hostname}:${uid}:${SALT}`;
-  return scryptSync(seed, SALT, 32);
-}
-
-/**
- * @deprecated Use EnvelopeEncryption.encrypt() instead
- * This function uses static key derivation and is vulnerable to anyone with code access.
- * Kept for backward compatibility during migration to envelope encryption.
- */
-export function encryptApiKey(plaintext: string): string {
-  const key = deriveEncryptionKey();
-  const iv = randomBytes(16);
-  const cipher = createCipheriv(ALGORITHM, key, iv);
-  let encrypted = cipher.update(plaintext, "utf8", "hex");
-  encrypted += cipher.final("hex");
-  const authTag = cipher.getAuthTag().toString("hex");
-  return `enc:${iv.toString("hex")}:${authTag}:${encrypted}`;
-}
-
-/**
- * @deprecated Use EnvelopeEncryption.decrypt() instead
- * This function uses static key derivation and is vulnerable to anyone with code access.
- * Kept for backward compatibility during migration to envelope encryption.
- */
-export function decryptApiKey(ciphertext: string): string {
-  if (!ciphertext.startsWith("enc:")) return ciphertext;
-  const parts = ciphertext.split(":");
-  if (parts.length < 4) return ciphertext; // Malformed — return as-is
-  const [, ivHex, authTagHex, ...encParts] = parts;
-  const encrypted = encParts.join(":"); // Rejoin in case encrypted data contains colons
-  const key = deriveEncryptionKey();
-  const decipher = createDecipheriv(ALGORITHM, key, Buffer.from(ivHex, "hex"));
-  decipher.setAuthTag(Buffer.from(authTagHex, "hex"));
-  let decrypted = decipher.update(encrypted, "hex", "utf8");
-  decrypted += decipher.final("utf8");
-  return decrypted;
-}
-
-// ─── New Envelope Encryption Integration ───────────────────────────────────
+// ─── Envelope Encryption Integration ────────────────────────────────────────
 
 import { EnvelopeEncryption, createKMSProviderFromEnv } from './crypto';
 
@@ -419,15 +360,11 @@ export async function secureDecrypt(ciphertext: string): Promise<string> {
     return data;
   }
   
-  // Handle legacy format
+  // Legacy format is no longer supported — keys must be re-encrypted
   if (ciphertext.startsWith('enc:')) {
-    // Decrypt with legacy method
-    const plaintext = decryptApiKey(ciphertext);
-    
-    // Optionally re-encrypt with new method (lazy migration)
-    // This would require async/await changes in callers
-    // For now, just return the plaintext
-    return plaintext;
+    throw new Error(
+      'Legacy enc: encryption format is no longer supported. Please re-encrypt your API keys using envelope encryption (run the migration or re-enter credentials).'
+    );
   }
   
   // Not encrypted, return as-is
@@ -446,16 +383,15 @@ export function isUsingSecureEncryption(): boolean {
  * In production, envelope encryption is required; in development, falls back to legacy with a warning.
  */
 export async function encryptForStorage(plaintext: string): Promise<string> {
-  if (envelopeEncryption) {
-    return secureEncrypt(plaintext);
+  if (!envelopeEncryption) {
+    if (process.env.NODE_ENV === "production") {
+      throw new Error(
+        "Envelope encryption is required in production. Initialize encryption at startup or set KORYPHAIOS_KMS_* environment."
+      );
+    }
+    await initializeEncryption();
   }
-  if (process.env.NODE_ENV === "production") {
-    throw new Error(
-      "Envelope encryption is required in production. Initialize encryption at startup or set KORYPHAIOS_KMS_* environment."
-    );
-  }
-  toolLog.warn("Using legacy API key encryption; set up envelope encryption for production.");
-  return encryptApiKey(plaintext);
+  return secureEncrypt(plaintext);
 }
 
 // ─── Log Redaction (never log credentials) ──────────────────────────────────
@@ -529,6 +465,8 @@ export function getSecurityHeaders(): Record<string, string> {
     "X-XSS-Protection": "1; mode=block",
     "Referrer-Policy": "strict-origin-when-cross-origin",
     "Permissions-Policy": "geolocation=(), microphone=(), camera=()",
+    "Strict-Transport-Security": "max-age=31536000; includeSubDomains",
+    "Content-Security-Policy": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com https://geistfont.vercel.app; img-src 'self' data: blob:; connect-src 'self' ws: wss:",
   };
 }
 

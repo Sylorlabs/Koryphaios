@@ -1,6 +1,5 @@
 import { describe, test, expect } from "bun:test";
 import { ProviderRegistry } from "../src/providers/registry";
-import { encryptApiKey } from "../src/security";
 import { ProviderName } from "@koryphaios/shared";
 import type { KoryphaiosConfig } from "@koryphaios/shared";
 
@@ -56,9 +55,9 @@ describe("ProviderRegistry auth modes", () => {
     }
   });
 
-  test("decrypts encrypted env API keys on startup", async () => {
+  test("detects plaintext env API keys on startup", async () => {
     const original = process.env.OPENAI_API_KEY;
-    process.env.OPENAI_API_KEY = encryptApiKey("sk-test-valid-looking");
+    process.env.OPENAI_API_KEY = "sk-test-valid-looking";
     try {
       const registry = new ProviderRegistry(minimalConfig());
       const statuses = await registry.getStatus();

@@ -124,6 +124,7 @@
       style="color: var(--color-text-secondary);"
       onclick={() => sessionStore.createSession()}
       title="New session (Ctrl+N)"
+      aria-label="New session"
     >
       <Plus size={16} />
     </button>
@@ -170,10 +171,10 @@
                     if (e.key === 'Escape') cancelRename();
                   }}
                 />
-                <button class="p-0.5 rounded" style="color: var(--color-success);" onclick={(e) => { e.stopPropagation(); saveRename(session.id); }}>
+                <button class="p-0.5 rounded" style="color: var(--color-success);" onclick={(e) => { e.stopPropagation(); saveRename(session.id); }} aria-label="Save rename">
                   <Check size={12} />
                 </button>
-                <button class="p-0.5 rounded" style="color: var(--color-text-muted);" onclick={(e) => { e.stopPropagation(); cancelRename(); }}>
+                <button class="p-0.5 rounded" style="color: var(--color-text-muted);" onclick={(e) => { e.stopPropagation(); cancelRename(); }} aria-label="Cancel rename">
                   <X size={12} />
                 </button>
               </div>
@@ -203,6 +204,7 @@
                   style="color: var(--color-text-muted);"
                   onclick={(e) => { e.stopPropagation(); startRename(session.id, session.title); }}
                   title="Rename"
+                  aria-label="Rename session"
                 >
                   <Pencil size={12} />
                 </button>
@@ -211,6 +213,7 @@
                   style="color: {confirmDeleteId === session.id ? 'var(--color-error)' : 'var(--color-text-muted)'};"
                   onclick={(e) => confirmDelete(e, session.id)}
                   title={confirmDeleteId === session.id ? 'Click again to confirm' : 'Delete (Shift+Click to skip confirmation)'}
+                  aria-label="Delete session"
                 >
                   <Trash2 size={12} />
                 </button>

@@ -1,7 +1,7 @@
 // File tools — read, write, edit, list, grep, glob.
 // Ported from OpenCode's tools/file.go, view.go, write.go, edit.go, grep.go, glob.go, ls.go.
 
-import { readFileSync, writeFileSync, existsSync, statSync, readdirSync, mkdirSync, unlinkSync, renameSync, copyFileSync } from "fs";
+import { existsSync, statSync, readdirSync, mkdirSync, unlinkSync, renameSync, copyFileSync } from "fs";
 import { join, relative, dirname, basename, resolve } from "path";
 import type { Tool, ToolContext, ToolCallInput, ToolCallOutput } from "./registry";
 import { validatePathAccess } from "../security";
@@ -55,7 +55,7 @@ export class ReadFileTool implements Tool {
     }
 
     try {
-      const content = readFileSync(absPath, "utf-8");
+      const content = await Bun.file(absPath).text();
       let lines = content.split("\n");
 
       if (startLine !== undefined || endLine !== undefined) {
@@ -123,7 +123,7 @@ export class WriteFileTool implements Tool {
         }
       }
 
-      writeFileSync(absPath, content, "utf-8");
+      await Bun.write(absPath, content);
       const lines = content.split("\n").length;
 
       if (ctx.emitFileComplete) {
@@ -193,7 +193,7 @@ export class EditFileTool implements Tool {
     }
 
     try {
-      const content = readFileSync(absPath, "utf-8");
+      const content = await Bun.file(absPath).text();
       const occurrences = content.split(old_str).length - 1;
 
       if (occurrences === 0) {
@@ -225,7 +225,7 @@ export class EditFileTool implements Tool {
         }
       }
 
-      writeFileSync(absPath, newContent, "utf-8");
+      await Bun.write(absPath, newContent);
 
       if (ctx.emitFileComplete) {
         ctx.emitFileComplete({ path: absPath, totalLines: newContent.split("\n").length, operation: "edit" });
@@ -479,7 +479,7 @@ export class DeleteFileTool implements Tool {
         return { callId: call.id, name: this.name, output: `Deleted empty directory: ${absPath}`, isError: false, durationMs: 0 };
       }
 
-      const content = readFileSync(absPath, "utf-8");
+      const content = await Bun.file(absPath).text();
       const lines = content.split("\n").length;
       
       unlinkSync(absPath);
@@ -640,7 +640,7 @@ export class DiffTool implements Tool {
         }
       } else if (new_content !== undefined) {
         // Diff file content vs new content using a temp approach
-        const oldContent = readFileSync(absA, "utf-8");
+        const oldContent = await Bun.file(absA).text();
         const oldLines = oldContent.split("\n");
         const newLines = new_content.split("\n");
 
@@ -714,7 +714,7 @@ export class PatchTool implements Tool {
     }
 
     try {
-      let content = readFileSync(absPath, "utf-8");
+      let content = await Bun.file(absPath).text();
 
       // Validate all edits first (atomic check)
       for (let i = 0; i < edits.length; i++) {
@@ -736,7 +736,7 @@ export class PatchTool implements Tool {
         content = content.replace(edit.old_str, edit.new_str);
       }
 
-      writeFileSync(absPath, content, "utf-8");
+      await Bun.write(absPath, content);
 
       if (ctx.recordChange) {
         ctx.recordChange({

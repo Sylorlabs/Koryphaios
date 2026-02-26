@@ -19,7 +19,7 @@ import { CopilotProvider, exchangeGitHubTokenForCopilotAsync } from "./copilot";
 import { ClineProvider } from "./cline";
 import { CodexProvider } from "./codex";
 
-import { decryptApiKey, secureDecrypt, isUsingSecureEncryption } from "../security";
+import { secureDecrypt, isUsingSecureEncryption } from "../security";
 import { resolveModel, getModelsForProvider, isLegacyModel, type StreamRequest, type ProviderEvent, type Provider } from "./types";
 import { withRetry } from "./utils";
 import { recordUsage as creditRecordUsage } from "../credit-accountant";
@@ -952,8 +952,8 @@ class ProviderRegistry {
     for (const envVar of envVars) {
       const val = process.env[envVar];
       if (!val) continue;
-      if (val.startsWith("env:")) return null;
-      return decryptApiKey(val);
+      if (val.startsWith("env:") || val.startsWith("enc:")) return null;
+      return val;
     }
     return null;
   }
@@ -963,8 +963,8 @@ class ProviderRegistry {
     for (const envVar of envVars) {
       const val = process.env[envVar];
       if (!val) continue;
-      if (val.startsWith("env:")) return null;
-      return decryptApiKey(val);
+      if (val.startsWith("env:") || val.startsWith("enc:")) return null;
+      return val;
     }
     return null;
   }

@@ -5,6 +5,7 @@ import type { Session } from '@koryphaios/shared';
 import { toastStore } from './toast.svelte';
 import { authStore } from './auth.svelte';
 import { browser } from '$app/environment';
+import { friendlyHttpError } from '$lib/api';
 
 let sessions = $state<Session[]>([]);
 let activeSessionId = $state<string>('');
@@ -31,7 +32,7 @@ async function fetchSessions(): Promise<boolean> {
       if (!(res.status === 500 && !text.trim())) {
         console.error('fetchSessions failed', { status: res.status, body: text || '(empty)' });
       }
-      toastStore.error(`Failed to load sessions (${res.status})`);
+      toastStore.error(friendlyHttpError(res.status, 'load sessions'));
       return false;
     }
     if (!text.trim()) return false;
@@ -70,7 +71,7 @@ async function createSession(): Promise<string | null> {
     });
     const text = await res.text();
     if (!res.ok) {
-      toastStore.error(`Failed to create session (${res.status})`);
+      toastStore.error(friendlyHttpError(res.status, 'create session'));
       return null;
     }
     let data: { ok?: boolean; data?: Session };

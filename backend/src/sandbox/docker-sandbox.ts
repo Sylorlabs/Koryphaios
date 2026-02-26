@@ -1,11 +1,24 @@
 // Docker-based sandbox for secure bash command execution.
 // Provides true isolation for command execution with resource limits.
 
-import { execSync, spawn, exec as execCallback } from "child_process";
-import { promisify } from "util";
 import { serverLog } from "../logger";
 
-const exec = promisify(execCallback);
+async function bunExec(cmd: string): Promise<{ stdout: string; stderr: string }> {
+  const proc = Bun.spawn(["sh", "-c", cmd], { stdout: "pipe", stderr: "pipe" });
+  const [stdout, stderr, exitCode] = await Promise.all([
+    new Response(proc.stdout).text(),
+    new Response(proc.stderr).text(),
+    proc.exited,
+  ]);
+  if (exitCode !== 0) {
+    const error: any = new Error(stderr || "Command failed");
+    error.stdout = stdout;
+    error.stderr = stderr;
+    error.code = exitCode;
+    throw error;
+  }
+  return { stdout, stderr };
+}
 
 export interface SandboxConfig {
     enabled: boolean;
@@ -41,8 +54,8 @@ const DEFAULT_CONFIG: Required<SandboxConfig> = {
  */
 export async function isDockerAvailable(): Promise<boolean> {
     try {
-        await exec("docker --version");
-        await exec("docker info > /dev/null 2>&1");
+        await bunExec("docker --version");
+        await bunExec("docker info > /dev/null 2>&1");
         return true;
     } catch {
         return false;
@@ -114,7 +127,7 @@ export async function executeInSandbox(
 
         // Clean up container if it still exists
         try {
-            await exec(`docker rm -f ${containerName} > /dev/null 2>&1`);
+            await bunExec(`docker rm -f ${containerName} > /dev/null 2>&1`);
         } catch {
             // Ignore cleanup errors
         }
@@ -140,48 +153,38 @@ async function execWithTimeout(
     command: string,
     timeout: number,
 ): Promise<{ stdout: string; stderr: string; exitCode: number }> {
-    return new Promise((resolve, reject) => {
-        // Pass the full command to the shell — do NOT split by space, which breaks
-        // arguments that contain spaces (e.g. paths, quoted strings).
-        const child = spawn("sh", ["-c", command], {
-            stdio: ["ignore", "pipe", "pipe"],
-        });
-
-        let stdout = "";
-        let stderr = "";
-
-        child.stdout?.on("data", (data) => {
-            stdout += data.toString();
-        });
-
-        child.stderr?.on("data", (data) => {
-            stderr += data.toString();
-        });
-
-        const timer = setTimeout(() => {
-            child.kill("SIGTERM");
-            // Force kill after 5 seconds if SIGTERM doesn't work
-            setTimeout(() => child.kill("SIGKILL"), 5000);
-        }, timeout);
-
-        child.on("close", (code) => {
-            clearTimeout(timer);
-            if (code === 0) {
-                resolve({ stdout, stderr, exitCode: code });
-            } else {
-                const error: any = new Error(stderr || "Command failed");
-                error.stdout = stdout;
-                error.stderr = stderr;
-                error.code = code;
-                reject(error);
-            }
-        });
-
-        child.on("error", (error) => {
-            clearTimeout(timer);
-            reject(error);
-        });
+    const child = Bun.spawn(["sh", "-c", command], {
+        stdin: "ignore",
+        stdout: "pipe",
+        stderr: "pipe",
     });
+
+    const timer = setTimeout(() => {
+        child.kill();
+        setTimeout(() => child.kill(9), 5000);
+    }, timeout);
+
+    try {
+        const [stdout, stderr, exitCode] = await Promise.all([
+            new Response(child.stdout).text(),
+            new Response(child.stderr).text(),
+            child.exited,
+        ]);
+        clearTimeout(timer);
+
+        if (exitCode === 0) {
+            return { stdout, stderr, exitCode };
+        }
+
+        const error: any = new Error(stderr || "Command failed");
+        error.stdout = stdout;
+        error.stderr = stderr;
+        error.code = exitCode;
+        throw error;
+    } catch (error) {
+        clearTimeout(timer);
+        throw error;
+    }
 }
 
 /**
@@ -226,14 +229,14 @@ export async function executeCommandsInSandbox(
             "sh", "-c", "tail -f /dev/null", // Keep container running
         ].filter(Boolean);
 
-        await exec(`docker ${startArgs.join(" ")}`);
+        await bunExec(`docker ${startArgs.join(" ")}`);
 
         const results: SandboxResult[] = [];
 
         for (const command of commands) {
             const startTime = Date.now();
             try {
-                const execResult = await exec(`docker exec ${containerName} sh -c "${command.replace(/"/g, '\\"')}"`);
+                const execResult = await bunExec(`docker exec ${containerName} sh -c "${command.replace(/"/g, '\\"')}"`);
                 results.push({
                     stdout: execResult.stdout,
                     stderr: execResult.stderr,
@@ -257,7 +260,7 @@ export async function executeCommandsInSandbox(
     } finally {
         // Clean up container
         try {
-            await exec(`docker rm -f ${containerName} > /dev/null 2>&1`);
+            await bunExec(`docker rm -f ${containerName} > /dev/null 2>&1`);
         } catch {
             // Ignore cleanup errors
         }
@@ -304,7 +307,7 @@ export async function getSandboxStats(containerName: string): Promise<{
 } | null> {
     try {
         // docker stats --no-stream outputs: CONTAINER ID, NAME, CPU %, MEM USAGE / LIMIT, ...
-        const result = await exec(
+        const result = await bunExec(
             `docker stats ${containerName} --no-stream --format "{{.CPUPerc}} {{.MemUsage}}"`,
         );
         const line = result.stdout.trim();

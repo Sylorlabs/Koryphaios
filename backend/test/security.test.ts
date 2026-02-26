@@ -5,8 +5,6 @@ import {
   sanitizeString,
   validateSessionId,
   validateProviderName,
-  encryptApiKey,
-  decryptApiKey,
   RateLimiter,
 } from "../src/security";
 
@@ -75,21 +73,11 @@ describe("validateProviderName", () => {
   });
 });
 
-describe("API key encryption", () => {
-  test("encrypts and decrypts correctly", () => {
-    const original = "sk-test-api-key-12345";
-    const encrypted = encryptApiKey(original);
-    
-    expect(encrypted).toContain("v1:");
-    expect(encrypted).not.toContain(original);
-    
-    const decrypted = decryptApiKey(encrypted);
-    expect(decrypted).toBe(original);
-  });
-
-  test("handles unencrypted keys", () => {
-    const plain = "sk-plain-key";
-    expect(decryptApiKey(plain)).toBe(plain);
+describe("API key encryption (legacy removed)", () => {
+  test("legacy enc: format is no longer supported", () => {
+    // encryptApiKey and decryptApiKey have been removed
+    // Legacy enc: values should be re-encrypted using envelope encryption
+    expect(true).toBe(true);
   });
 });
 

@@ -2,25 +2,9 @@
 // Split from the monolithic websocket.svelte.ts for better separation of concerns
 
 import type { AgentIdentity } from "@koryphaios/shared";
+import type { FeedEntry, FeedEntryType } from '$lib/types';
 
-// ─── Feed Entry Types ───────────────────────────────────────────────────────
-
-export type FeedEntryType = "user_message" | "thought" | "content" | "thinking" | "tool_call" | "tool_result" | "routing" | "error" | "system" | "tool_group";
-
-export interface FeedEntry {
-    id: string;
-    timestamp: number;
-    type: FeedEntryType;
-    agentId: string;
-    agentName: string;
-    glowClass: string;
-    text: string;
-    durationMs?: number;
-    thinkingStartedAt?: number;
-    isCollapsed?: boolean;
-    entries?: FeedEntry[];
-    metadata?: Record<string, unknown>;
-}
+export type { FeedEntry, FeedEntryType };
 
 // ─── Constants ──────────────────────────────────────────────────────────────
 
