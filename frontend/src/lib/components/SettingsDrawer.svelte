@@ -22,7 +22,7 @@
     AlertTriangle,
   } from 'lucide-svelte';
   import ModelSelectionDialog from './ModelSelectionDialog.svelte';
-  import { apiFetch } from '$lib/api';
+  import { apiFetch, parseJsonResponse } from '$lib/api';
 
   interface Props {
     open?: boolean;
@@ -58,7 +58,7 @@
   async function loadAvailableProviders() {
     try {
       const res = await apiFetch('/api/providers/available');
-      const data = await res.json();
+      const data = await parseJsonResponse(res);
       if (data?.ok && Array.isArray(data.data)) {
         availableProviderTypes = data.data;
       }
@@ -320,11 +320,13 @@
           { id: 'antigravity', label: 'Antigravity' },
         ]
       : undefined;
+    const requiresBaseUrl = authMode === 'base_url_only';
     return {
       authMode,
       supportsApiKey: authMode === 'api_key' || authMode === 'api_key_or_auth',
       supportsAuthToken: authMode === 'api_key_or_auth',
-      requiresBaseUrl: authMode === 'base_url_only',
+      requiresBaseUrl,
+      baseUrlPlaceholder: requiresBaseUrl ? 'e.g. http://localhost:1234/v1' : undefined,
       enabled: false,
       authenticated: false,
       models: [] as string[],
@@ -353,7 +355,7 @@
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(body),
         });
-        const data = await res.json();
+        const data = await parseJsonResponse(res);
         if (data.ok) {
           expandedProvider = null;
           toastStore.success(`${name} connected via Gemini CLI`);
@@ -397,7 +399,7 @@
         body: JSON.stringify(body),
       });
       verifying = null;
-      const data = await res.json();
+      const data = await parseJsonResponse(res);
       if (data.ok) {
         keyInputs[name] = '';
         tokenInputs[name] = '';
@@ -437,7 +439,7 @@
           hideModelSelector: hideSelector
         }),
       });
-      const data = await res.json();
+      const data = await parseJsonResponse(res);
       if (data.ok) {
         showModelSelector = false;
         selectorTarget = null;
@@ -470,7 +472,7 @@
     if (!antigravityAuthId) return;
     try {
       const res = await apiFetch(`/api/providers/google/auth/antigravity/poll?authId=${encodeURIComponent(antigravityAuthId)}`, { method: 'GET' });
-      const data = await res.json();
+      const data = await parseJsonResponse(res);
       if (data.ok && data.data?.success) {
         stopAntigravityPolling();
         antigravityAuthStatus = 'connected';
@@ -502,7 +504,7 @@
       antigravityAuthStatus = 'pending';
       antigravityAuthMessage = 'Opening sign-in page...';
       const res = await apiFetch('/api/providers/google/auth/antigravity', { method: 'POST' });
-      const data = await res.json();
+      const data = await parseJsonResponse(res);
       if (!data.ok) {
         antigravityAuthStatus = 'error';
         antigravityAuthMessage = data.error ?? 'Failed to start Antigravity auth';
@@ -530,7 +532,7 @@
   async function startGeminiCLIAuth() {
     try {
       const res = await apiFetch('/api/providers/google/auth/cli', { method: 'POST' });
-      const data = await res.json();
+      const data = await parseJsonResponse(res);
       if (!data.ok) {
         toastStore.error(data.error ?? 'Failed to start Gemini auth');
         return;
@@ -625,7 +627,7 @@
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ deviceCode: copilotDeviceAuth.deviceCode }),
       });
-      const data = await res.json();
+      const data = await parseJsonResponse(res);
       if (!data.ok) {
         toastStore.error(data.error ?? 'Copilot auth failed');
         return;
@@ -741,7 +743,7 @@
     messagingLoading = true;
     try {
       const res = await apiFetch('/api/messaging');
-      const data = await res.json();
+      const data = await parseJsonResponse(res);
       if (data.ok && data.data) {
         const t = data.data.telegram;
         telegramEnabled = t?.enabled ?? false;
@@ -781,7 +783,7 @@
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
       });
-      const data = await res.json();
+      const data = await parseJsonResponse(res);
       if (data.ok) {
         toastStore.success('Messaging config saved. Restart the server for Telegram changes to take effect.');
         void loadMessaging();
@@ -802,14 +804,14 @@
     try {
       const res = await apiFetch('/api/billing/credits');
       if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
-        const msg = (err as { error?: string }).error ?? `HTTP ${res.status}`;
+        const err = await parseJsonResponse<{ error?: string }>(res);
+        const msg = err.error ?? `HTTP ${res.status}`;
         billingError = res.status === 404
           ? 'Billing API not available. Start the backend server (e.g. from repo root) and ensure the frontend proxy targets it.'
           : msg;
         return;
       }
-      const data = await res.json();
+      const data = await parseJsonResponse(res);
       billingData = {
         localEstimate: data.localEstimate,
         cloudReality: data.cloudReality ?? [],
@@ -1144,7 +1146,7 @@
                       {#if caps.requiresBaseUrl || prov.needsUrl}
                         <input
                           type="text"
-                          placeholder="Endpoint URL"
+                          placeholder={caps.baseUrlPlaceholder ?? 'Endpoint URL'}
                           bind:value={urlInputs[prov.key]}
                           class="input"
                           style="font-size: 12px;"

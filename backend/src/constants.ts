@@ -56,8 +56,8 @@ export const RATE_LIMIT = {
 export const SERVER = {
   /** Default HTTP port */
   DEFAULT_PORT: 3000,
-  /** Default host */
-  DEFAULT_HOST: "0.0.0.0",
+  /** Default host (loopback for safer local defaults) */
+  DEFAULT_HOST: "127.0.0.1",
   /** WebSocket path */
   WS_PATH: "/ws",
   /** SSE path */
@@ -274,6 +274,12 @@ export const WORKSPACE = {
  */
 export const DOMAIN = {
   KEYWORDS: {
+    frontend: [
+      "skia", "flutter", "ui", "widget", "button", "layout", "css", "style",
+      "animation", "render", "frontend", "component", "svelte", "react", "view",
+      "canvas", "draw", "paint", "theme", "color", "font", "icon", "design",
+      "responsive", "mobile", "dark mode", "light mode", "sidebar", "modal",
+    ],
     ui: [
       "skia", "flutter", "ui", "widget", "button", "layout", "css", "style",
       "animation", "render", "frontend", "component", "svelte", "react", "view",
@@ -297,6 +303,7 @@ export const DOMAIN = {
     critic: ["critic", "critique", "audit", "review", "gate", "quality"],
   },
   DEFAULT_MODELS: {
+    frontend: "gpt-5.2",
     ui: "gpt-5.2",
     backend: "gemini-3.1-pro",
     general: "gemini-3-flash",
@@ -305,6 +312,7 @@ export const DOMAIN = {
     critic: "claude-sonnet-4-6",
   },
   GLOW_COLORS: {
+    frontend: "rgba(0,255,255,0.5)",  // Cyan (alias for UI)
     ui: "rgba(0,255,255,0.5)",       // Cyan
     backend: "rgba(128,0,128,0.5)",  // Deep Purple
     general: "rgba(255,165,0,0.5)",  // Orange (Claude)

@@ -49,6 +49,7 @@
   let zenMode = $state(false);
   let inputRef = $state<HTMLTextAreaElement>();
   let projectFileInput = $state<HTMLInputElement>();
+  let projectFolderInput = $state<HTMLInputElement>();
   let openMenu = $state<'file' | 'edit' | 'view' | null>(null);
   let recentProjects = $state<RecentProject[]>([]);
 
@@ -441,6 +442,62 @@ Release notes
     }
   }
 
+  async function handleProjectFolderSelected(e: Event) {
+    const input = e.currentTarget as HTMLInputElement;
+    const files = input.files;
+    if (!files?.length) return;
+
+    try {
+      const MAX_TOTAL_CHARS = 16000;
+      const KEY_FILES = /^(README|readme|Readme)(\.(md|txt|rst))?$|^package\.json$|^package-lock\.json$|^Cargo\.toml$|^pyproject\.toml$|^go\.mod$|^\.env\.example$/i;
+      const entries: { path: string; file: File }[] = [];
+      for (let i = 0; i < files.length; i++) {
+        const file = files[i];
+        const path = (file as File & { webkitRelativePath?: string }).webkitRelativePath || file.name;
+        entries.push({ path, file });
+      }
+      const keyEntries = entries.filter((e) => KEY_FILES.test(e.path.split('/').pop() || ''));
+      const otherEntries = entries.filter((e) => !KEY_FILES.test(e.path.split('/').pop() || ''));
+
+      let total = 0;
+      const parts: string[] = [];
+
+      for (const { path, file } of keyEntries) {
+        if (total >= MAX_TOTAL_CHARS) break;
+        try {
+          const text = await file.text();
+          const slice = text.length + total > MAX_TOTAL_CHARS ? text.slice(0, MAX_TOTAL_CHARS - total) : text;
+          total += slice.length;
+          parts.push(`--- ${path} ---\n${slice}`);
+        } catch (_) {}
+      }
+
+      const maxList = 200;
+      const otherPaths = otherEntries.slice(0, maxList).map((e) => e.path);
+      if (otherEntries.length > maxList) {
+        otherPaths.push(`... and ${otherEntries.length - maxList} more files`);
+      }
+      if (otherPaths.length > 0) {
+        parts.push(`--- Project structure (${otherEntries.length} files) ---\n${otherPaths.join('\n')}`);
+      }
+
+      const folderName = entries[0]?.path.split('/')[0] || 'Folder';
+      const title = `Project: ${folderName}`.slice(0, 64);
+      const content = parts.join('\n\n');
+
+      await createProjectFromText(title, content || `Project folder: ${folderName} (${entries.length} files)`, {
+        source: 'file',
+        fileName: folderName,
+      });
+      toastStore.success(`Opened project from folder: ${folderName} (${entries.length} files)`);
+    } catch (err) {
+      console.error('Folder import failed', err);
+      toastStore.error('Failed to open project from folder');
+    } finally {
+      input.value = '';
+    }
+  }
+
   async function openRecentProject(id: string) {
     const found = recentProjects.find((p) => p.id === id);
     if (!found) {
@@ -531,6 +588,9 @@ Release notes
       case 'open_project_file':
         projectFileInput?.click();
         break;
+      case 'open_project_folder':
+        projectFolderInput?.click();
+        break;
       case 'save_snapshot':
         exportCurrentProjectSnapshot();
         break;
@@ -614,30 +674,23 @@ Release notes
 </script>
 
 <svelte:head>
-  <title>Koryphaios — AI Agent Orchestrator</title>
+  <title>{appStore.projectName ? `${appStore.projectName} — Koryphaios` : 'Koryphaios — AI Agent Orchestrator'}</title>
 </svelte:head>
 
 <div class="flex h-screen overflow-hidden" style="background: var(--color-surface-0);">
-  {#if appStore.backendUnreachable}
-    <div
-      class="absolute inset-x-0 top-0 z-50 flex flex-col items-center justify-center gap-2 px-4 py-3 text-sm text-center"
-      style="background: var(--color-error, #ef4444); color: white;"
-    >
-      <span>Backend not running. From the project root run:</span>
-      <code class="rounded bg-black/20 px-2 py-1 font-mono">bun run dev</code>
-      <span class="text-xs opacity-90">Then open the URL the command prints (e.g. http://localhost:5173 or another port).</span>
-    </div>
-  {/if}
   <!-- Sidebar -->
   {#if showSidebar}
     <div class="w-60 min-w-[200px] max-w-[320px] shrink-0 border-r flex flex-col" style="border-color: var(--color-border); background: var(--color-surface-1);">
-      <!-- Logo -->
+      <!-- Logo + project -->
       <div class="flex items-center justify-between px-4 h-12 border-b shrink-0" style="border-color: var(--color-border);">
-        <div class="flex items-center gap-2.5">
-          <div class="w-7 h-7 rounded-lg bg-gradient-to-br from-yellow-400 to-amber-600 flex items-center justify-center text-xs font-bold" style="color: var(--color-surface-0);">K</div>
-          <div class="flex flex-col justify-center">
+        <div class="flex items-center gap-2.5 min-w-0">
+          <div class="w-7 h-7 rounded-lg bg-gradient-to-br from-yellow-400 to-amber-600 flex items-center justify-center text-xs font-bold shrink-0" style="color: var(--color-surface-0);">K</div>
+          <div class="flex flex-col justify-center min-w-0">
             <h1 class="text-sm font-semibold leading-tight" style="color: var(--color-text-primary);">Koryphaios</h1>
             <p class="text-[10px] leading-tight mt-0.5" style="color: var(--color-text-muted);">v0.1.0</p>
+            {#if appStore.projectName}
+              <p class="text-[10px] leading-tight truncate mt-0.5" style="color: var(--color-text-muted);" title={appStore.projectName}>{appStore.projectName}</p>
+            {/if}
           </div>
         </div>
         <button
@@ -652,7 +705,6 @@ Release notes
       <div class="flex-1 overflow-hidden">
         <SessionSidebar 
           currentSessionId={sessionStore.activeSessionId} 
-          onNewSession={() => inputRef?.focus()}
         />
       </div>
       <!-- Sidebar footer -->
@@ -705,6 +757,7 @@ Release notes
                 <div class="absolute left-0 top-8 z-30 min-w-[260px] rounded-lg border p-1" style="background: var(--color-surface-2); border-color: var(--color-border);">
                   <button class="w-full text-left px-2.5 py-1.5 text-xs rounded-md hover:bg-[var(--color-surface-3)]" style="color: var(--color-text-primary);" onclick={() => handleMenuAction('new_project')}>New Project</button>
                   <button class="w-full text-left px-2.5 py-1.5 text-xs rounded-md hover:bg-[var(--color-surface-3)]" style="color: var(--color-text-primary);" onclick={() => handleMenuAction('open_project_file')}>Open Project From File...</button>
+                  <button class="w-full text-left px-2.5 py-1.5 text-xs rounded-md hover:bg-[var(--color-surface-3)]" style="color: var(--color-text-primary);" onclick={() => handleMenuAction('open_project_folder')}>Open Project From Folder...</button>
                   <div class="h-px my-1" style="background: var(--color-border);"></div>
                   <div class="px-2.5 py-1.5 text-[10px] uppercase tracking-wider" style="color: var(--color-text-muted);">Recent projects</div>
                   {#if recentProjects.length > 0}
@@ -769,6 +822,19 @@ Release notes
               {/if}
             </div>
           </div>
+
+          {#if appStore.projectName}
+            <span class="flex items-center gap-2 min-w-0 max-w-[240px]">
+              <span class="shrink-0 text-[11px]" style="color: var(--color-text-muted);" aria-hidden="true">|</span>
+              <span
+                class="truncate text-xs font-medium"
+                style="color: var(--color-text-secondary);"
+                title={appStore.projectName}
+              >
+                {appStore.projectName}
+              </span>
+            </span>
+          {/if}
 
           {#if wsStore.koryPhase}
             <div class="flex items-center gap-2 px-2.5 py-1.5 rounded-lg" style="background: var(--color-surface-2);">
@@ -854,6 +920,14 @@ Release notes
       accept=".txt,.md,.json,.yaml,.yml,.toml,.csv"
       onchange={handleProjectFileSelected}
     />
+    <input
+      bind:this={projectFolderInput}
+      type="file"
+      class="hidden"
+      webkitdirectory
+      multiple
+      onchange={handleProjectFolderSelected}
+    />
 
     <!-- Agent cards (collapsible) -->
     {#if !zenMode && showAgents && activeAgents.length > 0}
@@ -877,17 +951,16 @@ Release notes
     </div>
 
     <!-- Context window usage -->
-    {#if wsStore.contextUsage.status !== 'unknown'}
+    {#if wsStore.contextUsage.isReliable}
       <div class="shrink-0 px-4 py-1.5 flex items-center gap-3" style="border-top: 1px solid var(--color-border); background: var(--color-surface-1);">
         <span class="text-[10px] shrink-0" style="color: var(--color-text-muted);">
-          {wsStore.contextUsage.label}
+          Context
         </span>
         <div class="flex-1 h-1.5 rounded-full overflow-hidden" style="background: var(--color-surface-3);">
           <div
             class="h-full rounded-full transition-all duration-500"
             style="width: {wsStore.contextUsage.percent}%; background: {
-              wsStore.contextUsage.status === 'multi_agent' ? 'var(--color-text-muted)' :
-              wsStore.contextUsage.percent > 85 ? '#ef4444' : 
+              wsStore.contextUsage.percent > 85 ? '#ef4444' :
               wsStore.contextUsage.percent > 65 ? '#f59e0b' : 
               'var(--color-accent)'
             };"
@@ -906,7 +979,6 @@ Release notes
       <CommandInput
         bind:inputRef
         onSend={handleSend}
-        onCommand={handleSlashCommand}
       />
     </div>
   </div>

@@ -18,6 +18,8 @@ export const authStore = {
   get user() { return user; },
   get isInitialized() { return isInitialized; },
   get isAuthenticated() { return !!user; },
+  /** Present when using API-key auth; undefined for local/cookie auth. */
+  get token() { return undefined as string | undefined; },
 
   /** Returns true if backend responded (even with no user), false if backend unreachable (5xx or network error). */
   async initialize(): Promise<boolean> {

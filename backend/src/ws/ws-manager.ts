@@ -4,7 +4,8 @@ import { serverLog } from "../logger";
 
 interface WSClientData {
   id: string;
-  sessionId: string;
+  sessionId?: string;
+  userId?: string;
 }
 
 interface WSClient {

@@ -1,6 +1,13 @@
 <script lang="ts">
     // Error Boundary Component - catches and displays errors gracefully
     import { onMount } from 'svelte';
+    import type { Snippet } from 'svelte';
+
+    interface Props {
+      children?: Snippet;
+    }
+
+    let { children }: Props = $props();
 
     let error: Error | null = $state(null);
     let errorStack: string | null = $state(null);
@@ -18,7 +25,7 @@
     // Handle unhandled promise rejections
     function handleRejection(event: PromiseRejectionEvent) {
         error = event.reason instanceof Error ? event.reason : new Error(String(event.reason));
-        errorStack = error.stack;
+        errorStack = error.stack ?? null;
         console.error('Unhandled rejection caught by boundary:', event.reason);
         
         event.preventDefault();
@@ -51,7 +58,7 @@
     }
 </script>
 
-<slot />
+{@render children?.()}
 
 {#if error}
     <div class="error-boundary" role="alert">

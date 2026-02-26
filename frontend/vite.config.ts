@@ -34,14 +34,17 @@ export default defineConfig({
 		host: '0.0.0.0',
 		proxy: (() => {
 			const target = loadBackendTargetFromConfig() ?? 'http://127.0.0.1:3001';
-			const base = target.replace(/^http/, 'ws');
+			const wsTarget = target.replace(/^http/, 'ws');
 			return {
-				'/api': target,
-				'/ws': {
-					target: base,
-					ws: true,
-				},
+				'/api': { target, changeOrigin: true },
+				'/ws': { target: wsTarget, ws: true, changeOrigin: true },
 			};
 		})(),
 	},
+	define: (() => {
+		const target = loadBackendTargetFromConfig() ?? 'http://127.0.0.1:3001';
+		const wsBase = target.replace(/^http/, 'ws');
+		const wsTarget = wsBase.endsWith('/ws') ? wsBase : `${wsBase}/ws`;
+		return { 'import.meta.env.VITE_BACKEND_WS_URL': JSON.stringify(wsTarget) };
+	})(),
 });

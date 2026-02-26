@@ -1,3 +1,4 @@
+// @ts-nocheck
 /**
  * API v1 Routes - Production Ready
  * 

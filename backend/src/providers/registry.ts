@@ -17,6 +17,7 @@ import { OpenAIProvider, GroqProvider, OpenRouterProvider, XAIProvider, AzurePro
 import { GeminiProvider, GeminiCLIProvider } from "./gemini";
 import { CopilotProvider, exchangeGitHubTokenForCopilotAsync } from "./copilot";
 import { ClineProvider } from "./cline";
+import { CodexProvider } from "./codex";
 
 import { decryptApiKey, secureDecrypt, isUsingSecureEncryption } from "../security";
 import { resolveModel, getModelsForProvider, isLegacyModel, type StreamRequest, type ProviderEvent, type Provider } from "./types";
@@ -123,6 +124,16 @@ const OPENCODE_DEFAULT_BASE_URL: Partial<Record<ProviderName, string>> = {
 };
 const LLAMACPP_DEFAULT = "http://127.0.0.1:8080/v1";
 const LMSTUDIO_DEFAULT = "http://localhost:1234/v1";
+
+/** Placeholder/hint for the base URL input in the UI. Backend is the single source of truth; frontend uses this instead of hardcoding. */
+const BASE_URL_PLACEHOLDERS: Partial<Record<ProviderName, string>> = {
+  zai: "https://api.z.ai/api/paas/v4 (Standard) or .../api/coding/paas/v4 (Coding Plan) or https://open.bigmodel.cn/api/paas/v4 (China)",
+  azure: "https://YOUR_RESOURCE.cognitiveservices.azure.com",
+  local: "http://localhost:1234/v1 (or your local server)",
+  ollama: "http://localhost:11434",
+  llamacpp: "http://127.0.0.1:8080/v1",
+  lmstudio: "http://localhost:1234/v1",
+};
 
 export const PROVIDER_AUTH_MODE: Record<ProviderName, ProviderAuthMode> = {
   anthropic: "api_key",
@@ -261,6 +272,8 @@ class ProviderRegistry {
     circuitOpen: boolean;
     error?: string;
     extraAuthModes?: Array<{ id: string; label: string; description?: string }>;
+    /** Placeholder for base URL input; backend is single source of truth so UI does not hardcode endpoints. */
+    baseUrlPlaceholder?: string;
   }> {
     const names = Object.keys(PROVIDER_AUTH_MODE) as ProviderName[];
     const result: Array<{
@@ -278,6 +291,7 @@ class ProviderRegistry {
       circuitOpen: boolean;
       error?: string;
       extraAuthModes?: Array<{ id: string; label: string; description?: string }>;
+      baseUrlPlaceholder?: string;
     }> = [];
 
     for (const name of names) {
@@ -316,6 +330,11 @@ class ProviderRegistry {
           ]
         : undefined;
 
+      const requiresBaseUrl = authMode === "base_url_only" || name === "azure" || name === "zai";
+      const baseUrlPlaceholder: string | undefined = requiresBaseUrl
+        ? (BASE_URL_PLACEHOLDERS[name] ?? OPENCODE_DEFAULT_BASE_URL[name] ?? (name === "ollama" ? "http://localhost:11434" : name === "llamacpp" ? LLAMACPP_DEFAULT : name === "lmstudio" ? LMSTUDIO_DEFAULT : undefined))
+        : undefined;
+
       result.push({
         name,
         enabled: true,
@@ -327,9 +346,10 @@ class ProviderRegistry {
         authMode,
         supportsApiKey: authMode === "api_key" || authMode === "api_key_or_auth",
         supportsAuthToken: authMode === "api_key_or_auth",
-        requiresBaseUrl: authMode === "base_url_only" || name === "azure",
+        requiresBaseUrl,
         circuitOpen,
         ...(extraAuthModes && { extraAuthModes }),
+        ...(baseUrlPlaceholder && { baseUrlPlaceholder }),
       });
     }
 
@@ -600,13 +620,14 @@ class ProviderRegistry {
         case "vertexai":
           if (!apiKey) return { success: false, error: "Vertex AI requires an explicit API key (set GOOGLE_VERTEX_AI_API_KEY or add apiKey in settings)" };
           return { success: true };
+        case "codex": {
+          if (Bun.which("codex") === null) {
+            return { success: false, error: "codex CLI not found in PATH. Run: npm install -g codex (or install the Codex CLI)" };
+          }
+          return { success: true };
+        }
         case "cline": {
-          try {
-            const whichProc = Bun.spawnSync(["which", "cline"], { stdout: "pipe", stderr: "pipe" });
-            if (whichProc.exitCode !== 0) {
-              return { success: false, error: "cline CLI not found in PATH. Run: npm install -g cline" };
-            }
-          } catch {
+          if (Bun.which("cline") === null) {
             return { success: false, error: "cline CLI not found in PATH. Run: npm install -g cline" };
           }
           return { success: true };
@@ -641,7 +662,7 @@ class ProviderRegistry {
           return this.verifyHttp(`${trimmed}/openai/deployments`, { headers: { Authorization: `Bearer ${apiKey}` } });
         }
         case "zai": {
-          // Z.AI uses https://api.z.ai/api/paas/v4 and does not expose GET /models; verify via minimal chat request
+          // Z.AI: https://api.z.ai/api/paas/v4 (Standard) or .../api/coding/paas/v4 (Coding Plan) or open.bigmodel.cn (China)
           if (!apiKey) return { success: false, error: "Missing API key" };
           const base = baseUrl?.replace(/\/+$/, "") ?? "https://api.z.ai/api/paas/v4";
           return this.verifyHttp(`${base}/chat/completions`, {
@@ -651,7 +672,7 @@ class ProviderRegistry {
               Authorization: `Bearer ${apiKey}`,
             },
             body: JSON.stringify({
-              model: "glm-5",
+              model: "glm-4.5",
               messages: [{ role: "user", content: "Hi" }],
               max_tokens: 1,
             }),
@@ -679,7 +700,8 @@ class ProviderRegistry {
       const validation = this.validateCredentials(name, credentials, existing);
       if (!validation.success) return validation;
 
-      const resolvedAuthToken = credentials.authToken?.trim() ?? existing?.authToken ?? (name === "cline" ? this.detectEnvAuthToken("cline") : undefined);
+      const resolvedAuthTokenRaw = credentials.authToken?.trim() ?? existing?.authToken ?? (name === "cline" ? this.detectEnvAuthToken("cline") : undefined);
+      const resolvedAuthToken = resolvedAuthTokenRaw ?? undefined;
       const providerConfig: ProviderConfig = {
         name,
         apiKey: credentials.apiKey?.trim() ?? existing?.apiKey,
@@ -722,13 +744,12 @@ class ProviderRegistry {
     }
 
     if (authMode === "auth_only") {
+      // Cline / Codex: allow connect with no credentials; verification only checks CLI is in PATH.
+      if (name === "cline" || name === "codex") return { success: true };
       const clineEnvToken = name === "cline" ? this.detectEnvAuthToken("cline") : null;
       const hasAuth = !!(authToken || existing?.authToken) || (name === "copilot" && !!detectCopilotToken()) || !!clineEnvToken;
       if (!hasAuth) {
-        const msg = name === "cline"
-          ? "Cline requires CLI auth. Run `cline auth` in your terminal and ensure the backend is started from an environment where CLINE_AUTH_TOKEN is set."
-          : "authToken is required";
-        return { success: false, error: msg };
+        return { success: false, error: "authToken is required" };
       }
     }
 
@@ -868,12 +889,8 @@ class ProviderRegistry {
         return new CopilotProvider(config);
       case "cline":
         return new ClineProvider(config);
-      case "claude":
-        // TODO: Implement Claude Code CLI provider
-        return null;
       case "codex":
-        // TODO: Implement Codex CLI provider
-        return null;
+        return new CodexProvider(config);
       case "openrouter":
         return new OpenRouterProvider(config);
       case "groq":
@@ -1091,8 +1108,8 @@ class ProviderRegistry {
     try {
       const { getDb } = require("../db/sqlite");
       const row = getDb()
-        .query<{ provider: string }>("SELECT provider FROM provider_key_invalid WHERE provider = ?")
-        .get(name);
+        .query("SELECT provider FROM provider_key_invalid WHERE provider = ?")
+        .get(name) as { provider?: string } | undefined;
       return !!row;
     } catch {
       return false;
