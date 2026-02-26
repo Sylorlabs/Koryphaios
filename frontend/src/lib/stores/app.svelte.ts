@@ -3,12 +3,14 @@
 // Prevents race conditions where components call APIs before auth is ready
 
 import { browser } from '$app/environment';
+import { authStore } from './auth.svelte';
 
 interface AppState {
   authReady: boolean;
   authError: string | null;
   sessionsLoaded: boolean;
   backendUnreachable: boolean;
+  projectName: string;
 }
 
 let state = $state<AppState>({
@@ -16,6 +18,7 @@ let state = $state<AppState>({
   authError: null,
   sessionsLoaded: false,
   backendUnreachable: false,
+  projectName: '',
 });
 
 export const appStore = {
@@ -23,14 +26,15 @@ export const appStore = {
   get authError() { return state.authError; },
   get sessionsLoaded() { return state.sessionsLoaded; },
   get backendUnreachable() { return state.backendUnreachable; },
+  get projectName() { return state.projectName; },
   get isReady() { return state.authReady && state.sessionsLoaded; },
 
-  async initialize(authStore: any, sessionStore: any) {
+  async initialize(authStoreInit: any, sessionStore: any) {
     if (!browser) return;
     state.backendUnreachable = false;
 
     try {
-      const authOk = await authStore.initialize();
+      const authOk = await authStoreInit.initialize();
       state.authReady = true;
       state.authError = null;
       if (!authOk) state.backendUnreachable = true;
@@ -52,9 +56,23 @@ export const appStore = {
       state.sessionsLoaded = false;
       state.backendUnreachable = true;
     }
+
+    try {
+      if (state.authReady) {
+        const res = await fetch('/api/project', {
+          headers: authStore.token ? { Authorization: `Bearer ${authStore.token}` } : {},
+        });
+        if (res.ok) {
+          const json = await res.json();
+          state.projectName = json?.data?.projectName ?? '';
+        }
+      }
+    } catch {
+      state.projectName = '';
+    }
   },
 
   reset() {
-    state = { authReady: false, authError: null, sessionsLoaded: false, backendUnreachable: false };
+    state = { authReady: false, authError: null, sessionsLoaded: false, backendUnreachable: false, projectName: '' };
   },
 };

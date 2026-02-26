@@ -180,6 +180,16 @@ export class GeminiCLIProvider implements Provider {
       env: getSafeSubprocessEnv(),
     });
 
+    const GEMINI_STREAM_TIMEOUT_MS = 300_000; // 5 min
+    const killAndReap = (): void => {
+      try {
+        proc.kill();
+      } catch {
+        // already exited
+      }
+    };
+    const timeoutId = setTimeout(killAndReap, GEMINI_STREAM_TIMEOUT_MS);
+
     const reader = proc.stdout.getReader();
     const decoder = new TextDecoder();
 
@@ -190,12 +200,20 @@ export class GeminiCLIProvider implements Provider {
         const text = decoder.decode(value, { stream: true });
         if (text) yield { type: "content_delta", content: text };
       }
+      clearTimeout(timeoutId);
       yield { type: "complete", finishReason: "end_turn" };
     } catch (err: any) {
+      killAndReap();
       yield { type: "error", error: err.message ?? String(err) };
     } finally {
+      clearTimeout(timeoutId);
       reader.releaseLock();
-      proc.kill();
+      killAndReap();
+      try {
+        await Promise.race([proc.exited, new Promise((r) => setTimeout(r, 2000))]);
+      } catch {
+        // ignore
+      }
     }
   }
 }

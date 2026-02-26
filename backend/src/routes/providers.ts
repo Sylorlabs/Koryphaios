@@ -266,18 +266,20 @@ async function handleCliAuth(
     providers: any,
     wsManager: any
 ): Promise<Response> {
-    const cliName = authMode === "codex" ? "codex" : authMode === "claude_code" ? "claude" : "gcloud";
     const targetProvider = authMode === "codex" ? "codex" : authMode === "claude_code" ? "anthropic" : "google";
-
-    const whichProc = Bun.spawnSync(["which", cliName], { stdout: "pipe", stderr: "pipe" });
-    if (whichProc.exitCode !== 0) {
-        return json({ ok: false, error: `${cliName} CLI not found in PATH. Install it first.` }, 400);
+    // Antigravity is OAuth (no CLI). Others need the binary in PATH; use Bun.which for Windows.
+    if (authMode !== "antigravity") {
+        const cliName = authMode === "codex" ? "codex" : authMode === "claude_code" ? "claude" : "gcloud";
+        if (!Bun.which(cliName)) {
+            return json({ ok: false, error: `${cliName} CLI not found in PATH. Install it first.` }, 400);
+        }
     }
 
-    const authValue = authMode === "antigravity" ? "cli:antigravity" : `cli:${cliName}`;
+    const authValue = authMode === "antigravity" ? "cli:antigravity" : `cli:${authMode === "codex" ? "codex" : authMode === "claude_code" ? "claude" : "gcloud"}`;
     const verification = await providers.verifyConnection(targetProvider, { authToken: authValue });
     if (!verification.success) {
-        return json({ ok: false, error: verification.error || `${cliName} CLI auth failed` }, 400);
+        const msg = authMode === "antigravity" ? "Antigravity token not found or invalid" : (authMode === "codex" ? "codex" : authMode === "claude_code" ? "claude" : "gcloud") + " CLI auth failed";
+        return json({ ok: false, error: verification.error || msg }, 400);
     }
 
     const result = providers.setCredentials(targetProvider, { authToken: authValue });

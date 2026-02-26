@@ -4,7 +4,7 @@
   "private": true,
   "workspaces": ["backend", "frontend", "shared"],
   "scripts": {
-    "dev": "bash -lc 'trap \"kill 0\" EXIT; bun run dev:backend & bun run dev:frontend & wait'",
+    "dev": "bun run scripts/dev.ts",
     "dev:backend": "bun run --filter backend dev",
     "dev:frontend": "bun run --filter frontend dev",
     "build": "bun run --filter '*' build",

@@ -25,3 +25,6 @@ jobs:
 
       - name: Run strict checks
         run: bun run check
+
+      - name: Run backend tests
+        run: bun run test

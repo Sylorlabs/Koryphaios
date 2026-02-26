@@ -13,6 +13,8 @@ import { LocalModels } from "./local";
 import { OllamaModels } from "./ollama";
 import { OpenCodeZenModels } from "./opencodezen";
 import { ClineModels } from "./cline";
+import { CodexModels } from "./codex";
+import { ZAIModels } from "./newproviders";
 
 // Combined list of all known models from REAL providers only
 const ALL_MODELS: ModelDef[] = [
@@ -30,6 +32,8 @@ const ALL_MODELS: ModelDef[] = [
   ...OllamaModels,
   ...OpenCodeZenModels,
   ...ClineModels,
+  ...CodexModels,
+  ...ZAIModels,
 ];
 
 // Map for fast lookup by ID

@@ -62,7 +62,7 @@ export const ProviderName = {
   ZenMux: "zenmux",
 } as const;
 
-export type ProviderName = (typeof ProviderName)[keyof typeof ProviderName];
+export type ProviderName = (typeof ProviderName)[keyof typeof ProviderName] | string;
 
 export const IMPLEMENTED_PROVIDERS: ProviderName[] = [
   "anthropic",
@@ -123,13 +123,13 @@ export interface ModelDef {
   apiModelId?: string;
   contextWindow: number;
   maxOutputTokens: number;
-  costPerMInputTokens: number;
-  costPerMOutputTokens: number;
+  costPerMInputTokens?: number;
+  costPerMOutputTokens?: number;
   costPerMInputCached?: number;
   costPerMOutputCached?: number;
-  canReason: boolean;
-  supportsAttachments: boolean;
-  supportsStreaming: boolean;
+  canReason?: boolean;
+  supportsAttachments?: boolean;
+  supportsStreaming?: boolean;
   tier?: ModelTier;
   isGeneric?: boolean;
   /** Whether this model is deprecated and should not be used for new sessions */

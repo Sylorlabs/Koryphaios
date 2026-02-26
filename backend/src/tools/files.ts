@@ -6,6 +6,13 @@ import { join, relative, dirname, basename, resolve } from "path";
 import type { Tool, ToolContext, ToolCallInput, ToolCallOutput } from "./registry";
 import { validatePathAccess } from "../security";
 
+/** When sandboxed with no explicit allowed paths, allow the full project (working directory). */
+function getAllowedRoots(ctx: ToolContext): string[] {
+  if (!ctx.isSandboxed) return ["/"];
+  if (ctx.allowedPaths?.length) return ctx.allowedPaths;
+  return [resolve(ctx.workingDirectory)];
+}
+
 // ─── Read File ──────────────────────────────────────────────────────────────
 
 export class ReadFileTool implements Tool {
@@ -30,7 +37,7 @@ export class ReadFileTool implements Tool {
     };
 
     const absPath = filePath.startsWith("/") ? filePath : join(ctx.workingDirectory, filePath);
-    const allowedRoots = ctx.isSandboxed ? ctx.allowedPaths : ["/"];
+    const allowedRoots = getAllowedRoots(ctx);
     const access = validatePathAccess(absPath, allowedRoots);
 
     if (!access.allowed) {
@@ -85,7 +92,7 @@ export class WriteFileTool implements Tool {
   async run(ctx: ToolContext, call: ToolCallInput): Promise<ToolCallOutput> {
     const { path: filePath, content } = call.input as { path: string; content: string };
     const absPath = filePath.startsWith("/") ? filePath : join(ctx.workingDirectory, filePath);
-    const allowedRoots = ctx.isSandboxed ? ctx.allowedPaths : ["/"];
+    const allowedRoots = getAllowedRoots(ctx);
     const access = validatePathAccess(absPath, allowedRoots);
 
     if (!access.allowed) {
@@ -168,7 +175,7 @@ export class EditFileTool implements Tool {
       new_str: string;
     };
     const absPath = filePath.startsWith("/") ? filePath : join(ctx.workingDirectory, filePath);
-    const allowedRoots = ctx.isSandboxed ? ctx.allowedPaths : ["/"];
+    const allowedRoots = getAllowedRoots(ctx);
     const access = validatePathAccess(absPath, allowedRoots);
 
     if (!access.allowed) {
@@ -283,22 +290,39 @@ export class GrepTool implements Tool {
     args.push(`-m`, String(maxResults ?? 50));
     args.push(pattern, searchPath);
 
+    const SUBPROC_TIMEOUT_MS = 30_000;
     try {
       const proc = Bun.spawn(args, { stdout: "pipe", stderr: "pipe" });
-      const stdout = await new Response(proc.stdout).text();
-      const stderr = await new Response(proc.stderr).text();
-      const exitCode = await proc.exited;
-
-      if (exitCode === 1 && !stdout) {
-        return { callId: call.id, name: this.name, output: "No matches found.", isError: false, durationMs: 0 };
+      const timeoutId = setTimeout(() => {
+        try {
+          proc.kill();
+        } catch {
+          // already exited
+        }
+      }, SUBPROC_TIMEOUT_MS);
+      try {
+        const stdout = await new Response(proc.stdout).text();
+        const stderr = await new Response(proc.stderr).text();
+        const exitCode = await proc.exited;
+        clearTimeout(timeoutId);
+        if (exitCode === 1 && !stdout) {
+          return { callId: call.id, name: this.name, output: "No matches found.", isError: false, durationMs: 0 };
+        }
+        if (exitCode > 1) {
+          return { callId: call.id, name: this.name, output: `rg error: ${stderr}`, isError: true, durationMs: 0 };
+        }
+        return { callId: call.id, name: this.name, output: stdout.trim(), isError: false, durationMs: 0 };
+      } finally {
+        clearTimeout(timeoutId);
+        try {
+          proc.kill();
+        } catch {
+          // already exited
+        }
+        await Promise.race([proc.exited, new Promise((r) => setTimeout(r, 2000))]);
       }
-      if (exitCode > 1) {
-        return { callId: call.id, name: this.name, output: `rg error: ${stderr}`, isError: true, durationMs: 0 };
-      }
-
-      return { callId: call.id, name: this.name, output: stdout.trim(), isError: false, durationMs: 0 };
     } catch {
-      return { callId: call.id, name: this.name, output: "ripgrep (rg) not found. Install with: apt install ripgrep", isError: true, durationMs: 0 };
+      return { callId: call.id, name: this.name, output: "ripgrep (rg) not found or timed out. Install with: apt install ripgrep", isError: true, durationMs: 0 };
     }
   }
 }
@@ -369,7 +393,7 @@ export class LsTool implements Tool {
       : ctx.workingDirectory;
 
     // Check directory access (read-only is fine for ls, but still needs scope check)
-    const access = validatePathAccess(absPath, ctx.allowedPaths);
+    const access = validatePathAccess(absPath, getAllowedRoots(ctx));
     if (!access.allowed) {
       return { callId: call.id, name: this.name, output: `Error: Access denied. ${access.reason}`, isError: true, durationMs: 0 };
     }
@@ -426,7 +450,7 @@ export class DeleteFileTool implements Tool {
   async run(ctx: ToolContext, call: ToolCallInput): Promise<ToolCallOutput> {
     const { path: filePath } = call.input as { path: string };
     const absPath = filePath.startsWith("/") ? filePath : join(ctx.workingDirectory, filePath);
-    const allowedRoots = ctx.isSandboxed ? ctx.allowedPaths : ["/"];
+    const allowedRoots = getAllowedRoots(ctx);
     const access = validatePathAccess(absPath, allowedRoots);
 
     if (!access.allowed) {
@@ -496,8 +520,8 @@ export class MoveFileTool implements Tool {
     const absSrc = source.startsWith("/") ? source : join(ctx.workingDirectory, source);
     const absDest = destination.startsWith("/") ? destination : join(ctx.workingDirectory, destination);
 
-    const accessSrc = validatePathAccess(absSrc, ctx.allowedPaths);
-    const accessDest = validatePathAccess(absDest, ctx.allowedPaths);
+    const accessSrc = validatePathAccess(absSrc, getAllowedRoots(ctx));
+    const accessDest = validatePathAccess(absDest, getAllowedRoots(ctx));
 
     if (!accessSrc.allowed || !accessDest.allowed) {
       return { 
@@ -566,7 +590,7 @@ export class DiffTool implements Tool {
 
     const absA = path_a.startsWith("/") ? path_a : join(ctx.workingDirectory, path_a);
     // Note: Diff is read-only, but still check scope for security
-    const accessA = validatePathAccess(absA, ctx.allowedPaths);
+    const accessA = validatePathAccess(absA, getAllowedRoots(ctx));
     if (!accessA.allowed) return { callId: call.id, name: this.name, output: `Access denied: ${accessA.reason}`, isError: true, durationMs: 0 };
 
 
@@ -578,7 +602,7 @@ export class DiffTool implements Tool {
       if (path_b) {
         // Diff two files using system diff
         const absB = path_b.startsWith("/") ? path_b : join(ctx.workingDirectory, path_b);
-        const accessB = validatePathAccess(absB, ctx.allowedPaths);
+        const accessB = validatePathAccess(absB, getAllowedRoots(ctx));
         if (!accessB.allowed) return { callId: call.id, name: this.name, output: `Access denied: ${accessB.reason}`, isError: true, durationMs: 0 };
 
         if (!existsSync(absB)) {
@@ -589,14 +613,31 @@ export class DiffTool implements Tool {
           stdout: "pipe",
           stderr: "pipe",
         });
-        const stdout = await new Response(proc.stdout).text();
-        const exitCode = await proc.exited;
-
-        if (exitCode === 0) {
-          return { callId: call.id, name: this.name, output: "Files are identical.", isError: false, durationMs: 0 };
+        const SUBPROC_TIMEOUT_MS = 15_000;
+        const timeoutId = setTimeout(() => {
+          try {
+            proc.kill();
+          } catch {
+            // already exited
+          }
+        }, SUBPROC_TIMEOUT_MS);
+        try {
+          const stdout = await new Response(proc.stdout).text();
+          const exitCode = await proc.exited;
+          clearTimeout(timeoutId);
+          if (exitCode === 0) {
+            return { callId: call.id, name: this.name, output: "Files are identical.", isError: false, durationMs: 0 };
+          }
+          return { callId: call.id, name: this.name, output: stdout, isError: false, durationMs: 0 };
+        } finally {
+          clearTimeout(timeoutId);
+          try {
+            proc.kill();
+          } catch {
+            // already exited
+          }
+          await Promise.race([proc.exited, new Promise((r) => setTimeout(r, 2000))]);
         }
-
-        return { callId: call.id, name: this.name, output: stdout, isError: false, durationMs: 0 };
       } else if (new_content !== undefined) {
         // Diff file content vs new content using a temp approach
         const oldContent = readFileSync(absA, "utf-8");
@@ -651,7 +692,7 @@ export class PatchTool implements Tool {
     };
 
     const absPath = filePath.startsWith("/") ? filePath : join(ctx.workingDirectory, filePath);
-    const allowedRoots = ctx.isSandboxed ? ctx.allowedPaths : ["/"];
+    const allowedRoots = getAllowedRoots(ctx);
     const access = validatePathAccess(absPath, allowedRoots);
 
     if (!access.allowed) {

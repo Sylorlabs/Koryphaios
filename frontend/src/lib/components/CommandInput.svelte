@@ -109,18 +109,34 @@
     lastSendAt = now;
     onSend(trimmed, selectedModel, reasoningLevel);
     input = '';
-    if (inputRef) inputRef.style.height = 'auto';
+    resizeToMin();
   }
 
   function stop() {
     onStop?.();
   }
 
+  const MIN_HEIGHT_PX = 52;
+  const MAX_HEIGHT_PX = 280;
+
+  function resizeToMin() {
+    if (!inputRef) return;
+    inputRef.style.height = 'auto';
+    inputRef.style.height = MIN_HEIGHT_PX + 'px';
+  }
+
   function autoResize() {
     if (!inputRef) return;
     inputRef.style.height = 'auto';
-    inputRef.style.height = Math.min(inputRef.scrollHeight, 200) + 'px';
+    const h = inputRef.scrollHeight;
+    inputRef.style.height = Math.max(MIN_HEIGHT_PX, Math.min(h, MAX_HEIGHT_PX)) + 'px';
   }
+
+  $effect(() => {
+    input; // track input so we resize when value changes (e.g. paste or programmatic set)
+    if (typeof requestAnimationFrame === 'undefined') return;
+    requestAnimationFrame(() => autoResize());
+  });
 
   function selectModel(value: string) {
     selectedModel = value;
@@ -268,7 +284,7 @@
       rows="1"
       class="input flex-1"
       class:yolo-active={wsStore.isYoloMode}
-      style="resize: none; min-height: 52px; max-height: 200px; font-size: 15px; padding: 14px 16px;"
+      style="resize: none; min-height: 52px; max-height: 280px; font-size: 15px; padding: 14px 16px; box-sizing: border-box;"
     ></textarea>
     <button
       onclick={isRunning ? stop : send}
