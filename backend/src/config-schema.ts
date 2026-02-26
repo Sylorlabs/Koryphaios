@@ -175,6 +175,21 @@ export function validateConfig(config: Partial<KoryphaiosConfig>): void {
     }
   }
 
+  if (config.safety) {
+    if (config.safety.maxTokensPerTurn !== undefined &&
+        (typeof config.safety.maxTokensPerTurn !== "number" || config.safety.maxTokensPerTurn < 1)) {
+      errors.push("safety.maxTokensPerTurn must be a positive number");
+    }
+    if (config.safety.maxFileSizeBytes !== undefined &&
+        (typeof config.safety.maxFileSizeBytes !== "number" || config.safety.maxFileSizeBytes < 1)) {
+      errors.push("safety.maxFileSizeBytes must be a positive number");
+    }
+    if (config.safety.toolExecutionTimeoutMs !== undefined &&
+        (typeof config.safety.toolExecutionTimeoutMs !== "number" || config.safety.toolExecutionTimeoutMs < 1000)) {
+      errors.push("safety.toolExecutionTimeoutMs must be at least 1000ms");
+    }
+  }
+
   if (errors.length > 0) {
     serverLog.error({ errors }, "Configuration validation failed");
     throw new ConfigError(

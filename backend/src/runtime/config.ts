@@ -64,6 +64,11 @@ export function loadConfig(projectRoot: string): KoryphaiosConfig {
     fallbacks: fileConfig.fallbacks ?? AGENT.DEFAULT_FALLBACKS,
     corsOrigins: mergeCorsOrigins(fileConfig.corsOrigins ?? [], process.env.CORS_ORIGINS),
     assignments: fileConfig.assignments,
+    safety: {
+      maxTokensPerTurn: fileConfig.safety?.maxTokensPerTurn ?? 4096,
+      maxFileSizeBytes: fileConfig.safety?.maxFileSizeBytes ?? 10_000_000,
+      toolExecutionTimeoutMs: fileConfig.safety?.toolExecutionTimeoutMs ?? 60_000,
+    },
     workspace: {
       worktreeLimit: fileConfig.workspace?.worktreeLimit ?? WORKSPACE.DEFAULT_WORKTREE_LIMIT,
       worktreeDir: fileConfig.workspace?.worktreeDir ?? WORKSPACE.DEFAULT_WORKTREE_DIR,

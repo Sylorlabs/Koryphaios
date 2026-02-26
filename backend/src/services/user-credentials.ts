@@ -46,6 +46,7 @@ export interface CreateCredentialInput {
   value: string;
   type: 'apiKey' | 'authToken' | 'baseUrl';
   expiresAt?: number;
+  metadata?: Record<string, any>;
 }
 
 export interface CredentialWithPlaintext extends UserCredential {
@@ -69,6 +70,46 @@ export class UserCredentialsService {
   constructor(encryption: PerUserKeyDerivation, db: any) {
     this.encryption = encryption;
     this.db = db;
+    this._initializeSchema();
+  }
+
+  private _initializeSchema(): void {
+    this.db.exec(`
+      CREATE TABLE IF NOT EXISTS user_credentials (
+        id TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL,
+        provider TEXT NOT NULL,
+        encrypted_credential TEXT NOT NULL,
+        type TEXT NOT NULL CHECK(type IN ('apiKey', 'authToken', 'baseUrl')),
+        is_active INTEGER DEFAULT 1,
+        created_at INTEGER NOT NULL,
+        last_used_at INTEGER,
+        expires_at INTEGER,
+        metadata TEXT,
+        FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+      )
+    `);
+    this.db.exec(`
+      CREATE TABLE IF NOT EXISTS credential_audit_log (
+        id TEXT PRIMARY KEY,
+        credential_id TEXT NOT NULL,
+        user_id TEXT NOT NULL,
+        action TEXT NOT NULL,
+        timestamp INTEGER NOT NULL,
+        ip TEXT,
+        user_agent TEXT,
+        success INTEGER NOT NULL,
+        error TEXT,
+        FOREIGN KEY(credential_id) REFERENCES user_credentials(id) ON DELETE CASCADE,
+        FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+      )
+    `);
+    this.db.exec(`CREATE INDEX IF NOT EXISTS idx_creds_user ON user_credentials(user_id)`);
+    this.db.exec(`CREATE INDEX IF NOT EXISTS idx_creds_provider ON user_credentials(user_id, provider)`);
+    this.db.exec(`CREATE INDEX IF NOT EXISTS idx_creds_active ON user_credentials(user_id, is_active)`);
+    this.db.exec(`CREATE INDEX IF NOT EXISTS idx_audit_credential ON credential_audit_log(credential_id)`);
+    this.db.exec(`CREATE INDEX IF NOT EXISTS idx_audit_user ON credential_audit_log(user_id)`);
+    this.db.exec(`CREATE INDEX IF NOT EXISTS idx_audit_timestamp ON credential_audit_log(timestamp)`);
   }
 
   /**
@@ -81,7 +122,7 @@ export class UserCredentialsService {
         id TEXT PRIMARY KEY,
         user_id TEXT NOT NULL,
         provider TEXT NOT NULL,
-        encrypted_value TEXT NOT NULL,
+        encrypted_credential TEXT NOT NULL,
         type TEXT NOT NULL CHECK(type IN ('apiKey', 'authToken', 'baseUrl')),
         is_active INTEGER DEFAULT 1,
         created_at INTEGER NOT NULL,
@@ -148,8 +189,8 @@ export class UserCredentialsService {
       // Store in database
       this.db.run(
         `INSERT INTO user_credentials 
-         (id, user_id, provider, encrypted_value, type, is_active, created_at, expires_at) 
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+         (id, user_id, provider, encrypted_credential, type, is_active, created_at, expires_at, metadata) 
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           credential.id,
           credential.userId,
@@ -159,6 +200,7 @@ export class UserCredentialsService {
           credential.isActive ? 1 : 0,
           credential.createdAt,
           credential.expiresAt || null,
+          input.metadata ? JSON.stringify(input.metadata) : null,
         ]
       );
 
@@ -449,13 +491,13 @@ export class UserCredentialsService {
       id: row.id,
       userId: row.user_id,
       provider: row.provider,
-      encryptedValue: row.encrypted_value,
+      encryptedValue: row.encrypted_credential,
       type: row.type,
       isActive: row.is_active === 1,
       createdAt: row.created_at,
       lastUsedAt: row.last_used_at,
       expiresAt: row.expires_at,
-      metadata: row.metadata,
+      metadata: row.metadata ? JSON.parse(row.metadata) : undefined,
     };
   }
 
@@ -489,27 +531,43 @@ export class UserCredentialsService {
       provider: input.provider,
       value: input.credential,
       type: 'apiKey',
+      metadata: input.metadata,
     });
     return result.id;
   }
 
   /**
-   * Alias for getCredential
+   * Alias for getCredential - also logs to external audit service
    */
-  async get(userId: string, credentialId: string, _reason: string): Promise<string | null> {
+  async get(userId: string, credentialId: string, reason: string): Promise<string | null> {
     const result = await this.getCredential(credentialId);
     if (!result) return null;
-    // Verify ownership
     if (result.userId !== userId) return null;
+
+    // Log to external audit service
+    try {
+      const { createAuditLogService } = require('./audit');
+      const auditSvc = createAuditLogService();
+      await auditSvc.log({
+        userId,
+        action: 'credential_access',
+        resourceType: 'credential',
+        resourceId: credentialId,
+        reason,
+        success: true,
+        timestamp: Date.now(),
+      });
+    } catch { /* non-critical */ }
+
     return result.plaintext;
   }
 
   /**
-   * Get credential metadata (without plaintext)
+   * Get credential metadata (without plaintext) - active credentials only
    */
   async getMetadata(userId: string, credentialId: string): Promise<UserCredential | null> {
     const row = this.db
-      .prepare('SELECT * FROM user_credentials WHERE id = ? AND user_id = ?')
+      .prepare('SELECT * FROM user_credentials WHERE id = ? AND user_id = ? AND is_active = 1')
       .get(credentialId, userId) as any;
     
     if (!row) return null;
@@ -584,7 +642,7 @@ export class UserCredentialsService {
   }
 
   private generateId(): string {
-    return `${Date.now()}-${Math.random().toString(36).substring(2, 11)}`;
+    return `cred_${Date.now()}-${Math.random().toString(36).substring(2, 11)}`;
   }
 }
 
@@ -595,7 +653,10 @@ export function createUserCredentialsService(): UserCredentialsService {
   if (!credentialsServiceInstance) {
     const { PerUserKeyDerivation } = require('../crypto/per-user');
     const { LocalKMSProvider } = require('../crypto/providers');
-    const kms = new LocalKMSProvider({ suppressWarning: true });
+    const { join } = require('path');
+    const { homedir } = require('os');
+    const dataDir = join(homedir(), '.koryphaios', 'kms');
+    const kms = new LocalKMSProvider({ dataDir, suppressWarning: true });
     const encryption = new PerUserKeyDerivation(kms);
     credentialsServiceInstance = new UserCredentialsService(encryption, getDb());
   }

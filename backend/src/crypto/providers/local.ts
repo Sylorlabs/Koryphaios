@@ -82,7 +82,7 @@ export class LocalKMSProvider implements KMSProvider {
 
   async generateDek(): Promise<{ plaintext: Buffer; encrypted: string }> {
     if (!this.masterKey) {
-      throw new Error('Master key not initialized');
+      await this.initialize();
     }
 
     // Generate random DEK
@@ -158,6 +158,25 @@ export class LocalKMSProvider implements KMSProvider {
 
   async healthCheck(): Promise<boolean> {
     return this.masterKey !== null && this.keyData !== null;
+  }
+
+  supportsPerUserKeys(): boolean {
+    return true;
+  }
+
+  async generatePerUserDek(derivationInput: string): Promise<{ plaintext: Buffer; encrypted: string }> {
+    if (!this.masterKey) {
+      await this.initialize();
+    }
+    const { createHmac, randomBytes, createCipheriv } = await import('node:crypto');
+    // Derive a deterministic user key from master key + derivationInput
+    const userKey = createHmac('sha256', this.masterKey).update(derivationInput).digest();
+    // Encrypt the derived key for storage (using master key as KEK)
+    const iv = randomBytes(16);
+    const cipher = createCipheriv('aes-256-cbc', this.masterKey, iv);
+    const enc = Buffer.concat([cipher.update(userKey), cipher.final()]);
+    const encrypted = Buffer.concat([iv, enc]).toString('base64');
+    return { plaintext: userKey, encrypted };
   }
 
   /**
