@@ -736,7 +736,7 @@ const DEFAULT_REASONING_RULES: ReasoningRule[] = [
   // Claude Opus 4.6 in Copilot supports extended thinking with max effort
   {
     provider: "copilot",
-    modelPattern: /claude-opus-4-6(?!-fast)/i,
+    modelPattern: /^claude-opus-4\.6$/i,
     config: {
       parameter: "thinking.effort",
       options: [REASONING_OPTIONS.low, REASONING_OPTIONS.medium, REASONING_OPTIONS.high, REASONING_OPTIONS.max],
@@ -756,7 +756,7 @@ const DEFAULT_REASONING_RULES: ReasoningRule[] = [
   // Claude Haiku 4.5 supports extended thinking with budget tokens
   {
     provider: "copilot",
-    modelPattern: /claude-haiku-4-5/i,
+    modelPattern: /claude-haiku-4\.5/i,
     config: {
       parameter: "thinkingConfig.thinkingBudget",
       options: [REASONING_OPTIONS.budget_0, REASONING_OPTIONS.budget_1024, REASONING_OPTIONS.budget_8192, REASONING_OPTIONS.budget_24576],
@@ -776,7 +776,7 @@ const DEFAULT_REASONING_RULES: ReasoningRule[] = [
   // Gemini 2.5 Pro in Copilot supports thinking budget
   {
     provider: "copilot",
-    modelPattern: /gemini-2-5-pro/i,
+    modelPattern: /gemini-2\.5-pro/i,
     config: {
       parameter: "thinkingConfig.thinkingBudget",
       options: [REASONING_OPTIONS.budget_0, REASONING_OPTIONS.budget_1024, REASONING_OPTIONS.budget_8192, REASONING_OPTIONS.budget_24576],
@@ -786,7 +786,7 @@ const DEFAULT_REASONING_RULES: ReasoningRule[] = [
   // GPT-5 base models (mini, 5.1, 5.2) support reasoning_effort
   {
     provider: "copilot",
-    modelPattern: /^gpt-5(\.[12]|mini)$/i,
+    modelPattern: /^gpt-5(\.([12])|-mini)$/i,
     config: {
       parameter: "reasoning.effort",
       options: [REASONING_OPTIONS.minimal, REASONING_OPTIONS.low, REASONING_OPTIONS.medium, REASONING_OPTIONS.high],
@@ -806,7 +806,7 @@ const DEFAULT_REASONING_RULES: ReasoningRule[] = [
   // Claude Opus 4.6 fast mode still supports thinking.effort (can dial down)
   {
     provider: "copilot",
-    modelPattern: /claude-opus-4\.6-fast/i,
+    modelPattern: /^claude-opus-4\.6-fast$/i,
     config: {
       parameter: "thinking.effort",
       options: [REASONING_OPTIONS.low, REASONING_OPTIONS.medium, REASONING_OPTIONS.high],
@@ -986,37 +986,37 @@ export function normalizeReasoningLevel(
       }
     }
 
-    // ─── OpenAI / Anthropic / Groq / Copilot (Effort-based) ──────────────────────────
-    if (["openai", "anthropic", "groq", "xai", "azure", "openrouter", "copilot"].includes(provider)) {
-      if (level === "none") return "none";
-      if (level === "xhigh") return "high"; // map xhigh to high for effort-based APIs
-      // Preserve low, medium, high, max (max is valid for Anthropic Opus 4.6 only)
-      return level;
-    }
-    
-    // ─── Copilot-specific handling for budget-based models (Gemini, Claude Haiku) ──────────────────────────
+    // ─── Copilot-specific handling for budget-based models (MUST come before general Copilot handling)
     if (provider === "copilot") {
-      // Gemini models in Copilot use budget-based thinking
-      if (model && /gemini-2-5-pro/i.test(model)) {
+      // Gemini 2.5 Pro uses budget-based thinking
+      if (model && /gemini-2\.5-pro/i.test(model)) {
         if (level === "none") return "0";
         if (level === "low") return "1024";
         if (level === "medium") return "8192";
         if (level === "high") return "24576";
         if (level === "xhigh") return "65536";
       }
-      // Gemini 3.x uses thinking levels
+      // Gemini 3.x uses thinking levels (not budget)
       if (model && /gemini-3/i.test(model)) {
         if (level === "none") return "low"; // Minimum for Gemini 3
         if (["low", "medium", "high", "xhigh"].includes(level)) return level === "xhigh" ? "high" : level;
       }
       // Claude Haiku 4.5 uses budget tokens
-      if (model && /claude-haiku-4-5/i.test(model)) {
+      if (model && /claude-haiku-4\.5/i.test(model)) {
         if (level === "none") return "0";
         if (level === "low") return "1024";
         if (level === "medium") return "8192";
         if (level === "high") return "24576";
         if (level === "xhigh") return "24576"; // Max for Haiku
       }
+    }
+    
+    // ─── OpenAI / Anthropic / Groq / Copilot (Effort-based) ──────────────────────────
+    if (["openai", "anthropic", "groq", "xai", "azure", "openrouter", "copilot"].includes(provider)) {
+      if (level === "none") return "none";
+      if (level === "xhigh") return "high"; // map xhigh to high for effort-based APIs
+      // Preserve low, medium, high, max (max is valid for Anthropic Opus 4.6 only)
+      return level;
     }
   }
 

@@ -27,6 +27,7 @@
     entry, 
     isSelected, 
     isExpanded, 
+    isStreaming = false,
     onSelect, 
     onToggleGroup, 
     onDelete 
@@ -34,6 +35,7 @@
     entry: FeedEntryLocal;
     isSelected: boolean;
     isExpanded: boolean;
+    isStreaming?: boolean;
     onSelect: (e: MouseEvent) => void;
     onToggleGroup: () => void;
     onDelete: (e: MouseEvent) => void;
@@ -155,6 +157,9 @@
           <div class="{getEntryColor(entry.type)} break-words mt-1">
             {entry.text}
           </div>
+      {/if}
+      {#if isStreaming}
+        <span class="inline-block w-2 h-4 bg-accent ml-0.5 animate-pulse" aria-hidden="true"></span>
       {/if}
     </div>
 

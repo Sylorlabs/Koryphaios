@@ -31,6 +31,7 @@
 </svelte:head>
 
 <div class="layout-root">
+	<a href="#main-content" class="skip-link">Skip to main content</a>
 	{#if isOffline}
 		<div class="offline-banner" role="alert">
 			You are offline. Changes may not be saved.
@@ -42,7 +43,7 @@
 			<span>Loading Koryphaios…</span>
 		</div>
 	{/if}
-	<main>
+	<main id="main-content">
 		{@render children()}
 	</main>
 </div>

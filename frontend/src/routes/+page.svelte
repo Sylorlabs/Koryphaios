@@ -54,7 +54,7 @@
   const LAYOUT_PREFS_KEY = 'koryphaios-layout-prefs';
 
   onMount(() => {
-    theme.init();
+    const cleanupTheme = theme.init();
     appStore.initialize(authStore, sessionStore).then(() => {
       wsStore.connect();
     });
@@ -63,6 +63,7 @@
 
     window.addEventListener('keydown', handleGlobalKeydown);
     return () => {
+      cleanupTheme?.();
       wsStore.disconnect();
       window.removeEventListener('keydown', handleGlobalKeydown);
     };
@@ -494,6 +495,10 @@
         {#each activeAgents as agent (agent.identity.id)}
           <WorkerCard {agent} />
         {/each}
+      </div>
+    {:else if !zenMode && showAgents}
+      <div class="px-4 py-2 border-b flex items-center justify-center shrink-0" style="border-color: var(--color-border); background: var(--color-surface-1);">
+        <span class="text-xs opacity-40" style="color: var(--color-text-muted);">No agents running</span>
       </div>
     {/if}
 

@@ -1,6 +1,6 @@
 // Security module — bash sandboxing, input validation, key encryption, SSRF prevention.
 
-import { randomBytes } from "node:crypto";
+import { randomBytes, timingSafeEqual } from "node:crypto";
 import { mkdirSync, writeFileSync, realpathSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { toolLog } from "./logger";
@@ -514,6 +514,30 @@ export class RateLimiter {
     clearInterval(this.pruneTimer);
     this.hits.clear();
   }
+}
+
+// ─── Secure Token Generation ─────────────────────────────────────────────────
+
+// ─── CSRF Protection (double-submit cookie) ──────────────────────────────────
+export function generateCsrfToken(): string {
+  return randomBytes(32).toString('hex');
+}
+
+export function validateCsrfToken(cookieToken: string | null, headerToken: string | null): boolean {
+  if (!cookieToken || !headerToken) return false;
+  if (cookieToken.length !== headerToken.length) return false;
+  try {
+    return timingSafeEqual(Buffer.from(cookieToken, 'hex'), Buffer.from(headerToken, 'hex'));
+  } catch {
+    return false;
+  }
+}
+
+export function buildCsrfCookie(token: string, isSecure: boolean): string {
+  const parts = [`kory_csrf=${token}`, 'Path=/', 'SameSite=Strict'];
+  if (isSecure) parts.push('Secure');
+  // NOT HttpOnly — JS needs to read this to send as header
+  return parts.join('; ');
 }
 
 // ─── Secure Token Generation ─────────────────────────────────────────────────

@@ -14,7 +14,7 @@ import {
 } from "../auth";
 import { requireAuth, SESSION_COOKIE_NAME, REFRESH_COOKIE_NAME } from "../middleware";
 import { authLog } from "../logger";
-import { sanitizeString, RateLimiter } from "../security";
+import { sanitizeString, RateLimiter, generateCsrfToken, buildCsrfCookie } from "../security";
 
 const registerLimiter = new RateLimiter(5, 60_000 * 15);
 const refreshLimiter = new RateLimiter(30, 60_000);
@@ -192,6 +192,7 @@ export async function handleLogin(req: Request): Promise<Response> {
     });
     res.headers.append("Set-Cookie", buildSessionCookie(accessToken, req));
     res.headers.append("Set-Cookie", buildRefreshCookie(refreshToken, req));
+    res.headers.append("Set-Cookie", buildCsrfCookie(generateCsrfToken(), isSecureRequest(req)));
     return res;
   } catch (err: any) {
     authLog.error({ err }, "Login error");

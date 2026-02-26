@@ -83,12 +83,13 @@ describe("Session Token Authentication", () => {
       expect(extracted).toBe(token);
     });
 
-    test("extracts from query parameter", () => {
+    test("does NOT extract from query parameter (security: tokens must be in headers)", () => {
       const token = "test-token-789";
       const req = new Request(`http://localhost/ws?token=${token}`);
 
+      // Query-string tokens are no longer accepted — they appear in logs/history
       const extracted = extractTokenFromRequest(req);
-      expect(extracted).toBe(token);
+      expect(extracted).toBeNull();
     });
 
     test("returns null when no token present", () => {

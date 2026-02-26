@@ -3,7 +3,7 @@
   import { sessionStore } from '$lib/stores/sessions.svelte';
   import { wsStore } from '$lib/stores/websocket.svelte';
   import { toastStore } from '$lib/stores/toast.svelte';
-  import { Plus, Search, Pencil, Trash2, Check, X, MessageSquare } from 'lucide-svelte';
+  import { Plus, Search, Pencil, Trash2, Check, X, MessageSquare, LoaderCircle } from 'lucide-svelte';
   import AnimatedStatusIcon from './AnimatedStatusIcon.svelte';
   import ConfirmDialog from './ConfirmDialog.svelte';
 
@@ -15,9 +15,11 @@
 
   let editingId = $state<string>('');
   let editTitle = $state<string>('');
+  let editError = $state<boolean>(false);
   let confirmDeleteId = $state<string>('');
   let showConfirmDialog = $state<boolean>(false);
   let sessionToDeleteId = $state<string>('');
+  let creating = $state(false);
   // Track which session we last loaded feed for, so we load when active changes (e.g. new session from +)
   let lastLoadedSessionId = $state<string>('');
 
@@ -56,6 +58,10 @@
   function saveRename(id: string) {
     if (editTitle.trim()) {
       sessionStore.renameSession(id, editTitle.trim());
+      editError = false;
+    } else {
+      editError = true;
+      return;
     }
     editingId = '';
   }
@@ -63,6 +69,7 @@
   function cancelRename() {
     editingId = '';
     editTitle = '';
+    editError = false;
   }
 
   function confirmDelete(e: MouseEvent, id: string) {
@@ -122,11 +129,16 @@
     <button
       class="p-1.5 rounded-lg transition-colors hover:bg-[var(--color-surface-3)] flex items-center justify-center"
       style="color: var(--color-text-secondary);"
-      onclick={() => sessionStore.createSession()}
+      disabled={creating}
+      onclick={async () => { creating = true; try { await sessionStore.createSession(); } finally { creating = false; } }}
       title="New session (Ctrl+N)"
       aria-label="New session"
     >
-      <Plus size={16} />
+      {#if creating}
+        <LoaderCircle size={16} class="animate-spin" />
+      {:else}
+        <Plus size={16} />
+      {/if}
     </button>
   </div>
 
@@ -161,22 +173,31 @@
             ondblclick={() => startRename(session.id, session.title)}
           >
             {#if editingId === session.id}
-              <div class="flex-1 flex items-center gap-1">
-                <input
-                  type="text"
-                  class="input text-xs h-6 flex-1"
-                  bind:value={editTitle}
-                  onkeydown={(e) => {
-                    if (e.key === 'Enter') saveRename(session.id);
-                    if (e.key === 'Escape') cancelRename();
-                  }}
-                />
-                <button class="p-0.5 rounded" style="color: var(--color-success);" onclick={(e) => { e.stopPropagation(); saveRename(session.id); }} aria-label="Save rename">
-                  <Check size={12} />
-                </button>
-                <button class="p-0.5 rounded" style="color: var(--color-text-muted);" onclick={(e) => { e.stopPropagation(); cancelRename(); }} aria-label="Cancel rename">
-                  <X size={12} />
-                </button>
+              <div class="flex-1 flex flex-col gap-0.5">
+                <div class="flex items-center gap-1">
+                  <input
+                    type="text"
+                    class="input text-xs h-6 flex-1 {editError ? 'border-red-500' : ''}"
+                    bind:value={editTitle}
+                    maxlength={80}
+                    oninput={() => { if (editTitle.trim()) editError = false; }}
+                    onkeydown={(e) => {
+                      if (e.key === 'Enter') saveRename(session.id);
+                      if (e.key === 'Escape') cancelRename();
+                    }}
+                  />
+                  <button class="p-0.5 rounded" style="color: var(--color-success);" onclick={(e) => { e.stopPropagation(); saveRename(session.id); }} aria-label="Save rename">
+                    <Check size={12} />
+                  </button>
+                  <button class="p-0.5 rounded" style="color: var(--color-text-muted);" onclick={(e) => { e.stopPropagation(); cancelRename(); }} aria-label="Cancel rename">
+                    <X size={12} />
+                  </button>
+                </div>
+                {#if editError}
+                  <span class="text-[10px] text-red-400 px-0.5">Name cannot be empty</span>
+                {:else}
+                  <span class="text-[10px] px-0.5" style="color: var(--color-text-muted);">{editTitle.length}/80</span>
+                {/if}
               </div>
             {:else}
               {#if sessionStore.activeSessionId === session.id && wsStore.managerStatus !== 'idle'}
