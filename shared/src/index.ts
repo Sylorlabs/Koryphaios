@@ -434,6 +434,15 @@ export interface KoryphaiosConfig {
   dataDirectory: string;
   /** Allowed CORS origins */
   corsOrigins?: string[];
+  /** Safety limits for tool execution and token budgets */
+  safety?: {
+    /** Maximum tokens per agent turn. @default 4096 */
+    maxTokensPerTurn?: number;
+    /** Maximum file size in bytes for file operations. @default 10_000_000 */
+    maxFileSizeBytes?: number;
+    /** Timeout in ms for tool execution. @default 60_000 */
+    toolExecutionTimeoutMs?: number;
+  };
   /** Workspace/Worktree configuration for parallel agent isolation */
   workspace?: {
     /** 

@@ -36,10 +36,18 @@ export class PerUserKeyDerivation {
   private pepper: string;
   private masterKey: Buffer | null = null;
 
-  constructor(config: PerUserEncryptionConfig) {
-    this.provider = config.provider;
-    this.context = config.context;
-    this.pepper = config.pepper || '';
+  constructor(configOrProvider: PerUserEncryptionConfig | KMSProvider) {
+    if ('generateDek' in configOrProvider) {
+      // Bare KMSProvider passed directly
+      this.provider = configOrProvider as KMSProvider;
+      this.context = 'default';
+      this.pepper = '';
+    } else {
+      const config = configOrProvider as PerUserEncryptionConfig;
+      this.provider = config.provider;
+      this.context = config.context;
+      this.pepper = config.pepper || '';
+    }
   }
 
   /**
@@ -50,6 +58,28 @@ export class PerUserKeyDerivation {
     // We use this as the HMAC key for per-user derivation
     const { plaintext } = await this.provider.generateDek();
     this.masterKey = plaintext;
+  }
+
+  /**
+   * Derive a user-specific key (async, uses provider's per-user DEK if available)
+   * Deterministic: same userId+context always produces same key
+   */
+  async deriveKey(userId: string, context?: { purpose?: string }): Promise<Buffer> {
+    const derivationInput = context?.purpose
+      ? `${userId}:${context.purpose}`
+      : userId;
+
+    // Use provider's per-user DEK method if available (deterministic)
+    if (typeof (this.provider as any).generatePerUserDek === 'function') {
+      const { plaintext } = await (this.provider as any).generatePerUserDek(derivationInput);
+      return plaintext;
+    }
+
+    // Fallback: use HMAC with master key
+    if (!this.masterKey) {
+      await this.initialize();
+    }
+    return this.deriveUserKey(derivationInput);
   }
 
   /**
@@ -72,6 +102,9 @@ export class PerUserKeyDerivation {
    * Returns both plaintext (for use) and encrypted (for storage)
    */
   async generateUserDek(userId: string): Promise<{ plaintext: Buffer; encrypted: string }> {
+    if (!this.masterKey) {
+      await this.initialize();
+    }
     const userKey = this.deriveUserKey(userId);
     
     // Generate random DEK
@@ -99,6 +132,9 @@ export class PerUserKeyDerivation {
    * Decrypt a user's Data Encryption Key
    */
   async decryptUserDek(userId: string, encryptedDek: string): Promise<Buffer> {
+    if (!this.masterKey) {
+      await this.initialize();
+    }
     const userKey = this.deriveUserKey(userId);
     
     try {
@@ -136,7 +172,6 @@ export class PerUserKeyDerivation {
     try {
       const { createCipheriv } = await import('node:crypto');
       
-      // Generate fresh key for this encryption
       const iv = randomBytes(16);
       const cipher = createCipheriv('aes-256-gcm', dek, iv);
       
@@ -147,13 +182,13 @@ export class PerUserKeyDerivation {
       
       const authTag = cipher.getAuthTag();
       
-      // Format: encryptedDek:iv:authTag:ciphertext
-      return [
+      // JSON envelope format with ciphertext key
+      return JSON.stringify({
         encryptedDek,
-        iv.toString('base64'),
-        authTag.toString('base64'),
-        encrypted.toString('base64'),
-      ].join(':');
+        iv: iv.toString('base64'),
+        authTag: authTag.toString('base64'),
+        ciphertext: encrypted.toString('base64'),
+      });
     } finally {
       dek.fill(0);
     }
@@ -163,12 +198,18 @@ export class PerUserKeyDerivation {
    * Decrypt data for a specific user
    */
   async decryptForUser(userId: string, ciphertext: string): Promise<string> {
-    const parts = ciphertext.split(':');
-    if (parts.length !== 4) {
-      throw new Error('Invalid ciphertext format');
+    let envelope: { encryptedDek: string; iv: string; authTag: string; ciphertext: string };
+    try {
+      envelope = JSON.parse(ciphertext);
+    } catch {
+      // Legacy colon-separated format
+      const parts = ciphertext.split(':');
+      if (parts.length !== 4) throw new Error('Invalid ciphertext format');
+      const [encryptedDek, iv, authTag, ct] = parts;
+      envelope = { encryptedDek, iv, authTag, ciphertext: ct };
     }
     
-    const [encryptedDek, ivB64, authTagB64, encryptedB64] = parts;
+    const { encryptedDek, iv: ivB64, authTag: authTagB64, ciphertext: encryptedB64 } = envelope;
     
     // Decrypt the DEK
     const dek = await this.decryptUserDek(userId, encryptedDek);

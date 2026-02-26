@@ -4,7 +4,7 @@
   import { wsStore } from '$lib/stores/websocket.svelte';
   import { Square, RotateCcw } from 'lucide-svelte';
   import { fade } from 'svelte/transition';
-  import { apiFetch } from '$lib/api';
+  import { apiFetch } from '$lib/api.svelte';
 
   interface AgentState {
     identity: AgentIdentity;

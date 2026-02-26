@@ -136,7 +136,7 @@ const BASE_URL_PLACEHOLDERS: Partial<Record<ProviderName, string>> = {
 };
 
 export const PROVIDER_AUTH_MODE: Record<ProviderName, ProviderAuthMode> = {
-  anthropic: "api_key",
+  anthropic: "api_key_or_auth",
   claude: "auth_only",
   cline: "auth_only",
   codex: "auth_only",

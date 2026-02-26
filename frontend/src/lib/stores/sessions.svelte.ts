@@ -5,7 +5,7 @@ import type { Session } from '@koryphaios/shared';
 import { toastStore } from './toast.svelte';
 import { authStore } from './auth.svelte';
 import { browser } from '$app/environment';
-import { friendlyHttpError } from '$lib/api';
+import { friendlyHttpError } from '$lib/api.svelte';
 
 let sessions = $state<Session[]>([]);
 let activeSessionId = $state<string>('');
