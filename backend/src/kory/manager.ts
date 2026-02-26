@@ -30,6 +30,7 @@ import type { ISessionStore } from "../stores/session-store";
 import type { IMessageStore } from "../stores/message-store";
 import { SnapshotManager } from "./snapshot-manager";
 import { GitManager } from "./git-manager";
+import { WorkspaceManager } from "./workspace-manager";
 import { parseCriticVerdict, formatMessagesForCritic as formatMessagesForCriticUtil } from "./critic-util";
 
 // ─── Default Model Assignments per Domain ───────────────────────────────────
@@ -189,6 +190,7 @@ export class KoryManager {
   private sessionChanges = new Map<string, ChangeSummary[]>();
   private snapshotManager: SnapshotManager;
   public readonly git: GitManager;
+  private workspaceManager: WorkspaceManager | null = null;
   private lastKnownGoodHash = new Map<string, string>();
   /** AbortController for the current manager run per session (so cancelSessionWorkers can abort manager too). */
   private managerAbortBySession = new Map<string, AbortController>();
@@ -205,6 +207,16 @@ export class KoryManager {
     mkdirSync(this.memoryDir, { recursive: true });
     this.snapshotManager = new SnapshotManager(workingDirectory);
     this.git = new GitManager(workingDirectory);
+
+    // Initialize WorkspaceManager if git is available
+    try {
+      if (this.git.isGitRepo()) {
+        this.workspaceManager = new WorkspaceManager(workingDirectory, config.workspace);
+        koryLog.info("WorkspaceManager initialized for parallel agent isolation");
+      }
+    } catch {
+      koryLog.warn("WorkspaceManager unavailable — workers will share the main directory");
+    }
   }
 
   setYoloMode(enabled: boolean) {
@@ -382,7 +394,42 @@ export class KoryManager {
     }
     this.updateWorkflowState(sessionId, "executing");
     const domainOverride = (domainHint && ["general", "ui", "backend", "test", "review"].includes(domainHint)) ? domainHint as WorkerDomain : undefined;
-    const result = await this.routeToWorker(sessionId, task, preferredModel, reasoningLevel, [this.workingDirectory], domainOverride);
+
+    // Attempt to spawn an isolated worktree for this worker task
+    const taskId = nanoid(12);
+    let workerDir = this.workingDirectory;
+    let worktreeSpawned = false;
+    if (this.workspaceManager) {
+      try {
+        const worktree = this.workspaceManager.spawn(taskId, task.slice(0, 60));
+        if (worktree) {
+          workerDir = worktree.path;
+          worktreeSpawned = true;
+          koryLog.info({ taskId, path: workerDir }, "Worker running in isolated worktree");
+        }
+      } catch (err: any) {
+        koryLog.warn({ err: err.message }, "Worktree spawn failed — using main directory");
+      }
+    }
+
+    const result = await this.routeToWorker(sessionId, task, preferredModel, reasoningLevel, [workerDir], domainOverride);
+
+    // Reconcile worktree changes back to main branch
+    if (worktreeSpawned && this.workspaceManager) {
+      try {
+        if (result.success) {
+          const reconcileResult = this.workspaceManager.reconcile(taskId);
+          if (!reconcileResult.success) {
+            koryLog.warn({ taskId, msg: reconcileResult.message }, "Worktree reconcile failed");
+          }
+        } else {
+          this.workspaceManager.cleanup(taskId);
+        }
+      } catch (err: any) {
+        koryLog.warn({ taskId, err: err.message }, "Worktree cleanup/reconcile error");
+      }
+    }
+
     this.updateWorkflowState(sessionId, "idle");
     if (result.success) {
       return result.criticFeedback ?? (result.workerTranscript ? "Worker completed. See transcript." : "Done.");
@@ -401,7 +448,7 @@ export class KoryManager {
       const hash = this.git.getCurrentHash();
       if (hash) this.lastKnownGoodHash.set(sessionId, hash);
     } else {
-      this.snapshotManager.createSnapshot(sessionId, "latest", effectivePaths, this.workingDirectory);
+      await this.snapshotManager.createSnapshot(sessionId, "latest", effectivePaths, this.workingDirectory);
     }
 
     let workerTask = await this.generateWorkerTask(sessionId, userMessage, domain, preferredModel);

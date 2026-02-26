@@ -238,11 +238,12 @@ function createThemeStore() {
     init() {
       if (!browser) return;
       applyToDOM();
-      if (preset === 'system') {
-        window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
-          if (preset === 'system') applyToDOM();
-        });
-      }
+      const mql = window.matchMedia('(prefers-color-scheme: dark)');
+      const handler = () => {
+        if (preset === 'system') applyToDOM();
+      };
+      mql.addEventListener('change', handler);
+      return () => mql.removeEventListener('change', handler);
     },
   };
 }

@@ -2,7 +2,6 @@
 // Supports connecting to MCP servers via stdio and SSE transports.
 // This allows Koryphaios to connect to external tool servers.
 
-import { spawn, type ChildProcess } from "child_process";
 import { mcpLog } from "../logger";
 import type { Tool, ToolCallInput, ToolContext, ToolCallOutput } from "../tools/registry";
 
@@ -51,7 +50,7 @@ interface MCPToolResult {
 // ─── MCP Client ─────────────────────────────────────────────────────────────
 
 export class MCPClient {
-  private process?: ChildProcess;
+  private process?: ReturnType<typeof Bun.spawn>;
   private requestId = 0;
   private pending = new Map<number, {
     resolve: (value: MCPResponse) => void;
@@ -83,25 +82,41 @@ export class MCPClient {
     const { command, args = [], env = {} } = this.config;
     if (!command) throw new Error(`MCP server ${this.serverName}: command is required for stdio transport`);
 
-    this.process = spawn(command, args, {
-      stdio: ["pipe", "pipe", "pipe"],
+    this.process = Bun.spawn([command, ...args], {
+      stdin: "pipe",
+      stdout: "pipe",
+      stderr: "pipe",
       env: { ...process.env, ...env },
     });
 
-    if (!this.process.stdout || !this.process.stdin) {
-      throw new Error(`MCP server ${this.serverName}: failed to open stdio pipes`);
-    }
+    // Read stdout asynchronously
+    const stdoutReader = (this.process.stdout as ReadableStream<Uint8Array>).getReader();
+    const decoder = new TextDecoder();
+    (async () => {
+      try {
+        while (true) {
+          const { done, value } = await stdoutReader.read();
+          if (done) break;
+          this.buffer += decoder.decode(value, { stream: true });
+          this.processBuffer();
+        }
+      } catch {}
+    })();
 
-    this.process.stdout.on("data", (data: Buffer) => {
-      this.buffer += data.toString();
-      this.processBuffer();
-    });
+    // Read stderr asynchronously
+    const stderrReader = (this.process.stderr as ReadableStream<Uint8Array>).getReader();
+    const stderrDecoder = new TextDecoder();
+    (async () => {
+      try {
+        while (true) {
+          const { done, value } = await stderrReader.read();
+          if (done) break;
+          mcpLog.error({ server: this.serverName, output: stderrDecoder.decode(value).trim() }, "MCP stderr");
+        }
+      } catch {}
+    })();
 
-    this.process.stderr?.on("data", (data: Buffer) => {
-      mcpLog.error({ server: this.serverName, output: data.toString().trim() }, "MCP stderr");
-    });
-
-    this.process.on("exit", (code) => {
+    this.process.exited.then((code) => {
       mcpLog.info({ server: this.serverName, code }, "MCP process exited");
       this.connected = false;
     });
@@ -221,7 +236,7 @@ export class MCPClient {
   async disconnect(): Promise<void> {
     this.connected = false;
     if (this.process) {
-      this.process.kill("SIGTERM");
+      this.process.kill();
       this.process = undefined;
     }
     this.pending.clear();
@@ -246,13 +261,17 @@ export class MCPClient {
         reject: (err) => { clearTimeout(timeout); reject(err); },
       });
 
-      this.process!.stdin!.write(JSON.stringify(request) + "\n");
+      (this.process!.stdin as any).write(JSON.stringify(request) + "\n");
+      (this.process!.stdin as any).flush();
     });
   }
 
   private notify(method: string, params: unknown): void {
     const notification = { jsonrpc: "2.0", method, params };
-    this.process?.stdin?.write(JSON.stringify(notification) + "\n");
+    if (this.process?.stdin) {
+      (this.process.stdin as any).write(JSON.stringify(notification) + "\n");
+      (this.process.stdin as any).flush();
+    }
   }
 
   private processBuffer(): void {
@@ -326,6 +345,7 @@ export class MCPToolWrapper implements Tool {
 // Manages multiple MCP server connections and registers their tools.
 
 import { ToolRegistry } from "../tools/registry";
+import { registerMCPToolsInRegistry } from "./tool-bridge";
 
 export class MCPManager {
   private clients = new Map<string, MCPClient>();
@@ -337,12 +357,8 @@ export class MCPManager {
       await client.connect();
       this.clients.set(config.name, client);
 
-      // Register all tools from this server
-      for (const toolDef of client.availableTools) {
-        const wrapper = new MCPToolWrapper(client, toolDef);
-        toolRegistry.register(wrapper);
-        mcpLog.info({ tool: wrapper.name }, "Registered MCP tool");
-      }
+      // Register all tools from this server via the tool bridge
+      await registerMCPToolsInRegistry(toolRegistry, client);
     } catch (err: any) {
       mcpLog.error({ server: config.name, err: err.message }, "Failed to connect MCP server");
     }

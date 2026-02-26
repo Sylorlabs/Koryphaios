@@ -7,6 +7,10 @@
     "google": {
       "name": "google",
       "disabled": true
+    },
+    "copilot": {
+      "name": "copilot",
+      "disabled": true
     }
   },
   "agents": {

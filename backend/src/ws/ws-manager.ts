@@ -16,6 +16,7 @@ interface WSClient {
 
 export class WSManager {
   private clients = new Map<string, WSClient>();
+  private readonly maxClients = 1000;
   private heartbeatInterval: Timer;
 
   constructor() {
@@ -24,6 +25,10 @@ export class WSManager {
   }
 
   add(ws: ServerWebSocket<WSClientData>) {
+    if (this.clients.size >= this.maxClients) {
+      ws.close(1013, "Max clients reached");
+      return;
+    }
     const id = ws.data.id;
     this.clients.set(id, { ws, subscribedSessions: new Set(), isAlive: true });
     serverLog.debug({ clientId: id, totalClients: this.clients.size }, "WebSocket client added");

@@ -51,7 +51,7 @@
       clearTimeout(timer);
       timer = setTimeout(() => {
         debouncedText = entry.text;
-      }, 100); // 100ms debounce
+      }, 32); // 32ms debounce for smoother streaming
     }
     return () => clearTimeout(timer);
   });

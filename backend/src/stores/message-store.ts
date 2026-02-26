@@ -3,7 +3,7 @@ import { getDb } from "../db/sqlite";
 
 export interface IMessageStore {
   add(sessionId: string, msg: StoredMessage): void;
-  getAll(sessionId: string): StoredMessage[];
+  getAll(sessionId: string, limit?: number): StoredMessage[];
   getRecent(sessionId: string, limit?: number): StoredMessage[];
 }
 
@@ -26,8 +26,8 @@ export class MessageStore implements IMessageStore {
     );
   }
 
-  getAll(sessionId: string): StoredMessage[] {
-    const rows = getDb().query("SELECT * FROM messages WHERE session_id = ? ORDER BY created_at ASC").all(sessionId) as any[];
+  getAll(sessionId: string, limit: number = 1000): StoredMessage[] {
+    const rows = getDb().query("SELECT * FROM messages WHERE session_id = ? ORDER BY created_at ASC LIMIT ?").all(sessionId, limit) as any[];
     return rows.map((row) => ({
       id: row.id,
       sessionId: row.session_id,

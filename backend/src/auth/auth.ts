@@ -13,9 +13,9 @@ const REFRESH_TOKEN_EXPIRY_SEC = 7 * 24 * 60 * 60;
 function getJwtSecret(): string {
   const secret = process.env.JWT_SECRET;
   if (process.env.NODE_ENV === "production") {
-    if (!secret || typeof secret !== "string" || secret.trim().length < 32) {
+    if (!secret || typeof secret !== "string" || secret.trim().length < 64) {
       throw new Error(
-        "JWT_SECRET must be set in production (min 32 characters). Set it in .env or environment."
+        "JWT_SECRET must be set in production (min 64 characters). Set it in .env or environment."
       );
     }
     return secret.trim();
@@ -173,8 +173,8 @@ export async function createUser(
   }
   
   // Validate password
-  if (password.length < 8) {
-    return { error: "Password must be at least 8 characters" };
+  if (password.length < 12 || !/[A-Z]/.test(password) || !/[a-z]/.test(password) || !/[0-9]/.test(password)) {
+    return { error: "Password must be at least 12 characters with uppercase, lowercase, and a digit" };
   }
   
   const id = generateToken(16);
@@ -336,8 +336,8 @@ export async function changePassword(
   oldPassword: string,
   newPassword: string
 ): Promise<{ success: boolean; error?: string }> {
-  if (newPassword.length < 8) {
-    return { success: false, error: "Password must be at least 8 characters" };
+  if (newPassword.length < 12 || !/[A-Z]/.test(newPassword) || !/[a-z]/.test(newPassword) || !/[0-9]/.test(newPassword)) {
+    return { success: false, error: "Password must be at least 12 characters with uppercase, lowercase, and a digit" };
   }
   
   const db = getDb();

@@ -38,3 +38,6 @@ Thumbs.db
 
 # Reference (excluded from repo)
 opencode-reference/
+
+# Koryphaios AI worktrees
+.trees/

@@ -1,4 +1,4 @@
-import { mkdirSync, copyFileSync, readFileSync, writeFileSync, existsSync, readdirSync, rmSync, statSync } from "node:fs";
+import { mkdirSync, copyFileSync, existsSync, readdirSync, rmSync, statSync } from "node:fs";
 import { join, relative, dirname } from "node:path";
 import { koryLog } from "../logger";
 
@@ -16,7 +16,7 @@ export class SnapshotManager {
    * Create a snapshot of specific files before they are modified.
    * We only backup files that are about to be touched or are in the allowed scope.
    */
-  createSnapshot(sessionId: string, snapshotId: string, filePaths: string[], workingDirectory: string): void {
+  async createSnapshot(sessionId: string, snapshotId: string, filePaths: string[], workingDirectory: string): Promise<void> {
     const snapshotDir = join(this.baseDir, sessionId, snapshotId);
     if (!existsSync(snapshotDir)) {
       mkdirSync(snapshotDir, { recursive: true });
@@ -35,7 +35,7 @@ export class SnapshotManager {
     }
 
     // Save a manifest of what was backed up
-    writeFileSync(join(snapshotDir, "manifest.json"), JSON.stringify({
+    await Bun.write(join(snapshotDir, "manifest.json"), JSON.stringify({
       timestamp: Date.now(),
       files: filePaths
     }));
@@ -88,12 +88,12 @@ export class SnapshotManager {
    * Restore only specific files from a snapshot.
    * Returns which files were restored and which were missing in snapshot backup.
    */
-  restoreFiles(
+  async restoreFiles(
     sessionId: string,
     snapshotId: string,
     workingDirectory: string,
     filePaths: string[],
-  ): { success: boolean; restored: string[]; missing: string[]; error?: string } {
+  ): Promise<{ success: boolean; restored: string[]; missing: string[]; error?: string }> {
     const snapshotDir = join(this.baseDir, sessionId, snapshotId);
     if (!existsSync(snapshotDir)) {
       return { success: false, restored: [], missing: filePaths, error: "Snapshot not found" };
@@ -105,7 +105,7 @@ export class SnapshotManager {
       for (const relPath of filePaths) {
         const normalized = relPath.replace(/^\/+/, "");
         const backupPath = join(snapshotDir, normalized);
-        if (!existsSync(backupPath)) {
+        if (!(await Bun.file(backupPath).exists())) {
           missing.push(relPath);
           continue;
         }
