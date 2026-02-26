@@ -5,12 +5,24 @@
 
 	let { children } = $props();
 	let showInitialLoad = $state(true);
+	let isOffline = $state(false);
 
 	onMount(() => {
 		import('$lib/utils/error-monitor').then((m) => m.initErrorMonitoring()).catch(() => {});
 		loadProvidersFromApi();
 		const t = setTimeout(() => { showInitialLoad = false; }, 1500);
-		return () => clearTimeout(t);
+
+		isOffline = !navigator.onLine;
+		const goOffline = () => { isOffline = true; };
+		const goOnline = () => { isOffline = false; };
+		window.addEventListener('offline', goOffline);
+		window.addEventListener('online', goOnline);
+
+		return () => {
+			clearTimeout(t);
+			window.removeEventListener('offline', goOffline);
+			window.removeEventListener('online', goOnline);
+		};
 	});
 </script>
 
@@ -19,13 +31,20 @@
 </svelte:head>
 
 <div class="layout-root">
+	{#if isOffline}
+		<div class="offline-banner" role="alert">
+			You are offline. Changes may not be saved.
+		</div>
+	{/if}
 	{#if showInitialLoad}
 		<div class="initial-load" aria-live="polite">
 			<div class="initial-load-dot"></div>
 			<span>Loading Koryphaios…</span>
 		</div>
 	{/if}
-	{@render children()}
+	<main>
+		{@render children()}
+	</main>
 </div>
 
 <style>
@@ -57,5 +76,16 @@
 	@keyframes pulse {
 		0%, 100% { opacity: 1; }
 		50% { opacity: 0.4; }
+	}
+	.offline-banner {
+		position: sticky;
+		top: 0;
+		z-index: 9999;
+		padding: 6px 16px;
+		text-align: center;
+		font-size: 13px;
+		font-weight: 500;
+		background: var(--color-warning);
+		color: #000;
 	}
 </style>

@@ -722,16 +722,129 @@ const DEFAULT_REASONING_RULES: ReasoningRule[] = [
     provider: "openrouter",
     config: null,
   },
-  { provider: "copilot", config: null },
+  // Copilot models with reasoning support
+  // GPT-5.1-Codex and GPT-5.2-Codex models support reasoning effort (low/medium/high/xhigh)
   {
     provider: "copilot",
-    modelPattern: /codex/i,
+    modelPattern: /gpt-5\.[12]-codex/i,
     config: {
       parameter: "reasoning.effort",
-      options: [REASONING_OPTIONS.adaptive, REASONING_OPTIONS.none, REASONING_OPTIONS.low, REASONING_OPTIONS.medium, REASONING_OPTIONS.high],
-      defaultValue: "adaptive",
+      options: [REASONING_OPTIONS.none, REASONING_OPTIONS.low, REASONING_OPTIONS.medium, REASONING_OPTIONS.high, REASONING_OPTIONS.xhigh],
+      defaultValue: "medium",
     },
   },
+  // Claude Opus 4.6 in Copilot supports extended thinking with max effort
+  {
+    provider: "copilot",
+    modelPattern: /claude-opus-4-6(?!-fast)/i,
+    config: {
+      parameter: "thinking.effort",
+      options: [REASONING_OPTIONS.low, REASONING_OPTIONS.medium, REASONING_OPTIONS.high, REASONING_OPTIONS.max],
+      defaultValue: "medium",
+    },
+  },
+  // Claude Opus 4.5 and Sonnet 4.x in Copilot support extended thinking
+  {
+    provider: "copilot",
+    modelPattern: /claude-(opus|sonnet)-4/i,
+    config: {
+      parameter: "thinking.effort",
+      options: [REASONING_OPTIONS.low, REASONING_OPTIONS.medium, REASONING_OPTIONS.high],
+      defaultValue: "medium",
+    },
+  },
+  // Claude Haiku 4.5 supports extended thinking with budget tokens
+  {
+    provider: "copilot",
+    modelPattern: /claude-haiku-4-5/i,
+    config: {
+      parameter: "thinkingConfig.thinkingBudget",
+      options: [REASONING_OPTIONS.budget_0, REASONING_OPTIONS.budget_1024, REASONING_OPTIONS.budget_8192, REASONING_OPTIONS.budget_24576],
+      defaultValue: "8192",
+    },
+  },
+  // Gemini 3.x models in Copilot support thinking levels
+  {
+    provider: "copilot",
+    modelPattern: /gemini-3/i,
+    config: {
+      parameter: "thinkingConfig.thinkingLevel",
+      options: [REASONING_OPTIONS.low, REASONING_OPTIONS.medium, REASONING_OPTIONS.high],
+      defaultValue: "medium",
+    },
+  },
+  // Gemini 2.5 Pro in Copilot supports thinking budget
+  {
+    provider: "copilot",
+    modelPattern: /gemini-2-5-pro/i,
+    config: {
+      parameter: "thinkingConfig.thinkingBudget",
+      options: [REASONING_OPTIONS.budget_0, REASONING_OPTIONS.budget_1024, REASONING_OPTIONS.budget_8192, REASONING_OPTIONS.budget_24576],
+      defaultValue: "8192",
+    },
+  },
+  // GPT-5 base models (mini, 5.1, 5.2) support reasoning_effort
+  {
+    provider: "copilot",
+    modelPattern: /^gpt-5(\.[12]|mini)$/i,
+    config: {
+      parameter: "reasoning.effort",
+      options: [REASONING_OPTIONS.minimal, REASONING_OPTIONS.low, REASONING_OPTIONS.medium, REASONING_OPTIONS.high],
+      defaultValue: "medium",
+    },
+  },
+  // GPT-5.3-Codex supports reasoning effort like other Codex models
+  {
+    provider: "copilot",
+    modelPattern: /gpt-5\.3-codex/i,
+    config: {
+      parameter: "reasoning.effort",
+      options: [REASONING_OPTIONS.none, REASONING_OPTIONS.low, REASONING_OPTIONS.medium, REASONING_OPTIONS.high, REASONING_OPTIONS.xhigh],
+      defaultValue: "medium",
+    },
+  },
+  // Claude Opus 4.6 fast mode still supports thinking.effort (can dial down)
+  {
+    provider: "copilot",
+    modelPattern: /claude-opus-4\.6-fast/i,
+    config: {
+      parameter: "thinking.effort",
+      options: [REASONING_OPTIONS.low, REASONING_OPTIONS.medium, REASONING_OPTIONS.high],
+      defaultValue: "medium",
+    },
+  },
+  // Grok Code Fast 1: Speedy reasoning model with thinking traces
+  {
+    provider: "copilot",
+    modelPattern: /grok-code-fast-1/i,
+    config: {
+      parameter: "reasoning.effort",
+      options: [REASONING_OPTIONS.low, REASONING_OPTIONS.medium, REASONING_OPTIONS.high],
+      defaultValue: "medium",
+    },
+  },
+  // Raptor mini: Workspace-based reasoning for multi-file edits
+  {
+    provider: "copilot",
+    modelPattern: /raptor-mini/i,
+    config: {
+      parameter: "reasoning.effort",
+      options: [REASONING_OPTIONS.low, REASONING_OPTIONS.medium, REASONING_OPTIONS.high],
+      defaultValue: "medium",
+    },
+  },
+  // Goldeneye: Agentic model with perception-reasoning-acting loop
+  {
+    provider: "copilot",
+    modelPattern: /goldeneye/i,
+    config: {
+      parameter: "reasoning.effort",
+      options: [REASONING_OPTIONS.low, REASONING_OPTIONS.medium, REASONING_OPTIONS.high],
+      defaultValue: "medium",
+    },
+  },
+  // Fallback for any other Copilot models (should not be reached if all models are covered)
+  { provider: "copilot", config: null },
   {
     provider: "codex",
     config: {
@@ -873,12 +986,37 @@ export function normalizeReasoningLevel(
       }
     }
 
-    // ─── OpenAI / Anthropic / Groq (Effort-based) ──────────────────────────
-    if (["openai", "anthropic", "groq", "xai", "azure", "openrouter"].includes(provider)) {
+    // ─── OpenAI / Anthropic / Groq / Copilot (Effort-based) ──────────────────────────
+    if (["openai", "anthropic", "groq", "xai", "azure", "openrouter", "copilot"].includes(provider)) {
       if (level === "none") return "none";
       if (level === "xhigh") return "high"; // map xhigh to high for effort-based APIs
       // Preserve low, medium, high, max (max is valid for Anthropic Opus 4.6 only)
       return level;
+    }
+    
+    // ─── Copilot-specific handling for budget-based models (Gemini, Claude Haiku) ──────────────────────────
+    if (provider === "copilot") {
+      // Gemini models in Copilot use budget-based thinking
+      if (model && /gemini-2-5-pro/i.test(model)) {
+        if (level === "none") return "0";
+        if (level === "low") return "1024";
+        if (level === "medium") return "8192";
+        if (level === "high") return "24576";
+        if (level === "xhigh") return "65536";
+      }
+      // Gemini 3.x uses thinking levels
+      if (model && /gemini-3/i.test(model)) {
+        if (level === "none") return "low"; // Minimum for Gemini 3
+        if (["low", "medium", "high", "xhigh"].includes(level)) return level === "xhigh" ? "high" : level;
+      }
+      // Claude Haiku 4.5 uses budget tokens
+      if (model && /claude-haiku-4-5/i.test(model)) {
+        if (level === "none") return "0";
+        if (level === "low") return "1024";
+        if (level === "medium") return "8192";
+        if (level === "high") return "24576";
+        if (level === "xhigh") return "24576"; // Max for Haiku
+      }
     }
   }
 

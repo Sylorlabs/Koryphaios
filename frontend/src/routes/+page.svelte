@@ -10,7 +10,6 @@
   import FileEditPreview from '$lib/components/FileEditPreview.svelte';
   import WorkerCard from '$lib/components/WorkerCard.svelte';
   import CommandInput from '$lib/components/CommandInput.svelte';
-  import Sidebar from '$lib/components/Sidebar.svelte';
   import SessionSidebar from '$lib/components/SessionSidebar.svelte';
   import SourceControlPanel from '$lib/components/SourceControlPanel.svelte';
   import DiffEditor from '$lib/components/DiffEditor.svelte';
@@ -20,22 +19,22 @@
   import SettingsDrawer from '$lib/components/SettingsDrawer.svelte';
   import ToastContainer from '$lib/components/ToastContainer.svelte';
   import CommandPalette from '$lib/components/CommandPalette.svelte';
+  import MenuBar from '$lib/components/MenuBar.svelte';
+  import ThemePickerModal from '$lib/components/ThemePickerModal.svelte';
   import { shortcutStore } from '$lib/stores/shortcuts.svelte';
   import { gitStore } from '$lib/stores/git.svelte';
-  import { getModKeyName } from '$lib/utils/platform';
+  import { ChevronLeft, ChevronRight } from 'lucide-svelte';
   import {
-    Settings,
-    Activity,
-    ChevronDown,
-    ChevronLeft,
-    ChevronRight,
-    GitBranch,
-    Zap,
-    Search,
-    SunMoon,
-    Check,
-    X,
-  } from 'lucide-svelte';
+    type RecentProject,
+    parseRecentProjects,
+    addRecentProject,
+    buildNewProjectTemplate,
+    createProjectSession,
+    readProjectFile,
+    readProjectFolder,
+    exportCurrentProjectSnapshot,
+    insertPromptTemplate,
+  } from '$lib/utils/projectManager';
 
   let showSettings = $state(false);
   let showAgents = $state(false);
@@ -50,120 +49,25 @@
   let inputRef = $state<HTMLTextAreaElement>();
   let projectFileInput = $state<HTMLInputElement>();
   let projectFolderInput = $state<HTMLInputElement>();
-  let openMenu = $state<'file' | 'edit' | 'view' | null>(null);
   let recentProjects = $state<RecentProject[]>([]);
 
-  const RECENT_PROJECTS_KEY = 'koryphaios-recent-projects';
   const LAYOUT_PREFS_KEY = 'koryphaios-layout-prefs';
-  const MAX_RECENT_PROJECTS = 12;
-
-  type RecentProject = {
-    id: string;
-    title: string;
-    content: string;
-    source: 'new' | 'file' | 'template';
-    fileName?: string;
-    updatedAt: number;
-  };
-
-  type PromptTemplate = {
-    id: 'prd' | 'bugfix' | 'refactor' | 'ship';
-    label: string;
-    content: string;
-  };
-
-  const promptTemplates: PromptTemplate[] = [
-    {
-      id: 'prd',
-      label: 'Insert PRD Template',
-      content: `Build Spec
-- Problem:
-- Target user:
-- Success metrics:
-
-Requirements
-- Must have:
-- Nice to have:
-- Out of scope:
-
-Execution plan
-- Milestone 1:
-- Milestone 2:
-- Milestone 3:
-
-Open questions
-- `,
-    },
-    {
-      id: 'bugfix',
-      label: 'Insert Bugfix Template',
-      content: `Bug Report
-- Expected:
-- Actual:
-- Repro steps:
-- Environment:
-
-Debug plan
-- Suspected root cause:
-- Verification steps:
-- Regression risks:
-
-Definition of done
-- `,
-    },
-    {
-      id: 'refactor',
-      label: 'Insert Refactor Template',
-      content: `Refactor Goal
-- Why now:
-- Scope:
-- Constraints:
-
-Current pain points
-- 
-
-Refactor approach
-- Architecture changes:
-- Migration steps:
-- Test strategy:
-
-Acceptance criteria
-- `,
-    },
-    {
-      id: 'ship',
-      label: 'Insert Ship Checklist',
-      content: `Ship Checklist
-- Feature complete
-- Tests passing
-- Edge cases reviewed
-- Docs updated
-- Monitoring/alerts defined
-- Rollback plan prepared
-
-Release notes
-- `,
-    },
-  ];
 
   onMount(() => {
     theme.init();
     appStore.initialize(authStore, sessionStore).then(() => {
       wsStore.connect();
     });
-    loadRecentProjects();
+    recentProjects = parseRecentProjects();
     loadLayoutPrefs();
 
     window.addEventListener('keydown', handleGlobalKeydown);
-    window.addEventListener('click', handleWindowClick);
     return () => {
       wsStore.disconnect();
       window.removeEventListener('keydown', handleGlobalKeydown);
-      window.removeEventListener('click', handleWindowClick);
     };
   });
 
-  // Automatically subscribe WebSocket to the active session when it changes
   $effect(() => {
     const activeId = sessionStore.activeSessionId;
     if (activeId && wsStore.status === 'connected') {
@@ -171,20 +75,9 @@ Release notes
     }
   });
 
-  function handleWindowClick(e: MouseEvent) {
-    const target = e.target as HTMLElement | null;
-    if (target?.closest('[data-top-menu]')) return;
-    openMenu = null;
-  }
-
   function handleGlobalKeydown(e: KeyboardEvent) {
     if (e.key === 'Escape' && showThemeQuickMenu) {
       showThemeQuickMenu = false;
-      return;
-    }
-
-    if (e.key === 'Escape' && openMenu) {
-      openMenu = null;
       return;
     }
 
@@ -218,10 +111,6 @@ Release notes
     } else if (shortcutStore.matches('close', e) && showSettings) {
       showSettings = false;
     }
-  }
-
-  function toggleMenu(menu: 'file' | 'edit' | 'view') {
-    openMenu = openMenu === menu ? null : menu;
   }
 
   function setYoloMode(enabled: boolean) {
@@ -291,30 +180,6 @@ Release notes
     return true;
   }
 
-  function loadRecentProjects() {
-    try {
-      const raw = localStorage.getItem(RECENT_PROJECTS_KEY);
-      if (!raw) return;
-
-      const parsed = JSON.parse(raw) as unknown;
-      if (!Array.isArray(parsed)) return;
-
-      recentProjects = parsed
-        .filter((entry): entry is RecentProject =>
-          typeof entry === 'object' &&
-          entry !== null &&
-          typeof (entry as RecentProject).id === 'string' &&
-          typeof (entry as RecentProject).title === 'string' &&
-          typeof (entry as RecentProject).content === 'string' &&
-          typeof (entry as RecentProject).source === 'string' &&
-          typeof (entry as RecentProject).updatedAt === 'number'
-        )
-        .slice(0, MAX_RECENT_PROJECTS);
-    } catch {
-      recentProjects = [];
-    }
-  }
-
   function loadLayoutPrefs() {
     try {
       const raw = localStorage.getItem(LAYOUT_PREFS_KEY);
@@ -343,77 +208,20 @@ Release notes
     );
   });
 
-  function persistRecentProjects() {
-    localStorage.setItem(RECENT_PROJECTS_KEY, JSON.stringify(recentProjects));
-  }
-
-  function saveRecentProject(entry: Omit<RecentProject, 'id' | 'updatedAt'>) {
-    const normalizedTitle = entry.title.trim().toLowerCase();
-    const normalizedContent = entry.content.trim();
-    const existing = recentProjects.find((p) =>
-      p.title.trim().toLowerCase() === normalizedTitle && p.content.trim() === normalizedContent
-    );
-
-    const now = Date.now();
-    if (existing) {
-      recentProjects = [
-        {
-          ...existing,
-          ...entry,
-          updatedAt: now,
-        },
-        ...recentProjects.filter((p) => p.id !== existing.id),
-      ].slice(0, MAX_RECENT_PROJECTS);
-    } else {
-      recentProjects = [
-        {
-          id: `recent-${now}-${Math.random().toString(36).slice(2, 8)}`,
-          ...entry,
-          updatedAt: now,
-        },
-        ...recentProjects,
-      ].slice(0, MAX_RECENT_PROJECTS);
-    }
-
-    persistRecentProjects();
-  }
-
-  function formatRecentDate(ts: number) {
-    const d = new Date(ts);
-    return d.toLocaleDateString([], { month: 'short', day: 'numeric' });
-  }
-
-  function buildNewProjectTemplate() {
-    return 'Set up a new project plan with milestones, risks, and first tasks.';
-  }
-
   async function createProjectFromText(
     title: string,
     text: string,
     options?: { source?: RecentProject['source']; fileName?: string }
   ) {
-    const sessionId = await sessionStore.createSession();
-    if (!sessionId) {
-      toastStore.error('Could not create project session');
-      return;
-    }
+    const sessionId = await createProjectSession(title, text);
+    if (!sessionId) return;
 
-    await sessionStore.renameSession(sessionId, title);
-
-    if (text.trim()) {
-      wsStore.sendMessage(
-        sessionId,
-        `Project brief loaded from file:\n\n${text}`
-      );
-    }
-
-    saveRecentProject({
+    recentProjects = addRecentProject(recentProjects, {
       title,
       content: text,
       source: options?.source ?? 'new',
       fileName: options?.fileName,
     });
-
     inputRef?.focus();
   }
 
@@ -423,14 +231,13 @@ Release notes
     if (!file) return;
 
     try {
-      const raw = await file.text();
-      const maxChars = 12000;
-      const trimmed = raw.length > maxChars ? raw.slice(0, maxChars) : raw;
-      const baseTitle = file.name.replace(/\.[^/.]+$/, '').trim();
-      const title = baseTitle ? `Project: ${baseTitle}` : 'Imported Project';
-
-      await createProjectFromText(title.slice(0, 64), trimmed, { source: 'file', fileName: file.name });
-      if (raw.length > maxChars) {
+      const result = await readProjectFile(file);
+      if (!result) {
+        toastStore.error('Failed to read selected project file');
+        return;
+      }
+      await createProjectFromText(result.title, result.text, { source: 'file', fileName: result.fileName });
+      if (result.truncated) {
         toastStore.warning('Large file imported; content was truncated for context size');
       } else {
         toastStore.success(`Imported ${file.name} into a new project`);
@@ -448,50 +255,14 @@ Release notes
     if (!files?.length) return;
 
     try {
-      const MAX_TOTAL_CHARS = 16000;
-      const KEY_FILES = /^(README|readme|Readme)(\.(md|txt|rst))?$|^package\.json$|^package-lock\.json$|^Cargo\.toml$|^pyproject\.toml$|^go\.mod$|^\.env\.example$/i;
-      const entries: { path: string; file: File }[] = [];
-      for (let i = 0; i < files.length; i++) {
-        const file = files[i];
-        const path = (file as File & { webkitRelativePath?: string }).webkitRelativePath || file.name;
-        entries.push({ path, file });
+      const result = await readProjectFolder(files);
+      if (!result) {
+        toastStore.error('Failed to open project from folder');
+        return;
       }
-      const keyEntries = entries.filter((e) => KEY_FILES.test(e.path.split('/').pop() || ''));
-      const otherEntries = entries.filter((e) => !KEY_FILES.test(e.path.split('/').pop() || ''));
-
-      let total = 0;
-      const parts: string[] = [];
-
-      for (const { path, file } of keyEntries) {
-        if (total >= MAX_TOTAL_CHARS) break;
-        try {
-          const text = await file.text();
-          const slice = text.length + total > MAX_TOTAL_CHARS ? text.slice(0, MAX_TOTAL_CHARS - total) : text;
-          total += slice.length;
-          parts.push(`--- ${path} ---\n${slice}`);
-        } catch (_) {}
-      }
-
-      const maxList = 200;
-      const otherPaths = otherEntries.slice(0, maxList).map((e) => e.path);
-      if (otherEntries.length > maxList) {
-        otherPaths.push(`... and ${otherEntries.length - maxList} more files`);
-      }
-      if (otherPaths.length > 0) {
-        parts.push(`--- Project structure (${otherEntries.length} files) ---\n${otherPaths.join('\n')}`);
-      }
-
-      const folderName = entries[0]?.path.split('/')[0] || 'Folder';
-      const title = `Project: ${folderName}`.slice(0, 64);
-      const content = parts.join('\n\n');
-
-      await createProjectFromText(title, content || `Project folder: ${folderName} (${entries.length} files)`, {
-        source: 'file',
-        fileName: folderName,
-      });
-      toastStore.success(`Opened project from folder: ${folderName} (${entries.length} files)`);
-    } catch (err) {
-      console.error('Folder import failed', err);
+      await createProjectFromText(result.title, result.text, { source: 'file', fileName: result.folderName });
+      toastStore.success(`Opened project from folder: ${result.folderName} (${result.fileCount} files)`);
+    } catch {
       toastStore.error('Failed to open project from folder');
     } finally {
       input.value = '';
@@ -512,71 +283,7 @@ Release notes
     toastStore.success(`Opened recent project: ${found.title}`);
   }
 
-  function sanitizeFileName(raw: string) {
-    return raw.replace(/[^a-z0-9_-]+/gi, '-').replace(/-+/g, '-').replace(/^-|-$/g, '') || 'project';
-  }
-
-  function exportCurrentProjectSnapshot() {
-    const sessionId = sessionStore.activeSessionId;
-    const activeSession = sessionStore.sessions.find((s) => s.id === sessionId);
-
-    if (!activeSession) {
-      toastStore.error('No active project session to export');
-      return;
-    }
-
-    const snapshot = {
-      format: 'koryphaios.project.snapshot.v1',
-      exportedAt: new Date().toISOString(),
-      project: {
-        id: activeSession.id,
-        title: activeSession.title,
-        updatedAt: activeSession.updatedAt,
-      },
-      feed: wsStore.feed
-        .filter((entry) => entry.metadata?.sessionId === sessionId || !entry.metadata?.sessionId)
-        .map((entry) => ({
-          type: entry.type,
-          agent: entry.agentName,
-          text: entry.text ?? '',
-          timestamp: entry.timestamp,
-          model: entry.metadata?.model ?? null,
-        })),
-    };
-
-    const payload = JSON.stringify(snapshot, null, 2);
-    const blob = new Blob([payload], { type: 'application/json' });
-    const href = URL.createObjectURL(blob);
-    const safeTitle = sanitizeFileName(activeSession.title.toLowerCase());
-    const datePart = new Date().toISOString().slice(0, 10);
-    const a = document.createElement('a');
-    a.href = href;
-    a.download = `${safeTitle}-${datePart}.kory.json`;
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    URL.revokeObjectURL(href);
-    toastStore.success('Project snapshot exported');
-  }
-
-  function insertPromptTemplate(templateId: PromptTemplate['id']) {
-    const template = promptTemplates.find((t) => t.id === templateId);
-    if (!template || !inputRef) {
-      toastStore.error('Prompt template unavailable');
-      return;
-    }
-
-    const current = inputRef.value.trim();
-    inputRef.value = current ? `${current}\n\n${template.content}` : template.content;
-    inputRef.dispatchEvent(new Event('input', { bubbles: true }));
-    inputRef.focus();
-    inputRef.setSelectionRange(inputRef.value.length, inputRef.value.length);
-    toastStore.success(`${template.label.replace('Insert ', '')} added`);
-  }
-
   async function handleMenuAction(action: string) {
-    openMenu = null;
-
     switch (action) {
       case 'new_project':
         await createProjectFromText(
@@ -642,17 +349,25 @@ Release notes
       case 'open_settings':
         showSettings = true;
         break;
+      case 'toggle_palette':
+        showCommandPalette = !showCommandPalette;
+        break;
       case 'template_prd':
-        insertPromptTemplate('prd');
+        insertPromptTemplate('prd', inputRef);
         break;
       case 'template_bugfix':
-        insertPromptTemplate('bugfix');
+        insertPromptTemplate('bugfix', inputRef);
         break;
       case 'template_refactor':
-        insertPromptTemplate('refactor');
+        insertPromptTemplate('refactor', inputRef);
         break;
       case 'template_ship':
-        insertPromptTemplate('ship');
+        insertPromptTemplate('ship', inputRef);
+        break;
+      default:
+        if (action.startsWith('open_recent:')) {
+          await openRecentProject(action.slice('open_recent:'.length));
+        }
         break;
     }
   }
@@ -680,7 +395,7 @@ Release notes
 <div class="flex h-screen overflow-hidden" style="background: var(--color-surface-0);">
   <!-- Sidebar -->
   {#if showSidebar}
-    <div class="w-60 min-w-[200px] max-w-[320px] shrink-0 border-r flex flex-col" style="border-color: var(--color-border); background: var(--color-surface-1);">
+    <nav class="w-60 min-w-[200px] max-w-[320px] shrink-0 border-r flex flex-col" style="border-color: var(--color-border); background: var(--color-surface-1);" aria-label="Session navigation">
       <!-- Logo + project -->
       <div class="flex items-center justify-between px-4 h-12 border-b shrink-0" style="border-color: var(--color-border);">
         <div class="flex items-center gap-2.5 min-w-0">
@@ -698,6 +413,7 @@ Release notes
           style="color: var(--color-text-muted);"
           onclick={() => showSidebar = false}
           title="Hide sidebar"
+          aria-label="Hide sidebar"
         >
           <ChevronLeft size={14} />
         </button>
@@ -721,7 +437,7 @@ Release notes
           {/if}
         </div>
       </div>
-    </div>
+    </nav>
   {:else if !zenMode}
     <div class="w-10 shrink-0 border-r flex flex-col items-center" style="border-color: var(--color-border); background: var(--color-surface-1);">
       <div class="h-12 w-full border-b flex items-center justify-center" style="border-color: var(--color-border);">
@@ -730,6 +446,7 @@ Release notes
           style="color: var(--color-text-muted);"
           onclick={() => showSidebar = true}
           title="Show sidebar"
+          aria-label="Show sidebar"
         >
           <ChevronRight size={14} />
         </button>
@@ -741,177 +458,19 @@ Release notes
   <div class="flex-1 flex min-w-0">
     <div class="flex-1 flex flex-col min-w-0 relative">
     <!-- Top bar -->
-    {#if !zenMode}
-      <header class="flex items-center justify-between px-4 h-12 border-b shrink-0" style="border-color: var(--color-border); background: var(--color-surface-1);">
-        <div class="flex items-center gap-3">
-          <div class="flex items-center gap-1" data-top-menu>
-            <div class="relative" data-top-menu>
-              <button
-                class="px-2 py-1 text-xs rounded-md transition-colors hover:bg-[var(--color-surface-3)]"
-                style="color: var(--color-text-secondary);"
-                onclick={() => toggleMenu('file')}
-              >
-                File
-              </button>
-              {#if openMenu === 'file'}
-                <div class="absolute left-0 top-8 z-30 min-w-[260px] rounded-lg border p-1" style="background: var(--color-surface-2); border-color: var(--color-border);">
-                  <button class="w-full text-left px-2.5 py-1.5 text-xs rounded-md hover:bg-[var(--color-surface-3)]" style="color: var(--color-text-primary);" onclick={() => handleMenuAction('new_project')}>New Project</button>
-                  <button class="w-full text-left px-2.5 py-1.5 text-xs rounded-md hover:bg-[var(--color-surface-3)]" style="color: var(--color-text-primary);" onclick={() => handleMenuAction('open_project_file')}>Open Project From File...</button>
-                  <button class="w-full text-left px-2.5 py-1.5 text-xs rounded-md hover:bg-[var(--color-surface-3)]" style="color: var(--color-text-primary);" onclick={() => handleMenuAction('open_project_folder')}>Open Project From Folder...</button>
-                  <div class="h-px my-1" style="background: var(--color-border);"></div>
-                  <div class="px-2.5 py-1.5 text-[10px] uppercase tracking-wider" style="color: var(--color-text-muted);">Recent projects</div>
-                  {#if recentProjects.length > 0}
-                    {#each recentProjects.slice(0, 6) as project (project.id)}
-                      <button class="w-full flex items-center justify-between gap-2 text-left px-2.5 py-1.5 text-xs rounded-md hover:bg-[var(--color-surface-3)]" style="color: var(--color-text-primary);" onclick={() => openRecentProject(project.id)}>
-                        <span class="truncate">{project.title}</span>
-                        <span class="shrink-0 text-[10px]" style="color: var(--color-text-muted);">{formatRecentDate(project.updatedAt)}</span>
-                      </button>
-                    {/each}
-                  {:else}
-                    <div class="px-2.5 py-1.5 text-xs" style="color: var(--color-text-muted);">No recent projects yet</div>
-                  {/if}
-                  <div class="h-px my-1" style="background: var(--color-border);"></div>
-                  <button class="w-full text-left px-2.5 py-1.5 text-xs rounded-md hover:bg-[var(--color-surface-3)]" style="color: var(--color-text-primary);" onclick={() => handleMenuAction('save_snapshot')}>Save Project As .kory.json</button>
-                  <button class="w-full text-left px-2.5 py-1.5 text-xs rounded-md hover:bg-[var(--color-surface-3)]" style="color: var(--color-text-primary);" onclick={() => handleMenuAction('new_session')}>New Session</button>
-                </div>
-              {/if}
-            </div>
-
-            <div class="relative" data-top-menu>
-              <button
-                class="px-2 py-1 text-xs rounded-md transition-colors hover:bg-[var(--color-surface-3)]"
-                style="color: var(--color-text-secondary);"
-                onclick={() => toggleMenu('edit')}
-              >
-                Edit
-              </button>
-              {#if openMenu === 'edit'}
-                <div class="absolute left-0 top-8 z-30 min-w-[220px] rounded-lg border p-1" style="background: var(--color-surface-2); border-color: var(--color-border);">
-                  <button class="w-full text-left px-2.5 py-1.5 text-xs rounded-md hover:bg-[var(--color-surface-3)]" style="color: var(--color-text-primary);" onclick={() => handleMenuAction('focus_input')}>Focus Prompt Input</button>
-                  <button class="w-full text-left px-2.5 py-1.5 text-xs rounded-md hover:bg-[var(--color-surface-3)]" style="color: var(--color-text-primary);" onclick={() => handleMenuAction('clear_feed')}>Clear Current Feed</button>
-                  <div class="h-px my-1" style="background: var(--color-border);"></div>
-                  {#each promptTemplates as template (template.id)}
-                    <button
-                      class="w-full text-left px-2.5 py-1.5 text-xs rounded-md hover:bg-[var(--color-surface-3)]"
-                      style="color: var(--color-text-primary);"
-                      onclick={() => handleMenuAction(`template_${template.id}`)}
-                    >
-                      {template.label}
-                    </button>
-                  {/each}
-                </div>
-              {/if}
-            </div>
-
-            <div class="relative" data-top-menu>
-              <button
-                class="px-2 py-1 text-xs rounded-md transition-colors hover:bg-[var(--color-surface-3)]"
-                style="color: var(--color-text-secondary);"
-                onclick={() => toggleMenu('view')}
-              >
-                View
-              </button>
-              {#if openMenu === 'view'}
-                <div class="absolute left-0 top-8 z-30 min-w-[200px] rounded-lg border p-1" style="background: var(--color-surface-2); border-color: var(--color-border);">
-                  <button class="w-full text-left px-2.5 py-1.5 text-xs rounded-md hover:bg-[var(--color-surface-3)]" style="color: var(--color-text-primary);" onclick={() => handleMenuAction('toggle_sidebar')}>{showSidebar ? 'Hide' : 'Show'} Sidebar</button>
-                  <button class="w-full text-left px-2.5 py-1.5 text-xs rounded-md hover:bg-[var(--color-surface-3)]" style="color: var(--color-text-primary);" onclick={() => handleMenuAction('toggle_zen_mode')}>{zenMode ? 'Disable' : 'Enable'} Zen Mode</button>
-                  <button class="w-full text-left px-2.5 py-1.5 text-xs rounded-md hover:bg-[var(--color-surface-3)]" style="color: var(--color-text-primary);" onclick={() => handleMenuAction('toggle_agents')}>{showAgents ? 'Hide' : 'Show'} Active Agents</button>
-                  <button class="w-full text-left px-2.5 py-1.5 text-xs rounded-md hover:bg-[var(--color-surface-3)]" style="color: var(--color-text-primary);" onclick={() => handleMenuAction('toggle_theme')}>Switch Theme...</button>
-                  <button class="w-full text-left px-2.5 py-1.5 text-xs rounded-md hover:bg-[var(--color-surface-3)]" style="color: var(--color-text-primary);" onclick={() => handleMenuAction('open_settings')}>Open Settings</button>
-                </div>
-              {/if}
-            </div>
-          </div>
-
-          {#if appStore.projectName}
-            <span class="flex items-center gap-2 min-w-0 max-w-[240px]">
-              <span class="shrink-0 text-[11px]" style="color: var(--color-text-muted);" aria-hidden="true">|</span>
-              <span
-                class="truncate text-xs font-medium"
-                style="color: var(--color-text-secondary);"
-                title={appStore.projectName}
-              >
-                {appStore.projectName}
-              </span>
-            </span>
-          {/if}
-
-          {#if wsStore.koryPhase}
-            <div class="flex items-center gap-2 px-2.5 py-1.5 rounded-lg" style="background: var(--color-surface-2);">
-              <div class="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse"></div>
-              <span class="text-xs leading-none" style="color: var(--color-text-secondary);">
-                Kory: {wsStore.koryPhase}
-              </span>
-            </div>
-          {/if}
-
-          {#if wsStore.isYoloMode}
-            <div class="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-red-500/10 border border-red-500/20 text-red-400">
-              <Zap size={12} fill="currentColor" />
-              <span class="text-[10px] font-bold tracking-wider uppercase">YOLO mode</span>
-            </div>
-          {/if}
-        </div>
-
-        <div class="flex items-center gap-2">
-          <button
-            class="px-2 py-1 text-[10px] rounded-md transition-colors hover:bg-[var(--color-surface-3)] uppercase tracking-wider"
-            style="color: var(--color-text-muted);"
-            onclick={() => showSidebar = !showSidebar}
-            title={showSidebar ? 'Hide sidebar' : 'Show sidebar'}
-          >
-            {showSidebar ? 'Hide Sidebar' : 'Show Sidebar'}
-          </button>
-          <button
-            class="flex items-center gap-1.5 px-2 py-1 rounded-md transition-colors hover:bg-[var(--color-surface-3)]"
-            style="color: {showGit ? 'var(--color-accent)' : 'var(--color-text-muted)'};"
-            onclick={() => showGit = !showGit}
-            title={showGit ? 'Hide Source Control' : 'Show Source Control'}
-          >
-            <GitBranch size={14} />
-            <span class="text-[10px] font-medium uppercase tracking-wider">{showGit ? 'Hide Git' : 'Show Git'}</span>
-          </button>
-          <button
-            class="flex items-center gap-1.5 px-2 py-1 rounded-md transition-colors hover:bg-[var(--color-surface-3)]"
-            style="color: var(--color-text-muted);"
-            onclick={() => showCommandPalette = true}
-            title="Command Palette ({getModKeyName()}K)"
-          >
-            <Search size={14} />
-            <span class="text-[10px] font-medium uppercase tracking-wider">Commands</span>
-            <kbd class="text-[9px] px-1 py-0.5 rounded bg-[var(--color-surface-3)] border border-[var(--color-border)] opacity-60">{getModKeyName()}K</kbd>
-          </button>
-
-          {#if activeAgents.length > 0}
-            <button
-              class="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg transition-colors hover:bg-[var(--color-surface-3)]"
-              style="background: var(--color-surface-2);"
-              onclick={() => showAgents = !showAgents}
-            >
-              <Activity size={12} class="text-emerald-400" />
-              <span class="text-xs leading-none" style="color: var(--color-text-secondary);">{activeAgents.length} agent{activeAgents.length !== 1 ? 's' : ''}</span>
-              <ChevronDown size={12} class="transition-transform {showAgents ? 'rotate-180' : ''}" style="color: var(--color-text-muted);" />
-            </button>
-          {/if}
-          <button
-            class="p-2 rounded-lg transition-colors hover:bg-[var(--color-surface-3)] flex items-center justify-center"
-            style="color: var(--color-text-muted);"
-            onclick={() => showSettings = true}
-            title="Settings ({getModKeyName()},)"
-          >
-            <Settings size={18} />
-          </button>
-        </div>
-      </header>
-    {:else}
-      <button
-        class="absolute top-1 right-4 z-20 px-2.5 py-1 rounded-md text-xs border transition-all duration-200 hover:bg-[var(--color-surface-3)] hover:border-[var(--color-border-bright)] hover:scale-105 active:scale-95"
-        style="background: var(--color-surface-2); border-color: var(--color-border); color: var(--color-text-secondary);"
-        onclick={() => handleMenuAction('toggle_zen_mode')}
-      >
-        Exit Zen
-      </button>
-    {/if}
+    <!-- Top bar -->
+    <MenuBar
+      {showSidebar}
+      {showGit}
+      {showAgents}
+      {zenMode}
+      projectName={appStore.projectName}
+      koryPhase={wsStore.koryPhase}
+      isYoloMode={wsStore.isYoloMode}
+      {activeAgents}
+      {recentProjects}
+      onAction={handleMenuAction}
+    />
 
     <input
       bind:this={projectFileInput}
@@ -942,13 +501,13 @@ Release notes
     <FileEditPreview />
 
     <!-- Chat / Feed area -->
-    <div class="flex-1 overflow-hidden flex flex-col">
+    <section class="flex-1 overflow-hidden flex flex-col" role="main" aria-label="Chat feed">
       {#if gitStore.state.activeDiff}
         <DiffEditor />
       {:else}
         <ManagerFeed />
       {/if}
-    </div>
+    </section>
 
     <!-- Context window usage -->
     {#if wsStore.contextUsage.isReliable}
@@ -994,60 +553,9 @@ Release notes
 <PermissionDialog />
 <QuestionDialog />
 <ChangesSummary />
-
-{#if showThemeQuickMenu}
-  <div
-    class="fixed inset-0 z-[95] flex items-start justify-center pt-[12vh] px-4 backdrop-blur-sm"
-    style="background: rgba(0,0,0,0.45);"
-    onmousedown={() => showThemeQuickMenu = false}
-    role="presentation"
-  >
-    <div
-      class="w-full max-w-md rounded-xl border shadow-2xl overflow-hidden"
-      style="background: var(--color-surface-1); border-color: var(--color-border);"
-      onmousedown={e => e.stopPropagation()}
-      role="presentation"
-    >
-      <div class="flex items-center justify-between px-4 py-3 border-b" style="border-color: var(--color-border);">
-        <div class="flex items-center gap-2">
-          <SunMoon size={15} style="color: var(--color-text-secondary);" />
-          <div class="text-sm font-medium" style="color: var(--color-text-primary);">Switch Theme</div>
-        </div>
-        <button
-          class="p-1 rounded transition-colors hover:bg-[var(--color-surface-3)]"
-          style="color: var(--color-text-muted);"
-          onclick={() => showThemeQuickMenu = false}
-          aria-label="Close theme picker"
-        >
-          <X size={14} />
-        </button>
-      </div>
-
-      <div class="p-3">
-        <div class="text-[10px] uppercase tracking-wider mb-2" style="color: var(--color-text-muted);">Theme Preset</div>
-        <div class="grid grid-cols-2 gap-1.5">
-          {#each theme.presets as preset}
-            <button
-              class="flex items-center justify-between gap-2 px-3 py-2 rounded-lg text-xs transition-all border
-                     {theme.preset === preset.id
-                       ? 'border-[var(--color-accent)] bg-[var(--color-accent)]/10 text-[var(--color-text-primary)]'
-                       : 'border-transparent bg-[var(--color-surface-2)] text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-3)]'}"
-              onclick={() => {
-                theme.setPreset(preset.id);
-              }}
-            >
-              <span>{preset.label}</span>
-              {#if theme.preset === preset.id}
-                <Check size={12} style="color: var(--color-accent);" />
-              {/if}
-            </button>
-          {/each}
-        </div>
-      </div>
-    </div>
-  </div>
-{/if}
+<ThemePickerModal open={showThemeQuickMenu} onClose={() => showThemeQuickMenu = false} />
 
 <SettingsDrawer open={showSettings} onClose={() => showSettings = false} />
 <CommandPalette bind:open={showCommandPalette} onAction={handleMenuAction} />
 <ToastContainer />
+

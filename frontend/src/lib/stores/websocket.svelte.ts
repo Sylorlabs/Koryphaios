@@ -26,6 +26,7 @@ import type {
 import { sessionStore } from './sessions.svelte';
 import { authStore } from './auth.svelte';
 import { browser } from '$app/environment';
+import type { FeedEntry } from '$lib/types';
 
 // ─── Agent State ────────────────────────────────────────────────────────────
 
@@ -47,20 +48,7 @@ interface AgentState {
 
 const EPHEMERAL_TOOLS = new Set(["ls", "read_file", "grep", "glob"]);
 
-export interface FeedEntry {
-  id: string;
-  timestamp: number;
-  type: "user_message" | "thought" | "content" | "thinking" | "tool_call" | "tool_result" | "routing" | "error" | "system" | "tool_group";
-  agentId: string;
-  agentName: string;
-  glowClass: string;
-  text: string;
-  durationMs?: number;
-  thinkingStartedAt?: number;
-  isCollapsed?: boolean;
-  entries?: FeedEntry[];
-  metadata?: Record<string, unknown>;
-}
+export type { FeedEntry };
 
 // ─── Reactive State (Svelte 5 Runes) ─────────────────────────────────────
 

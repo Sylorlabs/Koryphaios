@@ -1,6 +1,6 @@
 // Migration utility for transitioning from old encryption to envelope encryption
 
-import { decryptApiKey, encryptApiKey } from '../security';
+import { secureDecrypt } from '../security';
 import { serverLog } from '../logger';
 import { EnvelopeEncryption } from './envelope';
 import type { Envelope } from './types';
@@ -38,8 +38,8 @@ export class EncryptionMigration {
    */
   async migrateValue(encryptedValue: string): Promise<{ newValue: string; success: boolean; error?: string }> {
     try {
-      // Step 1: Decrypt using old method
-      const plaintext = decryptApiKey(encryptedValue);
+      // Step 1: Decrypt using secureDecrypt (will throw for legacy enc: format)
+      const plaintext = await secureDecrypt(encryptedValue);
       
       // Step 2: Re-encrypt using envelope encryption
       const envelope = await this.encryption.encrypt(plaintext);

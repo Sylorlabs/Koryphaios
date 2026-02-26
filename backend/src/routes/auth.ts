@@ -14,7 +14,10 @@ import {
 } from "../auth";
 import { requireAuth, SESSION_COOKIE_NAME, REFRESH_COOKIE_NAME } from "../middleware";
 import { authLog } from "../logger";
-import { sanitizeString } from "../security";
+import { sanitizeString, RateLimiter } from "../security";
+
+const registerLimiter = new RateLimiter(5, 60_000 * 15);
+const refreshLimiter = new RateLimiter(30, 60_000);
 import { getAllowRegistration } from "../config-schema";
 
 const MAX_USERNAME_LENGTH = 32;
@@ -99,6 +102,11 @@ async function parseBody(req: Request): Promise<{ ok: true; data: any } | { ok: 
 export async function handleRegister(req: Request): Promise<Response> {
   if (!getAllowRegistration()) {
     return json({ ok: false, error: "Registration is disabled" }, 403);
+  }
+  const ip = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "unknown";
+  const { allowed } = registerLimiter.check(ip);
+  if (!allowed) {
+    return json({ ok: false, error: "Too many registration attempts. Please try again later." }, 429);
   }
   try {
     const parsed = await parseBody(req);
@@ -196,6 +204,11 @@ export async function handleLogin(req: Request): Promise<Response> {
  * Accepts refresh token from cookie (koryphaios_refresh) or body (for programmatic clients).
  */
 export async function handleRefresh(req: Request): Promise<Response> {
+  const ip = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "unknown";
+  const { allowed } = refreshLimiter.check(ip);
+  if (!allowed) {
+    return json({ ok: false, error: "Too many refresh attempts. Please try again later." }, 429);
+  }
   try {
     let refreshToken = getCookieValue(req, REFRESH_COOKIE_NAME);
     if (!refreshToken) {

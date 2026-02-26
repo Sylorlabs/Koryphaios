@@ -134,6 +134,9 @@ export function initDb(dataDir: string) {
   db.run(`CREATE INDEX IF NOT EXISTS idx_abort_controllers_session ON abort_controllers(session_id)`);
   db.run(`CREATE INDEX IF NOT EXISTS idx_user_inputs_session ON user_inputs(session_id)`);
   db.run(`CREATE INDEX IF NOT EXISTS idx_session_changes_session ON session_changes(session_id)`);
+  db.run(`CREATE INDEX IF NOT EXISTS idx_messages_session ON messages(session_id, created_at)`);
+  db.run(`CREATE INDEX IF NOT EXISTS idx_sessions_updated ON sessions(updated_at DESC)`);
+  db.run(`CREATE INDEX IF NOT EXISTS idx_refresh_tokens_user ON refresh_tokens(user_id)`);
 
   serverLog.info({ dbPath }, "Database initialized (SQLite/WAL)");
 }

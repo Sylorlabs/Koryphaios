@@ -14,3 +14,6 @@ export interface FeedEntryLocal {
   entries?: FeedEntryLocal[];
   metadata?: Record<string, unknown>;
 }
+
+/** Alias used by store modules */
+export type FeedEntry = FeedEntryLocal;

@@ -3,7 +3,7 @@
 import type { WSMessage } from "@koryphaios/shared";
 import type { RouteHandler, RouteDependencies } from "./types";
 import { json } from "./types";
-import { validateProviderName, sanitizeString, encryptApiKey } from "../security";
+import { validateProviderName, sanitizeString, encryptForStorage } from "../security";
 import { startCopilotDeviceAuth, pollCopilotDeviceAuth } from "../providers/copilot";
 import { googleAuth } from "../providers/google-auth";
 import { cliAuth } from "../providers/cli-auth";
@@ -83,10 +83,10 @@ export function createProviderRoutes(deps: RouteDependencies): RouteHandler[] {
 
                 // Persist credentials
                 if (apiKey) {
-                    persistEnvVar(PROJECT_ROOT, providers.getExpectedEnvVar(providerName as any, "apiKey"), encryptApiKey(apiKey));
+                    persistEnvVar(PROJECT_ROOT, providers.getExpectedEnvVar(providerName as any, "apiKey"), await encryptForStorage(apiKey));
                 }
                 if (authToken) {
-                    persistEnvVar(PROJECT_ROOT, providers.getExpectedEnvVar(providerName as any, "authToken"), encryptApiKey(authToken));
+                    persistEnvVar(PROJECT_ROOT, providers.getExpectedEnvVar(providerName as any, "authToken"), await encryptForStorage(authToken));
                 }
                 if (baseUrl) {
                     persistEnvVar(PROJECT_ROOT, providers.getExpectedEnvVar(providerName as any, "baseUrl"), baseUrl);
@@ -173,7 +173,7 @@ export function createProviderRoutes(deps: RouteDependencies): RouteHandler[] {
                         return json({ ok: false, error: verification.error ?? "Copilot verification failed" }, 400);
                     }
 
-                    persistEnvVar(PROJECT_ROOT, providers.getExpectedEnvVar("copilot", "authToken"), encryptApiKey(poll.accessToken));
+                    persistEnvVar(PROJECT_ROOT, providers.getExpectedEnvVar("copilot", "authToken"), await encryptForStorage(poll.accessToken));
                     providers.refreshProvider("copilot");
 
                     wsManager.broadcast({
