@@ -1,6 +1,19 @@
 import { getDb } from "../db/sqlite";
 import type { KoryTask } from "../kory/manager";
 
+interface DbTaskRow {
+  id: string;
+  session_id: string;
+  description: string;
+  domain: string;
+  assigned_model: string;
+  assigned_provider: string;
+  status: string;
+  result: string | null;
+  error: string | null;
+  plan: string | null;
+}
+
 export interface ITaskStore {
   create(task: Omit<KoryTask, "status" | "result" | "error"> & { sessionId: string; plan?: string }): void;
   update(id: string, updates: Partial<KoryTask> & { status?: string; plan?: string }): void;
@@ -20,7 +33,7 @@ export class TaskStore implements ITaskStore {
 
   update(id: string, updates: Partial<KoryTask> & { status?: string; plan?: string }) {
     const fields: string[] = [];
-    const values: any[] = [];
+    const values: (string | number)[] = [];
     
     if (updates.status) { fields.push("status = ?"); values.push(updates.status); }
     if (updates.result) { fields.push("result = ?"); values.push(updates.result); }
@@ -37,28 +50,28 @@ export class TaskStore implements ITaskStore {
   }
 
   get(id: string) {
-    const row = getDb().query("SELECT * FROM tasks WHERE id = ?").get(id) as any;
+    const row = getDb().query("SELECT * FROM tasks WHERE id = ?").get(id) as DbTaskRow | undefined;
     if (!row) return undefined;
     return this.mapRow(row);
   }
 
   listActive() {
-    const rows = getDb().query("SELECT * FROM tasks WHERE status IN ('active', 'pending')").all() as any[];
+    const rows = getDb().query("SELECT * FROM tasks WHERE status IN ('active', 'pending')").all() as DbTaskRow[];
     return rows.map(this.mapRow);
   }
 
-  private mapRow(row: any): KoryTask & { sessionId: string; plan?: string } {
+  private mapRow(row: DbTaskRow): KoryTask & { sessionId: string; plan?: string } {
     return {
       id: row.id,
       sessionId: row.session_id,
       description: row.description,
-      domain: row.domain,
+      domain: row.domain as KoryTask["domain"],
       assignedModel: row.assigned_model,
       assignedProvider: row.assigned_provider,
-      status: row.status,
-      result: row.result,
-      error: row.error,
-      plan: row.plan,
+      status: row.status as KoryTask["status"],
+      result: row.result ?? undefined,
+      error: row.error ?? undefined,
+      plan: row.plan ?? undefined,
     };
   }
 }
