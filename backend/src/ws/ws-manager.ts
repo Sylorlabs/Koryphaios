@@ -17,7 +17,8 @@ interface WSClient {
 export class WSManager {
   private clients = new Map<string, WSClient>();
   private readonly maxClients = 1000;
-  private heartbeatInterval: Timer;
+  private heartbeatInterval: Timer | null = null;
+  private isShutdown = false;
 
   constructor() {
     // Check for stale connections every 30 seconds
@@ -25,6 +26,10 @@ export class WSManager {
   }
 
   add(ws: ServerWebSocket<WSClientData>) {
+    if (this.isShutdown) {
+      ws.close(1001, "Server shutting down");
+      return;
+    }
     if (this.clients.size >= this.maxClients) {
       ws.close(1013, "Max clients reached");
       return;
@@ -36,6 +41,11 @@ export class WSManager {
 
   remove(ws: ServerWebSocket<WSClientData>) {
     const id = ws.data.id;
+    const client = this.clients.get(id);
+    if (client) {
+      // Clear subscriptions to prevent memory leaks
+      client.subscribedSessions.clear();
+    }
     this.clients.delete(id);
     serverLog.debug({ clientId: id, totalClients: this.clients.size }, "WebSocket client removed");
   }
@@ -59,7 +69,7 @@ export class WSManager {
 
         client.isAlive = false;
         try {
-          client.ws.send(JSON.stringify({ type: "ping" }));
+          client.ws.send(JSON.stringify({ type: "ping", timestamp: Date.now() }));
         } catch (err) {
           // If send fails, assume dead and remove next tick
           serverLog.warn({ clientId: id, error: String(err) }, "Failed to send ping");
@@ -121,6 +131,45 @@ export class WSManager {
 
   get clientCount() {
     return this.clients.size;
+  }
+
+  /**
+   * Shutdown the WebSocket manager.
+   * Closes all connections and clears the heartbeat interval.
+   */
+  shutdown(): void {
+    if (this.isShutdown) return;
+
+    serverLog.info({ clientCount: this.clients.size }, "Shutting down WebSocket manager");
+    this.isShutdown = true;
+
+    // Stop heartbeat
+    if (this.heartbeatInterval) {
+      clearInterval(this.heartbeatInterval);
+      this.heartbeatInterval = null;
+    }
+
+    // Close all connections
+    for (const [id, client] of this.clients) {
+      try {
+        client.ws.close(1001, "Server shutting down");
+        client.subscribedSessions.clear();
+      } catch (err) {
+        serverLog.warn({ clientId: id, error: String(err) }, "Failed to close WebSocket connection");
+      }
+    }
+
+    // Clear all clients
+    this.clients.clear();
+
+    serverLog.info("WebSocket manager shutdown complete");
+  }
+
+  /**
+   * Check if the manager is shut down.
+   */
+  isShuttingDown(): boolean {
+    return this.isShutdown;
   }
 }
 
