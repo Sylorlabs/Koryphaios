@@ -46,13 +46,13 @@ export class SessionStore implements ISessionStore {
   }
 
   get(id: string): Session | undefined {
-    const row = getDb().query("SELECT * FROM sessions WHERE id = ?").get(id) as any;
+    const row = getDb().query("SELECT * FROM sessions WHERE id = ?").get(id) as Record<string, unknown> | undefined;
     if (!row) return undefined;
     return this.rowToSession(row);
   }
 
   list(): Session[] {
-    const rows = getDb().query("SELECT * FROM sessions ORDER BY updated_at DESC").all() as any[];
+    const rows = getDb().query("SELECT * FROM sessions ORDER BY updated_at DESC").all() as Record<string, unknown>[];
     return rows.map((row) => this.rowToSession(row));
   }
 
@@ -81,9 +81,6 @@ export class SessionStore implements ISessionStore {
   }
 
   update(id: string, updates: Partial<Session>): Session | undefined {
-    const fields = Object.keys(updates).filter((k) => k !== "id");
-    if (fields.length === 0) return this.get(id);
-
     const mapping: Record<string, string> = {
       title: "title",
       messageCount: "message_count",
@@ -93,12 +90,15 @@ export class SessionStore implements ISessionStore {
       updatedAt: "updated_at",
     };
 
-    const sets = fields.map((f) => `${mapping[f] || f} = ?`).join(", ");
-    const values = fields.map((f) => (updates as any)[f]);
+    const fields = Object.keys(updates).filter((k) => k !== "id" && k in mapping);
+    if (fields.length === 0) return this.get(id);
+
+    const sets = fields.map((f) => `${mapping[f]} = ?`).join(", ");
+    const values: unknown[] = fields.map((f) => (updates as Record<string, unknown>)[f]);
     values.push(Date.now());
     values.push(id);
 
-    getDb().run(`UPDATE sessions SET ${sets}, updated_at = ? WHERE id = ?`, values);
+    getDb().run(`UPDATE sessions SET ${sets}, updated_at = ? WHERE id = ?`, values as Parameters<ReturnType<typeof getDb>["run"]>[1]);
     return this.get(id);
   }
 

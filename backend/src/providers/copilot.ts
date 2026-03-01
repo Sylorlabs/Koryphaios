@@ -138,46 +138,7 @@ export function detectCopilotToken(): string | null {
   return null;
 }
 
-export function resolveCopilotBearerToken(githubToken?: string | null): string | null {
-  if (!githubToken) return null;
-  return exchangeGitHubTokenForCopilot(githubToken);
-}
-
-// Exchange GitHub OAuth token for Copilot bearer token (mirrors OpenCode's exchangeGitHubToken)
-function exchangeGitHubTokenForCopilot(githubToken: string): string | null {
-  // Use Bun.spawnSync + curl for synchronous exchange in constructor
-  const proc = Bun.spawnSync(
-    [
-      "curl", "-sS",
-      "https://api.github.com/copilot_internal/v2/token",
-      "-H", `Authorization: Token ${githubToken}`,
-      "-H", "User-Agent: Koryphaios/1.0",
-      "-H", "Accept: application/json",
-    ],
-    { stdout: "pipe", stderr: "pipe", timeout: 15_000 },
-  );
-
-  if (proc.exitCode !== 0) {
-    const stderr = proc.stderr ? new TextDecoder().decode(proc.stderr).trim() : "";
-    console.error("[copilot] Token exchange failed:", stderr || `exit code ${proc.exitCode}`);
-    return null;
-  }
-
-  try {
-    const body = proc.stdout ? new TextDecoder().decode(proc.stdout) : "";
-    const parsed = JSON.parse(body) as { token?: string; expires_at?: number };
-    if (!parsed.token) {
-      console.error("[copilot] Token exchange returned no token:", body.slice(0, 200));
-      return null;
-    }
-    return parsed.token;
-  } catch (err) {
-    console.error("[copilot] Token exchange parse error:", err);
-    return null;
-  }
-}
-
-// Async version for verification/refresh flows
+// Async token exchange (single implementation — no sync Bun.spawnSync)
 export async function exchangeGitHubTokenForCopilotAsync(githubToken: string): Promise<string | null> {
   try {
     const resp = await fetch("https://api.github.com/copilot_internal/v2/token", {

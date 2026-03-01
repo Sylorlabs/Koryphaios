@@ -2,7 +2,7 @@ module.exports = {
   apps: [
     {
       name: "kory-backend",
-      cwd: "/home/micah/Desktop/sylorlabs projects/Koryphaios",
+      cwd: __dirname,
       script: "bun",
       args: "run --filter backend dev",
       autorestart: true,
@@ -14,7 +14,7 @@ module.exports = {
     },
     {
       name: "kory-frontend",
-      cwd: "/home/micah/Desktop/sylorlabs projects/Koryphaios",
+      cwd: __dirname,
       script: "bun",
       args: "run --filter frontend dev",
       autorestart: true,
