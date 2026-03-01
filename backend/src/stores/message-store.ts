@@ -5,14 +5,27 @@ const GET_ALL_SQL = "SELECT * FROM messages WHERE session_id = ? ORDER BY create
 const GET_RECENT_SQL = "SELECT * FROM messages WHERE session_id = ? ORDER BY created_at DESC LIMIT ?";
 const ADD_SQL = "INSERT INTO messages (id, session_id, role, content, model, provider, tokens_in, tokens_out, cost, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
 
-function rowToMessage(row: any): StoredMessage {
+interface DbMessageRow {
+  id: string;
+  session_id: string;
+  role: string;
+  content: string;
+  model: string | null;
+  provider: string | null;
+  tokens_in: number;
+  tokens_out: number;
+  cost: number;
+  created_at: number;
+}
+
+function rowToMessage(row: DbMessageRow): StoredMessage {
   return {
     id: row.id,
     sessionId: row.session_id,
-    role: row.role,
+    role: row.role as StoredMessage["role"],
     content: row.content,
-    model: row.model,
-    provider: row.provider,
+    model: row.model ?? undefined,
+    provider: row.provider ?? undefined,
     tokensIn: row.tokens_in,
     tokensOut: row.tokens_out,
     cost: row.cost,
@@ -46,10 +59,10 @@ export class MessageStore implements IMessageStore {
   }
 
   getAll(sessionId: string, limit = 1000): StoredMessage[] {
-    return (this.getAllStmt.all(sessionId, limit) as any[]).map(rowToMessage);
+    return (this.getAllStmt.all(sessionId, limit) as DbMessageRow[]).map(rowToMessage);
   }
 
   getRecent(sessionId: string, limit = 10): StoredMessage[] {
-    return (this.getRecentStmt.all(sessionId, limit) as any[]).reverse().map(rowToMessage);
+    return (this.getRecentStmt.all(sessionId, limit) as DbMessageRow[]).reverse().map(rowToMessage);
   }
 }
