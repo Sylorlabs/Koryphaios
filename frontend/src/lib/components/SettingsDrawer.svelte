@@ -50,6 +50,7 @@
   };
 
   let availableProviderTypes = $state<Array<{ name: string; authMode: string }>>([]);
+  let providersLoadAttempted = $state(false);
 
   function getProviderDisplayLabel(name: string): string {
     return PROVIDER_LABELS[name] ?? (name.charAt(0).toUpperCase() + name.slice(1));
@@ -255,7 +256,12 @@
   });
 
   $effect(() => {
-    if (open && activeTab === 'providers' && availableProviderTypes.length === 0) {
+    if (!open) {
+      providersLoadAttempted = false;
+      return;
+    }
+    if (activeTab === 'providers' && availableProviderTypes.length === 0 && !providersLoadAttempted) {
+      providersLoadAttempted = true;
       void loadAvailableProviders();
     }
   });
