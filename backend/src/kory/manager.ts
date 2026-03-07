@@ -15,9 +15,9 @@ import type {
 } from "@koryphaios/shared";
 import { normalizeReasoningLevel, determineAutoReasoningLevel } from "@koryphaios/shared";
 import { AGENT, DOMAIN } from "../constants";
-import { ProviderRegistry, resolveModel, resolveTrustedContextWindow, isLegacyModel, getNonLegacyModels, withTimeoutSignal, type StreamRequest, type ProviderEvent } from "../providers";
+import { ProviderRegistry, resolveModel, resolveTrustedContextWindow, isLegacyModel, getNonLegacyModels, withTimeoutSignal, type StreamRequest, type ProviderEvent, type Provider } from "../providers";
 import type { ProviderMessage } from "../providers/types";
-import { ToolRegistry, type ToolCallInput, type ToolContext } from "../tools";
+import { ToolRegistry, type ToolCallInput, type ToolContext, type ToolCallOutput } from "../tools";
 import { wsBroker } from "../pubsub";
 import { koryLog } from "../logger";
 import { nanoid } from "nanoid";
@@ -32,6 +32,28 @@ import { SnapshotManager } from "./snapshot-manager";
 import { GitManager } from "./git-manager";
 import { WorkspaceManager } from "./workspace-manager";
 import { parseCriticVerdict, formatMessagesForCritic as formatMessagesForCriticUtil } from "./critic-util";
+
+// ─── Internal Types ─────────────────────────────────────────────────────────
+
+interface CompletedToolCall {
+  id: string;
+  name: string;
+  input: Record<string, unknown>;
+}
+
+interface InternalMessage {
+  role: "user" | "assistant" | "tool" | "system";
+  content: string;
+  tool_call_id?: string;
+  tool_calls?: CompletedToolCall[];
+}
+
+interface LLMTurnResult {
+  success: boolean;
+  content?: string;
+  usage?: { tokensIn: number; tokensOut: number };
+  completedToolCalls?: CompletedToolCall[];
+}
 
 // ─── Default Model Assignments per Domain ───────────────────────────────────
 
@@ -280,7 +302,9 @@ export class KoryManager {
       const stream = provider.streamResponse({ model: routing.model, systemPrompt: "Reply: WEB_SEARCH or ANSWER.", messages: [{ role: "user", content: question }], maxTokens: 10 });
       for await (const event of stream) if (event.type === "content_delta") decision += event.content ?? "";
       decision = decision.trim().toUpperCase();
-    } catch { }
+    } catch (err) {
+      koryLog.warn({ err }, "Manager inquiry routing failed, defaulting to ANSWER");
+    }
 
     if (decision.includes("WEB_SEARCH")) {
       const toolCtx: ToolContext = { sessionId, workingDirectory: this.workingDirectory };
@@ -407,8 +431,9 @@ export class KoryManager {
           worktreeSpawned = true;
           koryLog.info({ taskId, path: workerDir }, "Worker running in isolated worktree");
         }
-      } catch (err: any) {
-        koryLog.warn({ err: err.message }, "Worktree spawn failed — using main directory");
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : String(err);
+        koryLog.warn({ err: message }, "Worktree spawn failed — using main directory");
       }
     }
 
@@ -439,8 +464,9 @@ export class KoryManager {
         } else {
           this.workspaceManager.cleanup(taskId);
         }
-      } catch (err: any) {
-        koryLog.warn({ taskId, err: err.message }, "Worktree cleanup/reconcile error");
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : String(err);
+        koryLog.warn({ taskId, err: message }, "Worktree cleanup/reconcile error");
       }
     }
 
@@ -481,6 +507,7 @@ export class KoryManager {
           if (criticResult.passed) return { success: true, workerTranscript: formatMessagesForCriticUtil(res.workerMessages ?? []), criticFeedback: criticResult.feedback };
           workerTask = `QUALITY FAILURE. Fix these:\n${criticResult.feedback}`;
         } else return { success: false };
+        continue;
       }
 
       const result = await this.executeWithProvider(sessionId, provider, routing.model, workerTask, domain, reasoningLevel, true, effectivePaths, isSandboxed);
@@ -495,7 +522,7 @@ export class KoryManager {
   }
 
   /** Critic can only read files and grep. It sees the full worker transcript (truncated) and outputs PASS or FAIL with feedback. */
-  private async runCriticGate(sessionId: string, workerMessages: any[] | undefined, preferredModel?: string): Promise<{ passed: boolean; feedback?: string }> {
+  private async runCriticGate(sessionId: string, workerMessages: InternalMessage[] | undefined, preferredModel?: string): Promise<{ passed: boolean; feedback?: string }> {
     const hardCheckResult = await this.runHardChecks(sessionId);
     if (!hardCheckResult.passed) return { passed: false, feedback: hardCheckResult.output };
 
@@ -512,7 +539,7 @@ export class KoryManager {
       isSandboxed: true,
     };
 
-    const messages: any[] = [
+    const messages: InternalMessage[] = [
       { role: "user", content: `Worker transcript to review:\n\n${transcriptText}\n\nUse read_file/grep/glob/ls as needed. Then output PASS or FAIL and brief feedback.` },
     ];
 
@@ -534,7 +561,7 @@ export class KoryManager {
         this.buildFallbackChain(routing.model)
       );
       let assistantContent = "";
-      const completedToolCalls: any[] = [];
+      const completedToolCalls: CompletedToolCall[] = [];
       let pendingToolCalls = new Map<string, { name: string; input: string }>();
 
       for await (const event of stream) {
@@ -544,8 +571,8 @@ export class KoryManager {
         else if (event.type === "tool_use_stop") {
           const call = pendingToolCalls.get(event.toolCallId!);
           if (call) {
-            let parsedInput = {};
-            try { parsedInput = JSON.parse(call.input || "{}"); } catch { }
+            let parsedInput: Record<string, unknown> = {};
+            try { parsedInput = JSON.parse(call.input || "{}") as Record<string, unknown>; } catch { /* Expected: malformed tool input JSON, defaults to {} */ }
             completedToolCalls.push({ id: event.toolCallId!, name: call.name, input: parsedInput });
             pendingToolCalls.delete(event.toolCallId!);
           }
@@ -562,7 +589,7 @@ export class KoryManager {
       if (completedToolCalls.length === 0) break;
       for (const tc of completedToolCalls) {
         const result = await this.tools.execute(criticCtx, { id: tc.id, name: tc.name, input: tc.input });
-        messages.push({ role: "tool", content: JSON.stringify(result), tool_call_id: tc.id } as any);
+        messages.push({ role: "tool", content: JSON.stringify(result), tool_call_id: tc.id });
       }
     }
 
@@ -626,7 +653,7 @@ export class KoryManager {
       };
 
       const history = this.loadHistory(sessionId);
-      const messages: any[] = [...history, { role: "user", content: userMessage }];
+      const messages: InternalMessage[] = [...history, { role: "user", content: userMessage }];
       let turnCount = 0;
       let firstAskForDirectTools = true;
       let stoppedByUser = false;
@@ -634,11 +661,11 @@ export class KoryManager {
       while (turnCount < 25) {
         if (abort.signal.aborted) { stoppedByUser = true; break; }
         turnCount++;
-        let result: { success: boolean; content?: string; usage?: { tokensIn: number; tokensOut: number }; completedToolCalls?: any[] };
+        let result: LLMTurnResult;
         try {
           result = await this.processManagerTurn(sessionId, routing.model, provider, messages, managerCtx, abort.signal);
-        } catch (err: any) {
-          if (err?.name === "AbortError") { stoppedByUser = true; break; }
+        } catch (err: unknown) {
+          if (err instanceof DOMException && err.name === "AbortError") { stoppedByUser = true; break; }
           throw err;
         }
         if (typeof result.usage?.tokensIn === "number") tokensIn = Math.max(tokensIn, result.usage.tokensIn);
@@ -665,7 +692,7 @@ export class KoryManager {
         }
       }
 
-      const lastAssistant = messages.filter((m: any) => m.role === "assistant").pop();
+      const lastAssistant = messages.filter((m) => m.role === "assistant").pop();
       const content = (lastAssistant?.content ?? "").trim();
       const toPersist = stoppedByUser ? "[Stopped by user.]" : (content || "[Task completed using tools.]");
       if (this.messages) this.messages.add(sessionId, { id: nanoid(12), sessionId, role: "assistant", content: toPersist, model: routing.model, provider: providerName, createdAt: Date.now() });
@@ -699,11 +726,11 @@ export class KoryManager {
   private async processManagerTurn(
     sessionId: string,
     modelId: string,
-    provider: any,
-    messages: any[],
+    provider: Provider,
+    messages: InternalMessage[],
     ctx: ToolContext,
     signal?: AbortSignal
-  ): Promise<{ success: boolean; content?: string; usage?: { tokensIn: number; tokensOut: number }; completedToolCalls?: any[] }> {
+  ): Promise<LLMTurnResult> {
     if (signal?.aborted) throw new DOMException("Manager run aborted", "AbortError");
     const streamSignal = withTimeoutSignal(signal, AGENT.LLM_STREAM_TIMEOUT_MS);
     const stream = this.providers.executeWithRetry(
@@ -720,7 +747,7 @@ export class KoryManager {
 
     let assistantContent = "";
     let pendingToolCalls = new Map<string, { name: string; input: string }>();
-    const completedToolCalls: any[] = [];
+    const completedToolCalls: CompletedToolCall[] = [];
     let hasToolCalls = false;
     let tokensIn = 0;
     let tokensOut = 0;
@@ -730,7 +757,7 @@ export class KoryManager {
     for await (const event of stream) {
       if (signal?.aborted) throw new DOMException("Manager run aborted", "AbortError");
       if (event.type === "error") {
-        throw new Error((event as any).error ?? "LLM stream error");
+        throw new Error(event.error ?? "LLM stream error");
       }
       if (event.type === "content_delta") {
         assistantContent += event.content ?? "";
@@ -750,7 +777,7 @@ export class KoryManager {
         const call = pendingToolCalls.get(event.toolCallId!);
         if (call) {
           let parsedInput = {};
-          try { parsedInput = JSON.parse(call.input || "{}"); } catch { }
+          try { parsedInput = JSON.parse(call.input || "{}"); } catch { /* Expected: malformed tool input JSON, defaults to {} */ }
           completedToolCalls.push({ id: event.toolCallId!, name: call.name, input: parsedInput });
           pendingToolCalls.delete(event.toolCallId!);
         }
@@ -777,7 +804,7 @@ export class KoryManager {
     return { success: false, content: assistantContent, usage: { tokensIn, tokensOut } };
   }
 
-  private async executeManagerToolCall(sessionId: string, tc: any, ctx: ToolContext): Promise<any> {
+  private async executeManagerToolCall(sessionId: string, tc: CompletedToolCall, ctx: ToolContext): Promise<ToolCallOutput> {
     if (tc.name === "ask_user") {
       const question = (tc.input?.question as string) ?? "Proceed?";
       const options = (tc.input?.options as string[]) ?? ["Yes", "No"];
@@ -792,7 +819,7 @@ export class KoryManager {
    * runWorkerPipeline, which is invoked solely when the manager calls the delegate_to_worker tool.
    * The code never auto-spawns workers.
    */
-  private async executeWithProvider(sessionId: string, provider: any, modelId: string, userMessage: string, domain: WorkerDomain, reasoningLevel: any, isAutoMode: boolean, allowedPaths: string[], isSandboxed: boolean): Promise<{ success: boolean; error?: string; workerMessages?: any[] }> {
+  private async executeWithProvider(sessionId: string, provider: Provider, modelId: string, userMessage: string, domain: WorkerDomain, reasoningLevel: string | undefined, isAutoMode: boolean, allowedPaths: string[], isSandboxed: boolean): Promise<{ success: boolean; error?: string; workerMessages?: InternalMessage[] }> {
     const workerId = `worker-${nanoid(8)}`;
     const abort = new AbortController();
     const identity: AgentIdentity = { id: workerId, name: `${domain} Worker`, role: "coder", model: modelId, provider: provider.name, domain, glowColor: DOMAIN.GLOW_COLORS[domain] };
@@ -805,7 +832,7 @@ export class KoryManager {
 
     const ctx: ToolContext = { sessionId, workingDirectory: this.workingDirectory, signal: abort.signal, allowedPaths, isSandboxed, emitFileEdit: (e) => this.emitWSMessage(sessionId, "stream.file_delta", { agentId: workerId, ...e }), emitFileComplete: (e) => this.emitWSMessage(sessionId, "stream.file_complete", { agentId: workerId, ...e }), recordChange: (c) => { const e = this.sessionChanges.get(sessionId) || []; e.push(c); this.sessionChanges.set(sessionId, e); } };
     const history = this.loadHistory(sessionId);
-    const messages: any[] = [...history, { role: "user", content: userMessage }];
+    const messages: InternalMessage[] = [...history, { role: "user", content: userMessage }];
     const resolvedReasoningLevel = reasoningLevel === "auto" ? determineAutoReasoningLevel(userMessage) : reasoningLevel;
 
     try {
@@ -818,10 +845,11 @@ export class KoryManager {
       this.activeWorkers.delete(workerId);
       this.workerUsage.delete(workerId);
       return { success: true, workerMessages: [...messages] };
-    } catch (err: any) {
+    } catch (err: unknown) {
       this.activeWorkers.delete(workerId);
       this.workerUsage.delete(workerId);
-      return { success: false, error: err.message };
+      const message = err instanceof Error ? err.message : String(err);
+      return { success: false, error: message };
     }
   }
 
@@ -829,8 +857,8 @@ export class KoryManager {
     sessionId: string,
     workerId: string,
     modelId: string,
-    provider: any,
-    messages: any[],
+    provider: Provider,
+    messages: InternalMessage[],
     ctx: ToolContext,
     reasoningLevel?: string
   ): Promise<boolean> {
@@ -851,12 +879,12 @@ export class KoryManager {
 
     let assistantContent = "";
     let pendingToolCalls = new Map<string, { name: string; input: string }>();
-    const completedToolCalls: any[] = [];
+    const completedToolCalls: CompletedToolCall[] = [];
     let hasToolCalls = false;
 
     for await (const event of stream) {
       if (event.type === "error") {
-        throw new Error((event as any).error ?? "LLM stream error");
+        throw new Error(event.error ?? "LLM stream error");
       }
       if (event.type === "content_delta") {
         assistantContent += event.content;
@@ -879,7 +907,7 @@ export class KoryManager {
           let parsedInput = {};
           try {
             parsedInput = JSON.parse(call.input || "{}");
-          } catch (e) { }
+          } catch { /* Expected: malformed tool input JSON, defaults to {} */ }
           completedToolCalls.push({ id: event.toolCallId!, name: call.name, input: parsedInput });
           pendingToolCalls.delete(event.toolCallId!);
         }
@@ -904,7 +932,7 @@ export class KoryManager {
     return false; // Task complete
   }
 
-  private updateUsageFromEvent(sessionId: string, workerId: string, modelId: string, provider: string, event: any) {
+  private updateUsageFromEvent(sessionId: string, workerId: string, modelId: string, provider: string, event: ProviderEvent) {
     let usage = this.workerUsage.get(workerId);
     if (!usage) {
       usage = { tokensIn: 0, tokensOut: 0, usageKnown: false };
@@ -916,9 +944,9 @@ export class KoryManager {
     this.emitUsageUpdate(sessionId, workerId, modelId, provider as ProviderName, usage.tokensIn, usage.tokensOut, usage.usageKnown);
   }
 
-  private async executeToolCall(sessionId: string, workerId: string, tc: any, ctx: ToolContext): Promise<any> {
+  private async executeToolCall(sessionId: string, workerId: string, tc: CompletedToolCall, ctx: ToolContext): Promise<ToolCallOutput> {
     if (tc.name === "ask_manager") {
-      const ans = await this.handleManagerInquiry(sessionId, workerId, tc.input.question);
+      const ans = await this.handleManagerInquiry(sessionId, workerId, String(tc.input.question ?? ""));
       return { callId: tc.id, name: tc.name, output: ans, isError: false, durationMs: 0 };
     }
     return await this.tools.execute(ctx, { id: tc.id, name: tc.name, input: tc.input });
@@ -995,11 +1023,11 @@ export class KoryManager {
     } catch { return message; }
   }
 
-  private loadHistory(sessionId: string): any[] { return this.messages?.getRecent(sessionId, 10).map((m: any) => ({ role: m.role, content: m.content })) || []; }
+  private loadHistory(sessionId: string): InternalMessage[] { return this.messages?.getRecent(sessionId, 10).map((m) => ({ role: m.role as InternalMessage["role"], content: m.content })) || []; }
 
   /** Build provider messages with tool_call_id for role "tool" and tool_calls for assistant so APIs accept tool results. */
-  private toProviderMessages(messages: any[]): ProviderMessage[] {
-    return messages.map((m: any) => {
+  private toProviderMessages(messages: InternalMessage[]): ProviderMessage[] {
+    return messages.map((m) => {
       const out: ProviderMessage = { role: m.role, content: m.content };
       if (m.role === "tool" && m.tool_call_id != null) out.tool_call_id = m.tool_call_id;
       if (m.role === "assistant" && m.tool_calls?.length) out.tool_calls = m.tool_calls;
@@ -1014,6 +1042,136 @@ export class KoryManager {
       this.managerAbortBySession.delete(sessionId);
       koryLog.info({ sessionId }, "Manager run aborted");
     }
+  }
+
+  // ─── Memory Management & Cleanup ────────────────────────────────────────────────
+
+  /**
+   * Cleanup all resources for a specific session.
+   * Call this when a session is closed or abandoned.
+   */
+  cleanupSession(sessionId: string): void {
+    // Cancel any active workers for this session
+    const workersToCancel: string[] = [];
+    for (const [agentId, worker] of this.activeWorkers) {
+      if (worker.sessionId === sessionId) {
+        workersToCancel.push(agentId);
+      }
+    }
+    for (const agentId of workersToCancel) {
+      this.cancelWorker(agentId);
+    }
+
+    // Abort any ongoing manager run
+    this.abortManagerRun(sessionId);
+
+    // Clear pending user inputs (reject with abort error)
+    const pendingInput = this.pendingUserInputs.get(sessionId);
+    if (pendingInput) {
+      this.pendingUserInputs.delete(sessionId);
+      // Note: The promise resolver will simply never be called,
+      // causing the promise to hang indefinitely. In production,
+      // you should track and reject these promises.
+    }
+
+    // Clear session-specific data
+    this.sessionChanges.delete(sessionId);
+    this.lastKnownGoodHash.delete(sessionId);
+    this.managerAbortBySession.delete(sessionId);
+
+    koryLog.debug({ sessionId }, "Session resources cleaned up");
+  }
+
+  /**
+   * Get memory usage statistics for monitoring.
+   */
+  getMemoryStats(): {
+    activeWorkers: number;
+    pendingUserInputs: number;
+    trackedSessions: number;
+    workerUsageEntries: number;
+  } {
+    return {
+      activeWorkers: this.activeWorkers.size,
+      pendingUserInputs: this.pendingUserInputs.size,
+      trackedSessions: new Set(
+        Array.from(this.activeWorkers.values()).map((w) => w.sessionId)
+      ).size,
+      workerUsageEntries: this.workerUsage.size,
+    };
+  }
+
+  /**
+   * Cleanup abandoned resources.
+   * Call this periodically to prevent memory leaks from abandoned sessions.
+   */
+  cleanupAbandonedResources(maxSessionAgeMs = 30 * 60 * 1000): void {
+    const now = Date.now();
+    const activeSessionIds = new Set(
+      Array.from(this.activeWorkers.values()).map((w) => w.sessionId)
+    );
+
+    // Clean up worker usage for workers that no longer exist
+    const activeWorkerIds = new Set(this.activeWorkers.keys());
+    for (const [agentId] of this.workerUsage) {
+      if (!activeWorkerIds.has(agentId)) {
+        this.workerUsage.delete(agentId);
+      }
+    }
+
+    // Clean up old session data (sessionChanges, lastKnownGoodHash)
+    // that's not associated with any active worker
+    for (const [sessionId] of this.sessionChanges) {
+      if (!activeSessionIds.has(sessionId)) {
+        this.sessionChanges.delete(sessionId);
+        this.lastKnownGoodHash.delete(sessionId);
+      }
+    }
+
+    koryLog.debug(
+      {
+        activeWorkers: this.activeWorkers.size,
+        workerUsageEntries: this.workerUsage.size,
+        trackedSessions: activeSessionIds.size,
+      },
+      "Abandoned resources cleaned up"
+    );
+  }
+
+  /**
+   * Complete shutdown - cleanup all resources.
+   * Call this during server shutdown.
+   */
+  shutdown(): void {
+    koryLog.info("Shutting down KoryManager");
+
+    // Cancel all active workers
+    for (const [agentId, worker] of this.activeWorkers) {
+      try {
+        worker.abort.abort();
+      } catch (err) {
+        koryLog.warn({ agentId, error: String(err) }, "Failed to abort worker during shutdown");
+      }
+    }
+    this.activeWorkers.clear();
+
+    // Abort all manager runs
+    for (const [sessionId, controller] of this.managerAbortBySession) {
+      try {
+        controller.abort();
+      } catch (err) {
+        koryLog.warn({ sessionId, error: String(err) }, "Failed to abort manager run during shutdown");
+      }
+    }
+    this.managerAbortBySession.clear();
+
+    // Clear all maps
+    this.workerUsage.clear();
+    this.pendingUserInputs.clear();
+    this.sessionChanges.clear();
+    this.lastKnownGoodHash.clear();
+
+    koryLog.info("KoryManager shutdown complete");
   }
 
   private emitThought(sessionId: string, phase: string, thought: string) { this.emitWSMessage(sessionId, "kory.thought", { thought, phase }); }

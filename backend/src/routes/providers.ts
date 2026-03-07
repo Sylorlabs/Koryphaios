@@ -1,6 +1,9 @@
 // Provider routes — handles provider configuration and authentication
 
 import type { WSMessage } from "@koryphaios/shared";
+import type { ProviderName } from "@koryphaios/shared";
+import type { ProviderRegistry } from "../providers";
+import type { WSManager } from "../ws/ws-manager";
 import type { RouteHandler, RouteDependencies } from "./types";
 import { json } from "./types";
 import { validateProviderName, sanitizeString, encryptForStorage } from "../security";
@@ -9,6 +12,7 @@ import { googleAuth } from "../providers/google-auth";
 import { cliAuth } from "../providers/cli-auth";
 import { persistEnvVar, clearEnvVar } from "../runtime/env";
 import { PROJECT_ROOT } from "../runtime/paths";
+import { serverLog } from "../logger";
 
 export function createProviderRoutes(deps: RouteDependencies): RouteHandler[] {
     const { providers, wsManager } = deps;
@@ -56,7 +60,7 @@ export function createProviderRoutes(deps: RouteDependencies): RouteHandler[] {
                 const isPreferencesOnlyUpdate = !apiKey && !authToken && !baseUrl
                     && (body.selectedModels !== undefined || body.hideModelSelector !== undefined);
 
-                const result = providers.setCredentials(providerName as any, {
+                const result = providers.setCredentials(providerName as ProviderName, {
                     ...(apiKey && { apiKey }),
                     ...(authToken && { authToken }),
                     ...(baseUrl && { baseUrl }),
@@ -69,27 +73,27 @@ export function createProviderRoutes(deps: RouteDependencies): RouteHandler[] {
                 }
 
                 if (!isPreferencesOnlyUpdate) {
-                    const verification = await providers.verifyConnection(providerName as any, {
+                    const verification = await providers.verifyConnection(providerName as ProviderName, {
                         ...(apiKey && { apiKey }),
                         ...(authToken && { authToken }),
                         ...(baseUrl && { baseUrl }),
                     });
 
                     if (!verification.success) {
-                        providers.removeApiKey(providerName as any);
+                        providers.removeApiKey(providerName as ProviderName);
                         return json({ ok: false, error: verification.error ?? "Provider verification failed" }, 400);
                     }
                 }
 
                 // Persist credentials
                 if (apiKey) {
-                    persistEnvVar(PROJECT_ROOT, providers.getExpectedEnvVar(providerName as any, "apiKey"), await encryptForStorage(apiKey));
+                    persistEnvVar(PROJECT_ROOT, providers.getExpectedEnvVar(providerName as ProviderName, "apiKey"), await encryptForStorage(apiKey));
                 }
                 if (authToken) {
-                    persistEnvVar(PROJECT_ROOT, providers.getExpectedEnvVar(providerName as any, "authToken"), await encryptForStorage(authToken));
+                    persistEnvVar(PROJECT_ROOT, providers.getExpectedEnvVar(providerName as ProviderName, "authToken"), await encryptForStorage(authToken));
                 }
                 if (baseUrl) {
-                    persistEnvVar(PROJECT_ROOT, providers.getExpectedEnvVar(providerName as any, "baseUrl"), baseUrl);
+                    persistEnvVar(PROJECT_ROOT, providers.getExpectedEnvVar(providerName as ProviderName, "baseUrl"), baseUrl);
                 }
 
                 wsManager.broadcast({
@@ -113,10 +117,10 @@ export function createProviderRoutes(deps: RouteDependencies): RouteHandler[] {
                     return json({ ok: false, error: "Invalid provider name" }, 400);
                 }
 
-                providers.removeApiKey(providerName as any);
-                clearEnvVar(PROJECT_ROOT, providers.getExpectedEnvVar(providerName as any, "apiKey"));
-                clearEnvVar(PROJECT_ROOT, providers.getExpectedEnvVar(providerName as any, "authToken"));
-                clearEnvVar(PROJECT_ROOT, providers.getExpectedEnvVar(providerName as any, "baseUrl"));
+                providers.removeApiKey(providerName as ProviderName);
+                clearEnvVar(PROJECT_ROOT, providers.getExpectedEnvVar(providerName as ProviderName, "apiKey"));
+                clearEnvVar(PROJECT_ROOT, providers.getExpectedEnvVar(providerName as ProviderName, "authToken"));
+                clearEnvVar(PROJECT_ROOT, providers.getExpectedEnvVar(providerName as ProviderName, "baseUrl"));
 
                 wsManager.broadcast({
                     type: "provider.status",
@@ -136,8 +140,9 @@ export function createProviderRoutes(deps: RouteDependencies): RouteHandler[] {
                 try {
                     const start = await startCopilotDeviceAuth();
                     return json({ ok: true, data: start }, 200);
-                } catch (err: any) {
-                    return json({ ok: false, error: err.message ?? "Failed to start Copilot auth" }, 400);
+                } catch (err: unknown) {
+                    const message = err instanceof Error ? err.message : String(err);
+                    return json({ ok: false, error: message ?? "Failed to start Copilot auth" }, 400);
                 }
             },
         },
@@ -183,8 +188,9 @@ export function createProviderRoutes(deps: RouteDependencies): RouteHandler[] {
                     } satisfies WSMessage);
 
                     return json({ ok: true, data: { status: "connected" } }, 200);
-                } catch (err: any) {
-                    return json({ ok: false, error: err.message ?? "Failed to complete Copilot auth" }, 400);
+                } catch (err: unknown) {
+                    const message = err instanceof Error ? err.message : String(err);
+                    return json({ ok: false, error: message ?? "Failed to complete Copilot auth" }, 400);
                 }
             },
         },
@@ -197,22 +203,9 @@ export function createProviderRoutes(deps: RouteDependencies): RouteHandler[] {
                 try {
                     const result = await googleAuth.startGeminiCLIAuth();
                     return json({ ok: true, data: result }, 200);
-                } catch (err: any) {
-                    return json({ ok: false, error: err.message }, 500);
-                }
-            },
-        },
-
-        // POST /api/providers/anthropic/auth/cli — Anthropic CLI auth
-        {
-            path: "/api/providers/anthropic/auth/cli",
-            method: "POST",
-            handler: async (req, _params, ctx) => {
-                try {
-                    const result = await cliAuth.authenticateClaude();
-                    return json({ ok: true, data: result }, 200);
-                } catch (err: any) {
-                    return json({ ok: false, error: err.message }, 500);
+                } catch (err: unknown) {
+                    const message = err instanceof Error ? err.message : String(err);
+                    return json({ ok: false, error: message }, 500);
                 }
             },
         },
@@ -225,8 +218,9 @@ export function createProviderRoutes(deps: RouteDependencies): RouteHandler[] {
                 try {
                     const result = await cliAuth.authenticateCodex();
                     return json({ ok: true, data: result }, 200);
-                } catch (err: any) {
-                    return json({ ok: false, error: err.message }, 500);
+                } catch (err: unknown) {
+                    const message = err instanceof Error ? err.message : String(err);
+                    return json({ ok: false, error: message }, 500);
                 }
             },
         },
@@ -237,14 +231,16 @@ export function createProviderRoutes(deps: RouteDependencies): RouteHandler[] {
             method: "POST",
             handler: async (req, _params, ctx) => {
                 // Get all configured provider names
-                const providerNames = Array.from(providers.getAvailable().map((p: any) => p.name));
+                const providerNames = Array.from(providers.getAvailable().map((p) => p.name));
                 for (const name of providerNames) {
                     try {
-                        providers.removeApiKey(name as any);
-                        clearEnvVar(PROJECT_ROOT, providers.getExpectedEnvVar(name as any, "apiKey"));
-                        clearEnvVar(PROJECT_ROOT, providers.getExpectedEnvVar(name as any, "authToken"));
-                        clearEnvVar(PROJECT_ROOT, providers.getExpectedEnvVar(name as any, "baseUrl"));
-                    } catch { }
+                        providers.removeApiKey(name as ProviderName);
+                        clearEnvVar(PROJECT_ROOT, providers.getExpectedEnvVar(name as ProviderName, "apiKey"));
+                        clearEnvVar(PROJECT_ROOT, providers.getExpectedEnvVar(name as ProviderName, "authToken"));
+                        clearEnvVar(PROJECT_ROOT, providers.getExpectedEnvVar(name as ProviderName, "baseUrl"));
+                    } catch (err) {
+                        serverLog.warn({ provider: name, err }, "Failed to disconnect provider");
+                    }
                 }
 
                 wsManager.broadcast({
@@ -263,8 +259,8 @@ export function createProviderRoutes(deps: RouteDependencies): RouteHandler[] {
 async function handleCliAuth(
     providerName: string,
     authMode: string,
-    providers: any,
-    wsManager: any
+    providers: ProviderRegistry,
+    wsManager: WSManager
 ): Promise<Response> {
     const targetProvider = authMode === "codex" ? "codex" : authMode === "claude_code" ? "anthropic" : "google";
     // Antigravity is OAuth (no CLI). Others need the binary in PATH; use Bun.which for Windows.
