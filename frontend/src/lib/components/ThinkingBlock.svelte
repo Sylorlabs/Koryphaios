@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { ChevronDown, Lightbulb, Clock } from 'lucide-svelte';
+  import { ChevronDown, Brain, Clock } from 'lucide-svelte';
   import { slide } from 'svelte/transition';
 
   interface Props {
@@ -31,7 +31,7 @@
     onclick={() => expanded = !expanded}
   >
     <div class="flex items-center justify-center w-6 h-6 rounded-full bg-blue-500/20 text-blue-400">
-      <Lightbulb size={14} class={text ? 'animate-pulse' : ''} />
+      <Brain size={14} class={text ? 'animate-pulse' : ''} />
     </div>
     
     <div class="flex-1 min-w-0">
@@ -55,7 +55,7 @@
   {#if expanded}
     <div transition:slide={{ duration: 250 }}>
       <div class="px-4 pb-4 pt-1 border-t border-blue-500/10">
-        <div class="text-xs leading-relaxed text-blue-100/60 font-mono whitespace-pre-wrap selection:bg-blue-500/30">
+        <div class="thinking-content text-xs leading-relaxed text-blue-100/60 font-mono whitespace-pre-wrap selection:bg-blue-500/30 max-h-80 overflow-y-auto">
           {text}
         </div>
       </div>
@@ -66,5 +66,19 @@
 <style>
   .thinking-block {
     max-width: 90%;
+  }
+
+  .thinking-content::-webkit-scrollbar {
+    width: 6px;
+  }
+  .thinking-content::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  .thinking-content::-webkit-scrollbar-thumb {
+    background: rgba(96, 165, 250, 0.2);
+    border-radius: 3px;
+  }
+  .thinking-content::-webkit-scrollbar-thumb:hover {
+    background: rgba(96, 165, 250, 0.4);
   }
 </style>

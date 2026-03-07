@@ -120,6 +120,27 @@
     </svg>
   </div>
 
+{:else if status === 'analyzing'}
+  <!-- Eye with scanning radar pulse — violet theme -->
+  <div class="status-icon analyzing" style="width: {size}px; height: {size}px;">
+    <svg viewBox="0 0 24 24" fill="none" width={size} height={size}>
+      <!-- Scanning rings -->
+      <circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="0.8" class="text-violet-400 scan-ring ring-1"/>
+      <circle cx="12" cy="12" r="7" stroke="currentColor" stroke-width="0.8" class="text-violet-400 scan-ring ring-2"/>
+      <!-- Eye shape -->
+      <path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12z"
+            stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" class="text-violet-400"/>
+      <!-- Iris -->
+      <circle cx="12" cy="12" r="3.5" fill="currentColor" class="text-violet-300/80"/>
+      <!-- Pupil -->
+      <circle cx="12" cy="12" r="1.8" fill="currentColor" class="text-slate-900"/>
+      <!-- Highlight -->
+      <circle cx="13" cy="11" r="0.7" fill="currentColor" class="text-white"/>
+      <!-- Scan sweep line -->
+      <line x1="12" y1="2" x2="12" y2="22" stroke="currentColor" stroke-width="1" stroke-linecap="round" class="text-violet-300 analyze-sweep"/>
+    </svg>
+  </div>
+
 {:else if status === 'reading'}
   <!-- Eyeball looking left/right with occasional blink -->
   <div class="status-icon reading" style="width: {size}px; height: {size}px;">
@@ -331,6 +352,37 @@
   @keyframes breathe {
     0%, 100% { opacity: 0.2; r: 3; }
     50% { opacity: 0.5; r: 4.5; }
+  }
+
+  /* ── Analyzing: eye with scanning radar ─────────── */
+  .analyzing {
+    animation: analyze-pulse 2s ease-in-out infinite;
+  }
+  .analyzing .scan-ring {
+    animation: ring-expand 2.5s ease-out infinite;
+  }
+  .analyzing .ring-2 {
+    animation-delay: 0.4s;
+  }
+  .analyzing .analyze-sweep {
+    animation: sweep-rotate 2s linear infinite;
+    transform-origin: 12px 12px;
+  }
+  @keyframes analyze-pulse {
+    0%, 100% { transform: scale(1); }
+    50% { transform: scale(1.05); }
+  }
+  @keyframes ring-expand {
+    0% { opacity: 0.8; transform: scale(0.8); }
+    60% { opacity: 0.2; transform: scale(1.1); }
+    100% { opacity: 0; transform: scale(1.2); }
+  }
+  @keyframes sweep-rotate {
+    0% { transform: rotate(0deg); opacity: 0.6; }
+    25% { opacity: 0.9; }
+    50% { transform: rotate(180deg); opacity: 0.6; }
+    75% { opacity: 0.9; }
+    100% { transform: rotate(360deg); opacity: 0.6; }
   }
 
   /* ── Reading: eyeball looking left/right with blink ───── */
