@@ -5,6 +5,8 @@ import type { ChangeSummary } from "@koryphaios/shared";
 
 export interface ToolContext {
   sessionId: string;
+  /** Optional agent identifier for backward compatibility in tests and callsites. */
+  agentId?: string;
   workingDirectory: string;
   signal?: AbortSignal;
   /** whitelisted paths for scoped access (sandboxing) */
@@ -47,12 +49,15 @@ export interface Tool {
   run(ctx: ToolContext, call: ToolCallInput): Promise<ToolCallOutput>;
 }
 
+type ToolExecutionRole = "manager" | "worker" | "critic" | "coder";
+
 /** Role filter: manager gets manager+worker+any (full); worker gets worker+any; critic gets critic+any (read-only only). */
-function roleIncludesTool(role: "manager" | "worker" | "critic", toolRole?: "manager" | "worker" | "critic" | "any"): boolean {
+function roleIncludesTool(role: ToolExecutionRole, toolRole?: "manager" | "worker" | "critic" | "any"): boolean {
+  const normalizedRole: "manager" | "worker" | "critic" = role === "coder" ? "worker" : role;
   const r = toolRole as string | undefined;
   if (!r || r === "any") return true;
-  if (role === "manager") return r === "manager" || r === "worker";
-  return r === role;
+  if (normalizedRole === "manager") return r === "manager" || r === "worker";
+  return r === normalizedRole;
 }
 
 export class ToolRegistry {
@@ -71,7 +76,7 @@ export class ToolRegistry {
   }
 
   /** Get tool definitions formatted for LLM provider calls, filtered by role. Manager = full; worker = build tools; critic = read-only (read_file, grep, glob, ls). */
-  getToolDefsForRole(role: "manager" | "worker" | "critic") {
+  getToolDefsForRole(role: ToolExecutionRole) {
     return this.getAll()
       .filter((t) => roleIncludesTool(role, t.role))
       .map((t) => ({

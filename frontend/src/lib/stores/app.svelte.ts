@@ -4,6 +4,7 @@
 
 import { browser } from '$app/environment';
 import { authStore } from './auth.svelte';
+import { apiUrl } from '$lib/utils/api-url';
 
 interface AppState {
   authReady: boolean;
@@ -59,7 +60,7 @@ export const appStore = {
 
     try {
       if (state.authReady) {
-        const res = await fetch('/api/project', {
+        const res = await fetch(apiUrl('/api/project'), {
           headers: authStore.token ? { Authorization: `Bearer ${authStore.token}` } : {},
         });
         if (res.ok) {

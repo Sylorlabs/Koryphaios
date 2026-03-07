@@ -38,7 +38,7 @@ export const AnthropicModels: ModelDef[] = [
     id: "claude-sonnet-4-6",
     name: "Claude 4.6 Sonnet",
     provider: "anthropic",
-    apiModelId: "claude-sonnet-4-6-20260205",
+    apiModelId: "claude-sonnet-4-6-20260217",
     contextWindow: 400_000,
     maxOutputTokens: 128_000,
     costPerMInputTokens: 3.0,

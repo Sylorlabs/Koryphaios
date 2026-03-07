@@ -9,3 +9,4 @@ export { ClineProvider } from "./cline";
 export { withTimeoutSignal } from "./utils";
 export * from "./types";
 export * from "./models";
+export type { ToolRegistry } from "../tools";

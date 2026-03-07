@@ -29,19 +29,26 @@ function isWithinRoot(root: string, target: string): boolean {
   return rel === "" || (!rel.startsWith("..") && !isAbsolute(rel));
 }
 
+/** Extract base command names from a compound shell command.
+ *  Also extracts commands from subshells and command substitutions. */
 function parseBaseCommands(command: string): string[] {
+  // Split on shell operators: ||, &&, |, ;, and newlines
   const segments = command
-    .split(/(?:\|\||&&|[|;])/g)
+    .split(/(?:\|\||&&|[|;\n])/g)
     .map((segment) => segment.trim())
     .filter(Boolean);
 
   const bases: string[] = [];
   for (const segment of segments) {
-    const tokens = segment.split(/\s+/).filter(Boolean);
+    // Strip leading subshell/grouping characters: (, {, $( 
+    const cleaned = segment.replace(/^[\s(${]*/, "");
+    const tokens = cleaned.split(/\s+/).filter(Boolean);
     if (tokens.length === 0) continue;
     const firstExecutable = tokens.find((t) => !t.includes("=") || t.startsWith("./") || t.startsWith("/"));
     if (!firstExecutable) continue;
-    bases.push(firstExecutable);
+    // Strip any remaining shell metacharacters from the executable name
+    const sanitized = firstExecutable.replace(/^['"(${]+|['")}]+$/g, "");
+    if (sanitized) bases.push(sanitized);
   }
 
   return bases;
@@ -127,21 +134,21 @@ Network access via curl/wget is blocked unless explicitly authorized.`;
     if (ctx.isSandboxed) {
       // Check against whitelist/blacklist
       const baseCommands = parseBaseCommands(command);
-      const cmdParts = command.trim().split(/\s+/);
-      const baseCmd = baseCommands[0] ?? cmdParts[0] ?? "";
+      const allTokens = command.trim().split(/\s+/);
 
-      // Blacklist check (Network tools)
-      if (NETWORK_CMD_BLACKLIST.has(baseCmd) || cmdParts.some(p => NETWORK_CMD_BLACKLIST.has(p))) {
+      // Blacklist check — scan ALL tokens for blocked network tools
+      const blockedToken = allTokens.find(p => NETWORK_CMD_BLACKLIST.has(p));
+      if (blockedToken) {
          return {
           callId: call.id,
           name: this.name,
-          output: `Access Denied: Network tool '${baseCmd}' is blocked in sandbox mode. Ask Manager to authorize if needed.`,
+          output: `Access Denied: Network tool '${blockedToken}' is blocked in sandbox mode. Ask Manager to authorize if needed.`,
           isError: true,
           durationMs: 0,
         };
       }
 
-      // Whitelist check
+      // Whitelist check — ALL base commands must be whitelisted
       const disallowed = baseCommands.find((cmd) => !SANDBOX_CMD_WHITELIST.has(cmd));
       if (disallowed) {
         return {

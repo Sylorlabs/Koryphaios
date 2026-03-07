@@ -12,6 +12,8 @@ export function initDb(dataDir: string) {
 
   // Enable WAL mode for better concurrency
   db.exec("PRAGMA journal_mode = WAL;");
+  db.exec("PRAGMA busy_timeout = 5000;");
+  db.exec("PRAGMA synchronous = NORMAL;");
 
   // Users table (required for getOrCreateLocalUser / auth)
   db.run(`

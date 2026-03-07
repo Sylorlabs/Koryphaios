@@ -6,12 +6,27 @@ import { serverLog } from "./logger";
 import { ValidationError } from "./errors";
 
 /**
- * Secret key for signing tokens (should be in environment in production)
+ * Secret key for signing tokens — REQUIRED in all environments
+ * No fallback for security — fail fast if misconfigured
  */
-const TOKEN_SECRET = process.env.SESSION_TOKEN_SECRET ?? randomBytes(32).toString("hex");
+const TOKEN_SECRET = (() => {
+  const secret = process.env.SESSION_TOKEN_SECRET;
+  if (!secret || typeof secret !== "string") {
+    throw new Error(
+      "SESSION_TOKEN_SECRET must be set in environment (min 32 characters). " +
+      "Use: openssl rand -hex 16 to generate a secure secret."
+    );
+  }
+  if (secret.trim().length < 32) {
+    throw new Error(
+      `SESSION_TOKEN_SECRET must be at least 32 characters (current: ${secret.trim().length}).`
+    );
+  }
+  return secret.trim();
+})();
 
 if (!process.env.SESSION_TOKEN_SECRET) {
-  serverLog.warn("SESSION_TOKEN_SECRET not set, using random key (tokens won't persist across restarts)");
+  serverLog.warn("SESSION_TOKEN_SECRET not set - this will cause a startup error");
 }
 
 /**
@@ -144,10 +159,12 @@ export {
   generateToken,
   createAccessToken,
   verifyAccessToken,
+  revokeAccessToken,
   createRefreshToken,
   verifyRefreshToken,
   revokeRefreshToken,
   revokeAllUserTokens,
+  revokeAllUserSessions,
   createUser,
   authenticateUser,
   getUserById,
@@ -155,4 +172,5 @@ export {
   getOrCreateLocalUser,
   changePassword,
   cleanupExpiredTokens,
+  cleanupBlacklist,
 } from "./auth/auth";

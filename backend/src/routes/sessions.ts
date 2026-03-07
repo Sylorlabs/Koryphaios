@@ -104,6 +104,22 @@ export function createSessionRoutes(deps: RouteDependencies): RouteHandler[] {
             },
         },
 
+        // POST /api/sessions/:id/cancel — Cancel all running agents for a session
+        {
+            path: /^\/api\/sessions\/(?<id>[^/]+)\/cancel$/,
+            method: "POST",
+            handler: async (req, params, ctx) => {
+                const id = params.get("id");
+                if (!id) return json({ ok: false, error: "Session ID required" }, 400);
+
+                const validatedId = validateSessionId(id);
+                if (!validatedId) return json({ ok: false, error: "Invalid session ID" }, 400);
+
+                kory.cancelSessionWorkers(validatedId);
+                return json({ ok: true }, 200);
+            },
+        },
+
         // GET /api/sessions/:id/messages — Get session messages
         {
             path: /^\/api\/sessions\/(?<id>[^/]+)\/messages$/,

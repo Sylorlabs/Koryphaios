@@ -1,0 +1,185 @@
+/**
+ * Koryphaios Design Tokens
+ * 
+ * A consistent spacing and sizing system based on a 4px grid.
+ * All measurements should use these tokens, not arbitrary values.
+ */
+
+:root {
+  /* ─── Spacing Scale (4px base) ───────────────────────────────────────────── */
+  --space-0: 0;
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-10: 40px;
+  --space-12: 48px;
+  --space-16: 64px;
+  --space-20: 80px;
+  --space-24: 96px;
+  
+  /* Semantic spacing */
+  --space-xs: var(--space-1);   /* 4px - tightest */
+  --space-sm: var(--space-2);   /* 8px - tight */
+  --space-md: var(--space-3);   /* 12px - default */
+  --space-lg: var(--space-4);   /* 16px - relaxed */
+  --space-xl: var(--space-6);   /* 24px - spacious */
+  
+  /* ─── Sizing Scale ───────────────────────────────────────────────────────── */
+  --size-1: 4px;
+  --size-2: 8px;
+  --size-3: 12px;
+  --size-4: 16px;
+  --size-5: 20px;
+  --size-6: 24px;
+  --size-7: 28px;
+  --size-8: 32px;
+  --size-9: 36px;
+  --size-10: 40px;
+  --size-11: 44px;
+  --size-12: 48px;
+  --size-14: 56px;
+  --size-16: 64px;
+  --size-20: 80px;
+  --size-24: 96px;
+  --size-32: 128px;
+  --size-40: 160px;
+  --size-48: 192px;
+  --size-56: 224px;
+  --size-64: 256px;
+  
+  /* Semantic sizes */
+  --size-icon-xs: var(--size-3);   /* 12px */
+  --size-icon-sm: var(--size-4);   /* 16px */
+  --size-icon-md: var(--size-5);   /* 20px */
+  --size-icon-lg: var(--size-6);   /* 24px */
+  
+  --size-input-height-sm: var(--size-8);   /* 32px */
+  --size-input-height-md: var(--size-9);   /* 36px */
+  --size-input-height-lg: var(--size-10);  /* 40px */
+  
+  --size-button-height-sm: var(--size-7);  /* 28px */
+  --size-button-height-md: var(--size-8);  /* 32px */
+  --size-button-height-lg: var(--size-9);  /* 36px */
+  
+  /* ─── Border Radius ──────────────────────────────────────────────────────── */
+  --radius-none: 0;
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+  --radius-xl: 12px;
+  --radius-2xl: 16px;
+  --radius-full: 9999px;
+  
+  /* ─── Typography Scale ───────────────────────────────────────────────────── */
+  --text-xs: 10px;
+  --text-sm: 12px;
+  --text-base: 14px;
+  --text-md: 14px;
+  --text-lg: 16px;
+  --text-xl: 18px;
+  --text-2xl: 20px;
+  
+  /* Line heights */
+  --leading-none: 1;
+  --leading-tight: 1.25;
+  --leading-snug: 1.375;
+  --leading-normal: 1.5;
+  --leading-relaxed: 1.625;
+  
+  /* Font weights */
+  --font-normal: 400;
+  --font-medium: 500;
+  --font-semibold: 600;
+  --font-bold: 700;
+  
+  /* ─── Z-Index Scale ──────────────────────────────────────────────────────── */
+  --z-base: 0;
+  --z-dropdown: 100;
+  --z-sticky: 200;
+  --z-fixed: 300;
+  --z-modal-backdrop: 400;
+  --z-modal: 500;
+  --z-popover: 600;
+  --z-tooltip: 700;
+  --z-toast: 800;
+  --z-skip-link: 900;
+  
+  /* ─── Layout Constants ───────────────────────────────────────────────────── */
+  --sidebar-width: 240px;
+  --sidebar-width-collapsed: 40px;
+  --sidebar-min-width: 200px;
+  --sidebar-max-width: 320px;
+  
+  --git-panel-width: 320px;
+  --git-panel-min-width: 260px;
+  --git-panel-max-width: 40vw;
+  
+  --header-height: 48px;
+  --footer-height: 48px;
+  --input-area-height: auto;
+  
+  --drawer-width: 360px;
+  --drawer-max-width: 90vw;
+  
+  /* ─── Animation Timing ───────────────────────────────────────────────────── */
+  --duration-instant: 0ms;
+  --duration-fast: 100ms;
+  --duration-normal: 150ms;
+  --duration-slow: 200ms;
+  --duration-slower: 300ms;
+  
+  --ease-linear: linear;
+  --ease-in: cubic-bezier(0.4, 0, 1, 1);
+  --ease-out: cubic-bezier(0, 0, 0.2, 1);
+  --ease-in-out: cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* ─── Utility Classes (for when Tailwind isn't enough) ───────────────────── */
+
+/* Spacing utilities using design tokens */
+.token-gap-xs { gap: var(--space-xs); }
+.token-gap-sm { gap: var(--space-sm); }
+.token-gap-md { gap: var(--space-md); }
+.token-gap-lg { gap: var(--space-lg); }
+.token-gap-xl { gap: var(--space-xl); }
+
+.token-p-xs { padding: var(--space-xs); }
+.token-p-sm { padding: var(--space-sm); }
+.token-p-md { padding: var(--space-md); }
+.token-p-lg { padding: var(--space-lg); }
+.token-p-xl { padding: var(--space-xl); }
+
+.token-px-xs { padding-left: var(--space-xs); padding-right: var(--space-xs); }
+.token-px-sm { padding-left: var(--space-sm); padding-right: var(--space-sm); }
+.token-px-md { padding-left: var(--space-md); padding-right: var(--space-md); }
+.token-px-lg { padding-left: var(--space-lg); padding-right: var(--space-lg); }
+
+.token-py-xs { padding-top: var(--space-xs); padding-bottom: var(--space-xs); }
+.token-py-sm { padding-top: var(--space-sm); padding-bottom: var(--space-sm); }
+.token-py-md { padding-top: var(--space-md); padding-bottom: var(--space-md); }
+.token-py-lg { padding-top: var(--space-lg); padding-bottom: var(--space-lg); }
+
+.token-m-xs { margin: var(--space-xs); }
+.token-m-sm { margin: var(--space-sm); }
+.token-m-md { margin: var(--space-md); }
+.token-m-lg { margin: var(--space-lg); }
+
+/* Size utilities */
+.token-w-sidebar { width: var(--sidebar-width); }
+.token-w-sidebar-collapsed { width: var(--sidebar-width-collapsed); }
+.token-w-git-panel { width: var(--git-panel-width); }
+.token-w-drawer { width: var(--drawer-width); }
+
+.token-h-header { height: var(--header-height); }
+.token-h-footer { height: var(--footer-height); }
+
+/* Border radius utilities */
+.token-rounded-sm { border-radius: var(--radius-sm); }
+.token-rounded-md { border-radius: var(--radius-md); }
+.token-rounded-lg { border-radius: var(--radius-lg); }
+.token-rounded-xl { border-radius: var(--radius-xl); }
+.token-rounded-full { border-radius: var(--radius-full); }

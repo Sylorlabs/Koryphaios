@@ -3,6 +3,8 @@
  * No tokens in JS; session is in HttpOnly cookies.
  */
 
+const DEFAULT_TIMEOUT_MS = 30_000;
+
 /** Reactive count of in-flight API requests */
 let _inflight = $state(0);
 export const apiLoading = {
@@ -16,12 +18,24 @@ export function getAuthHeaders(): Record<string, string> {
 
 export async function apiFetch(
   url: string,
-  init: RequestInit = {}
+  init: RequestInit = {},
+  timeoutMs: number = DEFAULT_TIMEOUT_MS
 ): Promise<Response> {
   _inflight++;
   try {
     const headers = new Headers(init.headers);
-    return await fetch(url, { ...init, headers, credentials: 'include' });
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      return await fetch(url, {
+        ...init,
+        headers,
+        credentials: 'include',
+        signal: init.signal ?? controller.signal,
+      });
+    } finally {
+      clearTimeout(timeout);
+    }
   } finally {
     _inflight--;
   }
@@ -30,11 +44,12 @@ export async function apiFetch(
 type LooseApiResponse = {
   ok?: boolean;
   error?: string;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- callers access varied response shapes without narrowing
   data?: any;
   [key: string]: any;
 };
 
-/** Parse response as JSON; on empty or invalid body return { ok: false, error: message } so callers don't throw. */
+/** Parse response as JSON; on empty or invalid body return { ok: false, error } so callers don't throw. */
 export async function parseJsonResponse<T = LooseApiResponse>(
   res: Response
 ): Promise<T> {

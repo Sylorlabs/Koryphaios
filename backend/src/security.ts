@@ -470,52 +470,6 @@ export function getSecurityHeaders(): Record<string, string> {
   };
 }
 
-// ─── Rate Limiting (in-memory sliding window) ────────────────────────────────
-
-export class RateLimiter {
-  private hits = new Map<string, { count: number; resetAt: number }>();
-  private pruneTimer: ReturnType<typeof setInterval>;
-
-  constructor(
-    private maxRequests: number = 60,
-    private windowMs: number = 60_000,
-  ) {
-    // Auto-prune stale entries every 5 minutes to prevent unbounded memory growth
-    this.pruneTimer = setInterval(() => {
-      const now = Date.now();
-      for (const [key, entry] of this.hits) {
-        if (now >= entry.resetAt) this.hits.delete(key);
-      }
-    }, 5 * 60_000);
-
-    // Don't keep the process alive just for pruning
-    if (this.pruneTimer.unref) this.pruneTimer.unref();
-  }
-
-  check(key: string): { allowed: boolean; remaining: number; resetIn: number } {
-    const now = Date.now();
-    let entry = this.hits.get(key);
-
-    if (!entry || now >= entry.resetAt) {
-      entry = { count: 0, resetAt: now + this.windowMs };
-      this.hits.set(key, entry);
-    }
-
-    entry.count++;
-    const allowed = entry.count <= this.maxRequests;
-    return {
-      allowed,
-      remaining: Math.max(0, this.maxRequests - entry.count),
-      resetIn: entry.resetAt - now,
-    };
-  }
-
-  destroy(): void {
-    clearInterval(this.pruneTimer);
-    this.hits.clear();
-  }
-}
-
 // ─── Secure Token Generation ─────────────────────────────────────────────────
 
 // ─── CSRF Protection (double-submit cookie) ──────────────────────────────────

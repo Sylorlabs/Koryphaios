@@ -3,7 +3,8 @@
  * Tracks abort signals for operations with persistence.
  */
 
-import { initDb } from "../db/sqlite";
+import { getDb } from "../db/sqlite";
+import { serverLog } from "../logger";
 
 export interface AbortControllerEntry {
   id: string;
@@ -21,7 +22,7 @@ export class AbortControllersRegistry {
     if (this.initialized) return;
 
     try {
-      const db = await initDb();
+      const db = getDb();
       
       // Clear any stale entries from previous runs
       db.query("DELETE FROM abort_controllers WHERE created_at < ?").run(
@@ -30,7 +31,7 @@ export class AbortControllersRegistry {
 
       this.initialized = true;
     } catch (error) {
-      console.error("Failed to initialize abort controllers registry:", error);
+      serverLog.error({ error }, "Failed to initialize abort controllers registry");
       this.initialized = true;
     }
   }
@@ -47,7 +48,9 @@ export class AbortControllersRegistry {
       createdAt: Date.now(),
     });
 
-    this.persistEntry(id).catch(console.error);
+    this.persistEntry(id).catch((error) => {
+      serverLog.error({ error, id, sessionId }, "Failed to persist abort controller entry");
+    });
 
     return { id, controller };
   }
@@ -84,7 +87,9 @@ export class AbortControllersRegistry {
   remove(id: string): void {
     this.controllers.delete(id);
     this.entries.delete(id);
-    this.removePersistedEntry(id).catch(console.error);
+    this.removePersistedEntry(id).catch((error) => {
+      serverLog.error({ error, id }, "Failed to remove abort controller entry");
+    });
   }
 
   getBySession(sessionId: string): AbortControllerEntry[] {
@@ -96,7 +101,7 @@ export class AbortControllersRegistry {
     if (!entry) return;
 
     try {
-      const db = await initDb();
+      const db = getDb();
       db.query(`
         INSERT OR REPLACE INTO abort_controllers 
         (id, session_id, reason, created_at)
@@ -108,16 +113,16 @@ export class AbortControllersRegistry {
         entry.createdAt,
       );
     } catch (error) {
-      console.error("Failed to persist abort controller:", error);
+      serverLog.error({ error, id }, "Failed to persist abort controller");
     }
   }
 
   async removePersistedEntry(id: string): Promise<void> {
     try {
-      const db = await initDb();
+      const db = getDb();
       db.query("DELETE FROM abort_controllers WHERE id = ?").run(id);
     } catch (error) {
-      console.error("Failed to remove persisted abort controller:", error);
+      serverLog.error({ error, id }, "Failed to remove persisted abort controller");
     }
   }
 

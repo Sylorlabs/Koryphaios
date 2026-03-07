@@ -5,8 +5,8 @@ import {
   sanitizeString,
   validateSessionId,
   validateProviderName,
-  RateLimiter,
 } from "../src/security";
+import { RateLimiter } from "../src/security/rate-limit";
 
 describe("validateBashCommand", () => {
   test("allows safe commands", () => {
