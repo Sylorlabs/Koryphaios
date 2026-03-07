@@ -17,8 +17,8 @@ import { createAuditLogService } from "../../services/audit";
 import { getOrCreateLocalUser } from "../../auth/auth";
 import { serverLog } from "../../logger";
 import { initializeRedis, getRedisClient } from "../../redis/client";
-import { SlidingWindowRateLimiter, TokenBucketRateLimiter } from "../../ratelimit";
-import { getTierConfig } from "../../ratelimit/tiers";
+import { SlidingWindowRateLimiter, TokenBucketRateLimiter, getTierConfig } from "../../security/rate-limit";
+import type { RateLimitResult } from "../../security/rate-limit";
 import {
   validateBody,
   validateQuery,
@@ -39,7 +39,6 @@ import {
   recordAuditEvent,
   httpMetricsMiddleware,
 } from "../../metrics";
-import type { RateLimitResult } from "../../ratelimit/types";
 import { getReconciliation } from "../../credit-accountant";
 
 // Services initialized lazily (after DB is ready in server main())
@@ -70,23 +69,18 @@ async function initRateLimiters(): Promise<void> {
   
   try {
     await initializeRedis({ fallbackToMemory: true });
-    const redis = getRedisClient();
     
-    slidingLimiter = new SlidingWindowRateLimiter(redis, {
-      windowSeconds: 60,
+    slidingLimiter = new SlidingWindowRateLimiter({
       maxRequests: 100,
-      algorithm: "sliding-window",
+      windowMs: 60_000,
+      strategy: "sliding-window",
     });
     
-    bucketLimiter = new TokenBucketRateLimiter(redis, {
-      windowSeconds: 60,
+    bucketLimiter = new TokenBucketRateLimiter({
       maxRequests: 100,
-      algorithm: "token-bucket",
-      burstSize: 20,
+      windowMs: 60_000,
+      strategy: "token-bucket",
     });
-    
-    await slidingLimiter.initialize();
-    await bucketLimiter.initialize();
     
     rateLimitersInitialized = true;
     serverLog.info("Rate limiters initialized");
@@ -97,7 +91,7 @@ async function initRateLimiters(): Promise<void> {
 }
 
 // Response helpers with security headers
-function json(data: any, status = 200, headers: Record<string, string> = {}) {
+function json(data: unknown, status = 200, headers: Record<string, string> = {}) {
   return new Response(JSON.stringify(data), {
     status,
     headers: {
@@ -165,18 +159,18 @@ async function checkRateLimit(
   let result: RateLimitResult;
   
   if (algorithm === 'token-bucket' && bucketLimiter) {
-    result = await bucketLimiter.consume(`ratelimit:${key}`);
+    result = await bucketLimiter.check({ identifier: key, maxRequests: limit, windowMs: 60_000 });
   } else if (slidingLimiter) {
-    result = await slidingLimiter.check(`ratelimit:${key}`);
+    result = await slidingLimiter.check({ identifier: key, maxRequests: limit, windowMs: 60_000 });
   } else {
     // Fallback: allow request
-    result = { allowed: true, remaining: limit, resetTime: Date.now() + 60000, limit };
+    result = { allowed: true, remaining: limit, resetAt: Date.now() + 60000, limit };
   }
   
   const headers: Record<string, string> = {
     'X-RateLimit-Limit': String(result.limit),
     'X-RateLimit-Remaining': String(Math.max(0, result.remaining)),
-    'X-RateLimit-Reset': String(result.resetTime),
+    'X-RateLimit-Reset': String(result.resetAt),
   };
   
   if (!result.allowed) {
@@ -246,7 +240,7 @@ export async function handleCredentials(
         200,
         extraHeaders
       );
-    } catch (err: any) {
+    } catch (err: unknown) {
       serverLog.error({ err, requestId }, "Failed to list credentials");
       recordCredentialOperation('list', false);
       return json({ error: "Failed to list credentials" }, 500, extraHeaders);
@@ -297,7 +291,7 @@ export async function handleCredentials(
       });
 
       return json({ id, message: "Credential stored securely" }, 201, extraHeaders);
-    } catch (err: any) {
+    } catch (err: unknown) {
       serverLog.error({ err, requestId }, "Failed to create credential");
       recordCredentialOperation('create', false);
       return json({ error: "Failed to create credential" }, 500, extraHeaders);
@@ -331,7 +325,7 @@ export async function handleCredentials(
           200,
           extraHeaders
         );
-      } catch (err: any) {
+      } catch (err: unknown) {
         serverLog.error({ err, requestId }, "Failed to get credential");
         return json({ error: "Failed to get credential" }, 500, extraHeaders);
       }
@@ -368,7 +362,7 @@ export async function handleCredentials(
 
         recordCredentialOperation('update', true);
         return json({ message: "Credential updated" }, 200, extraHeaders);
-      } catch (err: any) {
+      } catch (err: unknown) {
         serverLog.error({ err, requestId }, "Failed to update credential");
         recordCredentialOperation('update', false);
         return json({ error: "Failed to update credential" }, 500, extraHeaders);
@@ -416,7 +410,7 @@ export async function handleCredentials(
         });
 
         return json({ message: "Credential deleted" }, 200, extraHeaders);
-      } catch (err: any) {
+      } catch (err: unknown) {
         serverLog.error({ err, requestId }, "Failed to delete credential");
         recordCredentialOperation('delete', false);
         return json({ error: "Failed to delete credential" }, 500, extraHeaders);
@@ -476,7 +470,7 @@ export async function handleCredentials(
         200,
         extraHeaders
       );
-    } catch (err: any) {
+    } catch (err: unknown) {
       serverLog.error({ err, requestId }, "Failed to rotate credential");
       recordCredentialOperation('rotate', false);
       return json({ error: "Failed to rotate credential" }, 500, extraHeaders);
@@ -513,7 +507,7 @@ export async function handleCredentials(
         200,
         extraHeaders
       );
-    } catch (err: any) {
+    } catch (err: unknown) {
       serverLog.error({ err, requestId }, "Failed to get audit trail");
       return json({ error: "Failed to get audit trail" }, 500, extraHeaders);
     }
@@ -547,7 +541,7 @@ export async function handleApiKeys(
         scopes: ['read', 'write'],
         rateLimitTier: 'free',
       };
-    } catch (err: any) {
+    } catch (err: unknown) {
       serverLog.error({ err, requestId }, "Guest user unavailable for API keys");
       return json({ error: "Service unavailable" }, 503, extraHeadersBase);
     }
@@ -591,7 +585,7 @@ export async function handleApiKeys(
         200,
         extraHeaders
       );
-    } catch (err: any) {
+    } catch (err: unknown) {
       serverLog.error({ err, requestId }, "Failed to list API keys");
       return json({ error: "Failed to list API keys" }, 500, extraHeaders);
     }
@@ -656,7 +650,7 @@ export async function handleApiKeys(
         201,
         extraHeaders
       );
-    } catch (err: any) {
+    } catch (err: unknown) {
       serverLog.error({ err, requestId }, "Failed to create API key");
       return json({ error: "Failed to create API key" }, 500, extraHeaders);
     }
@@ -691,7 +685,7 @@ export async function handleApiKeys(
           200,
           extraHeaders
         );
-      } catch (err: any) {
+      } catch (err: unknown) {
         serverLog.error({ err, requestId }, "Failed to get API key");
         return json({ error: "Failed to get API key" }, 500, extraHeaders);
       }
@@ -736,7 +730,7 @@ export async function handleApiKeys(
         });
 
         return json({ message: "API key updated" }, 200, extraHeaders);
-      } catch (err: any) {
+      } catch (err: unknown) {
         serverLog.error({ err, requestId }, "Failed to update API key");
         return json({ error: "Failed to update API key" }, 500, extraHeaders);
       }
@@ -765,7 +759,7 @@ export async function handleApiKeys(
         });
 
         return json({ message: "API key revoked" }, 200, extraHeaders);
-      } catch (err: any) {
+      } catch (err: unknown) {
         serverLog.error({ err, requestId }, "Failed to revoke API key");
         return json({ error: "Failed to revoke API key" }, 500, extraHeaders);
       }
@@ -815,7 +809,7 @@ export async function handleAudit(
         200,
         extraHeaders
       );
-    } catch (err: any) {
+    } catch (err: unknown) {
       serverLog.error({ err, requestId }, "Failed to get user activity");
       return json({ error: "Failed to get user activity" }, 500, extraHeaders);
     }
@@ -855,7 +849,7 @@ export async function handleAudit(
         200,
         extraHeaders
       );
-    } catch (err: any) {
+    } catch (err: unknown) {
       serverLog.error({ err, requestId }, "Failed to detect suspicious activity");
       return json({ error: "Failed to detect suspicious activity" }, 500, extraHeaders);
     }
@@ -877,7 +871,17 @@ export async function handleAudit(
     }
 
     // Build query
-    const query: any = {};
+    const query: {
+      userId?: string;
+      action?: string;
+      resourceType?: string;
+      resourceId?: string;
+      startTime?: number;
+      endTime?: number;
+      success?: boolean;
+      limit?: number;
+      offset?: number;
+    } = {};
 
     // Non-admins can only see their own logs
     if (!isAdmin) {
@@ -910,7 +914,7 @@ export async function handleAudit(
         200,
         extraHeaders
       );
-    } catch (err: any) {
+    } catch (err: unknown) {
       serverLog.error({ err, requestId }, "Failed to query audit logs");
       return json({ error: "Failed to query audit logs" }, 500, extraHeaders);
     }
@@ -950,7 +954,7 @@ export async function handleBilling(
         200,
         extraHeaders
       );
-    } catch (err: any) {
+    } catch (err: unknown) {
       serverLog.error({ err, requestId }, "Failed to get billing credits");
       return json({ error: "Failed to get billing credits" }, 500, extraHeaders);
     }
@@ -1003,7 +1007,7 @@ export async function handleV1Routes(
     }
 
     return null;
-  } catch (error: any) {
+  } catch (error: unknown) {
     serverLog.error({ error, requestId, path, method }, "Unhandled error in v1 routes");
     
     // Record error metrics
