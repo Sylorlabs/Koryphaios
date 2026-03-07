@@ -5,5 +5,7 @@
 export { messagingGateway } from "./gateway";
 export { sessionReplyStream } from "./reply-stream";
 export { TelegramAdapter } from "./telegram-adapter";
+export { DiscordAdapter } from "./discord-adapter";
+export { SlackAdapter } from "./slack-adapter";
 export type { ChannelAdapter, ReplySegment, ChannelId, ChannelMetadata } from "./types";
 export { CHANNEL_PREFIX } from "./types";
