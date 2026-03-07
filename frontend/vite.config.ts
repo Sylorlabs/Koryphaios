@@ -1,5 +1,6 @@
 import { sveltekit } from '@sveltejs/kit/vite';
 import { defineConfig } from 'vite';
+import tailwindcss from '@tailwindcss/vite';
 import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
@@ -38,6 +39,7 @@ const wsTarget = wsBase.endsWith('/ws') ? wsBase : `${wsBase}/ws`;
 
 export default defineConfig({
 	plugins: [
+		tailwindcss(),
 		sveltekit(),
 	],
 	server: {

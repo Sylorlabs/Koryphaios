@@ -10,8 +10,10 @@ import { AskUserTool, AskManagerTool, DelegateToWorkerTool } from "./tools/inter
 import { KoryManager } from "./kory/manager-refactored";
 import { Bot } from "grammy";
 import { TelegramBridge } from "./telegram/bot";
+import { DiscordBridge, createDiscordClient } from "./discord/bot";
+import { SlackBridge } from "./slack/bot";
 import { messagingGateway, sessionReplyStream } from "./messaging";
-import { TelegramAdapter } from "./messaging";
+import { TelegramAdapter, DiscordAdapter, SlackAdapter } from "./messaging";
 import { MCPManager } from "./mcp/client";
 import { wsBroker } from "./pubsub";
 import { serverLog } from "./logger";
@@ -184,10 +186,19 @@ async function main() {
     }
   })();
 
-  // Messaging gateway + Telegram bridge (optional)
+  // Messaging gateway + bridges (optional — each starts only if configured)
+  let gatewayStarted = false;
+  function ensureGateway() {
+    if (!gatewayStarted) {
+      messagingGateway.start();
+      gatewayStarted = true;
+    }
+  }
+
+  // Telegram bridge
   let telegram: TelegramBridge | undefined;
   if (config.telegram?.botToken && config.telegram.adminId) {
-    messagingGateway.start();
+    ensureGateway();
     const bot = new Bot(config.telegram.botToken);
     const telegramAdapter = new TelegramAdapter(bot);
     telegram = new TelegramBridge(
@@ -201,6 +212,47 @@ async function main() {
       telegramAdapter,
     );
     serverLog.info({ adminId: config.telegram.adminId }, "Telegram bridge enabled (replies stream to chat)");
+  }
+
+  // Discord bridge
+  let discord: DiscordBridge | undefined;
+  if (config.discord?.botToken) {
+    ensureGateway();
+    const discordClient = createDiscordClient();
+    const discordAdapter = new DiscordAdapter(discordClient);
+    discord = new DiscordBridge(
+      {
+        botToken: config.discord.botToken,
+        allowedGuildIds: config.discord.allowedGuildIds,
+        allowedUserIds: config.discord.allowedUserIds,
+      },
+      kory,
+      messagingGateway,
+      discordAdapter,
+    );
+    serverLog.info("Discord bridge enabled");
+  }
+
+  // Slack bridge
+  let slack: SlackBridge | undefined;
+  if (config.slack?.botToken && config.slack.appToken) {
+    ensureGateway();
+    const { WebClient } = await import("@slack/web-api");
+    const slackWebClient = new WebClient(config.slack.botToken);
+    const slackAdapter = new SlackAdapter(slackWebClient);
+    slack = new SlackBridge(
+      {
+        botToken: config.slack.botToken,
+        appToken: config.slack.appToken,
+        signingSecret: config.slack.signingSecret,
+        allowedChannelIds: config.slack.allowedChannelIds,
+        allowedUserIds: config.slack.allowedUserIds,
+      },
+      kory,
+      messagingGateway,
+      slackAdapter,
+    );
+    serverLog.info("Slack bridge enabled (Socket Mode)");
   }
 
   // ─── HTTP + WebSocket Server ────────────────────────────────────────────
@@ -1047,6 +1099,8 @@ async function main() {
           const auth = await requireAuth(req);
           if ("error" in auth) return withCors(auth.error, corsHeaders);
           const t = config.telegram;
+          const d = config.discord;
+          const s = config.slack;
           const data = {
             telegram: t
               ? {
@@ -1056,6 +1110,21 @@ async function main() {
                   webhookUrl: t.webhookUrl,
                 }
               : { enabled: false, adminId: 0, botTokenSet: false, webhookUrl: undefined },
+            discord: d
+              ? {
+                  enabled: true,
+                  botTokenSet: !!d.botToken,
+                  allowedGuildIds: d.allowedGuildIds ?? [],
+                }
+              : { enabled: false, botTokenSet: false, allowedGuildIds: [] },
+            slack: s
+              ? {
+                  enabled: true,
+                  botTokenSet: !!s.botToken,
+                  appTokenSet: !!s.appToken,
+                  allowedChannelIds: s.allowedChannelIds ?? [],
+                }
+              : { enabled: false, botTokenSet: false, appTokenSet: false, allowedChannelIds: [] },
           };
           return json({ ok: true, data }, 200, corsHeaders);
         }
@@ -1064,7 +1133,9 @@ async function main() {
           const auth = await requireAuth(req);
           if ("error" in auth) return withCors(auth.error, corsHeaders);
           const parsed = await parseJson<{
-            telegram?: { botToken?: string; adminId?: number; secretToken?: string; webhookUrl?: string };
+            telegram?: { botToken?: string; adminId?: number; secretToken?: string; webhookUrl?: string } | null;
+            discord?: { botToken?: string; allowedGuildIds?: string[]; allowedUserIds?: string[] } | null;
+            slack?: { botToken?: string; appToken?: string; signingSecret?: string; allowedChannelIds?: string[]; allowedUserIds?: string[] } | null;
           }>(req, corsHeaders);
           if (!parsed.ok) return parsed.res;
           const body = parsed.data;
@@ -1083,6 +1154,34 @@ async function main() {
             }
           }
 
+          if (body.discord !== undefined) {
+            const d = body.discord;
+            if (d === null) {
+              config.discord = undefined;
+            } else if (typeof d === "object") {
+              config.discord = {
+                botToken: d.botToken ?? config.discord?.botToken ?? "",
+                allowedGuildIds: d.allowedGuildIds ?? config.discord?.allowedGuildIds,
+                allowedUserIds: d.allowedUserIds ?? config.discord?.allowedUserIds,
+              };
+            }
+          }
+
+          if (body.slack !== undefined) {
+            const s = body.slack;
+            if (s === null) {
+              config.slack = undefined;
+            } else if (typeof s === "object") {
+              config.slack = {
+                botToken: s.botToken ?? config.slack?.botToken ?? "",
+                appToken: s.appToken ?? config.slack?.appToken ?? "",
+                signingSecret: s.signingSecret ?? config.slack?.signingSecret,
+                allowedChannelIds: s.allowedChannelIds ?? config.slack?.allowedChannelIds,
+                allowedUserIds: s.allowedUserIds ?? config.slack?.allowedUserIds,
+              };
+            }
+          }
+
           const configPath = join(PROJECT_ROOT, "koryphaios.json");
           try {
             let currentConfig: Record<string, unknown> = {};
@@ -1090,6 +1189,8 @@ async function main() {
               currentConfig = JSON.parse(readFileSync(configPath, "utf-8"));
             }
             currentConfig.telegram = config.telegram ?? null;
+            currentConfig.discord = config.discord ?? null;
+            currentConfig.slack = config.slack ?? null;
             writeFileSync(configPath, JSON.stringify(currentConfig, null, 2));
             serverLog.info("Updated messaging config in koryphaios.json");
           } catch (err) {
@@ -1101,6 +1202,12 @@ async function main() {
             data: {
               telegram: config.telegram
                 ? { enabled: true, adminId: config.telegram.adminId, botTokenSet: !!config.telegram.botToken }
+                : { enabled: false },
+              discord: config.discord
+                ? { enabled: true, botTokenSet: !!config.discord.botToken }
+                : { enabled: false },
+              slack: config.slack
+                ? { enabled: true, botTokenSet: !!config.slack.botToken, appTokenSet: !!config.slack.appToken }
                 : { enabled: false },
             },
           }, 200, corsHeaders);
@@ -1310,6 +1417,18 @@ async function main() {
 
   if (telegram && process.env.TELEGRAM_POLLING === "true") {
     await telegram.startPolling();
+  }
+
+  if (discord) {
+    discord.start().catch((err) => {
+      serverLog.error({ err }, "Discord bot failed to start");
+    });
+  }
+
+  if (slack) {
+    slack.start().catch((err) => {
+      serverLog.error({ err }, "Slack bot failed to start");
+    });
   }
 
   // ─── Graceful Shutdown ──────────────────────────────────────────────────
