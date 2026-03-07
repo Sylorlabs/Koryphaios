@@ -5,7 +5,7 @@ import type { ProviderName } from "../providers/ProviderNames";
 
 export type AgentRole = "manager" | "coder" | "task" | "reviewer" | "title" | "summarizer" | "critic";
 
-export type AgentStatus = "idle" | "thinking" | "tool_calling" | "streaming" | "verifying" | "compacting" | "waiting_user" | "error" | "done" | "reading" | "writing" | "criticizing";
+export type AgentStatus = "idle" | "thinking" | "analyzing" | "tool_calling" | "streaming" | "verifying" | "compacting" | "waiting_user" | "error" | "done" | "reading" | "writing" | "criticizing";
 
 export type WorkerDomain = "ui" | "frontend" | "backend" | "general" | "review" | "test" | "critic";
 

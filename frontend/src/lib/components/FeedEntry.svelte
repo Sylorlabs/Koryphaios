@@ -84,10 +84,10 @@
     }
   }
 
-  function getStatusForType(type: FeedEntryType): import('@koryphaios/shared').AgentStatus {
+  function getStatusForType(type: FeedEntryType, meta?: Record<string, unknown>): import('@koryphaios/shared').AgentStatus {
     switch (type) {
       case 'user_message': return 'idle';
-      case 'thought': return 'thinking';
+      case 'thought': return meta?.phase === 'analyzing' ? 'analyzing' : 'thinking';
       case 'content': return 'streaming';
       case 'thinking': return 'thinking';
       case 'tool_call': return 'tool_calling';
@@ -135,7 +135,7 @@
       <div
         class="shrink-0 flex items-center justify-center w-5 h-6 pt-1"
       >
-        <AnimatedStatusIcon status={getStatusForType(entry.type)} size={14} isManager={entry.agentId === 'kory-manager'} />
+        <AnimatedStatusIcon status={getStatusForType(entry.type, entry.metadata)} size={14} isManager={entry.agentId === 'kory-manager'} />
       </div>
     {/if}
 
