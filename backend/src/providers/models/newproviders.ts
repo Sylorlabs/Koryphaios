@@ -14,6 +14,8 @@ export const DeepSeekModels: ModelDef[] = [
     supportsAttachments: true,
     supportsStreaming: true,
     tier: "flagship",
+    deprecated: true,
+    beta: true,
   },
   {
     id: "deepseek-reasoner",
@@ -30,8 +32,22 @@ export const DeepSeekModels: ModelDef[] = [
     tier: "reasoning",
   },
   {
+    id: "deepseek-v3.2",
+    name: "DeepSeek V3.2",
+    provider: "deepseek",
+    apiModelId: "deepseek-v3.2",
+    contextWindow: 128_000,
+    maxOutputTokens: 8_192,
+    costPerMInputTokens: 0.14,
+    costPerMOutputTokens: 0.28,
+    canReason: false,
+    supportsAttachments: false,
+    supportsStreaming: true,
+    tier: "flagship",
+  },
+  {
     id: "deepseek-v3",
-    name: "DeepSeek V3",
+    name: "DeepSeek V3 (Legacy)",
     provider: "deepseek",
     apiModelId: "deepseek-v3",
     contextWindow: 64_000,
@@ -42,6 +58,7 @@ export const DeepSeekModels: ModelDef[] = [
     supportsAttachments: false,
     supportsStreaming: true,
     tier: "flagship",
+    deprecated: true,
   },
 ];
 

@@ -119,12 +119,12 @@ export const AGENT = {
   /** Default reasoning level */
   DEFAULT_REASONING_LEVEL: "high" as const,
 
-  /** Fallback model chains (IDs must exist in MODEL_CATALOG). No retired models (Claude 3.7, Haiku 3.5). */
+  /** Fallback model chains (IDs must exist in MODEL_CATALOG). */
   DEFAULT_FALLBACKS: {
-    "claude-sonnet-4-5": ["claude-sonnet-4-6", "gpt-5-mini", "gemini-3.1-pro"],
-    "claude-sonnet-4-6": ["claude-sonnet-4-5", "gpt-5-mini", "gemini-3.1-pro"],
-    "gpt-5-mini": ["gemini-3.1-pro", "claude-haiku-4-5"],
-    "o4-mini": ["gpt-5-mini", "gemini-3.1-pro"],
+    "claude-sonnet-4-6": ["gpt-5.2-pro", "gemini-3.1-pro"],
+    "gpt-5.2-pro": ["claude-sonnet-4-6", "gemini-3.1-pro"],
+    "gpt-5-mini": ["gemini-3-flash", "claude-haiku-4-5"],
+    "o4-mini": ["gpt-5-mini", "gemini-3-flash"],
   } as Record<string, string[]>,
 
   /** Max time a single LLM stream can run before being aborted (prevents stuck requests) */
@@ -232,29 +232,6 @@ export const TIMEOUT = {
 } as const;
 
 /**
- * Antigravity (Google OAuth) configuration.
- * Client credentials must be provided via environment variables.
- */
-export const ANTIGRAVITY = {
-  CLIENT_ID: process.env.ANTIGRAVITY_CLIENT_ID ?? "",
-  CLIENT_SECRET: process.env.ANTIGRAVITY_CLIENT_SECRET ?? "",
-  REDIRECT_URI: process.env.ANTIGRAVITY_REDIRECT_URI ?? "http://localhost:51121/oauth-callback",
-  SCOPES: [
-    "https://www.googleapis.com/auth/cloud-platform",
-    "https://www.googleapis.com/auth/userinfo.email",
-    "https://www.googleapis.com/auth/userinfo.profile",
-    "https://www.googleapis.com/auth/cclog",
-    "https://www.googleapis.com/auth/experimentsandconfigs",
-  ],
-  ENDPOINTS: {
-    DAILY: "https://daily-cloudcode-pa.sandbox.googleapis.com",
-    PROD: "https://cloudcode-pa.googleapis.com",
-    AUTH: "https://accounts.google.com/o/oauth2/v2/auth",
-    TOKEN: "https://oauth2.googleapis.com/token",
-  },
-} as const;
-
-/**
  * Workspace / Git Worktree Configuration
  * Used by WorkspaceManager for parallel agent isolation
  */
@@ -303,12 +280,12 @@ export const DOMAIN = {
     critic: ["critic", "critique", "audit", "review", "gate", "quality"],
   },
   DEFAULT_MODELS: {
-    frontend: "gpt-5.2",
-    ui: "gpt-5.2",
+    frontend: "gpt-5.2-pro",
+    ui: "gpt-5.2-pro",
     backend: "gemini-3.1-pro",
     general: "gemini-3-flash",
-    review: "gpt-5.2",
-    test: "gpt-5.2",
+    review: "gpt-5.2-pro",
+    test: "gpt-5.2-pro",
     critic: "claude-sonnet-4-6",
   },
   GLOW_COLORS: {

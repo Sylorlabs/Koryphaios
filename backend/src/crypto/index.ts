@@ -114,7 +114,7 @@ export function createKMSProviderFromEnv(): KMSProvider {
       serverLog.info('Using Local KMS provider (development only)');
       return new LocalKMSProvider({
         dataDir: process.env.KORYPHAIOS_DATA_DIR || '.koryphaios',
-        passphrase: process.env.KORYPHAIOS_KMS_PASSPHRASE,
+        passphrase: process.env.KORYPHAIOS_MASTER_KEY ?? process.env.KORYPHAIOS_KMS_PASSPHRASE,
         suppressWarning: process.env.NODE_ENV === 'development',
       });
     

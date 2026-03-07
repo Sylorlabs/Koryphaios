@@ -69,13 +69,15 @@
   let isManager = $derived(agent.identity.role === 'manager');
 </script>
 
-<div class="agent-card rounded-lg border transition-all duration-500 
+<div class="agent-card rounded-lg border transition-all duration-500
             {isActive ? `active ${glowClass} glow-active min-w-[180px] max-w-[240px]` : 'opacity-60 grayscale-[0.5] scale-95 origin-left'}"
-     style="background: var(--color-surface-2); border-color: var(--color-border); padding: {isActive ? '10px 12px' : '6px 10px'};">
+     style="background: var(--color-surface-2); border-color: var(--color-border); padding: {isActive ? '8px 12px' : '6px 10px'};">
   <!-- Header -->
-  <div class="flex items-center justify-between {isActive ? 'mb-1.5' : 'mb-0'}">
+  <div class="flex items-start justify-between {isActive ? 'mb-1.5' : 'mb-0'}">
     <div class="flex items-center gap-1.5">
-      <AnimatedStatusIcon status={agent.status} size={isActive ? 16 : 14} {isManager} isStatic={!isActive} />
+      <div class="flex items-center pt-0.5">
+        <AnimatedStatusIcon status={agent.status} size={isActive ? 16 : 14} {isManager} isStatic={!isActive} />
+      </div>
       <span class="text-xs font-medium {isActive ? 'opacity-100' : 'opacity-70'}" style="color: var(--color-text-primary);">{agent.identity.name}</span>
     </div>
     <div class="flex items-center gap-1">

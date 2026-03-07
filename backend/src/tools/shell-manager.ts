@@ -63,6 +63,8 @@ export class ShellManager {
       bgProc.status = "exited";
       bgProc.exitCode = code;
       toolLog.info({ id, name, code }, "Background process exited");
+    }).catch((err) => {
+      toolLog.warn({ id, name, err }, "Failed to track process exit");
     });
 
     return bgProc;

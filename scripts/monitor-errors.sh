@@ -9,7 +9,7 @@ echo "================================================"
 echo ""
 
 # Follow the backend logs and filter for frontend errors
-cd "/home/micah/Desktop/sylorlabs projects/Koryphaios"
+cd "$(cd "$(dirname "$0")/.." && pwd)"
 
 # If running in development, tail the logs
 if pgrep -f "bun run dev:backend" > /dev/null; then

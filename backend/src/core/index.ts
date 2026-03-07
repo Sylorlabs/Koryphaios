@@ -16,6 +16,7 @@ import { selectModel } from "./routing/SelectionEngine";
 import { runManagerSession } from "./orchestration/ManagerSession";
 import { runSafe } from "./safe-terminal";
 import type { TriageIntent } from "./routing/types";
+import { serverLog } from "../logger";
 
 export { triage, getCheckedModelsForUser, auditRoutingDecision };
 export { selectModel } from "./routing/SelectionEngine";
@@ -64,8 +65,8 @@ export async function runAutoMode(
 export async function exampleSafeTerminalUsage(): Promise<void> {
   const res = await runSafe(["node", "--version"], { timeoutMs: 5000 });
   if (res.timedOut) {
-    console.warn("Command timed out");
+    serverLog.warn("Command timed out");
   } else {
-    console.log("stdout:", res.stdout.trim());
+    serverLog.info({ stdout: res.stdout.trim() }, "Safe terminal command output");
   }
 }

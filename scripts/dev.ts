@@ -1,3 +1,19 @@
+#!/usr/bin/env bun
+/**
+ * Main dev launcher - runs Tauri desktop mode by default
+ * 
+ * This is the RECOMMENDED way to develop because:
+ * - Tests actual desktop performance (not browser)
+ * - Catches platform-specific quirks (Windows, macOS, Linux)
+ * - Uses real Tauri APIs (not mocks)
+ * - Tests CSP and security policies correctly
+ * 
+ * Usage: bun run dev
+ * 
+ * For browser-only development (faster but less accurate):
+ *   bun run dev:web
+ */
+
 const processes: Bun.Subprocess[] = [];
 
 function start(name: string, script: string): Bun.Subprocess {
@@ -25,8 +41,26 @@ async function shutdown(signal: string): Promise<void> {
   await Promise.allSettled(processes.map((proc) => proc.exited));
 }
 
-const backend = start("backend", "dev:backend");
-const frontend = start("frontend", "dev:frontend");
+console.log("═══════════════════════════════════════════════════════════");
+console.log("  KORYPHAIOS DESKTOP DEV MODE");
+console.log("═══════════════════════════════════════════════════════════");
+console.log("");
+console.log("  Running Tauri desktop app (recommended for testing)");
+console.log("");
+console.log("  Why Tauri mode?");
+console.log("  ✓ Tests actual desktop performance");
+console.log("  ✓ Catches Windows/macOS/Linux quirks");
+console.log("  ✓ Uses real native APIs");
+console.log("  ✓ Tests CSP and security correctly");
+console.log("");
+console.log("  For browser-only mode (faster, less accurate):");
+console.log("    bun run dev:web");
+console.log("");
+console.log("═══════════════════════════════════════════════════════════");
+console.log("");
+
+// Run Tauri desktop dev mode
+const desktop = start("desktop", "dev:desktop");
 
 for (const event of ["SIGINT", "SIGTERM"] as const) {
   process.on(event, async () => {
@@ -35,7 +69,6 @@ for (const event of ["SIGINT", "SIGTERM"] as const) {
   });
 }
 
-const [backendExit, frontendExit] = await Promise.all([backend.exited, frontend.exited]);
-const code = backendExit !== 0 ? backendExit : frontendExit;
+const code = await desktop.exited;
 await shutdown("child-exit");
 process.exit(code);

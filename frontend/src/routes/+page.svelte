@@ -6,6 +6,7 @@
   import { authStore } from '$lib/stores/auth.svelte';
   import { appStore } from '$lib/stores/app.svelte';
   import { toastStore } from '$lib/stores/toast.svelte';
+  import { apiUrl } from '$lib/utils/api-url';
   import ManagerFeed from '$lib/components/ManagerFeed.svelte';
   import FileEditPreview from '$lib/components/FileEditPreview.svelte';
   import WorkerCard from '$lib/components/WorkerCard.svelte';
@@ -378,6 +379,15 @@
     wsStore.sendMessage(sessionStore.activeSessionId, message, model, reasoningLevel);
   }
 
+  function handleStop() {
+    const sid = sessionStore.activeSessionId;
+    if (!sid) return;
+    wsStore.markSessionAgentsStopped(sid);
+    wsStore.clearAnalyzing();
+    fetch(apiUrl(`/api/sessions/${sid}/cancel`), { method: 'POST', credentials: 'include' })
+      .catch(() => {});
+  }
+
   let activeAgents = $derived([...wsStore.agents.values()].filter(a => 
     a.sessionId === sessionStore.activeSessionId && a.status !== 'done' && a.status !== 'idle'
   ));
@@ -396,22 +406,35 @@
 <div class="flex h-screen overflow-hidden" style="background: var(--color-surface-0);">
   <!-- Sidebar -->
   {#if showSidebar}
-    <nav class="w-60 min-w-[200px] max-w-[320px] shrink-0 border-r flex flex-col" style="border-color: var(--color-border); background: var(--color-surface-1);" aria-label="Session navigation">
+    <nav 
+      class="shrink-0 border-r flex flex-col" 
+      style="
+        width: var(--sidebar-width); 
+        min-width: var(--sidebar-min-width); 
+        max-width: var(--sidebar-max-width); 
+        border-color: var(--color-border); 
+        background: var(--color-surface-1);
+      " 
+      aria-label="Session navigation"
+    >
       <!-- Logo + project -->
-      <div class="flex items-center justify-between px-4 h-12 border-b shrink-0" style="border-color: var(--color-border);">
-        <div class="flex items-center gap-2.5 min-w-0">
-          <div class="w-7 h-7 rounded-lg bg-gradient-to-br from-yellow-400 to-amber-600 flex items-center justify-center text-xs font-bold shrink-0" style="color: var(--color-surface-0);">K</div>
+      <div 
+        class="flex items-center justify-between px-4 border-b shrink-0" 
+        style="height: var(--header-height); border-color: var(--color-border);"
+      >
+        <div class="flex items-center gap-3 min-w-0">
+          <div 
+            class="rounded-lg bg-gradient-to-br from-yellow-400 to-amber-600 flex items-center justify-center text-xs font-bold shrink-0" 
+            style="width: var(--size-7); height: var(--size-7); color: var(--color-surface-0);"
+          >K</div>
           <div class="flex flex-col justify-center min-w-0">
             <h1 class="text-sm font-semibold leading-tight" style="color: var(--color-text-primary);">Koryphaios</h1>
-            <p class="text-[10px] leading-tight mt-0.5" style="color: var(--color-text-muted);">v0.1.0</p>
-            {#if appStore.projectName}
-              <p class="text-[10px] leading-tight truncate mt-0.5" style="color: var(--color-text-muted);" title={appStore.projectName}>{appStore.projectName}</p>
-            {/if}
+            <p class="leading-tight" style="font-size: var(--text-xs); color: var(--color-text-muted);">v0.1.0</p>
           </div>
         </div>
         <button
-          class="p-1.5 rounded-md transition-colors hover:bg-[var(--color-surface-3)]"
-          style="color: var(--color-text-muted);"
+          class="rounded-md transition-colors hover:bg-[var(--color-surface-3)]"
+          style="padding: var(--space-2); color: var(--color-text-muted);"
           onclick={() => showSidebar = false}
           title="Hide sidebar"
           aria-label="Hide sidebar"
@@ -425,14 +448,20 @@
         />
       </div>
       <!-- Sidebar footer -->
-      <div class="px-3 h-10 border-t flex items-center justify-between shrink-0" style="border-color: var(--color-border);">
+      <div 
+        class="px-3 border-t flex items-center justify-between shrink-0" 
+        style="height: var(--size-10); border-color: var(--color-border);"
+      >
         <div class="flex items-center gap-2">
-          <div class="w-2 h-2 rounded-full {connectionDot}"></div>
-          <span class="text-[10px] capitalize leading-none" style="color: var(--color-text-muted);">{wsStore.status}</span>
+          <div class="rounded-full {connectionDot}" style="width: var(--size-2); height: var(--size-2);"></div>
+          <span class="capitalize leading-none" style="font-size: var(--text-xs); color: var(--color-text-muted);">{wsStore.status}</span>
         </div>
         <div class="flex items-center gap-1">
           {#if connectedProviders > 0}
-            <span class="text-[10px] px-1.5 py-0.5 rounded leading-none" style="background: var(--color-surface-3); color: var(--color-text-muted);">
+            <span 
+              class="px-1.5 py-0.5 rounded leading-none" 
+              style="font-size: var(--text-xs); background: var(--color-surface-3); color: var(--color-text-muted);"
+            >
               {connectedProviders} providers
             </span>
           {/if}
@@ -440,11 +469,17 @@
       </div>
     </nav>
   {:else if !zenMode}
-    <div class="w-10 shrink-0 border-r flex flex-col items-center" style="border-color: var(--color-border); background: var(--color-surface-1);">
-      <div class="h-12 w-full border-b flex items-center justify-center" style="border-color: var(--color-border);">
+    <div 
+      class="shrink-0 border-r flex flex-col items-center" 
+      style="width: var(--sidebar-width-collapsed); border-color: var(--color-border); background: var(--color-surface-1);"
+    >
+      <div 
+        class="w-full border-b flex items-center justify-center" 
+        style="height: var(--header-height); border-color: var(--color-border);"
+      >
         <button
-          class="p-1.5 rounded-md transition-colors hover:bg-[var(--color-surface-3)]"
-          style="color: var(--color-text-muted);"
+          class="rounded-md transition-colors hover:bg-[var(--color-surface-3)]"
+          style="padding: var(--space-2); color: var(--color-text-muted);"
           onclick={() => showSidebar = true}
           title="Show sidebar"
           aria-label="Show sidebar"
@@ -492,7 +527,7 @@
     <!-- Agent cards (collapsible) -->
     {#if !zenMode && showAgents && activeAgents.length > 0}
       <div class="px-4 py-2 border-b flex gap-2 overflow-x-auto shrink-0" style="border-color: var(--color-border); background: var(--color-surface-1);">
-        {#each activeAgents as agent (agent.identity.id)}
+        {#each activeAgents as agent (agent.identity.id + agent.status)}
           <WorkerCard {agent} />
         {/each}
       </div>
@@ -516,14 +551,17 @@
 
     <!-- Context window usage -->
     {#if wsStore.contextUsage.isReliable}
-      <div class="shrink-0 px-4 py-1.5 flex items-center gap-3" style="border-top: 1px solid var(--color-border); background: var(--color-surface-1);">
-        <span class="text-[10px] shrink-0" style="color: var(--color-text-muted);">
+      <div 
+        class="shrink-0 px-4 flex items-center gap-3" 
+        style="padding-top: var(--space-2); padding-bottom: var(--space-2); border-top: 1px solid var(--color-border); background: var(--color-surface-1);"
+      >
+        <span class="shrink-0" style="font-size: var(--text-xs); color: var(--color-text-muted);">
           Context
         </span>
-        <div class="flex-1 h-1.5 rounded-full overflow-hidden" style="background: var(--color-surface-3);">
+        <div class="flex-1 rounded-full overflow-hidden" style="height: 6px; background: var(--color-surface-3);">
           <div
-            class="h-full rounded-full transition-all duration-500"
-            style="width: {wsStore.contextUsage.percent}%; background: {
+            class="h-full rounded-full transition-all"
+            style="width: {wsStore.contextUsage.percent}%; transition-duration: var(--duration-slower); background: {
               wsStore.contextUsage.percent > 85 ? '#ef4444' :
               wsStore.contextUsage.percent > 65 ? '#f59e0b' : 
               'var(--color-accent)'
@@ -531,8 +569,8 @@
           ></div>
         </div>
         {#if wsStore.contextUsage.max > 0}
-          <span class="text-[10px] shrink-0 tabular-nums" style="color: var(--color-text-muted);">
-            {wsStore.contextUsage.used >= 1000 ? `${(wsStore.contextUsage.used / 1000).toFixed(1)}k` : wsStore.contextUsage.used} / {(wsStore.contextUsage.max / 1000).toFixed(0)}k
+          <span class="shrink-0 tabular-nums" style="font-size: var(--text-xs); color: var(--color-text-muted);">
+            {wsStore.contextUsage.used >= 1000 ? `${(wsStore.contextUsage.used / 1000).toFixed(1)}k` : wsStore.contextUsage.used} / {(wsStore.contextUsage.max / 1000).toFixed(1)}k
           </span>
         {/if}
       </div>
@@ -543,12 +581,23 @@
       <CommandInput
         bind:inputRef
         onSend={handleSend}
+        isRunning={wsStore.managerStatus !== 'idle' && wsStore.managerStatus !== 'done'}
+        onStop={handleStop}
       />
     </div>
   </div>
 
   {#if !zenMode && showGit}
-      <aside class="w-80 max-w-[40vw] min-w-[260px] border-l shrink-0" style="border-color: var(--color-border); background: var(--color-surface-1);">
+      <aside 
+        class="border-l shrink-0" 
+        style="
+          width: var(--git-panel-width); 
+          max-width: var(--git-panel-max-width); 
+          min-width: var(--git-panel-min-width); 
+          border-color: var(--color-border); 
+          background: var(--color-surface-1);
+        "
+      >
         <SourceControlPanel />
       </aside>
     {/if}

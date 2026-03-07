@@ -6,6 +6,7 @@ import { json } from "./types";
 import { validateSessionId, sanitizeString } from "../security";
 import { SESSION, MESSAGE, ID } from "../constants";
 import { nanoid } from "nanoid";
+import { getDb } from "../db/sqlite";
 
 export function createMessageRoutes(deps: RouteDependencies): RouteHandler[] {
     const { sessions, messages, wsManager, kory } = deps;
@@ -38,7 +39,7 @@ export function createMessageRoutes(deps: RouteDependencies): RouteHandler[] {
                     activeSessionId = session.id;
                 }
 
-                // Persist user message
+                // Persist user message + update session atomically
                 const userMsg: StoredMessage = {
                     id: nanoid(ID.SESSION_ID_LENGTH),
                     sessionId: activeSessionId,
@@ -46,22 +47,24 @@ export function createMessageRoutes(deps: RouteDependencies): RouteHandler[] {
                     content,
                     createdAt: Date.now(),
                 };
-                messages.add(activeSessionId, userMsg);
 
-                // Increment message count
                 const currentCount = session.messageCount ?? 0;
-                sessions.update(activeSessionId, {
-                    messageCount: currentCount + 1,
-                });
-
-                // AUTO-TITLE: If this was the first message or it's still the default title
-                if (currentCount === 0 || session.title === SESSION.DEFAULT_TITLE) {
+                const needsTitle = currentCount === 0 || session.title === SESSION.DEFAULT_TITLE;
+                let newTitle: string | undefined;
+                if (needsTitle) {
                     const rawTitle = content.replace(/\n/g, " ").trim();
-                    const newTitle = rawTitle.length > 50
-                        ? rawTitle.slice(0, 47) + "..."
-                        : rawTitle;
+                    newTitle = rawTitle.length > 50 ? rawTitle.slice(0, 47) + "..." : rawTitle;
+                }
 
-                    const updated = sessions.update(activeSessionId, { title: newTitle });
+                const txn = getDb().transaction(() => {
+                    messages.add(activeSessionId, userMsg);
+                    sessions.update(activeSessionId, { messageCount: currentCount + 1 });
+                    if (newTitle) sessions.update(activeSessionId, { title: newTitle });
+                });
+                txn();
+
+                if (newTitle) {
+                    const updated = sessions.get(activeSessionId);
                     if (updated) {
                         wsManager.broadcast({
                             type: "session.updated",

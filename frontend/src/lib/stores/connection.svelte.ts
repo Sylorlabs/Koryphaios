@@ -2,6 +2,7 @@
 // Split from the monolithic websocket.svelte.ts for better separation of concerns
 
 import { browser } from '$app/environment';
+import { getWsUrl } from '$lib/utils/api-url';
 
 export type ConnectionStatus = "connecting" | "connected" | "disconnected" | "error";
 
@@ -17,10 +18,8 @@ let connectionIdCounter = $state(0);
 let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 
 function buildWsUrl(preferredUrl?: string): string {
-    const scheme = window.location.protocol === "https:" ? "wss" : "ws";
-    const currentHost = window.location.host;
-    const primary = preferredUrl ?? `${scheme}://${currentHost}/ws`;
-    return primary;
+    if (preferredUrl) return preferredUrl;
+    return getWsUrl();
 }
 
 export function connect(url?: string) {

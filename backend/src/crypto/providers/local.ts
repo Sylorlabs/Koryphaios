@@ -84,13 +84,17 @@ export class LocalKMSProvider implements KMSProvider {
     if (!this.masterKey) {
       await this.initialize();
     }
+    if (!this.masterKey) {
+      throw new Error("Master key not initialized");
+    }
+    const masterKey = this.masterKey;
 
     // Generate random DEK
     const dek = randomBytes(KEY_SIZE);
     
     // Encrypt DEK with master key
     const iv = randomBytes(16);
-    const cipher = createCipheriv('aes-256-cbc', this.masterKey, iv);
+    const cipher = createCipheriv('aes-256-cbc', masterKey, iv);
     const encrypted = Buffer.concat([cipher.update(dek), cipher.final()]);
     
     // Combine IV + encrypted DEK
@@ -168,12 +172,16 @@ export class LocalKMSProvider implements KMSProvider {
     if (!this.masterKey) {
       await this.initialize();
     }
+    if (!this.masterKey) {
+      throw new Error("Master key not initialized");
+    }
+    const masterKey = this.masterKey;
     const { createHmac, randomBytes, createCipheriv } = await import('node:crypto');
     // Derive a deterministic user key from master key + derivationInput
-    const userKey = createHmac('sha256', this.masterKey).update(derivationInput).digest();
+    const userKey = createHmac('sha256', masterKey).update(derivationInput).digest();
     // Encrypt the derived key for storage (using master key as KEK)
     const iv = randomBytes(16);
-    const cipher = createCipheriv('aes-256-cbc', this.masterKey, iv);
+    const cipher = createCipheriv('aes-256-cbc', masterKey, iv);
     const enc = Buffer.concat([cipher.update(userKey), cipher.final()]);
     const encrypted = Buffer.concat([iv, enc]).toString('base64');
     return { plaintext: userKey, encrypted };

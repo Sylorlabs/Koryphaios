@@ -5,6 +5,7 @@
 import { getDb } from "../../db/sqlite";
 import { nanoid } from "nanoid";
 import type { TriageIntent } from "./types";
+import { serverLog } from "../../logger";
 
 export function logRoutingDecision(params: {
   userId: string | null;
@@ -29,6 +30,6 @@ export function logRoutingDecision(params: {
     );
   } catch (e) {
     // Don't fail the request if audit logging fails
-    console.warn("Routing audit log failed:", e);
+    serverLog.warn({ error: e }, "Routing audit log failed");
   }
 }

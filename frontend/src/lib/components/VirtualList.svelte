@@ -114,12 +114,31 @@
     }
     
     // Measure item heights after render
+    // FIX: Use ResizeObserver to batch updates instead of one-by-one state triggers
     function measureItem(element: HTMLElement, id: string) {
-        const height = element.offsetHeight;
-        if (height > 0 && heightCache.get(id) !== height) {
-            heightCache.set(id, height);
-            heightCache = new Map(heightCache); // Trigger reactivity
-        }
+        let currentId = id;
+        const ro = new ResizeObserver((entries) => {
+            let changed = false;
+            for (const entry of entries) {
+                const height = entry.borderBoxSize[0]?.blockSize ?? entry.contentRect.height;
+                if (height > 0 && heightCache.get(currentId) !== height) {
+                    heightCache.set(currentId, height);
+                    changed = true;
+                }
+            }
+            if (changed) {
+                heightCache = new Map(heightCache); // Trigger reactivity once per batch
+            }
+        });
+        ro.observe(element);
+        return {
+            update(nextId: string) {
+                currentId = nextId;
+            },
+            destroy() {
+                ro.disconnect();
+            },
+        };
     }
     
     // Resize observer for client height

@@ -60,17 +60,17 @@
 		display: flex;
 		align-items: center;
 		justify-content: center;
-		gap: 12px;
+		gap: var(--space-md);
 		background: var(--color-surface-0);
 		color: var(--color-text-muted);
-		font-size: 14px;
+		font-size: var(--text-base);
 		z-index: 10000;
 		pointer-events: none;
 	}
 	.initial-load-dot {
-		width: 8px;
-		height: 8px;
-		border-radius: 50%;
+		width: var(--size-2);
+		height: var(--size-2);
+		border-radius: var(--radius-full);
 		background: var(--color-accent);
 		animation: pulse 1s ease-in-out infinite;
 	}
@@ -82,10 +82,10 @@
 		position: sticky;
 		top: 0;
 		z-index: 9999;
-		padding: 6px 16px;
+		padding: var(--space-2) var(--space-lg);
 		text-align: center;
-		font-size: 13px;
-		font-weight: 500;
+		font-size: var(--text-sm);
+		font-weight: var(--font-medium);
 		background: var(--color-warning);
 		color: #000;
 	}

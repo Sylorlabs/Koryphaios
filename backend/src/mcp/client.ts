@@ -100,7 +100,7 @@ export class MCPClient {
           this.buffer += decoder.decode(value, { stream: true });
           this.processBuffer();
         }
-      } catch {}
+      } catch { /* Expected: stream closed when process exits */ }
     })();
 
     // Read stderr asynchronously
@@ -113,12 +113,14 @@ export class MCPClient {
           if (done) break;
           mcpLog.error({ server: this.serverName, output: stderrDecoder.decode(value).trim() }, "MCP stderr");
         }
-      } catch {}
+      } catch { /* Expected: stream closed when process exits */ }
     })();
 
     this.process.exited.then((code) => {
       mcpLog.info({ server: this.serverName, code }, "MCP process exited");
       this.connected = false;
+    }).catch((err) => {
+      mcpLog.warn({ server: this.serverName, err }, "Failed to track MCP process exit");
     });
 
     // Initialize

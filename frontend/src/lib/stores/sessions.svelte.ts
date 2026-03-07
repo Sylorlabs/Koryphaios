@@ -6,6 +6,7 @@ import { toastStore } from './toast.svelte';
 import { authStore } from './auth.svelte';
 import { browser } from '$app/environment';
 import { friendlyHttpError } from '$lib/api.svelte';
+import { apiUrl } from '$lib/utils/api-url';
 
 let sessions = $state<Session[]>([]);
 let activeSessionId = $state<string>('');
@@ -18,7 +19,7 @@ let loading = $state<boolean>(false);
 async function fetchSessions(): Promise<boolean> {
   if (!browser) return false;
   try {
-    const res = await fetch('/api/sessions', {
+    const res = await fetch(apiUrl('/api/sessions'), {
       headers: authStore.token ? { 'Authorization': `Bearer ${authStore.token}` } : {},
     });
     const text = await res.text();
@@ -61,7 +62,7 @@ async function fetchSessions(): Promise<boolean> {
 
 async function createSession(): Promise<string | null> {
   try {
-    const res = await fetch('/api/sessions', {
+    const res = await fetch(apiUrl('/api/sessions'), {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -93,7 +94,7 @@ async function createSession(): Promise<string | null> {
 
 async function renameSession(id: string, title: string) {
   try {
-    const res = await fetch(`/api/sessions/${id}`, {
+    const res = await fetch(apiUrl(`/api/sessions/${id}`), {
       method: 'PATCH',
       headers: {
         'Content-Type': 'application/json',
@@ -113,23 +114,34 @@ async function renameSession(id: string, title: string) {
 
 async function deleteSession(id: string) {
   try {
-    await fetch(`/api/sessions/${id}`, {
+    const res = await fetch(apiUrl(`/api/sessions/${id}`), {
       method: 'DELETE',
       headers: authStore.token ? { 'Authorization': `Bearer ${authStore.token}` } : {},
     });
+    const text = await res.text();
+    if (!res.ok) {
+      let detail = '';
+      try {
+        const body = text ? JSON.parse(text) : {};
+        detail = body.error ?? '';
+      } catch { /* ignore */ }
+      toastStore.error(detail || friendlyHttpError(res.status, 'delete session'));
+      return;
+    }
     sessions = sessions.filter(s => s.id !== id);
     if (activeSessionId === id) {
       activeSessionId = sessions[0]?.id ?? '';
     }
     toastStore.success('Session deleted');
-  } catch {
+  } catch (err) {
+    console.error('deleteSession exception:', err);
     toastStore.error('Failed to delete session');
   }
 }
 
 async function fetchMessages(sessionId: string): Promise<Array<{ id: string; role: string; content: string; createdAt: number; model?: string; cost?: number }>> {
   try {
-    const res = await fetch(`/api/sessions/${sessionId}/messages`, {
+    const res = await fetch(apiUrl(`/api/sessions/${sessionId}/messages`), {
       headers: authStore.token ? { 'Authorization': `Bearer ${authStore.token}` } : {},
     });
     const data = await res.json();

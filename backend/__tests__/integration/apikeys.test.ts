@@ -20,6 +20,7 @@ describe('API Key Authentication', () => {
   let service: ApiKeyService;
   let testDir: string;
   let userId: string;
+  let testCounter = 0;
 
   beforeAll(() => {
     testDir = join(tmpdir(), `koryphaios-test-${Date.now()}`);
@@ -35,7 +36,7 @@ describe('API Key Authentication', () => {
   });
 
   beforeEach(() => {
-    userId = `test_user_${Date.now()}`;
+    userId = `test_user_${Date.now()}_${++testCounter}`;
   });
 
   describe('create', () => {

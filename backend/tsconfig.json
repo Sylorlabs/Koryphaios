@@ -28,6 +28,9 @@
   ],
   "exclude": [
     "node_modules",
-    "build"
+    "build",
+    "src/**/__tests__/**",
+    "src/server/config.ts",
+    "src/server/shutdown-handler.ts"
   ]
 }

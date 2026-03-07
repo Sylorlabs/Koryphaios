@@ -7,37 +7,86 @@
     "frontendDist": "../../frontend/build",
     "devUrl": "http://localhost:5173",
     "beforeDevCommand": "",
-    "beforeBuildCommand": ""
+    "beforeBuildCommand": "",
+    "features": {}
   },
   "app": {
-    "withGlobalTauri": false,
+    "withGlobalTauri": true,
     "windows": [
       {
+        "label": "main",
         "title": "Koryphaios",
-        "width": 1400,
-        "height": 900,
-        "minWidth": 900,
-        "minHeight": 600,
+        "width": 1280,
+        "height": 800,
+        "minWidth": 1024,
+        "minHeight": 640,
+        "maxWidth": 3840,
+        "maxHeight": 2160,
         "resizable": true,
         "fullscreen": false,
         "center": true,
-        "decorations": true
+        "decorations": false,
+        "visible": true,
+        "focus": true,
+        "useHttpsScheme": false
       }
     ],
     "security": {
-      "csp": null
+      "csp": {
+        "default-src": "'self'",
+        "connect-src": "'self' http://localhost:* http://127.0.0.1:* ws://localhost:* ws://127.0.0.1:*",
+        "img-src": "'self' data: https:",
+        "style-src": "'self' 'unsafe-inline'",
+        "script-src": "'self' 'unsafe-eval'",
+        "font-src": "'self' data:"
+      },
+      "dangerousDisableAssetCspModification": false,
+      "capabilities": []
     }
   },
   "bundle": {
     "active": true,
-    "targets": "all",
+    "targets": ["deb", "rpm", "msi", "dmg", "app", "appimage"],
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
       "icons/128x128@2x.png",
       "icons/icon.icns",
       "icons/icon.ico"
-    ]
+    ],
+    "category": "DeveloperTool",
+    "shortDescription": "AI Agent Orchestration Dashboard",
+    "longDescription": "Koryphaios is a full-stack application that orchestrates AI agents across multiple providers with intelligent routing, task delegation, and real-time streaming.",
+    "publisher": "Sylorlabs",
+    "copyright": "Copyright (c) 2024 Sylorlabs",
+    "windows": {
+      "certificateThumbprint": null,
+      "digestAlgorithm": "sha256",
+      "timestampUrl": "",
+      "webviewInstallMode": {
+        "type": "downloadBootstrapper"
+      }
+    },
+    "macOS": {
+      "frameworks": [],
+      "minimumSystemVersion": "10.13",
+      "signingIdentity": null,
+      "entitlements": null
+    },
+    "linux": {
+      "deb": {
+        "depends": ["libwebkit2gtk-4.1-0", "libgtk-3-0"]
+      },
+      "rpm": {
+        "depends": ["webkit2gtk4.1", "gtk3"]
+      },
+      "appimage": {
+        "bundleMediaFramework": false
+      }
+    },
+    "resources": {
+      "../../config": "config"
+    }
   },
   "plugins": {
     "shell": {

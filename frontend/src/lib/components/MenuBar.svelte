@@ -6,11 +6,15 @@
     GitBranch,
     Zap,
     Search,
+    Minus,
+    Square,
+    X,
   } from 'lucide-svelte';
   import { getModKeyName } from '$lib/utils/platform';
   import { formatRecentDate, promptTemplates } from '$lib/utils/projectManager';
   import type { RecentProject } from '$lib/utils/projectManager';
   import { onMount } from 'svelte';
+  import { browser } from '$app/environment';
 
   interface Props {
     showSidebar: boolean;
@@ -20,7 +24,7 @@
     projectName: string | null | undefined;
     koryPhase: string | null;
     isYoloMode: boolean;
-    activeAgents: Array<{ identity: { id: string }; [key: string]: unknown }>;
+    activeAgents: Array<{ identity: { id: string } }>;
     recentProjects: RecentProject[];
     onAction: (action: string) => void;
   }
@@ -39,8 +43,47 @@
   }: Props = $props();
 
   let openMenu = $state<'file' | 'edit' | 'view' | null>(null);
+  let isMaximized = $state(false);
+  let inTauri = $state(false);
+
+  function getTauriWindow() {
+    if (!browser) return null;
+    const win = window as any;
+    return win.__TAURI__?.window ?? null;
+  }
+
+  async function minimizeWindow() {
+    const tw = getTauriWindow();
+    if (!tw) return;
+    const current = tw.getCurrentWindow?.() ?? tw.appWindow;
+    await current?.minimize?.();
+  }
+
+  async function toggleMaximize() {
+    const tw = getTauriWindow();
+    if (!tw) return;
+    const current = tw.getCurrentWindow?.() ?? tw.appWindow;
+    await current?.toggleMaximize?.();
+    isMaximized = await current?.isMaximized?.() ?? false;
+  }
+
+  async function closeWindow() {
+    const tw = getTauriWindow();
+    if (!tw) return;
+    const current = tw.getCurrentWindow?.() ?? tw.appWindow;
+    await current?.close?.();
+  }
 
   onMount(() => {
+    const win = window as any;
+    inTauri = typeof win.__TAURI__ !== 'undefined';
+
+    if (inTauri) {
+      const tw = getTauriWindow();
+      const current = tw?.getCurrentWindow?.() ?? tw?.appWindow;
+      current?.isMaximized?.().then((v: boolean) => { isMaximized = v; });
+    }
+
     function handleWindowClick(e: MouseEvent) {
       const target = e.target as HTMLElement | null;
       if (target?.closest('[data-top-menu]')) return;
@@ -72,8 +115,21 @@
 </script>
 
 {#if !zenMode}
-  <header class="flex items-center justify-between px-4 h-12 border-b shrink-0" style="border-color: var(--color-border); background: var(--color-surface-1);">
-    <div class="flex items-center gap-3">
+  <header
+    class="flex items-center justify-between px-2 h-11 border-b shrink-0 select-none"
+    style="border-color: var(--color-border); background: var(--color-surface-1);"
+    data-tauri-drag-region
+  >
+    <!-- Left: App logo + menus -->
+    <div class="flex items-center gap-1">
+      <!-- App logo -->
+      <div class="flex items-center justify-center w-8 h-8 rounded-lg mr-1 shrink-0" style="background: linear-gradient(135deg, #1a1a1c 0%, #2a2a2e 100%); border: 1px solid var(--color-border);">
+        <svg width="18" height="18" viewBox="0 0 18 18" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <polygon points="9,1 16.5,5 16.5,13 9,17 1.5,13 1.5,5" fill="#1a1a1c" stroke="#c9943a" stroke-width="1.2"/>
+          <text x="9" y="12.5" text-anchor="middle" font-family="Georgia,serif" font-size="9" font-weight="bold" fill="#d4a537">K</text>
+        </svg>
+      </div>
+
       <div class="flex items-center gap-1" data-top-menu>
         <div class="relative" data-top-menu>
           <button
@@ -153,33 +209,39 @@
         </div>
       </div>
 
-      {#if projectName}
-        <span class="flex items-center gap-2 min-w-0 max-w-[240px]">
+      {#if koryPhase}
+        <span class="flex items-center gap-2 min-w-0 max-w-[200px]">
           <span class="shrink-0 text-[11px]" style="color: var(--color-text-muted);" aria-hidden="true">|</span>
-          <span
-            class="truncate text-xs font-medium"
-            style="color: var(--color-text-secondary);"
-            title={projectName}
-          >
-            {projectName}
-          </span>
+          <div class="flex items-center gap-2 px-2.5 py-1 rounded-lg" style="background: var(--color-surface-2);">
+            <div class="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse"></div>
+            <span class="text-xs leading-none" style="color: var(--color-text-secondary);">
+              Kory: {koryPhase}
+            </span>
+          </div>
         </span>
       {/if}
 
-      {#if koryPhase}
-        <div class="flex items-center gap-2 px-2.5 py-1.5 rounded-lg" style="background: var(--color-surface-2);">
-          <div class="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse"></div>
-          <span class="text-xs leading-none" style="color: var(--color-text-secondary);">
-            Kory: {koryPhase}
+      {#if isYoloMode}
+        <span class="flex items-center gap-2 min-w-0">
+          <span class="shrink-0 text-[11px]" style="color: var(--color-text-muted);" aria-hidden="true">|</span>
+          <div class="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-red-500/10 border border-red-500/20 text-red-400">
+            <Zap size={12} fill="currentColor" />
+            <span class="text-[10px] font-bold tracking-wider uppercase">YOLO mode</span>
+          </div>
+        </span>
+      {/if}
+    </div>
+
+    <!-- Center: Project name (VS Code style) -->
+    <div class="flex-1 flex items-center justify-center">
+      {#if projectName}
+        <div class="flex items-center gap-2 px-3 py-1 rounded-md" style="background: var(--color-surface-2);">
+          <span class="text-sm font-medium" style="color: var(--color-text-primary);" title={projectName}>
+            {projectName}
           </span>
         </div>
-      {/if}
-
-      {#if isYoloMode}
-        <div class="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-red-500/10 border border-red-500/20 text-red-400">
-          <Zap size={12} fill="currentColor" />
-          <span class="text-[10px] font-bold tracking-wider uppercase">YOLO mode</span>
-        </div>
+      {:else}
+        <span class="text-sm" style="color: var(--color-text-muted);">Koryphaios</span>
       {/if}
     </div>
 
@@ -232,6 +294,41 @@
       >
         <Settings size={18} />
       </button>
+
+      {#if inTauri}
+        <!-- Window controls separator -->
+        <div class="w-px h-5 mx-1 shrink-0" style="background: var(--color-border);"></div>
+        <!-- Minimize -->
+        <button
+          class="flex items-center justify-center w-8 h-8 rounded-md transition-colors hover:bg-[var(--color-surface-3)]"
+          style="color: var(--color-text-muted);"
+          onclick={minimizeWindow}
+          title="Minimize"
+          aria-label="Minimize window"
+        >
+          <Minus size={14} />
+        </button>
+        <!-- Maximize / Restore -->
+        <button
+          class="flex items-center justify-center w-8 h-8 rounded-md transition-colors hover:bg-[var(--color-surface-3)]"
+          style="color: var(--color-text-muted);"
+          onclick={toggleMaximize}
+          title={isMaximized ? 'Restore' : 'Maximize'}
+          aria-label={isMaximized ? 'Restore window' : 'Maximize window'}
+        >
+          <Square size={13} />
+        </button>
+        <!-- Close -->
+        <button
+          class="flex items-center justify-center w-8 h-8 rounded-md transition-colors hover:bg-red-500/80 hover:text-white"
+          style="color: var(--color-text-muted);"
+          onclick={closeWindow}
+          title="Close"
+          aria-label="Close window"
+        >
+          <X size={14} />
+        </button>
+      {/if}
     </div>
   </header>
 {:else}

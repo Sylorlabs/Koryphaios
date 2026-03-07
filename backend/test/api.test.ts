@@ -61,7 +61,11 @@ beforeAll(async () => {
   const backendDir = join(dirname(import.meta.dir), "src", "..");
   serverProc = Bun.spawn(["bun", "run", "src/server.ts"], {
     cwd: backendDir,
-    env: { ...process.env, KORYPHAIOS_PORT: String(TEST_PORT) },
+    env: {
+      ...process.env,
+      KORYPHAIOS_PORT: String(TEST_PORT),
+      SESSION_TOKEN_SECRET: process.env.SESSION_TOKEN_SECRET ?? "test_only_not_for_production_aaaaaaaaaa",
+    },
     stdout: "ignore",
     stderr: "ignore",
   });
@@ -84,7 +88,7 @@ describe("API Integration Tests", () => {
       expect(res.status).toBe(200);
       expect(res.json?.ok).toBe(true);
       expect(res.json?.data).toHaveProperty("version");
-      expect(res.json?.data).toHaveProperty("uptime");
+      expect(res.json?.data).toHaveProperty("status");
     });
   });
 

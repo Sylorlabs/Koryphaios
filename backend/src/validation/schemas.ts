@@ -107,7 +107,7 @@ export const QueryAuditSchema = z.object({
 
 export const SuspiciousActivitySchema = z.object({
   type: z.string(),
-  details: z.record(z.unknown()).optional(),
+  details: z.record(z.string(), z.unknown()).optional(),
 });
 
 export const ApplyChangesRequestSchema = z.object({

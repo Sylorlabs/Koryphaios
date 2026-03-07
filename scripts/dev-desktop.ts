@@ -1,86 +1,186 @@
+#!/usr/bin/env bun
 /**
- * dev-desktop.ts
- * Starts backend + frontend dev server + Tauri desktop window.
+ * Desktop dev launcher - starts backend, frontend, and Tauri app
  * Usage: bun run dev:desktop
+ * 
+ * Cross-platform: Works on Windows, macOS, and Linux
  */
 
-import { resolve } from "node:path";
+import { spawn, type ChildProcess } from "child_process";
+import { resolve } from "path";
+import { setTimeout } from "timers/promises";
+import { existsSync, readFileSync } from "fs";
+import { platform } from "os";
 
-const ROOT = resolve(import.meta.dir, "..");
-const processes: Bun.Subprocess[] = [];
+const PROJECT_ROOT = resolve(import.meta.dir, "..");
+const FRONTEND_PORT = 5173;
+const MAX_WAIT_MS = 30000;
+const IS_WINDOWS = platform() === "win32";
 
-function start(name: string, cmd: string[], cwd?: string): Bun.Subprocess {
-  const proc = Bun.spawn(cmd, {
-    cwd: cwd ?? ROOT,
-    stdout: "inherit",
-    stderr: "inherit",
-    stdin: "inherit",
-    env: process.env,
-  });
-  processes.push(proc);
-  console.log(`[dev:desktop] started ${name} (pid ${proc.pid})`);
-  return proc;
+// Read port from .env file or use default
+function getBackendPort(): number {
+  const envPath = resolve(PROJECT_ROOT, ".env");
+  if (existsSync(envPath)) {
+    const envContent = readFileSync(envPath, "utf-8");
+    const portMatch = envContent.match(/KORYPHAIOS_PORT=(\d+)/);
+    if (portMatch) {
+      return parseInt(portMatch[1], 10);
+    }
+  }
+  // Try to read from koryphaios.json
+  const configPath = resolve(PROJECT_ROOT, "koryphaios.json");
+  if (existsSync(configPath)) {
+    try {
+      const config = JSON.parse(readFileSync(configPath, "utf-8"));
+      if (config.server?.port) {
+        return config.server.port;
+      }
+    } catch {
+      // Ignore config parse errors
+    }
+  }
+  return 3000;
 }
 
-async function waitForBackend(
-  url: string,
-  timeoutMs = 30_000
-): Promise<boolean> {
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
+const BACKEND_PORT = getBackendPort();
+
+async function waitForPort(port: number, name: string): Promise<boolean> {
+  const start = Date.now();
+  while (Date.now() - start < MAX_WAIT_MS) {
     try {
-      const res = await fetch(`${url}/api/health`, { signal: AbortSignal.timeout(1000) });
-      if (res.ok || res.status < 500) return true;
-    } catch {
-      // not ready yet
+      const res = await fetch(`http://localhost:${port}/api/health`).catch(() => null);
+      if (res?.ok) return true;
+    } catch { 
+      // Port not ready yet
     }
-    await Bun.sleep(500);
+    await setTimeout(500);
   }
   return false;
 }
 
-async function shutdown(signal: string): Promise<void> {
-  console.log(`[dev:desktop] shutting down (${signal})`);
-  for (const proc of processes) {
-    try { proc.kill(); } catch { /* already exited */ }
+async function waitForFrontend(port: number): Promise<boolean> {
+  const start = Date.now();
+  while (Date.now() - start < MAX_WAIT_MS) {
+    try {
+      const res = await fetch(`http://localhost:${port}`).catch(() => null);
+      if (res?.ok) return true;
+    } catch { 
+      // Port not ready yet
+    }
+    await setTimeout(500);
   }
-  await Promise.allSettled(processes.map((p) => p.exited));
+  return false;
 }
 
-// ── Start services ────────────────────────────────────────────────────────────
-
-const backend = start("backend", ["bun", "run", "dev:backend"]);
-
-// Give the backend a moment to bind, then start frontend + Tauri
-console.log("[dev:desktop] waiting for backend to be ready...");
-const backendReady = await waitForBackend("http://127.0.0.1:3001");
-if (!backendReady) {
-  console.warn("[dev:desktop] backend did not respond in time — continuing anyway");
-}
-
-const frontend = start("frontend", ["bun", "run", "dev:frontend"]);
-
-// Give Vite a few seconds to start, then launch Tauri
-await Bun.sleep(3000);
-const desktopDir = resolve(ROOT, "desktop");
-const tauri = start(
-  "tauri",
-  ["bunx", "tauri", "dev"],
-  desktopDir
-);
-
-for (const event of ["SIGINT", "SIGTERM"] as const) {
-  process.on(event, async () => {
-    await shutdown(event);
-    process.exit(0);
+// Cross-platform spawn helper
+function spawnCrossPlatform(
+  command: string,
+  args: string[],
+  options: { cwd?: string; stdio?: any; env?: NodeJS.ProcessEnv } = {}
+): ChildProcess {
+  const { cwd, stdio, env } = options;
+  
+  if (IS_WINDOWS) {
+    // On Windows, use cmd.exe /c for shell commands
+    return spawn("cmd", ["/c", command, ...args], {
+      cwd,
+      stdio: stdio || "inherit",
+      env: env || process.env,
+      windowsHide: false,
+    });
+  }
+  
+  // On Unix, spawn directly
+  return spawn(command, args, {
+    cwd,
+    stdio: stdio || "inherit",
+    env: env || process.env,
   });
 }
 
-const [backendCode, frontendCode, tauriCode] = await Promise.all([
-  backend.exited,
-  frontend.exited,
-  tauri.exited,
-]);
+// Cross-platform Tauri spawn with cargo environment
+function spawnTauriDev(cwd: string): ChildProcess {
+  const cargoHome = process.env.CARGO_HOME || resolve(process.env.HOME || "~", ".cargo");
+  
+  if (IS_WINDOWS) {
+    // Windows: Use cmd.exe and set PATH
+    const cargoBin = resolve(cargoHome, "bin");
+    const newPath = `${cargoBin};${process.env.PATH}`;
+    
+    return spawn("cmd", ["/c", "bun", "run", "tauri", "dev"], {
+      cwd,
+      stdio: "inherit",
+      env: {
+        ...process.env,
+        PATH: newPath,
+      },
+      windowsHide: false,
+    });
+  }
+  
+  // Unix: Source cargo env and run
+  return spawn("bash", ["-c", `source "${resolve(cargoHome, "env")}" && bun run tauri dev`], {
+    cwd,
+    stdio: "inherit",
+  });
+}
 
-await shutdown("child-exit");
-process.exit(tauriCode !== 0 ? tauriCode : backendCode !== 0 ? backendCode : frontendCode);
+console.log(`[Koryphaios Desktop] Starting development servers...`);
+console.log(`[Koryphaios Desktop] Platform: ${platform()}`);
+console.log(`[Koryphaios Desktop] Backend port: ${BACKEND_PORT}\n`);
+
+// Start backend directly
+console.log(`[1/3] Starting backend server on port ${BACKEND_PORT}...`);
+const backend = spawnCrossPlatform("bun", ["run", "src/server.ts"], {
+  cwd: resolve(PROJECT_ROOT, "backend"),
+});
+
+// Wait for backend to be ready
+const backendReady = await waitForPort(BACKEND_PORT, "backend");
+if (!backendReady) {
+  console.error("[Koryphaios Desktop] Backend failed to start");
+  backend.kill();
+  process.exit(1);
+}
+console.log("[1/3] Backend ready!\n");
+
+// Start frontend directly
+console.log("[2/3] Starting frontend dev server on port 5173...");
+const frontend = spawnCrossPlatform("bun", ["run", "vite", "dev"], {
+  cwd: resolve(PROJECT_ROOT, "frontend"),
+});
+
+// Wait for frontend to be ready
+const frontendReady = await waitForFrontend(FRONTEND_PORT);
+if (!frontendReady) {
+  console.error("[Koryphaios Desktop] Frontend failed to start");
+  frontend.kill();
+  backend.kill();
+  process.exit(1);
+}
+console.log("[2/3] Frontend ready!\n");
+
+// Launch Tauri
+console.log("[3/3] Launching Tauri app...\n");
+
+const tauri = spawnTauriDev(resolve(PROJECT_ROOT, "desktop"));
+
+// Handle cleanup
+const cleanup = () => {
+  console.log("\n[Koryphaios Desktop] Shutting down servers...");
+  backend.kill();
+  frontend.kill();
+  tauri.kill();
+  process.exit(0);
+};
+
+process.on("SIGINT", cleanup);
+process.on("SIGTERM", cleanup);
+
+// Windows doesn't support SIGINT properly, handle exit events
+if (IS_WINDOWS) {
+  process.on("exit", cleanup);
+}
+
+// If Tauri exits, kill the servers
+tauri.on("exit", cleanup);

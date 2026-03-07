@@ -5,6 +5,7 @@ node_modules/
 # Build output
 build/
 .svelte-kit/
+desktop/src-tauri/target/
 
 # Data & secrets
 .koryphaios/

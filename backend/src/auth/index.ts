@@ -6,10 +6,12 @@ export {
   generateToken,
   createAccessToken,
   verifyAccessToken,
+  revokeAccessToken,
   createRefreshToken,
   verifyRefreshToken,
   revokeRefreshToken,
   revokeAllUserTokens,
+  revokeAllUserSessions,
   createUser,
   authenticateUser,
   getUserById,
@@ -17,6 +19,7 @@ export {
   getOrCreateLocalUser,
   changePassword,
   cleanupExpiredTokens,
+  cleanupBlacklist,
 } from "./auth";
 
 export type { User, JWTPayload, RefreshToken, AuthContext } from "./types";

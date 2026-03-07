@@ -62,7 +62,7 @@ export class WSManager {
       for (const [id, client] of this.clients) {
         if (client.isAlive === false) {
           serverLog.debug({ clientId: id }, "Terminating inactive WebSocket client");
-          try { client.ws.close(); } catch {}
+          try { client.ws.close(); } catch { /* Expected: socket may already be closed */ }
           this.clients.delete(id);
           continue;
         }
@@ -74,7 +74,7 @@ export class WSManager {
           // If send fails, assume dead and remove next tick
           serverLog.warn({ clientId: id, error: String(err) }, "Failed to send ping");
           this.clients.delete(id);
-          try { client.ws.close(); } catch {}
+          try { client.ws.close(); } catch { /* Expected: socket may already be closed */ }
         }
       }
     } catch (err) {

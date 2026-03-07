@@ -106,85 +106,6 @@ export async function closeRedis(): Promise<void> {
 }
 
 /**
- * Distributed rate limiter using Redis.
- * Implements sliding window rate limiting.
- */
-export class DistributedRateLimiter {
-    private readonly maxRequests: number;
-    private readonly windowMs: number;
-    private readonly prefix: string;
-
-    constructor(maxRequests: number, windowMs: number, prefix: string = "rate_limit") {
-        this.maxRequests = maxRequests;
-        this.windowMs = windowMs;
-        this.prefix = prefix;
-    }
-
-    /**
-     * Check if a request should be rate limited.
-     * Returns { allowed: boolean, remaining: number, resetAt: number }
-     */
-    async check(key: string): Promise<{ allowed: boolean; remaining: number; resetAt: number }> {
-        const client = getRedis();
-        if (!client) {
-            // Fallback to always allow if Redis is not available
-            // In production, you should have a local fallback
-            return { allowed: true, remaining: this.maxRequests, resetAt: Date.now() + this.windowMs };
-        }
-
-        const now = Date.now();
-        const windowStart = now - this.windowMs;
-        const redisKey = `${this.prefix}:${key}`;
-
-        try {
-            const pipeline = client.pipeline();
-
-            // Remove old entries outside the current window
-            pipeline.zremrangebyscore(redisKey, 0, windowStart);
-
-            // Count requests in the current window
-            pipeline.zcard(redisKey);
-
-            // Add current request
-            pipeline.zadd(redisKey, now, `${now}-${Math.random()}`);
-
-            // Set expiration
-            pipeline.expire(redisKey, Math.ceil(this.windowMs / 1000) + 1);
-
-            const results = await pipeline.exec();
-
-            if (!results) {
-                return { allowed: true, remaining: this.maxRequests, resetAt: now + this.windowMs };
-            }
-
-            const count = (results[1][1] as number) + 1; // +1 for the current request
-            const allowed = count <= this.maxRequests;
-            const remaining = Math.max(0, this.maxRequests - count);
-            const resetAt = now + this.windowMs;
-
-            return { allowed, remaining, resetAt };
-        } catch (err) {
-            serverLog.error({ err, key }, "Redis rate limit check failed, allowing request");
-            return { allowed: true, remaining: this.maxRequests, resetAt: now + this.windowMs };
-        }
-    }
-
-    /**
-     * Reset rate limit for a specific key.
-     */
-    async reset(key: string): Promise<void> {
-        const client = getRedis();
-        if (!client) return;
-
-        try {
-            await client.del(`${this.prefix}:${key}`);
-        } catch (err) {
-            serverLog.error({ err, key }, "Failed to reset rate limit");
-        }
-    }
-}
-
-/**
  * Distributed cache using Redis.
  */
 export class DistributedCache {
@@ -358,6 +279,5 @@ export class DistributedSessionState {
 }
 
 // Export singleton instances
-export const rateLimiter = new DistributedRateLimiter(120, 60000, "koryphaios_rate_limit");
 export const cache = new DistributedCache("koryphaios_cache", 3600);
 export const sessionState = new DistributedSessionState();

@@ -31,7 +31,7 @@ export function detectCopilotToken(): string | null {
       const token = gh.stdout.toString().trim();
       if (token) return token;
     }
-  } catch { }
+  } catch { /* Expected: gh CLI may not be installed */ }
 
   // 2. Fallback to file-based detection
   const configDir = getConfigDir();
@@ -69,9 +69,9 @@ export function detectClaudeCodeToken(): string | null {
       try {
         const data = JSON.parse(status.stdout.toString());
         if (data?.loggedIn && data?.oauthToken) return data.oauthToken;
-      } catch { }
+      } catch { /* Expected: status output may not be valid JSON */ }
     }
-  } catch { }
+  } catch { /* Expected: claude CLI may not be installed */ }
 
   // 2. Fallback to file-based
   const paths = [
@@ -131,7 +131,7 @@ export function detectGeminiCLIToken(): string | null {
       if (data?.tokens?.access_token) return data.tokens.access_token;
       if (data?.accessToken) return data.accessToken;
       return "cli:detected";
-    } catch { }
+    } catch { /* Expected: creds file may be malformed or inaccessible */ }
   }
   return process.env.GOOGLE_CLI_TOKEN || null;
 }

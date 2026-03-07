@@ -14,7 +14,8 @@ import {
 } from "../auth";
 import { requireAuth, SESSION_COOKIE_NAME, REFRESH_COOKIE_NAME } from "../middleware";
 import { authLog } from "../logger";
-import { sanitizeString, RateLimiter, generateCsrfToken, buildCsrfCookie } from "../security";
+import { sanitizeString, generateCsrfToken, buildCsrfCookie } from "../security";
+import { RateLimiter } from "../security/rate-limit";
 
 const registerLimiter = new RateLimiter(5, 60_000 * 15);
 const refreshLimiter = new RateLimiter(30, 60_000);
@@ -29,7 +30,7 @@ function isSecureRequest(req: Request): boolean {
     const url = new URL(req.url);
     if (url.protocol === "https:") return true;
   } catch {
-    // ignore
+    /* Expected: req.url may be invalid; falls through to header check */
   }
   return req.headers.get("x-forwarded-proto") === "https";
 }
@@ -172,7 +173,6 @@ export async function handleLogin(req: Request): Promise<Response> {
       sub: user.id,
       username: user.username,
       isAdmin: user.isAdmin,
-      jti: crypto.randomUUID(),
     });
     
     const refreshToken = await createRefreshToken(user.id);
@@ -221,29 +221,30 @@ export async function handleRefresh(req: Request): Promise<Response> {
       return json({ ok: false, error: "Refresh token is required (cookie or body)" }, 400);
     }
 
-    const tokenData = verifyRefreshToken(refreshToken);
-    
+    // verifyRefreshToken now handles token rotation automatically
+    // It returns { userId, newToken } where newToken is the rotated refresh token
+    const tokenData = await verifyRefreshToken(refreshToken);
+
     if (!tokenData) {
       return json({ ok: false, error: "Invalid or expired refresh token" }, 401);
     }
-    
+
     const user = getUserById(tokenData.userId);
     if (!user) {
       return json({ ok: false, error: "User not found" }, 401);
     }
-    
+
     // Create new access token
     const accessToken = createAccessToken({
       sub: user.id,
       username: user.username,
       isAdmin: user.isAdmin,
-      jti: crypto.randomUUID(),
     });
-    
+
     authLog.info({ userId: user.id }, "Token refreshed");
 
-    const newRefreshToken = await createRefreshToken(user.id);
-    revokeRefreshToken(refreshToken);
+    // newToken is already provided by verifyRefreshToken via rotation
+    const newRefreshToken = tokenData.newToken;
 
     const res = json({
       ok: true,

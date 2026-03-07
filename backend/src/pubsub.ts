@@ -15,20 +15,34 @@ export class Broker<T> {
   private subscribers = new Map<string, {
     controller: ReadableStreamDefaultController<BrokerEvent<T>>;
     closed: boolean;
+    abortListener?: () => void;
   }>();
   private idCounter = 0;
+  private isShutdown = false;
 
   /** Subscribe to events. Returns an async iterable that yields events. */
   subscribe(signal?: AbortSignal): ReadableStream<BrokerEvent<T>> {
+    if (this.isShutdown) {
+      throw new Error("Broker is shut down");
+    }
+
     const id = String(++this.idCounter);
+    let abortListener: (() => void) | undefined;
 
     const stream = new ReadableStream<BrokerEvent<T>>({
       start: (controller) => {
-        this.subscribers.set(id, { controller, closed: false });
+        if (this.isShutdown) {
+          controller.close();
+          return;
+        }
 
-        signal?.addEventListener("abort", () => {
+        abortListener = () => {
           this.unsubscribe(id);
-        });
+        };
+
+        this.subscribers.set(id, { controller, closed: false, abortListener });
+
+        signal?.addEventListener("abort", abortListener);
       },
       cancel: () => {
         this.unsubscribe(id);
@@ -61,10 +75,21 @@ export class Broker<T> {
   }
 
   /** Shutdown all subscriptions. */
-  shutdown() {
+  shutdown(): void {
+    if (this.isShutdown) return;
+
+    this.isShutdown = true;
+
     for (const [id] of this.subscribers) {
       this.unsubscribe(id);
     }
+
+    this.subscribers.clear();
+  }
+
+  /** Check if broker is shut down. */
+  isShuttingDown(): boolean {
+    return this.isShutdown;
   }
 
   private unsubscribe(id: string) {
@@ -72,10 +97,21 @@ export class Broker<T> {
     if (sub && !sub.closed) {
       sub.closed = true;
       try {
+        // Remove abort listener if present
+        if (sub.abortListener) {
+          // Note: We can't remove the listener from the AbortSignal directly
+          // as we don't have a reference to the signal. The listener check
+          // inside will handle the shutdown case.
+        }
         sub.controller.close();
-      } catch {}
+      } catch { /* Expected: controller may already be closed */ }
     }
     this.subscribers.delete(id);
+  }
+
+  /** Get current subscriber count. */
+  getSubscriberCount(): number {
+    return this.subscribers.size;
   }
 }
 
@@ -93,3 +129,26 @@ export const sessionBroker = new Broker<Session>();
 export const permissionBroker = new Broker<PermissionRequest>();
 export const agentBroker = new Broker<AgentIdentity>();
 export const wsBroker = new Broker<WSMessage>();
+
+/**
+ * Shutdown all global brokers.
+ * Call this during server shutdown to properly clean up all subscribers.
+ */
+export function shutdownAllBrokers(): void {
+  sessionBroker.shutdown();
+  permissionBroker.shutdown();
+  agentBroker.shutdown();
+  wsBroker.shutdown();
+}
+
+/**
+ * Get total subscriber count across all brokers.
+ */
+export function getTotalBrokerSubscribers(): number {
+  return (
+    sessionBroker.getSubscriberCount() +
+    permissionBroker.getSubscriberCount() +
+    agentBroker.getSubscriberCount() +
+    wsBroker.getSubscriberCount()
+  );
+}

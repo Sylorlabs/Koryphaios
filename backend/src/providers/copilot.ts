@@ -9,6 +9,7 @@ import { readFileSync, existsSync } from "fs";
 import { join } from "path";
 import { homedir } from "os";
 import { CopilotModels } from "./models/copilot";
+import { providerLog } from "../logger";
 
 const COPILOT_CHAT_URL = "https://api.githubcopilot.com";
 
@@ -151,13 +152,13 @@ export async function exchangeGitHubTokenForCopilotAsync(githubToken: string): P
     });
     if (!resp.ok) {
       const body = await resp.text();
-      console.error(`[copilot] Token exchange HTTP ${resp.status}:`, body.slice(0, 200));
+      providerLog.error({ status: resp.status, body: body.slice(0, 200) }, "Copilot token exchange failed");
       return null;
     }
     const data = await resp.json() as { token?: string; expires_at?: number };
     return data.token ?? null;
   } catch (err) {
-    console.error("[copilot] Token exchange error:", err);
+    providerLog.error({ err }, "Copilot token exchange error");
     return null;
   }
 }

@@ -10,7 +10,7 @@
  * - CriticUtil: Code review and quality gate utilities
  */
 
-export { KoryManager as Manager, KoryManager } from "./manager";
+export { KoryManager as Manager, KoryManager } from "./manager-refactored";
 export { TaskManager } from "./task-manager";
 export { GitManager } from "./git-manager";
 export { WorkspaceManager, WorkspaceError } from "./workspace-manager";
