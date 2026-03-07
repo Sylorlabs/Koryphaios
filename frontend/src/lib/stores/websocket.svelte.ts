@@ -27,6 +27,7 @@ import { sessionStore } from './sessions.svelte';
 import { authStore } from './auth.svelte';
 import { browser } from '$app/environment';
 import type { FeedEntry } from '$lib/types';
+import { apiUrl, getWsUrl } from '$lib/utils/api-url';
 
 // ─── Agent State ────────────────────────────────────────────────────────────
 
@@ -101,6 +102,9 @@ let activeFileEdits = $state<Map<string, ActiveFileEdit>>(new Map());
 
 const MAX_FEED_ENTRIES = 2000;
 let feedIdCounter = 0;
+let hasShownMalformedWsMessage = false;
+// Track pending file-edit removal timers for cleanup on disconnect
+let fileEditTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
 // ─── Glow class resolver ───────────────────────────────────────────────────
 
@@ -132,7 +136,28 @@ function resolveGlowClass(agent?: AgentIdentity): string {
 
 function addFeedEntry(entry: Omit<FeedEntry, "id">) {
   const newEntry: FeedEntry = { ...entry, id: `fe-${++feedIdCounter}` };
-  feed = [...feed, newEntry].slice(-MAX_FEED_ENTRIES);
+  feed.push(newEntry);
+  if (feed.length > MAX_FEED_ENTRIES) feed.splice(0, feed.length - MAX_FEED_ENTRIES);
+}
+
+function addClientError(text: string) {
+  const activeSessionId = sessionStore.activeSessionId;
+  if (!activeSessionId) return;
+  addFeedEntry({
+    timestamp: Date.now(),
+    type: "error",
+    agentId: "kory-manager",
+    agentName: "Kory",
+    glowClass: "",
+    text,
+    metadata: { sessionId: activeSessionId, source: "client" },
+  });
+}
+
+function isWSMessageLike(value: unknown): value is WSMessage {
+  if (!value || typeof value !== "object") return false;
+  const candidate = value as Partial<WSMessage>;
+  return typeof candidate.type === "string" && typeof candidate.timestamp === "number";
 }
 
 /** Remove the ephemeral "Analyzing request..." thought once analysis is done (next phase, routing, or content). */
@@ -161,7 +186,7 @@ function accumulateFeedEntry(entry: Omit<FeedEntry, "id">) {
     }
 
     const updated = { ...last, ...updates };
-    feed = [...feed.slice(0, lastIdx), updated];
+    feed[lastIdx] = updated;
   } else {
     addFeedEntry(entry);
   }
@@ -178,7 +203,8 @@ function addUserMessage(sessionId: string, content: string) {
     text: content,
     metadata: { sessionId },
   };
-  feed = [...feed, userEntry].slice(-MAX_FEED_ENTRIES);
+  feed.push(userEntry);
+  if (feed.length > MAX_FEED_ENTRIES) feed.splice(0, feed.length - MAX_FEED_ENTRIES);
 }
 
 // ─── Message Handler ───────────────────────────────────────────────────────
@@ -224,7 +250,6 @@ function handleMessage(msg: WSMessage) {
       if (agent) {
         agent.status = p.status;
         if (msg.sessionId) agent.sessionId = msg.sessionId;
-        agents = new Map(agents);
       }
       break;
     }
@@ -236,14 +261,15 @@ function handleMessage(msg: WSMessage) {
       if (agent) {
         agent.status = "done";
         if (msg.sessionId) agent.sessionId = msg.sessionId;
-        agents = new Map(agents);
       }
+      if (isForActiveSession) removeAnalyzingThoughtEntries();
       break;
     }
 
     case "agent.error": {
       const p = msg.payload as any;
       if (isForActiveSession) {
+        removeAnalyzingThoughtEntries();
         addFeedEntry({
           timestamp: msg.timestamp,
           type: "error",
@@ -263,7 +289,6 @@ function handleMessage(msg: WSMessage) {
         agent.content += p.content;
         agent.status = "streaming";
         if (msg.sessionId) agent.sessionId = msg.sessionId;
-        agents = new Map(agents);
       }
       if (isForActiveSession) {
         removeAnalyzingThoughtEntries();
@@ -285,7 +310,6 @@ function handleMessage(msg: WSMessage) {
       if (agent) {
         agent.thinking += p.thinking;
         if (msg.sessionId) agent.sessionId = msg.sessionId;
-        agents = new Map(agents);
       }
       if (isForActiveSession) {
         accumulateFeedEntry({
@@ -308,7 +332,6 @@ function handleMessage(msg: WSMessage) {
         agent.toolCalls.push({ name: p.toolCall.name, status: "running" });
         agent.status = "tool_calling";
         if (msg.sessionId) agent.sessionId = msg.sessionId;
-        agents = new Map(agents);
       }
       if (isForActiveSession) {
         addFeedEntry({
@@ -353,7 +376,6 @@ function handleMessage(msg: WSMessage) {
         agent.contextKnown = !!p.contextKnown;
         agent.hasUsageData = !!p.usageKnown;
         if (msg.sessionId) agent.sessionId = msg.sessionId;
-        agents = new Map(agents);
       }
       break;
     }
@@ -383,11 +405,15 @@ function handleMessage(msg: WSMessage) {
     case "stream.file_complete": {
       const p = msg.payload as StreamFileCompletePayload;
       if (isForActiveSession) {
-        // Keep the completed edit visible briefly, then remove
-        setTimeout(() => {
+        // Clear any existing timer for this path before setting a new one
+        const existingTimer = fileEditTimers.get(p.path);
+        if (existingTimer) clearTimeout(existingTimer);
+        const timer = setTimeout(() => {
           activeFileEdits.delete(p.path);
           activeFileEdits = new Map(activeFileEdits);
+          fileEditTimers.delete(p.path);
         }, 2000);
+        fileEditTimers.set(p.path, timer);
       }
       break;
     }
@@ -398,15 +424,14 @@ function handleMessage(msg: WSMessage) {
         const manager = agents.get('kory-manager');
         if (manager) {
           manager.sessionId = msg.sessionId;
-          agents = new Map(agents);
         }
       }
       if (isForActiveSession) {
         koryThought = p.thought;
         koryPhase = p.phase;
-        // When moving past "Analyzing request...", remove it from the feed so it doesn't stay
-        const isAnalyzingEntry = p.phase === "analyzing" && p.thought === "Analyzing request...";
-        if (!isAnalyzingEntry) removeAnalyzingThoughtEntries();
+        // Always remove old analyzing entries before adding any new thought
+        // (prevents duplicate "Analyzing request..." entries stacking up)
+        removeAnalyzingThoughtEntries();
         addFeedEntry({
           timestamp: msg.timestamp,
           type: "thought",
@@ -501,6 +526,7 @@ function handleMessage(msg: WSMessage) {
     case "system.error": {
       const p = msg.payload as any;
       if (!isForActiveSession) break;
+      removeAnalyzingThoughtEntries();
       const errorText = p.error ?? "Unknown system error";
       // Dedupe: skip if the last entry is the same error within 3s (e.g. no-provider sent twice)
       const last = feed.length > 0 ? feed[feed.length - 1] : null;
@@ -529,25 +555,22 @@ let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 let reconnectAttempts = 0;
 let wsCandidates: string[] = [];
 let wsCandidateIndex = 0;
+let candidateRetryTimer: ReturnType<typeof setTimeout> | null = null;
 
 function ensureWsPath(url: string): string {
   return url.endsWith("/ws") ? url : `${url.replace(/\/?$/, "")}/ws`;
 }
 
 function buildWsCandidates(preferredUrl?: string): string[] {
-  const scheme = window.location.protocol === "https:" ? "wss" : "ws";
-  const currentHost = window.location.host;
-  const sameOrigin = `${scheme}://${currentHost}/ws`;
-  const rawDirect = typeof import.meta.env !== "undefined" && (import.meta.env as { VITE_BACKEND_WS_URL?: string }).VITE_BACKEND_WS_URL;
-  const directWs = rawDirect ? ensureWsPath(rawDirect) : undefined;
-  const defaultBackendWs = "ws://127.0.0.1:3001/ws";
+  // In Tauri, use the direct backend URL
+  const directUrl = getWsUrl();
+  const defaultBackendWs = "ws://127.0.0.1:3000/ws";
 
   const candidates: string[] = [];
   if (preferredUrl) candidates.push(ensureWsPath(preferredUrl));
-  if (sameOrigin && !candidates.includes(sameOrigin)) candidates.push(sameOrigin);
-  if (directWs && !candidates.includes(directWs)) candidates.push(directWs);
+  if (directUrl && !candidates.includes(directUrl)) candidates.push(directUrl);
   if (defaultBackendWs && !candidates.includes(defaultBackendWs)) candidates.push(defaultBackendWs);
-  if (candidates.length === 0) candidates.push(sameOrigin);
+  if (candidates.length === 0) candidates.push(defaultBackendWs);
   return candidates;
 }
 
@@ -577,6 +600,7 @@ function connect(url?: string) {
     ws.onopen = () => {
       connectionStatus = "connected";
       reconnectAttempts = 0;
+      hasShownMalformedWsMessage = false;
       wsConnection = ws;
       // Subscribe to the active session so backend can scope messages
       const activeSid = sessionStore.activeSessionId;
@@ -585,9 +609,23 @@ function connect(url?: string) {
 
     ws.onmessage = (event) => {
       try {
-        const msg = JSON.parse(event.data) as WSMessage;
-        handleMessage(msg);
-      } catch { }
+        const parsed: unknown = JSON.parse(event.data);
+        if (!isWSMessageLike(parsed)) {
+          if (!hasShownMalformedWsMessage) {
+            hasShownMalformedWsMessage = true;
+            addClientError("Received malformed realtime update from server.");
+          }
+          console.warn("Discarded malformed websocket payload", parsed);
+          return;
+        }
+        handleMessage(parsed);
+      } catch (error) {
+        if (!hasShownMalformedWsMessage) {
+          hasShownMalformedWsMessage = true;
+          addClientError("Failed to parse realtime update from server.");
+        }
+        console.warn("Failed to parse websocket message", error);
+      }
     };
 
     ws.onclose = () => {
@@ -597,7 +635,8 @@ function connect(url?: string) {
       // Rotate through candidates if we haven't exhausted them
       if (wsCandidateIndex < wsCandidates.length - 1) {
         wsCandidateIndex++;
-        setTimeout(() => connect(), 200); // Slightly longer delay for stability
+        if (candidateRetryTimer) clearTimeout(candidateRetryTimer);
+        candidateRetryTimer = setTimeout(() => connect(), 200);
       } else {
         wsCandidateIndex = 0;
         scheduleReconnect();
@@ -626,7 +665,11 @@ function subscribeToSession(sessionId: string) {
 }
 
 function disconnect() {
-  if (reconnectTimer) clearTimeout(reconnectTimer);
+  if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
+  if (candidateRetryTimer) { clearTimeout(candidateRetryTimer); candidateRetryTimer = null; }
+  // Clean up file edit timers
+  for (const timer of fileEditTimers.values()) clearTimeout(timer);
+  fileEditTimers.clear();
   wsConnection?.close();
   wsConnection = null;
   connectionStatus = "disconnected";
@@ -636,24 +679,34 @@ function disconnect() {
 export async function loadProvidersFromApi(): Promise<void> {
   if (!browser) return;
   try {
-    const res = await fetch("/api/providers", { credentials: "include" });
-    if (!res.ok) return;
+    const res = await fetch(apiUrl("/api/providers"), { credentials: "include" });
+    if (!res.ok) {
+      console.warn(`Failed to load providers: HTTP ${res.status}`);
+      return;
+    }
     const json = await res.json();
     const list = json?.data;
     if (Array.isArray(list)) providers = list;
-  } catch {
-    // ignore
+  } catch (error) {
+    console.warn("Failed to load providers from API", error);
   }
 }
 
 function sendMessage(sessionId: string, content: string, model?: string, reasoningLevel?: string) {
   addUserMessage(sessionId, content);
-  fetch("/api/messages", {
+  void fetch(apiUrl("/api/messages"), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     credentials: "include",
     body: JSON.stringify({ sessionId, content, model, reasoningLevel }),
-  }).catch(() => { });
+  })
+    .then((res) => {
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    })
+    .catch((error) => {
+      console.warn("Failed to send message", error);
+      addClientError("Message send failed. Check your connection and retry.");
+    });
 }
 
 function respondToPermission(id: string, approved: boolean) {
@@ -880,6 +933,7 @@ export const wsStore = {
   isSessionRunning,
   markSessionAgentsStopped,
   markAgentStopped,
+  clearAnalyzing: removeAnalyzingThoughtEntries,
   connect,
   disconnect,
   sendMessage,

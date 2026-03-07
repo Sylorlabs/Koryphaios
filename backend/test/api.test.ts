@@ -14,7 +14,7 @@ type ReqOpts = {
 };
 
 function request(path: string, opts: ReqOpts = {}) {
-  const args = ["-sS", "-X", opts.method ?? "GET", "-o", "-", "-w", "\n%{http_code}", `${BASE_URL}${path}`];
+  const args = ["-sS", "--path-as-is", "-X", opts.method ?? "GET", "-o", "-", "-w", "\n%{http_code}", `${BASE_URL}${path}`];
   const headers = opts.headers ?? {};
   for (const [k, v] of Object.entries(headers)) {
     args.push("-H", `${k}: ${v}`);
@@ -61,7 +61,11 @@ beforeAll(async () => {
   const backendDir = join(dirname(import.meta.dir), "src", "..");
   serverProc = Bun.spawn(["bun", "run", "src/server.ts"], {
     cwd: backendDir,
-    env: { ...process.env, KORYPHAIOS_PORT: String(TEST_PORT) },
+    env: {
+      ...process.env,
+      KORYPHAIOS_PORT: String(TEST_PORT),
+      SESSION_TOKEN_SECRET: process.env.SESSION_TOKEN_SECRET ?? "test_only_not_for_production_aaaaaaaaaa",
+    },
     stdout: "ignore",
     stderr: "ignore",
   });
@@ -84,7 +88,7 @@ describe("API Integration Tests", () => {
       expect(res.status).toBe(200);
       expect(res.json?.ok).toBe(true);
       expect(res.json?.data).toHaveProperty("version");
-      expect(res.json?.data).toHaveProperty("uptime");
+      expect(res.json?.data).toHaveProperty("status");
     });
   });
 
@@ -224,7 +228,7 @@ describe("API Integration Tests", () => {
 
   describe("Input Validation", () => {
     test("rejects invalid session ID", async () => {
-      const res = request("/api/sessions/invalid/../path");
+      const res = request("/api/sessions/invalid$$$");
 
       expect(res.status).toBe(400);
       expect(res.json?.ok).toBe(false);

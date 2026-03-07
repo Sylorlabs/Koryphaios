@@ -108,7 +108,9 @@ export class MessagingGateway {
   stop(): void {
     this.running = false;
     if (this.reader) {
-      this.reader.cancel().catch(() => {});
+      this.reader.cancel().catch((err) => {
+        messagingLog.warn({ err }, "Failed to cancel messaging gateway reader");
+      });
       this.reader = null;
     }
     this.sessionToAdapter.clear();

@@ -21,7 +21,7 @@
   let lastSelectedId = $state<string>('');
   let expandedGroups = $state<Set<string>>(new Set());
 
-  let filteredFeed = $derived(wsStore.groupedFeed as unknown as FeedEntryLocal[]);
+  let filteredFeed = $derived(wsStore.groupedFeed);
 
   // Track last feed length to avoid scroll loops
   let lastFeedLength = $state(0);
@@ -83,12 +83,11 @@
       e.preventDefault();
       const next = new Set(selectedEntries);
       if (lastSelectedId) {
-        const ids = filteredFeed.map(f => f.id);
-        const startIdx = ids.indexOf(lastSelectedId);
-        const endIdx = ids.indexOf(entry.id);
+        const startIdx = filteredFeed.findIndex(f => f.id === lastSelectedId);
+        const endIdx = filteredFeed.findIndex(f => f.id === entry.id);
         if (startIdx >= 0 && endIdx >= 0) {
           const [lo, hi] = startIdx < endIdx ? [startIdx, endIdx] : [endIdx, startIdx];
-          for (let i = lo; i <= hi; i++) next.add(ids[i]);
+          for (let i = lo; i <= hi; i++) next.add(filteredFeed[i].id);
         }
       } else {
         next.add(entry.id);
@@ -173,13 +172,14 @@
             { label: 'Refactor for performance', icon: Zap, prompt: 'Analyze my code and suggest performance optimizations.' },
             { label: 'Write unit tests', icon: Beaker, prompt: 'Generate comprehensive unit tests for my backend API routes.' }
           ] as suggestion}
+            {@const Icon = suggestion.icon}
             <button 
               class="flex flex-col items-start p-4 rounded-xl border text-left transition-all hover:bg-[var(--color-surface-3)] active:scale-[0.98] group"
               style="background: var(--color-surface-2); border-color: var(--color-border);"
               onclick={() => { wsStore.sendMessage(sessionStore.activeSessionId, suggestion.prompt); }}
             >
               <div class="w-8 h-8 rounded-lg bg-[var(--color-surface-3)] flex items-center justify-center mb-3 text-[var(--color-text-muted)] group-hover:text-[var(--color-accent)] transition-colors">
-                <suggestion.icon size={16} />
+                <Icon size={16} />
               </div>
               <span class="text-sm font-medium mb-1" style="color: var(--color-text-primary);">{suggestion.label}</span>
               <span class="text-[11px] leading-relaxed opacity-60 line-clamp-2" style="color: var(--color-text-muted);">{suggestion.prompt}</span>

@@ -61,6 +61,11 @@ export class CLIAuthManager {
         } else {
           resolve({ success: false, message: `Command exited with code ${code}. Output: ${output.slice(0, 300)}` });
         }
+      }).catch((err) => {
+        clearTimeout(timeout);
+        if (resolved) return;
+        resolved = true;
+        resolve({ success: false, message: `Process error: ${String(err)}` });
       });
     });
   }

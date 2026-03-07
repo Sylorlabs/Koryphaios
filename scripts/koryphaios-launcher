@@ -1,0 +1,40 @@
+#!/bin/bash
+# Koryphaios Launcher - Prevents terminal from showing
+# This script is designed to be run directly without a terminal
+
+cd "/home/micah/Desktop/sylorlabs projects/Koryphaios" || exit 1
+
+# Close stdin to prevent terminal attachment
+exec 0<&-
+
+# Redirect all output
+exec >/dev/null 2>&1
+
+# Check if already running
+if pgrep -x "koryphaios-desktop" > /dev/null 2>&1; then
+    # Try to focus existing window
+    wmctrl -x -R "koryphaios-desktop" 2>/dev/null &
+    exit 0
+fi
+
+# Backend check/start - completely detached
+if ! curl -s http://localhost:3001/api/health > /dev/null 2>&1; then
+    # Use setsid to fully detach from terminal
+    setsid bash -c "bun run src/server.ts" > .koryphaios/logs/backend.log 2>&1 &
+    # Wait for it
+
+if ! curl -s http://localhost:5173 > /dev/null 2>&1; then
+    cd frontend
+    setsid bash -c "bun run vite dev --host" > ../.koryphaios/logs/frontend.log 2>&1 &
+    cd ..
+    for i in {1..50}; do
+        curl -s http://localhost:5173 > /dev/null 2>&1 && break
+        sleep 0.1
+    done
+fi
+
+# Launch app - use nohup and & to fully detach
+source ~/.cargo/env 2>/dev/null
+cd desktop/src-tauri
+nohup cargo run --quiet > /dev/null 2>&1 &
+disown

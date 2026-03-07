@@ -69,7 +69,7 @@ export async function requireAuth(req: Request): Promise<AuthenticatedRequest | 
       };
     }
 
-    const payload = verifyAccessToken(token);
+    const payload = await verifyAccessToken(token);
     if (!payload) {
       return {
         error: new Response(
@@ -130,7 +130,7 @@ export async function optionalAuth(req: Request): Promise<AuthenticatedRequest |
   if (getAuthMode() === "token") {
     const token = getRequestToken(req);
     if (!token) return null;
-    const payload = verifyAccessToken(token);
+    const payload = await verifyAccessToken(token);
     if (!payload) return null;
     const user = getUserById(payload.sub);
     if (!user) return null;
@@ -156,7 +156,7 @@ export async function getUserIdFromToken(token: string): Promise<string | null> 
     }
   }
 
-  const payload = verifyAccessToken(token);
+  const payload = await verifyAccessToken(token);
   return payload?.sub ?? null;
 }
 

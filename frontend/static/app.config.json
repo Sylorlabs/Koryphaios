@@ -1,0 +1,31 @@
+{
+  "$schema": "./schema.json",
+  "app": {
+    "name": "Koryphaios",
+    "version": "0.1.0",
+    "identifier": "com.sylorlabs.koryphaios"
+  },
+  "server": {
+    "host": "127.0.0.1",
+    "port": 3000,
+    "wsPath": "/ws"
+  },
+  "window": {
+    "width": 1280,
+    "height": 800,
+    "minWidth": 1024,
+    "minHeight": 640,
+    "maxWidth": 3840,
+    "maxHeight": 2160
+  },
+  "security": {
+    "csp": {
+      "defaultSrc": ["'self'"],
+      "connectSrc": ["'self'", "http://127.0.0.1:*", "ws://127.0.0.1:*"],
+      "imgSrc": ["'self'", "data:", "https:"],
+      "styleSrc": ["'self'", "'unsafe-inline'"],
+      "scriptSrc": ["'self'"],
+      "fontSrc": ["'self'", "data:"]
+    }
+  }
+}

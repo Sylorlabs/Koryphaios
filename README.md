@@ -161,19 +161,37 @@ See `config.example.json` for all available options.
 
 ### Development
 
-The frontend connects to the backend over WebSocket (`/ws`) and REST (`/api`). **Both must be running** for the app to work.
+**IMPORTANT: This is a DESKTOP application, not a web app.** 
+
+For accurate testing (performance, platform quirks, native APIs), always use Tauri mode:
 
 ```bash
-# Start both backend and frontend (recommended; works on Windows and Unix)
-bun install   # installs concurrently for dev script
+# Start Tauri desktop app (RECOMMENDED - tests real desktop behavior)
 bun run dev
 
-# Or start in two terminals
-bun run dev:backend   # Backend on http://127.0.0.1:3000
-bun run dev:frontend  # Frontend on http://127.0.0.1:5173
+# Or build and run the production desktop app
+bun run build:desktop
 ```
 
-If you see "WebSocket connection to '...' failed" in the browser console, start the backend in another terminal with `bun run dev:backend`.
+**Why Tauri mode?**
+- Tests actual desktop performance (not browser)
+- Catches Windows/macOS/Linux platform quirks
+- Uses real native APIs (menus, system tray, file drop)
+- Tests CSP and security policies correctly
+- Catches Tauri-specific issues early
+
+**Browser mode (faster but less accurate):**
+```bash
+# Only use for quick UI iteration
+bun run dev:web
+```
+
+**Individual components:**
+```bash
+bun run dev:backend   # Backend only on http://127.0.0.1:3000
+bun run dev:frontend  # Frontend only on http://localhost:5173
+bun run dev:desktop   # Tauri dev window
+```
 
 ### Production Build
 

@@ -135,6 +135,7 @@
             <div class="px-2 py-1.5 text-[10px] uppercase font-bold tracking-wider" style="color: var(--color-text-muted);">{category}</div>
             {#each filteredActions.filter(a => a.category === category) as action, i}
               {@const isSelected = filteredActions.indexOf(action) === selectedIndex}
+              {@const Icon = action.icon}
               <button
                 class="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-left transition-colors group"
                 class:selected={isSelected}
@@ -146,7 +147,7 @@
                   class="w-8 h-8 rounded-lg flex items-center justify-center shrink-0 transition-colors"
                   style="background: {isSelected ? 'var(--color-surface-4)' : 'var(--color-surface-2)'};"
                 >
-                  <action.icon size={16} style="color: {isSelected ? 'var(--color-accent)' : 'var(--color-text-secondary)'};" />
+                  <Icon size={16} style="color: {isSelected ? 'var(--color-accent)' : 'var(--color-text-secondary)'};" />
                 </div>
                 <div class="flex-1 min-w-0">
                   <div class="text-sm font-medium" style="color: var(--color-text-primary);">{action.label}</div>

@@ -12,10 +12,10 @@ export class AskUserTool implements Tool {
     type: "object",
     properties: {
       question: { type: "string", description: "The question to ask the user" },
-      options: { 
-        type: "array", 
-        items: { type: "string" }, 
-        description: "List of options for the user to choose from (e.g. ['Apply changes', 'Discard changes', 'Other...'])" 
+      options: {
+        type: "array",
+        items: { type: "string" },
+        description: "List of options for the user to choose from (e.g. ['Apply changes', 'Discard changes', 'Other...'])"
       },
     },
     required: ["question", "options"],
@@ -107,11 +107,14 @@ export class AskManagerTool implements Tool {
 
   async run(ctx: ToolContext, call: ToolCallInput): Promise<ToolCallOutput> {
     // The actual execution of this tool is handled as an intercept in KoryManager's loop
-    // to allow the Manager to take over. If it reaches here, it means it wasn't intercepted.
+    // to allow the Manager to take over. We return a structured signal.
     return {
       callId: call.id,
       name: this.name,
-      output: `Question sent to Manager: "${(call.input as any).question}". Please wait for the Manager's response.`,
+      output: JSON.stringify({
+        type: "INTERVENTION_REQUEST",
+        question: (call.input as any).question
+      }),
       isError: false,
       durationMs: 0,
     };

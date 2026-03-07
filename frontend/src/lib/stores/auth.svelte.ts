@@ -3,6 +3,7 @@
 // After a successful POST /api/auth/login, call setUser(data.data.user) so the UI shows the logged-in user.
 
 import { browser } from '$app/environment';
+import { apiUrl } from '$lib/utils/api-url';
 
 export interface AuthUser {
   id: string;
@@ -30,7 +31,7 @@ export const authStore = {
     if (isInitialized) return true;
 
     try {
-      const res = await fetch('/api/auth/me', { credentials: 'include' });
+      const res = await fetch(apiUrl('/api/auth/me'), { credentials: 'include' });
       if (res.ok) {
         const text = await res.text();
         if (text.trim()) {

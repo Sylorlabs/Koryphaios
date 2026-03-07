@@ -1,10 +1,10 @@
 <script lang="ts">
-	import { page } from '$app/stores';
+	import { page } from '$app/state';
 
-	const status = $derived($page.status ?? 500);
+	const status = $derived(page.status ?? 500);
 	const message = $derived(
-		typeof $page.error === 'object' && $page.error !== null && 'message' in $page.error
-			? String(($page.error as { message?: string }).message)
+		typeof page.error === 'object' && page.error !== null && 'message' in page.error
+			? String(page.error.message)
 			: 'Something went wrong'
 	);
 </script>

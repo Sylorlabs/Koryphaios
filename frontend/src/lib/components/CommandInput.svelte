@@ -44,22 +44,22 @@
     };
   }
 
-  let fallbackProvider = $derived(() => {
+  let fallbackProvider = $derived.by(() => {
     const preferred = wsStore.providers.find((p) => p.enabled && p.authenticated);
     return preferred?.name ?? 'anthropic';
   });
 
   // Extract provider and model from selection. In auto mode, adapt to first available provider.
-  let currentProvider = $derived(() => parseModelSelection(selectedModel).provider ?? fallbackProvider());
-  let currentModel = $derived(() => parseModelSelection(selectedModel).model);
+  let currentProvider = $derived(parseModelSelection(selectedModel).provider ?? fallbackProvider);
+  let currentModel = $derived(parseModelSelection(selectedModel).model);
 
   // Get reasoning config based on provider + model
-  let reasoningConfig = $derived(getReasoningConfig(currentProvider(), currentModel()));
-  let reasoningSupported = $derived(hasReasoningSupport(currentProvider(), currentModel()));
+  let reasoningConfig = $derived(getReasoningConfig(currentProvider, currentModel));
+  let reasoningSupported = $derived(hasReasoningSupport(currentProvider, currentModel));
 
   const hasNoProvider = $derived((wsStore.providers ?? []).filter((p) => p.authenticated).length === 0);
 
-  let availableModels = $derived(() => {
+  let availableModels = $derived.by(() => {
     const models: Array<{ label: string; value: string; provider: string; isAuto?: boolean }> = [
       { label: 'Auto (Smart Selection)', value: 'auto', provider: '', isAuto: true },
     ];
@@ -73,7 +73,7 @@
     return models;
   });
 
-  let selectedModelLabel = $derived(() => {
+  let selectedModelLabel = $derived.by(() => {
     if (selectedModel === 'auto') return 'Auto';
     const parsed = parseModelSelection(selectedModel);
     if (!parsed.model || !parsed.provider) return selectedModel;
@@ -150,7 +150,7 @@
   }
 
   function reasoningLabel(value: string): string {
-    const config = getReasoningConfig(currentProvider(), currentModel());
+    const config = getReasoningConfig(currentProvider, currentModel);
     if (config) {
       const opt = config.options.find(o => o.value === value);
       if (opt) return opt.label;
@@ -158,13 +158,13 @@
     return value;
   }
 
-  let modelDisplayName = $derived(() => {
+  let modelDisplayName = $derived.by(() => {
     if (selectedModel === 'auto') return 'Auto';
-    const modelId = currentModel();
-    if (!modelId) return currentProvider().charAt(0).toUpperCase() + currentProvider().slice(1);
+    const modelId = currentModel;
+    if (!modelId) return currentProvider.charAt(0).toUpperCase() + currentProvider.slice(1);
     
     // Try to find in wsStore models if they have names, otherwise clean up the ID
-    const provider = wsStore.providers.find(p => p.name === currentProvider());
+    const provider = wsStore.providers.find(p => p.name === currentProvider);
     if (provider) {
       // If we had a model catalog on frontend we'd use it, for now prettify the ID
       return modelId.split('-').map((word: string) => word.charAt(0).toUpperCase() + word.slice(1)).join(' ');
@@ -200,7 +200,7 @@
         onclick={() => showModelPicker = !showModelPicker}
       >
         <Sparkles size={16} class="text-amber-400" />
-        <span>{selectedModelLabel()}</span>
+        <span>{selectedModelLabel}</span>
         <ChevronDown size={14} class="text-text-muted" />
       </button>
 
@@ -209,7 +209,7 @@
           class="absolute bottom-full left-0 mb-2 w-72 max-h-60 overflow-y-auto rounded-lg border shadow-2xl z-50"
           style="background: var(--color-surface-2); border-color: var(--color-border);"
         >
-          {#each availableModels() as model}
+          {#each availableModels as model}
             <button
               class="w-full text-left px-4 py-2.5 text-sm transition-colors hover:bg-[var(--color-surface-3)] flex items-center gap-2 {selectedModel === model.value ? 'text-[var(--color-accent)]' : ''}"
               style="color: {selectedModel === model.value ? 'var(--color-accent)' : 'var(--color-text-secondary)'};"
@@ -245,7 +245,7 @@
             style="background: var(--color-surface-2-alpha, rgba(30, 30, 35, 0.9)); border-color: var(--color-border);"
           >
             <div class="px-4 py-3 text-xs font-bold uppercase tracking-widest opacity-70" style="color: var(--color-text-muted); border-bottom: 1px solid var(--color-border); background: rgba(255,255,255,0.03);">
-              {selectedModel === 'auto' ? 'Reasoning' : `${modelDisplayName()} · ${reasoningLabel(reasoningLevel)}`}
+              {selectedModel === 'auto' ? 'Reasoning' : `${modelDisplayName} · ${reasoningLabel(reasoningLevel)}`}
             </div>
             <div class="py-1">
               {#each reasoningConfig.options as opt}

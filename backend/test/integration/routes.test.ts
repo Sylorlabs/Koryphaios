@@ -2,7 +2,7 @@
 
 import { describe, test, expect, beforeAll, afterAll } from "bun:test";
 import { Router } from "../../src/routes/router";
-import { RateLimiter } from "../../src/security";
+import { RateLimiter } from "../../src/security/rate-limit";
 import type { RouteDependencies } from "../../src/routes/types";
 
 // Mock dependencies

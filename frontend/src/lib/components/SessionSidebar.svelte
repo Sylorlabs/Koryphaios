@@ -37,6 +37,11 @@
     void loadHistory(activeId);
   });
 
+  async function handleCreateSession() {
+    creating = true;
+    try { await sessionStore.createSession(); } finally { creating = false; }
+  }
+
   async function loadHistory(id: string) {
     const messages = await sessionStore.fetchMessages(id);
     wsStore.loadSessionMessages(id, messages);
@@ -130,7 +135,7 @@
       class="p-1.5 rounded-lg transition-colors hover:bg-[var(--color-surface-3)] flex items-center justify-center"
       style="color: var(--color-text-secondary);"
       disabled={creating}
-      onclick={async () => { creating = true; try { await sessionStore.createSession(); } finally { creating = false; } }}
+      onclick={handleCreateSession}
       title="New session (Ctrl+N)"
       aria-label="New session"
     >
@@ -209,13 +214,13 @@
               {/if}
               <div class="flex-1 min-w-0">
                 <div class="text-xs truncate" style="color: var(--color-text-primary);">{session.title}</div>
-                <div class="flex items-center gap-2 mt-0.5">
-                  <span class="text-[10px]" style="color: var(--color-text-muted);">{formatTime(session.updatedAt)}</span>
+                <div class="flex items-center gap-2" style="margin-top: var(--space-1);">
+                  <span style="font-size: var(--text-xs); color: var(--color-text-muted);">{formatTime(session.updatedAt)}</span>
                   {#if session.messageCount > 0}
-                    <span class="text-[10px]" style="color: var(--color-text-muted);">{session.messageCount} msgs</span>
+                    <span style="font-size: var(--text-xs); color: var(--color-text-muted);">{session.messageCount} msgs</span>
                   {/if}
                   {#if session.totalCost > 0}
-                    <span class="text-[10px]" style="color: var(--color-text-muted);">${session.totalCost.toFixed(3)}</span>
+                    <span style="font-size: var(--text-xs); color: var(--color-text-muted);">${session.totalCost.toFixed(3)}</span>
                   {/if}
                 </div>
               </div>
@@ -246,8 +251,8 @@
     {/each}
 
     {#if sessionStore.filteredSessions.length === 0}
-      <div class="flex flex-col items-center justify-center py-8" style="color: var(--color-text-muted);">
-        <MessageSquare size={24} class="mb-2 opacity-40 relative top-[-2px]" />
+      <div class="flex flex-col items-center justify-center" style="padding-top: var(--space-8); padding-bottom: var(--space-8); color: var(--color-text-muted);">
+        <MessageSquare size={24} class="opacity-40" style="margin-bottom: var(--space-sm);" />
         <p class="text-xs">{sessionStore.searchQuery ? 'No matching sessions' : 'No sessions yet'}</p>
       </div>
     {/if}

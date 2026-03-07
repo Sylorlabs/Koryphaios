@@ -1,10 +1,15 @@
 import { sveltekit } from '@sveltejs/kit/vite';
-import tailwindcss from '@tailwindcss/vite';
 import { defineConfig } from 'vite';
 import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
-function loadBackendTargetFromConfig() {
+function loadBackendTargetFromConfig(): string {
+	// First check environment variable
+	if (process.env.KORYPHAIOS_PORT) {
+		return `http://127.0.0.1:${process.env.KORYPHAIOS_PORT}`;
+	}
+
+	// Then check config files
 	const configPaths = [
 		resolve(process.cwd(), 'koryphaios.json'),
 		resolve(process.cwd(), '..', 'koryphaios.json'),
@@ -15,36 +20,56 @@ function loadBackendTargetFromConfig() {
 		try {
 			const raw = readFileSync(path, 'utf-8');
 			const parsed = JSON.parse(raw) as { server?: { host?: string; port?: number } };
-			const host = parsed.server?.host?.trim();
-			const port = parsed.server?.port;
-			if (host && typeof port === 'number') {
-				return `http://${host}:${port}`;
-			}
+			const host = parsed.server?.host?.trim() || '127.0.0.1';
+			const port = parsed.server?.port || 3000;
+			return `http://${host}:${port}`;
 		} catch {
 			// Ignore invalid local config and fall back.
 		}
 	}
 
-	return null;
+	// Default fallback
+	return 'http://127.0.0.1:3000';
 }
 
+const target = loadBackendTargetFromConfig();
+const wsBase = target.replace(/^http/, 'ws');
+const wsTarget = wsBase.endsWith('/ws') ? wsBase : `${wsBase}/ws`;
+
 export default defineConfig({
-	plugins: [tailwindcss(), sveltekit()],
+	plugins: [
+		sveltekit(),
+	],
 	server: {
 		host: '0.0.0.0',
-		proxy: (() => {
-			const target = loadBackendTargetFromConfig() ?? 'http://127.0.0.1:3001';
-			const wsTarget = target.replace(/^http/, 'ws');
-			return {
-				'/api': { target, changeOrigin: true },
-				'/ws': { target: wsTarget, ws: true, changeOrigin: true },
-			};
-		})(),
+		fs: {
+			// Allow serving files from the shared workspace
+			allow: [
+				'..',
+				'../..',
+			],
+		},
+		proxy: {
+			'/api': { target, changeOrigin: true },
+			'/ws': { target: wsTarget, ws: true, changeOrigin: true },
+		},
 	},
-	define: (() => {
-		const target = loadBackendTargetFromConfig() ?? 'http://127.0.0.1:3001';
-		const wsBase = target.replace(/^http/, 'ws');
-		const wsTarget = wsBase.endsWith('/ws') ? wsBase : `${wsBase}/ws`;
-		return { 'import.meta.env.VITE_BACKEND_WS_URL': JSON.stringify(wsTarget) };
-	})(),
+	define: {
+		'import.meta.env.VITE_BACKEND_URL': JSON.stringify(target),
+		'import.meta.env.VITE_BACKEND_WS_URL': JSON.stringify(wsTarget),
+	},
+	// Transpilation settings for older WebKit (Tauri on Linux)
+	build: {
+		target: 'es2015',
+		minify: true,
+		sourcemap: true,
+	},
+	esbuild: {
+		target: 'es2015',
+	},
+	optimizeDeps: {
+		esbuildOptions: {
+			target: 'es2015',
+		},
+	},
 });

@@ -4,7 +4,8 @@
  */
 
 import type { WorkerTask } from "@koryphaios/shared";
-import { initDb } from "../db/sqlite";
+import { getDb } from "../db/sqlite";
+import { serverLog } from "../logger";
 
 export interface ActiveWorker {
   sessionId: string;
@@ -22,7 +23,7 @@ export class ActiveWorkersRegistry {
     if (this.initialized) return;
 
     try {
-      const db = await initDb();
+      const db = getDb();
       
       // Load persisted workers
       const rows = db.query(`
@@ -42,13 +43,13 @@ export class ActiveWorkersRegistry {
             status: row.status,
           });
         } catch (e) {
-          console.error("Failed to restore worker:", row.task_id, e);
+          serverLog.error({ error: e, taskId: row.task_id }, "Failed to restore worker");
         }
       }
 
       this.initialized = true;
     } catch (error) {
-      console.error("Failed to initialize workers registry:", error);
+      serverLog.error({ error }, "Failed to initialize workers registry");
       // Continue anyway - state will be transient
       this.initialized = true;
     }
@@ -64,12 +65,16 @@ export class ActiveWorkersRegistry {
     };
 
     this.workers.set(taskId, worker);
-    this.persistWorker(worker).catch(console.error);
+    this.persistWorker(worker).catch((error) => {
+      serverLog.error({ error, taskId }, "Failed to persist registered worker");
+    });
   }
 
   unregister(taskId: string): void {
     this.workers.delete(taskId);
-    this.removePersistedWorker(taskId).catch(console.error);
+    this.removePersistedWorker(taskId).catch((error) => {
+      serverLog.error({ error, taskId }, "Failed to remove persisted worker");
+    });
   }
 
   get(taskId: string): ActiveWorker | undefined {
@@ -86,7 +91,7 @@ export class ActiveWorkersRegistry {
 
   async persistWorker(worker: ActiveWorker): Promise<void> {
     try {
-      const db = await initDb();
+      const db = getDb();
       db.query(`
         INSERT OR REPLACE INTO active_workers 
         (session_id, task_id, task_data, start_time, status)
@@ -99,16 +104,16 @@ export class ActiveWorkersRegistry {
         worker.status,
       );
     } catch (error) {
-      console.error("Failed to persist worker:", error);
+      serverLog.error({ error, taskId: worker.taskId }, "Failed to persist worker");
     }
   }
 
   async removePersistedWorker(taskId: string): Promise<void> {
     try {
-      const db = await initDb();
+      const db = getDb();
       db.query("DELETE FROM active_workers WHERE task_id = ?").run(taskId);
     } catch (error) {
-      console.error("Failed to remove persisted worker:", error);
+      serverLog.error({ error, taskId }, "Failed to remove persisted worker");
     }
   }
 
