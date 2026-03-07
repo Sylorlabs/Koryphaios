@@ -2,12 +2,12 @@
 // This is the main entry point that wires everything together.
 
 import type { WSMessage, APIResponse, SendMessageRequest, CreateSessionRequest, StoredMessage, ProviderName } from "@koryphaios/shared";
-import type { ServerWebSocket } from "bun";
+import type { Server, ServerWebSocket } from "bun";
 import { ProviderRegistry } from "./providers";
 import { startCopilotDeviceAuth, pollCopilotDeviceAuth } from "./providers/copilot";
 import { ToolRegistry, BashTool, ShellManageTool, ReadFileTool, WriteFileTool, EditFileTool, GrepTool, GlobTool, LsTool, WebSearchTool, WebFetchTool, DeleteFileTool, MoveFileTool, DiffTool, PatchTool } from "./tools";
 import { AskUserTool, AskManagerTool, DelegateToWorkerTool } from "./tools/interaction";
-import { KoryManager } from "./kory/manager";
+import { KoryManager } from "./kory/manager-refactored";
 import { Bot } from "grammy";
 import { TelegramBridge } from "./telegram/bot";
 import { messagingGateway, sessionReplyStream } from "./messaging";
@@ -15,7 +15,8 @@ import { TelegramAdapter } from "./messaging";
 import { MCPManager } from "./mcp/client";
 import { wsBroker } from "./pubsub";
 import { serverLog } from "./logger";
-import { getCorsHeaders, addCorsOrigins, getSecurityHeaders, validateSessionId, validateProviderName, sanitizeString, encryptForStorage, RateLimiter, initializeEncryption } from "./security";
+import { getCorsHeaders, addCorsOrigins, getSecurityHeaders, validateSessionId, validateProviderName, sanitizeString, encryptForStorage, initializeEncryption } from "./security";
+import { RateLimiter } from "./security/rate-limit";
 import { handleError, generateCorrelationId } from "./errors";
 import { AUTH, SESSION, MESSAGE, ID, RATE_LIMIT, VERSION } from "./constants";
 import { validateEnvironment, getAllowRegistration } from "./config-schema";
@@ -33,6 +34,7 @@ import { loadEnvFromProject, persistEnvVar, clearEnvVar } from "./runtime/env";
 import { SessionStore } from "./stores/session-store";
 import { MessageStore } from "./stores/message-store";
 import { WSManager, type WSClientData } from "./ws/ws-manager";
+import { createWebSocketHandlers } from "./server/websocket-handler";
 
 import { requireAuth } from "./middleware";
 import { handleV1Routes } from "./routes/v1";
@@ -78,15 +80,16 @@ async function main() {
   try {
     await initializeEncryption();
     serverLog.info("Envelope encryption initialized");
-  } catch (err: any) {
-    serverLog.warn({ err: err?.message }, "Envelope encryption unavailable; API keys will use legacy encryption");
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    serverLog.warn({ err: message }, "Envelope encryption unavailable; API keys will use legacy encryption");
   }
 
   // Ensure local system user exists (no sign-in required)
   try {
     await getOrCreateLocalUser();
     serverLog.info("Local system user ready (no sign-in required)");
-  } catch (err: any) {
+  } catch (err: unknown) {
     serverLog.error({ err }, "Failed to create local system user");
     throw err;
   }
@@ -95,19 +98,19 @@ async function main() {
   const createDefaultAdmin = process.env.CREATE_DEFAULT_ADMIN === "true";
   if (createDefaultAdmin) {
     const { getDb } = await import("./db/sqlite");
-    const userCount = (getDb().query("SELECT COUNT(*) as count FROM users").get() as any)?.count ?? 0;
+    const userCount = (getDb().query("SELECT COUNT(*) as count FROM users").get() as { count: number } | null)?.count ?? 0;
     if (userCount === 0) {
       const adminPassword = process.env.ADMIN_INITIAL_PASSWORD;
-      const isProduction = process.env.NODE_ENV === "production";
-      if (isProduction && (!adminPassword || adminPassword.length < 16)) {
-        serverLog.warn("CREATE_DEFAULT_ADMIN is true but ADMIN_INITIAL_PASSWORD is missing or too short in production (min 16 chars). Skipping default admin.");
-      } else {
-        const password = isProduction ? adminPassword! : (adminPassword ?? "admin");
-        const adminUser = await createUser("admin", password, true);
-        if ("id" in adminUser) {
-          serverLog.info("Created default admin user (username: admin)");
-          if (!isProduction) serverLog.warn("Set CREATE_DEFAULT_ADMIN=false and change the admin password in production.");
-        }
+      if (!adminPassword || adminPassword.length < 12) {
+        throw new Error(
+          "ADMIN_INITIAL_PASSWORD must be set (min 12 chars) to create the default admin user. " +
+          "Use: openssl rand -base64 18"
+        );
+      }
+      const adminUser = await createUser("admin", adminPassword, true);
+      if ("id" in adminUser) {
+        serverLog.info("Created default admin user (username: admin)");
+        serverLog.warn("Change the admin password after first login.");
       }
     }
   }
@@ -206,9 +209,13 @@ async function main() {
   const credentialRateLimiter = new RateLimiter(RATE_LIMIT.CREDENTIAL_PER_MINUTE, RATE_LIMIT.WINDOW_MS);
   const pendingAntigravityAuth = new Map<string, Promise<{ success: boolean; token?: string; error?: string }>>();
 
-  const server = Bun.serve<WSClientData>({
-    port: config.server.port,
-    hostname: config.server.host,
+  // ─── Start Server with Port Conflict Handling ───────────────────────────
+  
+  let server: Server<WSClientData>;
+  try {
+    server = Bun.serve<WSClientData>({
+      port: config.server.port,
+      hostname: config.server.host,
 
     async fetch(req, server) {
       const url = new URL(req.url);
@@ -254,8 +261,9 @@ async function main() {
           try {
             const handler = telegram.getWebhookHandler();
             return await handler(req);
-          } catch (err: any) {
-            return json({ ok: false, error: err.message }, 500, corsHeaders);
+          } catch (err: unknown) {
+            const message = err instanceof Error ? err.message : String(err);
+            return json({ ok: false, error: message }, 500, corsHeaders);
           }
         }
 
@@ -275,13 +283,28 @@ async function main() {
           return withCors(getMetricsRegistry().handleMetrics(), corsHeaders);
         }
 
+        // Health check endpoint with configuration info
+        if (url.pathname === "/api/health" && method === "GET") {
+          return json({ 
+            ok: true, 
+            data: { 
+              status: "healthy",
+              version: VERSION,
+              config: {
+                port: config.server.port,
+                host: config.server.host,
+              }
+            } 
+          }, 200, corsHeaders);
+        }
+
         // Current user endpoint — always returns local system user (no sign-in required)
         if (url.pathname === "/api/auth/me" && method === "GET") {
           try {
             const user = await getOrCreateLocalUser();
             return json({ ok: true, data: { user } }, 200, corsHeaders);
-          } catch (err: any) {
-            const msg = err?.message ?? String(err);
+          } catch (err: unknown) {
+            const msg = err instanceof Error ? err.message : String(err);
             serverLog.error({ err, detail: msg }, "GET /api/auth/me failed");
             return json({ ok: false, error: "Auth unavailable", detail: msg }, 500, corsHeaders);
           }
@@ -301,7 +324,7 @@ async function main() {
               200,
               corsHeaders
             );
-          } catch (err: any) {
+          } catch (err: unknown) {
             serverLog.error({ err }, "Failed to get billing credits");
             return json({ error: "Failed to get billing credits" }, 500, corsHeaders);
           }
@@ -349,7 +372,7 @@ async function main() {
           let auth: Awaited<ReturnType<typeof requireAuth>>;
           try {
             auth = await requireAuth(req);
-          } catch (err: any) {
+          } catch (err: unknown) {
             serverLog.error({ err }, "Auth failed in GET /api/sessions");
             return json({ ok: false, error: "Authentication failed" }, 503, corsHeaders);
           }
@@ -358,8 +381,8 @@ async function main() {
           try {
             const data = sessions.listForUser(auth.user.id);
             return json({ ok: true, data }, 200, corsHeaders);
-          } catch (err: any) {
-            const msg = err?.message ?? String(err);
+          } catch (err: unknown) {
+            const msg = err instanceof Error ? err.message : String(err);
             serverLog.error({ err, detail: msg }, "Error fetching sessions");
             return json(
               { ok: false, error: "Failed to fetch sessions", detail: msg },
@@ -382,7 +405,7 @@ async function main() {
             const title = sanitizeString(body.title, SESSION.MAX_TITLE_LENGTH);
             const session = sessions.create(auth.user.id, title ?? undefined, body.parentSessionId);
             return json({ ok: true, data: session }, 201, corsHeaders);
-          } catch (err: any) {
+          } catch (err: unknown) {
             serverLog.error({ err }, "Error creating session");
             return json({ ok: false, error: "Failed to create session" }, 500, corsHeaders);
           }
@@ -586,8 +609,9 @@ async function main() {
           try {
             const start = await startCopilotDeviceAuth();
             return json({ ok: true, data: start }, 200, corsHeaders);
-          } catch (err: any) {
-            return json({ ok: false, error: err.message ?? "Failed to start Copilot auth" }, 400, corsHeaders);
+          } catch (err: unknown) {
+            const message = err instanceof Error ? err.message : String(err);
+            return json({ ok: false, error: message ?? "Failed to start Copilot auth" }, 400, corsHeaders);
           }
         }
 
@@ -634,8 +658,9 @@ async function main() {
             } satisfies WSMessage);
 
             return json({ ok: true, data: { status: "connected" } }, 200, corsHeaders);
-          } catch (err: any) {
-            return json({ ok: false, error: err.message ?? "Failed to complete Copilot auth" }, 400, corsHeaders);
+          } catch (err: unknown) {
+            const message = err instanceof Error ? err.message : String(err);
+            return json({ ok: false, error: message ?? "Failed to complete Copilot auth" }, 400, corsHeaders);
           }
         }
 
@@ -646,8 +671,9 @@ async function main() {
           try {
             const result = await googleAuth.startGeminiCLIAuth();
             return json({ ok: true, data: result }, 200, corsHeaders);
-          } catch (err: any) {
-            return json({ ok: false, error: err.message }, 500, corsHeaders);
+          } catch (err: unknown) {
+            const message = err instanceof Error ? err.message : String(err);
+            return json({ ok: false, error: message }, 500, corsHeaders);
           }
         }
 
@@ -666,8 +692,9 @@ async function main() {
             setTimeout(() => pendingAntigravityAuth.delete(authId), 360_000);
 
             return json({ ok: true, data: { ...startResult, authId } }, 200, corsHeaders);
-          } catch (err: any) {
-            return json({ ok: false, error: err.message }, 500, corsHeaders);
+          } catch (err: unknown) {
+            const message = err instanceof Error ? err.message : String(err);
+            return json({ ok: false, error: message }, 500, corsHeaders);
           }
         }
 
@@ -701,8 +728,9 @@ async function main() {
             } else {
               return json({ ok: false, error: result?.error || "Authentication failed" }, 400, corsHeaders);
             }
-          } catch (err: any) {
-            return json({ ok: false, error: err.message }, 500, corsHeaders);
+          } catch (err: unknown) {
+            const message = err instanceof Error ? err.message : String(err);
+            return json({ ok: false, error: message }, 500, corsHeaders);
           }
         }
 
@@ -844,9 +872,10 @@ async function main() {
           } satisfies WSMessage);
 
           return json({ ok: true, data: { provider: providerName, status: "connected" } }, 200, corsHeaders);
-          } catch (err: any) {
+          } catch (err: unknown) {
+            const message = err instanceof Error ? err.message : String(err);
             serverLog.error({ err, provider: rawName }, "Set provider credentials failed");
-            return json({ ok: false, error: err?.message ?? "Failed to set provider credentials" }, 500, corsHeaders);
+            return json({ ok: false, error: message ?? "Failed to set provider credentials" }, 500, corsHeaders);
           }
         }
 
@@ -860,9 +889,10 @@ async function main() {
             const status = await kory.git.getStatus();
             const branch = await kory.git.getBranch();
             return json({ ok: true, data: { status, branch } }, 200, corsHeaders);
-          } catch (err: any) {
+          } catch (err: unknown) {
+            const detail = err instanceof Error ? err.message : String(err);
             serverLog.error({ err }, "GET /api/git/status failed");
-            return json({ ok: false, error: "Git status failed", detail: err?.message ?? String(err) }, 500, corsHeaders);
+            return json({ ok: false, error: "Git status failed", detail }, 500, corsHeaders);
           }
         }
 
@@ -998,7 +1028,7 @@ async function main() {
           // Persist to koryphaios.json if it exists
           const configPath = join(PROJECT_ROOT, "koryphaios.json");
           try {
-            let currentConfig: any = {};
+            let currentConfig: Record<string, unknown> = {};
             if (existsSync(configPath)) {
               currentConfig = JSON.parse(readFileSync(configPath, "utf-8"));
             }
@@ -1102,7 +1132,7 @@ async function main() {
               authToken: undefined,
               baseUrl: undefined,
               disabled: true,
-            } as any;
+            } as unknown as typeof existing; // Config shape includes dynamic provider keys
 
             const configPath = join(PROJECT_ROOT, "koryphaios.json");
             if (existsSync(configPath)) {
@@ -1224,7 +1254,7 @@ async function main() {
             },
             cancel() {
               abortController.abort();
-              reader.cancel().catch(() => { });
+              reader.cancel().catch(() => { /* Expected: reader may already be closed */ });
             },
           });
 
@@ -1255,71 +1285,24 @@ async function main() {
       }
     },
 
-    websocket: {
-      open(ws: ServerWebSocket<WSClientData>) {
-        try {
-          wsManager.add(ws);
-          serverLog.info({ clientId: ws.data.id, clients: wsManager.clientCount }, "WS client connected");
-
-          // Send initial state
-          try {
-            const initialStatus = providers.getStatus();
-            ws.send(JSON.stringify({
-              type: "provider.status",
-              payload: { providers: initialStatus },
-              timestamp: Date.now(),
-            } satisfies WSMessage));
-          } catch (err) {
-            handleError(err, { event: "ws.open.init_status", clientId: ws?.data?.id });
-          }
-
-        } catch (err) {
-          handleError(err, { event: "ws.open", clientId: ws?.data?.id });
-        }
-      },
-
-      message(ws: ServerWebSocket<WSClientData>, message: string | Buffer) {
-        try {
-          const msg = JSON.parse(String(message));
-          const userId = ws.data.userId ?? "local";
-
-          const assertSessionOwnership = (sessionId: string): boolean => {
-            if (!sessionId || !validateSessionId(sessionId)) return false;
-            const session = sessions.getForUser(sessionId, userId);
-            return !!session;
-          };
-
-          if (msg.type === "subscribe_session") {
-            const sessionId = msg.sessionId;
-            if (sessionId && validateSessionId(sessionId) && sessions.getForUser(sessionId, userId)) {
-              wsManager.subscribeClientToSession(ws.data.id, sessionId);
-            }
-          } else if (msg.type === "user_input") {
-            if (assertSessionOwnership(msg.sessionId)) {
-              kory.handleUserInput(msg.sessionId, msg.selection, msg.text);
-            }
-          } else if (msg.type === "session.accept_changes") {
-            if (assertSessionOwnership(msg.sessionId)) {
-              kory.handleSessionResponse(msg.sessionId, true);
-            }
-          } else if (msg.type === "session.reject_changes") {
-            if (assertSessionOwnership(msg.sessionId)) {
-              kory.handleSessionResponse(msg.sessionId, false);
-            }
-          } else if (msg.type === "toggle_yolo") {
-            kory.setYoloMode(!!msg.enabled);
-          }
-        } catch (err) {
-          handleError(err, { event: "ws.message", clientId: ws?.data?.id, raw: String(message).slice(0, 500) });
-        }
-      },
-
-      close(ws: ServerWebSocket<WSClientData>) {
-        wsManager.remove(ws);
-        serverLog.info({ clients: wsManager.clientCount }, "WS client disconnected");
-      },
-    },
-  });
+    websocket: createWebSocketHandlers({ wsManager, sessions, kory, providers }),
+    });
+  } catch (err: unknown) {
+    // Handle port conflicts and other startup errors
+    const errObj = err instanceof Error ? err : null;
+    const code = (err as NodeJS.ErrnoException)?.code;
+    const message = errObj?.message ?? String(err);
+    if (code === 'EADDRINUSE' || message.includes('port') || message.includes('address already in use')) {
+      serverLog.fatal({ 
+        port: config.server.port, 
+        host: config.server.host,
+        error: message,
+        code,
+      }, `Port ${config.server.port} is already in use. Please check if another instance is running or change the port in koryphaios.json or KORYPHAIOS_PORT env var.`);
+      throw new Error(`Port ${config.server.port} is already in use. Is another Koryphaios instance running?`);
+    }
+    throw err;
+  }
 
   serverLog.info({ host: config.server.host, port: config.server.port }, "Server running");
   serverLog.info({ url: `ws://${config.server.host}:${config.server.port}/ws` }, "WebSocket ready");

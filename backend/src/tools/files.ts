@@ -6,9 +6,9 @@ import { join, relative, dirname, basename, resolve } from "path";
 import type { Tool, ToolContext, ToolCallInput, ToolCallOutput } from "./registry";
 import { validatePathAccess } from "../security";
 
-/** When sandboxed with no explicit allowed paths, allow the full project (working directory). */
+/** Resolve allowed filesystem roots for file operations.
+ *  Default to project directory even when not explicitly sandboxed — never allow "/" implicitly. */
 function getAllowedRoots(ctx: ToolContext): string[] {
-  if (!ctx.isSandboxed) return ["/"];
   if (ctx.allowedPaths?.length) return ctx.allowedPaths;
   return [resolve(ctx.workingDirectory)];
 }
@@ -68,8 +68,8 @@ export class ReadFileTool implements Tool {
 
       const numbered = lines.map((l, i) => `${i + 1}. ${l}`).join("\n");
       return { callId: call.id, name: this.name, output: numbered, isError: false, durationMs: 0 };
-    } catch (err: any) {
-      return { callId: call.id, name: this.name, output: `Error reading file: ${err.message}`, isError: true, durationMs: 0 };
+    } catch (err: unknown) {
+      return { callId: call.id, name: this.name, output: `Error reading file: ${err instanceof Error ? err.message : String(err)}`, isError: true, durationMs: 0 };
     }
   }
 }
@@ -146,8 +146,8 @@ export class WriteFileTool implements Tool {
         isError: false,
         durationMs: 0,
       };
-    } catch (err: any) {
-      return { callId: call.id, name: this.name, output: `Error writing file: ${err.message}`, isError: true, durationMs: 0 };
+    } catch (err: unknown) {
+      return { callId: call.id, name: this.name, output: `Error writing file: ${err instanceof Error ? err.message : String(err)}`, isError: true, durationMs: 0 };
     }
   }
 }
@@ -247,8 +247,8 @@ export class EditFileTool implements Tool {
         isError: false,
         durationMs: 0,
       };
-    } catch (err: any) {
-      return { callId: call.id, name: this.name, output: `Error editing file: ${err.message}`, isError: true, durationMs: 0 };
+    } catch (err: unknown) {
+      return { callId: call.id, name: this.name, output: `Error editing file: ${err instanceof Error ? err.message : String(err)}`, isError: true, durationMs: 0 };
     }
   }
 }
@@ -365,8 +365,8 @@ export class GlobTool implements Tool {
         isError: false,
         durationMs: 0,
       };
-    } catch (err: any) {
-      return { callId: call.id, name: this.name, output: `Glob error: ${err.message}`, isError: true, durationMs: 0 };
+    } catch (err: unknown) {
+      return { callId: call.id, name: this.name, output: `Glob error: ${err instanceof Error ? err.message : String(err)}`, isError: true, durationMs: 0 };
     }
   }
 }
@@ -405,8 +405,8 @@ export class LsTool implements Tool {
     try {
       const entries = this.listDir(absPath, depth ?? 1, 0);
       return { callId: call.id, name: this.name, output: entries.join("\n"), isError: false, durationMs: 0 };
-    } catch (err: any) {
-      return { callId: call.id, name: this.name, output: `Error listing: ${err.message}`, isError: true, durationMs: 0 };
+    } catch (err: unknown) {
+      return { callId: call.id, name: this.name, output: `Error listing: ${err instanceof Error ? err.message : String(err)}`, isError: true, durationMs: 0 };
     }
   }
 
@@ -494,8 +494,8 @@ export class DeleteFileTool implements Tool {
       }
 
       return { callId: call.id, name: this.name, output: `Deleted file: ${absPath}`, isError: false, durationMs: 0 };
-    } catch (err: any) {
-      return { callId: call.id, name: this.name, output: `Error deleting: ${err.message}`, isError: true, durationMs: 0 };
+    } catch (err: unknown) {
+      return { callId: call.id, name: this.name, output: `Error deleting: ${err instanceof Error ? err.message : String(err)}`, isError: true, durationMs: 0 };
     }
   }
 }
@@ -545,22 +545,22 @@ export class MoveFileTool implements Tool {
       mkdirSync(dirname(absDest), { recursive: true });
       renameSync(absSrc, absDest);
       return { callId: call.id, name: this.name, output: `Moved: ${absSrc} → ${absDest}`, isError: false, durationMs: 0 };
-    } catch (err: any) {
+    } catch (err: unknown) {
       // renameSync fails across devices — fallback to copy+delete for files
-      if (err.code === "EXDEV") {
+      if ((err as NodeJS.ErrnoException).code === "EXDEV") {
         try {
           const stat = statSync(absSrc);
           if (stat.isDirectory()) {
-            return { callId: call.id, name: this.name, output: `Cannot move directory across filesystems: ${err.message}`, isError: true, durationMs: 0 };
+            return { callId: call.id, name: this.name, output: `Cannot move directory across filesystems: ${err instanceof Error ? err.message : String(err)}`, isError: true, durationMs: 0 };
           }
           copyFileSync(absSrc, absDest);
           unlinkSync(absSrc);
           return { callId: call.id, name: this.name, output: `Moved (cross-device): ${absSrc} → ${absDest}`, isError: false, durationMs: 0 };
-        } catch (copyErr: any) {
-          return { callId: call.id, name: this.name, output: `Error moving file: ${copyErr.message}`, isError: true, durationMs: 0 };
+        } catch (copyErr: unknown) {
+          return { callId: call.id, name: this.name, output: `Error moving file: ${copyErr instanceof Error ? copyErr.message : String(copyErr)}`, isError: true, durationMs: 0 };
         }
       }
-      return { callId: call.id, name: this.name, output: `Error moving: ${err.message}`, isError: true, durationMs: 0 };
+      return { callId: call.id, name: this.name, output: `Error moving: ${err instanceof Error ? err.message : String(err)}`, isError: true, durationMs: 0 };
     }
   }
 }
@@ -653,8 +653,8 @@ export class DiffTool implements Tool {
       } else {
         return { callId: call.id, name: this.name, output: "Provide either path_b or new_content.", isError: true, durationMs: 0 };
       }
-    } catch (err: any) {
-      return { callId: call.id, name: this.name, output: `Diff error: ${err.message}`, isError: true, durationMs: 0 };
+    } catch (err: unknown) {
+      return { callId: call.id, name: this.name, output: `Diff error: ${err instanceof Error ? err.message : String(err)}`, isError: true, durationMs: 0 };
     }
   }
 }
@@ -754,8 +754,8 @@ export class PatchTool implements Tool {
         isError: false,
         durationMs: 0,
       };
-    } catch (err: any) {
-      return { callId: call.id, name: this.name, output: `Patch error: ${err.message}`, isError: true, durationMs: 0 };
+    } catch (err: unknown) {
+      return { callId: call.id, name: this.name, output: `Patch error: ${err instanceof Error ? err.message : String(err)}`, isError: true, durationMs: 0 };
     }
   }
 }

@@ -111,20 +111,24 @@ export class AnthropicProvider implements Provider {
 
       if (isOpus46 || isSonnet46) {
         // API: output_config.effort (low|medium|high|max), thinking.type "adaptive". Max is Opus 4.6 only.
-        const effort = (["low", "medium", "high", "max"] as const).includes(level as any)
+        const effort = (["low", "medium", "high", "max"] as const).includes(level as "low" | "medium" | "high" | "max")
           ? level
           : "medium";
         if (effort === "max" && isSonnet46) {
-          (params as any).output_config = { effort: "high" };
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any -- SDK types lag behind API; output_config not yet typed
+          (params as unknown as Record<string, unknown>).output_config = { effort: "high" };
         } else {
-          (params as any).output_config = { effort };
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any -- SDK types lag behind API; output_config not yet typed
+          (params as unknown as Record<string, unknown>).output_config = { effort };
         }
-        (params as any).thinking = { type: "adaptive" };
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any -- SDK types lag behind API; thinking not yet typed
+        (params as unknown as Record<string, unknown>).thinking = { type: "adaptive" };
       } else if (isHaiku45) {
         // Haiku 4.5: extended thinking with budget_tokens (same API as other Claude 4).
         const budget = level === "0" || level === "off" ? 0 : Math.max(0, parseInt(level, 10) || 8192);
         if (budget > 0) {
-          (params as any).thinking = { type: "enabled", budget_tokens: budget };
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any -- SDK types lag behind API; thinking not yet typed
+          (params as unknown as Record<string, unknown>).thinking = { type: "enabled", budget_tokens: budget };
           params.max_tokens = budget + outputTokens;
         }
       } else {
@@ -144,7 +148,8 @@ export class AnthropicProvider implements Provider {
           thinkingBudget = Number(level);
         }
         if (thinkingBudget > 0) {
-          (params as any).thinking = { type: "enabled", budget_tokens: thinkingBudget };
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any -- SDK types lag behind API; thinking not yet typed
+          (params as unknown as Record<string, unknown>).thinking = { type: "enabled", budget_tokens: thinkingBudget };
           params.max_tokens = thinkingBudget + outputTokens;
         }
       }
@@ -212,7 +217,8 @@ export class AnthropicProvider implements Provider {
           }
 
           case "message_delta": {
-            const usage = (event as any).usage;
+            // SDK types event.usage for message_delta
+            const usage = (event as unknown as Record<string, unknown>).usage as { output_tokens?: number } | undefined;
             yield {
               type: "usage_update",
               tokensOut: usage?.output_tokens,
@@ -231,15 +237,16 @@ export class AnthropicProvider implements Provider {
               tokensIn: usage.input_tokens,
               tokensOut: usage.output_tokens,
               // Anthropic reports cache reads in usage.cache_read_input_tokens
-              tokensCache: (usage as any).cache_read_input_tokens,
+              tokensCache: (usage as unknown as Record<string, unknown>).cache_read_input_tokens as number | undefined,
             };
             break;
           }
         }
       }
-    } catch (err: any) {
-      if (err.name === "AbortError") return;
-      yield { type: "error", error: err.message ?? String(err) };
+    } catch (err: unknown) {
+      if (err instanceof Error && err.name === "AbortError") return;
+      const message = err instanceof Error ? err.message : String(err);
+      yield { type: "error", error: message };
     }
   }
 
@@ -291,7 +298,7 @@ export class AnthropicProvider implements Provider {
               type: "image",
               source: {
                 type: "base64",
-                media_type: (b.imageMimeType ?? "image/png") as any,
+                media_type: (b.imageMimeType ?? "image/png") as "image/png" | "image/jpeg" | "image/gif" | "image/webp",
                 data: b.imageData ?? "",
               },
             };
