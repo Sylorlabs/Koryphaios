@@ -143,6 +143,38 @@ export function validateConfig(config: Partial<KoryphaiosConfig>): void {
     }
   }
 
+  // Validate discord config
+  if (config.discord) {
+    if (!config.discord.botToken || typeof config.discord.botToken !== "string") {
+      errors.push("discord.botToken must be a non-empty string");
+    }
+    if (config.discord.allowedGuildIds !== undefined && !Array.isArray(config.discord.allowedGuildIds)) {
+      errors.push("discord.allowedGuildIds must be an array of strings");
+    }
+    if (config.discord.allowedUserIds !== undefined && !Array.isArray(config.discord.allowedUserIds)) {
+      errors.push("discord.allowedUserIds must be an array of strings");
+    }
+  }
+
+  // Validate slack config
+  if (config.slack) {
+    if (!config.slack.botToken || typeof config.slack.botToken !== "string") {
+      errors.push("slack.botToken must be a non-empty string");
+    }
+    if (!config.slack.appToken || typeof config.slack.appToken !== "string") {
+      errors.push("slack.appToken must be a non-empty string (xapp-... token for Socket Mode)");
+    }
+    if (config.slack.signingSecret !== undefined && typeof config.slack.signingSecret !== "string") {
+      errors.push("slack.signingSecret must be a string");
+    }
+    if (config.slack.allowedChannelIds !== undefined && !Array.isArray(config.slack.allowedChannelIds)) {
+      errors.push("slack.allowedChannelIds must be an array of strings");
+    }
+    if (config.slack.allowedUserIds !== undefined && !Array.isArray(config.slack.allowedUserIds)) {
+      errors.push("slack.allowedUserIds must be an array of strings");
+    }
+  }
+
   // Validate dataDirectory
   if (config.dataDirectory && typeof config.dataDirectory !== "string") {
     errors.push("dataDirectory must be a string");
@@ -236,6 +268,11 @@ export function validateEnvironment(): void {
         errors.push("TELEGRAM_ADMIN_ID must be a valid positive number");
       }
     }
+  }
+
+  // Validate Slack config if set
+  if (process.env.SLACK_BOT_TOKEN && !process.env.SLACK_APP_TOKEN) {
+    errors.push("SLACK_APP_TOKEN is required when SLACK_BOT_TOKEN is set (Socket Mode needs xapp-... token)");
   }
 
   // In production, warn if CORS_ORIGINS is not explicitly set

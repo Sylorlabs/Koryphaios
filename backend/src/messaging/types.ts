@@ -1,9 +1,11 @@
 // Messaging gateway — channel adapter types.
-// Channels (Telegram, iMessage bridge, Android bridge) implement this and receive
+// Channels (Telegram, Discord, Slack, etc.) implement this and receive
 // session-scoped replies from the manager agent.
 
 export const CHANNEL_PREFIX = {
   telegram: "telegram-",
+  discord: "discord-",
+  slack: "slack-",
   imessage: "imessage-",
   android: "android-",
 } as const;
@@ -24,6 +26,12 @@ export interface ReplySegment {
 export interface ChannelMetadata {
   /** Telegram: chat id for replies */
   chatId?: number;
+  /** Discord: channel id for replies */
+  discordChannelId?: string;
+  /** Slack: channel id for replies */
+  slackChannelId?: string;
+  /** Slack: thread timestamp for threaded replies */
+  slackThreadTs?: string;
   /** Bridge devices: device id */
   deviceId?: string;
   /** Bridge: thread/conversation id */

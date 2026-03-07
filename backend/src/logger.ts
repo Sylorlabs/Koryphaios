@@ -37,5 +37,7 @@ export const koryLog = log.child({ module: "kory" });
 export const toolLog = log.child({ module: "tools" });
 export const mcpLog = log.child({ module: "mcp" });
 export const telegramLog = log.child({ module: "telegram" });
+export const discordLog = log.child({ module: "discord" });
+export const slackLog = log.child({ module: "slack" });
 export const messagingLog = log.child({ module: "messaging" });
 export const authLog = log.child({ module: "auth" });
