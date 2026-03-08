@@ -13,6 +13,7 @@
   import { getModKeyName } from '$lib/utils/platform';
   import { formatRecentDate, promptTemplates } from '$lib/utils/projectManager';
   import type { RecentProject } from '$lib/utils/projectManager';
+  import { modeStore } from '$lib/stores/mode.svelte';
   import { onMount } from 'svelte';
   import { browser } from '$app/environment';
 
@@ -251,15 +252,17 @@
       >
         {showSidebar ? 'Hide Sidebar' : 'Show Sidebar'}
       </button>
-      <button
-        class="flex items-center gap-1.5 px-2 py-1 rounded-md transition-colors hover:bg-[var(--color-surface-3)]"
-        style="color: {showGit ? 'var(--color-accent)' : 'var(--color-text-muted)'};"
-        onclick={() => action('toggle_git')}
-        title={showGit ? 'Hide Source Control' : 'Show Source Control'}
-      >
-        <GitBranch size={14} />
-        <span class="text-[10px] font-medium uppercase tracking-wider">{showGit ? 'Hide Git' : 'Show Git'}</span>
-      </button>
+      {#if modeStore.showGitPanel}
+        <button
+          class="flex items-center gap-1.5 px-2 py-1 rounded-md transition-colors hover:bg-[var(--color-surface-3)]"
+          style="color: {showGit ? 'var(--color-accent)' : 'var(--color-text-muted)'};"
+          onclick={() => action('toggle_git')}
+          title={showGit ? 'Hide Source Control' : 'Show Source Control'}
+        >
+          <GitBranch size={14} />
+          <span class="text-[10px] font-medium uppercase tracking-wider">{showGit ? 'Hide Git' : 'Show Git'}</span>
+        </button>
+      {/if}
       <button
         class="flex items-center gap-1.5 px-2 py-1 rounded-md transition-colors hover:bg-[var(--color-surface-3)]"
         style="color: var(--color-text-muted);"

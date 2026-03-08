@@ -304,3 +304,6 @@ let correlationIdCounter = 0;
 export function generateCorrelationId(): string {
   return `kory-${Date.now()}-${++correlationIdCounter}`;
 }
+
+// Re-export additional error types from the taxonomy
+export * from "./errors/types";

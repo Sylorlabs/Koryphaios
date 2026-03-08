@@ -11,7 +11,7 @@ import {
   PROVIDER_BASE_URLS,
 } from "./api-endpoints";
 import { AnthropicProvider } from "./anthropic";
-import { detectGeminiCLIToken, detectCopilotToken } from "./auth-utils";
+import { detectGeminiCLIToken, detectCopilotToken, detectDashScopeToken, detectClineToken } from "./auth-utils";
 import { OpenAIProvider, GroqProvider, OpenRouterProvider, XAIProvider, AzureProvider } from "./openai";
 
 import { GeminiProvider, GeminiCLIProvider } from "./gemini";
@@ -302,7 +302,10 @@ class ProviderRegistry {
 
       const isProviderAvailable = provider?.isAvailable() ?? false;
       const isAuthenticated = isProviderAvailable ||
-        (name === "copilot" && !!detectCopilotToken());
+        (name === "copilot" && !!detectCopilotToken()) ||
+        (name === "cline" && !!detectClineToken()) ||
+        (name === "qwen" && !!detectDashScopeToken()) ||
+        (name === "alibaba" && !!detectDashScopeToken());
 
       // Include all providers - authenticated or not - so users can configure them
 
@@ -680,7 +683,9 @@ class ProviderRegistry {
         }
         default: {
           const defaultBase = OPENCODE_DEFAULT_BASE_URL[name];
-          if (defaultBase && apiKey) return this.verifyBearerGet(`${defaultBase.replace(/\/?$/, "")}/models`, apiKey);
+          // Qwen/Alibaba can use aliyun CLI auth detection
+          const effectiveApiKey = apiKey ?? ((name === "qwen" || name === "alibaba") ? detectDashScopeToken() : null);
+          if (defaultBase && effectiveApiKey) return this.verifyBearerGet(`${defaultBase.replace(/\/?$/, "")}/models`, effectiveApiKey);
           if (defaultBase) return { success: false, error: "Missing API key" };
           return { success: false, error: `Unsupported provider: ${name}` };
         }
@@ -746,7 +751,7 @@ class ProviderRegistry {
     if (authMode === "auth_only") {
       // Cline / Codex: allow connect with no credentials; verification only checks CLI is in PATH.
       if (name === "cline" || name === "codex") return { success: true };
-      const clineEnvToken = name === "cline" ? this.detectEnvAuthToken("cline") : null;
+      const clineEnvToken = name === "cline" ? (this.detectEnvAuthToken("cline") ?? detectClineToken()) : null;
       const hasAuth = !!(authToken || existing?.authToken) || (name === "copilot" && !!detectCopilotToken()) || !!clineEnvToken;
       if (!hasAuth) {
         return { success: false, error: "authToken is required" };
@@ -854,7 +859,10 @@ class ProviderRegistry {
     const authMode = PROVIDER_AUTH_MODE[name];
     const hasApi = !!config.apiKey;
     const hasAuth = !!config.authToken ||
-      (name === "copilot" && !!detectCopilotToken());
+      (name === "copilot" && !!detectCopilotToken()) ||
+      (name === "cline" && !!detectClineToken()) ||
+      (name === "qwen" && !!detectDashScopeToken()) ||
+      (name === "alibaba" && !!detectDashScopeToken());
     const hasUrl = !!config.baseUrl;
 
     const hasAnyAuth =

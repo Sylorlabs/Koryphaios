@@ -21,6 +21,7 @@ export interface GitState {
   currentFileContent: string | null;
   ahead: number;
   behind: number;
+  isRepo: boolean;
 }
 
 let state = $state<GitState>({
@@ -35,6 +36,7 @@ let state = $state<GitState>({
   currentFileContent: null,
   ahead: 0,
   behind: 0,
+  isRepo: false,
 });
 
 async function refreshStatus() {
@@ -45,27 +47,33 @@ async function refreshStatus() {
     if (!res.ok) {
       state.status = [];
       state.branch = '';
+      state.isRepo = false;
       return;
     }
     if (!text.trim()) return;
-    let data: { ok?: boolean; data?: { status?: unknown[]; branch?: string; ahead?: number; behind?: number } };
+    let data: { ok?: boolean; data?: { isRepo?: boolean; status?: unknown[]; branch?: string; ahead?: number; behind?: number } };
     try {
       data = JSON.parse(text);
     } catch {
       state.status = [];
       state.branch = '';
+      state.isRepo = false;
       return;
     }
     if (data?.ok && data.data) {
+      state.isRepo = data.data.isRepo ?? false;
       state.status = (data.data.status as GitFileStatus[] | undefined) ?? [];
       state.branch = data.data.branch ?? '';
       state.ahead = data.data.ahead ?? 0;
       state.behind = data.data.behind ?? 0;
-      await fetchBranches();
+      if (state.isRepo) {
+        await fetchBranches();
+      }
     }
   } catch {
     state.status = [];
     state.branch = '';
+    state.isRepo = false;
   } finally {
     state.loading = false;
   }
