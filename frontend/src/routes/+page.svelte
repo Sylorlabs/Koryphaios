@@ -6,6 +6,7 @@
   import { authStore } from '$lib/stores/auth.svelte';
   import { appStore } from '$lib/stores/app.svelte';
   import { toastStore } from '$lib/stores/toast.svelte';
+  import { modeStore } from '$lib/stores/mode.svelte';
   import { apiUrl } from '$lib/utils/api-url';
   import ManagerFeed from '$lib/components/ManagerFeed.svelte';
   import FileEditPreview from '$lib/components/FileEditPreview.svelte';
@@ -22,6 +23,8 @@
   import CommandPalette from '$lib/components/CommandPalette.svelte';
   import MenuBar from '$lib/components/MenuBar.svelte';
   import ThemePickerModal from '$lib/components/ThemePickerModal.svelte';
+  import ModeToggle from '$lib/components/ModeToggle.svelte';
+  import NoGitWarning from '$lib/components/NoGitWarning.svelte';
   import { shortcutStore } from '$lib/stores/shortcuts.svelte';
   import { gitStore } from '$lib/stores/git.svelte';
   import { ChevronLeft, ChevronRight } from 'lucide-svelte';
@@ -61,6 +64,9 @@
     });
     recentProjects = parseRecentProjects();
     loadLayoutPrefs();
+    
+    // Fetch current mode from backend
+    modeStore.fetchMode();
 
     window.addEventListener('keydown', handleGlobalKeydown);
     return () => {
@@ -439,29 +445,40 @@
           <ChevronLeft size={14} />
         </button>
       </div>
+      <!-- No Git Warning (Beginner Mode) -->
+      <NoGitWarning />
+      
       <div class="flex-1 overflow-hidden">
         <SessionSidebar 
           currentSessionId={sessionStore.activeSessionId} 
         />
       </div>
-      <!-- Sidebar footer -->
+      
+      <!-- Mode Toggle & Sidebar footer -->
       <div 
-        class="px-3 border-t flex items-center justify-between shrink-0" 
-        style="height: var(--size-10); border-color: var(--color-border);"
+        class="px-3 py-2 border-t flex flex-col gap-2 shrink-0" 
+        style="border-color: var(--color-border);"
       >
-        <div class="flex items-center gap-2">
-          <div class="rounded-full {connectionDot}" style="width: var(--size-2); height: var(--size-2);"></div>
-          <span class="capitalize leading-none" style="font-size: var(--text-xs); color: var(--color-text-muted);">{wsStore.status}</span>
+        <!-- Mode Toggle -->
+        <div class="flex justify-center">
+          <ModeToggle variant="switch" />
         </div>
-        <div class="flex items-center gap-1">
-          {#if connectedProviders > 0}
-            <span 
-              class="px-1.5 py-0.5 rounded leading-none" 
-              style="font-size: var(--text-xs); background: var(--color-surface-3); color: var(--color-text-muted);"
-            >
-              {connectedProviders} providers
-            </span>
-          {/if}
+        
+        <div class="flex items-center justify-between">
+          <div class="flex items-center gap-2">
+            <div class="rounded-full {connectionDot}" style="width: var(--size-2); height: var(--size-2);"></div>
+            <span class="capitalize leading-none" style="font-size: var(--text-xs); color: var(--color-text-muted);">{wsStore.status}</span>
+          </div>
+          <div class="flex items-center gap-1">
+            {#if connectedProviders > 0}
+              <span 
+                class="px-1.5 py-0.5 rounded leading-none" 
+                style="font-size: var(--text-xs); background: var(--color-surface-3); color: var(--color-text-muted);"
+              >
+                {connectedProviders} providers
+              </span>
+            {/if}
+          </div>
         </div>
       </div>
     </nav>
@@ -521,14 +538,14 @@
       onchange={handleProjectFolderSelected}
     />
 
-    <!-- Agent cards (collapsible) -->
-    {#if !zenMode && showAgents && activeAgents.length > 0}
+    <!-- Agent cards (collapsible) - only in advanced mode -->
+    {#if !zenMode && showAgents && modeStore.showAgentDetails && activeAgents.length > 0}
       <div class="px-4 py-2 border-b flex gap-2 overflow-x-auto shrink-0" style="border-color: var(--color-border); background: var(--color-surface-1);">
         {#each activeAgents as agent (agent.identity.id + agent.status)}
           <WorkerCard {agent} />
         {/each}
       </div>
-    {:else if !zenMode && showAgents}
+    {:else if !zenMode && showAgents && modeStore.showAgentDetails}
       <div class="px-4 py-2 border-b flex items-center justify-center shrink-0" style="border-color: var(--color-border); background: var(--color-surface-1);">
         <span class="text-xs opacity-40" style="color: var(--color-text-muted);">No agents running</span>
       </div>
@@ -546,8 +563,8 @@
       {/if}
     </section>
 
-    <!-- Context window usage -->
-    {#if wsStore.contextUsage.isReliable}
+    <!-- Context window usage - only in advanced mode -->
+    {#if wsStore.contextUsage.isReliable && modeStore.showCostTracking}
       <div 
         class="shrink-0 px-4 flex items-center gap-3" 
         style="padding-top: var(--space-2); padding-bottom: var(--space-2); border-top: 1px solid var(--color-border); background: var(--color-surface-1);"
@@ -584,7 +601,7 @@
     </div>
   </div>
 
-  {#if !zenMode && showGit}
+  {#if !zenMode && showGit && modeStore.showGitPanel}
       <aside 
         class="border-l shrink-0" 
         style="

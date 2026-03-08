@@ -170,3 +170,124 @@ export function detectAntigravityToken(): string | null {
   return process.env.ANTIGRAVITY_TOKEN || null;
 }
 
+/**
+ * Detects DashScope (Alibaba Cloud Qwen) API keys from aliyun CLI or environment.
+ * Alibaba Cloud doesn't provide OAuth for DashScope - uses API key or AccessKey credentials.
+ */
+export function detectDashScopeToken(): string | null {
+  // 1. Check environment variable first
+  if (process.env.DASHSCOPE_API_KEY) return process.env.DASHSCOPE_API_KEY;
+  if (process.env.QWEN_API_KEY) return process.env.QWEN_API_KEY;
+
+  // 2. Try aliyun CLI to get AccessKey (DashScope uses same credentials)
+  try {
+    const aliyun = spawnSync(["aliyun", "configure", "get", "--profile", "default"], { 
+      stdout: "pipe", 
+      stderr: "pipe",
+      timeout: 5000
+    });
+    if (aliyun.exitCode === 0) {
+      const output = aliyun.stdout.toString();
+      // Parse aliyun configure output for accessKeyId
+      const match = output.match(/accessKeyId\s*[=:]\s*["']?([A-Za-z0-9]+)["']?/);
+      if (match && match[1]) {
+        return match[1];
+      }
+    }
+  } catch { /* Expected: aliyun CLI may not be installed */ }
+
+  // 3. Fallback to file-based detection
+  const configPaths = [
+    join(homedir(), ".aliyun", "config.json"),
+    join(getConfigDir(), "aliyun", "config.json"),
+  ];
+
+  for (const configPath of configPaths) {
+    if (!existsSync(configPath)) continue;
+    try {
+      const data = JSON.parse(readFileSync(configPath, "utf-8"));
+      // aliyun CLI stores profiles with access_key_id
+      if (data?.profiles && Array.isArray(data.profiles)) {
+        for (const profile of data.profiles) {
+          if (profile?.access_key_id) {
+            return profile.access_key_id;
+          }
+          // Some versions use nested access_key object
+          if (profile?.access_key?.access_key_id) {
+            return profile.access_key.access_key_id;
+          }
+        }
+      }
+      // Fallback: check first profile directly
+      if (data?.access_key_id) {
+        return data.access_key_id;
+      }
+    } catch {
+      continue;
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Detects Cline CLI auth tokens from WorkOS-based authentication.
+ * Cline CLI stores tokens with 'workos:' prefix in their config directory.
+ */
+export function detectClineToken(): string | null {
+  // 1. Check environment variable first
+  if (process.env.CLINE_AUTH_TOKEN) return process.env.CLINE_AUTH_TOKEN;
+
+  // 2. Try 'cline auth status' or similar CLI command if available
+  try {
+    const clineStatus = spawnSync(["cline", "auth", "status"], { 
+      stdout: "pipe", 
+      stderr: "pipe",
+      timeout: 5000
+    });
+    if (clineStatus.exitCode === 0) {
+      const output = clineStatus.stdout.toString();
+      // Try to extract token from status output (if it shows the token)
+      const tokenMatch = output.match(/workos:[A-Za-z0-9._-]+/);
+      if (tokenMatch) {
+        return tokenMatch[0];
+      }
+    }
+  } catch { /* Expected: cline CLI may not be installed or command may not exist */ }
+
+  // 3. Fallback to file-based detection
+  // Cline stores auth tokens in various locations depending on platform
+  const configPaths = [
+    join(homedir(), ".cline", "auth.json"),
+    join(homedir(), ".cline", "config.json"),
+    join(getConfigDir(), "Cline", "auth.json"),
+    join(getConfigDir(), "cline", "auth.json"),
+    // VS Code extension storage location (for users who auth via extension)
+    join(homedir(), ".vscode", "extensions", "cline.cline-*", "auth.json"),
+  ];
+
+  for (const configPath of configPaths) {
+    // Handle glob patterns in path
+    if (configPath.includes("*")) {
+      // Skip glob patterns for now - would need fs.readdir to resolve
+      continue;
+    }
+    if (!existsSync(configPath)) continue;
+    try {
+      const data = JSON.parse(readFileSync(configPath, "utf-8"));
+      // Check common token field names
+      if (data?.token) return data.token;
+      if (data?.authToken) return data.authToken;
+      if (data?.access_token) return data.access_token;
+      if (data?.workos_token) return data.workos_token;
+      // Some configs nest under 'auth' or 'credentials'
+      if (data?.auth?.token) return data.auth.token;
+      if (data?.credentials?.token) return data.credentials.token;
+    } catch {
+      continue;
+    }
+  }
+
+  return null;
+}
+

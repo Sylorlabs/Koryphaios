@@ -7,15 +7,29 @@ export function createGitRoutes(deps: RouteDependencies): RouteHandler[] {
     const { kory } = deps;
 
     return [
+        // GET /api/git/repo — Check if directory is a git repo
+        {
+            path: "/api/git/repo",
+            method: "GET",
+            handler: async (req, _params, ctx) => {
+                const isRepo = kory.git.isGitRepo();
+                return json({ ok: true, data: { isRepo } }, 200);
+            },
+        },
+
         // GET /api/git/status — Get git status
         {
             path: "/api/git/status",
             method: "GET",
             handler: async (req, _params, ctx) => {
+                const isRepo = kory.git.isGitRepo();
+                if (!isRepo) {
+                    return json({ ok: true, data: { isRepo: false, status: [], branch: '', ahead: 0, behind: 0 } }, 200);
+                }
                 const status = await kory.git.getStatus();
                 const branch = await kory.git.getBranch();
                 const { ahead, behind } = await kory.git.getAheadBehind();
-                return json({ ok: true, data: { status, branch, ahead, behind } }, 200);
+                return json({ ok: true, data: { isRepo: true, status, branch, ahead, behind } }, 200);
             },
         },
 

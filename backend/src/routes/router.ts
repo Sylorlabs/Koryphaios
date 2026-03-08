@@ -6,6 +6,7 @@ import { createSessionRoutes } from "./sessions";
 import { createProviderRoutes } from "./providers";
 import { createMessageRoutes } from "./messages";
 import { createGitRoutes } from "./git";
+import { createModeRoutes } from "./mode";
 import { getCorsHeaders, validateSessionId } from "../security";
 import { RateLimiter } from "../security/rate-limit";
 import { RATE_LIMIT } from "../constants";
@@ -33,6 +34,7 @@ export class Router {
             ...createProviderRoutes(deps),
             ...createMessageRoutes(deps),
             ...createGitRoutes(deps),
+            ...createModeRoutes(),
         ];
     }
 
