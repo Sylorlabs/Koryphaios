@@ -30,16 +30,16 @@
 
 @layer base {
   :root {
-    --color-surface-0: #0a0a0b;
-    --color-surface-1: #111113;
-    --color-surface-2: #1a1a1e;
-    --color-surface-3: #242428;
-    --color-surface-4: #2e2e34;
-    --color-border: #2a2a30;
-    --color-border-bright: #3a3a42;
-    --color-text-primary: #e8e8ed;
-    --color-text-secondary: #8b8b96;
-    --color-text-muted: #5a5a66;
+    --color-surface-0: #0D0B0A;
+    --color-surface-1: #141210;
+    --color-surface-2: #1C1917;
+    --color-surface-3: #262220;
+    --color-surface-4: #302B28;
+    --color-border: rgba(213, 178, 97, 0.16);
+    --color-border-bright: rgba(213, 178, 97, 0.36);
+    --color-text-primary: #F6EFE2;
+    --color-text-secondary: rgba(214, 206, 192, 0.74);
+    --color-text-muted: rgba(214, 206, 192, 0.40);
 
     --color-glow-codex: rgba(0, 255, 255, 0.5);
     --color-glow-google: rgba(66, 133, 244, 0.5);
@@ -47,8 +47,8 @@
     --color-glow-kory: rgba(255, 215, 0, 0.6);
     --color-glow-test: rgba(0, 255, 128, 0.5);
 
-    --color-accent: #6366f1;
-    --color-accent-hover: #818cf8;
+    --color-accent: #D5B261;
+    --color-accent-hover: #F3DDB0;
     --color-success: #22c55e;
     --color-error: #ef4444;
     --color-warning: #f59e0b;

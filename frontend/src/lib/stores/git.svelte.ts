@@ -151,7 +151,7 @@ async function loadDiff(file: string, staged: boolean) {
       }
     }
   } catch (err) {
-    console.error('Failed to load diff/content', err);
+    if (import.meta.env.DEV) console.error('Failed to load diff/content', err);
   }
 }
 

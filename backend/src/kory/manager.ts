@@ -1069,9 +1069,11 @@ export class KoryManager {
     const pendingInput = this.pendingUserInputs.get(sessionId);
     if (pendingInput) {
       this.pendingUserInputs.delete(sessionId);
-      // Note: The promise resolver will simply never be called,
-      // causing the promise to hang indefinitely. In production,
-      // you should track and reject these promises.
+      try {
+        pendingInput("");
+      } catch {
+        // Resolver already settled — safe to ignore
+      }
     }
 
     // Clear session-specific data

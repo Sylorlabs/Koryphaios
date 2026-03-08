@@ -53,7 +53,7 @@ export const appStore = {
         if (!ok) state.backendUnreachable = true;
       }
     } catch (err) {
-      console.error('Failed to load sessions:', err);
+      console.error('Failed to load sessions:', err); // eslint-disable-line no-console
       state.sessionsLoaded = false;
       state.backendUnreachable = true;
     }
