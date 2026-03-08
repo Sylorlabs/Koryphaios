@@ -523,3 +523,130 @@ export function writeTokenToFile(token: string, sessionId: string): string {
   writeFileSync(tokenFile, payload, { mode: 0o600, encoding: "utf-8" });
   return tokenFile;
 }
+
+// ─── CLI Auth Token Handling ─────────────────────────────────────────────────
+
+/**
+ * CLI auth token types that need special handling
+ */
+export type CLIAuthProvider = "gemini" | "antigravity" | "codex";
+
+/**
+ * Create a secure marker for CLI-based authentication.
+ * This marker is stored encrypted and indicates the provider
+ * should use CLI-based auth at runtime.
+ * 
+ * SECURITY: CLI auth tokens are now encrypted before storage,
+ * using the same envelope encryption as API keys.
+ */
+export async function createSecureCLIAuthToken(
+  provider: CLIAuthProvider,
+  encryptFn: (plaintext: string) => Promise<string>
+): Promise<string> {
+  // Create a unique marker that includes timestamp for audit
+  const timestamp = Date.now();
+  const marker = `cli:${provider}:${timestamp}`;
+  
+  // Encrypt the marker before storage
+  // This ensures CLI auth markers are treated with same security as API keys
+  return encryptFn(marker);
+}
+
+/**
+ * Verify if a stored value is a CLI auth token
+ */
+export function isCLIAuthToken(storedValue: string): boolean {
+  // Check for encrypted envelope format first
+  if (storedValue.startsWith("env:")) {
+    // Could be encrypted CLI token, need to decrypt to check
+    // This is intentionally opaque - verification happens at runtime
+    return false;
+  }
+  
+  // Legacy plaintext format (DEPRECATED - for migration only)
+  if (storedValue.startsWith("cli:")) {
+    toolLog.warn(
+      { storedValue: storedValue.slice(0, 20) + "..." },
+      "DEPRECATED: Plaintext CLI auth token detected. Re-authenticate to upgrade to encrypted storage."
+    );
+    return true;
+  }
+  
+  return false;
+}
+
+/**
+ * Parse a CLI auth token to extract provider info
+ * Handles both encrypted and legacy plaintext formats
+ */
+export async function parseCLIAuthToken(
+  storedValue: string,
+  decryptFn: (ciphertext: string) => Promise<string>
+): Promise<{ provider: CLIAuthProvider; timestamp: number } | null> {
+  let decrypted: string;
+  
+  // Handle encrypted format
+  if (storedValue.startsWith("env:")) {
+    try {
+      decrypted = await decryptFn(storedValue);
+    } catch {
+      return null;
+    }
+  } else if (storedValue.startsWith("cli:")) {
+    // Legacy plaintext format
+    decrypted = storedValue;
+  } else {
+    return null;
+  }
+  
+  // Parse the marker: cli:provider:timestamp
+  const parts = decrypted.split(":");
+  if (parts.length < 2 || parts[0] !== "cli") {
+    return null;
+  }
+  
+  const provider = parts[1] as CLIAuthProvider;
+  if (!["gemini", "antigravity", "codex"].includes(provider)) {
+    return null;
+  }
+  
+  const timestamp = parts.length > 2 ? parseInt(parts[2], 10) : 0;
+  
+  return { provider, timestamp };
+}
+
+/**
+ * Migrate legacy plaintext CLI tokens to encrypted format
+ * Call this during startup to upgrade existing tokens
+ */
+export async function migrateCLIAuthTokens(
+  envVars: Record<string, string>,
+  encryptFn: (plaintext: string) => Promise<string>,
+  persistFn: (key: string, value: string) => void
+): Promise<number> {
+  let migrated = 0;
+  
+  const cliTokenPatterns = [
+    { key: "GOOGLE_AUTH_TOKEN", providers: ["gemini", "antigravity"] as CLIAuthProvider[] },
+    { key: "CODEX_AUTH_TOKEN", providers: ["codex"] as CLIAuthProvider[] },
+  ];
+  
+  for (const { key, providers } of cliTokenPatterns) {
+    const value = envVars[key];
+    if (!value) continue;
+    
+    // Check if it's a legacy plaintext token
+    if (value.startsWith("cli:") && !value.startsWith("cli:gemini:") && !value.startsWith("cli:antigravity:") && !value.startsWith("cli:codex:")) {
+      // This is a legacy format token, migrate it
+      const provider = value.split(":")[1] as CLIAuthProvider;
+      if (providers.includes(provider)) {
+        const encrypted = await createSecureCLIAuthToken(provider, encryptFn);
+        persistFn(key, encrypted);
+        migrated++;
+        toolLog.info({ key, provider }, "Migrated CLI auth token to encrypted format");
+      }
+    }
+  }
+  
+  return migrated;
+}

@@ -178,6 +178,27 @@ export {
   parseConfig,
 } from "./config";
 
+// ============== Mode System ==============
+export type {
+  UIMode,
+  ModeConfig,
+  UIModeConfig,
+  ModeContext,
+} from "./types/ModeTypes";
+
+export {
+  MODE_DISPLAY_NAMES,
+  MODE_DESCRIPTIONS,
+} from "./types/ModeTypes";
+
+export {
+  DEFAULT_BEGINNER_CONFIG,
+  DEFAULT_ADVANCED_CONFIG,
+  DEFAULT_UI_MODE_CONFIG,
+  BEGINNER_TOOL_WHITELIST,
+  BEGINNER_TOOL_BLACKLIST,
+} from "./config/ModeConfig";
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Backward Compatibility Re-exports
 // ─────────────────────────────────────────────────────────────────────────────
