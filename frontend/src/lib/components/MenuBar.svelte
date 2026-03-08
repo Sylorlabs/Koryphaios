@@ -123,11 +123,8 @@
     <!-- Left: App logo + menus -->
     <div class="flex items-center gap-1">
       <!-- App logo -->
-      <div class="flex items-center justify-center w-8 h-8 rounded-lg mr-1 shrink-0" style="background: linear-gradient(135deg, #1a1a1c 0%, #2a2a2e 100%); border: 1px solid var(--color-border);">
-        <svg width="18" height="18" viewBox="0 0 18 18" fill="none" xmlns="http://www.w3.org/2000/svg">
-          <polygon points="9,1 16.5,5 16.5,13 9,17 1.5,13 1.5,5" fill="#1a1a1c" stroke="#c9943a" stroke-width="1.2"/>
-          <text x="9" y="12.5" text-anchor="middle" font-family="Georgia,serif" font-size="9" font-weight="bold" fill="#d4a537">K</text>
-        </svg>
+      <div class="flex items-center justify-center w-8 h-8 rounded-lg mr-1 shrink-0">
+        <img src="/logo-64.png" alt="Koryphaios" width="28" height="28" class="rounded-md" />
       </div>
 
       <div class="flex items-center gap-1" data-top-menu>
