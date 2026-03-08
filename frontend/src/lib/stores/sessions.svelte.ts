@@ -28,10 +28,10 @@ async function fetchSessions(): Promise<boolean> {
       try {
         const body = text ? JSON.parse(text) : {};
         detail = body.detail ?? body.error ?? '';
-        if (detail) console.error('fetchSessions backend error:', detail);
+        if (detail && import.meta.env.DEV) console.error('fetchSessions backend error:', detail);
       } catch { /* ignore */ }
       if (!(res.status === 500 && !text.trim())) {
-        console.error('fetchSessions failed', { status: res.status, body: text || '(empty)' });
+        if (import.meta.env.DEV) console.error('fetchSessions failed', { status: res.status, body: text || '(empty)' });
       }
       toastStore.error(friendlyHttpError(res.status, 'load sessions'), { onRetry: () => void fetchSessions() });
       return false;
@@ -54,7 +54,7 @@ async function fetchSessions(): Promise<boolean> {
     }
     return false;
   } catch (err) {
-    console.error('fetchSessions exception', err);
+    if (import.meta.env.DEV) console.error('fetchSessions exception', err);
     toastStore.error('Failed to load sessions', { onRetry: () => void fetchSessions() });
     return false;
   }
@@ -134,7 +134,7 @@ async function deleteSession(id: string) {
     }
     toastStore.success('Session deleted');
   } catch (err) {
-    console.error('deleteSession exception:', err);
+    if (import.meta.env.DEV) console.error('deleteSession exception:', err);
     toastStore.error('Failed to delete session');
   }
 }

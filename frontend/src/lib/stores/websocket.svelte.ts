@@ -615,7 +615,7 @@ function connect(url?: string) {
             hasShownMalformedWsMessage = true;
             addClientError("Received malformed realtime update from server.");
           }
-          console.warn("Discarded malformed websocket payload", parsed);
+          if (import.meta.env.DEV) console.warn("Discarded malformed websocket payload", parsed);
           return;
         }
         handleMessage(parsed);
@@ -624,7 +624,7 @@ function connect(url?: string) {
           hasShownMalformedWsMessage = true;
           addClientError("Failed to parse realtime update from server.");
         }
-        console.warn("Failed to parse websocket message", error);
+        if (import.meta.env.DEV) console.warn("Failed to parse websocket message", error);
       }
     };
 
@@ -681,14 +681,14 @@ export async function loadProvidersFromApi(): Promise<void> {
   try {
     const res = await fetch(apiUrl("/api/providers"), { credentials: "include" });
     if (!res.ok) {
-      console.warn(`Failed to load providers: HTTP ${res.status}`);
+      if (import.meta.env.DEV) console.warn(`Failed to load providers: HTTP ${res.status}`);
       return;
     }
     const json = await res.json();
     const list = json?.data;
     if (Array.isArray(list)) providers = list;
   } catch (error) {
-    console.warn("Failed to load providers from API", error);
+    if (import.meta.env.DEV) console.warn("Failed to load providers from API", error);
   }
 }
 
@@ -704,7 +704,7 @@ function sendMessage(sessionId: string, content: string, model?: string, reasoni
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
     })
     .catch((error) => {
-      console.warn("Failed to send message", error);
+      if (import.meta.env.DEV) console.warn("Failed to send message", error);
       addClientError("Message send failed. Check your connection and retry.");
     });
 }

@@ -207,30 +207,27 @@ export async function createRefreshToken(userId: string): Promise<string> {
 export async function verifyRefreshToken(token: string): Promise<{ userId: string; newToken: string } | null> {
   const db = getDb();
 
-  // Get token record (with row-level locking for concurrency)
-  const row = db.query(
-    `SELECT user_id, expires_at, revoked FROM refresh_tokens WHERE token = ?`
-  ).get(token) as { user_id: string; expires_at: number; revoked: number } | null;
+  // Atomic token rotation: SELECT + revoke in a single transaction to prevent
+  // race conditions where two concurrent requests reuse the same token.
+  const row = db.transaction(() => {
+    const found = db.query(
+      `SELECT user_id, expires_at, revoked FROM refresh_tokens WHERE token = ?`
+    ).get(token) as { user_id: string; expires_at: number; revoked: number } | null;
+
+    if (!found || found.revoked || found.expires_at < Date.now()) {
+      return null;
+    }
+
+    db.run(`UPDATE refresh_tokens SET revoked = 1 WHERE token = ?`, [token]);
+    return found;
+  })();
 
   if (!row) {
-    authLog.warn({ tokenPrefix: token.slice(0, 8) }, "Refresh token not found");
+    authLog.warn({ tokenPrefix: token.slice(0, 8) }, "Refresh token invalid, revoked, or expired");
     return null;
   }
 
-  if (row.revoked) {
-    authLog.warn({ tokenPrefix: token.slice(0, 8) }, "Refresh token already revoked");
-    return null;
-  }
-
-  if (row.expires_at < Date.now()) {
-    authLog.warn({ tokenPrefix: token.slice(0, 8) }, "Refresh token expired");
-    return null;
-  }
-
-  // TOKEN ROTATION: Revoke old token, issue new one
-  db.run(`UPDATE refresh_tokens SET revoked = 1 WHERE token = ?`, [token]);
-
-  // Issue new refresh token
+  // Issue new refresh token (outside transaction — only one winner reaches here)
   const newToken = await createRefreshToken(row.user_id);
 
   authLog.info({
