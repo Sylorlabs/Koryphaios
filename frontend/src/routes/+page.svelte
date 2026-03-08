@@ -423,10 +423,7 @@
         style="height: var(--header-height); border-color: var(--color-border);"
       >
         <div class="flex items-center gap-3 min-w-0">
-          <div 
-            class="rounded-lg bg-gradient-to-br from-yellow-400 to-amber-600 flex items-center justify-center text-xs font-bold shrink-0" 
-            style="width: var(--size-7); height: var(--size-7); color: var(--color-surface-0);"
-          >K</div>
+          <img src="/logo-64.png" alt="Koryphaios" class="rounded-md shrink-0" style="width: var(--size-7); height: var(--size-7);" />
           <div class="flex flex-col justify-center min-w-0">
             <h1 class="text-sm font-semibold leading-tight" style="color: var(--color-text-primary);">Koryphaios</h1>
             <p class="leading-tight" style="font-size: var(--text-xs); color: var(--color-text-muted);">v0.1.0</p>
