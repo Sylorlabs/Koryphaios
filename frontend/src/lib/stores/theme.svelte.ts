@@ -1,6 +1,7 @@
 // Theme system — multiple presets, accent colors, fonts, Svelte 5 runes
 
 export type ThemePreset =
+  | 'kintsugi'
   | 'midnight'
   | 'nord'
   | 'dracula'
@@ -10,7 +11,7 @@ export type ThemePreset =
   | 'solarized'
   | 'light'
   | 'system';
-export type AccentColor = 'indigo' | 'cyan' | 'emerald' | 'amber' | 'rose' | 'violet';
+export type AccentColor = 'gold' | 'indigo' | 'cyan' | 'emerald' | 'amber' | 'rose' | 'violet';
 export type FontFamily = 'inter' | 'geist' | 'jetbrains';
 
 export interface ThemeConfig {
@@ -20,6 +21,18 @@ export interface ThemeConfig {
 }
 
 const THEME_PRESETS: Record<Exclude<ThemePreset, 'system'>, Record<string, string>> = {
+  kintsugi: {
+    '--color-surface-0': '#0D0B0A',
+    '--color-surface-1': '#141210',
+    '--color-surface-2': '#1C1917',
+    '--color-surface-3': '#262220',
+    '--color-surface-4': '#302B28',
+    '--color-border': 'rgba(213, 178, 97, 0.16)',
+    '--color-border-bright': 'rgba(213, 178, 97, 0.36)',
+    '--color-text-primary': '#F6EFE2',
+    '--color-text-secondary': 'rgba(214, 206, 192, 0.74)',
+    '--color-text-muted': 'rgba(214, 206, 192, 0.40)',
+  },
   midnight: {
     '--color-surface-0': '#0a0a0b',
     '--color-surface-1': '#111113',
@@ -119,6 +132,7 @@ const THEME_PRESETS: Record<Exclude<ThemePreset, 'system'>, Record<string, strin
 };
 
 const ACCENT_COLORS: Record<AccentColor, { main: string; hover: string }> = {
+  gold: { main: '#D5B261', hover: '#F3DDB0' },
   indigo: { main: '#6366f1', hover: '#818cf8' },
   cyan: { main: '#06b6d4', hover: '#22d3ee' },
   emerald: { main: '#10b981', hover: '#34d399' },
@@ -136,7 +150,7 @@ const FONT_FAMILIES: Record<FontFamily, string> = {
 import { browser } from '$app/environment';
 
 function createThemeStore() {
-  const defaults: ThemeConfig = { preset: 'midnight', accent: 'indigo', font: 'inter' };
+  const defaults: ThemeConfig = { preset: 'kintsugi', accent: 'gold', font: 'inter' };
 
   // Load from localStorage
   let savedConfig: ThemeConfig = defaults;
@@ -178,7 +192,7 @@ function createThemeStore() {
     if (browser && window.matchMedia('(prefers-color-scheme: light)').matches) {
       return 'light';
     }
-    return 'midnight';
+    return 'kintsugi';
   }
 
   function save() {
@@ -202,6 +216,7 @@ function createThemeStore() {
 
     get presets(): Array<{ id: ThemePreset; label: string }> {
       return [
+        { id: 'kintsugi', label: 'Kintsugi' },
         { id: 'midnight', label: 'Midnight' },
         { id: 'nord', label: 'Nord' },
         { id: 'dracula', label: 'Dracula' },
@@ -215,6 +230,7 @@ function createThemeStore() {
     },
     get accents(): Array<{ id: AccentColor; label: string; color: string }> {
       return [
+        { id: 'gold', label: 'Kintsugi Gold', color: '#D5B261' },
         { id: 'indigo', label: 'Indigo', color: '#6366f1' },
         { id: 'cyan', label: 'Cyan', color: '#06b6d4' },
         { id: 'emerald', label: 'Emerald', color: '#10b981' },
