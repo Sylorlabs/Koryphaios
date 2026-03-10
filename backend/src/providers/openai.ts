@@ -14,8 +14,9 @@ import {
   resolveModel,
   createGenericModel,
 } from "./types";
-import { withRetry } from "./utils";
+import { withRetry, withTimeoutSignal } from "./utils";
 import { createUsageInterceptingFetch } from "../credit-accountant";
+import { providerLog } from "../logger";
 
 export class OpenAIProvider implements Provider {
   protected _client: OpenAI | null = null;
@@ -129,10 +130,13 @@ export class OpenAIProvider implements Provider {
     };
 
     try {
+      // Apply 60-second hard timeout to prevent indefinite hangs
+      const timeoutSignal = withTimeoutSignal(request.signal, 60_000);
       const stream = await withRetry(() =>
         this.client.chat.completions.create(params, {
-          signal: request.signal,
-        })
+          signal: timeoutSignal,
+        }),
+        { providerName: this.name, modelName: request.model }
       );
 
       const toolCallBuffers = new Map<number, { id: string; name: string; args: string }>();
@@ -202,7 +206,18 @@ export class OpenAIProvider implements Provider {
       }
     } catch (err: any) {
       if (err.name === "AbortError" || err.name === "AbortSignal") return;
-      yield { type: "error", error: err.message ?? String(err) };
+      
+      // Log full error details for debugging
+      const errorDetail = {
+        message: err.message ?? String(err),
+        name: err.name,
+        status: err.status,
+        code: err.code,
+        type: err.type,
+      };
+      providerLog.error({ errorDetail, model: request.model, provider: this.name }, "OpenAI provider stream error");
+      
+      yield { type: "error", error: errorDetail.message };
     }
   }
 

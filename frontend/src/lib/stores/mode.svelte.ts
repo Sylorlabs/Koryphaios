@@ -51,12 +51,9 @@ function createModeStore() {
     isLoading: false,
   });
 
-  // Persist mode changes
-  $effect(() => {
-    if (typeof localStorage !== "undefined") {
-      localStorage.setItem(STORAGE_KEY, state.mode);
-    }
-  });
+  // Persist mode changes - using a derived-like pattern with getter
+  // Note: We can't use $effect here since this runs at module level, not component level
+  // The persistence is handled in the setMode function instead
 
   function getDefaultConfig(mode: UIMode): ModeConfig {
     if (mode === "beginner") {
@@ -134,6 +131,11 @@ function createModeStore() {
           mode: data.mode,
           config: data.config,
         };
+
+        // Persist to localStorage
+        if (typeof localStorage !== "undefined") {
+          localStorage.setItem(STORAGE_KEY, state.mode);
+        }
 
         toastStore.success(`Switched to ${MODE_DISPLAY_NAMES[mode]} mode`);
       } else {

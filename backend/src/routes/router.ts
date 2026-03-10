@@ -7,6 +7,9 @@ import { createProviderRoutes } from "./providers";
 import { createMessageRoutes } from "./messages";
 import { createGitRoutes } from "./git";
 import { createModeRoutes } from "./mode";
+import { createMemoryRoutes } from "./memory";
+import { createAgentSettingsRoutes } from "./agent-settings";
+import { createSpendRoutes } from "./spend";
 import { getCorsHeaders, validateSessionId } from "../security";
 import { RateLimiter } from "../security/rate-limit";
 import { RATE_LIMIT } from "../constants";
@@ -35,6 +38,9 @@ export class Router {
             ...createMessageRoutes(deps),
             ...createGitRoutes(deps),
             ...createModeRoutes(),
+            ...createMemoryRoutes(),
+            ...createAgentSettingsRoutes(),
+            ...createSpendRoutes(),
         ];
     }
 
@@ -146,7 +152,13 @@ export class Router {
 export function authMiddleware(): Middleware {
     return async (ctx: MiddlewareContext, next: () => Promise<Response>) => {
         // Skip auth for public routes
-        const publicPaths = ["/api/health", "/health/live", "/health/ready", "/api/auth/session"];
+        const publicPaths = [
+            "/api/health", 
+            "/health/live", 
+            "/health/ready", 
+            "/api/auth/session",
+            "/api/mode", // Mode switching should be accessible
+        ];
 
         if (publicPaths.some((p) => ctx.url.pathname === p || ctx.url.pathname.startsWith(p))) {
             return next();

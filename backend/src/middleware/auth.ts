@@ -1,169 +1,22 @@
 // Authentication middleware for Koryphaios
-// Supports local no-auth mode for development and token auth mode for hardened deployments.
+// NOTE: Koryphaios operates WITHOUT user accounts.
+// This file is retained for API key authentication (provider credentials) only.
 
-import type { User } from "../auth/types";
-import {
-  getOrCreateLocalUser,
-  verifyAccessToken,
-  getUserById,
-} from "../auth";
 import { authLog } from "../logger";
-import { validateCsrfToken } from "../security";
 
+// Empty interface - no user authentication
 export interface AuthenticatedRequest {
-  user: User;
-  token: string;
+  // No user context - Koryphaios doesn't use accounts
 }
 
+// Cookie names retained for backward compatibility but not used
 export const SESSION_COOKIE_NAME = "koryphaios_session";
 export const REFRESH_COOKIE_NAME = "koryphaios_refresh";
 
-type AuthMode = "local" | "token";
-
-function getAuthMode(): AuthMode {
-  const configured = process.env.KORYPHAIOS_AUTH_MODE?.toLowerCase();
-  if (configured === "local" || configured === "token") return configured;
-  return process.env.NODE_ENV === "production" ? "token" : "local";
-}
-
-function parseCookie(req: Request, name: string): string | null {
-  const raw = req.headers.get("cookie");
-  if (!raw) return null;
-
-  const parts = raw.split(";").map((p) => p.trim());
-  for (const part of parts) {
-    const idx = part.indexOf("=");
-    if (idx === -1) continue;
-    if (part.slice(0, idx) !== name) continue;
-    const value = part.slice(idx + 1);
-    try {
-      return decodeURIComponent(value);
-    } catch {
-      return value;
-    }
-  }
-  return null;
-}
-
-function getRequestToken(req: Request): string | null {
-  const bearer = extractBearerToken(req);
-  if (bearer) return bearer;
-  return extractSessionToken(req);
-}
-
 /**
- * Require authentication for a route handler.
- * Defaults to token auth in production and local user mode in development.
+ * Extract bearer token from Authorization header
+ * Used for provider API key authentication, not user auth
  */
-export async function requireAuth(req: Request): Promise<AuthenticatedRequest | { error: Response }> {
-  const mode = getAuthMode();
-
-  if (mode === "token") {
-    const token = getRequestToken(req);
-    if (!token) {
-      return {
-        error: new Response(
-          JSON.stringify({ ok: false, error: "Authentication required" }),
-          { status: 401, headers: { "Content-Type": "application/json" } }
-        ),
-      };
-    }
-
-    const payload = await verifyAccessToken(token);
-    if (!payload) {
-      return {
-        error: new Response(
-          JSON.stringify({ ok: false, error: "Invalid or expired token" }),
-          { status: 401, headers: { "Content-Type": "application/json" } }
-        ),
-      };
-    }
-
-    const user = getUserById(payload.sub);
-    if (!user) {
-      return {
-        error: new Response(
-          JSON.stringify({ ok: false, error: "User not found" }),
-          { status: 401, headers: { "Content-Type": "application/json" } }
-        ),
-      };
-    }
-
-    return { user, token };
-  }
-
-  try {
-    const user = await getOrCreateLocalUser();
-    return { user, token: "" };
-  } catch (err: any) {
-    authLog.error({ err }, "Local user resolution failed");
-    return {
-      error: new Response(
-        JSON.stringify({ ok: false, error: "Service unavailable (local user)" }),
-        { status: 503, headers: { "Content-Type": "application/json" } }
-      ),
-    };
-  }
-}
-
-/**
- * Require admin privileges.
- */
-export async function requireAdmin(req: Request): Promise<AuthenticatedRequest | { error: Response }> {
-  const auth = await requireAuth(req);
-  if ("error" in auth) return auth;
-  if (!auth.user.isAdmin) {
-    return {
-      error: new Response(
-        JSON.stringify({ ok: false, error: "Admin access required" }),
-        { status: 403, headers: { "Content-Type": "application/json" } }
-      ),
-    };
-  }
-  return auth;
-}
-
-/**
- * Optional authentication.
- */
-export async function optionalAuth(req: Request): Promise<AuthenticatedRequest | null> {
-  if (getAuthMode() === "token") {
-    const token = getRequestToken(req);
-    if (!token) return null;
-    const payload = await verifyAccessToken(token);
-    if (!payload) return null;
-    const user = getUserById(payload.sub);
-    if (!user) return null;
-    return { user, token };
-  }
-
-  try {
-    const user = await getOrCreateLocalUser();
-    return { user, token: "" };
-  } catch {
-    return null;
-  }
-}
-
-// Retained for WebSocket upgrade compatibility
-export async function getUserIdFromToken(token: string): Promise<string | null> {
-  if (getAuthMode() === "local") {
-    try {
-      const user = await getOrCreateLocalUser();
-      return user.id;
-    } catch {
-      return null;
-    }
-  }
-
-  const payload = await verifyAccessToken(token);
-  return payload?.sub ?? null;
-}
-
-export function extractSessionToken(req: Request): string | null {
-  return parseCookie(req, SESSION_COOKIE_NAME);
-}
-
 export function extractBearerToken(req: Request): string | null {
   const authHeader = req.headers.get("authorization");
   if (!authHeader) return null;
@@ -173,37 +26,52 @@ export function extractBearerToken(req: Request): string | null {
   return token.trim() || null;
 }
 
-/** @deprecated Use getOrCreateLocalUser directly in local mode */
-
-const CSRF_EXEMPT_PATHS = [
-  "/api/auth/login",
-  "/api/auth/register",
-  "/api/auth/refresh",
-];
+/**
+ * Extract session token from cookie
+ * NOTE: Not used - Koryphaios doesn't have user sessions
+ */
+export function extractSessionToken(req: Request): string | null {
+  return null;
+}
 
 /**
- * Validate CSRF token for state-changing requests (POST/PUT/DELETE/PATCH).
- * Uses double-submit cookie pattern: cookie value must match X-CSRF-Token header.
- * Skip for auth routes, WebSocket upgrades, and OPTIONS preflight.
+ * CSRF validation - NO LONGER NEEDED since there are no user sessions
+ * This function always returns null (no CSRF error)
  */
-export function requireCsrf(req: Request): Response | null {
-  const method = req.method.toUpperCase();
-  if (method === "OPTIONS" || method === "GET" || method === "HEAD") return null;
-
-  const url = new URL(req.url);
-  // Skip WebSocket upgrade path
-  if (url.pathname === "/ws") return null;
-  // Skip auth routes that establish the session/cookie
-  if (CSRF_EXEMPT_PATHS.some((p) => url.pathname === p)) return null;
-
-  const cookieToken = parseCookie(req, "kory_csrf");
-  const headerToken = req.headers.get("x-csrf-token");
-
-  if (!validateCsrfToken(cookieToken, headerToken)) {
-    return new Response(
-      JSON.stringify({ ok: false, error: "Invalid or missing CSRF token" }),
-      { status: 403, headers: { "Content-Type": "application/json" } }
-    );
-  }
+export function requireCsrf(_req: Request): Response | null {
+  // CSRF protection not needed - no user accounts
   return null;
+}
+
+/**
+ * getUserIdFromToken - Returns a fixed system ID
+ * Since there are no user accounts, all requests use a fixed "system" user ID
+ */
+export async function getUserIdFromToken(_token: string): Promise<string> {
+  return "system";
+}
+
+/**
+ * requireAuth - NO LONGER NEEDED
+ * Koryphaios doesn't require user authentication
+ * All endpoints are accessible without user login
+ */
+export async function requireAuth(_req: Request): Promise<AuthenticatedRequest> {
+  return {}; // No auth required
+}
+
+/**
+ * requireAdmin - NO LONGER NEEDED
+ * Koryphaios doesn't have user roles or admin privileges
+ */
+export async function requireAdmin(_req: Request): Promise<AuthenticatedRequest> {
+  return {}; // No admin check needed
+}
+
+/**
+ * optionalAuth - Returns empty context
+ * No user authentication in Koryphaios
+ */
+export async function optionalAuth(_req: Request): Promise<AuthenticatedRequest | null> {
+  return {}; // No user context
 }

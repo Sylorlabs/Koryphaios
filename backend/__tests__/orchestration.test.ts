@@ -7,6 +7,7 @@ import { ProviderRegistry } from "../src/providers";
 import { ToolRegistry, BashTool, ReadFileTool, WriteFileTool, GrepTool } from "../src/tools";
 import { SessionStore } from "../src/stores/session-store";
 import { MessageStore } from "../src/stores/message-store";
+import { initDb } from "../src/db/sqlite";
 import { join } from "node:path";
 import { mkdirSync, rmSync, existsSync, writeFileSync, readFileSync } from "node:fs";
 import type { KoryphaiosConfig } from "@koryphaios/shared";
@@ -38,6 +39,9 @@ beforeAll(() => {
   
   // Create test file
   writeFileSync(join(TEST_DIR, "test.txt"), "Hello, World!");
+  
+  // Initialize database first (required for stores)
+  initDb(TEST_DIR);
   
   // Initialize stores
   sessions = new SessionStore();

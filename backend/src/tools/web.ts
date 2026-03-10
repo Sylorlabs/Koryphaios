@@ -145,16 +145,32 @@ export class WebFetchTool implements Tool {
 
   /**
    * Fetch a URL following redirects manually, validating each hop for SSRF safety.
+   *
+   * SECURITY: Uses validated IPs directly to prevent DNS rebinding attacks.
+   * Replaces the hostname with the validated IP address and sets the Host header
+   * to ensure the request goes to the pre-validated IP only.
    */
   private async fetchWithSafeRedirects(url: string, signal?: AbortSignal): Promise<string> {
     let currentUrl = url;
     let hops = 0;
 
     while (hops < MAX_REDIRECTS) {
-      const resp = await fetch(currentUrl, {
+      // Validate URL and get validated IPs
+      const validation = await validateUrl(currentUrl);
+      if (!validation.safe) {
+        throw new Error(`URL validation failed: ${validation.reason}`);
+      }
+
+      // SECURITY: Use the validated IPs directly to prevent TOCTOU race
+      // If we have validated IPs, use the first one directly
+      const fetchUrl = this.buildIpBasedUrl(currentUrl, validation.validatedIps, validation.validatedHostname);
+
+      const resp = await fetch(fetchUrl, {
         headers: {
           "User-Agent": USER_AGENT,
           Accept: "text/html, application/json, text/plain, */*",
+          // Preserve original hostname for virtual hosting
+          ...(validation.validatedHostname && { "Host": validation.validatedHostname }),
         },
         signal,
         redirect: "manual", // Never auto-follow — we validate each hop
@@ -189,6 +205,35 @@ export class WebFetchTool implements Tool {
     }
 
     throw new Error(`Too many redirects (max ${MAX_REDIRECTS})`);
+  }
+
+  /**
+   * Build an IP-based URL to prevent DNS rebinding.
+   * If validated IPs are available, replace the hostname with the IP.
+   */
+  private buildIpBasedUrl(originalUrl: string, validatedIps?: string[], validatedHostname?: string): string {
+    // If no validated IPs available, return original URL (for literal IPs)
+    if (!validatedIps || validatedIps.length === 0) {
+      return originalUrl;
+    }
+
+    try {
+      const url = new URL(originalUrl);
+      const ip = validatedIps[0]; // Use first validated IP
+
+      // Determine if we need to change the hostname
+      // Only replace if the current hostname is not already an IP
+      const isAlreadyIp = /^[\d.]+$|^[\da-f:]+$/i.test(url.hostname);
+
+      if (!isAlreadyIp && validatedHostname) {
+        // Replace hostname with validated IP, preserve original hostname for Host header
+        url.hostname = ip;
+      }
+
+      return url.toString();
+    } catch {
+      return originalUrl;
+    }
   }
 }
 

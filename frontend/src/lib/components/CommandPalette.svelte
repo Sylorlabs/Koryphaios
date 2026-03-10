@@ -12,9 +12,12 @@
     Trash2,
     FileCode,
     FolderOpen,
-    Command
+    Command,
+    GitBranch,
+    Activity
   } from 'lucide-svelte';
   import { getModKeyName } from '$lib/utils/platform';
+  import { modeStore } from '$lib/stores/mode.svelte';
 
   let { 
     open = $bindable(false), 
@@ -35,9 +38,11 @@
     icon: any;
     shortcut?: string;
     category: string;
+    mode?: 'beginner' | 'advanced'; // If set, only show in that mode
   };
 
-  const actions: Action[] = [
+  const allActions: Action[] = [
+    // Always available
     { id: 'new_project', label: 'New Project', description: 'Create a new project workspace', icon: Plus, shortcut: 'P', category: 'Project' },
     { id: 'new_session', label: 'New Session', description: 'Start a fresh conversation', icon: Plus, shortcut: 'N', category: 'Session' },
     { id: 'open_project_file', label: 'Import Project', description: 'Load project from a local file', icon: FileCode, category: 'Project' },
@@ -50,13 +55,19 @@
     { id: 'toggle_yolo', label: 'Toggle YOLO Mode', description: 'Bypass all confirmation dialogs', icon: Zap, shortcut: 'Y', category: 'System' },
     { id: 'open_settings', label: 'Settings', description: 'Configure providers and preferences', icon: Settings, shortcut: ',', category: 'System' },
     { id: 'clear_feed', label: 'Clear Feed', description: 'Remove all messages from view', icon: Trash2, category: 'System' },
+    // Advanced only
+    { id: 'toggle_git', label: 'Toggle Source Control', description: 'Show or hide the Git panel', icon: GitBranch, category: 'View', mode: 'advanced' },
+    { id: 'toggle_agents', label: 'Toggle Active Agents', description: 'Show or hide the agents panel', icon: Activity, category: 'View', mode: 'advanced' },
   ];
 
+  // Filter actions based on current mode and search query
   let filteredActions = $derived(
-    actions.filter(a => 
-      a.label.toLowerCase().includes(query.toLowerCase()) || 
-      a.category.toLowerCase().includes(query.toLowerCase())
-    )
+    allActions
+      .filter(a => !a.mode || a.mode === modeStore.mode)
+      .filter(a => 
+        a.label.toLowerCase().includes(query.toLowerCase()) || 
+        a.category.toLowerCase().includes(query.toLowerCase())
+      )
   );
 
   $effect(() => {

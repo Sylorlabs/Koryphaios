@@ -108,7 +108,7 @@ export class SlackBridge {
       const userId = event.user;
       const channelId = event.channel;
 
-      if (!this.isAuthorized(channelId, userId)) {
+      if (!userId || !this.isAuthorized(channelId, userId)) {
         slackLog.warn({ userId, channelId }, "Blocked unauthorized mention");
         return;
       }
@@ -128,7 +128,7 @@ export class SlackBridge {
       // Only handle direct messages (no subtype = user message)
       if ("subtype" in event && event.subtype) return;
       if (!("channel_type" in event)) return;
-      if ((event as Record<string, unknown>).channel_type !== "im") return;
+      if ((event as unknown as Record<string, unknown>).channel_type !== "im") return;
 
       const userId = "user" in event ? (event.user as string) : undefined;
       if (!userId) return;

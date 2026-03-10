@@ -64,7 +64,7 @@ export const SetProviderCredentialsRequestSchema = z.object({
     baseUrl: z.string().url().max(500).optional(),
     selectedModels: z.array(z.string()).optional(),
     hideModelSelector: z.boolean().optional(),
-    authMode: z.enum(["api_key", "codex", "cli", "antigravity", "claude_code"]).optional(),
+    authMode: z.enum(["api_key", "codex", "cli", "claude_code"]).optional(),
 });
 
 /** Alias for SetProviderCredentialsRequestSchema (used by routes). */

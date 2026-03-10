@@ -161,36 +161,32 @@ See `config.example.json` for all available options.
 
 ### Development
 
-**IMPORTANT: This is a DESKTOP application, not a web app.** 
+**Koryphaios is a DESKTOP application only.** 
 
-For accurate testing (performance, platform quirks, native APIs), always use Tauri mode:
+The app runs as a native Tauri application for maximum performance and native API access:
 
 ```bash
-# Start Tauri desktop app (RECOMMENDED - tests real desktop behavior)
+# Start Tauri desktop app
 bun run dev
 
 # Or build and run the production desktop app
 bun run build:desktop
 ```
 
-**Why Tauri mode?**
-- Tests actual desktop performance (not browser)
-- Catches Windows/macOS/Linux platform quirks
-- Uses real native APIs (menus, system tray, file drop)
-- Tests CSP and security policies correctly
-- Catches Tauri-specific issues early
+**Why Desktop?**
+- Lightweight desktop wrapper via Tauri (~10MB vs ~150MB+ for Electron)
+- Uses the OS native WebView (WebKit/Blink) instead of bundled Chromium
+- Platform-native APIs (menus, system tray, file drop)
+- Local-first architecture — all data stays on your machine
+- Enhanced security with CSP policies
+- Cross-platform: Windows, macOS, Linux
 
-**Browser mode (faster but less accurate):**
-```bash
-# Only use for quick UI iteration
-bun run dev:web
-```
+**Architecture Note:** The app uses Tauri's WebView to render the SvelteKit frontend, with the backend running as a local HTTP server. For local-only communication, Tauri's `invoke()` API could be used instead of HTTP/WebSocket — this is a future optimization.
 
-**Individual components:**
+**Development commands:**
 ```bash
 bun run dev:backend   # Backend only on http://127.0.0.1:3000
-bun run dev:frontend  # Frontend only on http://localhost:5173
-bun run dev:desktop   # Tauri dev window
+bun run dev:desktop   # Tauri dev window with hot reload
 ```
 
 ### Production Build
@@ -240,13 +236,13 @@ bun run check:full
 - `POST /api/agents/cancel` — Cancel all running agents
 
 #### System
-- `GET /api/health` — Health check (no auth)
-- `GET /api/events` — SSE stream (same as WebSocket; **requires auth**: `?access_token=JWT` or `Authorization: Bearer JWT`)
-- `GET /metrics` — Prometheus metrics (**requires auth**: same as above)
+- `GET /api/health` — Health check
+- `GET /api/events` — SSE stream (same as WebSocket)
+- `GET /metrics` — Prometheus metrics (optional; requires `ENABLE_METRICS=true`)
 
 ### WebSocket Protocol
 
-Connect to `ws://localhost:3000/ws` for real-time updates. **Requires auth:** pass token in query (`?access_token=JWT`) or `Authorization: Bearer JWT` header.
+Connect to `ws://localhost:3000/ws` for real-time updates. No authentication required by default.
 
 **Message Format:**
 ```typescript
@@ -313,17 +309,19 @@ Koryphaios supports MCP servers for extensible tools. Configure in `koryphaios.j
 
 ### Authentication
 
-- All API routes (sessions, messages, providers, git, agents) require authentication (JWT or API key).
-- WebSocket connections require a valid token (query `access_token=` or `Authorization: Bearer`).
-- **Production** (`NODE_ENV=production`):
-  - **JWT_SECRET** (min 32 characters) is required; the server will not start without it.
-  - **CORS_ORIGINS**: Comma-separated list of allowed frontend origins (e.g. `https://app.example.com`). Defaults include localhost for dev; add production origins via env or `corsOrigins` in config.
-  - **ALLOW_REGISTRATION**: Set to `false` to disable public sign-up; only existing users or default admin can sign in.
-- Optional: set `CREATE_DEFAULT_ADMIN=true` on first run to create a default `admin` / `admin` user; set it to `false` and change the password immediately after.
+Koryphaios operates **without user accounts**. The system is designed for single-tenant usage where all functionality is available without requiring user registration or login.
+
+For **multi-user deployment** or to restrict API access:
+
+- Set `KORYPHAIOS_AUTH_MODE=token` to enable JWT-based API authentication
+- Configure `JWT_SECRET` (min 32 characters) for secure token generation
+- Set `CORS_ORIGINS` to a comma-separated list of allowed frontend origins (e.g., `https://app.example.com`)
+
+**Note**: User registration is **disabled by default**. Koryphaios does not include account management features.
 
 ### API Key Management
 
-- Keys are encrypted before persistence in `.env`
+- Provider API keys are encrypted before storage in `.env`
 - Runtime keys stored in memory only
 - Rate limiting: 120 requests/minute per IP
 - CORS enforced with origin allowlist

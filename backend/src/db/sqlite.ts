@@ -2,6 +2,7 @@ import { Database } from "bun:sqlite";
 import { join } from "path";
 import { mkdirSync } from "fs";
 import { serverLog } from "../logger";
+import { initSpendCapsTable } from "../security/spend-caps";
 
 let db: Database;
 
@@ -39,6 +40,7 @@ export function initDb(dataDir: string) {
       tokens_out INTEGER DEFAULT 0,
       total_cost REAL DEFAULT 0,
       workflow_state TEXT DEFAULT 'idle',
+      version INTEGER DEFAULT 1,
       created_at INTEGER,
       updated_at INTEGER
     )
@@ -47,6 +49,13 @@ export function initDb(dataDir: string) {
   // Add user_id if missing (migration for existing DBs)
   try {
     db.exec(`ALTER TABLE sessions ADD COLUMN user_id TEXT`);
+  } catch {
+    // Column already exists
+  }
+
+  // Add version column for optimistic locking (migration for existing DBs)
+  try {
+    db.exec(`ALTER TABLE sessions ADD COLUMN version INTEGER DEFAULT 1`);
   } catch {
     // Column already exists
   }
@@ -193,6 +202,9 @@ export function initDb(dataDir: string) {
   db.run(`CREATE INDEX IF NOT EXISTS idx_api_keys_user ON api_keys(user_id)`);
   db.run(`CREATE INDEX IF NOT EXISTS idx_audit_user ON audit_logs(user_id)`);
   db.run(`CREATE INDEX IF NOT EXISTS idx_audit_action ON audit_logs(action)`);
+
+  // Initialize spend caps table
+  initSpendCapsTable();
 
   serverLog.info({ dbPath }, "Database initialized (SQLite/WAL)");
 }

@@ -139,18 +139,84 @@
 
     wsStore.sendMessage(
       sessionId,
-      [
-        'Compact the session for context efficiency.',
-        'Return:',
-        '1) one short project summary,',
-        '2) current status,',
-        '3) key decisions,',
-        '4) open issues,',
-        '5) next actions.',
-        'Keep it concise and implementation-focused.',
-      ].join('\n')
+      `🎯 SESSION COMPACTION — CONTEXT PRESERVATION PROTOCOL
+
+Create a hyper-dense, information-rich summary that preserves ALL critical context while eliminating redundancy. This summary will replace the full conversation history, so completeness is paramount.
+
+## 📄 SESSION MEMORY FILE
+
+This session has a persistent memory file at:
+\`.koryphaios/sessions/${sessionId}/memory.md\`
+
+**CRITICAL: You MUST update this memory file during compaction.**
+
+### Memory File Purpose
+- Survives compactions (unlike chat history which gets replaced)
+- Stores long-term context: project goals, key decisions, gotchas, references
+- Acts as a "source of truth" that persists across the entire session lifecycle
+- Automatically deleted when the session is deleted
+
+### How to Update the Memory File
+Use the \`write_file\` tool to update the memory file with structured information:
+- Path: \`.koryphaios/sessions/${sessionId}/memory.md\`
+- Content: Organized markdown with sections for project context, learnings, decisions, gotchas
+
+---
+
+## OUTPUT FORMAT (Strictly follow this structure)
+
+### 📋 PROJECT BRIEF
+One sentence: What we're building and why it matters.
+
+### 🏗️ ARCHITECTURE & KEY DECISIONS
+- Decision: [What was decided]
+  - Rationale: [Why]
+  - Impact: [What it affects]
+  - Status: [Implemented/Pending/Abandoned]
+[Repeat for each significant decision]
+
+### 📁 FILES & CODE STATE
+| File | Status | Key Implementation Details |
+|------|--------|---------------------------|
+| [path] | [modified/created/deleted] | [Critical: functions, classes, APIs, config values] |
+
+### ✅ COMPLETED WORK
+- [Specific achievement with technical details]
+- [Include verification steps if applicable]
+
+### 🚧 ACTIVE WORK (In Progress)
+- [What's being worked on right now]
+- [Current blockers or dependencies]
+- [Next immediate step]
+
+### ⚠️ OPEN ISSUES & TECH DEBT
+- [Issue]: [Severity: Critical/High/Medium/Low] — [One-line description] — [Proposed fix or investigation path]
+
+### 🎯 NEXT ACTIONS (Priority Ordered)
+1. [ ] [Specific, actionable task] — [Estimated effort] — [Success criteria]
+2. [ ] [Next task...]
+
+### 🔗 CRITICAL CONTEXT TO PRESERVE
+- [Any non-obvious context, gotchas, or tribal knowledge that would be lost]
+- [Environment-specific details, API keys, config flags]
+- [Links to external resources, docs, or references]
+
+### 📊 CONFIDENCE & RISK
+- Overall confidence: [High/Medium/Low]
+- Biggest risk: [What could derail this]
+- Mitigation: [How we're addressing it]
+
+---
+RULES:
+- NO fluff, filler, or conversational language
+- EVERY sentence must contain actionable information
+- Preserve SPECIFIC values: file paths, function names, config keys, error messages
+- Flag UNCERTAINTY explicitly: "UNCERTAIN: [what needs verification]"
+- Include CODE SNIPPETS only if critical and brief (< 5 lines)
+- **MANDATORY: Update the memory file with key learnings and decisions**
+- **MANDATORY: Reference the memory file path in your response so the user knows it exists**`
     );
-    toastStore.info('Compaction request sent to manager');
+    toastStore.info('Session compaction in progress...');
   }
 
   async function handleSlashCommand(command: string): Promise<boolean> {

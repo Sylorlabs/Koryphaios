@@ -9,7 +9,7 @@ export interface ISessionStore {
   list(): Session[];
   listForUser(userId: string): Session[];
   getForUser(id: string, userId: string): Session | undefined;
-  update(id: string, updates: Partial<Session>): Session | undefined;
+  update(id: string, updates: Partial<Session>, expectedVersion?: number): Session | undefined;
   delete(id: string): void;
   deleteForUser(id: string, userId: string): void;
   clear(): void;
@@ -75,12 +75,13 @@ export class SessionStore implements ISessionStore {
       totalTokensIn: (row.tokens_in as number) ?? 0,
       totalTokensOut: (row.tokens_out as number) ?? 0,
       totalCost: (row.total_cost as number) ?? 0,
+      version: (row.version as number) ?? 1,
       createdAt: row.created_at as number,
       updatedAt: row.updated_at as number,
     };
   }
 
-  update(id: string, updates: Partial<Session>): Session | undefined {
+  update(id: string, updates: Partial<Session>, expectedVersion?: number): Session | undefined {
     const mapping: Record<string, string> = {
       title: "title",
       messageCount: "message_count",
@@ -90,15 +91,39 @@ export class SessionStore implements ISessionStore {
       updatedAt: "updated_at",
     };
 
-    const fields = Object.keys(updates).filter((k) => k !== "id" && k in mapping);
-    if (fields.length === 0) return this.get(id);
+    const fields = Object.keys(updates).filter((k) => k !== "id" && k !== "version" && k in mapping);
+    if (fields.length === 0 && expectedVersion === undefined) return this.get(id);
 
-    const sets = fields.map((f) => `${mapping[f]} = ?`).join(", ");
-    const values: unknown[] = fields.map((f) => (updates as Record<string, unknown>)[f]);
-    values.push(Date.now());
-    values.push(id);
+    const db = getDb();
+    const now = Date.now();
 
-    getDb().run(`UPDATE sessions SET ${sets}, updated_at = ? WHERE id = ?`, values as Parameters<ReturnType<typeof getDb>["run"]>[1]);
+    // Use optimistic locking if version is provided
+    if (expectedVersion !== undefined) {
+      const sets = fields.map((f) => `${mapping[f]} = ?`).join(", ");
+      const values: unknown[] = fields.map((f) => (updates as Record<string, unknown>)[f]);
+      values.push(now); // updated_at
+      values.push(expectedVersion + 1); // new version
+      values.push(id);
+      values.push(expectedVersion); // expected current version
+
+      const result = db.run(
+        `UPDATE sessions SET ${sets ? sets + ", " : ""}updated_at = ?, version = ? WHERE id = ? AND version = ?`,
+        values as Parameters<typeof db.run>[1]
+      );
+
+      if (result.changes === 0) {
+        throw new Error(`Concurrent modification detected: session ${id} was modified by another process`);
+      }
+    } else {
+      // No optimistic locking - just update
+      const sets = fields.map((f) => `${mapping[f]} = ?`).join(", ");
+      const values: unknown[] = fields.map((f) => (updates as Record<string, unknown>)[f]);
+      values.push(now);
+      values.push(id);
+
+      db.run(`UPDATE sessions SET ${sets}, updated_at = ? WHERE id = ?`, values as Parameters<typeof db.run>[1]);
+    }
+
     return this.get(id);
   }
 

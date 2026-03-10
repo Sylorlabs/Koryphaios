@@ -6,9 +6,16 @@ import { ConfigError } from "./errors";
 import { serverLog } from "./logger";
 import { resolveModel } from "./providers/types";
 
-/** Whether public registration is allowed. Set ALLOW_REGISTRATION=false in production to disable sign-up. */
+/**
+ * Whether public registration is allowed.
+ *
+ * NOTE: Koryphaios does NOT use accounts. Registration is disabled by default.
+ * The system operates without user accounts - all functionality is available
+ * without authentication.
+ */
 export function getAllowRegistration(): boolean {
-  return process.env.ALLOW_REGISTRATION !== "false";
+  // Registration is disabled by default - Koryphaios does not use accounts
+  return process.env.ALLOW_REGISTRATION === "true";
 }
 
 /**
@@ -239,6 +246,21 @@ export function validateConfig(config: Partial<KoryphaiosConfig>): void {
 export function validateEnvironment(): void {
   const warnings: string[] = [];
   const errors: string[] = [];
+
+  // CRITICAL: Validate JWT_SECRET at startup (fail fast for security)
+  const jwtSecret = process.env.JWT_SECRET;
+  if (!jwtSecret || typeof jwtSecret !== "string") {
+    errors.push(
+      "JWT_SECRET must be set in environment (min 64 characters). " +
+      "Set it in .env or environment. This is required in ALL environments. " +
+      "Generate one with: openssl rand -hex 32"
+    );
+  } else if (jwtSecret.trim().length < 64) {
+    errors.push(
+      `JWT_SECRET must be at least 64 characters (current: ${jwtSecret.trim().length}). ` +
+      "Use: openssl rand -hex 32 to generate a secure secret."
+    );
+  }
 
   // Check if at least one provider API key is set
   const providerKeys = [

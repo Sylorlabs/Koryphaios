@@ -68,6 +68,16 @@ export class LocalKMSProvider implements KMSProvider {
   }
 
   async initialize(): Promise<void> {
+    // SECURITY: Enforce external KMS in production
+    if (process.env.NODE_ENV === 'production' && !this.config.suppressWarning) {
+      throw new Error(
+        'Local KMS Provider is NOT allowed in production. ' +
+        'Please configure an external KMS provider (AWS KMS, Azure Key Vault, ' +
+        'HashiCorp Vault, GCP KMS, or Cloudflare KMS) by setting KORYPHAIOS_KMS_PROVIDER. ' +
+        'Set suppressWarning: true ONLY if you understand the security implications.'
+      );
+    }
+
     // Ensure data directory exists
     mkdirSync(this.config.dataDir, { recursive: true, mode: 0o700 });
 

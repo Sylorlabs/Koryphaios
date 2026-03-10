@@ -42,3 +42,4 @@ opencode-reference/
 
 # Koryphaios AI worktrees
 .trees/
+.keys

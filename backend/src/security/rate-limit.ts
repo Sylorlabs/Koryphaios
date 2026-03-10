@@ -112,8 +112,15 @@ export class RateLimiter {
 /**
  * Sliding window rate limiter using Redis sorted sets
  * Provides smooth rate limiting without the "burst at reset" problem
+ *
+ * SECURITY: Falls back to local in-memory limiting if Redis is unavailable
+ * to prevent DoS when external services fail.
  */
 export class SlidingWindowRateLimiter {
+  private fallbackLimiters = new Map<string, RateLimiter>();
+  private lastFailure = 0;
+  private FAILURE_BACKOFF_MS = 60_000; // Wait 1 minute before retrying Redis after failure
+
   constructor(private config: RateLimitConfig) {}
 
   async check(options: RateLimitOptions): Promise<RateLimitResult> {
@@ -158,16 +165,45 @@ export class SlidingWindowRateLimiter {
         };
       }
     } catch (err) {
-      serverLog.error({ err, key }, "Sliding window rate limiter failed");
+      serverLog.warn({ err, key }, "Redis rate limiter unavailable, using fallback");
 
-      // Fail open if Redis is unavailable
-      return {
-        allowed: true,
-        remaining: maxRequests,
-        resetAt: now + windowMs,
-        limit: maxRequests,
-      };
+      // SECURITY: Use fallback in-memory limiter instead of fail-open
+      // This prevents DoS when Redis is unavailable
+      return this.checkWithFallback(identifier, maxRequests, windowMs, now);
     }
+  }
+
+  /**
+   * Fallback in-memory rate limiting when Redis is unavailable.
+   * Uses a simple fixed-window algorithm per identifier.
+   */
+  private checkWithFallback(
+    identifier: string,
+    maxRequests: number,
+    windowMs: number,
+    now: number
+  ): RateLimitResult {
+    let limiter = this.fallbackLimiters.get(identifier);
+
+    if (!limiter) {
+      limiter = new RateLimiter(maxRequests, windowMs);
+      this.fallbackLimiters.set(identifier, limiter);
+    }
+
+    const result = limiter.check(identifier);
+
+    serverLog.debug(
+      { identifier, allowed: result.allowed, remaining: result.remaining },
+      "Fallback rate limiter used"
+    );
+
+    return {
+      allowed: result.allowed,
+      remaining: result.remaining,
+      resetAt: now + result.resetIn,
+      limit: maxRequests,
+      retryAfter: result.allowed ? undefined : Math.ceil(result.resetIn / 1000),
+    };
   }
 
   async reset(identifier: string): Promise<void> {
@@ -188,8 +224,13 @@ export class SlidingWindowRateLimiter {
 /**
  * Token bucket rate limiter using Redis
  * Good for API rate limiting with burst capacity
+ *
+ * SECURITY: Falls back to local in-memory limiting if Redis is unavailable
+ * to prevent DoS when external services fail.
  */
 export class TokenBucketRateLimiter {
+  private fallbackLimiters = new Map<string, RateLimiter>();
+
   constructor(
     private config: RateLimitConfig & {
       bucketSize?: number;
@@ -270,16 +311,40 @@ export class TokenBucketRateLimiter {
         limit: bucketSize,
       };
     } catch (err) {
-      serverLog.error({ err, key }, "Token bucket rate limiter failed");
+      serverLog.warn({ err, key }, "Redis token bucket limiter unavailable, using fallback");
 
-      // Fail open if Redis is unavailable
-      return {
-        allowed: true,
-        remaining: maxRequests,
-        resetAt: now + windowMs,
-        limit: maxRequests,
-      };
+      // SECURITY: Use fallback in-memory limiter instead of fail-open
+      const bucketSize = merged.bucketSize ?? maxRequests;
+      return this.checkWithFallback(identifier, bucketSize, windowMs, now);
     }
+  }
+
+  /**
+   * Fallback in-memory rate limiting when Redis is unavailable.
+   * Uses a simple fixed-window algorithm per identifier.
+   */
+  private checkWithFallback(
+    identifier: string,
+    maxRequests: number,
+    windowMs: number,
+    now: number
+  ): RateLimitResult {
+    let limiter = this.fallbackLimiters.get(identifier);
+
+    if (!limiter) {
+      limiter = new RateLimiter(maxRequests, windowMs);
+      this.fallbackLimiters.set(identifier, limiter);
+    }
+
+    const result = limiter.check(identifier);
+
+    return {
+      allowed: result.allowed,
+      remaining: result.remaining,
+      resetAt: now + result.resetIn,
+      limit: maxRequests,
+      retryAfter: result.allowed ? undefined : Math.ceil(result.resetIn / 1000),
+    };
   }
 
   async reset(identifier: string): Promise<void> {
@@ -300,8 +365,13 @@ export class TokenBucketRateLimiter {
 /**
  * Fixed window rate limiter using Redis
  * Simple and efficient, but can have burst-at-reset behavior
+ *
+ * SECURITY: Falls back to local in-memory limiting if Redis is unavailable
+ * to prevent DoS when external services fail.
  */
 export class FixedWindowRateLimiter {
+  private fallbackLimiters = new Map<string, RateLimiter>();
+
   constructor(private config: RateLimitConfig) {}
 
   async check(options: RateLimitOptions): Promise<RateLimitResult> {
@@ -340,16 +410,39 @@ export class FixedWindowRateLimiter {
         };
       }
     } catch (err) {
-      serverLog.error({ err, key }, "Fixed window rate limiter failed");
+      serverLog.warn({ err, key }, "Redis fixed window limiter unavailable, using fallback");
 
-      // Fail open if Redis is unavailable
-      return {
-        allowed: true,
-        remaining: maxRequests,
-        resetAt: (windowId + 1) * windowMs,
-        limit: maxRequests,
-      };
+      // SECURITY: Use fallback in-memory limiter instead of fail-open
+      return this.checkWithFallback(identifier, maxRequests, windowMs, now);
     }
+  }
+
+  /**
+   * Fallback in-memory rate limiting when Redis is unavailable.
+   * Uses a simple fixed-window algorithm per identifier.
+   */
+  private checkWithFallback(
+    identifier: string,
+    maxRequests: number,
+    windowMs: number,
+    now: number
+  ): RateLimitResult {
+    let limiter = this.fallbackLimiters.get(identifier);
+
+    if (!limiter) {
+      limiter = new RateLimiter(maxRequests, windowMs);
+      this.fallbackLimiters.set(identifier, limiter);
+    }
+
+    const result = limiter.check(identifier);
+
+    return {
+      allowed: result.allowed,
+      remaining: result.remaining,
+      resetAt: now + result.resetIn,
+      limit: maxRequests,
+      retryAfter: result.allowed ? undefined : Math.ceil(result.resetIn / 1000),
+    };
   }
 
   async reset(identifier: string): Promise<void> {

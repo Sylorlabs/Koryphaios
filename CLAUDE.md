@@ -10,10 +10,11 @@ time-travel undo/redo via git shadow logging. Frontend is SvelteKit with real-ti
 
 ## Dev commands
 ```bash
-bun run dev              # starts backend (:3000) + frontend (:5173) concurrently
-bun run dev:backend      # backend only
-bun run dev:frontend     # frontend only
+bun run dev              # starts Tauri desktop app (recommended)
+bun run dev:backend      # backend only (:3000)
+bun run dev:desktop      # Tauri dev mode
 bun run build            # build all workspaces
+bun run build:desktop    # build desktop app for distribution
 bun run check            # typecheck all
 bun run test             # backend tests (bun test)
 bun run test:all         # full test suite

@@ -53,7 +53,7 @@ export function createProviderRoutes(deps: RouteDependencies): RouteHandler[] {
                 const authMode = sanitizeString(body.authMode, 50);
 
                 // Handle CLI auth modes
-                if (authMode === "codex" || authMode === "cli" || authMode === "antigravity" || authMode === "claude_code") {
+                if (authMode === "codex" || authMode === "cli" || authMode === "claude_code") {
                     return handleCliAuth(providerName, authMode, providers, wsManager);
                 }
 
@@ -129,6 +129,80 @@ export function createProviderRoutes(deps: RouteDependencies): RouteHandler[] {
                 } satisfies WSMessage);
 
                 return json({ ok: true }, 200);
+            },
+        },
+
+        // POST /api/providers/:name/rotate — Rotate provider API key
+        {
+            path: /^\/api\/providers\/(?<name>[^/]+)\/rotate$/,
+            method: "POST",
+            handler: async (req, params, ctx) => {
+                const rawName = params.get("name");
+                const providerName = validateProviderName(rawName);
+                if (!providerName) {
+                    return json({ ok: false, error: "Invalid provider name" }, 400);
+                }
+
+                try {
+                    const body = await req.json();
+                    const { newApiKey, newAuthToken } = body;
+
+                    // Get the current credentials for comparison
+                    const currentStatus = await providers.getStatus();
+                    const currentProvider = currentStatus.find(p => p.name === providerName);
+
+                    if (!currentProvider) {
+                        return json({ ok: false, error: "Provider not found" }, 404);
+                    }
+
+                    // Validate that at least one new credential is provided
+                    if (!newApiKey && !newAuthToken) {
+                        return json({ ok: false, error: "Either newApiKey or newAuthToken is required" }, 400);
+                    }
+
+                    // Set the new credentials
+                    if (newApiKey) {
+                        providers.setCredentials(providerName as ProviderName, {
+                            apiKey: newApiKey,
+                        });
+                        persistEnvVar(
+                            PROJECT_ROOT,
+                            providers.getExpectedEnvVar(providerName as ProviderName, "apiKey"),
+                            await encryptForStorage(newApiKey)
+                        );
+                    }
+
+                    if (newAuthToken) {
+                        providers.setCredentials(providerName as ProviderName, {
+                            authToken: newAuthToken,
+                        });
+                        persistEnvVar(
+                            PROJECT_ROOT,
+                            providers.getExpectedEnvVar(providerName as ProviderName, "authToken"),
+                            await encryptForStorage(newAuthToken)
+                        );
+                    }
+
+                    serverLog.info({ provider: providerName }, "Provider API key rotated");
+
+                    wsManager.broadcast({
+                        type: "provider.status",
+                        payload: { providers: await providers.getStatus() },
+                        timestamp: Date.now(),
+                    } satisfies WSMessage);
+
+                    return json({
+                        ok: true,
+                        data: {
+                            provider: providerName,
+                            message: "API key rotated successfully",
+                            timestamp: new Date().toISOString(),
+                        },
+                    }, 200);
+                } catch (err: unknown) {
+                    const message = err instanceof Error ? err.message : String(err);
+                    return json({ ok: false, error: message ?? "Failed to rotate API key" }, 400);
+                }
             },
         },
 
@@ -263,18 +337,15 @@ async function handleCliAuth(
     wsManager: WSManager
 ): Promise<Response> {
     const targetProvider = authMode === "codex" ? "codex" : authMode === "claude_code" ? "anthropic" : "google";
-    // Antigravity is OAuth (no CLI). Others need the binary in PATH; use Bun.which for Windows.
-    if (authMode !== "antigravity") {
-        const cliName = authMode === "codex" ? "codex" : authMode === "claude_code" ? "claude" : "gcloud";
-        if (!Bun.which(cliName)) {
-            return json({ ok: false, error: `${cliName} CLI not found in PATH. Install it first.` }, 400);
-        }
+    const cliName = authMode === "codex" ? "codex" : authMode === "claude_code" ? "claude" : "gcloud";
+    if (!Bun.which(cliName)) {
+        return json({ ok: false, error: `${cliName} CLI not found in PATH. Install it first.` }, 400);
     }
 
-    const authValue = authMode === "antigravity" ? "cli:antigravity" : `cli:${authMode === "codex" ? "codex" : authMode === "claude_code" ? "claude" : "gcloud"}`;
+    const authValue = `cli:${authMode === "codex" ? "codex" : authMode === "claude_code" ? "claude" : "gcloud"}`;
     const verification = await providers.verifyConnection(targetProvider, { authToken: authValue });
     if (!verification.success) {
-        const msg = authMode === "antigravity" ? "Antigravity token not found or invalid" : (authMode === "codex" ? "codex" : authMode === "claude_code" ? "claude" : "gcloud") + " CLI auth failed";
+        const msg = (authMode === "codex" ? "codex" : authMode === "claude_code" ? "claude" : "gcloud") + " CLI auth failed";
         return json({ ok: false, error: verification.error || msg }, 400);
     }
 

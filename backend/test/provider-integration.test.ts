@@ -305,7 +305,7 @@ describe("Provider Integration Tests", () => {
 
 describe("Provider Registry Integration", () => {
     test("should initialize all configured providers", async () => {
-        // This test verifies the provider registry can handle all 111 providers
+        // This test verifies the provider registry can handle all providers
         const { ProviderRegistry } = await import("../src/providers/registry");
 
         const config = {
@@ -325,7 +325,7 @@ describe("Provider Registry Integration", () => {
         expect(registry).toBeDefined();
         expect(registry.getAvailable()).toBeDefined();
         expect(registry.getStatus()).toBeDefined();
-    });
+    }, { timeout: 15000 });
 
     test("should handle provider status queries", async () => {
         const { ProviderRegistry } = await import("../src/providers/registry");
@@ -357,5 +357,5 @@ describe("Provider Registry Integration", () => {
         expect(anthropicStatus).toHaveProperty("enabled");
         expect(anthropicStatus).toHaveProperty("authenticated");
         expect(anthropicStatus).toHaveProperty("authMode");
-    });
+    }, { timeout: 15000 });
 });

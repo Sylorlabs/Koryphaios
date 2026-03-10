@@ -152,6 +152,25 @@ export const DEFAULT_CONTEXT_PATHS: string[] = [
 ];
 
 /**
+ * Session Memory Configuration
+ * Persistent markdown files that survive compaction
+ */
+export const SESSION_MEMORY = {
+  /** Filename for session memory */
+  FILENAME: "memory.md",
+  /** Default character limit for memory excerpts in prompts */
+  MAX_EXCERPT_LENGTH: 4000,
+  /** Sections that can be updated */
+  SECTIONS: {
+    PROJECT_CONTEXT: "🎯 Project Context",
+    KEY_LEARNINGS: "📚 Key Learnings & Insights",
+    TECHNICAL_DECISIONS: "🔧 Technical Decisions",
+    GOTCHAS: "⚠️ Gotchas & Edge Cases",
+    REFERENCES: "🔗 References",
+  } as const,
+};
+
+/**
  * Logging
  */
 export const LOG = {

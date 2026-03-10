@@ -1,14 +1,12 @@
 {
   "name": "koryphaios",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "workspaces": ["backend", "frontend", "shared", "desktop"],
   "scripts": {
     "dev": "bun run scripts/dev.ts",
-    "dev:web": "bun run scripts/dev-web.ts",
     "dev:desktop": "bun run scripts/dev-desktop.ts",
     "dev:backend": "bun run --filter backend dev",
-    "dev:frontend": "bun run --filter frontend dev",
     "build": "bun run --filter '*' build",
     "build:desktop": "bun run scripts/build-desktop.ts",
     "build:desktop:windows": "scripts/build-desktop-windows.bat",

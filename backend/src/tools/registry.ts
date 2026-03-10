@@ -2,6 +2,7 @@
 // Ported from OpenCode's tools/tools.go pattern.
 
 import type { ChangeSummary } from "@koryphaios/shared";
+import { toolLog } from "../logger";
 
 export interface ToolContext {
   sessionId: string;
@@ -104,6 +105,15 @@ export class ToolRegistry {
       result.durationMs = performance.now() - start;
       return result;
     } catch (err: any) {
+      // Log full error details for debugging
+      toolLog.error({
+        err: err instanceof Error ? { message: err.message, stack: err.stack, name: err.name } : err,
+        toolName: call.name,
+        callId: call.id,
+        sessionId: ctx.sessionId,
+        durationMs: performance.now() - start,
+      }, "Tool execution failed");
+      
       return {
         callId: call.id,
         name: call.name,

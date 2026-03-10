@@ -6,6 +6,11 @@ import type { Tool, ToolContext, ToolCallInput, ToolCallOutput } from "./registr
 import { validateBashCommand } from "../security";
 import { toolLog } from "../logger";
 import { shellManager } from "./shell-manager";
+import {
+  buildCommandWithLimits,
+  validateResourceRequest,
+  AGENT_RESOURCE_LIMITS,
+} from "../security/resource-limits";
 
 const MAX_OUTPUT_BYTES = 512_000; // 512KB output limit per command
 
@@ -178,12 +183,15 @@ Network access via curl/wget is blocked unless explicitly authorized.`;
 
     toolLog.info({ command: command.slice(0, 200), cwd: requestedCwd, sandboxed: ctx.isSandboxed }, "Executing bash command");
 
+    // Apply resource limits to the command
+    const limitedCommand = buildCommandWithLimits(command, AGENT_RESOURCE_LIMITS);
+
     try {
-      const proc = Bun.spawn(["bash", "-c", command], {
+      const proc = Bun.spawn(["bash", "-c", limitedCommand], {
         cwd: requestedCwd,
         stdout: "pipe",
         stderr: "pipe",
-        env: { ...process.env, PATH: process.env.PATH }, 
+        env: { ...process.env, PATH: process.env.PATH },
       });
 
       const timeoutPromise = new Promise<never>((_, reject) =>

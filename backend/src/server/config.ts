@@ -35,6 +35,7 @@ import { MCPManager } from "../mcp";
 import { SessionStore } from "../stores/session-store";
 import { MessageStore } from "../stores/message-store";
 import { KoryManager } from "../kory/manager";
+import { applyModeIntegration } from "../kory/manager-mode-integration";
 import { WSManager } from "../ws/ws-manager";
 import { wsBroker } from "../pubsub";
 import { TelegramBridge, messagingGateway, Bot, TelegramAdapter } from "../messaging";
@@ -301,6 +302,10 @@ export class ServerConfigurator {
     config: KoryphaiosConfig
   ): KoryManager {
     const kory = new KoryManager(providers, tools, this.projectRoot, config, sessions, messages);
+    
+    // Apply mode integration (sets up GitManager for mode context)
+    applyModeIntegration(kory);
+    
     serverLog.info("Kory manager initialized");
     return kory;
   }

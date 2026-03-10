@@ -4,7 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "bun run --watch src/server.ts",
-    "build": "bun build src/server.ts --outdir=./build --target=bun",
+    "build": "bun run typecheck && bun build src/server.ts --outdir=./build --target=bun",
     "typecheck": "tsc --noEmit",
     "test": "SESSION_TOKEN_SECRET=${SESSION_TOKEN_SECRET:-test_only_not_for_production_aaaaaaaaaa} NODE_ENV=test bun test",
     "test:all": "SESSION_TOKEN_SECRET=${SESSION_TOKEN_SECRET:-test_only_not_for_production_aaaaaaaaaa} NODE_ENV=test bun test",

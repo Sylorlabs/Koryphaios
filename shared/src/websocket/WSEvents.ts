@@ -28,6 +28,8 @@ export type WSEventType =
   | "permission.response"
   // Provider status
   | "provider.status"
+  // Rate limiting
+  | "provider.rate_limit"
   // System
   | "system.error"
   | "system.info"
@@ -66,6 +68,9 @@ export type WSMessagePayload =
   | ToolCallPayload
   | StreamToolResultPayload
 
+  // Provider payloads
+  | RateLimitPayload
+
   // System payloads
   | ErrorPayload
   | NotificationPayload;
@@ -89,6 +94,7 @@ import type {
   ErrorPayload,
   NotificationPayload,
   KorySessionChangesPayload,
+  RateLimitPayload,
 } from "./WSPayloads";
 
 export type { ChangeSummary, StreamUsage } from "./WSPayloads";

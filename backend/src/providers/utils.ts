@@ -1,4 +1,6 @@
 import { providerLog } from "../logger";
+import { wsBroker } from "../pubsub";
+import type { WSMessage, RateLimitPayload } from "@koryphaios/shared";
 
 /**
  * Returns an AbortSignal that aborts when either the given signal aborts or a timeout elapses.
@@ -51,9 +53,13 @@ export interface RetryOptions {
   initialDelayMs?: number;
   jitterFactor?: number;
   shouldRetry?: (error: any) => boolean;
+  /** Provider name for rate limit notifications */
+  providerName?: string;
+  /** Model name for rate limit notifications */
+  modelName?: string;
 }
 
-const DEFAULT_OPTIONS: Required<RetryOptions> = {
+const DEFAULT_OPTIONS: Required<Omit<RetryOptions, "providerName" | "modelName">> & { providerName?: string; modelName?: string } = {
   maxRetries: 3,
   initialDelayMs: 1000,
   jitterFactor: 0.2,
@@ -132,15 +138,37 @@ export async function withRetry<T>(
         delayMs = Math.min(retryAfterMs, 30_000);
       }
 
+      const isRateLimit = error?.status === 429 || 
+        (error?.message?.toLowerCase().includes("rate limit")) ||
+        (error?.message?.toLowerCase().includes("quota"));
+
       providerLog.warn(
         { 
           attempt, 
           maxRetries: opts.maxRetries, 
           delayMs: Math.round(delayMs),
-          error: error.message 
+          error: error.message,
+          isRateLimit 
         },
         "Retrying operation due to error"
       );
+
+      // Emit rate limit event to WebSocket for UI notification
+      if (isRateLimit) {
+        const rateLimitPayload: RateLimitPayload = {
+          provider: (opts.providerName || "unknown") as any,
+          model: opts.modelName || "unknown",
+          retryAfterMs: Math.round(delayMs),
+          attempt,
+          maxRetries: opts.maxRetries,
+        };
+        const message: WSMessage<RateLimitPayload> = {
+          type: "provider.rate_limit",
+          payload: rateLimitPayload,
+          timestamp: Date.now(),
+        };
+        wsBroker.publish("custom", message);
+      }
 
       await new Promise((resolve) => setTimeout(resolve, delayMs));
     }

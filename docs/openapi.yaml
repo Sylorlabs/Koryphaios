@@ -2,29 +2,18 @@ openapi: 3.0.3
 info:
   title: Koryphaios API
   description: |
-    Koryphaios Model Hub API - Secure multi-tenant AI model management.
-    
-    ## Authentication
-    
-    The API supports two authentication methods:
-    
-    ### 1. JWT Authentication (Session-based)
-    Obtain a JWT token through the `/api/auth/login` endpoint and include it in the Authorization header:
+    Koryphaios AI Agent Orchestration API.
+
+    **Note:** Koryphaios operates **without user accounts**. All functionality is available
+    without authentication by default. For multi-user deployments, optional JWT-based
+    authentication can be enabled via `KORYPHAIOS_AUTH_MODE=token`.
+
+    ## Optional Authentication
+
+    When authentication is enabled, include the JWT token in the Authorization header:
     ```
     Authorization: Bearer <jwt_token>
     ```
-    
-    ### 2. API Key Authentication (Programmatic)
-    Create an API key through the `/api/v1/keys` endpoint and include it in the Authorization header:
-    ```
-    Authorization: Bearer <api_key>
-    ```
-    
-    API keys have scopes that determine what operations they can perform:
-    - `read`: Read operations
-    - `write`: Write operations (implies read)
-    - `admin`: Administrative operations (implies all)
-    - `provider:*`: Provider-specific operations
   version: 1.0.0
   contact:
     name: Koryphaios Support
@@ -33,210 +22,290 @@ info:
 servers:
   - url: http://localhost:3000
     description: Local development server
-  - url: https://api.koryphaios.com
-    description: Production server
-
-security:
-  - BearerAuth: []
 
 tags:
-  - name: Authentication
-    description: User authentication and session management
-  - name: Credentials
-    description: Secure storage of provider API keys
-  - name: API Keys
-    description: Programmatic access key management
-  - name: Audit
-    description: Security audit logging
+  - name: Sessions
+    description: Chat session management
+  - name: Messages
+    description: Send and retrieve messages
+  - name: Providers
+    description: AI provider configuration
+  - name: Agents
+    description: Agent status and control
+  - name: System
+    description: Health and monitoring
 
 paths:
   # ────────────────────────────────────────────────────────────────────────────
-  # Authentication
+  # Sessions
   # ────────────────────────────────────────────────────────────────────────────
-  
-  /api/auth/login:
-    post:
-      tags: [Authentication]
-      summary: Login with username and password
-      description: Authenticate and receive a JWT access token
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [username, password]
-              properties:
-                username:
-                  type: string
-                password:
-                  type: string
-                deviceId:
-                  type: string
-                  description: Optional device identifier
-      responses:
-        200:
-          description: Login successful
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  accessToken:
-                    type: string
-                  refreshToken:
-                    type: string
-                  expiresIn:
-                    type: integer
-        401:
-          description: Invalid credentials
 
-  /api/auth/register:
-    post:
-      tags: [Authentication]
-      summary: Register a new user
-      description: Create a new user account
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [username, password]
-              properties:
-                username:
-                  type: string
-                password:
-                  type: string
-      responses:
-        201:
-          description: User created successfully
-        409:
-          description: Username already exists
-
-  /api/auth/refresh:
-    post:
-      tags: [Authentication]
-      summary: Refresh access token
-      description: Get a new access token using a refresh token
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [refreshToken]
-              properties:
-                refreshToken:
-                  type: string
-      responses:
-        200:
-          description: New tokens issued
-        401:
-          description: Invalid refresh token
-
-  /api/auth/me:
+  /api/sessions:
     get:
-      tags: [Authentication]
-      summary: Get current user info
-      security:
-        - BearerAuth: []
+      tags: [Sessions]
+      summary: List all sessions
       responses:
         200:
-          description: User information
+          description: List of sessions
           content:
             application/json:
               schema:
                 type: object
                 properties:
-                  id:
-                    type: string
-                  username:
-                    type: string
-                  isAdmin:
-                    type: boolean
-
-  # ────────────────────────────────────────────────────────────────────────────
-  # Credentials
-  # ────────────────────────────────────────────────────────────────────────────
-  
-  /api/v1/credentials:
-    get:
-      tags: [Credentials]
-      summary: List credentials
-      description: Get all credentials for the authenticated user (metadata only, never returns plaintext)
-      security:
-        - BearerAuth: []
-      parameters:
-        - name: provider
-          in: query
-          schema:
-            type: string
-          description: Filter by provider
-        - name: isActive
-          in: query
-          schema:
-            type: boolean
-            default: true
-          description: Filter by active status
-      responses:
-        200:
-          description: List of credentials
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  credentials:
+                  sessions:
                     type: array
                     items:
-                      $ref: '#/components/schemas/CredentialMetadata'
-        401:
-          description: Unauthorized
-          
+                      $ref: '#/components/schemas/Session'
     post:
-      tags: [Credentials]
-      summary: Store a new credential
-      description: Encrypt and store a provider API key or token
-      security:
-        - BearerAuth: []
+      tags: [Sessions]
+      summary: Create a new session
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                title:
+                  type: string
+                  description: Optional session title
+      responses:
+        201:
+          description: Session created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Session'
+
+  /api/sessions/{id}:
+    get:
+      tags: [Sessions]
+      summary: Get session details
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        200:
+          description: Session details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Session'
+        404:
+          description: Session not found
+    delete:
+      tags: [Sessions]
+      summary: Delete a session
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        204:
+          description: Session deleted
+        404:
+          description: Session not found
+
+  # ────────────────────────────────────────────────────────────────────────────
+  # Messages
+  # ────────────────────────────────────────────────────────────────────────────
+
+  /api/messages:
+    post:
+      tags: [Messages]
+      summary: Send a message
+      description: Send a message to trigger AI agent processing
       requestBody:
         required: true
         content:
           application/json:
             schema:
               type: object
-              required: [provider, credential]
+              required: [sessionId, content]
               properties:
-                provider:
+                sessionId:
                   type: string
-                  enum: [openai, anthropic, google, xai, openrouter, groq, azure, bedrock, vertexai, ollama, local]
-                credential:
+                content:
                   type: string
-                  description: The API key or token to encrypt
-                metadata:
-                  type: object
-                  description: Optional metadata (name, environment, etc.)
+                model:
+                  type: string
+                  description: Optional model override
+                reasoningLevel:
+                  type: string
+                  description: Optional reasoning level
       responses:
-        201:
-          description: Credential stored successfully
+        200:
+          description: Message processed
           content:
             application/json:
               schema:
                 type: object
                 properties:
-                  id:
-                    type: string
-                  message:
+                  messageId:
                     type: string
         400:
           description: Invalid request
-        403:
-          description: Insufficient permissions
 
-  /api/v1/credentials/{id}:
+  # ────────────────────────────────────────────────────────────────────────────
+  # Providers
+  # ────────────────────────────────────────────────────────────────────────────
+
+  /api/providers:
     get:
-      tags: [Credentials]
+      tags: [Providers]
+      summary: List provider status
+      responses:
+        200:
+          description: List of providers and their status
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  providers:
+                    type: object
+                    additionalProperties:
+                      $ref: '#/components/schemas/ProviderStatus'
+
+  /api/providers/{name}:
+    put:
+      tags: [Providers]
+      summary: Configure provider credentials
+      parameters:
+        - name: name
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                apiKey:
+                  type: string
+                baseUrl:
+                  type: string
+      responses:
+        200:
+          description: Provider configured
+        400:
+          description: Invalid request
+    delete:
+      tags: [Providers]
+      summary: Remove provider credentials
+      parameters:
+        - name: name
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        204:
+          description: Credentials removed
+
+  # ────────────────────────────────────────────────────────────────────────────
+  # Agents
+  # ────────────────────────────────────────────────────────────────────────────
+
+  /api/agents/status:
+    get:
+      tags: [Agents]
+      summary: Get active agent status
+      responses:
+        200:
+          description: Agent status information
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  agents:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/AgentStatus'
+
+  /api/agents/cancel:
+    post:
+      tags: [Agents]
+      summary: Cancel all running agents
+      responses:
+        200:
+          description: Agents cancelled
+
+  # ────────────────────────────────────────────────────────────────────────────
+  # System
+  # ────────────────────────────────────────────────────────────────────────────
+
+  /api/health:
+    get:
+      tags: [System]
+      summary: Health check
+      responses:
+        200:
+          description: System is healthy
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    enum: [healthy]
+                  version:
+                    type: string
+
+components:
+  schemas:
+    Session:
+      type: object
+      properties:
+        id:
+          type: string
+        title:
+          type: string
+        messageCount:
+          type: integer
+        createdAt:
+          type: integer
+          format: int64
+        updatedAt:
+          type: integer
+          format: int64
+
+    ProviderStatus:
+      type: object
+      properties:
+        configured:
+          type: boolean
+        available:
+          type: boolean
+        models:
+          type: array
+          items:
+            type: string
+
+    AgentStatus:
+      type: object
+      properties:
+        id:
+          type: string
+        sessionId:
+          type: string
+        status:
+          type: string
+          enum: [pending, active, done, failed, interrupted]
+        domain:
+          type: string
+        model:
+          type: string
       summary: Get credential metadata
       description: Get metadata for a specific credential (does not return the encrypted value)
       security:

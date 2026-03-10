@@ -1,15 +1,13 @@
 # Disaster Recovery Guide
 
-This document provides comprehensive procedures for disaster recovery and business continuity for Koryphaios.
+This document provides procedures for data backup and recovery for Koryphaios Desktop.
 
 ## Table of Contents
 
 1. [Backup Strategy](#backup-strategy)
 2. [Recovery Procedures](#recovery-procedures)
 3. [Data Integrity](#data-integrity)
-4. [High Availability Setup](#high-availability-setup)
-5. [Monitoring and Alerting](#monitoring-and-alerting)
-6. [Testing Recovery Procedures](#testing-recovery-procedures)
+4. [Monitoring](#monitoring)
 
 ---
 
@@ -28,6 +26,7 @@ This document provides comprehensive procedures for disaster recovery and busine
 3. **Session Data**
    - `.koryphaios/memory/` - Agent memory and snapshots
    - `.koryphaios/sessions/` - Session backups (if enabled)
+   - `.koryphaios/universal/` - Universal memory
 
 4. **Git State**
    - `.koryphaios/git/` - Git integration state
@@ -36,18 +35,18 @@ This document provides comprehensive procedures for disaster recovery and busine
 
 | Data Type | Frequency | Retention |
 |-----------|-----------|-----------|
-| SQLite Database | Every 5 minutes | 30 days |
+| SQLite Database | Every session | 30 days |
 | Configuration | On change | 90 days |
 | Session Memory | Hourly | 7 days |
-| Full Backup | Daily | 90 days |
+| Full Backup | Weekly | 90 days |
 
 ### Automated Backup Script
 
 ```bash
 #!/bin/bash
-# backup.sh - Automated backup script
+# backup.sh - Automated backup script for Koryphaios Desktop
 
-BACKUP_DIR="/backups/koryphaios"
+BACKUP_DIR="$HOME/.koryphaios/backups"
 DATE=$(date +%Y%m%d_%H%M%S)
 DATA_DIR=".koryphaios"
 
@@ -66,6 +65,7 @@ cp .env "$BACKUP_DIR/$DATE/"
 # Backup memory and sessions
 cp -r "$DATA_DIR/memory" "$BACKUP_DIR/$DATE/" 2>/dev/null || true
 cp -r "$DATA_DIR/sessions" "$BACKUP_DIR/$DATE/" 2>/dev/null || true
+cp -r "$DATA_DIR/universal" "$BACKUP_DIR/$DATE/" 2>/dev/null || true
 
 # Compress backup
 tar -czf "$BACKUP_DIR/koryphaios_$DATE.tar.gz" -C "$BACKUP_DIR" "$DATE"
@@ -77,7 +77,7 @@ find "$BACKUP_DIR" -name "koryphaios_*.tar.gz" -mtime +30 -delete
 echo "Backup completed: koryphaios_$DATE.tar.gz"
 ```
 
-### Cloud Storage Integration
+### Cloud Storage Integration (Optional)
 
 #### AWS S3
 ```bash
@@ -101,18 +101,16 @@ gsutil cp "$BACKUP_DIR/koryphaios_$DATE.tar.gz" \
 
 #### From Backup
 ```bash
-# Stop the server
-bun run stop
+# Close Koryphaios app first
 
 # Restore database
-cp /backups/koryphaios/koryphaios_20240101_120000.tar.gz /tmp/
+cp /path/to/backup/koryphaios_20240101_120000.tar.gz /tmp/
 cd /tmp
 tar -xzf koryphaios_20240101_120000.tar.gz
 cp koryphaios_20240101_120000/koryphaios.db ~/.koryphaios/
 cp koryphaios_20240101_120000/koryphaios.db-wal ~/.koryphaios/ 2>/dev/null || true
 
-# Restart server
-bun run dev
+# Restart Koryphaios
 ```
 
 #### WAL Recovery
@@ -125,8 +123,8 @@ sqlite3 ~/.koryphaios/koryphaios.db "PRAGMA wal_checkpoint(TRUNCATE);"
 
 ```bash
 # Restore configuration
-cp /backups/koryphaios/latest/koryphaios.json ./koryphaios.json
-cp /backups/koryphaios/latest/.env ./.env
+cp /path/to/backup/koryphaios.json ./koryphaios.json
+cp /path/to/backup/.env ./.env
 
 # Verify configuration
 bun run check
@@ -136,15 +134,16 @@ bun run check
 
 ```bash
 # Restore session memory
-cp -r /backups/koryphaios/latest/memory ~/.koryphaios/
-cp -r /backups/koryphaios/latest/sessions ~/.koryphaios/
+cp -r /path/to/backup/memory ~/.koryphaios/
+cp -r /path/to/backup/sessions ~/.koryphaios/
+cp -r /path/to/backup/universal ~/.koryphaios/
 ```
 
-### Complete System Recovery
+### Complete Recovery
 
 ```bash
 #!/bin/bash
-# restore.sh - Complete system restore
+# restore.sh - Complete restore for Koryphaios Desktop
 
 BACKUP_FILE=$1
 
@@ -153,9 +152,7 @@ if [ -z "$BACKUP_FILE" ]; then
   exit 1
 fi
 
-# Stop all services
-bun run stop || true
-docker-compose down || true
+# Close Koryphaios first
 
 # Extract backup
 TEMP_DIR=$(mktemp -d)
@@ -168,13 +165,12 @@ cp "$TEMP_DIR"/*/koryphaios.json ./koryphaios.json
 cp "$TEMP_DIR"/*/.env ./.env
 cp -r "$TEMP_DIR"/*/memory ~/.koryphaios/ 2>/dev/null || true
 cp -r "$TEMP_DIR"/*/sessions ~/.koryphaios/ 2>/dev/null || true
+cp -r "$TEMP_DIR"/*/universal ~/.koryphaios/ 2>/dev/null || true
 
 # Clean up
 rm -rf "$TEMP_DIR"
 
-# Restart services
-bun run dev
-
+# Restart Koryphaios
 echo "Restore completed successfully"
 ```
 
@@ -279,115 +275,20 @@ export async function validateSessions(): Promise<number> {
 
 ---
 
-## High Availability Setup
+## Monitoring
 
-### Redis Cluster for Distributed State
-
-```yaml
-# docker-compose.yml with Redis
-version: '3.8'
-
-services:
-  koryphaios:
-    image: koryphaios:latest
-    environment:
-      - REDIS_ENABLED=true
-      - REDIS_HOST=redis
-      - REDIS_PORT=6379
-    depends_on:
-      - redis
-    restart: unless-stopped
-
-  redis:
-    image: redis:7-alpine
-    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD}
-    volumes:
-      - redis_data:/data
-    restart: unless-stopped
-
-  redis-sentinel:
-    image: redis:7-alpine
-    command: redis-sentinel /etc/redis/sentinel.conf
-    volumes:
-      - ./redis/sentinel.conf:/etc/redis/sentinel.conf
-    depends_on:
-      - redis
-    restart: unless-stopped
-
-volumes:
-  redis_data:
-```
-
-### Load Balancer Configuration
-
-```nginx
-# nginx.conf - Load balancer configuration
-upstream koryphaios_backend {
-    least_conn;
-    server koryphaios-1:3000 max_fails=3 fail_timeout=30s;
-    server koryphaios-2:3000 max_fails=3 fail_timeout=30s;
-    server koryphaios-3:3000 max_fails=3 fail_timeout=30s;
-}
-
-server {
-    listen 80;
-    server_name koryphaios.example.com;
-
-    location / {
-        proxy_pass http://koryphaios_backend;
-        proxy_http_version 1.1;
-        proxy_set_header Upgrade $http_upgrade;
-        proxy_set_header Connection "upgrade";
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-        
-        # WebSocket timeout
-        proxy_read_timeout 86400;
-    }
-}
-```
-
-### Database Replication
-
-For production, consider migrating from SQLite to PostgreSQL with replication:
-
-```typescript
-// Migration to PostgreSQL
-import { Pool } from 'pg';
-
-const pool = new Pool({
-  host: process.env.PG_HOST,
-  port: parseInt(process.env.PG_PORT || '5432'),
-  database: process.env.PG_DATABASE,
-  user: process.env.PG_USER,
-  password: process.env.PG_PASSWORD,
-  max: 20,
-  idleTimeoutMillis: 30000,
-  connectionTimeoutMillis: 2000,
-});
-```
-
----
-
-## Monitoring and Alerting
-
-### Health Check Endpoints
+### Health Check
 
 ```typescript
 // backend/src/routes/health.ts
 import { Hono } from "hono";
 import { getDb } from "../db/sqlite";
-import { getRedis } from "../state/redis-client";
 
 const app = new Hono();
 
 app.get("/health", async (c) => {
   const checks = {
     database: false,
-    redis: false,
-    providers: false,
     diskSpace: false,
   };
 
@@ -397,17 +298,6 @@ app.get("/health", async (c) => {
     checks.database = true;
   } catch (error) {
     // Database check failed
-  }
-
-  // Check Redis
-  try {
-    const redis = getRedis();
-    if (redis) {
-      await redis.ping();
-      checks.redis = true;
-    }
-  } catch (error) {
-    // Redis check failed
   }
 
   // Check disk space
@@ -427,47 +317,12 @@ app.get("/health", async (c) => {
 export default app;
 ```
 
-### Alerting Rules
+### Log Files
 
-```yaml
-# prometheus/alerts.yml
-groups:
-  - name: koryphaios
-    interval: 30s
-    rules:
-      - alert: HighErrorRate
-        expr: rate(http_requests_total{status=~"5.."}[5m]) > 0.05
-        for: 5m
-        labels:
-          severity: critical
-        annotations:
-          summary: "High error rate detected"
-          description: "Error rate is {{ $value }} errors/sec"
-
-      - alert: DatabaseConnectionFailed
-        expr: koryphaios_database_up == 0
-        for: 1m
-        labels:
-          severity: critical
-        annotations:
-          summary: "Database connection failed"
-
-      - alert: RedisConnectionFailed
-        expr: koryphaios_redis_up == 0
-        for: 1m
-        labels:
-          severity: warning
-        annotations:
-          summary: "Redis connection failed"
-
-      - alert: DiskSpaceLow
-        expr: koryphaios_disk_free_percent < 10
-        for: 5m
-        labels:
-          severity: warning
-        annotations:
-          summary: "Disk space is low"
-```
+Koryphaios logs are stored in:
+- **macOS**: `~/Library/Logs/Koryphaios/`
+- **Windows**: `%APPDATA%\Koryphaios\logs\`
+- **Linux**: `~/.config/Koryphaios/logs/`
 
 ---
 
@@ -475,12 +330,11 @@ groups:
 
 ### Regular Testing Schedule
 
-| Test Type | Frequency | Owner |
+| Test Type | Frequency | Notes |
 |-----------|-----------|-------|
-| Backup Verification | Daily | Automated |
-| Database Restore Test | Weekly | DevOps |
-| Full Disaster Recovery | Monthly | DevOps |
-| Failover Test | Quarterly | DevOps |
+| Backup Verification | Weekly | Verify backup files are created |
+| Database Restore Test | Monthly | Test restoring from backup |
+| Full Recovery | Quarterly | Complete app recovery test |
 
 ### Test Checklist
 
@@ -489,55 +343,15 @@ groups:
 - [ ] Restore database from backup
 - [ ] Verify configuration restoration
 - [ ] Test session data recovery
-- [ ] Verify all services start correctly
+- [ ] Verify app starts correctly
 - [ ] Run health checks
-- [ ] Test with sample requests
 - [ ] Document any issues found
 - [ ] Update recovery procedures if needed
-
-### Test Results Template
-
-```markdown
-# Disaster Recovery Test - [Date]
-
-## Test Summary
-- **Date:** [Date]
-- **Tester:** [Name]
-- **Test Type:** [Backup/Database/Full]
-- **Result:** [Pass/Fail]
-
-## Test Steps
-1. [Step 1]
-2. [Step 2]
-...
-
-## Issues Found
-- [Issue 1]
-- [Issue 2]
-
-## Recommendations
-- [Recommendation 1]
-- [Recommendation 2]
-
-## Next Test Date
-[Date]
-```
-
----
-
-## Emergency Contacts
-
-| Role | Name | Email | Phone |
-|------|------|-------|-------|
-| Primary DevOps | | | |
-| Secondary DevOps | | | |
-| Database Admin | | | |
-| System Admin | | | |
 
 ---
 
 ## Related Documentation
 
-- [Deployment Guide](./DEPLOYMENT.md)
-- [Architecture](./ARCHITECTURE.md)
-- [Troubleshooting](./TROUBLESHOOTING.md)
+- [BUILD.md](../BUILD.md) - Building the desktop app
+- [TROUBLESHOOTING.md](./TROUBLESHOOTING.md) - Common issues
+- [desktop/README.md](../desktop/README.md) - Desktop app details

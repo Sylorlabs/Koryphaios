@@ -18,6 +18,8 @@ export { SnapshotManager } from "./snapshot-manager";
 export * as CriticUtil from "./critic-util";
 export { UserInputHandler } from "./user-input-handler";
 export { ShadowLogger, ShadowLoggerError } from "./shadow-logger";
+export { AutoCommitService, AutoCommitError } from "./auto-commit-service";
 
 export type { WorktreeInfo, WorktreeStatus } from "./workspace-manager";
 export type { GhostCommit, GhostCommitMetadata, TimelineEntry } from "./shadow-logger";
+export type { AutoCommitResult, PRResult } from "./auto-commit-service";

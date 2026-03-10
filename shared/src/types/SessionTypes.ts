@@ -13,6 +13,7 @@ export interface Session {
   totalTokensIn: number;
   totalTokensOut: number;
   totalCost: number;
+  version?: number; // For optimistic locking
   createdAt: number;
   updatedAt: number;
 }

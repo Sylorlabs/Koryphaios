@@ -1,17 +1,14 @@
 #!/usr/bin/env bun
 /**
- * Main dev launcher - runs Tauri desktop mode by default
+ * Main dev launcher - runs Tauri desktop mode
  * 
- * This is the RECOMMENDED way to develop because:
- * - Tests actual desktop performance (not browser)
+ * This is the standard way to develop Koryphaios Desktop:
+ * - Tests actual desktop performance
  * - Catches platform-specific quirks (Windows, macOS, Linux)
- * - Uses real Tauri APIs (not mocks)
+ * - Uses real Tauri APIs
  * - Tests CSP and security policies correctly
  * 
  * Usage: bun run dev
- * 
- * For browser-only development (faster but less accurate):
- *   bun run dev:web
  */
 
 const processes: Bun.Subprocess[] = [];
@@ -45,16 +42,13 @@ console.log("══════════════════════�
 console.log("  KORYPHAIOS DESKTOP DEV MODE");
 console.log("═══════════════════════════════════════════════════════════");
 console.log("");
-console.log("  Running Tauri desktop app (recommended for testing)");
+console.log("  Running Tauri desktop app");
 console.log("");
-console.log("  Why Tauri mode?");
-console.log("  ✓ Tests actual desktop performance");
-console.log("  ✓ Catches Windows/macOS/Linux quirks");
-console.log("  ✓ Uses real native APIs");
-console.log("  ✓ Tests CSP and security correctly");
-console.log("");
-console.log("  For browser-only mode (faster, less accurate):");
-console.log("    bun run dev:web");
+console.log("  Features:");
+console.log("  ✓ Native desktop performance");
+console.log("  ✓ Cross-platform: Windows, macOS, Linux");
+console.log("  ✓ Real native APIs (file system, notifications)");
+console.log("  ✓ Local-first architecture");
 console.log("");
 console.log("═══════════════════════════════════════════════════════════");
 console.log("");
