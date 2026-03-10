@@ -2,6 +2,8 @@
 	import '../app.css';
 	import { onMount } from 'svelte';
 	import { loadProvidersFromApi } from '$lib/stores/websocket.svelte';
+	import { initUrls } from '$lib/utils/api-url';
+	import UpdateDialog from '$lib/components/UpdateDialog.svelte';
 
 	let { children } = $props();
 	let showInitialLoad = $state(true);
@@ -9,6 +11,7 @@
 
 	onMount(() => {
 		import('$lib/utils/error-monitor').then((m) => m.initErrorMonitoring()).catch(() => {});
+		initUrls(); // Initialize backend URLs for desktop app
 		loadProvidersFromApi();
 		const t = setTimeout(() => { showInitialLoad = false; }, 1500);
 
@@ -46,6 +49,9 @@
 	<main id="main-content">
 		{@render children()}
 	</main>
+	
+	<!-- Update Dialog - only shown when update is available -->
+	<UpdateDialog />
 </div>
 
 <style>

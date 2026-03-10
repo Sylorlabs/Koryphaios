@@ -119,6 +119,7 @@ export type {
   KoryVerificationPayload,
   ProviderStatusPayload,
   ProviderInfo,
+  RateLimitPayload,
 } from "./websocket/WSPayloads";
 
 // ============== REST API Types ==============

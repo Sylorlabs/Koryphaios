@@ -1,20 +1,16 @@
 // @ts-nocheck
 /**
  * API v1 Routes - Production Ready
- * 
+ *
  * Unified route handlers with:
  * - Rate limiting
  * - Input validation (Zod)
  * - Metrics collection
- * - Comprehensive audit logging
  * - Request ID propagation
  * - Security headers
  */
 
-import { createApiKeyService } from "../../apikeys/service";
 import { createUserCredentialsService } from "../../services/user-credentials";
-import { createAuditLogService } from "../../services/audit";
-import { getOrCreateLocalUser } from "../../auth/auth";
 import { serverLog } from "../../logger";
 import { initializeRedis, getRedisClient } from "../../redis/client";
 import { SlidingWindowRateLimiter, TokenBucketRateLimiter, getTierConfig } from "../../security/rate-limit";
@@ -26,37 +22,24 @@ import {
   UpdateCredentialSchema,
   DeleteCredentialSchema,
   RotateCredentialSchema,
-  CreateApiKeySchema,
-  UpdateApiKeySchema,
-  QueryAuditSchema,
-  SuspiciousActivitySchema,
 } from "../../validation/schemas";
 import {
   getMetricsRegistry,
   recordRateLimitHit,
   recordRateLimitAllowed,
   recordCredentialOperation,
-  recordAuditEvent,
   httpMetricsMiddleware,
 } from "../../metrics";
 import { getReconciliation } from "../../credit-accountant";
 
 // Services initialized lazily (after DB is ready in server main())
-let _apiKeyService: ReturnType<typeof createApiKeyService> | null = null;
 let _credentialsService: ReturnType<typeof createUserCredentialsService> | null = null;
-let _auditService: ReturnType<typeof createAuditLogService> | null = null;
-function getApiKeyService() {
-  if (!_apiKeyService) _apiKeyService = createApiKeyService();
-  return _apiKeyService;
-}
+
 function getCredentialsService() {
   if (!_credentialsService) _credentialsService = createUserCredentialsService();
   return _credentialsService;
 }
-function getAuditService() {
-  if (!_auditService) _auditService = createAuditLogService();
-  return _auditService;
-}
+
 const metrics = getMetricsRegistry();
 
 // Rate limiters (initialized lazily)
@@ -982,8 +965,6 @@ export async function handleV1Routes(
     // Try each handler in order
     const handlers = [
       handleCredentials,
-      handleApiKeys,
-      handleAudit,
       handleBilling,
     ];
 

@@ -4,6 +4,7 @@ use tauri::{
     Manager, WindowEvent, Emitter, WebviewWindow, Listener,
 };
 use std::sync::Mutex;
+use tauri_plugin_updater::UpdaterExt;
 
 mod config;
 mod error;
@@ -65,6 +66,77 @@ fn minimize_to_tray(window: WebviewWindow, app_handle: tauri::AppHandle) {
         let _ = save_window_state(&app_handle, state);
     }
     let _ = window.hide();
+}
+
+#[tauri::command]
+async fn minimize_window_cmd(window: WebviewWindow) {
+    let _ = window.minimize();
+}
+
+#[tauri::command]
+async fn toggle_maximize(window: WebviewWindow) {
+    let is_maximized = window.is_maximized().unwrap_or(false);
+    if is_maximized {
+        let _ = window.unmaximize();
+    } else {
+        let _ = window.maximize();
+    }
+}
+
+#[tauri::command]
+async fn close_window_cmd(window: WebviewWindow) {
+    let _ = window.close();
+}
+
+// Update check result
+#[derive(serde::Serialize, Clone)]
+struct UpdateCheckResult {
+    available: bool,
+    version: Option<String>,
+    notes: Option<String>,
+    pub_date: Option<String>,
+}
+
+// Check for updates command
+#[tauri::command]
+async fn check_for_updates(app: tauri::AppHandle) -> Result<UpdateCheckResult, String> {
+    let updater = app.updater().map_err(|e| e.to_string())?;
+    
+    match updater.check().await {
+        Ok(Some(update)) => {
+            Ok(UpdateCheckResult {
+                available: true,
+                version: Some(update.version.clone()),
+                notes: Some(update.body.clone().unwrap_or_default()),
+                pub_date: update.date.map(|d| d.to_string()),
+            })
+        }
+        Ok(None) => {
+            Ok(UpdateCheckResult {
+                available: false,
+                version: None,
+                notes: None,
+                pub_date: None,
+            })
+        }
+        Err(e) => Err(e.to_string()),
+    }
+}
+
+// Install update command
+#[tauri::command]
+async fn install_update(app: tauri::AppHandle) -> Result<(), String> {
+    let updater = app.updater().map_err(|e| e.to_string())?;
+    
+    match updater.check().await {
+        Ok(Some(update)) => {
+            update.download_and_install(|_, _| {}, || {}).await
+                .map_err(|e| e.to_string())?;
+            Ok(())
+        }
+        Ok(None) => Err("No update available".to_string()),
+        Err(e) => Err(e.to_string()),
+    }
 }
 
 fn window_state(window: &WebviewWindow) -> AppResult<WindowState> {
@@ -285,21 +357,29 @@ pub fn run() {
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_notification::init())
+        .plugin(tauri_plugin_updater::init())
         .setup(|app| {
-            // Set up native menu bar
-            match create_native_menu(app.handle()) {
-                Ok(menu) => {
-                    if let Err(e) = app.set_menu(menu) {
-                        log_error("menu setup", &e);
+            // NOTE: Native menu bar is disabled for frameless window mode.
+            // Koryphaios provides its own custom menu bar in the frontend.
+            // The native menu is only created on macOS where it's expected,
+            // but hidden on Linux/Windows for a cleaner frameless experience.
+            #[cfg(target_os = "macos")]
+            {
+                match create_native_menu(app.handle()) {
+                    Ok(menu) => {
+                        if let Err(e) = app.set_menu(menu) {
+                            log_error("menu setup", &e);
+                        }
                     }
-                }
-                Err(e) => {
-                    log_error("menu creation", &e);
-                    eprintln!("[Koryphaios] Warning: Failed to create native menu: {}", e);
+                    Err(e) => {
+                        log_error("menu creation", &e);
+                        eprintln!("[Koryphaios] Warning: Failed to create native menu: {}", e);
+                    }
                 }
             }
             
-            // Set up menu event handler
+            // Set up menu event handler (macOS only)
+            #[cfg(target_os = "macos")]
             app.on_menu_event(|app, event| {
                 match event.id.as_ref() {
                     "new_session" => {
@@ -406,6 +486,11 @@ pub fn run() {
             show_main_window,
             toggle_fullscreen,
             minimize_to_tray,
+            minimize_window_cmd,
+            toggle_maximize,
+            close_window_cmd,
+            check_for_updates,
+            install_update,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Koryphaios desktop app");

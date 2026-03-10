@@ -3,6 +3,28 @@ import { join } from "node:path";
 import { homedir } from "node:os";
 import { spawnSync } from "bun";
 
+// Cache for token detection results to avoid repeated slow operations
+const tokenCache = new Map<string, { result: string | null; timestamp: number }>();
+const TOKEN_CACHE_TTL_MS = 30_000; // 30 seconds
+
+function getCachedToken(key: string, detector: () => string | null): string | null {
+  const cached = tokenCache.get(key);
+  const now = Date.now();
+  if (cached && (now - cached.timestamp) < TOKEN_CACHE_TTL_MS) {
+    return cached.result;
+  }
+  const result = detector();
+  tokenCache.set(key, { result, timestamp: now });
+  return result;
+}
+
+/**
+ * Clear all token detection caches. Useful for testing.
+ */
+export function clearTokenCache(): void {
+  tokenCache.clear();
+}
+
 /**
  * Robust, cross-platform config directory resolution.
  * Mirrors OpenCode's internal/config/config.go logic.
@@ -21,12 +43,17 @@ export function getConfigDir(): string {
  * Detects GitHub Copilot tokens from official 'gh' CLI or standard locations.
  */
 export function detectCopilotToken(): string | null {
+  return getCachedToken("copilot", () => {
   if (process.env.GITHUB_TOKEN) return process.env.GITHUB_TOKEN;
   if (process.env.GITHUB_COPILOT_TOKEN) return process.env.GITHUB_COPILOT_TOKEN;
 
-  // 1. Try 'gh' CLI (Semantic Auth)
+  // 1. Try 'gh' CLI (Semantic Auth) - with short timeout to avoid blocking
   try {
-    const gh = spawnSync(["gh", "auth", "token"], { stdout: "pipe", stderr: "pipe" });
+    const gh = spawnSync(["gh", "auth", "token"], { 
+      stdout: "pipe", 
+      stderr: "pipe",
+      timeout: 1000 // 1 second timeout to avoid blocking tests
+    });
     if (gh.exitCode === 0) {
       const token = gh.stdout.toString().trim();
       if (token) return token;
@@ -54,43 +81,50 @@ export function detectCopilotToken(): string | null {
     }
   }
   return null;
+  });
 }
 
 /**
  * Detects Claude Code (Anthropic) session tokens using 'claude' CLI or files.
  */
 export function detectClaudeCodeToken(): string | null {
-  // 1. Try 'claude status' (Semantic Auth)
-  // Claude Code CLI stores credentials internally; 'status' tells us if we're logged in.
-  // Note: We might need to parse JSON if they support --json
-  try {
-    const status = spawnSync(["claude", "status", "--json"], { stdout: "pipe", stderr: "pipe" });
-    if (status.exitCode === 0) {
-      try {
-        const data = JSON.parse(status.stdout.toString());
-        if (data?.loggedIn && data?.oauthToken) return data.oauthToken;
-      } catch { /* Expected: status output may not be valid JSON */ }
-    }
-  } catch { /* Expected: claude CLI may not be installed */ }
-
-  // 2. Fallback to file-based
-  const paths = [
-    join(homedir(), ".claude", ".credentials.json"),
-    join(homedir(), ".claude", "settings.json"),
-  ];
-
-  for (const p of paths) {
-    if (!existsSync(p)) continue;
+  return getCachedToken("claude", () => {
+    // 1. Try 'claude status' (Semantic Auth) - with short timeout to avoid blocking
+    // Claude Code CLI stores credentials internally; 'status' tells us if we're logged in.
+    // Note: We might need to parse JSON if they support --json
     try {
-      const data = JSON.parse(readFileSync(p, "utf-8"));
-      if (data?.oauth_token) return data.oauth_token;
-      if (data?.authToken) return data.authToken;
-      if (data?.env?.ANTHROPIC_AUTH_TOKEN) return data.env.ANTHROPIC_AUTH_TOKEN;
-    } catch {
-      continue;
+      const status = spawnSync(["claude", "status", "--json"], { 
+        stdout: "pipe", 
+        stderr: "pipe",
+        timeout: 1000 // 1 second timeout to avoid blocking tests
+      });
+      if (status.exitCode === 0) {
+        try {
+          const data = JSON.parse(status.stdout.toString());
+          if (data?.loggedIn && data?.oauthToken) return data.oauthToken;
+        } catch { /* Expected: status output may not be valid JSON */ }
+      }
+    } catch { /* Expected: claude CLI may not be installed */ }
+
+    // 2. Fallback to file-based
+    const paths = [
+      join(homedir(), ".claude", ".credentials.json"),
+      join(homedir(), ".claude", "settings.json"),
+    ];
+
+    for (const p of paths) {
+      if (!existsSync(p)) continue;
+      try {
+        const data = JSON.parse(readFileSync(p, "utf-8"));
+        if (data?.oauth_token) return data.oauth_token;
+        if (data?.authToken) return data.authToken;
+        if (data?.env?.ANTHROPIC_AUTH_TOKEN) return data.env.ANTHROPIC_AUTH_TOKEN;
+      } catch {
+        continue;
+      }
     }
-  }
-  return process.env.CLAUDE_CODE_OAUTH_TOKEN || process.env.ANTHROPIC_AUTH_TOKEN || null;
+    return process.env.CLAUDE_CODE_OAUTH_TOKEN || process.env.ANTHROPIC_AUTH_TOKEN || null;
+  });
 }
 
 /**
@@ -118,56 +152,56 @@ export function detectCodexToken(): string | null {
 
 /**
  * Detects Gemini CLI auth state (Google AI Studio / Gemini CLI only).
- * Does NOT touch gcloud, Application Default Credentials, or any GCP-wide credentials —
- * those belong to Vertex AI which requires explicit configuration.
+ * Also checks for gcloud Application Default Credentials (ADC) as a fallback.
  */
 export function detectGeminiCLIToken(): string | null {
-  // Only look for Gemini-specific OAuth credentials (not gcloud ADC or GCP credentials)
-  const geminiCredsPath = join(homedir(), ".gemini", "oauth_creds.json");
-  if (existsSync(geminiCredsPath)) {
-    try {
-      const data = JSON.parse(readFileSync(geminiCredsPath, "utf-8"));
-      if (data?.access_token) return data.access_token;
-      if (data?.tokens?.access_token) return data.tokens.access_token;
-      if (data?.accessToken) return data.accessToken;
-      return "cli:detected";
-    } catch { /* Expected: creds file may be malformed or inaccessible */ }
-  }
-  return process.env.GOOGLE_CLI_TOKEN || null;
-}
-
-/**
- * Detects Antigravity (Google internal portal) tokens.
- */
-export function detectAntigravityToken(): string | null {
-  const paths = [
-    join(homedir(), ".gemini", "antigravity", "token.json"),
-    join(homedir(), ".local", "share", "opencode", "antigravity-accounts.json"),
-    join(getConfigDir(), "Antigravity", "User", "globalStorage", "storage.json"),
-    join(homedir(), ".antigravity", "User", "globalStorage", "storage.json"),
-  ];
-
-  for (const p of paths) {
-    if (!existsSync(p)) continue;
-    try {
-      const data = JSON.parse(readFileSync(p, "utf-8"));
-      if (data?.token) return data.token;
-      if (data?.access_token) return data.access_token;
-
-      // opencode-antigravity-auth format (antigravity-accounts.json)
-      if (Array.isArray(data?.accounts) && data.accounts.length > 0) {
-        const activeAccount = data.accounts[data.activeIndex ?? 0];
-        if (activeAccount?.refreshToken) return activeAccount.refreshToken;
-      }
-
-      if (data?.["antigravityUnifiedStateSync.oauthToken"]) {
-        return data["antigravityUnifiedStateSync.oauthToken"];
-      }
-    } catch {
-      continue;
+  return getCachedToken("gemini", () => {
+    // 1. Check for Gemini-specific OAuth credentials first
+    const geminiCredsPath = join(homedir(), ".gemini", "oauth_creds.json");
+    if (existsSync(geminiCredsPath)) {
+      try {
+        const data = JSON.parse(readFileSync(geminiCredsPath, "utf-8"));
+        if (data?.access_token) return data.access_token;
+        if (data?.tokens?.access_token) return data.tokens.access_token;
+        if (data?.accessToken) return data.accessToken;
+        return "cli:detected";
+      } catch { /* Expected: creds file may be malformed or inaccessible */ }
     }
-  }
-  return process.env.ANTIGRAVITY_TOKEN || null;
+
+    // 2. Check for gcloud Application Default Credentials (ADC)
+    // Try to get an access token from gcloud CLI
+    try {
+      const gcloud = spawnSync(["gcloud", "auth", "application-default", "print-access-token"], {
+        stdout: "pipe",
+        stderr: "pipe",
+        timeout: 2000 // 2 second timeout to avoid blocking tests
+      });
+      if (gcloud.exitCode === 0) {
+        const token = gcloud.stdout.toString().trim();
+        if (token) return `gcloud-adc:${token}`;
+      }
+    } catch { /* Expected: gcloud CLI may not be installed */ }
+
+    // 3. Check for ADC credentials file directly
+    const adcPaths = [
+      process.env.GOOGLE_APPLICATION_CREDENTIALS,
+      join(homedir(), ".config", "gcloud", "application_default_credentials.json"),
+      join(homedir(), ".config", "gcloud", "credentials.json"),
+    ].filter(Boolean) as string[];
+
+    for (const adcPath of adcPaths) {
+      if (!adcPath || !existsSync(adcPath)) continue;
+      try {
+        const data = JSON.parse(readFileSync(adcPath, "utf-8"));
+        // ADC file has client_id, client_secret, refresh_token, type="authorized_user"
+        if (data?.type === "authorized_user" || data?.refresh_token || data?.client_id) {
+          return "gcloud-adc:detected";
+        }
+      } catch { /* Expected: creds file may be malformed or inaccessible */ }
+    }
+
+    return process.env.GOOGLE_CLI_TOKEN || null;
+  });
 }
 
 /**

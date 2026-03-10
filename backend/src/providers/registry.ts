@@ -328,8 +328,15 @@ class ProviderRegistry {
       const extraAuthModes = name === "google"
         ? [
             { id: "api_key", label: "API key", description: "Use a Gemini API key from Google AI Studio" },
-            { id: "cli", label: "Gemini CLI", description: "Use existing Gemini CLI session or sign in in browser" },
-            { id: "antigravity", label: "Antigravity", description: "Sign in with Google (Antigravity) in browser" },
+            { id: "cli", label: "Gemini CLI (Experimental)", description: "Requires gemini CLI installed and authenticated. May break without notice." },
+          ]
+        : name === "cline"
+        ? [
+            { id: "auth", label: "Cline CLI (Experimental)", description: "Requires cline CLI installed and authenticated. May break without notice." },
+          ]
+        : name === "codex"
+        ? [
+            { id: "auth", label: "Codex CLI (Experimental)", description: "Requires codex CLI installed and authenticated. May break without notice." },
           ]
         : undefined;
 
@@ -526,7 +533,7 @@ class ProviderRegistry {
         case "google": {
           if (authToken?.startsWith("cli:") || (!apiKey && !authToken)) {
             if (!Bun.which("gemini")) {
-              return { success: false, error: "gemini CLI not found in PATH" };
+              return { success: false, error: "Gemini CLI not found in PATH. This is an experimental feature - install the Gemini CLI and authenticate, or use an API key instead." };
             }
             return { success: true };
           }
@@ -625,13 +632,13 @@ class ProviderRegistry {
           return { success: true };
         case "codex": {
           if (Bun.which("codex") === null) {
-            return { success: false, error: "codex CLI not found in PATH. Run: npm install -g codex (or install the Codex CLI)" };
+            return { success: false, error: "Codex CLI not found in PATH. This is an experimental feature - install the Codex CLI and authenticate, or use OpenAI provider with an API key instead." };
           }
           return { success: true };
         }
         case "cline": {
           if (Bun.which("cline") === null) {
-            return { success: false, error: "cline CLI not found in PATH. Run: npm install -g cline" };
+            return { success: false, error: "Cline CLI not found in PATH. This is an experimental feature - install the Cline CLI and authenticate, or use another provider with an API key instead." };
           }
           return { success: true };
         }

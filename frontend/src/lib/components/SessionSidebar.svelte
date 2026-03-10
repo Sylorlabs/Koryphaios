@@ -30,7 +30,12 @@
   // Whenever the store's active session changes, sync and load its feed (including when + creates a new session)
   $effect(() => {
     const activeId = sessionStore.activeSessionId;
-    if (!activeId) return;
+    if (!activeId) {
+      // Clear feed when no active session (e.g., all sessions deleted)
+      wsStore.clearFeed();
+      lastLoadedSessionId = '';
+      return;
+    }
     if (activeId !== currentSessionId) currentSessionId = activeId;
     if (activeId === lastLoadedSessionId) return;
     lastLoadedSessionId = activeId;

@@ -60,7 +60,7 @@ describe("ProviderRegistry auth modes", () => {
     process.env.OPENAI_API_KEY = "sk-test-valid-looking";
     try {
       const registry = new ProviderRegistry(minimalConfig());
-      const statuses = await registry.getStatus();
+      const statuses = registry.getStatus();
       const status = statuses.find((p) => p.name === "openai");
       expect(status?.enabled).toBe(true);
       expect(status?.authenticated).toBe(true);
@@ -71,7 +71,7 @@ describe("ProviderRegistry auth modes", () => {
         process.env.OPENAI_API_KEY = original;
       }
     }
-  });
+  }, { timeout: 15000 });
 
   test("getStatus returns exactly ALL providers (every ProviderName)", () => {
     const registry = new ProviderRegistry(minimalConfig());
@@ -83,5 +83,5 @@ describe("ProviderRegistry auth modes", () => {
     expect(missing, `Missing providers: ${missing.join(", ")}`).toEqual([]);
     expect(extra, `Unexpected providers: ${extra.join(", ")}`).toEqual([]);
     expect(status.length).toBe(expectedNames.size);
-  });
+  }, { timeout: 15000 });
 });

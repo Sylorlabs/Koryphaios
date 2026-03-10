@@ -12,7 +12,7 @@ import type { UIMode } from "@koryphaios/shared";
 import { z } from "zod";
 
 interface Context {
-  request: Request;
+  req: Request;
   params: Map<string, string>;
 }
 
@@ -47,7 +47,7 @@ export async function getMode(ctx: Context): Promise<Response> {
  * Set the UI mode
  */
 export async function setMode(ctx: Context): Promise<Response> {
-  const body = await ctx.request.json();
+  const body = await ctx.req.json();
   const parsed = SetModeSchema.safeParse(body);
   
   if (!parsed.success) {
@@ -108,21 +108,21 @@ export function createModeRoutes(): RouteHandler[] {
       method: "GET",
       path: "/api/mode",
       handler: async (req, params, ctx) => {
-        return getMode({ request: req, params, ...ctx } as Context);
+        return getMode({ req, params, ...ctx } as Context);
       },
     },
     {
       method: "PUT",
       path: "/api/mode",
       handler: async (req, params, ctx) => {
-        return setMode({ request: req, params, ...ctx } as Context);
+        return setMode({ req, params, ...ctx } as Context);
       },
     },
     {
       method: "POST",
       path: "/api/mode/toggle",
       handler: async (req, params, ctx) => {
-        return toggleMode({ request: req, params, ...ctx } as Context);
+        return toggleMode({ req, params, ...ctx } as Context);
       },
     },
   ];

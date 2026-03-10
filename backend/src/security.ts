@@ -81,6 +81,11 @@ export function validateBashCommand(command: string): { safe: boolean; reason?: 
 
 // ─── SSRF Prevention ────────────────────────────────────────────────────────
 
+// Cache for validated URLs to prevent DNS rebinding attacks
+// Maps hostname -> { ips: string[], timestamp: number }
+const validatedHostCache = new Map<string, { ips: string[]; timestamp: number }>();
+const DNS_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
+
 /**
  * Validate a URL is safe to fetch — blocks SSRF, file://, and private network access.
  *
@@ -89,11 +94,19 @@ export function validateBashCommand(command: string): { safe: boolean; reason?: 
  *  2. Protocol must be http: or https:
  *  3. Hostname must not be localhost or resolve to a private/loopback IP
  *  4. IPv6 private ranges blocked (::1, fc00::/7, fe80::/10)
- *  5. DNS rebinding protection with caching
+ *  5. DNS rebinding protection: resolved IPs are cached and must match on subsequent requests
  *
  * Fail-closed: if DNS resolution fails, the URL is considered unsafe.
+ * 
+ * SECURITY NOTE: This function returns validated IPs that MUST be used with fetch
+ * via a custom agent/dispatcher to prevent DNS rebinding (time-of-check vs time-of-use).
  */
-export async function validateUrl(url: string): Promise<{ safe: boolean; reason?: string }> {
+export async function validateUrl(url: string): Promise<{ 
+  safe: boolean; 
+  reason?: string;
+  validatedIps?: string[];
+  validatedHostname?: string;
+}> {
   let parsed: URL;
   try {
     parsed = new URL(url);
@@ -113,13 +126,57 @@ export async function validateUrl(url: string): Promise<{ safe: boolean; reason?
     return { safe: false, reason: "Blocked: localhost is a restricted address" };
   }
 
+  // Block cloud provider metadata service hostnames
+  // These endpoints expose cloud instance metadata and credentials
+  const CLOUD_METADATA_HOSTNAMES = [
+    // AWS
+    "169.254.169.254",
+    "metadata.ec2.internal",
+    "instance-data.ec2.internal",
+    // GCP
+    "metadata.google.internal",
+    "metadata.google",
+    // Azure
+    "169.254.169.254",
+    "management.azure",
+    "management.core.windows.net",
+    // DigitalOcean
+    "169.254.169.254",
+    "digitalocean-metadata",
+    // Packet/Equinix
+    "metadata.packet.net",
+    "metadata.equinix.com",
+    // Linode
+    "169.254.169.254",
+    "metadata.linode.com",
+    // Vultr
+    "169.254.169.254",
+    "metadata.vultr.com",
+    // Oracle Cloud
+    "169.254.169.254",
+    "compute.metadata.oracle.com",
+    // Alibaba Cloud
+    "100.100.100.200",
+    "meta.taobao.ali.com",
+    // IBM Cloud
+    "169.254.169.254",
+    "metadata.service.softlayer.com",
+    // OVHcloud
+    "100.64.0.1",
+    "metadata.ovh.net",
+  ];
+
+  if (CLOUD_METADATA_HOSTNAMES.includes(hostname)) {
+    return { safe: false, reason: "Blocked: cloud metadata service is restricted (SSRF protection)" };
+  }
+
   // Block IPv6 literals
   if (hostname.startsWith("[")) {
     const ipv6 = hostname.slice(1, -1).toLowerCase();
     if (isPrivateIPv6(ipv6)) {
       return { safe: false, reason: "Blocked: IPv6 address resolves to a restricted range" };
     }
-    return { safe: true };
+    return { safe: true, validatedHostname: hostname };
   }
 
   // Block raw IPv4 literals without DNS lookup
@@ -127,7 +184,19 @@ export async function validateUrl(url: string): Promise<{ safe: boolean; reason?
     if (isPrivateIPv4(hostname)) {
       return { safe: false, reason: `Blocked: ${hostname} is a restricted IPv4 address` };
     }
-    return { safe: true };
+    return { safe: true, validatedHostname: hostname, validatedIps: [hostname] };
+  }
+
+  // Check cache first
+  const cached = validatedHostCache.get(hostname);
+  const now = Date.now();
+  if (cached && (now - cached.timestamp) < DNS_CACHE_TTL_MS) {
+    // Return cached validated IPs to ensure consistency
+    return { 
+      safe: true, 
+      validatedHostname: hostname,
+      validatedIps: cached.ips 
+    };
   }
 
   // Resolve hostname and check the resulting IPs
@@ -155,11 +224,26 @@ export async function validateUrl(url: string): Promise<{ safe: boolean; reason?
         return { safe: false, reason: `Blocked: "${hostname}" resolves to restricted IPv6 address ${addr}` };
       }
     }
+
+    // Cache the validated IPs
+    const allIps = [...addresses, ...addresses6];
+    validatedHostCache.set(hostname, { ips: allIps, timestamp: now });
+
+    return { 
+      safe: true, 
+      validatedHostname: hostname,
+      validatedIps: allIps 
+    };
   } catch {
     return { safe: false, reason: `Blocked: DNS resolution failed for "${hostname}" — fail-closed for safety` };
   }
+}
 
-  return { safe: true };
+/**
+ * Clear the DNS validation cache. Useful for testing or when DNS changes are expected.
+ */
+export function clearValidateUrlCache(): void {
+  validatedHostCache.clear();
 }
 
 function isPrivateIPv4(ip: string): boolean {
@@ -179,6 +263,9 @@ function isPrivateIPv4(ip: string): boolean {
     (a === 198 && (b === 18 || b === 19)) ||      // 198.18.0.0/15 (benchmarking)
     (a === 198 && b === 51 && c === 100) ||       // 198.51.100.0/24 (TEST-NET-2)
     (a === 203 && b === 0 && c === 113) ||        // 203.0.113.0/24 (TEST-NET-3)
+    (a === 100 && b >= 64 && b <= 127) ||         // 100.64.0.0/10 (carrier-grade NAT, Oracle/Aliyun metadata)
+    (a === 192 && b === 0 && c === 2) ||          // 192.0.2.0/24 (IPv4 service continuation, some cloud providers)
+    (a === 192 && b === 88 && c === 99) ||        // 192.88.99.0/24 (NAT64 discovery)
     a >= 224                                      // 224.0.0.0/4 (multicast) and above
   );
 }
@@ -188,14 +275,34 @@ function isPrivateIPv6(ip: string): boolean {
 
   return (
     lower === "::1" ||                            // loopback
+    lower === "::" ||                             // unspecified
     lower.startsWith("fc") ||                     // fc00::/7 (unique local)
     lower.startsWith("fd") ||                     // fd00::/8 (unique local)
     lower.startsWith("fe8") ||                    // fe80::/10 (link-local)
-    lower.startsWith("fe9") ||
-    lower.startsWith("fea") ||
-    lower.startsWith("feb") ||
-    lower === "::" ||                             // unspecified
-    lower.startsWith("::ffff:")                   // IPv4-mapped IPv6
+    lower.startsWith("fe9") ||                    // fe90::/10 (link-local)
+    lower.startsWith("fea") ||                    // fea0::/10 (link-local)
+    lower.startsWith("feb") ||                    // feb0::/10 (link-local)
+    lower.startsWith("::ffff:") ||                // IPv4-mapped IPv6 (::ffff:0:0/96)
+    lower.startsWith("64:ff9b:") ||              // IPv4-IPv6 translation (64:ff9b::/96)
+    lower.startsWith("fd00") ||                   // ULA
+    lower.startsWith("fd01") ||                   // ULA
+    lower.startsWith("fd02") ||                   // ULA
+    lower.startsWith("fd03") ||                   // ULA
+    lower.startsWith("fd04") ||                   // ULA
+    lower.startsWith("fd05") ||                   // ULA
+    lower.startsWith("fd06") ||                   // ULA
+    lower.startsWith("fd07") ||                   // ULA
+    lower.startsWith("fd08") ||                   // ULA
+    lower.startsWith("fd09") ||                   // ULA
+    lower.startsWith("fd0a") ||                   // ULA
+    lower.startsWith("fd0b") ||                   // ULA
+    lower.startsWith("fd0c") ||                   // ULA
+    lower.startsWith("fd0d") ||                   // ULA
+    lower.startsWith("fd0e") ||                   // ULA
+    lower.startsWith("fd0f") ||                   // ULA
+    lower.startsWith("fd1") || lower.startsWith("fd2") || lower.startsWith("fd3") ||  // More ULA
+    lower.startsWith("fe") ||                     // Reserved for IETF
+    lower.startsWith("ff")                        // Multicast
   );
 }
 
@@ -529,7 +636,7 @@ export function writeTokenToFile(token: string, sessionId: string): string {
 /**
  * CLI auth token types that need special handling
  */
-export type CLIAuthProvider = "gemini" | "antigravity" | "codex";
+export type CLIAuthProvider = "gemini" | "codex";
 
 /**
  * Create a secure marker for CLI-based authentication.
@@ -606,7 +713,7 @@ export async function parseCLIAuthToken(
   }
   
   const provider = parts[1] as CLIAuthProvider;
-  if (!["gemini", "antigravity", "codex"].includes(provider)) {
+  if (!["gemini", "codex"].includes(provider)) {
     return null;
   }
   
@@ -627,7 +734,7 @@ export async function migrateCLIAuthTokens(
   let migrated = 0;
   
   const cliTokenPatterns = [
-    { key: "GOOGLE_AUTH_TOKEN", providers: ["gemini", "antigravity"] as CLIAuthProvider[] },
+    { key: "GOOGLE_AUTH_TOKEN", providers: ["gemini"] as CLIAuthProvider[] },
     { key: "CODEX_AUTH_TOKEN", providers: ["codex"] as CLIAuthProvider[] },
   ];
   
@@ -636,7 +743,7 @@ export async function migrateCLIAuthTokens(
     if (!value) continue;
     
     // Check if it's a legacy plaintext token
-    if (value.startsWith("cli:") && !value.startsWith("cli:gemini:") && !value.startsWith("cli:antigravity:") && !value.startsWith("cli:codex:")) {
+    if (value.startsWith("cli:") && !value.startsWith("cli:gemini:") && !value.startsWith("cli:codex:")) {
       // This is a legacy format token, migrate it
       const provider = value.split(":")[1] as CLIAuthProvider;
       if (providers.includes(provider)) {

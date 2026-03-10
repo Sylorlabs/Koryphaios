@@ -1,8 +1,8 @@
 # Koryphaios Frontend
 
-**Real-time AI Agent Orchestration Dashboard**
+**Desktop AI Agent Orchestration Dashboard**
 
-Built with SvelteKit 2, TailwindCSS 4, and TypeScript.
+Built with SvelteKit 2, TailwindCSS 4, and TypeScript. Runs inside a Tauri desktop shell.
 
 ---
 
@@ -25,20 +25,23 @@ The frontend provides a real-time interface for managing AI agent workflows, mon
 - **TailwindCSS 4** — Utility-first styling with Vite plugin
 - **TypeScript** — Type-safe development
 - **Vite 7** — Fast build tooling
-- **Bun Adapter** — Production deployment with Bun
+- **Tauri v2** — Native desktop shell
 
 ---
 
 ## Development
 
 ```bash
-# Install dependencies (from project root)
+# From project root
+
+# Install dependencies
 bun install
 
-# Start dev server
-bun run dev:frontend
+# Start desktop app (recommended)
+bun run dev
 
-# Access at http://localhost:5173
+# Or start just the backend + frontend dev server
+bun run dev:backend  # Backend on :3000
 ```
 
 The dev server supports:
@@ -57,11 +60,11 @@ bun run check
 # Strict type checking with warnings as errors
 bun run check:strict
 
-# Production build
+# Production build (for Tauri)
 bun run build
 
-# Preview production build
-bun run preview
+# Build desktop app
+bun run build:desktop
 ```
 
 ---
@@ -80,8 +83,7 @@ frontend/
 │   └── app.html             # HTML template
 ├── static/                  # Static assets
 ├── svelte.config.js         # SvelteKit configuration
-├── vite.config.ts           # Vite configuration
-└── tailwind.config.js       # TailwindCSS configuration
+└── vite.config.ts           # Vite configuration
 ```
 
 ---
@@ -109,7 +111,7 @@ See `@koryphaios/shared` for WebSocket protocol types.
 Content streams token-by-token with typing indicators, tool execution visualization, and agent status updates.
 
 ### Session Persistence
-All sessions are saved server-side. Frontend auto-reconnects and syncs state on page load.
+All sessions are saved locally. Frontend auto-reconnects and syncs state on app launch.
 
 ### Provider Status
 Live authentication status for all configured providers with in-app key management.
@@ -119,17 +121,13 @@ Per-message and per-session cost calculation with token accounting.
 
 ---
 
-## Deployment
+## Desktop Integration
 
-The production build uses `svelte-adapter-bun` for efficient Bun runtime deployment:
+The frontend runs inside a Tauri WebView with access to native APIs:
 
-```bash
-# Build for production
-bun run build
-
-# Deploy the build/ directory with Bun
-cd build && bun run index.js
-```
+- **File System** — Native file dialogs and drag-drop
+- **Notifications** — System notifications for agent completion
+- **System Tray** — Background operation support
 
 ---
 
@@ -141,7 +139,7 @@ Frontend shares types with backend via `@koryphaios/shared` workspace package. A
 
 ## Notes
 
-- Configured for SvelteKit SSR with client-side hydration
+- Configured for SvelteKit with static adapter (for Tauri)
 - TailwindCSS with Vite plugin (no PostCSS needed)
 - Strict TypeScript checking in CI
-- Development server proxies API to avoid CORS issues
+- Desktop-only: No browser deployment support

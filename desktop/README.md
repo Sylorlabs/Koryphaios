@@ -257,9 +257,9 @@ rpm --addsign *.rpm
 - Native API commands for frontend
 
 ### API Communication
-The frontend detects whether it's running in Tauri or a browser:
-- **Browser**: Uses relative URLs (`/api/*`) with Vite proxy in dev
-- **Tauri**: Uses full backend URLs (`http://127.0.0.1:3001/api/*`)
+The frontend communicates with the backend via:
+- **Tauri Desktop**: Uses full backend URLs (`http://127.0.0.1:3000/api/*`)
+- The backend runs locally on the user's machine
 
 See `frontend/src/lib/utils/api-url.ts` for implementation details.
 

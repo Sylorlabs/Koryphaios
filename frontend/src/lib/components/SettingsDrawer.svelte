@@ -20,7 +20,13 @@
     Search,
     CreditCard,
     AlertTriangle,
+    Brain,
+    Bot,
   } from 'lucide-svelte';
+  import MemoryEditor from './MemoryEditor.svelte';
+  import AgentSettings from './AgentSettings.svelte';
+  import { memoryStore } from '$lib/stores/memory.svelte';
+  import { agentSettingsStore } from '$lib/stores/agent-settings.svelte';
   import ModelSelectionDialog from './ModelSelectionDialog.svelte';
   import { apiFetch, parseJsonResponse } from '$lib/api.svelte';
 
@@ -30,10 +36,13 @@
   }
 
   let { open = false, onClose }: Props = $props();
-  let activeTab = $state<'providers' | 'appearance' | 'shortcuts' | 'messaging' | 'billing'>('providers');
+  let activeTab = $state<'providers' | 'appearance' | 'shortcuts' | 'messaging' | 'billing' | 'memory' | 'agent'>('providers');
 
   let showModelSelector = $state(false);
   let selectorTarget = $state<any>(null);
+  let showRotateDialog = $state(false);
+  let rotateProvider = $state<{ name: string; keyType: 'apiKey' | 'authToken' } | null>(null);
+  let newKeyValue = $state('');
 
   function handleKeydown(e: KeyboardEvent) {
     if (e.key === 'Escape' && open && onClose) onClose();
@@ -263,6 +272,12 @@
     if (activeTab === 'providers' && availableProviderTypes.length === 0 && !providersLoadAttempted) {
       providersLoadAttempted = true;
       void loadAvailableProviders();
+    }
+    if (activeTab === 'memory') {
+      void memoryStore.loadAllMemory();
+    }
+    if (activeTab === 'agent') {
+      void agentSettingsStore.loadAll();
     }
   });
 
@@ -690,9 +705,44 @@
 
   async function disconnectProvider(name: string) {
     try {
-      await apiFetch(`/api/providers/${name}`, { method: 'DELETE' });
-      toastStore.info(`${name} disconnected`);
-    } catch {}
+      const res = await apiFetch(`/api/providers/${name}`, { method: 'DELETE' });
+      const data = await parseJsonResponse(res);
+      if (data.ok) {
+        toastStore.info(`${name} disconnected`);
+      } else {
+        toastStore.error(data.error ?? `Failed to disconnect ${name}`);
+      }
+    } catch (err: any) {
+      toastStore.error(err.message ?? `Failed to disconnect ${name}`);
+    }
+  }
+
+  async function rotateProviderKey(name: string, newKey: string, keyType: 'apiKey' | 'authToken') {
+    saving = name;
+    try {
+      const body: Record<string, string> = {};
+      body[keyType] = newKey;
+
+      const res = await apiFetch(`/api/providers/${name}/rotate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+
+      const data = await parseJsonResponse(res);
+      if (data.ok) {
+        toastStore.success(`${name} API key rotated ✓`);
+        keyInputs[name] = '';
+        tokenInputs[name] = '';
+        expandedProvider = null;
+      } else {
+        toastStore.error(data.error ?? 'Failed to rotate API key');
+      }
+    } catch (err: any) {
+      toastStore.error(err.message ?? 'Network error');
+    } finally {
+      saving = null;
+    }
   }
 
   function copyEndpoint() {
@@ -946,6 +996,20 @@
         >
           <CreditCard size={13} /> Billing
         </button>
+        <button
+          class="flex-1 min-w-0 flex items-center justify-center gap-1.5 py-2 text-xs rounded-md transition-colors
+                 {activeTab === 'memory' ? 'bg-[var(--color-surface-3)] text-[var(--color-text-primary)] font-medium' : 'text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)]'}"
+          onclick={() => activeTab = 'memory'}
+        >
+          <Brain size={13} /> Memory
+        </button>
+        <button
+          class="flex-1 min-w-0 flex items-center justify-center gap-1.5 py-2 text-xs rounded-md transition-colors
+                 {activeTab === 'agent' ? 'bg-[var(--color-surface-3)] text-[var(--color-text-primary)] font-medium' : 'text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)]'}"
+          onclick={() => activeTab = 'agent'}
+        >
+          <Bot size={13} /> Agent
+        </button>
       </div>
 
       <!-- Content (scrollable) -->
@@ -995,19 +1059,28 @@
                     <div class="flex items-center justify-between">
                       <div class="flex items-center gap-2">
                         <span class="text-[10px] text-emerald-400 font-medium flex items-center gap-1"><Check size={10} /> Connected</span>
-                        <button 
+                        <button
                           onclick={() => { selectorTarget = status; showModelSelector = true; }}
                           class="text-[10px] opacity-60 hover:opacity-100 underline decoration-dotted underline-offset-2"
                         >
                           Manage Models
                         </button>
                       </div>
-                      <button
-                        onclick={() => disconnectProvider(prov.key)}
-                        class="text-[10px] text-red-400 hover:text-red-300 transition-colors"
-                      >
-                        Disconnect
-                      </button>
+                      <div class="flex items-center gap-2">
+                        <button
+                          onclick={() => { rotateProvider = { name: prov.key, keyType: 'apiKey' }; showRotateDialog = true; }}
+                          class="text-[10px] text-blue-400 hover:text-blue-300 transition-colors"
+                          title="Rotate API key"
+                        >
+                          Rotate Key
+                        </button>
+                        <button
+                          onclick={() => disconnectProvider(prov.key)}
+                          class="text-[10px] text-red-400 hover:text-red-300 transition-colors"
+                        >
+                          Disconnect
+                        </button>
+                      </div>
                     </div>
                     <!-- Model list -->
                     <div class="space-y-0.5 mt-1">
@@ -1036,22 +1109,29 @@
                         {@const currentMode = selectedAuthMode[prov.key] ?? caps.extraAuthModes[0].id}
                         {#if currentMode === 'cli'}
                           <div class="text-[10px] mb-1" style="color: var(--color-text-muted);">
-                            Use an existing Gemini CLI session, or sign in in the browser and then verify.
+                            Use an existing Gemini CLI or gcloud session, or sign in via browser.
                           </div>
                           <button
                             type="button"
                             onclick={startGeminiCLIAuth}
                             class="btn btn-secondary w-full"
                           >
-                            Sign in with Gemini (open browser)
+                            Sign in with Google (open browser)
                           </button>
                           <button
                             onclick={() => connectProvider(prov.key)}
                             disabled={saving === prov.key}
                             class="btn btn-primary w-full mt-1"
                           >
-                            {verifying === prov.key ? 'Testing connection...' : saving === prov.key ? 'Saving...' : 'Verify Gemini CLI Auth'}
+                            {verifying === prov.key ? 'Testing connection...' : saving === prov.key ? 'Saving...' : 'Verify CLI Auth'}
                           </button>
+                          <div class="text-[10px] mt-2 p-2 rounded" style="background: var(--color-surface-2); color: var(--color-text-muted);">
+                            <strong>No credentials found?</strong> Make sure you have one of:
+                            <ul class="list-disc ml-4 mt-1 space-y-0.5">
+                              <li><a href="https://ai.google.dev/gemini-api/docs/downloads" target="_blank" class="underline hover:text-[var(--color-text-secondary)]">Gemini CLI</a> installed and logged in</li>
+                              <li><a href="https://cloud.google.com/sdk/docs/install" target="_blank" class="underline hover:text-[var(--color-text-secondary)]">gcloud CLI</a> with <code>gcloud auth application-default login</code></li>
+                            </ul>
+                          </div>
                         {:else if currentMode === 'antigravity'}
                           <div class="text-[10px] mb-1" style="color: var(--color-text-muted);">
                             Sign in with Google in your browser. No CLI required.
@@ -1442,8 +1522,57 @@
         </div>
       {/if}
     </div>
+  {:else if activeTab === 'memory'}
+    <div class="h-full -mx-6 -my-5">
+      <MemoryEditor />
+    </div>
+  {:else if activeTab === 'agent'}
+    <div class="h-full -mx-6 -my-5">
+      <AgentSettings />
+    </div>
   {/if}
 
+      </div>
+    </div>
+  </div>
+{/if}
+
+{#if showRotateDialog && rotateProvider}
+  <div class="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4" onkeydown={(e) => e.key === 'Escape' && (showRotateDialog = false)}>
+    <div class="bg-[var(--color-surface-1)] rounded-lg p-6 w-full max-w-md border border-[var(--color-border)]" role="dialog" aria-labelledby="rotate-dialog-title">
+      <h3 id="rotate-dialog-title" class="text-lg font-semibold mb-4 text-[var(--color-text-primary)]">Rotate API Key</h3>
+      <p class="text-sm text-[var(--color-text-secondary)] mb-4">
+        Enter a new {rotateProvider.keyType === 'apiKey' ? 'API key' : 'auth token'} for <strong>{getProviderDisplayLabel(rotateProvider.name)}</strong>
+      </p>
+
+      <div class="space-y-4">
+        <div>
+          <label for="new-key-input" class="text-xs text-[var(--color-text-secondary)] mb-1 block">New {rotateProvider.keyType === 'apiKey' ? 'API Key' : 'Auth Token'}</label>
+          <input
+            id="new-key-input"
+            type="password"
+            bind:value={newKeyValue}
+            placeholder={`Enter new ${rotateProvider.keyType === 'apiKey' ? 'API key' : 'auth token'}`}
+            class="w-full bg-[var(--color-surface-2)] border border-[var(--color-border)] rounded px-3 py-2 text-sm text-[var(--color-text-primary)] focus:outline-none focus:ring-2 focus:ring-blue-500"
+            onkeydown={(e) => e.key === 'Enter' && newKeyValue && rotateProvider && rotateProviderKey(rotateProvider.name, newKeyValue, rotateProvider.keyType)}
+          />
+        </div>
+
+        <div class="flex justify-end gap-2">
+          <button
+            onclick={() => { showRotateDialog = false; rotateProvider = null; newKeyValue = ''; }}
+            class="px-4 py-2 text-sm rounded transition-colors bg-[var(--color-surface-2)] text-[var(--color-text-primary)] hover:bg-[var(--color-surface-3)]"
+          >
+            Cancel
+          </button>
+          <button
+            onclick={() => { if (newKeyValue && rotateProvider) { rotateProviderKey(rotateProvider.name, newKeyValue, rotateProvider.keyType); showRotateDialog = false; rotateProvider = null; newKeyValue = ''; } }}
+            disabled={!newKeyValue || !rotateProvider || saving !== null}
+            class="px-4 py-2 text-sm rounded transition-colors bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {rotateProvider && saving === rotateProvider.name ? 'Rotating...' : 'Rotate'}
+          </button>
+        </div>
       </div>
     </div>
   </div>

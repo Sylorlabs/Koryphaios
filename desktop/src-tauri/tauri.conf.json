@@ -1,14 +1,14 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "Koryphaios",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "identifier": "com.sylorlabs.koryphaios",
   "build": {
     "frontendDist": "../../frontend/build",
     "devUrl": "http://localhost:5173",
     "beforeDevCommand": "",
     "beforeBuildCommand": "",
-    "features": {}
+    "features": null
   },
   "app": {
     "withGlobalTauri": true,
@@ -91,6 +91,14 @@
   "plugins": {
     "shell": {
       "open": true
+    },
+    "updater": {
+      "active": true,
+      "endpoints": [
+        "https://koryphaios.com/api/update.json"
+      ],
+      "dialog": false,
+      "pubkey": "BoZcZwJMlqqTUzPsXphfSL2q7NODsjpLqLOk0IbfTFI="
     }
   }
 }

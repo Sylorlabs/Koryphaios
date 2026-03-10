@@ -151,6 +151,12 @@ export interface NotificationPayload {
   title: string;
   message: string;
   duration?: number;
+  metadata?: {
+    branch?: string;
+    commitHash?: string;
+    prUrl?: string;
+    [key: string]: unknown;
+  };
 }
 
 // Kory-specific payloads
@@ -194,7 +200,7 @@ export interface ProviderInfo {
   name: ProviderName;
   enabled: boolean;
   authenticated: boolean;
-  authSource?: "API Key" | "Subscription" | "CLI session" | "Antigravity";
+  authSource?: "API Key" | "Subscription" | "CLI session";
   models: string[];
   allAvailableModels: ModelDef[];
   selectedModels: string[];
@@ -215,4 +221,13 @@ export interface ProviderInfo {
 
 export interface ProviderStatusPayload {
   providers: ProviderInfo[];
+}
+
+// Rate limit notification payload
+export interface RateLimitPayload {
+  provider: ProviderName;
+  model: string;
+  retryAfterMs: number;
+  attempt: number;
+  maxRetries: number;
 }

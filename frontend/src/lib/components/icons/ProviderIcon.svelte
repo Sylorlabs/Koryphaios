@@ -63,7 +63,6 @@
 
     gitlab: '/provider-icons/gitlab.svg',
     codex: '/provider-icons/codex.svg',
-    antigravity: '/provider-icons/antigravity.svg',
     chromeai: '/provider-icons/chromeai.svg',
 
     mistralai: '/provider-icons/mistralai.svg',

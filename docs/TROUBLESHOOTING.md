@@ -1,12 +1,12 @@
 # Troubleshooting Guide
 
-Common issues and solutions for Koryphaios.
+Common issues and solutions for Koryphaios Desktop.
 
 ---
 
-## Server Won't Start
+## Application Won't Start
 
-### Symptom: Server fails to start with config error
+### Symptom: App fails to start with config error
 
 **Error:**
 ```
@@ -91,14 +91,73 @@ Or comment out/remove Telegram config if not using it.
 
 ---
 
+## Desktop App Issues
+
+### Symptom: Tauri window doesn't open
+
+**Check:**
+1. Backend is running on port 3000
+2. No firewall blocking localhost
+3. Frontend build exists
+
+**Solution:**
+```bash
+# Check if backend is running
+curl http://localhost:3000/api/health
+
+# Rebuild frontend
+bun run --filter frontend build
+
+# Run Tauri dev with verbose logging
+cd desktop && cargo tauri dev --verbose
+```
+
+---
+
+### Symptom: White/blank window
+
+**Possible Causes:**
+1. Frontend build failed
+2. CSP blocking resources
+3. JavaScript errors
+
+**Solution:**
+```bash
+# Rebuild frontend
+bun run --filter frontend build
+
+# Check for build errors
+bun run --filter frontend check
+
+# Open DevTools in the app (Ctrl+Shift+I or Cmd+Option+I)
+# Check console for errors
+```
+
+---
+
+### Symptom: App crashes on startup
+
+**Solution:**
+```bash
+# Clean and rebuild
+cd desktop/src-tauri
+cargo clean
+cd ../..
+bun run build:desktop
+
+# Or for dev mode
+bun run dev:desktop
+```
+
+---
+
 ## WebSocket Issues
 
 ### Symptom: Frontend can't connect to WebSocket
 
 **Check:**
 1. Server is running and WebSocket endpoint is active
-2. CORS origin is allowed
-3. No reverse proxy blocking WebSocket upgrade
+2. No firewall blocking localhost:3000
 
 **Debugging:**
 ```bash
@@ -107,46 +166,27 @@ curl -i -N -H "Connection: Upgrade" -H "Upgrade: websocket" \
   http://localhost:3000/ws
 
 # Check server logs
-pm2 logs koryphaios-backend
-# or
-journalctl -u koryphaios-backend -f
+# Logs are in the terminal where you ran `bun run dev`
 ```
 
 **Solution:**
 - Verify `ws://localhost:3000/ws` is reachable
-- Check nginx/Caddy config includes WebSocket upgrade headers
-- Frontend should use SSE fallback at `/api/events` if WebSocket fails
+- Frontend uses SSE fallback at `/api/events` if WebSocket fails
+- Check that backend is actually running: `curl http://localhost:3000/api/health`
 
 ---
 
 ### Symptom: WebSocket disconnects frequently
 
 **Possible Causes:**
-1. Reverse proxy timeout too short
-2. Client network issues
-3. Server memory/resource limits
+1. Backend restarting
+2. Network issues
+3. System sleep/wake
 
 **Solution:**
-
-For nginx:
-```nginx
-location /ws {
-    proxy_read_timeout 86400;  # 24 hours
-    proxy_send_timeout 86400;
-    # ... other config
-}
-```
-
-For Caddy (automatic handling, but check):
-```caddyfile
-koryphaios.example.com {
-    @websocket {
-        header Connection Upgrade
-        header Upgrade websocket
-    }
-    reverse_proxy @websocket localhost:3000
-}
-```
+- Check backend logs for crashes
+- Restart the app: `bun run dev`
+- Disable system sleep during long operations
 
 ---
 
@@ -214,28 +254,19 @@ FATAL ERROR: Reached heap limit Allocation failed - JavaScript heap out of memor
 **Solution:**
 1. Increase Node.js memory limit:
 ```bash
-# In PM2 ecosystem.config.js
-env: {
-  NODE_OPTIONS: '--max-old-space-size=2048'  // 2GB
-}
+# Export before running
+export NODE_OPTIONS='--max-old-space-size=2048'  // 2GB
 
-# Or export directly
-export NODE_OPTIONS="--max-old-space-size=2048"
+# Then start the app
+bun run dev
 ```
 
 2. Check for memory leaks:
 ```bash
 # Monitor memory usage
-pm2 monit
-
-# Check system memory
-free -h
-```
-
-3. Restart periodically if needed:
-```javascript
-// In PM2 config
-max_memory_restart: '1G'
+# On macOS: Activity Monitor
+# On Linux: htop or top
+# On Windows: Task Manager
 ```
 
 ---
@@ -260,7 +291,7 @@ rm .koryphaios/sessions/*.json
 curl http://localhost:3000/api/sessions | jq '. | length'
 ```
 
-3. Implement session limits in code (future enhancement)
+3. Restart the app to clear memory
 
 ---
 
@@ -310,7 +341,7 @@ mv corrupted-file.json corrupted-file.json.bak
 rm corrupted-file.json
 ```
 
-3. Restart server (it will recreate if needed)
+3. Restart the app (it will recreate if needed)
 
 ---
 
@@ -332,6 +363,26 @@ bun run build
 
 # Type check first
 bun run typecheck
+```
+
+---
+
+### Symptom: Tauri build fails
+
+**Error:**
+```
+failed to run custom build command
+```
+
+**Solution:**
+```bash
+# Clean Tauri build
+cd desktop/src-tauri
+cargo clean
+
+# Rebuild from project root
+cd ../..
+bun run build:desktop
 ```
 
 ---
@@ -369,8 +420,7 @@ bun update
 # Cancel via API
 curl -X POST http://localhost:3000/api/agents/cancel
 
-# Or restart server
-pm2 restart koryphaios-backend
+# Or restart the app
 ```
 
 ---
@@ -403,22 +453,15 @@ RateLimitError: You exceeded your current quota
 **Debugging:**
 ```bash
 # Check system resources
-top
-htop
-
-# Monitor network
-iftop
-nethogs
-
-# Check file I/O
-iotop
+# On macOS: Activity Monitor
+# On Linux: htop
+# On Windows: Task Manager
 ```
 
 **Solution:**
-1. Optimize session storage (move to database)
-2. Add caching layer
-3. Use CDN for static assets
-4. Scale horizontally with load balancer
+1. Optimize session storage (clean up old sessions)
+2. Use faster storage (SSD)
+3. Close other resource-heavy applications
 
 ---
 
@@ -444,7 +487,47 @@ curl https://api.telegram.org/bot<YOUR_TOKEN>/getMe
 
 # Check polling is enabled
 export TELEGRAM_POLLING=true
-pm2 restart koryphaios-backend
+# Then restart the app
+```
+
+---
+
+## Platform-Specific Issues
+
+### macOS: "App is damaged"
+
+**Solution:** Remove quarantine attribute
+
+```bash
+xattr -cr /Applications/Koryphaios.app
+```
+
+---
+
+### Windows: Build fails with "linker not found"
+
+**Solution:** Install Visual Studio Build Tools with C++ workload
+
+```powershell
+# Use winget
+winget install Microsoft.VisualStudio.2022.BuildTools --override "--wait --add Microsoft.VisualStudio.Workload.VCTools"
+```
+
+---
+
+### Linux: "error while loading shared libraries"
+
+**Solution:** Install missing dependencies
+
+```bash
+# Check missing libraries
+ldd ./koryphaios | grep "not found"
+
+# Install WebKit (Debian/Ubuntu)
+sudo apt install libwebkit2gtk-4.1-0
+
+# Install AppImage dependencies
+sudo apt install libfuse2
 ```
 
 ---
@@ -453,39 +536,16 @@ pm2 restart koryphaios-backend
 
 ### Viewing Logs
 
-**PM2:**
+**Development:**
 ```bash
-# All logs
-pm2 logs
-
-# Specific app
-pm2 logs koryphaios-backend
-
-# Last 100 lines
-pm2 logs --lines 100
-
-# Follow errors only
-pm2 logs --err
+# Run directly to see all output
+bun run dev:backend   # Backend only
+bun run dev:desktop   # Full app with Tauri
 ```
 
-**Systemd:**
-```bash
-# Follow logs
-journalctl -u koryphaios-backend -f
-
-# Last 50 lines
-journalctl -u koryphaios-backend -n 50
-
-# Filter by time
-journalctl -u koryphaios-backend --since "1 hour ago"
-```
-
-**Direct (development):**
-```bash
-# Run server directly to see all output
-cd backend
-bun run src/server.ts
-```
+**Log files:**
+- Backend logs: Check terminal output
+- Tauri logs: Run with `RUST_LOG=debug bun run dev:desktop`
 
 ---
 
@@ -505,9 +565,9 @@ export LOG_LEVEL=trace
 
 ### Check the Logs
 
-Always include logs when asking for help:
+Always include logs when asking for help. Run the app directly to see full output:
 ```bash
-pm2 logs koryphaios-backend --lines 100 > logs.txt
+bun run dev:desktop
 ```
 
 ### System Information
@@ -517,8 +577,7 @@ pm2 logs koryphaios-backend --lines 100 > logs.txt
 uname -a
 bun --version
 node --version
-free -h
-df -h
+rustc --version  # For Tauri
 ```
 
 ### Create Issue
@@ -536,14 +595,15 @@ When opening an issue, include:
 
 | Issue | Quick Fix |
 |-------|-----------|
-| Server won't start | Check `koryphaios.json`, validate port |
-| WebSocket fails | Check CORS, reverse proxy config |
+| App won't start | Check `koryphaios.json`, validate port |
+| White/blank window | Rebuild frontend, check DevTools console |
+| WebSocket fails | Check backend is running on port 3000 |
 | Provider auth fails | Verify API key, test manually |
-| High memory | Clean old sessions, restart server |
-| Slow performance | Check provider API latency, resources |
+| High memory | Clean old sessions, restart app |
+| Slow performance | Check provider API latency, close other apps |
 | Bot not responding | Verify token, admin ID, polling enabled |
 
 ---
 
-**Last Updated:** 2026-02-15  
+**Last Updated:** 2026-03-09  
 **Version:** 0.1.0
