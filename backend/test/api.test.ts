@@ -65,9 +65,10 @@ beforeAll(async () => {
       ...process.env,
       KORYPHAIOS_PORT: String(TEST_PORT),
       SESSION_TOKEN_SECRET: process.env.SESSION_TOKEN_SECRET ?? "test_only_not_for_production_aaaaaaaaaa",
+      JWT_SECRET: process.env.JWT_SECRET ?? "test_secret_for_testing_only_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
     },
     stdout: "ignore",
-    stderr: "ignore",
+    stderr: "pipe", // Capture stderr to debug startup issues
   });
   await waitForServerReady();
 });

@@ -32,6 +32,9 @@ import { SnapshotManager } from "./snapshot-manager";
 import { GitManager } from "./git-manager";
 import { WorkspaceManager } from "./workspace-manager";
 import { parseCriticVerdict, formatMessagesForCritic as formatMessagesForCriticUtil } from "./critic-util";
+import { AutoCommitService } from "./auto-commit-service";
+import { getModeManager } from "../mode";
+import type { UIMode } from "@koryphaios/shared";
 
 // ─── Internal Types ─────────────────────────────────────────────────────────
 
@@ -213,6 +216,7 @@ export class KoryManager {
   private snapshotManager: SnapshotManager;
   public readonly git: GitManager;
   private workspaceManager: WorkspaceManager | null = null;
+  private autoCommitService: AutoCommitService;
   private lastKnownGoodHash = new Map<string, string>();
   /** AbortController for the current manager run per session (so cancelSessionWorkers can abort manager too). */
   private managerAbortBySession = new Map<string, AbortController>();
@@ -229,6 +233,7 @@ export class KoryManager {
     mkdirSync(this.memoryDir, { recursive: true });
     this.snapshotManager = new SnapshotManager(workingDirectory);
     this.git = new GitManager(workingDirectory);
+    this.autoCommitService = new AutoCommitService(workingDirectory, this.git);
 
     // Initialize WorkspaceManager if git is available
     try {
@@ -460,6 +465,9 @@ export class KoryManager {
             } catch {
               // Shadow logging is non-critical; don't fail the task if it errors
             }
+
+            // Auto-commit for beginner mode after successful worker task
+            await this.handleAutoCommit(sessionId, task);
           }
         } else {
           this.workspaceManager.cleanup(taskId);
@@ -468,6 +476,9 @@ export class KoryManager {
         const message = err instanceof Error ? err.message : String(err);
         koryLog.warn({ taskId, err: message }, "Worktree cleanup/reconcile error");
       }
+    } else if (result.success) {
+      // Auto-commit for beginner mode even without worktree (direct worker execution)
+      await this.handleAutoCommit(sessionId, task);
     }
 
     this.updateWorkflowState(sessionId, "idle");
@@ -701,6 +712,7 @@ export class KoryManager {
       const changes = this.sessionChanges.get(sessionId) || [];
       if (changes.length > 0) {
         this.emitWSMessage(sessionId, "session.changes", { changes });
+        
         // Create ghost commit for time-travel after direct manager tool use
         try {
           const { ShadowLogger } = await import('./shadow-logger');
@@ -716,10 +728,81 @@ export class KoryManager {
         } catch {
           // Shadow logging is non-critical; don't fail the task if it errors
         }
+
+        // Auto-commit for beginner mode
+        await this.handleAutoCommit(sessionId, userMessage);
       }
     } finally {
       this.managerAbortBySession.delete(sessionId);
       this.updateWorkflowState(sessionId, "idle");
+    }
+  }
+
+  /**
+   * Handle auto-commit for beginner mode
+   * Creates a branch, commits changes, and opens a PR
+   */
+  private async handleAutoCommit(sessionId: string, taskDescription: string): Promise<void> {
+    try {
+      const modeManager = getModeManager();
+      const mode = modeManager.getMode();
+      
+      // Only auto-commit in beginner mode when enabled
+      if (mode !== "beginner" || !modeManager.shouldAutoCommit()) {
+        return;
+      }
+
+      // Check if we have a git repo
+      if (!this.git.isGitRepo()) {
+        return;
+      }
+
+      koryLog.info({ sessionId }, "Auto-committing changes for beginner mode");
+      
+      const result = await this.autoCommitService.autoCommitAndCreatePR(taskDescription);
+      
+      if (result.success) {
+        // Emit a friendly message to the user
+        const message = result.prUrl 
+          ? `✨ I've saved your work and created a pull request for review: ${result.prUrl}`
+          : `✨ I've saved your work to branch "${result.branch}". You can merge it when you're ready!`;
+        
+        this.emitWSMessage(sessionId, "system.notification", { 
+          type: "success",
+          title: "Changes Saved",
+          message,
+          metadata: {
+            branch: result.branch,
+            commitHash: result.commitHash,
+            prUrl: result.prUrl,
+          }
+        });
+        
+        koryLog.info({ 
+          sessionId, 
+          branch: result.branch, 
+          prUrl: result.prUrl 
+        }, "Auto-commit completed successfully");
+      } else {
+        // Log the error but don't fail the task
+        koryLog.warn({ 
+          sessionId, 
+          error: result.message 
+        }, "Auto-commit failed");
+        
+        // Notify user that changes were made but not committed
+        this.emitWSMessage(sessionId, "system.notification", { 
+          type: "warning",
+          title: "Changes Made",
+          message: "Your changes are ready! I wasn't able to create a backup branch automatically, but your files have been updated.",
+        });
+      }
+    } catch (error) {
+      // Auto-commit should never fail the main task
+      koryLog.error({ 
+        sessionId, 
+        error: error instanceof Error ? error.message : String(error) 
+      }, "Auto-commit error");
     }
   }
 

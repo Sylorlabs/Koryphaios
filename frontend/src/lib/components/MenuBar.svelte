@@ -9,7 +9,9 @@
     Minus,
     Square,
     X,
+    RefreshCw,
   } from 'lucide-svelte';
+  import CheckForUpdatesButton from './CheckForUpdatesButton.svelte';
   import { getModKeyName } from '$lib/utils/platform';
   import { formatRecentDate, promptTemplates } from '$lib/utils/projectManager';
   import type { RecentProject } from '$lib/utils/projectManager';
@@ -47,32 +49,39 @@
   let isMaximized = $state(false);
   let inTauri = $state(false);
 
-  function getTauriWindow() {
-    if (!browser) return null;
-    const win = window as any;
-    return win.__TAURI__?.window ?? null;
-  }
-
   async function minimizeWindow() {
-    const tw = getTauriWindow();
-    if (!tw) return;
-    const current = tw.getCurrentWindow?.() ?? tw.appWindow;
-    await current?.minimize?.();
+    if (!browser) return;
+    const win = window as any;
+    const tauriWindow = win.__TAURI__?.window?.getCurrent?.() ?? win.__TAURI__?.core?.invoke;
+    if (tauriWindow?.minimize) {
+      await tauriWindow.minimize();
+    } else {
+      // Fallback: use invoke command
+      await win.__TAURI__?.core?.invoke?.('minimize_window');
+    }
   }
 
   async function toggleMaximize() {
-    const tw = getTauriWindow();
-    if (!tw) return;
-    const current = tw.getCurrentWindow?.() ?? tw.appWindow;
-    await current?.toggleMaximize?.();
-    isMaximized = await current?.isMaximized?.() ?? false;
+    if (!browser) return;
+    const win = window as any;
+    const tauriWindow = win.__TAURI__?.window?.getCurrent?.();
+    if (tauriWindow?.toggleMaximize) {
+      await tauriWindow.toggleMaximize();
+      isMaximized = await tauriWindow.isMaximized?.() ?? false;
+    } else {
+      await win.__TAURI__?.core?.invoke?.('toggle_maximize');
+    }
   }
 
   async function closeWindow() {
-    const tw = getTauriWindow();
-    if (!tw) return;
-    const current = tw.getCurrentWindow?.() ?? tw.appWindow;
-    await current?.close?.();
+    if (!browser) return;
+    const win = window as any;
+    const tauriWindow = win.__TAURI__?.window?.getCurrent?.();
+    if (tauriWindow?.close) {
+      await tauriWindow.close();
+    } else {
+      await win.__TAURI__?.core?.invoke?.('close_window');
+    }
   }
 
   onMount(() => {
@@ -80,9 +89,11 @@
     inTauri = typeof win.__TAURI__ !== 'undefined';
 
     if (inTauri) {
-      const tw = getTauriWindow();
-      const current = tw?.getCurrentWindow?.() ?? tw?.appWindow;
-      current?.isMaximized?.().then((v: boolean) => { isMaximized = v; });
+      // Access Tauri window API through __TAURI__ object
+      const tauriWindow = win.__TAURI__?.window?.getCurrent?.();
+      if (tauriWindow?.isMaximized) {
+        tauriWindow.isMaximized().then((v: boolean) => { isMaximized = v; });
+      }
     }
 
     function handleWindowClick(e: MouseEvent) {
@@ -196,12 +207,21 @@
             View
           </button>
           {#if openMenu === 'view'}
-            <div class="absolute left-0 top-8 z-30 min-w-[200px] rounded-lg border p-1" style="background: var(--color-surface-2); border-color: var(--color-border);">
+            <div class="absolute left-0 top-8 z-30 min-w-[220px] rounded-lg border p-1" style="background: var(--color-surface-2); border-color: var(--color-border);">
               <button class="w-full text-left px-2.5 py-1.5 text-xs rounded-md hover:bg-[var(--color-surface-3)]" style="color: var(--color-text-primary);" onclick={() => action('toggle_sidebar')}>{showSidebar ? 'Hide' : 'Show'} Sidebar</button>
               <button class="w-full text-left px-2.5 py-1.5 text-xs rounded-md hover:bg-[var(--color-surface-3)]" style="color: var(--color-text-primary);" onclick={() => action('toggle_zen_mode')}>{zenMode ? 'Disable' : 'Enable'} Zen Mode</button>
-              <button class="w-full text-left px-2.5 py-1.5 text-xs rounded-md hover:bg-[var(--color-surface-3)]" style="color: var(--color-text-primary);" onclick={() => action('toggle_agents')}>{showAgents ? 'Hide' : 'Show'} Active Agents</button>
+              {#if modeStore.showAgentDetails}
+                <button class="w-full text-left px-2.5 py-1.5 text-xs rounded-md hover:bg-[var(--color-surface-3)]" style="color: var(--color-text-primary);" onclick={() => action('toggle_agents')}>{showAgents ? 'Hide' : 'Show'} Active Agents</button>
+              {/if}
+              {#if modeStore.showGitPanel}
+                <button class="w-full text-left px-2.5 py-1.5 text-xs rounded-md hover:bg-[var(--color-surface-3)]" style="color: var(--color-text-primary);" onclick={() => action('toggle_git')}>{showGit ? 'Hide' : 'Show'} Source Control</button>
+              {/if}
               <button class="w-full text-left px-2.5 py-1.5 text-xs rounded-md hover:bg-[var(--color-surface-3)]" style="color: var(--color-text-primary);" onclick={() => action('toggle_theme')}>Switch Theme...</button>
               <button class="w-full text-left px-2.5 py-1.5 text-xs rounded-md hover:bg-[var(--color-surface-3)]" style="color: var(--color-text-primary);" onclick={() => action('open_settings')}>Open Settings</button>
+              {#if inTauri}
+                <div class="h-px my-1" style="background: var(--color-border);"></div>
+                <CheckForUpdatesButton variant="menu-item" />
+              {/if}
             </div>
           {/if}
         </div>

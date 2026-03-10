@@ -5,7 +5,7 @@ import type { Session } from '@koryphaios/shared';
 import { toastStore } from './toast.svelte';
 import { authStore } from './auth.svelte';
 import { browser } from '$app/environment';
-import { friendlyHttpError } from '$lib/api.svelte';
+import { friendlyHttpError } from '$lib/utils/http-error';
 import { apiUrl } from '$lib/utils/api-url';
 
 let sessions = $state<Session[]>([]);
@@ -45,10 +45,11 @@ async function fetchSessions(): Promise<boolean> {
     }
     if (data?.ok && Array.isArray(data.data)) {
       sessions = data.data;
-      if (!activeSessionId && sessions.length > 0) {
+      // If the active session is no longer in the list, clear it or select the first one
+      if (activeSessionId && !sessions.find(s => s.id === activeSessionId)) {
+        activeSessionId = sessions[0]?.id ?? '';
+      } else if (!activeSessionId && sessions.length > 0) {
         activeSessionId = sessions[0].id;
-      } else if (sessions.length === 0) {
-        void createSession();
       }
       return true;
     }
@@ -184,7 +185,14 @@ function groupByDate(sessionList: Session[]): SessionGroup[] {
 
 // Handle WebSocket updates to sessions
 function handleSessionUpdate(session: Session) {
-  sessions = sessions.map(s => s.id === session.id ? session : s);
+  const existingIndex = sessions.findIndex(s => s.id === session.id);
+  if (existingIndex >= 0) {
+    // Update existing session
+    sessions = sessions.map(s => s.id === session.id ? session : s);
+  } else {
+    // Add new session to the list (avoid duplicates from race conditions)
+    sessions = [session, ...sessions];
+  }
 }
 
 function handleSessionDeleted(sessionId: string) {

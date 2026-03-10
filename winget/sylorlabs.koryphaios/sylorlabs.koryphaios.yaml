@@ -1,0 +1,99 @@
+# yaml-language-server: $schema=https://aka.ms/winget-manifest.singleton.1.5.0.schema.json
+
+PackageIdentifier: Sylorlabs.Koryphaios
+PackageVersion: 0.2.0
+PackageLocale: en-US
+Publisher: Sylorlabs
+PublisherUrl: https://sylorlabs.com
+PublisherSupportUrl: https://github.com/sylorlabs/koryphaios/issues
+PrivacyUrl: https://koryphaios.com/privacy
+Author: Sylorlabs
+PackageName: Koryphaios
+PackageUrl: https://koryphaios.com
+License: Proprietary
+LicenseUrl: https://koryphaios.com/license
+Copyright: Copyright (c) 2024-2026 Sylorlabs. All rights reserved.
+CopyrightUrl: https://koryphaios.com/license
+ShortDescription: AI Agent Orchestration Dashboard
+Description: |
+  Koryphaios is a full-stack application that orchestrates AI agents across 
+  multiple providers with intelligent routing, task delegation, and real-time 
+  streaming. Features include Time Travel (undo/redo), parallel agent isolation, 
+  MCP integration, and a Telegram bridge.
+Moniker: koryphaios
+Tags:
+  - ai
+  - agents
+  - llm
+  - orchestration
+  - claude
+  - openai
+  - automation
+  - productivity
+  - developer-tools
+ReleaseNotes: |
+  ## What's New in v0.2.0
+  
+  - Feature: Automatic update checking every 2 hours with manual check option
+  - Feature: New changelog page at koryphaios.com/changelog
+  - Improvement: Enhanced update system with codeword verification
+  - Improvement: Better error handling for provider connections
+  - Fix: Fixed memory cleanup issues in long-running sessions
+ReleaseNotesUrl: https://koryphaios.com/changelog
+PurchaseUrl: https://koryphaios.com/pricing
+InstallationNotes: |
+  Koryphaios has been installed!
+  
+  To check for updates:
+    winget upgrade Sylorlabs.Koryphaios
+  
+  Or use the in-app updater:
+    View → Check for Updates
+  
+  Documentation: https://koryphaios.com/docs
+  Changelog: https://koryphaios.com/changelog
+Documentations:
+  - DocumentLabel: Documentation
+    DocumentUrl: https://koryphaios.com/docs
+  - DocumentLabel: Changelog
+    DocumentUrl: https://koryphaios.com/changelog
+  - DocumentLabel: GitHub
+    DocumentUrl: https://github.com/sylorlabs/koryphaios
+Icons:
+  - IconUrl: https://koryphaios.com/icon.png
+    IconFileType: png
+    IconResolution: 256x256
+    IconTheme: default
+    IconSha256: PLACEHOLDER_ICON_SHA256
+ManifestType: singleton
+ManifestVersion: 1.5.0
+
+Installers:
+  - Architecture: x64
+    InstallerType: nullsoft
+    InstallerUrl: https://github.com/sylorlabs/koryphaios/releases/download/v0.2.0/Koryphaios_0.2.0_x64-setup.exe
+    InstallerSha256: PLACEHOLDER_INSTALLER_SHA256
+    Scope: user
+    InstallerSwitches:
+      Silent: /S
+      SilentWithProgress: /S
+    ProductCode: '{com.sylorlabs.koryphaios}'
+    UpgradeBehavior: install
+    ReleaseDate: 2026-03-09
+    ElevationRequirement: elevationProhibited
+    AppsAndFeaturesEntries:
+      - DisplayName: Koryphaios
+        DisplayVersion: 0.2.0
+        Publisher: Sylorlabs
+        ProductCode: '{com.sylorlabs.koryphaios}'
+    ExpectedReturnCodes:
+      - InstallerReturnCode: 2
+        ReturnResponse: installInProgress
+      - InstallerReturnCode: 1602
+        ReturnResponse: cancelledByUser
+
+Protocols:
+  - koryphaios
+
+FileExtensions:
+  - kory

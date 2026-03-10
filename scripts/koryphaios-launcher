@@ -1,6 +1,6 @@
 #!/bin/bash
-# Koryphaios Launcher - Prevents terminal from showing
-# This script is designed to be run directly without a terminal
+# Koryphaios Launcher - Desktop app launcher
+# This script starts the backend and launches the Tauri desktop app
 
 cd "/home/micah/Desktop/sylorlabs projects/Koryphaios" || exit 1
 
@@ -18,22 +18,17 @@ if pgrep -x "koryphaios-desktop" > /dev/null 2>&1; then
 fi
 
 # Backend check/start - completely detached
-if ! curl -s http://localhost:3001/api/health > /dev/null 2>&1; then
+if ! curl -s http://localhost:3000/api/health > /dev/null 2>&1; then
     # Use setsid to fully detach from terminal
     setsid bash -c "bun run src/server.ts" > .koryphaios/logs/backend.log 2>&1 &
-    # Wait for it
-
-if ! curl -s http://localhost:5173 > /dev/null 2>&1; then
-    cd frontend
-    setsid bash -c "bun run vite dev --host" > ../.koryphaios/logs/frontend.log 2>&1 &
-    cd ..
+    # Wait for backend to be ready
     for i in {1..50}; do
-        curl -s http://localhost:5173 > /dev/null 2>&1 && break
+        curl -s http://localhost:3000/api/health > /dev/null 2>&1 && break
         sleep 0.1
     done
 fi
 
-# Launch app - use nohup and & to fully detach
+# Launch Tauri app - use nohup and & to fully detach
 source ~/.cargo/env 2>/dev/null
 cd desktop/src-tauri
 nohup cargo run --quiet > /dev/null 2>&1 &

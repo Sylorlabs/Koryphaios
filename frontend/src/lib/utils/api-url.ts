@@ -1,8 +1,8 @@
 /**
- * API URL utilities for handling both web and Tauri desktop environments
+ * API URL utilities for Tauri desktop environment
  * 
- * In web mode (browser): Use relative URLs that work with Vite proxy in dev
- * In Tauri mode: Use full backend URLs since there's no proxy
+ * Koryphaios is a desktop-only application using Tauri.
+ * The backend runs locally on the user's machine.
  * 
  * Cross-platform: Works on Windows, macOS, and Linux
  */
@@ -10,40 +10,17 @@
 import { browser } from '$app/environment';
 import { getBackendUrl, getWebSocketUrl, defaultConfig } from '@koryphaios/shared';
 
-// Cache for Tauri config
-let tauriBackendUrl: string | null = null;
-let tauriWebsocketUrl: string | null = null;
-let tauriUrlsInitialized = false;
-
-/**
- * Check if running inside Tauri
- * Tauri injects __TAURI__ object into the window
- */
-function isTauri(): boolean {
-  if (!browser) return false;
-  
-  // Check for Tauri-specific properties
-  const win = window as any;
-  
-  // Primary check: __TAURI__ object exists
-  if (typeof win.__TAURI__ !== 'undefined') return true;
-  
-  // Protocol check: tauri:// or similar custom protocol
-  if (win.location?.protocol?.startsWith('tauri')) return true;
-  
-  // User agent check (fallback)
-  const userAgent = navigator.userAgent.toLowerCase();
-  if (userAgent.includes('tauri')) return true;
-  
-  return false;
-}
+// Cache for backend URLs
+let cachedBackendUrl: string | null = null;
+let cachedWebsocketUrl: string | null = null;
+let urlsInitialized = false;
 
 /**
  * Get the backend URL synchronously
  * Uses cached value if available, otherwise returns default
  */
 function getCachedBackendUrl(): string {
-  if (tauriBackendUrl) return tauriBackendUrl;
+  if (cachedBackendUrl) return cachedBackendUrl;
   return getBackendUrl(defaultConfig);
 }
 
@@ -52,25 +29,25 @@ function getCachedBackendUrl(): string {
  * Uses cached value if available, otherwise returns default
  */
 function getCachedWebSocketUrl(): string {
-  if (tauriWebsocketUrl) return tauriWebsocketUrl;
+  if (cachedWebsocketUrl) return cachedWebsocketUrl;
   return getWebSocketUrl(defaultConfig);
 }
 
 /**
- * Initialize Tauri URLs by invoking the backend
+ * Initialize backend URLs by invoking the Tauri backend
  * This should be called early in app startup
  */
-export async function initTauriUrls(): Promise<void> {
-  if (!browser || !isTauri() || tauriUrlsInitialized) return;
+export async function initUrls(): Promise<void> {
+  if (!browser || urlsInitialized) return;
   
   try {
     // Access Tauri API from window.__TAURI__
     const win = window as any;
     if (!win.__TAURI__?.core?.invoke) {
       console.warn('[API] Tauri API not available on window');
-      tauriBackendUrl = getBackendUrl(defaultConfig);
-      tauriWebsocketUrl = getWebSocketUrl(defaultConfig);
-      tauriUrlsInitialized = true;
+      cachedBackendUrl = getBackendUrl(defaultConfig);
+      cachedWebsocketUrl = getWebSocketUrl(defaultConfig);
+      urlsInitialized = true;
       return;
     }
     
@@ -81,41 +58,32 @@ export async function initTauriUrls(): Promise<void> {
       invoke('get_websocket_url').catch(() => getWebSocketUrl(defaultConfig)),
     ]);
     
-    tauriBackendUrl = backend;
-    tauriWebsocketUrl = ws;
-    tauriUrlsInitialized = true;
+    cachedBackendUrl = backend;
+    cachedWebsocketUrl = ws;
+    urlsInitialized = true;
   } catch (e) {
-    console.warn('[API] Failed to initialize Tauri URLs:', e);
+    console.warn('[API] Failed to initialize URLs:', e);
     // Fall back to defaults
-    tauriBackendUrl = getBackendUrl(defaultConfig);
-    tauriWebsocketUrl = getWebSocketUrl(defaultConfig);
-    tauriUrlsInitialized = true;
+    cachedBackendUrl = getBackendUrl(defaultConfig);
+    cachedWebsocketUrl = getWebSocketUrl(defaultConfig);
+    urlsInitialized = true;
   }
 }
 
 /**
  * Get the base API URL
- * In Tauri: returns the full backend URL
- * In browser: returns empty string (relative URLs)
+ * Always returns the full backend URL for desktop app
  */
 export function getApiBaseUrl(): string {
   if (!browser) return '';
-  
-  // If running in Tauri, use the full backend URL
-  if (isTauri()) {
-    return getCachedBackendUrl();
-  }
-  
-  // In browser, use relative URLs (Vite proxy handles it in dev)
-  return '';
+  return getCachedBackendUrl();
 }
 
 /**
- * Build a full API URL (synchronous version)
+ * Build a full API URL
  * 
  * Usage:
- *   apiUrl('/api/sessions') -> '/api/sessions' (browser)
- *   apiUrl('/api/sessions') -> 'http://127.0.0.1:3000/api/sessions' (Tauri)
+ *   apiUrl('/api/sessions') -> 'http://127.0.0.1:3000/api/sessions'
  */
 export function apiUrl(path: string): string {
   const base = getApiBaseUrl();
@@ -124,23 +92,14 @@ export function apiUrl(path: string): string {
 }
 
 /**
- * Get WebSocket URL for the backend (synchronous version)
+ * Get WebSocket URL for the backend
  * 
  * Usage:
- *   getWsUrl() -> 'ws://localhost:5173/ws' (browser dev)
- *   getWsUrl() -> 'ws://127.0.0.1:3000/ws' (Tauri)
+ *   getWsUrl() -> 'ws://127.0.0.1:3000/ws'
  */
 export function getWsUrl(): string {
   if (!browser) return '';
-  
-  // If running in Tauri, connect directly to backend
-  if (isTauri()) {
-    return getCachedWebSocketUrl();
-  }
-  
-  // In browser, use same origin (Vite proxy handles WebSocket upgrade)
-  const scheme = window.location.protocol === 'https:' ? 'wss' : 'ws';
-  return `${scheme}://${window.location.host}/ws`;
+  return getCachedWebSocketUrl();
 }
 
 /**
@@ -150,7 +109,7 @@ export function getWsUrl(): string {
 export function getWsCandidates(): string[] {
   const candidates: string[] = [];
   
-  // Primary: Current environment's WS URL
+  // Primary: Current WS URL
   const primary = getWsUrl();
   if (primary) candidates.push(primary);
   
@@ -176,10 +135,8 @@ export function isDev(): boolean {
 /**
  * Get platform information
  */
-export function getPlatform(): { isTauri: boolean; isBrowser: boolean; isDev: boolean } {
+export function getPlatform(): { isDev: boolean } {
   return {
-    isTauri: isTauri(),
-    isBrowser: browser && !isTauri(),
     isDev: isDev(),
   };
 }

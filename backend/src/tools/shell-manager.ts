@@ -7,11 +7,12 @@ export interface BackgroundProcess {
   command: string;
   cwd: string;
   pid: number;
-  status: "running" | "exited" | "killed";
+  status: "running" | "exited" | "killed" | "crashed";
   exitCode?: number;
   stdout: string;
   stderr: string;
   startTime: number;
+  endTime?: number;
   proc: any; // Bun process
 }
 
@@ -58,13 +59,34 @@ export class ShellManager {
     this.readStream(proc.stdout.getReader(), id, "stdout");
     this.readStream(proc.stderr.getReader(), id, "stderr");
 
-    // Track exit
+    // Track exit with WebSocket notification
     proc.exited.then((code) => {
-      bgProc.status = "exited";
+      const isCrash = code !== 0 && code !== null;
+      bgProc.status = isCrash ? "crashed" : "exited";
       bgProc.exitCode = code;
-      toolLog.info({ id, name, code }, "Background process exited");
+      bgProc.endTime = Date.now();
+      
+      toolLog.info({ id, name, code, status: bgProc.status }, "Background process exited");
+      
+      // Log process status change
+      toolLog.info({
+        processId: id,
+        name,
+        status: bgProc.status,
+        exitCode: code,
+        duration: bgProc.endTime - bgProc.startTime,
+      }, "Background process status changed");
     }).catch((err) => {
+      bgProc.status = "crashed";
+      bgProc.endTime = Date.now();
       toolLog.warn({ id, name, err }, "Failed to track process exit");
+      
+      // Log process error
+      toolLog.error({
+        processId: id,
+        name,
+        error: err.message || String(err),
+      }, "Background process error");
     });
 
     return bgProc;

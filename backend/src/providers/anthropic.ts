@@ -12,9 +12,10 @@ import {
   getModelsForProvider,
   createGenericModel,
 } from "./types";
-import { withRetry } from "./utils";
+import { withRetry, withTimeoutSignal } from "./utils";
 import { detectClaudeCodeToken } from "./auth-utils";
 import { createUsageInterceptingFetch } from "../credit-accountant";
+import { providerLog } from "../logger";
 
 export class AnthropicProvider implements Provider {
   readonly name: "anthropic";
@@ -156,9 +157,11 @@ export class AnthropicProvider implements Provider {
     }
 
     try {
+      // Apply 60-second hard timeout to prevent indefinite hangs
+      const timeoutSignal = withTimeoutSignal(request.signal, 60_000);
       const stream = await withRetry(() => this.client.messages.stream(params, {
-        signal: request.signal,
-      }));
+        signal: timeoutSignal,
+      }), { providerName: this.name, modelName: request.model });
 
       let currentToolCallId = "";
       let currentToolName = "";
@@ -245,8 +248,18 @@ export class AnthropicProvider implements Provider {
       }
     } catch (err: unknown) {
       if (err instanceof Error && err.name === "AbortError") return;
-      const message = err instanceof Error ? err.message : String(err);
-      yield { type: "error", error: message };
+      
+      // Log full error details for debugging
+      const errorDetail = {
+        message: err instanceof Error ? err.message : String(err),
+        name: err instanceof Error ? err.name : undefined,
+        status: (err as any)?.status,
+        code: (err as any)?.error?.code || (err as any)?.code,
+        type: (err as any)?.error?.type,
+      };
+      providerLog.error({ errorDetail, model: request.model }, "Anthropic provider stream error");
+      
+      yield { type: "error", error: errorDetail.message };
     }
   }
 

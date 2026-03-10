@@ -12,13 +12,11 @@ import type { GitManager } from "./git-manager";
 
 /**
  * Mixin to add mode support to KoryManager
- * This is applied to the KoryManager prototype
+ * This is applied to the KoryManager to set up mode integration
  */
 export function applyModeIntegration(
   manager: {
     git: GitManager;
-    emitThought: (sessionId: string, phase: string, message: string) => void;
-    emitWSMessage: (sessionId: string, type: string, payload: unknown) => void;
   }
 ): void {
   // Initialize mode manager with git
