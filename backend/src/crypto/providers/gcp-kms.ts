@@ -206,7 +206,8 @@ export class GCPKMSProvider implements KMSProvider {
       // Try to get key info
       await this.refreshKeyInfo();
       return true;
-    } catch {
+    } catch (err) {
+      serverLog.warn({ error: err instanceof Error ? err.message : String(err) }, 'GCP KMS health check failed');
       return false;
     }
   }

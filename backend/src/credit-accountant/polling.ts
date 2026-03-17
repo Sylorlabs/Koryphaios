@@ -36,8 +36,8 @@ async function fetchOpenAICreditGrants(apiKey: string): Promise<void> {
       totalUsed = data.total_used ?? data.total_used_amount;
       totalGranted = data.total_granted ?? data.total_granted_amount;
       totalAvailable = data.total_available ?? data.total_available_amount;
-    } catch {
-      // keep raw payload
+    } catch (err) {
+      serverLog.debug({ error: err instanceof Error ? err.message : String(err) }, "Failed to parse OpenAI credit response");
     }
     saveCloudSnapshot("openai", text, totalUsed, totalGranted, totalAvailable);
     serverLog.debug({ totalUsed, totalGranted, totalAvailable }, "OpenAI credit_grants snapshot saved");

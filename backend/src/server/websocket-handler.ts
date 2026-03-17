@@ -6,7 +6,7 @@ import type { WSMessage } from "@koryphaios/shared";
 import type { ServerWebSocket } from "bun";
 import type { WSManager } from "../ws/ws-manager";
 import type { ISessionStore } from "../stores/session-store";
-import type { KoryManager } from "../kory/manager-refactored";
+import type { KoryManager } from "../kory/manager";
 import type { ProviderRegistry } from "../providers";
 import { validateSessionId } from "../security";
 import { serverLog } from "../logger";
@@ -90,6 +90,14 @@ export async function handleWSMessage(
         if (sessionId && validateSessionId(sessionId) && sessions.getForUser(sessionId, userId)) {
           wsManager.subscribeClientToSession(ws.data.id, sessionId);
           serverLog.debug({ clientId: ws.data.id, sessionId }, "Client subscribed to session");
+        }
+        break;
+
+      case "unsubscribe_session":
+        const unsubSessionId = msg.sessionId;
+        if (unsubSessionId) {
+          wsManager.unsubscribeClientFromSession(ws.data.id, unsubSessionId);
+          serverLog.debug({ clientId: ws.data.id, sessionId: unsubSessionId }, "Client unsubscribed from session");
         }
         break;
 

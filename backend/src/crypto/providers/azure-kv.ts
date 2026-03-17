@@ -194,7 +194,8 @@ export class AzureKMSProvider implements KMSProvider {
       // Try to get key info
       await this.refreshKeyInfo();
       return true;
-    } catch {
+    } catch (err) {
+      serverLog.warn({ error: err instanceof Error ? err.message : String(err) }, 'Azure Key Vault health check failed');
       return false;
     }
   }

@@ -207,7 +207,7 @@ export class ServerConfigurator {
     const createDefaultAdmin = process.env.CREATE_DEFAULT_ADMIN === "true";
     if (createDefaultAdmin) {
       const { getDb } = await import("../db/sqlite");
-      const userCount = (getDb().query("SELECT COUNT(*) as count FROM users").get() as any)?.count ?? 0;
+      const userCount = (getDb().query("SELECT COUNT(*) as count FROM users").get() as { count: number } | undefined)?.count ?? 0;
       if (userCount === 0) {
         const adminPassword = process.env.ADMIN_INITIAL_PASSWORD;
         if (!adminPassword || adminPassword.length < 12) {

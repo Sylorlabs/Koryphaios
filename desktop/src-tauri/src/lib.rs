@@ -29,6 +29,7 @@ struct FileDropPayload {
 }
 
 // Global window state
+#[allow(dead_code)]
 static WINDOW_STATE: Mutex<Option<WindowState>> = Mutex::new(None);
 
 #[tauri::command]
@@ -86,6 +87,31 @@ async fn toggle_maximize(window: WebviewWindow) {
 #[tauri::command]
 async fn close_window_cmd(window: WebviewWindow) {
     let _ = window.close();
+}
+
+#[tauri::command]
+async fn toggle_devtools(window: WebviewWindow) {
+    // Toggle DevTools directly - is_devtools_open() returns bool in Tauri 2.0
+    if window.is_devtools_open() {
+        let _ = window.close_devtools();
+    } else {
+        let _ = window.open_devtools();
+    }
+}
+
+#[tauri::command]
+async fn open_devtools(window: WebviewWindow) {
+    let _ = window.open_devtools();
+}
+
+#[tauri::command]
+async fn close_devtools(window: WebviewWindow) {
+    let _ = window.close_devtools();
+}
+
+#[tauri::command]
+async fn is_devtools_open(window: WebviewWindow) -> bool {
+    window.is_devtools_open()
 }
 
 // Update check result
@@ -146,7 +172,7 @@ fn window_state(window: &WebviewWindow) -> AppResult<WindowState> {
         .map_err(|e| AppError::Window(e.to_string()))?;
     let position = window.outer_position()
         .map_err(|e| AppError::Window(e.to_string()))?;
-    let maximized = window.is_maximized()
+    let maximized: bool = window.is_maximized()
         .map_err(|e| AppError::Window(e.to_string()))?;
     
     Ok(WindowState {
@@ -183,6 +209,7 @@ fn load_window_state(app: &tauri::AppHandle) -> Option<WindowState> {
     serde_json::from_str(&json).ok()
 }
 
+#[allow(dead_code)]
 fn create_native_menu(app: &tauri::AppHandle) -> AppResult<Menu<tauri::Wry>> {
     let config = AppConfig::get();
     
@@ -351,14 +378,24 @@ fn setup_file_drop_handler(window: &WebviewWindow) {
 }
 
 pub fn run() {
-    let config = AppConfig::get();
+    let _config = AppConfig::get();
     
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_notification::init())
-        .plugin(tauri_plugin_updater::init())
-        .setup(|app| {
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .setup(|app: &mut tauri::App| {
+            // Enable DevTools for all builds (debug and release)
+            #[cfg(debug_assertions)]
+            {
+                // DevTools are enabled by default in debug builds
+            }
+            #[cfg(not(debug_assertions))]
+            {
+                // In release builds, we need to explicitly enable DevTools
+                // This is controlled by the Cargo.toml feature flag
+            }
             // NOTE: Native menu bar is disabled for frameless window mode.
             // Koryphaios provides its own custom menu bar in the frontend.
             // The native menu is only created on macOS where it's expected,
@@ -408,8 +445,13 @@ pub fn run() {
                     }
                     "toggle_devtools" => {
                         if let Some(window) = app.get_webview_window("main") {
-                            #[cfg(debug_assertions)]
-                            let _ = window.open_devtools();
+                            // Enable DevTools in both debug and release builds
+                            // is_devtools_open() returns bool in Tauri 2.0
+                            if window.is_devtools_open() {
+                                let _ = window.close_devtools();
+                            } else {
+                                let _ = window.open_devtools();
+                            }
                         }
                     }
                     "minimize" => {
@@ -489,6 +531,10 @@ pub fn run() {
             minimize_window_cmd,
             toggle_maximize,
             close_window_cmd,
+            toggle_devtools,
+            open_devtools,
+            close_devtools,
+            is_devtools_open,
             check_for_updates,
             install_update,
         ])

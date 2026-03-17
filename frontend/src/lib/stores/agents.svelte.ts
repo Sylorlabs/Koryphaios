@@ -1,6 +1,7 @@
 // Agent Store — handles agent state and identity
 // Split from the monolithic websocket.svelte.ts for better separation of concerns
 
+import { untrack } from 'svelte';
 import type { AgentIdentity, AgentStatus, StreamUsagePayload, ProviderName } from "@koryphaios/shared";
 
 // ─── Agent State ────────────────────────────────────────────────────────────
@@ -146,8 +147,9 @@ export function clearNonManagerAgents() {
 
 // ─── Derived State ───────────────────────────────────────────────────────────
 
-export function getManagerStatus(activeSessionId?: string): AgentStatus {
-    const manager = agents.get("kory-manager");
+function computeManagerStatus(activeSessionId?: string): AgentStatus {
+    const currentAgents = untrack(() => agents);
+    const manager = currentAgents.get("kory-manager");
 
     if (manager && manager.status !== 'idle' && manager.status !== 'done') {
         if (manager.sessionId === activeSessionId || !manager.sessionId) {
@@ -156,7 +158,7 @@ export function getManagerStatus(activeSessionId?: string): AgentStatus {
     }
 
     if (activeSessionId) {
-        for (const a of agents.values()) {
+        for (const a of currentAgents.values()) {
             if (a.sessionId === activeSessionId && a.status !== 'idle' && a.status !== 'done') {
                 return a.status;
             }
@@ -166,8 +168,9 @@ export function getManagerStatus(activeSessionId?: string): AgentStatus {
     return 'idle';
 }
 
-export function isSessionRunning(sessionId: string): boolean {
-    for (const a of agents.values()) {
+function computeIsSessionRunning(sessionId: string): boolean {
+    const currentAgents = untrack(() => agents);
+    for (const a of currentAgents.values()) {
         if (a.sessionId === sessionId && a.status !== 'idle' && a.status !== 'done') {
             return true;
         }
@@ -175,7 +178,7 @@ export function isSessionRunning(sessionId: string): boolean {
     return false;
 }
 
-export function getContextUsage(activeSessionId?: string): {
+function computeContextUsage(activeSessionId?: string): {
     used: number;
     max: number;
     percent: number;
@@ -186,7 +189,8 @@ export function getContextUsage(activeSessionId?: string): {
         return { used: 0, max: 0, percent: 0, status: 'unknown', label: 'Context usage unknown' };
     }
 
-    const sessionAgents = [...agents.values()].filter((a) => a.sessionId === activeSessionId);
+    const currentAgents = untrack(() => agents);
+    const sessionAgents = [...currentAgents.values()].filter((a) => a.sessionId === activeSessionId);
     const candidates = sessionAgents.filter(a => a.hasUsageData);
 
     if (candidates.length === 0) {
@@ -212,11 +216,28 @@ export function getContextUsage(activeSessionId?: string): {
     return { used, max, percent, status: 'reliable', label: 'Context Window' };
 }
 
+// Export the original functions for backward compatibility
+export function getManagerStatus(activeSessionId?: string): AgentStatus {
+    return computeManagerStatus(activeSessionId);
+}
+
+export function isSessionRunning(sessionId: string): boolean {
+    return computeIsSessionRunning(sessionId);
+}
+
+export function getContextUsage(activeSessionId?: string) {
+    return computeContextUsage(activeSessionId);
+}
+
+// ─── Reactive derived values ────────────────────────────────────────────────
+
+let agentList = $derived([...agents.values()]);
+
 // ─── Exported Store ─────────────────────────────────────────────────────────
 
 export const agentStore = {
     get agents() { return agents; },
-    get agentList() { return [...agents.values()]; },
+    get agentList() { return agentList; },
     getManagerStatus,
     isSessionRunning,
     getContextUsage,

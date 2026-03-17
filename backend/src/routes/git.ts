@@ -124,8 +124,7 @@ export function createGitRoutes(deps: RouteDependencies): RouteHandler[] {
             path: "/api/git/branches",
             method: "GET",
             handler: async (req, _params, ctx) => {
-                const { output } = (kory.git as any).runGit(["branch", "--format=%(refname:short)"]);
-                const branches = output.split("\n").filter(Boolean);
+                const branches = await kory.git.getBranches();
                 return json({ ok: true, data: { branches } }, 200);
             },
         },

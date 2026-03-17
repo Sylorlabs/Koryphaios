@@ -40,6 +40,8 @@ export interface AppConfig {
 }
 
 // Default configuration - must match config/app.config.json defaults
+// NOTE: In the desktop app, these values are overridden by the Tauri backend
+// which reads from environment variables (KORYPHAIOS_PORT, KORYPHAIOS_BACKEND_URL)
 const defaultConfig: AppConfig = {
   app: {
     name: "Koryphaios",
@@ -48,7 +50,7 @@ const defaultConfig: AppConfig = {
   },
   server: {
     host: "127.0.0.1",
-    port: 3000,
+    port: 29473,  // Fallback port - avoids common dev port conflicts (3000, 5173, 8000, 8080)
     wsPath: "/ws",
   },
   window: {

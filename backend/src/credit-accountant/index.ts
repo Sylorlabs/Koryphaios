@@ -8,7 +8,7 @@
  * - API: expose local estimate vs cloud reality and highlight drift > 5%.
  */
 
-import { computeCost2026 } from "./models";
+import { computeCost } from "./models";
 import {
   initCreditDb,
   getCreditDb,
@@ -20,7 +20,7 @@ import { startCreditPolling, stopCreditPolling, type PollingConfig } from "./pol
 
 const DRIFT_THRESHOLD_PERCENT = 5;
 
-export { getModelCost2026, computeCost2026 } from "./models";
+export { getModelCost, computeCost } from "./models";
 export { initCreditDb, getLocalTotals, getLatestCloudSnapshots } from "./db";
 export { startCreditPolling, stopCreditPolling, type PollingConfig } from "./polling";
 export { createUsageInterceptingFetch } from "./usage-interceptor";
@@ -35,7 +35,7 @@ export function recordUsage(
   tokensIn: number,
   tokensOut: number
 ): void {
-  const costUsd = computeCost2026(model, tokensIn ?? 0, tokensOut ?? 0);
+  const costUsd = computeCost(model, tokensIn ?? 0, tokensOut ?? 0);
   dbRecordUsage(model, provider, tokensIn ?? 0, tokensOut ?? 0, costUsd);
 }
 

@@ -113,7 +113,7 @@ export class AskManagerTool implements Tool {
       name: this.name,
       output: JSON.stringify({
         type: "INTERVENTION_REQUEST",
-        question: (call.input as any).question
+        question: String(call.input.question ?? "")
       }),
       isError: false,
       durationMs: 0,

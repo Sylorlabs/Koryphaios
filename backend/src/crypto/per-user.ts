@@ -3,6 +3,7 @@
 // This ensures isolation between users - if one key leaks, others are safe
 
 import { createHmac, randomBytes } from 'node:crypto';
+import { serverLog } from '../logger';
 import type { KMSProvider } from './types';
 
 const DERIVATION_ALGORITHM = 'sha256';
@@ -70,8 +71,11 @@ export class PerUserKeyDerivation {
       : userId;
 
     // Use provider's per-user DEK method if available (deterministic)
-    if (typeof (this.provider as any).generatePerUserDek === 'function') {
-      const { plaintext } = await (this.provider as any).generatePerUserDek(derivationInput);
+    const providerWithPerUserDek = this.provider as {
+      generatePerUserDek?: (input: string) => Promise<{ plaintext: Buffer }>;
+    };
+    if (typeof providerWithPerUserDek.generatePerUserDek === 'function') {
+      const { plaintext } = await providerWithPerUserDek.generatePerUserDek(derivationInput);
       return plaintext;
     }
 
@@ -201,8 +205,9 @@ export class PerUserKeyDerivation {
     let envelope: { encryptedDek: string; iv: string; authTag: string; ciphertext: string };
     try {
       envelope = JSON.parse(ciphertext);
-    } catch {
+    } catch (err) {
       // Legacy colon-separated format
+      serverLog.warn({ error: err instanceof Error ? err.message : String(err) }, 'Per-user decrypt failed, trying legacy format');
       const parts = ciphertext.split(':');
       if (parts.length !== 4) throw new Error('Invalid ciphertext format');
       const [encryptedDek, iv, authTag, ct] = parts;

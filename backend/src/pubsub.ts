@@ -104,7 +104,7 @@ export class Broker<T> {
           // inside will handle the shutdown case.
         }
         sub.controller.close();
-      } catch { /* Expected: controller may already be closed */ }
+      } catch (err) { /* Expected: controller may already be closed */ }
     }
     this.subscribers.delete(id);
   }

@@ -17,9 +17,9 @@
   let localSelected = $state<string[]>([]);
   let dontAskAgain = $state(false);
 
-  // Initialize and sync local selection
+  // Initialize local selection - only when dialog opens
   $effect(() => {
-    if (availableModels.length > 0 && localSelected.length === 0) {
+    if (open && availableModels.length > 0 && localSelected.length === 0) {
       localSelected = selectedModels.length > 0 ? [...selectedModels] : availableModels.map(m => m.id);
     }
   });

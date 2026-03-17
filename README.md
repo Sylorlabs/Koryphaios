@@ -1,8 +1,9 @@
 # Koryphaios
 
-> **AI Agent Orchestration Dashboard** — A sophisticated platform for managing multi-agent AI workflows with real-time monitoring and control.
+> **AI Agent Orchestration Dashboard** — A local-first desktop application for managing multi-agent AI workflows with real-time monitoring and control.
 
-[![License](https://img.shields.io/badge/license-Private-red.svg)]()
+[![Version](https://img.shields.io/badge/version-1.0.0-blue.svg)]()
+[![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)]()
 [![Bun](https://img.shields.io/badge/runtime-Bun-orange.svg)](https://bun.sh)
 [![TypeScript](https://img.shields.io/badge/language-TypeScript-blue.svg)](https://www.typescriptlang.org/)
 
@@ -10,7 +11,7 @@
 
 ## Overview
 
-Koryphaios is a full-stack application that orchestrates AI agents across multiple providers (Anthropic, OpenAI, Google, and more) with intelligent routing, task delegation, and real-time streaming. The system features a manager-worker architecture where a central "Kory" coordinator delegates tasks to specialized agents based on domain expertise.
+Koryphaios is a **local-first, single-user desktop application** that orchestrates AI agents across multiple providers (Anthropic, OpenAI, Google, and more) with intelligent routing, task delegation, and real-time streaming. The system features a manager-worker architecture where a central "Kory" coordinator delegates tasks to specialized agents based on domain expertise.
 
 ### Key Features
 
@@ -35,7 +36,7 @@ Koryphaios is a full-stack application that orchestrates AI agents across multip
 │  • Session management, cost tracking, agent monitoring          │
 │  • Time Travel UI (undo/redo via ghost commits)                 │
 └────────────────────┬────────────────────────────────────────────┘
-                     │ WebSocket / REST API
+                     │ WebSocket / REST API (localhost only)
 ┌────────────────────┴────────────────────────────────────────────┐
 │                      Backend (Bun Server)                        │
 │  ┌──────────────────────────────────────────────────────────┐  │
@@ -58,8 +59,10 @@ Koryphaios is a full-stack application that orchestrates AI agents across multip
 │  └─────────────────────┘  └────────────────────────────────┘  │
 │                                                                  │
 │  ┌──────────────────────────────────────────────────────────┐  │
-│  │  Session Store (File-based persistence)                  │  │
-│  │  • Sessions, messages, conversation history              │  │
+│  │  Session Store (SQLite)                                  │  │
+│  │  • Local SQLite database in .koryphaios/                 │  │
+│  │  • No external database required                         │  │
+│  │  • WAL mode for concurrency                              │  │
 │  └──────────────────────────────────────────────────────────┘  │
 └──────────────────────────────────────────────────────────────────┘
 ```
@@ -77,7 +80,7 @@ Koryphaios is a full-stack application that orchestrates AI agents across multip
    - Kory orchestration engine
    - Provider abstraction layer (11 native + OpenAI-compatible adapter support)
    - Tool execution system
-   - File-based session persistence
+   - **SQLite database** (local file, no external DB needed)
 
 3. **Shared** (`/shared`)
    - TypeScript type definitions shared between frontend/backend
@@ -87,9 +90,9 @@ Koryphaios is a full-stack application that orchestrates AI agents across multip
 
 ### Agent Roles and Permissions
 
-- **Manager (Kory)** — Full access: can use all tools (bash, read/write files, web search, etc.) **unsandboxed** for simple tasks. Still asks the user for confirmation before executing delegated work unless YOLO mode is on. Sees everything: the critic’s review and sub-agent (worker) activity; synthesizes the final summary for the user.
+- **Manager (Kory)** — Full access: can use all tools (bash, read/write files, web search, etc.) **unsandboxed** for simple tasks. Still asks the user for confirmation before executing delegated work unless YOLO mode is on. Sees everything: the critic's review and sub-agent (worker) activity; synthesizes the final summary for the user.
 - **Workers (builders)** — Sandboxed: only have access to files and paths the manager granted via the plan. Use tools to implement the task; no direct user confirmation (manager handles that before delegating).
-- **Critic** — Read-only: may only use **read_file**, **grep**, **glob**, and **ls** to inspect the codebase. Sees the **full worker transcript** (thinking, tool calls, results) and outputs PASS or FAIL with feedback. The manager sees the critic’s feedback and uses it in the final summary.
+- **Critic** — Read-only: may only use **read_file**, **grep**, **glob**, and **ls** to inspect the codebase. Sees the **full worker transcript** (thinking, tool calls, results) and outputs PASS or FAIL with feedback. The manager sees the critic's feedback and uses it in the final summary.
 
 ---
 
@@ -103,20 +106,32 @@ Koryphaios is a full-stack application that orchestrates AI agents across multip
 
 ### Installation
 
+**Zero-Config Setup (Recommended):**
 ```bash
 # Clone the repository
 git clone <repository-url>
 cd Koryphaios
 
+# One-command setup: installs deps, generates secrets, checks ports
+bun run setup
+
+# Add your API keys to .env, then start the app
+bun run dev
+```
+
+**Manual Setup:**
+```bash
 # Install dependencies for all workspaces
 bun install
 
-# Copy environment template
+# Copy environment template and config
 cp .env.example .env
+cp config.example.json koryphaios.json
+
+# Generate required secrets (REQUIRED for security)
+bun run scripts/generate-secret.ts
 
 # Edit .env and add your API keys
-# ANTHROPIC_API_KEY=sk-ant-...
-# OPENAI_API_KEY=sk-...
 ```
 
 ### Configuration
@@ -137,21 +152,21 @@ Create or edit `koryphaios.json` in the project root:
   },
   "agents": {
     "manager": {
-      "model": "claude-sonnet-4-5",
+      "model": "claude-3-7-sonnet",
       "reasoningEffort": "high"
     },
     "coder": {
-      "model": "claude-sonnet-4-5",
+      "model": "claude-3-7-sonnet",
       "maxTokens": 16384
     },
     "task": {
-      "model": "o4-mini",
+      "model": "gpt-4o-mini",
       "maxTokens": 8192
     }
   },
   "server": {
-    "port": 3000,
-    "host": "localhost"
+    "port": 29473,
+    "host": "127.0.0.1"
   },
   "dataDirectory": ".koryphaios"
 }
@@ -177,15 +192,13 @@ bun run build:desktop
 - Lightweight desktop wrapper via Tauri (~10MB vs ~150MB+ for Electron)
 - Uses the OS native WebView (WebKit/Blink) instead of bundled Chromium
 - Platform-native APIs (menus, system tray, file drop)
-- Local-first architecture — all data stays on your machine
+- **Local-first architecture — all data stays on your machine in SQLite**
 - Enhanced security with CSP policies
 - Cross-platform: Windows, macOS, Linux
 
-**Architecture Note:** The app uses Tauri's WebView to render the SvelteKit frontend, with the backend running as a local HTTP server. For local-only communication, Tauri's `invoke()` API could be used instead of HTTP/WebSocket — this is a future optimization.
-
 **Development commands:**
 ```bash
-bun run dev:backend   # Backend only on http://127.0.0.1:3000
+bun run dev:backend   # Backend only on http://127.0.0.1:29473
 bun run dev:desktop   # Tauri dev window with hot reload
 ```
 
@@ -207,6 +220,30 @@ bun run test
 # Full pre-deploy validation (check + tests)
 bun run check:full
 ```
+
+---
+
+## Data Storage: Local SQLite
+
+Koryphaios uses **SQLite** for all data persistence—no external database required:
+
+```
+.koryphaios/
+├── koryphaios.db          # Main SQLite database (sessions, messages, tasks)
+├── koryphaios.db-shm      # Shared memory file (WAL mode)
+├── koryphaios.db-wal      # Write-ahead log
+├── memory/                # Session memory files
+└── .root-token            # Authentication token (mode 600)
+```
+
+**Features:**
+- **WAL Mode**: Write-Ahead Logging for better concurrency
+- **Busy Timeout**: 5-second timeout for lock contention
+- **Optimistic Locking**: Prevents lost updates during concurrent access
+- **Transactions**: Multi-step operations are atomic
+- **Automatic Migrations**: Schema updates on startup
+
+**Backup:** Simply copy the `.koryphaios/` directory.
 
 ---
 
@@ -242,7 +279,7 @@ bun run check:full
 
 ### WebSocket Protocol
 
-Connect to `ws://localhost:3000/ws` for real-time updates. No authentication required by default.
+Connect to `ws://localhost:29473/ws` for real-time updates. No authentication required by default.
 
 **Message Format:**
 ```typescript
@@ -311,17 +348,12 @@ Koryphaios supports MCP servers for extensible tools. Configure in `koryphaios.j
 
 Koryphaios operates **without user accounts**. The system is designed for single-tenant usage where all functionality is available without requiring user registration or login.
 
-For **multi-user deployment** or to restrict API access:
-
-- Set `KORYPHAIOS_AUTH_MODE=token` to enable JWT-based API authentication
-- Configure `JWT_SECRET` (min 32 characters) for secure token generation
-- Set `CORS_ORIGINS` to a comma-separated list of allowed frontend origins (e.g., `https://app.example.com`)
-
-**Note**: User registration is **disabled by default**. Koryphaios does not include account management features.
+For details on encryption, secrets management, and security best practices, see [SECURITY.md](SECURITY.md).
 
 ### API Key Management
 
-- Provider API keys are encrypted before storage in `.env`
+- Provider API keys are encrypted using envelope encryption (AES-256-GCM)
+- Encryption keys derived from `KORYPHAIOS_MASTER_KEY` or enterprise KMS
 - Runtime keys stored in memory only
 - Rate limiting: 120 requests/minute per IP
 - CORS enforced with origin allowlist
@@ -369,7 +401,7 @@ Koryphaios/
 │   │   ├── tools/             # Built-in tool implementations
 │   │   ├── mcp/               # MCP client
 │   │   ├── telegram/          # Telegram bot bridge
-│   │   ├── db/                # Database utilities
+│   │   ├── db/                # SQLite database utilities
 │   │   ├── security.ts        # Auth, validation, encryption
 │   │   └── logger.ts          # Structured logging
 │   └── package.json
@@ -390,26 +422,34 @@ Koryphaios/
 
 ## Contributing
 
-This is a private project. Contributions are managed internally.
+Koryphaios welcomes both human developers and AI coding agents as collaborators.
+
+### Quick Start for AI Agents
+
+Read AGENTS.md first. It contains the module map, key conventions, and gotchas specific to this codebase. The project uses Bun as the package manager, Svelte 5 with runes syntax, and Tailwind v4. Always import shared types from @koryphaios/shared rather than duplicating them.
+
+### Quick Start for Human Developers
+
+**Zero-config for new collaborators:** Run `bun run setup` to auto-configure everything, then `bun run dev` to start. The backend auto-finds an available port (default 29473) and the frontend auto-discovers it. No manual port configuration needed.
+
+**Standard workflow:** Fork the repository and create a feature branch. Install dependencies with `bun install`. Copy `.env.example` to `.env` and add your API keys. Run `bun run dev` to start the development server. Before submitting changes, run `bun run check` to ensure type safety and pass all tests with `bun run test`.
 
 ### Development Workflow
 
-1. Create feature branch
-2. Make changes with tests
-3. Run `bun run check` for type safety
-4. Submit PR with description
+Create a feature branch from main. Make your changes with appropriate test coverage. Run the full validation suite with bun run check. Submit a pull request with a clear description of the changes and any testing instructions. All contributions go through code review before merging.
 
 ---
 
 ## Troubleshooting
 
 ### Backend won't start
-- Check `.env` has at least one valid API key
-- Ensure port 3000 is available
+- Check `.env` has required secrets (`JWT_SECRET`, `KORYPHAIOS_MASTER_KEY`)
+- Port 29473 not available? The backend auto-finds an available port in range 29450-29500
 - Review `koryphaios.json` syntax
+- Check server logs for validation errors
 
 ### WebSocket connection fails
-- Verify CORS origin configuration
+- Verify the backend is running
 - Check firewall settings
 - Try SSE fallback at `/api/events`
 
@@ -418,13 +458,18 @@ This is a private project. Contributions are managed internally.
 - Check provider status at `/api/providers`
 - Review logs for detailed errors
 
+### Database locked errors
+- SQLite uses WAL mode with 5-second busy timeout
+- Heavy concurrent access may cause temporary locks
+- Operations retry automatically
+
 For more help, see `docs/TROUBLESHOOTING.md`.
 
 ---
 
 ## License
 
-Private — All rights reserved.
+Apache License 2.0 — See [LICENSE](LICENSE) for details.
 
 ---
 
@@ -435,6 +480,7 @@ Built with:
 - [SvelteKit](https://kit.svelte.dev) — Modern web framework
 - [Anthropic Claude](https://anthropic.com) — AI assistance
 - [Model Context Protocol](https://modelcontextprotocol.io) — Tool integration standard
+- [Tauri](https://tauri.app) — Desktop application framework
 
 ---
 

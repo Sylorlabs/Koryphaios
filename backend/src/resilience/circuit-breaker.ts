@@ -19,6 +19,8 @@ export interface CircuitBreakerConfig {
   requestTimeoutMs: number;
   /** Enable logging */
   enableLogging?: boolean;
+  /** Max response times to track for metrics (default: 100) */
+  maxResponseTimes?: number;
 }
 
 export interface CircuitBreakerStats {
@@ -42,6 +44,8 @@ export interface CircuitBreakerStats {
  * - CLOSED: Normal operation, requests pass through
  * - OPEN: Requests fail fast, no calls to underlying service
  * - HALF_OPEN: Limited requests allowed to test if service recovered
+ * 
+ * PERFORMANCE: Uses circular buffer for O(1) response time tracking.
  */
 export class CircuitBreaker {
   private state: CircuitState = "CLOSED";
@@ -53,18 +57,28 @@ export class CircuitBreaker {
   private totalFailures = 0;
   private totalSuccesses = 0;
   private totalTimeouts = 0;
-  private responseTimes: number[] = [];
+  
+  // PERFORMANCE: Circular buffer for O(1) response time tracking
+  private responseTimes: number[];
+  private responseTimeWriteIndex = 0;
+  private responseTimeCount = 0;
+  private readonly maxResponseTimes: number;
+  
   private resetTimer: Timer | null = null;
 
   private readonly config: CircuitBreakerConfig;
 
   constructor(config: Partial<CircuitBreakerConfig> & { name: string }) {
+    this.maxResponseTimes = config.maxResponseTimes ?? 100;
+    this.responseTimes = new Array(this.maxResponseTimes);
+    
     this.config = {
       failureThreshold: 5,
       successThreshold: 3,
       resetTimeoutMs: 30000, // 30 seconds
       requestTimeoutMs: 30000, // 30 seconds
       enableLogging: true,
+      maxResponseTimes: 100,
       ...config,
     };
   }
@@ -126,16 +140,18 @@ export class CircuitBreaker {
 
   /**
    * Record a successful call
+   * PERFORMANCE: O(1) circular buffer insertion
    */
   private recordSuccess(responseTime: number): void {
     this.successes++;
     this.totalSuccesses++;
     this.lastSuccessTime = Date.now();
     
-    // Track response times (keep last 100)
-    this.responseTimes.push(responseTime);
-    if (this.responseTimes.length > 100) {
-      this.responseTimes.shift();
+    // Add to circular buffer (O(1))
+    this.responseTimes[this.responseTimeWriteIndex] = responseTime;
+    this.responseTimeWriteIndex = (this.responseTimeWriteIndex + 1) % this.maxResponseTimes;
+    if (this.responseTimeCount < this.maxResponseTimes) {
+      this.responseTimeCount++;
     }
 
     if (this.state === "HALF_OPEN") {
@@ -243,11 +259,15 @@ export class CircuitBreaker {
 
   /**
    * Get average response time
+   * PERFORMANCE: O(n) on maxResponseTimes (configurable, default 100)
    */
   private getAverageResponseTime(): number {
-    if (this.responseTimes.length === 0) return 0;
-    const sum = this.responseTimes.reduce((a, b) => a + b, 0);
-    return Math.round(sum / this.responseTimes.length);
+    if (this.responseTimeCount === 0) return 0;
+    let sum = 0;
+    for (let i = 0; i < this.responseTimeCount; i++) {
+      sum += this.responseTimes[i];
+    }
+    return Math.round(sum / this.responseTimeCount);
   }
 
   /**
@@ -278,7 +298,9 @@ export class CircuitBreaker {
     this.totalFailures = 0;
     this.totalSuccesses = 0;
     this.totalTimeouts = 0;
-    this.responseTimes = [];
+    this.responseTimes = new Array(this.maxResponseTimes);
+    this.responseTimeWriteIndex = 0;
+    this.responseTimeCount = 0;
   }
 }
 
@@ -298,6 +320,7 @@ export class CircuitBreakerRegistry {
       resetTimeoutMs: 30000,
       requestTimeoutMs: 30000,
       enableLogging: true,
+      maxResponseTimes: 100,
       ...defaultConfig,
     };
   }

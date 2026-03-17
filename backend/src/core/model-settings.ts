@@ -20,7 +20,7 @@ export interface ModelSettingRow {
 
 /**
  * Get list of enabled model IDs for a user (is_checked = 1).
- * Returns model_id as stored (e.g. "claude-sonnet-4-5"); provider is in the same row for provider:model format.
+ * Returns model_id as stored (e.g. "claude-3-7-sonnet"); provider is in the same row for provider:model format.
  */
 export function getEnabledModelIds(userId: string): string[] {
   const db = getDb();
@@ -77,7 +77,8 @@ export function ensureModelSettingsTable(): void {
     getDb().exec(
       "CREATE TABLE IF NOT EXISTS model_settings (id TEXT PRIMARY KEY, user_id TEXT NOT NULL, model_id TEXT NOT NULL, provider TEXT NOT NULL, is_checked INTEGER NOT NULL DEFAULT 1, created_at INTEGER, updated_at INTEGER, UNIQUE(user_id, model_id))"
     );
-  } catch {
+  } catch (err) {
+    console.warn("[model-settings] Table creation failed (migration may not have run):", err instanceof Error ? err.message : String(err));
     // Migration may not have run; caller should run migrations
   }
 }

@@ -7,8 +7,8 @@ function minimalConfig(): KoryphaiosConfig {
   return {
     providers: {},
     agents: {
-      manager: { model: "claude-sonnet-4-5" },
-      coder: { model: "claude-sonnet-4-5" },
+      manager: { model: "claude-3-7-sonnet" },
+      coder: { model: "claude-3-7-sonnet" },
       task: { model: "o4-mini" },
     },
     server: { port: 3000, host: "localhost" },

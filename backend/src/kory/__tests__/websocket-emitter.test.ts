@@ -85,7 +85,7 @@ describe("WebSocketEmitter", () => {
       wsEmitter.emitRouting(
         "session-1",
         "ui",
-        "claude-sonnet-4-6",
+        "claude-3-7-sonnet",
         "anthropic"
       );
 
@@ -93,9 +93,9 @@ describe("WebSocketEmitter", () => {
         "kory.routing",
         expect.objectContaining({
           domain: "ui",
-          selectedModel: "claude-sonnet-4-6",
+          selectedModel: "claude-3-7-sonnet",
           selectedProvider: "anthropic",
-          reasoning: expect.stringContaining("claude-sonnet-4-6")
+          reasoning: expect.stringContaining("claude-3-7-sonnet")
         })
       );
     });
@@ -173,7 +173,7 @@ describe("WebSocketEmitter", () => {
       wsEmitter.emitUsageUpdate(
         "session-1",
         "worker-123",
-        "claude-opus-4-6",
+        "claude-3-opus",
         "anthropic",
         5000,
         2000,

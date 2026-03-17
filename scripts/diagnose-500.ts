@@ -23,7 +23,7 @@ const sources: { name: string; path: string; port?: number }[] = [
   { name: "config/app.config.json", path: resolve(PROJECT_ROOT, "config", "app.config.json") },
 ];
 
-let defaultPort = 3000;
+let defaultPort = 29473;
 
 for (const source of sources) {
   if (existsSync(source.path)) {
@@ -61,7 +61,7 @@ console.log("\n2. PORT CONSISTENCY CHECK");
 console.log("───────────────────────────────────────────────────────────");
 
 if (uniquePorts.length === 0) {
-  console.log("  ⚠ No ports configured in any file. Will use default: 3000");
+  console.log("  ⚠ No ports configured in any file. Will use default: 29473");
 } else if (uniquePorts.length === 1) {
   console.log(`  ✓ All configurations use port ${uniquePorts[0]} (consistent)`);
 } else {
@@ -92,13 +92,13 @@ console.log("──────────────────────�
 
 if (uniquePorts.length > 1) {
   console.log("  1. Fix port mismatch:");
-  console.log("     - Edit .env: KORYPHAIOS_PORT=3000");
-  console.log("     - Edit koryphaios.json: set server.port to 3000");
-  console.log("     - Edit config/app.config.json: set server.port to 3000");
+  console.log("     - Edit .env: KORYPHAIOS_PORT=29473");
+  console.log("     - Edit koryphaios.json: set server.port to 29473");
+  console.log("     - Edit config/app.config.json: set server.port to 29473");
 }
 
 console.log("  2. Check for port conflicts:");
-console.log("     - Run: lsof -i :3000");
+console.log("     - Run: lsof -i :29473");
 console.log("     - Kill any process using the port, or");
 console.log("     - Change to a different port in all config files");
 

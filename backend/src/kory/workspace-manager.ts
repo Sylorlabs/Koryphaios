@@ -9,9 +9,10 @@
  * - Security: .env files are not copied unless explicitly requested
  * - Cleanup: Automatic worktree/branch removal after changes are reconciled
  * - Resource Guard: Configurable concurrent worktree limit based on system RAM
+ * 
+ * PERFORMANCE NOTE: All git operations are async to avoid blocking the event loop.
  */
 
-import { spawnSync } from "bun";
 import { existsSync, mkdirSync, readFileSync, writeFileSync, appendFileSync } from "node:fs";
 import { join, resolve, relative } from "node:path";
 import { koryLog } from "../logger";
@@ -49,19 +50,25 @@ export class WorkspaceManager {
     this.maxConcurrent = config?.worktreeLimit ?? 4;
     this.copyEnvFiles = config?.copyEnvFiles ?? false;
 
-    // Validate we're in a git repo
-    if (!this.isGitRepo()) {
-      throw new WorkspaceError("Not a valid Git repository");
-    }
-
-    // Ensure .trees/ is in .gitignore
-    this.ensureGitignoreEntry();
-
+    // Validate we're in a git repo (async check will happen on first use)
     koryLog.info({
       worktreeDir: this.worktreeDir,
       maxConcurrent: this.maxConcurrent,
       copyEnvFiles: this.copyEnvFiles,
     }, "WorkspaceManager initialized");
+  }
+
+  /**
+   * Validate that we're in a git repo (async)
+   */
+  async validateGitRepo(): Promise<boolean> {
+    const result = await this.runGitAsync(["rev-parse", "--is-inside-work-tree"]);
+    if (!result.success) {
+      throw new WorkspaceError("Not a valid Git repository");
+    }
+    // Ensure .trees/ is in .gitignore
+    await this.ensureGitignoreEntry();
+    return true;
   }
 
   /**
@@ -84,12 +91,19 @@ export class WorkspaceManager {
 
   /**
    * Create a new isolated worktree for a task
+   * PERFORMANCE: Now fully async to avoid blocking the event loop.
+   * 
    * @param taskId Unique identifier for the task
    * @param taskName Human-readable task name (used for branch naming)
    * @param agentId Optional agent ID that owns this worktree
    * @returns WorktreeInfo on success, null if at capacity
    */
-  spawn(taskId: string, taskName: string, agentId?: string): WorktreeInfo | null {
+  async spawn(taskId: string, taskName: string, agentId?: string): Promise<WorktreeInfo | null> {
+    // Validate git repo on first use
+    if (!this.gitignoreUpdated) {
+      await this.validateGitRepo();
+    }
+
     // Resource Guard: Check concurrent limit
     if (!this.canSpawn()) {
       koryLog.warn({
@@ -112,7 +126,7 @@ export class WorkspaceManager {
     }
 
     // Create the worktree with a new branch
-    const result = this.runGit(["worktree", "add", "-b", branchName, worktreePath, "HEAD"]);
+    const result = await this.runGitAsync(["worktree", "add", "-b", branchName, worktreePath, "HEAD"]);
     if (!result.success) {
       koryLog.error({ taskId, output: result.output }, "Failed to create worktree");
       return null;
@@ -120,7 +134,7 @@ export class WorkspaceManager {
 
     // Handle .env file copying based on security policy
     if (this.copyEnvFiles) {
-      this.copyEnvToWorktree(worktreePath);
+      await this.copyEnvToWorktree(worktreePath);
     }
 
     const worktree: WorktreeInfo = {
@@ -146,23 +160,25 @@ export class WorkspaceManager {
 
   /**
    * Reconcile changes from a worktree back to main and clean up
+   * PERFORMANCE: Now fully async to avoid blocking.
+   * 
    * @param taskId The task/worktree ID to reconcile
    * @param squash Whether to squash commits (true) or preserve history (false)
    * @returns Success status and details
    */
-  reconcile(taskId: string, squash = true): { success: boolean; message: string } {
+  async reconcile(taskId: string, squash = true): Promise<{ success: boolean; message: string }> {
     const worktree = this.worktrees.get(taskId);
     if (!worktree) {
       return { success: false, message: `Worktree ${taskId} not found` };
     }
 
     // Check for uncommitted changes in the worktree
-    const hasChanges = this.runGit(["-C", worktree.path, "status", "--porcelain"]).output.trim() !== "";
+    const hasChanges = (await this.runGitAsync(["-C", worktree.path, "status", "--porcelain"])).output.trim() !== "";
     
     if (hasChanges) {
       // Auto-commit any pending changes
-      this.runGit(["-C", worktree.path, "add", "."]);
-      const commitResult = this.runGit([
+      await this.runGitAsync(["-C", worktree.path, "add", "."]);
+      const commitResult = await this.runGitAsync([
         "-C", worktree.path, "commit",
         "-m", `[AI] Changes from ${worktree.taskName}`,
         "--no-verify"
@@ -174,14 +190,14 @@ export class WorkspaceManager {
     }
 
     // Return to main repo and merge the worktree branch
-    const mainBranch = this.getMainBranch();
+    const mainBranch = await this.getMainBranch();
     
     // Checkout main
-    this.runGit(["checkout", mainBranch]);
+    await this.runGitAsync(["checkout", mainBranch]);
 
     if (squash) {
       // Squash merge: Combine all worktree changes into one commit
-      const mergeResult = this.runGit([
+      const mergeResult = await this.runGitAsync([
         "merge", "--squash", worktree.branchName
       ]);
       
@@ -191,7 +207,7 @@ export class WorkspaceManager {
       }
 
       // Commit the squashed changes
-      const commitResult = this.runGit([
+      const commitResult = await this.runGitAsync([
         "commit",
         "-m", `feat: ${worktree.taskName} [ai-${taskId.slice(0, 8)}]`,
         "--no-verify"
@@ -202,7 +218,7 @@ export class WorkspaceManager {
       }
     } else {
       // Regular merge: Preserve all commits from worktree
-      const mergeResult = this.runGit([
+      const mergeResult = await this.runGitAsync([
         "merge", worktree.branchName,
         "-m", `Merge ${worktree.branchName} into ${mainBranch}`
       ]);
@@ -214,7 +230,7 @@ export class WorkspaceManager {
     }
 
     // Cleanup: Remove worktree and branch
-    const cleanupResult = this.cleanup(taskId);
+    const cleanupResult = await this.cleanup(taskId);
     
     return {
       success: true,
@@ -226,24 +242,26 @@ export class WorkspaceManager {
 
   /**
    * Clean up a worktree and its branch without merging
+   * PERFORMANCE: Now fully async.
+   * 
    * @param taskId The task/worktree ID to clean up
    * @returns Success status
    */
-  cleanup(taskId: string): { success: boolean; message: string } {
+  async cleanup(taskId: string): Promise<{ success: boolean; message: string }> {
     const worktree = this.worktrees.get(taskId);
     if (!worktree) {
       return { success: false, message: `Worktree ${taskId} not found` };
     }
 
     // Remove the worktree
-    const removeResult = this.runGit(["worktree", "remove", "--force", worktree.path]);
+    const removeResult = await this.runGitAsync(["worktree", "remove", "--force", worktree.path]);
     if (!removeResult.success) {
       koryLog.error({ taskId, output: removeResult.output }, "Failed to remove worktree");
       return { success: false, message: "Failed to remove worktree: " + removeResult.output };
     }
 
     // Delete the branch
-    this.runGit(["branch", "-D", worktree.branchName]);
+    await this.runGitAsync(["branch", "-D", worktree.branchName]);
 
     // Remove from tracking
     this.worktrees.delete(taskId);
@@ -270,9 +288,10 @@ export class WorkspaceManager {
 
   /**
    * List all Git worktrees (including ones we didn't create)
+   * PERFORMANCE: Now async.
    */
-  listAllWorktrees(): Array<{ path: string; branch?: string; detached: boolean }> {
-    const result = this.runGit(["worktree", "list", "--porcelain"]);
+  async listAllWorktrees(): Promise<Array<{ path: string; branch?: string; detached: boolean }>> {
+    const result = await this.runGitAsync(["worktree", "list", "--porcelain"]);
     if (!result.success) return [];
 
     const worktrees: Array<{ path: string; branch?: string; detached: boolean }> = [];
@@ -296,9 +315,10 @@ export class WorkspaceManager {
 
   /**
    * Prune any stale worktree references
+   * PERFORMANCE: Now async.
    */
-  prune(): { success: boolean; message: string } {
-    const result = this.runGit(["worktree", "prune"]);
+  async prune(): Promise<{ success: boolean; message: string }> {
+    const result = await this.runGitAsync(["worktree", "prune"]);
     if (result.success) {
       return { success: true, message: "Stale worktree references pruned" };
     }
@@ -307,19 +327,31 @@ export class WorkspaceManager {
 
   // ─── Private Helper Methods ───────────────────────────────────────────────
 
-  private isGitRepo(): boolean {
-    return this.runGit(["rev-parse", "--is-inside-work-tree"]).success;
-  }
+  /**
+   * Run git command asynchronously to avoid blocking the event loop.
+   * PERFORMANCE: Uses Bun.spawn instead of spawnSync for non-blocking I/O.
+   */
+  private async runGitAsync(args: string[]): Promise<{ success: boolean; output: string }> {
+    try {
+      const proc = Bun.spawn(["git", ...args], {
+        cwd: this.repoRoot,
+        stdout: "pipe",
+        stderr: "pipe",
+      });
 
-  private runGit(args: string[]): { success: boolean; output: string } {
-    const proc = spawnSync(["git", ...args], {
-      cwd: this.repoRoot,
-      stdout: "pipe",
-      stderr: "pipe",
-    });
+      const [stdout, stderr] = await Promise.all([
+        new Response(proc.stdout).text(),
+        new Response(proc.stderr).text(),
+      ]);
 
-    const output = proc.stdout.toString() + proc.stderr.toString();
-    return { success: proc.exitCode === 0, output };
+      const exitCode = await proc.exited;
+      const output = (stdout + stderr).trim();
+      
+      return { success: exitCode === 0, output };
+    } catch (err) {
+      koryLog.error({ error: err instanceof Error ? err.message : String(err), args }, "Git command failed");
+      return { success: false, output: String(err) };
+    }
   }
 
   private sanitizeBranchName(name: string): string {
@@ -331,7 +363,7 @@ export class WorkspaceManager {
       .slice(0, 50); // Keep it reasonable
   }
 
-  private ensureGitignoreEntry(): void {
+  private async ensureGitignoreEntry(): Promise<void> {
     if (this.gitignoreUpdated) return;
 
     const gitignorePath = join(this.repoRoot, ".gitignore");
@@ -361,7 +393,7 @@ export class WorkspaceManager {
     }
   }
 
-  private copyEnvToWorktree(worktreePath: string): void {
+  private async copyEnvToWorktree(worktreePath: string): Promise<void> {
     const envFiles = [".env", ".env.local", ".env.development"];
     
     for (const envFile of envFiles) {
@@ -374,23 +406,23 @@ export class WorkspaceManager {
           writeFileSync(targetPath, content, "utf-8");
           koryLog.debug({ file: envFile }, "Copied .env file to worktree");
         } catch (err) {
-          koryLog.warn({ file: envFile, err }, "Failed to copy .env file");
+          koryLog.warn({ file: envFile, error: err instanceof Error ? err.message : String(err) }, "Failed to copy .env file");
         }
       }
     }
   }
 
-  private getMainBranch(): string {
+  private async getMainBranch(): Promise<string> {
     // Try common main branch names
     const candidates = ["main", "master", "trunk", "develop"];
     
     for (const branch of candidates) {
-      const result = this.runGit(["rev-parse", "--verify", branch]);
+      const result = await this.runGitAsync(["rev-parse", "--verify", branch]);
       if (result.success) return branch;
     }
 
     // Fallback to current branch
-    const result = this.runGit(["rev-parse", "--abbrev-ref", "HEAD"]);
+    const result = await this.runGitAsync(["rev-parse", "--abbrev-ref", "HEAD"]);
     return result.output.trim() || "main";
   }
 }

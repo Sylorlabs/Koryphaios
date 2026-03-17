@@ -27,7 +27,9 @@ export function createSessionRoutes(deps: RouteDependencies): RouteHandler[] {
             handler: async (req, _params, ctx) => {
                 const body = await req.json() as { title?: string; parentSessionId?: string };
                 const title = sanitizeString(body.title, SESSION.MAX_TITLE_LENGTH);
-                const session = sessions.create(title ?? undefined, body.parentSessionId);
+                // SessionStore.create signature: create(userId?, title?, parentId?)
+                // In single-user mode, we use "system" as the userId
+                const session = sessions.create("system", title ?? undefined, body.parentSessionId);
                 return json({ ok: true, data: session }, 201);
             },
         },

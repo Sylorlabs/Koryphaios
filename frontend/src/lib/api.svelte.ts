@@ -68,3 +68,121 @@ export async function parseJsonResponse<T = LooseApiResponse>(
 
 import { friendlyHttpError as friendlyHttpErrorImpl } from './utils/http-error';
 export { friendlyHttpErrorImpl as friendlyHttpError };
+
+// ─── Dynamic Provider API ───────────────────────────────────────────────────
+
+import type { 
+  ProviderPreset, 
+  DynamicProviderConfig, 
+  ReasoningConfig,
+  APIResponse,
+} from '@koryphaios/shared';
+
+const API_BASE = '/api';
+
+/** Get available provider presets */
+export async function getProviderPresets(): Promise<ProviderPreset[]> {
+  const res = await apiFetch(`${API_BASE}/providers/presets`);
+  const data = await parseJsonResponse(res);
+  return data.ok ? data.data : [];
+}
+
+/** Get all dynamic providers */
+export async function getDynamicProviders(): Promise<APIResponse> {
+  const res = await apiFetch(`${API_BASE}/providers/dynamic`);
+  return parseJsonResponse(res);
+}
+
+/** Add a new dynamic provider */
+export async function addDynamicProvider(
+  config: DynamicProviderConfig
+): Promise<APIResponse> {
+  const res = await apiFetch(`${API_BASE}/providers/dynamic`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(config),
+  });
+  return parseJsonResponse(res);
+}
+
+/** Get a specific dynamic provider */
+export async function getDynamicProvider(name: string): Promise<APIResponse> {
+  const res = await apiFetch(`${API_BASE}/providers/dynamic/${encodeURIComponent(name)}`);
+  return parseJsonResponse(res);
+}
+
+/** Update a dynamic provider */
+export async function updateDynamicProvider(
+  name: string,
+  config: Partial<DynamicProviderConfig>
+): Promise<APIResponse> {
+  const res = await apiFetch(`${API_BASE}/providers/dynamic/${encodeURIComponent(name)}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(config),
+  });
+  return parseJsonResponse(res);
+}
+
+/** Remove a dynamic provider */
+export async function removeDynamicProvider(name: string): Promise<APIResponse> {
+  const res = await apiFetch(`${API_BASE}/providers/dynamic/${encodeURIComponent(name)}`, {
+    method: 'DELETE',
+  });
+  return parseJsonResponse(res);
+}
+
+/** Test a dynamic provider connection */
+export async function testDynamicProvider(
+  name: string,
+  config: Partial<DynamicProviderConfig>
+): Promise<APIResponse> {
+  const res = await apiFetch(`${API_BASE}/providers/dynamic/${encodeURIComponent(name)}/test`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(config),
+  });
+  return parseJsonResponse(res);
+}
+
+/** Update provider reasoning configuration */
+export async function setProviderReasoning(
+  name: string,
+  config: ReasoningConfig
+): Promise<APIResponse> {
+  const res = await apiFetch(`${API_BASE}/providers/dynamic/${encodeURIComponent(name)}/reasoning`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(config),
+  });
+  return parseJsonResponse(res);
+}
+
+/** Update model-specific reasoning configuration */
+export async function setModelReasoning(
+  providerName: string,
+  modelId: string,
+  config: ReasoningConfig
+): Promise<APIResponse> {
+  const encodedName = encodeURIComponent(providerName);
+  const encodedModel = encodeURIComponent(modelId);
+  const res = await apiFetch(`${API_BASE}/providers/dynamic/${encodedName}/reasoning/${encodedModel}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(config),
+  });
+  return parseJsonResponse(res);
+}
+
+/** Get reasoning configuration */
+export async function getProviderReasoning(
+  name: string,
+  modelId?: string
+): Promise<APIResponse> {
+  let url = `${API_BASE}/providers/dynamic/${encodeURIComponent(name)}/reasoning`;
+  if (modelId) {
+    url += `?model=${encodeURIComponent(modelId)}`;
+  }
+  const res = await apiFetch(url);
+  return parseJsonResponse(res);
+}

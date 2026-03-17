@@ -50,8 +50,8 @@ export class CodexProvider implements Provider {
     const killAndReap = (): void => {
       try {
         proc.kill();
-      } catch {
-        // already exited
+      } catch (err) {
+        // Process already exited - silently ignore
       }
     };
 
@@ -86,8 +86,8 @@ export class CodexProvider implements Provider {
       killAndReap();
       try {
         await Promise.race([proc.exited, new Promise((r) => setTimeout(r, 2000))]);
-      } catch {
-        // ignore
+      } catch (err) {
+        // Ignore timeout waiting for process exit
       }
     }
   }

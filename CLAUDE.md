@@ -11,7 +11,7 @@ time-travel undo/redo via git shadow logging. Frontend is SvelteKit with real-ti
 ## Dev commands
 ```bash
 bun run dev              # starts Tauri desktop app (recommended)
-bun run dev:backend      # backend only (:3000)
+bun run dev:backend      # backend only (:29473 - avoids common dev port conflicts)
 bun run dev:desktop      # Tauri dev mode
 bun run build            # build all workspaces
 bun run build:desktop    # build desktop app for distribution
@@ -73,7 +73,7 @@ Key exports: `ProviderName`, `ModelDef`, `AgentRole`, `AgentStatus`, `ToolName`,
 - `routes/` handlers are **thin** — never put orchestration logic in route handlers
 - Frontend uses **Svelte 5** (runes syntax: `$state`, `$derived`, `$effect`) not Svelte 4 stores
 - Tailwind v4 (CSS-first config, no `tailwind.config.js`)
-- Config lives in `config.example.json` → copy to `config.json` (gitignored)
+- Config lives in `config.example.json` → copy to `koryphaios.json` (gitignored)
 
 ## Architecture docs
 | Doc | Topic |

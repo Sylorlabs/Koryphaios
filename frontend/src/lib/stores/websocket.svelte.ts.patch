@@ -1,0 +1,28 @@
+// PATCH: Fix race condition in session switching
+// Problem: activeSessionId is updated BEFORE subscription, allowing old session messages through
+
+// CURRENT (buggy):
+async function selectSession(id: string) {
+  if (sessionStore.activeSessionId === id) return;
+  lastLoadedSessionId = id;
+  sessionStore.activeSessionId = id;  // ← Race window starts here
+  wsStore.subscribeToSession(id);      // ← Old session messages slip through
+  await loadHistory(id);
+}
+
+// FIXED: Subscribe first, then switch active session
+async function selectSession(id: string) {
+  if (sessionStore.activeSessionId === id) return;
+  
+  // 1. Clear feed and pending state for old session FIRST
+  wsStore.clearFeed();
+  wsStore.unsubscribeFromCurrentSession();
+  
+  // 2. Load history BEFORE making it active (prevents flash of empty state)
+  lastLoadedSessionId = id;
+  await loadHistory(id);
+  
+  // 3. NOW switch active session and subscribe
+  sessionStore.activeSessionId = id;
+  wsStore.subscribeToSession(id);
+}

@@ -4,6 +4,7 @@
 
 import { validateUrl } from "../security";
 import type { Tool, ToolCallInput, ToolContext, ToolCallOutput } from "./registry";
+import { toolLog } from "../logger";
 
 const MAX_REDIRECTS = 5;
 const DEFAULT_MAX_LENGTH = 10_000;
@@ -231,7 +232,8 @@ export class WebFetchTool implements Tool {
       }
 
       return url.toString();
-    } catch {
+    } catch (err) {
+      toolLog.debug({ error: err instanceof Error ? err.message : String(err) }, "Failed to build IP-based URL");
       return originalUrl;
     }
   }

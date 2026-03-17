@@ -79,7 +79,7 @@ export const PROVIDER_CONFIGS: ProviderConfig[] = [
     { name: "togetherai", baseUrl: "https://api.together.ai", authMode: "api_key", envKeys: ["TOGETHERAI_API_KEY", "TOGETHER_API_KEY"] },
     { name: "venice", baseUrl: "https://api.venice.ai", authMode: "api_key", envKeys: ["VENICE_API_KEY"] },
     { name: "zenmux", baseUrl: "https://zenmux.ai/api/anthropic", authMode: "api_key", envKeys: ["ZENMUX_API_KEY"] },
-    { name: "opencodezen", baseUrl: "https://opencode.ai/zen", authMode: "api_key", envKeys: ["OPENCODEZEN_API_KEY"] },
+    { name: "opencodezen", baseUrl: "https://opencode.ai/zen", authMode: "api_key", envKeys: ["OPENCODE_ZEN_API_KEY"] },
     { name: "firmware", baseUrl: "https://api.firmware.ai", authMode: "api_key", envKeys: ["FIRMWARE_API_KEY"] },
     { name: "302ai", baseUrl: "https://api.302.ai", authMode: "api_key", envKeys: ["A302AI_API_KEY"] },
 

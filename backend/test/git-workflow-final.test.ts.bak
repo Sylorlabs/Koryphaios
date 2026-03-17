@@ -1,0 +1,246 @@
+// FINAL Real integration tests for Git Workflow features
+// All async methods properly awaited
+
+import { describe, test, expect, beforeAll, afterAll } from "bun:test";
+import { WorkspaceManager } from "../src/kory/workspace-manager";
+import { GitManager } from "../src/kory/git-manager";
+import { AutoCommitService } from "../src/kory/auto-commit-service";
+import { ShadowLogger } from "../src/kory/shadow-logger";
+import { SnapshotManager } from "../src/kory/snapshot-manager";
+import { join } from "node:path";
+import { mkdirSync, rmSync, existsSync, writeFileSync, readFileSync } from "node:fs";
+import { spawnSync } from "bun";
+
+const TEST_DIR = "/tmp/kory-git-final-test";
+
+describe("🧪 Git Workflow - FINAL VERIFICATION TESTS", () => {
+  beforeAll(() => {
+    if (existsSync(TEST_DIR)) rmSync(TEST_DIR, { recursive: true, force: true });
+    mkdirSync(TEST_DIR, { recursive: true });
+    spawnSync(["git", "init"], { cwd: TEST_DIR, stdout: "pipe", stderr: "pipe" });
+    spawnSync(["git", "config", "user.email", "test@test.com"], { cwd: TEST_DIR, stdout: "pipe", stderr: "pipe" });
+    spawnSync(["git", "config", "user.name", "Test User"], { cwd: TEST_DIR, stdout: "pipe", stderr: "pipe" });
+    writeFileSync(join(TEST_DIR, "README.md"), "# Test Project");
+    spawnSync(["git", "add", "."], { cwd: TEST_DIR, stdout: "pipe", stderr: "pipe" });
+    spawnSync(["git", "commit", "-m", "Initial commit"], { cwd: TEST_DIR, stdout: "pipe", stderr: "pipe" });
+  });
+
+  afterAll(() => {
+    if (existsSync(TEST_DIR)) rmSync(TEST_DIR, { recursive: true, force: true });
+  });
+
+  // ═══════════════════════════════════════════════════════════════
+  // ✅ GitManager - Basic Git Operations
+  // ═══════════════════════════════════════════════════════════════
+  describe("✅ GitManager (4/4 tests)", () => {
+    test("detects git repository", () => {
+      const git = new GitManager(TEST_DIR);
+      expect(git.isGitRepo()).toBe(true);
+    });
+
+    test("gets current hash", () => {
+      const git = new GitManager(TEST_DIR);
+      const hash = git.getCurrentHash();
+      expect(hash).toBeDefined();
+      expect(hash?.length).toBe(40);
+    });
+
+    test("stages and commits files", async () => {
+      const git = new GitManager(TEST_DIR);
+      writeFileSync(join(TEST_DIR, "test.txt"), "content");
+      expect(await git.stageFile("test.txt")).toBe(true);
+      expect(await git.commit("Add test")).toBe(true);
+    });
+
+    test("rollbacks to previous hash", async () => {
+      const git = new GitManager(TEST_DIR);
+      const originalHash = git.getCurrentHash();
+      writeFileSync(join(TEST_DIR, "rollback.txt"), "temp");
+      await git.stageFile("rollback.txt");
+      await git.commit("Add rollback file");
+      
+      expect(existsSync(join(TEST_DIR, "rollback.txt"))).toBe(true);
+      expect(git.rollback(originalHash!)).toBe(true);
+      expect(existsSync(join(TEST_DIR, "rollback.txt"))).toBe(false);
+    });
+  });
+
+  // ═══════════════════════════════════════════════════════════════
+  // ✅ WorkspaceManager - Git Worktree Isolation
+  // ═══════════════════════════════════════════════════════════════
+  describe("✅ WorkspaceManager (6/6 tests)", () => {
+    let workspace: WorkspaceManager;
+
+    beforeAll(() => {
+      workspace = new WorkspaceManager(TEST_DIR, {
+        worktreeDir: ".trees",
+        worktreeLimit: 4,
+        copyEnvFiles: false,
+      });
+    });
+
+    test("spawns worktree with isolated branch", async () => {
+      const wt = await workspace.spawn("wt-1", "Feature work", "agent-1");
+      expect(wt).toBeDefined();
+      expect(wt).not.toBeNull();
+      expect(wt?.path).toContain(".trees");
+      expect(wt?.branchName).toMatch(/^ai\//);
+      expect(existsSync(wt!.path)).toBe(true);
+    });
+
+    test("tracks active worktrees", () => {
+      const status = workspace.getStatus();
+      expect(status.active.length).toBeGreaterThan(0);
+      expect(status.maxAllowed).toBe(4);
+    });
+
+    test("isolates files from main repo", async () => {
+      const wt = await workspace.spawn("wt-2", "Isolated work", "agent-2");
+      writeFileSync(join(wt!.path, "isolated.txt"), "secret");
+      
+      expect(existsSync(join(wt!.path, "isolated.txt"))).toBe(true);
+      expect(existsSync(join(TEST_DIR, "isolated.txt"))).toBe(false);
+      
+      await workspace.cleanup("wt-2");
+    });
+
+    test("reconciles changes to main via squash", async () => {
+      const wt = await workspace.spawn("wt-3", "Reconcile work", "agent-3");
+      writeFileSync(join(wt!.path, "reconciled.txt"), "merged content");
+      
+      spawnSync(["git", "add", "."], { cwd: wt!.path });
+      spawnSync(["git", "commit", "-m", "Work", "--no-verify"], { cwd: wt!.path });
+      
+      expect(existsSync(join(TEST_DIR, "reconciled.txt"))).toBe(false);
+      
+      const result = await workspace.reconcile("wt-3", true);
+      expect(result.success).toBe(true);
+      
+      expect(existsSync(join(TEST_DIR, "reconciled.txt"))).toBe(true);
+      expect(readFileSync(join(TEST_DIR, "reconciled.txt"), "utf-8")).toBe("merged content");
+    });
+
+    test("cleans up without reconciling", async () => {
+      const wt = await workspace.spawn("wt-4", "Cleanup work", "agent-4");
+      writeFileSync(join(wt!.path, "cleanup.txt"), "orphan");
+      
+      const result = await workspace.cleanup("wt-4");
+      expect(result.success).toBe(true);
+      
+      expect(existsSync(wt!.path)).toBe(false);
+      expect(existsSync(join(TEST_DIR, "cleanup.txt"))).toBe(false);
+    });
+
+    test("enforces worktree limit", async () => {
+      const worktrees = [];
+      for (let i = 0; i < 4; i++) {
+        const wt = await workspace.spawn(`limit-${i}`, `Task ${i}`, `agent-${i}`);
+        if (wt) worktrees.push(wt);
+      }
+      
+      expect(workspace.canSpawn()).toBe(false);
+      expect(await workspace.spawn("over-limit", "Too many", "agent-x")).toBeNull();
+      
+      for (const wt of worktrees) await workspace.cleanup(wt.id);
+    });
+  });
+
+  // ═══════════════════════════════════════════════════════════════
+  // ✅ AutoCommitService - Beginner Mode Branch Creation
+  // ═══════════════════════════════════════════════════════════════
+  describe("✅ AutoCommitService (2/2 tests)", () => {
+    test("creates branch with commits", async () => {
+      const git = new GitManager(TEST_DIR);
+      const autoCommit = new AutoCommitService(TEST_DIR, git);
+      
+      writeFileSync(join(TEST_DIR, "feature.txt"), "New feature");
+      const branchBefore = await git.getBranch();
+      
+      const result = await autoCommit.autoCommitAndCreatePR("Add feature X");
+      
+      expect(result.success).toBe(true);
+      expect(result.branch).toMatch(/^kory\//);
+      expect(result.commitHash?.length).toBe(40);
+      
+      // Back on original branch
+      expect(await git.getBranch()).toBe(branchBefore);
+      
+      // Verify branch exists
+      const branches = await git.getBranches();
+      expect(branches.some(b => b.includes("kory/"))).toBe(true);
+      
+      // Note: File NOT on main (it's on the feature branch - that's correct!)
+    });
+
+    test("returns to original branch after commit", async () => {
+      const git = new GitManager(TEST_DIR);
+      const originalBranch = await git.getBranch();
+      
+      writeFileSync(join(TEST_DIR, "another.txt"), "Another feature");
+      await new AutoCommitService(TEST_DIR, git).autoCommitAndCreatePR("Another feature");
+      
+      expect(await git.getBranch()).toBe(originalBranch);
+    });
+  });
+
+  // ═══════════════════════════════════════════════════════════════
+  // ✅ ShadowLogger - Time Travel / Ghost Commits
+  // ═══════════════════════════════════════════════════════════════
+  describe("✅ ShadowLogger (3/3 tests)", () => {
+    let logger: ShadowLogger;
+
+    beforeAll(() => { logger = new ShadowLogger(TEST_DIR); });
+
+    test("creates ghost commit", async () => {
+      writeFileSync(join(TEST_DIR, "ghost.txt"), "Ghost content");
+      const hash = await logger.createGhostCommit("Test ghost", { model: "gpt-4" });
+      
+      expect(hash).toBeDefined();
+      expect(hash?.length).toBe(40);
+    });
+
+    test("gets timeline", async () => {
+      const timeline = await logger.getTimeline(10);
+      expect(Array.isArray(timeline)).toBe(true);
+      expect(timeline.length).toBeGreaterThan(0);
+    });
+
+    test("recovers to ghost state", async () => {
+      const timeline = await logger.getTimeline(1);
+      const targetHash = timeline[0].hash;
+      
+      writeFileSync(join(TEST_DIR, "temp.txt"), "Will be removed");
+      expect(existsSync(join(TEST_DIR, "temp.txt"))).toBe(true);
+      
+      const result = await logger.recover(targetHash);
+      expect(result.success).toBe(true);
+      
+      expect(existsSync(join(TEST_DIR, "temp.txt"))).toBe(false);
+    });
+  });
+
+  // ═══════════════════════════════════════════════════════════════
+  // ✅ SnapshotManager - Non-Git Fallback
+  // ═══════════════════════════════════════════════════════════════
+  describe("✅ SnapshotManager (2/2 tests)", () => {
+    let snapshots: SnapshotManager;
+
+    beforeAll(() => { snapshots = new SnapshotManager(TEST_DIR); });
+
+    test("creates file snapshot", async () => {
+      writeFileSync(join(TEST_DIR, "snap.txt"), "Original");
+      await snapshots.createSnapshot("s1", "v1", ["snap.txt"], TEST_DIR);
+      
+      expect(existsSync(join(TEST_DIR, ".koryphaios", "snapshots", "s1", "v1", "snap.txt"))).toBe(true);
+    });
+
+    test("restores from snapshot", async () => {
+      writeFileSync(join(TEST_DIR, "snap.txt"), "Modified");
+      
+      const result = await snapshots.restoreSnapshot("s1", "v1", TEST_DIR);
+      expect(result.success).toBe(true);
+      
+      expect(readFileSync(join(TEST_DIR, "snap.txt"), "utf-8")).toBe("Original");
+    });
+  });
+});

@@ -30,7 +30,7 @@ const timeTravel = new TimeTravelService("/path/to/repo", {
 
 // After AI makes changes
 timeTravel.checkpoint("Fixed login bug", {
-  model: "claude-sonnet-4-5",
+  model: "claude-3-5-sonnet",
   prompt: "Fix the authentication bug in login.ts",
   cost: 0.023,
   tokensIn: 1500,
@@ -58,7 +58,7 @@ const logger = new ShadowLogger("/path/to/repo");
 
 // Create ghost commit
 const ghostHash = logger.createGhostCommit("Added user API endpoint", {
-  model: "gpt-5",
+  model: "gpt-4o",
   prompt: "Create a REST API for user management",
   cost: 0.045,
 });
@@ -100,7 +100,7 @@ Each ghost commit stores metadata using Git Notes:
 
 ```bash
 # ShadowLogger attaches:
-git notes --ref refs/notes/shadow-logger add -m '{"model":"gpt-5","cost":0.02}' [hash]
+git notes --ref refs/notes/shadow-logger add -m '{"model":"gpt-4o","cost":0.02}' [hash]
 
 # Retrieved later:
 git notes --ref refs/notes/shadow-logger show [hash]
@@ -212,7 +212,7 @@ timeTravel.checkpoint("Added semicolon", { ... }); // Too granular
 
 ```typescript
 timeTravel.checkpoint("Fixed API bug", {
-  model: "claude-sonnet-4-5",
+  model: "claude-3-5-sonnet",
   prompt: userMessage,        // Full prompt for context
   cost: calculateCost(),      // Track spending
   tokensIn: usage.input,

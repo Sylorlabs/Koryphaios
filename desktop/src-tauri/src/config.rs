@@ -67,6 +67,16 @@ pub struct CspConfig {
     pub font_src: Vec<String>,
 }
 
+/// Port information written by the backend when using dynamic port allocation
+#[derive(Debug, Clone, Deserialize)]
+struct PortInfo {
+    url: String,
+    #[serde(rename = "wsUrl")]
+    ws_url: String,
+    timestamp: u64,
+    pid: u32,
+}
+
 impl AppConfig {
     pub fn load() -> Result<Self, ConfigError> {
         let config_path = Self::config_path()?;
@@ -89,11 +99,113 @@ impl AppConfig {
     }
     
     pub fn backend_url(&self) -> String {
-        format!("http://{}:{}", self.server.host, self.server.port)
+        // Priority order for backend URL discovery:
+        // 1. KORYPHAIOS_BACKEND_URL environment variable (highest priority)
+        // 2. KORYPHAIOS_PORT environment variable
+        // 3. Active port file (written by backend when using dynamic port)
+        // 4. Config file default
+        
+        // 1. Check explicit backend URL env var
+        if let Ok(url) = std::env::var("KORYPHAIOS_BACKEND_URL") {
+            eprintln!("[Koryphaios] Using KORYPHAIOS_BACKEND_URL: {}", url);
+            return url;
+        }
+        
+        // 2. Check KORYPHAIOS_PORT env var
+        if let Ok(port_str) = std::env::var("KORYPHAIOS_PORT") {
+            if let Ok(port) = port_str.parse::<u16>() {
+                let url = format!("http://{}:{}", self.server.host, port);
+                eprintln!("[Koryphaios] Using KORYPHAIOS_PORT: {}", url);
+                return url;
+            }
+        }
+        
+        // 3. Check active port file (backend writes this when using dynamic port)
+        if let Some(port_info) = Self::read_active_port_file() {
+            eprintln!("[Koryphaios] Using active port file: {}", port_info.url);
+            return port_info.url;
+        }
+        
+        // 4. Fall back to config file default
+        let url = format!("http://{}:{}", self.server.host, self.server.port);
+        eprintln!("[Koryphaios] Using config default: {}", url);
+        url
     }
     
     pub fn websocket_url(&self) -> String {
+        // Priority order for WebSocket URL discovery:
+        // 1. KORYPHAIOS_WS_URL environment variable
+        // 2. KORYPHAIOS_PORT environment variable
+        // 3. Active port file
+        // 4. Config file default
+        
+        if let Ok(url) = std::env::var("KORYPHAIOS_WS_URL") {
+            return url;
+        }
+        
+        if let Ok(port_str) = std::env::var("KORYPHAIOS_PORT") {
+            if let Ok(port) = port_str.parse::<u16>() {
+                return format!("ws://{}:{}{}", self.server.host, port, self.server.ws_path);
+            }
+        }
+        
+        if let Some(port_info) = Self::read_active_port_file() {
+            return port_info.ws_url;
+        }
+        
         format!("ws://{}:{}{}", self.server.host, self.server.port, self.server.ws_path)
+    }
+    
+    /// Read the active port file written by the backend
+    /// Returns None if file doesn't exist, is stale (>5 min old), or PID is not running
+    fn read_active_port_file() -> Option<PortInfo> {
+        // Determine the project root based on executable location
+        let port_file = if let Ok(exe_path) = std::env::current_exe() {
+            if let Some(exe_dir) = exe_path.parent() {
+                // Production: exe is in target/release/ or similar
+                // Check for .koryphaios next to the project
+                exe_dir.join("../../../.koryphaios/.active-port.json")
+            } else {
+                PathBuf::from(".koryphaios/.active-port.json")
+            }
+        } else {
+            PathBuf::from(".koryphaios/.active-port.json")
+        };
+        
+        if !port_file.exists() {
+            return None;
+        }
+        
+        let contents = fs::read_to_string(&port_file).ok()?;
+        let port_info: PortInfo = serde_json::from_str(&contents).ok()?;
+        
+        // Check if the port info is stale (>5 minutes old)
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .ok()?
+            .as_millis() as u64;
+        
+        if now.saturating_sub(port_info.timestamp) > 5 * 60 * 1000 {
+            eprintln!("[Koryphaios] Port file is stale (>5 min old)");
+            return None;
+        }
+        
+        // On Unix, check if the PID is still running
+        #[cfg(unix)]
+        {
+            use std::process::Command;
+            let output = Command::new("kill")
+                .args(&["-0", &port_info.pid.to_string()])
+                .output()
+                .ok()?;
+            
+            if !output.status.success() {
+                eprintln!("[Koryphaios] Backend PID {} not running", port_info.pid);
+                return None;
+            }
+        }
+        
+        Some(port_info)
     }
     
     fn config_path() -> Result<PathBuf, ConfigError> {
@@ -134,7 +246,7 @@ impl Default for AppConfig {
             },
             server: ServerConfig {
                 host: "127.0.0.1".to_string(),
-                port: 3000,
+                port: 29473,
                 ws_path: "/ws".to_string(),
             },
             window: WindowConfig {

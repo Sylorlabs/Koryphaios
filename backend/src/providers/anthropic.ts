@@ -100,51 +100,24 @@ export class AnthropicProvider implements Provider {
       ...(tools?.length && { tools }),
     };
 
-    // Extended thinking: Opus 4.6 & Sonnet 4.6 use adaptive + output_config.effort (Anthropic API);
-    // Haiku 4.5 and others use thinking.type "enabled" + budget_tokens.
-    const isOpus46 = /^claude-opus-4-6/i.test(request.model || "");
-    const isSonnet46 = /^claude-sonnet-4-6/i.test(request.model || "");
-    const isHaiku45 = /^claude-haiku-4-5/i.test(request.model || "");
+    // Extended thinking: Claude 3.7 Sonnet supports thinking with budget_tokens
+    const isClaude37 = /claude-3-7-sonnet/i.test(request.model || "");
 
     if (request.reasoningLevel !== undefined && request.reasoningLevel !== "") {
       const level = String(request.reasoningLevel).toLowerCase().trim();
       const outputTokens = request.maxTokens ?? 16_384;
 
-      if (isOpus46 || isSonnet46) {
-        // API: output_config.effort (low|medium|high|max), thinking.type "adaptive". Max is Opus 4.6 only.
-        const effort = (["low", "medium", "high", "max"] as const).includes(level as "low" | "medium" | "high" | "max")
-          ? level
-          : "medium";
-        if (effort === "max" && isSonnet46) {
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any -- SDK types lag behind API; output_config not yet typed
-          (params as unknown as Record<string, unknown>).output_config = { effort: "high" };
-        } else {
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any -- SDK types lag behind API; output_config not yet typed
-          (params as unknown as Record<string, unknown>).output_config = { effort };
-        }
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any -- SDK types lag behind API; thinking not yet typed
-        (params as unknown as Record<string, unknown>).thinking = { type: "adaptive" };
-      } else if (isHaiku45) {
-        // Haiku 4.5: extended thinking with budget_tokens (same API as other Claude 4).
-        const budget = level === "0" || level === "off" ? 0 : Math.max(0, parseInt(level, 10) || 8192);
-        if (budget > 0) {
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any -- SDK types lag behind API; thinking not yet typed
-          (params as unknown as Record<string, unknown>).thinking = { type: "enabled", budget_tokens: budget };
-          params.max_tokens = budget + outputTokens;
-        }
-      } else {
-        // Other Anthropic (Sonnet 4.5, 4, 3.7, etc.): thinking on/off with budget.
+      if (isClaude37) {
+        // Claude 3.7 Sonnet: extended thinking with budget_tokens
         let thinkingBudget = 8192;
         if (level === "off" || level === "none" || level === "0") {
           thinkingBudget = 0;
-        } else if (level === "on") {
-          thinkingBudget = 8192;
-        } else if (level === "low") {
+        } else if (level === "on" || level === "low") {
           thinkingBudget = 4096;
         } else if (level === "medium") {
           thinkingBudget = 8192;
         } else if (level === "high" || level === "max" || level === "xhigh") {
-          thinkingBudget = 32768;
+          thinkingBudget = 16384;
         } else if (!isNaN(Number(level))) {
           thinkingBudget = Number(level);
         }
@@ -154,6 +127,7 @@ export class AnthropicProvider implements Provider {
           params.max_tokens = thinkingBudget + outputTokens;
         }
       }
+      // Other Anthropic models don't support reasoning controls
     }
 
     try {
@@ -250,12 +224,13 @@ export class AnthropicProvider implements Provider {
       if (err instanceof Error && err.name === "AbortError") return;
       
       // Log full error details for debugging
+      const anthropicErr = err as { status?: number; error?: { code?: string; type?: string }; code?: string };
       const errorDetail = {
         message: err instanceof Error ? err.message : String(err),
         name: err instanceof Error ? err.name : undefined,
-        status: (err as any)?.status,
-        code: (err as any)?.error?.code || (err as any)?.code,
-        type: (err as any)?.error?.type,
+        status: anthropicErr?.status,
+        code: anthropicErr?.error?.code || anthropicErr?.code,
+        type: anthropicErr?.error?.type,
       };
       providerLog.error({ errorDetail, model: request.model }, "Anthropic provider stream error");
       

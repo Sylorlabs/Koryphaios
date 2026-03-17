@@ -1,7 +1,7 @@
 <script lang="ts">
   import { updater } from "$lib/stores/updater.svelte";
   import { RefreshCw, Check, AlertCircle } from "lucide-svelte";
-  import { toast } from "$lib/stores/toast.svelte";
+  import { toastStore as toast } from "$lib/stores/toast.svelte";
 
   interface Props {
     variant?: 'button' | 'menu-item';
@@ -22,16 +22,6 @@
     } else if (updater.error) {
       toast.error("Failed to check for updates");
     }
-  }
-
-  function getStatusIcon() {
-    if (updater.checking) {
-      return RefreshCw;
-    }
-    if (updater.updateAvailable) {
-      return AlertCircle;
-    }
-    return Check;
   }
 
   function getStatusText() {
@@ -62,8 +52,13 @@
     class="inline-flex items-center gap-2 px-3 py-1.5 text-sm font-medium text-slate-300 hover:text-white hover:bg-white/5 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed {className}"
     title={updater.lastChecked ? `Last checked: ${updater.getLastCheckedText()}` : 'Check for updates'}
   >
-    {#const Icon = getStatusIcon()}
-    <Icon class="w-4 h-4 {updater.checking ? 'animate-spin' : ''} {updater.updateAvailable ? 'text-amber-400' : ''}" />
+    {#if updater.checking}
+      <RefreshCw class="w-4 h-4 animate-spin" />
+    {:else if updater.updateAvailable}
+      <AlertCircle class="w-4 h-4 text-amber-400" />
+    {:else}
+      <Check class="w-4 h-4" />
+    {/if}
     <span class={updater.updateAvailable ? 'text-amber-400' : ''}>
       {getStatusText()}
     </span>
@@ -79,8 +74,13 @@
     disabled={updater.checking}
     class="w-full flex items-center gap-3 px-4 py-2 text-left text-sm hover:bg-white/5 transition-colors disabled:opacity-50 disabled:cursor-not-allowed {className}"
   >
-    {#const Icon = getStatusIcon()}
-    <Icon class="w-4 h-4 {updater.checking ? 'animate-spin' : ''} {getStatusColor()}" />
+    {#if updater.checking}
+      <RefreshCw class="w-4 h-4 animate-spin {getStatusColor()}" />
+    {:else if updater.updateAvailable}
+      <AlertCircle class="w-4 h-4 text-amber-400" />
+    {:else}
+      <Check class="w-4 h-4 {getStatusColor()}" />
+    {/if}
     <span class="flex-1 {getStatusColor()}">
       {getStatusText()}
     </span>

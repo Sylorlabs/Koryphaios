@@ -223,7 +223,8 @@ export class VaultKMSProvider implements KMSProvider {
       // 472 for data recovery mode replication secondary
       // 473 for performance standby
       return response.ok || response.status === 429 || response.status === 473;
-    } catch {
+    } catch (err) {
+      serverLog.warn({ error: err instanceof Error ? err.message : String(err) }, 'Vault health check failed');
       return false;
     }
   }
@@ -301,7 +302,8 @@ export class VaultKMSProvider implements KMSProvider {
       try {
         const { readFileSync } = await import('node:fs');
         jwt = readFileSync('/var/run/secrets/kubernetes.io/serviceaccount/token', 'utf8');
-      } catch {
+      } catch (err) {
+        serverLog.warn({ error: err instanceof Error ? err.message : String(err) }, 'Kubernetes JWT read failed');
         throw new Error('Kubernetes JWT not provided and not running in pod');
       }
     }

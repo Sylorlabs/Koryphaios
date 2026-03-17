@@ -29,11 +29,15 @@
     role="dialog"
     aria-modal="true"
     aria-labelledby="update-title"
+    tabindex="-1"
   >
     <div
       class="relative w-full max-w-md mx-4 bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl overflow-hidden"
       transition:fly={{ y: 20, duration: 300 }}
       onclick={(e) => e.stopPropagation()}
+      role="button"
+      tabindex="-1"
+      onkeydown={(e) => e.stopPropagation()}
     >
       <!-- Header with gradient -->
       <div class="relative bg-gradient-to-br from-indigo-600 to-purple-600 p-6">

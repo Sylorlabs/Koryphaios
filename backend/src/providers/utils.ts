@@ -1,6 +1,12 @@
 import { providerLog } from "../logger";
 import { wsBroker } from "../pubsub";
-import type { WSMessage, RateLimitPayload } from "@koryphaios/shared";
+import type { WSMessage, RateLimitPayload, ProviderName } from "@koryphaios/shared";
+
+/** Extended AbortSignal with newer TC39 proposal methods */
+interface AbortSignalWithExtensions {
+  timeout(ms: number): AbortSignal;
+  any(signals: AbortSignal[]): AbortSignal;
+}
 
 /**
  * Returns an AbortSignal that aborts when either the given signal aborts or a timeout elapses.
@@ -12,21 +18,21 @@ export function withTimeoutSignal(
 ): AbortSignal {
   const timeoutSignal =
     typeof AbortSignal !== "undefined" && "timeout" in AbortSignal
-      ? (AbortSignal as any).timeout(timeoutMs)
+      ? (AbortSignal as unknown as AbortSignalWithExtensions).timeout(timeoutMs)
       : createTimeoutSignal(timeoutMs);
 
   if (!signal) return timeoutSignal;
 
   if (typeof AbortSignal !== "undefined" && "any" in AbortSignal) {
-    return (AbortSignal as any).any([signal, timeoutSignal]);
+    return (AbortSignal as unknown as AbortSignalWithExtensions).any([signal, timeoutSignal]);
   }
 
   const controller = new AbortController();
   const abort = (reason?: any) => {
     try {
       controller.abort(reason);
-    } catch {
-      // already aborted
+    } catch (err) {
+      providerLog.debug({ error: err instanceof Error ? err.message : String(err) }, "Already aborted");
     }
   };
   signal.addEventListener("abort", () => abort(signal.reason), { once: true });
@@ -156,7 +162,7 @@ export async function withRetry<T>(
       // Emit rate limit event to WebSocket for UI notification
       if (isRateLimit) {
         const rateLimitPayload: RateLimitPayload = {
-          provider: (opts.providerName || "unknown") as any,
+          provider: (opts.providerName || "unknown") as ProviderName,
           model: opts.modelName || "unknown",
           retryAfterMs: Math.round(delayMs),
           attempt,

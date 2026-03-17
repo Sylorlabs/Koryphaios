@@ -415,7 +415,7 @@
               <h4 class="text-sm font-semibold text-red-400">Rules Are Always Enforced</h4>
               <p class="text-xs text-[var(--color-text-muted)] mt-1">
                 There is no option to disable rule enforcement. The Critic will always check 
-                code against .cursorrules and preferences.md. The enforcement level only 
+                code against .koryrules and preferences.md. The enforcement level only 
                 affects how strictly violations are treated.
               </p>
             </div>
@@ -431,7 +431,7 @@
               <div class="flex items-center gap-3">
                 <Shield size={18} class="text-green-400" />
                 <div>
-                  <div class="text-sm font-medium text-[var(--color-text-primary)]">.cursorrules</div>
+                  <div class="text-sm font-medium text-[var(--color-text-primary)]">.koryrules</div>
                   <div class="text-xs text-[var(--color-text-muted)]">Always enforced on all code</div>
                 </div>
               </div>

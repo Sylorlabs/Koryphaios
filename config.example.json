@@ -25,50 +25,100 @@
       "name": "xai",
       "disabled": false,
       "baseUrl": "https://api.x.ai/v1"
+    },
+    "fireworks": {
+      "name": "fireworks",
+      "disabled": false
+    },
+    "together": {
+      "name": "together",
+      "disabled": false
     }
   },
+
+  "_comment_dynamic_providers": "Dynamic providers allow unlimited OpenAI-compatible endpoints",
+  "dynamicProviders": [
+    {
+      "_comment": "Example: Add Fireworks AI with preset",
+      "name": "fireworks",
+      "preset": "fireworks",
+      "disabled": false
+    },
+    {
+      "_comment": "Example: Add Together AI with preset",
+      "name": "together",
+      "preset": "together",
+      "disabled": false
+    },
+    {
+      "_comment": "Example: Add custom OpenAI-compatible provider",
+      "name": "my-custom-provider",
+      "preset": "custom",
+      "displayName": "My Custom Provider",
+      "baseUrl": "https://api.example.com/v1",
+      "apiKey": "your-api-key-here",
+      "disabled": false
+    },
+    {
+      "_comment": "Example: Provider with custom reasoning configuration",
+      "name": "fireworks-reasoning",
+      "preset": "fireworks",
+      "apiKey": "fw_xxx",
+      "disabled": false,
+      "reasoning": {
+        "mode": "high",
+        "includeThoughts": false
+      },
+      "modelReasoning": {
+        "accounts/fireworks/models/llama-v3p1-405b-instruct": {
+          "mode": "medium",
+          "budgetTokens": 4096
+        }
+      }
+    }
+  ],
   
   "agents": {
     "manager": {
-      "model": "claude-sonnet-4-5",
+      "model": "claude-3-7-sonnet",
       "maxTokens": 8192,
       "reasoningLevel": "high"
     },
     "coder": {
-      "model": "claude-sonnet-4-5",
+      "model": "claude-3-7-sonnet",
       "maxTokens": 16384,
       "reasoningLevel": "medium"
     },
     "task": {
-      "model": "o4-mini",
+      "model": "gpt-4o-mini",
       "maxTokens": 8192
     }
   },
 
   "assignments": {
-    "frontend": "openai:gpt-4.1",
-    "backend": "google:gemini-2.5-pro",
-    "critic": "anthropic:claude-sonnet-4-5",
-    "general": "google:gemini-2.5-flash"
+    "frontend": "openai:gpt-4o",
+    "backend": "google:gemini-2.0-pro",
+    "critic": "anthropic:claude-3-7-sonnet",
+    "general": "google:gemini-2.0-flash"
   },
 
   "fallbacks": {
-    "gemini-2.5-pro": ["gpt-4.1", "claude-sonnet-4-5"],
-    "gpt-4.1": ["gemini-2.5-flash"],
-    "claude-sonnet-4-5": ["gpt-4.1"]
+    "gemini-2.0-pro": ["gpt-4o", "claude-3-7-sonnet"],
+    "gpt-4o": ["gemini-2.0-flash"],
+    "claude-3-7-sonnet": ["gpt-4o"]
   },
   
   "server": {
-    "port": 3001,
-    "host": "localhost"
+    "port": 29473,
+    "host": "127.0.0.1"
   },
   
   "dataDirectory": ".koryphaios",
   
   "contextPaths": [
-    ".cursorrules",
     "CLAUDE.md",
     "AGENTS.md",
+    "CONTRIBUTING.md",
     ".opencode.json",
     "CONVENTIONS.md"
   ],

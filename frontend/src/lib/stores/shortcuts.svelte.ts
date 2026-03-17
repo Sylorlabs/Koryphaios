@@ -19,6 +19,7 @@ const defaultShortcuts: Shortcut[] = [
   { id: 'toggle_zen_mode', keys: ['Mod', 'Shift', 'Z'], action: 'Toggle Zen mode' },
   { id: 'toggle_yolo', keys: ['Mod', 'Y'], action: 'Toggle YOLO mode' },
   { id: 'close', keys: ['Esc'], action: 'Close dialogs' },
+  { id: 'toggle_devtools', keys: ['F12'], action: 'Toggle Developer Tools' },
 ];
 
 function loadShortcuts(): Shortcut[] {

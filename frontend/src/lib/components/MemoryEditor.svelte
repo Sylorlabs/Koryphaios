@@ -1,6 +1,7 @@
 <script lang="ts">
   import { memoryStore, type MemoryFile, DEFAULT_SETTINGS } from "$lib/stores/memory.svelte";
   import { sessionStore } from "$lib/stores/sessions.svelte";
+  import Toggle from "./Toggle.svelte";
   import { 
     Brain, 
     FileText, 
@@ -36,30 +37,62 @@
     rules: false,
   });
 
-  // Sync local state when store updates
+  // Sync local state when store updates and auto-resize textareas
   $effect(() => {
     if (memoryStore.universal && !dirty.universal) {
       universalContent = memoryStore.universal.content;
+      // Auto-resize after content is set
+      requestAnimationFrame(() => autoResize(universalTextarea));
     }
   });
 
   $effect(() => {
     if (memoryStore.project && !dirty.project) {
       projectContent = memoryStore.project.content;
+      requestAnimationFrame(() => autoResize(projectTextarea));
     }
   });
 
   $effect(() => {
     if (memoryStore.session && !dirty.session) {
       sessionContent = memoryStore.session.content;
+      requestAnimationFrame(() => autoResize(sessionTextarea));
     }
   });
 
   $effect(() => {
     if (memoryStore.rules && !dirty.rules) {
       rulesContent = memoryStore.rules.content;
+      requestAnimationFrame(() => autoResize(rulesTextarea));
     }
   });
+
+  // Auto-resize textarea as user types
+  const MIN_TEXTAREA_HEIGHT = 200; // minimum height in pixels
+  const MAX_TEXTAREA_HEIGHT = 600; // maximum height before scrolling
+  
+  let universalTextarea = $state<HTMLTextAreaElement>();
+  let projectTextarea = $state<HTMLTextAreaElement>();
+  let sessionTextarea = $state<HTMLTextAreaElement>();
+  let rulesTextarea = $state<HTMLTextAreaElement>();
+  
+  function autoResize(textarea: HTMLTextAreaElement | undefined) {
+    if (!textarea) return;
+    // Reset height to auto to get the correct scrollHeight
+    textarea.style.height = 'auto';
+    // Calculate new height clamped between min and max
+    const newHeight = Math.max(
+      MIN_TEXTAREA_HEIGHT,
+      Math.min(textarea.scrollHeight, MAX_TEXTAREA_HEIGHT)
+    );
+    textarea.style.height = `${newHeight}px`;
+  }
+  
+  function handleContentChangeWithResize(type: keyof typeof dirty, value: string, textarea: HTMLTextAreaElement | undefined) {
+    handleContentChange(type, value);
+    // Use requestAnimationFrame to ensure DOM is updated before measuring
+    requestAnimationFrame(() => autoResize(textarea));
+  }
 
   // Handlers
   async function handleSaveUniversal() {
@@ -143,7 +176,7 @@
     { id: "project" as const, label: "Project Memory", icon: FileText, color: "text-blue-400" },
     { id: "universal" as const, label: "Universal Memory", icon: Brain, color: "text-purple-400" },
     { id: "session" as const, label: "Session Memory", icon: MessageSquare, color: "text-green-400" },
-    { id: "rules" as const, label: "Rules (.cursorrules)", icon: BookOpen, color: "text-orange-400" },
+    { id: "rules" as const, label: "Rules (.koryrules)", icon: BookOpen, color: "text-orange-400" },
     { id: "settings" as const, label: "Settings", icon: Settings2, color: "text-gray-400" },
   ];
 
@@ -256,11 +289,13 @@
           </div>
         </div>
         <textarea
+          bind:this={universalTextarea}
           bind:value={universalContent}
-          oninput={(e) => handleContentChange("universal", e.currentTarget.value)}
+          oninput={(e) => handleContentChangeWithResize("universal", e.currentTarget.value, universalTextarea)}
           disabled={!info.exists}
           placeholder={info.exists ? "Enter universal memory..." : "Initialize universal memory to start editing..."}
-          class="flex-1 w-full p-4 text-sm font-mono bg-[var(--color-surface-0)] text-[var(--color-text-primary)] resize-none focus:outline-none disabled:opacity-50"
+          class="w-full p-4 text-sm font-mono bg-[var(--color-surface-0)] text-[var(--color-text-primary)] resize-none focus:outline-none disabled:opacity-50 overflow-y-auto"
+          style="min-height: {MIN_TEXTAREA_HEIGHT}px; max-height: {MAX_TEXTAREA_HEIGHT}px;"
           spellcheck="false"
         ></textarea>
       </div>
@@ -321,11 +356,13 @@
           </div>
         </div>
         <textarea
+          bind:this={projectTextarea}
           bind:value={projectContent}
-          oninput={(e) => handleContentChange("project", e.currentTarget.value)}
+          oninput={(e) => handleContentChangeWithResize("project", e.currentTarget.value, projectTextarea)}
           disabled={!info.exists}
           placeholder={info.exists ? "Enter project memory..." : "Initialize project memory to start editing..."}
-          class="flex-1 w-full p-4 text-sm font-mono bg-[var(--color-surface-0)] text-[var(--color-text-primary)] resize-none focus:outline-none disabled:opacity-50"
+          class="w-full p-4 text-sm font-mono bg-[var(--color-surface-0)] text-[var(--color-text-primary)] resize-none focus:outline-none disabled:opacity-50 overflow-y-auto"
+          style="min-height: {MIN_TEXTAREA_HEIGHT}px; max-height: {MAX_TEXTAREA_HEIGHT}px;"
           spellcheck="false"
         ></textarea>
       </div>
@@ -399,11 +436,13 @@
           </div>
         {:else}
           <textarea
+            bind:this={sessionTextarea}
             bind:value={sessionContent}
-            oninput={(e) => handleContentChange("session", e.currentTarget.value)}
+            oninput={(e) => handleContentChangeWithResize("session", e.currentTarget.value, sessionTextarea)}
             disabled={!info.exists}
             placeholder={info.exists ? "Enter session memory..." : "Initialize session memory to start editing..."}
-            class="flex-1 w-full p-4 text-sm font-mono bg-[var(--color-surface-0)] text-[var(--color-text-primary)] resize-none focus:outline-none disabled:opacity-50"
+            class="w-full p-4 text-sm font-mono bg-[var(--color-surface-0)] text-[var(--color-text-primary)] resize-none focus:outline-none disabled:opacity-50 overflow-y-auto"
+            style="min-height: {MIN_TEXTAREA_HEIGHT}px; max-height: {MAX_TEXTAREA_HEIGHT}px;"
             spellcheck="false"
           ></textarea>
         {/if}
@@ -465,11 +504,13 @@
           </div>
         </div>
         <textarea
+          bind:this={rulesTextarea}
           bind:value={rulesContent}
-          oninput={(e) => handleContentChange("rules", e.currentTarget.value)}
+          oninput={(e) => handleContentChangeWithResize("rules", e.currentTarget.value, rulesTextarea)}
           disabled={!info.exists}
           placeholder={info.exists ? "Enter rules..." : "Initialize rules to start editing..."}
-          class="flex-1 w-full p-4 text-sm font-mono bg-[var(--color-surface-0)] text-[var(--color-text-primary)] resize-none focus:outline-none disabled:opacity-50"
+          class="w-full p-4 text-sm font-mono bg-[var(--color-surface-0)] text-[var(--color-text-primary)] resize-none focus:outline-none disabled:opacity-50 overflow-y-auto"
+          style="min-height: {MIN_TEXTAREA_HEIGHT}px; max-height: {MAX_TEXTAREA_HEIGHT}px;"
           spellcheck="false"
         ></textarea>
       </div>
@@ -486,70 +527,74 @@
             Choose which memory sources are included in the AI context
           </p>
           
-          <div class="space-y-3">
-            <label class="flex items-center justify-between p-3 bg-[var(--color-surface-2)] rounded-lg cursor-pointer hover:bg-[var(--color-surface-3)]">
+          <div class="space-y-2">
+            <!-- Universal Memory Toggle -->
+            <button
+              class="w-full flex items-center justify-between p-3 bg-[var(--color-surface-2)] rounded-lg hover:bg-[var(--color-surface-3)] transition-colors text-left"
+              onclick={() => toggleSetting("universalMemoryEnabled")}
+            >
               <div class="flex items-center gap-3">
-                <Brain size={18} class="text-purple-400" />
+                <div class="w-10 h-10 rounded-lg bg-purple-500/10 flex items-center justify-center">
+                  <Brain size={20} class="text-purple-400" />
+                </div>
                 <div>
                   <div class="text-sm font-medium text-[var(--color-text-primary)]">Universal Memory</div>
                   <div class="text-xs text-[var(--color-text-muted)]">Global across all projects (~/.koryphaios/)</div>
                 </div>
               </div>
-              <input
-                type="checkbox"
-                checked={memoryStore.settings?.universalMemoryEnabled ?? true}
-                onchange={() => toggleSetting("universalMemoryEnabled")}
-                class="w-4 h-4 rounded border-[var(--color-border)] bg-[var(--color-surface-0)] text-[var(--color-accent)] focus:ring-[var(--color-accent)]"
-              />
-            </label>
+              <Toggle checked={memoryStore.settings?.universalMemoryEnabled ?? true} />
+            </button>
 
-            <label class="flex items-center justify-between p-3 bg-[var(--color-surface-2)] rounded-lg cursor-pointer hover:bg-[var(--color-surface-3)]">
+            <!-- Project Memory Toggle -->
+            <button
+              class="w-full flex items-center justify-between p-3 bg-[var(--color-surface-2)] rounded-lg hover:bg-[var(--color-surface-3)] transition-colors text-left"
+              onclick={() => toggleSetting("projectMemoryEnabled")}
+            >
               <div class="flex items-center gap-3">
-                <FileText size={18} class="text-blue-400" />
+                <div class="w-10 h-10 rounded-lg bg-blue-500/10 flex items-center justify-center">
+                  <FileText size={20} class="text-blue-400" />
+                </div>
                 <div>
                   <div class="text-sm font-medium text-[var(--color-text-primary)]">Project Memory</div>
                   <div class="text-xs text-[var(--color-text-muted)]">Project-specific context (.koryphaios/project-memory/)</div>
                 </div>
               </div>
-              <input
-                type="checkbox"
-                checked={memoryStore.settings?.projectMemoryEnabled ?? true}
-                onchange={() => toggleSetting("projectMemoryEnabled")}
-                class="w-4 h-4 rounded border-[var(--color-border)] bg-[var(--color-surface-0)] text-[var(--color-accent)] focus:ring-[var(--color-accent)]"
-              />
-            </label>
+              <Toggle checked={memoryStore.settings?.projectMemoryEnabled ?? true} />
+            </button>
 
-            <label class="flex items-center justify-between p-3 bg-[var(--color-surface-2)] rounded-lg cursor-pointer hover:bg-[var(--color-surface-3)]">
+            <!-- Session Memory Toggle -->
+            <button
+              class="w-full flex items-center justify-between p-3 bg-[var(--color-surface-2)] rounded-lg hover:bg-[var(--color-surface-3)] transition-colors text-left"
+              onclick={() => toggleSetting("sessionMemoryEnabled")}
+            >
               <div class="flex items-center gap-3">
-                <MessageSquare size={18} class="text-green-400" />
+                <div class="w-10 h-10 rounded-lg bg-green-500/10 flex items-center justify-center">
+                  <MessageSquare size={20} class="text-green-400" />
+                </div>
                 <div>
                   <div class="text-sm font-medium text-[var(--color-text-primary)]">Session Memory</div>
                   <div class="text-xs text-[var(--color-text-muted)]">Per-chat persistent storage</div>
                 </div>
               </div>
-              <input
-                type="checkbox"
-                checked={memoryStore.settings?.sessionMemoryEnabled ?? true}
-                onchange={() => toggleSetting("sessionMemoryEnabled")}
-                class="w-4 h-4 rounded border-[var(--color-border)] bg-[var(--color-surface-0)] text-[var(--color-accent)] focus:ring-[var(--color-accent)]"
-              />
-            </label>
+              <Toggle checked={memoryStore.settings?.sessionMemoryEnabled ?? true} />
+            </button>
 
-            <label class="flex items-center justify-between p-3 bg-[var(--color-surface-2)] rounded-lg cursor-pointer hover:bg-[var(--color-surface-3)]">
+            <!-- Rules Toggle -->
+            <button
+              class="w-full flex items-center justify-between p-3 bg-[var(--color-surface-2)] rounded-lg hover:bg-[var(--color-surface-3)] transition-colors text-left"
+              onclick={() => toggleSetting("rulesEnabled")}
+            >
               <div class="flex items-center gap-3">
-                <BookOpen size={18} class="text-orange-400" />
+                <div class="w-10 h-10 rounded-lg bg-orange-500/10 flex items-center justify-center">
+                  <BookOpen size={20} class="text-orange-400" />
+                </div>
                 <div>
-                  <div class="text-sm font-medium text-[var(--color-text-primary)]">Rules (.cursorrules)</div>
+                  <div class="text-sm font-medium text-[var(--color-text-primary)]">Rules (.koryrules)</div>
                   <div class="text-xs text-[var(--color-text-muted)]">AI behavior rules and conventions</div>
                 </div>
               </div>
-              <input
-                type="checkbox"
-                checked={memoryStore.settings?.rulesEnabled ?? true}
-                onchange={() => toggleSetting("rulesEnabled")}
-                class="w-4 h-4 rounded border-[var(--color-border)] bg-[var(--color-surface-0)] text-[var(--color-accent)] focus:ring-[var(--color-accent)]"
-              />
-            </label>
+              <Toggle checked={memoryStore.settings?.rulesEnabled ?? true} />
+            </button>
           </div>
         </div>
 
@@ -557,31 +602,29 @@
         <div class="space-y-4 pt-4 border-t border-[var(--color-border)]">
           <h4 class="text-sm font-semibold text-[var(--color-text-primary)]">Agent Behavior</h4>
           
-          <label class="flex items-center justify-between p-3 bg-[var(--color-surface-2)] rounded-lg cursor-pointer hover:bg-[var(--color-surface-3)]">
-            <div>
+          <!-- Agent Memory Toggle -->
+          <button
+            class="w-full flex items-center justify-between p-3 bg-[var(--color-surface-2)] rounded-lg hover:bg-[var(--color-surface-3)] transition-colors text-left"
+            onclick={() => toggleSetting("agentMemoryEnabled")}
+          >
+            <div class="pr-4">
               <div class="text-sm font-medium text-[var(--color-text-primary)]">Allow Agent to Add Memories</div>
               <div class="text-xs text-[var(--color-text-muted)]">AI can automatically update memory files during compaction</div>
             </div>
-            <input
-              type="checkbox"
-              checked={memoryStore.settings?.agentMemoryEnabled ?? true}
-              onchange={() => toggleSetting("agentMemoryEnabled")}
-              class="w-4 h-4 rounded border-[var(--color-border)] bg-[var(--color-surface-0)] text-[var(--color-accent)] focus:ring-[var(--color-accent)]"
-            />
-          </label>
+            <Toggle checked={memoryStore.settings?.agentMemoryEnabled ?? true} />
+          </button>
 
-          <label class="flex items-center justify-between p-3 bg-[var(--color-surface-2)] rounded-lg cursor-pointer hover:bg-[var(--color-surface-3)]">
-            <div>
+          <!-- Auto-include Toggle -->
+          <button
+            class="w-full flex items-center justify-between p-3 bg-[var(--color-surface-2)] rounded-lg hover:bg-[var(--color-surface-3)] transition-colors text-left"
+            onclick={() => toggleSetting("autoIncludeInContext")}
+          >
+            <div class="pr-4">
               <div class="text-sm font-medium text-[var(--color-text-primary)]">Auto-include in Context</div>
               <div class="text-xs text-[var(--color-text-muted)]">Automatically add memories to AI context</div>
             </div>
-            <input
-              type="checkbox"
-              checked={memoryStore.settings?.autoIncludeInContext ?? true}
-              onchange={() => toggleSetting("autoIncludeInContext")}
-              class="w-4 h-4 rounded border-[var(--color-border)] bg-[var(--color-surface-0)] text-[var(--color-accent)] focus:ring-[var(--color-accent)]"
-            />
-          </label>
+            <Toggle checked={memoryStore.settings?.autoIncludeInContext ?? true} />
+          </button>
         </div>
 
         <!-- Context Limits -->

@@ -1,4 +1,4 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="opencodezen">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="OpenCode Zen">
   <defs>
     <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
       <stop offset="0" stop-color="hsl(20 70% 34%)"/>
@@ -6,5 +6,6 @@
     </linearGradient>
   </defs>
   <rect width="64" height="64" rx="14" fill="url(#g)"/>
-  <text x="32" y="38" text-anchor="middle" font-size="22" font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif" font-weight="700" fill="#fff">OZ</text>
+  <text x="32" y="30" text-anchor="middle" font-size="10" font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif" font-weight="700" fill="#fff">OpenCode</text>
+  <text x="32" y="44" text-anchor="middle" font-size="12" font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif" font-weight="700" fill="#fff">Zen</text>
 </svg>

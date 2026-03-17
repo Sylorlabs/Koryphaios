@@ -41,18 +41,35 @@ export async function initUrls(): Promise<void> {
   if (!browser || urlsInitialized) return;
   
   try {
-    // Access Tauri API from window.__TAURI__
+    // Try to import Tauri API directly (preferred method in Tauri v2)
+    const tauriModule = await import('@tauri-apps/api').catch(() => null);
+    if (tauriModule?.invoke) {
+      console.log('[API] Using @tauri-apps/api invoke');
+      const [backend, ws] = await Promise.all([
+        tauriModule.invoke('get_backend_url').catch(() => getBackendUrl(defaultConfig)),
+        tauriModule.invoke('get_websocket_url').catch(() => getWebSocketUrl(defaultConfig)),
+      ]);
+      
+      cachedBackendUrl = backend;
+      cachedWebsocketUrl = ws;
+      urlsInitialized = true;
+      console.log('[API] URLs initialized via Tauri:', { backend, ws });
+      return;
+    }
+    
+    // Fallback: Access Tauri API from window.__TAURI__
     const win = window as any;
-    if (!win.__TAURI__?.core?.invoke) {
-      console.warn('[API] Tauri API not available on window');
+    const invoke = win.__TAURI__?.core?.invoke || win.__TAURI__?.invoke;
+    
+    if (!invoke) {
+      console.warn('[API] Tauri API not available, using default config (port 29473)');
       cachedBackendUrl = getBackendUrl(defaultConfig);
       cachedWebsocketUrl = getWebSocketUrl(defaultConfig);
       urlsInitialized = true;
       return;
     }
     
-    const invoke = win.__TAURI__.core.invoke;
-    
+    console.log('[API] Using window.__TAURI__ invoke');
     const [backend, ws] = await Promise.all([
       invoke('get_backend_url').catch(() => getBackendUrl(defaultConfig)),
       invoke('get_websocket_url').catch(() => getWebSocketUrl(defaultConfig)),
@@ -61,6 +78,7 @@ export async function initUrls(): Promise<void> {
     cachedBackendUrl = backend;
     cachedWebsocketUrl = ws;
     urlsInitialized = true;
+    console.log('[API] URLs initialized via Tauri (window):', { backend, ws });
   } catch (e) {
     console.warn('[API] Failed to initialize URLs:', e);
     // Fall back to defaults
@@ -83,7 +101,7 @@ export function getApiBaseUrl(): string {
  * Build a full API URL
  * 
  * Usage:
- *   apiUrl('/api/sessions') -> 'http://127.0.0.1:3000/api/sessions'
+ *   apiUrl('/api/sessions') -> 'http://127.0.0.1:29473/api/sessions'
  */
 export function apiUrl(path: string): string {
   const base = getApiBaseUrl();
@@ -95,7 +113,7 @@ export function apiUrl(path: string): string {
  * Get WebSocket URL for the backend
  * 
  * Usage:
- *   getWsUrl() -> 'ws://127.0.0.1:3000/ws'
+ *   getWsUrl() -> 'ws://127.0.0.1:29473/ws'
  */
 export function getWsUrl(): string {
   if (!browser) return '';

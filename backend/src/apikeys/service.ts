@@ -36,7 +36,7 @@ export interface ApiKey {
   usageCount: number;
   isActive: boolean;
   createdAt: number;
-  metadata?: Record<string, any>;
+  metadata?: Record<string, unknown>;
 }
 
 export interface ApiKeyWithPlaintext extends ApiKey {
@@ -49,13 +49,30 @@ export interface CreateApiKeyInput {
   scopes?: ApiKeyScope[];
   rateLimitTier?: string;
   expiresInDays?: number;
-  metadata?: Record<string, any>;
+  metadata?: Record<string, unknown>;
 }
 
 export interface ApiKeyValidationResult {
   valid: boolean;
   key?: ApiKey;
   error?: string;
+}
+
+/** Database row structure for api_keys table */
+interface ApiKeyDbRow {
+  id: string;
+  user_id: string;
+  name: string;
+  prefix: string;
+  hashed_key: string;
+  scopes: string;
+  rate_limit_tier: string;
+  expires_at: number | null;
+  last_used_at: number | null;
+  usage_count: number;
+  is_active: number;
+  created_at: number;
+  metadata: string | null;
 }
 
 export class ApiKeyService {
@@ -161,7 +178,7 @@ export class ApiKeyService {
     // Find key by prefix (multiple keys may share prefix, so we check hash)
     const rows = this.db.prepare(
       `SELECT * FROM api_keys WHERE prefix = ? AND is_active = 1`
-    ).all(prefix) as any[];
+    ).all(prefix) as ApiKeyDbRow[];
 
     for (const row of rows) {
       const key = this.rowToApiKey(row);
@@ -194,7 +211,7 @@ export class ApiKeyService {
       `SELECT id, user_id, name, prefix, scopes, rate_limit_tier,
               expires_at, last_used_at, usage_count, is_active, created_at, metadata
        FROM api_keys WHERE user_id = ? ORDER BY created_at DESC`
-    ).all(userId) as any[];
+    ).all(userId) as ApiKeyDbRow[];
 
     return rows.map(row => ({
       id: row.id,
@@ -218,7 +235,7 @@ export class ApiKeyService {
   async get(userId: string, keyId: string): Promise<ApiKey | null> {
     const row = this.db.prepare(
       `SELECT * FROM api_keys WHERE id = ? AND user_id = ?`
-    ).get(keyId, userId) as any;
+    ).get(keyId, userId) as ApiKeyDbRow | undefined;
 
     if (!row) return null;
     return this.rowToApiKey(row);
@@ -258,7 +275,7 @@ export class ApiKeyService {
     updates: Partial<Pick<ApiKey, 'name' | 'scopes' | 'rateLimitTier'>>
   ): Promise<boolean> {
     const sets: string[] = [];
-    const values: any[] = [];
+    const values: (string | null)[] = [];
 
     if (updates.name !== undefined) {
       sets.push('name = ?');
@@ -363,7 +380,7 @@ export class ApiKeyService {
     }
   }
 
-  private rowToApiKey(row: any): ApiKey {
+  private rowToApiKey(row: ApiKeyDbRow): ApiKey {
     return {
       id: row.id,
       userId: row.user_id,

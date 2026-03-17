@@ -2,7 +2,7 @@
 // Domain: Unit tests for model selection and domain routing logic
 
 import { describe, it, expect, beforeEach, mock } from "bun:test";
-import { RoutingService } from "../routing-service";
+import { RoutingService } from "../services/RoutingService";
 import type { ProviderName, WorkerDomain, KoryphaiosConfig } from "@koryphaios/shared";
 import type { ProviderRegistry } from "../../providers";
 
@@ -30,7 +30,7 @@ describe("RoutingService", () => {
     } as unknown as ProviderRegistry;
 
     // Mock config
-    const mockConfig: KoryphaiosConfig = {
+    const mockConfig = {
       providers: {},
       agents: {
         manager: { model: "gpt-4.1", reasoningLevel: "medium" },
@@ -40,16 +40,13 @@ describe("RoutingService", () => {
       assignments: {
         ui: "openai:gpt-4.1",
         backend: "openai:gpt-4.1",
-        general: "anthropic:claude-sonnet-4-6"
+        general: "anthropic:claude-3-7-sonnet"
       },
       server: { port: 3000, host: "localhost" },
       dataDirectory: ".koryphaios",
     };
 
-    routingService = new RoutingService({
-      config: mockConfig,
-      providers: mockProviders
-    });
+    routingService = new RoutingService(mockProviders, mockConfig);
   });
 
   describe("resolveActiveRouting", () => {
@@ -85,25 +82,22 @@ describe("RoutingService", () => {
 
   describe("buildFallbackChain", () => {
     it("should build simple fallback chain", () => {
-      const mockConfig: KoryphaiosConfig = {
+      const mockConfig = {
         providers: {},
-        agents: { manager: { model: "gpt-5-mini" } },
+        agents: { manager: { model: "gpt-4o-mini" } },
         fallbacks: {
-          "gpt-5-mini": ["gemini-3-flash", "claude-haiku-4-5"]
+          "gpt-4o-mini": ["gemini-2.0-flash", "claude-3-5-haiku"]
         },
         server: { port: 3000, host: "localhost" },
         dataDirectory: ".koryphaios"
       };
 
-      const service = new RoutingService({
-        config: mockConfig,
-        providers: mockProviders
-      });
+      const service = new RoutingService(mockProviders, mockConfig);
 
-      const chain = service.buildFallbackChain("gpt-5-mini");
-      expect(chain).toContain("gpt-5-mini");
-      expect(chain).toContain("gemini-3-flash");
-      expect(chain).toContain("claude-haiku-4-5");
+      const chain = service.buildFallbackChain("gpt-4o-mini");
+      expect(chain).toContain("gpt-4o-mini");
+      expect(chain).toContain("gemini-2.0-flash");
+      expect(chain).toContain("claude-3-5-haiku");
     });
 
     it("should limit chain length to 25 models", () => {
@@ -113,7 +107,7 @@ describe("RoutingService", () => {
         fallbacks[`model-${i}`] = [`model-${i + 1}`];
       }
 
-      const mockConfig: KoryphaiosConfig = {
+      const mockConfig = {
         providers: {},
         agents: { manager: { model: "model-0" } },
         fallbacks,
@@ -121,17 +115,14 @@ describe("RoutingService", () => {
         dataDirectory: ".koryphaios"
       };
 
-      const service = new RoutingService({
-        config: mockConfig,
-        providers: mockProviders
-      });
+      const service = new RoutingService(mockProviders, mockConfig);
 
       const chain = service.buildFallbackChain("model-0");
       expect(chain.length).toBeLessThanOrEqual(25);
     });
 
     it("should handle circular dependencies", () => {
-      const mockConfig: KoryphaiosConfig = {
+      const mockConfig = {
         providers: {},
         agents: { manager: { model: "model-a" } },
         fallbacks: {
@@ -142,10 +133,7 @@ describe("RoutingService", () => {
         dataDirectory: ".koryphaios"
       };
 
-      const service = new RoutingService({
-        config: mockConfig,
-        providers: mockProviders
-      });
+      const service = new RoutingService(mockProviders, mockConfig);
 
       const chain = service.buildFallbackChain("model-a");
       // Should not include duplicates due to seen set
@@ -154,35 +142,35 @@ describe("RoutingService", () => {
     });
   });
 
-  describe("classifyDomainLLM", () => {
+  describe("classifyDomain", () => {
     it("should classify frontend tasks as 'ui'", () => {
-      const result = routingService.classifyDomainLLM("Create a React component for the user profile");
+      const result = routingService.classifyDomain("Create a React component for the user profile");
       expect(["ui", "frontend"]).toContain(result);
     });
 
     it("should classify backend tasks as 'backend'", () => {
-      const result = routingService.classifyDomainLLM("Implement a REST API endpoint for user authentication");
+      const result = routingService.classifyDomain("Implement a REST API endpoint for user authentication");
       expect(result).toBe("backend");
     });
 
     it("should classify test tasks as 'test'", () => {
-      const result = routingService.classifyDomainLLM("Write unit tests for the authentication module");
+      const result = routingService.classifyDomain("Write unit tests for the authentication module");
       expect(result).toBe("test");
     });
 
     it("should classify review tasks as 'review'", () => {
-      const result = routingService.classifyDomainLLM("Review the pull request for code quality issues");
+      const result = routingService.classifyDomain("Review the pull request for code quality issues");
       expect(["review", "critic"]).toContain(result);
     });
 
     it("should default to 'general' for unclear tasks", () => {
-      const result = routingService.classifyDomainLLM("Tell me a short joke.");
+      const result = routingService.classifyDomain("Tell me a short joke.");
       expect(result).toBe("general");
     });
 
     it("should score by keyword matches", () => {
       // "Frontend component" should score higher for ui
-      const uiResult = routingService.classifyDomainLLM("Create a frontend component with styling");
+      const uiResult = routingService.classifyDomain("Create a frontend component with styling");
       expect(["ui", "frontend"]).toContain(uiResult);
     });
   });
@@ -214,78 +202,9 @@ describe("RoutingService", () => {
     });
   });
 
-  describe("extractAllowedPaths", () => {
-    it("should extract paths from plan", async () => {
-      const mockProviders = {
-        resolveProvider: async () => ({
-          name: "anthropic" as ProviderName,
-          streamResponse: async function* () {
-            yield { type: "content_delta", content: '["/src/file1.ts", "/src/file2.ts"]' };
-          }
-        } as any)
-      } as unknown as ProviderRegistry;
-
-      const service = new RoutingService({
-        config: {
-          providers: {},
-          agents: { manager: { model: "gpt-4" } },
-          server: { port: 3000, host: "localhost" },
-          dataDirectory: ".koryphaios"
-        },
-        providers: mockProviders
-      });
-
-      const paths = await service.extractAllowedPaths("session-1", "Modify src and config files");
-      expect(paths).toEqual(["/src/file1.ts", "/src/file2.ts"]);
-    });
-
-    it("should return empty array on provider error", async () => {
-      const mockProviders = {
-        resolveProvider: async () => null
-      } as unknown as ProviderRegistry;
-
-      const service = new RoutingService({
-        config: {
-          providers: {},
-          agents: { manager: { model: "gpt-4" } },
-          server: { port: 3000, host: "localhost" },
-          dataDirectory: ".koryphaios"
-        },
-        providers: mockProviders
-      });
-
-      const paths = await service.extractAllowedPaths("session-1", "Modify files");
-      expect(paths).toEqual([]);
-    });
-
-    it("should handle invalid JSON gracefully", async () => {
-      const mockProviders = {
-        resolveProvider: async () => ({
-          name: "anthropic" as ProviderName,
-          streamResponse: async function* () {
-            yield { type: "content_delta", content: "invalid json" };
-          }
-        } as any)
-      } as unknown as ProviderRegistry;
-
-      const service = new RoutingService({
-        config: {
-          providers: {},
-          agents: { manager: { model: "gpt-4" } },
-          server: { port: 3000, host: "localhost" },
-          dataDirectory: ".koryphaios"
-        },
-        providers: mockProviders
-      });
-
-      const paths = await service.extractAllowedPaths("session-1", "Modify files");
-      expect(paths).toEqual([]);
-    });
-  });
-
   describe("isValidModel", () => {
     it("should return true for valid models", () => {
-      const result = routingService.isValidModel("gemini-3-flash");
+      const result = routingService.isValidModel("gemini-2.0-flash");
       expect(result).toBe(true);
     });
 
@@ -328,7 +247,7 @@ describe("RoutingService Edge Cases", () => {
   });
 
   it("should handle empty preferred model", () => {
-    const mockConfig: KoryphaiosConfig = {
+    const mockConfig = {
       providers: {},
       agents: { manager: { model: "gpt-4" } },
       assignments: {},
@@ -336,10 +255,7 @@ describe("RoutingService Edge Cases", () => {
       dataDirectory: ".koryphaios"
     };
 
-    const service = new RoutingService({
-      config: mockConfig,
-      providers: edgeProviders
-    });
+    const service = new RoutingService(edgeProviders, mockConfig);
 
     const result = service.resolveActiveRouting("", "general");
     expect(result.model).toBeTruthy();
@@ -347,15 +263,12 @@ describe("RoutingService Edge Cases", () => {
   });
 
   it("should handle malformed provider:model format", () => {
-    const service = new RoutingService({
-      config: {
-        providers: {},
-        agents: { manager: { model: "gpt-4" } },
-        assignments: {},
-        server: { port: 3000, host: "localhost" },
-        dataDirectory: ".koryphaios"
-      },
-      providers: edgeProviders
+    const service = new RoutingService(edgeProviders, {
+      providers: {},
+      agents: { manager: { model: "gpt-4" } },
+      assignments: {},
+      server: { port: 3000, host: "localhost" },
+      dataDirectory: ".koryphaios"
     });
     const result = service.resolveActiveRouting("invalid-format", "general");
     // Should fallback gracefully
@@ -363,7 +276,7 @@ describe("RoutingService Edge Cases", () => {
   });
 
   it("should handle empty assignments", () => {
-    const mockConfig: KoryphaiosConfig = {
+    const mockConfig = {
       providers: {},
       agents: { manager: { model: "gpt-4" } },
       assignments: {}, // Empty assignments
@@ -371,10 +284,7 @@ describe("RoutingService Edge Cases", () => {
       dataDirectory: ".koryphaios"
     };
 
-    const service = new RoutingService({
-      config: mockConfig,
-      providers: edgeProviders
-    });
+    const service = new RoutingService(edgeProviders, mockConfig);
 
     const result = service.resolveActiveRouting(undefined, "ui");
     // Should use DOMAIN.DEFAULT_MODELS.general

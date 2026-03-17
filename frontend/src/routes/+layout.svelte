@@ -21,10 +21,31 @@
 		window.addEventListener('offline', goOffline);
 		window.addEventListener('online', goOnline);
 
+		// Right-click to open DevTools (Ctrl+Right-click or Cmd+Right-click)
+		const handleContextMenu = async (e: MouseEvent) => {
+			// Check if Ctrl or Cmd is held during right-click
+			if (e.ctrlKey || e.metaKey) {
+				e.preventDefault();
+				try {
+					const win = window as any;
+					if (win.__TAURI__?.core?.invoke) {
+						await win.__TAURI__.core.invoke('toggle_devtools');
+					} else {
+						console.log('[DevTools] Tauri API not available');
+					}
+				} catch (err) {
+					// DevTools not available
+					console.log('[DevTools] Toggle failed:', err);
+				}
+			}
+		};
+		window.addEventListener('contextmenu', handleContextMenu);
+
 		return () => {
 			clearTimeout(t);
 			window.removeEventListener('offline', goOffline);
 			window.removeEventListener('online', goOnline);
+			window.removeEventListener('contextmenu', handleContextMenu);
 		};
 	});
 </script>

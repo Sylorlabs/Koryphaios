@@ -13,7 +13,7 @@ export function initDb(dataDir: string) {
 
   // Enable WAL mode for better concurrency
   db.exec("PRAGMA journal_mode = WAL;");
-  db.exec("PRAGMA busy_timeout = 5000;");
+  db.exec("PRAGMA busy_timeout = 10000;"); // Increased from 5s to 10s
   db.exec("PRAGMA synchronous = NORMAL;");
 
   // Users table (required for getOrCreateLocalUser / auth)
@@ -49,15 +49,15 @@ export function initDb(dataDir: string) {
   // Add user_id if missing (migration for existing DBs)
   try {
     db.exec(`ALTER TABLE sessions ADD COLUMN user_id TEXT`);
-  } catch {
-    // Column already exists
+  } catch (err) {
+    serverLog.debug({ error: err instanceof Error ? err.message : String(err) }, "user_id column already exists (migration skipped)");
   }
 
   // Add version column for optimistic locking (migration for existing DBs)
   try {
     db.exec(`ALTER TABLE sessions ADD COLUMN version INTEGER DEFAULT 1`);
-  } catch {
-    // Column already exists
+  } catch (err) {
+    serverLog.debug({ error: err instanceof Error ? err.message : String(err) }, "version column already exists (migration skipped)");
   }
 
   db.run(`
@@ -212,4 +212,40 @@ export function initDb(dataDir: string) {
 export function getDb() {
   if (!db) throw new Error("Database not initialized");
   return db;
+}
+
+/**
+ * Execute a database operation with automatic retry on SQLITE_BUSY
+ * This makes the transaction layer more robust under concurrent load
+ */
+export async function withRetry<T>(
+  operation: () => T,
+  maxRetries: number = 3,
+  delayMs: number = 100
+): Promise<T> {
+  let lastError: Error | undefined;
+  
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      return operation();
+    } catch (err: any) {
+      lastError = err;
+      
+      // Check if it's a busy/locked error
+      const isBusyError = err.message?.includes("database is locked") || 
+                          err.message?.includes("SQLITE_BUSY") ||
+                          err.message?.includes("busy");
+      
+      if (!isBusyError || attempt === maxRetries) {
+        throw err; // Not a busy error or last attempt
+      }
+      
+      // Exponential backoff: 100ms, 200ms, 400ms
+      const waitTime = delayMs * Math.pow(2, attempt - 1);
+      serverLog.debug({ attempt, waitTime, error: err.message }, "Database busy, retrying...");
+      await new Promise(resolve => setTimeout(resolve, waitTime));
+    }
+  }
+  
+  throw lastError!;
 }

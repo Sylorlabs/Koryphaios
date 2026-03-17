@@ -311,8 +311,8 @@ describe("Provider Registry Integration", () => {
         const config = {
             providers: {},
             agents: {
-                manager: { model: "claude-sonnet-4-5" },
-                coder: { model: "claude-sonnet-4-5" },
+                manager: { model: "claude-3-7-sonnet" },
+                coder: { model: "claude-3-7-sonnet" },
                 task: { model: "gpt-4o-mini" },
             },
             server: { port: 3000, host: "localhost" },
@@ -336,8 +336,8 @@ describe("Provider Registry Integration", () => {
                 openai: { name: "openai" as ProviderName, disabled: false },
             },
             agents: {
-                manager: { model: "claude-sonnet-4-5" },
-                coder: { model: "claude-sonnet-4-5" },
+                manager: { model: "claude-3-7-sonnet" },
+                coder: { model: "claude-3-7-sonnet" },
                 task: { model: "gpt-4o-mini" },
             },
             server: { port: 3000, host: "localhost" },

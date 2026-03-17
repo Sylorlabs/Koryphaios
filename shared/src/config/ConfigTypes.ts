@@ -4,6 +4,45 @@
 // Import types to avoid circular dependency
 import type { ProviderConfig } from "../providers/ModelDefs";
 import type { WorkerDomain } from "../types/AgentTypes";
+import type { ReasoningConfig } from "../providers/ReasoningConfig";
+
+/** Provider preset information for UI */
+export interface ProviderPreset {
+  /** Unique identifier for the preset (e.g., 'fireworks', 'together') */
+  name: string;
+  /** Human-readable display name */
+  displayName: string;
+  /** Description of the provider */
+  description?: string;
+  /** URL to provider documentation */
+  docsUrl?: string;
+  /** Default models available from this provider */
+  defaultModels?: string[];
+  /** Environment variable name for API key */
+  envVar?: string;
+}
+
+/** Dynamic/OpenAI-compatible provider configuration */
+export interface DynamicProviderConfig extends ProviderConfig {
+  /** Preset identifier (fireworks, together, perplexity, etc.) or 'custom' */
+  preset?: string;
+  /** Human-readable display name */
+  displayName?: string;
+  /** Custom headers for requests */
+  headers?: Record<string, string>;
+  /** Model ID mappings if provider uses different IDs */
+  modelMappings?: Record<string, string>;
+  /** 
+   * Default reasoning configuration for this provider
+   * Controls thinking/reasoning effort for supported models
+   */
+  reasoning?: ReasoningConfig;
+  /**
+   * Per-model reasoning overrides
+   * Key: model ID, Value: reasoning config for that specific model
+   */
+  modelReasoning?: Record<string, ReasoningConfig>;
+}
 
 export interface MCPServerConfig {
   type: "stdio" | "sse";
@@ -77,12 +116,12 @@ export interface KoryphaiosConfig {
     coder: { model: string; maxTokens?: number; reasoningLevel?: string };
     task: { model: string; maxTokens?: number };
   };
-  /** Mapping of worker domains to specific models. Example: "ui": "openai:gpt-4.1" */
+  /** Mapping of worker domains to specific models. Example: "ui": "openai:gpt-4o" */
   assignments?: Partial<Record<WorkerDomain, string>>;
   /**
    * Per-model fallback chains. When a model's provider is unavailable or quota-limited,
    * try these models in order before falling back to other available providers.
-   * Example: { "gemini-2.5-pro": ["gpt-4.1", "claude-sonnet-4-5"] }
+   * Example: { "gemini-2.0-pro": ["gpt-4o", "claude-3-5-sonnet"] }
    */
   fallbacks?: Record<string, string[]>;
   mcpServers?: Record<string, MCPServerConfig>;
@@ -98,4 +137,6 @@ export interface KoryphaiosConfig {
   safety?: SafetyLimits;
   /** Workspace/Worktree configuration for parallel agent isolation */
   workspace?: WorkspaceConfig;
+  /** Dynamic/OpenAI-compatible providers for unlimited provider support */
+  dynamicProviders?: DynamicProviderConfig[];
 }

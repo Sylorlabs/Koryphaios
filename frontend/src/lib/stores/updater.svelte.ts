@@ -19,42 +19,41 @@ export interface UpdateState {
 // Update check interval: 2 hours in milliseconds
 const UPDATE_CHECK_INTERVAL = 2 * 60 * 60 * 1000;
 
-class UpdaterStore {
-  // State
-  checking = $state(false);
-  updateAvailable = $state(false);
-  updateInfo = $state<UpdateInfo | null>(null);
-  lastChecked = $state<Date | null>(null);
-  error = $state<string | null>(null);
+// Use a factory function to create reactive state
+function createUpdaterStore() {
+  // State - using runes at top level of function
+  let checking = $state(false);
+  let updateAvailable = $state(false);
+  let updateInfo = $state<UpdateInfo | null>(null);
+  let lastChecked = $state<Date | null>(null);
+  let error = $state<string | null>(null);
   
   // Private
-  private checkInterval: ReturnType<typeof setInterval> | null = null;
-  private isTauri = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
+  let checkInterval: ReturnType<typeof setInterval> | null = null;
+  const isTauri = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
 
-  constructor() {
-    // Auto-check on startup if in Tauri
-    if (this.isTauri) {
-      // Wait a bit for app to fully load
-      setTimeout(() => {
-        this.checkForUpdates(true);
-      }, 5000);
-      
-      // Set up periodic checks every 2 hours
-      this.startPeriodicChecks();
-    }
+  // Auto-check on startup if in Tauri
+  if (isTauri) {
+    // Wait a bit for app to fully load
+    setTimeout(() => {
+      checkForUpdates(true);
+    }, 5000);
+    
+    // Set up periodic checks every 2 hours
+    startPeriodicChecks();
   }
 
   /**
    * Check for updates
    * @param silent - If true, don't show error toasts for failed checks
    */
-  async checkForUpdates(silent = false): Promise<UpdateInfo | null> {
-    if (!this.isTauri) {
+  async function checkForUpdates(silent = false): Promise<UpdateInfo | null> {
+    if (!isTauri) {
       return null;
     }
 
-    this.checking = true;
-    this.error = null;
+    checking = true;
+    error = null;
 
     try {
       const result = await invoke<{
@@ -64,21 +63,21 @@ class UpdaterStore {
         pub_date: string | null;
       }>("check_for_updates");
 
-      const updateInfo: UpdateInfo = {
+      const info: UpdateInfo = {
         available: result.available,
         version: result.version,
         notes: result.notes,
         pubDate: result.pub_date,
       };
 
-      this.updateInfo = updateInfo;
-      this.updateAvailable = result.available;
-      this.lastChecked = new Date();
+      updateInfo = info;
+      updateAvailable = result.available;
+      lastChecked = new Date();
 
-      return updateInfo;
+      return info;
     } catch (err) {
       const errorMsg = err instanceof Error ? err.message : String(err);
-      this.error = errorMsg;
+      error = errorMsg;
       
       if (!silent) {
         console.error("Failed to check for updates:", err);
@@ -86,15 +85,15 @@ class UpdaterStore {
       
       return null;
     } finally {
-      this.checking = false;
+      checking = false;
     }
   }
 
   /**
    * Install the available update
    */
-  async installUpdate(): Promise<boolean> {
-    if (!this.isTauri || !this.updateAvailable) {
+  async function installUpdate(): Promise<boolean> {
+    if (!isTauri || !updateAvailable) {
       return false;
     }
 
@@ -104,7 +103,7 @@ class UpdaterStore {
       return true;
     } catch (err) {
       const errorMsg = err instanceof Error ? err.message : String(err);
-      this.error = errorMsg;
+      error = errorMsg;
       console.error("Failed to install update:", err);
       return false;
     }
@@ -113,29 +112,29 @@ class UpdaterStore {
   /**
    * Open the changelog page in browser
    */
-  async openChangelog(): Promise<void> {
+  async function openChangelog(): Promise<void> {
     await open("https://koryphaios.com/changelog");
   }
 
   /**
    * Dismiss the current update notification
    */
-  dismissUpdate(): void {
-    this.updateAvailable = false;
+  function dismissUpdate(): void {
+    updateAvailable = false;
   }
 
   /**
    * Start periodic update checks (every 2 hours)
    */
-  startPeriodicChecks(): void {
-    if (this.checkInterval) {
-      clearInterval(this.checkInterval);
+  function startPeriodicChecks(): void {
+    if (checkInterval) {
+      clearInterval(checkInterval);
     }
 
-    this.checkInterval = setInterval(() => {
+    checkInterval = setInterval(() => {
       // Only check if we haven't shown an update yet
-      if (!this.updateAvailable) {
-        this.checkForUpdates(true);
+      if (!updateAvailable) {
+        checkForUpdates(true);
       }
     }, UPDATE_CHECK_INTERVAL);
   }
@@ -143,23 +142,23 @@ class UpdaterStore {
   /**
    * Stop periodic update checks
    */
-  stopPeriodicChecks(): void {
-    if (this.checkInterval) {
-      clearInterval(this.checkInterval);
-      this.checkInterval = null;
+  function stopPeriodicChecks(): void {
+    if (checkInterval) {
+      clearInterval(checkInterval);
+      checkInterval = null;
     }
   }
 
   /**
    * Get formatted last checked time
    */
-  getLastCheckedText(): string {
-    if (!this.lastChecked) {
+  function getLastCheckedText(): string {
+    if (!lastChecked) {
       return "Never";
     }
 
     const now = new Date();
-    const diff = now.getTime() - this.lastChecked.getTime();
+    const diff = now.getTime() - lastChecked.getTime();
     
     // Less than a minute
     if (diff < 60000) {
@@ -178,9 +177,25 @@ class UpdaterStore {
       return `${hours} hour${hours > 1 ? 's' : ''} ago`;
     }
     
-    return this.lastChecked.toLocaleDateString();
+    return lastChecked.toLocaleDateString();
   }
+
+  // Return store interface
+  return {
+    get checking() { return checking; },
+    get updateAvailable() { return updateAvailable; },
+    get updateInfo() { return updateInfo; },
+    get lastChecked() { return lastChecked; },
+    get error() { return error; },
+    checkForUpdates,
+    installUpdate,
+    openChangelog,
+    dismissUpdate,
+    startPeriodicChecks,
+    stopPeriodicChecks,
+    getLastCheckedText,
+  };
 }
 
 // Export singleton instance
-export const updater = new UpdaterStore();
+export const updater = createUpdaterStore();

@@ -7,7 +7,7 @@ import {
   parseClarificationDecision,
   resolveClarificationDecision,
   CLARIFICATION_SYSTEM_PROMPT,
-} from "../clarification-service";
+} from "../services/ClarificationService";
 
 describe("ClarificationService", () => {
   describe("parseClarificationDecision", () => {

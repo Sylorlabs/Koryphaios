@@ -64,7 +64,8 @@ async function classifyWithGemma(input: string): Promise<TriageResult | null> {
     if (upper.includes("LARGE")) intent = "LARGE";
     else if (upper.includes("SMALL")) intent = "SMALL";
     return { intent, rawLabel: text.trim() };
-  } catch {
+  } catch (err) {
+    console.debug("Gemma classification failed:", err instanceof Error ? err.message : String(err));
     return null;
   }
 }

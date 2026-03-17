@@ -1,7 +1,9 @@
 <script lang="ts">
   import { onMount } from 'svelte';
+  import { untrack } from 'svelte';
   import { sessionStore } from '$lib/stores/sessions.svelte';
   import { wsStore } from '$lib/stores/websocket.svelte';
+  import { sessionMemoryStore } from '$lib/stores/session-memory.svelte';
   import { toastStore } from '$lib/stores/toast.svelte';
   import { Plus, Search, Pencil, Trash2, Check, X, MessageSquare, LoaderCircle } from 'lucide-svelte';
   import AnimatedStatusIcon from './AnimatedStatusIcon.svelte';
@@ -11,7 +13,7 @@
     currentSessionId?: string;
   }
 
-  let { currentSessionId = $bindable('') }: Props = $props();
+  let { currentSessionId }: Props = $props();
 
   let editingId = $state<string>('');
   let editTitle = $state<string>('');
@@ -22,22 +24,34 @@
   let creating = $state(false);
   // Track which session we last loaded feed for, so we load when active changes (e.g. new session from +)
   let lastLoadedSessionId = $state<string>('');
+  // Guard to prevent effect from running during initialization
+  let isInitializing = true;
 
   onMount(() => {
     sessionStore.fetchSessions();
+    // Mark initialization complete after a tick to allow first effect run
+    requestAnimationFrame(() => { isInitializing = false; });
   });
 
-  // Whenever the store's active session changes, sync and load its feed (including when + creates a new session)
+  // Load history when active session changes
+  // Use untrack to prevent reactive loops - we manually track lastLoadedSessionId
   $effect(() => {
     const activeId = sessionStore.activeSessionId;
+    
+    // Prevent reactive reads of lastLoadedSessionId inside the effect body
+    const alreadyLoaded = untrack(() => lastLoadedSessionId);
+    
     if (!activeId) {
-      // Clear feed when no active session (e.g., all sessions deleted)
-      wsStore.clearFeed();
+      if (!isInitializing) {
+        wsStore.clearFeed();
+      }
       lastLoadedSessionId = '';
       return;
     }
-    if (activeId !== currentSessionId) currentSessionId = activeId;
-    if (activeId === lastLoadedSessionId) return;
+    
+    // Skip if already loaded this session
+    if (activeId === alreadyLoaded) return;
+    
     lastLoadedSessionId = activeId;
     void loadHistory(activeId);
   });
@@ -54,10 +68,27 @@
 
   async function selectSession(id: string) {
     if (sessionStore.activeSessionId === id) return;
+    
+    // FIX: Proper order to prevent race condition:
+    // 1. Clear old session state FIRST
+    // 2. Load new history BEFORE switching active session
+    // 3. Subscribe to new session
+    // 4. FINALLY update active session ID
+    
+    // Step 1: Clean up old session
+    wsStore.clearFeed();
+    wsStore.unsubscribeFromCurrentSession();
+    
+    // Step 2: Load history (may take time, but won't show stale data)
     lastLoadedSessionId = id;
-    sessionStore.activeSessionId = id;
-    wsStore.subscribeToSession(id);
     await loadHistory(id);
+    
+    // Step 3: Subscribe to new session (backend will now route messages correctly)
+    wsStore.subscribeToSession(id);
+    
+    // Step 4: ONLY NOW update active session ID
+    // This prevents messages from old session appearing in new session's feed
+    sessionStore.activeSessionId = id;
   }
 
   function startRename(id: string, currentTitle: string) {
@@ -87,7 +118,7 @@
     
     // Shift-click bypasses all confirmation
     if (e.shiftKey) {
-      sessionStore.deleteSession(id);
+      void deleteSessionAndCleanup(id);
       return;
     }
 
@@ -101,7 +132,7 @@
 
     // Standard double-click for idle sessions
     if (confirmDeleteId === id) {
-      sessionStore.deleteSession(id);
+      void deleteSessionAndCleanup(id);
       confirmDeleteId = '';
     } else {
       confirmDeleteId = id;
@@ -111,10 +142,21 @@
 
   function handleConfirmDelete() {
     if (sessionToDeleteId) {
-      sessionStore.deleteSession(sessionToDeleteId);
+      void deleteSessionAndCleanup(sessionToDeleteId);
       sessionToDeleteId = '';
     }
     showConfirmDialog = false;
+  }
+
+  async function deleteSessionAndCleanup(id: string) {
+    const wasActive = sessionStore.activeSessionId === id;
+    await sessionStore.deleteSession(id);
+    // Clear feed and memory if we deleted the active session
+    if (wasActive) {
+      wsStore.clearFeed();
+      sessionMemoryStore.clearMemory();
+      lastLoadedSessionId = '';
+    }
   }
 
   function handleCancelDelete() {

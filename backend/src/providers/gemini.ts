@@ -8,6 +8,7 @@ import {
   type Provider,
   type ProviderEvent,
   type StreamRequest,
+  type ProviderContentBlock,
   getModelsForProvider,
   resolveModel,
   createGenericModel,
@@ -67,7 +68,8 @@ export class GeminiProvider implements Provider {
         this.cachedModels = [...localModels, ...remote];
         this.lastFetch = Date.now();
       })
-      .catch(() => {
+      .catch((err) => {
+        providerLog.debug({ error: err instanceof Error ? err.message : String(err) }, "Failed to refresh Gemini models");
         if (!this.cachedModels) this.cachedModels = localModels;
       });
   }
@@ -95,7 +97,7 @@ export class GeminiProvider implements Provider {
       .filter((m) => m.role !== "system")
       .map((m) => ({
         role: m.role === "assistant" ? "model" : "user",
-        parts: typeof m.content === "string" ? [{ text: m.content }] : (m.content as any[]).map(b => b.type === "text" ? { text: b.text ?? "" } : { text: "" }),
+        parts: typeof m.content === "string" ? [{ text: m.content }] : (m.content as ProviderContentBlock[]).map(b => b.type === "text" ? { text: b.text ?? "" } : { text: "" }),
       }));
 
     const generationConfig: any = {
@@ -184,8 +186,8 @@ export class GeminiCLIProvider implements Provider {
     const killAndReap = (): void => {
       try {
         proc.kill();
-      } catch {
-        // already exited
+      } catch (err) {
+        providerLog.debug({ error: err instanceof Error ? err.message : String(err) }, "Process already exited");
       }
     };
     const timeoutId = setTimeout(killAndReap, GEMINI_STREAM_TIMEOUT_MS);
@@ -211,8 +213,8 @@ export class GeminiCLIProvider implements Provider {
       killAndReap();
       try {
         await Promise.race([proc.exited, new Promise((r) => setTimeout(r, 2000))]);
-      } catch {
-        // ignore
+      } catch (err) {
+        providerLog.debug({ error: err instanceof Error ? err.message : String(err) }, "Error waiting for process exit");
       }
     }
   }

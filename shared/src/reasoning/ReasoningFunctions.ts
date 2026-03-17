@@ -7,7 +7,7 @@ import { DEFAULT_REASONING_RULES } from "./ReasoningConfig";
 /**
  * Get reasoning configuration for a specific provider/model combination.
  * @param provider - Provider name (e.g., "anthropic", "openai")
- * @param model - Model ID (e.g., "claude-opus-4-6", "gpt-5")
+ * @param model - Model ID (e.g., "claude-3-opus", "gpt-4o")
  * @returns ReasoningConfig or null if reasoning is not supported
  */
 export function getReasoningConfig(provider?: string, model?: string): ReasoningConfig | null {

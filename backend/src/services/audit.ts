@@ -47,6 +47,21 @@ export interface AuditLogQueryResult {
   hasMore: boolean;
 }
 
+/** Database row structure for audit_logs table */
+interface AuditLogDbRow {
+  id: number;
+  user_id: string | null;
+  action: string;
+  resource_type: string | null;
+  resource_id: string | null;
+  ip_address: string | null;
+  user_agent: string | null;
+  success: number;
+  reason: string | null;
+  metadata: string | null;
+  timestamp: number;
+}
+
 // Sensitive actions that require audit logging
 export const SENSITIVE_ACTIONS = [
   'credential_access',
@@ -144,7 +159,7 @@ export class AuditLogService {
    */
   async query(query: AuditLogQuery): Promise<AuditLogQueryResult> {
     const conditions: string[] = [];
-    const params: any[] = [];
+    const params: (string | number | boolean | null)[] = [];
 
     if (query.userId) {
       conditions.push('user_id = ?');
@@ -191,7 +206,7 @@ export class AuditLogService {
     // Get total count
     const countResult = this.db.prepare(
       `SELECT COUNT(*) as total FROM audit_logs ${whereClause}`
-    ).get(...params) as { total: number };
+    ).get(...params as (string | number | boolean | null)[]) as { total: number };
 
     // Get entries - add limit and offset to params
     const entries = this.db.prepare(
@@ -199,7 +214,7 @@ export class AuditLogService {
        ${whereClause}
        ORDER BY timestamp DESC
        LIMIT ? OFFSET ?`
-    ).all(...[...params, limit, offset]) as any[];
+    ).all(...[...params, limit, offset] as (string | number)[]) as AuditLogDbRow[];
 
     return {
       entries: entries.map(row => this.rowToEntry(row)),
@@ -253,7 +268,7 @@ export class AuditLogService {
          AND resource_id = ?
          AND action = 'credential_access'
        ORDER BY timestamp DESC`
-    ).all(credentialId) as any[];
+    ).all(credentialId) as AuditLogDbRow[];
 
     return entries.map(row => this.rowToEntry(row));
   }
@@ -381,17 +396,17 @@ export class AuditLogService {
     return hash.toString(16);
   }
 
-  private rowToEntry(row: any): AuditLogEntry {
+  private rowToEntry(row: AuditLogDbRow): AuditLogEntry {
     return {
       id: row.id,
       userId: row.user_id,
       action: row.action,
-      resourceType: row.resource_type,
-      resourceId: row.resource_id,
-      ipAddress: row.ip_address,
-      userAgent: row.user_agent,
+      resourceType: row.resource_type ?? undefined,
+      resourceId: row.resource_id ?? undefined,
+      ipAddress: row.ip_address ?? undefined,
+      userAgent: row.user_agent ?? undefined,
       success: row.success === 1,
-      reason: row.reason,
+      reason: row.reason ?? undefined,
       metadata: row.metadata ? JSON.parse(row.metadata) : undefined,
       timestamp: row.timestamp,
     };

@@ -132,6 +132,8 @@ async function deleteSession(id: string) {
     sessions = sessions.filter(s => s.id !== id);
     if (activeSessionId === id) {
       activeSessionId = sessions[0]?.id ?? '';
+      // Clear all session-related state to prevent deleted sessions from resurfacing
+      // Note: wsStore.clearFeed() is called from the component after delete
     }
     toastStore.success('Session deleted');
   } catch (err) {
@@ -202,6 +204,16 @@ function handleSessionDeleted(sessionId: string) {
   }
 }
 
+// ─── Reactive derived values ────────────────────────────────────────────────
+
+let filteredSessions = $derived<Session[]>(
+  !searchQuery.trim() 
+    ? sessions 
+    : sessions.filter(s => s.title.toLowerCase().includes(searchQuery.toLowerCase()))
+);
+
+let groupedSessions = $derived<SessionGroup[]>(groupByDate(filteredSessions));
+
 // ─── Exported Store ─────────────────────────────────────────────────────────
 
 export const sessionStore = {
@@ -211,16 +223,8 @@ export const sessionStore = {
   get searchQuery() { return searchQuery; },
   set searchQuery(q: string) { searchQuery = q; },
   get loading() { return loading; },
-
-  get filteredSessions(): Session[] {
-    if (!searchQuery.trim()) return sessions;
-    const q = searchQuery.toLowerCase();
-    return sessions.filter(s => s.title.toLowerCase().includes(q));
-  },
-
-  get groupedSessions(): SessionGroup[] {
-    return groupByDate(this.filteredSessions);
-  },
+  get filteredSessions() { return filteredSessions; },
+  get groupedSessions() { return groupedSessions; },
 
   fetchSessions,
   createSession,

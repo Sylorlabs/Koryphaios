@@ -265,7 +265,8 @@ export class LocalKMSProvider implements KMSProvider {
         try {
           const decipher = createDecipheriv('aes-256-cbc', key, iv);
           this.masterKey = Buffer.concat([decipher.update(encrypted), decipher.final()]);
-        } catch {
+        } catch (err) {
+          serverLog.warn({ error: err instanceof Error ? err.message : String(err) }, 'Local KMS decrypt failed, trying plaintext');
           // Try plaintext (very old format)
           this.masterKey = encryptedKey;
         }

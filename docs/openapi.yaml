@@ -20,8 +20,8 @@ info:
     url: https://github.com/koryphaios/koryphaios
 
 servers:
-  - url: http://localhost:3000
-    description: Local development server
+  - url: http://localhost:29473
+    description: Local development server (avoids common dev port conflicts)
 
 tags:
   - name: Sessions

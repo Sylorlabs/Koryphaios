@@ -2,43 +2,31 @@
 //
 // This module re-exports the KoryManager from the core implementation and
 // bundles the extracted service modules that were refactored out of manager.ts.
-// server.ts imports KoryManager from here, keeping the monolith (manager.ts)
-// as the implementation detail and this file as the public API boundary.
+// server.ts imports KoryManager from here, keeping the implementation
+// in manager.ts as the detail and this file as the public API boundary.
 
-// ─── Core Manager (100% feature parity with manager.ts) ────────────────────
-
+// Core Manager (refactored with service decomposition)
 export { KoryManager } from "./manager";
-export type { KoryTask } from "./manager";
+export type { KoryTask } from "./agent-lifecycle-manager";
 
-// ─── Extracted Services ────────────────────────────────────────────────────
+// Extracted Services (for advanced usage/testing)
+export { ClarificationService } from "./services/ClarificationService";
+export { RoutingService } from "./services/RoutingService";
+export { SessionStateService } from "./services/SessionStateService";
+export { CriticReviewService } from "./services/CriticReviewService";
+export { UserInteractionService } from "./services/UserInteractionService";
+export { WorkerOrchestrationService } from "./services/WorkerOrchestrationService";
 
-export {
-  clarificationService,
-  parseClarificationDecision,
-  resolveClarificationDecision,
-  CLARIFICATION_SYSTEM_PROMPT,
-} from "./clarification-service";
-export type { ClarificationDecision } from "./clarification-service";
-
-export { RoutingService } from "./routing-service";
-export type { RoutingDecision, RoutingServiceDependencies } from "./routing-service";
-
+// Supporting modules
+export { GitManager } from "./git-manager";
+export { WorkspaceManager } from "./workspace-manager";
+export { AutoCommitService } from "./auto-commit-service";
+export { AgentLifecycleManager } from "./agent-lifecycle-manager";
 export {
   WebSocketEmitter,
   initWebSocketEmitter,
   getWebSocketEmitter,
 } from "./websocket-emitter";
 
-export { AgentLifecycleManager } from "./agent-lifecycle-manager";
-export type {
-  WorkerState,
-  WorkerUsage,
-  AgentLifecycleManagerDependencies,
-} from "./agent-lifecycle-manager";
-
-export { MessageProcessor } from "./message-processor";
-export type {
-  ProcessTurnResult,
-  CompletedToolCall,
-  MessageProcessorDependencies,
-} from "./message-processor";
+// Utility exports
+export * from "./utils";

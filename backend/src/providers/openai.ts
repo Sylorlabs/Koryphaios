@@ -113,7 +113,29 @@ export class OpenAIProvider implements Provider {
     const modelDef = resolveModel(request.model);
     const canReason = modelDef?.canReason ?? false;
     const reasoningEffort = request.reasoningLevel?.toLowerCase();
+    // Extended reasoning effort values supported by different providers
     const supportedEfforts = ["none", "minimal", "low", "medium", "high", "xhigh"];
+    
+    // Get full reasoning config if passed (from DynamicOpenAIProvider)
+    // @ts-ignore - extended property from dynamic provider
+    const reasoningConfig = request._reasoningConfig;
+
+    // Determine the actual reasoning_effort to send
+    // Priority: 1) reasoningConfig.mode, 2) reasoningLevel, 3) none
+    let effectiveReasoningEffort: string | undefined;
+    if (canReason && reasoningConfig?.mode && reasoningConfig.mode !== "disabled") {
+      // Map unified mode to OpenAI-specific value
+      const modeMap: Record<string, string> = {
+        minimal: "minimal",
+        low: "low",
+        medium: "medium",
+        high: "high",
+        max: "high", // OpenAI doesn't have "max", use "high"
+      };
+      effectiveReasoningEffort = modeMap[reasoningConfig.mode];
+    } else if (canReason && reasoningEffort && supportedEfforts.includes(reasoningEffort)) {
+      effectiveReasoningEffort = reasoningEffort === "none" ? undefined : reasoningEffort;
+    }
 
     const params: OpenAI.ChatCompletionCreateParamsStreaming = {
       model: modelDef?.apiModelId ?? request.model,
@@ -124,8 +146,10 @@ export class OpenAIProvider implements Provider {
       ...(request.temperature !== undefined && { temperature: request.temperature }),
       ...(tools?.length && { tools }),
       // Only send reasoning_effort if model + selected level supports it.
-      ...(canReason && reasoningEffort && supportedEfforts.includes(reasoningEffort) && {
-        reasoning_effort: reasoningEffort as any
+      // Note: OpenAI SDK's ReasoningEffort type is "low" | "medium" | "high"
+      // "minimal" is mapped to "low" above
+      ...(effectiveReasoningEffort && {
+        reasoning_effort: effectiveReasoningEffort as "low" | "medium" | "high"
       }),
     };
 
@@ -149,7 +173,7 @@ export class OpenAIProvider implements Provider {
               type: "usage_update",
               tokensIn: chunk.usage.prompt_tokens,
               tokensOut: chunk.usage.completion_tokens,
-              tokensCache: (chunk.usage as any).prompt_tokens_details?.cached_tokens,
+              tokensCache: (chunk.usage as { prompt_tokens_details?: { cached_tokens?: number } }).prompt_tokens_details?.cached_tokens,
             };
           }
           continue;
@@ -163,8 +187,9 @@ export class OpenAIProvider implements Provider {
         }
 
         // Reasoning content (O-series models)
-        if ((delta as any)?.reasoning_content) {
-          yield { type: "thinking_delta", thinking: (delta as any).reasoning_content };
+        const deltaWithReasoning = delta as { reasoning_content?: string };
+        if (deltaWithReasoning?.reasoning_content) {
+          yield { type: "thinking_delta", thinking: deltaWithReasoning.reasoning_content };
         }
 
         // Tool call streaming
@@ -270,7 +295,7 @@ export class OpenAIProvider implements Provider {
             })),
           });
         } else {
-          result.push({ role: msg.role as any, content: msg.content });
+          result.push({ role: msg.role as "user" | "assistant", content: msg.content });
         }
         continue;
       }
