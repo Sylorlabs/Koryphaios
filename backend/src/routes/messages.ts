@@ -7,7 +7,7 @@ import { validateSessionId, sanitizeString } from "../security";
 import { checkSpendCaps, checkGlobalSpendCaps, getSpendCaps } from "../security/spend-caps";
 import { SESSION, MESSAGE, ID } from "../constants";
 import { nanoid } from "nanoid";
-import { getDb } from "../db/sqlite";
+import { getDb, withRetry } from "../db/sqlite";
 import { z } from "zod";
 import { serverLog } from "../logger";
 
@@ -99,17 +99,19 @@ export function createMessageRoutes(deps: RouteDependencies): RouteHandler[] {
                 }
 
                 try {
-                    const txn = getDb().transaction(() => {
-                        messages.add(sessionId, userMsg);
-                        // Use optimistic locking with version
-                        sessions.update(sessionId, { messageCount: currentCount + 1 }, session.version);
-                        if (newTitle) {
-                            sessions.update(sessionId, { title: newTitle }, session.version! + 1);
-                        }
-                    });
-                    txn();
+                    await withRetry(() => {
+                        const txn = getDb().transaction(() => {
+                            messages.add(sessionId, userMsg);
+                            // Use optimistic locking with version
+                            sessions.update(sessionId, { messageCount: currentCount + 1 }, session.version);
+                            if (newTitle) {
+                                sessions.update(sessionId, { title: newTitle }, session.version! + 1);
+                            }
+                        });
+                        txn();
+                    }, 3, 100); // 3 retries with exponential backoff starting at 100ms
                 } catch (err: any) {
-                    serverLog.error({ error: err.message, sessionId }, "Transaction failed");
+                    serverLog.error({ error: err.message, sessionId }, "Transaction failed after retries");
                     return json({ ok: false, error: "Failed to save message. Please retry." }, 409);
                 }
 

@@ -27,7 +27,8 @@ export class SessionReplyStream {
       for (const ctrl of list) {
         try {
           ctrl.enqueue(segment);
-        } catch {
+        } catch (err) {
+          console.error("[reply-stream] Failed to enqueue segment:", err instanceof Error ? err.message : String(err));
           list.splice(list.indexOf(ctrl), 1);
         }
       }

@@ -4,6 +4,7 @@
 import { createCipheriv, createDecipheriv, randomBytes, createHash } from 'node:crypto';
 import { serverLog } from '../logger';
 import type { Envelope, KMSProvider, DecryptResult, CryptoAuditLog } from './types';
+import { LocalKMSProvider } from './providers/local';
 
 const ENVELOPE_VERSION = 1;
 const DATA_ALGORITHM = 'aes-256-gcm';
@@ -261,7 +262,8 @@ export class EnvelopeEncryption {
   async healthCheck(): Promise<boolean> {
     try {
       return await this.provider.healthCheck();
-    } catch {
+    } catch (err) {
+      serverLog.debug({ provider: this.provider.name, error: err instanceof Error ? err.message : String(err) }, "KMS health check failed");
       return false;
     }
   }
@@ -290,4 +292,24 @@ export async function createEnvelopeEncryption(
   const encryption = new EnvelopeEncryption(provider);
   await encryption.initialize();
   return encryption;
+}
+
+/**
+ * Create a KMS provider from environment variables
+ * Defaults to LocalKMSProvider for development
+ */
+export function createKMSProviderFromEnv(): KMSProvider {
+  const providerType = process.env.KORYPHAIOS_KMS_PROVIDER || 'local';
+  const dataDir = process.env.KORYPHAIOS_DATA_DIR || '.koryphaios';
+  
+  switch (providerType) {
+    case 'local':
+      return new LocalKMSProvider({ 
+        dataDir,
+        suppressWarning: process.env.KORYPHAIOS_SUPPRESS_KMS_WARNING === 'true'
+      });
+    default:
+      serverLog.warn({ provider: providerType }, 'Unknown KMS provider, falling back to local');
+      return new LocalKMSProvider({ dataDir });
+  }
 }

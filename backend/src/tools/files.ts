@@ -5,6 +5,7 @@ import { existsSync, statSync, readdirSync, mkdirSync, unlinkSync, renameSync, c
 import { join, relative, dirname, basename, resolve } from "path";
 import type { Tool, ToolContext, ToolCallInput, ToolCallOutput } from "./registry";
 import { validatePathAccess } from "../security";
+import { toolLog } from "../logger";
 
 /** Resolve allowed filesystem roots for file operations.
  *  Default to project directory even when not explicitly sandboxed — never allow "/" implicitly. */
@@ -296,8 +297,8 @@ export class GrepTool implements Tool {
       const timeoutId = setTimeout(() => {
         try {
           proc.kill();
-        } catch {
-          // already exited
+        } catch (err) {
+          toolLog.debug({ error: err instanceof Error ? err.message : String(err) }, "Process kill failed (already exited)");
         }
       }, SUBPROC_TIMEOUT_MS);
       try {
@@ -316,12 +317,13 @@ export class GrepTool implements Tool {
         clearTimeout(timeoutId);
         try {
           proc.kill();
-        } catch {
-          // already exited
+        } catch (err) {
+          toolLog.debug({ error: err instanceof Error ? err.message : String(err) }, "Process kill failed (already exited)");
         }
         await Promise.race([proc.exited, new Promise((r) => setTimeout(r, 2000))]);
       }
-    } catch {
+    } catch (err) {
+      toolLog.debug({ error: err instanceof Error ? err.message : String(err) }, "ripgrep execution failed");
       return { callId: call.id, name: this.name, output: "ripgrep (rg) not found or timed out. Install with: apt install ripgrep", isError: true, durationMs: 0 };
     }
   }
@@ -617,8 +619,8 @@ export class DiffTool implements Tool {
         const timeoutId = setTimeout(() => {
           try {
             proc.kill();
-          } catch {
-            // already exited
+          } catch (err) {
+            toolLog.debug({ error: err instanceof Error ? err.message : String(err) }, "Process kill failed (already exited)");
           }
         }, SUBPROC_TIMEOUT_MS);
         try {
@@ -633,8 +635,8 @@ export class DiffTool implements Tool {
           clearTimeout(timeoutId);
           try {
             proc.kill();
-          } catch {
-            // already exited
+          } catch (err) {
+            toolLog.debug({ error: err instanceof Error ? err.message : String(err) }, "Process kill failed (already exited)");
           }
           await Promise.race([proc.exited, new Promise((r) => setTimeout(r, 2000))]);
         }

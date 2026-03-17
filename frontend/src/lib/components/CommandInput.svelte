@@ -57,15 +57,25 @@
   let reasoningConfig = $derived(getReasoningConfig(currentProvider, currentModel));
   let reasoningSupported = $derived(hasReasoningSupport(currentProvider, currentModel));
 
-  const hasNoProvider = $derived((wsStore.providers ?? []).filter((p) => p.authenticated).length === 0);
+  const hasNoProvider = $derived(providerList.filter((p) => p.authenticated).length === 0);
 
+  // Ensure providers is always an array
+  let providerList = $derived(Array.isArray(wsStore.providers) ? wsStore.providers : []);
+  
   let availableModels = $derived.by(() => {
     const models: Array<{ label: string; value: string; provider: string; isAuto?: boolean }> = [
       { label: 'Auto (Smart Selection)', value: 'auto', provider: '', isAuto: true },
     ];
-    for (const p of wsStore.providers) {
+    
+    // Use allAvailableModels if models is empty (provider hasn't selected specific models)
+    for (const p of providerList) {
       if (p.authenticated) {
-        for (const m of p.models) {
+        // Prefer selected models, fallback to all available models
+        const modelIds = p.models?.length > 0 
+          ? p.models 
+          : (p.allAvailableModels ?? []);
+          
+        for (const m of modelIds) {
           models.push({ label: `(${providerLabel(p.name)}) ${m}`, value: `${p.name}:${m}`, provider: p.name });
         }
       }
@@ -77,6 +87,13 @@
     if (selectedModel === 'auto') return 'Auto';
     const parsed = parseModelSelection(selectedModel);
     if (!parsed.model || !parsed.provider) return selectedModel;
+    // Check if the selected model still exists in available models
+    const exists = availableModels.some(m => m.value === selectedModel);
+    if (!exists && selectedModel !== 'auto') {
+      // Reset to auto if previously selected model is no longer available
+      selectedModel = 'auto';
+      return 'Auto';
+    }
     return `(${providerLabel(parsed.provider)}) ${parsed.model}`;
   });
 

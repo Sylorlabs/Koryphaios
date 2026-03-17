@@ -30,7 +30,7 @@ export class ActiveWorkersRegistry {
         SELECT session_id, task_id, task_data, start_time, status
         FROM active_workers
         WHERE status IN ('running', 'paused')
-      `).all() as any[];
+      `).all() as { session_id: string; task_id: string; task_data: string; start_time: number; status: string }[];
 
       for (const row of rows) {
         try {
@@ -40,7 +40,7 @@ export class ActiveWorkersRegistry {
             taskId: row.task_id,
             task,
             startTime: row.start_time,
-            status: row.status,
+            status: row.status as ActiveWorker["status"],
           });
         } catch (e) {
           serverLog.error({ error: e, taskId: row.task_id }, "Failed to restore worker");

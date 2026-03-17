@@ -2,6 +2,7 @@ use std::fmt;
 
 /// Application errors with user-friendly messages
 #[derive(Debug)]
+#[allow(dead_code)]
 pub enum AppError {
     Config(String),
     Window(String),
@@ -39,6 +40,7 @@ impl From<serde_json::Error> for AppError {
 }
 
 /// User-friendly error messages for UI display
+#[allow(dead_code)]
 pub fn user_friendly_message(error: &AppError) -> String {
     match error {
         AppError::Config(_) => {

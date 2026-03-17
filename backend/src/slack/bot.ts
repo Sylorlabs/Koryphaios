@@ -85,7 +85,7 @@ export class SlackBridge {
         return;
       }
       const lines = workers.map((w) =>
-        `• *${w.agent.name}* (${w.agent.model})\n  Status: ${w.status}\n  Task: ${w.task.slice(0, 100)}`
+        `• *${w.agent.name}* (${w.agent.model})\n  Status: ${w.status}\n  Session: ${w.sessionId.slice(0, 8)}`
       );
       await respond(`📊 Active Workers:\n\n${lines.join("\n\n")}`);
     });
@@ -164,8 +164,8 @@ export class SlackBridge {
           text: `❌ Error: ${err instanceof Error ? err.message : String(err)}`,
           thread_ts: threadTs,
         });
-      } catch {
-        // Best effort
+      } catch (err) {
+        slackLog.warn({ channelId, error: err instanceof Error ? err.message : String(err) }, "Failed to send error message to Slack");
       }
     }
   }

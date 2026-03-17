@@ -5,8 +5,8 @@
 | Provider   | Base URL / Endpoint | Notes |
 |-----------|----------------------|--------|
 | **Anthropic** | `https://api.anthropic.com` | Messages API: `POST /v1/messages`. Model list: `GET /v1/models`. No change. |
-| **OpenAI**    | `https://api.openai.com/v1/` | Model list: `GET /v1/models`. Responses API: `GET /v1/responses` (GPT-5.2). No change. |
-| **Google Gemini** | `https://generativelanguage.googleapis.com` | Use **v1beta** for latest models (e.g. Gemini 3.1 Pro Preview). Model list: `GET /v1beta/models?key=...`. v1 is stable; v1beta has Gemini 3.1. |
+| **OpenAI**    | `https://api.openai.com/v1/` | Model list: `GET /v1/models`. Responses API: `GET /v1/responses` (GPT-4o.2). No change. |
+| **Google Gemini** | `https://generativelanguage.googleapis.com` | Use **v1beta** for latest models (e.g. Gemini 2.0.1 Pro Preview). Model list: `GET /v1beta/models?key=...`. v1 is stable; v1beta has Gemini 2.0.1. |
 
 All verification (minimal ping) uses **GET** to list models only; no full prompts or 1-token completions are used, to minimize cost.
 
@@ -16,10 +16,10 @@ All verification (minimal ping) uses **GET** to list models only; no full prompt
 
 - **Retired (Feb 2026):** Claude 3.7 Sonnet, Claude Haiku 3.5. Removed from default fallback chains and marked legacy in catalog.
 - **Default mappings updated:**
-  - Manager/Coder: `claude-sonnet-4-6`
-  - Task: `gpt-5-mini`
-  - Fallbacks: `claude-sonnet-4-6` → `claude-sonnet-4-5` → `gpt-5-mini` → `gemini-3.1-pro`
-- **Gemini 3.1** added: `gemini-3.1-pro` (apiModelId: `gemini-3.1-pro-preview`).
+  - Manager/Coder: `claude-3-7-sonnet`
+  - Task: `gpt-4o-mini`
+  - Fallbacks: `claude-3-7-sonnet` → `claude-3-5-sonnet` → `gpt-4o-mini` → `gemini-2.0.1-pro`
+- **Gemini 2.0.1** added: `gemini-2.0.1-pro` (apiModelId: `gemini-2.0.1-pro-preview`).
 - **Legacy list** extended: `claude-3.7-sonnet`, `claude-3.5-haiku`, `claude-3.5-sonnet` in `isLegacyModel()`.
 
 ---
@@ -76,7 +76,7 @@ Run: `cd backend && bun test __tests__/auth.test.ts`
 
 ## Summary
 
-- Endpoints verified and documented; defaults point to Claude 4.6 and Gemini 3.1; retired models removed from defaults.
+- Endpoints verified and documented; defaults point to Claude 3.7+.6 and Gemini 2.0.1; retired models removed from defaults.
 - KeyValidator provides minimal-ping verification with no key logging.
 - Database stores only hashed/encrypted secrets; logging excludes key material.
 - `auth.test.ts` passes with mocked 401/200 and optional live test.

@@ -18,12 +18,12 @@ if pgrep -x "koryphaios-desktop" > /dev/null 2>&1; then
 fi
 
 # Backend check/start - completely detached
-if ! curl -s http://localhost:3000/api/health > /dev/null 2>&1; then
+if ! curl -s http://localhost:29473/api/health > /dev/null 2>&1; then
     # Use setsid to fully detach from terminal
     setsid bash -c "bun run src/server.ts" > .koryphaios/logs/backend.log 2>&1 &
     # Wait for backend to be ready
     for i in {1..50}; do
-        curl -s http://localhost:3000/api/health > /dev/null 2>&1 && break
+        curl -s http://localhost:29473/api/health > /dev/null 2>&1 && break
         sleep 0.1
     done
 fi

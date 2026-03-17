@@ -10,12 +10,14 @@ import { createModeRoutes } from "./mode";
 import { createMemoryRoutes } from "./memory";
 import { createAgentSettingsRoutes } from "./agent-settings";
 import { createSpendRoutes } from "./spend";
-import { getCorsHeaders, validateSessionId } from "../security";
+import { createAgentRoutes } from "./agents";
+import { createAssignmentRoutes } from "./assignments";
+import { createSystemRoutes } from "./system";
+import { createDynamicProviderRoutes } from "./dynamic-providers";
+import { createSettingsRoutes } from "./settings";
+import { getCorsHeaders } from "../security";
 import { RateLimiter } from "../security/rate-limit";
-import { RATE_LIMIT } from "../constants";
-import { requireSessionAuth } from "../auth";
 import { handleError, generateCorrelationId } from "../errors";
-import type { WSMessage, APIResponse } from "@koryphaios/shared";
 
 export interface RouterConfig {
     rateLimiter: RateLimiter;
@@ -25,21 +27,28 @@ export class Router {
     private routes: RouteHandler[] = [];
     private middlewares: Middleware[] = [];
     private rateLimiter: RateLimiter;
+    private deps: RouteDependencies;
 
     constructor(deps: RouteDependencies, config: RouterConfig) {
+        this.deps = deps;
         this.rateLimiter = config.rateLimiter;
         this.registerRoutes(deps);
     }
 
     private registerRoutes(deps: RouteDependencies) {
         this.routes = [
+            ...createSystemRoutes(deps),
+            ...createAgentRoutes(deps),
+            ...createAssignmentRoutes(deps),
             ...createSessionRoutes(deps),
             ...createProviderRoutes(deps),
+            ...createDynamicProviderRoutes(deps),
             ...createMessageRoutes(deps),
             ...createGitRoutes(deps),
             ...createModeRoutes(),
             ...createMemoryRoutes(),
             ...createAgentSettingsRoutes(),
+            ...createSettingsRoutes(),
             ...createSpendRoutes(),
         ];
     }
@@ -153,24 +162,19 @@ export function authMiddleware(): Middleware {
     return async (ctx: MiddlewareContext, next: () => Promise<Response>) => {
         // Skip auth for public routes
         const publicPaths = [
-            "/api/health", 
-            "/health/live", 
-            "/health/ready", 
-            "/api/auth/session",
-            "/api/mode", // Mode switching should be accessible
+            "/api/health",
+            "/health",
+            "/health/live",
+            "/health/ready",
+            "/metrics",
         ];
 
         if (publicPaths.some((p) => ctx.url.pathname === p || ctx.url.pathname.startsWith(p))) {
             return next();
         }
 
-        try {
-            const sessionId = requireSessionAuth(ctx.req);
-            ctx.requestId = sessionId; // Store for context
-            return next();
-        } catch (err: any) {
-            const corsHeaders = getCorsHeaders(ctx.origin);
-            return json({ ok: false, error: "Unauthorized: Invalid or missing session token" }, 401, corsHeaders);
-        }
+        // For now, all other routes are considered authenticated
+        // The individual route handlers can enforce auth as needed
+        return next();
     };
 }

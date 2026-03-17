@@ -7,9 +7,10 @@
   },
   "server": {
     "host": "127.0.0.1",
-    "port": 3000,
+    "port": 29473,
     "wsPath": "/ws"
   },
+  "_comment": "Port 29473 chosen to avoid common dev port conflicts (3000, 5173, 8000, 8080). Can be overridden via KORYPHAIOS_PORT environment variable.",
   "window": {
     "width": 1280,
     "height": 800,

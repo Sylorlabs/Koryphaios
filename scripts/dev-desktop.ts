@@ -17,8 +17,14 @@ const FRONTEND_PORT = 5173;
 const MAX_WAIT_MS = 30000;
 const IS_WINDOWS = platform() === "win32";
 
-// Read port from .env file or use default
+// Read port from .env file, active-port.json, or use default
 function getBackendPort(): number {
+  // Priority 1: Environment variable
+  if (process.env.KORYPHAIOS_PORT) {
+    return parseInt(process.env.KORYPHAIOS_PORT, 10);
+  }
+
+  // Priority 2: .env file
   const envPath = resolve(PROJECT_ROOT, ".env");
   if (existsSync(envPath)) {
     const envContent = readFileSync(envPath, "utf-8");
@@ -27,7 +33,22 @@ function getBackendPort(): number {
       return parseInt(portMatch[1], 10);
     }
   }
-  // Try to read from koryphaios.json
+
+  // Priority 3: Active port file (backend may have dynamically switched)
+  const portFilePath = resolve(PROJECT_ROOT, ".koryphaios", ".active-port.json");
+  if (existsSync(portFilePath)) {
+    try {
+      const portInfo = JSON.parse(readFileSync(portFilePath, "utf-8"));
+      // Check if fresh (within last 5 minutes)
+      if (Date.now() - portInfo.timestamp < 5 * 60 * 1000) {
+        return portInfo.port;
+      }
+    } catch {
+      // Ignore parse errors
+    }
+  }
+
+  // Priority 4: koryphaios.json
   const configPath = resolve(PROJECT_ROOT, "koryphaios.json");
   if (existsSync(configPath)) {
     try {
@@ -39,7 +60,9 @@ function getBackendPort(): number {
       // Ignore config parse errors
     }
   }
-  return 3000;
+
+  // Default: high port to avoid common dev conflicts
+  return 29473;
 }
 
 const BACKEND_PORT = getBackendPort();

@@ -8,6 +8,8 @@
  * - Automatic reconnection
  * - Health checks
  * - Fallback to in-memory for development
+ * 
+ * PERFORMANCE: In-memory fallback uses sweep-based expiration to avoid timer leaks.
  */
 
 import Redis, { RedisOptions, Cluster as RedisCluster } from 'ioredis';
@@ -44,11 +46,18 @@ export interface RedisConfig {
 }
 
 // In-memory fallback for development
+// PERFORMANCE: Uses sweep-based expiration with a single timer instead of per-key timers
 class InMemoryRedis {
   private data: Map<string, any> = new Map();
   private expirations: Map<string, number> = new Map();
-  private timers: Map<string, NodeJS.Timeout> = new Map();
   private scripts: Map<string, string> = new Map();
+  
+  // Sweep-based expiration
+  private sweepTimer: NodeJS.Timeout | null = null;
+  private readonly SWEEP_INTERVAL_MS = 60000; // 1 minute
+  private lastSweepTime = Date.now();
+  private sweepCount = 0;
+  private isShuttingDown = false;
 
   async get(key: string): Promise<string | null> {
     this.checkExpiration(key);
@@ -60,15 +69,69 @@ class InMemoryRedis {
     this.data.set(key, value);
     
     // Handle EX/PX arguments
+    let expireMs: number | undefined;
     for (let i = 0; i < args.length; i++) {
       if (args[i] === 'EX' && args[i + 1]) {
-        this.setExpiration(key, args[i + 1] * 1000);
+        expireMs = args[i + 1] * 1000;
       } else if (args[i] === 'PX' && args[i + 1]) {
-        this.setExpiration(key, args[i + 1]);
+        expireMs = args[i + 1];
       }
     }
     
+    if (expireMs !== undefined) {
+      this.setExpiration(key, expireMs);
+    }
+    
     return 'OK';
+  }
+
+  async setex(key: string, seconds: number, value: string): Promise<'OK'> {
+    this.data.set(key, value);
+    this.setExpiration(key, seconds * 1000);
+    return 'OK';
+  }
+
+  // Hash operations
+  async hget(key: string, field: string): Promise<string | null> {
+    this.checkExpiration(key);
+    const hash = this.data.get(key) as Map<string, string> | undefined;
+    return hash ? hash.get(field) ?? null : null;
+  }
+
+  async hset(key: string, field: string, value: string): Promise<number> {
+    this.checkExpiration(key);
+    let hash = this.data.get(key) as Map<string, string> | undefined;
+    if (!hash) {
+      hash = new Map();
+      this.data.set(key, hash);
+    }
+    const isNew = hash.has(field) ? 0 : 1;
+    hash.set(field, value);
+    return isNew;
+  }
+
+  async hdel(key: string, ...fields: string[]): Promise<number> {
+    this.checkExpiration(key);
+    const hash = this.data.get(key) as Map<string, string> | undefined;
+    if (!hash) return 0;
+    
+    let count = 0;
+    for (const field of fields) {
+      if (hash.delete(field)) count++;
+    }
+    return count;
+  }
+
+  async hgetall(key: string): Promise<Record<string, string>> {
+    this.checkExpiration(key);
+    const hash = this.data.get(key) as Map<string, string> | undefined;
+    if (!hash) return {};
+    
+    const result: Record<string, string> = {};
+    for (const [field, value] of hash.entries()) {
+      result[field] = value;
+    }
+    return result;
   }
 
   async del(...keys: string[]): Promise<number> {
@@ -77,11 +140,6 @@ class InMemoryRedis {
       if (this.data.has(key)) {
         this.data.delete(key);
         this.expirations.delete(key);
-        const timer = this.timers.get(key);
-        if (timer) {
-          clearTimeout(timer);
-          this.timers.delete(key);
-        }
         count++;
       }
     }
@@ -303,10 +361,7 @@ class InMemoryRedis {
   async flushall(): Promise<'OK'> {
     this.data.clear();
     this.expirations.clear();
-    for (const timer of this.timers.values()) {
-      clearTimeout(timer);
-    }
-    this.timers.clear();
+    this.stopSweepTimer();
     // Note: scripts are not cleared on flushall (matches Redis behavior)
     return 'OK';
   }
@@ -316,26 +371,107 @@ class InMemoryRedis {
   }
 
   async quit(): Promise<'OK'> {
+    this.stopSweepTimer();
     return 'OK';
   }
 
+  /**
+   * Check and remove expired key (lazy expiration)
+   */
   private checkExpiration(key: string): void {
     const exp = this.expirations.get(key);
     if (exp && exp < Date.now()) {
-      this.del(key);
+      this.data.delete(key);
+      this.expirations.delete(key);
     }
   }
 
+  /**
+   * Set expiration time for a key
+   * PERFORMANCE: Uses sweep-based expiration instead of per-key timers
+   */
   private setExpiration(key: string, ttlMs: number): void {
-    const existing = this.timers.get(key);
-    if (existing) clearTimeout(existing);
-    
     this.expirations.set(key, Date.now() + ttlMs);
-    const timer = setTimeout(() => {
-      this.del(key);
-    }, ttlMs);
+    this.ensureSweepTimer();
+  }
+
+  /**
+   * Ensure sweep timer is running
+   */
+  private ensureSweepTimer(): void {
+    if (this.sweepTimer || this.isShuttingDown) return;
     
-    this.timers.set(key, timer);
+    this.sweepTimer = setInterval(() => {
+      this.sweep();
+    }, this.SWEEP_INTERVAL_MS);
+    
+    // Don't let sweep timer keep process alive
+    if (this.sweepTimer.unref) {
+      this.sweepTimer.unref();
+    }
+  }
+
+  /**
+   * Stop sweep timer
+   */
+  private stopSweepTimer(): void {
+    this.isShuttingDown = true;
+    if (this.sweepTimer) {
+      clearInterval(this.sweepTimer);
+      this.sweepTimer = null;
+    }
+  }
+
+  /**
+   * Sweep expired keys
+   * PERFORMANCE: Batch cleanup instead of per-key timers
+   */
+  private sweep(): void {
+    if (this.isShuttingDown) return;
+    
+    const now = Date.now();
+    this.lastSweepTime = now;
+    this.sweepCount++;
+    
+    const toDelete: string[] = [];
+    
+    // Find expired keys
+    for (const [key, exp] of this.expirations) {
+      if (exp < now) {
+        toDelete.push(key);
+      }
+    }
+    
+    // Batch delete
+    for (const key of toDelete) {
+      this.data.delete(key);
+      this.expirations.delete(key);
+    }
+    
+    // Stop timer if no more expirations
+    if (this.expirations.size === 0) {
+      this.stopSweepTimer();
+    }
+    
+    if (toDelete.length > 0) {
+      serverLog.debug({ 
+        swept: toDelete.length, 
+        remaining: this.expirations.size,
+        totalSweeps: this.sweepCount 
+      }, "InMemoryRedis sweep completed");
+    }
+  }
+
+  /**
+   * Get stats for monitoring
+   */
+  getStats(): { keys: number; expirations: number; sweeps: number; lastSweepTime: number } {
+    return {
+      keys: this.data.size,
+      expirations: this.expirations.size,
+      sweeps: this.sweepCount,
+      lastSweepTime: this.lastSweepTime,
+    };
   }
 }
 
@@ -403,6 +539,8 @@ class RedisManager {
     }
 
     if (this.client instanceof Redis) {
+      await this.client.quit();
+    } else if (this.client instanceof InMemoryRedis) {
       await this.client.quit();
     }
     

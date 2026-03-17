@@ -1,25 +1,80 @@
-// Memory Management Module
-// Domain: Memory leak prevention, resource cleanup, monitoring
+/**
+ * Memory System
+ * 
+ * A comprehensive memory and rules management system.
+ * 
+ * @example
+ * // Import everything
+ * import * as memory from "./memory";
+ * 
+ * // Or import specific modules
+ * import { readUniversalMemory, writeUniversalMemory } from "./memory/universal";
+ * import { readProjectMemory } from "./memory/project";
+ */
 
-// Export all cleanup utilities
+// Types
+export type {
+  MemoryFile,
+  MemorySettings,
+  MemoryContext,
+  MemoryStats,
+} from "./types";
+
+export { DEFAULT_MEMORY_SETTINGS } from "./types";
+
+// Config
+export { MEMORY_CONFIG } from "./config";
 export {
-  cleanupRegistry,
-  sessionTracker,
-  initMemoryMonitor,
-  getMemoryMonitor,
-  createDefaultMemoryPressureHandler,
-  registerShutdownHandlers,
-  getHeapStats,
-  createCleanupHook,
-  safeCleanup,
-} from "./cleanup";
+  getProjectRoot,
+  getUniversalMemoryPath,
+  getProjectMemoryPath,
+  getSessionMemoryPath,
+  getRulesPath,
+  getSettingsPath,
+} from "./config";
 
-// Export background cleanup service
+// Universal Memory
 export {
-  BackgroundCleanupService,
-  startBackgroundCleanup,
-} from "./background-cleanup";
+  initializeUniversalMemory,
+  readUniversalMemory,
+  writeUniversalMemory,
+} from "./universal";
 
-// Export types
-export type { CleanupHook, MemoryStats } from "./cleanup";
-export type { BackgroundCleanupConfig } from "./background-cleanup";
+// Project Memory
+export {
+  initializeProjectMemory,
+  readProjectMemory,
+  writeProjectMemory,
+} from "./project";
+
+// Session Memory
+export {
+  initializeSessionMemory,
+  readSessionMemory,
+  writeSessionMemory,
+  deleteSessionMemory,
+} from "./session";
+
+// Rules
+export {
+  initializeRules,
+  readRules,
+  writeRules,
+} from "./rules";
+
+// Settings
+export {
+  loadMemorySettings,
+  saveMemorySettings,
+} from "./settings";
+
+// Context
+export {
+  assembleMemoryContext,
+  formatMemoryForContext,
+  getMemoryContextSummary,
+  filterMemoryContent,
+} from "./context";
+
+// Stats
+export { getMemoryStats } from "./stats";

@@ -14,6 +14,23 @@ export interface SessionUsage {
   lastActivity: number;
 }
 
+interface SessionUsageRow {
+  session_id: string;
+  input_tokens: number;
+  output_tokens: number;
+  total_cost_cents: number;
+  command_count: number;
+  start_time: number;
+  last_activity: number;
+}
+
+interface GlobalSpendStatsRow {
+  total_cost: number;
+  total_tokens: number;
+  total_commands: number;
+  active_sessions: number;
+}
+
 export interface SpendCap {
   hourlyCapCents?: number;
   dailyCapCents?: number;
@@ -134,7 +151,7 @@ export function getSessionUsage(sessionId: string): SessionUsage | null {
     const db = getDb();
     const row = db.query(
       `SELECT * FROM session_usage WHERE session_id = ?`
-    ).get(sessionId) as any;
+    ).get(sessionId) as SessionUsageRow | null;
 
     if (!row) return null;
 
@@ -304,7 +321,7 @@ export function getGlobalSpendStats(timeframe: "hour" | "day" | "week" | "month"
         COUNT(DISTINCT session_id) as active_sessions
       FROM session_usage
       ${timeCondition}
-    `).get() as any;
+    `).get() as GlobalSpendStatsRow;
 
     return {
       totalCostCents: row.total_cost || 0,

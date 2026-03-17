@@ -1,6 +1,7 @@
 // Feed Store — handles feed entries and message display
 // Split from the monolithic websocket.svelte.ts for better separation of concerns
 
+import { untrack } from 'svelte';
 import type { AgentIdentity } from "@koryphaios/shared";
 import type { FeedEntry, FeedEntryType } from '$lib/types';
 
@@ -90,11 +91,11 @@ function getToolName(entry: FeedEntry): string {
     return metadata?.toolCall?.name ?? metadata?.toolResult?.name ?? "";
 }
 
-export function getGroupedFeed(): FeedEntry[] {
+function computeGroupedFeed(currentFeed: FeedEntry[]): FeedEntry[] {
     const result: FeedEntry[] = [];
     let currentGroup: FeedEntry | null = null;
 
-    for (const entry of feed) {
+    for (const entry of currentFeed) {
         const toolName = getToolName(entry);
         const isEphemeral =
             (entry.type === "tool_call" || entry.type === "tool_result") &&
@@ -130,6 +131,14 @@ export function getGroupedFeed(): FeedEntry[] {
     return result;
 }
 
+// Use $derived for proper memoization and reactive tracking
+let groupedFeed = $derived(computeGroupedFeed(feed));
+
+/** @deprecated Use feedStore.groupedFeed instead */
+export function getGroupedFeed(): FeedEntry[] {
+    return untrack(() => computeGroupedFeed(feed));
+}
+
 // ─── Session Loading ─────────────────────────────────────────────────────────
 
 export function loadSessionMessages(
@@ -152,7 +161,7 @@ export function loadSessionMessages(
 
 export const feedStore = {
     get feed() { return feed; },
-    get groupedFeed() { return getGroupedFeed(); },
+    get groupedFeed() { return groupedFeed; },
     get length() { return feed.length; },
     addEntry,
     accumulateEntry,

@@ -25,6 +25,7 @@ export interface WorkerState {
   task: KoryTask;
   abort: AbortController;
   sessionId: string;
+  createdAt: number; // Added for stale detection
 }
 
 export interface WorkerUsage {
@@ -43,9 +44,15 @@ export class AgentLifecycleManager {
   private activeWorkers = new Map<string, WorkerState>();
   private workerUsage = new Map<string, WorkerUsage>();
   private managerAgentId: string;
+  
+  // Cleanup tracking
+  private cleanupInterval: Timer | null = null;
+  private readonly CLEANUP_INTERVAL_MS = 60000; // 1 minute
+  private readonly WORKER_MAX_AGE_MS = 30 * 60 * 1000; // 30 minutes
 
   constructor(deps: AgentLifecycleManagerDependencies) {
     this.managerAgentId = deps.managerAgentId;
+    this.startCleanupInterval();
   }
 
   /**
@@ -66,6 +73,7 @@ export class AgentLifecycleManager {
       task,
       abort,
       sessionId,
+      createdAt: Date.now(),
     });
 
     this.emitAgentStatus(sessionId, agentId, "thinking");
@@ -76,6 +84,7 @@ export class AgentLifecycleManager {
 
   /**
    * Cancel a specific worker by ID.
+   * FIX: Now properly cleans up worker usage data.
    *
    * @param agentId - Worker agent ID to cancel
    */
@@ -85,12 +94,15 @@ export class AgentLifecycleManager {
       this.emitAgentStatus(worker.sessionId, agentId, "done");
       worker.abort.abort();
       this.activeWorkers.delete(agentId);
-      koryLog.info({ agentId }, "Worker cancelled");
+      // FIX: Clean up worker usage data to prevent memory leak
+      this.workerUsage.delete(agentId);
+      koryLog.info({ agentId }, "Worker cancelled and usage cleaned up");
     }
   }
 
   /**
    * Cancel all workers for a specific session.
+   * FIX: Now properly cleans up all worker usage data.
    *
    * @param sessionId - Session ID
    */
@@ -100,7 +112,9 @@ export class AgentLifecycleManager {
         this.emitAgentStatus(sessionId, id, "done");
         worker.abort.abort();
         this.activeWorkers.delete(id);
-        koryLog.info({ agentId: id, sessionId }, "Session worker cancelled");
+        // FIX: Clean up usage for each cancelled worker
+        this.workerUsage.delete(id);
+        koryLog.info({ agentId: id, sessionId }, "Session worker cancelled and usage cleaned up");
       }
     }
   }
@@ -239,6 +253,7 @@ export class AgentLifecycleManager {
 
   /**
    * Cancel all active workers across all sessions.
+   * FIX: Now properly cleans up all worker usage data.
    */
   cancelAll(): void {
     const sessionIds = new Set<string>();
@@ -250,7 +265,10 @@ export class AgentLifecycleManager {
     }
 
     this.activeWorkers.clear();
-    koryLog.info({ totalWorkers: sessionIds.size }, "All workers cancelled");
+    // FIX: Clear all usage data
+    this.workerUsage.clear();
+    
+    koryLog.info({ totalWorkers: sessionIds.size }, "All workers cancelled and usage cleared");
   }
 
   /**
@@ -274,6 +292,7 @@ export class AgentLifecycleManager {
 
   /**
    * Remove a worker from tracking (after completion/cancellation).
+   * FIX: Now also cleans up worker usage data.
    *
    * @param agentId - Worker agent ID
    */
@@ -281,6 +300,8 @@ export class AgentLifecycleManager {
     const worker = this.activeWorkers.get(agentId);
     if (worker) {
       this.activeWorkers.delete(agentId);
+      // FIX: Also clean up worker usage data to prevent memory leak
+      this.workerUsage.delete(agentId);
       koryLog.info({ agentId }, "Worker removed from tracking");
     }
   }
@@ -291,6 +312,106 @@ export class AgentLifecycleManager {
   clear(): void {
     this.activeWorkers.clear();
     this.workerUsage.clear();
+  }
+
+  /**
+   * Get memory statistics for monitoring.
+   */
+  getMemoryStats(): {
+    activeWorkers: number;
+    usageEntries: number;
+    orphanedUsageEntries: number;
+  } {
+    let orphaned = 0;
+    for (const agentId of this.workerUsage.keys()) {
+      if (!this.activeWorkers.has(agentId)) {
+        orphaned++;
+      }
+    }
+    
+    return {
+      activeWorkers: this.activeWorkers.size,
+      usageEntries: this.workerUsage.size,
+      orphanedUsageEntries: orphaned,
+    };
+  }
+
+  /**
+   * Clean up stale usage entries for workers that no longer exist.
+   * FIX: Now called automatically by cleanup interval.
+   */
+  cleanupStaleUsage(): void {
+    const staleIds: string[] = [];
+    for (const agentId of this.workerUsage.keys()) {
+      if (!this.activeWorkers.has(agentId)) {
+        staleIds.push(agentId);
+      }
+    }
+    for (const agentId of staleIds) {
+      this.workerUsage.delete(agentId);
+    }
+    if (staleIds.length > 0) {
+      koryLog.debug({ count: staleIds.length }, "Cleaned up stale worker usage entries");
+    }
+  }
+
+  /**
+   * Clean up workers that have been running too long (likely hung).
+   */
+  cleanupStaleWorkers(): void {
+    const now = Date.now();
+    const staleWorkers: string[] = [];
+    
+    for (const [agentId, worker] of this.activeWorkers) {
+      if (now - worker.createdAt > this.WORKER_MAX_AGE_MS) {
+        staleWorkers.push(agentId);
+      }
+    }
+    
+    for (const agentId of staleWorkers) {
+      koryLog.warn({ agentId, maxAgeMs: this.WORKER_MAX_AGE_MS }, "Cleaning up stale worker (exceeded max age)");
+      this.cancelWorker(agentId);
+    }
+  }
+
+  /**
+   * Start automatic cleanup interval.
+   * FIX: Actually wires up cleanup methods to run periodically.
+   */
+  private startCleanupInterval(): void {
+    if (this.cleanupInterval) return;
+    
+    this.cleanupInterval = setInterval(() => {
+      try {
+        this.cleanupStaleWorkers();
+        this.cleanupStaleUsage();
+        
+        const stats = this.getMemoryStats();
+        if (stats.orphanedUsageEntries > 0) {
+          koryLog.warn({ stats }, "Memory leak detected: orphaned usage entries");
+        }
+      } catch (err) {
+        koryLog.error({ error: err instanceof Error ? err.message : String(err) }, "Cleanup interval error");
+      }
+    }, this.CLEANUP_INTERVAL_MS);
+    
+    // Don't let the cleanup timer keep the process alive
+    if (this.cleanupInterval.unref) {
+      this.cleanupInterval.unref();
+    }
+    
+    koryLog.debug({ intervalMs: this.CLEANUP_INTERVAL_MS }, "AgentLifecycleManager cleanup started");
+  }
+
+  /**
+   * Stop automatic cleanup (for graceful shutdown).
+   */
+  stopCleanup(): void {
+    if (this.cleanupInterval) {
+      clearInterval(this.cleanupInterval);
+      this.cleanupInterval = null;
+      koryLog.debug("AgentLifecycleManager cleanup stopped");
+    }
   }
 
   // ─── Private Methods ───────────────────────────────────────────────────────────

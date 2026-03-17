@@ -164,7 +164,7 @@ export function serializeError(err: unknown): SerializedError {
       stack: err.stack,
       frames,
       topFrame: selectTopProjectFrame(frames),
-      cause: (err as any).cause,
+      cause: (err as { cause?: unknown }).cause,
     };
   }
   return {

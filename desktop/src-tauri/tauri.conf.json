@@ -25,10 +25,11 @@
         "resizable": true,
         "fullscreen": false,
         "center": true,
-        "decorations": false,
+        "decorations": true,
         "visible": true,
         "focus": true,
-        "useHttpsScheme": false
+        "useHttpsScheme": false,
+        "devtools": true
       }
     ],
     "security": {

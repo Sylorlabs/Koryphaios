@@ -3,7 +3,7 @@
 import { randomBytes, timingSafeEqual } from "node:crypto";
 import { mkdirSync, writeFileSync, realpathSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { toolLog } from "./logger";
+import { toolLog, serverLog } from "./logger";
 import { SECURITY } from "./constants";
 
 // ─── Bash Command Sandboxing ────────────────────────────────────────────────
@@ -110,7 +110,8 @@ export async function validateUrl(url: string): Promise<{
   let parsed: URL;
   try {
     parsed = new URL(url);
-  } catch {
+  } catch (err) {
+    serverLog.debug({ error: err instanceof Error ? err.message : String(err), url }, "Invalid URL format");
     return { safe: false, reason: "Invalid URL format" };
   }
 
@@ -234,7 +235,8 @@ export async function validateUrl(url: string): Promise<{
       validatedHostname: hostname,
       validatedIps: allIps 
     };
-  } catch {
+  } catch (err) {
+    serverLog.debug({ error: err instanceof Error ? err.message : String(err), hostname }, "DNS resolution failed");
     return { safe: false, reason: `Blocked: DNS resolution failed for "${hostname}" — fail-closed for safety` };
   }
 }
@@ -395,10 +397,12 @@ export function validatePathAccess(
     resolved = resolve(absolutePath);
     try {
       resolved = realpathSync(resolved);
-    } catch {
+    } catch (err) {
+      serverLog.debug({ error: err instanceof Error ? err.message : String(err), path: resolved }, "realpath failed (file may not exist yet)");
       // File may not exist yet (e.g. write); use resolved path
     }
-  } catch {
+  } catch (err) {
+    serverLog.debug({ error: err instanceof Error ? err.message : String(err), path: absolutePath }, "Path resolution failed");
     return { allowed: false, reason: "Invalid path" };
   }
 
@@ -411,93 +415,82 @@ export function validatePathAccess(
   return { allowed: false, reason: "Path is outside allowed directories" };
 }
 
-// ─── Envelope Encryption Integration ────────────────────────────────────────
+// ─── Bun-Native Secure Encryption Integration ───────────────────────────────
 
-import { EnvelopeEncryption, createKMSProviderFromEnv } from './crypto';
-
-let envelopeEncryption: EnvelopeEncryption | null = null;
+import { 
+  secureEncryption, 
+  encryptForStorage as cryptoEncryptForStorage,
+  decryptFromStorage as cryptoDecryptFromStorage,
+  isEncrypted as cryptoIsEncrypted,
+  SecureEncryptionError 
+} from './crypto';
 
 /**
- * Initialize the envelope encryption system
+ * Initialize the secure encryption system
  * Call this during server startup
  */
-export async function initializeEncryption(): Promise<EnvelopeEncryption> {
-  if (envelopeEncryption) {
-    return envelopeEncryption;
-  }
-
-  const provider = createKMSProviderFromEnv();
-  envelopeEncryption = new EnvelopeEncryption(provider);
-  await envelopeEncryption.initialize();
-  
-  return envelopeEncryption;
+export async function initializeEncryption(): Promise<void> {
+  await secureEncryption.initialize();
 }
 
 /**
- * Get the initialized envelope encryption instance
- * Throws if not initialized
+ * Get encryption status
  */
-export function getEnvelopeEncryption(): EnvelopeEncryption {
-  if (!envelopeEncryption) {
-    throw new Error('Envelope encryption not initialized. Call initializeEncryption() first.');
-  }
-  return envelopeEncryption;
+export function getEncryptionStatus(): { initialized: boolean; secure: boolean; version: string } {
+  return secureEncryption.getStatus();
 }
 
 /**
- * Securely encrypt an API key using envelope encryption
- * This is the new, secure method - use this instead of encryptApiKey()
+ * Securely encrypt an API key using Bun-native WebCrypto
  */
 export async function secureEncrypt(plaintext: string): Promise<string> {
-  const encryption = getEnvelopeEncryption();
-  const envelope = await encryption.encrypt(plaintext);
-  return `env:${encryption.serialize(envelope)}`;
+  return cryptoEncryptForStorage(plaintext);
 }
 
 /**
- * Decrypt a value (handles both legacy and new envelope formats)
- * Automatically re-encrypts legacy values if needed
+ * Decrypt a value (handles new v2 format)
+ * Legacy formats will fail - users must re-enter credentials
  */
 export async function secureDecrypt(ciphertext: string): Promise<string> {
-  // Handle new envelope format
-  if (ciphertext.startsWith('env:')) {
-    const encryption = getEnvelopeEncryption();
-    const envelope = encryption.parse(ciphertext.slice(4));
-    const { data } = await encryption.decrypt(envelope);
-    return data;
+  // Handle new v2 format
+  if (cryptoIsEncrypted(ciphertext)) {
+    return cryptoDecryptFromStorage(ciphertext);
   }
   
-  // Legacy format is no longer supported — keys must be re-encrypted
-  if (ciphertext.startsWith('enc:')) {
+  // Legacy formats are not supported
+  if (ciphertext.startsWith('env:') || ciphertext.startsWith('enc:')) {
     throw new Error(
-      'Legacy enc: encryption format is no longer supported. Please re-encrypt your API keys using envelope encryption (run the migration or re-enter credentials).'
+      'Legacy encryption format detected. Please re-enter your API keys to upgrade to the new secure format.'
     );
   }
   
-  // Not encrypted, return as-is
+  // Not encrypted, return as-is (plaintext credential)
   return ciphertext;
 }
 
 /**
- * Check if encryption is using the secure envelope system
+ * Check if encryption is using the secure system
  */
 export function isUsingSecureEncryption(): boolean {
-  return envelopeEncryption !== null;
+  return secureEncryption.getStatus().initialized;
 }
 
 /**
- * Encrypt for storage: uses envelope encryption when initialized.
- * In production, envelope encryption is required; in development, falls back to legacy with a warning.
+ * Encrypt for storage using Bun-native WebCrypto
+ * In production, KORYPHAIOS_MASTER_KEY is required
  */
 export async function encryptForStorage(plaintext: string): Promise<string> {
-  if (!envelopeEncryption) {
+  const status = secureEncryption.getStatus();
+  
+  if (!status.initialized) {
     if (process.env.NODE_ENV === "production") {
       throw new Error(
-        "Envelope encryption is required in production. Initialize encryption at startup or set KORYPHAIOS_KMS_* environment."
+        "Secure encryption is required in production. Initialize encryption at startup by setting KORYPHAIOS_MASTER_KEY environment variable."
       );
     }
-    await initializeEncryption();
+    await secureEncryption.initialize();
   }
+  
   return secureEncrypt(plaintext);
 }
 
@@ -589,7 +582,8 @@ export function validateCsrfToken(cookieToken: string | null, headerToken: strin
   if (cookieToken.length !== headerToken.length) return false;
   try {
     return timingSafeEqual(Buffer.from(cookieToken, 'hex'), Buffer.from(headerToken, 'hex'));
-  } catch {
+  } catch (err) {
+    serverLog.debug({ error: err instanceof Error ? err.message : String(err) }, "CSRF token validation failed");
     return false;
   }
 }
@@ -696,7 +690,8 @@ export async function parseCLIAuthToken(
   if (storedValue.startsWith("env:")) {
     try {
       decrypted = await decryptFn(storedValue);
-    } catch {
+    } catch (err) {
+      serverLog.debug({ error: err instanceof Error ? err.message : String(err) }, "CLI auth token decryption failed");
       return null;
     }
   } else if (storedValue.startsWith("cli:")) {

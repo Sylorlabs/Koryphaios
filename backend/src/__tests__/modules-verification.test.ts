@@ -19,14 +19,21 @@ describe("Core Modules Verification", () => {
 
   it("should have refactored modules", () => {
     const modules = [
-      "kory/clarification-service.ts",
-      "kory/routing-service.ts",
+      // Services (modular architecture)
+      "kory/services/ClarificationService.ts",
+      "kory/services/RoutingService.ts",
+      "kory/services/UserInteractionService.ts",
+      "kory/services/AgentOpsService.ts",
+      "kory/services/WorkerOrchestrationService.ts",
+      "kory/services/SessionStateService.ts",
+      "kory/services/MemoryManagerService.ts",
+      "kory/services/ConflictResolutionService.ts",
+      // Core components
       "kory/websocket-emitter.ts",
       "kory/agent-lifecycle-manager.ts",
-      "kory/message-processor.ts",
-      "server/config.ts",
-      "server/websocket-handler.ts",
-      "server/shutdown-handler.ts",
+      "kory/shadow-logger.ts",
+      "kory/workspace-manager.ts",
+      "kory/git-manager.ts",
     ];
 
     for (const mod of modules) {
@@ -40,7 +47,7 @@ describe("Core Modules Verification", () => {
       "kory/__tests__/routing-service.test.ts",
       "kory/__tests__/websocket-emitter.test.ts",
       "kory/__tests__/agent-lifecycle-manager.test.ts",
-      "kory/__tests__/message-processor.test.ts",
+      "kory/services/__tests__/ClarificationService.test.ts",
     ];
 
     for (const test of tests) {

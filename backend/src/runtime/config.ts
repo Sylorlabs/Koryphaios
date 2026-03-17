@@ -48,7 +48,16 @@ export function loadConfig(projectRoot: string): KoryphaiosConfig {
       task: { model: AGENT.DEFAULT_TASK_MODEL, maxTokens: AGENT.DEFAULT_MAX_TOKENS },
     },
     server: {
-      port: Number(process.env.KORYPHAIOS_PORT ?? fileConfig.server?.port ?? SERVER.DEFAULT_PORT),
+      port: (() => {
+        const envPort = process.env.KORYPHAIOS_PORT;
+        if (envPort && envPort.trim() !== '') {
+          const parsed = parseInt(envPort.trim(), 10);
+          if (!isNaN(parsed) && parsed > 0 && parsed < 65536) {
+            return parsed;
+          }
+        }
+        return fileConfig.server?.port ?? SERVER.DEFAULT_PORT;
+      })(),
       host: process.env.KORYPHAIOS_HOST ?? fileConfig.server?.host ?? SERVER.DEFAULT_HOST,
     },
     telegram: fileConfig.telegram ?? (process.env.TELEGRAM_BOT_TOKEN

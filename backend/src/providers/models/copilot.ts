@@ -6,7 +6,7 @@ import type { ModelDef } from "@koryphaios/shared";
  * Per https://docs.github.com/en/copilot/reference/ai-models/supported-models
  * Retired models are excluded (see Model retirement history on that page).
  * 
- * Last updated: February 2026
+ * Last updated: March 2026
  * 
  * NOTE: Model IDs in this catalog do NOT include the "copilot." prefix.
  * The provider prefix is added by the frontend/backend when displaying/selecting models.
@@ -58,245 +58,90 @@ const def = ({
 
 const OPENAI_MODELS: ModelDef[] = [
   def({
-    apiId: "gpt-4.1",
-    name: "GPT-4.1",
+    apiId: "gpt-4o",
+    name: "GPT-4o",
     contextWindow: 128_000,
     maxOutputTokens: 16_384,
     canReason: false,
     reasoningDescription: "Standard model optimized for high-throughput single-pass responses. No native reasoning controls.",
   }),
   def({
-    apiId: "gpt-5-mini",
-    name: "GPT-5 mini",
+    apiId: "gpt-4o-mini",
+    name: "GPT-4o mini",
     contextWindow: 128_000,
     maxOutputTokens: 16_384,
-    canReason: true,
+    canReason: false,
     tier: "fast",
-    reasoningDescription: "Supports reasoning_effort parameter (minimal, low, medium, high). Fast variant with reasoning controls.",
-    reasoningLevels: ["minimal", "low", "medium", "high"],
+    reasoningDescription: "Fast, cost-effective model for simpler tasks.",
   }),
   def({
-    apiId: "gpt-5.1",
-    name: "GPT-5.1",
+    apiId: "o1",
+    name: "o1",
     contextWindow: 128_000,
-    maxOutputTokens: 16_384,
+    maxOutputTokens: 32_768,
     canReason: true,
-    reasoningDescription: "Supports reasoning_effort parameter (minimal, low, medium, high).",
-    reasoningLevels: ["minimal", "low", "medium", "high"],
+    tier: "reasoning",
+    reasoningDescription: "Reasoning model that thinks before responding. Supports reasoning effort controls.",
+    reasoningLevels: ["low", "medium", "high"],
   }),
   def({
-    apiId: "gpt-5.1-codex",
-    name: "GPT-5.1-Codex",
+    apiId: "o1-mini",
+    name: "o1-mini",
     contextWindow: 128_000,
-    maxOutputTokens: 16_384,
+    maxOutputTokens: 65_536,
     canReason: true,
-    reasoningDescription: "Supports reasoning_effort parameter (minimal, low, medium, high, xhigh). Extended reasoning for complex coding tasks.",
-    reasoningLevels: ["minimal", "low", "medium", "high", "xhigh"],
+    tier: "reasoning",
+    reasoningDescription: "Faster reasoning model for coding tasks.",
+    reasoningLevels: ["low", "medium", "high"],
   }),
   def({
-    apiId: "gpt-5.1-codex-mini",
-    name: "GPT-5.1-Codex-Mini",
-    contextWindow: 128_000,
-    maxOutputTokens: 16_384,
+    apiId: "o3-mini",
+    name: "o3-mini",
+    contextWindow: 200_000,
+    maxOutputTokens: 100_000,
     canReason: true,
-    tier: "fast",
-    reasoningDescription: "Fast variant with Adaptive Reasoning. Supports reasoning_effort (none for fast mode, low/medium for deeper logic).",
-    reasoningLevels: ["none", "low", "medium"],
-  }),
-  def({
-    apiId: "gpt-5.1-codex-max",
-    name: "GPT-5.1-Codex-Max",
-    contextWindow: 128_000,
-    maxOutputTokens: 16_384,
-    canReason: true,
-    reasoningDescription: "Maximum capability Codex model. Supports reasoning_effort (minimal, low, medium, high, xhigh).",
-    reasoningLevels: ["minimal", "low", "medium", "high", "xhigh"],
-  }),
-  def({
-    apiId: "gpt-5.2",
-    name: "GPT-5.2",
-    contextWindow: 128_000,
-    maxOutputTokens: 16_384,
-    canReason: true,
-    reasoningDescription: "Supports reasoning_effort parameter (minimal, low, medium, high).",
-    reasoningLevels: ["minimal", "low", "medium", "high"],
-  }),
-  def({
-    apiId: "gpt-5.2-codex",
-    name: "GPT-5.2-Codex",
-    contextWindow: 128_000,
-    maxOutputTokens: 16_384,
-    canReason: true,
-    reasoningDescription: "Supports reasoning_effort parameter (minimal, low, medium, high, xhigh).",
-    reasoningLevels: ["minimal", "low", "medium", "high", "xhigh"],
-  }),
-  def({
-    apiId: "gpt-5.3-codex",
-    name: "GPT-5.3-Codex",
-    contextWindow: 128_000,
-    maxOutputTokens: 16_384,
-    canReason: true,
-    reasoningDescription: "Latest Codex model. Supports reasoning_effort parameter (minimal, low, medium, high, xhigh).",
-    reasoningLevels: ["minimal", "low", "medium", "high", "xhigh"],
+    tier: "reasoning",
+    reasoningDescription: "Latest reasoning model with improved coding capabilities.",
+    reasoningLevels: ["low", "medium", "high"],
   }),
 ];
 
 // ============================================================================
-// Anthropic Models
+// Anthropic Models (via Copilot)
 // ============================================================================
 
 const ANTHROPIC_MODELS: ModelDef[] = [
   def({
-    apiId: "claude-haiku-4.5",
-    name: "Claude Haiku 4.5",
-    contextWindow: 128_000,
+    apiId: "claude-3.5-sonnet",
+    name: "Claude 3.5 Sonnet",
+    contextWindow: 200_000,
     maxOutputTokens: 8_192,
-    canReason: true,
-    tier: "fast",
-    reasoningDescription: "Supports extended thinking with budget tokens (0, 1024, 8192, 24576). Fastest Claude model with reasoning.",
-    reasoningLevels: ["0", "1024", "8192", "24576"],
-  }),
-  def({
-    apiId: "claude-opus-4.5",
-    name: "Claude Opus 4.5",
-    contextWindow: 128_000,
-    maxOutputTokens: 16_384,
-    canReason: true,
-    reasoningDescription: "Supports extended thinking with effort levels (low, medium, high).",
-    reasoningLevels: ["low", "medium", "high"],
-  }),
-  def({
-    apiId: "claude-opus-4.6",
-    name: "Claude Opus 4.6",
-    contextWindow: 128_000,
-    maxOutputTokens: 16_384,
-    canReason: true,
-    reasoningDescription: "Supports extended thinking with effort levels (low, medium, high, max). Most capable Claude model.",
-    reasoningLevels: ["low", "medium", "high", "max"],
-  }),
-  def({
-    apiId: "claude-opus-4.6-fast",
-    name: "Claude Opus 4.6 (fast mode) (preview)",
-    contextWindow: 128_000,
-    maxOutputTokens: 16_384,
-    canReason: true,
-    tier: "fast",
-    reasoningDescription: "Fast mode variant still supports thinking.effort parameter (can dial down).",
-    reasoningLevels: ["low", "medium", "high"],
-  }),
-  def({
-    apiId: "claude-sonnet-4",
-    name: "Claude Sonnet 4",
-    contextWindow: 128_000,
-    maxOutputTokens: 16_384,
-    canReason: true,
-    reasoningDescription: "Supports extended thinking with effort levels (low, medium, high).",
-    reasoningLevels: ["low", "medium", "high"],
-  }),
-  def({
-    apiId: "claude-sonnet-4.5",
-    name: "Claude Sonnet 4.5",
-    contextWindow: 128_000,
-    maxOutputTokens: 16_384,
-    canReason: true,
-    reasoningDescription: "Supports extended thinking with effort levels (low, medium, high).",
-    reasoningLevels: ["low", "medium", "high"],
-  }),
-  def({
-    apiId: "claude-sonnet-4.6",
-    name: "Claude Sonnet 4.6",
-    contextWindow: 128_000,
-    maxOutputTokens: 16_384,
-    canReason: true,
-    reasoningDescription: "Supports extended thinking with effort levels (low, medium, high).",
-    reasoningLevels: ["low", "medium", "high"],
+    canReason: false,
+    reasoningDescription: "Balanced performance and speed. No native reasoning controls via Copilot.",
   }),
 ];
 
 // ============================================================================
-// Google Models
+// Google Models (via Copilot)
 // ============================================================================
 
 const GOOGLE_MODELS: ModelDef[] = [
   def({
-    apiId: "gemini-2.5-pro",
-    name: "Gemini 2.5 Pro",
-    contextWindow: 128_000,
-    maxOutputTokens: 64_000,
-    canReason: true,
-    reasoningDescription: "Supports thinking budget controls (0, 1024, 8192, 24576 tokens).",
-    reasoningLevels: ["0", "1024", "8192", "24576"],
-  }),
-  def({
-    apiId: "gemini-3-flash",
-    name: "Gemini 3 Flash",
-    contextWindow: 128_000,
+    apiId: "gemini-2.0-flash",
+    name: "Gemini 2.0 Flash",
+    contextWindow: 1_000_000,
     maxOutputTokens: 8_192,
-    canReason: true,
+    canReason: false,
     tier: "fast",
-    reasoningDescription: "Supports thinking levels (low, medium, high).",
-    reasoningLevels: ["low", "medium", "high"],
+    reasoningDescription: "Fast multimodal model with large context window.",
   }),
   def({
-    apiId: "gemini-3-pro",
-    name: "Gemini 3 Pro",
-    contextWindow: 128_000,
-    maxOutputTokens: 64_000,
-    canReason: true,
-    reasoningDescription: "Supports thinking levels (low, medium, high).",
-    reasoningLevels: ["low", "medium", "high"],
-  }),
-  def({
-    apiId: "gemini-3.1-pro",
-    name: "Gemini 3.1 Pro",
-    contextWindow: 128_000,
-    maxOutputTokens: 64_000,
-    canReason: true,
-    reasoningDescription: "Supports thinking levels (low, medium, high).",
-    reasoningLevels: ["low", "medium", "high"],
-  }),
-];
-
-// ============================================================================
-// xAI Models
-// ============================================================================
-
-const XAI_MODELS: ModelDef[] = [
-  def({
-    apiId: "grok-code-fast-1",
-    name: "Grok Code Fast 1",
-    contextWindow: 128_000,
+    apiId: "gemini-2.0-pro",
+    name: "Gemini 2.0 Pro",
+    contextWindow: 2_000_000,
     maxOutputTokens: 8_192,
-    canReason: true,
-    tier: "fast",
-    reasoningDescription: "Speedy reasoning model with Summarized Thinking Traces via reasoning_content field.",
-    reasoningLevels: ["low", "medium", "high"],
-  }),
-];
-
-// ============================================================================
-// Fine-tuned / Experimental Models
-// ============================================================================
-
-const EXPERIMENTAL_MODELS: ModelDef[] = [
-  def({
-    apiId: "raptor-mini",
-    name: "Raptor mini",
-    contextWindow: 128_000,
-    maxOutputTokens: 16_384,
-    canReason: true,
-    tier: "fast",
-    reasoningDescription: "GitHub's experimental VS Code model with workspace-based reasoning for multi-file edits.",
-    reasoningLevels: ["low", "medium", "high"],
-  }),
-  def({
-    apiId: "goldeneye",
-    name: "Goldeneye",
-    contextWindow: 128_000,
-    maxOutputTokens: 16_384,
-    canReason: true,
-    reasoningDescription: "Agentic model with perception-reasoning-acting loop. Excels in Chain-of-Thought and Planning tasks.",
-    reasoningLevels: ["low", "medium", "high"],
+    canReason: false,
+    reasoningDescription: "Advanced multimodal model for complex tasks.",
   }),
 ];
 
@@ -308,8 +153,6 @@ export const CopilotModels: ModelDef[] = [
   ...OPENAI_MODELS,
   ...ANTHROPIC_MODELS,
   ...GOOGLE_MODELS,
-  ...XAI_MODELS,
-  ...EXPERIMENTAL_MODELS,
 ];
 
 // Verify no duplicate IDs

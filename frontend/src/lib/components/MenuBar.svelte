@@ -126,12 +126,11 @@
   }
 </script>
 
-{#if !zenMode}
-  <header
-    class="flex items-center justify-between px-2 h-11 border-b shrink-0 select-none"
-    style="border-color: var(--color-border); background: var(--color-surface-1);"
-    data-tauri-drag-region
-  >
+<header
+  class="flex items-center justify-between px-2 h-11 border-b shrink-0 select-none"
+  style="border-color: var(--color-border); background: var(--color-surface-1);"
+  data-tauri-drag-region
+>
     <!-- Left: App logo + menus -->
     <div class="flex items-center gap-1">
       <!-- App logo -->
@@ -315,48 +314,46 @@
         <Settings size={18} />
       </button>
 
-      {#if inTauri}
-        <!-- Window controls separator -->
-        <div class="w-px h-5 mx-1 shrink-0" style="background: var(--color-border);"></div>
-        <!-- Minimize -->
-        <button
-          class="flex items-center justify-center w-8 h-8 rounded-md transition-colors hover:bg-[var(--color-surface-3)]"
-          style="color: var(--color-text-muted);"
-          onclick={minimizeWindow}
-          title="Minimize"
-          aria-label="Minimize window"
-        >
-          <Minus size={14} />
-        </button>
-        <!-- Maximize / Restore -->
-        <button
-          class="flex items-center justify-center w-8 h-8 rounded-md transition-colors hover:bg-[var(--color-surface-3)]"
-          style="color: var(--color-text-muted);"
-          onclick={toggleMaximize}
-          title={isMaximized ? 'Restore' : 'Maximize'}
-          aria-label={isMaximized ? 'Restore window' : 'Maximize window'}
-        >
-          <Square size={13} />
-        </button>
-        <!-- Close -->
-        <button
-          class="flex items-center justify-center w-8 h-8 rounded-md transition-colors hover:bg-red-500/80 hover:text-white"
-          style="color: var(--color-text-muted);"
-          onclick={closeWindow}
-          title="Close"
-          aria-label="Close window"
-        >
-          <X size={14} />
-        </button>
-      {/if}
+      <!-- Window controls separator -->
+      <div class="w-px h-5 mx-1 shrink-0" style="background: var(--color-border);"></div>
+      <!-- Minimize -->
+      <button
+        class="flex items-center justify-center w-8 h-8 rounded-md transition-colors hover:bg-[var(--color-surface-3)]"
+        style="color: var(--color-text-muted);"
+        onclick={minimizeWindow}
+        title="Minimize"
+        aria-label="Minimize window"
+      >
+        <Minus size={14} />
+      </button>
+      <!-- Maximize / Restore -->
+      <button
+        class="flex items-center justify-center w-8 h-8 rounded-md transition-colors hover:bg-[var(--color-surface-3)]"
+        style="color: var(--color-text-muted);"
+        onclick={toggleMaximize}
+        title={isMaximized ? 'Restore' : 'Maximize'}
+        aria-label={isMaximized ? 'Restore window' : 'Maximize window'}
+      >
+        <Square size={13} />
+      </button>
+      <!-- Close -->
+      <button
+        class="flex items-center justify-center w-8 h-8 rounded-md transition-colors hover:bg-red-500/80 hover:text-white"
+        style="color: var(--color-text-muted);"
+        onclick={closeWindow}
+        title="Close"
+        aria-label="Close window"
+      >
+        <X size={14} />
+      </button>
     </div>
   </header>
-{:else}
-  <button
-    class="absolute top-1 right-4 z-20 px-2.5 py-1 rounded-md text-xs border transition-all duration-200 hover:bg-[var(--color-surface-3)] hover:border-[var(--color-border-bright)] hover:scale-105 active:scale-95"
-    style="background: var(--color-surface-2); border-color: var(--color-border); color: var(--color-text-secondary);"
-    onclick={() => action('toggle_zen_mode')}
-  >
-    Exit Zen
-  </button>
-{/if}
+  {#if zenMode}
+    <button
+      class="absolute top-12 right-4 z-20 px-2.5 py-1 rounded-md text-xs border transition-all duration-200 hover:bg-[var(--color-surface-3)] hover:border-[var(--color-border-bright)] hover:scale-105 active:scale-95"
+      style="background: var(--color-surface-2); border-color: var(--color-border); color: var(--color-text-secondary);"
+      onclick={() => action('toggle_zen_mode')}
+    >
+      Exit Zen
+    </button>
+  {/if}

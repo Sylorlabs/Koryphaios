@@ -12,7 +12,7 @@ import {
 
 describe("Reasoning config (shared)", () => {
   test("Opus 4.6 has effort options including max", () => {
-    const config = getReasoningConfig("anthropic", "claude-opus-4-6");
+    const config = getReasoningConfig("anthropic", "claude-3-opus");
     expect(config).not.toBeNull();
     expect(config!.parameter).toBe("thinking.effort");
     const values = config!.options.map((o) => o.value);
@@ -24,7 +24,7 @@ describe("Reasoning config (shared)", () => {
   });
 
   test("Sonnet 4.6 has effort options without max", () => {
-    const config = getReasoningConfig("anthropic", "claude-sonnet-4-6");
+    const config = getReasoningConfig("anthropic", "claude-3-7-sonnet");
     expect(config).not.toBeNull();
     expect(config!.parameter).toBe("thinking.effort");
     const values = config!.options.map((o) => o.value);
@@ -36,7 +36,7 @@ describe("Reasoning config (shared)", () => {
   });
 
   test("Haiku 4.5 has thinking budget options", () => {
-    const config = getReasoningConfig("anthropic", "claude-haiku-4-5");
+    const config = getReasoningConfig("anthropic", "claude-3-5-haiku");
     expect(config).not.toBeNull();
     expect(config!.parameter).toBe("thinkingConfig.thinkingBudget");
     const values = config!.options.map((o) => o.value);
@@ -48,26 +48,26 @@ describe("Reasoning config (shared)", () => {
   });
 
   test("normalizeReasoningLevel preserves max for anthropic Opus 4.6", () => {
-    expect(normalizeReasoningLevel("anthropic", "claude-opus-4-6", "max")).toBe("max");
-    expect(normalizeReasoningLevel("anthropic", "claude-opus-4-6", "high")).toBe("high");
-    expect(normalizeReasoningLevel("anthropic", "claude-opus-4-6", "low")).toBe("low");
+    expect(normalizeReasoningLevel("anthropic", "claude-3-opus", "max")).toBe("max");
+    expect(normalizeReasoningLevel("anthropic", "claude-3-opus", "high")).toBe("high");
+    expect(normalizeReasoningLevel("anthropic", "claude-3-opus", "low")).toBe("low");
   });
 
   test("normalizeReasoningLevel maps Haiku 4.5 budget values through for numeric", () => {
     // Frontend sends option value directly (0, 1024, 8192, 24576)
-    expect(normalizeReasoningLevel("anthropic", "claude-haiku-4-5", "8192")).toBe("8192");
-    expect(normalizeReasoningLevel("anthropic", "claude-haiku-4-5", "0")).toBe("0");
+    expect(normalizeReasoningLevel("anthropic", "claude-3-5-haiku", "8192")).toBe("8192");
+    expect(normalizeReasoningLevel("anthropic", "claude-3-5-haiku", "0")).toBe("0");
   });
 
   test("hasReasoningSupport is true for Opus 4.6, Sonnet 4.6, Haiku 4.5", () => {
-    expect(hasReasoningSupport("anthropic", "claude-opus-4-6")).toBe(true);
-    expect(hasReasoningSupport("anthropic", "claude-sonnet-4-6")).toBe(true);
-    expect(hasReasoningSupport("anthropic", "claude-haiku-4-5")).toBe(true);
+    expect(hasReasoningSupport("anthropic", "claude-3-opus")).toBe(true);
+    expect(hasReasoningSupport("anthropic", "claude-3-7-sonnet")).toBe(true);
+    expect(hasReasoningSupport("anthropic", "claude-3-5-haiku")).toBe(true);
   });
 
   test("getDefaultReasoning returns correct defaults", () => {
-    expect(getDefaultReasoning("anthropic", "claude-opus-4-6")).toBe("medium");
-    expect(getDefaultReasoning("anthropic", "claude-sonnet-4-6")).toBe("medium");
-    expect(getDefaultReasoning("anthropic", "claude-haiku-4-5")).toBe("8192");
+    expect(getDefaultReasoning("anthropic", "claude-3-opus")).toBe("medium");
+    expect(getDefaultReasoning("anthropic", "claude-3-7-sonnet")).toBe("medium");
+    expect(getDefaultReasoning("anthropic", "claude-3-5-haiku")).toBe("8192");
   });
 });

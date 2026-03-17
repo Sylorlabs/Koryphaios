@@ -57,14 +57,22 @@
     if (feedContainer) {
       const container = feedContainer;
       // Track container resize and update autoscroll status.
+      // Use requestAnimationFrame to avoid ResizeObserver loop errors
+      let rafId: number | null = null;
       const ro = new ResizeObserver(entries => {
-        for (const entry of entries) {
-          const dist = container.scrollHeight - container.scrollTop - entry.contentRect.height;
-          autoScroll = dist < 50;
-        }
+        if (rafId) cancelAnimationFrame(rafId);
+        rafId = requestAnimationFrame(() => {
+          for (const entry of entries) {
+            const dist = container.scrollHeight - container.scrollTop - entry.contentRect.height;
+            autoScroll = dist < 50;
+          }
+        });
       });
       ro.observe(container);
-      return () => ro.disconnect();
+      return () => {
+        ro.disconnect();
+        if (rafId) cancelAnimationFrame(rafId);
+      };
     }
   });
 

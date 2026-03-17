@@ -23,11 +23,10 @@
   let container: HTMLDivElement;
   let firstPane: HTMLDivElement;
   let isResizing = $state(false);
-  let size = $state(50);
+  let size = $state(initialSize);
 
-  $effect(() => {
-    size = initialSize;
-  });
+  // Only update size from initialSize on mount, not on every change
+  // to avoid potential reactivity loops
 
   function handleMouseDown(e: MouseEvent) {
     e.preventDefault();

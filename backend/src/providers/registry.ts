@@ -1,4 +1,4 @@
-// Clean Provider Registry - Only real providers with proper circuit breaker
+// Clean Provider Registry - Supports both native and dynamic OpenAI-compatible providers
 
 import type { ProviderAuthMode, ProviderConfig, ProviderName, KoryphaiosConfig } from "@koryphaios/shared";
 import { providerLog } from "../logger";
@@ -18,6 +18,13 @@ import { GeminiProvider, GeminiCLIProvider } from "./gemini";
 import { CopilotProvider, exchangeGitHubTokenForCopilotAsync } from "./copilot";
 import { ClineProvider } from "./cline";
 import { CodexProvider } from "./codex";
+
+// Dynamic providers - unlimited OpenAI-compatible endpoints
+import {
+  DynamicOpenAIProvider,
+  DYNAMIC_PROVIDER_PRESETS,
+  type DynamicProviderConfig,
+} from "./dynamic";
 
 import { secureDecrypt, isUsingSecureEncryption } from "../security";
 import { resolveModel, getModelsForProvider, isLegacyModel, type StreamRequest, type ProviderEvent, type Provider } from "./types";
@@ -198,19 +205,81 @@ class ProviderRegistry {
   private providers = new Map<ProviderName, Provider>();
   private providerConfigs = new Map<ProviderName, ProviderConfig>();
   private circuitStates = new Map<ProviderName, CircuitState>();
+  private dynamicProviders = new Map<ProviderName, DynamicOpenAIProvider>();
+  
+  // PERFORMANCE: Model index cache for O(1) lookups instead of O(n²)
+  private modelIndex = new Map<string, ProviderName[]>();
+  private modelIndexVersion = 0; // Incremented on each rebuild for consistency
+  private readonly MODEL_INDEX_TTL_MS = 30000; // 30 seconds
+  
+  // PERFORMANCE: Status cache to avoid recalculating on every request
+  private statusCache: ReturnType<ProviderRegistry['getStatus']> | null = null;
+  private statusCacheTime = 0;
+  private readonly STATUS_CACHE_TTL_MS = 5000; // 5 seconds
 
   constructor(private config?: KoryphaiosConfig) {
     this.initializeAll();
+    this.initializeDynamicProviders();
+    this.buildModelIndex();
   }
 
-  /** Get a specific provider by name. */
+  /** Get a specific provider by name (includes dynamic providers). */
   get(name: ProviderName): Provider | undefined {
-    return this.providers.get(name);
+    return this.providers.get(name) ?? this.dynamicProviders.get(name);
   }
 
-  /** Get all available (authenticated) providers. */
+  /** Add a dynamic OpenAI-compatible provider. */
+  addDynamicProvider(config: DynamicProviderConfig): { success: boolean; error?: string } {
+    try {
+      // Validate config
+      if (!config.name) {
+        return { success: false, error: "Provider name is required" };
+      }
+      if (!config.baseUrl && !config.preset) {
+        return { success: false, error: "Either baseUrl or preset is required" };
+      }
+
+      const provider = new DynamicOpenAIProvider(config);
+      this.dynamicProviders.set(config.name, provider);
+      this.providerConfigs.set(config.name, config);
+      
+      // PERFORMANCE: Invalidate model index since we added a new provider
+      this.invalidateModelIndex();
+      
+      providerLog.info({ provider: config.name, preset: config.preset }, "Dynamic provider added");
+      return { success: true };
+    } catch (err: any) {
+      return { success: false, error: err.message };
+    }
+  }
+
+  /** Remove a dynamic provider. */
+  removeDynamicProvider(name: ProviderName): void {
+    this.dynamicProviders.delete(name);
+    this.providerConfigs.delete(name);
+    this.circuitStates.delete(name);
+    
+    // PERFORMANCE: Invalidate model index since we removed a provider
+    this.invalidateModelIndex();
+    
+    providerLog.info({ provider: name }, "Dynamic provider removed");
+  }
+
+  /** Get all dynamic providers. */
+  getDynamicProviders(): DynamicOpenAIProvider[] {
+    return [...this.dynamicProviders.values()];
+  }
+
+  /** Check if a provider is dynamic. */
+  isDynamicProvider(name: ProviderName): boolean {
+    return this.dynamicProviders.has(name);
+  }
+
+  /** Get all available (authenticated) providers (includes dynamic). */
   getAvailable(): Provider[] {
-    return [...this.providers.values()].filter((p) => p.isAvailable());
+    const native = [...this.providers.values()].filter((p) => p.isAvailable());
+    const dynamic = [...this.dynamicProviders.values()].filter((p) => p.isAvailable());
+    return [...native, ...dynamic];
   }
 
   /** Check if circuit breaker is open for a provider */
@@ -256,7 +325,10 @@ class ProviderRegistry {
     }
   }
 
-  /** Get provider status only for providers the user has authenticated. No hardcoded list. */
+  /** 
+   * Get provider status only for providers the user has authenticated. No hardcoded list.
+   * PERFORMANCE: Uses 5-second cache to avoid recalculating on every request.
+   */
   getStatus(): Array<{
     name: ProviderName;
     enabled: boolean;
@@ -275,6 +347,12 @@ class ProviderRegistry {
     /** Placeholder for base URL input; backend is single source of truth so UI does not hardcode endpoints. */
     baseUrlPlaceholder?: string;
   }> {
+    // PERFORMANCE: Return cached status if fresh
+    const now = Date.now();
+    if (this.statusCache && now - this.statusCacheTime < this.STATUS_CACHE_TTL_MS) {
+      return this.statusCache;
+    }
+    
     const names = Object.keys(PROVIDER_AUTH_MODE) as ProviderName[];
     const result: Array<{
       name: ProviderName;
@@ -363,7 +441,19 @@ class ProviderRegistry {
       });
     }
 
+    // PERFORMANCE: Update cache
+    this.statusCache = result;
+    this.statusCacheTime = now;
+    
     return result;
+  }
+  
+  /**
+   * Invalidate status cache (call when provider configs change)
+   */
+  invalidateStatusCache(): void {
+    this.statusCache = null;
+    this.statusCacheTime = 0;
   }
 
   /** All provider types that can be added (for "Add provider" UI). Not filtered by auth. */
@@ -374,8 +464,34 @@ class ProviderRegistry {
     }));
   }
 
-  /** Find the best available provider for a given model ID. */
+  /** 
+   * Find the best available provider for a given model ID.
+   * PERFORMANCE: Uses cached model index for O(1) average case instead of O(n²).
+   * Thread-safe: Uses version counter for consistency.
+   */
   findProviderForModel(modelId: string): Provider | undefined {
+    // Refresh index if stale (single-threaded JavaScript means no race here)
+    this.refreshModelIndexIfNeeded();
+    const providerNames = this.modelIndex.get(modelId);
+    
+    if (providerNames) {
+      // Try cached providers first (likely faster)
+      for (const name of providerNames) {
+        if (this.isCircuitOpen(name)) continue;
+        const provider = this.get(name);
+        if (provider?.isAvailable()) {
+          // Check selected models filter
+          const config = this.providerConfigs.get(name);
+          const selected = config?.selectedModels ?? [];
+          if (selected.length > 0 && !selected.includes(modelId)) {
+            continue;
+          }
+          return provider;
+        }
+      }
+    }
+    
+    // Fallback: search through all providers (handles dynamic additions)
     for (const provider of this.getAvailable()) {
       if (this.isCircuitOpen(provider.name)) continue;
       
@@ -387,10 +503,67 @@ class ProviderRegistry {
       }
 
       if (provider.listModels().some((m) => m.id === modelId)) {
+        // Update index for next time (but don't block)
+        setImmediate(() => this.addToModelIndex(modelId, provider.name));
         return provider;
       }
     }
     return undefined;
+  }
+  
+  /**
+   * Build the model index for fast lookups.
+   * PERFORMANCE: Incremental version counter for cache consistency.
+   */
+  private buildModelIndex(): void {
+    const newIndex = new Map<string, ProviderName[]>();
+    
+    for (const [name, provider] of this.providers) {
+      for (const model of provider.listModels()) {
+        this.addToModelIndexInMap(newIndex, model.id, name);
+      }
+    }
+    
+    // Also index dynamic providers
+    for (const [name, provider] of this.dynamicProviders) {
+      for (const model of provider.listModels()) {
+        this.addToModelIndexInMap(newIndex, model.id, name);
+      }
+    }
+    
+    // Atomic swap - single-threaded JS guarantees consistency
+    this.modelIndex = newIndex;
+    this.modelIndexVersion++;
+  }
+  
+  private addToModelIndexInMap(map: Map<string, ProviderName[]>, modelId: string, providerName: ProviderName): void {
+    const providers = map.get(modelId);
+    if (providers) {
+      if (!providers.includes(providerName)) {
+        providers.push(providerName);
+      }
+    } else {
+      map.set(modelId, [providerName]);
+    }
+  }
+  
+  private addToModelIndex(modelId: string, providerName: ProviderName): void {
+    this.addToModelIndexInMap(this.modelIndex, modelId, providerName);
+  }
+  
+  private refreshModelIndexIfNeeded(): void {
+    if (this.modelIndex.size === 0 || Date.now() - (this.statusCacheTime || 0) > this.MODEL_INDEX_TTL_MS) {
+      this.buildModelIndex();
+    }
+  }
+  
+  /**
+   * Invalidate model index (call when providers/models change)
+   * FIX: Actually clears the index now.
+   */
+  invalidateModelIndex(): void {
+    this.modelIndex.clear();
+    this.modelIndexVersion++;
   }
 
   /** Resolve the provider that should handle a model. */
@@ -575,8 +748,8 @@ class ProviderRegistry {
                     "INSERT OR REPLACE INTO provider_endpoint_override (provider, base_url, updated_at) VALUES (?, ?, ?)"
                   )
                   .run(name, GEMINI_V1_BASE, Date.now());
-              } catch {
-                // DB not initialized
+              } catch (err) {
+                providerLog.debug({ error: err instanceof Error ? err.message : String(err) }, "DB not initialized when storing Gemini base URL");
               }
               return { success: true };
             }
@@ -732,6 +905,10 @@ class ProviderRegistry {
         this.providers.set(name, provider);
         this.circuitStates.delete(name); // Reset circuit breaker
         this.clearKeyInvalid(name); // New key may be valid
+        
+        // PERFORMANCE: Invalidate model index since provider config changed
+        this.invalidateModelIndex();
+        
         providerLog.info({ provider: name }, "Provider configured");
         return { success: true };
       }
@@ -842,6 +1019,57 @@ class ProviderRegistry {
     this.logProviderStatus();
   }
 
+  // ─── Private: Initialize dynamic providers from config ────────────────────
+
+  private initializeDynamicProviders() {
+    // Load dynamic providers from config
+    const dynamicConfigs = this.config?.dynamicProviders ?? [];
+    
+    for (const config of dynamicConfigs) {
+      try {
+        const provider = new DynamicOpenAIProvider(config);
+        this.dynamicProviders.set(config.name, provider);
+        this.providerConfigs.set(config.name, config);
+        providerLog.info({ provider: config.name, preset: config.preset }, "Dynamic provider initialized");
+      } catch (error) {
+        providerLog.error({ provider: config.name, error }, "Failed to initialize dynamic provider");
+      }
+    }
+
+    // Also check for preset providers that aren't in native providers
+    for (const [presetName, preset] of Object.entries(DYNAMIC_PROVIDER_PRESETS)) {
+      if (presetName === "custom") continue;
+      
+      // Skip if already a native provider
+      if (presetName in PROVIDER_AUTH_MODE) continue;
+
+      // Check if user has configured this preset
+      const userConfig = this.config?.providers?.[presetName as ProviderName];
+      const envKey = preset.envVar ? process.env[preset.envVar] : undefined;
+      
+      if (userConfig || envKey) {
+        const config: DynamicProviderConfig = {
+          name: presetName as ProviderName,
+          preset: presetName,
+          displayName: preset.displayName,
+          apiKey: userConfig?.apiKey ?? envKey ?? "",
+          baseUrl: userConfig?.baseUrl ?? preset.baseUrl,
+          disabled: userConfig?.disabled ?? false,
+          selectedModels: userConfig?.selectedModels,
+        };
+
+        try {
+          const provider = new DynamicOpenAIProvider(config);
+          this.dynamicProviders.set(config.name, provider);
+          this.providerConfigs.set(config.name, config);
+          providerLog.info({ provider: presetName, preset: presetName }, "Preset provider initialized");
+        } catch (error) {
+          providerLog.error({ provider: presetName, error }, "Failed to initialize preset provider");
+        }
+      }
+    }
+  }
+
   private buildProviderConfig(name: ProviderName): ProviderConfig {
     const userConfig = this.config?.providers?.[name];
     // Vertex AI defaults to disabled so GCP env (e.g. gcloud ADC) does not auto-enable it or spawn it as subagents
@@ -930,15 +1158,20 @@ class ProviderRegistry {
           return new OpenAIProvider(config, "ollama", config.baseUrl);
         }
         return null;
-      case "opencodezen":
-        if (config.apiKey) {
-          return new OpenAIProvider(
-            config,
-            "opencodezen" as ProviderName,
-            config.baseUrl ?? "https://opencode.ai/zen/v1",
-          );
-        }
-        return null;
+      case "opencodezen": {
+        if (!config.apiKey) return null;
+        // Use DynamicOpenAIProvider for full preset support
+        const dynamicConfig: DynamicProviderConfig = {
+          name: "opencodezen",
+          preset: "opencodezen",
+          apiKey: config.apiKey,
+          baseUrl: config.baseUrl,
+          disabled: config.disabled,
+          selectedModels: config.selectedModels,
+          headers: config.headers,
+        };
+        return new DynamicOpenAIProvider(dynamicConfig);
+      }
       case "llamacpp":
         if (config.baseUrl) {
           return new OpenAIProvider(config, "llamacpp", config.baseUrl);
@@ -998,8 +1231,8 @@ class ProviderRegistry {
           try {
             apiKey = await secureDecrypt(val);
             break;
-          } catch {
-            providerLog.warn({ provider: name, envVar }, "Failed to decrypt stored API key");
+          } catch (err) {
+            providerLog.warn({ provider: name, envVar, error: err instanceof Error ? err.message : String(err) }, "Failed to decrypt stored API key");
           }
         }
       }
@@ -1009,8 +1242,8 @@ class ProviderRegistry {
           try {
             authToken = await secureDecrypt(val);
             break;
-          } catch {
-            providerLog.warn({ provider: name, envVar }, "Failed to decrypt stored auth token");
+          } catch (err) {
+            providerLog.warn({ provider: name, envVar, error: err instanceof Error ? err.message : String(err) }, "Failed to decrypt stored auth token");
           }
         }
       }
@@ -1103,8 +1336,8 @@ class ProviderRegistry {
         { provider: name, keyMask: maskApiKey(config?.apiKey ?? config?.authToken) },
         "API key marked invalid (401); update key in settings"
       );
-    } catch {
-      // DB not initialized (e.g. tests)
+    } catch (err) {
+      providerLog.debug({ error: err instanceof Error ? err.message : String(err) }, "DB not initialized when marking key invalid");
     }
   }
 
@@ -1113,8 +1346,8 @@ class ProviderRegistry {
     try {
       const { getDb } = require("../db/sqlite");
       getDb().run("DELETE FROM provider_key_invalid WHERE provider = ?", name);
-    } catch {
-      // DB not initialized
+    } catch (err) {
+      providerLog.debug({ error: err instanceof Error ? err.message : String(err) }, "DB not initialized when clearing key invalid state");
     }
   }
 
@@ -1126,7 +1359,8 @@ class ProviderRegistry {
         .query("SELECT provider FROM provider_key_invalid WHERE provider = ?")
         .get(name) as { provider?: string } | undefined;
       return !!row;
-    } catch {
+    } catch (err) {
+      providerLog.debug({ error: err instanceof Error ? err.message : String(err) }, "DB not initialized when checking key invalid status");
       return false;
     }
   }

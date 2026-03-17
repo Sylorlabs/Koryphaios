@@ -2,32 +2,35 @@ import type { ModelDef } from "@koryphaios/shared";
 
 /**
  * Codex CLI models — accessed via `codex` CLI (ChatGPT/Codex subscription).
+ * Uses OpenAI's Codex model series.
  */
 export const CodexModels: ModelDef[] = [
   {
-    id: "gpt-5.3-codex",
-    name: "GPT 5.3 Codex",
+    id: "codex-o3-mini",
+    name: "Codex o3-mini",
     provider: "codex",
-    contextWindow: 500_000,
-    maxOutputTokens: 128_000,
-    costPerMInputTokens: 1.50,
-    costPerMOutputTokens: 12.0,
+    apiModelId: "o3-mini",
+    contextWindow: 200_000,
+    maxOutputTokens: 100_000,
+    costPerMInputTokens: 1.10,
+    costPerMOutputTokens: 4.40,
     canReason: true,
     supportsAttachments: true,
     supportsStreaming: true,
-    tier: "flagship",
+    tier: "reasoning",
   },
   {
-    id: "gpt-5.2-codex",
-    name: "GPT 5.2 Codex",
+    id: "codex-o1-mini",
+    name: "Codex o1-mini",
     provider: "codex",
-    contextWindow: 400_000,
-    maxOutputTokens: 128_000,
-    costPerMInputTokens: 1.25,
-    costPerMOutputTokens: 10.0,
+    apiModelId: "o1-mini",
+    contextWindow: 128_000,
+    maxOutputTokens: 65_536,
+    costPerMInputTokens: 1.10,
+    costPerMOutputTokens: 4.40,
     canReason: true,
     supportsAttachments: true,
     supportsStreaming: true,
-    tier: "flagship",
+    tier: "reasoning",
   },
 ];

@@ -59,7 +59,7 @@ export class TelegramBridge {
         return;
       }
       const lines = workers.map((w) =>
-        `• **${w.agent.name}** (${w.agent.model})\n  Status: ${w.status}\n  Task: ${w.task.slice(0, 100)}`
+        `• **${w.agent.name}** (${w.agent.model})\n  Status: ${w.status}\n  Session: ${w.sessionId.slice(0, 8)}`
       );
       await ctx.reply(`📊 Active Workers:\n\n${lines.join("\n\n")}`, { parse_mode: "Markdown" });
     });

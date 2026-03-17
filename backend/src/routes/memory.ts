@@ -5,7 +5,7 @@
  * - Universal (global) memory
  * - Project memory
  * - Session memory
- * - Rules (.cursorrules)
+ * - Rules (.koryrules)
  * - Memory settings
  */
 
@@ -284,7 +284,7 @@ export function createMemoryRoutes(): RouteHandler[] {
     },
     
     // =========================================================================
-    // Rules (.cursorrules)
+    // Rules (.koryrules)
     // =========================================================================
     
     // GET /api/memory/rules — Get rules

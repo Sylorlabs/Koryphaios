@@ -4,6 +4,7 @@ import type { WSMessage, APIResponse } from "@koryphaios/shared";
 import type { ProviderRegistry } from "../providers/registry";
 import type { ToolRegistry } from "../tools/registry";
 import type { KoryManager } from "../kory/manager";
+import type { KoryphaiosConfig } from "@koryphaios/shared";
 import type { ISessionStore } from "../stores/session-store";
 import type { IMessageStore } from "../stores/message-store";
 import type { WSManager } from "../ws/ws-manager";
@@ -28,6 +29,7 @@ export interface RouteHandler {
 }
 
 export interface RouteDependencies {
+    config: KoryphaiosConfig;
     providers: ProviderRegistry;
     tools: ToolRegistry;
     kory: KoryManager;

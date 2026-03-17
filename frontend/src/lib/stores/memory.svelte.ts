@@ -5,7 +5,7 @@
  * - Universal Memory (global across all projects)
  * - Project Memory (specific to current project)
  * - Session Memory (per-chat persistent storage)
- * - Rules (.cursorrules file)
+ * - Rules (.koryrules file)
  * - Memory Settings (toggles and configuration)
  */
 

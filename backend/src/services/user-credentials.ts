@@ -46,7 +46,34 @@ export interface CreateCredentialInput {
   value: string;
   type: 'apiKey' | 'authToken' | 'baseUrl';
   expiresAt?: number;
-  metadata?: Record<string, any>;
+  metadata?: Record<string, unknown>;
+}
+
+/** Database row for user_credentials table */
+interface CredentialDbRow {
+  id: string;
+  user_id: string;
+  provider: string;
+  encrypted_credential: string;
+  type: 'apiKey' | 'authToken' | 'baseUrl';
+  is_active: number;
+  created_at: number;
+  last_used_at: number | null;
+  expires_at: number | null;
+  metadata: string | null;
+}
+
+/** Database row for credential_audit_log table */
+interface AuditLogDbRow {
+  id: string;
+  credential_id: string;
+  user_id: string;
+  action: string;
+  timestamp: number;
+  ip: string | null;
+  user_agent: string | null;
+  success: number;
+  error: string | null;
 }
 
 export interface CredentialWithPlaintext extends UserCredential {
@@ -250,7 +277,7 @@ export class UserCredentialsService {
       // Get from database
       const row = this.db
         .query('SELECT * FROM user_credentials WHERE id = ? AND is_active = 1')
-        .get(credentialId) as any;
+        .get(credentialId) as CredentialDbRow | undefined;
 
       if (!row) {
         return null;
@@ -321,7 +348,7 @@ export class UserCredentialsService {
   async getUserCredentials(userId: string): Promise<UserCredential[]> {
     const rows = this.db
       .query('SELECT * FROM user_credentials WHERE user_id = ? ORDER BY created_at DESC')
-      .all(userId) as any[];
+      .all(userId) as CredentialDbRow[];
 
     return rows.map(this.rowToCredential);
   }
@@ -337,7 +364,7 @@ export class UserCredentialsService {
     
     const row = this.db
       .query('SELECT * FROM user_credentials WHERE user_id = ? AND provider = ? AND is_active = 1 ORDER BY created_at DESC LIMIT 1')
-      .get(userId, provider) as any;
+      .get(userId, provider) as CredentialDbRow | undefined;
 
     if (!row) return null;
 
@@ -402,7 +429,7 @@ export class UserCredentialsService {
   ): Promise<void> {
     const row = this.db
       .query('SELECT user_id FROM user_credentials WHERE id = ?')
-      .get(credentialId) as any;
+      .get(credentialId) as { user_id: string } | undefined;
 
     if (!row) {
       throw new Error('Credential not found');
@@ -433,7 +460,7 @@ export class UserCredentialsService {
   async getCredentialAuditLog(credentialId: string): Promise<CredentialAuditLog[]> {
     const rows = this.db
       .query('SELECT * FROM credential_audit_log WHERE credential_id = ? ORDER BY timestamp DESC')
-      .all(credentialId) as any[];
+      .all(credentialId) as AuditLogDbRow[];
 
     return rows.map(this.rowToAuditLog);
   }
@@ -444,7 +471,7 @@ export class UserCredentialsService {
   async getUserAuditLog(userId: string, limit: number = 100): Promise<CredentialAuditLog[]> {
     const rows = this.db
       .query('SELECT * FROM credential_audit_log WHERE user_id = ? ORDER BY timestamp DESC LIMIT ?')
-      .all(userId, limit) as any[];
+      .all(userId, limit) as AuditLogDbRow[];
 
     return rows.map(this.rowToAuditLog);
   }
@@ -486,7 +513,7 @@ export class UserCredentialsService {
     );
   }
 
-  private rowToCredential(row: any): UserCredential {
+  private rowToCredential(row: CredentialDbRow): UserCredential {
     return {
       id: row.id,
       userId: row.user_id,
@@ -495,23 +522,23 @@ export class UserCredentialsService {
       type: row.type,
       isActive: row.is_active === 1,
       createdAt: row.created_at,
-      lastUsedAt: row.last_used_at,
-      expiresAt: row.expires_at,
+      lastUsedAt: row.last_used_at ?? undefined,
+      expiresAt: row.expires_at ?? undefined,
       metadata: row.metadata ? JSON.parse(row.metadata) : undefined,
     };
   }
 
-  private rowToAuditLog(row: any): CredentialAuditLog {
+  private rowToAuditLog(row: AuditLogDbRow): CredentialAuditLog {
     return {
       id: row.id,
       credentialId: row.credential_id,
       userId: row.user_id,
-      action: row.action,
+      action: row.action as CredentialAuditLog['action'],
       timestamp: row.timestamp,
-      ip: row.ip,
-      userAgent: row.user_agent,
+      ip: row.ip ?? undefined,
+      userAgent: row.user_agent ?? undefined,
       success: row.success === 1,
-      error: row.error,
+      error: row.error ?? undefined,
     };
   }
 
@@ -524,7 +551,7 @@ export class UserCredentialsService {
     userId: string;
     provider: string;
     credential: string;
-    metadata?: Record<string, any>;
+    metadata?: Record<string, unknown>;
   }): Promise<string> {
     const result = await this.createCredential({
       userId: input.userId,
@@ -568,7 +595,7 @@ export class UserCredentialsService {
   async getMetadata(userId: string, credentialId: string): Promise<UserCredential | null> {
     const row = this.db
       .prepare('SELECT * FROM user_credentials WHERE id = ? AND user_id = ? AND is_active = 1')
-      .get(credentialId, userId) as any;
+      .get(credentialId, userId) as CredentialDbRow | undefined;
     
     if (!row) return null;
     return this.rowToCredential(row);

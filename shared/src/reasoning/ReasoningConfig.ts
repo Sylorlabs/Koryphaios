@@ -18,16 +18,15 @@ export const STANDARD_REASONING_OPTIONS: Record<string, ReasoningOption> = {
 const EXTENDED_REASONING_OPTIONS: Record<string, ReasoningOption> = {
   ...STANDARD_REASONING_OPTIONS,
   minimal: { value: "minimal", label: "Minimal", description: "Lightest available explicit reasoning effort" },
-  max: { value: "max", label: "Max", description: "Maximum capability, no token constraints (Opus 4.6 only)" },
   off: { value: "off", label: "Off", description: "Disable explicit reasoning mode" },
   on: { value: "on", label: "On", description: "Enable default reasoning mode" },
   default: { value: "default", label: "Default", description: "Provider default reasoning mode" },
-  // Budget-based options (Gemini, Haiku 4.5)
+  max: { value: "max", label: "Max", description: "Maximum reasoning effort (Opus 4.6 only)" },
+  // Budget-based options (Gemini)
   budget_0: { value: "0", label: "Off", description: "Disable thinking budget" },
   budget_1024: { value: "1024", label: "Low", description: "Thinking budget: 1,024 tokens" },
   budget_8192: { value: "8192", label: "Medium", description: "Thinking budget: 8,192 tokens" },
   budget_24576: { value: "24576", label: "High", description: "Thinking budget: 24,576 tokens" },
-  budget_65536: { value: "65536", label: "xhigh", description: "Thinking budget: 65,536 tokens" },
 };
 
 // Helper to create reasoning config
@@ -45,71 +44,70 @@ function createConfig(
 
 // Anthropic reasoning configurations
 const ANTHROPIC_CONFIGS: Record<string, ReasoningConfig | null> = {
-  // Opus 4.6: adaptive thinking with effort levels (low, medium, high, max)
+  // Claude 3 Opus: effort-based adaptive thinking with max option
+  "claude-3-opus": createConfig(
+    "thinking.effort",
+    ["low", "medium", "high", "max"],
+    "medium",
+  ),
+  // Claude 3.7 Sonnet: effort-based adaptive thinking
+  "claude-3-7-sonnet": createConfig(
+    "thinking.effort",
+    ["low", "medium", "high"],
+    "medium",
+  ),
+  // Claude 3.5 Haiku: budget-based thinking
+  "claude-3-5-haiku": createConfig(
+    "thinkingConfig.thinkingBudget",
+    ["budget_0", "budget_1024", "budget_8192", "budget_24576"],
+    "8192",
+  ),
+  // Claude 4.6 Opus: effort-based adaptive thinking with max option
   "claude-opus-4-6": createConfig(
     "thinking.effort",
     ["low", "medium", "high", "max"],
     "medium",
   ),
-  // Sonnet 4.6: adaptive thinking with effort levels (no max)
+  // Claude 4.6 Sonnet: effort-based adaptive thinking
   "claude-sonnet-4-6": createConfig(
     "thinking.effort",
     ["low", "medium", "high"],
     "medium",
   ),
-  // Haiku 4.5: budget-based thinking
+  // Claude 4.5 Haiku: budget-based thinking
   "claude-haiku-4-5": createConfig(
-    "thinkingConfig.thinkingBudget",
+    "thinking.budget_tokens",
     ["budget_0", "budget_1024", "budget_8192", "budget_24576"],
     "8192",
   ),
-  // Other Anthropic models: thinking on/off
-  "default-anthropic": createConfig("thinking.type", ["off", "on"], "on"),
+  // Other Anthropic models: no explicit reasoning config
+  "default-anthropic": null,
 };
 
 // OpenAI reasoning configurations
 const OPENAI_CONFIGS: Record<string, ReasoningConfig | null> = {
   // o1-mini: no explicit reasoning config
   "o1-mini": null,
-  // GPT-5: full effort range
-  "gpt-5": createConfig(
-    "reasoning.effort",
-    ["none", "minimal", "low", "medium", "high", "xhigh"],
-    "medium",
-  ),
-  // o1/o3/o4: limited effort range
-  "o1-series": createConfig("reasoning.effort", ["low", "medium", "high"], "medium"),
+  // o1/o3: reasoning effort
+  "o1": createConfig("reasoning.effort", ["low", "medium", "high"], "medium"),
+  "o3-mini": createConfig("reasoning.effort", ["low", "medium", "high"], "medium"),
   // Default OpenAI: no reasoning config
   "default-openai": null,
 };
 
 // Google reasoning configurations
 const GOOGLE_CONFIGS: Record<string, ReasoningConfig | null> = {
-  // Gemini 3.x: level-based thinking
-  "gemini-3": createConfig("thinkingConfig.thinkingLevel", ["low", "medium", "high"], "medium"),
-  // Gemini 2.5 Pro: budget-based thinking
-  "gemini-2.5": createConfig(
-    "thinkingConfig.thinkingBudget",
-    ["budget_0", "budget_1024", "budget_8192", "budget_24576"],
-    "8192",
-  ),
-  // Default Google: budget-based
-  "default-google": createConfig(
-    "thinkingConfig.thinkingBudget",
-    ["budget_0", "budget_1024", "budget_8192", "budget_24576"],
-    "8192",
-  ),
+  // Gemini 2.0: level-based thinking
+  "gemini-2.0": createConfig("thinkingConfig.thinkingLevel", ["low", "medium", "high"], "medium"),
+  // Default Google: no reasoning config
+  "default-google": null,
 };
 
 // Azure (same as OpenAI but with azure prefix)
 const AZURE_CONFIGS: Record<string, ReasoningConfig | null> = {
   "azure.o1-mini": null,
-  "azure.gpt-5": createConfig(
-    "reasoning.effort",
-    ["none", "minimal", "low", "medium", "high", "xhigh"],
-    "medium",
-  ),
-  "azure.o1-series": createConfig("reasoning.effort", ["low", "medium", "high"], "medium"),
+  "azure.o1": createConfig("reasoning.effort", ["low", "medium", "high"], "medium"),
+  "azure.o3-mini": createConfig("reasoning.effort", ["low", "medium", "high"], "medium"),
   "default-azure": null,
 };
 
@@ -132,86 +130,36 @@ const XAI_CONFIGS: Record<string, ReasoningConfig | null> = {
 // OpenRouter reasoning configurations
 const OPENROUTER_CONFIGS: Record<string, ReasoningConfig | null> = {
   // OpenAI o-series through OpenRouter
-  "openrouter.o1-series": createConfig("reasoning.effort", ["low", "medium", "high"], "medium"),
+  "openrouter.o1": createConfig("reasoning.effort", ["low", "medium", "high"], "medium"),
+  "openrouter.o3-mini": createConfig("reasoning.effort", ["low", "medium", "high"], "medium"),
   // Default OpenRouter: no reasoning
   "default-openrouter": null,
 };
 
-// Copilot reasoning configurations (complex - many model families)
+// Copilot reasoning configurations
 const COPILOT_CONFIGS: Record<string, ReasoningConfig | null> = {
-  // GPT-5.1/5.2 Codex: full effort range
-  "gpt-5.1-codex": createConfig(
-    "reasoning.effort",
-    ["none", "low", "medium", "high", "xhigh"],
-    "medium",
-  ),
-  "gpt-5.2-codex": createConfig(
-    "reasoning.effort",
-    ["none", "low", "medium", "high", "xhigh"],
-    "medium",
-  ),
-  "gpt-5.1-codex-max": createConfig(
-    "reasoning.effort",
-    ["none", "low", "medium", "high", "xhigh"],
-    "medium",
-  ),
-  // Claude Opus 4.6 in Copilot: with max
+  // OpenAI o-series via Copilot
+  "o1": createConfig("reasoning.effort", ["low", "medium", "high"], "medium"),
+  "o1-mini": createConfig("reasoning.effort", ["low", "medium", "high"], "medium"),
+  "o3-mini": createConfig("reasoning.effort", ["low", "medium", "high"], "medium"),
+  // GPT-4o series via Copilot
+  "gpt-4o": createConfig("reasoning.effort", ["low", "medium", "high"], "medium"),
+  "gpt-4o-mini": createConfig("reasoning.effort", ["low", "medium", "high"], "medium"),
+  // Claude models via Copilot
   "claude-opus-4.6": createConfig("thinking.effort", ["low", "medium", "high", "max"], "medium"),
-  // Claude Opus 4.5/Sonnet 4.x: no max
-  "claude-opus-4.5": createConfig("thinking.effort", ["low", "medium", "high"], "medium"),
-  "claude-sonnet-4": createConfig("thinking.effort", ["low", "medium", "high"], "medium"),
-  "claude-sonnet-4.5": createConfig("thinking.effort", ["low", "medium", "high"], "medium"),
-  "claude-sonnet-4.6": createConfig("thinking.effort", ["low", "medium", "high"], "medium"),
-  // Claude Haiku 4.5: budget-based
-  "claude-haiku-4.5": createConfig(
-    "thinkingConfig.thinkingBudget",
-    ["budget_0", "budget_1024", "budget_8192", "budget_24576"],
-    "8192",
-  ),
-  // Gemini 3.x: level-based
-  "gemini-3": createConfig("thinkingConfig.thinkingLevel", ["low", "medium", "high"], "medium"),
-  // Gemini 2.5 Pro: budget-based
-  "gemini-2.5-pro": createConfig(
-    "thinkingConfig.thinkingBudget",
-    ["budget_0", "budget_1024", "budget_8192", "budget_24576"],
-    "8192",
-  ),
-  // GPT-5 mini/5.1/5.2 and codex-mini: reasoning effort (no xhigh)
-  "gpt-5-mini": createConfig("reasoning.effort", ["minimal", "low", "medium", "high"], "medium"),
-  "gpt-5.1": createConfig("reasoning.effort", ["minimal", "low", "medium", "high"], "medium"),
-  "gpt-5.1-codex-mini": createConfig("reasoning.effort", ["none", "low", "medium"], "medium"),
-  "gpt-5.2": createConfig("reasoning.effort", ["minimal", "low", "medium", "high"], "medium"),
-  // GPT-5.3 Codex: full effort range
-  "gpt-5.3-codex": createConfig(
-    "reasoning.effort",
-    ["none", "low", "medium", "high", "xhigh"],
-    "medium",
-  ),
-  // Claude Opus 4.6 fast: no max
-  "claude-opus-4.6-fast": createConfig("thinking.effort", ["low", "medium", "high"], "medium"),
-  // Grok Code Fast 1
-  "grok-code-fast-1": createConfig("reasoning.effort", ["low", "medium", "high"], "medium"),
-  // Raptor mini
-  "raptor-mini": createConfig("reasoning.effort", ["low", "medium", "high"], "medium"),
-  // Goldeneye
-  "goldeneye": createConfig("reasoning.effort", ["low", "medium", "high"], "medium"),
+  "claude-3.5-sonnet": createConfig("thinking.effort", ["low", "medium", "high"], "medium"),
+  "claude-haiku-4.5": createConfig("thinkingConfig.thinkingBudget", ["budget_0", "budget_1024", "budget_8192", "budget_24576"], "8192"),
+  // Gemini models via Copilot
+  "gemini-2.0-pro": createConfig("thinkingConfig.thinkingBudget", ["budget_0", "budget_1024", "budget_8192", "budget_24576"], "8192"),
+  "gemini-2.0-flash": createConfig("thinkingConfig.thinkingLevel", ["low", "medium", "high"], "medium"),
   // Default Copilot: no reasoning
   "default-copilot": null,
 };
 
 // VertexAI (Google Cloud) configurations
 const VERTEXAI_CONFIGS: Record<string, ReasoningConfig | null> = {
-  "vertexai.gemini-2.5": createConfig(
-    "thinkingConfig.thinkingBudget",
-    ["budget_0", "budget_1024", "budget_8192", "budget_24576"],
-    "8192",
-  ),
-  "vertexai.gemini-3": createConfig("thinkingConfig.thinkingLevel", ["low", "medium", "high"], "medium"),
-  "default-vertexai": createConfig(
-    "thinkingConfig.thinkingBudget",
-    ["budget_0", "budget_1024", "budget_8192", "budget_24576"],
-    "8192",
-  ),
+  "vertexai.gemini-2.0": createConfig("thinkingConfig.thinkingLevel", ["low", "medium", "high"], "medium"),
+  "default-vertexai": null,
 };
 
 // Codex reasoning configuration
@@ -353,7 +301,7 @@ export const DEFAULT_REASONING_RULES: ReasoningRule[] = [
   ...buildRules("xai", XAI_CONFIGS),
   // OpenRouter
   ...buildRules("openrouter", OPENROUTER_CONFIGS),
-  // Copilot (complex - need custom rules)
+  // Copilot
   ...buildRules("copilot", COPILOT_CONFIGS),
   // VertexAI
   ...buildRules("vertexai", VERTEXAI_CONFIGS),

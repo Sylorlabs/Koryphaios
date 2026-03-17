@@ -1,6 +1,4 @@
 // Google Auth Manager — handles Gemini CLI authentication via gcloud.
-// Note: The previous "Antigravity" internal Google tool integration has been removed
-// as it was an unsupported, reverse-engineered feature that could break at any time.
 
 import { spawn } from "bun";
 import { providerLog } from "../logger";

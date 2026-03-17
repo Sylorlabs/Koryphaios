@@ -8,9 +8,9 @@
  * Built on top of ShadowLogger (git reflog recorder).
  */
 
-import { ShadowLogger, type TimelineEntry, type GhostCommit } from "@/kory/shadow-logger";
-import { GitManager } from "@/kory/git-manager";
-import { serverLog } from "@/logger";
+import { ShadowLogger, type TimelineEntry, type GhostCommit } from "../kory/shadow-logger";
+import { GitManager } from "../kory/git-manager";
+import { serverLog } from "../logger";
 
 export interface TimeTravelState {
   /** Current position in the timeline (HEAD) */
@@ -61,8 +61,8 @@ export class TimeTravelService {
    */
   async getState(): Promise<TimeTravelState> {
     const currentHash = this.gitManager.getCurrentHash() || "";
-    const timeline = this.shadowLogger.getTimeline(this.options.timelineLimit);
-    const stats = this.shadowLogger.getStats();
+    const timeline = await this.shadowLogger.getTimeline(this.options.timelineLimit);
+    const stats = await this.shadowLogger.getStats();
 
     // Determine if we can undo/redo
     const currentIndex = timeline.findIndex(t => t.hash === currentHash);
@@ -87,7 +87,7 @@ export class TimeTravelService {
    * 
    * Call this after an AI agent makes changes to save the state.
    */
-  checkpoint(
+  async checkpoint(
     description: string,
     metadata: {
       model?: string;
@@ -97,7 +97,7 @@ export class TimeTravelService {
       tokensOut?: number;
       agentId?: string;
     }
-  ): { success: boolean; hash?: string; message: string } {
+  ): Promise<{ success: boolean; hash?: string; message: string }> {
     // Only checkpoint if there are actual changes
     const status = this.gitManager.runGit(["status", "--porcelain"]).output.trim();
     if (!status) {
@@ -112,7 +112,7 @@ export class TimeTravelService {
       };
     }
 
-    const hash = this.shadowLogger.createGhostCommit(description, metadata);
+    const hash = await this.shadowLogger.createGhostCommit(description, metadata);
 
     if (hash) {
       serverLog.info({ hash, description, model: metadata.model }, "Time travel checkpoint created");
@@ -133,7 +133,7 @@ export class TimeTravelService {
       return { success: false, message: "Cannot determine current state" };
     }
 
-    const timeline = this.shadowLogger.getTimeline(this.options.timelineLimit);
+    const timeline = await this.shadowLogger.getTimeline(this.options.timelineLimit);
     const currentIndex = timeline.findIndex(t => t.hash === currentHash);
 
     if (currentIndex === -1 || currentIndex >= timeline.length - 1) {
@@ -156,7 +156,7 @@ export class TimeTravelService {
       return { success: false, message: "Cannot determine current state" };
     }
 
-    const timeline = this.shadowLogger.getTimeline(this.options.timelineLimit);
+    const timeline = await this.shadowLogger.getTimeline(this.options.timelineLimit);
     const currentIndex = timeline.findIndex(t => t.hash === currentHash);
 
     if (currentIndex <= 0) {
@@ -173,9 +173,9 @@ export class TimeTravelService {
    * 
    * @param ghostHash The ghost commit hash to recover to
    */
-  travelTo(ghostHash: string): { success: boolean; message: string; newHash?: string } {
+  async travelTo(ghostHash: string): Promise<{ success: boolean; message: string; newHash?: string }> {
     // Verify this is a valid ghost commit
-    const ghost = this.shadowLogger.getGhostCommit(ghostHash);
+    const ghost = await this.shadowLogger.getGhostCommit(ghostHash);
     if (!ghost) {
       return { success: false, message: "Invalid or unknown state" };
     }
@@ -186,7 +186,7 @@ export class TimeTravelService {
       metadata: ghost.metadata 
     }, "Time travel initiated");
 
-    const result = this.shadowLogger.recover(ghostHash);
+    const result = await this.shadowLogger.recover(ghostHash);
 
     if (result.success) {
       return {
@@ -204,13 +204,13 @@ export class TimeTravelService {
    * 
    * Returns a diff showing the changes that would be applied.
    */
-  previewTravel(ghostHash: string): {
+  async previewTravel(ghostHash: string): Promise<{
     canTravel: boolean;
     diff: string;
     filesChanged: Array<{ path: string; status: string }>;
     message: string;
-  } {
-    const ghost = this.shadowLogger.getGhostCommit(ghostHash);
+  }> {
+    const ghost = await this.shadowLogger.getGhostCommit(ghostHash);
     if (!ghost) {
       return {
         canTravel: false,
@@ -220,7 +220,7 @@ export class TimeTravelService {
       };
     }
 
-    const diff = this.shadowLogger.compareWithGhost(ghostHash);
+    const diff = await this.shadowLogger.compareWithGhost(ghostHash);
 
     return {
       canTravel: true,
@@ -233,8 +233,8 @@ export class TimeTravelService {
   /**
    * Get detailed information about a specific state
    */
-  getStateDetails(ghostHash: string): GhostCommit | null {
-    return this.shadowLogger.getGhostCommit(ghostHash);
+  async getStateDetails(ghostHash: string): Promise<GhostCommit | null> {
+    return await this.shadowLogger.getGhostCommit(ghostHash);
   }
 
   /**
@@ -242,11 +242,11 @@ export class TimeTravelService {
    * 
    * This is safer than reset - creates a new branch without modifying HEAD.
    */
-  createBranchFromState(
+  async createBranchFromState(
     ghostHash: string,
     branchName: string
-  ): { success: boolean; message: string } {
-    const ghost = this.shadowLogger.getGhostCommit(ghostHash);
+  ): Promise<{ success: boolean; message: string }> {
+    const ghost = await this.shadowLogger.getGhostCommit(ghostHash);
     if (!ghost) {
       return { success: false, message: "Invalid ghost state" };
     }
@@ -267,8 +267,8 @@ export class TimeTravelService {
   /**
    * Clean up old ghost states
    */
-  prune(olderThanDays = 30): { success: boolean; message: string } {
-    const result = this.shadowLogger.prune(olderThanDays);
+  async prune(olderThanDays = 30): Promise<{ success: boolean; message: string }> {
+    const result = await this.shadowLogger.prune(olderThanDays);
     return {
       success: true,
       message: result.message,
@@ -278,17 +278,15 @@ export class TimeTravelService {
   /**
    * Export the timeline as a JSON file (for backup/analysis)
    */
-  exportTimeline(): {
+  async exportTimeline(): Promise<{
     exportedAt: string;
     timeline: TimelineEntry[];
-    stats: ReturnType<ShadowLogger["getStats"]>;
-  } {
+    stats: Awaited<ReturnType<ShadowLogger["getStats"]>>;
+  }> {
     return {
       exportedAt: new Date().toISOString(),
-      timeline: this.shadowLogger.getTimeline(100),
-      stats: this.shadowLogger.getStats(),
+      timeline: await this.shadowLogger.getTimeline(100),
+      stats: await this.shadowLogger.getStats(),
     };
   }
 }
-
-// Extend GitManager interface to expose runGit for TimeTravelService

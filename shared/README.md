@@ -66,10 +66,10 @@ The shared package defines all TypeScript types, interfaces, and contracts used 
 | Azure | `reasoning.effort` | low, medium, high | medium |
 
 **Model-specific overrides:**
-- GPT-5 series: Supports `xhigh` effort level
+- GPT-4o series: Supports `xhigh` effort level
 - o1-mini: No reasoning effort parameter
 - Qwen models: Only `none`/`default`
-- Gemini 2.5/3: Uses `thinkingLevel` instead of token budget
+- Gemini 2.0/3: Uses `thinkingLevel` instead of token budget
 
 **Helper functions:**
 - `getReasoningConfig(provider, model?)` — Get reasoning config for provider/model combo
@@ -85,7 +85,7 @@ The shared package defines all TypeScript types, interfaces, and contracts used 
 import type { Session, WSMessage, ProviderName } from "@koryphaios/shared";
 import { getReasoningConfig } from "@koryphaios/shared";
 
-const config = getReasoningConfig("anthropic", "claude-sonnet-4-20250514");
+const config = getReasoningConfig("anthropic", "claude-3-7-sonnet");
 // { parameter: "effort", options: [...], defaultValue: "high" }
 ```
 

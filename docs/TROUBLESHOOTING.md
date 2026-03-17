@@ -228,7 +228,7 @@ curl https://api.openai.com/v1/models \
 
 **Check:**
 1. Account has access to the model
-2. Model ID is correct (e.g., `claude-sonnet-4-20250514` not `claude-4-sonnet`)
+2. Model ID is correct (e.g., `claude-3-7-sonnet` not `claude-3.7-sonnet`)
 3. No billing issues
 
 **Debugging:**
@@ -281,14 +281,16 @@ bun run dev
 **Solution:**
 1. Clean up old sessions:
 ```bash
-# Manual cleanup (be careful!)
-rm .koryphaios/sessions/*.json
-# Keep last 100 sessions or implement auto-cleanup
+# Sessions are stored in SQLite, use the API to delete old ones
+# Or manually query the database:
+sqlite3 .koryphaios/koryphaios.db "DELETE FROM sessions WHERE updated_at < datetime('now', '-30 days');"
 ```
 
 2. Monitor session count:
 ```bash
 curl http://localhost:3000/api/sessions | jq '. | length'
+# Or query directly:
+sqlite3 .koryphaios/koryphaios.db "SELECT COUNT(*) FROM sessions;"
 ```
 
 3. Restart the app to clear memory
@@ -322,26 +324,28 @@ chmod -R 755 .koryphaios/
 
 **Error:**
 ```
-Failed to parse session file: Unexpected end of JSON input
+SQLite error: database disk image is malformed
 ```
 
 **Solution:**
-1. Identify corrupted file:
+1. Backup the current database:
 ```bash
-# Find invalid JSON files
-find .koryphaios/sessions -name "*.json" -exec sh -c 'jq . "$1" > /dev/null 2>&1 || echo "$1"' _ {} \;
+cp .koryphaios/koryphaios.db .koryphaios/koryphaios.db.bak.$(date +%Y%m%d)
 ```
 
-2. Remove or restore:
+2. Attempt SQLite recovery:
 ```bash
-# Move to backup
-mv corrupted-file.json corrupted-file.json.bak
-
-# Or delete if not needed
-rm corrupted-file.json
+cd .koryphaios
+sqlite3 koryphaios.db ".dump" | sqlite3 koryphaios.db.recovered
+mv koryphaios.db.recovered koryphaios.db
 ```
 
-3. Restart the app (it will recreate if needed)
+3. If recovery fails, start fresh (you will lose session history):
+```bash
+rm .koryphaios/koryphaios.db*
+```
+
+4. Restart the app
 
 ---
 

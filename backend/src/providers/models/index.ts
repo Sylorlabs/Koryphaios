@@ -119,7 +119,7 @@ export function findAlternativeModel(failedModelId: string): ModelDef | undefine
 
 /**
  * Check if a model is a legacy/deprecated model.
- * Includes retired models (e.g. Claude 3.7 Sonnet, Haiku 3.5 as of Feb 2026).
+ * Includes retired models (e.g. GPT-3.5, Claude 1/2 as of March 2026).
  */
 export function isLegacyModel(modelOrId: string | ModelDef): boolean {
   const id = typeof modelOrId === "string" ? modelOrId : modelOrId.id;
@@ -130,9 +130,8 @@ export function isLegacyModel(modelOrId: string | ModelDef): boolean {
     "claude-1",
     "claude-2",
     "claude-instant",
-    "claude-3.7-sonnet",
-    "claude-3.5-haiku",
-    "claude-3.5-sonnet",
+    "claude-3-sonnet",
+    "claude-3-opus-20240229-legacy",
   ];
   return deprecatedIds.includes(id);
 }

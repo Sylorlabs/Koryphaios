@@ -54,8 +54,8 @@ export const RATE_LIMIT = {
  * Server Configuration Defaults
  */
 export const SERVER = {
-  /** Default HTTP port */
-  DEFAULT_PORT: 3000,
+  /** Default HTTP port - using high range to avoid common dev port conflicts (3000, 5173, 8000, 8080, etc.) */
+  DEFAULT_PORT: 29473,
   /** Default host (loopback for safer local defaults) */
   DEFAULT_HOST: "127.0.0.1",
   /** WebSocket path */
@@ -74,9 +74,12 @@ export const SECURITY = {
   MAX_PROVIDER_NAME_LENGTH: 50,
   /** Allowed CORS origins (add more via config.corsOrigins for other dev hosts/ports) */
   ALLOWED_ORIGINS: [
-    "http://localhost:5173",   // Vite dev default
-    "http://localhost:3000",   // Bun dev server
+    "http://localhost:5173",      // Vite dev default
+    "http://localhost:29473",     // Koryphaios backend default
     "http://127.0.0.1:5173",
+    "http://127.0.0.1:29473",
+    // Legacy ports for backward compatibility
+    "http://localhost:3000",
     "http://127.0.0.1:3000",
   ],
 } as const;
@@ -108,9 +111,9 @@ export const FS = {
  */
 export const AGENT = {
   /** Default models per role if not configured */
-  DEFAULT_MANAGER_MODEL: "claude-sonnet-4-6",
-  DEFAULT_CODER_MODEL: "claude-sonnet-4-6",
-  DEFAULT_TASK_MODEL: "gpt-5-mini",
+  DEFAULT_MANAGER_MODEL: "claude-3-7-sonnet",
+  DEFAULT_CODER_MODEL: "claude-3-7-sonnet",
+  DEFAULT_TASK_MODEL: "gpt-4o-mini",
 
   /** Default token limits */
   DEFAULT_MAX_TOKENS: 8192,
@@ -121,10 +124,10 @@ export const AGENT = {
 
   /** Fallback model chains (IDs must exist in MODEL_CATALOG). */
   DEFAULT_FALLBACKS: {
-    "claude-sonnet-4-6": ["gpt-5.2-pro", "gemini-3.1-pro"],
-    "gpt-5.2-pro": ["claude-sonnet-4-6", "gemini-3.1-pro"],
-    "gpt-5-mini": ["gemini-3-flash", "claude-haiku-4-5"],
-    "o4-mini": ["gpt-5-mini", "gemini-3-flash"],
+    "claude-3-7-sonnet": ["gpt-4o", "gemini-2.0-pro"],
+    "gpt-4o": ["claude-3-7-sonnet", "gemini-2.0-pro"],
+    "gpt-4o-mini": ["gemini-2.0-flash", "claude-3-5-haiku"],
+    "o3-mini": ["gpt-4o-mini", "gemini-2.0-flash"],
   } as Record<string, string[]>,
 
   /** Max time a single LLM stream can run before being aborted (prevents stuck requests) */
@@ -144,7 +147,7 @@ export const CONFIG_PATHS = [
  * Context Files (loaded into agent context)
  */
 export const DEFAULT_CONTEXT_PATHS: string[] = [
-  ".cursorrules",
+  ".koryrules",
   "CLAUDE.md",
   "AGENTS.md",
   ".opencode.json",
@@ -276,12 +279,8 @@ export const DOMAIN = {
       "canvas", "draw", "paint", "theme", "color", "font", "icon", "design",
       "responsive", "mobile", "dark mode", "light mode", "sidebar", "modal",
     ],
-    ui: [
-      "skia", "flutter", "ui", "widget", "button", "layout", "css", "style",
-      "animation", "render", "frontend", "component", "svelte", "react", "view",
-      "canvas", "draw", "paint", "theme", "color", "font", "icon", "design",
-      "responsive", "mobile", "dark mode", "light mode", "sidebar", "modal",
-    ],
+    // ui is an alias for frontend - they share the same keywords
+    get ui() { return this.frontend; },
     backend: [
       "c++", "cpp", "cmake", "makefile", "gtest", "boost", "llvm", "clang",
       "server", "api", "database", "sql", "grpc", "protobuf", "socket",
@@ -299,13 +298,13 @@ export const DOMAIN = {
     critic: ["critic", "critique", "audit", "review", "gate", "quality"],
   },
   DEFAULT_MODELS: {
-    frontend: "gpt-5.2-pro",
-    ui: "gpt-5.2-pro",
-    backend: "gemini-3.1-pro",
-    general: "gemini-3-flash",
-    review: "gpt-5.2-pro",
-    test: "gpt-5.2-pro",
-    critic: "claude-sonnet-4-6",
+    frontend: "gpt-4o",
+    ui: "gpt-4o",
+    backend: "gemini-2.0-pro",
+    general: "gemini-2.0-flash",
+    review: "gpt-4o",
+    test: "gpt-4o",
+    critic: "claude-3-7-sonnet",
   },
   GLOW_COLORS: {
     frontend: "rgba(0,255,255,0.5)",  // Cyan (alias for UI)

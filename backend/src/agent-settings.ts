@@ -8,6 +8,7 @@
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, dirname } from "node:path";
+import { serverLog } from "./logger";
 
 // ============================================================================
 // Configuration
@@ -255,7 +256,7 @@ export function loadAgentSettings(projectRoot: string): AgentSettings {
     const parsed = JSON.parse(content);
     return { ...DEFAULT_AGENT_SETTINGS, ...parsed };
   } catch (err) {
-    console.error("Failed to load agent settings:", err);
+    serverLog.error({ err }, "Failed to load agent settings");
     return DEFAULT_AGENT_SETTINGS;
   }
 }
@@ -313,7 +314,7 @@ export function readPreferences(projectRoot: string): { path: string; content: s
     const content = readFileSync(filePath, "utf-8");
     return { path: filePath, content, exists: true };
   } catch (err) {
-    console.error("Failed to read preferences:", err);
+    serverLog.error({ err }, "Failed to read preferences");
     return { path: filePath, content: "", exists: false };
   }
 }
@@ -592,7 +593,7 @@ export function assembleAgentContext(
     : "";
   
   const rulesContent = readFileSync(
-    join(projectRoot, ".cursorrules"), 
+    join(projectRoot, ".koryrules"), 
     "utf-8"
   ).toString() || "";
   
@@ -611,7 +612,7 @@ function generateEnforcementMessage(settings: AgentSettings): string {
     "🚨 RULE ENFORCEMENT IS ACTIVE",
     "",
     "The following rules MUST be followed:",
-    "1. ALL rules from .cursorrules are mandatory",
+    "1. ALL rules from .koryrules are mandatory",
     "2. ALL preferences from preferences.md are mandatory",
   ];
   

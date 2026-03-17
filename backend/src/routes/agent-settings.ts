@@ -236,9 +236,9 @@ export function createAgentSettingsRoutes(): RouteHandler[] {
           try {
             const { readFileSync } = await import("node:fs");
             const { join } = await import("node:path");
-            rules = readFileSync(join(PROJECT_ROOT, ".cursorrules"), "utf-8");
-          } catch {
-            // Rules file may not exist
+            rules = readFileSync(join(PROJECT_ROOT, ".koryrules"), "utf-8");
+          } catch (err) {
+            console.debug("Rules file may not exist:", err instanceof Error ? err.message : String(err));
           }
           
           const result = criticReview({

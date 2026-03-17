@@ -82,14 +82,14 @@ describe("Config Loading", () => {
     try {
       writeFileSync(join(dir, "koryphaios.json"), JSON.stringify({
         agents: {
-          manager: { model: "claude-opus-4-6", reasoningLevel: "high" },
-          coder: { model: "claude-sonnet-4-5", maxTokens: 16384 },
+          manager: { model: "claude-3-opus", reasoningLevel: "high" },
+          coder: { model: "claude-3-7-sonnet", maxTokens: 16384 },
         },
       }));
 
       const config = loadConfig(dir);
       
-      expect(config.agents.manager.model).toBe("claude-opus-4-6");
+      expect(config.agents.manager.model).toBe("claude-3-opus");
       expect(config.agents.manager.reasoningLevel).toBe("high");
       expect(config.agents.coder.maxTokens).toBe(16384);
     } finally {
@@ -121,12 +121,12 @@ describe("Config Loading", () => {
     mkdirSync(dir, { recursive: true });
     try {
       writeFileSync(join(dir, "koryphaios.json"), JSON.stringify({
-        contextPaths: [".cursorrules", "CLAUDE.md"],
+        contextPaths: [".koryrules", "CLAUDE.md"],
       }));
 
       const config = loadConfig(dir);
       
-      expect(config.contextPaths).toEqual([".cursorrules", "CLAUDE.md"]);
+      expect(config.contextPaths).toEqual([".koryrules", "CLAUDE.md"]);
     } finally {
       rmSync(dir, { recursive: true });
     }

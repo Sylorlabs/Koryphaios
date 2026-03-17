@@ -131,7 +131,8 @@ export function detectCopilotToken(): string | null {
           if (typeof oauthToken === "string" && oauthToken) return oauthToken;
         }
       }
-    } catch {
+    } catch (err) {
+      providerLog.debug({ error: err instanceof Error ? err.message : String(err), path }, "Failed to parse Copilot token file");
       continue;
     }
   }

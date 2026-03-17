@@ -174,7 +174,8 @@ export class AgeKMSProvider implements KMSProvider {
     try {
       await fs.access(path);
       return true;
-    } catch {
+    } catch (err) {
+      serverLog.warn({ error: err instanceof Error ? err.message : String(err) }, 'Age KMS file check failed');
       return false;
     }
   }

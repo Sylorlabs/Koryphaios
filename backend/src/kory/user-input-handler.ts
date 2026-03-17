@@ -104,8 +104,8 @@ export class UserInputHandler {
             // Reject with cancellation
             try {
                 resolver("");
-            } catch {
-                // Resolver may have already been called
+            } catch (err) {
+                koryLog.debug({ error: err instanceof Error ? err.message : String(err) }, "Resolver may have already been called");
             }
 
             koryLog.info({ inputId, sessionId }, "User input cancelled");

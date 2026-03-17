@@ -57,7 +57,8 @@ export async function isDockerAvailable(): Promise<boolean> {
         await bunExec("docker --version");
         await bunExec("docker info > /dev/null 2>&1");
         return true;
-    } catch {
+    } catch (err) {
+        serverLog.debug({ error: err instanceof Error ? err.message : String(err) }, "Docker not available");
         return false;
     }
 }
@@ -128,8 +129,8 @@ export async function executeInSandbox(
         // Clean up container if it still exists
         try {
             await bunExec(`docker rm -f ${containerName} > /dev/null 2>&1`);
-        } catch {
-            // Ignore cleanup errors
+        } catch (err) {
+            serverLog.debug({ error: err instanceof Error ? err.message : String(err), containerName }, "Container cleanup failed");
         }
 
         if (error.killed && error.signal === "SIGTERM") {
@@ -261,8 +262,8 @@ export async function executeCommandsInSandbox(
         // Clean up container
         try {
             await bunExec(`docker rm -f ${containerName} > /dev/null 2>&1`);
-        } catch {
-            // Ignore cleanup errors
+        } catch (err) {
+            serverLog.debug({ error: err instanceof Error ? err.message : String(err), containerName }, "Container cleanup failed");
         }
     }
 }
@@ -332,7 +333,8 @@ export async function getSandboxStats(containerName: string): Promise<{
         }
 
         return { memoryUsageMb, cpuPercent };
-    } catch {
+    } catch (err) {
+        serverLog.debug({ error: err instanceof Error ? err.message : String(err), containerName }, "Failed to get sandbox stats");
         return null;
     }
 }

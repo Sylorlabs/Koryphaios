@@ -7,7 +7,7 @@ source ~/.cargo/env
 
 echo "╔══════════════════════════════════════════════════════════════╗"
 echo "║  KORYPHAIOS - Desktop Development Mode                       ║"
-echo "║  Backend: http://localhost:3000                              ║"
+echo "║  Backend: http://localhost:29473                             ║"
 echo "║                                                              ║"
 echo "║  Features:                                                   ║"
 echo "║  • Hot reload on file changes                                ║"

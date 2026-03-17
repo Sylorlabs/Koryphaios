@@ -24,8 +24,10 @@ import type {
   Session,
 } from "@koryphaios/shared";
 import { sessionStore } from './sessions.svelte';
+import { sessionMemoryStore } from './session-memory.svelte';
 import { authStore } from './auth.svelte';
 import { browser } from '$app/environment';
+import { untrack } from 'svelte';
 import type { FeedEntry } from '$lib/types';
 import { apiUrl, getWsUrl } from '$lib/utils/api-url';
 
@@ -105,6 +107,40 @@ let feedIdCounter = 0;
 let hasShownMalformedWsMessage = false;
 // Track pending file-edit removal timers for cleanup on disconnect
 let fileEditTimers = new Map<string, ReturnType<typeof setTimeout>>();
+
+// ─── Message Deduplication ──────────────────────────────────────────────────
+// Prevents processing duplicate messages during reconnections
+const seenMessageIds = new Set<string>();
+const MAX_SEEN_CACHE = 200;
+const MAX_SEEN_AGE_MS = 60000; // 1 minute
+interface SeenMessage {
+  id: string;
+  timestamp: number;
+}
+let seenMessages: SeenMessage[] = [];
+
+function isDuplicateMessage(msg: WSMessage): boolean {
+  // Create unique key from message properties
+  const msgKey = `${msg.type}-${msg.timestamp}-${(msg.payload as any)?.agentId || ''}-${(msg.payload as any)?.messageId || ''}`;
+  
+  if (seenMessageIds.has(msgKey)) {
+    return true;
+  }
+  
+  // Add to seen set
+  seenMessageIds.add(msgKey);
+  seenMessages.push({ id: msgKey, timestamp: Date.now() });
+  
+  // Cleanup old entries periodically
+  if (seenMessages.length > MAX_SEEN_CACHE) {
+    const cutoff = Date.now() - MAX_SEEN_AGE_MS;
+    seenMessages = seenMessages.filter(m => m.timestamp > cutoff);
+    seenMessageIds.clear();
+    seenMessages.forEach(m => seenMessageIds.add(m.id));
+  }
+  
+  return false;
+}
 
 // ─── Glow class resolver ───────────────────────────────────────────────────
 
@@ -210,27 +246,34 @@ function addUserMessage(sessionId: string, content: string) {
 // ─── Message Handler ───────────────────────────────────────────────────────
 
 function handleMessage(msg: WSMessage) {
+  // Check for duplicate messages
+  if (isDuplicateMessage(msg)) {
+    if (import.meta.env.DEV) console.debug("[WebSocket] Duplicate message dropped", msg.type);
+    return;
+  }
+  
   const activeSessionId = sessionStore.activeSessionId;
   const isForActiveSession = !msg.sessionId || msg.sessionId === activeSessionId;
 
   switch (msg.type) {
     case "agent.spawned": {
       const p = msg.payload as AgentSpawnedPayload;
-      agents.set(p.agent.id, {
-        identity: p.agent,
-        status: "thinking",
-        content: "",
-        thinking: "",
-        toolCalls: [],
-        task: p.task,
-        tokensUsed: 0,
-        contextMax: 0,
-        contextKnown: false,
-        hasUsageData: false,
-        sessionId: msg.sessionId ?? "",
-      });
-      agents = new Map(agents);
+      // Only track agents for active session to prevent "jumpscare" flashes
       if (isForActiveSession) {
+        agents.set(p.agent.id, {
+          identity: p.agent,
+          status: "thinking",
+          content: "",
+          thinking: "",
+          toolCalls: [],
+          task: p.task,
+          tokensUsed: 0,
+          contextMax: 0,
+          contextKnown: false,
+          hasUsageData: false,
+          sessionId: msg.sessionId ?? "",
+        });
+        agents = new Map(agents);
         addFeedEntry({
           timestamp: msg.timestamp,
           type: "system",
@@ -246,10 +289,13 @@ function handleMessage(msg: WSMessage) {
 
     case "agent.status": {
       const p = msg.payload as AgentStatusPayload;
-      const agent = agents.get(p.agentId);
-      if (agent) {
-        agent.status = p.status;
-        if (msg.sessionId) agent.sessionId = msg.sessionId;
+      // Only update agent state for active session to prevent "jumpscare" flashes
+      if (isForActiveSession) {
+        const agent = agents.get(p.agentId);
+        if (agent) {
+          agent.status = p.status;
+          if (msg.sessionId) agent.sessionId = msg.sessionId;
+        }
       }
       break;
     }
@@ -257,18 +303,26 @@ function handleMessage(msg: WSMessage) {
     case "agent.completed":
     case "stream.complete": {
       const p = msg.payload as any;
-      const agent = agents.get(p.agentId);
-      if (agent) {
-        agent.status = "done";
-        if (msg.sessionId) agent.sessionId = msg.sessionId;
+      // Only update agent state for active session to prevent "jumpscare" flashes
+      if (isForActiveSession) {
+        const agent = agents.get(p.agentId);
+        if (agent) {
+          agent.status = "done";
+          if (msg.sessionId) agent.sessionId = msg.sessionId;
+        }
+        removeAnalyzingThoughtEntries();
       }
-      if (isForActiveSession) removeAnalyzingThoughtEntries();
       break;
     }
 
     case "agent.error": {
       const p = msg.payload as any;
+      // Only update agent state for active session to prevent "jumpscare" flashes
       if (isForActiveSession) {
+        const agent = agents.get(p.agentId);
+        if (agent) {
+          agent.status = "error";
+        }
         removeAnalyzingThoughtEntries();
         addFeedEntry({
           timestamp: msg.timestamp,
@@ -284,13 +338,14 @@ function handleMessage(msg: WSMessage) {
 
     case "stream.delta": {
       const p = msg.payload as StreamDeltaPayload;
-      const agent = agents.get(p.agentId);
-      if (agent) {
-        agent.content += p.content;
-        agent.status = "streaming";
-        if (msg.sessionId) agent.sessionId = msg.sessionId;
-      }
+      // Only update agent state for active session to prevent "jumpscare" flashes
       if (isForActiveSession) {
+        const agent = agents.get(p.agentId);
+        if (agent) {
+          agent.content += p.content;
+          agent.status = "streaming";
+          if (msg.sessionId) agent.sessionId = msg.sessionId;
+        }
         removeAnalyzingThoughtEntries();
         accumulateFeedEntry({
           timestamp: msg.timestamp,
@@ -306,12 +361,13 @@ function handleMessage(msg: WSMessage) {
 
     case "stream.thinking": {
       const p = msg.payload as StreamThinkingPayload;
-      const agent = agents.get(p.agentId);
-      if (agent) {
-        agent.thinking += p.thinking;
-        if (msg.sessionId) agent.sessionId = msg.sessionId;
-      }
+      // Only update agent state for active session to prevent "jumpscare" flashes
       if (isForActiveSession) {
+        const agent = agents.get(p.agentId);
+        if (agent) {
+          agent.thinking += p.thinking;
+          if (msg.sessionId) agent.sessionId = msg.sessionId;
+        }
         accumulateFeedEntry({
           timestamp: msg.timestamp,
           type: "thinking",
@@ -327,13 +383,14 @@ function handleMessage(msg: WSMessage) {
 
     case "stream.tool_call": {
       const p = msg.payload as StreamToolCallPayload;
-      const agent = agents.get(p.agentId);
-      if (agent) {
-        agent.toolCalls.push({ name: p.toolCall.name, status: "running" });
-        agent.status = "tool_calling";
-        if (msg.sessionId) agent.sessionId = msg.sessionId;
-      }
+      // Only update agent state for active session to prevent "jumpscare" flashes
       if (isForActiveSession) {
+        const agent = agents.get(p.agentId);
+        if (agent) {
+          agent.toolCalls.push({ name: p.toolCall.name, status: "running" });
+          agent.status = "tool_calling";
+          if (msg.sessionId) agent.sessionId = msg.sessionId;
+        }
         addFeedEntry({
           timestamp: msg.timestamp,
           type: "tool_call",
@@ -367,15 +424,18 @@ function handleMessage(msg: WSMessage) {
 
     case "stream.usage": {
       const p = msg.payload as StreamUsagePayload;
-      const agent = agents.get(p.agentId);
-      if (agent) {
-        agent.tokensUsed = Math.max(0, p.tokensUsed || 0);
-        if (typeof p.contextWindow === "number") {
-          agent.contextMax = p.contextWindow;
+      // Only update agent state for active session to prevent "jumpscare" flashes
+      if (isForActiveSession) {
+        const agent = agents.get(p.agentId);
+        if (agent) {
+          agent.tokensUsed = Math.max(0, p.tokensUsed || 0);
+          if (typeof p.contextWindow === "number") {
+            agent.contextMax = p.contextWindow;
+          }
+          agent.contextKnown = !!p.contextKnown;
+          agent.hasUsageData = !!p.usageKnown;
+          if (msg.sessionId) agent.sessionId = msg.sessionId;
         }
-        agent.contextKnown = !!p.contextKnown;
-        agent.hasUsageData = !!p.usageKnown;
-        if (msg.sessionId) agent.sessionId = msg.sessionId;
       }
       break;
     }
@@ -488,7 +548,27 @@ function handleMessage(msg: WSMessage) {
 
     case "session.deleted": {
       const p = msg.payload as { sessionId: string };
-      if (p.sessionId) sessionStore.handleSessionDeleted(p.sessionId);
+      if (p.sessionId) {
+        sessionStore.handleSessionDeleted(p.sessionId);
+        // Clear all session-related state to prevent deleted sessions from resurfacing
+        if (p.sessionId === sessionStore.activeSessionId) {
+          clearFeed();
+          sessionMemoryStore.clearMemory();
+          koryThought = "";
+          koryPhase = "";
+          pendingPermissions = [];
+          pendingQuestion = null;
+          sessionChanges.delete(p.sessionId);
+          sessionChanges = new Map(sessionChanges);
+          // Remove agents for deleted session
+          for (const [agentId, agent] of agents) {
+            if (agent.sessionId === p.sessionId) {
+              agents.delete(agentId);
+            }
+          }
+          agents = new Map(agents);
+        }
+      }
       break;
     }
 
@@ -564,7 +644,7 @@ function ensureWsPath(url: string): string {
 function buildWsCandidates(preferredUrl?: string): string[] {
   // In Tauri, use the direct backend URL
   const directUrl = getWsUrl();
-  const defaultBackendWs = "ws://127.0.0.1:3000/ws";
+  const defaultBackendWs = "ws://127.0.0.1:29473/ws";
 
   const candidates: string[] = [];
   if (preferredUrl) candidates.push(ensureWsPath(preferredUrl));
@@ -659,9 +739,34 @@ function scheduleReconnect(url?: string) {
   reconnectTimer = setTimeout(() => connect(url), delay);
 }
 
+// Track current subscription to handle race conditions
+let currentSubscribedSessionId = $state<string>('');
+
 function subscribeToSession(sessionId: string) {
   if (!sessionId || wsConnection?.readyState !== WebSocket.OPEN) return;
+  
+  // Unsubscribe from previous session first to prevent cross-contamination
+  if (currentSubscribedSessionId && currentSubscribedSessionId !== sessionId) {
+    wsConnection.send(JSON.stringify({ 
+      type: "unsubscribe_session", 
+      sessionId: currentSubscribedSessionId, 
+      timestamp: Date.now() 
+    }));
+  }
+  
+  currentSubscribedSessionId = sessionId;
   wsConnection.send(JSON.stringify({ type: "subscribe_session", sessionId, timestamp: Date.now() }));
+}
+
+function unsubscribeFromCurrentSession() {
+  if (currentSubscribedSessionId && wsConnection?.readyState === WebSocket.OPEN) {
+    wsConnection.send(JSON.stringify({ 
+      type: "unsubscribe_session", 
+      sessionId: currentSubscribedSessionId, 
+      timestamp: Date.now() 
+    }));
+  }
+  currentSubscribedSessionId = '';
 }
 
 function disconnect() {
@@ -789,11 +894,14 @@ function getGroupedFeed(): FeedEntry[] {
   return result;
 }
 
-// ─── Derived helpers ────────────────────────────────────────────────────────
+// ─── Derived helpers (use untrack to prevent reactive loops) ─────────────────
 
 function getManagerStatus(): AgentStatus {
-  const activeSessionId = sessionStore.activeSessionId;
-  const manager = agents.get('kory-manager');
+  // Use untrack to prevent this function from creating reactive dependencies
+  // when called from a reactive context (like a $derived or template)
+  const activeSessionId = untrack(() => sessionStore.activeSessionId);
+  const currentAgents = untrack(() => agents);
+  const manager = currentAgents.get('kory-manager');
   
   // Only show manager as active if it's working on the CURRENT session
   if (manager && manager.status !== 'idle' && manager.status !== 'done' && (manager.sessionId === activeSessionId || !manager.sessionId)) {
@@ -801,7 +909,7 @@ function getManagerStatus(): AgentStatus {
   }
 
   // Fallback: if any worker for THIS session is active, infer from their states
-  for (const a of agents.values()) {
+  for (const a of currentAgents.values()) {
     if (a.sessionId === activeSessionId && a.status !== 'idle' && a.status !== 'done') {
       return a.status;
     }
@@ -810,8 +918,10 @@ function getManagerStatus(): AgentStatus {
 }
 
 function getContextUsage(): { used: number; max: number; percent: number; isReliable: boolean; reason?: string } {
-  const activeSessionId = sessionStore.activeSessionId;
-  const candidates = [...agents.values()].filter((a) => a.sessionId === activeSessionId && a.hasUsageData);
+  // Use untrack to prevent reactive loops
+  const activeSessionId = untrack(() => sessionStore.activeSessionId);
+  const currentAgents = untrack(() => agents);
+  const candidates = [...currentAgents.values()].filter((a) => a.sessionId === activeSessionId && a.hasUsageData);
 
   // Exact session context is only reliable when we have one authoritative usage source.
   if (candidates.length === 0) {
@@ -833,7 +943,9 @@ function getContextUsage(): { used: number; max: number; percent: number; isReli
 }
 
 function isSessionRunning(sessionId: string): boolean {
-  for (const a of agents.values()) {
+  // Use untrack to prevent reactive dependencies when called from templates
+  const currentAgents = untrack(() => agents);
+  for (const a of currentAgents.values()) {
     if (a.sessionId === sessionId && a.status !== 'idle' && a.status !== 'done') {
       return true;
     }
@@ -843,22 +955,24 @@ function isSessionRunning(sessionId: string): boolean {
 
 /** Mark all agents for this session as done (optimistic UI when user clicks Stop). */
 function markSessionAgentsStopped(sessionId: string) {
+  const currentAgents = untrack(() => agents);
   let changed = false;
-  for (const a of agents.values()) {
+  for (const a of currentAgents.values()) {
     if (a.sessionId === sessionId && a.status !== 'idle' && a.status !== 'done') {
       a.status = 'done';
       changed = true;
     }
   }
-  if (changed) agents = new Map(agents);
+  if (changed) agents = new Map(currentAgents);
 }
 
 /** Mark a single agent as done (optimistic UI when user cancels one worker). */
 function markAgentStopped(agentId: string) {
-  const agent = agents.get(agentId);
+  const currentAgents = untrack(() => agents);
+  const agent = currentAgents.get(agentId);
   if (agent && agent.status !== 'idle' && agent.status !== 'done') {
     agent.status = 'done';
-    agents = new Map(agents);
+    agents = new Map(currentAgents);
   }
 }
 
@@ -914,12 +1028,17 @@ function setYoloMode(enabled: boolean) {
 
 // ─── Exported Store ─────────────────────────────────────────────────────────
 
+// Use $derived for computed values to enable proper memoization and prevent loops
+let managerStatus = $derived(getManagerStatus());
+let contextUsage = $derived(getContextUsage());
+let groupedFeed = $derived(getGroupedFeed());
+
 export const wsStore = {
   get connection() { return wsConnection; },
   get status() { return connectionStatus; },
   get agents() { return agents; },
   get feed() { return feed; },
-  get groupedFeed() { return getGroupedFeed(); },
+  get groupedFeed() { return groupedFeed; },
   get providers() { return providers; },
   get koryThought() { return koryThought; },
   get koryPhase() { return koryPhase; },
@@ -928,8 +1047,8 @@ export const wsStore = {
   get pendingQuestion() { return pendingQuestion; },
   get sessionChanges() { return sessionChanges; },
   get activeFileEdits() { return activeFileEdits; },
-  get managerStatus() { return getManagerStatus(); },
-  get contextUsage() { return getContextUsage(); },
+  get managerStatus() { return managerStatus; },
+  get contextUsage() { return contextUsage; },
   isSessionRunning,
   markSessionAgentsStopped,
   markAgentStopped,
@@ -943,6 +1062,7 @@ export const wsStore = {
   removeEntries,
   respondToPermission,
   subscribeToSession,
+  unsubscribeFromCurrentSession,
   clearFeed,
   toggleYolo,
   setYoloMode,

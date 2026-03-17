@@ -175,7 +175,8 @@ export class GitManager {
     if (!safePath) return null;
     try {
       return readFileSync(safePath, "utf-8");
-    } catch {
+    } catch (err) {
+      koryLog.debug({ path: safePath, error: err instanceof Error ? err.message : String(err) }, "Failed to read file");
       return null;
     }
   }

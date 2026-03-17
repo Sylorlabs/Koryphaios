@@ -9,6 +9,10 @@ export * from "./git";
 export * from "./mode";
 export * from "./memory";
 export * from "./agent-settings";
+export * from "./agents";
+export * from "./assignments";
+export * from "./system";
+export * from "./spend";
 export { 
   loadAgentSettings, 
   saveAgentSettings,

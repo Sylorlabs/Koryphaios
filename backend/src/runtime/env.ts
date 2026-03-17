@@ -65,7 +65,8 @@ export function clearEnvVar(projectRoot: string, key: string) {
   let content = "";
   try {
     content = readFileSync(envPath, "utf-8");
-  } catch {
+  } catch (err) {
+    serverLog.debug({ key, error: err instanceof Error ? err.message : String(err) }, "No existing .env file, creating new one");
     delete process.env[key];
     return;
   }

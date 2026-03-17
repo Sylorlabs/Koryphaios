@@ -1,9 +1,10 @@
 {
   "name": "koryphaios",
-  "version": "0.2.0",
+  "version": "1.0.0",
   "private": true,
   "workspaces": ["backend", "frontend", "shared", "desktop"],
   "scripts": {
+    "setup": "bun run scripts/dev-setup.ts",
     "dev": "bun run scripts/dev.ts",
     "dev:desktop": "bun run scripts/dev-desktop.ts",
     "dev:backend": "bun run --filter backend dev",

@@ -117,18 +117,22 @@
     // FIX: Use ResizeObserver to batch updates instead of one-by-one state triggers
     function measureItem(element: HTMLElement, id: string) {
         let currentId = id;
+        let rafId: number | null = null;
         const ro = new ResizeObserver((entries) => {
-            let changed = false;
-            for (const entry of entries) {
-                const height = entry.borderBoxSize[0]?.blockSize ?? entry.contentRect.height;
-                if (height > 0 && heightCache.get(currentId) !== height) {
-                    heightCache.set(currentId, height);
-                    changed = true;
+            if (rafId) cancelAnimationFrame(rafId);
+            rafId = requestAnimationFrame(() => {
+                let changed = false;
+                for (const entry of entries) {
+                    const height = entry.borderBoxSize[0]?.blockSize ?? entry.contentRect.height;
+                    if (height > 0 && heightCache.get(currentId) !== height) {
+                        heightCache.set(currentId, height);
+                        changed = true;
+                    }
                 }
-            }
-            if (changed) {
-                heightCache = new Map(heightCache); // Trigger reactivity once per batch
-            }
+                if (changed) {
+                    heightCache = new Map(heightCache); // Trigger reactivity once per batch
+                }
+            });
         });
         ro.observe(element);
         return {
@@ -137,6 +141,7 @@
             },
             destroy() {
                 ro.disconnect();
+                if (rafId) cancelAnimationFrame(rafId);
             },
         };
     }
@@ -147,14 +152,21 @@
         
         clientHeight = containerEl.clientHeight;
         
+        let rafId: number | null = null;
         const ro = new ResizeObserver((entries) => {
-            for (const entry of entries) {
-                clientHeight = entry.contentRect.height;
-            }
+            if (rafId) cancelAnimationFrame(rafId);
+            rafId = requestAnimationFrame(() => {
+                for (const entry of entries) {
+                    clientHeight = entry.contentRect.height;
+                }
+            });
         });
         ro.observe(containerEl);
         
-        return () => ro.disconnect();
+        return () => {
+            ro.disconnect();
+            if (rafId) cancelAnimationFrame(rafId);
+        };
     });
     
     // Expose methods

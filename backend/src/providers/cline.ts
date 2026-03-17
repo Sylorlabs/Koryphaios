@@ -99,7 +99,7 @@ export class ClineProvider extends OpenAIProvider {
         name: m.name ?? m.id,
         contextWindow: m.context_window ?? 128000,
       }));
-    } catch {
+    } catch (err) {
       return [];
     }
   }

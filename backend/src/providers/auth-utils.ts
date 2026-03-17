@@ -58,7 +58,9 @@ export function detectCopilotToken(): string | null {
       const token = gh.stdout.toString().trim();
       if (token) return token;
     }
-  } catch { /* Expected: gh CLI may not be installed */ }
+  } catch (err) {
+    // Expected: gh CLI may not be installed - silently ignore
+  }
 
   // 2. Fallback to file-based detection
   const configDir = getConfigDir();
@@ -76,7 +78,8 @@ export function detectCopilotToken(): string | null {
           return data[key].oauth_token;
         }
       }
-    } catch {
+    } catch (err) {
+      // Expected: file may be malformed or inaccessible - silently continue to next file
       continue;
     }
   }
@@ -102,9 +105,13 @@ export function detectClaudeCodeToken(): string | null {
         try {
           const data = JSON.parse(status.stdout.toString());
           if (data?.loggedIn && data?.oauthToken) return data.oauthToken;
-        } catch { /* Expected: status output may not be valid JSON */ }
+        } catch (err) {
+          // Expected: status output may not be valid JSON - silently ignore
+        }
       }
-    } catch { /* Expected: claude CLI may not be installed */ }
+    } catch (err) {
+      // Expected: claude CLI may not be installed - silently ignore
+    }
 
     // 2. Fallback to file-based
     const paths = [
@@ -119,7 +126,8 @@ export function detectClaudeCodeToken(): string | null {
         if (data?.oauth_token) return data.oauth_token;
         if (data?.authToken) return data.authToken;
         if (data?.env?.ANTHROPIC_AUTH_TOKEN) return data.env.ANTHROPIC_AUTH_TOKEN;
-      } catch {
+      } catch (err) {
+        // Expected: file may be malformed or inaccessible - silently continue to next file
         continue;
       }
     }
@@ -143,7 +151,8 @@ export function detectCodexToken(): string | null {
       const data = JSON.parse(readFileSync(p, "utf-8"));
       if (data?.tokens?.access_token) return data.tokens.access_token;
       if (data?.accessToken) return data.accessToken;
-    } catch {
+    } catch (err) {
+      // Expected: file may be malformed or inaccessible - silently continue to next file
       continue;
     }
   }
@@ -165,7 +174,9 @@ export function detectGeminiCLIToken(): string | null {
         if (data?.tokens?.access_token) return data.tokens.access_token;
         if (data?.accessToken) return data.accessToken;
         return "cli:detected";
-      } catch { /* Expected: creds file may be malformed or inaccessible */ }
+      } catch (err) {
+        // Expected: creds file may be malformed or inaccessible - silently ignore
+      }
     }
 
     // 2. Check for gcloud Application Default Credentials (ADC)
@@ -180,7 +191,9 @@ export function detectGeminiCLIToken(): string | null {
         const token = gcloud.stdout.toString().trim();
         if (token) return `gcloud-adc:${token}`;
       }
-    } catch { /* Expected: gcloud CLI may not be installed */ }
+    } catch (err) {
+      // Expected: gcloud CLI may not be installed - silently ignore
+    }
 
     // 3. Check for ADC credentials file directly
     const adcPaths = [
@@ -197,7 +210,9 @@ export function detectGeminiCLIToken(): string | null {
         if (data?.type === "authorized_user" || data?.refresh_token || data?.client_id) {
           return "gcloud-adc:detected";
         }
-      } catch { /* Expected: creds file may be malformed or inaccessible */ }
+      } catch (err) {
+        // Expected: creds file may be malformed or inaccessible - silently ignore
+      }
     }
 
     return process.env.GOOGLE_CLI_TOKEN || null;
@@ -228,7 +243,9 @@ export function detectDashScopeToken(): string | null {
         return match[1];
       }
     }
-  } catch { /* Expected: aliyun CLI may not be installed */ }
+  } catch (err) {
+    // Expected: aliyun CLI may not be installed - silently ignore
+  }
 
   // 3. Fallback to file-based detection
   const configPaths = [
@@ -256,7 +273,8 @@ export function detectDashScopeToken(): string | null {
       if (data?.access_key_id) {
         return data.access_key_id;
       }
-    } catch {
+    } catch (err) {
+      // Expected: file may be malformed or inaccessible - silently continue to next file
       continue;
     }
   }
@@ -287,7 +305,9 @@ export function detectClineToken(): string | null {
         return tokenMatch[0];
       }
     }
-  } catch { /* Expected: cline CLI may not be installed or command may not exist */ }
+  } catch (err) {
+    // Expected: cline CLI may not be installed or command may not exist - silently ignore
+  }
 
   // 3. Fallback to file-based detection
   // Cline stores auth tokens in various locations depending on platform
@@ -317,7 +337,8 @@ export function detectClineToken(): string | null {
       // Some configs nest under 'auth' or 'credentials'
       if (data?.auth?.token) return data.auth.token;
       if (data?.credentials?.token) return data.credentials.token;
-    } catch {
+    } catch (err) {
+      // Expected: file may be malformed or inaccessible - silently continue to next file
       continue;
     }
   }

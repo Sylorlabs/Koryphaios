@@ -57,6 +57,14 @@ export type {
 // ============== Task Types ==============
 export type { WorkerTask } from "./types/TaskTypes";
 
+// ============== Internal Message Types (Backend Services) ==============
+export type {
+  InternalMessage,
+  CompletedToolCall,
+  LLMTurnResult,
+  ProcessTurnResult,
+} from "./types/InternalMessageTypes";
+
 // ============== Provider & Model Definitions ==============
 export { ProviderName } from "./providers/ProviderNames";
 
@@ -66,6 +74,28 @@ export type {
   ProviderConfig,
   ProviderStatus,
 } from "./providers/ModelDefs";
+
+// ============== Reasoning Configuration ==============
+export type {
+  ReasoningMode,
+  ReasoningConfig,
+} from "./providers/ReasoningConfig";
+
+export {
+  DEFAULT_REASONING_CONFIG,
+  ALL_REASONING_MODES,
+  supportsReasoning,
+  toOpenAIReasoning,
+  toAnthropicThinking,
+  toGeminiThinking,
+  applyReasoningConfig,
+  getReasoningModeDescription,
+  getReasoningCostMultiplier,
+  validateReasoningConfig,
+} from "./providers/ReasoningConfig";
+
+// Note: ReasoningConfig from './reasoning/ReasoningFunctions' is intentionally NOT re-exported
+// to avoid duplicate identifier conflicts. Use the version from './providers/ReasoningConfig' instead.
 
 // Re-export from existing providers.ts for backward compatibility
 export {
@@ -136,7 +166,7 @@ export type {
   PaginatedResponse,
 } from "./api/APITypes";
 
-// ============== Reasoning Configuration ==============
+// ============== Reasoning Configuration Functions ==============
 export {
   getReasoningConfig,
   hasReasoningSupport,
@@ -149,7 +179,7 @@ export {
 
 export type {
   ReasoningLevel,
-  ReasoningConfig,
+  // ReasoningConfig - intentionally omitted, use from ./providers/ReasoningConfig instead
   ReasoningOption,
   ReasoningRule,
 } from "./reasoning/ReasoningFunctions";
@@ -164,6 +194,8 @@ export type {
   DiscordConfig,
   SlackConfig,
   ServerConfig,
+  DynamicProviderConfig,
+  ProviderPreset,
 } from "./config/ConfigTypes";
 
 // ============== App Configuration ==============

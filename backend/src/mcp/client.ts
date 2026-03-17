@@ -47,6 +47,21 @@ interface MCPToolResult {
   isError?: boolean;
 }
 
+interface MCPInitResult {
+  capabilities?: Record<string, unknown>;
+  [key: string]: unknown;
+}
+
+interface MCPToolListResult {
+  tools?: MCPToolDef[];
+  [key: string]: unknown;
+}
+
+interface MCPStdinSink {
+  write(chunk: string): void;
+  flush(): void;
+}
+
 // ─── MCP Client ─────────────────────────────────────────────────────────────
 
 export class MCPClient {
@@ -100,7 +115,9 @@ export class MCPClient {
           this.buffer += decoder.decode(value, { stream: true });
           this.processBuffer();
         }
-      } catch { /* Expected: stream closed when process exits */ }
+      } catch (err) {
+        mcpLog.debug({ server: this.serverName, error: err instanceof Error ? err.message : String(err) }, "MCP stdout stream closed");
+      }
     })();
 
     // Read stderr asynchronously
@@ -113,7 +130,9 @@ export class MCPClient {
           if (done) break;
           mcpLog.error({ server: this.serverName, output: stderrDecoder.decode(value).trim() }, "MCP stderr");
         }
-      } catch { /* Expected: stream closed when process exits */ }
+      } catch (err) {
+        mcpLog.debug({ server: this.serverName, error: err instanceof Error ? err.message : String(err) }, "MCP stderr stream closed");
+      }
     })();
 
     this.process.exited.then((code) => {
@@ -135,7 +154,8 @@ export class MCPClient {
       },
     });
 
-    this.serverCapabilities = (initResult.result as any).capabilities ?? {};
+    const initResultTyped = initResult.result as MCPInitResult | undefined;
+    this.serverCapabilities = initResultTyped?.capabilities ?? {};
 
     // Send initialized notification
     this.notify("notifications/initialized", {});
@@ -144,7 +164,8 @@ export class MCPClient {
     if (this.serverCapabilities.tools) {
       try {
         const toolsResult = await this.request("tools/list", {});
-        this.tools = (toolsResult.result as any)?.tools ?? [];
+        const toolsResultTyped = toolsResult.result as MCPToolListResult | undefined;
+        this.tools = toolsResultTyped?.tools ?? [];
       } catch (err: any) {
         mcpLog.warn({ server: this.serverName, err: err.message }, "Failed to list tools despite capability");
       }
@@ -194,7 +215,8 @@ export class MCPClient {
 
     if (toolsResp.ok) {
       const data = await toolsResp.json() as MCPResponse;
-      this.tools = (data.result as any)?.tools ?? [];
+      const dataResultTyped = data.result as MCPToolListResult | undefined;
+      this.tools = dataResultTyped?.tools ?? [];
     }
 
     this.connected = true;
@@ -263,16 +285,16 @@ export class MCPClient {
         reject: (err) => { clearTimeout(timeout); reject(err); },
       });
 
-      (this.process!.stdin as any).write(JSON.stringify(request) + "\n");
-      (this.process!.stdin as any).flush();
+      (this.process!.stdin as MCPStdinSink).write(JSON.stringify(request) + "\n");
+      (this.process!.stdin as MCPStdinSink).flush();
     });
   }
 
   private notify(method: string, params: unknown): void {
     const notification = { jsonrpc: "2.0", method, params };
     if (this.process?.stdin) {
-      (this.process.stdin as any).write(JSON.stringify(notification) + "\n");
-      (this.process.stdin as any).flush();
+      (this.process.stdin as MCPStdinSink).write(JSON.stringify(notification) + "\n");
+      (this.process.stdin as MCPStdinSink).flush();
     }
   }
 
@@ -291,8 +313,8 @@ export class MCPClient {
             pending.resolve(msg);
           }
         }
-      } catch {
-        // Ignore non-JSON lines (server logging etc.)
+      } catch (err) {
+        mcpLog.debug({ line: line.slice(0, 200), error: err instanceof Error ? err.message : String(err) }, "Ignoring non-JSON MCP line");
       }
     }
   }

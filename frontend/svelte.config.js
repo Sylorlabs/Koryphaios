@@ -12,8 +12,6 @@ const config = {
 		},
 		// Disable modern JavaScript features that older WebKit doesn't support
 		css: 'injected',
-		// Don't use modern JS features
-		generate: 'client',
 	},
 	kit: {
 		adapter: isStaticBuild 

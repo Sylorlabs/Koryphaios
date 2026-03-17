@@ -5,6 +5,11 @@ import { getCorsHeaders } from "../security";
 import { buildSecurityHeaders, generateCSPNonce, handleCSPViolation } from "../security/csp";
 import { serverLog } from "../logger";
 
+/** Extended Response interface with CSP nonce property */
+interface ResponseWithNonce extends Response {
+  cspNonce?: string;
+}
+
 /**
  * Security headers middleware configuration
  */
@@ -53,7 +58,7 @@ export function securityHeadersMiddleware(config: SecurityMiddlewareConfig = {})
       }
 
       // Store nonce in response for template rendering
-      (response as any).cspNonce = nonce;
+      (response as ResponseWithNonce).cspNonce = nonce;
 
       return response;
     } catch (err) {
@@ -99,7 +104,7 @@ export function injectCSPNonceMiddleware(
   request: Request,
   response: Response
 ): Response {
-  const nonce = (response as any).cspNonce;
+  const nonce = (response as ResponseWithNonce).cspNonce;
 
   if (!nonce || !response.headers.get("Content-Type")?.includes("text/html")) {
     return response;
