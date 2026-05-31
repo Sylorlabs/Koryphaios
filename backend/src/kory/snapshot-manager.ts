@@ -1,12 +1,12 @@
-import { mkdirSync, existsSync, readdirSync, rmSync, statSync } from "node:fs";
-import { join, relative, dirname } from "node:path";
-import { koryLog } from "../logger";
+import { mkdirSync, existsSync, readdirSync, rmSync, statSync } from 'node:fs';
+import { join, relative, dirname } from 'node:path';
+import { koryLog } from '../logger';
 
 export class SnapshotManager {
   private baseDir: string;
 
   constructor(workingDirectory: string) {
-    this.baseDir = join(workingDirectory, ".koryphaios", "snapshots");
+    this.baseDir = join(workingDirectory, '.koryphaios', 'snapshots');
     if (!existsSync(this.baseDir)) {
       mkdirSync(this.baseDir, { recursive: true });
     }
@@ -16,14 +16,19 @@ export class SnapshotManager {
    * Create a snapshot of specific files before they are modified.
    * We only backup files that are about to be touched or are in the allowed scope.
    */
-  async createSnapshot(sessionId: string, snapshotId: string, filePaths: string[], workingDirectory: string): Promise<void> {
+  async createSnapshot(
+    sessionId: string,
+    snapshotId: string,
+    filePaths: string[],
+    workingDirectory: string,
+  ): Promise<void> {
     const snapshotDir = join(this.baseDir, sessionId, snapshotId);
     if (!existsSync(snapshotDir)) {
       mkdirSync(snapshotDir, { recursive: true });
     }
 
     for (const filePath of filePaths) {
-      const absPath = filePath.startsWith("/") ? filePath : join(workingDirectory, filePath);
+      const absPath = filePath.startsWith('/') ? filePath : join(workingDirectory, filePath);
       if (existsSync(absPath) && statSync(absPath).isFile()) {
         // preserve directory structure inside snapshot
         const relPath = relative(workingDirectory, absPath);
@@ -35,26 +40,33 @@ export class SnapshotManager {
     }
 
     // Save a manifest of what was backed up
-    await Bun.write(join(snapshotDir, "manifest.json"), JSON.stringify({
-      timestamp: Date.now(),
-      files: filePaths
-    }));
+    await Bun.write(
+      join(snapshotDir, 'manifest.json'),
+      JSON.stringify({
+        timestamp: Date.now(),
+        files: filePaths,
+      }),
+    );
 
-    koryLog.info({ sessionId, snapshotId, files: filePaths.length }, "Created file snapshot");
+    koryLog.info({ sessionId, snapshotId, files: filePaths.length }, 'Created file snapshot');
   }
 
   /**
    * Restore files from a snapshot.
    */
-  async restoreSnapshot(sessionId: string, snapshotId: string, workingDirectory: string): Promise<{ success: boolean; error?: string }> {
+  async restoreSnapshot(
+    sessionId: string,
+    snapshotId: string,
+    workingDirectory: string,
+  ): Promise<{ success: boolean; error?: string }> {
     const snapshotDir = join(this.baseDir, sessionId, snapshotId);
     if (!existsSync(snapshotDir)) {
-      return { success: false, error: "Snapshot not found" };
+      return { success: false, error: 'Snapshot not found' };
     }
 
     try {
       // 1. Read manifest to know what *should* be there
-      // (Simple restoration: copy files back. Complex: delete new files created? 
+      // (Simple restoration: copy files back. Complex: delete new files created?
       // For now, we mainly care about reverting modifications to existing files.)
 
       const restoreDir = async (currentDir: string) => {
@@ -63,7 +75,7 @@ export class SnapshotManager {
           const fullPath = join(currentDir, entry.name);
           const relPath = relative(snapshotDir, fullPath);
 
-          if (entry.name === "manifest.json") continue;
+          if (entry.name === 'manifest.json') continue;
 
           const targetPath = join(workingDirectory, relPath);
 
@@ -77,7 +89,7 @@ export class SnapshotManager {
       };
 
       await restoreDir(snapshotDir);
-      koryLog.info({ sessionId, snapshotId }, "Restored snapshot");
+      koryLog.info({ sessionId, snapshotId }, 'Restored snapshot');
       return { success: true };
     } catch (err: any) {
       return { success: false, error: err.message };
@@ -96,14 +108,14 @@ export class SnapshotManager {
   ): Promise<{ success: boolean; restored: string[]; missing: string[]; error?: string }> {
     const snapshotDir = join(this.baseDir, sessionId, snapshotId);
     if (!existsSync(snapshotDir)) {
-      return { success: false, restored: [], missing: filePaths, error: "Snapshot not found" };
+      return { success: false, restored: [], missing: filePaths, error: 'Snapshot not found' };
     }
 
     const restored: string[] = [];
     const missing: string[] = [];
     try {
       for (const relPath of filePaths) {
-        const normalized = relPath.replace(/^\/+/, "");
+        const normalized = relPath.replace(/^\/+/, '');
         const backupPath = join(snapshotDir, normalized);
         if (!(await Bun.file(backupPath).exists())) {
           missing.push(relPath);

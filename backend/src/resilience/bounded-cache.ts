@@ -1,7 +1,7 @@
 // Bounded Cache — TTL-based cache with automatic cleanup and size limits
 // Prevents memory leaks from unbounded Map usage
 
-import { serverLog } from "../logger";
+import { serverLog } from '../logger';
 
 export interface CacheEntry<T> {
   value: T;
@@ -37,7 +37,7 @@ export interface CacheStats {
 
 /**
  * Bounded cache with TTL support
- * 
+ *
  * Features:
  * - Maximum size limit with LRU eviction
  * - TTL-based expiration
@@ -71,7 +71,7 @@ export class BoundedCache<T> {
    */
   get(key: string): T | undefined {
     const entry = this.cache.get(key);
-    
+
     if (!entry) {
       this.misses++;
       return undefined;
@@ -129,13 +129,13 @@ export class BoundedCache<T> {
   has(key: string): boolean {
     const entry = this.cache.get(key);
     if (!entry) return false;
-    
+
     if (Date.now() > entry.expiresAt) {
       this.cache.delete(key);
       this.expiredCleanups++;
       return false;
     }
-    
+
     return true;
   }
 
@@ -212,7 +212,7 @@ export class BoundedCache<T> {
     if (cleaned > 0 && this.config.enableLogging) {
       serverLog.debug(
         { cache: this.config.name, cleaned },
-        "Cache cleanup removed expired entries"
+        'Cache cleanup removed expired entries',
       );
     }
 
@@ -248,7 +248,7 @@ export class BoundedCache<T> {
   getStats(): CacheStats {
     const total = this.hits + this.misses;
     return {
-      name: this.config.name ?? "unnamed",
+      name: this.config.name ?? 'unnamed',
       size: this.cache.size,
       maxSize: this.config.maxSize,
       hits: this.hits,
@@ -275,9 +275,9 @@ export class BoundedCache<T> {
   shutdown(): void {
     this.stopCleanupTimer();
     this.clear();
-    
+
     if (this.config.enableLogging) {
-      serverLog.debug({ cache: this.config.name }, "Cache shutdown complete");
+      serverLog.debug({ cache: this.config.name }, 'Cache shutdown complete');
     }
   }
 }
@@ -289,7 +289,7 @@ export class BoundedCache<T> {
  */
 export class CacheManager {
   private caches = new Map<string, BoundedCache<unknown>>();
-  private defaultConfig: Omit<BoundedCacheConfig, "name">;
+  private defaultConfig: Omit<BoundedCacheConfig, 'name'>;
 
   constructor(defaultConfig?: Partial<BoundedCacheConfig>) {
     this.defaultConfig = {
@@ -355,9 +355,6 @@ export function getCacheManager(): CacheManager {
   return manager;
 }
 
-export function getCache<T>(
-  name: string, 
-  config?: Partial<BoundedCacheConfig>
-): BoundedCache<T> {
+export function getCache<T>(name: string, config?: Partial<BoundedCacheConfig>): BoundedCache<T> {
   return getCacheManager().get<T>(name, config);
 }

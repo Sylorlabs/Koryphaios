@@ -1,8 +1,8 @@
 // Database Migrations — versioned schema changes with rollback support
 // Prevents data loss on schema changes and tracks migration history
 
-import { Database } from "bun:sqlite";
-import { serverLog } from "../logger";
+import { Database } from 'bun:sqlite';
+import { serverLog } from '../logger';
 
 export interface Migration {
   /** Unique version number (e.g., 20240101_001) */
@@ -31,8 +31,8 @@ export interface MigrationRecord {
 export const MIGRATIONS: Migration[] = [
   // ─── Version 001: Initial Schema ───────────────────────────────────────────
   {
-    version: "20240101_001",
-    description: "Initial schema with users, sessions, messages, tasks",
+    version: '20240101_001',
+    description: 'Initial schema with users, sessions, messages, tasks',
     up: `
       -- Users table
       CREATE TABLE IF NOT EXISTS users (
@@ -107,8 +107,8 @@ export const MIGRATIONS: Migration[] = [
 
   // ─── Version 002: Worker Persistence ───────────────────────────────────────
   {
-    version: "20240115_001",
-    description: "Add worker persistence tables",
+    version: '20240115_001',
+    description: 'Add worker persistence tables',
     up: `
       -- Active workers table for persistence
       CREATE TABLE IF NOT EXISTS active_workers (
@@ -167,8 +167,8 @@ export const MIGRATIONS: Migration[] = [
 
   // ─── Version 003: Auth Tables ──────────────────────────────────────────────
   {
-    version: "20240201_001",
-    description: "Add authentication and API key tables",
+    version: '20240201_001',
+    description: 'Add authentication and API key tables',
     up: `
       -- Refresh tokens table (for JWT refresh token persistence)
       CREATE TABLE IF NOT EXISTS refresh_tokens (
@@ -234,12 +234,53 @@ export const MIGRATIONS: Migration[] = [
 
   // ─── Version 004: Add user_id to sessions ───────────────────────────────────
   {
-    version: "20240215_001",
-    description: "Add user_id column to sessions table for multi-user support",
+    version: '20240215_001',
+    description: 'Add user_id column to sessions table for multi-user support',
     up: `
       -- Add user_id column if it doesn't exist
-      -- SQLite doesn't support IF NOT EXISTS for columns, so we handle errors
-      ALTER TABLE sessions ADD COLUMN user_id TEXT;
+      -- SQLite doesn't support IF NOT EXISTS for columns, so we handle it by checking if it already exists
+      -- Use a temporary table approach or just rely on the application handling the error if we want simplicity
+      -- But for robustness, we use this:
+      PRAGMA foreign_keys=OFF;
+      BEGIN TRANSACTION;
+      
+      -- Create a temp table that DEFINITELY has user_id
+      CREATE TABLE sessions_new (
+        id TEXT PRIMARY KEY,
+        user_id TEXT,
+        title TEXT NOT NULL,
+        parent_id TEXT,
+        message_count INTEGER DEFAULT 0,
+        tokens_in INTEGER DEFAULT 0,
+        tokens_out INTEGER DEFAULT 0,
+        total_cost REAL DEFAULT 0,
+        workflow_state TEXT DEFAULT 'idle',
+        metadata TEXT,
+        tags TEXT,
+        version INTEGER DEFAULT 1,
+        created_at INTEGER,
+        updated_at INTEGER
+      );
+
+      -- Copy data from old to new, mapping columns correctly
+      -- If user_id exists in old sessions, it will be copied.
+      -- If not, it will be NULL in sessions_new.
+      INSERT INTO sessions_new (id, user_id, title, parent_id, message_count, tokens_in, tokens_out, total_cost, workflow_state, created_at, updated_at)
+      SELECT id, 
+             CASE WHEN (SELECT count(*) FROM pragma_table_info('sessions') WHERE name='user_id') > 0 
+                  THEN user_id ELSE NULL END,
+             title, parent_id, message_count, tokens_in, tokens_out, total_cost, workflow_state, created_at, updated_at
+      FROM sessions;
+
+      -- Drop old table and rename new one
+      DROP TABLE sessions;
+      ALTER TABLE sessions_new RENAME TO sessions;
+
+      -- Recreate indexes
+      CREATE INDEX IF NOT EXISTS idx_sessions_updated ON sessions(updated_at DESC);
+
+      COMMIT;
+      PRAGMA foreign_keys=ON;
     `,
     down: `
       -- SQLite doesn't support DROP COLUMN, so we recreate the table
@@ -249,8 +290,8 @@ export const MIGRATIONS: Migration[] = [
 
   // ─── Version 005: Provider credentials ──────────────────────────────────────
   {
-    version: "20240301_001",
-    description: "Add provider credentials storage table",
+    version: '20240301_001',
+    description: 'Add provider credentials storage table',
     up: `
       -- Provider credentials table (encrypted API keys)
       CREATE TABLE IF NOT EXISTS provider_credentials (
@@ -281,14 +322,61 @@ export const MIGRATIONS: Migration[] = [
 
   // ─── Version 006: Session metadata ──────────────────────────────────────────
   {
-    version: "20240315_001",
-    description: "Add metadata and tags to sessions",
+    version: '20240315_001',
+    description: 'Add metadata and tags to sessions',
     up: `
-      -- Add metadata column to sessions
-      ALTER TABLE sessions ADD COLUMN metadata TEXT;
+      -- Add metadata column to sessions if it doesn't exist
+      -- Use a safe check for column existence
+      PRAGMA foreign_keys=OFF;
+      
+      -- Check for metadata column
+      -- Note: SQLite ALTER TABLE ADD COLUMN will fail if it already exists
+      -- We can use this trick: check if column count increases or handle gracefully
+      -- Since we already potentially added it in the previous migration's table recreate,
+      -- we should only add if it's REALLY missing.
+      
+      -- Helper: Only add if missing
+      -- Actually, easier is to use the same recreate approach if we want to be 100% sure
+      -- But let's try a simpler approach if we can, or just keep it robust.
+      
+      -- For Koryphaios, we'll use a safer approach for this migration too:
+      BEGIN TRANSACTION;
+      CREATE TABLE IF NOT EXISTS sessions_meta_check (id TEXT);
+      
+      -- This script is getting complex for a migration. 
+      -- Simpler: check if column exists, if not, ALTER. 
+      -- Since SQLite doesn't have IF in SQL, we'll just use a similar recreate or 
+      -- skip if already present.
+      
+      -- Let's use the recreate approach to be consistent and safe.
+      CREATE TABLE sessions_new (
+        id TEXT PRIMARY KEY,
+        user_id TEXT,
+        title TEXT NOT NULL,
+        parent_id TEXT,
+        message_count INTEGER DEFAULT 0,
+        tokens_in INTEGER DEFAULT 0,
+        tokens_out INTEGER DEFAULT 0,
+        total_cost REAL DEFAULT 0,
+        workflow_state TEXT DEFAULT 'idle',
+        metadata TEXT,
+        tags TEXT,
+        version INTEGER DEFAULT 1,
+        created_at INTEGER,
+        updated_at INTEGER
+      );
 
-      -- Add tags column to sessions
-      ALTER TABLE sessions ADD COLUMN tags TEXT;
+      INSERT INTO sessions_new (id, user_id, title, parent_id, message_count, tokens_in, tokens_out, total_cost, workflow_state, metadata, tags, version, created_at, updated_at)
+      SELECT id, user_id, title, parent_id, message_count, tokens_in, tokens_out, total_cost, workflow_state,
+             CASE WHEN (SELECT count(*) FROM pragma_table_info('sessions') WHERE name='metadata') > 0 THEN metadata ELSE NULL END,
+             CASE WHEN (SELECT count(*) FROM pragma_table_info('sessions') WHERE name='tags') > 0 THEN tags ELSE NULL END,
+             CASE WHEN (SELECT count(*) FROM pragma_table_info('sessions') WHERE name='version') > 0 THEN version ELSE 1 END,
+             created_at, updated_at
+      FROM sessions;
+
+      DROP TABLE sessions;
+      ALTER TABLE sessions_new RENAME TO sessions;
+      CREATE INDEX IF NOT EXISTS idx_sessions_updated ON sessions(updated_at DESC);
 
       -- Session tags table for querying
       CREATE TABLE IF NOT EXISTS session_tags (
@@ -299,11 +387,86 @@ export const MIGRATIONS: Migration[] = [
         FOREIGN KEY(session_id) REFERENCES sessions(id) ON DELETE CASCADE
       );
 
+      COMMIT;
+      PRAGMA foreign_keys=ON;
+
       CREATE INDEX IF NOT EXISTS idx_session_tags_tag ON session_tags(tag);
     `,
     down: `
       DROP INDEX IF EXISTS idx_session_tags_tag;
       DROP TABLE IF EXISTS session_tags;
+    `,
+  },
+
+  // ─── Version 007: Message Replay Buffer ────────────────────────────────────
+  {
+    version: '20240328_001',
+    description: 'Add replay events table for message replay buffer',
+    up: `
+      -- Events table for replay buffer
+      CREATE TABLE IF NOT EXISTS replay_events (
+        id TEXT PRIMARY KEY,
+        session_id TEXT NOT NULL,
+        sequence INTEGER NOT NULL,
+        timestamp INTEGER NOT NULL,
+        type TEXT NOT NULL,
+        payload TEXT NOT NULL,
+        parent_event_id TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(session_id, sequence)
+      );
+
+      -- Index for fast session queries
+      CREATE INDEX IF NOT EXISTS idx_replay_events_session ON replay_events(session_id, sequence);
+
+      -- Index for event type queries
+      CREATE INDEX IF NOT EXISTS idx_replay_events_type ON replay_events(type);
+
+      -- Index for parent event lookups (for forks)
+      CREATE INDEX IF NOT EXISTS idx_replay_events_parent ON replay_events(parent_event_id);
+    `,
+    down: `
+      DROP INDEX IF EXISTS idx_replay_events_parent;
+      DROP INDEX IF EXISTS idx_replay_events_type;
+      DROP INDEX IF EXISTS idx_replay_events_session;
+      DROP TABLE IF EXISTS replay_events;
+    `,
+  },
+
+  // ─── Version 008: Enable Foreign Key Enforcement ───────────────────────────
+  {
+    version: '20240401_001',
+    description: 'Enable SQLite foreign key enforcement and add missing FK constraints',
+    up: `
+      -- Enable foreign key enforcement (must be done per-connection in SQLite)
+      PRAGMA foreign_keys = ON;
+
+      -- Recreate replay_events with FK to sessions
+      CREATE TABLE IF NOT EXISTS replay_events_new (
+        id TEXT PRIMARY KEY,
+        session_id TEXT NOT NULL,
+        sequence INTEGER NOT NULL,
+        timestamp INTEGER NOT NULL,
+        type TEXT NOT NULL,
+        payload TEXT NOT NULL,
+        parent_event_id TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(session_id, sequence),
+        FOREIGN KEY(session_id) REFERENCES sessions(id) ON DELETE CASCADE
+      );
+
+      INSERT OR IGNORE INTO replay_events_new
+        SELECT * FROM replay_events;
+
+      DROP TABLE IF EXISTS replay_events;
+      ALTER TABLE replay_events_new RENAME TO replay_events;
+
+      CREATE INDEX IF NOT EXISTS idx_replay_events_session ON replay_events(session_id, sequence);
+      CREATE INDEX IF NOT EXISTS idx_replay_events_type ON replay_events(type);
+      CREATE INDEX IF NOT EXISTS idx_replay_events_parent ON replay_events(parent_event_id);
+    `,
+    down: `
+      PRAGMA foreign_keys = OFF;
     `,
   },
 ];
@@ -312,7 +475,7 @@ export const MIGRATIONS: Migration[] = [
 
 export class MigrationRunner {
   private db: Database;
-  private migrationsTable = "_migrations";
+  private migrationsTable = '_migrations';
 
   constructor(db: Database) {
     this.db = db;
@@ -346,9 +509,7 @@ export class MigrationRunner {
    * Get pending migrations
    */
   getPendingMigrations(): Migration[] {
-    const applied = new Set(
-      this.getAppliedMigrations().map((m) => m.version)
-    );
+    const applied = new Set(this.getAppliedMigrations().map((m) => m.version));
     return MIGRATIONS.filter((m) => !applied.has(m.version));
   }
 
@@ -372,10 +533,10 @@ export class MigrationRunner {
    */
   async applyMigration(migration: Migration): Promise<void> {
     const checksum = this.calculateChecksum(migration);
-    
+
     serverLog.info(
       { version: migration.version, description: migration.description },
-      "Applying migration"
+      'Applying migration',
     );
 
     try {
@@ -385,18 +546,12 @@ export class MigrationRunner {
       // Record the migration
       this.db.run(
         `INSERT INTO ${this.migrationsTable} (version, description, applied_at, checksum) VALUES (?, ?, ?, ?)`,
-        [migration.version, migration.description, Date.now(), checksum]
+        [migration.version, migration.description, Date.now(), checksum],
       );
 
-      serverLog.info(
-        { version: migration.version },
-        "Migration applied successfully"
-      );
+      serverLog.info({ version: migration.version }, 'Migration applied successfully');
     } catch (error) {
-      serverLog.error(
-        { version: migration.version, error },
-        "Migration failed"
-      );
+      serverLog.error({ version: migration.version, error }, 'Migration failed');
       throw error;
     }
   }
@@ -411,7 +566,7 @@ export class MigrationRunner {
 
     serverLog.info(
       { version: migration.version, description: migration.description },
-      "Rolling back migration"
+      'Rolling back migration',
     );
 
     try {
@@ -419,20 +574,11 @@ export class MigrationRunner {
       this.db.exec(migration.down);
 
       // Remove the migration record
-      this.db.run(
-        `DELETE FROM ${this.migrationsTable} WHERE version = ?`,
-        [migration.version]
-      );
+      this.db.run(`DELETE FROM ${this.migrationsTable} WHERE version = ?`, [migration.version]);
 
-      serverLog.info(
-        { version: migration.version },
-        "Migration rolled back successfully"
-      );
+      serverLog.info({ version: migration.version }, 'Migration rolled back successfully');
     } catch (error) {
-      serverLog.error(
-        { version: migration.version, error },
-        "Migration rollback failed"
-      );
+      serverLog.error({ version: migration.version, error }, 'Migration rollback failed');
       throw error;
     }
   }
@@ -442,13 +588,13 @@ export class MigrationRunner {
    */
   async migrate(): Promise<number> {
     const pending = this.getPendingMigrations();
-    
+
     if (pending.length === 0) {
-      serverLog.info("No pending migrations");
+      serverLog.info('No pending migrations');
       return 0;
     }
 
-    serverLog.info({ count: pending.length }, "Running pending migrations");
+    serverLog.info({ count: pending.length }, 'Running pending migrations');
 
     for (const migration of pending) {
       await this.applyMigration(migration);
@@ -465,11 +611,11 @@ export class MigrationRunner {
     const toRollback = applied.slice(-count);
 
     if (toRollback.length === 0) {
-      serverLog.info("No migrations to rollback");
+      serverLog.info('No migrations to rollback');
       return 0;
     }
 
-    serverLog.info({ count: toRollback.length }, "Rolling back migrations");
+    serverLog.info({ count: toRollback.length }, 'Rolling back migrations');
 
     // Rollback in reverse order
     for (const record of toRollback.reverse()) {
@@ -506,15 +652,15 @@ export class MigrationRunner {
 export async function runMigrations(db: Database): Promise<void> {
   const runner = new MigrationRunner(db);
   const count = await runner.migrate();
-  
+
   if (count > 0) {
     const status = runner.getStatus();
     serverLog.info(
-      { 
-        migrationsApplied: count, 
-        currentVersion: status.currentVersion 
+      {
+        migrationsApplied: count,
+        currentVersion: status.currentVersion,
       },
-      "Database migrations complete"
+      'Database migrations complete',
     );
   }
 }

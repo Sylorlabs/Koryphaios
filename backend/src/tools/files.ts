@@ -1,10 +1,18 @@
 // File tools — read, write, edit, list, grep, glob.
 // Ported from OpenCode's tools/file.go, view.go, write.go, edit.go, grep.go, glob.go, ls.go.
 
-import { existsSync, statSync, readdirSync, mkdirSync, unlinkSync, renameSync, copyFileSync } from "fs";
-import { join, relative, dirname, basename, resolve } from "path";
-import type { Tool, ToolContext, ToolCallInput, ToolCallOutput } from "./registry";
-import { validatePathAccess } from "../security";
+import {
+  existsSync,
+  statSync,
+  readdirSync,
+  mkdirSync,
+  unlinkSync,
+  renameSync,
+  copyFileSync,
+} from 'fs';
+import { join, relative, dirname, basename, resolve } from 'path';
+import type { Tool, ToolContext, ToolCallInput, ToolCallOutput } from './registry';
+import { validatePathAccess } from '../security';
 
 /** Resolve allowed filesystem roots for file operations.
  *  Default to project directory even when not explicitly sandboxed — never allow "/" implicitly. */
@@ -16,60 +24,82 @@ function getAllowedRoots(ctx: ToolContext): string[] {
 // ─── Read File ──────────────────────────────────────────────────────────────
 
 export class ReadFileTool implements Tool {
-  readonly name = "read_file";
+  readonly name = 'read_file';
   readonly description = `Read the contents of a file. Returns the file content with line numbers. Use this to examine source code, configuration files, or any text file.`;
 
   readonly inputSchema = {
-    type: "object",
+    type: 'object',
     properties: {
-      path: { type: "string", description: "Absolute or relative path to the file." },
-      startLine: { type: "number", description: "Start line number (1-indexed). Optional." },
-      endLine: { type: "number", description: "End line number (1-indexed, inclusive). Optional." },
+      path: { type: 'string', description: 'Absolute or relative path to the file.' },
+      startLine: { type: 'number', description: 'Start line number (1-indexed). Optional.' },
+      endLine: { type: 'number', description: 'End line number (1-indexed, inclusive). Optional.' },
     },
-    required: ["path"],
+    required: ['path'],
   };
 
   async run(ctx: ToolContext, call: ToolCallInput): Promise<ToolCallOutput> {
-    const { path: filePath, startLine, endLine } = call.input as {
+    const {
+      path: filePath,
+      startLine,
+      endLine,
+    } = call.input as {
       path: string;
       startLine?: number;
       endLine?: number;
     };
 
-    const absPath = filePath.startsWith("/") ? filePath : join(ctx.workingDirectory, filePath);
+    const absPath = filePath.startsWith('/') ? filePath : join(ctx.workingDirectory, filePath);
     const allowedRoots = getAllowedRoots(ctx);
     const access = validatePathAccess(absPath, allowedRoots);
 
     if (!access.allowed) {
-      return { 
-        callId: call.id, 
-        name: this.name, 
-        output: `Error: Access denied. ${access.reason}`, 
-        isError: true, 
-        durationMs: 0 
+      return {
+        callId: call.id,
+        name: this.name,
+        output: `Error: Access denied. ${access.reason}`,
+        isError: true,
+        durationMs: 0,
       };
     }
 
     if (!existsSync(absPath)) {
-      return { callId: call.id, name: this.name, output: `File not found: ${absPath}`, isError: true, durationMs: 0 };
+      return {
+        callId: call.id,
+        name: this.name,
+        output: `File not found: ${absPath}`,
+        isError: true,
+        durationMs: 0,
+      };
     }
 
     try {
       const content = await Bun.file(absPath).text();
-      let lines = content.split("\n");
+      let lines = content.split('\n');
 
       if (startLine !== undefined || endLine !== undefined) {
         const start = (startLine ?? 1) - 1;
         const end = endLine ?? lines.length;
         lines = lines.slice(start, end);
-        const numbered = lines.map((l, i) => `${start + i + 1}. ${l}`).join("\n");
-        return { callId: call.id, name: this.name, output: numbered, isError: false, durationMs: 0 };
+        const numbered = lines.map((l, i) => `${start + i + 1}. ${l}`).join('\n');
+        return {
+          callId: call.id,
+          name: this.name,
+          output: numbered,
+          isError: false,
+          durationMs: 0,
+        };
       }
 
-      const numbered = lines.map((l, i) => `${i + 1}. ${l}`).join("\n");
+      const numbered = lines.map((l, i) => `${i + 1}. ${l}`).join('\n');
       return { callId: call.id, name: this.name, output: numbered, isError: false, durationMs: 0 };
     } catch (err: unknown) {
-      return { callId: call.id, name: this.name, output: `Error reading file: ${err instanceof Error ? err.message : String(err)}`, isError: true, durationMs: 0 };
+      return {
+        callId: call.id,
+        name: this.name,
+        output: `Error reading file: ${err instanceof Error ? err.message : String(err)}`,
+        isError: true,
+        durationMs: 0,
+      };
     }
   }
 }
@@ -77,31 +107,31 @@ export class ReadFileTool implements Tool {
 // ─── Write File ─────────────────────────────────────────────────────────────
 
 export class WriteFileTool implements Tool {
-  readonly name = "write_file";
+  readonly name = 'write_file';
   readonly description = `Create a new file or overwrite an existing file with the provided content. Creates parent directories if they don't exist.`;
 
   readonly inputSchema = {
-    type: "object",
+    type: 'object',
     properties: {
-      path: { type: "string", description: "Path to the file to write." },
-      content: { type: "string", description: "The full content to write to the file." },
+      path: { type: 'string', description: 'Path to the file to write.' },
+      content: { type: 'string', description: 'The full content to write to the file.' },
     },
-    required: ["path", "content"],
+    required: ['path', 'content'],
   };
 
   async run(ctx: ToolContext, call: ToolCallInput): Promise<ToolCallOutput> {
     const { path: filePath, content } = call.input as { path: string; content: string };
-    const absPath = filePath.startsWith("/") ? filePath : join(ctx.workingDirectory, filePath);
+    const absPath = filePath.startsWith('/') ? filePath : join(ctx.workingDirectory, filePath);
     const allowedRoots = getAllowedRoots(ctx);
     const access = validatePathAccess(absPath, allowedRoots);
 
     if (!access.allowed) {
-      return { 
-        callId: call.id, 
-        name: this.name, 
-        output: `Error: Access denied. ${access.reason}`, 
-        isError: true, 
-        durationMs: 0 
+      return {
+        callId: call.id,
+        name: this.name,
+        output: `Error: Access denied. ${access.reason}`,
+        isError: true,
+        durationMs: 0,
       };
     }
 
@@ -115,19 +145,19 @@ export class WriteFileTool implements Tool {
         while (sent < content.length) {
           const chunk = content.slice(sent, sent + CHUNK_SIZE);
           sent += chunk.length;
-          ctx.emitFileEdit({ path: absPath, delta: chunk, totalLength: sent, operation: "create" });
+          ctx.emitFileEdit({ path: absPath, delta: chunk, totalLength: sent, operation: 'create' });
           // Yield to event loop every few chunks for smooth streaming
           if (sent % (CHUNK_SIZE * 5) === 0) {
-            await new Promise(r => setTimeout(r, 0));
+            await new Promise((r) => setTimeout(r, 0));
           }
         }
       }
 
       await Bun.write(absPath, content);
-      const lines = content.split("\n").length;
+      const lines = content.split('\n').length;
 
       if (ctx.emitFileComplete) {
-        ctx.emitFileComplete({ path: absPath, totalLines: lines, operation: "create" });
+        ctx.emitFileComplete({ path: absPath, totalLines: lines, operation: 'create' });
       }
 
       if (ctx.recordChange) {
@@ -135,7 +165,7 @@ export class WriteFileTool implements Tool {
           path: absPath,
           linesAdded: lines,
           linesDeleted: 0,
-          operation: "create",
+          operation: 'create',
         });
       }
 
@@ -147,7 +177,13 @@ export class WriteFileTool implements Tool {
         durationMs: 0,
       };
     } catch (err: unknown) {
-      return { callId: call.id, name: this.name, output: `Error writing file: ${err instanceof Error ? err.message : String(err)}`, isError: true, durationMs: 0 };
+      return {
+        callId: call.id,
+        name: this.name,
+        output: `Error writing file: ${err instanceof Error ? err.message : String(err)}`,
+        isError: true,
+        durationMs: 0,
+      };
     }
   }
 }
@@ -155,41 +191,51 @@ export class WriteFileTool implements Tool {
 // ─── Edit File (string replacement) ─────────────────────────────────────────
 
 export class EditFileTool implements Tool {
-  readonly name = "edit_file";
+  readonly name = 'edit_file';
   readonly description = `Edit an existing file by replacing a specific string with new content. The old_str must match exactly one location in the file. Include enough context to make the match unique.`;
 
   readonly inputSchema = {
-    type: "object",
+    type: 'object',
     properties: {
-      path: { type: "string", description: "Path to the file to edit." },
-      old_str: { type: "string", description: "The exact string to find and replace." },
-      new_str: { type: "string", description: "The replacement string." },
+      path: { type: 'string', description: 'Path to the file to edit.' },
+      old_str: { type: 'string', description: 'The exact string to find and replace.' },
+      new_str: { type: 'string', description: 'The replacement string.' },
     },
-    required: ["path", "old_str", "new_str"],
+    required: ['path', 'old_str', 'new_str'],
   };
 
   async run(ctx: ToolContext, call: ToolCallInput): Promise<ToolCallOutput> {
-    const { path: filePath, old_str, new_str } = call.input as {
+    const {
+      path: filePath,
+      old_str,
+      new_str,
+    } = call.input as {
       path: string;
       old_str: string;
       new_str: string;
     };
-    const absPath = filePath.startsWith("/") ? filePath : join(ctx.workingDirectory, filePath);
+    const absPath = filePath.startsWith('/') ? filePath : join(ctx.workingDirectory, filePath);
     const allowedRoots = getAllowedRoots(ctx);
     const access = validatePathAccess(absPath, allowedRoots);
 
     if (!access.allowed) {
-      return { 
-        callId: call.id, 
-        name: this.name, 
-        output: `Error: Access denied. ${access.reason}`, 
-        isError: true, 
-        durationMs: 0 
+      return {
+        callId: call.id,
+        name: this.name,
+        output: `Error: Access denied. ${access.reason}`,
+        isError: true,
+        durationMs: 0,
       };
     }
 
     if (!existsSync(absPath)) {
-      return { callId: call.id, name: this.name, output: `File not found: ${absPath}`, isError: true, durationMs: 0 };
+      return {
+        callId: call.id,
+        name: this.name,
+        output: `File not found: ${absPath}`,
+        isError: true,
+        durationMs: 0,
+      };
     }
 
     try {
@@ -197,7 +243,13 @@ export class EditFileTool implements Tool {
       const occurrences = content.split(old_str).length - 1;
 
       if (occurrences === 0) {
-        return { callId: call.id, name: this.name, output: `old_str not found in ${absPath}`, isError: true, durationMs: 0 };
+        return {
+          callId: call.id,
+          name: this.name,
+          output: `old_str not found in ${absPath}`,
+          isError: true,
+          durationMs: 0,
+        };
       }
       if (occurrences > 1) {
         return {
@@ -218,9 +270,9 @@ export class EditFileTool implements Tool {
         while (sent < new_str.length) {
           const chunk = new_str.slice(sent, sent + CHUNK_SIZE);
           sent += chunk.length;
-          ctx.emitFileEdit({ path: absPath, delta: chunk, totalLength: sent, operation: "edit" });
+          ctx.emitFileEdit({ path: absPath, delta: chunk, totalLength: sent, operation: 'edit' });
           if (sent % (CHUNK_SIZE * 5) === 0) {
-            await new Promise(r => setTimeout(r, 0));
+            await new Promise((r) => setTimeout(r, 0));
           }
         }
       }
@@ -228,15 +280,19 @@ export class EditFileTool implements Tool {
       await Bun.write(absPath, newContent);
 
       if (ctx.emitFileComplete) {
-        ctx.emitFileComplete({ path: absPath, totalLines: newContent.split("\n").length, operation: "edit" });
+        ctx.emitFileComplete({
+          path: absPath,
+          totalLines: newContent.split('\n').length,
+          operation: 'edit',
+        });
       }
 
       if (ctx.recordChange) {
         ctx.recordChange({
           path: absPath,
-          linesAdded: new_str.split("\n").length,
-          linesDeleted: old_str.split("\n").length,
-          operation: "edit",
+          linesAdded: new_str.split('\n').length,
+          linesDeleted: old_str.split('\n').length,
+          operation: 'edit',
         });
       }
 
@@ -248,7 +304,13 @@ export class EditFileTool implements Tool {
         durationMs: 0,
       };
     } catch (err: unknown) {
-      return { callId: call.id, name: this.name, output: `Error editing file: ${err instanceof Error ? err.message : String(err)}`, isError: true, durationMs: 0 };
+      return {
+        callId: call.id,
+        name: this.name,
+        output: `Error editing file: ${err instanceof Error ? err.message : String(err)}`,
+        isError: true,
+        durationMs: 0,
+      };
     }
   }
 }
@@ -256,20 +318,23 @@ export class EditFileTool implements Tool {
 // ─── Grep (ripgrep wrapper) ─────────────────────────────────────────────────
 
 export class GrepTool implements Tool {
-  readonly name = "grep";
+  readonly name = 'grep';
   readonly description = `Search for a pattern in file contents using ripgrep (rg). Returns matching file paths and lines. Fast parallel search across large codebases.`;
 
   readonly inputSchema = {
-    type: "object",
+    type: 'object',
     properties: {
-      pattern: { type: "string", description: "Regex pattern to search for." },
-      path: { type: "string", description: "Directory or file to search in. Defaults to working directory." },
-      glob: { type: "string", description: "File glob to filter (e.g., '*.ts', '*.cpp')." },
-      contextLines: { type: "number", description: "Lines of context around matches." },
-      caseSensitive: { type: "boolean", description: "Case-sensitive search. Default: true." },
-      maxResults: { type: "number", description: "Maximum number of results. Default: 50." },
+      pattern: { type: 'string', description: 'Regex pattern to search for.' },
+      path: {
+        type: 'string',
+        description: 'Directory or file to search in. Defaults to working directory.',
+      },
+      glob: { type: 'string', description: "File glob to filter (e.g., '*.ts', '*.cpp')." },
+      contextLines: { type: 'number', description: 'Lines of context around matches.' },
+      caseSensitive: { type: 'boolean', description: 'Case-sensitive search. Default: true.' },
+      maxResults: { type: 'number', description: 'Maximum number of results. Default: 50.' },
     },
-    required: ["pattern"],
+    required: ['pattern'],
   };
 
   async run(ctx: ToolContext, call: ToolCallInput): Promise<ToolCallOutput> {
@@ -283,8 +348,8 @@ export class GrepTool implements Tool {
     };
 
     const searchPath = path ?? ctx.workingDirectory;
-    const args = ["rg", "--no-heading", "--line-number", "--color", "never"];
-    if (caseSensitive === false) args.push("-i");
+    const args = ['rg', '--no-heading', '--line-number', '--color', 'never'];
+    if (caseSensitive === false) args.push('-i');
     if (contextLines) args.push(`-C`, String(contextLines));
     if (glob) args.push(`-g`, glob);
     args.push(`-m`, String(maxResults ?? 50));
@@ -292,7 +357,7 @@ export class GrepTool implements Tool {
 
     const SUBPROC_TIMEOUT_MS = 30_000;
     try {
-      const proc = Bun.spawn(args, { stdout: "pipe", stderr: "pipe" });
+      const proc = Bun.spawn(args, { stdout: 'pipe', stderr: 'pipe' });
       const timeoutId = setTimeout(() => {
         try {
           proc.kill();
@@ -306,12 +371,30 @@ export class GrepTool implements Tool {
         const exitCode = await proc.exited;
         clearTimeout(timeoutId);
         if (exitCode === 1 && !stdout) {
-          return { callId: call.id, name: this.name, output: "No matches found.", isError: false, durationMs: 0 };
+          return {
+            callId: call.id,
+            name: this.name,
+            output: 'No matches found.',
+            isError: false,
+            durationMs: 0,
+          };
         }
         if (exitCode > 1) {
-          return { callId: call.id, name: this.name, output: `rg error: ${stderr}`, isError: true, durationMs: 0 };
+          return {
+            callId: call.id,
+            name: this.name,
+            output: `rg error: ${stderr}`,
+            isError: true,
+            durationMs: 0,
+          };
         }
-        return { callId: call.id, name: this.name, output: stdout.trim(), isError: false, durationMs: 0 };
+        return {
+          callId: call.id,
+          name: this.name,
+          output: stdout.trim(),
+          isError: false,
+          durationMs: 0,
+        };
       } finally {
         clearTimeout(timeoutId);
         try {
@@ -322,7 +405,13 @@ export class GrepTool implements Tool {
         await Promise.race([proc.exited, new Promise((r) => setTimeout(r, 2000))]);
       }
     } catch {
-      return { callId: call.id, name: this.name, output: "ripgrep (rg) not found or timed out. Install with: apt install ripgrep", isError: true, durationMs: 0 };
+      return {
+        callId: call.id,
+        name: this.name,
+        output: 'ripgrep (rg) not found or timed out. Install with: apt install ripgrep',
+        isError: true,
+        durationMs: 0,
+      };
     }
   }
 }
@@ -330,16 +419,19 @@ export class GrepTool implements Tool {
 // ─── Glob ───────────────────────────────────────────────────────────────────
 
 export class GlobTool implements Tool {
-  readonly name = "glob";
+  readonly name = 'glob';
   readonly description = `Find files matching a glob pattern. Returns file paths relative to the working directory.`;
 
   readonly inputSchema = {
-    type: "object",
+    type: 'object',
     properties: {
-      pattern: { type: "string", description: "Glob pattern (e.g., '**/*.ts', 'src/**/*.svelte')." },
-      path: { type: "string", description: "Base directory. Defaults to working directory." },
+      pattern: {
+        type: 'string',
+        description: "Glob pattern (e.g., '**/*.ts', 'src/**/*.svelte').",
+      },
+      path: { type: 'string', description: 'Base directory. Defaults to working directory.' },
     },
-    required: ["pattern"],
+    required: ['pattern'],
   };
 
   async run(ctx: ToolContext, call: ToolCallInput): Promise<ToolCallOutput> {
@@ -355,18 +447,30 @@ export class GlobTool implements Tool {
       }
 
       if (matches.length === 0) {
-        return { callId: call.id, name: this.name, output: "No files matched.", isError: false, durationMs: 0 };
+        return {
+          callId: call.id,
+          name: this.name,
+          output: 'No files matched.',
+          isError: false,
+          durationMs: 0,
+        };
       }
 
       return {
         callId: call.id,
         name: this.name,
-        output: matches.join("\n") + (matches.length >= 500 ? "\n[truncated at 500 results]" : ""),
+        output: matches.join('\n') + (matches.length >= 500 ? '\n[truncated at 500 results]' : ''),
         isError: false,
         durationMs: 0,
       };
     } catch (err: unknown) {
-      return { callId: call.id, name: this.name, output: `Glob error: ${err instanceof Error ? err.message : String(err)}`, isError: true, durationMs: 0 };
+      return {
+        callId: call.id,
+        name: this.name,
+        output: `Glob error: ${err instanceof Error ? err.message : String(err)}`,
+        isError: true,
+        durationMs: 0,
+      };
     }
   }
 }
@@ -374,14 +478,20 @@ export class GlobTool implements Tool {
 // ─── Directory Listing ──────────────────────────────────────────────────────
 
 export class LsTool implements Tool {
-  readonly name = "ls";
+  readonly name = 'ls';
   readonly description = `List files and directories at a given path. Returns names with type indicators (/ for directories).`;
 
   readonly inputSchema = {
-    type: "object",
+    type: 'object',
     properties: {
-      path: { type: "string", description: "Directory path to list. Defaults to working directory." },
-      depth: { type: "number", description: "Recursion depth. Default: 1 (immediate children only)." },
+      path: {
+        type: 'string',
+        description: 'Directory path to list. Defaults to working directory.',
+      },
+      depth: {
+        type: 'number',
+        description: 'Recursion depth. Default: 1 (immediate children only).',
+      },
     },
     required: [],
   };
@@ -389,24 +499,50 @@ export class LsTool implements Tool {
   async run(ctx: ToolContext, call: ToolCallInput): Promise<ToolCallOutput> {
     const { path: dirPath, depth } = call.input as { path?: string; depth?: number };
     const absPath = dirPath
-      ? dirPath.startsWith("/") ? dirPath : join(ctx.workingDirectory, dirPath)
+      ? dirPath.startsWith('/')
+        ? dirPath
+        : join(ctx.workingDirectory, dirPath)
       : ctx.workingDirectory;
 
     // Check directory access (read-only is fine for ls, but still needs scope check)
     const access = validatePathAccess(absPath, getAllowedRoots(ctx));
     if (!access.allowed) {
-      return { callId: call.id, name: this.name, output: `Error: Access denied. ${access.reason}`, isError: true, durationMs: 0 };
+      return {
+        callId: call.id,
+        name: this.name,
+        output: `Error: Access denied. ${access.reason}`,
+        isError: true,
+        durationMs: 0,
+      };
     }
 
     if (!existsSync(absPath)) {
-      return { callId: call.id, name: this.name, output: `Path not found: ${absPath}`, isError: true, durationMs: 0 };
+      return {
+        callId: call.id,
+        name: this.name,
+        output: `Path not found: ${absPath}`,
+        isError: true,
+        durationMs: 0,
+      };
     }
 
     try {
       const entries = this.listDir(absPath, depth ?? 1, 0);
-      return { callId: call.id, name: this.name, output: entries.join("\n"), isError: false, durationMs: 0 };
+      return {
+        callId: call.id,
+        name: this.name,
+        output: entries.join('\n'),
+        isError: false,
+        durationMs: 0,
+      };
     } catch (err: unknown) {
-      return { callId: call.id, name: this.name, output: `Error listing: ${err instanceof Error ? err.message : String(err)}`, isError: true, durationMs: 0 };
+      return {
+        callId: call.id,
+        name: this.name,
+        output: `Error listing: ${err instanceof Error ? err.message : String(err)}`,
+        isError: true,
+        durationMs: 0,
+      };
     }
   }
 
@@ -415,11 +551,11 @@ export class LsTool implements Tool {
 
     const entries = readdirSync(dirPath, { withFileTypes: true });
     const result: string[] = [];
-    const indent = "  ".repeat(currentDepth);
+    const indent = '  '.repeat(currentDepth);
 
     for (const entry of entries) {
-      if (entry.name.startsWith(".")) continue;
-      if (entry.name === "node_modules" || entry.name === ".git") continue;
+      if (entry.name.startsWith('.')) continue;
+      if (entry.name === 'node_modules' || entry.name === '.git') continue;
 
       if (entry.isDirectory()) {
         result.push(`${indent}${entry.name}/`);
@@ -436,35 +572,41 @@ export class LsTool implements Tool {
 // ─── Delete File ────────────────────────────────────────────────────────────
 
 export class DeleteFileTool implements Tool {
-  readonly name = "delete_file";
+  readonly name = 'delete_file';
   readonly description = `Delete a file or empty directory. Cannot delete non-empty directories for safety.`;
 
   readonly inputSchema = {
-    type: "object",
+    type: 'object',
     properties: {
-      path: { type: "string", description: "Path to the file or empty directory to delete." },
+      path: { type: 'string', description: 'Path to the file or empty directory to delete.' },
     },
-    required: ["path"],
+    required: ['path'],
   };
 
   async run(ctx: ToolContext, call: ToolCallInput): Promise<ToolCallOutput> {
     const { path: filePath } = call.input as { path: string };
-    const absPath = filePath.startsWith("/") ? filePath : join(ctx.workingDirectory, filePath);
+    const absPath = filePath.startsWith('/') ? filePath : join(ctx.workingDirectory, filePath);
     const allowedRoots = getAllowedRoots(ctx);
     const access = validatePathAccess(absPath, allowedRoots);
 
     if (!access.allowed) {
-      return { 
-        callId: call.id, 
-        name: this.name, 
-        output: `Error: Access denied. ${access.reason}`, 
-        isError: true, 
-        durationMs: 0 
+      return {
+        callId: call.id,
+        name: this.name,
+        output: `Error: Access denied. ${access.reason}`,
+        isError: true,
+        durationMs: 0,
       };
     }
 
     if (!existsSync(absPath)) {
-      return { callId: call.id, name: this.name, output: `Path not found: ${absPath}`, isError: true, durationMs: 0 };
+      return {
+        callId: call.id,
+        name: this.name,
+        output: `Path not found: ${absPath}`,
+        isError: true,
+        durationMs: 0,
+      };
     }
 
     try {
@@ -472,16 +614,28 @@ export class DeleteFileTool implements Tool {
       if (stat.isDirectory()) {
         const entries = readdirSync(absPath);
         if (entries.length > 0) {
-          return { callId: call.id, name: this.name, output: `Cannot delete non-empty directory: ${absPath} (${entries.length} entries). Remove contents first.`, isError: true, durationMs: 0 };
+          return {
+            callId: call.id,
+            name: this.name,
+            output: `Cannot delete non-empty directory: ${absPath} (${entries.length} entries). Remove contents first.`,
+            isError: true,
+            durationMs: 0,
+          };
         }
-        const { rmdirSync } = await import("fs");
+        const { rmdirSync } = await import('fs');
         rmdirSync(absPath);
-        return { callId: call.id, name: this.name, output: `Deleted empty directory: ${absPath}`, isError: false, durationMs: 0 };
+        return {
+          callId: call.id,
+          name: this.name,
+          output: `Deleted empty directory: ${absPath}`,
+          isError: false,
+          durationMs: 0,
+        };
       }
 
       const content = await Bun.file(absPath).text();
-      const lines = content.split("\n").length;
-      
+      const lines = content.split('\n').length;
+
       unlinkSync(absPath);
 
       if (ctx.recordChange) {
@@ -489,13 +643,25 @@ export class DeleteFileTool implements Tool {
           path: absPath,
           linesAdded: 0,
           linesDeleted: lines,
-          operation: "delete",
+          operation: 'delete',
         });
       }
 
-      return { callId: call.id, name: this.name, output: `Deleted file: ${absPath}`, isError: false, durationMs: 0 };
+      return {
+        callId: call.id,
+        name: this.name,
+        output: `Deleted file: ${absPath}`,
+        isError: false,
+        durationMs: 0,
+      };
     } catch (err: unknown) {
-      return { callId: call.id, name: this.name, output: `Error deleting: ${err instanceof Error ? err.message : String(err)}`, isError: true, durationMs: 0 };
+      return {
+        callId: call.id,
+        name: this.name,
+        output: `Error deleting: ${err instanceof Error ? err.message : String(err)}`,
+        isError: true,
+        durationMs: 0,
+      };
     }
   }
 }
@@ -503,64 +669,108 @@ export class DeleteFileTool implements Tool {
 // ─── Move / Rename File ─────────────────────────────────────────────────────
 
 export class MoveFileTool implements Tool {
-  readonly name = "move_file";
+  readonly name = 'move_file';
   readonly description = `Move or rename a file or directory. Creates parent directories for the destination if needed.`;
 
   readonly inputSchema = {
-    type: "object",
+    type: 'object',
     properties: {
-      source: { type: "string", description: "Source path to move from." },
-      destination: { type: "string", description: "Destination path to move to." },
+      source: { type: 'string', description: 'Source path to move from.' },
+      destination: { type: 'string', description: 'Destination path to move to.' },
     },
-    required: ["source", "destination"],
+    required: ['source', 'destination'],
   };
 
   async run(ctx: ToolContext, call: ToolCallInput): Promise<ToolCallOutput> {
     const { source, destination } = call.input as { source: string; destination: string };
-    const absSrc = source.startsWith("/") ? source : join(ctx.workingDirectory, source);
-    const absDest = destination.startsWith("/") ? destination : join(ctx.workingDirectory, destination);
+    const absSrc = source.startsWith('/') ? source : join(ctx.workingDirectory, source);
+    const absDest = destination.startsWith('/')
+      ? destination
+      : join(ctx.workingDirectory, destination);
 
     const accessSrc = validatePathAccess(absSrc, getAllowedRoots(ctx));
     const accessDest = validatePathAccess(absDest, getAllowedRoots(ctx));
 
     if (!accessSrc.allowed || !accessDest.allowed) {
-      return { 
-        callId: call.id, 
-        name: this.name, 
-        output: `Error: Access denied. Source or destination is outside allowed scope.`, 
-        isError: true, 
-        durationMs: 0 
+      return {
+        callId: call.id,
+        name: this.name,
+        output: `Error: Access denied. Source or destination is outside allowed scope.`,
+        isError: true,
+        durationMs: 0,
       };
     }
 
     if (!existsSync(absSrc)) {
-      return { callId: call.id, name: this.name, output: `Source not found: ${absSrc}`, isError: true, durationMs: 0 };
+      return {
+        callId: call.id,
+        name: this.name,
+        output: `Source not found: ${absSrc}`,
+        isError: true,
+        durationMs: 0,
+      };
     }
 
     if (existsSync(absDest)) {
-      return { callId: call.id, name: this.name, output: `Destination already exists: ${absDest}`, isError: true, durationMs: 0 };
+      return {
+        callId: call.id,
+        name: this.name,
+        output: `Destination already exists: ${absDest}`,
+        isError: true,
+        durationMs: 0,
+      };
     }
 
     try {
       mkdirSync(dirname(absDest), { recursive: true });
       renameSync(absSrc, absDest);
-      return { callId: call.id, name: this.name, output: `Moved: ${absSrc} → ${absDest}`, isError: false, durationMs: 0 };
+      return {
+        callId: call.id,
+        name: this.name,
+        output: `Moved: ${absSrc} → ${absDest}`,
+        isError: false,
+        durationMs: 0,
+      };
     } catch (err: unknown) {
       // renameSync fails across devices — fallback to copy+delete for files
-      if ((err as NodeJS.ErrnoException).code === "EXDEV") {
+      if ((err as NodeJS.ErrnoException).code === 'EXDEV') {
         try {
           const stat = statSync(absSrc);
           if (stat.isDirectory()) {
-            return { callId: call.id, name: this.name, output: `Cannot move directory across filesystems: ${err instanceof Error ? err.message : String(err)}`, isError: true, durationMs: 0 };
+            return {
+              callId: call.id,
+              name: this.name,
+              output: `Cannot move directory across filesystems: ${err instanceof Error ? err.message : String(err)}`,
+              isError: true,
+              durationMs: 0,
+            };
           }
           copyFileSync(absSrc, absDest);
           unlinkSync(absSrc);
-          return { callId: call.id, name: this.name, output: `Moved (cross-device): ${absSrc} → ${absDest}`, isError: false, durationMs: 0 };
+          return {
+            callId: call.id,
+            name: this.name,
+            output: `Moved (cross-device): ${absSrc} → ${absDest}`,
+            isError: false,
+            durationMs: 0,
+          };
         } catch (copyErr: unknown) {
-          return { callId: call.id, name: this.name, output: `Error moving file: ${copyErr instanceof Error ? copyErr.message : String(copyErr)}`, isError: true, durationMs: 0 };
+          return {
+            callId: call.id,
+            name: this.name,
+            output: `Error moving file: ${copyErr instanceof Error ? copyErr.message : String(copyErr)}`,
+            isError: true,
+            durationMs: 0,
+          };
         }
       }
-      return { callId: call.id, name: this.name, output: `Error moving: ${err instanceof Error ? err.message : String(err)}`, isError: true, durationMs: 0 };
+      return {
+        callId: call.id,
+        name: this.name,
+        output: `Error moving: ${err instanceof Error ? err.message : String(err)}`,
+        isError: true,
+        durationMs: 0,
+      };
     }
   }
 }
@@ -568,17 +778,26 @@ export class MoveFileTool implements Tool {
 // ─── Diff Tool ──────────────────────────────────────────────────────────────
 
 export class DiffTool implements Tool {
-  readonly name = "diff";
+  readonly name = 'diff';
   readonly description = `Show a unified diff between two files, or between the current content and provided new content. Useful for reviewing changes before applying them.`;
 
   readonly inputSchema = {
-    type: "object",
+    type: 'object',
     properties: {
-      path_a: { type: "string", description: "Path to the first file (or the file to diff against new content)." },
-      path_b: { type: "string", description: "Path to the second file. If omitted, use 'new_content' instead." },
-      new_content: { type: "string", description: "New content to diff against the file at path_a." },
+      path_a: {
+        type: 'string',
+        description: 'Path to the first file (or the file to diff against new content).',
+      },
+      path_b: {
+        type: 'string',
+        description: "Path to the second file. If omitted, use 'new_content' instead.",
+      },
+      new_content: {
+        type: 'string',
+        description: 'New content to diff against the file at path_a.',
+      },
     },
-    required: ["path_a"],
+    required: ['path_a'],
   };
 
   async run(ctx: ToolContext, call: ToolCallInput): Promise<ToolCallOutput> {
@@ -588,30 +807,55 @@ export class DiffTool implements Tool {
       new_content?: string;
     };
 
-    const absA = path_a.startsWith("/") ? path_a : join(ctx.workingDirectory, path_a);
+    const absA = path_a.startsWith('/') ? path_a : join(ctx.workingDirectory, path_a);
     // Note: Diff is read-only, but still check scope for security
     const accessA = validatePathAccess(absA, getAllowedRoots(ctx));
-    if (!accessA.allowed) return { callId: call.id, name: this.name, output: `Access denied: ${accessA.reason}`, isError: true, durationMs: 0 };
-
+    if (!accessA.allowed)
+      return {
+        callId: call.id,
+        name: this.name,
+        output: `Access denied: ${accessA.reason}`,
+        isError: true,
+        durationMs: 0,
+      };
 
     if (!existsSync(absA)) {
-      return { callId: call.id, name: this.name, output: `File not found: ${absA}`, isError: true, durationMs: 0 };
+      return {
+        callId: call.id,
+        name: this.name,
+        output: `File not found: ${absA}`,
+        isError: true,
+        durationMs: 0,
+      };
     }
 
     try {
       if (path_b) {
         // Diff two files using system diff
-        const absB = path_b.startsWith("/") ? path_b : join(ctx.workingDirectory, path_b);
+        const absB = path_b.startsWith('/') ? path_b : join(ctx.workingDirectory, path_b);
         const accessB = validatePathAccess(absB, getAllowedRoots(ctx));
-        if (!accessB.allowed) return { callId: call.id, name: this.name, output: `Access denied: ${accessB.reason}`, isError: true, durationMs: 0 };
+        if (!accessB.allowed)
+          return {
+            callId: call.id,
+            name: this.name,
+            output: `Access denied: ${accessB.reason}`,
+            isError: true,
+            durationMs: 0,
+          };
 
         if (!existsSync(absB)) {
-          return { callId: call.id, name: this.name, output: `File not found: ${absB}`, isError: true, durationMs: 0 };
+          return {
+            callId: call.id,
+            name: this.name,
+            output: `File not found: ${absB}`,
+            isError: true,
+            durationMs: 0,
+          };
         }
 
-        const proc = Bun.spawn(["diff", "-u", "--label", path_a, "--label", path_b, absA, absB], {
-          stdout: "pipe",
-          stderr: "pipe",
+        const proc = Bun.spawn(['diff', '-u', '--label', path_a, '--label', path_b, absA, absB], {
+          stdout: 'pipe',
+          stderr: 'pipe',
         });
         const SUBPROC_TIMEOUT_MS = 15_000;
         const timeoutId = setTimeout(() => {
@@ -626,9 +870,21 @@ export class DiffTool implements Tool {
           const exitCode = await proc.exited;
           clearTimeout(timeoutId);
           if (exitCode === 0) {
-            return { callId: call.id, name: this.name, output: "Files are identical.", isError: false, durationMs: 0 };
+            return {
+              callId: call.id,
+              name: this.name,
+              output: 'Files are identical.',
+              isError: false,
+              durationMs: 0,
+            };
           }
-          return { callId: call.id, name: this.name, output: stdout, isError: false, durationMs: 0 };
+          return {
+            callId: call.id,
+            name: this.name,
+            output: stdout,
+            isError: false,
+            durationMs: 0,
+          };
         } finally {
           clearTimeout(timeoutId);
           try {
@@ -641,20 +897,38 @@ export class DiffTool implements Tool {
       } else if (new_content !== undefined) {
         // Diff file content vs new content using a temp approach
         const oldContent = await Bun.file(absA).text();
-        const oldLines = oldContent.split("\n");
-        const newLines = new_content.split("\n");
+        const oldLines = oldContent.split('\n');
+        const newLines = new_content.split('\n');
 
         const diff = generateUnifiedDiff(path_a, oldLines, newLines);
         if (!diff) {
-          return { callId: call.id, name: this.name, output: "No differences.", isError: false, durationMs: 0 };
+          return {
+            callId: call.id,
+            name: this.name,
+            output: 'No differences.',
+            isError: false,
+            durationMs: 0,
+          };
         }
 
         return { callId: call.id, name: this.name, output: diff, isError: false, durationMs: 0 };
       } else {
-        return { callId: call.id, name: this.name, output: "Provide either path_b or new_content.", isError: true, durationMs: 0 };
+        return {
+          callId: call.id,
+          name: this.name,
+          output: 'Provide either path_b or new_content.',
+          isError: true,
+          durationMs: 0,
+        };
       }
     } catch (err: unknown) {
-      return { callId: call.id, name: this.name, output: `Diff error: ${err instanceof Error ? err.message : String(err)}`, isError: true, durationMs: 0 };
+      return {
+        callId: call.id,
+        name: this.name,
+        output: `Diff error: ${err instanceof Error ? err.message : String(err)}`,
+        isError: true,
+        durationMs: 0,
+      };
     }
   }
 }
@@ -662,27 +936,27 @@ export class DiffTool implements Tool {
 // ─── Patch Tool ─────────────────────────────────────────────────────────────
 
 export class PatchTool implements Tool {
-  readonly name = "patch";
+  readonly name = 'patch';
   readonly description = `Apply a multi-edit patch to a file. Each edit specifies old_str to find and new_str to replace it with. All edits are validated before any are applied (atomic). More efficient than multiple edit_file calls.`;
 
   readonly inputSchema = {
-    type: "object",
+    type: 'object',
     properties: {
-      path: { type: "string", description: "Path to the file to patch." },
+      path: { type: 'string', description: 'Path to the file to patch.' },
       edits: {
-        type: "array",
-        description: "Array of edits to apply.",
+        type: 'array',
+        description: 'Array of edits to apply.',
         items: {
-          type: "object",
+          type: 'object',
           properties: {
-            old_str: { type: "string", description: "Exact string to find." },
-            new_str: { type: "string", description: "Replacement string." },
+            old_str: { type: 'string', description: 'Exact string to find.' },
+            new_str: { type: 'string', description: 'Replacement string.' },
           },
-          required: ["old_str", "new_str"],
+          required: ['old_str', 'new_str'],
         },
       },
     },
-    required: ["path", "edits"],
+    required: ['path', 'edits'],
   };
 
   async run(ctx: ToolContext, call: ToolCallInput): Promise<ToolCallOutput> {
@@ -691,26 +965,38 @@ export class PatchTool implements Tool {
       edits: Array<{ old_str: string; new_str: string }>;
     };
 
-    const absPath = filePath.startsWith("/") ? filePath : join(ctx.workingDirectory, filePath);
+    const absPath = filePath.startsWith('/') ? filePath : join(ctx.workingDirectory, filePath);
     const allowedRoots = getAllowedRoots(ctx);
     const access = validatePathAccess(absPath, allowedRoots);
 
     if (!access.allowed) {
-      return { 
-        callId: call.id, 
-        name: this.name, 
-        output: `Error: Access denied. ${access.reason}`, 
-        isError: true, 
-        durationMs: 0 
+      return {
+        callId: call.id,
+        name: this.name,
+        output: `Error: Access denied. ${access.reason}`,
+        isError: true,
+        durationMs: 0,
       };
     }
 
     if (!existsSync(absPath)) {
-      return { callId: call.id, name: this.name, output: `File not found: ${absPath}`, isError: true, durationMs: 0 };
+      return {
+        callId: call.id,
+        name: this.name,
+        output: `File not found: ${absPath}`,
+        isError: true,
+        durationMs: 0,
+      };
     }
 
     if (!edits || edits.length === 0) {
-      return { callId: call.id, name: this.name, output: "No edits provided.", isError: true, durationMs: 0 };
+      return {
+        callId: call.id,
+        name: this.name,
+        output: 'No edits provided.',
+        isError: true,
+        durationMs: 0,
+      };
     }
 
     try {
@@ -720,10 +1006,22 @@ export class PatchTool implements Tool {
       for (let i = 0; i < edits.length; i++) {
         const occurrences = content.split(edits[i].old_str).length - 1;
         if (occurrences === 0) {
-          return { callId: call.id, name: this.name, output: `Edit ${i + 1}: old_str not found in ${absPath}`, isError: true, durationMs: 0 };
+          return {
+            callId: call.id,
+            name: this.name,
+            output: `Edit ${i + 1}: old_str not found in ${absPath}`,
+            isError: true,
+            durationMs: 0,
+          };
         }
         if (occurrences > 1) {
-          return { callId: call.id, name: this.name, output: `Edit ${i + 1}: old_str found ${occurrences} times. Must be unique.`, isError: true, durationMs: 0 };
+          return {
+            callId: call.id,
+            name: this.name,
+            output: `Edit ${i + 1}: old_str found ${occurrences} times. Must be unique.`,
+            isError: true,
+            durationMs: 0,
+          };
         }
       }
 
@@ -731,8 +1029,8 @@ export class PatchTool implements Tool {
       let totalAdded = 0;
       let totalDeleted = 0;
       for (const edit of edits) {
-        totalAdded += edit.new_str.split("\n").length;
-        totalDeleted += edit.old_str.split("\n").length;
+        totalAdded += edit.new_str.split('\n').length;
+        totalDeleted += edit.old_str.split('\n').length;
         content = content.replace(edit.old_str, edit.new_str);
       }
 
@@ -743,7 +1041,7 @@ export class PatchTool implements Tool {
           path: absPath,
           linesAdded: totalAdded,
           linesDeleted: totalDeleted,
-          operation: "edit",
+          operation: 'edit',
         });
       }
 
@@ -755,21 +1053,32 @@ export class PatchTool implements Tool {
         durationMs: 0,
       };
     } catch (err: unknown) {
-      return { callId: call.id, name: this.name, output: `Patch error: ${err instanceof Error ? err.message : String(err)}`, isError: true, durationMs: 0 };
+      return {
+        callId: call.id,
+        name: this.name,
+        output: `Patch error: ${err instanceof Error ? err.message : String(err)}`,
+        isError: true,
+        durationMs: 0,
+      };
     }
   }
 }
 
 // ─── Unified Diff Helper ────────────────────────────────────────────────────
 
-function generateUnifiedDiff(fileName: string, oldLines: string[], newLines: string[]): string | null {
+function generateUnifiedDiff(
+  fileName: string,
+  oldLines: string[],
+  newLines: string[],
+): string | null {
   // Simple line-by-line diff using LCS-based approach
   const hunks: string[] = [];
   hunks.push(`--- a/${fileName}`);
   hunks.push(`+++ b/${fileName}`);
 
   let hasChanges = false;
-  let i = 0, j = 0;
+  let i = 0,
+    j = 0;
 
   while (i < oldLines.length || j < newLines.length) {
     if (i < oldLines.length && j < newLines.length && oldLines[i] === newLines[j]) {
@@ -785,7 +1094,11 @@ function generateUnifiedDiff(fileName: string, oldLines: string[], newLines: str
 
     // Scan ahead to find the end of the changed region
     while (oldEnd < oldLines.length || newEnd < newLines.length) {
-      if (oldEnd < oldLines.length && newEnd < newLines.length && oldLines[oldEnd] === newLines[newEnd]) {
+      if (
+        oldEnd < oldLines.length &&
+        newEnd < newLines.length &&
+        oldLines[oldEnd] === newLines[newEnd]
+      ) {
         // Check if we have enough matching lines to end the hunk
         let matchCount = 0;
         while (
@@ -799,18 +1112,26 @@ function generateUnifiedDiff(fileName: string, oldLines: string[], newLines: str
         if (matchCount >= 6) break;
         oldEnd += matchCount || 1;
         newEnd += matchCount || 1;
-      } else if (oldEnd < oldLines.length && (newEnd >= newLines.length || oldLines[oldEnd] !== newLines[newEnd])) {
+      } else if (
+        oldEnd < oldLines.length &&
+        (newEnd >= newLines.length || oldLines[oldEnd] !== newLines[newEnd])
+      ) {
         oldEnd++;
       } else {
         newEnd++;
       }
     }
 
-    const contextEnd = Math.min(Math.max(oldEnd, newEnd) + 3, Math.max(oldLines.length, newLines.length));
+    const contextEnd = Math.min(
+      Math.max(oldEnd, newEnd) + 3,
+      Math.max(oldLines.length, newLines.length),
+    );
     const oldContextEnd = Math.min(oldEnd + 3, oldLines.length);
     const newContextEnd = Math.min(newEnd + 3, newLines.length);
 
-    hunks.push(`@@ -${contextStart + 1},${oldContextEnd - contextStart} +${contextStart + 1},${newContextEnd - contextStart} @@`);
+    hunks.push(
+      `@@ -${contextStart + 1},${oldContextEnd - contextStart} +${contextStart + 1},${newContextEnd - contextStart} @@`,
+    );
 
     // Context before
     for (let c = contextStart; c < i; c++) {
@@ -836,5 +1157,5 @@ function generateUnifiedDiff(fileName: string, oldLines: string[], newLines: str
     j = newContextEnd;
   }
 
-  return hasChanges ? hunks.join("\n") : null;
+  return hasChanges ? hunks.join('\n') : null;
 }

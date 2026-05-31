@@ -1,9 +1,8 @@
-// Google provider — supports both API calls and google-cli child process wrapper.
+// Google provider — direct API access only.
 // Uses Google's GenAI SDK for direct API access.
 // Model list is refreshed from the Gemini API when available; static list is fallback only.
 
-import type { ProviderConfig, ModelDef } from "@koryphaios/shared";
-import { detectGeminiCLIToken } from "./auth-utils";
+import type { ProviderConfig, ModelDef } from '@koryphaios/shared';
 import {
   type Provider,
   type ProviderEvent,
@@ -11,27 +10,19 @@ import {
   getModelsForProvider,
   resolveModel,
   createGenericModel,
-} from "./types";
-import { GEMINI_V1BETA_BASE } from "./api-endpoints";
-import { withRetry } from "./utils";
-import { providerLog } from "../logger";
-import { getSafeSubprocessEnv } from "../runtime/safe-env";
-
-declare const Bun: any;
+} from './types';
+import { GEMINI_V1BETA_BASE } from './api-endpoints';
+import { withRetry } from './utils';
 
 export class GeminiProvider implements Provider {
-  readonly name: "google" | "vertexai";
+  readonly name: 'google' | 'vertexai';
 
   constructor(readonly config: ProviderConfig) {
-    this.name = config.name === "vertexai" ? "vertexai" : "google";
+    this.name = config.name === 'vertexai' ? 'vertexai' : 'google';
   }
 
   isAvailable(): boolean {
-    // Vertex AI must not fall back to Gemini CLI / gcloud auto-detection
-    const hasAuth = this.name === "vertexai"
-      ? !!(this.config.apiKey || this.config.authToken)
-      : !!(this.config.apiKey || this.config.authToken || detectGeminiCLIToken());
-    return !this.config.disabled && hasAuth;
+    return !this.config.disabled && !!(this.config.apiKey || this.config.authToken);
   }
 
   private cachedModels: ModelDef[] | null = null;
@@ -39,7 +30,7 @@ export class GeminiProvider implements Provider {
 
   listModels(): ModelDef[] {
     const localModels = getModelsForProvider(this.name);
-    if (this.name !== "google") return localModels;
+    if (this.name !== 'google') return localModels;
     if (!this.isAvailable()) return localModels;
     if (this.cachedModels && Date.now() - this.lastFetch < 5 * 60 * 1000) {
       return this.cachedModels;
@@ -49,18 +40,20 @@ export class GeminiProvider implements Provider {
   }
 
   private refreshModelsInBackground(localModels: ModelDef[]) {
-    const apiKey = this.config.apiKey || this.config.authToken || detectGeminiCLIToken();
+    const apiKey = this.config.apiKey || this.config.authToken;
     if (!apiKey) return;
     const url = `${GEMINI_V1BETA_BASE}/models?key=${encodeURIComponent(apiKey)}`;
-    withRetry(() => fetch(url).then((r) => (r.ok ? r.json() : Promise.reject(new Error(r.statusText)))))
+    withRetry(() =>
+      fetch(url).then((r) => (r.ok ? r.json() : Promise.reject(new Error(r.statusText)))),
+    )
       .then((body: { models?: Array<{ name?: string }> }) => {
         const remote: ModelDef[] = [];
         for (const m of body.models ?? []) {
           const name = m.name;
-          if (!name || !name.startsWith("models/")) continue;
-          const id = name.replace(/^models\//, "");
+          if (!name || !name.startsWith('models/')) continue;
+          const id = name.replace(/^models\//, '');
           if (localModels.some((l) => l.id === id || l.apiModelId === id)) continue;
-          const def = createGenericModel(id, "google");
+          const def = createGenericModel(id, 'google');
           def.apiModelId = id;
           remote.push(def);
         }
@@ -73,18 +66,22 @@ export class GeminiProvider implements Provider {
   }
 
   async *streamResponse(request: StreamRequest): AsyncGenerator<ProviderEvent> {
-    const { GoogleGenAI } = await import("@google/genai");
+    const { GoogleGenAI } = await import('@google/genai');
 
-    // Vertex AI requires an explicit API key — never auto-detect from Gemini CLI or GCP credentials
-    const apiKey = this.config.apiKey || this.config.authToken ||
-      (this.name !== "vertexai" ? detectGeminiCLIToken() : null);
+    const apiKey = this.config.apiKey || this.config.authToken;
     if (!apiKey) {
-      yield { type: "error", error: this.name === "vertexai" ? "Vertex AI requires an explicit API key (set GOOGLE_VERTEX_AI_API_KEY)" : "No API key available" };
+      yield {
+        type: 'error',
+        error:
+          this.name === 'vertexai'
+            ? 'Vertex AI requires an explicit API key (set GOOGLE_VERTEX_AI_API_KEY)'
+            : 'No API key available',
+      };
       return;
     }
 
     const clientOptions: any = { apiKey };
-    
+
     if (this.config.baseUrl) {
       clientOptions.baseUrl = this.config.baseUrl;
     }
@@ -92,10 +89,15 @@ export class GeminiProvider implements Provider {
     const client = new GoogleGenAI(clientOptions);
 
     const contents = request.messages
-      .filter((m) => m.role !== "system")
+      .filter((m) => m.role !== 'system')
       .map((m) => ({
-        role: m.role === "assistant" ? "model" : "user",
-        parts: typeof m.content === "string" ? [{ text: m.content }] : (m.content as any[]).map(b => b.type === "text" ? { text: b.text ?? "" } : { text: "" }),
+        role: m.role === 'assistant' ? 'model' : 'user',
+        parts:
+          typeof m.content === 'string'
+            ? [{ text: m.content }]
+            : (m.content as any[]).map((b) =>
+                b.type === 'text' ? { text: b.text ?? '' } : { text: '' },
+              ),
       }));
 
     const generationConfig: any = {
@@ -106,15 +108,20 @@ export class GeminiProvider implements Provider {
 
     const modelDef = resolveModel(request.model);
     const apiModel = modelDef?.apiModelId || request.model;
-    const isGemini3 = /gemini-3/i.test(request.model) || /gemini-3/i.test(apiModel ?? "");
+    const isGemini3 = /gemini-3/i.test(request.model) || /gemini-3/i.test(apiModel ?? '');
 
-    if (request.reasoningLevel !== undefined && request.reasoningLevel !== "") {
+    if (request.reasoningLevel !== undefined && request.reasoningLevel !== '') {
       const level = String(request.reasoningLevel).trim();
       if (isGemini3) {
-        const thinkingLevel = ["low", "medium", "high"].includes(level.toLowerCase()) ? level.toUpperCase() : "MEDIUM";
+        const thinkingLevel = ['low', 'medium', 'high'].includes(level.toLowerCase())
+          ? level.toUpperCase()
+          : 'MEDIUM';
         generationConfig.thinkingConfig = { thinkingLevel };
       } else {
-        const budget = level === "0" || level.toLowerCase() === "off" ? 0 : Math.max(0, parseInt(level, 10) || 8192);
+        const budget =
+          level === '0' || level.toLowerCase() === 'off'
+            ? 0
+            : Math.max(0, parseInt(level, 10) || 8192);
         generationConfig.thinkingConfig = { thinkingBudget: budget };
       }
     }
@@ -130,90 +137,12 @@ export class GeminiProvider implements Provider {
         const candidate = chunk.candidates?.[0];
         if (!candidate?.content?.parts) continue;
         for (const part of candidate.content.parts) {
-          if (part.text) yield { type: "content_delta", content: part.text };
+          if (part.text) yield { type: 'content_delta', content: part.text };
         }
-        if (candidate.finishReason) yield { type: "complete", finishReason: "end_turn" };
+        if (candidate.finishReason) yield { type: 'complete', finishReason: 'end_turn' };
       }
     } catch (err: any) {
-      yield { type: "error", error: err.message ?? String(err) };
-    }
-  }
-}
-
-export class GeminiCLIProvider implements Provider {
-  readonly name: "google";
-  private cliAvailable: boolean | null = null;
-
-  constructor(readonly config: ProviderConfig) {
-    this.name = "google";
-  }
-
-  isAvailable(): boolean {
-    const hasAuth = this.config.authToken?.startsWith("cli:") || !!detectGeminiCLIToken();
-    if (!hasAuth || this.config.disabled) return false;
-    if (this.cliAvailable === null) {
-      this.cliAvailable = Bun.which("gemini") !== null;
-    }
-    return this.cliAvailable;
-  }
-
-  listModels(): ModelDef[] {
-    return getModelsForProvider(this.name);
-  }
-
-  async *streamResponse(request: StreamRequest): AsyncGenerator<ProviderEvent> {
-    const modelDef = resolveModel(request.model);
-    let cliModel = modelDef?.apiModelId || request.model;
-
-    // Explicit CLI Auto Mappings
-    if (request.model === "auto-gemini-3") cliModel = "gemini-3";
-    if (request.model === "auto-gemini-2.5") cliModel = "gemini-2.5";
-
-    const prompt = request.messages
-      .filter((m) => m.role === "user")
-      .map((m) => (typeof m.content === "string" ? m.content : ""))
-      .join("\n");
-
-    const proc = Bun.spawn(["gemini", "--model", cliModel, "--prompt", prompt], {
-      stdout: "pipe",
-      stderr: "pipe",
-      env: getSafeSubprocessEnv(),
-    });
-
-    const GEMINI_STREAM_TIMEOUT_MS = 300_000; // 5 min
-    const killAndReap = (): void => {
-      try {
-        proc.kill();
-      } catch {
-        // already exited
-      }
-    };
-    const timeoutId = setTimeout(killAndReap, GEMINI_STREAM_TIMEOUT_MS);
-
-    const reader = proc.stdout.getReader();
-    const decoder = new TextDecoder();
-
-    try {
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        const text = decoder.decode(value, { stream: true });
-        if (text) yield { type: "content_delta", content: text };
-      }
-      clearTimeout(timeoutId);
-      yield { type: "complete", finishReason: "end_turn" };
-    } catch (err: any) {
-      killAndReap();
-      yield { type: "error", error: err.message ?? String(err) };
-    } finally {
-      clearTimeout(timeoutId);
-      reader.releaseLock();
-      killAndReap();
-      try {
-        await Promise.race([proc.exited, new Promise((r) => setTimeout(r, 2000))]);
-      } catch {
-        // ignore
-      }
+      yield { type: 'error', error: err.message ?? String(err) };
     }
   }
 }

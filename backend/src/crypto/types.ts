@@ -29,32 +29,32 @@ export interface Envelope {
  */
 export interface KMSProvider {
   readonly name: string;
-  
+
   /** Initialize the provider */
   initialize(): Promise<void>;
-  
-  /** 
+
+  /**
    * Generate a new Data Encryption Key
    * Returns the plaintext DEK and the encrypted DEK
    */
   generateDek(): Promise<{ plaintext: Buffer; encrypted: string }>;
-  
+
   /**
    * Decrypt a DEK using the KEK
    */
   decryptDek(encryptedDek: string): Promise<Buffer>;
-  
+
   /**
    * Get the current KEK ID and version
    */
   getKekMetadata(): Promise<{ id: string; version: number }>;
-  
+
   /**
    * Rotate the KEK (if supported)
    * Returns true if rotation was performed
    */
   rotateKey?(): Promise<boolean>;
-  
+
   /** Check if provider is healthy */
   healthCheck(): Promise<boolean>;
 }

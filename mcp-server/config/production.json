@@ -1,0 +1,235 @@
+{
+  "server": {
+    "name": "error-debugging-mcp-server",
+    "version": "1.0.0",
+    "port": 3000,
+    "host": "0.0.0.0",
+    "logLevel": "info",
+    "logFile": "/app/logs/server.log",
+    "maxLogFileSize": "100MB",
+    "logRotation": true
+  },
+  "detection": {
+    "enabled": true,
+    "realTime": true,
+    "sources": {
+      "console": true,
+      "runtime": true,
+      "build": true,
+      "test": false,
+      "linter": true,
+      "staticAnalysis": true,
+      "ide": true
+    },
+    "filters": {
+      "categories": [],
+      "severities": ["error", "warning"],
+      "excludeFiles": [
+        "node_modules/**",
+        "dist/**",
+        "build/**",
+        "*.min.js",
+        "*.map",
+        "coverage/**",
+        "test/**",
+        "tests/**",
+        "__tests__/**"
+      ],
+      "excludePatterns": ["*.test.js", "*.test.ts", "*.spec.js", "*.spec.ts"]
+    },
+    "polling": {
+      "interval": 5000,
+      "maxRetries": 3,
+      "backoffMultiplier": 2
+    },
+    "bufferSize": 1000,
+    "maxErrorsPerSession": 100,
+    "timeout": 30000
+  },
+  "analysis": {
+    "enabled": true,
+    "aiEnhanced": false,
+    "confidenceThreshold": 0.8,
+    "maxAnalysisTime": 10000,
+    "enablePatternMatching": true,
+    "enableSimilaritySearch": true,
+    "enableRootCauseAnalysis": true,
+    "enableImpactPrediction": false,
+    "customPatterns": [],
+    "historicalDataRetention": 30,
+    "cacheResults": true,
+    "cacheSize": 1000,
+    "cacheTTL": 3600000
+  },
+  "debugging": {
+    "enabled": true,
+    "languages": {
+      "typescript": {
+        "enabled": true,
+        "timeout": 30000,
+        "maxSessions": 2
+      },
+      "javascript": {
+        "enabled": true,
+        "timeout": 30000,
+        "maxSessions": 3
+      },
+      "python": {
+        "enabled": true,
+        "timeout": 30000,
+        "maxSessions": 2
+      },
+      "go": {
+        "enabled": true,
+        "timeout": 30000,
+        "maxSessions": 1
+      },
+      "rust": {
+        "enabled": true,
+        "timeout": 30000,
+        "maxSessions": 1
+      }
+    },
+    "defaultTimeout": 30000,
+    "maxConcurrentSessions": 5,
+    "enableHotReload": false,
+    "enableRemoteDebugging": false,
+    "breakpoints": {
+      "maxPerSession": 50,
+      "enableConditional": true,
+      "enableLogPoints": true,
+      "enableHitCount": true
+    },
+    "variableInspection": {
+      "maxDepth": 10,
+      "maxStringLength": 1000,
+      "maxArrayLength": 100,
+      "enableLazyLoading": true,
+      "enablePrivateMembers": false
+    },
+    "sessionCleanup": {
+      "inactiveTimeout": 1800000,
+      "cleanupInterval": 300000
+    }
+  },
+  "performance": {
+    "enabled": true,
+    "profiling": {
+      "enabled": true,
+      "sampleRate": 100,
+      "maxDuration": 60000,
+      "includeMemory": true,
+      "includeCpu": true,
+      "includeNetwork": false,
+      "maxProfiles": 100
+    },
+    "monitoring": {
+      "enabled": true,
+      "interval": 10000,
+      "thresholds": {
+        "memory": 536870912,
+        "cpu": 80,
+        "responseTime": 1000,
+        "errorRate": 0.05
+      },
+      "alerts": {
+        "enabled": true,
+        "cooldown": 300000
+      }
+    },
+    "optimization": {
+      "enableSuggestions": true,
+      "enableAutomaticOptimization": false,
+      "aggressiveness": "conservative",
+      "enableCaching": true,
+      "enableCompression": true
+    },
+    "cleanup": {
+      "interval": 3600000,
+      "maxAge": 86400000,
+      "maxMetrics": 10000
+    }
+  },
+  "integrations": {
+    "vscode": {
+      "enabled": true,
+      "diagnosticsProvider": true,
+      "codeActionsProvider": true,
+      "hoverProvider": true,
+      "completionProvider": false
+    },
+    "cursor": {
+      "enabled": false,
+      "aiAssistance": false
+    },
+    "windsurf": {
+      "enabled": false,
+      "advancedFeatures": false
+    },
+    "augmentCode": {
+      "enabled": false,
+      "contextEngine": false
+    }
+  },
+  "security": {
+    "enableSecurityScanning": false,
+    "vulnerabilityDatabases": [],
+    "enableDependencyScanning": false,
+    "enableCodeScanning": false,
+    "reportingLevel": "medium-high",
+    "autoFixVulnerabilities": false,
+    "excludePatterns": ["test/**", "tests/**", "__tests__/**", "node_modules/**"],
+    "rateLimiting": {
+      "enabled": true,
+      "maxRequestsPerMinute": 1000,
+      "maxRequestsPerHour": 10000
+    }
+  },
+  "storage": {
+    "type": "memory",
+    "redis": {
+      "enabled": false,
+      "host": "localhost",
+      "port": 6379,
+      "password": null,
+      "db": 0,
+      "keyPrefix": "error-debugging:",
+      "ttl": 3600
+    },
+    "filesystem": {
+      "enabled": false,
+      "dataDir": "/app/data",
+      "maxFileSize": "10MB",
+      "compression": true
+    }
+  },
+  "networking": {
+    "cors": {
+      "enabled": true,
+      "origins": ["*"],
+      "methods": ["GET", "POST", "PUT", "DELETE"],
+      "headers": ["Content-Type", "Authorization"]
+    },
+    "compression": {
+      "enabled": true,
+      "level": 6,
+      "threshold": 1024
+    },
+    "keepAlive": {
+      "enabled": true,
+      "timeout": 5000
+    }
+  },
+  "health": {
+    "enabled": true,
+    "endpoint": "/health",
+    "checks": {
+      "memory": true,
+      "cpu": true,
+      "disk": false,
+      "database": false,
+      "external": false
+    },
+    "timeout": 5000
+  }
+}

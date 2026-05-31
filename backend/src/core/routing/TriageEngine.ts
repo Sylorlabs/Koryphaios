@@ -9,18 +9,50 @@
  *    when not available, uses a heuristic classifier so the pipeline still works.
  */
 
-import { getEnabledModelIds } from "../model-settings";
-import type { TriageIntent, TriageResult } from "./types";
-import { logRoutingDecision } from "./audit";
+import { getEnabledModelIds } from '../model-settings';
+import type { TriageIntent, TriageResult } from './types';
+import { logRoutingDecision } from './audit';
 
 // Heuristic: keywords and length to approximate SMALL / MEDIUM / LARGE
 const LARGE_KEYWORDS = [
-  "refactor", "rewrite", "implement", "build", "create", "architecture", "design", "multiple", "several",
-  "full", "entire", "whole", "project", "application", "system", "integration", "migration", "replace",
+  'refactor',
+  'rewrite',
+  'implement',
+  'build',
+  'create',
+  'architecture',
+  'design',
+  'multiple',
+  'several',
+  'full',
+  'entire',
+  'whole',
+  'project',
+  'application',
+  'system',
+  'integration',
+  'migration',
+  'replace',
 ];
 const MEDIUM_KEYWORDS = [
-  "add", "fix", "update", "change", "modify", "improve", "feature", "function", "component", "module",
-  "test", "tests", "api", "endpoint", "handler", "service", "util", "helper",
+  'add',
+  'fix',
+  'update',
+  'change',
+  'modify',
+  'improve',
+  'feature',
+  'function',
+  'component',
+  'module',
+  'test',
+  'tests',
+  'api',
+  'endpoint',
+  'handler',
+  'service',
+  'util',
+  'helper',
 ];
 
 /**
@@ -35,9 +67,9 @@ function classifyHeuristic(input: string): TriageIntent {
   const hasLarge = LARGE_KEYWORDS.some((k) => text.includes(k));
   const hasMedium = MEDIUM_KEYWORDS.some((k) => text.includes(k));
 
-  if (wordCount >= 80 || hasLarge) return "LARGE";
-  if (wordCount >= 25 || hasMedium) return "MEDIUM";
-  return "SMALL";
+  if (wordCount >= 80 || hasLarge) return 'LARGE';
+  if (wordCount >= 25 || hasMedium) return 'MEDIUM';
+  return 'SMALL';
 }
 
 /**
@@ -49,20 +81,34 @@ async function classifyWithGemma(input: string): Promise<TriageResult | null> {
   try {
     const load = new Function("return import('@huggingface/transformers')");
     const modRaw = await (load() as Promise<unknown>).catch(() => null);
-    type Pipeline = (task: string, model: string, opts?: object) => Promise<(prompt: string, opts?: object) => Promise<{ generated_text?: string } | Array<{ generated_text?: string }>>>;
+    type Pipeline = (
+      task: string,
+      model: string,
+      opts?: object,
+    ) => Promise<
+      (
+        prompt: string,
+        opts?: object,
+      ) => Promise<{ generated_text?: string } | Array<{ generated_text?: string }>>
+    >;
     const mod = modRaw as { pipeline?: Pipeline } | null;
     if (!mod?.pipeline) return null;
 
-    const pipe = await mod.pipeline("text2text-generation", "google/gemma-3-270m-it", {
-      device: "webgpu",
+    const pipe = await mod.pipeline('text2text-generation', 'google/gemma-3-270m-it', {
+      device: 'webgpu',
     });
     const prompt = `Classify the following user request complexity. Reply with exactly one word: SMALL, MEDIUM, or LARGE.\n\nRequest: ${input.slice(0, 500)}\n\nClassification:`;
     const out = await pipe(prompt, { max_new_tokens: 10 });
-    const text = (out && (Array.isArray(out) ? out[0]?.generated_text : (out as { generated_text?: string })?.generated_text)) ?? "";
+    const text =
+      (out &&
+        (Array.isArray(out)
+          ? out[0]?.generated_text
+          : (out as { generated_text?: string })?.generated_text)) ??
+      '';
     const upper = text.toUpperCase();
-    let intent: TriageIntent = "MEDIUM";
-    if (upper.includes("LARGE")) intent = "LARGE";
-    else if (upper.includes("SMALL")) intent = "SMALL";
+    let intent: TriageIntent = 'MEDIUM';
+    if (upper.includes('LARGE')) intent = 'LARGE';
+    else if (upper.includes('SMALL')) intent = 'SMALL';
     return { intent, rawLabel: text.trim() };
   } catch {
     return null;
@@ -82,26 +128,23 @@ export interface TriageEngineOptions {
  * Get the list of enabled (checked) model IDs for the user from SQLite.
  * TriageEngine and ManagerSession must only consider these models.
  */
-export function getCheckedModelsForUser(userId: string): string[] {
-  return getEnabledModelIds(userId);
+export async function getCheckedModelsForUser(userId: string): Promise<string[]> {
+  return await getEnabledModelIds(userId);
 }
 
 /**
  * Run triage on user input: classify into SMALL, MEDIUM, or LARGE.
  * Uses local Gemma 3 270M when useLocalSlm is true and the dependency is available; otherwise heuristic.
  */
-export async function triage(
-  input: string,
-  options: TriageEngineOptions
-): Promise<TriageResult> {
+export async function triage(input: string, options: TriageEngineOptions): Promise<TriageResult> {
   const { userId, sessionId, useLocalSlm = false } = options;
 
   let result: TriageResult;
   if (useLocalSlm) {
     const gemmaResult = await classifyWithGemma(input);
-    result = gemmaResult ?? { intent: classifyHeuristic(input), rawLabel: "heuristic" };
+    result = gemmaResult ?? { intent: classifyHeuristic(input), rawLabel: 'heuristic' };
   } else {
-    result = { intent: classifyHeuristic(input), rawLabel: "heuristic" };
+    result = { intent: classifyHeuristic(input), rawLabel: 'heuristic' };
   }
 
   return result;

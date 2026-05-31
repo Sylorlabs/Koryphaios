@@ -3,15 +3,42 @@
 
 import type { Session } from '@koryphaios/shared';
 import { toastStore } from './toast.svelte';
-import { authStore } from './auth.svelte';
 import { browser } from '$app/environment';
 import { friendlyHttpError } from '$lib/utils/http-error';
 import { apiUrl } from '$lib/utils/api-url';
+import { apiFetch } from '$lib/api.svelte';
+
+const LAST_SESSION_KEY = 'koryphaios-last-session';
 
 let sessions = $state<Session[]>([]);
 let activeSessionId = $state<string>('');
 let searchQuery = $state<string>('');
 let loading = $state<boolean>(false);
+
+// Load last session from localStorage on startup
+function loadLastSession(): string {
+  if (!browser) return '';
+  try {
+    const stored = localStorage.getItem(LAST_SESSION_KEY);
+    return stored || '';
+  } catch {
+    return '';
+  }
+}
+
+// Save active session to localStorage
+function saveLastSession(id: string): void {
+  if (!browser) return;
+  try {
+    if (id) {
+      localStorage.setItem(LAST_SESSION_KEY, id);
+    } else {
+      localStorage.removeItem(LAST_SESSION_KEY);
+    }
+  } catch {
+    // Ignore localStorage errors
+  }
+}
 
 // ─── API calls ──────────────────────────────────────────────────────────────
 
@@ -19,9 +46,7 @@ let loading = $state<boolean>(false);
 async function fetchSessions(): Promise<boolean> {
   if (!browser) return false;
   try {
-    const res = await fetch(apiUrl('/api/sessions'), {
-      headers: authStore.token ? { 'Authorization': `Bearer ${authStore.token}` } : {},
-    });
+    const res = await apiFetch(apiUrl('/api/sessions'));
     const text = await res.text();
     if (!res.ok) {
       let detail = '';
@@ -29,11 +54,16 @@ async function fetchSessions(): Promise<boolean> {
         const body = text ? JSON.parse(text) : {};
         detail = body.detail ?? body.error ?? '';
         if (detail && import.meta.env.DEV) console.error('fetchSessions backend error:', detail);
-      } catch { /* ignore */ }
-      if (!(res.status === 500 && !text.trim())) {
-        if (import.meta.env.DEV) console.error('fetchSessions failed', { status: res.status, body: text || '(empty)' });
+      } catch {
+        /* ignore */
       }
-      toastStore.error(friendlyHttpError(res.status, 'load sessions'), { onRetry: () => void fetchSessions() });
+      if (!(res.status === 500 && !text.trim())) {
+        if (import.meta.env.DEV)
+          console.error('fetchSessions failed', { status: res.status, body: text || '(empty)' });
+      }
+      toastStore.error(friendlyHttpError(res.status, 'load sessions'), {
+        onRetry: () => void fetchSessions(),
+      });
       return false;
     }
     if (!text.trim()) return false;
@@ -45,11 +75,22 @@ async function fetchSessions(): Promise<boolean> {
     }
     if (data?.ok && Array.isArray(data.data)) {
       sessions = data.data;
-      // If the active session is no longer in the list, clear it or select the first one
-      if (activeSessionId && !sessions.find(s => s.id === activeSessionId)) {
+      // Try to restore last session from localStorage
+      const lastSessionId = loadLastSession();
+
+      // If we have a stored session and it still exists, use it
+      if (lastSessionId && sessions.find((s) => s.id === lastSessionId)) {
+        activeSessionId = lastSessionId;
+      } else if (activeSessionId && !sessions.find((s) => s.id === activeSessionId)) {
+        // If the active session is no longer in the list, clear it or select the first one
         activeSessionId = sessions[0]?.id ?? '';
       } else if (!activeSessionId && sessions.length > 0) {
         activeSessionId = sessions[0].id;
+      }
+
+      // Save the resolved active session
+      if (activeSessionId) {
+        saveLastSession(activeSessionId);
       }
       return true;
     }
@@ -63,11 +104,10 @@ async function fetchSessions(): Promise<boolean> {
 
 async function createSession(): Promise<string | null> {
   try {
-    const res = await fetch(apiUrl('/api/sessions'), {
+    const res = await apiFetch(apiUrl('/api/sessions'), {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        ...(authStore.token ? { 'Authorization': `Bearer ${authStore.token}` } : {}),
       },
       body: JSON.stringify({ title: 'New Session' }),
     });
@@ -85,6 +125,7 @@ async function createSession(): Promise<string | null> {
     if (data?.ok && data?.data) {
       sessions = [data.data, ...sessions];
       activeSessionId = data.data.id;
+      saveLastSession(activeSessionId);
       return data.data.id;
     }
   } catch {
@@ -95,17 +136,16 @@ async function createSession(): Promise<string | null> {
 
 async function renameSession(id: string, title: string) {
   try {
-    const res = await fetch(apiUrl(`/api/sessions/${id}`), {
+    const res = await apiFetch(apiUrl(`/api/sessions/${id}`), {
       method: 'PATCH',
       headers: {
         'Content-Type': 'application/json',
-        ...(authStore.token ? { 'Authorization': `Bearer ${authStore.token}` } : {}),
       },
       body: JSON.stringify({ title }),
     });
     const data = await res.json();
     if (data.ok) {
-      sessions = sessions.map(s => s.id === id ? data.data : s);
+      sessions = sessions.map((s) => (s.id === id ? data.data : s));
       toastStore.success('Session renamed');
     }
   } catch {
@@ -115,9 +155,8 @@ async function renameSession(id: string, title: string) {
 
 async function deleteSession(id: string) {
   try {
-    const res = await fetch(apiUrl(`/api/sessions/${id}`), {
+    const res = await apiFetch(apiUrl(`/api/sessions/${id}`), {
       method: 'DELETE',
-      headers: authStore.token ? { 'Authorization': `Bearer ${authStore.token}` } : {},
     });
     const text = await res.text();
     if (!res.ok) {
@@ -125,13 +164,16 @@ async function deleteSession(id: string) {
       try {
         const body = text ? JSON.parse(text) : {};
         detail = body.error ?? '';
-      } catch { /* ignore */ }
+      } catch {
+        /* ignore */
+      }
       toastStore.error(detail || friendlyHttpError(res.status, 'delete session'));
       return;
     }
-    sessions = sessions.filter(s => s.id !== id);
+    sessions = sessions.filter((s) => s.id !== id);
     if (activeSessionId === id) {
       activeSessionId = sessions[0]?.id ?? '';
+      saveLastSession(activeSessionId);
     }
     toastStore.success('Session deleted');
   } catch (err) {
@@ -140,11 +182,20 @@ async function deleteSession(id: string) {
   }
 }
 
-async function fetchMessages(sessionId: string): Promise<Array<{ id: string; role: string; content: string; createdAt: number; model?: string; cost?: number }>> {
+async function fetchMessages(
+  sessionId: string,
+): Promise<
+  Array<{
+    id: string;
+    role: string;
+    content: string;
+    createdAt: number;
+    model?: string;
+    cost?: number;
+  }>
+> {
   try {
-    const res = await fetch(apiUrl(`/api/sessions/${sessionId}/messages`), {
-      headers: authStore.token ? { 'Authorization': `Bearer ${authStore.token}` } : {},
-    });
+    const res = await apiFetch(apiUrl(`/api/messages/${sessionId}`));
     const data = await res.json();
     if (data.ok) return data.data;
   } catch {}
@@ -165,10 +216,10 @@ function groupByDate(sessionList: Session[]): SessionGroup[] {
   const weekAgo = today - 7 * 86400000;
 
   const groups: Record<string, Session[]> = {
-    'Today': [],
-    'Yesterday': [],
+    Today: [],
+    Yesterday: [],
     'This week': [],
-    'Older': [],
+    Older: [],
   };
 
   for (const s of sessionList) {
@@ -185,10 +236,10 @@ function groupByDate(sessionList: Session[]): SessionGroup[] {
 
 // Handle WebSocket updates to sessions
 function handleSessionUpdate(session: Session) {
-  const existingIndex = sessions.findIndex(s => s.id === session.id);
+  const existingIndex = sessions.findIndex((s) => s.id === session.id);
   if (existingIndex >= 0) {
     // Update existing session
-    sessions = sessions.map(s => s.id === session.id ? session : s);
+    sessions = sessions.map((s) => (s.id === session.id ? session : s));
   } else {
     // Add new session to the list (avoid duplicates from race conditions)
     sessions = [session, ...sessions];
@@ -196,26 +247,40 @@ function handleSessionUpdate(session: Session) {
 }
 
 function handleSessionDeleted(sessionId: string) {
-  sessions = sessions.filter(s => s.id !== sessionId);
+  sessions = sessions.filter((s) => s.id !== sessionId);
   if (activeSessionId === sessionId) {
     activeSessionId = sessions[0]?.id ?? '';
+    saveLastSession(activeSessionId);
   }
 }
 
 // ─── Exported Store ─────────────────────────────────────────────────────────
 
 export const sessionStore = {
-  get sessions() { return sessions; },
-  get activeSessionId() { return activeSessionId; },
-  set activeSessionId(id: string) { activeSessionId = id; },
-  get searchQuery() { return searchQuery; },
-  set searchQuery(q: string) { searchQuery = q; },
-  get loading() { return loading; },
+  get sessions() {
+    return sessions;
+  },
+  get activeSessionId() {
+    return activeSessionId;
+  },
+  set activeSessionId(id: string) {
+    activeSessionId = id;
+    saveLastSession(id);
+  },
+  get searchQuery() {
+    return searchQuery;
+  },
+  set searchQuery(q: string) {
+    searchQuery = q;
+  },
+  get loading() {
+    return loading;
+  },
 
   get filteredSessions(): Session[] {
     if (!searchQuery.trim()) return sessions;
     const q = searchQuery.toLowerCase();
-    return sessions.filter(s => s.title.toLowerCase().includes(q));
+    return sessions.filter((s) => s.title.toLowerCase().includes(q));
   },
 
   get groupedSessions(): SessionGroup[] {

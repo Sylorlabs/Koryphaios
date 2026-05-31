@@ -1,74 +1,78 @@
-import { getDb } from "../db/sqlite";
-import type { KoryTask } from "../kory/manager";
-
-interface DbTaskRow {
-  id: string;
-  session_id: string;
-  description: string;
-  domain: string;
-  assigned_model: string;
-  assigned_provider: string;
-  status: string;
-  result: string | null;
-  error: string | null;
-  plan: string | null;
-}
+import { db, tasks } from '../db';
+import { eq, or, and, inArray } from 'drizzle-orm';
+import type { KoryTask } from '../kory/services/WorkerLifecycleService';
+// Note: Import from worker-lifecycle-service directly, not manager
 
 export interface ITaskStore {
-  create(task: Omit<KoryTask, "status" | "result" | "error"> & { sessionId: string; plan?: string }): void;
-  update(id: string, updates: Partial<KoryTask> & { status?: string; plan?: string }): void;
-  get(id: string): (KoryTask & { sessionId: string; plan?: string }) | undefined;
-  listActive(): (KoryTask & { sessionId: string; plan?: string })[];
+  create(
+    task: Omit<KoryTask, 'status' | 'result' | 'error'> & { sessionId: string; plan?: string },
+  ): Promise<void>;
+  update(
+    id: string,
+    updates: Partial<KoryTask> & { status?: string; plan?: string },
+  ): Promise<void>;
+  get(id: string): Promise<(KoryTask & { sessionId: string; plan?: string }) | undefined>;
+  listActive(): Promise<(KoryTask & { sessionId: string; plan?: string })[]>;
 }
 
 export class TaskStore implements ITaskStore {
-  create(task: Omit<KoryTask, "status" | "result" | "error"> & { sessionId: string; plan?: string }) {
-    const now = Date.now();
-    getDb().run(
-      `INSERT INTO tasks (id, session_id, description, domain, status, assigned_model, assigned_provider, plan, created_at, updated_at)
-       VALUES (?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?)`,
-      [task.id, task.sessionId, task.description, task.domain, task.assignedModel, task.assignedProvider, task.plan || null, now, now]
-    );
+  async create(
+    task: Omit<KoryTask, 'status' | 'result' | 'error'> & { sessionId: string; plan?: string },
+  ) {
+    const now = new Date();
+    await db.insert(tasks).values({
+      id: task.id,
+      sessionId: task.sessionId,
+      description: task.description,
+      domain: task.domain,
+      status: 'pending',
+      assignedModel: task.assignedModel,
+      assignedProvider: task.assignedProvider,
+      plan: task.plan || null,
+      createdAt: now,
+      updatedAt: now,
+    });
   }
 
-  update(id: string, updates: Partial<KoryTask> & { status?: string; plan?: string }) {
-    const fields: string[] = [];
-    const values: (string | number)[] = [];
-    
-    if (updates.status) { fields.push("status = ?"); values.push(updates.status); }
-    if (updates.result) { fields.push("result = ?"); values.push(updates.result); }
-    if (updates.error) { fields.push("error = ?"); values.push(updates.error); }
-    if (updates.plan) { fields.push("plan = ?"); values.push(updates.plan); }
-    
-    if (fields.length === 0) return;
+  async update(id: string, updates: Partial<KoryTask> & { status?: string; plan?: string }) {
+    const values: any = {};
 
-    fields.push("updated_at = ?");
-    values.push(Date.now());
-    values.push(id);
+    if (updates.status) values.status = updates.status;
+    if (updates.result) values.result = updates.result;
+    if (updates.error) values.error = updates.error;
+    if (updates.plan) values.plan = updates.plan;
 
-    getDb().run(`UPDATE tasks SET ${fields.join(", ")} WHERE id = ?`, values);
+    if (Object.keys(values).length === 0) return;
+
+    values.updatedAt = new Date();
+
+    await db.update(tasks).set(values).where(eq(tasks.id, id));
   }
 
-  get(id: string) {
-    const row = getDb().query("SELECT * FROM tasks WHERE id = ?").get(id) as DbTaskRow | undefined;
+  async get(id: string) {
+    const row = await db.select().from(tasks).where(eq(tasks.id, id)).get();
     if (!row) return undefined;
     return this.mapRow(row);
   }
 
-  listActive() {
-    const rows = getDb().query("SELECT * FROM tasks WHERE status IN ('active', 'pending')").all() as DbTaskRow[];
-    return rows.map(this.mapRow);
+  async listActive() {
+    const rows = await db
+      .select()
+      .from(tasks)
+      .where(inArray(tasks.status, ['active', 'pending']))
+      .all();
+    return rows.map((r) => this.mapRow(r));
   }
 
-  private mapRow(row: DbTaskRow): KoryTask & { sessionId: string; plan?: string } {
+  private mapRow(row: any): KoryTask & { sessionId: string; plan?: string } {
     return {
       id: row.id,
-      sessionId: row.session_id,
+      sessionId: row.sessionId,
       description: row.description,
-      domain: row.domain as KoryTask["domain"],
-      assignedModel: row.assigned_model,
-      assignedProvider: row.assigned_provider,
-      status: row.status as KoryTask["status"],
+      domain: row.domain as KoryTask['domain'],
+      assignedModel: row.assignedModel,
+      assignedProvider: row.assignedProvider,
+      status: row.status as KoryTask['status'],
       result: row.result ?? undefined,
       error: row.error ?? undefined,
       plan: row.plan ?? undefined,

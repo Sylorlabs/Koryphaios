@@ -1,7 +1,7 @@
 [package]
 name = "koryphaios-desktop"
 version = "0.2.0"
-description = "Koryphaios — AI Agent Orchestration Platform"
+description = "Koryphaios — The Autonomous Workspace for 100% AI-Generated Code"
 authors = ["Sylorlabs"]
 edition = "2021"
 
@@ -17,10 +17,14 @@ path = "src/main.rs"
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-tauri = { version = "2", features = ["tray-icon"] }
+tauri = { version = "2", features = ["tray-icon", "devtools"] }
 tauri-plugin-shell = "2"
 tauri-plugin-dialog = "2"
 tauri-plugin-notification = "2"
-tauri-plugin-updater = "2"
+tauri-plugin-process = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+reqwest = { version = "0.12", features = ["json"], default-features = false }
+tokio = { version = "1", features = ["time"] }
+ignore = "0.4.25"
+regex = "1.12.3"

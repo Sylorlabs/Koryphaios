@@ -12,7 +12,19 @@ export type ThemePreset =
   | 'light'
   | 'system';
 export type AccentColor = 'gold' | 'indigo' | 'cyan' | 'emerald' | 'amber' | 'rose' | 'violet';
-export type FontFamily = 'inter' | 'geist' | 'jetbrains';
+export type FontFamily =
+  | 'inter'
+  | 'geist'
+  | 'jetbrains'
+  | 'roboto'
+  | 'outfit'
+  | 'space-grotesk'
+  | 'dm-sans'
+  | 'plus-jakarta'
+  | 'source-code-pro'
+  | 'ibm-plex-mono'
+  | 'fira-code'
+  | 'berkeley-mono';
 
 export interface ThemeConfig {
   preset: ThemePreset;
@@ -32,6 +44,18 @@ const THEME_PRESETS: Record<Exclude<ThemePreset, 'system'>, Record<string, strin
     '--color-text-primary': '#F6EFE2',
     '--color-text-secondary': 'rgba(214, 206, 192, 0.74)',
     '--color-text-muted': 'rgba(214, 206, 192, 0.40)',
+    // Semantic status colors
+    '--color-success': '#22c55e',
+    '--color-success-bg': 'rgba(34, 197, 94, 0.15)',
+    '--color-error': '#ef4444',
+    '--color-error-bg': 'rgba(239, 68, 68, 0.15)',
+    '--color-warning': '#f59e0b',
+    '--color-warning-bg': 'rgba(245, 158, 11, 0.15)',
+    '--color-info': '#3b82f6',
+    '--color-info-bg': 'rgba(59, 130, 246, 0.15)',
+    '--color-added': '#22c55e',
+    '--color-removed': '#ef4444',
+    '--color-modified': '#f59e0b',
   },
   midnight: {
     '--color-surface-0': '#0a0a0b',
@@ -44,6 +68,17 @@ const THEME_PRESETS: Record<Exclude<ThemePreset, 'system'>, Record<string, strin
     '--color-text-primary': '#e8e8ed',
     '--color-text-secondary': '#8b8b96',
     '--color-text-muted': '#5a5a66',
+    '--color-success': '#4ade80',
+    '--color-success-bg': 'rgba(74, 222, 128, 0.15)',
+    '--color-error': '#f87171',
+    '--color-error-bg': 'rgba(248, 113, 113, 0.15)',
+    '--color-warning': '#fbbf24',
+    '--color-warning-bg': 'rgba(251, 191, 36, 0.15)',
+    '--color-info': '#60a5fa',
+    '--color-info-bg': 'rgba(96, 165, 250, 0.15)',
+    '--color-added': '#4ade80',
+    '--color-removed': '#f87171',
+    '--color-modified': '#fbbf24',
   },
   nord: {
     '--color-surface-0': '#2e3440',
@@ -56,6 +91,17 @@ const THEME_PRESETS: Record<Exclude<ThemePreset, 'system'>, Record<string, strin
     '--color-text-primary': '#eceff4',
     '--color-text-secondary': '#d8dee9',
     '--color-text-muted': '#81a1c1',
+    '--color-success': '#a3be8c',
+    '--color-success-bg': 'rgba(163, 190, 140, 0.2)',
+    '--color-error': '#bf616a',
+    '--color-error-bg': 'rgba(191, 97, 106, 0.2)',
+    '--color-warning': '#ebcb8b',
+    '--color-warning-bg': 'rgba(235, 203, 139, 0.2)',
+    '--color-info': '#81a1c1',
+    '--color-info-bg': 'rgba(129, 161, 193, 0.2)',
+    '--color-added': '#a3be8c',
+    '--color-removed': '#bf616a',
+    '--color-modified': '#ebcb8b',
   },
   dracula: {
     '--color-surface-0': '#1e1f29',
@@ -68,6 +114,17 @@ const THEME_PRESETS: Record<Exclude<ThemePreset, 'system'>, Record<string, strin
     '--color-text-primary': '#f8f8f2',
     '--color-text-secondary': '#c7c7d1',
     '--color-text-muted': '#6272a4',
+    '--color-success': '#50fa7b',
+    '--color-success-bg': 'rgba(80, 250, 123, 0.15)',
+    '--color-error': '#ff5555',
+    '--color-error-bg': 'rgba(255, 85, 85, 0.15)',
+    '--color-warning': '#f1fa8c',
+    '--color-warning-bg': 'rgba(241, 250, 140, 0.15)',
+    '--color-info': '#8be9fd',
+    '--color-info-bg': 'rgba(139, 233, 253, 0.15)',
+    '--color-added': '#50fa7b',
+    '--color-removed': '#ff5555',
+    '--color-modified': '#f1fa8c',
   },
   catppuccin: {
     '--color-surface-0': '#1e1e2e',
@@ -80,6 +137,17 @@ const THEME_PRESETS: Record<Exclude<ThemePreset, 'system'>, Record<string, strin
     '--color-text-primary': '#cdd6f4',
     '--color-text-secondary': '#a6adc8',
     '--color-text-muted': '#6c7086',
+    '--color-success': '#a6e3a1',
+    '--color-success-bg': 'rgba(166, 227, 161, 0.15)',
+    '--color-error': '#f38ba8',
+    '--color-error-bg': 'rgba(243, 139, 168, 0.15)',
+    '--color-warning': '#f9e2af',
+    '--color-warning-bg': 'rgba(249, 226, 175, 0.15)',
+    '--color-info': '#89b4fa',
+    '--color-info-bg': 'rgba(137, 180, 250, 0.15)',
+    '--color-added': '#a6e3a1',
+    '--color-removed': '#f38ba8',
+    '--color-modified': '#f9e2af',
   },
   gruvbox: {
     '--color-surface-0': '#1d2021',
@@ -92,6 +160,17 @@ const THEME_PRESETS: Record<Exclude<ThemePreset, 'system'>, Record<string, strin
     '--color-text-primary': '#ebdbb2',
     '--color-text-secondary': '#d5c4a1',
     '--color-text-muted': '#a89984',
+    '--color-success': '#b8bb26',
+    '--color-success-bg': 'rgba(184, 187, 38, 0.2)',
+    '--color-error': '#fb4934',
+    '--color-error-bg': 'rgba(251, 73, 52, 0.2)',
+    '--color-warning': '#fabd2f',
+    '--color-warning-bg': 'rgba(250, 189, 47, 0.2)',
+    '--color-info': '#83a598',
+    '--color-info-bg': 'rgba(131, 165, 152, 0.2)',
+    '--color-added': '#b8bb26',
+    '--color-removed': '#fb4934',
+    '--color-modified': '#fabd2f',
   },
   tokyo: {
     '--color-surface-0': '#1a1b26',
@@ -104,6 +183,17 @@ const THEME_PRESETS: Record<Exclude<ThemePreset, 'system'>, Record<string, strin
     '--color-text-primary': '#c0caf5',
     '--color-text-secondary': '#a9b1d6',
     '--color-text-muted': '#7a84a7',
+    '--color-success': '#9ece6a',
+    '--color-success-bg': 'rgba(158, 206, 106, 0.15)',
+    '--color-error': '#f7768e',
+    '--color-error-bg': 'rgba(247, 118, 142, 0.15)',
+    '--color-warning': '#e0af68',
+    '--color-warning-bg': 'rgba(224, 175, 104, 0.15)',
+    '--color-info': '#7aa2f7',
+    '--color-info-bg': 'rgba(122, 162, 247, 0.15)',
+    '--color-added': '#9ece6a',
+    '--color-removed': '#f7768e',
+    '--color-modified': '#e0af68',
   },
   solarized: {
     '--color-surface-0': '#002b36',
@@ -116,6 +206,17 @@ const THEME_PRESETS: Record<Exclude<ThemePreset, 'system'>, Record<string, strin
     '--color-text-primary': '#93a1a1',
     '--color-text-secondary': '#839496',
     '--color-text-muted': '#657b83',
+    '--color-success': '#859900',
+    '--color-success-bg': 'rgba(133, 153, 0, 0.2)',
+    '--color-error': '#dc322f',
+    '--color-error-bg': 'rgba(220, 50, 47, 0.2)',
+    '--color-warning': '#b58900',
+    '--color-warning-bg': 'rgba(181, 137, 0, 0.2)',
+    '--color-info': '#268bd2',
+    '--color-info-bg': 'rgba(38, 139, 210, 0.2)',
+    '--color-added': '#859900',
+    '--color-removed': '#dc322f',
+    '--color-modified': '#b58900',
   },
   light: {
     '--color-surface-0': '#ffffff',
@@ -128,6 +229,17 @@ const THEME_PRESETS: Record<Exclude<ThemePreset, 'system'>, Record<string, strin
     '--color-text-primary': '#212529',
     '--color-text-secondary': '#495057',
     '--color-text-muted': '#868e96',
+    '--color-success': '#16a34a',
+    '--color-success-bg': 'rgba(22, 163, 74, 0.12)',
+    '--color-error': '#dc2626',
+    '--color-error-bg': 'rgba(220, 38, 38, 0.12)',
+    '--color-warning': '#d97706',
+    '--color-warning-bg': 'rgba(217, 119, 6, 0.12)',
+    '--color-info': '#2563eb',
+    '--color-info-bg': 'rgba(37, 99, 235, 0.12)',
+    '--color-added': '#16a34a',
+    '--color-removed': '#dc2626',
+    '--color-modified': '#d97706',
   },
 };
 
@@ -143,8 +255,17 @@ const ACCENT_COLORS: Record<AccentColor, { main: string; hover: string }> = {
 
 const FONT_FAMILIES: Record<FontFamily, string> = {
   inter: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif",
-  geist: "'Geist', 'Inter', -apple-system, sans-serif",
+  geist: "'Geist Sans', 'Inter', -apple-system, sans-serif",
   jetbrains: "'JetBrains Mono', 'SF Mono', monospace",
+  roboto: "'Roboto', -apple-system, BlinkMacSystemFont, sans-serif",
+  outfit: "'Outfit', 'Inter', sans-serif",
+  'space-grotesk': "'Space Grotesk', 'Inter', sans-serif",
+  'dm-sans': "'DM Sans', 'Inter', sans-serif",
+  'plus-jakarta': "'Plus Jakarta Sans', 'Inter', sans-serif",
+  'source-code-pro': "'Source Code Pro', 'SF Mono', monospace",
+  'ibm-plex-mono': "'IBM Plex Mono', 'SF Mono', monospace",
+  'fira-code': "'Fira Code', 'JetBrains Mono', monospace",
+  'berkeley-mono': "'Berkeley Mono', 'JetBrains Mono', 'SF Mono', monospace",
 };
 
 import { browser } from '$app/environment';
@@ -203,16 +324,31 @@ function createThemeStore() {
   }
 
   return {
-    get preset() { return preset; },
-    get accent() { return accent; },
-    get font() { return font; },
+    get preset() {
+      return preset;
+    },
+    get accent() {
+      return accent;
+    },
+    get font() {
+      return font;
+    },
     get isDark() {
       return resolvePreset(preset) !== 'light';
     },
 
-    setPreset(p: ThemePreset) { preset = p; save(); },
-    setAccent(a: AccentColor) { accent = a; save(); },
-    setFont(f: FontFamily) { font = f; save(); },
+    setPreset(p: ThemePreset) {
+      preset = p;
+      save();
+    },
+    setAccent(a: AccentColor) {
+      accent = a;
+      save();
+    },
+    setFont(f: FontFamily) {
+      font = f;
+      save();
+    },
 
     get presets(): Array<{ id: ThemePreset; label: string }> {
       return [
@@ -239,11 +375,20 @@ function createThemeStore() {
         { id: 'violet', label: 'Violet', color: '#8b5cf6' },
       ];
     },
-    get fonts(): Array<{ id: FontFamily; label: string }> {
+    get fonts(): Array<{ id: FontFamily; label: string; category: string }> {
       return [
-        { id: 'inter', label: 'Inter' },
-        { id: 'geist', label: 'Geist' },
-        { id: 'jetbrains', label: 'JetBrains Mono' },
+        { id: 'inter', label: 'Inter', category: 'Sans Serif' },
+        { id: 'geist', label: 'Geist', category: 'Sans Serif' },
+        { id: 'roboto', label: 'Roboto', category: 'Sans Serif' },
+        { id: 'outfit', label: 'Outfit', category: 'Sans Serif' },
+        { id: 'space-grotesk', label: 'Space Grotesk', category: 'Sans Serif' },
+        { id: 'dm-sans', label: 'DM Sans', category: 'Sans Serif' },
+        { id: 'plus-jakarta', label: 'Plus Jakarta Sans', category: 'Sans Serif' },
+        { id: 'jetbrains', label: 'JetBrains Mono', category: 'Monospace' },
+        { id: 'source-code-pro', label: 'Source Code Pro', category: 'Monospace' },
+        { id: 'ibm-plex-mono', label: 'IBM Plex Mono', category: 'Monospace' },
+        { id: 'fira-code', label: 'Fira Code', category: 'Monospace' },
+        { id: 'berkeley-mono', label: 'Berkeley Mono', category: 'Monospace' },
       ];
     },
     /** Font-family CSS value for a font id (for previews so each option shows in its own typeface). */

@@ -2,37 +2,43 @@
 // WebSearchTool uses DuckDuckGo HTML (no API key required).
 // WebFetchTool fetches URLs with SSRF protection — validates each hop before following redirects.
 
-import { validateUrl } from "../security";
-import type { Tool, ToolCallInput, ToolContext, ToolCallOutput } from "./registry";
+import { validateUrl } from '../security';
+import type { Tool, ToolCallInput, ToolContext, ToolCallOutput } from './registry';
 
 const MAX_REDIRECTS = 5;
 const DEFAULT_MAX_LENGTH = 10_000;
-const USER_AGENT = "Koryphaios/1.0 (AI Agent; +https://github.com/micahcooley/Koryphaios)";
+const USER_AGENT = 'Koryphaios/1.0 (AI Agent; +https://github.com/micahcooley/Koryphaios)';
 
 // ─── Web Search ──────────────────────────────────────────────────────────────
 
 /** Web search using DuckDuckGo HTML (no API key required). */
 export class WebSearchTool implements Tool {
-  readonly name = "web_search";
-  readonly role = "worker" as const; // manager + worker only (not critic)
+  readonly name = 'web_search';
+  readonly role = 'worker' as const; // manager + worker only (not critic)
   readonly description =
-    "Search the web for current information. Returns snippets from search results. Use this liberally — agents perform better when they can verify information.";
+    'Search the web for current information. Returns snippets from search results. Use this liberally — agents perform better when they can verify information.';
 
   readonly inputSchema = {
-    type: "object" as const,
+    type: 'object' as const,
     properties: {
-      query: { type: "string", description: "The search query." },
-      maxResults: { type: "number", description: "Max results to return (default: 5, max: 10)." },
+      query: { type: 'string', description: 'The search query.' },
+      maxResults: { type: 'number', description: 'Max results to return (default: 5, max: 10).' },
     },
-    required: ["query"],
+    required: ['query'],
   };
 
   async run(ctx: ToolContext, call: ToolCallInput): Promise<ToolCallOutput> {
     const query = call.input.query as string;
     const maxResults = Math.min((call.input.maxResults as number) || 5, 10);
 
-    if (!query || typeof query !== "string" || query.trim().length === 0) {
-      return { callId: call.id, name: this.name, output: "Error: query must be a non-empty string.", isError: true, durationMs: 0 };
+    if (!query || typeof query !== 'string' || query.trim().length === 0) {
+      return {
+        callId: call.id,
+        name: this.name,
+        output: 'Error: query must be a non-empty string.',
+        isError: true,
+        durationMs: 0,
+      };
     }
 
     try {
@@ -40,25 +46,37 @@ export class WebSearchTool implements Tool {
       const searchUrl = `https://html.duckduckgo.com/html/?q=${encoded}`;
 
       const resp = await fetch(searchUrl, {
-        headers: { "User-Agent": USER_AGENT },
+        headers: { 'User-Agent': USER_AGENT },
         signal: ctx.signal,
-        redirect: "follow",
+        redirect: 'follow',
       });
 
       if (!resp.ok) {
-        return { callId: call.id, name: this.name, output: `Search failed: HTTP ${resp.status}`, isError: true, durationMs: 0 };
+        return {
+          callId: call.id,
+          name: this.name,
+          output: `Search failed: HTTP ${resp.status}`,
+          isError: true,
+          durationMs: 0,
+        };
       }
 
       const html = await resp.text();
       const results = parseSearchResults(html, maxResults);
 
       if (results.length === 0) {
-        return { callId: call.id, name: this.name, output: `No results found for: ${query}`, isError: false, durationMs: 0 };
+        return {
+          callId: call.id,
+          name: this.name,
+          output: `No results found for: ${query}`,
+          isError: false,
+          durationMs: 0,
+        };
       }
 
       const output = results
         .map((r, i) => `[${i + 1}] ${r.title}\n    ${r.url}\n    ${r.snippet}`)
-        .join("\n\n");
+        .join('\n\n');
 
       return {
         callId: call.id,
@@ -68,7 +86,13 @@ export class WebSearchTool implements Tool {
         durationMs: 0,
       };
     } catch (err: any) {
-      return { callId: call.id, name: this.name, output: `Search error: ${err.message}`, isError: true, durationMs: 0 };
+      return {
+        callId: call.id,
+        name: this.name,
+        output: `Search error: ${err.message}`,
+        isError: true,
+        durationMs: 0,
+      };
     }
   }
 }
@@ -83,26 +107,35 @@ export class WebSearchTool implements Tool {
  * can inspect each Location header before following it.
  */
 export class WebFetchTool implements Tool {
-  readonly name = "web_fetch";
-  readonly role = "worker" as const;
+  readonly name = 'web_fetch';
+  readonly role = 'worker' as const;
   readonly description =
-    "Fetch a URL and extract readable text content. Good for reading documentation, API references, or any web page. Blocked for private/internal network addresses.";
+    'Fetch a URL and extract readable text content. Good for reading documentation, API references, or any web page. Blocked for private/internal network addresses.';
 
   readonly inputSchema = {
-    type: "object" as const,
+    type: 'object' as const,
     properties: {
-      url: { type: "string", description: "The URL to fetch. Must be a public http/https URL." },
-      maxLength: { type: "number", description: `Max characters to return (default: ${DEFAULT_MAX_LENGTH}).` },
+      url: { type: 'string', description: 'The URL to fetch. Must be a public http/https URL.' },
+      maxLength: {
+        type: 'number',
+        description: `Max characters to return (default: ${DEFAULT_MAX_LENGTH}).`,
+      },
     },
-    required: ["url"],
+    required: ['url'],
   };
 
   async run(ctx: ToolContext, call: ToolCallInput): Promise<ToolCallOutput> {
     const url = call.input.url as string;
     const maxLength = (call.input.maxLength as number) || DEFAULT_MAX_LENGTH;
 
-    if (!url || typeof url !== "string") {
-      return { callId: call.id, name: this.name, output: "Error: url must be a non-empty string.", isError: true, durationMs: 0 };
+    if (!url || typeof url !== 'string') {
+      return {
+        callId: call.id,
+        name: this.name,
+        output: 'Error: url must be a non-empty string.',
+        isError: true,
+        durationMs: 0,
+      };
     }
 
     // Validate the initial URL before any network activity
@@ -119,10 +152,10 @@ export class WebFetchTool implements Tool {
 
     try {
       const text = await this.fetchWithSafeRedirects(url, ctx.signal);
-      const contentType = ""; // determined inside fetchWithSafeRedirects
+      const contentType = ''; // determined inside fetchWithSafeRedirects
 
       let output: string;
-      if (text.trimStart().startsWith("{") || text.trimStart().startsWith("[")) {
+      if (text.trimStart().startsWith('{') || text.trimStart().startsWith('[')) {
         // Likely JSON
         output = text.slice(0, maxLength);
       } else if (/<html/i.test(text.slice(0, 200))) {
@@ -139,7 +172,13 @@ export class WebFetchTool implements Tool {
         durationMs: 0,
       };
     } catch (err: any) {
-      return { callId: call.id, name: this.name, output: `Fetch error: ${err.message}`, isError: true, durationMs: 0 };
+      return {
+        callId: call.id,
+        name: this.name,
+        output: `Fetch error: ${err.message}`,
+        isError: true,
+        durationMs: 0,
+      };
     }
   }
 
@@ -163,22 +202,26 @@ export class WebFetchTool implements Tool {
 
       // SECURITY: Use the validated IPs directly to prevent TOCTOU race
       // If we have validated IPs, use the first one directly
-      const fetchUrl = this.buildIpBasedUrl(currentUrl, validation.validatedIps, validation.validatedHostname);
+      const fetchUrl = this.buildIpBasedUrl(
+        currentUrl,
+        validation.validatedIps,
+        validation.validatedHostname,
+      );
 
       const resp = await fetch(fetchUrl, {
         headers: {
-          "User-Agent": USER_AGENT,
-          Accept: "text/html, application/json, text/plain, */*",
+          'User-Agent': USER_AGENT,
+          Accept: 'text/html, application/json, text/plain, */*',
           // Preserve original hostname for virtual hosting
-          ...(validation.validatedHostname && { "Host": validation.validatedHostname }),
+          ...(validation.validatedHostname && { Host: validation.validatedHostname }),
         },
         signal,
-        redirect: "manual", // Never auto-follow — we validate each hop
+        redirect: 'manual', // Never auto-follow — we validate each hop
       });
 
       // Handle redirects
       if (resp.status >= 300 && resp.status < 400) {
-        const location = resp.headers.get("location");
+        const location = resp.headers.get('location');
         if (!location) {
           throw new Error(`Redirect response (${resp.status}) missing Location header`);
         }
@@ -211,7 +254,11 @@ export class WebFetchTool implements Tool {
    * Build an IP-based URL to prevent DNS rebinding.
    * If validated IPs are available, replace the hostname with the IP.
    */
-  private buildIpBasedUrl(originalUrl: string, validatedIps?: string[], validatedHostname?: string): string {
+  private buildIpBasedUrl(
+    originalUrl: string,
+    validatedIps?: string[],
+    validatedHostname?: string,
+  ): string {
     // If no validated IPs available, return original URL (for literal IPs)
     if (!validatedIps || validatedIps.length === 0) {
       return originalUrl;
@@ -269,7 +316,7 @@ function parseSearchResults(html: string, max: number): SearchResult[] {
       results.push({
         title: stripHTML(titleMatch[2]).trim(),
         url,
-        snippet: snippetMatch ? stripHTML(snippetMatch[1]).trim() : "",
+        snippet: snippetMatch ? stripHTML(snippetMatch[1]).trim() : '',
       });
     }
   }
@@ -279,43 +326,43 @@ function parseSearchResults(html: string, max: number): SearchResult[] {
 
 function stripHTML(html: string): string {
   return html
-    .replace(/<[^>]+>/g, "")
-    .replace(/&amp;/g, "&")
-    .replace(/&lt;/g, "<")
-    .replace(/&gt;/g, ">")
+    .replace(/<[^>]+>/g, '')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
     .replace(/&quot;/g, '"')
     .replace(/&#39;/g, "'")
-    .replace(/&nbsp;/g, " ")
-    .replace(/\s+/g, " ")
+    .replace(/&nbsp;/g, ' ')
+    .replace(/\s+/g, ' ')
     .trim();
 }
 
 function extractTextFromHTML(html: string): string {
   // Remove non-content blocks
   let text = html
-    .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, "")
-    .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, "")
-    .replace(/<nav[^>]*>[\s\S]*?<\/nav>/gi, "")
-    .replace(/<header[^>]*>[\s\S]*?<\/header>/gi, "")
-    .replace(/<footer[^>]*>[\s\S]*?<\/footer>/gi, "");
+    .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
+    .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
+    .replace(/<nav[^>]*>[\s\S]*?<\/nav>/gi, '')
+    .replace(/<header[^>]*>[\s\S]*?<\/header>/gi, '')
+    .replace(/<footer[^>]*>[\s\S]*?<\/footer>/gi, '');
 
   // Convert block elements to newlines for readability
   text = text
-    .replace(/<br\s*\/?>/gi, "\n")
-    .replace(/<\/p>/gi, "\n\n")
-    .replace(/<\/div>/gi, "\n")
-    .replace(/<\/li>/gi, "\n")
-    .replace(/<\/h[1-6]>/gi, "\n\n")
-    .replace(/<\/tr>/gi, "\n");
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<\/p>/gi, '\n\n')
+    .replace(/<\/div>/gi, '\n')
+    .replace(/<\/li>/gi, '\n')
+    .replace(/<\/h[1-6]>/gi, '\n\n')
+    .replace(/<\/tr>/gi, '\n');
 
   // Strip remaining tags and decode entities
   text = stripHTML(text);
 
   // Normalize whitespace
   return text
-    .split("\n")
+    .split('\n')
     .map((line) => line.trim())
     .filter((line) => line.length > 0)
-    .join("\n")
-    .replace(/\n{3,}/g, "\n\n");
+    .join('\n')
+    .replace(/\n{3,}/g, '\n\n');
 }

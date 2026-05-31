@@ -1,9 +1,9 @@
 /**
  * Cloudflare Workers KV KMS Provider
- * 
+ *
  * Uses Cloudflare Workers KV for key storage and Web Crypto API for encryption.
  * Designed for edge deployments on Cloudflare Workers.
- * 
+ *
  * Security: Uses Cloudflare's distributed edge infrastructure.
  * Best for: Edge-deployed applications using Cloudflare Workers.
  */
@@ -45,7 +45,7 @@ export class CloudflareKMSProvider implements KMSProvider {
     try {
       // Try to retrieve existing master key
       const existingKey = await this.getFromKV(this.config.keyName!);
-      
+
       if (existingKey) {
         // Import the key
         this.localKeyBuffer = Buffer.from(existingKey, 'base64');
@@ -54,29 +54,26 @@ export class CloudflareKMSProvider implements KMSProvider {
           new Uint8Array(this.localKeyBuffer),
           { name: 'AES-GCM', length: 256 },
           false,
-          ['encrypt', 'decrypt']
+          ['encrypt', 'decrypt'],
         );
         serverLog.info('Cloudflare KMS: Master key loaded from KV');
       } else {
         // Generate new master key
         const newKey = crypto.getRandomValues(new Uint8Array(32));
         this.localKeyBuffer = Buffer.from(newKey);
-        
+
         // Store in KV
-        await this.putToKV(
-          this.config.keyName!,
-          this.localKeyBuffer.toString('base64')
-        );
-        
+        await this.putToKV(this.config.keyName!, this.localKeyBuffer.toString('base64'));
+
         // Import for use
         this.masterKey = await crypto.subtle.importKey(
           'raw',
           newKey,
           { name: 'AES-GCM', length: 256 },
           false,
-          ['encrypt', 'decrypt']
+          ['encrypt', 'decrypt'],
         );
-        
+
         serverLog.info('Cloudflare KMS: New master key generated and stored in KV');
       }
     } catch (error) {
@@ -88,10 +85,10 @@ export class CloudflareKMSProvider implements KMSProvider {
   async generateDek(): Promise<{ plaintext: Buffer; encrypted: string }> {
     // Generate a random DEK
     const dek = Buffer.from(crypto.getRandomValues(new Uint8Array(32)));
-    
+
     // Encrypt DEK with master key using AES-KW (key wrap)
     const encrypted = await this.wrapKey(dek);
-    
+
     return {
       plaintext: dek,
       encrypted: Buffer.from(encrypted).toString('base64'),
@@ -108,22 +105,22 @@ export class CloudflareKMSProvider implements KMSProvider {
     if (!this.localKeyBuffer) {
       throw new Error('Cloudflare KMS not initialized');
     }
-    
+
     // Derive user-specific key using HKDF-like construction
     const encoder = new TextEncoder();
     const userData = encoder.encode(userId);
-    
+
     // Use Web Crypto for key derivation
     const combined = new Uint8Array(this.localKeyBuffer!.length + userData.length);
     combined.set(new Uint8Array(this.localKeyBuffer!), 0);
     combined.set(userData, this.localKeyBuffer!.length);
     const userKey = await crypto.subtle.digest('SHA-256', combined);
-    
+
     const dek = Buffer.from(userKey);
-    
+
     // Encrypt the derived key with master key
     const encrypted = await this.wrapKey(dek);
-    
+
     return {
       plaintext: dek,
       encrypted: Buffer.from(encrypted).toString('base64'),
@@ -154,7 +151,7 @@ export class CloudflareKMSProvider implements KMSProvider {
   private async getFromKV(key: string): Promise<string | null> {
     const response = await fetch(`${this.baseUrl}/values/${encodeURIComponent(key)}`, {
       headers: {
-        'Authorization': `Bearer ${this.config.apiToken}`,
+        Authorization: `Bearer ${this.config.apiToken}`,
       },
     });
 
@@ -173,7 +170,7 @@ export class CloudflareKMSProvider implements KMSProvider {
     const response = await fetch(`${this.baseUrl}/values/${encodeURIComponent(key)}`, {
       method: 'PUT',
       headers: {
-        'Authorization': `Bearer ${this.config.apiToken}`,
+        Authorization: `Bearer ${this.config.apiToken}`,
         'Content-Type': 'text/plain',
       },
       body: value,
@@ -192,19 +189,19 @@ export class CloudflareKMSProvider implements KMSProvider {
 
     // Generate a random IV
     const iv = crypto.getRandomValues(new Uint8Array(12));
-    
+
     // Encrypt the key
     const encrypted = await crypto.subtle.encrypt(
       { name: 'AES-GCM', iv },
       this.masterKey,
-      new Uint8Array(key)
+      new Uint8Array(key),
     );
 
     // Prepend IV to encrypted data
     const result = new Uint8Array(iv.length + encrypted.byteLength);
     result.set(iv, 0);
     result.set(new Uint8Array(encrypted), iv.length);
-    
+
     return result.buffer;
   }
 
@@ -221,7 +218,7 @@ export class CloudflareKMSProvider implements KMSProvider {
     const decrypted = await crypto.subtle.decrypt(
       { name: 'AES-GCM', iv },
       this.masterKey,
-      encrypted
+      encrypted,
     );
 
     return decrypted;

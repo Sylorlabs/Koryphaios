@@ -2,20 +2,26 @@
 
 export function isMac(): boolean {
   if (typeof navigator === 'undefined') return false;
-  return navigator.platform.toUpperCase().indexOf('MAC') >= 0 ||
-         navigator.userAgent.toUpperCase().indexOf('MAC') >= 0;
+  return (
+    navigator.platform.toUpperCase().indexOf('MAC') >= 0 ||
+    navigator.userAgent.toUpperCase().indexOf('MAC') >= 0
+  );
 }
 
 export function isWindows(): boolean {
   if (typeof navigator === 'undefined') return false;
-  return navigator.platform.toUpperCase().indexOf('WIN') >= 0 ||
-         navigator.userAgent.toUpperCase().indexOf('WIN') >= 0;
+  return (
+    navigator.platform.toUpperCase().indexOf('WIN') >= 0 ||
+    navigator.userAgent.toUpperCase().indexOf('WIN') >= 0
+  );
 }
 
 export function isLinux(): boolean {
   if (typeof navigator === 'undefined') return false;
-  return navigator.platform.toUpperCase().indexOf('LINUX') >= 0 ||
-         navigator.userAgent.toUpperCase().indexOf('LINUX') >= 0;
+  return (
+    navigator.platform.toUpperCase().indexOf('LINUX') >= 0 ||
+    navigator.userAgent.toUpperCase().indexOf('LINUX') >= 0
+  );
 }
 
 /** Returns the platform's primary modifier key name (Ctrl or ⌘) */

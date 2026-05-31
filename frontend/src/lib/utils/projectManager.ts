@@ -8,6 +8,7 @@ export type RecentProject = {
   content: string;
   source: 'new' | 'file' | 'template';
   fileName?: string;
+  path?: string;
   updatedAt: number;
 };
 
@@ -104,7 +105,12 @@ export function buildNewProjectTemplate(): string {
 }
 
 export function sanitizeFileName(raw: string): string {
-  return raw.replace(/[^a-z0-9_-]+/gi, '-').replace(/-+/g, '-').replace(/^-|-$/g, '') || 'project';
+  return (
+    raw
+      .replace(/[^a-z0-9_-]+/gi, '-')
+      .replace(/-+/g, '-')
+      .replace(/^-|-$/g, '') || 'project'
+  );
 }
 
 export function parseRecentProjects(): RecentProject[] {
@@ -116,14 +122,15 @@ export function parseRecentProjects(): RecentProject[] {
     if (!Array.isArray(parsed)) return [];
 
     return parsed
-      .filter((entry): entry is RecentProject =>
-        typeof entry === 'object' &&
-        entry !== null &&
-        typeof (entry as RecentProject).id === 'string' &&
-        typeof (entry as RecentProject).title === 'string' &&
-        typeof (entry as RecentProject).content === 'string' &&
-        typeof (entry as RecentProject).source === 'string' &&
-        typeof (entry as RecentProject).updatedAt === 'number'
+      .filter(
+        (entry): entry is RecentProject =>
+          typeof entry === 'object' &&
+          entry !== null &&
+          typeof (entry as RecentProject).id === 'string' &&
+          typeof (entry as RecentProject).title === 'string' &&
+          typeof (entry as RecentProject).content === 'string' &&
+          typeof (entry as RecentProject).source === 'string' &&
+          typeof (entry as RecentProject).updatedAt === 'number',
       )
       .slice(0, MAX_RECENT_PROJECTS);
   } catch {
@@ -137,12 +144,13 @@ export function persistRecentProjects(projects: RecentProject[]): void {
 
 export function addRecentProject(
   projects: RecentProject[],
-  entry: Omit<RecentProject, 'id' | 'updatedAt'>
+  entry: Omit<RecentProject, 'id' | 'updatedAt'>,
 ): RecentProject[] {
   const normalizedTitle = entry.title.trim().toLowerCase();
   const normalizedContent = entry.content.trim();
-  const existing = projects.find((p) =>
-    p.title.trim().toLowerCase() === normalizedTitle && p.content.trim() === normalizedContent
+  const existing = projects.find(
+    (p) =>
+      p.title.trim().toLowerCase() === normalizedTitle && p.content.trim() === normalizedContent,
   );
 
   const now = Date.now();
@@ -168,10 +176,7 @@ export function addRecentProject(
 }
 
 /** Creates a new session from project text. Returns sessionId on success, null on failure. */
-export async function createProjectSession(
-  title: string,
-  text: string,
-): Promise<string | null> {
+export async function createProjectSession(title: string, text: string): Promise<string | null> {
   const sessionId = await sessionStore.createSession();
   if (!sessionId) {
     toastStore.error('Could not create project session');
@@ -189,7 +194,7 @@ export async function createProjectSession(
 
 /** Reads and parses a single project file. Returns parsed data or null on error. */
 export async function readProjectFile(
-  file: File
+  file: File,
 ): Promise<{ title: string; text: string; fileName: string; truncated: boolean } | null> {
   try {
     const raw = await file.text();
@@ -206,11 +211,12 @@ export async function readProjectFile(
 
 /** Reads and parses a project folder. Returns parsed data or null on error. */
 export async function readProjectFolder(
-  files: FileList
+  files: FileList,
 ): Promise<{ title: string; text: string; folderName: string; fileCount: number } | null> {
   try {
     const MAX_TOTAL_CHARS = 16000;
-    const KEY_FILES = /^(README|readme|Readme)(\.(md|txt|rst))?$|^package\.json$|^package-lock\.json$|^Cargo\.toml$|^pyproject\.toml$|^go\.mod$|^\.env\.example$/i;
+    const KEY_FILES =
+      /^(README|readme|Readme)(\.(md|txt|rst))?$|^package\.json$|^package-lock\.json$|^Cargo\.toml$|^pyproject\.toml$|^go\.mod$|^\.env\.example$/i;
     const entries: { path: string; file: File }[] = [];
     for (let i = 0; i < files.length; i++) {
       const file = files[i];
@@ -227,7 +233,8 @@ export async function readProjectFolder(
       if (total >= MAX_TOTAL_CHARS) break;
       try {
         const text = await file.text();
-        const slice = text.length + total > MAX_TOTAL_CHARS ? text.slice(0, MAX_TOTAL_CHARS - total) : text;
+        const slice =
+          text.length + total > MAX_TOTAL_CHARS ? text.slice(0, MAX_TOTAL_CHARS - total) : text;
         total += slice.length;
         parts.push(`--- ${path} ---\n${slice}`);
       } catch (_) {}
@@ -239,7 +246,9 @@ export async function readProjectFolder(
       otherPaths.push(`... and ${otherEntries.length - maxList} more files`);
     }
     if (otherPaths.length > 0) {
-      parts.push(`--- Project structure (${otherEntries.length} files) ---\n${otherPaths.join('\n')}`);
+      parts.push(
+        `--- Project structure (${otherEntries.length} files) ---\n${otherPaths.join('\n')}`,
+      );
     }
 
     const folderName = entries[0]?.path.split('/')[0] || 'Folder';
@@ -303,7 +312,7 @@ export function exportCurrentProjectSnapshot(): void {
 
 export function insertPromptTemplate(
   templateId: PromptTemplate['id'],
-  inputRef: HTMLTextAreaElement | undefined
+  inputRef: HTMLTextAreaElement | undefined,
 ): void {
   const template = promptTemplates.find((t) => t.id === templateId);
   if (!template || !inputRef) {

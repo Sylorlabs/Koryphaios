@@ -1,15 +1,15 @@
 /**
  * Auto-Commit Service - Handles automatic commits and PR creation for Beginner Mode
- * 
+ *
  * In Beginner Mode:
  * - Changes are automatically committed after task completion
  * - A branch is created based on the task
  * - A PR is opened on origin for review
  */
 
-import { spawnSync } from "bun";
-import { koryLog } from "../logger";
-import { GitManager } from "./git-manager";
+import { spawnSync } from 'bun';
+import { koryLog } from '../logger';
+import { GitManager } from './git-manager';
 
 export interface AutoCommitResult {
   success: boolean;
@@ -29,7 +29,7 @@ export interface PRResult {
 export class AutoCommitService {
   constructor(
     private workingDirectory: string,
-    private git: GitManager
+    private git: GitManager,
   ) {}
 
   /**
@@ -44,7 +44,7 @@ export class AutoCommitService {
       .split(/\s+/)
       .slice(0, 6)
       .join('-');
-    
+
     const timestamp = Date.now().toString(36).slice(-4);
     return `kory/${clean || 'update'}-${timestamp}`;
   }
@@ -62,30 +62,30 @@ export class AutoCommitService {
    * Check if there's a remote named 'origin'
    */
   private hasOriginRemote(): boolean {
-    const result = this.runGit(["remote", "get-url", "origin"]);
-    return result.success && result.output.includes("http");
+    const result = this.runGit(['remote', 'get-url', 'origin']);
+    return result.success && result.output.includes('http');
   }
 
   /**
    * Get the default branch from origin
    */
   private async getDefaultBranch(): Promise<string> {
-    const result = this.runGit(["symbolic-ref", "refs/remotes/origin/HEAD"]);
+    const result = this.runGit(['symbolic-ref', 'refs/remotes/origin/HEAD']);
     if (result.success) {
       const match = result.output.match(/origin\/(\S+)/);
-      return match?.[1] || "main";
+      return match?.[1] || 'main';
     }
-    return "main";
+    return 'main';
   }
 
   /**
    * Run a git command
    */
   private runGit(args: string[]): { success: boolean; output: string } {
-    const proc = spawnSync(["git", ...args], {
+    const proc = spawnSync(['git', ...args], {
       cwd: this.workingDirectory,
-      stdout: "pipe",
-      stderr: "pipe",
+      stdout: 'pipe',
+      stderr: 'pipe',
     });
 
     const output = proc.stdout.toString() + proc.stderr.toString();
@@ -94,7 +94,7 @@ export class AutoCommitService {
 
   /**
    * Auto-commit changes and create a PR for beginner mode
-   * 
+   *
    * Flow:
    * 1. Check if we're in a git repo
    * 2. Check if there are changes to commit
@@ -108,7 +108,7 @@ export class AutoCommitService {
     if (!this.git.isGitRepo()) {
       return {
         success: false,
-        message: "Not a git repository. Changes were saved but not committed.",
+        message: 'Not a git repository. Changes were saved but not committed.',
       };
     }
 
@@ -117,7 +117,7 @@ export class AutoCommitService {
     if (!hasChanges) {
       return {
         success: true,
-        message: "No changes to commit.",
+        message: 'No changes to commit.',
       };
     }
 
@@ -138,32 +138,32 @@ export class AutoCommitService {
       }
 
       // Stage all changes
-      const stageResult = this.runGit(["add", "-A"]);
+      const stageResult = this.runGit(['add', '-A']);
       if (!stageResult.success) {
         // Try to go back to original branch
         await this.git.checkout(currentBranch);
         return {
           success: false,
-          message: "Failed to stage changes for commit.",
+          message: 'Failed to stage changes for commit.',
         };
       }
 
       // Commit changes
-      const commitResult = this.runGit(["commit", "-m", commitMessage, "--no-verify"]);
+      const commitResult = this.runGit(['commit', '-m', commitMessage, '--no-verify']);
       if (!commitResult.success) {
         // Try to go back to original branch
         await this.git.checkout(currentBranch);
         return {
           success: false,
-          message: "Failed to commit changes.",
+          message: 'Failed to commit changes.',
         };
       }
 
       // Get the commit hash
-      const hashResult = this.runGit(["rev-parse", "HEAD"]);
+      const hashResult = this.runGit(['rev-parse', 'HEAD']);
       const commitHash = hashResult.success ? hashResult.output.trim() : undefined;
 
-      koryLog.info({ branchName, commitHash }, "Auto-committed changes in beginner mode");
+      koryLog.info({ branchName, commitHash }, 'Auto-committed changes in beginner mode');
 
       // Try to push and create PR if origin exists
       let prResult: PRResult | undefined;
@@ -179,14 +179,13 @@ export class AutoCommitService {
         branch: branchName,
         commitHash,
         prUrl: prResult?.prUrl,
-        message: prResult?.success 
+        message: prResult?.success
           ? `Changes committed to branch "${branchName}" and PR created!`
           : `Changes committed to branch "${branchName}". You can merge when ready.`,
       };
-
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : String(error);
-      koryLog.error({ error: errorMsg }, "Auto-commit failed");
+      koryLog.error({ error: errorMsg }, 'Auto-commit failed');
       return {
         success: false,
         message: `Auto-commit failed: ${errorMsg}`,
@@ -200,10 +199,10 @@ export class AutoCommitService {
   private async createPullRequest(
     branchName: string,
     taskDescription: string,
-    commitMessage: string
+    commitMessage: string,
   ): Promise<PRResult> {
     // First, try to push the branch
-    const pushResult = this.runGit(["push", "-u", "origin", branchName]);
+    const pushResult = this.runGit(['push', '-u', 'origin', branchName]);
     if (!pushResult.success) {
       return {
         success: false,
@@ -213,10 +212,14 @@ export class AutoCommitService {
 
     // Try using GitHub CLI (gh) first
     const ghResult = this.runGh([
-      "pr", "create",
-      "--title", commitMessage,
-      "--body", this.generatePRBody(taskDescription),
-      "--head", branchName,
+      'pr',
+      'create',
+      '--title',
+      commitMessage,
+      '--body',
+      this.generatePRBody(taskDescription),
+      '--head',
+      branchName,
     ]);
 
     if (ghResult.success) {
@@ -230,9 +233,9 @@ export class AutoCommitService {
     }
 
     // If gh CLI fails, return the branch info for manual PR creation
-    const remoteUrl = this.runGit(["remote", "get-url", "origin"]).output;
+    const remoteUrl = this.runGit(['remote', 'get-url', 'origin']).output;
     const repoMatch = remoteUrl.match(/github\.com[:\/]([^\/]+)\/([^\/\.]+)/);
-    
+
     if (repoMatch) {
       const [, owner, repo] = repoMatch;
       const prUrl = `https://github.com/${owner}/${repo}/compare/${branchName}?expand=1`;
@@ -245,7 +248,7 @@ export class AutoCommitService {
 
     return {
       success: false,
-      message: "Branch pushed but could not create PR. Please create manually.",
+      message: 'Branch pushed but could not create PR. Please create manually.',
     };
   }
 
@@ -253,10 +256,10 @@ export class AutoCommitService {
    * Run a GitHub CLI command
    */
   private runGh(args: string[]): { success: boolean; output: string } {
-    const proc = spawnSync(["gh", ...args], {
+    const proc = spawnSync(['gh', ...args], {
       cwd: this.workingDirectory,
-      stdout: "pipe",
-      stderr: "pipe",
+      stdout: 'pipe',
+      stderr: 'pipe',
     });
 
     const output = proc.stdout.toString() + proc.stderr.toString();
@@ -281,7 +284,7 @@ ${taskDescription}
    */
   async isAvailable(): Promise<boolean> {
     if (!this.git.isGitRepo()) return false;
-    
+
     // Check if we can push (have origin remote)
     return this.hasOriginRemote();
   }
@@ -290,6 +293,6 @@ ${taskDescription}
 export class AutoCommitError extends Error {
   constructor(message: string) {
     super(message);
-    this.name = "AutoCommitError";
+    this.name = 'AutoCommitError';
   }
 }

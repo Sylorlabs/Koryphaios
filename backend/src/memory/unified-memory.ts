@@ -1,18 +1,27 @@
 /**
  * Unified Memory System
- * 
+ *
  * A comprehensive memory and rules management system that provides:
  * - Universal Memory: Global across all projects
  * - Project Memory: Specific to current project
  * - Session Memory: Per-chat persistent storage
- * - Cursor-style Rules: .cursorrules file support
- * 
+ * - Cursor-style Rules: .koryrules file support
+ *
  * All files are stored relative to the project for portability.
  */
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync, unlinkSync, readdirSync, statSync, copyFileSync } from "node:fs";
-import { join, dirname, basename } from "node:path";
-import { homedir } from "node:os";
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  writeFileSync,
+  unlinkSync,
+  readdirSync,
+  statSync,
+  copyFileSync,
+} from 'node:fs';
+import { join, dirname, basename } from 'node:path';
+import { homedir } from 'node:os';
 
 // ============================================================================
 // Configuration
@@ -20,19 +29,19 @@ import { homedir } from "node:os";
 
 export const MEMORY_CONFIG = {
   // Directory names (relative to project root or home)
-  UNIVERSAL_MEMORY_DIR: ".koryphaios/universal-memory",
-  PROJECT_MEMORY_DIR: ".koryphaios/project-memory",
-  SESSIONS_DIR: ".koryphaios/sessions",
-  RULES_FILE: ".cursorrules",
-  
+  UNIVERSAL_MEMORY_DIR: '.koryphaios/universal-memory',
+  PROJECT_MEMORY_DIR: '.koryphaios/project-memory',
+  SESSIONS_DIR: '.koryphaios/sessions',
+  RULES_FILE: '.koryrules',
+
   // File names
-  UNIVERSAL_MEMORY_FILE: "universal-memory.md",
-  PROJECT_MEMORY_FILE: "project-memory.md",
-  SESSION_MEMORY_FILE: "memory.md",
-  
+  UNIVERSAL_MEMORY_FILE: 'universal-memory.md',
+  PROJECT_MEMORY_FILE: 'project-memory.md',
+  SESSION_MEMORY_FILE: 'memory.md',
+
   // Settings
   MAX_MEMORY_SIZE: 100_000, // 100KB max per memory file
-  MAX_RULES_SIZE: 50_000,   // 50KB max for rules
+  MAX_RULES_SIZE: 50_000, // 50KB max for rules
 } as const;
 
 // ============================================================================
@@ -56,7 +65,7 @@ export interface MemorySettings {
   sessionMemoryEnabled: boolean;
   /** Enable agent-added memories */
   agentMemoryEnabled: boolean;
-  /** Enable .cursorrules file */
+  /** Enable .koryrules file */
   rulesEnabled: boolean;
   /** Auto-include memories in agent context */
   autoIncludeInContext: boolean;
@@ -104,11 +113,16 @@ export function getProjectMemoryPath(projectRoot: string): string {
  * Get session memory path
  */
 export function getSessionMemoryPath(projectRoot: string, sessionId: string): string {
-  return join(projectRoot, MEMORY_CONFIG.SESSIONS_DIR, sessionId, MEMORY_CONFIG.SESSION_MEMORY_FILE);
+  return join(
+    projectRoot,
+    MEMORY_CONFIG.SESSIONS_DIR,
+    sessionId,
+    MEMORY_CONFIG.SESSION_MEMORY_FILE,
+  );
 }
 
 /**
- * Get .cursorrules path
+ * Get .koryrules path
  */
 export function getRulesPath(projectRoot: string): string {
   return join(projectRoot, MEMORY_CONFIG.RULES_FILE);
@@ -173,21 +187,18 @@ const UNIVERSAL_MEMORY_TEMPLATE = `# Universal Memory
 
 export function initializeUniversalMemory(): MemoryFile {
   const filePath = getUniversalMemoryPath();
-  
+
   if (!existsSync(filePath)) {
     // Create directory if needed
     const dir = dirname(filePath);
     if (!existsSync(dir)) {
       mkdirSync(dir, { recursive: true });
     }
-    
-    const content = UNIVERSAL_MEMORY_TEMPLATE.replace(
-      "{timestamp}",
-      new Date().toISOString()
-    );
-    
-    writeFileSync(filePath, content, "utf-8");
-    
+
+    const content = UNIVERSAL_MEMORY_TEMPLATE.replace('{timestamp}', new Date().toISOString());
+
+    writeFileSync(filePath, content, 'utf-8');
+
     return {
       path: filePath,
       content,
@@ -196,27 +207,27 @@ export function initializeUniversalMemory(): MemoryFile {
       size: content.length,
     };
   }
-  
+
   return readUniversalMemory();
 }
 
 export function readUniversalMemory(): MemoryFile {
   const filePath = getUniversalMemoryPath();
-  
+
   if (!existsSync(filePath)) {
     return {
       path: filePath,
-      content: "",
+      content: '',
       exists: false,
       lastModified: null,
       size: 0,
     };
   }
-  
+
   try {
-    const content = readFileSync(filePath, "utf-8");
+    const content = readFileSync(filePath, 'utf-8');
     const stats = statSync(filePath);
-    
+
     return {
       path: filePath,
       content,
@@ -225,10 +236,10 @@ export function readUniversalMemory(): MemoryFile {
       size: content.length,
     };
   } catch (err) {
-    console.error("Failed to read universal memory:", err);
+    console.error('Failed to read universal memory:', err);
     return {
       path: filePath,
-      content: "",
+      content: '',
       exists: false,
       lastModified: null,
       size: 0,
@@ -239,18 +250,18 @@ export function readUniversalMemory(): MemoryFile {
 export function writeUniversalMemory(content: string): MemoryFile {
   const filePath = getUniversalMemoryPath();
   const dir = dirname(filePath);
-  
+
   if (!existsSync(dir)) {
     mkdirSync(dir, { recursive: true });
   }
-  
+
   // Enforce size limit
   if (content.length > MEMORY_CONFIG.MAX_MEMORY_SIZE) {
     throw new Error(`Memory file exceeds maximum size of ${MEMORY_CONFIG.MAX_MEMORY_SIZE} bytes`);
   }
-  
-  writeFileSync(filePath, content, "utf-8");
-  
+
+  writeFileSync(filePath, content, 'utf-8');
+
   return {
     path: filePath,
     content,
@@ -366,20 +377,17 @@ project-root/
 
 export function initializeProjectMemory(projectRoot: string): MemoryFile {
   const filePath = getProjectMemoryPath(projectRoot);
-  
+
   if (!existsSync(filePath)) {
     const dir = dirname(filePath);
     if (!existsSync(dir)) {
       mkdirSync(dir, { recursive: true });
     }
-    
-    const content = PROJECT_MEMORY_TEMPLATE.replace(
-      "{timestamp}",
-      new Date().toISOString()
-    );
-    
-    writeFileSync(filePath, content, "utf-8");
-    
+
+    const content = PROJECT_MEMORY_TEMPLATE.replace('{timestamp}', new Date().toISOString());
+
+    writeFileSync(filePath, content, 'utf-8');
+
     return {
       path: filePath,
       content,
@@ -388,27 +396,27 @@ export function initializeProjectMemory(projectRoot: string): MemoryFile {
       size: content.length,
     };
   }
-  
+
   return readProjectMemory(projectRoot);
 }
 
 export function readProjectMemory(projectRoot: string): MemoryFile {
   const filePath = getProjectMemoryPath(projectRoot);
-  
+
   if (!existsSync(filePath)) {
     return {
       path: filePath,
-      content: "",
+      content: '',
       exists: false,
       lastModified: null,
       size: 0,
     };
   }
-  
+
   try {
-    const content = readFileSync(filePath, "utf-8");
+    const content = readFileSync(filePath, 'utf-8');
     const stats = statSync(filePath);
-    
+
     return {
       path: filePath,
       content,
@@ -417,10 +425,10 @@ export function readProjectMemory(projectRoot: string): MemoryFile {
       size: content.length,
     };
   } catch (err) {
-    console.error("Failed to read project memory:", err);
+    console.error('Failed to read project memory:', err);
     return {
       path: filePath,
-      content: "",
+      content: '',
       exists: false,
       lastModified: null,
       size: 0,
@@ -431,17 +439,17 @@ export function readProjectMemory(projectRoot: string): MemoryFile {
 export function writeProjectMemory(projectRoot: string, content: string): MemoryFile {
   const filePath = getProjectMemoryPath(projectRoot);
   const dir = dirname(filePath);
-  
+
   if (!existsSync(dir)) {
     mkdirSync(dir, { recursive: true });
   }
-  
+
   if (content.length > MEMORY_CONFIG.MAX_MEMORY_SIZE) {
     throw new Error(`Memory file exceeds maximum size of ${MEMORY_CONFIG.MAX_MEMORY_SIZE} bytes`);
   }
-  
-  writeFileSync(filePath, content, "utf-8");
-  
+
+  writeFileSync(filePath, content, 'utf-8');
+
   return {
     path: filePath,
     content,
@@ -513,19 +521,20 @@ const SESSION_MEMORY_TEMPLATE = `# Session Memory
 export function initializeSessionMemory(projectRoot: string, sessionId: string): MemoryFile {
   const filePath = getSessionMemoryPath(projectRoot, sessionId);
   const dir = dirname(filePath);
-  
+
   if (!existsSync(dir)) {
     mkdirSync(dir, { recursive: true });
   }
-  
+
   if (!existsSync(filePath)) {
     const timestamp = new Date().toISOString();
-    const content = SESSION_MEMORY_TEMPLATE
-      .replace(/{timestamp}/g, timestamp)
-      .replace(/{sessionId}/g, sessionId);
-    
-    writeFileSync(filePath, content, "utf-8");
-    
+    const content = SESSION_MEMORY_TEMPLATE.replace(/{timestamp}/g, timestamp).replace(
+      /{sessionId}/g,
+      sessionId,
+    );
+
+    writeFileSync(filePath, content, 'utf-8');
+
     return {
       path: filePath,
       content,
@@ -534,27 +543,27 @@ export function initializeSessionMemory(projectRoot: string, sessionId: string):
       size: content.length,
     };
   }
-  
+
   return readSessionMemory(projectRoot, sessionId);
 }
 
 export function readSessionMemory(projectRoot: string, sessionId: string): MemoryFile {
   const filePath = getSessionMemoryPath(projectRoot, sessionId);
-  
+
   if (!existsSync(filePath)) {
     return {
       path: filePath,
-      content: "",
+      content: '',
       exists: false,
       lastModified: null,
       size: 0,
     };
   }
-  
+
   try {
-    const content = readFileSync(filePath, "utf-8");
+    const content = readFileSync(filePath, 'utf-8');
     const stats = statSync(filePath);
-    
+
     return {
       path: filePath,
       content,
@@ -566,7 +575,7 @@ export function readSessionMemory(projectRoot: string, sessionId: string): Memor
     console.error(`Failed to read session memory for ${sessionId}:`, err);
     return {
       path: filePath,
-      content: "",
+      content: '',
       exists: false,
       lastModified: null,
       size: 0,
@@ -574,20 +583,24 @@ export function readSessionMemory(projectRoot: string, sessionId: string): Memor
   }
 }
 
-export function writeSessionMemory(projectRoot: string, sessionId: string, content: string): MemoryFile {
+export function writeSessionMemory(
+  projectRoot: string,
+  sessionId: string,
+  content: string,
+): MemoryFile {
   const filePath = getSessionMemoryPath(projectRoot, sessionId);
   const dir = dirname(filePath);
-  
+
   if (!existsSync(dir)) {
     mkdirSync(dir, { recursive: true });
   }
-  
+
   if (content.length > MEMORY_CONFIG.MAX_MEMORY_SIZE) {
     throw new Error(`Memory file exceeds maximum size of ${MEMORY_CONFIG.MAX_MEMORY_SIZE} bytes`);
   }
-  
-  writeFileSync(filePath, content, "utf-8");
-  
+
+  writeFileSync(filePath, content, 'utf-8');
+
   return {
     path: filePath,
     content,
@@ -600,25 +613,25 @@ export function writeSessionMemory(projectRoot: string, sessionId: string, conte
 export function deleteSessionMemory(projectRoot: string, sessionId: string): boolean {
   const filePath = getSessionMemoryPath(projectRoot, sessionId);
   const dir = dirname(filePath);
-  
+
   try {
     if (existsSync(filePath)) {
       unlinkSync(filePath);
     }
-    
+
     // Try to clean up empty session directory
     try {
       if (existsSync(dir)) {
         const files = readdirSync(dir);
         if (files.length === 0) {
-          const { rmdirSync } = require("node:fs");
+          const { rmdirSync } = require('node:fs');
           rmdirSync(dir);
         }
       }
     } catch {
       // Ignore cleanup errors
     }
-    
+
     return true;
   } catch (err) {
     console.error(`Failed to delete session memory for ${sessionId}:`, err);
@@ -627,13 +640,13 @@ export function deleteSessionMemory(projectRoot: string, sessionId: string): boo
 }
 
 // ============================================================================
-// Rules (.cursorrules)
+// Rules (.koryrules)
 // ============================================================================
 
 const DEFAULT_RULES_TEMPLATE = `# Koryphaios Rules
 
 > This file defines rules and conventions for AI assistance in this project.
-> Similar to .cursorrules, these instructions guide the AI's behavior.
+> Similar to .koryrules, these instructions guide the AI's behavior.
 
 ## 🎯 General Principles
 
@@ -728,16 +741,16 @@ const DEFAULT_RULES_TEMPLATE = `# Koryphaios Rules
 - Keep setup instructions current
 
 ---
-*Place this file at: .cursorrules (project root)*
+*Place this file at: .koryrules (project root)*
 *Or at: .koryphaios/rules.md*
 `;
 
 export function initializeRules(projectRoot: string): MemoryFile {
   const filePath = getRulesPath(projectRoot);
-  
+
   if (!existsSync(filePath)) {
-    writeFileSync(filePath, DEFAULT_RULES_TEMPLATE, "utf-8");
-    
+    writeFileSync(filePath, DEFAULT_RULES_TEMPLATE, 'utf-8');
+
     return {
       path: filePath,
       content: DEFAULT_RULES_TEMPLATE,
@@ -746,27 +759,27 @@ export function initializeRules(projectRoot: string): MemoryFile {
       size: DEFAULT_RULES_TEMPLATE.length,
     };
   }
-  
+
   return readRules(projectRoot);
 }
 
 export function readRules(projectRoot: string): MemoryFile {
   const filePath = getRulesPath(projectRoot);
-  
+
   if (!existsSync(filePath)) {
     return {
       path: filePath,
-      content: "",
+      content: '',
       exists: false,
       lastModified: null,
       size: 0,
     };
   }
-  
+
   try {
-    const content = readFileSync(filePath, "utf-8");
+    const content = readFileSync(filePath, 'utf-8');
     const stats = statSync(filePath);
-    
+
     return {
       path: filePath,
       content,
@@ -775,10 +788,10 @@ export function readRules(projectRoot: string): MemoryFile {
       size: content.length,
     };
   } catch (err) {
-    console.error("Failed to read rules:", err);
+    console.error('Failed to read rules:', err);
     return {
       path: filePath,
-      content: "",
+      content: '',
       exists: false,
       lastModified: null,
       size: 0,
@@ -788,13 +801,13 @@ export function readRules(projectRoot: string): MemoryFile {
 
 export function writeRules(projectRoot: string, content: string): MemoryFile {
   const filePath = getRulesPath(projectRoot);
-  
+
   if (content.length > MEMORY_CONFIG.MAX_RULES_SIZE) {
     throw new Error(`Rules file exceeds maximum size of ${MEMORY_CONFIG.MAX_RULES_SIZE} bytes`);
   }
-  
-  writeFileSync(filePath, content, "utf-8");
-  
+
+  writeFileSync(filePath, content, 'utf-8');
+
   return {
     path: filePath,
     content,
@@ -808,7 +821,7 @@ export function writeRules(projectRoot: string, content: string): MemoryFile {
 // Settings Management
 // ============================================================================
 
-const SETTINGS_FILE = ".koryphaios/memory-settings.json";
+const SETTINGS_FILE = '.koryphaios/memory-settings.json';
 
 export function getSettingsPath(projectRoot: string): string {
   return join(projectRoot, SETTINGS_FILE);
@@ -816,17 +829,17 @@ export function getSettingsPath(projectRoot: string): string {
 
 export function loadMemorySettings(projectRoot: string): MemorySettings {
   const filePath = getSettingsPath(projectRoot);
-  
+
   if (!existsSync(filePath)) {
     return DEFAULT_MEMORY_SETTINGS;
   }
-  
+
   try {
-    const content = readFileSync(filePath, "utf-8");
+    const content = readFileSync(filePath, 'utf-8');
     const parsed = JSON.parse(content);
     return { ...DEFAULT_MEMORY_SETTINGS, ...parsed };
   } catch (err) {
-    console.error("Failed to load memory settings:", err);
+    console.error('Failed to load memory settings:', err);
     return DEFAULT_MEMORY_SETTINGS;
   }
 }
@@ -834,12 +847,12 @@ export function loadMemorySettings(projectRoot: string): MemorySettings {
 export function saveMemorySettings(projectRoot: string, settings: MemorySettings): void {
   const filePath = getSettingsPath(projectRoot);
   const dir = dirname(filePath);
-  
+
   if (!existsSync(dir)) {
     mkdirSync(dir, { recursive: true });
   }
-  
-  writeFileSync(filePath, JSON.stringify(settings, null, 2), "utf-8");
+
+  writeFileSync(filePath, JSON.stringify(settings, null, 2), 'utf-8');
 }
 
 // ============================================================================
@@ -857,16 +870,17 @@ export interface MemoryContext {
 export function assembleMemoryContext(
   projectRoot: string,
   sessionId: string | null,
-  settings?: MemorySettings
+  settings?: MemorySettings,
 ): MemoryContext {
   const effectiveSettings = settings ?? loadMemorySettings(projectRoot);
-  
+
   return {
     universal: effectiveSettings.universalMemoryEnabled ? readUniversalMemory() : null,
     project: effectiveSettings.projectMemoryEnabled ? readProjectMemory(projectRoot) : null,
-    session: effectiveSettings.sessionMemoryEnabled && sessionId
-      ? readSessionMemory(projectRoot, sessionId)
-      : null,
+    session:
+      effectiveSettings.sessionMemoryEnabled && sessionId
+        ? readSessionMemory(projectRoot, sessionId)
+        : null,
     rules: effectiveSettings.rulesEnabled ? readRules(projectRoot) : null,
     settings: effectiveSettings,
   };
@@ -874,28 +888,28 @@ export function assembleMemoryContext(
 
 export function formatMemoryForContext(context: MemoryContext): string {
   const parts: string[] = [];
-  
+
   if (context.rules?.exists && context.rules.content) {
-    parts.push(`## Project Rules (.cursorrules)\n\n${context.rules.content}`);
+    parts.push(`## Project Rules (.koryrules)\n\n${context.rules.content}`);
   }
-  
+
   if (context.universal?.exists && context.universal.content) {
     parts.push(`## Universal Memory\n\n${context.universal.content}`);
   }
-  
+
   if (context.project?.exists && context.project.content) {
     parts.push(`## Project Memory\n\n${context.project.content}`);
   }
-  
+
   if (context.session?.exists && context.session.content) {
     parts.push(`## Session Memory\n\n${context.session.content}`);
   }
-  
+
   if (parts.length === 0) {
-    return "";
+    return '';
   }
-  
-  return `# Memory Context\n\n${parts.join("\n\n---\n\n")}`;
+
+  return `# Memory Context\n\n${parts.join('\n\n---\n\n')}`;
 }
 
 // ============================================================================
@@ -904,7 +918,7 @@ export function formatMemoryForContext(context: MemoryContext): string {
 
 export function getMemoryStats(projectRoot: string, sessionId?: string) {
   const settings = loadMemorySettings(projectRoot);
-  
+
   return {
     settings,
     files: {

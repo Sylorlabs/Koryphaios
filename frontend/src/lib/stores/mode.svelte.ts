@@ -1,12 +1,12 @@
 /**
  * Mode Store - Beginner vs Advanced mode management
- * 
+ *
  * Beginner Mode:
  * - Git panel completely hidden
  * - Friendly, non-technical language
  * - Auto-commit enabled
  * - Simplified UI
- * 
+ *
  * Advanced Mode:
  * - Full Git panel with shadow logger
  * - Technical terminology
@@ -14,12 +14,13 @@
  * - Full feature access
  */
 
-import type { UIMode, ModeConfig, ModeContext } from "@koryphaios/shared";
-import { MODE_DISPLAY_NAMES, MODE_DESCRIPTIONS } from "@koryphaios/shared";
-import { apiUrl } from "$lib/utils/api-url";
-import { toastStore } from "./toast.svelte";
+import type { UIMode, ModeConfig, ModeContext } from '@koryphaios/shared';
+import { MODE_DISPLAY_NAMES, MODE_DESCRIPTIONS } from '@koryphaios/shared';
+import { apiUrl } from '$lib/utils/api-url';
+import { toastStore } from './toast.svelte';
+import { apiFetch } from '$lib/api.svelte';
 
-const STORAGE_KEY = "koryphaios-mode";
+const STORAGE_KEY = 'koryphaios-mode';
 
 interface ModeState {
   mode: UIMode;
@@ -32,11 +33,12 @@ interface ModeState {
 
 function createModeStore() {
   // Initialize from localStorage or default to beginner
-  const stored = typeof localStorage !== "undefined" 
-    ? localStorage.getItem(STORAGE_KEY) as UIMode | null 
-    : null;
-  
-  const initialMode: UIMode = stored === "advanced" ? "advanced" : "beginner";
+  const stored =
+    typeof localStorage !== 'undefined'
+      ? (localStorage.getItem(STORAGE_KEY) as UIMode | null)
+      : null;
+
+  const initialMode: UIMode = stored === 'advanced' ? 'advanced' : 'beginner';
 
   let state = $state<ModeState>({
     mode: initialMode,
@@ -56,15 +58,15 @@ function createModeStore() {
   // The persistence is handled in the setMode function instead
 
   function getDefaultConfig(mode: UIMode): ModeConfig {
-    if (mode === "beginner") {
+    if (mode === 'beginner') {
       return {
         hideGitPanel: true,
         autoCommit: true,
         simplifiedPrompts: true,
         maxWorkers: 2,
         requireConfirmations: false,
-        toolAccess: "curated",
-        explanations: "verbose",
+        toolAccess: 'curated',
+        explanations: 'verbose',
         enableShadowLoggerUI: false,
         enableWorktrees: false,
         enableCriticGate: false,
@@ -78,8 +80,8 @@ function createModeStore() {
       simplifiedPrompts: false,
       maxWorkers: 8,
       requireConfirmations: true,
-      toolAccess: "full",
-      explanations: "minimal",
+      toolAccess: 'full',
+      explanations: 'minimal',
       enableShadowLoggerUI: true,
       enableWorktrees: true,
       enableCriticGate: true,
@@ -90,10 +92,8 @@ function createModeStore() {
 
   async function fetchMode(): Promise<void> {
     try {
-      const res = await fetch(apiUrl("/api/mode"), {
-        credentials: "include",
-      });
-      
+      const res = await apiFetch(apiUrl('/api/mode'));
+
       if (res.ok) {
         const data = await res.json();
         state.mode = data.mode;
@@ -103,20 +103,19 @@ function createModeStore() {
         state.noGitWarning = data.noGitWarning;
       }
     } catch (err) {
-      console.error("Failed to fetch mode:", err);
+      console.error('Failed to fetch mode:', err);
     }
   }
 
   async function setMode(mode: UIMode): Promise<void> {
     if (state.mode === mode) return;
-    
+
     state.isLoading = true;
-    
+
     try {
-      const res = await fetch(apiUrl("/api/mode"), {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        credentials: "include",
+      const res = await apiFetch(apiUrl('/api/mode'), {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ mode }),
       });
 
@@ -124,7 +123,7 @@ function createModeStore() {
         const data = await res.json();
         state.mode = data.mode;
         state.config = data.config;
-        
+
         // Update context mode
         state.context = {
           ...state.context,
@@ -133,16 +132,16 @@ function createModeStore() {
         };
 
         // Persist to localStorage
-        if (typeof localStorage !== "undefined") {
+        if (typeof localStorage !== 'undefined') {
           localStorage.setItem(STORAGE_KEY, state.mode);
         }
 
         toastStore.success(`Switched to ${MODE_DISPLAY_NAMES[mode]} mode`);
       } else {
-        throw new Error("Failed to switch mode");
+        throw new Error('Failed to switch mode');
       }
     } catch (err) {
-      toastStore.error("Failed to switch mode");
+      toastStore.error('Failed to switch mode');
       console.error(err);
     } finally {
       state.isLoading = false;
@@ -150,7 +149,7 @@ function createModeStore() {
   }
 
   async function toggleMode(): Promise<void> {
-    const newMode = state.mode === "beginner" ? "advanced" : "beginner";
+    const newMode = state.mode === 'beginner' ? 'advanced' : 'beginner';
     await setMode(newMode);
   }
 
@@ -159,24 +158,54 @@ function createModeStore() {
   }
 
   return {
-    get mode() { return state.mode; },
-    get config() { return state.config; },
-    get context() { return state.context; },
-    get shouldWarnNoGit() { return state.shouldWarnNoGit; },
-    get noGitWarning() { return state.noGitWarning; },
-    get isLoading() { return state.isLoading; },
-    get isBeginner() { return state.mode === "beginner"; },
-    get isAdvanced() { return state.mode === "advanced"; },
-    get displayName() { return MODE_DISPLAY_NAMES[state.mode]; },
-    get description() { return MODE_DESCRIPTIONS[state.mode]; },
-    
-    // Computed helpers
-    get showGitPanel() { return !state.config.hideGitPanel; },
-    get showAgentDetails() { return state.config.showAgentDetails; },
-    get showCostTracking() { return state.config.showCostTracking; },
-    get autoCommit() { return state.config.autoCommit; },
-    get requireConfirmations() { return state.config.requireConfirmations; },
-    
+    get mode() {
+      return state.mode;
+    },
+    get config() {
+      return state.config;
+    },
+    get context() {
+      return state.context;
+    },
+    get shouldWarnNoGit() {
+      return state.shouldWarnNoGit;
+    },
+    get noGitWarning() {
+      return state.noGitWarning;
+    },
+    get isLoading() {
+      return state.isLoading;
+    },
+    get isBeginner() {
+      return state.mode === 'beginner';
+    },
+    get isAdvanced() {
+      return state.mode === 'advanced';
+    },
+    get displayName() {
+      return MODE_DISPLAY_NAMES[state.mode];
+    },
+    get description() {
+      return MODE_DESCRIPTIONS[state.mode];
+    },
+
+    // Computed helpers - with safety checks for undefined state
+    get showGitPanel() {
+      return !state.config?.hideGitPanel;
+    },
+    get showAgentDetails() {
+      return state.config?.showAgentDetails ?? false;
+    },
+    get showCostTracking() {
+      return state.config?.showCostTracking ?? false;
+    },
+    get autoCommit() {
+      return state.config.autoCommit;
+    },
+    get requireConfirmations() {
+      return state.config.requireConfirmations;
+    },
+
     fetchMode,
     setMode,
     toggleMode,

@@ -1,22 +1,53 @@
 <script lang="ts">
-  import { Send, ChevronDown, Sparkles, Square } from 'lucide-svelte';
+  import { onMount } from 'svelte';
+  import { Send, ChevronDown, Sparkles, Square, Users, User, ShieldCheck, ShieldAlert, Circle } from 'lucide-svelte';
   import { wsStore } from '$lib/stores/websocket.svelte';
   import { shortcutStore } from '$lib/stores/shortcuts.svelte';
+  import { experimentalStore } from '$lib/stores/experimental.svelte';
+  import { agentSettingsStore } from '$lib/stores/agent-settings.svelte';
   import { getReasoningConfig, hasReasoningSupport } from '@koryphaios/shared';
   import BrainIcon from '$lib/components/icons/BrainIcon.svelte';
+  import { getModelConfigurationWarning } from '$lib/utils/model-config';
 
   interface Props {
     onSend: (message: string, model?: string, reasoningLevel?: string) => void;
+    onExecuteCommand?: (command: string) => Promise<boolean> | boolean;
     /** When true, show Stop instead of Send; clicking stops manager and workers for the session. */
     isRunning?: boolean;
     onStop?: () => void;
+    onOpenSettings?: () => void;
     inputRef?: HTMLTextAreaElement;
+    value?: string;
+    slashCommands?: Array<{ command: string; label: string; description: string }>;
+    fileMentions?: string[];
+    /** When true, disables input because no project is open */
+    disabled?: boolean;
+    disabledMessage?: string;
+    placeholder?: string;
   }
 
-  let { onSend, isRunning = false, onStop, inputRef = $bindable() }: Props = $props();
-  let input = $state('');
+  let {
+    onSend,
+    onExecuteCommand,
+    isRunning = false,
+    onStop,
+    onOpenSettings,
+    inputRef = $bindable(),
+    value = $bindable(''),
+    slashCommands = [],
+    fileMentions = [],
+    disabled = false,
+    disabledMessage = 'Open a project to start chatting',
+    placeholder = 'Ask Koryphaios to inspect, explain, or change this project...',
+  }: Props = $props();
+  let actionPanelRef = $state<HTMLDivElement>();
   let showModelPicker = $state(false);
   let selectedModel = $state<string>('auto');
+  let selectedPickerIndex = $state(0);
+
+  type ComposerPickerItem =
+    | { type: 'command'; key: string; label: string; value: string; description: string }
+    | { type: 'file'; key: string; label: string; value: string; description: string };
 
   function providerLabel(provider: string): string {
     if (provider === 'openai') return 'OpenAI';
@@ -49,15 +80,17 @@
     return preferred?.name ?? 'anthropic';
   });
 
-  // Extract provider and model from selection. In auto mode, adapt to first available provider.
-  let currentProvider = $derived(parseModelSelection(selectedModel).provider ?? fallbackProvider);
+  // Extract provider and model from selection. In auto mode, use 'auto' provider for specific reasoning config.
+  let currentProvider = $derived(selectedModel === 'auto' ? 'auto' : (parseModelSelection(selectedModel).provider ?? fallbackProvider));
   let currentModel = $derived(parseModelSelection(selectedModel).model);
 
   // Get reasoning config based on provider + model
   let reasoningConfig = $derived(getReasoningConfig(currentProvider, currentModel));
-  let reasoningSupported = $derived(hasReasoningSupport(currentProvider, currentModel));
+  let reasoningSupported = $derived(selectedModel === 'auto' || hasReasoningSupport(currentProvider, currentModel));
 
-  const hasNoProvider = $derived((wsStore.providers ?? []).filter((p) => p.authenticated).length === 0);
+  const configurationWarning = $derived(
+    disabled ? null : getModelConfigurationWarning(wsStore.providers, selectedModel),
+  );
 
   let availableModels = $derived.by(() => {
     const models: Array<{ label: string; value: string; provider: string; isAuto?: boolean }> = [
@@ -84,8 +117,118 @@
   const SEND_COOLDOWN_MS = 800;
   let lastSendAt = $state(0);
 
+  function getCaretPosition(): number {
+    return inputRef?.selectionStart ?? value.length;
+  }
+
+  function getTriggerContext() {
+    const caret = getCaretPosition();
+    const beforeCaret = value.slice(0, caret);
+    const match = beforeCaret.match(/(?:^|\s)([/@])([^\s/]*)$/);
+    if (!match || match.index == null) return null;
+    const trigger = match[1] as '/' | '@';
+    const query = match[2] ?? '';
+    const start = match.index + (match[0].startsWith(' ') ? 1 : 0);
+    return { trigger, query, start, end: caret };
+  }
+
+  let triggerContext = $derived(getTriggerContext());
+  let pickerItems = $derived.by<ComposerPickerItem[]>(() => {
+    const ctx = triggerContext;
+    if (!ctx) return [];
+    const query = ctx.query.trim().toLowerCase();
+
+    if (ctx.trigger === '/') {
+      return slashCommands
+        .filter((item) => !query || item.command.toLowerCase().includes(query) || item.label.toLowerCase().includes(query))
+        .slice(0, 8)
+        .map((item) => ({
+          type: 'command' as const,
+          key: item.command,
+          label: item.label,
+          value: item.command,
+          description: item.description,
+        }));
+    }
+
+    return fileMentions
+      .filter((path) => !query || path.toLowerCase().includes(query))
+      .slice(0, 8)
+      .map((path) => ({
+        type: 'file' as const,
+        key: path,
+        label: path.split('/').pop() || path,
+        value: path,
+        description: path,
+      }));
+  });
+  let pickerOpen = $derived(pickerItems.length > 0 && !!triggerContext);
+
+  $effect(() => {
+    pickerItems;
+    selectedPickerIndex = 0;
+  });
+
+  function replaceRange(start: number, end: number, nextText: string) {
+    value = value.slice(0, start) + nextText + value.slice(end);
+  }
+
+  async function focusComposer() {
+    await Promise.resolve();
+    inputRef?.focus();
+  }
+
+  async function applyPickerItem(item: ComposerPickerItem): Promise<void> {
+    const ctx = triggerContext;
+    if (!ctx) return;
+
+    if (item.type === 'command') {
+      value = '';
+      await onExecuteCommand?.(`/${item.value}`);
+      resizeToMin();
+      return;
+    }
+
+    replaceRange(ctx.start, ctx.end, `@${item.value} `);
+    await focusComposer();
+  }
+
+  async function executeSlashIfNeeded(): Promise<boolean> {
+    const trimmed = value.trim();
+    if (!trimmed.startsWith('/')) return false;
+    const handled = await onExecuteCommand?.(trimmed);
+    if (handled) {
+      value = '';
+      resizeToMin();
+      return true;
+    }
+    return false;
+  }
+
   function handleKeydown(e: KeyboardEvent) {
     if (e.repeat) return; // ignore key repeat (e.g. holding Enter)
+    if (pickerOpen) {
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        selectedPickerIndex = (selectedPickerIndex + 1) % pickerItems.length;
+        return;
+      }
+      if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        selectedPickerIndex = (selectedPickerIndex - 1 + pickerItems.length) % pickerItems.length;
+        return;
+      }
+      if (e.key === 'Tab' || (e.key === 'Enter' && !e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey)) {
+        e.preventDefault();
+        void applyPickerItem(pickerItems[selectedPickerIndex]);
+        return;
+      }
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        inputRef?.focus();
+        return;
+      }
+    }
     if (isRunning && shortcutStore.matches('send', e)) {
       e.preventDefault();
       stop();
@@ -101,14 +244,20 @@
     }
   }
 
-  function send() {
-    const trimmed = input.trim();
+  async function send() {
+    if (disabled) return;
+    if (configurationWarning) {
+      onOpenSettings?.();
+      return;
+    }
+    if (await executeSlashIfNeeded()) return;
+    const trimmed = value.trim();
     if (!trimmed) return;
     const now = Date.now();
     if (now - lastSendAt < SEND_COOLDOWN_MS) return; // debounce duplicate sends
     lastSendAt = now;
     onSend(trimmed, selectedModel, reasoningLevel);
-    input = '';
+    value = '';
     resizeToMin();
   }
 
@@ -116,24 +265,87 @@
     onStop?.();
   }
 
-  const MIN_HEIGHT_PX = 52;
+  const BASE_MIN_HEIGHT_PX = 88;
   const MAX_HEIGHT_PX = 280;
+  let minHeightPx = $state(BASE_MIN_HEIGHT_PX);
+
+  function syncComposerMinHeight() {
+    if (typeof window === 'undefined') return;
+    const isDesktopTwoColumn = window.innerWidth >= 1280;
+    const actionPanelHeight = actionPanelRef?.getBoundingClientRect().height ?? 0;
+    minHeightPx = isDesktopTwoColumn
+      ? Math.max(BASE_MIN_HEIGHT_PX, Math.ceil(actionPanelHeight))
+      : BASE_MIN_HEIGHT_PX;
+  }
 
   function resizeToMin() {
     if (!inputRef) return;
     inputRef.style.height = 'auto';
-    inputRef.style.height = MIN_HEIGHT_PX + 'px';
+    inputRef.style.height = minHeightPx + 'px';
   }
 
   function autoResize() {
     if (!inputRef) return;
     inputRef.style.height = 'auto';
     const h = inputRef.scrollHeight;
-    inputRef.style.height = Math.max(MIN_HEIGHT_PX, Math.min(h, MAX_HEIGHT_PX)) + 'px';
+    inputRef.style.height = Math.max(minHeightPx, Math.min(h, MAX_HEIGHT_PX)) + 'px';
   }
 
+  onMount(() => {
+    if (typeof window === "undefined") return;
+
+    // Global Esc listener to stop running agent
+    const handleGlobalEsc = (e: KeyboardEvent) => {
+      if (
+        e.key === "Escape" &&
+        isRunning &&
+        !showModelPicker &&
+        !showReasoningMenu &&
+        !pickerOpen
+      ) {
+        stop();
+      }
+    };
+    window.addEventListener("keydown", handleGlobalEsc);
+
+    const resizeObserver = new ResizeObserver(() => {
+      syncComposerMinHeight();
+      autoResize();
+    });
+
+    if (actionPanelRef) {
+      resizeObserver.observe(actionPanelRef);
+    }
+
+    const handleWindowResize = () => {
+      syncComposerMinHeight();
+      autoResize();
+    };
+
+    window.addEventListener("resize", handleWindowResize);
+    requestAnimationFrame(() => {
+      syncComposerMinHeight();
+      autoResize();
+    });
+
+    return () => {
+      resizeObserver.disconnect();
+      window.removeEventListener("resize", handleWindowResize);
+      window.removeEventListener("keydown", handleGlobalEsc);
+    };
+  });
+
   $effect(() => {
-    input; // track input so we resize when value changes (e.g. paste or programmatic set)
+    actionPanelRef;
+    if (typeof requestAnimationFrame === 'undefined') return;
+    requestAnimationFrame(() => {
+      syncComposerMinHeight();
+      autoResize();
+    });
+  });
+
+  $effect(() => {
+    value; // track value so we resize when it changes (e.g. paste or programmatic set)
     if (typeof requestAnimationFrame === 'undefined') return;
     requestAnimationFrame(() => autoResize());
   });
@@ -155,6 +367,14 @@
       const opt = config.options.find(o => o.value === value);
       if (opt) return opt.label;
     }
+    // Fallback for Auto/None/Max etc
+    if (value === 'none') return 'None';
+    if (value === 'low') return 'Low';
+    if (value === 'medium') return 'Medium';
+    if (value === 'high') return 'High';
+    if (value === 'xhigh') return 'max/xhigh';
+    if (value === 'max') return 'Max';
+    if (value === 'adaptive') return 'Auto';
     return value;
   }
 
@@ -177,135 +397,278 @@
     if (!target.closest('.model-picker')) showModelPicker = false;
     if (!target.closest('.reasoning-picker')) showReasoningMenu = false;
   }
+
+  let canSend = $derived(!disabled && !configurationWarning && value.trim().length > 0);
+
+  function cycleAgentExecutionMode() {
+    const current = agentSettingsStore.settings.agentExecutionMode ?? 'auto';
+    const next =
+      current === 'auto' ? 'single' :
+      current === 'single' ? 'multi' :
+      'auto';
+
+    void agentSettingsStore.saveSettings({
+      ...agentSettingsStore.settings,
+      agentExecutionMode: next,
+    }, { quietSuccess: true });
+  }
+
+  let agentExecutionModeMeta = $derived.by(() => {
+    const mode = agentSettingsStore.settings.agentExecutionMode ?? 'auto';
+    if (mode === 'multi') {
+      return {
+        label: 'Multi-Agent',
+        title: 'Agent Mode: Multi-Agent',
+        icon: Users,
+        className: 'bg-indigo-500/20 text-indigo-400 border border-indigo-500/30',
+      };
+    }
+    if (mode === 'single') {
+      return {
+        label: 'Single Agent',
+        title: 'Agent Mode: Single Agent',
+        icon: User,
+        className: 'bg-[var(--color-surface-3)] text-[var(--color-text-secondary)] border border-[var(--color-border)] hover:brightness-110',
+      };
+    }
+    return {
+      label: 'Auto',
+      title: 'Agent Mode: Auto',
+      icon: Sparkles,
+      className: 'bg-emerald-500/14 text-emerald-300 border border-emerald-500/25 hover:brightness-110',
+    };
+  });
 </script>
 
 <svelte:window onclick={handleClickOutside} />
 
 <div class="command-input px-4 py-3">
-  <!-- No provider: show error (Send still works; backend will return the same error) -->
-  {#if hasNoProvider}
-    <div class="mb-3 px-3 py-2.5 rounded-lg text-sm font-medium flex items-center gap-2" style="background: rgba(239, 68, 68, 0.12); border: 1px solid rgba(239, 68, 68, 0.35); color: var(--color-text-primary);">
-      <span class="text-red-400">Error:</span>
-      <span>No provider. No analyzing request. Add a provider in Settings.</span>
+  <!-- No project: show error -->
+  {#if disabled}
+    <div class="mb-4 px-4 py-3 rounded-xl text-sm font-medium flex items-center gap-2" style="background: rgba(245, 158, 11, 0.12); border: 1px solid rgba(245, 158, 11, 0.35); color: var(--color-text-primary);">
+      <span class="text-amber-400">⚠</span>
+      <span>{disabledMessage}</span>
     </div>
   {/if}
 
-  <!-- Controls row: Model picker + Reasoning toggle -->
-  <div class="flex items-center gap-3 mb-3">
-    <!-- Model selector -->
-    <div class="relative model-picker">
+  <!-- No provider: show blocking setup state -->
+  {#if !disabled && configurationWarning}
+    <div class="mb-4 flex items-center justify-between gap-3 px-4 py-3 rounded-xl" style="background: rgba(239, 68, 68, 0.12); border: 1px solid rgba(239, 68, 68, 0.35); color: var(--color-text-primary);">
+      <div class="flex items-center gap-2 min-w-0">
+        <span class="text-red-400 font-semibold shrink-0">Setup required</span>
+        <span class="text-sm min-w-0" style="color: var(--color-text-secondary);">{configurationWarning}</span>
+      </div>
       <button
-        class="flex items-center gap-2 px-3 h-9 rounded-lg text-sm font-medium transition-all hover:brightness-110 active:scale-[0.98]"
-        style="background: var(--color-surface-3); color: var(--color-text-primary); border: 1px solid var(--color-border);"
-        onclick={() => showModelPicker = !showModelPicker}
+        type="button"
+        class="btn btn-secondary shrink-0"
+        onclick={() => onOpenSettings?.()}
       >
-        <Sparkles size={16} class="text-amber-400" />
-        <span>{selectedModelLabel}</span>
-        <ChevronDown size={14} class="text-text-muted" />
+        Open Settings
       </button>
+    </div>
+  {/if}
 
-      {#if showModelPicker}
-        <div
-          class="absolute bottom-full left-0 mb-2 w-72 max-h-60 overflow-y-auto rounded-lg border shadow-2xl z-50"
-          style="background: var(--color-surface-2); border-color: var(--color-border);"
+  <div class="rounded-[20px] border px-5 py-3" style="background: rgba(12, 10, 9, 0.2); border-color: var(--color-border);">
+    <!-- Controls row: Model picker + Reasoning toggle -->
+    <div class="mb-3 flex flex-wrap items-center gap-3">
+      <!-- Model selector -->
+      <div class="relative model-picker">
+        <button
+          type="button"
+          class="flex items-center gap-2 px-3.5 h-10 rounded-xl text-sm font-medium transition-all hover:brightness-110 active:scale-[0.98]"
+          style="background: var(--color-surface-3); color: var(--color-text-primary); border: 1px solid var(--color-border);"
+          onclick={() => showModelPicker = !showModelPicker}
         >
-          {#each availableModels as model}
-            <button
-              class="w-full text-left px-4 py-2.5 text-sm transition-colors hover:bg-[var(--color-surface-3)] flex items-center gap-2 {selectedModel === model.value ? 'text-[var(--color-accent)]' : ''}"
-              style="color: {selectedModel === model.value ? 'var(--color-accent)' : 'var(--color-text-secondary)'};"
-              onclick={() => selectModel(model.value)}
+          <Sparkles size={16} class="text-amber-400" />
+          <span>{selectedModelLabel}</span>
+          <ChevronDown size={14} class="text-text-muted" />
+        </button>
+
+        {#if showModelPicker}
+          <div
+            class="absolute bottom-full left-0 mb-2 w-72 max-h-60 overflow-y-auto rounded-xl border shadow-2xl z-50"
+            style="background: var(--color-surface-2); border-color: var(--color-border);"
+          >
+            {#each availableModels as model}
+              <button
+                type="button"
+                class="w-full text-left px-4 py-3 text-sm transition-colors hover:bg-[var(--color-surface-3)] flex items-center gap-2 {selectedModel === model.value ? 'text-[var(--color-accent)]' : ''}"
+                style="color: {selectedModel === model.value ? 'var(--color-accent)' : 'var(--color-text-secondary)'};"
+                onclick={() => selectModel(model.value)}
+              >
+                {#if model.isAuto}
+                  <Sparkles size={14} class="text-amber-400 shrink-0" />
+                {/if}
+                <span>{model.label}</span>
+              </button>
+            {/each}
+          </div>
+        {/if}
+      </div>
+
+      <!-- Reasoning toggle - shows/hides based on provider+model -->
+      {#if reasoningSupported && reasoningConfig}
+        <div class="relative reasoning-picker">
+          <button
+            type="button"
+            class="flex items-center gap-2 px-3.5 h-10 rounded-xl text-sm font-medium transition-all hover:brightness-110 active:scale-[0.98]"
+            style="background: var(--color-surface-3); color: var(--color-text-primary); border: 1px solid var(--color-border);"
+            onclick={() => showReasoningMenu = !showReasoningMenu}
+            title="Set auto effort"
+          >
+            <BrainIcon {reasoningLevel} size={20} class="text-[#c890ab]" />
+            <span>{reasoningLabel(reasoningLevel)}</span>
+            <ChevronDown size={14} class="text-text-muted" />
+          </button>
+
+          {#if showReasoningMenu}
+            <div
+              class="absolute bottom-full left-0 mb-2 w-72 rounded-xl border shadow-2xl z-50 overflow-hidden backdrop-blur-md"
+              style="background: var(--color-surface-2-alpha, rgba(30, 30, 35, 0.9)); border-color: var(--color-border);"
             >
-              {#if model.isAuto}
-                <Sparkles size={14} class="text-amber-400 shrink-0" />
-              {/if}
-              <span>{model.label}</span>
-            </button>
-          {/each}
+              <div class="px-4 py-3 text-xs font-bold uppercase tracking-widest opacity-70" style="color: var(--color-text-muted); border-bottom: 1px solid var(--color-border); background: rgba(255,255,255,0.03);">
+                {selectedModel === 'auto' ? 'Reasoning' : `${modelDisplayName} · ${reasoningLabel(reasoningLevel)}`}
+              </div>
+              <div class="py-1">
+                {#each reasoningConfig.options as opt}
+                  <button
+                    type="button"
+                    class="w-full text-left px-4 py-3 transition-all hover:bg-[var(--color-surface-3)] group"
+                    onclick={() => selectReasoning(opt.value)}
+                  >
+                    <div class="flex items-center justify-between mb-0.5">
+                      <span class="text-sm font-semibold {reasoningLevel === opt.value ? 'text-[var(--color-accent)]' : 'text-[var(--color-text-primary)]'}">
+                        {opt.label}
+                      </span>
+                      {#if reasoningLevel === opt.value}
+                        <div class="w-1.5 h-1.5 rounded-full bg-[var(--color-accent)] shadow-[0_0_8px_var(--color-accent)]"></div>
+                      {/if}
+                    </div>
+                    <div class="text-[11px] leading-relaxed opacity-60 group-hover:opacity-100 transition-opacity" style="color: var(--color-text-muted);">
+                      {opt.description}
+                    </div>
+                  </button>
+                {/each}
+              </div>
+            </div>
+          {/if}
         </div>
       {/if}
     </div>
 
-    <!-- Reasoning toggle - shows/hides based on provider+model -->
-    {#if reasoningSupported && reasoningConfig}
-      <div class="relative reasoning-picker">
-        <button
-          class="flex items-center gap-2 px-3 h-9 rounded-lg text-sm font-medium transition-all hover:brightness-110 active:scale-[0.98]"
-          style="background: var(--color-surface-3); color: var(--color-text-primary); border: 1px solid var(--color-border);"
-          onclick={() => showReasoningMenu = !showReasoningMenu}
-          title="Set auto effort"
-        >
-          <BrainIcon {reasoningLevel} size={20} class="text-[#c890ab]" />
-          <span>{reasoningLabel(reasoningLevel)}</span>
-          <ChevronDown size={14} class="text-text-muted" />
-        </button>
-
-        {#if showReasoningMenu}
-          <div
-            class="absolute bottom-full left-0 mb-2 w-72 rounded-xl border shadow-2xl z-50 overflow-hidden backdrop-blur-md"
-            style="background: var(--color-surface-2-alpha, rgba(30, 30, 35, 0.9)); border-color: var(--color-border);"
-          >
-            <div class="px-4 py-3 text-xs font-bold uppercase tracking-widest opacity-70" style="color: var(--color-text-muted); border-bottom: 1px solid var(--color-border); background: rgba(255,255,255,0.03);">
-              {selectedModel === 'auto' ? 'Reasoning' : `${modelDisplayName} · ${reasoningLabel(reasoningLevel)}`}
+    <!-- Input area -->
+    <div class="flex flex-col gap-3 xl:flex-row xl:items-start">
+      <div class="min-w-0 flex-1">
+        {#if pickerOpen}
+          <div class="mb-3 overflow-hidden rounded-xl border" style="background: var(--color-surface-2); border-color: var(--color-border);">
+            <div class="px-3 py-2 text-[11px] font-semibold uppercase tracking-[0.14em]" style="color: var(--color-text-muted); border-bottom: 1px solid var(--color-border);">
+              {triggerContext?.trigger === '/' ? 'Commands' : 'Files'}
             </div>
             <div class="py-1">
-              {#each reasoningConfig.options as opt}
+              {#each pickerItems as item, index (item.key)}
                 <button
-                  class="w-full text-left px-4 py-3 transition-all hover:bg-[var(--color-surface-3)] group"
-                  onclick={() => selectReasoning(opt.value)}
+                  type="button"
+                  class="flex w-full items-start justify-between gap-3 px-3 py-2 text-left transition-colors {index === selectedPickerIndex ? 'bg-[var(--color-surface-3)]' : 'hover:bg-[var(--color-surface-3)]'}"
+                  onclick={() => void applyPickerItem(item)}
                 >
-                  <div class="flex items-center justify-between mb-0.5">
-                    <span class="text-sm font-semibold {reasoningLevel === opt.value ? 'text-[var(--color-accent)]' : 'text-[var(--color-text-primary)]'}">
-                      {opt.label}
-                    </span>
-                    {#if reasoningLevel === opt.value}
-                      <div class="w-1.5 h-1.5 rounded-full bg-[var(--color-accent)] shadow-[0_0_8px_var(--color-accent)]"></div>
-                    {/if}
+                  <div class="min-w-0">
+                    <div class="text-sm font-medium" style="color: var(--color-text-primary);">
+                      {item.type === 'command' ? `/${item.value}` : `@${item.label}`}
+                    </div>
+                    <div class="truncate text-xs" style="color: var(--color-text-muted);">
+                      {item.description}
+                    </div>
                   </div>
-                  <div class="text-[11px] leading-relaxed opacity-60 group-hover:opacity-100 transition-opacity" style="color: var(--color-text-muted);">
-                    {opt.description}
+                  <div class="shrink-0 text-[10px] uppercase tracking-[0.12em]" style="color: var(--color-text-muted);">
+                    {item.type}
                   </div>
                 </button>
               {/each}
             </div>
           </div>
         {/if}
+        <textarea
+          bind:this={inputRef}
+          bind:value={value}
+          oninput={autoResize}
+          onkeydown={handleKeydown}
+          placeholder={disabled ? disabledMessage : placeholder}
+          rows="1"
+          class="input flex-1"
+          class:yolo-active={wsStore.isYoloMode}
+          disabled={disabled || !!configurationWarning}
+          style="resize: none; min-height: {minHeightPx}px; max-height: 280px; font-size: 15px; line-height: 1.6; box-sizing: border-box; padding: 10px 12px; background: transparent; border: none; box-shadow: none; {disabled || configurationWarning ? 'opacity: 0.6; cursor: not-allowed;' : ''}"
+        ></textarea>
       </div>
-    {/if}
+      <div class="w-full xl:w-auto xl:self-start">
+        <div
+          bind:this={actionPanelRef}
+          class="flex flex-col gap-3 rounded-2xl border px-3 py-3 xl:min-w-[188px]"
+          style="background: rgba(12, 10, 9, 0.34); border-color: var(--color-border);"
+        >
+          <div class="flex flex-wrap items-center gap-2 xl:justify-end">
+            <button
+              type="button"
+              class="flex items-center gap-1.5 text-[11px] font-medium px-2.5 py-1.5 rounded-md transition-colors {agentExecutionModeMeta.className}"
+              onclick={cycleAgentExecutionMode}
+              title={agentExecutionModeMeta.title}
+            >
+              <agentExecutionModeMeta.icon size={12} />
+              <span>{agentExecutionModeMeta.label}</span>
+            </button>
+
+            <button
+              type="button"
+              class="flex items-center gap-1.5 text-[11px] font-medium px-2.5 py-1.5 rounded-md transition-colors {agentSettingsStore.settings.criticGateEnabled ? 'bg-amber-500/20 text-amber-400 border border-amber-500/30' : 'bg-[var(--color-surface-3)] text-[var(--color-text-muted)] border border-[var(--color-border)] hover:brightness-110'}"
+              onclick={() => agentSettingsStore.saveSettings(
+                { ...agentSettingsStore.settings, criticGateEnabled: !agentSettingsStore.settings.criticGateEnabled },
+                { quietSuccess: true },
+              )}
+              title="Toggle Critic Agent"
+            >
+              {#if agentSettingsStore.settings.criticGateEnabled}
+                <ShieldCheck size={12} />
+                <span>Critic: On</span>
+              {:else}
+                <ShieldAlert size={12} />
+                <span>Critic: Off</span>
+              {/if}
+            </button>
+          </div>
+
+          <button
+            type="button"
+            onclick={isRunning ? stop : send}
+            disabled={disabled || (!isRunning && !canSend)}
+            class="btn flex w-full items-center justify-center gap-2 {isRunning ? 'bg-red-500/90 hover:bg-red-500 text-white border-transparent' : 'btn-primary'}"
+            style="height: 52px; padding: 0 20px; font-size: 14px; {disabled || configurationWarning ? 'opacity: 0.5; cursor: not-allowed;' : ''}"
+          >
+            {#if isRunning}
+              <div class="relative flex items-center justify-center">
+                <Circle size={18} fill="currentColor" class="animate-pulse" />
+                <div class="absolute w-2 h-2 bg-white rounded-full"></div>
+              </div>
+              Stop
+            {:else}
+              <Send size={18} />
+              Send
+            {/if}
+          </button>
+        </div>
+      </div>
+    </div>
   </div>
 
-  <!-- Input area -->
-  <div class="flex gap-3">
-    <textarea
-      bind:this={inputRef}
-      bind:value={input}
-      oninput={autoResize}
-      onkeydown={handleKeydown}
-      placeholder="Describe what you want to build..."
-      rows="1"
-      class="input flex-1"
-      class:yolo-active={wsStore.isYoloMode}
-      style="resize: none; min-height: 52px; max-height: 280px; font-size: 15px; padding: 14px 16px; box-sizing: border-box;"
-    ></textarea>
-    <button
-      onclick={isRunning ? stop : send}
-      disabled={!isRunning && !input.trim()}
-      class="btn self-end flex items-center justify-center gap-2 {isRunning ? 'bg-red-500/90 hover:bg-red-500' : 'btn-primary'}"
-      style="min-width: 80px; height: 52px; padding: 0 20px; font-size: 14px; font-weight: 600; {isRunning ? 'border: none; color: white;' : ''}"
-    >
-      {#if isRunning}
-        <Square size={18} fill="currentColor" />
-        Stop
+  <div class="flex items-center justify-between mt-[var(--space-sm)]">
+    <span class="text-xs" style="color: var(--color-text-muted);">
+      {#if configurationWarning}
+        Configure a provider to enable sending.
       {:else}
-        <Send size={18} />
-        Send
+        Enter to send · Shift+Enter for new line
       {/if}
-    </button>
-  </div>
-
-  <div class="flex items-center justify-between mt-2">
-    <span class="text-xs" style="color: var(--color-text-muted);">Enter to send · Shift+Enter for new line</span>
-    {#if input.length > 0}
-      <span class="text-xs" style="color: var(--color-text-muted);">{input.length} chars</span>
+    </span>
+    {#if value.length > 0}
+      <span class="text-xs" style="color: var(--color-text-muted);">{value.length} chars</span>
     {/if}
   </div>
 </div>

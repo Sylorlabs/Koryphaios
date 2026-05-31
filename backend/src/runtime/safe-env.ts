@@ -5,27 +5,27 @@
  */
 
 const ALLOWED_KEYS = new Set([
-  "PATH",
-  "HOME",
-  "USER",
-  "USERNAME",
-  "LANG",
-  "LC_ALL",
-  "LC_CTYPE",
-  "TMP",
-  "TEMP",
-  "TMPDIR",
-  "NODE_ENV",
-  "NO_COLOR",
-  "TERM",
-  "HTTP_PROXY",
-  "HTTPS_PROXY",
-  "NO_PROXY",
-  "http_proxy",
-  "https_proxy",
-  "no_proxy",
-  "ALL_PROXY",
-  "all_proxy",
+  'PATH',
+  'HOME',
+  'USER',
+  'USERNAME',
+  'LANG',
+  'LC_ALL',
+  'LC_CTYPE',
+  'TMP',
+  'TEMP',
+  'TMPDIR',
+  'NODE_ENV',
+  'NO_COLOR',
+  'TERM',
+  'HTTP_PROXY',
+  'HTTPS_PROXY',
+  'NO_PROXY',
+  'http_proxy',
+  'https_proxy',
+  'no_proxy',
+  'ALL_PROXY',
+  'all_proxy',
 ]);
 
 /** Patterns that must never be passed (case-insensitive key match). */
@@ -62,11 +62,11 @@ export function getSafeSubprocessEnv(extra: Record<string, string> = {}): Record
 
   for (const key of ALLOWED_KEYS) {
     const val = process.env[key];
-    if (val !== undefined && val !== "") out[key] = val;
+    if (val !== undefined && val !== '') out[key] = val;
   }
 
   for (const [key, value] of Object.entries(extra)) {
-    if (!isBlocked(key) && value !== undefined && value !== "") out[key] = value;
+    if (!isBlocked(key) && value !== undefined && value !== '') out[key] = value;
   }
 
   return out;

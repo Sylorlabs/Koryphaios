@@ -1,7 +1,7 @@
 // Memory Management and Cleanup
 // Domain: Centralized cleanup orchestration, memory leak prevention, resource disposal
 
-import { serverLog } from "../logger";
+import { serverLog } from '../logger';
 
 // ─── Types ─────────────────────────────────────────────────────────────────────
 
@@ -38,7 +38,7 @@ class CleanupRegistry {
 
   register(hook: CleanupHook): void {
     this.hooks.set(hook.name, hook);
-    serverLog.debug({ hook: hook.name, priority: hook.priority }, "Cleanup hook registered");
+    serverLog.debug({ hook: hook.name, priority: hook.priority }, 'Cleanup hook registered');
   }
 
   unregister(name: string): void {
@@ -51,27 +51,27 @@ class CleanupRegistry {
    */
   async shutdown(): Promise<void> {
     if (this.isShuttingDown) {
-      serverLog.warn("Shutdown already in progress");
+      serverLog.warn('Shutdown already in progress');
       return;
     }
 
     this.isShuttingDown = true;
-    serverLog.info({ hooksCount: this.hooks.size }, "Starting cleanup shutdown");
+    serverLog.info({ hooksCount: this.hooks.size }, 'Starting cleanup shutdown');
 
     // Sort by priority (lower = first)
     const sortedHooks = Array.from(this.hooks.values()).sort((a, b) => a.priority - b.priority);
 
     for (const hook of sortedHooks) {
       try {
-        serverLog.debug({ hook: hook.name }, "Running cleanup hook");
+        serverLog.debug({ hook: hook.name }, 'Running cleanup hook');
         await Promise.resolve(hook.cleanup());
       } catch (err) {
-        serverLog.error({ err, hook: hook.name }, "Cleanup hook failed");
+        serverLog.error({ err, hook: hook.name }, 'Cleanup hook failed');
       }
     }
 
     this.hooks.clear();
-    serverLog.info("Cleanup shutdown complete");
+    serverLog.info('Cleanup shutdown complete');
   }
 
   getHooks(): CleanupHook[] {
@@ -89,11 +89,11 @@ class MemoryMonitor {
   private lastAlertTime = 0;
   private readonly ALERT_COOLDOWN_MS = 60000; // 1 minute
   private readonly WARNING_THRESHOLD = 0.75; // 75%
-  private readonly CRITICAL_THRESHOLD = 0.90; // 90%
+  private readonly CRITICAL_THRESHOLD = 0.9; // 90%
 
   constructor(
     private getStats: () => MemoryStats,
-    private onMemoryPressure: (level: "warning" | "critical", stats: MemoryStats) => void
+    private onMemoryPressure: (level: 'warning' | 'critical', stats: MemoryStats) => void,
   ) {}
 
   start(intervalMs = 30000): void {
@@ -103,18 +103,18 @@ class MemoryMonitor {
       try {
         this.checkMemory();
       } catch (err) {
-        serverLog.error(err, "Memory check failed");
+        serverLog.error(err, 'Memory check failed');
       }
     }, intervalMs);
 
-    serverLog.debug({ intervalMs }, "Memory monitor started");
+    serverLog.debug({ intervalMs }, 'Memory monitor started');
   }
 
   stop(): void {
     if (this.checkInterval) {
       clearInterval(this.checkInterval);
       this.checkInterval = null;
-      serverLog.debug("Memory monitor stopped");
+      serverLog.debug('Memory monitor stopped');
     }
   }
 
@@ -129,9 +129,9 @@ class MemoryMonitor {
         this.lastAlertTime = now;
         serverLog.warn(
           { usage: `${usage.toFixed(1)}%`, used: stats.nodeHeap.used, total: stats.nodeHeap.total },
-          "High memory usage detected"
+          'High memory usage detected',
         );
-        this.onMemoryPressure("warning", stats);
+        this.onMemoryPressure('warning', stats);
       }
     }
 
@@ -142,26 +142,26 @@ class MemoryMonitor {
         this.lastAlertTime = now;
         serverLog.error(
           { usage: `${usage.toFixed(1)}%`, used: stats.nodeHeap.used, total: stats.nodeHeap.total },
-          "Critical memory usage detected"
+          'Critical memory usage detected',
         );
-        this.onMemoryPressure("critical", stats);
+        this.onMemoryPressure('critical', stats);
       }
     }
   }
 
   forceGC(): void {
     // Force garbage collection if --expose-gc is enabled
-    if (typeof global.gc === "function") {
+    if (typeof global.gc === 'function') {
       const before = this.getStats().nodeHeap.used;
       global.gc();
       const after = this.getStats().nodeHeap.used;
       const freed = before - after;
       serverLog.info(
         { before, after, freed: `${((freed / before) * 100).toFixed(2)}%` },
-        "Forced garbage collection"
+        'Forced garbage collection',
       );
     } else {
-      serverLog.debug("--expose-gc not enabled, cannot force GC");
+      serverLog.debug('--expose-gc not enabled, cannot force GC');
     }
   }
 }
@@ -172,7 +172,10 @@ class MemoryMonitor {
  * Track active sessions and trigger cleanup for abandoned ones.
  */
 class SessionTracker {
-  private activeSessions = new Map<string, { lastActivity: number; data: Record<string, unknown> }>();
+  private activeSessions = new Map<
+    string,
+    { lastActivity: number; data: Record<string, unknown> }
+  >();
   private cleanupInterval: Timer | null = null;
   private readonly SESSION_TIMEOUT_MS = 30 * 60 * 1000; // 30 minutes
 
@@ -222,7 +225,7 @@ class SessionTracker {
       if (toRemove.length > 0) {
         serverLog.info(
           { count: toRemove.length, sessions: toRemove },
-          "Cleaning up abandoned sessions"
+          'Cleaning up abandoned sessions',
         );
         for (const id of toRemove) {
           this.activeSessions.delete(id);
@@ -230,14 +233,14 @@ class SessionTracker {
       }
     }, intervalMs);
 
-    serverLog.debug({ intervalMs }, "Session cleanup started");
+    serverLog.debug({ intervalMs }, 'Session cleanup started');
   }
 
   stopCleanup(): void {
     if (this.cleanupInterval) {
       clearInterval(this.cleanupInterval);
       this.cleanupInterval = null;
-      serverLog.debug("Session cleanup stopped");
+      serverLog.debug('Session cleanup stopped');
     }
   }
 
@@ -258,7 +261,7 @@ let memoryMonitorInstance: MemoryMonitor | null = null;
  */
 export function initMemoryMonitor(
   getStats: () => MemoryStats,
-  onMemoryPressure: (level: "warning" | "critical", stats: MemoryStats) => void
+  onMemoryPressure: (level: 'warning' | 'critical', stats: MemoryStats) => void,
 ): MemoryMonitor {
   if (memoryMonitorInstance) {
     memoryMonitorInstance.stop();
@@ -282,23 +285,23 @@ export function getMemoryMonitor(): MemoryMonitor | null {
  * - Critical: Log, force GC, and optionally trigger gentle cleanup
  */
 export function createDefaultMemoryPressureHandler(): (
-  level: "warning" | "critical",
-  stats: MemoryStats
+  level: 'warning' | 'critical',
+  stats: MemoryStats,
 ) => void {
-  return (level: "warning" | "critical", stats: MemoryStats) => {
+  return (level: 'warning' | 'critical', stats: MemoryStats) => {
     // Force GC if available
-    if (typeof global.gc === "function") {
+    if (typeof global.gc === 'function') {
       global.gc();
     }
 
     // For critical pressure, we could trigger more aggressive cleanup
-    if (level === "critical") {
+    if (level === 'critical') {
       serverLog.warn(
         {
           activeSessions: stats.resources.activeSessions,
           pendingInputs: stats.resources.pendingInputs,
         },
-        "Critical memory pressure: consider session cleanup"
+        'Critical memory pressure: consider session cleanup',
       );
     }
   };
@@ -309,7 +312,7 @@ export function createDefaultMemoryPressureHandler(): (
 /**
  * Get current Node.js heap memory statistics.
  */
-export function getHeapStats(): MemoryStats["nodeHeap"] {
+export function getHeapStats(): MemoryStats['nodeHeap'] {
   const mem = process.memoryUsage();
   const total = mem.heapTotal;
   const used = mem.heapUsed;
@@ -330,7 +333,7 @@ export function getHeapStats(): MemoryStats["nodeHeap"] {
 export function createCleanupHook(
   name: string,
   priority: number,
-  cleanup: () => void | Promise<void>
+  cleanup: () => void | Promise<void>,
 ): CleanupHook {
   return {
     name,
@@ -339,7 +342,7 @@ export function createCleanupHook(
       try {
         await Promise.resolve(cleanup());
       } catch (err) {
-        serverLog.error({ err, hook: name }, "Cleanup failed");
+        serverLog.error({ err, hook: name }, 'Cleanup failed');
         throw err; // Re-throw to ensure it's logged by registry
       }
     },
@@ -353,7 +356,7 @@ export async function safeCleanup(name: string, fn: () => void | Promise<void>):
   try {
     await Promise.resolve(fn());
   } catch (err) {
-    serverLog.error({ err, cleanup: name }, "Cleanup failed");
+    serverLog.error({ err, cleanup: name }, 'Cleanup failed');
   }
 }
 
@@ -364,19 +367,19 @@ export async function safeCleanup(name: string, fn: () => void | Promise<void>):
  */
 export function registerShutdownHandlers(): void {
   const shutdown = async (signal: string) => {
-    serverLog.info({ signal }, "Received shutdown signal");
+    serverLog.info({ signal }, 'Received shutdown signal');
     try {
       await cleanupRegistry.shutdown();
-      serverLog.info("Graceful shutdown complete");
+      serverLog.info('Graceful shutdown complete');
     } catch (err) {
-      serverLog.error(err, "Shutdown failed");
+      serverLog.error(err, 'Shutdown failed');
       process.exit(1);
     }
     process.exit(0);
   };
 
-  process.on("SIGTERM", () => shutdown("SIGTERM"));
-  process.on("SIGINT", () => shutdown("SIGINT"));
+  process.on('SIGTERM', () => shutdown('SIGTERM'));
+  process.on('SIGINT', () => shutdown('SIGINT'));
 
-  serverLog.debug("Shutdown signal handlers registered");
+  serverLog.debug('Shutdown signal handlers registered');
 }

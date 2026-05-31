@@ -3,14 +3,15 @@
  * model_tier selection strictly obeys the user's checked model list; uses fallback or notifies if tier unavailable.
  */
 
-import type { TriageIntent, ModelTier, SelectionResult } from "../routing/types";
-import { getEnabledModelIds } from "../model-settings";
+import type { TriageIntent, ModelTier, SelectionResult } from '../routing/types';
+import { getEnabledModelIds } from '../model-settings';
 import {
   selectModel,
   selectModelForTier,
   selectFallbackWhenTierUnavailable,
-} from "../routing/SelectionEngine";
-import { auditRoutingDecision } from "../routing/TriageEngine";
+} from '../routing/SelectionEngine';
+export { selectModel };
+import { auditRoutingDecision } from '../routing/TriageEngine';
 
 export const MANAGER_INTERVIEW_QUESTION_COUNT = 4;
 
@@ -25,7 +26,7 @@ export interface ManagerSessionOptions {
   notifyUser?: (message: string) => void;
 }
 
-const DEFAULT_LARGE_TIER: ModelTier = "flagship";
+const DEFAULT_LARGE_TIER: ModelTier = 'flagship';
 
 /**
  * Run the Manager interview: ask 3–4 questions to clarify the LARGE task.
@@ -33,13 +34,13 @@ const DEFAULT_LARGE_TIER: ModelTier = "flagship";
  */
 export async function runManagerInterview(
   initialTask: string,
-  askUser: ManagerSessionOptions["askUser"]
+  askUser: ManagerSessionOptions['askUser'],
 ): Promise<{ refinedTask: string; answers: string[] }> {
   const questions = [
-    "What is the main deliverable? (e.g. a new API, a refactored module, a full feature)",
-    "Are there constraints? (e.g. existing patterns, tests required, no breaking changes)",
-    "Which area of the codebase does this touch? (e.g. frontend, backend, both)",
-    "Anything else the agent should know before starting?",
+    'What is the main deliverable? (e.g. a new API, a refactored module, a full feature)',
+    'Are there constraints? (e.g. existing patterns, tests required, no breaking changes)',
+    'Which area of the codebase does this touch? (e.g. frontend, backend, both)',
+    'Anything else the agent should know before starting?',
   ].slice(0, MANAGER_INTERVIEW_QUESTION_COUNT);
 
   const answers: string[] = [];
@@ -58,19 +59,19 @@ export async function runManagerInterview(
  * Resolve model_tier to a concrete model from the user's checked list.
  * If no model in that tier is checked, notifies user and uses fallback.
  */
-export function resolveWorkerModel(
+export async function resolveWorkerModel(
   modelTier: ModelTier,
   userId: string,
-  notifyUser?: (msg: string) => void
-): SelectionResult | null {
-  const checked = getEnabledModelIds(userId);
+  notifyUser?: (msg: string) => void,
+): Promise<SelectionResult | null> {
+  const checked = await getEnabledModelIds(userId);
   let result = selectModelForTier(modelTier, checked);
 
   if (!result) {
     const fallback = selectFallbackWhenTierUnavailable(modelTier, checked);
     if (fallback && notifyUser) {
       notifyUser(
-        `No model in tier "${modelTier}" is enabled in your settings. Using ${fallback.modelId} (${fallback.tier}) instead.`
+        `No model in tier "${modelTier}" is enabled in your settings. Using ${fallback.modelId} (${fallback.tier}) instead.`,
       );
     }
     result = fallback;
@@ -85,12 +86,12 @@ export function resolveWorkerModel(
 export async function runManagerSession(
   intent: TriageIntent,
   initialTask: string,
-  options: ManagerSessionOptions
+  options: ManagerSessionOptions,
 ): Promise<string> {
   const { userId, sessionId, askUser, spawnWorker, notifyUser } = options;
 
-  if (intent !== "LARGE") {
-    const checked = getEnabledModelIds(userId);
+  if (intent !== 'LARGE') {
+    const checked = await getEnabledModelIds(userId);
     const selection = selectModel(intent, checked);
     if (selection) {
       auditRoutingDecision({
@@ -102,25 +103,28 @@ export async function runManagerSession(
       });
       return spawnWorker(initialTask, selection.modelId, selection.provider);
     }
-    if (notifyUser) notifyUser("No enabled models in settings. Please enable at least one model.");
-    return "No model available.";
+    if (notifyUser) notifyUser('No enabled models in settings. Please enable at least one model.');
+    return 'No model available.';
   }
 
   const { refinedTask } = await runManagerInterview(initialTask, askUser);
 
   const modelTier = DEFAULT_LARGE_TIER;
-  const selection = resolveWorkerModel(modelTier, userId, notifyUser);
+  const selection = await resolveWorkerModel(modelTier, userId, notifyUser);
 
   if (!selection) {
-    if (notifyUser) notifyUser("No enabled model could be used for this task. Please enable at least one model in Settings.");
-    return "No model available.";
+    if (notifyUser)
+      notifyUser(
+        'No enabled model could be used for this task. Please enable at least one model in Settings.',
+      );
+    return 'No model available.';
   }
 
-  const checked = getEnabledModelIds(userId);
+  const checked = await getEnabledModelIds(userId);
   auditRoutingDecision({
     userId,
     sessionId,
-    intent: "LARGE",
+    intent: 'LARGE',
     selectedModelId: `${selection.provider}:${selection.modelId}`,
     checkedModels: checked,
   });

@@ -1,6 +1,6 @@
-import type { ServerWebSocket } from "bun";
-import type { WSMessage } from "@koryphaios/shared";
-import { serverLog } from "../logger";
+import type { ServerWebSocket } from 'bun';
+import type { WSMessage } from '@koryphaios/shared';
+import { serverLog } from '../logger';
 
 interface WSClientData {
   id: string;
@@ -27,16 +27,16 @@ export class WSManager {
 
   add(ws: ServerWebSocket<WSClientData>) {
     if (this.isShutdown) {
-      ws.close(1001, "Server shutting down");
+      ws.close(1001, 'Server shutting down');
       return;
     }
     if (this.clients.size >= this.maxClients) {
-      ws.close(1013, "Max clients reached");
+      ws.close(1013, 'Max clients reached');
       return;
     }
     const id = ws.data.id;
     this.clients.set(id, { ws, subscribedSessions: new Set(), isAlive: true });
-    serverLog.debug({ clientId: id, totalClients: this.clients.size }, "WebSocket client added");
+    serverLog.debug({ clientId: id, totalClients: this.clients.size }, 'WebSocket client added');
   }
 
   remove(ws: ServerWebSocket<WSClientData>) {
@@ -47,7 +47,7 @@ export class WSManager {
       client.subscribedSessions.clear();
     }
     this.clients.delete(id);
-    serverLog.debug({ clientId: id, totalClients: this.clients.size }, "WebSocket client removed");
+    serverLog.debug({ clientId: id, totalClients: this.clients.size }, 'WebSocket client removed');
   }
 
   handlePong(clientId: string) {
@@ -57,28 +57,36 @@ export class WSManager {
     }
   }
 
-   private heartbeat() {
+  private heartbeat() {
     try {
       for (const [id, client] of this.clients) {
         if (client.isAlive === false) {
-          serverLog.debug({ clientId: id }, "Terminating inactive WebSocket client");
-          try { client.ws.close(); } catch { /* Expected: socket may already be closed */ }
+          serverLog.debug({ clientId: id }, 'Terminating inactive WebSocket client');
+          try {
+            client.ws.close();
+          } catch {
+            /* Expected: socket may already be closed */
+          }
           this.clients.delete(id);
           continue;
         }
 
         client.isAlive = false;
         try {
-          client.ws.send(JSON.stringify({ type: "ping", timestamp: Date.now() }));
+          client.ws.send(JSON.stringify({ type: 'ping', timestamp: Date.now() }));
         } catch (err) {
           // If send fails, assume dead and remove next tick
-          serverLog.warn({ clientId: id, error: String(err) }, "Failed to send ping");
+          serverLog.warn({ clientId: id, error: String(err) }, 'Failed to send ping');
           this.clients.delete(id);
-          try { client.ws.close(); } catch { /* Expected: socket may already be closed */ }
+          try {
+            client.ws.close();
+          } catch {
+            /* Expected: socket may already be closed */
+          }
         }
       }
     } catch (err) {
-      serverLog.error({ error: String(err) }, "Heartbeat loop error");
+      serverLog.error({ error: String(err) }, 'Heartbeat loop error');
     }
   }
 
@@ -100,12 +108,12 @@ export class WSManager {
         }
       } catch (err) {
         failCount++;
-        serverLog.warn({ error: String(err) }, "Failed to send WebSocket message to client");
+        serverLog.warn({ error: String(err) }, 'Failed to send WebSocket message to client');
       }
     }
 
     if (failCount > 0) {
-      serverLog.debug({ successCount, failCount }, "Broadcast complete with failures");
+      serverLog.debug({ successCount, failCount }, 'Broadcast complete with failures');
     }
   }
 
@@ -121,12 +129,15 @@ export class WSManager {
             targetCount++;
           }
         } catch (err) {
-          serverLog.warn({ sessionId, error: String(err) }, "Failed to send session message to client");
+          serverLog.warn(
+            { sessionId, error: String(err) },
+            'Failed to send session message to client',
+          );
         }
       }
     }
 
-    serverLog.debug({ sessionId, targetCount }, "Session broadcast complete");
+    serverLog.debug({ sessionId, targetCount }, 'Session broadcast complete');
   }
 
   get clientCount() {
@@ -140,7 +151,7 @@ export class WSManager {
   shutdown(): void {
     if (this.isShutdown) return;
 
-    serverLog.info({ clientCount: this.clients.size }, "Shutting down WebSocket manager");
+    serverLog.info({ clientCount: this.clients.size }, 'Shutting down WebSocket manager');
     this.isShutdown = true;
 
     // Stop heartbeat
@@ -152,17 +163,20 @@ export class WSManager {
     // Close all connections
     for (const [id, client] of this.clients) {
       try {
-        client.ws.close(1001, "Server shutting down");
+        client.ws.close(1001, 'Server shutting down');
         client.subscribedSessions.clear();
       } catch (err) {
-        serverLog.warn({ clientId: id, error: String(err) }, "Failed to close WebSocket connection");
+        serverLog.warn(
+          { clientId: id, error: String(err) },
+          'Failed to close WebSocket connection',
+        );
       }
     }
 
     // Clear all clients
     this.clients.clear();
 
-    serverLog.info("WebSocket manager shutdown complete");
+    serverLog.info('WebSocket manager shutdown complete');
   }
 
   /**
@@ -174,3 +188,10 @@ export class WSManager {
 }
 
 export type { WSClientData };
+
+// Singleton instance for modules that need to broadcast without direct access
+export let wsManager: WSManager | null = null;
+
+export function setWsManager(manager: WSManager) {
+  wsManager = manager;
+}

@@ -1,6 +1,6 @@
 /**
  * Credentials Service Integration Tests
- * 
+ *
  * Tests encrypted credential storage:
  * - Store and retrieve credentials
  * - Per-user encryption isolation
@@ -9,9 +9,9 @@
  */
 
 import { describe, it, expect, beforeAll, beforeEach, afterAll } from 'bun:test';
-import { createUserCredentialsService, UserCredentialsService } from '../../src/services/user-credentials';
+import { UserCredentialsService } from '../../src/services/user-credentials';
 import { createAuditLogService } from '../../src/services/audit';
-import { initDb, getDb } from '../../src/db/sqlite';
+import { initDb, getDb } from '../../src/db';
 import { mkdirSync, rmSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
@@ -24,8 +24,14 @@ describe('Credentials Service', () => {
   beforeAll(() => {
     testDir = join(tmpdir(), `koryphaios-creds-test-${Date.now()}`);
     mkdirSync(testDir, { recursive: true });
+    // Set master key for encryption tests
+    process.env.KORYPHAIOS_MASTER_KEY =
+      '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef';
     initDb(testDir);
-    service = createUserCredentialsService();
+    // Disable FK constraints for tests (audit log FK causes issues with test isolation)
+    getDb().run('PRAGMA foreign_keys = OFF;');
+    // Create service directly with fresh DB connection to avoid singleton issues
+    service = new UserCredentialsService(getDb());
   });
 
   afterAll(() => {
@@ -53,7 +59,7 @@ describe('Credentials Service', () => {
 
     it('should encrypt credential (cannot be read back as plaintext from DB)', async () => {
       const credential = 'sk-secret123';
-      
+
       await service.create({
         userId,
         provider: 'openai',
@@ -63,18 +69,21 @@ describe('Credentials Service', () => {
 
       // Direct DB query should show encrypted data
       const db = getDb();
-      const row = db.prepare(
-        'SELECT encrypted_credential FROM user_credentials WHERE user_id = ?'
-      ).get(userId) as any;
+      const row = db
+        .prepare('SELECT encrypted_credential FROM user_credentials WHERE user_id = ?')
+        .get(userId) as any;
 
       expect(row.encrypted_credential).toBeDefined();
       expect(row.encrypted_credential).not.toContain(credential);
-      expect(row.encrypted_credential).toContain('"ciphertext"'); // JSON envelope
+      // Verify it looks like base64-encoded encrypted data (not plaintext JSON)
+      expect(Buffer.from(row.encrypted_credential, 'base64').toString('base64')).toBe(
+        row.encrypted_credential,
+      );
     });
 
     it('should store metadata', async () => {
       const metadata = { name: 'Production Key', env: 'prod' };
-      
+
       const id = await service.create({
         userId,
         provider: 'anthropic',
@@ -90,7 +99,7 @@ describe('Credentials Service', () => {
   describe('get', () => {
     it('should retrieve and decrypt credential', async () => {
       const originalCredential = 'sk-test-secret';
-      
+
       const id = await service.create({
         userId,
         provider: 'openai',
@@ -107,10 +116,10 @@ describe('Credentials Service', () => {
       expect(result).toBeNull();
     });
 
-    it('should not allow accessing other user\'s credential', async () => {
+    it("should not allow accessing other user's credential", async () => {
       const otherUserId = `other_${Date.now()}`;
       const credential = 'sk-secret';
-      
+
       const id = await service.create({
         userId,
         provider: 'openai',
@@ -126,7 +135,7 @@ describe('Credentials Service', () => {
   describe('getMetadata', () => {
     it('should return metadata without credential', async () => {
       const metadata = { name: 'My Key', note: 'Important' };
-      
+
       const id = await service.create({
         userId,
         provider: 'groq',
@@ -158,17 +167,22 @@ describe('Credentials Service', () => {
   });
 
   describe('list', () => {
-    it('should list only user\'s credentials', async () => {
+    it("should list only user's credentials", async () => {
       const otherUserId = `other_${Date.now()}`;
-      
+
       await service.create({ userId, provider: 'openai', credential: 'sk-1', metadata: {} });
       await service.create({ userId, provider: 'anthropic', credential: 'sk-2', metadata: {} });
-      await service.create({ userId: otherUserId, provider: 'groq', credential: 'sk-3', metadata: {} });
+      await service.create({
+        userId: otherUserId,
+        provider: 'groq',
+        credential: 'sk-3',
+        metadata: {},
+      });
 
       const credentials = await service.list(userId);
 
       expect(credentials.length).toBe(2);
-      expect(credentials.every(c => c.userId === userId)).toBe(true);
+      expect(credentials.every((c) => c.userId === userId)).toBe(true);
     });
 
     it('should filter by provider', async () => {
@@ -179,7 +193,7 @@ describe('Credentials Service', () => {
       const openaiCreds = await service.list(userId, { provider: 'openai' });
 
       expect(openaiCreds.length).toBe(2);
-      expect(openaiCreds.every(c => c.provider === 'openai')).toBe(true);
+      expect(openaiCreds.every((c) => c.provider === 'openai')).toBe(true);
     });
 
     it('should filter by active status', async () => {
@@ -222,9 +236,9 @@ describe('Credentials Service', () => {
       expect(result).toBe(false);
     });
 
-    it('should not allow deleting other user\'s credential', async () => {
+    it("should not allow deleting other user's credential", async () => {
       const otherUserId = `other_${Date.now()}`;
-      
+
       const id = await service.create({
         userId,
         provider: 'openai',
@@ -261,7 +275,7 @@ describe('Credentials Service', () => {
   describe('rotate', () => {
     it('should rotate credential encryption', async () => {
       const originalCredential = 'sk-secret123';
-      
+
       const id = await service.create({
         userId,
         provider: 'openai',
@@ -287,7 +301,7 @@ describe('Credentials Service', () => {
   describe('audit logging', () => {
     it('should log credential access', async () => {
       const auditService = createAuditLogService();
-      
+
       const id = await service.create({
         userId,
         provider: 'openai',
@@ -300,7 +314,7 @@ describe('Credentials Service', () => {
 
       // Check audit log
       const auditTrail = await auditService.getCredentialAccessHistory(id);
-      
+
       expect(auditTrail.length).toBeGreaterThan(0);
       expect(auditTrail[0].action).toBe('credential_access');
       expect(auditTrail[0].resourceId).toBe(id);

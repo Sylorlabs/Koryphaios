@@ -1,9 +1,9 @@
 // Session token authentication
 // Simple JWT-like token system for session authentication
 
-import { createHmac, randomBytes, timingSafeEqual } from "crypto";
-import { serverLog } from "./logger";
-import { ValidationError } from "./errors";
+import { createHmac, randomBytes, timingSafeEqual } from 'crypto';
+import { serverLog } from './logger';
+import { ValidationError } from './errors';
 
 /**
  * Secret key for signing tokens — REQUIRED in all environments
@@ -11,22 +11,22 @@ import { ValidationError } from "./errors";
  */
 const TOKEN_SECRET = (() => {
   const secret = process.env.SESSION_TOKEN_SECRET;
-  if (!secret || typeof secret !== "string") {
+  if (!secret || typeof secret !== 'string') {
     throw new Error(
-      "SESSION_TOKEN_SECRET must be set in environment (min 32 characters). " +
-      "Use: openssl rand -hex 16 to generate a secure secret."
+      'SESSION_TOKEN_SECRET must be set in environment (min 32 characters). ' +
+        'Use: openssl rand -hex 16 to generate a secure secret.',
     );
   }
   if (secret.trim().length < 32) {
     throw new Error(
-      `SESSION_TOKEN_SECRET must be at least 32 characters (current: ${secret.trim().length}).`
+      `SESSION_TOKEN_SECRET must be at least 32 characters (current: ${secret.trim().length}).`,
     );
   }
   return secret.trim();
 })();
 
 if (!process.env.SESSION_TOKEN_SECRET) {
-  serverLog.warn("SESSION_TOKEN_SECRET not set - this will cause a startup error");
+  serverLog.warn('SESSION_TOKEN_SECRET not set - this will cause a startup error');
 }
 
 /**
@@ -41,17 +41,18 @@ interface TokenPayload {
 /**
  * Generate a session token
  */
-export function generateSessionToken(sessionId: string, ttlMs: number = 24 * 60 * 60 * 1000): string {
+export function generateSessionToken(
+  sessionId: string,
+  ttlMs: number = 24 * 60 * 60 * 1000,
+): string {
   const payload: TokenPayload = {
     sessionId,
     createdAt: Date.now(),
     expiresAt: Date.now() + ttlMs,
   };
 
-  const payloadBase64 = Buffer.from(JSON.stringify(payload)).toString("base64url");
-  const signature = createHmac("sha256", TOKEN_SECRET)
-    .update(payloadBase64)
-    .digest("base64url");
+  const payloadBase64 = Buffer.from(JSON.stringify(payload)).toString('base64url');
+  const signature = createHmac('sha256', TOKEN_SECRET).update(payloadBase64).digest('base64url');
 
   return `${payloadBase64}.${signature}`;
 }
@@ -61,38 +62,38 @@ export function generateSessionToken(sessionId: string, ttlMs: number = 24 * 60 
  */
 export function verifySessionToken(token: string): TokenPayload {
   try {
-    const [payloadBase64, signature] = token.split(".");
-    
+    const [payloadBase64, signature] = token.split('.');
+
     if (!payloadBase64 || !signature) {
-      throw new ValidationError("Invalid token format");
+      throw new ValidationError('Invalid token format');
     }
 
     // Verify signature
-    const expectedSignature = createHmac("sha256", TOKEN_SECRET)
+    const expectedSignature = createHmac('sha256', TOKEN_SECRET)
       .update(payloadBase64)
-      .digest("base64url");
+      .digest('base64url');
 
     // Timing-safe comparison to prevent timing attacks
-    const sigBuf = Buffer.from(signature, "base64url");
-    const expectedBuf = Buffer.from(expectedSignature, "base64url");
+    const sigBuf = Buffer.from(signature, 'base64url');
+    const expectedBuf = Buffer.from(expectedSignature, 'base64url');
     if (sigBuf.length !== expectedBuf.length || !timingSafeEqual(sigBuf, expectedBuf)) {
-      throw new ValidationError("Invalid token signature");
+      throw new ValidationError('Invalid token signature');
     }
 
     // Decode payload
     const payload: TokenPayload = JSON.parse(
-      Buffer.from(payloadBase64, "base64url").toString("utf-8")
+      Buffer.from(payloadBase64, 'base64url').toString('utf-8'),
     );
 
     // Check expiration
     if (payload.expiresAt && Date.now() > payload.expiresAt) {
-      throw new ValidationError("Token expired");
+      throw new ValidationError('Token expired');
     }
 
     return payload;
   } catch (err) {
     if (err instanceof ValidationError) throw err;
-    throw new ValidationError("Token verification failed", { error: String(err) });
+    throw new ValidationError('Token verification failed', { error: String(err) });
   }
 }
 
@@ -101,13 +102,13 @@ export function verifySessionToken(token: string): TokenPayload {
  */
 export function extractTokenFromRequest(req: Request): string | null {
   // Check Authorization header (Bearer token)
-  const authHeader = req.headers.get("Authorization");
-  if (authHeader?.startsWith("Bearer ")) {
+  const authHeader = req.headers.get('Authorization');
+  if (authHeader?.startsWith('Bearer ')) {
     return authHeader.substring(7);
   }
 
   // Check X-Session-Token header
-  const sessionHeader = req.headers.get("X-Session-Token");
+  const sessionHeader = req.headers.get('X-Session-Token');
   if (sessionHeader) {
     return sessionHeader;
   }
@@ -116,9 +117,12 @@ export function extractTokenFromRequest(req: Request): string | null {
 }
 
 export class AuthError extends Error {
-  constructor(message: string, public statusCode: number = 401) {
+  constructor(
+    message: string,
+    public statusCode: number = 401,
+  ) {
     super(message);
-    this.name = "AuthError";
+    this.name = 'AuthError';
   }
 }
 
@@ -128,16 +132,16 @@ export class AuthError extends Error {
  */
 export function requireSessionAuth(req: Request): string {
   const token = extractTokenFromRequest(req);
-  
+
   if (!token) {
-    throw new AuthError("Missing session token");
+    throw new AuthError('Missing session token');
   }
 
   try {
     const payload = verifySessionToken(token);
     return payload.sessionId;
   } catch (err) {
-    throw new AuthError("Invalid or expired session token");
+    throw new AuthError('Invalid or expired session token');
   }
 }
 
@@ -173,4 +177,4 @@ export {
   changePassword,
   cleanupExpiredTokens,
   cleanupBlacklist,
-} from "./auth/auth";
+} from './auth/auth';

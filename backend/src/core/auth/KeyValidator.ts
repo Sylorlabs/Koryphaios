@@ -11,11 +11,11 @@
  * - Google Gemini: https://generativelanguage.googleapis.com/v1beta/models (?key= or x-goog-api-key)
  */
 
-import { ANTHROPIC_VERSION } from "../../providers/api-endpoints";
+import { ANTHROPIC_VERSION } from '../../providers/api-endpoints';
 
 const VERIFY_TIMEOUT_MS = 5_000;
 
-export type KeyStatus = "VALID" | "INVALID" | "NO_KEY";
+export type KeyStatus = 'VALID' | 'INVALID' | 'NO_KEY';
 
 export interface KeyValidationResult {
   status: KeyStatus;
@@ -23,33 +23,30 @@ export interface KeyValidationResult {
 }
 
 /** Provider-specific minimal ping config */
-const ENDPOINTS: Record<
-  string,
-  { url: string; auth: "x-api-key" | "bearer" | "query" }
-> = {
+const ENDPOINTS: Record<string, { url: string; auth: 'x-api-key' | 'bearer' | 'query' }> = {
   anthropic: {
-    url: "https://api.anthropic.com/v1/models",
-    auth: "x-api-key",
+    url: 'https://api.anthropic.com/v1/models',
+    auth: 'x-api-key',
   },
   openai: {
-    url: "https://api.openai.com/v1/models",
-    auth: "bearer",
+    url: 'https://api.openai.com/v1/models',
+    auth: 'bearer',
   },
   google: {
-    url: "https://generativelanguage.googleapis.com/v1beta/models",
-    auth: "query",
+    url: 'https://generativelanguage.googleapis.com/v1beta/models',
+    auth: 'query',
   },
   groq: {
-    url: "https://api.groq.com/openai/v1/models",
-    auth: "bearer",
+    url: 'https://api.groq.com/openai/v1/models',
+    auth: 'bearer',
   },
   openrouter: {
-    url: "https://openrouter.ai/api/v1/models",
-    auth: "bearer",
+    url: 'https://openrouter.ai/api/v1/models',
+    auth: 'bearer',
   },
   xai: {
-    url: "https://api.x.ai/v1/models",
-    auth: "bearer",
+    url: 'https://api.x.ai/v1/models',
+    auth: 'bearer',
   },
 };
 
@@ -59,7 +56,7 @@ const ENDPOINTS: Record<
 async function fetchWithTimeout(
   url: string,
   init: RequestInit,
-  timeoutMs: number = VERIFY_TIMEOUT_MS
+  timeoutMs: number = VERIFY_TIMEOUT_MS,
 ): Promise<Response> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
@@ -68,7 +65,7 @@ async function fetchWithTimeout(
       ...init,
       signal: controller.signal,
       headers: new Headers({
-        "User-Agent": "Koryphaios/1.0",
+        'User-Agent': 'Koryphaios/1.0',
         ...(init.headers as Record<string, string>),
       }),
     });
@@ -84,62 +81,62 @@ async function fetchWithTimeout(
  */
 export async function validateProviderKey(
   provider: string,
-  credentials: { apiKey?: string | null; authToken?: string | null }
+  credentials: { apiKey?: string | null; authToken?: string | null },
 ): Promise<KeyValidationResult> {
   const apiKey = credentials.apiKey?.trim() || null;
   const authToken = credentials.authToken?.trim() || null;
   const token = apiKey || authToken;
 
   if (!token) {
-    return { status: "NO_KEY" };
+    return { status: 'NO_KEY' };
   }
 
   const config = ENDPOINTS[provider.toLowerCase()];
   if (!config) {
-    return { status: "INVALID", error: `Unsupported provider: ${provider}` };
+    return { status: 'INVALID', error: `Unsupported provider: ${provider}` };
   }
 
   let url = config.url;
-  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
 
   switch (config.auth) {
-    case "x-api-key":
-      headers["x-api-key"] = token;
-      headers["anthropic-version"] = ANTHROPIC_VERSION;
+    case 'x-api-key':
+      headers['x-api-key'] = token;
+      headers['anthropic-version'] = ANTHROPIC_VERSION;
       break;
-    case "bearer":
-      headers["Authorization"] = `Bearer ${token}`;
+    case 'bearer':
+      headers['Authorization'] = `Bearer ${token}`;
       break;
-    case "query":
+    case 'query':
       url = `${url}?key=${encodeURIComponent(token)}`;
       break;
   }
 
   try {
     const response = await fetchWithTimeout(url, {
-      method: "GET",
+      method: 'GET',
       headers,
     });
 
     if (response.ok) {
-      return { status: "VALID" };
+      return { status: 'VALID' };
     }
 
     if (response.status === 401) {
-      return { status: "INVALID", error: "Unauthorized (invalid or expired key)" };
+      return { status: 'INVALID', error: 'Unauthorized (invalid or expired key)' };
     }
 
     const body = await response.text();
     return {
-      status: "INVALID",
+      status: 'INVALID',
       error: `HTTP ${response.status}: ${body.slice(0, 200)}`,
     };
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
-    if (message.includes("abort") || message.includes("timeout")) {
-      return { status: "INVALID", error: "Timeout (5s)" };
+    if (message.includes('abort') || message.includes('timeout')) {
+      return { status: 'INVALID', error: 'Timeout (5s)' };
     }
-    return { status: "INVALID", error: message };
+    return { status: 'INVALID', error: message };
   }
 }
 
@@ -154,7 +151,7 @@ export async function validateProviderKeys(credentialsByProvider: {
     Object.entries(credentialsByProvider).map(async ([provider, creds]) => {
       const result = await validateProviderKey(provider, creds);
       return [provider, result.status] as const;
-    })
+    }),
   );
   return Object.fromEntries(entries);
 }

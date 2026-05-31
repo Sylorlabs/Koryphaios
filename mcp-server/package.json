@@ -1,0 +1,80 @@
+{
+  "name": "@koryphaios/mcp-server",
+  "version": "1.0.0",
+  "description": "Koryphaios MCP Server — Model Context Protocol server for AI agent error detection, debugging, and console log monitoring",
+  "main": "dist/index.js",
+  "exports": {
+    ".": "./dist/exports.js",
+    "./server": "./dist/index.js"
+  },
+  "type": "module",
+  "scripts": {
+    "build": "tsc && bunx tsc-alias",
+    "dev": "bunx tsx watch src/index.ts",
+    "start": "node dist/index.js",
+    "test": "vitest",
+    "test:coverage": "vitest --coverage",
+    "test:ui": "vitest --ui",
+    "lint": "eslint src --ext .ts,.tsx",
+    "lint:fix": "eslint src --ext .ts,.tsx --fix",
+    "format": "prettier --write src/**/*.{ts,tsx,json}",
+    "typecheck": "tsc --noEmit",
+    "clean": "rimraf dist",
+    "prepublishOnly": "bun run clean && bun run build",
+    "benchmark": "bunx tsx benchmarks/run.ts",
+    "benchmark:ci": "bunx tsx benchmarks/run.ts --ci",
+    "optimize": "bun run build && bun run benchmark",
+    "cleanup": "scripts/cleanup.sh",
+    "cleanup:deep": "scripts/cleanup.sh --deep",
+    "test:mcp": "node scripts/test-mcp-protocol.js",
+    "test:integration": "node scripts/test-mcp-integration.js",
+    "test:errors": "node scripts/simple-mcp-test.js",
+    "verify": "bun run build && bun run test && bun run test:mcp"
+  },
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "koryphaios",
+    "debugging",
+    "error-detection",
+    "ai-agent",
+    "console-logs",
+    "typescript",
+    "javascript",
+    "python",
+    "go",
+    "rust",
+    "linting",
+    "performance-monitoring",
+    "multi-language",
+    "production-ready"
+  ],
+  "author": "Sylorlabs",
+  "license": "UNLICENSED",
+  "private": true,
+  "engines": {
+    "node": ">=18.0.0",
+    "bun": ">=1.0.0"
+  },
+  "files": [
+    "dist",
+    "docs",
+    "README.md",
+    "LICENSE",
+    "package.json"
+  ],
+  "dependencies": {
+    "@koryphaios/shared": "workspace:*",
+    "@modelcontextprotocol/sdk": "^1.0.0",
+    "playwright": "^1.40.0"
+  },
+  "devDependencies": {
+    "@types/node": "^25.9.1",
+    "eslint": "^10.4.1",
+    "prettier": "^3.8.3",
+    "rimraf": "^6.1.3",
+    "tsc-alias": "^1.8.17",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.7"
+  }
+}

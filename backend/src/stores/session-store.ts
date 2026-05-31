@@ -1,142 +1,138 @@
-import type { Session } from "@koryphaios/shared";
-import { nanoid } from "nanoid";
-import { getDb } from "../db/sqlite";
-import { ID, SESSION } from "../constants";
+import type { Session as SharedSession } from '@koryphaios/shared';
+import { nanoid } from 'nanoid';
+import { ID, SESSION } from '../constants';
+import { db, sessions, type Session as DbSession } from '../db';
+import { eq, and, desc } from 'drizzle-orm';
 
 export interface ISessionStore {
-  create(titleOrUserId?: string, titleOrParentId?: string, parentId?: string): Session;
-  get(id: string): Session | undefined;
-  list(): Session[];
-  listForUser(userId: string): Session[];
-  getForUser(id: string, userId: string): Session | undefined;
-  update(id: string, updates: Partial<Session>, expectedVersion?: number): Session | undefined;
-  delete(id: string): void;
-  deleteForUser(id: string, userId: string): void;
-  clear(): void;
+  create(
+    titleOrUserId?: string,
+    titleOrParentId?: string,
+    parentId?: string,
+  ): Promise<SharedSession>;
+  get(id: string): Promise<SharedSession | undefined>;
+  list(): Promise<SharedSession[]>;
+  listForUser(userId: string): Promise<SharedSession[]>;
+  getForUser(id: string, userId: string): Promise<SharedSession | undefined>;
+  update(
+    id: string,
+    updates: Partial<SharedSession>,
+    expectedVersion?: number,
+  ): Promise<SharedSession | undefined>;
+  delete(id: string): Promise<void>;
+  deleteForUser(id: string, userId: string): Promise<void>;
+  clear(): Promise<void>;
+}
+
+function toSharedSession(s: DbSession): SharedSession {
+  return {
+    id: s.id,
+    title: s.title,
+    parentSessionId: s.parentId ?? undefined,
+    messageCount: s.messageCount ?? 0,
+    totalTokensIn: s.tokensIn ?? 0,
+    totalTokensOut: s.tokensOut ?? 0,
+    totalCost: s.totalCost ?? 0,
+    version: s.version ?? 1,
+    createdAt: s.createdAt.getTime(),
+    updatedAt: s.updatedAt.getTime(),
+  };
 }
 
 export class SessionStore implements ISessionStore {
-  create(titleOrUserId?: string, titleOrTitle?: string, parentId?: string): Session {
-    // Server calls create(userId, title?, parentId?) or create(userId, title); store also supports create(title?, parentId?)
+  async create(
+    titleOrUserId?: string,
+    titleOrTitle?: string,
+    parentId?: string,
+  ): Promise<SharedSession> {
     const argc = arguments.length;
     const userId = argc >= 1 ? (titleOrUserId ?? null) : null;
     const title =
-      argc >= 2 ? (titleOrTitle ?? SESSION.DEFAULT_TITLE) : (titleOrUserId ?? SESSION.DEFAULT_TITLE);
-    const parent = argc >= 3 ? parentId : (argc === 2 ? undefined : titleOrTitle);
+      argc >= 2
+        ? (titleOrTitle ?? SESSION.DEFAULT_TITLE)
+        : (titleOrUserId ?? SESSION.DEFAULT_TITLE);
+    const parent = argc >= 3 ? parentId : argc === 2 ? undefined : titleOrTitle;
+
     const id = nanoid(ID.SESSION_ID_LENGTH);
-    const now = Date.now();
-    const db = getDb();
+    const now = new Date();
 
-    db.run(
-      "INSERT INTO sessions (id, user_id, title, parent_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
-      [id, userId, title ?? SESSION.DEFAULT_TITLE, parent || null, now, now],
-    );
+    const [session] = await db
+      .insert(sessions)
+      .values({
+        id,
+        userId: userId ?? null,
+        title: title ?? SESSION.DEFAULT_TITLE,
+        parentId: parent || null,
+        createdAt: now,
+        updatedAt: now,
+        version: 1,
+      })
+      .returning();
 
-    return {
-      id,
-      title: title ?? SESSION.DEFAULT_TITLE,
-      parentSessionId: parent || undefined,
-      messageCount: 0,
-      totalTokensIn: 0,
-      totalTokensOut: 0,
-      totalCost: 0,
-      createdAt: now,
-      updatedAt: now,
-    };
+    return toSharedSession(session);
   }
 
-  get(id: string): Session | undefined {
-    const row = getDb().query("SELECT * FROM sessions WHERE id = ?").get(id) as Record<string, unknown> | undefined;
-    if (!row) return undefined;
-    return this.rowToSession(row);
+  async get(id: string): Promise<SharedSession | undefined> {
+    const session = await db.query.sessions.findFirst({
+      where: eq(sessions.id, id),
+    });
+    return session ? toSharedSession(session) : undefined;
   }
 
-  list(): Session[] {
-    const rows = getDb().query("SELECT * FROM sessions ORDER BY updated_at DESC").all() as Record<string, unknown>[];
-    return rows.map((row) => this.rowToSession(row));
+  async list(): Promise<SharedSession[]> {
+    const results = await db.select().from(sessions).orderBy(desc(sessions.updatedAt));
+    return results.map(toSharedSession);
   }
 
-  /** In single-user mode, returns all sessions (no user_id column). */
-  listForUser(_userId: string): Session[] {
-    return this.list();
+  async listForUser(userId: string): Promise<SharedSession[]> {
+    const results = await db
+      .select()
+      .from(sessions)
+      .where(eq(sessions.userId, userId))
+      .orderBy(desc(sessions.updatedAt));
+    return results.map(toSharedSession);
   }
 
-  /** In single-user mode, same as get(id). */
-  getForUser(id: string, _userId: string): Session | undefined {
-    return this.get(id);
+  async getForUser(id: string, userId: string): Promise<SharedSession | undefined> {
+    const session = await db.query.sessions.findFirst({
+      where: and(eq(sessions.id, id), eq(sessions.userId, userId)),
+    });
+    return session ? toSharedSession(session) : undefined;
   }
 
-  private rowToSession(row: Record<string, unknown>): Session {
-    return {
-      id: row.id as string,
-      title: row.title as string,
-      parentSessionId: row.parent_id as string | undefined,
-      messageCount: (row.message_count as number) ?? 0,
-      totalTokensIn: (row.tokens_in as number) ?? 0,
-      totalTokensOut: (row.tokens_out as number) ?? 0,
-      totalCost: (row.total_cost as number) ?? 0,
-      version: (row.version as number) ?? 1,
-      createdAt: row.created_at as number,
-      updatedAt: row.updated_at as number,
-    };
-  }
-
-  update(id: string, updates: Partial<Session>, expectedVersion?: number): Session | undefined {
-    const mapping: Record<string, string> = {
-      title: "title",
-      messageCount: "message_count",
-      totalTokensIn: "tokens_in",
-      totalTokensOut: "tokens_out",
-      totalCost: "total_cost",
-      updatedAt: "updated_at",
+  async update(
+    id: string,
+    updates: Partial<SharedSession>,
+    expectedVersion?: number,
+  ): Promise<SharedSession | undefined> {
+    const drizzleUpdates: any = {
+      updatedAt: new Date(),
     };
 
-    const fields = Object.keys(updates).filter((k) => k !== "id" && k !== "version" && k in mapping);
-    if (fields.length === 0 && expectedVersion === undefined) return this.get(id);
+    if (updates.title !== undefined) drizzleUpdates.title = updates.title;
+    if (updates.messageCount !== undefined) drizzleUpdates.messageCount = updates.messageCount;
+    if (updates.totalTokensIn !== undefined) drizzleUpdates.tokensIn = updates.totalTokensIn;
+    if (updates.totalTokensOut !== undefined) drizzleUpdates.tokensOut = updates.totalTokensOut;
+    if (updates.totalCost !== undefined) drizzleUpdates.totalCost = updates.totalCost;
 
-    const db = getDb();
-    const now = Date.now();
+    const whereClause = expectedVersion
+      ? and(eq(sessions.id, id), eq(sessions.version, expectedVersion))
+      : eq(sessions.id, id);
 
-    // Use optimistic locking if version is provided
-    if (expectedVersion !== undefined) {
-      const sets = fields.map((f) => `${mapping[f]} = ?`).join(", ");
-      const values: unknown[] = fields.map((f) => (updates as Record<string, unknown>)[f]);
-      values.push(now); // updated_at
-      values.push(expectedVersion + 1); // new version
-      values.push(id);
-      values.push(expectedVersion); // expected current version
+    const [updated] = await db.update(sessions).set(drizzleUpdates).where(whereClause).returning();
 
-      const result = db.run(
-        `UPDATE sessions SET ${sets ? sets + ", " : ""}updated_at = ?, version = ? WHERE id = ? AND version = ?`,
-        values as Parameters<typeof db.run>[1]
-      );
-
-      if (result.changes === 0) {
-        throw new Error(`Concurrent modification detected: session ${id} was modified by another process`);
-      }
-    } else {
-      // No optimistic locking - just update
-      const sets = fields.map((f) => `${mapping[f]} = ?`).join(", ");
-      const values: unknown[] = fields.map((f) => (updates as Record<string, unknown>)[f]);
-      values.push(now);
-      values.push(id);
-
-      db.run(`UPDATE sessions SET ${sets}, updated_at = ? WHERE id = ?`, values as Parameters<typeof db.run>[1]);
-    }
-
-    return this.get(id);
+    return updated ? toSharedSession(updated) : undefined;
   }
 
-  delete(id: string) {
-    getDb().run("DELETE FROM sessions WHERE id = ?", [id]);
+  async delete(id: string): Promise<void> {
+    await db.delete(sessions).where(eq(sessions.id, id));
   }
 
-  /** In single-user mode, same as delete(id). */
-  deleteForUser(id: string, _userId: string) {
-    this.delete(id);
+  async deleteForUser(id: string, userId: string): Promise<void> {
+    await db.delete(sessions).where(and(eq(sessions.id, id), eq(sessions.userId, userId)));
   }
 
-  clear() {
-    getDb().run("DELETE FROM sessions");
+  async clear(): Promise<void> {
+    await db.delete(sessions);
   }
 }

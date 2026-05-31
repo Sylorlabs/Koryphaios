@@ -6,8 +6,12 @@
   "windows": ["main"],
   "permissions": [
     "core:default",
+    "core:window:allow-start-dragging",
+    "core:window:allow-toggle-maximize",
     "shell:allow-open",
     "dialog:default",
-    "notification:default"
+    "notification:default",
+    "process:default",
+    "process:allow-restart"
   ]
 }

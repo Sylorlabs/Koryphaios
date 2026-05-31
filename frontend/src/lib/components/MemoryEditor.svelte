@@ -143,7 +143,7 @@
     { id: "project" as const, label: "Project Memory", icon: FileText, color: "text-blue-400" },
     { id: "universal" as const, label: "Universal Memory", icon: Brain, color: "text-purple-400" },
     { id: "session" as const, label: "Session Memory", icon: MessageSquare, color: "text-green-400" },
-    { id: "rules" as const, label: "Rules (.cursorrules)", icon: BookOpen, color: "text-orange-400" },
+    { id: "rules" as const, label: "Rules (.koryrules)", icon: BookOpen, color: "text-orange-400" },
     { id: "settings" as const, label: "Settings", icon: Settings2, color: "text-gray-400" },
   ];
 
@@ -161,7 +161,7 @@
   }
 </script>
 
-<div class="flex flex-col h-full">
+<div class="flex h-full min-h-0 min-w-0 flex-col">
   <!-- Header -->
   <div class="flex items-center justify-between px-4 py-3 border-b border-[var(--color-border)]">
     <div class="flex items-center gap-2">
@@ -179,11 +179,11 @@
   </div>
 
   <!-- Tabs -->
-  <div class="flex border-b border-[var(--color-border)]">
+  <div class="flex shrink-0 overflow-x-auto border-b border-[var(--color-border)]">
     {#each tabs as tab}
       <button
         onclick={() => memoryStore.setActiveTab(tab.id)}
-        class="flex items-center gap-1.5 px-3 py-2 text-xs font-medium transition-colors border-b-2
+        class="shrink-0 whitespace-nowrap flex items-center gap-1.5 px-3 py-2 text-xs font-medium transition-colors border-b-2
           {memoryStore.activeTab === tab.id 
             ? `border-[var(--color-accent)] ${tab.color} bg-[var(--color-surface-2)]` 
             : 'border-transparent text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-1)]'}"
@@ -195,14 +195,14 @@
   </div>
 
   <!-- Content -->
-  <div class="flex-1 overflow-hidden">
+  <div class="flex-1 min-h-0 overflow-hidden">
     {#if memoryStore.isLoading}
       <div class="flex items-center justify-center h-full">
         <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-[var(--color-accent)]"></div>
       </div>
     {:else if memoryStore.activeTab === "universal"}
       {@const info = getFileInfo(memoryStore.universal)}
-      <div class="flex flex-col h-full">
+      <div class="flex h-full min-h-0 flex-col">
         <div class="px-4 py-2 bg-[var(--color-surface-2)] border-b border-[var(--color-border)]">
           <div class="flex items-center justify-between">
             <div class="flex-1 min-w-0">
@@ -260,14 +260,14 @@
           oninput={(e) => handleContentChange("universal", e.currentTarget.value)}
           disabled={!info.exists}
           placeholder={info.exists ? "Enter universal memory..." : "Initialize universal memory to start editing..."}
-          class="flex-1 w-full p-4 text-sm font-mono bg-[var(--color-surface-0)] text-[var(--color-text-primary)] resize-none focus:outline-none disabled:opacity-50"
+          class="min-h-0 flex-1 w-full p-4 text-sm font-mono bg-[var(--color-surface-0)] text-[var(--color-text-primary)] resize-none focus:outline-none disabled:opacity-50"
           spellcheck="false"
         ></textarea>
       </div>
 
     {:else if memoryStore.activeTab === "project"}
       {@const info = getFileInfo(memoryStore.project)}
-      <div class="flex flex-col h-full">
+      <div class="flex h-full min-h-0 flex-col">
         <div class="px-4 py-2 bg-[var(--color-surface-2)] border-b border-[var(--color-border)]">
           <div class="flex items-center justify-between">
             <div class="flex-1 min-w-0">
@@ -325,14 +325,14 @@
           oninput={(e) => handleContentChange("project", e.currentTarget.value)}
           disabled={!info.exists}
           placeholder={info.exists ? "Enter project memory..." : "Initialize project memory to start editing..."}
-          class="flex-1 w-full p-4 text-sm font-mono bg-[var(--color-surface-0)] text-[var(--color-text-primary)] resize-none focus:outline-none disabled:opacity-50"
+          class="min-h-0 flex-1 w-full p-4 text-sm font-mono bg-[var(--color-surface-0)] text-[var(--color-text-primary)] resize-none focus:outline-none disabled:opacity-50"
           spellcheck="false"
         ></textarea>
       </div>
 
     {:else if memoryStore.activeTab === "session"}
       {@const info = getFileInfo(memoryStore.session)}
-      <div class="flex flex-col h-full">
+      <div class="flex h-full min-h-0 flex-col">
         <div class="px-4 py-2 bg-[var(--color-surface-2)] border-b border-[var(--color-border)]">
           <div class="flex items-center justify-between">
             <div class="flex-1 min-w-0">
@@ -403,7 +403,7 @@
             oninput={(e) => handleContentChange("session", e.currentTarget.value)}
             disabled={!info.exists}
             placeholder={info.exists ? "Enter session memory..." : "Initialize session memory to start editing..."}
-            class="flex-1 w-full p-4 text-sm font-mono bg-[var(--color-surface-0)] text-[var(--color-text-primary)] resize-none focus:outline-none disabled:opacity-50"
+            class="min-h-0 flex-1 w-full p-4 text-sm font-mono bg-[var(--color-surface-0)] text-[var(--color-text-primary)] resize-none focus:outline-none disabled:opacity-50"
             spellcheck="false"
           ></textarea>
         {/if}
@@ -411,7 +411,7 @@
 
     {:else if memoryStore.activeTab === "rules"}
       {@const info = getFileInfo(memoryStore.rules)}
-      <div class="flex flex-col h-full">
+      <div class="flex h-full min-h-0 flex-col">
         <div class="px-4 py-2 bg-[var(--color-surface-2)] border-b border-[var(--color-border)]">
           <div class="flex items-center justify-between">
             <div class="flex-1 min-w-0">
@@ -469,158 +469,204 @@
           oninput={(e) => handleContentChange("rules", e.currentTarget.value)}
           disabled={!info.exists}
           placeholder={info.exists ? "Enter rules..." : "Initialize rules to start editing..."}
-          class="flex-1 w-full p-4 text-sm font-mono bg-[var(--color-surface-0)] text-[var(--color-text-primary)] resize-none focus:outline-none disabled:opacity-50"
+          class="min-h-0 flex-1 w-full p-4 text-sm font-mono bg-[var(--color-surface-0)] text-[var(--color-text-primary)] resize-none focus:outline-none disabled:opacity-50"
           spellcheck="false"
         ></textarea>
       </div>
 
     {:else if memoryStore.activeTab === "settings"}
-      <div class="p-6 space-y-6 overflow-y-auto">
-        <!-- Enable/Disable Section -->
-        <div class="space-y-4">
-          <h4 class="text-sm font-semibold text-[var(--color-text-primary)] flex items-center gap-2">
-            <Settings2 size={16} />
-            Memory Sources
-          </h4>
-          <p class="text-xs text-[var(--color-text-muted)]">
-            Choose which memory sources are included in the AI context
-          </p>
-          
-          <div class="space-y-3">
-            <label class="flex items-center justify-between p-3 bg-[var(--color-surface-2)] rounded-lg cursor-pointer hover:bg-[var(--color-surface-3)]">
-              <div class="flex items-center gap-3">
-                <Brain size={18} class="text-purple-400" />
-                <div>
-                  <div class="text-sm font-medium text-[var(--color-text-primary)]">Universal Memory</div>
-                  <div class="text-xs text-[var(--color-text-muted)]">Global across all projects (~/.koryphaios/)</div>
-                </div>
+      <div class="h-full overflow-y-auto p-6">
+        <div class="grid gap-6 xl:grid-cols-[minmax(0,1.15fr)_minmax(320px,0.85fr)]">
+          <div class="space-y-6">
+            <section class="space-y-4 rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-1)] p-5">
+              <div class="space-y-1">
+                <h4 class="flex items-center gap-2 text-sm font-semibold text-[var(--color-text-primary)]">
+                  <Settings2 size={16} />
+                  Memory Sources
+                </h4>
+                <p class="text-xs text-[var(--color-text-muted)]">
+                  Choose which memory sources are included in the AI context.
+                </p>
               </div>
-              <input
-                type="checkbox"
-                checked={memoryStore.settings?.universalMemoryEnabled ?? true}
-                onchange={() => toggleSetting("universalMemoryEnabled")}
-                class="w-4 h-4 rounded border-[var(--color-border)] bg-[var(--color-surface-0)] text-[var(--color-accent)] focus:ring-[var(--color-accent)]"
-              />
-            </label>
 
-            <label class="flex items-center justify-between p-3 bg-[var(--color-surface-2)] rounded-lg cursor-pointer hover:bg-[var(--color-surface-3)]">
-              <div class="flex items-center gap-3">
-                <FileText size={18} class="text-blue-400" />
-                <div>
-                  <div class="text-sm font-medium text-[var(--color-text-primary)]">Project Memory</div>
-                  <div class="text-xs text-[var(--color-text-muted)]">Project-specific context (.koryphaios/project-memory/)</div>
-                </div>
-              </div>
-              <input
-                type="checkbox"
-                checked={memoryStore.settings?.projectMemoryEnabled ?? true}
-                onchange={() => toggleSetting("projectMemoryEnabled")}
-                class="w-4 h-4 rounded border-[var(--color-border)] bg-[var(--color-surface-0)] text-[var(--color-accent)] focus:ring-[var(--color-accent)]"
-              />
-            </label>
+              <div class="grid gap-3 sm:grid-cols-2">
+                <label class="flex h-full cursor-pointer items-start justify-between gap-4 rounded-xl bg-[var(--color-surface-2)] p-4 hover:bg-[var(--color-surface-3)]">
+                  <div class="flex items-start gap-3">
+                    <Brain size={18} class="mt-0.5 text-purple-400" />
+                    <div>
+                      <div class="text-sm font-medium text-[var(--color-text-primary)]">Universal Memory</div>
+                      <div class="mt-1 text-xs text-[var(--color-text-muted)]">Global across all projects in `~/.koryphaios/`.</div>
+                    </div>
+                  </div>
+                  <input
+                    type="checkbox"
+                    checked={memoryStore.settings?.universalMemoryEnabled ?? true}
+                    onchange={() => toggleSetting("universalMemoryEnabled")}
+                    class="mt-1 h-4 w-4 rounded border-[var(--color-border)] bg-[var(--color-surface-0)] text-[var(--color-accent)] focus:ring-[var(--color-accent)]"
+                  />
+                </label>
 
-            <label class="flex items-center justify-between p-3 bg-[var(--color-surface-2)] rounded-lg cursor-pointer hover:bg-[var(--color-surface-3)]">
-              <div class="flex items-center gap-3">
-                <MessageSquare size={18} class="text-green-400" />
-                <div>
-                  <div class="text-sm font-medium text-[var(--color-text-primary)]">Session Memory</div>
-                  <div class="text-xs text-[var(--color-text-muted)]">Per-chat persistent storage</div>
-                </div>
-              </div>
-              <input
-                type="checkbox"
-                checked={memoryStore.settings?.sessionMemoryEnabled ?? true}
-                onchange={() => toggleSetting("sessionMemoryEnabled")}
-                class="w-4 h-4 rounded border-[var(--color-border)] bg-[var(--color-surface-0)] text-[var(--color-accent)] focus:ring-[var(--color-accent)]"
-              />
-            </label>
+                <label class="flex h-full cursor-pointer items-start justify-between gap-4 rounded-xl bg-[var(--color-surface-2)] p-4 hover:bg-[var(--color-surface-3)]">
+                  <div class="flex items-start gap-3">
+                    <FileText size={18} class="mt-0.5 text-blue-400" />
+                    <div>
+                      <div class="text-sm font-medium text-[var(--color-text-primary)]">Project Memory</div>
+                      <div class="mt-1 text-xs text-[var(--color-text-muted)]">Project-specific context in `.koryphaios/project-memory/`.</div>
+                    </div>
+                  </div>
+                  <input
+                    type="checkbox"
+                    checked={memoryStore.settings?.projectMemoryEnabled ?? true}
+                    onchange={() => toggleSetting("projectMemoryEnabled")}
+                    class="mt-1 h-4 w-4 rounded border-[var(--color-border)] bg-[var(--color-surface-0)] text-[var(--color-accent)] focus:ring-[var(--color-accent)]"
+                  />
+                </label>
 
-            <label class="flex items-center justify-between p-3 bg-[var(--color-surface-2)] rounded-lg cursor-pointer hover:bg-[var(--color-surface-3)]">
-              <div class="flex items-center gap-3">
-                <BookOpen size={18} class="text-orange-400" />
-                <div>
-                  <div class="text-sm font-medium text-[var(--color-text-primary)]">Rules (.cursorrules)</div>
-                  <div class="text-xs text-[var(--color-text-muted)]">AI behavior rules and conventions</div>
-                </div>
+                <label class="flex h-full cursor-pointer items-start justify-between gap-4 rounded-xl bg-[var(--color-surface-2)] p-4 hover:bg-[var(--color-surface-3)]">
+                  <div class="flex items-start gap-3">
+                    <MessageSquare size={18} class="mt-0.5 text-green-400" />
+                    <div>
+                      <div class="text-sm font-medium text-[var(--color-text-primary)]">Session Memory</div>
+                      <div class="mt-1 text-xs text-[var(--color-text-muted)]">Persistent storage scoped to the active chat.</div>
+                    </div>
+                  </div>
+                  <input
+                    type="checkbox"
+                    checked={memoryStore.settings?.sessionMemoryEnabled ?? true}
+                    onchange={() => toggleSetting("sessionMemoryEnabled")}
+                    class="mt-1 h-4 w-4 rounded border-[var(--color-border)] bg-[var(--color-surface-0)] text-[var(--color-accent)] focus:ring-[var(--color-accent)]"
+                  />
+                </label>
+
+                <label class="flex h-full cursor-pointer items-start justify-between gap-4 rounded-xl bg-[var(--color-surface-2)] p-4 hover:bg-[var(--color-surface-3)]">
+                  <div class="flex items-start gap-3">
+                    <BookOpen size={18} class="mt-0.5 text-orange-400" />
+                    <div>
+                      <div class="text-sm font-medium text-[var(--color-text-primary)]">Rules (.koryrules)</div>
+                      <div class="mt-1 text-xs text-[var(--color-text-muted)]">Behavior rules and conventions added to context.</div>
+                    </div>
+                  </div>
+                  <input
+                    type="checkbox"
+                    checked={memoryStore.settings?.rulesEnabled ?? true}
+                    onchange={() => toggleSetting("rulesEnabled")}
+                    class="mt-1 h-4 w-4 rounded border-[var(--color-border)] bg-[var(--color-surface-0)] text-[var(--color-accent)] focus:ring-[var(--color-accent)]"
+                  />
+                </label>
               </div>
-              <input
-                type="checkbox"
-                checked={memoryStore.settings?.rulesEnabled ?? true}
-                onchange={() => toggleSetting("rulesEnabled")}
-                class="w-4 h-4 rounded border-[var(--color-border)] bg-[var(--color-surface-0)] text-[var(--color-accent)] focus:ring-[var(--color-accent)]"
-              />
-            </label>
+            </section>
+
+            <section class="space-y-4 rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-1)] p-5">
+              <div class="space-y-1">
+                <h4 class="text-sm font-semibold text-[var(--color-text-primary)]">Agent Behavior</h4>
+                <p class="text-xs text-[var(--color-text-muted)]">
+                  Configure how the agent writes and consumes memory.
+                </p>
+              </div>
+
+              <div class="grid gap-3 sm:grid-cols-2">
+                <label class="flex h-full cursor-pointer items-start justify-between gap-4 rounded-xl bg-[var(--color-surface-2)] p-4 hover:bg-[var(--color-surface-3)]">
+                  <div>
+                    <div class="text-sm font-medium text-[var(--color-text-primary)]">Allow Agent to Add Memories</div>
+                    <div class="mt-1 text-xs text-[var(--color-text-muted)]">AI can automatically update memory files during compaction.</div>
+                  </div>
+                  <input
+                    type="checkbox"
+                    checked={memoryStore.settings?.agentMemoryEnabled ?? true}
+                    onchange={() => toggleSetting("agentMemoryEnabled")}
+                    class="mt-1 h-4 w-4 rounded border-[var(--color-border)] bg-[var(--color-surface-0)] text-[var(--color-accent)] focus:ring-[var(--color-accent)]"
+                  />
+                </label>
+
+                <label class="flex h-full cursor-pointer items-start justify-between gap-4 rounded-xl bg-[var(--color-surface-2)] p-4 hover:bg-[var(--color-surface-3)]">
+                  <div>
+                    <div class="text-sm font-medium text-[var(--color-text-primary)]">Auto-include in Context</div>
+                    <div class="mt-1 text-xs text-[var(--color-text-muted)]">Automatically add selected memories to the AI context window.</div>
+                  </div>
+                  <input
+                    type="checkbox"
+                    checked={memoryStore.settings?.autoIncludeInContext ?? true}
+                    onchange={() => toggleSetting("autoIncludeInContext")}
+                    class="mt-1 h-4 w-4 rounded border-[var(--color-border)] bg-[var(--color-surface-0)] text-[var(--color-accent)] focus:ring-[var(--color-accent)]"
+                  />
+                </label>
+              </div>
+            </section>
           </div>
-        </div>
 
-        <!-- Agent Memory -->
-        <div class="space-y-4 pt-4 border-t border-[var(--color-border)]">
-          <h4 class="text-sm font-semibold text-[var(--color-text-primary)]">Agent Behavior</h4>
-          
-          <label class="flex items-center justify-between p-3 bg-[var(--color-surface-2)] rounded-lg cursor-pointer hover:bg-[var(--color-surface-3)]">
-            <div>
-              <div class="text-sm font-medium text-[var(--color-text-primary)]">Allow Agent to Add Memories</div>
-              <div class="text-xs text-[var(--color-text-muted)]">AI can automatically update memory files during compaction</div>
-            </div>
-            <input
-              type="checkbox"
-              checked={memoryStore.settings?.agentMemoryEnabled ?? true}
-              onchange={() => toggleSetting("agentMemoryEnabled")}
-              class="w-4 h-4 rounded border-[var(--color-border)] bg-[var(--color-surface-0)] text-[var(--color-accent)] focus:ring-[var(--color-accent)]"
-            />
-          </label>
+          <div class="space-y-6">
+            <section class="space-y-4 rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-1)] p-5">
+              <div class="space-y-1">
+                <h4 class="text-sm font-semibold text-[var(--color-text-primary)]">Context Limits</h4>
+                <p class="text-xs text-[var(--color-text-muted)]">
+                  Cap how much memory content is injected into prompts.
+                </p>
+              </div>
 
-          <label class="flex items-center justify-between p-3 bg-[var(--color-surface-2)] rounded-lg cursor-pointer hover:bg-[var(--color-surface-3)]">
-            <div>
-              <div class="text-sm font-medium text-[var(--color-text-primary)]">Auto-include in Context</div>
-              <div class="text-xs text-[var(--color-text-muted)]">Automatically add memories to AI context</div>
-            </div>
-            <input
-              type="checkbox"
-              checked={memoryStore.settings?.autoIncludeInContext ?? true}
-              onchange={() => toggleSetting("autoIncludeInContext")}
-              class="w-4 h-4 rounded border-[var(--color-border)] bg-[var(--color-surface-0)] text-[var(--color-accent)] focus:ring-[var(--color-accent)]"
-            />
-          </label>
-        </div>
+              <div class="rounded-xl bg-[var(--color-surface-2)] p-4">
+                <div class="mb-3 flex items-center justify-between gap-3">
+                  <label for="max-tokens" class="text-sm text-[var(--color-text-primary)]">Max Context Tokens</label>
+                  <span class="text-xs text-[var(--color-text-muted)]">
+                    {memoryStore.settings?.maxContextTokens ?? 2000} tokens
+                  </span>
+                </div>
+                <input
+                  id="max-tokens"
+                  type="range"
+                  min="500"
+                  max="8000"
+                  step="100"
+                  value={memoryStore.settings?.maxContextTokens ?? 2000}
+                  onchange={(e) => handleMaxTokensChange(e.currentTarget.value)}
+                  class="h-2 w-full cursor-pointer appearance-none rounded-lg bg-[var(--color-surface-3)] accent-[var(--color-accent)]"
+                />
+                <div class="mt-2 flex justify-between text-xs text-[var(--color-text-muted)]">
+                  <span>500</span>
+                  <span>8000</span>
+                </div>
+              </div>
+            </section>
 
-        <!-- Context Limits -->
-        <div class="space-y-4 pt-4 border-t border-[var(--color-border)]">
-          <h4 class="text-sm font-semibold text-[var(--color-text-primary)]">Context Limits</h4>
-          
-          <div class="p-3 bg-[var(--color-surface-2)] rounded-lg">
-            <div class="flex items-center justify-between mb-2">
-              <label for="max-tokens" class="text-sm text-[var(--color-text-primary)]">Max Context Tokens</label>
-              <span class="text-xs text-[var(--color-text-muted)]">
-                {memoryStore.settings?.maxContextTokens ?? 2000} tokens
-              </span>
-            </div>
-            <input
-              id="max-tokens"
-              type="range"
-              min="500"
-              max="8000"
-              step="100"
-              value={memoryStore.settings?.maxContextTokens ?? 2000}
-              onchange={(e) => handleMaxTokensChange(e.currentTarget.value)}
-              class="w-full h-2 bg-[var(--color-surface-3)] rounded-lg appearance-none cursor-pointer accent-[var(--color-accent)]"
-            />
-            <div class="flex justify-between text-xs text-[var(--color-text-muted)] mt-1">
-              <span>500</span>
-              <span>8000</span>
-            </div>
+            <section class="space-y-4 rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-1)] p-5">
+              <h4 class="text-sm font-semibold text-[var(--color-text-primary)]">Active Context</h4>
+              <div class="grid gap-3 sm:grid-cols-3 xl:grid-cols-1">
+                <div class="rounded-xl bg-[var(--color-surface-2)] p-4">
+                  <div class="text-[10px] uppercase tracking-wide text-[var(--color-text-muted)]">Sources Enabled</div>
+                  <div class="mt-2 text-sm font-semibold text-[var(--color-text-primary)]">
+                    {[
+                      memoryStore.settings?.universalMemoryEnabled ?? true,
+                      memoryStore.settings?.projectMemoryEnabled ?? true,
+                      memoryStore.settings?.sessionMemoryEnabled ?? true,
+                      memoryStore.settings?.rulesEnabled ?? true,
+                    ].filter(Boolean).length}
+                    / 4
+                  </div>
+                </div>
+                <div class="rounded-xl bg-[var(--color-surface-2)] p-4">
+                  <div class="text-[10px] uppercase tracking-wide text-[var(--color-text-muted)]">Agent Writes</div>
+                  <div class="mt-2 text-sm font-semibold text-[var(--color-text-primary)]">
+                    {memoryStore.settings?.agentMemoryEnabled ?? true ? 'Allowed' : 'Blocked'}
+                  </div>
+                </div>
+                <div class="rounded-xl bg-[var(--color-surface-2)] p-4">
+                  <div class="text-[10px] uppercase tracking-wide text-[var(--color-text-muted)]">Auto Include</div>
+                  <div class="mt-2 text-sm font-semibold text-[var(--color-text-primary)]">
+                    {memoryStore.settings?.autoIncludeInContext ?? true ? 'Enabled' : 'Manual'}
+                  </div>
+                </div>
+              </div>
+            </section>
+
+            <section class="rounded-2xl border border-red-500/20 bg-red-500/5 p-5">
+              <button
+                onclick={() => memoryStore.resetSettings()}
+                class="flex items-center gap-2 rounded-lg px-4 py-2 text-sm text-red-400 transition-colors hover:bg-red-500/10"
+              >
+                <RotateCcw size={16} />
+                Reset to Defaults
+              </button>
+            </section>
           </div>
-        </div>
-
-        <!-- Reset Button -->
-        <div class="pt-4 border-t border-[var(--color-border)]">
-          <button
-            onclick={() => memoryStore.resetSettings()}
-            class="flex items-center gap-2 px-4 py-2 text-sm text-red-400 bg-red-500/10 rounded-lg hover:bg-red-500/20"
-          >
-            <RotateCcw size={16} />
-            Reset to Defaults
-          </button>
         </div>
       </div>
     {/if}
