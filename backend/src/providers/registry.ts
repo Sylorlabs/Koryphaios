@@ -1,7 +1,12 @@
 // Clean Provider Registry - Only real providers with proper circuit breaker
 
-import type { ProviderAuthMode, ProviderConfig, ProviderName, KoryphaiosConfig } from "@koryphaios/shared";
-import { providerLog } from "../logger";
+import type {
+  ProviderAuthMode,
+  ProviderConfig,
+  ProviderName,
+  KoryphaiosConfig,
+} from '@koryphaios/shared';
+import { providerLog } from '../logger';
 import {
   buildAuthHeaders,
   getVerifyUrl,
@@ -9,180 +14,45 @@ import {
   GEMINI_V1BETA_BASE,
   GEMINI_V1_BASE,
   PROVIDER_BASE_URLS,
-} from "./api-endpoints";
-import { AnthropicProvider } from "./anthropic";
-import { detectGeminiCLIToken, detectCopilotToken, detectDashScopeToken, detectClineToken } from "./auth-utils";
-import { OpenAIProvider, GroqProvider, OpenRouterProvider, XAIProvider, AzureProvider } from "./openai";
+} from './api-endpoints';
+import { AnthropicProvider } from './anthropic';
+import {
+  OpenAIProvider,
+  GroqProvider,
+  OpenRouterProvider,
+  XAIProvider,
+  AzureProvider,
+} from './openai';
 
-import { GeminiProvider, GeminiCLIProvider } from "./gemini";
-import { CopilotProvider, exchangeGitHubTokenForCopilotAsync } from "./copilot";
-import { ClineProvider } from "./cline";
-import { CodexProvider } from "./codex";
+import { GeminiProvider } from './gemini';
+import { CopilotProvider, exchangeGitHubTokenForCopilotAsync } from './copilot';
+import { CodexProvider } from './codex';
+import { detectCodexAuthToken, isCodexCLIAuthMarker } from './auth-utils';
+import { KimiCodeProvider } from './kimicode';
+import { resolveKimiCodeAccessToken } from './kimicode-auth';
+import { secureDecrypt, isUsingSecureEncryption } from '../security';
+import {
+  resolveModel,
+  getModelsForProvider,
+  isLegacyModel,
+  type StreamRequest,
+  type ProviderEvent,
+  type Provider,
+} from './types';
+import { withRetry } from './utils';
+import { recordUsage as creditRecordUsage } from '../credit-accountant';
+import {
+  ENV_API_KEY_MAP,
+  ENV_URL_MAP,
+  ENV_AUTH_TOKEN_MAP,
+  OPENCODE_DEFAULT_BASE_URL,
+  LLAMACPP_DEFAULT,
+  LMSTUDIO_DEFAULT,
+  BASE_URL_PLACEHOLDERS,
+  PROVIDER_AUTH_MODE,
+} from './constants';
 
-import { secureDecrypt, isUsingSecureEncryption } from "../security";
-import { resolveModel, getModelsForProvider, isLegacyModel, type StreamRequest, type ProviderEvent, type Provider } from "./types";
-import { withRetry } from "./utils";
-import { recordUsage as creditRecordUsage } from "../credit-accountant";
-
-// Environment variable mappings for real providers only
-const ENV_API_KEY_MAP: Record<ProviderName, string[]> = {
-  anthropic: ["ANTHROPIC_API_KEY"],
-  claude: [], // auth only - uses Claude Code CLI
-  cline: [], // auth only - uses Cline CLI
-  codex: [], // auth only - uses Codex CLI
-  openai: ["OPENAI_API_KEY"],
-  google: ["GEMINI_API_KEY", "GOOGLE_API_KEY"],
-  xai: ["XAI_API_KEY"],
-  openrouter: ["OPENROUTER_API_KEY"],
-  groq: ["GROQ_API_KEY"],
-  copilot: [], // auth only - uses GitHub OAuth
-  opencodezen: ["OPENCODE_ZEN_API_KEY"],
-  azure: ["AZURE_OPENAI_API_KEY"],
-  bedrock: ["AWS_ACCESS_KEY_ID"],
-  vertexai: ["GOOGLE_VERTEX_AI_API_KEY"],
-  local: [],
-  ollama: [],
-  "302ai": ["A302AI_API_KEY"],
-  azurecognitive: ["AZURE_COGNITIVE_API_KEY"],
-  baseten: ["BASETEN_API_KEY"],
-  cerebras: ["CEREBRAS_API_KEY"],
-  cloudflare: ["CLOUDFLARE_API_TOKEN"],
-  cortecs: ["CORTECS_API_KEY"],
-  deepseek: ["DEEPSEEK_API_KEY"],
-  deepinfra: ["DEEPINFRA_API_KEY"],
-  firmware: ["FIRMWARE_API_KEY"],
-  fireworks: ["FIREWORKS_API_KEY"],
-  gitlab: ["GITLAB_API_KEY"],
-  huggingface: ["HUGGINGFACE_API_KEY"],
-  helicone: ["HELICONE_API_KEY"],
-  llamacpp: [],
-  ionet: ["IONET_API_KEY"],
-  lmstudio: [],
-  mistral: ["MISTRAL_API_KEY"],
-  moonshot: ["MOONSHOT_API_KEY"],
-  minimax: ["MINIMAX_API_KEY"],
-  nebius: ["NEBIUS_API_KEY"],
-  ollamacloud: ["OLLAMA_CLOUD_API_KEY"],
-  sapai: ["AICORE_SERVICE_KEY"],
-  stackit: ["STACKIT_API_KEY"],
-  ovhcloud: ["OVHCLOUD_API_KEY"],
-  scaleway: ["SCALEWAY_API_KEY"],
-  togetherai: ["TOGETHER_API_KEY"],
-  venice: ["VENICE_API_KEY"],
-  vercel: ["VERCEL_AI_API_KEY"],
-  zai: ["ZAI_API_KEY"],
-  zenmux: ["ZENMUX_API_KEY"],
-};
-
-const ENV_URL_MAP: Partial<Record<ProviderName, string>> = {
-  azure: "AZURE_OPENAI_ENDPOINT",
-  local: "LOCAL_ENDPOINT",
-  ollama: "OLLAMA_BASE_URL",
-  openrouter: "OPENROUTER_BASE_URL",
-  azurecognitive: "AZURE_COGNITIVE_RESOURCE_URL",
-  llamacpp: "LLAMACPP_BASE_URL",
-  lmstudio: "LMSTUDIO_BASE_URL",
-};
-
-const ENV_AUTH_TOKEN_MAP: Partial<Record<ProviderName, string[]>> = {
-  anthropic: ["ANTHROPIC_AUTH_TOKEN"],
-  claude: ["CLAUDE_CODE_OAUTH_TOKEN"],
-  cline: ["CLINE_AUTH_TOKEN"],
-  codex: ["CODEX_AUTH_TOKEN"],
-  copilot: ["GITHUB_COPILOT_TOKEN", "GITHUB_TOKEN"],
-  azure: ["AZURE_OPENAI_AUTH_TOKEN"],
-  google: ["GEMINI_AUTH_TOKEN"],
-};
-
-/** Default base URLs for OpenAI-compatible OpenCode parity providers (verify + chat use these). */
-const OPENCODE_DEFAULT_BASE_URL: Partial<Record<ProviderName, string>> = {
-  "302ai": "https://api.302.ai/v1",
-  baseten: "https://api.baseten.co/v1",
-  cerebras: "https://api.cerebras.ai/v1",
-  cloudflare: "https://gateway.ai.cloudflare.com/v1",
-  cortecs: "https://api.cortecs.ai/v1",
-  deepseek: "https://api.deepseek.com",
-  deepinfra: "https://api.deepinfra.com/v1",
-  firmware: "https://api.firmware.ai/v1",
-  fireworks: "https://api.fireworks.ai/inference/v1",
-  gitlab: "https://gitlab.com/api/v4",
-  helicone: "https://oai.hconeai.com/v1",
-  huggingface: "https://api-inference.huggingface.co/v1",
-  ionet: "https://api.io.net/v1",
-  minimax: "https://api.minimax.chat/v1",
-  moonshot: "https://api.moonshot.cn/v1",
-  nebius: "https://api.nebius.com/v1",
-  ollamacloud: "https://api.ollama.com/v1",
-  ovhcloud: "https://ai.endpoints.ovh.net/v1",
-  scaleway: "https://api.scaleway.com/llm/v1",
-  stackit: "https://api.stackit.cloud/ai/v1",
-  togetherai: "https://api.together.xyz/v1",
-  venice: "https://api.venice.ai/v1",
-  vercel: "https://ai.vercel.com/v1",
-  zai: "https://api.z.ai/api/paas/v4",
-  zenmux: "https://api.zenmux.ai/v1",
-};
-const LLAMACPP_DEFAULT = "http://127.0.0.1:8080/v1";
-const LMSTUDIO_DEFAULT = "http://localhost:1234/v1";
-
-/** Placeholder/hint for the base URL input in the UI. Backend is the single source of truth; frontend uses this instead of hardcoding. */
-const BASE_URL_PLACEHOLDERS: Partial<Record<ProviderName, string>> = {
-  zai: "https://api.z.ai/api/paas/v4 (Standard) or .../api/coding/paas/v4 (Coding Plan) or https://open.bigmodel.cn/api/paas/v4 (China)",
-  azure: "https://YOUR_RESOURCE.cognitiveservices.azure.com",
-  local: "http://localhost:1234/v1 (or your local server)",
-  ollama: "http://localhost:11434",
-  llamacpp: "http://127.0.0.1:8080/v1",
-  lmstudio: "http://localhost:1234/v1",
-};
-
-export const PROVIDER_AUTH_MODE: Record<ProviderName, ProviderAuthMode> = {
-  anthropic: "api_key_or_auth",
-  claude: "auth_only",
-  cline: "auth_only",
-  codex: "auth_only",
-  openai: "api_key",
-  google: "api_key_or_auth",
-  xai: "api_key",
-  openrouter: "api_key",
-  groq: "api_key",
-  copilot: "auth_only",
-  opencodezen: "api_key",
-  azure: "api_key_or_auth",
-  bedrock: "env_auth",
-  vertexai: "api_key",
-  local: "base_url_only",
-  ollama: "base_url_only",
-  "302ai": "api_key",
-  azurecognitive: "api_key",
-  baseten: "api_key",
-  cerebras: "api_key",
-  cloudflare: "api_key",
-  cortecs: "api_key",
-  deepseek: "api_key",
-  deepinfra: "api_key",
-  firmware: "api_key",
-  fireworks: "api_key",
-  gitlab: "api_key",
-  huggingface: "api_key",
-  helicone: "api_key",
-  llamacpp: "base_url_only",
-  ionet: "api_key",
-  lmstudio: "base_url_only",
-  mistral: "api_key",
-  moonshot: "api_key",
-  minimax: "api_key",
-  nebius: "api_key",
-  ollamacloud: "api_key",
-  sapai: "api_key",
-  stackit: "api_key",
-  ovhcloud: "api_key",
-  scaleway: "api_key",
-  togetherai: "api_key",
-  venice: "api_key",
-  vercel: "api_key",
-  zai: "api_key",
-  zenmux: "api_key",
-};
+const CODEX_MODELS_URL = 'https://chatgpt.com/backend-api/codex/models?client_version=0.120.0';
 
 // Circuit breaker states
 interface CircuitState {
@@ -203,6 +73,19 @@ class ProviderRegistry {
     this.initializeAll();
   }
 
+  private getVisibleProviderNames(): ProviderName[] {
+    return Object.keys(PROVIDER_AUTH_MODE) as ProviderName[];
+  }
+
+  /** Get all current provider configurations. */
+  getConfigs(): Record<string, ProviderConfig> {
+    const configs: Record<string, ProviderConfig> = {};
+    for (const [name, config] of this.providerConfigs) {
+      configs[name] = config;
+    }
+    return configs;
+  }
+
   /** Get a specific provider by name. */
   get(name: ProviderName): Provider | undefined {
     return this.providers.get(name);
@@ -217,7 +100,7 @@ class ProviderRegistry {
   private isCircuitOpen(name: ProviderName): boolean {
     const state = this.circuitStates.get(name);
     if (!state) return false;
-    
+
     if (state.isOpen) {
       // Check if we should close it
       if (Date.now() - state.lastFailure > CIRCUIT_TIMEOUT) {
@@ -237,13 +120,13 @@ class ProviderRegistry {
       state = { failures: 0, lastFailure: 0, isOpen: false };
       this.circuitStates.set(name, state);
     }
-    
+
     state.failures++;
     state.lastFailure = Date.now();
-    
+
     if (state.failures >= CIRCUIT_THRESHOLD) {
       state.isOpen = true;
-      providerLog.warn({ provider: name, failures: state.failures }, "Circuit breaker opened");
+      providerLog.warn({ provider: name, failures: state.failures }, 'Circuit breaker opened');
     }
   }
 
@@ -262,7 +145,7 @@ class ProviderRegistry {
     enabled: boolean;
     authenticated: boolean;
     models: string[];
-    allAvailableModels: string[];
+    allAvailableModels: ReturnType<Provider['listModels']>;
     selectedModels: string[];
     hideModelSelector: boolean;
     authMode: ProviderAuthMode;
@@ -275,13 +158,13 @@ class ProviderRegistry {
     /** Placeholder for base URL input; backend is single source of truth so UI does not hardcode endpoints. */
     baseUrlPlaceholder?: string;
   }> {
-    const names = Object.keys(PROVIDER_AUTH_MODE) as ProviderName[];
+    const names = this.getVisibleProviderNames();
     const result: Array<{
       name: ProviderName;
       enabled: boolean;
       authenticated: boolean;
       models: string[];
-      allAvailableModels: string[];
+      allAvailableModels: ReturnType<Provider['listModels']>;
       selectedModels: string[];
       hideModelSelector: boolean;
       authMode: ProviderAuthMode;
@@ -301,64 +184,47 @@ class ProviderRegistry {
       const circuitOpen = this.isCircuitOpen(name);
 
       const isProviderAvailable = provider?.isAvailable() ?? false;
-      const isAuthenticated = isProviderAvailable ||
-        (name === "copilot" && !!detectCopilotToken()) ||
-        (name === "cline" && !!detectClineToken()) ||
-        (name === "qwen" && !!detectDashScopeToken()) ||
-        (name === "alibaba" && !!detectDashScopeToken());
-
-      // Include all providers - authenticated or not - so users can configure them
-
       const isEnabled = config ? !config.disabled : false;
-      let allModels: string[] = [];
+      let allModels = [] as ReturnType<Provider['listModels']>;
       if (isEnabled) {
-        allModels = provider?.listModels().map((m) => m.id)
-          ?? getModelsForProvider(name).map((m) => m.id);
+        allModels =
+          provider?.listModels() ?? getModelsForProvider(name);
       }
 
       const selectedModels = config?.selectedModels ?? [];
       const hideModelSelector = config?.hideModelSelector ?? false;
 
+      const enabledModels =
+        selectedModels.length > 0
+          ? allModels.filter((model) => selectedModels.includes(model.id)).map((model) => model.id)
+          : allModels.map((model) => model.id);
 
-
-      const enabledModels = (selectedModels.length > 0)
-        ? allModels.filter(id => selectedModels.includes(id))
-        : allModels;
-
-      const extraAuthModes = name === "google"
-        ? [
-            { id: "api_key", label: "API key", description: "Use a Gemini API key from Google AI Studio" },
-            { id: "cli", label: "Gemini CLI (Experimental)", description: "Requires gemini CLI installed and authenticated. May break without notice." },
-          ]
-        : name === "cline"
-        ? [
-            { id: "auth", label: "Cline CLI (Experimental)", description: "Requires cline CLI installed and authenticated. May break without notice." },
-          ]
-        : name === "codex"
-        ? [
-            { id: "auth", label: "Codex CLI (Experimental)", description: "Requires codex CLI installed and authenticated. May break without notice." },
-          ]
-        : undefined;
-
-      const requiresBaseUrl = authMode === "base_url_only" || name === "azure" || name === "zai";
+      const requiresBaseUrl = authMode === 'base_url_only' || name === 'azure' || name === 'zai';
       const baseUrlPlaceholder: string | undefined = requiresBaseUrl
-        ? (BASE_URL_PLACEHOLDERS[name] ?? OPENCODE_DEFAULT_BASE_URL[name] ?? (name === "ollama" ? "http://localhost:11434" : name === "llamacpp" ? LLAMACPP_DEFAULT : name === "lmstudio" ? LMSTUDIO_DEFAULT : undefined))
+        ? (BASE_URL_PLACEHOLDERS[name] ??
+          OPENCODE_DEFAULT_BASE_URL[name] ??
+          (name === 'ollama'
+            ? 'http://localhost:11434'
+            : name === 'llamacpp'
+              ? LLAMACPP_DEFAULT
+              : name === 'lmstudio'
+                ? LMSTUDIO_DEFAULT
+                : undefined))
         : undefined;
 
       result.push({
         name,
-        enabled: true,
+        enabled: isEnabled,
         authenticated: isProviderAvailable,
         models: enabledModels,
         allAvailableModels: allModels,
         selectedModels,
         hideModelSelector,
         authMode,
-        supportsApiKey: authMode === "api_key" || authMode === "api_key_or_auth",
-        supportsAuthToken: authMode === "api_key_or_auth",
+        supportsApiKey: authMode === 'api_key' || authMode === 'api_key_or_auth',
+        supportsAuthToken: authMode === 'auth_only' || authMode === 'api_key_or_auth',
         requiresBaseUrl,
         circuitOpen,
-        ...(extraAuthModes && { extraAuthModes }),
         ...(baseUrlPlaceholder && { baseUrlPlaceholder }),
       });
     }
@@ -368,7 +234,7 @@ class ProviderRegistry {
 
   /** All provider types that can be added (for "Add provider" UI). Not filtered by auth. */
   getAvailableProviderTypes(): Array<{ name: ProviderName; authMode: ProviderAuthMode }> {
-    return (Object.keys(PROVIDER_AUTH_MODE) as ProviderName[]).map((name) => ({
+    return this.getVisibleProviderNames().map((name) => ({
       name,
       authMode: PROVIDER_AUTH_MODE[name],
     }));
@@ -378,7 +244,7 @@ class ProviderRegistry {
   findProviderForModel(modelId: string): Provider | undefined {
     for (const provider of this.getAvailable()) {
       if (this.isCircuitOpen(provider.name)) continue;
-      
+
       const config = this.providerConfigs.get(provider.name);
       const selected = config?.selectedModels ?? [];
 
@@ -399,11 +265,16 @@ class ProviderRegistry {
 
     if (modelDef) {
       const catalogProvider = this.providers.get(modelDef.provider);
-      if (catalogProvider?.isAvailable() && !this.isCircuitOpen(catalogProvider.name)) return catalogProvider;
+      if (catalogProvider?.isAvailable() && !this.isCircuitOpen(catalogProvider.name))
+        return catalogProvider;
       // Catalog provider missing or unavailable: try user's preferred provider if it can serve this model, then any available provider.
       if (preferredProvider) {
         const preferred = this.providers.get(preferredProvider);
-        if (preferred?.isAvailable() && !this.isCircuitOpen(preferredProvider) && preferred.listModels().some((m) => m.id === modelId))
+        if (
+          preferred?.isAvailable() &&
+          !this.isCircuitOpen(preferredProvider) &&
+          preferred.listModels().some((m) => m.id === modelId)
+        )
           return preferred;
       }
       return this.findProviderForModel(modelId);
@@ -419,7 +290,7 @@ class ProviderRegistry {
   /** Return the first available provider and one of its non-legacy models for "auto" fallback. */
   getFirstAvailableRouting(): { model: string; provider: ProviderName } | undefined {
     for (const provider of this.getAvailable()) {
-      if (provider.name === "vertexai" || this.isCircuitOpen(provider.name)) continue;
+      if (provider.name === 'vertexai' || this.isCircuitOpen(provider.name)) continue;
       const models = provider.listModels().filter((m) => !isLegacyModel(m));
       const first = models[0];
       if (first) return { model: first.id, provider: provider.name as ProviderName };
@@ -431,7 +302,7 @@ class ProviderRegistry {
   async *executeWithRetry(
     request: StreamRequest,
     preferredProvider?: ProviderName,
-    fallbackChain: string[] = []
+    fallbackChain: string[] = [],
   ): AsyncGenerator<ProviderEvent> {
     const chain = [request.model, ...fallbackChain];
 
@@ -441,18 +312,18 @@ class ProviderRegistry {
 
       if (!provider) {
         if (i === chain.length - 1) {
-          yield { type: "error", error: `No available provider for model: ${currentModel}` };
+          yield { type: 'error', error: `No available provider for model: ${currentModel}` };
           return;
         }
-        providerLog.warn({ model: currentModel }, "No provider available, trying fallback");
+        providerLog.warn({ model: currentModel }, 'No provider available, trying fallback');
         continue;
       }
 
       // Check circuit breaker
       if (this.isCircuitOpen(provider.name)) {
-        providerLog.warn({ provider: provider.name }, "Circuit breaker open, skipping");
+        providerLog.warn({ provider: provider.name }, 'Circuit breaker open, skipping');
         if (i === chain.length - 1) {
-          yield { type: "error", error: `Provider ${provider.name} circuit breaker open` };
+          yield { type: 'error', error: `Provider ${provider.name} circuit breaker open` };
           return;
         }
         continue;
@@ -466,9 +337,9 @@ class ProviderRegistry {
 
         for await (const event of stream) {
           if (this.isContentEvent(event)) hasContent = true;
-          if (event.type === "usage_update") {
-            if (typeof event.tokensIn === "number") accTokensIn = event.tokensIn;
-            if (typeof event.tokensOut === "number") accTokensOut = event.tokensOut;
+          if (event.type === 'usage_update') {
+            if (typeof event.tokensIn === 'number') accTokensIn = event.tokensIn;
+            if (typeof event.tokensOut === 'number') accTokensOut = event.tokensOut;
           }
           yield event;
         }
@@ -480,24 +351,34 @@ class ProviderRegistry {
           this.recordSuccess(provider.name);
           return;
         }
-        
-        providerLog.warn({ model: currentModel, provider: provider.name }, "Empty response, trying fallback");
+
+        providerLog.warn(
+          { model: currentModel, provider: provider.name },
+          'Empty response, trying fallback',
+        );
         this.recordFailure(provider.name);
       } catch (err: any) {
-        providerLog.error({ model: currentModel, provider: provider.name, error: err.message }, "Provider error");
+        providerLog.error(
+          { model: currentModel, provider: provider.name, error: err.message },
+          'Provider error',
+        );
         this.recordFailure(provider.name);
-        
+
         if (i === chain.length - 1) {
-          yield { type: "error", error: err.message || "Unknown error" };
+          yield { type: 'error', error: err.message || 'Unknown error' };
           return;
         }
-        providerLog.info("Trying next model in fallback chain");
+        providerLog.info('Trying next model in fallback chain');
       }
     }
   }
 
   private isContentEvent(event: ProviderEvent): boolean {
-    return event.type === "content_delta" || event.type === "thinking_delta" || event.type === "tool_use_start";
+    return (
+      event.type === 'content_delta' ||
+      event.type === 'thinking_delta' ||
+      event.type === 'tool_use_start'
+    );
   }
 
   /** Validate provider credentials. */
@@ -509,17 +390,25 @@ class ProviderRegistry {
     const apiKey = credentials?.apiKey ?? existing?.apiKey;
     const authToken = credentials?.authToken ?? existing?.authToken;
     const baseUrl = credentials?.baseUrl ?? existing?.baseUrl;
+    const shouldMutateStoredState =
+      credentials == null ||
+      ((credentials.apiKey ?? undefined) === (existing?.apiKey ?? undefined) &&
+        (credentials.authToken ?? undefined) === (existing?.authToken ?? undefined) &&
+        (credentials.baseUrl ?? undefined) === (existing?.baseUrl ?? undefined));
 
     try {
       switch (name) {
-        case "anthropic": {
-          if (!apiKey && !authToken) return { success: false, error: "Missing apiKey or authToken" };
+        case 'anthropic': {
+          if (!apiKey && !authToken)
+            return { success: false, error: 'Missing apiKey or authToken' };
           const { headers } = buildAuthHeaders(name, { apiKey, authToken });
-          const url = getVerifyUrl(name, undefined, { apiKey, authToken }) || `${PROVIDER_BASE_URLS.anthropic}/models`;
-          const res = await this.verifyHttpWithStatus(url, { method: "GET", headers });
+          const url =
+            getVerifyUrl(name, undefined, { apiKey, authToken }) ||
+            `${PROVIDER_BASE_URLS.anthropic}/models`;
+          const res = await this.verifyHttpWithStatus(url, { method: 'GET', headers });
           if (res.success) return { success: true };
-          if (res.status === 401) {
-            this.markKeyInvalid(name, res.error ?? "Unauthorized");
+          if (res.status === 401 && shouldMutateStoredState) {
+            this.markKeyInvalid(name, res.error ?? 'Unauthorized');
             const config = this.providerConfigs.get(name);
             if (config) {
               config.disabled = true;
@@ -528,34 +417,29 @@ class ProviderRegistry {
           }
           return { success: false, error: res.error };
         }
-        case "openai":
-          return this.verifyBearerGet("https://api.openai.com/v1/models", apiKey);
-        case "google": {
-          if (authToken?.startsWith("cli:") || (!apiKey && !authToken)) {
-            if (!Bun.which("gemini")) {
-              return { success: false, error: "Gemini CLI not found in PATH. This is an experimental feature - install the Gemini CLI and authenticate, or use an API key instead." };
-            }
-            return { success: true };
-          }
-          if (!apiKey) return { success: false, error: "Missing apiKey" };
+        case 'openai':
+          return this.verifyBearerGet('https://api.openai.com/v1/models', apiKey);
+        case 'google': {
+          if (!apiKey && !authToken)
+            return { success: false, error: 'Missing apiKey or authToken' };
           // Gemini 3.1 / Thinking: v1beta often required; support ?key= and x-goog-api-key as fallbacks.
           const creds = { apiKey, authToken };
           const tryUrl = (base: string, useHeader: boolean) => {
-            const path = `${base.replace(/\/?$/, "")}/models`;
+            const path = `${base.replace(/\/?$/, '')}/models`;
             if (useHeader) {
               const { headers } = buildAuthHeaders(name, creds, { useGeminiHeader: true });
-              return this.verifyHttpWithStatus(path, { method: "GET", headers });
+              return this.verifyHttpWithStatus(path, { method: 'GET', headers });
             }
             const urlWithKey = `${path}?key=${encodeURIComponent(apiKey!)}`;
             return this.verifyHttpWithStatus(urlWithKey, {
-              method: "GET",
-              headers: { "Content-Type": "application/json", "User-Agent": "Koryphaios/1.0" },
+              method: 'GET',
+              headers: { 'Content-Type': 'application/json', 'User-Agent': 'Koryphaios/1.0' },
             });
           };
           let result = await tryUrl(GEMINI_V1BETA_BASE, false);
           if (result.success) return { success: true };
-          if (result.status === 401) {
-            this.markKeyInvalid(name, result.error ?? "Unauthorized");
+          if (result.status === 401 && shouldMutateStoredState) {
+            this.markKeyInvalid(name, result.error ?? 'Unauthorized');
             const config = this.providerConfigs.get(name);
             if (config) {
               config.disabled = true;
@@ -569,10 +453,10 @@ class ProviderRegistry {
             result = await tryUrl(GEMINI_V1_BASE, false);
             if (result.success) {
               try {
-                const { getDb } = require("../db/sqlite");
+                const { getDb } = require('../db');
                 getDb()
                   .prepare(
-                    "INSERT OR REPLACE INTO provider_endpoint_override (provider, base_url, updated_at) VALUES (?, ?, ?)"
+                    'INSERT OR REPLACE INTO provider_endpoint_override (provider, base_url, updated_at) VALUES (?, ?, ?)',
                   )
                   .run(name, GEMINI_V1_BASE, Date.now());
               } catch {
@@ -583,117 +467,162 @@ class ProviderRegistry {
           }
           return { success: false, error: result.error };
         }
-        case "copilot": {
-          const token = authToken ?? detectCopilotToken();
-          if (!token) return { success: false, error: "GitHub Copilot token not found" };
+        case 'copilot': {
+          const token = authToken;
+          if (!token) return { success: false, error: 'GitHub Copilot token not found' };
           const bearer = await exchangeGitHubTokenForCopilotAsync(token);
-          if (!bearer) return { success: false, error: "Failed to exchange GitHub token for Copilot bearer" };
-          return this.verifyHttp("https://api.githubcopilot.com/models", {
+          if (!bearer)
+            return { success: false, error: 'Failed to exchange GitHub token for Copilot bearer' };
+          return this.verifyHttp('https://api.githubcopilot.com/models', {
             headers: {
               Authorization: `Bearer ${bearer}`,
-              "Editor-Version": "vscode/1.100.0",
-              "Editor-Plugin-Version": "copilot-chat/0.27.0",
-              "Copilot-Integration-Id": "vscode-chat",
-              "User-Agent": "Koryphaios/1.0",
+              'Editor-Version': 'vscode/1.100.0',
+              'Editor-Plugin-Version': 'copilot-chat/0.27.0',
+              'Copilot-Integration-Id': 'vscode-chat',
+              'User-Agent': 'Koryphaios/1.0',
             },
           });
         }
-        case "openrouter":
-          return this.verifyBearerGet("https://openrouter.ai/api/v1/models", apiKey);
-        case "mistral":
-          return this.verifyBearerGet("https://api.mistral.ai/v1/models", apiKey);
-        case "groq":
-          return this.verifyBearerGet("https://api.groq.com/openai/v1/models", apiKey);
-        case "xai":
-          return this.verifyBearerGet("https://api.x.ai/v1/models", apiKey);
-        case "azure": {
-          if (!apiKey && !authToken) return { success: false, error: "Missing apiKey or authToken" };
-          if (!baseUrl) return { success: false, error: "Missing baseUrl" };
-          const trimmed = baseUrl.replace(/\/+$/, "");
+        case 'openrouter':
+          return this.verifyBearerGet('https://openrouter.ai/api/v1/models', apiKey);
+        case 'kimicode': {
+          const resolvedToken = await resolveKimiCodeAccessToken(authToken ?? apiKey ?? null);
+          if (!resolvedToken) return { success: false, error: 'Missing authToken' };
+          const base = baseUrl?.replace(/\/+$/, '') || 'https://api.kimi.com/coding/v1';
+          return this.verifyHttp(`${base}/models`, {
+            method: 'GET',
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${resolvedToken}`,
+            },
+          });
+        }
+        case 'mistral':
+          return this.verifyBearerGet('https://api.mistral.ai/v1/models', apiKey);
+        case 'groq':
+          return this.verifyBearerGet('https://api.groq.com/openai/v1/models', apiKey);
+        case 'xai':
+          return this.verifyBearerGet('https://api.x.ai/v1/models', apiKey);
+        case 'azure': {
+          if (!apiKey && !authToken)
+            return { success: false, error: 'Missing apiKey or authToken' };
+          if (!baseUrl) return { success: false, error: 'Missing baseUrl' };
+          const trimmed = baseUrl.replace(/\/+$/, '');
           const headers: Record<string, string> = {};
-          if (apiKey) headers["api-key"] = apiKey;
+          if (apiKey) headers['api-key'] = apiKey;
           if (authToken) headers.Authorization = `Bearer ${authToken}`;
           return this.verifyHttp(`${trimmed}/openai/models?api-version=2024-10-21`, { headers });
         }
-        case "local": {
-          if (!baseUrl) return { success: false, error: "Missing baseUrl" };
-          const trimmed = baseUrl.replace(/\/+$/, "");
+        case 'local': {
+          if (!baseUrl) return { success: false, error: 'Missing baseUrl' };
+          const trimmed = baseUrl.replace(/\/+$/, '');
           return this.verifyHttp(`${trimmed}/models`);
         }
-        case "ollama": {
-          if (!baseUrl) return { success: false, error: "Missing baseUrl (e.g. http://localhost:11434)" };
-          const trimmed = baseUrl.replace(/\/+$/, "");
+        case 'ollama': {
+          if (!baseUrl)
+            return { success: false, error: 'Missing baseUrl (e.g. http://localhost:11434)' };
+          const trimmed = baseUrl.replace(/\/+$/, '');
           return this.verifyHttp(`${trimmed}/api/tags`);
         }
-        case "bedrock":
+        case 'bedrock':
           return this.verifyBedrockEnvironment();
-        case "vertexai":
-          if (!apiKey) return { success: false, error: "Vertex AI requires an explicit API key (set GOOGLE_VERTEX_AI_API_KEY or add apiKey in settings)" };
+        case 'vertexai':
+          if (!apiKey)
+            return {
+              success: false,
+              error:
+                'Vertex AI requires an explicit API key (set GOOGLE_VERTEX_AI_API_KEY or add apiKey in settings)',
+            };
           return { success: true };
-        case "codex": {
-          if (Bun.which("codex") === null) {
-            return { success: false, error: "Codex CLI not found in PATH. This is an experimental feature - install the Codex CLI and authenticate, or use OpenAI provider with an API key instead." };
+        case 'codex': {
+          const isMarker = authToken && isCodexCLIAuthMarker(authToken);
+          const resolvedCodexToken = isMarker ? detectCodexAuthToken() : authToken;
+          if (!resolvedCodexToken) {
+            return {
+              success: false,
+              error: 'Missing authToken',
+            };
           }
-          return { success: true };
-        }
-        case "cline": {
-          if (Bun.which("cline") === null) {
-            return { success: false, error: "Cline CLI not found in PATH. This is an experimental feature - install the Cline CLI and authenticate, or use another provider with an API key instead." };
-          }
-          return { success: true };
-        }
-        case "opencodezen": {
-          if (!apiKey) return { success: false, error: "Missing API key (get one at opencode.ai/auth)" };
-          const base = "https://opencode.ai/zen/v1";
-          return this.verifyBearerGet(`${base}/models`, apiKey);
-        }
-        case "llamacpp": {
-          const url = baseUrl ?? LLAMACPP_DEFAULT;
-          if (!url) return { success: false, error: "Missing baseUrl (e.g. http://127.0.0.1:8080/v1)" };
-          return this.verifyHttp(`${url.replace(/\/v1\/?$/, "")}/v1/models`);
-        }
-        case "lmstudio": {
-          const url = baseUrl ?? LMSTUDIO_DEFAULT;
-          if (!url) return { success: false, error: "Missing baseUrl (e.g. http://localhost:1234/v1)" };
-          return this.verifyHttp(`${url.replace(/\/v1\/?$/, "")}/v1/models`);
-        }
-        case "azurecognitive": {
-          if (!apiKey) return { success: false, error: "Missing API key" };
-          if (!baseUrl) return { success: false, error: "Missing baseUrl (e.g. https://YOUR_RESOURCE.cognitiveservices.azure.com)" };
-          const trimmed = baseUrl.replace(/\/+$/, "");
-          return this.verifyHttp(`${trimmed}/openai/deployments?api-version=2024-02-15-preview`, {
-            headers: { "api-key": apiKey },
+          // If auth came from CLI device flow (marker), trust the token without
+          // a synchronous verification — the ChatGPT backend can be slow to
+          // accept freshly issued tokens and the CodexProvider will validate
+          // on first real API call anyway.
+          if (isMarker) return { success: true };
+          return this.verifyHttp(CODEX_MODELS_URL, {
+            headers: { Authorization: `Bearer ${resolvedCodexToken}` },
           });
         }
-        case "sapai": {
-          if (!apiKey) return { success: false, error: "Missing service key (JSON from SAP BTP Cockpit)" };
-          if (!baseUrl) return { success: false, error: "Missing baseUrl from service key (AI_API_URL)" };
-          const trimmed = baseUrl.replace(/\/+$/, "");
-          return this.verifyHttp(`${trimmed}/openai/deployments`, { headers: { Authorization: `Bearer ${apiKey}` } });
+        case 'opencodezen': {
+          if (!apiKey)
+            return { success: false, error: 'Missing API key (get one at opencode.ai/auth)' };
+          const base = 'https://opencode.ai/zen/v1';
+          return this.verifyBearerGet(`${base}/models`, apiKey);
         }
-        case "zai": {
+        case 'llamacpp': {
+          const url = baseUrl ?? LLAMACPP_DEFAULT;
+          if (!url)
+            return { success: false, error: 'Missing baseUrl (e.g. http://127.0.0.1:8080/v1)' };
+          return this.verifyHttp(`${url.replace(/\/v1\/?$/, '')}/v1/models`);
+        }
+        case 'lmstudio': {
+          const url = baseUrl ?? LMSTUDIO_DEFAULT;
+          if (!url)
+            return { success: false, error: 'Missing baseUrl (e.g. http://localhost:1234/v1)' };
+          return this.verifyHttp(`${url.replace(/\/v1\/?$/, '')}/v1/models`);
+        }
+        case 'azurecognitive': {
+          if (!apiKey) return { success: false, error: 'Missing API key' };
+          if (!baseUrl)
+            return {
+              success: false,
+              error: 'Missing baseUrl (e.g. https://YOUR_RESOURCE.cognitiveservices.azure.com)',
+            };
+          const trimmed = baseUrl.replace(/\/+$/, '');
+          return this.verifyHttp(`${trimmed}/openai/deployments?api-version=2024-02-15-preview`, {
+            headers: { 'api-key': apiKey },
+          });
+        }
+        case 'sapai': {
+          if (!apiKey)
+            return { success: false, error: 'Missing service key (JSON from SAP BTP Cockpit)' };
+          if (!baseUrl)
+            return { success: false, error: 'Missing baseUrl from service key (AI_API_URL)' };
+          const trimmed = baseUrl.replace(/\/+$/, '');
+          return this.verifyHttp(`${trimmed}/openai/deployments`, {
+            headers: { Authorization: `Bearer ${apiKey}` },
+          });
+        }
+        case 'zai': {
           // Z.AI: https://api.z.ai/api/paas/v4 (Standard) or .../api/coding/paas/v4 (Coding Plan) or open.bigmodel.cn (China)
-          if (!apiKey) return { success: false, error: "Missing API key" };
-          const base = baseUrl?.replace(/\/+$/, "") ?? "https://api.z.ai/api/paas/v4";
+          if (!apiKey) return { success: false, error: 'Missing API key' };
+          const base = baseUrl?.replace(/\/+$/, '') ?? 'https://api.z.ai/api/paas/v4';
           return this.verifyHttp(`${base}/chat/completions`, {
-            method: "POST",
+            method: 'POST',
             headers: {
-              "Content-Type": "application/json",
+              'Content-Type': 'application/json',
               Authorization: `Bearer ${apiKey}`,
             },
             body: JSON.stringify({
-              model: "glm-4.5",
-              messages: [{ role: "user", content: "Hi" }],
+              model: 'glm-4.5',
+              messages: [{ role: 'user', content: 'Hi' }],
               max_tokens: 1,
             }),
           });
         }
         default: {
           const defaultBase = OPENCODE_DEFAULT_BASE_URL[name];
-          // Qwen/Alibaba can use aliyun CLI auth detection
-          const effectiveApiKey = apiKey ?? ((name === "qwen" || name === "alibaba") ? detectDashScopeToken() : null);
-          if (defaultBase && effectiveApiKey) return this.verifyBearerGet(`${defaultBase.replace(/\/?$/, "")}/models`, effectiveApiKey);
-          if (defaultBase) return { success: false, error: "Missing API key" };
+          const effectiveBase = baseUrl ?? defaultBase;
+          const effectiveApiKey = apiKey || authToken;
+
+          // Universal OpenAI-compatible verification
+          if (effectiveBase && effectiveApiKey) {
+            return this.verifyBearerGet(
+              `${effectiveBase.replace(/\/?$/, '')}/models`,
+              effectiveApiKey,
+            );
+          }
+
+          if (effectiveBase) return { success: false, error: 'Missing API key' };
           return { success: false, error: `Unsupported provider: ${name}` };
         }
       }
@@ -703,25 +632,54 @@ class ProviderRegistry {
   }
 
   /** Set/update provider credentials. */
-  setCredentials(
+  async setCredentials(
     name: ProviderName,
-    credentials: { apiKey?: string; authToken?: string; baseUrl?: string; selectedModels?: string[]; hideModelSelector?: boolean },
-  ): { success: boolean; error?: string } {
+    credentials: {
+      apiKey?: string;
+      authToken?: string;
+      baseUrl?: string;
+      selectedModels?: string[];
+      hideModelSelector?: boolean;
+    },
+  ): Promise<{ success: boolean; error?: string }> {
     try {
       const existing = this.providerConfigs.get(name);
-      const validation = this.validateCredentials(name, credentials, existing);
+
+      // Auto-detect if blank
+      const resolvedApiKey =
+        credentials.apiKey?.trim() || existing?.apiKey || this.detectEnvKey(name) || undefined;
+      const resolvedAuthToken =
+        credentials.authToken?.trim() || existing?.authToken || undefined;
+      const resolvedBaseUrl =
+        credentials.baseUrl?.trim() || existing?.baseUrl || this.detectEnvUrl(name) || undefined;
+
+      const nextConnection = {
+        apiKey: resolvedApiKey,
+        authToken: resolvedAuthToken,
+        baseUrl: resolvedBaseUrl,
+      };
+
+      const validation = this.validateCredentials(name, nextConnection, existing);
       if (!validation.success) return validation;
 
-      const resolvedAuthTokenRaw = credentials.authToken?.trim() ?? existing?.authToken ?? (name === "cline" ? this.detectEnvAuthToken("cline") : undefined);
-      const resolvedAuthToken = resolvedAuthTokenRaw ?? undefined;
+      const connectionChanged =
+        existing?.apiKey !== nextConnection.apiKey ||
+        existing?.authToken !== nextConnection.authToken ||
+        existing?.baseUrl !== nextConnection.baseUrl;
+
+      if (connectionChanged) {
+        const verification = await this.verifyConnection(name, nextConnection);
+        if (!verification.success) return verification;
+      }
+
       const providerConfig: ProviderConfig = {
         name,
-        apiKey: credentials.apiKey?.trim() ?? existing?.apiKey,
+        apiKey: resolvedApiKey,
         authToken: resolvedAuthToken,
-        baseUrl: credentials.baseUrl?.trim() ?? existing?.baseUrl,
+        baseUrl: resolvedBaseUrl,
         selectedModels: credentials.selectedModels ?? existing?.selectedModels,
         hideModelSelector: credentials.hideModelSelector ?? existing?.hideModelSelector,
-        disabled: false,
+        disabled: false, // Explicitly enable on setCredentials
         headers: existing?.headers,
       };
 
@@ -732,10 +690,10 @@ class ProviderRegistry {
         this.providers.set(name, provider);
         this.circuitStates.delete(name); // Reset circuit breaker
         this.clearKeyInvalid(name); // New key may be valid
-        providerLog.info({ provider: name }, "Provider configured");
+        providerLog.info({ provider: name }, 'Provider configured');
         return { success: true };
       }
-      return { success: false, error: "Failed to initialize provider" };
+      return { success: false, error: 'Failed to initialize provider' };
     } catch (err: any) {
       return { success: false, error: err.message };
     }
@@ -744,42 +702,45 @@ class ProviderRegistry {
   private validateCredentials(
     name: ProviderName,
     credentials: { apiKey?: string; authToken?: string; baseUrl?: string },
-    existing?: ProviderConfig
+    existing?: ProviderConfig,
   ): { success: boolean; error?: string } {
     const authMode = PROVIDER_AUTH_MODE[name];
     const apiKey = credentials.apiKey?.trim();
     const authToken = credentials.authToken?.trim();
     const baseUrl = credentials.baseUrl?.trim();
 
-    if (authMode === "auth_only" && apiKey) {
-      return { success: false, error: `${name} uses account auth only and does not accept API keys` };
+    if (authMode === 'auth_only' && apiKey) {
+      return {
+        success: false,
+        error: `${name} uses account auth only and does not accept API keys`,
+      };
     }
 
-    if (authMode === "auth_only") {
-      // Cline / Codex: allow connect with no credentials; verification only checks CLI is in PATH.
-      if (name === "cline" || name === "codex") return { success: true };
-      const clineEnvToken = name === "cline" ? (this.detectEnvAuthToken("cline") ?? detectClineToken()) : null;
-      const hasAuth = !!(authToken || existing?.authToken) || (name === "copilot" && !!detectCopilotToken()) || !!clineEnvToken;
+    if (authMode === 'auth_only') {
+      const hasAuth = !!(authToken || existing?.authToken);
       if (!hasAuth) {
-        return { success: false, error: "authToken is required" };
+        return { success: false, error: 'authToken is required' };
       }
     }
 
-    if (authMode === "api_key" && !apiKey) {
-      return { success: false, error: "apiKey is required" };
+    if (authMode === 'api_key' && !apiKey) {
+      return { success: false, error: 'apiKey is required' };
     }
 
-    if (authMode === "api_key_or_auth" && !apiKey && !authToken && !existing?.authToken) {
-      return { success: false, error: "Provide apiKey or authToken" };
+    if (authMode === 'api_key_or_auth' && !apiKey && !authToken) {
+      return { success: false, error: 'Provide apiKey or authToken' };
     }
 
-    if (authMode === "env_auth") {
+    if (authMode === 'env_auth') {
       const envReady = this.hasBedrockEnvironment();
-      if (!envReady) return { success: false, error: `${name} environment credentials not detected` };
+      if (!envReady)
+        return { success: false, error: `${name} environment credentials not detected` };
     }
 
-    if (authMode === "base_url_only" && !baseUrl && !existing?.baseUrl) {
-      return { success: false, error: "baseUrl is required" };
+    if (authMode === 'base_url_only' && !baseUrl) {
+      // Some local providers have defaults
+      if (name === 'llamacpp' || name === 'lmstudio' || name === 'ollama') return { success: true };
+      return { success: false, error: 'baseUrl is required' };
     }
 
     return { success: true };
@@ -788,10 +749,10 @@ class ProviderRegistry {
   /** Force-refresh a provider instance from current stored config. */
   refreshProvider(name: ProviderName): { success: boolean; error?: string } {
     const config = this.providerConfigs.get(name);
-    if (!config) return { success: false, error: "Provider config not found" };
+    if (!config) return { success: false, error: 'Provider config not found' };
     try {
       const provider = this.createProvider(name, config);
-      if (!provider) return { success: false, error: "Failed to initialize provider" };
+      if (!provider) return { success: false, error: 'Failed to initialize provider' };
       this.providers.set(name, provider);
       this.circuitStates.delete(name); // Reset circuit breaker on refresh
       return { success: true };
@@ -811,15 +772,18 @@ class ProviderRegistry {
     }
     this.providers.delete(name);
     this.circuitStates.delete(name);
-    providerLog.info({ provider: name }, "Provider disconnected");
+    providerLog.info({ provider: name }, 'Provider disconnected');
   }
 
   /** Get the env var name expected for a provider. */
-  getExpectedEnvVar(name: ProviderName, kind: "apiKey" | "authToken" | "baseUrl" = "apiKey"): string {
-    if (kind === "authToken") {
+  getExpectedEnvVar(
+    name: ProviderName,
+    kind: 'apiKey' | 'authToken' | 'baseUrl' = 'apiKey',
+  ): string {
+    if (kind === 'authToken') {
       return ENV_AUTH_TOKEN_MAP[name]?.[0] ?? `${name.toUpperCase()}_AUTH_TOKEN`;
     }
-    if (kind === "baseUrl") {
+    if (kind === 'baseUrl') {
       return ENV_URL_MAP[name] ?? `${name.toUpperCase()}_BASE_URL`;
     }
     return ENV_API_KEY_MAP[name]?.[0] ?? `${name.toUpperCase()}_API_KEY`;
@@ -836,7 +800,7 @@ class ProviderRegistry {
         const provider = this.createProvider(name, providerConfig);
         if (provider) this.providers.set(name, provider);
       } catch (error) {
-        providerLog.error({ provider: name, error }, "Failed to initialize provider");
+        providerLog.error({ provider: name, error }, 'Failed to initialize provider');
       }
     }
     this.logProviderStatus();
@@ -844,20 +808,22 @@ class ProviderRegistry {
 
   private buildProviderConfig(name: ProviderName): ProviderConfig {
     const userConfig = this.config?.providers?.[name];
-    // Vertex AI defaults to disabled so GCP env (e.g. gcloud ADC) does not auto-enable it or spawn it as subagents
-    const defaultDisabled = name === "vertexai";
+    
+    // Default to disabled to prevent "auto-authing" from environment variables without user intent.
+    // Explicit opt-in (via UI "Connect" or config) is required.
+    const defaultDisabled = true;
+    const isDisabled = userConfig?.disabled ?? defaultDisabled;
+    
     const providerConfig: ProviderConfig = {
       name,
-      apiKey: userConfig?.apiKey ?? this.detectEnvKey(name) ?? undefined,
-      authToken: userConfig?.authToken ?? this.detectEnvAuthToken(name) ?? undefined,
+      apiKey: userConfig?.apiKey ?? (isDisabled ? undefined : this.detectEnvKey(name)) ?? undefined,
+      authToken: userConfig?.authToken ?? (isDisabled ? undefined : this.detectEnvAuthToken(name)) ?? undefined,
       baseUrl: userConfig?.baseUrl ?? this.detectEnvUrl(name) ?? undefined,
       selectedModels: userConfig?.selectedModels ?? [],
       hideModelSelector: userConfig?.hideModelSelector ?? false,
-      disabled: userConfig?.disabled ?? defaultDisabled,
+      disabled: isDisabled,
       headers: userConfig?.headers,
     };
-
-    // Providers enabled by default (except vertexai) - auth checked at runtime
 
     return providerConfig;
   }
@@ -865,19 +831,15 @@ class ProviderRegistry {
   private hasValidAuth(name: ProviderName, config: ProviderConfig): boolean {
     const authMode = PROVIDER_AUTH_MODE[name];
     const hasApi = !!config.apiKey;
-    const hasAuth = !!config.authToken ||
-      (name === "copilot" && !!detectCopilotToken()) ||
-      (name === "cline" && !!detectClineToken()) ||
-      (name === "qwen" && !!detectDashScopeToken()) ||
-      (name === "alibaba" && !!detectDashScopeToken());
+    const hasAuth = !!config.authToken;
     const hasUrl = !!config.baseUrl;
 
     const hasAnyAuth =
-      (authMode === "api_key" && hasApi) ||
-      (authMode === "auth_only" && hasAuth) ||
-      (authMode === "api_key_or_auth" && (hasApi || hasAuth)) ||
-      (authMode === "env_auth" && this.hasBedrockEnvironment()) ||
-      (authMode === "base_url_only" && (hasUrl || name === "lmstudio" || name === "llamacpp"));
+      (authMode === 'api_key' && hasApi) ||
+      (authMode === 'auth_only' && hasAuth) ||
+      (authMode === 'api_key_or_auth' && (hasApi || hasAuth)) ||
+      (authMode === 'env_auth' && this.hasBedrockEnvironment()) ||
+      (authMode === 'base_url_only' && (hasUrl || name === 'lmstudio' || name === 'llamacpp'));
 
     if (hasAnyAuth) return true;
 
@@ -887,75 +849,54 @@ class ProviderRegistry {
 
   private createProvider(name: ProviderName, config: ProviderConfig): Provider | null {
     switch (name) {
-      case "anthropic":
+      case 'anthropic':
         return new AnthropicProvider(config);
-      case "openai":
+      case 'openai':
         return new OpenAIProvider(config);
-      case "google":
-        // API key takes priority — use direct Gemini API
-        if (config.apiKey) return new GeminiProvider(config);
-        // Fall back to CLI if explicitly set or auto-detected
-        if (config.authToken?.startsWith("cli:") || detectGeminiCLIToken()) {
-          const cliProvider = new GeminiCLIProvider(config);
-          if (cliProvider.isAvailable()) return cliProvider;
-        }
-        return null;
-      case "copilot":
+      case 'google':
+        return config.apiKey || config.authToken ? new GeminiProvider(config) : null;
+      case 'copilot':
         return new CopilotProvider(config);
-      case "cline":
-        return new ClineProvider(config);
-      case "codex":
+      case 'codex':
         return new CodexProvider(config);
-      case "openrouter":
+      case 'kimicode':
+        return new KimiCodeProvider(config);
+      case 'openrouter':
         return new OpenRouterProvider(config);
-      case "groq":
+      case 'groq':
         return new GroqProvider(config);
-      case "xai":
+      case 'xai':
         return new XAIProvider(config);
-      case "azure":
+      case 'azure':
         return new AzureProvider(config);
-      case "bedrock":
-        return new OpenAIProvider(config, "bedrock", config.baseUrl);
-      case "vertexai":
+      case 'bedrock':
+        return new OpenAIProvider(config, 'bedrock', config.baseUrl);
+      case 'vertexai':
         // Requires explicit API key — never auto-enable from GCP environment variables
         if (config.disabled || !config.apiKey) return null;
-        return new GeminiProvider({ ...config, name: "vertexai" });
-      case "local":
-        if (config.baseUrl) {
-          return new OpenAIProvider(config, "local", config.baseUrl);
-        }
-        return null;
-      case "ollama":
-        if (config.baseUrl) {
-          return new OpenAIProvider(config, "ollama", config.baseUrl);
-        }
-        return null;
-      case "opencodezen":
-        if (config.apiKey) {
-          return new OpenAIProvider(
-            config,
-            "opencodezen" as ProviderName,
-            config.baseUrl ?? "https://opencode.ai/zen/v1",
-          );
-        }
-        return null;
-      case "llamacpp":
-        if (config.baseUrl) {
-          return new OpenAIProvider(config, "llamacpp", config.baseUrl);
-        }
-        return new OpenAIProvider(config, "llamacpp", LLAMACPP_DEFAULT);
-      case "lmstudio":
-        if (config.baseUrl) {
-          return new OpenAIProvider(config, "lmstudio", config.baseUrl);
-        }
-        return new OpenAIProvider(config, "lmstudio", LMSTUDIO_DEFAULT);
-      default: {
-        const defaultBase = OPENCODE_DEFAULT_BASE_URL[name];
-        if (defaultBase && config.apiKey) {
+        return new GeminiProvider({ ...config, name: 'vertexai' });
+      case 'local':
+      case 'ollama':
+      case 'llamacpp':
+      case 'lmstudio': {
+        const defaultBase =
+          name === 'llamacpp'
+            ? LLAMACPP_DEFAULT
+            : name === 'lmstudio'
+              ? LMSTUDIO_DEFAULT
+              : undefined;
+        if (config.baseUrl || defaultBase) {
           return new OpenAIProvider(config, name, config.baseUrl ?? defaultBase);
         }
-        if (name === "sapai" && config.apiKey && config.baseUrl) {
-          return new OpenAIProvider(config, "sapai", config.baseUrl);
+        return null;
+      }
+      default: {
+        const defaultBase = OPENCODE_DEFAULT_BASE_URL[name];
+        if ((defaultBase || config.baseUrl) && (config.apiKey || config.authToken)) {
+          return new OpenAIProvider(config, name, config.baseUrl ?? defaultBase);
+        }
+        if (name === 'sapai' && config.apiKey && config.baseUrl) {
+          return new OpenAIProvider(config, 'sapai', config.baseUrl);
         }
         return null;
       }
@@ -967,7 +908,7 @@ class ProviderRegistry {
     for (const envVar of envVars) {
       const val = process.env[envVar];
       if (!val) continue;
-      if (val.startsWith("env:") || val.startsWith("enc:")) return null;
+      if (val.startsWith('env:') || val.startsWith('enc:')) return null;
       return val;
     }
     return null;
@@ -978,7 +919,7 @@ class ProviderRegistry {
     for (const envVar of envVars) {
       const val = process.env[envVar];
       if (!val) continue;
-      if (val.startsWith("env:") || val.startsWith("enc:")) return null;
+      if (val.startsWith('env:') || val.startsWith('enc:')) return null;
       return val;
     }
     return null;
@@ -994,23 +935,23 @@ class ProviderRegistry {
       let authToken = config.authToken;
       for (const envVar of ENV_API_KEY_MAP[name] ?? []) {
         const val = process.env[envVar];
-        if (val?.startsWith("env:")) {
+        if (val?.startsWith('env:')) {
           try {
             apiKey = await secureDecrypt(val);
             break;
           } catch {
-            providerLog.warn({ provider: name, envVar }, "Failed to decrypt stored API key");
+            providerLog.warn({ provider: name, envVar }, 'Failed to decrypt stored API key');
           }
         }
       }
       for (const envVar of ENV_AUTH_TOKEN_MAP[name] ?? []) {
         const val = process.env[envVar];
-        if (val?.startsWith("env:")) {
+        if (val?.startsWith('env:')) {
           try {
             authToken = await secureDecrypt(val);
             break;
           } catch {
-            providerLog.warn({ provider: name, envVar }, "Failed to decrypt stored auth token");
+            providerLog.warn({ provider: name, envVar }, 'Failed to decrypt stored auth token');
           }
         }
       }
@@ -1031,40 +972,43 @@ class ProviderRegistry {
 
   private hasBedrockEnvironment(): boolean {
     return !!(
-      (process.env.AWS_ACCESS_KEY_ID && process.env.AWS_SECRET_ACCESS_KEY)
-      || process.env.AWS_PROFILE
+      (process.env.AWS_ACCESS_KEY_ID && process.env.AWS_SECRET_ACCESS_KEY) ||
+      process.env.AWS_PROFILE
     );
   }
 
   private verifyBedrockEnvironment(): { success: boolean; error?: string } {
     if (this.hasBedrockEnvironment()) return { success: true };
-    return { success: false, error: "AWS credentials not detected" };
+    return { success: false, error: 'AWS credentials not detected' };
   }
 
   private logProviderStatus() {
     const available = this.getAvailable();
     const names = available.map((p) => p.name);
-    providerLog.info({ providers: names }, "Providers ready");
+    providerLog.info({ providers: names }, 'Providers ready');
 
     if (names.length === 0) {
-      providerLog.warn("No providers configured - set API keys in .env");
+      providerLog.warn('No providers configured - set API keys in .env');
     }
   }
 
-  private async verifyBearerGet(url: string, token?: string | null): Promise<{ success: boolean; error?: string }> {
-    if (!token) return { success: false, error: "Missing token" };
+  private async verifyBearerGet(
+    url: string,
+    token?: string | null,
+  ): Promise<{ success: boolean; error?: string }> {
+    if (!token) return { success: false, error: 'Missing token' };
     return this.verifyHttp(url, { headers: { Authorization: `Bearer ${token}` } });
   }
 
   /** Identify if an error is a quota/rate limit error that should trigger a reroute. */
   isQuotaError(error: any): boolean {
-    const msg = String(error?.message || error || "").toLowerCase();
+    const msg = String(error?.message || error || '').toLowerCase();
     const isQuota =
-      msg.includes("quota") ||
-      msg.includes("rate limit") ||
-      msg.includes("429") ||
-      msg.includes("insufficient_quota") ||
-      msg.includes("credit balance");
+      msg.includes('quota') ||
+      msg.includes('rate limit') ||
+      msg.includes('429') ||
+      msg.includes('insufficient_quota') ||
+      msg.includes('credit balance');
     return isQuota;
   }
 
@@ -1080,28 +1024,28 @@ class ProviderRegistry {
   }> {
     const result = await this.verifyConnection(name);
     if (result.success) return { ok: true, status: 200 };
-    const err = (result.error ?? "").toLowerCase();
+    const err = (result.error ?? '').toLowerCase();
     const outOfCredits =
-      err.includes("quota") ||
-      err.includes("credit") ||
-      err.includes("insufficient") ||
-      err.includes("out of credits");
+      err.includes('quota') ||
+      err.includes('credit') ||
+      err.includes('insufficient') ||
+      err.includes('out of credits');
     return { ok: false, error: result.error, outOfCredits };
   }
 
   /** Persist invalid key state (401). No-op if DB not initialized. */
   private markKeyInvalid(name: ProviderName, lastError: string): void {
     try {
-      const { getDb } = require("../db/sqlite");
+      const { getDb } = require('../db');
       getDb()
         .prepare(
-          "INSERT OR REPLACE INTO provider_key_invalid (provider, invalid_since, last_error) VALUES (?, ?, ?)"
+          'INSERT OR REPLACE INTO provider_key_invalid (provider, invalid_since, last_error) VALUES (?, ?, ?)',
         )
         .run(name, Date.now(), lastError);
       const config = this.providerConfigs.get(name);
       providerLog.warn(
         { provider: name, keyMask: maskApiKey(config?.apiKey ?? config?.authToken) },
-        "API key marked invalid (401); update key in settings"
+        'API key marked invalid (401); update key in settings',
       );
     } catch {
       // DB not initialized (e.g. tests)
@@ -1111,8 +1055,8 @@ class ProviderRegistry {
   /** Clear invalid key state (e.g. after user updates key). */
   clearKeyInvalid(name: ProviderName): void {
     try {
-      const { getDb } = require("../db/sqlite");
-      getDb().run("DELETE FROM provider_key_invalid WHERE provider = ?", name);
+      const { getDb } = require('../db');
+      getDb().run('DELETE FROM provider_key_invalid WHERE provider = ?', name);
     } catch {
       // DB not initialized
     }
@@ -1121,9 +1065,9 @@ class ProviderRegistry {
   /** Check if provider was previously marked invalid. */
   private isKeyMarkedInvalid(name: ProviderName): boolean {
     try {
-      const { getDb } = require("../db/sqlite");
+      const { getDb } = require('../db');
       const row = getDb()
-        .query("SELECT provider FROM provider_key_invalid WHERE provider = ?")
+        .query('SELECT provider FROM provider_key_invalid WHERE provider = ?')
         .get(name) as { provider?: string } | undefined;
       return !!row;
     } catch {
@@ -1134,16 +1078,16 @@ class ProviderRegistry {
   /** Like verifyHttp but returns status for 401/404 handling. */
   private async verifyHttpWithStatus(
     url: string,
-    init?: RequestInit
+    init?: RequestInit,
   ): Promise<{ success: boolean; status?: number; error?: string }> {
     const timeoutMs = 5_000;
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
     try {
       const headers = new Headers(init?.headers ?? {});
-      if (!headers.has("User-Agent")) headers.set("User-Agent", "Koryphaios/1.0");
+      if (!headers.has('User-Agent')) headers.set('User-Agent', 'Koryphaios/1.0');
       const response = await fetch(url, {
-        method: "GET",
+        method: 'GET',
         ...init,
         headers,
         signal: controller.signal,
@@ -1157,8 +1101,8 @@ class ProviderRegistry {
       };
     } catch (err: any) {
       const msg = err?.message ?? String(err);
-      if (msg.includes("abort") || msg.includes("timeout")) {
-        return { success: false, error: "Request timeout (5s)" };
+      if (msg.includes('abort') || msg.includes('timeout')) {
+        return { success: false, error: 'Request timeout (5s)' };
       }
       return { success: false, error: msg };
     } finally {
@@ -1166,7 +1110,10 @@ class ProviderRegistry {
     }
   }
 
-  private async verifyHttp(url: string, init?: RequestInit): Promise<{ success: boolean; error?: string }> {
+  private async verifyHttp(
+    url: string,
+    init?: RequestInit,
+  ): Promise<{ success: boolean; error?: string }> {
     const res = await this.verifyHttpWithStatus(url, init);
     return { success: res.success, error: res.error };
   }

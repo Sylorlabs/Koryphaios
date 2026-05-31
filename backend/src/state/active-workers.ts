@@ -3,16 +3,17 @@
  * Tracks running worker processes with persistence support.
  */
 
-import type { WorkerTask } from "@koryphaios/shared";
-import { getDb } from "../db/sqlite";
-import { serverLog } from "../logger";
+import type { WorkerTask } from '@koryphaios/shared';
+import { db, activeWorkers as activeWorkersTable } from '../db';
+import { serverLog } from '../logger';
+import { eq, or } from 'drizzle-orm';
 
 export interface ActiveWorker {
   sessionId: string;
   taskId: string;
   task: WorkerTask;
   startTime: number;
-  status: "running" | "paused" | "completed" | "failed";
+  status: 'running' | 'paused' | 'completed' | 'failed';
 }
 
 export class ActiveWorkersRegistry {
@@ -23,33 +24,32 @@ export class ActiveWorkersRegistry {
     if (this.initialized) return;
 
     try {
-      const db = getDb();
-      
       // Load persisted workers
-      const rows = db.query(`
-        SELECT session_id, task_id, task_data, start_time, status
-        FROM active_workers
-        WHERE status IN ('running', 'paused')
-      `).all() as any[];
+      const rows = await db
+        .select()
+        .from(activeWorkersTable)
+        .where(
+          or(eq(activeWorkersTable.status, 'running'), eq(activeWorkersTable.status, 'paused')),
+        );
 
       for (const row of rows) {
         try {
-          const task = JSON.parse(row.task_data) as WorkerTask;
-          this.workers.set(row.task_id, {
-            sessionId: row.session_id,
-            taskId: row.task_id,
+          const task = JSON.parse(row.taskData) as WorkerTask;
+          this.workers.set(row.taskId, {
+            sessionId: row.sessionId,
+            taskId: row.taskId,
             task,
-            startTime: row.start_time,
-            status: row.status,
+            startTime: row.startTime.getTime(),
+            status: row.status as ActiveWorker['status'],
           });
         } catch (e) {
-          serverLog.error({ error: e, taskId: row.task_id }, "Failed to restore worker");
+          serverLog.error({ error: e, taskId: row.taskId }, 'Failed to restore worker');
         }
       }
 
       this.initialized = true;
     } catch (error) {
-      serverLog.error({ error }, "Failed to initialize workers registry");
+      serverLog.error({ error }, 'Failed to initialize workers registry');
       // Continue anyway - state will be transient
       this.initialized = true;
     }
@@ -61,19 +61,19 @@ export class ActiveWorkersRegistry {
       taskId,
       task,
       startTime: Date.now(),
-      status: "running",
+      status: 'running',
     };
 
     this.workers.set(taskId, worker);
     this.persistWorker(worker).catch((error) => {
-      serverLog.error({ error, taskId }, "Failed to persist registered worker");
+      serverLog.error({ error, taskId }, 'Failed to persist registered worker');
     });
   }
 
   unregister(taskId: string): void {
     this.workers.delete(taskId);
     this.removePersistedWorker(taskId).catch((error) => {
-      serverLog.error({ error, taskId }, "Failed to remove persisted worker");
+      serverLog.error({ error, taskId }, 'Failed to remove persisted worker');
     });
   }
 
@@ -86,38 +86,41 @@ export class ActiveWorkersRegistry {
   }
 
   getBySession(sessionId: string): ActiveWorker[] {
-    return Array.from(this.workers.values()).filter(w => w.sessionId === sessionId);
+    return Array.from(this.workers.values()).filter((w) => w.sessionId === sessionId);
   }
 
   async persistWorker(worker: ActiveWorker): Promise<void> {
     try {
-      const db = getDb();
-      db.query(`
-        INSERT OR REPLACE INTO active_workers 
-        (session_id, task_id, task_data, start_time, status)
-        VALUES (?, ?, ?, ?, ?)
-      `).run(
-        worker.sessionId,
-        worker.taskId,
-        JSON.stringify(worker.task),
-        worker.startTime,
-        worker.status,
-      );
+      await db
+        .insert(activeWorkersTable)
+        .values({
+          sessionId: worker.sessionId,
+          taskId: worker.taskId,
+          taskData: JSON.stringify(worker.task),
+          startTime: new Date(worker.startTime),
+          status: worker.status,
+        })
+        .onConflictDoUpdate({
+          target: activeWorkersTable.taskId,
+          set: {
+            status: worker.status,
+            taskData: JSON.stringify(worker.task),
+          },
+        });
     } catch (error) {
-      serverLog.error({ error, taskId: worker.taskId }, "Failed to persist worker");
+      serverLog.error({ error, taskId: worker.taskId }, 'Failed to persist worker');
     }
   }
 
   async removePersistedWorker(taskId: string): Promise<void> {
     try {
-      const db = getDb();
-      db.query("DELETE FROM active_workers WHERE task_id = ?").run(taskId);
+      await db.delete(activeWorkersTable).where(eq(activeWorkersTable.taskId, taskId));
     } catch (error) {
-      serverLog.error({ error, taskId }, "Failed to remove persisted worker");
+      serverLog.error({ error, taskId }, 'Failed to remove persisted worker');
     }
   }
 
-  async updateStatus(taskId: string, status: ActiveWorker["status"]): Promise<void> {
+  async updateStatus(taskId: string, status: ActiveWorker['status']): Promise<void> {
     const worker = this.workers.get(taskId);
     if (!worker) return;
 

@@ -2,6 +2,7 @@
   import { wsStore } from '$lib/stores/websocket.svelte';
   import { FileCode, X, Pencil, FilePlus } from 'lucide-svelte';
   import { tick } from 'svelte';
+  import FileIcon from './icons/FileIcon.svelte';
 
   let codeContainer = $state<HTMLPreElement>();
   let collapsed = $state<Set<string>>(new Set());
@@ -55,11 +56,7 @@
           style="background: var(--color-surface-2);"
           onclick={() => toggleCollapse(edit.path)}
         >
-          {#if edit.operation === 'create'}
-            <FilePlus size={13} class="text-emerald-400 shrink-0" />
-          {:else}
-            <Pencil size={13} class="text-amber-400 shrink-0" />
-          {/if}
+          <FileIcon path={edit.path} size={14} />
           <span class="text-xs font-mono truncate" style="color: var(--color-text-primary);">
             {getFileName(edit.path)}
           </span>
@@ -72,9 +69,9 @@
           </span>
           <!-- Typing indicator -->
           <span class="flex gap-0.5 shrink-0">
-            <span class="w-1 h-1 rounded-full bg-accent animate-pulse" style="animation-delay: 0ms;"></span>
-            <span class="w-1 h-1 rounded-full bg-accent animate-pulse" style="animation-delay: 150ms;"></span>
-            <span class="w-1 h-1 rounded-full bg-accent animate-pulse" style="animation-delay: 300ms;"></span>
+            <span class="w-1 h-1 rounded-full bg-[var(--color-accent)] animate-pulse" style="animation-delay: 0ms;"></span>
+            <span class="w-1 h-1 rounded-full bg-[var(--color-accent)] animate-pulse" style="animation-delay: 150ms;"></span>
+            <span class="w-1 h-1 rounded-full bg-[var(--color-accent)] animate-pulse" style="animation-delay: 300ms;"></span>
           </span>
         </button>
 
@@ -92,7 +89,7 @@
               bind:this={codeContainer}
               class="flex-1 overflow-auto py-2 px-3 text-[11px] leading-[1.4] font-mono"
               style="color: var(--color-text-primary);"
-            >{edit.content}<span class="inline-block w-[2px] h-[14px] bg-accent animate-pulse ml-px align-middle"></span></pre>
+            >{edit.content}<span class="inline-block w-[2px] h-[14px] bg-[var(--color-accent)] animate-pulse ml-px align-middle"></span></pre>
           </div>
         {/if}
       </div>

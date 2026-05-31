@@ -4,22 +4,84 @@
     Send,
     ChevronRight,
     ChevronDown,
-    Trash2
+    Trash2,
+    Copy,
+    Check,
+    Terminal,
+    Maximize2,
+    Minimize2
   } from 'lucide-svelte';
-  import { fly } from 'svelte/transition';
+  import { fly, fade } from 'svelte/transition';
   import AnimatedStatusIcon from './AnimatedStatusIcon.svelte';
   import ThinkingBlock from './ThinkingBlock.svelte';
   import { marked } from 'marked';
-  import hljs from 'highlight.js';
+  import DOMPurify from 'dompurify';
+  import hljs from 'highlight.js/lib/core';
+  import bash from 'highlight.js/lib/languages/bash';
+  import cpp from 'highlight.js/lib/languages/cpp';
+  import css from 'highlight.js/lib/languages/css';
+  import diff from 'highlight.js/lib/languages/diff';
+  import go from 'highlight.js/lib/languages/go';
+  import java from 'highlight.js/lib/languages/java';
+  import javascript from 'highlight.js/lib/languages/javascript';
+  import json from 'highlight.js/lib/languages/json';
+  import markdown from 'highlight.js/lib/languages/markdown';
+  import python from 'highlight.js/lib/languages/python';
+  import rust from 'highlight.js/lib/languages/rust';
+  import scss from 'highlight.js/lib/languages/scss';
+  import sql from 'highlight.js/lib/languages/sql';
+  import typescript from 'highlight.js/lib/languages/typescript';
+  import xml from 'highlight.js/lib/languages/xml';
+  import yaml from 'highlight.js/lib/languages/yaml';
   import 'highlight.js/styles/atom-one-dark.css';
   import type { FeedEntryLocal, FeedEntryType } from '$lib/types';
+
+  hljs.registerLanguage('bash', bash);
+  hljs.registerLanguage('cpp', cpp);
+  hljs.registerLanguage('css', css);
+  hljs.registerLanguage('diff', diff);
+  hljs.registerLanguage('go', go);
+  hljs.registerLanguage('java', java);
+  hljs.registerLanguage('javascript', javascript);
+  hljs.registerLanguage('json', json);
+  hljs.registerLanguage('markdown', markdown);
+  hljs.registerLanguage('python', python);
+  hljs.registerLanguage('rust', rust);
+  hljs.registerLanguage('scss', scss);
+  hljs.registerLanguage('sql', sql);
+  hljs.registerLanguage('typescript', typescript);
+  hljs.registerLanguage('xml', xml);
+  hljs.registerLanguage('yaml', yaml);
+
+  const languageAliases: Record<string, string> = {
+    c: 'cpp',
+    h: 'cpp',
+    hpp: 'cpp',
+    html: 'xml',
+    js: 'javascript',
+    jsx: 'javascript',
+    md: 'markdown',
+    py: 'python',
+    rs: 'rust',
+    sh: 'bash',
+    ts: 'typescript',
+    tsx: 'typescript',
+    yml: 'yaml',
+  };
 
   // Shared renderer configuration
   const renderer = new marked.Renderer();
   renderer.code = ({ text, lang }: { text: string, lang?: string }) => {
-    const language = lang && hljs.getLanguage(lang) ? lang : 'plaintext';
-    const highlighted = hljs.highlight(text, { language }).value;
-    return `<pre><code class="hljs language-${language}">${highlighted}</code></pre>`;
+    const requestedLanguage = lang?.trim().toLowerCase();
+    const language = requestedLanguage
+      ? hljs.getLanguage(requestedLanguage)
+        ? requestedLanguage
+        : languageAliases[requestedLanguage]
+      : undefined;
+    const highlighted = language
+      ? hljs.highlight(text, { language }).value
+      : hljs.highlightAuto(text).value;
+    return `<pre><code class="hljs language-${language ?? 'plaintext'}">${highlighted}</code></pre>`;
   };
   marked.setOptions({ renderer });
 
@@ -40,6 +102,19 @@
     onToggleGroup: () => void;
     onDelete: (e: MouseEvent) => void;
   }>();
+
+  let copied = $state(false);
+  let expandedTerminal = $state(false);
+
+  async function copyToClipboard() {
+    try {
+      await navigator.clipboard.writeText(entry.text);
+      copied = true;
+      setTimeout(() => { copied = false; }, 2000);
+    } catch (err) {
+      console.error('Failed to copy text: ', err);
+    }
+  }
 
   // Debounced markdown parsing for performance
   let debouncedText = $state('');
@@ -62,7 +137,7 @@
   let parsedHtml = $derived.by(() => {
     if (!debouncedText) return '';
     try {
-      return marked.parse(debouncedText, { async: false }) as string;
+      return DOMPurify.sanitize(marked.parse(debouncedText, { async: false }) as string);
     } catch {
       return debouncedText;
     }
@@ -107,8 +182,7 @@
   style="content-visibility: auto; contain-intrinsic-size: 80px;"
 >
   <div
-    class="flex items-start gap-3 py-2 text-sm leading-relaxed rounded px-3 -mx-2 transition-all cursor-default
-           {entry.type === 'user_message' ? 'feed-user-message' : ''}
+    class="flex items-start gap-[var(--space-md)] py-[var(--space-sm)] text-sm leading-relaxed rounded px-[var(--space-md)] -mx-[var(--space-md)] transition-all cursor-default
            {isSelected ? 'bg-[var(--color-accent)]/10 ring-1 ring-[var(--color-accent)]/30' : 'hover:bg-surface-2/30'}"
     onclick={(e) => entry.type === 'tool_group' ? onToggleGroup() : onSelect(e)}
     onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') entry.type === 'tool_group' ? onToggleGroup() : onSelect(e as unknown as MouseEvent); }}
@@ -149,10 +223,69 @@
             durationMs={entry.durationMs} 
             agentName={entry.agentName} 
           />
-      {:else if entry.type === 'user_message' || entry.type === 'content' || entry.type === 'thought' || entry.type === 'tool_result'}
+      {:else if entry.type === 'tool_call' || entry.type === 'tool_result'}
+          <div class="mt-1 flex flex-col gap-2">
+            <div 
+              class="rounded-lg border border-[var(--color-border)] overflow-hidden bg-[var(--color-surface-2)] transition-all"
+              style={expandedTerminal ? 'max-height: 1000px;' : 'max-height: 120px;'}
+            >
+              <div class="flex items-center justify-between px-3 py-1.5 bg-[var(--color-surface-3)] border-b border-[var(--color-border)]">
+                <div class="flex items-center gap-2 text-[10px] font-bold uppercase tracking-widest text-[var(--color-text-muted)]">
+                  <Terminal size={12} />
+                  <span>{entry.type === 'tool_call' ? 'Executing Command' : 'Terminal Output'}</span>
+                </div>
+                <button 
+                  type="button"
+                  class="p-1 hover:bg-[var(--color-surface-4)] rounded transition-colors text-[var(--color-text-muted)]"
+                  onclick={(e) => { e.stopPropagation(); expandedTerminal = !expandedTerminal; }}
+                >
+                  {#if expandedTerminal}
+                    <Minimize2 size={12} />
+                  {:else}
+                    <Maximize2 size={12} />
+                  {/if}
+                </button>
+              </div>
+              <div class="p-3 font-mono text-[12px] leading-relaxed break-words whitespace-pre-wrap {getEntryColor(entry.type)} overflow-y-auto" style={expandedTerminal ? 'max-height: 800px;' : 'max-height: 80px;'}>
+                {entry.text}
+              </div>
+            </div>
+          </div>
+      {:else if entry.type === 'user_message' || entry.type === 'content' || entry.type === 'thought'}
           <div class="{getEntryColor(entry.type)} break-words mt-1 markdown-content">
             {@html parsedHtml}
           </div>
+
+          {#if entry.type === 'content' && !isStreaming && entry.text}
+            <div class="mt-2 flex items-center gap-2" in:fade>
+              <button
+                type="button"
+                class="flex items-center gap-1.5 px-2 py-1 rounded-md text-[10px] font-bold uppercase tracking-wider transition-all
+                       {copied ? 'bg-emerald-500/10 text-emerald-400' : 'bg-[var(--color-surface-3)] text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-border)]'}"
+                onclick={(e) => { e.stopPropagation(); copyToClipboard(); }}
+              >
+                {#if copied}
+                  <Check size={10} />
+                  Copied
+                {:else}
+                  <Copy size={10} />
+                  Copy Response
+                {/if}
+              </button>
+
+              {#if entry.ghostHash}
+                <button
+                  type="button"
+                  class="flex items-center gap-1.5 px-2 py-1 rounded-md text-[10px] font-bold uppercase tracking-wider transition-all bg-[var(--color-surface-3)] text-[var(--color-text-muted)] hover:text-amber-400 hover:bg-amber-400/10"
+                  onclick={(e) => { e.stopPropagation(); wsStore.rewind(entry.ghostHash!); }}
+                  title="Rollback everything to this point"
+                >
+                  <Undo size={10} />
+                  Rewind to Here
+                </button>
+              {/if}
+            </div>
+          {/if}
       {:else}
           <div class="{getEntryColor(entry.type)} break-words mt-1">
             {entry.text}

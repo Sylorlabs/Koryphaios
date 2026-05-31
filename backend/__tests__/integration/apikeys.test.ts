@@ -1,6 +1,6 @@
 /**
  * API Key Authentication Integration Tests
- * 
+ *
  * Tests the complete API key lifecycle:
  * - Key generation
  * - Key validation
@@ -11,7 +11,7 @@
 
 import { describe, it, expect, beforeAll, beforeEach, afterAll } from 'bun:test';
 import { createApiKeyService, ApiKeyService } from '../../src/apikeys/service';
-import { initDb, getDb } from '../../src/db/sqlite';
+import { initDb, getDb } from '../../src/db';
 import { mkdirSync, rmSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
@@ -206,7 +206,7 @@ describe('API Key Authentication', () => {
       expect(result).toBe(false);
     });
 
-    it('should not allow revoking other user\'s key', async () => {
+    it("should not allow revoking other user's key", async () => {
       const created = await service.create({
         userId,
         name: 'Protected',
@@ -218,9 +218,9 @@ describe('API Key Authentication', () => {
   });
 
   describe('listForUser', () => {
-    it('should list only user\'s keys', async () => {
+    it("should list only user's keys", async () => {
       const otherUserId = `other_${Date.now()}`;
-      
+
       await service.create({ userId, name: 'Key 1' });
       await service.create({ userId, name: 'Key 2' });
       await service.create({ userId: otherUserId, name: 'Other Key' });
@@ -228,7 +228,7 @@ describe('API Key Authentication', () => {
       const keys = await service.listForUser(userId);
 
       expect(keys.length).toBe(2);
-      expect(keys.every(k => k.userId === userId)).toBe(true);
+      expect(keys.every((k) => k.userId === userId)).toBe(true);
     });
 
     it('should not include hashedKey in list', async () => {

@@ -8,22 +8,23 @@
  * - API: expose local estimate vs cloud reality and highlight drift > 5%.
  */
 
-import { computeCost2026 } from "./models";
+import { computeCost2026 } from './models';
 import {
   initCreditDb,
   getCreditDb,
   recordUsage as dbRecordUsage,
   getLocalTotals,
+  getLocalTotalsByProvider,
   getLatestCloudSnapshots,
-} from "./db";
-import { startCreditPolling, stopCreditPolling, type PollingConfig } from "./polling";
+} from './db';
+import { startCreditPolling, stopCreditPolling, type PollingConfig } from './polling';
 
 const DRIFT_THRESHOLD_PERCENT = 5;
 
-export { getModelCost2026, computeCost2026 } from "./models";
-export { initCreditDb, getLocalTotals, getLatestCloudSnapshots } from "./db";
-export { startCreditPolling, stopCreditPolling, type PollingConfig } from "./polling";
-export { createUsageInterceptingFetch } from "./usage-interceptor";
+export { getModelCost2026, computeCost2026 } from './models';
+export { initCreditDb, getLocalTotals, getLocalTotalsByProvider, getLatestCloudSnapshots } from './db';
+export { startCreditPolling, stopCreditPolling, type PollingConfig } from './polling';
+export { createUsageInterceptingFetch } from './usage-interceptor';
 
 /**
  * Record token usage and cost to sylorlabs.db.
@@ -33,7 +34,7 @@ export function recordUsage(
   model: string,
   provider: string,
   tokensIn: number,
-  tokensOut: number
+  tokensOut: number,
 ): void {
   const costUsd = computeCost2026(model, tokensIn ?? 0, tokensOut ?? 0);
   dbRecordUsage(model, provider, tokensIn ?? 0, tokensOut ?? 0, costUsd);
@@ -44,7 +45,10 @@ export function recordUsage(
  */
 export function initCreditAccountant(dataDir: string, pollingConfig?: PollingConfig): void {
   initCreditDb(dataDir);
-  if (pollingConfig && (pollingConfig.openaiApiKey || (pollingConfig.githubEnterpriseId && pollingConfig.githubToken))) {
+  if (
+    pollingConfig &&
+    (pollingConfig.openaiApiKey || (pollingConfig.githubEnterpriseId && pollingConfig.githubToken))
+  ) {
     startCreditPolling(pollingConfig);
   }
 }
@@ -53,7 +57,12 @@ export function initCreditAccountant(dataDir: string, pollingConfig?: PollingCon
  * Reconciliation payload for API/UI: local estimate, cloud snapshots, drift.
  */
 export function getReconciliation(): {
-  localEstimate: { totalCostUsd: number; tokensIn: number; tokensOut: number; byModel: Array<{ model: string; costUsd: number; tokensIn: number; tokensOut: number }> };
+  localEstimate: {
+    totalCostUsd: number;
+    tokensIn: number;
+    tokensOut: number;
+    byModel: Array<{ model: string; costUsd: number; tokensIn: number; tokensOut: number }>;
+  };
   cloudReality: Array<{
     source: string;
     ts: number;
@@ -69,9 +78,9 @@ export function getReconciliation(): {
   const cloud = getLatestCloudSnapshots();
 
   let driftPercent: number | null = null;
-  const openai = cloud.find((c) => c.source === "openai");
+  const openai = cloud.find((c) => c.source === 'openai');
   if (openai && openai.totalUsedUsd != null && openai.totalUsedUsd > 0 && local.totalCostUsd >= 0) {
-    driftPercent = Math.abs(local.totalCostUsd - openai.totalUsedUsd) / openai.totalUsedUsd * 100;
+    driftPercent = (Math.abs(local.totalCostUsd - openai.totalUsedUsd) / openai.totalUsedUsd) * 100;
   }
 
   return {

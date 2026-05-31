@@ -1,25 +1,25 @@
 /**
  * Agent Settings System
- * 
+ *
  * Manages agent behavior, rule enforcement, and workflow preferences.
  * Rules are ALWAYS applied - no option to disable.
  * Critic strongly enforces rules and workflow from preferences.md
  */
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { join, dirname } from "node:path";
+import { existsSync, mkdirSync, readFileSync, writeFileSync, renameSync } from 'node:fs';
+import { join, dirname } from 'node:path';
+import { wsBroker } from './pubsub';
 
 // ============================================================================
 // Configuration
 // ============================================================================
 
 export const AGENT_SETTINGS_CONFIG = {
-  SETTINGS_FILE: ".koryphaios/agent-settings.json",
-  PREFERENCES_FILE: ".koryphaios/preferences.md",
+  PREFERENCES_FILE: '.koryphaios/preferences.md',
   RULES_ENFORCEMENT: {
-    STRICT: "strict",      // Critic blocks violations
-    MODERATE: "moderate",  // Critic warns on violations
-    LENIENT: "lenient",    // Critic suggests improvements
+    STRICT: 'strict', // Critic blocks violations
+    MODERATE: 'moderate', // Critic warns on violations
+    LENIENT: 'lenient', // Critic suggests improvements
   },
 } as const;
 
@@ -29,41 +29,54 @@ export const AGENT_SETTINGS_CONFIG = {
 
 export interface AgentSettings {
   /** Rule enforcement level - always applied, but critic can be strict/moderate/lenient */
-  ruleEnforcementLevel: "strict" | "moderate" | "lenient";
-  
+  ruleEnforcementLevel: 'strict' | 'moderate' | 'lenient';
+
+  /** Agent orchestration mode preference. Auto lets Kory decide when to delegate. */
+  agentExecutionMode: 'auto' | 'single' | 'multi';
+
   /** Whether to use preferences.md for workflow guidance */
   preferencesEnabled: boolean;
-  
+
   /** Critic gate enabled - critic reviews all changes */
   criticGateEnabled: boolean;
-  
+
   /** Critic enforces preferences.md workflow strictly */
   criticEnforcesPreferences: boolean;
-  
+
   /** Auto-apply fixes that don't violate rules */
   autoApplySafeFixes: boolean;
-  
+
   /** Require confirmation for rule violations */
   confirmRuleViolations: boolean;
-  
+
   /** Agent memory - allow agents to update memory files */
   agentMemoryEnabled: boolean;
-  
+
   /** Agent can update preferences.md based on learned patterns */
   agentCanUpdatePreferences: boolean;
-  
+
   /** Max iterations for critic review loop */
   maxCriticIterations: number;
-  
+
   /** Require human approval for changes that modify >N files */
   approvalThresholdFiles: number;
-  
+
   /** Require human approval for changes >N lines */
   approvalThresholdLines: number;
+
+  /** Experimental: Local Web Search (DuckDuckGo) */
+  localWebSearch: 'off' | 'on' | 'fallback';
+
+  /** Experimental: Multi-source research requirements */
+  multiSourceResearch: boolean;
+
+  /** Timestamp of last update for synchronization */
+  updatedAt?: number;
 }
 
 export const DEFAULT_AGENT_SETTINGS: AgentSettings = {
-  ruleEnforcementLevel: "strict",
+  ruleEnforcementLevel: 'strict',
+  agentExecutionMode: 'auto',
   preferencesEnabled: true,
   criticGateEnabled: true,
   criticEnforcesPreferences: true,
@@ -74,7 +87,50 @@ export const DEFAULT_AGENT_SETTINGS: AgentSettings = {
   maxCriticIterations: 3,
   approvalThresholdFiles: 5,
   approvalThresholdLines: 100,
+  localWebSearch: 'fallback',
+  multiSourceResearch: true,
 };
+
+// Helper to load koryphaios.json
+function loadKoryphaiosConfig(projectRoot: string): Record<string, unknown> {
+  const configPath = join(projectRoot, 'koryphaios.json');
+  if (!existsSync(configPath)) return {};
+  try {
+    return JSON.parse(readFileSync(configPath, 'utf-8'));
+  } catch {
+    return {};
+  }
+}
+
+/**
+ * Atomic write for koryphaios.json.
+ * Writes to a temporary file then renames to avoid corruption during race conditions.
+ */
+function saveKoryphaiosConfig(projectRoot: string, config: Record<string, unknown>): void {
+  const configPath = join(projectRoot, 'koryphaios.json');
+  const tempPath = `${configPath}.${process.pid}.tmp`;
+
+  try {
+    // Add global updatedAt
+    config.updatedAt = Date.now();
+
+    writeFileSync(tempPath, JSON.stringify(config, null, 2), 'utf-8');
+    renameSync(tempPath, configPath);
+
+    // Broadcast update via WebSocket broker
+    wsBroker.publish('custom', {
+      type: 'system.config_updated' as any,
+      payload: { source: 'agent-settings', updatedAt: config.updatedAt },
+      timestamp: config.updatedAt as number,
+      sessionId: 'global',
+      agentId: 'system',
+    });
+  } catch (err) {
+    console.error('Failed to save koryphaios.json atomically:', err);
+    // Fallback to direct write if rename fails (e.g. cross-device)
+    writeFileSync(configPath, JSON.stringify(config, null, 2), 'utf-8');
+  }
+}
 
 // ============================================================================
 // Preferences.md Template
@@ -235,98 +291,117 @@ const PREFERENCES_TEMPLATE = `# Agent Preferences & Workflow
 // Settings Management
 // ============================================================================
 
-export function getSettingsPath(projectRoot: string): string {
-  return join(projectRoot, AGENT_SETTINGS_CONFIG.SETTINGS_FILE);
-}
-
 export function getPreferencesPath(projectRoot: string): string {
   return join(projectRoot, AGENT_SETTINGS_CONFIG.PREFERENCES_FILE);
 }
 
+/**
+ * Load agent settings from koryphaios.json
+ * All settings live in the main config file - no separate file needed
+ */
 export function loadAgentSettings(projectRoot: string): AgentSettings {
-  const filePath = getSettingsPath(projectRoot);
-  
-  if (!existsSync(filePath)) {
-    return DEFAULT_AGENT_SETTINGS;
-  }
-  
-  try {
-    const content = readFileSync(filePath, "utf-8");
-    const parsed = JSON.parse(content);
-    return { ...DEFAULT_AGENT_SETTINGS, ...parsed };
-  } catch (err) {
-    console.error("Failed to load agent settings:", err);
-    return DEFAULT_AGENT_SETTINGS;
-  }
+  const config = loadKoryphaiosConfig(projectRoot);
+
+  // agentSettings in koryphaios.json is the new source of truth
+  const persistedSettings = config.agentSettings as Partial<AgentSettings> | undefined;
+
+  // Backward compatibility: enableCritic in koryphaios.json maps to criticGateEnabled
+  const enableCritic = config.enableCritic as boolean | undefined;
+
+  return {
+    ...DEFAULT_AGENT_SETTINGS,
+    ...(enableCritic !== undefined && { criticGateEnabled: enableCritic }),
+    ...persistedSettings,
+  };
 }
 
+/**
+ * Save agent settings to koryphaios.json
+ * This edits the main config file directly
+ */
 export function saveAgentSettings(projectRoot: string, settings: AgentSettings): void {
-  const filePath = getSettingsPath(projectRoot);
-  const dir = dirname(filePath);
-  
-  if (!existsSync(dir)) {
-    mkdirSync(dir, { recursive: true });
-  }
-  
-  writeFileSync(filePath, JSON.stringify(settings, null, 2), "utf-8");
+  const config = loadKoryphaiosConfig(projectRoot);
+
+  // Set updatedAt for the settings object
+  settings.updatedAt = Date.now();
+
+  // Update both for compatibility
+  config.enableCritic = settings.criticGateEnabled;
+  config.agentSettings = settings;
+
+  saveKoryphaiosConfig(projectRoot, config);
 }
 
+/**
+ * Reset agent settings to defaults in koryphaios.json
+ */
 export function resetAgentSettings(projectRoot: string): AgentSettings {
-  saveAgentSettings(projectRoot, DEFAULT_AGENT_SETTINGS);
-  return DEFAULT_AGENT_SETTINGS;
+  const config = loadKoryphaiosConfig(projectRoot);
+  const settings = { ...DEFAULT_AGENT_SETTINGS, updatedAt: Date.now() };
+
+  config.enableCritic = settings.criticGateEnabled;
+  config.agentSettings = settings;
+
+  saveKoryphaiosConfig(projectRoot, config);
+  return settings;
 }
 
 // ============================================================================
 // Preferences.md Management
 // ============================================================================
 
-export function initializePreferences(projectRoot: string): { path: string; content: string; exists: boolean } {
+export function initializePreferences(projectRoot: string): {
+  path: string;
+  content: string;
+  exists: boolean;
+} {
   const filePath = getPreferencesPath(projectRoot);
-  
+
   if (!existsSync(filePath)) {
     const dir = dirname(filePath);
     if (!existsSync(dir)) {
       mkdirSync(dir, { recursive: true });
     }
-    
-    const content = PREFERENCES_TEMPLATE.replace(
-      "{timestamp}",
-      new Date().toISOString()
-    );
-    
-    writeFileSync(filePath, content, "utf-8");
-    
+
+    const content = PREFERENCES_TEMPLATE.replace('{timestamp}', new Date().toISOString());
+
+    writeFileSync(filePath, content, 'utf-8');
+
     return { path: filePath, content, exists: true };
   }
-  
+
   return readPreferences(projectRoot);
 }
 
-export function readPreferences(projectRoot: string): { path: string; content: string; exists: boolean } {
+export function readPreferences(projectRoot: string): {
+  path: string;
+  content: string;
+  exists: boolean;
+} {
   const filePath = getPreferencesPath(projectRoot);
-  
+
   if (!existsSync(filePath)) {
-    return { path: filePath, content: "", exists: false };
+    return { path: filePath, content: '', exists: false };
   }
-  
+
   try {
-    const content = readFileSync(filePath, "utf-8");
+    const content = readFileSync(filePath, 'utf-8');
     return { path: filePath, content, exists: true };
   } catch (err) {
-    console.error("Failed to read preferences:", err);
-    return { path: filePath, content: "", exists: false };
+    console.error('Failed to read preferences:', err);
+    return { path: filePath, content: '', exists: false };
   }
 }
 
 export function writePreferences(projectRoot: string, content: string): void {
   const filePath = getPreferencesPath(projectRoot);
   const dir = dirname(filePath);
-  
+
   if (!existsSync(dir)) {
     mkdirSync(dir, { recursive: true });
   }
-  
-  writeFileSync(filePath, content, "utf-8");
+
+  writeFileSync(filePath, content, 'utf-8');
 }
 
 // ============================================================================
@@ -341,7 +416,7 @@ export interface RuleEnforcementResult {
 
 export interface RuleViolation {
   rule: string;
-  severity: "critical" | "error" | "warning";
+  severity: 'critical' | 'error' | 'warning';
   message: string;
   file?: string;
   line?: number;
@@ -361,42 +436,42 @@ export function enforceRules(
   code: string,
   filePath: string,
   preferences: string,
-  enforcementLevel: AgentSettings["ruleEnforcementLevel"]
+  enforcementLevel: AgentSettings['ruleEnforcementLevel'],
 ): RuleEnforcementResult {
   const violations: RuleViolation[] = [];
   const warnings: RuleWarning[] = [];
-  
+
   // Parse preferences for forbidden patterns
   const forbiddenPatterns = extractForbiddenPatterns(preferences);
   const requiredPatterns = extractRequiredPatterns(preferences);
-  
+
   // Check for forbidden patterns
   for (const pattern of forbiddenPatterns) {
     if (code.includes(pattern.pattern)) {
-      if (pattern.critical || enforcementLevel === "strict") {
+      if (pattern.critical || enforcementLevel === 'strict') {
         violations.push({
           rule: pattern.name,
-          severity: pattern.critical ? "critical" : "error",
+          severity: pattern.critical ? 'critical' : 'error',
           message: pattern.message,
           file: filePath,
         });
-      } else if (enforcementLevel === "moderate") {
+      } else if (enforcementLevel === 'moderate') {
         warnings.push({
           rule: pattern.name,
           message: pattern.message,
-          suggestion: pattern.suggestion || "Remove this pattern",
+          suggestion: pattern.suggestion || 'Remove this pattern',
         });
       }
     }
   }
-  
+
   // Check for required patterns
   for (const pattern of requiredPatterns) {
     if (!pattern.check(code)) {
-      if (enforcementLevel === "strict") {
+      if (enforcementLevel === 'strict') {
         violations.push({
           rule: pattern.name,
-          severity: "error",
+          severity: 'error',
           message: pattern.message,
           file: filePath,
         });
@@ -409,7 +484,7 @@ export function enforceRules(
       }
     }
   }
-  
+
   return {
     passed: violations.length === 0,
     violations,
@@ -434,53 +509,87 @@ interface RequiredPattern {
 
 function extractForbiddenPatterns(preferences: string): Pattern[] {
   const patterns: Pattern[] = [];
-  
-  // Extract "Never Do This" patterns
-  const neverSection = preferences.match(/### Never Do This[\s\S]*?(?=###|$)/);
-  if (neverSection) {
-    const lines = neverSection[0].split("\n");
+
+  // Extract "Never Do This" patterns using more robust multi-line matching
+  const neverSectionMatch = preferences.match(
+    /##+ 🚫 Forbidden Patterns[\s\S]*?### Never Do This([\s\S]*?)(?=###|##|$)/i,
+  );
+  if (neverSectionMatch && neverSectionMatch[1]) {
+    const lines = neverSectionMatch[1].split('\n');
     for (const line of lines) {
-      const match = line.match(/-\s*\*\*CRITICAL\*\*:\s*(.+)/);
+      // Match both - **CRITICAL**: and - CRITICAL:
+      const match = line.match(/-\s*(\*\*)?CRITICAL(\*\*)?:\s*(.+)/i);
       if (match) {
+        const patternText = match[3].trim();
         patterns.push({
-          name: "Critical Rule",
-          pattern: match[1].toLowerCase(),
-          message: match[1],
+          name: 'Critical Rule',
+          pattern: patternText.toLowerCase(),
+          message: patternText,
           critical: true,
         });
       }
     }
   }
-  
+
   // Default security patterns (always enforced)
   patterns.push(
-    { name: "No Secrets", pattern: "apikey", message: "Potential API key detected", critical: true },
-    { name: "No Eval", pattern: "eval(", message: "eval() is dangerous", critical: true },
-    { name: "No Console", pattern: "console.log", message: "console.log should not be in production" }
+    {
+      name: 'No Secrets',
+      pattern: 'apikey',
+      message: 'Potential API key detected',
+      critical: true,
+    },
+    { name: 'No Eval', pattern: 'eval(', message: 'eval() is dangerous', critical: true },
+    {
+      name: 'No Console',
+      pattern: 'console.log',
+      message: 'console.log should not be in production',
+    },
   );
-  
+
   return patterns;
 }
 
 function extractRequiredPatterns(preferences: string): RequiredPattern[] {
   const patterns: RequiredPattern[] = [];
-  
-  // Check for error handling
-  patterns.push({
-    name: "Error Handling",
-    check: (code) => code.includes("try") || code.includes("catch") || code.includes("throw"),
-    message: "Code should have error handling",
-    suggestion: "Add try/catch or error checks",
-  });
-  
-  // Check for JSDoc (for functions)
-  patterns.push({
-    name: "Documentation",
-    check: (code) => !code.includes("function") || code.includes("/**"),
-    message: "Functions should have JSDoc comments",
-    suggestion: "Add JSDoc documentation",
-  });
-  
+
+  // Check for error handling requirement in preferences
+  const hasErrorHandlingReq = /mandatory.*error handling/i.test(preferences);
+  if (hasErrorHandlingReq) {
+    patterns.push({
+      name: 'Error Handling',
+      check: (code) =>
+        code.includes('try') ||
+        code.includes('catch') ||
+        code.includes('throw') ||
+        code.includes('Error('),
+      message: 'Code should have error handling as per preferences',
+      suggestion: 'Add try/catch or error checks',
+    });
+  }
+
+  // Check for JSDoc requirement in preferences
+  const hasJSDocReq = /mandatory.*jsdoc/i.test(preferences);
+  if (hasJSDocReq) {
+    patterns.push({
+      name: 'Documentation',
+      check: (code) => !code.includes('function') || code.includes('/**'),
+      message: 'Functions should have JSDoc comments as per preferences',
+      suggestion: 'Add JSDoc documentation',
+    });
+  }
+
+  // Check for "No any types" requirement in preferences
+  const hasNoAnyReq = /mandatory.*no any types/i.test(preferences);
+  if (hasNoAnyReq) {
+    patterns.push({
+      name: 'Type Safety',
+      check: (code) => !code.includes(': any') && !code.includes('<any>'),
+      message: "Avoid using 'any' types as per preferences",
+      suggestion: 'Use specific types or unknown instead of any',
+    });
+  }
+
   return patterns;
 }
 
@@ -511,27 +620,26 @@ export interface CriticReviewResult {
  */
 export function criticReview(request: CriticReviewRequest): CriticReviewResult {
   const { code, filePath, settings, preferences, rules } = request;
-  
+
   // Always enforce rules
   const ruleCheck = enforceRules(code, filePath, preferences, settings.ruleEnforcementLevel);
-  
+
   const violations = ruleCheck.violations;
   const warnings = ruleCheck.warnings;
   const requiredChanges: string[] = [];
-  
+
   // Critical violations always block
-  const criticalViolations = violations.filter(v => v.severity === "critical");
-  
+  const criticalViolations = violations.filter((v) => v.severity === 'critical');
+
   // In strict mode, all violations block
-  const blockingViolations = settings.ruleEnforcementLevel === "strict" 
-    ? violations 
-    : criticalViolations;
-  
+  const blockingViolations =
+    settings.ruleEnforcementLevel === 'strict' ? violations : criticalViolations;
+
   // Generate required changes
   for (const violation of blockingViolations) {
     requiredChanges.push(`${violation.severity.toUpperCase()}: ${violation.message}`);
   }
-  
+
   // Check preferences workflow
   if (settings.criticEnforcesPreferences && preferences) {
     const workflowCheck = checkWorkflowCompliance(code, preferences);
@@ -539,38 +647,40 @@ export function criticReview(request: CriticReviewRequest): CriticReviewResult {
       requiredChanges.push(...workflowCheck.issues);
     }
   }
-  
+
   // Determine if can auto-fix
   const canAutoFix = violations.length === 0 && warnings.length > 0;
-  
+
   // Auto-apply if safe and enabled
-  const approved = settings.criticGateEnabled 
-    ? requiredChanges.length === 0 
-    : true;
-  
+  const approved = settings.criticGateEnabled ? requiredChanges.length === 0 : true;
+
   return {
     approved,
     canAutoFix,
     violations,
     warnings,
-    suggestions: warnings.map(w => w.suggestion),
+    suggestions: warnings.map((w) => w.suggestion),
     requiredChanges,
   };
 }
 
-function checkWorkflowCompliance(code: string, preferences: string): { compliant: boolean; issues: string[] } {
+function checkWorkflowCompliance(
+  code: string,
+  preferences: string,
+): { compliant: boolean; issues: string[] } {
   const issues: string[] = [];
-  
+
   // Check if code follows "Write tests BEFORE implementation"
-  if (preferences.includes("Write tests BEFORE implementation")) {
-    const hasTest = code.includes("test(") || code.includes("it(") || code.includes("describe(");
-    const hasImplementation = code.includes("function") || code.includes("const") || code.includes("class");
-    
+  if (preferences.includes('Write tests BEFORE implementation')) {
+    const hasTest = code.includes('test(') || code.includes('it(') || code.includes('describe(');
+    const hasImplementation =
+      code.includes('function') || code.includes('const') || code.includes('class');
+
     if (hasImplementation && !hasTest) {
-      issues.push("WORKFLOW: Tests should be written before implementation");
+      issues.push('WORKFLOW: Tests should be written before implementation');
     }
   }
-  
+
   return { compliant: issues.length === 0, issues };
 }
 
@@ -580,24 +690,19 @@ function checkWorkflowCompliance(code: string, preferences: string): { compliant
 
 export function assembleAgentContext(
   projectRoot: string,
-  settings: AgentSettings
+  settings: AgentSettings,
 ): {
   settings: AgentSettings;
   preferences: string;
   rules: string;
   enforcementMessage: string;
 } {
-  const prefs = settings.preferencesEnabled 
-    ? readPreferences(projectRoot).content 
-    : "";
-  
-  const rulesContent = readFileSync(
-    join(projectRoot, ".cursorrules"), 
-    "utf-8"
-  ).toString() || "";
-  
+  const prefs = settings.preferencesEnabled ? readPreferences(projectRoot).content : '';
+
+  const rulesContent = readFileSync(join(projectRoot, '.koryrules'), 'utf-8').toString() || '';
+
   const enforcementMessage = generateEnforcementMessage(settings);
-  
+
   return {
     settings,
     preferences: prefs,
@@ -608,33 +713,33 @@ export function assembleAgentContext(
 
 function generateEnforcementMessage(settings: AgentSettings): string {
   const messages = [
-    "🚨 RULE ENFORCEMENT IS ACTIVE",
-    "",
-    "The following rules MUST be followed:",
-    "1. ALL rules from .cursorrules are mandatory",
-    "2. ALL preferences from preferences.md are mandatory",
+    '🚨 RULE ENFORCEMENT IS ACTIVE',
+    '',
+    'The following rules MUST be followed:',
+    '1. ALL rules from .koryrules are mandatory',
+    '2. ALL preferences from preferences.md are mandatory',
   ];
-  
+
   if (settings.criticGateEnabled) {
-    messages.push("3. CRITIC WILL REVIEW and may BLOCK violations");
+    messages.push('3. CRITIC WILL REVIEW and may BLOCK violations');
   }
-  
+
   if (settings.criticEnforcesPreferences) {
-    messages.push("4. CRITIC STRICTLY ENFORCES workflow preferences");
+    messages.push('4. CRITIC STRICTLY ENFORCES workflow preferences');
   }
-  
-  if (settings.ruleEnforcementLevel === "strict") {
-    messages.push("5. STRICT MODE: Any rule violation blocks the change");
+
+  if (settings.ruleEnforcementLevel === 'strict') {
+    messages.push('5. STRICT MODE: Any rule violation blocks the change');
   }
-  
-  messages.push("");
-  messages.push("Before submitting changes:");
-  messages.push("- Verify compliance with ALL rules");
-  messages.push("- Check against preferences.md workflow");
-  messages.push("- Ensure no forbidden patterns");
-  messages.push("- Run all checks (lint, test, type)");
-  
-  return messages.join("\n");
+
+  messages.push('');
+  messages.push('Before submitting changes:');
+  messages.push('- Verify compliance with ALL rules');
+  messages.push('- Check against preferences.md workflow');
+  messages.push('- Ensure no forbidden patterns');
+  messages.push('- Run all checks (lint, test, type)');
+
+  return messages.join('\n');
 }
 
 // ============================================================================
@@ -644,7 +749,7 @@ function generateEnforcementMessage(settings: AgentSettings): string {
 export function getAgentSettingsStats(projectRoot: string) {
   const settings = loadAgentSettings(projectRoot);
   const preferences = readPreferences(projectRoot);
-  
+
   return {
     settings,
     preferences: {
@@ -653,6 +758,6 @@ export function getAgentSettingsStats(projectRoot: string) {
     },
     enforcementActive: true,
     criticActive: settings.criticGateEnabled,
-    strictMode: settings.ruleEnforcementLevel === "strict",
+    strictMode: settings.ruleEnforcementLevel === 'strict',
   };
 }

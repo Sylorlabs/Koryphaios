@@ -1,13 +1,7 @@
 /**
  * Redis Connection Manager
- * 
- * Manages Redis connections with support for:
- * - Connection pooling
- * - Sentinel mode for HA
- * - Cluster mode for sharding
- * - Automatic reconnection
- * - Health checks
- * - Fallback to in-memory for development
+ *
+ * Manages Redis connections with fallback to in-memory for development.
  */
 
 import Redis, { RedisOptions, Cluster as RedisCluster } from 'ioredis';
@@ -20,30 +14,22 @@ export interface RedisConfig {
   password?: string;
   db?: number;
   tls?: boolean;
-  
-  // Sentinel configuration
   sentinel?: {
     hosts: { host: string; port: number }[];
     masterName: string;
     password?: string;
   };
-  
-  // Cluster configuration
   cluster?: {
     startupNodes: { host: string; port: number }[];
     options?: RedisOptions;
   };
-  
-  // Connection pool
   maxRetriesPerRequest?: number;
   enableReadyCheck?: boolean;
   maxLoadingTimeout?: number;
-  
-  // For development/testing
   fallbackToMemory?: boolean;
 }
 
-// In-memory fallback for development
+// Simple in-memory fallback for development
 class InMemoryRedis {
   private data: Map<string, any> = new Map();
   private expirations: Map<string, number> = new Map();
@@ -58,7 +44,7 @@ class InMemoryRedis {
 
   async set(key: string, value: string, ...args: any[]): Promise<'OK'> {
     this.data.set(key, value);
-    
+
     // Handle EX/PX arguments
     for (let i = 0; i < args.length; i++) {
       if (args[i] === 'EX' && args[i + 1]) {
@@ -67,7 +53,7 @@ class InMemoryRedis {
         this.setExpiration(key, args[i + 1]);
       }
     }
-    
+
     return 'OK';
   }
 
@@ -114,7 +100,7 @@ class InMemoryRedis {
     this.checkExpiration(key);
     let score: number | undefined;
     const members: { score: number; member: string }[] = [];
-    
+
     for (let i = 0; i < args.length; i++) {
       if (score === undefined) {
         score = Number(args[i]);
@@ -123,19 +109,19 @@ class InMemoryRedis {
         score = undefined;
       }
     }
-    
+
     let set = this.data.get(key) as Map<string, number> | undefined;
     if (!set) {
       set = new Map();
       this.data.set(key, set);
     }
-    
+
     let added = 0;
     for (const { score, member } of members) {
       if (!set.has(member)) added++;
       set.set(member, score);
     }
-    
+
     return added;
   }
 
@@ -143,10 +129,10 @@ class InMemoryRedis {
     this.checkExpiration(key);
     const set = this.data.get(key) as Map<string, number> | undefined;
     if (!set) return 0;
-    
+
     const minScore = min === '-inf' ? -Infinity : Number(min);
     const maxScore = max === '+inf' || max === 'inf' ? Infinity : Number(max);
-    
+
     let removed = 0;
     for (const [member, score] of set.entries()) {
       if (score >= minScore && score <= maxScore) {
@@ -154,7 +140,7 @@ class InMemoryRedis {
         removed++;
       }
     }
-    
+
     return removed;
   }
 
@@ -168,16 +154,16 @@ class InMemoryRedis {
     this.checkExpiration(key);
     const set = this.data.get(key) as Map<string, number> | undefined;
     if (!set) return [];
-    
+
     const entries = Array.from(set.entries());
     entries.sort((a, b) => a[1] - b[1]);
-    
+
     const sliced = entries.slice(start, stop === -1 ? undefined : stop + 1);
-    
+
     if (args.includes('WITHSCORES')) {
       return sliced.flatMap(([member, score]) => [member, String(score)]);
     }
-    
+
     return sliced.map(([member]) => member);
   }
 
@@ -188,13 +174,13 @@ class InMemoryRedis {
       hash = new Map();
       this.data.set(key, hash);
     }
-    
+
     for (let i = 0; i < args.length; i += 2) {
       if (args[i + 1] !== undefined) {
         hash.set(String(args[i]), String(args[i + 1]));
       }
     }
-    
+
     return 'OK';
   }
 
@@ -202,8 +188,8 @@ class InMemoryRedis {
     this.checkExpiration(key);
     const hash = this.data.get(key) as Map<string, string> | undefined;
     if (!hash) return fields.map(() => null);
-    
-    return fields.map(f => hash.get(f) || null);
+
+    return fields.map((f) => hash.get(f) || null);
   }
 
   async incr(key: string): Promise<number> {
@@ -218,7 +204,7 @@ class InMemoryRedis {
     let hash = 0;
     for (let i = 0; i < script.length; i++) {
       const char = script.charCodeAt(i);
-      hash = ((hash << 5) - hash) + char;
+      hash = (hash << 5) - hash + char;
       hash = hash & hash;
     }
     const sha = Math.abs(hash).toString(16);
@@ -231,11 +217,9 @@ class InMemoryRedis {
     const keys = args.slice(0, numKeys);
     const argv = args.slice(numKeys);
 
-    // Sliding window: uses ZREMRANGEBYSCORE and ZCARD
     if (script?.includes('ZREMRANGEBYSCORE')) {
       return this._execSlidingWindow(keys[0], argv);
     }
-    // Token bucket: uses last_refill hash field
     if (script?.includes('last_refill')) {
       return this._execTokenBucket(keys[0], argv);
     }
@@ -297,7 +281,7 @@ class InMemoryRedis {
 
   async keys(pattern: string): Promise<string[]> {
     const regex = new RegExp(pattern.replace('*', '.*').replace('?', '.'));
-    return Array.from(this.data.keys()).filter(k => regex.test(k));
+    return Array.from(this.data.keys()).filter((k) => regex.test(k));
   }
 
   async flushall(): Promise<'OK'> {
@@ -307,7 +291,6 @@ class InMemoryRedis {
       clearTimeout(timer);
     }
     this.timers.clear();
-    // Note: scripts are not cleared on flushall (matches Redis behavior)
     return 'OK';
   }
 
@@ -322,19 +305,20 @@ class InMemoryRedis {
   private checkExpiration(key: string): void {
     const exp = this.expirations.get(key);
     if (exp && exp < Date.now()) {
-      this.del(key);
+      this.data.delete(key);
+      this.expirations.delete(key);
     }
   }
 
   private setExpiration(key: string, ttlMs: number): void {
     const existing = this.timers.get(key);
     if (existing) clearTimeout(existing);
-    
+
     this.expirations.set(key, Date.now() + ttlMs);
     const timer = setTimeout(() => {
       this.del(key);
     }, ttlMs);
-    
+
     this.timers.set(key, timer);
   }
 }
@@ -347,9 +331,6 @@ class RedisManager {
   private reconnectTimer: NodeJS.Timeout | null = null;
   private healthCheckInterval: NodeJS.Timeout | null = null;
 
-  /**
-   * Initialize Redis connection
-   */
   async initialize(config: RedisConfig = {}): Promise<void> {
     this.config = {
       maxRetriesPerRequest: 3,
@@ -359,24 +340,24 @@ class RedisManager {
       ...config,
     };
 
-    // Check if we should use fallback
     if (!this.config.url && !this.config.host && !this.config.sentinel && !this.config.cluster) {
       if (this.config.fallbackToMemory) {
-        serverLog.warn('No Redis configuration provided, using in-memory fallback (NOT FOR PRODUCTION)');
+        serverLog.warn(
+          'No Redis configuration provided, using in-memory fallback (NOT FOR PRODUCTION)',
+        );
         this.client = new InMemoryRedis();
         this.isConnected = true;
         return;
       }
-      throw new Error('Redis configuration required. Set REDIS_URL or enable fallbackToMemory for development.');
+      throw new Error(
+        'Redis configuration required. Set REDIS_URL or enable fallbackToMemory for development.',
+      );
     }
 
     await this.connect();
     this.startHealthChecks();
   }
 
-  /**
-   * Get Redis client
-   */
   getClient(): Redis | RedisCluster | InMemoryRedis {
     if (!this.client) {
       throw new Error('Redis not initialized. Call initialize() first.');
@@ -384,19 +365,13 @@ class RedisManager {
     return this.client;
   }
 
-  /**
-   * Check if connected
-   */
   isHealthy(): boolean {
     return this.isConnected && this.client !== null;
   }
 
-  /**
-   * Close connection
-   */
   async close(): Promise<void> {
     this.stopHealthChecks();
-    
+
     if (this.reconnectTimer) {
       clearTimeout(this.reconnectTimer);
       this.reconnectTimer = null;
@@ -405,7 +380,7 @@ class RedisManager {
     if (this.client instanceof Redis) {
       await this.client.quit();
     }
-    
+
     this.client = null;
     this.isConnected = false;
   }
@@ -415,7 +390,7 @@ class RedisManager {
       if (this.config.cluster) {
         this.client = new RedisCluster(
           this.config.cluster.startupNodes,
-          this.config.cluster.options
+          this.config.cluster.options,
         );
       } else if (this.config.sentinel) {
         this.client = new Redis({
@@ -445,12 +420,12 @@ class RedisManager {
 
       this.setupEventHandlers();
       await this.waitForReady();
-      
+
       this.isConnected = true;
       serverLog.info('Redis connection established');
     } catch (error) {
       serverLog.error({ error }, 'Failed to connect to Redis');
-      
+
       if (this.config.fallbackToMemory) {
         serverLog.warn('Falling back to in-memory Redis (NOT FOR PRODUCTION)');
         this.client = new InMemoryRedis();
@@ -491,24 +466,24 @@ class RedisManager {
 
   private async waitForReady(): Promise<void> {
     if (!(this.client instanceof Redis)) return;
-    
+
     const timeout = this.config.maxLoadingTimeout || 30000;
     const start = Date.now();
-    
+
     while (Date.now() - start < timeout) {
       if (this.client.status === 'ready') return;
-      await new Promise(r => setTimeout(r, 100));
+      await new Promise((r) => setTimeout(r, 100));
     }
-    
+
     throw new Error('Redis connection timeout');
   }
 
   private scheduleReconnect(): void {
     if (this.reconnectTimer) return;
-    
+
     this.reconnectTimer = setTimeout(async () => {
       this.reconnectTimer = null;
-      
+
       if (!this.isConnected) {
         serverLog.info('Attempting Redis reconnection...');
         try {
@@ -524,7 +499,7 @@ class RedisManager {
   private startHealthChecks(): void {
     this.healthCheckInterval = setInterval(async () => {
       if (!this.client || this.client instanceof InMemoryRedis) return;
-      
+
       try {
         await this.client.ping();
       } catch (error) {
@@ -542,7 +517,6 @@ class RedisManager {
   }
 }
 
-// Singleton instance
 let redisManager: RedisManager | null = null;
 
 export function getRedisManager(): RedisManager {

@@ -1,11 +1,11 @@
 /**
  * Prompt Registry - Mode-aware prompt templates
- * 
+ *
  * Beginner Mode: Friendly, non-technical language
  * Advanced Mode: Technical, concise language
  */
 
-import type { UIMode } from "@koryphaios/shared";
+import type { UIMode } from '@koryphaios/shared';
 
 export interface PromptTemplate {
   /** Main system prompt for the manager agent */
@@ -74,42 +74,43 @@ You can only:
 
 Be gentle but thorough. Output either "PASS" or "FAIL" with brief, friendly feedback.`,
 
-  workerDelegation: (domain: string) => 
+  workerDelegation: (domain: string) =>
     `I'll get a ${domain} specialist to help bring this to life...`,
 
-  criticReview: "Let me make sure everything looks perfect...",
+  criticReview: 'Let me make sure everything looks perfect...',
 
   toolDescriptions: {
     read_file: "Read a file to see what's in it",
-    write_file: "Create or update a file with new content",
-    edit_file: "Make changes to an existing file",
-    bash: "Run a command to help complete the task",
-    web_search: "Search the web for information",
-    web_fetch: "Get content from a specific webpage",
-    ask_user: "Ask the user a question",
-    delegate_to_worker: "Get help from a specialist for complex tasks",
-    shell_manage: "Manage background processes",
-    delete_file: "Remove a file",
-    move_file: "Move or rename a file",
-    diff: "Show differences between files",
-    patch: "Apply changes from a patch file",
-    grep: "Search for text in files",
-    glob: "Find files by pattern",
-    ls: "List directory contents",
+    write_file: 'Create or update a file with new content',
+    edit_file: 'Make changes to an existing file',
+    bash: 'Run a command to help complete the task',
+    web_search: 'Search the web for information',
+    web_fetch: 'Get content from a specific webpage',
+    ask_user: 'Ask the user a question',
+    delegate_to_worker: 'Get help from a specialist for complex tasks',
+    shell_manage: 'Manage background processes',
+    delete_file: 'Remove a file',
+    move_file: 'Move or rename a file',
+    diff: 'Show differences between files',
+    patch: 'Apply changes from a patch file',
+    grep: 'Search for text in files',
+    glob: 'Find files by pattern',
+    ls: 'List directory contents',
   },
 
   errors: {
-    noProvider: "I need an AI service to help you. Please add your API key in Settings.",
-    toolFailed: "I ran into a small hiccup. Let me try a different approach!",
-    workerFailed: "The specialist ran into an issue. Let me try handling this myself.",
-    noGitRepo: "⚠️ No backup system detected. I recommend adding your project to Git so your work is safely backed up. Would you like help with that?",
+    noProvider: 'I need an AI service to help you. Please add your API key in Settings.',
+    toolFailed: 'I ran into a small hiccup. Let me try a different approach!',
+    workerFailed: 'The specialist ran into an issue. Let me try handling this myself.',
+    noGitRepo:
+      '⚠️ No backup system detected. I recommend adding your project to Git so your work is safely backed up. Would you like help with that?',
   },
 
   thoughts: {
     analyzing: "Let me understand what you're looking to build...",
     planning: "Here's what I'll do to make this happen...",
-    executing: "Working on it... this is exciting! 🚀",
-    reviewing: "Double-checking everything looks good...",
+    executing: 'Working on it... this is exciting! 🚀',
+    reviewing: 'Double-checking everything looks good...',
     complete: "All done! Here's what I built for you:",
   },
 };
@@ -159,43 +160,42 @@ Process:
 
 Your final message MUST end with exactly "PASS" or "FAIL: <reason>"`,
 
-  workerDelegation: (domain: string) => 
-    `Spawning ${domain} worker in isolated worktree...`,
+  workerDelegation: (domain: string) => `Spawning ${domain} worker in isolated worktree...`,
 
-  criticReview: "Running critic gate on worker output...",
+  criticReview: 'Running critic gate on worker output...',
 
   toolDescriptions: {
-    read_file: "Read file contents",
-    write_file: "Write or overwrite a file",
-    edit_file: "Surgical file edits",
-    bash: "Execute shell command",
-    web_search: "Search the web",
-    web_fetch: "Fetch URL content",
-    ask_user: "Request user input",
-    delegate_to_worker: "Spawn domain-specific worker agent",
-    shell_manage: "List/kill background processes",
-    delete_file: "Delete a file",
-    move_file: "Move/rename a file",
-    diff: "Generate file diff",
-    patch: "Apply patch to file",
-    grep: "Search file contents",
-    glob: "Find files by pattern",
-    ls: "List directory",
+    read_file: 'Read file contents',
+    write_file: 'Write or overwrite a file',
+    edit_file: 'Surgical file edits',
+    bash: 'Execute shell command',
+    web_search: 'Search the web',
+    web_fetch: 'Fetch URL content',
+    ask_user: 'Request user input',
+    delegate_to_worker: 'Spawn domain-specific worker agent',
+    shell_manage: 'List/kill background processes',
+    delete_file: 'Delete a file',
+    move_file: 'Move/rename a file',
+    diff: 'Generate file diff',
+    patch: 'Apply patch to file',
+    grep: 'Search file contents',
+    glob: 'Find files by pattern',
+    ls: 'List directory',
   },
 
   errors: {
-    noProvider: "No provider available. Configure providers in koryphaios.json or Settings.",
-    toolFailed: "Tool execution failed: ${error}",
-    workerFailed: "Worker failed after ${attempts} attempts. Error: ${error}",
-    noGitRepo: "No Git repository detected. Shadow logger and worktree isolation unavailable.",
+    noProvider: 'No provider available. Configure providers in koryphaios.json or Settings.',
+    toolFailed: 'Tool execution failed: ${error}',
+    workerFailed: 'Worker failed after ${attempts} attempts. Error: ${error}',
+    noGitRepo: 'No Git repository detected. Shadow logger and worktree isolation unavailable.',
   },
 
   thoughts: {
-    analyzing: "Analyzing request...",
-    planning: "Planning approach...",
-    executing: "Executing...",
-    reviewing: "Reviewing output...",
-    complete: "Complete.",
+    analyzing: 'Analyzing request...',
+    planning: 'Planning approach...',
+    executing: 'Executing...',
+    reviewing: 'Reviewing output...',
+    complete: 'Complete.',
   },
 };
 

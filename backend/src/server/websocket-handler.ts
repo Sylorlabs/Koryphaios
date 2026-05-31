@@ -2,14 +2,14 @@
 // Domain: WebSocket connection lifecycle and message processing
 // Extracted from server.ts lines 1258-1322
 
-import type { WSMessage } from "@koryphaios/shared";
-import type { ServerWebSocket } from "bun";
-import type { WSManager } from "../ws/ws-manager";
-import type { ISessionStore } from "../stores/session-store";
-import type { KoryManager } from "../kory/manager-refactored";
-import type { ProviderRegistry } from "../providers";
-import { validateSessionId } from "../security";
-import { serverLog } from "../logger";
+import type { WSMessage } from '@koryphaios/shared';
+import type { ServerWebSocket } from 'bun';
+import type { WSManager } from '../ws/ws-manager';
+import type { ISessionStore } from '../stores/session-store';
+import type { KoryManager } from '../kory/manager';
+import type { ProviderRegistry } from '../providers';
+import { validateSessionId } from '../security';
+import { serverLog } from '../logger';
 
 // ─── Types ─────────────────────────────────────────────────────────────────────
 
@@ -35,27 +35,32 @@ export interface WebSocketHandlerDependencies {
  */
 export async function handleWSOpen(
   ws: ServerWebSocket<WSClientData>,
-  deps: WebSocketHandlerDependencies
+  deps: WebSocketHandlerDependencies,
 ): Promise<void> {
   try {
     const { wsManager, providers } = deps;
 
     wsManager.add(ws);
-    serverLog.info({ clientId: ws.data.id, clients: wsManager.clientCount }, "WS client connected");
+    serverLog.info({ clientId: ws.data.id, clients: wsManager.clientCount }, 'WS client connected');
 
     // Send initial provider status
     try {
       const initialStatus = providers.getStatus();
-      ws.send(JSON.stringify({
-        type: "provider.status",
-        payload: { providers: initialStatus },
-        timestamp: Date.now(),
-      } satisfies WSMessage));
+      ws.send(
+        JSON.stringify({
+          type: 'provider.status',
+          payload: { providers: initialStatus },
+          timestamp: Date.now(),
+        } satisfies WSMessage),
+      );
     } catch (err) {
-      serverLog.error({ err, event: "ws.open.init_status", clientId: ws?.data?.id }, "WS init status error");
+      serverLog.error(
+        { err, event: 'ws.open.init_status', clientId: ws?.data?.id },
+        'WS init status error',
+      );
     }
   } catch (err) {
-    serverLog.error({ err, event: "ws.open", clientId: ws?.data?.id }, "WS open error");
+    serverLog.error({ err, event: 'ws.open', clientId: ws?.data?.id }, 'WS open error');
   }
 }
 
@@ -69,69 +74,77 @@ export async function handleWSOpen(
 export async function handleWSMessage(
   ws: ServerWebSocket<WSClientData>,
   message: string | Buffer,
-  deps: WebSocketHandlerDependencies
+  deps: WebSocketHandlerDependencies,
 ): Promise<void> {
   try {
     const { wsManager, sessions, kory } = deps;
     const msg = JSON.parse(String(message));
-    const userId = ws.data.userId ?? "local";
-
-    // Helper to assert session ownership
-    const assertSessionOwnership = (sessionId: string): boolean => {
+    // Helper to assert the session exists for this local single-user app.
+    const assertSessionAccess = async (sessionId: string): Promise<boolean> => {
       if (!sessionId || !validateSessionId(sessionId)) return false;
-      const session = sessions.getForUser(sessionId, userId);
+      const session = await sessions.get(sessionId);
       return !!session;
     };
 
     // Route message by type
     switch (msg.type) {
-      case "subscribe_session":
+      case 'subscribe_session': {
         const sessionId = msg.sessionId;
-        if (sessionId && validateSessionId(sessionId) && sessions.getForUser(sessionId, userId)) {
+        if (sessionId && validateSessionId(sessionId) && (await sessions.get(sessionId))) {
           wsManager.subscribeClientToSession(ws.data.id, sessionId);
-          serverLog.debug({ clientId: ws.data.id, sessionId }, "Client subscribed to session");
+          serverLog.debug({ clientId: ws.data.id, sessionId }, 'Client subscribed to session');
         }
         break;
+      }
 
-      case "user_input":
-        if (assertSessionOwnership(msg.sessionId)) {
+      case 'user_input':
+        if (await assertSessionAccess(msg.sessionId)) {
           kory.handleUserInput(msg.sessionId, msg.selection, msg.text);
         } else {
-          serverLog.warn({ sessionId: msg.sessionId, userId }, "Unauthorized user_input attempt");
+          serverLog.warn({ sessionId: msg.sessionId, clientId: ws.data.id }, 'Unauthorized user_input attempt');
         }
         break;
 
-      case "session.accept_changes":
-        if (assertSessionOwnership(msg.sessionId)) {
+      case 'session.accept_changes':
+        if (await assertSessionAccess(msg.sessionId)) {
           kory.handleSessionResponse(msg.sessionId, true);
         } else {
-          serverLog.warn({ sessionId: msg.sessionId, userId }, "Unauthorized session.accept_changes attempt");
+          serverLog.warn(
+            { sessionId: msg.sessionId, clientId: ws.data.id },
+            'Unauthorized session.accept_changes attempt',
+          );
         }
         break;
 
-      case "session.reject_changes":
-        if (assertSessionOwnership(msg.sessionId)) {
+      case 'session.reject_changes':
+        if (await assertSessionAccess(msg.sessionId)) {
           kory.handleSessionResponse(msg.sessionId, false);
         } else {
-          serverLog.warn({ sessionId: msg.sessionId, userId }, "Unauthorized session.reject_changes attempt");
+          serverLog.warn(
+            { sessionId: msg.sessionId, clientId: ws.data.id },
+            'Unauthorized session.reject_changes attempt',
+          );
         }
         break;
 
-      case "toggle_yolo":
+      case 'toggle_yolo':
         kory.setYoloMode(!!msg.enabled);
-        serverLog.info({ enabled: msg.enabled }, "YOLO mode toggled via WebSocket");
+        serverLog.info({ enabled: msg.enabled }, 'YOLO mode toggled via WebSocket');
         break;
 
       default:
-        serverLog.warn({ type: msg.type }, "Unknown WebSocket message type");
+        serverLog.warn({ type: msg.type }, 'Unknown WebSocket message type');
     }
   } catch (err) {
-    serverLog.error({
-      err,
-      event: "ws.message",
-      clientId: ws?.data?.id,
-      raw: String(message).slice(0, 500)
-    }, "WS message error");
+    serverLog.error(
+      {
+        err,
+        event: 'ws.message',
+        clientId: ws?.data?.id,
+        raw: String(message).slice(0, 500),
+      },
+      'WS message error',
+    );
   }
 }
 
@@ -141,12 +154,9 @@ export async function handleWSMessage(
  * @param ws - WebSocket instance
  * @param wsManager - WebSocket manager instance
  */
-export function handleWSClose(
-  ws: ServerWebSocket<WSClientData>,
-  wsManager: WSManager
-): void {
+export function handleWSClose(ws: ServerWebSocket<WSClientData>, wsManager: WSManager): void {
   wsManager.remove(ws);
-  serverLog.info({ clients: wsManager.clientCount }, "WS client disconnected");
+  serverLog.info({ clients: wsManager.clientCount }, 'WS client disconnected');
 }
 
 /**

@@ -1,5 +1,5 @@
-import { toolLog } from "../logger";
-import { nanoid } from "nanoid";
+import { toolLog } from '../logger';
+import { nanoid } from 'nanoid';
 
 export interface BackgroundProcess {
   id: string;
@@ -7,7 +7,7 @@ export interface BackgroundProcess {
   command: string;
   cwd: string;
   pid: number;
-  status: "running" | "exited" | "killed" | "crashed";
+  status: 'running' | 'exited' | 'killed' | 'crashed';
   exitCode?: number;
   stdout: string;
   stderr: string;
@@ -32,11 +32,11 @@ export class ShellManager {
 
   startProcess(name: string, command: string, cwd: string): BackgroundProcess {
     const id = nanoid(8);
-    
-    const proc = Bun.spawn(["bash", "-c", command], {
+
+    const proc = Bun.spawn(['bash', '-c', command], {
       cwd,
-      stdout: "pipe",
-      stderr: "pipe",
+      stdout: 'pipe',
+      stderr: 'pipe',
       env: { ...process.env, PATH: process.env.PATH },
     });
 
@@ -46,9 +46,9 @@ export class ShellManager {
       command,
       cwd,
       pid: proc.pid,
-      status: "running",
-      stdout: "",
-      stderr: "",
+      status: 'running',
+      stdout: '',
+      stderr: '',
       startTime: Date.now(),
       proc,
     };
@@ -56,54 +56,66 @@ export class ShellManager {
     this.processes.set(id, bgProc);
 
     // Async readers for logs
-    this.readStream(proc.stdout.getReader(), id, "stdout");
-    this.readStream(proc.stderr.getReader(), id, "stderr");
+    this.readStream(proc.stdout.getReader(), id, 'stdout');
+    this.readStream(proc.stderr.getReader(), id, 'stderr');
 
     // Track exit with WebSocket notification
-    proc.exited.then((code) => {
-      const isCrash = code !== 0 && code !== null;
-      bgProc.status = isCrash ? "crashed" : "exited";
-      bgProc.exitCode = code;
-      bgProc.endTime = Date.now();
-      
-      toolLog.info({ id, name, code, status: bgProc.status }, "Background process exited");
-      
-      // Log process status change
-      toolLog.info({
-        processId: id,
-        name,
-        status: bgProc.status,
-        exitCode: code,
-        duration: bgProc.endTime - bgProc.startTime,
-      }, "Background process status changed");
-    }).catch((err) => {
-      bgProc.status = "crashed";
-      bgProc.endTime = Date.now();
-      toolLog.warn({ id, name, err }, "Failed to track process exit");
-      
-      // Log process error
-      toolLog.error({
-        processId: id,
-        name,
-        error: err.message || String(err),
-      }, "Background process error");
-    });
+    proc.exited
+      .then((code) => {
+        const isCrash = code !== 0 && code !== null;
+        bgProc.status = isCrash ? 'crashed' : 'exited';
+        bgProc.exitCode = code;
+        bgProc.endTime = Date.now();
+
+        toolLog.info({ id, name, code, status: bgProc.status }, 'Background process exited');
+
+        // Log process status change
+        toolLog.info(
+          {
+            processId: id,
+            name,
+            status: bgProc.status,
+            exitCode: code,
+            duration: bgProc.endTime - bgProc.startTime,
+          },
+          'Background process status changed',
+        );
+      })
+      .catch((err) => {
+        bgProc.status = 'crashed';
+        bgProc.endTime = Date.now();
+        toolLog.warn({ id, name, err }, 'Failed to track process exit');
+
+        // Log process error
+        toolLog.error(
+          {
+            processId: id,
+            name,
+            error: err.message || String(err),
+          },
+          'Background process error',
+        );
+      });
 
     return bgProc;
   }
 
-  private async readStream(reader: ReadableStreamDefaultReader<Uint8Array>, id: string, type: "stdout" | "stderr") {
+  private async readStream(
+    reader: ReadableStreamDefaultReader<Uint8Array>,
+    id: string,
+    type: 'stdout' | 'stderr',
+  ) {
     const decoder = new TextDecoder();
     try {
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
-        
+
         const proc = this.processes.get(id);
         if (!proc) break;
 
         const chunk = decoder.decode(value);
-        if (type === "stdout") {
+        if (type === 'stdout') {
           proc.stdout += chunk;
           if (proc.stdout.length > this.MAX_LOG_SIZE) {
             proc.stdout = proc.stdout.slice(-this.MAX_LOG_SIZE);
@@ -116,15 +128,15 @@ export class ShellManager {
         }
       }
     } catch (err) {
-      toolLog.error({ id, err }, "Error reading background process stream");
+      toolLog.error({ id, err }, 'Error reading background process stream');
     }
   }
 
   killProcess(id: string): boolean {
     const proc = this.processes.get(id);
-    if (proc && proc.status === "running") {
+    if (proc && proc.status === 'running') {
       proc.proc.kill();
-      proc.status = "killed";
+      proc.status = 'killed';
       return true;
     }
     return false;
@@ -134,13 +146,13 @@ export class ShellManager {
     return this.processes.get(id);
   }
 
-  listProcesses(): Omit<BackgroundProcess, "proc">[] {
+  listProcesses(): Omit<BackgroundProcess, 'proc'>[] {
     return Array.from(this.processes.values()).map(({ proc, ...rest }) => rest);
   }
 
   cleanup() {
     for (const proc of this.processes.values()) {
-      if (proc.status === "running") {
+      if (proc.status === 'running') {
         proc.proc.kill();
       }
     }

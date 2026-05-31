@@ -1,15 +1,93 @@
 use tauri::{
-    menu::{Menu, MenuItem, PredefinedMenuItem, Submenu},
+    menu::{Menu, MenuItem, PredefinedMenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
     Manager, WindowEvent, Emitter, WebviewWindow, Listener,
 };
+#[cfg(target_os = "macos")]
+use tauri::menu::Submenu;
 use std::sync::Mutex;
-use tauri_plugin_updater::UpdaterExt;
+use std::process::Stdio;
+use std::sync::Arc;
+use tauri_plugin_dialog::DialogExt;
+
+// Global backend process handle
+static BACKEND_PROCESS: Mutex<Option<Arc<std::sync::Mutex<std::process::Child>>>> = Mutex::new(None);
 
 mod config;
 mod error;
+mod indexer;
 use config::AppConfig;
 use error::{AppError, AppResult, log_error};
+
+/// Spawn the backend sidecar process
+fn spawn_backend_sidecar(app_handle: &tauri::AppHandle) -> Result<Arc<std::sync::Mutex<std::process::Child>>, String> {
+    let sidecar_path = app_handle.path()
+        .resolve("sidecar/koryphaios-backend", tauri::path::BaseDirectory::Resource)
+        .map_err(|e| format!("Failed to resolve sidecar path: {}", e))?;
+    
+    // Check if sidecar exists (production build)
+    if !sidecar_path.exists() {
+        // In development, backend is started separately
+        println!("[Koryphaios] Sidecar not found at {:?}, assuming development mode", sidecar_path);
+        return Err("Sidecar not found - development mode".to_string());
+    }
+    
+    println!("[Koryphaios] Starting backend sidecar from {:?}", sidecar_path);
+    
+    let mut cmd = std::process::Command::new(&sidecar_path);
+    cmd.stdout(Stdio::piped())
+       .stderr(Stdio::piped());
+    
+    // Set environment variables for the backend
+    let config = AppConfig::get();
+    cmd.env("KORYPHAIOS_PORT", config.server.port.to_string());
+    cmd.env("KORYPHAIOS_HOST", &config.server.host);
+    cmd.env("NODE_ENV", "production");
+    
+    // Set data directory
+    if let Ok(app_data_dir) = app_handle.path().app_data_dir() {
+        cmd.env("KORYPHAIOS_DATA_DIR", &app_data_dir);
+    }
+    
+    let child = cmd.spawn()
+        .map_err(|e| format!("Failed to spawn backend: {}", e))?;
+    
+    println!("[Koryphaios] Backend sidecar started with PID {}", child.id());
+    
+    Ok(Arc::new(std::sync::Mutex::new(child)))
+}
+
+/// Wait for backend to be ready by polling health endpoint
+async fn wait_for_backend_ready(host: &str, port: u16, max_wait_ms: u64) -> Result<(), String> {
+    let start = std::time::Instant::now();
+    let health_url = format!("http://{}:{}/api/health", host, port);
+    
+    while (start.elapsed().as_millis() as u64) < max_wait_ms {
+        // Try to connect to health endpoint
+        if let Ok(response) = reqwest::get(&health_url).await {
+            if response.status().is_success() {
+                println!("[Koryphaios] Backend is ready!");
+                return Ok(());
+            }
+        }
+        
+        tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+    }
+    
+    Err(format!("Backend failed to become ready within {}ms", max_wait_ms))
+}
+
+/// Kill the backend process
+fn kill_backend() {
+    if let Ok(mut guard) = BACKEND_PROCESS.lock() {
+        if let Some(process_arc) = guard.take() {
+            if let Ok(mut process) = process_arc.lock() {
+                println!("[Koryphaios] Stopping backend sidecar...");
+                let _ = process.kill();
+            }
+        }
+    }
+}
 
 // Window state for persistence
 #[derive(Default, serde::Serialize, serde::Deserialize)]
@@ -27,9 +105,6 @@ struct FileDropPayload {
     paths: Vec<String>,
     position: Option<(f64, f64)>,
 }
-
-// Global window state
-static WINDOW_STATE: Mutex<Option<WindowState>> = Mutex::new(None);
 
 #[tauri::command]
 fn get_backend_url() -> String {
@@ -88,55 +163,152 @@ async fn close_window_cmd(window: WebviewWindow) {
     let _ = window.close();
 }
 
-// Update check result
-#[derive(serde::Serialize, Clone)]
-struct UpdateCheckResult {
-    available: bool,
-    version: Option<String>,
-    notes: Option<String>,
-    pub_date: Option<String>,
+// Open folder dialog to select a directory for new project
+#[tauri::command]
+async fn select_folder_dialog(app: tauri::AppHandle) -> Result<Option<String>, String> {
+    let result = app.dialog()
+        .file()
+        .set_title("Select Folder Location")
+        .blocking_pick_folder();
+    
+    Ok(result.map(|p| p.to_string()))
 }
 
-// Check for updates command
+// Create a new project folder at the specified path
 #[tauri::command]
-async fn check_for_updates(app: tauri::AppHandle) -> Result<UpdateCheckResult, String> {
-    let updater = app.updater().map_err(|e| e.to_string())?;
+fn create_project_folder(parent_path: String, project_name: String) -> Result<String, String> {
+    use std::fs;
+    use std::path::PathBuf;
     
-    match updater.check().await {
-        Ok(Some(update)) => {
-            Ok(UpdateCheckResult {
-                available: true,
-                version: Some(update.version.clone()),
-                notes: Some(update.body.clone().unwrap_or_default()),
-                pub_date: update.date.map(|d| d.to_string()),
-            })
-        }
-        Ok(None) => {
-            Ok(UpdateCheckResult {
-                available: false,
-                version: None,
-                notes: None,
-                pub_date: None,
-            })
-        }
-        Err(e) => Err(e.to_string()),
+    let parent = PathBuf::from(&parent_path);
+    if !parent.exists() {
+        return Err("Parent directory does not exist".to_string());
     }
+    
+    if !parent.is_dir() {
+        return Err("Parent path is not a directory".to_string());
+    }
+    
+    // Sanitize project name for filesystem
+    let sanitized_name: String = project_name
+        .chars()
+        .filter(|c| c.is_alphanumeric() || *c == ' ' || *c == '-' || *c == '_')
+        .collect::<String>()
+        .trim()
+        .replace(' ', "_");
+    
+    if sanitized_name.is_empty() {
+        return Err("Invalid project name".to_string());
+    }
+    
+    let project_path = parent.join(&sanitized_name);
+    
+    if project_path.exists() {
+        return Err("A folder with this name already exists".to_string());
+    }
+    
+    fs::create_dir_all(&project_path)
+        .map_err(|e| format!("Failed to create folder: {}", e))?;
+    
+    Ok(project_path.to_string_lossy().to_string())
 }
 
-// Install update command
+// Read folder contents for project import
+#[derive(serde::Serialize)]
+struct FileEntry {
+    path: String,
+    content: Option<String>,
+}
+
+#[derive(serde::Serialize)]
+struct FolderContents {
+    folder_name: String,
+    files: Vec<FileEntry>,
+}
+
 #[tauri::command]
-async fn install_update(app: tauri::AppHandle) -> Result<(), String> {
-    let updater = app.updater().map_err(|e| e.to_string())?;
+fn read_folder_contents(folder_path: String) -> Result<FolderContents, String> {
+    use std::fs;
+    use std::path::Path;
     
-    match updater.check().await {
-        Ok(Some(update)) => {
-            update.download_and_install(|_, _| {}, || {}).await
-                .map_err(|e| e.to_string())?;
-            Ok(())
-        }
-        Ok(None) => Err("No update available".to_string()),
-        Err(e) => Err(e.to_string()),
+    let path = Path::new(&folder_path);
+    if !path.exists() {
+        return Err("Folder does not exist".to_string());
     }
+    if !path.is_dir() {
+        return Err("Path is not a directory".to_string());
+    }
+    
+    let folder_name = path.file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("Project")
+        .to_string();
+    
+    // Key files to read content from
+    let key_files: &[&str] = &[
+        "README.md", "readme.md", "Readme.md", "README.txt", "readme.txt",
+        "package.json", "Cargo.toml", "pyproject.toml", "go.mod", ".env.example", "main.py", "main.js", "index.js"
+    ];
+    
+    let mut files = Vec::new();
+    
+    fn visit_dir(dir: &Path, base: &Path, files: &mut Vec<FileEntry>, key_files: &[&str]) -> Result<(), String> {
+        let entries = fs::read_dir(dir).map_err(|e| format!("Failed to read directory: {}", e))?;
+        
+        for entry in entries {
+            let entry = entry.map_err(|e| format!("Failed to read entry: {}", e))?;
+            let path = entry.path();
+            let relative_path = path.strip_prefix(base).unwrap_or(&path);
+            let relative_str = relative_path.to_string_lossy().to_string();
+            
+            if path.is_dir() {
+                // Recursively visit subdirectories (limit depth by checking path components)
+                if relative_path.components().count() < 3 {
+                    visit_dir(&path, base, files, key_files)?;
+                }
+            } else {
+                let file_name = path.file_name()
+                    .and_then(|n| n.to_str())
+                    .unwrap_or("");
+                
+                // Check if this is a key file we want to read
+                let is_key_file = key_files.iter().any(|k| file_name.eq_ignore_ascii_case(k));
+                
+                let content = if is_key_file {
+                    // Read content for key files (limit size)
+                    match fs::read_to_string(&path) {
+                        Ok(text) => {
+                            let max_len = 8000;
+                            if text.len() > max_len {
+                                Some(text[..max_len].to_string() + "\n... (truncated)")
+                            } else {
+                                Some(text)
+                            }
+                        }
+                        Err(_) => None,
+                    }
+                } else {
+                    None
+                };
+                
+                files.push(FileEntry {
+                    path: relative_str,
+                    content,
+                });
+            }
+        }
+        
+        Ok(())
+    }
+    
+    visit_dir(path, path, &mut files, key_files)?;
+    
+    // Limit total files to prevent overwhelming the UI
+    if files.len() > 1000 {
+        files.truncate(1000);
+    }
+    
+    Ok(FolderContents { folder_name, files })
 }
 
 fn window_state(window: &WebviewWindow) -> AppResult<WindowState> {
@@ -183,9 +355,8 @@ fn load_window_state(app: &tauri::AppHandle) -> Option<WindowState> {
     serde_json::from_str(&json).ok()
 }
 
+#[cfg(target_os = "macos")]
 fn create_native_menu(app: &tauri::AppHandle) -> AppResult<Menu<tauri::Wry>> {
-    let config = AppConfig::get();
-    
     // File menu
     let new_session = MenuItem::with_id(app, "new_session", "New Session", true, Some("CmdOrCtrl+N"))
         .map_err(|e| AppError::Menu(e.to_string()))?;
@@ -351,14 +522,47 @@ fn setup_file_drop_handler(window: &WebviewWindow) {
 }
 
 pub fn run() {
-    let config = AppConfig::get();
-    
+    #[cfg(target_os = "linux")]
+    {
+        // Force X11 backend on Linux to ensure custom titlebar dragging works correctly
+        // This is a known workaround for Tauri v2 / GTK issues on certain window managers
+        if std::env::var("GDK_BACKEND").is_err() {
+            std::env::set_var("GDK_BACKEND", "x11");
+        }
+    }
+
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_notification::init())
-        .plugin(tauri_plugin_updater::init())
+        .plugin(tauri_plugin_process::init())
         .setup(|app| {
+            // Spawn backend sidecar in production mode
+            let config = AppConfig::get();
+            let app_handle = app.handle().clone();
+            
+            match spawn_backend_sidecar(&app_handle) {
+                Ok(process) => {
+                    // Store process handle
+                    if let Ok(mut guard) = BACKEND_PROCESS.lock() {
+                        *guard = Some(process);
+                    }
+                    
+                    // Wait for backend to be ready (async block)
+                    let host = config.server.host.clone();
+                    let port = config.server.port;
+                    tauri::async_runtime::spawn(async move {
+                        if let Err(e) = wait_for_backend_ready(&host, port, 30000).await {
+                            eprintln!("[Koryphaios] Warning: {}", e);
+                        }
+                    });
+                }
+                Err(e) => {
+                    // Development mode - backend started separately
+                    println!("[Koryphaios] {}", e);
+                }
+            }
+            
             // NOTE: Native menu bar is disabled for frameless window mode.
             // Koryphaios provides its own custom menu bar in the frontend.
             // The native menu is only created on macOS where it's expected,
@@ -408,7 +612,7 @@ pub fn run() {
                     }
                     "toggle_devtools" => {
                         if let Some(window) = app.get_webview_window("main") {
-                            #[cfg(debug_assertions)]
+                            // Enable devtools in all builds for debugging
                             let _ = window.open_devtools();
                         }
                     }
@@ -437,12 +641,9 @@ pub fn run() {
                 eprintln!("[Koryphaios] The app will continue without system tray support.");
             }
             
-            // Get main window and restore state
+            // Get main window and ensure visibility
             if let Some(window) = app.get_webview_window("main") {
-                // Set up file drop handler
-                setup_file_drop_handler(&window);
-                
-                // Load and apply window state
+                // Load and apply window state if available
                 if let Some(state) = load_window_state(app.handle()) {
                     if !state.maximized {
                         let _ = window.set_size(tauri::Size::Physical(tauri::PhysicalSize {
@@ -457,6 +658,15 @@ pub fn run() {
                         let _ = window.maximize();
                     }
                 }
+
+                // CRITICAL: Always force show, focus, and unminimize to ensure window is visible on launch
+                println!("[Koryphaios] Main window initialized, forcing visibility...");
+                let _ = window.show();
+                let _ = window.set_focus();
+                let _ = window.unminimize();
+
+                // Set up file drop handler
+                setup_file_drop_handler(&window);
                 
                 // Set up window event handler for state persistence
                 let app_handle = app.handle().clone();
@@ -477,7 +687,18 @@ pub fn run() {
                 });
             }
             
+            // Set up exit handler to kill backend
+            let app_handle_clone = app.handle().clone();
+            app_handle_clone.run_on_main_thread(|| {
+                // Cleanup happens automatically via Drop, but we ensure it here
+            }).ok();
+            
             Ok(())
+        })
+        .on_window_event(|_app, event| {
+            if let WindowEvent::Destroyed = event {
+                kill_backend();
+            }
         })
         .invoke_handler(tauri::generate_handler![
             get_backend_url,
@@ -489,8 +710,10 @@ pub fn run() {
             minimize_window_cmd,
             toggle_maximize,
             close_window_cmd,
-            check_for_updates,
-            install_update,
+            select_folder_dialog,
+            create_project_folder,
+            read_folder_contents,
+            indexer::search_codebase,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Koryphaios desktop app");

@@ -68,15 +68,15 @@
   /* ─── Border Radius ──────────────────────────────────────────────────────── */
   --radius-none: 0;
   --radius-sm: 4px;
-  --radius-md: 6px;
-  --radius-lg: 8px;
-  --radius-xl: 12px;
-  --radius-2xl: 16px;
+  --radius-md: 8px;
+  --radius-lg: 10px;
+  --radius-xl: 14px;
+  --radius-2xl: 18px;
   --radius-full: 9999px;
   
   /* ─── Typography Scale ───────────────────────────────────────────────────── */
-  --text-xs: 10px;
-  --text-sm: 12px;
+  --text-xs: 11px;
+  --text-sm: 13px;
   --text-base: 14px;
   --text-md: 14px;
   --text-lg: 16px;
@@ -109,17 +109,17 @@
   --z-skip-link: 900;
   
   /* ─── Layout Constants ───────────────────────────────────────────────────── */
-  --sidebar-width: 240px;
+  --sidebar-width: clamp(224px, 22vw, 272px);
   --sidebar-width-collapsed: 40px;
-  --sidebar-min-width: 200px;
-  --sidebar-max-width: 320px;
+  --sidebar-min-width: 220px;
+  --sidebar-max-width: min(340px, 30vw);
   
-  --git-panel-width: 320px;
-  --git-panel-min-width: 260px;
-  --git-panel-max-width: 40vw;
+  --git-panel-width: clamp(260px, 28vw, 360px);
+  --git-panel-min-width: 240px;
+  --git-panel-max-width: min(360px, 36vw);
   
-  --header-height: 48px;
-  --footer-height: 48px;
+  --header-height: 52px;
+  --footer-height: 56px;
   --input-area-height: auto;
   
   --drawer-width: 360px;
@@ -128,8 +128,8 @@
   /* ─── Animation Timing ───────────────────────────────────────────────────── */
   --duration-instant: 0ms;
   --duration-fast: 100ms;
-  --duration-normal: 150ms;
-  --duration-slow: 200ms;
+  --duration-normal: 180ms;
+  --duration-slow: 240ms;
   --duration-slower: 300ms;
   
   --ease-linear: linear;

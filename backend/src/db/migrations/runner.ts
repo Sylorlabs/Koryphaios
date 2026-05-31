@@ -1,6 +1,6 @@
 /**
  * Database Migration Runner
- * 
+ *
  * Manages database schema migrations with:
  * - Version tracking in database
  * - Up/down migrations
@@ -8,10 +8,10 @@
  * - Logging
  */
 
-import { Database } from "bun:sqlite";
-import { serverLog } from "../../logger";
-import { readdirSync, readFileSync } from "fs";
-import { join } from "path";
+import { Database } from 'bun:sqlite';
+import { serverLog } from '../../logger';
+import { readdirSync, readFileSync } from 'fs';
+import { join } from 'path';
 
 interface Migration {
   version: number;
@@ -46,18 +46,18 @@ export class MigrationRunner {
         applied_at INTEGER NOT NULL
       )
     `);
-    
-    serverLog.info("Migration tracking initialized");
+
+    serverLog.info('Migration tracking initialized');
   }
 
   /**
    * Get current schema version
    */
   getCurrentVersion(): number {
-    const result = this.db
-      .query("SELECT MAX(version) as version FROM schema_migrations")
-      .get() as { version: number | null };
-    
+    const result = this.db.query('SELECT MAX(version) as version FROM schema_migrations').get() as {
+      version: number | null;
+    };
+
     return result.version || 0;
   }
 
@@ -66,7 +66,7 @@ export class MigrationRunner {
    */
   private loadMigrations(): Migration[] {
     const files = readdirSync(this.migrationsDir)
-      .filter(f => f.endsWith('.sql'))
+      .filter((f) => f.endsWith('.sql'))
       .sort();
 
     const migrations: Migration[] = [];
@@ -75,7 +75,7 @@ export class MigrationRunner {
       // Parse filename: 001_migration_name.sql
       const match = file.match(/^(\d+)_(.+)\.sql$/);
       if (!match) {
-        serverLog.warn({ file }, "Skipping invalid migration filename");
+        serverLog.warn({ file }, 'Skipping invalid migration filename');
         continue;
       }
 
@@ -85,7 +85,7 @@ export class MigrationRunner {
 
       // Split up/down migrations if separated by -- DOWN
       const parts = content.split(/--\s*DOWN/i);
-      
+
       migrations.push({
         version,
         name,
@@ -106,38 +106,29 @@ export class MigrationRunner {
     const currentVersion = this.getCurrentVersion();
     const migrations = this.loadMigrations();
 
-    const pendingMigrations = migrations.filter(m => m.version > currentVersion);
+    const pendingMigrations = migrations.filter((m) => m.version > currentVersion);
 
     if (pendingMigrations.length === 0) {
-      serverLog.info({ version: currentVersion }, "Database is up to date");
+      serverLog.info({ version: currentVersion }, 'Database is up to date');
       return;
     }
 
-    serverLog.info(
-      { currentVersion, pending: pendingMigrations.length },
-      "Running migrations"
-    );
+    serverLog.info({ currentVersion, pending: pendingMigrations.length }, 'Running migrations');
 
     for (const migration of pendingMigrations) {
       try {
         this.runMigration(migration);
-        serverLog.info(
-          { version: migration.version, name: migration.name },
-          "Migration applied"
-        );
+        serverLog.info({ version: migration.version, name: migration.name }, 'Migration applied');
       } catch (error: any) {
         serverLog.error(
           { error, version: migration.version, name: migration.name },
-          "Migration failed"
+          'Migration failed',
         );
         throw error;
       }
     }
 
-    serverLog.info(
-      { newVersion: this.getCurrentVersion() },
-      "Migrations complete"
-    );
+    serverLog.info({ newVersion: this.getCurrentVersion() }, 'Migrations complete');
   }
 
   /**
@@ -149,10 +140,11 @@ export class MigrationRunner {
       this.db.exec(migration.up);
 
       // Record migration
-      this.db.run(
-        `INSERT INTO schema_migrations (version, name, applied_at) VALUES (?, ?, ?)`,
-        [migration.version, migration.name, Date.now()]
-      );
+      this.db.run(`INSERT INTO schema_migrations (version, name, applied_at) VALUES (?, ?, ?)`, [
+        migration.version,
+        migration.name,
+        Date.now(),
+      ]);
     });
 
     transaction();
@@ -163,14 +155,14 @@ export class MigrationRunner {
    */
   async rollback(): Promise<void> {
     const currentVersion = this.getCurrentVersion();
-    
+
     if (currentVersion === 0) {
-      serverLog.info("No migrations to rollback");
+      serverLog.info('No migrations to rollback');
       return;
     }
 
     const migrations = this.loadMigrations();
-    const migration = migrations.find(m => m.version === currentVersion);
+    const migration = migrations.find((m) => m.version === currentVersion);
 
     if (!migration) {
       throw new Error(`Migration ${currentVersion} not found`);
@@ -186,22 +178,16 @@ export class MigrationRunner {
         this.db.exec(migration.down!);
 
         // Remove migration record
-        this.db.run(
-          `DELETE FROM schema_migrations WHERE version = ?`,
-          [migration.version]
-        );
+        this.db.run(`DELETE FROM schema_migrations WHERE version = ?`, [migration.version]);
       });
 
       transaction();
 
-      serverLog.info(
-        { version: migration.version, name: migration.name },
-        "Migration rolled back"
-      );
+      serverLog.info({ version: migration.version, name: migration.name }, 'Migration rolled back');
     } catch (error: any) {
       serverLog.error(
         { error, version: migration.version, name: migration.name },
-        "Rollback failed"
+        'Rollback failed',
       );
       throw error;
     }
@@ -210,13 +196,16 @@ export class MigrationRunner {
   /**
    * Get migration status
    */
-  getStatus(): { version: number; migrations: { version: number; name: string; applied: boolean }[] } {
+  getStatus(): {
+    version: number;
+    migrations: { version: number; name: string; applied: boolean }[];
+  } {
     const migrations = this.loadMigrations();
     const currentVersion = this.getCurrentVersion();
 
     return {
       version: currentVersion,
-      migrations: migrations.map(m => ({
+      migrations: migrations.map((m) => ({
         version: m.version,
         name: m.name,
         applied: m.version <= currentVersion,
@@ -228,7 +217,7 @@ export class MigrationRunner {
    * Reset all migrations (DANGEROUS - drops all tables)
    */
   async reset(): Promise<void> {
-    serverLog.warn("Resetting all migrations - this will drop all tables!");
+    serverLog.warn('Resetting all migrations - this will drop all tables!');
 
     const migrations = this.loadMigrations().reverse();
 
@@ -236,22 +225,26 @@ export class MigrationRunner {
       if (migration.down) {
         try {
           this.db.exec(migration.down);
-          serverLog.info({ version: migration.version }, "Rolled back");
+          serverLog.info({ version: migration.version }, 'Rolled back');
         } catch (error: any) {
-          serverLog.error({ error, version: migration.version }, "Rollback error");
+          serverLog.error({ error, version: migration.version }, 'Rollback error');
         }
       }
     }
 
     // Clear migration table
-    this.db.run("DELETE FROM schema_migrations");
+    this.db.run('DELETE FROM schema_migrations');
 
-    serverLog.info("Database reset complete");
+    serverLog.info('Database reset complete');
   }
 }
 
 // CLI interface for running migrations
-export async function runMigrations(db: Database, migrationsDir: string, command: string = 'migrate'): Promise<void> {
+export async function runMigrations(
+  db: Database,
+  migrationsDir: string,
+  command: string = 'migrate',
+): Promise<void> {
   const runner = new MigrationRunner(db, migrationsDir);
 
   switch (command) {

@@ -1,6 +1,4 @@
-// Authentication store — cookie-based session (no tokens in JS/localStorage).
-// Session and refresh are HttpOnly cookies; backend sets them on login/refresh.
-// After a successful POST /api/auth/login, call setUser(data.data.user) so the UI shows the logged-in user.
+// Authentication store — local bearer bootstrap for the desktop backend.
 
 import { browser } from '$app/environment';
 import { apiUrl } from '$lib/utils/api-url';
@@ -14,13 +12,75 @@ export interface AuthUser {
 
 let user = $state<AuthUser | null>(null);
 let isInitialized = $state(false);
+let token = $state<string | undefined>(undefined);
+
+const LOCAL_AUTH_TOKEN_KEY = 'koryphaios-local-auth-token';
+
+function loadStoredToken(): string | undefined {
+  if (!browser) return undefined;
+  try {
+    return localStorage.getItem(LOCAL_AUTH_TOKEN_KEY) || undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function persistToken(nextToken: string | undefined) {
+  if (!browser) return;
+  try {
+    if (nextToken) localStorage.setItem(LOCAL_AUTH_TOKEN_KEY, nextToken);
+    else localStorage.removeItem(LOCAL_AUTH_TOKEN_KEY);
+  } catch {
+    // Ignore localStorage failures.
+  }
+}
+
+async function validateToken(candidate: string): Promise<AuthUser | null> {
+  const res = await fetch(apiUrl('/api/auth/me'), {
+    credentials: 'include',
+    headers: { Authorization: candidate },
+  });
+  if (!res.ok) return null;
+  const text = await res.text();
+  if (!text.trim()) return null;
+  try {
+    const data = JSON.parse(text);
+    return data?.ok && data?.data?.user ? (data.data.user as AuthUser) : null;
+  } catch {
+    return null;
+  }
+}
+
+async function createLocalSession(): Promise<string | undefined> {
+  const res = await fetch(apiUrl('/api/auth/session'), {
+    method: 'POST',
+    credentials: 'include',
+  });
+  if (!res.ok) return undefined;
+  const text = await res.text();
+  if (!text.trim()) return undefined;
+  try {
+    const data = JSON.parse(text);
+    return data?.ok ? data?.data?.bearerToken : undefined;
+  } catch {
+    return undefined;
+  }
+}
 
 export const authStore = {
-  get user() { return user; },
-  get isInitialized() { return isInitialized; },
-  get isAuthenticated() { return !!user; },
+  get user() {
+    return user;
+  },
+  get isInitialized() {
+    return isInitialized;
+  },
+  get isAuthenticated() {
+    return !!user;
+  },
   /** Present when using API-key auth; undefined for local/cookie auth. */
-  get token() { return undefined as string | undefined; },
+  get token() {
+    return token;
+  },
 
   /** Returns true if backend responded (even with no user), false if backend unreachable (5xx or network error). */
   async initialize(): Promise<boolean> {
@@ -30,29 +90,23 @@ export const authStore = {
     }
     if (isInitialized) return true;
 
+    token = loadStoredToken();
     try {
-      const res = await fetch(apiUrl('/api/auth/me'), { credentials: 'include' });
-      if (res.ok) {
-        const text = await res.text();
-        if (text.trim()) {
-          try {
-            const data = JSON.parse(text);
-            if (data?.ok && data?.data?.user) user = data.data.user;
-            else user = null;
-          } catch {
-            user = null;
-          }
-        } else {
-          user = null;
-        }
-        isInitialized = true;
-        return true;
+      let resolvedUser: AuthUser | null = token ? await validateToken(token) : null;
+
+      if (!resolvedUser) {
+        token = await createLocalSession();
+        persistToken(token);
+        resolvedUser = token ? await validateToken(token) : null;
       }
-      user = null;
+
+      user = resolvedUser;
       isInitialized = true;
-      return false; // 5xx or 4xx → backend unreachable or auth issue
+      return !!resolvedUser;
     } catch {
       user = null;
+      token = undefined;
+      persistToken(undefined);
       isInitialized = true;
       return false;
     }
@@ -62,8 +116,21 @@ export const authStore = {
     user = u;
   },
 
-  logout() {
+  async logout() {
+    if (token) {
+      try {
+        await fetch(apiUrl('/api/auth/session'), {
+          method: 'DELETE',
+          credentials: 'include',
+          headers: { Authorization: token },
+        });
+      } catch {
+        // Ignore logout failures and clear local state.
+      }
+    }
     user = null;
+    token = undefined;
+    persistToken(undefined);
     isInitialized = false;
   },
 };

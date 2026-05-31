@@ -9,7 +9,7 @@ export interface VaultKMSConfig {
   address: string;
   /** Transit key name */
   keyName: string;
-  /** 
+  /**
    * Authentication method
    * - 'token': Direct token (development)
    * - 'approle': AppRole (production)
@@ -37,16 +37,16 @@ type VaultAuthConfig =
 
 /**
  * HashiCorp Vault KMS Provider
- * 
+ *
  * Uses Vault's Transit secrets engine for key management.
  * Vault handles encryption/decryption and key rotation.
- * 
+ *
  * Setup:
  * 1. Enable Transit engine: vault secrets enable transit
  * 2. Create key: vault write -f transit/keys/:name
  * 3. Configure ACL policy for the app
  * 4. Set up authentication (AppRole recommended for production)
- * 
+ *
  * Features:
  * - Automatic key rotation (configurable interval)
  * - Key versioning with automatic upgrade
@@ -73,11 +73,14 @@ export class VaultKMSProvider implements KMSProvider {
       // Verify key exists and get current version
       await this.refreshKeyInfo();
 
-      serverLog.info({ 
-        address: this.config.address, 
-        keyName: this.config.keyName,
-        version: this.keyVersion 
-      }, 'HashiCorp Vault KMS initialized');
+      serverLog.info(
+        {
+          address: this.config.address,
+          keyName: this.config.keyName,
+          version: this.keyVersion,
+        },
+        'HashiCorp Vault KMS initialized',
+      );
     } catch (error: any) {
       serverLog.error({ error, address: this.config.address }, 'Failed to initialize Vault KMS');
       throw new Error(`Vault KMS initialization failed: ${error.message}`);
@@ -92,7 +95,7 @@ export class VaultKMSProvider implements KMSProvider {
     try {
       // Vault Transit generates data keys
       const url = `${this.config.address}/v1/${this.config.mountPath}/datakey/plaintext/${this.config.keyName}`;
-      
+
       const response = await fetch(url, {
         method: 'POST',
         headers: {
@@ -111,7 +114,7 @@ export class VaultKMSProvider implements KMSProvider {
       }
 
       const data = await response.json();
-      
+
       // plaintext is base64-encoded DEK
       const plaintext = Buffer.from(data.data.plaintext, 'base64');
       // ciphertext is the encrypted DEK (includes key version)
@@ -132,7 +135,7 @@ export class VaultKMSProvider implements KMSProvider {
     try {
       // Vault Transit decrypts the data key
       const url = `${this.config.address}/v1/${this.config.mountPath}/decrypt/${this.config.keyName}`;
-      
+
       const response = await fetch(url, {
         method: 'POST',
         headers: {
@@ -151,7 +154,7 @@ export class VaultKMSProvider implements KMSProvider {
       }
 
       const data = await response.json();
-      
+
       // plaintext is base64-encoded DEK
       return Buffer.from(data.data.plaintext, 'base64');
     } catch (error: any) {
@@ -175,7 +178,7 @@ export class VaultKMSProvider implements KMSProvider {
     try {
       // Rotate the transit key
       const url = `${this.config.address}/v1/${this.config.mountPath}/keys/${this.config.keyName}/rotate`;
-      
+
       const response = await fetch(url, {
         method: 'POST',
         headers: {
@@ -190,11 +193,14 @@ export class VaultKMSProvider implements KMSProvider {
       }
 
       await this.refreshKeyInfo();
-      
-      serverLog.info({ 
-        keyName: this.config.keyName, 
-        newVersion: this.keyVersion 
-      }, 'Vault key rotated');
+
+      serverLog.info(
+        {
+          keyName: this.config.keyName,
+          newVersion: this.keyVersion,
+        },
+        'Vault key rotated',
+      );
 
       return true;
     } catch (error: any) {
@@ -210,7 +216,7 @@ export class VaultKMSProvider implements KMSProvider {
 
     try {
       const url = `${this.config.address}/v1/sys/health`;
-      
+
       const response = await fetch(url, {
         headers: {
           'X-Vault-Token': this.token,
@@ -250,10 +256,10 @@ export class VaultKMSProvider implements KMSProvider {
   private async authToken(): Promise<void> {
     const config = this.config.authConfig as { token: string };
     this.token = config.token;
-    
+
     // Verify token works
     const url = `${this.config.address}/v1/auth/token/lookup-self`;
-    
+
     const response = await fetch(url, {
       headers: {
         'X-Vault-Token': this.token,
@@ -268,9 +274,9 @@ export class VaultKMSProvider implements KMSProvider {
 
   private async authAppRole(): Promise<void> {
     const config = this.config.authConfig as { roleId: string; secretId: string };
-    
+
     const url = `${this.config.address}/v1/auth/approle/login`;
-    
+
     const response = await fetch(url, {
       method: 'POST',
       headers: {
@@ -294,7 +300,7 @@ export class VaultKMSProvider implements KMSProvider {
 
   private async authKubernetes(): Promise<void> {
     const config = this.config.authConfig as { role: string; jwt?: string };
-    
+
     // Get JWT from service account if not provided
     let jwt = config.jwt;
     if (!jwt) {
@@ -305,9 +311,9 @@ export class VaultKMSProvider implements KMSProvider {
         throw new Error('Kubernetes JWT not provided and not running in pod');
       }
     }
-    
+
     const url = `${this.config.address}/v1/auth/kubernetes/login`;
-    
+
     const response = await fetch(url, {
       method: 'POST',
       headers: {
@@ -332,12 +338,12 @@ export class VaultKMSProvider implements KMSProvider {
   private async authAWS(): Promise<void> {
     const config = this.config.authConfig as { role: string; mount?: string };
     const mount = config.mount || 'aws';
-    
+
     // AWS IAM auth requires AWS SDK for signing
     // Install: npm install @aws-sdk/client-sts
     throw new Error(
       'AWS IAM auth requires @aws-sdk/client-sts. ' +
-      'Install it with: npm install @aws-sdk/client-sts'
+        'Install it with: npm install @aws-sdk/client-sts',
     );
   }
 
@@ -347,7 +353,7 @@ export class VaultKMSProvider implements KMSProvider {
     }
 
     const url = `${this.config.address}/v1/${this.config.mountPath}/keys/${this.config.keyName}`;
-    
+
     const response = await fetch(url, {
       headers: {
         'X-Vault-Token': this.token,

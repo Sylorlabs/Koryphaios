@@ -1,6 +1,6 @@
 <script lang="ts">
   import { wsStore } from '$lib/stores/websocket.svelte';
-  import { sessionStore } from '$lib/stores/sessions.svelte';
+  import { appStore } from '$lib/stores/app.svelte';
   import { isMac } from '$lib/utils/platform';
   import { onMount } from 'svelte';
   import { 
@@ -10,16 +10,43 @@
     Paintbrush,
     Bug,
     Zap,
-    Beaker
+    Beaker,
+    GitBranch,
+    Pencil,
+    Check,
+    X
   } from 'lucide-svelte';
   import FeedEntry from './FeedEntry.svelte';
-  import type { FeedEntryLocal, FeedEntryType } from '$lib/types';
+  import type { FeedEntryLocal } from '$lib/types';
 
   let feedContainer = $state<HTMLDivElement>();
   let autoScroll = $state(true);
   let selectedEntries = $state<Set<string>>(new Set());
   let lastSelectedId = $state<string>('');
   let expandedGroups = $state<Set<string>>(new Set());
+  let editingSuggestionId = $state<string | null>(null);
+  let editingSuggestionText = $state('');
+
+  interface Props {
+    onUseSuggestion?: (prompt: string) => void;
+  }
+
+  let { onUseSuggestion }: Props = $props();
+
+  type DashboardSuggestion = {
+    id: string;
+    label: string;
+    icon: typeof Zap;
+    prompt: string;
+  };
+
+  const defaultSuggestions: DashboardSuggestion[] = [
+    { id: 'map-codebase', label: 'Map the codebase', icon: Zap, prompt: 'Inspect this project and summarize the architecture, key entry points, and the highest-leverage next steps.' },
+    { id: 'critique-ui', label: 'Critique the UI', icon: Paintbrush, prompt: 'Critique the current UI in this project, identify the weakest hierarchy and spacing choices, and recommend the most important visual fixes.' },
+    { id: 'review-changes', label: 'Review recent changes', icon: GitBranch, prompt: 'Review the current uncommitted changes in this project and identify the most likely bugs, regressions, or missing tests.' },
+    { id: 'debug-regression', label: 'Debug a regression', icon: Bug, prompt: 'Help me trace a bug in this project. Start by asking for the failing behavior or error, then narrow the likely root cause.' }
+  ];
+  let suggestions = $state<DashboardSuggestion[]>(defaultSuggestions);
 
   let filteredFeed = $derived(wsStore.groupedFeed);
 
@@ -122,6 +149,36 @@
   function deleteSingle(id: string) {
     wsStore.removeEntries(new Set([id]));
   }
+
+  function runSuggestion(prompt: string) {
+    onUseSuggestion?.(prompt);
+  }
+
+  function handleSuggestionKeydown(event: KeyboardEvent, prompt: string) {
+    if (event.key !== 'Enter' && event.key !== ' ') return;
+    event.preventDefault();
+    runSuggestion(prompt);
+  }
+
+  function startEditingSuggestion(suggestion: DashboardSuggestion) {
+    editingSuggestionId = suggestion.id;
+    editingSuggestionText = suggestion.prompt;
+  }
+
+  function cancelEditingSuggestion() {
+    editingSuggestionId = null;
+    editingSuggestionText = '';
+  }
+
+  function saveSuggestionEdit(id: string) {
+    const nextText = editingSuggestionText.trim();
+    if (!nextText) return;
+    suggestions = suggestions.map((suggestion) =>
+      suggestion.id === id ? { ...suggestion, prompt: nextText } : suggestion
+    );
+    editingSuggestionId = null;
+    editingSuggestionText = '';
+  }
 </script>
 
 <div class="flex flex-col flex-1 overflow-hidden">
@@ -158,33 +215,148 @@
     class="flex-1 overflow-y-auto p-4 space-y-3 feed-scroll"
   >
     {#if filteredFeed.length === 0}
-      <div class="flex-1 flex flex-col items-center justify-center text-center h-full max-w-2xl mx-auto py-12">
-        <div class="w-16 h-16 rounded-2xl bg-amber-500/10 flex items-center justify-center mb-6 text-amber-500">
-          <MessageSquare size={32} />
-        </div>
-        <h2 class="text-xl font-semibold mb-2" style="color: var(--color-text-primary);">Ready for your request</h2>
-        <p class="text-sm mb-8 text-text-muted">Start a new project or collaborate with specialized agents on your existing code.</p>
-        
-        <div class="grid grid-cols-1 md:grid-cols-2 gap-3 w-full">
-          {#each [
-            { label: 'Build a new UI component', icon: Paintbrush, prompt: 'Build a beautiful, responsive landing page using Tailwind and Svelte.' },
-            { label: 'Debug an issue', icon: Bug, prompt: 'Help me find and fix a bug in my authentication logic.' },
-            { label: 'Refactor for performance', icon: Zap, prompt: 'Analyze my code and suggest performance optimizations.' },
-            { label: 'Write unit tests', icon: Beaker, prompt: 'Generate comprehensive unit tests for my backend API routes.' }
-          ] as suggestion}
-            {@const Icon = suggestion.icon}
-            <button 
-              class="flex flex-col items-start p-4 rounded-xl border text-left transition-all hover:bg-[var(--color-surface-3)] active:scale-[0.98] group"
-              style="background: var(--color-surface-2); border-color: var(--color-border);"
-              onclick={() => { wsStore.sendMessage(sessionStore.activeSessionId, suggestion.prompt); }}
-            >
-              <div class="w-8 h-8 rounded-lg bg-[var(--color-surface-3)] flex items-center justify-center mb-3 text-[var(--color-text-muted)] group-hover:text-[var(--color-accent)] transition-colors">
-                <Icon size={16} />
+      <div class="px-6 py-10 max-w-5xl mx-auto">
+        <div class="flex gap-5 animate-in fade-in slide-in-from-bottom-4 duration-700">
+          <div class="flex-1 space-y-6 min-w-0">
+            <div class="rounded-[28px] border p-8 shadow-2xl backdrop-blur-sm" style="background: linear-gradient(165deg, rgba(213, 178, 97, 0.12), rgba(12, 10, 9, 0.4)); border-color: rgba(213, 178, 97, 0.24);">
+              <div class="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full border mb-6" style="background: rgba(0, 0, 0, 0.2); border-color: rgba(213, 178, 97, 0.15); color: var(--color-text-secondary);">
+                <div class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></div>
+                <span class="text-[10px] font-bold uppercase tracking-[0.2em] opacity-70">Workspace Analyzed</span>
               </div>
-              <span class="text-sm font-medium mb-1" style="color: var(--color-text-primary);">{suggestion.label}</span>
-              <span class="text-[11px] leading-relaxed opacity-60 line-clamp-2" style="color: var(--color-text-muted);">{suggestion.prompt}</span>
-            </button>
-          {/each}
+              
+              <h2 class="text-3xl font-semibold leading-tight mb-4 tracking-tight" style="color: var(--color-text-primary);">
+                What should Koryphaios do with your project?
+              </h2>
+              
+              <p class="text-[15px] max-w-2xl leading-relaxed mb-10 opacity-70" style="color: var(--color-text-secondary);">
+                I'm connected and ready to help. Choose a strategic starting point or describe your task in the composer below.
+              </p>
+
+              <div class="grid grid-cols-1 md:grid-cols-2 gap-4 w-full">
+                {#each suggestions as suggestion (suggestion.id)}
+                  {@const Icon = suggestion.icon}
+                  <div 
+                    class="suggestion-card relative flex flex-col items-start p-5 rounded-2xl border text-left transition-all duration-300 group cursor-pointer overflow-hidden"
+                    style="background: rgba(12, 10, 9, 0.4); border-color: var(--color-border);"
+                    role="button"
+                    tabindex="0"
+                    onclick={() => runSuggestion(suggestion.prompt)}
+                    onkeydown={(event) => handleSuggestionKeydown(event, suggestion.prompt)}
+                  >
+                    <div class="absolute inset-0 bg-gradient-to-br from-[var(--color-accent)]/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity"></div>
+                    
+                    <button
+                      type="button"
+                      class="absolute top-4 right-4 z-10 flex h-8 w-8 items-center justify-center rounded-lg transition-all opacity-0 group-hover:opacity-100 hover:bg-[var(--color-surface-3)]"
+                      style="color: var(--color-text-muted);"
+                      onclick={(e) => {
+                        e.stopPropagation();
+                        startEditingSuggestion(suggestion);
+                      }}
+                      title="Edit suggestion"
+                      aria-label={`Edit ${suggestion.label}`}
+                    >
+                      <Pencil size={14} />
+                    </button>
+
+                    <div class="relative w-full text-left">
+                      <div class="w-11 h-11 rounded-xl flex items-center justify-center mb-5 bg-[var(--color-surface-3)] group-hover:scale-110 group-hover:bg-[var(--color-accent)]/10 group-hover:text-[var(--color-accent)] transition-all duration-300" style="color: var(--color-text-secondary);">
+                        <Icon size={19} />
+                      </div>
+                      
+                      <span class="text-sm font-bold mb-2 block pr-10 tracking-tight transition-colors group-hover:text-[var(--color-text-primary)]" style="color: var(--color-text-secondary);">{suggestion.label}</span>
+                      
+                      {#if editingSuggestionId === suggestion.id}
+                        <textarea
+                          bind:value={editingSuggestionText}
+                          class="w-full min-h-[120px] rounded-xl border px-3 py-2 text-xs leading-relaxed focus:ring-1 focus:ring-[var(--color-accent)]/30 outline-none"
+                          style="background: var(--color-surface-2); border-color: var(--color-border); color: var(--color-text-primary); resize: vertical;"
+                          onclick={(e) => e.stopPropagation()}
+                        ></textarea>
+                      {:else}
+                        <span class="text-xs leading-relaxed block opacity-50 group-hover:opacity-100 transition-opacity duration-300" style="color: var(--color-text-muted);">{suggestion.prompt}</span>
+                      {/if}
+                    </div>
+
+                    {#if editingSuggestionId === suggestion.id}
+                      <div class="relative mt-4 flex items-center gap-2">
+                        <button
+                          type="button"
+                          class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-bold transition-all bg-[var(--color-accent)]/10 text-[var(--color-accent)] hover:bg-[var(--color-accent)]/20"
+                          onclick={(e) => {
+                            e.stopPropagation();
+                            saveSuggestionEdit(suggestion.id);
+                          }}
+                        >
+                          <Check size={12} />
+                          Save
+                        </button>
+                        <button
+                          type="button"
+                          class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-bold transition-all text-[var(--color-text-muted)] hover:bg-[var(--color-surface-3)]"
+                          onclick={(e) => {
+                            e.stopPropagation();
+                            cancelEditingSuggestion();
+                          }}
+                        >
+                          <X size={12} />
+                          Cancel
+                        </button>
+                      </div>
+                    {:else}
+                      <div class="relative mt-5 flex items-center gap-2 text-[10px] font-black uppercase tracking-[0.15em] opacity-0 group-hover:opacity-40 transition-all duration-300 translate-y-2 group-hover:translate-y-0" style="color: var(--color-text-muted);">
+                        Load into composer <ArrowDown size={10} />
+                      </div>
+                    {/if}
+                  </div>
+                {/each}
+              </div>
+            </div>
+
+            <div class="grid grid-cols-1 xl:grid-cols-2 gap-4">
+              <div class="rounded-[24px] border p-6 flex flex-col justify-between transition-all hover:border-[var(--color-accent)]/20" style="background: var(--color-surface-2); border-color: var(--color-border);">
+                <div>
+                  <div class="text-[10px] font-bold uppercase tracking-[0.2em] mb-4 opacity-50" style="color: var(--color-text-muted);">Pro Tips</div>
+                  <div class="space-y-4">
+                    {#each [
+                      'Ask for a repo walkthrough before making changes.',
+                      'Review spacing and hierarchy before polish work.'
+                    ] as tip}
+                      <div class="flex items-start gap-3">
+                        <div class="w-1.5 h-1.5 rounded-full mt-1.5 shrink-0 bg-amber-500/40"></div>
+                        <p class="text-xs leading-relaxed opacity-70" style="color: var(--color-text-secondary);">{tip}</p>
+                      </div>
+                    {/each}
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  class="w-full mt-6 flex items-center justify-center gap-2 px-4 py-3 rounded-xl border text-xs font-bold transition-all hover:bg-[var(--color-surface-3)] border-[var(--color-border)]"
+                  style="color: var(--color-text-secondary);"
+                  onclick={() => runSuggestion('Write a concrete implementation plan for the highest-priority improvement in this project.')}
+                >
+                  <Beaker size={14} />
+                  Plan next improvement
+                </button>
+              </div>
+
+              <div class="rounded-[24px] border p-6 transition-all hover:border-[var(--color-accent)]/20" style="background: var(--color-surface-2); border-color: var(--color-border);">
+                 <div class="text-[10px] font-bold uppercase tracking-[0.2em] mb-4 opacity-50" style="color: var(--color-text-muted);">Workflow</div>
+                 <div class="space-y-4">
+                    {#each [
+                      'Use composer below for direct tasks.',
+                      'Open Git panel for change review.'
+                    ] as tip}
+                      <div class="flex items-start gap-3">
+                        <div class="w-1.5 h-1.5 rounded-full mt-1.5 shrink-0 bg-blue-500/40"></div>
+                        <p class="text-xs leading-relaxed opacity-70" style="color: var(--color-text-secondary);">{tip}</p>
+                      </div>
+                    {/each}
+                  </div>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
     {:else}
@@ -239,5 +411,10 @@
   }
   .feed-scroll {
     overscroll-behavior: contain;
+  }
+  .suggestion-card:hover {
+    transform: translateY(-2px);
+    border-color: rgba(213, 178, 97, 0.4) !important;
+    box-shadow: 0 10px 30px -10px rgba(0,0,0,0.5), 0 0 20px rgba(213, 178, 97, 0.05);
   }
 </style>

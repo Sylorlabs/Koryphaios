@@ -1,6 +1,6 @@
 // Error handling utilities — Structured error types and recovery strategies
 
-import { serverLog } from "./logger";
+import { serverLog } from './logger';
 
 /**
  * Base error class with structured logging support
@@ -13,7 +13,7 @@ export class KoryphaiosError extends Error {
     public readonly context?: Record<string, unknown>,
   ) {
     super(message);
-    this.name = "KoryphaiosError";
+    this.name = 'KoryphaiosError';
     Error.captureStackTrace(this, this.constructor);
   }
 
@@ -31,8 +31,8 @@ export class KoryphaiosError extends Error {
  */
 export class ConfigError extends KoryphaiosError {
   constructor(message: string, context?: Record<string, unknown>) {
-    super(message, "CONFIG_ERROR", 500, context);
-    this.name = "ConfigError";
+    super(message, 'CONFIG_ERROR', 500, context);
+    this.name = 'ConfigError';
   }
 }
 
@@ -41,8 +41,8 @@ export class ConfigError extends KoryphaiosError {
  */
 export class ValidationError extends KoryphaiosError {
   constructor(message: string, context?: Record<string, unknown>) {
-    super(message, "VALIDATION_ERROR", 400, context);
-    this.name = "ValidationError";
+    super(message, 'VALIDATION_ERROR', 400, context);
+    this.name = 'ValidationError';
   }
 }
 
@@ -55,8 +55,8 @@ export class ProviderError extends KoryphaiosError {
     public readonly provider: string,
     context?: Record<string, unknown>,
   ) {
-    super(message, "PROVIDER_ERROR", 502, { ...context, provider });
-    this.name = "ProviderError";
+    super(message, 'PROVIDER_ERROR', 502, { ...context, provider });
+    this.name = 'ProviderError';
   }
 }
 
@@ -65,8 +65,8 @@ export class ProviderError extends KoryphaiosError {
  */
 export class SessionError extends KoryphaiosError {
   constructor(message: string, context?: Record<string, unknown>) {
-    super(message, "SESSION_ERROR", 404, context);
-    this.name = "SessionError";
+    super(message, 'SESSION_ERROR', 404, context);
+    this.name = 'SessionError';
   }
 }
 
@@ -79,8 +79,8 @@ export class ToolExecutionError extends KoryphaiosError {
     public readonly toolName: string,
     context?: Record<string, unknown>,
   ) {
-    super(message, "TOOL_EXECUTION_ERROR", 500, { ...context, toolName });
-    this.name = "ToolExecutionError";
+    super(message, 'TOOL_EXECUTION_ERROR', 500, { ...context, toolName });
+    this.name = 'ToolExecutionError';
   }
 }
 
@@ -89,8 +89,8 @@ export class ToolExecutionError extends KoryphaiosError {
  */
 export class RateLimitError extends KoryphaiosError {
   constructor(message: string, context?: Record<string, unknown>) {
-    super(message, "RATE_LIMIT_ERROR", 429, context);
-    this.name = "RateLimitError";
+    super(message, 'RATE_LIMIT_ERROR', 429, context);
+    this.name = 'RateLimitError';
   }
 }
 
@@ -113,7 +113,7 @@ type SerializedError = {
 
 function parseStackFrames(stack?: string): ErrorStackFrame[] {
   if (!stack) return [];
-  const lines = stack.split("\n").slice(1);
+  const lines = stack.split('\n').slice(1);
   const frames: ErrorStackFrame[] = [];
 
   for (const raw of lines) {
@@ -149,10 +149,16 @@ function parseStackFrames(stack?: string): ErrorStackFrame[] {
 }
 
 function selectTopProjectFrame(frames: ErrorStackFrame[]): ErrorStackFrame | undefined {
-  return frames.find((f) => {
-    const file = f.file ?? "";
-    return file.includes("/backend/src/") || file.includes("/shared/src/") || file.includes("/frontend/src/");
-  }) ?? frames[0];
+  return (
+    frames.find((f) => {
+      const file = f.file ?? '';
+      return (
+        file.includes('/backend/src/') ||
+        file.includes('/shared/src/') ||
+        file.includes('/frontend/src/')
+      );
+    }) ?? frames[0]
+  );
 }
 
 export function serializeError(err: unknown): SerializedError {
@@ -168,8 +174,8 @@ export function serializeError(err: unknown): SerializedError {
     };
   }
   return {
-    name: "UnknownError",
-    message: typeof err === "string" ? err : String(err),
+    name: 'UnknownError',
+    message: typeof err === 'string' ? err : String(err),
     frames: [],
   };
 }
@@ -177,7 +183,10 @@ export function serializeError(err: unknown): SerializedError {
 /**
  * Error handler that logs and returns appropriate response
  */
-export function handleError(err: unknown, context?: Record<string, unknown>): {
+export function handleError(
+  err: unknown,
+  context?: Record<string, unknown>,
+): {
   message: string;
   code: string;
   statusCode: number;
@@ -185,13 +194,16 @@ export function handleError(err: unknown, context?: Record<string, unknown>): {
   const serialized = serializeError(err);
 
   if (err instanceof KoryphaiosError) {
-    serverLog.error({
-      code: err.code,
-      message: serialized.message,
-      context: { ...err.context, ...context },
-      error: serialized,
-    }, "Koryphaios error");
-    
+    serverLog.error(
+      {
+        code: err.code,
+        message: serialized.message,
+        context: { ...err.context, ...context },
+        error: serialized,
+      },
+      'Koryphaios error',
+    );
+
     return {
       message: err.message,
       code: err.code,
@@ -200,23 +212,26 @@ export function handleError(err: unknown, context?: Record<string, unknown>): {
   }
 
   if (err instanceof Error) {
-    serverLog.error({
-      message: serialized.message,
-      context,
-      error: serialized,
-    }, "Unexpected error");
-    
+    serverLog.error(
+      {
+        message: serialized.message,
+        context,
+        error: serialized,
+      },
+      'Unexpected error',
+    );
+
     return {
-      message: "Internal server error",
-      code: "INTERNAL_ERROR",
+      message: 'Internal server error',
+      code: 'INTERNAL_ERROR',
       statusCode: 500,
     };
   }
 
-  serverLog.error({ err: serialized, context }, "Unknown error type");
+  serverLog.error({ err: serialized, context }, 'Unknown error type');
   return {
-    message: "Internal server error",
-    code: "UNKNOWN_ERROR",
+    message: 'Internal server error',
+    code: 'UNKNOWN_ERROR',
     statusCode: 500,
   };
 }
@@ -241,57 +256,46 @@ export async function safeAsync<T>(
  * File operation error handler
  */
 export function handleFileError(err: unknown, path: string, operation: string): never {
-  if (err && typeof err === "object" && "code" in err) {
+  if (err && typeof err === 'object' && 'code' in err) {
     const code = (err as NodeJS.ErrnoException).code;
-    
-    if (code === "ENOENT") {
-      throw new KoryphaiosError(
-        `File not found: ${path}`,
-        "FILE_NOT_FOUND",
-        404,
-        { path, operation },
-      );
+
+    if (code === 'ENOENT') {
+      throw new KoryphaiosError(`File not found: ${path}`, 'FILE_NOT_FOUND', 404, {
+        path,
+        operation,
+      });
     }
-    
-    if (code === "EACCES" || code === "EPERM") {
-      throw new KoryphaiosError(
-        `Permission denied: ${path}`,
-        "FILE_PERMISSION_DENIED",
-        403,
-        { path, operation },
-      );
+
+    if (code === 'EACCES' || code === 'EPERM') {
+      throw new KoryphaiosError(`Permission denied: ${path}`, 'FILE_PERMISSION_DENIED', 403, {
+        path,
+        operation,
+      });
     }
-    
-    if (code === "EEXIST") {
-      throw new KoryphaiosError(
-        `File already exists: ${path}`,
-        "FILE_EXISTS",
-        409,
-        { path, operation },
-      );
+
+    if (code === 'EEXIST') {
+      throw new KoryphaiosError(`File already exists: ${path}`, 'FILE_EXISTS', 409, {
+        path,
+        operation,
+      });
     }
   }
 
-  throw new KoryphaiosError(
-    `File operation failed: ${operation} on ${path}`,
-    "FILE_ERROR",
-    500,
-    { path, operation, error: String(err) },
-  );
+  throw new KoryphaiosError(`File operation failed: ${operation} on ${path}`, 'FILE_ERROR', 500, {
+    path,
+    operation,
+    error: String(err),
+  });
 }
 
 /**
  * JSON parse with error handling
  */
-export function safeJsonParse<T>(
-  data: string,
-  fallback: T,
-  context?: Record<string, unknown>,
-): T {
+export function safeJsonParse<T>(data: string, fallback: T, context?: Record<string, unknown>): T {
   try {
     return JSON.parse(data) as T;
   } catch (err) {
-    serverLog.warn({ context, error: String(err) }, "JSON parse failed, using fallback");
+    serverLog.warn({ context, error: String(err) }, 'JSON parse failed, using fallback');
     return fallback;
   }
 }
@@ -306,4 +310,4 @@ export function generateCorrelationId(): string {
 }
 
 // Re-export additional error types from the taxonomy
-export * from "./errors/types";
+export * from './errors/types';

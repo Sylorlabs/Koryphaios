@@ -1,9 +1,9 @@
 // Message Types
 // Domain: Message and content block structures
 
-import type { ProviderName, ToolCall, ToolResult } from "../index";
+import type { ProviderName, ToolCall, ToolResult } from '../index';
 
-export type ContentBlockType = "text" | "thinking" | "tool_use" | "tool_result" | "image";
+export type ContentBlockType = 'text' | 'thinking' | 'tool_use' | 'tool_result' | 'image';
 
 export interface ContentBlock {
   type: ContentBlockType;
@@ -17,7 +17,7 @@ export interface ContentBlock {
 export interface Message {
   id: string;
   sessionId: string;
-  role: "user" | "assistant" | "system";
+  role: 'user' | 'assistant' | 'system';
   content: ContentBlock[];
   model?: string;
   provider?: ProviderName;
@@ -31,7 +31,7 @@ export interface Message {
 export interface StoredMessage {
   id: string;
   sessionId: string;
-  role: "user" | "assistant" | "system";
+  role: 'user' | 'assistant' | 'system';
   content: string; // JSON string of ContentBlock[] or raw text
   model?: string;
   provider?: ProviderName;

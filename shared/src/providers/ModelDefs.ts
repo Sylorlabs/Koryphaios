@@ -1,12 +1,12 @@
 // Model Definitions
 // Domain: LLM model specifications and capabilities
 
-import type { ProviderName } from "./ProviderNames";
+import type { ProviderName } from './ProviderNames';
 
 // Re-export for convenience
-export type { ProviderName } from "./ProviderNames";
+export type { ProviderName } from './ProviderNames';
 
-export type ModelTier = "flagship" | "fast" | "cheap" | "reasoning";
+export type ModelTier = 'flagship' | 'fast' | 'cheap' | 'reasoning';
 
 export interface ModelDef {
   id: string;
@@ -43,6 +43,8 @@ export interface ProviderConfig {
   selectedModels?: string[];
   /** Whether to skip the model selection dialog in the future. */
   hideModelSelector?: boolean;
+  /** Ordered list of saved account IDs for automatic fallback on failure. */
+  fallbackOrder?: string[];
   headers?: Record<string, string>;
 }
 

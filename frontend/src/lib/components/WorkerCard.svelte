@@ -19,7 +19,15 @@
     sessionId?: string;
   }
 
-  let { agent }: { agent: AgentState } = $props();
+  let {
+    agent,
+    selected = false,
+    onSelect,
+  }: {
+    agent: AgentState;
+    selected?: boolean;
+    onSelect?: () => void;
+  } = $props();
 
   function providerLabel(provider: string): string {
     if (provider === 'openai') return 'OpenAI';
@@ -69,11 +77,23 @@
   let isManager = $derived(agent.identity.role === 'manager');
 </script>
 
-<div class="agent-card rounded-lg border transition-all duration-500
-            {isActive ? `active ${glowClass} glow-active min-w-[180px] max-w-[240px]` : 'opacity-60 grayscale-[0.5] scale-95 origin-left'}"
-     style="background: var(--color-surface-2); border-color: var(--color-border); padding: {isActive ? '8px 12px' : '6px 10px'};">
+<div
+  class="agent-card rounded-lg border text-left transition-all duration-300
+            {selected ? `ring-1 ring-[var(--color-accent)] bg-[var(--color-surface-2)] shadow-[0_0_0_1px_rgba(213,178,97,0.2)]` : ''}
+            {isActive ? `active ${glowClass} glow-active min-w-[188px] max-w-[252px]` : 'min-w-[188px] max-w-[252px] opacity-85'}"
+  style="background: var(--color-surface-2); border-color: {selected ? 'rgba(213,178,97,0.42)' : 'var(--color-border)'}; padding: {isActive || selected ? '10px 12px' : '8px 10px'};"
+  onclick={() => onSelect?.()}
+  onkeydown={(event) => {
+    if (event.key === 'Enter' || event.key === ' ') {
+      event.preventDefault();
+      onSelect?.();
+    }
+  }}
+  role="button"
+  tabindex="0"
+>
   <!-- Header -->
-  <div class="flex items-start justify-between {isActive ? 'mb-1.5' : 'mb-0'}">
+  <div class="flex items-start justify-between {isActive ? 'mb-[var(--space-sm)]' : 'mb-0'}">
     <div class="flex items-center gap-1.5">
       <div class="flex items-center pt-0.5">
         <AnimatedStatusIcon status={agent.status} size={isActive ? 16 : 14} {isManager} isStatic={!isActive} />
@@ -87,13 +107,14 @@
           class="p-0.5 rounded transition-colors hover:bg-red-500/20"
           style="color: var(--color-text-muted);"
           title={isManager ? 'Stop manager and workers' : 'Cancel this worker'}
-          onclick={() => {
+          onclick={(event) => {
+            event.stopPropagation();
             if (isManager && agent.sessionId) {
               wsStore.markSessionAgentsStopped(agent.sessionId);
               apiFetch(`/api/sessions/${agent.sessionId}/cancel`, { method: 'POST' }).catch(() => {});
             } else {
               wsStore.markAgentStopped(agent.identity.id);
-              apiFetch(`/api/agents/${agent.identity.id}/cancel`, { method: 'POST' }).catch(() => {});
+              apiFetch(`/api/agent/${agent.identity.id}/cancel`, { method: 'POST' }).catch(() => {});
             }
           }}
         >
@@ -107,7 +128,7 @@
 
   {#if isActive}
     <!-- Status -->
-    <div class="flex items-center justify-between mb-1.5" transition:fade={{duration: 200}}>
+    <div class="flex items-center justify-between mb-[var(--space-md)]" transition:fade={{duration: 200}}>
       <span class="text-[11px]" style="color: {agent.status === 'done' ? 'var(--color-success)' : agent.status === 'error' ? 'var(--color-error)' : 'var(--color-text-secondary)'};">
         {statusText}
       </span>
@@ -116,8 +137,8 @@
 
     <!-- Context window bar -->
     {#if agent.tokensUsed > 0 && agent.contextKnown && agent.contextMax > 0}
-      <div class="mb-1">
-        <div class="flex items-center justify-between mb-0.5">
+      <div class="mb-[var(--space-sm)]">
+        <div class="flex items-center justify-between mb-[var(--space-xs)]">
           <span class="text-[9px]" style="color: var(--color-text-muted);">Context</span>
           <span class="text-[9px]" style="color: var(--color-text-muted);">{Math.round(agent.tokensUsed / 1000)}k / {Math.round(agent.contextMax / 1000)}k</span>
         </div>

@@ -1,150 +1,209 @@
 <script lang="ts">
+  import { EXISTING_PROVIDER_ICON_PATHS } from './provider-icon-assets';
+
   interface Props {
     provider: string;
     size?: number;
     class?: string;
   }
 
+  interface IconCandidate {
+    src: string;
+    themeAdaptive: boolean;
+  }
+
   let { provider, size = 16, class: className = '' }: Props = $props();
 
-  const providerIconPath: Record<string, string> = {
-    anthropic: '/provider-icons/anthropic.svg',
-    openai: '/provider-icons/openai.svg',
-    google: '/provider-icons/google.svg',
-    xai: '/provider-icons/xai.svg',
-    openrouter: '/provider-icons/openrouter.svg',
-    cline: '/provider-icons/openrouter.svg',
-    copilot: '/provider-icons/copilot.svg',
-    groq: '/provider-icons/groq.svg',
-    togetherai: '/provider-icons/togetherai.svg',
-    opencodezen: '/provider-icons/opencodezen.svg',
-
-    cloudflare: '/provider-icons/cloudflare.svg',
-    vercel: '/provider-icons/vercel.svg',
-    baseten: '/provider-icons/baseten.svg',
-    helicone: '/provider-icons/helicone.svg',
-    portkey: '/provider-icons/portkey.svg',
-
-    cerebras: '/provider-icons/cerebras.svg',
-    fireworks: '/provider-icons/fireworks.svg',
-    deepinfra: '/provider-icons/deepinfra.svg',
-    hyperbolic: '/provider-icons/hyperbolic.svg',
-    ionet: '/provider-icons/ionet.svg',
-
-    deepseek: '/provider-icons/deepseek.svg',
-    moonshot: '/provider-icons/moonshot.svg',
-    minimax: '/provider-icons/minimax.svg',
-    nebius: '/provider-icons/nebius.svg',
-    zai: '/provider-icons/zai.svg',
-    cortecs: '/provider-icons/cortecs.svg',
-    stepfun: '/provider-icons/stepfun.svg',
-
-    huggingface: '/provider-icons/huggingface.svg',
-    replicate: '/provider-icons/replicate.svg',
-    modal: '/provider-icons/modal.svg',
-    scaleway: '/provider-icons/scaleway.svg',
-    venice: '/provider-icons/venice.svg',
-    zenmux: '/provider-icons/zenmux.svg',
-    firmware: '/provider-icons/firmware.svg',
-
-    azure: '/provider-icons/azure.svg',
-    azurecognitive: '/provider-icons/azurecognitive.svg',
-    bedrock: '/provider-icons/bedrock.svg',
-    vertexai: '/provider-icons/vertexai.svg',
-    sapai: '/provider-icons/sapai.svg',
-    stackit: '/provider-icons/stackit.svg',
-    ovhcloud: '/provider-icons/ovhcloud.svg',
-
-    local: '/provider-icons/local.svg',
-    ollama: '/provider-icons/ollama.svg',
-    ollamacloud: '/provider-icons/ollamacloud.svg',
-    lmstudio: '/provider-icons/lmstudio.svg',
-    llamacpp: '/provider-icons/llamacpp.svg',
-
-    gitlab: '/provider-icons/gitlab.svg',
-    codex: '/provider-icons/codex.svg',
-    chromeai: '/provider-icons/chromeai.svg',
-
-    mistralai: '/provider-icons/mistralai.svg',
-    cohere: '/provider-icons/cohere.svg',
-    perplexity: '/provider-icons/perplexity.svg',
-    luma: '/provider-icons/luma.svg',
-    fal: '/provider-icons/fal.svg',
-
-    elevenlabs: '/provider-icons/elevenlabs.svg',
-    deepgram: '/provider-icons/deepgram.svg',
-    gladia: '/provider-icons/gladia.svg',
-    assemblyai: '/provider-icons/assemblyai.svg',
-    lmnt: '/provider-icons/lmnt.svg',
-
-    nvidia: '/provider-icons/nvidia.svg',
-    nim: '/provider-icons/nvidia.svg',
-    friendliai: '/provider-icons/friendliai.svg',
-    friendli: '/provider-icons/friendliai.svg',
-    voyageai: '/provider-icons/voyageai.svg',
-    mixedbread: '/provider-icons/mixedbread.svg',
-    mem0: '/provider-icons/mem0.svg',
-    letta: '/provider-icons/letta.svg',
-    blackforestlabs: '/provider-icons/blackforestlabs.svg',
-    klingai: '/provider-icons/klingai.svg',
-    prodia: '/provider-icons/prodia.svg',
-    a302ai: '/provider-icons/a302ai.svg',
-    qwen: '/provider-icons/qwen.svg',
-    alibaba: '/provider-icons/alibaba.svg',
-    'alibaba-cn': '/provider-icons/alibaba.svg',
-    zhipuai: '/provider-icons/zhipuai.svg',
-    modelscope: '/provider-icons/modelscope.svg',
-    'moonshotai-cn': '/provider-icons/moonshot.svg',
-    cloudflareworkers: '/provider-icons/cloudflare.svg',
-    'novita-ai': '/provider-icons/novita-ai.svg',
-    upstage: '/provider-icons/upstage.svg',
-    siliconflow: '/provider-icons/siliconflow.svg',
-    abacus: '/provider-icons/abacus.svg',
-    llama: '/provider-icons/llama.svg',
-    vultr: '/provider-icons/vultr.svg',
-    wandb: '/provider-icons/wandb.svg',
-    poe: '/provider-icons/poe.svg',
-    'github-models': '/provider-icons/github-models.svg',
-    requesty: '/provider-icons/requesty.svg',
-    inference: '/provider-icons/inference.svg',
-    submodel: '/provider-icons/submodel.svg',
-    synthetic: '/provider-icons/synthetic.svg',
-    moark: '/provider-icons/moark.svg',
-    nova: '/provider-icons/nova.svg',
-    // Fallbacks for missing icons
-    v0: '/provider-icons/vercel.svg',
+  const providerSlugMap: Record<string, string[]> = {
+    anthropic: ['anthropic'],
+    claude: ['claudecode', 'claude'],
+    openai: ['openai'],
+    google: ['google', 'google-brand'],
+    xai: ['xai'],
+    openrouter: ['openrouter'],
+    groq: ['groq'],
+    togetherai: ['together', 'together-brand'],
+    deepseek: ['deepseek'],
+    mistralai: ['mistral'],
+    mistral: ['mistral'],
+    cohere: ['cohere'],
+    perplexity: ['perplexity'],
+    azure: ['azure'],
+    azurecognitive: ['azureai', 'azure'],
+    bedrock: ['bedrock'],
+    vertexai: ['vertexai'],
+    cloudflare: ['cloudflare'],
+    vercel: ['vercel'],
+    huggingface: ['huggingface'],
+    replicate: ['replicate'],
+    ollama: ['ollama'],
+    qwen: ['qwen'],
+    alibaba: ['alibaba'],
+    'alibaba-cn': ['alibaba'],
+    '302ai': ['ai302'],
+    baichuan: ['baichuan'],
+    minimax: ['minimax'],
+    kimicode: ['kimicode', 'kimi'],
+    moonshot: ['moonshot'],
+    stepfun: ['stepfun'],
+    zhipuai: ['zhipu'],
+    fireworks: ['fireworks'],
+    deepinfra: ['deepinfra'],
+    codex: ['codex'],
+    nebius: ['nebius'],
+    together: ['together', 'together-brand'],
+    upstage: ['upstage'],
+    opencodezen: ['opencode'],
+    copilot: ['githubcopilot'],
+    github: ['github'],
+    gitlab: ['gitlab'],
+    v0: ['v0'],
+    local: ['local', 'lmstudio'],
+    lmstudio: ['lmstudio'],
+    nvidia: ['nvidia'],
+    nim: ['nvidia'],
+    voyageai: ['voyage'],
+    friendliai: ['friendli'],
+    klingai: ['kling'],
+    ionet: ['ionet'],
+    ollamacloud: ['ollama'],
+    firmware: ['firmware'],
+    helicone: ['helicone'],
+    llamacpp: ['llamacpp'],
+    sapai: ['sapai'],
+    stackit: ['stackit'],
+    ovhcloud: ['ovhcloud'],
+    scaleway: ['scaleway'],
+    venice: ['venice'],
+    zenmux: ['zenmux'],
+    zai: ['zai'],
   };
 
-  const themeAdaptive = new Set([
+  const themeAdaptiveSlugs = new Set([
     'openai',
-    'codex',
-    'vercel',
+    'anthropic',
+    'claude',
+    'claudecode',
+    'xai',
+    'deepseek',
+    'mistral',
+    'moonshot',
+    'kimicode',
+    'cohere',
+    'perplexity',
+    'together',
+    'groq',
+    'openrouter',
+    'opencode',
+    'replicate',
     'ollama',
-    'ollamacloud',
+    'codex',
+    'copilot',
+    'github',
+    'gitlab',
+    'vercel',
+    'zai',
+    'baseten',
+    'nebius',
+    'lmstudio',
+    'zenmux',
   ]);
+
+  const monochromeFirstProviders = new Set([
+    'zai',
+    'moonshot',
+    'baseten',
+    'nebius',
+    'lmstudio',
+    'zenmux',
+  ]);
+
   let loadError = $state(false);
+  let candidateIndex = $state(0);
+
+  const unique = (values: string[]) => [...new Set(values.filter(Boolean))];
+
+  const getSlugCandidates = (p: string) => {
+    const normalized = p.toLowerCase();
+    const mapped = providerSlugMap[normalized];
+    return mapped ? unique(mapped) : [normalized];
+  };
+
+  const getIconCandidates = (p: string): IconCandidate[] => {
+    const normalized = p.toLowerCase();
+    const slugs = getSlugCandidates(normalized);
+    const candidates: IconCandidate[] = [];
+    const seen = new Set<string>();
+    const preferMonochrome = monochromeFirstProviders.has(normalized);
+
+    const pushCandidate = (src: string, themeAdaptive: boolean) => {
+      if (seen.has(src) || !EXISTING_PROVIDER_ICON_PATHS.has(src)) return;
+      seen.add(src);
+      candidates.push({ src, themeAdaptive });
+    };
+
+    const pushColorCandidates = () => {
+      for (const slug of slugs) {
+        pushCandidate(`/provider-icons/${slug}-color.svg`, false);
+        pushCandidate(`/provider-icons/${slug}-color.png`, false);
+        pushCandidate(`/provider-icons/${slug}-color.ico`, false);
+        pushCandidate(`/provider-icons/lobehub/${slug}-color.svg`, false);
+      }
+    };
+
+    const pushMonochromeCandidates = () => {
+      for (const slug of slugs) {
+        const themeAdaptive = themeAdaptiveSlugs.has(slug) || themeAdaptiveSlugs.has(normalized);
+        pushCandidate(`/provider-icons/lobehub/${slug}.svg`, themeAdaptive);
+        pushCandidate(`/provider-icons/${slug}.svg`, themeAdaptive);
+      }
+    };
+
+    if (preferMonochrome) {
+      pushMonochromeCandidates();
+      pushColorCandidates();
+    } else {
+      pushColorCandidates();
+      pushMonochromeCandidates();
+    }
+
+    return candidates;
+  };
+
+  const iconCandidates = $derived.by(() => getIconCandidates(provider));
+  const currentCandidate = $derived.by(() => iconCandidates[candidateIndex] ?? null);
+
   $effect(() => {
     provider;
+    candidateIndex = 0;
     loadError = false;
   });
 </script>
 
-{#if providerIconPath[provider] && !loadError}
+{#if !loadError && currentCandidate}
   <img
-    src={providerIconPath[provider]}
+    src={currentCandidate.src}
     alt={`${provider} logo`}
     width={size}
     height={size}
-    class={`provider-icon ${themeAdaptive.has(provider) ? 'theme-adaptive' : ''} ${className}`}
+    class={`provider-icon ${currentCandidate.themeAdaptive ? 'theme-adaptive' : ''} ${className}`}
     loading="lazy"
     decoding="async"
-    onerror={() => loadError = true}
+    onerror={() => {
+      if (candidateIndex < iconCandidates.length - 1) {
+        candidateIndex += 1;
+      } else {
+        loadError = true;
+      }
+    }}
   />
 {:else}
-  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" class={className}>
-    <circle cx="12" cy="12" r="8" stroke="currentColor" stroke-width="1.5" fill="none" style="color: var(--color-text-muted);" />
-    <circle cx="12" cy="12" r="3" fill="currentColor" style="color: var(--color-text-muted);" />
-  </svg>
+  <div class={`provider-icon-placeholder ${className}`} style="width: {size}px; height: {size}px;">
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <circle cx="12" cy="12" r="8" stroke="currentColor" stroke-width="1.5" fill="none" style="color: var(--color-text-muted);" />
+      <circle cx="12" cy="12" r="3" fill="currentColor" style="color: var(--color-text-muted);" />
+    </svg>
+  </div>
 {/if}
 
 <style>
@@ -155,11 +214,14 @@
     border: 0;
     border-radius: 0;
   }
-  :global(:root[data-theme='dark']) .theme-adaptive {
-    filter: brightness(0) invert(1);
+
+  .provider-icon-placeholder {
+    display: flex;
+    align-items: center;
+    justify-content: center;
   }
 
-  :global(:root[data-theme='light']) .theme-adaptive {
-    filter: none;
+  :global(:root[data-theme='dark']) .theme-adaptive {
+    filter: brightness(0) invert(1);
   }
 </style>

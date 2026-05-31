@@ -1,23 +1,20 @@
-import { providerLog } from "../logger";
-import { wsBroker } from "../pubsub";
-import type { WSMessage, RateLimitPayload } from "@koryphaios/shared";
+import { providerLog } from '../logger';
+import { wsBroker } from '../pubsub';
+import type { WSMessage, RateLimitPayload } from '@koryphaios/shared';
 
 /**
  * Returns an AbortSignal that aborts when either the given signal aborts or a timeout elapses.
  * Prevents LLM streams from hanging indefinitely when the provider is slow or unresponsive.
  */
-export function withTimeoutSignal(
-  signal: AbortSignal | undefined,
-  timeoutMs: number
-): AbortSignal {
+export function withTimeoutSignal(signal: AbortSignal | undefined, timeoutMs: number): AbortSignal {
   const timeoutSignal =
-    typeof AbortSignal !== "undefined" && "timeout" in AbortSignal
+    typeof AbortSignal !== 'undefined' && 'timeout' in AbortSignal
       ? (AbortSignal as any).timeout(timeoutMs)
       : createTimeoutSignal(timeoutMs);
 
   if (!signal) return timeoutSignal;
 
-  if (typeof AbortSignal !== "undefined" && "any" in AbortSignal) {
+  if (typeof AbortSignal !== 'undefined' && 'any' in AbortSignal) {
     return (AbortSignal as any).any([signal, timeoutSignal]);
   }
 
@@ -29,22 +26,18 @@ export function withTimeoutSignal(
       // already aborted
     }
   };
-  signal.addEventListener("abort", () => abort(signal.reason), { once: true });
-  timeoutSignal.addEventListener("abort", () => abort(timeoutSignal.reason), { once: true });
+  signal.addEventListener('abort', () => abort(signal.reason), { once: true });
+  timeoutSignal.addEventListener('abort', () => abort(timeoutSignal.reason), { once: true });
   return controller.signal;
 }
 
 function createTimeoutSignal(ms: number): AbortSignal {
   const controller = new AbortController();
   const timer = setTimeout(() => {
-    controller.abort(new DOMException(`Stream timed out after ${ms}ms`, "TimeoutError"));
+    controller.abort(new DOMException(`Stream timed out after ${ms}ms`, 'TimeoutError'));
   }, ms);
   const signal = controller.signal;
-  signal.addEventListener(
-    "abort",
-    () => clearTimeout(timer),
-    { once: true }
-  );
+  signal.addEventListener('abort', () => clearTimeout(timer), { once: true });
   return signal;
 }
 
@@ -59,15 +52,18 @@ export interface RetryOptions {
   modelName?: string;
 }
 
-const DEFAULT_OPTIONS: Required<Omit<RetryOptions, "providerName" | "modelName">> & { providerName?: string; modelName?: string } = {
+const DEFAULT_OPTIONS: Required<Omit<RetryOptions, 'providerName' | 'modelName'>> & {
+  providerName?: string;
+  modelName?: string;
+} = {
   maxRetries: 3,
   initialDelayMs: 1000,
   jitterFactor: 0.2,
   shouldRetry: (error: any) => {
     // Check for standard fetch errors or provider-specific error objects
     const status = error?.status ?? error?.statusCode ?? error?.response?.status;
-    const message = (error?.message || "").toLowerCase();
-    
+    const message = (error?.message || '').toLowerCase();
+
     // 429: Too Many Requests (Rate Limit)
     // 500: Internal Server Error
     // 502: Bad Gateway
@@ -78,12 +74,12 @@ const DEFAULT_OPTIONS: Required<Omit<RetryOptions, "providerName" | "modelName">
     }
 
     // Check message content for rate limit indicators if status is missing
-    if (message.includes("rate limit") || message.includes("quota") || message.includes("429")) {
+    if (message.includes('rate limit') || message.includes('quota') || message.includes('429')) {
       return true;
     }
-    
+
     return false;
-  }
+  },
 };
 
 /**
@@ -92,7 +88,7 @@ const DEFAULT_OPTIONS: Required<Omit<RetryOptions, "providerName" | "modelName">
  */
 export async function withRetry<T>(
   operation: () => T | Promise<T>,
-  options: RetryOptions = {}
+  options: RetryOptions = {},
 ): Promise<Awaited<T>> {
   const opts = { ...DEFAULT_OPTIONS, ...options };
   let lastError: any;
@@ -102,7 +98,7 @@ export async function withRetry<T>(
       return await operation();
     } catch (error: any) {
       lastError = error;
-      
+
       if (attempt === opts.maxRetries || !opts.shouldRetry(error)) {
         throw error;
       }
@@ -112,10 +108,9 @@ export async function withRetry<T>(
       const headers = error?.response?.headers ?? error?.headers;
       if (headers) {
         // Handle both Map-like and object-like headers
-        const retryHeader = typeof headers.get === 'function' 
-          ? headers.get("retry-after") 
-          : headers["retry-after"];
-          
+        const retryHeader =
+          typeof headers.get === 'function' ? headers.get('retry-after') : headers['retry-after'];
+
         if (retryHeader) {
           const seconds = parseInt(retryHeader, 10);
           if (!isNaN(seconds)) {
@@ -127,7 +122,7 @@ export async function withRetry<T>(
       // Calculate backoff
       // 2000 * (2 ^ (attempt - 1))
       let backoffMs = opts.initialDelayMs * Math.pow(2, attempt - 1);
-      
+
       // Add jitter: +/- 20% of backoff
       // OpenCode uses +jitter, we'll do the same
       const jitterMs = backoffMs * opts.jitterFactor * Math.random();
@@ -138,36 +133,37 @@ export async function withRetry<T>(
         delayMs = Math.min(retryAfterMs, 30_000);
       }
 
-      const isRateLimit = error?.status === 429 || 
-        (error?.message?.toLowerCase().includes("rate limit")) ||
-        (error?.message?.toLowerCase().includes("quota"));
+      const isRateLimit =
+        error?.status === 429 ||
+        error?.message?.toLowerCase().includes('rate limit') ||
+        error?.message?.toLowerCase().includes('quota');
 
       providerLog.warn(
-        { 
-          attempt, 
-          maxRetries: opts.maxRetries, 
+        {
+          attempt,
+          maxRetries: opts.maxRetries,
           delayMs: Math.round(delayMs),
           error: error.message,
-          isRateLimit 
+          isRateLimit,
         },
-        "Retrying operation due to error"
+        'Retrying operation due to error',
       );
 
       // Emit rate limit event to WebSocket for UI notification
       if (isRateLimit) {
         const rateLimitPayload: RateLimitPayload = {
-          provider: (opts.providerName || "unknown") as any,
-          model: opts.modelName || "unknown",
+          provider: (opts.providerName || 'unknown') as any,
+          model: opts.modelName || 'unknown',
           retryAfterMs: Math.round(delayMs),
           attempt,
           maxRetries: opts.maxRetries,
         };
         const message: WSMessage<RateLimitPayload> = {
-          type: "provider.rate_limit",
+          type: 'provider.rate_limit',
           payload: rateLimitPayload,
           timestamp: Date.now(),
         };
-        wsBroker.publish("custom", message);
+        wsBroker.publish('custom', message);
       }
 
       await new Promise((resolve) => setTimeout(resolve, delayMs));

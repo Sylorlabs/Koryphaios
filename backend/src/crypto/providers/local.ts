@@ -34,11 +34,11 @@ export interface LocalKMSConfig {
 
 /**
  * Local KMS Provider
- * 
+ *
  * ⚠️ SECURITY WARNING ⚠️
  * This provider is for DEVELOPMENT ONLY. It stores the master key on disk.
  * In production, use AWS KMS, HashiCorp Vault, or another external KMS.
- * 
+ *
  * How it works:
  * 1. Generates a random master key on first use
  * 2. Encrypts the master key with a passphrase-derived key (if passphrase provided)
@@ -56,7 +56,7 @@ export class LocalKMSProvider implements KMSProvider {
   constructor(config: LocalKMSConfig) {
     this.config = config;
     this.keyFilePath = join(config.dataDir, KEY_FILE);
-    
+
     if (!config.suppressWarning) {
       serverLog.warn('╔════════════════════════════════════════════════════════════════╗');
       serverLog.warn('║  SECURITY WARNING: Using Local KMS Provider                   ║');
@@ -72,9 +72,9 @@ export class LocalKMSProvider implements KMSProvider {
     if (process.env.NODE_ENV === 'production' && !this.config.suppressWarning) {
       throw new Error(
         'Local KMS Provider is NOT allowed in production. ' +
-        'Please configure an external KMS provider (AWS KMS, Azure Key Vault, ' +
-        'HashiCorp Vault, GCP KMS, or Cloudflare KMS) by setting KORYPHAIOS_KMS_PROVIDER. ' +
-        'Set suppressWarning: true ONLY if you understand the security implications.'
+          'Please configure an external KMS provider (AWS KMS, Azure Key Vault, ' +
+          'HashiCorp Vault, GCP KMS, or Cloudflare KMS) by setting KORYPHAIOS_KMS_PROVIDER. ' +
+          'Set suppressWarning: true ONLY if you understand the security implications.',
       );
     }
 
@@ -87,7 +87,10 @@ export class LocalKMSProvider implements KMSProvider {
       await this.generateMasterKey();
     }
 
-    serverLog.info({ keyId: this.keyData?.keyId, version: this.keyData?.version }, 'Local KMS initialized');
+    serverLog.info(
+      { keyId: this.keyData?.keyId, version: this.keyData?.version },
+      'Local KMS initialized',
+    );
   }
 
   async generateDek(): Promise<{ plaintext: Buffer; encrypted: string }> {
@@ -95,21 +98,21 @@ export class LocalKMSProvider implements KMSProvider {
       await this.initialize();
     }
     if (!this.masterKey) {
-      throw new Error("Master key not initialized");
+      throw new Error('Master key not initialized');
     }
     const masterKey = this.masterKey;
 
     // Generate random DEK
     const dek = randomBytes(KEY_SIZE);
-    
+
     // Encrypt DEK with master key
     const iv = randomBytes(16);
     const cipher = createCipheriv('aes-256-cbc', masterKey, iv);
     const encrypted = Buffer.concat([cipher.update(dek), cipher.final()]);
-    
+
     // Combine IV + encrypted DEK
     const combined = Buffer.concat([iv, encrypted]);
-    
+
     return {
       plaintext: dek,
       encrypted: combined.toString('base64'),
@@ -122,15 +125,15 @@ export class LocalKMSProvider implements KMSProvider {
     }
 
     const combined = Buffer.from(encryptedDek, 'base64');
-    
+
     // Extract IV and encrypted data
     const iv = combined.subarray(0, 16);
     const encrypted = combined.subarray(16);
-    
+
     // Decrypt DEK
     const decipher = createDecipheriv('aes-256-cbc', this.masterKey, iv);
     const decrypted = Buffer.concat([decipher.update(encrypted), decipher.final()]);
-    
+
     return decrypted;
   }
 
@@ -138,7 +141,7 @@ export class LocalKMSProvider implements KMSProvider {
     if (!this.keyData) {
       throw new Error('Key data not initialized');
     }
-    
+
     return {
       id: this.keyData.keyId,
       version: this.keyData.version,
@@ -154,19 +157,22 @@ export class LocalKMSProvider implements KMSProvider {
 
     // Generate new master key
     const newMasterKey = randomBytes(KEY_SIZE);
-    
+
     // Increment version
     this.keyData.version++;
-    
+
     // Store new key
     await this.saveMasterKey(newMasterKey);
-    
+
     // Clear old key
     this.masterKey.fill(0);
     this.masterKey = newMasterKey;
 
-    serverLog.info({ keyId: this.keyData.keyId, version: this.keyData.version }, 'Master key rotated');
-    
+    serverLog.info(
+      { keyId: this.keyData.keyId, version: this.keyData.version },
+      'Master key rotated',
+    );
+
     return true;
   }
 
@@ -178,12 +184,14 @@ export class LocalKMSProvider implements KMSProvider {
     return true;
   }
 
-  async generatePerUserDek(derivationInput: string): Promise<{ plaintext: Buffer; encrypted: string }> {
+  async generatePerUserDek(
+    derivationInput: string,
+  ): Promise<{ plaintext: Buffer; encrypted: string }> {
     if (!this.masterKey) {
       await this.initialize();
     }
     if (!this.masterKey) {
-      throw new Error("Master key not initialized");
+      throw new Error('Master key not initialized');
     }
     const masterKey = this.masterKey;
     const { createHmac, randomBytes, createCipheriv } = await import('node:crypto');
@@ -209,10 +217,10 @@ export class LocalKMSProvider implements KMSProvider {
 
     // Generate random master key
     const masterKey = randomBytes(KEY_SIZE);
-    
+
     // Generate key ID from hash
     const keyId = createHash('sha256').update(masterKey).digest('hex').substring(0, 16);
-    
+
     this.keyData = {
       salt: randomBytes(SALT_SIZE).toString('base64'),
       encryptedKey: '', // Will be set by saveMasterKey
@@ -224,7 +232,7 @@ export class LocalKMSProvider implements KMSProvider {
     this.masterKey = masterKey;
 
     serverLog.info({ keyId }, 'New master key generated');
-    
+
     if (!this.config.passphrase) {
       serverLog.warn('╔════════════════════════════════════════════════════════════════╗');
       serverLog.warn('║  CRITICAL: No passphrase set for local KMS!                   ║');
@@ -238,30 +246,30 @@ export class LocalKMSProvider implements KMSProvider {
     try {
       const content = readFileSync(this.keyFilePath, 'utf8');
       this.keyData = JSON.parse(content) as LocalKeyData;
-      
+
       const encryptedKey = Buffer.from(this.keyData.encryptedKey, 'base64');
-      
+
       if (this.config.passphrase) {
         // Decrypt with passphrase
         const salt = Buffer.from(this.keyData.salt, 'base64');
         const key = scryptSync(this.config.passphrase, salt, KEY_SIZE);
-        
+
         const iv = encryptedKey.subarray(0, 16);
         const encrypted = encryptedKey.subarray(16);
-        
+
         const decipher = createDecipheriv('aes-256-cbc', key, iv);
         this.masterKey = Buffer.concat([decipher.update(encrypted), decipher.final()]);
-        
+
         // Clear derived key
         key.fill(0);
       } else {
         // No passphrase - assume direct storage (legacy/insecure mode)
         const iv = encryptedKey.subarray(0, 16);
         const encrypted = encryptedKey.subarray(16);
-        
+
         // For backward compatibility, try to decrypt with empty key
         const key = scryptSync('', Buffer.from(this.keyData.salt, 'base64'), KEY_SIZE);
-        
+
         try {
           const decipher = createDecipheriv('aes-256-cbc', key, iv);
           this.masterKey = Buffer.concat([decipher.update(encrypted), decipher.final()]);
@@ -269,11 +277,14 @@ export class LocalKMSProvider implements KMSProvider {
           // Try plaintext (very old format)
           this.masterKey = encryptedKey;
         }
-        
+
         key.fill(0);
       }
-      
-      serverLog.info({ keyId: this.keyData.keyId, version: this.keyData.version }, 'Master key loaded');
+
+      serverLog.info(
+        { keyId: this.keyData.keyId, version: this.keyData.version },
+        'Master key loaded',
+      );
     } catch (error: any) {
       throw new Error(`Failed to load master key: ${error.message}`);
     }
@@ -285,41 +296,37 @@ export class LocalKMSProvider implements KMSProvider {
     }
 
     let encryptedKey: Buffer;
-    
+
     if (this.config.passphrase) {
       // Encrypt with passphrase
       const salt = Buffer.from(this.keyData.salt, 'base64');
       const key = scryptSync(this.config.passphrase, salt, KEY_SIZE);
-      
+
       const iv = randomBytes(16);
       const cipher = createCipheriv('aes-256-cbc', key, iv);
       const encrypted = Buffer.concat([cipher.update(masterKey), cipher.final()]);
-      
+
       encryptedKey = Buffer.concat([iv, encrypted]);
-      
+
       // Clear derived key
       key.fill(0);
     } else {
       // Store with empty encryption (insecure but functional)
       const salt = Buffer.from(this.keyData.salt, 'base64');
       const key = scryptSync('', salt, KEY_SIZE);
-      
+
       const iv = randomBytes(16);
       const cipher = createCipheriv('aes-256-cbc', key, iv);
       const encrypted = Buffer.concat([cipher.update(masterKey), cipher.final()]);
-      
+
       encryptedKey = Buffer.concat([iv, encrypted]);
-      
+
       key.fill(0);
     }
 
     this.keyData.encryptedKey = encryptedKey.toString('base64');
-    
+
     // Write with strict permissions
-    writeFileSync(
-      this.keyFilePath,
-      JSON.stringify(this.keyData, null, 2),
-      { mode: 0o600 }
-    );
+    writeFileSync(this.keyFilePath, JSON.stringify(this.keyData, null, 2), { mode: 0o600 });
   }
 }

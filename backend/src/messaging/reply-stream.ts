@@ -1,7 +1,7 @@
 // Per-session reply queue for channel reply streaming (SSE/poll).
 // Bridge devices can consume replies via GET /api/channels/replies?sessionId=...
 
-import type { ReplySegment } from "./types";
+import type { ReplySegment } from './types';
 
 const SESSION_TTL_MS = 60 * 60 * 1000; // 1 hour
 

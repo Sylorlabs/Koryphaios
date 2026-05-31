@@ -37,14 +37,17 @@ export class EnvelopeEncryption {
         durationMs: Date.now() - startTime,
       });
     } catch (error: any) {
-      serverLog.error({ error, provider: this.provider.name }, 'Failed to initialize envelope encryption');
+      serverLog.error(
+        { error, provider: this.provider.name },
+        'Failed to initialize envelope encryption',
+      );
       throw error;
     }
   }
 
   /**
    * Encrypt plaintext data using envelope encryption
-   * 
+   *
    * Process:
    * 1. Generate a random DEK (Data Encryption Key)
    * 2. Encrypt the data with AES-256-GCM using the DEK
@@ -64,10 +67,7 @@ export class EnvelopeEncryption {
 
       // Step 3: Encrypt data with DEK
       const cipher = createCipheriv(DATA_ALGORITHM, dek, nonce);
-      const encryptedData = Buffer.concat([
-        cipher.update(plaintext, 'utf8'),
-        cipher.final(),
-      ]);
+      const encryptedData = Buffer.concat([cipher.update(plaintext, 'utf8'), cipher.final()]);
       const authTag = cipher.getAuthTag();
 
       // Combine authTag + encryptedData for storage
@@ -113,7 +113,7 @@ export class EnvelopeEncryption {
 
   /**
    * Decrypt an envelope to get the plaintext
-   * 
+   *
    * Process:
    * 1. Decrypt the DEK using the KMS
    * 2. Decrypt the data using the DEK
@@ -138,10 +138,9 @@ export class EnvelopeEncryption {
       const decipher = createDecipheriv(DATA_ALGORITHM, dek, nonce);
       decipher.setAuthTag(authTag);
 
-      const plaintext = Buffer.concat([
-        decipher.update(encryptedData),
-        decipher.final(),
-      ]).toString('utf8');
+      const plaintext = Buffer.concat([decipher.update(encryptedData), decipher.final()]).toString(
+        'utf8',
+      );
 
       // Step 4: Clear DEK from memory
       dek.fill(0);
@@ -192,7 +191,7 @@ export class EnvelopeEncryption {
     try {
       // Decrypt with old envelope
       const { data } = await this.decrypt(envelope);
-      
+
       // Re-encrypt with new KEK
       const newEnvelope = await this.encrypt(data);
 
@@ -233,7 +232,7 @@ export class EnvelopeEncryption {
   parse(serialized: string): Envelope {
     try {
       const envelope = JSON.parse(serialized) as Envelope;
-      
+
       // Validate envelope structure
       if (envelope.version !== ENVELOPE_VERSION) {
         throw new Error(`Unsupported envelope version: ${envelope.version}`);
@@ -241,7 +240,7 @@ export class EnvelopeEncryption {
       if (!envelope.encryptedDek || !envelope.encryptedData) {
         throw new Error('Invalid envelope: missing encrypted fields');
       }
-      
+
       return envelope;
     } catch (error: any) {
       throw new Error(`Failed to parse envelope: ${error.message}`);
@@ -268,7 +267,7 @@ export class EnvelopeEncryption {
 
   private logAudit(entry: CryptoAuditLog): void {
     this.auditLogs.push(entry);
-    
+
     // Keep only recent logs
     if (this.auditLogs.length > this.maxAuditLogs) {
       this.auditLogs = this.auditLogs.slice(-this.maxAuditLogs);
@@ -284,9 +283,7 @@ export class EnvelopeEncryption {
 /**
  * Create envelope encryption instance from configuration
  */
-export async function createEnvelopeEncryption(
-  provider: KMSProvider
-): Promise<EnvelopeEncryption> {
+export async function createEnvelopeEncryption(provider: KMSProvider): Promise<EnvelopeEncryption> {
   const encryption = new EnvelopeEncryption(provider);
   await encryption.initialize();
   return encryption;

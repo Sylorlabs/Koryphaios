@@ -1,0 +1,481 @@
+{
+  "name": "error-debugging-mcp-server-windsurf",
+  "displayName": "Error Debugging MCP Server for Windsurf",
+  "description": "Advanced error detection, debugging, and performance monitoring with AI-powered insights for Windsurf IDE",
+  "version": "1.0.0",
+  "publisher": "error-debugging-mcp",
+  "engines": {
+    "windsurf": "^1.0.0"
+  },
+  "categories": ["Debuggers", "Linters", "Profilers", "AI Tools", "Other"],
+  "keywords": [
+    "error-detection",
+    "advanced-debugging",
+    "performance-analysis",
+    "memory-profiling",
+    "ai-insights",
+    "mcp",
+    "typescript",
+    "javascript",
+    "python",
+    "go",
+    "rust",
+    "collaborative-debugging",
+    "visual-debugging"
+  ],
+  "activationEvents": [
+    "onLanguage:typescript",
+    "onLanguage:javascript",
+    "onLanguage:python",
+    "onLanguage:go",
+    "onLanguage:rust",
+    "onCommand:windsurf.errorDebugging.start",
+    "onCommand:windsurf.errorDebugging.createAdvancedSession",
+    "onDebug"
+  ],
+  "main": "./dist/integrations/windsurf-extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "windsurf.errorDebugging.start",
+        "title": "Start Advanced Error Debugging",
+        "category": "Windsurf Debug",
+        "icon": "$(debug-start)"
+      },
+      {
+        "command": "windsurf.errorDebugging.stop",
+        "title": "Stop Advanced Error Debugging",
+        "category": "Windsurf Debug",
+        "icon": "$(debug-stop)"
+      },
+      {
+        "command": "windsurf.errorDebugging.createAdvancedSession",
+        "title": "Create Advanced Debug Session",
+        "category": "Windsurf Debug",
+        "icon": "$(debug-configure)"
+      },
+      {
+        "command": "windsurf.errorDebugging.analyzeDocument",
+        "title": "Analyze Document (Advanced)",
+        "category": "Windsurf Debug",
+        "icon": "$(search)"
+      },
+      {
+        "command": "windsurf.errorDebugging.profileMemory",
+        "title": "Profile Memory Usage",
+        "category": "Windsurf Debug",
+        "icon": "$(graph)"
+      },
+      {
+        "command": "windsurf.errorDebugging.analyzeNetwork",
+        "title": "Analyze Network Performance",
+        "category": "Windsurf Debug",
+        "icon": "$(globe)"
+      },
+      {
+        "command": "windsurf.errorDebugging.securityScan",
+        "title": "Security Vulnerability Scan",
+        "category": "Windsurf Debug",
+        "icon": "$(shield)"
+      },
+      {
+        "command": "windsurf.errorDebugging.aiInsights",
+        "title": "Get AI-Powered Insights",
+        "category": "Windsurf Debug",
+        "icon": "$(lightbulb)"
+      },
+      {
+        "command": "windsurf.errorDebugging.collaborativeDebug",
+        "title": "Start Collaborative Debugging",
+        "category": "Windsurf Debug",
+        "icon": "$(live-share)"
+      },
+      {
+        "command": "windsurf.errorDebugging.visualDebugger",
+        "title": "Open Visual Debugger",
+        "category": "Windsurf Debug",
+        "icon": "$(eye)"
+      },
+      {
+        "command": "windsurf.analyzeFunction",
+        "title": "Analyze Function Performance",
+        "category": "Windsurf Debug"
+      },
+      {
+        "command": "windsurf.setDebugPoint",
+        "title": "Set Advanced Debug Point",
+        "category": "Windsurf Debug"
+      },
+      {
+        "command": "windsurf.analyzeMemory",
+        "title": "Analyze Memory Usage",
+        "category": "Windsurf Debug"
+      }
+    ],
+    "menus": {
+      "editor/context": [
+        {
+          "submenu": "windsurf.errorDebugging.context",
+          "when": "editorTextFocus && resourceExtname =~ /\\.(ts|js|py|go|rs)$/",
+          "group": "1_modification@1"
+        }
+      ],
+      "windsurf.errorDebugging.context": [
+        {
+          "command": "windsurf.errorDebugging.analyzeDocument",
+          "when": "editorTextFocus",
+          "group": "1_analysis@1"
+        },
+        {
+          "command": "windsurf.errorDebugging.profileMemory",
+          "when": "editorTextFocus",
+          "group": "1_analysis@2"
+        },
+        {
+          "command": "windsurf.errorDebugging.securityScan",
+          "when": "editorTextFocus",
+          "group": "1_analysis@3"
+        },
+        {
+          "command": "windsurf.errorDebugging.aiInsights",
+          "when": "editorTextFocus",
+          "group": "2_ai@1"
+        },
+        {
+          "command": "windsurf.errorDebugging.createAdvancedSession",
+          "when": "editorTextFocus",
+          "group": "3_debug@1"
+        },
+        {
+          "command": "windsurf.errorDebugging.visualDebugger",
+          "when": "editorTextFocus",
+          "group": "3_debug@2"
+        }
+      ],
+      "editor/title": [
+        {
+          "command": "windsurf.errorDebugging.analyzeDocument",
+          "when": "resourceExtname =~ /\\.(ts|js|py|go|rs)$/",
+          "group": "navigation@1"
+        },
+        {
+          "command": "windsurf.errorDebugging.aiInsights",
+          "when": "resourceExtname =~ /\\.(ts|js|py|go|rs)$/",
+          "group": "navigation@2"
+        }
+      ],
+      "debug/toolbar": [
+        {
+          "command": "windsurf.errorDebugging.profileMemory",
+          "when": "debugState == 'running'",
+          "group": "navigation@1"
+        },
+        {
+          "command": "windsurf.errorDebugging.analyzeNetwork",
+          "when": "debugState == 'running'",
+          "group": "navigation@2"
+        },
+        {
+          "command": "windsurf.errorDebugging.visualDebugger",
+          "when": "debugState != 'inactive'",
+          "group": "navigation@3"
+        }
+      ],
+      "view/title": [
+        {
+          "command": "windsurf.errorDebugging.collaborativeDebug",
+          "when": "view == windsurf.errorDebugging.sessions",
+          "group": "navigation@1"
+        }
+      ]
+    },
+    "submenus": [
+      {
+        "id": "windsurf.errorDebugging.context",
+        "label": "Advanced Error Debugging"
+      }
+    ],
+    "keybindings": [
+      {
+        "command": "windsurf.errorDebugging.analyzeDocument",
+        "key": "ctrl+shift+alt+a",
+        "mac": "cmd+shift+alt+a",
+        "when": "editorTextFocus"
+      },
+      {
+        "command": "windsurf.errorDebugging.profileMemory",
+        "key": "ctrl+shift+alt+m",
+        "mac": "cmd+shift+alt+m",
+        "when": "editorTextFocus"
+      },
+      {
+        "command": "windsurf.errorDebugging.aiInsights",
+        "key": "ctrl+shift+alt+i",
+        "mac": "cmd+shift+alt+i",
+        "when": "editorTextFocus"
+      },
+      {
+        "command": "windsurf.errorDebugging.visualDebugger",
+        "key": "ctrl+shift+alt+v",
+        "mac": "cmd+shift+alt+v",
+        "when": "editorTextFocus"
+      }
+    ],
+    "configuration": {
+      "title": "Windsurf Error Debugging",
+      "properties": {
+        "windsurf.errorDebugging.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable advanced error debugging features"
+        },
+        "windsurf.errorDebugging.advancedFeatures": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable advanced debugging features"
+        },
+        "windsurf.errorDebugging.realTimeDebugging": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable real-time debugging capabilities"
+        },
+        "windsurf.errorDebugging.performanceAnalysis": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable performance analysis and profiling"
+        },
+        "windsurf.errorDebugging.codeIntelligence": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable code intelligence features (inlay hints, code lenses)"
+        },
+        "windsurf.errorDebugging.collaborativeDebugging": {
+          "type": "boolean",
+          "default": false,
+          "description": "Enable collaborative debugging features"
+        },
+        "windsurf.errorDebugging.visualDebugging": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable visual debugging interface"
+        },
+        "windsurf.errorDebugging.memoryProfiling": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable memory profiling and leak detection"
+        },
+        "windsurf.errorDebugging.networkAnalysis": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable network request analysis"
+        },
+        "windsurf.errorDebugging.securityScanning": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable security vulnerability scanning"
+        },
+        "windsurf.errorDebugging.aiPoweredInsights": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable AI-powered code insights and suggestions"
+        },
+        "windsurf.errorDebugging.serverConfig": {
+          "type": "object",
+          "default": {
+            "host": "localhost",
+            "port": 3000,
+            "timeout": 30000
+          },
+          "description": "MCP server connection configuration"
+        },
+        "windsurf.errorDebugging.debugConfig": {
+          "type": "object",
+          "default": {
+            "maxConcurrentSessions": 5,
+            "sessionTimeout": 1800000,
+            "enableHotReload": true,
+            "enableSourceMaps": true
+          },
+          "description": "Debug session configuration"
+        },
+        "windsurf.errorDebugging.performanceConfig": {
+          "type": "object",
+          "default": {
+            "monitoringInterval": 5000,
+            "memoryThreshold": 512,
+            "cpuThreshold": 80,
+            "enableProfiling": true,
+            "profilingDuration": 60000
+          },
+          "description": "Performance monitoring configuration"
+        },
+        "windsurf.errorDebugging.aiConfig": {
+          "type": "object",
+          "default": {
+            "enableContextSharing": true,
+            "confidenceThreshold": 0.8,
+            "maxSuggestions": 5,
+            "enableLearning": true
+          },
+          "description": "AI insights configuration"
+        },
+        "windsurf.errorDebugging.visualConfig": {
+          "type": "object",
+          "default": {
+            "theme": "dark",
+            "showCallGraph": true,
+            "showMemoryGraph": true,
+            "showPerformanceMetrics": true,
+            "enableAnimations": true
+          },
+          "description": "Visual debugger configuration"
+        }
+      }
+    },
+    "views": {
+      "debug": [
+        {
+          "id": "windsurf.errorDebugging.sessions",
+          "name": "Advanced Debug Sessions",
+          "when": "windsurf.errorDebugging.active"
+        },
+        {
+          "id": "windsurf.errorDebugging.performance",
+          "name": "Performance Monitor",
+          "when": "windsurf.errorDebugging.active"
+        },
+        {
+          "id": "windsurf.errorDebugging.memory",
+          "name": "Memory Profiler",
+          "when": "windsurf.errorDebugging.active"
+        },
+        {
+          "id": "windsurf.errorDebugging.network",
+          "name": "Network Analysis",
+          "when": "windsurf.errorDebugging.active"
+        },
+        {
+          "id": "windsurf.errorDebugging.security",
+          "name": "Security Scanner",
+          "when": "windsurf.errorDebugging.active"
+        },
+        {
+          "id": "windsurf.errorDebugging.insights",
+          "name": "AI Insights",
+          "when": "windsurf.errorDebugging.active"
+        }
+      ]
+    },
+    "viewsWelcome": [
+      {
+        "view": "windsurf.errorDebugging.sessions",
+        "contents": "No active debug sessions.\n[Start Advanced Debugging](command:windsurf.errorDebugging.start)\n[Create Debug Session](command:windsurf.errorDebugging.createAdvancedSession)"
+      }
+    ],
+    "debuggers": [
+      {
+        "type": "windsurf-advanced",
+        "label": "Windsurf Advanced Debugger",
+        "languages": ["typescript", "javascript", "python", "go", "rust"],
+        "configurationAttributes": {
+          "launch": {
+            "required": ["program"],
+            "properties": {
+              "program": {
+                "type": "string",
+                "description": "Absolute path to the program"
+              },
+              "args": {
+                "type": "array",
+                "description": "Command line arguments",
+                "default": []
+              },
+              "cwd": {
+                "type": "string",
+                "description": "Absolute path to the working directory"
+              },
+              "env": {
+                "type": "object",
+                "description": "Environment variables"
+              },
+              "enablePerformanceMonitoring": {
+                "type": "boolean",
+                "description": "Enable performance monitoring",
+                "default": true
+              },
+              "enableMemoryProfiling": {
+                "type": "boolean",
+                "description": "Enable memory profiling",
+                "default": true
+              },
+              "enableNetworkAnalysis": {
+                "type": "boolean",
+                "description": "Enable network analysis",
+                "default": true
+              },
+              "enableAIInsights": {
+                "type": "boolean",
+                "description": "Enable AI-powered insights",
+                "default": true
+              }
+            }
+          }
+        },
+        "configurationSnippets": [
+          {
+            "label": "Windsurf: Launch Advanced Debug",
+            "description": "Launch program with advanced debugging features",
+            "body": {
+              "type": "windsurf-advanced",
+              "request": "launch",
+              "name": "Advanced Debug",
+              "program": "${workspaceFolder}/${1:app.js}",
+              "enablePerformanceMonitoring": true,
+              "enableMemoryProfiling": true,
+              "enableNetworkAnalysis": true,
+              "enableAIInsights": true
+            }
+          }
+        ]
+      }
+    ],
+    "problemMatchers": [
+      {
+        "name": "windsurf-advanced",
+        "owner": "windsurf-errorDebugging",
+        "fileLocation": ["relative", "${workspaceFolder}"],
+        "pattern": {
+          "regexp": "^(.*):(\\d+):(\\d+):\\s+(error|warning|info):\\s+(.*)\\s+\\[(.*)\\]$",
+          "file": 1,
+          "line": 2,
+          "column": 3,
+          "severity": 4,
+          "message": 5,
+          "code": 6
+        }
+      }
+    ]
+  },
+  "scripts": {
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "package": "windsurf package",
+    "publish": "windsurf publish"
+  },
+  "devDependencies": {
+    "@types/node": "^18.0.0",
+    "typescript": "^5.0.0"
+  },
+  "dependencies": {
+    "error-debugging-mcp-server": "^1.0.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/your-org/error-debugging-mcp-server.git"
+  },
+  "bugs": {
+    "url": "https://github.com/your-org/error-debugging-mcp-server/issues"
+  },
+  "homepage": "https://github.com/your-org/error-debugging-mcp-server#readme",
+  "license": "MIT"
+}
