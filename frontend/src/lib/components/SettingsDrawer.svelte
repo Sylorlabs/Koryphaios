@@ -1,7 +1,8 @@
 <script lang="ts">
-  import { onDestroy } from 'svelte';
+  import { onDestroy, tick } from 'svelte';
+  import { open as openExternal } from '@tauri-apps/plugin-shell';
   import { wsStore } from '$lib/stores/websocket.svelte';
-  import { theme } from '$lib/stores/theme.svelte';
+  import { theme, type ThemePreset, type AccentColor, type FontFamily } from '$lib/stores/theme.svelte';
   import { toastStore } from '$lib/stores/toast.svelte';
   import {
     Key,
@@ -22,13 +23,31 @@
     AlertTriangle,
     Brain,
     Bot,
+    FlaskConical,
+    Sparkles,
+    Terminal,
+    Users,
+    Send,
+    MessageSquare,
+    Slack,
+    Type,
+    RotateCcw,
+    Save,
+    GripVertical,
   } from 'lucide-svelte';
   import MemoryEditor from './MemoryEditor.svelte';
   import AgentSettings from './AgentSettings.svelte';
+  import ExperimentalSettings from './ExperimentalSettings.svelte';
+  import ProviderIcon from './icons/ProviderIcon.svelte';
   import { memoryStore } from '$lib/stores/memory.svelte';
   import { agentSettingsStore } from '$lib/stores/agent-settings.svelte';
+  import { experimentalStore } from '$lib/stores/experimental.svelte';
+  import { collaborationStore } from '$lib/stores/collaboration.svelte';
+  import { modeStore } from '$lib/stores/mode.svelte';
   import ModelSelectionDialog from './ModelSelectionDialog.svelte';
+  import ModeToggle from './ModeToggle.svelte';
   import { apiFetch, parseJsonResponse } from '$lib/api.svelte';
+  import { dndzone } from 'svelte-dnd-action';
 
   interface Props {
     open?: boolean;
@@ -36,33 +55,85 @@
   }
 
   let { open = false, onClose }: Props = $props();
-  let activeTab = $state<'providers' | 'appearance' | 'shortcuts' | 'messaging' | 'billing' | 'memory' | 'agent'>('providers');
+  let activeTab = $state<'providers' | 'appearance' | 'shortcuts' | 'messaging' | 'billing' | 'memory' | 'agent' | 'experimental' | 'teams'>('providers');
 
   let showModelSelector = $state(false);
   let selectorTarget = $state<any>(null);
   let showRotateDialog = $state(false);
   let rotateProvider = $state<{ name: string; keyType: 'apiKey' | 'authToken' } | null>(null);
+  let showCodexProfileDialog = $state(false);
+  let codexProfileInput = $state('');
+  let codexProfileInputRef = $state<HTMLInputElement | null>(null);
+  let pendingCodexAuthOptions = $state<{ saveAccount?: boolean; label?: string } | null>(null);
+  let showAccountManageDialog = $state(false);
+  let managingAccountProvider = $state<string | null>(null);
+  let managingAccountId = $state<string | null>(null);
+  let managingAccountLabel = $state('');
+  let managingAccountSaving = $state(false);
   let newKeyValue = $state('');
+  let rotateKeyInput = $state<HTMLInputElement | null>(null);
+
+  $effect(() => {
+    if (showRotateDialog) {
+      void tick().then(() => rotateKeyInput?.focus());
+    }
+  });
+
+  $effect(() => {
+    if (showCodexProfileDialog) {
+      void tick().then(() => codexProfileInputRef?.focus());
+    }
+  });
 
   function handleKeydown(e: KeyboardEvent) {
     if (e.key === 'Escape' && open && onClose) onClose();
   }
 
   // ─── Provider Management ──────────────────────────────────────────────
-  // Only show providers the user has authenticated (from backend). No hardcoded list.
-  // Display labels for provider names (used when a provider appears in the list or in Add dropdown).
   const PROVIDER_LABELS: Record<string, string> = {
-    anthropic: 'Anthropic', cline: 'Cline', openai: 'OpenAI', google: 'Google', xai: 'xAI',
+    anthropic: 'Anthropic', openai: 'OpenAI', google: 'Google', xai: 'xAI',
     openrouter: 'OpenRouter', groq: 'Groq', copilot: 'GitHub Copilot', azure: 'Azure OpenAI',
     bedrock: 'AWS Bedrock', vertexai: 'Vertex AI', local: 'Local (custom endpoint)', ollama: 'Ollama',
     lmstudio: 'LM Studio', llamacpp: 'Llama.cpp', opencodezen: 'OpenCodeZen',
+    claude: 'Claude Code', codex: 'OpenAI Codex', kimicode: 'Kimi Code',
+    moonshot: 'Moonshot AI / Kimi API', mistral: 'Mistral AI',
   };
 
   let availableProviderTypes = $state<Array<{ name: string; authMode: string }>>([]);
   let providersLoadAttempted = $state(false);
+  let lastInitializedTab = $state<typeof activeTab | null>(null);
+  const tokenPlaceholders: Record<string, string> = {
+    anthropic: 'Anthropic auth token',
+    copilot: 'GitHub token or Copilot auth token',
+    google: 'OAuth or access token',
+    kimicode: 'Auth with Kimi Code',
+    azure: 'Bearer token',
+  };
+
+  interface StoredProviderAccount {
+    id: string;
+    provider: string;
+    label: string;
+    createdAt: number;
+    updatedAt: number;
+    hasApiKey: boolean;
+    hasAuthToken: boolean;
+    hasBaseUrl: boolean;
+  }
+
+  type SavedAccountSummary = {
+    id: string;
+    provider: string;
+    label: string;
+  };
 
   function getProviderDisplayLabel(name: string): string {
     return PROVIDER_LABELS[name] ?? (name.charAt(0).toUpperCase() + name.slice(1));
+  }
+
+  function getKnownAuthMode(name: string, fallback: string): string {
+    if (name === 'copilot' || name === 'codex' || name === 'kimicode' || name === 'claude') return 'auth_only';
+    return fallback;
   }
 
   async function loadAvailableProviders() {
@@ -77,286 +148,672 @@
     }
   }
 
-  // Build one clean list from all provider types (API). Status comes from wsStore per row.
   const providerList = $derived.by(() => {
-    const types = availableProviderTypes.length > 0 ? availableProviderTypes : (wsStore.providers ?? []).map((p) => ({ name: p.name, authMode: (p as { authMode?: string }).authMode ?? 'api_key' }));
+    const types = availableProviderTypes.length > 0
+      ? availableProviderTypes.map((type) => ({
+          ...type,
+          authMode: getKnownAuthMode(type.name, type.authMode ?? 'api_key'),
+        }))
+      : (wsStore.providers ?? []).map((p) => ({
+          name: p.name,
+          authMode: getKnownAuthMode(
+            p.name,
+            (p as { authMode?: string }).authMode ?? 'api_key',
+          ),
+        }));
     
-    // Provider label mappings
     const providerLabels: Record<string, string> = {
-      anthropic: 'Anthropic',
-      cline: 'Cline',
-      openai: 'OpenAI',
-      google: 'Google',
-      xai: 'xAI',
-      openrouter: 'OpenRouter',
-      groq: 'Groq',
-      copilot: 'GitHub Copilot',
-      azure: 'Azure OpenAI',
-      bedrock: 'AWS Bedrock',
-      vertexai: 'Vertex AI',
-      local: 'Local (custom endpoint)',
-      ollama: 'Ollama',
-      lmstudio: 'LM Studio',
-      llamacpp: 'Llama.cpp',
-      ollamacloud: 'Ollama Cloud',
-      deepseek: 'DeepSeek',
-      minimax: 'MiniMax',
-      moonshot: 'Moonshot AI',
-      zai: 'ZAI',
-      cortecs: 'Cortecs',
-      stepfun: 'StepFun',
-      cerebras: 'Cerebras',
-      fireworks: 'Fireworks AI',
-      deepinfra: 'DeepInfra',
-      ionet: 'IO.net',
-      hyperbolic: 'Hyperbolic',
-      huggingface: 'HuggingFace',
-      replicate: 'Replicate',
-      modal: 'Modal',
-      vercel: 'Vercel',
-      cloudflare: 'Cloudflare',
-      cloudflareworkers: 'Cloudflare Workers',
-      baseten: 'Baseten',
-      helicone: 'Helicone',
-      portkey: 'Portkey',
-      scaleway: 'Scaleway',
-      ovhcloud: 'OVHcloud',
-      stackit: 'STACKIT',
-      nebius: 'Nebius',
-      togetherai: 'Together AI',
-      venice: 'Venice AI',
-      zenmux: 'ZenMux',
-      opencodezen: 'OpenCodeZen',
-      firmware: 'Firmware',
-      '302ai': '302.ai',
-      mistralai: 'Mistral AI',
-      cohere: 'Cohere',
-      perplexity: 'Perplexity',
-      luma: 'Luma',
-      fal: 'Fal',
-      elevenlabs: 'ElevenLabs',
-      assemblyai: 'AssemblyAI',
-      deepgram: 'Deepgram',
-      gladia: 'Gladia',
-      lmnt: 'LMNT',
-      azurecognitive: 'Azure Cognitive',
-      sapai: 'SAP AI',
-      gitlab: 'GitLab',
-      nvidia: 'NVIDIA',
-      nim: 'NIM',
-      friendliai: 'FriendliAI',
-      voyageai: 'VoyageAI',
-      mixedbread: 'Mixedbread',
-      mem0: 'Mem0',
-      letta: 'Letta',
-      qwen: 'Qwen',
-      alibaba: 'Alibaba',
-      chromeai: 'ChromeAI',
-      requesty: 'Requesty',
-      aihubmix: 'AIHubMix',
-      aimlapi: 'AIMLAPI',
-      blackforestlabs: 'Black Forest Labs',
-      klingai: 'KlingAI',
-      prodia: 'Prodia',
-
-      antigravity: 'Antigravity',
-      novita: 'Novita',
-      banbri: 'Banbri',
+      anthropic: 'Anthropic', openai: 'OpenAI', google: 'Google', xai: 'xAI',
+      openrouter: 'OpenRouter', groq: 'Groq', copilot: 'GitHub Copilot', azure: 'Azure OpenAI',
+      bedrock: 'AWS Bedrock', vertexai: 'Vertex AI', local: 'Local (custom endpoint)', ollama: 'Ollama',
+      lmstudio: 'LM Studio', llamacpp: 'Llama.cpp', ollamacloud: 'Ollama Cloud',
+      deepseek: 'DeepSeek', kimicode: 'Kimi Code', minimax: 'MiniMax', moonshot: 'Moonshot AI / Kimi API',
+      zai: 'ZAI', stepfun: 'StepFun', cerebras: 'Cerebras',
+      fireworks: 'Fireworks AI', deepinfra: 'DeepInfra', ionet: 'IO.net',
+      hyperbolic: 'Hyperbolic', huggingface: 'HuggingFace', replicate: 'Replicate',
+      modal: 'Modal', vercel: 'Vercel', cloudflare: 'Cloudflare',
+      cloudflareworkers: 'Cloudflare Workers', baseten: 'Baseten', helicone: 'Helicone',
+      portkey: 'Portkey', scaleway: 'Scaleway', ovhcloud: 'OVHcloud', stackit: 'STACKIT',
+      nebius: 'Nebius', togetherai: 'Together AI', venice: 'Venice AI', zenmux: 'ZenMux',
+      opencodezen: 'OpenCodeZen', firmware: 'Firmware', '302ai': '302.ai',
+      claude: 'Claude Code', codex: 'OpenAI Codex', mistral: 'Mistral AI',
+      mistralai: 'Mistral AI', cohere: 'Cohere', perplexity: 'Perplexity',
+      luma: 'Luma', fal: 'Fal', elevenlabs: 'ElevenLabs', assemblyai: 'AssemblyAI',
+      deepgram: 'Deepgram', gladia: 'Gladia', lmnt: 'LMNT', azurecognitive: 'Azure Cognitive',
+      sapai: 'SAP AI', gitlab: 'GitLab', nvidia: 'NVIDIA', nim: 'NIM',
+      friendliai: 'FriendliAI', voyageai: 'VoyageAI', mixedbread: 'Mixedbread',
+      mem0: 'Mem0', letta: 'Letta', qwen: 'Qwen', alibaba: 'Alibaba',
+      chromeai: 'ChromeAI', requesty: 'Requesty', aihubmix: 'AIHubMix',
+      aimlapi: 'AIMLAPI', blackforestlabs: 'Black Forest Labs', klingai: 'KlingAI',
+      prodia: 'Prodia', novita: 'Novita', banbri: 'Banbri',
     };
 
-    // Provider placeholder mappings
     const providerPlaceholders: Record<string, string> = {
-      anthropic: 'sk-ant-...',
-      cline: 'Must have authed with CLI first',
-      openai: 'sk-...',
-      google: 'AIza...',
-      xai: 'xai-...',
-      openrouter: 'sk-or-...',
-
-      groq: 'gsk_...',
-      copilot: 'gho_...',
-      azure: 'key...',
-      bedrock: 'AKIA...',
-      vertexai: '/path/to/creds.json',
-      local: 'http://localhost:1234',
-      ollama: 'http://localhost:11434',
-      lmstudio: 'http://localhost:1234',
-      llamacpp: 'http://localhost:8080',
-      ollamacloud: 'sk-...',
-      deepseek: 'sk-...',
-      minimax: 'sk-...',
-      moonshot: 'sk-...',
-      zai: 'sk-...',
-      cortecs: 'sk-...',
-      stepfun: 'sk-...',
-      cerebras: 'sk-...',
-      fireworks: 'sk-...',
-      deepinfra: 'sk-...',
-      ionet: 'sk-...',
-      hyperbolic: 'sk-...',
-      huggingface: 'hf_...',
-      replicate: 'r8_...',
-      modal: 'md-...',
-      vercel: '...',
-      cloudflare: '...',
-      cloudflareworkers: '...',
-      baseten: '...',
-      helicone: 'sk-...',
-      portkey: 'sk-...',
-      scaleway: 'scw_...',
-      ovhcloud: 'ovh-...',
-      stackit: '...',
-      nebius: '',
-      togetherai: 'sk-...',
-      venice: 'sk-...',
-      zenmux: 'sk-...',
-      opencodezen: 'Get key at opencode.ai/auth',
-      firmware: 'sk-...',
-      '302ai': 'sk-...',
-      mistralai: 'sk-...',
-      cohere: 'sk-...',
-      perplexity: 'pplx-...',
-      luma: 'lm-...',
-      fal: 'sk-...',
-      elevenlabs: 'sk-...',
-      assemblyai: 'sk-...',
-      deepgram: 'sk-...',
-      gladia: 'sk-...',
-      lmnt: 'sk-...',
-      azurecognitive: 'sk-...',
-      sapai: 'sk-...',
-      gitlab: 'glpat-...',
-      nvidia: 'nvapi-...',
-      nim: 'nvapi-...',
-      friendliai: '',
-      voyageai: 'sk-...',
-      mixedbread: 'sk-...',
-      mem0: 'm0-...',
-      letta: 'lt-...',
-      qwen: 'sk-...',
-      alibaba: 'sk-...',
-      chromeai: '',
-      requesty: 'sk-...',
-      aihubmix: 'sk-...',
-      aimlapi: 'sk-...',
-      blackforestlabs: 'sk-...',
-      klingai: 'sk-...',
-      prodia: 'sk-...',
-  
-      antigravity: 'sk-...',
-      novita: 'sk-...',
-      banbri: 'sk-...',
+      anthropic: 'sk-ant-...', openai: 'sk-...',
+      google: 'AIza...', xai: 'xai-...', openrouter: 'sk-or-...', groq: 'gsk_...',
+      copilot: 'gho_...', azure: 'key...', bedrock: 'AKIA...', vertexai: '/path/to/creds.json',
+      local: 'http://localhost:1234', ollama: 'http://localhost:11434', lmstudio: 'http://localhost:1234',
+      llamacpp: 'http://localhost:8080', ollamacloud: 'sk-...', deepseek: 'sk-...',
+      kimicode: 'Auth with Kimi Code', minimax: 'sk-...', moonshot: 'sk-...', zai: 'sk-...',
+      stepfun: 'sk-...', cerebras: 'sk-...', fireworks: 'sk-...', deepinfra: 'sk-...',
+      ionet: 'sk-...', hyperbolic: 'sk-...', huggingface: 'hf_...', replicate: 'r8_...',
+      modal: 'md-...', vercel: '...', cloudflare: '...', cloudflareworkers: '...',
+      baseten: '...', helicone: 'sk-...', portkey: 'sk-...', scaleway: 'scw_...',
+      ovhcloud: 'ovh-...', stackit: '...', nebius: '', togetherai: 'sk-...',
+      venice: 'sk-...', zenmux: 'sk-...', opencodezen: 'Get key at opencode.ai/auth',
+      firmware: 'sk-...', '302ai': 'sk-...', mistralai: 'sk-...',
+      claude: 'Claude auth token', codex: 'Auth with ChatGPT',
+      mistral: 'sk-...', cohere: 'sk-...', perplexity: 'pplx-...', luma: 'lm-...',
+      fal: 'sk-...', elevenlabs: 'sk-...', assemblyai: 'sk-...', deepgram: 'sk-...',
+      gladia: 'sk-...', lmnt: 'sk-...', azurecognitive: 'sk-...', sapai: 'sk-...',
+      gitlab: 'glpat-...', nvidia: 'nvapi-...', nim: 'nvapi-...', friendliai: '',
+      voyageai: 'sk-...', mixedbread: 'sk-...', mem0: 'm0-...', letta: 'lt-...',
+      qwen: 'sk-...', alibaba: 'sk-...', chromeai: '', requesty: 'sk-...',
+      aihubmix: 'sk-...', aimlapi: 'sk-...', blackforestlabs: 'sk-...',
+      klingai: 'sk-...', prodia: 'sk-...', novita: 'sk-...', banbri: 'sk-...',
     };
 
-    // Providers that require a base URL
-    const providersNeedingUrl = new Set([
-      'local', 'ollama', 'lmstudio', 'llamacpp', 'azure'
-    ]);
+    const providersNeedingUrl = new Set(['local', 'ollama', 'lmstudio', 'llamacpp', 'azure']);
 
-    // One list: all provider types (from API), sorted — same nice list as before
-    const providers = types.map((type) => ({
+    return types.map((type) => ({
       key: type.name,
       label: providerLabels[type.name] || type.name.charAt(0).toUpperCase() + type.name.slice(1),
       placeholder: providerPlaceholders[type.name] || 'API key...',
       needsUrl: providersNeedingUrl.has(type.name),
-    }));
-
-    return providers.sort((a, b) => a.label.localeCompare(b.label));
+    })).sort((a, b) => a.label.localeCompare(b.label));
   });
 
   $effect(() => {
     if (!open) {
       providersLoadAttempted = false;
+      lastInitializedTab = null;
       return;
     }
-    if (activeTab === 'providers' && availableProviderTypes.length === 0 && !providersLoadAttempted) {
-      providersLoadAttempted = true;
-      void loadAvailableProviders();
+
+    if (activeTab === 'providers') {
+      if (availableProviderTypes.length === 0 && !providersLoadAttempted) {
+        providersLoadAttempted = true;
+        void loadAvailableProviders();
+      }
+    } else {
+      // Reset so navigating back to providers re-loads fresh
+      providersLoadAttempted = false;
     }
-    if (activeTab === 'memory') {
-      void memoryStore.loadAllMemory();
-    }
-    if (activeTab === 'agent') {
-      void agentSettingsStore.loadAll();
-    }
+
+    if (activeTab === lastInitializedTab) return;
+    lastInitializedTab = activeTab;
+
+    if (activeTab === 'memory') void memoryStore.loadAllMemory();
+    if (activeTab === 'agent') void agentSettingsStore.loadAll();
+    if (activeTab === 'experimental') void experimentalStore.loadAll();
+    if (activeTab === 'messaging') void loadMessaging();
   });
 
   let providerSearchQuery = $state('');
   const filteredProviderList = $derived.by(() => {
     const q = providerSearchQuery.trim().toLowerCase();
     if (!q) return providerList;
-    return providerList.filter(
-      (p) =>
-        p.label.toLowerCase().includes(q) ||
-        p.key.toLowerCase().includes(q)
-    );
+    return providerList.filter(p => p.label.toLowerCase().includes(q) || p.key.toLowerCase().includes(q));
   });
 
   let expandedProvider = $state<string | null>(null);
   let keyInputs = $state<Record<string, string>>({});
   let tokenInputs = $state<Record<string, string>>({});
   let urlInputs = $state<Record<string, string>>({});
+  let accountLabelInputs = $state<Record<string, string>>({});
+  let accountKeyInputs = $state<Record<string, string>>({});
+  let accountTokenInputs = $state<Record<string, string>>({});
+  let accountUrlInputs = $state<Record<string, string>>({});
+  let providerAccounts = $state<Record<string, StoredProviderAccount[]>>({});
+  let accountsLoading = $state<Record<string, boolean>>({});
+  let accountBusy = $state<string | null>(null);
+  let fallbackOrders = $state<Record<string, string[]>>({});
+  let fallbackItems = $state<Record<string, StoredProviderAccount[]>>({});
+  let fallbackSaving = $state<string | null>(null);
   let saving = $state<string | null>(null);
   let verifying = $state<string | null>(null);
+  let browserAuthBusy = $state<string | null>(null);
+  let browserAuthPending = $state<Record<string, boolean>>({});
+  let browserAuthMessages = $state<Record<string, string>>({});
   let copiedEndpoint = $state(false);
+  let copiedDeviceCode = $state<string | null>(null);
+  let copiedDeviceUrl = $state<string | null>(null);
   const authPortalUrls: Record<string, string> = {
     anthropic: 'https://console.anthropic.com',
-
     bedrock: 'https://signin.aws.amazon.com/',
+    kimicode: 'https://www.kimi.com/code',
     vertexai: 'https://console.cloud.google.com/',
-
     opencodezen: 'https://opencode.ai/auth',
   };
-  let copilotDeviceAuth = $state<{
-    deviceCode: string;
-    userCode: string;
-    verificationUri: string;
-    verificationUriComplete?: string;
-    expiresAt: number;
-    intervalMs: number;
-  } | null>(null);
+  let copilotDeviceAuth = $state<{ deviceCode: string; userCode: string; verificationUri: string; verificationUriComplete?: string; expiresAt: number; intervalMs: number } | null>(null);
   let copilotAuthStatus = $state<'idle' | 'pending' | 'connected' | 'error'>('idle');
   let copilotAuthMessage = $state<string>('');
   let copilotPollTimer: ReturnType<typeof setTimeout> | null = null;
 
-  // Antigravity (Google) OAuth: start → open URL → poll until backend saves
-  let antigravityAuthId = $state<string | null>(null);
-  let antigravityAuthStatus = $state<'idle' | 'pending' | 'connected' | 'error'>('idle');
-  let antigravityAuthMessage = $state<string>('');
-  let antigravityPollTimer: ReturnType<typeof setTimeout> | null = null;
+  let kimicodeDeviceAuth = $state<{ deviceCode: string; userCode: string; verificationUri: string; verificationUriComplete?: string; expiresAt: number; intervalMs: number } | null>(null);
+  let kimicodeAuthStatus = $state<'idle' | 'pending' | 'connected' | 'error'>('idle');
+  let kimicodeAuthMessage = $state<string>('');
+  let kimicodePollTimer: ReturnType<typeof setTimeout> | null = null;
 
-  // Auth mode for providers with multiple auth options
-  let selectedAuthMode = $state<Record<string, string>>({});
+  let codexDeviceAuth = $state<{ deviceAuthId?: string; userCode: string; verificationUri: string; verificationUriComplete?: string; expiresAt: number; intervalMs: number } | null>(null);
+  let codexAuthStatus = $state<'idle' | 'pending' | 'connected' | 'error'>('idle');
+  let codexAuthMessage = $state<string>('');
+  let codexPollTimer: ReturnType<typeof setTimeout> | null = null;
+  
+  let googleDeviceAuth = $state<{ deviceCode: string; userCode: string; verificationUri: string; verificationUriComplete?: string; expiresAt: number; intervalMs: number } | null>(null);
+  let googleAuthStatus = $state<'idle' | 'pending' | 'connected' | 'error'>('idle');
+  let googleAuthMessage = $state<string>('');
+  let googlePollTimer: ReturnType<typeof setTimeout> | null = null;
+
+  const isTauri = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
+
+  const browserAuthProviders = new Set(['copilot', 'kimicode', 'codex', 'claude', 'google', 'google-subscription']);
+
+  function usesBrowserAuth(name: string): boolean {
+    return browserAuthProviders.has(name);
+  }
+
+  function showTokenInput(name: string, caps: ReturnType<typeof getProviderCaps>): boolean {
+    // Never show manual auth token input — it's horrible UX.
+    // Providers with auth tokens should use browser auth flows instead.
+    // Users who need to set auth tokens manually can use environment variables.
+    return false;
+  }
+
+  async function openAuthUrl(url: string) {
+    if (isTauri) {
+      await openExternal(url);
+      return;
+    }
+    window.open(url, '_blank', 'noopener,noreferrer');
+  }
+
+  function clearCopilotPollTimer() {
+    if (copilotPollTimer) {
+      clearTimeout(copilotPollTimer);
+      copilotPollTimer = null;
+    }
+  }
+
+  function clearKimiCodePollTimer() {
+    if (kimicodePollTimer) {
+      clearTimeout(kimicodePollTimer);
+      kimicodePollTimer = null;
+    }
+  }
+
+  async function pollCopilotAuth(deviceCode: string, intervalMs: number) {
+    clearCopilotPollTimer();
+    try {
+      const res = await apiFetch('/api/providers/copilot/auth/poll', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ deviceCode }),
+      });
+      const data = await parseJsonResponse<{
+        ok?: boolean;
+        error?: string;
+        data?: {
+          status?: string;
+          error?: string;
+          errorDescription?: string;
+          savedAccount?: SavedAccountSummary;
+        };
+      }>(res);
+
+      if (!data.ok) {
+        copilotAuthStatus = 'error';
+        copilotAuthMessage = data.error ?? 'Copilot sign-in failed';
+        browserAuthMessages.copilot = copilotAuthMessage;
+        browserAuthPending.copilot = false;
+        return;
+      }
+
+      const status = data.data?.status;
+      if (status === 'connected') {
+        copilotAuthStatus = 'connected';
+        copilotAuthMessage = 'GitHub Copilot connected';
+        browserAuthMessages.copilot = copilotAuthMessage;
+        browserAuthPending.copilot = false;
+        copilotDeviceAuth = null;
+        await syncProviderUi('copilot', {
+          openModelSelector: true,
+          successMessage: 'GitHub Copilot connected',
+        });
+        return;
+      }
+
+      const pollError = data.data?.error;
+      if (pollError && pollError !== 'authorization_pending') {
+        copilotAuthStatus = 'error';
+        copilotAuthMessage = data.data?.errorDescription ?? pollError;
+        browserAuthMessages.copilot = copilotAuthMessage;
+        browserAuthPending.copilot = false;
+        return;
+      }
+
+      copilotAuthStatus = 'pending';
+      browserAuthPending.copilot = true;
+      copilotPollTimer = setTimeout(() => {
+        void pollCopilotAuth(deviceCode, intervalMs);
+      }, intervalMs);
+    } catch (err: any) {
+      copilotAuthStatus = 'error';
+      copilotAuthMessage = err.message ?? 'Copilot sign-in failed';
+      browserAuthMessages.copilot = copilotAuthMessage;
+      browserAuthPending.copilot = false;
+    }
+  }
+
+  async function pollKimiCodeAuth(deviceCode: string, intervalMs: number) {
+    clearKimiCodePollTimer();
+    try {
+      const res = await apiFetch('/api/providers/kimicode/auth/poll', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ deviceCode }),
+      });
+      const data = await parseJsonResponse<{
+        ok?: boolean;
+        error?: string;
+        data?: {
+          status?: string;
+          error?: string;
+          errorDescription?: string;
+        };
+      }>(res);
+
+      if (!data.ok) {
+        kimicodeAuthStatus = 'error';
+        kimicodeAuthMessage = data.error ?? 'Kimi Code sign-in failed';
+        browserAuthMessages.kimicode = kimicodeAuthMessage;
+        browserAuthPending.kimicode = false;
+        return;
+      }
+
+      const status = data.data?.status;
+      if (status === 'connected') {
+        kimicodeAuthStatus = 'connected';
+        kimicodeAuthMessage = 'Kimi Code connected';
+        browserAuthMessages.kimicode = kimicodeAuthMessage;
+        browserAuthPending.kimicode = false;
+        kimicodeDeviceAuth = null;
+        await syncProviderUi('kimicode', {
+          openModelSelector: true,
+          successMessage: 'Kimi Code connected',
+        });
+        return;
+      }
+
+      const pollError = data.data?.error;
+      if (pollError && pollError !== 'authorization_pending') {
+        kimicodeAuthStatus = 'error';
+        kimicodeAuthMessage = data.data?.errorDescription ?? pollError;
+        browserAuthMessages.kimicode = kimicodeAuthMessage;
+        browserAuthPending.kimicode = false;
+        return;
+      }
+
+      kimicodeAuthStatus = 'pending';
+      browserAuthPending.kimicode = true;
+      kimicodePollTimer = setTimeout(() => {
+        void pollKimiCodeAuth(deviceCode, intervalMs);
+      }, intervalMs);
+    } catch (err: any) {
+      kimicodeAuthStatus = 'error';
+      kimicodeAuthMessage = err.message ?? 'Kimi Code sign-in failed';
+      browserAuthMessages.kimicode = kimicodeAuthMessage;
+      browserAuthPending.kimicode = false;
+    }
+  }
+
+  function clearCodexPollTimer() {
+    if (codexPollTimer) {
+      clearTimeout(codexPollTimer);
+      codexPollTimer = null;
+    }
+  }
+
+  async function pollCodexAuth(
+    deviceAuthId: string,
+    userCode: string,
+    intervalMs: number,
+    saveAccount = false,
+    label?: string,
+  ) {
+    clearCodexPollTimer();
+    try {
+      const res = await apiFetch('/api/providers/codex/auth/poll', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ deviceAuthId, userCode, saveAccount, label }),
+      });
+      const data = await parseJsonResponse<{
+        ok?: boolean;
+        error?: string;
+        data?: { status?: string; error?: string; errorDescription?: string; savedAccount?: { id: string; provider: string; label: string } };
+      }>(res);
+
+      if (!data.ok) {
+        codexAuthStatus = 'error';
+        codexAuthMessage = data.error ?? 'Codex sign-in failed';
+        browserAuthMessages.codex = codexAuthMessage;
+        browserAuthPending.codex = false;
+        return;
+      }
+
+      const status = data.data?.status;
+      if (status === 'connected') {
+        codexAuthStatus = 'connected';
+        codexAuthMessage = 'Codex connected';
+        browserAuthMessages.codex = codexAuthMessage;
+        browserAuthPending.codex = false;
+        codexDeviceAuth = null;
+        await syncProviderUi('codex', {
+          openModelSelector: true,
+          successMessage: saveAccount
+            ? `Codex profile "${data.data?.savedAccount?.label ?? label ?? 'profile'}" saved`
+            : 'Codex connected',
+        });
+        if (saveAccount) {
+          accountLabelInputs.codex = '';
+          await loadProviderAccounts('codex', true);
+          if (data.data?.savedAccount) {
+            openAccountManager('codex', data.data.savedAccount);
+          }
+        }
+        return;
+      }
+
+      const pollError = data.data?.error;
+      if (pollError && pollError !== 'authorization_pending') {
+        codexAuthStatus = 'error';
+        codexAuthMessage = data.data?.errorDescription ?? pollError;
+        browserAuthMessages.codex = codexAuthMessage;
+        browserAuthPending.codex = false;
+        return;
+      }
+
+      codexAuthStatus = 'pending';
+      browserAuthPending.codex = true;
+      codexPollTimer = setTimeout(() => {
+        void pollCodexAuth(deviceAuthId, userCode, intervalMs, saveAccount, label);
+      }, intervalMs);
+    } catch (err: any) {
+      codexAuthStatus = 'error';
+      codexAuthMessage = err.message ?? 'Codex sign-in failed';
+      browserAuthMessages.codex = codexAuthMessage;
+      browserAuthPending.codex = false;
+    }
+  }
+
+  function clearGooglePollTimer() {
+    if (googlePollTimer) {
+      clearTimeout(googlePollTimer);
+      googlePollTimer = null;
+    }
+  }
+
+  async function pollGoogleAuth(deviceCode: string, intervalMs: number) {
+    clearGooglePollTimer();
+    try {
+      const res = await apiFetch('/api/providers/google-subscription/auth/poll', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ deviceCode }),
+      });
+      const data = await parseJsonResponse<any>(res);
+
+      if (!data.ok) {
+        googleAuthStatus = 'error';
+        googleAuthMessage = data.error ?? 'Google sign-in failed';
+        browserAuthMessages['google-subscription'] = googleAuthMessage;
+        browserAuthPending['google-subscription'] = false;
+        return;
+      }
+
+      const status = data.data?.status;
+      if (status === 'connected') {
+        googleAuthStatus = 'connected';
+        googleAuthMessage = 'Google connected';
+        browserAuthMessages['google-subscription'] = googleAuthMessage;
+        browserAuthPending['google-subscription'] = false;
+        googleDeviceAuth = null;
+        await syncProviderUi('google-subscription', {
+          openModelSelector: true,
+          successMessage: 'Google connected',
+        });
+        return;
+      }
+
+      const pollError = data.data?.error;
+      if (pollError && pollError !== 'authorization_pending') {
+        googleAuthStatus = 'error';
+        googleAuthMessage = data.data?.errorDescription ?? pollError;
+        browserAuthMessages['google-subscription'] = googleAuthMessage;
+        browserAuthPending['google-subscription'] = false;
+        return;
+      }
+
+      googleAuthStatus = 'pending';
+      browserAuthPending['google-subscription'] = true;
+      googlePollTimer = setTimeout(() => {
+        void pollGoogleAuth(deviceCode, intervalMs);
+      }, intervalMs);
+    } catch (err: any) {
+        googleAuthStatus = 'error';
+        googleAuthMessage = err.message ?? 'Google sign-in failed';
+        browserAuthMessages['google-subscription'] = googleAuthMessage;
+        browserAuthPending['google-subscription'] = false;
+    }
+  }
 
   function getProviderCaps(name: string) {
     const status = getProviderStatus(name);
     if (status) return status;
-    // Provider not yet connected (e.g. "Add provider"): use type from available list
     const type = availableProviderTypes.find((t) => t.name === name);
-    const authMode = type?.authMode ?? 'api_key';
-    const extraAuthModes = name === 'google'
-      ? [
-          { id: 'api_key', label: 'API key' },
-          { id: 'cli', label: 'Gemini CLI' },
-          { id: 'antigravity', label: 'Antigravity' },
-        ]
-      : undefined;
+    const authMode = getKnownAuthMode(name, type?.authMode ?? 'api_key');
     const requiresBaseUrl = authMode === 'base_url_only';
     return {
       authMode,
       supportsApiKey: authMode === 'api_key' || authMode === 'api_key_or_auth',
-      supportsAuthToken: authMode === 'api_key_or_auth',
+      supportsAuthToken: authMode === 'api_key_or_auth' || authMode === 'auth_only',
       requiresBaseUrl,
       baseUrlPlaceholder: requiresBaseUrl ? 'e.g. http://localhost:1234/v1' : undefined,
       enabled: false,
       authenticated: false,
       models: [] as string[],
-      extraAuthModes: extraAuthModes as undefined | Array<{ id: string; label: string }>,
     };
   }
 
-  function getProviderStatus(name: string) {
-    return wsStore.providers.find(p => p.name === name);
+  function getProviderStatus(name: string) { return wsStore.providers.find(p => p.name === name); }
+  function getProviderAccounts(name: string) { return providerAccounts[name] ?? []; }
+
+  function openAccountManager(provider: string, account: StoredProviderAccount | SavedAccountSummary) {
+    managingAccountProvider = provider;
+    managingAccountId = account.id;
+    managingAccountLabel = account.label;
+    showAccountManageDialog = true;
+  }
+
+  async function saveAccountProfileLabel() {
+    if (!managingAccountProvider || !managingAccountId) return;
+    const label = managingAccountLabel.trim();
+    if (!label) {
+      toastStore.error('Enter a profile name');
+      return;
+    }
+    managingAccountSaving = true;
+    try {
+      const res = await apiFetch(`/api/providers/${managingAccountProvider}/accounts/${managingAccountId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ label }),
+      });
+      const data = await parseJsonResponse<{ ok?: boolean; error?: string }>(res);
+      if (!data.ok) {
+        toastStore.error(data.error ?? 'Failed to rename profile');
+        return;
+      }
+      await loadProviderAccounts(managingAccountProvider, true);
+      toastStore.success('Profile updated');
+    } catch (err: any) {
+      toastStore.error(err.message ?? 'Failed to rename profile');
+    } finally {
+      managingAccountSaving = false;
+    }
+  }
+
+  function manageAccountModels() {
+    if (!managingAccountProvider) return;
+    const status = getProviderStatus(managingAccountProvider);
+    if (!status) {
+      toastStore.error('Provider is not connected');
+      return;
+    }
+    selectorTarget = status;
+    showModelSelector = true;
+  }
+
+  async function refreshProviderStatus(name: string, options?: { warmModelList?: boolean }) {
+    await wsStore.loadProvidersFromApi();
+    if (options?.warmModelList) {
+      await new Promise((resolve) => setTimeout(resolve, 700));
+      await wsStore.loadProvidersFromApi();
+    }
+    await tick();
+    return getProviderStatus(name);
+  }
+
+  async function syncProviderUi(name: string, options?: { openModelSelector?: boolean; successMessage?: string }) {
+    const status = await refreshProviderStatus(name, {
+      warmModelList: options?.openModelSelector === true,
+    });
+    expandedProvider = name;
+    if (status?.authenticated) {
+      const modelCount = status.allAvailableModels?.length ?? 0;
+      if (options?.openModelSelector && !status.hideModelSelector && modelCount > 0) {
+        selectorTarget = status;
+        showModelSelector = true;
+      }
+      if (options?.successMessage) {
+        const suffix = modelCount > 0 ? ' (' + modelCount + ' models ready)' : '';
+        toastStore.success(options.successMessage + suffix);
+      }
+      return;
+    }
+
+    if (options?.successMessage) {
+      toastStore.success(options.successMessage);
+    }
+  }
+
+  async function loadProviderAccounts(name: string, force = false) {
+    if (!force && (accountsLoading[name] || providerAccounts[name])) return;
+    accountsLoading[name] = true;
+    try {
+      const res = await apiFetch(`/api/providers/${name}/accounts`);
+      const data = await parseJsonResponse<{ ok?: boolean; data?: StoredProviderAccount[]; fallbackOrder?: string[]; error?: string }>(res);
+      if (data.ok && Array.isArray(data.data)) {
+        providerAccounts[name] = data.data;
+        if (data.fallbackOrder) {
+          fallbackOrders[name] = data.fallbackOrder;
+        }
+      } else if (force) {
+        providerAccounts[name] = [];
+      }
+    } catch {
+      if (force) providerAccounts[name] = [];
+    } finally {
+      accountsLoading[name] = false;
+    }
+  }
+
+  $effect(() => {
+    if (open && activeTab === 'providers' && expandedProvider) {
+      void loadProviderAccounts(expandedProvider);
+    }
+  });
+
+  function getOrderedFallbackAccounts(name: string): StoredProviderAccount[] {
+    const accounts = providerAccounts[name] ?? [];
+    if (accounts.length < 2) return [];
+    const order = fallbackOrders[name] ?? [];
+    const ordered: StoredProviderAccount[] = [];
+    const seen = new Set<string>();
+    for (const id of order) {
+      const acc = accounts.find((a) => a.id === id);
+      if (acc) {
+        ordered.push(acc);
+        seen.add(id);
+      }
+    }
+    for (const acc of accounts) {
+      if (!seen.has(acc.id)) ordered.push(acc);
+    }
+    // Keep fallbackItems in sync for dndzone (must be same array reference)
+    if (!fallbackItems[name] || fallbackItems[name].length !== ordered.length || fallbackItems[name].some((a, i) => a.id !== ordered[i].id)) {
+      fallbackItems[name] = [...ordered];
+    }
+    return fallbackItems[name];
+  }
+
+  async function saveFallbackOrder(name: string, order: string[]) {
+    fallbackSaving = name;
+    try {
+      const res = await apiFetch(`/api/providers/${name}/fallback-order`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ order }),
+      });
+      const data = await parseJsonResponse<{ ok?: boolean; error?: string }>(res);
+      if (data.ok) {
+        fallbackOrders[name] = order;
+      } else {
+        toastStore.error(data.error ?? 'Failed to save fallback order');
+      }
+    } catch (err: any) {
+      toastStore.error(err.message ?? 'Failed to save fallback order');
+    } finally {
+      fallbackSaving = null;
+    }
+  }
+
+  function handleFallbackDndFinalize(name: string, event: CustomEvent) {
+    const reordered: StoredProviderAccount[] = event.detail.items;
+    fallbackItems[name] = reordered;
+    const newOrder: string[] = reordered.map((a: { id: string }) => a.id);
+    void saveFallbackOrder(name, newOrder);
+  }
+
+  onDestroy(() => {
+    clearCopilotPollTimer();
+    clearKimiCodePollTimer();
+    clearCodexPollTimer();
+    clearGooglePollTimer();
+  });
+
+  function promptForCodexProfile(options: { saveAccount?: boolean; label?: string } = {}) {
+    pendingCodexAuthOptions = options;
+    codexProfileInput = options.label?.trim() ?? '';
+    showCodexProfileDialog = true;
+  }
+
+  async function confirmCodexProfileAuth() {
+    const label = codexProfileInput.trim();
+    if (!label) {
+      toastStore.error('Enter a profile name');
+      return;
+    }
+    const options = pendingCodexAuthOptions ?? {};
+    showCodexProfileDialog = false;
+    pendingCodexAuthOptions = null;
+    await startBrowserAuthFlow('codex', {
+      ...options,
+      saveAccount: true,
+      label,
+      profileConfirmed: true,
+    });
   }
 
   async function connectProvider(name: string) {
@@ -364,48 +821,10 @@
     const apiKey = keyInputs[name]?.trim();
     const authToken = tokenInputs[name]?.trim();
     const baseUrl = urlInputs[name]?.trim();
-    const authMode = selectedAuthMode[name];
-
-    // Handle Gemini CLI auth mode
-    if (authMode === 'cli') {
-      saving = name;
-      try {
-        const body: { authMode: string } = { authMode };
-        const res = await apiFetch(`/api/providers/${name}`, {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(body),
-        });
-        const data = await parseJsonResponse(res);
-        if (data.ok) {
-          expandedProvider = null;
-          toastStore.success(`${name} connected via Gemini CLI`);
-        } else {
-          toastStore.error(data.error ?? 'Connection failed');
-        }
-      } catch (err: any) {
-        toastStore.error(err.message ?? 'Network error');
-      } finally {
-        saving = null;
-      }
-      return;
-    }
-
-    if (caps.authMode === 'api_key' && !apiKey) {
-      toastStore.error('Enter API key');
-      return;
-    }
-    if (caps.authMode === 'api_key_or_auth' && !apiKey && !authToken) {
-      toastStore.error('Enter auth token or API key');
-      return;
-    }
-    if (caps.authMode === 'base_url_only' && !baseUrl) {
-      toastStore.error('Enter endpoint URL');
-      return;
-    }
-    if (caps.authMode === 'env_auth') {
-      // No typed secret input; backend verifies host environment credentials.
-    }
+    if (caps.authMode === 'api_key' && !apiKey) { toastStore.error('Enter API key'); return; }
+    if (caps.authMode === 'api_key_or_auth' && !apiKey && !authToken) { toastStore.error('Enter API key'); return; }
+    if (caps.authMode === 'auth_only' && !authToken && !usesBrowserAuth(name)) { toastStore.error('Enter auth token'); return; }
+    if (caps.authMode === 'base_url_only' && !baseUrl) { toastStore.error('Enter endpoint URL'); return; }
 
     saving = name;
     try {
@@ -422,327 +841,188 @@
       verifying = null;
       const data = await parseJsonResponse(res);
       if (data.ok) {
-        keyInputs[name] = '';
-        tokenInputs[name] = '';
-        urlInputs[name] = '';
+        keyInputs[name] = ''; tokenInputs[name] = ''; urlInputs[name] = '';
         expandedProvider = null;
+        await refreshProviderStatus(name, { warmModelList: true });
         toastStore.success(`${name} connected ✓`);
-
-        // Wait a small bit for wsStore to update if needed, then check status
         setTimeout(() => {
           const status = getProviderStatus(name);
           if (status && !status.hideModelSelector && (status.allAvailableModels?.length ?? 0) > 0) {
-            selectorTarget = status;
-            showModelSelector = true;
+            selectorTarget = status; showModelSelector = true;
           }
         }, 100);
+      } else toastStore.error(data.error ?? 'Connection failed');
+    } catch (err: any) { toastStore.error(err.message ?? 'Network error'); }
+    finally { saving = null; verifying = null; }
+  }
+
+  async function startBrowserAuthFlow(
+    name: string,
+    options: { saveAccount?: boolean; label?: string; profileConfirmed?: boolean } = {},
+  ) {
+    if (name === 'codex' && options.saveAccount && !options.profileConfirmed) {
+      promptForCodexProfile(options);
+      return;
+    }
+    browserAuthBusy = name;
+    browserAuthMessages[name] = '';
+    try {
+      const res = await apiFetch(`/api/providers/${name}/auth/start`, {
+        method: 'POST',
+      });
+      const data = await parseJsonResponse<{
+        ok?: boolean;
+        error?: string;
+        data?: {
+          status?: string;
+          url?: string;
+          message?: string;
+          deviceAuthId?: string;
+          deviceCode?: string;
+          userCode?: string;
+          verificationUri?: string;
+          verificationUriComplete?: string;
+          interval?: number;
+          expiresIn?: number;
+        };
+      }>(res);
+
+      if (!data.ok || !data.data) {
+        toastStore.error(data.error ?? 'Failed to start sign-in');
+        return;
+      }
+
+      if (data.data.status === 'connected') {
+        browserAuthPending[name] = false;
+        browserAuthMessages[name] = data.data.message ?? '';
+        await syncProviderUi(name, {
+          openModelSelector: true,
+          successMessage: getProviderDisplayLabel(name) + ' connected',
+        });
+        return;
+      }
+
+      browserAuthPending[name] = true;
+      browserAuthMessages[name] = data.data.message ?? 'Continue sign-in in your browser';
+
+      const authUrl = data.data.verificationUriComplete ?? data.data.url ?? data.data.verificationUri;
+      if (authUrl) {
+        await openAuthUrl(authUrl);
+      }
+
+      if (name === 'copilot' && data.data.deviceCode && data.data.userCode && data.data.verificationUri) {
+        copilotDeviceAuth = {
+          deviceCode: data.data.deviceCode,
+          userCode: data.data.userCode,
+          verificationUri: data.data.verificationUri,
+          verificationUriComplete: data.data.verificationUriComplete,
+          expiresAt: Date.now() + (data.data.expiresIn ?? 900) * 1000,
+          intervalMs: Math.max(1000, (data.data.interval ?? 5) * 1000),
+        };
+        copilotAuthStatus = 'pending';
+        copilotAuthMessage = 'Approve GitHub Copilot in the browser to finish connecting.';
+        browserAuthMessages[name] = copilotAuthMessage;
+        void pollCopilotAuth(copilotDeviceAuth.deviceCode, copilotDeviceAuth.intervalMs);
+      } else if (name === 'kimicode' && data.data.deviceCode && data.data.userCode && data.data.verificationUri) {
+        kimicodeDeviceAuth = {
+          deviceCode: data.data.deviceCode,
+          userCode: data.data.userCode,
+          verificationUri: data.data.verificationUri,
+          verificationUriComplete: data.data.verificationUriComplete,
+          expiresAt: Date.now() + (data.data.expiresIn ?? 900) * 1000,
+          intervalMs: Math.max(1000, (data.data.interval ?? 5) * 1000),
+        };
+        kimicodeAuthStatus = 'pending';
+        kimicodeAuthMessage = 'Approve Kimi Code in the browser to finish connecting.';
+        browserAuthMessages[name] = kimicodeAuthMessage;
+        void pollKimiCodeAuth(kimicodeDeviceAuth.deviceCode, kimicodeDeviceAuth.intervalMs);
+      } else if (name === 'codex' && data.data.userCode && data.data.verificationUri) {
+        codexDeviceAuth = {
+          deviceAuthId: data.data.deviceAuthId,
+          userCode: data.data.userCode,
+          verificationUri: data.data.verificationUri,
+          verificationUriComplete: data.data.verificationUriComplete,
+          expiresAt: Date.now() + (data.data.expiresIn ?? 900) * 1000,
+          intervalMs: Math.max(1000, (data.data.interval ?? 5) * 1000),
+        };
+        codexAuthStatus = 'pending';
+        await copyToClipboard(codexDeviceAuth.userCode, 'deviceCode');
+        codexAuthMessage = `Codex sign-in code ${codexDeviceAuth.userCode} copied to clipboard. Finish approval in the browser.`;
+        browserAuthMessages[name] = codexAuthMessage;
+        if (codexDeviceAuth.deviceAuthId) {
+          void pollCodexAuth(
+            codexDeviceAuth.deviceAuthId,
+            codexDeviceAuth.userCode,
+            codexDeviceAuth.intervalMs,
+            options.saveAccount === true,
+            options.label,
+          );
+        }
+      } else if (name === 'google-subscription' && data.data.userCode && data.data.deviceCode) {
+        googleDeviceAuth = {
+          deviceCode: data.data.deviceCode,
+          userCode: data.data.userCode,
+          verificationUri: data.data.verificationUri ?? '',
+          verificationUriComplete: data.data.verificationUriComplete,
+          expiresAt: Date.now() + (data.data.expiresIn || 1800) * 1000,
+          intervalMs: Math.max(1000, (data.data.interval ?? 5) * 1000),
+        };
+        googleAuthStatus = 'pending';
+        googleAuthMessage = 'Approve Google Device Auth in the browser to finish connecting.';
+        browserAuthMessages[name] = googleAuthMessage;
+        void pollGoogleAuth(googleDeviceAuth!.deviceCode, googleDeviceAuth!.intervalMs);
       } else {
-        toastStore.error(data.error ?? 'Connection failed');
+        toastStore.info(data.data.message ?? 'Finish sign-in in the browser, then confirm here.');
       }
     } catch (err: any) {
-      toastStore.error(err.message ?? 'Network error');
+      toastStore.error(err.message ?? 'Failed to start sign-in');
     } finally {
-      saving = null;
-      verifying = null;
+      browserAuthBusy = null;
+    }
+  }
+
+  async function finishBrowserAuthFlow(name: string) {
+    browserAuthBusy = name;
+    try {
+      const res = await apiFetch(`/api/providers/${name}/auth/complete`, {
+        method: 'POST',
+      });
+      const data = await parseJsonResponse<{ ok?: boolean; error?: string }>(res);
+      if (!data.ok) {
+        toastStore.error(data.error ?? 'Sign-in is not complete yet');
+        return;
+      }
+
+      browserAuthPending[name] = false;
+      browserAuthMessages[name] = '';
+      await wsStore.loadProvidersFromApi();
+      toastStore.success(`${getProviderDisplayLabel(name)} connected ✓`);
+    } catch (err: any) {
+      toastStore.error(err.message ?? 'Failed to finish sign-in');
+    } finally {
+      browserAuthBusy = null;
     }
   }
 
   async function saveSelectedModels(selected: string[], hideSelector: boolean) {
     if (!selectorTarget) return;
     const name = selectorTarget.name;
-    
     try {
       const res = await apiFetch(`/api/providers/${name}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
-          selectedModels: selected,
-          hideModelSelector: hideSelector
-        }),
+        body: JSON.stringify({ selectedModels: selected, hideModelSelector: hideSelector }),
       });
       const data = await parseJsonResponse(res);
-      if (data.ok) {
-        showModelSelector = false;
-        selectorTarget = null;
-        toastStore.success('Models updated');
-      } else {
-        toastStore.error(data.error ?? 'Failed to update models');
-      }
-    } catch (err: any) {
-      toastStore.error(err.message ?? 'Network error');
-    }
+      if (data.ok) { await wsStore.loadProvidersFromApi(); showModelSelector = false; selectorTarget = null; toastStore.success('Models updated'); }
+      else toastStore.error(data.error ?? 'Failed to update models');
+    } catch (err: any) { toastStore.error(err.message ?? 'Network error'); }
   }
 
-  function openAuthPortal(name: string) {
-    const url = authPortalUrls[name];
-    if (!url) {
-      toastStore.error('No auth portal configured for this provider');
-      return;
-    }
-    window.open(url, '_blank', 'noopener,noreferrer');
-  }
-
-  function stopAntigravityPolling() {
-    if (antigravityPollTimer) {
-      clearTimeout(antigravityPollTimer);
-      antigravityPollTimer = null;
-    }
-  }
-
-  async function pollAntigravityAuth() {
-    if (!antigravityAuthId) return;
-    try {
-      const res = await apiFetch(`/api/providers/google/auth/antigravity/poll?authId=${encodeURIComponent(antigravityAuthId)}`, { method: 'GET' });
-      const data = await parseJsonResponse(res);
-      if (data.ok && data.data?.success) {
-        stopAntigravityPolling();
-        antigravityAuthStatus = 'connected';
-        antigravityAuthMessage = 'Authorized successfully.';
-        antigravityAuthId = null;
-        expandedProvider = null;
-        toastStore.success('Google (Antigravity) connected');
-        return;
-      }
-      if (!data.ok) {
-        stopAntigravityPolling();
-        antigravityAuthStatus = 'error';
-        antigravityAuthMessage = data.error ?? 'Auth failed';
-        toastStore.error(antigravityAuthMessage);
-        return;
-      }
-      antigravityAuthMessage = 'Waiting for you to sign in in the browser...';
-      antigravityPollTimer = setTimeout(pollAntigravityAuth, 2500);
-    } catch (err: any) {
-      antigravityAuthStatus = 'error';
-      antigravityAuthMessage = err.message ?? 'Poll failed';
-      toastStore.error(antigravityAuthMessage);
-    }
-  }
-
-  async function startAntigravityAuth() {
-    try {
-      stopAntigravityPolling();
-      antigravityAuthStatus = 'pending';
-      antigravityAuthMessage = 'Opening sign-in page...';
-      const res = await apiFetch('/api/providers/google/auth/antigravity', { method: 'POST' });
-      const data = await parseJsonResponse(res);
-      if (!data.ok) {
-        antigravityAuthStatus = 'error';
-        antigravityAuthMessage = data.error ?? 'Failed to start Antigravity auth';
-        toastStore.error(antigravityAuthMessage);
-        return;
-      }
-      const { url, authId } = data.data ?? {};
-      if (!url || !authId) {
-        antigravityAuthStatus = 'error';
-        antigravityAuthMessage = 'No auth URL returned';
-        toastStore.error(antigravityAuthMessage);
-        return;
-      }
-      antigravityAuthId = authId;
-      window.open(url, '_blank', 'noopener,noreferrer');
-      antigravityAuthMessage = 'Waiting for you to sign in in the browser...';
-      antigravityPollTimer = setTimeout(pollAntigravityAuth, 2500);
-    } catch (err: any) {
-      antigravityAuthStatus = 'error';
-      antigravityAuthMessage = err.message ?? 'Failed to start auth';
-      toastStore.error(antigravityAuthMessage);
-    }
-  }
-
-  async function startGeminiCLIAuth() {
-    try {
-      const res = await apiFetch('/api/providers/google/auth/cli', { method: 'POST' });
-      const data = await parseJsonResponse(res);
-      if (!data.ok) {
-        toastStore.error(data.error ?? 'Failed to start Gemini auth');
-        return;
-      }
-      const url = data.data?.url;
-      if (url) {
-        window.open(url, '_blank', 'noopener,noreferrer');
-        toastStore.success('Sign-in page opened. Complete sign-in, then click Verify below.');
-      } else {
-        toastStore.info(data.data?.message ?? 'Check your terminal for the sign-in link.');
-      }
-    } catch (err: any) {
-      toastStore.error(err.message ?? 'Failed to start Gemini auth');
-    }
-  }
-
-  function stopCopilotPolling() {
-    if (copilotPollTimer) {
-      clearTimeout(copilotPollTimer);
-      copilotPollTimer = null;
-    }
-  }
-
-  function scheduleCopilotPoll(delayMs: number) {
-    stopCopilotPolling();
-    copilotPollTimer = setTimeout(() => {
-      void completeCopilotAuth(false);
-    }, delayMs);
-  }
-
-  async function startCopilotAuth() {
-    try {
-      stopCopilotPolling();
-      const res = await apiFetch('/api/providers/copilot/device/start', {
-        method: 'POST',
-      });
-      const data = await res.json();
-      if (!data.ok) {
-        toastStore.error(data.error ?? 'Failed to start Copilot auth');
-        return;
-      }
-
-      const p = data.data as {
-        deviceCode: string;
-        userCode: string;
-        verificationUri: string;
-        verificationUriComplete?: string;
-        expiresIn: number;
-        interval?: number;
-      };
-      copilotDeviceAuth = {
-        deviceCode: p.deviceCode,
-        userCode: p.userCode,
-        verificationUri: p.verificationUri,
-        verificationUriComplete: p.verificationUriComplete,
-        expiresAt: Date.now() + p.expiresIn * 1000,
-        intervalMs: Math.max(3, p.interval ?? 5) * 1000,
-      };
-      copilotAuthStatus = 'pending';
-      copilotAuthMessage = 'Waiting for GitHub authorization...';
-
-      const authUrl = p.verificationUriComplete ?? p.verificationUri;
-      window.open(authUrl, '_blank', 'noopener,noreferrer');
-      await navigator.clipboard.writeText(p.userCode);
-      toastStore.success('Copilot code ready. It has been copied to clipboard.');
-      scheduleCopilotPoll(1500);
-    } catch (err: any) {
-      copilotAuthStatus = 'error';
-      copilotAuthMessage = err.message ?? 'Failed to start Copilot auth';
-      toastStore.error(err.message ?? 'Failed to start Copilot auth');
-    }
-  }
-
-  async function completeCopilotAuth(manual = true) {
-    if (!copilotDeviceAuth?.deviceCode) {
-      toastStore.error('Start Copilot auth first');
-      return;
-    }
-    const pollIntervalMs = copilotDeviceAuth.intervalMs;
-    if (Date.now() > copilotDeviceAuth.expiresAt) {
-      stopCopilotPolling();
-      copilotAuthStatus = 'error';
-      copilotAuthMessage = 'Device code expired. Start authorization again.';
-      toastStore.error(copilotAuthMessage);
-      return;
-    }
-
-    saving = 'copilot';
-    try {
-      const res = await apiFetch('/api/providers/copilot/device/poll', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ deviceCode: copilotDeviceAuth.deviceCode }),
-      });
-      const data = await parseJsonResponse(res);
-      if (!data.ok) {
-        toastStore.error(data.error ?? 'Copilot auth failed');
-        return;
-      }
-
-      const status = data.data?.status as string | undefined;
-      if (status && status !== 'connected') {
-        if (status === 'authorization_pending') {
-          copilotAuthStatus = 'pending';
-          copilotAuthMessage = 'Waiting for GitHub authorization...';
-          scheduleCopilotPoll(pollIntervalMs);
-        } else if (status === 'slow_down') {
-          copilotAuthStatus = 'pending';
-          copilotAuthMessage = 'GitHub asked to slow down. Retrying...';
-          scheduleCopilotPoll(pollIntervalMs + 3000);
-        } else if (status === 'expired_token') {
-          stopCopilotPolling();
-          copilotAuthStatus = 'error';
-          copilotAuthMessage = 'Device code expired. Start authorization again.';
-          toastStore.error(copilotAuthMessage);
-        } else {
-          stopCopilotPolling();
-          copilotAuthStatus = 'error';
-          copilotAuthMessage = data.data?.description ?? status;
-          toastStore.error(copilotAuthMessage);
-        }
-        return;
-      }
-
-      stopCopilotPolling();
-      copilotAuthStatus = 'connected';
-      copilotAuthMessage = 'Authorized successfully.';
-      copilotDeviceAuth = null;
-      expandedProvider = null;
-      toastStore.success('copilot connected');
-    } catch (err: any) {
-      if (manual) {
-        toastStore.error(err.message ?? 'Copilot auth failed');
-      } else {
-        // keep polling on transient failures
-        copilotAuthStatus = 'pending';
-        copilotAuthMessage = 'Waiting for GitHub authorization...';
-        scheduleCopilotPoll(pollIntervalMs);
-      }
-    } finally {
-      saving = null;
-    }
-  }
-
-  onDestroy(() => {
-    stopCopilotPolling();
-    stopAntigravityPolling();
-  });
-
-  async function disconnectProvider(name: string) {
-    try {
-      const res = await apiFetch(`/api/providers/${name}`, { method: 'DELETE' });
-      const data = await parseJsonResponse(res);
-      if (data.ok) {
-        toastStore.info(`${name} disconnected`);
-      } else {
-        toastStore.error(data.error ?? `Failed to disconnect ${name}`);
-      }
-    } catch (err: any) {
-      toastStore.error(err.message ?? `Failed to disconnect ${name}`);
-    }
-  }
-
-  async function rotateProviderKey(name: string, newKey: string, keyType: 'apiKey' | 'authToken') {
-    saving = name;
-    try {
-      const body: Record<string, string> = {};
-      body[keyType] = newKey;
-
-      const res = await apiFetch(`/api/providers/${name}/rotate`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-      });
-
-      const data = await parseJsonResponse(res);
-      if (data.ok) {
-        toastStore.success(`${name} API key rotated ✓`);
-        keyInputs[name] = '';
-        tokenInputs[name] = '';
-        expandedProvider = null;
-      } else {
-        toastStore.error(data.error ?? 'Failed to rotate API key');
-      }
-    } catch (err: any) {
-      toastStore.error(err.message ?? 'Network error');
-    } finally {
-      saving = null;
-    }
+  function disconnectProvider(name: string) {
+    void apiFetch(`/api/providers/${name}`, { method: 'DELETE' })
+      .then(res => parseJsonResponse(res))
+      .then(async data => { if (data.ok) { await wsStore.loadProvidersFromApi(); toastStore.info(`${name} disconnected`); } });
   }
 
   function copyEndpoint() {
@@ -751,26 +1031,156 @@
     setTimeout(() => copiedEndpoint = false, 2000);
   }
 
-  // ─── Keyboard Shortcuts (editable, persisted) ──────────────────────────
-  interface Shortcut {
-    id: string;
-    keys: string[];
-    action: string;
+  async function copyToClipboard(value: string, kind: 'deviceCode' | 'deviceUrl') {
+    await navigator.clipboard.writeText(value);
+    if (kind === 'deviceCode') {
+      copiedDeviceCode = value;
+      setTimeout(() => {
+        if (copiedDeviceCode === value) copiedDeviceCode = null;
+      }, 2000);
+      return;
+    }
+    copiedDeviceUrl = value;
+    setTimeout(() => {
+      if (copiedDeviceUrl === value) copiedDeviceUrl = null;
+    }, 2000);
   }
 
+  async function rotateProviderKey(name: string, newKey: string, keyType: 'apiKey' | 'authToken') {
+    if (!newKey.trim()) { toastStore.error('Enter a new key'); return; }
+    try {
+      const body: Record<string, string> = {};
+      body[keyType] = newKey.trim();
+      const res = await apiFetch(`/api/providers/${name}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      const data = await parseJsonResponse(res);
+      if (data.ok) { await wsStore.loadProvidersFromApi(); toastStore.success(`${getProviderDisplayLabel(name)} key rotated ✓`); }
+      else toastStore.error(data.error ?? 'Failed to rotate key');
+    } catch (err: any) { toastStore.error(err.message ?? 'Network error'); }
+  }
+
+  async function saveProviderAccount(name: string, activate = false) {
+    const caps = getProviderCaps(name);
+    const label = accountLabelInputs[name]?.trim();
+    const apiKey = accountKeyInputs[name]?.trim();
+    const authToken = accountTokenInputs[name]?.trim();
+    const baseUrl = accountUrlInputs[name]?.trim();
+
+    if (!apiKey && !authToken && !baseUrl) {
+      toastStore.error('Enter account credentials to save');
+      return;
+    }
+    if (caps.authMode === 'auth_only' && !authToken && !usesBrowserAuth(name)) {
+      toastStore.error('Enter auth token');
+      return;
+    }
+    if (caps.authMode === 'api_key' && !apiKey && !baseUrl) {
+      toastStore.error('Enter API key');
+      return;
+    }
+    if (caps.authMode === 'base_url_only' && !baseUrl) {
+      toastStore.error('Enter endpoint URL');
+      return;
+    }
+
+    accountBusy = `${name}:save`;
+    try {
+      const res = await apiFetch(`/api/providers/${name}/accounts`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ label, apiKey, authToken, baseUrl, activate }),
+      });
+      const data = await parseJsonResponse<{ ok?: boolean; data?: { account?: { id: string } }; error?: string }>(res);
+      if (data.ok) {
+        accountLabelInputs[name] = '';
+        accountKeyInputs[name] = '';
+        accountTokenInputs[name] = '';
+        accountUrlInputs[name] = '';
+        await loadProviderAccounts(name, true);
+        // Append new account to fallback order
+        const newAccountId = data.data?.account?.id;
+        if (newAccountId) {
+          const currentOrder = fallbackOrders[name] ?? [];
+          const allIds = new Set((providerAccounts[name] ?? []).map((a) => a.id));
+          const missing = [...allIds].filter((id) => !currentOrder.includes(id));
+          if (missing.length > 0) {
+            void saveFallbackOrder(name, [...currentOrder, ...missing]);
+          }
+        }
+        if (activate) await wsStore.loadProvidersFromApi();
+        toastStore.success(activate ? 'Account saved and activated' : 'Account saved');
+      } else {
+        toastStore.error(data.error ?? 'Failed to save account');
+      }
+    } catch (err: any) {
+      toastStore.error(err.message ?? 'Failed to save account');
+    } finally {
+      accountBusy = null;
+    }
+  }
+
+  async function activateProviderAccount(name: string, accountId: string) {
+    accountBusy = `${name}:activate:${accountId}`;
+    try {
+      const res = await apiFetch(`/api/providers/${name}/accounts/${accountId}/activate`, {
+        method: 'POST',
+      });
+      const data = await parseJsonResponse<{ ok?: boolean; error?: string }>(res);
+      if (data.ok) {
+        await wsStore.loadProvidersFromApi();
+        await loadProviderAccounts(name, true);
+        toastStore.success('Saved account activated');
+      } else {
+        toastStore.error(data.error ?? 'Failed to activate account');
+      }
+    } catch (err: any) {
+      toastStore.error(err.message ?? 'Failed to activate account');
+    } finally {
+      accountBusy = null;
+    }
+  }
+
+  async function deleteProviderAccount(name: string, accountId: string) {
+    accountBusy = `${name}:delete:${accountId}`;
+    try {
+      const res = await apiFetch(`/api/providers/${name}/accounts/${accountId}`, {
+        method: 'DELETE',
+      });
+      const data = await parseJsonResponse<{ ok?: boolean; error?: string }>(res);
+      if (data.ok) {
+        await loadProviderAccounts(name, true);
+        // Remove deleted account from fallback order
+        const currentOrder = fallbackOrders[name] ?? [];
+        const cleaned = currentOrder.filter((id) => id !== accountId);
+        if (cleaned.length !== currentOrder.length) {
+          void saveFallbackOrder(name, cleaned);
+        }
+        toastStore.info('Saved account removed');
+      } else {
+        toastStore.error(data.error ?? 'Failed to remove account');
+      }
+    } catch (err: any) {
+      toastStore.error(err.message ?? 'Failed to remove account');
+    } finally {
+      accountBusy = null;
+    }
+  }
+
+  // ─── Shortcuts ───────────────────────────────────────────────────────
+  interface Shortcut { id: string; keys: string[]; action: string; description?: string }
   const defaultShortcuts: Shortcut[] = [
-    { id: 'send', keys: ['Ctrl', 'Enter'], action: 'Send message' },
-    { id: 'settings', keys: ['Ctrl', ','], action: 'Open settings' },
-    { id: 'new_session', keys: ['Ctrl', 'N'], action: 'New session' },
-    { id: 'focus_input', keys: ['Ctrl', 'K'], action: 'Focus input' },
-    { id: 'close', keys: ['Esc'], action: 'Close dialogs' },
+    { id: 'send', keys: ['Ctrl', 'Enter'], action: 'Send message', description: 'Submit task' },
+    { id: 'settings', keys: ['Ctrl', ','], action: 'Open settings', description: 'Preferences' },
+    { id: 'new_session', keys: ['Ctrl', 'N'], action: 'New session', description: 'Clear' },
+    { id: 'focus_input', keys: ['Ctrl', 'K'], action: 'Focus input', description: 'Jump' },
+    { id: 'close', keys: ['Esc'], action: 'Close dialogs', description: 'Back' },
   ];
 
   function loadShortcuts(): Shortcut[] {
-    try {
-      const stored = localStorage.getItem('koryphaios-shortcuts');
-      if (stored) return JSON.parse(stored);
-    } catch {}
+    try { const stored = localStorage.getItem('koryphaios-shortcuts'); if (stored) return JSON.parse(stored); } catch {}
     return structuredClone(defaultShortcuts);
   }
 
@@ -778,18 +1188,23 @@
   let editingShortcutId = $state<string | null>(null);
   let capturedKeys = $state<string[]>([]);
 
-  // Messaging tab
+  function startEditShortcut(id: string) { editingShortcutId = id; capturedKeys = []; }
+  function handleShortcutKeydown(e: KeyboardEvent) {
+    if (!editingShortcutId) return; e.preventDefault(); e.stopPropagation();
+    const keys: string[] = []; if (e.ctrlKey) keys.push('Ctrl'); if (e.shiftKey) keys.push('Shift'); if (e.altKey) keys.push('Alt'); if (e.metaKey) keys.push('Meta');
+    const key = e.key; if (!['Control', 'Shift', 'Alt', 'Meta'].includes(key)) keys.push(key.length === 1 ? key.toUpperCase() : key);
+    if (keys.length === 0) return; capturedKeys = keys;
+    if (!['Control', 'Shift', 'Alt', 'Meta'].includes(key)) {
+      const idx = shortcuts.findIndex(s => s.id === editingShortcutId);
+      if (idx >= 0) { shortcuts[idx] = { ...shortcuts[idx], keys: capturedKeys }; shortcuts = [...shortcuts]; localStorage.setItem('koryphaios-shortcuts', JSON.stringify(shortcuts)); }
+      editingShortcutId = null; capturedKeys = [];
+    }
+  }
+  function resetShortcuts() { shortcuts = structuredClone(defaultShortcuts); localStorage.removeItem('koryphaios-shortcuts'); toastStore.info('Shortcuts reset'); }
+
+  // ─── Messaging ───────────────────────────────────────────────────────
   let messagingLoading = $state(false);
   let messagingSaving = $state(false);
-
-  let billingLoading = $state(false);
-  let billingData = $state<{
-    localEstimate: { totalCostUsd: number; tokensIn: number; tokensOut: number; byModel: Array<{ model: string; costUsd: number; tokensIn: number; tokensOut: number }> };
-    cloudReality: Array<{ source: string; ts: number; totalUsedUsd: number | null; totalGrantedUsd: number | null; totalAvailableUsd: number | null; payload: string }>;
-    driftPercent: number | null;
-    highlightDrift: boolean;
-  } | null>(null);
-  let billingError = $state<string | null>(null);
   let telegramEnabled = $state(false);
   let telegramAdminId = $state('');
   let telegramBotToken = $state('');
@@ -805,772 +1220,941 @@
         telegramEnabled = t?.enabled ?? false;
         telegramAdminId = t?.adminId ? String(t.adminId) : '';
         telegramBotTokenSet = t?.botTokenSet ?? false;
-        if (!telegramBotTokenSet) telegramBotToken = '';
       }
-    } catch {
-      toastStore.error('Failed to load messaging config');
-    } finally {
-      messagingLoading = false;
-    }
+    } catch { toastStore.error('Failed to load messaging config'); }
+    finally { messagingLoading = false; }
   }
 
   async function saveMessaging() {
     const adminId = parseInt(telegramAdminId, 10);
-    if (telegramEnabled && !telegramBotToken.trim() && !telegramBotTokenSet) {
-      toastStore.error('Bot token is required to enable Telegram');
-      return;
-    }
-    if (telegramEnabled && (!Number.isFinite(adminId) || adminId <= 0)) {
-      toastStore.error('Enter a valid Telegram user ID (positive number).');
-      return;
-    }
+    if (telegramEnabled && !telegramBotToken.trim() && !telegramBotTokenSet) { toastStore.error('Bot token is required'); return; }
     messagingSaving = true;
     try {
-      const body = {
-        telegram: telegramEnabled && (telegramBotToken.trim() || telegramBotTokenSet) && Number.isFinite(adminId) && adminId > 0
-          ? { botToken: telegramBotToken.trim() || undefined, adminId }
-          : null,
-      };
-      if (body.telegram && !body.telegram.botToken && telegramBotTokenSet) {
-        (body.telegram as Record<string, unknown>).botToken = undefined;
-      }
-      const res = await apiFetch('/api/messaging', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-      });
+      const res = await apiFetch('/api/messaging', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ telegram: telegramEnabled ? { botToken: telegramBotToken.trim() || undefined, adminId } : null }) });
       const data = await parseJsonResponse(res);
-      if (data.ok) {
-        toastStore.success('Messaging config saved. Restart the server for Telegram changes to take effect.');
-        void loadMessaging();
-      } else {
-        toastStore.error(data.error ?? 'Failed to save');
-      }
-    } catch (err: unknown) {
-      toastStore.error(err instanceof Error ? err.message : 'Failed to save messaging config');
-    } finally {
-      messagingSaving = false;
-    }
+      if (data.ok) { toastStore.success('Messaging config saved'); void loadMessaging(); }
+      else toastStore.error(data.error ?? 'Failed to save');
+    } catch (err: any) { toastStore.error(err.message ?? 'Failed to save'); }
+    finally { messagingSaving = false; }
   }
+
+  // ─── Billing ─────────────────────────────────────────────────────────
+  let billingLoading = $state(false);
+  let billingCredits = $state<any>(null);
+  let billingError = $state<string | null>(null);
 
   async function loadBillingCredits() {
-    billingLoading = true;
-    billingError = null;
-    billingData = null;
+    billingLoading = true; billingError = null;
     try {
       const res = await apiFetch('/api/billing/credits');
-      if (!res.ok) {
-        const err = await parseJsonResponse<{ error?: string }>(res);
-        const msg = err.error ?? `HTTP ${res.status}`;
-        billingError = res.status === 404
-          ? 'Billing API not available. Start the backend server (e.g. from repo root) and ensure the frontend proxy targets it.'
-          : msg;
-        return;
-      }
+      if (!res.ok) { billingError = 'Billing API not available'; return; }
       const data = await parseJsonResponse(res);
-      billingData = {
-        localEstimate: data.localEstimate,
-        cloudReality: data.cloudReality ?? [],
-        driftPercent: data.driftPercent ?? null,
-        highlightDrift: data.highlightDrift === true,
-      };
-    } catch (e) {
-      billingError = e instanceof Error ? e.message : 'Failed to load billing. Ensure the backend is running (e.g. port 3000) and the frontend proxy targets it.';
-    } finally {
-      billingLoading = false;
-    }
-  }
-
-  function startEditShortcut(id: string) {
-    editingShortcutId = id;
-    capturedKeys = [];
-  }
-
-  function handleShortcutKeydown(e: KeyboardEvent) {
-    if (!editingShortcutId) return;
-    e.preventDefault();
-    e.stopPropagation();
-
-    const keys: string[] = [];
-    if (e.ctrlKey) keys.push('Ctrl');
-    if (e.shiftKey) keys.push('Shift');
-    if (e.altKey) keys.push('Alt');
-    if (e.metaKey) keys.push('Meta');
-
-    const key = e.key;
-    if (!['Control', 'Shift', 'Alt', 'Meta'].includes(key)) {
-      keys.push(key.length === 1 ? key.toUpperCase() : key);
-    }
-
-    if (keys.length === 0) return;
-    capturedKeys = keys;
-
-    // If a non-modifier key was pressed, commit the binding
-    if (!['Control', 'Shift', 'Alt', 'Meta'].includes(key)) {
-      const idx = shortcuts.findIndex(s => s.id === editingShortcutId);
-      if (idx >= 0) {
-        shortcuts[idx] = { ...shortcuts[idx], keys: capturedKeys };
-        shortcuts = [...shortcuts];
-        localStorage.setItem('koryphaios-shortcuts', JSON.stringify(shortcuts));
-      }
-      editingShortcutId = null;
-      capturedKeys = [];
-    }
-  }
-
-  function resetShortcuts() {
-    shortcuts = structuredClone(defaultShortcuts);
-    localStorage.removeItem('koryphaios-shortcuts');
-    toastStore.info('Shortcuts reset to defaults');
+      billingCredits = data;
+    } catch (e: any) { billingError = e.message; }
+    finally { billingLoading = false; }
   }
 </script>
 
 <svelte:window onkeydown={(e) => { if (editingShortcutId) handleShortcutKeydown(e); else handleKeydown(e); }} />
 
 {#if open}
-  <!-- Backdrop -->
-  <div
-    class="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center"
-    onclick={onClose}
-    onkeydown={(e) => { if (e.key === 'Escape' && onClose) onClose(); }}
-    role="presentation"
-  >
-    <!-- Modal -->
-    <div
-      class="relative w-[90vw] max-w-3xl max-h-[85vh] rounded-2xl shadow-2xl flex flex-col overflow-hidden"
-      style="background: var(--color-surface-1); border: 1px solid var(--color-border);"
-      onclick={(e) => e.stopPropagation()}
-      onkeydown={(e) => { if (!editingShortcutId) e.stopPropagation(); }}
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="settings-title"
-      tabindex="-1"
-    >
-      <!-- Header -->
-      <div class="flex items-center justify-between px-6 py-4 shrink-0" style="border-bottom: 1px solid var(--color-border);">
-        <h2 id="settings-title" class="text-base font-semibold" style="color: var(--color-text-primary);">Settings</h2>
-        <button
-          class="p-1.5 rounded-lg transition-colors hover:bg-[var(--color-surface-3)]"
-          style="color: var(--color-text-muted);"
-          onclick={onClose}
-          aria-label="Close"
-        >
-          <X size={18} />
-        </button>
-      </div>
+  <div class="fixed inset-0 z-50 flex min-h-0 flex-col" style="background: var(--color-surface-1);" role="dialog" aria-modal="true" aria-labelledby="settings-title">
+    <!-- Header -->
+    <div class="flex items-center justify-between px-6 py-4 shrink-0 border-b" style="border-color: var(--color-border); background: var(--color-surface-0);">
+      <h2 id="settings-title" class="text-base font-semibold" style="color: var(--color-text-primary);">Settings</h2>
+      <button class="p-1.5 rounded-lg transition-colors hover:bg-[var(--color-surface-3)]" style="color: var(--color-text-muted);" onclick={onClose} aria-label="Close">
+        <X size={18} />
+      </button>
+    </div>
 
-      <!-- Tab bar -->
-      <div class="flex gap-1 mx-6 mt-4 p-1 rounded-lg shrink-0 flex-wrap" style="background: var(--color-surface-0);">
+    <!-- Tab bar -->
+    <div class="flex gap-1 px-4 py-2 border-b shrink-0 overflow-x-auto no-scrollbar" style="background: var(--color-surface-0); border-color: var(--color-border);">
+      {#each [
+        { id: 'providers', label: 'Providers', icon: Key },
+        { id: 'appearance', label: 'Appearance', icon: Palette },
+        { id: 'shortcuts', label: 'Shortcuts', icon: Keyboard },
+        { id: 'messaging', label: 'Messaging', icon: MessageCircle, action: loadMessaging },
+        { id: 'billing', label: 'Billing', icon: CreditCard, action: loadBillingCredits },
+        { id: 'memory', label: 'Memory', icon: Brain },
+        { id: 'agent', label: 'Agent', icon: Bot },
+        { id: 'experimental', label: 'Experimental', icon: FlaskConical },
+        { id: 'teams', label: 'Teams', icon: Users }
+      ] as tab}
+        {@const Icon = tab.icon}
         <button
-          class="flex-1 min-w-0 flex items-center justify-center gap-1.5 py-2 text-xs rounded-md transition-colors
-                 {activeTab === 'providers' ? 'bg-[var(--color-surface-3)] text-[var(--color-text-primary)] font-medium' : 'text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)]'}"
-          onclick={() => activeTab = 'providers'}
+          type="button"
+          class="flex-1 min-w-[100px] flex items-center justify-center gap-1.5 py-2 text-xs rounded-md transition-colors whitespace-nowrap
+                 {activeTab === tab.id ? 'bg-[var(--color-surface-3)] text-[var(--color-text-primary)] font-medium' : 'text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)]'}"
+          onclick={() => { activeTab = tab.id as any; if (tab.action) tab.action(); }}
         >
-          <Key size={13} /> Providers
+          <Icon size={13} /> {tab.label}
+          {#if tab.id === 'experimental' && experimentalStore.enabledCount > 0}
+            <span class="ml-1 min-w-[16px] h-4 px-1 rounded-full bg-amber-500 text-white text-[9px] flex items-center justify-center font-medium">
+              {experimentalStore.enabledCount}
+            </span>
+          {/if}
         </button>
-        <button
-          class="flex-1 min-w-0 flex items-center justify-center gap-1.5 py-2 text-xs rounded-md transition-colors
-                 {activeTab === 'appearance' ? 'bg-[var(--color-surface-3)] text-[var(--color-text-primary)] font-medium' : 'text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)]'}"
-          onclick={() => activeTab = 'appearance'}
-        >
-          <Palette size={13} /> Theme
-        </button>
-        <button
-          class="flex-1 min-w-0 flex items-center justify-center gap-1.5 py-2 text-xs rounded-md transition-colors
-                 {activeTab === 'shortcuts' ? 'bg-[var(--color-surface-3)] text-[var(--color-text-primary)] font-medium' : 'text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)]'}"
-          onclick={() => activeTab = 'shortcuts'}
-        >
-          <Keyboard size={13} /> Shortcuts
-        </button>
-        <button
-          class="flex-1 min-w-0 flex items-center justify-center gap-1.5 py-2 text-xs rounded-md transition-colors
-                 {activeTab === 'messaging' ? 'bg-[var(--color-surface-3)] text-[var(--color-text-primary)] font-medium' : 'text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)]'}"
-          onclick={() => { activeTab = 'messaging'; void loadMessaging(); }}
-        >
-          <MessageCircle size={13} /> Messaging
-        </button>
-        <button
-          class="flex-1 min-w-0 flex items-center justify-center gap-1.5 py-2 text-xs rounded-md transition-colors
-                 {activeTab === 'billing' ? 'bg-[var(--color-surface-3)] text-[var(--color-text-primary)] font-medium' : 'text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)]'}"
-          onclick={() => { activeTab = 'billing'; void loadBillingCredits(); }}
-        >
-          <CreditCard size={13} /> Billing
-        </button>
-        <button
-          class="flex-1 min-w-0 flex items-center justify-center gap-1.5 py-2 text-xs rounded-md transition-colors
-                 {activeTab === 'memory' ? 'bg-[var(--color-surface-3)] text-[var(--color-text-primary)] font-medium' : 'text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)]'}"
-          onclick={() => activeTab = 'memory'}
-        >
-          <Brain size={13} /> Memory
-        </button>
-        <button
-          class="flex-1 min-w-0 flex items-center justify-center gap-1.5 py-2 text-xs rounded-md transition-colors
-                 {activeTab === 'agent' ? 'bg-[var(--color-surface-3)] text-[var(--color-text-primary)] font-medium' : 'text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)]'}"
-          onclick={() => activeTab = 'agent'}
-        >
-          <Bot size={13} /> Agent
-        </button>
-      </div>
+      {/each}
+    </div>
 
-      <!-- Content (scrollable) -->
-      <div class="flex-1 overflow-y-auto px-6 py-5">
-
-  {#if activeTab === 'providers'}
-    <div class="space-y-0.5">
-      <div class="sticky top-0 z-10 -mx-1 px-1 py-2 mb-1" style="background: var(--color-surface-1);">
+    <!-- Content Area -->
+    <div class="flex-1 min-h-0 overflow-hidden flex flex-col">
+      <!-- Providers Tab -->
+      <div class={activeTab === 'providers' ? 'flex-1 overflow-y-auto px-6 py-5 space-y-6' : 'hidden'}>
         <div class="relative">
-          <Search size={14} class="absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none shrink-0" style="color: var(--color-text-muted);" />
-          <input
-            type="text"
-            placeholder="Search providers..."
-            bind:value={providerSearchQuery}
-            class="input w-full pr-3 py-2 text-sm"
-            style="font-size: 12px; padding-left: 2.75rem;"
-          />
+          <Search size={14} class="absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" style="color: var(--color-text-muted);" />
+          <input type="text" placeholder="Search providers..." bind:value={providerSearchQuery} class="input w-full pl-12 py-2 text-sm" />
         </div>
-        {#if providerSearchQuery.trim()}
-          <p class="text-[10px] mt-1" style="color: var(--color-text-muted);">
-            {filteredProviderList.length} provider{filteredProviderList.length !== 1 ? 's' : ''}
-          </p>
-        {/if}
-      </div>
-      {#each filteredProviderList as prov}
+        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 items-start">
+          {#each filteredProviderList as prov (prov.key)}
             {@const status = getProviderStatus(prov.key)}
             {@const caps = getProviderCaps(prov.key)}
-            <div class={`rounded-lg transition-colors ${expandedProvider === prov.key ? 'bg-[var(--color-surface-3)]' : 'hover:bg-[var(--color-surface-2)]'}`}>
-              <button
-                onclick={() => { expandedProvider = expandedProvider === prov.key ? null : prov.key; }}
-                class="w-full flex items-center justify-between py-2 px-2.5 text-left"
-              >
-                <span class="text-xs font-medium" style="color: var(--color-text-primary);">{prov.label}</span>
-                <div class="flex items-center gap-1.5">
+            <div class="rounded-xl border border-[var(--color-border)] p-4 transition-all {expandedProvider === prov.key ? 'bg-[var(--color-surface-2)] ring-1 ring-[var(--color-accent)]/30' : 'bg-[var(--color-surface-1)] hover:bg-[var(--color-surface-2)] shadow-sm'}">
+              <button type="button" onclick={() => expandedProvider = expandedProvider === prov.key ? null : prov.key} class="w-full flex items-center justify-between text-left group">
+                <div class="flex items-center gap-3">
+                  <div class="w-8 h-8 rounded-lg bg-[var(--color-surface-3)] flex items-center justify-center p-1.5 shrink-0 overflow-hidden">
+                    <ProviderIcon provider={prov.key} size={20} class="w-full h-full" />
+                  </div>
+                  <div>
+                    <span class="text-sm font-semibold text-[var(--color-text-primary)]">{prov.label}</span>
+                    <p class="text-[10px] text-[var(--color-text-muted)] group-hover:text-[var(--color-text-secondary)]">
+                      {#if status?.authenticated}
+                        {@const selectedCount = status.models?.length ?? 0}
+                        {@const availableCount = status.allAvailableModels?.length ?? 0}
+                        Connected{availableCount > 0 ? ` · ${selectedCount}/${availableCount} enabled` : ''}
+                      {:else}
+                        Not configured
+                      {/if}
+                    </p>
+                  </div>
+                </div>
+                <div class="flex items-center gap-2">
                   {#if status?.authenticated}
-                    <span class="w-1.5 h-1.5 rounded-full bg-green-500" title="Connected"></span>
-                    <span class="text-[10px]" style="color: var(--color-text-muted);">{status.models.length} models</span>
+                    <div class="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 text-[9px] font-bold">
+                      <span class="w-1 h-1 rounded-full bg-emerald-400"></span>
+                      {status.allAvailableModels?.length ?? status.models?.length ?? 0}
+                    </div>
                   {:else}
-                    <span class="w-1.5 h-1.5 rounded-full bg-yellow-500" title="Auth needed"></span>
+                    <div class="w-2 h-2 rounded-full bg-yellow-500/50 ring-4 ring-yellow-500/10"></div>
                   {/if}
                 </div>
               </button>
-
               {#if expandedProvider === prov.key}
-                <div class="px-2.5 pb-2.5 space-y-2">
+                {@const caps = getProviderCaps(prov.key)}
+                <div class="mt-4 space-y-3 pt-4 border-t border-[var(--color-border)]">
                   {#if status?.authenticated}
                     <div class="flex items-center justify-between">
-                      <div class="flex items-center gap-2">
-                        <span class="text-[10px] text-emerald-400 font-medium flex items-center gap-1"><Check size={10} /> Connected</span>
-                        <button
-                          onclick={() => { selectorTarget = status; showModelSelector = true; }}
-                          class="text-[10px] opacity-60 hover:opacity-100 underline decoration-dotted underline-offset-2"
-                        >
-                          Manage Models
-                        </button>
+                      <div class="text-[10px] text-[var(--color-text-muted)]">
+                        {(status.models?.length ?? 0)} enabled of {(status.allAvailableModels?.length ?? 0)} available
                       </div>
-                      <div class="flex items-center gap-2">
-                        <button
-                          onclick={() => { rotateProvider = { name: prov.key, keyType: 'apiKey' }; showRotateDialog = true; }}
-                          class="text-[10px] text-blue-400 hover:text-blue-300 transition-colors"
-                          title="Rotate API key"
-                        >
-                          Rotate Key
-                        </button>
-                        <button
-                          onclick={() => disconnectProvider(prov.key)}
-                          class="text-[10px] text-red-400 hover:text-red-300 transition-colors"
-                        >
-                          Disconnect
-                        </button>
-                      </div>
-                    </div>
-                    <!-- Model list -->
-                    <div class="space-y-0.5 mt-1">
-                      {#each status.models as model}
-                        <div class="flex items-center justify-between px-2 py-1 rounded" style="background: var(--color-surface-2);">
-                          <span class="text-[11px]" style="color: var(--color-text-secondary);">{model}</span>
-                        </div>
-                      {/each}
+                      <button type="button" onclick={() => { selectorTarget = status; showModelSelector = true; }} class="btn btn-secondary text-[10px] py-1 px-3">Manage Models</button>
+                      <button type="button" onclick={() => disconnectProvider(prov.key)} class="text-[10px] text-red-400 hover:text-red-300 font-medium transition-colors">Disconnect</button>
                     </div>
                   {:else}
-                    <!-- Auth mode selector for providers with multiple auth options -->
-                      {#if caps.extraAuthModes}
-                        <div class="flex gap-1 p-0.5 rounded-md mb-2" style="background: var(--color-surface-2);">
-                          {#each caps.extraAuthModes as mode}
-                            <button
-                              class="flex-1 text-[10px] py-1 rounded transition-colors
-                                     {(selectedAuthMode[prov.key] ?? caps.extraAuthModes[0].id) === mode.id
-                                       ? 'bg-[var(--color-surface-4)] text-[var(--color-text-primary)] font-medium'
-                                       : 'text-[var(--color-text-muted)]'}"
-                              onclick={() => { selectedAuthMode[prov.key] = mode.id; selectedAuthMode = {...selectedAuthMode}; }}
-                            >
-                              {mode.label}
-                            </button>
-                          {/each}
-                        </div>
-                        {@const currentMode = selectedAuthMode[prov.key] ?? caps.extraAuthModes[0].id}
-                        {#if currentMode === 'cli'}
-                          <div class="text-[10px] mb-1" style="color: var(--color-text-muted);">
-                            Use an existing Gemini CLI or gcloud session, or sign in via browser.
-                          </div>
-                          <button
-                            type="button"
-                            onclick={startGeminiCLIAuth}
-                            class="btn btn-secondary w-full"
-                          >
-                            Sign in with Google (open browser)
-                          </button>
-                          <button
-                            onclick={() => connectProvider(prov.key)}
-                            disabled={saving === prov.key}
-                            class="btn btn-primary w-full mt-1"
-                          >
-                            {verifying === prov.key ? 'Testing connection...' : saving === prov.key ? 'Saving...' : 'Verify CLI Auth'}
-                          </button>
-                          <div class="text-[10px] mt-2 p-2 rounded" style="background: var(--color-surface-2); color: var(--color-text-muted);">
-                            <strong>No credentials found?</strong> Make sure you have one of:
-                            <ul class="list-disc ml-4 mt-1 space-y-0.5">
-                              <li><a href="https://ai.google.dev/gemini-api/docs/downloads" target="_blank" class="underline hover:text-[var(--color-text-secondary)]">Gemini CLI</a> installed and logged in</li>
-                              <li><a href="https://cloud.google.com/sdk/docs/install" target="_blank" class="underline hover:text-[var(--color-text-secondary)]">gcloud CLI</a> with <code>gcloud auth application-default login</code></li>
-                            </ul>
-                          </div>
-                        {:else if currentMode === 'antigravity'}
-                          <div class="text-[10px] mb-1" style="color: var(--color-text-muted);">
-                            Sign in with Google in your browser. No CLI required.
-                          </div>
-                          <button
-                            type="button"
-                            onclick={startAntigravityAuth}
-                            disabled={antigravityAuthStatus === 'pending'}
-                            class="btn btn-secondary w-full"
-                          >
-                            Authorize Antigravity in Browser
-                          </button>
-                          {#if antigravityAuthId || antigravityAuthStatus !== 'idle'}
-                            <div class="rounded-md px-2 py-2 mt-2" style="background: var(--color-surface-2);">
-                              <div class="text-[10px]" style="color: var(--color-text-muted);">{antigravityAuthMessage}</div>
+                    <div class="space-y-2">
+                      {#if caps.supportsApiKey}
+                        <label class="text-[10px] text-[var(--color-text-muted)] font-medium uppercase tracking-wider" for={`provider-key-${prov.key}`}>API Key</label>
+                        <input id={`provider-key-${prov.key}`} type="password" placeholder={prov.placeholder} bind:value={keyInputs[prov.key]} class="input w-full text-xs" onkeydown={(e) => e.key === 'Enter' && connectProvider(prov.key)} />
+                      {/if}
+                      {#if showTokenInput(prov.key, caps)}
+                        <label class="text-[10px] text-[var(--color-text-muted)] font-medium uppercase tracking-wider" for={`provider-token-${prov.key}`}>Auth Token</label>
+                        <input id={`provider-token-${prov.key}`} type="password" placeholder={tokenPlaceholders[prov.key] ?? 'Auth token'} bind:value={tokenInputs[prov.key]} class="input w-full text-xs" onkeydown={(e) => e.key === 'Enter' && connectProvider(prov.key)} />
+                      {/if}
+                      {#if caps.requiresBaseUrl}
+                        <label class="text-[10px] text-[var(--color-text-muted)] font-medium uppercase tracking-wider" for={`provider-url-${prov.key}`}>Endpoint URL</label>
+                        <input id={`provider-url-${prov.key}`} type="text" placeholder={caps.baseUrlPlaceholder ?? 'https://...'} bind:value={urlInputs[prov.key]} class="input w-full text-xs" onkeydown={(e) => e.key === 'Enter' && connectProvider(prov.key)} />
+                      {/if}
+                      {#if usesBrowserAuth(prov.key)}
+                        <div class="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-0)]/80 p-3 space-y-2">
+                          {#if browserAuthMessages[prov.key]}
+                            <p class="text-[10px] text-[var(--color-text-muted)]">{browserAuthMessages[prov.key]}</p>
+                          {/if}
+                          {#if prov.key === 'copilot' && copilotDeviceAuth}
+                            <div class="rounded-md bg-[var(--color-surface-2)] px-2.5 py-2 text-[10px] text-[var(--color-text-secondary)]">
+                              <div>User code: <span class="font-semibold text-[var(--color-text-primary)]">{copilotDeviceAuth.userCode}</span></div>
+                              <div class="mt-1 break-all">{copilotDeviceAuth.verificationUri}</div>
                             </div>
                           {/if}
-                        {:else}
-                        <!-- Standard API key input -->
-                        <input
-                          type="password"
-                          placeholder={prov.placeholder}
-                          bind:value={keyInputs[prov.key]}
-                          onkeydown={(e) => { if (e.key === 'Enter') connectProvider(prov.key); }}
-                          class="input"
-                          style="font-size: 12px;"
-                        />
-                        <button
-                          onclick={() => connectProvider(prov.key)}
-                          disabled={saving === prov.key}
-                          class="btn btn-primary w-full"
-                        >
-                          {verifying === prov.key ? 'Testing connection...' : saving === prov.key ? 'Saving...' : 'Connect'}
-                        </button>
+                          {#if prov.key === 'kimicode' && kimicodeDeviceAuth}
+                            {@const kimiUserCode = kimicodeDeviceAuth.userCode}
+                            <div class="rounded-md bg-[var(--color-surface-2)] px-2.5 py-2 text-[10px] text-[var(--color-text-secondary)]">
+                              <div class="font-medium text-[var(--color-text-primary)]">Kimi Code sign-in needs approval.</div>
+                              <div class="mt-1">The browser was opened automatically.</div>
+                              <div>Paste this code if Kimi asks for it.</div>
+                              <div class="mt-2 flex items-center gap-2">
+                                <span>Code:</span>
+                                <span class="font-semibold tracking-[0.18em] text-[var(--color-text-primary)]">{kimiUserCode}</span>
+                                <button
+                                  type="button"
+                                  class="inline-flex items-center gap-1 rounded border border-[var(--color-border)] px-1.5 py-0.5 text-[10px] hover:bg-[var(--color-surface-3)]"
+                                  onclick={() => copyToClipboard(kimiUserCode, 'deviceCode')}
+                                >
+                                  <Copy size={10} />
+                                  {copiedDeviceCode === kimiUserCode ? 'Copied' : 'Copy code'}
+                                </button>
+                              </div>
+                              <div class="mt-2 text-[10px] text-[var(--color-text-muted)]">
+                                Waiting for Kimi Code approval to complete…
+                              </div>
+                            </div>
+                          {/if}
+                          {#if prov.key === 'codex' && codexDeviceAuth}
+                            {@const codexUserCode = codexDeviceAuth.userCode}
+                            <div class="rounded-md bg-[var(--color-surface-2)] px-2.5 py-2 text-[10px] text-[var(--color-text-secondary)]">
+                              <div class="font-medium text-[var(--color-text-primary)]">Codex sign-in needs a code.</div>
+                              <div class="mt-1">The browser was opened automatically.</div>
+                              <div>Paste this code if Codex asks for it.</div>
+                              <div class="mt-2 flex items-center gap-2">
+                                <span>Code:</span>
+                                <span class="font-semibold tracking-[0.18em] text-[var(--color-text-primary)]">{codexUserCode}</span>
+                                <button
+                                  type="button"
+                                  class="inline-flex items-center gap-1 rounded border border-[var(--color-border)] px-1.5 py-0.5 text-[10px] hover:bg-[var(--color-surface-3)]"
+                                  onclick={() => copyToClipboard(codexUserCode, 'deviceCode')}
+                                >
+                                  <Copy size={10} />
+                                  {copiedDeviceCode === codexUserCode ? 'Copied' : 'Copy code'}
+                                </button>
+                              </div>
+                              <div class="mt-2 text-[10px] text-[var(--color-text-muted)]">
+                                Waiting for Codex approval to complete…
+                              </div>
+                            </div>
+                          {/if}
+                          <div class="flex gap-2">
+                            <button
+                              type="button"
+                              onclick={() => startBrowserAuthFlow(prov.key)}
+                              disabled={browserAuthBusy === prov.key}
+                              class="btn btn-secondary flex-1 text-[10px] py-2"
+                            >
+                              {browserAuthBusy === prov.key && !browserAuthPending[prov.key]
+                                ? 'Opening...'
+                                : 'Auth'}
+                            </button>
+                            {#if browserAuthPending[prov.key] && prov.key !== 'copilot' && prov.key !== 'codex' && prov.key !== 'kimicode' && prov.key !== 'google-subscription'}
+                              <button
+                                type="button"
+                                onclick={() => finishBrowserAuthFlow(prov.key)}
+                                disabled={browserAuthBusy === prov.key}
+                                class="btn btn-primary flex-1 text-[10px] py-2 shadow-lg shadow-[var(--color-accent)]/10"
+                              >
+                                {browserAuthBusy === prov.key && browserAuthPending[prov.key] ? 'Checking...' : 'I Finished Sign-In'}
+                              </button>
+                            {/if}
+                          </div>
+                        </div>
                       {/if}
+                      {#if usesBrowserAuth(prov.key) && caps.supportsApiKey}
+                        <div class="flex items-center gap-3 py-1">
+                          <div class="flex-1 border-t border-[var(--color-border)]"></div>
+                          <span class="text-[9px] text-[var(--color-text-muted)] uppercase tracking-wider font-medium">or use API key</span>
+                          <div class="flex-1 border-t border-[var(--color-border)]"></div>
+                        </div>
+                        <button type="button" onclick={() => connectProvider(prov.key)} disabled={saving === prov.key} class="btn btn-primary w-full text-xs py-2 shadow-lg shadow-[var(--color-accent)]/10">{saving === prov.key ? 'Testing...' : 'Connect with API Key'}</button>
+                      {:else if !usesBrowserAuth(prov.key)}
+                        <button type="button" onclick={() => connectProvider(prov.key)} disabled={saving === prov.key} class="btn btn-primary w-full text-xs py-2 shadow-lg shadow-[var(--color-accent)]/10">{saving === prov.key ? 'Testing...' : 'Connect Provider'}</button>
+                      {/if}
+                    </div>
+                  {/if}
+                  <div class="space-y-3 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-0)]/70 p-3">
+                    <div class="flex items-center justify-between gap-3">
+                      <div>
+                        <p class="text-[10px] font-semibold uppercase tracking-[0.2em] text-[var(--color-text-muted)]">Saved Accounts</p>
+                        <p class="text-[11px] text-[var(--color-text-muted)]">Keep multiple keys or account logins per provider and switch between them.</p>
+                      </div>
+                      <button type="button" onclick={() => loadProviderAccounts(prov.key, true)} class="text-[10px] text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]">Refresh</button>
+                    </div>
+
+                    {#if accountsLoading[prov.key]}
+                      <p class="text-[11px] text-[var(--color-text-muted)]">Loading saved accounts...</p>
+                    {:else if getProviderAccounts(prov.key).length === 0}
+                      <p class="text-[11px] text-[var(--color-text-muted)]">No saved accounts yet.</p>
                     {:else}
-                      <!-- Providers without multi-auth-mode -->
+                      <div class="space-y-2">
+                        {#each getProviderAccounts(prov.key) as account (account.id)}
+                          <div class="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-1)] p-2.5">
+                            <div class="flex items-start justify-between gap-3">
+                              <div>
+                                <div class="text-xs font-semibold text-[var(--color-text-primary)]">{account.label}</div>
+                                <div class="mt-1 text-[10px] text-[var(--color-text-muted)]">
+                                  {[
+                                    account.hasApiKey ? 'API key' : null,
+                                    account.hasAuthToken ? 'Auth token' : null,
+                                    account.hasBaseUrl ? 'Endpoint URL' : null,
+                                  ].filter(Boolean).join(' • ')}
+                                </div>
+                              </div>
+                              <div class="flex items-center gap-2">
+                                <button
+                                  type="button"
+                                  onclick={() => activateProviderAccount(prov.key, account.id)}
+                                  disabled={accountBusy === `${prov.key}:activate:${account.id}`}
+                                  class="btn btn-secondary text-[10px] px-2.5 py-1"
+                                >
+                                  {accountBusy === `${prov.key}:activate:${account.id}` ? 'Activating...' : 'Activate'}
+                                </button>
+                                <button
+                                  type="button"
+                                  onclick={() => openAccountManager(prov.key, account)}
+                                  class="btn btn-secondary text-[10px] px-2.5 py-1"
+                                >
+                                  Manage
+                                </button>
+                                <button
+                                  type="button"
+                                  onclick={() => deleteProviderAccount(prov.key, account.id)}
+                                  disabled={accountBusy === `${prov.key}:delete:${account.id}`}
+                                  class="text-[10px] text-red-400 hover:text-red-300 font-medium transition-colors"
+                                >
+                                  {accountBusy === `${prov.key}:delete:${account.id}` ? 'Removing...' : 'Delete'}
+                                </button>
+                              </div>
+                            </div>
+                          </div>
+                        {/each}
+                      </div>
+                    {/if}
+
+                    <div class="space-y-2 pt-2 border-t border-[var(--color-border)]">
+                      <input
+                        type="text"
+                        placeholder="Label this saved account"
+                        bind:value={accountLabelInputs[prov.key]}
+                        class="input w-full text-xs"
+                      />
                       {#if caps.supportsApiKey}
                         <input
                           type="password"
                           placeholder={prov.placeholder}
-                          bind:value={keyInputs[prov.key]}
-                          onkeydown={(e) => { if (e.key === 'Enter') connectProvider(prov.key); }}
-                          class="input"
-                          style="font-size: 12px;"
+                          bind:value={accountKeyInputs[prov.key]}
+                          class="input w-full text-xs"
                         />
                       {/if}
-                      {#if caps.supportsAuthToken}
+                      {#if showTokenInput(prov.key, caps)}
                         <input
                           type="password"
-                          placeholder={caps.authMode === 'api_key_or_auth' ? 'Auth token (or use API key)' : 'Auth token'}
-                          bind:value={tokenInputs[prov.key]}
-                          onkeydown={(e) => { if (e.key === 'Enter') connectProvider(prov.key); }}
-                          class="input"
-                          style="font-size: 12px;"
+                          placeholder={tokenPlaceholders[prov.key] ?? 'Auth token'}
+                          bind:value={accountTokenInputs[prov.key]}
+                          class="input w-full text-xs"
                         />
                       {/if}
-                      {#if caps.authMode === 'auth_only'}
-                        <div class="text-[10px] mb-1" style="color: var(--color-text-muted);">
-                          {#if prov.key === 'cline'}
-                            Must have authed with CLI first (run <code>cline auth</code> in your terminal), then verify the connection.
-                          {:else}
-                            Authenticate in your browser, then verify the connection.
-                          {/if}
-                        </div>
-                        {#if prov.key === 'copilot'}
-                          <button
-                            onclick={startCopilotAuth}
-                            class="btn btn-secondary w-full"
-                          >
-                            Authorize Copilot in Browser
-                          </button>
-                          {#if copilotDeviceAuth}
-                            <div class="rounded-md px-2 py-2 mt-2" style="background: var(--color-surface-2);">
-                              <div class="text-[10px] mb-1" style="color: var(--color-text-muted);">Enter this code on GitHub:</div>
-                              <code class="text-xs font-semibold">{copilotDeviceAuth.userCode}</code>
-                              {#if copilotAuthStatus !== 'idle'}
-                                <div class="text-[10px] mt-2" style="color: var(--color-text-muted);">{copilotAuthMessage}</div>
-                              {/if}
-                            </div>
-                            <button
-                              onclick={() => completeCopilotAuth(true)}
-                              disabled={saving === 'copilot'}
-                              class="btn btn-primary w-full"
-                            >
-                              {saving === 'copilot' ? 'Checking...' : 'Complete Authorization'}
-                            </button>
-                          {/if}
-                        {:else if authPortalUrls[prov.key]}
-                          <button
-                            onclick={() => openAuthPortal(prov.key)}
-                            class="btn btn-secondary w-full"
-                          >
-                            Authenticate in Browser
-                          </button>
-                        {/if}
-                      {/if}
-                      {#if caps.requiresBaseUrl || prov.needsUrl}
+                      {#if caps.requiresBaseUrl}
                         <input
                           type="text"
-                          placeholder={caps.baseUrlPlaceholder ?? 'Endpoint URL'}
-                          bind:value={urlInputs[prov.key]}
-                          class="input"
-                          style="font-size: 12px;"
+                          placeholder={caps.baseUrlPlaceholder ?? 'https://...'}
+                          bind:value={accountUrlInputs[prov.key]}
+                          class="input w-full text-xs"
                         />
                       {/if}
-                      {#if caps.authMode === 'env_auth'}
-                        <div class="text-[10px]" style="color: var(--color-text-muted);">
-                          Uses host environment auth ({prov.key === 'bedrock' ? 'AWS credentials/profile' : 'Vertex/Google credentials'}).
+                      {#if prov.key === 'codex'}
+                        <button
+                          type="button"
+                          onclick={() => startBrowserAuthFlow('codex', { saveAccount: true, label: accountLabelInputs[prov.key] })}
+                          disabled={browserAuthBusy === 'codex'}
+                          class="btn btn-primary w-full text-[10px] py-2 shadow-lg shadow-[var(--color-accent)]/10"
+                        >
+                          {browserAuthBusy === 'codex' ? 'Opening...' : 'Auth'}
+                        </button>
+                      {:else if usesBrowserAuth(prov.key)}
+                        <p class="text-[11px] text-[var(--color-text-muted)]">
+                          This provider connects through browser sign-in instead of manual saved credentials.
+                        </p>
+                        <button
+                          type="button"
+                          onclick={() => startBrowserAuthFlow(prov.key)}
+                          disabled={browserAuthBusy === prov.key}
+                          class="btn btn-primary w-full text-[10px] py-2 shadow-lg shadow-[var(--color-accent)]/10"
+                        >
+                          {browserAuthBusy === prov.key ? 'Opening...' : 'Auth'}
+                        </button>
+                      {:else}
+                        <div class="flex gap-2">
+                          <button
+                            type="button"
+                            onclick={() => saveProviderAccount(prov.key, false)}
+                            disabled={accountBusy === `${prov.key}:save`}
+                            class="btn btn-secondary flex-1 text-[10px] py-2"
+                          >
+                            {accountBusy === `${prov.key}:save` ? 'Saving...' : 'Save Account'}
+                          </button>
+                          <button
+                            type="button"
+                            onclick={() => saveProviderAccount(prov.key, true)}
+                            disabled={accountBusy === `${prov.key}:save`}
+                            class="btn btn-primary flex-1 text-[10px] py-2 shadow-lg shadow-[var(--color-accent)]/10"
+                          >
+                            {accountBusy === `${prov.key}:save` ? 'Saving...' : 'Save + Activate'}
+                          </button>
                         </div>
                       {/if}
-                      {#if !(caps.authMode === 'auth_only' && prov.key === 'copilot')}
-                        <button
-                          onclick={() => connectProvider(prov.key)}
-                          disabled={saving === prov.key}
-                          class="btn btn-primary w-full"
-                        >
-                          {verifying === prov.key ? 'Testing connection...' : saving === prov.key ? 'Saving...' : (caps.authMode === 'auth_only' || caps.authMode === 'env_auth' ? 'Verify Connection' : 'Connect')}
-                        </button>
-                      {/if}
-                    {/if}
+                    </div>
+                  </div>
+                  {#if getProviderAccounts(prov.key).length >= 2}
+                    {@const orderedAccounts = getOrderedFallbackAccounts(prov.key)}
+                    <div class="space-y-3 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-0)]/70 p-3">
+                      <div class="flex items-center justify-between gap-3">
+                        <div>
+                          <p class="text-[10px] font-semibold uppercase tracking-[0.2em] text-[var(--color-text-muted)]">Fallback Order</p>
+                          <p class="text-[11px] text-[var(--color-text-muted)]">Drag to set priority. When the active account fails, the next one is tried automatically.</p>
+                        </div>
+                        {#if fallbackSaving === prov.key}
+                          <span class="text-[10px] text-[var(--color-text-muted)]">Saving...</span>
+                        {/if}
+                      </div>
+                      <div
+                        class="space-y-2"
+                        use:dndzone={{ items: orderedAccounts, dragDisabled: false }}
+                        onfinalize={(e) => handleFallbackDndFinalize(prov.key, e)}
+                      >
+                        {#each orderedAccounts as account, i (account.id)}
+                          <div class="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-1)] p-2.5 flex items-center gap-2.5 cursor-grab active:cursor-grabbing">
+                            <GripVertical size={14} class="text-[var(--color-text-muted)] shrink-0" />
+                            <span class="text-[10px] font-bold text-[var(--color-accent)] shrink-0 w-5 text-center">{i + 1}</span>
+                            <div class="flex-1 min-w-0">
+                              <div class="text-xs font-semibold text-[var(--color-text-primary)] truncate">{account.label}</div>
+                              <div class="text-[10px] text-[var(--color-text-muted)]">
+                                {[
+                                  account.hasApiKey ? 'API key' : null,
+                                  account.hasAuthToken ? 'Auth token' : null,
+                                  account.hasBaseUrl ? 'Endpoint URL' : null,
+                                ].filter(Boolean).join(' · ')}
+                              </div>
+                            </div>
+                            <span class="text-[9px] uppercase tracking-wider text-[var(--color-text-muted)] shrink-0">{i === 0 ? '1st' : i === 1 ? '2nd' : i === 2 ? '3rd' : `${i + 1}th`}</span>
+                          </div>
+                        {/each}
+                      </div>
+                    </div>
                   {/if}
                 </div>
               {/if}
             </div>
           {/each}
-    </div>
-
-    <div class="pt-4 mt-4" style="border-top: 1px solid var(--color-border);">
-      <p class="text-[10px] uppercase tracking-wider mb-2" style="color: var(--color-text-muted);">Server</p>
-      <div class="flex items-center gap-2">
-        <code class="flex-1 px-2 py-1.5 text-[11px] rounded-md" style="background: var(--color-surface-3);">
-          {typeof window !== 'undefined' ? `${window.location.protocol}//${window.location.host}` : ''}
-        </code>
-        <button class="btn btn-secondary p-1.5" onclick={copyEndpoint}>
-          {#if copiedEndpoint}<Check size={13} />{:else}<Copy size={13} />{/if}
-        </button>
-      </div>
-    </div>
-
-  {:else if activeTab === 'appearance'}
-    <div class="space-y-6 max-w-lg">
-      <div>
-        <div class="text-xs font-medium mb-2 block" style="color: var(--color-text-secondary);">Theme Preset</div>
-        <div class="grid grid-cols-3 gap-1.5">
-          {#each theme.presets as preset}
-            <button
-              class="flex items-center gap-2 px-3 py-2 rounded-lg text-xs transition-all border
-                     {theme.preset === preset.id
-                       ? 'border-[var(--color-accent)] bg-[var(--color-accent)]/10 text-[var(--color-text-primary)]'
-                       : 'border-transparent bg-[var(--color-surface-2)] text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-3)]'}"
-              onclick={() => theme.setPreset(preset.id)}
-            >
-              {#if theme.preset === preset.id}
-                <Check size={12} style="color: var(--color-accent);" />
-              {/if}
-              {preset.label}
-            </button>
-          {/each}
         </div>
       </div>
 
-      <div>
-        <div class="text-xs font-medium mb-2 block" style="color: var(--color-text-secondary);">Accent Color</div>
-        <div class="flex gap-2">
-          {#each theme.accents as accent}
-            <button
-              class="w-8 h-8 rounded-full border-2 transition-all flex items-center justify-center
-                     {theme.accent === accent.id ? 'border-[var(--color-text-primary)] scale-110' : 'border-transparent hover:scale-105'}"
-              style="background: {accent.color};"
-              onclick={() => theme.setAccent(accent.id)}
-              title={accent.label}
+      <!-- Appearance Tab -->
+      <div class={activeTab === 'appearance' ? 'flex-1 overflow-y-auto px-6 py-5 space-y-10 w-full max-w-7xl mx-auto' : 'hidden'}>
+        <section>
+          <div class="flex items-center gap-3 mb-6">
+            <Palette size={20} class="text-[var(--color-accent)]" />
+            <div>
+              <h3 class="text-base font-bold text-[var(--color-text-primary)]">Theme Presets</h3>
+              <p class="text-xs text-[var(--color-text-muted)]">Select your preferred application color scheme</p>
+            </div>
+          </div>
+          <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-4">
+            <!-- Static per-theme preview colors so each card shows its actual palette -->
+          {#each theme.presets as t}
+            {@const previewColors: Record<string, { bg: string; s1: string; s2: string; border: string; accent: string }> = {
+              kintsugi:    { bg: '#0D0B0A', s1: '#141210', s2: '#1C1917', border: 'rgba(213, 178, 97, 0.16)', accent: '#D5B261' },
+              midnight:    { bg: '#0a0a0b', s1: '#111113', s2: '#1a1a1e', border: '#2a2a30', accent: '#6366f1' },
+              nord:        { bg: '#2e3440', s1: '#3b4252', s2: '#434c5e', border: '#4c566a', accent: '#81a1c1' },
+              dracula:     { bg: '#1e1f29', s1: '#282a36', s2: '#2d303e', border: '#44475a', accent: '#ff79c6' },
+              catppuccin:  { bg: '#1e1e2e', s1: '#24243a', s2: '#2a2a42', border: '#3a3a52', accent: '#cba6f7' },
+              gruvbox:     { bg: '#1d2021', s1: '#282828', s2: '#32302f', border: '#504945', accent: '#fabd2f' },
+              tokyo:       { bg: '#1a1b26', s1: '#1f2335', s2: '#24283b', border: '#343b58', accent: '#7aa2f7' },
+              solarized:   { bg: '#002b36', s1: '#073642', s2: '#0b3f4a', border: '#1a5563', accent: '#268bd2' },
+              light:       { bg: '#ffffff', s1: '#f8f9fa', s2: '#f1f3f5', border: '#dee2e6', accent: '#2563eb' },
+              system:      { bg: '#f8f9fa', s1: '#141210', s2: '#262220', border: '#dee2e6', accent: '#D5B261' },
+            }}
+            {@const colors = previewColors[t.id] ?? previewColors.kintsugi}
+            <button 
+              type="button"
+              class="group relative flex flex-col gap-3 p-3 rounded-xl border transition-all 
+                     {theme.preset === t.id ? 'border-[var(--color-accent)] bg-[var(--color-surface-2)] shadow-lg' : 'border-[var(--color-border)] bg-[var(--color-surface-1)] hover:border-[var(--color-text-muted)]'}" 
+              onclick={() => theme.setPreset(t.id as ThemePreset)}
             >
-              {#if theme.accent === accent.id}
-                <Check size={14} style="color: var(--color-text-primary); filter: drop-shadow(0 0 2px rgba(0,0,0,0.5));" />
-              {/if}
-            </button>
-          {/each}
-        </div>
-      </div>
-
-      <div>
-        <div class="text-xs font-medium mb-2 block" style="color: var(--color-text-secondary);">Font</div>
-        <div class="space-y-1">
-          {#each theme.fonts as font}
-            <button
-              class="w-full flex items-center justify-between px-3 py-2 rounded-lg text-xs transition-colors border
-                     {theme.font === font.id
-                       ? 'border-[var(--color-accent)] bg-[var(--color-accent)]/10'
-                       : 'border-transparent bg-[var(--color-surface-2)] hover:bg-[var(--color-surface-3)]'}"
-              onclick={() => theme.setFont(font.id)}
-            >
-              <span style="color: var(--color-text-primary); font-family: {theme.getFontFamily(font.id)};">{font.label}</span>
-              {#if theme.font === font.id}
-                <Check size={12} style="color: var(--color-accent);" />
+              <div class="w-full h-20 rounded-lg flex overflow-hidden shadow-inner border border-black/20" style="background: {colors.bg};">
+                <!-- Mini Sidebar -->
+                <div class="w-1/4 h-full border-r border-black/20 p-1.5 flex flex-col gap-1.5" style="background: {colors.s1}; border-color: {colors.border};">
+                  <div class="w-full h-1.5 rounded-sm opacity-60" style="background: {colors.s2};"></div>
+                  <div class="w-2/3 h-1.5 rounded-sm opacity-60" style="background: {colors.s2};"></div>
+                  <div class="w-3/4 h-1.5 rounded-sm opacity-60" style="background: {colors.s2};"></div>
+                </div>
+                <!-- Mini Main Content -->
+                <div class="flex-1 flex flex-col">
+                  <!-- Header -->
+                  <div class="h-4 w-full flex items-center px-2 border-b border-black/20" style="background: {colors.bg}; border-color: {colors.border};">
+                    <div class="w-4 h-1 rounded-full" style="background: {colors.accent};"></div>
+                  </div>
+                  <!-- Chat Area -->
+                  <div class="flex-1 p-2 flex flex-col gap-1.5 justify-end" style="background: {colors.bg};">
+                    <!-- User bubble -->
+                    <div class="self-end w-3/4 rounded shrink-0 p-1 shadow-sm" style="background: {colors.accent};">
+                      <div class="h-[3px] w-full bg-white/40 rounded-full"></div>
+                    </div>
+                    <!-- Assistant bubble -->
+                    <div class="self-start w-5/6 rounded shrink-0 border border-black/10 p-1" style="background: {colors.s1}; border-color: {colors.border};">
+                      <div class="h-[3px] w-full opacity-50 mb-0.5 rounded-full" style="background: {colors.s2};"></div>
+                      <div class="h-[3px] w-2/3 opacity-50 rounded-full" style="background: {colors.s2};"></div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+              <span class="text-xs font-semibold capitalize transition-colors {theme.preset === t.id ? 'text-[var(--color-accent)]' : 'text-[var(--color-text-secondary)]'}">{t.label}</span>
+              {#if theme.preset === t.id}
+                <div class="absolute -top-1 -right-1 w-5 h-5 bg-[var(--color-accent)] rounded-full flex items-center justify-center text-[var(--color-surface-0)] shadow-md">
+                  <Check size={12} strokeWidth={3} />
+                </div>
               {/if}
             </button>
           {/each}
         </div>
-      </div>
-    </div>
+      </section>
 
-  {:else if activeTab === 'shortcuts'}
-    <div class="space-y-1.5 max-w-lg">
-      <p class="text-[10px] mb-3" style="color: var(--color-text-muted);">
-        Click a shortcut to rebind it. Press the new key combination to save.
-      </p>
-      {#each shortcuts as shortcut (shortcut.id)}
-        <div
-          class="flex items-center justify-between py-2 px-3 rounded-lg transition-colors cursor-pointer
-                 {editingShortcutId === shortcut.id ? 'ring-1 ring-[var(--color-accent)]' : 'hover:bg-[var(--color-surface-3)]'}"
-          style="background: var(--color-surface-2);"
-          onclick={() => startEditShortcut(shortcut.id)}
-          role="button"
-          tabindex="0"
-          onkeydown={(e) => { if (e.key === 'Enter') startEditShortcut(shortcut.id); }}
-        >
-          <span class="text-xs" style="color: var(--color-text-secondary);">{shortcut.action}</span>
-          <div class="flex gap-1">
-            {#if editingShortcutId === shortcut.id}
-              {#if capturedKeys.length > 0}
-                {#each capturedKeys as key}
-                  <span class="kbd" style="color: var(--color-accent);">{key}</span>
+        <section>
+          <div class="flex items-center gap-3 mb-6">
+            <Zap size={20} class="text-[var(--color-accent)]" />
+            <div>
+              <h3 class="text-base font-bold text-[var(--color-text-primary)]">Accent Color</h3>
+              <p class="text-xs text-[var(--color-text-muted)]">Customize the primary interaction color</p>
+            </div>
+          </div>
+          <div class="flex flex-wrap gap-4 p-4 rounded-2xl bg-[var(--color-surface-2)] border border-[var(--color-border)]">
+            {#each theme.accents as color}
+              <button 
+                type="button"
+                class="group relative w-12 h-12 rounded-xl transition-all hover:scale-110 active:scale-95 shadow-md
+                       {theme.accent === color.id ? 'ring-2 ring-[var(--color-text-primary)] ring-offset-4 ring-offset-[var(--color-surface-2)]' : 'opacity-80 hover:opacity-100'}" 
+                style="background-color: {color.color};" 
+                onclick={() => theme.setAccent(color.id as AccentColor)}
+                title={color.label}
+              >
+                {#if theme.accent === color.id}
+                  <Check size={20} class="mx-auto text-white drop-shadow-md" strokeWidth={3} />
+                {/if}
+              </button>
+            {/each}
+          </div>
+        </section>
+
+        <section>
+          <div class="flex items-center gap-3 mb-6">
+            <Type size={20} class="text-[var(--color-accent)]" />
+            <div>
+              <h3 class="text-base font-bold text-[var(--color-text-primary)]">Typography</h3>
+              <p class="text-xs text-[var(--color-text-muted)]">Choose the font family for the interface</p>
+            </div>
+          </div>
+          {#each [...new Set(theme.fonts.map(f => f.category))] as category}
+            <div class="mb-6">
+              <p class="text-[10px] font-bold uppercase tracking-[0.2em] text-[var(--color-text-muted)] mb-3">{category}</p>
+              <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
+                {#each theme.fonts.filter(f => f.category === category) as f}
+                  <button 
+                    type="button"
+                    class="flex flex-col gap-2 p-4 rounded-xl border transition-all text-left
+                           {theme.font === f.id ? 'border-[var(--color-accent)] bg-[var(--color-surface-2)] shadow-lg shadow-[var(--color-accent)]/5' : 'border-[var(--color-border)] bg-[var(--color-surface-1)] hover:bg-[var(--color-surface-2)] hover:border-[var(--color-text-muted)]'}" 
+                    onclick={() => theme.setFont(f.id as FontFamily)}
+                  >
+                    <span class="text-[10px] font-medium text-[var(--color-text-muted)]">{f.label}</span>
+                    <span class="text-lg leading-tight" style="font-family: {theme.getFontFamily(f.id as FontFamily)}">Koryphaios</span>
+                    <span class="text-[10px] opacity-50" style="font-family: {theme.getFontFamily(f.id as FontFamily)}">The quick brown fox</span>
+                    {#if theme.font === f.id}
+                      <div class="mt-1 flex items-center gap-1.5 text-[var(--color-accent)] font-bold text-[10px] uppercase tracking-tighter">
+                        <Check size={10} strokeWidth={3} /> Active
+                      </div>
+                    {/if}
+                  </button>
                 {/each}
+              </div>
+            </div>
+          {/each}
+        </section>
+      </div>
+
+      <!-- Shortcuts Tab -->
+      <div class={activeTab === 'shortcuts' ? 'flex-1 overflow-y-auto px-6 py-5 space-y-6 w-full max-w-7xl mx-auto' : 'hidden'}>
+        <div class="flex items-center justify-between mb-4">
+          <div>
+            <h3 class="text-base font-bold text-[var(--color-text-primary)]">Keyboard Shortcuts</h3>
+            <p class="text-xs text-[var(--color-text-muted)]">Customizable global key bindings</p>
+          </div>
+          <button type="button" onclick={resetShortcuts} class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-red-500/10 text-red-400 text-xs font-medium hover:bg-red-500/20 transition-colors">
+            <RotateCcw size={12} /> Reset to Defaults
+          </button>
+        </div>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+          {#each shortcuts as shortcut}
+            <div class="group flex items-center justify-between p-4 bg-[var(--color-surface-2)] rounded-xl border border-[var(--color-border)] transition-colors hover:border-[var(--color-text-muted)]">
+              <div>
+                <div class="text-sm font-semibold text-[var(--color-text-primary)]">{shortcut.action}</div>
+                <div class="text-xs text-[var(--color-text-muted)]">{shortcut.description}</div>
+              </div>
+              <button 
+                type="button"
+                onclick={() => startEditShortcut(shortcut.id)} 
+                class="flex items-center gap-1 px-3 py-2 rounded-lg border bg-[var(--color-surface-1)] text-sm font-mono transition-all
+                       {editingShortcutId === shortcut.id ? 'ring-2 ring-[var(--color-accent)] border-[var(--color-accent)] text-[var(--color-accent)]' : 'group-hover:border-[var(--color-text-secondary)] shadow-sm'}"
+              >
+                {#if editingShortcutId === shortcut.id}
+                  <span class="animate-pulse">Waiting for keys...</span>
+                {:else}
+                  {#each shortcut.keys as key, i}
+                    <span>{key}</span>
+                    {#if i < shortcut.keys.length - 1}<span class="opacity-30 mx-0.5">+</span>{/if}
+                  {/each}
+                {/if}
+              </button>
+            </div>
+          {/each}
+        </div>
+      </div>
+
+      <!-- Messaging Tab -->
+      <div class={activeTab === 'messaging' ? 'flex-1 overflow-y-auto px-6 py-5 w-full max-w-7xl mx-auto' : 'hidden'}>
+        <div class="grid gap-6 xl:grid-cols-[minmax(0,1.1fr)_minmax(320px,0.9fr)]">
+          <div class="space-y-6">
+            <div class="flex gap-4 rounded-2xl border border-[var(--color-accent)]/10 bg-[var(--color-accent)]/5 p-6">
+              <Globe size={24} class="shrink-0 text-[var(--color-accent)]" />
+              <div>
+                <h4 class="text-base font-bold text-[var(--color-text-primary)]">Real-time Messaging Bridge</h4>
+                <p class="mt-1 text-xs text-[var(--color-text-secondary)]">Connect your workspace to external apps. Tasks can be sent from Telegram or Slack and replies will stream back to the same chat.</p>
+              </div>
+            </div>
+
+            <div class="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-2)] p-5">
+              <div class="mb-6 flex items-center justify-between gap-4">
+                <div class="flex items-center gap-3">
+                  <div class="flex h-10 w-10 items-center justify-center rounded-xl bg-[#24A1DE] text-white shadow-lg shadow-[#24A1DE]/20">
+                    <Send size={20} />
+                  </div>
+                  <div>
+                    <h4 class="text-sm font-bold text-[var(--color-text-primary)]">Telegram</h4>
+                    <p class="text-[10px] text-[var(--color-text-muted)]">Native integration via bot API</p>
+                  </div>
+                </div>
+                <label class="relative inline-flex cursor-pointer items-center">
+                  <input type="checkbox" bind:checked={telegramEnabled} class="peer sr-only" />
+                  <div class="peer h-6 w-11 rounded-full bg-[var(--color-surface-4)] peer-focus:outline-none
+                    peer-checked:after:translate-x-full peer-checked:after:border-white after:absolute
+                    after:left-[2px] after:top-[2px] after:h-5 after:w-5 after:rounded-full after:bg-white
+                    after:transition-all after:content-[''] peer-checked:bg-[var(--color-accent)]"></div>
+                </label>
+              </div>
+
+              <div class="grid gap-4 lg:grid-cols-2">
+                <div class="space-y-4 lg:col-span-2">
+                  <div class="space-y-1.5">
+                    <label class="ml-1 text-[10px] font-bold uppercase tracking-widest text-[var(--color-text-muted)]" for="telegram-bot-token">Bot Token</label>
+                    <input id="telegram-bot-token" type="password" placeholder={telegramBotTokenSet ? '••••••••••••••••' : 'Token from @BotFather'} bind:value={telegramBotToken} class="input w-full" />
+                  </div>
+                  <div class="space-y-1.5">
+                    <label class="ml-1 text-[10px] font-bold uppercase tracking-widest text-[var(--color-text-muted)]" for="telegram-admin-id">Admin User ID</label>
+                    <input id="telegram-admin-id" type="text" placeholder="Your numeric ID (e.g. 1234567)" bind:value={telegramAdminId} class="input w-full" />
+                  </div>
+                </div>
+
+                <div class="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-1)] p-4">
+                  <div class="text-[10px] uppercase tracking-widest text-[var(--color-text-muted)]">Connection</div>
+                  <div class="mt-2 text-sm font-semibold text-[var(--color-text-primary)]">
+                    {telegramEnabled ? 'Enabled' : 'Disabled'}
+                  </div>
+                  <p class="mt-2 text-[10px] text-[var(--color-text-muted)]">
+                    {telegramBotTokenSet ? 'A bot token is already stored.' : 'No token has been stored yet.'}
+                  </p>
+                </div>
+
+                <div class="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-1)] p-4">
+                  <div class="text-[10px] uppercase tracking-widest text-[var(--color-text-muted)]">Delivery</div>
+                  <div class="mt-2 text-sm font-semibold text-[var(--color-text-primary)]">Task relay</div>
+                  <p class="mt-2 text-[10px] text-[var(--color-text-muted)]">
+                    Incoming tasks are forwarded into the current workspace and stream replies back to the same thread.
+                  </p>
+                </div>
+              </div>
+
+              <button type="button" onclick={saveMessaging} disabled={messagingSaving} class="btn btn-primary mt-5 w-full py-2.5">
+                {messagingSaving ? 'Saving...' : 'Save Telegram Config'}
+              </button>
+            </div>
+          </div>
+
+          <div class="space-y-6">
+            <div class="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-2)] p-5 opacity-60">
+              <div class="mb-4 flex items-center justify-between gap-4">
+                <div class="flex items-center gap-3">
+                  <div class="flex h-10 w-10 items-center justify-center rounded-xl bg-[#4A154B] text-white">
+                    <Slack size={20} />
+                  </div>
+                  <div>
+                    <h4 class="text-sm font-bold text-[var(--color-text-primary)]">Slack</h4>
+                    <p class="text-[10px] text-[var(--color-text-muted)]">Enterprise workspace bridge</p>
+                  </div>
+                </div>
+                <span class="rounded bg-[var(--color-surface-3)] px-2 py-0.5 text-[9px] font-bold uppercase tracking-widest text-[var(--color-text-muted)]">Coming Soon</span>
+              </div>
+              <p class="text-xs text-[var(--color-text-muted)]">Slack support will mirror the Telegram bridge but with workspace-scoped auth and channel routing.</p>
+            </div>
+
+            <div class="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-2)] p-5">
+              <h4 class="text-sm font-bold text-[var(--color-text-primary)]">Bridge Notes</h4>
+              <div class="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-1">
+                <div class="rounded-xl bg-[var(--color-surface-1)] p-4">
+                  <div class="text-[10px] uppercase tracking-widest text-[var(--color-text-muted)]">Recommended</div>
+                  <p class="mt-2 text-xs text-[var(--color-text-primary)]">Keep one admin user per bot while you validate the workflow.</p>
+                </div>
+                <div class="rounded-xl bg-[var(--color-surface-1)] p-4">
+                  <div class="text-[10px] uppercase tracking-widest text-[var(--color-text-muted)]">Safety</div>
+                  <p class="mt-2 text-xs text-[var(--color-text-primary)]">Use a dedicated bot token instead of reusing a general automation bot.</p>
+                </div>
+                <div class="rounded-xl bg-[var(--color-surface-1)] p-4 sm:col-span-2 xl:col-span-1">
+                  <div class="text-[10px] uppercase tracking-widest text-[var(--color-text-muted)]">Status</div>
+                  <p class="mt-2 text-xs text-[var(--color-text-primary)]">
+                    {messagingLoading ? 'Loading messaging configuration…' : 'Configuration loaded locally from the backend settings endpoint.'}
+                  </p>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Billing Tab -->
+      <div class={activeTab === 'billing' ? 'flex-1 overflow-y-auto px-6 py-5 space-y-8 w-full max-w-7xl mx-auto' : 'hidden'}>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+          <div class="p-6 rounded-2xl bg-gradient-to-br from-[var(--color-surface-2)] to-[var(--color-surface-1)] border border-[var(--color-border)] shadow-xl relative overflow-hidden">
+            <div class="absolute -top-4 -right-4 w-24 h-24 bg-[var(--color-accent)]/5 rounded-full blur-3xl"></div>
+            <div class="text-[10px] text-[var(--color-text-muted)] uppercase tracking-widest font-bold mb-2">Total Workspace Spend</div>
+            <div class="text-4xl font-black text-[var(--color-text-primary)] flex items-baseline gap-1">
+              {#if billingCredits === null}
+                <div class="h-10 w-32 bg-[var(--color-surface-3)] animate-pulse rounded-lg"></div>
               {:else}
-                <span class="text-[10px] animate-pulse" style="color: var(--color-accent);">Press keys...</span>
+                <span class="text-2xl opacity-50">$</span>{(billingCredits.totalSpendCents / 100).toFixed(2)}
               {/if}
-            {:else}
-              {#each shortcut.keys as key}
-                <span class="kbd">{key}</span>
-              {/each}
-            {/if}
+            </div>
+            <p class="text-[10px] text-[var(--color-text-muted)] mt-4">Estimated from local token usage tracking</p>
+          </div>
+
+          <div class="p-6 rounded-2xl bg-[var(--color-surface-2)] border border-[var(--color-border)]">
+            <div class="text-[10px] text-[var(--color-text-muted)] uppercase tracking-widest font-bold mb-2">Available Budget</div>
+            <div class="text-4xl font-black text-emerald-400 flex items-baseline gap-1">
+              {#if billingCredits === null}
+                <div class="h-10 w-32 bg-[var(--color-surface-3)] animate-pulse rounded-lg"></div>
+              {:else}
+                <span class="text-2xl opacity-50">$</span>{(billingCredits.remainingCents / 100).toFixed(2)}
+              {/if}
+            </div>
+            <div class="mt-4 h-2 w-full bg-[var(--color-surface-3)] rounded-full overflow-hidden">
+              <div class="h-full bg-emerald-500 rounded-full" style="width: 75%"></div>
+            </div>
           </div>
         </div>
-      {/each}
-      <div class="pt-3">
-        <button
-          class="btn btn-secondary text-xs"
-          onclick={resetShortcuts}
-        >
-          Reset to Defaults
-        </button>
-      </div>
-    </div>
 
-  {:else if activeTab === 'messaging'}
-    <div class="space-y-6 max-w-lg">
-      <p class="text-[10px] uppercase tracking-wider mb-2" style="color: var(--color-text-muted);">
-        Talk to the manager agent via messaging apps. Replies stream back automatically.
-      </p>
-      {#if messagingLoading}
-        <p class="text-xs" style="color: var(--color-text-muted);">Loading…</p>
-      {:else}
-        <!-- Telegram -->
-        <div class="rounded-lg p-4" style="background: var(--color-surface-2); border: 1px solid var(--color-border);">
-          <div class="flex items-center justify-between mb-3">
-            <span class="text-xs font-medium" style="color: var(--color-text-primary);">Telegram</span>
-            {#if telegramEnabled}
-              <span class="flex items-center gap-1.5 text-[10px]" style="color: var(--color-text-muted);">
-                <span class="w-1.5 h-1.5 rounded-full bg-green-500"></span>
-                Connected
-              </span>
-            {:else}
-              <span class="text-[10px]" style="color: var(--color-text-muted);">Not configured</span>
-            {/if}
-          </div>
-          <label class="flex items-center gap-2 mb-2">
-            <input
-              type="checkbox"
-              bind:checked={telegramEnabled}
-              class="rounded"
-            />
-            <span class="text-xs" style="color: var(--color-text-secondary);">Enable Telegram bridge</span>
-          </label>
-          {#if telegramEnabled}
-            <input
-              type="password"
-              placeholder={telegramBotTokenSet ? 'Bot token (leave blank to keep current)' : 'Bot token (from @BotFather)'}
-              bind:value={telegramBotToken}
-              class="input mb-2"
-              style="font-size: 12px;"
-            />
-            <input
-              type="text"
-              placeholder="Your Telegram user ID (admin)"
-              bind:value={telegramAdminId}
-              class="input mb-3"
-              style="font-size: 12px;"
-            />
-            <p class="text-[10px] mb-3" style="color: var(--color-text-muted);">
-              Get your ID from @userinfobot. Only this user can send tasks; replies stream to the same chat.
-            </p>
-          {/if}
-        </div>
-
-        <!-- iMessage -->
-        <div class="rounded-lg p-4" style="background: var(--color-surface-2); border: 1px solid var(--color-border);">
-          <div class="flex items-center justify-between mb-3">
-            <span class="text-xs font-medium" style="color: var(--color-text-primary);">iMessage</span>
-            <span class="text-[10px]" style="color: var(--color-text-muted);">Bridge required</span>
-          </div>
-          <p class="text-[10px] mb-2" style="color: var(--color-text-secondary);">
-            Use your Mac as a bridge: run a small bridge app that forwards iMessage to this server and sends replies back. No server API for iMessage; the bridge runs on your Mac.
-          </p>
-          <p class="text-[10px]" style="color: var(--color-text-muted);">
-            Bridge app: connect to this server, then message the configured number from iMessage to talk to the manager agent.
-          </p>
-        </div>
-
-        <!-- Android Messages -->
-        <div class="rounded-lg p-4" style="background: var(--color-surface-2); border: 1px solid var(--color-border);">
-          <div class="flex items-center justify-between mb-3">
-            <span class="text-xs font-medium" style="color: var(--color-text-primary);">Android Messages</span>
-            <span class="text-[10px]" style="color: var(--color-text-muted);">Bridge required</span>
-          </div>
-          <p class="text-[10px] mb-2" style="color: var(--color-text-secondary);">
-            Use your Android phone as a bridge: run a small bridge app that forwards Messages to this server and sends replies back. No server API for Android Messages; the bridge runs on your device.
-          </p>
-          <p class="text-[10px]" style="color: var(--color-text-muted);">
-            Bridge app: connect to this server, then message the configured number from Android Messages to talk to the manager agent.
-          </p>
-        </div>
-
-        <button
-          class="btn btn-primary"
-          disabled={messagingSaving}
-          onclick={() => saveMessaging()}
-        >
-          {messagingSaving ? 'Saving…' : 'Save messaging config'}
-        </button>
-        <p class="text-[10px]" style="color: var(--color-text-muted);">
-          Restart the server after saving for Telegram changes to take effect.
-        </p>
-      {/if}
-    </div>
-  {:else if activeTab === 'billing'}
-    <div class="space-y-4">
-      <p class="text-sm" style="color: var(--color-text-secondary);">
-        Local estimate (from token usage) vs cloud reality (OpenAI / GitHub Copilot). Drift &gt; 5% is highlighted.
-      </p>
-      {#if billingLoading}
-        <p class="text-sm" style="color: var(--color-text-muted);">Loading…</p>
-      {:else if billingError}
-        <p class="text-sm" style="color: var(--color-error, #dc2626);">{billingError}</p>
-      {:else if billingData}
-        {#if billingData.highlightDrift}
-          <div
-            class="flex items-center gap-2 p-3 rounded-lg border"
-            style="background: var(--color-surface-2); border-color: var(--color-warning, #f59e0b);"
-          >
-            <AlertTriangle size={18} style="color: var(--color-warning, #f59e0b);" />
-            <span class="text-sm font-medium">Drift &gt; 5% — Local estimate and cloud usage differ by {billingData.driftPercent?.toFixed(1) ?? '?'}%.</span>
-          </div>
-        {/if}
-        <div class="grid gap-4 sm:grid-cols-2">
-          <div class="p-4 rounded-lg" style="background: var(--color-surface-2);">
-            <h3 class="text-xs font-semibold uppercase tracking-wider mb-2" style="color: var(--color-text-muted);">Local estimate</h3>
-            <p class="text-lg font-semibold" style="color: var(--color-text-primary);">${billingData.localEstimate.totalCostUsd.toFixed(4)}</p>
-            <p class="text-[10px] mt-1" style="color: var(--color-text-muted);">
-              {billingData.localEstimate.tokensIn.toLocaleString()} in / {billingData.localEstimate.tokensOut.toLocaleString()} out tokens
-            </p>
-            {#if billingData.localEstimate.byModel.length > 0}
-              <ul class="mt-2 space-y-1 text-[10px]" style="color: var(--color-text-muted);">
-                {#each billingData.localEstimate.byModel as row}
-                  <li>{row.model}: ${row.costUsd.toFixed(4)}</li>
-                {/each}
-              </ul>
-            {/if}
-          </div>
-          <div class="p-4 rounded-lg" style="background: var(--color-surface-2);">
-            <h3 class="text-xs font-semibold uppercase tracking-wider mb-2" style="color: var(--color-text-muted);">Cloud reality</h3>
-            {#if billingData.cloudReality.length === 0}
-              <p class="text-sm" style="color: var(--color-text-muted);">No cloud snapshots yet (poll every 15 min).</p>
-            {:else}
-              {#each billingData.cloudReality as cloud}
-                <div class="mb-2 last:mb-0">
-                  <span class="text-xs font-medium" style="color: var(--color-text-secondary);">{cloud.source}</span>
-                  {#if cloud.totalUsedUsd != null}
-                    <p class="text-sm" style="color: var(--color-text-primary);">Used: ${cloud.totalUsedUsd.toFixed(4)}</p>
-                  {/if}
-                  {#if cloud.totalAvailableUsd != null}
-                    <p class="text-[10px]" style="color: var(--color-text-muted);">Available: ${cloud.totalAvailableUsd.toFixed(4)}</p>
-                  {/if}
+        <div class="space-y-4">
+          <h3 class="text-sm font-bold text-[var(--color-text-primary)] ml-1">Consumption by Provider</h3>
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            {#if billingCredits?.byProvider}
+              {#each billingCredits.byProvider as prov (prov.name)}
+                <div class="flex items-center justify-between p-4 bg-[var(--color-surface-2)] rounded-xl border border-[var(--color-border)]">
+                  <div class="flex items-center gap-3">
+                    <div class="w-8 h-8 rounded-lg bg-[var(--color-surface-3)] flex items-center justify-center p-1.5 shrink-0">
+                      <ProviderIcon provider={prov.name} size={20} class="w-full h-full" />
+                    </div>
+                    <span class="text-xs font-semibold">{getProviderDisplayLabel(prov.name)}</span>
+                  </div>
+                  <div class="text-xs font-mono font-bold text-[var(--color-text-secondary)]">${(prov.spendCents / 100).toFixed(3)}</div>
                 </div>
               {/each}
+            {:else}
+              <div class="col-span-full py-12 text-center border-2 border-dashed border-[var(--color-border)] rounded-2xl">
+                <p class="text-xs text-[var(--color-text-muted)]">No usage data recorded yet</p>
+              </div>
             {/if}
           </div>
         </div>
-      {/if}
-    </div>
-  {:else if activeTab === 'memory'}
-    <div class="h-full -mx-6 -my-5">
-      <MemoryEditor />
-    </div>
-  {:else if activeTab === 'agent'}
-    <div class="h-full -mx-6 -my-5">
-      <AgentSettings />
-    </div>
-  {/if}
+      </div>
 
+      <!-- Memory Tab -->
+      <div class={activeTab === 'memory' ? 'flex-1 min-h-0 min-w-0 overflow-hidden flex flex-col' : 'hidden'}>
+        <MemoryEditor />
+      </div>
+
+      <!-- Agent Tab -->
+      <div class={activeTab === 'agent' ? 'flex-1 min-h-0 min-w-0 overflow-hidden flex flex-col' : 'hidden'}>
+        <AgentSettings />
+      </div>
+
+      <!-- Experimental Tab -->
+      <div class={activeTab === 'experimental' ? 'flex-1 min-h-0 min-w-0 overflow-hidden flex flex-col' : 'hidden'}>
+        <div class="flex-1 min-h-0 overflow-y-auto px-6 py-5"><ExperimentalSettings /></div>
+      </div>
+
+      <!-- Teams Tab -->
+      <div class={activeTab === 'teams' ? 'flex-1 overflow-y-auto px-6 py-5 flex flex-col w-full max-w-7xl mx-auto' : 'hidden'}>
+        <div class="flex-1 py-10">
+          <div class="text-center mb-12">
+            <div class="w-20 h-20 bg-[var(--color-accent)]/10 text-[var(--color-accent)] rounded-3xl flex items-center justify-center mx-auto mb-6 shadow-xl shadow-[var(--color-accent)]/5">
+              <Users size={40} />
+            </div>
+            <h3 class="text-2xl font-black text-[var(--color-text-primary)]">Team Collaboration</h3>
+            <p class="text-sm text-[var(--color-text-muted)] mt-2">Enable multiplayer AI sessions and shared knowledge bases</p>
+          </div>
+
+          {#if collaborationStore.activeCollab}
+            <div class="mx-auto grid max-w-6xl gap-6 xl:grid-cols-[minmax(320px,0.8fr)_minmax(0,1.2fr)]">
+              <div class="relative rounded-3xl border border-[var(--color-accent)]/30 bg-[var(--color-surface-2)] p-8 shadow-2xl">
+                <div class="absolute -top-3 left-6 px-4 py-1 rounded-full bg-[var(--color-accent)] text-[10px] font-black uppercase tracking-widest text-[var(--color-surface-0)] shadow-lg">Active Session</div>
+
+                <div class="space-y-6">
+                  <div class="text-center">
+                    <p class="mb-2 block text-[10px] font-bold uppercase tracking-widest text-[var(--color-text-muted)]">Workspace Passcode</p>
+                    <code class="block rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-1)] py-4 text-3xl font-black tracking-[0.3em] text-[var(--color-accent)]">{collaborationStore.activeCollab.joinCode || '••••••'}</code>
+                  </div>
+
+                  <div class="grid gap-3 sm:grid-cols-2 xl:grid-cols-1">
+                    <div class="rounded-2xl bg-[var(--color-surface-1)] p-4 text-left">
+                      <div class="text-[10px] uppercase tracking-widest text-[var(--color-text-muted)]">Mode</div>
+                      <div class="mt-2 text-sm font-semibold text-[var(--color-text-primary)]">Hosted workspace</div>
+                    </div>
+                    <div class="rounded-2xl bg-[var(--color-surface-1)] p-4 text-left">
+                      <div class="text-[10px] uppercase tracking-widest text-[var(--color-text-muted)]">Join Flow</div>
+                      <div class="mt-2 text-sm font-semibold text-[var(--color-text-primary)]">Share the passcode with teammates</div>
+                    </div>
+                  </div>
+
+                  <button type="button" onclick={() => collaborationStore.endSession()} class="btn w-full rounded-xl bg-red-500/10 py-3 font-bold text-red-400 transition-all hover:bg-red-500/20">Stop Hosting</button>
+                </div>
+              </div>
+
+              <div class="grid gap-6 md:grid-cols-2">
+                <div class="rounded-3xl border border-[var(--color-border)] bg-[var(--color-surface-2)] p-8 text-left">
+                  <div class="mb-4 flex h-12 w-12 items-center justify-center rounded-2xl bg-emerald-500/10 text-emerald-400">
+                    <Shield size={24} />
+                  </div>
+                  <h4 class="text-lg font-bold text-[var(--color-text-primary)]">Secure Tunnel Active</h4>
+                  <p class="mt-2 text-xs text-[var(--color-text-muted)]">The workspace is currently hosting a collaboration session for invited teammates.</p>
+                </div>
+
+                <div class="rounded-3xl border border-[var(--color-border)] bg-[var(--color-surface-2)] p-8 text-left">
+                  <div class="mb-4 flex h-12 w-12 items-center justify-center rounded-2xl bg-blue-500/10 text-blue-400">
+                    <MessageSquare size={24} />
+                  </div>
+                  <h4 class="text-lg font-bold text-[var(--color-text-primary)]">Shared Session Flow</h4>
+                  <p class="mt-2 text-xs text-[var(--color-text-muted)]">Invitees join with the passcode and collaborate inside the same active AI workspace.</p>
+                </div>
+
+                <div class="rounded-3xl border border-[var(--color-border)] bg-[var(--color-surface-2)] p-8 text-left md:col-span-2">
+                  <div class="mb-4 flex h-12 w-12 items-center justify-center rounded-2xl bg-[var(--color-accent)]/10 text-[var(--color-accent)]">
+                    <Sparkles size={24} />
+                  </div>
+                  <h4 class="text-lg font-bold text-[var(--color-text-primary)]">Hosting Checklist</h4>
+                  <div class="mt-4 grid gap-3 sm:grid-cols-3">
+                    <div class="rounded-2xl bg-[var(--color-surface-1)] p-4">
+                      <div class="text-[10px] uppercase tracking-widest text-[var(--color-text-muted)]">1</div>
+                      <p class="mt-2 text-xs text-[var(--color-text-primary)]">Share the passcode only with the people who should join.</p>
+                    </div>
+                    <div class="rounded-2xl bg-[var(--color-surface-1)] p-4">
+                      <div class="text-[10px] uppercase tracking-widest text-[var(--color-text-muted)]">2</div>
+                      <p class="mt-2 text-xs text-[var(--color-text-primary)]">Keep the host workspace open while collaborators are connected.</p>
+                    </div>
+                    <div class="rounded-2xl bg-[var(--color-surface-1)] p-4">
+                      <div class="text-[10px] uppercase tracking-widest text-[var(--color-text-muted)]">3</div>
+                      <p class="mt-2 text-xs text-[var(--color-text-primary)]">Stop hosting when the review or pairing session ends.</p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          {:else}
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-8">
+              <div class="p-8 rounded-3xl bg-[var(--color-surface-2)] border border-[var(--color-border)] hover:border-[var(--color-accent)]/30 transition-all flex flex-col text-center">
+                <div class="w-12 h-12 bg-emerald-500/10 text-emerald-400 rounded-2xl flex items-center justify-center mx-auto mb-6">
+                  <Zap size={24} />
+                </div>
+                <h4 class="text-lg font-bold mb-2">Host New Session</h4>
+                <p class="text-xs text-[var(--color-text-muted)] mb-8">Create a secure P2P tunnel to invite teammates into your active AI workspace.</p>
+                <button type="button" onclick={() => collaborationStore.hostSession()} class="btn btn-primary w-full py-3 mt-auto font-bold rounded-xl">Start Secure Tunnel</button>
+              </div>
+
+              <div class="p-8 rounded-3xl bg-[var(--color-surface-2)] border border-[var(--color-border)] hover:border-[var(--color-accent)]/30 transition-all flex flex-col text-center">
+                <div class="w-12 h-12 bg-blue-500/10 text-blue-400 rounded-2xl flex items-center justify-center mx-auto mb-6">
+                  <Keyboard size={24} />
+                </div>
+                <h4 class="text-lg font-bold mb-2">Join Existing</h4>
+                <p class="text-xs text-[var(--color-text-muted)] mb-8">Enter a 6-digit passcode to join a teammate's session.</p>
+                <div class="mt-auto flex flex-col gap-3">
+                  <input id="team-join-input" type="text" placeholder="PASSCODE" class="input text-center text-lg font-bold tracking-widest py-3 rounded-xl" maxlength="6" />
+                  <button type="button" onclick={() => {
+                    const el = document.getElementById('team-join-input') as HTMLInputElement;
+                    if (el.value) collaborationStore.joinSession(el.value, 'Teammate');
+                  }} class="btn btn-secondary w-full py-3 font-bold rounded-xl">Join Workspace</button>
+                </div>
+              </div>
+            </div>
+          {/if}
+        </div>
       </div>
     </div>
   </div>
 {/if}
 
 {#if showRotateDialog && rotateProvider}
-  <div class="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4" onkeydown={(e) => e.key === 'Escape' && (showRotateDialog = false)}>
-    <div class="bg-[var(--color-surface-1)] rounded-lg p-6 w-full max-w-md border border-[var(--color-border)]" role="dialog" aria-labelledby="rotate-dialog-title">
-      <h3 id="rotate-dialog-title" class="text-lg font-semibold mb-4 text-[var(--color-text-primary)]">Rotate API Key</h3>
-      <p class="text-sm text-[var(--color-text-secondary)] mb-4">
-        Enter a new {rotateProvider.keyType === 'apiKey' ? 'API key' : 'auth token'} for <strong>{getProviderDisplayLabel(rotateProvider.name)}</strong>
-      </p>
+  <div class="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4 backdrop-blur-sm">
+    <div class="bg-[var(--color-surface-1)] rounded-3xl p-8 w-full max-w-md border border-[var(--color-border)] shadow-2xl">
+      <h3 class="text-xl font-black mb-2 text-[var(--color-text-primary)]">Rotate API Key</h3>
+      <p class="text-xs text-[var(--color-text-muted)] mb-6">Enter a new key for {getProviderDisplayLabel(rotateProvider.name)}. Your previous key will be immediately discarded.</p>
+      <input bind:this={rotateKeyInput} type="password" bind:value={newKeyValue} placeholder="sk-..." class="input w-full text-base py-3 mb-6 font-mono" />
+      <div class="flex justify-end gap-3">
+        <button type="button" onclick={() => { showRotateDialog = false; newKeyValue = ''; }} class="px-6 py-2.5 text-xs font-bold rounded-xl bg-[var(--color-surface-3)] hover:bg-[var(--color-surface-4)] transition-colors">Cancel</button>
+        <button type="button" onclick={() => { rotateProviderKey(rotateProvider!.name, newKeyValue, rotateProvider!.keyType); showRotateDialog = false; newKeyValue = ''; }} class="btn btn-primary px-8 py-2.5 text-xs font-bold rounded-xl shadow-lg shadow-[var(--color-accent)]/20">Rotate Key</button>
+      </div>
+    </div>
+  </div>
+{/if}
 
-      <div class="space-y-4">
-        <div>
-          <label for="new-key-input" class="text-xs text-[var(--color-text-secondary)] mb-1 block">New {rotateProvider.keyType === 'apiKey' ? 'API Key' : 'Auth Token'}</label>
-          <input
-            id="new-key-input"
-            type="password"
-            bind:value={newKeyValue}
-            placeholder={`Enter new ${rotateProvider.keyType === 'apiKey' ? 'API key' : 'auth token'}`}
-            class="w-full bg-[var(--color-surface-2)] border border-[var(--color-border)] rounded px-3 py-2 text-sm text-[var(--color-text-primary)] focus:outline-none focus:ring-2 focus:ring-blue-500"
-            onkeydown={(e) => e.key === 'Enter' && newKeyValue && rotateProvider && rotateProviderKey(rotateProvider.name, newKeyValue, rotateProvider.keyType)}
-          />
+{#if showCodexProfileDialog}
+  <div class="fixed inset-0 z-50 flex items-center justify-center bg-[radial-gradient(circle_at_top,rgba(255,255,255,0.08),transparent_45%),rgba(3,7,18,0.94)] p-4 backdrop-blur-md">
+    <div class="w-full max-w-2xl overflow-hidden rounded-[2rem] border border-[var(--color-accent)]/20 bg-[var(--color-surface-1)] shadow-2xl shadow-black/40">
+      <div class="border-b border-[var(--color-border)] bg-[linear-gradient(135deg,var(--color-surface-2),var(--color-surface-1))] px-8 py-8">
+        <div class="flex items-center gap-4">
+          <div class="flex h-14 w-14 items-center justify-center rounded-2xl bg-[var(--color-accent)]/12 text-[var(--color-accent)]">
+            <User size={26} />
+          </div>
+          <div>
+            <p class="text-[11px] font-bold uppercase tracking-[0.28em] text-[var(--color-text-muted)]">Codex Account Auth</p>
+            <h3 class="mt-2 text-2xl font-black text-[var(--color-text-primary)]">Enter a profile name before sign-in</h3>
+          </div>
         </div>
+        <p class="mt-4 max-w-xl text-sm text-[var(--color-text-muted)]">
+          This label is how the Codex account will appear inside Koryphaios after the browser sign-in finishes.
+        </p>
+      </div>
 
-        <div class="flex justify-end gap-2">
+      <div class="px-8 py-8">
+        <label for="codex-profile-name" class="mb-3 block text-[11px] font-bold uppercase tracking-[0.22em] text-[var(--color-text-muted)]">
+          Profile Name
+        </label>
+        <input
+          bind:this={codexProfileInputRef}
+          id="codex-profile-name"
+          type="text"
+          bind:value={codexProfileInput}
+          placeholder="Personal Codex, Work Codex, Team Sandbox..."
+          class="input w-full py-4 text-base"
+          onkeydown={(e) => e.key === 'Enter' && void confirmCodexProfileAuth()}
+        />
+
+        <div class="mt-8 flex justify-end gap-3">
           <button
-            onclick={() => { showRotateDialog = false; rotateProvider = null; newKeyValue = ''; }}
-            class="px-4 py-2 text-sm rounded transition-colors bg-[var(--color-surface-2)] text-[var(--color-text-primary)] hover:bg-[var(--color-surface-3)]"
+            type="button"
+            onclick={() => {
+              showCodexProfileDialog = false;
+              pendingCodexAuthOptions = null;
+              codexProfileInput = '';
+            }}
+            class="rounded-xl bg-[var(--color-surface-3)] px-6 py-3 text-xs font-bold text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-surface-4)]"
           >
             Cancel
           </button>
           <button
-            onclick={() => { if (newKeyValue && rotateProvider) { rotateProviderKey(rotateProvider.name, newKeyValue, rotateProvider.keyType); showRotateDialog = false; rotateProvider = null; newKeyValue = ''; } }}
-            disabled={!newKeyValue || !rotateProvider || saving !== null}
-            class="px-4 py-2 text-sm rounded transition-colors bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+            type="button"
+            onclick={() => void confirmCodexProfileAuth()}
+            class="btn btn-primary rounded-xl px-8 py-3 text-xs font-bold shadow-lg shadow-[var(--color-accent)]/20"
           >
-            {rotateProvider && saving === rotateProvider.name ? 'Rotating...' : 'Rotate'}
+            Continue To Codex Auth
           </button>
         </div>
       </div>
@@ -1579,11 +2163,55 @@
 {/if}
 
 {#if showModelSelector && selectorTarget}
-  <ModelSelectionDialog
-    providerName={selectorTarget.name}
-    availableModels={selectorTarget.allAvailableModels}
-    selectedModels={selectorTarget.selectedModels}
-    onSave={saveSelectedModels}
-    onClose={() => { showModelSelector = false; selectorTarget = null; }}
-  />
+  <ModelSelectionDialog providerName={selectorTarget.name} availableModels={selectorTarget.allAvailableModels} selectedModels={selectorTarget.selectedModels} onSave={saveSelectedModels} onClose={() => { showModelSelector = false; selectorTarget = null; }} />
 {/if}
+
+{#if showAccountManageDialog && managingAccountProvider && managingAccountId}
+  <div class="fixed inset-0 z-[101] flex items-center justify-center p-4 bg-black/70 backdrop-blur-md">
+    <div class="w-full max-w-md rounded-2xl border p-5 shadow-2xl" style="background: var(--color-surface-1); border-color: var(--color-border);">
+      <div class="flex items-center justify-between gap-3">
+        <div>
+          <h3 class="text-base font-semibold text-[var(--color-text-primary)]">Saved Profile</h3>
+          <p class="text-xs text-[var(--color-text-muted)]">{getProviderDisplayLabel(managingAccountProvider)}</p>
+        </div>
+        <button type="button" class="rounded-lg p-2 hover:bg-[var(--color-surface-3)]" onclick={() => showAccountManageDialog = false} aria-label="Close">
+          <X size={16} />
+        </button>
+      </div>
+      <div class="mt-4 space-y-3">
+        <div>
+          <label class="text-[10px] text-[var(--color-text-muted)] font-medium uppercase tracking-wider" for="manage-account-label">Profile Name</label>
+          <input id="manage-account-label" type="text" bind:value={managingAccountLabel} class="input mt-1 w-full text-sm" />
+        </div>
+        <div class="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-0)]/70 p-3">
+          <div class="text-xs font-semibold text-[var(--color-text-primary)]">{managingAccountLabel || 'Unnamed profile'}</div>
+          <div class="mt-1 text-[11px] text-[var(--color-text-muted)]">Use this saved profile name when switching accounts. Model management opens the provider model selector.</div>
+        </div>
+      </div>
+      <div class="mt-5 flex gap-2">
+        <button type="button" class="btn btn-secondary flex-1" onclick={manageAccountModels}>Manage Models</button>
+        <button type="button" class="btn btn-primary flex-1" onclick={() => void saveAccountProfileLabel()} disabled={managingAccountSaving}>
+          {managingAccountSaving ? 'Saving...' : 'Save Name'}
+        </button>
+      </div>
+    </div>
+  </div>
+{/if}
+
+<style>
+  .no-scrollbar::-webkit-scrollbar { display: none; }
+  .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+  
+  /* Glassmorphism input styling override */
+  :global(.input) {
+    background: var(--color-surface-0) !important;
+    border: 1px solid var(--color-border) !important;
+    border-radius: 0.75rem !important;
+    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1) !important;
+  }
+  :global(.input:focus) {
+    border-color: var(--color-accent) !important;
+    box-shadow: 0 0 0 4px var(--color-accent-transparent, rgba(213, 178, 97, 0.1)) !important;
+    background: var(--color-surface-1) !important;
+  }
+</style>

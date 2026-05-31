@@ -5,9 +5,9 @@
   "identifier": "com.sylorlabs.koryphaios",
   "build": {
     "frontendDist": "../../frontend/build",
-    "devUrl": "http://localhost:5173",
-    "beforeDevCommand": "",
-    "beforeBuildCommand": "",
+    "devUrl": "http://127.0.0.1:3003",
+    "beforeDevCommand": null,
+    "beforeBuildCommand": "cd ../frontend && bun run build",
     "features": null
   },
   "app": {
@@ -46,7 +46,11 @@
   },
   "bundle": {
     "active": true,
-    "targets": ["deb", "rpm", "msi", "dmg", "app", "appimage"],
+    "createUpdaterArtifacts": false,
+    "targets": [
+      "deb",
+      "rpm"
+    ],
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
@@ -55,7 +59,7 @@
       "icons/icon.ico"
     ],
     "category": "DeveloperTool",
-    "shortDescription": "AI Agent Orchestration Dashboard",
+    "shortDescription": "The Autonomous Workspace for 100% AI-Generated Code",
     "longDescription": "Koryphaios is a full-stack application that orchestrates AI agents across multiple providers with intelligent routing, task delegation, and real-time streaming.",
     "publisher": "Sylorlabs",
     "copyright": "Copyright (c) 2024 Sylorlabs",
@@ -75,10 +79,16 @@
     },
     "linux": {
       "deb": {
-        "depends": ["libwebkit2gtk-4.1-0", "libgtk-3-0"]
+        "depends": [
+          "libwebkit2gtk-4.1-0",
+          "libgtk-3-0"
+        ]
       },
       "rpm": {
-        "depends": ["webkit2gtk4.1", "gtk3"]
+        "depends": [
+          "webkit2gtk4.1",
+          "gtk3"
+        ]
       },
       "appimage": {
         "bundleMediaFramework": false
@@ -86,19 +96,14 @@
     },
     "resources": {
       "../../config": "config"
-    }
+    },
+    "externalBin": [
+      "sidecar/koryphaios-backend"
+    ]
   },
   "plugins": {
     "shell": {
       "open": true
-    },
-    "updater": {
-      "active": true,
-      "endpoints": [
-        "https://koryphaios.com/api/update.json"
-      ],
-      "dialog": false,
-      "pubkey": "BoZcZwJMlqqTUzPsXphfSL2q7NODsjpLqLOk0IbfTFI="
     }
   }
 }

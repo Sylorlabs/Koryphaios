@@ -14,9 +14,9 @@ export interface ModelCost2026 {
 
 /** Normalize model id for lookup (e.g. claude-3-sonnet-4-6 -> claude-sonnet-4-6). */
 function normalizeModelId(model: string): string {
-  const s = (model || "").toLowerCase().trim();
+  const s = (model || '').toLowerCase().trim();
   // Strip "claude-3-" prefix if present
-  if (s.startsWith("claude-3-")) return "claude-" + s.slice("claude-3-".length);
+  if (s.startsWith('claude-3-')) return 'claude-' + s.slice('claude-3-'.length);
   return s;
 }
 
@@ -27,11 +27,11 @@ function normalizeModelId(model: string): string {
  * - gpt-5-mini: $0.15/MTok [0x / free-tier equivalent]
  */
 const COST_MAP: Record<string, ModelCost2026> = {
-  "claude-haiku-4-5": { costPerMInput: 1.0, costPerMOutput: 5.0, multiplier: 0.33 },
-  "claude-3-haiku-4-5": { costPerMInput: 1.0, costPerMOutput: 5.0, multiplier: 0.33 },
-  "claude-sonnet-4-6": { costPerMInput: 3.0, costPerMOutput: 15.0, multiplier: 1.0 },
-  "claude-3-sonnet-4-6": { costPerMInput: 3.0, costPerMOutput: 15.0, multiplier: 1.0 },
-  "gpt-5-mini": { costPerMInput: 0.15, costPerMOutput: 0.15, multiplier: 0 },
+  'claude-haiku-4-5': { costPerMInput: 1.0, costPerMOutput: 5.0, multiplier: 0.33 },
+  'claude-3-haiku-4-5': { costPerMInput: 1.0, costPerMOutput: 5.0, multiplier: 0.33 },
+  'claude-sonnet-4-6': { costPerMInput: 3.0, costPerMOutput: 15.0, multiplier: 1.0 },
+  'claude-3-sonnet-4-6': { costPerMInput: 3.0, costPerMOutput: 15.0, multiplier: 1.0 },
+  'gpt-5-mini': { costPerMInput: 0.15, costPerMOutput: 0.15, multiplier: 0 },
 };
 
 export function getModelCost2026(model: string): ModelCost2026 | null {
@@ -40,11 +40,7 @@ export function getModelCost2026(model: string): ModelCost2026 | null {
 }
 
 /** Compute cost in USD for the given token counts using 2026 pricing. */
-export function computeCost2026(
-  model: string,
-  tokensIn: number,
-  tokensOut: number
-): number {
+export function computeCost2026(model: string, tokensIn: number, tokensOut: number): number {
   const cost = getModelCost2026(model);
   if (!cost) return 0;
   const inCost = (tokensIn / 1_000_000) * cost.costPerMInput;

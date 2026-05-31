@@ -19,7 +19,7 @@ export interface MigratableKey {
 
 /**
  * Migration utility for envelope encryption
- * 
+ *
  * Handles migrating from the old static-seed encryption to the new
  * envelope encryption system. Can be run incrementally or in bulk.
  */
@@ -32,21 +32,23 @@ export class EncryptionMigration {
 
   /**
    * Migrate a single key value
-   * 
+   *
    * @param encryptedValue - The old encrypted value (with "enc:" prefix)
    * @returns The new envelope-encrypted value
    */
-  async migrateValue(encryptedValue: string): Promise<{ newValue: string; success: boolean; error?: string }> {
+  async migrateValue(
+    encryptedValue: string,
+  ): Promise<{ newValue: string; success: boolean; error?: string }> {
     try {
       // Step 1: Decrypt using secureDecrypt (will throw for legacy enc: format)
       const plaintext = await secureDecrypt(encryptedValue);
-      
+
       // Step 2: Re-encrypt using envelope encryption
       const envelope = await this.encryption.encrypt(plaintext);
-      
+
       // Step 3: Serialize envelope
       const newValue = `env:${this.encryption.serialize(envelope)}`;
-      
+
       return { newValue, success: true };
     } catch (error: any) {
       return { newValue: encryptedValue, success: false, error: error.message };
@@ -55,7 +57,7 @@ export class EncryptionMigration {
 
   /**
    * Migrate multiple keys in batch
-   * 
+   *
    * @param keys - Array of keys to migrate
    * @returns Migration result statistics
    */
@@ -95,12 +97,15 @@ export class EncryptionMigration {
     }
 
     result.success = result.failed === 0;
-    
-    serverLog.info({
-      total: keys.length,
-      migrated: result.migrated,
-      failed: result.failed,
-    }, 'Batch migration complete');
+
+    serverLog.info(
+      {
+        total: keys.length,
+        migrated: result.migrated,
+        failed: result.failed,
+      },
+      'Batch migration complete',
+    );
 
     return result;
   }
@@ -110,8 +115,13 @@ export class EncryptionMigration {
    * This is a helper for the common case of migrating stored API keys
    */
   async migrateDatabaseCredentials(
-    readCredentials: () => Promise<Array<{ provider: string; apiKey?: string; authToken?: string; baseUrl?: string }>>,
-    updateCredential: (provider: string, updates: { apiKey?: string; authToken?: string }) => Promise<void>
+    readCredentials: () => Promise<
+      Array<{ provider: string; apiKey?: string; authToken?: string; baseUrl?: string }>
+    >,
+    updateCredential: (
+      provider: string,
+      updates: { apiKey?: string; authToken?: string },
+    ) => Promise<void>,
   ): Promise<MigrationResult> {
     const result: MigrationResult = {
       success: true,
@@ -122,7 +132,7 @@ export class EncryptionMigration {
 
     try {
       const credentials = await readCredentials();
-      
+
       for (const cred of credentials) {
         const updates: { apiKey?: string; authToken?: string } = {};
 
@@ -157,7 +167,10 @@ export class EncryptionMigration {
           } catch (error: any) {
             result.failed++;
             result.errors.push({ key: cred.provider, error: error.message });
-            serverLog.error({ provider: cred.provider, error: error.message }, 'Failed to update migrated credentials');
+            serverLog.error(
+              { provider: cred.provider, error: error.message },
+              'Failed to update migrated credentials',
+            );
           }
         }
       }
@@ -176,7 +189,7 @@ export class EncryptionMigration {
    * Verify migration by decrypting a sample of migrated keys
    */
   async verifyMigration(
-    keys: Array<{ key: string; encryptedValue: string; expectedPlaintext?: string }>
+    keys: Array<{ key: string; encryptedValue: string; expectedPlaintext?: string }>,
   ): Promise<{ success: boolean; verified: number; failed: number; errors: string[] }> {
     const result = {
       success: true,

@@ -1,6 +1,3 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
-@import url('https://geistfont.vercel.app/geist.css');
-@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&display=swap');
 @import '$lib/styles/design-tokens.css';
 
 @import 'tailwindcss';
@@ -30,16 +27,16 @@
 
 @layer base {
   :root {
-    --color-surface-0: #0D0B0A;
-    --color-surface-1: #141210;
-    --color-surface-2: #1C1917;
-    --color-surface-3: #262220;
-    --color-surface-4: #302B28;
-    --color-border: rgba(213, 178, 97, 0.16);
-    --color-border-bright: rgba(213, 178, 97, 0.36);
+    --color-surface-0: #0d0b0a;
+    --color-surface-1: #151210;
+    --color-surface-2: #1d1916;
+    --color-surface-3: #26211d;
+    --color-surface-4: #332c27;
+    --color-border: rgba(213, 178, 97, 0.18);
+    --color-border-bright: rgba(213, 178, 97, 0.42);
     --color-text-primary: #F6EFE2;
-    --color-text-secondary: rgba(214, 206, 192, 0.74);
-    --color-text-muted: rgba(214, 206, 192, 0.40);
+    --color-text-secondary: rgba(235, 226, 212, 0.8);
+    --color-text-muted: rgba(214, 206, 192, 0.54);
 
     --color-glow-codex: rgba(0, 255, 255, 0.5);
     --color-glow-google: rgba(66, 133, 244, 0.5);
@@ -47,13 +44,13 @@
     --color-glow-kory: rgba(255, 215, 0, 0.6);
     --color-glow-test: rgba(0, 255, 128, 0.5);
 
-    --color-accent: #D5B261;
-    --color-accent-hover: #F3DDB0;
+    --color-accent: #d5b261;
+    --color-accent-hover: #f1dbab;
     --color-success: #22c55e;
     --color-error: #ef4444;
     --color-warning: #f59e0b;
 
-    --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+    --font-sans: 'Geist Sans', 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
     --font-mono: 'JetBrains Mono', 'SF Mono', 'Fira Code', monospace;
   }
 
@@ -201,21 +198,21 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 8px 12px;
-  background: var(--color-surface-2);
+  padding: var(--space-md) var(--space-lg);
+  background: var(--color-surface-1);
   border-bottom: 1px solid var(--color-border);
-  min-height: 36px;
+  min-height: 44px;
 }
 
 .panel-title {
   display: flex;
   align-items: center;
-  gap: 8px;
-  font-size: 12px;
-  font-weight: 500;
+  gap: var(--space-sm);
+  font-size: var(--text-xs);
+  font-weight: var(--font-semibold);
   color: var(--color-text-secondary);
   text-transform: uppercase;
-  letter-spacing: 0.5px;
+  letter-spacing: 0.08em;
 }
 
 .panel-content {
@@ -270,8 +267,8 @@
 
 /* Scrollbar */
 ::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
+  width: 10px;
+  height: 10px;
 }
 
 ::-webkit-scrollbar-track {
@@ -280,7 +277,9 @@
 
 ::-webkit-scrollbar-thumb {
   background: var(--color-surface-4);
-  border-radius: 4px;
+  border-radius: var(--radius-full);
+  border: 2px solid transparent;
+  background-clip: padding-box;
 }
 
 ::-webkit-scrollbar-thumb:hover {
@@ -295,8 +294,8 @@ pre, code {
 pre {
   background: var(--color-surface-0);
   border: 1px solid var(--color-border);
-  border-radius: 8px;
-  padding: 16px;
+  border-radius: var(--radius-xl);
+  padding: var(--space-lg);
   overflow-x: auto;
   font-size: 14px;
   line-height: 1.7;
@@ -368,14 +367,6 @@ pre {
 }
 
 /* User Message in Feed */
-.feed-user-message {
-  background: var(--color-surface-2);
-  border-left: 2px solid var(--color-accent);
-  padding: var(--space-sm) var(--space-md);
-  margin: var(--space-xs) 0;
-  border-radius: 0 var(--radius-lg) var(--radius-lg) 0;
-}
-
 .feed-assistant-message {
   padding: 4px 0;
 }
@@ -454,11 +445,11 @@ pre {
   gap: var(--space-2);
   padding: var(--space-sm) var(--space-lg);
   font-size: var(--text-sm);
-  font-weight: var(--font-medium);
+  font-weight: var(--font-semibold);
   border-radius: var(--radius-lg);
   transition: all var(--duration-normal) var(--ease-in-out);
   cursor: pointer;
-  border: none;
+  border: 1px solid transparent;
   min-height: var(--size-button-height-md);
 }
 
@@ -469,16 +460,19 @@ pre {
 
 .btn-primary {
   background: var(--color-accent);
-  color: white;
+  color: #17120d;
+  box-shadow: 0 8px 24px rgba(213, 178, 97, 0.18);
 }
 
 .btn-primary:hover:not(:disabled) {
   background: var(--color-accent-hover);
+  transform: translateY(-1px);
 }
 
 .btn-secondary {
   background: var(--color-surface-3);
   color: var(--color-text-secondary);
+  border-color: var(--color-border);
 }
 
 .btn-secondary:hover:not(:disabled) {
@@ -499,13 +493,14 @@ pre {
   width: 100%;
   padding: var(--space-sm) var(--space-md);
   font-size: var(--text-base);
-  background: var(--color-surface-1);
+  background: var(--color-surface-2);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-lg);
   color: var(--color-text-primary);
-  transition: border-color var(--duration-normal) var(--ease-in-out);
+  transition: border-color var(--duration-normal) var(--ease-in-out), box-shadow var(--duration-normal) var(--ease-in-out), background var(--duration-normal) var(--ease-in-out);
   min-height: var(--size-input-height-md);
   box-sizing: border-box;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.02);
 }
 
 /* Non-selectable session items to avoid text highlighting when clicking */
@@ -518,8 +513,9 @@ pre {
 
 /* Active session highlight fallback for environments where Tailwind arbitrary classes are not applied */
 .active-session {
-  background: var(--color-surface-4);
-  border-left: 2px solid var(--color-accent);
+  background: linear-gradient(180deg, rgba(213, 178, 97, 0.14), rgba(213, 178, 97, 0.08));
+  border: 1px solid rgba(213, 178, 97, 0.34);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.02);
 }
 
 /* Bring command input above the feed so it isn't covered by other layout elements */
@@ -531,6 +527,8 @@ pre {
 .input:focus {
   outline: none;
   border-color: var(--color-accent);
+  background: var(--color-surface-1);
+  box-shadow: 0 0 0 3px rgba(213, 178, 97, 0.12);
 }
 
 .input::placeholder {

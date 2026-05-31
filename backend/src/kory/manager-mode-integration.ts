@@ -1,24 +1,20 @@
 /**
  * Mode Integration for KoryManager
- * 
+ *
  * This module provides mode-aware behavior for the KoryManager
  * without modifying the core manager.ts file extensively.
  */
 
-import type { UIMode, ModeContext } from "@koryphaios/shared";
-import { ModeManager, getModeManager } from "../mode";
-import { getPrompts, type PromptTemplate } from "./prompts";
-import type { GitManager } from "./git-manager";
+import type { UIMode, ModeContext } from '@koryphaios/shared';
+import { ModeManager, getModeManager } from '../mode';
+import { getPrompts, type PromptTemplate } from './prompts';
+import type { GitManager } from './git-manager';
 
 /**
  * Mixin to add mode support to KoryManager
  * This is applied to the KoryManager to set up mode integration
  */
-export function applyModeIntegration(
-  manager: {
-    git: GitManager;
-  }
-): void {
+export function applyModeIntegration(manager: { git: GitManager }): void {
   // Initialize mode manager with git
   const modeManager = getModeManager();
   modeManager.setGitManager(manager.git);
@@ -96,10 +92,7 @@ export function getNoGitWarningMessage(): string {
 /**
  * Get mode-aware thought message
  */
-export function getModeThought(
-  type: keyof PromptTemplate["thoughts"],
-  mode?: UIMode
-): string {
+export function getModeThought(type: keyof PromptTemplate['thoughts'], mode?: UIMode): string {
   const modeManager = getModeManager();
   const effectiveMode = mode ?? modeManager.getMode();
   return getPrompts(effectiveMode).thoughts[type];
@@ -109,14 +102,14 @@ export function getModeThought(
  * Get mode-aware error message
  */
 export function getModeError(
-  type: keyof PromptTemplate["errors"],
+  type: keyof PromptTemplate['errors'],
   vars?: Record<string, string>,
-  mode?: UIMode
+  mode?: UIMode,
 ): string {
   const modeManager = getModeManager();
   const effectiveMode = mode ?? modeManager.getMode();
   const template = getPrompts(effectiveMode).errors[type];
-  
+
   if (!vars) return template;
   return template.replace(/\$\{(\w+)\}/g, (match, key) => vars[key] ?? match);
 }
@@ -138,4 +131,4 @@ export function isToolAllowed(toolName: string): boolean {
 }
 
 // Re-export for convenience
-export { ModeManager, getModeManager } from "../mode";
+export { ModeManager, getModeManager } from '../mode';

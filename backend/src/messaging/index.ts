@@ -2,10 +2,10 @@
 // Use registerSession(sessionId, adapter) when a channel receives a message,
 // then call kory.processTask(sessionId, text). Replies stream to the adapter.
 
-export { messagingGateway } from "./gateway";
-export { sessionReplyStream } from "./reply-stream";
-export { TelegramAdapter } from "./telegram-adapter";
-export { DiscordAdapter } from "./discord-adapter";
-export { SlackAdapter } from "./slack-adapter";
-export type { ChannelAdapter, ReplySegment, ChannelId, ChannelMetadata } from "./types";
-export { CHANNEL_PREFIX } from "./types";
+export { messagingGateway } from './gateway';
+export { sessionReplyStream } from './reply-stream';
+export { TelegramAdapter } from './telegram-adapter';
+export { DiscordAdapter } from './discord-adapter';
+export { SlackAdapter } from './slack-adapter';
+export type { ChannelAdapter, ReplySegment, ChannelId, ChannelMetadata } from './types';
+export { CHANNEL_PREFIX } from './types';

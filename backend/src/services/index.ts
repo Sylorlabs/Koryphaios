@@ -13,11 +13,6 @@ export type {
   CredentialWithPlaintext,
 } from './user-credentials';
 
-export type {
-  AuditLogEntry,
-  AuditLogQuery,
-  AuditLogQueryResult,
-  SensitiveAction,
-} from './audit';
+export type { AuditLogEntry, AuditLogQuery, AuditLogQueryResult, SensitiveAction } from './audit';
 
 export type { TimeTravelState, TimeTravelOptions } from './timetravel';

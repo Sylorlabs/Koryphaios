@@ -1,0 +1,11 @@
+<svg width="64" height="64" viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
+  <title>Local</title>
+  <rect width="64" height="64" rx="14" fill="#10211C"/>
+  <path d="M32 14L47 22.5V41.5L32 50L17 41.5V22.5L32 14Z" fill="#163129" stroke="#4BE3A6" stroke-width="2"/>
+  <circle cx="32" cy="32" r="7" fill="#4BE3A6"/>
+  <circle cx="24" cy="25" r="2.4" fill="#D8FFF0"/>
+  <circle cx="40" cy="25" r="2.4" fill="#D8FFF0"/>
+  <circle cx="24" cy="39" r="2.4" fill="#D8FFF0"/>
+  <circle cx="40" cy="39" r="2.4" fill="#D8FFF0"/>
+  <path d="M32 32L24 25M32 32L40 25M32 32L24 39M32 32L40 39" stroke="#D8FFF0" stroke-width="2" stroke-linecap="round"/>
+</svg>

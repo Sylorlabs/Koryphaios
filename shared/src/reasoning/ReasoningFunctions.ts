@@ -1,8 +1,8 @@
 // Reasoning Configuration Functions
 // Domain: Helper functions to query and normalize reasoning settings
 
-import type { ReasoningConfig } from "./ReasoningTypes";
-import { DEFAULT_REASONING_RULES } from "./ReasoningConfig";
+import type { ReasoningConfig } from './ReasoningTypes';
+import { DEFAULT_REASONING_RULES } from './ReasoningConfig';
 
 /**
  * Get reasoning configuration for a specific provider/model combination.
@@ -11,11 +11,11 @@ import { DEFAULT_REASONING_RULES } from "./ReasoningConfig";
  * @returns ReasoningConfig or null if reasoning is not supported
  */
 export function getReasoningConfig(provider?: string, model?: string): ReasoningConfig | null {
-  const normalizedProvider = provider || "auto";
+  const normalizedProvider = provider || 'auto';
 
   for (const rule of DEFAULT_REASONING_RULES) {
     if (rule.provider !== normalizedProvider) continue;
-    if (rule.modelPattern && !rule.modelPattern.test(model ?? "")) continue;
+    if (rule.modelPattern && !rule.modelPattern.test(model ?? '')) continue;
     return rule.config;
   }
   return null;
@@ -40,7 +40,7 @@ export function hasReasoningSupport(provider?: string, model?: string): boolean 
  */
 export function getDefaultReasoning(provider?: string, model?: string): string {
   const config = getReasoningConfig(provider, model);
-  return config?.defaultValue ?? "medium";
+  return config?.defaultValue ?? 'medium';
 }
 
 /**
@@ -62,68 +62,70 @@ export function normalizeReasoningLevel(
 
   // Adaptive means let the model decide
   const normalizedLevel = reasoningLevel.toLowerCase().trim();
-  if (normalizedLevel === "adaptive") {
+  if (normalizedLevel === 'adaptive') {
     return undefined;
   }
 
   // Auto means manager decides based on task complexity
-  if (normalizedLevel === "auto") {
-    return "auto";
+  if (normalizedLevel === 'auto') {
+    return 'auto';
   }
 
   // If provider is specified, map standardized level to provider's native value
-  if (provider && provider !== "auto") {
+  if (provider && provider !== 'auto') {
     const level = normalizedLevel;
 
     // Gemini (Budget-based)
-    if (provider === "google" || provider === "vertexai") {
+    if (provider === 'google' || provider === 'vertexai') {
       const isGemini3 = model ? /gemini-3/i.test(model) : false;
       if (isGemini3) {
-        if (level === "none") return "low";
-        if (["low", "medium", "high", "xhigh"].includes(level)) {
-          return level === "xhigh" ? "high" : level;
+        if (level === 'none') return 'low';
+        if (['low', 'medium', 'high', 'xhigh'].includes(level)) {
+          return level === 'xhigh' ? 'high' : level;
         }
       } else {
         // Budget-based mapping
-        if (level === "none") return "0";
-        if (level === "low") return "1024";
-        if (level === "medium") return "8192";
-        if (level === "high") return "24576";
-        if (level === "xhigh") return "65536";
+        if (level === 'none') return '0';
+        if (level === 'low') return '1024';
+        if (level === 'medium') return '8192';
+        if (level === 'high') return '24576';
+        if (level === 'xhigh') return '65536';
       }
     }
 
     // Copilot-specific handling for budget-based models
-    if (provider === "copilot") {
+    if (provider === 'copilot') {
       // Gemini 2.5 Pro uses budget-based thinking
       if (model && /gemini-2\.5-pro/i.test(model)) {
-        if (level === "none") return "0";
-        if (level === "low") return "1024";
-        if (level === "medium") return "8192";
-        if (level === "high") return "24576";
-        if (level === "xhigh") return "65536";
+        if (level === 'none') return '0';
+        if (level === 'low') return '1024';
+        if (level === 'medium') return '8192';
+        if (level === 'high') return '24576';
+        if (level === 'xhigh') return '65536';
       }
       // Gemini 3.x uses thinking levels
       if (model && /gemini-3/i.test(model)) {
-        if (level === "none") return "low";
-        if (["low", "medium", "high", "xhigh"].includes(level)) {
-          return level === "xhigh" ? "high" : level;
+        if (level === 'none') return 'low';
+        if (['low', 'medium', 'high', 'xhigh'].includes(level)) {
+          return level === 'xhigh' ? 'high' : level;
         }
       }
       // Claude Haiku 4.5 uses budget tokens
       if (model && /claude-haiku-4\.5/i.test(model)) {
-        if (level === "none") return "0";
-        if (level === "low") return "1024";
-        if (level === "medium") return "8192";
-        if (level === "high") return "24576";
-        if (level === "xhigh") return "24576"; // Max for Haiku
+        if (level === 'none') return '0';
+        if (level === 'low') return '1024';
+        if (level === 'medium') return '8192';
+        if (level === 'high') return '24576';
+        if (level === 'xhigh') return '24576'; // Max for Haiku
       }
     }
 
     // OpenAI / Anthropic / Groq / xAI / Azure / OpenRouter / Copilot (Effort-based)
-    if (["openai", "anthropic", "groq", "xai", "azure", "openrouter", "copilot"].includes(provider)) {
-      if (level === "none") return "none";
-      if (level === "xhigh") return "high"; // Map xhigh to high for effort-based APIs
+    if (
+      ['openai', 'anthropic', 'groq', 'xai', 'azure', 'openrouter', 'copilot', 'kimicode'].includes(provider)
+    ) {
+      if (level === 'none') return 'none';
+      if (level === 'xhigh') return 'high'; // Map xhigh to high for effort-based APIs
       // Preserve low, medium, high, max (max is valid for Anthropic Opus 4.6 only)
       return level;
     }
@@ -190,21 +192,26 @@ export function determineAutoReasoningLevel(taskDescription: string): string {
 
   for (const pattern of highComplexityPatterns) {
     if (pattern.test(lower)) {
-      return "high";
+      return 'high';
     }
   }
 
   for (const pattern of lowComplexityPatterns) {
     if (pattern.test(lower)) {
-      return "low";
+      return 'low';
     }
   }
 
   // Default to medium for everything else
-  return "medium";
+  return 'medium';
 }
 
 // Re-export types and constants for convenience
-export { DEFAULT_REASONING_RULES } from "./ReasoningConfig";
-export { STANDARD_REASONING_OPTIONS } from "./ReasoningConfig";
-export type { ReasoningConfig, ReasoningOption, ReasoningRule, ReasoningLevel } from "./ReasoningTypes";
+export { DEFAULT_REASONING_RULES } from './ReasoningConfig';
+export { STANDARD_REASONING_OPTIONS } from './ReasoningConfig';
+export type {
+  ReasoningConfig,
+  ReasoningOption,
+  ReasoningRule,
+  ReasoningLevel,
+} from './ReasoningTypes';

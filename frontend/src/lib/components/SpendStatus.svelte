@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { apiUrl } from '$lib/utils/api-url';
+  import { apiFetch, parseJsonResponse } from '$lib/api.svelte';
 
   export let sessionId: string | null = null;
 
@@ -42,12 +43,12 @@
     if (!autoRefresh) return;
 
     try {
-      const url = sessionId
-        ? `${apiUrl}/spend/status?sessionId=${sessionId}`
-        : `${apiUrl}/spend/status`;
+      const path = sessionId
+        ? `/api/spend/status?sessionId=${sessionId}`
+        : `/api/spend/status`;
 
-      const response = await fetch(url);
-      const data = await response.json();
+      const response = await apiFetch(apiUrl(path));
+      const data = await parseJsonResponse<any>(response);
 
       if (data.ok) {
         status = data.data;

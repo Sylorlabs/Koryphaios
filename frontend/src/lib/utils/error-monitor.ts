@@ -19,10 +19,10 @@ let flushTimer: ReturnType<typeof setTimeout> | null = null;
 
 async function flushErrors() {
   if (errorBuffer.length === 0) return;
-  
+
   const errors = [...errorBuffer];
   errorBuffer = [];
-  
+
   try {
     await fetch(ERROR_LOG_ENDPOINT, {
       method: 'POST',
@@ -58,11 +58,13 @@ export function initErrorMonitoring() {
 
   // Capture console errors — must call _originalError so our own logError doesn't recurse
   console.error = (...args: unknown[]) => {
-    const message = args.map(a => {
-      if (a instanceof Error) return `${a.name}: ${a.message}\n${a.stack}`;
-      if (typeof a === 'object') return JSON.stringify(a);
-      return String(a);
-    }).join(' ');
+    const message = args
+      .map((a) => {
+        if (a instanceof Error) return `${a.name}: ${a.message}\n${a.stack}`;
+        if (typeof a === 'object') return JSON.stringify(a);
+        return String(a);
+      })
+      .join(' ');
 
     errorBuffer.push({
       timestamp: Date.now(),
@@ -76,7 +78,7 @@ export function initErrorMonitoring() {
 
   // Capture console warnings
   console.warn = (...args: unknown[]) => {
-    const message = args.map(a => String(a)).join(' ');
+    const message = args.map((a) => String(a)).join(' ');
     errorBuffer.push({
       timestamp: Date.now(),
       type: 'warn',

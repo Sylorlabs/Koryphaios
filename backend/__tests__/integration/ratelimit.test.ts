@@ -1,13 +1,19 @@
 /**
  * Rate Limiting Integration Tests
- * 
+ *
  * Tests the canonical rate limiting implementations from security/rate-limit.ts:
  * - Simple in-memory RateLimiter
  * - Tier configuration
  */
 
 import { describe, it, expect } from 'bun:test';
-import { RateLimiter, getTierConfig, DEFAULT_TIERS, ENDPOINT_LIMITS, getEndpointConfig } from '../../src/security/rate-limit';
+import {
+  RateLimiter,
+  getTierConfig,
+  DEFAULT_TIERS,
+  ENDPOINT_LIMITS,
+  getEndpointConfig,
+} from '../../src/security/rate-limit';
 
 describe('Rate Limiting', () => {
   describe('RateLimiter (in-memory)', () => {
@@ -85,12 +91,12 @@ describe('Rate Limiting', () => {
     });
 
     it('should have endpoint limits', () => {
-      expect(ENDPOINT_LIMITS['/api/v1/chat/completions']).toBeDefined();
-      expect(ENDPOINT_LIMITS['/api/v1/models']).toBeDefined();
+      expect(ENDPOINT_LIMITS['/api/chat/completions']).toBeDefined();
+      expect(ENDPOINT_LIMITS['/api/models']).toBeDefined();
     });
 
     it('should return endpoint config', () => {
-      const config = getEndpointConfig('/api/v1/chat/completions');
+      const config = getEndpointConfig('/api/chat/completions');
       expect(config).not.toBeNull();
       expect(config!.maxRequests).toBe(100);
     });

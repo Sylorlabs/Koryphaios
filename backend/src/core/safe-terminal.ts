@@ -3,7 +3,7 @@
  * Ensures stdout/stderr are fully consumed and process is killed on timeout.
  */
 
-import type { Subprocess } from "bun";
+import type { Subprocess } from 'bun';
 
 const DEFAULT_TIMEOUT_MS = 60_000;
 
@@ -36,7 +36,7 @@ export async function runSafe(
     timeoutMs?: number;
     maxStdoutBytes?: number;
     maxStderrBytes?: number;
-  } = {}
+  } = {},
 ): Promise<SafeTerminalResult> {
   const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const maxStdoutBytes = options.maxStdoutBytes ?? 2 * 1024 * 1024; // 2MB
@@ -46,8 +46,8 @@ export async function runSafe(
   const proc = Bun.spawn(cmd, {
     cwd: options.cwd,
     env: options.env,
-    stdout: "pipe",
-    stderr: "pipe",
+    stdout: 'pipe',
+    stderr: 'pipe',
   });
 
   const timeoutPromise = new Promise<SafeTerminalResult>((resolve) => {
@@ -58,8 +58,8 @@ export async function runSafe(
         // already exited
       }
       resolve({
-        stdout: "",
-        stderr: "Process timed out and was killed.",
+        stdout: '',
+        stderr: 'Process timed out and was killed.',
         exitCode: null,
         timedOut: true,
         durationMs: Date.now() - start,
@@ -78,7 +78,7 @@ export async function runSafe(
       stream: ReadableStream<Uint8Array>,
       chunks: Uint8Array[],
       maxBytes: number,
-      lenRef: { current: number }
+      lenRef: { current: number },
     ) => {
       const reader = stream.getReader();
       try {

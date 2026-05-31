@@ -1,49 +1,317 @@
 {
+  "server": {
+    "port": 3001,
+    "host": "127.0.0.1"
+  },
+  "mcpServers": {
+    "playwright": {
+      "type": "stdio",
+      "command": "npx",
+      "args": [
+        "-y",
+        "@playwright/mcp@latest",
+        "--headless",
+        "--isolated"
+      ]
+    }
+  },
+  "enableCritic": true,
+  "agentSettings": {
+    "ruleEnforcementLevel": "strict",
+    "agentExecutionMode": "auto",
+    "preferencesEnabled": true,
+    "criticGateEnabled": true,
+    "criticEnforcesPreferences": true,
+    "autoApplySafeFixes": false,
+    "confirmRuleViolations": true,
+    "agentMemoryEnabled": true,
+    "agentCanUpdatePreferences": false,
+    "maxCriticIterations": 3,
+    "approvalThresholdFiles": 5,
+    "approvalThresholdLines": 100,
+    "localWebSearch": "fallback",
+    "multiSourceResearch": true,
+    "updatedAt": 1780218641603
+  },
+  "updatedAt": 1780218641603,
   "providers": {
     "anthropic": {
       "name": "anthropic",
+      "selectedModels": [],
+      "hideModelSelector": false,
+      "disabled": true
+    },
+    "claude": {
+      "name": "claude",
+      "selectedModels": [],
+      "hideModelSelector": false,
+      "disabled": true
+    },
+    "codex": {
+      "name": "codex",
+      "selectedModels": [
+        "gpt-5.4",
+        "gpt-5.4-mini"
+      ],
+      "hideModelSelector": false,
+      "disabled": true
+    },
+    "openai": {
+      "name": "openai",
+      "selectedModels": [],
+      "hideModelSelector": false,
       "disabled": true
     },
     "google": {
       "name": "google",
+      "selectedModels": [],
+      "hideModelSelector": false,
+      "disabled": true
+    },
+    "xai": {
+      "name": "xai",
+      "selectedModels": [],
+      "hideModelSelector": false,
+      "disabled": true
+    },
+    "openrouter": {
+      "name": "openrouter",
+      "selectedModels": [],
+      "hideModelSelector": false,
+      "disabled": true
+    },
+    "groq": {
+      "name": "groq",
+      "selectedModels": [],
+      "hideModelSelector": false,
       "disabled": true
     },
     "copilot": {
       "name": "copilot",
+      "selectedModels": [],
+      "hideModelSelector": false,
+      "disabled": true
+    },
+    "opencodezen": {
+      "name": "opencodezen",
+      "selectedModels": [],
+      "hideModelSelector": false,
+      "disabled": true
+    },
+    "azure": {
+      "name": "azure",
+      "baseUrl": "",
+      "selectedModels": [],
+      "hideModelSelector": false,
+      "disabled": true
+    },
+    "bedrock": {
+      "name": "bedrock",
+      "selectedModels": [],
+      "hideModelSelector": false,
+      "disabled": true
+    },
+    "vertexai": {
+      "name": "vertexai",
+      "selectedModels": [],
+      "hideModelSelector": false,
+      "disabled": true
+    },
+    "local": {
+      "name": "local",
+      "baseUrl": "localhost:8080",
+      "selectedModels": [],
+      "hideModelSelector": false,
+      "disabled": false
+    },
+    "ollama": {
+      "name": "ollama",
+      "selectedModels": [],
+      "hideModelSelector": false,
+      "disabled": true
+    },
+    "302ai": {
+      "name": "302ai",
+      "selectedModels": [],
+      "hideModelSelector": false,
+      "disabled": true
+    },
+    "azurecognitive": {
+      "name": "azurecognitive",
+      "selectedModels": [],
+      "hideModelSelector": false,
+      "disabled": true
+    },
+    "baseten": {
+      "name": "baseten",
+      "selectedModels": [],
+      "hideModelSelector": false,
+      "disabled": true
+    },
+    "cerebras": {
+      "name": "cerebras",
+      "selectedModels": [],
+      "hideModelSelector": false,
+      "disabled": true
+    },
+    "cloudflare": {
+      "name": "cloudflare",
+      "selectedModels": [],
+      "hideModelSelector": false,
+      "disabled": true
+    },
+    "deepseek": {
+      "name": "deepseek",
+      "selectedModels": [
+        "deepseek-v4-pro",
+        "deepseek-v4-flash"
+      ],
+      "hideModelSelector": false,
+      "disabled": false
+    },
+    "deepinfra": {
+      "name": "deepinfra",
+      "selectedModels": [],
+      "hideModelSelector": false,
+      "disabled": true
+    },
+    "firmware": {
+      "name": "firmware",
+      "selectedModels": [],
+      "hideModelSelector": false,
+      "disabled": true
+    },
+    "fireworks": {
+      "name": "fireworks",
+      "selectedModels": [],
+      "hideModelSelector": false,
+      "disabled": true
+    },
+    "gitlab": {
+      "name": "gitlab",
+      "selectedModels": [],
+      "hideModelSelector": false,
+      "disabled": true
+    },
+    "huggingface": {
+      "name": "huggingface",
+      "selectedModels": [],
+      "hideModelSelector": false,
+      "disabled": true
+    },
+    "helicone": {
+      "name": "helicone",
+      "selectedModels": [],
+      "hideModelSelector": false,
+      "disabled": true
+    },
+    "llamacpp": {
+      "name": "llamacpp",
+      "selectedModels": [],
+      "hideModelSelector": false,
+      "disabled": true
+    },
+    "ionet": {
+      "name": "ionet",
+      "selectedModels": [],
+      "hideModelSelector": false,
+      "disabled": true
+    },
+    "lmstudio": {
+      "name": "lmstudio",
+      "selectedModels": [],
+      "hideModelSelector": false,
+      "disabled": true
+    },
+    "mistral": {
+      "name": "mistral",
+      "selectedModels": [],
+      "hideModelSelector": false,
+      "disabled": true
+    },
+    "moonshot": {
+      "name": "moonshot",
+      "selectedModels": [],
+      "hideModelSelector": false,
+      "disabled": true
+    },
+    "minimax": {
+      "name": "minimax",
+      "selectedModels": [],
+      "hideModelSelector": false,
+      "disabled": true
+    },
+    "nebius": {
+      "name": "nebius",
+      "selectedModels": [],
+      "hideModelSelector": false,
+      "disabled": true
+    },
+    "ollamacloud": {
+      "name": "ollamacloud",
+      "selectedModels": [],
+      "hideModelSelector": false,
+      "disabled": true
+    },
+    "sapai": {
+      "name": "sapai",
+      "selectedModels": [],
+      "hideModelSelector": false,
+      "disabled": true
+    },
+    "stackit": {
+      "name": "stackit",
+      "selectedModels": [],
+      "hideModelSelector": false,
+      "disabled": true
+    },
+    "ovhcloud": {
+      "name": "ovhcloud",
+      "selectedModels": [],
+      "hideModelSelector": false,
+      "disabled": true
+    },
+    "scaleway": {
+      "name": "scaleway",
+      "selectedModels": [],
+      "hideModelSelector": false,
+      "disabled": true
+    },
+    "togetherai": {
+      "name": "togetherai",
+      "selectedModels": [],
+      "hideModelSelector": false,
+      "disabled": true
+    },
+    "venice": {
+      "name": "venice",
+      "selectedModels": [],
+      "hideModelSelector": false,
+      "disabled": true
+    },
+    "vercel": {
+      "name": "vercel",
+      "selectedModels": [],
+      "hideModelSelector": false,
+      "disabled": true
+    },
+    "zai": {
+      "name": "zai",
+      "selectedModels": [],
+      "hideModelSelector": false,
+      "disabled": true
+    },
+    "zenmux": {
+      "name": "zenmux",
+      "selectedModels": [],
+      "hideModelSelector": false,
+      "disabled": true
+    },
+    "kimicode": {
+      "name": "kimicode",
+      "selectedModels": [],
+      "hideModelSelector": false,
       "disabled": true
     }
-  },
-  "agents": {
-    "manager": {
-      "model": "claude-sonnet-4-6",
-      "reasoningLevel": "high"
-    },
-    "coder": {
-      "model": "claude-sonnet-4-6",
-      "maxTokens": 16384
-    },
-    "task": {
-      "model": "gpt-5-mini",
-      "maxTokens": 8192
-    }
-  },
-  "server": {
-    "port": 3000,
-    "host": "0.0.0.0"
-  },
-  "dataDirectory": ".koryphaios",
-  "contextPaths": [
-    ".cursorrules",
-    "CLAUDE.md",
-    "AGENTS.md",
-    ".opencode.json",
-    "CONVENTIONS.md"
-  ],
-  "_workspace": {
-    "_comment": "Git worktree isolation for parallel agents (uncomment to enable)",
-    "_worktreeLimit_comment": "Max concurrent worktrees. 8GB RAM=3-4, 16GB=6-8, 32GB+=10+",
-    "_worktreeLimit": 4,
-    "_worktreeDir": ".trees",
-    "_copyEnvFiles": false
   }
 }

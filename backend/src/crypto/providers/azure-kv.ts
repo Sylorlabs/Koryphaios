@@ -21,10 +21,10 @@ export interface AzureKMSConfig {
 
 /**
  * Azure Key Vault KMS Provider
- * 
+ *
  * Uses Azure Key Vault Keys API for envelope encryption.
  * Supports HSM-backed keys (Premium tier).
- * 
+ *
  * Setup:
  * 1. Create Azure Key Vault (Standard or Premium for HSM)
  * 2. Create a key: az keyvault key create --name mykey --vault-name myvault
@@ -48,17 +48,23 @@ export class AzureKMSProvider implements KMSProvider {
     try {
       // Get access token
       await this.authenticate();
-      
+
       // Get key info
       await this.refreshKeyInfo();
 
-      serverLog.info({ 
-        vault: this.config.vaultName, 
-        key: this.config.keyName,
-        version: this.keyVersion 
-      }, 'Azure Key Vault initialized');
+      serverLog.info(
+        {
+          vault: this.config.vaultName,
+          key: this.config.keyName,
+          version: this.keyVersion,
+        },
+        'Azure Key Vault initialized',
+      );
     } catch (error: any) {
-      serverLog.error({ error, vault: this.config.vaultName }, 'Failed to initialize Azure Key Vault');
+      serverLog.error(
+        { error, vault: this.config.vaultName },
+        'Failed to initialize Azure Key Vault',
+      );
       throw new Error(`Azure Key Vault initialization failed: ${error.message}`);
     }
   }
@@ -75,11 +81,11 @@ export class AzureKMSProvider implements KMSProvider {
 
       // Wrap (encrypt) the DEK using Azure Key Vault
       const url = `https://${this.config.vaultName}.vault.azure.net/keys/${this.config.keyName}/${this.keyVersion}/wrapKey?api-version=7.4`;
-      
+
       const response = await fetch(url, {
         method: 'POST',
         headers: {
-          'Authorization': `Bearer ${this.accessToken}`,
+          Authorization: `Bearer ${this.accessToken}`,
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
@@ -94,7 +100,7 @@ export class AzureKMSProvider implements KMSProvider {
       }
 
       const data = await response.json();
-      
+
       return {
         plaintext: dek,
         encrypted: data.value, // base64-encoded wrapped key
@@ -113,11 +119,11 @@ export class AzureKMSProvider implements KMSProvider {
     try {
       // Unwrap (decrypt) the DEK using Azure Key Vault
       const url = `https://${this.config.vaultName}.vault.azure.net/keys/${this.config.keyName}/${this.keyVersion}/unwrapKey?api-version=7.4`;
-      
+
       const response = await fetch(url, {
         method: 'POST',
         headers: {
-          'Authorization': `Bearer ${this.accessToken}`,
+          Authorization: `Bearer ${this.accessToken}`,
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
@@ -132,7 +138,7 @@ export class AzureKMSProvider implements KMSProvider {
       }
 
       const data = await response.json();
-      
+
       return Buffer.from(data.value, 'base64');
     } catch (error: any) {
       serverLog.error({ error }, 'Azure Key Vault unwrap key failed');
@@ -143,7 +149,7 @@ export class AzureKMSProvider implements KMSProvider {
   async getKekMetadata(): Promise<{ id: string; version: number }> {
     // Parse version from keyVersion string (format: timestamp or semantic)
     const versionNum = parseInt(this.keyVersion, 10) || 1;
-    
+
     return {
       id: this.keyId,
       version: versionNum,
@@ -158,11 +164,11 @@ export class AzureKMSProvider implements KMSProvider {
     try {
       // Rotate the key
       const url = `https://${this.config.vaultName}.vault.azure.net/keys/${this.config.keyName}/rotate?api-version=7.4`;
-      
+
       const response = await fetch(url, {
         method: 'POST',
         headers: {
-          'Authorization': `Bearer ${this.accessToken}`,
+          Authorization: `Bearer ${this.accessToken}`,
         },
       });
 
@@ -172,11 +178,14 @@ export class AzureKMSProvider implements KMSProvider {
       }
 
       await this.refreshKeyInfo();
-      
-      serverLog.info({ 
-        keyName: this.config.keyName, 
-        newVersion: this.keyVersion 
-      }, 'Azure Key Vault key rotated');
+
+      serverLog.info(
+        {
+          keyName: this.config.keyName,
+          newVersion: this.keyVersion,
+        },
+        'Azure Key Vault key rotated',
+      );
 
       return true;
     } catch (error: any) {
@@ -201,7 +210,7 @@ export class AzureKMSProvider implements KMSProvider {
 
   private async authenticate(): Promise<void> {
     const url = `https://login.microsoftonline.com/${this.config.tenantId}/oauth2/v2.0/token`;
-    
+
     const params = new URLSearchParams({
       client_id: this.config.clientId,
       client_secret: this.config.clientSecret,
@@ -232,10 +241,10 @@ export class AzureKMSProvider implements KMSProvider {
     }
 
     const url = `https://${this.config.vaultName}.vault.azure.net/keys/${this.config.keyName}?api-version=7.4`;
-    
+
     const response = await fetch(url, {
       headers: {
-        'Authorization': `Bearer ${this.accessToken}`,
+        Authorization: `Bearer ${this.accessToken}`,
       },
     });
 

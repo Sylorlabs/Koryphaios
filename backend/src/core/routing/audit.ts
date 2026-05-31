@@ -2,10 +2,10 @@
  * Routing audit — Log routing decisions to SQLite for auditing.
  */
 
-import { getDb } from "../../db/sqlite";
-import { nanoid } from "nanoid";
-import type { TriageIntent } from "./types";
-import { serverLog } from "../../logger";
+import { getDb } from '@/db';
+import { nanoid } from 'nanoid';
+import type { TriageIntent } from './types';
+import { serverLog } from '../../logger';
 
 export function logRoutingDecision(params: {
   userId: string | null;
@@ -26,10 +26,10 @@ export function logRoutingDecision(params: {
         params.selectedModelId ?? null,
         JSON.stringify(params.checkedModels),
         Date.now(),
-      ]
+      ],
     );
   } catch (e) {
     // Don't fail the request if audit logging fails
-    serverLog.warn({ error: e }, "Routing audit log failed");
+    serverLog.warn({ error: e }, 'Routing audit log failed');
   }
 }

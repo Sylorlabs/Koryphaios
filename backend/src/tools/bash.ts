@@ -1,37 +1,47 @@
 // Bash tool — execute shell commands with security sandboxing.
 // Uses Bun's spawn for process execution with command validation.
 
-import { resolve, relative, isAbsolute } from "path";
-import type { Tool, ToolContext, ToolCallInput, ToolCallOutput } from "./registry";
-import { validateBashCommand } from "../security";
-import { toolLog } from "../logger";
-import { shellManager } from "./shell-manager";
+import { resolve, relative, isAbsolute } from 'path';
+import type { Tool, ToolContext, ToolCallInput, ToolCallOutput } from './registry';
+import {
+  validateBashCommand,
+  auditBashCommand,
+  SANDBOX_CMD_WHITELIST,
+} from '../security/bash-sandbox';
+import { toolLog } from '../logger';
+import { shellManager } from './shell-manager';
+import { processSupervisor } from '../process-supervisor/supervisor';
 import {
   buildCommandWithLimits,
   validateResourceRequest,
   AGENT_RESOURCE_LIMITS,
-} from "../security/resource-limits";
+} from '../security/resource-limits';
 
 const MAX_OUTPUT_BYTES = 512_000; // 512KB output limit per command
 
-// Safe command whitelist for sandboxed mode
-// Using a Set for O(1) lookups
-const SANDBOX_CMD_WHITELIST = new Set([
-  "ls", "dir", "cd", "pwd", "echo", "cat", "grep", "find", "wc", "sort", "uniq", "head", "tail",
-  "npm", "node", "bun", "yarn", "pnpm", "tsc", "jest", "vitest", "lint", "prettier",
-  "git", "python", "python3", "pip", "pip3", "go", "cargo", "rustc",
-  "mkdir", "touch", "cp", "mv", "rm", // destructive allowed inside sandbox
-]);
-
 const NETWORK_CMD_BLACKLIST = new Set([
-  "curl", "wget", "ssh", "nc", "netcat", "telnet", "ftp", "scp", "rsync",
-  "ping", "traceroute", "dig", "nslookup", "whois",
-  "nmap", "tcpdump", "wireshark",
+  'curl',
+  'wget',
+  'ssh',
+  'nc',
+  'netcat',
+  'telnet',
+  'ftp',
+  'scp',
+  'rsync',
+  'ping',
+  'traceroute',
+  'dig',
+  'nslookup',
+  'whois',
+  'nmap',
+  'tcpdump',
+  'wireshark',
 ]);
 
 function isWithinRoot(root: string, target: string): boolean {
   const rel = relative(root, target);
-  return rel === "" || (!rel.startsWith("..") && !isAbsolute(rel));
+  return rel === '' || (!rel.startsWith('..') && !isAbsolute(rel));
 }
 
 /** Extract base command names from a compound shell command.
@@ -45,14 +55,16 @@ function parseBaseCommands(command: string): string[] {
 
   const bases: string[] = [];
   for (const segment of segments) {
-    // Strip leading subshell/grouping characters: (, {, $( 
-    const cleaned = segment.replace(/^[\s(${]*/, "");
+    // Strip leading subshell/grouping characters: (, {, $(
+    const cleaned = segment.replace(/^[\s(${]*/, '');
     const tokens = cleaned.split(/\s+/).filter(Boolean);
     if (tokens.length === 0) continue;
-    const firstExecutable = tokens.find((t) => !t.includes("=") || t.startsWith("./") || t.startsWith("/"));
+    const firstExecutable = tokens.find(
+      (t) => !t.includes('=') || t.startsWith('./') || t.startsWith('/'),
+    );
     if (!firstExecutable) continue;
     // Strip any remaining shell metacharacters from the executable name
-    const sanitized = firstExecutable.replace(/^['"(${]+|['")}]+$/g, "");
+    const sanitized = firstExecutable.replace(/^['"(${]+|['")}]+$/g, '');
     if (sanitized) bases.push(sanitized);
   }
 
@@ -60,7 +72,7 @@ function parseBaseCommands(command: string): string[] {
 }
 
 export class BashTool implements Tool {
-  readonly name = "bash";
+  readonly name = 'bash';
   readonly description = `Execute a shell command on the system.
   
 SECURITY NOTE: By default, commands are sandboxed to the project directory and only safe development tools (npm, git, ls, grep, etc.) are allowed.
@@ -68,30 +80,32 @@ Absolute paths outside the project are blocked.
 Network access via curl/wget is blocked unless explicitly authorized.`;
 
   readonly inputSchema = {
-    type: "object",
+    type: 'object',
     properties: {
       command: {
-        type: "string",
-        description: "The shell command to execute.",
+        type: 'string',
+        description: 'The shell command to execute.',
       },
       workingDirectory: {
-        type: "string",
-        description: "Working directory for the command. Defaults to the session working directory.",
+        type: 'string',
+        description:
+          'Working directory for the command. Defaults to the session working directory.',
       },
       timeout: {
-        type: "number",
-        description: "Timeout in seconds for foreground commands. Defaults to 120.",
+        type: 'number',
+        description: 'Timeout in seconds for foreground commands. Defaults to 120.',
       },
       isBackground: {
-        type: "boolean",
-        description: "Whether to run the command in the background and keep it running. Use for long-lived processes like servers.",
+        type: 'boolean',
+        description:
+          'Whether to run the command in the background and keep it running. Use for long-lived processes like servers.',
       },
       processName: {
-        type: "string",
-        description: "Optional descriptive name for the background process.",
+        type: 'string',
+        description: 'Optional descriptive name for the background process.',
       },
     },
-    required: ["command"],
+    required: ['command'],
   };
 
   async run(ctx: ToolContext, call: ToolCallInput): Promise<ToolCallOutput> {
@@ -104,8 +118,10 @@ Network access via curl/wget is blocked unless explicitly authorized.`;
     };
 
     // 1. Resolve and Validate Working Directory
-    const requestedCwd = workingDirectory 
-      ? (isAbsolute(workingDirectory) ? workingDirectory : resolve(ctx.workingDirectory, workingDirectory))
+    const requestedCwd = workingDirectory
+      ? isAbsolute(workingDirectory)
+        ? workingDirectory
+        : resolve(ctx.workingDirectory, workingDirectory)
       : ctx.workingDirectory;
 
     // Check if requested path is inside project
@@ -122,58 +138,56 @@ Network access via curl/wget is blocked unless explicitly authorized.`;
       };
     }
 
-    // 2. Validate Command Content
-    const validation = validateBashCommand(command);
+    // 2. Validate Command Content (comprehensive security check)
+    const validation = validateBashCommand(command, {
+      isSandboxed: ctx.isSandboxed,
+      allowNetwork: !ctx.isSandboxed, // Only allow network in unsandboxed mode
+    });
+
+    // Audit log the attempt
+    auditBashCommand(command, {
+      sessionId: ctx.sessionId,
+      agentId: ctx.agentId,
+      userId: 'system', // TODO: Get from auth context
+      isSandboxed: ctx.isSandboxed ?? true,
+      allowed: validation.safe ?? false,
+      reason: validation.reason,
+    });
+
     if (!validation.safe) {
-      toolLog.warn({ command: command.slice(0, 100), reason: validation.reason }, "Blocked dangerous command");
       return {
         callId: call.id,
         name: this.name,
-        output: `Command blocked by security policy: ${validation.reason}`,
+        output: `Command blocked by security policy: ${validation.reason}${validation.requiresUnsandboxed ? '\n\nThis command requires unsandboxed mode. The Manager can run it with full permissions.' : ''}`,
         isError: true,
         durationMs: 0,
       };
     }
 
-    // 3. Sandbox Constraints
-    if (ctx.isSandboxed) {
-      // Check against whitelist/blacklist
-      const baseCommands = parseBaseCommands(command);
-      const allTokens = command.trim().split(/\s+/);
-
-      // Blacklist check — scan ALL tokens for blocked network tools
-      const blockedToken = allTokens.find(p => NETWORK_CMD_BLACKLIST.has(p));
-      if (blockedToken) {
-         return {
-          callId: call.id,
-          name: this.name,
-          output: `Access Denied: Network tool '${blockedToken}' is blocked in sandbox mode. Ask Manager to authorize if needed.`,
-          isError: true,
-          durationMs: 0,
-        };
-      }
-
-      // Whitelist check — ALL base commands must be whitelisted
-      const disallowed = baseCommands.find((cmd) => !SANDBOX_CMD_WHITELIST.has(cmd));
-      if (disallowed) {
-        return {
-          callId: call.id,
-          name: this.name,
-          output: `Access Denied: Command '${disallowed}' is not allowed in sandbox mode.`,
-          isError: true,
-          durationMs: 0,
-        };
-      }
-    }
-
-    // 4. Background Execution
+    // 4. Background Execution (using Process Supervisor)
     if (isBackground) {
-      toolLog.info({ command: command.slice(0, 200), name: processName }, "Starting background process");
-      const bgProc = shellManager.startProcess(processName || "bg-proc", command, requestedCwd);
+      toolLog.info(
+        { command: command.slice(0, 200), name: processName, sessionId: ctx.sessionId },
+        'Starting supervised background process',
+      );
+
+      const bgProc = await processSupervisor.startProcess({
+        name: processName || 'bg-proc',
+        command,
+        cwd: requestedCwd,
+        sessionId: ctx.sessionId,
+        restartPolicy: 'on-failure',
+        maxRestarts: 3,
+        metadata: {
+          toolCallId: call.id,
+          isSandboxed: ctx.isSandboxed,
+        },
+      });
+
       return {
         callId: call.id,
         name: this.name,
-        output: `Background process started.\nID: ${bgProc.id}\nName: ${bgProc.name}\nPID: ${bgProc.pid}\nUse shell_manage to view logs or kill the process.`,
+        output: `Supervised background process started.\nID: ${bgProc.id}\nName: ${bgProc.name}\nPID: ${bgProc.pid}\nRestart Policy: ${bgProc.restartPolicy} (max ${bgProc.maxRestarts} restarts)\nUse shell_manage or Process Supervisor to view logs or kill the process.`,
         isError: false,
         durationMs: 0,
       };
@@ -181,16 +195,19 @@ Network access via curl/wget is blocked unless explicitly authorized.`;
 
     const timeoutMs = (timeout ?? 120) * 1000;
 
-    toolLog.info({ command: command.slice(0, 200), cwd: requestedCwd, sandboxed: ctx.isSandboxed }, "Executing bash command");
+    toolLog.info(
+      { command: command.slice(0, 200), cwd: requestedCwd, sandboxed: ctx.isSandboxed },
+      'Executing bash command',
+    );
 
     // Apply resource limits to the command
     const limitedCommand = buildCommandWithLimits(command, AGENT_RESOURCE_LIMITS);
 
     try {
-      const proc = Bun.spawn(["bash", "-c", limitedCommand], {
+      const proc = Bun.spawn(['bash', '-c', limitedCommand], {
         cwd: requestedCwd,
-        stdout: "pipe",
-        stderr: "pipe",
+        stdout: 'pipe',
+        stderr: 'pipe',
         env: { ...process.env, PATH: process.env.PATH },
       });
 
@@ -210,7 +227,10 @@ Network access via curl/wget is blocked unless explicitly authorized.`;
         const stderrReader = proc.stderr.getReader();
 
         // Read stdout
-        const readStream = async (reader: ReadableStreamDefaultReader<Uint8Array>, chunks: Uint8Array[]) => {
+        const readStream = async (
+          reader: ReadableStreamDefaultReader<Uint8Array>,
+          chunks: Uint8Array[],
+        ) => {
           while (true) {
             const { done, value } = await reader.read();
             if (done) break;
@@ -231,9 +251,9 @@ Network access via curl/wget is blocked unless explicitly authorized.`;
         const stdout = decoder.decode(Buffer.concat(stdoutChunks));
         const stderr = decoder.decode(Buffer.concat(stderrChunks));
 
-        let output = "";
+        let output = '';
         if (stdout) output += stdout;
-        if (stderr) output += (output ? "\n--- stderr ---\n" : "") + stderr;
+        if (stderr) output += (output ? '\n--- stderr ---\n' : '') + stderr;
         if (!output) output = `(no output, exit code: ${exitCode})`;
 
         if (totalBytes >= MAX_OUTPUT_BYTES) {

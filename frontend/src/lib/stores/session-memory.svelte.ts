@@ -1,12 +1,13 @@
 /**
  * Session Memory Store
- * 
+ *
  * Manages the persistent memory file for the current session.
  * Memory files survive compaction and store long-term context.
  */
 
-import { apiUrl } from "$lib/utils/api-url";
-import { toastStore } from "./toast.svelte";
+import { apiUrl } from '$lib/utils/api-url';
+import { toastStore } from './toast.svelte';
+import { apiFetch } from '$lib/api.svelte';
 
 interface MemoryState {
   content: string | null;
@@ -26,9 +27,7 @@ function createSessionMemoryStore() {
   async function loadMemory(sessionId: string): Promise<void> {
     state.isLoading = true;
     try {
-      const res = await fetch(apiUrl(`/api/sessions/${sessionId}/memory`), {
-        credentials: "include",
-      });
+      const res = await apiFetch(apiUrl(`/api/memory/sessions/${sessionId}`));
 
       if (res.ok) {
         const data = await res.json();
@@ -39,7 +38,7 @@ function createSessionMemoryStore() {
         }
       }
     } catch (err) {
-      console.error("Failed to load session memory:", err);
+      console.error('Failed to load session memory:', err);
     } finally {
       state.isLoading = false;
     }
@@ -48,10 +47,9 @@ function createSessionMemoryStore() {
   async function saveMemory(sessionId: string, content: string): Promise<boolean> {
     state.isLoading = true;
     try {
-      const res = await fetch(apiUrl(`/api/sessions/${sessionId}/memory`), {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        credentials: "include",
+      const res = await apiFetch(apiUrl(`/api/memory/sessions/${sessionId}`), {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ content }),
       });
 
@@ -59,13 +57,13 @@ function createSessionMemoryStore() {
         state.content = content;
         state.exists = true;
         state.lastUpdated = Date.now();
-        toastStore.success("Session memory saved");
+        toastStore.success('Session memory saved');
         return true;
       } else {
-        throw new Error("Failed to save memory");
+        throw new Error('Failed to save memory');
       }
     } catch (err) {
-      toastStore.error("Failed to save session memory");
+      toastStore.error('Failed to save session memory');
       console.error(err);
       return false;
     } finally {
@@ -80,11 +78,19 @@ function createSessionMemoryStore() {
   }
 
   return {
-    get content() { return state.content; },
-    get exists() { return state.exists; },
-    get isLoading() { return state.isLoading; },
-    get lastUpdated() { return state.lastUpdated; },
-    
+    get content() {
+      return state.content;
+    },
+    get exists() {
+      return state.exists;
+    },
+    get isLoading() {
+      return state.isLoading;
+    },
+    get lastUpdated() {
+      return state.lastUpdated;
+    },
+
     loadMemory,
     saveMemory,
     clearMemory,

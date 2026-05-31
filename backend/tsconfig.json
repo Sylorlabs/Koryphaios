@@ -5,32 +5,14 @@
     "outDir": "build",
     "module": "esnext",
     "moduleResolution": "node",
-    "types": [
-      "bun",
-      "node"
-    ],
+    "types": ["bun", "node"],
     "noEmit": true,
     "paths": {
-      "@koryphaios/shared/*": [
-        "../shared/src/*"
-      ],
-      "@koryphaios/shared": [
-        "../shared/src/index.ts"
-      ],
-      "@/*": [
-        "./src/*"
-      ]
+      "@koryphaios/shared/*": ["../shared/src/*"],
+      "@koryphaios/shared": ["../shared/src/index.ts"],
+      "@/*": ["./src/*"]
     }
   },
-  "include": [
-    "src/**/*.ts",
-    "../shared/src/**/*.ts"
-  ],
-  "exclude": [
-    "node_modules",
-    "build",
-    "src/**/__tests__/**",
-    "src/server/config.ts",
-    "src/server/shutdown-handler.ts"
-  ]
+  "include": ["src/**/*.ts", "../shared/src/**/*.ts"],
+  "exclude": ["node_modules", "build", "src/**/__tests__/**"]
 }

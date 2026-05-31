@@ -1,31 +1,31 @@
 // Resource Limits for Command Execution
 // Prevents runaway commands from exhausting server resources
 
-import { serverLog } from "../logger";
+import { serverLog } from '../logger';
 
 export interface ResourceLimits {
-  maxCpuTimeMs?: number;      // Maximum CPU time in milliseconds
-  maxMemoryMB?: number;        // Maximum memory in MB
-  maxFileSize?: number;        // Maximum file size for writes (bytes)
-  maxProcesses?: number;       // Maximum number of child processes
-  maxNetworkSockets?: number;  // Maximum network sockets
+  maxCpuTimeMs?: number; // Maximum CPU time in milliseconds
+  maxMemoryMB?: number; // Maximum memory in MB
+  maxFileSize?: number; // Maximum file size for writes (bytes)
+  maxProcesses?: number; // Maximum number of child processes
+  maxNetworkSockets?: number; // Maximum network sockets
   allowNetworkAccess?: boolean; // Whether to allow network access
-  maxDiskWriteMB?: number;     // Maximum disk write in MB
+  maxDiskWriteMB?: number; // Maximum disk write in MB
 }
 
 export const DEFAULT_RESOURCE_LIMITS: ResourceLimits = {
-  maxCpuTimeMs: 120_000,      // 2 minutes
-  maxMemoryMB: 512,           // 512MB
+  maxCpuTimeMs: 120_000, // 2 minutes
+  maxMemoryMB: 512, // 512MB
   maxFileSize: 10 * 1024 * 1024, // 10MB
-  maxProcesses: 50,           // 50 processes
-  maxNetworkSockets: 10,      // 10 network connections
-  allowNetworkAccess: false,  // No network access by default
-  maxDiskWriteMB: 100,        // 100MB disk write
+  maxProcesses: 50, // 50 processes
+  maxNetworkSockets: 10, // 10 network connections
+  allowNetworkAccess: false, // No network access by default
+  maxDiskWriteMB: 100, // 100MB disk write
 };
 
 export const AGENT_RESOURCE_LIMITS: ResourceLimits = {
-  maxCpuTimeMs: 300_000,      // 5 minutes for agent commands
-  maxMemoryMB: 1024,          // 1GB for agent commands
+  maxCpuTimeMs: 300_000, // 5 minutes for agent commands
+  maxMemoryMB: 1024, // 1GB for agent commands
   maxFileSize: 50 * 1024 * 1024, // 50MB
   maxProcesses: 100,
   maxNetworkSockets: 20,
@@ -39,7 +39,7 @@ export const AGENT_RESOURCE_LIMITS: ResourceLimits = {
  */
 export function buildCommandWithLimits(
   command: string,
-  limits: Partial<ResourceLimits> = {}
+  limits: Partial<ResourceLimits> = {},
 ): string {
   const finalLimits = { ...DEFAULT_RESOURCE_LIMITS, ...limits };
 
@@ -48,7 +48,10 @@ export function buildCommandWithLimits(
 
   if (!hasPrlimit) {
     // On non-Linux systems, just return the command with a warning
-    serverLog.warn({ platform: process.platform }, "Resource limits require Linux; proceeding without limits");
+    serverLog.warn(
+      { platform: process.platform },
+      'Resource limits require Linux; proceeding without limits',
+    );
     return command;
   }
 
@@ -95,26 +98,27 @@ export function buildCommandWithLimits(
  * Validate that a command doesn't exceed resource limits before execution.
  * This is a lightweight check; actual enforcement happens via prlimit.
  */
-export function validateResourceRequest(
-  limits: Partial<ResourceLimits> = {}
-): { allowed: boolean; reason?: string } {
+export function validateResourceRequest(limits: Partial<ResourceLimits> = {}): {
+  allowed: boolean;
+  reason?: string;
+} {
   const finalLimits = { ...DEFAULT_RESOURCE_LIMITS, ...limits };
 
   // Check for unreasonably high limits
   if (finalLimits.maxCpuTimeMs && finalLimits.maxCpuTimeMs > 3_600_000) {
-    return { allowed: false, reason: "CPU time limit exceeds maximum (60 minutes)" };
+    return { allowed: false, reason: 'CPU time limit exceeds maximum (60 minutes)' };
   }
 
   if (finalLimits.maxMemoryMB && finalLimits.maxMemoryMB > 8192) {
-    return { allowed: false, reason: "Memory limit exceeds maximum (8GB)" };
+    return { allowed: false, reason: 'Memory limit exceeds maximum (8GB)' };
   }
 
   if (finalLimits.maxProcesses && finalLimits.maxProcesses > 500) {
-    return { allowed: false, reason: "Process limit exceeds maximum (500)" };
+    return { allowed: false, reason: 'Process limit exceeds maximum (500)' };
   }
 
-  if (finalLimits.allowNetworkAccess && process.env.KORYPHAIOS_ALLOW_NETWORK !== "true") {
-    return { allowed: false, reason: "Network access is disabled by default" };
+  if (finalLimits.allowNetworkAccess && process.env.KORYPHAIOS_ALLOW_NETWORK !== 'true') {
+    return { allowed: false, reason: 'Network access is disabled by default' };
   }
 
   return { allowed: true };
@@ -160,7 +164,7 @@ export function checkSessionQuota(
   sessionId: string,
   quota: SessionQuota,
   usage: SessionResourceUsage,
-  sessionAge: number
+  sessionAge: number,
 ): { allowed: boolean; reason?: string; retryAfter?: number } {
   // Check command count
   if (usage.commandCount >= quota.maxDailyCommands) {

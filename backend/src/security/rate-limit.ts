@@ -1,15 +1,15 @@
 // Complete Rate Limiting Implementation
 // Production-ready distributed rate limiting with Redis, multiple strategies, and CAPTCHA integration
 
-import { getRedisClient, type InMemoryRedis } from "../redis";
-import { randomBytes } from "node:crypto";
-import { serverLog } from "../logger";
+import { getRedisClient, type InMemoryRedis } from '../redis';
+import { randomBytes } from 'node:crypto';
+import { serverLog } from '../logger';
 
 // ============================================================================
 // RATE LIMITING STRATEGIES
 // ============================================================================
 
-export type RateLimitStrategy = "sliding-window" | "token-bucket" | "fixed-window";
+export type RateLimitStrategy = 'sliding-window' | 'token-bucket' | 'fixed-window';
 
 export interface RateLimitConfig {
   maxRequests: number;
@@ -126,13 +126,13 @@ export class SlidingWindowRateLimiter {
   async check(options: RateLimitOptions): Promise<RateLimitResult> {
     const redis = getRedisClient();
     const { identifier, maxRequests, windowMs } = { ...this.config, ...options };
-    const key = `${this.config.keyPrefix || "ratelimit"}:sliding:${identifier}`;
+    const key = `${this.config.keyPrefix || 'ratelimit'}:sliding:${identifier}`;
     const now = Date.now();
     const windowStart = now - windowMs;
 
     try {
       // Remove expired entries
-      await redis.zremrangebyscore(key, "0", windowStart);
+      await redis.zremrangebyscore(key, '0', windowStart);
 
       // Count current requests in window
       const current = await redis.zcard(key);
@@ -140,7 +140,7 @@ export class SlidingWindowRateLimiter {
       if (current < maxRequests) {
         // Add current request
         const score = now;
-        const member = `${now}:${randomBytes(8).toString("hex")}`;
+        const member = `${now}:${randomBytes(8).toString('hex')}`;
         await redis.zadd(key, score, member);
         await redis.expire(key, Math.ceil(windowMs / 1000) + 1);
 
@@ -152,7 +152,7 @@ export class SlidingWindowRateLimiter {
         };
       } else {
         // Rate limit exceeded - find when the oldest request will expire
-        const oldest = await redis.zrange(key, 0, 0, "WITHSCORES");
+        const oldest = await redis.zrange(key, 0, 0, 'WITHSCORES');
         const resetAt = oldest.length >= 2 ? Number(oldest[1]) + windowMs : now + windowMs;
         const retryAfter = Math.ceil((resetAt - now) / 1000);
 
@@ -165,7 +165,7 @@ export class SlidingWindowRateLimiter {
         };
       }
     } catch (err) {
-      serverLog.warn({ err, key }, "Redis rate limiter unavailable, using fallback");
+      serverLog.warn({ err, key }, 'Redis rate limiter unavailable, using fallback');
 
       // SECURITY: Use fallback in-memory limiter instead of fail-open
       // This prevents DoS when Redis is unavailable
@@ -181,7 +181,7 @@ export class SlidingWindowRateLimiter {
     identifier: string,
     maxRequests: number,
     windowMs: number,
-    now: number
+    now: number,
   ): RateLimitResult {
     let limiter = this.fallbackLimiters.get(identifier);
 
@@ -194,7 +194,7 @@ export class SlidingWindowRateLimiter {
 
     serverLog.debug(
       { identifier, allowed: result.allowed, remaining: result.remaining },
-      "Fallback rate limiter used"
+      'Fallback rate limiter used',
     );
 
     return {
@@ -209,10 +209,10 @@ export class SlidingWindowRateLimiter {
   async reset(identifier: string): Promise<void> {
     try {
       const redis = getRedisClient();
-      const key = `${this.config.keyPrefix || "ratelimit"}:sliding:${identifier}`;
+      const key = `${this.config.keyPrefix || 'ratelimit'}:sliding:${identifier}`;
       await redis.del(key);
     } catch (err) {
-      serverLog.error({ err, identifier }, "Failed to reset rate limit");
+      serverLog.error({ err, identifier }, 'Failed to reset rate limit');
     }
   }
 }
@@ -235,7 +235,7 @@ export class TokenBucketRateLimiter {
     private config: RateLimitConfig & {
       bucketSize?: number;
       refillRate?: number;
-    }
+    },
   ) {}
 
   async check(options: RateLimitOptions): Promise<RateLimitResult> {
@@ -244,7 +244,7 @@ export class TokenBucketRateLimiter {
     const { identifier, maxRequests, windowMs } = merged;
     const bucketSize = merged.bucketSize ?? maxRequests;
     const refillRate = merged.refillRate ?? maxRequests / (windowMs / 1000);
-    const key = `${this.config.keyPrefix || "ratelimit"}:tokenbucket:${identifier}`;
+    const key = `${this.config.keyPrefix || 'ratelimit'}:tokenbucket:${identifier}`;
     const now = Date.now();
     const cost = 1; // Cost per request
 
@@ -287,7 +287,7 @@ export class TokenBucketRateLimiter {
         return {allowed, remaining, retry_after}
       `;
 
-      const scriptHash = String(await redis.script("LOAD", luaScript));
+      const scriptHash = String(await redis.script('LOAD', luaScript));
       const ttl = Math.ceil(windowMs / 1000) + 60; // TTL + 1 minute buffer
 
       const result = await redis.evalsha(
@@ -298,7 +298,7 @@ export class TokenBucketRateLimiter {
         String(refillRate),
         String(now),
         String(cost),
-        String(ttl)
+        String(ttl),
       );
 
       const [allowed, remaining, retryAfter] = result as [number, number, number];
@@ -311,7 +311,7 @@ export class TokenBucketRateLimiter {
         limit: bucketSize,
       };
     } catch (err) {
-      serverLog.warn({ err, key }, "Redis token bucket limiter unavailable, using fallback");
+      serverLog.warn({ err, key }, 'Redis token bucket limiter unavailable, using fallback');
 
       // SECURITY: Use fallback in-memory limiter instead of fail-open
       const bucketSize = merged.bucketSize ?? maxRequests;
@@ -327,7 +327,7 @@ export class TokenBucketRateLimiter {
     identifier: string,
     maxRequests: number,
     windowMs: number,
-    now: number
+    now: number,
   ): RateLimitResult {
     let limiter = this.fallbackLimiters.get(identifier);
 
@@ -350,10 +350,10 @@ export class TokenBucketRateLimiter {
   async reset(identifier: string): Promise<void> {
     try {
       const redis = getRedisClient();
-      const key = `${this.config.keyPrefix || "ratelimit"}:tokenbucket:${identifier}`;
+      const key = `${this.config.keyPrefix || 'ratelimit'}:tokenbucket:${identifier}`;
       await redis.del(key);
     } catch (err) {
-      serverLog.error({ err, identifier }, "Failed to reset rate limit");
+      serverLog.error({ err, identifier }, 'Failed to reset rate limit');
     }
   }
 }
@@ -379,7 +379,7 @@ export class FixedWindowRateLimiter {
     const { identifier, maxRequests, windowMs } = { ...this.config, ...options };
     const now = Date.now();
     const windowId = Math.floor(now / windowMs);
-    const key = `${this.config.keyPrefix || "ratelimit"}:fixed:${identifier}:${windowId}`;
+    const key = `${this.config.keyPrefix || 'ratelimit'}:fixed:${identifier}:${windowId}`;
 
     try {
       // Increment counter
@@ -410,7 +410,7 @@ export class FixedWindowRateLimiter {
         };
       }
     } catch (err) {
-      serverLog.warn({ err, key }, "Redis fixed window limiter unavailable, using fallback");
+      serverLog.warn({ err, key }, 'Redis fixed window limiter unavailable, using fallback');
 
       // SECURITY: Use fallback in-memory limiter instead of fail-open
       return this.checkWithFallback(identifier, maxRequests, windowMs, now);
@@ -425,7 +425,7 @@ export class FixedWindowRateLimiter {
     identifier: string,
     maxRequests: number,
     windowMs: number,
-    now: number
+    now: number,
   ): RateLimitResult {
     let limiter = this.fallbackLimiters.get(identifier);
 
@@ -449,13 +449,13 @@ export class FixedWindowRateLimiter {
     try {
       const redis = getRedisClient();
       // Clear all windows for this identifier
-      const pattern = `${this.config.keyPrefix || "ratelimit"}:fixed:${identifier}:*`;
+      const pattern = `${this.config.keyPrefix || 'ratelimit'}:fixed:${identifier}:*`;
       const keys = await redis.keys(pattern);
       if (keys.length > 0) {
         await redis.del(...keys);
       }
     } catch (err) {
-      serverLog.error({ err, identifier }, "Failed to reset rate limit");
+      serverLog.error({ err, identifier }, 'Failed to reset rate limit');
     }
   }
 }
@@ -482,8 +482,10 @@ export interface TieredRateLimitConfig {
 }
 
 export class TieredRateLimiter {
-  private limiters: Map<string, SlidingWindowRateLimiter | TokenBucketRateLimiter | FixedWindowRateLimiter> =
-    new Map();
+  private limiters: Map<
+    string,
+    SlidingWindowRateLimiter | TokenBucketRateLimiter | FixedWindowRateLimiter
+  > = new Map();
 
   constructor(private config: TieredRateLimitConfig) {}
 
@@ -501,19 +503,19 @@ export class TieredRateLimiter {
 
     // Global rate limit
     if (this.config.global) {
-      const result = await this.checkWithKey("global", "global", this.config.global);
+      const result = await this.checkWithKey('global', 'global', this.config.global);
       results.push(result);
     }
 
     // IP-based rate limit
     if (this.config.ip) {
-      const result = await this.checkWithKey("ip", request.ip, this.config.ip);
+      const result = await this.checkWithKey('ip', request.ip, this.config.ip);
       results.push(result);
     }
 
     // User-based rate limit (if authenticated)
     if (this.config.user && request.userId) {
-      const result = await this.checkWithKey("user", request.userId, this.config.user);
+      const result = await this.checkWithKey('user', request.userId, this.config.user);
       results.push(result);
     }
 
@@ -524,7 +526,7 @@ export class TieredRateLimiter {
         const result = await this.checkWithKey(
           `endpoint:${request.endpoint}`,
           `${request.ip}:${request.endpoint}`,
-          endpointConfig
+          endpointConfig,
         );
         results.push(result);
       }
@@ -532,11 +534,7 @@ export class TieredRateLimiter {
 
     // Auth endpoint rate limit (stricter)
     if (this.config.auth && request.isAuthEndpoint) {
-      const result = await this.checkWithKey(
-        "auth",
-        request.ip,
-        this.config.auth
-      );
+      const result = await this.checkWithKey('auth', request.ip, this.config.auth);
       results.push(result);
     }
 
@@ -551,18 +549,18 @@ export class TieredRateLimiter {
   private async checkWithKey(
     tier: string,
     identifier: string,
-    config: RateLimitConfig
+    config: RateLimitConfig,
   ): Promise<RateLimitResult> {
-    const limiterKey = `${tier}:${config.strategy || "sliding-window"}`;
+    const limiterKey = `${tier}:${config.strategy || 'sliding-window'}`;
 
     let limiter = this.limiters.get(limiterKey);
     if (!limiter) {
-      const strategy = config.strategy || "sliding-window";
+      const strategy = config.strategy || 'sliding-window';
       switch (strategy) {
-        case "token-bucket":
+        case 'token-bucket':
           limiter = new TokenBucketRateLimiter(config);
           break;
-        case "fixed-window":
+        case 'fixed-window':
           limiter = new FixedWindowRateLimiter(config);
           break;
         default:
@@ -578,9 +576,7 @@ export class TieredRateLimiter {
    * Reset rate limits for a specific identifier
    */
   async reset(identifier: string, tier?: string): Promise<void> {
-    const keys = tier
-      ? [`${tier}:${identifier}`]
-      : Array.from(this.limiters.keys());
+    const keys = tier ? [`${tier}:${identifier}`] : Array.from(this.limiters.keys());
 
     for (const key of keys) {
       // Reset logic would go here
@@ -606,7 +602,7 @@ export class ProgressiveBackoffRateLimiter {
       maxAttempts: number;
       windowMs: number;
       decayMs?: number; // Time before attempt counter decays
-    }
+    },
   ) {}
 
   async check(identifier: string): Promise<{
@@ -619,7 +615,7 @@ export class ProgressiveBackoffRateLimiter {
     const now = Date.now();
 
     try {
-      const data = await redis.hmget(key, "attempts", "lastAttempt");
+      const data = await redis.hmget(key, 'attempts', 'lastAttempt');
 
       const attempts = data[0] ? parseInt(data[0], 10) : 0;
       const lastAttempt = data[1] ? parseInt(data[1], 10) : 0;
@@ -636,10 +632,7 @@ export class ProgressiveBackoffRateLimiter {
 
       // Check if max attempts exceeded
       if (effectiveAttempts >= this.config.maxAttempts) {
-        const backoffIndex = Math.min(
-          effectiveAttempts,
-          this.backoffMultipliers.length - 1
-        );
+        const backoffIndex = Math.min(effectiveAttempts, this.backoffMultipliers.length - 1);
         const retryAfter = this.backoffMultipliers[backoffIndex] * this.baseDelayMs;
 
         return {
@@ -650,7 +643,7 @@ export class ProgressiveBackoffRateLimiter {
       }
 
       // Increment attempts
-      await redis.hmset(key, "attempts", effectiveAttempts + 1, "lastAttempt", now);
+      await redis.hmset(key, 'attempts', effectiveAttempts + 1, 'lastAttempt', now);
       await redis.expire(key, Math.ceil(this.config.windowMs / 1000) + 1);
 
       return {
@@ -658,7 +651,7 @@ export class ProgressiveBackoffRateLimiter {
         attempt: effectiveAttempts,
       };
     } catch (err) {
-      serverLog.error({ err, key }, "Progressive backoff limiter failed");
+      serverLog.error({ err, key }, 'Progressive backoff limiter failed');
 
       // Fail open
       return { allowed: true, attempt: 0 };
@@ -670,7 +663,7 @@ export class ProgressiveBackoffRateLimiter {
       const redis = getRedisClient();
       await redis.del(`backoff:${identifier}`);
     } catch (err) {
-      serverLog.error({ err, identifier }, "Failed to reset backoff");
+      serverLog.error({ err, identifier }, 'Failed to reset backoff');
     }
   }
 }
@@ -689,30 +682,30 @@ export interface RateLimitMiddlewareOptions {
 /**
  * Express/Bun-style middleware for rate limiting
  */
-export function createRateLimitMiddleware(
-  options: RateLimitMiddlewareOptions
-) {
+export function createRateLimitMiddleware(options: RateLimitMiddlewareOptions) {
   const limiter = new TieredRateLimiter(options.tieredConfig);
 
-  return async (
-    request: Request,
-    response: Response
-  ): Promise<Response> => {
+  return async (request: Request, response: Response): Promise<Response> => {
     // Extract IP address
     const ip =
-      request.headers.get(options.ipHeader || "x-forwarded-for")?.split(",")[0]?.trim() ||
-      "unknown";
+      request.headers
+        .get(options.ipHeader || 'x-forwarded-for')
+        ?.split(',')[0]
+        ?.trim() || 'unknown';
 
     // Extract user ID if authenticated
-    const authHeader = request.headers.get("authorization");
-    const userId = authHeader?.startsWith("Bearer ") ? extractUserIdFromToken(authHeader.slice(7)) : undefined;
+    const authHeader = request.headers.get('authorization');
+    const userId = authHeader?.startsWith('Bearer ')
+      ? extractUserIdFromToken(authHeader.slice(7))
+      : undefined;
 
     // Determine endpoint
     const url = new URL(request.url);
     const endpoint = `${request.method}:${url.pathname}`;
 
     // Check if auth endpoint
-    const isAuthEndpoint = endpoint.includes("/auth/") || endpoint.includes("/login") || endpoint.includes("/register");
+    const isAuthEndpoint =
+      endpoint.includes('/auth/') || endpoint.includes('/login') || endpoint.includes('/register');
 
     // Check rate limits
     const result = await limiter.check({
@@ -723,20 +716,23 @@ export function createRateLimitMiddleware(
     });
 
     // Add rate limit headers to response
-    response.headers.set("X-RateLimit-Limit", String(result.limit));
-    response.headers.set("X-RateLimit-Remaining", String(result.remaining));
-    response.headers.set("X-RateLimit-Reset", String(result.resetAt));
+    response.headers.set('X-RateLimit-Limit', String(result.limit));
+    response.headers.set('X-RateLimit-Remaining', String(result.remaining));
+    response.headers.set('X-RateLimit-Reset', String(result.resetAt));
 
     if (!result.allowed) {
-      response.headers.set("Retry-After", String(result.retryAfter || 60));
+      response.headers.set('Retry-After', String(result.retryAfter || 60));
 
       // Log rate limit hit
-      serverLog.warn({
-        ip,
-        userId,
-        endpoint,
-        retryAfter: result.retryAfter,
-      }, "Rate limit exceeded");
+      serverLog.warn(
+        {
+          ip,
+          userId,
+          endpoint,
+          retryAfter: result.retryAfter,
+        },
+        'Rate limit exceeded',
+      );
 
       // Call custom handler or return default response
       if (options.onRateLimited) {
@@ -745,13 +741,13 @@ export function createRateLimitMiddleware(
 
       return new Response(
         JSON.stringify({
-          error: "Too many requests",
+          error: 'Too many requests',
           retryAfter: result.retryAfter,
         }),
         {
           status: 429,
-          headers: { "Content-Type": "application/json" },
-        }
+          headers: { 'Content-Type': 'application/json' },
+        },
       );
     }
 
@@ -764,7 +760,7 @@ export function createRateLimitMiddleware(
 // ============================================================================
 
 export interface CaptchaConfig {
-  provider: "hcaptcha" | "recaptcha" | "turnstile";
+  provider: 'hcaptcha' | 'recaptcha' | 'turnstile';
   secretKey: string;
   minScore?: number; // For reCAPTCHA v3
   threshold?: number; // Number of failures before triggering CAPTCHA
@@ -808,16 +804,16 @@ export class CaptchaRateLimiter {
       let body: Record<string, string>;
 
       switch (this.config.provider) {
-        case "hcaptcha":
-          verifyUrl = "https://hcaptcha.com/siteverify";
+        case 'hcaptcha':
+          verifyUrl = 'https://hcaptcha.com/siteverify';
           body = {
             secret: this.config.secretKey,
             response: token,
           };
           break;
 
-        case "recaptcha":
-          verifyUrl = "https://www.google.com/recaptcha/api/siteverify";
+        case 'recaptcha':
+          verifyUrl = 'https://www.google.com/recaptcha/api/siteverify';
           body = {
             secret: this.config.secretKey,
             response: token,
@@ -825,8 +821,8 @@ export class CaptchaRateLimiter {
           };
           break;
 
-        case "turnstile":
-          verifyUrl = "https://challenges.cloudflare.com/turnstile/v0/siteverify";
+        case 'turnstile':
+          verifyUrl = 'https://challenges.cloudflare.com/turnstile/v0/siteverify';
           body = {
             secret: this.config.secretKey,
             response: token,
@@ -836,8 +832,8 @@ export class CaptchaRateLimiter {
       }
 
       const response = await fetch(verifyUrl, {
-        method: "POST",
-        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
         body: new URLSearchParams(body),
       });
 
@@ -850,7 +846,7 @@ export class CaptchaRateLimiter {
 
       return result.success;
     } catch (err) {
-      serverLog.error({ err }, "CAPTCHA verification failed");
+      serverLog.error({ err }, 'CAPTCHA verification failed');
       return false;
     }
   }
@@ -868,28 +864,28 @@ export const RateLimitPresets = {
   api: {
     maxRequests: 100,
     windowMs: 60_000,
-    strategy: "sliding-window" as const,
+    strategy: 'sliding-window' as const,
   },
 
   // Authentication: 5 attempts per 15 minutes
   auth: {
     maxRequests: 5,
     windowMs: 15 * 60_000,
-    strategy: "sliding-window" as const,
+    strategy: 'sliding-window' as const,
   },
 
   // Password reset: 3 attempts per hour
   passwordReset: {
     maxRequests: 3,
     windowMs: 60 * 60_000,
-    strategy: "fixed-window" as const,
+    strategy: 'fixed-window' as const,
   },
 
   // WebSocket connections: 10 per second
   websocket: {
     maxRequests: 10,
     windowMs: 1000,
-    strategy: "token-bucket" as const,
+    strategy: 'token-bucket' as const,
     refillRate: 10,
     bucketSize: 20, // Allow burst
   },
@@ -898,14 +894,14 @@ export const RateLimitPresets = {
   fileUpload: {
     maxRequests: 5,
     windowMs: 60 * 60_000,
-    strategy: "fixed-window" as const,
+    strategy: 'fixed-window' as const,
   },
 
   // LLM API calls: 60 per minute
   llmCalls: {
     maxRequests: 60,
     windowMs: 60_000,
-    strategy: "token-bucket" as const,
+    strategy: 'token-bucket' as const,
     refillRate: 1,
     bucketSize: 10, // Allow burst
   },
@@ -921,11 +917,11 @@ export function createProductionRateLimiter(): TieredRateLimiter {
     user: RateLimitPresets.api,
     auth: RateLimitPresets.auth,
     endpoints: {
-      "/api/auth/login": RateLimitPresets.auth,
-      "/api/auth/register": RateLimitPresets.auth,
-      "/api/auth/reset-password": RateLimitPresets.passwordReset,
-      "/api/file/upload": RateLimitPresets.fileUpload,
-      "/api/llm": RateLimitPresets.llmCalls,
+      '/api/auth/login': RateLimitPresets.auth,
+      '/api/auth/register': RateLimitPresets.auth,
+      '/api/auth/reset-password': RateLimitPresets.passwordReset,
+      '/api/file/upload': RateLimitPresets.fileUpload,
+      '/api/llm': RateLimitPresets.llmCalls,
     },
   });
 }
@@ -940,9 +936,9 @@ export function createProductionRateLimiter(): TieredRateLimiter {
  */
 function extractUserIdFromToken(token: string): string | undefined {
   try {
-    const parts = token.split(".");
+    const parts = token.split('.');
     if (parts.length === 3) {
-      const payload = JSON.parse(Buffer.from(parts[1], "base64url").toString());
+      const payload = JSON.parse(Buffer.from(parts[1], 'base64url').toString());
       return payload.sub;
     }
   } catch {
@@ -961,7 +957,7 @@ function createTierConfig(
   requestsPerHour: number,
   requestsPerDay: number,
   maxTokensPerRequest: number,
-  concurrentRequests: number
+  concurrentRequests: number,
 ): RateLimitTier {
   return {
     name,
@@ -970,23 +966,23 @@ function createTierConfig(
       user: {
         windowMs: 60_000,
         maxRequests: requestsPerMinute,
-        strategy: "sliding-window",
+        strategy: 'sliding-window',
       },
       ip: {
         windowMs: 60_000,
         maxRequests: Math.max(requestsPerMinute * 2, 100),
-        strategy: "sliding-window",
+        strategy: 'sliding-window',
       },
       endpoints: {
-        "/api/v1/chat/completions": {
+        '/api/chat/completions': {
           windowMs: 60_000,
           maxRequests: Math.floor(requestsPerMinute / 2),
-          strategy: "token-bucket",
+          strategy: 'token-bucket',
         },
-        "/api/v1/models": {
+        '/api/models': {
           windowMs: 60_000,
           maxRequests: 30,
-          strategy: "sliding-window",
+          strategy: 'sliding-window',
         },
       },
     },
@@ -994,49 +990,52 @@ function createTierConfig(
 }
 
 export const DEFAULT_TIERS: Record<string, RateLimitTier> = {
-  free: createTierConfig("free", 60, 1_000, 10_000, 4_000, 2),
-  premium: createTierConfig("premium", 300, 10_000, 100_000, 8_000, 10),
-  pro: createTierConfig("pro", 1_000, 50_000, 500_000, 32_000, 50),
-  enterprise: createTierConfig("enterprise", 5_000, 200_000, 2_000_000, 128_000, 200),
+  free: createTierConfig('free', 60, 1_000, 10_000, 4_000, 2),
+  premium: createTierConfig('premium', 300, 10_000, 100_000, 8_000, 10),
+  pro: createTierConfig('pro', 1_000, 50_000, 500_000, 32_000, 50),
+  enterprise: createTierConfig('enterprise', 5_000, 200_000, 2_000_000, 128_000, 200),
 };
 
-export const ENDPOINT_LIMITS: Record<string, {
-  windowMs: number;
-  maxRequests: number;
-  description: string;
-  strategy?: RateLimitStrategy;
-  bucketSize?: number;
-}> = {
-  "/api/v1/chat/completions": {
+export const ENDPOINT_LIMITS: Record<
+  string,
+  {
+    windowMs: number;
+    maxRequests: number;
+    description: string;
+    strategy?: RateLimitStrategy;
+    bucketSize?: number;
+  }
+> = {
+  '/api/chat/completions': {
     windowMs: 60_000,
     maxRequests: 100,
-    description: "Chat completions endpoint",
-    strategy: "token-bucket",
+    description: 'Chat completions endpoint',
+    strategy: 'token-bucket',
     bucketSize: 20,
   },
-  "/api/v1/models": {
+  '/api/models': {
     windowMs: 60_000,
     maxRequests: 30,
-    description: "Model list endpoint",
-    strategy: "sliding-window",
+    description: 'Model list endpoint',
+    strategy: 'sliding-window',
   },
-  "/api/v1/credentials": {
+  '/api/credentials': {
     windowMs: 60_000,
     maxRequests: 20,
-    description: "Credential management (sensitive)",
-    strategy: "sliding-window",
+    description: 'Credential management (sensitive)',
+    strategy: 'sliding-window',
   },
-  "/api/v1/admin": {
+  '/api/admin': {
     windowMs: 60_000,
     maxRequests: 10,
-    description: "Admin operations",
-    strategy: "sliding-window",
+    description: 'Admin operations',
+    strategy: 'sliding-window',
   },
-  "/api/v1/keys": {
+  '/api/keys': {
     windowMs: 60_000,
     maxRequests: 5,
-    description: "API key generation (expensive)",
-    strategy: "token-bucket",
+    description: 'API key generation (expensive)',
+    strategy: 'token-bucket',
     bucketSize: 2,
   },
 };
@@ -1050,18 +1049,18 @@ export function getTierRequestsPerMinute(tierName: string): number {
   return tier.limits.user?.maxRequests || 60;
 }
 
-export function shouldUpgrade(tierName: string, usage: {
-  requestsLastHour: number;
-  requestsLastDay: number;
-}): boolean {
+export function shouldUpgrade(
+  tierName: string,
+  usage: {
+    requestsLastHour: number;
+    requestsLastDay: number;
+  },
+): boolean {
   const tier = getTierConfig(tierName);
   const hourlyLimit = (tier.limits.user?.maxRequests || 60) * 60;
   const dailyLimit = hourlyLimit * 24;
 
-  return (
-    usage.requestsLastHour > hourlyLimit * 0.9 ||
-    usage.requestsLastDay > dailyLimit * 0.9
-  );
+  return usage.requestsLastHour > hourlyLimit * 0.9 || usage.requestsLastDay > dailyLimit * 0.9;
 }
 
 export function getEndpointConfig(endpoint: string): RateLimitConfig | null {
@@ -1071,7 +1070,7 @@ export function getEndpointConfig(endpoint: string): RateLimitConfig | null {
   return {
     windowMs: limit.windowMs,
     maxRequests: limit.maxRequests,
-    strategy: limit.strategy || "sliding-window",
+    strategy: limit.strategy || 'sliding-window',
   };
 }
 
@@ -1091,7 +1090,7 @@ export interface ExpressRateLimitOptions {
 const DEFAULT_MIDDLEWARE_CONFIG: RateLimitConfig = {
   windowMs: 60_000,
   maxRequests: 100,
-  strategy: "sliding-window",
+  strategy: 'sliding-window',
 };
 
 const memoryLimiters = new Map<string, Map<string, { count: number; resetTime: number }>>();
@@ -1106,15 +1105,15 @@ function getMemoryLimiter(key: string): Map<string, { count: number; resetTime: 
 async function checkMemoryLimit(
   key: string,
   config: RateLimitConfig,
-  algorithm: string
+  algorithm: string,
 ): Promise<RateLimitResult> {
   const now = Date.now();
   const windowMs = config.windowMs;
 
-  if (algorithm === "token-bucket") {
+  if (algorithm === 'token-bucket') {
     const bucketSize = config.maxRequests;
     const refillRate = config.maxRequests / (windowMs / 1000);
-    const limiters = getMemoryLimiter("token-bucket");
+    const limiters = getMemoryLimiter('token-bucket');
 
     let bucket = limiters.get(key);
     if (!bucket) {
@@ -1146,7 +1145,7 @@ async function checkMemoryLimit(
       };
     }
   } else {
-    const limiters = getMemoryLimiter("sliding-window");
+    const limiters = getMemoryLimiter('sliding-window');
     let entry = limiters.get(key);
 
     if (!entry || entry.resetTime < now) {
@@ -1180,8 +1179,8 @@ async function checkMemoryLimit(
  * Falls back to in-memory limiting if Redis is unavailable.
  */
 export function rateLimit(options: ExpressRateLimitOptions = {}) {
-  const prefix = options.prefix || "ratelimit";
-  const algorithm = options.algorithm || "sliding-window";
+  const prefix = options.prefix || 'ratelimit';
+  const algorithm = options.algorithm || 'sliding-window';
   const config = options.config || DEFAULT_MIDDLEWARE_CONFIG;
 
   return async (req: any, res: any, next: any): Promise<void> => {
@@ -1196,7 +1195,7 @@ export function rateLimit(options: ExpressRateLimitOptions = {}) {
       } else if (req.authenticatedUser) {
         key = req.authenticatedUser.id;
       } else {
-        key = req.ip || req.connection?.remoteAddress || "unknown";
+        key = req.ip || req.connection?.remoteAddress || 'unknown';
       }
 
       let effectiveConfig: RateLimitConfig = config;
@@ -1207,31 +1206,31 @@ export function rateLimit(options: ExpressRateLimitOptions = {}) {
 
       const result = await checkMemoryLimit(`${prefix}:${key}`, effectiveConfig, algorithm);
 
-      res.setHeader("X-RateLimit-Limit", String(result.limit));
-      res.setHeader("X-RateLimit-Remaining", String(Math.max(0, result.remaining)));
-      res.setHeader("X-RateLimit-Reset", String(result.resetAt));
+      res.setHeader('X-RateLimit-Limit', String(result.limit));
+      res.setHeader('X-RateLimit-Remaining', String(Math.max(0, result.remaining)));
+      res.setHeader('X-RateLimit-Reset', String(result.resetAt));
 
       if (!result.allowed) {
         const retryAfter = result.retryAfter || Math.ceil((result.resetAt - Date.now()) / 1000);
-        res.setHeader("Retry-After", String(retryAfter));
+        res.setHeader('Retry-After', String(retryAfter));
 
         if (options.handler) {
           options.handler(req, res, next, retryAfter);
         } else {
           res.status(429).json({
-            error: "Too Many Requests",
-            message: "Rate limit exceeded. Please try again later.",
+            error: 'Too Many Requests',
+            message: 'Rate limit exceeded. Please try again later.',
             retryAfter,
           });
         }
 
-        serverLog.warn({ key, path: req.path }, "Rate limit exceeded");
+        serverLog.warn({ key, path: req.path }, 'Rate limit exceeded');
         return;
       }
 
       next();
     } catch (error) {
-      serverLog.error({ error }, "Rate limiting error");
+      serverLog.error({ error }, 'Rate limiting error');
       next();
     }
   };
@@ -1242,39 +1241,36 @@ export function rateLimit(options: ExpressRateLimitOptions = {}) {
  */
 export function endpointRateLimit(
   endpoint: string,
-  options: Omit<ExpressRateLimitOptions, "config"> = {}
+  options: Omit<ExpressRateLimitOptions, 'config'> = {},
 ) {
   const config = getEndpointConfig(endpoint);
   if (!config) {
-    serverLog.warn({ endpoint }, "No rate limit config for endpoint, using defaults");
+    serverLog.warn({ endpoint }, 'No rate limit config for endpoint, using defaults');
   }
 
   return rateLimit({
     ...options,
     config: config || DEFAULT_MIDDLEWARE_CONFIG,
-    prefix: `ratelimit:${endpoint.replace(/\//g, ":")}`,
+    prefix: `ratelimit:${endpoint.replace(/\//g, ':')}`,
   });
 }
 
 /**
  * Multi-layer rate limiting middleware combining global, tier, and endpoint limits.
  */
-export function multiLayerRateLimit(
-  endpoint?: string,
-  options: ExpressRateLimitOptions = {}
-) {
+export function multiLayerRateLimit(endpoint?: string, options: ExpressRateLimitOptions = {}) {
   const globalMiddleware = rateLimit({
-    prefix: "ratelimit:global",
+    prefix: 'ratelimit:global',
     config: {
       windowMs: 60_000,
       maxRequests: 1000,
-      strategy: "sliding-window",
+      strategy: 'sliding-window',
     },
   });
 
   const tierMiddleware = rateLimit({
     ...options,
-    prefix: "ratelimit:tier",
+    prefix: 'ratelimit:tier',
   });
 
   const endpointMiddleware = endpoint

@@ -12,14 +12,11 @@ export {
   getHeapStats,
   createCleanupHook,
   safeCleanup,
-} from "./cleanup";
+} from './cleanup';
 
 // Export background cleanup service
-export {
-  BackgroundCleanupService,
-  startBackgroundCleanup,
-} from "./background-cleanup";
+export { BackgroundCleanupService, startBackgroundCleanup } from './background-cleanup';
 
 // Export types
-export type { CleanupHook, MemoryStats } from "./cleanup";
-export type { BackgroundCleanupConfig } from "./background-cleanup";
+export type { CleanupHook, MemoryStats } from './cleanup';
+export type { BackgroundCleanupConfig } from './background-cleanup';

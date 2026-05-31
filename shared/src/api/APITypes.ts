@@ -13,7 +13,7 @@ export interface APIResponse<T = unknown> {
 export interface SendMessageRequest {
   sessionId: string;
   content: string;
-  attachments?: Array<{ type: "image" | "file"; data: string; name: string }>;
+  attachments?: Array<{ type: 'image' | 'file'; data: string; name: string }>;
   model?: string;
   reasoningLevel?: string;
 }
@@ -25,14 +25,14 @@ export interface CreateSessionRequest {
 
 export interface UpdateSessionRequest {
   title?: string;
-  status?: "active" | "archived";
+  status?: 'active' | 'archived';
 }
 
 export interface GetMessagesRequest {
   sessionId: string;
   limit?: number;
-  before?: string;  // Message ID for pagination
-  after?: string;   // Message ID for pagination
+  before?: string; // Message ID for pagination
+  after?: string; // Message ID for pagination
 }
 
 export interface DeleteSessionRequest {
@@ -49,12 +49,15 @@ export interface RejectChangesRequest {
 }
 
 export interface ProviderConfigRequest {
-  providers: Record<string, {
-    apiKey?: string;
-    authToken?: string;
-    baseUrl?: string;
-    disabled?: boolean;
-  }>;
+  providers: Record<
+    string,
+    {
+      apiKey?: string;
+      authToken?: string;
+      baseUrl?: string;
+      disabled?: boolean;
+    }
+  >;
 }
 
 // Pagination types

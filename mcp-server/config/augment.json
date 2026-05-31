@@ -1,0 +1,454 @@
+{
+  "name": "error-debugging-mcp-server-augment",
+  "displayName": "Error Debugging MCP Server for Augment Code",
+  "description": "Deep integration with Augment's world-leading context engine for intelligent error debugging and AI-powered coding assistance",
+  "version": "1.0.0",
+  "publisher": "error-debugging-mcp",
+  "engines": {
+    "augment": "^1.0.0"
+  },
+  "categories": ["AI Tools", "Debuggers", "Code Analysis", "Refactoring", "Documentation", "Other"],
+  "keywords": [
+    "augment-code",
+    "context-engine",
+    "ai-assistance",
+    "error-debugging",
+    "semantic-search",
+    "code-generation",
+    "intelligent-suggestions",
+    "codebase-analysis",
+    "cross-file-analysis",
+    "dependency-tracking",
+    "refactoring-assistance",
+    "documentation-generation",
+    "mcp",
+    "typescript",
+    "javascript",
+    "python",
+    "go",
+    "rust"
+  ],
+  "activationEvents": [
+    "onStartupFinished",
+    "onLanguage:typescript",
+    "onLanguage:javascript",
+    "onLanguage:python",
+    "onLanguage:go",
+    "onLanguage:rust",
+    "onCommand:augment.errorDebugging.start",
+    "onCommand:augment.errorDebugging.analyzeWithContext"
+  ],
+  "main": "./dist/integrations/augment-extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "augment.errorDebugging.start",
+        "title": "Start Augment Error Debugging",
+        "category": "Augment Debug",
+        "icon": "$(debug-start)"
+      },
+      {
+        "command": "augment.errorDebugging.stop",
+        "title": "Stop Augment Error Debugging",
+        "category": "Augment Debug",
+        "icon": "$(debug-stop)"
+      },
+      {
+        "command": "augment.errorDebugging.analyzeWithContext",
+        "title": "Analyze with Context Engine",
+        "category": "Augment Debug",
+        "icon": "$(search)"
+      },
+      {
+        "command": "augment.errorDebugging.semanticSearch",
+        "title": "Semantic Search",
+        "category": "Augment Debug",
+        "icon": "$(search-fuzzy)"
+      },
+      {
+        "command": "augment.errorDebugging.intelligentSuggestions",
+        "title": "Get Intelligent Suggestions",
+        "category": "Augment Debug",
+        "icon": "$(lightbulb)"
+      },
+      {
+        "command": "augment.errorDebugging.generateDocumentation",
+        "title": "Generate Documentation",
+        "category": "Augment Debug",
+        "icon": "$(book)"
+      },
+      {
+        "command": "augment.errorDebugging.generateCode",
+        "title": "Generate Code with AI",
+        "category": "Augment Debug",
+        "icon": "$(wand)"
+      },
+      {
+        "command": "augment.errorDebugging.refactoringSuggestions",
+        "title": "Get Refactoring Suggestions",
+        "category": "Augment Debug",
+        "icon": "$(symbol-method)"
+      },
+      {
+        "command": "augment.errorDebugging.crossFileAnalysis",
+        "title": "Cross-File Analysis",
+        "category": "Augment Debug",
+        "icon": "$(references)"
+      },
+      {
+        "command": "augment.errorDebugging.dependencyTracking",
+        "title": "Analyze Dependencies",
+        "category": "Augment Debug",
+        "icon": "$(package)"
+      },
+      {
+        "command": "augment.errorDebugging.codebaseInsights",
+        "title": "Get Codebase Insights",
+        "category": "Augment Debug",
+        "icon": "$(graph)"
+      },
+      {
+        "command": "augment.errorDebugging.contextualDebugging",
+        "title": "Contextual Debugging",
+        "category": "Augment Debug",
+        "icon": "$(debug-alt)"
+      }
+    ],
+    "menus": {
+      "editor/context": [
+        {
+          "submenu": "augment.errorDebugging.context",
+          "when": "editorTextFocus && resourceExtname =~ /\\.(ts|js|py|go|rs)$/",
+          "group": "1_modification@1"
+        }
+      ],
+      "augment.errorDebugging.context": [
+        {
+          "command": "augment.errorDebugging.analyzeWithContext",
+          "when": "editorTextFocus",
+          "group": "1_analysis@1"
+        },
+        {
+          "command": "augment.errorDebugging.intelligentSuggestions",
+          "when": "editorTextFocus",
+          "group": "1_analysis@2"
+        },
+        {
+          "command": "augment.errorDebugging.semanticSearch",
+          "when": "editorTextFocus",
+          "group": "1_analysis@3"
+        },
+        {
+          "command": "augment.errorDebugging.generateCode",
+          "when": "editorTextFocus",
+          "group": "2_generation@1"
+        },
+        {
+          "command": "augment.errorDebugging.generateDocumentation",
+          "when": "editorTextFocus",
+          "group": "2_generation@2"
+        },
+        {
+          "command": "augment.errorDebugging.refactoringSuggestions",
+          "when": "editorTextFocus",
+          "group": "3_refactoring@1"
+        },
+        {
+          "command": "augment.errorDebugging.crossFileAnalysis",
+          "when": "editorTextFocus",
+          "group": "4_advanced@1"
+        },
+        {
+          "command": "augment.errorDebugging.dependencyTracking",
+          "when": "editorTextFocus",
+          "group": "4_advanced@2"
+        }
+      ],
+      "editor/title": [
+        {
+          "command": "augment.errorDebugging.analyzeWithContext",
+          "when": "resourceExtname =~ /\\.(ts|js|py|go|rs)$/",
+          "group": "navigation@1"
+        },
+        {
+          "command": "augment.errorDebugging.codebaseInsights",
+          "when": "resourceExtname =~ /\\.(ts|js|py|go|rs)$/",
+          "group": "navigation@2"
+        }
+      ],
+      "explorer/context": [
+        {
+          "command": "augment.errorDebugging.crossFileAnalysis",
+          "when": "resourceExtname =~ /\\.(ts|js|py|go|rs)$/",
+          "group": "augment@1"
+        },
+        {
+          "command": "augment.errorDebugging.dependencyTracking",
+          "when": "explorerResourceIsFolder",
+          "group": "augment@2"
+        }
+      ],
+      "view/title": [
+        {
+          "command": "augment.errorDebugging.codebaseInsights",
+          "when": "view == augment.errorDebugging.context",
+          "group": "navigation@1"
+        }
+      ]
+    },
+    "submenus": [
+      {
+        "id": "augment.errorDebugging.context",
+        "label": "Augment Error Debugging"
+      }
+    ],
+    "keybindings": [
+      {
+        "command": "augment.errorDebugging.analyzeWithContext",
+        "key": "ctrl+shift+alt+a",
+        "mac": "cmd+shift+alt+a",
+        "when": "editorTextFocus"
+      },
+      {
+        "command": "augment.errorDebugging.semanticSearch",
+        "key": "ctrl+shift+alt+s",
+        "mac": "cmd+shift+alt+s",
+        "when": "editorTextFocus"
+      },
+      {
+        "command": "augment.errorDebugging.intelligentSuggestions",
+        "key": "ctrl+shift+alt+i",
+        "mac": "cmd+shift+alt+i",
+        "when": "editorTextFocus"
+      },
+      {
+        "command": "augment.errorDebugging.generateCode",
+        "key": "ctrl+shift+alt+g",
+        "mac": "cmd+shift+alt+g",
+        "when": "editorTextFocus"
+      },
+      {
+        "command": "augment.errorDebugging.generateDocumentation",
+        "key": "ctrl+shift+alt+d",
+        "mac": "cmd+shift+alt+d",
+        "when": "editorTextFocus"
+      }
+    ],
+    "configuration": {
+      "title": "Augment Error Debugging",
+      "properties": {
+        "augment.errorDebugging.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable Augment error debugging integration"
+        },
+        "augment.errorDebugging.contextEngine": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable integration with Augment's context engine"
+        },
+        "augment.errorDebugging.aiAssistance": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable AI-powered assistance and suggestions"
+        },
+        "augment.errorDebugging.codebaseAnalysis": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable comprehensive codebase analysis"
+        },
+        "augment.errorDebugging.semanticSearch": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable semantic search capabilities"
+        },
+        "augment.errorDebugging.intelligentSuggestions": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable intelligent error resolution suggestions"
+        },
+        "augment.errorDebugging.contextualDebugging": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable contextual debugging with cross-file awareness"
+        },
+        "augment.errorDebugging.crossFileAnalysis": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable cross-file analysis and dependency tracking"
+        },
+        "augment.errorDebugging.dependencyTracking": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable dependency analysis and tracking"
+        },
+        "augment.errorDebugging.refactoringAssistance": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable AI-powered refactoring suggestions"
+        },
+        "augment.errorDebugging.codeGeneration": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable AI-powered code generation"
+        },
+        "augment.errorDebugging.documentationGeneration": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable automatic documentation generation"
+        },
+        "augment.errorDebugging.contextEngineConfig": {
+          "type": "object",
+          "default": {
+            "endpoint": "https://api.augmentcode.com/context",
+            "apiKey": "",
+            "timeout": 30000,
+            "cacheSize": 1000,
+            "cacheTTL": 3600000
+          },
+          "description": "Context engine connection configuration"
+        },
+        "augment.errorDebugging.analysisConfig": {
+          "type": "object",
+          "default": {
+            "maxFileSize": 1048576,
+            "excludePatterns": ["node_modules/**", "dist/**", "build/**", "*.min.js", "*.map"],
+            "includeTests": false,
+            "analysisDepth": "deep",
+            "enableMetrics": true
+          },
+          "description": "Code analysis configuration"
+        },
+        "augment.errorDebugging.aiConfig": {
+          "type": "object",
+          "default": {
+            "model": "augment-v1",
+            "temperature": 0.3,
+            "maxTokens": 2048,
+            "confidenceThreshold": 0.7,
+            "enableLearning": true,
+            "contextWindow": 8192
+          },
+          "description": "AI assistance configuration"
+        },
+        "augment.errorDebugging.searchConfig": {
+          "type": "object",
+          "default": {
+            "maxResults": 50,
+            "includeTests": false,
+            "includeDocumentation": true,
+            "semanticThreshold": 0.6,
+            "enableFuzzySearch": true
+          },
+          "description": "Semantic search configuration"
+        },
+        "augment.errorDebugging.performanceConfig": {
+          "type": "object",
+          "default": {
+            "enableProfiling": true,
+            "maxAnalysisTime": 30000,
+            "enableCaching": true,
+            "batchSize": 10,
+            "enableParallelProcessing": true
+          },
+          "description": "Performance and optimization configuration"
+        }
+      }
+    },
+    "views": {
+      "explorer": [
+        {
+          "id": "augment.errorDebugging.context",
+          "name": "Augment Context",
+          "when": "augment.errorDebugging.active"
+        },
+        {
+          "id": "augment.errorDebugging.insights",
+          "name": "AI Insights",
+          "when": "augment.errorDebugging.active"
+        },
+        {
+          "id": "augment.errorDebugging.suggestions",
+          "name": "Intelligent Suggestions",
+          "when": "augment.errorDebugging.active"
+        },
+        {
+          "id": "augment.errorDebugging.patterns",
+          "name": "Error Patterns",
+          "when": "augment.errorDebugging.active"
+        },
+        {
+          "id": "augment.errorDebugging.dependencies",
+          "name": "Dependencies",
+          "when": "augment.errorDebugging.active"
+        }
+      ]
+    },
+    "viewsWelcome": [
+      {
+        "view": "augment.errorDebugging.context",
+        "contents": "Augment Context Engine is not initialized.\n[Initialize Context Engine](command:augment.errorDebugging.start)\n[Learn More](https://docs.augmentcode.com/context-engine)"
+      },
+      {
+        "view": "augment.errorDebugging.insights",
+        "contents": "No AI insights available.\n[Analyze Current File](command:augment.errorDebugging.analyzeWithContext)\n[Get Codebase Insights](command:augment.errorDebugging.codebaseInsights)"
+      }
+    ],
+    "languages": [
+      {
+        "id": "augment-analysis",
+        "aliases": ["Augment Analysis"],
+        "extensions": [".augment"],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "augment-analysis",
+        "scopeName": "source.augment-analysis",
+        "path": "./syntaxes/augment-analysis.tmGrammar.json"
+      }
+    ]
+  },
+  "scripts": {
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "package": "augment package",
+    "publish": "augment publish"
+  },
+  "devDependencies": {
+    "@types/node": "^18.0.0",
+    "typescript": "^5.0.0"
+  },
+  "dependencies": {
+    "error-debugging-mcp-server": "^1.0.0",
+    "@augment/context-engine": "^1.0.0",
+    "@augment/ai-assistant": "^1.0.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/your-org/error-debugging-mcp-server.git"
+  },
+  "bugs": {
+    "url": "https://github.com/your-org/error-debugging-mcp-server/issues"
+  },
+  "homepage": "https://github.com/your-org/error-debugging-mcp-server#readme",
+  "license": "MIT",
+  "augment": {
+    "contextEngine": {
+      "version": "1.0.0",
+      "capabilities": [
+        "semantic-search",
+        "cross-file-analysis",
+        "dependency-tracking",
+        "pattern-recognition",
+        "code-generation",
+        "documentation-generation"
+      ]
+    },
+    "aiAssistant": {
+      "version": "1.0.0",
+      "models": ["augment-v1", "augment-code-v1", "augment-debug-v1"]
+    }
+  }
+}

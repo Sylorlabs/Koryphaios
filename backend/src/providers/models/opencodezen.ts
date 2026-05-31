@@ -1,4 +1,4 @@
-import type { ModelDef } from "@koryphaios/shared";
+import type { ModelDef } from '@koryphaios/shared';
 
 /**
  * OpenCode Zen — curated models at opencode.ai/zen (API key from opencode.ai/auth).
@@ -6,10 +6,10 @@ import type { ModelDef } from "@koryphaios/shared";
  */
 export const OpenCodeZenModels: ModelDef[] = [
   {
-    id: "opencodezen.claude-sonnet-4",
-    name: "Claude Sonnet 4 (Zen)",
-    provider: "opencodezen",
-    apiModelId: "claude-sonnet-4",
+    id: 'opencodezen.claude-sonnet-4',
+    name: 'Claude Sonnet 4 (Zen)',
+    provider: 'opencodezen',
+    apiModelId: 'claude-sonnet-4',
     contextWindow: 200_000,
     maxOutputTokens: 64_000,
     costPerMInputTokens: 3,
@@ -17,13 +17,13 @@ export const OpenCodeZenModels: ModelDef[] = [
     canReason: false,
     supportsAttachments: true,
     supportsStreaming: true,
-    tier: "flagship",
+    tier: 'flagship',
   },
   {
-    id: "opencodezen.gpt-4.1",
-    name: "GPT-4.1 (Zen)",
-    provider: "opencodezen",
-    apiModelId: "gpt-4.1",
+    id: 'opencodezen.gpt-4.1',
+    name: 'GPT-4.1 (Zen)',
+    provider: 'opencodezen',
+    apiModelId: 'gpt-4.1',
     contextWindow: 128_000,
     maxOutputTokens: 16_384,
     costPerMInputTokens: 2,
@@ -31,12 +31,12 @@ export const OpenCodeZenModels: ModelDef[] = [
     canReason: false,
     supportsAttachments: false,
     supportsStreaming: true,
-    tier: "flagship",
+    tier: 'flagship',
   },
   {
-    id: "opencodezen.default",
-    name: "OpenCode Zen (auto)",
-    provider: "opencodezen",
+    id: 'opencodezen.default',
+    name: 'OpenCode Zen (auto)',
+    provider: 'opencodezen',
     contextWindow: 128_000,
     maxOutputTokens: 16_384,
     costPerMInputTokens: 0,
@@ -44,7 +44,7 @@ export const OpenCodeZenModels: ModelDef[] = [
     canReason: false,
     supportsAttachments: false,
     supportsStreaming: true,
-    tier: "fast",
+    tier: 'fast',
     isGeneric: true,
   },
 ];

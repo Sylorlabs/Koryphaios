@@ -38,7 +38,7 @@ jobs:
           bun-version: latest
 
       - name: Install Rust stable
-        uses: dtolnay/rust-action@stable
+        uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: stable
 
@@ -100,7 +100,7 @@ jobs:
           bun-version: latest
 
       - name: Install Rust stable
-        uses: dtolnay/rust-action@stable
+        uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: stable
           target: ${{ matrix.arch }}-apple-darwin
@@ -183,7 +183,7 @@ jobs:
           bun-version: latest
 
       - name: Install Rust stable
-        uses: dtolnay/rust-action@stable
+        uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: stable
           target: ${{ matrix.target }}
@@ -253,7 +253,7 @@ jobs:
           bun-version: latest
 
       - name: Install Rust stable
-        uses: dtolnay/rust-action@stable
+        uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: stable
           target: aarch64-apple-darwin

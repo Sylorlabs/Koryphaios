@@ -3,42 +3,50 @@
 
 export type WSEventType =
   // Agent lifecycle
-  | "agent.spawned"
-  | "agent.status"
-  | "agent.completed"
-  | "agent.error"
+  | 'agent.spawned'
+  | 'agent.status'
+  | 'agent.completed'
+  | 'agent.error'
+  | 'agent.thread_message'
   // Streaming content
-  | "stream.delta"
-  | "stream.thinking"
-  | "stream.tool_call"
-  | "stream.tool_result"
-  | "stream.usage"
-  | "stream.complete"
+  | 'stream.delta'
+  | 'stream.thinking'
+  | 'stream.tool_call'
+  | 'stream.tool_result'
+  | 'stream.usage'
+  | 'stream.complete'
+  | 'stream.clear_content'
   // File edit streaming (Cursor-style per-token preview)
-  | "stream.file_delta"
-  | "stream.file_complete"
+  | 'stream.file_delta'
+  | 'stream.file_complete'
+  // Context detection
+  | 'context.detected'
   // Session events
-  | "session.created"
-  | "session.updated"
-  | "session.deleted"
-  | "session.changes"
-  | "session.accept_changes"
+  | 'session.created'
+  | 'session.updated'
+  | 'session.deleted'
+  | 'session.changes'
+  | 'session.accept_changes'
   // Permission events
-  | "permission.request"
-  | "permission.response"
+  | 'permission.request'
+  | 'permission.response'
   // Provider status
-  | "provider.status"
+  | 'provider.status'
   // Rate limiting
-  | "provider.rate_limit"
+  | 'provider.rate_limit'
   // System
-  | "system.error"
-  | "system.info"
+  | 'system.error'
+  | 'system.notification'
+  | 'system.info'
+  | 'system.config_updated'
+  // Process supervision
+  | 'process.status'
   // Kory-specific
-  | "kory.thought"
-  | "kory.routing"
-  | "kory.verification"
-  | "kory.task_breakdown"
-  | "kory.ask_user";
+  | 'kory.thought'
+  | 'kory.routing'
+  | 'kory.verification'
+  | 'kory.task_breakdown'
+  | 'kory.ask_user';
 
 export interface WSMessage<T = unknown> {
   type: WSEventType;
@@ -64,6 +72,7 @@ export type WSMessagePayload =
   // Agent payloads
   | AgentSpawnedPayload
   | AgentStatusPayload
+  | AgentThreadMessagePayload
   | ThinkingPayload
   | ToolCallPayload
   | StreamToolResultPayload
@@ -88,6 +97,7 @@ import type {
   MessageCompletePayload,
   AgentSpawnedPayload,
   AgentStatusPayload,
+  AgentThreadMessagePayload,
   ThinkingPayload,
   ToolCallPayload,
   StreamToolResultPayload,
@@ -95,6 +105,6 @@ import type {
   NotificationPayload,
   KorySessionChangesPayload,
   RateLimitPayload,
-} from "./WSPayloads";
+} from './WSPayloads';
 
-export type { ChangeSummary, StreamUsage } from "./WSPayloads";
+export type { ChangeSummary, StreamUsage } from './WSPayloads';

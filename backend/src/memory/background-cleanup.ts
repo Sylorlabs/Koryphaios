@@ -1,11 +1,17 @@
 // Background Cleanup Service
 // Domain: Periodic cleanup of abandoned resources to prevent memory leaks
 
-import type { KoryManager } from "../kory/manager";
-import type { WSManager } from "../ws/ws-manager";
-import { sessionTracker, initMemoryMonitor, getMemoryMonitor, getHeapStats, createDefaultMemoryPressureHandler } from "./cleanup";
-import { getTotalBrokerSubscribers } from "../pubsub";
-import { serverLog } from "../logger";
+import type { KoryManager } from '../kory/manager';
+import type { WSManager } from '../ws/ws-manager';
+import {
+  sessionTracker,
+  initMemoryMonitor,
+  getMemoryMonitor,
+  getHeapStats,
+  createDefaultMemoryPressureHandler,
+} from './cleanup';
+import { getTotalBrokerSubscribers } from '../pubsub';
+import { serverLog } from '../logger';
 
 // ─── Types ─────────────────────────────────────────────────────────────────────
 
@@ -28,7 +34,7 @@ export class BackgroundCleanupService {
   constructor(
     private kory: KoryManager,
     private wsManager: WSManager,
-    config: BackgroundCleanupConfig = {}
+    config: BackgroundCleanupConfig = {},
   ) {
     this.config = {
       cleanupIntervalMs: config.cleanupIntervalMs ?? 5 * 60 * 1000, // 5 minutes
@@ -42,7 +48,7 @@ export class BackgroundCleanupService {
    */
   start(): void {
     if (this.isRunning) {
-      serverLog.warn("Background cleanup service already running");
+      serverLog.warn('Background cleanup service already running');
       return;
     }
 
@@ -52,10 +58,7 @@ export class BackgroundCleanupService {
     sessionTracker.startCleanup(this.config.cleanupIntervalMs);
 
     // Start memory monitoring
-    initMemoryMonitor(
-      () => this.getMemoryStats(),
-      createDefaultMemoryPressureHandler()
-    );
+    initMemoryMonitor(() => this.getMemoryStats(), createDefaultMemoryPressureHandler());
 
     // Start periodic resource cleanup
     this.cleanupInterval = setInterval(() => {
@@ -67,7 +70,7 @@ export class BackgroundCleanupService {
         cleanupInterval: `${this.config.cleanupIntervalMs / 1000}s`,
         memoryCheckInterval: `${this.config.memoryCheckIntervalMs / 1000}s`,
       },
-      "Background cleanup service started"
+      'Background cleanup service started',
     );
   }
 
@@ -94,7 +97,7 @@ export class BackgroundCleanupService {
       monitor.stop();
     }
 
-    serverLog.info("Background cleanup service stopped");
+    serverLog.info('Background cleanup service stopped');
   }
 
   /**
@@ -123,10 +126,10 @@ export class BackgroundCleanupService {
           },
           freed: `${((beforeStats.nodeHeap.used - afterStats.nodeHeap.used) / 1024 / 1024).toFixed(2)}MB`,
         },
-        "Background cleanup completed"
+        'Background cleanup completed',
       );
     } catch (err) {
-      serverLog.error(err, "Background cleanup failed");
+      serverLog.error(err, 'Background cleanup failed');
     }
   }
 
@@ -165,7 +168,7 @@ export class BackgroundCleanupService {
    * Force garbage collection (if --expose-gc is enabled).
    */
   forceGC(): void {
-    if (typeof global.gc === "function") {
+    if (typeof global.gc === 'function') {
       const before = this.getMemoryStats();
       global.gc();
       const after = this.getMemoryStats();
@@ -176,10 +179,10 @@ export class BackgroundCleanupService {
           after: `${(after.nodeHeap.used / 1024 / 1024).toFixed(2)}MB`,
           freed: `${(freed / 1024 / 1024).toFixed(2)}MB`,
         },
-        "Forced garbage collection"
+        'Forced garbage collection',
       );
     } else {
-      serverLog.warn("--expose-gc not enabled, cannot force GC");
+      serverLog.warn('--expose-gc not enabled, cannot force GC');
     }
   }
 }
@@ -197,7 +200,7 @@ export class BackgroundCleanupService {
 export function startBackgroundCleanup(
   kory: KoryManager,
   wsManager: WSManager,
-  config?: BackgroundCleanupConfig
+  config?: BackgroundCleanupConfig,
 ): BackgroundCleanupService {
   const service = new BackgroundCleanupService(kory, wsManager, config);
   service.start();

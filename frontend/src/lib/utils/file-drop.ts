@@ -1,6 +1,6 @@
 /**
  * Native file drop handling for Tauri desktop app
- * 
+ *
  * This module handles file drops from the native OS file manager
  * into the application window.
  */
@@ -18,12 +18,11 @@ export type FileDropHandler = (payload: FileDropPayload) => void;
 let unlistenFn: (() => void) | null = null;
 
 /**
- * Check if we're in Tauri environment
+ * Check if we're in Tauri environment (Tauri v2)
  */
 function isTauri(): boolean {
   if (!browser) return false;
-  const win = window as any;
-  return !!win.__TAURI__?.event?.listen;
+  return typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
 }
 
 /**
@@ -33,25 +32,25 @@ function isTauri(): boolean {
  */
 export async function initFileDrop(handler: FileDropHandler): Promise<() => void> {
   if (!browser) return () => {};
-  
+
   // Check if we're in Tauri
   if (!isTauri()) {
     return () => {};
   }
-  
+
   try {
-    const win = window as any;
-    const { listen } = win.__TAURI__.event;
-    
+    // Use Tauri v2 API imports
+    const { listen } = await import('@tauri-apps/api/event');
+
     // Listen for file-drop events from Tauri
-    const unlisten = await listen('file-drop', (event: any) => {
+    const unlisten = await listen('file-drop', (event) => {
       if (event.payload) {
         handler(event.payload as FileDropPayload);
       }
     });
-    
+
     unlistenFn = unlisten;
-    
+
     return () => {
       if (unlistenFn) {
         unlistenFn();
@@ -96,7 +95,30 @@ export function getFileExtension(path: string): string {
  * Check if file is a text file that can be read
  */
 export function isTextFile(path: string): boolean {
-  const textExtensions = ['txt', 'md', 'json', 'yaml', 'yml', 'toml', 'csv', 'ts', 'js', 'tsx', 'jsx', 'svelte', 'css', 'html', 'rs', 'py', 'go', 'java', 'c', 'cpp', 'h', 'hpp'];
+  const textExtensions = [
+    'txt',
+    'md',
+    'json',
+    'yaml',
+    'yml',
+    'toml',
+    'csv',
+    'ts',
+    'js',
+    'tsx',
+    'jsx',
+    'svelte',
+    'css',
+    'html',
+    'rs',
+    'py',
+    'go',
+    'java',
+    'c',
+    'cpp',
+    'h',
+    'hpp',
+  ];
   const ext = getFileExtension(path);
   return textExtensions.includes(ext);
 }

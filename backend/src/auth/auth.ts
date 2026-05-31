@@ -2,8 +2,8 @@
 // NOTE: Koryphaios operates WITHOUT user accounts.
 // This file is retained for provider credential utilities only.
 
-import { randomBytes } from "node:crypto";
-import { authLog } from "../logger";
+import { randomBytes } from 'node:crypto';
+import { authLog } from '../logger';
 
 // ============================================================================
 // Token Generation (for provider credentials, NOT user auth)
@@ -14,14 +14,14 @@ import { authLog } from "../logger";
  * Used for generating provider API keys or other secure tokens
  */
 export function generateToken(length: number = 32): string {
-  return randomBytes(length).toString("base64url");
+  return randomBytes(length).toString('base64url');
 }
 
 // ============================================================================
 // Type Exports (for backward compatibility)
 // ============================================================================
 
-export type { User, JWTPayload } from "./types";
+export type { User, JWTPayload } from './types';
 
 // ============================================================================
 // Deprecated/Removed Functions
@@ -31,21 +31,21 @@ export type { User, JWTPayload } from "./types";
  * @deprecated Koryphaios doesn't use user accounts
  */
 export async function hashPassword(_password: string): Promise<string> {
-  throw new Error("User authentication is not supported in Koryphaios");
+  throw new Error('User authentication is not supported in Koryphaios');
 }
 
 /**
  * @deprecated Koryphaios doesn't use user accounts
  */
 export async function verifyPassword(_password: string, _hash: string): Promise<boolean> {
-  throw new Error("User authentication is not supported in Koryphaios");
+  throw new Error('User authentication is not supported in Koryphaios');
 }
 
 /**
  * @deprecated Koryphaios doesn't use user accounts
  */
 export function createAccessToken(_payload: unknown): string {
-  throw new Error("User authentication is not supported in Koryphaios");
+  throw new Error('User authentication is not supported in Koryphaios');
 }
 
 /**
@@ -59,7 +59,7 @@ export async function verifyAccessToken(_token: string): Promise<null> {
  * @deprecated Koryphaios doesn't use user accounts
  */
 export async function createRefreshToken(_userId: string): Promise<string> {
-  throw new Error("User authentication is not supported in Koryphaios");
+  throw new Error('User authentication is not supported in Koryphaios');
 }
 
 /**
@@ -93,8 +93,12 @@ export async function revokeAllUserSessions(_userId: string): Promise<void> {
 /**
  * @deprecated Koryphaios doesn't use user accounts
  */
-export async function createUser(_username: string, _password: string, _isAdmin?: boolean): Promise<never> {
-  throw new Error("User accounts are not supported in Koryphaios");
+export async function createUser(
+  _username: string,
+  _password: string,
+  _isAdmin?: boolean,
+): Promise<never> {
+  throw new Error('User accounts are not supported in Koryphaios');
 }
 
 /**
@@ -108,14 +112,14 @@ export async function authenticateUser(_username: string, _password: string): Pr
  * @deprecated Koryphaios doesn't use user accounts
  */
 export async function getOrCreateLocalUser(): Promise<never> {
-  throw new Error("User accounts are not supported in Koryphaios");
+  throw new Error('User accounts are not supported in Koryphaios');
 }
 
 /**
  * @deprecated Koryphaios doesn't use user accounts
  */
 export async function getOrCreateGuestUser(): Promise<never> {
-  throw new Error("User accounts are not supported in Koryphaios");
+  throw new Error('User accounts are not supported in Koryphaios');
 }
 
 /**
@@ -128,8 +132,12 @@ export function getUserById(_id: string): null {
 /**
  * @deprecated Koryphaios doesn't use user accounts
  */
-export async function changePassword(_userId: string, _oldPassword: string, _newPassword: string): Promise<never> {
-  throw new Error("User accounts are not supported in Koryphaios");
+export async function changePassword(
+  _userId: string,
+  _oldPassword: string,
+  _newPassword: string,
+): Promise<never> {
+  throw new Error('User accounts are not supported in Koryphaios');
 }
 
 /**
@@ -152,7 +160,7 @@ export async function trackActiveJti(): Promise<void> {
 }
 
 export async function createAccessTokenWithTracking(): Promise<string> {
-  throw new Error("User authentication is not supported in Koryphaios");
+  throw new Error('User authentication is not supported in Koryphaios');
 }
 
 export async function revokeAccessToken(): Promise<void> {

@@ -1,8 +1,8 @@
 /**
  * API Key Authentication Middleware
- * 
+ *
  * Express middleware for authenticating requests via API keys.
- * 
+ *
  * Features:
  * - Extracts API key from Authorization header or query param
  * - Validates key against database
@@ -36,22 +36,22 @@ export interface ApiKeyMiddlewareOptions {
    * Required scopes for this route
    */
   requiredScopes?: ApiKeyScope[];
-  
+
   /**
    * Whether to allow JWT authentication as fallback
    */
   allowJwtFallback?: boolean;
-  
+
   /**
    * Whether to skip authentication (for public routes)
    */
   optional?: boolean;
-  
+
   /**
    * Custom key extractor
    */
   extractKey?: (req: Request) => string | undefined;
-  
+
   /**
    * Rate limit tier override
    */
@@ -68,25 +68,25 @@ function defaultExtractKey(req: Request): string | undefined {
     if (bearerMatch) {
       return bearerMatch[1];
     }
-    
+
     // Direct API key format (for backward compatibility)
     if (authHeader.startsWith('kor_')) {
       return authHeader;
     }
   }
-  
+
   // Check query parameter
   const apiKey = req.query.api_key;
   if (typeof apiKey === 'string') {
     return apiKey;
   }
-  
+
   // Check custom header
   const customHeader = req.headers['x-api-key'];
   if (typeof customHeader === 'string') {
     return customHeader;
   }
-  
+
   return undefined;
 }
 
@@ -96,26 +96,26 @@ function defaultExtractKey(req: Request): string | undefined {
 export function apiKeyAuth(options: ApiKeyMiddlewareOptions = {}) {
   const apiKeyService = createApiKeyService();
   const extractKey = options.extractKey || defaultExtractKey;
-  
+
   return async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     try {
       const key = extractKey(req);
-      
+
       if (!key) {
         if (options.optional) {
           return next();
         }
-        
+
         res.status(401).json({
           error: 'Authentication required',
           message: 'API key missing. Provide via Authorization: Bearer <key> or X-API-Key header',
         });
         return;
       }
-      
+
       // Validate the key
       const result = await apiKeyService.validate(key);
-      
+
       if (!result.valid) {
         res.status(401).json({
           error: 'Authentication failed',
@@ -123,15 +123,15 @@ export function apiKeyAuth(options: ApiKeyMiddlewareOptions = {}) {
         });
         return;
       }
-      
+
       const apiKey = result.key!;
-      
+
       // Check required scopes
       if (options.requiredScopes && options.requiredScopes.length > 0) {
-        const hasScope = options.requiredScopes.every(scope => 
-          apiKeyService.hasScope(apiKey, scope)
+        const hasScope = options.requiredScopes.every((scope) =>
+          apiKeyService.hasScope(apiKey, scope),
         );
-        
+
         if (!hasScope) {
           res.status(403).json({
             error: 'Forbidden',
@@ -140,7 +140,7 @@ export function apiKeyAuth(options: ApiKeyMiddlewareOptions = {}) {
           return;
         }
       }
-      
+
       // Attach to request
       req.apiKey = apiKey;
       req.authenticatedUser = {
@@ -149,7 +149,7 @@ export function apiKeyAuth(options: ApiKeyMiddlewareOptions = {}) {
         scopes: apiKey.scopes,
         rateLimitTier: options.rateLimitTier || apiKey.rateLimitTier,
       };
-      
+
       next();
     } catch (error) {
       serverLog.error({ error }, 'API key authentication error');
@@ -173,15 +173,13 @@ export function requireScopes(...scopes: ApiKeyScope[]) {
       });
       return;
     }
-    
+
     const apiKeyService = createApiKeyService();
-    
+
     // If authenticated via API key
     if (req.apiKey) {
-      const hasAllScopes = scopes.every(scope => 
-        apiKeyService.hasScope(req.apiKey!, scope)
-      );
-      
+      const hasAllScopes = scopes.every((scope) => apiKeyService.hasScope(req.apiKey!, scope));
+
       if (!hasAllScopes) {
         res.status(403).json({
           error: 'Forbidden',
@@ -190,7 +188,7 @@ export function requireScopes(...scopes: ApiKeyScope[]) {
         return;
       }
     }
-    
+
     // If authenticated via JWT, check would be done elsewhere
     next();
   };
@@ -202,24 +200,24 @@ export function requireScopes(...scopes: ApiKeyScope[]) {
  */
 export function flexibleAuth(options: ApiKeyMiddlewareOptions = {}) {
   const apiKeyMiddleware = apiKeyAuth({ ...options, optional: true });
-  
+
   return async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     // Try API key first
     await apiKeyMiddleware(req, res, (err?: any) => {
       if (err) return next(err);
-      
+
       // If API key authenticated, continue
       if (req.authenticatedUser) {
         return next();
       }
-      
+
       // Try JWT if enabled
       if (options.allowJwtFallback !== false) {
         // JWT middleware would be applied separately
         // This just passes through to let JWT middleware handle it
         return next();
       }
-      
+
       // No authentication and not optional
       if (!options.optional) {
         return res.status(401).json({
@@ -227,7 +225,7 @@ export function flexibleAuth(options: ApiKeyMiddlewareOptions = {}) {
           message: 'Valid API key or JWT token required',
         });
       }
-      
+
       next();
     });
   };
@@ -237,8 +235,8 @@ export function flexibleAuth(options: ApiKeyMiddlewareOptions = {}) {
  * Get rate limit key for authenticated request
  * Returns user ID if authenticated, IP otherwise
  */
-export function getRateLimitKey(req: Request): { 
-  key: string; 
+export function getRateLimitKey(req: Request): {
+  key: string;
   tier: string;
   isAuthenticated: boolean;
 } {
@@ -249,7 +247,7 @@ export function getRateLimitKey(req: Request): {
       isAuthenticated: true,
     };
   }
-  
+
   // Fall back to IP address
   const ip = req.ip || req.connection.remoteAddress || 'unknown';
   return {

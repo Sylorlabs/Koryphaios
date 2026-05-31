@@ -1,5 +1,5 @@
 // Tests for Rate Limiting
-import { describe, test, expect, beforeAll, beforeEach, afterEach } from "bun:test";
+import { describe, test, expect, beforeAll, beforeEach, afterEach } from 'bun:test';
 import {
   SlidingWindowRateLimiter,
   TokenBucketRateLimiter,
@@ -9,8 +9,8 @@ import {
   CaptchaRateLimiter,
   createProductionRateLimiter,
   RateLimitPresets,
-} from "../src/security/rate-limit";
-import { getRedisManager, getRedisClient } from "../src/redis";
+} from '../src/security/rate-limit';
+import { getRedisManager, getRedisClient } from '../src/redis';
 
 // Mock Redis with full ioredis-compatible API
 class MockRedisIORedis {
@@ -23,17 +23,17 @@ class MockRedisIORedis {
     return this.data.get(key) || null;
   }
 
-  async set(key: string, value: string, mode?: string, ...args: any[]): Promise<"OK"> {
+  async set(key: string, value: string, mode?: string, ...args: any[]): Promise<'OK'> {
     this.data.set(key, value);
 
     // Handle EX/PX
-    if (mode === "EX" && args[0]) {
+    if (mode === 'EX' && args[0]) {
       // Set expiration (not implemented in mock)
-    } else if (mode === "PX" && args[0]) {
+    } else if (mode === 'PX' && args[0]) {
       // Set expiration (not implemented in mock)
     }
 
-    return "OK";
+    return 'OK';
   }
 
   async del(...keys: string[]): Promise<number> {
@@ -102,8 +102,8 @@ class MockRedisIORedis {
     const set = this.sortedSets.get(key);
     if (!set) return 0;
 
-    const minScore = typeof min === "number" ? min : parseFloat(min);
-    const maxScore = typeof max === "number" ? max : parseFloat(max);
+    const minScore = typeof min === 'number' ? min : parseFloat(min);
+    const maxScore = typeof max === 'number' ? max : parseFloat(max);
 
     let removed = 0;
     for (const [score, members] of set.entries()) {
@@ -116,12 +116,7 @@ class MockRedisIORedis {
     return removed;
   }
 
-  async zrange(
-    key: string,
-    start: number,
-    stop: number,
-    ...args: string[]
-  ): Promise<string[]> {
+  async zrange(key: string, start: number, stop: number, ...args: string[]): Promise<string[]> {
     const set = this.sortedSets.get(key);
     if (!set) return [];
 
@@ -129,8 +124,10 @@ class MockRedisIORedis {
 
     const sliced = entries.slice(start, stop === -1 ? undefined : stop + 1);
 
-    if (args.includes("WITHSCORES")) {
-      return sliced.flatMap(([score, members]) => Array.from(members).map((m) => [m, String(score)]));
+    if (args.includes('WITHSCORES')) {
+      return sliced.flatMap(([score, members]) =>
+        Array.from(members).map((m) => [m, String(score)]),
+      );
     }
 
     return sliced.flatMap(([, members]) => Array.from(members));
@@ -143,7 +140,7 @@ class MockRedisIORedis {
     return fields.map((f) => hash.get(f) || null);
   }
 
-  async hmset(key: string, ...fieldValues: string[]): Promise<"OK"> {
+  async hmset(key: string, ...fieldValues: string[]): Promise<'OK'> {
     if (!this.hashFields.has(key)) {
       this.hashFields.set(key, new Map());
     }
@@ -155,19 +152,19 @@ class MockRedisIORedis {
       }
     }
 
-    return "OK";
+    return 'OK';
   }
 
   async keys(pattern: string): Promise<string[]> {
-    const regex = new RegExp(pattern.replace("*", ".*"));
+    const regex = new RegExp(pattern.replace('*', '.*'));
     return Array.from(this.data.keys()).filter((k) => regex.test(k));
   }
 
-  async script(mode: "LOAD", script: string): Promise<string> {
+  async script(mode: 'LOAD', script: string): Promise<string> {
     // Simple hash for script ID
     let hash = 0;
     for (let i = 0; i < script.length; i++) {
-      hash = ((hash << 5) - hash + script.charCodeAt(i));
+      hash = (hash << 5) - hash + script.charCodeAt(i);
       hash = hash & hash;
     }
     return Math.abs(hash).toString(16);
@@ -192,7 +189,7 @@ const mockRedis = new MockRedisIORedis();
 async function resetRedisData() {
   try {
     const redis = getRedisClient() as any;
-    if (typeof redis.flushall === "function") {
+    if (typeof redis.flushall === 'function') {
       await redis.flushall();
     }
   } catch {
@@ -208,68 +205,68 @@ beforeAll(async () => {
   await resetRedisData();
 });
 
-describe("SlidingWindowRateLimiter", () => {
+describe('SlidingWindowRateLimiter', () => {
   let limiter: SlidingWindowRateLimiter;
 
   beforeEach(async () => {
     limiter = new SlidingWindowRateLimiter({
       maxRequests: 5,
       windowMs: 1000,
-      keyPrefix: "test",
+      keyPrefix: 'test',
     });
     await resetRedisData();
   });
 
-  test("should allow requests within limit", async () => {
-    const result = await limiter.check({ identifier: "user1" });
+  test('should allow requests within limit', async () => {
+    const result = await limiter.check({ identifier: 'user1' });
 
     expect(result.allowed).toBe(true);
     expect(result.remaining).toBe(4);
   });
 
-  test("should track remaining requests correctly", async () => {
-    await limiter.check({ identifier: "user1" });
-    await limiter.check({ identifier: "user1" });
-    const result = await limiter.check({ identifier: "user1" });
+  test('should track remaining requests correctly', async () => {
+    await limiter.check({ identifier: 'user1' });
+    await limiter.check({ identifier: 'user1' });
+    const result = await limiter.check({ identifier: 'user1' });
 
     expect(result.allowed).toBe(true);
     expect(result.remaining).toBe(2);
   });
 
-  test("should block requests over limit", async () => {
+  test('should block requests over limit', async () => {
     // Use up all requests
     for (let i = 0; i < 5; i++) {
-      await limiter.check({ identifier: "user1" });
+      await limiter.check({ identifier: 'user1' });
     }
 
     // Next request should be blocked
-    const result = await limiter.check({ identifier: "user1" });
+    const result = await limiter.check({ identifier: 'user1' });
 
     expect(result.allowed).toBe(false);
     expect(result.remaining).toBe(0);
     expect(result.retryAfter).toBeGreaterThan(0);
   });
 
-  test("should calculate reset time correctly", async () => {
-    const result = await limiter.check({ identifier: "user1" });
+  test('should calculate reset time correctly', async () => {
+    const result = await limiter.check({ identifier: 'user1' });
 
     expect(result.resetAt).toBeGreaterThan(Date.now());
     expect(result.resetAt).toBeLessThan(Date.now() + 2000);
   });
 
-  test("should track different identifiers separately", async () => {
-    await limiter.check({ identifier: "user1" });
-    await limiter.check({ identifier: "user2" });
+  test('should track different identifiers separately', async () => {
+    await limiter.check({ identifier: 'user1' });
+    await limiter.check({ identifier: 'user2' });
 
-    const result1 = await limiter.check({ identifier: "user1" });
-    const result2 = await limiter.check({ identifier: "user2" });
+    const result1 = await limiter.check({ identifier: 'user1' });
+    const result2 = await limiter.check({ identifier: 'user2' });
 
     expect(result1.remaining).toBe(3);
     expect(result2.remaining).toBe(3);
   });
 });
 
-describe("TokenBucketRateLimiter", () => {
+describe('TokenBucketRateLimiter', () => {
   let limiter: TokenBucketRateLimiter;
 
   beforeEach(async () => {
@@ -278,26 +275,26 @@ describe("TokenBucketRateLimiter", () => {
       windowMs: 1000,
       bucketSize: 10,
       refillRate: 5, // 5 tokens per second
-      keyPrefix: "test",
+      keyPrefix: 'test',
     });
     await resetRedisData();
   });
 
-  test("should allow requests within bucket size", async () => {
-    const result = await limiter.check({ identifier: "user1" });
+  test('should allow requests within bucket size', async () => {
+    const result = await limiter.check({ identifier: 'user1' });
 
     expect(result.allowed).toBe(true);
     expect(result.remaining).toBeGreaterThan(0);
   });
 
-  test("should refill tokens over time", async () => {
+  test('should refill tokens over time', async () => {
     // Use all tokens
     for (let i = 0; i < 10; i++) {
-      await limiter.check({ identifier: "user1" });
+      await limiter.check({ identifier: 'user1' });
     }
 
     // Should be rate limited
-    let result = await limiter.check({ identifier: "user1" });
+    let result = await limiter.check({ identifier: 'user1' });
     expect(result.allowed).toBe(false);
 
     // Wait for refill (in real test, would need to mock time)
@@ -305,12 +302,12 @@ describe("TokenBucketRateLimiter", () => {
     expect(result.retryAfter).toBeGreaterThan(0);
   });
 
-  test("should support burst capacity", async () => {
+  test('should support burst capacity', async () => {
     // Make 3 quick requests
     const results = await Promise.all([
-      limiter.check({ identifier: "user1" }),
-      limiter.check({ identifier: "user1" }),
-      limiter.check({ identifier: "user1" }),
+      limiter.check({ identifier: 'user1' }),
+      limiter.check({ identifier: 'user1' }),
+      limiter.check({ identifier: 'user1' }),
     ]);
 
     // All should succeed (burst capacity)
@@ -318,46 +315,46 @@ describe("TokenBucketRateLimiter", () => {
   });
 });
 
-describe("FixedWindowRateLimiter", () => {
+describe('FixedWindowRateLimiter', () => {
   let limiter: FixedWindowRateLimiter;
 
   beforeEach(async () => {
     limiter = new FixedWindowRateLimiter({
       maxRequests: 3,
       windowMs: 1000,
-      keyPrefix: "test",
+      keyPrefix: 'test',
     });
     await resetRedisData();
   });
 
-  test("should allow requests within window", async () => {
-    const result1 = await limiter.check({ identifier: "user1" });
-    const result2 = await limiter.check({ identifier: "user1" });
-    const result3 = await limiter.check({ identifier: "user1" });
+  test('should allow requests within window', async () => {
+    const result1 = await limiter.check({ identifier: 'user1' });
+    const result2 = await limiter.check({ identifier: 'user1' });
+    const result3 = await limiter.check({ identifier: 'user1' });
 
     expect(result1.allowed).toBe(true);
     expect(result2.allowed).toBe(true);
     expect(result3.allowed).toBe(true);
   });
 
-  test("should block when window exhausted", async () => {
-    await limiter.check({ identifier: "user1" });
-    await limiter.check({ identifier: "user1" });
-    await limiter.check({ identifier: "user1" });
+  test('should block when window exhausted', async () => {
+    await limiter.check({ identifier: 'user1' });
+    await limiter.check({ identifier: 'user1' });
+    await limiter.check({ identifier: 'user1' });
 
-    const result = await limiter.check({ identifier: "user1" });
+    const result = await limiter.check({ identifier: 'user1' });
 
     expect(result.allowed).toBe(false);
     expect(result.remaining).toBe(0);
   });
 
-  test("should reset after window expires", async () => {
+  test('should reset after window expires', async () => {
     // Use all requests
     for (let i = 0; i < 3; i++) {
-      await limiter.check({ identifier: "user1" });
+      await limiter.check({ identifier: 'user1' });
     }
 
-    let result = await limiter.check({ identifier: "user1" });
+    let result = await limiter.check({ identifier: 'user1' });
     expect(result.allowed).toBe(false);
 
     // In real test, would wait for window to expire
@@ -366,7 +363,7 @@ describe("FixedWindowRateLimiter", () => {
   });
 });
 
-describe("TieredRateLimiter", () => {
+describe('TieredRateLimiter', () => {
   let limiter: TieredRateLimiter;
 
   beforeEach(async () => {
@@ -377,25 +374,25 @@ describe("TieredRateLimiter", () => {
       user: { maxRequests: 20, windowMs: 1000 },
       auth: { maxRequests: 5, windowMs: 1000 },
       endpoints: {
-        "/api/test": { maxRequests: 10, windowMs: 1000 },
+        '/api/test': { maxRequests: 10, windowMs: 1000 },
       },
     });
   });
 
-  test("should apply global limit", async () => {
+  test('should apply global limit', async () => {
     const result = await limiter.check({
-      ip: "127.0.0.1",
-      endpoint: "/api/test",
+      ip: '127.0.0.1',
+      endpoint: '/api/test',
     });
 
     expect(result.allowed).toBe(true);
     expect(result.limit).toBe(10); // Most restrictive endpoint limit wins
   });
 
-  test("should apply auth endpoint limit", async () => {
+  test('should apply auth endpoint limit', async () => {
     const result = await limiter.check({
-      ip: "127.0.0.1",
-      endpoint: "/api/auth/login",
+      ip: '127.0.0.1',
+      endpoint: '/api/auth/login',
       isAuthEndpoint: true,
     });
 
@@ -403,22 +400,22 @@ describe("TieredRateLimiter", () => {
     expect(result.limit).toBe(5); // Auth limit is most restrictive
   });
 
-  test("should apply per-user limit when user ID provided", async () => {
+  test('should apply per-user limit when user ID provided', async () => {
     const result = await limiter.check({
-      ip: "127.0.0.1",
-      userId: "user123",
-      endpoint: "/api/test",
+      ip: '127.0.0.1',
+      userId: 'user123',
+      endpoint: '/api/test',
     });
 
     expect(result.allowed).toBe(true);
     // User limit (20) is more restrictive than IP (50) or endpoint (10)
   });
 
-  test("should return most restrictive limit", async () => {
+  test('should return most restrictive limit', async () => {
     const result = await limiter.check({
-      ip: "127.0.0.1",
-      userId: "user123",
-      endpoint: "/api/test",
+      ip: '127.0.0.1',
+      userId: 'user123',
+      endpoint: '/api/test',
       isAuthEndpoint: false,
     });
 
@@ -427,7 +424,7 @@ describe("TieredRateLimiter", () => {
   });
 });
 
-describe("ProgressiveBackoffRateLimiter", () => {
+describe('ProgressiveBackoffRateLimiter', () => {
   let limiter: ProgressiveBackoffRateLimiter;
 
   beforeEach(async () => {
@@ -438,42 +435,42 @@ describe("ProgressiveBackoffRateLimiter", () => {
     });
   });
 
-  test("should allow requests initially", async () => {
-    const result = await limiter.check("user1");
+  test('should allow requests initially', async () => {
+    const result = await limiter.check('user1');
 
     expect(result.allowed).toBe(true);
     expect(result.attempt).toBe(0);
   });
 
-  test("should track failed attempts", async () => {
-    await limiter.check("user1");
-    await limiter.check("user1");
-    await limiter.check("user1");
+  test('should track failed attempts', async () => {
+    await limiter.check('user1');
+    await limiter.check('user1');
+    await limiter.check('user1');
 
-    const result = await limiter.check("user1");
+    const result = await limiter.check('user1');
 
     expect(result.allowed).toBe(true);
     expect(result.attempt).toBe(3);
   });
 
-  test("should block after max attempts", async () => {
+  test('should block after max attempts', async () => {
     // Simulate 5 failed attempts
     for (let i = 0; i < 5; i++) {
-      await limiter.check("user1");
+      await limiter.check('user1');
     }
 
-    const result = await limiter.check("user1");
+    const result = await limiter.check('user1');
 
     expect(result.allowed).toBe(false);
     expect(result.retryAfter).toBeGreaterThan(0);
   });
 
-  test("should increase backoff with each attempt", async () => {
+  test('should increase backoff with each attempt', async () => {
     const attempts = [];
 
     // Make 6 attempts
     for (let i = 0; i < 6; i++) {
-      const result = await limiter.check("user1");
+      const result = await limiter.check('user1');
       if (result.retryAfter) {
         attempts.push(result.retryAfter);
       }
@@ -484,105 +481,105 @@ describe("ProgressiveBackoffRateLimiter", () => {
     expect(attempts[0]).toBeGreaterThan(0);
   });
 
-  test("should reset after decay period", async () => {
+  test('should reset after decay period', async () => {
     // Use all attempts
     for (let i = 0; i < 5; i++) {
-      await limiter.check("user1");
+      await limiter.check('user1');
     }
 
     // Wait for decay (in real test, would mock time)
     // For now, just verify reset function exists
-    await limiter.reset("user1");
+    await limiter.reset('user1');
   });
 });
 
-describe("CaptchaRateLimiter", () => {
+describe('CaptchaRateLimiter', () => {
   let limiter: CaptchaRateLimiter;
 
   beforeEach(() => {
     limiter = new CaptchaRateLimiter({
-      provider: "hcaptcha",
-      secretKey: "test-secret",
+      provider: 'hcaptcha',
+      secretKey: 'test-secret',
       threshold: 3,
     });
   });
 
-  test("should not require CAPTCHA initially", () => {
-    expect(limiter.requiresCaptcha("user1")).toBe(false);
+  test('should not require CAPTCHA initially', () => {
+    expect(limiter.requiresCaptcha('user1')).toBe(false);
   });
 
-  test("should require CAPTCHA after threshold failures", () => {
-    limiter.recordFailure("user1");
-    limiter.recordFailure("user1");
-    limiter.recordFailure("user1");
+  test('should require CAPTCHA after threshold failures', () => {
+    limiter.recordFailure('user1');
+    limiter.recordFailure('user1');
+    limiter.recordFailure('user1');
 
-    expect(limiter.requiresCaptcha("user1")).toBe(true);
+    expect(limiter.requiresCaptcha('user1')).toBe(true);
   });
 
-  test("should reset failure count on success", () => {
-    limiter.recordFailure("user1");
-    limiter.recordFailure("user1");
-    limiter.recordSuccess("user1");
+  test('should reset failure count on success', () => {
+    limiter.recordFailure('user1');
+    limiter.recordFailure('user1');
+    limiter.recordSuccess('user1');
 
-    expect(limiter.requiresCaptcha("user1")).toBe(false);
+    expect(limiter.requiresCaptcha('user1')).toBe(false);
   });
 
-  test("should track failures separately per user", () => {
-    limiter.recordFailure("user1");
-    limiter.recordFailure("user1");
-    limiter.recordFailure("user1");
-    limiter.recordFailure("user2");
+  test('should track failures separately per user', () => {
+    limiter.recordFailure('user1');
+    limiter.recordFailure('user1');
+    limiter.recordFailure('user1');
+    limiter.recordFailure('user2');
 
-    expect(limiter.requiresCaptcha("user1")).toBe(true);
-    expect(limiter.requiresCaptcha("user2")).toBe(false);
+    expect(limiter.requiresCaptcha('user1')).toBe(true);
+    expect(limiter.requiresCaptcha('user2')).toBe(false);
   });
 });
 
-describe("RateLimitPresets", () => {
-  test("should have API preset", () => {
+describe('RateLimitPresets', () => {
+  test('should have API preset', () => {
     expect(RateLimitPresets.api.maxRequests).toBe(100);
     expect(RateLimitPresets.api.windowMs).toBe(60_000);
   });
 
-  test("should have auth preset with strict limits", () => {
+  test('should have auth preset with strict limits', () => {
     expect(RateLimitPresets.auth.maxRequests).toBe(5);
     expect(RateLimitPresets.auth.windowMs).toBe(15 * 60_000);
   });
 
-  test("should have password reset preset", () => {
+  test('should have password reset preset', () => {
     expect(RateLimitPresets.passwordReset.maxRequests).toBe(3);
     expect(RateLimitPresets.passwordReset.windowMs).toBe(60 * 60_000);
   });
 
-  test("should have WebSocket preset with token bucket", () => {
-    expect(RateLimitPresets.websocket.strategy).toBe("token-bucket");
+  test('should have WebSocket preset with token bucket', () => {
+    expect(RateLimitPresets.websocket.strategy).toBe('token-bucket');
     expect(RateLimitPresets.websocket.refillRate).toBeDefined();
   });
 
-  test("should have LLM calls preset", () => {
+  test('should have LLM calls preset', () => {
     expect(RateLimitPresets.llmCalls.maxRequests).toBe(60);
-    expect(RateLimitPresets.llmCalls.strategy).toBe("token-bucket");
+    expect(RateLimitPresets.llmCalls.strategy).toBe('token-bucket');
   });
 });
 
-describe("createProductionRateLimiter", () => {
+describe('createProductionRateLimiter', () => {
   beforeEach(async () => {
     await resetRedisData();
   });
 
-  test("should create tiered rate limiter with all presets", () => {
+  test('should create tiered rate limiter with all presets', () => {
     const limiter = createProductionRateLimiter();
 
     expect(limiter).toBeInstanceOf(TieredRateLimiter);
   });
 
-  test("should have configured endpoints", async () => {
+  test('should have configured endpoints', async () => {
     const limiter = createProductionRateLimiter();
 
     // Test auth endpoint (should have strict limit)
     const authResult = await limiter.check({
-      ip: "127.0.0.1",
-      endpoint: "/api/auth/login",
+      ip: '127.0.0.1',
+      endpoint: '/api/auth/login',
       isAuthEndpoint: true,
     });
 

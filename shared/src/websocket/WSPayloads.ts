@@ -1,15 +1,15 @@
 // WebSocket Message Payloads
 // Domain: Payload structures for all WebSocket event types
 
-import type { ProviderName, ModelDef } from "../providers/ModelDefs";
-import type { AgentRole, AgentStatus, WorkerDomain } from "../types/AgentTypes";
+import type { ProviderName, ModelDef } from '../providers/ModelDefs';
+import type { AgentRole, AgentStatus, WorkerDomain } from '../types/AgentTypes';
 
 // Re-export these types to avoid circular dependency
 export type ChangeSummary = {
   path: string;
   linesAdded: number;
   linesDeleted: number;
-  operation: "create" | "edit" | "delete";
+  operation: 'create' | 'edit' | 'delete';
 };
 
 export type StreamUsage = {
@@ -44,6 +44,16 @@ export interface AgentStatusPayload {
   detail?: string;
 }
 
+export interface AgentThreadMessagePayload {
+  agentId: string;
+  entry: {
+    id: string;
+    role: 'manager' | 'user' | 'assistant';
+    content: string;
+    createdAt: number;
+  };
+}
+
 export interface ThinkingPayload {
   agentId: string;
   thinking: string;
@@ -54,6 +64,18 @@ export interface StreamDeltaPayload {
   agentId: string;
   content: string;
   model: string;
+}
+
+export interface StreamClearContentPayload {
+  agentId: string;
+}
+
+export interface ContextDetectedPayload {
+  files: Array<{
+    path: string;
+    relevance: number;
+    reason: string;
+  }>;
 }
 
 export interface MessagePendingPayload {
@@ -128,14 +150,14 @@ export interface StreamFileDeltaPayload {
   path: string;
   delta: string;
   totalLength: number;
-  operation: "create" | "edit";
+  operation: 'create' | 'edit';
 }
 
 export interface StreamFileCompletePayload {
   agentId: string;
   path: string;
   totalLines: number;
-  operation: "create" | "edit";
+  operation: 'create' | 'edit';
 }
 
 export interface ErrorPayload {
@@ -147,8 +169,8 @@ export interface ErrorPayload {
 }
 
 export interface NotificationPayload {
-  type: "info" | "warning" | "success" | "error";
-  title: string;
+  type: 'info' | 'warning' | 'success' | 'error';
+  title?: string;
   message: string;
   duration?: number;
   metadata?: {
@@ -162,7 +184,7 @@ export interface NotificationPayload {
 // Kory-specific payloads
 export interface KoryThoughtPayload {
   thought: string;
-  phase: "analyzing" | "routing" | "delegating" | "verifying" | "synthesizing";
+  phase: 'analyzing' | 'routing' | 'delegating' | 'verifying' | 'synthesizing';
 }
 
 export interface KoryRoutingPayload {
@@ -178,7 +200,7 @@ export interface KoryTaskBreakdownPayload {
     description: string;
     domain: string;
     assignedModel: string;
-    status: "pending" | "active" | "done" | "failed";
+    status: 'pending' | 'active' | 'done' | 'failed';
   }>;
 }
 
@@ -200,16 +222,18 @@ export interface ProviderInfo {
   name: ProviderName;
   enabled: boolean;
   authenticated: boolean;
-  authSource?: "API Key" | "Subscription" | "CLI session";
+  authSource?: 'API Key' | 'Subscription' | 'CLI session';
   models: string[];
   allAvailableModels: ModelDef[];
   selectedModels: string[];
   hideModelSelector: boolean;
-  authMode: string | {
-    id: string;
-    label: string;
-    description: string;
-  };
+  authMode:
+    | string
+    | {
+        id: string;
+        label: string;
+        description: string;
+      };
   supportsApiKey: boolean;
   supportsAuthToken: boolean;
   requiresBaseUrl: boolean;

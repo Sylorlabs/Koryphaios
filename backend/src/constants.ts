@@ -1,7 +1,7 @@
 // Backend Constants — Extract magic numbers and configuration defaults
 
 /** Application version (single source of truth) */
-export const VERSION = "1.0.0";
+export const VERSION = '1.0.0';
 
 /**
  * Session and Message Limits
@@ -10,7 +10,7 @@ export const SESSION = {
   /** Maximum length for session titles */
   MAX_TITLE_LENGTH: 200,
   /** Default title for new sessions */
-  DEFAULT_TITLE: "New Session",
+  DEFAULT_TITLE: 'New Session',
   /** Characters to extract from first message for auto-title */
   AUTO_TITLE_CHARS: 50,
 } as const;
@@ -54,14 +54,14 @@ export const RATE_LIMIT = {
  * Server Configuration Defaults
  */
 export const SERVER = {
-  /** Default HTTP port */
-  DEFAULT_PORT: 3000,
+  /** Default HTTP port - using port 3001 for unified desktop experience */
+  DEFAULT_PORT: 3001,
   /** Default host (loopback for safer local defaults) */
-  DEFAULT_HOST: "127.0.0.1",
+  DEFAULT_HOST: '127.0.0.1',
   /** WebSocket path */
-  WS_PATH: "/ws",
+  WS_PATH: '/ws',
   /** SSE path */
-  SSE_PATH: "/api/events",
+  SSE_PATH: '/api/events',
 } as const;
 
 /**
@@ -74,10 +74,10 @@ export const SECURITY = {
   MAX_PROVIDER_NAME_LENGTH: 50,
   /** Allowed CORS origins (add more via config.corsOrigins for other dev hosts/ports) */
   ALLOWED_ORIGINS: [
-    "http://localhost:5173",   // Vite dev default
-    "http://localhost:3000",   // Bun dev server
-    "http://127.0.0.1:5173",
-    "http://127.0.0.1:3000",
+    'http://localhost:5173', // Vite dev default
+    'http://localhost:3000', // Bun dev server
+    'http://127.0.0.1:5173',
+    'http://127.0.0.1:3000',
   ],
 } as const;
 
@@ -94,13 +94,13 @@ export const AUTH = {
  */
 export const FS = {
   /** Default data directory name */
-  DEFAULT_DATA_DIR: ".koryphaios",
+  DEFAULT_DATA_DIR: '.koryphaios',
   /** Sessions subdirectory */
-  SESSIONS_DIR: "sessions",
+  SESSIONS_DIR: 'sessions',
   /** Messages file suffix */
-  MESSAGES_FILE_SUFFIX: ".messages.json",
+  MESSAGES_FILE_SUFFIX: '.messages.json',
   /** Session file suffix */
-  SESSION_FILE_SUFFIX: ".json",
+  SESSION_FILE_SUFFIX: '.json',
 } as const;
 
 /**
@@ -108,23 +108,23 @@ export const FS = {
  */
 export const AGENT = {
   /** Default models per role if not configured */
-  DEFAULT_MANAGER_MODEL: "claude-sonnet-4-6",
-  DEFAULT_CODER_MODEL: "claude-sonnet-4-6",
-  DEFAULT_TASK_MODEL: "gpt-5-mini",
+  DEFAULT_MANAGER_MODEL: 'claude-sonnet-4-6',
+  DEFAULT_CODER_MODEL: 'claude-sonnet-4-6',
+  DEFAULT_TASK_MODEL: 'gpt-5-mini',
 
   /** Default token limits */
   DEFAULT_MAX_TOKENS: 8192,
   CODER_MAX_TOKENS: 16384,
 
   /** Default reasoning level */
-  DEFAULT_REASONING_LEVEL: "high" as const,
+  DEFAULT_REASONING_LEVEL: 'high' as const,
 
   /** Fallback model chains (IDs must exist in MODEL_CATALOG). */
   DEFAULT_FALLBACKS: {
-    "claude-sonnet-4-6": ["gpt-5.2-pro", "gemini-3.1-pro"],
-    "gpt-5.2-pro": ["claude-sonnet-4-6", "gemini-3.1-pro"],
-    "gpt-5-mini": ["gemini-3-flash", "claude-haiku-4-5"],
-    "o4-mini": ["gpt-5-mini", "gemini-3-flash"],
+    'claude-sonnet-4-6': ['gpt-5.2-pro', 'gemini-3.1-pro'],
+    'gpt-5.2-pro': ['claude-sonnet-4-6', 'gemini-3.1-pro'],
+    'gpt-5-mini': ['gemini-3-flash', 'claude-haiku-4-5'],
+    'o4-mini': ['gpt-5-mini', 'gemini-3-flash'],
   } as Record<string, string[]>,
 
   /** Max time a single LLM stream can run before being aborted (prevents stuck requests) */
@@ -135,20 +135,20 @@ export const AGENT = {
  * Configuration File Paths (in order of precedence)
  */
 export const CONFIG_PATHS = [
-  "koryphaios.json",                          // Project root
-  ".config/koryphaios/config.json",           // User config (in home)
-  ".koryphaios.json",                         // User config (home root)
+  'koryphaios.json', // Project root
+  '.config/koryphaios/config.json', // User config (in home)
+  '.koryphaios.json', // User config (home root)
 ] as const;
 
 /**
  * Context Files (loaded into agent context)
  */
 export const DEFAULT_CONTEXT_PATHS: string[] = [
-  ".cursorrules",
-  "CLAUDE.md",
-  "AGENTS.md",
-  ".opencode.json",
-  "CONVENTIONS.md",
+  '.koryrules',
+  'CLAUDE.md',
+  'AGENTS.md',
+  '.opencode.json',
+  'CONVENTIONS.md',
 ];
 
 /**
@@ -157,16 +157,16 @@ export const DEFAULT_CONTEXT_PATHS: string[] = [
  */
 export const SESSION_MEMORY = {
   /** Filename for session memory */
-  FILENAME: "memory.md",
+  FILENAME: 'memory.md',
   /** Default character limit for memory excerpts in prompts */
   MAX_EXCERPT_LENGTH: 4000,
   /** Sections that can be updated */
   SECTIONS: {
-    PROJECT_CONTEXT: "🎯 Project Context",
-    KEY_LEARNINGS: "📚 Key Learnings & Insights",
-    TECHNICAL_DECISIONS: "🔧 Technical Decisions",
-    GOTCHAS: "⚠️ Gotchas & Edge Cases",
-    REFERENCES: "🔗 References",
+    PROJECT_CONTEXT: '🎯 Project Context',
+    KEY_LEARNINGS: '📚 Key Learnings & Insights',
+    TECHNICAL_DECISIONS: '🔧 Technical Decisions',
+    GOTCHAS: '⚠️ Gotchas & Edge Cases',
+    REFERENCES: '🔗 References',
   } as const,
 };
 
@@ -175,9 +175,9 @@ export const SESSION_MEMORY = {
  */
 export const LOG = {
   /** Log level for production */
-  PROD_LEVEL: "info" as const,
+  PROD_LEVEL: 'info' as const,
   /** Log level for development */
-  DEV_LEVEL: "debug" as const,
+  DEV_LEVEL: 'debug' as const,
   /** Enable pretty printing in dev */
   PRETTY_PRINT_DEV: true,
 } as const;
@@ -187,20 +187,20 @@ export const LOG = {
  */
 export const PROVIDER = {
   /** Environment variable prefix */
-  ENV_VAR_PREFIX: "ANTHROPIC_API_KEY", // Example pattern
+  ENV_VAR_PREFIX: 'ANTHROPIC_API_KEY', // Example pattern
 
   /** Expected environment variable names */
   ENV_VARS: {
-    ANTHROPIC: "ANTHROPIC_API_KEY",
-    OPENAI: "OPENAI_API_KEY",
-    GEMINI: "GEMINI_API_KEY",
-    GROQ: "GROQ_API_KEY",
-    XAI: "XAI_API_KEY",
-    AZURE: "AZURE_OPENAI_API_KEY",
-    BEDROCK: "AWS_ACCESS_KEY_ID", // Also needs AWS_SECRET_ACCESS_KEY
-    COPILOT: "GITHUB_TOKEN",
-    OPENROUTER: "OPENROUTER_API_KEY",
-    VERTEXAI: "GOOGLE_VERTEX_AI_API_KEY",
+    ANTHROPIC: 'ANTHROPIC_API_KEY',
+    OPENAI: 'OPENAI_API_KEY',
+    GEMINI: 'GEMINI_API_KEY',
+    GROQ: 'GROQ_API_KEY',
+    XAI: 'XAI_API_KEY',
+    AZURE: 'AZURE_OPENAI_API_KEY',
+    BEDROCK: 'AWS_ACCESS_KEY_ID', // Also needs AWS_SECRET_ACCESS_KEY
+    COPILOT: 'GITHUB_TOKEN',
+    OPENROUTER: 'OPENROUTER_API_KEY',
+    VERTEXAI: 'GOOGLE_VERTEX_AI_API_KEY',
   } as const,
 } as const;
 
@@ -209,7 +209,7 @@ export const PROVIDER = {
  */
 export const TELEGRAM = {
   /** Webhook path */
-  WEBHOOK_PATH: "/api/telegram/webhook",
+  WEBHOOK_PATH: '/api/telegram/webhook',
   /** Polling interval (ms) */
   POLLING_INTERVAL: 1000,
   /** Max message length */
@@ -258,7 +258,7 @@ export const WORKSPACE = {
   /** Default max concurrent worktrees */
   DEFAULT_WORKTREE_LIMIT: 4,
   /** Default worktree directory (relative to repo root) */
-  DEFAULT_WORKTREE_DIR: ".trees",
+  DEFAULT_WORKTREE_DIR: '.trees',
   /** Default: don't copy .env files to worktrees (security) */
   DEFAULT_COPY_ENV_FILES: false,
   /** Estimated RAM usage per worktree in MB (for guidance) */
@@ -271,49 +271,143 @@ export const WORKSPACE = {
 export const DOMAIN = {
   KEYWORDS: {
     frontend: [
-      "skia", "flutter", "ui", "widget", "button", "layout", "css", "style",
-      "animation", "render", "frontend", "component", "svelte", "react", "view",
-      "canvas", "draw", "paint", "theme", "color", "font", "icon", "design",
-      "responsive", "mobile", "dark mode", "light mode", "sidebar", "modal",
+      'skia',
+      'flutter',
+      'ui',
+      'widget',
+      'button',
+      'layout',
+      'css',
+      'style',
+      'animation',
+      'render',
+      'frontend',
+      'component',
+      'svelte',
+      'react',
+      'view',
+      'canvas',
+      'draw',
+      'paint',
+      'theme',
+      'color',
+      'font',
+      'icon',
+      'design',
+      'responsive',
+      'mobile',
+      'dark mode',
+      'light mode',
+      'sidebar',
+      'modal',
     ],
     ui: [
-      "skia", "flutter", "ui", "widget", "button", "layout", "css", "style",
-      "animation", "render", "frontend", "component", "svelte", "react", "view",
-      "canvas", "draw", "paint", "theme", "color", "font", "icon", "design",
-      "responsive", "mobile", "dark mode", "light mode", "sidebar", "modal",
+      'skia',
+      'flutter',
+      'ui',
+      'widget',
+      'button',
+      'layout',
+      'css',
+      'style',
+      'animation',
+      'render',
+      'frontend',
+      'component',
+      'svelte',
+      'react',
+      'view',
+      'canvas',
+      'draw',
+      'paint',
+      'theme',
+      'color',
+      'font',
+      'icon',
+      'design',
+      'responsive',
+      'mobile',
+      'dark mode',
+      'light mode',
+      'sidebar',
+      'modal',
     ],
     backend: [
-      "c++", "cpp", "cmake", "makefile", "gtest", "boost", "llvm", "clang",
-      "server", "api", "database", "sql", "grpc", "protobuf", "socket",
-      "memory", "pointer", "thread", "mutex", "algorithm", "data structure",
-      "compiler", "linker", "binary", "build", "performance", "optimization",
-      "kernel", "driver", "system", "dsp", "audio", "midi", "signal",
+      'c++',
+      'cpp',
+      'cmake',
+      'makefile',
+      'gtest',
+      'boost',
+      'llvm',
+      'clang',
+      'server',
+      'api',
+      'database',
+      'sql',
+      'grpc',
+      'protobuf',
+      'socket',
+      'memory',
+      'pointer',
+      'thread',
+      'mutex',
+      'algorithm',
+      'data structure',
+      'compiler',
+      'linker',
+      'binary',
+      'build',
+      'performance',
+      'optimization',
+      'kernel',
+      'driver',
+      'system',
+      'dsp',
+      'audio',
+      'midi',
+      'signal',
     ],
     general: [
-      "refactor", "rename", "move", "organize", "clean", "lint", "format",
-      "documentation", "readme", "comment", "explain", "review", "improve",
-      "typescript", "javascript", "python", "rust", "go",
+      'refactor',
+      'rename',
+      'move',
+      'organize',
+      'clean',
+      'lint',
+      'format',
+      'documentation',
+      'readme',
+      'comment',
+      'explain',
+      'review',
+      'improve',
+      'typescript',
+      'javascript',
+      'python',
+      'rust',
+      'go',
     ],
-    review: ["review", "audit", "check", "verify", "validate"],
-    test: ["test", "spec", "gtest", "jest", "vitest", "mocha", "pytest"],
-    critic: ["critic", "critique", "audit", "review", "gate", "quality"],
+    review: ['review', 'audit', 'check', 'verify', 'validate'],
+    test: ['test', 'spec', 'gtest', 'jest', 'vitest', 'mocha', 'pytest'],
+    critic: ['critic', 'critique', 'audit', 'review', 'gate', 'quality'],
   },
   DEFAULT_MODELS: {
-    frontend: "gpt-5.2-pro",
-    ui: "gpt-5.2-pro",
-    backend: "gemini-3.1-pro",
-    general: "gemini-3-flash",
-    review: "gpt-5.2-pro",
-    test: "gpt-5.2-pro",
-    critic: "claude-sonnet-4-6",
+    frontend: 'gpt-5.2-pro',
+    ui: 'gpt-5.2-pro',
+    backend: 'gemini-3.1-pro',
+    general: 'gemini-3-flash',
+    review: 'gpt-5.2-pro',
+    test: 'gpt-5.2-pro',
+    critic: 'claude-sonnet-4-6',
   },
   GLOW_COLORS: {
-    frontend: "rgba(0,255,255,0.5)",  // Cyan (alias for UI)
-    ui: "rgba(0,255,255,0.5)",       // Cyan
-    backend: "rgba(128,0,128,0.5)",  // Deep Purple
-    general: "rgba(255,165,0,0.5)",  // Orange (Claude)
-    review: "rgba(255,165,0,0.5)",   // Orange
-    test: "rgba(0,255,128,0.5)",     // Green
-    critic: "rgba(255,0,0,0.6)",      // Red (Harshest)
+    frontend: 'rgba(0,255,255,0.5)', // Cyan (alias for UI)
+    ui: 'rgba(0,255,255,0.5)', // Cyan
+    backend: 'rgba(128,0,128,0.5)', // Deep Purple
+    general: 'rgba(255,165,0,0.5)', // Orange (Claude)
+    review: 'rgba(255,165,0,0.5)', // Orange
+    test: 'rgba(0,255,128,0.5)', // Green
+    critic: 'rgba(255,0,0,0.6)', // Red (Harshest)
   },
 } as const;

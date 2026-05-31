@@ -1,16 +1,16 @@
 // Slack channel adapter: sends reply segments as Slack messages.
 // Session id format: slack-<channelId> so one channel = one conversation.
 
-import type { WebClient } from "@slack/web-api";
-import type { ChannelAdapter, ReplySegment } from "./types";
-import { CHANNEL_PREFIX } from "./types";
-import { slackLog } from "../logger";
+import type { WebClient } from '@slack/web-api';
+import type { ChannelAdapter, ReplySegment } from './types';
+import { CHANNEL_PREFIX } from './types';
+import { slackLog } from '../logger';
 
 const MAX_MESSAGE_LENGTH = 3000;
 
 export class SlackAdapter implements ChannelAdapter {
   readonly sessionIdPrefix = CHANNEL_PREFIX.slack;
-  readonly channelId = "slack";
+  readonly channelId = 'slack';
   readonly webClient: WebClient;
   private sessionToChannel = new Map<string, { channelId: string; threadTs?: string }>();
   private buffer = new Map<string, string>();
@@ -26,22 +26,22 @@ export class SlackAdapter implements ChannelAdapter {
   async sendReply(sessionId: string, segment: ReplySegment): Promise<void> {
     const target = this.sessionToChannel.get(sessionId);
     if (!target) {
-      slackLog.debug({ sessionId }, "No channel for session, skipping reply");
+      slackLog.debug({ sessionId }, 'No channel for session, skipping reply');
       return;
     }
 
-    if (segment.type === "error") {
-      await this.send(target.channelId, `❌ ${segment.error ?? "Error"}`, target.threadTs);
+    if (segment.type === 'error') {
+      await this.send(target.channelId, `❌ ${segment.error ?? 'Error'}`, target.threadTs);
       return;
     }
 
-    if (segment.type === "delta" && segment.content) {
-      let buf = this.buffer.get(sessionId) ?? "";
+    if (segment.type === 'delta' && segment.content) {
+      let buf = this.buffer.get(sessionId) ?? '';
       buf += segment.content;
       this.buffer.set(sessionId, buf);
     }
 
-    if (segment.type === "status" && segment.done) {
+    if (segment.type === 'status' && segment.done) {
       const text = this.buffer.get(sessionId)?.trim();
       this.buffer.delete(sessionId);
       this.sessionToChannel.delete(sessionId);
@@ -73,7 +73,7 @@ export class SlackAdapter implements ChannelAdapter {
         });
       }
     } catch (err) {
-      slackLog.warn({ err, channelId }, "Slack send failed");
+      slackLog.warn({ err, channelId }, 'Slack send failed');
     }
   }
 
@@ -85,7 +85,7 @@ export class SlackAdapter implements ChannelAdapter {
         chunks.push(remaining);
         break;
       }
-      let splitIdx = remaining.lastIndexOf("\n", MAX_MESSAGE_LENGTH);
+      let splitIdx = remaining.lastIndexOf('\n', MAX_MESSAGE_LENGTH);
       if (splitIdx <= 0) splitIdx = MAX_MESSAGE_LENGTH;
       chunks.push(remaining.slice(0, splitIdx));
       remaining = remaining.slice(splitIdx);

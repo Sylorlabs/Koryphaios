@@ -1,1814 +1,224 @@
 // Koryphaios Backend Server — Bun HTTP + WebSocket server.
-// This is the main entry point that wires everything together.
+// Main entry point via ElysiaJS.
 
-import type { WSMessage, APIResponse, SendMessageRequest, CreateSessionRequest, StoredMessage, ProviderName } from "@koryphaios/shared";
-import type { Server, ServerWebSocket } from "bun";
-import { ProviderRegistry } from "./providers";
-import { startCopilotDeviceAuth, pollCopilotDeviceAuth } from "./providers/copilot";
-import { ToolRegistry, BashTool, ShellManageTool, ReadFileTool, WriteFileTool, EditFileTool, GrepTool, GlobTool, LsTool, WebSearchTool, WebFetchTool, DeleteFileTool, MoveFileTool, DiffTool, PatchTool } from "./tools";
-import { AskUserTool, AskManagerTool, DelegateToWorkerTool } from "./tools/interaction";
-import { KoryManager } from "./kory/manager-refactored";
-import { applyModeIntegration } from "./kory/manager-mode-integration";
-import { Bot } from "grammy";
-import { TelegramBridge } from "./telegram/bot";
-import { DiscordBridge, createDiscordClient } from "./discord/bot";
-import { SlackBridge } from "./slack/bot";
-import { messagingGateway, sessionReplyStream } from "./messaging";
-import { TelegramAdapter, DiscordAdapter, SlackAdapter } from "./messaging";
-import { MCPManager } from "./mcp/client";
-import { wsBroker } from "./pubsub";
-import { serverLog } from "./logger";
-import { getCorsHeaders, addCorsOrigins, getSecurityHeaders, validateSessionId, validateProviderName, sanitizeString, encryptForStorage, initializeEncryption } from "./security";
-import { RateLimiter } from "./security/rate-limit";
-import { handleError, generateCorrelationId } from "./errors";
-import { AUTH, SESSION, MESSAGE, ID, RATE_LIMIT, VERSION } from "./constants";
-import { validateEnvironment, getAllowRegistration } from "./config-schema";
-import { nanoid } from "nanoid";
-import { existsSync, readFileSync, writeFileSync, readdirSync } from "node:fs";
-import { join, basename } from "node:path";
-import { googleAuth } from "./providers/google-auth";
-import { cliAuth } from "./providers/cli-auth";
-import { initDb } from "./db/sqlite";
-import { initCreditAccountant } from "./credit-accountant";
+import { Elysia, t } from 'elysia';
+import { cors } from '@elysiajs/cors';
+import { nanoid } from 'nanoid';
+import { writeFileSync } from 'node:fs';
+import { join, resolve } from 'node:path';
+import type { Server } from 'bun';
 
-import { PROJECT_ROOT, BACKEND_ROOT } from "./runtime/paths";
-import { loadConfig } from "./runtime/config";
-import { loadEnvFromProject, persistEnvVar, clearEnvVar } from "./runtime/env";
-import { SessionStore } from "./stores/session-store";
-import { MessageStore } from "./stores/message-store";
-import { WSManager, type WSClientData } from "./ws/ws-manager";
-import { createWebSocketHandlers } from "./server/websocket-handler";
+import { bootstrap } from './bootstrap';
+import { setContext } from './context';
+import { serverLog } from './logger';
+import { VERSION, ID, RATE_LIMIT } from './constants';
+import { RateLimiter } from './security/rate-limit';
+import { PROJECT_ROOT } from './runtime/paths';
+import { createWebSocketHandlers } from './server/websocket-handler';
+import type { WSClientData } from './ws/ws-manager';
+import { validateLocalBearerToken } from './auth/local-route-auth';
+import { getDb } from './db';
+import { shutdownAllBrokers } from './pubsub';
 
-import { requireAuth } from "./middleware";
-import { handleV1Routes } from "./routes/v1";
-import { getMetricsRegistry } from "./metrics";
-import { getReconciliation, stopCreditPolling } from "./credit-accountant";
-import { 
-  initializeSessionMemory, 
-  deleteSessionMemory, 
-  readSessionMemory,
-  writeSessionMemory,
-  readUniversalMemory,
-  writeUniversalMemory,
-  initializeUniversalMemory,
-  readProjectMemory,
-  writeProjectMemory,
-  initializeProjectMemory,
-  initializeSessionMemory as initSessionMemory,
-} from "./memory/unified-memory";
-import {
-  loadAgentSettings,
-  saveAgentSettings,
-  resetAgentSettings,
-  initializePreferences,
-  readPreferences,
-  writePreferences,
-  assembleAgentContext,
-  criticReview,
-  DEFAULT_AGENT_SETTINGS,
-} from "./agent-settings";
+// Routes
+import { sessionRoutes } from './routes/v1/sessions';
+import { messageRoutes } from './routes/v1/messages';
+import { providerRoutes } from './routes/v1/providers';
+import { collaborationRoutes } from './routes/collaboration';
+import { authRoutes } from './routes/v1/auth';
+import { agentSettingsRoutes } from './routes/v1/agent-settings';
+import { gitRoutes } from './routes/v1/git';
+import { memoryRoutes } from './routes/v1/memory';
+import { modeRoutes } from './routes/v1/mode';
+import { spendRoutes } from './routes/v1/spend';
+import { spendCapsRoutes } from './routes/v1/spend-caps';
+import { billingRoutes } from './routes/v1/billing';
+import { messagingRoutes } from './routes/v1/messaging';
+import { processRoutes } from './routes/v1/processes';
 
-// ─── Configuration Loading ──────────────────────────────────────────────────
+// Define base Elysia App for export
+const baseApp = new Elysia()
+  .get('/api/health', () => ({
+    ok: true,
+    data: {
+      version: VERSION,
+      uptime: process.uptime(),
+    },
+  }))
+  .get('/api/project', async () => {
+    const { basename } = await import('node:path');
+    const projectName = basename(PROJECT_ROOT);
+    return { ok: true, data: { projectName } };
+  })
+  .post('/api/debug/log-error', () => ({ ok: true }))
+  .use(sessionRoutes)
+  .use(messageRoutes)
+  .use(providerRoutes)
+  .use(collaborationRoutes)
+  .use(authRoutes)
+  .use(agentSettingsRoutes)
+  .use(gitRoutes)
+  .use(memoryRoutes)
+  .use(modeRoutes)
+  .use(spendRoutes)
+  .use(spendCapsRoutes)
+  .use(billingRoutes)
+  .use(messagingRoutes)
+  .use(processRoutes);
 
-// ─── Main Server ────────────────────────────────────────────────────────────
+export type App = typeof baseApp;
 
 async function main() {
-  serverLog.info("═══════════════════════════════════════");
+  serverLog.info('═══════════════════════════════════════');
   serverLog.info(`       KORYPHAIOS v${VERSION}`);
-  serverLog.info("  AI Agent Orchestration Dashboard");
-  serverLog.info("═══════════════════════════════════════");
+  serverLog.info('  AI Agent Orchestration Dashboard');
+  serverLog.info('═══════════════════════════════════════');
 
-  // Validate environment variables
-  validateEnvironment();
-
-  const config = loadConfig(PROJECT_ROOT);
-
-  // Load .env so persisted provider API keys are available after server restart
-  loadEnvFromProject(PROJECT_ROOT);
-
-  // Register any extra CORS origins from config
-  if (config.corsOrigins?.length) {
-    addCorsOrigins(config.corsOrigins);
-    serverLog.info({ origins: config.corsOrigins }, "Registered extra CORS origins");
-  }
-
-  // Initialize SQLite Database (must complete before any request uses getDb())
-  await initDb(join(PROJECT_ROOT, config.dataDirectory));
-
-  // Initialize CreditAccountant (sylorlabs.db + optional polling)
-  initCreditAccountant(join(PROJECT_ROOT, config.dataDirectory), {
-    openaiApiKey: process.env.OPENAI_API_KEY,
-    githubEnterpriseId: process.env.GITHUB_ENTERPRISE_ID,
-    githubToken: process.env.GITHUB_TOKEN,
-  });
-
-  // Initialize envelope encryption (optional; legacy encryption used if this fails)
-  try {
-    await initializeEncryption();
-    serverLog.info("Envelope encryption initialized");
-  } catch (err: unknown) {
-    const message = err instanceof Error ? err.message : String(err);
-    serverLog.warn({ err: message }, "Envelope encryption unavailable; API keys will use legacy encryption");
-  }
-
-  // Initialize providers (auth hub)
-  const providers = new ProviderRegistry(config);
-  await providers.initializeEncryptedCredentials();
-
-  // Initialize tools
-  const tools = new ToolRegistry();
-  tools.register(new BashTool());
-  tools.register(new ShellManageTool());
-  tools.register(new ReadFileTool());
-  tools.register(new WriteFileTool());
-  tools.register(new EditFileTool());
-  tools.register(new DeleteFileTool());
-  tools.register(new MoveFileTool());
-  tools.register(new DiffTool());
-  tools.register(new PatchTool());
-  tools.register(new GrepTool());
-  tools.register(new GlobTool());
-  tools.register(new LsTool());
-  tools.register(new WebSearchTool());
-  tools.register(new WebFetchTool());
-  tools.register(new AskUserTool());
-  tools.register(new AskManagerTool());
-  tools.register(new DelegateToWorkerTool());
-
-  // Load local plugins
-  await loadPlugins(tools);
-
-  // Initialize MCP connections
-  const mcpManager = new MCPManager();
-  if (config.mcpServers) {
-    for (const [name, serverConfig] of Object.entries(config.mcpServers)) {
-      await mcpManager.connectServer({
-        name,
-        transport: serverConfig.type,
-        command: serverConfig.command,
-        args: serverConfig.args,
-        env: serverConfig.env,
-        url: serverConfig.url,
-        headers: serverConfig.headers,
-      }, tools);
-    }
-    serverLog.info({ count: mcpManager.getStatus().length }, "MCP servers connected");
-  }
-
-  // Initialize sessions
-  const sessions = new SessionStore();
-  const messages = new MessageStore();
-
-  // Initialize Kory
-  const kory = new KoryManager(providers, tools, PROJECT_ROOT, config, sessions, messages);
-  
-  // Apply mode integration (sets up GitManager for mode context)
-  applyModeIntegration(kory);
-
-  // Initialize WebSocket manager
-  const wsManager = new WSManager();
-
-  // Wire up pub/sub → WebSocket broadcast
-  const wsStream = wsBroker.subscribe();
-  const wsReader = wsStream.getReader();
-  (async () => {
-    try {
-      while (true) {
-        const { done, value } = await wsReader.read();
-        if (done) break;
-        wsManager.broadcast(value.payload);
-      }
-    } catch (err) {
-      serverLog.error({ err }, "WebSocket pub/sub reader error");
-    }
-  })();
-
-  // Messaging gateway + bridges (optional — each starts only if configured)
-  let gatewayStarted = false;
-  function ensureGateway() {
-    if (!gatewayStarted) {
-      messagingGateway.start();
-      gatewayStarted = true;
-    }
-  }
-
-  // Telegram bridge
-  let telegram: TelegramBridge | undefined;
-  if (config.telegram?.botToken && config.telegram.adminId) {
-    ensureGateway();
-    const bot = new Bot(config.telegram.botToken);
-    const telegramAdapter = new TelegramAdapter(bot);
-    telegram = new TelegramBridge(
-      {
-        botToken: config.telegram.botToken,
-        adminId: config.telegram.adminId,
-        secretToken: config.telegram.secretToken,
-      },
-      kory,
-      messagingGateway,
-      telegramAdapter,
-    );
-    serverLog.info({ adminId: config.telegram.adminId }, "Telegram bridge enabled (replies stream to chat)");
-  }
-
-  // Discord bridge
-  let discord: DiscordBridge | undefined;
-  if (config.discord?.botToken) {
-    ensureGateway();
-    const discordClient = createDiscordClient();
-    const discordAdapter = new DiscordAdapter(discordClient);
-    discord = new DiscordBridge(
-      {
-        botToken: config.discord.botToken,
-        allowedGuildIds: config.discord.allowedGuildIds,
-        allowedUserIds: config.discord.allowedUserIds,
-      },
-      kory,
-      messagingGateway,
-      discordAdapter,
-    );
-    serverLog.info("Discord bridge enabled");
-  }
-
-  // Slack bridge
-  let slack: SlackBridge | undefined;
-  if (config.slack?.botToken && config.slack.appToken) {
-    ensureGateway();
-    const { WebClient } = await import("@slack/web-api");
-    const slackWebClient = new WebClient(config.slack.botToken);
-    const slackAdapter = new SlackAdapter(slackWebClient);
-    slack = new SlackBridge(
-      {
-        botToken: config.slack.botToken,
-        appToken: config.slack.appToken,
-        signingSecret: config.slack.signingSecret,
-        allowedChannelIds: config.slack.allowedChannelIds,
-        allowedUserIds: config.slack.allowedUserIds,
-      },
-      kory,
-      messagingGateway,
-      slackAdapter,
-    );
-    serverLog.info("Slack bridge enabled (Socket Mode)");
-  }
-
-  // ─── HTTP + WebSocket Server ────────────────────────────────────────────
+  // Bootstrap dependencies
+  const ctx = await bootstrap();
+  setContext(ctx);
+  const { config, kory, providers, sessions, messages, wsManager, telegram, discord, slack } = ctx;
 
   const rateLimiter = new RateLimiter(RATE_LIMIT.MAX_REQUESTS, RATE_LIMIT.WINDOW_MS);
-  const credentialRateLimiter = new RateLimiter(RATE_LIMIT.CREDENTIAL_PER_MINUTE, RATE_LIMIT.WINDOW_MS);
 
-  // ─── Start Server with Port Conflict Handling ───────────────────────────
-
-  let server: Server<WSClientData>;
-  try {
-    server = Bun.serve<WSClientData>({
-      port: config.server.port,
-      hostname: config.server.host,
-
-    async fetch(req, server) {
-      const url = new URL(req.url);
-      const method = req.method;
-      const origin = req.headers.get("origin");
-      const requestId = generateCorrelationId();
-
-      try {
-        serverLog.debug({ requestId, method, path: url.pathname }, "Incoming request");
-
-        // Guard against path traversal sequences that may be normalized by URL parsing.
-        if (req.url.includes("/api/sessions/") && req.url.includes("..")) {
-          const corsHeaders = getCorsHeaders(origin);
-          return json({ ok: false, error: "Invalid session ID" }, 400, corsHeaders);
-        }
-
-        // CORS — origin allowlist (not *)
-        const corsHeaders = { ...getCorsHeaders(origin), ...getSecurityHeaders() };
-
-        if (method === "OPTIONS") {
-          return new Response(null, { status: 204, headers: corsHeaders });
-        }
-
-        // Rate limiting (IP; per-user applied on critical authenticated routes)
-        const clientIp = (req.headers.get("x-forwarded-for") ?? "local").split(",")[0].trim();
-        const rateCheck = rateLimiter.check(clientIp);
-        if (!rateCheck.allowed) {
-          return json({ ok: false, error: "Rate limit exceeded" }, 429, corsHeaders);
-        }
-
-        // ── WebSocket upgrade ──
-        if (url.pathname === "/ws") {
-          const userId = "system"; // Fixed user ID since no account system
-          const upgraded = server.upgrade(req, {
-            data: { id: nanoid(ID.WS_CLIENT_ID_LENGTH), userId },
-          });
-          if (upgraded) return undefined;
-          return json({ ok: false, error: "WebSocket upgrade failed" }, 400, corsHeaders);
-        }
-
-        // ── Telegram webhook ──
-        if (url.pathname === "/api/telegram/webhook" && telegram) {
-          try {
-            const handler = telegram.getWebhookHandler();
-            return await handler(req);
-          } catch (err: unknown) {
-            const message = err instanceof Error ? err.message : String(err);
-            return json({ ok: false, error: message }, 500, corsHeaders);
-          }
-        }
-
-        // ── REST API Routes ──
-
-        // Agent steering (authenticated)
-        if (url.pathname.startsWith("/api/agents/") && url.pathname.endsWith("/cancel") && method === "POST") {
-          const auth = await requireAuth(req);
-          const agentId = url.pathname.replace("/api/agents/", "").replace("/cancel", "");
-          kory.cancelWorker(agentId);
-          return json({ ok: true }, 200, corsHeaders);
-        }
-
-        // Metrics endpoint (Prometheus)
-        if (url.pathname === "/metrics" && method === "GET") {
-          return withCors(getMetricsRegistry().handleMetrics(), corsHeaders);
-        }
-
-        // Health check endpoint with configuration info
-        if (url.pathname === "/api/health" && method === "GET") {
-          return json({ 
-            ok: true, 
-            data: { 
-              status: "healthy",
-              version: VERSION,
-              config: {
-                port: config.server.port,
-                host: config.server.host,
-              }
-            }
-          }, 200, corsHeaders);
-        }
-
-        // Billing / credits (local estimate vs cloud reality, drift) — same shape as v1
-        if (url.pathname === "/api/billing/credits" && method === "GET") {
-          try {
-            const data = getReconciliation();
-            return json(
-              {
-                localEstimate: data.localEstimate,
-                cloudReality: data.cloudReality,
-                driftPercent: data.driftPercent,
-                highlightDrift: data.highlightDrift,
-              },
-              200,
-              corsHeaders
-            );
-          } catch (err: unknown) {
-            serverLog.error({ err }, "Failed to get billing credits");
-            return json({ error: "Failed to get billing credits" }, 500, corsHeaders);
-          }
-        }
-
-        // Health check endpoint (minimal for public/lb)
-        if (url.pathname === "/health" && method === "GET") {
-          return json({ ok: true, data: { version: VERSION } }, 200, corsHeaders);
-        }
-
-        // Debug: client error log sink (no-op, avoids 404 from error-monitor)
-        if (url.pathname === "/api/debug/log-error" && method === "POST") {
-          return json({ ok: true }, 200, corsHeaders);
-        }
-
-        // API v1 Routes
-        if (url.pathname.startsWith("/api/v1/")) {
-          const v1Response = await handleV1Routes(req, url.pathname, method);
-          if (v1Response) {
-            // Add CORS headers to v1 responses
-            const headers: Record<string, string> = {};
-            v1Response.headers.forEach((value, key) => {
-              headers[key] = value;
-            });
-            Object.entries(corsHeaders).forEach(([key, value]) => {
-              if (!headers[key]) headers[key] = value;
-            });
-            return new Response(v1Response.body, {
-              status: v1Response.status,
-              headers,
-            });
-          }
-        }
-
-        // Project context (folder name the backend is operating in)
-        if (url.pathname === "/api/project" && method === "GET") {
-          const auth = await requireAuth(req);
-          const projectName = basename(PROJECT_ROOT);
-          return json({ ok: true, data: { projectName } }, 200, corsHeaders);
-        }
-
-        // Sessions (Authenticated)
-        if (url.pathname === "/api/sessions" && method === "GET") {
-          let auth: Awaited<ReturnType<typeof requireAuth>>;
-          try {
-            auth = await requireAuth(req);
-          } catch (err: unknown) {
-            serverLog.error({ err }, "Auth failed in GET /api/sessions");
-            return json({ ok: false, error: "Authentication failed" }, 503, corsHeaders);
-          }
-
-          try {
-            const data = sessions.listForUser("system");
-            return json({ ok: true, data }, 200, corsHeaders);
-          } catch (err: unknown) {
-            const msg = err instanceof Error ? err.message : String(err);
-            serverLog.error({ err, detail: msg }, "Error fetching sessions");
-            return json(
-              { ok: false, error: "Failed to fetch sessions", detail: msg },
-              500,
-              corsHeaders
-            );
-          }
-        }
-
-        if (url.pathname === "/api/sessions" && method === "POST") {
-          const auth = await requireAuth(req);
-          const userRate = rateLimiter.check(`user:${"system"}`);
-          if (!userRate.allowed) return json({ ok: false, error: "Rate limit exceeded" }, 429, corsHeaders);
-
-          const parsed = await parseJson<CreateSessionRequest>(req, corsHeaders);
-          if (!parsed.ok) return parsed.res;
-          const body = parsed.data;
-          try {
-            const title = sanitizeString(body.title, SESSION.MAX_TITLE_LENGTH);
-            const session = sessions.create("system", title ?? undefined, body.parentSessionId);
-            
-            // Initialize session memory file
-            initializeSessionMemory(PROJECT_ROOT, session.id);
-            serverLog.debug({ sessionId: session.id }, "Session memory initialized");
-            
-            return json({ ok: true, data: session }, 201, corsHeaders);
-          } catch (err: unknown) {
-            serverLog.error({ err }, "Error creating session");
-            return json({ ok: false, error: "Failed to create session" }, 500, corsHeaders);
-          }
-        }
-
-        // Session by ID routes — parse path segments (Authenticated)
-        if (url.pathname.startsWith("/api/sessions/")) {
-          const segments = url.pathname.split("/");
-          const id = segments[3];
-          const subResource = segments[4]; // "messages", "auto-title", or undefined
-
-          if (!id) return json({ ok: false, error: "Session ID required" }, 400, corsHeaders);
-          const validatedId = validateSessionId(id);
-          if (!validatedId) return json({ ok: false, error: "Invalid session ID" }, 400, corsHeaders);
-
-          // All session operations require authentication
-          const auth = await requireAuth(req);
-
-          // Verify session ownership
-          const session = sessions.getForUser(validatedId, "system");
-          if (!session && subResource !== "messages") {
-            return json({ ok: false, error: "Session not found" }, 404, corsHeaders);
-          }
-
-          // GET /api/sessions/:id/messages — fetch message history
-          if (subResource === "messages" && method === "GET") {
-            if (!session) return json({ ok: false, error: "Session not found" }, 404, corsHeaders);
-            const sessionMessages = messages.getAll(validatedId);
-            return json({ ok: true, data: sessionMessages }, 200, corsHeaders);
-          }
-
-          // POST /api/sessions/:id/auto-title — generate title from first message
-          if (subResource === "auto-title" && method === "POST") {
-            if (!session) return json({ ok: false, error: "Session not found" }, 404, corsHeaders);
-            const sessionMessages = messages.getAll(validatedId);
-            const firstUserMsg = sessionMessages.find(m => m.role === "user");
-            if (firstUserMsg) {
-              const rawTitle = firstUserMsg.content.replace(/\n/g, " ").trim();
-              const title = rawTitle.length > 50 ? rawTitle.slice(0, 47) + "..." : rawTitle;
-              const updated = sessions.update(validatedId, { title });
-              if (updated) {
-                wsManager.broadcast({
-                  type: "session.updated",
-                  payload: { session: updated },
-                  timestamp: Date.now(),
-                  sessionId: validatedId,
-                } satisfies WSMessage);
-              }
-              return json({ ok: true, data: { title } }, 200, corsHeaders);
-            }
-            return json({ ok: true, data: { title: "New Session" } }, 200, corsHeaders);
-          }
-
-          // No sub-resource — operate on session itself
-          if (!subResource) {
-            if (method === "GET") {
-              if (!session) return json({ ok: false, error: "Session not found" }, 404, corsHeaders);
-              return json({ ok: true, data: session }, 200, corsHeaders);
-            }
-
-            if (method === "PATCH") {
-              if (!session) return json({ ok: false, error: "Session not found" }, 404, corsHeaders);
-              const parsed = await parseJson<{ title?: string }>(req, corsHeaders);
-              if (!parsed.ok) return parsed.res;
-              const body = parsed.data;
-              const title = sanitizeString(body.title, SESSION.MAX_TITLE_LENGTH);
-              if (!title) return json({ ok: false, error: "title is required" }, 400, corsHeaders);
-              const updated = sessions.update(validatedId, { title });
-              if (!updated) return json({ ok: false, error: "Session not found" }, 404, corsHeaders);
-              wsManager.broadcast({
-                type: "session.updated",
-                payload: { session: updated },
-                timestamp: Date.now(),
-                sessionId: validatedId,
-              } satisfies WSMessage);
-              return json({ ok: true, data: updated }, 200, corsHeaders);
-            }
-
-            if (method === "DELETE") {
-              if (!session) return json({ ok: false, error: "Session not found" }, 404, corsHeaders);
-              kory.cancelSessionWorkers(validatedId);
-              sessions.deleteForUser(validatedId, "system");
-              
-              // Clean up session memory file
-              deleteSessionMemory(PROJECT_ROOT, validatedId);
-              serverLog.debug({ sessionId: validatedId }, "Session memory deleted");
-              
-              wsManager.broadcast({
-                type: "session.deleted",
-                payload: { sessionId: id },
-                timestamp: Date.now(),
-                sessionId: validatedId,
-              } satisfies WSMessage);
-              return json({ ok: true }, 200, corsHeaders);
-            }
-          }
-
-          // GET /api/sessions/:id/running — check if session is running (manager or workers)
-          if (subResource === "running" && method === "GET") {
-            if (!session) return json({ ok: false, error: "Session not found" }, 404, corsHeaders);
-            return json({ ok: true, data: { running: kory.isSessionRunning(validatedId) } }, 200, corsHeaders);
-          }
-
-          // POST /api/sessions/:id/cancel — stop manager and all workers for this session
-          if (subResource === "cancel" && method === "POST") {
-            if (!session) return json({ ok: false, error: "Session not found" }, 404, corsHeaders);
-            kory.cancelSessionWorkers(validatedId);
-            return json({ ok: true }, 200, corsHeaders);
-          }
-          
-          // GET /api/sessions/:id/memory — get session memory content
-          if (subResource === "memory" && method === "GET") {
-            if (!session) return json({ ok: false, error: "Session not found" }, 404, corsHeaders);
-            const memoryContent = readSessionMemory(PROJECT_ROOT, validatedId);
-            if (memoryContent === null) {
-              return json({ ok: true, data: { exists: false, content: null } }, 200, corsHeaders);
-            }
-            return json({ ok: true, data: { exists: true, content: memoryContent } }, 200, corsHeaders);
-          }
-          
-          // PUT /api/sessions/:id/memory — update session memory content
-          if (subResource === "memory" && method === "PUT") {
-            if (!session) return json({ ok: false, error: "Session not found" }, 404, corsHeaders);
-            const parsed = await parseJson<{ content: string }>(req, corsHeaders);
-            if (!parsed.ok) return parsed.res;
-            
-            const { content } = parsed.data;
-            if (typeof content !== "string") {
-              return json({ ok: false, error: "content must be a string" }, 400, corsHeaders);
-            }
-            
-            writeSessionMemory(PROJECT_ROOT, validatedId, content);
-            return json({ ok: true }, 200, corsHeaders);
-          }
-        }
-
-        // Send message (trigger Kory) — requires authentication
-        if (url.pathname === "/api/messages" && method === "POST") {
-          const auth = await requireAuth(req);
-          const userRate = rateLimiter.check(`user:${"system"}`);
-          if (!userRate.allowed) return json({ ok: false, error: "Rate limit exceeded" }, 429, corsHeaders);
-
-          const parsed = await parseJson<SendMessageRequest>(req, corsHeaders);
-          if (!parsed.ok) return parsed.res;
-          const body = parsed.data;
-          const sessionId = validateSessionId(body.sessionId);
-          const content = sanitizeString(body.content, MESSAGE.MAX_CONTENT_LENGTH);
-
-          if (!sessionId || !content) {
-            return json({ ok: false, error: "Valid sessionId and content are required" }, 400, corsHeaders);
-          }
-
-          // Session must exist and belong to the authenticated user
-          const session = sessions.getForUser(sessionId, "system");
-          if (!session) {
-            return json({ ok: false, error: "Session not found or access denied" }, 404, corsHeaders);
-          }
-
-          // Persist user message
-          const userMsg: StoredMessage = {
-            id: nanoid(ID.SESSION_ID_LENGTH),
-            sessionId: sessionId,
-            role: "user",
-            content,
-            createdAt: Date.now(),
-          };
-          messages.add(sessionId, userMsg);
-          sessions.update(sessionId, {
-            messageCount: (session.messageCount ?? 0) + 1,
-          });
-
-          // Auto-title on first message
-          if (session.messageCount === 0 || session.title === SESSION.DEFAULT_TITLE) {
-            const rawTitle = content.replace(/\n/g, " ").trim();
-            const title = rawTitle.length > SESSION.AUTO_TITLE_CHARS
-              ? rawTitle.slice(0, SESSION.AUTO_TITLE_CHARS - 3) + "..."
-              : rawTitle;
-            sessions.update(sessionId, { title });
-            wsManager.broadcast({
-              type: "session.updated",
-              payload: { session: sessions.get(sessionId) },
-              timestamp: Date.now(),
-              sessionId: sessionId,
-            } satisfies WSMessage);
-          }
-
-          // Process async — results stream via WebSocket
-          kory.processTask(sessionId, content, body.model, body.reasoningLevel)
-            .then(() => {
-              serverLog.debug({ sessionId: sessionId }, "Task completed successfully");
-            })
-            .catch((err) => {
-              serverLog.error({ sessionId: sessionId, error: err }, "Error processing request");
-              wsManager.broadcast({
-                type: "system.error",
-                payload: { error: err.message },
-                timestamp: Date.now(),
-                sessionId: sessionId,
-              });
-            });
-
-          return json({ ok: true, data: { sessionId: sessionId, status: "processing" } }, 202, corsHeaders);
-        }
-
-        // All provider types that can be added (for "Add provider" UI; no auth filter)
-        if (url.pathname === "/api/providers/available" && method === "GET") {
-          const auth = await requireAuth(req);
-          return json({ ok: true, data: providers.getAvailableProviderTypes() }, 200, corsHeaders);
-        }
-
-        // Provider status — only providers the user has authenticated (no hardcoded list)
-        if (url.pathname === "/api/providers" && method === "GET") {
-          const auth = await requireAuth(req);
-          return json({ ok: true, data: await providers.getStatus() }, 200, corsHeaders);
-        }
-
-        // Start Copilot browser device auth flow (authenticated)
-        if (url.pathname === "/api/providers/copilot/device/start" && method === "POST") {
-          const auth = await requireAuth(req);
-          try {
-            const start = await startCopilotDeviceAuth();
-            return json({ ok: true, data: start }, 200, corsHeaders);
-          } catch (err: unknown) {
-            const message = err instanceof Error ? err.message : String(err);
-            return json({ ok: false, error: message ?? "Failed to start Copilot auth" }, 400, corsHeaders);
-          }
-        }
-
-        // Poll Copilot device auth and finalize connection (authenticated)
-        if (url.pathname === "/api/providers/copilot/device/poll" && method === "POST") {
-          const auth = await requireAuth(req);
-          const parsed = await parseJson<{ deviceCode?: string }>(req, corsHeaders);
-          if (!parsed.ok) return parsed.res;
-          const body = parsed.data;
-          const deviceCode = sanitizeString(body.deviceCode, 300);
-          if (!deviceCode) {
-            return json({ ok: false, error: "deviceCode is required" }, 400, corsHeaders);
-          }
-
-          try {
-            const poll = await pollCopilotDeviceAuth(deviceCode);
-            if (poll.error) {
-              // Standard pending/slow_down/expired_token responses
-              return json({ ok: true, data: { status: poll.error, description: poll.errorDescription } }, 200, corsHeaders);
-            }
-            if (!poll.accessToken) {
-              return json({ ok: false, error: "No access token returned from GitHub" }, 400, corsHeaders);
-            }
-
-            const result = providers.setCredentials("copilot", { authToken: poll.accessToken });
-            if (!result.success) {
-              return json({ ok: false, error: result.error }, 400, corsHeaders);
-            }
-
-            const verification = await providers.verifyConnection("copilot", { authToken: poll.accessToken });
-            if (!verification.success) {
-              providers.removeApiKey("copilot");
-              return json({ ok: false, error: verification.error ?? "Copilot verification failed" }, 400, corsHeaders);
-            }
-
-            persistEnvVar(PROJECT_ROOT, providers.getExpectedEnvVar("copilot", "authToken"), await encryptForStorage(poll.accessToken));
-            providers.refreshProvider("copilot");
-
-            wsManager.broadcast({
-              type: "provider.status",
-              payload: { providers: await providers.getStatus() },
-              timestamp: Date.now(),
-            } satisfies WSMessage);
-
-            return json({ ok: true, data: { status: "connected" } }, 200, corsHeaders);
-          } catch (err: unknown) {
-            const message = err instanceof Error ? err.message : String(err);
-            return json({ ok: false, error: message ?? "Failed to complete Copilot auth" }, 400, corsHeaders);
-          }
-        }
-
-        // Google/Gemini Auth Routes (authenticated)
-        if (url.pathname === "/api/providers/google/auth/cli" && method === "POST") {
-          const auth = await requireAuth(req);
-          try {
-            const result = await googleAuth.startGeminiCLIAuth();
-            return json({ ok: true, data: result }, 200, corsHeaders);
-          } catch (err: unknown) {
-            const message = err instanceof Error ? err.message : String(err);
-            return json({ ok: false, error: message }, 500, corsHeaders);
-          }
-        }
-
-        // Set provider credentials (authenticated, rate-limited)
-        if (url.pathname.startsWith("/api/providers/") && method === "PUT") {
-          const credLimit = credentialRateLimiter.check(`cred:${clientIp}`);
-          if (!credLimit.allowed) return json({ ok: false, error: "Rate limit exceeded" }, 429, corsHeaders);
-          const auth = await requireAuth(req);
-          const rawName = url.pathname.split("/")[3];
-          const providerName = validateProviderName(rawName);
-          if (!providerName) {
-            return json({ ok: false, error: `Invalid provider name: ${rawName ?? "missing"}` }, 400, corsHeaders);
-          }
-
-          const parsed = await parseJson<{ apiKey?: string; authToken?: string; baseUrl?: string; selectedModels?: string[]; hideModelSelector?: boolean; authMode?: string }>(req, corsHeaders);
-          if (!parsed.ok) return parsed.res;
-          const body = parsed.data;
-
-          try {
-          // Allow long API keys (e.g. JWT, multi-line keys); do not truncate
-          const apiKey = sanitizeString(body.apiKey, 8192);
-          const authToken = sanitizeString(body.authToken, 8192);
-          const baseUrl = sanitizeString(body.baseUrl, 2048);
-          const authMode = sanitizeString(body.authMode, 50);
-
-          // Handle special CLI auth modes (gemini cli, codex)
-          if (authMode === "cli") {
-            const targetProvider = "google" as ProviderName;
-            
-            if (!Bun.which("gemini")) {
-              return json({ ok: false, error: "Gemini CLI not found in PATH. Install it first." }, 400, corsHeaders);
-            }
-
-            // Mark provider as CLI-authenticated temporarily to verify
-            const authValue = "cli:gemini";
-
-            const verification = await providers.verifyConnection(targetProvider, {
-              authToken: authValue
-            });
-
-            if (!verification.success) {
-              return json({ ok: false, error: verification.error || "Gemini CLI auth failed" }, 400, corsHeaders);
-            }
-
-            // Verification passed, set and persist
-            const result = providers.setCredentials(targetProvider, {
-              authToken: authValue,
-            });
-
-            if (!result.success) {
-              return json({ ok: false, error: result.error }, 400, corsHeaders);
-            }
-
-            persistEnvVar(
-              PROJECT_ROOT,
-              providers.getExpectedEnvVar(targetProvider, "authToken"),
-              authValue,
-            );
-
-            wsManager.broadcast({
-              type: "provider.status",
-              payload: { providers: await providers.getStatus() },
-              timestamp: Date.now(),
-            } satisfies WSMessage);
-
-            return json({ ok: true, data: { provider: targetProvider, status: "connected", authMode } }, 200, corsHeaders);
-          }
-
-          if (authMode === "codex") {
-            const targetProvider = "codex" as ProviderName;
-            if (!Bun.which("codex")) {
-              return json({ ok: false, error: "codex CLI not found in PATH. Install it first (e.g. npm install -g codex)." }, 400, corsHeaders);
-            }
-            const authValue = "cli:codex";
-            const verification = await providers.verifyConnection(targetProvider, { authToken: authValue });
-            if (!verification.success) {
-              return json({ ok: false, error: verification.error ?? "codex CLI verification failed" }, 400, corsHeaders);
-            }
-            const result = providers.setCredentials(targetProvider, { authToken: authValue });
-            if (!result.success) {
-              return json({ ok: false, error: result.error }, 400, corsHeaders);
-            }
-            persistEnvVar(PROJECT_ROOT, providers.getExpectedEnvVar(targetProvider, "authToken"), authValue);
-            wsManager.broadcast({
-              type: "provider.status",
-              payload: { providers: await providers.getStatus() },
-              timestamp: Date.now(),
-            } satisfies WSMessage);
-            return json({ ok: true, data: { provider: targetProvider, status: "connected", authMode } }, 200, corsHeaders);
-          }
-
-          const isPreferencesOnlyUpdate =
-            !apiKey &&
-            !authToken &&
-            !baseUrl &&
-            (body.selectedModels !== undefined || body.hideModelSelector !== undefined);
-
-          const result = providers.setCredentials(providerName, {
-            ...(apiKey && { apiKey }),
-            ...(authToken && { authToken }),
-            ...(baseUrl && { baseUrl }),
-            ...(body.selectedModels && { selectedModels: body.selectedModels }),
-            ...(body.hideModelSelector !== undefined && { hideModelSelector: body.hideModelSelector }),
-          });
-          if (!result.success) {
-            return json({ ok: false, error: result.error }, 400, corsHeaders);
-          }
-
-          if (!isPreferencesOnlyUpdate) {
-            const verification = await providers.verifyConnection(providerName, {
-              ...(apiKey && { apiKey }),
-              ...(authToken && { authToken }),
-              ...(baseUrl && { baseUrl }),
-            });
-            if (!verification.success) {
-              providers.removeApiKey(providerName);
-              return json({ ok: false, error: verification.error ?? "Provider verification failed" }, 400, corsHeaders);
-            }
-          }
-
-          if (apiKey) {
-            persistEnvVar(PROJECT_ROOT, providers.getExpectedEnvVar(providerName, "apiKey"), await encryptForStorage(apiKey));
-          }
-          if (authToken) {
-            persistEnvVar(PROJECT_ROOT, providers.getExpectedEnvVar(providerName, "authToken"), await encryptForStorage(authToken));
-          }
-          if (baseUrl) {
-            persistEnvVar(PROJECT_ROOT, providers.getExpectedEnvVar(providerName, "baseUrl"), baseUrl);
-          }
-
-          // Broadcast updated provider status via WebSocket
-          wsManager.broadcast({
-            type: "provider.status",
-            payload: { providers: await providers.getStatus() },
-            timestamp: Date.now(),
-          } satisfies WSMessage);
-
-          return json({ ok: true, data: { provider: providerName, status: "connected" } }, 200, corsHeaders);
-          } catch (err: unknown) {
-            const message = err instanceof Error ? err.message : String(err);
-            serverLog.error({ err, provider: rawName }, "Set provider credentials failed");
-            return json({ ok: false, error: message ?? "Failed to set provider credentials" }, 500, corsHeaders);
-          }
-        }
-
-        // ─── Git Integration (authenticated) ───
-
-        // Status
-        if (url.pathname === "/api/git/status" && method === "GET") {
-          const auth = await requireAuth(req);
-          try {
-            const status = await kory.git.getStatus();
-            const branch = await kory.git.getBranch();
-            return json({ ok: true, data: { status, branch } }, 200, corsHeaders);
-          } catch (err: unknown) {
-            const detail = err instanceof Error ? err.message : String(err);
-            serverLog.error({ err }, "GET /api/git/status failed");
-            return json({ ok: false, error: "Git status failed", detail }, 500, corsHeaders);
-          }
-        }
-
-        // Diff
-        if (url.pathname === "/api/git/diff" && method === "GET") {
-          const auth = await requireAuth(req);
-          const file = url.searchParams.get("file");
-          const staged = url.searchParams.get("staged") === "true";
-          if (!file) return json({ ok: false, error: "file parameter required" }, 400, corsHeaders);
-          if (!kory.git.resolvePathUnderRepo(file)) return json({ ok: false, error: "Invalid file path" }, 400, corsHeaders);
-          const diff = await kory.git.getDiff(file, staged);
-          return json({ ok: true, data: { diff } }, 200, corsHeaders);
-        }
-
-        // Stage/Unstage
-        if (url.pathname === "/api/git/stage" && method === "POST") {
-          const auth = await requireAuth(req);
-          const parsed = await parseJson<{ file: string; unstage?: boolean }>(req, corsHeaders);
-          if (!parsed.ok) return parsed.res;
-          const body = parsed.data;
-          if (!body.file) return json({ ok: false, error: "file required" }, 400, corsHeaders);
-          if (!kory.git.resolvePathUnderRepo(body.file)) return json({ ok: false, error: "Invalid file path" }, 400, corsHeaders);
-          const success = body.unstage
-            ? await kory.git.unstageFile(body.file)
-            : await kory.git.stageFile(body.file);
-          return json({ ok: success }, success ? 200 : 500, corsHeaders);
-        }
-
-        // Restore (Discard)
-        if (url.pathname === "/api/git/restore" && method === "POST") {
-          const auth = await requireAuth(req);
-          const parsed = await parseJson<{ file: string }>(req, corsHeaders);
-          if (!parsed.ok) return parsed.res;
-          const body = parsed.data;
-          if (!body.file) return json({ ok: false, error: "file required" }, 400, corsHeaders);
-          if (!kory.git.resolvePathUnderRepo(body.file)) return json({ ok: false, error: "Invalid file path" }, 400, corsHeaders);
-          const success = await kory.git.restoreFile(body.file);
-          return json({ ok: success }, success ? 200 : 500, corsHeaders);
-        }
-
-        // Commit
-        if (url.pathname === "/api/git/commit" && method === "POST") {
-          const auth = await requireAuth(req);
-          const parsed = await parseJson<{ message: string }>(req, corsHeaders);
-          if (!parsed.ok) return parsed.res;
-          const body = parsed.data;
-          if (!body.message) return json({ ok: false, error: "message required" }, 400, corsHeaders);
-          const message = sanitizeString(body.message, 2000);
-          if (!message) return json({ ok: false, error: "message required" }, 400, corsHeaders);
-          const success = await kory.git.commit(message);
-          return json({ ok: success }, success ? 200 : 500, corsHeaders);
-        }
-
-        // Branches
-        if (url.pathname === "/api/git/branches" && method === "GET") {
-          const auth = await requireAuth(req);
-          const branches = await kory.git.getBranches();
-          return json({ ok: true, data: { branches } }, 200, corsHeaders);
-        }
-
-        // Checkout
-        if (url.pathname === "/api/git/checkout" && method === "POST") {
-          const auth = await requireAuth(req);
-          const parsed = await parseJson<{ branch: string; create?: boolean }>(req, corsHeaders);
-          if (!parsed.ok) return parsed.res;
-          const body = parsed.data;
-          if (!body.branch) return json({ ok: false, error: "branch required" }, 400, corsHeaders);
-          const { GitManager } = await import("./kory/git-manager");
-          if (!GitManager.validateBranchName(body.branch)) return json({ ok: false, error: "Invalid branch name" }, 400, corsHeaders);
-          const success = await kory.git.checkout(body.branch, body.create);
-          return json({ ok: success }, success ? 200 : 500, corsHeaders);
-        }
-
-        // Merge
-        if (url.pathname === "/api/git/merge" && method === "POST") {
-          const auth = await requireAuth(req);
-          const parsed = await parseJson<{ branch: string }>(req, corsHeaders);
-          if (!parsed.ok) return parsed.res;
-          const body = parsed.data;
-          if (!body.branch) return json({ ok: false, error: "branch required" }, 400, corsHeaders);
-          const { GitManager } = await import("./kory/git-manager");
-          if (!GitManager.validateBranchName(body.branch)) return json({ ok: false, error: "Invalid branch name" }, 400, corsHeaders);
-          const result = await kory.git.merge(body.branch);
-          const conflicts = result.hasConflicts ? await kory.git.getConflicts() : [];
-          return json({ ok: result.success, data: { output: result.output, conflicts, hasConflicts: result.hasConflicts } }, 200, corsHeaders);
-        }
-
-        // Push
-        if (url.pathname === "/api/git/push" && method === "POST") {
-          const auth = await requireAuth(req);
-          const result = await kory.git.push();
-          return json({ ok: result.success, error: result.output }, result.success ? 200 : 500, corsHeaders);
-        }
-
-        // Pull
-        if (url.pathname === "/api/git/pull" && method === "POST") {
-          const auth = await requireAuth(req);
-          const result = await kory.git.pull();
-          const hasConflicts = result.output.includes("CONFLICT") || result.output.includes("Automatic merge failed");
-          const conflicts = hasConflicts ? await kory.git.getConflicts() : [];
-          return json({ ok: result.success, data: { output: result.output, conflicts, hasConflicts } }, 200, corsHeaders);
-        }
-
-        // Set worker assignments (authenticated)
-        if (url.pathname === "/api/assignments" && method === "GET") {
-          const auth = await requireAuth(req);
-          return json({ ok: true, data: { assignments: config.assignments ?? {} } }, 200, corsHeaders);
-        }
-
-        if (url.pathname === "/api/assignments" && method === "PUT") {
-          const auth = await requireAuth(req);
-          const parsed = await parseJson<{ assignments: Record<string, string> }>(req, corsHeaders);
-          if (!parsed.ok) return parsed.res;
-          const body = parsed.data;
-          if (!body.assignments || typeof body.assignments !== "object") {
-            return json({ ok: false, error: "assignments object is required" }, 400, corsHeaders);
-          }
-
-          // Update config in memory
-          config.assignments = { ...config.assignments, ...body.assignments };
-
-          // Persist to koryphaios.json if it exists
-          const configPath = join(PROJECT_ROOT, "koryphaios.json");
-          try {
-            let currentConfig: Record<string, unknown> = {};
-            if (existsSync(configPath)) {
-              currentConfig = JSON.parse(readFileSync(configPath, "utf-8"));
-            }
-            currentConfig.assignments = config.assignments;
-            writeFileSync(configPath, JSON.stringify(currentConfig, null, 2));
-            serverLog.info("Updated worker assignments in koryphaios.json");
-          } catch (err) {
-            serverLog.warn({ err }, "Failed to persist assignments to koryphaios.json");
-          }
-
-          return json({ ok: true, data: { assignments: config.assignments } }, 200, corsHeaders);
-        }
-
-        // ============================================================================
-        // Memory Routes
-        // ============================================================================
-        
-        // GET /api/memory/universal — Get universal memory
-        if (url.pathname === "/api/memory/universal" && method === "GET") {
-          const memory = readUniversalMemory();
-          return json({ 
-            ok: true, 
-            data: {
-              exists: memory.exists,
-              content: memory.content,
-              path: memory.path,
-              lastModified: memory.lastModified,
-              size: memory.size,
-            }
-          }, 200, corsHeaders);
-        }
-        
-        // PUT /api/memory/universal — Update universal memory
-        if (url.pathname === "/api/memory/universal" && method === "PUT") {
-          const auth = await requireAuth(req);
-          
-          try {
-            const parsed = await parseJson<{ content: string }>(req, corsHeaders);
-            if (!parsed.ok) return parsed.res;
-            
-            const { content } = parsed.data;
-            if (typeof content !== "string") {
-              return json({ ok: false, error: "content must be a string" }, 400, corsHeaders);
-            }
-            
-            const memory = writeUniversalMemory(content);
-            return json({ 
-              ok: true, 
-              data: {
-                path: memory.path,
-                lastModified: memory.lastModified,
-                size: memory.size,
-              }
-            }, 200, corsHeaders);
-          } catch (err: any) {
-            return json({ ok: false, error: err.message ?? "Failed to write universal memory" }, 500, corsHeaders);
-          }
-        }
-        
-        // POST /api/memory/universal/init — Initialize universal memory
-        if (url.pathname === "/api/memory/universal/init" && method === "POST") {
-          const auth = await requireAuth(req);
-          
-          const memory = initializeUniversalMemory();
-          return json({ 
-            ok: true, 
-            data: {
-              exists: memory.exists,
-              content: memory.content,
-              path: memory.path,
-              lastModified: memory.lastModified,
-              size: memory.size,
-            }
-          }, 200, corsHeaders);
-        }
-        
-        // GET /api/memory/project — Get project memory
-        if (url.pathname === "/api/memory/project" && method === "GET") {
-          const memory = readProjectMemory(PROJECT_ROOT);
-          return json({ 
-            ok: true, 
-            data: {
-              exists: memory.exists,
-              content: memory.content,
-              path: memory.path,
-              lastModified: memory.lastModified,
-              size: memory.size,
-            }
-          }, 200, corsHeaders);
-        }
-        
-        // PUT /api/memory/project — Update project memory
-        if (url.pathname === "/api/memory/project" && method === "PUT") {
-          const auth = await requireAuth(req);
-          
-          try {
-            const parsed = await parseJson<{ content: string }>(req, corsHeaders);
-            if (!parsed.ok) return parsed.res;
-            
-            const { content } = parsed.data;
-            if (typeof content !== "string") {
-              return json({ ok: false, error: "content must be a string" }, 400, corsHeaders);
-            }
-            
-            const memory = writeProjectMemory(PROJECT_ROOT, content);
-            return json({ 
-              ok: true, 
-              data: {
-                path: memory.path,
-                lastModified: memory.lastModified,
-                size: memory.size,
-              }
-            }, 200, corsHeaders);
-          } catch (err: any) {
-            return json({ ok: false, error: err.message ?? "Failed to write project memory" }, 500, corsHeaders);
-          }
-        }
-        
-        // POST /api/memory/project/init — Initialize project memory
-        if (url.pathname === "/api/memory/project/init" && method === "POST") {
-          const auth = await requireAuth(req);
-          
-          const memory = initializeProjectMemory(PROJECT_ROOT);
-          return json({ 
-            ok: true, 
-            data: {
-              exists: memory.exists,
-              content: memory.content,
-              path: memory.path,
-              lastModified: memory.lastModified,
-              size: memory.size,
-            }
-          }, 200, corsHeaders);
-        }
-        
-        // GET /api/memory/rules — Get rules (.cursorrules)
-        if (url.pathname === "/api/memory/rules" && method === "GET") {
-          const { readFileSync } = await import("node:fs");
-          const rulesPath = join(PROJECT_ROOT, ".cursorrules");
-          
-          try {
-            if (existsSync(rulesPath)) {
-              const content = readFileSync(rulesPath, "utf-8");
-              const { statSync } = await import("node:fs");
-              const stats = statSync(rulesPath);
-              return json({ 
-                ok: true, 
-                data: {
-                  exists: true,
-                  content,
-                  path: rulesPath,
-                  lastModified: stats.mtimeMs,
-                  size: content.length,
-                }
-              }, 200, corsHeaders);
-            } else {
-              return json({ 
-                ok: true, 
-                data: {
-                  exists: false,
-                  content: null,
-                  path: rulesPath,
-                  lastModified: null,
-                  size: 0,
-                }
-              }, 200, corsHeaders);
-            }
-          } catch (err) {
-            return json({ ok: false, error: "Failed to read rules" }, 500, corsHeaders);
-          }
-        }
-        
-        // PUT /api/memory/rules — Update rules
-        if (url.pathname === "/api/memory/rules" && method === "PUT") {
-          const auth = await requireAuth(req);
-          
-          try {
-            const parsed = await parseJson<{ content: string }>(req, corsHeaders);
-            if (!parsed.ok) return parsed.res;
-            
-            const { content } = parsed.data;
-            if (typeof content !== "string") {
-              return json({ ok: false, error: "content must be a string" }, 400, corsHeaders);
-            }
-            
-            const rulesPath = join(PROJECT_ROOT, ".cursorrules");
-            writeFileSync(rulesPath, content, "utf-8");
-            
-            return json({ ok: true }, 200, corsHeaders);
-          } catch (err: any) {
-            return json({ ok: false, error: err.message ?? "Failed to write rules" }, 500, corsHeaders);
-          }
-        }
-
-        // ============================================================================
-        // Agent Settings Routes
-        // ============================================================================
-        
-        // GET /api/agent/settings — Get agent settings
-        if (url.pathname === "/api/agent/settings" && method === "GET") {
-          const settings = loadAgentSettings(PROJECT_ROOT);
-          return json({ 
-            ok: true, 
-            data: settings,
-            message: "Rules are always enforced."
-          }, 200, corsHeaders);
-        }
-        
-        // PUT /api/agent/settings — Update agent settings
-        if (url.pathname === "/api/agent/settings" && method === "PUT") {
-          const auth = await requireAuth(req);
-          
-          try {
-            const parsed = await parseJson<Partial<typeof DEFAULT_AGENT_SETTINGS>>(req, corsHeaders);
-            if (!parsed.ok) return parsed.res;
-            
-            const currentSettings = loadAgentSettings(PROJECT_ROOT);
-            const newSettings = { ...currentSettings, ...parsed.data };
-            
-            saveAgentSettings(PROJECT_ROOT, newSettings);
-            
-            return json({ 
-              ok: true, 
-              data: newSettings,
-              message: "Agent settings updated."
-            }, 200, corsHeaders);
-          } catch (err: any) {
-            return json({ ok: false, error: err.message ?? "Failed to save settings" }, 500, corsHeaders);
-          }
-        }
-        
-        // POST /api/agent/settings/reset — Reset to defaults
-        if (url.pathname === "/api/agent/settings/reset" && method === "POST") {
-          const auth = await requireAuth(req);
-          
-          const settings = resetAgentSettings(PROJECT_ROOT);
-          return json({ 
-            ok: true, 
-            data: settings,
-            message: "Agent settings reset to defaults."
-          }, 200, corsHeaders);
-        }
-        
-        // GET /api/agent/defaults — Get default settings
-        if (url.pathname === "/api/agent/defaults" && method === "GET") {
-          return json({ 
-            ok: true, 
-            data: DEFAULT_AGENT_SETTINGS,
-            message: "Default agent settings."
-          }, 200, corsHeaders);
-        }
-        
-        // GET /api/agent/preferences — Get preferences.md
-        if (url.pathname === "/api/agent/preferences" && method === "GET") {
-          const prefs = readPreferences(PROJECT_ROOT);
-          return json({ 
-            ok: true, 
-            data: {
-              exists: prefs.exists,
-              content: prefs.content,
-              path: prefs.path,
-            }
-          }, 200, corsHeaders);
-        }
-        
-        // PUT /api/agent/preferences — Update preferences.md
-        if (url.pathname === "/api/agent/preferences" && method === "PUT") {
-          const auth = await requireAuth(req);
-          
-          try {
-            const parsed = await parseJson<{ content: string }>(req, corsHeaders);
-            if (!parsed.ok) return parsed.res;
-            
-            const { content } = parsed.data;
-            if (typeof content !== "string") {
-              return json({ ok: false, error: "content must be a string" }, 400, corsHeaders);
-            }
-            
-            writePreferences(PROJECT_ROOT, content);
-            
-            return json({ 
-              ok: true, 
-              message: "Preferences updated. Critic will enforce new rules."
-            }, 200, corsHeaders);
-          } catch (err: any) {
-            return json({ ok: false, error: err.message ?? "Failed to save preferences" }, 500, corsHeaders);
-          }
-        }
-        
-        // POST /api/agent/preferences/init — Initialize preferences
-        if (url.pathname === "/api/agent/preferences/init" && method === "POST") {
-          const auth = await requireAuth(req);
-          
-          const prefs = initializePreferences(PROJECT_ROOT);
-          return json({ 
-            ok: true, 
-            data: {
-              exists: prefs.exists,
-              content: prefs.content,
-              path: prefs.path,
-            },
-            message: "Preferences initialized."
-          }, 200, corsHeaders);
-        }
-        
-        // GET /api/agent/context — Get assembled agent context
-        if (url.pathname === "/api/agent/context" && method === "GET") {
-          const settings = loadAgentSettings(PROJECT_ROOT);
-          const context = assembleAgentContext(PROJECT_ROOT, settings);
-          
-          return json({ 
-            ok: true, 
-            data: context
-          }, 200, corsHeaders);
-        }
-
-        // Messaging config (GET: current state; PUT: update and persist)
-        if (url.pathname === "/api/messaging" && method === "GET") {
-          const auth = await requireAuth(req);
-          const t = config.telegram;
-          const d = config.discord;
-          const s = config.slack;
-          const data = {
-            telegram: t
-              ? {
-                  enabled: true,
-                  adminId: t.adminId,
-                  botTokenSet: !!t.botToken,
-                  webhookUrl: t.webhookUrl,
-                }
-              : { enabled: false, adminId: 0, botTokenSet: false, webhookUrl: undefined },
-            discord: d
-              ? {
-                  enabled: true,
-                  botTokenSet: !!d.botToken,
-                  allowedGuildIds: d.allowedGuildIds ?? [],
-                }
-              : { enabled: false, botTokenSet: false, allowedGuildIds: [] },
-            slack: s
-              ? {
-                  enabled: true,
-                  botTokenSet: !!s.botToken,
-                  appTokenSet: !!s.appToken,
-                  allowedChannelIds: s.allowedChannelIds ?? [],
-                }
-              : { enabled: false, botTokenSet: false, appTokenSet: false, allowedChannelIds: [] },
-          };
-          return json({ ok: true, data }, 200, corsHeaders);
-        }
-
-        if (url.pathname === "/api/messaging" && method === "PUT") {
-          const auth = await requireAuth(req);
-          const parsed = await parseJson<{
-            telegram?: { botToken?: string; adminId?: number; secretToken?: string; webhookUrl?: string } | null;
-            discord?: { botToken?: string; allowedGuildIds?: string[]; allowedUserIds?: string[] } | null;
-            slack?: { botToken?: string; appToken?: string; signingSecret?: string; allowedChannelIds?: string[]; allowedUserIds?: string[] } | null;
-          }>(req, corsHeaders);
-          if (!parsed.ok) return parsed.res;
-          const body = parsed.data;
-
-          if (body.telegram !== undefined) {
-            const t = body.telegram;
-            if (t === null) {
-              config.telegram = undefined;
-            } else if (typeof t === "object") {
-              config.telegram = {
-                botToken: t.botToken ?? config.telegram?.botToken ?? "",
-                adminId: typeof t.adminId === "number" ? t.adminId : config.telegram?.adminId ?? 0,
-                secretToken: t.secretToken ?? config.telegram?.secretToken,
-                webhookUrl: t.webhookUrl ?? config.telegram?.webhookUrl,
-              };
-            }
-          }
-
-          if (body.discord !== undefined) {
-            const d = body.discord;
-            if (d === null) {
-              config.discord = undefined;
-            } else if (typeof d === "object") {
-              config.discord = {
-                botToken: d.botToken ?? config.discord?.botToken ?? "",
-                allowedGuildIds: d.allowedGuildIds ?? config.discord?.allowedGuildIds,
-                allowedUserIds: d.allowedUserIds ?? config.discord?.allowedUserIds,
-              };
-            }
-          }
-
-          if (body.slack !== undefined) {
-            const s = body.slack;
-            if (s === null) {
-              config.slack = undefined;
-            } else if (typeof s === "object") {
-              config.slack = {
-                botToken: s.botToken ?? config.slack?.botToken ?? "",
-                appToken: s.appToken ?? config.slack?.appToken ?? "",
-                signingSecret: s.signingSecret ?? config.slack?.signingSecret,
-                allowedChannelIds: s.allowedChannelIds ?? config.slack?.allowedChannelIds,
-                allowedUserIds: s.allowedUserIds ?? config.slack?.allowedUserIds,
-              };
-            }
-          }
-
-          const configPath = join(PROJECT_ROOT, "koryphaios.json");
-          try {
-            let currentConfig: Record<string, unknown> = {};
-            if (existsSync(configPath)) {
-              currentConfig = JSON.parse(readFileSync(configPath, "utf-8"));
-            }
-            currentConfig.telegram = config.telegram ?? null;
-            currentConfig.discord = config.discord ?? null;
-            currentConfig.slack = config.slack ?? null;
-            writeFileSync(configPath, JSON.stringify(currentConfig, null, 2));
-            serverLog.info("Updated messaging config in koryphaios.json");
-          } catch (err) {
-            serverLog.warn({ err }, "Failed to persist messaging config to koryphaios.json");
-          }
-
-          return json({
-            ok: true,
-            data: {
-              telegram: config.telegram
-                ? { enabled: true, adminId: config.telegram.adminId, botTokenSet: !!config.telegram.botToken }
-                : { enabled: false },
-              discord: config.discord
-                ? { enabled: true, botTokenSet: !!config.discord.botToken }
-                : { enabled: false },
-              slack: config.slack
-                ? { enabled: true, botTokenSet: !!config.slack.botToken, appTokenSet: !!config.slack.appToken }
-                : { enabled: false },
-            },
-          }, 200, corsHeaders);
-        }
-
-        // Remove provider API key (authenticated)
-        if (url.pathname.startsWith("/api/providers/") && method === "DELETE") {
-          const auth = await requireAuth(req);
-          const rawName = url.pathname.split("/")[3];
-          const providerName = validateProviderName(rawName);
-          if (!providerName) {
-            return json({ ok: false, error: "Invalid provider name" }, 400, corsHeaders);
-          }
-          providers.removeApiKey(providerName);
-          clearEnvVar(PROJECT_ROOT, providers.getExpectedEnvVar(providerName, "apiKey"));
-          clearEnvVar(PROJECT_ROOT, providers.getExpectedEnvVar(providerName, "authToken"));
-          clearEnvVar(PROJECT_ROOT, providers.getExpectedEnvVar(providerName, "baseUrl"));
-
-          // Persist provider disconnect state so auto-detected CLI/env auth does not
-          // immediately re-enable on next restart unless user explicitly reconnects.
-          try {
-            config.providers = config.providers ?? {};
-            const existing = config.providers[providerName as keyof typeof config.providers] ?? { name: providerName };
-            config.providers[providerName as keyof typeof config.providers] = {
-              ...existing,
-              name: providerName,
-              apiKey: undefined,
-              authToken: undefined,
-              baseUrl: undefined,
-              disabled: true,
-            } as unknown as typeof existing; // Config shape includes dynamic provider keys
-
-            const configPath = join(PROJECT_ROOT, "koryphaios.json");
-            if (existsSync(configPath)) {
-              const currentConfig = JSON.parse(readFileSync(configPath, "utf-8"));
-              currentConfig.providers = currentConfig.providers ?? {};
-              currentConfig.providers[providerName] = {
-                ...(currentConfig.providers[providerName] ?? {}),
-                name: providerName,
-                disabled: true,
-              };
-              delete currentConfig.providers[providerName].apiKey;
-              delete currentConfig.providers[providerName].authToken;
-              delete currentConfig.providers[providerName].baseUrl;
-              writeFileSync(configPath, JSON.stringify(currentConfig, null, 2));
-            }
-          } catch (err) {
-            serverLog.warn({ provider: providerName, err }, "Failed to persist provider disconnect state");
-          }
-
-          wsManager.broadcast({
-            type: "provider.status",
-            payload: { providers: await providers.getStatus() },
-            timestamp: Date.now(),
-          } satisfies WSMessage);
-
-          return json({ ok: true }, 200, corsHeaders);
-        }
-
-        // Agent status (authenticated)
-        if (url.pathname === "/api/agents/status" && method === "GET") {
-          const auth = await requireAuth(req);
-          return json({ ok: true, data: { workers: kory.getStatus() } }, 200, corsHeaders);
-        }
-
-        // Cancel all (authenticated)
-        if (url.pathname === "/api/agents/cancel" && method === "POST") {
-          const auth = await requireAuth(req);
-          kory.cancel();
-          return json({ ok: true }, 200, corsHeaders);
-        }
-
-        // Health check
-        if (url.pathname === "/api/health") {
-          return json({
-            ok: true,
-            data: {
-              version: VERSION,
-              uptime: process.uptime(),
-              providers: providers.getAvailable().length,
-              wsClients: wsManager.clientCount,
-              allowRegistration: getAllowRegistration(),
-            },
-          }, 200, corsHeaders);
-        }
-
-        // Channel reply stream (SSE) for a single session — for bridge devices
-        if (url.pathname === "/api/channels/replies" && method === "GET") {
-          const auth = await requireAuth(req);
-          const sessionId = url.searchParams.get("sessionId")?.trim();
-          if (!sessionId) {
-            return json({ ok: false, error: "sessionId required" }, 400, corsHeaders);
-          }
-          const stream = sessionReplyStream.getStream(sessionId);
-          const encoder = new TextEncoder();
-          const s = new ReadableStream({
-            start(controller) {
-              const reader = stream.getReader();
-              (async () => {
-                try {
-                  while (true) {
-                    const { done, value } = await reader.read();
-                    if (done) break;
-                    controller.enqueue(encoder.encode(`data: ${JSON.stringify(value)}\n\n`));
-                  }
-                } catch {
-                  // Client disconnected or stream closed
-                } finally {
-                  controller.close();
-                }
-              })();
-            },
-          });
-          return new Response(s, {
-            headers: {
-              ...corsHeaders,
-              "Content-Type": "text/event-stream",
-              "Cache-Control": "no-cache",
-              Connection: "keep-alive",
-            },
-          });
-        }
-
-        // SSE endpoint (same events as WebSocket)
-        if (url.pathname === "/api/events") {
-          const userId = "system"; // Fixed user ID since no account system
-          const abortController = new AbortController();
-          const sub = wsBroker.subscribe(abortController.signal);
-          const reader = sub.getReader();
-          const stream = new ReadableStream({
-            start(controller) {
-              const encoder = new TextEncoder();
-              (async () => {
-                try {
-                  while (true) {
-                    const { done, value } = await reader.read();
-                    if (done) break;
-                    const data = `data: ${JSON.stringify(value.payload)}\n\n`;
-                    controller.enqueue(encoder.encode(data));
-                  }
-                } catch {
-                  // Client disconnected or stream closed
-                } finally {
-                  controller.close();
-                }
-              })();
-            },
-            cancel() {
-              abortController.abort();
-              reader.cancel().catch(() => { /* Expected: reader may already be closed */ });
-            },
-          });
-
-          return new Response(stream, {
-            headers: {
-              ...corsHeaders,
-              "Content-Type": "text/event-stream",
-              "Cache-Control": "no-cache",
-              "Connection": "keep-alive",
-            },
-          });
-        }
-
-        return json({ ok: false, error: "Not found" }, 404, corsHeaders);
-      } catch (err) {
-        const handled = handleError(err, {
-          requestId,
-          method,
-          path: url.pathname,
-          query: url.search,
-        });
-        const corsHeaders = getCorsHeaders(origin);
-        return json(
-          { ok: false, error: `${handled.message} (requestId=${requestId})` },
-          handled.statusCode,
-          corsHeaders,
-        );
+  // Setup actual running app with middleware
+  const runningApp = new Elysia()
+    .use(
+      cors({
+        origin: config.corsOrigins?.length ? config.corsOrigins : undefined,
+      }),
+    )
+    .onRequest(({ request, set }) => {
+      const clientIp = (request.headers.get('x-forwarded-for') ?? 'local').split(',')[0].trim();
+      const rateCheck = rateLimiter.check(clientIp);
+      if (!rateCheck.allowed) {
+        set.status = 429;
+        return { ok: false, error: 'Rate limit exceeded' };
       }
-    },
-
-    websocket: createWebSocketHandlers({ wsManager, sessions, kory, providers }),
+    })
+    .use(baseApp)
+    .all('/api/*', ({ set }) => {
+      set.status = 404;
+      return { ok: false, error: 'Not Found' };
     });
-  } catch (err: unknown) {
-    // Handle port conflicts and other startup errors
-    const errObj = err instanceof Error ? err : null;
-    const code = (err as NodeJS.ErrnoException)?.code;
-    const message = errObj?.message ?? String(err);
-    if (code === 'EADDRINUSE' || message.includes('port') || message.includes('address already in use')) {
-      serverLog.fatal({ 
-        port: config.server.port, 
-        host: config.server.host,
-        error: message,
-        code,
-      }, `Port ${config.server.port} is already in use. Please check if another instance is running or change the port in koryphaios.json or KORYPHAIOS_PORT env var.`);
-      throw new Error(`Port ${config.server.port} is already in use. Is another Koryphaios instance running?`);
-    }
-    throw err;
+
+  // ─── Start Server ───────────────────────────────────────────────────────────
+  // Default to 127.0.0.1 for local-only security. 
+  // User must explicitly override with 0.0.0.0 to expose to network.
+  const serverConfig = {
+    port: config.server?.port || 3001,
+    host: config.server?.host || '127.0.0.1'
+  };
+
+  const server = Bun.serve<WSClientData>({
+    port: serverConfig.port,
+    hostname: serverConfig.host,
+    async fetch(req, srv) {
+      const url = new URL(req.url);
+
+      // 1. WebSocket upgrade
+      if (url.pathname === '/ws') {
+        const protocols = req.headers.get('sec-websocket-protocol')?.split(',').map(s => s.trim()) || [];
+        // First protocol is usually 'koryphaios', second is the token
+        const authToken = protocols.length > 1 ? protocols[1] : url.searchParams.get('auth');
+        
+        const authSession = validateLocalBearerToken(authToken);
+        if (!authSession) {
+          return new Response(JSON.stringify({ ok: false, error: 'Unauthorized WebSocket request' }), {
+            status: 401,
+            headers: { 'Content-Type': 'application/json' },
+          });
+        }
+        const upgraded = srv.upgrade(req, {
+          data: { id: nanoid(ID.WS_CLIENT_ID_LENGTH), userId: authSession.id },
+          headers: protocols.length > 0 ? { 'Sec-WebSocket-Protocol': protocols[0] } : undefined
+        });
+        if (upgraded) return undefined;
+        return new Response(JSON.stringify({ ok: false, error: 'WebSocket upgrade failed' }), {
+          status: 400,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+
+      // 2. API Routes
+      if (url.pathname.startsWith('/api')) {
+        return runningApp.handle(req);
+      }
+
+      // 3. Static Frontend Files
+      const frontendBuildDir = resolve(join(PROJECT_ROOT, "frontend", "build", "client"));
+      let filePath = resolve(join(frontendBuildDir, url.pathname));
+
+      if (url.pathname === '/' || url.pathname.endsWith('/')) {
+        filePath = join(frontendBuildDir, 'index.html');
+      }
+
+      if (!filePath.startsWith(frontendBuildDir)) {
+        return new Response('Forbidden', { status: 403 });
+      }
+
+      let file = Bun.file(filePath);
+      if (await file.exists()) {
+        return new Response(file);
+      }
+
+      // 4. SPA Fallback (Routing handled by frontend)
+      const indexHtml = Bun.file(join(frontendBuildDir, 'index.html'));
+      if (await indexHtml.exists()) {
+        return new Response(indexHtml);
+      }
+
+      // 5. Final Fallback
+      return new Response('Not Found', { status: 404 });
+    },
+    websocket: createWebSocketHandlers({ wsManager, sessions, kory, providers }),
+  });
+
+  const clientHost = serverConfig.host === '0.0.0.0' ? '127.0.0.1' : serverConfig.host;
+  const actualPort = server.port;
+  const activePortPath = join(PROJECT_ROOT, '.koryphaios', '.active-port.json');
+
+  try {
+    writeFileSync(
+      activePortPath,
+      JSON.stringify(
+        {
+          port: actualPort,
+          host: clientHost,
+          url: `http://${clientHost}:${actualPort}`,
+          wsUrl: `ws://${clientHost}:${actualPort}/ws`,
+          timestamp: Date.now(),
+          pid: process.pid,
+        },
+        null,
+        2,
+      ),
+    );
+  } catch (err) {
+    serverLog.warn({ err }, 'Failed to write active port file');
   }
 
-  serverLog.info({ host: config.server.host, port: config.server.port }, "Server running");
-  serverLog.info({ url: `ws://${config.server.host}:${config.server.port}/ws` }, "WebSocket ready");
-  serverLog.info({ url: `http://${config.server.host}:${config.server.port}/api/events` }, "SSE fallback ready");
+  serverLog.info({ host: serverConfig.host, port: actualPort }, 'Server running');
 
-  if (telegram && process.env.TELEGRAM_POLLING === "true") {
+  if (telegram && process.env.TELEGRAM_POLLING === 'true') {
     await telegram.startPolling();
   }
 
-  if (discord) {
-    discord.start().catch((err) => {
-      serverLog.error({ err }, "Discord bot failed to start");
-    });
-  }
-
-  if (slack) {
-    slack.start().catch((err) => {
-      serverLog.error({ err }, "Slack bot failed to start");
-    });
-  }
+  if (discord) discord.start().catch((err) => serverLog.error({ err }, 'Discord bot failed'));
+  if (slack) slack.start().catch((err) => serverLog.error({ err }, 'Slack bot failed'));
 
   // ─── Graceful Shutdown ──────────────────────────────────────────────────
-
-  let isShuttingDown = false;
-
   async function gracefulShutdown(signal: string) {
-    if (isShuttingDown) {
-      serverLog.warn("Shutdown already in progress, forcing exit");
-      process.exit(1);
-    }
-
-    isShuttingDown = true;
-    serverLog.info({ signal }, "Received shutdown signal, starting graceful shutdown");
-
-    try {
-      // 1. Stop accepting new connections
-      server.stop(true);
-      serverLog.info("Server stopped accepting new connections");
-
-      // 2. Cancel all running agents
-      kory.cancel();
-      serverLog.info("Cancelled all running agents");
-
-      // 3. Close WebSocket connections gracefully
-      wsManager.broadcast({
-        type: "system.info",
-        payload: { message: "Server shutting down" },
-        timestamp: Date.now(),
-      });
-      serverLog.info("Notified WebSocket clients");
-
-      // 4. Wait a moment for final messages to send
-      await new Promise(resolve => setTimeout(resolve, 1000));
-
-      // 5. Shut down pub/sub broker
-      wsBroker.shutdown();
-
-      // 5b. Stop messaging gateway
-      messagingGateway.stop();
-
-      // 6. Stop credit polling timer (avoid stray intervals)
-      stopCreditPolling();
-
-      // 7. Clean up rate limiter
-      rateLimiter.destroy();
-
-      serverLog.info("Graceful shutdown complete");
-      process.exit(0);
-    } catch (err) {
-      serverLog.error(err, "Error during graceful shutdown");
-      process.exit(1);
-    }
+    serverLog.info({ signal }, 'Graceful shutdown');
+    server.stop(true);
+    kory.cancel();
+    shutdownAllBrokers();
+    try { getDb().close(); } catch (e) { /* ignore */ }
+    process.exit(0);
   }
 
-  // Register shutdown handlers
-  process.on("SIGTERM", () => gracefulShutdown("SIGTERM"));
-  process.on("SIGINT", () => gracefulShutdown("SIGINT"));
-
-  // Handle uncaught errors
-  process.on("uncaughtException", (err) => {
-    serverLog.fatal(err, "Uncaught exception");
-    gracefulShutdown("uncaughtException");
-  });
-
-  process.on("unhandledRejection", (reason) => {
-    serverLog.error({ reason }, "Unhandled promise rejection (server will continue)");
-  });
+  process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+  process.on('SIGINT', () => gracefulShutdown('SIGINT'));
 }
 
-// ─── Helpers ────────────────────────────────────────────────────────────────
-
-function json(data: APIResponse, status: number, headers: Record<string, string> = {}): Response {
-  return new Response(JSON.stringify(data), {
-    status,
-    headers: {
-      "Content-Type": "application/json",
-      ...headers,
-    },
-  });
-}
-
-/** Merge CORS headers into a Response so cross-origin clients (e.g. dev frontend) can read it. */
-function withCors(res: Response, corsHeaders: Record<string, string>): Response {
-  const headers = new Headers(res.headers);
-  for (const [k, v] of Object.entries(corsHeaders)) headers.set(k, v);
-  return new Response(res.body, { status: res.status, statusText: res.statusText, headers });
-}
-
-const MAX_JSON_BODY_BYTES = 1 * 1024 * 1024; // 1 MB
-
-/** Parse JSON body with size limit; on failure return 400 Response. Caller must merge corsHeaders. */
-async function parseJson<T>(req: Request, corsHeaders: Record<string, string>): Promise<{ ok: true; data: T } | { ok: false; res: Response }> {
-  const contentLength = parseInt(req.headers.get("content-length") ?? "0", 10);
-  if (contentLength > MAX_JSON_BODY_BYTES) {
-    return { ok: false, res: json({ ok: false, error: "Request body too large" }, 413, corsHeaders) };
-  }
-  try {
-    const data = await req.json() as T;
-    return { ok: true, data };
-  } catch {
-    return { ok: false, res: json({ ok: false, error: "Invalid or missing JSON body" }, 400, corsHeaders) };
-  }
-}
-
-/**
- * Load local plugins from valid plugin directories
- */
-async function loadPlugins(registry: ToolRegistry) {
-  const candidates = [
-    join(BACKEND_ROOT, "src", "plugins"),
-    join(PROJECT_ROOT, "plugins"),
-  ];
-
-  const loaded = new Set<string>();
-
-  for (const pluginsDir of candidates) {
-    if (!existsSync(pluginsDir)) continue;
-
-    try {
-      const files = readdirSync(pluginsDir);
-
-      for (const file of files) {
-        if ((file.endsWith(".ts") || file.endsWith(".js")) && !file.endsWith(".d.ts")) {
-          try {
-            const modulePath = join(pluginsDir, file);
-            const module = await import(modulePath);
-            const ToolClass = module.default;
-
-            if (ToolClass && typeof ToolClass === 'function') {
-              const toolInstance = new ToolClass();
-              if (toolInstance.name && typeof toolInstance.run === 'function') {
-                if (loaded.has(toolInstance.name)) continue;
-                registry.register(toolInstance);
-                loaded.add(toolInstance.name);
-                serverLog.debug({ plugin: toolInstance.name, path: pluginsDir }, "Loaded local plugin");
-              }
-            }
-          } catch (err) {
-            serverLog.warn({ file, err }, "Failed to load plugin");
-          }
-        }
-      }
-    } catch (err) {
-      serverLog.warn({ pluginsDir, err }, "Error scanning plugins directory");
-    }
-  }
-
-  if (loaded.size > 0) {
-    serverLog.info({ count: loaded.size }, "Loaded local plugins");
-  }
-}
-
-// ─── Start ──────────────────────────────────────────────────────────────────
-
-main().catch((err) => serverLog.fatal(err, "Server startup failed"));
+main().catch((err) => serverLog.fatal(err, 'Server startup failed'));

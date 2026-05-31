@@ -1,4 +1,4 @@
-import type { ModelDef } from "@koryphaios/shared";
+import type { ModelDef } from '@koryphaios/shared';
 
 /**
  * Local/Custom endpoint models
@@ -6,9 +6,9 @@ import type { ModelDef } from "@koryphaios/shared";
  */
 export const LocalModels: ModelDef[] = [
   {
-    id: "local.default",
-    name: "Local Model",
-    provider: "local",
+    id: 'local.default',
+    name: 'Local Model',
+    provider: 'local',
     contextWindow: 128_000,
     maxOutputTokens: 4_096,
     costPerMInputTokens: 0,
@@ -16,7 +16,7 @@ export const LocalModels: ModelDef[] = [
     canReason: false,
     supportsAttachments: false,
     supportsStreaming: true,
-    tier: "fast",
+    tier: 'fast',
     isGeneric: true,
   },
 ];

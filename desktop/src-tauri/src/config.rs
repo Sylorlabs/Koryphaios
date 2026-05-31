@@ -114,10 +114,16 @@ impl AppConfig {
             }
         }
         
-        // Development: check project root
-        let dev_path = PathBuf::from("../../config/app.config.json");
+        // Development: check project root (from desktop/src-tauri/target/debug/ -> project root)
+        let dev_path = PathBuf::from("../../../../config/app.config.json");
         if dev_path.exists() {
             return Ok(dev_path);
+        }
+        
+        // Alternative: check from project root directly
+        let dev_path2 = PathBuf::from("../../config/app.config.json");
+        if dev_path2.exists() {
+            return Ok(dev_path2);
         }
         
         Err(ConfigError::NotFound)

@@ -3,12 +3,12 @@
  * metrics to reconcile Local Estimate with Cloud Reality.
  */
 
-import { serverLog } from "../logger";
-import { saveCloudSnapshot } from "./db";
+import { serverLog } from '../logger';
+import { saveCloudSnapshot } from './db';
 
 const POLL_INTERVAL_MS = 15 * 60 * 1000;
-const OPENAI_CREDIT_GRANTS_URL = "https://api.openai.com/v1/dashboard/billing/credit_grants";
-const GITHUB_COPILOT_METRICS_PATH = "/enterprises/{id}/copilot/metrics/reports/users-1-day";
+const OPENAI_CREDIT_GRANTS_URL = 'https://api.openai.com/v1/dashboard/billing/credit_grants';
+const GITHUB_COPILOT_METRICS_PATH = '/enterprises/{id}/copilot/metrics/reports/users-1-day';
 
 export interface PollingConfig {
   /** OpenAI API key for GET /v1/dashboard/billing/credit_grants */
@@ -24,7 +24,7 @@ let pollTimer: ReturnType<typeof setInterval> | null = null;
 async function fetchOpenAICreditGrants(apiKey: string): Promise<void> {
   try {
     const res = await fetch(OPENAI_CREDIT_GRANTS_URL, {
-      method: "GET",
+      method: 'GET',
       headers: { Authorization: `Bearer ${apiKey}` },
     });
     const text = await res.text();
@@ -39,30 +39,33 @@ async function fetchOpenAICreditGrants(apiKey: string): Promise<void> {
     } catch {
       // keep raw payload
     }
-    saveCloudSnapshot("openai", text, totalUsed, totalGranted, totalAvailable);
-    serverLog.debug({ totalUsed, totalGranted, totalAvailable }, "OpenAI credit_grants snapshot saved");
+    saveCloudSnapshot('openai', text, totalUsed, totalGranted, totalAvailable);
+    serverLog.debug(
+      { totalUsed, totalGranted, totalAvailable },
+      'OpenAI credit_grants snapshot saved',
+    );
   } catch (err: any) {
-    serverLog.warn({ err: err?.message }, "OpenAI credit_grants poll failed");
+    serverLog.warn({ err: err?.message }, 'OpenAI credit_grants poll failed');
   }
 }
 
 async function fetchGitHubCopilotMetrics(enterpriseId: string, token: string): Promise<void> {
-  const path = GITHUB_COPILOT_METRICS_PATH.replace("{id}", encodeURIComponent(enterpriseId));
+  const path = GITHUB_COPILOT_METRICS_PATH.replace('{id}', encodeURIComponent(enterpriseId));
   const url = `https://api.github.com${path}`;
   try {
     const res = await fetch(url, {
-      method: "GET",
+      method: 'GET',
       headers: {
-        Accept: "application/vnd.github+json",
+        Accept: 'application/vnd.github+json',
         Authorization: `Bearer ${token}`,
-        "X-GitHub-Api-Version": "2022-11-28",
+        'X-GitHub-Api-Version': '2022-11-28',
       },
     });
     const text = await res.text();
-    saveCloudSnapshot("github_copilot", text);
-    serverLog.debug("GitHub Copilot metrics snapshot saved");
+    saveCloudSnapshot('github_copilot', text);
+    serverLog.debug('GitHub Copilot metrics snapshot saved');
   } catch (err: any) {
-    serverLog.warn({ err: err?.message }, "GitHub Copilot metrics poll failed");
+    serverLog.warn({ err: err?.message }, 'GitHub Copilot metrics poll failed');
   }
 }
 
@@ -78,13 +81,13 @@ export function startCreditPolling(config: PollingConfig): void {
 
   run();
   pollTimer = setInterval(run, POLL_INTERVAL_MS);
-  serverLog.info({ intervalMinutes: 15 }, "CreditAccountant polling started");
+  serverLog.info({ intervalMinutes: 15 }, 'CreditAccountant polling started');
 }
 
 export function stopCreditPolling(): void {
   if (pollTimer) {
     clearInterval(pollTimer);
     pollTimer = null;
-    serverLog.info("CreditAccountant polling stopped");
+    serverLog.info('CreditAccountant polling stopped');
   }
 }

@@ -2,30 +2,31 @@
 // Supports connecting to MCP servers via stdio and SSE transports.
 // This allows Koryphaios to connect to external tool servers.
 
-import { mcpLog } from "../logger";
-import type { Tool, ToolCallInput, ToolContext, ToolCallOutput } from "../tools/registry";
+import { mcpLog } from '../logger';
+import type { Tool, ToolCallInput, ToolContext, ToolCallOutput } from '../tools/registry';
+import { registerMCPToolsInRegistry } from './tool-bridge';
 
 // ─── MCP Protocol Types ─────────────────────────────────────────────────────
 
 interface MCPServerConfig {
   name: string;
-  transport: "stdio" | "sse";
-  command?: string;       // For stdio
-  args?: string[];        // For stdio
+  transport: 'stdio' | 'sse';
+  command?: string; // For stdio
+  args?: string[]; // For stdio
   env?: Record<string, string>;
-  url?: string;           // For SSE
+  url?: string; // For SSE
   headers?: Record<string, string>;
 }
 
 interface MCPRequest {
-  jsonrpc: "2.0";
+  jsonrpc: '2.0';
   id: number;
   method: string;
   params?: unknown;
 }
 
 interface MCPResponse {
-  jsonrpc: "2.0";
+  jsonrpc: '2.0';
   id: number;
   result?: unknown;
   error?: { code: number; message: string; data?: unknown };
@@ -39,7 +40,7 @@ interface MCPToolDef {
 
 interface MCPToolResult {
   content: Array<{
-    type: "text" | "image" | "resource";
+    type: 'text' | 'image' | 'resource';
     text?: string;
     data?: string;
     mimeType?: string;
@@ -52,11 +53,14 @@ interface MCPToolResult {
 export class MCPClient {
   private process?: ReturnType<typeof Bun.spawn>;
   private requestId = 0;
-  private pending = new Map<number, {
-    resolve: (value: MCPResponse) => void;
-    reject: (reason: Error) => void;
-  }>();
-  private buffer = "";
+  private pending = new Map<
+    number,
+    {
+      resolve: (value: MCPResponse) => void;
+      reject: (reason: Error) => void;
+    }
+  >();
+  private buffer = '';
   private tools: MCPToolDef[] = [];
   private connected = false;
   private serverName: string;
@@ -66,12 +70,18 @@ export class MCPClient {
     this.serverName = config.name;
   }
 
-  get name() { return this.serverName; }
-  get isConnected() { return this.connected; }
-  get availableTools() { return this.tools; }
+  get name() {
+    return this.serverName;
+  }
+  get isConnected() {
+    return this.connected;
+  }
+  get availableTools() {
+    return this.tools;
+  }
 
   async connect(): Promise<void> {
-    if (this.config.transport === "stdio") {
+    if (this.config.transport === 'stdio') {
       await this.connectStdio();
     } else {
       await this.connectSSE();
@@ -80,13 +90,48 @@ export class MCPClient {
 
   private async connectStdio(): Promise<void> {
     const { command, args = [], env = {} } = this.config;
-    if (!command) throw new Error(`MCP server ${this.serverName}: command is required for stdio transport`);
+    if (!command)
+      throw new Error(`MCP server ${this.serverName}: command is required for stdio transport`);
+
+    // Build a safe environment to prevent leaking API keys to MCP servers
+    const safeEnv: Record<string, string> = {};
+    const allowedVars = new Set([
+      'PATH',
+      'HOME',
+      'USER',
+      'LANG',
+      'TERM',
+      'NODE_ENV',
+      'SHELL',
+      'TMPDIR',
+    ]);
+    for (const [key, value] of Object.entries(process.env)) {
+      if (value === undefined) continue;
+
+      // Explicitly block known sensitive prefixes
+      if (
+        key.startsWith('KORYPHAIOS_') ||
+        key.startsWith('ANTHROPIC_') ||
+        key.startsWith('OPENAI_') ||
+        key.startsWith('GOOGLE_') ||
+        key.includes('API_KEY') ||
+        key.includes('TOKEN') ||
+        key.includes('SECRET')
+      ) {
+        continue;
+      }
+
+      // Allow basic system variables
+      if (allowedVars.has(key)) {
+        safeEnv[key] = value;
+      }
+    }
 
     this.process = Bun.spawn([command, ...args], {
-      stdin: "pipe",
-      stdout: "pipe",
-      stderr: "pipe",
-      env: { ...process.env, ...env },
+      stdin: 'pipe',
+      stdout: 'pipe',
+      stderr: 'pipe',
+      env: { ...safeEnv, ...env },
     });
 
     // Read stdout asynchronously
@@ -100,7 +145,9 @@ export class MCPClient {
           this.buffer += decoder.decode(value, { stream: true });
           this.processBuffer();
         }
-      } catch { /* Expected: stream closed when process exits */ }
+      } catch {
+        /* Expected: stream closed when process exits */
+      }
     })();
 
     // Read stderr asynchronously
@@ -111,47 +158,57 @@ export class MCPClient {
         while (true) {
           const { done, value } = await stderrReader.read();
           if (done) break;
-          mcpLog.error({ server: this.serverName, output: stderrDecoder.decode(value).trim() }, "MCP stderr");
+          mcpLog.error(
+            { server: this.serverName, output: stderrDecoder.decode(value).trim() },
+            'MCP stderr',
+          );
         }
-      } catch { /* Expected: stream closed when process exits */ }
+      } catch {
+        /* Expected: stream closed when process exits */
+      }
     })();
 
-    this.process.exited.then((code) => {
-      mcpLog.info({ server: this.serverName, code }, "MCP process exited");
-      this.connected = false;
-    }).catch((err) => {
-      mcpLog.warn({ server: this.serverName, err }, "Failed to track MCP process exit");
-    });
+    this.process.exited
+      .then((code) => {
+        mcpLog.info({ server: this.serverName, code }, 'MCP process exited');
+        this.connected = false;
+      })
+      .catch((err) => {
+        mcpLog.warn({ server: this.serverName, err }, 'Failed to track MCP process exit');
+      });
 
     // Initialize
-    const initResult = await this.request("initialize", {
-      protocolVersion: "2024-11-05",
+    const initResult = await this.request('initialize', {
+      protocolVersion: '2024-11-05',
       capabilities: {
         roots: { listChanged: false },
       },
       clientInfo: {
-        name: "koryphaios",
-        version: "0.1.0",
+        name: 'koryphaios',
+        version: '0.1.0',
       },
     });
 
     this.serverCapabilities = (initResult.result as any).capabilities ?? {};
 
     // Send initialized notification
-    this.notify("notifications/initialized", {});
+    this.notify('notifications/initialized', {});
 
     // List available tools if server supports them
     if (this.serverCapabilities.tools) {
       try {
-        const toolsResult = await this.request("tools/list", {});
+        const toolsResult = await this.request('tools/list', {});
         this.tools = (toolsResult.result as any)?.tools ?? [];
       } catch (err: any) {
-        mcpLog.warn({ server: this.serverName, err: err.message }, "Failed to list tools despite capability");
+        mcpLog.warn(
+          { server: this.serverName, err: err.message },
+          'Failed to list tools despite capability',
+        );
       }
     }
 
     this.connected = true;
-    mcpLog.info({ server: this.serverName, tools: this.tools.length }, "MCP connected via stdio");
+    mcpLog.info({ server: this.serverName, tools: this.tools.length }, 'MCP connected via stdio');
   }
 
   private async connectSSE(): Promise<void> {
@@ -162,16 +219,16 @@ export class MCPClient {
     // For SSE, we call HTTP endpoints for RPC
     // Initialize
     const initResp = await fetch(`${url}/initialize`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", ...headers },
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...headers },
       body: JSON.stringify({
-        jsonrpc: "2.0",
+        jsonrpc: '2.0',
         id: ++this.requestId,
-        method: "initialize",
+        method: 'initialize',
         params: {
-          protocolVersion: "2024-11-05",
+          protocolVersion: '2024-11-05',
           capabilities: { roots: { listChanged: false } },
-          clientInfo: { name: "koryphaios", version: "0.1.0" },
+          clientInfo: { name: 'koryphaios', version: '0.1.0' },
         },
       }),
     });
@@ -182,31 +239,31 @@ export class MCPClient {
 
     // List tools
     const toolsResp = await fetch(`${url}/tools/list`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", ...headers },
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...headers },
       body: JSON.stringify({
-        jsonrpc: "2.0",
+        jsonrpc: '2.0',
         id: ++this.requestId,
-        method: "tools/list",
+        method: 'tools/list',
         params: {},
       }),
     });
 
     if (toolsResp.ok) {
-      const data = await toolsResp.json() as MCPResponse;
+      const data = (await toolsResp.json()) as MCPResponse;
       this.tools = (data.result as any)?.tools ?? [];
     }
 
     this.connected = true;
-    mcpLog.info({ server: this.serverName, tools: this.tools.length }, "MCP connected via SSE");
+    mcpLog.info({ server: this.serverName, tools: this.tools.length }, 'MCP connected via SSE');
   }
 
   async callTool(name: string, args: Record<string, unknown>): Promise<MCPToolResult> {
-    if (this.config.transport === "stdio") {
-      const response = await this.request("tools/call", { name, arguments: args });
+    if (this.config.transport === 'stdio') {
+      const response = await this.request('tools/call', { name, arguments: args });
       if (response.error) {
         return {
-          content: [{ type: "text", text: `MCP Error: ${response.error.message}` }],
+          content: [{ type: 'text', text: `MCP Error: ${response.error.message}` }],
           isError: true,
         };
       }
@@ -214,20 +271,27 @@ export class MCPClient {
     } else {
       // SSE transport
       const resp = await fetch(`${this.config.url}/tools/call`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", ...this.config.headers },
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...(this.config.headers ?? {}) },
         body: JSON.stringify({
-          jsonrpc: "2.0",
+          jsonrpc: '2.0',
           id: ++this.requestId,
-          method: "tools/call",
+          method: 'tools/call',
           params: { name, arguments: args },
         }),
       });
 
-      const data = await resp.json() as MCPResponse;
+      if (!resp.ok) {
+        return {
+          content: [{ type: 'text', text: `MCP HTTP Error: ${resp.status}` }],
+          isError: true,
+        };
+      }
+
+      const data = (await resp.json()) as MCPResponse;
       if (data.error) {
         return {
-          content: [{ type: "text", text: `MCP Error: ${data.error.message}` }],
+          content: [{ type: 'text', text: `MCP Error: ${data.error.message}` }],
           isError: true,
         };
       }
@@ -235,150 +299,159 @@ export class MCPClient {
     }
   }
 
-  async disconnect(): Promise<void> {
-    this.connected = false;
-    if (this.process) {
-      this.process.kill();
-      this.process = undefined;
-    }
-    this.pending.clear();
-  }
-
-  // ── Stdio JSON-RPC helpers ──
-
   private async request(method: string, params: unknown): Promise<MCPResponse> {
+    if (this.config.transport === 'stdio' && !this.process) {
+      throw new Error('MCP process not started');
+    }
+
     const id = ++this.requestId;
-    const request: MCPRequest = { jsonrpc: "2.0", id, method, params };
+    const request: MCPRequest = { jsonrpc: '2.0', id, method, params };
 
     return new Promise((resolve, reject) => {
       this.pending.set(id, { resolve, reject });
 
-      const timeout = setTimeout(() => {
-        this.pending.delete(id);
-        reject(new Error(`MCP request ${method} timed out`));
-      }, 30_000);
-
-      this.pending.set(id, {
-        resolve: (val) => { clearTimeout(timeout); resolve(val); },
-        reject: (err) => { clearTimeout(timeout); reject(err); },
-      });
-
-      (this.process!.stdin as any).write(JSON.stringify(request) + "\n");
-      (this.process!.stdin as any).flush();
+      if (this.config.transport === 'stdio') {
+        const writer = this.process!.stdin.getWriter();
+        writer.write(JSON.stringify(request) + '\n');
+        writer.releaseLock();
+      }
     });
   }
 
   private notify(method: string, params: unknown): void {
-    const notification = { jsonrpc: "2.0", method, params };
-    if (this.process?.stdin) {
-      (this.process.stdin as any).write(JSON.stringify(notification) + "\n");
-      (this.process.stdin as any).flush();
+    const notification = { jsonrpc: '2.0', method, params };
+    if (this.config.transport === 'stdio' && this.process) {
+      const writer = this.process.stdin.getWriter();
+      writer.write(JSON.stringify(notification) + '\n');
+      writer.releaseLock();
     }
   }
 
   private processBuffer(): void {
-    const lines = this.buffer.split("\n");
-    this.buffer = lines.pop() ?? "";
+    let newlineIdx: number;
+    while ((newlineIdx = this.buffer.indexOf('\n')) >= 0) {
+      const line = this.buffer.slice(0, newlineIdx).trim();
+      this.buffer = this.buffer.slice(newlineIdx + 1);
 
-    for (const line of lines) {
-      if (!line.trim()) continue;
+      if (!line) continue;
+
       try {
-        const msg = JSON.parse(line) as MCPResponse;
-        if (msg.id !== undefined) {
-          const pending = this.pending.get(msg.id);
-          if (pending) {
-            this.pending.delete(msg.id);
-            pending.resolve(msg);
-          }
+        const response = JSON.parse(line) as MCPResponse;
+        if (response.id && this.pending.has(response.id)) {
+          const { resolve } = this.pending.get(response.id)!;
+          this.pending.delete(response.id);
+          resolve(response);
         }
-      } catch {
-        // Ignore non-JSON lines (server logging etc.)
+      } catch (err) {
+        mcpLog.error({ server: this.serverName, err, line }, 'Failed to parse MCP response');
       }
     }
+  }
+
+  async shutdown(): Promise<void> {
+    if (this.process) {
+      this.process.kill();
+      this.process = undefined;
+    }
+    this.connected = false;
+    this.pending.clear();
   }
 }
 
 // ─── MCP Tool Wrapper ───────────────────────────────────────────────────────
-// Wraps an MCP server's tool as a local Tool for the ToolRegistry.
 
 export class MCPToolWrapper implements Tool {
-  readonly name: string;
-  readonly description: string;
-  readonly inputSchema: Record<string, unknown>;
+  readonly role = 'worker' as const;
 
   constructor(
     private client: MCPClient,
-    private toolDef: MCPToolDef,
-  ) {
-    // Prefix with server name to avoid collisions
-    this.name = `mcp_${client.name}_${toolDef.name}`;
-    this.description = `[MCP:${client.name}] ${toolDef.description}`;
-    this.inputSchema = toolDef.inputSchema;
+    private def: MCPToolDef,
+  ) {}
+
+  get name() {
+    return `mcp_${this.client.name}_${this.def.name}`;
+  }
+  get description() {
+    return this.def.description;
+  }
+  get inputSchema() {
+    return this.def.inputSchema as any;
   }
 
-  async run(ctx: ToolContext, call: ToolCallInput): Promise<ToolCallOutput> {
+  async run(ctx: ToolContext, input: ToolCallInput): Promise<ToolCallOutput> {
+    const start = performance.now();
     try {
-      const result = await this.client.callTool(this.toolDef.name, call.input);
-
-      const output = result.content
-        .map((c) => c.text ?? `[${c.type}: ${c.mimeType ?? "binary"}]`)
-        .join("\n");
+      const result = await this.client.callTool(this.def.name, input.input as any);
+      const text = result.content
+        .filter((c) => c.type === 'text')
+        .map((c) => c.text)
+        .join('\n');
 
       return {
-        callId: call.id,
+        callId: input.id,
         name: this.name,
-        output,
-        isError: result.isError ?? false,
-        durationMs: 0,
+        output: text || '[No text output from MCP tool]',
+        isError: !!result.isError,
+        durationMs: performance.now() - start,
       };
     } catch (err: any) {
       return {
-        callId: call.id,
+        callId: input.id,
         name: this.name,
-        output: `MCP tool error: ${err.message}`,
+        output: `MCP Tool Error: ${err.message}`,
         isError: true,
-        durationMs: 0,
+        durationMs: performance.now() - start,
       };
     }
   }
 }
 
-// ─── MCP Manager ────────────────────────────────────────────────────────────
-// Manages multiple MCP server connections and registers their tools.
-
-import { ToolRegistry } from "../tools/registry";
-import { registerMCPToolsInRegistry } from "./tool-bridge";
+// ─── MCP Manager ─────────────────────────────────────────────────────────────
 
 export class MCPManager {
   private clients = new Map<string, MCPClient>();
 
-  async connectServer(config: MCPServerConfig, toolRegistry: ToolRegistry): Promise<void> {
+  constructor(private workingDirectory: string) {}
+
+  async connectServer(config: MCPServerConfig): Promise<MCPClient> {
     const client = new MCPClient(config);
+    await client.connect();
+    this.clients.set(config.name, client);
+    return client;
+  }
 
-    try {
-      await client.connect();
-      this.clients.set(config.name, client);
-
-      // Register all tools from this server via the tool bridge
-      await registerMCPToolsInRegistry(toolRegistry, client);
-    } catch (err: any) {
-      mcpLog.error({ server: config.name, err: err.message }, "Failed to connect MCP server");
+  async registerAllTools(registry: any): Promise<void> {
+    for (const client of this.clients.values()) {
+      await registerMCPToolsInRegistry(registry, client);
     }
   }
 
-  async disconnectAll(): Promise<void> {
-    for (const [name, client] of this.clients) {
-      await client.disconnect();
-      mcpLog.info({ server: name }, "MCP disconnected");
+  async shutdown(): Promise<void> {
+    for (const client of this.clients.values()) {
+      await client.shutdown();
     }
     this.clients.clear();
   }
+}
 
-  getStatus(): Array<{ name: string; connected: boolean; toolCount: number }> {
-    return [...this.clients.entries()].map(([name, client]) => ({
-      name,
-      connected: client.isConnected,
-      toolCount: client.availableTools.length,
-    }));
+/**
+ * Initialize MCP servers from configuration.
+ */
+export async function initMCP(config: any, tools: any): Promise<MCPManager> {
+  const manager = new MCPManager(process.cwd());
+  const servers = config.mcpServers || {};
+
+  for (const [name, serverConfig] of Object.entries(servers)) {
+    try {
+      await manager.connectServer({
+        name,
+        ...(serverConfig as any),
+      });
+    } catch (err: any) {
+      mcpLog.error({ server: name, err: err.message }, 'Failed to connect to MCP server');
+    }
   }
+
+  await manager.registerAllTools(tools);
+  return manager;
 }

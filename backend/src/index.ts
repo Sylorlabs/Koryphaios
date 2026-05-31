@@ -1,56 +1,28 @@
+// Koryphaios Backend Entry Point
+// Main index for library usage or direct execution
+
+export * from './providers';
+export * from './tools';
+export * from './kory';
+export * from './bootstrap';
+export * from './config-schema';
+export * from './constants';
+export * from './logger';
+export * from './context';
+
+// Sample selectModel usage showing how to resolve a model from tier + user preferences
+import { selectModel } from './core/orchestration/ManagerSession';
+import { getEnabledModelIds } from './core/model-settings';
+
 /**
- * Integration sample: Intelligent Auto-Mode with User Preference Constraints.
- *
- * Run after DB is initialized (e.g. from server.ts after initDb).
- * Wire this to your session handler: get userId from session, use askUser/spawnWorker from WS or HTTP.
- *
- * Example:
- *   import { runAutoMode, getCheckedModelsForUser } from "./core";
- *   const result = await runAutoMode(message, { userId, sessionId, askUser, spawnWorker, notifyUser });
+ * Sample demonstrating model selection based on user's checked models.
  */
+export async function sampleSelectModel(intent: 'SMALL' | 'MEDIUM' | 'LARGE', userId: string) {
+  const checked = await getEnabledModelIds(userId);
 
-import {
-  runAutoMode,
-  getCheckedModelsForUser,
-  triage,
-  selectModel,
-  runSafe,
-  getEnabledModelIds,
-} from "./core";
-
-export async function sampleAutoModeIntegration(
-  userMessage: string,
-  userId: string,
-  sessionId: string | null,
-  askUser: (q: string, opts?: string[]) => Promise<string>,
-  spawnWorker: (task: string, modelId: string, provider: string) => Promise<string>,
-  notifyUser?: (msg: string) => void
-): Promise<string> {
-  const checked = getCheckedModelsForUser(userId);
   if (checked.length === 0) {
-    return "No models enabled in Settings. Please check at least one model for Auto-Mode.";
+    console.log('No models enabled by user. Using system defaults.');
   }
 
-  return runAutoMode(userMessage, {
-    userId,
-    sessionId,
-    askUser,
-    spawnWorker,
-    notifyUser,
-    useLocalSlm: false,
-  });
-}
-
-/** Sample: triage only (e.g. for UI to show intent before running). */
-export async function sampleTriageOnly(userMessage: string, userId: string, useLocalSlm = false) {
-  return triage(userMessage, { userId, sessionId: null, useLocalSlm });
-}
-
-/** Sample: resolve model for intent from checked list (downgrade if needed). */
-export function sampleSelectModel(intent: "SMALL" | "MEDIUM" | "LARGE", userId: string) {
-  const checked = getEnabledModelIds(userId);
   return selectModel(intent, checked);
 }
-
-/** Sample: SafeTerminal for any shell command to prevent Bun deadlocks. */
-export { runSafe };

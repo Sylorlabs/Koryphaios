@@ -2,9 +2,9 @@
  * Types for Intelligent Auto-Mode routing (Triage + Selection).
  */
 
-export type TriageIntent = "SMALL" | "MEDIUM" | "LARGE";
+export type TriageIntent = 'SMALL' | 'MEDIUM' | 'LARGE';
 
-export type ModelTier = "flagship" | "fast" | "cheap" | "reasoning";
+export type ModelTier = 'flagship' | 'fast' | 'cheap' | 'reasoning';
 
 export interface RoutingAuditEntry {
   id: string;

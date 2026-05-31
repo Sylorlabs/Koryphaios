@@ -2,11 +2,11 @@
 // Domain: Application configuration structure
 
 // Import types to avoid circular dependency
-import type { ProviderConfig } from "../providers/ModelDefs";
-import type { WorkerDomain } from "../types/AgentTypes";
+import type { ProviderConfig } from '../providers/ModelDefs';
+import type { WorkerDomain } from '../types/AgentTypes';
 
 export interface MCPServerConfig {
-  type: "stdio" | "sse";
+  type: 'stdio' | 'sse';
   command?: string;
   args?: string[];
   env?: Record<string, string>;
@@ -70,6 +70,39 @@ export interface ServerConfig {
   host: string;
 }
 
+export interface AgentSettings {
+  /** Rule enforcement level - always applied, but critic can be strict/moderate/lenient */
+  ruleEnforcementLevel: 'strict' | 'moderate' | 'lenient';
+  /** Agent orchestration mode preference. Auto lets Kory decide when to delegate. */
+  agentExecutionMode?: 'auto' | 'single' | 'multi';
+  /** Whether to use preferences.md for workflow guidance */
+  preferencesEnabled: boolean;
+  /** Critic gate enabled - critic reviews all changes */
+  criticGateEnabled: boolean;
+  /** Critic enforces preferences.md workflow strictly */
+  criticEnforcesPreferences: boolean;
+  /** Auto-apply fixes that don't violate rules */
+  autoApplySafeFixes: boolean;
+  /** Require confirmation for rule violations */
+  confirmRuleViolations: boolean;
+  /** Agent memory - allow agents to update memory files */
+  agentMemoryEnabled: boolean;
+  /** Agent can update preferences.md based on learned patterns */
+  agentCanUpdatePreferences: boolean;
+  /** Max iterations for critic review loop */
+  maxCriticIterations: number;
+  /** Require human approval for changes that modify >N files */
+  approvalThresholdFiles: number;
+  /** Require human approval for changes >N lines */
+  approvalThresholdLines: number;
+  /** Experimental: Local Web Search (DuckDuckGo) */
+  localWebSearch?: 'off' | 'on' | 'fallback';
+  /** Experimental: Multi-source research requirements */
+  multiSourceResearch?: boolean;
+  /** Timestamp of last update for synchronization */
+  updatedAt?: number;
+}
+
 export interface KoryphaiosConfig {
   providers: Record<string, ProviderConfig>;
   agents: {
@@ -77,6 +110,12 @@ export interface KoryphaiosConfig {
     coder: { model: string; maxTokens?: number; reasoningLevel?: string };
     task: { model: string; maxTokens?: number };
   };
+  /** Enable critic quality gate after worker completion. Disabled = faster/cheaper but less thorough. @default true */
+  enableCritic?: boolean;
+  /** UI Mode - beginner or advanced. @default "beginner" */
+  mode?: 'beginner' | 'advanced';
+  /** Full agent behavioral settings. If provided, overrides enableCritic. */
+  agentSettings?: AgentSettings;
   /** Mapping of worker domains to specific models. Example: "ui": "openai:gpt-4.1" */
   assignments?: Partial<Record<WorkerDomain, string>>;
   /**
@@ -89,7 +128,8 @@ export interface KoryphaiosConfig {
   telegram?: TelegramConfig;
   discord?: DiscordConfig;
   slack?: SlackConfig;
-  server: ServerConfig;
+  /** Server infrastructure settings. Deprecated: Use app.config.json instead. */
+  server?: ServerConfig;
   contextPaths?: string[];
   dataDirectory: string;
   /** Allowed CORS origins */
@@ -98,4 +138,6 @@ export interface KoryphaiosConfig {
   safety?: SafetyLimits;
   /** Workspace/Worktree configuration for parallel agent isolation */
   workspace?: WorkspaceConfig;
+  /** Timestamp of last update for synchronization */
+  updatedAt?: number;
 }

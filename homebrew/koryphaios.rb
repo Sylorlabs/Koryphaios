@@ -10,7 +10,7 @@
 #   brew upgrade koryphaios
 
 class Koryphaios < Formula
-  desc "AI Agent Orchestration Dashboard"
+  desc "The Autonomous Workspace for 100% AI-Generated Code"
   homepage "https://koryphaios.com"
   version "0.2.0"
 

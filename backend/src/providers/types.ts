@@ -1,22 +1,22 @@
 // Provider abstraction layer — modeled after OpenCode's baseProvider pattern.
 // Each provider implements a uniform streaming interface regardless of underlying API.
 
-import type { ModelDef, ProviderConfig, ProviderName } from "@koryphaios/shared";
+import type { ModelDef, ProviderConfig, ProviderName } from '@koryphaios/shared';
 
 // Export model catalog and helpers from the new modular structure
-export * from "./models";
+export * from './models';
 
 // ─── Provider Events (streaming protocol) ───────────────────────────────────
 
 export type ProviderEventType =
-  | "content_delta"
-  | "thinking_delta"
-  | "tool_use_start"
-  | "tool_use_delta"
-  | "tool_use_stop"
-  | "usage_update"
-  | "complete"
-  | "error";
+  | 'content_delta'
+  | 'thinking_delta'
+  | 'tool_use_start'
+  | 'tool_use_delta'
+  | 'tool_use_stop'
+  | 'usage_update'
+  | 'complete'
+  | 'error';
 
 export interface ProviderEvent {
   type: ProviderEventType;
@@ -28,7 +28,7 @@ export interface ProviderEvent {
   tokensIn?: number;
   tokensOut?: number;
   tokensCache?: number; // Added for caching support
-  finishReason?: "end_turn" | "tool_use" | "max_tokens" | "stop";
+  finishReason?: 'end_turn' | 'tool_use' | 'max_tokens' | 'stop';
   error?: string;
 }
 
@@ -50,7 +50,7 @@ export interface ProviderToolCall {
 }
 
 export interface ProviderMessage {
-  role: "user" | "assistant" | "system" | "tool";
+  role: 'user' | 'assistant' | 'system' | 'tool';
   content: string | ProviderContentBlock[];
   /** Required for role "tool": ID of the tool call this result belongs to. */
   tool_call_id?: string;
@@ -59,7 +59,7 @@ export interface ProviderMessage {
 }
 
 export interface ProviderContentBlock {
-  type: "text" | "image" | "tool_use" | "tool_result";
+  type: 'text' | 'image' | 'tool_use' | 'tool_result';
   text?: string;
   toolCallId?: string;
   toolName?: string;

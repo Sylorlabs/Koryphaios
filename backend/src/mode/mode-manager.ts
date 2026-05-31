@@ -2,36 +2,36 @@
  * Mode Manager - Handles UI mode state and configuration
  */
 
-import type { 
-  UIMode, 
-  ModeConfig, 
-  ModeContext,
-  UIModeConfig 
-} from "@koryphaios/shared";
-import { 
+import type { UIMode, ModeConfig, ModeContext, UIModeConfig } from '@koryphaios/shared';
+import {
   DEFAULT_UI_MODE_CONFIG,
   DEFAULT_BEGINNER_CONFIG,
   DEFAULT_ADVANCED_CONFIG,
   BEGINNER_TOOL_WHITELIST,
-} from "@koryphaios/shared";
-import { getPrompts, type PromptTemplate } from "../kory/prompts";
-import type { GitManager } from "../kory/git-manager";
+} from '@koryphaios/shared';
+import { getPrompts, type PromptTemplate } from '../kory/prompts';
+import type { GitManager } from '../kory/git-manager';
+import { syncModeToConfig } from '../runtime/config';
 
 export class ModeManager {
-  private currentMode: UIMode = "beginner";
+  private currentMode: UIMode = 'beginner';
   private config: UIModeConfig;
   private gitManager: GitManager | null = null;
+  private projectRoot: string;
 
-  constructor(config?: Partial<UIModeConfig>) {
+  constructor(projectRoot: string, config?: Partial<UIModeConfig>) {
+    this.projectRoot = projectRoot;
     this.config = {
       ...DEFAULT_UI_MODE_CONFIG,
       ...config,
       beginner: { ...DEFAULT_BEGINNER_CONFIG, ...config?.beginner },
       advanced: { ...DEFAULT_ADVANCED_CONFIG, ...config?.advanced },
     };
-    
+
     // Set initial mode
-    if (this.config.mode !== "adaptive") {
+    if (config?.mode && config.mode !== 'adaptive') {
+      this.currentMode = config.mode as UIMode;
+    } else if (this.config.mode !== 'adaptive') {
       this.currentMode = this.config.mode;
     }
   }
@@ -51,17 +51,19 @@ export class ModeManager {
   }
 
   /**
-   * Set mode explicitly
+   * Set mode explicitly and persist to config
    */
   setMode(mode: UIMode): void {
     this.currentMode = mode;
+    syncModeToConfig(this.projectRoot, mode);
   }
 
   /**
-   * Toggle between beginner and advanced
+   * Toggle between beginner and advanced and persist
    */
   toggleMode(): UIMode {
-    this.currentMode = this.currentMode === "beginner" ? "advanced" : "beginner";
+    const newMode = this.currentMode === 'beginner' ? 'advanced' : 'beginner';
+    this.setMode(newMode);
     return this.currentMode;
   }
 
@@ -69,9 +71,7 @@ export class ModeManager {
    * Get current mode configuration
    */
   getModeConfig(): ModeConfig {
-    return this.currentMode === "beginner" 
-      ? this.config.beginner 
-      : this.config.advanced;
+    return this.currentMode === 'beginner' ? this.config.beginner : this.config.advanced;
   }
 
   /**
@@ -97,11 +97,11 @@ export class ModeManager {
    */
   isToolAllowed(toolName: string): boolean {
     const modeConfig = this.getModeConfig();
-    
-    if (modeConfig.toolAccess === "full") {
+
+    if (modeConfig.toolAccess === 'full') {
       return true;
     }
-    
+
     // Curated mode - check whitelist
     return BEGINNER_TOOL_WHITELIST.includes(toolName);
   }
@@ -111,12 +111,12 @@ export class ModeManager {
    */
   filterTools<T extends { name: string }>(tools: T[]): T[] {
     const modeConfig = this.getModeConfig();
-    
-    if (modeConfig.toolAccess === "full") {
+
+    if (modeConfig.toolAccess === 'full') {
       return tools;
     }
-    
-    return tools.filter(t => BEGINNER_TOOL_WHITELIST.includes(t.name));
+
+    return tools.filter((t) => BEGINNER_TOOL_WHITELIST.includes(t.name));
   }
 
   /**
@@ -178,17 +178,17 @@ export class ModeManager {
   /**
    * Get formatted thought message
    */
-  getThought(type: keyof PromptTemplate["thoughts"]): string {
+  getThought(type: keyof PromptTemplate['thoughts']): string {
     return this.getPrompts().thoughts[type];
   }
 
   /**
    * Get error message for current mode
    */
-  getError(type: keyof PromptTemplate["errors"], vars?: Record<string, string>): string {
+  getError(type: keyof PromptTemplate['errors'], vars?: Record<string, string>): string {
     const template = this.getPrompts().errors[type];
     if (!vars) return template;
-    
+
     // Simple variable substitution
     return template.replace(/\$\{(\w+)\}/g, (match, key) => vars[key] ?? match);
   }
@@ -197,7 +197,7 @@ export class ModeManager {
    * Check if we should warn about missing git repo (beginner mode only)
    */
   shouldWarnNoGitRepo(): boolean {
-    if (this.currentMode !== "beginner") return false;
+    if (this.currentMode !== 'beginner') return false;
     return !this.gitManager?.isGitRepo();
   }
 
@@ -209,12 +209,14 @@ export class ModeManager {
   }
 }
 
+import { PROJECT_ROOT } from '../runtime/paths';
+
 // Singleton instance
 let modeManagerInstance: ModeManager | null = null;
 
 export function getModeManager(config?: Partial<UIModeConfig>): ModeManager {
   if (!modeManagerInstance) {
-    modeManagerInstance = new ModeManager(config);
+    modeManagerInstance = new ModeManager(PROJECT_ROOT, config);
   }
   return modeManagerInstance;
 }

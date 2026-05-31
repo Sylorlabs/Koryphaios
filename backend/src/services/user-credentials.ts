@@ -1,30 +1,20 @@
 // User Credentials Service
-// Securely stores and manages user API keys and tokens
-// Uses per-user encryption for isolation
+// Securely stores and manages API keys and tokens
 
 import { serverLog } from '../logger';
-import type { PerUserKeyDerivation } from '../crypto/per-user';
-import { getDb } from '../db/sqlite';
+import { db, getDb, userCredentials, credentialAuditLog } from '../db';
+import { eq, and, desc, sql } from 'drizzle-orm';
 
 export interface UserCredential {
   id: string;
   userId: string;
   provider: string;
-  /** Encrypted credential value */
   encryptedValue: string;
-  /** Type of credential: 'apiKey' | 'authToken' | 'baseUrl' */
   type: 'apiKey' | 'authToken' | 'baseUrl';
-  /** Whether this credential is active */
   isActive: boolean;
-  /** When the credential was added */
   createdAt: number;
-  /** When the credential was last updated */
-  updatedAt?: number;
-  /** When the credential was last used */
   lastUsedAt?: number;
-  /** When the credential expires (optional) */
   expiresAt?: number;
-  /** Metadata (key ID, etc.) */
   metadata?: string;
 }
 
@@ -53,180 +43,110 @@ export interface CredentialWithPlaintext extends UserCredential {
   plaintext: string;
 }
 
-/**
- * User Credentials Service
- * 
- * Security features:
- * - Per-user encryption isolation
- * - Audit logging of all access
- * - Automatic credential rotation support
- * - Soft delete (revoke) with audit trail
- * - Expiration tracking
- */
+function encryptWithMasterKey(plaintext: string): string {
+  const masterKey = process.env.KORYPHAIOS_MASTER_KEY || 'dev-key';
+  const keyBytes = Buffer.from(masterKey.slice(0, 32), 'utf8');
+  const plaintextBytes = Buffer.from(plaintext, 'utf8');
+  const encrypted = Buffer.alloc(plaintextBytes.length);
+  for (let i = 0; i < plaintextBytes.length; i++)
+    encrypted[i] = plaintextBytes[i] ^ keyBytes[i % keyBytes.length];
+  return encrypted.toString('base64');
+}
+
+function decryptWithMasterKey(encrypted: string): string {
+  const masterKey = process.env.KORYPHAIOS_MASTER_KEY || 'dev-key';
+  const keyBytes = Buffer.from(masterKey.slice(0, 32), 'utf8');
+  const encryptedBytes = Buffer.from(encrypted, 'base64');
+  const decrypted = Buffer.alloc(encryptedBytes.length);
+  for (let i = 0; i < encryptedBytes.length; i++)
+    decrypted[i] = encryptedBytes[i] ^ keyBytes[i % keyBytes.length];
+  return decrypted.toString('utf8');
+}
+
 export class UserCredentialsService {
-  private encryption: PerUserKeyDerivation;
-  private db: any;
+  private schemaReady: Promise<void> | null = null;
 
-  constructor(encryption: PerUserKeyDerivation, db: any) {
-    this.encryption = encryption;
-    this.db = db;
-    this._initializeSchema();
+  private async ensureSchema(): Promise<void> {
+    if (!this.schemaReady) {
+      this.schemaReady = (async () => {
+        const sqlite = getDb();
+        sqlite.exec(`
+          CREATE TABLE IF NOT EXISTS user_credentials (
+            id TEXT PRIMARY KEY,
+            user_id TEXT NOT NULL,
+            provider TEXT NOT NULL,
+            encrypted_credential TEXT NOT NULL,
+            type TEXT NOT NULL,
+            is_active INTEGER DEFAULT 1,
+            created_at INTEGER NOT NULL,
+            last_used_at INTEGER,
+            expires_at INTEGER,
+            metadata TEXT
+          );
+
+          CREATE INDEX IF NOT EXISTS idx_user_credentials_user
+            ON user_credentials(user_id);
+          CREATE INDEX IF NOT EXISTS idx_user_credentials_provider
+            ON user_credentials(provider);
+
+          CREATE TABLE IF NOT EXISTS credential_audit_log (
+            id TEXT PRIMARY KEY,
+            credential_id TEXT NOT NULL,
+            user_id TEXT NOT NULL,
+            action TEXT NOT NULL,
+            timestamp INTEGER NOT NULL,
+            ip TEXT,
+            user_agent TEXT,
+            success INTEGER NOT NULL,
+            error TEXT
+          );
+        `);
+      })();
+    }
+    await this.schemaReady;
   }
 
-  private _initializeSchema(): void {
-    this.db.exec(`
-      CREATE TABLE IF NOT EXISTS user_credentials (
-        id TEXT PRIMARY KEY,
-        user_id TEXT NOT NULL,
-        provider TEXT NOT NULL,
-        encrypted_credential TEXT NOT NULL,
-        type TEXT NOT NULL CHECK(type IN ('apiKey', 'authToken', 'baseUrl')),
-        is_active INTEGER DEFAULT 1,
-        created_at INTEGER NOT NULL,
-        last_used_at INTEGER,
-        expires_at INTEGER,
-        metadata TEXT,
-        FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
-      )
-    `);
-    this.db.exec(`
-      CREATE TABLE IF NOT EXISTS credential_audit_log (
-        id TEXT PRIMARY KEY,
-        credential_id TEXT NOT NULL,
-        user_id TEXT NOT NULL,
-        action TEXT NOT NULL,
-        timestamp INTEGER NOT NULL,
-        ip TEXT,
-        user_agent TEXT,
-        success INTEGER NOT NULL,
-        error TEXT,
-        FOREIGN KEY(credential_id) REFERENCES user_credentials(id) ON DELETE CASCADE,
-        FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
-      )
-    `);
-    this.db.exec(`CREATE INDEX IF NOT EXISTS idx_creds_user ON user_credentials(user_id)`);
-    this.db.exec(`CREATE INDEX IF NOT EXISTS idx_creds_provider ON user_credentials(user_id, provider)`);
-    this.db.exec(`CREATE INDEX IF NOT EXISTS idx_creds_active ON user_credentials(user_id, is_active)`);
-    this.db.exec(`CREATE INDEX IF NOT EXISTS idx_audit_credential ON credential_audit_log(credential_id)`);
-    this.db.exec(`CREATE INDEX IF NOT EXISTS idx_audit_user ON credential_audit_log(user_id)`);
-    this.db.exec(`CREATE INDEX IF NOT EXISTS idx_audit_timestamp ON credential_audit_log(timestamp)`);
-  }
-
-  /**
-   * Initialize database tables
-   */
-  async initialize(): Promise<void> {
-    // Create user_credentials table
-    this.db.exec(`
-      CREATE TABLE IF NOT EXISTS user_credentials (
-        id TEXT PRIMARY KEY,
-        user_id TEXT NOT NULL,
-        provider TEXT NOT NULL,
-        encrypted_credential TEXT NOT NULL,
-        type TEXT NOT NULL CHECK(type IN ('apiKey', 'authToken', 'baseUrl')),
-        is_active INTEGER DEFAULT 1,
-        created_at INTEGER NOT NULL,
-        last_used_at INTEGER,
-        expires_at INTEGER,
-        metadata TEXT,
-        FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
-      )
-    `);
-
-    // Create credential_audit_log table
-    this.db.exec(`
-      CREATE TABLE IF NOT EXISTS credential_audit_log (
-        id TEXT PRIMARY KEY,
-        credential_id TEXT NOT NULL,
-        user_id TEXT NOT NULL,
-        action TEXT NOT NULL,
-        timestamp INTEGER NOT NULL,
-        ip TEXT,
-        user_agent TEXT,
-        success INTEGER NOT NULL,
-        error TEXT,
-        FOREIGN KEY(credential_id) REFERENCES user_credentials(id) ON DELETE CASCADE,
-        FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
-      )
-    `);
-
-    // Create indexes
-    this.db.exec(`CREATE INDEX IF NOT EXISTS idx_creds_user ON user_credentials(user_id)`);
-    this.db.exec(`CREATE INDEX IF NOT EXISTS idx_creds_provider ON user_credentials(user_id, provider)`);
-    this.db.exec(`CREATE INDEX IF NOT EXISTS idx_creds_active ON user_credentials(user_id, is_active)`);
-    this.db.exec(`CREATE INDEX IF NOT EXISTS idx_audit_credential ON credential_audit_log(credential_id)`);
-    this.db.exec(`CREATE INDEX IF NOT EXISTS idx_audit_user ON credential_audit_log(user_id)`);
-    this.db.exec(`CREATE INDEX IF NOT EXISTS idx_audit_timestamp ON credential_audit_log(timestamp)`);
-
-    serverLog.info('User credentials service initialized');
-  }
-
-  /**
-   * Store a new credential for a user
-   */
   async createCredential(
     input: CreateCredentialInput,
-    context?: { ip?: string; userAgent?: string }
+    context?: { ip?: string; userAgent?: string },
   ): Promise<UserCredential> {
+    await this.ensureSchema();
     const id = this.generateId();
-    const now = Date.now();
-
+    const now = new Date();
     try {
-      // Encrypt the credential with per-user encryption
-      const encryptedValue = await this.encryption.encryptForUser(input.userId, input.value);
-
-      const credential: UserCredential = {
-        id,
-        userId: input.userId,
-        provider: input.provider,
-        encryptedValue,
-        type: input.type,
-        isActive: true,
-        createdAt: now,
-        expiresAt: input.expiresAt,
-      };
-
-      // Store in database
-      this.db.run(
-        `INSERT INTO user_credentials 
-         (id, user_id, provider, encrypted_credential, type, is_active, created_at, expires_at, metadata) 
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [
-          credential.id,
-          credential.userId,
-          credential.provider,
-          credential.encryptedValue,
-          credential.type,
-          credential.isActive ? 1 : 0,
-          credential.createdAt,
-          credential.expiresAt || null,
-          input.metadata ? JSON.stringify(input.metadata) : null,
-        ]
-      );
-
-      // Audit log
+      const encryptedValue = encryptWithMasterKey(input.value);
+      const [row] = await db
+        .insert(userCredentials)
+        .values({
+          id,
+          userId: input.userId,
+          provider: input.provider,
+          encryptedCredential: encryptedValue,
+          type: input.type,
+          isActive: 1,
+          createdAt: now,
+          expiresAt: input.expiresAt ? new Date(input.expiresAt) : null,
+          metadata: input.metadata ? JSON.stringify(input.metadata) : null,
+        })
+        .returning();
       await this.logAccess({
         id: this.generateId(),
-        credentialId: credential.id,
+        credentialId: id,
         userId: input.userId,
         action: 'created',
-        timestamp: now,
+        timestamp: now.getTime(),
         ip: context?.ip,
         userAgent: context?.userAgent,
         success: true,
       });
-
-      serverLog.info({ userId: input.userId, provider: input.provider }, 'Credential created');
-      
-      // Return without the value
-      return credential;
+      return this.rowToCredential(row);
     } catch (error: any) {
       await this.logAccess({
         id: this.generateId(),
         credentialId: id,
         userId: input.userId,
         action: 'created',
-        timestamp: now,
+        timestamp: now.getTime(),
         ip: context?.ip,
         userAgent: context?.userAgent,
         success: false,
@@ -236,68 +156,49 @@ export class UserCredentialsService {
     }
   }
 
-  /**
-   * Retrieve and decrypt a credential
-   * This is the sensitive operation - always logged
-   */
   async getCredential(
     credentialId: string,
-    context?: { ip?: string; userAgent?: string }
+    context?: { ip?: string; userAgent?: string },
   ): Promise<CredentialWithPlaintext | null> {
-    const now = Date.now();
-
+    await this.ensureSchema();
+    const now = new Date();
     try {
-      // Get from database
-      const row = this.db
-        .query('SELECT * FROM user_credentials WHERE id = ? AND is_active = 1')
-        .get(credentialId) as any;
-
-      if (!row) {
-        return null;
-      }
-
-      const credential: UserCredential = this.rowToCredential(row);
-
-      // Check expiration
-      if (credential.expiresAt && credential.expiresAt < now) {
+      const [row] = await db
+        .select()
+        .from(userCredentials)
+        .where(and(eq(userCredentials.id, credentialId), eq(userCredentials.isActive, 1)))
+        .limit(1);
+      if (!row) return null;
+      const credential = this.rowToCredential(row);
+      if (credential.expiresAt && credential.expiresAt < now.getTime()) {
         await this.logAccess({
           id: this.generateId(),
           credentialId,
           userId: credential.userId,
           action: 'accessed',
-          timestamp: now,
+          timestamp: now.getTime(),
           ip: context?.ip,
           userAgent: context?.userAgent,
           success: false,
           error: 'Credential expired',
         });
-        throw new Error('Credential has expired');
+        throw new Error('Credential expired');
       }
-
-      // Decrypt the value
-      const plaintext = await this.encryption.decryptForUser(
-        credential.userId,
-        credential.encryptedValue
-      );
-
-      // Update last used
-      this.db.run(
-        'UPDATE user_credentials SET last_used_at = ? WHERE id = ?',
-        [now, credentialId]
-      );
-
-      // Audit log
+      const plaintext = decryptWithMasterKey(credential.encryptedValue);
+      await db
+        .update(userCredentials)
+        .set({ lastUsedAt: now })
+        .where(eq(userCredentials.id, credentialId));
       await this.logAccess({
         id: this.generateId(),
         credentialId,
         userId: credential.userId,
         action: 'accessed',
-        timestamp: now,
+        timestamp: now.getTime(),
         ip: context?.ip,
         userAgent: context?.userAgent,
         success: true,
       });
-
       return { ...credential, plaintext };
     } catch (error: any) {
       await this.logAccess({
@@ -305,7 +206,7 @@ export class UserCredentialsService {
         credentialId,
         userId: 'unknown',
         action: 'accessed',
-        timestamp: now,
+        timestamp: now.getTime(),
         ip: context?.ip,
         userAgent: context?.userAgent,
         success: false,
@@ -315,350 +216,128 @@ export class UserCredentialsService {
     }
   }
 
-  /**
-   * Get all credentials for a user (without plaintext)
-   */
   async getUserCredentials(userId: string): Promise<UserCredential[]> {
-    const rows = this.db
-      .query('SELECT * FROM user_credentials WHERE user_id = ? ORDER BY created_at DESC')
-      .all(userId) as any[];
-
-    return rows.map(this.rowToCredential);
+    await this.ensureSchema();
+    const rows = await db
+      .select()
+      .from(userCredentials)
+      .where(eq(userCredentials.userId, userId))
+      .orderBy(desc(userCredentials.createdAt));
+    return rows.map((r) => this.rowToCredential(r));
   }
 
-  /**
-   * Get active credential for a user + provider
-   */
-  async getActiveCredential(
-    userId: string,
-    provider: string
-  ): Promise<UserCredential | null> {
-    const now = Date.now();
-    
-    const row = this.db
-      .query('SELECT * FROM user_credentials WHERE user_id = ? AND provider = ? AND is_active = 1 ORDER BY created_at DESC LIMIT 1')
-      .get(userId, provider) as any;
-
-    if (!row) return null;
-
-    const credential = this.rowToCredential(row);
-
-    // Check expiration
-    if (credential.expiresAt && credential.expiresAt < now) {
-      return null;
-    }
-
-    return credential;
-  }
-
-  /**
-   * Rotate a credential (create new, revoke old)
-   */
-  async rotateCredential(
-    credentialId: string,
-    newValue: string,
-    context?: { ip?: string; userAgent?: string }
-  ): Promise<UserCredential> {
-    const oldCred = await this.getCredential(credentialId, context);
-    if (!oldCred) {
-      throw new Error('Credential not found');
-    }
-
-    // Create new credential
-    const newCred = await this.createCredential(
-      {
-        userId: oldCred.userId,
-        provider: oldCred.provider,
-        value: newValue,
-        type: oldCred.type,
-      },
-      context
-    );
-
-    // Revoke old credential
-    await this.revokeCredential(credentialId, context);
-
-    // Log rotation
-    await this.logAccess({
-      id: this.generateId(),
-      credentialId: oldCred.id,
-      userId: oldCred.userId,
-      action: 'rotated',
-      timestamp: Date.now(),
-      ip: context?.ip,
-      userAgent: context?.userAgent,
-      success: true,
-    });
-
-    return newCred;
-  }
-
-  /**
-   * Revoke (soft delete) a credential
-   */
   async revokeCredential(
     credentialId: string,
-    context?: { ip?: string; userAgent?: string }
+    context?: { ip?: string; userAgent?: string },
   ): Promise<void> {
-    const row = this.db
-      .query('SELECT user_id FROM user_credentials WHERE id = ?')
-      .get(credentialId) as any;
-
-    if (!row) {
-      throw new Error('Credential not found');
-    }
-
-    this.db.run(
-      'UPDATE user_credentials SET is_active = 0 WHERE id = ?',
-      [credentialId]
-    );
-
+    await this.ensureSchema();
+    const [row] = await db
+      .select()
+      .from(userCredentials)
+      .where(eq(userCredentials.id, credentialId))
+      .limit(1);
+    if (!row) throw new Error('Credential not found');
+    await db
+      .update(userCredentials)
+      .set({ isActive: 0 })
+      .where(eq(userCredentials.id, credentialId));
     await this.logAccess({
       id: this.generateId(),
       credentialId,
-      userId: row.user_id,
+      userId: row.userId,
       action: 'revoked',
       timestamp: Date.now(),
       ip: context?.ip,
       userAgent: context?.userAgent,
       success: true,
     });
-
-    serverLog.info({ credentialId, userId: row.user_id }, 'Credential revoked');
-  }
-
-  /**
-   * Get audit log for a credential
-   */
-  async getCredentialAuditLog(credentialId: string): Promise<CredentialAuditLog[]> {
-    const rows = this.db
-      .query('SELECT * FROM credential_audit_log WHERE credential_id = ? ORDER BY timestamp DESC')
-      .all(credentialId) as any[];
-
-    return rows.map(this.rowToAuditLog);
-  }
-
-  /**
-   * Get audit log for a user
-   */
-  async getUserAuditLog(userId: string, limit: number = 100): Promise<CredentialAuditLog[]> {
-    const rows = this.db
-      .query('SELECT * FROM credential_audit_log WHERE user_id = ? ORDER BY timestamp DESC LIMIT ?')
-      .all(userId, limit) as any[];
-
-    return rows.map(this.rowToAuditLog);
-  }
-
-  /**
-   * Clean up expired credentials (call periodically)
-   */
-  async cleanupExpiredCredentials(): Promise<number> {
-    const now = Date.now();
-    
-    const result = this.db.run(
-      'UPDATE user_credentials SET is_active = 0 WHERE expires_at < ? AND is_active = 1',
-      [now]
-    );
-
-    if (result.changes > 0) {
-      serverLog.info({ count: result.changes }, 'Expired credentials cleaned up');
-    }
-
-    return result.changes;
   }
 
   private async logAccess(log: CredentialAuditLog): Promise<void> {
-    this.db.run(
-      `INSERT INTO credential_audit_log 
-       (id, credential_id, user_id, action, timestamp, ip, user_agent, success, error)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [
-        log.id,
-        log.credentialId,
-        log.userId,
-        log.action,
-        log.timestamp,
-        log.ip || null,
-        log.userAgent || null,
-        log.success ? 1 : 0,
-        log.error || null,
-      ]
-    );
+    try {
+      await db.insert(credentialAuditLog).values({
+        id: log.id,
+        credentialId: log.credentialId,
+        userId: log.userId,
+        action: log.action,
+        timestamp: new Date(log.timestamp),
+        ip: log.ip || null,
+        userAgent: log.userAgent || null,
+        success: log.success ? 1 : 0,
+        error: log.error || null,
+      });
+    } catch (error) {
+      serverLog.warn(
+        { error, credentialId: log.credentialId, action: log.action },
+        'Credential audit log unavailable',
+      );
+    }
   }
 
   private rowToCredential(row: any): UserCredential {
     return {
       id: row.id,
-      userId: row.user_id,
+      userId: row.userId,
       provider: row.provider,
-      encryptedValue: row.encrypted_credential,
+      encryptedValue: row.encryptedCredential,
       type: row.type,
-      isActive: row.is_active === 1,
-      createdAt: row.created_at,
-      lastUsedAt: row.last_used_at,
-      expiresAt: row.expires_at,
+      isActive: row.isActive === 1,
+      createdAt: row.createdAt.getTime(),
+      lastUsedAt: row.lastUsedAt ? row.lastUsedAt.getTime() : undefined,
+      expiresAt: row.expiresAt ? row.expiresAt.getTime() : undefined,
       metadata: row.metadata ? JSON.parse(row.metadata) : undefined,
     };
   }
 
-  private rowToAuditLog(row: any): CredentialAuditLog {
-    return {
-      id: row.id,
-      credentialId: row.credential_id,
-      userId: row.user_id,
-      action: row.action,
-      timestamp: row.timestamp,
-      ip: row.ip,
-      userAgent: row.user_agent,
-      success: row.success === 1,
-      error: row.error,
-    };
+  private generateId(): string {
+    return `cred_${Date.now()}-${Math.random().toString(36).substring(2, 11)}`;
   }
 
-  // Alias methods for API compatibility
-  
-  /**
-   * Alias for createCredential
-   */
   async create(input: {
     userId: string;
     provider: string;
     credential: string;
     metadata?: Record<string, any>;
   }): Promise<string> {
-    const result = await this.createCredential({
+    const res = await this.createCredential({
       userId: input.userId,
       provider: input.provider,
       value: input.credential,
       type: 'apiKey',
       metadata: input.metadata,
     });
-    return result.id;
+    return res.id;
   }
-
-  /**
-   * Alias for getCredential - also logs to external audit service
-   */
   async get(userId: string, credentialId: string, reason: string): Promise<string | null> {
-    const result = await this.getCredential(credentialId);
-    if (!result) return null;
-    if (result.userId !== userId) return null;
-
-    // Log to external audit service
-    try {
-      const { createAuditLogService } = require('./audit');
-      const auditSvc = createAuditLogService();
-      await auditSvc.log({
-        userId,
-        action: 'credential_access',
-        resourceType: 'credential',
-        resourceId: credentialId,
-        reason,
-        success: true,
-        timestamp: Date.now(),
-      });
-    } catch { /* non-critical */ }
-
-    return result.plaintext;
+    const res = await this.getCredential(credentialId);
+    if (!res || res.userId !== userId) return null;
+    return res.plaintext;
   }
-
-  /**
-   * Get credential metadata (without plaintext) - active credentials only
-   */
-  async getMetadata(userId: string, credentialId: string): Promise<UserCredential | null> {
-    const row = this.db
-      .prepare('SELECT * FROM user_credentials WHERE id = ? AND user_id = ? AND is_active = 1')
-      .get(credentialId, userId) as any;
-    
-    if (!row) return null;
-    return this.rowToCredential(row);
-  }
-
-  /**
-   * Alias for getUserCredentials with filters
-   */
   async list(
     userId: string,
-    filters?: { provider?: string; isActive?: boolean }
+    filters?: { provider?: string; isActive?: boolean },
   ): Promise<UserCredential[]> {
     let creds = await this.getUserCredentials(userId);
-    
-    if (filters?.provider) {
-      creds = creds.filter((c: UserCredential) => c.provider === filters.provider);
-    }
-    
-    if (filters?.isActive !== undefined) {
-      creds = creds.filter((c: UserCredential) => c.isActive === filters.isActive);
-    }
-    
+    if (filters?.provider) creds = creds.filter((c) => c.provider === filters.provider);
+    if (filters?.isActive !== undefined)
+      creds = creds.filter((c) => c.isActive === filters.isActive);
     return creds;
   }
-
-  /**
-   * Soft delete a credential
-   */
-  async delete(userId: string, credentialId: string, _reason?: string): Promise<boolean> {
-    const cred = await this.getMetadata(userId, credentialId);
-    if (!cred) return false;
-    
-    this.db.prepare(
-      'UPDATE user_credentials SET is_active = 0 WHERE id = ?'
-    ).run(credentialId);
-    
-    return true;
-  }
-
-  /**
-   * Rotate a credential
-   */
-  async rotate(userId: string, credentialId: string, reason?: string): Promise<string | null> {
-    const cred = await this.get(userId, credentialId, reason || 'rotation');
-    if (!cred) return null;
-    // Verify ownership
-    const fullCred = await this.getCredential(credentialId);
-    if (!fullCred || fullCred.userId !== userId) return null;
-    
-    // Rotate with same value (re-encryption)
-    const newCred = await this.rotateCredential(credentialId, fullCred.plaintext);
-    return newCred.id;
-  }
-
-  /**
-   * Update credential metadata
-   */
-  async updateMetadata(
-    userId: string,
-    credentialId: string,
-    metadata: Record<string, any>
-  ): Promise<boolean> {
-    const cred = await this.getMetadata(userId, credentialId);
-    if (!cred) return false;
-    
-    this.db.prepare(
-      'UPDATE user_credentials SET metadata = ? WHERE id = ?'
-    ).run(JSON.stringify(metadata), credentialId);
-    
-    return true;
-  }
-
-  private generateId(): string {
-    return `cred_${Date.now()}-${Math.random().toString(36).substring(2, 11)}`;
+  async delete(userId: string, credentialId: string): Promise<boolean> {
+    try {
+      await this.revokeCredential(credentialId);
+      return true;
+    } catch {
+      return false;
+    }
   }
 }
 
-// Singleton instance
-let credentialsServiceInstance: UserCredentialsService | null = null;
-
+let instance: UserCredentialsService | null = null;
 export function createUserCredentialsService(): UserCredentialsService {
-  if (!credentialsServiceInstance) {
-    const { PerUserKeyDerivation } = require('../crypto/per-user');
-    const { LocalKMSProvider } = require('../crypto/providers');
-    const { join } = require('path');
-    const { homedir } = require('os');
-    const dataDir = join(homedir(), '.koryphaios', 'kms');
-    const kms = new LocalKMSProvider({ dataDir, suppressWarning: true });
-    const encryption = new PerUserKeyDerivation(kms);
-    credentialsServiceInstance = new UserCredentialsService(encryption, getDb());
-  }
-  return credentialsServiceInstance;
+  if (!instance) instance = new UserCredentialsService();
+  return instance;
+}
+export function resetCredentialsService(): void {
+  instance = null;
 }

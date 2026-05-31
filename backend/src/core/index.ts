@@ -11,20 +11,20 @@
  * Usage: ensure DB is initialized (migrations run), then call runAutoMode() with session context.
  */
 
-import { triage, getCheckedModelsForUser, auditRoutingDecision } from "./routing/TriageEngine";
-import { selectModel } from "./routing/SelectionEngine";
-import { runManagerSession } from "./orchestration/ManagerSession";
-import { runSafe } from "./safe-terminal";
-import type { TriageIntent } from "./routing/types";
-import { serverLog } from "../logger";
+import { triage, getCheckedModelsForUser, auditRoutingDecision } from './routing/TriageEngine';
+import { selectModel } from './routing/SelectionEngine';
+import { runManagerSession } from './orchestration/ManagerSession';
+import { runSafe } from './safe-terminal';
+import type { TriageIntent } from './routing/types';
+import { serverLog } from '../logger';
 
 export { triage, getCheckedModelsForUser, auditRoutingDecision };
-export { selectModel } from "./routing/SelectionEngine";
-export { runManagerSession, runManagerInterview, resolveWorkerModel } from "./orchestration";
-export { runSafe } from "./safe-terminal";
-export { getEnabledModelIds, getEnabledModelsForRouting, setModelChecked } from "./model-settings";
+export { selectModel } from './routing/SelectionEngine';
+export { runManagerSession, runManagerInterview, resolveWorkerModel } from './orchestration';
+export { runSafe } from './safe-terminal';
+export { getEnabledModelIds, getEnabledModelsForRouting, setModelChecked } from './model-settings';
 
-export type { TriageIntent, TriageResult, SelectionResult, ModelTier } from "./routing/types";
+export type { TriageIntent, TriageResult, SelectionResult, ModelTier } from './routing/types';
 
 /**
  * Run Intelligent Auto-Mode: triage -> select model (from checked list only) -> for LARGE run ManagerSession else direct.
@@ -42,7 +42,7 @@ export async function runAutoMode(
     spawnWorker: (task: string, modelId: string, provider: string) => Promise<string>;
     notifyUser?: (message: string) => void;
     useLocalSlm?: boolean;
-  }
+  },
 ): Promise<string> {
   const result = await triage(userMessage, {
     userId: options.userId,
@@ -63,10 +63,10 @@ export async function runAutoMode(
  * Example: use SafeTerminal for any CLI/shell call to avoid deadlocks.
  */
 export async function exampleSafeTerminalUsage(): Promise<void> {
-  const res = await runSafe(["node", "--version"], { timeoutMs: 5000 });
+  const res = await runSafe(['node', '--version'], { timeoutMs: 5000 });
   if (res.timedOut) {
-    serverLog.warn("Command timed out");
+    serverLog.warn('Command timed out');
   } else {
-    serverLog.info({ stdout: res.stdout.trim() }, "Safe terminal command output");
+    serverLog.info({ stdout: res.stdout.trim() }, 'Safe terminal command output');
   }
 }

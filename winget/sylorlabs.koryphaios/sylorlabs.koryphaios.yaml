@@ -14,7 +14,7 @@ License: Proprietary
 LicenseUrl: https://koryphaios.com/license
 Copyright: Copyright (c) 2024-2026 Sylorlabs. All rights reserved.
 CopyrightUrl: https://koryphaios.com/license
-ShortDescription: AI Agent Orchestration Dashboard
+ShortDescription: The Autonomous Workspace for 100% AI-Generated Code
 Description: |
   Koryphaios is a full-stack application that orchestrates AI agents across 
   multiple providers with intelligent routing, task delegation, and real-time 

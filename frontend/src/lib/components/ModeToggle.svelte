@@ -42,7 +42,7 @@
   </div>
 {:else if variant === "switch"}
   <button
-    class="flex items-center gap-2 px-3 py-1.5 rounded-md text-sm font-medium transition-all"
+    class="flex items-center gap-2 px-3 py-1.5 rounded-md text-sm font-medium transition-all active"
     style="background: var(--color-surface-2);"
     onclick={handleToggle}
     disabled={modeStore.isLoading}

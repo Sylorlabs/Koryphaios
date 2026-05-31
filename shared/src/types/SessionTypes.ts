@@ -1,8 +1,8 @@
 // Session Types
 // Domain: Session management and state tracking
 
-import type { AgentRole, AgentStatus, WorkerDomain } from "./AgentTypes";
-import type { ProviderName } from "../providers/ProviderNames";
+import type { AgentRole, AgentStatus, WorkerDomain } from './AgentTypes';
+import type { ProviderName } from '../providers/ProviderNames';
 
 export interface Session {
   id: string;
@@ -18,7 +18,7 @@ export interface Session {
   updatedAt: number;
 }
 
-export type SessionStatus = "active" | "archived" | "deleted";
+export type SessionStatus = 'active' | 'archived' | 'deleted';
 
 export interface SessionMetadata {
   agentCount?: number;
@@ -59,11 +59,11 @@ export interface AgentInfo {
 export interface TaskInfo {
   id: string;
   description: string;
-  status: "pending" | "in_progress" | "completed" | "failed";
+  status: 'pending' | 'in_progress' | 'completed' | 'failed';
   assignedTo?: string;
   startTime?: number;
   endTime?: number;
 }
 
 // Import StoredMessage to avoid circular dependency
-import type { StoredMessage } from "./MessageTypes";
+import type { StoredMessage } from './MessageTypes';

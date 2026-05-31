@@ -1,9 +1,9 @@
 // Security Headers Middleware - Complete Implementation
 // Applies CSP, XSS protection, and other security headers to all responses
 
-import { getCorsHeaders } from "../security";
-import { buildSecurityHeaders, generateCSPNonce, handleCSPViolation } from "../security/csp";
-import { serverLog } from "../logger";
+import { getCorsHeaders } from '../security';
+import { buildSecurityHeaders, generateCSPNonce, handleCSPViolation } from '../security/csp';
+import { serverLog } from '../logger';
 
 /**
  * Security headers middleware configuration
@@ -57,7 +57,7 @@ export function securityHeadersMiddleware(config: SecurityMiddlewareConfig = {})
 
       return response;
     } catch (err) {
-      serverLog.error({ err }, "Failed to apply security headers");
+      serverLog.error({ err }, 'Failed to apply security headers');
       // Fail open - return response without security headers rather than blocking
       return response;
     }
@@ -70,24 +70,24 @@ export function securityHeadersMiddleware(config: SecurityMiddlewareConfig = {})
  */
 export async function handleCSPViolationReport(
   request: Request,
-  response: Response
+  response: Response,
 ): Promise<Response> {
-  if (request.method !== "POST") {
-    return new Response("Method not allowed", { status: 405 });
+  if (request.method !== 'POST') {
+    return new Response('Method not allowed', { status: 405 });
   }
 
   try {
     const report = await request.json();
     await handleCSPViolation(report, {
-      ip: request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "unknown",
-      userAgent: request.headers.get("user-agent") || "unknown",
+      ip: request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() || 'unknown',
+      userAgent: request.headers.get('user-agent') || 'unknown',
       timestamp: Date.now(),
     });
 
-    return new Response("OK", { status: 202 });
+    return new Response('OK', { status: 202 });
   } catch (err) {
-    serverLog.error({ err }, "Failed to process CSP violation report");
-    return new Response("Failed to process report", { status: 400 });
+    serverLog.error({ err }, 'Failed to process CSP violation report');
+    return new Response('Failed to process report', { status: 400 });
   }
 }
 
@@ -95,13 +95,10 @@ export async function handleCSPViolationReport(
  * Middleware to inject CSP nonce into HTML responses
  * This replaces {{NONCE}} placeholders in HTML with the actual nonce
  */
-export function injectCSPNonceMiddleware(
-  request: Request,
-  response: Response
-): Response {
+export function injectCSPNonceMiddleware(request: Request, response: Response): Response {
   const nonce = (response as any).cspNonce;
 
-  if (!nonce || !response.headers.get("Content-Type")?.includes("text/html")) {
+  if (!nonce || !response.headers.get('Content-Type')?.includes('text/html')) {
     return response;
   }
 
@@ -115,9 +112,9 @@ export function injectCSPNonceMiddleware(
  */
 export async function handleOptionsRequest(
   request: Request,
-  response: Response
+  response: Response,
 ): Promise<Response> {
-  const origin = request.headers.get("Origin");
+  const origin = request.headers.get('Origin');
 
   // Get CORS headers
   const corsHeaders = getCorsHeaders(origin);

@@ -1,7 +1,7 @@
 // Type-safe pub/sub event broker — ported from OpenCode's pubsub/broker.go.
 // Uses async generators for backpressure-friendly subscription.
 
-export type EventType = "created" | "updated" | "deleted" | "custom";
+export type EventType = 'created' | 'updated' | 'deleted' | 'custom';
 
 export interface BrokerEvent<T> {
   type: EventType;
@@ -12,18 +12,21 @@ export interface BrokerEvent<T> {
 const MAX_BUFFER = 256;
 
 export class Broker<T> {
-  private subscribers = new Map<string, {
-    controller: ReadableStreamDefaultController<BrokerEvent<T>>;
-    closed: boolean;
-    abortListener?: () => void;
-  }>();
+  private subscribers = new Map<
+    string,
+    {
+      controller: ReadableStreamDefaultController<BrokerEvent<T>>;
+      closed: boolean;
+      abortListener?: () => void;
+    }
+  >();
   private idCounter = 0;
   private isShutdown = false;
 
   /** Subscribe to events. Returns an async iterable that yields events. */
   subscribe(signal?: AbortSignal): ReadableStream<BrokerEvent<T>> {
     if (this.isShutdown) {
-      throw new Error("Broker is shut down");
+      throw new Error('Broker is shut down');
     }
 
     const id = String(++this.idCounter);
@@ -42,7 +45,7 @@ export class Broker<T> {
 
         this.subscribers.set(id, { controller, closed: false, abortListener });
 
-        signal?.addEventListener("abort", abortListener);
+        signal?.addEventListener('abort', abortListener);
       },
       cancel: () => {
         this.unsubscribe(id);
@@ -104,7 +107,9 @@ export class Broker<T> {
           // inside will handle the shutdown case.
         }
         sub.controller.close();
-      } catch { /* Expected: controller may already be closed */ }
+      } catch {
+        /* Expected: controller may already be closed */
+      }
     }
     this.subscribers.delete(id);
   }
@@ -118,12 +123,7 @@ export class Broker<T> {
 // ─── Global Event Bus ───────────────────────────────────────────────────────
 // Singleton brokers for different event domains.
 
-import type {
-  WSMessage,
-  Session,
-  PermissionRequest,
-  AgentIdentity,
-} from "@koryphaios/shared";
+import type { WSMessage, Session, PermissionRequest, AgentIdentity } from '@koryphaios/shared';
 
 export const sessionBroker = new Broker<Session>();
 export const permissionBroker = new Broker<PermissionRequest>();

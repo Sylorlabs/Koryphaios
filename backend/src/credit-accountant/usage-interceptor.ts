@@ -5,9 +5,14 @@
  * and any response where the provider sends usage in headers/body.
  */
 
-import { recordUsage } from "./index";
+import { recordUsage } from './index';
 
-function safeRecordUsage(model: string, provider: string, tokensIn: number, tokensOut: number): void {
+function safeRecordUsage(
+  model: string,
+  provider: string,
+  tokensIn: number,
+  tokensOut: number,
+): void {
   try {
     recordUsage(model, provider, tokensIn, tokensOut);
   } catch {
@@ -15,13 +20,13 @@ function safeRecordUsage(model: string, provider: string, tokensIn: number, toke
   }
 }
 
-const ANTHROPIC_URL_SUBSTR = "anthropic";
-const OPENAI_URL_SUBSTR = "openai.com";
+const ANTHROPIC_URL_SUBSTR = 'anthropic';
+const OPENAI_URL_SUBSTR = 'openai.com';
 
 type FetchImpl = typeof fetch;
 
 function getRequestUrl(input: RequestInfo | URL): string {
-  if (typeof input === "string") return input;
+  if (typeof input === 'string') return input;
   if (input instanceof URL) return input.href;
   return input.url;
 }
@@ -29,7 +34,7 @@ function getRequestUrl(input: RequestInfo | URL): string {
 function parseBodyForModel(body: BodyInit | null | undefined): string | undefined {
   if (body == null) return undefined;
   try {
-    if (typeof body === "string") {
+    if (typeof body === 'string') {
       const data = JSON.parse(body);
       return data?.model ?? undefined;
     }
@@ -49,7 +54,7 @@ function parseBodyForModel(body: BodyInit | null | undefined): string | undefine
 export function createUsageInterceptingFetch(realFetch: FetchImpl): FetchImpl {
   async function interceptingFetch(
     input: RequestInfo | URL,
-    init?: RequestInit
+    init?: RequestInit,
   ): Promise<Response> {
     const url = getRequestUrl(input);
     const isAnthropic = url.includes(ANTHROPIC_URL_SUBSTR);
@@ -65,14 +70,14 @@ export function createUsageInterceptingFetch(realFetch: FetchImpl): FetchImpl {
     if (!model) return response;
 
     if (isAnthropic) {
-      const usageHeader = response.headers.get("x-anthropic-usage");
+      const usageHeader = response.headers.get('x-anthropic-usage');
       if (usageHeader) {
         try {
           const u = JSON.parse(usageHeader) as { input_tokens?: number; output_tokens?: number };
           const in_ = Number(u?.input_tokens ?? 0);
           const out_ = Number(u?.output_tokens ?? 0);
           if (in_ > 0 || out_ > 0) {
-            safeRecordUsage(model, "anthropic", in_, out_);
+            safeRecordUsage(model, 'anthropic', in_, out_);
           }
         } catch {
           // ignore parse errors
@@ -82,11 +87,11 @@ export function createUsageInterceptingFetch(realFetch: FetchImpl): FetchImpl {
     }
 
     if (isOpenAI) {
-      const contentType = response.headers.get("content-type") ?? "";
-      const isJson = contentType.includes("application/json");
-      const isStream = contentType.includes("stream") || response.body != null;
+      const contentType = response.headers.get('content-type') ?? '';
+      const isJson = contentType.includes('application/json');
+      const isStream = contentType.includes('stream') || response.body != null;
       // Only read body for non-streaming JSON (e.g. non-stream completions)
-      if (isJson && !contentType.includes("text/event-stream")) {
+      if (isJson && !contentType.includes('text/event-stream')) {
         try {
           const cloned = response.clone();
           const data = (await cloned.json()) as {
@@ -99,7 +104,7 @@ export function createUsageInterceptingFetch(realFetch: FetchImpl): FetchImpl {
             const in_ = Number(usage.prompt_tokens ?? 0);
             const out_ = Number(usage.completion_tokens ?? 0);
             if (in_ > 0 || out_ > 0) {
-              safeRecordUsage(m, "openai", in_, out_);
+              safeRecordUsage(m, 'openai', in_, out_);
             }
           }
         } catch {

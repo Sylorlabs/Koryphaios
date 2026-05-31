@@ -1,9 +1,9 @@
 /**
  * Shared application configuration
- * 
+ *
  * This module provides a single source of truth for app configuration
  * that is shared between the backend, frontend, and desktop app.
- * 
+ *
  * The configuration is loaded from config/app.config.json at runtime
  * for the desktop app, and from environment variables for the backend.
  */
@@ -39,17 +39,18 @@ export interface AppConfig {
   };
 }
 
-// Default configuration - must match config/app.config.json defaults
+// Default fallback configuration for frontend/shared helpers.
+// Keep this aligned with config/app.config.json unless a caller explicitly needs a different fallback.
 const defaultConfig: AppConfig = {
   app: {
-    name: "Koryphaios",
-    version: "0.1.0",
-    identifier: "com.sylorlabs.koryphaios",
+    name: 'Koryphaios',
+    version: '0.1.0',
+    identifier: 'com.sylorlabs.koryphaios',
   },
   server: {
-    host: "127.0.0.1",
-    port: 3000,
-    wsPath: "/ws",
+    host: '127.0.0.1',
+    port: 3001,
+    wsPath: '/ws',
   },
   window: {
     width: 1280,
@@ -62,11 +63,11 @@ const defaultConfig: AppConfig = {
   security: {
     csp: {
       defaultSrc: ["'self'"],
-      connectSrc: ["'self'", "http://127.0.0.1:*", "ws://127.0.0.1:*"],
-      imgSrc: ["'self'", "data:", "https:"],
+      connectSrc: ["'self'", 'http://127.0.0.1:*', 'ws://127.0.0.1:*'],
+      imgSrc: ["'self'", 'data:', 'https:'],
       styleSrc: ["'self'", "'unsafe-inline'"],
       scriptSrc: ["'self'"],
-      fontSrc: ["'self'", "data:"],
+      fontSrc: ["'self'", 'data:'],
     },
   },
 };

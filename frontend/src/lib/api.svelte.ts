@@ -1,29 +1,38 @@
 /**
- * Shared API helpers — cookie-based auth (credentials: 'include').
- * No tokens in JS; session is in HttpOnly cookies.
+ * Shared API helpers for the local desktop bearer session.
+ * Automatically attaches the current Authorization header when present.
  */
+
+import { authStore } from '$lib/stores/auth.svelte';
 
 const DEFAULT_TIMEOUT_MS = 30_000;
 
 /** Reactive count of in-flight API requests */
 let _inflight = $state(0);
 export const apiLoading = {
-  get count() { return _inflight; },
-  get active() { return _inflight > 0; },
+  get count() {
+    return _inflight;
+  },
+  get active() {
+    return _inflight > 0;
+  },
 };
 
 export function getAuthHeaders(): Record<string, string> {
-  return {};
+  return authStore.token ? { Authorization: authStore.token } : {};
 }
 
 export async function apiFetch(
   url: string,
   init: RequestInit = {},
-  timeoutMs: number = DEFAULT_TIMEOUT_MS
+  timeoutMs: number = DEFAULT_TIMEOUT_MS,
 ): Promise<Response> {
   _inflight++;
   try {
     const headers = new Headers(init.headers);
+    for (const [key, value] of Object.entries(getAuthHeaders())) {
+      if (!headers.has(key)) headers.set(key, value);
+    }
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), timeoutMs);
     try {
@@ -50,18 +59,20 @@ type LooseApiResponse = {
 };
 
 /** Parse response as JSON; on empty or invalid body return { ok: false, error } so callers don't throw. */
-export async function parseJsonResponse<T = LooseApiResponse>(
-  res: Response
-): Promise<T> {
+export async function parseJsonResponse<T = LooseApiResponse>(res: Response): Promise<T> {
   const text = await res.text();
   if (!text.trim()) {
-    const message = res.ok ? 'Empty response from server' : `Request failed: ${res.status} ${res.statusText}`;
+    const message = res.ok
+      ? 'Empty response from server'
+      : `Request failed: ${res.status} ${res.statusText}`;
     return { ok: false, error: message } as T;
   }
   try {
     return JSON.parse(text) as T;
   } catch {
-    const message = res.ok ? 'Invalid JSON from server' : `Request failed: ${res.status} ${res.statusText}`;
+    const message = res.ok
+      ? 'Invalid JSON from server'
+      : `Request failed: ${res.status} ${res.statusText}`;
     return { ok: false, error: message } as T;
   }
 }

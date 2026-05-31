@@ -1,4 +1,14 @@
-export type FeedEntryType = "user_message" | "thought" | "content" | "thinking" | "tool_call" | "tool_result" | "routing" | "error" | "system" | "tool_group";
+export type FeedEntryType =
+  | 'user_message'
+  | 'thought'
+  | 'content'
+  | 'thinking'
+  | 'tool_call'
+  | 'tool_result'
+  | 'routing'
+  | 'error'
+  | 'system'
+  | 'tool_group';
 
 export interface FeedEntryLocal {
   id: string;
@@ -13,6 +23,7 @@ export interface FeedEntryLocal {
   isCollapsed?: boolean;
   entries?: FeedEntryLocal[];
   metadata?: Record<string, unknown>;
+  ghostHash?: string;
 }
 
 /** Alias used by store modules */

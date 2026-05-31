@@ -1,9 +1,8 @@
 // OpenAI provider — supports GPT-4.1, O3, O4-mini, Codex.
 // Also used as base for Groq, OpenRouter, xAI (OpenAI-compatible endpoints).
 
-import OpenAI from "openai";
-import type { ProviderConfig, ProviderName, ModelDef } from "@koryphaios/shared";
-
+import OpenAI from 'openai';
+import type { ProviderConfig, ProviderName, ModelDef } from '@koryphaios/shared';
 
 import {
   type Provider,
@@ -13,33 +12,31 @@ import {
   getModelsForProvider,
   resolveModel,
   createGenericModel,
-} from "./types";
-import { withRetry, withTimeoutSignal } from "./utils";
-import { createUsageInterceptingFetch } from "../credit-accountant";
-import { providerLog } from "../logger";
+} from './types';
+import { withRetry, withTimeoutSignal } from './utils';
+import { createUsageInterceptingFetch } from '../credit-accountant';
+import { providerLog } from '../logger';
 
 export class OpenAIProvider implements Provider {
   protected _client: OpenAI | null = null;
 
   constructor(
     readonly config: ProviderConfig,
-    readonly name: ProviderName = "openai",
+    readonly name: ProviderName = 'openai',
     private readonly baseUrl?: string,
-  ) { }
+  ) {}
 
   protected get client(): OpenAI {
     if (!this._client) {
       const apiKey = this.config.apiKey || this.config.authToken;
       this._client = new OpenAI({
-        apiKey: apiKey || "placeholder",
+        apiKey: apiKey || 'placeholder',
         baseURL: this.baseUrl ?? this.config.baseUrl,
         defaultHeaders: this.config.headers,
         fetch: createUsageInterceptingFetch(globalThis.fetch),
       });
     }
     return this._client;
-
-
   }
 
   isAvailable(): boolean {
@@ -76,12 +73,35 @@ export class OpenAIProvider implements Provider {
         const remoteModels: ModelDef[] = [];
         for await (const model of response) {
           const id = model.id;
-          const existing = localModels.find(m => m.apiModelId === id || m.id === id);
+          const existing = localModels.find((m) => m.apiModelId === id || m.id === id);
           if (existing) continue;
 
           const lowerId = id.toLowerCase();
-          if (lowerId.includes("gpt") || lowerId.includes("o1") || lowerId.includes("o3") || lowerId.includes("o4")) {
-            remoteModels.push(createGenericModel(id, this.name));
+          const isOpenAI = this.name === 'openai';
+          
+          // For OpenAI, keep strict filtering to avoid legacy noise
+          if (isOpenAI) {
+            if (
+              lowerId.includes('gpt') ||
+              lowerId.includes('o1') ||
+              lowerId.includes('o3') ||
+              lowerId.includes('o4')
+            ) {
+              remoteModels.push(createGenericModel(id, this.name));
+            }
+          } else {
+            // For other providers (Groq, Together, DeepSeek, etc), be more inclusive
+            // Filter out obviously non-chat models (embeddings, audio, etc)
+            if (
+              !lowerId.includes('embed') &&
+              !lowerId.includes('whisper') &&
+              !lowerId.includes('tts') &&
+              !lowerId.includes('dall-e') &&
+              !lowerId.includes('moderation') &&
+              !lowerId.includes('rerank')
+            ) {
+              remoteModels.push(createGenericModel(id, this.name));
+            }
           }
         }
 
@@ -91,7 +111,6 @@ export class OpenAIProvider implements Provider {
       .catch(() => {
         // Keep local models on failure
         this.cachedModels ??= localModels;
-
       })
       .finally(() => {
         this.fetchInProgress = false;
@@ -101,7 +120,7 @@ export class OpenAIProvider implements Provider {
   async *streamResponse(request: StreamRequest): AsyncGenerator<ProviderEvent> {
     const messages = this.convertMessages(request);
     const tools = request.tools?.map((t) => ({
-      type: "function" as const,
+      type: 'function' as const,
       function: {
         name: t.name,
         description: t.description,
@@ -113,7 +132,7 @@ export class OpenAIProvider implements Provider {
     const modelDef = resolveModel(request.model);
     const canReason = modelDef?.canReason ?? false;
     const reasoningEffort = request.reasoningLevel?.toLowerCase();
-    const supportedEfforts = ["none", "minimal", "low", "medium", "high", "xhigh"];
+    const supportedEfforts = ['none', 'minimal', 'low', 'medium', 'high', 'xhigh'];
 
     const params: OpenAI.ChatCompletionCreateParamsStreaming = {
       model: modelDef?.apiModelId ?? request.model,
@@ -123,20 +142,33 @@ export class OpenAIProvider implements Provider {
       ...(request.maxTokens && { max_completion_tokens: request.maxTokens }),
       ...(request.temperature !== undefined && { temperature: request.temperature }),
       ...(tools?.length && { tools }),
-      // Only send reasoning_effort if model + selected level supports it.
-      ...(canReason && reasoningEffort && supportedEfforts.includes(reasoningEffort) && {
-        reasoning_effort: reasoningEffort as any
-      }),
     };
+
+    // Only send reasoning_effort if model + selected level supports it.
+    if (canReason && reasoningEffort && supportedEfforts.includes(reasoningEffort)) {
+      if (this.name === 'deepseek') {
+        // DeepSeek 2026 (V4): uses "thinking" parameter object
+        (params as any).thinking = { 
+          type: reasoningEffort === 'none' ? 'disabled' : 'enabled' 
+        };
+        // Use reasoning_effort string directly (low, medium, high, max)
+        if (reasoningEffort !== 'none') {
+          (params as any).reasoning_effort = reasoningEffort === 'xhigh' ? 'max' : reasoningEffort;
+        }
+      } else {
+        (params as any).reasoning_effort = reasoningEffort as any;
+      }
+    }
 
     try {
       // Apply 60-second hard timeout to prevent indefinite hangs
       const timeoutSignal = withTimeoutSignal(request.signal, 60_000);
-      const stream = await withRetry(() =>
-        this.client.chat.completions.create(params, {
-          signal: timeoutSignal,
-        }),
-        { providerName: this.name, modelName: request.model }
+      const stream = await withRetry(
+        () =>
+          this.client.chat.completions.create(params, {
+            signal: timeoutSignal,
+          }),
+        { providerName: this.name, modelName: request.model },
       );
 
       const toolCallBuffers = new Map<number, { id: string; name: string; args: string }>();
@@ -146,7 +178,7 @@ export class OpenAIProvider implements Provider {
         if (!choice) {
           if (chunk.usage) {
             yield {
-              type: "usage_update",
+              type: 'usage_update',
               tokensIn: chunk.usage.prompt_tokens,
               tokensOut: chunk.usage.completion_tokens,
               tokensCache: (chunk.usage as any).prompt_tokens_details?.cached_tokens,
@@ -159,12 +191,12 @@ export class OpenAIProvider implements Provider {
 
         // Content streaming
         if (delta?.content) {
-          yield { type: "content_delta", content: delta.content };
+          yield { type: 'content_delta', content: delta.content };
         }
 
         // Reasoning content (O-series models)
         if ((delta as any)?.reasoning_content) {
-          yield { type: "thinking_delta", thinking: (delta as any).reasoning_content };
+          yield { type: 'thinking_delta', thinking: (delta as any).reasoning_content };
         }
 
         // Tool call streaming
@@ -172,9 +204,13 @@ export class OpenAIProvider implements Provider {
           for (const tc of delta.tool_calls) {
             const idx = tc.index;
             if (!toolCallBuffers.has(idx)) {
-              toolCallBuffers.set(idx, { id: tc.id ?? "", name: tc.function?.name ?? "", args: "" });
+              toolCallBuffers.set(idx, {
+                id: tc.id ?? '',
+                name: tc.function?.name ?? '',
+                args: '',
+              });
               yield {
-                type: "tool_use_start",
+                type: 'tool_use_start',
                 toolCallId: tc.id,
                 toolName: tc.function?.name,
               };
@@ -186,7 +222,7 @@ export class OpenAIProvider implements Provider {
             if (tc.function?.arguments) {
               buf.args += tc.function.arguments;
               yield {
-                type: "tool_use_delta",
+                type: 'tool_use_delta',
                 toolCallId: buf.id,
                 toolName: buf.name,
                 toolInput: tc.function.arguments,
@@ -199,14 +235,14 @@ export class OpenAIProvider implements Provider {
         if (choice.finish_reason) {
           yield* this.flushToolCalls(toolCallBuffers);
           yield {
-            type: "complete",
+            type: 'complete',
             finishReason: this.mapFinishReason(choice.finish_reason),
           };
         }
       }
     } catch (err: any) {
-      if (err.name === "AbortError" || err.name === "AbortSignal") return;
-      
+      if (err.name === 'AbortError' || err.name === 'AbortSignal') return;
+
       // Log full error details for debugging
       const errorDetail = {
         message: err.message ?? String(err),
@@ -215,16 +251,21 @@ export class OpenAIProvider implements Provider {
         code: err.code,
         type: err.type,
       };
-      providerLog.error({ errorDetail, model: request.model, provider: this.name }, "OpenAI provider stream error");
-      
-      yield { type: "error", error: errorDetail.message };
+      providerLog.error(
+        { errorDetail, model: request.model, provider: this.name },
+        'OpenAI provider stream error',
+      );
+
+      yield { type: 'error', error: errorDetail.message };
     }
   }
 
-  private *flushToolCalls(toolCallBuffers: Map<number, { id: string; name: string; args: string }>) {
+  private *flushToolCalls(
+    toolCallBuffers: Map<number, { id: string; name: string; args: string }>,
+  ) {
     for (const [, buf] of toolCallBuffers) {
       yield {
-        type: "tool_use_stop",
+        type: 'tool_use_stop',
         toolCallId: buf.id,
         toolName: buf.name,
         toolInput: buf.args,
@@ -233,12 +274,16 @@ export class OpenAIProvider implements Provider {
     toolCallBuffers.clear();
   }
 
-  private mapFinishReason(reason: string): ProviderEvent["finishReason"] {
+  private mapFinishReason(reason: string): ProviderEvent['finishReason'] {
     switch (reason) {
-      case "stop": return "stop";
-      case "length": return "max_tokens";
-      case "tool_calls": return "tool_use";
-      default: return "end_turn";
+      case 'stop':
+        return 'stop';
+      case 'length':
+        return 'max_tokens';
+      case 'tool_calls':
+        return 'tool_use';
+      default:
+        return 'end_turn';
     }
   }
 
@@ -246,26 +291,26 @@ export class OpenAIProvider implements Provider {
     const result: OpenAI.ChatCompletionMessageParam[] = [];
 
     if (request.systemPrompt) {
-      result.push({ role: "system", content: request.systemPrompt });
+      result.push({ role: 'system', content: request.systemPrompt });
     }
 
     for (const msg of request.messages) {
-      if (msg.role === "system") continue;
+      if (msg.role === 'system') continue;
 
-      if (typeof msg.content === "string") {
-        if (msg.role === "tool") {
+      if (typeof msg.content === 'string') {
+        if (msg.role === 'tool') {
           result.push({
-            role: "tool",
-            tool_call_id: msg.tool_call_id ?? "",
+            role: 'tool',
+            tool_call_id: msg.tool_call_id ?? '',
             content: msg.content,
           });
-        } else if (msg.role === "assistant" && msg.tool_calls?.length) {
+        } else if (msg.role === 'assistant' && msg.tool_calls?.length) {
           result.push({
-            role: "assistant",
+            role: 'assistant',
             content: msg.content || null,
             tool_calls: msg.tool_calls.map((tc) => ({
               id: tc.id,
-              type: "function" as const,
+              type: 'function' as const,
               function: { name: tc.name, arguments: JSON.stringify(tc.input ?? {}) },
             })),
           });
@@ -275,11 +320,10 @@ export class OpenAIProvider implements Provider {
         continue;
       }
 
-
       const blocks = msg.content as ProviderContentBlock[];
-      if (msg.role === "assistant") {
+      if (msg.role === 'assistant') {
         result.push(this.mapAssistantMessage(blocks));
-      } else if (msg.role === "user") {
+      } else if (msg.role === 'user') {
         this.mapUserMessage(blocks, result);
       }
     }
@@ -287,71 +331,78 @@ export class OpenAIProvider implements Provider {
     return result;
   }
 
-  private mapAssistantMessage(blocks: ProviderContentBlock[]): OpenAI.ChatCompletionAssistantMessageParam {
-    const text = blocks.filter((b) => b.type === "text").map((b) => b.text).join("");
+  private mapAssistantMessage(
+    blocks: ProviderContentBlock[],
+  ): OpenAI.ChatCompletionAssistantMessageParam {
+    const text = blocks
+      .filter((b) => b.type === 'text')
+      .map((b) => b.text)
+      .join('');
     const toolCalls = blocks
-      .filter((b) => b.type === "tool_use")
+      .filter((b) => b.type === 'tool_use')
       .map((b) => ({
-        id: b.toolCallId ?? "",
-        type: "function" as const,
-        function: { name: b.toolName ?? "", arguments: JSON.stringify(b.toolInput ?? {}) },
+        id: b.toolCallId ?? '',
+        type: 'function' as const,
+        function: { name: b.toolName ?? '', arguments: JSON.stringify(b.toolInput ?? {}) },
       }));
 
     return {
-      role: "assistant",
+      role: 'assistant',
       content: text || null,
       ...(toolCalls.length && { tool_calls: toolCalls }),
     };
   }
 
-  private mapUserMessage(blocks: ProviderContentBlock[], result: OpenAI.ChatCompletionMessageParam[]) {
-    const toolResults = blocks.filter((b) => b.type === "tool_result");
+  private mapUserMessage(
+    blocks: ProviderContentBlock[],
+    result: OpenAI.ChatCompletionMessageParam[],
+  ) {
+    const toolResults = blocks.filter((b) => b.type === 'tool_result');
     if (toolResults.length) {
       for (const tr of toolResults) {
         result.push({
-          role: "tool",
-          tool_call_id: tr.toolCallId ?? "",
-          content: tr.toolOutput ?? "",
+          role: 'tool',
+          tool_call_id: tr.toolCallId ?? '',
+          content: tr.toolOutput ?? '',
         });
       }
     } else {
       const content: OpenAI.ChatCompletionContentPart[] = blocks.map((b) => {
-        if (b.type === "image") {
+        if (b.type === 'image') {
           return {
-            type: "image_url",
+            type: 'image_url',
             image_url: { url: `data:${b.imageMimeType};base64,${b.imageData}` },
           };
         }
-        return { type: "text", text: b.text ?? "" };
+        return { type: 'text', text: b.text ?? '' };
       });
-      result.push({ role: "user", content });
+      result.push({ role: 'user', content });
     }
   }
-
 }
 
 // ─── OpenAI-Compatible Provider Factories ───────────────────────────────────
 
 export class GroqProvider extends OpenAIProvider {
   constructor(config: ProviderConfig) {
-    super(config, "groq", "https://api.groq.com/openai/v1");
+    super(config, 'groq', 'https://api.groq.com/openai/v1');
   }
 }
 
 export class OpenRouterProvider extends OpenAIProvider {
   constructor(config: ProviderConfig) {
-    super(config, "openrouter", "https://openrouter.ai/api/v1");
+    super(config, 'openrouter', 'https://openrouter.ai/api/v1');
   }
 }
 
 export class XAIProvider extends OpenAIProvider {
   constructor(config: ProviderConfig) {
-    super(config, "xai", "https://api.x.ai/v1");
+    super(config, 'xai', 'https://api.x.ai/v1');
   }
 }
 
 export class AzureProvider extends OpenAIProvider {
   constructor(config: ProviderConfig) {
-    super(config, "azure", config.baseUrl);
+    super(config, 'azure', config.baseUrl);
   }
 }

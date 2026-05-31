@@ -4,14 +4,14 @@
  * downgrades to the next best enabled tier (e.g. fast, then cheap).
  */
 
-import type { ModelDef, ProviderName } from "@koryphaios/shared";
-import { resolveModel } from "../../providers";
-import type { TriageIntent, ModelTier, SelectionResult } from "./types";
+import type { ModelDef, ProviderName } from '@koryphaios/shared';
+import { resolveModel } from '../../providers';
+import type { TriageIntent, ModelTier, SelectionResult } from './types';
 
 const INTENT_TO_TIERS: Record<TriageIntent, ModelTier[]> = {
-  LARGE: ["flagship", "reasoning", "fast", "cheap"],
-  MEDIUM: ["fast", "flagship", "cheap", "reasoning"],
-  SMALL: ["cheap", "fast", "flagship", "reasoning"],
+  LARGE: ['flagship', 'reasoning', 'fast', 'cheap'],
+  MEDIUM: ['fast', 'flagship', 'cheap', 'reasoning'],
+  SMALL: ['cheap', 'fast', 'flagship', 'reasoning'],
 };
 
 /**
@@ -20,9 +20,10 @@ const INTENT_TO_TIERS: Record<TriageIntent, ModelTier[]> = {
 function normalizeChecked(checked: string[]): { modelId: string; provider: ProviderName }[] {
   const out: { modelId: string; provider: ProviderName }[] = [];
   for (const s of checked) {
-    if (s.includes(":")) {
-      const [provider, modelId] = s.split(":");
-      if (provider && modelId) out.push({ modelId: modelId.trim(), provider: provider.trim() as ProviderName });
+    if (s.includes(':')) {
+      const [provider, modelId] = s.split(':');
+      if (provider && modelId)
+        out.push({ modelId: modelId.trim(), provider: provider.trim() as ProviderName });
     } else {
       const def = resolveModel(s);
       if (def) out.push({ modelId: def.id, provider: def.provider });
@@ -73,7 +74,7 @@ export function selectModel(intent: TriageIntent, checkedModels: string[]): Sele
   return {
     modelId: fallback.id,
     provider: fallback.provider,
-    tier: (fallback.tier as ModelTier) ?? "fast",
+    tier: (fallback.tier as ModelTier) ?? 'fast',
     downgraded: true,
   };
 }
@@ -84,7 +85,7 @@ export function selectModel(intent: TriageIntent, checkedModels: string[]): Sele
  */
 export function selectModelForTier(
   modelTier: ModelTier,
-  checkedModels: string[]
+  checkedModels: string[],
 ): SelectionResult | null {
   const enabled = getEnabledDefs(checkedModels);
   const inTier = enabled.filter((m) => m.tier === modelTier);
@@ -103,10 +104,10 @@ export function selectModelForTier(
  */
 export function selectFallbackWhenTierUnavailable(
   requiredTier: ModelTier,
-  checkedModels: string[]
+  checkedModels: string[],
 ): SelectionResult | null {
   const fallbackTiers: ModelTier[] = (
-    ["flagship", "fast", "reasoning", "cheap"] as ModelTier[]
+    ['flagship', 'fast', 'reasoning', 'cheap'] as ModelTier[]
   ).filter((t) => t !== requiredTier);
   for (const tier of fallbackTiers) {
     const r = selectModelForTier(tier, checkedModels);
@@ -118,7 +119,7 @@ export function selectFallbackWhenTierUnavailable(
   return {
     modelId: first.id,
     provider: first.provider,
-    tier: (first.tier as ModelTier) ?? "fast",
+    tier: (first.tier as ModelTier) ?? 'fast',
     downgraded: true,
   };
 }

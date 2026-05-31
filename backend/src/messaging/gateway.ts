@@ -1,13 +1,13 @@
 // Messaging gateway: subscribes to wsBroker and forwards session-scoped events
 // to the correct channel adapter. Channels register sessions when they submit a message.
 
-import type { BrokerEvent } from "../pubsub";
-import type { WSMessage } from "@koryphaios/shared";
-import type { ChannelAdapter } from "./types";
-import type { ReplySegment } from "./types";
-import { wsBroker } from "../pubsub";
-import { sessionReplyStream } from "./reply-stream";
-import { messagingLog } from "../logger";
+import type { BrokerEvent } from '../pubsub';
+import type { WSMessage } from '@koryphaios/shared';
+import type { ChannelAdapter } from './types';
+import type { ReplySegment } from './types';
+import { wsBroker } from '../pubsub';
+import { sessionReplyStream } from './reply-stream';
+import { messagingLog } from '../logger';
 
 export class MessagingGateway {
   private sessionToAdapter = new Map<string, ChannelAdapter>();
@@ -17,7 +17,10 @@ export class MessagingGateway {
   /** Register a session with an adapter so replies are routed to it. */
   registerSession(sessionId: string, adapter: ChannelAdapter): void {
     this.sessionToAdapter.set(sessionId, adapter);
-    messagingLog.debug({ sessionId, channelId: adapter.channelId }, "Session registered for messaging");
+    messagingLog.debug(
+      { sessionId, channelId: adapter.channelId },
+      'Session registered for messaging',
+    );
   }
 
   /** Unregister when a session is done (optional; also pruned on done event). */
@@ -32,7 +35,7 @@ export class MessagingGateway {
     const stream = wsBroker.subscribe();
     this.reader = stream.getReader();
     this.pump();
-    messagingLog.info("Messaging gateway started");
+    messagingLog.info('Messaging gateway started');
   }
 
   private async pump(): Promise<void> {
@@ -53,7 +56,10 @@ export class MessagingGateway {
 
         sessionReplyStream.push(sessionId, segment);
         adapter.sendReply(sessionId, segment).catch((err) => {
-          messagingLog.warn({ err, sessionId, channelId: adapter.channelId }, "Adapter sendReply failed");
+          messagingLog.warn(
+            { err, sessionId, channelId: adapter.channelId },
+            'Adapter sendReply failed',
+          );
         });
 
         if (segment.done) {
@@ -61,7 +67,7 @@ export class MessagingGateway {
         }
       }
     } catch (err) {
-      messagingLog.error({ err }, "Messaging gateway pump error");
+      messagingLog.error({ err }, 'Messaging gateway pump error');
     } finally {
       this.running = false;
       this.reader = null;
@@ -71,34 +77,34 @@ export class MessagingGateway {
   private toReplySegment(sessionId: string, msg: WSMessage): ReplySegment | null {
     const pl = msg.payload as Record<string, unknown>;
     switch (msg.type) {
-      case "stream.delta":
+      case 'stream.delta':
         return {
-          type: "delta",
+          type: 'delta',
           sessionId,
-          content: typeof pl.content === "string" ? pl.content : undefined,
+          content: typeof pl.content === 'string' ? pl.content : undefined,
         };
-      case "agent.status": {
+      case 'agent.status': {
         const status = pl.status as string;
-        const done = status === "done";
+        const done = status === 'done';
         return {
-          type: "status",
+          type: 'status',
           sessionId,
           status,
           done,
         };
       }
-      case "system.error":
+      case 'system.error':
         return {
-          type: "error",
+          type: 'error',
           sessionId,
-          error: typeof pl.error === "string" ? pl.error : String(pl.error),
+          error: typeof pl.error === 'string' ? pl.error : String(pl.error),
           done: true,
         };
-      case "kory.thought":
+      case 'kory.thought':
         return {
-          type: "status",
+          type: 'status',
           sessionId,
-          status: typeof pl.thought === "string" ? pl.thought : "",
+          status: typeof pl.thought === 'string' ? pl.thought : '',
         };
       default:
         return null;
@@ -109,12 +115,12 @@ export class MessagingGateway {
     this.running = false;
     if (this.reader) {
       this.reader.cancel().catch((err) => {
-        messagingLog.warn({ err }, "Failed to cancel messaging gateway reader");
+        messagingLog.warn({ err }, 'Failed to cancel messaging gateway reader');
       });
       this.reader = null;
     }
     this.sessionToAdapter.clear();
-    messagingLog.info("Messaging gateway stopped");
+    messagingLog.info('Messaging gateway stopped');
   }
 }
 

@@ -1,0 +1,314 @@
+{
+  "name": "error-debugging-mcp-server",
+  "displayName": "Error Debugging MCP Server",
+  "description": "AI-powered error detection, debugging, and performance monitoring for Cursor IDE",
+  "version": "1.0.0",
+  "publisher": "error-debugging-mcp",
+  "engines": {
+    "cursor": "^0.1.0"
+  },
+  "categories": ["Debuggers", "Linters", "Other"],
+  "keywords": [
+    "error-detection",
+    "debugging",
+    "performance",
+    "ai-assistance",
+    "mcp",
+    "typescript",
+    "javascript",
+    "python",
+    "go",
+    "rust"
+  ],
+  "activationEvents": [
+    "onLanguage:typescript",
+    "onLanguage:javascript",
+    "onLanguage:python",
+    "onLanguage:go",
+    "onLanguage:rust",
+    "onCommand:errorDebugging.start",
+    "onCommand:errorDebugging.analyze"
+  ],
+  "main": "./dist/integrations/cursor-extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "errorDebugging.start",
+        "title": "Start Error Debugging",
+        "category": "Error Debugging"
+      },
+      {
+        "command": "errorDebugging.stop",
+        "title": "Stop Error Debugging",
+        "category": "Error Debugging"
+      },
+      {
+        "command": "errorDebugging.analyze",
+        "title": "Analyze Current File",
+        "category": "Error Debugging"
+      },
+      {
+        "command": "errorDebugging.analyzePerformance",
+        "title": "Analyze Performance",
+        "category": "Error Debugging"
+      },
+      {
+        "command": "errorDebugging.fixAll",
+        "title": "Fix All Auto-fixable Problems",
+        "category": "Error Debugging"
+      },
+      {
+        "command": "errorDebugging.showStatistics",
+        "title": "Show Statistics",
+        "category": "Error Debugging"
+      },
+      {
+        "command": "errorDebugging.openSettings",
+        "title": "Open Settings",
+        "category": "Error Debugging"
+      }
+    ],
+    "menus": {
+      "editor/context": [
+        {
+          "command": "errorDebugging.analyze",
+          "when": "editorTextFocus && resourceExtname =~ /\\.(ts|js|py|go|rs)$/",
+          "group": "1_modification@1"
+        },
+        {
+          "command": "errorDebugging.analyzePerformance",
+          "when": "editorTextFocus && resourceExtname =~ /\\.(ts|js|py|go|rs)$/",
+          "group": "1_modification@2"
+        },
+        {
+          "command": "errorDebugging.fixAll",
+          "when": "editorTextFocus && resourceExtname =~ /\\.(ts|js|py|go|rs)$/",
+          "group": "1_modification@3"
+        }
+      ],
+      "editor/title": [
+        {
+          "command": "errorDebugging.analyze",
+          "when": "resourceExtname =~ /\\.(ts|js|py|go|rs)$/",
+          "group": "navigation@1"
+        }
+      ],
+      "commandPalette": [
+        {
+          "command": "errorDebugging.start",
+          "when": "true"
+        },
+        {
+          "command": "errorDebugging.stop",
+          "when": "errorDebugging.active"
+        },
+        {
+          "command": "errorDebugging.analyze",
+          "when": "editorIsOpen"
+        },
+        {
+          "command": "errorDebugging.analyzePerformance",
+          "when": "editorIsOpen"
+        },
+        {
+          "command": "errorDebugging.fixAll",
+          "when": "editorIsOpen"
+        }
+      ]
+    },
+    "keybindings": [
+      {
+        "command": "errorDebugging.analyze",
+        "key": "ctrl+shift+e",
+        "mac": "cmd+shift+e",
+        "when": "editorTextFocus"
+      },
+      {
+        "command": "errorDebugging.analyzePerformance",
+        "key": "ctrl+shift+p",
+        "mac": "cmd+shift+p",
+        "when": "editorTextFocus"
+      },
+      {
+        "command": "errorDebugging.fixAll",
+        "key": "ctrl+shift+f",
+        "mac": "cmd+shift+f",
+        "when": "editorTextFocus"
+      }
+    ],
+    "configuration": {
+      "title": "Error Debugging MCP Server",
+      "properties": {
+        "errorDebugging.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable error debugging features"
+        },
+        "errorDebugging.realTimeAnalysis": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable real-time error analysis"
+        },
+        "errorDebugging.aiAssistance": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable AI-powered assistance and suggestions"
+        },
+        "errorDebugging.contextSharing": {
+          "type": "boolean",
+          "default": true,
+          "description": "Share context with AI for better suggestions"
+        },
+        "errorDebugging.autoSuggestions": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show automatic suggestions for fixes"
+        },
+        "errorDebugging.debugIntegration": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable debug session integration"
+        },
+        "errorDebugging.performanceInsights": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show performance insights and optimizations"
+        },
+        "errorDebugging.codeActions": {
+          "type": "boolean",
+          "default": true,
+          "description": "Provide code actions for quick fixes"
+        },
+        "errorDebugging.hoverProvider": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show detailed information on hover"
+        },
+        "errorDebugging.completionProvider": {
+          "type": "boolean",
+          "default": false,
+          "description": "Provide error-related completions"
+        },
+        "errorDebugging.serverPort": {
+          "type": "number",
+          "default": 3000,
+          "description": "MCP server port"
+        },
+        "errorDebugging.serverHost": {
+          "type": "string",
+          "default": "localhost",
+          "description": "MCP server host"
+        },
+        "errorDebugging.logLevel": {
+          "type": "string",
+          "enum": ["debug", "info", "warn", "error"],
+          "default": "info",
+          "description": "Logging level"
+        },
+        "errorDebugging.languages": {
+          "type": "object",
+          "default": {
+            "typescript": {
+              "enabled": true,
+              "linting": true,
+              "typeChecking": true
+            },
+            "javascript": {
+              "enabled": true,
+              "linting": true,
+              "typeChecking": false
+            },
+            "python": {
+              "enabled": true,
+              "linting": true,
+              "typeChecking": false
+            },
+            "go": {
+              "enabled": true,
+              "linting": true,
+              "typeChecking": false
+            },
+            "rust": {
+              "enabled": true,
+              "linting": true,
+              "typeChecking": false
+            }
+          },
+          "description": "Language-specific settings"
+        },
+        "errorDebugging.excludePatterns": {
+          "type": "array",
+          "default": ["node_modules/**", "dist/**", "build/**", "*.min.js", "*.map"],
+          "description": "File patterns to exclude from analysis"
+        },
+        "errorDebugging.performance": {
+          "type": "object",
+          "default": {
+            "enabled": true,
+            "monitoring": true,
+            "profiling": false,
+            "thresholds": {
+              "memory": 512,
+              "cpu": 80,
+              "responseTime": 1000
+            }
+          },
+          "description": "Performance monitoring settings"
+        }
+      }
+    },
+    "problemMatchers": [
+      {
+        "name": "errorDebugging",
+        "owner": "errorDebugging",
+        "fileLocation": ["relative", "${workspaceFolder}"],
+        "pattern": {
+          "regexp": "^(.*):(\\d+):(\\d+):\\s+(warning|error):\\s+(.*)$",
+          "file": 1,
+          "line": 2,
+          "column": 3,
+          "severity": 4,
+          "message": 5
+        }
+      }
+    ],
+    "taskDefinitions": [
+      {
+        "type": "errorDebugging",
+        "required": ["command"],
+        "properties": {
+          "command": {
+            "type": "string",
+            "description": "The error debugging command to run"
+          },
+          "args": {
+            "type": "array",
+            "description": "Additional arguments"
+          }
+        }
+      }
+    ]
+  },
+  "scripts": {
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "package": "cursor package",
+    "publish": "cursor publish"
+  },
+  "devDependencies": {
+    "@types/node": "^18.0.0",
+    "typescript": "^5.0.0"
+  },
+  "dependencies": {
+    "error-debugging-mcp-server": "^1.0.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/your-org/error-debugging-mcp-server.git"
+  },
+  "bugs": {
+    "url": "https://github.com/your-org/error-debugging-mcp-server/issues"
+  },
+  "homepage": "https://github.com/your-org/error-debugging-mcp-server#readme",
+  "license": "MIT"
+}

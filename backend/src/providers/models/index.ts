@@ -1,20 +1,19 @@
-import type { ModelDef, ProviderName } from "@koryphaios/shared";
-import { OpenAIModels } from "./openai";
-import { AnthropicModels } from "./anthropic";
-import { GeminiModels } from "./gemini";
-import { VertexAIModels } from "./vertex";
-import { OpenRouterModels } from "./openrouter";
-import { GroqModels } from "./groq";
-import { XAIModels } from "./xai";
-import { AzureModels } from "./azure";
-import { CopilotModels } from "./copilot";
-import { BedrockModels } from "./bedrock";
-import { LocalModels } from "./local";
-import { OllamaModels } from "./ollama";
-import { OpenCodeZenModels } from "./opencodezen";
-import { ClineModels } from "./cline";
-import { CodexModels } from "./codex";
-import { ZAIModels } from "./newproviders";
+import type { ModelDef, ProviderName } from '@koryphaios/shared';
+import { OpenAIModels } from './openai';
+import { AnthropicModels } from './anthropic';
+import { GeminiModels } from './gemini';
+import { VertexAIModels } from './vertex';
+import { OpenRouterModels } from './openrouter';
+import { GroqModels } from './groq';
+import { XAIModels } from './xai';
+import { AzureModels } from './azure';
+import { CopilotModels } from './copilot';
+import { BedrockModels } from './bedrock';
+import { LocalModels } from './local';
+import { OllamaModels } from './ollama';
+import { OpenCodeZenModels } from './opencodezen';
+import { CodexModels } from './codex';
+import { ZAIModels, KimiCodeModels, DeepSeekModels, MoonshotModels } from './newproviders';
 
 // Combined list of all known models from REAL providers only
 const ALL_MODELS: ModelDef[] = [
@@ -31,14 +30,16 @@ const ALL_MODELS: ModelDef[] = [
   ...LocalModels,
   ...OllamaModels,
   ...OpenCodeZenModels,
-  ...ClineModels,
   ...CodexModels,
+  ...KimiCodeModels,
   ...ZAIModels,
+  ...DeepSeekModels,
+  ...MoonshotModels,
 ];
 
 // Map for fast lookup by ID
 export const MODEL_CATALOG: Record<string, ModelDef> = Object.fromEntries(
-  ALL_MODELS.map((m) => [m.id, m])
+  ALL_MODELS.map((m) => [m.id, m]),
 );
 
 /**
@@ -78,23 +79,27 @@ export function createGenericModel(id: string, provider: ProviderName): ModelDef
  * Providers with verified context window documentation.
  */
 const VERIFIED_CONTEXT_PROVIDERS = new Set<ProviderName>([
-  "openai",
-  "anthropic",
-  "google",
-  "groq",
-  "xai",
+  'openai',
+  'anthropic',
+  'google',
+  'groq',
+  'xai',
 ]);
 
 /**
  * Resolve trustworthy context metadata for UI telemetry.
  */
-export function resolveTrustedContextWindow(modelId: string, provider: ProviderName): { contextWindow?: number; contextKnown: boolean } {
+export function resolveTrustedContextWindow(
+  modelId: string,
+  provider: ProviderName,
+): { contextWindow?: number; contextKnown: boolean } {
   const model = resolveModel(modelId);
   if (!model) return { contextKnown: false };
   if (model.isGeneric) return { contextKnown: false };
   if (model.provider !== provider) return { contextKnown: false };
   if (!VERIFIED_CONTEXT_PROVIDERS.has(provider)) return { contextKnown: false };
-  if (!Number.isFinite(model.contextWindow) || model.contextWindow <= 0) return { contextKnown: false };
+  if (!Number.isFinite(model.contextWindow) || model.contextWindow <= 0)
+    return { contextKnown: false };
   return { contextWindow: model.contextWindow, contextKnown: true };
 }
 
@@ -110,7 +115,7 @@ export function findAlternativeModel(failedModelId: string): ModelDef | undefine
       m.provider === original.provider &&
       m.tier === original.tier &&
       m.id !== original.id &&
-      !isLegacyModel(m)
+      !isLegacyModel(m),
   );
 
   if (sameProvider.length > 0) return sameProvider[0];
@@ -122,17 +127,17 @@ export function findAlternativeModel(failedModelId: string): ModelDef | undefine
  * Includes retired models (e.g. Claude 3.7 Sonnet, Haiku 3.5 as of Feb 2026).
  */
 export function isLegacyModel(modelOrId: string | ModelDef): boolean {
-  const id = typeof modelOrId === "string" ? modelOrId : modelOrId.id;
+  const id = typeof modelOrId === 'string' ? modelOrId : modelOrId.id;
   const deprecatedIds = [
-    "gpt-3.5-turbo",
-    "gpt-4",
-    "gpt-4-32k",
-    "claude-1",
-    "claude-2",
-    "claude-instant",
-    "claude-3.7-sonnet",
-    "claude-3.5-haiku",
-    "claude-3.5-sonnet",
+    'gpt-3.5-turbo',
+    'gpt-4',
+    'gpt-4-32k',
+    'claude-1',
+    'claude-2',
+    'claude-instant',
+    'claude-3.7-sonnet',
+    'claude-3.5-haiku',
+    'claude-3.5-sonnet',
   ];
   return deprecatedIds.includes(id);
 }

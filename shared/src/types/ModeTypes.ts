@@ -2,7 +2,7 @@
  * Mode Types - Beginner vs Advanced mode configuration
  */
 
-export type UIMode = "beginner" | "advanced";
+export type UIMode = 'beginner' | 'advanced';
 
 export interface ModeConfig {
   /** Hide all Git UI elements */
@@ -16,9 +16,9 @@ export interface ModeConfig {
   /** Require confirmations before actions */
   requireConfirmations: boolean;
   /** Tools available in this mode (whitelist for beginner, blacklist for advanced) */
-  toolAccess: "curated" | "full";
+  toolAccess: 'curated' | 'full';
   /** Explanation verbosity */
-  explanations: "verbose" | "minimal";
+  explanations: 'verbose' | 'minimal';
   /** Enable shadow logger UI */
   enableShadowLoggerUI: boolean;
   /** Enable git worktrees */
@@ -33,7 +33,7 @@ export interface ModeConfig {
 
 export interface UIModeConfig {
   /** Current mode or adaptive */
-  mode: UIMode | "adaptive";
+  mode: UIMode | 'adaptive';
   /** Number of sessions before suggesting advanced (adaptive mode) */
   adaptiveThreshold?: number;
   /** Beginner mode settings */
@@ -52,12 +52,12 @@ export interface ModeContext {
 
 /** User-friendly mode names */
 export const MODE_DISPLAY_NAMES: Record<UIMode, string> = {
-  beginner: "Beginner",
-  advanced: "Advanced",
+  beginner: 'Beginner',
+  advanced: 'Advanced',
 };
 
 /** Mode descriptions for UI */
 export const MODE_DESCRIPTIONS: Record<UIMode, string> = {
   beginner: "Simple and guided - I'll handle the technical details",
-  advanced: "Full control - Access all features and Git operations",
+  advanced: 'Full control - Access all features and Git operations',
 };

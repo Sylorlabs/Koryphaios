@@ -3,4 +3,4 @@ export {
   runManagerInterview,
   resolveWorkerModel,
   MANAGER_INTERVIEW_QUESTION_COUNT,
-} from "./ManagerSession";
+} from './ManagerSession';

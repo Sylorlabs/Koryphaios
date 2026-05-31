@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { X, Search, Check, Info, Sparkles } from 'lucide-svelte';
+  import { X, Search, Check } from 'lucide-svelte';
   import { fade, scale } from 'svelte/transition';
   import type { ProviderName, ModelDef } from '@koryphaios/shared';
 
@@ -19,8 +19,8 @@
 
   // Initialize and sync local selection
   $effect(() => {
-    if (availableModels.length > 0 && localSelected.length === 0) {
-      localSelected = selectedModels.length > 0 ? [...selectedModels] : availableModels.map(m => m.id);
+    if ((availableModels || []).length > 0 && localSelected.length === 0) {
+      localSelected = (selectedModels || []).length > 0 ? [...(selectedModels || [])] : (availableModels || []).map(m => m.id);
     }
   });
 
@@ -44,7 +44,7 @@
   }
 
   function selectAll() {
-    localSelected = availableModels.map(m => m.id);
+    localSelected = (availableModels || []).map(m => m.id);
   }
 
   function selectNone() {
@@ -56,7 +56,7 @@
   }
 
   function skip() {
-    onSave(availableModels.map(m => m.id), dontAskAgain);
+    onSave((availableModels || []).map(m => m.id), dontAskAgain);
   }
 </script>
 
@@ -95,7 +95,7 @@
           <button class="text-[10px] uppercase tracking-wider font-bold hover:text-red-400 transition-colors" onclick={selectNone}>Select None</button>
         </div>
         <span class="text-[10px] font-medium" style="color: var(--color-text-muted);">
-          {localSelected.length} of {availableModels.length} selected
+          {localSelected.length} of {(availableModels || []).length} selected
         </span>
       </div>
     </div>
@@ -122,19 +122,6 @@
                 </span>
                 <span class="text-[10px] opacity-40">{model.id}</span>
               </div>
-            </div>
-            <div class="flex gap-1.5">
-              {#if model.isGeneric}
-                <span class="text-[9px] font-bold px-1.5 py-0.5 rounded bg-blue-500/10 text-blue-400 border border-blue-500/20 flex items-center gap-1">
-                  <Sparkles size={10} /> NEW
-                </span>
-              {/if}
-              {#if model.canReason}
-                <span class="text-[9px] font-bold px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">AUTO</span>
-              {/if}
-              {#if model.name.includes('Pro') || model.name.includes('Max') || model.tier === 'flagship'}
-                <span class="text-[9px] uppercase font-black px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-500 border border-amber-500/20">Flagship</span>
-              {/if}
             </div>
           </button>
         {/each}

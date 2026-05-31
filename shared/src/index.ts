@@ -21,27 +21,13 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 // ============== Agent & Worker Types ==============
-export type {
-  AgentRole,
-  AgentStatus,
-  WorkerDomain,
-  AgentIdentity,
-} from "./types/AgentTypes";
+export type { AgentRole, AgentStatus, WorkerDomain, AgentIdentity } from './types/AgentTypes';
 
 // ============== Tool System ==============
-export type {
-  ToolName,
-  ToolCall,
-  ToolResult,
-} from "./types/ToolTypes";
+export type { ToolName, ToolCall, ToolResult } from './types/ToolTypes';
 
 // ============== Message & Content Types ==============
-export type {
-  ContentBlockType,
-  ContentBlock,
-  Message,
-  StoredMessage,
-} from "./types/MessageTypes";
+export type { ContentBlockType, ContentBlock, Message, StoredMessage } from './types/MessageTypes';
 
 // ============== Session Types ==============
 export type {
@@ -52,47 +38,32 @@ export type {
   SessionState,
   AgentInfo,
   TaskInfo,
-} from "./types/SessionTypes";
+} from './types/SessionTypes';
 
 // ============== Task Types ==============
-export type { WorkerTask } from "./types/TaskTypes";
+export type { WorkerTask } from './types/TaskTypes';
 
 // ============== Provider & Model Definitions ==============
-export { ProviderName } from "./providers/ProviderNames";
+export { ProviderName } from './providers/ProviderNames';
 
-export type {
-  ModelTier,
-  ModelDef,
-  ProviderConfig,
-  ProviderStatus,
-} from "./providers/ModelDefs";
+export type { ModelTier, ModelDef, ProviderConfig, ProviderStatus } from './providers/ModelDefs';
 
 // Re-export from existing providers.ts for backward compatibility
-export {
-  IMPLEMENTED_PROVIDERS,
-  PROVIDER_AUTH_MODES,
-  PROVIDER_ENV_VARS,
-} from "./providers";
+export { IMPLEMENTED_PROVIDERS, PROVIDER_AUTH_MODES, PROVIDER_ENV_VARS } from './providers';
 
-export type { ProviderAuthMode } from "./providers";
+export type { ProviderAuthMode } from './providers';
 
 // ============== Permission System ==============
-export type {
-  PermissionRequest,
-  PermissionResponse,
-} from "./permissions/PermissionTypes";
+export type { PermissionRequest, PermissionResponse } from './permissions/PermissionTypes';
 
 // ============== WebSocket Protocol ==============
-export type {
-  WSEventType,
-  WSMessage,
-  WSMessagePayload,
-} from "./websocket/WSEvents";
+export type { WSEventType, WSMessage, WSMessagePayload } from './websocket/WSEvents';
 
 // ============== WebSocket Payloads ==============
 export type {
   AgentSpawnedPayload,
   AgentStatusPayload,
+  AgentThreadMessagePayload,
   ThinkingPayload,
   StreamThinkingPayload,
   StreamDeltaPayload,
@@ -110,6 +81,8 @@ export type {
   StreamUsagePayload,
   StreamFileDeltaPayload,
   StreamFileCompletePayload,
+  StreamClearContentPayload,
+  ContextDetectedPayload,
   ErrorPayload,
   NotificationPayload,
   KoryThoughtPayload,
@@ -120,7 +93,7 @@ export type {
   ProviderStatusPayload,
   ProviderInfo,
   RateLimitPayload,
-} from "./websocket/WSPayloads";
+} from './websocket/WSPayloads';
 
 // ============== REST API Types ==============
 export type {
@@ -134,7 +107,7 @@ export type {
   RejectChangesRequest,
   ProviderConfigRequest,
   PaginatedResponse,
-} from "./api/APITypes";
+} from './api/APITypes';
 
 // ============== Reasoning Configuration ==============
 export {
@@ -145,14 +118,14 @@ export {
   determineAutoReasoningLevel,
   DEFAULT_REASONING_RULES,
   STANDARD_REASONING_OPTIONS,
-} from "./reasoning/ReasoningFunctions";
+} from './reasoning/ReasoningFunctions';
 
 export type {
   ReasoningLevel,
   ReasoningConfig,
   ReasoningOption,
   ReasoningRule,
-} from "./reasoning/ReasoningFunctions";
+} from './reasoning/ReasoningFunctions';
 
 // ============== Configuration ==============
 export type {
@@ -164,12 +137,10 @@ export type {
   DiscordConfig,
   SlackConfig,
   ServerConfig,
-} from "./config/ConfigTypes";
+} from './config/ConfigTypes';
 
 // ============== App Configuration ==============
-export type {
-  AppConfig,
-} from "./config";
+export type { AppConfig } from './config';
 
 export {
   getBackendUrl,
@@ -177,20 +148,12 @@ export {
   getDefaultConfig,
   defaultConfig,
   parseConfig,
-} from "./config";
+} from './config';
 
 // ============== Mode System ==============
-export type {
-  UIMode,
-  ModeConfig,
-  UIModeConfig,
-  ModeContext,
-} from "./types/ModeTypes";
+export type { UIMode, ModeConfig, UIModeConfig, ModeContext } from './types/ModeTypes';
 
-export {
-  MODE_DISPLAY_NAMES,
-  MODE_DESCRIPTIONS,
-} from "./types/ModeTypes";
+export { MODE_DISPLAY_NAMES, MODE_DESCRIPTIONS } from './types/ModeTypes';
 
 export {
   DEFAULT_BEGINNER_CONFIG,
@@ -198,7 +161,7 @@ export {
   DEFAULT_UI_MODE_CONFIG,
   BEGINNER_TOOL_WHITELIST,
   BEGINNER_TOOL_BLACKLIST,
-} from "./config/ModeConfig";
+} from './config/ModeConfig';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Backward Compatibility Re-exports

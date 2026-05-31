@@ -1,16 +1,17 @@
 /**
  * Time Travel Service - Undo/Redo via Ghost Commits
- * 
+ *
  * This service provides a high-level API for the "Time Travel" UI feature,
  * allowing users to see a history of AI-generated states and instantly
  * revert to any previous state.
- * 
+ *
  * Built on top of ShadowLogger (git reflog recorder).
  */
 
-import { ShadowLogger, type TimelineEntry, type GhostCommit } from "@/kory/shadow-logger";
-import { GitManager } from "@/kory/git-manager";
-import { serverLog } from "@/logger";
+import { ShadowLogger, type TimelineEntry, type GhostCommit } from '../kory/shadow-logger';
+import { GitManager } from '../kory/git-manager';
+import { serverLog } from '../logger';
+import type { IMessageStore } from '../stores/message-store';
 
 export interface TimeTravelState {
   /** Current position in the timeline (HEAD) */
@@ -41,14 +42,13 @@ export interface TimeTravelOptions {
 export class TimeTravelService {
   private shadowLogger: ShadowLogger;
   private gitManager: GitManager;
+  private messageStore: IMessageStore;
   private options: Required<TimeTravelOptions>;
 
-  constructor(
-    workingDirectory: string,
-    options: TimeTravelOptions = {}
-  ) {
+  constructor(workingDirectory: string, messageStore: IMessageStore, options: TimeTravelOptions = {}) {
     this.shadowLogger = new ShadowLogger(workingDirectory);
     this.gitManager = new GitManager(workingDirectory);
+    this.messageStore = messageStore;
     this.options = {
       timelineLimit: options.timelineLimit ?? 50,
       autoCheckpoint: options.autoCheckpoint ?? true,
@@ -59,13 +59,13 @@ export class TimeTravelService {
   /**
    * Get the current time travel state for UI display
    */
-  async getState(): Promise<TimeTravelState> {
-    const currentHash = this.gitManager.getCurrentHash() || "";
-    const timeline = this.shadowLogger.getTimeline(this.options.timelineLimit);
-    const stats = this.shadowLogger.getStats();
+  async getState(sessionId?: string): Promise<TimeTravelState> {
+    const currentHash = await this.gitManager.getCurrentHash() || '';
+    const timeline = await this.shadowLogger.getTimeline(this.options.timelineLimit, sessionId);
+    const stats = await this.shadowLogger.getStats();
 
     // Determine if we can undo/redo
-    const currentIndex = timeline.findIndex(t => t.hash === currentHash);
+    const currentIndex = timeline.findIndex((t) => t.hash === currentHash);
     const canUndo = timeline.length > 1 && currentIndex < timeline.length - 1;
     const canRedo = currentIndex > 0;
 
@@ -84,10 +84,10 @@ export class TimeTravelService {
 
   /**
    * Create a checkpoint (ghost commit) after AI changes
-   * 
+   *
    * Call this after an AI agent makes changes to save the state.
    */
-  checkpoint(
+  async checkpoint(
     description: string,
     metadata: {
       model?: string;
@@ -96,99 +96,125 @@ export class TimeTravelService {
       tokensIn?: number;
       tokensOut?: number;
       agentId?: string;
-    }
-  ): { success: boolean; hash?: string; message: string } {
-    // Only checkpoint if there are actual changes
-    const status = this.gitManager.runGit(["status", "--porcelain"]).output.trim();
-    if (!status) {
-      return { success: false, message: "No changes to checkpoint" };
+      messageId?: string;
+      checkpointType?: 'turn_end' | 'user_manual' | 'auto_save';
+    },
+  ): Promise<{ success: boolean; hash?: string; message: string }> {
+    // Only checkpoint if there are actual changes OR it's a final response point
+    const statusResult = await this.gitManager.runGit(['status', '--porcelain']);
+    const status = statusResult.output.trim();
+    
+    const isFinalResponse = metadata.checkpointType === 'turn_end';
+
+    if (!status && !isFinalResponse) {
+      return { success: false, message: 'No changes or final response to checkpoint' };
     }
 
-    // Check cost threshold
-    if (metadata.cost && metadata.cost < this.options.costThreshold) {
-      return { 
-        success: false, 
-        message: `Cost ${metadata.cost} below threshold ${this.options.costThreshold}` 
+    // Check cost threshold for auto-checkpoints (not for final responses)
+    if (!isFinalResponse && metadata.cost && metadata.cost < this.options.costThreshold) {
+      return {
+        success: false,
+        message: `Cost ${metadata.cost} below threshold ${this.options.costThreshold}`,
       };
     }
 
-    const hash = this.shadowLogger.createGhostCommit(description, metadata);
+    const hash = await this.shadowLogger.createGhostCommit(description, metadata);
 
     if (hash) {
-      serverLog.info({ hash, description, model: metadata.model }, "Time travel checkpoint created");
-      return { success: true, hash, message: "Checkpoint created" };
+      serverLog.info(
+        { hash, description, model: metadata.model, type: metadata.checkpointType },
+        'Time travel checkpoint created',
+      );
+      return { success: true, hash, message: 'Checkpoint created' };
     }
 
-    return { success: false, message: "Failed to create checkpoint" };
+    return { success: false, message: 'Failed to create checkpoint' };
   }
 
   /**
    * Undo - Go back to the previous state
-   * 
+   *
    * This finds the next ghost commit in the timeline and recovers to it.
    */
-  async undo(): Promise<{ success: boolean; message: string; newHash?: string }> {
-    const currentHash = this.gitManager.getCurrentHash();
+  async undo(sessionId?: string): Promise<{ success: boolean; message: string; newHash?: string }> {
+    const currentHash = await this.gitManager.getCurrentHash();
     if (!currentHash) {
-      return { success: false, message: "Cannot determine current state" };
+      return { success: false, message: 'Cannot determine current state' };
     }
 
-    const timeline = this.shadowLogger.getTimeline(this.options.timelineLimit);
-    const currentIndex = timeline.findIndex(t => t.hash === currentHash);
+    const timeline = await this.shadowLogger.getTimeline(this.options.timelineLimit);
+    const currentIndex = timeline.findIndex((t) => t.hash === currentHash);
 
     if (currentIndex === -1 || currentIndex >= timeline.length - 1) {
-      return { success: false, message: "No previous state to undo to" };
+      return { success: false, message: 'No previous state to undo to' };
     }
 
     // Get the next state (older in timeline)
     const targetState = timeline[currentIndex + 1];
-    return this.travelTo(targetState.hash);
+    return this.travelTo(targetState.hash, sessionId);
   }
 
   /**
    * Redo - Go forward to a newer state
-   * 
+   *
    * This finds the previous ghost commit in the timeline and recovers to it.
    */
-  async redo(): Promise<{ success: boolean; message: string; newHash?: string }> {
-    const currentHash = this.gitManager.getCurrentHash();
+  async redo(sessionId?: string): Promise<{ success: boolean; message: string; newHash?: string }> {
+    const currentHash = await this.gitManager.getCurrentHash();
     if (!currentHash) {
-      return { success: false, message: "Cannot determine current state" };
+      return { success: false, message: 'Cannot determine current state' };
     }
 
-    const timeline = this.shadowLogger.getTimeline(this.options.timelineLimit);
-    const currentIndex = timeline.findIndex(t => t.hash === currentHash);
+    const timeline = await this.shadowLogger.getTimeline(this.options.timelineLimit);
+    const currentIndex = timeline.findIndex((t) => t.hash === currentHash);
 
     if (currentIndex <= 0) {
-      return { success: false, message: "No newer state to redo to" };
+      return { success: false, message: 'No newer state to redo to' };
     }
 
     // Get the previous state (newer in timeline)
     const targetState = timeline[currentIndex - 1];
-    return this.travelTo(targetState.hash);
+    return this.travelTo(targetState.hash, sessionId);
   }
 
   /**
    * Travel to a specific ghost commit state
-   * 
+   *
    * @param ghostHash The ghost commit hash to recover to
+   * @param sessionId Optional session ID to truncate history for
    */
-  travelTo(ghostHash: string): { success: boolean; message: string; newHash?: string } {
+  async travelTo(
+    ghostHash: string,
+    sessionId?: string,
+  ): Promise<{ success: boolean; message: string; newHash?: string }> {
     // Verify this is a valid ghost commit
-    const ghost = this.shadowLogger.getGhostCommit(ghostHash);
+    const ghost = await this.shadowLogger.getGhostCommit(ghostHash);
     if (!ghost) {
-      return { success: false, message: "Invalid or unknown state" };
+      return { success: false, message: 'Invalid or unknown state' };
     }
 
-    serverLog.info({ 
-      targetHash: ghostHash, 
-      description: ghost.message,
-      metadata: ghost.metadata 
-    }, "Time travel initiated");
+    serverLog.info(
+      {
+        targetHash: ghostHash,
+        description: ghost.message,
+        metadata: ghost.metadata,
+      },
+      'Time travel initiated',
+    );
 
-    const result = this.shadowLogger.recover(ghostHash);
+    const result = await this.shadowLogger.recover(ghostHash);
 
     if (result.success) {
+      // If we have a sessionId and the ghost commit has a messageId, truncate history
+      if (sessionId && ghost.metadata?.messageId) {
+        try {
+          await this.messageStore.truncateAfter(sessionId, ghost.metadata.messageId);
+          serverLog.info({ sessionId, messageId: ghost.metadata.messageId }, 'Session history truncated after rewind');
+        } catch (err) {
+          serverLog.error({ err, sessionId }, 'Failed to truncate session history during rewind');
+        }
+      }
+
       return {
         success: true,
         message: `Traveled to: ${ghost.message.slice(0, 50)}`,
@@ -201,26 +227,26 @@ export class TimeTravelService {
 
   /**
    * Preview what would change if we traveled to a state
-   * 
+   *
    * Returns a diff showing the changes that would be applied.
    */
-  previewTravel(ghostHash: string): {
+  async previewTravel(ghostHash: string): Promise<{
     canTravel: boolean;
     diff: string;
     filesChanged: Array<{ path: string; status: string }>;
     message: string;
-  } {
-    const ghost = this.shadowLogger.getGhostCommit(ghostHash);
+  }> {
+    const ghost = await this.shadowLogger.getGhostCommit(ghostHash);
     if (!ghost) {
       return {
         canTravel: false,
-        diff: "",
+        diff: '',
         filesChanged: [],
-        message: "Invalid state",
+        message: 'Invalid state',
       };
     }
 
-    const diff = this.shadowLogger.compareWithGhost(ghostHash);
+    const diff = await this.shadowLogger.compareWithGhost(ghostHash);
 
     return {
       canTravel: true,
@@ -233,26 +259,26 @@ export class TimeTravelService {
   /**
    * Get detailed information about a specific state
    */
-  getStateDetails(ghostHash: string): GhostCommit | null {
+  async getStateDetails(ghostHash: string): Promise<GhostCommit | null> {
     return this.shadowLogger.getGhostCommit(ghostHash);
   }
 
   /**
    * Create a branch from a ghost state instead of resetting
-   * 
+   *
    * This is safer than reset - creates a new branch without modifying HEAD.
    */
-  createBranchFromState(
+  async createBranchFromState(
     ghostHash: string,
-    branchName: string
-  ): { success: boolean; message: string } {
-    const ghost = this.shadowLogger.getGhostCommit(ghostHash);
+    branchName: string,
+  ): Promise<{ success: boolean; message: string }> {
+    const ghost = await this.shadowLogger.getGhostCommit(ghostHash);
     if (!ghost) {
-      return { success: false, message: "Invalid ghost state" };
+      return { success: false, message: 'Invalid ghost state' };
     }
 
     // Create branch from the ghost commit
-    const result = this.gitManager.runGit(["branch", branchName, ghostHash]);
+    const result = await this.gitManager.runGit(['branch', branchName, ghostHash]);
 
     if (result.success) {
       return {
@@ -261,14 +287,14 @@ export class TimeTravelService {
       };
     }
 
-    return { success: false, message: "Failed to create branch: " + result.output };
+    return { success: false, message: 'Failed to create branch: ' + result.output };
   }
 
   /**
    * Clean up old ghost states
    */
-  prune(olderThanDays = 30): { success: boolean; message: string } {
-    const result = this.shadowLogger.prune(olderThanDays);
+  async prune(olderThanDays = 30): Promise<{ success: boolean; message: string }> {
+    const result = await this.shadowLogger.prune(olderThanDays);
     return {
       success: true,
       message: result.message,
@@ -278,17 +304,15 @@ export class TimeTravelService {
   /**
    * Export the timeline as a JSON file (for backup/analysis)
    */
-  exportTimeline(): {
+  async exportTimeline(): Promise<{
     exportedAt: string;
     timeline: TimelineEntry[];
-    stats: ReturnType<ShadowLogger["getStats"]>;
-  } {
+    stats: Awaited<ReturnType<ShadowLogger['getStats']>>;
+  }> {
     return {
       exportedAt: new Date().toISOString(),
-      timeline: this.shadowLogger.getTimeline(100),
-      stats: this.shadowLogger.getStats(),
+      timeline: await this.shadowLogger.getTimeline(100),
+      stats: await this.shadowLogger.getStats(),
     };
   }
 }
-
-// Extend GitManager interface to expose runGit for TimeTravelService

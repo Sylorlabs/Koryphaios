@@ -1,8 +1,8 @@
 // Tool system — abstract base and registry.
 // Ported from OpenCode's tools/tools.go pattern.
 
-import type { ChangeSummary } from "@koryphaios/shared";
-import { toolLog } from "../logger";
+import type { ChangeSummary } from '@koryphaios/shared';
+import { toolLog } from '../logger';
 
 export interface ToolContext {
   sessionId: string;
@@ -15,8 +15,17 @@ export interface ToolContext {
   /** Whether the tool execution should be strictly sandboxed */
   isSandboxed?: boolean;
   /** Optional callback for streaming file edit deltas to the UI */
-  emitFileEdit?: (event: { path: string; delta: string; totalLength: number; operation: "create" | "edit" }) => void;
-  emitFileComplete?: (event: { path: string; totalLines: number; operation: "create" | "edit" }) => void;
+  emitFileEdit?: (event: {
+    path: string;
+    delta: string;
+    totalLength: number;
+    operation: 'create' | 'edit';
+  }) => void;
+  emitFileComplete?: (event: {
+    path: string;
+    totalLines: number;
+    operation: 'create' | 'edit';
+  }) => void;
   /** Optional callback to request user input (blocking) */
   waitForUserInput?: (question: string, options: string[]) => Promise<string>;
   /** Optional callback to record code changes for summary and keep/reject */
@@ -44,20 +53,30 @@ export interface Tool {
   readonly description: string;
   readonly inputSchema: Record<string, unknown>;
   /** Optional role restriction: manager = full access; worker = builders; critic = read-only (read_file, grep, glob, ls); any = all roles */
-  readonly role?: "manager" | "worker" | "critic" | "any";
+  readonly role?: 'manager' | 'worker' | 'critic' | 'any';
 
   /** Execute the tool with the given input. */
   run(ctx: ToolContext, call: ToolCallInput): Promise<ToolCallOutput>;
 }
 
-type ToolExecutionRole = "manager" | "worker" | "critic" | "coder";
+type ToolExecutionRole = 'manager' | 'worker' | 'critic' | 'coder';
+
+const CRITIC_READ_ONLY_TOOLS = new Set(['read_file', 'grep', 'glob', 'ls']);
 
 /** Role filter: manager gets manager+worker+any (full); worker gets worker+any; critic gets critic+any (read-only only). */
-function roleIncludesTool(role: ToolExecutionRole, toolRole?: "manager" | "worker" | "critic" | "any"): boolean {
-  const normalizedRole: "manager" | "worker" | "critic" = role === "coder" ? "worker" : role;
+function roleIncludesTool(
+  toolName: string,
+  role: ToolExecutionRole,
+  toolRole?: 'manager' | 'worker' | 'critic' | 'any',
+): boolean {
+  const normalizedRole: 'manager' | 'worker' | 'critic' = role === 'coder' ? 'worker' : role;
   const r = toolRole as string | undefined;
-  if (!r || r === "any") return true;
-  if (normalizedRole === "manager") return r === "manager" || r === "worker";
+
+  if (normalizedRole === 'critic') {
+    return CRITIC_READ_ONLY_TOOLS.has(toolName) || r === 'critic' || r === 'any' || !r;
+  }
+  if (!r || r === 'any') return true;
+  if (normalizedRole === 'manager') return r === 'manager' || r === 'worker';
   return r === normalizedRole;
 }
 
@@ -79,7 +98,7 @@ export class ToolRegistry {
   /** Get tool definitions formatted for LLM provider calls, filtered by role. Manager = full; worker = build tools; critic = read-only (read_file, grep, glob, ls). */
   getToolDefsForRole(role: ToolExecutionRole) {
     return this.getAll()
-      .filter((t) => roleIncludesTool(role, t.role))
+      .filter((t) => roleIncludesTool(t.name, role, t.role))
       .map((t) => ({
         name: t.name,
         description: t.description,
@@ -106,14 +125,18 @@ export class ToolRegistry {
       return result;
     } catch (err: any) {
       // Log full error details for debugging
-      toolLog.error({
-        err: err instanceof Error ? { message: err.message, stack: err.stack, name: err.name } : err,
-        toolName: call.name,
-        callId: call.id,
-        sessionId: ctx.sessionId,
-        durationMs: performance.now() - start,
-      }, "Tool execution failed");
-      
+      toolLog.error(
+        {
+          err:
+            err instanceof Error ? { message: err.message, stack: err.stack, name: err.name } : err,
+          toolName: call.name,
+          callId: call.id,
+          sessionId: ctx.sessionId,
+          durationMs: performance.now() - start,
+        },
+        'Tool execution failed',
+      );
+
       return {
         callId: call.id,
         name: call.name,

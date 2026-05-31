@@ -1,6 +1,6 @@
 /**
  * Prometheus Metrics
- * 
+ *
  * Exposes metrics for monitoring:
  * - HTTP request duration and count
  * - Rate limiting events
@@ -46,21 +46,33 @@ class MetricsRegistry {
 
   private registerDefaultMetrics() {
     // HTTP metrics
-    this.registerCounter('http_requests_total', 'Total HTTP requests', ['method', 'route', 'status']);
-    this.registerHistogram('http_request_duration_seconds', 'HTTP request duration', ['method', 'route'], [0.01, 0.05, 0.1, 0.5, 1, 2, 5]);
-    
+    this.registerCounter('http_requests_total', 'Total HTTP requests', [
+      'method',
+      'route',
+      'status',
+    ]);
+    this.registerHistogram(
+      'http_request_duration_seconds',
+      'HTTP request duration',
+      ['method', 'route'],
+      [0.01, 0.05, 0.1, 0.5, 1, 2, 5],
+    );
+
     // Auth metrics
     this.registerCounter('auth_attempts_total', 'Authentication attempts', ['method', 'result']);
     this.registerCounter('api_key_validations_total', 'API key validations', ['result']);
-    
+
     // Rate limiting metrics
     this.registerCounter('rate_limit_hits_total', 'Rate limit hits', ['tier', 'algorithm']);
     this.registerCounter('rate_limit_allowed_total', 'Requests allowed by rate limiter', ['tier']);
-    
+
     // Credential metrics
-    this.registerCounter('credential_operations_total', 'Credential operations', ['operation', 'result']);
+    this.registerCounter('credential_operations_total', 'Credential operations', [
+      'operation',
+      'result',
+    ]);
     this.registerGauge('credentials_stored', 'Total credentials stored', ['provider']);
-    
+
     // Audit metrics
     this.registerCounter('audit_events_total', 'Audit events logged', ['action', 'resource_type']);
   }
@@ -115,7 +127,12 @@ class MetricsRegistry {
   }
 
   // Histogram methods
-  registerHistogram(name: string, help: string, labels: string[] = [], buckets: number[] = [0.1, 0.5, 1, 2, 5]) {
+  registerHistogram(
+    name: string,
+    help: string,
+    labels: string[] = [],
+    buckets: number[] = [0.1, 0.5, 1, 2, 5],
+  ) {
     this.histograms.set(name, { name, help, labels, buckets, values: new Map() });
   }
 
@@ -134,14 +151,14 @@ class MetricsRegistry {
 
   // Format labels for storage key
   private formatLabels(labels: Record<string, string>, expectedLabels: string[]): string {
-    const parts = expectedLabels.map(label => `${label}="${labels[label] || ''}"`);
+    const parts = expectedLabels.map((label) => `${label}="${labels[label] || ''}"`);
     return parts.join(',');
   }
 
   // Generate Prometheus exposition format
   generateMetrics(): string {
     const lines: string[] = [];
-    
+
     // Process info
     lines.push(`# HELP process_uptime_seconds Process uptime in seconds`);
     lines.push(`# TYPE process_uptime_seconds gauge`);
@@ -152,7 +169,7 @@ class MetricsRegistry {
     for (const counter of this.counters.values()) {
       lines.push(`# HELP ${counter.name} ${counter.help}`);
       lines.push(`# TYPE ${counter.name} counter`);
-      
+
       if (counter.values.size === 0) {
         lines.push(`${counter.name} 0`);
       } else {
@@ -171,7 +188,7 @@ class MetricsRegistry {
     for (const gauge of this.gauges.values()) {
       lines.push(`# HELP ${gauge.name} ${gauge.help}`);
       lines.push(`# TYPE ${gauge.name} gauge`);
-      
+
       if (gauge.values.size === 0) {
         lines.push(`${gauge.name} 0`);
       } else {
@@ -190,27 +207,31 @@ class MetricsRegistry {
     for (const histogram of this.histograms.values()) {
       lines.push(`# HELP ${histogram.name} ${histogram.help}`);
       lines.push(`# TYPE ${histogram.name} histogram`);
-      
+
       for (const [labelKey, values] of histogram.values) {
         const labelPrefix = labelKey ? `{${labelKey}}` : '';
-        
+
         // Calculate buckets
         for (const bucket of histogram.buckets) {
-          const count = values.filter(v => v <= bucket).length;
-          lines.push(`${histogram.name}_bucket{le="${bucket}"${labelKey ? ',' + labelKey : ''}} ${count}`);
+          const count = values.filter((v) => v <= bucket).length;
+          lines.push(
+            `${histogram.name}_bucket{le="${bucket}"${labelKey ? ',' + labelKey : ''}} ${count}`,
+          );
         }
-        
+
         // +Inf bucket
-        lines.push(`${histogram.name}_bucket{le="+Inf"${labelKey ? ',' + labelKey : ''}} ${values.length}`);
-        
+        lines.push(
+          `${histogram.name}_bucket{le="+Inf"${labelKey ? ',' + labelKey : ''}} ${values.length}`,
+        );
+
         // Sum
         const sum = values.reduce((a, b) => a + b, 0);
         lines.push(`${histogram.name}_sum${labelPrefix} ${sum}`);
-        
+
         // Count
         lines.push(`${histogram.name}_count${labelPrefix} ${values.length}`);
       }
-      
+
       if (histogram.values.size === 0) {
         for (const bucket of histogram.buckets) {
           lines.push(`${histogram.name}_bucket{le="${bucket}"} 0`);
@@ -219,7 +240,7 @@ class MetricsRegistry {
         lines.push(`${histogram.name}_sum 0`);
         lines.push(`${histogram.name}_count 0`);
       }
-      
+
       lines.push('');
     }
 
@@ -268,22 +289,22 @@ export function observeHistogram(name: string, labels?: Record<string, string>, 
 // Middleware for HTTP metrics
 export function httpMetricsMiddleware() {
   const registry = getMetricsRegistry();
-  
+
   return async (req: Request, next: () => Promise<Response>): Promise<Response> => {
     const start = Date.now();
     const url = new URL(req.url);
     const method = req.method;
     const route = url.pathname;
-    
+
     try {
       const response = await next();
       const duration = (Date.now() - start) / 1000;
       const status = response.status.toString();
-      
+
       // Record metrics
       registry.incCounter('http_requests_total', { method, route, status });
       registry.observeHistogram('http_request_duration_seconds', { method, route }, duration);
-      
+
       return response;
     } catch (error) {
       const duration = (Date.now() - start) / 1000;
@@ -326,8 +347,8 @@ export function updateCredentialsStored(provider: string, count: number) {
 
 // Audit metrics helpers
 export function recordAuditEvent(action: string, resourceType?: string) {
-  incCounter('audit_events_total', { 
-    action, 
-    resource_type: resourceType || 'unknown' 
+  incCounter('audit_events_total', {
+    action,
+    resource_type: resourceType || 'unknown',
   });
 }

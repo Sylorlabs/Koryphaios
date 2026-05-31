@@ -9,6 +9,9 @@ desktop/src-tauri/target/
 
 # Data & secrets
 .koryphaios/
+data/*.db
+data/*.db-*
+*.db
 *.db-wal
 *.db-shm
 
@@ -43,3 +46,4 @@ opencode-reference/
 # Koryphaios AI worktrees
 .trees/
 .keys
+desktop/src-tauri/sidecar/

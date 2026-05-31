@@ -3,18 +3,18 @@
 // session-scoped replies from the manager agent.
 
 export const CHANNEL_PREFIX = {
-  telegram: "telegram-",
-  discord: "discord-",
-  slack: "slack-",
-  imessage: "imessage-",
-  android: "android-",
+  telegram: 'telegram-',
+  discord: 'discord-',
+  slack: 'slack-',
+  imessage: 'imessage-',
+  android: 'android-',
 } as const;
 
 export type ChannelId = keyof typeof CHANNEL_PREFIX;
 
 /** Reply segment: text delta or final message for a session */
 export interface ReplySegment {
-  type: "delta" | "message" | "error" | "status";
+  type: 'delta' | 'message' | 'error' | 'status';
   sessionId: string;
   content?: string;
   error?: string;

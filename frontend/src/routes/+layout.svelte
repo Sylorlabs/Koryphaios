@@ -1,19 +1,46 @@
 <script lang="ts">
 	import '../app.css';
+	import '$lib/fonts';
 	import { onMount } from 'svelte';
 	import { loadProvidersFromApi } from '$lib/stores/websocket.svelte';
+	import { authStore } from '$lib/stores/auth.svelte';
 	import { initUrls } from '$lib/utils/api-url';
+	import UpdateBanner from '$lib/components/UpdateBanner.svelte';
 	import UpdateDialog from '$lib/components/UpdateDialog.svelte';
 
 	let { children } = $props();
 	let showInitialLoad = $state(true);
 	let isOffline = $state(false);
+	let loadError = $state<string | null>(null);
 
 	onMount(() => {
+		// Direct DOM fallback for hiding loading screen
+		const hideLoading = () => {
+			showInitialLoad = false;
+			// Also directly hide via DOM as fallback
+			const el = document.querySelector('.initial-load');
+			if (el) (el as HTMLElement).style.display = 'none';
+		};
+
 		import('$lib/utils/error-monitor').then((m) => m.initErrorMonitoring()).catch(() => {});
-		initUrls(); // Initialize backend URLs for desktop app
-		loadProvidersFromApi();
-		const t = setTimeout(() => { showInitialLoad = false; }, 1500);
+		
+		// Resolve backend URLs first, then wait for auth before requesting protected data.
+		Promise.resolve()
+			.then(() => initUrls())
+			.then(() => authStore.initialize())
+			.then((authReady) => {
+				if (authReady) {
+					return loadProvidersFromApi();
+				}
+			})
+			.catch(() => {})
+			.finally(() => {
+			// Hide loading screen after init or on error
+			setTimeout(hideLoading, 500);
+		});
+
+		// Fallback: always hide after max 3 seconds
+		const fallbackTimer = setTimeout(hideLoading, 3000);
 
 		isOffline = !navigator.onLine;
 		const goOffline = () => { isOffline = true; };
@@ -22,7 +49,7 @@
 		window.addEventListener('online', goOnline);
 
 		return () => {
-			clearTimeout(t);
+			clearTimeout(fallbackTimer);
 			window.removeEventListener('offline', goOffline);
 			window.removeEventListener('online', goOnline);
 		};
@@ -36,21 +63,24 @@
 <div class="layout-root">
 	<a href="#main-content" class="skip-link">Skip to main content</a>
 	{#if isOffline}
-		<div class="offline-banner" role="alert">
+		<div class="offline-banner" role="alert" data-tauri-drag-region>
 			You are offline. Changes may not be saved.
 		</div>
 	{/if}
 	{#if showInitialLoad}
-		<div class="initial-load" aria-live="polite">
+		<div class="initial-load" aria-live="polite" data-tauri-drag-region>
 			<div class="initial-load-dot"></div>
-			<span>Loading Koryphaios…</span>
+			<span data-tauri-drag-region>Loading Koryphaios…</span>
 		</div>
 	{/if}
 	<main id="main-content">
 		{@render children()}
 	</main>
 	
-	<!-- Update Dialog - only shown when update is available -->
+	<!-- Update Banner - shows at top when update is available -->
+	<UpdateBanner />
+	
+	<!-- Update Dialog - modal for detailed update info -->
 	<UpdateDialog />
 </div>
 
@@ -94,5 +124,6 @@
 		font-weight: var(--font-medium);
 		background: var(--color-warning);
 		color: #000;
+		-webkit-app-region: drag;
 	}
 </style>

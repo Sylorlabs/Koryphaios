@@ -1,16 +1,17 @@
 /**
  * Unified Memory Store
- * 
+ *
  * Manages all memory types:
  * - Universal Memory (global across all projects)
  * - Project Memory (specific to current project)
  * - Session Memory (per-chat persistent storage)
- * - Rules (.cursorrules file)
+ * - Rules (.koryrules file)
  * - Memory Settings (toggles and configuration)
  */
 
-import { apiUrl } from "$lib/utils/api-url";
-import { toastStore } from "./toast.svelte";
+import { apiUrl } from '$lib/utils/api-url';
+import { toastStore } from './toast.svelte';
+import { apiFetch } from '$lib/api.svelte';
 
 // ============================================================================
 // Types
@@ -41,7 +42,7 @@ export interface MemoryState {
   rules: MemoryFile | null;
   settings: MemorySettings | null;
   isLoading: boolean;
-  activeTab: "universal" | "project" | "session" | "rules" | "settings";
+  activeTab: 'universal' | 'project' | 'session' | 'rules' | 'settings';
 }
 
 // ============================================================================
@@ -70,7 +71,7 @@ function createMemoryStore() {
     rules: null,
     settings: null,
     isLoading: false,
-    activeTab: "project",
+    activeTab: 'project',
   });
 
   // ========================================================================
@@ -79,9 +80,7 @@ function createMemoryStore() {
 
   async function loadUniversalMemory(): Promise<void> {
     try {
-      const res = await fetch(apiUrl("/api/memory/universal"), {
-        credentials: "include",
-      });
+      const res = await apiFetch(apiUrl('/api/memory/universal'));
 
       if (res.ok) {
         const data = await res.json();
@@ -90,17 +89,16 @@ function createMemoryStore() {
         }
       }
     } catch (err) {
-      console.error("Failed to load universal memory:", err);
+      console.error('Failed to load universal memory:', err);
     }
   }
 
   async function saveUniversalMemory(content: string): Promise<boolean> {
     state.isLoading = true;
     try {
-      const res = await fetch(apiUrl("/api/memory/universal"), {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        credentials: "include",
+      const res = await apiFetch(apiUrl('/api/memory/universal'), {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ content }),
       });
 
@@ -114,13 +112,13 @@ function createMemoryStore() {
             lastModified: Date.now(),
             size: content.length,
           } as MemoryFile;
-          toastStore.success("Universal memory saved");
+          toastStore.success('Universal memory saved');
           return true;
         }
       }
-      throw new Error("Failed to save");
+      throw new Error('Failed to save');
     } catch (err) {
-      toastStore.error("Failed to save universal memory");
+      toastStore.error('Failed to save universal memory');
       return false;
     } finally {
       state.isLoading = false;
@@ -129,20 +127,17 @@ function createMemoryStore() {
 
   async function initializeUniversalMemory(): Promise<void> {
     try {
-      const res = await fetch(apiUrl("/api/memory/universal/init"), {
-        method: "POST",
-        credentials: "include",
-      });
+      const res = await apiFetch(apiUrl('/api/memory/universal/init'), { method: 'POST' });
 
       if (res.ok) {
         const data = await res.json();
         if (data.ok) {
           state.universal = data.data;
-          toastStore.success("Universal memory initialized with template");
+          toastStore.success('Universal memory initialized with template');
         }
       }
     } catch (err) {
-      toastStore.error("Failed to initialize universal memory");
+      toastStore.error('Failed to initialize universal memory');
     }
   }
 
@@ -152,9 +147,7 @@ function createMemoryStore() {
 
   async function loadProjectMemory(): Promise<void> {
     try {
-      const res = await fetch(apiUrl("/api/memory/project"), {
-        credentials: "include",
-      });
+      const res = await apiFetch(apiUrl('/api/memory/project'));
 
       if (res.ok) {
         const data = await res.json();
@@ -163,17 +156,16 @@ function createMemoryStore() {
         }
       }
     } catch (err) {
-      console.error("Failed to load project memory:", err);
+      console.error('Failed to load project memory:', err);
     }
   }
 
   async function saveProjectMemory(content: string): Promise<boolean> {
     state.isLoading = true;
     try {
-      const res = await fetch(apiUrl("/api/memory/project"), {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        credentials: "include",
+      const res = await apiFetch(apiUrl('/api/memory/project'), {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ content }),
       });
 
@@ -187,13 +179,13 @@ function createMemoryStore() {
             lastModified: Date.now(),
             size: content.length,
           } as MemoryFile;
-          toastStore.success("Project memory saved");
+          toastStore.success('Project memory saved');
           return true;
         }
       }
-      throw new Error("Failed to save");
+      throw new Error('Failed to save');
     } catch (err) {
-      toastStore.error("Failed to save project memory");
+      toastStore.error('Failed to save project memory');
       return false;
     } finally {
       state.isLoading = false;
@@ -202,20 +194,17 @@ function createMemoryStore() {
 
   async function initializeProjectMemory(): Promise<void> {
     try {
-      const res = await fetch(apiUrl("/api/memory/project/init"), {
-        method: "POST",
-        credentials: "include",
-      });
+      const res = await apiFetch(apiUrl('/api/memory/project/init'), { method: 'POST' });
 
       if (res.ok) {
         const data = await res.json();
         if (data.ok) {
           state.project = data.data;
-          toastStore.success("Project memory initialized with template");
+          toastStore.success('Project memory initialized with template');
         }
       }
     } catch (err) {
-      toastStore.error("Failed to initialize project memory");
+      toastStore.error('Failed to initialize project memory');
     }
   }
 
@@ -225,9 +214,7 @@ function createMemoryStore() {
 
   async function loadSessionMemory(sessionId: string): Promise<void> {
     try {
-      const res = await fetch(apiUrl(`/api/sessions/${sessionId}/memory`), {
-        credentials: "include",
-      });
+      const res = await apiFetch(apiUrl(`/api/memory/sessions/${sessionId}`));
 
       if (res.ok) {
         const data = await res.json();
@@ -236,17 +223,16 @@ function createMemoryStore() {
         }
       }
     } catch (err) {
-      console.error("Failed to load session memory:", err);
+      console.error('Failed to load session memory:', err);
     }
   }
 
   async function saveSessionMemory(sessionId: string, content: string): Promise<boolean> {
     state.isLoading = true;
     try {
-      const res = await fetch(apiUrl(`/api/sessions/${sessionId}/memory`), {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        credentials: "include",
+      const res = await apiFetch(apiUrl(`/api/memory/sessions/${sessionId}`), {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ content }),
       });
 
@@ -260,13 +246,13 @@ function createMemoryStore() {
             lastModified: Date.now(),
             size: content.length,
           } as MemoryFile;
-          toastStore.success("Session memory saved");
+          toastStore.success('Session memory saved');
           return true;
         }
       }
-      throw new Error("Failed to save");
+      throw new Error('Failed to save');
     } catch (err) {
-      toastStore.error("Failed to save session memory");
+      toastStore.error('Failed to save session memory');
       return false;
     } finally {
       state.isLoading = false;
@@ -275,38 +261,34 @@ function createMemoryStore() {
 
   async function initializeSessionMemory(sessionId: string): Promise<void> {
     try {
-      const res = await fetch(apiUrl(`/api/sessions/${sessionId}/memory/init`), {
-        method: "POST",
-        credentials: "include",
+      const res = await apiFetch(apiUrl(`/api/memory/sessions/${sessionId}/init`), {
+        method: 'POST',
       });
 
       if (res.ok) {
         const data = await res.json();
         if (data.ok) {
           state.session = data.data;
-          toastStore.success("Session memory initialized with template");
+          toastStore.success('Session memory initialized with template');
         }
       }
     } catch (err) {
-      toastStore.error("Failed to initialize session memory");
+      toastStore.error('Failed to initialize session memory');
     }
   }
 
   async function deleteSessionMemory(sessionId: string): Promise<boolean> {
     try {
-      const res = await fetch(apiUrl(`/api/sessions/${sessionId}/memory`), {
-        method: "DELETE",
-        credentials: "include",
-      });
+      const res = await apiFetch(apiUrl(`/api/memory/sessions/${sessionId}`), { method: 'DELETE' });
 
       if (res.ok) {
         state.session = null;
-        toastStore.success("Session memory deleted");
+        toastStore.success('Session memory deleted');
         return true;
       }
       return false;
     } catch (err) {
-      toastStore.error("Failed to delete session memory");
+      toastStore.error('Failed to delete session memory');
       return false;
     }
   }
@@ -317,9 +299,7 @@ function createMemoryStore() {
 
   async function loadRules(): Promise<void> {
     try {
-      const res = await fetch(apiUrl("/api/memory/rules"), {
-        credentials: "include",
-      });
+      const res = await apiFetch(apiUrl('/api/memory/rules'));
 
       if (res.ok) {
         const data = await res.json();
@@ -328,17 +308,16 @@ function createMemoryStore() {
         }
       }
     } catch (err) {
-      console.error("Failed to load rules:", err);
+      console.error('Failed to load rules:', err);
     }
   }
 
   async function saveRules(content: string): Promise<boolean> {
     state.isLoading = true;
     try {
-      const res = await fetch(apiUrl("/api/memory/rules"), {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        credentials: "include",
+      const res = await apiFetch(apiUrl('/api/memory/rules'), {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ content }),
       });
 
@@ -352,13 +331,13 @@ function createMemoryStore() {
             lastModified: Date.now(),
             size: content.length,
           } as MemoryFile;
-          toastStore.success("Rules saved");
+          toastStore.success('Rules saved');
           return true;
         }
       }
-      throw new Error("Failed to save");
+      throw new Error('Failed to save');
     } catch (err) {
-      toastStore.error("Failed to save rules");
+      toastStore.error('Failed to save rules');
       return false;
     } finally {
       state.isLoading = false;
@@ -367,20 +346,17 @@ function createMemoryStore() {
 
   async function initializeRules(): Promise<void> {
     try {
-      const res = await fetch(apiUrl("/api/memory/rules/init"), {
-        method: "POST",
-        credentials: "include",
-      });
+      const res = await apiFetch(apiUrl('/api/memory/rules/init'), { method: 'POST' });
 
       if (res.ok) {
         const data = await res.json();
         if (data.ok) {
           state.rules = data.data;
-          toastStore.success("Rules initialized with template");
+          toastStore.success('Rules initialized with template');
         }
       }
     } catch (err) {
-      toastStore.error("Failed to initialize rules");
+      toastStore.error('Failed to initialize rules');
     }
   }
 
@@ -390,9 +366,7 @@ function createMemoryStore() {
 
   async function loadSettings(): Promise<void> {
     try {
-      const res = await fetch(apiUrl("/api/memory/settings"), {
-        credentials: "include",
-      });
+      const res = await apiFetch(apiUrl('/api/memory/settings'));
 
       if (res.ok) {
         const data = await res.json();
@@ -401,7 +375,7 @@ function createMemoryStore() {
         }
       }
     } catch (err) {
-      console.error("Failed to load memory settings:", err);
+      console.error('Failed to load memory settings:', err);
       state.settings = DEFAULT_SETTINGS;
     }
   }
@@ -409,10 +383,9 @@ function createMemoryStore() {
   async function saveSettings(settings: Partial<MemorySettings>): Promise<boolean> {
     state.isLoading = true;
     try {
-      const res = await fetch(apiUrl("/api/memory/settings"), {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        credentials: "include",
+      const res = await apiFetch(apiUrl('/api/memory/settings'), {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(settings),
       });
 
@@ -420,13 +393,13 @@ function createMemoryStore() {
         const data = await res.json();
         if (data.ok) {
           state.settings = { ...state.settings, ...data.data } as MemorySettings;
-          toastStore.success("Memory settings saved");
+          toastStore.success('Memory settings saved');
           return true;
         }
       }
-      throw new Error("Failed to save");
+      throw new Error('Failed to save');
     } catch (err) {
-      toastStore.error("Failed to save memory settings");
+      toastStore.error('Failed to save memory settings');
       return false;
     } finally {
       state.isLoading = false;
@@ -435,22 +408,19 @@ function createMemoryStore() {
 
   async function resetSettings(): Promise<boolean> {
     try {
-      const res = await fetch(apiUrl("/api/memory/settings/reset"), {
-        method: "POST",
-        credentials: "include",
-      });
+      const res = await apiFetch(apiUrl('/api/memory/settings/reset'), { method: 'POST' });
 
       if (res.ok) {
         const data = await res.json();
         if (data.ok) {
           state.settings = data.data;
-          toastStore.success("Memory settings reset to defaults");
+          toastStore.success('Memory settings reset to defaults');
           return true;
         }
       }
       return false;
     } catch (err) {
-      toastStore.error("Failed to reset memory settings");
+      toastStore.error('Failed to reset memory settings');
       return false;
     }
   }
@@ -474,7 +444,7 @@ function createMemoryStore() {
     }
   }
 
-  function setActiveTab(tab: MemoryState["activeTab"]): void {
+  function setActiveTab(tab: MemoryState['activeTab']): void {
     state.activeTab = tab;
   }
 
@@ -488,13 +458,27 @@ function createMemoryStore() {
 
   return {
     // State getters
-    get universal() { return state.universal; },
-    get project() { return state.project; },
-    get session() { return state.session; },
-    get rules() { return state.rules; },
-    get settings() { return state.settings; },
-    get isLoading() { return state.isLoading; },
-    get activeTab() { return state.activeTab; },
+    get universal() {
+      return state.universal;
+    },
+    get project() {
+      return state.project;
+    },
+    get session() {
+      return state.session;
+    },
+    get rules() {
+      return state.rules;
+    },
+    get settings() {
+      return state.settings;
+    },
+    get isLoading() {
+      return state.isLoading;
+    },
+    get activeTab() {
+      return state.activeTab;
+    },
 
     // Universal memory
     loadUniversalMemory,

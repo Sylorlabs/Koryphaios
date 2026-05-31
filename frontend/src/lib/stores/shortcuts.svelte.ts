@@ -26,16 +26,16 @@ function loadShortcuts(): Shortcut[] {
     const stored = localStorage.getItem(STORAGE_KEY);
     if (stored) {
       let parsed = JSON.parse(stored) as Shortcut[];
-      
+
       // Migrate old 'Ctrl' shortcuts to 'Mod'
-      parsed = parsed.map(s => ({
+      parsed = parsed.map((s) => ({
         ...s,
-        keys: s.keys.map(k => k === 'Ctrl' ? 'Mod' : k)
+        keys: s.keys.map((k) => (k === 'Ctrl' ? 'Mod' : k)),
       }));
 
       // Merge in missing default shortcuts
       for (const def of defaultShortcuts) {
-        if (!parsed.some(s => s.id === def.id)) {
+        if (!parsed.some((s) => s.id === def.id)) {
           parsed.push(structuredClone(def));
         }
       }
@@ -50,8 +50,12 @@ function createShortcutStore() {
   let shortcuts = $state<Shortcut[]>(loadShortcuts());
 
   return {
-    get list() { return shortcuts; },
-    set list(v: Shortcut[]) { shortcuts = v; },
+    get list() {
+      return shortcuts;
+    },
+    set list(v: Shortcut[]) {
+      shortcuts = v;
+    },
 
     save() {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(shortcuts));
@@ -64,7 +68,7 @@ function createShortcutStore() {
 
     /** Check if a KeyboardEvent matches a given shortcut id */
     matches(id: string, e: KeyboardEvent): boolean {
-      const shortcut = shortcuts.find(s => s.id === id);
+      const shortcut = shortcuts.find((s) => s.id === id);
       if (!shortcut) return false;
       return keysMatch(shortcut.keys, e);
     },
@@ -92,7 +96,7 @@ function keysMatch(keys: string[], e: KeyboardEvent): boolean {
   if (!ctrlOk || !metaOk || !shiftOk || !altOk) return false;
 
   // Find the non-modifier key in the shortcut
-  const nonModKeys = keys.filter(k => !['Ctrl', 'Shift', 'Alt', 'Meta', 'Mod'].includes(k));
+  const nonModKeys = keys.filter((k) => !['Ctrl', 'Shift', 'Alt', 'Meta', 'Mod'].includes(k));
   if (nonModKeys.length === 0) return false;
 
   const target = nonModKeys[0];

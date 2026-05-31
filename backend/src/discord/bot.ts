@@ -1,11 +1,11 @@
 // Secure Discord Bridge — Guild/User-locked bot handler.
 // Streams manager replies back to Discord channels.
 
-import { Client, GatewayIntentBits, Events, REST, Routes, SlashCommandBuilder } from "discord.js";
-import type { KoryManager } from "../kory/manager";
-import type { MessagingGateway } from "../messaging/gateway";
-import type { DiscordAdapter } from "../messaging/discord-adapter";
-import { discordLog } from "../logger";
+import { Client, GatewayIntentBits, Events, REST, Routes, SlashCommandBuilder } from 'discord.js';
+import type { KoryManager } from '../kory/manager';
+import type { MessagingGateway } from '../messaging/gateway';
+import type { DiscordAdapter } from '../messaging/discord-adapter';
+import { discordLog } from '../logger';
 
 export interface DiscordBridgeConfig {
   botToken: string;
@@ -48,37 +48,41 @@ export class DiscordBridge {
       const guildId = interaction.guildId;
 
       if (!this.isAuthorized(guildId, userId)) {
-        discordLog.warn({ userId, guildId }, "Blocked unauthorized user");
-        await interaction.reply({ content: "⛔ You are not authorized to use this bot.", ephemeral: true });
+        discordLog.warn({ userId, guildId }, 'Blocked unauthorized user');
+        await interaction.reply({
+          content: '⛔ You are not authorized to use this bot.',
+          ephemeral: true,
+        });
         return;
       }
 
       const channelId = interaction.channelId;
 
       switch (interaction.commandName) {
-        case "task": {
-          const prompt = interaction.options.getString("prompt", true);
+        case 'task': {
+          const prompt = interaction.options.getString('prompt', true);
           await interaction.deferReply();
           await this.runTask(channelId, prompt, async (text) => {
             await interaction.editReply(text);
           });
           break;
         }
-        case "status": {
+        case 'status': {
           const workers = this.kory.getStatus();
           if (workers.length === 0) {
-            await interaction.reply("😴 No active workers. System is idle.");
+            await interaction.reply('😴 No active workers. System is idle.');
             return;
           }
-          const lines = workers.map((w) =>
-            `• **${w.agent.name}** (${w.agent.model})\n  Status: ${w.status}\n  Task: ${w.task.slice(0, 100)}`
+          const lines = workers.map(
+            (w) =>
+              `• **${w.agent.name}** (${w.agent.model})\n  Status: ${w.status}\n  Task: ${w.task.slice(0, 100)}`,
           );
-          await interaction.reply(`📊 Active Workers:\n\n${lines.join("\n\n")}`);
+          await interaction.reply(`📊 Active Workers:\n\n${lines.join('\n\n')}`);
           break;
         }
-        case "cancel": {
+        case 'cancel': {
           this.kory.cancel();
-          await interaction.reply("🛑 All active tasks cancelled.");
+          await interaction.reply('🛑 All active tasks cancelled.');
           break;
         }
       }
@@ -93,18 +97,18 @@ export class DiscordBridge {
       const guildId = message.guildId;
 
       if (!this.isAuthorized(guildId, userId)) {
-        discordLog.warn({ userId, guildId }, "Blocked unauthorized mention");
+        discordLog.warn({ userId, guildId }, 'Blocked unauthorized mention');
         return;
       }
 
       const text = message.content
-        .replace(new RegExp(`<@!?${this.client.user!.id}>`, "g"), "")
+        .replace(new RegExp(`<@!?${this.client.user!.id}>`, 'g'), '')
         .trim();
 
       if (!text) return;
 
       const channelId = message.channelId;
-      await message.reply("⏳ Processing…");
+      await message.reply('⏳ Processing…');
       await this.runTask(channelId, text, async (reply) => {
         // Chunked reply for long messages
         if (reply.length <= 2000) {
@@ -135,7 +139,7 @@ export class DiscordBridge {
     try {
       await this.kory.processTask(sessionId, prompt);
     } catch (err: unknown) {
-      discordLog.error({ err, sessionId }, "Kory task error from Discord");
+      discordLog.error({ err, sessionId }, 'Kory task error from Discord');
       await reply(`❌ Error: ${err instanceof Error ? err.message : String(err)}`).catch(() => {});
     }
   }
@@ -143,35 +147,30 @@ export class DiscordBridge {
   async registerSlashCommands(): Promise<void> {
     const commands = [
       new SlashCommandBuilder()
-        .setName("task")
-        .setDescription("Send a task to the AI agent")
+        .setName('task')
+        .setDescription('Send a task to the AI agent')
         .addStringOption((opt) =>
-          opt.setName("prompt").setDescription("The task to perform").setRequired(true),
+          opt.setName('prompt').setDescription('The task to perform').setRequired(true),
         ),
-      new SlashCommandBuilder()
-        .setName("status")
-        .setDescription("Show status of active workers"),
-      new SlashCommandBuilder()
-        .setName("cancel")
-        .setDescription("Cancel all active tasks"),
+      new SlashCommandBuilder().setName('status').setDescription('Show status of active workers'),
+      new SlashCommandBuilder().setName('cancel').setDescription('Cancel all active tasks'),
     ];
 
-    const rest = new REST({ version: "10" }).setToken(this.config.botToken);
+    const rest = new REST({ version: '10' }).setToken(this.config.botToken);
 
     try {
-      await rest.put(
-        Routes.applicationCommands(this.client.user!.id),
-        { body: commands.map((c) => c.toJSON()) },
-      );
-      discordLog.info("Registered Discord slash commands");
+      await rest.put(Routes.applicationCommands(this.client.user!.id), {
+        body: commands.map((c) => c.toJSON()),
+      });
+      discordLog.info('Registered Discord slash commands');
     } catch (err) {
-      discordLog.error({ err }, "Failed to register Discord slash commands");
+      discordLog.error({ err }, 'Failed to register Discord slash commands');
     }
   }
 
   async start(): Promise<void> {
     await this.client.login(this.config.botToken);
-    discordLog.info({ tag: this.client.user?.tag }, "Discord bot logged in");
+    discordLog.info({ tag: this.client.user?.tag }, 'Discord bot logged in');
 
     // Register slash commands once ready
     this.client.once(Events.ClientReady, async () => {
@@ -181,7 +180,7 @@ export class DiscordBridge {
 
   async stop(): Promise<void> {
     await this.client.destroy();
-    discordLog.info("Discord bot stopped");
+    discordLog.info('Discord bot stopped');
   }
 }
 

@@ -6,25 +6,25 @@ Any `.ts` file in this directory that exports a default class implementing the `
 ## Example
 
 ```typescript
-import type { Tool, ToolContext, ToolCallInput, ToolCallOutput } from "../tools/registry";
+import type { Tool, ToolContext, ToolCallInput, ToolCallOutput } from '../tools/registry';
 
 export default class MyCustomTool implements Tool {
-  name = "my_custom_tool";
-  description = "Does something special";
+  name = 'my_custom_tool';
+  description = 'Does something special';
   inputSchema = {
-    type: "object",
+    type: 'object',
     properties: {
-      param: { type: "string" }
-    }
+      param: { type: 'string' },
+    },
   };
 
   async run(ctx: ToolContext, call: ToolCallInput): Promise<ToolCallOutput> {
     return {
       callId: call.id,
       name: this.name,
-      output: "Hello from custom tool!",
+      output: 'Hello from custom tool!',
       isError: false,
-      durationMs: 0
+      durationMs: 0,
     };
   }
 }

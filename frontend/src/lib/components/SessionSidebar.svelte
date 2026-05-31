@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
+  import { untrack } from 'svelte';
   import { sessionStore } from '$lib/stores/sessions.svelte';
   import { wsStore } from '$lib/stores/websocket.svelte';
   import { toastStore } from '$lib/stores/toast.svelte';
@@ -23,17 +23,17 @@
   // Track which session we last loaded feed for, so we load when active changes (e.g. new session from +)
   let lastLoadedSessionId = $state<string>('');
 
-  onMount(() => {
-    sessionStore.fetchSessions();
-  });
-
   // Whenever the store's active session changes, sync and load its feed (including when + creates a new session)
   $effect(() => {
-    const activeId = sessionStore.activeSessionId;
+    // Use untrack to prevent this effect from depending on wsStore state reads
+    const activeId = untrack(() => sessionStore.activeSessionId);
     if (!activeId) {
       // Clear feed when no active session (e.g., all sessions deleted)
-      wsStore.clearFeed();
-      lastLoadedSessionId = '';
+      // Only clear if we haven't already cleared for this state
+      if (lastLoadedSessionId !== '') {
+        wsStore.clearFeed();
+        lastLoadedSessionId = '';
+      }
       return;
     }
     if (activeId !== currentSessionId) currentSessionId = activeId;
@@ -134,10 +134,14 @@
 
 <div class="h-full flex flex-col" style="background: var(--color-surface-1);">
   <!-- Header -->
-  <div class="flex items-center justify-between px-3 py-3 border-b" style="border-color: var(--color-border);">
-    <span class="text-sm font-semibold leading-none" style="color: var(--color-text-primary);">Sessions</span>
+  <div class="flex items-start justify-between px-4 py-4 border-b" style="border-color: var(--color-border);">
+    <div class="min-w-0">
+      <div class="text-sm font-semibold leading-none" style="color: var(--color-text-primary);">Sessions</div>
+      <div class="mt-1 text-xs" style="color: var(--color-text-muted);">Recent workspaces and agent runs</div>
+    </div>
     <button
-      class="p-1.5 rounded-lg transition-colors hover:bg-[var(--color-surface-3)] flex items-center justify-center"
+      type="button"
+      class="p-2 rounded-lg transition-colors hover:bg-[var(--color-surface-3)] flex items-center justify-center"
       style="color: var(--color-text-secondary);"
       disabled={creating}
       onclick={handleCreateSession}
@@ -153,31 +157,31 @@
   </div>
 
   <!-- Search -->
-  <div class="px-3 py-2">
+  <div class="px-4 py-3">
     <div class="relative flex items-center">
-      <Search size={14} class="absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" style="color: var(--color-text-muted);" />
+      <Search size={14} class="absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" style="color: var(--color-text-muted);" />
       <input
         type="text"
         placeholder="Search sessions..."
-        class="input text-xs h-8 w-full"
-        style="padding-left: 32px;"
+        class="input text-sm h-9 w-full"
+        style="padding-left: 36px;"
         bind:value={sessionStore.searchQuery}
       />
     </div>
   </div>
 
   <!-- Session List -->
-  <div class="flex-1 overflow-y-auto px-1.5">
+  <div class="flex-1 overflow-y-auto px-2 pb-3">
     {#each sessionStore.groupedSessions as group (group.label)}
-      <div class="mb-1">
-        <div class="px-2 py-1.5 text-[10px] font-medium uppercase tracking-wider" style="color: var(--color-text-muted);">
+      <div class="mb-2">
+        <div class="px-3 py-2 text-xs font-semibold uppercase tracking-[0.14em]" style="color: var(--color-text-muted);">
           {group.label}
         </div>
         {#each group.sessions as session (session.id)}
           <div
             role="button"
             tabindex="0"
-            class="session-item group flex items-center gap-2.5 px-2.5 py-2.5 mx-1 rounded-lg cursor-pointer transition-colors {sessionStore.activeSessionId === session.id ? 'active-session' : 'hover:bg-[var(--color-surface-2)]'}"
+            class="session-item group flex items-center gap-3 px-3 py-3 mx-1 rounded-xl cursor-pointer transition-colors border border-transparent {sessionStore.activeSessionId === session.id ? 'active-session' : 'hover:bg-[var(--color-surface-2)] hover:border-[var(--color-border)]'}"
             onclick={() => selectSession(session.id)}
             onkeydown={(e) => { if (e.key === 'Enter') selectSession(session.id); }}
             ondblclick={() => startRename(session.id, session.title)}
@@ -196,10 +200,10 @@
                       if (e.key === 'Escape') cancelRename();
                     }}
                   />
-                  <button class="p-0.5 rounded" style="color: var(--color-success);" onclick={(e) => { e.stopPropagation(); saveRename(session.id); }} aria-label="Save rename">
+                  <button type="button" class="p-0.5 rounded" style="color: var(--color-success);" onclick={(e) => { e.stopPropagation(); saveRename(session.id); }} aria-label="Save rename">
                     <Check size={12} />
                   </button>
-                  <button class="p-0.5 rounded" style="color: var(--color-text-muted);" onclick={(e) => { e.stopPropagation(); cancelRename(); }} aria-label="Cancel rename">
+                  <button type="button" class="p-0.5 rounded" style="color: var(--color-text-muted);" onclick={(e) => { e.stopPropagation(); cancelRename(); }} aria-label="Cancel rename">
                     <X size={12} />
                   </button>
                 </div>
@@ -211,15 +215,17 @@
               </div>
             {:else}
               {#if sessionStore.activeSessionId === session.id && wsStore.managerStatus !== 'idle'}
-                <div class="shrink-0 flex items-center justify-center" style="width: 16px; height: 16px;">
+                <div class="shrink-0 flex items-center justify-center rounded-lg" style="width: 18px; height: 18px; background: rgba(213, 178, 97, 0.08);">
                   <AnimatedStatusIcon status={wsStore.managerStatus} size={14} isManager={true} phase={wsStore.koryPhase} />
                 </div>
               {:else}
-                <MessageSquare size={14} class="shrink-0 relative top-[-2px]" style="color: var(--color-text-muted);" />
+                <div class="shrink-0 flex items-center justify-center rounded-lg" style="width: 18px; height: 18px; background: var(--color-surface-3);">
+                  <MessageSquare size={12} style="color: var(--color-text-muted);" />
+                </div>
               {/if}
               <div class="flex-1 min-w-0">
-                <div class="text-xs truncate" style="color: var(--color-text-primary);">{session.title}</div>
-                <div class="flex items-center gap-2" style="margin-top: var(--space-1);">
+                <div class="text-sm font-medium truncate" style="color: var(--color-text-primary);">{session.title}</div>
+                <div class="flex items-center gap-2.5 flex-wrap" style="margin-top: 6px;">
                   <span style="font-size: var(--text-xs); color: var(--color-text-muted);">{formatTime(session.updatedAt)}</span>
                   {#if session.messageCount > 0}
                     <span style="font-size: var(--text-xs); color: var(--color-text-muted);">{session.messageCount} msgs</span>
@@ -229,9 +235,10 @@
                   {/if}
                 </div>
               </div>
-              <div class="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+              <div class="flex items-center gap-1 transition-opacity {sessionStore.activeSessionId === session.id ? 'opacity-70 group-hover:opacity-100 group-focus-within:opacity-100' : 'opacity-0 group-hover:opacity-100 group-focus-within:opacity-100'}">
                 <button
-                  class="p-1 rounded hover:bg-[var(--color-surface-4)] transition-colors"
+                  type="button"
+                  class="p-1.5 rounded-lg hover:bg-[var(--color-surface-4)] transition-colors"
                   style="color: var(--color-text-muted);"
                   onclick={(e) => { e.stopPropagation(); startRename(session.id, session.title); }}
                   title="Rename"
@@ -240,7 +247,8 @@
                   <Pencil size={12} />
                 </button>
                 <button
-                  class="p-1 rounded hover:bg-[var(--color-surface-4)] transition-colors"
+                  type="button"
+                  class="p-1.5 rounded-lg hover:bg-[var(--color-surface-4)] transition-colors"
                   style="color: {confirmDeleteId === session.id ? 'var(--color-error)' : 'var(--color-text-muted)'};"
                   onclick={(e) => confirmDelete(e, session.id)}
                   title={confirmDeleteId === session.id ? 'Click again to confirm' : 'Delete (Shift+Click to skip confirmation)'}

@@ -9,7 +9,6 @@
     Minus,
     Square,
     X,
-    RefreshCw,
   } from 'lucide-svelte';
   import CheckForUpdatesButton from './CheckForUpdatesButton.svelte';
   import { getModKeyName } from '$lib/utils/platform';
@@ -18,6 +17,7 @@
   import { modeStore } from '$lib/stores/mode.svelte';
   import { onMount } from 'svelte';
   import { browser } from '$app/environment';
+  import { invoke } from '@tauri-apps/api/core';
 
   interface Props {
     showSidebar: boolean;
@@ -50,50 +50,45 @@
   let inTauri = $state(false);
 
   async function minimizeWindow() {
-    if (!browser) return;
-    const win = window as any;
-    const tauriWindow = win.__TAURI__?.window?.getCurrent?.() ?? win.__TAURI__?.core?.invoke;
-    if (tauriWindow?.minimize) {
-      await tauriWindow.minimize();
-    } else {
-      // Fallback: use invoke command
-      await win.__TAURI__?.core?.invoke?.('minimize_window');
+    if (!browser || !inTauri) return;
+    try {
+      await invoke('minimize_window_cmd');
+    } catch (e) {
+      console.error('Failed to minimize window:', e);
     }
   }
 
   async function toggleMaximize() {
-    if (!browser) return;
-    const win = window as any;
-    const tauriWindow = win.__TAURI__?.window?.getCurrent?.();
-    if (tauriWindow?.toggleMaximize) {
-      await tauriWindow.toggleMaximize();
-      isMaximized = await tauriWindow.isMaximized?.() ?? false;
-    } else {
-      await win.__TAURI__?.core?.invoke?.('toggle_maximize');
+    if (!browser || !inTauri) return;
+    try {
+      await invoke('toggle_maximize');
+      // Update maximized state
+      const { getCurrentWindow } = await import('@tauri-apps/api/window');
+      isMaximized = await getCurrentWindow().isMaximized();
+    } catch (e) {
+      console.error('Failed to toggle maximize:', e);
     }
   }
 
   async function closeWindow() {
-    if (!browser) return;
-    const win = window as any;
-    const tauriWindow = win.__TAURI__?.window?.getCurrent?.();
-    if (tauriWindow?.close) {
-      await tauriWindow.close();
-    } else {
-      await win.__TAURI__?.core?.invoke?.('close_window');
+    if (!browser || !inTauri) return;
+    try {
+      await invoke('close_window_cmd');
+    } catch (e) {
+      console.error('Failed to close window:', e);
     }
   }
 
   onMount(() => {
-    const win = window as any;
-    inTauri = typeof win.__TAURI__ !== 'undefined';
+    // Tauri v2 detection
+    inTauri = typeof window !== 'undefined' && 
+             ('__TAURI_INTERNALS__' in window || '__TAURI__' in window);
 
     if (inTauri) {
-      // Access Tauri window API through __TAURI__ object
-      const tauriWindow = win.__TAURI__?.window?.getCurrent?.();
-      if (tauriWindow?.isMaximized) {
-        tauriWindow.isMaximized().then((v: boolean) => { isMaximized = v; });
-      }
+      // Get initial maximized state
+      import('@tauri-apps/api/window').then(({ getCurrentWindow }) => {
+        getCurrentWindow().isMaximized().then((v: boolean) => { isMaximized = v; });
+      }).catch(() => {});
     }
 
     function handleWindowClick(e: MouseEvent) {
@@ -116,6 +111,24 @@
     };
   });
 
+  async function startDragging(e: MouseEvent) {
+    if (!inTauri) return;
+    
+    // Check if we clicked an interactive element (buttons, etc)
+    const interactive = (e.target as HTMLElement | null)?.closest('button, a, input, [role="button"]');
+    if (interactive) return;
+
+    const target = (e.target as HTMLElement | null)?.closest('[data-tauri-drag-region]');
+    if (target && target.getAttribute('data-tauri-drag-region') !== 'false') {
+      try {
+        const { getCurrentWindow } = await import('@tauri-apps/api/window');
+        await getCurrentWindow().startDragging();
+      } catch (err) {
+        console.error('Failed to start dragging:', err);
+      }
+    }
+  }
+
   function toggleMenu(menu: 'file' | 'edit' | 'view') {
     openMenu = openMenu === menu ? null : menu;
   }
@@ -128,66 +141,68 @@
 
 {#if !zenMode}
   <header
-    class="flex items-center justify-between px-2 h-11 border-b shrink-0 select-none"
+    class="titlebar flex items-center justify-between gap-3 px-3 border-b shrink-0 select-none"
     style="border-color: var(--color-border); background: var(--color-surface-1);"
     data-tauri-drag-region
+    onmousedown={startDragging}
+    role="presentation"
   >
-    <!-- Left: App logo + menus -->
-    <div class="flex items-center gap-1">
-      <!-- App logo -->
-      <div class="flex items-center justify-center w-8 h-8 rounded-lg mr-1 shrink-0">
-        <img src="/logo-64.png" alt="Koryphaios" width="28" height="28" class="rounded-md" />
-      </div>
-
+    <!-- Left: App menus -->
+    <div class="flex items-center gap-2 min-w-0">
       <div class="flex items-center gap-1" data-top-menu>
         <div class="relative" data-top-menu>
           <button
-            class="px-2 py-1 text-xs rounded-md transition-colors hover:bg-[var(--color-surface-3)]"
+            type="button"
+            class="px-2.5 py-1.5 text-sm rounded-lg transition-colors hover:bg-[var(--color-surface-3)]"
             style="color: var(--color-text-secondary);"
             onclick={() => toggleMenu('file')}
+            data-tauri-drag-region="false"
           >
             File
           </button>
           {#if openMenu === 'file'}
-            <div class="absolute left-0 top-8 z-30 min-w-[260px] rounded-lg border p-1" style="background: var(--color-surface-2); border-color: var(--color-border);">
-              <button class="w-full text-left px-2.5 py-1.5 text-xs rounded-md hover:bg-[var(--color-surface-3)]" style="color: var(--color-text-primary);" onclick={() => action('new_project')}>New Project</button>
-              <button class="w-full text-left px-2.5 py-1.5 text-xs rounded-md hover:bg-[var(--color-surface-3)]" style="color: var(--color-text-primary);" onclick={() => action('open_project_file')}>Open Project From File...</button>
-              <button class="w-full text-left px-2.5 py-1.5 text-xs rounded-md hover:bg-[var(--color-surface-3)]" style="color: var(--color-text-primary);" onclick={() => action('open_project_folder')}>Open Project From Folder...</button>
+            <div class="absolute left-0 top-10 z-30 min-w-[260px] border p-1.5 shadow-2xl" style="background: var(--color-surface-2); border-color: var(--color-border); border-radius: 0.5rem;">
+              <button type="button" class="w-full text-left px-2.5 py-1.5 text-xs hover:bg-[var(--color-surface-3)]" style="color: var(--color-text-primary);" onclick={() => action('new_project')}>New Project</button>
+              <button type="button" class="w-full text-left px-2.5 py-1.5 text-xs hover:bg-[var(--color-surface-3)]" style="color: var(--color-text-primary);" onclick={() => action('open_project_file')}>Open Project From File...</button>
+              <button type="button" class="w-full text-left px-2.5 py-1.5 text-xs hover:bg-[var(--color-surface-3)]" style="color: var(--color-text-primary);" onclick={() => action('open_project_folder')}>Open Project From Folder...</button>
               <div class="h-px my-1" style="background: var(--color-border);"></div>
               <div class="px-2.5 py-1.5 text-[10px] uppercase tracking-wider" style="color: var(--color-text-muted);">Recent projects</div>
               {#if recentProjects.length > 0}
                 {#each recentProjects.slice(0, 6) as project (project.id)}
-                  <button class="w-full flex items-center justify-between gap-2 text-left px-2.5 py-1.5 text-xs rounded-md hover:bg-[var(--color-surface-3)]" style="color: var(--color-text-primary);" onclick={() => action(`open_recent:${project.id}`)}>
+                  <button type="button" class="w-full flex items-center justify-between gap-2 text-left px-2.5 py-1.5 text-xs hover:bg-[var(--color-surface-3)]" style="color: var(--color-text-primary);" onclick={() => action(`open_recent:${project.id}`)} title={project.path || project.fileName || project.title}>
                     <span class="truncate">{project.title}</span>
-                    <span class="shrink-0 text-[10px]" style="color: var(--color-text-muted);">{formatRecentDate(project.updatedAt)}</span>
+                    <span class="shrink-0 text-[10px] truncate max-w-[120px]" style="color: var(--color-text-muted);">{project.path || project.fileName || formatRecentDate(project.updatedAt)}</span>
                   </button>
                 {/each}
               {:else}
                 <div class="px-2.5 py-1.5 text-xs" style="color: var(--color-text-muted);">No recent projects yet</div>
               {/if}
               <div class="h-px my-1" style="background: var(--color-border);"></div>
-              <button class="w-full text-left px-2.5 py-1.5 text-xs rounded-md hover:bg-[var(--color-surface-3)]" style="color: var(--color-text-primary);" onclick={() => action('save_snapshot')}>Save Project As .kory.json</button>
-              <button class="w-full text-left px-2.5 py-1.5 text-xs rounded-md hover:bg-[var(--color-surface-3)]" style="color: var(--color-text-primary);" onclick={() => action('new_session')}>New Session</button>
+              <button type="button" class="w-full text-left px-2.5 py-1.5 text-xs hover:bg-[var(--color-surface-3)]" style="color: var(--color-text-primary);" onclick={() => action('save_snapshot')}>Save Project As .kory.json</button>
+              <button type="button" class="w-full text-left px-2.5 py-1.5 text-xs hover:bg-[var(--color-surface-3)]" style="color: var(--color-text-primary);" onclick={() => action('new_session')}>New Session</button>
             </div>
           {/if}
         </div>
 
         <div class="relative" data-top-menu>
           <button
-            class="px-2 py-1 text-xs rounded-md transition-colors hover:bg-[var(--color-surface-3)]"
+            type="button"
+            class="px-2.5 py-1.5 text-sm rounded-lg transition-colors hover:bg-[var(--color-surface-3)]"
             style="color: var(--color-text-secondary);"
             onclick={() => toggleMenu('edit')}
+            data-tauri-drag-region="false"
           >
             Edit
           </button>
           {#if openMenu === 'edit'}
-            <div class="absolute left-0 top-8 z-30 min-w-[220px] rounded-lg border p-1" style="background: var(--color-surface-2); border-color: var(--color-border);">
-              <button class="w-full text-left px-2.5 py-1.5 text-xs rounded-md hover:bg-[var(--color-surface-3)]" style="color: var(--color-text-primary);" onclick={() => action('focus_input')}>Focus Prompt Input</button>
-              <button class="w-full text-left px-2.5 py-1.5 text-xs rounded-md hover:bg-[var(--color-surface-3)]" style="color: var(--color-text-primary);" onclick={() => action('clear_feed')}>Clear Current Feed</button>
+            <div class="absolute left-0 top-10 z-30 min-w-[220px] border p-1.5 shadow-2xl" style="background: var(--color-surface-2); border-color: var(--color-border); border-radius: 0.5rem;">
+              <button type="button" class="w-full text-left px-2.5 py-1.5 text-xs hover:bg-[var(--color-surface-3)]" style="color: var(--color-text-primary);" onclick={() => action('focus_input')}>Focus Prompt Input</button>
+              <button type="button" class="w-full text-left px-2.5 py-1.5 text-xs hover:bg-[var(--color-surface-3)]" style="color: var(--color-text-primary);" onclick={() => action('clear_feed')}>Clear Current Feed</button>
               <div class="h-px my-1" style="background: var(--color-border);"></div>
               {#each promptTemplates as template (template.id)}
                 <button
-                  class="w-full text-left px-2.5 py-1.5 text-xs rounded-md hover:bg-[var(--color-surface-3)]"
+                  type="button"
+                  class="w-full text-left px-2.5 py-1.5 text-xs hover:bg-[var(--color-surface-3)]"
                   style="color: var(--color-text-primary);"
                   onclick={() => action(`template_${template.id}`)}
                 >
@@ -200,24 +215,26 @@
 
         <div class="relative" data-top-menu>
           <button
-            class="px-2 py-1 text-xs rounded-md transition-colors hover:bg-[var(--color-surface-3)]"
+            type="button"
+            class="px-2.5 py-1.5 text-sm rounded-lg transition-colors hover:bg-[var(--color-surface-3)]"
             style="color: var(--color-text-secondary);"
             onclick={() => toggleMenu('view')}
+            data-tauri-drag-region="false"
           >
             View
           </button>
           {#if openMenu === 'view'}
-            <div class="absolute left-0 top-8 z-30 min-w-[220px] rounded-lg border p-1" style="background: var(--color-surface-2); border-color: var(--color-border);">
-              <button class="w-full text-left px-2.5 py-1.5 text-xs rounded-md hover:bg-[var(--color-surface-3)]" style="color: var(--color-text-primary);" onclick={() => action('toggle_sidebar')}>{showSidebar ? 'Hide' : 'Show'} Sidebar</button>
-              <button class="w-full text-left px-2.5 py-1.5 text-xs rounded-md hover:bg-[var(--color-surface-3)]" style="color: var(--color-text-primary);" onclick={() => action('toggle_zen_mode')}>{zenMode ? 'Disable' : 'Enable'} Zen Mode</button>
+            <div class="absolute left-0 top-10 z-30 min-w-[220px] border p-1.5 shadow-2xl" style="background: var(--color-surface-2); border-color: var(--color-border); border-radius: 0.5rem;">
+              <button type="button" class="w-full text-left px-2.5 py-1.5 text-xs hover:bg-[var(--color-surface-3)]" style="color: var(--color-text-primary);" onclick={() => action('toggle_sidebar')}>{showSidebar ? 'Hide' : 'Show'} Sidebar</button>
+              <button type="button" class="w-full text-left px-2.5 py-1.5 text-xs hover:bg-[var(--color-surface-3)]" style="color: var(--color-text-primary);" onclick={() => action('toggle_zen_mode')}>{zenMode ? 'Disable' : 'Enable'} Zen Mode</button>
               {#if modeStore.showAgentDetails}
-                <button class="w-full text-left px-2.5 py-1.5 text-xs rounded-md hover:bg-[var(--color-surface-3)]" style="color: var(--color-text-primary);" onclick={() => action('toggle_agents')}>{showAgents ? 'Hide' : 'Show'} Active Agents</button>
+                <button type="button" class="w-full text-left px-2.5 py-1.5 text-xs hover:bg-[var(--color-surface-3)]" style="color: var(--color-text-primary);" onclick={() => action('toggle_agents')}>{showAgents ? 'Hide' : 'Show'} Active Agents</button>
               {/if}
               {#if modeStore.showGitPanel}
-                <button class="w-full text-left px-2.5 py-1.5 text-xs rounded-md hover:bg-[var(--color-surface-3)]" style="color: var(--color-text-primary);" onclick={() => action('toggle_git')}>{showGit ? 'Hide' : 'Show'} Source Control</button>
+                <button type="button" class="w-full text-left px-2.5 py-1.5 text-xs hover:bg-[var(--color-surface-3)]" style="color: var(--color-text-primary);" onclick={() => action('toggle_git')}>{showGit ? 'Hide' : 'Show'} Source Control</button>
               {/if}
-              <button class="w-full text-left px-2.5 py-1.5 text-xs rounded-md hover:bg-[var(--color-surface-3)]" style="color: var(--color-text-primary);" onclick={() => action('toggle_theme')}>Switch Theme...</button>
-              <button class="w-full text-left px-2.5 py-1.5 text-xs rounded-md hover:bg-[var(--color-surface-3)]" style="color: var(--color-text-primary);" onclick={() => action('open_settings')}>Open Settings</button>
+              <button type="button" class="w-full text-left px-2.5 py-1.5 text-xs hover:bg-[var(--color-surface-3)]" style="color: var(--color-text-primary);" onclick={() => action('toggle_theme')}>Switch Theme...</button>
+              <button type="button" class="w-full text-left px-2.5 py-1.5 text-xs hover:bg-[var(--color-surface-3)]" style="color: var(--color-text-primary);" onclick={() => action('open_settings')}>Open Settings</button>
               {#if inTauri}
                 <div class="h-px my-1" style="background: var(--color-border);"></div>
                 <CheckForUpdatesButton variant="menu-item" />
@@ -228,89 +245,97 @@
       </div>
 
       {#if koryPhase}
-        <span class="flex items-center gap-2 min-w-0 max-w-[200px]">
-          <span class="shrink-0 text-[11px]" style="color: var(--color-text-muted);" aria-hidden="true">|</span>
-          <div class="flex items-center gap-2 px-2.5 py-1 rounded-lg" style="background: var(--color-surface-2);">
-            <div class="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse"></div>
-            <span class="text-xs leading-none" style="color: var(--color-text-secondary);">
-              Kory: {koryPhase}
-            </span>
-          </div>
+        <span class="flex items-center gap-2 min-w-0 max-w-[220px] px-1 py-2">
+            <div class="w-1.5 h-1.5 bg-amber-400 animate-pulse"></div>
+            <span class="text-xs font-medium leading-none truncate" style="color: var(--color-text-secondary);">Kory {koryPhase}</span>
         </span>
       {/if}
 
       {#if isYoloMode}
-        <span class="flex items-center gap-2 min-w-0">
-          <span class="shrink-0 text-[11px]" style="color: var(--color-text-muted);" aria-hidden="true">|</span>
-          <div class="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-red-500/10 border border-red-500/20 text-red-400">
+        <span class="flex items-center gap-1.5 px-1 py-2 text-red-400">
             <Zap size={12} fill="currentColor" />
-            <span class="text-[10px] font-bold tracking-wider uppercase">YOLO mode</span>
-          </div>
+            <span class="text-xs font-semibold">YOLO</span>
         </span>
       {/if}
     </div>
 
-    <!-- Center: Project name (VS Code style) -->
-    <div class="flex-1 flex items-center justify-center">
+    <div 
+      class="flex-1 flex items-center justify-center h-full"
+      data-tauri-drag-region
+    >
       {#if projectName}
-        <div class="flex items-center gap-2 px-3 py-1 rounded-md" style="background: var(--color-surface-2);">
-          <span class="text-sm font-medium" style="color: var(--color-text-primary);" title={projectName}>
-            {projectName}
-          </span>
+        <div class="flex items-center gap-2 min-w-0 max-w-[420px] px-2 py-2" data-tauri-drag-region>
+          <div class="min-w-0 pointer-events-none">
+            <div class="text-[13px] font-medium truncate leading-tight opacity-80" style="color: var(--color-text-primary);" title={projectName}>
+              {projectName}
+            </div>
+          </div>
         </div>
       {:else}
-        <span class="text-sm" style="color: var(--color-text-muted);">Koryphaios</span>
+        <div class="px-2 py-2 pointer-events-none" data-tauri-drag-region>
+          <span class="text-xs" style="color: var(--color-text-muted);">No project open</span>
+        </div>
       {/if}
     </div>
 
-    <div class="flex items-center gap-2">
+    <!-- Right: Controls -->
+    <div class="flex items-center gap-1.5">
       <button
-        class="px-2 py-1 text-[10px] rounded-md transition-colors hover:bg-[var(--color-surface-3)] uppercase tracking-wider"
-        style="color: var(--color-text-muted);"
+        type="button"
+        class="px-3 py-2 text-xs font-medium rounded-lg transition-colors hover:bg-[var(--color-surface-2)]"
+        style="color: var(--color-text-secondary);"
         onclick={() => action('toggle_sidebar')}
         title={showSidebar ? 'Hide sidebar' : 'Show sidebar'}
+        data-tauri-drag-region="false"
       >
-        {showSidebar ? 'Hide Sidebar' : 'Show Sidebar'}
+        {showSidebar ? 'Sidebar on' : 'Sidebar off'}
       </button>
       {#if modeStore.showGitPanel}
         <button
-          class="flex items-center gap-1.5 px-2 py-1 rounded-md transition-colors hover:bg-[var(--color-surface-3)]"
-          style="color: {showGit ? 'var(--color-accent)' : 'var(--color-text-muted)'};"
+          type="button"
+          class="flex items-center gap-1.5 px-3 py-2 rounded-lg transition-colors hover:bg-[var(--color-surface-2)]"
+          style="color: {showGit ? 'var(--color-accent)' : 'var(--color-text-secondary)'};"
           onclick={() => action('toggle_git')}
-          title={showGit ? 'Hide Source Control' : 'Show Source Control'}
+          data-tauri-drag-region="false"
         >
           <GitBranch size={14} />
-          <span class="text-[10px] font-medium uppercase tracking-wider">{showGit ? 'Hide Git' : 'Show Git'}</span>
+          <span class="text-xs font-medium">{showGit ? 'Git open' : 'Git'}</span>
         </button>
       {/if}
       <button
-        class="flex items-center gap-1.5 px-2 py-1 rounded-md transition-colors hover:bg-[var(--color-surface-3)]"
-        style="color: var(--color-text-muted);"
+        type="button"
+        class="flex items-center gap-2 px-3 py-2 rounded-lg transition-colors hover:bg-[var(--color-surface-2)]"
+        style="color: var(--color-text-secondary);"
         onclick={() => action('toggle_palette')}
+        data-tauri-drag-region="false"
         title="Command Palette ({getModKeyName()}K)"
       >
         <Search size={14} />
-        <span class="text-[10px] font-medium uppercase tracking-wider">Commands</span>
-        <kbd class="text-[9px] px-1 py-0.5 rounded bg-[var(--color-surface-3)] border border-[var(--color-border)] opacity-60">{getModKeyName()}K</kbd>
+        <span class="text-xs font-medium">Commands</span>
+        <kbd class="kbd opacity-80">{getModKeyName()}K</kbd>
       </button>
 
       {#if activeAgents.length > 0}
         <button
-          class="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg transition-colors hover:bg-[var(--color-surface-3)]"
-          style="background: var(--color-surface-2);"
+          type="button"
+          class="flex items-center gap-1.5 px-3 py-2 rounded-lg transition-colors hover:bg-[var(--color-surface-2)]"
+          style="background: transparent;"
           onclick={() => action('toggle_agents')}
+          data-tauri-drag-region="false"
         >
           <Activity size={12} class="text-emerald-400" />
-          <span class="text-xs leading-none" style="color: var(--color-text-secondary);">{activeAgents.length} agent{activeAgents.length !== 1 ? 's' : ''}</span>
+          <span class="text-xs font-medium leading-none" style="color: var(--color-text-secondary);">{activeAgents.length} agent{activeAgents.length !== 1 ? 's' : ''}</span>
           <ChevronDown size={12} class="transition-transform {showAgents ? 'rotate-180' : ''}" style="color: var(--color-text-muted);" />
         </button>
       {/if}
       <button
-        class="p-2 rounded-lg transition-colors hover:bg-[var(--color-surface-3)] flex items-center justify-center"
-        style="color: var(--color-text-muted);"
+        type="button"
+        class="p-2.5 rounded-lg transition-colors hover:bg-[var(--color-surface-2)] flex items-center justify-center"
+        style="color: var(--color-text-secondary);"
         onclick={() => action('open_settings')}
         title="Settings ({getModKeyName()},)"
         aria-label="Open settings"
+        data-tauri-drag-region="false"
       >
         <Settings size={18} />
       </button>
@@ -320,7 +345,8 @@
         <div class="w-px h-5 mx-1 shrink-0" style="background: var(--color-border);"></div>
         <!-- Minimize -->
         <button
-          class="flex items-center justify-center w-8 h-8 rounded-md transition-colors hover:bg-[var(--color-surface-3)]"
+          type="button"
+          class="flex items-center justify-center w-8 h-8 rounded-lg transition-colors hover:bg-[var(--color-surface-3)]"
           style="color: var(--color-text-muted);"
           onclick={minimizeWindow}
           title="Minimize"
@@ -330,7 +356,8 @@
         </button>
         <!-- Maximize / Restore -->
         <button
-          class="flex items-center justify-center w-8 h-8 rounded-md transition-colors hover:bg-[var(--color-surface-3)]"
+          type="button"
+          class="flex items-center justify-center w-8 h-8 rounded-lg transition-colors hover:bg-[var(--color-surface-3)]"
           style="color: var(--color-text-muted);"
           onclick={toggleMaximize}
           title={isMaximized ? 'Restore' : 'Maximize'}
@@ -340,7 +367,8 @@
         </button>
         <!-- Close -->
         <button
-          class="flex items-center justify-center w-8 h-8 rounded-md transition-colors hover:bg-red-500/80 hover:text-white"
+          type="button"
+          class="flex items-center justify-center w-8 h-8 rounded-lg transition-colors hover:bg-red-500/80 hover:text-white"
           style="color: var(--color-text-muted);"
           onclick={closeWindow}
           title="Close"
@@ -352,11 +380,28 @@
     </div>
   </header>
 {:else}
+  <!-- Drag region for Zen Mode -->
+  <div class="absolute top-0 left-0 right-0 h-4 z-10" data-tauri-drag-region onpointerdown={startDragging} role="presentation" style="-webkit-app-region: drag;"></div>
+  
   <button
-    class="absolute top-1 right-4 z-20 px-2.5 py-1 rounded-md text-xs border transition-all duration-200 hover:bg-[var(--color-surface-3)] hover:border-[var(--color-border-bright)] hover:scale-105 active:scale-95"
-    style="background: var(--color-surface-2); border-color: var(--color-border); color: var(--color-text-secondary);"
+    type="button"
+    class="absolute top-2.5 right-4 z-20 px-3.5 py-1.5 text-xs border rounded-full transition-all duration-200 hover:bg-[var(--color-surface-3)] hover:border-[var(--color-border-bright)] hover:scale-105 active:scale-95 shadow-lg"
+    style="background: var(--color-surface-2); border-color: var(--color-border); color: var(--color-text-secondary); -webkit-app-region: no-drag;"
     onclick={() => action('toggle_zen_mode')}
   >
     Exit Zen
   </button>
 {/if}
+
+<style>
+  /* Enable window dragging */
+  .titlebar {
+    height: var(--header-height);
+  }
+
+  /* Ensure buttons and interactive elements are clickable */
+  .titlebar button,
+  .titlebar [data-top-menu] {
+    cursor: pointer;
+  }
+</style>
