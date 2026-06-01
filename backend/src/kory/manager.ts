@@ -12,6 +12,7 @@ import type {
   KoryAskUserPayload,
   ChangeSummary,
   StreamUsagePayload,
+  StreamThinkingPayload,
 } from '@koryphaios/shared';
 import { normalizeReasoningLevel, determineAutoReasoningLevel } from '@koryphaios/shared';
 import { AGENT, DOMAIN } from '../constants';
@@ -44,6 +45,7 @@ import { SnapshotManager } from './snapshot-manager';
 import { GitManager } from './git-manager';
 import { WorkspaceManager } from './workspace-manager';
 import { EventEmitterService, WorkerLifecycleService, SessionStateService } from './services';
+import { TimeTravelService } from '../services';
 import { RoutingServiceEnhanced } from './services/RoutingServiceEnhanced';
 import {
   parseCriticVerdict,
@@ -141,7 +143,7 @@ const KORY_SYSTEM_PROMPT = `You are Kory, the manager agent. The user talks to y
 • When you delegate, the worker reports back; you verify and synthesize.
 • IMPORTANT: If you decide to delegate, call delegate_to_worker IMMEDIATELY without generating any explanatory text first. Do not write "I'll delegate this" or similar—just call the tool directly.`;
 const WORKER_SYSTEM_PROMPT = `You are a specialist Worker Agent. EXECUTE the assigned task using tools. QUALITY FIRST. VERIFY.`;
-const CRITIC_SYSTEM_PROMPT = `You are the Critic agent. You may only use read_file, grep, glob, and ls to inspect the codebase. You see the worker conversation below. Review the work and output either PASS or FAIL. If FAIL, give brief, actionable feedback. Your final message must end with a line that starts with exactly PASS or exactly FAIL (e.g. "PASS" or "FAIL: missing tests").`;
+const CRITIC_SYSTEM_PROMPT = `You are an independent, fresh Critic AI model evaluating the work of a DIFFERENT agent (the Worker). You must evaluate their work objectively. You may only use read_file, grep, glob, and ls to inspect the codebase. Review the Worker's output and output either PASS or FAIL. If FAIL, give brief, actionable feedback. Your final message must end with a line that starts with exactly PASS or exactly FAIL (e.g. "PASS" or "FAIL: missing tests").`;
 
 // ─── Kory Manager Class ─────────────────────────────────────────────────────
 

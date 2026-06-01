@@ -24,9 +24,9 @@ export function formatMessagesForCritic(
 ): string {
   const raw = messages
     .map((m) => {
-      if (m.role === 'user') return `[USER]\n${m.content}`;
-      if (m.role === 'assistant') return `[ASSISTANT]\n${m.content}`;
-      if (m.role === 'tool') return `[TOOL RESULT]\n${m.content}`;
+      if (m.role === 'user') return `[MANAGER INSTRUCTION]\n${m.content}`;
+      if (m.role === 'assistant') return `[WORKER OUTPUT]\n${m.content}`;
+      if (m.role === 'tool') return `[WORKER TOOL RESULT]\n${m.content}`;
       return '';
     })
     .filter(Boolean)
