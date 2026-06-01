@@ -113,13 +113,36 @@
     }
   }
 
-  // Track last subscribed session to avoid duplicate subscriptions
   let lastSubscribedSessionId = $state<string>('');
 
   $effect(() => {
     const activeId = sessionStore.activeSessionId;
-    if (activeId && wsStore.status === 'connected' && activeId !== lastSubscribedSessionId) {
+    if (!activeId) {
+      if (lastSubscribedSessionId !== '') {
+        wsStore.clearFeed();
+        lastSubscribedSessionId = '';
+      }
+      return;
+    }
+
+    if (activeId !== lastSubscribedSessionId) {
       lastSubscribedSessionId = activeId;
+      
+      // Subscribe to the WS session if connected
+      if (wsStore.status === 'connected') {
+        wsStore.subscribeToSession(activeId);
+      }
+      
+      // Load history
+      void (async () => {
+        const messages = await sessionStore.fetchMessages(activeId);
+        wsStore.loadSessionMessages(activeId, messages);
+      })();
+    } else if (wsStore.status === 'connected' && activeId === lastSubscribedSessionId) {
+      // Re-subscribe if we just connected and we haven't subscribed yet
+      // But wait, the subscribeToSession call on reconnect is actually handled in websocket.svelte.ts:
+      // "if (activeSid) subscribeToSession(activeSid);" inside ws.onopen
+      // So we don't strictly need it here for reconnects, but let's be safe:
       wsStore.subscribeToSession(activeId);
     }
   });

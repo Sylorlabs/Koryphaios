@@ -385,7 +385,7 @@
   
   <button
     type="button"
-    class="absolute top-2.5 right-4 z-20 px-3.5 py-1.5 text-xs border rounded-full transition-all duration-200 hover:bg-[var(--color-surface-3)] hover:border-[var(--color-border-bright)] hover:scale-105 active:scale-95 shadow-lg"
+    class="absolute top-1.5 right-4 z-20 px-3.5 py-1.5 text-xs border rounded-full transition-all duration-200 hover:bg-[var(--color-surface-3)] hover:border-[var(--color-border-bright)] hover:scale-105 active:scale-95 shadow-lg"
     style="background: var(--color-surface-2); border-color: var(--color-border); color: var(--color-text-secondary); -webkit-app-region: no-drag;"
     onclick={() => action('toggle_zen_mode')}
   >

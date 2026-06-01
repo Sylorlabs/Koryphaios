@@ -18,7 +18,7 @@
   "enableCritic": true,
   "agentSettings": {
     "ruleEnforcementLevel": "strict",
-    "agentExecutionMode": "auto",
+    "agentExecutionMode": "single",
     "preferencesEnabled": true,
     "criticGateEnabled": true,
     "criticEnforcesPreferences": true,
@@ -31,9 +31,9 @@
     "approvalThresholdLines": 100,
     "localWebSearch": "fallback",
     "multiSourceResearch": true,
-    "updatedAt": 1780218641603
+    "updatedAt": 1780293760276
   },
-  "updatedAt": 1780218641603,
+  "updatedAt": 1780293808501,
   "providers": {
     "anthropic": {
       "name": "anthropic",
@@ -162,6 +162,7 @@
     },
     "deepseek": {
       "name": "deepseek",
+      "apiKey": "sk-242b452208174e6ea9cabbb35ee6cd04",
       "selectedModels": [
         "deepseek-v4-pro",
         "deepseek-v4-flash"
