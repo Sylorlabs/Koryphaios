@@ -640,15 +640,13 @@
             type="button"
             onclick={isRunning ? stop : send}
             disabled={disabled || (!isRunning && !canSend)}
-            class="btn flex w-full items-center justify-center gap-2 {isRunning ? 'bg-red-500/90 hover:bg-red-500 text-white border-transparent' : 'btn-primary'}"
+            class="btn flex w-full items-center justify-center gap-2 {isRunning ? 'bg-[var(--color-surface-3)] hover:bg-[var(--color-surface-2)] border-[var(--color-border)] hover:border-red-500/40' : 'btn-primary'}"
             style="height: 52px; padding: 0 20px; font-size: 14px; {disabled || configurationWarning ? 'opacity: 0.5; cursor: not-allowed;' : ''}"
           >
             {#if isRunning}
-              <div class="relative flex items-center justify-center">
-                <Circle size={18} fill="currentColor" class="animate-pulse" />
-                <div class="absolute w-2 h-2 bg-white rounded-full"></div>
-              </div>
-              Stop
+              <span class="recording-dot"></span>
+              <Square size={16} fill="currentColor" class="text-red-400" />
+              <span class="text-red-400/90">Stop</span>
             {:else}
               <Send size={18} />
               Send
@@ -677,5 +675,19 @@
   .yolo-active {
     border-color: #ef4444 !important;
     box-shadow: 0 0 0 1px #ef4444;
+  }
+
+  .recording-dot {
+    display: inline-block;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: #ef4444;
+    animation: record-pulse 1.4s ease-in-out infinite;
+  }
+
+  @keyframes record-pulse {
+    0%, 100% { opacity: 1;   box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.6); }
+    50%      { opacity: 0.55; box-shadow: 0 0 0 5px rgba(239, 68, 68, 0);   }
   }
 </style>
