@@ -195,7 +195,7 @@ async function initBridges(config: any, kory: KoryManager) {
     telegram = new TelegramBridge(
       {
         botToken: config.telegram.botToken,
-        allowedUserIds: config.telegram.allowedUserIds,
+        adminId: config.telegram.adminId ?? 0,
       },
       kory,
       messagingGateway,
@@ -224,10 +224,11 @@ async function initBridges(config: any, kory: KoryManager) {
     serverLog.info('Discord bridge enabled');
   }
 
-  if (config.slack?.enabled && config.slack?.botToken) {
+  if (config.slack?.enabled && config.slack?.botToken && config.slack?.appToken) {
     slack = new SlackBridge(
       {
         botToken: config.slack.botToken,
+        appToken: config.slack.appToken,
         allowedUserIds: config.slack.allowedUserIds,
       },
       kory,
