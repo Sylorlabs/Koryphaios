@@ -644,8 +644,9 @@
             style="height: 52px; padding: 0 20px; font-size: 14px; {disabled || configurationWarning ? 'opacity: 0.5; cursor: not-allowed;' : ''}"
           >
             {#if isRunning}
-              <span class="recording-dot"></span>
-              <Square size={16} fill="currentColor" class="text-red-400" />
+              <span class="stop-icon-ring">
+                <Square size={12} fill="currentColor" class="text-red-400" />
+              </span>
               <span class="text-red-400/90">Stop</span>
             {:else}
               <Send size={18} />
@@ -677,17 +678,14 @@
     box-shadow: 0 0 0 1px #ef4444;
   }
 
-  .recording-dot {
-    display: inline-block;
-    width: 8px;
-    height: 8px;
+  .stop-icon-ring {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 26px;
+    height: 26px;
     border-radius: 50%;
-    background: #ef4444;
-    animation: record-pulse 1.4s ease-in-out infinite;
-  }
-
-  @keyframes record-pulse {
-    0%, 100% { opacity: 1;   box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.6); }
-    50%      { opacity: 0.55; box-shadow: 0 0 0 5px rgba(239, 68, 68, 0);   }
+    border: 2px solid rgb(239 68 68 / 0.45);
+    flex-shrink: 0;
   }
 </style>
