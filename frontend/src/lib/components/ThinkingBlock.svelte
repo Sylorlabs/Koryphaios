@@ -1,5 +1,4 @@
 <script lang="ts">
-  import { ChevronDown, Brain, Clock } from 'lucide-svelte';
   import { slide } from 'svelte/transition';
 
   interface Props {
@@ -8,77 +7,96 @@
     agentName: string;
   }
 
-  let { text, durationMs, agentName }: Props = $props();
+  let { text, durationMs: _durationMs, agentName: _agentName }: Props = $props();
   let expanded = $state(false);
 
-  // Derive a summary from the first line or first 100 chars
-  let summary = $derived.by(() => {
-    if (!text) return 'Thinking...';
+  // Extract the first sentence (up to .!? followed by space/capital, or first 120 chars)
+  let firstSentence = $derived.by(() => {
+    if (!text) return 'Thinking…';
+    const match = text.match(/^(.+?[.!?])(?=\s+[A-Z]|\s*$)/);
+    if (match && match[1].length > 10) return match[1];
+    // Fallback: first line
     const firstLine = text.split('\n')[0].trim();
-    if (firstLine.length > 100) return firstLine.slice(0, 97) + '...';
-    return firstLine || 'Processing...';
+    if (firstLine && firstLine.length <= 140) return firstLine;
+    return firstLine ? firstLine.slice(0, 137) + '…' : 'Thinking…';
   });
 
-  function formatDuration(ms: number): string {
-    if (ms < 1000) return `${ms}ms`;
-    return `${(ms / 1000).toFixed(1)}s`;
-  }
+  let hasMore = $derived(firstSentence !== text.trim());
 </script>
 
-<div class="thinking-block group mb-2 overflow-hidden border border-blue-500/20 rounded-xl bg-blue-500/5 transition-all hover:bg-blue-500/10">
-  <button 
-    class="w-full flex items-center gap-3 px-4 py-2.5 text-left transition-colors"
-    onclick={() => expanded = !expanded}
-  >
-    <div class="flex items-center justify-center w-6 h-6 rounded-full bg-blue-500/20 text-blue-400">
-      <Brain size={14} class={text ? 'animate-pulse' : ''} />
-    </div>
-    
-    <div class="flex-1 min-w-0">
-      <div class="flex items-center gap-2 mb-0.5">
-        <span class="text-[10px] font-bold uppercase tracking-wider text-blue-400/80">{agentName} is thinking</span>
-        {#if durationMs !== undefined}
-          <div class="flex items-center gap-1 text-[10px] text-blue-400/60 font-medium">
-            <Clock size={10} />
-            {formatDuration(durationMs)}
-          </div>
-        {/if}
-      </div>
-      <p class="text-sm text-blue-200/70 truncate font-medium">{summary}</p>
-    </div>
-
-    <div class="shrink-0 text-blue-400/40 transition-transform duration-300 {expanded ? 'rotate-180' : ''}">
-      <ChevronDown size={16} />
-    </div>
-  </button>
-
-  {#if expanded}
-    <div transition:slide={{ duration: 250 }}>
-      <div class="px-4 pb-4 pt-1 border-t border-blue-500/10">
-        <div class="thinking-content text-xs leading-relaxed text-blue-100/60 font-mono whitespace-pre-wrap selection:bg-blue-500/30 max-h-80 overflow-y-auto">
-          {text}
-        </div>
-      </div>
-    </div>
+<!-- Collapsed: just a whispered line -->
+<button
+  class="thinking-whisper group"
+  onclick={() => expanded = !expanded}
+  aria-expanded={expanded}
+>
+  <span class="summary-text">{firstSentence}</span>
+  {#if hasMore}
+    <span class="expand-cue {expanded ? 'rotated' : ''}" aria-hidden="true">▸</span>
   {/if}
-</div>
+</button>
+
+<!-- Expanded: clean prose panel -->
+{#if expanded && hasMore}
+  <div class="thinking-expanded" transition:slide={{ duration: 180 }}>
+    <p class="thinking-full-text">{text}</p>
+  </div>
+{/if}
 
 <style>
-  .thinking-block {
+  .thinking-whisper {
+    display: inline-flex;
+    align-items: baseline;
+    gap: 5px;
+    cursor: pointer;
+    border: none;
+    background: none;
+    padding: 2px 0;
+    text-align: left;
+    max-width: 90%;
+    opacity: 0.65;
+    transition: opacity var(--duration-normal) var(--ease-in-out);
+  }
+
+  .thinking-whisper:hover {
+    opacity: 1;
+  }
+
+  .summary-text {
+    font-style: italic;
+    color: var(--color-text-muted);
+    font-size: var(--text-sm);
+    line-height: var(--leading-relaxed);
+  }
+
+  .expand-cue {
+    display: inline-block;
+    font-size: 9px;
+    color: var(--color-text-muted);
+    opacity: 0.4;
+    transition: transform var(--duration-normal) var(--ease-in-out);
+    flex-shrink: 0;
+    margin-top: 2px;
+  }
+
+  .expand-cue.rotated {
+    transform: rotate(90deg);
+  }
+
+  .thinking-expanded {
+    padding: var(--space-md) var(--space-lg);
+    border-left: 2px solid var(--color-border);
+    margin: var(--space-sm) 0 var(--space-sm) 0;
     max-width: 90%;
   }
 
-  .thinking-content::-webkit-scrollbar {
-    width: 6px;
-  }
-  .thinking-content::-webkit-scrollbar-track {
-    background: transparent;
-  }
-  .thinking-content::-webkit-scrollbar-thumb {
-    background: rgba(96, 165, 250, 0.2);
-    border-radius: 3px;
-  }
-  .thinking-content::-webkit-scrollbar-thumb:hover {
-    background: rgba(96, 165, 250, 0.4);
+  .thinking-full-text {
+    font-size: var(--text-sm);
+    line-height: var(--leading-relaxed);
+    color: var(--color-text-secondary);
+    white-space: pre-wrap;
+    margin: 0;
+    max-height: 18rem;
+    overflow-y: auto;
   }
 </style>
