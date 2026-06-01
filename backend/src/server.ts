@@ -130,8 +130,7 @@ async function main() {
           });
         }
         const upgraded = srv.upgrade(req, {
-          data: { id: nanoid(ID.WS_CLIENT_ID_LENGTH), userId: authSession.id },
-          headers: protocols.length > 0 ? { 'Sec-WebSocket-Protocol': protocols[0] } : undefined
+          data: { id: nanoid(ID.WS_CLIENT_ID_LENGTH), userId: authSession.id }
         });
         if (upgraded) return undefined;
         return new Response(JSON.stringify({ ok: false, error: 'WebSocket upgrade failed' }), {

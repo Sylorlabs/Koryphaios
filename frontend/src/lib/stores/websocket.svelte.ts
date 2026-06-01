@@ -875,9 +875,16 @@ function connect(url?: string) {
   providers = Array.isArray(providers) ? providers : [];
 
   try {
-    const protocols = authStore.token ? ['koryphaios', authStore.token] : undefined;
-    console.log('[WS] Creating WebSocket connection to:', wsUrl);
-    const ws = new WebSocket(wsUrl, protocols);
+    const protocols = ['koryphaios'];
+    let finalWsUrl = wsUrl;
+    if (authStore.token) {
+      // Append auth token as a query parameter because WebSocket subprotocols cannot contain spaces (e.g. "Bearer ...")
+      const sep = finalWsUrl.includes('?') ? '&' : '?';
+      finalWsUrl = `${finalWsUrl}${sep}auth=${encodeURIComponent(authStore.token)}`;
+    }
+    
+    console.log('[WS] Creating WebSocket connection to:', finalWsUrl);
+    const ws = new WebSocket(finalWsUrl, protocols);
 
     ws.onopen = () => {
       console.log('[WS] Connection opened successfully');
