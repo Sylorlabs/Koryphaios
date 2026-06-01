@@ -23,23 +23,11 @@
   // Track which session we last loaded feed for, so we load when active changes (e.g. new session from +)
   let lastLoadedSessionId = $state<string>('');
 
-  // Whenever the store's active session changes, sync and load its feed (including when + creates a new session)
   $effect(() => {
-    // Use untrack to prevent this effect from depending on wsStore state reads
-    const activeId = untrack(() => sessionStore.activeSessionId);
-    if (!activeId) {
-      // Clear feed when no active session (e.g., all sessions deleted)
-      // Only clear if we haven't already cleared for this state
-      if (lastLoadedSessionId !== '') {
-        wsStore.clearFeed();
-        lastLoadedSessionId = '';
-      }
-      return;
+    // Keep currentSessionId in sync if needed by other parts of the sidebar
+    if (sessionStore.activeSessionId && sessionStore.activeSessionId !== currentSessionId) {
+      currentSessionId = sessionStore.activeSessionId;
     }
-    if (activeId !== currentSessionId) currentSessionId = activeId;
-    if (activeId === lastLoadedSessionId) return;
-    lastLoadedSessionId = activeId;
-    void loadHistory(activeId);
   });
 
   async function handleCreateSession() {
@@ -54,10 +42,8 @@
 
   async function selectSession(id: string) {
     if (sessionStore.activeSessionId === id) return;
-    lastLoadedSessionId = id;
     sessionStore.activeSessionId = id;
-    wsStore.subscribeToSession(id);
-    await loadHistory(id);
+    // Note: loadHistory is now handled globally in +page.svelte based on activeSessionId changes
   }
 
   function startRename(id: string, currentTitle: string) {
