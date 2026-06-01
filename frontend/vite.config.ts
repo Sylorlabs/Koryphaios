@@ -74,7 +74,7 @@ export default defineConfig({
     },
     proxy: {
       '/api': { target, changeOrigin: true },
-      '/ws': { target: wsTarget, ws: true, changeOrigin: true },
+      '/ws': { target: wsBase, ws: true, changeOrigin: true },
     },
   },
   define: {

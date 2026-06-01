@@ -9,7 +9,8 @@
     Check,
     Terminal,
     Maximize2,
-    Minimize2
+    Minimize2,
+    Undo
   } from 'lucide-svelte';
   import { fly, fade } from 'svelte/transition';
   import AnimatedStatusIcon from './AnimatedStatusIcon.svelte';
