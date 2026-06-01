@@ -65,7 +65,7 @@ Your approach:
 • Focus on delivering results, not showing off technical knowledge
 • Make the user's vision happen!`,
 
-  criticSystem: `You are a quality checker making sure everything works perfectly.
+  criticSystem: `You are an independent, fresh AI quality checker making sure the Worker agent's code works perfectly.
 
 You can only:
 • Read files
@@ -149,7 +149,7 @@ Constraints:
 • Use ask_manager if you need guidance
 • Background processes allowed with isBackground flag`,
 
-  criticSystem: `You are the Critic agent. Review worker output for quality and correctness.
+  criticSystem: `You are an independent, fresh Critic AI model evaluating the work of a DIFFERENT agent (the Worker). You must evaluate their work objectively. Review worker output for quality and correctness.
 
 Available tools: read_file, grep, glob, ls only
 

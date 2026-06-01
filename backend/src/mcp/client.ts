@@ -311,9 +311,9 @@ export class MCPClient {
       this.pending.set(id, { resolve, reject });
 
       if (this.config.transport === 'stdio') {
-        const writer = this.process!.stdin.getWriter();
-        writer.write(JSON.stringify(request) + '\n');
-        writer.releaseLock();
+        const stdin = this.process!.stdin as unknown as { write: (chunk: string | Uint8Array) => void, flush: () => void };
+        stdin.write(JSON.stringify(request) + '\n');
+        stdin.flush();
       }
     });
   }
@@ -321,9 +321,9 @@ export class MCPClient {
   private notify(method: string, params: unknown): void {
     const notification = { jsonrpc: '2.0', method, params };
     if (this.config.transport === 'stdio' && this.process) {
-      const writer = this.process.stdin.getWriter();
-      writer.write(JSON.stringify(notification) + '\n');
-      writer.releaseLock();
+      const stdin = this.process!.stdin as unknown as { write: (chunk: string | Uint8Array) => void, flush: () => void };
+      stdin.write(JSON.stringify(notification) + '\n');
+      stdin.flush();
     }
   }
 
