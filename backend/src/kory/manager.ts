@@ -54,6 +54,7 @@ import {
 import { AutoCommitService } from './auto-commit-service';
 import { getModeManager } from '../mode';
 import type { UIMode } from '@koryphaios/shared';
+import { collaborationManager } from '../collaboration/manager';
 
 // ─── Internal Types ─────────────────────────────────────────────────────────
 
@@ -395,6 +396,9 @@ export class KoryManager {
       { sessionId, routing, providerName: provider.name },
       'Resolved provider for task',
     );
+
+    // Broadcast the user message to relay guests
+    collaborationManager.broadcastEvent({ type: 'chat', from: 'human', content: userMessage });
 
     await this.updateWorkflowState(sessionId, 'analyzing');
     try {

@@ -1990,98 +1990,140 @@
               <Users size={40} />
             </div>
             <h3 class="text-2xl font-black text-[var(--color-text-primary)]">Team Collaboration</h3>
-            <p class="text-sm text-[var(--color-text-muted)] mt-2">Enable multiplayer AI sessions and shared knowledge bases</p>
+            <p class="text-sm text-[var(--color-text-muted)] mt-2">Invite teammates to watch or co-pilot your live AI agent session</p>
           </div>
 
           {#if collaborationStore.activeCollab}
-            <div class="mx-auto grid max-w-6xl gap-6 xl:grid-cols-[minmax(320px,0.8fr)_minmax(0,1.2fr)]">
+            <!-- ── ACTIVE SESSION ── -->
+            <div class="mx-auto max-w-4xl space-y-6">
+
+              <!-- Invite links -->
               <div class="relative rounded-3xl border border-[var(--color-accent)]/30 bg-[var(--color-surface-2)] p-8 shadow-2xl">
-                <div class="absolute -top-3 left-6 px-4 py-1 rounded-full bg-[var(--color-accent)] text-[10px] font-black uppercase tracking-widest text-[var(--color-surface-0)] shadow-lg">Active Session</div>
+                <div class="absolute -top-3 left-6 px-4 py-1 rounded-full bg-[var(--color-accent)] text-[10px] font-black uppercase tracking-widest text-[var(--color-surface-0)] shadow-lg">
+                  {collaborationStore.activeCollab.relayEnabled ? '● Live via Relay' : '● Active Session'}
+                </div>
 
-                <div class="space-y-6">
+                {#if collaborationStore.activeCollab.relayEnabled}
+                  <h4 class="text-sm font-bold text-[var(--color-text-primary)] mb-5">Invite Links — share the right link for each teammate's role</h4>
+                  <div class="space-y-3">
+                    {#each [
+                      { role: 'viewer', label: 'Viewer', desc: 'Watch only — no interaction', color: 'text-blue-400', bg: 'bg-blue-500/10' },
+                      { role: 'collaborator', label: 'Collaborator', desc: 'Can submit prompts — you approve each one before agents run', color: 'text-amber-400', bg: 'bg-amber-500/10' },
+                      { role: 'copilot', label: 'Co-Pilot', desc: 'Full shared control — prompts execute immediately', color: 'text-[var(--color-accent)]', bg: 'bg-[var(--color-accent)]/10' },
+                    ] as r}
+                      <div class="flex items-center gap-4 rounded-2xl bg-[var(--color-surface-1)] p-4">
+                        <div class="flex-1">
+                          <div class="flex items-center gap-2 mb-0.5">
+                            <span class="text-xs font-bold {r.color}">{r.label}</span>
+                          </div>
+                          <p class="text-[11px] text-[var(--color-text-muted)]">{r.desc}</p>
+                        </div>
+                        <button
+                          type="button"
+                          onclick={() => collaborationStore.copyInviteLink(r.role as any)}
+                          class="shrink-0 rounded-xl {r.bg} {r.color} px-4 py-2 text-xs font-bold transition-all hover:opacity-80"
+                        >
+                          Copy Link
+                        </button>
+                      </div>
+                    {/each}
+                  </div>
+                {:else}
+                  <!-- Relay not configured — show legacy join code -->
                   <div class="text-center">
-                    <p class="mb-2 block text-[10px] font-bold uppercase tracking-widest text-[var(--color-text-muted)]">Workspace Passcode</p>
-                    <code class="block rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-1)] py-4 text-3xl font-black tracking-[0.3em] text-[var(--color-accent)]">{collaborationStore.activeCollab.joinCode || '••••••'}</code>
+                    <p class="mb-2 block text-[10px] font-bold uppercase tracking-widest text-[var(--color-text-muted)]">Join Code (local network only)</p>
+                    <code class="block rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-1)] py-4 text-3xl font-black tracking-[0.3em] text-[var(--color-accent)]">
+                      {collaborationStore.activeCollab.joinCode || '••••••'}
+                    </code>
+                    <p class="mt-3 text-[11px] text-[var(--color-text-muted)]">
+                      Configure <code class="font-mono">RELAY_URL</code> and <code class="font-mono">RELAY_HOST_SECRET</code> in your environment for internet-accessible invite links.
+                    </p>
                   </div>
-
-                  <div class="grid gap-3 sm:grid-cols-2 xl:grid-cols-1">
-                    <div class="rounded-2xl bg-[var(--color-surface-1)] p-4 text-left">
-                      <div class="text-[10px] uppercase tracking-widest text-[var(--color-text-muted)]">Mode</div>
-                      <div class="mt-2 text-sm font-semibold text-[var(--color-text-primary)]">Hosted workspace</div>
-                    </div>
-                    <div class="rounded-2xl bg-[var(--color-surface-1)] p-4 text-left">
-                      <div class="text-[10px] uppercase tracking-widest text-[var(--color-text-muted)]">Join Flow</div>
-                      <div class="mt-2 text-sm font-semibold text-[var(--color-text-primary)]">Share the passcode with teammates</div>
-                    </div>
-                  </div>
-
-                  <button type="button" onclick={() => collaborationStore.endSession()} class="btn w-full rounded-xl bg-red-500/10 py-3 font-bold text-red-400 transition-all hover:bg-red-500/20">Stop Hosting</button>
-                </div>
+                {/if}
               </div>
 
-              <div class="grid gap-6 md:grid-cols-2">
-                <div class="rounded-3xl border border-[var(--color-border)] bg-[var(--color-surface-2)] p-8 text-left">
-                  <div class="mb-4 flex h-12 w-12 items-center justify-center rounded-2xl bg-emerald-500/10 text-emerald-400">
-                    <Shield size={24} />
+              <!-- Pending approvals -->
+              {#if collaborationStore.pendingPrompts.length > 0}
+                <div class="rounded-3xl border border-amber-500/30 bg-amber-500/5 p-6">
+                  <h4 class="text-sm font-bold text-amber-400 mb-4 flex items-center gap-2">
+                    <span>⏳</span> Pending Guest Prompts ({collaborationStore.pendingPrompts.length})
+                  </h4>
+                  <div class="space-y-3">
+                    {#each collaborationStore.pendingPrompts as p (p.promptId)}
+                      <div class="rounded-2xl bg-[var(--color-surface-1)] border border-[var(--color-border)] p-4">
+                        <div class="flex items-start justify-between gap-4">
+                          <div class="flex-1 min-w-0">
+                            <div class="flex items-center gap-2 mb-1">
+                              <span class="text-[10px] font-bold uppercase text-amber-400">{p.name}</span>
+                              <span class="text-[10px] text-[var(--color-text-muted)]">· {p.role}</span>
+                            </div>
+                            <p class="text-sm text-[var(--color-text-primary)] break-words">{p.content}</p>
+                          </div>
+                          <div class="flex gap-2 shrink-0">
+                            <button
+                              type="button"
+                              onclick={() => collaborationStore.approvePrompt(p.promptId, true)}
+                              class="rounded-xl bg-emerald-500/10 text-emerald-400 px-3 py-1.5 text-xs font-bold hover:bg-emerald-500/20 transition-all"
+                            >
+                              Approve
+                            </button>
+                            <button
+                              type="button"
+                              onclick={() => collaborationStore.approvePrompt(p.promptId, false)}
+                              class="rounded-xl bg-red-500/10 text-red-400 px-3 py-1.5 text-xs font-bold hover:bg-red-500/20 transition-all"
+                            >
+                              Reject
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    {/each}
                   </div>
-                  <h4 class="text-lg font-bold text-[var(--color-text-primary)]">Secure Tunnel Active</h4>
-                  <p class="mt-2 text-xs text-[var(--color-text-muted)]">The workspace is currently hosting a collaboration session for invited teammates.</p>
                 </div>
+              {/if}
 
-                <div class="rounded-3xl border border-[var(--color-border)] bg-[var(--color-surface-2)] p-8 text-left">
-                  <div class="mb-4 flex h-12 w-12 items-center justify-center rounded-2xl bg-blue-500/10 text-blue-400">
-                    <MessageSquare size={24} />
-                  </div>
-                  <h4 class="text-lg font-bold text-[var(--color-text-primary)]">Shared Session Flow</h4>
-                  <p class="mt-2 text-xs text-[var(--color-text-muted)]">Invitees join with the passcode and collaborate inside the same active AI workspace.</p>
-                </div>
-
-                <div class="rounded-3xl border border-[var(--color-border)] bg-[var(--color-surface-2)] p-8 text-left md:col-span-2">
-                  <div class="mb-4 flex h-12 w-12 items-center justify-center rounded-2xl bg-[var(--color-accent)]/10 text-[var(--color-accent)]">
-                    <Sparkles size={24} />
-                  </div>
-                  <h4 class="text-lg font-bold text-[var(--color-text-primary)]">Hosting Checklist</h4>
-                  <div class="mt-4 grid gap-3 sm:grid-cols-3">
-                    <div class="rounded-2xl bg-[var(--color-surface-1)] p-4">
-                      <div class="text-[10px] uppercase tracking-widest text-[var(--color-text-muted)]">1</div>
-                      <p class="mt-2 text-xs text-[var(--color-text-primary)]">Share the passcode only with the people who should join.</p>
-                    </div>
-                    <div class="rounded-2xl bg-[var(--color-surface-1)] p-4">
-                      <div class="text-[10px] uppercase tracking-widest text-[var(--color-text-muted)]">2</div>
-                      <p class="mt-2 text-xs text-[var(--color-text-primary)]">Keep the host workspace open while collaborators are connected.</p>
-                    </div>
-                    <div class="rounded-2xl bg-[var(--color-surface-1)] p-4">
-                      <div class="text-[10px] uppercase tracking-widest text-[var(--color-text-muted)]">3</div>
-                      <p class="mt-2 text-xs text-[var(--color-text-primary)]">Stop hosting when the review or pairing session ends.</p>
-                    </div>
-                  </div>
-                </div>
-              </div>
+              <!-- Stop hosting -->
+              <button
+                type="button"
+                onclick={() => collaborationStore.endSession()}
+                class="btn w-full rounded-xl bg-red-500/10 py-3 font-bold text-red-400 transition-all hover:bg-red-500/20"
+              >
+                Stop Hosting
+              </button>
             </div>
+
           {:else}
-            <div class="grid grid-cols-1 md:grid-cols-2 gap-8">
+            <!-- ── NOT HOSTING ── -->
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-8 max-w-4xl mx-auto">
               <div class="p-8 rounded-3xl bg-[var(--color-surface-2)] border border-[var(--color-border)] hover:border-[var(--color-accent)]/30 transition-all flex flex-col text-center">
                 <div class="w-12 h-12 bg-emerald-500/10 text-emerald-400 rounded-2xl flex items-center justify-center mx-auto mb-6">
                   <Zap size={24} />
                 </div>
-                <h4 class="text-lg font-bold mb-2">Host New Session</h4>
-                <p class="text-xs text-[var(--color-text-muted)] mb-8">Create a secure P2P tunnel to invite teammates into your active AI workspace.</p>
-                <button type="button" onclick={() => collaborationStore.hostSession()} class="btn btn-primary w-full py-3 mt-auto font-bold rounded-xl">Start Secure Tunnel</button>
+                <h4 class="text-lg font-bold mb-2">Host a Session</h4>
+                <p class="text-xs text-[var(--color-text-muted)] mb-8">
+                  Generate invite links for teammates to watch or co-pilot your active AI session in real time.
+                </p>
+                <button
+                  type="button"
+                  onclick={() => collaborationStore.hostSession()}
+                  disabled={collaborationStore.loading}
+                  class="btn btn-primary w-full py-3 mt-auto font-bold rounded-xl disabled:opacity-50"
+                >
+                  {collaborationStore.loading ? 'Starting...' : 'Start Collaboration'}
+                </button>
               </div>
 
               <div class="p-8 rounded-3xl bg-[var(--color-surface-2)] border border-[var(--color-border)] hover:border-[var(--color-accent)]/30 transition-all flex flex-col text-center">
                 <div class="w-12 h-12 bg-blue-500/10 text-blue-400 rounded-2xl flex items-center justify-center mx-auto mb-6">
                   <Keyboard size={24} />
                 </div>
-                <h4 class="text-lg font-bold mb-2">Join Existing</h4>
-                <p class="text-xs text-[var(--color-text-muted)] mb-8">Enter a 6-digit passcode to join a teammate's session.</p>
-                <div class="mt-auto flex flex-col gap-3">
-                  <input id="team-join-input" type="text" placeholder="PASSCODE" class="input text-center text-lg font-bold tracking-widest py-3 rounded-xl" maxlength="6" />
-                  <button type="button" onclick={() => {
-                    const el = document.getElementById('team-join-input') as HTMLInputElement;
-                    if (el.value) collaborationStore.joinSession(el.value, 'Teammate');
-                  }} class="btn btn-secondary w-full py-3 font-bold rounded-xl">Join Workspace</button>
-                </div>
+                <h4 class="text-lg font-bold mb-2">Join via Invite Link</h4>
+                <p class="text-xs text-[var(--color-text-muted)] mb-8">
+                  Ask the host for their viewer, collaborator, or co-pilot invite link and open it in any browser.
+                </p>
+                <p class="text-[11px] text-[var(--color-text-muted)] mt-auto">
+                  Invite links open a live feed page — no Koryphaios install required.
+                </p>
               </div>
             </div>
           {/if}
