@@ -18,7 +18,7 @@
   "enableCritic": true,
   "agentSettings": {
     "ruleEnforcementLevel": "strict",
-    "agentExecutionMode": "single",
+    "agentExecutionMode": "auto",
     "preferencesEnabled": true,
     "criticGateEnabled": true,
     "criticEnforcesPreferences": true,
@@ -31,9 +31,9 @@
     "approvalThresholdLines": 100,
     "localWebSearch": "fallback",
     "multiSourceResearch": true,
-    "updatedAt": 1780293760276
+    "updatedAt": 1780376672267
   },
-  "updatedAt": 1780293808501,
+  "updatedAt": 1780376672267,
   "providers": {
     "anthropic": {
       "name": "anthropic",

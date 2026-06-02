@@ -368,7 +368,7 @@ export const DEFAULT_REASONING_RULES: ReasoningRule[] = [
     provider: 'auto',
     config: createConfig(
       'reasoning',
-      ['none', 'low', 'medium', 'high', 'xhigh', 'auto'],
+      ['none', 'low', 'medium', 'high', 'xhigh', 'max', 'auto'],
       'medium',
     ),
   },

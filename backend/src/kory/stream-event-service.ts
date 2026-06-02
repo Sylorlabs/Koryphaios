@@ -10,6 +10,7 @@ import type { WSMessage, WorkerDomain, ProviderName, StreamUsagePayload } from '
 import { wsBroker } from '../pubsub';
 import { resolveTrustedContextWindow } from '../providers';
 import { koryLog } from '../logger';
+import { collaborationManager } from '../collaboration/manager';
 
 export interface StreamEventServiceDependencies {
   managerAgentId: string;
@@ -194,6 +195,30 @@ export class StreamEventService {
       sessionId,
       agentId: this.managerAgentId,
     });
+
+    // Mirror relevant events to collaboration relay guests
+    this.relayBroadcast(type, payload);
+  }
+
+  private relayBroadcast(type: string, payload: WSMessage['payload']): void {
+    // Only forward meaningful events — skip usage counters, routing decisions, etc.
+    if (type === 'stream.file_complete') {
+      const p = payload as any;
+      if (p?.diff) {
+        collaborationManager.broadcastEvent({ type: 'diff', path: p.path ?? '', diff: p.diff });
+      }
+    } else if (type === 'agent.status') {
+      const p = payload as any;
+      collaborationManager.broadcastEvent({ type: 'agent-status', status: `${p?.agentId ?? 'agent'}: ${p?.status ?? ''}` });
+    } else if (type === 'stream.delta') {
+      const p = payload as any;
+      if (p?.content) {
+        collaborationManager.broadcastEvent({ type: 'log', content: p.content });
+      }
+    } else if (type === 'system.notification') {
+      const p = payload as any;
+      collaborationManager.broadcastEvent({ type: 'log', content: `[${p?.type ?? 'info'}] ${p?.message ?? ''}` });
+    }
   }
 }
 
