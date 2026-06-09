@@ -1324,17 +1324,27 @@ function markAgentStopped(agentId: string) {
 
 function sendUserInput(sessionId: string, selection: string, text?: string) {
   if (wsConnection?.readyState === WebSocket.OPEN) {
-    wsConnection.send(
-      JSON.stringify({
-        type: 'user_input',
-        sessionId,
-        selection,
-        text,
-        timestamp: Date.now(),
-      }),
-    );
+    try {
+      wsConnection.send(
+        JSON.stringify({
+          type: 'user_input',
+          sessionId,
+          selection,
+          text,
+          timestamp: Date.now(),
+        }),
+      );
+      // Only clear the question on successful send — otherwise the backend
+      // never receives the answer and the manager stays stuck forever.
+      pendingQuestion = null;
+    } catch (err) {
+      console.error('[ws] Failed to send user_input, keeping question pending', err);
+      toastStore.error('Failed to send answer. Please try again.');
+    }
+  } else {
+    console.warn('[ws] WebSocket not open, cannot send user_input. Keeping question pending.');
+    toastStore.error('Connection lost. Please wait for reconnection.');
   }
-  pendingQuestion = null;
 }
 
 function respondToChanges(sessionId: string, accepted: boolean) {
