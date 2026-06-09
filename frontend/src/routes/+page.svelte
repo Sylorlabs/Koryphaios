@@ -720,7 +720,7 @@ RULES:
     }
   }
 
-  function handleSend(message: string, model?: string, reasoningLevel?: string) {
+  function handleSend(message: string, model?: string, reasoningLevel?: string, attachments?: Array<{type: string, data: string, name: string}>) {
     if (!appStore.projectName) {
       toastStore.error('Open a project first to chat with an agent');
       return;
@@ -731,12 +731,13 @@ RULES:
       showSettings = true;
       return;
     }
-    if (!sessionStore.activeSessionId || !message.trim()) return;
+    if (!sessionStore.activeSessionId || (!message.trim() && !(attachments && attachments.length > 0))) return;
     if (selectedAgentId) {
+      // NOTE: currently agent thread send might not support attachments, but we'll pass them if wsStore updates
       wsStore.sendAgentMessage(sessionStore.activeSessionId, selectedAgentId, message);
       return;
     }
-    wsStore.sendMessage(sessionStore.activeSessionId, message, model, reasoningLevel);
+    wsStore.sendMessage(sessionStore.activeSessionId, message, model, reasoningLevel, attachments);
   }
 
   function handleStop() {

@@ -41,7 +41,7 @@ impl From<serde_json::Error> for AppError {
 /// Log error with context
 pub fn log_error(context: &str, error: &dyn std::error::Error) {
     eprintln!("[Koryphaios] Error in {}: {}", context, error);
-    
+
     // In production, you might want to send this to a crash reporting service
     #[cfg(debug_assertions)]
     {

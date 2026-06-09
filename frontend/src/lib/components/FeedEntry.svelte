@@ -10,7 +10,8 @@
     Terminal,
     Maximize2,
     Minimize2,
-    Undo
+    Undo,
+    X
   } from 'lucide-svelte';
   import { fly, fade } from 'svelte/transition';
   import AnimatedStatusIcon from './AnimatedStatusIcon.svelte';
@@ -106,6 +107,7 @@
 
   let copied = $state(false);
   let expandedTerminal = $state(false);
+  let zoomedImage = $state<string | null>(null);
 
   async function copyToClipboard() {
     try {
@@ -257,6 +259,23 @@
             {@html parsedHtml}
           </div>
 
+          {#if entry.metadata?.attachments && Array.isArray(entry.metadata.attachments) && entry.metadata.attachments.length > 0}
+            <div class="mt-3 flex flex-wrap gap-2">
+              {#each entry.metadata.attachments as attachment}
+                {#if attachment.type === 'image'}
+                  <button 
+                    type="button"
+                    class="relative rounded-lg overflow-hidden border transition-transform hover:scale-105 active:scale-95" 
+                    style="border-color: var(--color-border); width: 80px; height: 80px; cursor: zoom-in;"
+                    onclick={(e) => { e.stopPropagation(); zoomedImage = attachment.data; }}
+                  >
+                    <img src={`data:image/png;base64,${attachment.data}`} alt={attachment.name} class="w-full h-full object-cover" />
+                  </button>
+                {/if}
+              {/each}
+            </div>
+          {/if}
+
           {#if entry.type === 'content' && !isStreaming && entry.text}
             <div class="mt-2 flex items-center gap-2" in:fade>
               <button
@@ -322,3 +341,26 @@
     </div>
   {/if}
 </div>
+
+{#if zoomedImage}
+  <!-- svelte-ignore a11y_click_events_have_key_events -->
+  <!-- svelte-ignore a11y_no_static_element_interactions -->
+  <div 
+    class="fixed inset-0 z-[100] flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm cursor-zoom-out"
+    transition:fade={{ duration: 150 }}
+    onclick={(e) => { e.stopPropagation(); zoomedImage = null; }}
+  >
+    <button 
+      class="absolute top-4 right-4 p-2 text-white/70 hover:text-white bg-black/50 hover:bg-black/80 rounded-full transition-colors"
+      onclick={(e) => { e.stopPropagation(); zoomedImage = null; }}
+    >
+      <X size={24} />
+    </button>
+    <img 
+      src={`data:image/png;base64,${zoomedImage}`} 
+      alt="Zoomed attachment" 
+      class="max-w-full max-h-full object-contain rounded shadow-2xl" 
+      onclick={(e) => e.stopPropagation()}
+    />
+  </div>
+{/if}

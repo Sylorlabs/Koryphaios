@@ -62,16 +62,16 @@ pub async fn search_codebase(
     walker.run(|| {
         let tx = tx.clone();
         let regex = regex.clone();
-        
+
         Box::new(move |result| {
             if let Ok(entry) = result {
                 if entry.file_type().map_or(false, |ft| ft.is_file()) {
                     let file_path = entry.path().to_path_buf();
-                    
+
                     // Simple fast read - skip binary files or unreadable files
                     if let Ok(content) = fs::read_to_string(&file_path) {
                         let mut local_matches = Vec::new();
-                        
+
                         for (i, line) in content.lines().enumerate() {
                             if regex.is_match(line) {
                                 local_matches.push(SearchResult {
@@ -85,7 +85,7 @@ pub async fn search_codebase(
                                 }
                             }
                         }
-                        
+
                         if !local_matches.is_empty() {
                             let _ = tx.send((1, local_matches));
                         } else {

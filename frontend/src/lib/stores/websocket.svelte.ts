@@ -263,7 +263,7 @@ function accumulateFeedEntry(entry: Omit<FeedEntry, 'id'>) {
   }
 }
 
-function addUserMessage(sessionId: string, content: string) {
+function addUserMessage(sessionId: string, content: string, attachments?: Array<{type: string, data: string, name: string}>) {
   const userEntry: FeedEntry = {
     id: `user-${++feedIdCounter}`,
     timestamp: Date.now(),
@@ -272,7 +272,7 @@ function addUserMessage(sessionId: string, content: string) {
     agentName: 'You',
     glowClass: '',
     text: content,
-    metadata: { sessionId },
+    metadata: { sessionId, attachments },
   };
   feed.push(userEntry);
   if (feed.length > MAX_FEED_ENTRIES) feed.splice(0, feed.length - MAX_FEED_ENTRIES);
@@ -994,14 +994,14 @@ export async function loadProvidersFromApi(): Promise<void> {
   }
 }
 
-function sendMessage(sessionId: string, content: string, model?: string, reasoningLevel?: string) {
-  addUserMessage(sessionId, content);
+function sendMessage(sessionId: string, content: string, model?: string, reasoningLevel?: string, attachments?: Array<{type: string, data: string, name: string}>) {
+  addUserMessage(sessionId, content, attachments);
   // Clear previous context detection for new message
   detectedContext = [];
   void apiFetch(apiUrl('/api/messages'), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ sessionId, content, model, reasoningLevel }),
+    body: JSON.stringify({ sessionId, content, model, reasoningLevel, attachments }),
   })
     .then(async (res) => {
       const data = await parseJsonResponse<{ ok?: boolean; error?: string }>(res);
