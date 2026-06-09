@@ -9,6 +9,7 @@
   import BrainIcon from '$lib/components/icons/BrainIcon.svelte';
   import { getModelConfigurationWarning } from '$lib/utils/model-config';
   import { invoke } from '@tauri-apps/api/core';
+  import { toastStore } from '$lib/stores/toast.svelte';
 
   export type Attachment = { type: 'image' | 'file'; data: string; name: string };
 
@@ -468,7 +469,7 @@
     attachments = attachments.filter((_, i) => i !== index);
   }
 
-  function handlePaste(e: ClipboardEvent) {
+  async function handlePaste(e: ClipboardEvent) {
     const items = e.clipboardData?.items;
     const files = e.clipboardData?.files;
     let handled = false;
@@ -515,32 +516,33 @@
 
     if (handled) {
       e.preventDefault(); // Stop it from pasting text representation into textarea if any
-    } else if (typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window) {
+      return;
+    }
+
+    if (typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window) {
       // Fallback: Check Tauri native clipboard
-      import('@tauri-apps/plugin-clipboard-manager').then(async ({ readImage }) => {
-        try {
-          const image = await readImage();
-          if (image) {
-            e.preventDefault();
-            const uint8Array = await image.rgba();
-            // In Tauri v2, readImage() returns an Image. We can use `.png()` to get png buffer
-            // wait, we can just use `image.png()`
-            const pngData = await image.png();
-            const blob = new Blob([pngData], { type: 'image/png' });
-            const reader = new FileReader();
-            reader.onload = (e) => {
-              const result = e.target?.result as string;
-              if (result) {
-                const base64 = result.split(',')[1];
-                attachments = [...attachments, { type: 'image', data: base64, name: 'clipboard-image.png' }];
-              }
-            };
-            reader.readAsDataURL(blob);
-          }
-        } catch (err) {
-          // ignore error if clipboard doesn't contain image
+      try {
+        const { readImage } = await import('@tauri-apps/plugin-clipboard-manager');
+        const image = await readImage();
+        if (image) {
+          e.preventDefault();
+          const pngData = await image.png();
+          const blob = new Blob([pngData], { type: 'image/png' });
+          const reader = new FileReader();
+          reader.onload = (ev) => {
+            const result = ev.target?.result as string;
+            if (result) {
+              const base64 = result.split(',')[1];
+              attachments = [...attachments, { type: 'image', data: base64, name: 'clipboard-image.png' }];
+            }
+          };
+          reader.readAsDataURL(blob);
+        } else {
+          toastStore.error("No image found in clipboard");
         }
-      });
+      } catch (err: any) {
+        toastStore.error("Clipboard error: " + err.message);
+      }
     }
   }
 </script>
@@ -718,6 +720,7 @@
           bind:value={value}
           oninput={autoResize}
           onkeydown={handleKeydown}
+          onpaste={handlePaste}
           placeholder={disabled ? disabledMessage : placeholder}
           rows="1"
           class="input flex-1"
