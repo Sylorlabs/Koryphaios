@@ -8,7 +8,7 @@ const log = serverLog.child({ module: 'collab-manager' });
 
 // ─── Pending approvals (in-memory, cleared on restart) ──────────────────────
 
-interface PendingPrompt {
+export interface PendingPrompt {
   guestId: string;
   name: string;
   role: string;

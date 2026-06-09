@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { Send, ChevronDown, Sparkles, Square, Users, User, ShieldCheck, ShieldAlert, Circle } from 'lucide-svelte';
+  import { Send, ChevronDown, Sparkles, Square, Users, User, ShieldCheck, ShieldAlert, Circle, Paperclip, X } from 'lucide-svelte';
   import { wsStore } from '$lib/stores/websocket.svelte';
   import { shortcutStore } from '$lib/stores/shortcuts.svelte';
   import { experimentalStore } from '$lib/stores/experimental.svelte';
@@ -8,9 +8,12 @@
   import { getReasoningConfig, hasReasoningSupport } from '@koryphaios/shared';
   import BrainIcon from '$lib/components/icons/BrainIcon.svelte';
   import { getModelConfigurationWarning } from '$lib/utils/model-config';
+  import { invoke } from '@tauri-apps/api/core';
+
+  export type Attachment = { type: 'image' | 'file'; data: string; name: string };
 
   interface Props {
-    onSend: (message: string, model?: string, reasoningLevel?: string) => void;
+    onSend: (message: string, model?: string, reasoningLevel?: string, attachments?: Attachment[]) => void;
     onExecuteCommand?: (command: string) => Promise<boolean> | boolean;
     /** When true, show Stop instead of Send; clicking stops manager and workers for the session. */
     isRunning?: boolean;
@@ -44,6 +47,8 @@
   let showModelPicker = $state(false);
   let selectedModel = $state<string>('auto');
   let selectedPickerIndex = $state(0);
+  let attachments = $state<Attachment[]>([]);
+  let fileInputRef = $state<HTMLInputElement>();
 
   type ComposerPickerItem =
     | { type: 'command'; key: string; label: string; value: string; description: string }
@@ -252,12 +257,13 @@
     }
     if (await executeSlashIfNeeded()) return;
     const trimmed = value.trim();
-    if (!trimmed) return;
+    if (!trimmed && attachments.length === 0) return;
     const now = Date.now();
     if (now - lastSendAt < SEND_COOLDOWN_MS) return; // debounce duplicate sends
     lastSendAt = now;
-    onSend(trimmed, selectedModel, reasoningLevel);
+    onSend(trimmed, selectedModel, reasoningLevel, attachments.length > 0 ? [...attachments] : undefined);
     value = '';
+    attachments = [];
     resizeToMin();
   }
 
@@ -398,7 +404,7 @@
     if (!target.closest('.reasoning-picker')) showReasoningMenu = false;
   }
 
-  let canSend = $derived(!disabled && !configurationWarning && value.trim().length > 0);
+  let canSend = $derived(!disabled && !configurationWarning && (value.trim().length > 0 || attachments.length > 0));
 
   function cycleAgentExecutionMode() {
     const current = agentSettingsStore.settings.agentExecutionMode ?? 'auto';
@@ -438,9 +444,108 @@
       className: 'bg-emerald-500/14 text-emerald-300 border border-emerald-500/25 hover:brightness-110',
     };
   });
+
+  async function handleFileInput(e: Event) {
+    const target = e.target as HTMLInputElement;
+    if (!target.files) return;
+    for (const file of target.files) {
+      if (file.type.startsWith('image/')) {
+        const reader = new FileReader();
+        reader.onload = (e) => {
+          const result = e.target?.result as string;
+          if (result) {
+            const data = result.split(',')[1];
+            attachments = [...attachments, { type: 'image', data, name: file.name }];
+          }
+        };
+        reader.readAsDataURL(file);
+      }
+    }
+    target.value = '';
+  }
+
+  function removeAttachment(index: number) {
+    attachments = attachments.filter((_, i) => i !== index);
+  }
+
+  function handlePaste(e: ClipboardEvent) {
+    const items = e.clipboardData?.items;
+    const files = e.clipboardData?.files;
+    let handled = false;
+
+    // Check items first (usually browser images)
+    if (items) {
+      for (const item of items) {
+        if (item.type.startsWith('image/')) {
+          handled = true;
+          const file = item.getAsFile();
+          if (file) {
+            const reader = new FileReader();
+            reader.onload = (e) => {
+              const result = e.target?.result as string;
+              if (result) {
+                const data = result.split(',')[1];
+                attachments = [...attachments, { type: 'image', data, name: file.name }];
+              }
+            };
+            reader.readAsDataURL(file);
+          }
+        }
+      }
+    }
+
+    // Fallback to files array (sometimes OS files copied)
+    if (!handled && files) {
+      for (let i = 0; i < files.length; i++) {
+        const file = files[i];
+        if (file.type.startsWith('image/')) {
+          handled = true;
+          const reader = new FileReader();
+          reader.onload = (e) => {
+            const result = e.target?.result as string;
+            if (result) {
+              const data = result.split(',')[1];
+              attachments = [...attachments, { type: 'image', data, name: file.name }];
+            }
+          };
+          reader.readAsDataURL(file);
+        }
+      }
+    }
+
+    if (handled) {
+      e.preventDefault(); // Stop it from pasting text representation into textarea if any
+    } else if (typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window) {
+      // Fallback: Check Tauri native clipboard
+      import('@tauri-apps/plugin-clipboard-manager').then(async ({ readImage }) => {
+        try {
+          const image = await readImage();
+          if (image) {
+            e.preventDefault();
+            const uint8Array = await image.rgba();
+            // In Tauri v2, readImage() returns an Image. We can use `.png()` to get png buffer
+            // wait, we can just use `image.png()`
+            const pngData = await image.png();
+            const blob = new Blob([pngData], { type: 'image/png' });
+            const reader = new FileReader();
+            reader.onload = (e) => {
+              const result = e.target?.result as string;
+              if (result) {
+                const base64 = result.split(',')[1];
+                attachments = [...attachments, { type: 'image', data: base64, name: 'clipboard-image.png' }];
+              }
+            };
+            reader.readAsDataURL(blob);
+          }
+        } catch (err) {
+          // ignore error if clipboard doesn't contain image
+        }
+      });
+    }
+  }
 </script>
 
-<svelte:window onclick={handleClickOutside} />
+<svelte:window onclick={handleClickOutside} onpaste={handlePaste} />
 
 <div class="command-input px-4 py-3">
   <!-- No project: show error -->
@@ -587,6 +692,27 @@
             </div>
           </div>
         {/if}
+        
+        <!-- Attachments Preview -->
+        {#if attachments.length > 0}
+          <div class="mb-3 flex flex-wrap gap-2">
+            {#each attachments as attachment, i}
+              <div class="relative group rounded-lg overflow-hidden border" style="border-color: var(--color-border); width: 64px; height: 64px;">
+                {#if attachment.type === 'image'}
+                  <img src={`data:image/png;base64,${attachment.data}`} alt={attachment.name} class="w-full h-full object-cover" />
+                {/if}
+                <button
+                  type="button"
+                  class="absolute top-1 right-1 p-0.5 rounded-full bg-black/60 text-white opacity-0 group-hover:opacity-100 transition-opacity hover:bg-black/80"
+                  onclick={() => removeAttachment(i)}
+                >
+                  <X size={12} />
+                </button>
+              </div>
+            {/each}
+          </div>
+        {/if}
+        
         <textarea
           bind:this={inputRef}
           bind:value={value}
@@ -636,6 +762,14 @@
             </button>
           </div>
 
+          <input
+            type="file"
+            multiple
+            accept="image/*"
+            class="hidden"
+            bind:this={fileInputRef}
+            onchange={handleFileInput}
+          />
           <button
             type="button"
             onclick={isRunning ? stop : send}
@@ -666,9 +800,19 @@
         Enter to send · Shift+Enter for new line
       {/if}
     </span>
-    {#if value.length > 0}
-      <span class="text-xs" style="color: var(--color-text-muted);">{value.length} chars</span>
-    {/if}
+    <div class="flex items-center gap-3">
+      <button
+        type="button"
+        class="text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] transition-colors"
+        onclick={() => fileInputRef?.click()}
+        title="Attach Image"
+      >
+        <Paperclip size={16} />
+      </button>
+      {#if value.length > 0}
+        <span class="text-xs" style="color: var(--color-text-muted);">{value.length} chars</span>
+      {/if}
+    </div>
   </div>
 </div>
 
