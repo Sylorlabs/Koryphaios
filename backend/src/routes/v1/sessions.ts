@@ -80,6 +80,8 @@ export const sessionRoutes = new Elysia({ prefix: '/api/sessions' })
     const { kory, wsManager } = getContext();
     // Cancel all workers for this session
     kory.cancelSessionWorkers(id);
+    // Abort manager thread for this session
+    kory.abortManagerRun(id);
     // Cancel any LLM jobs for this session
     const { cancelLLMJobsForSession } = await import('../../queue/workers/llm-worker');
     await cancelLLMJobsForSession(id);

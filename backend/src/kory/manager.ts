@@ -1111,7 +1111,7 @@ export class KoryManager {
 
       const result = await this.autoCommitService.autoCommitAndCreatePR(taskDescription);
 
-      if (result.success) {
+      if (result.success && result.branch) {
         // Emit a friendly message to the user
         const message = result.prUrl
           ? `✨ I've saved your work and created a pull request for review: ${result.prUrl}`

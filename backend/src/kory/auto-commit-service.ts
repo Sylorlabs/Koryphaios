@@ -61,8 +61,8 @@ export class AutoCommitService {
   /**
    * Check if there's a remote named 'origin'
    */
-  private hasOriginRemote(): boolean {
-    const result = this.runGit(['remote', 'get-url', 'origin']);
+  private async hasOriginRemote(): Promise<boolean> {
+    const result = await this.runGit(['remote', 'get-url', 'origin']);
     return result.success && result.output.includes('http');
   }
 
@@ -70,7 +70,7 @@ export class AutoCommitService {
    * Get the default branch from origin
    */
   private async getDefaultBranch(): Promise<string> {
-    const result = this.runGit(['symbolic-ref', 'refs/remotes/origin/HEAD']);
+    const result = await this.runGit(['symbolic-ref', 'refs/remotes/origin/HEAD']);
     if (result.success) {
       const match = result.output.match(/origin\/(\S+)/);
       return match?.[1] || 'main';
@@ -79,17 +79,21 @@ export class AutoCommitService {
   }
 
   /**
-   * Run a git command
+   * Run a git command asynchronously
    */
-  private runGit(args: string[]): { success: boolean; output: string } {
-    const proc = spawnSync(['git', ...args], {
+  private async runGit(args: string[]): Promise<{ success: boolean; output: string }> {
+    const proc = Bun.spawn(['git', ...args], {
       cwd: this.workingDirectory,
       stdout: 'pipe',
       stderr: 'pipe',
     });
 
-    const output = proc.stdout.toString() + proc.stderr.toString();
-    return { success: proc.exitCode === 0, output: output.trim() };
+    const [stdout, stderr] = await Promise.all([
+      new Response(proc.stdout).text(),
+      new Response(proc.stderr).text(),
+    ]);
+    const exitCode = await proc.exited;
+    return { success: exitCode === 0, output: (stdout + stderr).trim() };
   }
 
   /**
@@ -138,7 +142,7 @@ export class AutoCommitService {
       }
 
       // Stage all changes
-      const stageResult = this.runGit(['add', '-A']);
+      const stageResult = await this.runGit(['add', '-A']);
       if (!stageResult.success) {
         // Try to go back to original branch
         await this.git.checkout(currentBranch);
@@ -149,7 +153,7 @@ export class AutoCommitService {
       }
 
       // Commit changes
-      const commitResult = this.runGit(['commit', '-m', commitMessage, '--no-verify']);
+      const commitResult = await this.runGit(['commit', '-m', commitMessage, '--no-verify']);
       if (!commitResult.success) {
         // Try to go back to original branch
         await this.git.checkout(currentBranch);
@@ -160,7 +164,7 @@ export class AutoCommitService {
       }
 
       // Get the commit hash
-      const hashResult = this.runGit(['rev-parse', 'HEAD']);
+      const hashResult = await this.runGit(['rev-parse', 'HEAD']);
       const commitHash = hashResult.success ? hashResult.output.trim() : undefined;
 
       koryLog.info({ branchName, commitHash }, 'Auto-committed changes in beginner mode');
@@ -202,7 +206,7 @@ export class AutoCommitService {
     commitMessage: string,
   ): Promise<PRResult> {
     // First, try to push the branch
-    const pushResult = this.runGit(['push', '-u', 'origin', branchName]);
+    const pushResult = await this.runGit(['push', '-u', 'origin', branchName]);
     if (!pushResult.success) {
       return {
         success: false,
@@ -211,7 +215,7 @@ export class AutoCommitService {
     }
 
     // Try using GitHub CLI (gh) first
-    const ghResult = this.runGh([
+    const ghResult = await this.runGh([
       'pr',
       'create',
       '--title',
@@ -233,7 +237,8 @@ export class AutoCommitService {
     }
 
     // If gh CLI fails, return the branch info for manual PR creation
-    const remoteUrl = this.runGit(['remote', 'get-url', 'origin']).output;
+    const remoteResult = await this.runGit(['remote', 'get-url', 'origin']);
+    const remoteUrl = remoteResult.output;
     const repoMatch = remoteUrl.match(/github\.com[:\/]([^\/]+)\/([^\/\.]+)/);
 
     if (repoMatch) {
@@ -255,15 +260,19 @@ export class AutoCommitService {
   /**
    * Run a GitHub CLI command
    */
-  private runGh(args: string[]): { success: boolean; output: string } {
-    const proc = spawnSync(['gh', ...args], {
+  private async runGh(args: string[]): Promise<{ success: boolean; output: string }> {
+    const proc = Bun.spawn(['gh', ...args], {
       cwd: this.workingDirectory,
       stdout: 'pipe',
       stderr: 'pipe',
     });
 
-    const output = proc.stdout.toString() + proc.stderr.toString();
-    return { success: proc.exitCode === 0, output: output.trim() };
+    const [stdout, stderr] = await Promise.all([
+      new Response(proc.stdout).text(),
+      new Response(proc.stderr).text(),
+    ]);
+    const exitCode = await proc.exited;
+    return { success: exitCode === 0, output: (stdout + stderr).trim() };
   }
 
   /**
