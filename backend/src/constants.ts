@@ -129,6 +129,9 @@ export const AGENT = {
 
   /** Max time a single LLM stream can run before being aborted (prevents stuck requests) */
   LLM_STREAM_TIMEOUT_MS: 600_000, // 10 minutes
+
+  /** Max total wall-clock time for processTask before hard abort (prevents indefinite hangs) */
+  PROCESS_TASK_TIMEOUT_MS: 1_800_000, // 30 minutes
 } as const;
 
 /**

@@ -404,7 +404,27 @@ export class KoryManager {
     try {
       koryLog.debug({ sessionId }, 'Calling handleDirectly');
       this.emitThought(sessionId, 'analyzing', `Analyzing request...`);
-      await this.handleDirectly(sessionId, userMessage, reasoningLevel, preferredModel, attachments);
+
+      // Global timeout: abort the task if it runs too long (prevents indefinite hangs)
+      const TIMEOUT_MIN = AGENT.PROCESS_TASK_TIMEOUT_MS / 60_000;
+      const processTimeout = setTimeout(() => {
+        // Abort any active LLM stream
+        const abort = this.managerAbortBySession.get(sessionId);
+        if (abort) {
+          abort.abort(
+            new DOMException(`Process task timed out after ${TIMEOUT_MIN} minutes`, 'TimeoutError'),
+          );
+        }
+        // Resolve any pending user input so the task doesn't hang forever
+        this.state.resolveUserInput(sessionId, '__timeout__');
+      }, AGENT.PROCESS_TASK_TIMEOUT_MS);
+
+      try {
+        await this.handleDirectly(sessionId, userMessage, reasoningLevel, preferredModel, attachments);
+      } finally {
+        clearTimeout(processTimeout);
+      }
+
       koryLog.debug({ sessionId }, 'handleDirectly completed');
 
       await this.updateWorkflowState(sessionId, 'idle');
