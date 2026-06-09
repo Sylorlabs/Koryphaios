@@ -171,7 +171,7 @@ export class AutoCommitService {
 
       // Try to push and create PR if origin exists
       let prResult: PRResult | undefined;
-      if (this.hasOriginRemote()) {
+      if (await this.hasOriginRemote()) {
         prResult = await this.createPullRequest(branchName, taskDescription, commitMessage);
       }
 

@@ -51,8 +51,12 @@
     const container = feedContainer;
     const observer = new ResizeObserver((entries) => {
       for (const entry of entries) {
-        const dist = container.scrollHeight - container.scrollTop - entry.contentRect.height;
-        autoScroll = dist < 50;
+        if (autoScroll) {
+          container.scrollTop = container.scrollHeight;
+        } else {
+          const dist = container.scrollHeight - container.scrollTop - entry.contentRect.height;
+          autoScroll = dist < 50;
+        }
       }
     });
     observer.observe(container);

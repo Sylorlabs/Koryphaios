@@ -22,3 +22,4 @@ export {
 export { WebSearchTool, WebFetchTool } from './web';
 export { AskUserTool, AskManagerTool } from './interaction';
 export { MCPDetectErrorsTool, MCPAnalyzeErrorTool, MCPSuggestFixesTool } from './mcp';
+export { registerGitTools } from './git';

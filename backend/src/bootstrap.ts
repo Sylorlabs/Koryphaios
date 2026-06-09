@@ -153,6 +153,8 @@ async function initEncryption() {
   }
 }
 
+import { registerGitTools } from './tools';
+
 async function initTools() {
   const tools = new ToolRegistry();
   const defaultTools = [
@@ -180,6 +182,8 @@ async function initTools() {
   for (const tool of defaultTools) {
     tools.register(tool);
   }
+
+  registerGitTools(tools);
 
   return tools;
 }

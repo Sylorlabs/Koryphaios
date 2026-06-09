@@ -142,8 +142,9 @@ const KORY_SYSTEM_PROMPT = `You are Kory, the manager agent. The user talks to y
 • You may run terminals in the background: use the bash tool with isBackground: true (and optional processName) to start long-lived processes (e.g. dev servers). Use shell_manage to list stored background processes, view their logs, or kill them. Only you can manage these background terminals.
 • Sub-agents (workers: general, ui, backend, test, review) exist only for you to invoke when you decide a task needs a specialist coder. Call delegate_to_worker only for substantial implementation, refactoring, or multi-step coding—not for chat, simple questions, or minor edits.
 • When you delegate, the worker reports back; you verify and synthesize.
-• IMPORTANT: If you decide to delegate, call delegate_to_worker IMMEDIATELY without generating any explanatory text first. Do not write "I'll delegate this" or similar—just call the tool directly.`;
-const WORKER_SYSTEM_PROMPT = `You are a specialist Worker Agent. EXECUTE the assigned task using tools. QUALITY FIRST. VERIFY.`;
+• IMPORTANT: If you decide to delegate, call delegate_to_worker IMMEDIATELY without generating any explanatory text first. Do not write "I'll delegate this" or similar—just call the tool directly.
+• If you have successfully completed a task or edit and are ready to save the work, use the commit_and_create_pr tool to commit and create a pull request automatically.`;
+const WORKER_SYSTEM_PROMPT = `You are a specialist Worker Agent. EXECUTE the assigned task using tools. QUALITY FIRST. VERIFY. If you have successfully completed a task, you may use the commit_and_create_pr tool to save the work.`;
 const CRITIC_SYSTEM_PROMPT = `You are an independent, fresh Critic AI model evaluating the work of a DIFFERENT agent (the Worker). You must evaluate their work objectively. You may only use read_file, grep, glob, and ls to inspect the codebase. Review the Worker's output and output either PASS or FAIL. If FAIL, give brief, actionable feedback. Your final message must end with a line that starts with exactly PASS or exactly FAIL (e.g. "PASS" or "FAIL: missing tests").`;
 
 // ─── Kory Manager Class ─────────────────────────────────────────────────────
@@ -166,7 +167,6 @@ export class KoryManager {
   private snapshotManager: SnapshotManager;
   public readonly git: GitManager;
   private workspaceManager: WorkspaceManager | null = null;
-  private autoCommitService: AutoCommitService;
   /** AbortController for the current manager run per session (so cancelSessionWorkers can abort manager too). */
   private managerAbortBySession = new Map<string, AbortController>();
   /** In-memory worker/critic chat threads keyed by agentId. */
@@ -191,7 +191,6 @@ export class KoryManager {
     mkdirSync(this.memoryDir, { recursive: true });
     this.snapshotManager = new SnapshotManager(workingDirectory);
     this.git = new GitManager(workingDirectory);
-    this.autoCommitService = new AutoCommitService(workingDirectory, this.git);
 
     // Initialize WorkspaceManager if git is available
     try {
@@ -573,9 +572,6 @@ export class KoryManager {
             } catch {
               // Shadow logging is non-critical; don't fail the task if it errors
             }
-
-            // Auto-commit for beginner mode after successful worker task
-            await this.handleAutoCommit(sessionId, task);
           }
         } else {
           this.workspaceManager.cleanup(taskId);
@@ -584,9 +580,7 @@ export class KoryManager {
         const message = err instanceof Error ? err.message : String(err);
         koryLog.warn({ taskId, err: message }, 'Worktree cleanup/reconcile error');
       }
-    } else if (result.success) {
-      // Auto-commit for beginner mode even without worktree (direct worker execution)
-      await this.handleAutoCommit(sessionId, task);
+      // Auto-commit is now handled by the agent manually via the commit_and_create_pr tool
     }
 
     // Update task in persistent store after reconcile, so persisted state matches user-visible result.
@@ -1001,7 +995,8 @@ export class KoryManager {
         'Filtering assistant messages for persistence',
       );
       const lastAssistant = assistants.pop();
-      const content = (lastAssistant?.content ?? '').trim();
+      const rawContent = lastAssistant?.content ?? '';
+      const content = (typeof rawContent === 'string' ? rawContent : JSON.stringify(rawContent)).trim();
       const toPersist = stoppedByUser
         ? '[Stopped by user.]'
         : content || '[Task completed using tools.]';
@@ -1053,9 +1048,6 @@ export class KoryManager {
         } catch {
           // Shadow logging is non-critical; don't fail the task if it errors
         }
-
-        // Auto-commit for beginner mode
-        await this.handleAutoCommit(sessionId, userMessage);
       }
     } finally {
       this.managerAbortBySession.delete(sessionId);
@@ -1088,83 +1080,7 @@ export class KoryManager {
     }
   }
 
-  /**
-   * Handle auto-commit for beginner mode
-   * Creates a branch, commits changes, and opens a PR
-   */
-  private async handleAutoCommit(sessionId: string, taskDescription: string): Promise<void> {
-    try {
-      const modeManager = getModeManager();
-      const mode = modeManager.getMode();
 
-      // Only auto-commit in beginner mode when enabled
-      if (mode !== 'beginner' || !modeManager.shouldAutoCommit()) {
-        return;
-      }
-
-      // Check if we have a git repo
-      if (!this.git.isGitRepo()) {
-        return;
-      }
-
-      koryLog.info({ sessionId }, 'Auto-committing changes for beginner mode');
-
-      const result = await this.autoCommitService.autoCommitAndCreatePR(taskDescription);
-
-      if (result.success && result.branch) {
-        // Emit a friendly message to the user
-        const message = result.prUrl
-          ? `✨ I've saved your work and created a pull request for review: ${result.prUrl}`
-          : `✨ I've saved your work to branch "${result.branch}". You can merge it when you're ready!`;
-
-        this.emitWSMessage(sessionId, 'system.notification', {
-          type: 'success',
-          title: 'Changes Saved',
-          message,
-          metadata: {
-            branch: result.branch,
-            commitHash: result.commitHash,
-            prUrl: result.prUrl,
-          },
-        });
-
-        koryLog.info(
-          {
-            sessionId,
-            branch: result.branch,
-            prUrl: result.prUrl,
-          },
-          'Auto-commit completed successfully',
-        );
-      } else {
-        // Log the error but don't fail the task
-        koryLog.warn(
-          {
-            sessionId,
-            error: result.message,
-          },
-          'Auto-commit failed',
-        );
-
-        // Notify user that changes were made but not committed
-        this.emitWSMessage(sessionId, 'system.notification', {
-          type: 'warning',
-          title: 'Changes Made',
-          message:
-            "Your changes are ready! I wasn't able to create a backup branch automatically, but your files have been updated.",
-        });
-      }
-    } catch (error) {
-      // Auto-commit should never fail the main task
-      koryLog.error(
-        {
-          sessionId,
-          error: error instanceof Error ? error.message : String(error),
-        },
-        'Auto-commit error',
-      );
-    }
-  }
 
   private async processManagerTurn(
     sessionId: string,
