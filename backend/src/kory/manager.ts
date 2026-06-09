@@ -360,7 +360,7 @@ export class KoryManager {
       options,
       allowOther: true,
     } satisfies KoryAskUserPayload);
-    return this.state.requestUserInput(sessionId);
+    return this.state.requestUserInput(sessionId, AGENT.USER_INPUT_TIMEOUT_MS);
   }
 
   /** Main entry point for processing a task. */
@@ -514,6 +514,7 @@ export class KoryManager {
         'Ready to proceed with the delegated task?',
         ['Yes, proceed', 'Cancel'],
       );
+      if (selection === '__timeout__') return 'Timed out waiting for user response.';
       if (selection.includes('Cancel')) return 'Cancelled by user.';
     } else {
       this.emitThought(sessionId, 'executing', 'YOLO mode: Proceeding with delegated task.');
@@ -976,13 +977,15 @@ export class KoryManager {
               ['Yes, proceed', 'Cancel'],
             );
             firstAskForDirectTools = false;
-            if (selection.includes('Cancel')) {
+            if (selection === '__timeout__' || selection.includes('Cancel')) {
               if (this.messages)
                 await this.messages.add(sessionId, {
                   id: nanoid(12),
                   sessionId,
                   role: 'assistant',
-                  content: '[Cancelled by user.]',
+                  content: selection === '__timeout__'
+                    ? '[Timed out waiting for user response.]'
+                    : '[Cancelled by user.]',
                   model: routing.model,
                   provider: providerName,
                   createdAt: Date.now(),

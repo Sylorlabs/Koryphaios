@@ -88,19 +88,43 @@ export class SessionStateService {
 
   // ─── User Input ──────────────────────────────────────────────────────────────
 
-  requestUserInput(sessionId: string): Promise<string> {
+  private pendingInputTimers = new Map<string, ReturnType<typeof setTimeout>>();
+
+  requestUserInput(sessionId: string, timeoutMs = 300_000): Promise<string> {
     const session = this.ensureSession(sessionId);
 
-    // Cancel any existing pending input
+    // Cancel any existing pending input and its timer
     if (session.pendingInputResolver) {
       session.pendingInputResolver('__cancelled__');
     }
+    const existingTimer = this.pendingInputTimers.get(sessionId);
+    if (existingTimer) {
+      clearTimeout(existingTimer);
+      this.pendingInputTimers.delete(sessionId);
+    }
 
     return new Promise<string>((resolve) => {
-      session.pendingInputResolver = (selection: string) => {
+      let settled = false;
+
+      const settle = (selection: string) => {
+        if (settled) return;
+        settled = true;
         session.pendingInputResolver = undefined;
+        const timer = this.pendingInputTimers.get(sessionId);
+        if (timer) {
+          clearTimeout(timer);
+          this.pendingInputTimers.delete(sessionId);
+        }
         resolve(selection);
       };
+
+      session.pendingInputResolver = settle;
+
+      // Auto-resolve after timeout to prevent indefinite hangs
+      const timer = setTimeout(() => {
+        settle('__timeout__');
+      }, timeoutMs);
+      this.pendingInputTimers.set(sessionId, timer);
     });
   }
 
@@ -159,6 +183,12 @@ export class SessionStateService {
   // ─── Cleanup ─────────────────────────────────────────────────────────────────
 
   cleanupSession(sessionId: string): void {
+    // Clear any pending input timer
+    const timer = this.pendingInputTimers.get(sessionId);
+    if (timer) {
+      clearTimeout(timer);
+      this.pendingInputTimers.delete(sessionId);
+    }
     const session = this.sessions.get(sessionId);
     if (session) {
       if (!session.abortController.signal.aborted) {
@@ -169,6 +199,11 @@ export class SessionStateService {
   }
 
   cleanupAll(): void {
+    // Clear all pending input timers
+    for (const timer of this.pendingInputTimers.values()) {
+      clearTimeout(timer);
+    }
+    this.pendingInputTimers.clear();
     for (const session of this.sessions.values()) {
       try {
         if (!session.abortController.signal.aborted) {

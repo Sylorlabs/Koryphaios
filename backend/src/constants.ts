@@ -132,6 +132,9 @@ export const AGENT = {
 
   /** Max total wall-clock time for processTask before hard abort (prevents indefinite hangs) */
   PROCESS_TASK_TIMEOUT_MS: 1_800_000, // 30 minutes
+
+  /** Max time to wait for a single user input response before auto-resolving (prevents indefinite hangs) */
+  USER_INPUT_TIMEOUT_MS: 300_000, // 5 minutes
 } as const;
 
 /**
