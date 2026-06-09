@@ -469,6 +469,46 @@ export const MIGRATIONS: Migration[] = [
       PRAGMA foreign_keys = OFF;
     `,
   },
+  {
+    version: '0009',
+    description: 'Add collaboration_sessions and session_participants tables',
+    up: `
+      CREATE TABLE IF NOT EXISTS collaboration_sessions (
+        id TEXT PRIMARY KEY,
+        base_session_id TEXT NOT NULL,
+        owner_id TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'active',
+        join_code TEXT NOT NULL UNIQUE,
+        tunnel_url TEXT,
+        ai_state TEXT,
+        context_snapshot TEXT,
+        created_at INTEGER NOT NULL,
+        ended_at INTEGER
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_collab_base_session ON collaboration_sessions(base_session_id);
+      CREATE INDEX IF NOT EXISTS idx_collab_join_code ON collaboration_sessions(join_code);
+      CREATE INDEX IF NOT EXISTS idx_collab_status ON collaboration_sessions(status);
+
+      CREATE TABLE IF NOT EXISTS session_participants (
+        id TEXT PRIMARY KEY,
+        session_id TEXT NOT NULL,
+        user_id TEXT NOT NULL,
+        name TEXT NOT NULL,
+        role TEXT NOT NULL DEFAULT 'viewer',
+        cursor_file TEXT,
+        cursor_line INTEGER,
+        last_active INTEGER NOT NULL,
+        FOREIGN KEY(session_id) REFERENCES collaboration_sessions(id) ON DELETE CASCADE
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_participants_session ON session_participants(session_id);
+    `,
+    down: `
+      DROP TABLE IF EXISTS session_participants;
+      DROP TABLE IF EXISTS collaboration_sessions;
+    `,
+  },
 ];
 
 // ─── Migration Runner ────────────────────────────────────────────────────────
