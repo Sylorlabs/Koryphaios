@@ -31,9 +31,9 @@
     "approvalThresholdLines": 100,
     "localWebSearch": "fallback",
     "multiSourceResearch": true,
-    "updatedAt": 1780376672267
+    "updatedAt": 1781032321172
   },
-  "updatedAt": 1780376672267,
+  "updatedAt": 1781032321172,
   "providers": {
     "anthropic": {
       "name": "anthropic",
