@@ -19,14 +19,15 @@ export function parseCriticVerdict(content: string): boolean {
 
 /** Format message list for critic prompt; truncate to maxLength to avoid token overflow. */
 export function formatMessagesForCritic(
-  messages: Array<{ role: string; content: string }>,
+  messages: Array<{ role: string; content: string | any[] }>,
   maxLength: number = 12_000,
 ): string {
   const raw = messages
     .map((m) => {
-      if (m.role === 'user') return `[MANAGER INSTRUCTION]\n${m.content}`;
-      if (m.role === 'assistant') return `[WORKER OUTPUT]\n${m.content}`;
-      if (m.role === 'tool') return `[WORKER TOOL RESULT]\n${m.content}`;
+      let text = typeof m.content === 'string' ? m.content : JSON.stringify(m.content);
+      if (m.role === 'user') return `[MANAGER INSTRUCTION]\n${text}`;
+      if (m.role === 'assistant') return `[WORKER OUTPUT]\n${text}`;
+      if (m.role === 'tool') return `[WORKER TOOL RESULT]\n${text}`;
       return '';
     })
     .filter(Boolean)

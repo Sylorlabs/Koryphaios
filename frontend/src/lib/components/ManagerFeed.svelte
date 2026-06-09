@@ -86,8 +86,12 @@
       // Track container resize and update autoscroll status.
       const ro = new ResizeObserver(entries => {
         for (const entry of entries) {
-          const dist = container.scrollHeight - container.scrollTop - entry.contentRect.height;
-          autoScroll = dist < 50;
+          if (autoScroll) {
+            container.scrollTop = container.scrollHeight;
+          } else {
+            const dist = container.scrollHeight - container.scrollTop - entry.contentRect.height;
+            autoScroll = dist < 50;
+          }
         }
       });
       ro.observe(container);
