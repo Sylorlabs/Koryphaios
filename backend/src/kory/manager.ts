@@ -66,7 +66,7 @@ interface CompletedToolCall {
 
 interface InternalMessage {
   role: 'user' | 'assistant' | 'tool' | 'system';
-  content: string;
+  content: string | import('../providers/types').ProviderContentBlock[];
   tool_call_id?: string;
   tool_calls?: CompletedToolCall[];
 }
@@ -370,6 +370,7 @@ export class KoryManager {
     userMessage: string,
     preferredModel?: string,
     reasoningLevel?: string,
+    attachments?: Array<{ type: string; data: string; name: string }>,
   ): Promise<void> {
     this.isProcessing = true;
     this.state.clearChanges(sessionId);
@@ -404,7 +405,7 @@ export class KoryManager {
     try {
       koryLog.debug({ sessionId }, 'Calling handleDirectly');
       this.emitThought(sessionId, 'analyzing', `Analyzing request...`);
-      await this.handleDirectly(sessionId, userMessage, reasoningLevel, preferredModel);
+      await this.handleDirectly(sessionId, userMessage, reasoningLevel, preferredModel, attachments);
       koryLog.debug({ sessionId }, 'handleDirectly completed');
 
       await this.updateWorkflowState(sessionId, 'idle');
@@ -822,6 +823,7 @@ export class KoryManager {
     userMessage: string,
     reasoningLevel?: string,
     preferredModel?: string,
+    attachments?: Array<{ type: string; data: string; name: string }>,
   ): Promise<void> {
     koryLog.debug({ sessionId, reasoningLevel, preferredModel }, 'Entering handleDirectly');
     const routing = this.resolveActiveRouting(preferredModel, 'general', true);
@@ -881,7 +883,30 @@ export class KoryManager {
 
       const history = await this.loadHistory(sessionId);
       koryLog.debug({ historyCount: history.length }, 'Loaded history');
-      const messages: InternalMessage[] = [...history, { role: 'user', content: userMessage }];
+      
+      let finalContent: string | import('../providers/types').ProviderContentBlock[] = userMessage;
+      if (attachments && attachments.length > 0) {
+        const imageAttachments = attachments.filter(a => a.type === 'image');
+        if (imageAttachments.length > 0) {
+          finalContent = [
+            { type: 'text', text: userMessage },
+            ...imageAttachments.map((att) => {
+              let mime = 'image/png';
+              const lowerName = att.name.toLowerCase();
+              if (lowerName.endsWith('.jpg') || lowerName.endsWith('.jpeg')) mime = 'image/jpeg';
+              if (lowerName.endsWith('.webp')) mime = 'image/webp';
+              if (lowerName.endsWith('.gif')) mime = 'image/gif';
+              return {
+                type: 'image' as const,
+                imageData: att.data,
+                imageMimeType: mime,
+              };
+            })
+          ];
+        }
+      }
+
+      const messages: InternalMessage[] = [...history, { role: 'user', content: finalContent }];
       let turnCount = 0;
       let firstAskForDirectTools = true;
       let stoppedByUser = false;

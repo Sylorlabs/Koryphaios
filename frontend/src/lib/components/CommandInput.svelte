@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { Send, ChevronDown, Sparkles, Square, Users, User, ShieldCheck, ShieldAlert, Circle, Paperclip, X } from 'lucide-svelte';
+  import { Send, ChevronDown, Sparkles, Square, Users, User, ShieldCheck, ShieldAlert, Circle, Paperclip, Clipboard, X } from 'lucide-svelte';
   import { wsStore } from '$lib/stores/websocket.svelte';
   import { shortcutStore } from '$lib/stores/shortcuts.svelte';
   import { experimentalStore } from '$lib/stores/experimental.svelte';
@@ -235,6 +235,17 @@
         return;
       }
     }
+    // Ctrl+Shift+V / Cmd+Shift+V → force paste image from clipboard
+    if (
+      (e.ctrlKey || e.metaKey) &&
+      e.shiftKey &&
+      (e.key === 'v' || e.key === 'V')
+    ) {
+      e.preventDefault();
+      void pasteImageFromClipboard();
+      return;
+    }
+
     if (isRunning && shortcutStore.matches('send', e)) {
       e.preventDefault();
       stop();
@@ -469,12 +480,67 @@
     attachments = attachments.filter((_, i) => i !== index);
   }
 
-  async function handlePaste(e: ClipboardEvent) {
+  /** Force-paste image from OS clipboard (bypasses text). Used by Ctrl+Shift+V and the paste-image button. */
+  async function pasteImageFromClipboard() {
+    // Try browser clipboard first (works for images copied from web pages)
+    try {
+      const clipboardItems = await navigator.clipboard.read();
+      for (const item of clipboardItems) {
+        for (const type of item.types) {
+          if (type.startsWith('image/')) {
+            const blob = await item.getType(type);
+            const reader = new FileReader();
+            const loaded = await new Promise<string>((resolve) => {
+              reader.onload = (e) => resolve(e.target?.result as string);
+              reader.readAsDataURL(blob);
+            });
+            const data = loaded.split(',')[1];
+            const ext = type === 'image/png' ? 'png' : type === 'image/jpeg' ? 'jpg' : type === 'image/gif' ? 'gif' : type === 'image/webp' ? 'webp' : 'png';
+            attachments = [...attachments, { type: 'image', data, name: `clipboard-image.${ext}` }];
+            return;
+          }
+        }
+      }
+    } catch (_) {
+      // navigator.clipboard.read() may fail if permission denied — fall through to Tauri
+    }
+
+    // Tauri native clipboard (for OS-level screenshot tools)
+    if (typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window) {
+      try {
+        const { readImage } = await import('@tauri-apps/plugin-clipboard-manager');
+        const image = await readImage();
+        if (image) {
+          const pngData = await image.png();
+          const blob = new Blob([pngData], { type: 'image/png' });
+          const reader = new FileReader();
+          const loaded = await new Promise<string>((resolve) => {
+            reader.onload = (ev) => resolve(ev.target?.result as string);
+            reader.readAsDataURL(blob);
+          });
+          const base64 = loaded.split(',')[1];
+          attachments = [...attachments, { type: 'image', data: base64, name: 'clipboard-image.png' }];
+          return;
+        }
+      } catch (err: any) {
+        toastStore.error("Clipboard error: " + err.message);
+        return;
+      }
+    }
+
+    toastStore.error("No image found in clipboard");
+  }
+
+  function handlePaste(e: ClipboardEvent) {
+    // ALWAYS prevent default first — we'll manually handle everything.
+    // This stops the browser from inserting text before we can check for images.
+    e.preventDefault();
+
     const items = e.clipboardData?.items;
     const files = e.clipboardData?.files;
     let handled = false;
 
-    // Check items first (usually browser images)
+    // Check items first (usually browser images, e.g. copied from web pages)
     if (items) {
       for (const item of items) {
         if (item.type.startsWith('image/')) {
@@ -482,11 +548,11 @@
           const file = item.getAsFile();
           if (file) {
             const reader = new FileReader();
-            reader.onload = (e) => {
-              const result = e.target?.result as string;
+            reader.onload = (ev) => {
+              const result = ev.target?.result as string;
               if (result) {
                 const data = result.split(',')[1];
-                attachments = [...attachments, { type: 'image', data, name: file.name }];
+                attachments = [...attachments, { type: 'image', data, name: file.name || 'pasted-image.png' }];
               }
             };
             reader.readAsDataURL(file);
@@ -502,8 +568,8 @@
         if (file.type.startsWith('image/')) {
           handled = true;
           const reader = new FileReader();
-          reader.onload = (e) => {
-            const result = e.target?.result as string;
+          reader.onload = (ev) => {
+            const result = ev.target?.result as string;
             if (result) {
               const data = result.split(',')[1];
               attachments = [...attachments, { type: 'image', data, name: file.name }];
@@ -514,36 +580,70 @@
       }
     }
 
-    if (handled) {
-      e.preventDefault(); // Stop it from pasting text representation into textarea if any
+    if (handled) return;
+
+    // No browser-visible image found. Try Tauri native clipboard asynchronously.
+    // We already called preventDefault(), so text won't leak through.
+    if (typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window) {
+      void (async () => {
+        try {
+          const { readImage } = await import('@tauri-apps/plugin-clipboard-manager');
+          const image = await readImage();
+          if (image) {
+            const pngData = await image.png();
+            const blob = new Blob([pngData], { type: 'image/png' });
+            const reader = new FileReader();
+            reader.onload = (ev) => {
+              const result = ev.target?.result as string;
+              if (result) {
+                const base64 = result.split(',')[1];
+                attachments = [...attachments, { type: 'image', data: base64, name: 'clipboard-image.png' }];
+              }
+            };
+            reader.readAsDataURL(blob);
+            return;
+          }
+        } catch (_) {
+          // Silently fall through to text paste
+        }
+
+        // No image found anywhere — paste text manually at cursor position
+        void navigator.clipboard.readText().then((text) => {
+          if (text && inputRef) {
+            const start = inputRef.selectionStart ?? value.length;
+            const end = inputRef.selectionEnd ?? value.length;
+            value = value.slice(0, start) + text + value.slice(end);
+            // Move cursor after pasted text
+            requestAnimationFrame(() => {
+              if (inputRef) {
+                const newPos = start + text.length;
+                inputRef.selectionStart = newPos;
+                inputRef.selectionEnd = newPos;
+                inputRef.focus();
+              }
+            });
+          }
+        }).catch(() => {});
+      })();
       return;
     }
 
-    if (typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window) {
-      // Fallback: Check Tauri native clipboard
-      try {
-        const { readImage } = await import('@tauri-apps/plugin-clipboard-manager');
-        const image = await readImage();
-        if (image) {
-          e.preventDefault();
-          const pngData = await image.png();
-          const blob = new Blob([pngData], { type: 'image/png' });
-          const reader = new FileReader();
-          reader.onload = (ev) => {
-            const result = ev.target?.result as string;
-            if (result) {
-              const base64 = result.split(',')[1];
-              attachments = [...attachments, { type: 'image', data: base64, name: 'clipboard-image.png' }];
-            }
-          };
-          reader.readAsDataURL(blob);
-        } else {
-          toastStore.error("No image found in clipboard");
-        }
-      } catch (err: any) {
-        toastStore.error("Clipboard error: " + err.message);
+    // Browser environment: no image, just paste text
+    void navigator.clipboard.readText().then((text) => {
+      if (text && inputRef) {
+        const start = inputRef.selectionStart ?? value.length;
+        const end = inputRef.selectionEnd ?? value.length;
+        value = value.slice(0, start) + text + value.slice(end);
+        requestAnimationFrame(() => {
+          if (inputRef) {
+            const newPos = start + text.length;
+            inputRef.selectionStart = newPos;
+            inputRef.selectionEnd = newPos;
+            inputRef.focus();
+          }
+        });
       }
-    }
+    }).catch(() => {});
   }
 </script>
 
@@ -800,7 +900,7 @@
       {#if configurationWarning}
         Configure a provider to enable sending.
       {:else}
-        Enter to send · Shift+Enter for new line
+        Enter to send · Shift+Enter for new line · Ctrl+Shift+V paste image
       {/if}
     </span>
     <div class="flex items-center gap-3">
@@ -811,6 +911,14 @@
         title="Attach Image"
       >
         <Paperclip size={16} />
+      </button>
+      <button
+        type="button"
+        class="text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] transition-colors"
+        onclick={() => pasteImageFromClipboard()}
+        title="Paste Image (Ctrl+Shift+V)"
+      >
+        <Clipboard size={16} />
       </button>
       {#if value.length > 0}
         <span class="text-xs" style="color: var(--color-text-muted);">{value.length} chars</span>

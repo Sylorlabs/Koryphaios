@@ -36,7 +36,7 @@ export const messageRoutes = new Elysia({ prefix: '/api/messages' })
 
       // Trigger Kory processing
       kory
-        .processTask(body.sessionId, body.content, body.model, body.reasoningLevel)
+        .processTask(body.sessionId, body.content, body.model, body.reasoningLevel, body.attachments)
         .catch((err) => {
           wsManager.broadcast({
             type: 'system.error',
@@ -54,6 +54,15 @@ export const messageRoutes = new Elysia({ prefix: '/api/messages' })
         content: t.String(),
         model: t.Optional(t.String()),
         reasoningLevel: t.Optional(t.String()),
+        attachments: t.Optional(
+          t.Array(
+            t.Object({
+              type: t.String(),
+              data: t.String(),
+              name: t.String(),
+            }),
+          ),
+        ),
       }),
     },
   );
