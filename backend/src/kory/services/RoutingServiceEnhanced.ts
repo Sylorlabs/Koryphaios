@@ -68,6 +68,11 @@ export class RoutingServiceEnhanced {
     if (preferredModel && preferredModel.includes(':')) {
       const [p, m] = preferredModel.split(':');
       out = { provider: p as ProviderName, model: m! };
+    } else if (preferredModel && preferredModel !== 'auto' && resolveModel(preferredModel)) {
+      // Honor a bare model id (e.g. "claude-code-haiku") by resolving its provider
+      // from the catalog, instead of silently dropping it for the domain default.
+      const def = resolveModel(preferredModel)!;
+      out = { model: preferredModel, provider: def.provider };
     } else {
       const assignment = this.config.assignments?.[domain];
       if (assignment && assignment.includes(':')) {

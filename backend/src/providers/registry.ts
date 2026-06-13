@@ -27,7 +27,8 @@ import {
 import { GeminiProvider } from './gemini';
 import { CopilotProvider, exchangeGitHubTokenForCopilotAsync } from './copilot';
 import { CodexProvider } from './codex';
-import { detectCodexAuthToken, isCodexCLIAuthMarker } from './auth-utils';
+import { ClaudeCodeProvider } from './claude-code';
+import { detectCodexAuthToken, isCodexCLIAuthMarker, detectClaudeCodeLogin } from './auth-utils';
 import { KimiCodeProvider } from './kimicode';
 import { resolveKimiCodeAccessToken } from './kimicode-auth';
 import { secureDecrypt, isUsingSecureEncryption } from '../security';
@@ -398,6 +399,16 @@ class ProviderRegistry {
 
     try {
       switch (name) {
+        case 'claude': {
+          // Claude Code subscription is verified by confirming the official CLI is
+          // logged in. We never validate a raw token against the API — the CLI owns
+          // auth and runs every request, keeping us compliant with Anthropic's terms.
+          if (detectClaudeCodeLogin()) return { success: true };
+          return {
+            success: false,
+            error: 'Claude Code is not logged in. Run "claude login" in your terminal to connect your Claude subscription.',
+          };
+        }
         case 'anthropic': {
           if (!apiKey && !authToken)
             return { success: false, error: 'Missing apiKey or authToken' };
@@ -851,6 +862,9 @@ class ProviderRegistry {
     switch (name) {
       case 'anthropic':
         return new AnthropicProvider(config);
+      case 'claude':
+        // Claude Code subscription — runs the official `claude` CLI harness (no direct API calls).
+        return new ClaudeCodeProvider(config);
       case 'openai':
         return new OpenAIProvider(config);
       case 'google':

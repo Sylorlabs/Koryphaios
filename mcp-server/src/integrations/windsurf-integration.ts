@@ -223,7 +223,7 @@ export class WindsurfIntegration extends EventEmitter {
   /**
    * Create advanced debug session
    */
-  async createAdvancedDebugSession(language: SupportedLanguage, config: any): Promise<string> {
+  async createAdvancedDebugSession(language: SupportedLanguage, config: Record<string, unknown>): Promise<string> {
     try {
       this.logger.debug('Creating advanced debug session', { language, config });
 
