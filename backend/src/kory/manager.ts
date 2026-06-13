@@ -945,6 +945,10 @@ export class KoryManager {
       }
 
       const messages: InternalMessage[] = [...history, { role: 'user', content: finalContent }];
+      // Auto-run tools by default so the app "just works" on launch (changes stay reviewable
+      // after the fact + Critic-gated). Set autoRunTools:false to confirm before each run.
+      const { loadAgentSettings: loadAgentSettingsForRun } = await import('../agent-settings');
+      const autoRunTools = loadAgentSettingsForRun(this.workingDirectory).autoRunTools !== false;
       let turnCount = 0;
       let firstAskForDirectTools = true;
       let stoppedByUser = false;
@@ -998,7 +1002,7 @@ export class KoryManager {
         if (!completedToolCalls || completedToolCalls.length === 0) break;
 
         if (completedToolCalls && completedToolCalls.length > 0) {
-          if (!this.isYoloMode && firstAskForDirectTools) {
+          if (!autoRunTools && !this.isYoloMode && firstAskForDirectTools) {
             const selection = await this.waitForUserInputInternal(
               sessionId,
               'Manager will run tools to complete this task. Proceed?',

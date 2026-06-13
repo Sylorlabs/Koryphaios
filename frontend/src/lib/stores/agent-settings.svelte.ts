@@ -21,6 +21,7 @@ export interface AgentSettings {
   criticEnforcesPreferences: boolean;
   autoApplySafeFixes: boolean;
   confirmRuleViolations: boolean;
+  autoRunTools: boolean;
   agentMemoryEnabled: boolean;
   agentCanUpdatePreferences: boolean;
   maxCriticIterations: number;
@@ -70,6 +71,7 @@ export const DEFAULT_AGENT_SETTINGS: AgentSettings = {
   criticEnforcesPreferences: true,
   autoApplySafeFixes: false,
   confirmRuleViolations: true,
+  autoRunTools: true,
   agentMemoryEnabled: true,
   agentCanUpdatePreferences: false,
   maxCriticIterations: 3,

@@ -49,6 +49,13 @@ export interface AgentSettings {
   /** Require confirmation for rule violations */
   confirmRuleViolations: boolean;
 
+  /**
+   * Run the manager's tools automatically without an upfront "proceed?" prompt. On by
+   * default so the app just works on launch — changes are still reviewable after the fact
+   * (keep/reject + time-travel) and gated by the Critic. Turn off to confirm before each run.
+   */
+  autoRunTools: boolean;
+
   /** Agent memory - allow agents to update memory files */
   agentMemoryEnabled: boolean;
 
@@ -82,6 +89,7 @@ export const DEFAULT_AGENT_SETTINGS: AgentSettings = {
   criticEnforcesPreferences: true,
   autoApplySafeFixes: false,
   confirmRuleViolations: true,
+  autoRunTools: true,
   agentMemoryEnabled: true,
   agentCanUpdatePreferences: false,
   maxCriticIterations: 3,
