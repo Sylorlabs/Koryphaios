@@ -136,6 +136,17 @@ function koryIdentityWithModel(model: string, provider: ProviderName): AgentIden
 
 // ─── System Prompts ──────────────────────────────────────────────────────────
 
+/** Parse a JSON string into an object, tolerating malformed input (returns {}). */
+function safeParseJson(s?: string): Record<string, unknown> {
+  if (!s) return {};
+  try {
+    const o = JSON.parse(s);
+    return o && typeof o === 'object' && !Array.isArray(o) ? (o as Record<string, unknown>) : {};
+  } catch {
+    return {};
+  }
+}
+
 const KORY_SYSTEM_PROMPT = `You are Kory, the manager agent. The user talks to you only. Sub-agents (workers) run only when you explicitly call delegate_to_worker—never automatically.
 
 • Handle requests yourself: answer questions, use tools (read_file, grep, bash, web_search, etc.), do small edits. For conversation, clarification, or straightforward work, you are the sole agent.
@@ -1188,6 +1199,8 @@ export class KoryManager {
         tools,
         maxTokens: 16384,
         signal: streamSignal,
+        // Agentic CLI providers (claude-code) run + edit files in the project directory.
+        workingDirectory: this.workingDirectory,
       },
       provider.name,
     );
@@ -1223,6 +1236,23 @@ export class KoryManager {
             thinking: event.thinking,
           } satisfies StreamThinkingPayload);
         }
+      } else if (event.type === 'file_edit') {
+        // Agentic provider (claude-code) already wrote the file — surface it in the live
+        // diff preview (it's done, not a tool for us to execute).
+        if (event.filePath) {
+          this.streamAgentFileEdit(ctx, event.filePath, event.fileContent ?? '', event.fileOperation ?? 'edit', event.fileOldContent);
+        }
+      } else if (event.type === 'tool_executed') {
+        // Agentic provider already ran a non-file tool — surface it in the tool feed.
+        const callId = `agent-${nanoid(8)}`;
+        this.emitWSMessage(sessionId, 'stream.tool_call', {
+          agentId: KORY_IDENTITY.id,
+          toolCall: { id: callId, name: event.toolName ?? 'tool', input: safeParseJson(event.toolInput) },
+        });
+        this.emitWSMessage(sessionId, 'stream.tool_result', {
+          agentId: KORY_IDENTITY.id,
+          toolResult: { callId, name: event.toolName ?? 'tool', output: event.toolOutput ?? '', isError: event.isError === true, durationMs: 0 },
+        });
       } else if (event.type === 'usage_update') {
         if (typeof event.tokensIn === 'number') tokensIn = Math.max(tokensIn, event.tokensIn);
         if (typeof event.tokensOut === 'number') tokensOut = Math.max(tokensOut, event.tokensOut);
@@ -1282,6 +1312,34 @@ export class KoryManager {
       content: assistantContent,
       usage: { tokensIn, tokensOut },
     };
+  }
+
+  /**
+   * Surface a file edit an AGENTIC provider (claude-code) already performed, via the live
+   * diff preview pipeline (stream.file_delta/file_complete) + change tracking. The agent
+   * did the write; we only display it.
+   */
+  private streamAgentFileEdit(
+    ctx: ToolContext,
+    path: string,
+    content: string,
+    operation: 'create' | 'edit',
+    oldStr?: string,
+  ): void {
+    ctx.emitFileEdit?.({
+      path,
+      delta: content,
+      totalLength: content.length,
+      operation,
+      ...(operation === 'edit' && oldStr !== undefined ? { oldStr } : {}),
+    });
+    ctx.emitFileComplete?.({ path, totalLines: content.split('\n').length, operation });
+    ctx.recordChange?.({
+      path,
+      linesAdded: content ? content.split('\n').length : 0,
+      linesDeleted: oldStr ? oldStr.split('\n').length : 0,
+      operation,
+    });
   }
 
   private async executeManagerToolCall(

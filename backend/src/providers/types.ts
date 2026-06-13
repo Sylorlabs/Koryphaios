@@ -15,6 +15,11 @@ export type ProviderEventType =
   | 'tool_use_delta'
   | 'tool_use_stop'
   | 'usage_update'
+  // Emitted by AGENTIC providers (CLI harnesses like claude-code) that execute their own
+  // tools internally. Unlike tool_use_*, these are already-done actions to DISPLAY, not to
+  // execute — the manager surfaces them (live file preview / tool feed) without re-running.
+  | 'file_edit'
+  | 'tool_executed'
   | 'complete'
   | 'error';
 
@@ -30,6 +35,14 @@ export interface ProviderEvent {
   tokensCache?: number; // Added for caching support
   finishReason?: 'end_turn' | 'tool_use' | 'max_tokens' | 'stop';
   error?: string;
+  // file_edit (agentic providers): a file the agent just created/edited.
+  filePath?: string;
+  fileContent?: string;
+  fileOldContent?: string;
+  fileOperation?: 'create' | 'edit';
+  // tool_executed (agentic providers): a non-file tool the agent already ran.
+  toolOutput?: string;
+  isError?: boolean;
 }
 
 // ─── Tool definition for provider calls ─────────────────────────────────────
@@ -83,6 +96,8 @@ export interface StreamRequest {
   reasoningLevel?: string;
   /** Signal to abort the stream */
   signal?: AbortSignal;
+  /** Project working directory — agentic CLI providers (claude-code) run + edit files here. */
+  workingDirectory?: string;
 }
 
 // ─── Provider interface ─────────────────────────────────────────────────────
