@@ -1087,7 +1087,7 @@ RULES:
           bind:value={composerDraft}
 	        onSend={handleSend}
           onExecuteCommand={handleSlashCommand}
-	        isRunning={selectedAgent ? selectedAgentIsRunning : (wsStore.managerStatus !== 'idle' && wsStore.managerStatus !== 'done')}
+	        isRunning={selectedAgent ? selectedAgentIsRunning : wsStore.isSessionBusy(sessionStore.activeSessionId)}
 	        onStop={handleStop}
 	        onOpenSettings={() => showSettings = true}
           slashCommands={composerSlashCommands}

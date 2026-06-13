@@ -96,8 +96,8 @@ describe('Git Workflow Integration Tests', () => {
     test('should rollback to previous hash', async () => {
       const git = new GitManager(TEST_DIR);
 
-      // Get current hash
-      const originalHash = git.getCurrentHash();
+      // Get current hash (getCurrentHash is async — must await, else a Promise leaks into rollback)
+      const originalHash = await git.getCurrentHash();
       expect(originalHash).toBeDefined();
 
       // Create and commit a new file

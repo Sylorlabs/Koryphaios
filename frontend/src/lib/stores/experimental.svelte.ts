@@ -126,8 +126,8 @@ export const DEFAULT_EXPERIMENTAL_FEATURES: ExperimentalFeatures = {
 
   // AI & Agents
   agentMemoryV2: false,
-  multiAgentCoordination: false,
-  reasoningModeConfig: false,
+  multiAgentCoordination: true, // On: Kory delegates to specialist workers when a task warrants it.
+  reasoningModeConfig: true, // Stable + broadly wanted — on by default.
 
   // Integrations
   vectorSearch: false,
@@ -182,43 +182,6 @@ export const FEATURE_METADATA: FeatureMetadata[] = [
     category: 'Database',
     status: 'beta',
   },
-  {
-    key: 'postgresBackend',
-    label: 'PostgreSQL Backend',
-    description: 'Use PostgreSQL instead of SQLite for multi-user deployments.',
-    category: 'Database',
-    status: 'coming-soon',
-  },
-  {
-    key: 'redisJobQueue',
-    label: 'Redis Job Queue',
-    description: 'Durable job queue with Redis. Survive crashes without losing agent tasks.',
-    category: 'Database',
-    status: 'coming-soon',
-  },
-
-  // Sync & Reliability
-  {
-    key: 'messageReplayBuffer',
-    label: 'Message Replay Buffer',
-    description: 'Server-side message buffer for replay on reconnect. Never miss completions.',
-    category: 'Reliability',
-    status: 'coming-soon',
-  },
-  {
-    key: 'requestCorrelation',
-    label: 'Request Correlation IDs',
-    description: 'Track HTTP requests through to WebSocket responses for better debugging.',
-    category: 'Reliability',
-    status: 'coming-soon',
-  },
-  {
-    key: 'serverSideSessionFilter',
-    label: 'Server-Side Session Filter',
-    description: 'Only send session messages to subscribed clients. Reduces bandwidth 90%.',
-    category: 'Reliability',
-    status: 'coming-soon',
-  },
 
   // Process Management
   {
@@ -251,118 +214,21 @@ export const FEATURE_METADATA: FeatureMetadata[] = [
     category: 'Performance',
     status: 'alpha',
   },
-  {
-    key: 'connectionPooling',
-    label: 'HTTP Connection Pooling',
-    description: 'Reuse connections to LLM providers for lower latency.',
-    category: 'Performance',
-    status: 'coming-soon',
-  },
-  {
-    key: 'queryOptimization',
-    label: 'Query Optimization',
-    description: 'Optimized database queries with better indexes and caching.',
-    category: 'Performance',
-    status: 'coming-soon',
-  },
-
-  // UX & UI
-  {
-    key: 'commandPaletteV2',
-    label: 'Command Palette V2',
-    description: 'Fuzzy search, recent commands, customizable shortcuts.',
-    category: 'UX',
-    status: 'coming-soon',
-  },
-  {
-    key: 'inlineDiffPreview',
-    label: 'Inline Diff Preview',
-    description: 'See code changes inline as the agent makes them.',
-    category: 'UX',
-    status: 'coming-soon',
-  },
-  {
-    key: 'realTimeMetrics',
-    label: 'Real-Time Metrics',
-    description: 'Live performance charts and cost tracking in the UI.',
-    category: 'UX',
-    status: 'coming-soon',
-  },
-  {
-    key: 'advancedThemeEditor',
-    label: 'Advanced Theme Editor',
-    description: 'Fine-grained control over colors, fonts, and UI density.',
-    category: 'UX',
-    status: 'coming-soon',
-  },
-
   // AI & Agents
-  {
-    key: 'agentMemoryV2',
-    label: 'Agent Memory V2',
-    description: 'Long-term memory across sessions with semantic search.',
-    category: 'AI',
-    status: 'coming-soon',
-  },
   {
     key: 'multiAgentCoordination',
     label: 'Multi-Agent Coordination',
-    description: 'Advanced coordination between multiple agents with conflict resolution.',
+    description:
+      'Let Kory delegate to specialist workers. Engages only when you pick Multi-Agent in the composer, or when Auto decides a task needs it — never for simple chat.',
     category: 'AI',
-    status: 'alpha',
+    status: 'stable',
   },
   {
     key: 'reasoningModeConfig',
     label: 'Reasoning Mode Configuration',
     description: 'Configure thinking effort per model (low/medium/high/max).',
     category: 'AI',
-    status: 'beta',
-  },
-
-  // Integrations
-  {
-    key: 'vectorSearch',
-    label: 'Vector Search / RAG',
-    description: 'Index and search your codebase with embeddings. True context awareness.',
-    category: 'Integrations',
-    status: 'coming-soon',
-  },
-  {
-    key: 'mcpServerV2',
-    label: 'MCP Server V2',
-    description: 'Enhanced Model Context Protocol with better tool discovery.',
-    category: 'Integrations',
-    status: 'coming-soon',
-  },
-  {
-    key: 'telegramBotV2',
-    label: 'Telegram Bot V2',
-    description: 'Rich interactions with inline keyboards and file sharing.',
-    category: 'Integrations',
-    status: 'coming-soon',
-  },
-
-  // Security
-  {
-    key: 'enhancedAuditLogs',
-    label: 'Enhanced Audit Logs',
-    description: 'Detailed audit trail of all actions with export capabilities.',
-    category: 'Security',
-    status: 'coming-soon',
-  },
-  {
-    key: 'sessionRecording',
-    label: 'Session Recording',
-    description: 'Record and replay sessions for debugging and compliance.',
-    category: 'Security',
-    status: 'coming-soon',
-  },
-  {
-    key: 'ipRateLimiting',
-    label: 'IP-Based Rate Limiting',
-    description: 'Stricter rate limits per IP address with automatic blocking.',
-    category: 'Security',
-    status: 'coming-soon',
+    status: 'stable',
   },
 ];
 

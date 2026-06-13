@@ -431,17 +431,6 @@ export const BasetenModels: ModelDef[] = [
   },
 ];
 
-export const FirmwareModels: ModelDef[] = [
-  {
-    id: "firmware-default",
-    name: "Firmware AI",
-    provider: "firmware",
-    contextWindow: 128_000,
-    maxOutputTokens: 8_192,
-    isGeneric: true,
-  },
-];
-
 export const CortecsModels: ModelDef[] = [
   {
     id: "kimi-k2.5-instruct-cortecs",

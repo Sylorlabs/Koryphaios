@@ -1,7 +1,7 @@
 // OpenAI provider — supports GPT-4.1, O3, O4-mini, Codex.
 // Also used as base for Groq, OpenRouter, xAI (OpenAI-compatible endpoints).
 
-import OpenAI from 'openai';
+import OpenAI, { AzureOpenAI } from 'openai';
 import type { ProviderConfig, ProviderName, ModelDef } from '@koryphaios/shared';
 
 import {
@@ -401,8 +401,33 @@ export class XAIProvider extends OpenAIProvider {
   }
 }
 
+// Azure OpenAI + Azure Cognitive Services. Unlike the OpenAI-compatible providers,
+// Azure authenticates with an `api-key` header (not Bearer) and routes to
+// `{endpoint}/openai/deployments/{deployment}/chat/completions?api-version=...`.
+// The official AzureOpenAI client builds exactly that wire shape; the selected model
+// id is used as the deployment name. All streaming/parsing logic is inherited.
+const AZURE_API_VERSION = process.env.AZURE_OPENAI_API_VERSION || '2024-10-21';
+
 export class AzureProvider extends OpenAIProvider {
-  constructor(config: ProviderConfig) {
-    super(config, 'azure', config.baseUrl);
+  constructor(config: ProviderConfig, name: ProviderName = 'azure') {
+    super(config, name, config.baseUrl);
+  }
+
+  protected override get client(): OpenAI {
+    if (!this._client) {
+      const endpoint = this.config.baseUrl;
+      if (!endpoint) {
+        throw new Error(
+          `${this.name} requires an endpoint (base URL), e.g. https://YOUR_RESOURCE.openai.azure.com`,
+        );
+      }
+      this._client = new AzureOpenAI({
+        apiKey: this.config.apiKey || this.config.authToken || 'placeholder',
+        endpoint,
+        apiVersion: AZURE_API_VERSION,
+        fetch: createUsageInterceptingFetch(globalThis.fetch),
+      });
+    }
+    return this._client;
   }
 }

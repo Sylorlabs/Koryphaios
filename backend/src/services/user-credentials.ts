@@ -4,6 +4,12 @@
 import { serverLog } from '../logger';
 import { db, getDb, userCredentials, credentialAuditLog } from '../db';
 import { eq, and, desc, sql } from 'drizzle-orm';
+import { createAuditLogService } from './audit';
+
+/** Credential record exposed without the encrypted/plaintext value (metadata view). */
+export type CredentialMetadataView = Omit<UserCredential, 'encryptedValue' | 'metadata'> & {
+  metadata?: Record<string, unknown>;
+};
 
 export interface UserCredential {
   id: string;
@@ -65,6 +71,7 @@ function decryptWithMasterKey(encrypted: string): string {
 
 export class UserCredentialsService {
   private schemaReady: Promise<void> | null = null;
+  private audit = createAuditLogService();
 
   private async ensureSchema(): Promise<void> {
     if (!this.schemaReady) {
@@ -309,10 +316,23 @@ export class UserCredentialsService {
     return res.id;
   }
   async get(userId: string, credentialId: string, reason: string): Promise<string | null> {
-    const res = await this.getCredential(credentialId);
+    const res = await this.getCredential(credentialId).catch(() => null);
     if (!res || res.userId !== userId) return null;
+    // Record the access in the audit trail (action/resourceId/reason are queried back).
+    await this.audit
+      .log({
+        userId,
+        action: 'credential_access',
+        resourceType: 'credential',
+        resourceId: credentialId,
+        reason,
+        success: true,
+        timestamp: Date.now(),
+      })
+      .catch(() => {});
     return res.plaintext;
   }
+
   async list(
     userId: string,
     filters?: { provider?: string; isActive?: boolean },
@@ -323,13 +343,87 @@ export class UserCredentialsService {
       creds = creds.filter((c) => c.isActive === filters.isActive);
     return creds;
   }
+
+  /** Fetch a credential's metadata WITHOUT the secret value. Null if missing/not owned/inactive. */
+  async getMetadata(userId: string, credentialId: string): Promise<CredentialMetadataView | null> {
+    await this.ensureSchema();
+    const [row] = await db
+      .select()
+      .from(userCredentials)
+      .where(and(eq(userCredentials.id, credentialId), eq(userCredentials.isActive, 1)))
+      .limit(1);
+    if (!row || row.userId !== userId) return null;
+    const cred = this.rowToCredential(row);
+    // rowToCredential already JSON-parses metadata; strip the encrypted value.
+    const { encryptedValue, metadata, ...rest } = cred as UserCredential & {
+      metadata?: Record<string, unknown> | string;
+    };
+    return {
+      ...rest,
+      metadata: (metadata as Record<string, unknown> | undefined) ?? {},
+    };
+  }
+
+  /** Update a credential's metadata. Returns false if missing/not owned. */
+  async updateMetadata(
+    userId: string,
+    credentialId: string,
+    metadata: Record<string, unknown>,
+  ): Promise<boolean> {
+    await this.ensureSchema();
+    const [row] = await db
+      .select()
+      .from(userCredentials)
+      .where(and(eq(userCredentials.id, credentialId), eq(userCredentials.isActive, 1)))
+      .limit(1);
+    if (!row || row.userId !== userId) return false;
+    await db
+      .update(userCredentials)
+      .set({ metadata: JSON.stringify(metadata) })
+      .where(eq(userCredentials.id, credentialId));
+    return true;
+  }
+
+  /** Rotate a credential's encryption: re-encrypt the secret under a fresh record and
+   *  retire the old one. Returns the new credential id, or null if missing/not owned. */
+  async rotate(userId: string, credentialId: string): Promise<string | null> {
+    const existing = await this.getCredential(credentialId).catch(() => null);
+    if (!existing || existing.userId !== userId) return null;
+    const created = await this.createCredential({
+      userId,
+      provider: existing.provider,
+      value: existing.plaintext,
+      type: existing.type,
+      expiresAt: existing.expiresAt,
+      metadata: existing.metadata
+        ? (existing.metadata as unknown as Record<string, unknown>)
+        : undefined,
+    });
+    await this.revokeCredential(credentialId).catch(() => {});
+    await this.audit
+      .log({
+        userId,
+        action: 'credential_rotate',
+        resourceType: 'credential',
+        resourceId: credentialId,
+        success: true,
+        timestamp: Date.now(),
+      })
+      .catch(() => {});
+    return created.id;
+  }
+
+  /** Soft-delete a credential. Returns false if missing or not owned by the user. */
   async delete(userId: string, credentialId: string): Promise<boolean> {
-    try {
-      await this.revokeCredential(credentialId);
-      return true;
-    } catch {
-      return false;
-    }
+    await this.ensureSchema();
+    const [row] = await db
+      .select()
+      .from(userCredentials)
+      .where(eq(userCredentials.id, credentialId))
+      .limit(1);
+    if (!row || row.userId !== userId) return false;
+    await this.revokeCredential(credentialId).catch(() => {});
+    return true;
   }
 }
 

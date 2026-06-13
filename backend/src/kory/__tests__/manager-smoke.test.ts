@@ -42,8 +42,8 @@ describe('KoryManager (Original) - Smoke Tests', () => {
 
 describe('KoryManager - Method Signatures', () => {
   it('should have correct constructor signature', () => {
-    // Constructor takes: providers, tools, workingDirectory, config, sessions?, messages?, tasks?
-    expect(KoryManager.length).toBe(7);
+    // Constructor takes: providers, tools, workingDirectory, config, sessions, messages, tasks, timeTravel
+    expect(KoryManager.length).toBe(8);
   });
 
   it('setYoloMode should accept boolean', () => {
@@ -58,7 +58,7 @@ describe('KoryManager - Method Signatures', () => {
 
   it('processTask should accept sessionId, message, and optional parameters', () => {
     const descriptor = Object.getOwnPropertyDescriptor(KoryManager.prototype, 'processTask');
-    expect(descriptor?.value?.length).toBe(4); // sessionId, userMessage, preferredModel?, reasoningLevel?
+    expect(descriptor?.value?.length).toBe(5); // sessionId, content, model?, reasoningLevel?, attachments?
   });
 });
 

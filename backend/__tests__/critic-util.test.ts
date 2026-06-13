@@ -37,11 +37,11 @@ describe('formatMessagesForCritic', () => {
       { role: 'tool', content: 'result' },
     ];
     const out = formatMessagesForCritic(messages);
-    expect(out).toContain('[USER]');
+    expect(out).toContain('[MANAGER INSTRUCTION]');
     expect(out).toContain('Hello');
-    expect(out).toContain('[ASSISTANT]');
+    expect(out).toContain('[WORKER OUTPUT]');
     expect(out).toContain('Hi');
-    expect(out).toContain('[TOOL RESULT]');
+    expect(out).toContain('[WORKER TOOL RESULT]');
     expect(out).toContain('result');
   });
 
@@ -56,6 +56,6 @@ describe('formatMessagesForCritic', () => {
   test('does not truncate when under maxLength', () => {
     const messages = [{ role: 'user', content: 'short' }];
     const out = formatMessagesForCritic(messages, 1000);
-    expect(out).toBe('[USER]\nshort');
+    expect(out).toBe('[MANAGER INSTRUCTION]\nshort');
   });
 });

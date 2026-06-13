@@ -14,6 +14,7 @@ import { OllamaModels } from './ollama';
 import { OpenCodeZenModels } from './opencodezen';
 import { CodexModels } from './codex';
 import { ClaudeCodeModels } from './claude-code';
+import { GrokModels } from './grok';
 import { ZAIModels, KimiCodeModels, DeepSeekModels, MoonshotModels } from './newproviders';
 
 // Combined list of all known models from REAL providers only
@@ -33,6 +34,7 @@ const ALL_MODELS: ModelDef[] = [
   ...OpenCodeZenModels,
   ...CodexModels,
   ...ClaudeCodeModels,
+  ...GrokModels,
   ...KimiCodeModels,
   ...ZAIModels,
   ...DeepSeekModels,

@@ -21,6 +21,38 @@ function getAllowedRoots(ctx: ToolContext): string[] {
   return [resolve(ctx.workingDirectory)];
 }
 
+/**
+ * Stream file content to the UI in chunks with a satisfying, capped "typing" animation
+ * (the Cursor-style live preview). The whole reveal is kept under ~2.5s regardless of file
+ * size. For edits, the original text is sent once on the first delta so the UI can diff it.
+ */
+async function streamFileToUI(
+  emit: NonNullable<ToolContext['emitFileEdit']>,
+  path: string,
+  content: string,
+  operation: 'create' | 'edit',
+  oldStr?: string,
+): Promise<void> {
+  const CHUNK = 48;
+  const totalChunks = Math.max(1, Math.ceil(content.length / CHUNK));
+  const delayMs = Math.min(14, Math.floor(2500 / totalChunks));
+  let sent = 0;
+  let first = true;
+  while (sent < content.length) {
+    const piece = content.slice(sent, sent + CHUNK);
+    sent += piece.length;
+    emit({
+      path,
+      delta: piece,
+      totalLength: sent,
+      operation,
+      ...(first && operation === 'edit' && oldStr !== undefined ? { oldStr } : {}),
+    });
+    first = false;
+    if (delayMs > 0) await new Promise((r) => setTimeout(r, delayMs));
+  }
+}
+
 // ─── Read File ──────────────────────────────────────────────────────────────
 
 export class ReadFileTool implements Tool {
@@ -138,19 +170,9 @@ export class WriteFileTool implements Tool {
     try {
       mkdirSync(dirname(absPath), { recursive: true });
 
-      // Stream content to UI in chunks for Cursor-style live preview
+      // Stream content to UI in chunks for Cursor-style live preview.
       if (ctx.emitFileEdit) {
-        const CHUNK_SIZE = 80; // ~80 chars per emit for smooth animation
-        let sent = 0;
-        while (sent < content.length) {
-          const chunk = content.slice(sent, sent + CHUNK_SIZE);
-          sent += chunk.length;
-          ctx.emitFileEdit({ path: absPath, delta: chunk, totalLength: sent, operation: 'create' });
-          // Yield to event loop every few chunks for smooth streaming
-          if (sent % (CHUNK_SIZE * 5) === 0) {
-            await new Promise((r) => setTimeout(r, 0));
-          }
-        }
+        await streamFileToUI(ctx.emitFileEdit, absPath, content, 'create');
       }
 
       await Bun.write(absPath, content);
@@ -263,18 +285,9 @@ export class EditFileTool implements Tool {
 
       const newContent = content.replace(old_str, new_str);
 
-      // Stream the replacement region to UI
+      // Stream the replacement region to UI, carrying the old text so the UI can show a diff.
       if (ctx.emitFileEdit && new_str.length > 0) {
-        const CHUNK_SIZE = 80;
-        let sent = 0;
-        while (sent < new_str.length) {
-          const chunk = new_str.slice(sent, sent + CHUNK_SIZE);
-          sent += chunk.length;
-          ctx.emitFileEdit({ path: absPath, delta: chunk, totalLength: sent, operation: 'edit' });
-          if (sent % (CHUNK_SIZE * 5) === 0) {
-            await new Promise((r) => setTimeout(r, 0));
-          }
-        }
+        await streamFileToUI(ctx.emitFileEdit, absPath, new_str, 'edit', old_str);
       }
 
       await Bun.write(absPath, newContent);

@@ -1,7 +1,22 @@
-import { describe, test, expect } from 'bun:test';
+import { describe, test, expect, beforeAll, afterAll } from 'bun:test';
 import { ProviderRegistry } from '../src/providers/registry';
 import { ProviderName } from '@koryphaios/shared';
 import type { KoryphaiosConfig } from '@koryphaios/shared';
+
+// These tests assert auth-MODE acceptance (which credentials a provider accepts), not real
+// connectivity. setCredentials() now verifies over the network, so stub fetch with a 200 so
+// verification succeeds for valid-shaped (but fake) credentials. Restored after this file.
+const realFetch = globalThis.fetch;
+beforeAll(() => {
+  globalThis.fetch = (async () =>
+    new Response('{"data":[]}', {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    })) as unknown as typeof fetch;
+});
+afterAll(() => {
+  globalThis.fetch = realFetch;
+});
 
 function minimalConfig(): KoryphaiosConfig {
   return {

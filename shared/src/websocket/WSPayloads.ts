@@ -151,6 +151,8 @@ export interface StreamFileDeltaPayload {
   delta: string;
   totalLength: number;
   operation: 'create' | 'edit';
+  /** For edits: the original text being replaced, sent once on the first delta (enables a live diff). */
+  oldStr?: string;
 }
 
 export interface StreamFileCompletePayload {

@@ -236,8 +236,10 @@ describe('Message Store', () => {
   test('should add messages to a session', async () => {
     const session = await sessions.create('user1', 'Test');
 
+    // Use a per-session-unique id: the messages table persists across test runs, so a
+    // hardcoded id collides on the PRIMARY KEY on the second run.
     await messages.add(session.id, {
-      id: 'msg1',
+      id: `msg-${session.id}`,
       sessionId: session.id,
       role: 'user',
       content: 'Hello',

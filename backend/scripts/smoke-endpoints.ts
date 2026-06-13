@@ -165,6 +165,62 @@ async function run(): Promise<void> {
     }
   }
 
+  // ── Custom (bring-your-own) provider flow ──
+  console.log('\nCustom provider flow:');
+  const headers = { 'content-type': 'application/json', authorization: token, 'x-forwarded-for': '127.0.0.1' };
+  try {
+    const add = await fetch(`${BASE}/api/providers/custom`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        label: 'Smoke Test LLM',
+        kind: 'openai',
+        baseUrl: 'https://smoke.example/v1',
+        apiKey: 'sk-smoke',
+        models: ['smoke-model-1', 'smoke-model-2'],
+      }),
+    });
+    const addBody: any = await add.json();
+    const id = addBody?.data?.id;
+    if (addBody?.ok && id) {
+      pass++;
+      console.log(`✓ ${'add custom provider'.padEnd(46)} [${add.status}] id=${id}`);
+    } else {
+      fail++;
+      console.log(`✗ add custom provider: ${JSON.stringify(addBody)}`);
+    }
+
+    // It should appear in status with the right form fields.
+    const st = await fetch(`${BASE}/api/providers/status`, { headers });
+    const stBody: any = await st.json();
+    const custom = (stBody.data ?? []).find((p: any) => p.name === id);
+    const fieldsOk = custom && custom.custom === true && custom.requiresBaseUrl === true && custom.supportsApiKey === true;
+    const modelsOk = custom && (custom.allAvailableModels ?? []).some((m: any) => m.id === 'smoke-model-1');
+    if (fieldsOk && modelsOk) {
+      pass++;
+      console.log(`✓ ${'custom provider in status w/ fields+models'.padEnd(46)} [${st.status}]`);
+    } else {
+      fail++;
+      console.log(`✗ custom provider status: fields=${fieldsOk} models=${modelsOk} ${JSON.stringify(custom)?.slice(0, 200)}`);
+    }
+
+    // Clean up.
+    if (id) {
+      const del = await fetch(`${BASE}/api/providers/custom/${encodeURIComponent(id)}`, { method: 'DELETE', headers });
+      const delBody: any = await del.json();
+      if (delBody?.ok) {
+        pass++;
+        console.log(`✓ ${'delete custom provider'.padEnd(46)} [${del.status}]`);
+      } else {
+        fail++;
+        console.log(`✗ delete custom provider: ${JSON.stringify(delBody)}`);
+      }
+    }
+  } catch (e) {
+    fail++;
+    console.log(`✗ custom provider flow threw: ${(e as Error).message}`);
+  }
+
   console.log(`${'─'.repeat(60)}\n${pass} passed, ${fail} failed\n`);
   process.exit(fail > 0 ? 1 : 0);
 }

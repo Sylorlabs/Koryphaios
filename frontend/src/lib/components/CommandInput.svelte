@@ -511,7 +511,8 @@
         const { readImage } = await import('@tauri-apps/plugin-clipboard-manager');
         const image = await readImage();
         if (image) {
-          const pngData = await image.png();
+          // Tauri's Image exposes png() at runtime but it isn't in the published types.
+          const pngData = await (image as unknown as { png: () => Promise<BlobPart> }).png();
           const blob = new Blob([pngData], { type: 'image/png' });
           const reader = new FileReader();
           const loaded = await new Promise<string>((resolve) => {
@@ -800,14 +801,16 @@
             type="button"
             onclick={isRunning ? stop : send}
             disabled={disabled || (!isRunning && !canSend)}
-            class="btn flex w-full items-center justify-center gap-2 {isRunning ? 'bg-[var(--color-surface-3)] hover:bg-[var(--color-surface-2)] border-[var(--color-border)] hover:border-red-500/40' : 'btn-primary'}"
+            class="btn flex w-full items-center justify-center gap-2 {isRunning ? 'stop-btn' : 'btn-primary'}"
             style="height: 52px; padding: 0 20px; font-size: 14px; {disabled || configurationWarning ? 'opacity: 0.5; cursor: not-allowed;' : ''}"
+            aria-label={isRunning ? 'Stop the running model' : 'Send message'}
+            title={isRunning ? 'Stop (Esc)' : 'Send (Enter)'}
           >
             {#if isRunning}
-              <span class="stop-icon-ring">
-                <Square size={12} fill="currentColor" class="text-red-400" />
+              <span class="stop-pulse" aria-hidden="true">
+                <Square size={10} fill="currentColor" strokeWidth={0} />
               </span>
-              <span class="text-red-400/90">Stop</span>
+              <span>Stop</span>
             {:else}
               <Send size={18} />
               Send
@@ -856,14 +859,56 @@
     box-shadow: 0 0 0 1px #ef4444;
   }
 
-  .stop-icon-ring {
+  /* Stop button — unmistakably "live, click to stop" with a pulsing ring. */
+  .stop-btn {
+    background: rgb(239 68 68 / 0.12);
+    border: 1px solid rgb(239 68 68 / 0.45);
+    color: #fca5a5;
+    font-weight: 600;
+    transition:
+      background 0.15s ease,
+      border-color 0.15s ease,
+      color 0.15s ease;
+  }
+  .stop-btn:hover {
+    background: rgb(239 68 68 / 0.2);
+    border-color: rgb(239 68 68 / 0.85);
+    color: #fecaca;
+  }
+  .stop-pulse {
+    position: relative;
     display: flex;
     align-items: center;
     justify-content: center;
-    width: 26px;
-    height: 26px;
+    width: 22px;
+    height: 22px;
     border-radius: 50%;
-    border: 2px solid rgb(239 68 68 / 0.45);
+    background: #ef4444;
+    color: #fff;
     flex-shrink: 0;
+  }
+  .stop-pulse::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-radius: 50%;
+    border: 2px solid rgb(239 68 68 / 0.7);
+    animation: stop-ping 1.4s cubic-bezier(0, 0, 0.2, 1) infinite;
+  }
+  @keyframes stop-ping {
+    0% {
+      transform: scale(1);
+      opacity: 0.7;
+    }
+    75%,
+    100% {
+      transform: scale(2);
+      opacity: 0;
+    }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .stop-pulse::after {
+      animation: none;
+    }
   }
 </style>

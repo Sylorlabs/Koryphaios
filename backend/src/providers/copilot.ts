@@ -5,6 +5,7 @@ import type { ProviderConfig, ModelDef } from '@koryphaios/shared';
 import { OpenAIProvider } from './openai';
 import OpenAI from 'openai';
 import { CopilotModels } from './models/copilot';
+import { createUsageInterceptingFetch } from '../credit-accountant';
 import { providerLog } from '../logger';
 
 const COPILOT_CHAT_URL = 'https://api.githubcopilot.com';
@@ -69,6 +70,9 @@ export class CopilotProvider extends OpenAIProvider {
         apiKey: this.bearerToken || 'placeholder-awaiting-async-init',
         baseURL: COPILOT_CHAT_URL,
         defaultHeaders: { ...this.config.headers }, // Headers are already merged in constructor
+        // Route through the usage-intercepting fetch like every other OpenAI-family
+        // client so Copilot usage is tracked (and so requests are interceptable).
+        fetch: createUsageInterceptingFetch(globalThis.fetch),
       });
     }
     return this._copilotClient;

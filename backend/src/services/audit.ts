@@ -117,6 +117,16 @@ export class AuditLogService {
     };
   }
 
+  /** All recorded accesses for a specific credential (newest first). */
+  async getCredentialAccessHistory(credentialId: string): Promise<AuditLogEntry[]> {
+    const { entries } = await this.query({
+      action: 'credential_access',
+      resourceId: credentialId,
+      limit: 1000,
+    });
+    return entries;
+  }
+
   async detectSuspiciousActivity(
     userId: string,
   ): Promise<{ suspicious: boolean; reasons: string[] }> {

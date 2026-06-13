@@ -68,14 +68,14 @@
 </script>
 
 <div class="flex h-full min-h-0 min-w-0 flex-col gap-4">
-  <!-- Warning Banner -->
-  <div class="flex items-start gap-3 p-3 rounded-lg" style="background: rgba(245, 158, 11, 0.1); border: 1px solid rgba(245, 158, 11, 0.3);">
-    <AlertTriangle size={16} class="shrink-0 mt-0.5" style="color: #f59e0b;" />
+  <!-- Intro Banner -->
+  <div class="flex items-start gap-3 p-3 rounded-lg" style="background: var(--color-surface-1); border: 1px solid var(--color-border);">
+    <Beaker size={16} class="shrink-0 mt-0.5" style="color: var(--color-accent);" />
     <div class="flex-1 min-w-0">
-      <p class="text-[11px] font-medium" style="color: #f59e0b;">Experimental Features</p>
+      <p class="text-[11px] font-medium" style="color: var(--color-text-primary);">Advanced Settings</p>
       <p class="text-[10px] mt-0.5" style="color: var(--color-text-muted);">
-        These features are in development and may have bugs or breaking changes. 
-        Enable at your own risk.
+        <span style="color: #22c55e;">Stable</span> features are production-ready and on by default.
+        <span style="color: #f59e0b;">Beta</span>/<span style="color: #ef4444;">Alpha</span> are experimental — enable at your own risk.
       </p>
     </div>
   </div>
@@ -87,7 +87,7 @@
       <Search size={14} class="absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" style="color: var(--color-text-muted);" />
       <input
         type="text"
-        placeholder="Search experimental features..."
+        placeholder="Search advanced settings..."
         value={experimentalStore.searchQuery}
         oninput={(e) => experimentalStore.setSearchQuery(e.currentTarget.value)}
         class="w-full pl-9 pr-3 py-2 text-xs rounded-lg border"

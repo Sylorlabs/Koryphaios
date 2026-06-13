@@ -28,7 +28,13 @@ import { GeminiProvider } from './gemini';
 import { CopilotProvider, exchangeGitHubTokenForCopilotAsync } from './copilot';
 import { CodexProvider } from './codex';
 import { ClaudeCodeProvider } from './claude-code';
+import { GrokBuildProvider } from './grok-build';
+import { BedrockProvider } from './bedrock';
+import { GitLabProvider } from './gitlab';
+import { SapAiProvider } from './sapai';
+import { CustomProvider } from './custom';
 import { detectCodexAuthToken, isCodexCLIAuthMarker, detectClaudeCodeLogin } from './auth-utils';
+import { cliAutoEnableCreds } from './cli-detection';
 import { KimiCodeProvider } from './kimicode';
 import { resolveKimiCodeAccessToken } from './kimicode-auth';
 import { secureDecrypt, isUsingSecureEncryption } from '../security';
@@ -69,13 +75,20 @@ class ProviderRegistry {
   private providers = new Map<ProviderName, Provider>();
   private providerConfigs = new Map<ProviderName, ProviderConfig>();
   private circuitStates = new Map<ProviderName, CircuitState>();
+  /** IDs of user-defined custom providers (e.g. "custom:my-llm"). */
+  private customProviderIds = new Set<ProviderName>();
 
   constructor(private config?: KoryphaiosConfig) {
     this.initializeAll();
   }
 
   private getVisibleProviderNames(): ProviderName[] {
-    return Object.keys(PROVIDER_AUTH_MODE) as ProviderName[];
+    return [...(Object.keys(PROVIDER_AUTH_MODE) as ProviderName[]), ...this.customProviderIds];
+  }
+
+  /** Auth mode for a provider, defaulting to api_key for user-defined custom providers. */
+  private authModeFor(name: ProviderName): ProviderAuthMode {
+    return PROVIDER_AUTH_MODE[name] ?? 'api_key';
   }
 
   /** Get all current provider configurations. */
@@ -158,6 +171,10 @@ class ProviderRegistry {
     extraAuthModes?: Array<{ id: string; label: string; description?: string }>;
     /** Placeholder for base URL input; backend is single source of truth so UI does not hardcode endpoints. */
     baseUrlPlaceholder?: string;
+    /** True for user-defined custom providers. */
+    custom?: boolean;
+    /** Display label for custom providers. */
+    label?: string;
   }> {
     const names = this.getVisibleProviderNames();
     const result: Array<{
@@ -176,12 +193,15 @@ class ProviderRegistry {
       error?: string;
       extraAuthModes?: Array<{ id: string; label: string; description?: string }>;
       baseUrlPlaceholder?: string;
+      custom?: boolean;
+      label?: string;
     }> = [];
 
     for (const name of names) {
       const provider = this.providers.get(name);
       const config = this.providerConfigs.get(name);
-      const authMode = PROVIDER_AUTH_MODE[name];
+      const isCustom = this.customProviderIds.has(name) || !!config?.custom;
+      const authMode = this.authModeFor(name);
       const circuitOpen = this.isCircuitOpen(name);
 
       const isProviderAvailable = provider?.isAvailable() ?? false;
@@ -200,7 +220,13 @@ class ProviderRegistry {
           ? allModels.filter((model) => selectedModels.includes(model.id)).map((model) => model.id)
           : allModels.map((model) => model.id);
 
-      const requiresBaseUrl = authMode === 'base_url_only' || name === 'azure' || name === 'zai';
+      const requiresBaseUrl =
+        isCustom ||
+        authMode === 'base_url_only' ||
+        name === 'azure' ||
+        name === 'azurecognitive' ||
+        name === 'sapai' ||
+        name === 'zai';
       const baseUrlPlaceholder: string | undefined = requiresBaseUrl
         ? (BASE_URL_PLACEHOLDERS[name] ??
           OPENCODE_DEFAULT_BASE_URL[name] ??
@@ -210,7 +236,9 @@ class ProviderRegistry {
               ? LLAMACPP_DEFAULT
               : name === 'lmstudio'
                 ? LMSTUDIO_DEFAULT
-                : undefined))
+                : isCustom
+                  ? config?.baseUrl || 'https://your-endpoint.example/v1'
+                  : undefined))
         : undefined;
 
       result.push({
@@ -222,10 +250,11 @@ class ProviderRegistry {
         selectedModels,
         hideModelSelector,
         authMode,
-        supportsApiKey: authMode === 'api_key' || authMode === 'api_key_or_auth',
+        supportsApiKey: isCustom || authMode === 'api_key' || authMode === 'api_key_or_auth',
         supportsAuthToken: authMode === 'auth_only' || authMode === 'api_key_or_auth',
         requiresBaseUrl,
         circuitOpen,
+        ...(isCustom && { custom: true, label: config?.label ?? String(name) }),
         ...(baseUrlPlaceholder && { baseUrlPlaceholder }),
       });
     }
@@ -237,8 +266,57 @@ class ProviderRegistry {
   getAvailableProviderTypes(): Array<{ name: ProviderName; authMode: ProviderAuthMode }> {
     return this.getVisibleProviderNames().map((name) => ({
       name,
-      authMode: PROVIDER_AUTH_MODE[name],
+      authMode: this.authModeFor(name),
     }));
+  }
+
+  /** Register (or update) a user-defined custom provider. Caller persists via getConfigs(). */
+  registerCustomProvider(def: {
+    id: ProviderName;
+    label: string;
+    kind?: 'openai' | 'anthropic' | 'gemini';
+    baseUrl: string;
+    apiKey?: string;
+    authToken?: string;
+    headers?: Record<string, string>;
+    models?: string[];
+  }): { success: boolean; error?: string } {
+    if (!def.baseUrl?.trim()) return { success: false, error: 'Custom provider requires a base URL' };
+    const providerConfig: ProviderConfig = {
+      name: def.id,
+      custom: true,
+      kind: def.kind ?? 'openai',
+      label: def.label,
+      baseUrl: def.baseUrl.trim(),
+      apiKey: def.apiKey?.trim() || undefined,
+      authToken: def.authToken?.trim() || undefined,
+      headers: def.headers,
+      models: def.models,
+      selectedModels: def.models ?? [],
+      hideModelSelector: false,
+      disabled: false,
+    };
+    this.providerConfigs.set(def.id, providerConfig);
+    this.customProviderIds.add(def.id);
+    const provider = this.createProvider(def.id, providerConfig);
+    if (!provider) {
+      this.customProviderIds.delete(def.id);
+      this.providerConfigs.delete(def.id);
+      return { success: false, error: 'Failed to initialize custom provider' };
+    }
+    this.providers.set(def.id, provider);
+    this.circuitStates.delete(def.id);
+    providerLog.info({ provider: def.id, kind: providerConfig.kind }, 'Custom provider registered');
+    return { success: true };
+  }
+
+  /** Remove a user-defined custom provider. */
+  removeCustomProvider(id: ProviderName): void {
+    this.providers.delete(id);
+    this.providerConfigs.delete(id);
+    this.customProviderIds.delete(id);
+    this.circuitStates.delete(id);
+    providerLog.info({ provider: id }, 'Custom provider removed');
   }
 
   /** Find the best available provider for a given model ID. */
@@ -715,10 +793,18 @@ class ProviderRegistry {
     credentials: { apiKey?: string; authToken?: string; baseUrl?: string },
     existing?: ProviderConfig,
   ): { success: boolean; error?: string } {
-    const authMode = PROVIDER_AUTH_MODE[name];
+    const authMode = this.authModeFor(name);
     const apiKey = credentials.apiKey?.trim();
     const authToken = credentials.authToken?.trim();
     const baseUrl = credentials.baseUrl?.trim();
+
+    // Custom providers only require a base URL; the API key is optional.
+    if (existing?.custom || this.customProviderIds.has(name)) {
+      if (!baseUrl && !existing?.baseUrl) {
+        return { success: false, error: 'Custom provider requires a base URL' };
+      }
+      return { success: true };
+    }
 
     if (authMode === 'auth_only' && apiKey) {
       return {
@@ -814,33 +900,67 @@ class ProviderRegistry {
         providerLog.error({ provider: name, error }, 'Failed to initialize provider');
       }
     }
+
+    // Restore user-defined custom providers persisted in the config.
+    for (const [id, pc] of Object.entries(this.config?.providers ?? {})) {
+      if (!pc?.custom || PROVIDER_AUTH_MODE[id as ProviderName]) continue;
+      this.customProviderIds.add(id as ProviderName);
+      const providerConfig = this.buildProviderConfig(id as ProviderName);
+      this.providerConfigs.set(id, providerConfig);
+      try {
+        const provider = this.createProvider(id as ProviderName, providerConfig);
+        if (provider) this.providers.set(id, provider);
+      } catch (error) {
+        providerLog.error({ provider: id, error }, 'Failed to initialize custom provider');
+      }
+    }
+
     this.logProviderStatus();
   }
 
+  /**
+   * Auto-enable providers backed by an agent CLI the user already has installed +
+   * logged in on this machine (Claude Code, Codex, Gemini CLI, Grok Build) — so they
+   * "just work" with no manual Connect step. A logged-in CLI is clear user intent,
+   * unlike a stray environment variable (which we still don't auto-auth). Returns the
+   * credentials to inject, or null when there's nothing to auto-enable.
+   * Opt out entirely with KORY_DISABLE_CLI_AUTODETECT=1.
+   */
   private buildProviderConfig(name: ProviderName): ProviderConfig {
     const userConfig = this.config?.providers?.[name];
-    
+
     // Default to disabled to prevent "auto-authing" from environment variables without user intent.
-    // Explicit opt-in (via UI "Connect" or config) is required.
+    // Explicit opt-in (via UI "Connect" or config) is required — EXCEPT for providers backed by
+    // an agent CLI the user has installed + logged in, which we treat as intent and auto-enable
+    // (Claude Code, Codex, Gemini CLI, Grok Build). Opt out with KORY_DISABLE_CLI_AUTODETECT=1.
     const defaultDisabled = true;
-    const isDisabled = userConfig?.disabled ?? defaultDisabled;
-    
+    const autoCli = cliAutoEnableCreds(name);
+    const isDisabled = autoCli ? false : (userConfig?.disabled ?? defaultDisabled);
+
     const providerConfig: ProviderConfig = {
       name,
-      apiKey: userConfig?.apiKey ?? (isDisabled ? undefined : this.detectEnvKey(name)) ?? undefined,
-      authToken: userConfig?.authToken ?? (isDisabled ? undefined : this.detectEnvAuthToken(name)) ?? undefined,
+      apiKey: userConfig?.apiKey ?? autoCli?.apiKey ?? (isDisabled ? undefined : this.detectEnvKey(name)) ?? undefined,
+      authToken: userConfig?.authToken ?? autoCli?.authToken ?? (isDisabled ? undefined : this.detectEnvAuthToken(name)) ?? undefined,
       baseUrl: userConfig?.baseUrl ?? this.detectEnvUrl(name) ?? undefined,
       selectedModels: userConfig?.selectedModels ?? [],
       hideModelSelector: userConfig?.hideModelSelector ?? false,
       disabled: isDisabled,
       headers: userConfig?.headers,
+      // Preserve custom-provider metadata so BYO providers survive restarts.
+      ...(userConfig?.custom && {
+        custom: true,
+        kind: userConfig.kind,
+        label: userConfig.label,
+        models: userConfig.models,
+      }),
     };
 
     return providerConfig;
   }
 
   private hasValidAuth(name: ProviderName, config: ProviderConfig): boolean {
-    const authMode = PROVIDER_AUTH_MODE[name];
+    if (config.custom) return !!config.baseUrl;
+    const authMode = this.authModeFor(name);
     const hasApi = !!config.apiKey;
     const hasAuth = !!config.authToken;
     const hasUrl = !!config.baseUrl;
@@ -859,6 +979,10 @@ class ProviderRegistry {
   }
 
   private createProvider(name: ProviderName, config: ProviderConfig): Provider | null {
+    // User-defined custom providers (OpenAI/Anthropic/Gemini-compatible BYO endpoints).
+    if (config.custom || this.customProviderIds.has(name)) {
+      return config.baseUrl ? new CustomProvider(config) : null;
+    }
     switch (name) {
       case 'anthropic':
         return new AnthropicProvider(config);
@@ -873,6 +997,9 @@ class ProviderRegistry {
         return new CopilotProvider(config);
       case 'codex':
         return new CodexProvider(config);
+      case 'grok':
+        // Grok Build subscription — runs the official `grok` CLI harness (no direct API calls).
+        return new GrokBuildProvider(config);
       case 'kimicode':
         return new KimiCodeProvider(config);
       case 'openrouter':
@@ -883,8 +1010,19 @@ class ProviderRegistry {
         return new XAIProvider(config);
       case 'azure':
         return new AzureProvider(config);
+      case 'azurecognitive':
+        // Azure Cognitive Services uses the same Azure OpenAI wire contract (api-key
+        // header + /openai/deployments/{deployment}?api-version), just a different host.
+        return config.baseUrl ? new AzureProvider(config, 'azurecognitive') : null;
       case 'bedrock':
-        return new OpenAIProvider(config, 'bedrock', config.baseUrl);
+        // Claude on Amazon Bedrock — SigV4-signed via the official AnthropicBedrock client.
+        return new BedrockProvider(config);
+      case 'gitlab':
+        // GitLab Duo Chat — POST /api/v4/chat/completions ({content} body, Bearer PAT).
+        return config.apiKey || config.authToken ? new GitLabProvider(config) : null;
+      case 'sapai':
+        // SAP AI Core — OAuth (service key) + /v2/inference/deployments/{id} + AI-Resource-Group.
+        return config.apiKey || config.authToken ? new SapAiProvider(config) : null;
       case 'vertexai':
         // Requires explicit API key — never auto-enable from GCP environment variables
         if (config.disabled || !config.apiKey) return null;

@@ -1,7 +1,24 @@
 import type { ModelDef } from '@koryphaios/shared';
 
 export const XAIModels: ModelDef[] = [
-  // Current Models (February 2026) - Verified from docs.x.ai/developers/models
+  // Current Models - Verified from docs.x.ai/developers/models
+  // Grok Build (grok-build-0.1) — xAI's agentic coding model powering the Grok Build CLI,
+  // published 2026-05-20. Served on the standard OpenAI-compatible xAI API (api.x.ai/v1).
+  {
+    id: 'grok-build-0.1',
+    name: 'Grok Build 0.1',
+    provider: 'xai',
+    apiModelId: 'grok-build-0.1',
+    contextWindow: 256_000,
+    maxOutputTokens: 50_000,
+    costPerMInputTokens: 1.0,
+    costPerMOutputTokens: 2.0,
+    costPerMInputCached: 0.2,
+    canReason: true,
+    supportsAttachments: true,
+    supportsStreaming: true,
+    tier: 'flagship',
+  },
   {
     id: 'grok-4-1-fast-reasoning',
     name: 'Grok 4.1 Fast Reasoning',

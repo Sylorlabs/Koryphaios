@@ -80,7 +80,20 @@ export class GeminiProvider implements Provider {
       return;
     }
 
-    const clientOptions: any = { apiKey };
+    // Vertex AI is a DIFFERENT backend from the consumer Gemini API: it routes to
+    // {location}-aiplatform.googleapis.com under a GCP project, not generativelanguage.
+    // The official SDK builds that wire shape when vertexai:true. Project/location come
+    // from the standard GCP env vars; an API key enables Vertex express mode.
+    const clientOptions: any =
+      this.name === 'vertexai'
+        ? {
+            vertexai: true,
+            apiKey,
+            project: process.env.GOOGLE_CLOUD_PROJECT || process.env.GOOGLE_VERTEX_PROJECT,
+            location:
+              process.env.GOOGLE_CLOUD_LOCATION || process.env.GOOGLE_VERTEX_LOCATION || undefined,
+          }
+        : { apiKey };
 
     if (this.config.baseUrl) {
       clientOptions.baseUrl = this.config.baseUrl;
