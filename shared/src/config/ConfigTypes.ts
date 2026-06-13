@@ -85,6 +85,8 @@ export interface AgentSettings {
   autoApplySafeFixes: boolean;
   /** Require confirmation for rule violations */
   confirmRuleViolations: boolean;
+  /** Run the agent's tools without an upfront "proceed?" prompt (on by default). */
+  autoRunTools?: boolean;
   /** Agent memory - allow agents to update memory files */
   agentMemoryEnabled: boolean;
   /** Agent can update preferences.md based on learned patterns */
