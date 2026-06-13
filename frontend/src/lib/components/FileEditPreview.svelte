@@ -1,35 +1,37 @@
 <script lang="ts">
   import { wsStore } from '$lib/stores/websocket.svelte';
-  import { FileCode, X, Pencil, FilePlus } from 'lucide-svelte';
+  import { Loader, Check } from 'lucide-svelte';
   import { tick } from 'svelte';
   import FileIcon from './icons/FileIcon.svelte';
+  import hljs from 'highlight.js/lib/common';
+  import 'highlight.js/styles/atom-one-dark.css';
+  import DiffMatchPatch from 'diff-match-patch';
 
-  let codeContainer = $state<HTMLPreElement>();
+  const dmp = new DiffMatchPatch();
+
+  let codeContainers: Record<string, HTMLElement> = {};
   let collapsed = $state<Set<string>>(new Set());
 
   let edits = $derived([...wsStore.activeFileEdits.values()]);
 
+  // Auto-scroll each still-streaming code container to the bottom as content grows.
   $effect(() => {
-    // Auto-scroll code container when content changes
-    if (edits.length > 0 && codeContainer) {
-      tick().then(() => {
-        if (codeContainer) {
-          codeContainer.scrollTop = codeContainer.scrollHeight;
-        }
-      });
-    }
+    void edits.map((e) => e.content.length + (e.done ? 1 : 0));
+    tick().then(() => {
+      for (const e of edits) {
+        const el = codeContainers[e.path];
+        if (el && !e.done) el.scrollTop = el.scrollHeight;
+      }
+    });
   });
 
   function getFileName(path: string): string {
     return path.split('/').pop() ?? path;
   }
-
   function getRelativePath(path: string): string {
-    // Show last 3 segments for context
     const parts = path.split('/');
     return parts.length > 3 ? '.../' + parts.slice(-3).join('/') : path;
   }
-
   function toggleCollapse(path: string) {
     const next = new Set(collapsed);
     if (next.has(path)) next.delete(path);
@@ -37,9 +39,51 @@
     collapsed = next;
   }
 
-  function getLineNumbers(content: string): string {
-    const lines = content.split('\n');
-    return lines.map((_, i) => i + 1).join('\n');
+  const EXT_LANG: Record<string, string> = {
+    ts: 'typescript', tsx: 'typescript', js: 'javascript', jsx: 'javascript', mjs: 'javascript',
+    svelte: 'xml', html: 'xml', xml: 'xml', vue: 'xml',
+    css: 'css', scss: 'scss', less: 'less',
+    json: 'json', md: 'markdown', py: 'python', rs: 'rust', go: 'go', rb: 'ruby',
+    java: 'java', c: 'c', h: 'c', cpp: 'cpp', cs: 'csharp', php: 'php', sh: 'bash', bash: 'bash',
+    yml: 'yaml', yaml: 'yaml', sql: 'sql', toml: 'ini',
+  };
+  function langFor(path: string): string | null {
+    const ext = path.split('.').pop()?.toLowerCase() ?? '';
+    return EXT_LANG[ext] ?? null;
+  }
+  function escapeHtml(s: string): string {
+    return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  }
+  function highlight(code: string, path: string): string {
+    try {
+      const lang = langFor(path);
+      if (lang && hljs.getLanguage(lang)) return hljs.highlight(code, { language: lang }).value;
+      return hljs.highlightAuto(code).value;
+    } catch {
+      return escapeHtml(code);
+    }
+  }
+  // Live red/green diff for edits (old text being replaced → new text).
+  function diffHtml(oldContent: string, newContent: string): string {
+    const diffs = dmp.diff_main(oldContent, newContent);
+    dmp.diff_cleanupSemantic(diffs);
+    return diffs
+      .map(([op, text]: [number, string]) => {
+        const esc = escapeHtml(text);
+        if (op === 1) return `<span class="df-ins">${esc}</span>`;
+        if (op === -1) return `<span class="df-del">${esc}</span>`;
+        return esc;
+      })
+      .join('');
+  }
+  function bodyHtml(edit: { operation: string; content: string; oldContent?: string; path: string }): string {
+    if (edit.operation === 'edit' && edit.oldContent !== undefined) {
+      return diffHtml(edit.oldContent, edit.content);
+    }
+    return highlight(edit.content, edit.path);
+  }
+  function lineCount(content: string): number {
+    return content.split('\n').length;
   }
 </script>
 
@@ -48,7 +92,7 @@
     {#each edits as edit (edit.path)}
       <div
         class="rounded-lg border overflow-hidden transition-all"
-        style="border-color: var(--color-border); background: var(--color-surface-0);"
+        style="border-color: {edit.done ? 'var(--color-border)' : 'rgba(245,158,11,0.4)'}; background: var(--color-surface-0);"
       >
         <!-- File header -->
         <button
@@ -60,39 +104,75 @@
           <span class="text-xs font-mono truncate" style="color: var(--color-text-primary);">
             {getFileName(edit.path)}
           </span>
-          <span class="text-[10px] font-mono truncate ml-auto" style="color: var(--color-text-muted);">
+          <span class="text-[10px] font-mono truncate" style="color: var(--color-text-muted);">
             {getRelativePath(edit.path)}
           </span>
-          <span class="text-[10px] px-1.5 py-0.5 rounded shrink-0 {edit.operation === 'create' ? 'text-emerald-400' : 'text-amber-400'}"
-                style="background: var(--color-surface-3);">
+          <span
+            class="text-[10px] px-1.5 py-0.5 rounded shrink-0 ml-auto {edit.operation === 'create' ? 'text-emerald-400' : 'text-amber-400'}"
+            style="background: var(--color-surface-3);"
+          >
             {edit.operation === 'create' ? 'NEW' : 'EDIT'}
           </span>
-          <!-- Typing indicator -->
-          <span class="flex gap-0.5 shrink-0">
-            <span class="w-1 h-1 rounded-full bg-[var(--color-accent)] animate-pulse" style="animation-delay: 0ms;"></span>
-            <span class="w-1 h-1 rounded-full bg-[var(--color-accent)] animate-pulse" style="animation-delay: 150ms;"></span>
-            <span class="w-1 h-1 rounded-full bg-[var(--color-accent)] animate-pulse" style="animation-delay: 300ms;"></span>
+          <span class="text-[10px] tabular-nums shrink-0" style="color: var(--color-text-muted);">
+            {lineCount(edit.content)} ln
           </span>
+          <!-- Cursor-style status: spinning circle while writing, ✓ when done -->
+          {#if edit.done}
+            <Check size={15} class="text-emerald-400 shrink-0" />
+          {:else}
+            <Loader size={15} class="text-[var(--color-accent)] shrink-0 animate-spin" />
+          {/if}
         </button>
 
         <!-- Code content -->
         {#if !collapsed.has(edit.path)}
-          <div class="flex overflow-hidden" style="max-height: 400px;">
-            <!-- Line numbers -->
+          <div class="flex overflow-hidden" style="max-height: 420px;">
             <pre
-              class="text-right pr-2 pl-3 py-2 text-[11px] leading-[1.4] select-none shrink-0 font-mono"
+              class="text-right pr-2 pl-3 py-2 text-[11px] leading-[1.5] select-none shrink-0 font-mono"
               style="color: var(--color-text-muted); background: var(--color-surface-1); border-right: 1px solid var(--color-border);"
-            >{getLineNumbers(edit.content)}</pre>
+            >{Array.from({ length: lineCount(edit.content) }, (_, i) => i + 1).join('\n')}</pre>
 
-            <!-- Code content -->
             <pre
-              bind:this={codeContainer}
-              class="flex-1 overflow-auto py-2 px-3 text-[11px] leading-[1.4] font-mono"
-              style="color: var(--color-text-primary);"
-            >{edit.content}<span class="inline-block w-[2px] h-[14px] bg-[var(--color-accent)] animate-pulse ml-px align-middle"></span></pre>
+              bind:this={codeContainers[edit.path]}
+              class="hljs flex-1 overflow-auto py-2 px-3 text-[11px] leading-[1.5] font-mono"
+              style="background: transparent;"
+            ><code>{@html bodyHtml(edit)}</code>{#if !edit.done}<span class="caret"></span>{/if}</pre>
           </div>
         {/if}
       </div>
     {/each}
   </div>
 {/if}
+
+<style>
+  .caret {
+    display: inline-block;
+    width: 7px;
+    height: 13px;
+    margin-left: 1px;
+    vertical-align: text-bottom;
+    background: var(--color-accent);
+    animation: kory-blink 1s steps(2, start) infinite;
+  }
+  @keyframes kory-blink {
+    50% {
+      opacity: 0;
+    }
+  }
+  /* Live diff colors for edits */
+  :global(.df-ins) {
+    background: rgba(34, 197, 94, 0.22);
+    color: #86efac;
+  }
+  :global(.df-del) {
+    background: rgba(239, 68, 68, 0.18);
+    color: #fca5a5;
+    text-decoration: line-through;
+    text-decoration-color: rgba(239, 68, 68, 0.5);
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .caret {
+      animation: none;
+    }
+  }
+</style>

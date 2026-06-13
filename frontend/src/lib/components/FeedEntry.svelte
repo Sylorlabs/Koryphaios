@@ -14,6 +14,7 @@
     X
   } from 'lucide-svelte';
   import { fly, fade } from 'svelte/transition';
+  import { wsStore } from '$lib/stores/websocket.svelte';
   import AnimatedStatusIcon from './AnimatedStatusIcon.svelte';
   import ThinkingBlock from './ThinkingBlock.svelte';
   import { marked } from 'marked';

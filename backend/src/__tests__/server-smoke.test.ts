@@ -13,16 +13,17 @@ describe('Server (Original) - Smoke Tests', () => {
   });
 
   it('should have refactored modules available', () => {
-    expect(existsSync(resolve(import.meta.dir, '../server/config.ts'))).toBe(true);
     expect(existsSync(resolve(import.meta.dir, '../server/websocket-handler.ts'))).toBe(true);
-    expect(existsSync(resolve(import.meta.dir, '../server/shutdown-handler.ts'))).toBe(true);
+    expect(existsSync(resolve(import.meta.dir, '../server/http-helpers.ts'))).toBe(true);
+    expect(existsSync(resolve(import.meta.dir, '../server/plugins.ts'))).toBe(true);
   });
 
   it('should keep test-targeted server module files present', () => {
     const expectedFiles = [
-      '../server/config.ts',
       '../server/websocket-handler.ts',
-      '../server/shutdown-handler.ts',
+      '../server/http-helpers.ts',
+      '../server/plugins.ts',
+      '../server/socket-server.ts',
     ];
     for (const relPath of expectedFiles) {
       expect(existsSync(resolve(import.meta.dir, relPath))).toBe(true);

@@ -3,7 +3,7 @@
 // Supports both API key and Claude Code OAuth token (Pro/Max subscription).
 
 import Anthropic from '@anthropic-ai/sdk';
-import type { ProviderConfig, ModelDef } from '@koryphaios/shared';
+import type { ProviderConfig, ModelDef, ProviderName } from '@koryphaios/shared';
 import {
   type Provider,
   type ProviderEvent,
@@ -11,29 +11,35 @@ import {
   type ProviderContentBlock,
   getModelsForProvider,
   createGenericModel,
+  resolveModel,
 } from './types';
 import { withRetry, withTimeoutSignal } from './utils';
 import { createUsageInterceptingFetch } from '../credit-accountant';
 import { providerLog } from '../logger';
 
 export class AnthropicProvider implements Provider {
-  readonly name: 'anthropic';
-  private _client: Anthropic | null = null;
+  readonly name: ProviderName;
+  protected _client: Anthropic | null = null;
 
-  constructor(readonly config: ProviderConfig) {
-    this.name = 'anthropic';
+  constructor(readonly config: ProviderConfig, name: ProviderName = 'anthropic') {
+    this.name = name;
   }
 
   protected get client(): Anthropic {
     if (!this._client) {
-      this._client = new Anthropic({
-        apiKey: this.config.apiKey,
-        authToken: this.config.authToken,
-        baseURL: this.config.baseUrl || undefined,
-        fetch: createUsageInterceptingFetch(globalThis.fetch),
-      });
+      this._client = this.makeClient();
     }
     return this._client;
+  }
+
+  /** Build the underlying client. Overridden by BedrockProvider to use AnthropicBedrock (SigV4). */
+  protected makeClient(): Anthropic {
+    return new Anthropic({
+      apiKey: this.config.apiKey,
+      authToken: this.config.authToken,
+      baseURL: this.config.baseUrl || undefined,
+      fetch: createUsageInterceptingFetch(globalThis.fetch),
+    });
   }
 
   isAvailable(): boolean {
@@ -86,7 +92,8 @@ export class AnthropicProvider implements Provider {
     }));
 
     const params: Anthropic.MessageCreateParamsStreaming = {
-      model: request.model,
+      // Use the catalog's apiModelId (dated Anthropic id, or the Bedrock model id) when known.
+      model: resolveModel(request.model)?.apiModelId ?? request.model,
       max_tokens: request.maxTokens ?? 16_384,
       system: request.systemPrompt,
       messages,

@@ -24,7 +24,9 @@ export type FontFamily =
   | 'source-code-pro'
   | 'ibm-plex-mono'
   | 'fira-code'
-  | 'berkeley-mono';
+  | 'berkeley-mono'
+  | 'source-serif'
+  | 'roboto-slab';
 
 export interface ThemeConfig {
   preset: ThemePreset;
@@ -266,6 +268,8 @@ const FONT_FAMILIES: Record<FontFamily, string> = {
   'ibm-plex-mono': "'IBM Plex Mono', 'SF Mono', monospace",
   'fira-code': "'Fira Code', 'JetBrains Mono', monospace",
   'berkeley-mono': "'Berkeley Mono', 'JetBrains Mono', 'SF Mono', monospace",
+  'source-serif': "'Source Serif 4', Georgia, 'Times New Roman', serif",
+  'roboto-slab': "'Roboto Slab', 'Roboto', Georgia, serif",
 };
 
 import { browser } from '$app/environment';
@@ -376,19 +380,19 @@ function createThemeStore() {
       ];
     },
     get fonts(): Array<{ id: FontFamily; label: string; category: string }> {
+      // Curated for VISUAL DISTINCTION — each option is a clearly different typeface
+      // (neutral vs geometric vs grotesque sans, a true serif, a slab, and three monos
+      // with distinct character). Lookalike sans/monos were removed from the picker; their
+      // ids still resolve in FONT_FAMILIES so any previously-saved selection keeps working.
       return [
         { id: 'inter', label: 'Inter', category: 'Sans Serif' },
         { id: 'geist', label: 'Geist', category: 'Sans Serif' },
-        { id: 'roboto', label: 'Roboto', category: 'Sans Serif' },
-        { id: 'outfit', label: 'Outfit', category: 'Sans Serif' },
         { id: 'space-grotesk', label: 'Space Grotesk', category: 'Sans Serif' },
-        { id: 'dm-sans', label: 'DM Sans', category: 'Sans Serif' },
-        { id: 'plus-jakarta', label: 'Plus Jakarta Sans', category: 'Sans Serif' },
+        { id: 'source-serif', label: 'Source Serif', category: 'Serif' },
+        { id: 'roboto-slab', label: 'Roboto Slab', category: 'Serif' },
         { id: 'jetbrains', label: 'JetBrains Mono', category: 'Monospace' },
-        { id: 'source-code-pro', label: 'Source Code Pro', category: 'Monospace' },
-        { id: 'ibm-plex-mono', label: 'IBM Plex Mono', category: 'Monospace' },
         { id: 'fira-code', label: 'Fira Code', category: 'Monospace' },
-        { id: 'berkeley-mono', label: 'Berkeley Mono', category: 'Monospace' },
+        { id: 'ibm-plex-mono', label: 'IBM Plex Mono', category: 'Monospace' },
       ];
     },
     /** Font-family CSS value for a font id (for previews so each option shows in its own typeface). */

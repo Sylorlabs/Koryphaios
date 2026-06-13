@@ -317,12 +317,6 @@ export const PROVIDER_CONFIGS: ProviderConfig[] = [
     envKeys: ['OPENCODEZEN_API_KEY'],
   },
   {
-    name: 'firmware',
-    baseUrl: 'https://api.firmware.ai/v1',
-    authMode: 'api_key',
-    envKeys: ['FIRMWARE_API_KEY'],
-  },
-  {
     name: '302ai',
     baseUrl: 'https://api.302.ai',
     authMode: 'api_key',

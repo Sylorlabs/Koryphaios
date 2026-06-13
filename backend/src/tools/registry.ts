@@ -20,6 +20,8 @@ export interface ToolContext {
     delta: string;
     totalLength: number;
     operation: 'create' | 'edit';
+    /** For edits: the original text being replaced, sent once on the first delta (enables a live diff). */
+    oldStr?: string;
   }) => void;
   emitFileComplete?: (event: {
     path: string;
@@ -73,7 +75,10 @@ function roleIncludesTool(
   const r = toolRole as string | undefined;
 
   if (normalizedRole === 'critic') {
-    return CRITIC_READ_ONLY_TOOLS.has(toolName) || r === 'critic' || r === 'any' || !r;
+    // Critic is read-only: the read-only filesystem tools, tools explicitly roled 'critic',
+    // or tools the author explicitly marked 'any' (safe for all roles). Crucially, do NOT
+    // fall through to NO-role/default tools — that is how bash/write_file leaked to the critic.
+    return CRITIC_READ_ONLY_TOOLS.has(toolName) || r === 'critic' || r === 'any';
   }
   if (!r || r === 'any') return true;
   if (normalizedRole === 'manager') return r === 'manager' || r === 'worker';

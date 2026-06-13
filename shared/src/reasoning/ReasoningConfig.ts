@@ -285,7 +285,6 @@ const NO_REASONING_PROVIDERS = [
   'zai',
   'zenmux',
   'opencodezen',
-  'firmware',
   'azurecognitive',
   'gitlab',
   'mistralai',

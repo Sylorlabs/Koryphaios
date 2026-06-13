@@ -101,6 +101,26 @@ let detectedContext = $state<DetectedContextFile[]>([]);
 // Track analyzing thought index to avoid O(N) filtering
 let analyzingThoughtId = $state<string | null>(null);
 
+// Sessions with an in-flight run. Set optimistically the instant the user sends (so the
+// Stop button shows immediately, before the first agent.status arrives) and cleared only on
+// a terminal signal — so "running" is true for the WHOLE run with no gaps.
+let busySessions = $state<Set<string>>(new Set());
+function markSessionBusy(sessionId: string) {
+  if (busySessions.has(sessionId)) return;
+  busySessions = new Set(busySessions).add(sessionId);
+}
+function clearSessionBusy(sessionId: string) {
+  if (!busySessions.has(sessionId)) return;
+  const next = new Set(busySessions);
+  next.delete(sessionId);
+  busySessions = next;
+}
+/** Clear the busy bridge once the session has no active agents left (terminal events only). */
+function maybeClearBusy(sessionId: string | undefined) {
+  if (!sessionId || !busySessions.has(sessionId)) return;
+  if (!isSessionRunning(sessionId)) clearSessionBusy(sessionId);
+}
+
 // Initialize manager agent state
 const initialAgents = new Map<string, AgentState>();
 initialAgents.set('kory-manager', {
@@ -134,6 +154,10 @@ interface ActiveFileEdit {
   operation: 'create' | 'edit';
   agentId: string;
   startedAt: number;
+  /** For edits: the original text being replaced, so the preview can show a live diff. */
+  oldContent?: string;
+  /** Set true on stream.file_complete so the UI swaps the spinner for a done state. */
+  done?: boolean;
 }
 let activeFileEdits = $state<Map<string, ActiveFileEdit>>(new Map());
 
@@ -409,6 +433,8 @@ function handleMessage(msg: WSMessage) {
         agent.status = p.status;
         if (msg.sessionId) agent.sessionId = msg.sessionId;
       }
+      // If a run just went terminal and nothing else is active, drop the busy bridge.
+      if (p.status === 'done' || p.status === 'idle') maybeClearBusy(msg.sessionId ?? agent?.sessionId);
       break;
     }
 
@@ -421,11 +447,13 @@ function handleMessage(msg: WSMessage) {
         if (msg.sessionId) agent.sessionId = msg.sessionId;
       }
       if (isForActiveSession) removeAnalyzingThoughtEntries();
+      maybeClearBusy(msg.sessionId ?? agent?.sessionId);
       break;
     }
 
     case 'agent.error': {
       const p = msg.payload as any;
+      clearSessionBusy(msg.sessionId ?? agents.get(p.agentId)?.sessionId ?? '');
       if (isForActiveSession) {
         removeAnalyzingThoughtEntries();
         addFeedEntry({
@@ -617,17 +645,26 @@ function handleMessage(msg: WSMessage) {
     case 'stream.file_delta': {
       const p = msg.payload as StreamFileDeltaPayload;
       if (isForActiveSession) {
-        const existing = activeFileEdits.get(p.path);
+        // A new edit to a path that just finished should start fresh, not append.
+        const prior = activeFileEdits.get(p.path);
+        const existing = prior && !prior.done ? prior : undefined;
         if (existing) {
           existing.content += p.delta;
         } else {
-          activeFileEdits.set(p.path, {
+          // Cancel any pending cleanup timer from a previous edit of this path.
+          const t = fileEditTimers.get(p.path);
+          if (t) { clearTimeout(t); fileEditTimers.delete(p.path); }
+          const next = new Map(activeFileEdits);
+          next.set(p.path, {
             path: p.path,
             content: p.delta,
             operation: p.operation,
             agentId: p.agentId,
             startedAt: Date.now(),
+            oldContent: p.oldStr,
+            done: false,
           });
+          activeFileEdits = next;
         }
       }
       break;
@@ -636,12 +673,20 @@ function handleMessage(msg: WSMessage) {
     case 'stream.file_complete': {
       const p = msg.payload as StreamFileCompletePayload;
       if (isForActiveSession) {
+        // Mark done so the preview swaps the spinner for a ✓ (kept visible a few seconds).
+        const edit = activeFileEdits.get(p.path);
+        if (edit) {
+          edit.done = true;
+          activeFileEdits = new Map(activeFileEdits);
+        }
         const existingTimer = fileEditTimers.get(p.path);
         if (existingTimer) clearTimeout(existingTimer);
         const timer = setTimeout(() => {
-          activeFileEdits.delete(p.path);
+          const next = new Map(activeFileEdits);
+          next.delete(p.path);
+          activeFileEdits = next;
           fileEditTimers.delete(p.path);
-        }, 2000);
+        }, 4000);
         fileEditTimers.set(p.path, timer);
       }
       break;
@@ -996,6 +1041,8 @@ export async function loadProvidersFromApi(): Promise<void> {
 
 function sendMessage(sessionId: string, content: string, model?: string, reasoningLevel?: string, attachments?: Array<{type: string, data: string, name: string}>) {
   addUserMessage(sessionId, content, attachments);
+  // Show the Stop button immediately — bridges the gap until the first agent.status arrives.
+  markSessionBusy(sessionId);
   // Clear previous context detection for new message
   detectedContext = [];
   void apiFetch(apiUrl('/api/messages'), {
@@ -1017,6 +1064,8 @@ function sendMessage(sessionId: string, content: string, model?: string, reasoni
           : 'Message send failed. Check your connection and retry.';
       toastStore.error(message);
       addClientError(message);
+      // The run never started — drop the optimistic Stop state.
+      clearSessionBusy(sessionId);
     });
 }
 
@@ -1303,6 +1352,7 @@ function isSessionRunning(sessionId: string): boolean {
 
 /** Mark all agents for this session as done (optimistic UI when user clicks Stop). */
 function markSessionAgentsStopped(sessionId: string) {
+  clearSessionBusy(sessionId);
   let changed = false;
   for (const a of agents.values()) {
     if (a.sessionId === sessionId && a.status !== 'idle' && a.status !== 'done') {
@@ -1474,8 +1524,12 @@ export const wsStore = {
     return detectedContext;
   },
   isSessionRunning,
+  /** True from the instant a message is sent until the run fully ends (no gaps). */
+  isSessionBusy: (sessionId: string | null | undefined) =>
+    !!sessionId && (busySessions.has(sessionId) || isSessionRunning(sessionId)),
   markSessionAgentsStopped,
   markAgentStopped,
+  clearSessionBusy,
   clearAnalyzing: removeAnalyzingThoughtEntries,
   connect,
   disconnect,

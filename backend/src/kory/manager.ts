@@ -139,12 +139,14 @@ function koryIdentityWithModel(model: string, provider: ProviderName): AgentIden
 const KORY_SYSTEM_PROMPT = `You are Kory, the manager agent. The user talks to you only. Sub-agents (workers) run only when you explicitly call delegate_to_worker—never automatically.
 
 • Handle requests yourself: answer questions, use tools (read_file, grep, bash, web_search, etc.), do small edits. For conversation, clarification, or straightforward work, you are the sole agent.
+• FILE EDITS: ALWAYS create files with the write_file tool and modify files with the edit_file tool. NEVER use bash (cat >, tee, echo >, sed, heredocs, apply_patch) to create or modify files — those bypass the live code preview the user watches. Use bash only for running commands, never for writing file content.
 • You may run terminals in the background: use the bash tool with isBackground: true (and optional processName) to start long-lived processes (e.g. dev servers). Use shell_manage to list stored background processes, view their logs, or kill them. Only you can manage these background terminals.
 • Sub-agents (workers: general, ui, backend, test, review) exist only for you to invoke when you decide a task needs a specialist coder. Call delegate_to_worker only for substantial implementation, refactoring, or multi-step coding—not for chat, simple questions, or minor edits.
 • When you delegate, the worker reports back; you verify and synthesize.
 • IMPORTANT: If you decide to delegate, call delegate_to_worker IMMEDIATELY without generating any explanatory text first. Do not write "I'll delegate this" or similar—just call the tool directly.
 • If you have successfully completed a task or edit and are ready to save the work, use the commit_and_create_pr tool to commit and create a pull request automatically.`;
-const WORKER_SYSTEM_PROMPT = `You are a specialist Worker Agent. EXECUTE the assigned task using tools. QUALITY FIRST. VERIFY. If you have successfully completed a task, you may use the commit_and_create_pr tool to save the work.`;
+const WORKER_SYSTEM_PROMPT = `You are a specialist Worker Agent. EXECUTE the assigned task using tools. QUALITY FIRST. VERIFY. If you have successfully completed a task, you may use the commit_and_create_pr tool to save the work.
+FILE EDITS: ALWAYS create files with write_file and modify files with edit_file. NEVER use bash (cat >, tee, echo >, sed, heredocs) to write or modify file content — that bypasses the live code preview. Use bash only for running commands.`;
 const CRITIC_SYSTEM_PROMPT = `You are an independent, fresh Critic AI model evaluating the work of a DIFFERENT agent (the Worker). You must evaluate their work objectively. You may only use read_file, grep, glob, and ls to inspect the codebase. Review the Worker's output and output either PASS or FAIL. If FAIL, give brief, actionable feedback. Your final message must end with a line that starts with exactly PASS or exactly FAIL (e.g. "PASS" or "FAIL: missing tests").`;
 
 // ─── Kory Manager Class ─────────────────────────────────────────────────────
@@ -841,8 +843,18 @@ export class KoryManager {
     attachments?: Array<{ type: string; data: string; name: string }>,
   ): Promise<void> {
     koryLog.debug({ sessionId, reasoningLevel, preferredModel }, 'Entering handleDirectly');
-    const routing = this.resolveActiveRouting(preferredModel, 'general', true);
-    const provider = await this.providers.resolveProvider(routing.model, routing.provider);
+    let routing = this.resolveActiveRouting(preferredModel, 'general', true);
+    let provider = await this.providers.resolveProvider(routing.model, routing.provider);
+    // Mirror processTask's fallback: for "auto" (or no model), if the routed model has no
+    // available provider, fall back to the first available one — otherwise a configured
+    // session spuriously fails with "No provider." even though providers are connected.
+    if (!provider && (!preferredModel || preferredModel === 'auto')) {
+      const fallback = this.providers.getFirstAvailableRouting();
+      if (fallback) {
+        routing = { model: fallback.model, provider: fallback.provider };
+        provider = this.providers.resolveProvider(routing.model, routing.provider);
+      }
+    }
     if (!provider) throw new Error('No provider.');
     const providerName = provider.name as ProviderName;
     koryLog.debug({ routing, providerName }, 'Resolved routing and provider');
@@ -925,6 +937,10 @@ export class KoryManager {
       let turnCount = 0;
       let firstAskForDirectTools = true;
       let stoppedByUser = false;
+      // Track whether the run produced anything user-visible — so an empty LLM response
+      // surfaces a clear message instead of a silent "weird stop".
+      let streamedAnyContent = false;
+      let executedAnyTool = false;
 
       while (turnCount < 25) {
         if (abort.signal.aborted) {
@@ -963,6 +979,7 @@ export class KoryManager {
           tokensIn = Math.max(tokensIn, result.usage.tokensIn);
         if (typeof result.usage?.tokensOut === 'number')
           tokensOut = Math.max(tokensOut, result.usage.tokensOut);
+        if (result.content && result.content.trim()) streamedAnyContent = true;
 
         if (!result.success) break;
 
@@ -1003,6 +1020,7 @@ export class KoryManager {
               agentId: KORY_IDENTITY.id,
               toolResult,
             });
+            executedAnyTool = true;
             messages.push({
               role: 'tool',
               content: JSON.stringify(toolResult),
@@ -1020,9 +1038,22 @@ export class KoryManager {
       const lastAssistant = assistants.pop();
       const rawContent = lastAssistant?.content ?? '';
       const content = (typeof rawContent === 'string' ? rawContent : JSON.stringify(rawContent)).trim();
+
+      // No silent stops: if the model returned nothing user-visible (no streamed text, no
+      // tools), say so live instead of leaving the user staring at a finished spinner.
+      const emptyResponse = !stoppedByUser && !streamedAnyContent && !executedAnyTool && !content;
+      const EMPTY_NOTICE = 'The model returned an empty response. Please resend or rephrase your request.';
+      if (emptyResponse) {
+        this.emitWSMessage(sessionId, 'stream.delta', {
+          agentId: KORY_IDENTITY.id,
+          content: EMPTY_NOTICE,
+          model: routing.model,
+        });
+      }
+
       const toPersist = stoppedByUser
         ? '[Stopped by user.]'
-        : content || '[Task completed using tools.]';
+        : content || (emptyResponse ? EMPTY_NOTICE : '[Task completed using tools.]');
       koryLog.debug({ toPersist, sessionId }, 'Attempting to persist assistant message');
       let finalMessageId: string | undefined;
       if (this.messages) {
@@ -1132,6 +1163,20 @@ export class KoryManager {
     if (settings.localWebSearch === 'off') {
       tools = tools.filter((t) => t.name !== 'web_search');
     }
+
+    // Agent execution mode (the composer pill, persisted in agent settings): gate delegation.
+    //  • single → never delegate (remove the tool entirely — guaranteed solo)
+    //  • multi  → actively prefer delegating substantial coding to specialist workers
+    //  • auto   → Kory decides per-task (default)
+    const execMode = settings.agentExecutionMode ?? 'auto';
+    if (execMode === 'single') {
+      tools = tools.filter((t) => t.name !== 'delegate_to_worker');
+      systemPrompt +=
+        '\n\n• AGENT MODE: SOLO — Do NOT delegate. Complete the entire task yourself; the delegate_to_worker tool is unavailable this turn.';
+    } else if (execMode === 'multi') {
+      systemPrompt +=
+        '\n\n• AGENT MODE: MULTI-AGENT — The user explicitly wants a coordinated team. Prefer delegating substantial implementation, refactoring, or multi-step coding to specialist workers via delegate_to_worker, and synthesize their results. Still answer trivial questions yourself.';
+    }
     // If "fallback", we keep it in the list. The model can choose to use it if its native search fails or is unavailable.
 
     const streamSignal = withTimeoutSignal(signal, AGENT.LLM_STREAM_TIMEOUT_MS);
@@ -1153,8 +1198,6 @@ export class KoryManager {
     let hasToolCalls = false;
     let tokensIn = 0;
     let tokensOut = 0;
-    // Buffer content to avoid streaming if the turn only delegates to worker
-    let contentBuffer = '';
 
     for await (const event of stream) {
       if (signal?.aborted) throw new DOMException('Manager run aborted', 'AbortError');
@@ -1162,8 +1205,17 @@ export class KoryManager {
         throw new Error(event.error ?? 'LLM stream error');
       }
       if (event.type === 'content_delta') {
-        assistantContent += event.content ?? '';
-        contentBuffer += event.content ?? '';
+        const delta = event.content ?? '';
+        assistantContent += delta;
+        // Stream live, token-by-token — so the user sees text appear immediately (no
+        // "thinks then dumps" pause) and partial output survives a mid-stream error.
+        if (delta) {
+          this.emitWSMessage(sessionId, 'stream.delta', {
+            agentId: KORY_IDENTITY.id,
+            content: delta,
+            model: modelId,
+          });
+        }
       } else if (event.type === 'thinking_delta') {
         if (event.thinking) {
           this.emitWSMessage(sessionId, 'stream.thinking', {
@@ -1206,19 +1258,6 @@ export class KoryManager {
           pendingToolCalls.delete(event.toolCallId!);
         }
       }
-    }
-
-    // Only emit content if this turn doesn't solely delegate to a worker
-    const isDelegationOnly =
-      hasToolCalls &&
-      completedToolCalls.length === 1 &&
-      completedToolCalls[0]!.name === 'delegate_to_worker';
-    if (!isDelegationOnly && contentBuffer) {
-      this.emitWSMessage(sessionId, 'stream.delta', {
-        agentId: KORY_IDENTITY.id,
-        content: contentBuffer,
-        model: modelId,
-      });
     }
 
     messages.push({

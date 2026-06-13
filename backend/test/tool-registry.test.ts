@@ -80,11 +80,13 @@ describe('ToolRegistry', () => {
     expect(workerDefs.map((t) => t.name)).not.toContain('manager-tool');
     expect(workerDefs.map((t) => t.name)).not.toContain('critic-tool');
 
-    // Critic gets critic + any only (read-only tools)
+    // Critic gets critic + any only (read-only). NO-role/default tools are NOT given to the
+    // critic — that no-role fall-through is exactly how bash/write_file used to leak in.
     const criticDefs = registry.getToolDefsForRole('critic');
     expect(criticDefs.map((t) => t.name)).toEqual(
-      expect.arrayContaining(['critic-tool', 'any-tool', 'default-tool']),
+      expect.arrayContaining(['critic-tool', 'any-tool']),
     );
+    expect(criticDefs.map((t) => t.name)).not.toContain('default-tool');
     expect(criticDefs.map((t) => t.name)).not.toContain('manager-tool');
     expect(criticDefs.map((t) => t.name)).not.toContain('worker-tool');
   });

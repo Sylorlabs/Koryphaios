@@ -48,3 +48,13 @@ import '@fontsource/geist-sans/400.css';
 import '@fontsource/geist-sans/500.css';
 import '@fontsource/geist-sans/600.css';
 import '@fontsource/geist-sans/700.css';
+// Serif + slab — genuinely distinct from the sans/mono options.
+import '@fontsource/source-serif-4/400.css';
+import '@fontsource/source-serif-4/500.css';
+import '@fontsource/source-serif-4/600.css';
+import '@fontsource/source-serif-4/700.css';
+import '@fontsource/roboto-slab/300.css';
+import '@fontsource/roboto-slab/400.css';
+import '@fontsource/roboto-slab/500.css';
+import '@fontsource/roboto-slab/600.css';
+import '@fontsource/roboto-slab/700.css';

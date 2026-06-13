@@ -2,7 +2,8 @@ import { eq } from 'drizzle-orm';
 import { Elysia, t } from 'elysia';
 import { getContext } from '../../context';
 import { PROJECT_ROOT } from '../../runtime/paths';
-import { syncProviderConfigsToConfig } from '../../runtime/config';
+import { syncProviderConfigsToConfig, removeProviderFromConfig } from '../../runtime/config';
+import { customProviderId } from '../../providers/custom';
 import type { ProviderName } from '@koryphaios/shared';
 import { serverLog } from '../../logger';
 import { requireLocalRouteAuth } from '../../auth/local-route-auth';
@@ -15,6 +16,7 @@ import {
   startCodexDeviceAuth,
 } from '../../providers/codex';
 import { clearCodexAuthState, createCodexCLIAuthMarker, detectCodexAuthToken, detectClaudeCodeLogin, createClaudeCLIAuthMarker, detectGeminiCLIToken, clearCachedToken } from '../../providers/auth-utils';
+import { detectAgentClis } from '../../providers/cli-detection';
 import { googleAuth } from '../../providers/google-auth';
 import {
   clearKimiCodeAuthState,
@@ -426,6 +428,73 @@ export const providerRoutes = new Elysia({ prefix: '/api/providers' })
       ok: true,
       data: providers.getAvailableProviderTypes(),
     };
+  })
+  // Agent-CLI auto-detection: which coding CLIs (Claude Code, Codex, Gemini, Grok, Cursor)
+  // are installed + logged in on this machine, and which Koryphaios auto-enabled.
+  .get('/detect', async ({ request, set }) => {
+    if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
+    return {
+      ok: true,
+      data: detectAgentClis(),
+    };
+  })
+  // ─── Custom (bring-your-own) providers ──────────────────────────────────
+  // Add an OpenAI-compatible (or Anthropic/Gemini-compatible) endpoint with a base URL,
+  // optional API key, optional explicit model list, and optional custom headers.
+  .post(
+    '/custom',
+    async ({ request, body, set }) => {
+      if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
+      const label = body.label?.trim();
+      const baseUrl = body.baseUrl?.trim();
+      if (!label) {
+        set.status = 400;
+        return { ok: false, error: 'A display name is required' };
+      }
+      if (!baseUrl) {
+        set.status = 400;
+        return { ok: false, error: 'A base URL is required (e.g. https://api.example.com/v1)' };
+      }
+      const { providers } = getContext();
+      const id = customProviderId(label);
+      const result = providers.registerCustomProvider({
+        id,
+        label,
+        kind: body.kind ?? 'openai',
+        baseUrl,
+        apiKey: body.apiKey?.trim() || undefined,
+        authToken: body.authToken?.trim() || undefined,
+        headers: body.headers,
+        models: body.models?.map((m) => m.trim()).filter(Boolean),
+      });
+      if (!result.success) {
+        set.status = 400;
+        return { ok: false, error: result.error ?? 'Failed to add custom provider' };
+      }
+      syncProviderConfigsSafely(providers);
+      serverLog.info({ provider: id, kind: body.kind ?? 'openai' }, 'Custom provider added');
+      return { ok: true, data: { id, label, kind: body.kind ?? 'openai' } };
+    },
+    {
+      body: t.Object({
+        label: t.String(),
+        kind: t.Optional(
+          t.Union([t.Literal('openai'), t.Literal('anthropic'), t.Literal('gemini')]),
+        ),
+        baseUrl: t.String(),
+        apiKey: t.Optional(t.String()),
+        authToken: t.Optional(t.String()),
+        models: t.Optional(t.Array(t.String())),
+        headers: t.Optional(t.Record(t.String(), t.String())),
+      }),
+    },
+  )
+  .delete('/custom/:id', async ({ request, params: { id }, set }) => {
+    if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
+    const { providers } = getContext();
+    providers.removeCustomProvider(id as ProviderName);
+    if (process.env.NODE_ENV !== 'test') removeProviderFromConfig(PROJECT_ROOT, id);
+    return { ok: true };
   })
   .post('/:name/auth/start', async ({ request, params: { name }, set }) => {
     if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };

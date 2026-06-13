@@ -233,6 +233,28 @@ export function syncAgentSettingsToConfig(projectRoot: string, settings: any): v
 }
 
 /**
+ * Remove a provider entry from koryphaios.json (used for deleting custom providers).
+ * syncProviderConfigsToConfig only merges, so deletions need an explicit removal.
+ */
+export function removeProviderFromConfig(projectRoot: string, providerId: string): void {
+  const configPath = join(projectRoot, 'koryphaios.json');
+  if (!existsSync(configPath)) return;
+  const tempPath = `${configPath}.${process.pid}.tmp`;
+  try {
+    const config = JSON.parse(readFileSync(configPath, 'utf-8'));
+    if (config.providers && config.providers[providerId]) {
+      delete config.providers[providerId];
+      config.updatedAt = Date.now();
+      writeFileSync(tempPath, JSON.stringify(config, null, 2), 'utf-8');
+      renameSync(tempPath, configPath);
+      serverLog.info({ providerId }, 'Removed provider from koryphaios.json');
+    }
+  } catch (err) {
+    serverLog.warn({ err, providerId }, 'Failed to remove provider from koryphaios.json');
+  }
+}
+
+/**
  * Sync provider configurations back to koryphaios.json atomically.
  */
 export function syncProviderConfigsToConfig(

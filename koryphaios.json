@@ -31,9 +31,9 @@
     "approvalThresholdLines": 100,
     "localWebSearch": "fallback",
     "multiSourceResearch": true,
-    "updatedAt": 1781032321172
+    "updatedAt": 1781385946807
   },
-  "updatedAt": 1781032321172,
+  "updatedAt": 1781385946807,
   "providers": {
     "anthropic": {
       "name": "anthropic",
@@ -172,12 +172,6 @@
     },
     "deepinfra": {
       "name": "deepinfra",
-      "selectedModels": [],
-      "hideModelSelector": false,
-      "disabled": true
-    },
-    "firmware": {
-      "name": "firmware",
       "selectedModels": [],
       "hideModelSelector": false,
       "disabled": true

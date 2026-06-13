@@ -1,5 +1,10 @@
 import { afterAll, beforeAll, describe, expect, mock, test } from 'bun:test';
 import { existsSync, rmSync } from 'node:fs';
+// Real model catalogs (these module paths are NOT mocked) so the stub Provider classes
+// below expose the true catalogs — bun applies mock.module process-wide, so other test
+// files (copilot-models, provider-conformance) would otherwise see empty model lists.
+import { CopilotModels } from '../src/providers/models/copilot';
+import { CodexModels } from '../src/providers/models/codex';
 
 process.env.NODE_ENV = 'test';
 process.env.SESSION_TOKEN_SECRET =
@@ -63,7 +68,7 @@ mock.module('../src/providers/copilot', () => ({
       return !!this.config && !this.config.disabled;
     }
     listModels() {
-      return [];
+      return CopilotModels;
     }
     async *streamResponse() {}
   },
@@ -95,7 +100,7 @@ mock.module('../src/providers/codex', () => ({
       return !!this.config && !this.config.disabled;
     }
     listModels() {
-      return [];
+      return CodexModels;
     }
     async *streamResponse() {}
   },
@@ -109,6 +114,10 @@ mock.module('../src/providers/auth-utils', () => ({
   clearCodexAuthState: clearCodexAuthStateMock,
   isCodexCLIAuthMarker: (value: string | null | undefined) => typeof value === 'string' && value.startsWith('cli:codex:'),
   createCodexCLIAuthMarker: () => `cli:codex:${Date.now()}`,
+  detectClaudeCodeLogin: () => true,
+  createClaudeCLIAuthMarker: () => `cli:claude:${Date.now()}`,
+  detectGeminiCLIToken: () => null,
+  clearCachedToken: () => {},
 }));
 
 const { initDb } = await import('../src/db');
@@ -228,6 +237,9 @@ beforeAll(async () => {
 
 afterAll(() => {
   if (existsSync(dbPath)) rmSync(dbPath, { force: true });
+  // Undo the process-wide module mocks so other test files (copilot-models,
+  // provider-conformance) see the REAL codex/copilot/auth-utils modules.
+  mock.restore();
 });
 
 describe('provider routes', () => {
@@ -317,7 +329,9 @@ describe('provider routes', () => {
     expect(start.response.status).toBe(404);
     expect(start.body.ok).toBe(false);
 
-    const complete = await request('/api/providers/google/auth/complete', {
+    // openai is an API-key provider (not a browser/OAuth-managed one) → no auth flow.
+    // (google IS browser-auth managed, so it would not 404 here.)
+    const complete = await request('/api/providers/openai/auth/complete', {
       method: 'POST',
     });
 

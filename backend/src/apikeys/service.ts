@@ -108,18 +108,50 @@ export class ApiKeyService {
     return { valid: false, error: 'Invalid API key' };
   }
 
-  async listForUser(userId: string): Promise<ApiKey[]> {
+  /** List a user's keys WITHOUT exposing the hashed key. */
+  async listForUser(userId: string): Promise<Omit<ApiKey, 'hashedKey'>[]> {
     const rows = await db
       .select()
       .from(apiKeys)
       .where(eq(apiKeys.userId, userId))
       .orderBy(desc(apiKeys.createdAt));
-    return rows.map(this.rowToApiKey);
+    return rows.map((row) => {
+      const key = this.rowToApiKey(row);
+      delete (key as Partial<ApiKey>).hashedKey;
+      return key;
+    });
+  }
+
+  /** Get a single key owned by the user (null if missing or not owned). */
+  async get(userId: string, id: string): Promise<ApiKey | null> {
+    const [row] = await db
+      .select()
+      .from(apiKeys)
+      .where(and(eq(apiKeys.id, id), eq(apiKeys.userId, userId)))
+      .limit(1);
+    return row ? this.rowToApiKey(row) : null;
+  }
+
+  /** Revoke (deactivate) a key. Returns false if the key doesn't exist or isn't the user's. */
+  async revoke(userId: string, id: string): Promise<boolean> {
+    const rows = await db
+      .update(apiKeys)
+      .set({ isActive: 0 })
+      .where(and(eq(apiKeys.id, id), eq(apiKeys.userId, userId)))
+      .returning();
+    if (rows.length > 0) {
+      await this.audit
+        .log({ userId, action: 'api_key_revoke', success: true, timestamp: Date.now() })
+        .catch(() => {});
+    }
+    return rows.length > 0;
   }
 
   hasScope(apiKey: ApiKey, requiredScope: ApiKeyScope): boolean {
     if (apiKey.scopes.includes('admin')) return true;
     if (apiKey.scopes.includes(requiredScope)) return true;
+    // Scope hierarchy: write implies read.
+    if (requiredScope === 'read' && apiKey.scopes.includes('write')) return true;
     if (requiredScope.includes(':')) {
       const [provider] = requiredScope.split(':');
       if (apiKey.scopes.includes(`${provider}:*`)) return true;
