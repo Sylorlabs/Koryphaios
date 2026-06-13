@@ -54,7 +54,7 @@ export const spendCapsRoutes = new Elysia({ prefix: '/api/spend-caps' })
       day: await getGlobalSpendStats('day'),
       month: await getGlobalSpendStats('month'),
     };
-    const pausedSessions = await getAllPausedSessions();
+    const pausedSessions = getAllPausedSessions();
 
     return {
       ok: true,
@@ -67,8 +67,8 @@ export const spendCapsRoutes = new Elysia({ prefix: '/api/spend-caps' })
   .get('/sessions/:id', async ({ request, params: { id }, set }) => {
     if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
     const usage = await getSessionUsage(id);
-    const isPaused = await isSessionPaused(id);
-    const pauseRecord = isPaused ? await getSessionPauseRecord(id) : null;
+    const isPaused = isSessionPaused(id);
+    const pauseRecord = isPaused ? getSessionPauseRecord(id) : null;
 
     return {
       ok: true,
@@ -80,7 +80,7 @@ export const spendCapsRoutes = new Elysia({ prefix: '/api/spend-caps' })
   })
   .post('/sessions/:id/resume', async ({ request, params: { id }, set }) => {
     if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
-    if (!(await isSessionPaused(id))) {
+    if (!isSessionPaused(id)) {
       set.status = 400;
       return { ok: false, error: 'Session is not paused' };
     }

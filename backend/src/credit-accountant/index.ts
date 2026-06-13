@@ -53,6 +53,47 @@ export function initCreditAccountant(dataDir: string, pollingConfig?: PollingCon
   }
 }
 
+// ─── Subscription quota tracking ────────────────────────────────────────────
+// Subscription providers (Claude Code, Codex, Copilot, …) are flat-rate: there is
+// no per-token dollar "remaining balance" to report. Instead they expose rate-limit
+// windows. We keep the latest window in memory so the billing route can surface real
+// quota status for these providers instead of meaningless $0 balances.
+
+export interface SubscriptionStatus {
+  provider: string;
+  /** e.g. "allowed" | "allowed_warning" | "rejected" */
+  status?: string;
+  /** e.g. "five_hour" */
+  rateLimitType?: string;
+  /** epoch seconds when the current window resets */
+  resetsAt?: number;
+  /** epoch ms when this status was last observed */
+  updatedAt: number;
+}
+
+const subscriptionStatuses = new Map<string, SubscriptionStatus>();
+
+/** Record a Claude Code rate-limit window observed from the CLI harness stream. */
+export function recordClaudeCodeRateLimit(info: {
+  status?: string;
+  resetsAt?: number;
+  rateLimitType?: string;
+  overageStatus?: string;
+}): void {
+  subscriptionStatuses.set('claude', {
+    provider: 'claude',
+    status: info.status,
+    rateLimitType: info.rateLimitType,
+    resetsAt: info.resetsAt,
+    updatedAt: Date.now(),
+  });
+}
+
+/** Latest known subscription quota windows, for the billing/subscription route. */
+export function getSubscriptionStatuses(): SubscriptionStatus[] {
+  return [...subscriptionStatuses.values()];
+}
+
 /**
  * Reconciliation payload for API/UI: local estimate, cloud snapshots, drift.
  */

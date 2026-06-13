@@ -1,5 +1,6 @@
 export { ProviderRegistry } from './registry';
 export { AnthropicProvider } from './anthropic';
+export { ClaudeCodeProvider } from './claude-code';
 export {
   OpenAIProvider,
   GroqProvider,

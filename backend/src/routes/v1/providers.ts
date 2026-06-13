@@ -14,7 +14,7 @@ import {
   resetCodexDeviceAuthSessions,
   startCodexDeviceAuth,
 } from '../../providers/codex';
-import { clearCodexAuthState, createCodexCLIAuthMarker, detectCodexAuthToken, detectClaudeCodeToken, detectGeminiCLIToken, clearCachedToken } from '../../providers/auth-utils';
+import { clearCodexAuthState, createCodexCLIAuthMarker, detectCodexAuthToken, detectClaudeCodeLogin, createClaudeCLIAuthMarker, detectGeminiCLIToken, clearCachedToken } from '../../providers/auth-utils';
 import { googleAuth } from '../../providers/google-auth';
 import {
   clearKimiCodeAuthState,
@@ -137,29 +137,28 @@ async function startBrowserAuth(
         };
       }
       case 'claude': {
-        // Detect existing Claude CLI authentication
-        const detected = detectClaudeCodeToken();
-        if (detected.token) {
+        // Claude Code subscription connects through the official `claude` CLI harness.
+        // We never store the raw OAuth token — only an opt-in marker; the CLI owns auth.
+        if (detectClaudeCodeLogin()) {
           const { providers } = getContext();
           const setResult = await providers.setCredentials('claude', {
-            authToken: detected.token,
-            baseUrl: detected.baseUrl,
+            authToken: createClaudeCLIAuthMarker(),
           });
           if (!setResult.success) {
             return { ok: false, error: setResult.error ?? 'Failed to activate Claude auth' };
           }
           syncProviderConfigsSafely(providers);
-          serverLog.info({ provider: name }, 'Claude Code auto-connected via CLI auth');
+          serverLog.info({ provider: name }, 'Claude Code connected via CLI subscription');
           return {
             ok: true,
             data: {
               status: 'connected',
               provider: 'claude',
-              message: 'Claude Code connected via CLI credentials',
+              message: 'Claude Code connected via your Claude subscription (CLI harness)',
             },
           };
         }
-        serverLog.info({ provider: name }, 'No Claude CLI auth detected');
+        serverLog.info({ provider: name }, 'No Claude CLI login detected');
         return {
           ok: true,
           data: {
@@ -262,14 +261,12 @@ async function completeBrowserAuth(
         return { ok: true, data: { status: 'connected', provider: 'codex' } };
       }
       case 'claude': {
-        clearCachedToken('claude-full');
-        const detected = detectClaudeCodeToken();
-        if (!detected.token) {
+        clearCachedToken('claude-login');
+        if (!detectClaudeCodeLogin()) {
           return { ok: false, error: 'Claude Code is not logged in. Run "claude login" in your terminal first.' };
         }
         const claudeResult = await providers.setCredentials('claude', {
-          authToken: detected.token,
-          baseUrl: detected.baseUrl,
+          authToken: createClaudeCLIAuthMarker(),
         });
         if (!claudeResult.success) {
           return { ok: false, error: claudeResult.error ?? 'Failed to activate Claude auth' };

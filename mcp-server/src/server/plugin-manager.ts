@@ -18,7 +18,7 @@ export interface PluginContext {
   registerTool: (tool: any) => Promise<void>;
   registerResource: (resource: any) => Promise<void>;
   registerPrompt: (prompt: any) => Promise<void>;
-  config: any;
+  config: Record<string, unknown>;
 }
 
 export class PluginManager {

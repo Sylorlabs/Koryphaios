@@ -219,7 +219,7 @@ export class IntegrationManager extends EventEmitter {
   /**
    * Update configuration for a specific integration
    */
-  async updateIntegrationConfig(name: string, config: any): Promise<void> {
+  async updateIntegrationConfig(name: string, config: Record<string, unknown>): Promise<void> {
     const integration = this.integrations.get(name);
     if (!integration) {
       throw new Error(`Integration ${name} is not initialized`);
@@ -378,7 +378,7 @@ export class IntegrationManager extends EventEmitter {
     });
 
     // Forward configuration updates
-    integration.on('configUpdated', (config: any) => {
+    integration.on('configUpdated', (config: Record<string, unknown>) => {
       this.emit('integrationConfigUpdated', name, config);
     });
   }

@@ -42,6 +42,7 @@ export function clearCachedToken(key: string): void {
 }
 
 const CODEX_CLI_AUTH_PREFIX = 'cli:codex:';
+const CLAUDE_CLI_AUTH_PREFIX = 'cli:claude:';
 const KORY_CODEX_HOME = join(PROJECT_ROOT, '.koryphaios', 'codex-home');
 
 export function getKoryCodexHome(): string {
@@ -134,6 +135,68 @@ export function detectClaudeCodeToken(): { token: string | null; baseUrl?: strin
   );
 
   return { token: cached };
+}
+
+// ─── Claude Code subscription (CLI harness) auth ────────────────────────────
+// The Claude Code subscription is driven through the official `claude` CLI, which
+// owns its own OAuth credentials. We never persist or transmit the raw subscription
+// token ourselves — instead we store an opaque marker indicating the user opted in,
+// and the CLI authenticates each request. This keeps Koryphaios compliant with
+// Anthropic's terms (subscription auth must flow through the Claude Code product,
+// not direct API calls).
+
+export function isClaudeCLIAuthMarker(value: string | null | undefined): boolean {
+  return typeof value === 'string' && value.startsWith(CLAUDE_CLI_AUTH_PREFIX);
+}
+
+export function createClaudeCLIAuthMarker(): string {
+  return `${CLAUDE_CLI_AUTH_PREFIX}${Date.now()}`;
+}
+
+/**
+ * Detects whether the Claude Code CLI is logged in (Pro/Max subscription or OAuth),
+ * without depending on the exact on-disk token format. Returns true if any recognized
+ * login signal is present. The CLI remains the source of truth for the actual token.
+ */
+export function detectClaudeCodeLogin(): boolean {
+  return (
+    getCachedToken(
+      'claude-login',
+      () => {
+        // 1. Explicit OAuth token via environment
+        const envToken = process.env.CLAUDE_CODE_OAUTH_TOKEN;
+        if (typeof envToken === 'string' && envToken.trim()) return 'yes';
+
+        const home = process.env.HOME ?? process.env.USERPROFILE ?? '';
+        if (!home) return null;
+
+        // 2. Claude CLI credential files (subscription OAuth lives here)
+        const credentialPaths = [
+          join(home, '.claude', '.credentials.json'),
+          join(home, '.claude', '.credentials'),
+          join(home, '.claude', 'credentials.json'),
+          join(home, '.config', 'claude', 'credentials.json'),
+        ];
+        for (const path of credentialPaths) {
+          if (existsSync(path)) return 'yes';
+        }
+
+        // 3. ~/.claude.json with a linked OAuth account
+        const claudeJson = join(home, '.claude.json');
+        if (existsSync(claudeJson)) {
+          try {
+            const data = JSON.parse(readFileSync(claudeJson, 'utf-8'));
+            if (data?.oauthAccount) return 'yes';
+          } catch {
+            // Ignore malformed config
+          }
+        }
+
+        return null;
+      },
+      { cacheNull: false },
+    ) === 'yes'
+  );
 }
 
 /**
