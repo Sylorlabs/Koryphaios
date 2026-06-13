@@ -13,7 +13,6 @@
 
 import type { ProviderConfig, ModelDef } from '@koryphaios/shared';
 import { spawn } from 'node:child_process';
-import { tmpdir } from 'node:os';
 import {
   type Provider,
   type ProviderContentBlock,
@@ -29,24 +28,36 @@ import { recordClaudeCodeRateLimit } from '../credit-accountant';
 const CLAUDE_STREAM_TIMEOUT_MS = 300_000;
 const DEFAULT_CLI_MODEL = 'sonnet';
 
-// Claude Code's built-in agentic tools — disabled so this acts as a pure model
-// endpoint. Koryphaios drives its own tool loop for every provider.
-const DISABLED_TOOLS = [
-  'Bash',
-  'BashOutput',
-  'KillShell',
+// Claude Code runs as a FULL AGENT here: it executes its OWN tools (Write/Edit/Bash/…) in
+// the project directory, and we parse its stream to surface progress, tool activity, and
+// file edits (the live diff preview). We pre-approve the standard toolset so a headless
+// `-p` run never blocks on an interactive permission prompt.
+const ALLOWED_TOOLS = [
+  'Read',
   'Edit',
   'Write',
   'MultiEdit',
   'NotebookEdit',
-  'Read',
+  'Bash',
   'Glob',
   'Grep',
+  'LS',
+  'TodoWrite',
   'WebFetch',
   'WebSearch',
-  'Task',
-  'TodoWrite',
 ].join(',');
+
+interface ClaudeToolUseBlock {
+  type: string; // 'text' | 'tool_use' | 'tool_result'
+  text?: string;
+  id?: string;
+  name?: string;
+  input?: Record<string, unknown>;
+  // tool_result blocks (in user messages)
+  tool_use_id?: string;
+  is_error?: boolean;
+  content?: string | Array<{ type?: string; text?: string }>;
+}
 
 interface ClaudeStreamEnvelope {
   type: string;
@@ -58,6 +69,10 @@ interface ClaudeStreamEnvelope {
     content_block?: { type?: string; thinking?: string };
     message?: { usage?: ClaudeUsage };
   };
+  // assistant/user payloads carry a full message with content blocks (tool_use/tool_result)
+  message?:
+    | string
+    | { content?: ClaudeToolUseBlock[]; usage?: ClaudeUsage };
   // result payloads
   is_error?: boolean;
   result?: string;
@@ -66,7 +81,6 @@ interface ClaudeStreamEnvelope {
   total_cost_usd?: number;
   // error payloads
   error?: string | { message?: string };
-  message?: string;
   // rate_limit_event payloads
   rate_limit_info?: ClaudeRateLimitInfo;
 }
@@ -126,16 +140,21 @@ export class ClaudeCodeProvider implements Provider {
       '--verbose',
       '--model',
       cliModel,
-      '--disallowed-tools',
-      DISABLED_TOOLS,
+      // Agentic, non-interactive: auto-approve edits + the pre-approved toolset so a
+      // headless run never hangs waiting for a permission prompt.
+      '--permission-mode',
+      'acceptEdits',
+      '--allowedTools',
+      ALLOWED_TOOLS,
     ];
     if (request.systemPrompt?.trim()) {
       args.push('--append-system-prompt', request.systemPrompt);
     }
 
+    // Run in the project directory so the CLI edits the real files (falls back to cwd).
+    const cwd = request.workingDirectory?.trim() || process.cwd();
     const child = spawn('claude', args, {
-      // Neutral working dir: this is a generation endpoint, not an in-repo agent.
-      cwd: tmpdir(),
+      cwd,
       stdio: ['pipe', 'pipe', 'pipe'],
       env: { ...process.env },
     });
@@ -172,6 +191,8 @@ export class ClaudeCodeProvider implements Provider {
     let buffer = '';
     let sawContent = false;
     let emittedComplete = false;
+    // Correlate tool_use (assistant msg) → tool_result (user msg) for non-file tools.
+    const pendingTools = new Map<string, { name: string; input: Record<string, unknown> }>();
 
     try {
       for await (const chunk of child.stdout as AsyncIterable<Buffer>) {
@@ -188,8 +209,13 @@ export class ClaudeCodeProvider implements Provider {
           } catch {
             continue;
           }
-          for (const event of this.mapEnvelope(envelope)) {
-            if (event.type === 'content_delta' || event.type === 'thinking_delta') {
+          for (const event of this.mapEnvelope(envelope, pendingTools)) {
+            if (
+              event.type === 'content_delta' ||
+              event.type === 'thinking_delta' ||
+              event.type === 'file_edit' ||
+              event.type === 'tool_executed'
+            ) {
               sawContent = true;
             }
             if (event.type === 'complete') emittedComplete = true;
@@ -231,7 +257,10 @@ export class ClaudeCodeProvider implements Provider {
     }
   }
 
-  private *mapEnvelope(envelope: ClaudeStreamEnvelope): Generator<ProviderEvent> {
+  private *mapEnvelope(
+    envelope: ClaudeStreamEnvelope,
+    pendingTools: Map<string, { name: string; input: Record<string, unknown> }>,
+  ): Generator<ProviderEvent> {
     switch (envelope.type) {
       case 'stream_event': {
         const event = envelope.event;
@@ -250,6 +279,37 @@ export class ClaudeCodeProvider implements Provider {
             tokensIn: u.input_tokens,
             tokensOut: u.output_tokens,
             tokensCache: u.cache_read_input_tokens,
+          };
+        }
+        return;
+      }
+      case 'assistant': {
+        // Full assistant message — surface the tool_use blocks the agent is running.
+        // (Text is streamed live via stream_event text_delta; skip it here to avoid dupes.)
+        const msg = envelope.message;
+        if (!msg || typeof msg === 'string' || !Array.isArray(msg.content)) return;
+        for (const block of msg.content) {
+          if (block.type !== 'tool_use' || !block.name) continue;
+          const input = (block.input ?? {}) as Record<string, unknown>;
+          yield* this.mapToolUse(block.id ?? '', block.name, input, pendingTools);
+        }
+        return;
+      }
+      case 'user': {
+        // Tool results for the non-file tools we're tracking → surface as executed actions.
+        const msg = envelope.message;
+        if (!msg || typeof msg === 'string' || !Array.isArray(msg.content)) return;
+        for (const block of msg.content) {
+          if (block.type !== 'tool_result' || !block.tool_use_id) continue;
+          const pending = pendingTools.get(block.tool_use_id);
+          if (!pending) continue;
+          pendingTools.delete(block.tool_use_id);
+          yield {
+            type: 'tool_executed',
+            toolName: pending.name,
+            toolInput: JSON.stringify(pending.input),
+            toolOutput: flattenToolResult(block.content),
+            isError: block.is_error === true,
           };
         }
         return;
@@ -291,6 +351,57 @@ export class ClaudeCodeProvider implements Provider {
         return;
     }
   }
+
+  /** Map a built-in tool_use block → a display event (file_edit for writes, else pending). */
+  private *mapToolUse(
+    id: string,
+    name: string,
+    input: Record<string, unknown>,
+    pendingTools: Map<string, { name: string; input: Record<string, unknown> }>,
+  ): Generator<ProviderEvent> {
+    const filePath = typeof input.file_path === 'string' ? input.file_path : undefined;
+    if (name === 'Write' && filePath) {
+      yield {
+        type: 'file_edit',
+        filePath,
+        fileContent: String(input.content ?? ''),
+        fileOperation: 'create',
+      };
+      return;
+    }
+    if (name === 'Edit' && filePath) {
+      yield {
+        type: 'file_edit',
+        filePath,
+        fileOldContent: typeof input.old_string === 'string' ? input.old_string : undefined,
+        fileContent: String(input.new_string ?? ''),
+        fileOperation: 'edit',
+      };
+      return;
+    }
+    if (name === 'MultiEdit' && filePath && Array.isArray(input.edits)) {
+      for (const e of input.edits as Array<{ old_string?: string; new_string?: string }>) {
+        yield {
+          type: 'file_edit',
+          filePath,
+          fileOldContent: e.old_string,
+          fileContent: String(e.new_string ?? ''),
+          fileOperation: 'edit',
+        };
+      }
+      return;
+    }
+    // Non-file tool (Bash, Read, Grep, …): surface it once its result arrives.
+    if (id) pendingTools.set(id, { name, input });
+  }
+}
+
+function flattenToolResult(
+  content: string | Array<{ type?: string; text?: string }> | undefined,
+): string {
+  if (typeof content === 'string') return content;
+  if (Array.isArray(content)) return content.map((c) => c?.text ?? '').join('');
+  return '';
 }
 
 function extractError(envelope: ClaudeStreamEnvelope): string | undefined {
