@@ -19,6 +19,7 @@ export const ProviderNameSchema = z
     'copilot',
     'codex',
     'grok',
+    'cursor',
     'openrouter',
     'groq',
     'xai',

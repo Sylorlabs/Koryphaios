@@ -5,8 +5,45 @@ import {
   getSubscriptionStatuses,
 } from '../../credit-accountant';
 import { requireLocalRouteAuth } from '../../auth/local-route-auth';
+import { MODEL_CATALOG } from '../../providers/models';
+import { PROVIDER_AUTH_MODE } from '../../providers/constants';
+import type { ProviderName } from '@koryphaios/shared';
 
-export const billingRoutes = new Elysia({ prefix: '/api/billing' }).get(
+export const billingRoutes = new Elysia({ prefix: '/api/billing' })
+  // Central pricing hub: per-provider model pricing from the single source of truth
+  // (the model catalog / ModelDefs). Subscription/CLI providers are flat-rate (no per-token cost).
+  .get('/pricing', async ({ request, set }) => {
+    if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
+    const byProvider = new Map<
+      string,
+      Array<{ id: string; name: string; inputPerM: number | null; outputPerM: number | null; cachedInputPerM: number | null }>
+    >();
+    for (const m of Object.values(MODEL_CATALOG)) {
+      const list = byProvider.get(m.provider) ?? [];
+      list.push({
+        id: m.id,
+        name: m.name,
+        inputPerM: m.costPerMInputTokens ?? null,
+        outputPerM: m.costPerMOutputTokens ?? null,
+        cachedInputPerM: m.costPerMInputCached ?? null,
+      });
+      byProvider.set(m.provider, list);
+    }
+    const providers = [...byProvider.entries()]
+      .map(([name, models]) => {
+        const authMode = PROVIDER_AUTH_MODE[name as ProviderName];
+        // Subscription = CLI/auth-only providers OR providers whose models carry no per-token price.
+        const metered = models.some((x) => (x.inputPerM ?? 0) > 0 || (x.outputPerM ?? 0) > 0);
+        return {
+          name,
+          subscription: authMode === 'auth_only' || !metered,
+          models: models.sort((a, b) => (b.inputPerM ?? 0) - (a.inputPerM ?? 0)),
+        };
+      })
+      .sort((a, b) => a.name.localeCompare(b.name));
+    return { ok: true, providers };
+  })
+  .get(
   '/credits',
   async ({ request, set }) => {
     if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };

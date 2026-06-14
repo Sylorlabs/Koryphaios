@@ -97,7 +97,7 @@
     openrouter: 'OpenRouter', groq: 'Groq', copilot: 'GitHub Copilot', azure: 'Azure OpenAI',
     bedrock: 'AWS Bedrock', vertexai: 'Vertex AI', local: 'Local (custom endpoint)', ollama: 'Ollama',
     lmstudio: 'LM Studio', llamacpp: 'Llama.cpp', opencodezen: 'OpenCodeZen',
-    claude: 'Claude Code', codex: 'OpenAI Codex', grok: 'Grok Build', kimicode: 'Kimi Code',
+    claude: 'Claude Code', codex: 'OpenAI Codex', grok: 'Grok Build', cursor: 'Cursor', kimicode: 'Kimi Code',
     moonshot: 'Moonshot AI / Kimi API', mistral: 'Mistral AI',
   };
 
@@ -227,7 +227,7 @@
       ovhcloud: 'ovh-...', stackit: '...', nebius: '', togetherai: 'sk-...',
       venice: 'sk-...', zenmux: 'sk-...', opencodezen: 'Get key at opencode.ai/auth',
       firmware: 'sk-...', '302ai': 'sk-...', mistralai: 'sk-...',
-      claude: 'Claude auth token', codex: 'Auth with ChatGPT', grok: 'Run "grok login" (or set GROK_CODE_XAI_API_KEY)',
+      claude: 'Claude auth token', codex: 'Auth with ChatGPT', grok: 'Run "grok login" (or set GROK_CODE_XAI_API_KEY)', cursor: 'Run "cursor-agent login" (or set CURSOR_API_KEY)',
       mistral: 'sk-...', cohere: 'sk-...', perplexity: 'pplx-...', luma: 'lm-...',
       fal: 'sk-...', elevenlabs: 'sk-...', assemblyai: 'sk-...', deepgram: 'sk-...',
       gladia: 'sk-...', lmnt: 'sk-...', azurecognitive: 'sk-...', sapai: 'sk-...',
@@ -1331,6 +1331,20 @@
   let billingLoading = $state(false);
   let billingCredits = $state<any>(null);
   let billingError = $state<string | null>(null);
+  // Central pricing hub data (per-provider model pricing).
+  let pricing = $state<Array<{ name: string; subscription: boolean; models: Array<{ id: string; name: string; inputPerM: number | null; outputPerM: number | null; cachedInputPerM: number | null }> }>>([]);
+  let pricingExpanded = $state<Set<string>>(new Set());
+
+  function fmtPerM(v: number | null): string {
+    if (v == null) return '—';
+    if (v === 0) return 'free';
+    return '$' + (v >= 1 ? v.toFixed(2) : v.toFixed(3)).replace(/\.?0+$/, '') + '/M';
+  }
+  function togglePricing(name: string) {
+    const next = new Set(pricingExpanded);
+    next.has(name) ? next.delete(name) : next.add(name);
+    pricingExpanded = next;
+  }
 
   async function loadBillingCredits() {
     billingLoading = true; billingError = null;
@@ -1339,6 +1353,12 @@
       if (!res.ok) { billingError = 'Billing API not available'; return; }
       const data = await parseJsonResponse(res);
       billingCredits = data;
+      // Load the central pricing hub alongside credits.
+      try {
+        const pr = await apiFetch('/api/billing/pricing');
+        const pd = await parseJsonResponse<{ ok?: boolean; providers?: typeof pricing }>(pr);
+        if (pd?.ok && Array.isArray(pd.providers)) pricing = pd.providers;
+      } catch { /* pricing is supplementary */ }
     } catch (e: any) { billingError = e.message; }
     finally { billingLoading = false; }
   }
@@ -2140,6 +2160,77 @@
             {/if}
           </div>
         </div>
+
+        <!-- Subscription / plan usage -->
+        {#if billingCredits?.subscriptions?.length}
+          <div class="space-y-4">
+            <h3 class="text-sm font-bold text-[var(--color-text-primary)] ml-1">Subscription Usage</h3>
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              {#each billingCredits.subscriptions as sub (sub.provider)}
+                <div class="flex items-center justify-between p-4 bg-[var(--color-surface-2)] rounded-xl border border-[var(--color-border)]">
+                  <div class="flex items-center gap-3">
+                    <div class="w-8 h-8 rounded-lg bg-[var(--color-surface-3)] flex items-center justify-center p-1.5 shrink-0">
+                      <ProviderIcon provider={sub.provider} size={20} class="w-full h-full" />
+                    </div>
+                    <span class="text-xs font-semibold">{getProviderDisplayLabel(sub.provider)}</span>
+                  </div>
+                  <div class="text-right">
+                    <div class="text-[11px] font-semibold {sub.status === 'rejected' ? 'text-red-400' : sub.status === 'allowed_warning' ? 'text-amber-400' : 'text-emerald-400'}">
+                      {sub.status === 'rejected' ? 'Rate-limited' : sub.status === 'allowed_warning' ? 'Near limit' : 'OK'}
+                    </div>
+                    {#if sub.resetsAtMs}
+                      <div class="text-[10px] text-[var(--color-text-muted)]">resets {new Date(sub.resetsAtMs).toLocaleTimeString()}</div>
+                    {/if}
+                  </div>
+                </div>
+              {/each}
+            </div>
+          </div>
+        {/if}
+
+        <!-- Central pricing hub: per-million-token rates for every provider + CLI -->
+        {#if pricing.length}
+          <div class="space-y-3">
+            <div>
+              <h3 class="text-sm font-bold text-[var(--color-text-primary)] ml-1">Model Pricing</h3>
+              <p class="text-[10px] text-[var(--color-text-muted)] ml-1">Per-million-token rates across all providers &amp; CLIs. Subscription/CLI providers are flat-rate.</p>
+            </div>
+            <div class="space-y-2">
+              {#each pricing as p (p.name)}
+                <div class="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-1)] overflow-hidden">
+                  <button class="w-full flex items-center gap-3 px-4 py-3 text-left hover:brightness-110" onclick={() => togglePricing(p.name)}>
+                    <div class="w-7 h-7 rounded-lg bg-[var(--color-surface-3)] flex items-center justify-center p-1.5 shrink-0">
+                      <ProviderIcon provider={p.name} size={18} class="w-full h-full" />
+                    </div>
+                    <span class="text-xs font-semibold flex-1">{getProviderDisplayLabel(p.name)}</span>
+                    {#if p.subscription}
+                      <span class="text-[10px] px-1.5 py-0.5 rounded-full bg-[var(--color-surface-3)] text-[var(--color-text-muted)]">subscription</span>
+                    {/if}
+                    <span class="text-[10px] text-[var(--color-text-muted)]">{p.models.length} models</span>
+                  </button>
+                  {#if pricingExpanded.has(p.name)}
+                    <div class="border-t border-[var(--color-border)]">
+                      {#if p.subscription}
+                        <div class="px-4 py-3 text-[11px] text-[var(--color-text-muted)]">Flat-rate subscription — no per-token cost.</div>
+                      {:else}
+                        <div class="grid grid-cols-[1fr_auto_auto] gap-x-4 gap-y-1.5 px-4 py-3 text-[11px] font-mono">
+                          <div class="text-[10px] uppercase tracking-wide text-[var(--color-text-muted)]">Model</div>
+                          <div class="text-[10px] uppercase tracking-wide text-[var(--color-text-muted)] text-right">In</div>
+                          <div class="text-[10px] uppercase tracking-wide text-[var(--color-text-muted)] text-right">Out</div>
+                          {#each p.models as m (m.id)}
+                            <div class="truncate text-[var(--color-text-secondary)]">{m.name}</div>
+                            <div class="text-right text-[var(--color-text-primary)]">{fmtPerM(m.inputPerM)}</div>
+                            <div class="text-right text-[var(--color-text-primary)]">{fmtPerM(m.outputPerM)}</div>
+                          {/each}
+                        </div>
+                      {/if}
+                    </div>
+                  {/if}
+                </div>
+              {/each}
+            </div>
+          </div>
+        {/if}
       </div>
 
       <!-- Memory Tab -->

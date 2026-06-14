@@ -29,6 +29,7 @@ import { CopilotProvider, exchangeGitHubTokenForCopilotAsync } from './copilot';
 import { CodexProvider } from './codex';
 import { ClaudeCodeProvider } from './claude-code';
 import { GrokBuildProvider } from './grok-build';
+import { CursorProvider } from './cursor';
 import { BedrockProvider } from './bedrock';
 import { GitLabProvider } from './gitlab';
 import { SapAiProvider } from './sapai';
@@ -47,7 +48,7 @@ import {
   type Provider,
 } from './types';
 import { withRetry } from './utils';
-import { recordUsage as creditRecordUsage } from '../credit-accountant';
+import { recordUsage as creditRecordUsage, getSubscriptionStatuses } from '../credit-accountant';
 import {
   ENV_API_KEY_MAP,
   ENV_URL_MAP,
@@ -367,14 +368,35 @@ class ProviderRegistry {
   }
 
   /** Return the first available provider and one of its non-legacy models for "auto" fallback. */
-  getFirstAvailableRouting(): { model: string; provider: ProviderName } | undefined {
+  /** True if a subscription provider is currently rate-limited (its quota window was rejected). */
+  isProviderThrottled(name: ProviderName): boolean {
+    return getSubscriptionStatuses().find((s) => s.provider === name)?.status === 'rejected';
+  }
+
+  /**
+   * Pick a usable provider/model for "auto" routing — the smart-router fallback. Skips
+   * providers that are unhealthy (circuit open), rate-limited (subscription rejected), or
+   * excluded. When `preferCheap` is set (e.g. the user is over their spend cap) it prefers the
+   * cheapest available model (subscription/local = $0), otherwise keeps configured order.
+   */
+  getFirstAvailableRouting(opts?: {
+    exclude?: (name: ProviderName) => boolean;
+    preferCheap?: boolean;
+  }): { model: string; provider: ProviderName } | undefined {
+    const candidates: Array<{ model: string; provider: ProviderName; cost: number }> = [];
     for (const provider of this.getAvailable()) {
       if (provider.name === 'vertexai' || this.isCircuitOpen(provider.name)) continue;
+      if (this.isProviderThrottled(provider.name as ProviderName)) continue;
+      if (opts?.exclude?.(provider.name as ProviderName)) continue;
       const models = provider.listModels().filter((m) => !isLegacyModel(m));
       const first = models[0];
-      if (first) return { model: first.id, provider: provider.name as ProviderName };
+      if (!first) continue;
+      const cost = (first.costPerMInputTokens ?? 0) + (first.costPerMOutputTokens ?? 0);
+      candidates.push({ model: first.id, provider: provider.name as ProviderName, cost });
     }
-    return undefined;
+    if (candidates.length === 0) return undefined;
+    if (opts?.preferCheap) candidates.sort((a, b) => a.cost - b.cost);
+    return { model: candidates[0].model, provider: candidates[0].provider };
   }
 
   /** Execute a stream request with automatic retries and circuit breaker. */
@@ -1000,6 +1022,9 @@ class ProviderRegistry {
       case 'grok':
         // Grok Build subscription — runs the official `grok` CLI harness (no direct API calls).
         return new GrokBuildProvider(config);
+      case 'cursor':
+        // Cursor subscription — runs the official `cursor-agent` CLI as a full agent.
+        return new CursorProvider(config);
       case 'kimicode':
         return new KimiCodeProvider(config);
       case 'openrouter':

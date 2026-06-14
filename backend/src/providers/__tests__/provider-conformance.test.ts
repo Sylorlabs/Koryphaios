@@ -28,7 +28,7 @@ import {
   ENV_AUTH_TOKEN_MAP,
 } from '../constants';
 import { getModelsForProvider } from '../models';
-import { detectClaudeCodeLogin, detectCodexAuthToken, detectGrokCLILogin } from '../auth-utils';
+import { detectClaudeCodeLogin, detectCodexAuthToken, detectGrokCLILogin, detectCursorCLILogin } from '../auth-utils';
 import type { Provider, ProviderEvent } from '../types';
 import type { ProviderConfig, ProviderName } from '@koryphaios/shared';
 
@@ -359,6 +359,16 @@ describe('Provider conformance (contract + optional live)', () => {
         result.evidence = 'CLI harness (grok-build provider)';
         result.live = loggedIn ? 'LIVE_PASS' : 'SKIP';
         result.liveDetail = loggedIn ? 'grok CLI logged in' : 'no grok login';
+        results.push(result);
+        continue;
+      }
+
+      if (name === 'cursor') {
+        // Cursor — `cursor-agent` CLI harness (subprocess, not fetch).
+        const loggedIn = detectCursorCLILogin();
+        result.evidence = 'CLI harness (cursor provider)';
+        result.live = loggedIn ? 'LIVE_PASS' : 'SKIP';
+        result.liveDetail = loggedIn ? 'cursor CLI logged in' : 'no cursor login';
         results.push(result);
         continue;
       }

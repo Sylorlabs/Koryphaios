@@ -54,6 +54,15 @@ export function createGrokCLIAuthMarker(): string {
   return `${GROK_CLI_AUTH_PREFIX}${Date.now()}`;
 }
 
+const CURSOR_CLI_AUTH_PREFIX = 'cli:cursor:';
+/** Cursor CLI opt-in marker — the cursor-agent CLI owns its own auth. */
+export function isCursorCLIAuthMarker(value: string | null | undefined): boolean {
+  return typeof value === 'string' && value.startsWith(CURSOR_CLI_AUTH_PREFIX);
+}
+export function createCursorCLIAuthMarker(): string {
+  return `${CURSOR_CLI_AUTH_PREFIX}${Date.now()}`;
+}
+
 export function getKoryCodexHome(): string {
   return KORY_CODEX_HOME;
 }

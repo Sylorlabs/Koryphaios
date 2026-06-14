@@ -114,6 +114,7 @@ export function validateConfig(config: Partial<KoryphaiosConfig>): void {
       'copilot',
       'codex',
       'grok',
+      'cursor',
       'openrouter',
       'groq',
       'xai',

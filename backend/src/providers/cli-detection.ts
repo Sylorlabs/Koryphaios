@@ -25,6 +25,7 @@ import {
   createClaudeCLIAuthMarker,
   createCodexCLIAuthMarker,
   createGrokCLIAuthMarker,
+  createCursorCLIAuthMarker,
 } from './auth-utils';
 
 export interface AgentCliStatus {
@@ -89,6 +90,8 @@ export function canAutoEnable(provider: ProviderName): boolean {
     case 'grok':
       // Grok Build subscription CLI — installed + logged in (subscription or xAI key).
       return !!whichBinary('grok') && detectGrokCLILogin();
+    case 'cursor':
+      return !!whichBinary('cursor-agent') && detectCursorCLILogin();
     default:
       return false;
   }
@@ -114,6 +117,8 @@ export function cliAutoEnableCreds(
     case 'grok':
       // The CLI owns the real token; the marker just signals "use the CLI harness".
       return { authToken: createGrokCLIAuthMarker() };
+    case 'cursor':
+      return { authToken: createCursorCLIAuthMarker() };
     default:
       return null;
   }
@@ -185,19 +190,17 @@ export function detectAgentClis(): AgentCliStatus[] {
     docsUrl: 'https://docs.x.ai/build/cli/headless-scripting',
   });
 
-  // ── Cursor (cursor-agent) → no Koryphaios provider yet; detected + surfaced. ──
+  // ── Cursor (cursor-agent) → `cursor` provider (its own agentic CLI harness). ──
   const cursorLogin = detectCursorCLILogin();
-  const cursor = mk('cursor', 'Cursor CLI', ['cursor-agent'], null, {
+  const cursor = mk('cursor', 'Cursor CLI', ['cursor-agent'], 'cursor', {
     loggedIn: cursorLogin,
     authSource: cursorLogin
       ? process.env.CURSOR_API_KEY
         ? 'CURSOR_API_KEY'
         : '~/.cursor/cli-config.json'
       : null,
-    autoEnabled: false,
-    workingNote: cursorLogin
-      ? 'Cursor CLI detected and logged in — direct chat needs the Cursor CLI harness (not yet wired).'
-      : 'Cursor CLI is installed but not logged in.',
+    autoEnabled: canAutoEnable('cursor'),
+    workingNote: 'Chats + codes through the Cursor CLI agent (cursor-agent).',
     docsUrl: 'https://cursor.com/docs/cli',
   });
 

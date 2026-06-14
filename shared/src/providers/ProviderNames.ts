@@ -18,6 +18,7 @@ export const ProviderName = {
   Cline: 'cline',
   Codex: 'codex',
   Grok: 'grok',
+  Cursor: 'cursor',
 
   // Curated coding models
   OpenCodeZen: 'opencodezen',

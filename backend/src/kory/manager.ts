@@ -33,9 +33,10 @@ import { wsBroker } from '../pubsub';
 import { koryLog } from '../logger';
 import { nanoid } from 'nanoid';
 import { sanitizeForPrompt } from '../security';
+import { checkGlobalSpendCaps } from '../security/spend-caps';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { z } from 'zod';
-import { join } from 'node:path';
+import { join, relative } from 'node:path';
 import { db, sessions } from '../db';
 import { eq } from 'drizzle-orm';
 import type { ISessionStore } from '../stores/session-store';
@@ -157,7 +158,8 @@ const KORY_SYSTEM_PROMPT = `You are Kory, the manager agent. The user talks to y
 • IMPORTANT: If you decide to delegate, call delegate_to_worker IMMEDIATELY without generating any explanatory text first. Do not write "I'll delegate this" or similar—just call the tool directly.
 • If you have successfully completed a task or edit and are ready to save the work, use the commit_and_create_pr tool to commit and create a pull request automatically.`;
 const WORKER_SYSTEM_PROMPT = `You are a specialist Worker Agent. EXECUTE the assigned task using tools. QUALITY FIRST. VERIFY. If you have successfully completed a task, you may use the commit_and_create_pr tool to save the work.
-FILE EDITS: ALWAYS create files with write_file and modify files with edit_file. NEVER use bash (cat >, tee, echo >, sed, heredocs) to write or modify file content — that bypasses the live code preview. Use bash only for running commands.`;
+FILE EDITS: ALWAYS create files with write_file and modify files with edit_file. NEVER use bash (cat >, tee, echo >, sed, heredocs) to write or modify file content — that bypasses the live code preview. Use bash only for running commands.
+SHARED MACHINE: You may be one of several agents running at once. Builds, tests, and installs share machine-wide queues — heavy commands may wait for a free slot, and an identical job already running for another agent is reused automatically. So don't launch redundant builds; prefer one build/test and reuse its result, and expect occasional queue waits (that's the system protecting the machine, not a hang).`;
 const CRITIC_SYSTEM_PROMPT = `You are an independent, fresh Critic AI model evaluating the work of a DIFFERENT agent (the Worker). You must evaluate their work objectively. You may only use read_file, grep, glob, and ls to inspect the codebase. Review the Worker's output and output either PASS or FAIL. If FAIL, give brief, actionable feedback. Your final message must end with a line that starts with exactly PASS or exactly FAIL (e.g. "PASS" or "FAIL: missing tests").`;
 
 // ─── Kory Manager Class ─────────────────────────────────────────────────────
@@ -180,6 +182,11 @@ export class KoryManager {
   private snapshotManager: SnapshotManager;
   public readonly git: GitManager;
   private workspaceManager: WorkspaceManager | null = null;
+  /** Serializes worktree merge-back so parallel workers never race on the shared main repo. */
+  private mergeLock: Promise<unknown> = Promise.resolve();
+  /** True while a batch of delegated workers runs concurrently — suppresses per-worker
+   *  confirm prompts and workflow-state thrashing (the batch coordinator handles those). */
+  private parallelDelegationActive = false;
   /** AbortController for the current manager run per session (so cancelSessionWorkers can abort manager too). */
   private managerAbortBySession = new Map<string, AbortController>();
   /** In-memory worker/critic chat threads keyed by agentId. */
@@ -388,16 +395,8 @@ export class KoryManager {
     this.state.clearChanges(sessionId);
     userMessage = sanitizeForPrompt(userMessage);
 
-    // Resolve provider before any UI updates or work. No provider = manager responds once and returns.
-    let routing = this.resolveActiveRouting(preferredModel, 'general', true);
-    let provider = await this.providers.resolveProvider(routing.model, routing.provider);
-    if (!provider && (!preferredModel || preferredModel === 'auto')) {
-      const fallback = this.providers.getFirstAvailableRouting();
-      if (fallback) {
-        routing = { model: fallback.model, provider: fallback.provider };
-        provider = this.providers.resolveProvider(routing.model, routing.provider);
-      }
-    }
+    // Resolve provider (cost/usage-aware). No provider = manager responds once and returns.
+    const { routing, provider } = await this.resolveRoutingWithBudget(preferredModel, 'general');
     if (!provider) {
       await this.updateWorkflowState(sessionId, 'idle');
       this.emitError(sessionId, this.getModelConfigurationError(preferredModel));
@@ -464,6 +463,38 @@ export class KoryManager {
     return this.routing.resolveActiveRouting(preferredModel, domain, avoidLegacy);
   }
 
+  /**
+   * Cost/usage-aware routing — the "smart router". Resolves the model normally, but for AUTO
+   * mode it reroutes off providers that are unavailable or rate-limited (subscription rejected),
+   * and when the user is over their spend cap it prefers the cheapest available model
+   * (subscription/local = $0). Explicit user model choices are respected as-is.
+   */
+  private async resolveRoutingWithBudget(
+    preferredModel?: string,
+    domain: WorkerDomain = 'general',
+  ): Promise<{ routing: { model: string; provider: ProviderName | undefined }; provider: Provider | undefined }> {
+    let routing = this.resolveActiveRouting(preferredModel, domain, true);
+    let provider = await this.providers.resolveProvider(routing.model, routing.provider);
+    const isAuto = !preferredModel || preferredModel === 'auto';
+    if (isAuto && (!provider || this.providers.isProviderThrottled(provider.name as ProviderName))) {
+      let preferCheap = false;
+      try {
+        preferCheap = !(await checkGlobalSpendCaps()).allowed;
+      } catch {
+        /* spend check is best-effort */
+      }
+      const alt = this.providers.getFirstAvailableRouting({ preferCheap });
+      if (alt) {
+        const altProvider = await this.providers.resolveProvider(alt.model, alt.provider);
+        if (altProvider) {
+          routing = { model: alt.model, provider: alt.provider };
+          provider = altProvider;
+        }
+      }
+    }
+    return { routing, provider };
+  }
+
   private formatProviderName(provider: string): string {
     if (provider === 'openai') return 'OpenAI';
     if (provider === 'codex') return 'Codex';
@@ -514,6 +545,28 @@ export class KoryManager {
    * Run the worker pipeline (confirm if needed, routeToWorker, return summary).
    * Used when the manager explicitly calls delegate_to_worker. Only the manager LLM decides to spawn a worker.
    */
+  /**
+   * Serialize a critical section (the worktree merge-back) so concurrent workers
+   * never run `git checkout`/`merge` against the shared main repo at the same time.
+   */
+  private withMergeLock<T>(fn: () => Promise<T>): Promise<T> {
+    const run = this.mergeLock.then(fn, fn);
+    // Keep the chain alive regardless of success/failure of this section.
+    this.mergeLock = run.then(
+      () => undefined,
+      () => undefined,
+    );
+    return run;
+  }
+
+  /**
+   * Choose the branch worker output is merged into. null = the branch the user
+   * currently has checked out. Exposed so a future UI / route can pin a target.
+   */
+  setReconcileTargetBranch(branch: string | null): void {
+    this.workspaceManager?.setTargetBranch(branch);
+  }
+
   async runWorkerPipeline(
     sessionId: string,
     task: string,
@@ -521,7 +574,8 @@ export class KoryManager {
     reasoningLevel?: string,
     domainHint?: string,
   ): Promise<string> {
-    if (!this.isYoloMode) {
+    // In a parallel batch the coordinator already confirmed + set workflow state.
+    if (!this.isYoloMode && !this.parallelDelegationActive) {
       const selection = await this.waitForUserInputInternal(
         sessionId,
         'Ready to proceed with the delegated task?',
@@ -529,10 +583,10 @@ export class KoryManager {
       );
       if (selection === '__timeout__') return 'Timed out waiting for user response.';
       if (selection.includes('Cancel')) return 'Cancelled by user.';
-    } else {
+    } else if (this.isYoloMode) {
       this.emitThought(sessionId, 'executing', 'YOLO mode: Proceeding with delegated task.');
     }
-    await this.updateWorkflowState(sessionId, 'executing');
+    if (!this.parallelDelegationActive) await this.updateWorkflowState(sessionId, 'executing');
     const domainOverride =
       domainHint && ['general', 'ui', 'backend', 'test', 'review'].includes(domainHint)
         ? (domainHint as WorkerDomain)
@@ -580,19 +634,22 @@ export class KoryManager {
       taskId,
     );
 
-    // Reconcile worktree changes back to main branch
+    // Reconcile worktree changes back into the selected branch. Serialized via the
+    // merge lock so parallel workers never race on `git checkout`/`merge` in the main repo.
     if (worktreeSpawned && this.workspaceManager) {
-      try {
-        if (result.success) {
-          const reconcileResult = this.workspaceManager.reconcile(taskId);
-          if (!reconcileResult.success) {
-            koryLog.warn({ taskId, msg: reconcileResult.message }, 'Worktree reconcile failed');
-            result = {
-              success: false,
-              workerTranscript: result.workerTranscript,
-              criticFeedback: `Worktree reconcile failed: ${reconcileResult.message}`,
-            };
-          } else {
+      const ws = this.workspaceManager;
+      result = await this.withMergeLock(async () => {
+        try {
+          if (result.success) {
+            const reconcileResult = ws.reconcile(taskId);
+            if (!reconcileResult.success) {
+              koryLog.warn({ taskId, msg: reconcileResult.message }, 'Worktree reconcile failed');
+              return {
+                success: false,
+                workerTranscript: result.workerTranscript,
+                criticFeedback: `Worktree reconcile failed: ${reconcileResult.message}`,
+              };
+            }
             // Create ghost commit for time-travel after successful worker reconciliation
             try {
               const { ShadowLogger } = await import('./shadow-logger');
@@ -606,15 +663,16 @@ export class KoryManager {
             } catch {
               // Shadow logging is non-critical; don't fail the task if it errors
             }
+          } else {
+            ws.cleanup(taskId);
           }
-        } else {
-          this.workspaceManager.cleanup(taskId);
+        } catch (err: unknown) {
+          const message = err instanceof Error ? err.message : String(err);
+          koryLog.warn({ taskId, err: message }, 'Worktree cleanup/reconcile error');
         }
-      } catch (err: unknown) {
-        const message = err instanceof Error ? err.message : String(err);
-        koryLog.warn({ taskId, err: message }, 'Worktree cleanup/reconcile error');
-      }
-      // Auto-commit is now handled by the agent manually via the commit_and_create_pr tool
+        // Auto-commit is now handled by the agent manually via the commit_and_create_pr tool
+        return result;
+      });
     }
 
     // Update task in persistent store after reconcile, so persisted state matches user-visible result.
@@ -626,7 +684,7 @@ export class KoryManager {
       });
     }
 
-    await this.updateWorkflowState(sessionId, 'idle');
+    if (!this.parallelDelegationActive) await this.updateWorkflowState(sessionId, 'idle');
     if (result.success) {
       return (
         result.criticFeedback ??
@@ -701,7 +759,9 @@ export class KoryManager {
           const criticResult = await this.runCriticGate(
             sessionId,
             res.workerMessages,
-            preferredModel,
+            alt.name as ProviderName,
+            effectivePaths[0],
+            taskId,
           );
           if (criticResult.passed)
             return {
@@ -729,7 +789,9 @@ export class KoryManager {
         const criticResult = await this.runCriticGate(
           sessionId,
           result.workerMessages,
-          preferredModel,
+          provider.name as ProviderName,
+          effectivePaths[0],
+          taskId,
         );
         if (criticResult.passed)
           return {
@@ -748,13 +810,33 @@ export class KoryManager {
   private async runCriticGate(
     sessionId: string,
     workerMessages: InternalMessage[] | undefined,
-    preferredModel?: string,
+    coderProvider?: ProviderName,
+    workerDir: string = this.workingDirectory,
+    taskId?: string,
   ): Promise<{ passed: boolean; feedback?: string }> {
-    const hardCheckResult = await this.runHardChecks(sessionId);
+    const hardCheckResult = await this.runHardChecks(sessionId, workerDir, taskId);
     if (!hardCheckResult.passed) return { passed: false, feedback: hardCheckResult.output };
 
-    const routing = this.resolveActiveRouting(preferredModel, 'critic');
-    const provider = await this.providers.resolveProvider(routing.model, routing.provider);
+    // Independent critic: resolve from the 'critic' domain (NOT the coder's per-message model)
+    // so it's a fresh reviewer. Then prefer a DIFFERENT provider than the coder used — the
+    // harshest review comes from a different model. Falls back to any available provider so the
+    // critic still runs even when the configured critic model (e.g. needs an Anthropic key) isn't
+    // available — previously it was silently skipped for CLI-only users.
+    let routing = this.resolveActiveRouting(undefined, 'critic');
+    let provider = await this.providers.resolveProvider(routing.model, routing.provider);
+    if (!provider || (coderProvider && provider.name === coderProvider)) {
+      const alt =
+        (coderProvider
+          ? this.providers.getFirstAvailableRouting({ exclude: (n) => n === coderProvider })
+          : undefined) ?? this.providers.getFirstAvailableRouting();
+      if (alt) {
+        const altProvider = await this.providers.resolveProvider(alt.model, alt.provider);
+        if (altProvider) {
+          routing = { model: alt.model, provider: alt.provider };
+          provider = altProvider;
+        }
+      }
+    }
     if (!provider) return { passed: true };
 
     const transcriptText = formatMessagesForCriticUtil(workerMessages ?? [], 12_000);
@@ -771,10 +853,12 @@ export class KoryManager {
     };
     this.emitWSMessage(sessionId, 'agent.spawned', { agent: identity, task: 'Review delegated work' });
     const criticAbort = new AbortController();
+    // Point the critic's read-only tools at the worker's directory (its worktree) so it
+    // reviews the worker's actual changes rather than the unmodified main repo.
     const criticCtx: ToolContext = {
       sessionId,
-      workingDirectory: this.workingDirectory,
-      allowedPaths: [this.workingDirectory],
+      workingDirectory: workerDir,
+      allowedPaths: [workerDir],
       isSandboxed: true,
       signal: criticAbort.signal,
     };
@@ -812,15 +896,129 @@ export class KoryManager {
     return { passed, feedback: lastContent.trim() };
   }
 
-  private async runHardChecks(sessionId: string): Promise<{ passed: boolean; output: string }> {
-    const pkgPath = join(this.workingDirectory, 'package.json');
-    if (!existsSync(pkgPath)) return { passed: true, output: '' };
+  private async runHardChecks(
+    sessionId: string,
+    workerDir: string = this.workingDirectory,
+    taskId?: string,
+  ): Promise<{ passed: boolean; output: string }> {
     const bash = this.tools.get('bash')!;
+
+    // Diff-scoped: when the worker ran in a worktree, only run the tests its changes
+    // actually touch — never the whole monorepo. This keeps the Critic focused on the
+    // sub-agent's work instead of testing things it never touched.
+    if (taskId && this.workspaceManager) {
+      const changed = this.workspaceManager.getChangedFiles(taskId);
+      const plan = this.buildDiffTestPlan(workerDir, changed);
+      if (changed.length > 0 && plan.length === 0) {
+        // Changes were only in non-testable areas (docs/config, or packages with no tests).
+        return { passed: true, output: '(no tests cover the changed files — skipped hard check)' };
+      }
+      if (plan.length > 0) {
+        let combined = '';
+        for (const step of plan) {
+          const rel = relative(this.workingDirectory, step.cwd) || '.';
+          const result = await bash.run(
+            { sessionId, workingDirectory: step.cwd, isSandboxed: true },
+            { id: nanoid(), name: 'bash', input: { command: step.command, timeout: 120 } },
+          );
+          combined += `\n$ (${rel}) ${step.command}\n${result.output}\n`;
+          if (result.isError) return { passed: false, output: combined.trim() };
+        }
+        return { passed: true, output: combined.trim() };
+      }
+      // plan empty + nothing changed → nothing to check.
+      return { passed: true, output: '' };
+    }
+
+    // Fallback (no worktree isolation): run the directory's suite as before.
+    const pkgPath = join(workerDir, 'package.json');
+    if (!existsSync(pkgPath)) return { passed: true, output: '' };
     const result = await bash.run(
-      { sessionId, workingDirectory: this.workingDirectory, isSandboxed: true },
+      { sessionId, workingDirectory: workerDir, isSandboxed: true },
       { id: nanoid(), name: 'bash', input: { command: 'bun test', timeout: 60 } },
     );
     return { passed: !result.isError, output: result.output };
+  }
+
+  /**
+   * Build a minimal set of test commands covering only the worker's changed files.
+   * Maps each changed file to its workspace package and resolves co-located tests;
+   * runs just those test files when found, else the affected package's suite (scoped
+   * to that one package, never the whole monorepo). Packages without a test runner
+   * (frontend/shared/desktop here) are skipped.
+   */
+  private buildDiffTestPlan(
+    workerDir: string,
+    changed: string[],
+  ): Array<{ cwd: string; command: string }> {
+    const CODE_RE = /\.(ts|tsx|mts|cts|js|jsx|mjs|cjs|svelte)$/;
+    const isTestFile = (f: string) =>
+      /(^|[./])(test|spec)\.[mc]?[tj]sx?$/.test(f) || /(^|\/)(__tests__|tests?)\//.test(f);
+    // Packages with a usable test runner. base command stays `bun`/`bun x` → sandbox-allowed.
+    const RUNNERS: Record<string, 'bun' | 'vitest'> = { backend: 'bun', 'mcp-server': 'vitest' };
+
+    const byPkg = new Map<
+      string,
+      { runner: 'bun' | 'vitest'; tests: Set<string>; hasSrc: boolean }
+    >();
+
+    for (const file of changed) {
+      if (!CODE_RE.test(file) || file.includes('node_modules')) continue;
+      const pkg = file.split('/')[0]!;
+      const runner = RUNNERS[pkg];
+      if (!runner) continue; // package has no tests — skip
+      const relInPkg = file.slice(pkg.length + 1);
+      const entry = byPkg.get(pkg) ?? { runner, tests: new Set<string>(), hasSrc: false };
+      if (isTestFile(relInPkg)) {
+        entry.tests.add(relInPkg);
+      } else {
+        entry.hasSrc = true;
+        for (const cand of this.coLocatedTestCandidates(relInPkg)) {
+          if (existsSync(join(workerDir, pkg, cand))) entry.tests.add(cand);
+        }
+      }
+      byPkg.set(pkg, entry);
+    }
+
+    const plan: Array<{ cwd: string; command: string }> = [];
+    for (const [pkg, e] of byPkg) {
+      const cwd = join(workerDir, pkg);
+      if (e.tests.size > 0) {
+        const files = [...e.tests].map((f) => `'${f.replace(/'/g, "'\\''")}'`).join(' ');
+        plan.push({
+          cwd,
+          command: e.runner === 'bun' ? `bun test ${files}` : `bun x vitest run ${files}`,
+        });
+      } else if (e.hasSrc) {
+        // Source changed but no co-located test found → run that one package's suite.
+        plan.push({ cwd, command: e.runner === 'bun' ? 'bun test' : 'bun x vitest run' });
+      }
+    }
+    return plan;
+  }
+
+  /** Candidate co-located test paths (within the package) for a changed source file. */
+  private coLocatedTestCandidates(relInPkg: string): string[] {
+    const m = relInPkg.match(/^(.*?)([^/]+)\.(ts|tsx|mts|cts|js|jsx|mjs|cjs|svelte)$/);
+    if (!m) return [];
+    const [, dir, base, srcExt] = m;
+    // Tests for .ts/.svelte sources are .ts (or .tsx); .js sources → .js. Keep it small.
+    const exts = srcExt.startsWith('j') ? ['js', 'jsx'] : ['ts', 'tsx'];
+    const cands: string[] = [];
+    for (const ext of exts) {
+      cands.push(
+        `${dir}${base}.test.${ext}`,
+        `${dir}${base}.spec.${ext}`,
+        `${dir}__tests__/${base}.test.${ext}`,
+        `${dir}__tests__/${base}.spec.${ext}`,
+      );
+      // backend convention: src/x.ts ↔ test/x.test.ts and __tests__/x.test.ts at package root.
+      if (dir.startsWith('src/')) {
+        const tail = dir.slice('src/'.length);
+        cands.push(`test/${tail}${base}.test.${ext}`, `__tests__/${tail}${base}.test.${ext}`);
+      }
+    }
+    return cands;
   }
 
   private requiresSystemAccess(m: string): boolean {
@@ -854,18 +1052,9 @@ export class KoryManager {
     attachments?: Array<{ type: string; data: string; name: string }>,
   ): Promise<void> {
     koryLog.debug({ sessionId, reasoningLevel, preferredModel }, 'Entering handleDirectly');
-    let routing = this.resolveActiveRouting(preferredModel, 'general', true);
-    let provider = await this.providers.resolveProvider(routing.model, routing.provider);
-    // Mirror processTask's fallback: for "auto" (or no model), if the routed model has no
-    // available provider, fall back to the first available one — otherwise a configured
-    // session spuriously fails with "No provider." even though providers are connected.
-    if (!provider && (!preferredModel || preferredModel === 'auto')) {
-      const fallback = this.providers.getFirstAvailableRouting();
-      if (fallback) {
-        routing = { model: fallback.model, provider: fallback.provider };
-        provider = this.providers.resolveProvider(routing.model, routing.provider);
-      }
-    }
+    // Cost/usage-aware routing (reroutes off rate-limited/unavailable providers for auto, and
+    // prefers cheap models when over the spend cap). Mirrors processTask so they never disagree.
+    const { routing, provider } = await this.resolveRoutingWithBudget(preferredModel, 'general');
     if (!provider) throw new Error('No provider.');
     const providerName = provider.name as ProviderName;
     koryLog.debug({ routing, providerName }, 'Resolved routing and provider');
@@ -1025,12 +1214,17 @@ export class KoryManager {
               break;
             }
           }
-          for (const tc of completedToolCalls) {
-            if (abort.signal.aborted) {
-              stoppedByUser = true;
-              break;
-            }
-            const toolResult = await this.executeManagerToolCall(sessionId, tc, managerCtx);
+          // Parallel delegation: when the manager issues 2+ delegate_to_worker calls in
+          // one turn and there's worktree capacity for all of them, run them concurrently
+          // in their own isolated worktrees. Merge-back is serialized by the merge lock.
+          const delegateCalls = completedToolCalls.filter((tc) => tc.name === 'delegate_to_worker');
+          const canParallelize =
+            delegateCalls.length >= 2 &&
+            !!this.workspaceManager &&
+            this.workspaceManager.getStatus().availableSlots >= delegateCalls.length &&
+            !abort.signal.aborted;
+
+          const emitAndPush = (tc: CompletedToolCall, toolResult: ToolCallOutput) => {
             this.emitWSMessage(sessionId, 'stream.tool_result', {
               agentId: KORY_IDENTITY.id,
               toolResult,
@@ -1041,6 +1235,44 @@ export class KoryManager {
               content: JSON.stringify(toolResult),
               tool_call_id: tc.id,
             });
+          };
+
+          if (canParallelize) {
+            this.emitThought(
+              sessionId,
+              'executing',
+              `Running ${delegateCalls.length} workers in parallel (isolated worktrees).`,
+            );
+            await this.updateWorkflowState(sessionId, 'executing');
+            this.parallelDelegationActive = true;
+            let delegateResults: ToolCallOutput[];
+            try {
+              delegateResults = await Promise.all(
+                delegateCalls.map((tc) => this.executeManagerToolCall(sessionId, tc, managerCtx)),
+              );
+            } finally {
+              this.parallelDelegationActive = false;
+              await this.updateWorkflowState(sessionId, 'idle');
+            }
+            delegateCalls.forEach((tc, i) => emitAndPush(tc, delegateResults[i]!));
+
+            // Run any remaining (non-delegate) tool calls sequentially.
+            for (const tc of completedToolCalls) {
+              if (tc.name === 'delegate_to_worker') continue;
+              if (abort.signal.aborted) {
+                stoppedByUser = true;
+                break;
+              }
+              emitAndPush(tc, await this.executeManagerToolCall(sessionId, tc, managerCtx));
+            }
+          } else {
+            for (const tc of completedToolCalls) {
+              if (abort.signal.aborted) {
+                stoppedByUser = true;
+                break;
+              }
+              emitAndPush(tc, await this.executeManagerToolCall(sessionId, tc, managerCtx));
+            }
           }
         }
       }

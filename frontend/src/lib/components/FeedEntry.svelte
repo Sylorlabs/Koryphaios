@@ -349,19 +349,18 @@
   <div 
     class="fixed inset-0 z-[100] flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm cursor-zoom-out"
     transition:fade={{ duration: 150 }}
-    onclick={(e) => { e.stopPropagation(); zoomedImage = null; }}
+    onclick={(e) => { e.stopPropagation(); if (e.target === e.currentTarget) zoomedImage = null; }}
   >
-    <button 
+    <button
       class="absolute top-4 right-4 p-2 text-white/70 hover:text-white bg-black/50 hover:bg-black/80 rounded-full transition-colors"
       onclick={(e) => { e.stopPropagation(); zoomedImage = null; }}
     >
       <X size={24} />
     </button>
-    <img 
-      src={`data:image/png;base64,${zoomedImage}`} 
-      alt="Zoomed attachment" 
-      class="max-w-full max-h-full object-contain rounded shadow-2xl" 
-      onclick={(e) => e.stopPropagation()}
+    <img
+      src={`data:image/png;base64,${zoomedImage}`}
+      alt="Zoomed attachment"
+      class="max-w-full max-h-full object-contain rounded shadow-2xl"
     />
   </div>
 {/if}

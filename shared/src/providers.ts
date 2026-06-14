@@ -16,6 +16,7 @@ export const ProviderName = {
   Claude: 'claude',
   Codex: 'codex',
   Grok: 'grok',
+  Cursor: 'cursor',
   Copilot: 'copilot',
 
   // Curated coding models (OpenCode Zen)
@@ -69,6 +70,7 @@ export const IMPLEMENTED_PROVIDERS: ProviderName[] = [
   'claude',
   'codex',
   'grok',
+  'cursor',
   'openai',
   'google',
   'google-subscription',
@@ -162,6 +164,7 @@ export const PROVIDER_AUTH_MODES: Record<ProviderName, ProviderAuthMode> = {
   claude: 'auth_only',
   codex: 'auth_only',
   grok: 'auth_only',
+  cursor: 'auth_only',
   openai: 'api_key',
   google: 'api_key_or_auth',
   'google-subscription': 'auth_only',
@@ -215,6 +218,7 @@ export const PROVIDER_ENV_VARS: Record<
   claude: { authToken: 'CLAUDE_CODE_OAUTH_TOKEN' },
   openai: { apiKey: 'OPENAI_API_KEY' },
   grok: { authToken: 'GROK_CODE_XAI_API_KEY' },
+  cursor: { authToken: 'CURSOR_API_KEY' },
   google: { apiKey: 'GEMINI_API_KEY', authToken: 'GEMINI_AUTH_TOKEN' },
   'google-subscription': { authToken: 'GOOGLE_SUBSCRIPTION_OAUTH_TOKEN' },
   xai: { apiKey: 'XAI_API_KEY' },

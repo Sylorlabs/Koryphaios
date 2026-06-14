@@ -1124,13 +1124,3 @@ RULES:
 <SettingsDrawer open={showSettings} onClose={() => showSettings = false} />
 <CommandPalette bind:open={showCommandPalette} onAction={handleMenuAction} />
 <ToastContainer />
-
-<style>
-  .sidebar-header {
-    /* Relying on JS onmousedown={startDragging} */
-  }
-
-  .sidebar-header-button {
-    /* Normal button behavior */
-  }
-</style>

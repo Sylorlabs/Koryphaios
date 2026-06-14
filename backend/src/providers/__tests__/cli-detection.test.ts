@@ -52,7 +52,7 @@ describe('detectAgentClis', () => {
     expect(byId.codex.provider).toBe('codex');
     expect(byId.gemini.provider).toBe('google');
     expect(byId.grok.provider).toBe('grok'); // Grok Build has its own CLI-harness provider
-    expect(byId.cursor.provider).toBeNull(); // no provider wired yet — detection-only
+    expect(byId.cursor.provider).toBe('cursor'); // Cursor now has its own agentic CLI provider
   });
 
   it('every entry carries a binary path when installed, and a human note', () => {

@@ -17,6 +17,23 @@ import {
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { requireLocalRouteAuth } from '../../auth/local-route-auth';
+import { DOMAIN } from '../../constants';
+import { resolveModel } from '../../providers';
+import { syncAssignmentsToConfig } from '../../runtime/config';
+
+/**
+ * Routing categories the user can override a model for. The manager's smart
+ * router uses these per-domain assignments (config.assignments) ahead of the
+ * built-in DOMAIN.DEFAULT_MODELS, falling back to "auto" when unset.
+ */
+const ROUTING_CATEGORIES: Array<{ id: keyof typeof DOMAIN.DEFAULT_MODELS; label: string; description: string }> = [
+  { id: 'ui', label: 'UI / Frontend', description: 'Svelte, components, styling, design work' },
+  { id: 'backend', label: 'Backend', description: 'APIs, services, server logic, data' },
+  { id: 'general', label: 'General', description: 'Default for uncategorized tasks' },
+  { id: 'test', label: 'Testing', description: 'Writing and fixing tests' },
+  { id: 'review', label: 'Review', description: 'Reviewing code and changes' },
+  { id: 'critic', label: 'Critic', description: 'The harshest gate — best on a different model than the coder' },
+];
 
 export const agentSettingsRoutes = new Elysia({ prefix: '/api/agent' })
   .get(
@@ -121,6 +138,57 @@ export const agentSettingsRoutes = new Elysia({ prefix: '/api/agent' })
       message: 'Agent settings reset to defaults. Rules still enforced.',
     };
   })
+  // Per-category model routing. The smart router uses these overrides ahead of
+  // the built-in defaults; unset categories resolve to "auto".
+  .get('/assignments', async ({ request, set }) => {
+    if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
+    const { config } = getContext();
+    const current = (config.assignments ?? {}) as Record<string, string>;
+    const categories = ROUTING_CATEGORIES.map((c) => ({
+      id: c.id,
+      label: c.label,
+      description: c.description,
+      defaultModel: DOMAIN.DEFAULT_MODELS[c.id],
+      value: current[c.id] ?? '',
+    }));
+    return { ok: true, data: { categories, assignments: current } };
+  })
+  .put(
+    '/assignments',
+    async ({ request, body, set }) => {
+      if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
+      try {
+        const incoming = (body.assignments ?? {}) as Record<string, string>;
+        const validDomains = new Set(ROUTING_CATEGORIES.map((c) => c.id as string));
+        const cleaned: Record<string, string> = {};
+        for (const [domain, raw] of Object.entries(incoming)) {
+          if (!validDomains.has(domain)) continue;
+          const v = (raw ?? '').trim();
+          if (!v || v === 'auto') continue; // empty/auto = use smart-router default
+          // Accept "provider:model" or a bare model id; validate the model resolves.
+          const modelId = v.includes(':') ? v.split(':')[1]! : v;
+          if (!resolveModel(modelId)) {
+            set.status = 400;
+            return { ok: false, error: `Unknown model "${v}" for category "${domain}"` };
+          }
+          cleaned[domain] = v;
+        }
+        // Mutate the live config so routing picks it up immediately, then persist.
+        const { config } = getContext();
+        (config as any).assignments = cleaned;
+        syncAssignmentsToConfig(PROJECT_ROOT, cleaned);
+        return { ok: true, data: { assignments: cleaned }, message: 'Routing updated.' };
+      } catch (err: any) {
+        set.status = 500;
+        return { ok: false, error: err.message ?? 'Failed to save assignments' };
+      }
+    },
+    {
+      body: t.Object({
+        assignments: t.Record(t.String(), t.String()),
+      }),
+    },
+  )
   .get('/preferences', async ({ request, set }) => {
     if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
     const prefs = readPreferences(PROJECT_ROOT);

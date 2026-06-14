@@ -1,9 +1,10 @@
 <script lang="ts">
   import { agentSettingsStore, DEFAULT_AGENT_SETTINGS } from "$lib/stores/agent-settings.svelte";
-  import { 
-    Bot, 
-    Shield, 
-    FileText, 
+  import { wsStore } from "$lib/stores/websocket.svelte";
+  import {
+    Bot,
+    Shield,
+    FileText,
     Settings,
     AlertTriangle,
     CheckCircle,
@@ -17,7 +18,9 @@
     AlertOctagon,
     FlaskConical,
     Globe,
-    Layers
+    Layers,
+    Cpu,
+    Sparkles
   } from "lucide-svelte";
 
   // Props
@@ -41,9 +44,50 @@
   // Tab configuration - uses semantic theme colors
   const tabs = [
     { id: "settings" as const, label: "Agent Settings", icon: Bot, color: "var(--color-info)" },
-    { id: "preferences" as const, label: "Preferences.md", icon: FileText, color: "var(--color-success)" },
+    { id: "routing" as const, label: "Models & Routing", icon: Cpu, color: "var(--color-accent)" },
+    { id: "preferences" as const, label: "Custom Instructions", icon: FileText, color: "var(--color-success)" },
     { id: "enforcement" as const, label: "Rule Enforcement", icon: Gavel, color: "var(--color-error)" },
   ];
+
+  // Model options for the per-category routing pickers, grouped by enabled provider.
+  // Only authenticated + enabled providers' models are offered.
+  const modelGroups = $derived.by(() => {
+    const list = wsStore.providers ?? [];
+    const labelFor: Record<string, string> = {
+      anthropic: "Anthropic", openai: "OpenAI", google: "Google", xai: "xAI",
+      claude: "Claude Code", codex: "OpenAI Codex", grok: "Grok Build", cursor: "Cursor",
+      openrouter: "OpenRouter", groq: "Groq", copilot: "GitHub Copilot", deepseek: "DeepSeek",
+      gemini: "Gemini", mistral: "Mistral AI", cohere: "Cohere",
+    };
+    return list
+      .filter((p: any) => p.enabled && p.authenticated)
+      .map((p: any) => {
+        const all = p.allAvailableModels ?? [];
+        const enabledIds: string[] = (p.models ?? []).length > 0
+          ? p.models
+          : all.map((m: any) => m.id);
+        const models = enabledIds.map((id: string) => {
+          const def = all.find((m: any) => m.id === id);
+          return { value: `${p.name}:${id}`, label: def?.name ?? id };
+        });
+        return {
+          provider: p.name as string,
+          label: labelFor[p.name] ?? p.name,
+          models,
+        };
+      })
+      .filter((g) => g.models.length > 0);
+  });
+
+  function currentCategoryLabel(value: string): string {
+    if (!value || value === "auto") return "";
+    for (const g of modelGroups) {
+      const m = g.models.find((x) => x.value === value);
+      if (m) return `${g.label} · ${m.label}`;
+    }
+    // Pinned model whose provider isn't currently enabled/authenticated.
+    return value;
+  }
 
   // Handler helpers
   async function toggleSetting(key: keyof typeof DEFAULT_AGENT_SETTINGS) {
@@ -416,6 +460,79 @@
               </button>
             </section>
           </div>
+        </div>
+      </div>
+
+    {:else if agentSettingsStore.activeTab === "routing"}
+      <div class="h-full min-h-0 overflow-y-auto p-6">
+        <div class="mx-auto max-w-3xl space-y-6">
+          <section class="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-1)] p-5">
+            <div class="flex items-start gap-3">
+              <div class="rounded-lg p-2" style="background: color-mix(in srgb, var(--color-accent) 14%, transparent); color: var(--color-accent);">
+                <Sparkles size={18} />
+              </div>
+              <div>
+                <h4 class="text-sm font-semibold text-[var(--color-text-primary)]">Smart Router</h4>
+                <p class="mt-1 text-xs text-[var(--color-text-muted)]">
+                  By default the manager picks the best model for each job, factoring in availability,
+                  rate limits, and spend caps. Pin a specific model to any category below to override
+                  auto for that kind of work. Leave it on <span class="font-medium text-[var(--color-text-secondary)]">Auto</span> to let the router decide.
+                </p>
+              </div>
+            </div>
+          </section>
+
+          {#if modelGroups.length === 0}
+            <div class="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-1)] p-6 text-center">
+              <Cpu size={32} class="mx-auto mb-3 opacity-40" />
+              <p class="text-sm text-[var(--color-text-muted)]">No providers connected yet.</p>
+              <p class="mt-1 text-xs text-[var(--color-text-muted)]">
+                Connect a provider in the Providers tab to pin models. Routing stays on Auto until then.
+              </p>
+            </div>
+          {/if}
+
+          <section class="space-y-3">
+            {#each agentSettingsStore.routingCategories as cat (cat.id)}
+              <div class="flex flex-col gap-3 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-2)] p-4 sm:flex-row sm:items-center sm:justify-between">
+                <div class="min-w-0">
+                  <div class="flex items-center gap-2">
+                    <span class="text-sm font-medium text-[var(--color-text-primary)]">{cat.label}</span>
+                    {#if !cat.value}
+                      <span class="rounded-full px-2 py-0.5 text-[10px] font-medium" style="background: color-mix(in srgb, var(--color-accent) 16%, transparent); color: var(--color-accent);">Auto</span>
+                    {/if}
+                  </div>
+                  <p class="mt-0.5 text-xs text-[var(--color-text-muted)]">{cat.description}</p>
+                  {#if !cat.value}
+                    <p class="mt-1 text-[10px] text-[var(--color-text-muted)]">Smart default: <span class="font-mono">{cat.defaultModel}</span></p>
+                  {/if}
+                </div>
+                <select
+                  value={cat.value || "auto"}
+                  onchange={(e) => agentSettingsStore.saveAssignment(cat.id, e.currentTarget.value === "auto" ? "" : e.currentTarget.value)}
+                  class="w-full shrink-0 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-0)] px-3 py-2 text-xs text-[var(--color-text-primary)] sm:w-64"
+                >
+                  <option value="auto">Auto (smart router)</option>
+                  {#if cat.value && !currentCategoryLabel(cat.value).includes("·")}
+                    <option value={cat.value}>{cat.value} (offline)</option>
+                  {/if}
+                  {#each modelGroups as group (group.provider)}
+                    <optgroup label={group.label}>
+                      {#each group.models as m (m.value)}
+                        <option value={m.value}>{m.label}</option>
+                      {/each}
+                    </optgroup>
+                  {/each}
+                </select>
+              </div>
+            {/each}
+          </section>
+
+          <p class="text-[10px] text-[var(--color-text-muted)]">
+            The <span class="font-medium">Critic</span> is the harshest gate — pinning it to a different model
+            family than your coder catches more issues. Per-message model choices in the composer always win
+            over these category defaults.
+          </p>
         </div>
       </div>
 

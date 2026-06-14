@@ -59,6 +59,16 @@ export interface AgentContext {
   enforcementMessage: string;
 }
 
+/** A routing category the user can pin a specific model to (else "auto"). */
+export interface RoutingCategory {
+  id: string;
+  label: string;
+  description: string;
+  defaultModel: string;
+  /** Current override as "provider:model" (or "" for auto). */
+  value: string;
+}
+
 // ============================================================================
 // Default Settings
 // ============================================================================
@@ -89,8 +99,9 @@ function createAgentSettingsStore() {
   let settings = $state<AgentSettings>(DEFAULT_AGENT_SETTINGS);
   let preferences = $state<{ exists: boolean; content: string; path: string } | null>(null);
   let isLoading = $state(false);
-  let activeTab = $state<'settings' | 'preferences' | 'enforcement'>('settings');
+  let activeTab = $state<'settings' | 'routing' | 'preferences' | 'enforcement'>('settings');
   let lastCriticResult = $state<CriticReviewResult | null>(null);
+  let routingCategories = $state<RoutingCategory[]>([]);
 
   // ========================================================================
   // Settings
@@ -160,6 +171,59 @@ function createAgentSettingsStore() {
       return false;
     } catch (err) {
       toastStore.error('Failed to reset agent settings');
+      return false;
+    }
+  }
+
+  // ========================================================================
+  // Routing (per-category model assignments)
+  // ========================================================================
+
+  async function loadAssignments(): Promise<void> {
+    try {
+      const res = await apiFetch(apiUrl('/api/agent/assignments'));
+      if (res.ok) {
+        const data = await res.json();
+        if (data.ok && Array.isArray(data.data?.categories)) {
+          routingCategories = data.data.categories;
+        }
+      }
+    } catch (err) {
+      console.error('Failed to load routing assignments:', err);
+    }
+  }
+
+  async function saveAssignment(categoryId: string, value: string): Promise<boolean> {
+    // Optimistically update local state, then persist the full map.
+    const next = routingCategories.map((c) =>
+      c.id === categoryId ? { ...c, value } : c,
+    );
+    routingCategories = next;
+    const assignments: Record<string, string> = {};
+    for (const c of next) {
+      if (c.value && c.value !== 'auto') assignments[c.id] = c.value;
+    }
+    try {
+      const res = await apiFetch(apiUrl('/api/agent/assignments'), {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ assignments }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.ok) {
+          toastStore.success(value && value !== 'auto'
+            ? 'Model pinned for this category'
+            : 'Category set to auto');
+          return true;
+        }
+        throw new Error(data.error ?? 'Failed to save');
+      }
+      throw new Error('Failed to save');
+    } catch (err: any) {
+      toastStore.error(err?.message ?? 'Failed to save routing');
+      // Reload to revert optimistic change on error.
+      await loadAssignments();
       return false;
     }
   }
@@ -282,7 +346,7 @@ function createAgentSettingsStore() {
   async function loadAll(): Promise<void> {
     isLoading = true;
     try {
-      await Promise.all([loadSettings(), loadPreferences()]);
+      await Promise.all([loadSettings(), loadPreferences(), loadAssignments()]);
     } finally {
       isLoading = false;
     }
@@ -313,6 +377,9 @@ function createAgentSettingsStore() {
     get lastCriticResult() {
       return lastCriticResult;
     },
+    get routingCategories() {
+      return routingCategories;
+    },
 
     // Rules are always enforced - no getter to disable
     get rulesAlwaysEnforced() {
@@ -329,6 +396,10 @@ function createAgentSettingsStore() {
     loadSettings,
     saveSettings,
     resetSettings,
+
+    // Routing
+    loadAssignments,
+    saveAssignment,
 
     // Preferences
     loadPreferences,
