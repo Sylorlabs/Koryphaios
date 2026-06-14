@@ -63,6 +63,15 @@ export function createCursorCLIAuthMarker(): string {
   return `${CURSOR_CLI_AUTH_PREFIX}${Date.now()}`;
 }
 
+const GEMINI_CLI_AUTH_PREFIX = 'cli:gemini:';
+/** Gemini CLI opt-in marker — the gemini CLI owns its own OAuth (no API key needed). */
+export function isGeminiCLIAuthMarker(value: string | null | undefined): boolean {
+  return typeof value === 'string' && value.startsWith(GEMINI_CLI_AUTH_PREFIX);
+}
+export function createGeminiCLIAuthMarker(): string {
+  return `${GEMINI_CLI_AUTH_PREFIX}${Date.now()}`;
+}
+
 export function getKoryCodexHome(): string {
   return KORY_CODEX_HOME;
 }
