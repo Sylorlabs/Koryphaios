@@ -301,9 +301,12 @@ export class CodexProvider implements Provider {
 
     const existing =
       fallback.find((model) => model.id === id || model.apiModelId === id) ?? resolveModel(id);
-    const reasoningLevels = Array.isArray(item.supported_reasoning_levels)
-      ? item.supported_reasoning_levels
-      : [];
+    // Normalize the CLI's real supported reasoning levels into plain effort strings.
+    const reasoningLevels = (
+      Array.isArray(item.supported_reasoning_levels) ? item.supported_reasoning_levels : []
+    )
+      .map((lvl) => (typeof lvl === 'string' ? lvl : lvl?.effort))
+      .filter((v): v is string => typeof v === 'string' && v.length > 0);
     const modalities = Array.isArray(item.input_modalities) ? item.input_modalities : [];
     const speedTiers = Array.isArray(item.additional_speed_tiers)
       ? item.additional_speed_tiers
@@ -322,6 +325,8 @@ export class CodexProvider implements Provider {
       costPerMInputTokens: existing?.costPerMInputTokens ?? 0,
       costPerMOutputTokens: existing?.costPerMOutputTokens ?? 0,
       canReason: reasoningLevels.length > 0 || existing?.canReason === true,
+      // Real per-model reasoning levels straight from the codex CLI (empty → fall back to defaults).
+      reasoningLevels: reasoningLevels.length > 0 ? reasoningLevels : existing?.reasoningLevels,
       supportsAttachments: modalities.includes('image') || existing?.supportsAttachments === true,
       supportsStreaming: existing?.supportsStreaming ?? true,
       tier:

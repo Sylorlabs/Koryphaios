@@ -21,6 +21,13 @@ export interface ModelDef {
   costPerMInputCached?: number;
   costPerMOutputCached?: number;
   canReason?: boolean;
+  /**
+   * The model's actual selectable reasoning/effort levels (e.g. ['low','medium','high','max']).
+   * Source of truth for the reasoning picker — derived from real CLI/provider capabilities,
+   * not a hardcoded guess. An empty array means "no user-selectable reasoning level" (can't
+   * reason, or reasons adaptively with no knob); undefined means "fall back to the static config".
+   */
+  reasoningLevels?: string[];
   supportsAttachments?: boolean;
   supportsStreaming?: boolean;
   tier?: ModelTier;
@@ -46,6 +53,17 @@ export interface ProviderConfig {
   /** Ordered list of saved account IDs for automatic fallback on failure. */
   fallbackOrder?: string[];
   headers?: Record<string, string>;
+
+  // ─── Custom (user-defined / bring-your-own) provider fields ───────────────
+  /** True when this is a user-defined custom provider (not a built-in). */
+  custom?: boolean;
+  /** API wire format for a custom provider. Defaults to 'openai' (OpenAI-compatible). */
+  kind?: 'openai' | 'anthropic' | 'gemini';
+  /** Human-friendly display name for a custom provider. */
+  label?: string;
+  /** Explicitly declared model IDs for a custom provider (used when the endpoint has
+   *  no /models discovery, or to seed the catalog before the live fetch completes). */
+  models?: string[];
 }
 
 export interface ProviderStatus {

@@ -1,16 +1,21 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { Send, ChevronDown, Sparkles, Square, Users, User, ShieldCheck, ShieldAlert, Circle } from 'lucide-svelte';
+  import { Send, ChevronDown, Sparkles, Square, Users, User, ShieldCheck, ShieldAlert, Circle, Paperclip, Clipboard, X } from 'lucide-svelte';
   import { wsStore } from '$lib/stores/websocket.svelte';
   import { shortcutStore } from '$lib/stores/shortcuts.svelte';
   import { experimentalStore } from '$lib/stores/experimental.svelte';
   import { agentSettingsStore } from '$lib/stores/agent-settings.svelte';
-  import { getReasoningConfig, hasReasoningSupport } from '@koryphaios/shared';
+  import { getReasoningConfig, STANDARD_REASONING_OPTIONS } from '@koryphaios/shared';
+  import type { ModelDef, ReasoningConfig } from '@koryphaios/shared';
   import BrainIcon from '$lib/components/icons/BrainIcon.svelte';
   import { getModelConfigurationWarning } from '$lib/utils/model-config';
+  import { invoke } from '@tauri-apps/api/core';
+  import { toastStore } from '$lib/stores/toast.svelte';
+
+  export type Attachment = { type: 'image' | 'file'; data: string; name: string };
 
   interface Props {
-    onSend: (message: string, model?: string, reasoningLevel?: string) => void;
+    onSend: (message: string, model?: string, reasoningLevel?: string, attachments?: Attachment[]) => void;
     onExecuteCommand?: (command: string) => Promise<boolean> | boolean;
     /** When true, show Stop instead of Send; clicking stops manager and workers for the session. */
     isRunning?: boolean;
@@ -44,6 +49,8 @@
   let showModelPicker = $state(false);
   let selectedModel = $state<string>('auto');
   let selectedPickerIndex = $state(0);
+  let attachments = $state<Attachment[]>([]);
+  let fileInputRef = $state<HTMLInputElement>();
 
   type ComposerPickerItem =
     | { type: 'command'; key: string; label: string; value: string; description: string }
@@ -84,9 +91,54 @@
   let currentProvider = $derived(selectedModel === 'auto' ? 'auto' : (parseModelSelection(selectedModel).provider ?? fallbackProvider));
   let currentModel = $derived(parseModelSelection(selectedModel).model);
 
-  // Get reasoning config based on provider + model
-  let reasoningConfig = $derived(getReasoningConfig(currentProvider, currentModel));
-  let reasoningSupported = $derived(selectedModel === 'auto' || hasReasoningSupport(currentProvider, currentModel));
+  // The selected model's catalog def, so we can read its REAL per-model reasoning levels.
+  let selectedModelDef = $derived.by<ModelDef | undefined>(() => {
+    if (selectedModel === 'auto') return undefined;
+    const { provider, model } = parseModelSelection(selectedModel);
+    for (const p of wsStore.providers) {
+      if (provider && p.name !== provider) continue;
+      const def = (p.allAvailableModels ?? []).find(
+        (m: any) => m.id === model || m.apiModelId === model,
+      );
+      if (def) return def as ModelDef;
+    }
+    return undefined;
+  });
+
+  // Reasoning config: prefer the model's real reasoningLevels (from the actual CLI/provider);
+  // fall back to the static per-provider table only when a model declares none.
+  let reasoningConfig = $derived.by<ReasoningConfig | null>(() => {
+    if (selectedModel === 'auto') return getReasoningConfig('auto', currentModel);
+    const levels = selectedModelDef?.reasoningLevels;
+    if (levels !== undefined) {
+      if (levels.length === 0) return null; // model has no user-selectable reasoning
+      return {
+        parameter: 'reasoning',
+        options: levels.map(
+          (v: string) =>
+            STANDARD_REASONING_OPTIONS[v] ?? {
+              value: v,
+              label: v.charAt(0).toUpperCase() + v.slice(1),
+              description: '',
+            },
+        ),
+        defaultValue: levels.includes('medium') ? 'medium' : levels[0],
+      };
+    }
+    return getReasoningConfig(currentProvider, currentModel);
+  });
+  let reasoningSupported = $derived(
+    selectedModel === 'auto' || (!!reasoningConfig && reasoningConfig.options.length > 0),
+  );
+
+  // Keep the selected reasoning level valid for the current model (clamp to its options).
+  $effect(() => {
+    const cfg = reasoningConfig;
+    if (!cfg || cfg.options.length === 0) return;
+    if (!cfg.options.some((o) => o.value === reasoningLevel)) {
+      reasoningLevel = cfg.defaultValue ?? cfg.options[0].value;
+    }
+  });
 
   const configurationWarning = $derived(
     disabled ? null : getModelConfigurationWarning(wsStore.providers, selectedModel),
@@ -229,6 +281,17 @@
         return;
       }
     }
+    // Ctrl+Shift+V / Cmd+Shift+V → force paste image from clipboard
+    if (
+      (e.ctrlKey || e.metaKey) &&
+      e.shiftKey &&
+      (e.key === 'v' || e.key === 'V')
+    ) {
+      e.preventDefault();
+      void pasteImageFromClipboard();
+      return;
+    }
+
     if (isRunning && shortcutStore.matches('send', e)) {
       e.preventDefault();
       stop();
@@ -252,12 +315,13 @@
     }
     if (await executeSlashIfNeeded()) return;
     const trimmed = value.trim();
-    if (!trimmed) return;
+    if (!trimmed && attachments.length === 0) return;
     const now = Date.now();
     if (now - lastSendAt < SEND_COOLDOWN_MS) return; // debounce duplicate sends
     lastSendAt = now;
-    onSend(trimmed, selectedModel, reasoningLevel);
+    onSend(trimmed, selectedModel, reasoningLevel, attachments.length > 0 ? [...attachments] : undefined);
     value = '';
+    attachments = [];
     resizeToMin();
   }
 
@@ -362,7 +426,7 @@
   }
 
   function reasoningLabel(value: string): string {
-    const config = getReasoningConfig(currentProvider, currentModel);
+    const config = reasoningConfig;
     if (config) {
       const opt = config.options.find(o => o.value === value);
       if (opt) return opt.label;
@@ -398,7 +462,7 @@
     if (!target.closest('.reasoning-picker')) showReasoningMenu = false;
   }
 
-  let canSend = $derived(!disabled && !configurationWarning && value.trim().length > 0);
+  let canSend = $derived(!disabled && !configurationWarning && (value.trim().length > 0 || attachments.length > 0));
 
   function cycleAgentExecutionMode() {
     const current = agentSettingsStore.settings.agentExecutionMode ?? 'auto';
@@ -438,11 +502,124 @@
       className: 'bg-emerald-500/14 text-emerald-300 border border-emerald-500/25 hover:brightness-110',
     };
   });
+
+  async function handleFileInput(e: Event) {
+    const target = e.target as HTMLInputElement;
+    if (!target.files) return;
+    for (const file of target.files) {
+      if (file.type.startsWith('image/')) {
+        const reader = new FileReader();
+        reader.onload = (e) => {
+          const result = e.target?.result as string;
+          if (result) {
+            const data = result.split(',')[1];
+            attachments = [...attachments, { type: 'image', data, name: file.name }];
+          }
+        };
+        reader.readAsDataURL(file);
+      }
+    }
+    target.value = '';
+  }
+
+  function removeAttachment(index: number) {
+    attachments = attachments.filter((_, i) => i !== index);
+  }
+
+  /** Force-paste image from OS clipboard (bypasses text). Used by Ctrl+Shift+V and the paste-image button. */
+  async function pasteImageFromClipboard() {
+    // Try browser clipboard first (works for images copied from web pages)
+    try {
+      const clipboardItems = await navigator.clipboard.read();
+      for (const item of clipboardItems) {
+        for (const type of item.types) {
+          if (type.startsWith('image/')) {
+            const blob = await item.getType(type);
+            const reader = new FileReader();
+            const loaded = await new Promise<string>((resolve) => {
+              reader.onload = (e) => resolve(e.target?.result as string);
+              reader.readAsDataURL(blob);
+            });
+            const data = loaded.split(',')[1];
+            const ext = type === 'image/png' ? 'png' : type === 'image/jpeg' ? 'jpg' : type === 'image/gif' ? 'gif' : type === 'image/webp' ? 'webp' : 'png';
+            attachments = [...attachments, { type: 'image', data, name: `clipboard-image.${ext}` }];
+            return;
+          }
+        }
+      }
+    } catch (_) {
+      // navigator.clipboard.read() may fail if permission denied — fall through to Tauri
+    }
+
+    // Tauri native clipboard (for OS-level screenshot tools)
+    if (typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window) {
+      try {
+        const { readImage } = await import('@tauri-apps/plugin-clipboard-manager');
+        const image = await readImage();
+        if (image) {
+          // Tauri's Image exposes png() at runtime but it isn't in the published types.
+          const pngData = await (image as unknown as { png: () => Promise<BlobPart> }).png();
+          const blob = new Blob([pngData], { type: 'image/png' });
+          const reader = new FileReader();
+          const loaded = await new Promise<string>((resolve) => {
+            reader.onload = (ev) => resolve(ev.target?.result as string);
+            reader.readAsDataURL(blob);
+          });
+          const base64 = loaded.split(',')[1];
+          attachments = [...attachments, { type: 'image', data: base64, name: 'clipboard-image.png' }];
+          return;
+        }
+      } catch (err: any) {
+        toastStore.error("Clipboard error: " + err.message);
+        return;
+      }
+    }
+
+    toastStore.error("No image found in clipboard");
+  }
+
+  // Track whether we already handled this paste event (prevents double-fire
+  // from the container + textarea both seeing the same bubbling event).
+  let lastPasteEvent: ClipboardEvent | null = null;
+
+  /** Ctrl+V / Cmd+V → paste TEXT only (no image detection). */
+  function handlePaste(e: ClipboardEvent) {
+    // If this exact event was already handled (container + textarea both fire), skip.
+    if (lastPasteEvent === e) return;
+    lastPasteEvent = e;
+
+    e.preventDefault();
+
+    // Focus the input if we're not already there
+    inputRef?.focus();
+
+    // Read TEXT only from the clipboard.  Image pasting is Ctrl+Shift+V.
+    void navigator.clipboard.readText().then((text) => {
+      if (text && inputRef) {
+        const start = inputRef.selectionStart ?? value.length;
+        const end = inputRef.selectionEnd ?? value.length;
+        value = value.slice(0, start) + text + value.slice(end);
+        requestAnimationFrame(() => {
+          if (inputRef) {
+            const newPos = start + text.length;
+            inputRef.selectionStart = newPos;
+            inputRef.selectionEnd = newPos;
+            inputRef.focus();
+          }
+        });
+      }
+    }).catch(() => {});
+
+    // Clear the guard after a tick so a new paste works
+    requestAnimationFrame(() => {
+      lastPasteEvent = null;
+    });
+  }
 </script>
 
 <svelte:window onclick={handleClickOutside} />
 
-<div class="command-input px-4 py-3">
+<div class="command-input px-4 py-3" onpaste={handlePaste}>
   <!-- No project: show error -->
   {#if disabled}
     <div class="mb-4 px-4 py-3 rounded-xl text-sm font-medium flex items-center gap-2" style="background: rgba(245, 158, 11, 0.12); border: 1px solid rgba(245, 158, 11, 0.35); color: var(--color-text-primary);">
@@ -587,11 +764,33 @@
             </div>
           </div>
         {/if}
+        
+        <!-- Attachments Preview -->
+        {#if attachments.length > 0}
+          <div class="mb-3 flex flex-wrap gap-2">
+            {#each attachments as attachment, i}
+              <div class="relative group rounded-lg overflow-hidden border" style="border-color: var(--color-border); width: 64px; height: 64px;">
+                {#if attachment.type === 'image'}
+                  <img src={`data:image/png;base64,${attachment.data}`} alt={attachment.name} class="w-full h-full object-cover" />
+                {/if}
+                <button
+                  type="button"
+                  class="absolute top-1 right-1 p-0.5 rounded-full bg-black/60 text-white opacity-0 group-hover:opacity-100 transition-opacity hover:bg-black/80"
+                  onclick={() => removeAttachment(i)}
+                >
+                  <X size={12} />
+                </button>
+              </div>
+            {/each}
+          </div>
+        {/if}
+        
         <textarea
           bind:this={inputRef}
           bind:value={value}
           oninput={autoResize}
           onkeydown={handleKeydown}
+          onpaste={handlePaste}
           placeholder={disabled ? disabledMessage : placeholder}
           rows="1"
           class="input flex-1"
@@ -636,19 +835,28 @@
             </button>
           </div>
 
+          <input
+            type="file"
+            multiple
+            accept="image/*"
+            class="hidden"
+            bind:this={fileInputRef}
+            onchange={handleFileInput}
+          />
           <button
             type="button"
             onclick={isRunning ? stop : send}
             disabled={disabled || (!isRunning && !canSend)}
-            class="btn flex w-full items-center justify-center gap-2 {isRunning ? 'bg-red-500/90 hover:bg-red-500 text-white border-transparent' : 'btn-primary'}"
+            class="btn flex w-full items-center justify-center gap-2 {isRunning ? 'stop-btn' : 'btn-primary'}"
             style="height: 52px; padding: 0 20px; font-size: 14px; {disabled || configurationWarning ? 'opacity: 0.5; cursor: not-allowed;' : ''}"
+            aria-label={isRunning ? 'Stop the running model' : 'Send message'}
+            title={isRunning ? 'Stop (Esc)' : 'Send (Enter)'}
           >
             {#if isRunning}
-              <div class="relative flex items-center justify-center">
-                <Circle size={18} fill="currentColor" class="animate-pulse" />
-                <div class="absolute w-2 h-2 bg-white rounded-full"></div>
-              </div>
-              Stop
+              <span class="stop-pulse" aria-hidden="true">
+                <Square size={10} fill="currentColor" strokeWidth={0} />
+              </span>
+              <span>Stop</span>
             {:else}
               <Send size={18} />
               Send
@@ -664,12 +872,30 @@
       {#if configurationWarning}
         Configure a provider to enable sending.
       {:else}
-        Enter to send · Shift+Enter for new line
+        Enter to send · Shift+Enter for new line · Ctrl+V paste text · Ctrl+Shift+V paste image
       {/if}
     </span>
-    {#if value.length > 0}
-      <span class="text-xs" style="color: var(--color-text-muted);">{value.length} chars</span>
-    {/if}
+    <div class="flex items-center gap-3">
+      <button
+        type="button"
+        class="text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] transition-colors"
+        onclick={() => fileInputRef?.click()}
+        title="Attach Image"
+      >
+        <Paperclip size={16} />
+      </button>
+      <button
+        type="button"
+        class="text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] transition-colors"
+        onclick={() => pasteImageFromClipboard()}
+        title="Paste Image (Ctrl+Shift+V)"
+      >
+        <Clipboard size={16} />
+      </button>
+      {#if value.length > 0}
+        <span class="text-xs" style="color: var(--color-text-muted);">{value.length} chars</span>
+      {/if}
+    </div>
   </div>
 </div>
 
@@ -677,5 +903,58 @@
   .yolo-active {
     border-color: #ef4444 !important;
     box-shadow: 0 0 0 1px #ef4444;
+  }
+
+  /* Stop button — unmistakably "live, click to stop" with a pulsing ring. */
+  .stop-btn {
+    background: rgb(239 68 68 / 0.12);
+    border: 1px solid rgb(239 68 68 / 0.45);
+    color: #fca5a5;
+    font-weight: 600;
+    transition:
+      background 0.15s ease,
+      border-color 0.15s ease,
+      color 0.15s ease;
+  }
+  .stop-btn:hover {
+    background: rgb(239 68 68 / 0.2);
+    border-color: rgb(239 68 68 / 0.85);
+    color: #fecaca;
+  }
+  .stop-pulse {
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 22px;
+    height: 22px;
+    border-radius: 50%;
+    background: #ef4444;
+    color: #fff;
+    flex-shrink: 0;
+  }
+  .stop-pulse::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-radius: 50%;
+    border: 2px solid rgb(239 68 68 / 0.7);
+    animation: stop-ping 1.4s cubic-bezier(0, 0, 0.2, 1) infinite;
+  }
+  @keyframes stop-ping {
+    0% {
+      transform: scale(1);
+      opacity: 0.7;
+    }
+    75%,
+    100% {
+      transform: scale(2);
+      opacity: 0;
+    }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .stop-pulse::after {
+      animation: none;
+    }
   }
 </style>

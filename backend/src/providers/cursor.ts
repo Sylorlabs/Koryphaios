@@ -74,9 +74,8 @@ export class CursorProvider implements Provider {
       '--force',
     ];
 
-    // Real reasoning control: cursor-agent supports --reasoning-effort=<low|medium|high>.
-    const effort = mapCursorEffort(request.reasoningLevel);
-    if (effort) args.push(`--reasoning-effort=${effort}`);
+    // Note: cursor-agent has no --reasoning-effort flag — reasoning is selected via the
+    // model variant (e.g. sonnet-4-thinking), so there's nothing to pass here.
 
     const cwd = request.workingDirectory?.trim() || process.cwd();
     const child = spawn(bin, args, { cwd, stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env } });
@@ -238,20 +237,6 @@ function summarizeCursorResult(result: Record<string, unknown> | undefined): str
     return JSON.stringify(success).slice(0, 500);
   }
   return JSON.stringify(result).slice(0, 500);
-}
-
-/**
- * Map a generic reasoning level to cursor-agent's --reasoning-effort (low|medium|high).
- * Returns undefined when no/invalid level is given so the CLI keeps its default.
- */
-function mapCursorEffort(level?: string): string | undefined {
-  if (!level) return undefined;
-  const v = level.toLowerCase().trim();
-  if (v === 'none' || v === 'off' || v === 'auto') return undefined;
-  if (v === 'minimal' || v === 'low') return 'low';
-  if (v === 'xhigh' || v === 'max' || v === 'high') return 'high';
-  if (v === 'medium') return 'medium';
-  return undefined;
 }
 
 /** Serialize the conversation into a single prompt for cursor-agent's print mode. */
