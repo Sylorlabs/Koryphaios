@@ -17,6 +17,8 @@ export const ProviderName = {
   Copilot: 'copilot',
   Cline: 'cline',
   Codex: 'codex',
+  Grok: 'grok',
+  Cursor: 'cursor',
 
   // Curated coding models
   OpenCodeZen: 'opencodezen',
@@ -39,7 +41,6 @@ export const ProviderName = {
   Cortecs: 'cortecs',
   DeepSeek: 'deepseek',
   DeepInfra: 'deepinfra',
-  Firmware: 'firmware',
   Fireworks: 'fireworks',
   GitLab: 'gitlab',
   HuggingFace: 'huggingface',

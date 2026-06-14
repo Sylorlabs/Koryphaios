@@ -113,13 +113,36 @@
     }
   }
 
-  // Track last subscribed session to avoid duplicate subscriptions
   let lastSubscribedSessionId = $state<string>('');
 
   $effect(() => {
     const activeId = sessionStore.activeSessionId;
-    if (activeId && wsStore.status === 'connected' && activeId !== lastSubscribedSessionId) {
+    if (!activeId) {
+      if (lastSubscribedSessionId !== '') {
+        wsStore.clearFeed();
+        lastSubscribedSessionId = '';
+      }
+      return;
+    }
+
+    if (activeId !== lastSubscribedSessionId) {
       lastSubscribedSessionId = activeId;
+      
+      // Subscribe to the WS session if connected
+      if (wsStore.status === 'connected') {
+        wsStore.subscribeToSession(activeId);
+      }
+      
+      // Load history
+      void (async () => {
+        const messages = await sessionStore.fetchMessages(activeId);
+        wsStore.loadSessionMessages(activeId, messages);
+      })();
+    } else if (wsStore.status === 'connected' && activeId === lastSubscribedSessionId) {
+      // Re-subscribe if we just connected and we haven't subscribed yet
+      // But wait, the subscribeToSession call on reconnect is actually handled in websocket.svelte.ts:
+      // "if (activeSid) subscribeToSession(activeSid);" inside ws.onopen
+      // So we don't strictly need it here for reconnects, but let's be safe:
       wsStore.subscribeToSession(activeId);
     }
   });
@@ -697,7 +720,7 @@ RULES:
     }
   }
 
-  function handleSend(message: string, model?: string, reasoningLevel?: string) {
+  function handleSend(message: string, model?: string, reasoningLevel?: string, attachments?: Array<{type: string, data: string, name: string}>) {
     if (!appStore.projectName) {
       toastStore.error('Open a project first to chat with an agent');
       return;
@@ -708,12 +731,13 @@ RULES:
       showSettings = true;
       return;
     }
-    if (!sessionStore.activeSessionId || !message.trim()) return;
+    if (!sessionStore.activeSessionId || (!message.trim() && !(attachments && attachments.length > 0))) return;
     if (selectedAgentId) {
+      // NOTE: currently agent thread send might not support attachments, but we'll pass them if wsStore updates
       wsStore.sendAgentMessage(sessionStore.activeSessionId, selectedAgentId, message);
       return;
     }
-    wsStore.sendMessage(sessionStore.activeSessionId, message, model, reasoningLevel);
+    wsStore.sendMessage(sessionStore.activeSessionId, message, model, reasoningLevel, attachments);
   }
 
   function handleStop() {
@@ -1063,7 +1087,7 @@ RULES:
           bind:value={composerDraft}
 	        onSend={handleSend}
           onExecuteCommand={handleSlashCommand}
-	        isRunning={selectedAgent ? selectedAgentIsRunning : (wsStore.managerStatus !== 'idle' && wsStore.managerStatus !== 'done')}
+	        isRunning={selectedAgent ? selectedAgentIsRunning : wsStore.isSessionBusy(sessionStore.activeSessionId)}
 	        onStop={handleStop}
 	        onOpenSettings={() => showSettings = true}
           slashCommands={composerSlashCommands}
@@ -1100,13 +1124,3 @@ RULES:
 <SettingsDrawer open={showSettings} onClose={() => showSettings = false} />
 <CommandPalette bind:open={showCommandPalette} onAction={handleMenuAction} />
 <ToastContainer />
-
-<style>
-  .sidebar-header {
-    /* Relying on JS onmousedown={startDragging} */
-  }
-
-  .sidebar-header-button {
-    /* Normal button behavior */
-  }
-</style>

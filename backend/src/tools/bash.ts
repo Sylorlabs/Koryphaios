@@ -11,6 +11,7 @@ import {
 import { toolLog } from '../logger';
 import { shellManager } from './shell-manager';
 import { processSupervisor } from '../process-supervisor/supervisor';
+import { computeScheduler } from '../runtime/compute-scheduler';
 import {
   buildCommandWithLimits,
   validateResourceRequest,
@@ -203,6 +204,7 @@ Network access via curl/wget is blocked unless explicitly authorized.`;
     // Apply resource limits to the command
     const limitedCommand = buildCommandWithLimits(command, AGENT_RESOURCE_LIMITS);
 
+    const execute = async (): Promise<ToolCallOutput> => {
     try {
       const proc = Bun.spawn(['bash', '-c', limitedCommand], {
         cwd: requestedCwd,
@@ -279,5 +281,39 @@ Network access via curl/wget is blocked unless explicitly authorized.`;
         durationMs: 0,
       };
     }
+    };
+
+    // Machine-wide coordination: heavy commands (build/test/install/typecheck) share
+    // global concurrency pools across ALL agents, so e.g. four big builds can't fire at
+    // once and thrash the box. Identical in-flight jobs (same command + cwd) are reused.
+    const resource = computeScheduler.classify(command);
+    if (resource === 'light') {
+      return await execute();
+    }
+
+    const key = `${resource}:${requestedCwd}:${command.trim()}`;
+    let queuedNotice = '';
+    const { result, waitedMs, shared } = await computeScheduler.run(
+      {
+        resource,
+        key,
+        onQueue: ({ ahead, running }) => {
+          queuedNotice = `[compute] ${running} ${resource} job(s) already running; waiting in queue (${ahead} ahead) to protect the machine…`;
+          toolLog.info({ resource, ahead, running, cwd: requestedCwd }, 'bash command queued for compute slot');
+        },
+      },
+      execute,
+    );
+
+    if (shared) {
+      result.output =
+        `[compute] Reused an identical ${resource} already in progress from another agent (no duplicate run).\n` +
+        result.output;
+    } else if (waitedMs > 1500) {
+      result.output =
+        `${queuedNotice || `[compute] waited for a free ${resource} slot`} — waited ${(waitedMs / 1000).toFixed(1)}s.\n` +
+        result.output;
+    }
+    return result;
   }
 }

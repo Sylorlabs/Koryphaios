@@ -34,6 +34,8 @@
     RotateCcw,
     Save,
     GripVertical,
+    Plus,
+    Trash2,
   } from 'lucide-svelte';
   import MemoryEditor from './MemoryEditor.svelte';
   import AgentSettings from './AgentSettings.svelte';
@@ -95,7 +97,7 @@
     openrouter: 'OpenRouter', groq: 'Groq', copilot: 'GitHub Copilot', azure: 'Azure OpenAI',
     bedrock: 'AWS Bedrock', vertexai: 'Vertex AI', local: 'Local (custom endpoint)', ollama: 'Ollama',
     lmstudio: 'LM Studio', llamacpp: 'Llama.cpp', opencodezen: 'OpenCodeZen',
-    claude: 'Claude Code', codex: 'OpenAI Codex', kimicode: 'Kimi Code',
+    claude: 'Claude Code', codex: 'OpenAI Codex', grok: 'Grok Build', cursor: 'Cursor', kimicode: 'Kimi Code',
     moonshot: 'Moonshot AI / Kimi API', mistral: 'Mistral AI',
   };
 
@@ -148,6 +150,29 @@
     }
   }
 
+  // Agent-CLI auto-detection — which coding CLIs Koryphaios found installed + logged in.
+  type DetectedCli = {
+    id: string;
+    displayName: string;
+    installed: boolean;
+    loggedIn: boolean;
+    autoEnabled: boolean;
+    provider: string | null;
+    authSource: string | null;
+    note: string;
+    docsUrl: string;
+  };
+  let detectedClis = $state<DetectedCli[]>([]);
+  async function loadDetectedClis() {
+    try {
+      const res = await apiFetch('/api/providers/detect');
+      const data = await parseJsonResponse<{ ok?: boolean; data?: DetectedCli[] }>(res);
+      if (data?.ok && Array.isArray(data.data)) detectedClis = data.data;
+    } catch {
+      detectedClis = [];
+    }
+  }
+
   const providerList = $derived.by(() => {
     const types = availableProviderTypes.length > 0
       ? availableProviderTypes.map((type) => ({
@@ -176,7 +201,7 @@
       portkey: 'Portkey', scaleway: 'Scaleway', ovhcloud: 'OVHcloud', stackit: 'STACKIT',
       nebius: 'Nebius', togetherai: 'Together AI', venice: 'Venice AI', zenmux: 'ZenMux',
       opencodezen: 'OpenCodeZen', firmware: 'Firmware', '302ai': '302.ai',
-      claude: 'Claude Code', codex: 'OpenAI Codex', mistral: 'Mistral AI',
+      claude: 'Claude Code', codex: 'OpenAI Codex', grok: 'Grok Build', mistral: 'Mistral AI',
       mistralai: 'Mistral AI', cohere: 'Cohere', perplexity: 'Perplexity',
       luma: 'Luma', fal: 'Fal', elevenlabs: 'ElevenLabs', assemblyai: 'AssemblyAI',
       deepgram: 'Deepgram', gladia: 'Gladia', lmnt: 'LMNT', azurecognitive: 'Azure Cognitive',
@@ -202,7 +227,7 @@
       ovhcloud: 'ovh-...', stackit: '...', nebius: '', togetherai: 'sk-...',
       venice: 'sk-...', zenmux: 'sk-...', opencodezen: 'Get key at opencode.ai/auth',
       firmware: 'sk-...', '302ai': 'sk-...', mistralai: 'sk-...',
-      claude: 'Claude auth token', codex: 'Auth with ChatGPT',
+      claude: 'Claude auth token', codex: 'Auth with ChatGPT', grok: 'Run "grok login" (or set GROK_CODE_XAI_API_KEY)', cursor: 'Run "cursor-agent login" (or set CURSOR_API_KEY)',
       mistral: 'sk-...', cohere: 'sk-...', perplexity: 'pplx-...', luma: 'lm-...',
       fal: 'sk-...', elevenlabs: 'sk-...', assemblyai: 'sk-...', deepgram: 'sk-...',
       gladia: 'sk-...', lmnt: 'sk-...', azurecognitive: 'sk-...', sapai: 'sk-...',
@@ -217,9 +242,14 @@
 
     return types.map((type) => ({
       key: type.name,
-      label: providerLabels[type.name] || type.name.charAt(0).toUpperCase() + type.name.slice(1),
+      label:
+        providerLabels[type.name] ||
+        ((wsStore.providers ?? []).find((p) => p.name === type.name) as { label?: string } | undefined)?.label ||
+        (type.name.startsWith('custom:')
+          ? type.name.slice('custom:'.length)
+          : type.name.charAt(0).toUpperCase() + type.name.slice(1)),
       placeholder: providerPlaceholders[type.name] || 'API key...',
-      needsUrl: providersNeedingUrl.has(type.name),
+      needsUrl: providersNeedingUrl.has(type.name) || type.name.startsWith('custom:'),
     })).sort((a, b) => a.label.localeCompare(b.label));
   });
 
@@ -234,6 +264,7 @@
       if (availableProviderTypes.length === 0 && !providersLoadAttempted) {
         providersLoadAttempted = true;
         void loadAvailableProviders();
+        void loadDetectedClis();
       }
     } else {
       // Reset so navigating back to providers re-loads fresh
@@ -259,6 +290,64 @@
   let expandedProvider = $state<string | null>(null);
   let keyInputs = $state<Record<string, string>>({});
   let tokenInputs = $state<Record<string, string>>({});
+
+  // ── Custom (bring-your-own) provider ──
+  let showAddCustom = $state(false);
+  let addingCustom = $state(false);
+  let customForm = $state({ label: '', kind: 'openai', baseUrl: '', apiKey: '', models: '' });
+
+  async function addCustomProvider() {
+    const label = customForm.label.trim();
+    const baseUrl = customForm.baseUrl.trim();
+    if (!label) { toastStore.error('Enter a display name'); return; }
+    if (!baseUrl) { toastStore.error('Enter the base URL'); return; }
+    addingCustom = true;
+    try {
+      const models = customForm.models.split(',').map((s) => s.trim()).filter(Boolean);
+      const res = await apiFetch('/api/providers/custom', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          label,
+          kind: customForm.kind,
+          baseUrl,
+          apiKey: customForm.apiKey.trim() || undefined,
+          models: models.length ? models : undefined,
+        }),
+      });
+      const data = await parseJsonResponse<{ ok?: boolean; error?: string }>(res);
+      if (data?.ok) {
+        toastStore.success(`Custom provider "${label}" added ✓`);
+        customForm = { label: '', kind: 'openai', baseUrl: '', apiKey: '', models: '' };
+        showAddCustom = false;
+        await loadAvailableProviders();
+        await wsStore.loadProvidersFromApi();
+      } else {
+        toastStore.error(data?.error ?? 'Failed to add custom provider');
+      }
+    } catch (err: any) {
+      toastStore.error(err.message ?? 'Network error');
+    } finally {
+      addingCustom = false;
+    }
+  }
+
+  async function deleteCustomProvider(id: string) {
+    try {
+      const res = await apiFetch(`/api/providers/custom/${encodeURIComponent(id)}`, { method: 'DELETE' });
+      const data = await parseJsonResponse<{ ok?: boolean; error?: string }>(res);
+      if (data?.ok) {
+        toastStore.info('Custom provider removed');
+        expandedProvider = null;
+        await loadAvailableProviders();
+        await wsStore.loadProvidersFromApi();
+      } else {
+        toastStore.error(data?.error ?? 'Failed to remove custom provider');
+      }
+    } catch (err: any) {
+      toastStore.error(err.message ?? 'Network error');
+    }
+  }
   let urlInputs = $state<Record<string, string>>({});
   let accountLabelInputs = $state<Record<string, string>>({});
   let accountKeyInputs = $state<Record<string, string>>({});
@@ -1242,6 +1331,20 @@
   let billingLoading = $state(false);
   let billingCredits = $state<any>(null);
   let billingError = $state<string | null>(null);
+  // Central pricing hub data (per-provider model pricing).
+  let pricing = $state<Array<{ name: string; subscription: boolean; models: Array<{ id: string; name: string; inputPerM: number | null; outputPerM: number | null; cachedInputPerM: number | null }> }>>([]);
+  let pricingExpanded = $state<Set<string>>(new Set());
+
+  function fmtPerM(v: number | null): string {
+    if (v == null) return '—';
+    if (v === 0) return 'free';
+    return '$' + (v >= 1 ? v.toFixed(2) : v.toFixed(3)).replace(/\.?0+$/, '') + '/M';
+  }
+  function togglePricing(name: string) {
+    const next = new Set(pricingExpanded);
+    next.has(name) ? next.delete(name) : next.add(name);
+    pricingExpanded = next;
+  }
 
   async function loadBillingCredits() {
     billingLoading = true; billingError = null;
@@ -1250,6 +1353,12 @@
       if (!res.ok) { billingError = 'Billing API not available'; return; }
       const data = await parseJsonResponse(res);
       billingCredits = data;
+      // Load the central pricing hub alongside credits.
+      try {
+        const pr = await apiFetch('/api/billing/pricing');
+        const pd = await parseJsonResponse<{ ok?: boolean; providers?: typeof pricing }>(pr);
+        if (pd?.ok && Array.isArray(pd.providers)) pricing = pd.providers;
+      } catch { /* pricing is supplementary */ }
     } catch (e: any) { billingError = e.message; }
     finally { billingLoading = false; }
   }
@@ -1277,7 +1386,7 @@
         { id: 'billing', label: 'Billing', icon: CreditCard, action: loadBillingCredits },
         { id: 'memory', label: 'Memory', icon: Brain },
         { id: 'agent', label: 'Agent', icon: Bot },
-        { id: 'experimental', label: 'Experimental', icon: FlaskConical },
+        { id: 'experimental', label: 'Advanced', icon: FlaskConical },
         { id: 'teams', label: 'Teams', icon: Users }
       ] as tab}
         {@const Icon = tab.icon}
@@ -1305,6 +1414,87 @@
           <Search size={14} class="absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" style="color: var(--color-text-muted);" />
           <input type="text" placeholder="Search providers..." bind:value={providerSearchQuery} class="input w-full pl-12 py-2 text-sm" />
         </div>
+
+        <!-- Detected on your system — agent CLIs Koryphaios auto-picked up -->
+        {#if detectedClis.some((c) => c.installed)}
+          <div class="rounded-xl border border-[var(--color-border)] p-4 bg-[var(--color-surface-1)]">
+            <div class="flex items-center justify-between mb-3">
+              <span class="text-sm font-semibold text-[var(--color-text-primary)]">Detected on your system</span>
+              <span class="text-[10px] text-[var(--color-text-muted)]">Auto-picked up — no setup needed</span>
+            </div>
+            <div class="space-y-2.5">
+              {#each detectedClis.filter((c) => c.installed) as cli (cli.id)}
+                <div class="flex items-start gap-3">
+                  <span
+                    class="mt-1.5 h-2 w-2 rounded-full flex-shrink-0"
+                    style="background: {cli.autoEnabled
+                      ? 'var(--color-success, #22c55e)'
+                      : cli.loggedIn
+                        ? 'var(--color-warning, #f59e0b)'
+                        : 'var(--color-text-muted)'};"
+                  ></span>
+                  <div class="min-w-0 flex-1">
+                    <div class="flex items-center gap-2 flex-wrap">
+                      <span class="text-sm font-medium text-[var(--color-text-primary)]">{cli.displayName}</span>
+                      {#if cli.autoEnabled}
+                        <span class="text-[10px] px-1.5 py-0.5 rounded-full font-medium" style="background: var(--color-success-bg, rgba(34,197,94,0.15)); color: var(--color-success, #22c55e);">Connected automatically</span>
+                      {:else if cli.loggedIn}
+                        <span class="text-[10px] px-1.5 py-0.5 rounded-full font-medium" style="background: var(--color-warning-bg, rgba(245,158,11,0.15)); color: var(--color-warning, #f59e0b);">Logged in — needs a key</span>
+                      {:else}
+                        <span class="text-[10px] text-[var(--color-text-muted)]">Installed — not logged in</span>
+                      {/if}
+                    </div>
+                    <p class="text-[10px] text-[var(--color-text-muted)] leading-relaxed mt-0.5">{cli.note}</p>
+                  </div>
+                </div>
+              {/each}
+            </div>
+          </div>
+        {/if}
+
+        <!-- Add a custom (bring-your-own) provider -->
+        <div class="rounded-xl border border-dashed border-[var(--color-border)] p-4 bg-[var(--color-surface-1)]">
+          <button type="button" onclick={() => (showAddCustom = !showAddCustom)} class="w-full flex items-center justify-between text-left">
+            <div class="flex items-center gap-2">
+              <Plus size={15} style="color: var(--color-accent);" />
+              <span class="text-sm font-semibold text-[var(--color-text-primary)]">Add a custom provider</span>
+            </div>
+            <span class="text-[10px] text-[var(--color-text-muted)]">OpenAI-compatible &amp; more</span>
+          </button>
+          {#if showAddCustom}
+            <div class="mt-4 space-y-3 pt-4 border-t border-[var(--color-border)]">
+              <p class="text-[10px] text-[var(--color-text-muted)] leading-relaxed">
+                Bring your own endpoint — works with any OpenAI-compatible API (vLLM, LiteLLM, LM Studio, self-hosted gateways, OpenRouter-style services), plus Anthropic- and Gemini-compatible servers. Models are auto-fetched from <code>/models</code> when available, or list them explicitly below.
+              </p>
+              <div class="space-y-1">
+                <label class="text-[10px] uppercase tracking-wider text-[var(--color-text-muted)] font-medium" for="custom-label">Display name</label>
+                <input id="custom-label" type="text" placeholder="My LLM" bind:value={customForm.label} class="input w-full text-xs" />
+              </div>
+              <div class="space-y-1">
+                <label class="text-[10px] uppercase tracking-wider text-[var(--color-text-muted)] font-medium" for="custom-kind">API format</label>
+                <select id="custom-kind" bind:value={customForm.kind} class="input w-full text-xs">
+                  <option value="openai">OpenAI-compatible (/v1/chat/completions)</option>
+                  <option value="anthropic">Anthropic-compatible (/v1/messages)</option>
+                  <option value="gemini">Gemini-compatible</option>
+                </select>
+              </div>
+              <div class="space-y-1">
+                <label class="text-[10px] uppercase tracking-wider text-[var(--color-text-muted)] font-medium" for="custom-url">Base URL</label>
+                <input id="custom-url" type="text" placeholder="https://api.example.com/v1" bind:value={customForm.baseUrl} class="input w-full text-xs" />
+              </div>
+              <div class="space-y-1">
+                <label class="text-[10px] uppercase tracking-wider text-[var(--color-text-muted)] font-medium" for="custom-key">API key <span class="opacity-60 normal-case">(optional — leave blank if not required)</span></label>
+                <input id="custom-key" type="password" placeholder="sk-..." bind:value={customForm.apiKey} class="input w-full text-xs" />
+              </div>
+              <div class="space-y-1">
+                <label class="text-[10px] uppercase tracking-wider text-[var(--color-text-muted)] font-medium" for="custom-models">Models <span class="opacity-60 normal-case">(optional, comma-separated)</span></label>
+                <input id="custom-models" type="text" placeholder="my-model-a, my-model-b — or leave blank to auto-fetch" bind:value={customForm.models} class="input w-full text-xs" />
+              </div>
+              <button type="button" onclick={addCustomProvider} disabled={addingCustom} class="btn btn-primary w-full text-xs py-2">{addingCustom ? 'Adding…' : 'Add provider'}</button>
+            </div>
+          {/if}
+        </div>
+
         <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 items-start">
           {#each filteredProviderList as prov (prov.key)}
             {@const status = getProviderStatus(prov.key)}
@@ -1454,6 +1644,11 @@
                         <button type="button" onclick={() => connectProvider(prov.key)} disabled={saving === prov.key} class="btn btn-primary w-full text-xs py-2 shadow-lg shadow-[var(--color-accent)]/10">{saving === prov.key ? 'Testing...' : 'Connect with API Key'}</button>
                       {:else if !usesBrowserAuth(prov.key)}
                         <button type="button" onclick={() => connectProvider(prov.key)} disabled={saving === prov.key} class="btn btn-primary w-full text-xs py-2 shadow-lg shadow-[var(--color-accent)]/10">{saving === prov.key ? 'Testing...' : 'Connect Provider'}</button>
+                      {/if}
+                      {#if prov.key.startsWith('custom:')}
+                        <button type="button" onclick={() => deleteCustomProvider(prov.key)} class="btn btn-ghost w-full text-[10px] py-1.5 mt-1 text-red-400 hover:bg-red-500/10 flex items-center justify-center gap-1.5">
+                          <Trash2 size={12} /> Remove this custom provider
+                        </button>
                       {/if}
                     </div>
                   {/if}
@@ -1965,6 +2160,77 @@
             {/if}
           </div>
         </div>
+
+        <!-- Subscription / plan usage -->
+        {#if billingCredits?.subscriptions?.length}
+          <div class="space-y-4">
+            <h3 class="text-sm font-bold text-[var(--color-text-primary)] ml-1">Subscription Usage</h3>
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              {#each billingCredits.subscriptions as sub (sub.provider)}
+                <div class="flex items-center justify-between p-4 bg-[var(--color-surface-2)] rounded-xl border border-[var(--color-border)]">
+                  <div class="flex items-center gap-3">
+                    <div class="w-8 h-8 rounded-lg bg-[var(--color-surface-3)] flex items-center justify-center p-1.5 shrink-0">
+                      <ProviderIcon provider={sub.provider} size={20} class="w-full h-full" />
+                    </div>
+                    <span class="text-xs font-semibold">{getProviderDisplayLabel(sub.provider)}</span>
+                  </div>
+                  <div class="text-right">
+                    <div class="text-[11px] font-semibold {sub.status === 'rejected' ? 'text-red-400' : sub.status === 'allowed_warning' ? 'text-amber-400' : 'text-emerald-400'}">
+                      {sub.status === 'rejected' ? 'Rate-limited' : sub.status === 'allowed_warning' ? 'Near limit' : 'OK'}
+                    </div>
+                    {#if sub.resetsAtMs}
+                      <div class="text-[10px] text-[var(--color-text-muted)]">resets {new Date(sub.resetsAtMs).toLocaleTimeString()}</div>
+                    {/if}
+                  </div>
+                </div>
+              {/each}
+            </div>
+          </div>
+        {/if}
+
+        <!-- Central pricing hub: per-million-token rates for every provider + CLI -->
+        {#if pricing.length}
+          <div class="space-y-3">
+            <div>
+              <h3 class="text-sm font-bold text-[var(--color-text-primary)] ml-1">Model Pricing</h3>
+              <p class="text-[10px] text-[var(--color-text-muted)] ml-1">Per-million-token rates across all providers &amp; CLIs. Subscription/CLI providers are flat-rate.</p>
+            </div>
+            <div class="space-y-2">
+              {#each pricing as p (p.name)}
+                <div class="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-1)] overflow-hidden">
+                  <button class="w-full flex items-center gap-3 px-4 py-3 text-left hover:brightness-110" onclick={() => togglePricing(p.name)}>
+                    <div class="w-7 h-7 rounded-lg bg-[var(--color-surface-3)] flex items-center justify-center p-1.5 shrink-0">
+                      <ProviderIcon provider={p.name} size={18} class="w-full h-full" />
+                    </div>
+                    <span class="text-xs font-semibold flex-1">{getProviderDisplayLabel(p.name)}</span>
+                    {#if p.subscription}
+                      <span class="text-[10px] px-1.5 py-0.5 rounded-full bg-[var(--color-surface-3)] text-[var(--color-text-muted)]">subscription</span>
+                    {/if}
+                    <span class="text-[10px] text-[var(--color-text-muted)]">{p.models.length} models</span>
+                  </button>
+                  {#if pricingExpanded.has(p.name)}
+                    <div class="border-t border-[var(--color-border)]">
+                      {#if p.subscription}
+                        <div class="px-4 py-3 text-[11px] text-[var(--color-text-muted)]">Flat-rate subscription — no per-token cost.</div>
+                      {:else}
+                        <div class="grid grid-cols-[1fr_auto_auto] gap-x-4 gap-y-1.5 px-4 py-3 text-[11px] font-mono">
+                          <div class="text-[10px] uppercase tracking-wide text-[var(--color-text-muted)]">Model</div>
+                          <div class="text-[10px] uppercase tracking-wide text-[var(--color-text-muted)] text-right">In</div>
+                          <div class="text-[10px] uppercase tracking-wide text-[var(--color-text-muted)] text-right">Out</div>
+                          {#each p.models as m (m.id)}
+                            <div class="truncate text-[var(--color-text-secondary)]">{m.name}</div>
+                            <div class="text-right text-[var(--color-text-primary)]">{fmtPerM(m.inputPerM)}</div>
+                            <div class="text-right text-[var(--color-text-primary)]">{fmtPerM(m.outputPerM)}</div>
+                          {/each}
+                        </div>
+                      {/if}
+                    </div>
+                  {/if}
+                </div>
+              {/each}
+            </div>
+          </div>
+        {/if}
       </div>
 
       <!-- Memory Tab -->
@@ -1990,98 +2256,140 @@
               <Users size={40} />
             </div>
             <h3 class="text-2xl font-black text-[var(--color-text-primary)]">Team Collaboration</h3>
-            <p class="text-sm text-[var(--color-text-muted)] mt-2">Enable multiplayer AI sessions and shared knowledge bases</p>
+            <p class="text-sm text-[var(--color-text-muted)] mt-2">Invite teammates to watch or co-pilot your live AI agent session</p>
           </div>
 
           {#if collaborationStore.activeCollab}
-            <div class="mx-auto grid max-w-6xl gap-6 xl:grid-cols-[minmax(320px,0.8fr)_minmax(0,1.2fr)]">
+            <!-- ── ACTIVE SESSION ── -->
+            <div class="mx-auto max-w-4xl space-y-6">
+
+              <!-- Invite links -->
               <div class="relative rounded-3xl border border-[var(--color-accent)]/30 bg-[var(--color-surface-2)] p-8 shadow-2xl">
-                <div class="absolute -top-3 left-6 px-4 py-1 rounded-full bg-[var(--color-accent)] text-[10px] font-black uppercase tracking-widest text-[var(--color-surface-0)] shadow-lg">Active Session</div>
+                <div class="absolute -top-3 left-6 px-4 py-1 rounded-full bg-[var(--color-accent)] text-[10px] font-black uppercase tracking-widest text-[var(--color-surface-0)] shadow-lg">
+                  {collaborationStore.activeCollab.relayEnabled ? '● Live via Relay' : '● Active Session'}
+                </div>
 
-                <div class="space-y-6">
+                {#if collaborationStore.activeCollab.relayEnabled}
+                  <h4 class="text-sm font-bold text-[var(--color-text-primary)] mb-5">Invite Links — share the right link for each teammate's role</h4>
+                  <div class="space-y-3">
+                    {#each [
+                      { role: 'viewer', label: 'Viewer', desc: 'Watch only — no interaction', color: 'text-blue-400', bg: 'bg-blue-500/10' },
+                      { role: 'collaborator', label: 'Collaborator', desc: 'Can submit prompts — you approve each one before agents run', color: 'text-amber-400', bg: 'bg-amber-500/10' },
+                      { role: 'copilot', label: 'Co-Pilot', desc: 'Full shared control — prompts execute immediately', color: 'text-[var(--color-accent)]', bg: 'bg-[var(--color-accent)]/10' },
+                    ] as r}
+                      <div class="flex items-center gap-4 rounded-2xl bg-[var(--color-surface-1)] p-4">
+                        <div class="flex-1">
+                          <div class="flex items-center gap-2 mb-0.5">
+                            <span class="text-xs font-bold {r.color}">{r.label}</span>
+                          </div>
+                          <p class="text-[11px] text-[var(--color-text-muted)]">{r.desc}</p>
+                        </div>
+                        <button
+                          type="button"
+                          onclick={() => collaborationStore.copyInviteLink(r.role as any)}
+                          class="shrink-0 rounded-xl {r.bg} {r.color} px-4 py-2 text-xs font-bold transition-all hover:opacity-80"
+                        >
+                          Copy Link
+                        </button>
+                      </div>
+                    {/each}
+                  </div>
+                {:else}
+                  <!-- Relay not configured — show legacy join code -->
                   <div class="text-center">
-                    <p class="mb-2 block text-[10px] font-bold uppercase tracking-widest text-[var(--color-text-muted)]">Workspace Passcode</p>
-                    <code class="block rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-1)] py-4 text-3xl font-black tracking-[0.3em] text-[var(--color-accent)]">{collaborationStore.activeCollab.joinCode || '••••••'}</code>
+                    <p class="mb-2 block text-[10px] font-bold uppercase tracking-widest text-[var(--color-text-muted)]">Join Code (local network only)</p>
+                    <code class="block rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-1)] py-4 text-3xl font-black tracking-[0.3em] text-[var(--color-accent)]">
+                      {collaborationStore.activeCollab.joinCode || '••••••'}
+                    </code>
+                    <p class="mt-3 text-[11px] text-[var(--color-text-muted)]">
+                      Configure <code class="font-mono">RELAY_URL</code> and <code class="font-mono">RELAY_HOST_SECRET</code> in your environment for internet-accessible invite links.
+                    </p>
                   </div>
-
-                  <div class="grid gap-3 sm:grid-cols-2 xl:grid-cols-1">
-                    <div class="rounded-2xl bg-[var(--color-surface-1)] p-4 text-left">
-                      <div class="text-[10px] uppercase tracking-widest text-[var(--color-text-muted)]">Mode</div>
-                      <div class="mt-2 text-sm font-semibold text-[var(--color-text-primary)]">Hosted workspace</div>
-                    </div>
-                    <div class="rounded-2xl bg-[var(--color-surface-1)] p-4 text-left">
-                      <div class="text-[10px] uppercase tracking-widest text-[var(--color-text-muted)]">Join Flow</div>
-                      <div class="mt-2 text-sm font-semibold text-[var(--color-text-primary)]">Share the passcode with teammates</div>
-                    </div>
-                  </div>
-
-                  <button type="button" onclick={() => collaborationStore.endSession()} class="btn w-full rounded-xl bg-red-500/10 py-3 font-bold text-red-400 transition-all hover:bg-red-500/20">Stop Hosting</button>
-                </div>
+                {/if}
               </div>
 
-              <div class="grid gap-6 md:grid-cols-2">
-                <div class="rounded-3xl border border-[var(--color-border)] bg-[var(--color-surface-2)] p-8 text-left">
-                  <div class="mb-4 flex h-12 w-12 items-center justify-center rounded-2xl bg-emerald-500/10 text-emerald-400">
-                    <Shield size={24} />
+              <!-- Pending approvals -->
+              {#if collaborationStore.pendingPrompts.length > 0}
+                <div class="rounded-3xl border border-amber-500/30 bg-amber-500/5 p-6">
+                  <h4 class="text-sm font-bold text-amber-400 mb-4 flex items-center gap-2">
+                    <span>⏳</span> Pending Guest Prompts ({collaborationStore.pendingPrompts.length})
+                  </h4>
+                  <div class="space-y-3">
+                    {#each collaborationStore.pendingPrompts as p (p.promptId)}
+                      <div class="rounded-2xl bg-[var(--color-surface-1)] border border-[var(--color-border)] p-4">
+                        <div class="flex items-start justify-between gap-4">
+                          <div class="flex-1 min-w-0">
+                            <div class="flex items-center gap-2 mb-1">
+                              <span class="text-[10px] font-bold uppercase text-amber-400">{p.name}</span>
+                              <span class="text-[10px] text-[var(--color-text-muted)]">· {p.role}</span>
+                            </div>
+                            <p class="text-sm text-[var(--color-text-primary)] break-words">{p.content}</p>
+                          </div>
+                          <div class="flex gap-2 shrink-0">
+                            <button
+                              type="button"
+                              onclick={() => collaborationStore.approvePrompt(p.promptId, true)}
+                              class="rounded-xl bg-emerald-500/10 text-emerald-400 px-3 py-1.5 text-xs font-bold hover:bg-emerald-500/20 transition-all"
+                            >
+                              Approve
+                            </button>
+                            <button
+                              type="button"
+                              onclick={() => collaborationStore.approvePrompt(p.promptId, false)}
+                              class="rounded-xl bg-red-500/10 text-red-400 px-3 py-1.5 text-xs font-bold hover:bg-red-500/20 transition-all"
+                            >
+                              Reject
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    {/each}
                   </div>
-                  <h4 class="text-lg font-bold text-[var(--color-text-primary)]">Secure Tunnel Active</h4>
-                  <p class="mt-2 text-xs text-[var(--color-text-muted)]">The workspace is currently hosting a collaboration session for invited teammates.</p>
                 </div>
+              {/if}
 
-                <div class="rounded-3xl border border-[var(--color-border)] bg-[var(--color-surface-2)] p-8 text-left">
-                  <div class="mb-4 flex h-12 w-12 items-center justify-center rounded-2xl bg-blue-500/10 text-blue-400">
-                    <MessageSquare size={24} />
-                  </div>
-                  <h4 class="text-lg font-bold text-[var(--color-text-primary)]">Shared Session Flow</h4>
-                  <p class="mt-2 text-xs text-[var(--color-text-muted)]">Invitees join with the passcode and collaborate inside the same active AI workspace.</p>
-                </div>
-
-                <div class="rounded-3xl border border-[var(--color-border)] bg-[var(--color-surface-2)] p-8 text-left md:col-span-2">
-                  <div class="mb-4 flex h-12 w-12 items-center justify-center rounded-2xl bg-[var(--color-accent)]/10 text-[var(--color-accent)]">
-                    <Sparkles size={24} />
-                  </div>
-                  <h4 class="text-lg font-bold text-[var(--color-text-primary)]">Hosting Checklist</h4>
-                  <div class="mt-4 grid gap-3 sm:grid-cols-3">
-                    <div class="rounded-2xl bg-[var(--color-surface-1)] p-4">
-                      <div class="text-[10px] uppercase tracking-widest text-[var(--color-text-muted)]">1</div>
-                      <p class="mt-2 text-xs text-[var(--color-text-primary)]">Share the passcode only with the people who should join.</p>
-                    </div>
-                    <div class="rounded-2xl bg-[var(--color-surface-1)] p-4">
-                      <div class="text-[10px] uppercase tracking-widest text-[var(--color-text-muted)]">2</div>
-                      <p class="mt-2 text-xs text-[var(--color-text-primary)]">Keep the host workspace open while collaborators are connected.</p>
-                    </div>
-                    <div class="rounded-2xl bg-[var(--color-surface-1)] p-4">
-                      <div class="text-[10px] uppercase tracking-widest text-[var(--color-text-muted)]">3</div>
-                      <p class="mt-2 text-xs text-[var(--color-text-primary)]">Stop hosting when the review or pairing session ends.</p>
-                    </div>
-                  </div>
-                </div>
-              </div>
+              <!-- Stop hosting -->
+              <button
+                type="button"
+                onclick={() => collaborationStore.endSession()}
+                class="btn w-full rounded-xl bg-red-500/10 py-3 font-bold text-red-400 transition-all hover:bg-red-500/20"
+              >
+                Stop Hosting
+              </button>
             </div>
+
           {:else}
-            <div class="grid grid-cols-1 md:grid-cols-2 gap-8">
+            <!-- ── NOT HOSTING ── -->
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-8 max-w-4xl mx-auto">
               <div class="p-8 rounded-3xl bg-[var(--color-surface-2)] border border-[var(--color-border)] hover:border-[var(--color-accent)]/30 transition-all flex flex-col text-center">
                 <div class="w-12 h-12 bg-emerald-500/10 text-emerald-400 rounded-2xl flex items-center justify-center mx-auto mb-6">
                   <Zap size={24} />
                 </div>
-                <h4 class="text-lg font-bold mb-2">Host New Session</h4>
-                <p class="text-xs text-[var(--color-text-muted)] mb-8">Create a secure P2P tunnel to invite teammates into your active AI workspace.</p>
-                <button type="button" onclick={() => collaborationStore.hostSession()} class="btn btn-primary w-full py-3 mt-auto font-bold rounded-xl">Start Secure Tunnel</button>
+                <h4 class="text-lg font-bold mb-2">Host a Session</h4>
+                <p class="text-xs text-[var(--color-text-muted)] mb-8">
+                  Generate invite links for teammates to watch or co-pilot your active AI session in real time.
+                </p>
+                <button
+                  type="button"
+                  onclick={() => collaborationStore.hostSession()}
+                  disabled={collaborationStore.loading}
+                  class="btn btn-primary w-full py-3 mt-auto font-bold rounded-xl disabled:opacity-50"
+                >
+                  {collaborationStore.loading ? 'Starting...' : 'Start Collaboration'}
+                </button>
               </div>
 
               <div class="p-8 rounded-3xl bg-[var(--color-surface-2)] border border-[var(--color-border)] hover:border-[var(--color-accent)]/30 transition-all flex flex-col text-center">
                 <div class="w-12 h-12 bg-blue-500/10 text-blue-400 rounded-2xl flex items-center justify-center mx-auto mb-6">
                   <Keyboard size={24} />
                 </div>
-                <h4 class="text-lg font-bold mb-2">Join Existing</h4>
-                <p class="text-xs text-[var(--color-text-muted)] mb-8">Enter a 6-digit passcode to join a teammate's session.</p>
-                <div class="mt-auto flex flex-col gap-3">
-                  <input id="team-join-input" type="text" placeholder="PASSCODE" class="input text-center text-lg font-bold tracking-widest py-3 rounded-xl" maxlength="6" />
-                  <button type="button" onclick={() => {
-                    const el = document.getElementById('team-join-input') as HTMLInputElement;
-                    if (el.value) collaborationStore.joinSession(el.value, 'Teammate');
-                  }} class="btn btn-secondary w-full py-3 font-bold rounded-xl">Join Workspace</button>
-                </div>
+                <h4 class="text-lg font-bold mb-2">Join via Invite Link</h4>
+                <p class="text-xs text-[var(--color-text-muted)] mb-8">
+                  Ask the host for their viewer, collaborator, or co-pilot invite link and open it in any browser.
+                </p>
+                <p class="text-[11px] text-[var(--color-text-muted)] mt-auto">
+                  Invite links open a live feed page — no Koryphaios install required.
+                </p>
               </div>
             </div>
           {/if}

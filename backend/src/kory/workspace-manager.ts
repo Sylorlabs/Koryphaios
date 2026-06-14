@@ -12,7 +12,15 @@
  */
 
 import { spawnSync } from 'bun';
-import { existsSync, mkdirSync, readFileSync, writeFileSync, appendFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  writeFileSync,
+  appendFileSync,
+  readdirSync,
+  symlinkSync,
+} from 'node:fs';
 import { join, resolve, relative } from 'node:path';
 import { koryLog } from '../logger';
 import type { KoryphaiosConfig } from '@koryphaios/shared';
@@ -24,6 +32,8 @@ export interface WorktreeInfo {
   path: string;
   createdAt: number;
   agentId?: string;
+  /** Commit the worktree branched from — used to diff the worker's changes. */
+  baseSha?: string;
 }
 
 export interface WorktreeStatus {
@@ -39,6 +49,9 @@ export class WorkspaceManager {
   private copyEnvFiles: boolean;
   private repoRoot: string;
   private gitignoreUpdated = false;
+  /** Explicit branch to reconcile worker changes into. null = use the branch the user
+   *  currently has checked out (i.e. "whatever branch was selected on the user's system"). */
+  private targetBranch: string | null = null;
 
   constructor(repoRoot: string, config?: KoryphaiosConfig['workspace']) {
     this.repoRoot = resolve(repoRoot);
@@ -145,6 +158,9 @@ export class WorkspaceManager {
       mkdirSync(worktreeBaseDir, { recursive: true });
     }
 
+    // Record the base commit so we can later diff exactly what the worker changed.
+    const baseSha = this.runGit(['rev-parse', 'HEAD']).output.trim() || undefined;
+
     // Create the worktree with a new branch
     const result = this.runGit(['worktree', 'add', '-b', branchName, worktreePath, 'HEAD']);
     if (!result.success) {
@@ -157,6 +173,11 @@ export class WorkspaceManager {
       this.copyEnvToWorktree(worktreePath);
     }
 
+    // Make dependencies resolvable in the worktree so the Critic's hard check (`bun test`)
+    // can exercise the worker's actual diff. A fresh worktree has no node_modules (gitignored),
+    // so symlink the repo's installed deps in — fast, zero-copy, and ignored by git.
+    this.linkDependencies(worktreePath);
+
     const worktree: WorktreeInfo = {
       id: taskId,
       taskName,
@@ -164,6 +185,7 @@ export class WorkspaceManager {
       path: worktreePath,
       createdAt: Date.now(),
       agentId,
+      baseSha,
     };
 
     this.worktrees.set(taskId, worktree);
@@ -182,7 +204,26 @@ export class WorkspaceManager {
   }
 
   /**
-   * Reconcile changes from a worktree back to main and clean up
+   * Set an explicit branch to reconcile worker changes into. Pass null to revert
+   * to "merge into whatever branch the user currently has checked out".
+   */
+  setTargetBranch(branch: string | null): void {
+    this.targetBranch = branch && branch.trim() ? branch.trim() : null;
+    koryLog.info({ targetBranch: this.targetBranch }, 'Reconcile target branch updated');
+  }
+
+  /** The branch the user currently has checked out in the main repo. */
+  getCurrentBranch(): string | null {
+    const result = this.runGit(['rev-parse', '--abbrev-ref', 'HEAD']);
+    const branch = result.output.trim();
+    return result.success && branch && branch !== 'HEAD' ? branch : null;
+  }
+
+  /**
+   * Reconcile changes from a worktree back into the target branch and clean up.
+   * The target is the explicitly-set branch, else the user's currently checked-out
+   * branch, else a conventional main branch — so worker output lands on the branch
+   * the user actually selected rather than always on main.
    * @param taskId The task/worktree ID to reconcile
    * @param squash Whether to squash commits (true) or preserve history (false)
    * @returns Success status and details
@@ -194,12 +235,25 @@ export class WorkspaceManager {
     }
 
     // Check for uncommitted changes in the worktree
-    const hasChanges =
-      this.runGit(['-C', worktree.path, 'status', '--porcelain']).output.trim() !== '';
+    // Ignore node_modules in the change check — a symlinked node_modules isn't matched by
+    // the dir-only gitignore pattern, so it would otherwise look like a pending change.
+    const hasChanges = this.runGit(['-C', worktree.path, 'status', '--porcelain']).output
+      .split('\n')
+      .some((line) => line.trim() && !line.includes('node_modules'));
 
     if (hasChanges) {
-      // Auto-commit any pending changes
-      this.runGit(['-C', worktree.path, 'add', '.']);
+      // Auto-commit any pending changes, explicitly excluding dependency dirs so the
+      // symlinked node_modules never get committed onto the user's branch.
+      this.runGit([
+        '-C',
+        worktree.path,
+        'add',
+        '-A',
+        '--',
+        '.',
+        ':(exclude)node_modules',
+        ':(exclude)**/node_modules',
+      ]);
       const commitResult = this.runGit([
         '-C',
         worktree.path,
@@ -214,8 +268,8 @@ export class WorkspaceManager {
       }
     }
 
-    // Return to main repo and merge the worktree branch
-    const mainBranch = this.getMainBranch();
+    // Return to the selected branch and merge the worktree branch into it.
+    const mainBranch = this.targetBranch ?? this.getCurrentBranch() ?? this.getMainBranch();
 
     // Check if main repository has uncommitted changes that might block checkout
     const mainHasChanges = this.runGit(['status', '--porcelain']).output.trim() !== '';
@@ -327,6 +381,43 @@ export class WorkspaceManager {
   }
 
   /**
+   * Files the worker changed in its worktree, relative to the repo root. Includes
+   * committed + uncommitted tracked changes (diffed against the base commit) plus
+   * new untracked files. Used to scope the Critic's hard check to just the diff.
+   */
+  getChangedFiles(taskId: string): string[] {
+    const worktree = this.worktrees.get(taskId);
+    if (!worktree) return [];
+    const base = worktree.baseSha ?? 'HEAD';
+    const files = new Set<string>();
+    // Tracked changes (committed or working-tree) since the base commit.
+    const tracked = this.runGit(['-C', worktree.path, 'diff', '--name-only', base]);
+    if (tracked.success) {
+      for (const line of tracked.output.split('\n')) {
+        const f = line.trim();
+        if (f) files.add(f);
+      }
+    }
+    // New untracked files (respecting .gitignore, so node_modules symlinks are skipped).
+    const untracked = this.runGit([
+      '-C',
+      worktree.path,
+      'ls-files',
+      '--others',
+      '--exclude-standard',
+    ]);
+    if (untracked.success) {
+      for (const line of untracked.output.split('\n')) {
+        const f = line.trim();
+        if (f) files.add(f);
+      }
+    }
+    // Drop dependency dirs: a symlinked node_modules isn't matched by the dir-only
+    // `node_modules/` gitignore pattern, so it can leak into untracked output here.
+    return [...files].filter((f) => !/(^|\/)node_modules(\/|$)/.test(f));
+  }
+
+  /**
    * Check if a task has an active worktree
    */
   hasWorktree(taskId: string): boolean {
@@ -432,6 +523,41 @@ export class WorkspaceManager {
       appendFileSync(gitignorePath, `\n# Koryphaios AI worktrees\n${entry}\n`, 'utf-8');
       this.gitignoreUpdated = true;
       koryLog.info('Added worktree directory to .gitignore');
+    }
+  }
+
+  /**
+   * Symlink the repo's installed node_modules into a fresh worktree (root + each workspace
+   * package that has its own). node_modules is gitignored, so the links never show up in
+   * `git status`/`git add` during reconcile. Best-effort: a failed link just means that
+   * package's deps aren't resolvable in the worktree, which `bun test` will surface.
+   */
+  private linkDependencies(worktreePath: string): void {
+    const linkOne = (relDir: string): void => {
+      const src = join(this.repoRoot, relDir, 'node_modules');
+      if (!existsSync(src)) return;
+      const destParent = join(worktreePath, relDir);
+      if (!existsSync(destParent)) return; // workspace dir not present in the worktree
+      const dest = join(destParent, 'node_modules');
+      if (existsSync(dest)) return; // already linked/installed
+      try {
+        symlinkSync(src, dest, 'dir');
+      } catch (err) {
+        koryLog.warn({ relDir, err: String(err) }, 'Failed to symlink node_modules into worktree');
+      }
+    };
+
+    // Root deps, then each immediate subdirectory that ships its own node_modules
+    // (bun workspaces keep per-package node_modules alongside the hoisted root one).
+    linkOne('.');
+    try {
+      for (const entry of readdirSync(this.repoRoot, { withFileTypes: true })) {
+        if (!entry.isDirectory()) continue;
+        if (entry.name === 'node_modules' || entry.name.startsWith('.')) continue;
+        linkOne(entry.name);
+      }
+    } catch {
+      // Best-effort enumeration; root link above is the important one.
     }
   }
 
