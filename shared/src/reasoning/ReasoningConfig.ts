@@ -244,6 +244,21 @@ const KIMICODE_CONFIGS: Record<string, ReasoningConfig | null> = {
   ),
 };
 
+// Claude Code CLI — adaptive-thinking effort, applied via the CLAUDE_CODE_EFFORT_LEVEL
+// env var on Opus/Sonnet 4.x (low | medium | high | max).
+const CLAUDE_CODE_CONFIGS: Record<string, ReasoningConfig | null> = {
+  'default-claude': createConfig(
+    'CLAUDE_CODE_EFFORT_LEVEL',
+    ['low', 'medium', 'high', 'max'],
+    'medium',
+  ),
+};
+
+// Cursor CLI (cursor-agent) — supports --reasoning-effort=<low|medium|high>.
+const CURSOR_CONFIGS: Record<string, ReasoningConfig | null> = {
+  'default-cursor': createConfig('reasoning-effort', ['low', 'medium', 'high'], 'medium'),
+};
+
 // DeepSeek reasoning configurations
 const DEEPSEEK_CONFIGS: Record<string, ReasoningConfig | null> = {
   // DeepSeek V4: Uses reasoning_effort (low, medium, high, max)
@@ -285,7 +300,6 @@ const NO_REASONING_PROVIDERS = [
   'zai',
   'zenmux',
   'opencodezen',
-  'firmware',
   'azurecognitive',
   'gitlab',
   'mistralai',
@@ -368,7 +382,7 @@ export const DEFAULT_REASONING_RULES: ReasoningRule[] = [
     provider: 'auto',
     config: createConfig(
       'reasoning',
-      ['none', 'low', 'medium', 'high', 'xhigh', 'auto'],
+      ['none', 'low', 'medium', 'high', 'xhigh', 'max', 'auto'],
       'medium',
     ),
   },
@@ -392,6 +406,10 @@ export const DEFAULT_REASONING_RULES: ReasoningRule[] = [
   ...buildRules('vertexai', VERTEXAI_CONFIGS),
   // Codex
   ...buildRules('codex', CODEX_CONFIGS),
+  // Claude Code CLI
+  ...buildRules('claude', CLAUDE_CODE_CONFIGS),
+  // Cursor CLI
+  ...buildRules('cursor', CURSOR_CONFIGS),
   // Kimi Code
   ...buildRules('kimicode', KIMICODE_CONFIGS),
   // DeepSeek
