@@ -28,6 +28,98 @@ import { recordClaudeCodeRateLimit } from '../credit-accountant';
 const CLAUDE_STREAM_TIMEOUT_MS = 300_000;
 const DEFAULT_CLI_MODEL = 'sonnet';
 
+// ── Real effort levels, pulled live from the claude CLI ─────────────────────────
+// The CLI is the source of truth for its valid --effort values: probing it with a
+// bogus value makes it print "Valid values: low, medium, high, xhigh, max". We pull
+// that (cheaply, via --version so no model turn runs) and cache it, rather than
+// hardcoding a list that can drift between CLI versions.
+let cachedEffortLevels: string[] | null = null;
+let effortLevelsAt = 0;
+const EFFORT_CACHE_MS = 10 * 60 * 1000;
+let effortProbeInFlight: Promise<void> | null = null;
+
+function probeEffortLevels(): Promise<string[] | null> {
+  return new Promise((resolve) => {
+    let buf = '';
+    let settled = false;
+    const finish = (v: string[] | null) => {
+      if (!settled) {
+        settled = true;
+        resolve(v);
+      }
+    };
+    try {
+      const child = spawn('claude', ['--effort', '__kory_probe__', '--version'], {
+        stdio: ['ignore', 'pipe', 'pipe'],
+        env: { ...process.env },
+      });
+      const onData = (d: Buffer) => {
+        buf += d.toString();
+        const m = buf.match(/Valid values:\s*([a-z0-9,\s]+?)\./i);
+        if (m) {
+          try {
+            child.kill();
+          } catch {
+            /* noop */
+          }
+          finish(
+            m[1]
+              .split(',')
+              .map((s) => s.trim().toLowerCase())
+              .filter(Boolean),
+          );
+        }
+      };
+      child.stdout?.on('data', onData);
+      child.stderr?.on('data', onData);
+      child.on('close', () => finish(null));
+      child.on('error', () => finish(null));
+      setTimeout(() => {
+        try {
+          child.kill();
+        } catch {
+          /* noop */
+        }
+        finish(null);
+      }, 8000);
+    } catch {
+      finish(null);
+    }
+  });
+}
+
+function refreshEffortLevelsInBackground(): void {
+  if (effortProbeInFlight) return;
+  if (cachedEffortLevels && Date.now() - effortLevelsAt < EFFORT_CACHE_MS) return;
+  effortProbeInFlight = probeEffortLevels()
+    .then((levels) => {
+      if (levels && levels.length > 0) {
+        cachedEffortLevels = levels;
+        effortLevelsAt = Date.now();
+        providerLog.info({ levels }, 'Pulled real claude effort levels from CLI');
+      }
+    })
+    .catch(() => {})
+    .finally(() => {
+      effortProbeInFlight = null;
+    });
+}
+
+/** Whether a model is xhigh-capable. Per the CLI, xhigh is gated to Opus ("xhigh-capable model"). */
+function isXhighCapable(model: ModelDef): boolean {
+  return /opus/i.test(model.apiModelId ?? '') || /opus/i.test(model.id);
+}
+
+/**
+ * Apply the live effort set to a model: non-reasoning models get none; xhigh is kept only
+ * for xhigh-capable (Opus) models, everything else uses the pulled set minus xhigh.
+ */
+function withLiveEffortLevels(model: ModelDef, levels: string[]): ModelDef {
+  if (model.canReason === false) return { ...model, reasoningLevels: [] };
+  const allowed = isXhighCapable(model) ? levels : levels.filter((l) => l !== 'xhigh');
+  return { ...model, reasoningLevels: allowed };
+}
+
 // Claude Code runs as a FULL AGENT here: it executes its OWN tools (Write/Edit/Bash/…) in
 // the project directory, and we parse its stream to surface progress, tool activity, and
 // file edits (the live diff preview). We pre-approve the standard toolset so a headless
@@ -112,7 +204,12 @@ export class ClaudeCodeProvider implements Provider {
   }
 
   listModels(): ModelDef[] {
-    return getModelsForProvider('claude');
+    const base = getModelsForProvider('claude');
+    // Pull real effort levels from the CLI (cached + refreshed in the background). Until the
+    // first probe resolves, fall back to the static per-model levels on the defs.
+    refreshEffortLevelsInBackground();
+    if (!cachedEffortLevels) return base;
+    return base.map((m) => withLiveEffortLevels(m, cachedEffortLevels!));
   }
 
   private resolveCliModel(modelId: string): string {
