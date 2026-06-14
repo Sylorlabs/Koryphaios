@@ -21,6 +21,13 @@ export interface ModelDef {
   costPerMInputCached?: number;
   costPerMOutputCached?: number;
   canReason?: boolean;
+  /**
+   * The model's actual selectable reasoning/effort levels (e.g. ['low','medium','high','max']).
+   * Source of truth for the reasoning picker — derived from real CLI/provider capabilities,
+   * not a hardcoded guess. An empty array means "no user-selectable reasoning level" (can't
+   * reason, or reasons adaptively with no knob); undefined means "fall back to the static config".
+   */
+  reasoningLevels?: string[];
   supportsAttachments?: boolean;
   supportsStreaming?: boolean;
   tier?: ModelTier;

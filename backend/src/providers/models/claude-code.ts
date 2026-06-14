@@ -18,6 +18,8 @@ export const ClaudeCodeModels: ModelDef[] = [
     costPerMInputTokens: 0,
     costPerMOutputTokens: 0,
     canReason: true,
+    // Opus adaptive thinking exposes a 'max' effort (set via CLAUDE_CODE_EFFORT_LEVEL).
+    reasoningLevels: ['low', 'medium', 'high', 'max'],
     supportsAttachments: true,
     supportsStreaming: true,
     tier: 'flagship',
@@ -32,6 +34,8 @@ export const ClaudeCodeModels: ModelDef[] = [
     costPerMInputTokens: 0,
     costPerMOutputTokens: 0,
     canReason: true,
+    // Sonnet adaptive thinking: low/medium/high (no 'max').
+    reasoningLevels: ['low', 'medium', 'high'],
     supportsAttachments: true,
     supportsStreaming: true,
     tier: 'flagship',
@@ -46,6 +50,8 @@ export const ClaudeCodeModels: ModelDef[] = [
     costPerMInputTokens: 0,
     costPerMOutputTokens: 0,
     canReason: false,
+    // Haiku via Claude Code has no user-selectable effort level.
+    reasoningLevels: [],
     supportsAttachments: true,
     supportsStreaming: true,
     tier: 'fast',

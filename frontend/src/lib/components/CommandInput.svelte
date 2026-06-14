@@ -5,7 +5,8 @@
   import { shortcutStore } from '$lib/stores/shortcuts.svelte';
   import { experimentalStore } from '$lib/stores/experimental.svelte';
   import { agentSettingsStore } from '$lib/stores/agent-settings.svelte';
-  import { getReasoningConfig, hasReasoningSupport } from '@koryphaios/shared';
+  import { getReasoningConfig, STANDARD_REASONING_OPTIONS } from '@koryphaios/shared';
+  import type { ModelDef, ReasoningConfig } from '@koryphaios/shared';
   import BrainIcon from '$lib/components/icons/BrainIcon.svelte';
   import { getModelConfigurationWarning } from '$lib/utils/model-config';
   import { invoke } from '@tauri-apps/api/core';
@@ -90,9 +91,54 @@
   let currentProvider = $derived(selectedModel === 'auto' ? 'auto' : (parseModelSelection(selectedModel).provider ?? fallbackProvider));
   let currentModel = $derived(parseModelSelection(selectedModel).model);
 
-  // Get reasoning config based on provider + model
-  let reasoningConfig = $derived(getReasoningConfig(currentProvider, currentModel));
-  let reasoningSupported = $derived(selectedModel === 'auto' || hasReasoningSupport(currentProvider, currentModel));
+  // The selected model's catalog def, so we can read its REAL per-model reasoning levels.
+  let selectedModelDef = $derived.by<ModelDef | undefined>(() => {
+    if (selectedModel === 'auto') return undefined;
+    const { provider, model } = parseModelSelection(selectedModel);
+    for (const p of wsStore.providers) {
+      if (provider && p.name !== provider) continue;
+      const def = (p.allAvailableModels ?? []).find(
+        (m: any) => m.id === model || m.apiModelId === model,
+      );
+      if (def) return def as ModelDef;
+    }
+    return undefined;
+  });
+
+  // Reasoning config: prefer the model's real reasoningLevels (from the actual CLI/provider);
+  // fall back to the static per-provider table only when a model declares none.
+  let reasoningConfig = $derived.by<ReasoningConfig | null>(() => {
+    if (selectedModel === 'auto') return getReasoningConfig('auto', currentModel);
+    const levels = selectedModelDef?.reasoningLevels;
+    if (levels !== undefined) {
+      if (levels.length === 0) return null; // model has no user-selectable reasoning
+      return {
+        parameter: 'reasoning',
+        options: levels.map(
+          (v: string) =>
+            STANDARD_REASONING_OPTIONS[v] ?? {
+              value: v,
+              label: v.charAt(0).toUpperCase() + v.slice(1),
+              description: '',
+            },
+        ),
+        defaultValue: levels.includes('medium') ? 'medium' : levels[0],
+      };
+    }
+    return getReasoningConfig(currentProvider, currentModel);
+  });
+  let reasoningSupported = $derived(
+    selectedModel === 'auto' || (!!reasoningConfig && reasoningConfig.options.length > 0),
+  );
+
+  // Keep the selected reasoning level valid for the current model (clamp to its options).
+  $effect(() => {
+    const cfg = reasoningConfig;
+    if (!cfg || cfg.options.length === 0) return;
+    if (!cfg.options.some((o) => o.value === reasoningLevel)) {
+      reasoningLevel = cfg.defaultValue ?? cfg.options[0].value;
+    }
+  });
 
   const configurationWarning = $derived(
     disabled ? null : getModelConfigurationWarning(wsStore.providers, selectedModel),
@@ -380,7 +426,7 @@
   }
 
   function reasoningLabel(value: string): string {
-    const config = getReasoningConfig(currentProvider, currentModel);
+    const config = reasoningConfig;
     if (config) {
       const opt = config.options.find(o => o.value === value);
       if (opt) return opt.label;

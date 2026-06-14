@@ -92,24 +92,6 @@ const OPENAI_CONFIGS: Record<string, ReasoningConfig | null> = {
   'default-openai': null,
 };
 
-// Google reasoning configurations
-const GOOGLE_CONFIGS: Record<string, ReasoningConfig | null> = {
-  // Gemini 3.x: level-based thinking
-  'gemini-3': createConfig('thinkingConfig.thinkingLevel', ['low', 'medium', 'high'], 'medium'),
-  // Gemini 2.5 Pro: budget-based thinking
-  'gemini-2.5': createConfig(
-    'thinkingConfig.thinkingBudget',
-    ['budget_0', 'budget_1024', 'budget_8192', 'budget_24576'],
-    '8192',
-  ),
-  // Default Google: budget-based
-  'default-google': createConfig(
-    'thinkingConfig.thinkingBudget',
-    ['budget_0', 'budget_1024', 'budget_8192', 'budget_24576'],
-    '8192',
-  ),
-};
-
 // Azure (same as OpenAI but with azure prefix)
 const AZURE_CONFIGS: Record<string, ReasoningConfig | null> = {
   'azure.o1-mini': null,
@@ -244,20 +226,9 @@ const KIMICODE_CONFIGS: Record<string, ReasoningConfig | null> = {
   ),
 };
 
-// Claude Code CLI — adaptive-thinking effort, applied via the CLAUDE_CODE_EFFORT_LEVEL
-// env var on Opus/Sonnet 4.x (low | medium | high | max).
-const CLAUDE_CODE_CONFIGS: Record<string, ReasoningConfig | null> = {
-  'default-claude': createConfig(
-    'CLAUDE_CODE_EFFORT_LEVEL',
-    ['low', 'medium', 'high', 'max'],
-    'medium',
-  ),
-};
-
-// Cursor CLI (cursor-agent) — supports --reasoning-effort=<low|medium|high>.
-const CURSOR_CONFIGS: Record<string, ReasoningConfig | null> = {
-  'default-cursor': createConfig('reasoning-effort', ['low', 'medium', 'high'], 'medium'),
-};
+// NOTE: claude (Claude Code) and cursor (cursor-agent) reasoning is now data-driven from
+// each model's real `reasoningLevels` (see models/claude-code.ts, models/cursor.ts), not a
+// static table — Claude Code exposes per-model effort, cursor exposes none (model variants).
 
 // DeepSeek reasoning configurations
 const DEEPSEEK_CONFIGS: Record<string, ReasoningConfig | null> = {
@@ -275,6 +246,8 @@ const NO_REASONING: ReasoningConfig | null = null;
 const NO_REASONING_PROVIDERS = [
   'bedrock',
   'local',
+  // Gemini: no user-selectable reasoning (CLI has no flag; Gemini 3 thinks adaptively).
+  'google',
   // 'deepseek' removed from here
   'togetherai',
   'cerebras',
@@ -390,8 +363,9 @@ export const DEFAULT_REASONING_RULES: ReasoningRule[] = [
   ...buildRules('anthropic', ANTHROPIC_CONFIGS),
   // OpenAI
   ...buildRules('openai', OPENAI_CONFIGS),
-  // Google
-  ...buildRules('google', GOOGLE_CONFIGS),
+  // Google (Gemini): no user-selectable reasoning picker — the Gemini CLI exposes no
+  // effort/thinking flag, and Gemini 3 thinks adaptively on its own. Listed in
+  // NO_REASONING_PROVIDERS below instead of a static config.
   // Azure
   ...buildRules('azure', AZURE_CONFIGS),
   // Groq
@@ -404,12 +378,9 @@ export const DEFAULT_REASONING_RULES: ReasoningRule[] = [
   ...buildRules('copilot', COPILOT_CONFIGS),
   // VertexAI
   ...buildRules('vertexai', VERTEXAI_CONFIGS),
-  // Codex
+  // Codex (static fallback; real per-model levels come from the codex CLI at runtime)
   ...buildRules('codex', CODEX_CONFIGS),
-  // Claude Code CLI
-  ...buildRules('claude', CLAUDE_CODE_CONFIGS),
-  // Cursor CLI
-  ...buildRules('cursor', CURSOR_CONFIGS),
+  // claude (Claude Code) + cursor are intentionally absent — driven by model.reasoningLevels.
   // Kimi Code
   ...buildRules('kimicode', KIMICODE_CONFIGS),
   // DeepSeek

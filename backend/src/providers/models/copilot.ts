@@ -47,6 +47,7 @@ const def = ({
   costPerMInputCached: 0,
   costPerMOutputCached: 0,
   canReason,
+  reasoningLevels: canReason ? (reasoningLevels ?? []) : [],
   supportsAttachments: true,
   supportsStreaming: true,
   tier,
