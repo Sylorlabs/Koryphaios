@@ -163,7 +163,6 @@
           {#if openMenu === 'file'}
             <div class="absolute left-0 top-10 z-30 min-w-[260px] border p-1.5 shadow-2xl" style="background: var(--color-surface-2); border-color: var(--color-border); border-radius: 0.5rem;">
               <button type="button" class="w-full text-left px-2.5 py-1.5 text-xs hover:bg-[var(--color-surface-3)]" style="color: var(--color-text-primary);" onclick={() => action('new_project')}>New Project</button>
-              <button type="button" class="w-full text-left px-2.5 py-1.5 text-xs hover:bg-[var(--color-surface-3)]" style="color: var(--color-text-primary);" onclick={() => action('open_project_file')}>Open Project From File...</button>
               <button type="button" class="w-full text-left px-2.5 py-1.5 text-xs hover:bg-[var(--color-surface-3)]" style="color: var(--color-text-primary);" onclick={() => action('open_project_folder')}>Open Project From Folder...</button>
               <div class="h-px my-1" style="background: var(--color-border);"></div>
               <div class="px-2.5 py-1.5 text-[10px] uppercase tracking-wider" style="color: var(--color-text-muted);">Recent projects</div>
@@ -178,7 +177,6 @@
                 <div class="px-2.5 py-1.5 text-xs" style="color: var(--color-text-muted);">No recent projects yet</div>
               {/if}
               <div class="h-px my-1" style="background: var(--color-border);"></div>
-              <button type="button" class="w-full text-left px-2.5 py-1.5 text-xs hover:bg-[var(--color-surface-3)]" style="color: var(--color-text-primary);" onclick={() => action('save_snapshot')}>Save Project As .kory.json</button>
               <button type="button" class="w-full text-left px-2.5 py-1.5 text-xs hover:bg-[var(--color-surface-3)]" style="color: var(--color-text-primary);" onclick={() => action('new_session')}>New Session</button>
             </div>
           {/if}
@@ -385,7 +383,7 @@
   
   <button
     type="button"
-    class="absolute top-2.5 right-4 z-20 px-3.5 py-1.5 text-xs border rounded-full transition-all duration-200 hover:bg-[var(--color-surface-3)] hover:border-[var(--color-border-bright)] hover:scale-105 active:scale-95 shadow-lg"
+    class="absolute top-1.5 right-4 z-20 px-3.5 py-1.5 text-xs border rounded-full transition-all duration-200 hover:bg-[var(--color-surface-3)] hover:border-[var(--color-border-bright)] hover:scale-105 active:scale-95 shadow-lg"
     style="background: var(--color-surface-2); border-color: var(--color-border); color: var(--color-text-secondary); -webkit-app-region: no-drag;"
     onclick={() => action('toggle_zen_mode')}
   >
