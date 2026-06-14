@@ -3,6 +3,8 @@
  * Used to compute local estimate from token usage.
  */
 
+import { resolveModel } from '../providers/models';
+
 export interface ModelCost2026 {
   /** $ per million input tokens */
   costPerMInput: number;
@@ -35,6 +37,16 @@ const COST_MAP: Record<string, ModelCost2026> = {
 };
 
 export function getModelCost2026(model: string): ModelCost2026 | null {
+  // Central source of truth: the model catalog (ModelDefs). Makes cost accurate for ALL
+  // models, not just the handful in the legacy table below.
+  const def = resolveModel(model) ?? resolveModel(normalizeModelId(model));
+  if (def && (def.costPerMInputTokens != null || def.costPerMOutputTokens != null)) {
+    return {
+      costPerMInput: def.costPerMInputTokens ?? 0,
+      costPerMOutput: def.costPerMOutputTokens ?? 0,
+      multiplier: 1,
+    };
+  }
   const key = normalizeModelId(model);
   return COST_MAP[key] ?? null;
 }

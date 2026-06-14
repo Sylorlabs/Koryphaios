@@ -217,6 +217,55 @@ export function syncAgentSettingsToConfig(projectRoot: string, settings: any): v
 }
 
 /**
+ * Sync per-category model assignments (domain -> "provider:model") back to
+ * koryphaios.json atomically. Empty/"auto" values are removed so the smart
+ * router falls back to DOMAIN.DEFAULT_MODELS for that category.
+ */
+export function syncAssignmentsToConfig(
+  projectRoot: string,
+  assignments: Record<string, string>,
+): void {
+  const configPath = join(projectRoot, 'koryphaios.json');
+
+  if (!existsSync(configPath)) {
+    return;
+  }
+
+  const tempPath = `${configPath}.${process.pid}.tmp`;
+
+  try {
+    const content = readFileSync(configPath, 'utf-8');
+    const config = JSON.parse(content);
+
+    // Drop empty/"auto" entries so the file only carries explicit overrides.
+    const cleaned: Record<string, string> = {};
+    for (const [domain, value] of Object.entries(assignments)) {
+      const v = (value ?? '').trim();
+      if (v && v !== 'auto') cleaned[domain] = v;
+    }
+    config.assignments = cleaned;
+
+    const updatedAt = Date.now();
+    config.updatedAt = updatedAt;
+
+    writeFileSync(tempPath, JSON.stringify(config, null, 2), 'utf-8');
+    renameSync(tempPath, configPath);
+
+    serverLog.info({ updatedAt, assignments: cleaned }, 'Synced category assignments to koryphaios.json');
+
+    wsBroker.publish('custom', {
+      type: 'system.config_updated' as any,
+      payload: { source: 'assignments-sync', updatedAt },
+      timestamp: updatedAt,
+      sessionId: 'global',
+      agentId: 'system',
+    });
+  } catch (err) {
+    serverLog.warn({ err }, 'Failed to sync category assignments to koryphaios.json');
+  }
+}
+
+/**
  * Remove a provider entry from koryphaios.json (used for deleting custom providers).
  * syncProviderConfigsToConfig only merges, so deletions need an explicit removal.
  */

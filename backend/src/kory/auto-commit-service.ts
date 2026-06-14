@@ -141,8 +141,17 @@ export class AutoCommitService {
         };
       }
 
-      // Stage all changes
-      const stageResult = await this.runGit(['add', '-A']);
+      // Stage all changes, excluding dependency dirs. (In an agent worktree, node_modules
+      // is a symlink that the dir-only gitignore pattern misses, so exclude it explicitly
+      // to keep it off the user's branch. Harmless in the main repo — never commit deps.)
+      const stageResult = await this.runGit([
+        'add',
+        '-A',
+        '--',
+        '.',
+        ':(exclude)node_modules',
+        ':(exclude)**/node_modules',
+      ]);
       if (!stageResult.success) {
         // Try to go back to original branch
         await this.git.checkout(currentBranch);
