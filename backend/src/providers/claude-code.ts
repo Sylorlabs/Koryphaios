@@ -147,21 +147,20 @@ export class ClaudeCodeProvider implements Provider {
       '--allowedTools',
       ALLOWED_TOOLS,
     ];
+    // Real reasoning control: the claude CLI's --effort flag. Per the CLI itself the valid
+    // values are low | medium | high | xhigh | max.
+    const effort = mapClaudeEffort(request.reasoningLevel);
+    if (effort) args.push('--effort', effort);
     if (request.systemPrompt?.trim()) {
       args.push('--append-system-prompt', request.systemPrompt);
     }
 
     // Run in the project directory so the CLI edits the real files (falls back to cwd).
     const cwd = request.workingDirectory?.trim() || process.cwd();
-    // Real reasoning control: Claude Code reads CLAUDE_CODE_EFFORT_LEVEL (low|medium|high|max)
-    // for adaptive thinking effort on Opus/Sonnet 4.x.
-    const env: Record<string, string | undefined> = { ...process.env };
-    const effort = mapClaudeEffort(request.reasoningLevel);
-    if (effort) env.CLAUDE_CODE_EFFORT_LEVEL = effort;
     const child = spawn('claude', args, {
       cwd,
       stdio: ['pipe', 'pipe', 'pipe'],
-      env,
+      env: { ...process.env },
     });
 
     const onAbort = () => {
@@ -420,17 +419,15 @@ function extractError(envelope: ClaudeStreamEnvelope): string | undefined {
 }
 
 /**
- * Map a generic reasoning level to Claude Code's adaptive-thinking effort
- * (CLAUDE_CODE_EFFORT_LEVEL). Returns undefined when no/invalid level is given so
- * the CLI keeps its own default. Real values: low | medium | high | max.
+ * Map a reasoning level to the claude CLI's --effort value. The CLI's own valid set is
+ * low | medium | high | xhigh | max (it warns + ignores anything else). Returns undefined
+ * for none/off/auto so the CLI keeps its default effort.
  */
+const CLAUDE_EFFORT_VALUES = new Set(['low', 'medium', 'high', 'xhigh', 'max']);
 function mapClaudeEffort(level?: string): string | undefined {
   if (!level) return undefined;
   const v = level.toLowerCase().trim();
-  if (v === 'none' || v === 'off' || v === 'auto') return undefined;
-  if (v === 'xhigh') return 'high';
-  if (['low', 'medium', 'high', 'max'].includes(v)) return v;
-  return undefined;
+  return CLAUDE_EFFORT_VALUES.has(v) ? v : undefined;
 }
 
 /** Serialize the conversation into a single prompt for the CLI's print mode. */
