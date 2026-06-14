@@ -104,15 +104,6 @@ export function buildNewProjectTemplate(): string {
   return 'Set up a new project plan with milestones, risks, and first tasks.';
 }
 
-export function sanitizeFileName(raw: string): string {
-  return (
-    raw
-      .replace(/[^a-z0-9_-]+/gi, '-')
-      .replace(/-+/g, '-')
-      .replace(/^-|-$/g, '') || 'project'
-  );
-}
-
 export function parseRecentProjects(): RecentProject[] {
   try {
     const raw = localStorage.getItem(RECENT_PROJECTS_KEY);
@@ -190,22 +181,6 @@ export async function createProjectSession(title: string, text: string): Promise
 }
 
 /** Reads and parses a single project file. Returns parsed data or null on error. */
-export async function readProjectFile(
-  file: File,
-): Promise<{ title: string; text: string; fileName: string; truncated: boolean } | null> {
-  try {
-    const raw = await file.text();
-    const maxChars = 12000;
-    const trimmed = raw.length > maxChars ? raw.slice(0, maxChars) : raw;
-    const baseTitle = file.name.replace(/\.[^/.]+$/, '').trim();
-    const title = (baseTitle ? `Project: ${baseTitle}` : 'Imported Project').slice(0, 64);
-
-    return { title, text: trimmed, fileName: file.name, truncated: raw.length > maxChars };
-  } catch {
-    return null;
-  }
-}
-
 /** Reads and parses a project folder. Returns parsed data or null on error. */
 export async function readProjectFolder(
   files: FileList,
@@ -262,49 +237,6 @@ export async function readProjectFolder(
     console.error('Folder import failed', err);
     return null;
   }
-}
-
-export function exportCurrentProjectSnapshot(): void {
-  const sessionId = sessionStore.activeSessionId;
-  const activeSession = sessionStore.sessions.find((s) => s.id === sessionId);
-
-  if (!activeSession) {
-    toastStore.error('No active project session to export');
-    return;
-  }
-
-  const snapshot = {
-    format: 'koryphaios.project.snapshot.v1',
-    exportedAt: new Date().toISOString(),
-    project: {
-      id: activeSession.id,
-      title: activeSession.title,
-      updatedAt: activeSession.updatedAt,
-    },
-    feed: wsStore.feed
-      .filter((entry) => entry.metadata?.sessionId === sessionId || !entry.metadata?.sessionId)
-      .map((entry) => ({
-        type: entry.type,
-        agent: entry.agentName,
-        text: entry.text ?? '',
-        timestamp: entry.timestamp,
-        model: entry.metadata?.model ?? null,
-      })),
-  };
-
-  const payload = JSON.stringify(snapshot, null, 2);
-  const blob = new Blob([payload], { type: 'application/json' });
-  const href = URL.createObjectURL(blob);
-  const safeTitle = sanitizeFileName(activeSession.title.toLowerCase());
-  const datePart = new Date().toISOString().slice(0, 10);
-  const a = document.createElement('a');
-  a.href = href;
-  a.download = `${safeTitle}-${datePart}.kory.json`;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  URL.revokeObjectURL(href);
-  toastStore.success('Project snapshot exported');
 }
 
 export function insertPromptTemplate(
