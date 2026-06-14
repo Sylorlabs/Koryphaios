@@ -25,6 +25,111 @@ import { providerLog } from '../logger';
 
 const CURSOR_STREAM_TIMEOUT_MS = 300_000;
 
+// ── Real model list, pulled live from cursor-agent ──────────────────────────────
+// cursor-agent exposes no reasoning-effort flag; reasoning is chosen via the model
+// variant (e.g. claude-4.5-sonnet-thinking, gpt-5.3-codex-xhigh). So the "real" data
+// to pull is the model list itself — `cursor-agent --list-models`. Cached + refreshed
+// in the background; we never hardcode the catalog.
+let cachedCursorModels: ModelDef[] | null = null;
+let cursorModelsAt = 0;
+const CURSOR_MODELS_CACHE_MS = 10 * 60 * 1000;
+let cursorModelsInFlight: Promise<void> | null = null;
+
+function parseCursorModels(output: string): ModelDef[] {
+  const models: ModelDef[] = [];
+  const seen = new Set<string>();
+  for (const raw of output.split('\n')) {
+    const line = raw.trim();
+    // Lines look like: "gpt-5.3-codex-xhigh - Codex 5.3 Extra High" or "auto - Auto (current)".
+    const m = line.match(/^([A-Za-z0-9][\w.-]*)\s+-\s+(.+)$/);
+    if (!m) continue;
+    const id = m[1];
+    if (seen.has(id)) continue;
+    seen.add(id);
+    const name = m[2].replace(/\s*\(current\)\s*$/i, '').trim() || id;
+    models.push({
+      id,
+      name,
+      provider: 'cursor',
+      apiModelId: id,
+      contextWindow: 200_000,
+      maxOutputTokens: 32_000,
+      costPerMInputTokens: 0,
+      costPerMOutputTokens: 0,
+      // Reasoning is the model variant itself, so there's no separate effort picker.
+      canReason: false,
+      reasoningLevels: [],
+      supportsAttachments: false,
+      supportsStreaming: true,
+      tier: id === 'auto' ? 'flagship' : 'flagship',
+    });
+  }
+  return models;
+}
+
+function probeCursorModels(): Promise<ModelDef[] | null> {
+  return new Promise((resolve) => {
+    const bin = whichBinary('cursor-agent');
+    if (!bin) return resolve(null);
+    let buf = '';
+    let settled = false;
+    const finish = (v: ModelDef[] | null) => {
+      if (!settled) {
+        settled = true;
+        resolve(v);
+      }
+    };
+    try {
+      const child = spawn(bin, ['--list-models'], {
+        stdio: ['ignore', 'pipe', 'pipe'],
+        env: { ...process.env },
+      });
+      child.stdout?.on('data', (d: Buffer) => (buf += d.toString()));
+      child.stderr?.on('data', (d: Buffer) => (buf += d.toString()));
+      child.on('close', () => {
+        const models = parseCursorModels(buf);
+        finish(models.length > 0 ? models : null);
+      });
+      child.on('error', () => finish(null));
+      setTimeout(() => {
+        try {
+          child.kill();
+        } catch {
+          /* noop */
+        }
+        finish(parseCursorModels(buf));
+      }, 12_000);
+    } catch {
+      finish(null);
+    }
+  });
+}
+
+function refreshCursorModelsInBackground(): void {
+  if (cursorModelsInFlight) return;
+  if (cachedCursorModels && Date.now() - cursorModelsAt < CURSOR_MODELS_CACHE_MS) return;
+  cursorModelsInFlight = probeCursorModels()
+    .then((models) => {
+      if (models && models.length > 0) {
+        cachedCursorModels = models;
+        cursorModelsAt = Date.now();
+        providerLog.info({ count: models.length }, 'Pulled real cursor model list from CLI');
+      }
+    })
+    .catch(() => {})
+    .finally(() => {
+      cursorModelsInFlight = null;
+    });
+}
+
+/** The cursor-agent --model value for a selection, or undefined to let it auto-pick. */
+function cursorModelArg(model?: string): string | undefined {
+  if (!model) return undefined;
+  const id = model.includes(':') ? model.split(':').slice(1).join(':') : model;
+  if (!id || id === 'auto' || id === 'cursor-agent') return undefined;
+  return id;
+}
+
 interface CursorEnvelope {
   type: string;
   subtype?: string;
@@ -46,7 +151,10 @@ export class CursorProvider implements Provider {
   }
 
   listModels(): ModelDef[] {
-    return getModelsForProvider('cursor');
+    // Pull the real model list from cursor-agent (cached + background-refreshed).
+    // Until the first pull resolves, fall back to the static single "auto" entry.
+    refreshCursorModelsInBackground();
+    return cachedCursorModels ?? getModelsForProvider('cursor');
   }
 
   async *streamResponse(request: StreamRequest): AsyncGenerator<ProviderEvent> {
@@ -74,8 +182,10 @@ export class CursorProvider implements Provider {
       '--force',
     ];
 
-    // Note: cursor-agent has no --reasoning-effort flag — reasoning is selected via the
-    // model variant (e.g. sonnet-4-thinking), so there's nothing to pass here.
+    // Reasoning IS the model variant for cursor-agent (no --reasoning-effort flag). Pass the
+    // selected model (e.g. claude-4.5-sonnet-thinking, gpt-5.3-codex-xhigh); omit for "auto".
+    const modelArg = cursorModelArg(request.model);
+    if (modelArg) args.push('--model', modelArg);
 
     const cwd = request.workingDirectory?.trim() || process.cwd();
     const child = spawn(bin, args, { cwd, stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env } });
