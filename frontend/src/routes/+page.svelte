@@ -37,9 +37,7 @@
     addRecentProject,
     buildNewProjectTemplate,
     createProjectSession,
-    readProjectFile,
     readProjectFolder,
-    exportCurrentProjectSnapshot,
     insertPromptTemplate,
   } from '$lib/utils/projectManager';
   import { getModelConfigurationWarning } from '$lib/utils/model-config';
@@ -55,7 +53,6 @@
   let showThemeQuickMenu = $state(false);
   let zenMode = $state(false);
   let inputRef = $state<HTMLTextAreaElement>();
-  let projectFileInput = $state<HTMLInputElement>();
   let projectFolderInput = $state<HTMLInputElement>();
   let recentProjects = $state<RecentProject[]>([]);
   let selectedAgentId = $state<string>('');
@@ -510,30 +507,6 @@ RULES:
     inputRef?.focus();
   }
 
-  async function handleProjectFileSelected(e: Event) {
-    const input = e.currentTarget as HTMLInputElement;
-    const file = input.files?.[0];
-    if (!file) return;
-
-    try {
-      const result = await readProjectFile(file);
-      if (!result) {
-        toastStore.error('Failed to read selected project file');
-        return;
-      }
-      await createProjectFromText(result.title, result.text, { source: 'file', fileName: result.fileName });
-      if (result.truncated) {
-        toastStore.warning('Large file imported; content was truncated for context size');
-      } else {
-        toastStore.success(`Imported ${file.name} into a new project`);
-      }
-    } catch {
-      toastStore.error('Failed to read selected project file');
-    } finally {
-      input.value = '';
-    }
-  }
-
   async function handleProjectFolderSelected(e: Event) {
     const input = e.currentTarget as HTMLInputElement;
     const files = input.files;
@@ -613,9 +586,6 @@ RULES:
         }
         break;
       }
-      case 'open_project_file':
-        projectFileInput?.click();
-        break;
       case 'open_project_folder': {
         // Check if we're in Tauri desktop app (Tauri v2 uses __TAURI_INTERNALS__)
         const inTauri = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
@@ -646,9 +616,6 @@ RULES:
         }
         break;
       }
-      case 'save_snapshot':
-        exportCurrentProjectSnapshot();
-        break;
       case 'new_session':
         await sessionStore.createSession();
         inputRef?.focus();
@@ -925,13 +892,6 @@ RULES:
       onAction={handleMenuAction}
     />
 
-    <input
-      bind:this={projectFileInput}
-      type="file"
-      class="hidden"
-      accept=".txt,.md,.json,.yaml,.yml,.toml,.csv"
-      onchange={handleProjectFileSelected}
-    />
     <input
       bind:this={projectFolderInput}
       type="file"
