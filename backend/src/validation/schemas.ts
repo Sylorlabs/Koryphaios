@@ -20,6 +20,7 @@ export const ProviderNameSchema = z
     'codex',
     'codex-auth',
     'grok',
+    'cursor',
     'openrouter',
     'groq',
     'xai',

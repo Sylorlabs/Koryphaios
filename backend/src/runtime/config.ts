@@ -7,6 +7,13 @@ import { serverLog } from '../logger';
 import { safeJsonParse, ConfigError } from '../errors';
 import { AGENT, DEFAULT_CONTEXT_PATHS, FS, SERVER, WORKSPACE } from '../constants';
 import { wsBroker } from '../pubsub';
+import {
+  migrateSecretsOutOfConfig,
+  hydrateProviderSecrets,
+  stripProviderSecrets,
+  upsertProviderSecrets,
+  removeProviderSecrets,
+} from '../security/secret-store';
 
 /** Merge file corsOrigins with CORS_ORIGINS env (comma-separated). Production can set CORS_ORIGINS=https://app.example.com */
 function mergeCorsOrigins(fromFile: string[], envValue?: string): string[] {
@@ -47,6 +54,10 @@ export function loadConfig(projectRoot: string): BackendConfig {
     join(homedir(), '.koryphaios.json'),
   ];
 
+  // Heal any credentials still living in koryphaios.json (moves them into
+  // the 0600 secret store) BEFORE reading — settings and secrets never mix.
+  migrateSecretsOutOfConfig(projectRoot);
+
   let fileConfig: Partial<KoryphaiosConfig> = {};
 
   for (const path of configPaths) {
@@ -69,7 +80,9 @@ export function loadConfig(projectRoot: string): BackendConfig {
   const appConfig = loadAppConfig(projectRoot);
 
   const config: KoryphaiosConfig = {
-    providers: fileConfig.providers ?? {},
+    // Runtime gets real keys from the 0600 secret store; the on-disk
+    // koryphaios.json stays credential-free.
+    providers: hydrateProviderSecrets(projectRoot, (fileConfig.providers ?? {}) as Record<string, unknown>) as KoryphaiosConfig['providers'],
     agents: fileConfig.agents ?? {
       manager: {
         model: AGENT.DEFAULT_MANAGER_MODEL,
@@ -91,35 +104,6 @@ export function loadConfig(projectRoot: string): BackendConfig {
         appConfig.server?.host ??
         SERVER.DEFAULT_HOST,
     },
-    telegram:
-      fileConfig.telegram ??
-      (process.env.TELEGRAM_BOT_TOKEN
-        ? {
-            botToken: process.env.TELEGRAM_BOT_TOKEN,
-            adminId: Number(process.env.TELEGRAM_ADMIN_ID ?? 0),
-            secretToken: process.env.TELEGRAM_SECRET_TOKEN,
-          }
-        : undefined),
-    discord:
-      fileConfig.discord ??
-      (process.env.DISCORD_BOT_TOKEN
-        ? {
-            botToken: process.env.DISCORD_BOT_TOKEN,
-            allowedGuildIds: process.env.DISCORD_ALLOWED_GUILD_IDS?.split(',').filter(Boolean),
-            allowedUserIds: process.env.DISCORD_ALLOWED_USER_IDS?.split(',').filter(Boolean),
-          }
-        : undefined),
-    slack:
-      fileConfig.slack ??
-      (process.env.SLACK_BOT_TOKEN && process.env.SLACK_APP_TOKEN
-        ? {
-            botToken: process.env.SLACK_BOT_TOKEN,
-            appToken: process.env.SLACK_APP_TOKEN,
-            signingSecret: process.env.SLACK_SIGNING_SECRET,
-            allowedChannelIds: process.env.SLACK_ALLOWED_CHANNEL_IDS?.split(',').filter(Boolean),
-            allowedUserIds: process.env.SLACK_ALLOWED_USER_IDS?.split(',').filter(Boolean),
-          }
-        : undefined),
     mcpServers: fileConfig.mcpServers,
     contextPaths: fileConfig.contextPaths ?? DEFAULT_CONTEXT_PATHS,
     dataDirectory: fileConfig.dataDirectory ?? FS.DEFAULT_DATA_DIR,
@@ -233,6 +217,78 @@ export function syncAgentSettingsToConfig(projectRoot: string, settings: any): v
 }
 
 /**
+ * Sync per-category model assignments (domain -> "provider:model") back to
+ * koryphaios.json atomically. Empty/"auto" values are removed so the smart
+ * router falls back to DOMAIN.DEFAULT_MODELS for that category.
+ */
+export function syncAssignmentsToConfig(
+  projectRoot: string,
+  assignments: Record<string, string>,
+): void {
+  const configPath = join(projectRoot, 'koryphaios.json');
+
+  if (!existsSync(configPath)) {
+    return;
+  }
+
+  const tempPath = `${configPath}.${process.pid}.tmp`;
+
+  try {
+    const content = readFileSync(configPath, 'utf-8');
+    const config = JSON.parse(content);
+
+    // Drop empty/"auto" entries so the file only carries explicit overrides.
+    const cleaned: Record<string, string> = {};
+    for (const [domain, value] of Object.entries(assignments)) {
+      const v = (value ?? '').trim();
+      if (v && v !== 'auto') cleaned[domain] = v;
+    }
+    config.assignments = cleaned;
+
+    const updatedAt = Date.now();
+    config.updatedAt = updatedAt;
+
+    writeFileSync(tempPath, JSON.stringify(config, null, 2), 'utf-8');
+    renameSync(tempPath, configPath);
+
+    serverLog.info({ updatedAt, assignments: cleaned }, 'Synced category assignments to koryphaios.json');
+
+    wsBroker.publish('custom', {
+      type: 'system.config_updated' as any,
+      payload: { source: 'assignments-sync', updatedAt },
+      timestamp: updatedAt,
+      sessionId: 'global',
+      agentId: 'system',
+    });
+  } catch (err) {
+    serverLog.warn({ err }, 'Failed to sync category assignments to koryphaios.json');
+  }
+}
+
+/**
+ * Remove a provider entry from koryphaios.json (used for deleting custom providers).
+ * syncProviderConfigsToConfig only merges, so deletions need an explicit removal.
+ */
+export function removeProviderFromConfig(projectRoot: string, providerId: string): void {
+  const configPath = join(projectRoot, 'koryphaios.json');
+  if (!existsSync(configPath)) return;
+  const tempPath = `${configPath}.${process.pid}.tmp`;
+  try {
+    const config = JSON.parse(readFileSync(configPath, 'utf-8'));
+    if (config.providers && config.providers[providerId]) {
+      delete config.providers[providerId];
+      removeProviderSecrets(projectRoot, providerId);
+      config.updatedAt = Date.now();
+      writeFileSync(tempPath, JSON.stringify(config, null, 2), 'utf-8');
+      renameSync(tempPath, configPath);
+      serverLog.info({ providerId }, 'Removed provider from koryphaios.json');
+    }
+  } catch (err) {
+    serverLog.warn({ err, providerId }, 'Failed to remove provider from koryphaios.json');
+  }
+}
+
+/**
  * Sync provider configurations back to koryphaios.json atomically.
  */
 export function syncProviderConfigsToConfig(
@@ -251,10 +307,17 @@ export function syncProviderConfigsToConfig(
     const content = readFileSync(configPath, 'utf-8');
     const config = JSON.parse(content);
 
-    config.providers = {
-      ...(config.providers || {}),
-      ...providers,
-    };
+    // Secrets go to the 0600 store; koryphaios.json gets everything else.
+    const { clean, secrets } = stripProviderSecrets(providers);
+    for (const [name, vals] of Object.entries(secrets)) {
+      upsertProviderSecrets(projectRoot, name, vals);
+    }
+    const merged: Record<string, unknown> = { ...(config.providers || {}) };
+    for (const [name, cfg] of Object.entries(clean)) {
+      merged[name] = { ...((merged[name] as Record<string, unknown>) ?? {}), ...(cfg as Record<string, unknown>) };
+      for (const field of ['apiKey', 'authToken']) delete (merged[name] as Record<string, unknown>)[field];
+    }
+    config.providers = merged;
 
     // Track global update
     const updatedAt = Date.now();
