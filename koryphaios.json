@@ -33,7 +33,7 @@
     "multiSourceResearch": true,
     "updatedAt": 1781385946807
   },
-  "updatedAt": 1781385946807,
+  "updatedAt": 1781394997934,
   "providers": {
     "anthropic": {
       "name": "anthropic",
@@ -308,5 +308,6 @@
       "hideModelSelector": false,
       "disabled": true
     }
-  }
+  },
+  "assignments": {}
 }
