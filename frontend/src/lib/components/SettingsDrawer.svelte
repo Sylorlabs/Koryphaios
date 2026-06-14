@@ -295,6 +295,21 @@
   let showAddCustom = $state(false);
   let addingCustom = $state(false);
   let customForm = $state({ label: '', kind: 'openai', baseUrl: '', apiKey: '', models: '' });
+  let customCardEl = $state<HTMLElement>();
+
+  function closeAddCustom() {
+    showAddCustom = false;
+  }
+
+  // Collapse the custom-provider form when the user clicks outside it (change-of-mind cancel).
+  $effect(() => {
+    if (!showAddCustom) return;
+    const onDocPointer = (e: PointerEvent) => {
+      if (customCardEl && !customCardEl.contains(e.target as Node)) closeAddCustom();
+    };
+    document.addEventListener('pointerdown', onDocPointer, true);
+    return () => document.removeEventListener('pointerdown', onDocPointer, true);
+  });
 
   async function addCustomProvider() {
     const label = customForm.label.trim();
@@ -1453,14 +1468,20 @@
         {/if}
 
         <!-- Add a custom (bring-your-own) provider -->
-        <div class="rounded-xl border border-dashed border-[var(--color-border)] p-4 bg-[var(--color-surface-1)]">
-          <button type="button" onclick={() => (showAddCustom = !showAddCustom)} class="w-full flex items-center justify-between text-left">
-            <div class="flex items-center gap-2">
+        <div class="rounded-xl border border-dashed border-[var(--color-border)] p-4 bg-[var(--color-surface-1)]" bind:this={customCardEl}>
+          <div class="w-full flex items-center justify-between gap-2">
+            <button type="button" onclick={() => (showAddCustom = !showAddCustom)} class="flex items-center gap-2 text-left">
               <Plus size={15} style="color: var(--color-accent);" />
               <span class="text-sm font-semibold text-[var(--color-text-primary)]">Add a custom provider</span>
-            </div>
-            <span class="text-[10px] text-[var(--color-text-muted)]">OpenAI-compatible &amp; more</span>
-          </button>
+            </button>
+            {#if showAddCustom}
+              <button type="button" onclick={closeAddCustom} aria-label="Cancel adding a custom provider" title="Cancel" class="shrink-0 p-1 rounded-md hover:bg-[var(--color-surface-3)] text-[var(--color-text-muted)]">
+                <X size={14} />
+              </button>
+            {:else}
+              <span class="text-[10px] text-[var(--color-text-muted)]">OpenAI-compatible &amp; more</span>
+            {/if}
+          </div>
           {#if showAddCustom}
             <div class="mt-4 space-y-3 pt-4 border-t border-[var(--color-border)]">
               <p class="text-[10px] text-[var(--color-text-muted)] leading-relaxed">
@@ -1490,7 +1511,10 @@
                 <label class="text-[10px] uppercase tracking-wider text-[var(--color-text-muted)] font-medium" for="custom-models">Models <span class="opacity-60 normal-case">(optional, comma-separated)</span></label>
                 <input id="custom-models" type="text" placeholder="my-model-a, my-model-b — or leave blank to auto-fetch" bind:value={customForm.models} class="input w-full text-xs" />
               </div>
-              <button type="button" onclick={addCustomProvider} disabled={addingCustom} class="btn btn-primary w-full text-xs py-2">{addingCustom ? 'Adding…' : 'Add provider'}</button>
+              <div class="flex gap-2">
+                <button type="button" onclick={closeAddCustom} disabled={addingCustom} class="btn btn-ghost text-xs py-2 px-3">Cancel</button>
+                <button type="button" onclick={addCustomProvider} disabled={addingCustom} class="btn btn-primary flex-1 text-xs py-2">{addingCustom ? 'Adding…' : 'Add provider'}</button>
+              </div>
             </div>
           {/if}
         </div>

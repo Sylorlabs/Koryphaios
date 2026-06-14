@@ -153,10 +153,15 @@ export class ClaudeCodeProvider implements Provider {
 
     // Run in the project directory so the CLI edits the real files (falls back to cwd).
     const cwd = request.workingDirectory?.trim() || process.cwd();
+    // Real reasoning control: Claude Code reads CLAUDE_CODE_EFFORT_LEVEL (low|medium|high|max)
+    // for adaptive thinking effort on Opus/Sonnet 4.x.
+    const env: Record<string, string | undefined> = { ...process.env };
+    const effort = mapClaudeEffort(request.reasoningLevel);
+    if (effort) env.CLAUDE_CODE_EFFORT_LEVEL = effort;
     const child = spawn('claude', args, {
       cwd,
       stdio: ['pipe', 'pipe', 'pipe'],
-      env: { ...process.env },
+      env,
     });
 
     const onAbort = () => {
@@ -411,6 +416,20 @@ function extractError(envelope: ClaudeStreamEnvelope): string | undefined {
   }
   if (typeof envelope.message === 'string') return envelope.message;
   if (typeof envelope.result === 'string' && envelope.is_error) return envelope.result;
+  return undefined;
+}
+
+/**
+ * Map a generic reasoning level to Claude Code's adaptive-thinking effort
+ * (CLAUDE_CODE_EFFORT_LEVEL). Returns undefined when no/invalid level is given so
+ * the CLI keeps its own default. Real values: low | medium | high | max.
+ */
+function mapClaudeEffort(level?: string): string | undefined {
+  if (!level) return undefined;
+  const v = level.toLowerCase().trim();
+  if (v === 'none' || v === 'off' || v === 'auto') return undefined;
+  if (v === 'xhigh') return 'high';
+  if (['low', 'medium', 'high', 'max'].includes(v)) return v;
   return undefined;
 }
 
