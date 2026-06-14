@@ -26,6 +26,7 @@ import {
   createCodexCLIAuthMarker,
   createGrokCLIAuthMarker,
   createCursorCLIAuthMarker,
+  createGeminiCLIAuthMarker,
 } from './auth-utils';
 
 export interface AgentCliStatus {
@@ -86,7 +87,9 @@ export function canAutoEnable(provider: ProviderName): boolean {
     case 'codex':
       return !!whichBinary('codex') && !!detectCodexAuthToken();
     case 'google':
-      return !!whichBinary('gemini') && !!detectGeminiApiKey();
+      // Enabled if the gemini CLI is installed AND logged in (API key OR OAuth) — the CLI
+      // harness handles OAuth, so no API key is required.
+      return !!whichBinary('gemini') && detectGeminiCLILogin();
     case 'grok':
       // Grok Build subscription CLI — installed + logged in (subscription or xAI key).
       return !!whichBinary('grok') && detectGrokCLILogin();
@@ -112,8 +115,11 @@ export function cliAutoEnableCreds(
       return { authToken: createClaudeCLIAuthMarker() };
     case 'codex':
       return { authToken: createCodexCLIAuthMarker() };
-    case 'google':
-      return { apiKey: detectGeminiApiKey() ?? undefined };
+    case 'google': {
+      // Prefer a real API key; otherwise opt into the gemini CLI harness via OAuth marker.
+      const key = detectGeminiApiKey();
+      return key ? { apiKey: key } : { authToken: createGeminiCLIAuthMarker() };
+    }
     case 'grok':
       // The CLI owns the real token; the marker just signals "use the CLI harness".
       return { authToken: createGrokCLIAuthMarker() };
