@@ -18,7 +18,7 @@ export const ClaudeCodeModels: ModelDef[] = [
     costPerMInputTokens: 0,
     costPerMOutputTokens: 0,
     canReason: true,
-    // Real claude CLI --effort values (the CLI's own valid set).
+    // Fallback levels (the live set is pulled from the CLI at runtime; opus is xhigh-capable).
     reasoningLevels: ['low', 'medium', 'high', 'xhigh', 'max'],
     supportsAttachments: true,
     supportsStreaming: true,
@@ -34,8 +34,8 @@ export const ClaudeCodeModels: ModelDef[] = [
     costPerMInputTokens: 0,
     costPerMOutputTokens: 0,
     canReason: true,
-    // Real claude CLI --effort values (the CLI's own valid set).
-    reasoningLevels: ['low', 'medium', 'high', 'xhigh', 'max'],
+    // Fallback levels — Sonnet is NOT xhigh-capable (no 'xhigh'); live set pulled at runtime.
+    reasoningLevels: ['low', 'medium', 'high', 'max'],
     supportsAttachments: true,
     supportsStreaming: true,
     tier: 'flagship',
