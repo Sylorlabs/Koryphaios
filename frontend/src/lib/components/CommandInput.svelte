@@ -25,6 +25,8 @@
     inputRef?: HTMLTextAreaElement;
     value?: string;
     slashCommands?: Array<{ command: string; label: string; description: string }>;
+    /** Native CLI slash commands from the active CLI provider (e.g. claude /compact, gemini /compress). */
+    cliSlashCommands?: Array<{ command: string; description?: string; category?: string }>;
     fileMentions?: string[];
     /** When true, disables input because no project is open */
     disabled?: boolean;
@@ -41,6 +43,7 @@
     inputRef = $bindable(),
     value = $bindable(''),
     slashCommands = [],
+    cliSlashCommands = [],
     fileMentions = [],
     disabled = false,
     disabledMessage = 'Open a project to start chatting',
@@ -55,6 +58,8 @@
 
   type ComposerPickerItem =
     | { type: 'command'; key: string; label: string; value: string; description: string }
+    // CLI provider native slash command — sent as a message directly to the CLI, not handled locally
+    | { type: 'cliCommand'; key: string; label: string; value: string; description: string; category?: string }
     | { type: 'file'; key: string; label: string; value: string; description: string };
 
   function providerLabel(provider: string): string {
@@ -192,16 +197,30 @@
     const query = ctx.query.trim().toLowerCase();
 
     if (ctx.trigger === '/') {
-      return slashCommands
+      // App commands (handled locally by Koryphaios)
+      const appItems: ComposerPickerItem[] = slashCommands
         .filter((item) => !query || item.command.toLowerCase().includes(query) || item.label.toLowerCase().includes(query))
-        .slice(0, 8)
         .map((item) => ({
           type: 'command' as const,
-          key: item.command,
+          key: `app:${item.command}`,
           label: item.label,
           value: item.command,
           description: item.description,
         }));
+
+      // CLI native commands (sent as messages to the CLI)
+      const cliItems: ComposerPickerItem[] = cliSlashCommands
+        .filter((item) => !query || item.command.toLowerCase().includes(query))
+        .map((item) => ({
+          type: 'cliCommand' as const,
+          key: `cli:${item.command}`,
+          label: `/${item.command}`,
+          value: item.command,
+          description: item.description ?? '',
+          category: item.category,
+        }));
+
+      return [...appItems, ...cliItems].slice(0, 12);
     }
 
     return fileMentions
@@ -238,6 +257,14 @@
     if (item.type === 'command') {
       value = '';
       await onExecuteCommand?.(`/${item.value}`);
+      resizeToMin();
+      return;
+    }
+
+    if (item.type === 'cliCommand') {
+      // Send the CLI's slash command as a plain message — the CLI handles it natively
+      value = '';
+      onSend(`/${item.value}`);
       resizeToMin();
       return;
     }
@@ -783,16 +810,25 @@
                   onclick={() => void applyPickerItem(item)}
                 >
                   <div class="min-w-0">
-                    <div class="text-sm font-medium" style="color: var(--color-text-primary);">
-                      {item.type === 'command' ? `/${item.value}` : `@${item.label}`}
+                    <div class="flex items-center gap-1.5">
+                      <span class="text-sm font-medium" style="color: var(--color-text-primary);">
+                        {item.type === 'command' ? `/${item.value}` : item.type === 'cliCommand' ? `/${item.value}` : `@${item.label}`}
+                      </span>
+                      {#if item.type === 'cliCommand'}
+                        <span class="rounded px-1 py-0.5 text-[9px] font-semibold uppercase tracking-wide" style="background: color-mix(in srgb, var(--color-accent) 15%, transparent); color: var(--color-accent);">
+                          CLI
+                        </span>
+                      {/if}
                     </div>
                     <div class="truncate text-xs" style="color: var(--color-text-muted);">
                       {item.description}
                     </div>
                   </div>
-                  <div class="shrink-0 text-[10px] uppercase tracking-[0.12em]" style="color: var(--color-text-muted);">
-                    {item.type}
-                  </div>
+                  {#if item.type === 'command'}
+                    <div class="shrink-0 text-[10px] uppercase tracking-[0.12em]" style="color: var(--color-text-muted);">
+                      app
+                    </div>
+                  {/if}
                 </button>
               {/each}
             </div>

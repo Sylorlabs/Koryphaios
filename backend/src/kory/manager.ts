@@ -1486,6 +1486,18 @@ export class KoryManager {
     // If "fallback", we keep it in the list. The model can choose to use it if its native search fails or is unavailable.
 
     const streamSignal = withTimeoutSignal(signal, AGENT.LLM_STREAM_TIMEOUT_MS);
+
+    // Emit static CLI command list at session start so the frontend "/" palette populates
+    // immediately. For claude, the stream init event overrides this with the dynamic list
+    // (which includes installed skills/plugins).
+    const staticCliCommands = provider.getCliCommands?.();
+    if (staticCliCommands && staticCliCommands.length > 0) {
+      this.emitWSMessage(sessionId, 'cli.commands', {
+        provider: provider.name,
+        commands: staticCliCommands,
+      });
+    }
+
     const stream = this.providers.executeWithRetry(
       {
         model: modelId,
@@ -1547,6 +1559,12 @@ export class KoryManager {
         this.emitWSMessage(sessionId, 'stream.tool_result', {
           agentId: KORY_IDENTITY.id,
           toolResult: { callId, name: event.toolName ?? 'tool', output: event.toolOutput ?? '', isError: event.isError === true, durationMs: 0 },
+        });
+      } else if (event.type === 'cli_commands' && event.cliCommands) {
+        // Emit the CLI's native slash commands to the frontend so it can show a "/" palette.
+        this.emitWSMessage(sessionId, 'cli.commands', {
+          provider: provider.name,
+          commands: event.cliCommands,
         });
       } else if (event.type === 'usage_update') {
         if (typeof event.tokensIn === 'number') tokensIn = Math.max(tokensIn, event.tokensIn);

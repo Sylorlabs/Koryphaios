@@ -103,6 +103,11 @@ let ctxUsageState = $state<{
   used: number; max: number; percent: number; isReliable: boolean; hasData: boolean;
 }>({ used: 0, max: 0, percent: 0, isReliable: false, hasData: false });
 
+// CLI provider slash commands for the "/" palette.
+// Updated when cli.commands arrives (at session start, once per provider).
+let cliCommandsState = $state<{ name: string; description?: string; category?: string }[]>([]);
+let cliCommandsProvider = $state<string>('');
+
 // Track analyzing thought index to avoid O(N) filtering
 let analyzingThoughtId = $state<string | null>(null);
 
@@ -858,6 +863,14 @@ function handleMessage(msg: WSMessage) {
       break;
     }
 
+    case 'cli.commands': {
+      // CLI provider sent its available slash commands — update the "/" palette
+      const p = msg.payload as { provider: string; commands: { name: string; description?: string; category?: string }[] };
+      cliCommandsState = p.commands ?? [];
+      cliCommandsProvider = p.provider ?? '';
+      break;
+    }
+
     case 'system.error': {
       const p = msg.payload as any;
       if (!isForActiveSession) break;
@@ -1522,6 +1535,8 @@ function clearFeed() {
   activeFileEdits = new Map();
   detectedContext = [];
   ctxUsageState = { used: 0, max: 0, percent: 0, isReliable: false, hasData: false };
+  cliCommandsState = [];
+  cliCommandsProvider = '';
   // Clear non-essential agent states but keep kory-manager
   const manager = agents.get('kory-manager');
   agents = new Map();
@@ -1625,6 +1640,12 @@ export const wsStore = {
   },
   get contextUsage() {
     return ctxUsageState;
+  },
+  get cliCommands() {
+    return cliCommandsState;
+  },
+  get cliCommandsProvider() {
+    return cliCommandsProvider;
   },
   get detectedContext() {
     return detectedContext;

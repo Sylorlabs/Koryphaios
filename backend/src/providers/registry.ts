@@ -35,7 +35,8 @@ import { BedrockProvider } from './bedrock';
 import { GitLabProvider } from './gitlab';
 import { SapAiProvider } from './sapai';
 import { CustomProvider } from './custom';
-import { detectCodexAuthToken, isCodexCLIAuthMarker, detectClaudeCodeLogin } from './auth-utils';
+import { detectCodexAuthToken, isCodexCLIAuthMarker, detectClaudeCodeLogin, isKiloCLIAuthMarker } from './auth-utils';
+import { KiloCodeCLIProvider } from './kilo-cli';
 import { cliAutoEnableCreds } from './cli-detection';
 import { KimiCodeProvider } from './kimicode';
 import { resolveKimiCodeAccessToken } from './kimicode-auth';
@@ -1035,6 +1036,8 @@ class ProviderRegistry {
       case 'kimicode':
         return new KimiCodeProvider(config);
       case 'kilocode':
+        // CLI harness (kilo run) takes precedence over the API key path
+        if (isKiloCLIAuthMarker(config.authToken)) return new KiloCodeCLIProvider(config);
         return config.apiKey
           ? new OpenAIProvider(config, 'kilocode', 'https://api.kilo.ai/api/gateway')
           : null;

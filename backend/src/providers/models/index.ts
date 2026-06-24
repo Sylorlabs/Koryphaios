@@ -104,6 +104,7 @@ const CLI_PROVIDER_ALIAS: Record<string, ProviderName> = {
   'codex': 'openai',        // OpenAI Codex CLI
   'copilot': 'openai',      // GitHub Copilot (OpenAI-backed)
   'cursor': 'anthropic',    // Cursor proxy (predominantly Anthropic models)
+  'kilocode': 'kilocode',   // Kilo Code CLI harness (own provider, context from model def)
 };
 
 /**

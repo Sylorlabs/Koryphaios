@@ -17,6 +17,7 @@ import {
   type ProviderEvent,
   type ProviderMessage,
   type StreamRequest,
+  type CliCommand,
   getModelsForProvider,
 } from './types';
 import { detectCursorCLILogin } from './auth-utils';
@@ -166,6 +167,13 @@ interface CursorEnvelope {
   call_id?: string;
 }
 
+// Cursor Agent in-session commands. cursor-agent doesn't have a traditional slash command
+// system; these are the most useful chat-level directives Cursor understands.
+const CURSOR_CLI_COMMANDS: CliCommand[] = [
+  { name: 'clear', description: 'Clear the current conversation and start a new session', category: 'builtin' },
+  { name: 'help', description: 'Show Cursor Agent usage help', category: 'builtin' },
+];
+
 export class CursorProvider implements Provider {
   readonly name = 'cursor' as const;
 
@@ -174,6 +182,10 @@ export class CursorProvider implements Provider {
   isAvailable(): boolean {
     if (this.config.disabled) return false;
     return !!this.config.authToken || detectCursorCLILogin();
+  }
+
+  getCliCommands(): CliCommand[] {
+    return CURSOR_CLI_COMMANDS;
   }
 
   listModels(): ModelDef[] {

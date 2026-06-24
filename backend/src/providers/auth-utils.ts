@@ -72,6 +72,37 @@ export function createAntigravityCLIAuthMarker(): string {
   return `${ANTIGRAVITY_CLI_AUTH_PREFIX}${Date.now()}`;
 }
 
+const KILO_CLI_AUTH_PREFIX = 'cli:kilo:';
+/** Kilo Code CLI opt-in marker — the kilo CLI owns its own auth/session. */
+export function isKiloCLIAuthMarker(value: string | null | undefined): boolean {
+  return typeof value === 'string' && value.startsWith(KILO_CLI_AUTH_PREFIX);
+}
+export function createKiloCLIAuthMarker(): string {
+  return `${KILO_CLI_AUTH_PREFIX}${Date.now()}`;
+}
+export function detectKiloLogin(): boolean {
+  // Check if kilo binary exists and returns a valid profile (user is logged in).
+  const homeDirPath = homeDir();
+  if (!homeDirPath) return false;
+  // Check common kilo config paths
+  const credPaths = [
+    join(homeDirPath, '.kilo', 'auth.json'),
+    join(homeDirPath, '.config', 'kilo', 'auth.json'),
+    join(homeDirPath, '.kilocode', 'auth.json'),
+  ];
+  if (credPaths.some((p) => existsSync(p))) return true;
+  // Fallback: try running kilo profile (but only if binary exists)
+  try {
+    const { spawnSync } = require('node:child_process') as typeof import('node:child_process');
+    const result = spawnSync('kilo', ['profile', '--json'], { timeout: 3_000, encoding: 'utf8' });
+    if (result.status === 0 && result.stdout) {
+      const profile = JSON.parse(result.stdout);
+      return !!(profile.email || profile.name);
+    }
+  } catch { /* binary not on PATH or timed out */ }
+  return false;
+}
+
 
 export function getKoryCodexHome(): string {
   return KORY_CODEX_HOME;

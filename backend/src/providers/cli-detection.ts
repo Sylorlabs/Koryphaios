@@ -21,16 +21,18 @@ import {
   detectGrokXaiKey,
   detectCursorCLILogin,
   detectAntigravityCLILogin,
+  detectKiloLogin,
   createClaudeCLIAuthMarker,
   createCodexCLIAuthMarker,
   createGrokCLIAuthMarker,
   createCursorCLIAuthMarker,
   createAntigravityCLIAuthMarker,
+  createKiloCLIAuthMarker,
 } from './auth-utils';
 
 export interface AgentCliStatus {
   /** Stable id for the CLI. */
-  id: 'claude' | 'codex' | 'grok' | 'cursor' | 'antigravity';
+  id: 'claude' | 'codex' | 'grok' | 'cursor' | 'antigravity' | 'kilocode';
   displayName: string;
   /** Candidate binary names looked up on PATH. */
   binaries: string[];
@@ -94,6 +96,8 @@ export function canAutoEnable(provider: ProviderName): boolean {
       return !!whichBinary('cursor-agent') && detectCursorCLILogin();
     case 'antigravity':
       return !!firstInstalled(['agy', 'antigravity-cli', 'antigravity']) && detectAntigravityCLILogin();
+    case 'kilocode':
+      return !!whichBinary('kilo') && detectKiloLogin();
     default:
       return false;
   }
@@ -121,6 +125,8 @@ export function cliAutoEnableCreds(
       return { authToken: createCursorCLIAuthMarker() };
     case 'antigravity':
       return { authToken: createAntigravityCLIAuthMarker() };
+    case 'kilocode':
+      return { authToken: createKiloCLIAuthMarker() };
     default:
       return null;
   }
@@ -195,7 +201,17 @@ export function detectAgentClis(): AgentCliStatus[] {
     docsUrl: 'https://antigravity.google/docs/home',
   });
 
-  return [claude, codex, grok, cursor, antigravity];
+  // ── Kilo Code (kilo) → `kilocode` provider (CLI harness, headless JSON mode). ──
+  const kiloLogin = detectKiloLogin();
+  const kilo = mk('kilocode', 'Kilo Code', ['kilo', 'kilocode'], 'kilocode', {
+    loggedIn: kiloLogin,
+    authSource: kiloLogin ? 'kilo.ai account (kilo profile)' : null,
+    autoEnabled: canAutoEnable('kilocode'),
+    workingNote: 'Chats through the Kilo Code CLI harness (kilo run --format json).',
+    docsUrl: 'https://kilo.ai/docs',
+  });
+
+  return [claude, codex, grok, cursor, antigravity, kilo];
 }
 
 function mk(

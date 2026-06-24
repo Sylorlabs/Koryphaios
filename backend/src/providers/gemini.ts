@@ -9,6 +9,7 @@ import {
   type ProviderMessage,
   type ProviderContentBlock,
   type StreamRequest,
+  type CliCommand,
   getModelsForProvider,
   resolveModel,
   createGenericModel,
@@ -325,6 +326,33 @@ function refreshCliGeminiModelsInBackground(localModels: ModelDef[]): void {
   }, 0);
 }
 
+// Slash commands available in the Gemini CLI (when using OAuth CLI harness mode).
+const GEMINI_CLI_COMMANDS: CliCommand[] = [
+  { name: 'compress', description: 'Compress conversation context with a summary (aliases: compact, summarize)', category: 'builtin' },
+  { name: 'clear', description: 'Clear the screen and start a new session (alias: new)', category: 'builtin' },
+  { name: 'help', description: 'Show help for Gemini CLI', category: 'builtin' },
+  { name: 'chat', description: 'Browse and manage auto-saved conversation history', category: 'builtin' },
+  { name: 'resume', description: 'Resume a previous auto-saved conversation', category: 'builtin' },
+  { name: 'memory', description: 'Manage Gemini memory (add, show, refresh, clear)', category: 'builtin' },
+  { name: 'model', description: 'Switch or view the current Gemini model', category: 'builtin' },
+  { name: 'tools', description: 'List available Gemini CLI tools', category: 'builtin' },
+  { name: 'mcp', description: 'Manage MCP (Model Context Protocol) server connections', category: 'builtin' },
+  { name: 'stats', description: 'Show session and model usage statistics', category: 'builtin' },
+  { name: 'config', description: 'View or edit Gemini CLI settings', category: 'builtin' },
+  { name: 'permissions', description: 'Manage folder trust settings and permissions', category: 'builtin' },
+  { name: 'init', description: 'Analyze project and create a tailored GEMINI.md file', category: 'builtin' },
+  { name: 'theme', description: 'Change the CLI color theme', category: 'builtin' },
+  { name: 'vim', description: 'Toggle vim keybinding mode', category: 'builtin' },
+  { name: 'plan', description: 'Switch to Plan Mode and view the current plan', category: 'builtin' },
+  { name: 'rewind', description: 'Jump back to a specific message and restart the conversation', category: 'builtin' },
+  { name: 'export-session', description: 'Export the current session to a JSON file', category: 'builtin' },
+  { name: 'quit', description: 'Exit the CLI', category: 'builtin' },
+  { name: 'skills', description: 'List, enable, disable, or reload Gemini CLI skills', category: 'builtin' },
+  { name: 'extensions', description: 'Manage Gemini CLI extensions', category: 'builtin' },
+  { name: 'about', description: 'Show version and system information', category: 'builtin' },
+  { name: 'bug', description: 'Submit a bug report to Google', category: 'builtin' },
+];
+
 export class GeminiProvider implements Provider {
   readonly name: 'google' | 'vertexai';
 
@@ -344,6 +372,11 @@ export class GeminiProvider implements Provider {
       typeof this.config.authToken === 'string' &&
       this.config.authToken.startsWith('cli:gemini:')
     );
+  }
+
+  getCliCommands(): CliCommand[] {
+    if (!this.isCliHarnessMode()) return [];
+    return GEMINI_CLI_COMMANDS;
   }
 
   private cachedModels: ModelDef[] | null = null;

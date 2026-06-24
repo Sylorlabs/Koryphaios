@@ -24,6 +24,8 @@ export type WSEventType =
   // Context management (hide/recall)
   | 'context.hidden'
   | 'context.recalled'
+  // CLI provider slash commands available in the current session
+  | 'cli.commands'
   // Session events
   | 'session.created'
   | 'session.updated'

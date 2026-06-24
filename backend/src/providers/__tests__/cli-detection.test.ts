@@ -45,13 +45,14 @@ afterEach(() => {
 describe('detectAgentClis', () => {
   it('reports all agent CLIs with their provider mappings', () => {
     const list = detectAgentClis();
-    expect(list.map((c) => c.id).sort()).toEqual(['antigravity', 'claude', 'codex', 'cursor', 'grok']);
+    expect(list.map((c) => c.id).sort()).toEqual(['antigravity', 'claude', 'codex', 'cursor', 'grok', 'kilocode']);
     const byId = Object.fromEntries(list.map((c) => [c.id, c]));
     expect(byId.claude.provider).toBe('claude');
     expect(byId.codex.provider).toBe('codex');
     expect(byId.grok.provider).toBe('grok');
     expect(byId.cursor.provider).toBe('cursor');
     expect(byId.antigravity.provider).toBe('antigravity');
+    expect(byId.kilocode.provider).toBe('kilocode');
   });
 
   it('every entry carries a binary path when installed, and a human note', () => {

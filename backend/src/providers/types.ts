@@ -21,7 +21,9 @@ export type ProviderEventType =
   | 'file_edit'
   | 'tool_executed'
   | 'complete'
-  | 'error';
+  | 'error'
+  // Emitted by CLI providers on session init: lists the slash commands available in this CLI.
+  | 'cli_commands';
 
 export interface ProviderEvent {
   type: ProviderEventType;
@@ -43,6 +45,14 @@ export interface ProviderEvent {
   // tool_executed (agentic providers): a non-file tool the agent already ran.
   toolOutput?: string;
   isError?: boolean;
+  // cli_commands (CLI providers): slash commands available in this CLI session.
+  cliCommands?: CliCommand[];
+}
+
+export interface CliCommand {
+  name: string;        // without "/" prefix, e.g. "compact"
+  description?: string;
+  category?: 'builtin' | 'skill' | 'plugin' | 'custom';
 }
 
 // ─── Tool definition for provider calls ─────────────────────────────────────
@@ -117,6 +127,15 @@ export interface Provider {
 
   /** Optional provider-specific status detail for settings/debug UI. */
   getStatusError?(): string | undefined;
+
+  /**
+   * CLI providers: return the slash commands available in this CLI.
+   * Used to populate the "/" command palette in the UI.
+   * For providers like claude where commands are discovered dynamically from the
+   * stream init event, this returns a static fallback list; the stream event takes
+   * precedence and is emitted as `cli.commands` when received.
+   */
+  getCliCommands?(): CliCommand[];
 }
 
 // ─── Provider factory ───────────────────────────────────────────────────────

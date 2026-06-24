@@ -1059,6 +1059,7 @@ RULES:
 	        onStop={handleStop}
 	        onOpenSettings={() => showSettings = true}
           slashCommands={composerSlashCommands}
+          cliSlashCommands={wsStore.cliCommands.map(c => ({ command: c.name, description: c.description, category: c.category }))}
           fileMentions={composerFileMentions}
 	        disabled={!appStore.projectName}
 	        disabledMessage="Open a project to start chatting with agents"

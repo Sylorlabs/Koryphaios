@@ -159,6 +159,7 @@ export function validateConfig(config: Partial<KoryphaiosConfig>): void {
       'cline',
       'cortecs',
       'google-subscription',
+      'kilocode',
     ]);
 
     for (const [name, providerConfig] of Object.entries(config.providers)) {
