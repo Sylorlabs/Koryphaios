@@ -10,7 +10,7 @@
 // result/success {result, is_error}.
 
 import type { ProviderConfig, ModelDef } from '@koryphaios/shared';
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import {
   type Provider,
   type ProviderContentBlock,
@@ -34,12 +34,14 @@ let cachedCursorModels: ModelDef[] | null = null;
 let cursorModelsAt = 0;
 const CURSOR_MODELS_CACHE_MS = 10 * 60 * 1000;
 let cursorModelsInFlight: Promise<void> | null = null;
+let cursorModelListError: string | undefined;
 
 function parseCursorModels(output: string): ModelDef[] {
   const models: ModelDef[] = [];
   const seen = new Set<string>();
   for (const raw of output.split('\n')) {
     const line = raw.trim();
+    if (/no models available/i.test(line)) cursorModelListError = line;
     // Lines look like: "gpt-5.3-codex-xhigh - Codex 5.3 Extra High" or "auto - Auto (current)".
     const m = line.match(/^([A-Za-z0-9][\w.-]*)\s+-\s+(.+)$/);
     if (!m) continue;
@@ -105,12 +107,34 @@ function probeCursorModels(): Promise<ModelDef[] | null> {
   });
 }
 
+function probeCursorModelsSync(): ModelDef[] | null {
+  const bin = whichBinary('cursor-agent');
+  if (!bin) return null;
+  try {
+    const result = spawnSync(bin, ['--list-models'], {
+      stdio: ['ignore', 'pipe', 'pipe'],
+      env: { ...process.env },
+      encoding: 'utf8',
+      timeout: 5000,
+    });
+    const output = `${result.stdout ?? ''}\n${result.stderr ?? ''}`;
+    const models = parseCursorModels(output);
+    if (models.length === 0 && /no models available/i.test(output)) {
+      cursorModelListError = 'No models available for this Cursor account. Cursor CLI reports the account has no model access; sign into a Cursor account/tier with agent model access or set CURSOR_API_KEY.';
+    }
+    return models.length > 0 ? models : null;
+  } catch {
+    return null;
+  }
+}
+
 function refreshCursorModelsInBackground(): void {
   if (cursorModelsInFlight) return;
   if (cachedCursorModels && Date.now() - cursorModelsAt < CURSOR_MODELS_CACHE_MS) return;
   cursorModelsInFlight = probeCursorModels()
     .then((models) => {
       if (models && models.length > 0) {
+        cursorModelListError = undefined;
         cachedCursorModels = models;
         cursorModelsAt = Date.now();
         providerLog.info({ count: models.length }, 'Pulled real cursor model list from CLI');
@@ -122,11 +146,13 @@ function refreshCursorModelsInBackground(): void {
     });
 }
 
-/** The cursor-agent --model value for a selection, or undefined to let it auto-pick. */
-function cursorModelArg(model?: string): string | undefined {
-  if (!model) return undefined;
+/** The cursor-agent --model value for a selection.
+ *  Returns 'auto' when no named model is requested (ensures the CLI doesn't fall back
+ *  to whatever named model is set in the editor config, which breaks free-plan accounts). */
+function cursorModelArg(model?: string): string {
+  if (!model) return 'auto';
   const id = model.includes(':') ? model.split(':').slice(1).join(':') : model;
-  if (!id || id === 'auto' || id === 'cursor-agent') return undefined;
+  if (!id || id === 'auto' || id === 'cursor-agent') return 'auto';
   return id;
 }
 
@@ -151,10 +177,22 @@ export class CursorProvider implements Provider {
   }
 
   listModels(): ModelDef[] {
-    // Pull the real model list from cursor-agent (cached + background-refreshed).
-    // Until the first pull resolves, fall back to the static single "auto" entry.
+    // Pull the real model list from cursor-agent. The first status read does a short
+    // synchronous probe so the UI does not expose a fake placeholder catalog.
+    if (!cachedCursorModels && whichBinary('cursor-agent')) {
+      const models = probeCursorModelsSync();
+      if (models && models.length > 0) {
+        cursorModelListError = undefined;
+        cachedCursorModels = models;
+        cursorModelsAt = Date.now();
+      }
+    }
     refreshCursorModelsInBackground();
-    return cachedCursorModels ?? getModelsForProvider('cursor');
+    return cachedCursorModels ?? [];
+  }
+
+  getStatusError(): string | undefined {
+    return cursorModelListError;
   }
 
   async *streamResponse(request: StreamRequest): AsyncGenerator<ProviderEvent> {
@@ -175,17 +213,19 @@ export class CursorProvider implements Provider {
 
     const args = [
       '-p',
-      prompt,
       '--output-format',
       'stream-json',
+      '--stream-partial-output',
+      '--trust',
       // Non-interactive: run tools without an approval prompt (headless agentic).
       '--force',
     ];
 
-    // Reasoning IS the model variant for cursor-agent (no --reasoning-effort flag). Pass the
-    // selected model (e.g. claude-4.5-sonnet-thinking, gpt-5.3-codex-xhigh); omit for "auto".
-    const modelArg = cursorModelArg(request.model);
-    if (modelArg) args.push('--model', modelArg);
+    // Always pass --model explicitly: without it cursor-agent falls back to whatever
+    // model is configured in the Cursor editor, which breaks free-plan accounts that
+    // can only use "auto". cursorModelArg() returns 'auto' when no named model is chosen.
+    args.push('--model', cursorModelArg(request.model));
+    args.push(prompt);
 
     const cwd = request.workingDirectory?.trim() || process.cwd();
     const child = spawn(bin, args, { cwd, stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env } });
