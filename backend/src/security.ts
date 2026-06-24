@@ -403,6 +403,8 @@ const VALID_PROVIDERS = new Set<string>([
   'cline',
   'openai',
   'google',
+  'gemini',
+  'antigravity',
   'copilot',
   'openrouter',
   'groq',

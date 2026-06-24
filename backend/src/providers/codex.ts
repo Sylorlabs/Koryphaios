@@ -107,7 +107,7 @@ export class CodexProvider implements Provider {
     }
 
     this.refreshModelsInBackground(fallback);
-    return this.cachedModels ?? fallback;
+    return this.cachedModels ?? [];
   }
 
   private refreshModelsInBackground(fallback: ModelDef[]): void {
@@ -124,7 +124,6 @@ export class CodexProvider implements Provider {
           { provider: 'codex', error: error?.message ?? String(error) },
           'Failed to refresh Codex models from ChatGPT backend',
         );
-        this.cachedModels ??= fallback;
       })
       .finally(() => {
         this.fetchInProgress = false;
@@ -149,7 +148,7 @@ export class CodexProvider implements Provider {
       .map((item) => this.mapModel(item, fallback))
       .filter((item): item is ModelDef => !!item);
 
-    return dedupeModels(discovered.length > 0 ? discovered : fallback);
+    return dedupeModels(discovered);
   }
 
   async *streamResponse(request: StreamRequest): AsyncGenerator<ProviderEvent> {

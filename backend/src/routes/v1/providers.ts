@@ -15,7 +15,23 @@ import {
   resetCodexDeviceAuthSessions,
   startCodexDeviceAuth,
 } from '../../providers/codex';
-import { clearCodexAuthState, createCodexCLIAuthMarker, detectCodexAuthToken, detectClaudeCodeLogin, createClaudeCLIAuthMarker, detectGeminiCLIToken, clearCachedToken } from '../../providers/auth-utils';
+import {
+  clearCodexAuthState,
+  createCodexCLIAuthMarker,
+  detectCodexAuthToken,
+  detectClaudeCodeLogin,
+  createClaudeCLIAuthMarker,
+  detectGeminiCLILogin,
+  createGeminiCLIAuthMarker,
+  detectGeminiCLIToken,
+  clearCachedToken,
+  detectGrokCLILogin,
+  createGrokCLIAuthMarker,
+  detectCursorCLILogin,
+  createCursorCLIAuthMarker,
+  detectAntigravityCLILogin,
+  createAntigravityCLIAuthMarker,
+} from '../../providers/auth-utils';
 import { detectAgentClis } from '../../providers/cli-detection';
 import { googleAuth } from '../../providers/google-auth';
 import {
@@ -54,10 +70,31 @@ const providerConfigBody = t.Object({
   hideModelSelector: t.Optional(t.Boolean()),
 });
 
-type BrowserAuthProvider = 'copilot' | 'codex' | 'kimicode' | 'claude' | 'google' | 'google-subscription';
+type BrowserAuthProvider =
+  | 'copilot'
+  | 'codex'
+  | 'kimicode'
+  | 'claude'
+  | 'google'
+  | 'gemini'
+  | 'google-subscription'
+  | 'grok'
+  | 'cursor'
+  | 'antigravity';
 
 function isBrowserAuthProvider(name: string): name is BrowserAuthProvider {
-  return name === 'copilot' || name === 'codex' || name === 'kimicode' || name === 'claude' || name === 'google' || name === 'google-subscription';
+  return (
+    name === 'copilot' ||
+    name === 'codex' ||
+    name === 'kimicode' ||
+    name === 'claude' ||
+    name === 'google' ||
+    name === 'gemini' ||
+    name === 'google-subscription' ||
+    name === 'grok' ||
+    name === 'cursor' ||
+    name === 'antigravity'
+  );
 }
 
 async function startBrowserAuth(
@@ -81,6 +118,26 @@ async function startBrowserAuth(
         };
       }
       case 'codex': {
+        const existingCodexToken = detectCodexAuthToken();
+        if (existingCodexToken) {
+          const { providers } = getContext();
+          const setResult = await providers.setCredentials('codex', {
+            authToken: createCodexCLIAuthMarker(),
+          });
+          if (!setResult.success) {
+            return { ok: false, error: setResult.error ?? 'Failed to activate Codex auth' };
+          }
+          syncProviderConfigsSafely(providers);
+          serverLog.info({ provider: name }, 'Codex connected via existing CLI credentials');
+          return {
+            ok: true,
+            data: {
+              status: 'connected',
+              provider: 'codex',
+              message: 'OpenAI Codex connected via existing CLI credentials',
+            },
+          };
+        }
         resetCodexDeviceAuthSessions();
         clearCodexAuthState();
         const result = await startCodexDeviceAuth();
@@ -227,6 +284,114 @@ async function startBrowserAuth(
           error: authResult.message || 'Google Cloud SDK (gcloud) is required. Install it or enter an API key instead.',
         };
       }
+      case 'gemini': {
+        if (!detectGeminiCLILogin()) {
+          return {
+            ok: true,
+            data: {
+              provider: 'gemini',
+              message: 'Install Gemini CLI and run "gemini" to sign in, then click Detect.',
+            },
+          };
+        }
+        const { providers } = getContext();
+        const setResult = await providers.setCredentials('gemini', {
+          authToken: createGeminiCLIAuthMarker(),
+        });
+        if (!setResult.success) {
+          return { ok: false, error: setResult.error ?? 'Failed to activate Gemini CLI auth' };
+        }
+        syncProviderConfigsSafely(providers);
+        return {
+          ok: true,
+          data: {
+            status: 'connected',
+            provider: 'gemini',
+            message: 'Gemini CLI connected via existing CLI credentials',
+          },
+        };
+      }
+      case 'grok': {
+        if (!detectGrokCLILogin()) {
+          return {
+            ok: true,
+            data: {
+              provider: 'grok',
+              message: 'Install Grok Build and run "grok login", then click Detect.',
+            },
+          };
+        }
+        const { providers } = getContext();
+        const setResult = await providers.setCredentials('grok', {
+          authToken: createGrokCLIAuthMarker(),
+        });
+        if (!setResult.success) {
+          return { ok: false, error: setResult.error ?? 'Failed to activate Grok Build auth' };
+        }
+        syncProviderConfigsSafely(providers);
+        return {
+          ok: true,
+          data: {
+            status: 'connected',
+            provider: 'grok',
+            message: 'Grok Build connected via existing CLI credentials',
+          },
+        };
+      }
+      case 'cursor': {
+        if (!detectCursorCLILogin()) {
+          return {
+            ok: true,
+            data: {
+              provider: 'cursor',
+              message: 'Install Cursor CLI and run "cursor-agent login", then click Detect.',
+            },
+          };
+        }
+        const { providers } = getContext();
+        const setResult = await providers.setCredentials('cursor', {
+          authToken: createCursorCLIAuthMarker(),
+        });
+        if (!setResult.success) {
+          return { ok: false, error: setResult.error ?? 'Failed to activate Cursor CLI auth' };
+        }
+        syncProviderConfigsSafely(providers);
+        return {
+          ok: true,
+          data: {
+            status: 'connected',
+            provider: 'cursor',
+            message: 'Cursor CLI connected via existing CLI credentials',
+          },
+        };
+      }
+      case 'antigravity': {
+        if (!detectAntigravityCLILogin()) {
+          return {
+            ok: true,
+            data: {
+              provider: 'antigravity',
+              message: 'Install Google Antigravity CLI and sign in, then click Detect.',
+            },
+          };
+        }
+        const { providers } = getContext();
+        const setResult = await providers.setCredentials('antigravity', {
+          authToken: createAntigravityCLIAuthMarker(),
+        });
+        if (!setResult.success) {
+          return { ok: false, error: setResult.error ?? 'Failed to activate Antigravity CLI auth' };
+        }
+        syncProviderConfigsSafely(providers);
+        return {
+          ok: true,
+          data: {
+            status: 'connected',
+            provider: 'antigravity',
+            message: 'Google Antigravity connected via existing CLI credentials',
+          },
+        };
+      }
     }
   } catch (error: any) {
     serverLog.error(
@@ -294,6 +459,10 @@ async function completeBrowserAuth(
       case 'copilot':
       case 'kimicode':
       case 'google-subscription':
+      case 'gemini':
+      case 'grok':
+      case 'cursor':
+      case 'antigravity':
         return { ok: false, error: `${name} auth completes automatically after browser approval` };
     }
   } catch (error: any) {

@@ -131,11 +131,60 @@
     await memoryStore.saveSettings({ [key]: !current });
   }
 
+  // Context limit slider: null = unlimited (∞)
+  const SLIDER_MAX = 100000; // slider max position = infinity
+  let minEditing = $state(false);
+  let maxEditing = $state(false);
+  let minEditValue = $state('0');
+  let maxEditValue = $state('');
+
+  function isUnlimited(v: number | null | undefined) {
+    return v === null || v === undefined || v >= SLIDER_MAX;
+  }
+
+  function displayTokens(v: number | null | undefined) {
+    return isUnlimited(v) ? '∞' : String(v);
+  }
+
+  function sliderValue(v: number | null | undefined) {
+    return isUnlimited(v) ? SLIDER_MAX : (v ?? 2000);
+  }
+
+  function parseTokenInput(raw: string): number | null {
+    const s = raw.trim().toLowerCase();
+    if (s === '∞' || s === 'infinite' || s === 'infinity' || s === '') return null;
+    const n = parseInt(s, 10);
+    return isNaN(n) || n <= 0 ? null : n;
+  }
+
   async function handleMaxTokensChange(value: string) {
     const num = parseInt(value, 10);
-    if (!isNaN(num) && num > 0) {
-      await memoryStore.saveSettings({ maxContextTokens: num });
-    }
+    const isInf = num >= SLIDER_MAX;
+    await memoryStore.saveSettings({ maxContextTokens: isInf ? null : num } as any);
+  }
+
+  function startMinEdit() {
+    minEditValue = '0';
+    minEditing = true;
+  }
+  function commitMinEdit() {
+    minEditing = false;
+    // min is always 0, nothing to save
+  }
+
+  function startMaxEdit() {
+    const cur = memoryStore.settings?.maxContextTokens;
+    maxEditValue = isUnlimited(cur) ? '∞' : String(cur ?? 2000);
+    maxEditing = true;
+  }
+  async function commitMaxEdit() {
+    maxEditing = false;
+    const parsed = parseTokenInput(maxEditValue);
+    await memoryStore.saveSettings({ maxContextTokens: parsed } as any);
+  }
+  function handleMaxKeydown(e: KeyboardEvent) {
+    if (e.key === 'Enter') commitMaxEdit();
+    else if (e.key === 'Escape') maxEditing = false;
   }
 
   // Tab configuration
@@ -498,12 +547,13 @@
                       <div class="mt-1 text-xs text-[var(--color-text-muted)]">Global across all projects in `~/.koryphaios/`.</div>
                     </div>
                   </div>
-                  <input
-                    type="checkbox"
-                    checked={memoryStore.settings?.universalMemoryEnabled ?? true}
-                    onchange={() => toggleSetting("universalMemoryEnabled")}
-                    class="mt-1 h-4 w-4 rounded border-[var(--color-border)] bg-[var(--color-surface-0)] text-[var(--color-accent)] focus:ring-[var(--color-accent)]"
-                  />
+                  <button
+                    type="button"
+                    role="checkbox"
+                    aria-checked={memoryStore.settings?.universalMemoryEnabled ?? true}
+                    onclick={() => toggleSetting("universalMemoryEnabled")}
+                    class="kory-checkbox mt-0.5 shrink-0 {(memoryStore.settings?.universalMemoryEnabled ?? true) ? 'checked' : ''}"
+                  ><span class="kory-checkmark">✓</span></button>
                 </label>
 
                 <label class="flex h-full cursor-pointer items-start justify-between gap-4 rounded-xl bg-[var(--color-surface-2)] p-4 hover:bg-[var(--color-surface-3)]">
@@ -514,12 +564,13 @@
                       <div class="mt-1 text-xs text-[var(--color-text-muted)]">Project-specific context in `.koryphaios/project-memory/`.</div>
                     </div>
                   </div>
-                  <input
-                    type="checkbox"
-                    checked={memoryStore.settings?.projectMemoryEnabled ?? true}
-                    onchange={() => toggleSetting("projectMemoryEnabled")}
-                    class="mt-1 h-4 w-4 rounded border-[var(--color-border)] bg-[var(--color-surface-0)] text-[var(--color-accent)] focus:ring-[var(--color-accent)]"
-                  />
+                  <button
+                    type="button"
+                    role="checkbox"
+                    aria-checked={memoryStore.settings?.projectMemoryEnabled ?? true}
+                    onclick={() => toggleSetting("projectMemoryEnabled")}
+                    class="kory-checkbox mt-0.5 shrink-0 {(memoryStore.settings?.projectMemoryEnabled ?? true) ? 'checked' : ''}"
+                  ><span class="kory-checkmark">✓</span></button>
                 </label>
 
                 <label class="flex h-full cursor-pointer items-start justify-between gap-4 rounded-xl bg-[var(--color-surface-2)] p-4 hover:bg-[var(--color-surface-3)]">
@@ -530,12 +581,13 @@
                       <div class="mt-1 text-xs text-[var(--color-text-muted)]">Persistent storage scoped to the active chat.</div>
                     </div>
                   </div>
-                  <input
-                    type="checkbox"
-                    checked={memoryStore.settings?.sessionMemoryEnabled ?? true}
-                    onchange={() => toggleSetting("sessionMemoryEnabled")}
-                    class="mt-1 h-4 w-4 rounded border-[var(--color-border)] bg-[var(--color-surface-0)] text-[var(--color-accent)] focus:ring-[var(--color-accent)]"
-                  />
+                  <button
+                    type="button"
+                    role="checkbox"
+                    aria-checked={memoryStore.settings?.sessionMemoryEnabled ?? true}
+                    onclick={() => toggleSetting("sessionMemoryEnabled")}
+                    class="kory-checkbox mt-0.5 shrink-0 {(memoryStore.settings?.sessionMemoryEnabled ?? true) ? 'checked' : ''}"
+                  ><span class="kory-checkmark">✓</span></button>
                 </label>
 
                 <label class="flex h-full cursor-pointer items-start justify-between gap-4 rounded-xl bg-[var(--color-surface-2)] p-4 hover:bg-[var(--color-surface-3)]">
@@ -546,12 +598,13 @@
                       <div class="mt-1 text-xs text-[var(--color-text-muted)]">Behavior rules and conventions added to context.</div>
                     </div>
                   </div>
-                  <input
-                    type="checkbox"
-                    checked={memoryStore.settings?.rulesEnabled ?? true}
-                    onchange={() => toggleSetting("rulesEnabled")}
-                    class="mt-1 h-4 w-4 rounded border-[var(--color-border)] bg-[var(--color-surface-0)] text-[var(--color-accent)] focus:ring-[var(--color-accent)]"
-                  />
+                  <button
+                    type="button"
+                    role="checkbox"
+                    aria-checked={memoryStore.settings?.rulesEnabled ?? true}
+                    onclick={() => toggleSetting("rulesEnabled")}
+                    class="kory-checkbox mt-0.5 shrink-0 {(memoryStore.settings?.rulesEnabled ?? true) ? 'checked' : ''}"
+                  ><span class="kory-checkmark">✓</span></button>
                 </label>
               </div>
             </section>
@@ -570,12 +623,13 @@
                     <div class="text-sm font-medium text-[var(--color-text-primary)]">Allow Agent to Add Memories</div>
                     <div class="mt-1 text-xs text-[var(--color-text-muted)]">AI can automatically update memory files during compaction.</div>
                   </div>
-                  <input
-                    type="checkbox"
-                    checked={memoryStore.settings?.agentMemoryEnabled ?? true}
-                    onchange={() => toggleSetting("agentMemoryEnabled")}
-                    class="mt-1 h-4 w-4 rounded border-[var(--color-border)] bg-[var(--color-surface-0)] text-[var(--color-accent)] focus:ring-[var(--color-accent)]"
-                  />
+                  <button
+                    type="button"
+                    role="checkbox"
+                    aria-checked={memoryStore.settings?.agentMemoryEnabled ?? true}
+                    onclick={() => toggleSetting("agentMemoryEnabled")}
+                    class="kory-checkbox mt-0.5 shrink-0 {(memoryStore.settings?.agentMemoryEnabled ?? true) ? 'checked' : ''}"
+                  ><span class="kory-checkmark">✓</span></button>
                 </label>
 
                 <label class="flex h-full cursor-pointer items-start justify-between gap-4 rounded-xl bg-[var(--color-surface-2)] p-4 hover:bg-[var(--color-surface-3)]">
@@ -583,12 +637,13 @@
                     <div class="text-sm font-medium text-[var(--color-text-primary)]">Auto-include in Context</div>
                     <div class="mt-1 text-xs text-[var(--color-text-muted)]">Automatically add selected memories to the AI context window.</div>
                   </div>
-                  <input
-                    type="checkbox"
-                    checked={memoryStore.settings?.autoIncludeInContext ?? true}
-                    onchange={() => toggleSetting("autoIncludeInContext")}
-                    class="mt-1 h-4 w-4 rounded border-[var(--color-border)] bg-[var(--color-surface-0)] text-[var(--color-accent)] focus:ring-[var(--color-accent)]"
-                  />
+                  <button
+                    type="button"
+                    role="checkbox"
+                    aria-checked={memoryStore.settings?.autoIncludeInContext ?? true}
+                    onclick={() => toggleSetting("autoIncludeInContext")}
+                    class="kory-checkbox mt-0.5 shrink-0 {(memoryStore.settings?.autoIncludeInContext ?? true) ? 'checked' : ''}"
+                  ><span class="kory-checkmark">✓</span></button>
                 </label>
               </div>
             </section>
@@ -606,23 +661,45 @@
               <div class="rounded-xl bg-[var(--color-surface-2)] p-4">
                 <div class="mb-3 flex items-center justify-between gap-3">
                   <label for="max-tokens" class="text-sm text-[var(--color-text-primary)]">Max Context Tokens</label>
-                  <span class="text-xs text-[var(--color-text-muted)]">
-                    {memoryStore.settings?.maxContextTokens ?? 2000} tokens
+                  <span class="text-xs font-mono text-[var(--color-accent)]">
+                    {displayTokens(memoryStore.settings?.maxContextTokens)} tokens
                   </span>
                 </div>
                 <input
                   id="max-tokens"
                   type="range"
-                  min="500"
-                  max="8000"
+                  min="0"
+                  max={SLIDER_MAX}
                   step="100"
-                  value={memoryStore.settings?.maxContextTokens ?? 2000}
-                  onchange={(e) => handleMaxTokensChange(e.currentTarget.value)}
-                  class="h-2 w-full cursor-pointer appearance-none rounded-lg bg-[var(--color-surface-3)] accent-[var(--color-accent)]"
+                  value={sliderValue(memoryStore.settings?.maxContextTokens)}
+                  oninput={(e) => handleMaxTokensChange(e.currentTarget.value)}
+                  class="kory-slider w-full cursor-pointer"
                 />
                 <div class="mt-2 flex justify-between text-xs text-[var(--color-text-muted)]">
-                  <span>500</span>
-                  <span>8000</span>
+                  {#if minEditing}
+                    <input
+                      type="text"
+                      value={minEditValue}
+                      onblur={commitMinEdit}
+                      onkeydown={(e) => { if (e.key === 'Enter' || e.key === 'Escape') commitMinEdit(); }}
+                      class="w-14 bg-[var(--color-surface-1)] border border-[var(--color-accent)] rounded px-1 text-xs text-[var(--color-text-primary)] outline-none"
+                      autofocus
+                    />
+                  {:else}
+                    <span class="cursor-pointer hover:text-[var(--color-accent)] transition-colors" ondblclick={startMinEdit} title="Double-click to edit">0</span>
+                  {/if}
+                  {#if maxEditing}
+                    <input
+                      type="text"
+                      bind:value={maxEditValue}
+                      onblur={commitMaxEdit}
+                      onkeydown={handleMaxKeydown}
+                      class="w-20 bg-[var(--color-surface-1)] border border-[var(--color-accent)] rounded px-1 text-xs text-[var(--color-text-primary)] outline-none text-right"
+                      autofocus
+                    />
+                  {:else}
+                    <span class="cursor-pointer hover:text-[var(--color-accent)] transition-colors text-lg leading-none" ondblclick={startMaxEdit} title="Double-click to edit">∞</span>
+                  {/if}
                 </div>
               </div>
             </section>

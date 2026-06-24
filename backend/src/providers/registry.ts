@@ -30,6 +30,7 @@ import { CodexProvider } from './codex';
 import { ClaudeCodeProvider } from './claude-code';
 import { GrokBuildProvider } from './grok-build';
 import { CursorProvider } from './cursor';
+import { AntigravityProvider } from './antigravity';
 import { BedrockProvider } from './bedrock';
 import { GitLabProvider } from './gitlab';
 import { SapAiProvider } from './sapai';
@@ -256,6 +257,7 @@ class ProviderRegistry {
         requiresBaseUrl,
         circuitOpen,
         ...(isCustom && { custom: true, label: config?.label ?? String(name) }),
+        ...(provider?.getStatusError?.() && { error: provider.getStatusError?.() }),
         ...(baseUrlPlaceholder && { baseUrlPlaceholder }),
       });
     }
@@ -942,7 +944,7 @@ class ProviderRegistry {
 
   /**
    * Auto-enable providers backed by an agent CLI the user already has installed +
-   * logged in on this machine (Claude Code, Codex, Gemini CLI, Grok Build) — so they
+   * logged in on this machine (Claude Code, Codex, Gemini CLI, Grok Build, Antigravity) — so they
    * "just work" with no manual Connect step. A logged-in CLI is clear user intent,
    * unlike a stray environment variable (which we still don't auto-auth). Returns the
    * credentials to inject, or null when there's nothing to auto-enable.
@@ -954,7 +956,7 @@ class ProviderRegistry {
     // Default to disabled to prevent "auto-authing" from environment variables without user intent.
     // Explicit opt-in (via UI "Connect" or config) is required — EXCEPT for providers backed by
     // an agent CLI the user has installed + logged in, which we treat as intent and auto-enable
-    // (Claude Code, Codex, Gemini CLI, Grok Build). Opt out with KORY_DISABLE_CLI_AUTODETECT=1.
+    // (Claude Code, Codex, Gemini CLI, Grok Build, Antigravity). Opt out with KORY_DISABLE_CLI_AUTODETECT=1.
     const defaultDisabled = true;
     const autoCli = cliAutoEnableCreds(name);
     const isDisabled = autoCli ? false : (userConfig?.disabled ?? defaultDisabled);
@@ -1015,6 +1017,8 @@ class ProviderRegistry {
         return new OpenAIProvider(config);
       case 'google':
         return config.apiKey || config.authToken ? new GeminiProvider(config) : null;
+      case 'gemini':
+        return new GeminiProvider(config);
       case 'copilot':
         return new CopilotProvider(config);
       case 'codex':
@@ -1025,6 +1029,8 @@ class ProviderRegistry {
       case 'cursor':
         // Cursor subscription — runs the official `cursor-agent` CLI as a full agent.
         return new CursorProvider(config);
+      case 'antigravity':
+        return new AntigravityProvider(config);
       case 'kimicode':
         return new KimiCodeProvider(config);
       case 'openrouter':

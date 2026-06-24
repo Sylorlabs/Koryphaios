@@ -114,6 +114,9 @@ export interface Provider {
 
   /** List models available for this provider. */
   listModels(): ModelDef[];
+
+  /** Optional provider-specific status detail for settings/debug UI. */
+  getStatusError?(): string | undefined;
 }
 
 // ─── Provider factory ───────────────────────────────────────────────────────

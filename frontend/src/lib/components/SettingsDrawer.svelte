@@ -36,6 +36,8 @@
     GripVertical,
     Plus,
     Trash2,
+    Download,
+    Radar,
   } from 'lucide-svelte';
   import MemoryEditor from './MemoryEditor.svelte';
   import AgentSettings from './AgentSettings.svelte';
@@ -93,11 +95,12 @@
 
   // ─── Provider Management ──────────────────────────────────────────────
   const PROVIDER_LABELS: Record<string, string> = {
-    anthropic: 'Anthropic', openai: 'OpenAI', google: 'Google', xai: 'xAI',
+    anthropic: 'Anthropic', openai: 'OpenAI', google: 'Google', gemini: 'Gemini CLI', xai: 'xAI',
     openrouter: 'OpenRouter', groq: 'Groq', copilot: 'GitHub Copilot', azure: 'Azure OpenAI',
     bedrock: 'AWS Bedrock', vertexai: 'Vertex AI', local: 'Local (custom endpoint)', ollama: 'Ollama',
     lmstudio: 'LM Studio', llamacpp: 'Llama.cpp', opencodezen: 'OpenCodeZen',
-    claude: 'Claude Code', codex: 'OpenAI Codex', grok: 'Grok Build', cursor: 'Cursor', kimicode: 'Kimi Code',
+    claude: 'Claude Code', codex: 'OpenAI Codex', grok: 'Grok Build', cursor: 'Cursor', antigravity: 'Google Antigravity', kimicode: 'Kimi Code',
+    cortecs: 'Cortecs', cortects: 'Cortects',
     moonshot: 'Moonshot AI / Kimi API', mistral: 'Mistral AI',
   };
 
@@ -107,7 +110,9 @@
   const tokenPlaceholders: Record<string, string> = {
     anthropic: 'Anthropic auth token',
     copilot: 'GitHub token or Copilot auth token',
-    google: 'OAuth or access token',
+    google: 'API key',
+    gemini: 'Gemini CLI auth',
+    antigravity: 'Antigravity CLI auth',
     kimicode: 'Auth with Kimi Code',
     azure: 'Bearer token',
   };
@@ -134,7 +139,7 @@
   }
 
   function getKnownAuthMode(name: string, fallback: string): string {
-    if (name === 'copilot' || name === 'codex' || name === 'kimicode' || name === 'claude') return 'auth_only';
+    if (name === 'copilot' || name === 'codex' || name === 'kimicode' || name === 'claude' || name === 'gemini' || name === 'grok' || name === 'cursor' || name === 'antigravity') return 'auth_only';
     return fallback;
   }
 
@@ -163,14 +168,18 @@
     docsUrl: string;
   };
   let detectedClis = $state<DetectedCli[]>([]);
-  async function loadDetectedClis() {
+  async function loadDetectedClis(): Promise<DetectedCli[]> {
     try {
       const res = await apiFetch('/api/providers/detect');
       const data = await parseJsonResponse<{ ok?: boolean; data?: DetectedCli[] }>(res);
-      if (data?.ok && Array.isArray(data.data)) detectedClis = data.data;
+      if (data?.ok && Array.isArray(data.data)) {
+        detectedClis = data.data;
+        return data.data;
+      }
     } catch {
       detectedClis = [];
     }
+    return detectedClis;
   }
 
   const providerList = $derived.by(() => {
@@ -188,7 +197,7 @@
         }));
     
     const providerLabels: Record<string, string> = {
-      anthropic: 'Anthropic', openai: 'OpenAI', google: 'Google', xai: 'xAI',
+      anthropic: 'Anthropic', openai: 'OpenAI', google: 'Google', gemini: 'Gemini CLI', xai: 'xAI',
       openrouter: 'OpenRouter', groq: 'Groq', copilot: 'GitHub Copilot', azure: 'Azure OpenAI',
       bedrock: 'AWS Bedrock', vertexai: 'Vertex AI', local: 'Local (custom endpoint)', ollama: 'Ollama',
       lmstudio: 'LM Studio', llamacpp: 'Llama.cpp', ollamacloud: 'Ollama Cloud',
@@ -201,7 +210,8 @@
       portkey: 'Portkey', scaleway: 'Scaleway', ovhcloud: 'OVHcloud', stackit: 'STACKIT',
       nebius: 'Nebius', togetherai: 'Together AI', venice: 'Venice AI', zenmux: 'ZenMux',
       opencodezen: 'OpenCodeZen', firmware: 'Firmware', '302ai': '302.ai',
-      claude: 'Claude Code', codex: 'OpenAI Codex', grok: 'Grok Build', mistral: 'Mistral AI',
+      claude: 'Claude Code', codex: 'OpenAI Codex', gemini: 'Gemini CLI', grok: 'Grok Build', cursor: 'Cursor', antigravity: 'Google Antigravity', mistral: 'Mistral AI',
+      cortecs: 'Cortecs', cortects: 'Cortects',
       mistralai: 'Mistral AI', cohere: 'Cohere', perplexity: 'Perplexity',
       luma: 'Luma', fal: 'Fal', elevenlabs: 'ElevenLabs', assemblyai: 'AssemblyAI',
       deepgram: 'Deepgram', gladia: 'Gladia', lmnt: 'LMNT', azurecognitive: 'Azure Cognitive',
@@ -215,7 +225,7 @@
 
     const providerPlaceholders: Record<string, string> = {
       anthropic: 'sk-ant-...', openai: 'sk-...',
-      google: 'AIza...', xai: 'xai-...', openrouter: 'sk-or-...', groq: 'gsk_...',
+      google: 'AIza...', gemini: 'Run "gemini" to sign in', xai: 'xai-...', openrouter: 'sk-or-...', groq: 'gsk_...',
       copilot: 'gho_...', azure: 'key...', bedrock: 'AKIA...', vertexai: '/path/to/creds.json',
       local: 'http://localhost:1234', ollama: 'http://localhost:11434', lmstudio: 'http://localhost:1234',
       llamacpp: 'http://localhost:8080', ollamacloud: 'sk-...', deepseek: 'sk-...',
@@ -227,7 +237,8 @@
       ovhcloud: 'ovh-...', stackit: '...', nebius: '', togetherai: 'sk-...',
       venice: 'sk-...', zenmux: 'sk-...', opencodezen: 'Get key at opencode.ai/auth',
       firmware: 'sk-...', '302ai': 'sk-...', mistralai: 'sk-...',
-      claude: 'Claude auth token', codex: 'Auth with ChatGPT', grok: 'Run "grok login" (or set GROK_CODE_XAI_API_KEY)', cursor: 'Run "cursor-agent login" (or set CURSOR_API_KEY)',
+      claude: 'Claude auth token', codex: 'Auth with ChatGPT', gemini: 'Run "gemini" to sign in', grok: 'Run "grok login" (or set GROK_CODE_XAI_API_KEY)', cursor: 'Run "cursor-agent login" (or set CURSOR_API_KEY)', antigravity: 'Run Antigravity CLI sign-in',
+      cortecs: 'sk-...',
       mistral: 'sk-...', cohere: 'sk-...', perplexity: 'pplx-...', luma: 'lm-...',
       fal: 'sk-...', elevenlabs: 'sk-...', assemblyai: 'sk-...', deepgram: 'sk-...',
       gladia: 'sk-...', lmnt: 'sk-...', azurecognitive: 'sk-...', sapai: 'sk-...',
@@ -296,6 +307,13 @@
   let addingCustom = $state(false);
   let customForm = $state({ label: '', kind: 'openai', baseUrl: '', apiKey: '', models: '' });
   let customCardEl = $state<HTMLElement>();
+  let apiFormatDropdownOpen = $state(false);
+
+  const API_FORMAT_OPTIONS = [
+    { value: 'openai', label: 'OpenAI-compatible (/v1/chat/completions)' },
+    { value: 'anthropic', label: 'Anthropic-compatible (/v1/messages)' },
+    { value: 'gemini', label: 'Gemini-compatible' },
+  ];
 
   function closeAddCustom() {
     showAddCustom = false;
@@ -411,10 +429,58 @@
 
   const isTauri = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
 
-  const browserAuthProviders = new Set(['copilot', 'kimicode', 'codex', 'claude', 'google', 'google-subscription']);
+  const browserAuthProviders = new Set(['copilot', 'kimicode', 'codex', 'claude', 'gemini', 'google-subscription', 'grok', 'cursor', 'antigravity']);
+  const cliProviderIds = new Set(['claude', 'codex', 'gemini', 'grok', 'cursor', 'antigravity']);
+  const externalCliDetectProviders = new Set(['codex', 'gemini', 'grok', 'cursor', 'antigravity']);
+  const providerToCliId: Record<string, string> = {
+    claude: 'claude',
+    codex: 'codex',
+    gemini: 'gemini',
+    grok: 'grok',
+    cursor: 'cursor',
+    antigravity: 'antigravity',
+  };
+  const cliInstallUrls: Record<string, string> = {
+    claude: 'https://docs.anthropic.com/en/docs/claude-code',
+    codex: 'https://developers.openai.com/codex/cli',
+    gemini: 'https://github.com/google-gemini/gemini-cli',
+    grok: 'https://docs.x.ai/build/cli',
+    cursor: 'https://cursor.com/docs/cli',
+    antigravity: 'https://antigravity.google/',
+  };
 
   function usesBrowserAuth(name: string): boolean {
     return browserAuthProviders.has(name);
+  }
+
+  function detectedCliForProvider(name: string): DetectedCli | undefined {
+    const cliId = providerToCliId[name];
+    return cliId ? detectedClis.find((c) => c.id === cliId) : undefined;
+  }
+
+  function supportsExternalCliDetect(name: string): boolean {
+    return externalCliDetectProviders.has(name);
+  }
+
+  async function openCliInstall(name: string) {
+    const cli = detectedCliForProvider(name);
+    const url = cli?.docsUrl || cliInstallUrls[name];
+    if (url) await openAuthUrl(url);
+  }
+
+  async function detectCliAuth(name: string) {
+    const latest = await loadDetectedClis();
+    const cliId = providerToCliId[name];
+    const cli = latest.find((c) => c.id === cliId);
+    if (cli && !cli.installed) {
+      toastStore.info(`${cli.displayName} CLI is not installed`);
+      return;
+    }
+    if (cli && !cli.loggedIn) {
+      toastStore.info(cli.note);
+      return;
+    }
+    await startBrowserAuthFlow(name);
   }
 
   function showTokenInput(name: string, caps: ReturnType<typeof getProviderCaps>): boolean {
@@ -1076,7 +1142,13 @@
         browserAuthMessages[name] = googleAuthMessage;
         void pollGoogleAuth(googleDeviceAuth!.deviceCode, googleDeviceAuth!.intervalMs);
       } else {
-        toastStore.info(data.data.message ?? 'Finish sign-in in the browser, then confirm here.');
+        browserAuthPending[name] = false;
+        browserAuthMessages[name] = data.data.message ?? '';
+        if (data.data.message) {
+          toastStore.info(data.data.message);
+        } else {
+          toastStore.info('Finish sign-in in the browser, then confirm here.');
+        }
       }
     } catch (err: any) {
       toastStore.error(err.message ?? 'Failed to start sign-in');
@@ -1425,9 +1497,9 @@
     <div class="flex-1 min-h-0 overflow-hidden flex flex-col">
       <!-- Providers Tab -->
       <div class={activeTab === 'providers' ? 'flex-1 overflow-y-auto px-6 py-5 space-y-6' : 'hidden'}>
-        <div class="relative">
-          <Search size={14} class="absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" style="color: var(--color-text-muted);" />
-          <input type="text" placeholder="Search providers..." bind:value={providerSearchQuery} class="input w-full pl-12 py-2 text-sm" />
+        <div class="flex items-center gap-2 input py-2">
+          <Search size={14} class="shrink-0 text-[var(--color-text-muted)]" />
+          <input type="text" placeholder="Search providers..." bind:value={providerSearchQuery} class="bg-transparent border-0 outline-none w-full text-sm text-[var(--color-text-primary)] placeholder:text-[var(--color-text-muted)]" style="padding:0;" />
         </div>
 
         <!-- Detected on your system — agent CLIs Koryphaios auto-picked up -->
@@ -1492,12 +1564,35 @@
                 <input id="custom-label" type="text" placeholder="My LLM" bind:value={customForm.label} class="input w-full text-xs" />
               </div>
               <div class="space-y-1">
-                <label class="text-[10px] uppercase tracking-wider text-[var(--color-text-muted)] font-medium" for="custom-kind">API format</label>
-                <select id="custom-kind" bind:value={customForm.kind} class="input w-full text-xs">
-                  <option value="openai">OpenAI-compatible (/v1/chat/completions)</option>
-                  <option value="anthropic">Anthropic-compatible (/v1/messages)</option>
-                  <option value="gemini">Gemini-compatible</option>
-                </select>
+                <label class="text-[10px] uppercase tracking-wider text-[var(--color-text-muted)] font-medium">API format</label>
+                <div class="relative">
+                  <button
+                    type="button"
+                    onclick={() => (apiFormatDropdownOpen = !apiFormatDropdownOpen)}
+                    class="w-full flex items-center justify-between px-3 py-2 text-xs bg-[var(--color-surface-2)] border border-[var(--color-border)] rounded-lg hover:bg-[var(--color-surface-3)] transition-colors text-left"
+                  >
+                    <span>{API_FORMAT_OPTIONS.find((o) => o.value === customForm.kind)?.label || 'Select format'}</span>
+                    <svg class="w-4 h-4 text-[var(--color-text-muted)] transition-transform {apiFormatDropdownOpen ? 'rotate-180' : ''}" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 14l-7 7m0 0l-7-7m7 7V3" />
+                    </svg>
+                  </button>
+                  {#if apiFormatDropdownOpen}
+                    <div class="absolute top-full left-0 right-0 mt-1 bg-[var(--color-surface-1)] border border-[var(--color-border)] rounded-lg shadow-lg z-50 overflow-hidden">
+                      {#each API_FORMAT_OPTIONS as option}
+                        <button
+                          type="button"
+                          onclick={() => {
+                            customForm.kind = option.value;
+                            apiFormatDropdownOpen = false;
+                          }}
+                          class="w-full text-left px-3 py-2 text-xs hover:bg-[var(--color-surface-2)] transition-colors {customForm.kind === option.value ? 'text-[var(--color-accent)] bg-[var(--color-surface-2)]' : 'text-[var(--color-text)]'}"
+                        >
+                          {option.label}
+                        </button>
+                      {/each}
+                    </div>
+                  {/if}
+                </div>
               </div>
               <div class="space-y-1">
                 <label class="text-[10px] uppercase tracking-wider text-[var(--color-text-muted)] font-medium" for="custom-url">Base URL</label>
@@ -1512,7 +1607,7 @@
                 <input id="custom-models" type="text" placeholder="my-model-a, my-model-b — or leave blank to auto-fetch" bind:value={customForm.models} class="input w-full text-xs" />
               </div>
               <div class="flex gap-2">
-                <button type="button" onclick={closeAddCustom} disabled={addingCustom} class="btn btn-ghost text-xs py-2 px-3">Cancel</button>
+                <button type="button" onclick={closeAddCustom} disabled={addingCustom} class="btn btn-ghost flex-1 text-xs py-2">Cancel</button>
                 <button type="button" onclick={addCustomProvider} disabled={addingCustom} class="btn btn-primary flex-1 text-xs py-2">{addingCustom ? 'Adding…' : 'Add provider'}</button>
               </div>
             </div>
@@ -1565,7 +1660,51 @@
                       <button type="button" onclick={() => disconnectProvider(prov.key)} class="text-[10px] text-red-400 hover:text-red-300 font-medium transition-colors">Disconnect</button>
                     </div>
                   {:else}
+                    {@const cliStatus = detectedCliForProvider(prov.key)}
                     <div class="space-y-2">
+                      {#if cliProviderIds.has(prov.key)}
+                        <div class="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-0)]/80 p-3 space-y-2">
+                          <div class="flex items-start justify-between gap-3">
+                            <div class="min-w-0">
+                              <div class="flex items-center gap-2 text-[11px] font-semibold text-[var(--color-text-primary)]">
+                                <Terminal size={12} />
+                                <span>CLI harness</span>
+                              </div>
+                              <p class="mt-1 text-[10px] leading-relaxed text-[var(--color-text-muted)]">
+                                {#if cliStatus}
+                                  {cliStatus.note}
+                                {:else}
+                                  Install the provider CLI, sign in there, then connect it here.
+                                {/if}
+                              </p>
+                            </div>
+                            {#if cliStatus?.installed && cliStatus.loggedIn}
+                              <span class="shrink-0 text-[9px] px-1.5 py-0.5 rounded-full font-medium bg-emerald-500/10 text-emerald-400">Ready</span>
+                            {:else if cliStatus?.installed}
+                              <span class="shrink-0 text-[9px] px-1.5 py-0.5 rounded-full font-medium bg-yellow-500/10 text-yellow-400">Login needed</span>
+                            {:else}
+                              <span class="shrink-0 text-[9px] px-1.5 py-0.5 rounded-full font-medium bg-[var(--color-surface-2)] text-[var(--color-text-muted)]">Missing</span>
+                            {/if}
+                          </div>
+                          <div class="flex gap-2">
+                            {#if !cliStatus?.installed}
+                              <button type="button" onclick={() => openCliInstall(prov.key)} class="btn btn-secondary flex-1 text-[10px] py-2">
+                                <Download size={12} /> Install CLI
+                              </button>
+                            {/if}
+                            {#if supportsExternalCliDetect(prov.key)}
+                              <button
+                                type="button"
+                                onclick={() => detectCliAuth(prov.key)}
+                                disabled={browserAuthBusy === prov.key}
+                                class="btn btn-secondary flex-1 text-[10px] py-2"
+                              >
+                                <Radar size={12} /> {browserAuthBusy === prov.key ? 'Checking...' : 'Detect'}
+                              </button>
+                            {/if}
+                          </div>
+                        </div>
+                      {/if}
                       {#if caps.supportsApiKey}
                         <label class="text-[10px] text-[var(--color-text-muted)] font-medium uppercase tracking-wider" for={`provider-key-${prov.key}`}>API Key</label>
                         <input id={`provider-key-${prov.key}`} type="password" placeholder={prov.placeholder} bind:value={keyInputs[prov.key]} class="input w-full text-xs" onkeydown={(e) => e.key === 'Enter' && connectProvider(prov.key)} />
@@ -1644,7 +1783,9 @@
                             >
                               {browserAuthBusy === prov.key && !browserAuthPending[prov.key]
                                 ? 'Opening...'
-                                : 'Auth'}
+                                : cliProviderIds.has(prov.key)
+                                  ? 'Auth CLI'
+                                  : 'Auth'}
                             </button>
                             {#if browserAuthPending[prov.key] && prov.key !== 'copilot' && prov.key !== 'codex' && prov.key !== 'kimicode' && prov.key !== 'google-subscription'}
                               <button

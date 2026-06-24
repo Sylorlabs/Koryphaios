@@ -33,7 +33,7 @@
     "multiSourceResearch": true,
     "updatedAt": 1781385946807
   },
-  "updatedAt": 1781394997934,
+  "updatedAt": 1782271428316,
   "providers": {
     "anthropic": {
       "name": "anthropic",
@@ -43,18 +43,20 @@
     },
     "claude": {
       "name": "claude",
+      "authToken": "cli:claude:1782261184852",
       "selectedModels": [],
       "hideModelSelector": false,
-      "disabled": true
+      "disabled": false
     },
     "codex": {
       "name": "codex",
+      "authToken": "cli:codex:1782263383150",
       "selectedModels": [
         "gpt-5.4",
         "gpt-5.4-mini"
       ],
       "hideModelSelector": false,
-      "disabled": true
+      "disabled": false
     },
     "openai": {
       "name": "openai",
@@ -88,9 +90,15 @@
     },
     "copilot": {
       "name": "copilot",
-      "selectedModels": [],
+      "authToken": "REDACTED",
+      "selectedModels": [
+        "gpt-5-mini",
+        "claude-haiku-4.5",
+        "raptor-mini",
+        "goldeneye"
+      ],
       "hideModelSelector": false,
-      "disabled": true
+      "disabled": false
     },
     "opencodezen": {
       "name": "opencodezen",
@@ -304,6 +312,44 @@
     },
     "kimicode": {
       "name": "kimicode",
+      "selectedModels": [],
+      "hideModelSelector": false,
+      "disabled": true
+    },
+    "grok": {
+      "name": "grok",
+      "selectedModels": [],
+      "hideModelSelector": false,
+      "disabled": true
+    },
+    "cursor": {
+      "name": "cursor",
+      "authToken": "cli:cursor:1782259653105",
+      "selectedModels": [],
+      "hideModelSelector": false,
+      "disabled": false
+    },
+    "antigravity": {
+      "name": "antigravity",
+      "selectedModels": [],
+      "hideModelSelector": false,
+      "disabled": true
+    },
+    "gemini": {
+      "name": "gemini",
+      "authToken": "cli:gemini:1782263383151",
+      "selectedModels": [],
+      "hideModelSelector": false,
+      "disabled": false
+    },
+    "cline": {
+      "name": "cline",
+      "selectedModels": [],
+      "hideModelSelector": false,
+      "disabled": true
+    },
+    "cortecs": {
+      "name": "cortecs",
       "selectedModels": [],
       "hideModelSelector": false,
       "disabled": true

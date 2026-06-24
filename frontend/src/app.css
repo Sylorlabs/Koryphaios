@@ -775,3 +775,83 @@ pre {
 .skip-link:focus {
   top: 0;
 }
+
+/* ── Koryphaios custom checkbox ──────────────────────────────────── */
+.kory-checkbox {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 5px;
+  border: 1.5px solid var(--color-border-bright);
+  background: var(--color-surface-0);
+  transition: border-color 0.18s ease, background 0.18s ease, box-shadow 0.18s ease;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.kory-checkbox:hover {
+  border-color: var(--color-accent);
+  box-shadow: 0 0 0 3px rgba(213, 178, 97, 0.12);
+}
+.kory-checkbox.checked {
+  background: var(--color-accent);
+  border-color: var(--color-accent);
+  box-shadow: 0 0 0 3px rgba(213, 178, 97, 0.18);
+}
+.kory-checkmark {
+  font-size: 11px;
+  font-weight: 700;
+  color: #17120d;
+  line-height: 1;
+  opacity: 0;
+  transform: scale(0.4) rotate(-10deg);
+  transition: opacity 0.15s ease, transform 0.15s cubic-bezier(0.34, 1.56, 0.64, 1);
+  pointer-events: none;
+}
+.kory-checkbox.checked .kory-checkmark {
+  opacity: 1;
+  transform: scale(1) rotate(0deg);
+}
+
+/* ── Koryphaios range slider ─────────────────────────────────────── */
+.kory-slider {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--color-surface-3);
+  outline: none;
+  cursor: pointer;
+}
+.kory-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--color-accent);
+  cursor: pointer;
+  border: 2px solid var(--color-surface-1);
+  box-shadow: 0 0 0 0 rgba(213, 178, 97, 0.3);
+  transition: box-shadow 0.18s ease, transform 0.18s ease;
+}
+.kory-slider::-webkit-slider-thumb:hover {
+  box-shadow: 0 0 0 5px rgba(213, 178, 97, 0.2);
+  transform: scale(1.1);
+}
+.kory-slider::-moz-range-thumb {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--color-accent);
+  cursor: pointer;
+  border: 2px solid var(--color-surface-1);
+  transition: box-shadow 0.18s ease;
+}
+.kory-slider::-moz-range-track {
+  height: 6px;
+  border-radius: 999px;
+  background: var(--color-surface-3);
+}

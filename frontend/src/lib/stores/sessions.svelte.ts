@@ -75,21 +75,13 @@ async function fetchSessions(): Promise<boolean> {
     }
     if (data?.ok && Array.isArray(data.data)) {
       sessions = data.data;
-      // Try to restore last session from localStorage
-      const lastSessionId = loadLastSession();
-
-      // If we have a stored session and it still exists, use it
-      if (lastSessionId && sessions.find((s) => s.id === lastSessionId)) {
-        activeSessionId = lastSessionId;
-      } else if (activeSessionId && !sessions.find((s) => s.id === activeSessionId)) {
-        // If the active session is no longer in the list, clear it or select the first one
-        activeSessionId = sessions[0]?.id ?? '';
-      } else if (!activeSessionId && sessions.length > 0) {
+      // Always create a new session on app launch
+      const newSessionId = await createSession();
+      if (newSessionId) {
+        activeSessionId = newSessionId;
+      } else if (sessions.length > 0) {
+        // Fallback to first session if new session creation fails
         activeSessionId = sessions[0].id;
-      }
-
-      // Save the resolved active session
-      if (activeSessionId) {
         saveLastSession(activeSessionId);
       }
       return true;

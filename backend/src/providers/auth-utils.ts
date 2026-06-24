@@ -63,6 +63,15 @@ export function createCursorCLIAuthMarker(): string {
   return `${CURSOR_CLI_AUTH_PREFIX}${Date.now()}`;
 }
 
+const ANTIGRAVITY_CLI_AUTH_PREFIX = 'cli:antigravity:';
+/** Antigravity CLI opt-in marker — the CLI owns its own auth/session. */
+export function isAntigravityCLIAuthMarker(value: string | null | undefined): boolean {
+  return typeof value === 'string' && value.startsWith(ANTIGRAVITY_CLI_AUTH_PREFIX);
+}
+export function createAntigravityCLIAuthMarker(): string {
+  return `${ANTIGRAVITY_CLI_AUTH_PREFIX}${Date.now()}`;
+}
+
 const GEMINI_CLI_AUTH_PREFIX = 'cli:gemini:';
 /** Gemini CLI opt-in marker — the gemini CLI owns its own OAuth (no API key needed). */
 export function isGeminiCLIAuthMarker(value: string | null | undefined): boolean {
@@ -92,20 +101,26 @@ export function detectCodexAuthToken(): string | null {
   return getCachedToken(
     'codex-cli-auth',
     () => {
-    const authPath = join(KORY_CODEX_HOME, 'auth.json');
-    if (!existsSync(authPath)) return null;
+      const home = homeDir();
+      const authPaths = [
+        join(KORY_CODEX_HOME, 'auth.json'),
+        ...(home ? [join(home, '.codex', 'auth.json')] : []),
+      ];
 
-    try {
-      const data = JSON.parse(readFileSync(authPath, 'utf-8'));
-      const accessToken = data?.tokens?.access_token;
-      if (typeof accessToken === 'string' && accessToken.trim()) {
-        return accessToken.trim();
+      for (const authPath of authPaths) {
+        if (!existsSync(authPath)) continue;
+        try {
+          const data = JSON.parse(readFileSync(authPath, 'utf-8'));
+          const accessToken = data?.tokens?.access_token ?? data?.access_token;
+          if (typeof accessToken === 'string' && accessToken.trim()) {
+            return accessToken.trim();
+          }
+        } catch {
+          // Ignore malformed auth files and try the next known location.
+        }
       }
-    } catch {
-      // Ignore malformed auth files and treat as signed out.
-    }
 
-    return null;
+      return null;
     },
   );
 }
@@ -310,6 +325,19 @@ export function detectCursorCLILogin(): boolean {
   } catch {
     return false;
   }
+}
+
+export function detectAntigravityCLILogin(): boolean {
+  if (process.env.ANTIGRAVITY_AUTH_TOKEN?.trim()) return true;
+  const home = homeDir();
+  if (!home) return false;
+  const credentialPaths = [
+    join(home, '.antigravity', 'auth.json'),
+    join(home, '.antigravity', 'credentials.json'),
+    join(home, '.config', 'antigravity', 'auth.json'),
+    join(home, '.config', 'antigravity', 'credentials.json'),
+  ];
+  return credentialPaths.some((path) => existsSync(path));
 }
 
 /**

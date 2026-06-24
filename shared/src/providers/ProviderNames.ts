@@ -6,6 +6,7 @@ export const ProviderName = {
   Anthropic: 'anthropic',
   OpenAI: 'openai',
   Google: 'google',
+  Gemini: 'gemini',
   XAI: 'xai',
 
   // Aggregators (OpenAI-compatible APIs with implementations)
@@ -19,6 +20,7 @@ export const ProviderName = {
   Codex: 'codex',
   Grok: 'grok',
   Cursor: 'cursor',
+  Antigravity: 'antigravity',
 
   // Curated coding models
   OpenCodeZen: 'opencodezen',

@@ -10,6 +10,7 @@ export {
 } from './openai';
 
 export { GeminiProvider } from './gemini';
+export { AntigravityProvider } from './antigravity';
 export { CopilotProvider } from './copilot';
 
 export { withTimeoutSignal } from './utils';

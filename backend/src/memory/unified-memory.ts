@@ -69,8 +69,8 @@ export interface MemorySettings {
   rulesEnabled: boolean;
   /** Auto-include memories in agent context */
   autoIncludeInContext: boolean;
-  /** Maximum tokens to use for memories in context */
-  maxContextTokens: number;
+  /** Maximum tokens to use for memories in context. null = unlimited */
+  maxContextTokens: number | null;
 }
 
 export const DEFAULT_MEMORY_SETTINGS: MemorySettings = {
@@ -80,7 +80,7 @@ export const DEFAULT_MEMORY_SETTINGS: MemorySettings = {
   agentMemoryEnabled: true,
   rulesEnabled: true,
   autoIncludeInContext: true,
-  maxContextTokens: 2000,
+  maxContextTokens: null,
 };
 
 // ============================================================================
@@ -909,7 +909,16 @@ export function formatMemoryForContext(context: MemoryContext): string {
     return '';
   }
 
-  return `# Memory Context\n\n${parts.join('\n\n---\n\n')}`;
+  const full = `# Memory Context\n\n${parts.join('\n\n---\n\n')}`;
+
+  const maxTokens = context.settings.maxContextTokens;
+  if (maxTokens === null || maxTokens === undefined) {
+    return full; // unlimited
+  }
+  // Rough approximation: 1 token ≈ 4 chars
+  const charLimit = maxTokens * 4;
+  if (full.length <= charLimit) return full;
+  return full.slice(0, charLimit) + '\n\n…(truncated)';
 }
 
 // ============================================================================

@@ -103,9 +103,9 @@ function buildCliGeminiModels(localModels: ModelDef[]): ModelDef[] {
     const existing = byId.get(id);
     if (existing) return existing; // keep curated metadata (cost/context) where we have it
     return {
-      id,
+      id: `gemini-cli:${id}`,
       name: prettyGeminiName(id),
-      provider: 'google',
+      provider: 'gemini',
       apiModelId: id,
       contextWindow: 1_000_000,
       maxOutputTokens: 64_000,
@@ -327,10 +327,10 @@ function refreshCliGeminiModelsInBackground(localModels: ModelDef[]): void {
 }
 
 export class GeminiProvider implements Provider {
-  readonly name: 'google' | 'vertexai';
+  readonly name: 'google' | 'gemini' | 'vertexai';
 
   constructor(readonly config: ProviderConfig) {
-    this.name = config.name === 'vertexai' ? 'vertexai' : 'google';
+    this.name = config.name === 'vertexai' ? 'vertexai' : config.name === 'gemini' ? 'gemini' : 'google';
   }
 
   isAvailable(): boolean {
@@ -343,7 +343,7 @@ export class GeminiProvider implements Provider {
       this.name === 'google' &&
       !this.config.apiKey &&
       isGeminiCLIAuthMarker(this.config.authToken)
-    );
+    ) || this.name === 'gemini';
   }
 
   private cachedModels: ModelDef[] | null = null;
@@ -351,13 +351,20 @@ export class GeminiProvider implements Provider {
 
   listModels(): ModelDef[] {
     const localModels = getModelsForProvider(this.name);
-    if (this.name !== 'google') return localModels;
+    if (this.name !== 'google' && this.name !== 'gemini') return localModels;
     if (!this.isAvailable()) return localModels;
     // OAuth/CLI mode: the gemini CLI has no model-list API, so read the installed CLI's
     // own catalog from its bundle (the real models the CLI offers).
     if (this.isCliHarnessMode()) {
+      if (!cachedCliGeminiModels) {
+        const models = buildCliGeminiModels(localModels);
+        if (models.length > 0) {
+          cachedCliGeminiModels = models;
+          cliGeminiModelsAt = Date.now();
+        }
+      }
       refreshCliGeminiModelsInBackground(localModels);
-      return cachedCliGeminiModels ?? localModels;
+      return cachedCliGeminiModels ?? [];
     }
     if (this.cachedModels && Date.now() - this.lastFetch < 5 * 60 * 1000) {
       return this.cachedModels;
