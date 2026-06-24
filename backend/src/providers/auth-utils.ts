@@ -63,14 +63,46 @@ export function createCursorCLIAuthMarker(): string {
   return `${CURSOR_CLI_AUTH_PREFIX}${Date.now()}`;
 }
 
-const GEMINI_CLI_AUTH_PREFIX = 'cli:gemini:';
-/** Gemini CLI opt-in marker — the gemini CLI owns its own OAuth (no API key needed). */
-export function isGeminiCLIAuthMarker(value: string | null | undefined): boolean {
-  return typeof value === 'string' && value.startsWith(GEMINI_CLI_AUTH_PREFIX);
+const ANTIGRAVITY_CLI_AUTH_PREFIX = 'cli:antigravity:';
+/** Antigravity CLI opt-in marker — the CLI owns its own auth/session. */
+export function isAntigravityCLIAuthMarker(value: string | null | undefined): boolean {
+  return typeof value === 'string' && value.startsWith(ANTIGRAVITY_CLI_AUTH_PREFIX);
 }
-export function createGeminiCLIAuthMarker(): string {
-  return `${GEMINI_CLI_AUTH_PREFIX}${Date.now()}`;
+export function createAntigravityCLIAuthMarker(): string {
+  return `${ANTIGRAVITY_CLI_AUTH_PREFIX}${Date.now()}`;
 }
+
+const KILO_CLI_AUTH_PREFIX = 'cli:kilo:';
+/** Kilo Code CLI opt-in marker — the kilo CLI owns its own auth/session. */
+export function isKiloCLIAuthMarker(value: string | null | undefined): boolean {
+  return typeof value === 'string' && value.startsWith(KILO_CLI_AUTH_PREFIX);
+}
+export function createKiloCLIAuthMarker(): string {
+  return `${KILO_CLI_AUTH_PREFIX}${Date.now()}`;
+}
+export function detectKiloLogin(): boolean {
+  // Check if kilo binary exists and returns a valid profile (user is logged in).
+  const homeDirPath = homeDir();
+  if (!homeDirPath) return false;
+  // Check common kilo config paths
+  const credPaths = [
+    join(homeDirPath, '.kilo', 'auth.json'),
+    join(homeDirPath, '.config', 'kilo', 'auth.json'),
+    join(homeDirPath, '.kilocode', 'auth.json'),
+  ];
+  if (credPaths.some((p) => existsSync(p))) return true;
+  // Fallback: try running kilo profile (but only if binary exists)
+  try {
+    const { spawnSync } = require('node:child_process') as typeof import('node:child_process');
+    const result = spawnSync('kilo', ['profile', '--json'], { timeout: 3_000, encoding: 'utf8' });
+    if (result.status === 0 && result.stdout) {
+      const profile = JSON.parse(result.stdout);
+      return !!(profile.email || profile.name);
+    }
+  } catch { /* binary not on PATH or timed out */ }
+  return false;
+}
+
 
 export function getKoryCodexHome(): string {
   return KORY_CODEX_HOME;
@@ -92,20 +124,26 @@ export function detectCodexAuthToken(): string | null {
   return getCachedToken(
     'codex-cli-auth',
     () => {
-    const authPath = join(KORY_CODEX_HOME, 'auth.json');
-    if (!existsSync(authPath)) return null;
+      const home = homeDir();
+      const authPaths = [
+        join(KORY_CODEX_HOME, 'auth.json'),
+        ...(home ? [join(home, '.codex', 'auth.json')] : []),
+      ];
 
-    try {
-      const data = JSON.parse(readFileSync(authPath, 'utf-8'));
-      const accessToken = data?.tokens?.access_token;
-      if (typeof accessToken === 'string' && accessToken.trim()) {
-        return accessToken.trim();
+      for (const authPath of authPaths) {
+        if (!existsSync(authPath)) continue;
+        try {
+          const data = JSON.parse(readFileSync(authPath, 'utf-8'));
+          const accessToken = data?.tokens?.access_token ?? data?.access_token;
+          if (typeof accessToken === 'string' && accessToken.trim()) {
+            return accessToken.trim();
+          }
+        } catch {
+          // Ignore malformed auth files and try the next known location.
+        }
       }
-    } catch {
-      // Ignore malformed auth files and treat as signed out.
-    }
 
-    return null;
+      return null;
     },
   );
 }
@@ -242,23 +280,6 @@ export function detectGeminiApiKey(): string | null {
   return k || null;
 }
 
-/**
- * Detects whether the Gemini CLI is logged in: either an API key in the environment
- * or the CLI's cached OAuth credentials at ~/.gemini/oauth_creds.json.
- */
-export function detectGeminiCLILogin(): boolean {
-  if (detectGeminiApiKey()) return true;
-  const home = homeDir();
-  if (!home) return false;
-  const creds = join(home, '.gemini', 'oauth_creds.json');
-  if (!existsSync(creds)) return false;
-  try {
-    const data = JSON.parse(readFileSync(creds, 'utf-8'));
-    return !!(data?.access_token || data?.refresh_token);
-  } catch {
-    return false;
-  }
-}
 
 /**
  * Detects a machine-wide Codex CLI login at ~/.codex/auth.json. This is separate from
@@ -310,6 +331,24 @@ export function detectCursorCLILogin(): boolean {
   } catch {
     return false;
   }
+}
+
+export function detectAntigravityCLILogin(): boolean {
+  if (process.env.ANTIGRAVITY_AUTH_TOKEN?.trim()) return true;
+  const home = homeDir();
+  if (!home) return false;
+  const credentialPaths = [
+    // Antigravity 2.0 / agy binary locations
+    join(home, '.gemini', 'antigravity', 'mcp_oauth_tokens.json'),
+    join(home, '.config', 'agy', 'auth.json'),
+    join(home, '.agy', 'auth.json'),
+    // Legacy paths
+    join(home, '.antigravity', 'auth.json'),
+    join(home, '.antigravity', 'credentials.json'),
+    join(home, '.config', 'antigravity', 'auth.json'),
+    join(home, '.config', 'antigravity', 'credentials.json'),
+  ];
+  return credentialPaths.some((path) => existsSync(path));
 }
 
 /**

@@ -1,10 +1,11 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { Send, ChevronDown, Sparkles, Square, Users, User, ShieldCheck, ShieldAlert, Circle, Paperclip, Clipboard, X } from 'lucide-svelte';
+  import { Send, ChevronDown, Sparkles, Square, Users, User, ShieldCheck, ShieldAlert, Circle, Paperclip, X } from 'lucide-svelte';
   import { wsStore } from '$lib/stores/websocket.svelte';
   import { shortcutStore } from '$lib/stores/shortcuts.svelte';
   import { experimentalStore } from '$lib/stores/experimental.svelte';
   import { agentSettingsStore } from '$lib/stores/agent-settings.svelte';
+  import { appStore } from '$lib/stores/app.svelte';
   import { getReasoningConfig, STANDARD_REASONING_OPTIONS } from '@koryphaios/shared';
   import type { ModelDef, ReasoningConfig } from '@koryphaios/shared';
   import BrainIcon from '$lib/components/icons/BrainIcon.svelte';
@@ -24,6 +25,8 @@
     inputRef?: HTMLTextAreaElement;
     value?: string;
     slashCommands?: Array<{ command: string; label: string; description: string }>;
+    /** Native CLI slash commands from the active CLI provider (e.g. claude /compact, gemini /compress). */
+    cliSlashCommands?: Array<{ command: string; description?: string; category?: string }>;
     fileMentions?: string[];
     /** When true, disables input because no project is open */
     disabled?: boolean;
@@ -40,6 +43,7 @@
     inputRef = $bindable(),
     value = $bindable(''),
     slashCommands = [],
+    cliSlashCommands = [],
     fileMentions = [],
     disabled = false,
     disabledMessage = 'Open a project to start chatting',
@@ -54,6 +58,8 @@
 
   type ComposerPickerItem =
     | { type: 'command'; key: string; label: string; value: string; description: string }
+    // CLI provider native slash command — sent as a message directly to the CLI, not handled locally
+    | { type: 'cliCommand'; key: string; label: string; value: string; description: string; category?: string }
     | { type: 'file'; key: string; label: string; value: string; description: string };
 
   function providerLabel(provider: string): string {
@@ -191,16 +197,30 @@
     const query = ctx.query.trim().toLowerCase();
 
     if (ctx.trigger === '/') {
-      return slashCommands
+      // App commands (handled locally by Koryphaios)
+      const appItems: ComposerPickerItem[] = slashCommands
         .filter((item) => !query || item.command.toLowerCase().includes(query) || item.label.toLowerCase().includes(query))
-        .slice(0, 8)
         .map((item) => ({
           type: 'command' as const,
-          key: item.command,
+          key: `app:${item.command}`,
           label: item.label,
           value: item.command,
           description: item.description,
         }));
+
+      // CLI native commands (sent as messages to the CLI)
+      const cliItems: ComposerPickerItem[] = cliSlashCommands
+        .filter((item) => !query || item.command.toLowerCase().includes(query))
+        .map((item) => ({
+          type: 'cliCommand' as const,
+          key: `cli:${item.command}`,
+          label: `/${item.command}`,
+          value: item.command,
+          description: item.description ?? '',
+          category: item.category,
+        }));
+
+      return [...appItems, ...cliItems].slice(0, 12);
     }
 
     return fileMentions
@@ -237,6 +257,14 @@
     if (item.type === 'command') {
       value = '';
       await onExecuteCommand?.(`/${item.value}`);
+      resizeToMin();
+      return;
+    }
+
+    if (item.type === 'cliCommand') {
+      // Send the CLI's slash command as a plain message — the CLI handles it natively
+      value = '';
+      onSend(`/${item.value}`);
       resizeToMin();
       return;
     }
@@ -522,6 +550,39 @@
     target.value = '';
   }
 
+  async function openFileDialog() {
+    if (typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window) {
+      try {
+        const { open } = await import('@tauri-apps/plugin-dialog');
+        const { convertFileSrc } = await import('@tauri-apps/api/core');
+        const selected = await open({
+          multiple: true,
+          filters: [{ name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp'] }],
+          defaultPath: appStore.projectPath || undefined,
+        });
+        if (!selected) return;
+        const paths = Array.isArray(selected) ? selected : [selected];
+        for (const filePath of paths) {
+          const name = (filePath.split('/').pop() ?? filePath.split('\\').pop() ?? 'file') as string;
+          const url = convertFileSrc(filePath);
+          const resp = await fetch(url);
+          const blob = await resp.blob();
+          const reader = new FileReader();
+          const loaded = await new Promise<string>((resolve) => {
+            reader.onload = (ev) => resolve(ev.target?.result as string);
+            reader.readAsDataURL(blob);
+          });
+          const base64 = loaded.split(',')[1];
+          attachments = [...attachments, { type: 'image', data: base64, name }];
+        }
+        return;
+      } catch {
+        // Fall through to browser file input
+      }
+    }
+    fileInputRef?.click();
+  }
+
   function removeAttachment(index: number) {
     attachments = attachments.filter((_, i) => i !== index);
   }
@@ -749,16 +810,25 @@
                   onclick={() => void applyPickerItem(item)}
                 >
                   <div class="min-w-0">
-                    <div class="text-sm font-medium" style="color: var(--color-text-primary);">
-                      {item.type === 'command' ? `/${item.value}` : `@${item.label}`}
+                    <div class="flex items-center gap-1.5">
+                      <span class="text-sm font-medium" style="color: var(--color-text-primary);">
+                        {item.type === 'command' ? `/${item.value}` : item.type === 'cliCommand' ? `/${item.value}` : `@${item.label}`}
+                      </span>
+                      {#if item.type === 'cliCommand'}
+                        <span class="rounded px-1 py-0.5 text-[9px] font-semibold uppercase tracking-wide" style="background: color-mix(in srgb, var(--color-accent) 15%, transparent); color: var(--color-accent);">
+                          CLI
+                        </span>
+                      {/if}
                     </div>
                     <div class="truncate text-xs" style="color: var(--color-text-muted);">
                       {item.description}
                     </div>
                   </div>
-                  <div class="shrink-0 text-[10px] uppercase tracking-[0.12em]" style="color: var(--color-text-muted);">
-                    {item.type}
-                  </div>
+                  {#if item.type === 'command'}
+                    <div class="shrink-0 text-[10px] uppercase tracking-[0.12em]" style="color: var(--color-text-muted);">
+                      app
+                    </div>
+                  {/if}
                 </button>
               {/each}
             </div>
@@ -785,19 +855,29 @@
           </div>
         {/if}
         
-        <textarea
-          bind:this={inputRef}
-          bind:value={value}
-          oninput={autoResize}
-          onkeydown={handleKeydown}
-          onpaste={handlePaste}
-          placeholder={disabled ? disabledMessage : placeholder}
-          rows="1"
-          class="input flex-1"
-          class:yolo-active={wsStore.isYoloMode}
-          disabled={disabled || !!configurationWarning}
-          style="resize: none; min-height: {minHeightPx}px; max-height: 280px; font-size: 15px; line-height: 1.6; box-sizing: border-box; padding: 10px 12px; background: transparent; border: none; box-shadow: none; {disabled || configurationWarning ? 'opacity: 0.6; cursor: not-allowed;' : ''}"
-        ></textarea>
+        <div class="relative">
+          <textarea
+            bind:this={inputRef}
+            bind:value={value}
+            oninput={autoResize}
+            onkeydown={handleKeydown}
+            onpaste={handlePaste}
+            placeholder={disabled ? disabledMessage : placeholder}
+            rows="1"
+            class="input flex-1 w-full"
+            class:yolo-active={wsStore.isYoloMode}
+            disabled={disabled || !!configurationWarning}
+            style="resize: none; min-height: {minHeightPx}px; max-height: 280px; font-size: 15px; line-height: 1.6; box-sizing: border-box; padding: 10px 36px 10px 12px; background: transparent; border: none; box-shadow: none; {disabled || configurationWarning ? 'opacity: 0.6; cursor: not-allowed;' : ''}"
+          ></textarea>
+          <button
+            type="button"
+            class="absolute bottom-2 right-2 text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] transition-colors p-1"
+            onclick={openFileDialog}
+            title="Attach File"
+          >
+            <Paperclip size={15} />
+          </button>
+        </div>
       </div>
       <div class="w-full xl:w-auto xl:self-start">
         <div
@@ -875,27 +955,9 @@
         Enter to send · Shift+Enter for new line · Ctrl+V paste text · Ctrl+Shift+V paste image
       {/if}
     </span>
-    <div class="flex items-center gap-3">
-      <button
-        type="button"
-        class="text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] transition-colors"
-        onclick={() => fileInputRef?.click()}
-        title="Attach Image"
-      >
-        <Paperclip size={16} />
-      </button>
-      <button
-        type="button"
-        class="text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] transition-colors"
-        onclick={() => pasteImageFromClipboard()}
-        title="Paste Image (Ctrl+Shift+V)"
-      >
-        <Clipboard size={16} />
-      </button>
-      {#if value.length > 0}
-        <span class="text-xs" style="color: var(--color-text-muted);">{value.length} chars</span>
-      {/if}
-    </div>
+    {#if value.length > 0}
+      <span class="text-xs" style="color: var(--color-text-muted);">{value.length} chars</span>
+    {/if}
   </div>
 </div>
 

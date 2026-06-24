@@ -1,7 +1,7 @@
 // Agent-CLI auto-detection.
 //
 // Koryphaios scans the user's machine for installed + logged-in agent CLIs (Claude Code,
-// Codex, Gemini CLI, Grok Build, Cursor) and surfaces them so their providers light up
+// Codex, Grok Build, Cursor, Antigravity) and surfaces them so their providers light up
 // with zero manual configuration. The registry uses the same signals (via auth-utils) to
 // auto-enable providers on boot; this module is the single, side-effect-free source of the
 // detection picture for the API/UI.
@@ -17,21 +17,22 @@ import {
   detectClaudeCodeLogin,
   detectCodexAuthToken,
   detectCodexCLILogin,
-  detectGeminiCLILogin,
-  detectGeminiApiKey,
   detectGrokCLILogin,
   detectGrokXaiKey,
   detectCursorCLILogin,
+  detectAntigravityCLILogin,
+  detectKiloLogin,
   createClaudeCLIAuthMarker,
   createCodexCLIAuthMarker,
   createGrokCLIAuthMarker,
   createCursorCLIAuthMarker,
-  createGeminiCLIAuthMarker,
+  createAntigravityCLIAuthMarker,
+  createKiloCLIAuthMarker,
 } from './auth-utils';
 
 export interface AgentCliStatus {
   /** Stable id for the CLI. */
-  id: 'claude' | 'codex' | 'gemini' | 'grok' | 'cursor';
+  id: 'claude' | 'codex' | 'grok' | 'cursor' | 'antigravity' | 'kilocode';
   displayName: string;
   /** Candidate binary names looked up on PATH. */
   binaries: string[];
@@ -87,14 +88,16 @@ export function canAutoEnable(provider: ProviderName): boolean {
     case 'codex':
       return !!whichBinary('codex') && !!detectCodexAuthToken();
     case 'google':
-      // Enabled if the gemini CLI is installed AND logged in (API key OR OAuth) — the CLI
-      // harness handles OAuth, so no API key is required.
-      return !!whichBinary('gemini') && detectGeminiCLILogin();
+      return false;
     case 'grok':
       // Grok Build subscription CLI — installed + logged in (subscription or xAI key).
       return !!whichBinary('grok') && detectGrokCLILogin();
     case 'cursor':
       return !!whichBinary('cursor-agent') && detectCursorCLILogin();
+    case 'antigravity':
+      return !!firstInstalled(['agy', 'antigravity-cli', 'antigravity']) && detectAntigravityCLILogin();
+    case 'kilocode':
+      return !!whichBinary('kilo') && detectKiloLogin();
     default:
       return false;
   }
@@ -115,16 +118,15 @@ export function cliAutoEnableCreds(
       return { authToken: createClaudeCLIAuthMarker() };
     case 'codex':
       return { authToken: createCodexCLIAuthMarker() };
-    case 'google': {
-      // Prefer a real API key; otherwise opt into the gemini CLI harness via OAuth marker.
-      const key = detectGeminiApiKey();
-      return key ? { apiKey: key } : { authToken: createGeminiCLIAuthMarker() };
-    }
     case 'grok':
       // The CLI owns the real token; the marker just signals "use the CLI harness".
       return { authToken: createGrokCLIAuthMarker() };
     case 'cursor':
       return { authToken: createCursorCLIAuthMarker() };
+    case 'antigravity':
+      return { authToken: createAntigravityCLIAuthMarker() };
+    case 'kilocode':
+      return { authToken: createKiloCLIAuthMarker() };
     default:
       return null;
   }
@@ -145,8 +147,8 @@ export function detectAgentClis(): AgentCliStatus[] {
     docsUrl: 'https://docs.anthropic.com/en/docs/claude-code',
   });
 
-  // ── Codex → `codex` provider. Koryphaios uses an isolated codex-home for the actual
-  // token; a machine-wide ~/.codex login is surfaced too. ──
+  // ── Codex → `codex` provider. Koryphaios prefers its isolated codex-home but can also
+  // reuse a machine-wide ~/.codex login without persisting the raw token. ──
   const koryCodexToken = !!detectCodexAuthToken();
   const machineCodex = detectCodexCLILogin();
   const codex = mk('codex', 'OpenAI Codex', ['codex'], 'codex', {
@@ -160,29 +162,9 @@ export function detectAgentClis(): AgentCliStatus[] {
     workingNote: koryCodexToken
       ? 'Chats through the Codex provider.'
       : machineCodex
-        ? 'Codex CLI login found — run the in-app Codex connect to link it to Koryphaios.'
+        ? 'Codex CLI login found — click Detect to link it to Koryphaios.'
         : 'Codex CLI is installed but not logged in.',
     docsUrl: 'https://developers.openai.com/codex/cli',
-  });
-
-  // ── Gemini CLI → `google` provider. The provider needs an API key; the CLI's OAuth
-  // login is detected/surfaced but can't drive the API directly without a key. ──
-  const geminiKey = detectGeminiApiKey();
-  const geminiLogin = detectGeminiCLILogin();
-  const gemini = mk('gemini', 'Gemini CLI', ['gemini'], 'google', {
-    loggedIn: geminiLogin,
-    authSource: geminiKey
-      ? 'GEMINI_API_KEY / GOOGLE_API_KEY'
-      : geminiLogin
-        ? '~/.gemini/oauth_creds.json'
-        : null,
-    autoEnabled: canAutoEnable('google'),
-    workingNote: geminiKey
-      ? 'Chats through the Google (Gemini) provider.'
-      : geminiLogin
-        ? 'Gemini CLI login detected — set a Gemini API key to chat (the CLI OAuth token cannot call the API directly).'
-        : 'Gemini CLI is installed but not logged in.',
-    docsUrl: 'https://github.com/google-gemini/gemini-cli',
   });
 
   // ── Grok Build → `grok` provider (its own CLI harness, like Claude Code / Codex). ──
@@ -210,7 +192,26 @@ export function detectAgentClis(): AgentCliStatus[] {
     docsUrl: 'https://cursor.com/docs/cli',
   });
 
-  return [claude, codex, gemini, grok, cursor];
+  const antigravityLogin = detectAntigravityCLILogin();
+  const antigravity = mk('antigravity', 'Google Antigravity', ['agy', 'antigravity-cli', 'antigravity'], 'antigravity', {
+    loggedIn: antigravityLogin,
+    authSource: antigravityLogin ? '~/.gemini/antigravity or ANTIGRAVITY_AUTH_TOKEN' : null,
+    autoEnabled: canAutoEnable('antigravity'),
+    workingNote: 'Chats through the Antigravity CLI (agy) harness.',
+    docsUrl: 'https://antigravity.google/docs/home',
+  });
+
+  // ── Kilo Code (kilo) → `kilocode` provider (CLI harness, headless JSON mode). ──
+  const kiloLogin = detectKiloLogin();
+  const kilo = mk('kilocode', 'Kilo Code', ['kilo', 'kilocode'], 'kilocode', {
+    loggedIn: kiloLogin,
+    authSource: kiloLogin ? 'kilo.ai account (kilo profile)' : null,
+    autoEnabled: canAutoEnable('kilocode'),
+    workingNote: 'Chats through the Kilo Code CLI harness (kilo run --format json).',
+    docsUrl: 'https://kilo.ai/docs',
+  });
+
+  return [claude, codex, grok, cursor, antigravity, kilo];
 }
 
 function mk(

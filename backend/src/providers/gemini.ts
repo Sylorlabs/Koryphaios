@@ -9,6 +9,7 @@ import {
   type ProviderMessage,
   type ProviderContentBlock,
   type StreamRequest,
+  type CliCommand,
   getModelsForProvider,
   resolveModel,
   createGenericModel,
@@ -16,7 +17,6 @@ import {
 import { GEMINI_V1BETA_BASE } from './api-endpoints';
 import { withRetry } from './utils';
 import { whichBinary } from './cli-detection';
-import { isGeminiCLIAuthMarker } from './auth-utils';
 import { spawn } from 'node:child_process';
 import { realpathSync, existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { join, dirname } from 'node:path';
@@ -103,9 +103,9 @@ function buildCliGeminiModels(localModels: ModelDef[]): ModelDef[] {
     const existing = byId.get(id);
     if (existing) return existing; // keep curated metadata (cost/context) where we have it
     return {
-      id,
+      id: `gemini-cli:${id}`,
       name: prettyGeminiName(id),
-      provider: 'google',
+      provider: 'gemini',
       apiModelId: id,
       contextWindow: 1_000_000,
       maxOutputTokens: 64_000,
@@ -326,6 +326,33 @@ function refreshCliGeminiModelsInBackground(localModels: ModelDef[]): void {
   }, 0);
 }
 
+// Slash commands available in the Gemini CLI (when using OAuth CLI harness mode).
+const GEMINI_CLI_COMMANDS: CliCommand[] = [
+  { name: 'compress', description: 'Compress conversation context with a summary (aliases: compact, summarize)', category: 'builtin' },
+  { name: 'clear', description: 'Clear the screen and start a new session (alias: new)', category: 'builtin' },
+  { name: 'help', description: 'Show help for Gemini CLI', category: 'builtin' },
+  { name: 'chat', description: 'Browse and manage auto-saved conversation history', category: 'builtin' },
+  { name: 'resume', description: 'Resume a previous auto-saved conversation', category: 'builtin' },
+  { name: 'memory', description: 'Manage Gemini memory (add, show, refresh, clear)', category: 'builtin' },
+  { name: 'model', description: 'Switch or view the current Gemini model', category: 'builtin' },
+  { name: 'tools', description: 'List available Gemini CLI tools', category: 'builtin' },
+  { name: 'mcp', description: 'Manage MCP (Model Context Protocol) server connections', category: 'builtin' },
+  { name: 'stats', description: 'Show session and model usage statistics', category: 'builtin' },
+  { name: 'config', description: 'View or edit Gemini CLI settings', category: 'builtin' },
+  { name: 'permissions', description: 'Manage folder trust settings and permissions', category: 'builtin' },
+  { name: 'init', description: 'Analyze project and create a tailored GEMINI.md file', category: 'builtin' },
+  { name: 'theme', description: 'Change the CLI color theme', category: 'builtin' },
+  { name: 'vim', description: 'Toggle vim keybinding mode', category: 'builtin' },
+  { name: 'plan', description: 'Switch to Plan Mode and view the current plan', category: 'builtin' },
+  { name: 'rewind', description: 'Jump back to a specific message and restart the conversation', category: 'builtin' },
+  { name: 'export-session', description: 'Export the current session to a JSON file', category: 'builtin' },
+  { name: 'quit', description: 'Exit the CLI', category: 'builtin' },
+  { name: 'skills', description: 'List, enable, disable, or reload Gemini CLI skills', category: 'builtin' },
+  { name: 'extensions', description: 'Manage Gemini CLI extensions', category: 'builtin' },
+  { name: 'about', description: 'Show version and system information', category: 'builtin' },
+  { name: 'bug', description: 'Submit a bug report to Google', category: 'builtin' },
+];
+
 export class GeminiProvider implements Provider {
   readonly name: 'google' | 'vertexai';
 
@@ -342,8 +369,14 @@ export class GeminiProvider implements Provider {
     return (
       this.name === 'google' &&
       !this.config.apiKey &&
-      isGeminiCLIAuthMarker(this.config.authToken)
+      typeof this.config.authToken === 'string' &&
+      this.config.authToken.startsWith('cli:gemini:')
     );
+  }
+
+  getCliCommands(): CliCommand[] {
+    if (!this.isCliHarnessMode()) return [];
+    return GEMINI_CLI_COMMANDS;
   }
 
   private cachedModels: ModelDef[] | null = null;
@@ -353,12 +386,6 @@ export class GeminiProvider implements Provider {
     const localModels = getModelsForProvider(this.name);
     if (this.name !== 'google') return localModels;
     if (!this.isAvailable()) return localModels;
-    // OAuth/CLI mode: the gemini CLI has no model-list API, so read the installed CLI's
-    // own catalog from its bundle (the real models the CLI offers).
-    if (this.isCliHarnessMode()) {
-      refreshCliGeminiModelsInBackground(localModels);
-      return cachedCliGeminiModels ?? localModels;
-    }
     if (this.cachedModels && Date.now() - this.lastFetch < 5 * 60 * 1000) {
       return this.cachedModels;
     }

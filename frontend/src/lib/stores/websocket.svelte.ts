@@ -97,9 +97,39 @@ interface DetectedContextFile {
   reason: string;
 }
 let detectedContext = $state<DetectedContextFile[]>([]);
+// Direct reactive state for context window usage — updated in stream.usage handler to avoid
+// Map-iteration reactivity issues (short-circuit filter can miss subscriptions).
+let ctxUsageState = $state<{
+  used: number; max: number; percent: number; isReliable: boolean; hasData: boolean;
+}>({ used: 0, max: 0, percent: 0, isReliable: false, hasData: false });
+
+// CLI provider slash commands for the "/" palette.
+// Updated when cli.commands arrives (at session start, once per provider).
+let cliCommandsState = $state<{ name: string; description?: string; category?: string }[]>([]);
+let cliCommandsProvider = $state<string>('');
 
 // Track analyzing thought index to avoid O(N) filtering
 let analyzingThoughtId = $state<string | null>(null);
+
+// Sessions with an in-flight run. Set optimistically the instant the user sends (so the
+// Stop button shows immediately, before the first agent.status arrives) and cleared only on
+// a terminal signal — so "running" is true for the WHOLE run with no gaps.
+let busySessions = $state<Set<string>>(new Set());
+function markSessionBusy(sessionId: string) {
+  if (busySessions.has(sessionId)) return;
+  busySessions = new Set(busySessions).add(sessionId);
+}
+function clearSessionBusy(sessionId: string) {
+  if (!busySessions.has(sessionId)) return;
+  const next = new Set(busySessions);
+  next.delete(sessionId);
+  busySessions = next;
+}
+/** Clear the busy bridge once the session has no active agents left (terminal events only). */
+function maybeClearBusy(sessionId: string | undefined) {
+  if (!sessionId || !busySessions.has(sessionId)) return;
+  if (!isSessionRunning(sessionId)) clearSessionBusy(sessionId);
+}
 
 // Initialize manager agent state
 const initialAgents = new Map<string, AgentState>();
@@ -134,6 +164,10 @@ interface ActiveFileEdit {
   operation: 'create' | 'edit';
   agentId: string;
   startedAt: number;
+  /** For edits: the original text being replaced, so the preview can show a live diff. */
+  oldContent?: string;
+  /** Set true on stream.file_complete so the UI swaps the spinner for a done state. */
+  done?: boolean;
 }
 let activeFileEdits = $state<Map<string, ActiveFileEdit>>(new Map());
 
@@ -263,19 +297,21 @@ function accumulateFeedEntry(entry: Omit<FeedEntry, 'id'>) {
   }
 }
 
-function addUserMessage(sessionId: string, content: string) {
+function addUserMessage(sessionId: string, content: string, attachments?: Array<{type: string, data: string, name: string}>): string {
+  const entryId = `user-${++feedIdCounter}`;
   const userEntry: FeedEntry = {
-    id: `user-${++feedIdCounter}`,
+    id: entryId,
     timestamp: Date.now(),
     type: 'user_message',
     agentId: 'user',
     agentName: 'You',
     glowClass: '',
     text: content,
-    metadata: { sessionId },
+    metadata: { sessionId, attachments },
   };
   feed.push(userEntry);
   if (feed.length > MAX_FEED_ENTRIES) feed.splice(0, feed.length - MAX_FEED_ENTRIES);
+  return entryId;
 }
 
 function getAgentThreadKey(sessionId: string, agentId: string): string {
@@ -403,12 +439,23 @@ function handleMessage(msg: WSMessage) {
     }
 
     case 'agent.status': {
-      const p = msg.payload as AgentStatusPayload;
+      const p = msg.payload as AgentStatusPayload & { messageId?: string };
       const agent = agents.get(p.agentId);
       if (agent) {
         agent.status = p.status;
         if (msg.sessionId) agent.sessionId = msg.sessionId;
       }
+      // Tag the last assistant content entry with its DB storage ID for context deletion
+      if (p.status === 'done' && p.messageId) {
+        for (let i = feed.length - 1; i >= 0; i--) {
+          if (feed[i]!.type === 'content' && feed[i]!.agentId !== 'user') {
+            feed[i] = { ...feed[i]!, storageId: p.messageId };
+            break;
+          }
+        }
+      }
+      // If a run just went terminal and nothing else is active, drop the busy bridge.
+      if (p.status === 'done' || p.status === 'idle') maybeClearBusy(msg.sessionId ?? agent?.sessionId);
       break;
     }
 
@@ -421,11 +468,13 @@ function handleMessage(msg: WSMessage) {
         if (msg.sessionId) agent.sessionId = msg.sessionId;
       }
       if (isForActiveSession) removeAnalyzingThoughtEntries();
+      maybeClearBusy(msg.sessionId ?? agent?.sessionId);
       break;
     }
 
     case 'agent.error': {
       const p = msg.payload as any;
+      clearSessionBusy(msg.sessionId ?? agents.get(p.agentId)?.sessionId ?? '');
       if (isForActiveSession) {
         removeAnalyzingThoughtEntries();
         addFeedEntry({
@@ -569,7 +618,7 @@ function handleMessage(msg: WSMessage) {
     }
 
     case 'stream.tool_result': {
-      const p = msg.payload as StreamToolResultPayload;
+      const p = msg.payload as StreamToolResultPayload & { storageId?: string };
       if (isForActiveSession) {
         addFeedEntry({
           timestamp: msg.timestamp,
@@ -581,6 +630,7 @@ function handleMessage(msg: WSMessage) {
             ? `Tool error: ${p.toolResult.output}`
             : `Tool result (${p.toolResult.durationMs.toFixed(0)}ms): ${p.toolResult.output}`,
           metadata: { toolResult: p.toolResult },
+          storageId: p.storageId,
         });
       }
       if (msg.sessionId) {
@@ -611,23 +661,45 @@ function handleMessage(msg: WSMessage) {
         agent.hasUsageData = !!p.usageKnown;
         if (msg.sessionId) agent.sessionId = msg.sessionId;
       }
+      // Update context usage state directly — avoids Map-iteration reactivity issues
+      if (p.usageKnown) {
+        const used = Math.max(0, p.tokensUsed || 0);
+        const activeForSession = !msg.sessionId || msg.sessionId === sessionStore.activeSessionId;
+        if (activeForSession) {
+          if (p.contextKnown && p.contextWindow && p.contextWindow > 0) {
+            const percent = Math.min(100, Math.round((used / p.contextWindow) * 100));
+            ctxUsageState = { used, max: p.contextWindow, percent, isReliable: true, hasData: true };
+          } else {
+            ctxUsageState = { used, max: 0, percent: 0, isReliable: false, hasData: true };
+          }
+        }
+      }
       break;
     }
 
     case 'stream.file_delta': {
       const p = msg.payload as StreamFileDeltaPayload;
       if (isForActiveSession) {
-        const existing = activeFileEdits.get(p.path);
+        // A new edit to a path that just finished should start fresh, not append.
+        const prior = activeFileEdits.get(p.path);
+        const existing = prior && !prior.done ? prior : undefined;
         if (existing) {
           existing.content += p.delta;
         } else {
-          activeFileEdits.set(p.path, {
+          // Cancel any pending cleanup timer from a previous edit of this path.
+          const t = fileEditTimers.get(p.path);
+          if (t) { clearTimeout(t); fileEditTimers.delete(p.path); }
+          const next = new Map(activeFileEdits);
+          next.set(p.path, {
             path: p.path,
             content: p.delta,
             operation: p.operation,
             agentId: p.agentId,
             startedAt: Date.now(),
+            oldContent: p.oldStr,
+            done: false,
           });
+          activeFileEdits = next;
         }
       }
       break;
@@ -636,12 +708,20 @@ function handleMessage(msg: WSMessage) {
     case 'stream.file_complete': {
       const p = msg.payload as StreamFileCompletePayload;
       if (isForActiveSession) {
+        // Mark done so the preview swaps the spinner for a ✓ (kept visible a few seconds).
+        const edit = activeFileEdits.get(p.path);
+        if (edit) {
+          edit.done = true;
+          activeFileEdits = new Map(activeFileEdits);
+        }
         const existingTimer = fileEditTimers.get(p.path);
         if (existingTimer) clearTimeout(existingTimer);
         const timer = setTimeout(() => {
-          activeFileEdits.delete(p.path);
+          const next = new Map(activeFileEdits);
+          next.delete(p.path);
+          activeFileEdits = next;
           fileEditTimers.delete(p.path);
-        }, 2000);
+        }, 4000);
         fileEditTimers.set(p.path, timer);
       }
       break;
@@ -767,6 +847,30 @@ function handleMessage(msg: WSMessage) {
       break;
     }
 
+    case 'context.hidden': {
+      // Agent hid messages from its own context — mark them in the feed
+      const p = msg.payload as { messageIds: string[]; scope: string };
+      if (!isForActiveSession) break;
+      const hiddenSet = new Set(p.messageIds);
+      feed = feed.map((e) => (e.storageId && hiddenSet.has(e.storageId) ? { ...e, hiddenFromAgent: true } : e));
+      break;
+    }
+
+    case 'context.recalled': {
+      // Agent recalled all hidden messages
+      if (!isForActiveSession) break;
+      feed = feed.map((e) => (e.hiddenFromAgent ? { ...e, hiddenFromAgent: false } : e));
+      break;
+    }
+
+    case 'cli.commands': {
+      // CLI provider sent its available slash commands — update the "/" palette
+      const p = msg.payload as { provider: string; commands: { name: string; description?: string; category?: string }[] };
+      cliCommandsState = p.commands ?? [];
+      cliCommandsProvider = p.provider ?? '';
+      break;
+    }
+
     case 'system.error': {
       const p = msg.payload as any;
       if (!isForActiveSession) break;
@@ -875,9 +979,16 @@ function connect(url?: string) {
   providers = Array.isArray(providers) ? providers : [];
 
   try {
-    const protocols = authStore.token ? ['koryphaios', authStore.token] : undefined;
-    console.log('[WS] Creating WebSocket connection to:', wsUrl);
-    const ws = new WebSocket(wsUrl, protocols);
+    const protocols = ['koryphaios'];
+    let finalWsUrl = wsUrl;
+    if (authStore.token) {
+      // Append auth token as a query parameter because WebSocket subprotocols cannot contain spaces (e.g. "Bearer ...")
+      const sep = finalWsUrl.includes('?') ? '&' : '?';
+      finalWsUrl = `${finalWsUrl}${sep}auth=${encodeURIComponent(authStore.token)}`;
+    }
+    
+    console.log('[WS] Creating WebSocket connection to:', finalWsUrl);
+    const ws = new WebSocket(finalWsUrl, protocols);
 
     ws.onopen = () => {
       console.log('[WS] Connection opened successfully');
@@ -987,19 +1098,27 @@ export async function loadProvidersFromApi(): Promise<void> {
   }
 }
 
-function sendMessage(sessionId: string, content: string, model?: string, reasoningLevel?: string) {
-  addUserMessage(sessionId, content);
+function sendMessage(sessionId: string, content: string, model?: string, reasoningLevel?: string, attachments?: Array<{type: string, data: string, name: string}>) {
+  const entryId = addUserMessage(sessionId, content, attachments);
+  // Show the Stop button immediately — bridges the gap until the first agent.status arrives.
+  markSessionBusy(sessionId);
   // Clear previous context detection for new message
   detectedContext = [];
   void apiFetch(apiUrl('/api/messages'), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ sessionId, content, model, reasoningLevel }),
+    body: JSON.stringify({ sessionId, content, model, reasoningLevel, attachments }),
   })
     .then(async (res) => {
-      const data = await parseJsonResponse<{ ok?: boolean; error?: string }>(res);
+      const data = await parseJsonResponse<{ ok?: boolean; error?: string; data?: { messageId?: string } }>(res);
       if (!res.ok || data?.ok === false) {
         throw new Error(data?.error || `Request failed: ${res.status} ${res.statusText}`);
+      }
+      // Attach the DB storage ID so this entry can be deleted from agent context
+      const messageId = data?.data?.messageId;
+      if (messageId) {
+        const idx = feed.findIndex((e) => e.id === entryId);
+        if (idx !== -1) feed[idx] = { ...feed[idx]!, storageId: messageId };
       }
     })
     .catch((error) => {
@@ -1010,6 +1129,8 @@ function sendMessage(sessionId: string, content: string, model?: string, reasoni
           : 'Message send failed. Check your connection and retry.';
       toastStore.error(message);
       addClientError(message);
+      // The run never started — drop the optimistic Stop state.
+      clearSessionBusy(sessionId);
     });
 }
 
@@ -1170,6 +1291,7 @@ async function loadSessionMessages(
       text: m.content,
       metadata: { sessionId, model: m.model, cost: m.cost },
       ghostHash: ghost?.hash,
+      storageId: m.id,
     };
   });
   feedVersion++;
@@ -1177,6 +1299,57 @@ async function loadSessionMessages(
 
 function removeEntries(ids: Set<string>) {
   feed = feed.filter((e) => !ids.has(e.id));
+}
+
+function hideEntriesFromContext(sessionId: string, entryIds: Set<string>) {
+  const toHide = feed.filter((e) => entryIds.has(e.id) && e.storageId);
+  const messageIds = toHide.map((e) => e.storageId!);
+  if (messageIds.length === 0) return;
+  if (wsConnection?.readyState === WebSocket.OPEN) {
+    wsConnection.send(JSON.stringify({
+      type: 'context.hide_messages',
+      sessionId,
+      messageIds,
+      timestamp: Date.now(),
+    }));
+  }
+  // Mark as hidden in feed (keep visible to user with a badge)
+  feed = feed.map((e) =>
+    entryIds.has(e.id) && e.storageId ? { ...e, hiddenFromAgent: true } : e
+  );
+}
+
+function unhideEntriesFromContext(sessionId: string, entryIds: Set<string>) {
+  const toUnhide = feed.filter((e) => entryIds.has(e.id) && e.storageId);
+  const messageIds = toUnhide.map((e) => e.storageId!);
+  if (messageIds.length === 0) return;
+  if (wsConnection?.readyState === WebSocket.OPEN) {
+    wsConnection.send(JSON.stringify({
+      type: 'context.unhide_messages',
+      sessionId,
+      messageIds,
+      timestamp: Date.now(),
+    }));
+  }
+  feed = feed.map((e) =>
+    entryIds.has(e.id) && e.storageId ? { ...e, hiddenFromAgent: false } : e
+  );
+}
+
+// Keep hard delete for permanent removal
+function deleteEntriesFromContext(sessionId: string, entryIds: Set<string>) {
+  const toDelete = feed.filter((e) => entryIds.has(e.id) && e.storageId);
+  const messageIds = toDelete.map((e) => e.storageId!);
+  if (messageIds.length === 0) return;
+  if (wsConnection?.readyState === WebSocket.OPEN) {
+    wsConnection.send(JSON.stringify({
+      type: 'context.delete_messages',
+      sessionId,
+      messageIds,
+      timestamp: Date.now(),
+    }));
+  }
+  feed = feed.filter((e) => !entryIds.has(e.id));
 }
 
 function getToolName(entry: FeedEntry): string {
@@ -1259,6 +1432,7 @@ function getContextUsage(): {
   max: number;
   percent: number;
   isReliable: boolean;
+  hasData: boolean;
   reason?: string;
 } {
   const activeSessionId = sessionStore.activeSessionId;
@@ -1266,23 +1440,23 @@ function getContextUsage(): {
     (a) => a.sessionId === activeSessionId && a.hasUsageData,
   );
 
-  // Exact session context is only reliable when we have one authoritative usage source.
   if (candidates.length === 0) {
-    return { used: 0, max: 0, percent: 0, isReliable: false, reason: 'usage_unknown' };
-  }
-  if (candidates.length > 1) {
-    return { used: 0, max: 0, percent: 0, isReliable: false, reason: 'multi_agent_usage' };
+    return { used: 0, max: 0, percent: 0, isReliable: false, hasData: false, reason: 'usage_unknown' };
   }
 
-  const agent = candidates[0];
-  if (!agent.contextKnown || agent.contextMax <= 0) {
-    return { used: 0, max: 0, percent: 0, isReliable: false, reason: 'context_unknown' };
-  }
+  // Pick the one with the most tokens (most recent active agent)
+  const agent = candidates.reduce((best, a) => a.tokensUsed > best.tokensUsed ? a : best, candidates[0]!);
 
   const used = Math.max(0, agent.tokensUsed);
+
+  if (!agent.contextKnown || agent.contextMax <= 0) {
+    // We have token counts but no context window — show partial data
+    return { used, max: 0, percent: 0, isReliable: false, hasData: true, reason: 'context_unknown' };
+  }
+
   const max = agent.contextMax;
   const percent = Math.min(100, Math.round((used / max) * 100));
-  return { used, max, percent, isReliable: true };
+  return { used, max, percent, isReliable: true, hasData: true };
 }
 
 function isSessionRunning(sessionId: string): boolean {
@@ -1296,6 +1470,7 @@ function isSessionRunning(sessionId: string): boolean {
 
 /** Mark all agents for this session as done (optimistic UI when user clicks Stop). */
 function markSessionAgentsStopped(sessionId: string) {
+  clearSessionBusy(sessionId);
   let changed = false;
   for (const a of agents.values()) {
     if (a.sessionId === sessionId && a.status !== 'idle' && a.status !== 'done') {
@@ -1317,17 +1492,27 @@ function markAgentStopped(agentId: string) {
 
 function sendUserInput(sessionId: string, selection: string, text?: string) {
   if (wsConnection?.readyState === WebSocket.OPEN) {
-    wsConnection.send(
-      JSON.stringify({
-        type: 'user_input',
-        sessionId,
-        selection,
-        text,
-        timestamp: Date.now(),
-      }),
-    );
+    try {
+      wsConnection.send(
+        JSON.stringify({
+          type: 'user_input',
+          sessionId,
+          selection,
+          text,
+          timestamp: Date.now(),
+        }),
+      );
+      // Only clear the question on successful send — otherwise the backend
+      // never receives the answer and the manager stays stuck forever.
+      pendingQuestion = null;
+    } catch (err) {
+      console.error('[ws] Failed to send user_input, keeping question pending', err);
+      toastStore.error('Failed to send answer. Please try again.');
+    }
+  } else {
+    console.warn('[ws] WebSocket not open, cannot send user_input. Keeping question pending.');
+    toastStore.error('Connection lost. Please wait for reconnection.');
   }
-  pendingQuestion = null;
 }
 
 function respondToChanges(sessionId: string, accepted: boolean) {
@@ -1349,6 +1534,9 @@ function clearFeed() {
   feedVersion++;
   activeFileEdits = new Map();
   detectedContext = [];
+  ctxUsageState = { used: 0, max: 0, percent: 0, isReliable: false, hasData: false };
+  cliCommandsState = [];
+  cliCommandsProvider = '';
   // Clear non-essential agent states but keep kory-manager
   const manager = agents.get('kory-manager');
   agents = new Map();
@@ -1451,14 +1639,24 @@ export const wsStore = {
     return getManagerStatus();
   },
   get contextUsage() {
-    return getContextUsage();
+    return ctxUsageState;
+  },
+  get cliCommands() {
+    return cliCommandsState;
+  },
+  get cliCommandsProvider() {
+    return cliCommandsProvider;
   },
   get detectedContext() {
     return detectedContext;
   },
   isSessionRunning,
+  /** True from the instant a message is sent until the run fully ends (no gaps). */
+  isSessionBusy: (sessionId: string | null | undefined) =>
+    !!sessionId && (busySessions.has(sessionId) || isSessionRunning(sessionId)),
   markSessionAgentsStopped,
   markAgentStopped,
+  clearSessionBusy,
   clearAnalyzing: removeAnalyzingThoughtEntries,
   connect,
   disconnect,
@@ -1471,6 +1669,9 @@ export const wsStore = {
   loadAgentThreadMessages,
   getAgentThreadFeed,
   removeEntries,
+  hideEntriesFromContext,
+  unhideEntriesFromContext,
+  deleteEntriesFromContext,
   respondToPermission,
   subscribeToSession,
   clearFeed,

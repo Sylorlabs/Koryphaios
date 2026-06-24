@@ -13,6 +13,7 @@ import {
   type ProviderMessage,
   type ProviderToolDef,
   type StreamRequest,
+  type CliCommand,
   getModelsForProvider,
   resolveModel,
 } from './types';
@@ -86,6 +87,14 @@ type CodexResponseStreamEvent =
       [key: string]: unknown;
     };
 
+// OpenAI Codex CLI available commands (via `codex exec --command <cmd>`).
+const CODEX_CLI_COMMANDS: CliCommand[] = [
+  { name: 'clear', description: 'Start a new Codex session', category: 'builtin' },
+  { name: 'review', description: 'Run a code review on the current codebase', category: 'builtin' },
+  { name: 'doctor', description: 'Diagnose local Codex installation and runtime health', category: 'builtin' },
+  { name: 'help', description: 'Show Codex CLI help and available options', category: 'builtin' },
+];
+
 export class CodexProvider implements Provider {
   readonly name = 'codex' as const;
   private cachedModels: ModelDef[] | null = null;
@@ -98,6 +107,10 @@ export class CodexProvider implements Provider {
     return !this.config.disabled && !!this.resolveAuthToken();
   }
 
+  getCliCommands(): CliCommand[] {
+    return CODEX_CLI_COMMANDS;
+  }
+
   listModels(): ModelDef[] {
     const fallback = getModelsForProvider('codex');
     if (!this.isAvailable()) return fallback;
@@ -107,7 +120,7 @@ export class CodexProvider implements Provider {
     }
 
     this.refreshModelsInBackground(fallback);
-    return this.cachedModels ?? fallback;
+    return this.cachedModels ?? [];
   }
 
   private refreshModelsInBackground(fallback: ModelDef[]): void {
@@ -124,7 +137,6 @@ export class CodexProvider implements Provider {
           { provider: 'codex', error: error?.message ?? String(error) },
           'Failed to refresh Codex models from ChatGPT backend',
         );
-        this.cachedModels ??= fallback;
       })
       .finally(() => {
         this.fetchInProgress = false;
@@ -149,7 +161,7 @@ export class CodexProvider implements Provider {
       .map((item) => this.mapModel(item, fallback))
       .filter((item): item is ModelDef => !!item);
 
-    return dedupeModels(discovered.length > 0 ? discovered : fallback);
+    return dedupeModels(discovered);
   }
 
   async *streamResponse(request: StreamRequest): AsyncGenerator<ProviderEvent> {

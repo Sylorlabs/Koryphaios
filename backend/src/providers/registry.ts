@@ -30,11 +30,13 @@ import { CodexProvider } from './codex';
 import { ClaudeCodeProvider } from './claude-code';
 import { GrokBuildProvider } from './grok-build';
 import { CursorProvider } from './cursor';
+import { AntigravityProvider } from './antigravity';
 import { BedrockProvider } from './bedrock';
 import { GitLabProvider } from './gitlab';
 import { SapAiProvider } from './sapai';
 import { CustomProvider } from './custom';
-import { detectCodexAuthToken, isCodexCLIAuthMarker, detectClaudeCodeLogin } from './auth-utils';
+import { detectCodexAuthToken, isCodexCLIAuthMarker, detectClaudeCodeLogin, isKiloCLIAuthMarker } from './auth-utils';
+import { KiloCodeCLIProvider } from './kilo-cli';
 import { cliAutoEnableCreds } from './cli-detection';
 import { KimiCodeProvider } from './kimicode';
 import { resolveKimiCodeAccessToken } from './kimicode-auth';
@@ -256,6 +258,7 @@ class ProviderRegistry {
         requiresBaseUrl,
         circuitOpen,
         ...(isCustom && { custom: true, label: config?.label ?? String(name) }),
+        ...(provider?.getStatusError?.() && { error: provider.getStatusError?.() }),
         ...(baseUrlPlaceholder && { baseUrlPlaceholder }),
       });
     }
@@ -594,6 +597,9 @@ class ProviderRegistry {
             },
           });
         }
+        case 'kilocode':
+          if (!apiKey) return { success: false, error: 'Missing API key (get one at app.kilo.ai)' };
+          return this.verifyBearerGet('https://api.kilo.ai/api/gateway/models', apiKey);
         case 'openrouter':
           return this.verifyBearerGet('https://openrouter.ai/api/v1/models', apiKey);
         case 'kimicode': {
@@ -942,7 +948,7 @@ class ProviderRegistry {
 
   /**
    * Auto-enable providers backed by an agent CLI the user already has installed +
-   * logged in on this machine (Claude Code, Codex, Gemini CLI, Grok Build) — so they
+   * logged in on this machine (Claude Code, Codex, Gemini CLI, Grok Build, Antigravity) — so they
    * "just work" with no manual Connect step. A logged-in CLI is clear user intent,
    * unlike a stray environment variable (which we still don't auto-auth). Returns the
    * credentials to inject, or null when there's nothing to auto-enable.
@@ -954,7 +960,7 @@ class ProviderRegistry {
     // Default to disabled to prevent "auto-authing" from environment variables without user intent.
     // Explicit opt-in (via UI "Connect" or config) is required — EXCEPT for providers backed by
     // an agent CLI the user has installed + logged in, which we treat as intent and auto-enable
-    // (Claude Code, Codex, Gemini CLI, Grok Build). Opt out with KORY_DISABLE_CLI_AUTODETECT=1.
+    // (Claude Code, Codex, Gemini CLI, Grok Build, Antigravity). Opt out with KORY_DISABLE_CLI_AUTODETECT=1.
     const defaultDisabled = true;
     const autoCli = cliAutoEnableCreds(name);
     const isDisabled = autoCli ? false : (userConfig?.disabled ?? defaultDisabled);
@@ -1025,8 +1031,16 @@ class ProviderRegistry {
       case 'cursor':
         // Cursor subscription — runs the official `cursor-agent` CLI as a full agent.
         return new CursorProvider(config);
+      case 'antigravity':
+        return new AntigravityProvider(config);
       case 'kimicode':
         return new KimiCodeProvider(config);
+      case 'kilocode':
+        // CLI harness (kilo run) takes precedence over the API key path
+        if (isKiloCLIAuthMarker(config.authToken)) return new KiloCodeCLIProvider(config);
+        return config.apiKey
+          ? new OpenAIProvider(config, 'kilocode', 'https://api.kilo.ai/api/gateway')
+          : null;
       case 'openrouter':
         return new OpenRouterProvider(config);
       case 'groq':

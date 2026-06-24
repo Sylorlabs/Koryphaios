@@ -154,6 +154,12 @@ export function validateConfig(config: Partial<KoryphaiosConfig>): void {
       'zai',
       'zenmux',
       'claude',
+      'antigravity',
+      'gemini',
+      'cline',
+      'cortecs',
+      'google-subscription',
+      'kilocode',
     ]);
 
     for (const [name, providerConfig] of Object.entries(config.providers)) {
