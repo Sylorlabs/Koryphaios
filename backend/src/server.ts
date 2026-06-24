@@ -48,7 +48,7 @@ const baseApp = new Elysia()
   .get('/api/project', async () => {
     const { basename } = await import('node:path');
     const projectName = basename(PROJECT_ROOT);
-    return { ok: true, data: { projectName } };
+    return { ok: true, data: { projectName, projectPath: PROJECT_ROOT } };
   })
   .post('/api/debug/log-error', () => ({ ok: true }))
   .use(sessionRoutes)

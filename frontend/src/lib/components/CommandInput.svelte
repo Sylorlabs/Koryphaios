@@ -1,10 +1,11 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { Send, ChevronDown, Sparkles, Square, Users, User, ShieldCheck, ShieldAlert, Circle, Paperclip, Clipboard, X } from 'lucide-svelte';
+  import { Send, ChevronDown, Sparkles, Square, Users, User, ShieldCheck, ShieldAlert, Circle, Paperclip, X } from 'lucide-svelte';
   import { wsStore } from '$lib/stores/websocket.svelte';
   import { shortcutStore } from '$lib/stores/shortcuts.svelte';
   import { experimentalStore } from '$lib/stores/experimental.svelte';
   import { agentSettingsStore } from '$lib/stores/agent-settings.svelte';
+  import { appStore } from '$lib/stores/app.svelte';
   import { getReasoningConfig, STANDARD_REASONING_OPTIONS } from '@koryphaios/shared';
   import type { ModelDef, ReasoningConfig } from '@koryphaios/shared';
   import BrainIcon from '$lib/components/icons/BrainIcon.svelte';
@@ -522,6 +523,39 @@
     target.value = '';
   }
 
+  async function openFileDialog() {
+    if (typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window) {
+      try {
+        const { open } = await import('@tauri-apps/plugin-dialog');
+        const { convertFileSrc } = await import('@tauri-apps/api/core');
+        const selected = await open({
+          multiple: true,
+          filters: [{ name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp'] }],
+          defaultPath: appStore.projectPath || undefined,
+        });
+        if (!selected) return;
+        const paths = Array.isArray(selected) ? selected : [selected];
+        for (const filePath of paths) {
+          const name = (filePath.split('/').pop() ?? filePath.split('\\').pop() ?? 'file') as string;
+          const url = convertFileSrc(filePath);
+          const resp = await fetch(url);
+          const blob = await resp.blob();
+          const reader = new FileReader();
+          const loaded = await new Promise<string>((resolve) => {
+            reader.onload = (ev) => resolve(ev.target?.result as string);
+            reader.readAsDataURL(blob);
+          });
+          const base64 = loaded.split(',')[1];
+          attachments = [...attachments, { type: 'image', data: base64, name }];
+        }
+        return;
+      } catch {
+        // Fall through to browser file input
+      }
+    }
+    fileInputRef?.click();
+  }
+
   function removeAttachment(index: number) {
     attachments = attachments.filter((_, i) => i !== index);
   }
@@ -785,19 +819,29 @@
           </div>
         {/if}
         
-        <textarea
-          bind:this={inputRef}
-          bind:value={value}
-          oninput={autoResize}
-          onkeydown={handleKeydown}
-          onpaste={handlePaste}
-          placeholder={disabled ? disabledMessage : placeholder}
-          rows="1"
-          class="input flex-1"
-          class:yolo-active={wsStore.isYoloMode}
-          disabled={disabled || !!configurationWarning}
-          style="resize: none; min-height: {minHeightPx}px; max-height: 280px; font-size: 15px; line-height: 1.6; box-sizing: border-box; padding: 10px 12px; background: transparent; border: none; box-shadow: none; {disabled || configurationWarning ? 'opacity: 0.6; cursor: not-allowed;' : ''}"
-        ></textarea>
+        <div class="relative">
+          <textarea
+            bind:this={inputRef}
+            bind:value={value}
+            oninput={autoResize}
+            onkeydown={handleKeydown}
+            onpaste={handlePaste}
+            placeholder={disabled ? disabledMessage : placeholder}
+            rows="1"
+            class="input flex-1 w-full"
+            class:yolo-active={wsStore.isYoloMode}
+            disabled={disabled || !!configurationWarning}
+            style="resize: none; min-height: {minHeightPx}px; max-height: 280px; font-size: 15px; line-height: 1.6; box-sizing: border-box; padding: 10px 36px 10px 12px; background: transparent; border: none; box-shadow: none; {disabled || configurationWarning ? 'opacity: 0.6; cursor: not-allowed;' : ''}"
+          ></textarea>
+          <button
+            type="button"
+            class="absolute bottom-2 right-2 text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] transition-colors p-1"
+            onclick={openFileDialog}
+            title="Attach File"
+          >
+            <Paperclip size={15} />
+          </button>
+        </div>
       </div>
       <div class="w-full xl:w-auto xl:self-start">
         <div
@@ -875,27 +919,9 @@
         Enter to send · Shift+Enter for new line · Ctrl+V paste text · Ctrl+Shift+V paste image
       {/if}
     </span>
-    <div class="flex items-center gap-3">
-      <button
-        type="button"
-        class="text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] transition-colors"
-        onclick={() => fileInputRef?.click()}
-        title="Attach Image"
-      >
-        <Paperclip size={16} />
-      </button>
-      <button
-        type="button"
-        class="text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] transition-colors"
-        onclick={() => pasteImageFromClipboard()}
-        title="Paste Image (Ctrl+Shift+V)"
-      >
-        <Clipboard size={16} />
-      </button>
-      {#if value.length > 0}
-        <span class="text-xs" style="color: var(--color-text-muted);">{value.length} chars</span>
-      {/if}
-    </div>
+    {#if value.length > 0}
+      <span class="text-xs" style="color: var(--color-text-muted);">{value.length} chars</span>
+    {/if}
   </div>
 </div>
 

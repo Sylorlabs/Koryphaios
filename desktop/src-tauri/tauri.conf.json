@@ -34,8 +34,8 @@
     "security": {
       "csp": {
         "default-src": "'self'",
-        "connect-src": "'self' http://localhost:* http://127.0.0.1:* ws://localhost:* ws://127.0.0.1:*",
-        "img-src": "'self' data: https:",
+        "connect-src": "'self' http://localhost:* http://127.0.0.1:* ws://localhost:* ws://127.0.0.1:* asset: https://asset.localhost",
+        "img-src": "'self' data: https: asset: https://asset.localhost",
         "style-src": "'self' 'unsafe-inline'",
         "script-src": "'self' 'unsafe-eval'",
         "font-src": "'self' data:"

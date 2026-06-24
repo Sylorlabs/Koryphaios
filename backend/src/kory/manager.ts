@@ -1354,16 +1354,22 @@ export class KoryManager {
       let finalMessageId: string | undefined;
       if (this.messages) {
         finalMessageId = nanoid(12);
-        await this.messages.add(sessionId, {
-          id: finalMessageId,
-          sessionId,
-          role: 'assistant',
-          content: toPersist,
-          model: routing.model,
-          provider: providerName,
-          createdAt: Date.now(),
-        });
-        koryLog.debug('Assistant message persisted');
+        try {
+          await this.messages.add(sessionId, {
+            id: finalMessageId,
+            sessionId,
+            role: 'assistant',
+            content: toPersist,
+            model: routing.model,
+            provider: providerName,
+            createdAt: Date.now(),
+          });
+          koryLog.debug('Assistant message persisted');
+        } catch (err) {
+          koryLog.error({ err, finalMessageId }, 'Failed to persist assistant message — messageId still emitted');
+        }
+      } else {
+        koryLog.warn({ sessionId }, 'this.messages is falsy — cannot persist assistant message');
       }
       this.emitWSMessage(sessionId, 'agent.status', {
         agentId: KORY_IDENTITY.id,

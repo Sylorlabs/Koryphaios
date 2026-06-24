@@ -15,6 +15,7 @@ interface AppState {
   sessionsLoaded: boolean;
   backendUnreachable: boolean;
   projectName: string;
+  projectPath: string;
 }
 
 // Load last project from localStorage
@@ -47,6 +48,7 @@ let state = $state<AppState>({
   sessionsLoaded: false,
   backendUnreachable: false,
   projectName: loadLastProject(),
+  projectPath: '',
 });
 
 export const appStore = {
@@ -68,6 +70,9 @@ export const appStore = {
   set projectName(name: string) {
     state.projectName = name;
     saveLastProject(name);
+  },
+  get projectPath() {
+    return state.projectPath;
   },
   get isReady() {
     return state.authReady && state.sessionsLoaded;
@@ -113,11 +118,15 @@ export const appStore = {
         if (res.ok) {
           const json = await res.json();
           const serverProjectName = json?.data?.projectName ?? '';
+          const serverProjectPath = json?.data?.projectPath ?? '';
           // Only override localStorage value if server has a project
           // Otherwise, keep the last project from localStorage for continuity
           if (serverProjectName) {
             state.projectName = serverProjectName;
             saveLastProject(serverProjectName);
+          }
+          if (serverProjectPath) {
+            state.projectPath = serverProjectPath;
           }
         }
       }
@@ -133,6 +142,7 @@ export const appStore = {
       sessionsLoaded: false,
       backendUnreachable: false,
       projectName: '',
+      projectPath: '',
     };
   },
 };
