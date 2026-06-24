@@ -97,6 +97,11 @@ interface DetectedContextFile {
   reason: string;
 }
 let detectedContext = $state<DetectedContextFile[]>([]);
+// Direct reactive state for context window usage — updated in stream.usage handler to avoid
+// Map-iteration reactivity issues (short-circuit filter can miss subscriptions).
+let ctxUsageState = $state<{
+  used: number; max: number; percent: number; isReliable: boolean; hasData: boolean;
+}>({ used: 0, max: 0, percent: 0, isReliable: false, hasData: false });
 
 // Track analyzing thought index to avoid O(N) filtering
 let analyzingThoughtId = $state<string | null>(null);
@@ -643,15 +648,26 @@ function handleMessage(msg: WSMessage) {
       const p = msg.payload as StreamUsagePayload;
       const agent = agents.get(p.agentId);
       if (agent) {
-        // Replace via agents.set() so Map-level reactivity fires for getContextUsage()
-        agents.set(p.agentId, {
-          ...agent,
-          tokensUsed: Math.max(0, p.tokensUsed || 0),
-          contextMax: typeof p.contextWindow === 'number' ? p.contextWindow : agent.contextMax,
-          contextKnown: !!p.contextKnown,
-          hasUsageData: !!p.usageKnown,
-          sessionId: msg.sessionId ?? agent.sessionId,
-        });
+        agent.tokensUsed = Math.max(0, p.tokensUsed || 0);
+        if (typeof p.contextWindow === 'number') {
+          agent.contextMax = p.contextWindow;
+        }
+        agent.contextKnown = !!p.contextKnown;
+        agent.hasUsageData = !!p.usageKnown;
+        if (msg.sessionId) agent.sessionId = msg.sessionId;
+      }
+      // Update context usage state directly — avoids Map-iteration reactivity issues
+      if (p.usageKnown) {
+        const used = Math.max(0, p.tokensUsed || 0);
+        const activeForSession = !msg.sessionId || msg.sessionId === sessionStore.activeSessionId;
+        if (activeForSession) {
+          if (p.contextKnown && p.contextWindow && p.contextWindow > 0) {
+            const percent = Math.min(100, Math.round((used / p.contextWindow) * 100));
+            ctxUsageState = { used, max: p.contextWindow, percent, isReliable: true, hasData: true };
+          } else {
+            ctxUsageState = { used, max: 0, percent: 0, isReliable: false, hasData: true };
+          }
+        }
       }
       break;
     }
@@ -1407,12 +1423,9 @@ function getContextUsage(): {
   reason?: string;
 } {
   const activeSessionId = sessionStore.activeSessionId;
-  const allAgentStates = [...agents.values()].map(a => ({ id: a.identity?.id, sid: a.sessionId, hasData: a.hasUsageData, tok: a.tokensUsed }));
-  console.debug('[ctxUsage] active:', activeSessionId, 'agents:', JSON.stringify(allAgentStates));
   const candidates = [...agents.values()].filter(
     (a) => a.sessionId === activeSessionId && a.hasUsageData,
   );
-  console.debug('[ctxUsage] candidates:', candidates.length);
 
   if (candidates.length === 0) {
     return { used: 0, max: 0, percent: 0, isReliable: false, hasData: false, reason: 'usage_unknown' };
@@ -1508,6 +1521,7 @@ function clearFeed() {
   feedVersion++;
   activeFileEdits = new Map();
   detectedContext = [];
+  ctxUsageState = { used: 0, max: 0, percent: 0, isReliable: false, hasData: false };
   // Clear non-essential agent states but keep kory-manager
   const manager = agents.get('kory-manager');
   agents = new Map();
@@ -1610,7 +1624,7 @@ export const wsStore = {
     return getManagerStatus();
   },
   get contextUsage() {
-    return getContextUsage();
+    return ctxUsageState;
   },
   get detectedContext() {
     return detectedContext;
