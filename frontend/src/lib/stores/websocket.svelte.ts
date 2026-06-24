@@ -1405,9 +1405,12 @@ function getContextUsage(): {
   reason?: string;
 } {
   const activeSessionId = sessionStore.activeSessionId;
+  const allAgentStates = [...agents.values()].map(a => ({ id: a.identity?.id, sid: a.sessionId, hasData: a.hasUsageData, tok: a.tokensUsed }));
+  console.debug('[ctxUsage] active:', activeSessionId, 'agents:', JSON.stringify(allAgentStates));
   const candidates = [...agents.values()].filter(
     (a) => a.sessionId === activeSessionId && a.hasUsageData,
   );
+  console.debug('[ctxUsage] candidates:', candidates.length);
 
   if (candidates.length === 0) {
     return { used: 0, max: 0, percent: 0, isReliable: false, hasData: false, reason: 'usage_unknown' };
