@@ -32,6 +32,7 @@ import {
   type ProviderEvent,
   type ProviderMessage,
   type StreamRequest,
+  type CliCommand,
   getModelsForProvider,
   resolveModel,
 } from './types';
@@ -588,6 +589,8 @@ interface ClaudeToolUseBlock {
 interface ClaudeStreamEnvelope {
   type: string;
   subtype?: string;
+  // system/init payload
+  slash_commands?: string[];
   // stream_event payloads carry the raw Anthropic SSE event
   event?: {
     type: string;
@@ -623,6 +626,47 @@ interface ClaudeRateLimitInfo {
   overageStatus?: string;
 }
 
+// Known built-in claude CLI command descriptions.
+// Commands not in this map are shown as "custom" (skills/plugins).
+const CLAUDE_BUILTIN_COMMANDS: Record<string, string> = {
+  'compact': 'Compress conversation history to save context window space',
+  'clear': 'Clear conversation history and start fresh',
+  'cost': 'Show token usage and cost for this session',
+  'memory': 'View or edit Claude\'s memory files',
+  'doctor': 'Check Claude Code installation health',
+  'help': 'Show available commands and usage help',
+  'init': 'Initialize Claude Code in this project (create CLAUDE.md)',
+  'model': 'Switch AI model for this session',
+  'permissions': 'View or update tool permissions',
+  'review': 'Request a code review of recent changes',
+  'status': 'Show current session status and configuration',
+  'config': 'View or modify Claude Code configuration',
+  'context': 'Show what\'s in the current context window',
+  'login': 'Login to Claude Code',
+  'logout': 'Logout from Claude Code',
+  'resume': 'Resume a previous conversation session',
+  'vim': 'Enter vim keybinding mode',
+  'add-dir': 'Add a directory to the current context',
+  'bug': 'Report a bug to Anthropic',
+  'release-notes': 'View Claude Code release notes',
+  'pr-comments': 'Fetch and display GitHub PR comments',
+  'terminal-setup': 'Install Claude Code terminal integration',
+  'mcp': 'Manage MCP server connections',
+  'run-mcp': 'Run an MCP tool directly',
+};
+
+function buildCliCommands(names: string[]): CliCommand[] {
+  return names.map((name) => {
+    const isBuiltin = name in CLAUDE_BUILTIN_COMMANDS;
+    const category: CliCommand['category'] = isBuiltin ? 'builtin' : 'skill';
+    return {
+      name,
+      description: CLAUDE_BUILTIN_COMMANDS[name],
+      category,
+    };
+  });
+}
+
 export class ClaudeCodeProvider implements Provider {
   readonly name = 'claude' as const;
 
@@ -635,6 +679,17 @@ export class ClaudeCodeProvider implements Provider {
       refreshModelsInBackground();
     }
     return available;
+  }
+
+  // Static fallback command list for the "/" palette.
+  // The dynamic list (which includes installed skills/plugins) is emitted via stream events
+  // when the claude CLI sends its system/init event at session start.
+  getCliCommands(): CliCommand[] {
+    return Object.entries(CLAUDE_BUILTIN_COMMANDS).map(([name, description]) => ({
+      name,
+      description,
+      category: 'builtin' as const,
+    }));
   }
 
   listModels(): ModelDef[] {
@@ -1059,6 +1114,16 @@ export class ClaudeCodeProvider implements Provider {
       }
       case 'error': {
         yield { type: 'error', error: extractError(envelope) ?? 'Claude Code error' };
+        return;
+      }
+      case 'system': {
+        // The 'init' subtype fires at session start and lists all slash commands.
+        if (envelope.subtype === 'init' && Array.isArray(envelope.slash_commands)) {
+          yield {
+            type: 'cli_commands',
+            cliCommands: buildCliCommands(envelope.slash_commands),
+          };
+        }
         return;
       }
       default:
