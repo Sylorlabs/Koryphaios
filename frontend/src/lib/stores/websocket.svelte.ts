@@ -643,13 +643,15 @@ function handleMessage(msg: WSMessage) {
       const p = msg.payload as StreamUsagePayload;
       const agent = agents.get(p.agentId);
       if (agent) {
-        agent.tokensUsed = Math.max(0, p.tokensUsed || 0);
-        if (typeof p.contextWindow === 'number') {
-          agent.contextMax = p.contextWindow;
-        }
-        agent.contextKnown = !!p.contextKnown;
-        agent.hasUsageData = !!p.usageKnown;
-        if (msg.sessionId) agent.sessionId = msg.sessionId;
+        // Replace via agents.set() so Map-level reactivity fires for getContextUsage()
+        agents.set(p.agentId, {
+          ...agent,
+          tokensUsed: Math.max(0, p.tokensUsed || 0),
+          contextMax: typeof p.contextWindow === 'number' ? p.contextWindow : agent.contextMax,
+          contextKnown: !!p.contextKnown,
+          hasUsageData: !!p.usageKnown,
+          sessionId: msg.sessionId ?? agent.sessionId,
+        });
       }
       break;
     }
