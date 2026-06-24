@@ -24,6 +24,7 @@
     "criticEnforcesPreferences": true,
     "autoApplySafeFixes": false,
     "confirmRuleViolations": true,
+    "autoRunTools": true,
     "agentMemoryEnabled": true,
     "agentCanUpdatePreferences": false,
     "maxCriticIterations": 3,
@@ -31,9 +32,9 @@
     "approvalThresholdLines": 100,
     "localWebSearch": "fallback",
     "multiSourceResearch": true,
-    "updatedAt": 1781385946807
+    "updatedAt": 1782282363999
   },
-  "updatedAt": 1782281777047,
+  "updatedAt": 1782282363999,
   "providers": {
     "anthropic": {
       "name": "anthropic",

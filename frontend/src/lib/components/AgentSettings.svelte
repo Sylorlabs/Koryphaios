@@ -57,7 +57,7 @@
       anthropic: "Anthropic", openai: "OpenAI", google: "Google", xai: "xAI",
       claude: "Claude Code", codex: "OpenAI Codex", grok: "Grok Build", cursor: "Cursor",
       openrouter: "OpenRouter", groq: "Groq", copilot: "GitHub Copilot", deepseek: "DeepSeek",
-      gemini: "Gemini", mistral: "Mistral AI", cohere: "Cohere",
+      mistral: "Mistral AI", cohere: "Cohere",
     };
     return list
       .filter((p: any) => p.enabled && p.authenticated)

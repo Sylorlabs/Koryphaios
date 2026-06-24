@@ -19,7 +19,6 @@
     claude: ['claudecode', 'claude'],
     openai: ['openai'],
     google: ['google', 'google-brand'],
-    gemini: ['geminicli', 'gemini'],
     antigravity: ['antigravity'],
     xai: ['xai'],
     grok: ['grok'],

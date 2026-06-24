@@ -1013,28 +1013,36 @@ RULES:
       {/if}
     </section>
 
-    <!-- Context window usage - only in advanced mode -->
-    {#if wsStore.contextUsage.isReliable && modeStore.showCostTracking}
-      <div 
-        class="shrink-0 px-4 flex items-center gap-3" 
-        style="padding-top: var(--space-2); padding-bottom: var(--space-2); border-top: 1px solid var(--color-border); background: var(--color-surface-1);"
+    <!-- Context window usage — always visible when there's data -->
+    {#if wsStore.contextUsage.hasData}
+      {@const ctx = wsStore.contextUsage}
+      <div
+        class="shrink-0 px-4 flex items-center gap-2"
+        style="padding-top: 5px; padding-bottom: 5px; border-top: 1px solid var(--color-border); background: var(--color-surface-1);"
       >
-        <span class="shrink-0" style="font-size: var(--text-xs); color: var(--color-text-muted);">
-          Context
+        <span class="shrink-0 tabular-nums" style="font-size: 10px; color: var(--color-text-muted); min-width: 3rem;">
+          {ctx.used >= 1000 ? `${(ctx.used / 1000).toFixed(1)}k` : ctx.used} tok
         </span>
-        <div class="flex-1 rounded-full overflow-hidden" style="height: 6px; background: var(--color-surface-3);">
-          <div
-            class="h-full rounded-full transition-all"
-            style="width: {wsStore.contextUsage.percent}%; transition-duration: var(--duration-slower); background: {
-              wsStore.contextUsage.percent > 85 ? '#ef4444' :
-              wsStore.contextUsage.percent > 65 ? '#f59e0b' : 
-              'var(--color-accent)'
-            };"
-          ></div>
-        </div>
-        {#if wsStore.contextUsage.max > 0}
-          <span class="shrink-0 tabular-nums" style="font-size: var(--text-xs); color: var(--color-text-muted);">
-            {wsStore.contextUsage.used >= 1000 ? `${(wsStore.contextUsage.used / 1000).toFixed(1)}k` : wsStore.contextUsage.used} / {(wsStore.contextUsage.max / 1000).toFixed(1)}k
+        {#if ctx.isReliable && ctx.max > 0}
+          <div class="flex-1 rounded-full overflow-hidden" style="height: 4px; background: var(--color-surface-3);">
+            <div
+              class="h-full rounded-full transition-all"
+              style="width: {ctx.percent}%; transition-duration: 600ms; background: {
+                ctx.percent > 85 ? '#ef4444' :
+                ctx.percent > 65 ? '#f59e0b' :
+                'var(--color-accent)'
+              };"
+            ></div>
+          </div>
+          <span class="shrink-0 tabular-nums" style="font-size: 10px; color: var(--color-text-muted);">
+            {ctx.percent}% of {ctx.max >= 1000 ? `${(ctx.max / 1000).toFixed(0)}k` : ctx.max}
+          </span>
+        {:else}
+          <div class="flex-1 rounded-full overflow-hidden" style="height: 4px; background: var(--color-surface-3);">
+            <div class="h-full rounded-full" style="width: 30%; background: var(--color-text-muted); opacity: 0.3;"></div>
+          </div>
+          <span class="shrink-0" style="font-size: 10px; color: var(--color-text-muted); opacity: 0.5;" title="Context window size not reported by this provider">
+            ? ctx
           </span>
         {/if}
       </div>

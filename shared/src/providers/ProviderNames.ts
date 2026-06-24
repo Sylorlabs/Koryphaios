@@ -6,7 +6,6 @@ export const ProviderName = {
   Anthropic: 'anthropic',
   OpenAI: 'openai',
   Google: 'google',
-  Gemini: 'gemini',
   XAI: 'xai',
 
   // Aggregators (OpenAI-compatible APIs with implementations)

@@ -84,7 +84,7 @@ export function createGenericModel(id: string, provider: ProviderName): ModelDef
 }
 
 /**
- * Providers with verified context window documentation.
+ * Providers with verified context window documentation (direct API access).
  */
 const VERIFIED_CONTEXT_PROVIDERS = new Set<ProviderName>([
   'openai',
@@ -95,7 +95,20 @@ const VERIFIED_CONTEXT_PROVIDERS = new Set<ProviderName>([
 ]);
 
 /**
+ * CLI providers that proxy to a known underlying API.
+ * Maps CLI provider name → underlying API provider for context window resolution.
+ * Provider names match the `readonly name` field in each provider class.
+ */
+const CLI_PROVIDER_ALIAS: Record<string, ProviderName> = {
+  'claude': 'anthropic',    // claude-code CLI routes to Anthropic models
+  'codex': 'openai',        // OpenAI Codex CLI
+  'copilot': 'openai',      // GitHub Copilot (OpenAI-backed)
+  'cursor': 'anthropic',    // Cursor proxy (predominantly Anthropic models)
+};
+
+/**
  * Resolve trustworthy context metadata for UI telemetry.
+ * For CLI providers, aliases to their underlying API provider for model lookup.
  */
 export function resolveTrustedContextWindow(
   modelId: string,
@@ -104,11 +117,22 @@ export function resolveTrustedContextWindow(
   const model = resolveModel(modelId);
   if (!model) return { contextKnown: false };
   if (model.isGeneric) return { contextKnown: false };
-  if (model.provider !== provider) return { contextKnown: false };
-  if (!VERIFIED_CONTEXT_PROVIDERS.has(provider)) return { contextKnown: false };
   if (!Number.isFinite(model.contextWindow) || model.contextWindow <= 0)
     return { contextKnown: false };
-  return { contextWindow: model.contextWindow, contextKnown: true };
+
+  // Direct API provider: must match model's declared provider
+  if (VERIFIED_CONTEXT_PROVIDERS.has(provider)) {
+    if (model.provider !== provider) return { contextKnown: false };
+    return { contextWindow: model.contextWindow, contextKnown: true };
+  }
+
+  // CLI provider: resolve via alias — trust if model belongs to the aliased provider
+  const aliasProvider = CLI_PROVIDER_ALIAS[provider];
+  if (aliasProvider && (model.provider === aliasProvider || model.provider === provider)) {
+    return { contextWindow: model.contextWindow, contextKnown: true };
+  }
+
+  return { contextKnown: false };
 }
 
 /**

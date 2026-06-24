@@ -161,26 +161,6 @@ export function detectAgentClis(): AgentCliStatus[] {
     docsUrl: 'https://developers.openai.com/codex/cli',
   });
 
-  // ── Gemini CLI → `gemini` provider. API keys use the Gemini API; OAuth uses the
-  // installed gemini CLI as the harness, so no fake API key is required. ──
-  const geminiKey = detectGeminiApiKey();
-  const geminiLogin = detectGeminiCLILogin();
-  const gemini = mk('gemini', 'Gemini CLI', ['gemini'], 'gemini', {
-    loggedIn: geminiLogin,
-    authSource: geminiKey
-      ? 'GEMINI_API_KEY / GOOGLE_API_KEY'
-      : geminiLogin
-        ? '~/.gemini/oauth_creds.json'
-        : null,
-    autoEnabled: canAutoEnable('gemini'),
-    workingNote: geminiKey
-      ? 'Chats through the Google (Gemini) provider.'
-      : geminiLogin
-        ? 'Chats through the Gemini CLI harness.'
-        : 'Gemini CLI is installed but not logged in.',
-    docsUrl: 'https://github.com/google-gemini/gemini-cli',
-  });
-
   // ── Grok Build → `grok` provider (its own CLI harness, like Claude Code / Codex). ──
   const grokKey = detectGrokXaiKey();
   const grokLogin = detectGrokCLILogin();
@@ -207,15 +187,15 @@ export function detectAgentClis(): AgentCliStatus[] {
   });
 
   const antigravityLogin = detectAntigravityCLILogin();
-  const antigravity = mk('antigravity', 'Google Antigravity', ['antigravity-cli', 'antigravity'], 'antigravity', {
+  const antigravity = mk('antigravity', 'Google Antigravity', ['agy', 'antigravity-cli', 'antigravity'], 'antigravity', {
     loggedIn: antigravityLogin,
-    authSource: antigravityLogin ? '~/.antigravity or ANTIGRAVITY_AUTH_TOKEN' : null,
+    authSource: antigravityLogin ? '~/.gemini/antigravity or ANTIGRAVITY_AUTH_TOKEN' : null,
     autoEnabled: canAutoEnable('antigravity'),
-    workingNote: 'Antigravity CLI detected; model support depends on the installed CLI exposing a headless model list.',
-    docsUrl: 'https://antigravity.google/',
+    workingNote: 'Chats through the Antigravity CLI (agy) harness.',
+    docsUrl: 'https://antigravity.google/docs/home',
   });
 
-  return [claude, codex, gemini, grok, cursor, antigravity];
+  return [claude, codex, grok, cursor, antigravity];
 }
 
 function mk(

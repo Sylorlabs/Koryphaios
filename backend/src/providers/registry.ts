@@ -1020,8 +1020,6 @@ class ProviderRegistry {
         return new OpenAIProvider(config);
       case 'google':
         return config.apiKey || config.authToken ? new GeminiProvider(config) : null;
-      case 'gemini':
-        return new GeminiProvider(config);
       case 'copilot':
         return new CopilotProvider(config);
       case 'codex':

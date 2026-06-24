@@ -16,7 +16,6 @@ import {
 import { GEMINI_V1BETA_BASE } from './api-endpoints';
 import { withRetry } from './utils';
 import { whichBinary } from './cli-detection';
-import { isGeminiCLIAuthMarker } from './auth-utils';
 import { spawn } from 'node:child_process';
 import { realpathSync, existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { join, dirname } from 'node:path';
@@ -327,10 +326,10 @@ function refreshCliGeminiModelsInBackground(localModels: ModelDef[]): void {
 }
 
 export class GeminiProvider implements Provider {
-  readonly name: 'google' | 'gemini' | 'vertexai';
+  readonly name: 'google' | 'vertexai';
 
   constructor(readonly config: ProviderConfig) {
-    this.name = config.name === 'vertexai' ? 'vertexai' : config.name === 'gemini' ? 'gemini' : 'google';
+    this.name = config.name === 'vertexai' ? 'vertexai' : 'google';
   }
 
   isAvailable(): boolean {
@@ -342,8 +341,9 @@ export class GeminiProvider implements Provider {
     return (
       this.name === 'google' &&
       !this.config.apiKey &&
-      isGeminiCLIAuthMarker(this.config.authToken)
-    ) || this.name === 'gemini';
+      typeof this.config.authToken === 'string' &&
+      this.config.authToken.startsWith('cli:gemini:')
+    );
   }
 
   private cachedModels: ModelDef[] | null = null;
@@ -351,21 +351,8 @@ export class GeminiProvider implements Provider {
 
   listModels(): ModelDef[] {
     const localModels = getModelsForProvider(this.name);
-    if (this.name !== 'google' && this.name !== 'gemini') return localModels;
+    if (this.name !== 'google') return localModels;
     if (!this.isAvailable()) return localModels;
-    // OAuth/CLI mode: the gemini CLI has no model-list API, so read the installed CLI's
-    // own catalog from its bundle (the real models the CLI offers).
-    if (this.isCliHarnessMode()) {
-      if (!cachedCliGeminiModels) {
-        const models = buildCliGeminiModels(localModels);
-        if (models.length > 0) {
-          cachedCliGeminiModels = models;
-          cliGeminiModelsAt = Date.now();
-        }
-      }
-      refreshCliGeminiModelsInBackground(localModels);
-      return cachedCliGeminiModels ?? [];
-    }
     if (this.cachedModels && Date.now() - this.lastFetch < 5 * 60 * 1000) {
       return this.cachedModels;
     }

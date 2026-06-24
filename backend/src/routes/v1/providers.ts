@@ -21,8 +21,6 @@ import {
   detectCodexAuthToken,
   detectClaudeCodeLogin,
   createClaudeCLIAuthMarker,
-  detectGeminiCLILogin,
-  createGeminiCLIAuthMarker,
   detectGeminiCLIToken,
   clearCachedToken,
   detectGrokCLILogin,
@@ -76,7 +74,6 @@ type BrowserAuthProvider =
   | 'kimicode'
   | 'claude'
   | 'google'
-  | 'gemini'
   | 'google-subscription'
   | 'grok'
   | 'cursor'
@@ -89,7 +86,6 @@ function isBrowserAuthProvider(name: string): name is BrowserAuthProvider {
     name === 'kimicode' ||
     name === 'claude' ||
     name === 'google' ||
-    name === 'gemini' ||
     name === 'google-subscription' ||
     name === 'grok' ||
     name === 'cursor' ||
@@ -227,8 +223,7 @@ async function startBrowserAuth(
         };
       }
       case 'google': {
-        // Check for existing gcloud / Gemini CLI credentials
-        clearCachedToken('gemini');
+        // Check for existing gcloud credentials
         const existingToken = detectGeminiCLIToken();
         if (existingToken) {
           const { providers } = getContext();
@@ -263,7 +258,6 @@ async function startBrowserAuth(
           };
         }
         if (authResult.success) {
-          clearCachedToken('gemini');
           const freshToken = detectGeminiCLIToken();
           if (freshToken) {
             const { providers } = getContext();
@@ -282,33 +276,6 @@ async function startBrowserAuth(
         return {
           ok: false,
           error: authResult.message || 'Google Cloud SDK (gcloud) is required. Install it or enter an API key instead.',
-        };
-      }
-      case 'gemini': {
-        if (!detectGeminiCLILogin()) {
-          return {
-            ok: true,
-            data: {
-              provider: 'gemini',
-              message: 'Install Gemini CLI and run "gemini" to sign in, then click Detect.',
-            },
-          };
-        }
-        const { providers } = getContext();
-        const setResult = await providers.setCredentials('gemini', {
-          authToken: createGeminiCLIAuthMarker(),
-        });
-        if (!setResult.success) {
-          return { ok: false, error: setResult.error ?? 'Failed to activate Gemini CLI auth' };
-        }
-        syncProviderConfigsSafely(providers);
-        return {
-          ok: true,
-          data: {
-            status: 'connected',
-            provider: 'gemini',
-            message: 'Gemini CLI connected via existing CLI credentials',
-          },
         };
       }
       case 'grok': {
@@ -443,7 +410,6 @@ async function completeBrowserAuth(
         return { ok: true, data: { status: 'connected', provider: 'claude' } };
       }
       case 'google': {
-        clearCachedToken('gemini');
         const token = detectGeminiCLIToken();
         if (!token) {
           return { ok: false, error: 'Google sign-in not complete yet. Finish authentication in the browser.' };
@@ -459,7 +425,6 @@ async function completeBrowserAuth(
       case 'copilot':
       case 'kimicode':
       case 'google-subscription':
-      case 'gemini':
       case 'grok':
       case 'cursor':
       case 'antigravity':

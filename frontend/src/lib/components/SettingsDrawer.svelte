@@ -96,7 +96,7 @@
 
   // ─── Provider Management ──────────────────────────────────────────────
   const PROVIDER_LABELS: Record<string, string> = {
-    anthropic: 'Anthropic', openai: 'OpenAI', google: 'Google', gemini: 'Gemini CLI', xai: 'xAI',
+    anthropic: 'Anthropic', openai: 'OpenAI', google: 'Google', xai: 'xAI',
     openrouter: 'OpenRouter', groq: 'Groq', copilot: 'GitHub Copilot', azure: 'Azure OpenAI',
     bedrock: 'AWS Bedrock', vertexai: 'Vertex AI', local: 'Local (custom endpoint)', ollama: 'Ollama',
     lmstudio: 'LM Studio', llamacpp: 'Llama.cpp', opencodezen: 'OpenCodeZen',
@@ -112,8 +112,7 @@
     anthropic: 'Anthropic auth token',
     copilot: 'GitHub token or Copilot auth token',
     google: 'API key',
-    gemini: 'Gemini CLI auth',
-    antigravity: 'Antigravity CLI auth',
+    antigravity: 'Antigravity CLI (agy) auth',
     kimicode: 'Auth with Kimi Code',
     azure: 'Bearer token',
   };
@@ -140,7 +139,7 @@
   }
 
   function getKnownAuthMode(name: string, fallback: string): string {
-    if (name === 'copilot' || name === 'codex' || name === 'kimicode' || name === 'claude' || name === 'gemini' || name === 'grok' || name === 'cursor' || name === 'antigravity') return 'auth_only';
+    if (name === 'copilot' || name === 'codex' || name === 'kimicode' || name === 'claude' || name === 'grok' || name === 'cursor' || name === 'antigravity') return 'auth_only';
     return fallback;
   }
 
@@ -198,7 +197,7 @@
         }));
     
     const providerLabels: Record<string, string> = {
-      anthropic: 'Anthropic', openai: 'OpenAI', google: 'Google', gemini: 'Gemini CLI', xai: 'xAI',
+      anthropic: 'Anthropic', openai: 'OpenAI', google: 'Google', xai: 'xAI',
       openrouter: 'OpenRouter', groq: 'Groq', copilot: 'GitHub Copilot', azure: 'Azure OpenAI',
       bedrock: 'AWS Bedrock', vertexai: 'Vertex AI', local: 'Local (custom endpoint)', ollama: 'Ollama',
       lmstudio: 'LM Studio', llamacpp: 'Llama.cpp', ollamacloud: 'Ollama Cloud',
@@ -211,7 +210,7 @@
       portkey: 'Portkey', scaleway: 'Scaleway', ovhcloud: 'OVHcloud', stackit: 'STACKIT',
       nebius: 'Nebius', togetherai: 'Together AI', venice: 'Venice AI', zenmux: 'ZenMux',
       opencodezen: 'OpenCodeZen', firmware: 'Firmware', '302ai': '302.ai',
-      claude: 'Claude Code', codex: 'OpenAI Codex', gemini: 'Gemini CLI', grok: 'Grok Build', cursor: 'Cursor', antigravity: 'Google Antigravity', mistral: 'Mistral AI',
+      claude: 'Claude Code', codex: 'OpenAI Codex', grok: 'Grok Build', cursor: 'Cursor', antigravity: 'Google Antigravity', mistral: 'Mistral AI',
       cortecs: 'Cortecs', cortects: 'Cortects', kilocode: 'Kilo Code',
       mistralai: 'Mistral AI', cohere: 'Cohere', perplexity: 'Perplexity',
       luma: 'Luma', fal: 'Fal', elevenlabs: 'ElevenLabs', assemblyai: 'AssemblyAI',
@@ -226,7 +225,7 @@
 
     const providerPlaceholders: Record<string, string> = {
       anthropic: 'sk-ant-...', openai: 'sk-...',
-      google: 'AIza...', gemini: 'Run "gemini" to sign in', xai: 'xai-...', openrouter: 'sk-or-...', groq: 'gsk_...',
+      google: 'AIza...', xai: 'xai-...', openrouter: 'sk-or-...', groq: 'gsk_...',
       copilot: 'gho_...', azure: 'key...', bedrock: 'AKIA...', vertexai: '/path/to/creds.json',
       local: 'http://localhost:1234', ollama: 'http://localhost:11434', lmstudio: 'http://localhost:1234',
       llamacpp: 'http://localhost:8080', ollamacloud: 'sk-...', deepseek: 'sk-...',
@@ -238,7 +237,7 @@
       ovhcloud: 'ovh-...', stackit: '...', nebius: '', togetherai: 'sk-...',
       venice: 'sk-...', zenmux: 'sk-...', opencodezen: 'Get key at opencode.ai/auth',
       firmware: 'sk-...', '302ai': 'sk-...', mistralai: 'sk-...',
-      claude: 'Claude auth token', codex: 'Auth with ChatGPT', gemini: 'Run "gemini" to sign in', grok: 'Run "grok login" (or set GROK_CODE_XAI_API_KEY)', cursor: 'Run "cursor-agent login" (or set CURSOR_API_KEY)', antigravity: 'Run Antigravity CLI sign-in',
+      claude: 'Claude auth token', codex: 'Auth with ChatGPT', grok: 'Run "grok login" (or set GROK_CODE_XAI_API_KEY)', cursor: 'Run "cursor-agent login" (or set CURSOR_API_KEY)', antigravity: 'Run Antigravity CLI sign-in',
       cortecs: 'sk-...', kilocode: 'Get key at app.kilo.ai',
       mistral: 'sk-...', cohere: 'sk-...', perplexity: 'pplx-...', luma: 'lm-...',
       fal: 'sk-...', elevenlabs: 'sk-...', assemblyai: 'sk-...', deepgram: 'sk-...',
@@ -430,13 +429,12 @@
 
   const isTauri = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
 
-  const browserAuthProviders = new Set(['copilot', 'kimicode', 'codex', 'claude', 'gemini', 'google-subscription', 'grok', 'cursor', 'antigravity']);
-  const cliProviderIds = new Set(['claude', 'codex', 'gemini', 'grok', 'cursor', 'antigravity']);
-  const externalCliDetectProviders = new Set(['claude', 'codex', 'gemini', 'grok', 'cursor', 'antigravity']);
+  const browserAuthProviders = new Set(['copilot', 'kimicode', 'codex', 'claude', 'google-subscription', 'grok', 'cursor', 'antigravity']);
+  const cliProviderIds = new Set(['claude', 'codex', 'grok', 'cursor', 'antigravity']);
+  const externalCliDetectProviders = new Set(['claude', 'codex', 'grok', 'cursor', 'antigravity']);
   const providerToCliId: Record<string, string> = {
     claude: 'claude',
     codex: 'codex',
-    gemini: 'gemini',
     grok: 'grok',
     cursor: 'cursor',
     antigravity: 'antigravity',
@@ -444,10 +442,9 @@
   const cliInstallUrls: Record<string, string> = {
     claude: 'https://docs.anthropic.com/en/docs/claude-code',
     codex: 'https://developers.openai.com/codex/cli',
-    gemini: 'https://github.com/google-gemini/gemini-cli',
     grok: 'https://docs.x.ai/build/cli',
     cursor: 'https://cursor.com/docs/cli',
-    antigravity: 'https://antigravity.google/',
+    antigravity: 'https://antigravity.google/docs/home',
   };
 
   function usesBrowserAuth(name: string): boolean {

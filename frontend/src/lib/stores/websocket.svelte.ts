@@ -1401,6 +1401,7 @@ function getContextUsage(): {
   max: number;
   percent: number;
   isReliable: boolean;
+  hasData: boolean;
   reason?: string;
 } {
   const activeSessionId = sessionStore.activeSessionId;
@@ -1408,23 +1409,23 @@ function getContextUsage(): {
     (a) => a.sessionId === activeSessionId && a.hasUsageData,
   );
 
-  // Exact session context is only reliable when we have one authoritative usage source.
   if (candidates.length === 0) {
-    return { used: 0, max: 0, percent: 0, isReliable: false, reason: 'usage_unknown' };
-  }
-  if (candidates.length > 1) {
-    return { used: 0, max: 0, percent: 0, isReliable: false, reason: 'multi_agent_usage' };
+    return { used: 0, max: 0, percent: 0, isReliable: false, hasData: false, reason: 'usage_unknown' };
   }
 
-  const agent = candidates[0];
-  if (!agent.contextKnown || agent.contextMax <= 0) {
-    return { used: 0, max: 0, percent: 0, isReliable: false, reason: 'context_unknown' };
-  }
+  // Pick the one with the most tokens (most recent active agent)
+  const agent = candidates.reduce((best, a) => a.tokensUsed > best.tokensUsed ? a : best, candidates[0]!);
 
   const used = Math.max(0, agent.tokensUsed);
+
+  if (!agent.contextKnown || agent.contextMax <= 0) {
+    // We have token counts but no context window — show partial data
+    return { used, max: 0, percent: 0, isReliable: false, hasData: true, reason: 'context_unknown' };
+  }
+
   const max = agent.contextMax;
   const percent = Math.min(100, Math.round((used / max) * 100));
-  return { used, max, percent, isReliable: true };
+  return { used, max, percent, isReliable: true, hasData: true };
 }
 
 function isSessionRunning(sessionId: string): boolean {

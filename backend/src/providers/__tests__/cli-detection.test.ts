@@ -4,7 +4,6 @@ import { tmpdir } from 'node:os';
 import { join, delimiter } from 'node:path';
 import { detectAgentClis, whichBinary, canAutoEnable } from '../cli-detection';
 import {
-  detectGeminiCLILogin,
   detectCursorCLILogin,
   detectGrokCLILogin,
   detectCodexCLILogin,
@@ -44,15 +43,15 @@ afterEach(() => {
 });
 
 describe('detectAgentClis', () => {
-  it('reports all five agent CLIs with their provider mappings', () => {
+  it('reports all agent CLIs with their provider mappings', () => {
     const list = detectAgentClis();
-    expect(list.map((c) => c.id).sort()).toEqual(['claude', 'codex', 'cursor', 'gemini', 'grok']);
+    expect(list.map((c) => c.id).sort()).toEqual(['antigravity', 'claude', 'codex', 'cursor', 'grok']);
     const byId = Object.fromEntries(list.map((c) => [c.id, c]));
     expect(byId.claude.provider).toBe('claude');
     expect(byId.codex.provider).toBe('codex');
-    expect(byId.gemini.provider).toBe('google');
-    expect(byId.grok.provider).toBe('grok'); // Grok Build has its own CLI-harness provider
-    expect(byId.cursor.provider).toBe('cursor'); // Cursor now has its own agentic CLI provider
+    expect(byId.grok.provider).toBe('grok');
+    expect(byId.cursor.provider).toBe('cursor');
+    expect(byId.antigravity.provider).toBe('antigravity');
   });
 
   it('every entry carries a binary path when installed, and a human note', () => {
@@ -84,13 +83,6 @@ describe('whichBinary', () => {
 });
 
 describe('login detectors (deterministic via temp HOME)', () => {
-  it('detects Gemini CLI login from ~/.gemini/oauth_creds.json', () => {
-    expect(detectGeminiCLILogin()).toBe(false);
-    mkdirSync(join(tmpHome, '.gemini'), { recursive: true });
-    writeFileSync(join(tmpHome, '.gemini', 'oauth_creds.json'), JSON.stringify({ access_token: 'x', refresh_token: 'y' }));
-    expect(detectGeminiCLILogin()).toBe(true);
-  });
-
   it('detects Cursor CLI login from ~/.cursor/cli-config.json authInfo', () => {
     mkdirSync(join(tmpHome, '.cursor'), { recursive: true });
     writeFileSync(join(tmpHome, '.cursor', 'cli-config.json'), JSON.stringify({ authInfo: {} }));
