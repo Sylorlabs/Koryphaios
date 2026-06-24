@@ -10,7 +10,6 @@
     "core:default",
     "core:window:allow-start-dragging",
     "core:window:allow-toggle-maximize",
-    "core:asset:allow-fetch",
     "shell:allow-open",
     "dialog:default",
     "dialog:allow-open",

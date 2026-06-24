@@ -27,7 +27,7 @@
   let autoScroll = $state(true);
   let selectedEntries = $state<Set<string>>(new Set());
   let lastSelectedId = $state<string>('');
-  let expandedGroups = $state<Set<string>>(new Set());
+  let expandedGroups = $state<Record<string, boolean>>({});
   let editingSuggestionId = $state<string | null>(null);
   let editingSuggestionText = $state('');
 
@@ -110,12 +110,7 @@
   });
 
   function toggleGroup(id: string) {
-    if (expandedGroups.has(id)) {
-      expandedGroups.delete(id);
-    } else {
-      expandedGroups.add(id);
-    }
-    expandedGroups = new Set(expandedGroups);
+    expandedGroups[id] = !expandedGroups[id];
   }
 
   function handleEntryClick(entry: FeedEntryLocal, e: MouseEvent) {
@@ -430,7 +425,7 @@
         <FeedEntry 
           {entry}
           isSelected={selectedEntries.has(entry.id)}
-          isExpanded={expandedGroups.has(entry.id)}
+          isExpanded={!!expandedGroups[entry.id]}
           isStreaming={i === filteredFeed.length - 1 && (wsStore.managerStatus === 'streaming' || wsStore.managerStatus === 'thinking')}
           onSelect={(e) => handleEntryClick(entry, e)}
           onToggleGroup={() => toggleGroup(entry.id)}

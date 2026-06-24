@@ -19,7 +19,7 @@
 
   let feedContainer = $state<HTMLDivElement>();
   let autoScroll = $state(true);
-  let expandedGroups = $state<Set<string>>(new Set());
+  let expandedGroups = $state<Record<string, boolean>>({});
   let lastFeedLength = $state(0);
   let lastUserScrollAt = $state(0);
 
@@ -64,9 +64,7 @@
   });
 
   function toggleGroup(id: string) {
-    if (expandedGroups.has(id)) expandedGroups.delete(id);
-    else expandedGroups.add(id);
-    expandedGroups = new Set(expandedGroups);
+    expandedGroups[id] = !expandedGroups[id];
   }
 
   function noopSelect() {}
@@ -130,7 +128,7 @@
         <FeedEntry
           {entry}
           isSelected={false}
-          isExpanded={expandedGroups.has(entry.id)}
+          isExpanded={!!expandedGroups[entry.id]}
           isStreaming={i === feed.length - 1 && isStreaming}
           onSelect={noopSelect}
           onToggleGroup={() => toggleGroup(entry.id)}
