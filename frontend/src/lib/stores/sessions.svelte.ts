@@ -14,6 +14,7 @@ let sessions = $state<Session[]>([]);
 let activeSessionId = $state<string>('');
 let searchQuery = $state<string>('');
 let loading = $state<boolean>(false);
+let launchSessionCreated = false; // create a new session only on the very first fetchSessions call
 
 // Load last session from localStorage on startup
 function loadLastSession(): string {
@@ -75,14 +76,25 @@ async function fetchSessions(): Promise<boolean> {
     }
     if (data?.ok && Array.isArray(data.data)) {
       sessions = data.data;
-      // Always create a new session on app launch
-      const newSessionId = await createSession();
-      if (newSessionId) {
-        activeSessionId = newSessionId;
-      } else if (sessions.length > 0) {
-        // Fallback to first session if new session creation fails
-        activeSessionId = sessions[0].id;
-        saveLastSession(activeSessionId);
+      if (!launchSessionCreated) {
+        // First load: create a fresh session so the app always opens to a new chat
+        launchSessionCreated = true;
+        const newSessionId = await createSession();
+        if (newSessionId) {
+          activeSessionId = newSessionId;
+        } else if (sessions.length > 0) {
+          activeSessionId = sessions[0].id;
+          saveLastSession(activeSessionId);
+        }
+      } else {
+        // Subsequent reloads (reconnect, refresh): restore whichever session the user is on
+        const lastSessionId = loadLastSession();
+        if (lastSessionId && sessions.find((s) => s.id === lastSessionId)) {
+          activeSessionId = lastSessionId;
+        } else if (!activeSessionId || !sessions.find((s) => s.id === activeSessionId)) {
+          activeSessionId = sessions[0]?.id ?? '';
+          if (activeSessionId) saveLastSession(activeSessionId);
+        }
       }
       return true;
     }

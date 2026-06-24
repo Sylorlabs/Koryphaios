@@ -146,11 +146,13 @@ function refreshCursorModelsInBackground(): void {
     });
 }
 
-/** The cursor-agent --model value for a selection, or undefined to let it auto-pick. */
-function cursorModelArg(model?: string): string | undefined {
-  if (!model) return undefined;
+/** The cursor-agent --model value for a selection.
+ *  Returns 'auto' when no named model is requested (ensures the CLI doesn't fall back
+ *  to whatever named model is set in the editor config, which breaks free-plan accounts). */
+function cursorModelArg(model?: string): string {
+  if (!model) return 'auto';
   const id = model.includes(':') ? model.split(':').slice(1).join(':') : model;
-  if (!id || id === 'auto' || id === 'cursor-agent') return undefined;
+  if (!id || id === 'auto' || id === 'cursor-agent') return 'auto';
   return id;
 }
 
@@ -219,10 +221,10 @@ export class CursorProvider implements Provider {
       '--force',
     ];
 
-    // Reasoning IS the model variant for cursor-agent (no --reasoning-effort flag). Pass the
-    // selected model (e.g. claude-4.5-sonnet-thinking, gpt-5.3-codex-xhigh); omit for "auto".
-    const modelArg = cursorModelArg(request.model);
-    if (modelArg) args.push('--model', modelArg);
+    // Always pass --model explicitly: without it cursor-agent falls back to whatever
+    // model is configured in the Cursor editor, which breaks free-plan accounts that
+    // can only use "auto". cursorModelArg() returns 'auto' when no named model is chosen.
+    args.push('--model', cursorModelArg(request.model));
     args.push(prompt);
 
     const cwd = request.workingDirectory?.trim() || process.cwd();

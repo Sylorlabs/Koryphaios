@@ -14,13 +14,15 @@
   let { providerName, availableModels = [], selectedModels = [], onSave, onClose }: Props = $props();
 
   let searchQuery = $state('');
+  let initialized = $state(false);
   let localSelected = $state<string[]>([]);
   let dontAskAgain = $state(false);
 
-  // Initialize and sync local selection
+  // Initialize once when models are available
   $effect(() => {
-    if ((availableModels || []).length > 0 && localSelected.length === 0) {
+    if (!initialized && (availableModels || []).length > 0) {
       localSelected = (selectedModels || []).length > 0 ? [...(selectedModels || [])] : (availableModels || []).map(m => m.id);
+      initialized = true;
     }
   });
 
