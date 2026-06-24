@@ -6,6 +6,7 @@ export interface Shortcut {
   id: string;
   keys: string[];
   action: string;
+  description?: string;
 }
 
 const STORAGE_KEY = 'koryphaios-shortcuts';

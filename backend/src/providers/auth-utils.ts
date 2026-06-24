@@ -72,14 +72,6 @@ export function createAntigravityCLIAuthMarker(): string {
   return `${ANTIGRAVITY_CLI_AUTH_PREFIX}${Date.now()}`;
 }
 
-const GEMINI_CLI_AUTH_PREFIX = 'cli:gemini:';
-/** Gemini CLI opt-in marker — the gemini CLI owns its own OAuth (no API key needed). */
-export function isGeminiCLIAuthMarker(value: string | null | undefined): boolean {
-  return typeof value === 'string' && value.startsWith(GEMINI_CLI_AUTH_PREFIX);
-}
-export function createGeminiCLIAuthMarker(): string {
-  return `${GEMINI_CLI_AUTH_PREFIX}${Date.now()}`;
-}
 
 export function getKoryCodexHome(): string {
   return KORY_CODEX_HOME;
@@ -257,23 +249,6 @@ export function detectGeminiApiKey(): string | null {
   return k || null;
 }
 
-/**
- * Detects whether the Gemini CLI is logged in: either an API key in the environment
- * or the CLI's cached OAuth credentials at ~/.gemini/oauth_creds.json.
- */
-export function detectGeminiCLILogin(): boolean {
-  if (detectGeminiApiKey()) return true;
-  const home = homeDir();
-  if (!home) return false;
-  const creds = join(home, '.gemini', 'oauth_creds.json');
-  if (!existsSync(creds)) return false;
-  try {
-    const data = JSON.parse(readFileSync(creds, 'utf-8'));
-    return !!(data?.access_token || data?.refresh_token);
-  } catch {
-    return false;
-  }
-}
 
 /**
  * Detects a machine-wide Codex CLI login at ~/.codex/auth.json. This is separate from
@@ -332,6 +307,11 @@ export function detectAntigravityCLILogin(): boolean {
   const home = homeDir();
   if (!home) return false;
   const credentialPaths = [
+    // Antigravity 2.0 / agy binary locations
+    join(home, '.gemini', 'antigravity', 'mcp_oauth_tokens.json'),
+    join(home, '.config', 'agy', 'auth.json'),
+    join(home, '.agy', 'auth.json'),
+    // Legacy paths
     join(home, '.antigravity', 'auth.json'),
     join(home, '.antigravity', 'credentials.json'),
     join(home, '.config', 'antigravity', 'auth.json'),

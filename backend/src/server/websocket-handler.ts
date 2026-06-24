@@ -132,6 +132,48 @@ export async function handleWSMessage(
         serverLog.info({ enabled: msg.enabled }, 'YOLO mode toggled via WebSocket');
         break;
 
+      case 'context.delete_messages':
+        if (
+          await assertSessionAccess(msg.sessionId) &&
+          Array.isArray(msg.messageIds) &&
+          msg.messageIds.length > 0
+        ) {
+          await kory.deleteContextMessages(msg.sessionId, msg.messageIds);
+          serverLog.info(
+            { sessionId: msg.sessionId, count: msg.messageIds.length },
+            'Context messages deleted',
+          );
+        }
+        break;
+
+      case 'context.hide_messages':
+        if (
+          await assertSessionAccess(msg.sessionId) &&
+          Array.isArray(msg.messageIds) &&
+          msg.messageIds.length > 0
+        ) {
+          await kory.hideContextMessages(msg.sessionId, msg.messageIds);
+          serverLog.info(
+            { sessionId: msg.sessionId, count: msg.messageIds.length },
+            'Context messages hidden',
+          );
+        }
+        break;
+
+      case 'context.unhide_messages':
+        if (
+          await assertSessionAccess(msg.sessionId) &&
+          Array.isArray(msg.messageIds) &&
+          msg.messageIds.length > 0
+        ) {
+          await kory.unhideContextMessages(msg.sessionId, msg.messageIds);
+          serverLog.info(
+            { sessionId: msg.sessionId, count: msg.messageIds.length },
+            'Context messages unhidden',
+          );
+        }
+        break;
+
       default:
         serverLog.warn({ type: msg.type }, 'Unknown WebSocket message type');
     }

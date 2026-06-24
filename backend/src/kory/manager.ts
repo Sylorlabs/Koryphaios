@@ -301,6 +301,31 @@ export class KoryManager {
     this.state.resolveUserInput(sessionId, text || selection);
   }
 
+  async deleteContextMessages(sessionId: string, messageIds: string[]): Promise<void> {
+    if (!this.messages || messageIds.length === 0) return;
+    await this.messages.deleteMessages(sessionId, messageIds);
+  }
+
+  async hideContextMessages(sessionId: string, messageIds: string[]): Promise<void> {
+    if (!this.messages || messageIds.length === 0) return;
+    await this.messages.hideMessages(sessionId, messageIds);
+  }
+
+  async unhideContextMessages(sessionId: string, messageIds: string[]): Promise<void> {
+    if (!this.messages || messageIds.length === 0) return;
+    await this.messages.unhideMessages(sessionId, messageIds);
+  }
+
+  async hideContextByScope(sessionId: string, scope: 'tool_results' | 'all'): Promise<string[]> {
+    if (!this.messages) return [];
+    return this.messages.hideByScope(sessionId, scope);
+  }
+
+  async unhideAllContext(sessionId: string): Promise<void> {
+    if (!this.messages) return;
+    await this.messages.unhideAll(sessionId);
+  }
+
   async handleSessionResponse(sessionId: string, accepted: boolean) {
     if (accepted) {
       this.emitThought(sessionId, 'synthesizing', 'User accepted changes.');
@@ -1106,6 +1131,17 @@ export class KoryManager {
             this.getWorkerReasoningLevel(),
             domainHint,
           ),
+        hideContext: async (scope: 'tool_results' | 'all') => {
+          const ids = await this.hideContextByScope(sessionId, scope);
+          if (ids.length > 0) {
+            this.emitWSMessage(sessionId, 'context.hidden', { messageIds: ids, scope });
+          }
+          return ids;
+        },
+        recallContext: async (scope: 'tool_results' | 'all' | 'specific') => {
+          await this.unhideAllContext(sessionId);
+          this.emitWSMessage(sessionId, 'context.recalled', { scope });
+        },
       };
 
       const history = await this.loadHistory(sessionId);
@@ -1225,9 +1261,11 @@ export class KoryManager {
             !abort.signal.aborted;
 
           const emitAndPush = (tc: CompletedToolCall, toolResult: ToolCallOutput) => {
+            const toolMsgId = nanoid(12);
             this.emitWSMessage(sessionId, 'stream.tool_result', {
               agentId: KORY_IDENTITY.id,
               toolResult,
+              storageId: toolMsgId,
             });
             executedAnyTool = true;
             messages.push({
@@ -1235,6 +1273,17 @@ export class KoryManager {
               content: JSON.stringify(toolResult),
               tool_call_id: tc.id,
             });
+            // Persist tool result so it can be hidden/recalled
+            if (this.messages) {
+              this.messages.add(sessionId, {
+                id: toolMsgId,
+                sessionId,
+                role: 'tool',
+                content: toolResult.output,
+                createdAt: Date.now(),
+                toolCallId: tc.id,
+              }).catch(() => {});
+            }
           };
 
           if (canParallelize) {
@@ -1316,7 +1365,11 @@ export class KoryManager {
         });
         koryLog.debug('Assistant message persisted');
       }
-      this.emitWSMessage(sessionId, 'agent.status', { agentId: KORY_IDENTITY.id, status: 'done' });
+      this.emitWSMessage(sessionId, 'agent.status', {
+        agentId: KORY_IDENTITY.id,
+        status: 'done',
+        ...(finalMessageId ? { messageId: finalMessageId } : {}),
+      });
 
       // Create rewind point after final response
       if (finalMessageId) {
@@ -1811,9 +1864,10 @@ export class KoryManager {
 
   private async loadHistory(sessionId: string): Promise<InternalMessage[]> {
     return (
-      (await this.messages?.getRecent(sessionId, 10))?.map((m) => ({
+      (await this.messages?.getRecent(sessionId, 20))?.map((m) => ({
         role: m.role as InternalMessage['role'],
         content: m.content,
+        ...(m.toolCallId ? { tool_call_id: m.toolCallId } : {}),
       })) || []
     );
   }

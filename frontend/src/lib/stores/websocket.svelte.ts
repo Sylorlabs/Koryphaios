@@ -287,9 +287,10 @@ function accumulateFeedEntry(entry: Omit<FeedEntry, 'id'>) {
   }
 }
 
-function addUserMessage(sessionId: string, content: string, attachments?: Array<{type: string, data: string, name: string}>) {
+function addUserMessage(sessionId: string, content: string, attachments?: Array<{type: string, data: string, name: string}>): string {
+  const entryId = `user-${++feedIdCounter}`;
   const userEntry: FeedEntry = {
-    id: `user-${++feedIdCounter}`,
+    id: entryId,
     timestamp: Date.now(),
     type: 'user_message',
     agentId: 'user',
@@ -300,6 +301,7 @@ function addUserMessage(sessionId: string, content: string, attachments?: Array<
   };
   feed.push(userEntry);
   if (feed.length > MAX_FEED_ENTRIES) feed.splice(0, feed.length - MAX_FEED_ENTRIES);
+  return entryId;
 }
 
 function getAgentThreadKey(sessionId: string, agentId: string): string {
@@ -427,11 +429,20 @@ function handleMessage(msg: WSMessage) {
     }
 
     case 'agent.status': {
-      const p = msg.payload as AgentStatusPayload;
+      const p = msg.payload as AgentStatusPayload & { messageId?: string };
       const agent = agents.get(p.agentId);
       if (agent) {
         agent.status = p.status;
         if (msg.sessionId) agent.sessionId = msg.sessionId;
+      }
+      // Tag the last assistant content entry with its DB storage ID for context deletion
+      if (p.status === 'done' && p.messageId) {
+        for (let i = feed.length - 1; i >= 0; i--) {
+          if (feed[i]!.type === 'content' && feed[i]!.agentId !== 'user') {
+            feed[i] = { ...feed[i]!, storageId: p.messageId };
+            break;
+          }
+        }
       }
       // If a run just went terminal and nothing else is active, drop the busy bridge.
       if (p.status === 'done' || p.status === 'idle') maybeClearBusy(msg.sessionId ?? agent?.sessionId);
@@ -597,7 +608,7 @@ function handleMessage(msg: WSMessage) {
     }
 
     case 'stream.tool_result': {
-      const p = msg.payload as StreamToolResultPayload;
+      const p = msg.payload as StreamToolResultPayload & { storageId?: string };
       if (isForActiveSession) {
         addFeedEntry({
           timestamp: msg.timestamp,
@@ -609,6 +620,7 @@ function handleMessage(msg: WSMessage) {
             ? `Tool error: ${p.toolResult.output}`
             : `Tool result (${p.toolResult.durationMs.toFixed(0)}ms): ${p.toolResult.output}`,
           metadata: { toolResult: p.toolResult },
+          storageId: p.storageId,
         });
       }
       if (msg.sessionId) {
@@ -809,6 +821,22 @@ function handleMessage(msg: WSMessage) {
           metadata: { contextFiles: p.files },
         });
       }
+      break;
+    }
+
+    case 'context.hidden': {
+      // Agent hid messages from its own context — mark them in the feed
+      const p = msg.payload as { messageIds: string[]; scope: string };
+      if (!isForActiveSession) break;
+      const hiddenSet = new Set(p.messageIds);
+      feed = feed.map((e) => (e.storageId && hiddenSet.has(e.storageId) ? { ...e, hiddenFromAgent: true } : e));
+      break;
+    }
+
+    case 'context.recalled': {
+      // Agent recalled all hidden messages
+      if (!isForActiveSession) break;
+      feed = feed.map((e) => (e.hiddenFromAgent ? { ...e, hiddenFromAgent: false } : e));
       break;
     }
 
@@ -1040,7 +1068,7 @@ export async function loadProvidersFromApi(): Promise<void> {
 }
 
 function sendMessage(sessionId: string, content: string, model?: string, reasoningLevel?: string, attachments?: Array<{type: string, data: string, name: string}>) {
-  addUserMessage(sessionId, content, attachments);
+  const entryId = addUserMessage(sessionId, content, attachments);
   // Show the Stop button immediately — bridges the gap until the first agent.status arrives.
   markSessionBusy(sessionId);
   // Clear previous context detection for new message
@@ -1051,9 +1079,15 @@ function sendMessage(sessionId: string, content: string, model?: string, reasoni
     body: JSON.stringify({ sessionId, content, model, reasoningLevel, attachments }),
   })
     .then(async (res) => {
-      const data = await parseJsonResponse<{ ok?: boolean; error?: string }>(res);
+      const data = await parseJsonResponse<{ ok?: boolean; error?: string; data?: { messageId?: string } }>(res);
       if (!res.ok || data?.ok === false) {
         throw new Error(data?.error || `Request failed: ${res.status} ${res.statusText}`);
+      }
+      // Attach the DB storage ID so this entry can be deleted from agent context
+      const messageId = data?.data?.messageId;
+      if (messageId) {
+        const idx = feed.findIndex((e) => e.id === entryId);
+        if (idx !== -1) feed[idx] = { ...feed[idx]!, storageId: messageId };
       }
     })
     .catch((error) => {
@@ -1226,6 +1260,7 @@ async function loadSessionMessages(
       text: m.content,
       metadata: { sessionId, model: m.model, cost: m.cost },
       ghostHash: ghost?.hash,
+      storageId: m.id,
     };
   });
   feedVersion++;
@@ -1233,6 +1268,57 @@ async function loadSessionMessages(
 
 function removeEntries(ids: Set<string>) {
   feed = feed.filter((e) => !ids.has(e.id));
+}
+
+function hideEntriesFromContext(sessionId: string, entryIds: Set<string>) {
+  const toHide = feed.filter((e) => entryIds.has(e.id) && e.storageId);
+  const messageIds = toHide.map((e) => e.storageId!);
+  if (messageIds.length === 0) return;
+  if (wsConnection?.readyState === WebSocket.OPEN) {
+    wsConnection.send(JSON.stringify({
+      type: 'context.hide_messages',
+      sessionId,
+      messageIds,
+      timestamp: Date.now(),
+    }));
+  }
+  // Mark as hidden in feed (keep visible to user with a badge)
+  feed = feed.map((e) =>
+    entryIds.has(e.id) && e.storageId ? { ...e, hiddenFromAgent: true } : e
+  );
+}
+
+function unhideEntriesFromContext(sessionId: string, entryIds: Set<string>) {
+  const toUnhide = feed.filter((e) => entryIds.has(e.id) && e.storageId);
+  const messageIds = toUnhide.map((e) => e.storageId!);
+  if (messageIds.length === 0) return;
+  if (wsConnection?.readyState === WebSocket.OPEN) {
+    wsConnection.send(JSON.stringify({
+      type: 'context.unhide_messages',
+      sessionId,
+      messageIds,
+      timestamp: Date.now(),
+    }));
+  }
+  feed = feed.map((e) =>
+    entryIds.has(e.id) && e.storageId ? { ...e, hiddenFromAgent: false } : e
+  );
+}
+
+// Keep hard delete for permanent removal
+function deleteEntriesFromContext(sessionId: string, entryIds: Set<string>) {
+  const toDelete = feed.filter((e) => entryIds.has(e.id) && e.storageId);
+  const messageIds = toDelete.map((e) => e.storageId!);
+  if (messageIds.length === 0) return;
+  if (wsConnection?.readyState === WebSocket.OPEN) {
+    wsConnection.send(JSON.stringify({
+      type: 'context.delete_messages',
+      sessionId,
+      messageIds,
+      timestamp: Date.now(),
+    }));
+  }
+  feed = feed.filter((e) => !entryIds.has(e.id));
 }
 
 function getToolName(entry: FeedEntry): string {
@@ -1542,6 +1628,9 @@ export const wsStore = {
   loadAgentThreadMessages,
   getAgentThreadFeed,
   removeEntries,
+  hideEntriesFromContext,
+  unhideEntriesFromContext,
+  deleteEntriesFromContext,
   respondToPermission,
   subscribeToSession,
   clearFeed,

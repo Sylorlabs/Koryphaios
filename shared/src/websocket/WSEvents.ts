@@ -21,6 +21,9 @@ export type WSEventType =
   | 'stream.file_complete'
   // Context detection
   | 'context.detected'
+  // Context management (hide/recall)
+  | 'context.hidden'
+  | 'context.recalled'
   // Session events
   | 'session.created'
   | 'session.updated'

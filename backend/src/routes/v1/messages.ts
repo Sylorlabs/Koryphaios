@@ -46,7 +46,7 @@ export const messageRoutes = new Elysia({ prefix: '/api/messages' })
           });
         });
 
-      return { ok: true, data: { status: 'processing' } };
+      return { ok: true, data: { status: 'processing', messageId: userMsg.id } };
     },
     {
       body: t.Object({

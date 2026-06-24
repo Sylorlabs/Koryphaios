@@ -5,7 +5,6 @@ export const ProviderName = {
   Anthropic: 'anthropic',
   OpenAI: 'openai',
   Google: 'google',
-  Gemini: 'gemini',
   GoogleSubscription: 'google-subscription',
   XAI: 'xai',
 
@@ -64,6 +63,7 @@ export const ProviderName = {
   Vercel: 'vercel',
   ZAI: 'zai',
   ZenMux: 'zenmux',
+  KiloCode: 'kilocode',
 } as const;
 
 export type ProviderName = (typeof ProviderName)[keyof typeof ProviderName] | string;
@@ -77,7 +77,6 @@ export const IMPLEMENTED_PROVIDERS: ProviderName[] = [
   'antigravity',
   'openai',
   'google',
-  'gemini',
   'google-subscription',
   'xai',
   'openrouter',
@@ -119,6 +118,7 @@ export const IMPLEMENTED_PROVIDERS: ProviderName[] = [
   'vercel',
   'zai',
   'zenmux',
+  'kilocode',
 ];
 
 export type ModelTier = 'flagship' | 'fast' | 'cheap' | 'reasoning';
@@ -174,7 +174,6 @@ export const PROVIDER_AUTH_MODES: Record<ProviderName, ProviderAuthMode> = {
   antigravity: 'auth_only',
   openai: 'api_key',
   google: 'api_key',
-  gemini: 'auth_only',
   'google-subscription': 'auth_only',
   xai: 'api_key',
   openrouter: 'api_key',
@@ -216,6 +215,7 @@ export const PROVIDER_AUTH_MODES: Record<ProviderName, ProviderAuthMode> = {
   vercel: 'api_key',
   zai: 'api_key',
   zenmux: 'api_key',
+  kilocode: 'api_key',
 };
 
 /** Environment variable mappings for providers */
@@ -230,7 +230,6 @@ export const PROVIDER_ENV_VARS: Record<
   cursor: { authToken: 'CURSOR_API_KEY' },
   antigravity: { authToken: 'ANTIGRAVITY_AUTH_TOKEN' },
   google: { apiKey: 'GEMINI_API_KEY' },
-  gemini: { authToken: 'GEMINI_AUTH_TOKEN' },
   'google-subscription': { authToken: 'GOOGLE_SUBSCRIPTION_OAUTH_TOKEN' },
   xai: { apiKey: 'XAI_API_KEY' },
   openrouter: { apiKey: 'OPENROUTER_API_KEY', baseUrl: 'OPENROUTER_BASE_URL' },
@@ -273,4 +272,5 @@ export const PROVIDER_ENV_VARS: Record<
   vercel: { apiKey: 'VERCEL_AI_API_KEY' },
   zai: { apiKey: 'ZAI_API_KEY' },
   zenmux: { apiKey: 'ZENMUX_API_KEY' },
+  kilocode: { apiKey: 'KILOCODE_API_KEY' },
 };

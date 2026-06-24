@@ -1,12 +1,16 @@
 <script lang="ts">
   import { wsStore } from '$lib/stores/websocket.svelte';
+  import { sessionStore } from '$lib/stores/sessions.svelte';
   import { appStore } from '$lib/stores/app.svelte';
   import { isMac } from '$lib/utils/platform';
   import { onMount } from 'svelte';
-  import { 
-    MessageSquare, 
+  import {
+    MessageSquare,
     ArrowDown,
     Trash2,
+    BrainCircuit,
+    EyeOff,
+    Eye,
     Paintbrush,
     Bug,
     Zap,
@@ -49,6 +53,12 @@
   let suggestions = $state<DashboardSuggestion[]>(defaultSuggestions);
 
   let filteredFeed = $derived(wsStore.groupedFeed);
+  let selectedHaveStorageId = $derived(
+    wsStore.feed.some((e) => selectedEntries.has(e.id) && e.storageId)
+  );
+  let selectedAreAllHidden = $derived(
+    wsStore.feed.filter((e) => selectedEntries.has(e.id) && e.storageId).every((e) => e.hiddenFromAgent)
+  );
 
   // Track last feed length to avoid scroll loops
   let lastFeedLength = $state(0);
@@ -150,8 +160,38 @@
     lastSelectedId = '';
   }
 
+  function hideSelectedFromContext() {
+    if (selectedEntries.size === 0) return;
+    const sessionId = sessionStore.activeSessionId;
+    if (!sessionId) return;
+    wsStore.hideEntriesFromContext(sessionId, selectedEntries);
+    selectedEntries = new Set();
+    lastSelectedId = '';
+  }
+
+  function unhideSelectedFromContext() {
+    if (selectedEntries.size === 0) return;
+    const sessionId = sessionStore.activeSessionId;
+    if (!sessionId) return;
+    wsStore.unhideEntriesFromContext(sessionId, selectedEntries);
+    selectedEntries = new Set();
+    lastSelectedId = '';
+  }
+
   function deleteSingle(id: string) {
     wsStore.removeEntries(new Set([id]));
+  }
+
+  function hideSingleFromContext(id: string) {
+    const sessionId = sessionStore.activeSessionId;
+    if (!sessionId) return;
+    wsStore.hideEntriesFromContext(sessionId, new Set([id]));
+  }
+
+  function unhideSingleFromContext(id: string) {
+    const sessionId = sessionStore.activeSessionId;
+    if (!sessionId) return;
+    wsStore.unhideEntriesFromContext(sessionId, new Set([id]));
   }
 
   function runSuggestion(prompt: string) {
@@ -193,12 +233,34 @@
     </span>
     <div class="flex items-center gap-2">
       {#if selectedEntries.size > 0}
+        {#if selectedHaveStorageId}
+          {#if selectedAreAllHidden}
+            <button
+              onclick={unhideSelectedFromContext}
+              class="btn btn-secondary flex items-center gap-1.5"
+              style="padding: 4px 10px; font-size: 11px; color: var(--color-accent);"
+              title="Restore to agent context — agent will see these again"
+            >
+              <Eye size={12} />Recall for agent
+            </button>
+          {:else}
+            <button
+              onclick={hideSelectedFromContext}
+              class="btn btn-secondary flex items-center gap-1.5"
+              style="padding: 4px 10px; font-size: 11px; color: var(--color-error);"
+              title="Remove from agent context — you still see it, agent won't"
+            >
+              <EyeOff size={12} />Hide from agent
+            </button>
+          {/if}
+        {/if}
         <button
           onclick={deleteSelected}
           class="btn btn-secondary flex items-center gap-1.5"
-          style="padding: 4px 10px; font-size: 11px; color: var(--color-error);"
+          style="padding: 4px 10px; font-size: 11px; color: var(--color-text-secondary);"
+          title="Remove from this view only — agent is unaffected"
         >
-          <Trash2 size={12} />Delete {selectedEntries.size}
+          <Trash2 size={12} />Remove {selectedEntries.size}
         </button>
       {/if}
       {#if !autoScroll}
@@ -373,6 +435,8 @@
           onSelect={(e) => handleEntryClick(entry, e)}
           onToggleGroup={() => toggleGroup(entry.id)}
           onDelete={() => deleteSingle(entry.id)}
+          onHideFromContext={entry.storageId && !entry.hiddenFromAgent ? () => hideSingleFromContext(entry.id) : undefined}
+          onUnhideFromContext={entry.storageId && entry.hiddenFromAgent ? () => unhideSingleFromContext(entry.id) : undefined}
         />
       {/each}
     {/if}

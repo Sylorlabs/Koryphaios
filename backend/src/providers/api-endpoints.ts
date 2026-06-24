@@ -21,6 +21,7 @@ export const PROVIDER_BASE_URLS: Partial<Record<ProviderName, string>> = {
   groq: 'https://api.groq.com/openai/v1',
   openrouter: 'https://openrouter.ai/api/v1',
   xai: 'https://api.x.ai/v1',
+  kilocode: 'https://api.kilo.ai/api/gateway',
 };
 
 /** Gemini: v1beta often required for Thinking models and Live API (early 2026). */
@@ -78,6 +79,7 @@ export function buildAuthHeaders(
 
     case 'openai':
     case 'kimicode':
+    case 'kilocode':
     case 'groq':
     case 'xai':
     case 'openrouter':
@@ -122,6 +124,7 @@ export function getVerifyUrl(
       return `${base}/models`;
     case 'openai':
     case 'kimicode':
+    case 'kilocode':
     case 'groq':
     case 'xai':
     case 'openrouter':

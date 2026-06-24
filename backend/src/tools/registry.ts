@@ -34,6 +34,10 @@ export interface ToolContext {
   recordChange?: (change: ChangeSummary) => void;
   /** Optional: manager-only. When the manager calls delegate_to_worker, this runs the worker pipeline and returns a summary. */
   delegateToWorker?: (task: string, domain?: string) => Promise<string>;
+  /** Optional: manager-only. Hide messages from context by scope or specific IDs. Returns hidden message IDs. */
+  hideContext?: (scope: 'tool_results' | 'all', messageIds?: string[]) => Promise<string[]>;
+  /** Optional: manager-only. Restore hidden messages back into context. */
+  recallContext?: (scope: 'tool_results' | 'all' | 'specific', messageIds?: string[]) => Promise<void>;
 }
 
 export interface ToolCallInput {

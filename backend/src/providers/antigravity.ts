@@ -26,7 +26,9 @@ let cachedModelsAt = 0;
 let modelListError: string | undefined;
 
 function antigravityBin(): string | null {
-  return whichBinary('antigravity-cli') ?? whichBinary('antigravity');
+  // `agy` is the official binary name as of Antigravity 2.0 (I/O 2026).
+  // Keep legacy names as fallbacks for older installs.
+  return whichBinary('agy') ?? whichBinary('antigravity-cli') ?? whichBinary('antigravity');
 }
 
 function parseModelList(output: string): ModelDef[] {

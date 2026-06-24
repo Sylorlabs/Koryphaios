@@ -39,7 +39,7 @@ export const sessions = sqliteTable('sessions', {
 export const messages = sqliteTable('messages', {
   id: text('id').primaryKey(),
   sessionId: text('session_id').notNull().references(() => sessions.id, { onDelete: 'cascade' }),
-  role: text('role', { enum: ['user', 'assistant', 'system'] }).notNull(),
+  role: text('role', { enum: ['user', 'assistant', 'system', 'tool'] }).notNull(),
   content: text('content').notNull(), // JSON string of ContentBlock[]
   model: text('model'),
   provider: text('provider'),
@@ -47,6 +47,8 @@ export const messages = sqliteTable('messages', {
   tokensOut: integer('tokens_out').default(0),
   cost: real('cost').default(0),
   createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
+  hidden: integer('hidden', { mode: 'boolean' }).default(false).notNull(),
+  toolCallId: text('tool_call_id'),
 });
 
 export const tasks = sqliteTable('tasks', {

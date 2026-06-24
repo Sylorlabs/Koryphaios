@@ -126,10 +126,3 @@ export const GeminiModels: ModelDef[] = [
   },
 ];
 
-export const GeminiCliModels: ModelDef[] = GeminiModels.map((model) => ({
-  ...model,
-  id: `gemini-cli:${model.apiModelId ?? model.id}`,
-  provider: 'gemini',
-  costPerMInputTokens: 0,
-  costPerMOutputTokens: 0,
-}));

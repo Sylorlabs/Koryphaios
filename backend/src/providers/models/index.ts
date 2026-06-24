@@ -1,7 +1,7 @@
 import type { ModelDef, ProviderName } from '@koryphaios/shared';
 import { OpenAIModels } from './openai';
 import { AnthropicModels } from './anthropic';
-import { GeminiModels, GeminiCliModels } from './gemini';
+import { GeminiModels } from './gemini';
 import { VertexAIModels } from './vertex';
 import { OpenRouterModels } from './openrouter';
 import { GroqModels } from './groq';
@@ -16,14 +16,13 @@ import { CodexModels } from './codex';
 import { ClaudeCodeModels } from './claude-code';
 import { GrokModels } from './grok';
 import { CursorModels } from './cursor';
-import { ZAIModels, KimiCodeModels, DeepSeekModels, MoonshotModels, CortecsModels } from './newproviders';
+import { ZAIModels, KimiCodeModels, DeepSeekModels, MoonshotModels, CortecsModels, KiloCodeModels } from './newproviders';
 
 // Combined list of all known models from REAL providers only
 const ALL_MODELS: ModelDef[] = [
   ...OpenAIModels,
   ...AnthropicModels,
   ...GeminiModels,
-  ...GeminiCliModels,
   ...VertexAIModels,
   ...OpenRouterModels,
   ...GroqModels,
@@ -43,6 +42,7 @@ const ALL_MODELS: ModelDef[] = [
   ...DeepSeekModels,
   ...MoonshotModels,
   ...CortecsModels,
+  ...KiloCodeModels,
 ];
 
 // Map for fast lookup by ID

@@ -33,7 +33,7 @@
     "multiSourceResearch": true,
     "updatedAt": 1781385946807
   },
-  "updatedAt": 1782274235363,
+  "updatedAt": 1782281777047,
   "providers": {
     "anthropic": {
       "name": "anthropic",
@@ -330,6 +330,33 @@
       ],
       "hideModelSelector": false,
       "disabled": false
+    },
+    "antigravity": {
+      "name": "antigravity",
+      "selectedModels": [],
+      "hideModelSelector": false,
+      "disabled": true
+    },
+    "gemini": {
+      "name": "gemini",
+      "authToken": "cli:gemini:1782275797370",
+      "selectedModels": [
+        "gemini-cli:gemini-3-flash-preview"
+      ],
+      "hideModelSelector": false,
+      "disabled": false
+    },
+    "cline": {
+      "name": "cline",
+      "selectedModels": [],
+      "hideModelSelector": false,
+      "disabled": true
+    },
+    "cortecs": {
+      "name": "cortecs",
+      "selectedModels": [],
+      "hideModelSelector": false,
+      "disabled": true
     }
   },
   "assignments": {}

@@ -1,7 +1,7 @@
 // Agent-CLI auto-detection.
 //
 // Koryphaios scans the user's machine for installed + logged-in agent CLIs (Claude Code,
-// Codex, Gemini CLI, Grok Build, Cursor, Antigravity) and surfaces them so their providers light up
+// Codex, Grok Build, Cursor, Antigravity) and surfaces them so their providers light up
 // with zero manual configuration. The registry uses the same signals (via auth-utils) to
 // auto-enable providers on boot; this module is the single, side-effect-free source of the
 // detection picture for the API/UI.
@@ -17,7 +17,6 @@ import {
   detectClaudeCodeLogin,
   detectCodexAuthToken,
   detectCodexCLILogin,
-  detectGeminiCLILogin,
   detectGrokCLILogin,
   detectGrokXaiKey,
   detectCursorCLILogin,
@@ -26,13 +25,12 @@ import {
   createCodexCLIAuthMarker,
   createGrokCLIAuthMarker,
   createCursorCLIAuthMarker,
-  createGeminiCLIAuthMarker,
   createAntigravityCLIAuthMarker,
 } from './auth-utils';
 
 export interface AgentCliStatus {
   /** Stable id for the CLI. */
-  id: 'claude' | 'codex' | 'gemini' | 'grok' | 'cursor' | 'antigravity';
+  id: 'claude' | 'codex' | 'grok' | 'cursor' | 'antigravity';
   displayName: string;
   /** Candidate binary names looked up on PATH. */
   binaries: string[];
@@ -89,17 +87,13 @@ export function canAutoEnable(provider: ProviderName): boolean {
       return !!whichBinary('codex') && !!detectCodexAuthToken();
     case 'google':
       return false;
-    case 'gemini':
-      // Enabled if the gemini CLI is installed AND logged in (API key OR OAuth) — the CLI
-      // harness handles OAuth, so no API key is required.
-      return !!whichBinary('gemini') && detectGeminiCLILogin();
     case 'grok':
       // Grok Build subscription CLI — installed + logged in (subscription or xAI key).
       return !!whichBinary('grok') && detectGrokCLILogin();
     case 'cursor':
       return !!whichBinary('cursor-agent') && detectCursorCLILogin();
     case 'antigravity':
-      return !!firstInstalled(['antigravity-cli', 'antigravity']) && detectAntigravityCLILogin();
+      return !!firstInstalled(['agy', 'antigravity-cli', 'antigravity']) && detectAntigravityCLILogin();
     default:
       return false;
   }
@@ -120,8 +114,6 @@ export function cliAutoEnableCreds(
       return { authToken: createClaudeCLIAuthMarker() };
     case 'codex':
       return { authToken: createCodexCLIAuthMarker() };
-    case 'gemini':
-      return { authToken: createGeminiCLIAuthMarker() };
     case 'grok':
       // The CLI owns the real token; the marker just signals "use the CLI harness".
       return { authToken: createGrokCLIAuthMarker() };

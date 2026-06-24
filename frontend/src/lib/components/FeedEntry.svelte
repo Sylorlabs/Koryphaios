@@ -1,10 +1,12 @@
 <script lang="ts">
-  import { 
-    MessageSquare, 
+  import {
+    MessageSquare,
     Send,
     ChevronRight,
     ChevronDown,
     Trash2,
+    EyeOff,
+    Eye,
     Copy,
     Check,
     Terminal,
@@ -88,14 +90,16 @@
   };
   marked.setOptions({ renderer });
 
-  let { 
-    entry, 
-    isSelected, 
-    isExpanded, 
+  let {
+    entry,
+    isSelected,
+    isExpanded,
     isStreaming = false,
-    onSelect, 
-    onToggleGroup, 
-    onDelete 
+    onSelect,
+    onToggleGroup,
+    onDelete,
+    onHideFromContext,
+    onUnhideFromContext,
   } = $props<{
     entry: FeedEntryLocal;
     isSelected: boolean;
@@ -104,6 +108,8 @@
     onSelect: (e: MouseEvent) => void;
     onToggleGroup: () => void;
     onDelete: (e: MouseEvent) => void;
+    onHideFromContext?: (e: MouseEvent) => void;
+    onUnhideFromContext?: (e: MouseEvent) => void;
   }>();
 
   let copied = $state(false);
@@ -187,7 +193,8 @@
 >
   <div
     class="flex items-start gap-[var(--space-md)] py-[var(--space-sm)] text-sm leading-relaxed rounded px-[var(--space-md)] -mx-[var(--space-md)] transition-all cursor-default
-           {isSelected ? 'bg-[var(--color-accent)]/10 ring-1 ring-[var(--color-accent)]/30' : 'hover:bg-surface-2/30'}"
+           {isSelected ? 'bg-[var(--color-accent)]/10 ring-1 ring-[var(--color-accent)]/30' : 'hover:bg-surface-2/30'}
+           {entry.hiddenFromAgent ? 'opacity-50' : ''}"
     onclick={(e) => entry.type === 'tool_group' ? onToggleGroup() : onSelect(e)}
     onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') entry.type === 'tool_group' ? onToggleGroup() : onSelect(e as unknown as MouseEvent); }}
     role="row"
@@ -315,13 +322,37 @@
       {#if isStreaming}
         <span class="inline-block w-2 h-4 bg-accent ml-0.5 animate-pulse" aria-hidden="true"></span>
       {/if}
+      {#if entry.hiddenFromAgent}
+        <span class="inline-flex items-center gap-1 mt-1 px-1.5 py-0.5 rounded text-[10px] font-medium" style="background: rgba(239,68,68,0.1); color: var(--color-error);">
+          <EyeOff size={9} />hidden from agent
+        </span>
+      {/if}
     </div>
 
+    {#if onUnhideFromContext}
+      <button
+        class="shrink-0 p-1.5 rounded opacity-60 hover:opacity-100 transition-opacity flex items-center justify-center"
+        style="color: var(--color-accent);"
+        onclick={(e) => { e.stopPropagation(); onUnhideFromContext!(e); }}
+        title="Recall to agent context"
+      >
+        <Eye size={14} />
+      </button>
+    {:else if onHideFromContext}
+      <button
+        class="shrink-0 p-1.5 rounded opacity-0 group-hover:opacity-60 hover:!opacity-100 transition-opacity flex items-center justify-center"
+        style="color: var(--color-error);"
+        onclick={(e) => { e.stopPropagation(); onHideFromContext!(e); }}
+        title="Hide from agent context — you still see it"
+      >
+        <EyeOff size={14} />
+      </button>
+    {/if}
     <button
       class="shrink-0 p-1.5 rounded opacity-0 group-hover:opacity-60 hover:!opacity-100 transition-opacity flex items-center justify-center"
       style="color: var(--color-text-muted);"
       onclick={(e) => { e.stopPropagation(); onDelete(e); }}
-      title="Delete message"
+      title="Remove from view"
     >
       <Trash2 size={14} />
     </button>

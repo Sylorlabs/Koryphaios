@@ -52,6 +52,7 @@
   import ModeToggle from './ModeToggle.svelte';
   import { apiFetch, parseJsonResponse } from '$lib/api.svelte';
   import { dndzone } from 'svelte-dnd-action';
+  import { shortcutStore, type Shortcut } from '$lib/stores/shortcuts.svelte';
 
   interface Props {
     open?: boolean;
@@ -99,7 +100,7 @@
     openrouter: 'OpenRouter', groq: 'Groq', copilot: 'GitHub Copilot', azure: 'Azure OpenAI',
     bedrock: 'AWS Bedrock', vertexai: 'Vertex AI', local: 'Local (custom endpoint)', ollama: 'Ollama',
     lmstudio: 'LM Studio', llamacpp: 'Llama.cpp', opencodezen: 'OpenCodeZen',
-    claude: 'Claude Code', codex: 'OpenAI Codex', grok: 'Grok Build', cursor: 'Cursor', antigravity: 'Google Antigravity', kimicode: 'Kimi Code',
+    claude: 'Claude Code', codex: 'OpenAI Codex', grok: 'Grok Build', cursor: 'Cursor', antigravity: 'Google Antigravity', kimicode: 'Kimi Code', kilocode: 'Kilo Code',
     cortecs: 'Cortecs', cortects: 'Cortects',
     moonshot: 'Moonshot AI / Kimi API', mistral: 'Mistral AI',
   };
@@ -211,7 +212,7 @@
       nebius: 'Nebius', togetherai: 'Together AI', venice: 'Venice AI', zenmux: 'ZenMux',
       opencodezen: 'OpenCodeZen', firmware: 'Firmware', '302ai': '302.ai',
       claude: 'Claude Code', codex: 'OpenAI Codex', gemini: 'Gemini CLI', grok: 'Grok Build', cursor: 'Cursor', antigravity: 'Google Antigravity', mistral: 'Mistral AI',
-      cortecs: 'Cortecs', cortects: 'Cortects',
+      cortecs: 'Cortecs', cortects: 'Cortects', kilocode: 'Kilo Code',
       mistralai: 'Mistral AI', cohere: 'Cohere', perplexity: 'Perplexity',
       luma: 'Luma', fal: 'Fal', elevenlabs: 'ElevenLabs', assemblyai: 'AssemblyAI',
       deepgram: 'Deepgram', gladia: 'Gladia', lmnt: 'LMNT', azurecognitive: 'Azure Cognitive',
@@ -238,7 +239,7 @@
       venice: 'sk-...', zenmux: 'sk-...', opencodezen: 'Get key at opencode.ai/auth',
       firmware: 'sk-...', '302ai': 'sk-...', mistralai: 'sk-...',
       claude: 'Claude auth token', codex: 'Auth with ChatGPT', gemini: 'Run "gemini" to sign in', grok: 'Run "grok login" (or set GROK_CODE_XAI_API_KEY)', cursor: 'Run "cursor-agent login" (or set CURSOR_API_KEY)', antigravity: 'Run Antigravity CLI sign-in',
-      cortecs: 'sk-...',
+      cortecs: 'sk-...', kilocode: 'Get key at app.kilo.ai',
       mistral: 'sk-...', cohere: 'sk-...', perplexity: 'pplx-...', luma: 'lm-...',
       fal: 'sk-...', elevenlabs: 'sk-...', assemblyai: 'sk-...', deepgram: 'sk-...',
       gladia: 'sk-...', lmnt: 'sk-...', azurecognitive: 'sk-...', sapai: 'sk-...',
@@ -431,7 +432,7 @@
 
   const browserAuthProviders = new Set(['copilot', 'kimicode', 'codex', 'claude', 'gemini', 'google-subscription', 'grok', 'cursor', 'antigravity']);
   const cliProviderIds = new Set(['claude', 'codex', 'gemini', 'grok', 'cursor', 'antigravity']);
-  const externalCliDetectProviders = new Set(['codex', 'gemini', 'grok', 'cursor', 'antigravity']);
+  const externalCliDetectProviders = new Set(['claude', 'codex', 'gemini', 'grok', 'cursor', 'antigravity']);
   const providerToCliId: Record<string, string> = {
     claude: 'claude',
     codex: 'codex',
@@ -1346,37 +1347,27 @@
   }
 
   // ─── Shortcuts ───────────────────────────────────────────────────────
-  interface Shortcut { id: string; keys: string[]; action: string; description?: string }
-  const defaultShortcuts: Shortcut[] = [
-    { id: 'send', keys: ['Ctrl', 'Enter'], action: 'Send message', description: 'Submit task' },
-    { id: 'settings', keys: ['Ctrl', ','], action: 'Open settings', description: 'Preferences' },
-    { id: 'new_session', keys: ['Ctrl', 'N'], action: 'New session', description: 'Clear' },
-    { id: 'focus_input', keys: ['Ctrl', 'K'], action: 'Focus input', description: 'Jump' },
-    { id: 'close', keys: ['Esc'], action: 'Close dialogs', description: 'Back' },
-  ];
-
-  function loadShortcuts(): Shortcut[] {
-    try { const stored = localStorage.getItem('koryphaios-shortcuts'); if (stored) return JSON.parse(stored); } catch {}
-    return structuredClone(defaultShortcuts);
-  }
-
-  let shortcuts = $state<Shortcut[]>(loadShortcuts());
   let editingShortcutId = $state<string | null>(null);
   let capturedKeys = $state<string[]>([]);
 
   function startEditShortcut(id: string) { editingShortcutId = id; capturedKeys = []; }
   function handleShortcutKeydown(e: KeyboardEvent) {
     if (!editingShortcutId) return; e.preventDefault(); e.stopPropagation();
-    const keys: string[] = []; if (e.ctrlKey) keys.push('Ctrl'); if (e.shiftKey) keys.push('Shift'); if (e.altKey) keys.push('Alt'); if (e.metaKey) keys.push('Meta');
+    const keys: string[] = [];
+    // Normalize Ctrl/Meta to Mod so keysMatch() in shortcutStore works correctly
+    if (e.ctrlKey || e.metaKey) keys.push('Mod');
+    if (e.shiftKey) keys.push('Shift');
+    if (e.altKey) keys.push('Alt');
     const key = e.key; if (!['Control', 'Shift', 'Alt', 'Meta'].includes(key)) keys.push(key.length === 1 ? key.toUpperCase() : key);
     if (keys.length === 0) return; capturedKeys = keys;
     if (!['Control', 'Shift', 'Alt', 'Meta'].includes(key)) {
-      const idx = shortcuts.findIndex(s => s.id === editingShortcutId);
-      if (idx >= 0) { shortcuts[idx] = { ...shortcuts[idx], keys: capturedKeys }; shortcuts = [...shortcuts]; localStorage.setItem('koryphaios-shortcuts', JSON.stringify(shortcuts)); }
+      const updated = shortcutStore.list.map(s => s.id === editingShortcutId ? { ...s, keys: capturedKeys } : s);
+      shortcutStore.list = updated;
+      shortcutStore.save();
       editingShortcutId = null; capturedKeys = [];
     }
   }
-  function resetShortcuts() { shortcuts = structuredClone(defaultShortcuts); localStorage.removeItem('koryphaios-shortcuts'); toastStore.info('Shortcuts reset'); }
+  function resetShortcuts() { shortcutStore.reset(); toastStore.info('Shortcuts reset'); }
 
   // ─── Messaging ───────────────────────────────────────────────────────
   let messagingLoading = $state(false);
@@ -1777,7 +1768,7 @@
                           <div class="flex gap-2">
                             <button
                               type="button"
-                              onclick={() => startBrowserAuthFlow(prov.key)}
+                              onclick={() => cliProviderIds.has(prov.key) ? detectCliAuth(prov.key) : startBrowserAuthFlow(prov.key)}
                               disabled={browserAuthBusy === prov.key}
                               class="btn btn-secondary flex-1 text-[10px] py-2"
                             >
@@ -2137,7 +2128,7 @@
           </button>
         </div>
         <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
-          {#each shortcuts as shortcut}
+          {#each shortcutStore.list as shortcut}
             <div class="group flex items-center justify-between p-4 bg-[var(--color-surface-2)] rounded-xl border border-[var(--color-border)] transition-colors hover:border-[var(--color-text-muted)]">
               <div>
                 <div class="text-sm font-semibold text-[var(--color-text-primary)]">{shortcut.action}</div>

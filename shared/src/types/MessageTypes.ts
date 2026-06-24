@@ -31,7 +31,7 @@ export interface Message {
 export interface StoredMessage {
   id: string;
   sessionId: string;
-  role: 'user' | 'assistant' | 'system';
+  role: 'user' | 'assistant' | 'system' | 'tool';
   content: string; // JSON string of ContentBlock[] or raw text
   model?: string;
   provider?: ProviderName;
@@ -39,4 +39,6 @@ export interface StoredMessage {
   tokensOut?: number;
   cost?: number;
   createdAt: number;
+  hidden?: boolean;
+  toolCallId?: string;
 }

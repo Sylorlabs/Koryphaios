@@ -20,6 +20,6 @@ export {
   PatchTool,
 } from './files';
 export { WebSearchTool, WebFetchTool } from './web';
-export { AskUserTool, AskManagerTool } from './interaction';
+export { AskUserTool, AskManagerTool, HideContextTool, RecallContextTool } from './interaction';
 export { MCPDetectErrorsTool, MCPAnalyzeErrorTool, MCPSuggestFixesTool } from './mcp';
 export { registerGitTools } from './git';

@@ -596,6 +596,9 @@ class ProviderRegistry {
             },
           });
         }
+        case 'kilocode':
+          if (!apiKey) return { success: false, error: 'Missing API key (get one at app.kilo.ai)' };
+          return this.verifyBearerGet('https://api.kilo.ai/api/gateway/models', apiKey);
         case 'openrouter':
           return this.verifyBearerGet('https://openrouter.ai/api/v1/models', apiKey);
         case 'kimicode': {
@@ -1033,6 +1036,10 @@ class ProviderRegistry {
         return new AntigravityProvider(config);
       case 'kimicode':
         return new KimiCodeProvider(config);
+      case 'kilocode':
+        return config.apiKey
+          ? new OpenAIProvider(config, 'kilocode', 'https://api.kilo.ai/api/gateway')
+          : null;
       case 'openrouter':
         return new OpenRouterProvider(config);
       case 'groq':

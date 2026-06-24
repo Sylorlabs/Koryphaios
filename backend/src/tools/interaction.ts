@@ -145,3 +145,90 @@ export class AskManagerTool implements Tool {
     };
   }
 }
+
+/**
+ * Tool for the Manager to hide messages from its own context window to free up space.
+ * Hidden messages are stored in the DB and can be recalled at any time.
+ */
+export class HideContextTool implements Tool {
+  readonly name = 'hide_context';
+  readonly role = 'manager' as const;
+  readonly description =
+    "Remove messages from your active context window to reduce token usage. Hidden messages are preserved in storage and can be recalled at any time with recall_context. Use 'tool_results' to hide all stored tool outputs, or 'all' to hide all prior conversation history.";
+  readonly inputSchema = {
+    type: 'object',
+    properties: {
+      scope: {
+        type: 'string',
+        enum: ['tool_results', 'all'],
+        description: "'tool_results' hides all tool call outputs; 'all' hides the entire prior conversation",
+      },
+    },
+    required: ['scope'],
+  };
+
+  async run(ctx: ToolContext, call: ToolCallInput): Promise<ToolCallOutput> {
+    const start = Date.now();
+    const { scope } = call.input as { scope: 'tool_results' | 'all' };
+
+    if (!ctx.hideContext) {
+      return { callId: call.id, name: this.name, output: 'Context management not available.', isError: true, durationMs: 0 };
+    }
+
+    try {
+      const hiddenIds = await ctx.hideContext(scope);
+      return {
+        callId: call.id,
+        name: this.name,
+        output: `Hidden ${hiddenIds.length} message(s) from context (scope: ${scope}). Use recall_context to restore them.`,
+        isError: false,
+        durationMs: Date.now() - start,
+      };
+    } catch (err: any) {
+      return { callId: call.id, name: this.name, output: `Error: ${err.message}`, isError: true, durationMs: Date.now() - start };
+    }
+  }
+}
+
+/**
+ * Tool for the Manager to restore previously hidden messages back into its context window.
+ */
+export class RecallContextTool implements Tool {
+  readonly name = 'recall_context';
+  readonly role = 'manager' as const;
+  readonly description =
+    "Restore messages that were previously hidden from your context window using hide_context. Use 'tool_results' to restore only tool outputs, or 'all' to restore everything. Restored messages will be included in your context on the next turn.";
+  readonly inputSchema = {
+    type: 'object',
+    properties: {
+      scope: {
+        type: 'string',
+        enum: ['tool_results', 'all'],
+        description: "'tool_results' restores hidden tool outputs; 'all' restores the full conversation history",
+      },
+    },
+    required: ['scope'],
+  };
+
+  async run(ctx: ToolContext, call: ToolCallInput): Promise<ToolCallOutput> {
+    const start = Date.now();
+    const { scope } = call.input as { scope: 'tool_results' | 'all' };
+
+    if (!ctx.recallContext) {
+      return { callId: call.id, name: this.name, output: 'Context management not available.', isError: true, durationMs: 0 };
+    }
+
+    try {
+      await ctx.recallContext(scope === 'all' ? 'all' : 'tool_results');
+      return {
+        callId: call.id,
+        name: this.name,
+        output: `Restored ${scope} messages to context. They will be included starting from the next turn.`,
+        isError: false,
+        durationMs: Date.now() - start,
+      };
+    } catch (err: any) {
+      return { callId: call.id, name: this.name, output: `Error: ${err.message}`, isError: true, durationMs: Date.now() - start };
+    }
+  }
+}
