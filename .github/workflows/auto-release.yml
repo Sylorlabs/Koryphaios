@@ -100,11 +100,13 @@ jobs:
           console.log('Changelog generated with', changesJson.length, 'entries');
           "
 
-          # Output as multiline
+          # Output as multiline (GitHub requires delimiter not in content)
+          DELIMITER="KORY_RELEASE_$(head -c 8 /dev/urandom | xxd -p)"
           {
-            echo 'release_body<<RELEASE_EOF'
+            echo "release_body<<${DELIMITER}"
             cat release-notes.md
-            echo 'RELEASE_EOF'
+            echo ""
+            echo "${DELIMITER}"
           } >> $GITHUB_OUTPUT
 
       - name: Commit version bump
