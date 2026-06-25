@@ -29,3 +29,4 @@ tokio = { version = "1", features = ["time"] }
 ignore = "0.4.25"
 regex = "1.12.3"
 tauri-plugin-clipboard-manager = "2"
+tauri-plugin-updater = "2"

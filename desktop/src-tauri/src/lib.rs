@@ -125,6 +125,51 @@ struct FileDropPayload {
     position: Option<(f64, f64)>,
 }
 
+#[derive(serde::Serialize)]
+struct UpdateCheckResult {
+    available: bool,
+    version: Option<String>,
+    notes: Option<String>,
+    pub_date: Option<String>,
+}
+
+#[tauri::command]
+async fn check_for_updates(app: tauri::AppHandle) -> Result<UpdateCheckResult, String> {
+    use tauri_plugin_updater::UpdaterExt;
+    let updater = app.updater().map_err(|e| e.to_string())?;
+    let update = updater.check().await.map_err(|e| e.to_string())?;
+    if let Some(update) = update {
+        Ok(UpdateCheckResult {
+            available: true,
+            version: Some(update.version.clone()),
+            notes: update.body.clone(),
+            pub_date: update.date.as_ref().map(|d| d.to_string()),
+        })
+    } else {
+        Ok(UpdateCheckResult {
+            available: false,
+            version: None,
+            notes: None,
+            pub_date: None,
+        })
+    }
+}
+
+#[tauri::command]
+async fn install_update(app: tauri::AppHandle) -> Result<(), String> {
+    use tauri_plugin_updater::UpdaterExt;
+    let updater = app.updater().map_err(|e| e.to_string())?;
+    let update = updater.check().await.map_err(|e| e.to_string())?;
+    if let Some(update) = update {
+        update
+            .download_and_install(|_, _| {}, || {})
+            .await
+            .map_err(|e| e.to_string())?;
+        app.restart();
+    }
+    Ok(())
+}
+
 #[tauri::command]
 fn get_backend_url() -> String {
     AppConfig::get().backend_url()
@@ -617,6 +662,7 @@ pub fn run() {
 
     tauri::Builder::default()
         .plugin(tauri_plugin_clipboard_manager::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_notification::init())
@@ -803,6 +849,8 @@ pub fn run() {
             create_project_folder,
             read_folder_contents,
             indexer::search_codebase,
+            check_for_updates,
+            install_update,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Koryphaios desktop app");
