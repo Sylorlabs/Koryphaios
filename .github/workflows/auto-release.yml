@@ -40,7 +40,9 @@ jobs:
           echo "new_version=$NEW_VERSION" >> $GITHUB_OUTPUT
 
           jq ".version = \"$NEW_VERSION\"" package.json > package.json.tmp && mv package.json.tmp package.json
-          sed -i "s/^version = \"$CURRENT\"/version = \"$NEW_VERSION\"/" desktop/src-tauri/Cargo.toml
+          # Update Cargo.toml — find whatever version is currently there and replace it
+          CARGO_CURRENT=$(grep -m1 '^version = ' desktop/src-tauri/Cargo.toml | sed 's/version = "\(.*\)"/\1/')
+          sed -i "s/^version = \"$CARGO_CURRENT\"/version = \"$NEW_VERSION\"/" desktop/src-tauri/Cargo.toml
           jq ".version = \"$NEW_VERSION\"" desktop/src-tauri/tauri.conf.json > tauri.conf.json.tmp && mv tauri.conf.json.tmp desktop/src-tauri/tauri.conf.json
 
       - name: Generate changelog
@@ -131,12 +133,20 @@ jobs:
         include:
           - platform: 'macos-latest'
             args: '--target aarch64-apple-darwin'
+            bun-target: 'bun-darwin-arm64'
+            sidecar-suffix: 'aarch64-apple-darwin'
           - platform: 'macos-latest'
             args: '--target x86_64-apple-darwin'
+            bun-target: 'bun-darwin-x64'
+            sidecar-suffix: 'x86_64-apple-darwin'
           - platform: 'ubuntu-22.04'
             args: ''
+            bun-target: 'bun-linux-x64'
+            sidecar-suffix: 'x86_64-unknown-linux-gnu'
           - platform: 'windows-latest'
             args: ''
+            bun-target: 'bun-windows-x64'
+            sidecar-suffix: 'x86_64-pc-windows-msvc'
 
     runs-on: ${{ matrix.platform }}
     steps:
@@ -156,7 +166,24 @@ jobs:
         if: matrix.platform == 'ubuntu-22.04'
         run: |
           sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf libgtk-3-dev libayatana-appindicator3-dev
+          sudo apt-get install -y libwebkit2gtk-4.1-dev librsvg2-dev patchelf libgtk-3-dev libayatana-appindicator3-dev
+
+      - name: Install backend dependencies
+        working-directory: ./backend
+        run: bun install
+
+      - name: Build backend sidecar
+        shell: bash
+        run: |
+          EXT=""
+          if [[ "${{ matrix.sidecar-suffix }}" == *"windows"* ]]; then EXT=".exe"; fi
+          bun build --compile \
+            --target=${{ matrix.bun-target }} \
+            backend/src/server.ts \
+            --outfile="desktop/src-tauri/sidecar/koryphaios-backend-${{ matrix.sidecar-suffix }}${EXT}"
+          # Also place as the generic name (used on the runner's own platform)
+          cp "desktop/src-tauri/sidecar/koryphaios-backend-${{ matrix.sidecar-suffix }}${EXT}" \
+             "desktop/src-tauri/sidecar/koryphaios-backend${EXT}" 2>/dev/null || true
 
       - name: Install frontend dependencies
         working-directory: ./frontend
@@ -170,6 +197,7 @@ jobs:
           NODE_ENV: production
 
       - name: Inject signing public key
+        shell: bash
         run: |
           jq --arg key "$TAURI_SIGNING_PUBLIC_KEY" \
             '.plugins.updater.pubkey = $key' \
@@ -215,6 +243,17 @@ jobs:
         with:
           targets: 'aarch64-apple-darwin,x86_64-apple-darwin'
 
+      - name: Install backend dependencies
+        working-directory: ./backend
+        run: bun install
+
+      - name: Build backend sidecar (both macOS targets for universal)
+        run: |
+          bun build --compile --target=bun-darwin-arm64 backend/src/server.ts \
+            --outfile=desktop/src-tauri/sidecar/koryphaios-backend-aarch64-apple-darwin
+          bun build --compile --target=bun-darwin-x64 backend/src/server.ts \
+            --outfile=desktop/src-tauri/sidecar/koryphaios-backend-x86_64-apple-darwin
+
       - name: Install frontend dependencies
         working-directory: ./frontend
         run: bun install
@@ -227,6 +266,7 @@ jobs:
           NODE_ENV: production
 
       - name: Inject signing public key
+        shell: bash
         run: |
           jq --arg key "$TAURI_SIGNING_PUBLIC_KEY" \
             '.plugins.updater.pubkey = $key' \
