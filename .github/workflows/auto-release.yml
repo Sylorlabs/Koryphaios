@@ -8,6 +8,8 @@ on:
 jobs:
   check-update-trigger:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     outputs:
       should_release: ${{ steps.check.outputs.should_release }}
       new_version: ${{ steps.bump.outputs.new_version }}
