@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join, delimiter } from 'node:path';
 import { detectAgentClis, whichBinary, canAutoEnable } from '../cli-detection';
 import {
-  detectGeminiCLILogin,
+  detectAntigravityCLILogin,
   detectCursorCLILogin,
   detectGrokCLILogin,
   detectCodexCLILogin,
@@ -18,6 +18,7 @@ const ENV_KEYS = [
   'KORY_DISABLE_CLI_AUTODETECT',
   'GROK_CODE_XAI_API_KEY',
   'GROK_API_KEY',
+  'ANTIGRAVITY_API_KEY',
   'GEMINI_API_KEY',
   'GOOGLE_API_KEY',
   'CURSOR_API_KEY',
@@ -31,7 +32,7 @@ beforeEach(() => {
   // Neutralize ambient signals so tests are deterministic regardless of the dev machine.
   process.env.HOME = tmpHome;
   process.env.USERPROFILE = tmpHome;
-  for (const k of ['KORY_DISABLE_CLI_AUTODETECT', 'GROK_CODE_XAI_API_KEY', 'GROK_API_KEY', 'GEMINI_API_KEY', 'GOOGLE_API_KEY', 'CURSOR_API_KEY']) {
+  for (const k of ['KORY_DISABLE_CLI_AUTODETECT', 'GROK_CODE_XAI_API_KEY', 'GROK_API_KEY', 'ANTIGRAVITY_API_KEY', 'GEMINI_API_KEY', 'GOOGLE_API_KEY', 'CURSOR_API_KEY']) {
     delete process.env[k];
   }
 });
@@ -46,11 +47,11 @@ afterEach(() => {
 describe('detectAgentClis', () => {
   it('reports all five agent CLIs with their provider mappings', () => {
     const list = detectAgentClis();
-    expect(list.map((c) => c.id).sort()).toEqual(['claude', 'codex', 'cursor', 'gemini', 'grok']);
+    expect(list.map((c) => c.id).sort()).toEqual(['antigravity', 'claude', 'codex', 'cursor', 'grok']);
     const byId = Object.fromEntries(list.map((c) => [c.id, c]));
     expect(byId.claude.provider).toBe('claude');
     expect(byId.codex.provider).toBe('codex');
-    expect(byId.gemini.provider).toBe('google');
+    expect(byId.antigravity.provider).toBe('google');
     expect(byId.grok.provider).toBe('grok'); // Grok Build has its own CLI-harness provider
     expect(byId.cursor.provider).toBeNull(); // no provider wired yet — detection-only
   });
@@ -84,11 +85,14 @@ describe('whichBinary', () => {
 });
 
 describe('login detectors (deterministic via temp HOME)', () => {
-  it('detects Gemini CLI login from ~/.gemini/oauth_creds.json', () => {
-    expect(detectGeminiCLILogin()).toBe(false);
-    mkdirSync(join(tmpHome, '.gemini'), { recursive: true });
-    writeFileSync(join(tmpHome, '.gemini', 'oauth_creds.json'), JSON.stringify({ access_token: 'x', refresh_token: 'y' }));
-    expect(detectGeminiCLILogin()).toBe(true);
+  it('detects Antigravity CLI login from ANTIGRAVITY_API_KEY or ~/.gemini/antigravity-cli/settings.json', () => {
+    expect(detectAntigravityCLILogin()).toBe(false);
+    process.env.ANTIGRAVITY_API_KEY = 'agy-test-key';
+    expect(detectAntigravityCLILogin()).toBe(true);
+    delete process.env.ANTIGRAVITY_API_KEY;
+    mkdirSync(join(tmpHome, '.gemini', 'antigravity-cli'), { recursive: true });
+    writeFileSync(join(tmpHome, '.gemini', 'antigravity-cli', 'settings.json'), JSON.stringify({ theme: 'dark' }));
+    expect(detectAntigravityCLILogin()).toBe(true);
   });
 
   it('detects Cursor CLI login from ~/.cursor/cli-config.json authInfo', () => {

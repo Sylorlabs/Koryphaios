@@ -1,7 +1,7 @@
 // Agent-CLI auto-detection.
 //
 // Koryphaios scans the user's machine for installed + logged-in agent CLIs (Claude Code,
-// Codex, Gemini CLI, Grok Build, Cursor) and surfaces them so their providers light up
+// Codex, Antigravity CLI, Grok Build, Cursor) and surfaces them so their providers light up
 // with zero manual configuration. The registry uses the same signals (via auth-utils) to
 // auto-enable providers on boot; this module is the single, side-effect-free source of the
 // detection picture for the API/UI.
@@ -17,8 +17,8 @@ import {
   detectClaudeCodeLogin,
   detectCodexAuthToken,
   detectCodexCLILogin,
-  detectGeminiCLILogin,
-  detectGeminiApiKey,
+  detectAntigravityApiKey,
+  detectAntigravityCLILogin,
   detectGrokCLILogin,
   detectGrokXaiKey,
   detectCursorCLILogin,
@@ -29,7 +29,7 @@ import {
 
 export interface AgentCliStatus {
   /** Stable id for the CLI. */
-  id: 'claude' | 'codex' | 'gemini' | 'grok' | 'cursor';
+  id: 'claude' | 'codex' | 'antigravity' | 'grok' | 'cursor';
   displayName: string;
   /** Candidate binary names looked up on PATH. */
   binaries: string[];
@@ -85,7 +85,7 @@ export function canAutoEnable(provider: ProviderName): boolean {
     case 'codex':
       return !!whichBinary('codex') && !!detectCodexAuthToken();
     case 'google':
-      return !!whichBinary('gemini') && !!detectGeminiApiKey();
+      return !!whichBinary('agy') && !!detectAntigravityApiKey();
     case 'grok':
       // Grok Build subscription CLI — installed + logged in (subscription or xAI key).
       return !!whichBinary('grok') && detectGrokCLILogin();
@@ -110,7 +110,7 @@ export function cliAutoEnableCreds(
     case 'codex':
       return { authToken: createCodexCLIAuthMarker() };
     case 'google':
-      return { apiKey: detectGeminiApiKey() ?? undefined };
+      return { apiKey: detectAntigravityApiKey() ?? undefined };
     case 'grok':
       // The CLI owns the real token; the marker just signals "use the CLI harness".
       return { authToken: createGrokCLIAuthMarker() };
@@ -154,24 +154,25 @@ export function detectAgentClis(): AgentCliStatus[] {
     docsUrl: 'https://developers.openai.com/codex/cli',
   });
 
-  // ── Gemini CLI → `google` provider. The provider needs an API key; the CLI's OAuth
-  // login is detected/surfaced but can't drive the API directly without a key. ──
-  const geminiKey = detectGeminiApiKey();
-  const geminiLogin = detectGeminiCLILogin();
-  const gemini = mk('gemini', 'Gemini CLI', ['gemini'], 'google', {
-    loggedIn: geminiLogin,
-    authSource: geminiKey
-      ? 'GEMINI_API_KEY / GOOGLE_API_KEY'
-      : geminiLogin
-        ? '~/.gemini/oauth_creds.json'
+  // ── Antigravity CLI (`agy`) → `google` provider. Google's Gemini CLI successor;
+  // auto-enables when ANTIGRAVITY_API_KEY is set. OAuth-only login is surfaced but
+  // needs an API key to drive the Google provider directly. ──
+  const antigravityKey = detectAntigravityApiKey();
+  const antigravityLogin = detectAntigravityCLILogin();
+  const antigravity = mk('antigravity', 'Antigravity CLI', ['agy'], 'google', {
+    loggedIn: antigravityLogin,
+    authSource: antigravityKey
+      ? 'ANTIGRAVITY_API_KEY'
+      : antigravityLogin
+        ? '~/.gemini/antigravity-cli/'
         : null,
     autoEnabled: canAutoEnable('google'),
-    workingNote: geminiKey
+    workingNote: antigravityKey
       ? 'Chats through the Google (Gemini) provider.'
-      : geminiLogin
-        ? 'Gemini CLI login detected — set a Gemini API key to chat (the CLI OAuth token cannot call the API directly).'
-        : 'Gemini CLI is installed but not logged in.',
-    docsUrl: 'https://github.com/google-gemini/gemini-cli',
+      : antigravityLogin
+        ? 'Antigravity CLI configured — set ANTIGRAVITY_API_KEY to chat through the Google provider.'
+        : 'Antigravity CLI is installed but not configured.',
+    docsUrl: 'https://antigravity.google/docs/cli-getting-started',
   });
 
   // ── Grok Build → `grok` provider (its own CLI harness, like Claude Code / Codex). ──
@@ -201,7 +202,7 @@ export function detectAgentClis(): AgentCliStatus[] {
     docsUrl: 'https://cursor.com/docs/cli',
   });
 
-  return [claude, codex, gemini, grok, cursor];
+  return [claude, codex, antigravity, grok, cursor];
 }
 
 function mk(

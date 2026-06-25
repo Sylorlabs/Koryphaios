@@ -6,7 +6,7 @@ export const ENV_API_KEY_MAP: Record<ProviderName, string[]> = {
   codex: [],
   grok: [],
   openai: ['OPENAI_API_KEY'],
-  google: ['GEMINI_API_KEY', 'GOOGLE_API_KEY'],
+  google: ['ANTIGRAVITY_API_KEY', 'GEMINI_API_KEY', 'GOOGLE_API_KEY'],
   xai: ['XAI_API_KEY'],
   openrouter: ['OPENROUTER_API_KEY'],
   groq: ['GROQ_API_KEY'],

@@ -210,7 +210,7 @@ export function detectClaudeCodeLogin(): boolean {
 
 // ─── Agent-CLI login detection ──────────────────────────────────────────────
 // Koryphaios auto-detects agent CLIs installed + logged-in on the user's machine
-// (Claude Code, Codex, Gemini CLI, Grok Build, Cursor) so their providers light up
+// (Claude Code, Codex, Antigravity CLI, Grok Build, Cursor) so their providers light up
 // with no manual configuration. These helpers detect a login signal WITHOUT holding
 // the raw credential where a CLI/subscription owns it.
 
@@ -292,6 +292,23 @@ export function detectCursorCLILogin(): boolean {
   } catch {
     return false;
   }
+}
+
+/** The Antigravity CLI (`agy`) API key from the environment. */
+export function detectAntigravityApiKey(): string | null {
+  const k = process.env.ANTIGRAVITY_API_KEY?.trim();
+  return k || null;
+}
+
+/**
+ * Detects whether the Antigravity CLI is configured: an API key in the environment
+ * or the CLI's config dir at ~/.gemini/antigravity-cli/settings.json.
+ */
+export function detectAntigravityCLILogin(): boolean {
+  if (detectAntigravityApiKey()) return true;
+  const home = homeDir();
+  if (!home) return false;
+  return existsSync(join(home, '.gemini', 'antigravity-cli', 'settings.json'));
 }
 
 /**
