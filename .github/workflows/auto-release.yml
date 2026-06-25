@@ -177,13 +177,13 @@ jobs:
         run: |
           EXT=""
           if [[ "${{ matrix.sidecar-suffix }}" == *"windows"* ]]; then EXT=".exe"; fi
+          OUTFILE="$(pwd)/desktop/src-tauri/sidecar/koryphaios-backend-${{ matrix.sidecar-suffix }}${EXT}"
+          cd backend
           bun build --compile \
             --target=${{ matrix.bun-target }} \
-            backend/src/server.ts \
-            --outfile="desktop/src-tauri/sidecar/koryphaios-backend-${{ matrix.sidecar-suffix }}${EXT}"
-          # Also place as the generic name (used on the runner's own platform)
-          cp "desktop/src-tauri/sidecar/koryphaios-backend-${{ matrix.sidecar-suffix }}${EXT}" \
-             "desktop/src-tauri/sidecar/koryphaios-backend${EXT}" 2>/dev/null || true
+            src/server.ts \
+            --outfile="$OUTFILE"
+          cp "$OUTFILE" "$(pwd)/../desktop/src-tauri/sidecar/koryphaios-backend${EXT}" 2>/dev/null || true
 
       - name: Install frontend dependencies
         working-directory: ./frontend
@@ -249,10 +249,12 @@ jobs:
 
       - name: Build backend sidecar (both macOS targets for universal)
         run: |
-          bun build --compile --target=bun-darwin-arm64 backend/src/server.ts \
-            --outfile=desktop/src-tauri/sidecar/koryphaios-backend-aarch64-apple-darwin
-          bun build --compile --target=bun-darwin-x64 backend/src/server.ts \
-            --outfile=desktop/src-tauri/sidecar/koryphaios-backend-x86_64-apple-darwin
+          ROOT="$(pwd)"
+          cd backend
+          bun build --compile --target=bun-darwin-arm64 src/server.ts \
+            --outfile="$ROOT/desktop/src-tauri/sidecar/koryphaios-backend-aarch64-apple-darwin"
+          bun build --compile --target=bun-darwin-x64 src/server.ts \
+            --outfile="$ROOT/desktop/src-tauri/sidecar/koryphaios-backend-x86_64-apple-darwin"
 
       - name: Install frontend dependencies
         working-directory: ./frontend
