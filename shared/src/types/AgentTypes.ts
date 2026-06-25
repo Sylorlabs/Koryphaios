@@ -25,6 +25,7 @@ export type AgentStatus =
   | 'done'
   | 'reading'
   | 'writing'
+  | 'searching'
   | 'criticizing';
 
 export type WorkerDomain = 'ui' | 'frontend' | 'backend' | 'general' | 'review' | 'test' | 'critic';

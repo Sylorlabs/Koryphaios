@@ -1,17 +1,22 @@
 <script lang="ts">
-  import { 
-    MessageSquare, 
+  import {
+    MessageSquare,
     Send,
     ChevronRight,
     ChevronDown,
     Trash2,
+    EyeOff,
+    Eye,
     Copy,
     Check,
     Terminal,
     Maximize2,
     Minimize2,
     Undo,
-    X
+    X,
+    Pencil,
+    Globe,
+    FileSearch
   } from 'lucide-svelte';
   import { fly, fade } from 'svelte/transition';
   import { wsStore } from '$lib/stores/websocket.svelte';
@@ -163,13 +168,52 @@
     }
   }
 
+  type ToolCategory = 'bash' | 'read' | 'write' | 'web' | 'other';
+
+  const READ_TOOLS = new Set(['read_file', 'grep', 'glob', 'ls']);
+  const WRITE_TOOLS = new Set(['write_file', 'edit_file', 'patch', 'diff', 'delete_file', 'move_file']);
+  const WEB_TOOLS = new Set(['web_search', 'web_fetch']);
+  const BASH_TOOLS = new Set(['bash', 'shell_manage']);
+
+  function getToolNameFromMeta(meta?: Record<string, unknown>): string {
+    const m = meta as { toolCall?: { name?: string }; toolResult?: { name?: string } } | undefined;
+    return m?.toolCall?.name ?? m?.toolResult?.name ?? '';
+  }
+
+  function getToolCategory(meta?: Record<string, unknown>): ToolCategory {
+    const name = getToolNameFromMeta(meta);
+    if (BASH_TOOLS.has(name)) return 'bash';
+    if (READ_TOOLS.has(name)) return 'read';
+    if (WRITE_TOOLS.has(name)) return 'write';
+    if (WEB_TOOLS.has(name)) return 'web';
+    return 'other';
+  }
+
+  interface ToolDisplay { label: string; resultLabel: string; colorClass: string; }
+
+  function getToolDisplay(category: ToolCategory): ToolDisplay {
+    switch (category) {
+      case 'read':  return { label: 'Reading File',      resultLabel: 'File Contents',    colorClass: 'text-cyan-400' };
+      case 'write': return { label: 'Editing File',      resultLabel: 'File Written',     colorClass: 'text-amber-400' };
+      case 'web':   return { label: 'Searching Web',     resultLabel: 'Web Results',      colorClass: 'text-sky-400' };
+      case 'bash':  return { label: 'Executing Command', resultLabel: 'Terminal Output',  colorClass: 'text-emerald-400' };
+      default:      return { label: 'Running Tool',      resultLabel: 'Tool Output',      colorClass: 'text-emerald-400' };
+    }
+  }
+
   function getStatusForType(type: FeedEntryType, meta?: Record<string, unknown>): import('@koryphaios/shared').AgentStatus {
     switch (type) {
       case 'user_message': return 'idle';
       case 'thought': return meta?.phase === 'analyzing' ? 'analyzing' : 'thinking';
       case 'content': return 'streaming';
       case 'thinking': return 'thinking';
-      case 'tool_call': return 'tool_calling';
+      case 'tool_call': {
+        const cat = getToolCategory(meta);
+        if (cat === 'read') return 'reading';
+        if (cat === 'write') return 'writing';
+        if (cat === 'web') return 'searching';
+        return 'tool_calling';
+      }
       case 'tool_result': return 'done';
       case 'routing': return 'verifying';
       case 'error': return 'error';
@@ -228,17 +272,27 @@
             agentName={entry.agentName} 
           />
       {:else if entry.type === 'tool_call' || entry.type === 'tool_result'}
+          {@const toolCat = getToolCategory(entry.metadata)}
+          {@const toolDisplay = getToolDisplay(toolCat)}
           <div class="mt-1 flex flex-col gap-2">
-            <div 
+            <div
               class="rounded-lg border border-[var(--color-border)] overflow-hidden bg-[var(--color-surface-2)] transition-all"
               style={expandedTerminal ? 'max-height: 1000px;' : 'max-height: 120px;'}
             >
               <div class="flex items-center justify-between px-3 py-1.5 bg-[var(--color-surface-3)] border-b border-[var(--color-border)]">
-                <div class="flex items-center gap-2 text-[10px] font-bold uppercase tracking-widest text-[var(--color-text-muted)]">
-                  <Terminal size={12} />
-                  <span>{entry.type === 'tool_call' ? 'Executing Command' : 'Terminal Output'}</span>
+                <div class="flex items-center gap-2 text-[10px] font-bold uppercase tracking-widest {toolDisplay.colorClass}">
+                  {#if toolCat === 'read'}
+                    <FileSearch size={12} />
+                  {:else if toolCat === 'write'}
+                    <Pencil size={12} />
+                  {:else if toolCat === 'web'}
+                    <Globe size={12} />
+                  {:else}
+                    <Terminal size={12} />
+                  {/if}
+                  <span>{entry.type === 'tool_call' ? toolDisplay.label : toolDisplay.resultLabel}</span>
                 </div>
-                <button 
+                <button
                   type="button"
                   class="p-1 hover:bg-[var(--color-surface-4)] rounded transition-colors text-[var(--color-text-muted)]"
                   onclick={(e) => { e.stopPropagation(); expandedTerminal = !expandedTerminal; }}

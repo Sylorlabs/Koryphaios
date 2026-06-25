@@ -46,7 +46,10 @@
   }: Props = $props();
   let actionPanelRef = $state<HTMLDivElement>();
   let showModelPicker = $state(false);
-  let selectedModel = $state<string>('auto');
+  const MODEL_STORAGE_KEY = 'koryphaios-selected-model';
+  let _storedModel = typeof localStorage !== 'undefined' ? localStorage.getItem(MODEL_STORAGE_KEY) : null;
+  if (_storedModel === 'auto') { localStorage.removeItem(MODEL_STORAGE_KEY); _storedModel = null; }
+  let selectedModel = $state<string>(_storedModel ?? '');
   let selectedPickerIndex = $state(0);
   let attachments = $state<Attachment[]>([]);
   let fileInputRef = $state<HTMLInputElement>();
@@ -86,22 +89,18 @@
     return preferred?.name ?? 'anthropic';
   });
 
-  // Extract provider and model from selection. In auto mode, use 'auto' provider for specific reasoning config.
-  let currentProvider = $derived(selectedModel === 'auto' ? 'auto' : (parseModelSelection(selectedModel).provider ?? fallbackProvider));
+  let currentProvider = $derived(!selectedModel ? fallbackProvider : (parseModelSelection(selectedModel).provider ?? fallbackProvider));
   let currentModel = $derived(parseModelSelection(selectedModel).model);
 
-  // Get reasoning config based on provider + model
-  let reasoningConfig = $derived(getReasoningConfig(currentProvider, currentModel));
-  let reasoningSupported = $derived(selectedModel === 'auto' || hasReasoningSupport(currentProvider, currentModel));
+  let reasoningConfig = $derived(!selectedModel ? null : getReasoningConfig(currentProvider, currentModel));
+  let reasoningSupported = $derived(!!selectedModel && hasReasoningSupport(currentProvider, currentModel));
 
   const configurationWarning = $derived(
     disabled ? null : getModelConfigurationWarning(wsStore.providers, selectedModel),
   );
 
   let availableModels = $derived.by(() => {
-    const models: Array<{ label: string; value: string; provider: string; isAuto?: boolean }> = [
-      { label: 'Auto (Smart Selection)', value: 'auto', provider: '', isAuto: true },
-    ];
+    const models: Array<{ label: string; value: string; provider: string }> = [];
     for (const p of wsStore.providers) {
       if (p.authenticated) {
         for (const m of p.models) {
@@ -113,7 +112,7 @@
   });
 
   let selectedModelLabel = $derived.by(() => {
-    if (selectedModel === 'auto') return 'Auto';
+    if (!selectedModel) return 'Select model';
     const parsed = parseModelSelection(selectedModel);
     if (!parsed.model || !parsed.provider) return selectedModel;
     return `(${providerLabel(parsed.provider)}) ${parsed.model}`;
@@ -371,7 +370,7 @@
   function selectModel(value: string) {
     selectedModel = value;
     showModelPicker = false;
-    // Reasoning will auto-update via $effect
+    if (typeof localStorage !== 'undefined') localStorage.setItem(MODEL_STORAGE_KEY, value);
   }
 
   function selectReasoning(value: string) {
@@ -397,7 +396,7 @@
   }
 
   let modelDisplayName = $derived.by(() => {
-    if (selectedModel === 'auto') return 'Auto';
+    if (!selectedModel) return '';
     const modelId = currentModel;
     if (!modelId) return currentProvider.charAt(0).toUpperCase() + currentProvider.slice(1);
     
@@ -607,10 +606,12 @@
         <button
           type="button"
           class="flex items-center gap-2 px-3.5 h-10 rounded-xl text-sm font-medium transition-all hover:brightness-110 active:scale-[0.98]"
-          style="background: var(--color-surface-3); color: var(--color-text-primary); border: 1px solid var(--color-border);"
+          style="background: var(--color-surface-3); color: {selectedModel ? 'var(--color-text-primary)' : 'var(--color-text-muted)'}; border: 1px solid var(--color-border);"
           onclick={() => showModelPicker = !showModelPicker}
         >
-          <Sparkles size={16} class="text-amber-400" />
+          {#if selectedModel}
+            <Sparkles size={16} class="text-amber-400" />
+          {/if}
           <span>{selectedModelLabel}</span>
           <ChevronDown size={14} class="text-text-muted" />
         </button>
@@ -627,9 +628,6 @@
                 style="color: {selectedModel === model.value ? 'var(--color-accent)' : 'var(--color-text-secondary)'};"
                 onclick={() => selectModel(model.value)}
               >
-                {#if model.isAuto}
-                  <Sparkles size={14} class="text-amber-400 shrink-0" />
-                {/if}
                 <span>{model.label}</span>
               </button>
             {/each}
@@ -658,7 +656,7 @@
               style="background: var(--color-surface-2-alpha, rgba(30, 30, 35, 0.9)); border-color: var(--color-border);"
             >
               <div class="px-4 py-3 text-xs font-bold uppercase tracking-widest opacity-70" style="color: var(--color-text-muted); border-bottom: 1px solid var(--color-border); background: rgba(255,255,255,0.03);">
-                {selectedModel === 'auto' ? 'Reasoning' : `${modelDisplayName} · ${reasoningLabel(reasoningLevel)}`}
+                {`${modelDisplayName} · ${reasoningLabel(reasoningLevel)}`}
               </div>
               <div class="py-1">
                 {#each reasoningConfig.options as opt}
