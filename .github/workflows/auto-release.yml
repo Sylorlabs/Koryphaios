@@ -115,16 +115,27 @@ jobs:
           BUILD_MODE: static
           NODE_ENV: production
 
+      - name: Inject signing public key
+        run: |
+          jq --arg key "$TAURI_SIGNING_PUBLIC_KEY" \
+            '.plugins.updater.pubkey = $key' \
+            desktop/src-tauri/tauri.conf.json > tauri.conf.json.tmp
+          mv tauri.conf.json.tmp desktop/src-tauri/tauri.conf.json
+        env:
+          TAURI_SIGNING_PUBLIC_KEY: ${{ secrets.TAURI_SIGNING_PUBLIC_KEY }}
+
       - name: Build Tauri app
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          TAURI_SIGNING_PUBLIC_KEY: ${{ secrets.TAURI_SIGNING_PUBLIC_KEY }}
         with:
           projectPath: ./desktop
           args: ${{ matrix.args }}
           includeUpdaterJson: true
+          updaterJsonPreferNsis: true
           tagName: v${{ needs.check-update-trigger.outputs.new_version }}
           releaseName: "Koryphaios v${{ needs.check-update-trigger.outputs.new_version }}"
           releaseBody: |
@@ -175,12 +186,22 @@ jobs:
           BUILD_MODE: static
           NODE_ENV: production
 
+      - name: Inject signing public key
+        run: |
+          jq --arg key "$TAURI_SIGNING_PUBLIC_KEY" \
+            '.plugins.updater.pubkey = $key' \
+            desktop/src-tauri/tauri.conf.json > tauri.conf.json.tmp
+          mv tauri.conf.json.tmp desktop/src-tauri/tauri.conf.json
+        env:
+          TAURI_SIGNING_PUBLIC_KEY: ${{ secrets.TAURI_SIGNING_PUBLIC_KEY }}
+
       - name: Build Universal Binary
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          TAURI_SIGNING_PUBLIC_KEY: ${{ secrets.TAURI_SIGNING_PUBLIC_KEY }}
         with:
           projectPath: ./desktop
           args: '--target universal-apple-darwin'
