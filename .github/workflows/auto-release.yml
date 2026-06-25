@@ -3,7 +3,7 @@ name: Auto Release on /update
 on:
   push:
     branches:
-      - main
+      - master
 
 jobs:
   check-update-trigger:
