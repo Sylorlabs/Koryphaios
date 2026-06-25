@@ -11,6 +11,7 @@ jobs:
     outputs:
       should_release: ${{ steps.check.outputs.should_release }}
       new_version: ${{ steps.bump.outputs.new_version }}
+      release_body: ${{ steps.changelog.outputs.release_body }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -21,41 +22,90 @@ jobs:
         id: check
         run: |
           COMMIT_MSG="${{ github.event.head_commit.message }}"
-          echo "Commit message: $COMMIT_MSG"
-          
           if echo "$COMMIT_MSG" | grep -q "/update"; then
             echo "should_release=true" >> $GITHUB_OUTPUT
-            echo "🚀 /update trigger detected - will create release"
           else
             echo "should_release=false" >> $GITHUB_OUTPUT
-            echo "No /update trigger found - skipping release"
           fi
 
       - name: Bump version
         id: bump
         if: steps.check.outputs.should_release == 'true'
         run: |
-          # Get current version from package.json
           CURRENT=$(jq -r .version package.json)
-          echo "Current version: $CURRENT"
-          
-          # Bump patch version (0.2.0 -> 0.2.1)
           IFS='.' read -r MAJOR MINOR PATCH <<< "$CURRENT"
           NEW_VERSION="$MAJOR.$MINOR.$((PATCH + 1))"
-          
-          echo "New version: $NEW_VERSION"
           echo "new_version=$NEW_VERSION" >> $GITHUB_OUTPUT
-          
-          # Update package.json
-          jq ".version = \"$NEW_VERSION\"" package.json > package.json.tmp
-          mv package.json.tmp package.json
-          
-          # Update Cargo.toml
+
+          jq ".version = \"$NEW_VERSION\"" package.json > package.json.tmp && mv package.json.tmp package.json
           sed -i "s/^version = \"$CURRENT\"/version = \"$NEW_VERSION\"/" desktop/src-tauri/Cargo.toml
-          
-          # Update tauri.conf.json
-          jq ".version = \"$NEW_VERSION\"" desktop/src-tauri/tauri.conf.json > tauri.conf.json.tmp
-          mv tauri.conf.json.tmp desktop/src-tauri/tauri.conf.json
+          jq ".version = \"$NEW_VERSION\"" desktop/src-tauri/tauri.conf.json > tauri.conf.json.tmp && mv tauri.conf.json.tmp desktop/src-tauri/tauri.conf.json
+
+      - name: Generate changelog
+        id: changelog
+        if: steps.check.outputs.should_release == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Get last release tag
+          LAST_TAG=$(gh release list --limit 1 --json tagName --jq '.[0].tagName' 2>/dev/null || echo "")
+          RANGE="${LAST_TAG:+$LAST_TAG..HEAD}"
+          [ -z "$RANGE" ] && RANGE="HEAD~30..HEAD"
+
+          node -e "
+          const { execSync } = require('child_process');
+          const { writeFileSync } = require('fs');
+
+          const raw = execSync('git log $RANGE --pretty=format:\"%s\" --no-merges 2>/dev/null || echo \"\"').toString();
+          const commits = raw.split('\n').filter(Boolean);
+
+          const features = [], fixes = [], improvements = [];
+          const changesJson = [];
+
+          for (const c of commits) {
+            if (/^\[GHOST\]|^chore:|^\[skip ci\]/i.test(c)) continue;
+            if (/^feat(\(.*?\))?:/i.test(c)) {
+              const d = c.replace(/^feat(\(.*?\))?:\s*/i, '');
+              features.push(d);
+              changesJson.push({ type: 'feature', description: d });
+            } else if (/^fix(\(.*?\))?:/i.test(c)) {
+              const d = c.replace(/^fix(\(.*?\))?:\s*/i, '');
+              fixes.push(d);
+              changesJson.push({ type: 'fix', description: d });
+            } else if (/^perf|^refactor|^improve/i.test(c)) {
+              const d = c.replace(/^(perf|refactor|improve)(\(.*?\))?:\s*/i, '');
+              improvements.push(d);
+              changesJson.push({ type: 'improvement', description: d });
+            } else {
+              improvements.push(c);
+              changesJson.push({ type: 'improvement', description: c });
+            }
+          }
+
+          if (!changesJson.length) {
+            improvements.push('Minor updates and stability improvements');
+            changesJson.push({ type: 'improvement', description: 'Minor updates and stability improvements' });
+          }
+
+          let md = '';
+          if (features.length) md += '### ✨ Features\n' + features.map(f => '- ' + f).join('\n') + '\n\n';
+          if (fixes.length)    md += '### 🐛 Bug Fixes\n' + fixes.map(f => '- ' + f).join('\n') + '\n\n';
+          if (improvements.length) md += '### 🚀 Improvements\n' + improvements.map(i => '- ' + i).join('\n') + '\n\n';
+
+          md += '---\n\n';
+          md += '**macOS** · **Windows** · **Linux** — download below or update automatically on next launch.\n\n';
+          md += '<!-- CHANGES_JSON\n' + JSON.stringify(changesJson) + '\n-->';
+
+          writeFileSync('release-notes.md', md);
+          console.log('Changelog generated with', changesJson.length, 'entries');
+          "
+
+          # Output as multiline
+          {
+            echo 'release_body<<RELEASE_EOF'
+            cat release-notes.md
+            echo 'RELEASE_EOF'
+          } >> $GITHUB_OUTPUT
 
       - name: Commit version bump
         if: steps.check.outputs.should_release == 'true'
@@ -138,21 +188,7 @@ jobs:
           updaterJsonPreferNsis: true
           tagName: v${{ needs.check-update-trigger.outputs.new_version }}
           releaseName: "Koryphaios v${{ needs.check-update-trigger.outputs.new_version }}"
-          releaseBody: |
-            🚀 Auto-released via "/update" commit trigger
-            
-            **Changes:**
-            ${{ github.event.head_commit.message }}
-            
-            ---
-            
-            ### Installation
-            
-            **macOS:** Download the `.dmg` file
-            **Windows:** Download the `.msi` or `.exe` installer
-            **Linux:** Download `.deb`, `.rpm`, or `.AppImage`
-            
-            The app will automatically check for updates on launch.
+          releaseBody: ${{ needs.check-update-trigger.outputs.release_body }}
           releaseDraft: false
           prerelease: false
 
@@ -208,9 +244,22 @@ jobs:
           includeUpdaterJson: false
           tagName: v${{ needs.check-update-trigger.outputs.new_version }}
           releaseName: "Koryphaios v${{ needs.check-update-trigger.outputs.new_version }}"
-          releaseBody: |
-            🚀 Auto-released via "/update" commit trigger
-            
-            This is the macOS Universal build (works on both Intel and Apple Silicon).
+          releaseBody: "macOS Universal binary (Apple Silicon + Intel)."
           releaseDraft: false
           prerelease: false
+
+  notify-website:
+    needs: [check-update-trigger, build-and-release, build-macos-universal]
+    if: needs.check-update-trigger.outputs.should_release == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger Koryphaios.com rebuild
+        run: |
+          curl -s -X POST \
+            -H "Accept: application/vnd.github+json" \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            "https://api.github.com/repos/Sylorlabs/Koryphaios.com/dispatches" \
+            -d '{"event_type":"new_release","client_payload":{"version":"${{ needs.check-update-trigger.outputs.new_version }}"}}'
+          echo "Website rebuild triggered for v${{ needs.check-update-trigger.outputs.new_version }}"
+        env:
+          GH_TOKEN: ${{ secrets.CROSS_REPO_TOKEN }}
