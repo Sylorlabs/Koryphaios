@@ -77,6 +77,8 @@
     venice: ['venice'],
     zenmux: ['zenmux'],
     zai: ['zai'],
+    antigravity: ['antigravity'],
+    cursor: ['cursor'],
   };
 
   const themeAdaptiveSlugs = new Set([
@@ -107,6 +109,8 @@
     'nebius',
     'lmstudio',
     'zenmux',
+    'grok',
+    'cursor',
   ]);
 
   const monochromeFirstProviders = new Set([
@@ -116,6 +120,8 @@
     'nebius',
     'lmstudio',
     'zenmux',
+    'grok',
+    'cursor',
   ]);
 
   let loadError = $state(false);
