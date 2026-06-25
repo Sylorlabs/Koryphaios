@@ -28,6 +28,7 @@
     "@fontsource/space-grotesk": "^5.2.10",
     "@koryphaios/shared": "workspace:*",
     "@lobehub/icons-static-svg": "^1.86.0",
+    "@tauri-apps/api": "~2",
     "@tauri-apps/plugin-clipboard-manager": "~2",
     "@types/dompurify": "^3.2.0",
     "diff-match-patch": "^1.0.5",
