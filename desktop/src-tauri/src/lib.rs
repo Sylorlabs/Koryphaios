@@ -439,6 +439,7 @@ fn load_window_state(app: &tauri::AppHandle) -> Option<WindowState> {
 
 #[cfg(target_os = "macos")]
 fn create_native_menu(app: &tauri::AppHandle) -> AppResult<Menu<tauri::Wry>> {
+    let config = AppConfig::get();
     // File menu
     let new_session =
         MenuItem::with_id(app, "new_session", "New Session", true, Some("CmdOrCtrl+N"))
