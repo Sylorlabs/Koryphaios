@@ -11,6 +11,7 @@ import { TelegramBridge } from './telegram/bot';
 import { DiscordBridge } from './discord/bot';
 import { SlackBridge } from './slack/bot';
 import type { AppConfig } from './config-schema';
+import type { QueueService } from './queue';
 
 export interface AppContext {
   config: AppConfig;
@@ -23,6 +24,7 @@ export interface AppContext {
   kory: KoryManager;
   wsManager: WSManager;
   timeTravel: TimeTravelService;
+  queueService?: QueueService;
   telegram?: TelegramBridge;
   discord?: DiscordBridge;
   slack?: SlackBridge;

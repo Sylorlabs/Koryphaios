@@ -19,6 +19,8 @@ import type { WSClientData } from './ws/ws-manager';
 import { validateLocalBearerToken } from './auth/local-route-auth';
 import { getDb } from './db';
 import { shutdownAllBrokers } from './pubsub';
+import { getCorsHeaders } from './security';
+import { handleDashboardRequest } from './queue';
 
 // Routes
 import { sessionRoutes } from './routes/v1/sessions';
@@ -38,13 +40,6 @@ import { processRoutes } from './routes/v1/processes';
 
 // Define base Elysia App for export
 const baseApp = new Elysia()
-  .get('/api/health', () => ({
-    ok: true,
-    data: {
-      version: VERSION,
-      uptime: process.uptime(),
-    },
-  }))
   .get('/api/project', async () => {
     const { basename } = await import('node:path');
     const projectName = basename(PROJECT_ROOT);
@@ -77,7 +72,7 @@ async function main() {
   // Bootstrap dependencies
   const ctx = await bootstrap();
   setContext(ctx);
-  const { config, kory, providers, sessions, messages, wsManager, telegram, discord, slack } = ctx;
+  const { config, kory, providers, sessions, messages, wsManager, telegram, discord, slack, queueService } = ctx;
 
   const rateLimiter = new RateLimiter(RATE_LIMIT.MAX_REQUESTS, RATE_LIMIT.WINDOW_MS);
 
@@ -96,6 +91,15 @@ async function main() {
         return { ok: false, error: 'Rate limit exceeded' };
       }
     })
+    .get('/api/health', () => ({
+      ok: true,
+      data: {
+        version: VERSION,
+        uptime: process.uptime(),
+        queueSystem: queueService?.getStatus() ?? null,
+        redisConnected: queueService?.getStatus().redisConnected ?? false,
+      },
+    }))
     .use(baseApp)
     .all('/api/*', ({ set }) => {
       set.status = 404;
@@ -115,6 +119,8 @@ async function main() {
     hostname: serverConfig.host,
     async fetch(req, srv) {
       const url = new URL(req.url);
+      const method = req.method;
+      const origin = req.headers.get('origin');
 
       // 1. WebSocket upgrade
       if (url.pathname === '/ws') {
@@ -139,12 +145,25 @@ async function main() {
         });
       }
 
-      // 2. API Routes
+      // 2. Queue dashboard
+      const dashboardResponse = await handleDashboardRequest(url.pathname, method);
+      if (dashboardResponse) {
+        const headers = new Headers(dashboardResponse.headers);
+        for (const [key, value] of Object.entries(getCorsHeaders(origin))) {
+          if (!headers.has(key)) headers.set(key, value);
+        }
+        return new Response(dashboardResponse.body, {
+          status: dashboardResponse.status,
+          headers,
+        });
+      }
+
+      // 3. API Routes
       if (url.pathname.startsWith('/api')) {
         return runningApp.handle(req);
       }
 
-      // 3. Static Frontend Files
+      // 4. Static Frontend Files
       const frontendBuildDir = resolve(join(PROJECT_ROOT, "frontend", "build", "client"));
       let filePath = resolve(join(frontendBuildDir, url.pathname));
 
@@ -161,13 +180,13 @@ async function main() {
         return new Response(file);
       }
 
-      // 4. SPA Fallback (Routing handled by frontend)
+      // 5. SPA Fallback (Routing handled by frontend)
       const indexHtml = Bun.file(join(frontendBuildDir, 'index.html'));
       if (await indexHtml.exists()) {
         return new Response(indexHtml);
       }
 
-      // 5. Final Fallback
+      // 6. Final Fallback
       return new Response('Not Found', { status: 404 });
     },
     websocket: createWebSocketHandlers({ wsManager, sessions, kory, providers }),
@@ -212,6 +231,10 @@ async function main() {
     server.stop(true);
     kory.cancel();
     shutdownAllBrokers();
+    if (queueService) {
+      await queueService.close();
+      serverLog.info('Queue service closed');
+    }
     try { getDb().close(); } catch (e) { /* ignore */ }
     process.exit(0);
   }

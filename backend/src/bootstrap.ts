@@ -61,6 +61,12 @@ import { loadPlugins } from './server/plugins';
 import { setContext, type AppContext } from './context';
 import { getModeManager } from './mode';
 import { TimeTravelService } from './services/timetravel';
+import {
+  createQueueService,
+  getRedisConnection,
+  testRedisConnection,
+  type QueueService,
+} from './queue';
 
 export async function bootstrap(): Promise<AppContext> {
   // Load environment and validate
@@ -88,6 +94,23 @@ export async function bootstrap(): Promise<AppContext> {
   const providers = new ProviderRegistry(config);
   await providers.initializeEncryptedCredentials();
 
+  // Queue system (optional — degrades gracefully without Redis)
+  getRedisConnection();
+  let queueService: QueueService | undefined;
+  const redisAvailable = await testRedisConnection();
+  if (redisAvailable) {
+    queueService = await createQueueService(providers, {
+      llmWorkerConcurrency: 3,
+      fileWorkerConcurrency: 5,
+      embeddingWorkerConcurrency: 2,
+      projectRoot: PROJECT_ROOT,
+      enableDashboard: true,
+    });
+    serverLog.info({ status: queueService.getStatus() }, 'Queue service initialized');
+  } else {
+    serverLog.warn('Redis unavailable — queue features disabled');
+  }
+
   const tools = await initTools();
 
   // MCP Connections
@@ -108,6 +131,7 @@ export async function bootstrap(): Promise<AppContext> {
     messages,
     tasks,
     timeTravel,
+    queueService,
   );
   applyModeIntegration(kory);
 
@@ -129,6 +153,7 @@ export async function bootstrap(): Promise<AppContext> {
     kory,
     wsManager,
     timeTravel,
+    queueService,
     ...bridges,
   };
 

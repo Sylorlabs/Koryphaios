@@ -42,8 +42,8 @@ describe('KoryManager (Original) - Smoke Tests', () => {
 
 describe('KoryManager - Method Signatures', () => {
   it('should have correct constructor signature', () => {
-    // Constructor takes: providers, tools, workingDirectory, config, sessions, messages, tasks, timeTravel
-    expect(KoryManager.length).toBe(8);
+    // Constructor takes: providers, tools, workingDirectory, config, sessions, messages, tasks, timeTravel, queueService?
+    expect(KoryManager.length).toBe(9);
   });
 
   it('setYoloMode should accept boolean', () => {

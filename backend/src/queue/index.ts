@@ -301,6 +301,11 @@ export class QueueService {
     );
   }
 
+  /** True when workers are initialized and Redis is connected. */
+  isOperational(): boolean {
+    return this.initialized && isRedisConnected();
+  }
+
   /**
    * Close all queues and workers gracefully
    */

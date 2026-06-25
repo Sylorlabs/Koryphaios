@@ -47,6 +47,7 @@ import { GitManager } from './git-manager';
 import { WorkspaceManager } from './workspace-manager';
 import { EventEmitterService, WorkerLifecycleService, SessionStateService } from './services';
 import { TimeTravelService } from '../services';
+import type { QueueService } from '../queue';
 import { RoutingServiceEnhanced } from './services/RoutingServiceEnhanced';
 import {
   parseCriticVerdict,
@@ -206,6 +207,7 @@ export class KoryManager {
     private messages?: IMessageStore,
     private tasks?: ITaskStore,
     private timeTravel?: TimeTravelService,
+    private queueService?: QueueService,
   ) {
     this.memoryDir = join(workingDirectory, '.koryphaios/memory');
     mkdirSync(this.memoryDir, { recursive: true });
@@ -257,6 +259,11 @@ export class KoryManager {
   setYoloMode(enabled: boolean) {
     this.isYoloMode = enabled;
     koryLog.info({ enabled }, 'YOLO mode state updated');
+  }
+
+  /** Background job queue (LLM, file, embedding) when Redis is available. */
+  getQueueService(): QueueService | undefined {
+    return this.queueService;
   }
 
   /** Reasoning level the manager uses for delegated workers (from config). */
