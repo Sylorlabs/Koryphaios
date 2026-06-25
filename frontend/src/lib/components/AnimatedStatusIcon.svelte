@@ -141,6 +141,27 @@
     </svg>
   </div>
 
+{:else if status === 'searching'}
+  <!-- Globe with pulsing signal rings -->
+  <div class="status-icon searching" style="width: {size}px; height: {size}px;">
+    <svg viewBox="0 0 24 24" fill="none" width={size} height={size}>
+      <!-- Pulse rings -->
+      <circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="0.7" class="text-sky-400 search-ring ring-a"/>
+      <circle cx="12" cy="12" r="7" stroke="currentColor" stroke-width="0.7" class="text-sky-400 search-ring ring-b"/>
+      <!-- Globe circle -->
+      <circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="1.5" class="text-sky-400"/>
+      <!-- Latitude lines -->
+      <path d="M3 12h18" stroke="currentColor" stroke-width="1" class="text-sky-300/70"/>
+      <path d="M5 7.5h14" stroke="currentColor" stroke-width="0.8" class="text-sky-300/50"/>
+      <path d="M5 16.5h14" stroke="currentColor" stroke-width="0.8" class="text-sky-300/50"/>
+      <!-- Longitude curves -->
+      <path d="M12 3c-3 3-3 12 0 18" stroke="currentColor" stroke-width="1" class="text-sky-300/70"/>
+      <path d="M12 3c3 3 3 12 0 18" stroke="currentColor" stroke-width="1" class="text-sky-300/70"/>
+      <!-- Signal dot -->
+      <circle cx="12" cy="12" r="1.5" fill="currentColor" class="text-sky-300 search-dot"/>
+    </svg>
+  </div>
+
 {:else if status === 'reading'}
   <!-- Eyeball looking left/right with occasional blink -->
   <div class="status-icon reading" style="width: {size}px; height: {size}px;">
@@ -383,6 +404,31 @@
     50% { transform: rotate(180deg); opacity: 0.6; }
     75% { opacity: 0.9; }
     100% { transform: rotate(360deg); opacity: 0.6; }
+  }
+
+  /* ── Searching: globe with pulsing signal rings ────────── */
+  .searching {
+    animation: globe-spin 4s linear infinite;
+    transform-origin: 12px 12px;
+  }
+  .searching .search-ring {
+    animation: search-pulse 2s ease-out infinite;
+    transform-origin: 12px 12px;
+  }
+  .searching .ring-b { animation-delay: 0.5s; }
+  .searching .search-dot { animation: dot-ping 2s ease-in-out infinite; }
+  @keyframes globe-spin {
+    0%, 100% { transform: rotate(0deg); }
+    50% { transform: rotate(5deg); }
+  }
+  @keyframes search-pulse {
+    0% { opacity: 0.8; transform: scale(0.85); }
+    60% { opacity: 0.15; transform: scale(1.15); }
+    100% { opacity: 0; transform: scale(1.25); }
+  }
+  @keyframes dot-ping {
+    0%, 100% { opacity: 1; r: 1.5; }
+    50% { opacity: 0.4; r: 2.5; }
   }
 
   /* ── Reading: eyeball looking left/right with blink ───── */
