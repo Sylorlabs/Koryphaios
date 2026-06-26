@@ -262,6 +262,10 @@
 
   async function send() {
     if (disabled) return;
+    if (!selectedModel) {
+      showModelPicker = true;
+      return;
+    }
     if (configurationWarning) {
       onOpenSettings?.();
       return;
