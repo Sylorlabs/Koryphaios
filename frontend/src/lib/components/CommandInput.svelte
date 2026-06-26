@@ -103,8 +103,18 @@
     const models: Array<{ label: string; value: string; provider: string }> = [];
     for (const p of wsStore.providers) {
       if (p.authenticated) {
-        for (const m of p.models) {
-          models.push({ label: `(${providerLabel(p.name)}) ${m}`, value: `${p.name}:${m}`, provider: p.name });
+        const enabledIds = new Set(p.models);
+        const catalog = (p as any).allAvailableModels as Array<{ id: string; name: string }> | undefined;
+        if (catalog && catalog.length > 0) {
+          for (const m of catalog) {
+            if (enabledIds.size === 0 || enabledIds.has(m.id)) {
+              models.push({ label: m.name, value: `${p.name}:${m.id}`, provider: p.name });
+            }
+          }
+        } else {
+          for (const m of p.models) {
+            models.push({ label: m, value: `${p.name}:${m}`, provider: p.name });
+          }
         }
       }
     }
@@ -115,7 +125,11 @@
     if (!selectedModel) return 'Select model';
     const parsed = parseModelSelection(selectedModel);
     if (!parsed.model || !parsed.provider) return selectedModel;
-    return `(${providerLabel(parsed.provider)}) ${parsed.model}`;
+    const provider = wsStore.providers.find(p => p.name === parsed.provider);
+    const catalog = (provider as any)?.allAvailableModels as Array<{ id: string; name: string }> | undefined;
+    const modelDef = catalog?.find(m => m.id === parsed.model);
+    if (modelDef) return modelDef.name;
+    return parsed.model;
   });
 
   // Cooldown to prevent duplicate sends (double Enter, key repeat, double-click)
@@ -403,14 +417,11 @@
     if (!selectedModel) return '';
     const modelId = currentModel;
     if (!modelId) return currentProvider.charAt(0).toUpperCase() + currentProvider.slice(1);
-    
-    // Try to find in wsStore models if they have names, otherwise clean up the ID
     const provider = wsStore.providers.find(p => p.name === currentProvider);
-    if (provider) {
-      // If we had a model catalog on frontend we'd use it, for now prettify the ID
-      return modelId.split('-').map((word: string) => word.charAt(0).toUpperCase() + word.slice(1)).join(' ');
-    }
-    return modelId;
+    const catalog = (provider as any)?.allAvailableModels as Array<{ id: string; name: string }> | undefined;
+    const modelDef = catalog?.find(m => m.id === modelId);
+    if (modelDef) return modelDef.name;
+    return modelId.split('-').map((word: string) => word.charAt(0).toUpperCase() + word.slice(1)).join(' ');
   });
 
   function handleClickOutside(e: MouseEvent) {
