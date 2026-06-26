@@ -31,6 +31,8 @@ export interface ModelDef {
   beta?: boolean;
   vision?: boolean;
   functionCall?: boolean;
+  /** For alias-based CLI models: the real resolved model ID (e.g. 'claude-opus-4-8' for alias 'opus') */
+  realModelId?: string;
 }
 
 export interface ProviderConfig {

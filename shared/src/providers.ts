@@ -136,6 +136,8 @@ export interface ModelDef {
   isGeneric?: boolean;
   /** Whether this model is deprecated and should not be used for new sessions */
   deprecated?: boolean;
+  /** For alias-based CLI models: the real resolved model ID (e.g. 'claude-opus-4-8' for alias 'opus') */
+  realModelId?: string;
 }
 
 export interface ProviderConfig {

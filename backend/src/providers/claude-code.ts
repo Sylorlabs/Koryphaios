@@ -24,9 +24,117 @@ import {
 import { detectClaudeCodeLogin } from './auth-utils';
 import { providerLog } from '../logger';
 import { recordClaudeCodeRateLimit } from '../credit-accountant';
+import { ClaudeCodeModels } from './models/claude-code';
 
 const CLAUDE_STREAM_TIMEOUT_MS = 300_000;
 const DEFAULT_CLI_MODEL = 'sonnet';
+const MODELS_CACHE_TTL_MS = 5 * 60_000;
+
+// ── Dynamic alias → real model ID discovery ────────────────────────────────
+
+// Module-level cache shared across all provider instances.
+let cachedModels: ModelDef[] | null = null;
+let cachedModelsAt = 0;
+let refreshInProgress = false;
+
+/**
+ * Probe a single claude alias (e.g. 'opus') by spawning a minimal headless
+ * run and reading the first assistant message's `model` field. Kills the child
+ * immediately after getting the ID so we spend negligible tokens.
+ */
+async function probeAlias(alias: string): Promise<string | null> {
+  return new Promise((resolve) => {
+    const child = spawn('claude', ['-p', '.', '--output-format', 'stream-json', '--model', alias], {
+      stdio: ['ignore', 'pipe', 'ignore'],
+      env: { ...process.env },
+    });
+
+    let buf = '';
+    let settled = false;
+
+    const done = (id: string | null) => {
+      if (settled) return;
+      settled = true;
+      try { child.kill('SIGTERM'); } catch { /* already gone */ }
+      resolve(id);
+    };
+
+    child.stdout.on('data', (chunk: Buffer) => {
+      buf += chunk.toString();
+      const lines = buf.split('\n');
+      buf = lines.pop() ?? '';
+      for (const line of lines) {
+        try {
+          const d = JSON.parse(line.trim()) as Record<string, unknown>;
+          if (
+            d.type === 'assistant' &&
+            d.message &&
+            typeof d.message === 'object' &&
+            typeof (d.message as Record<string, unknown>).model === 'string'
+          ) {
+            done((d.message as Record<string, unknown>).model as string);
+            return;
+          }
+        } catch { /* skip non-JSON */ }
+      }
+    });
+
+    child.once('exit', () => done(null));
+    child.once('error', () => done(null));
+    // Hard timeout so a hung probe never stalls the refresh.
+    setTimeout(() => done(null), 12_000);
+  });
+}
+
+/** Convert a real model ID to a human display name.
+ *  claude-opus-4-8        → "Claude Opus 4.8"
+ *  claude-haiku-4-5-20251001 → "Claude Haiku 4.5"
+ *  claude-fable-5         → "Claude Fable 5"
+ */
+function realIdToName(id: string): string {
+  // family + two-part version, optional date suffix
+  const m = id.match(/^claude-([a-z]+)-(\d+)-(\d+)/);
+  if (m) {
+    const family = m[1].charAt(0).toUpperCase() + m[1].slice(1);
+    return `Claude ${family} ${m[2]}.${m[3]}`;
+  }
+  // family + single version (e.g. claude-fable-5)
+  const s = id.match(/^claude-([a-z]+)-(\d+)$/);
+  if (s) {
+    const family = s[1].charAt(0).toUpperCase() + s[1].slice(1);
+    return `Claude ${family} ${s[2]}`;
+  }
+  return id;
+}
+
+function refreshModelsInBackground(): void {
+  if (refreshInProgress) return;
+  refreshInProgress = true;
+
+  const aliases = ClaudeCodeModels.map((m) => m.apiModelId!);
+
+  Promise.all(aliases.map((alias) => probeAlias(alias)))
+    .then((results) => {
+      const models: ModelDef[] = ClaudeCodeModels.map((base, i) => {
+        const realId = results[i];
+        if (!realId) return base;
+        return {
+          ...base,
+          realModelId: realId,
+          name: realIdToName(realId),
+        };
+      });
+      cachedModels = models;
+      cachedModelsAt = Date.now();
+      providerLog.debug({ provider: 'claude', models: models.map((m) => m.name) }, 'Claude Code model names refreshed');
+    })
+    .catch((err) => {
+      providerLog.warn({ provider: 'claude', err }, 'Claude Code alias probe failed');
+    })
+    .finally(() => {
+      refreshInProgress = false;
+    });
+}
 
 // Claude Code runs as a FULL AGENT here: it executes its OWN tools (Write/Edit/Bash/…) in
 // the project directory, and we parse its stream to surface progress, tool activity, and
@@ -106,13 +214,20 @@ export class ClaudeCodeProvider implements Provider {
 
   isAvailable(): boolean {
     if (this.config.disabled) return false;
-    // Either the user explicitly connected (marker stored as authToken) or the
-    // CLI is logged in on this machine. The CLI itself owns the real credential.
-    return !!this.config.authToken || detectClaudeCodeLogin();
+    const available = !!this.config.authToken || detectClaudeCodeLogin();
+    if (available && Date.now() - cachedModelsAt > MODELS_CACHE_TTL_MS) {
+      refreshModelsInBackground();
+    }
+    return available;
   }
 
   listModels(): ModelDef[] {
-    return getModelsForProvider('claude');
+    const fallback = getModelsForProvider('claude');
+    if (cachedModels && Date.now() - cachedModelsAt < MODELS_CACHE_TTL_MS) {
+      return cachedModels;
+    }
+    refreshModelsInBackground();
+    return cachedModels ?? fallback;
   }
 
   private resolveCliModel(modelId: string): string {
