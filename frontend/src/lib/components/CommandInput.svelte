@@ -62,11 +62,14 @@
     if (provider === 'openai') return 'OpenAI';
     if (provider === 'codex') return 'Codex';
     if (provider === 'anthropic') return 'Anthropic';
+    if (provider === 'claude') return 'Claude Code';
+    if (provider === 'antigravity') return 'Antigravity';
     if (provider === 'google') return 'Google';
     if (provider === 'xai') return 'xAI';
     if (provider === 'openrouter') return 'OpenRouter';
     if (provider === 'vertexai') return 'Vertex AI';
     if (provider === 'copilot') return 'Copilot';
+    if (provider === 'grok') return 'Grok Build';
     return provider.charAt(0).toUpperCase() + provider.slice(1);
   }
   
@@ -108,7 +111,7 @@
         if (catalog && catalog.length > 0) {
           for (const m of catalog) {
             if (enabledIds.size === 0 || enabledIds.has(m.id)) {
-              models.push({ label: m.name, value: `${p.name}:${m.id}`, provider: p.name });
+              models.push({ label: `(${providerLabel(p.name)}) ${m.name}`, value: `${p.name}:${m.id}`, provider: p.name });
             }
           }
         } else {
@@ -128,7 +131,7 @@
     const provider = wsStore.providers.find(p => p.name === parsed.provider);
     const catalog = (provider as any)?.allAvailableModels as Array<{ id: string; name: string }> | undefined;
     const modelDef = catalog?.find(m => m.id === parsed.model);
-    if (modelDef) return modelDef.name;
+    if (modelDef) return `(${providerLabel(parsed.provider)}) ${modelDef.name}`;
     return parsed.model;
   });
 
