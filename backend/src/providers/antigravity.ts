@@ -228,16 +228,7 @@ export class AntigravityProvider implements Provider {
         const events: ProviderEvent[] = [];
         for (let i = 0; i < matches.length; i++) {
           sseRound++;
-          if (sseRound === 1) {
-            // First round = initial request. Show a lightweight "thinking" signal.
-            events.push({
-              type: 'tool_executed',
-              toolName: 'agy',
-              toolInput: cliModel,
-              toolOutput: 'Antigravity agent started',
-              isError: false,
-            });
-          } else {
+          if (sseRound > 1) {
             // Subsequent rounds = the agent completed a tool turn and is re-querying.
             events.push({
               type: 'tool_executed',
@@ -247,6 +238,7 @@ export class AntigravityProvider implements Provider {
               isError: false,
             });
           }
+          // sseRound === 1 is the initial request — no tool was called, don't show a tool event.
         }
         return events;
       } catch {
