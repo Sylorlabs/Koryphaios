@@ -108,7 +108,7 @@
         if (catalog && catalog.length > 0) {
           for (const m of catalog) {
             if (enabledIds.size === 0 || enabledIds.has(m.id)) {
-              models.push({ label: m.name, value: `${p.name}:${m.id}`, provider: p.name });
+              models.push({ label: `(${providerLabel(p.name)}) ${m.name}`, value: `${p.name}:${m.id}`, provider: p.name });
             }
           }
         } else {
@@ -128,7 +128,7 @@
     const provider = wsStore.providers.find(p => p.name === parsed.provider);
     const catalog = (provider as any)?.allAvailableModels as Array<{ id: string; name: string }> | undefined;
     const modelDef = catalog?.find(m => m.id === parsed.model);
-    if (modelDef) return modelDef.name;
+    if (modelDef) return `(${providerLabel(parsed.provider)}) ${modelDef.name}`;
     return parsed.model;
   });
 
