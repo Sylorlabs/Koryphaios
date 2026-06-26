@@ -8,6 +8,8 @@
 import type { WorkerDomain, ProviderName, KoryphaiosConfig } from '@koryphaios/shared';
 import { resolveModel, isLegacyModel, getNonLegacyModels } from '../../providers';
 import { DOMAIN } from '../../constants';
+import type { ProviderRegistry } from '../../providers/registry';
+import { SmartRouterService } from './SmartRouterService';
 
 export interface RoutingDecision {
   model: string;
@@ -16,6 +18,7 @@ export interface RoutingDecision {
 
 export interface RoutingServiceEnhancedConfig {
   config: KoryphaiosConfig;
+  providers?: ProviderRegistry;
 }
 
 /**
@@ -24,9 +27,13 @@ export interface RoutingServiceEnhancedConfig {
  */
 export class RoutingServiceEnhanced {
   private config: KoryphaiosConfig;
+  private smartRouter: SmartRouterService | undefined;
 
   constructor(deps: RoutingServiceEnhancedConfig) {
     this.config = deps.config;
+    if (deps.providers) {
+      this.smartRouter = new SmartRouterService(deps.providers);
+    }
   }
 
   /**
@@ -57,11 +64,20 @@ export class RoutingServiceEnhanced {
    * Resolves the routing (model/provider) for a domain.
    * Prioritizes user selection when provided.
    * When avoidLegacy is true, never returns a legacy/deprecated model.
+   *
+   * Auto mode order:
+   *   1. Explicit provider:model string → honor as-is
+   *   2. Bare model ID (not "auto") → look up in catalog
+   *   3. Category assignment in config → honor
+   *   4. SmartRouterService (task-aware, live-catalog) if available
+   *   5. DOMAIN.DEFAULT_MODELS static fallback
    */
   resolveActiveRouting(
     preferredModel?: string,
     domain: WorkerDomain = 'general',
     avoidLegacy = false,
+    prompt?: string,
+    preferCheap?: boolean,
   ): RoutingDecision {
     let out: RoutingDecision;
 
@@ -69,8 +85,6 @@ export class RoutingServiceEnhanced {
       const [p, m] = preferredModel.split(':');
       out = { provider: p as ProviderName, model: m! };
     } else if (preferredModel && preferredModel !== 'auto' && resolveModel(preferredModel)) {
-      // Honor a bare model id (e.g. "claude-code-haiku") by resolving its provider
-      // from the catalog, instead of silently dropping it for the domain default.
       const def = resolveModel(preferredModel)!;
       out = { model: preferredModel, provider: def.provider };
     } else {
@@ -78,6 +92,17 @@ export class RoutingServiceEnhanced {
       if (assignment && assignment.includes(':')) {
         const [p, m] = assignment.split(':');
         out = { provider: p as ProviderName, model: m! };
+      } else if (this.smartRouter) {
+        // Task-aware selection from live catalog
+        const decision = this.smartRouter.route({ prompt, domain, preferCheap });
+        if (decision) {
+          out = { model: decision.model, provider: decision.provider };
+        } else {
+          // SmartRouter returned nothing (no providers) — fall through to static default
+          const modelId = DOMAIN.DEFAULT_MODELS[domain] ?? DOMAIN.DEFAULT_MODELS.general;
+          const def = resolveModel(modelId)!;
+          out = { model: modelId, provider: def.provider };
+        }
       } else {
         const modelId = DOMAIN.DEFAULT_MODELS[domain] ?? DOMAIN.DEFAULT_MODELS.general;
         const def = resolveModel(modelId)!;

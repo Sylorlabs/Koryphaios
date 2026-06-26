@@ -3,6 +3,7 @@
 
 export { ClarificationService } from './ClarificationService';
 export { RoutingServiceEnhanced } from './RoutingServiceEnhanced';
+export { SmartRouterService, type SmartRoutingDecision, type TaskType as SmartRouterTaskType } from './SmartRouterService';
 export { SessionStateService } from './SessionStateService';
 export {
   CriticGateService,

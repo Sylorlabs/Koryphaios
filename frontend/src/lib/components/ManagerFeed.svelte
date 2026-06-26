@@ -3,8 +3,9 @@
   import { appStore } from '$lib/stores/app.svelte';
   import { isMac } from '$lib/utils/platform';
   import { onMount } from 'svelte';
-  import { 
-    MessageSquare, 
+  import { fade } from 'svelte/transition';
+  import {
+    MessageSquare,
     ArrowDown,
     Trash2,
     Paintbrush,
@@ -81,22 +82,38 @@
   }
   
   onMount(() => {
-    if (feedContainer) {
-      const container = feedContainer;
-      // Track container resize and update autoscroll status.
-      const ro = new ResizeObserver(entries => {
-        for (const entry of entries) {
-          if (autoScroll) {
-            container.scrollTop = container.scrollHeight;
-          } else {
-            const dist = container.scrollHeight - container.scrollTop - entry.contentRect.height;
-            autoScroll = dist < 50;
-          }
+    if (!feedContainer) return;
+    const container = feedContainer;
+
+    const ro = new ResizeObserver(entries => {
+      for (const entry of entries) {
+        if (autoScroll) {
+          container.scrollTop = container.scrollHeight;
+        } else {
+          const dist = container.scrollHeight - container.scrollTop - entry.contentRect.height;
+          autoScroll = dist < 50;
         }
+      }
+    });
+    ro.observe(container);
+
+    // Scroll during streaming: fire on any DOM content change inside the feed
+    let rafId: number | null = null;
+    const mo = new MutationObserver(() => {
+      if (!autoScroll) return;
+      if (rafId !== null) return;
+      rafId = requestAnimationFrame(() => {
+        rafId = null;
+        if (autoScroll) container.scrollTop = container.scrollHeight;
       });
-      ro.observe(container);
-      return () => ro.disconnect();
-    }
+    });
+    mo.observe(container, { childList: true, subtree: true, characterData: true });
+
+    return () => {
+      ro.disconnect();
+      mo.disconnect();
+      if (rafId !== null) cancelAnimationFrame(rafId);
+    };
   });
 
   function toggleGroup(id: string) {
@@ -201,23 +218,15 @@
           <Trash2 size={12} />Delete {selectedEntries.size}
         </button>
       {/if}
-      {#if !autoScroll}
-        <button
-          onclick={() => { autoScroll = true; if (feedContainer) feedContainer.scrollTop = feedContainer.scrollHeight; }}
-          class="btn btn-secondary flex items-center gap-1.5"
-          style="padding: 4px 10px; font-size: 11px;"
-        >
-          <ArrowDown size={12} />Bottom
-        </button>
-      {/if}
     </div>
   </div>
 
-  <div
-    bind:this={feedContainer}
-    onscroll={handleScroll}
-    class="flex-1 overflow-y-auto p-4 space-y-3 feed-scroll"
-  >
+  <div class="relative flex-1 min-h-0 overflow-hidden">
+    <div
+      bind:this={feedContainer}
+      onscroll={handleScroll}
+      class="absolute inset-0 overflow-y-auto p-4 space-y-3 feed-scroll"
+    >
     {#if filteredFeed.length === 0}
       <div class="px-6 py-10 max-w-5xl mx-auto">
         <div class="flex gap-5 animate-in fade-in slide-in-from-bottom-4 duration-700">
@@ -376,8 +385,26 @@
         />
       {/each}
     {/if}
-  </div>
-</div>
+    </div><!-- /feedContainer -->
+
+  {#if !autoScroll}
+    <div
+      transition:fade={{ duration: 150 }}
+      class="absolute bottom-4 left-1/2 z-10 -translate-x-1/2 pointer-events-none"
+    >
+      <button
+        onclick={() => { autoScroll = true; if (feedContainer) feedContainer.scrollTop = feedContainer.scrollHeight; }}
+        class="pointer-events-auto flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-medium shadow-lg backdrop-blur-sm transition-transform hover:scale-105 active:scale-95"
+        style="background: var(--color-surface-2); border-color: var(--color-border); color: var(--color-text-secondary); box-shadow: 0 4px 16px rgba(0,0,0,0.35);"
+        aria-label="Scroll to bottom"
+      >
+        <ArrowDown size={12} />
+        <span>Jump to bottom</span>
+      </button>
+    </div>
+  {/if}
+  </div><!-- /relative wrapper -->
+</div><!-- /outer -->
 
 <style>
   :global(.markdown-content) { font-size: 14px; line-height: 1.7; }

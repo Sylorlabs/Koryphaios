@@ -217,7 +217,7 @@ export class KoryManager {
 
     // Initialize services
     this.events = new EventEmitterService({ managerAgentId: KORY_IDENTITY.id });
-    this.routing = new RoutingServiceEnhanced({ config: this.config });
+    this.routing = new RoutingServiceEnhanced({ config: this.config, providers: this.providers });
     this.workers = new WorkerLifecycleService({ events: this.events });
     this.state = new SessionStateService();
 
@@ -389,7 +389,7 @@ export class KoryManager {
     userMessage = sanitizeForPrompt(userMessage);
 
     // Resolve provider before any UI updates or work. No provider = manager responds once and returns.
-    let routing = this.resolveActiveRouting(preferredModel, 'general', true);
+    let routing = this.resolveActiveRouting(preferredModel, 'general', true, userMessage);
     let provider = await this.providers.resolveProvider(routing.model, routing.provider);
     if (!provider && (!preferredModel || preferredModel === 'auto')) {
       const fallback = this.providers.getFirstAvailableRouting();
@@ -460,8 +460,10 @@ export class KoryManager {
     preferredModel?: string,
     domain: WorkerDomain = 'general',
     avoidLegacy = false,
+    prompt?: string,
+    preferCheap?: boolean,
   ): { model: string; provider: ProviderName | undefined } {
-    return this.routing.resolveActiveRouting(preferredModel, domain, avoidLegacy);
+    return this.routing.resolveActiveRouting(preferredModel, domain, avoidLegacy, prompt, preferCheap);
   }
 
   private formatProviderName(provider: string): string {
@@ -854,7 +856,7 @@ export class KoryManager {
     attachments?: Array<{ type: string; data: string; name: string }>,
   ): Promise<void> {
     koryLog.debug({ sessionId, reasoningLevel, preferredModel }, 'Entering handleDirectly');
-    let routing = this.resolveActiveRouting(preferredModel, 'general', true);
+    let routing = this.resolveActiveRouting(preferredModel, 'general', true, userMessage);
     let provider = await this.providers.resolveProvider(routing.model, routing.provider);
     // Mirror processTask's fallback: for "auto" (or no model), if the routed model has no
     // available provider, fall back to the first available one — otherwise a configured

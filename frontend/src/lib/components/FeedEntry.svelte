@@ -16,7 +16,15 @@
     X,
     Pencil,
     Globe,
-    FileSearch
+    FileSearch,
+    FileText,
+    Search,
+    FolderSearch,
+    Folder,
+    FilePlus,
+    GitMerge,
+    MoveRight,
+    FileCode
   } from 'lucide-svelte';
   import { fly, fade } from 'svelte/transition';
   import { wsStore } from '$lib/stores/websocket.svelte';
@@ -201,6 +209,87 @@
     }
   }
 
+  function getToolShortLabel(meta?: Record<string, unknown>): string {
+    const m = meta as { toolCall?: { name?: string; input?: Record<string, unknown> } } | undefined;
+    const name = m?.toolCall?.name ?? '';
+    const input = (m?.toolCall?.input ?? {}) as Record<string, unknown>;
+    const rawPath = (input.path ?? input.file_path ?? input.filepath ?? '') as string;
+    const base = rawPath ? rawPath.split('/').pop() ?? rawPath : '';
+    switch (name) {
+      case 'read_file': return base || rawPath;
+      case 'write_file':
+      case 'edit_file':
+      case 'delete_file': return base || rawPath;
+      case 'move_file': {
+        const src = ((input.source ?? input.src ?? '') as string).split('/').pop() ?? '';
+        const dst = ((input.dest ?? input.destination ?? '') as string).split('/').pop() ?? '';
+        return src && dst ? `${src} → ${dst}` : name;
+      }
+      case 'grep': {
+        const pat = (input.pattern ?? input.regex ?? '') as string;
+        return base ? `"${pat}" in ${base}` : `"${pat}"`;
+      }
+      case 'glob': return (input.pattern ?? '') as string;
+      case 'ls': return base || '.';
+      case 'patch':
+      case 'diff': return base || name;
+      default: return name;
+    }
+  }
+
+  function getToolVerb(meta?: Record<string, unknown>): string {
+    const m = meta as { toolCall?: { name?: string } } | undefined;
+    switch (m?.toolCall?.name) {
+      case 'read_file': return 'read';
+      case 'write_file': return 'write';
+      case 'edit_file': return 'edit';
+      case 'delete_file': return 'delete';
+      case 'move_file': return 'move';
+      case 'grep': return 'grep';
+      case 'glob': return 'glob';
+      case 'ls': return 'ls';
+      case 'patch': return 'patch';
+      case 'diff': return 'diff';
+      default: return 'tool';
+    }
+  }
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  function getToolIcon(meta?: Record<string, unknown>): any {
+    const m = meta as { toolCall?: { name?: string } } | undefined;
+    switch (m?.toolCall?.name) {
+      case 'read_file':   return FileText;
+      case 'grep':        return Search;
+      case 'glob':        return FolderSearch;
+      case 'ls':          return Folder;
+      case 'write_file':  return FilePlus;
+      case 'edit_file':   return Pencil;
+      case 'patch':       return GitMerge;
+      case 'diff':        return FileCode;
+      case 'delete_file': return Trash2;
+      case 'move_file':   return MoveRight;
+      default:            return FileSearch;
+    }
+  }
+
+  function getBashCommand(meta?: Record<string, unknown>): string {
+    const m = meta as { toolCall?: { input?: Record<string, unknown> } } | undefined;
+    return (m?.toolCall?.input?.command as string) ?? '';
+  }
+
+  function getToolIconColor(meta?: Record<string, unknown>): string {
+    const m = meta as { toolCall?: { name?: string } } | undefined;
+    switch (m?.toolCall?.name) {
+      case 'delete_file': return 'text-red-400/50';
+      case 'write_file':
+      case 'edit_file':
+      case 'patch':
+      case 'diff':
+      case 'move_file':   return 'text-amber-400/50';
+      default:            return 'text-cyan-400/50';
+    }
+  }
+
   function getStatusForType(type: FeedEntryType, meta?: Record<string, unknown>): import('@koryphaios/shared').AgentStatus {
     switch (type) {
       case 'user_message': return 'idle';
@@ -274,23 +363,38 @@
       {:else if entry.type === 'tool_call' || entry.type === 'tool_result'}
           {@const toolCat = getToolCategory(entry.metadata)}
           {@const toolDisplay = getToolDisplay(toolCat)}
+          {@const isSimple = toolCat === 'read' || toolCat === 'write'}
+          {#if isSimple}
+            {#if entry.type === 'tool_call'}
+              {@const ToolIcon = getToolIcon(entry.metadata)}
+              <div class="mt-0.5 flex items-center gap-1.5 text-[11px]">
+                <ToolIcon size={11} class="{getToolIconColor(entry.metadata)} shrink-0" />
+                <span class="opacity-40 font-medium text-text-secondary">{getToolVerb(entry.metadata)}</span>
+                <span class="text-text-muted opacity-50 truncate max-w-xs">{getToolShortLabel(entry.metadata)}</span>
+              </div>
+            {/if}
+          {:else}
           <div class="mt-1 flex flex-col gap-2">
             <div
               class="rounded-lg border border-[var(--color-border)] overflow-hidden bg-[var(--color-surface-2)] transition-all"
               style={expandedTerminal ? 'max-height: 1000px;' : 'max-height: 120px;'}
             >
               <div class="flex items-center justify-between px-3 py-1.5 bg-[var(--color-surface-3)] border-b border-[var(--color-border)]">
-                <div class="flex items-center gap-2 text-[10px] font-bold uppercase tracking-widest {toolDisplay.colorClass}">
-                  {#if toolCat === 'read'}
-                    <FileSearch size={12} />
-                  {:else if toolCat === 'write'}
-                    <Pencil size={12} />
-                  {:else if toolCat === 'web'}
-                    <Globe size={12} />
-                  {:else}
-                    <Terminal size={12} />
+                <div class="flex items-center gap-2 min-w-0 flex-1 overflow-hidden">
+                  <div class="flex items-center gap-2 text-[10px] font-bold uppercase tracking-widest {toolDisplay.colorClass} shrink-0">
+                    {#if toolCat === 'web'}
+                      <Globe size={12} />
+                    {:else}
+                      <Terminal size={12} />
+                    {/if}
+                    <span>{entry.type === 'tool_call' ? toolDisplay.label : toolDisplay.resultLabel}</span>
+                  </div>
+                  {#if toolCat === 'bash'}
+                    {@const cmd = getBashCommand(entry.metadata)}
+                    {#if cmd}
+                      <span class="font-mono text-[11px] truncate opacity-60" style="color: var(--color-text-secondary);">$ {cmd}</span>
+                    {/if}
                   {/if}
-                  <span>{entry.type === 'tool_call' ? toolDisplay.label : toolDisplay.resultLabel}</span>
                 </div>
                 <button
                   type="button"
@@ -309,6 +413,7 @@
               </div>
             </div>
           </div>
+          {/if}
       {:else if entry.type === 'user_message' || entry.type === 'content' || entry.type === 'thought'}
           <div class="{getEntryColor(entry.type)} break-words mt-1 markdown-content">
             {@html parsedHtml}

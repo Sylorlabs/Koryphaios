@@ -18,12 +18,13 @@
   "enableCritic": true,
   "agentSettings": {
     "ruleEnforcementLevel": "strict",
-    "agentExecutionMode": "auto",
+    "agentExecutionMode": "single",
     "preferencesEnabled": true,
     "criticGateEnabled": true,
     "criticEnforcesPreferences": true,
     "autoApplySafeFixes": false,
     "confirmRuleViolations": true,
+    "autoRunTools": true,
     "agentMemoryEnabled": true,
     "agentCanUpdatePreferences": false,
     "maxCriticIterations": 3,
@@ -31,9 +32,9 @@
     "approvalThresholdLines": 100,
     "localWebSearch": "fallback",
     "multiSourceResearch": true,
-    "updatedAt": 1781385946807
+    "updatedAt": 1782433271098
   },
-  "updatedAt": 1781385946807,
+  "updatedAt": 1782433271098,
   "providers": {
     "anthropic": {
       "name": "anthropic",

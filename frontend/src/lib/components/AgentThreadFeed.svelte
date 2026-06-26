@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
+  import { fade } from 'svelte/transition';
   import type { AgentIdentity, AgentStatus } from '@koryphaios/shared';
   import type { FeedEntryLocal } from '$lib/types';
   import FeedEntry from './FeedEntry.svelte';
@@ -49,7 +50,8 @@
   onMount(() => {
     if (!feedContainer) return;
     const container = feedContainer;
-    const observer = new ResizeObserver((entries) => {
+
+    const ro = new ResizeObserver((entries) => {
       for (const entry of entries) {
         if (autoScroll) {
           container.scrollTop = container.scrollHeight;
@@ -59,8 +61,24 @@
         }
       }
     });
-    observer.observe(container);
-    return () => observer.disconnect();
+    ro.observe(container);
+
+    let rafId: number | null = null;
+    const mo = new MutationObserver(() => {
+      if (!autoScroll) return;
+      if (rafId !== null) return;
+      rafId = requestAnimationFrame(() => {
+        rafId = null;
+        if (autoScroll) container.scrollTop = container.scrollHeight;
+      });
+    });
+    mo.observe(container, { childList: true, subtree: true, characterData: true });
+
+    return () => {
+      ro.disconnect();
+      mo.disconnect();
+      if (rafId !== null) cancelAnimationFrame(rafId);
+    };
   });
 
   function toggleGroup(id: string) {
@@ -99,21 +117,10 @@
         </div>
       </div>
     </div>
-    {#if !autoScroll}
-      <button
-        onclick={() => {
-          autoScroll = true;
-          if (feedContainer) feedContainer.scrollTop = feedContainer.scrollHeight;
-        }}
-        class="btn btn-secondary flex items-center gap-1.5"
-        style="padding: 4px 10px; font-size: 11px;"
-      >
-        <ArrowDown size={12} />Bottom
-      </button>
-    {/if}
   </div>
 
-  <div bind:this={feedContainer} onscroll={handleScroll} class="flex-1 overflow-y-auto p-4 space-y-3 feed-scroll">
+  <div class="relative flex-1 min-h-0 overflow-hidden">
+    <div bind:this={feedContainer} onscroll={handleScroll} class="absolute inset-0 overflow-y-auto p-4 space-y-3 feed-scroll">
     {#if feed.length === 0}
       <div class="flex h-full items-center justify-center">
         <div class="max-w-lg rounded-[20px] border px-6 py-8 text-center" style="background: var(--color-surface-2); border-color: var(--color-border);">
@@ -138,5 +145,23 @@
         />
       {/each}
     {/if}
-  </div>
-</div>
+    </div><!-- /feedContainer -->
+
+  {#if !autoScroll}
+    <div
+      transition:fade={{ duration: 150 }}
+      class="absolute bottom-4 left-1/2 z-10 -translate-x-1/2 pointer-events-none"
+    >
+      <button
+        onclick={() => { autoScroll = true; if (feedContainer) feedContainer.scrollTop = feedContainer.scrollHeight; }}
+        class="pointer-events-auto flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-medium shadow-lg backdrop-blur-sm transition-transform hover:scale-105 active:scale-95"
+        style="background: var(--color-surface-2); border-color: var(--color-border); color: var(--color-text-secondary); box-shadow: 0 4px 16px rgba(0,0,0,0.35);"
+        aria-label="Scroll to bottom"
+      >
+        <ArrowDown size={12} />
+        <span>Jump to bottom</span>
+      </button>
+    </div>
+  {/if}
+  </div><!-- /relative wrapper -->
+</div><!-- /outer -->
