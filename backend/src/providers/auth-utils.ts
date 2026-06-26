@@ -44,6 +44,7 @@ export function clearCachedToken(key: string): void {
 const CODEX_CLI_AUTH_PREFIX = 'cli:codex:';
 const CLAUDE_CLI_AUTH_PREFIX = 'cli:claude:';
 const GROK_CLI_AUTH_PREFIX = 'cli:grok:';
+const ANTIGRAVITY_CLI_AUTH_PREFIX = 'cli:antigravity:';
 const KORY_CODEX_HOME = join(PROJECT_ROOT, '.koryphaios', 'codex-home');
 
 /** Grok Build CLI opt-in marker — the CLI owns its own auth (subscription or XAI key). */
@@ -52,6 +53,13 @@ export function isGrokCLIAuthMarker(value: string | null | undefined): boolean {
 }
 export function createGrokCLIAuthMarker(): string {
   return `${GROK_CLI_AUTH_PREFIX}${Date.now()}`;
+}
+
+export function isAntigravityCLIAuthMarker(value: string | null | undefined): boolean {
+  return typeof value === 'string' && value.startsWith(ANTIGRAVITY_CLI_AUTH_PREFIX);
+}
+export function createAntigravityCLIAuthMarker(): string {
+  return `${ANTIGRAVITY_CLI_AUTH_PREFIX}${Date.now()}`;
 }
 
 export function getKoryCodexHome(): string {

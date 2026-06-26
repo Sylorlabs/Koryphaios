@@ -19,6 +19,7 @@ import {
   detectCodexCLILogin,
   detectAntigravityApiKey,
   detectAntigravityCLILogin,
+  createAntigravityCLIAuthMarker,
   detectGrokCLILogin,
   detectGrokXaiKey,
   detectCursorCLILogin,
@@ -84,8 +85,8 @@ export function canAutoEnable(provider: ProviderName): boolean {
       return !!whichBinary('claude') && detectClaudeCodeLogin();
     case 'codex':
       return !!whichBinary('codex') && !!detectCodexAuthToken();
-    case 'google':
-      return !!whichBinary('agy') && !!detectAntigravityApiKey();
+    case 'antigravity':
+      return !!whichBinary('agy') && detectAntigravityCLILogin();
     case 'grok':
       // Grok Build subscription CLI — installed + logged in (subscription or xAI key).
       return !!whichBinary('grok') && detectGrokCLILogin();
@@ -109,8 +110,8 @@ export function cliAutoEnableCreds(
       return { authToken: createClaudeCLIAuthMarker() };
     case 'codex':
       return { authToken: createCodexCLIAuthMarker() };
-    case 'google':
-      return { apiKey: detectAntigravityApiKey() ?? undefined };
+    case 'antigravity':
+      return { authToken: createAntigravityCLIAuthMarker() };
     case 'grok':
       // The CLI owns the real token; the marker just signals "use the CLI harness".
       return { authToken: createGrokCLIAuthMarker() };
@@ -159,14 +160,14 @@ export function detectAgentClis(): AgentCliStatus[] {
   // needs an API key to drive the Google provider directly. ──
   const antigravityKey = detectAntigravityApiKey();
   const antigravityLogin = detectAntigravityCLILogin();
-  const antigravity = mk('antigravity', 'Antigravity CLI', ['agy'], 'google', {
+  const antigravity = mk('antigravity', 'Antigravity CLI', ['agy'], 'antigravity', {
     loggedIn: antigravityLogin,
     authSource: antigravityKey
       ? 'ANTIGRAVITY_API_KEY'
       : antigravityLogin
         ? '~/.gemini/antigravity-cli/'
         : null,
-    autoEnabled: canAutoEnable('google'),
+    autoEnabled: canAutoEnable('antigravity'),
     workingNote: antigravityKey
       ? 'Chats through the Google (Gemini) provider.'
       : antigravityLogin

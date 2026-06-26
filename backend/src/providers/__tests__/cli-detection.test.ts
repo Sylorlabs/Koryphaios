@@ -51,7 +51,7 @@ describe('detectAgentClis', () => {
     const byId = Object.fromEntries(list.map((c) => [c.id, c]));
     expect(byId.claude.provider).toBe('claude');
     expect(byId.codex.provider).toBe('codex');
-    expect(byId.antigravity.provider).toBe('google');
+    expect(byId.antigravity.provider).toBe('antigravity');
     expect(byId.grok.provider).toBe('grok'); // Grok Build has its own CLI-harness provider
     expect(byId.cursor.provider).toBeNull(); // no provider wired yet — detection-only
   });

@@ -29,6 +29,7 @@ import { CopilotProvider, exchangeGitHubTokenForCopilotAsync } from './copilot';
 import { CodexProvider } from './codex';
 import { ClaudeCodeProvider } from './claude-code';
 import { GrokBuildProvider } from './grok-build';
+import { AntigravityProvider } from './antigravity';
 import { BedrockProvider } from './bedrock';
 import { GitLabProvider } from './gitlab';
 import { SapAiProvider } from './sapai';
@@ -1000,6 +1001,9 @@ class ProviderRegistry {
       case 'grok':
         // Grok Build subscription — runs the official `grok` CLI harness (no direct API calls).
         return new GrokBuildProvider(config);
+      case 'antigravity':
+        // Antigravity subscription — runs the official `agy` CLI harness (no direct API calls).
+        return new AntigravityProvider(config);
       case 'kimicode':
         return new KimiCodeProvider(config);
       case 'openrouter':

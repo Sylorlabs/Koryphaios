@@ -16,6 +16,7 @@ export const ProviderName = {
   Claude: 'claude',
   Codex: 'codex',
   Grok: 'grok',
+  Antigravity: 'antigravity',
   Copilot: 'copilot',
 
   // Curated coding models (OpenCode Zen)
@@ -69,6 +70,7 @@ export const IMPLEMENTED_PROVIDERS: ProviderName[] = [
   'claude',
   'codex',
   'grok',
+  'antigravity',
   'openai',
   'google',
   'google-subscription',
