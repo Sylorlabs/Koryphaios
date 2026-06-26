@@ -62,11 +62,14 @@
     if (provider === 'openai') return 'OpenAI';
     if (provider === 'codex') return 'Codex';
     if (provider === 'anthropic') return 'Anthropic';
+    if (provider === 'claude') return 'Claude Code';
+    if (provider === 'antigravity') return 'Antigravity';
     if (provider === 'google') return 'Google';
     if (provider === 'xai') return 'xAI';
     if (provider === 'openrouter') return 'OpenRouter';
     if (provider === 'vertexai') return 'Vertex AI';
     if (provider === 'copilot') return 'Copilot';
+    if (provider === 'grok') return 'Grok Build';
     return provider.charAt(0).toUpperCase() + provider.slice(1);
   }
   
