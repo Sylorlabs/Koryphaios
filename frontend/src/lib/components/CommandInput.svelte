@@ -627,9 +627,6 @@
           style="background: var(--color-surface-3); color: {selectedModel ? 'var(--color-text-primary)' : 'var(--color-text-muted)'}; border: 1px solid var(--color-border);"
           onclick={() => showModelPicker = !showModelPicker}
         >
-          {#if selectedModel}
-            <Sparkles size={16} class="text-amber-400" />
-          {/if}
           <span>{selectedModelLabel}</span>
           <ChevronDown size={14} class="text-text-muted" />
         </button>
