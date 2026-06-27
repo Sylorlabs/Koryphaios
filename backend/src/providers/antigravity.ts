@@ -1,24 +1,21 @@
 // Antigravity CLI harness provider — runs Google's official `agy` CLI.
 //
-// Mirrors the Grok Build pattern (grok-build.ts): the Antigravity CLI owns its own auth
-// (Google subscription via `agy auth`, or ANTIGRAVITY_API_KEY in the environment),
-// so this provider never holds the credential — it shells out to the locally installed,
-// logged-in `agy` CLI in print mode and translates its output into Koryphaios
-// ProviderEvents. Koryphaios remains the single owner of its own tool loop.
+// Auth: `agy auth` (Google subscription OAuth) or ANTIGRAVITY_API_KEY in environment.
+// Koryphaios never holds the credential — it shells out to the locally installed CLI.
 //
 // Headless interface:
-//   agy --print "<prompt>" --model "<model>" --dangerously-skip-permissions
-//   → plain text response (no JSON output mode unlike grok or claude)
+//   agy --print "<prompt>" --model "<model>" --dangerously-skip-permissions --log-file <path>
 //
-// Model discovery:
-//   agy models → one model name per line; refreshed in background with a 5 min TTL.
+// Streaming (Option A): agy writes its raw Gemini SSE traffic to --log-file. We tail
+// that file at 150ms intervals, parse Gemini SSE JSON lines, and emit real ProviderEvents:
+//   • part.text + !part.thought → content_delta (live text streaming)
+//   • part.thought === true     → thinking_delta (reasoning tokens)
+//   • part.functionCall         → tool_executed  (tools agy ran internally)
+// If the log yields no content_delta events (e.g. log file unreadable) we fall back to
+// chunking stdout at word boundaries so the response always appears.
 //
-// Live progress:
-//   agy is a full agent CLI. We write its internal log to a temp file (--log-file) and
-//   tail it while the process runs. Each `streamGenerateContent?alt=sse` line signals a
-//   new model request round (initial call + one per agentic tool turn). We emit a
-//   tool_executed event per round > 1 so the UI shows the agent working between turns.
-//   The final stdout (plain text) is chunked to simulate word-level streaming.
+// Model discovery: `agy models` → one model name per line, refreshed with a 5-min TTL.
+// Antigravity exposes Gemini, Claude, and GPT models under a single Google subscription.
 
 import type { ProviderConfig, ModelDef } from '@koryphaios/shared';
 import { spawn } from 'node:child_process';
@@ -40,9 +37,10 @@ import { AntigravityModels } from './models/antigravity';
 
 const AGY_TIMEOUT_MS = 300_000;
 const MODELS_CACHE_TTL_MS = 5 * 60_000;
+const LOG_POLL_INTERVAL_MS = 150;
 const DEFAULT_CLI_MODEL = 'Gemini 3.5 Flash (Medium)';
 
-// ── Dynamic model cache (module-level, shared across provider instances) ──────
+// ── Dynamic model cache ────────────────────────────────────────────────────────
 
 let cachedModels: ModelDef[] | null = null;
 let cachedModelsAt = 0;
@@ -61,12 +59,8 @@ function refreshModelsInBackground(): void {
         cachedModelsAt = Date.now();
       }
     })
-    .catch(() => {
-      /* best-effort; static list remains the fallback */
-    })
-    .finally(() => {
-      modelsFetchInProgress = false;
-    });
+    .catch(() => { /* best-effort; static list remains the fallback */ })
+    .finally(() => { modelsFetchInProgress = false; });
 }
 
 async function fetchAgyModels(bin: string): Promise<ModelDef[]> {
@@ -79,26 +73,16 @@ async function fetchAgyModels(bin: string): Promise<ModelDef[]> {
     child.stdout.on('data', (c: Buffer) => (out += c.toString()));
     child.once('error', reject);
     child.once('exit', () => {
-      const lines = out
-        .split('\n')
-        .map((l) => l.trim())
-        .filter(Boolean);
-      if (lines.length === 0) {
-        resolve([]);
-        return;
-      }
-      const models = lines.map((name) => modelDefFromCliName(name));
-      resolve(models);
+      const lines = out.split('\n').map((l) => l.trim()).filter(Boolean);
+      resolve(lines.length === 0 ? [] : lines.map(modelDefFromCliName));
     });
   });
 }
 
 function modelDefFromCliName(cliName: string): ModelDef {
-  // Try to find an existing static def first (preserves curated metadata).
   const existing = AntigravityModels.find((m) => m.apiModelId === cliName);
   if (existing) return existing;
 
-  // Build a generic def for any model not yet in the static list.
   const id = `antigravity-${cliName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/-+$/, '')}`;
   const isHigh = /\(high\)/i.test(cliName);
   const isThinking = /thinking/i.test(cliName);
@@ -117,6 +101,60 @@ function modelDefFromCliName(cliName: string): ModelDef {
     supportsStreaming: true,
     tier: isHigh || isThinking ? 'reasoning' : isPro || isOpus ? 'flagship' : 'fast',
   };
+}
+
+// ── SSE log parser ─────────────────────────────────────────────────────────────
+
+interface ParsedLogEvents {
+  events: ProviderEvent[];
+  gotContent: boolean;
+}
+
+function parseLogChunk(chunk: string): ParsedLogEvents {
+  const events: ProviderEvent[] = [];
+  let gotContent = false;
+
+  for (const line of chunk.split('\n')) {
+    const trimmed = line.trim();
+    if (!trimmed.startsWith('data:')) continue;
+    const jsonStr = trimmed.slice(5).trim();
+    if (!jsonStr || jsonStr === '[DONE]') continue;
+
+    try {
+      const payload = JSON.parse(jsonStr) as {
+        candidates?: Array<{
+          content?: {
+            parts?: Array<{
+              text?: string;
+              thought?: boolean;
+              functionCall?: { name?: string; args?: unknown };
+            }>;
+          };
+        }>;
+      };
+
+      for (const part of payload.candidates?.[0]?.content?.parts ?? []) {
+        if (part.thought === true && part.text) {
+          events.push({ type: 'thinking_delta', thinking: part.text });
+        } else if (part.text) {
+          events.push({ type: 'content_delta', content: part.text });
+          gotContent = true;
+        } else if (part.functionCall) {
+          events.push({
+            type: 'tool_executed',
+            toolName: part.functionCall.name ?? 'tool',
+            toolInput: JSON.stringify(part.functionCall.args ?? {}),
+            toolOutput: '',
+            isError: false,
+          });
+        }
+      }
+    } catch {
+      // malformed SSE line — skip
+    }
+  }
+
+  return { events, gotContent };
 }
 
 // ── Provider ──────────────────────────────────────────────────────────────────
@@ -155,8 +193,7 @@ export class AntigravityProvider implements Provider {
     if (!bin) {
       yield {
         type: 'error',
-        error:
-          'Antigravity CLI not found on PATH. Install it from antigravity.google and run "agy auth", then reconnect.',
+        error: 'Antigravity CLI not found on PATH. Install it and run "agy auth", then reconnect.',
       };
       return;
     }
@@ -187,11 +224,7 @@ export class AntigravityProvider implements Provider {
     });
 
     const onAbort = () => {
-      try {
-        child.kill('SIGTERM');
-      } catch {
-        /* already gone */
-      }
+      try { child.kill('SIGTERM'); } catch { /* already gone */ }
     };
     request.signal?.addEventListener('abort', onAbort, { once: true });
 
@@ -206,111 +239,81 @@ export class AntigravityProvider implements Provider {
     child.stdout.on('data', (c: Buffer) => (stdout += c.toString()));
     child.stderr.on('data', (c: Buffer) => (stderr += c.toString()));
 
-    // Promise that resolves when the child exits.
-    let exitCode = 0;
     const exitPromise = new Promise<number>((resolve) => {
       child.once('error', () => resolve(-1));
       child.once('exit', (code) => resolve(code ?? 0));
     });
 
-    // Poll the log file while agy runs. Each `streamGenerateContent?alt=sse` line
-    // marks one model request round. Rounds > 1 mean the agent ran a tool turn.
+    // Tail the log file, parse Gemini SSE JSON, emit real streaming events.
     let logOffset = 0;
-    let sseRound = 0;
+    let totalContentEvents = 0;
 
-    const readNewLogEvents = (): ProviderEvent[] => {
+    const drainLog = (): ProviderEvent[] => {
       try {
-        const content = readFileSync(logPath, 'utf-8');
-        const newContent = content.slice(logOffset);
-        logOffset = content.length;
-        const matches = newContent.match(/streamGenerateContent\?alt=sse/g);
-        if (!matches) return [];
-        const events: ProviderEvent[] = [];
-        for (let i = 0; i < matches.length; i++) {
-          sseRound++;
-          if (sseRound > 1) {
-            // Subsequent rounds = the agent completed a tool turn and is re-querying.
-            events.push({
-              type: 'tool_executed',
-              toolName: 'agy',
-              toolInput: `turn ${sseRound}`,
-              toolOutput: `Antigravity agent executed tools (turn ${sseRound - 1})`,
-              isError: false,
-            });
-          }
-          // sseRound === 1 is the initial request — no tool was called, don't show a tool event.
-        }
+        const full = readFileSync(logPath, 'utf-8');
+        const newChunk = full.slice(logOffset);
+        if (!newChunk) return [];
+        logOffset = full.length;
+        const { events, gotContent } = parseLogChunk(newChunk);
+        if (gotContent) totalContentEvents++;
         return events;
       } catch {
         return [];
       }
     };
 
-    // Interleave log polling with process completion.
-    const POLL_INTERVAL_MS = 200;
+    // Poll while agy runs, yielding events as they arrive.
     while (true) {
       const result = await Promise.race([
         exitPromise.then((code) => ({ done: true as const, code })),
-        new Promise<{ done: false }>((res) => setTimeout(() => res({ done: false }), POLL_INTERVAL_MS)),
+        new Promise<{ done: false }>((res) => setTimeout(() => res({ done: false }), LOG_POLL_INTERVAL_MS)),
       ]);
 
-      for (const event of readNewLogEvents()) {
-        yield event;
-      }
+      for (const event of drainLog()) yield event;
 
       if (result.done) {
-        exitCode = result.code;
-        // Drain any remaining log lines written before shutdown.
-        for (const event of readNewLogEvents()) {
-          yield event;
+        // Drain any final log bytes written before shutdown.
+        for (const event of drainLog()) yield event;
+        clearTimeout(timeout);
+        request.signal?.removeEventListener('abort', onAbort);
+
+        try { unlinkSync(logPath); } catch { /* best-effort */ }
+
+        if (request.signal?.aborted) return;
+
+        if (result.code === -1) {
+          yield { type: 'error', error: 'Antigravity: failed to launch the agy CLI process.' };
+          return;
         }
-        break;
+
+        const text = stdout.trim();
+        if (!text && result.code !== 0) {
+          const hint = stderr.trim() || `agy exited with status ${result.code}`;
+          const loginHint = /not.*logged in|unauthorized|login|authenticate|api key/i.test(hint)
+            ? ' — run "agy auth" (or set ANTIGRAVITY_API_KEY) to authenticate.'
+            : '';
+          yield { type: 'error', error: `Antigravity: ${hint.slice(0, 300)}${loginHint}` };
+          return;
+        }
+
+        // Fall back to stdout chunking only if the log produced no content (e.g. log
+        // was unreadable or agy used a non-SSE output path).
+        if (totalContentEvents === 0 && text) {
+          yield* chunkText(text);
+        }
+
+        yield { type: 'complete', finishReason: 'end_turn' };
+        return;
       }
     }
-
-    clearTimeout(timeout);
-    request.signal?.removeEventListener('abort', onAbort);
-
-    // Clean up the temp log file.
-    try {
-      unlinkSync(logPath);
-    } catch {
-      /* best-effort */
-    }
-
-    if (request.signal?.aborted) return;
-
-    if (exitCode === -1) {
-      yield { type: 'error', error: 'Antigravity: failed to launch the agy CLI process.' };
-      return;
-    }
-
-    const text = stdout.trim();
-    if (!text && exitCode !== 0) {
-      const hint = stderr.trim() || `agy exited with status ${exitCode}`;
-      const loginHint = /not.*logged in|unauthorized|login|authenticate|api key/i.test(hint)
-        ? ' — run "agy auth" (or set ANTIGRAVITY_API_KEY) to authenticate.'
-        : '';
-      yield { type: 'error', error: `Antigravity: ${hint.slice(0, 300)}${loginHint}` };
-      return;
-    }
-
-    if (text) {
-      // Chunk the text at word boundaries to give a streaming appearance.
-      yield* chunkText(text);
-    }
-    yield { type: 'complete', finishReason: 'end_turn' };
   }
 }
 
-// Emit the plain-text response in small word-group chunks so the UI renders
-// progressively rather than painting the whole answer at once.
 function* chunkText(text: string): Generator<ProviderEvent> {
-  const CHUNK_SIZE = 8; // words per chunk
+  const CHUNK_SIZE = 8;
   const words = text.split(/(\s+)/);
   let buf = '';
   let wordCount = 0;
-
   for (const token of words) {
     buf += token;
     if (!/^\s+$/.test(token)) wordCount++;

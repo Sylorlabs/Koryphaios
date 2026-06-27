@@ -1,5 +1,5 @@
 import type { ProviderConfig, ModelDef } from '@koryphaios/shared';
-import { GeminiProvider } from './gemini';
+import { GoogleProvider } from './google';
 
 const DEFAULT_GOOGLE_OAUTH_CLIENT_ID = process.env.GOOGLE_OAUTH_CLIENT_ID || 'your_default_client_id_here'; // Replace if needed
 
@@ -80,7 +80,7 @@ export async function pollGoogleDeviceAuth(deviceCode: string): Promise<GoogleDe
   };
 }
 
-export class GoogleSubscriptionProvider extends GeminiProvider {
+export class GoogleSubscriptionProvider extends GoogleProvider {
   constructor(config: ProviderConfig) {
     // google-subscription provider acts as Gemini with OAuth token
     super({

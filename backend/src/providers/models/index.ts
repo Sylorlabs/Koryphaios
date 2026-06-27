@@ -1,7 +1,7 @@
 import type { ModelDef, ProviderName } from '@koryphaios/shared';
 import { OpenAIModels } from './openai';
 import { AnthropicModels } from './anthropic';
-import { GeminiModels } from './gemini';
+import { GoogleModels } from './google';
 import { VertexAIModels } from './vertex';
 import { OpenRouterModels } from './openrouter';
 import { GroqModels } from './groq';
@@ -22,7 +22,7 @@ import { ZAIModels, KimiCodeModels, DeepSeekModels, MoonshotModels } from './new
 const ALL_MODELS: ModelDef[] = [
   ...OpenAIModels,
   ...AnthropicModels,
-  ...GeminiModels,
+  ...GoogleModels,
   ...VertexAIModels,
   ...OpenRouterModels,
   ...GroqModels,

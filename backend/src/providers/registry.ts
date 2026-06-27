@@ -24,7 +24,7 @@ import {
   AzureProvider,
 } from './openai';
 
-import { GeminiProvider } from './gemini';
+import { GoogleProvider } from './google';
 import { CopilotProvider, exchangeGitHubTokenForCopilotAsync } from './copilot';
 import { CodexProvider } from './codex';
 import { ClaudeCodeProvider } from './claude-code';
@@ -993,7 +993,7 @@ class ProviderRegistry {
       case 'openai':
         return new OpenAIProvider(config);
       case 'google':
-        return config.apiKey || config.authToken ? new GeminiProvider(config) : null;
+        return config.apiKey || config.authToken ? new GoogleProvider(config) : null;
       case 'copilot':
         return new CopilotProvider(config);
       case 'codex':
@@ -1030,7 +1030,7 @@ class ProviderRegistry {
       case 'vertexai':
         // Requires explicit API key — never auto-enable from GCP environment variables
         if (config.disabled || !config.apiKey) return null;
-        return new GeminiProvider({ ...config, name: 'vertexai' });
+        return new GoogleProvider({ ...config, name: 'vertexai' });
       case 'local':
       case 'ollama':
       case 'llamacpp':
