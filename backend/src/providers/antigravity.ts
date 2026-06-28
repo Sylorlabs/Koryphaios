@@ -103,6 +103,46 @@ function modelDefFromCliName(cliName: string): ModelDef {
   };
 }
 
+// ── File-edit tool detection ──────────────────────────────────────────────────
+
+// agy tool names that create or overwrite a file entirely.
+const AGY_CREATE_TOOLS = new Set(['write_to_file', 'write_file']);
+// agy tool names that patch/replace content within an existing file.
+const AGY_EDIT_TOOLS = new Set(['replace_file_content', 'multi_replace_file_content', 'edit_file']);
+
+function tryEmitFileEdit(
+  name: string,
+  args: Record<string, unknown>,
+): ProviderEvent | null {
+  const isCreate = AGY_CREATE_TOOLS.has(name);
+  const isEdit = AGY_EDIT_TOOLS.has(name);
+  if (!isCreate && !isEdit) return null;
+
+  // agy uses "path" or "filename" for the file path field.
+  const filePath = (args.path ?? args.filename ?? args.file_path) as string | undefined;
+  if (!filePath) return null;
+
+  // For full-write tools the content is in "content" or "new_content".
+  // For patch tools we concatenate replacement strings so the UI shows something.
+  let fileContent: string | undefined;
+  if (isCreate) {
+    fileContent = (args.content ?? args.new_content ?? '') as string;
+  } else {
+    // multi_replace_file_content: { replacements: [{old_string, new_string}] }
+    const replacements = args.replacements as Array<{ new_string?: string }> | undefined;
+    fileContent = replacements
+      ? replacements.map((r) => r.new_string ?? '').join('\n')
+      : ((args.new_content ?? args.content ?? '') as string);
+  }
+
+  return {
+    type: 'file_edit',
+    filePath,
+    fileContent,
+    fileOperation: isCreate ? 'create' : 'edit',
+  };
+}
+
 // ── SSE log parser ─────────────────────────────────────────────────────────────
 
 interface ParsedLogEvents {
@@ -139,9 +179,20 @@ function parseLogChunk(chunk: string): ParsedLogEvents {
         } else if (part.text) {
           events.push({ type: 'content_delta', content: part.text });
           gotContent = true;
+        } else if (part.functionCall) {
+          const name = part.functionCall.name ?? 'tool';
+          const args = (part.functionCall.args ?? {}) as Record<string, unknown>;
+          const fileEvent = tryEmitFileEdit(name, args);
+          if (fileEvent) {
+            events.push(fileEvent);
+          } else {
+            events.push({
+              type: 'tool_executed',
+              toolName: name,
+              toolInput: JSON.stringify(args),
+            });
+          }
         }
-        // agy's internal tool calls (ls, read_file, git_status, etc.) are autonomous
-        // CLI actions — intentionally not surfaced in the Koryphaios UI.
       }
     } catch {
       // malformed SSE line — skip
