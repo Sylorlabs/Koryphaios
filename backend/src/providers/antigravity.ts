@@ -139,15 +139,9 @@ function parseLogChunk(chunk: string): ParsedLogEvents {
         } else if (part.text) {
           events.push({ type: 'content_delta', content: part.text });
           gotContent = true;
-        } else if (part.functionCall) {
-          events.push({
-            type: 'tool_executed',
-            toolName: part.functionCall.name ?? 'tool',
-            toolInput: JSON.stringify(part.functionCall.args ?? {}),
-            toolOutput: '',
-            isError: false,
-          });
         }
+        // agy's internal tool calls (ls, read_file, git_status, etc.) are autonomous
+        // CLI actions — intentionally not surfaced in the Koryphaios UI.
       }
     } catch {
       // malformed SSE line — skip
