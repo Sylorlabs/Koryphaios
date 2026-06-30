@@ -3,6 +3,9 @@
 
 import type { AgentIdentity } from '@koryphaios/shared';
 import type { FeedEntry, FeedEntryType } from '$lib/types';
+import { sessionStore } from './sessions.svelte';
+import { apiUrl } from '$lib/utils/api-url';
+import { apiFetch, parseJsonResponse } from '$lib/api.svelte';
 
 export type { FeedEntry, FeedEntryType };
 
@@ -16,15 +19,59 @@ let feedIdCounter = 0;
 
 let feed = $state<FeedEntry[]>([]);
 
-// Use $derived for groupedFeed to prevent infinite loops
-let groupedFeed = $derived(getGroupedFeed());
+// Cache for grouped feed — rebuild only on structural changes, not per token
+let lastGroupedFeed = $state<FeedEntry[]>([]);
+let feedVersion = $state(0);
+let streamingRevision = $state(0);
+
+// Track analyzing thought index to avoid O(N) filtering
+let analyzingThoughtId = $state<string | null>(null);
+
+function rebuildGroupedFeedCache(): void {
+  lastGroupedFeed = getGroupedEntries(feed);
+}
+
+function patchGroupedFeedEntry(
+  entryId: string,
+  text: string,
+  timestamp: number,
+  extra?: Partial<FeedEntry>,
+): void {
+  for (let i = lastGroupedFeed.length - 1; i >= 0; i--) {
+    const grouped = lastGroupedFeed[i];
+    if (grouped.id === entryId) {
+      grouped.text = text;
+      grouped.timestamp = timestamp;
+      if (extra) Object.assign(grouped, extra);
+      return;
+    }
+    if (grouped.entries?.length) {
+      const sub = grouped.entries[grouped.entries.length - 1];
+      if (sub?.id === entryId) {
+        sub.text = text;
+        sub.timestamp = timestamp;
+        if (extra) Object.assign(sub, extra);
+        return;
+      }
+    }
+  }
+}
+
+// Structural changes bump feedVersion; streaming text bumps streamingRevision only
+let groupedFeed = $derived.by(() => {
+  const _structure = feedVersion;
+  const _stream = streamingRevision;
+  void _structure;
+  void _stream;
+  return lastGroupedFeed;
+});
 
 // ─── Glow Class Resolver ────────────────────────────────────────────────────
 
 function resolveGlowClass(agent?: AgentIdentity): string {
   if (!agent) return '';
   switch (agent.domain) {
-    case 'ui':
+    case 'frontend':
       return 'glow-codex';
     case 'backend':
       return 'glow-google';
@@ -39,14 +86,24 @@ function resolveGlowClass(agent?: AgentIdentity): string {
   }
 }
 
-// ─── Feed Actions ────────────────────────────────────────────────────────────
-
-export function addEntry(entry: Omit<FeedEntry, 'id'>) {
-  const newEntry: FeedEntry = { ...entry, id: `fe-${++feedIdCounter}` };
-  feed = [...feed, newEntry].slice(-MAX_FEED_ENTRIES);
+function nextFeedId(prefix: string): string {
+  return `${prefix}-${++feedIdCounter}`;
 }
 
-export function accumulateEntry(entry: Omit<FeedEntry, 'id'>) {
+// ─── Feed Actions ────────────────────────────────────────────────────────────
+
+function addFeedEntry(entry: Omit<FeedEntry, 'id'>) {
+  const newEntry: FeedEntry = { ...entry, id: nextFeedId('fe') };
+  if (newEntry.type === 'thought' && (newEntry.metadata as { phase?: string })?.phase === 'analyzing') {
+    analyzingThoughtId = newEntry.id;
+  }
+  feed.push(newEntry);
+  if (feed.length > MAX_FEED_ENTRIES) feed.splice(0, feed.length - MAX_FEED_ENTRIES);
+  feedVersion++;
+  rebuildGroupedFeedCache();
+}
+
+function accumulateFeedEntry(entry: Omit<FeedEntry, 'id'>) {
   const lastIdx = feed.length - 1;
   const last = lastIdx >= 0 ? feed[lastIdx] : null;
 
@@ -62,33 +119,95 @@ export function accumulateEntry(entry: Omit<FeedEntry, 'id'>) {
       updates.thinkingStartedAt = entry.timestamp;
     }
 
-    const updated = { ...last, ...updates };
-    feed = [...feed.slice(0, lastIdx), updated];
+    Object.assign(last, updates);
+    patchGroupedFeedEntry(last.id, last.text, last.timestamp, updates);
+    streamingRevision++;
   } else {
-    addEntry(entry);
+    addFeedEntry(entry);
   }
 }
 
-export function addUserMessage(sessionId: string, content: string) {
+function addUserMessage(
+  sessionId: string,
+  content: string,
+  attachments?: Array<{ type: string; data: string; name: string }>,
+) {
   const userEntry: FeedEntry = {
-    id: `user-${++feedIdCounter}`,
+    id: nextFeedId('user'),
     timestamp: Date.now(),
     type: 'user_message',
     agentId: 'user',
     agentName: 'You',
     glowClass: '',
     text: content,
-    metadata: { sessionId },
+    metadata: { sessionId, attachments },
   };
-  feed = [...feed, userEntry].slice(-MAX_FEED_ENTRIES);
+  feed.push(userEntry);
+  if (feed.length > MAX_FEED_ENTRIES) feed.splice(0, feed.length - MAX_FEED_ENTRIES);
+  feedVersion++;
+  rebuildGroupedFeedCache();
 }
 
-export function removeEntries(ids: Set<string>) {
+/** Efficiently remove the ephemeral analyzing thought. */
+function removeAnalyzingThoughtEntries() {
+  if (!analyzingThoughtId) return;
+  const idx = feed.findIndex((e) => e.id === analyzingThoughtId);
+  if (idx !== -1) {
+    feed.splice(idx, 1);
+    feedVersion++;
+    rebuildGroupedFeedCache();
+  }
+  analyzingThoughtId = null;
+}
+
+function addClientError(text: string) {
+  const activeSessionId = sessionStore.activeSessionId;
+  if (!activeSessionId) return;
+  addFeedEntry({
+    timestamp: Date.now(),
+    type: 'error',
+    agentId: 'kory-manager',
+    agentName: 'Kory',
+    glowClass: '',
+    text,
+    metadata: { sessionId: activeSessionId, source: 'client' },
+  });
+}
+
+function removeEntries(ids: Set<string>) {
+  if (ids.size === 0) return;
   feed = feed.filter((e) => !ids.has(e.id));
+  feedVersion++;
+  rebuildGroupedFeedCache();
 }
 
-export function clearFeed() {
+function removeContentEntriesForAgent(agentId: string) {
+  const entriesToRemove = new Set<string>();
+  for (let i = feed.length - 1; i >= 0; i--) {
+    const entry = feed[i];
+    if (entry?.type === 'user_message') break;
+    if (entry?.agentId === agentId && entry?.type === 'content') {
+      entriesToRemove.add(entry.id);
+    } else if (entry?.type !== 'content' && entry?.type !== 'thinking') {
+      break;
+    }
+  }
+  if (entriesToRemove.size > 0) {
+    removeEntries(entriesToRemove);
+  }
+}
+
+function clearFeed() {
   feed = [];
+  feedVersion++;
+  streamingRevision = 0;
+  analyzingThoughtId = null;
+  rebuildGroupedFeedCache();
+}
+
+function isDuplicateError(text: string, timestamp: number): boolean {
+  const last = feed.length > 0 ? feed[feed.length - 1] : null;
+  return !!(last?.type === 'error' && last.text === text && timestamp - last.timestamp < 3000);
 }
 
 // ─── Grouped Feed (for virtual list) ─────────────────────────────────────────
@@ -100,11 +219,11 @@ function getToolName(entry: FeedEntry): string {
   return metadata?.toolCall?.name ?? metadata?.toolResult?.name ?? '';
 }
 
-export function getGroupedFeed(): FeedEntry[] {
+export function getGroupedEntries(entries: FeedEntry[]): FeedEntry[] {
   const result: FeedEntry[] = [];
   let currentGroup: FeedEntry | null = null;
 
-  for (const entry of feed) {
+  for (const entry of entries) {
     const toolName = getToolName(entry);
     const isEphemeral =
       (entry.type === 'tool_call' || entry.type === 'tool_result') && EPHEMERAL_TOOLS.has(toolName);
@@ -141,7 +260,7 @@ export function getGroupedFeed(): FeedEntry[] {
 
 // ─── Session Loading ─────────────────────────────────────────────────────────
 
-export function loadSessionMessages(
+async function loadSessionMessages(
   sessionId: string,
   messages: Array<{
     id: string;
@@ -152,16 +271,36 @@ export function loadSessionMessages(
     cost?: number;
   }>,
 ) {
-  feed = messages.map((m) => ({
-    id: `hist-${m.id}`,
-    timestamp: m.createdAt,
-    type: m.role === 'user' ? ('user_message' as const) : ('content' as const),
-    agentId: m.role === 'user' ? 'user' : 'kory-manager',
-    agentName: m.role === 'user' ? 'You' : 'Kory',
-    glowClass: m.role === 'user' ? '' : 'glow-kory',
-    text: m.content,
-    metadata: { sessionId, model: m.model, cost: m.cost },
-  }));
+  clearFeed();
+
+  let timeline: Array<{ messageId?: string; hash?: string }> = [];
+  try {
+    const res = await apiFetch(apiUrl(`/api/sessions/${sessionId}/timetravel`));
+    const data = await parseJsonResponse<{ ok?: boolean; data?: { timeline?: typeof timeline } }>(
+      res,
+    );
+    if (data.ok) timeline = data.data?.timeline ?? [];
+  } catch (err) {
+    console.warn('Failed to fetch timeline:', err);
+  }
+
+  feed = messages.map((m) => {
+    const ghost = timeline.find((t) => t.messageId === m.id);
+
+    return {
+      id: `hist-${m.id}`,
+      timestamp: m.createdAt,
+      type: m.role === 'user' ? ('user_message' as const) : ('content' as const),
+      agentId: m.role === 'user' ? 'user' : 'kory-manager',
+      agentName: m.role === 'user' ? 'You' : 'Kory',
+      glowClass: m.role === 'user' ? '' : 'glow-kory',
+      text: m.content,
+      metadata: { sessionId, model: m.model, cost: m.cost },
+      ghostHash: ghost?.hash,
+    };
+  });
+  feedVersion++;
+  rebuildGroupedFeedCache();
 }
 
 // ─── Exported Store ─────────────────────────────────────────────────────────
@@ -176,11 +315,17 @@ export const feedStore = {
   get length() {
     return feed.length;
   },
-  addEntry,
-  accumulateEntry,
+  addFeedEntry,
+  accumulateFeedEntry,
   addUserMessage,
+  removeAnalyzingThoughtEntries,
+  addClientError,
   removeEntries,
+  removeContentEntriesForAgent,
   clearFeed,
   loadSessionMessages,
   resolveGlowClass,
+  getGroupedEntries,
+  isDuplicateError,
+  nextFeedId,
 };

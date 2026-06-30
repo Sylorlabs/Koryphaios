@@ -22,9 +22,9 @@ function getAllowedRoots(ctx: ToolContext): string[] {
 }
 
 /**
- * Stream file content to the UI in chunks with a satisfying, capped "typing" animation
- * (the Cursor-style live preview). The whole reveal is kept under ~2.5s regardless of file
- * size. For edits, the original text is sent once on the first delta so the UI can diff it.
+ * Stream file content to the UI in chunks with a capped "typing" animation (Cursor-style live
+ * preview). Emits at most MAX_FRAMES WS events per file; large files use bigger chunks and
+ * skip per-chunk delay. For edits, the original text is sent once on the first delta.
  */
 async function streamFileToUI(
   emit: NonNullable<ToolContext['emitFileEdit']>,
@@ -33,13 +33,16 @@ async function streamFileToUI(
   operation: 'create' | 'edit',
   oldStr?: string,
 ): Promise<void> {
-  const CHUNK = 48;
-  const totalChunks = Math.max(1, Math.ceil(content.length / CHUNK));
-  const delayMs = Math.min(14, Math.floor(2500 / totalChunks));
+  const MAX_FRAMES = 40;
+  const TARGET_CHUNK = 768;
+  const chunkSize = Math.max(TARGET_CHUNK, Math.ceil(content.length / MAX_FRAMES));
+  const totalFrames = Math.max(1, Math.ceil(content.length / chunkSize));
+  const delayMs =
+    content.length > 8_000 ? 0 : Math.min(14, Math.floor(2500 / totalFrames));
   let sent = 0;
   let first = true;
   while (sent < content.length) {
-    const piece = content.slice(sent, sent + CHUNK);
+    const piece = content.slice(sent, sent + chunkSize);
     sent += piece.length;
     emit({
       path,

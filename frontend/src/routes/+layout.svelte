@@ -2,7 +2,7 @@
 	import '../app.css';
 	import '$lib/fonts';
 	import { onMount } from 'svelte';
-	import { loadProvidersFromApi } from '$lib/stores/websocket.svelte';
+	import { loadProvidersFromApi } from '$lib/stores/providers.svelte';
 	import { authStore } from '$lib/stores/auth.svelte';
 	import { initUrls } from '$lib/utils/api-url';
 	import UpdateBanner from '$lib/components/UpdateBanner.svelte';

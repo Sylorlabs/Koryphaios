@@ -122,7 +122,7 @@ export class WSManager {
     let targetCount = 0;
 
     for (const [, client] of this.clients) {
-      if (client.subscribedSessions.has(sessionId) || client.subscribedSessions.size === 0) {
+      if (client.subscribedSessions.has(sessionId)) {
         try {
           if (client.ws.readyState === 1) {
             client.ws.send(data);

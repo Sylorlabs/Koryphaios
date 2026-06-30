@@ -1,5 +1,7 @@
+import type { WSMessage } from '@koryphaios/shared';
 import { wsBroker } from '../pubsub';
 import { WSManager } from './ws-manager';
+import { StreamCoalescer } from './stream-coalescer';
 
 /**
  * Initialize the WebSocket broker.
@@ -9,22 +11,30 @@ export function initWSBroker(manager: WSManager): void {
   const stream = wsBroker.subscribe();
   const reader = stream.getReader();
 
+  const publish = (message: WSMessage) => {
+    if (message.sessionId) {
+      manager.broadcastToSession(message.sessionId, message);
+    } else {
+      manager.broadcast(message);
+    }
+  };
+
+  const coalescer = new StreamCoalescer(publish);
+
   // Process events from the global broker and broadcast to WebSocket clients
   (async () => {
     try {
       while (true) {
         const { value, done } = await reader.read();
         if (done) break;
-        if (value && value.payload) {
-          if (value.payload.sessionId) {
-            manager.broadcastToSession(value.payload.sessionId, value.payload);
-          } else {
-            manager.broadcast(value.payload);
-          }
+        if (value?.payload) {
+          coalescer.enqueue(value.payload);
         }
       }
-    } catch (err) {
-      // Ignore errors in the bridge loop, but log them
+    } catch {
+      // Bridge loop ended
+    } finally {
+      coalescer.dispose();
     }
   })();
 }

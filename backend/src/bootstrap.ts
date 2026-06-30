@@ -61,6 +61,7 @@ import { loadPlugins } from './server/plugins';
 import { setContext, type AppContext } from './context';
 import { getModeManager } from './mode';
 import { TimeTravelService } from './services/timetravel';
+import { startBackgroundCleanup } from './memory/background-cleanup';
 
 export async function bootstrap(): Promise<AppContext> {
   // Load environment and validate
@@ -133,6 +134,7 @@ export async function bootstrap(): Promise<AppContext> {
   };
 
   setContext(context);
+  startBackgroundCleanup(kory, wsManager);
   return context;
 }
 

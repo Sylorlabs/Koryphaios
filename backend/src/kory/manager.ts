@@ -47,7 +47,12 @@ import type { ITaskStore } from '../stores/task-store';
 import { SnapshotManager } from './snapshot-manager';
 import { GitManager } from './git-manager';
 import { WorkspaceManager } from './workspace-manager';
-import { EventEmitterService, WorkerLifecycleService, SessionStateService } from './services';
+import {
+  EventEmitterService,
+  WorkerLifecycleService,
+  SessionStateService,
+  WorkerPipelineService,
+} from './services';
 import { TimeTravelService } from '../services';
 import { RoutingServiceEnhanced } from './services/RoutingServiceEnhanced';
 import {
@@ -56,6 +61,7 @@ import {
 } from './critic-util';
 import { AutoCommitService } from './auto-commit-service';
 import { getModeManager } from '../mode';
+import type { WorkerPipelineConfig } from './services/WorkerPipelineService';
 import type { UIMode } from '@koryphaios/shared';
 import { collaborationManager } from '../collaboration/manager';
 
@@ -193,6 +199,8 @@ export class KoryManager {
   private routing: RoutingServiceEnhanced;
   private workers: WorkerLifecycleService;
   private state: SessionStateService;
+  private workerPipeline: WorkerPipelineService;
+  private autoCommitService: AutoCommitService;
 
   constructor(
     private providers: ProviderRegistry,
@@ -224,6 +232,55 @@ export class KoryManager {
     this.routing = new RoutingServiceEnhanced({ config: this.config, providers: this.providers });
     this.workers = new WorkerLifecycleService({ events: this.events });
     this.state = new SessionStateService();
+    this.autoCommitService = new AutoCommitService(this.workingDirectory, this.git);
+
+    const pipelineConfig: WorkerPipelineConfig = {
+      getIsYoloMode: () => this.isYoloMode,
+      getWorkingDirectory: () => this.workingDirectory,
+      getWorkerReasoningLevel: () => this.getWorkerReasoningLevel(),
+      waitForUserInput: (sessionId, question, options) =>
+        this.waitForUserInputInternal(sessionId, question, options),
+      emitThought: (sessionId, phase, thought) => this.emitThought(sessionId, phase, thought),
+      updateWorkflowState: (sessionId, state) => this.updateWorkflowState(sessionId, state),
+      handleAutoCommit: (sessionId, taskDescription) =>
+        this.handleAutoCommit(sessionId, taskDescription),
+      resolveActiveRouting: (preferredModel, domain, avoidLegacy, prompt, preferCheap) =>
+        this.resolveActiveRouting(preferredModel, domain, avoidLegacy, prompt, preferCheap),
+      executeWithProvider: (
+        sessionId,
+        provider,
+        modelId,
+        userMessage,
+        domain,
+        reasoningLevel,
+        isAutoMode,
+        allowedPaths,
+        isSandboxed,
+      ) =>
+        this.executeWithProvider(
+          sessionId,
+          provider,
+          modelId,
+          userMessage,
+          domain,
+          reasoningLevel,
+          isAutoMode,
+          allowedPaths,
+          isSandboxed,
+        ),
+      runCriticGate: (sessionId, workerMessages, preferredModel) =>
+        this.runCriticGate(sessionId, workerMessages, preferredModel),
+    };
+
+    this.workerPipeline = new WorkerPipelineService({
+      providers: this.providers,
+      state: this.state,
+      git: this.git,
+      workspaceManager: this.workspaceManager,
+      snapshotManager: this.snapshotManager,
+      tasks: this.tasks,
+      config: pipelineConfig,
+    });
 
     // Recover state from persistent stores
     this.recoverState();
@@ -527,121 +584,22 @@ export class KoryManager {
     reasoningLevel?: string,
     domainHint?: string,
   ): Promise<string> {
-    if (!this.isYoloMode) {
-      const selection = await this.waitForUserInputInternal(
-        sessionId,
-        'Ready to proceed with the delegated task?',
-        ['Yes, proceed', 'Cancel'],
-      );
-      if (selection === '__timeout__') return 'Timed out waiting for user response.';
-      if (selection.includes('Cancel')) return 'Cancelled by user.';
-    } else {
-      this.emitThought(sessionId, 'executing', 'YOLO mode: Proceeding with delegated task.');
-    }
-    await this.updateWorkflowState(sessionId, 'executing');
-    const domainOverride =
-      domainHint && ['general', 'ui', 'backend', 'test', 'review'].includes(domainHint)
-        ? (domainHint as WorkerDomain)
-        : undefined;
-
-    // Attempt to spawn an isolated worktree for this worker task
-    const taskId = nanoid(12);
-
-    // Create task in persistent store
-    const routing = this.resolveActiveRouting(preferredModel, domainOverride || 'general');
-    if (this.tasks) {
-      await this.tasks.create({
-        id: taskId,
-        sessionId,
-        description: task,
-        domain: domainOverride || 'general',
-        assignedModel: routing.model,
-        assignedProvider: routing.provider || 'copilot',
-      });
-    }
-
-    let workerDir = this.workingDirectory;
-    let worktreeSpawned = false;
-    if (this.workspaceManager) {
-      try {
-        const worktree = this.workspaceManager.spawn(taskId, task.slice(0, 60));
-        if (worktree) {
-          workerDir = worktree.path;
-          worktreeSpawned = true;
-          koryLog.info({ taskId, path: workerDir }, 'Worker running in isolated worktree');
-        }
-      } catch (err: unknown) {
-        const message = err instanceof Error ? err.message : String(err);
-        koryLog.warn({ err: message }, 'Worktree spawn failed — using main directory');
-      }
-    }
-
-    let result = await this.routeToWorker(
+    return this.workerPipeline.runWorkerPipeline(
       sessionId,
       task,
       preferredModel,
       reasoningLevel,
-      [workerDir],
-      domainOverride,
-      taskId,
+      domainHint,
     );
+  }
 
-    // Reconcile worktree changes back to main branch
-    if (worktreeSpawned && this.workspaceManager) {
-      try {
-        if (result.success) {
-          const reconcileResult = this.workspaceManager.reconcile(taskId);
-          if (!reconcileResult.success) {
-            koryLog.warn({ taskId, msg: reconcileResult.message }, 'Worktree reconcile failed');
-            result = {
-              success: false,
-              workerTranscript: result.workerTranscript,
-              criticFeedback: `Worktree reconcile failed: ${reconcileResult.message}`,
-            };
-          } else {
-            // Create ghost commit for time-travel after successful worker reconciliation
-            try {
-              const { ShadowLogger } = await import('./shadow-logger');
-              const shadowLogger = new ShadowLogger(this.workingDirectory);
-              await shadowLogger.createGhostCommit(task.slice(0, 72), {
-                agentId: sessionId,
-                model: preferredModel ?? 'unknown',
-                prompt: task.slice(0, 200),
-                cost: 0,
-              });
-            } catch {
-              // Shadow logging is non-critical; don't fail the task if it errors
-            }
-          }
-        } else {
-          this.workspaceManager.cleanup(taskId);
-        }
-      } catch (err: unknown) {
-        const message = err instanceof Error ? err.message : String(err);
-        koryLog.warn({ taskId, err: message }, 'Worktree cleanup/reconcile error');
-      }
-      // Auto-commit is now handled by the agent manually via the commit_and_create_pr tool
+  private async handleAutoCommit(sessionId: string, taskDescription: string): Promise<void> {
+    if (!getModeManager().shouldAutoCommit()) return;
+    try {
+      await this.autoCommitService.autoCommitAndCreatePR(taskDescription);
+    } catch (err) {
+      koryLog.warn({ err, sessionId }, 'Auto-commit failed after worker task');
     }
-
-    // Update task in persistent store after reconcile, so persisted state matches user-visible result.
-    if (this.tasks) {
-      await this.tasks.update(taskId, {
-        status: result.success ? 'done' : 'failed',
-        result: result.success ? result.criticFeedback || 'Done' : undefined,
-        error: !result.success ? result.criticFeedback || 'Worker failed' : undefined,
-      });
-    }
-
-    await this.updateWorkflowState(sessionId, 'idle');
-    if (result.success) {
-      return (
-        result.criticFeedback ??
-        (result.workerTranscript ? 'Worker completed. See transcript.' : 'Done.')
-      );
-    }
-    return result.workerTranscript
-      ? `Worker did not pass review. ${result.criticFeedback ?? ''}`
-      : 'Worker failed.';
   }
 
   /** Whether Jules cloud delegation is configured (API key). */
@@ -758,112 +716,6 @@ export class KoryManager {
     }
   }
 
-  private async routeToWorker(
-    sessionId: string,
-    userMessage: string,
-    preferredModel?: string,
-    reasoningLevel?: string,
-    allowedPaths: string[] = [],
-    domainOverride?: WorkerDomain,
-    taskId?: string,
-  ): Promise<{ success: boolean; workerTranscript?: string; criticFeedback?: string }> {
-    let domain: WorkerDomain;
-    if (domainOverride) domain = domainOverride;
-    else
-      try {
-        domain = this.classifyDomainLLM(userMessage);
-      } catch {
-        domain = 'general';
-      }
-    const isSandboxed = this.isYoloMode ? false : !this.requiresSystemAccess(userMessage);
-    const effectivePaths = allowedPaths.length > 0 ? allowedPaths : [this.workingDirectory];
-
-    if (this.git.isGitRepo()) {
-      const hash = await this.git.getCurrentHash();
-      if (hash) this.state.saveCheckpoint(sessionId, hash);
-    } else {
-      await this.snapshotManager.createSnapshot(
-        sessionId,
-        'latest',
-        effectivePaths,
-        this.workingDirectory,
-      );
-    }
-
-    let workerTask = await this.generateWorkerTask(sessionId, userMessage, domain, preferredModel);
-
-    // Mark task as active in store
-    if (taskId && this.tasks) {
-      await this.tasks.update(taskId, { status: 'active' });
-    }
-
-    let attempts = 0;
-    while (attempts < 3) {
-      attempts++;
-      this.emitThought(sessionId, 'delegating', `Delegating to ${domain} worker...`);
-      const routing = this.resolveActiveRouting(preferredModel, domain);
-      const provider = this.providers.getAvailable().find((p) => p.name === routing.provider);
-      if (!provider) {
-        const alt = this.providers.getAvailable()[0];
-        if (!alt) return { success: false };
-        const res = await this.executeWithProvider(
-          sessionId,
-          alt,
-          routing.model,
-          workerTask,
-          domain,
-          reasoningLevel,
-          true,
-          effectivePaths,
-          isSandboxed,
-        );
-        if (res.success) {
-          const criticResult = await this.runCriticGate(
-            sessionId,
-            res.workerMessages,
-            preferredModel,
-          );
-          if (criticResult.passed)
-            return {
-              success: true,
-              workerTranscript: formatMessagesForCriticUtil(res.workerMessages ?? []),
-              criticFeedback: criticResult.feedback,
-            };
-          workerTask = `QUALITY FAILURE. Fix these:\n${criticResult.feedback}`;
-        } else return { success: false };
-        continue;
-      }
-
-      const result = await this.executeWithProvider(
-        sessionId,
-        provider,
-        routing.model,
-        workerTask,
-        domain,
-        reasoningLevel,
-        true,
-        effectivePaths,
-        isSandboxed,
-      );
-      if (result.success) {
-        const criticResult = await this.runCriticGate(
-          sessionId,
-          result.workerMessages,
-          preferredModel,
-        );
-        if (criticResult.passed)
-          return {
-            success: true,
-            workerTranscript: formatMessagesForCriticUtil(result.workerMessages ?? []),
-            criticFeedback: criticResult.feedback,
-          };
-        workerTask = `QUALITY FAILURE. Fix these:\n${criticResult.feedback}`;
-      }
-      if (!this.providers.isQuotaError(result.error)) return { success: false };
-    }
-    return { success: false };
-  }
-
   /** Critic can only read files and grep. It sees the full worker transcript (truncated) and outputs PASS or FAIL with feedback. */
   private async runCriticGate(
     sessionId: string,
@@ -941,28 +793,6 @@ export class KoryManager {
       { id: nanoid(), name: 'bash', input: { command: 'bun test', timeout: 60 } },
     );
     return { passed: !result.isError, output: result.output };
-  }
-
-  private requiresSystemAccess(m: string): boolean {
-    const lower = m.toLowerCase();
-    const systemPatterns = [
-      /\b(sudo|apt|apt-get|yum|dnf|pacman|brew)\b/,
-      /\b(systemctl|service|journalctl)\b/,
-      /\b(chmod|chown)\b.*\/(etc|var|usr|bin|sbin|boot|lib|sys|dev)/,
-      /\/etc\//,
-      /\/var\/log\//,
-    ];
-    return systemPatterns.some((p) => p.test(lower));
-  }
-
-  private classifyDomainLLM(message: string): WorkerDomain {
-    const lower = message.toLowerCase();
-    const scores: Record<string, number> = {};
-    for (const [domain, keywords] of Object.entries(DOMAIN.KEYWORDS)) {
-      scores[domain] = (keywords as readonly string[]).filter((k) => lower.includes(k)).length;
-    }
-    const best = Object.entries(scores).sort((a, b) => b[1] - a[1])[0];
-    return (best && best[1] > 0 ? best[0] : 'general') as WorkerDomain;
   }
 
   /** Manager handles simple tasks directly with full tool access (unsandboxed). Asks user before first tool run unless YOLO. Manager never uses legacy models. */
@@ -1502,8 +1332,7 @@ export class KoryManager {
   }
 
   /**
-   * Runs a worker (sub-agent). Only called from routeToWorker, which is only called from
-   * runWorkerPipeline, which is invoked solely when the manager calls the delegate_to_worker tool.
+   * Runs a worker (sub-agent). Invoked by WorkerPipelineService when the manager calls delegate_to_worker.
    * The code never auto-spawns workers.
    */
   private async executeWithProvider(
@@ -1686,30 +1515,6 @@ export class KoryManager {
     }
     this.isProcessing = false;
     koryLog.info('All workers cancelled via global cancel');
-  }
-
-  private async generateWorkerTask(
-    sessionId: string,
-    message: string,
-    domain: WorkerDomain,
-    preferredModel?: string,
-  ): Promise<string> {
-    const routing = this.resolveActiveRouting(preferredModel, 'general', true);
-    const provider = await this.providers.resolveProvider(routing.model, routing.provider);
-    if (!provider) return message;
-    let res = '';
-    try {
-      for await (const event of provider.streamResponse({
-        model: routing.model,
-        systemPrompt: 'Be brief and actionable.',
-        messages: [{ role: 'user', content: `Worker instruction for ${domain}: ${message}` }],
-        maxTokens: 200,
-      }))
-        if (event.type === 'content_delta') res += event.content;
-      return res.trim() || message;
-    } catch {
-      return message;
-    }
   }
 
   private async loadHistory(sessionId: string): Promise<InternalMessage[]> {

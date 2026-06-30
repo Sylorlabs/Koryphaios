@@ -10,6 +10,7 @@ import { DOMAIN } from '../src/constants';
 const mockProviderRegistry = {
   resolveProvider: mock(),
   getAvailable: mock(() => []),
+  getStatus: mock(() => []),
   isQuotaError: mock(() => false),
   get: mock(),
 } as unknown as ProviderRegistry;
@@ -118,13 +119,13 @@ describe('KoryManager Orchestration', () => {
     const autoCommit = mock(async () => {});
 
     manager.setYoloMode(true);
-    manager['routeToWorker'] = mock(async () => ({
+    manager['workerPipeline']['routeToWorker'] = mock(async () => ({
       success: true,
       workerTranscript: 'worker transcript',
       criticFeedback: 'PASS',
     }));
     manager['handleAutoCommit'] = autoCommit;
-    manager['workspaceManager'] = {
+    manager['workerPipeline']['workspaceManager'] = {
       spawn: () => ({ path: '/tmp/worktree-2' }),
       reconcile: () => ({ success: false, message: 'merge conflict' }),
       cleanup: mock(() => ({ success: true, message: 'cleaned' })),

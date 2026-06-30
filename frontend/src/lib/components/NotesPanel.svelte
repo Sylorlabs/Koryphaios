@@ -22,6 +22,7 @@
   let includeInContext = $state(false);
   let isDirty = $state(false);
   let autosaveTimer: ReturnType<typeof setTimeout> | null = null;
+  let searchDebounceTimer: ReturnType<typeof setTimeout> | null = null;
   let searchQuery = $state('');
   let expandedFolders = $state<Set<string>>(new Set(['/']));
   let dragOver = $state(false);
@@ -61,6 +62,7 @@
   onDestroy(() => {
     window.removeEventListener('keydown', handleGlobalKeydown);
     if (autosaveTimer) clearTimeout(autosaveTimer);
+    if (searchDebounceTimer) clearTimeout(searchDebounceTimer);
   });
 
   // ── Sync editor when current note changes ─────────────────────────────────
@@ -325,7 +327,10 @@
           "
           bind:value={searchQuery}
           oninput={() => {
-            void notesStore.setSearchQuery(searchQuery);
+            if (searchDebounceTimer) clearTimeout(searchDebounceTimer);
+            searchDebounceTimer = setTimeout(() => {
+              void notesStore.setSearchQuery(searchQuery);
+            }, 300);
           }}
         />
       </div>

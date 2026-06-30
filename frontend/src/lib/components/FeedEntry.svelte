@@ -181,9 +181,10 @@
     return () => clearTimeout(timer);
   });
 
-  // Derived parsed HTML from the DEBOUNCED text
+  // While streaming, render plain text — markdown parse only after stream completes
   let parsedHtml = $derived.by(() => {
     if (!debouncedText) return '';
+    if (isStreaming) return '';
     try {
       return DOMPurify.sanitize(marked.parse(debouncedText, { async: false }) as string);
     } catch {
@@ -447,7 +448,11 @@
           {/if}
       {:else if entry.type === 'user_message' || entry.type === 'content' || entry.type === 'thought'}
           <div class="{getEntryColor(entry.type)} break-words mt-1 markdown-content">
-            {@html parsedHtml}
+            {#if isStreaming}
+              {entry.text}
+            {:else}
+              {@html parsedHtml}
+            {/if}
           </div>
 
           {#if entry.metadata?.attachments && Array.isArray(entry.metadata.attachments) && entry.metadata.attachments.length > 0}

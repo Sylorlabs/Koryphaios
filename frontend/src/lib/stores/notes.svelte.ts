@@ -86,7 +86,7 @@ async function fetchNotes(folder?: string, query?: string): Promise<void> {
   try {
     const params = new URLSearchParams();
     if (folder && folder !== '/') params.set('folder', folder);
-    if (query) params.set('q', query);
+    if (query) params.set('search', query);
     const qs = params.toString();
     const res = await apiFetch(apiUrl(`/api/notes${qs ? `?${qs}` : ''}`));
     if (res.ok) {

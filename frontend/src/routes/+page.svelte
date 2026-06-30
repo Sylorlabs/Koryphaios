@@ -11,11 +11,7 @@
   import { apiUrl } from '$lib/utils/api-url';
   import ManagerFeed from '$lib/components/ManagerFeed.svelte';
   import AgentThreadFeed from '$lib/components/AgentThreadFeed.svelte';
-  import FileEditPreview from '$lib/components/FileEditPreview.svelte';
-  import WorkerCard from '$lib/components/WorkerCard.svelte';
   import CommandInput from '$lib/components/CommandInput.svelte';
-  import SessionSidebar from '$lib/components/SessionSidebar.svelte';
-  import SourceControlPanel from '$lib/components/SourceControlPanel.svelte';
   import DiffEditor from '$lib/components/DiffEditor.svelte';
   import PermissionDialog from '$lib/components/PermissionDialog.svelte';
   import QuestionDialog from '$lib/components/QuestionDialog.svelte';
@@ -25,13 +21,14 @@
   import CommandPalette from '$lib/components/CommandPalette.svelte';
   import MenuBar from '$lib/components/MenuBar.svelte';
   import ThemePickerModal from '$lib/components/ThemePickerModal.svelte';
-
-  import NoGitWarning from '$lib/components/NoGitWarning.svelte';
-  import NotesPanel from '$lib/components/NotesPanel.svelte';
+  import AppShell from '$lib/components/shell/AppShell.svelte';
+  import AgentRail from '$lib/components/shell/AgentRail.svelte';
+  import { useAgentRail } from '$lib/components/shell/useAgentRail.svelte';
+  import { useSessionSync } from '$lib/hooks/useSessionSync.svelte';
   import { shortcutStore } from '$lib/stores/shortcuts.svelte';
   import { gitStore } from '$lib/stores/git.svelte';
   import { notesStore } from '$lib/stores/notes.svelte';
-  import { ChevronLeft, ChevronRight, FolderOpen, FolderPlus, Clock, StickyNote } from 'lucide-svelte';
+  import { FolderOpen, FolderPlus, Clock } from 'lucide-svelte';
   import { invoke } from '@tauri-apps/api/core';
   import {
     type RecentProject,
@@ -61,9 +58,16 @@
   let projectFileInput = $state<HTMLInputElement>();
   let projectFolderInput = $state<HTMLInputElement>();
   let recentProjects = $state<RecentProject[]>([]);
-  let selectedAgentId = $state<string>('');
   let composerDraft = $state('');
   let currentProjectContent = $state('');
+
+  const agentRail = useAgentRail();
+
+  useSessionSync({
+    onActiveSessionChange: () => {
+      agentRail.selectedAgentId = '';
+    },
+  });
 
   const composerSlashCommands = [
     { command: 'new', label: 'New Session', description: 'Create a fresh session.' },
@@ -93,7 +97,6 @@
 
     window.addEventListener('keydown', handleGlobalKeydown);
 
-    // Listen for wikilink clicks from FeedEntry to open notes panel
     const handleOpenNote = async (e: Event) => {
       const title = (e as CustomEvent<{ title: string }>).detail?.title;
       if (!title) return;
@@ -102,7 +105,6 @@
     };
     window.addEventListener('open-note', handleOpenNote);
 
-    // Listen for "open-notes-graph" dispatched from Settings → Notes tab
     const handleOpenNotesGraph = () => {
       showNotes = true;
     };
@@ -134,63 +136,6 @@
     }
   }
 
-  let lastSubscribedSessionId = $state<string>('');
-
-  $effect(() => {
-    const activeId = sessionStore.activeSessionId;
-    if (!activeId) {
-      if (lastSubscribedSessionId !== '') {
-        wsStore.clearFeed();
-        lastSubscribedSessionId = '';
-      }
-      return;
-    }
-
-    if (activeId !== lastSubscribedSessionId) {
-      lastSubscribedSessionId = activeId;
-      
-      // Subscribe to the WS session if connected
-      if (wsStore.status === 'connected') {
-        wsStore.subscribeToSession(activeId);
-      }
-      
-      // Load history
-      void (async () => {
-        const messages = await sessionStore.fetchMessages(activeId);
-        wsStore.loadSessionMessages(activeId, messages);
-      })();
-    } else if (wsStore.status === 'connected' && activeId === lastSubscribedSessionId) {
-      // Re-subscribe if we just connected and we haven't subscribed yet
-      // But wait, the subscribeToSession call on reconnect is actually handled in websocket.svelte.ts:
-      // "if (activeSid) subscribeToSession(activeSid);" inside ws.onopen
-      // So we don't strictly need it here for reconnects, but let's be safe:
-      wsStore.subscribeToSession(activeId);
-    }
-  });
-
-  let lastLoadedAgentThreadsSessionId = $state('');
-
-  $effect(() => {
-    const activeId = sessionStore.activeSessionId;
-    if (activeId && activeId !== lastLoadedAgentThreadsSessionId) {
-      lastLoadedAgentThreadsSessionId = activeId;
-      selectedAgentId = '';
-      void wsStore.loadAgentThreads(activeId);
-    }
-  });
-
-  let lastLoadedAgentThreadKey = $state('');
-
-  $effect(() => {
-    const activeId = sessionStore.activeSessionId;
-    const selectedId = selectedAgentId;
-    if (!activeId || !selectedId) return;
-    const key = `${activeId}:${selectedId}`;
-    if (key === lastLoadedAgentThreadKey) return;
-    lastLoadedAgentThreadKey = key;
-    void wsStore.loadAgentThreadMessages(activeId, selectedId);
-  });
-
   function handleGlobalKeydown(e: KeyboardEvent) {
     if (e.key === 'Escape' && showThemeQuickMenu) {
       showThemeQuickMenu = false;
@@ -215,7 +160,6 @@
       return;
     }
 
-    // Ctrl+Shift+N / Cmd+Shift+N — toggle Notes panel
     if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === 'N') {
       e.preventDefault();
       showNotes = !showNotes;
@@ -472,40 +416,37 @@ RULES:
     );
   });
 
-  // Read folder contents using Tauri (for desktop app)
   async function readFolderFromTauri(folderPath: string): Promise<{ title: string; text: string; folderName: string; fileCount: number; path: string } | null> {
     try {
       const result = await invoke<{ folder_name: string; files: Array<{ path: string; content?: string }> }>('read_folder_contents', {
         folderPath
       });
-      
+
       const MAX_TOTAL_CHARS = 16000;
       let total = 0;
       const parts: string[] = [];
-      
-      // First, add files with content (key files like README, package.json, etc.)
+
       for (const file of result.files) {
         if (total >= MAX_TOTAL_CHARS) break;
         if (file.content) {
-          const slice = file.content.length + total > MAX_TOTAL_CHARS 
-            ? file.content.slice(0, MAX_TOTAL_CHARS - total) 
+          const slice = file.content.length + total > MAX_TOTAL_CHARS
+            ? file.content.slice(0, MAX_TOTAL_CHARS - total)
             : file.content;
           total += slice.length;
           parts.push(`--- ${file.path} ---\n${slice}`);
         }
       }
-      
-      // Then, add the file list
+
       const fileList = result.files.map(f => f.path).join('\n');
       if (fileList && total < MAX_TOTAL_CHARS) {
         const remaining = MAX_TOTAL_CHARS - total;
         const listSlice = fileList.length > remaining ? fileList.slice(0, remaining) + '\n... (truncated)' : fileList;
         parts.push(`\n--- File List ---\n${listSlice}`);
       }
-      
+
       const text = parts.join('\n\n');
       const title = `Project: ${result.folder_name}`.slice(0, 64);
-      
+
       return {
         title,
         text,
@@ -599,11 +540,9 @@ RULES:
   async function handleMenuAction(action: string) {
     switch (action) {
       case 'new_project': {
-        // Check if we're in Tauri desktop app (Tauri v2 uses __TAURI_INTERNALS__)
         const inTauri = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
-        
+
         if (!inTauri) {
-          // Fallback for web: create project without folder selection
           await createProjectFromText(
             `New Project ${new Date().toLocaleDateString()}`,
             buildNewProjectTemplate(),
@@ -611,26 +550,21 @@ RULES:
           );
           break;
         }
-        
+
         try {
-          // Step 1: Open folder dialog to select parent directory
           const selectedPath = await invoke<string | null>('select_folder_dialog');
-          if (!selectedPath) break; // User cancelled
-          
-          // Step 2: Prompt for project name
+          if (!selectedPath) break;
+
           const projectName = prompt('Enter project name:', 'New Project');
-          if (!projectName || !projectName.trim()) break; // User cancelled or empty
-          
-          // Step 3: Create the project folder
+          if (!projectName || !projectName.trim()) break;
+
           const projectPath = await invoke<string>('create_project_folder', {
             parentPath: selectedPath,
             projectName: projectName.trim()
           });
-          
-          // Step 4: Open the newly created folder as project
+
           toastStore.success(`Created project folder: ${projectPath}`);
-          
-          // Create a new project session with the folder info
+
           await createProjectFromText(
             projectName.trim(),
             buildNewProjectTemplate(),
@@ -645,28 +579,23 @@ RULES:
         projectFileInput?.click();
         break;
       case 'open_project_folder': {
-        // Check if we're in Tauri desktop app (Tauri v2 uses __TAURI_INTERNALS__)
         const inTauri = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
-        
+
         if (!inTauri) {
-          // Fallback for web: use the file input
           projectFolderInput?.click();
           break;
         }
-        
+
         try {
-          // Use Tauri folder dialog for native folder selection
           const selectedPath = await invoke<string | null>('select_folder_dialog');
-          if (!selectedPath) break; // User cancelled
-          
-          // Create a mock FileList from the selected folder path
-          // We'll need to read the folder contents via Tauri
+          if (!selectedPath) break;
+
           const result = await readFolderFromTauri(selectedPath);
           if (!result) {
             toastStore.error('Failed to open folder');
             break;
           }
-          
+
           await createProjectFromText(result.title, result.text, { source: 'file', fileName: result.folderName, path: selectedPath });
           toastStore.success(`Opened project from folder: ${result.folderName} (${result.fileCount} files)`);
         } catch (error) {
@@ -763,9 +692,8 @@ RULES:
       return;
     }
     if (!sessionStore.activeSessionId || (!message.trim() && !(attachments && attachments.length > 0))) return;
-    if (selectedAgentId) {
-      // NOTE: currently agent thread send might not support attachments, but we'll pass them if wsStore updates
-      wsStore.sendAgentMessage(sessionStore.activeSessionId, selectedAgentId, message);
+    if (agentRail.selectedAgentId) {
+      wsStore.sendAgentMessage(sessionStore.activeSessionId, agentRail.selectedAgentId, message);
       return;
     }
     wsStore.sendMessage(sessionStore.activeSessionId, message, model, reasoningLevel, attachments);
@@ -774,9 +702,9 @@ RULES:
   function handleStop() {
     const sid = sessionStore.activeSessionId;
     if (!sid) return;
-    if (selectedAgentId) {
-      wsStore.markAgentStopped(selectedAgentId);
-      apiFetch(apiUrl(`/api/agent/${selectedAgentId}/cancel`), { method: 'POST' }).catch(() => {});
+    if (agentRail.selectedAgentId) {
+      wsStore.markAgentStopped(agentRail.selectedAgentId);
+      apiFetch(apiUrl(`/api/agent/${agentRail.selectedAgentId}/cancel`), { method: 'POST' }).catch(() => {});
       return;
     }
     wsStore.markSessionAgentsStopped(sid);
@@ -788,36 +716,6 @@ RULES:
   let activeAgents = $derived([...wsStore.agents.values()].filter(a =>
     a.sessionId === sessionStore.activeSessionId && a.status !== 'done' && a.status !== 'idle'
   ));
-  let sessionAgentChats = $derived(
-    [...wsStore.agents.values()]
-      .filter((a) =>
-        a.sessionId === sessionStore.activeSessionId &&
-        a.identity.id !== 'kory-manager' &&
-        (a.identity.role === 'critic' || a.identity.role === 'coder')
-      )
-      .sort((a, b) => {
-        const activeWeight = (status: typeof a.status) =>
-          status !== 'done' && status !== 'idle' ? 1 : 0;
-        return activeWeight(b.status) - activeWeight(a.status);
-      })
-  );
-  let selectedAgent = $derived(
-    selectedAgentId ? wsStore.agents.get(selectedAgentId) ?? null : null
-  );
-  let selectedAgentFeed = $derived.by(() => {
-    const _version = wsStore.agentThreadVersion;
-    const sessionId = sessionStore.activeSessionId;
-    if (!sessionId || !selectedAgentId) return [];
-    return wsStore.getAgentThreadFeed(sessionId, selectedAgentId);
-  });
-  let selectedAgentIsRunning = $derived(
-    !!selectedAgent && selectedAgent.status !== 'done' && selectedAgent.status !== 'idle'
-  );
-  let inputPlaceholder = $derived(
-    selectedAgent
-      ? `What's the move for ${selectedAgent.identity.name}?`
-      : "What's the move?"
-  );
   let composerFileMentions = $derived(extractProjectFiles(currentProjectContent));
   let connectedProviders = $derived(wsStore.providers.filter(p => p.authenticated).length);
   let connectionDot = $derived(
@@ -831,118 +729,27 @@ RULES:
     wsStore.status === 'error' ? 'Realtime connection error' :
     'Realtime offline'
   );
-
-  $effect(() => {
-    if (!selectedAgentId) return;
-    const activeId = sessionStore.activeSessionId;
-    const exists = sessionAgentChats.some((agent) => agent.identity.id === selectedAgentId);
-    if (!activeId || !exists) {
-      selectedAgentId = '';
-    }
-  });
 </script>
 
 <svelte:head>
   <title>{appStore.projectName ? `${appStore.projectName} — Koryphaios` : 'Koryphaios — AI Agent Orchestrator'}</title>
 </svelte:head>
 
-<div class="flex h-screen min-h-0 min-w-0 overflow-hidden" style="background: var(--color-surface-0);">
-  <!-- Sidebar -->
-  {#if showSidebar}
-    <nav 
-      class="shrink-0 border-r flex min-h-0 flex-col" 
-      style="
-        width: var(--sidebar-width); 
-        min-width: var(--sidebar-min-width); 
-        max-width: var(--sidebar-max-width); 
-        border-color: var(--color-border); 
-        background: var(--color-surface-1);
-      " 
-      aria-label="Session navigation"
-    >
-      <!-- Logo + project -->
-      <div 
-        class="sidebar-header flex items-center justify-between px-4 border-b shrink-0" 
-        style="height: var(--header-height); border-color: var(--color-border);"
-        data-tauri-drag-region
-        onmousedown={startDragging}
-        role="presentation"
-      >
-        <div class="flex items-center gap-3 min-w-0 pointer-events-none">
-          <img src="/logo-64.png" alt="Koryphaios" class="rounded-lg shrink-0" style="width: var(--size-8); height: var(--size-8);" />
-          <div class="flex flex-col justify-center min-w-0">
-            <h1 class="text-sm font-semibold leading-tight" style="color: var(--color-text-primary);">Koryphaios</h1>
-            <p class="leading-tight" style="font-size: var(--text-xs); color: var(--color-text-muted);">Agent workspace</p>
-          </div>
-        </div>
-        <button
-          type="button"
-          class="sidebar-header-button rounded-lg transition-colors hover:bg-[var(--color-surface-3)]"
-          style="padding: var(--space-2); color: var(--color-text-muted);"
-          onclick={() => showSidebar = false}
-          title="Hide sidebar"
-          aria-label="Hide sidebar"
-        >
-          <ChevronLeft size={14} />
-        </button>
-      </div>
-      <!-- No Git Warning (Beginner Mode) -->
-      <NoGitWarning />
-      
-      <div class="flex-1 min-h-0 overflow-hidden">
-        <SessionSidebar 
-          currentSessionId={sessionStore.activeSessionId} 
-        />
-      </div>
-      
-      <!-- Sidebar footer -->
-      <div 
-        class="px-4 py-3 border-t flex items-center justify-between shrink-0" 
-        style="border-color: var(--color-border); background: var(--color-surface-2);"
-      >
-        <div class="flex items-center gap-2">
-          <div class="rounded-full {connectionDot}" style="width: var(--size-2); height: var(--size-2);"></div>
-          <span class="leading-none" style="font-size: var(--text-xs); color: var(--color-text-muted);" title={connectionStatusLabel}>{connectionStatusLabel}</span>
-        </div>
-        <div class="flex items-center gap-1">
-          {#if connectedProviders > 0}
-            <span 
-              class="px-1.5 py-0.5 rounded leading-none" 
-              style="font-size: var(--text-xs); background: var(--color-surface-3); color: var(--color-text-muted);"
-            >
-              {connectedProviders} providers
-            </span>
-          {/if}
-        </div>
-      </div>
-    </nav>
-  {:else if !zenMode}
-    <div 
-      class="shrink-0 border-r flex min-h-0 flex-col items-center" 
-      style="width: var(--sidebar-width-collapsed); border-color: var(--color-border); background: var(--color-surface-1);"
-    >
-      <div 
-        class="w-full border-b flex items-center justify-center" 
-        style="height: var(--header-height); border-color: var(--color-border);"
-      >
-        <button
-          type="button"
-          class="rounded-lg transition-colors hover:bg-[var(--color-surface-3)]"
-          style="padding: var(--space-2); color: var(--color-text-muted);"
-          onclick={() => showSidebar = true}
-          title="Show sidebar"
-          aria-label="Show sidebar"
-        >
-          <ChevronRight size={14} />
-        </button>
-      </div>
-    </div>
-  {/if}
-
-  <!-- Main Content -->
-  <div class="flex-1 flex min-h-0 min-w-0">
-    <div class="relative flex flex-1 min-h-0 min-w-0 flex-col">
-    <!-- Top bar -->
+<AppShell
+  {showSidebar}
+  {zenMode}
+  {showGit}
+  {showNotes}
+  activeSessionId={sessionStore.activeSessionId}
+  {connectionDot}
+  {connectionStatusLabel}
+  {connectedProviders}
+  onHideSidebar={() => showSidebar = false}
+  onShowSidebar={() => showSidebar = true}
+  onCloseNotes={() => showNotes = false}
+  {startDragging}
+>
+  {#snippet menubar()}
     <MenuBar
       {showSidebar}
       {showGit}
@@ -956,7 +763,9 @@ RULES:
       {recentProjects}
       onAction={handleMenuAction}
     />
+  {/snippet}
 
+  {#snippet fileInputs()}
     <input
       bind:this={projectFileInput}
       type="file"
@@ -972,147 +781,88 @@ RULES:
       multiple
       onchange={handleProjectFolderSelected}
     />
+  {/snippet}
 
-    <!-- Agent cards (collapsible) - only in advanced mode -->
-    {#if !zenMode && showAgents && modeStore.showAgentDetails && sessionAgentChats.length > 0}
-      <div class="px-4 py-2 border-b flex gap-2 overflow-x-auto shrink-0 items-stretch" style="border-color: var(--color-border); background: var(--color-surface-1);">
-        <button
-          type="button"
-          class="shrink-0 rounded-xl border px-4 py-2 text-left transition-colors"
-          style="min-width: 160px; background: {selectedAgentId ? 'var(--color-surface-2)' : 'rgba(213, 178, 97, 0.12)'}; border-color: {selectedAgentId ? 'var(--color-border)' : 'rgba(213, 178, 97, 0.35)'}; color: var(--color-text-primary);"
-          onclick={() => selectedAgentId = ''}
-        >
-          <div class="text-xs font-semibold uppercase tracking-[0.14em]" style="color: var(--color-text-muted);">Main chat</div>
-          <div class="mt-2 text-sm font-semibold">Manager feed</div>
-          <div class="mt-1 text-xs" style="color: var(--color-text-secondary);">Talk to Kory and review the full session.</div>
-        </button>
-        {#each sessionAgentChats as agent (agent.identity.id)}
-          <WorkerCard
-            {agent}
-            selected={selectedAgentId === agent.identity.id}
-            onSelect={() => {
-              selectedAgentId = agent.identity.id;
-              if (sessionStore.activeSessionId) {
-                void wsStore.loadAgentThreadMessages(sessionStore.activeSessionId, agent.identity.id);
-              }
-            }}
-          />
-        {/each}
-      </div>
-    {:else if !zenMode && showAgents && modeStore.showAgentDetails}
-      <div class="px-4 py-2 border-b flex items-center justify-center shrink-0" style="border-color: var(--color-border); background: var(--color-surface-1);">
-        <span class="text-xs opacity-40" style="color: var(--color-text-muted);">No worker or critic chats yet</span>
-      </div>
-    {/if}
+  {#snippet agentRailSlot()}
+    <AgentRail rail={agentRail} visible={showAgents} />
+  {/snippet}
 
-    <!-- File Edit Preview (Cursor-style streaming) -->
-    <FileEditPreview />
-
-    <!-- Notes Panel (full-area overlay when active) -->
-    {#if showNotes}
-      <div class="absolute inset-0 z-30 flex min-h-0 min-w-0 flex-col" style="top: var(--header-height, 40px); background: var(--color-surface-1);">
-        <div class="flex items-center justify-between px-4 py-2 border-b shrink-0" style="border-color: var(--color-border); background: var(--color-surface-0);">
-          <div class="flex items-center gap-2">
-            <StickyNote size={14} style="color: var(--color-accent);" />
-            <span class="text-sm font-semibold" style="color: var(--color-text-primary);">Note Network</span>
+  {#snippet feed()}
+    {#if !appStore.projectName}
+      <div class="flex-1 flex flex-col items-center justify-center px-8 py-10" style="background: var(--color-surface-1);">
+        <div class="max-w-xl w-full text-center rounded-[24px] border px-8 py-10" style="background: linear-gradient(180deg, rgba(213, 178, 97, 0.1), rgba(213, 178, 97, 0.03)); border-color: rgba(213, 178, 97, 0.22);">
+          <div class="mb-8">
+            <img src="/logo-64.png" alt="Koryphaios" class="mx-auto rounded-2xl opacity-90" style="width: 72px; height: 72px;" />
           </div>
-          <button
-            type="button"
-            class="p-1.5 rounded-lg transition-colors hover:bg-[var(--color-surface-3)] text-xs"
-            style="color: var(--color-text-muted);"
-            onclick={() => showNotes = false}
-            aria-label="Close notes"
-          >
-            Back to chat
-          </button>
-        </div>
-        <div class="flex-1 min-h-0">
-          <NotesPanel />
-        </div>
-      </div>
-    {/if}
 
-    <!-- Chat / Feed area -->
-	    <section class="flex flex-1 min-h-0 flex-col overflow-hidden" role="main" aria-label="Chat feed">
-	      {#if !appStore.projectName}
-	        <!-- Empty state: No project selected -->
-	        <div class="flex-1 flex flex-col items-center justify-center px-8 py-10" style="background: var(--color-surface-1);">
-	          <div class="max-w-xl w-full text-center rounded-[24px] border px-8 py-10" style="background: linear-gradient(180deg, rgba(213, 178, 97, 0.1), rgba(213, 178, 97, 0.03)); border-color: rgba(213, 178, 97, 0.22);">
-	            <!-- Logo -->
-	            <div class="mb-8">
-	              <img src="/logo-64.png" alt="Koryphaios" class="mx-auto rounded-2xl opacity-90" style="width: 72px; height: 72px;" />
-	            </div>
-	            
-	            <h2 class="text-2xl font-semibold mb-3" style="color: var(--color-text-primary);">Open a project to start working</h2>
-	            <p class="text-sm mb-8 max-w-md mx-auto leading-relaxed" style="color: var(--color-text-secondary);">Koryphaios works best when it can inspect a real codebase, explain the current state, and then make targeted changes.</p>
-	            
-	            <!-- Action buttons -->
-	            <div class="flex flex-col gap-3 mb-8">
-	              <button
-	                type="button"
-	                class="flex items-center justify-center gap-3 px-2 py-3 rounded-xl text-sm font-semibold transition-colors hover:bg-[var(--color-surface-2)]"
-	                style="color: var(--color-text-primary);"
-	                onclick={() => handleMenuAction('open_project_folder')}
-	              >
-	                <FolderOpen size={18} />
-	                <span>Open Folder</span>
-              </button>
-              
-	              <button
-	                type="button"
-	                class="flex items-center justify-center gap-3 px-2 py-3 rounded-xl text-sm font-semibold transition-colors hover:bg-[var(--color-surface-2)]"
-	                style="color: var(--color-text-primary);"
-	                onclick={() => handleMenuAction('new_project')}
-	              >
-	                <FolderPlus size={18} />
-                <span>New Project</span>
-              </button>
-            </div>
-            
-            <!-- Recent projects -->
-	            {#if recentProjects.length > 0}
-	              <div class="text-left">
-	                <div class="flex items-center gap-2 mb-3 px-1">
-	                  <Clock size={14} style="color: var(--color-text-muted);" />
-	                  <span class="text-xs font-semibold uppercase tracking-[0.14em]" style="color: var(--color-text-muted);">Recent projects</span>
-	                </div>
-	                <div class="flex flex-col gap-2">
-	                  {#each recentProjects.slice(0, 5) as project (project.id)}
-	                    <button
-	                      type="button"
-	                      class="flex items-center justify-between gap-3 px-4 py-3 rounded-xl text-left text-sm transition-colors border hover:bg-[var(--color-surface-2)]"
-	                      style="color: var(--color-text-primary); border-color: var(--color-border); background: rgba(12, 10, 9, 0.2);"
-	                      onclick={() => handleMenuAction(`open_recent:${project.id}`)}
-	                      title={project.path || project.fileName || project.title}
-	                    >
-	                      <span class="truncate font-medium">{project.title}</span>
-	                      <span class="shrink-0 text-xs truncate max-w-[150px]" style="color: var(--color-text-muted);">
-	                        {project.path ? project.path.split('/').pop() || project.path.split('\\').pop() : project.fileName || ''}
-	                      </span>
-                    </button>
-                  {/each}
-                </div>
+          <h2 class="text-2xl font-semibold mb-3" style="color: var(--color-text-primary);">Open a project to start working</h2>
+          <p class="text-sm mb-8 max-w-md mx-auto leading-relaxed" style="color: var(--color-text-secondary);">Koryphaios works best when it can inspect a real codebase, explain the current state, and then make targeted changes.</p>
+
+          <div class="flex flex-col gap-3 mb-8">
+            <button
+              type="button"
+              class="flex items-center justify-center gap-3 px-2 py-3 rounded-xl text-sm font-semibold transition-colors hover:bg-[var(--color-surface-2)]"
+              style="color: var(--color-text-primary);"
+              onclick={() => handleMenuAction('open_project_folder')}
+            >
+              <FolderOpen size={18} />
+              <span>Open Folder</span>
+            </button>
+
+            <button
+              type="button"
+              class="flex items-center justify-center gap-3 px-2 py-3 rounded-xl text-sm font-semibold transition-colors hover:bg-[var(--color-surface-2)]"
+              style="color: var(--color-text-primary);"
+              onclick={() => handleMenuAction('new_project')}
+            >
+              <FolderPlus size={18} />
+              <span>New Project</span>
+            </button>
+          </div>
+
+          {#if recentProjects.length > 0}
+            <div class="text-left">
+              <div class="flex items-center gap-2 mb-3 px-1">
+                <Clock size={14} style="color: var(--color-text-muted);" />
+                <span class="text-xs font-semibold uppercase tracking-[0.14em]" style="color: var(--color-text-muted);">Recent projects</span>
               </div>
-            {/if}
-          </div>
+              <div class="flex flex-col gap-2">
+                {#each recentProjects.slice(0, 5) as project (project.id)}
+                  <button
+                    type="button"
+                    class="flex items-center justify-between gap-3 px-4 py-3 rounded-xl text-left text-sm transition-colors border hover:bg-[var(--color-surface-2)]"
+                    style="color: var(--color-text-primary); border-color: var(--color-border); background: rgba(12, 10, 9, 0.2);"
+                    onclick={() => handleMenuAction(`open_recent:${project.id}`)}
+                    title={project.path || project.fileName || project.title}
+                  >
+                    <span class="truncate font-medium">{project.title}</span>
+                    <span class="shrink-0 text-xs truncate max-w-[150px]" style="color: var(--color-text-muted);">
+                      {project.path ? project.path.split('/').pop() || project.path.split('\\').pop() : project.fileName || ''}
+                    </span>
+                  </button>
+                {/each}
+              </div>
+            </div>
+          {/if}
         </div>
-      {:else if gitStore.state.activeDiff}
-        <DiffEditor />
-      {:else if selectedAgent}
-        <AgentThreadFeed
-          agent={selectedAgent}
-          feed={selectedAgentFeed}
-          isStreaming={selectedAgentIsRunning}
-        />
-      {:else}
-        <ManagerFeed onUseSuggestion={loadSuggestionIntoComposer} />
-      {/if}
-    </section>
+      </div>
+    {:else if gitStore.state.activeDiff}
+      <DiffEditor />
+    {:else if agentRail.selectedAgent}
+      <AgentThreadFeed
+        agent={agentRail.selectedAgent}
+        feed={agentRail.selectedAgentFeed}
+        isStreaming={agentRail.selectedAgentIsRunning}
+      />
+    {:else}
+      <ManagerFeed onUseSuggestion={loadSuggestionIntoComposer} />
+    {/if}
+  {/snippet}
 
-    <!-- Context window usage - only in advanced mode -->
+  {#snippet contextBar()}
     {#if wsStore.contextUsage.isReliable && modeStore.showCostTracking}
-      <div 
-        class="shrink-0 px-4 flex items-center gap-3" 
+      <div
+        class="shrink-0 px-4 flex items-center gap-3"
         style="padding-top: var(--space-2); padding-bottom: var(--space-2); border-top: 1px solid var(--color-border); background: var(--color-surface-1);"
       >
         <span class="shrink-0" style="font-size: var(--text-xs); color: var(--color-text-muted);">
@@ -1123,7 +873,7 @@ RULES:
             class="h-full rounded-full transition-all"
             style="width: {wsStore.contextUsage.percent}%; transition-duration: var(--duration-slower); background: {
               wsStore.contextUsage.percent > 85 ? '#ef4444' :
-              wsStore.contextUsage.percent > 65 ? '#f59e0b' : 
+              wsStore.contextUsage.percent > 65 ? '#f59e0b' :
               'var(--color-accent)'
             };"
           ></div>
@@ -1135,42 +885,25 @@ RULES:
         {/if}
       </div>
     {/if}
+  {/snippet}
 
-    <!-- Command Input -->
-	    <div class="shrink-0" style="background: var(--color-surface-1);">
-	      <CommandInput
-	        bind:inputRef
-          bind:value={composerDraft}
-	        onSend={handleSend}
-          onExecuteCommand={handleSlashCommand}
-	        isRunning={selectedAgent ? selectedAgentIsRunning : wsStore.isSessionBusy(sessionStore.activeSessionId)}
-	        onStop={handleStop}
-	        onOpenSettings={() => showSettings = true}
-          slashCommands={composerSlashCommands}
-          fileMentions={composerFileMentions}
-	        disabled={!appStore.projectName}
-	        disabledMessage="Open a project to start chatting with agents"
-          placeholder={inputPlaceholder}
-	      />
-    </div>
-  </div>
-
-  {#if !zenMode && showGit && modeStore.showGitPanel}
-      <aside 
-        class="border-l shrink-0 min-h-0" 
-        style="
-          width: var(--git-panel-width); 
-          max-width: var(--git-panel-max-width); 
-          min-width: var(--git-panel-min-width); 
-          border-color: var(--color-border); 
-          background: var(--color-surface-1);
-        "
-      >
-        <SourceControlPanel />
-      </aside>
-    {/if}
-  </div>
-</div>
+  {#snippet composer()}
+    <CommandInput
+      bind:inputRef
+      bind:value={composerDraft}
+      onSend={handleSend}
+      onExecuteCommand={handleSlashCommand}
+      isRunning={agentRail.selectedAgent ? agentRail.selectedAgentIsRunning : wsStore.isSessionBusy(sessionStore.activeSessionId)}
+      onStop={handleStop}
+      onOpenSettings={() => showSettings = true}
+      slashCommands={composerSlashCommands}
+      fileMentions={composerFileMentions}
+      disabled={!appStore.projectName}
+      disabledMessage="Open a project to start chatting with agents"
+      placeholder={agentRail.inputPlaceholder}
+    />
+  {/snippet}
+</AppShell>
 
 <PermissionDialog />
 <QuestionDialog />
@@ -1180,13 +913,3 @@ RULES:
 <SettingsDrawer open={showSettings} onClose={() => showSettings = false} />
 <CommandPalette bind:open={showCommandPalette} onAction={handleMenuAction} />
 <ToastContainer />
-
-<style>
-  .sidebar-header {
-    /* Relying on JS onmousedown={startDragging} */
-  }
-
-  .sidebar-header-button {
-    /* Normal button behavior */
-  }
-</style>

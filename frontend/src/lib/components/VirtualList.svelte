@@ -9,11 +9,14 @@
         items: T[];
         estimateHeight: (item: T) => number;
         overscan?: number;
+        class?: string;
+        onScroll?: (distFromBottom: number) => void;
         onScrollNearBottom?: () => void;
+        onReady?: (el: HTMLDivElement) => void;
         row?: Snippet<[T, number]>;
     }
     
-    let { items, estimateHeight, overscan = 5, onScrollNearBottom, row }: Props = $props();
+    let { items, estimateHeight, overscan = 5, class: className = '', onScroll, onScrollNearBottom, onReady, row }: Props = $props();
     
     // DOM refs
     let containerEl = $state<HTMLDivElement>();
@@ -108,6 +111,7 @@
         // Check if near bottom
         const { scrollHeight } = containerEl;
         const dist = scrollHeight - scrollTop - clientHeight;
+        onScroll?.(dist);
         if (dist < 200 && onScrollNearBottom) {
             onScrollNearBottom();
         }
@@ -145,6 +149,7 @@
     onMount(() => {
         if (!containerEl) return;
         
+        onReady?.(containerEl);
         clientHeight = containerEl.clientHeight;
         
         const ro = new ResizeObserver((entries) => {
@@ -158,9 +163,13 @@
     });
     
     // Expose methods
-    export function scrollToBottom() {
+    export function getScrollElement(): HTMLDivElement | undefined {
+        return containerEl;
+    }
+
+    export function scrollToBottom(behavior: ScrollBehavior = 'smooth') {
         if (containerEl) {
-            containerEl.scrollTo({ top: containerEl.scrollHeight, behavior: 'smooth' });
+            containerEl.scrollTo({ top: containerEl.scrollHeight, behavior });
         }
     }
     
@@ -177,7 +186,7 @@
 
 <div 
     bind:this={containerEl}
-    class="virtual-list"
+    class="virtual-list {className}"
     onscroll={handleScroll}
 >
     <div 

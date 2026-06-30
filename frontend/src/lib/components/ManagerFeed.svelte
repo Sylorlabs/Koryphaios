@@ -2,7 +2,6 @@
   import { wsStore } from '$lib/stores/websocket.svelte';
   import { appStore } from '$lib/stores/app.svelte';
   import { isMac } from '$lib/utils/platform';
-  import { onMount } from 'svelte';
   import { fade } from 'svelte/transition';
   import {
     MessageSquare,
@@ -18,9 +17,12 @@
     X
   } from 'lucide-svelte';
   import FeedEntry from './FeedEntry.svelte';
+  import VirtualList from './VirtualList.svelte';
   import type { FeedEntryLocal } from '$lib/types';
 
   let feedContainer = $state<HTMLDivElement>();
+  let virtualList = $state<VirtualList<FeedEntryLocal>>();
+  let feedScrollEl = $state<HTMLDivElement | undefined>();
   let autoScroll = $state(true);
   let selectedEntries = $state<Set<string>>(new Set());
   let lastSelectedId = $state<string>('');
@@ -50,21 +52,60 @@
   let suggestions = $state<DashboardSuggestion[]>(defaultSuggestions);
 
   let filteredFeed = $derived(wsStore.groupedFeed);
+  let isManagerStreaming = $derived(
+    wsStore.managerStatus === 'streaming' || wsStore.managerStatus === 'thinking',
+  );
 
   // Track last feed length to avoid scroll loops
   let lastFeedLength = $state(0);
   let lastUserScrollAt = $state(0);
 
+  function estimateFeedHeight(entry: FeedEntryLocal): number {
+    switch (entry.type) {
+      case 'user_message':
+        return 60;
+      case 'content':
+        return 120;
+      case 'tool_call':
+      case 'tool_result':
+      case 'tool_group':
+        return 80;
+      default:
+        return 100;
+    }
+  }
+
+  function scrollFeedToBottom(behavior: ScrollBehavior = 'instant') {
+    if (virtualList) {
+      virtualList.scrollToBottom(behavior);
+    } else if (feedContainer) {
+      feedContainer.scrollTop = feedContainer.scrollHeight;
+    }
+  }
+
+  function handleFeedScroll(distFromBottom: number) {
+    lastUserScrollAt = Date.now();
+    autoScroll = distFromBottom < 50;
+  }
+
+  function handleScrollNearBottom() {
+    if (autoScroll) {
+      scrollFeedToBottom('instant');
+    }
+  }
+
+  function handleVirtualListReady(el: HTMLDivElement) {
+    feedScrollEl = el;
+  }
+
   // Auto-scroll effect: only when new items added and user was already at bottom (not right after they scrolled up)
   $effect(() => {
     const len = filteredFeed.length;
     const justScrolled = Date.now() - lastUserScrollAt < 200;
-    if (autoScroll && feedContainer && len > lastFeedLength && !justScrolled) {
+    if (autoScroll && len > lastFeedLength && !justScrolled) {
       lastFeedLength = len;
       requestAnimationFrame(() => {
-        if (feedContainer && autoScroll) {
-          feedContainer.scrollTop = feedContainer.scrollHeight;
-        }
+        if (autoScroll) scrollFeedToBottom('instant');
       });
     } else if (len !== lastFeedLength) {
       lastFeedLength = len;
@@ -73,19 +114,22 @@
 
   function handleScroll(_e: UIEvent) {
     if (!feedContainer) return;
-    lastUserScrollAt = Date.now();
-
     const { scrollHeight, clientHeight: ch } = feedContainer;
-    const scrollTop = feedContainer.scrollTop;
-    const dist = scrollHeight - scrollTop - ch;
-    autoScroll = dist < 50;
+    const dist = scrollHeight - feedContainer.scrollTop - ch;
+    handleFeedScroll(dist);
   }
-  
-  onMount(() => {
-    if (!feedContainer) return;
-    const container = feedContainer;
 
-    const ro = new ResizeObserver(entries => {
+  $effect(() => {
+    if (filteredFeed.length === 0) {
+      feedScrollEl = feedContainer;
+    }
+  });
+
+  $effect(() => {
+    const container = feedScrollEl;
+    if (!container) return;
+
+    const ro = new ResizeObserver((entries) => {
       for (const entry of entries) {
         if (autoScroll) {
           container.scrollTop = container.scrollHeight;
@@ -97,7 +141,6 @@
     });
     ro.observe(container);
 
-    // Scroll during streaming: fire on any DOM content change inside the feed
     let rafId: number | null = null;
     const mo = new MutationObserver(() => {
       if (!autoScroll) return;
@@ -107,7 +150,7 @@
         if (autoScroll) container.scrollTop = container.scrollHeight;
       });
     });
-    mo.observe(container, { childList: true, subtree: true, characterData: true });
+    mo.observe(container, { childList: true, subtree: true });
 
     return () => {
       ro.disconnect();
@@ -222,12 +265,12 @@
   </div>
 
   <div class="relative flex-1 min-h-0 overflow-hidden">
+    {#if filteredFeed.length === 0}
     <div
       bind:this={feedContainer}
       onscroll={handleScroll}
-      class="absolute inset-0 overflow-y-auto p-4 space-y-3 feed-scroll"
+      class="absolute inset-0 overflow-y-auto p-4 feed-scroll"
     >
-    {#if filteredFeed.length === 0}
       <div class="px-6 py-10 max-w-5xl mx-auto">
         <div class="flex gap-5 animate-in fade-in slide-in-from-bottom-4 duration-700">
           <div class="flex-1 space-y-6 min-w-0">
@@ -372,20 +415,34 @@
           </div>
         </div>
       </div>
+    </div>
     {:else}
-      {#each filteredFeed as entry, i (entry.id)}
-        <FeedEntry 
-          {entry}
-          isSelected={selectedEntries.has(entry.id)}
-          isExpanded={expandedGroups.has(entry.id)}
-          isStreaming={i === filteredFeed.length - 1 && (wsStore.managerStatus === 'streaming' || wsStore.managerStatus === 'thinking')}
-          onSelect={(e) => handleEntryClick(entry, e)}
-          onToggleGroup={() => toggleGroup(entry.id)}
-          onDelete={() => deleteSingle(entry.id)}
-        />
-      {/each}
+      <div class="absolute inset-0">
+        <VirtualList
+          bind:this={virtualList}
+          items={filteredFeed}
+          estimateHeight={estimateFeedHeight}
+          class="h-full p-4 feed-scroll"
+          onScroll={handleFeedScroll}
+          onScrollNearBottom={handleScrollNearBottom}
+          onReady={handleVirtualListReady}
+        >
+          {#snippet row(entry, i)}
+            <div class="pb-3">
+              <FeedEntry
+                {entry}
+                isSelected={selectedEntries.has(entry.id)}
+                isExpanded={expandedGroups.has(entry.id)}
+                isStreaming={i === filteredFeed.length - 1 && isManagerStreaming}
+                onSelect={(e) => handleEntryClick(entry, e)}
+                onToggleGroup={() => toggleGroup(entry.id)}
+                onDelete={() => deleteSingle(entry.id)}
+              />
+            </div>
+          {/snippet}
+        </VirtualList>
+      </div>
     {/if}
-    </div><!-- /feedContainer -->
 
   {#if !autoScroll}
     <div
@@ -393,7 +450,7 @@
       class="absolute bottom-4 left-1/2 z-10 -translate-x-1/2 pointer-events-none"
     >
       <button
-        onclick={() => { autoScroll = true; if (feedContainer) feedContainer.scrollTop = feedContainer.scrollHeight; }}
+        onclick={() => { autoScroll = true; scrollFeedToBottom('smooth'); }}
         class="pointer-events-auto flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-medium shadow-lg backdrop-blur-sm transition-transform hover:scale-105 active:scale-95"
         style="background: var(--color-surface-2); border-color: var(--color-border); color: var(--color-text-secondary); box-shadow: 0 4px 16px rgba(0,0,0,0.35);"
         aria-label="Scroll to bottom"
