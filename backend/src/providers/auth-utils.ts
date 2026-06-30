@@ -302,6 +302,12 @@ export function detectCursorCLILogin(): boolean {
   }
 }
 
+/** Google Jules API key from the environment (https://jules.google.com/settings#api). */
+export function detectJulesApiKey(): string | null {
+  const k = process.env.JULES_API_KEY?.trim();
+  return k || null;
+}
+
 /** The Antigravity CLI (`agy`) API key from the environment. */
 export function detectAntigravityApiKey(): string | null {
   const k = process.env.ANTIGRAVITY_API_KEY?.trim();

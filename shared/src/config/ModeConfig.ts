@@ -54,6 +54,7 @@ export const BEGINNER_TOOL_WHITELIST = [
 /** Tools excluded from beginner mode */
 export const BEGINNER_TOOL_BLACKLIST = [
   'delegate_to_worker',
+  'delegate_to_jules',
   'shell_manage',
   'delete_file',
   'move_file',

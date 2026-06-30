@@ -15,7 +15,19 @@ import {
   resetCodexDeviceAuthSessions,
   startCodexDeviceAuth,
 } from '../../providers/codex';
-import { clearCodexAuthState, createCodexCLIAuthMarker, detectCodexAuthToken, detectClaudeCodeLogin, createClaudeCLIAuthMarker, detectGeminiCLIToken, clearCachedToken } from '../../providers/auth-utils';
+import {
+  clearCodexAuthState,
+  createCodexCLIAuthMarker,
+  detectCodexAuthToken,
+  detectClaudeCodeLogin,
+  createClaudeCLIAuthMarker,
+  detectGeminiCLIToken,
+  clearCachedToken,
+  detectGrokCLILogin,
+  createGrokCLIAuthMarker,
+  detectAntigravityCLILogin,
+  createAntigravityCLIAuthMarker,
+} from '../../providers/auth-utils';
 import { detectAgentClis } from '../../providers/cli-detection';
 import { googleAuth } from '../../providers/google-auth';
 import {
@@ -54,10 +66,27 @@ const providerConfigBody = t.Object({
   hideModelSelector: t.Optional(t.Boolean()),
 });
 
-type BrowserAuthProvider = 'copilot' | 'codex' | 'kimicode' | 'claude' | 'google' | 'google-subscription';
+type BrowserAuthProvider =
+  | 'copilot'
+  | 'codex'
+  | 'kimicode'
+  | 'claude'
+  | 'grok'
+  | 'antigravity'
+  | 'google'
+  | 'google-subscription';
 
 function isBrowserAuthProvider(name: string): name is BrowserAuthProvider {
-  return name === 'copilot' || name === 'codex' || name === 'kimicode' || name === 'claude' || name === 'google' || name === 'google-subscription';
+  return (
+    name === 'copilot' ||
+    name === 'codex' ||
+    name === 'kimicode' ||
+    name === 'claude' ||
+    name === 'grok' ||
+    name === 'antigravity' ||
+    name === 'google' ||
+    name === 'google-subscription'
+  );
 }
 
 async function startBrowserAuth(
@@ -169,6 +198,65 @@ async function startBrowserAuth(
           },
         };
       }
+      case 'grok': {
+        // Grok Build subscription — the official `grok` CLI owns auth (no token entry in UI).
+        if (detectGrokCLILogin()) {
+          const { providers } = getContext();
+          const setResult = await providers.setCredentials('grok', {
+            authToken: createGrokCLIAuthMarker(),
+          });
+          if (!setResult.success) {
+            return { ok: false, error: setResult.error ?? 'Failed to activate Grok Build auth' };
+          }
+          syncProviderConfigsSafely(providers);
+          serverLog.info({ provider: name }, 'Grok Build connected via CLI subscription');
+          return {
+            ok: true,
+            data: {
+              status: 'connected',
+              provider: 'grok',
+              message: 'Grok Build connected via your local grok CLI (subscription or xAI key)',
+            },
+          };
+        }
+        serverLog.info({ provider: name }, 'No Grok Build CLI login detected');
+        return {
+          ok: true,
+          data: {
+            provider: 'grok',
+            message: 'Install the grok CLI and run "grok login", then click Auth again to connect.',
+          },
+        };
+      }
+      case 'antigravity': {
+        if (detectAntigravityCLILogin()) {
+          const { providers } = getContext();
+          const setResult = await providers.setCredentials('antigravity', {
+            authToken: createAntigravityCLIAuthMarker(),
+          });
+          if (!setResult.success) {
+            return { ok: false, error: setResult.error ?? 'Failed to activate Antigravity auth' };
+          }
+          syncProviderConfigsSafely(providers);
+          serverLog.info({ provider: name }, 'Antigravity connected via CLI');
+          return {
+            ok: true,
+            data: {
+              status: 'connected',
+              provider: 'antigravity',
+              message: 'Antigravity connected via your local agy CLI',
+            },
+          };
+        }
+        serverLog.info({ provider: name }, 'No Antigravity CLI login detected');
+        return {
+          ok: true,
+          data: {
+            provider: 'antigravity',
+            message: 'Install the agy CLI and run "agy login", then click Auth again to connect.',
+          },
+        };
+      }
       case 'google': {
         // Check for existing gcloud / Gemini CLI credentials
         clearCachedToken('gemini');
@@ -276,6 +364,40 @@ async function completeBrowserAuth(
         syncProviderConfigsSafely(providers);
         serverLog.info({ provider: name }, 'Claude Code auth completed');
         return { ok: true, data: { status: 'connected', provider: 'claude' } };
+      }
+      case 'grok': {
+        if (!detectGrokCLILogin()) {
+          return {
+            ok: false,
+            error: 'Grok Build CLI is not logged in. Install grok and run "grok login" first.',
+          };
+        }
+        const grokResult = await providers.setCredentials('grok', {
+          authToken: createGrokCLIAuthMarker(),
+        });
+        if (!grokResult.success) {
+          return { ok: false, error: grokResult.error ?? 'Failed to activate Grok Build auth' };
+        }
+        syncProviderConfigsSafely(providers);
+        serverLog.info({ provider: name }, 'Grok Build auth completed');
+        return { ok: true, data: { status: 'connected', provider: 'grok' } };
+      }
+      case 'antigravity': {
+        if (!detectAntigravityCLILogin()) {
+          return {
+            ok: false,
+            error: 'Antigravity CLI is not logged in. Install agy and run "agy login" first.',
+          };
+        }
+        const agyResult = await providers.setCredentials('antigravity', {
+          authToken: createAntigravityCLIAuthMarker(),
+        });
+        if (!agyResult.success) {
+          return { ok: false, error: agyResult.error ?? 'Failed to activate Antigravity auth' };
+        }
+        syncProviderConfigsSafely(providers);
+        serverLog.info({ provider: name }, 'Antigravity auth completed');
+        return { ok: true, data: { status: 'connected', provider: 'antigravity' } };
       }
       case 'google': {
         clearCachedToken('gemini');

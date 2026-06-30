@@ -12,10 +12,9 @@
 // deployment URL + headers + api-version, plus an async OAuth token step.
 
 import OpenAI from 'openai';
-import type { ProviderConfig, ModelDef } from '@koryphaios/shared';
+import type { ProviderConfig } from '@koryphaios/shared';
 import { OpenAIProvider } from './openai';
 import { createUsageInterceptingFetch } from '../credit-accountant';
-import { getModelsForProvider } from './types';
 import { withTimeoutSignal } from './utils';
 import { providerLog } from '../logger';
 
@@ -43,8 +42,8 @@ export class SapAiProvider extends OpenAIProvider {
     return !this.config.disabled && !!cred && (!!this.config.baseUrl || this.looksLikeServiceKey(cred));
   }
 
-  override listModels(): ModelDef[] {
-    return getModelsForProvider('sapai');
+  protected override async prepareForModelDiscovery(): Promise<void> {
+    await this.ensureToken();
   }
 
   override async *streamResponse(

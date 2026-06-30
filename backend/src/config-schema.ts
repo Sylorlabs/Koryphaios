@@ -2,8 +2,10 @@
 // This provides runtime validation beyond TypeScript's compile-time checks
 
 import type { KoryphaiosConfig } from '@koryphaios/shared';
+import { IMPLEMENTED_PROVIDERS } from '@koryphaios/shared';
 import { ConfigError } from './errors';
 import { serverLog } from './logger';
+import { PROVIDER_AUTH_MODE } from './providers/constants';
 import { resolveModel } from './providers/types';
 
 export type AppConfig = KoryphaiosConfig;
@@ -107,52 +109,9 @@ export function validateConfig(config: Partial<KoryphaiosConfig>): void {
 
   // Validate providers config
   if (config.providers) {
-    const validProviders = new Set([
-      'anthropic',
-      'openai',
-      'google',
-      'copilot',
-      'codex',
-      'grok',
-      'openrouter',
-      'groq',
-      'xai',
-      'azure',
-      'bedrock',
-      'vertexai',
-      'local',
-      'ollama',
-      'opencodezen',
-      '302ai',
-      'azurecognitive',
-      'baseten',
-      'cerebras',
-      'cloudflare',
-      'deepseek',
-      'deepinfra',
-      'fireworks',
-      'gitlab',
-      'huggingface',
-      'helicone',
-      'llamacpp',
-      'ionet',
-      'lmstudio',
-      'kimicode',
-      'mistral',
-      'moonshot',
-      'minimax',
-      'nebius',
-      'ollamacloud',
-      'sapai',
-      'stackit',
-      'ovhcloud',
-      'scaleway',
-      'togetherai',
-      'venice',
-      'vercel',
-      'zai',
-      'zenmux',
-      'claude',
+    const validProviders = new Set<string>([
+      ...IMPLEMENTED_PROVIDERS,
+      ...Object.keys(PROVIDER_AUTH_MODE),
     ]);
 
     for (const [name, providerConfig] of Object.entries(config.providers)) {

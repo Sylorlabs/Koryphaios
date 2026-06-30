@@ -34,7 +34,7 @@
     "multiSourceResearch": true,
     "updatedAt": 1782433271098
   },
-  "updatedAt": 1782433271098,
+  "updatedAt": 1782796422013,
   "providers": {
     "anthropic": {
       "name": "anthropic",
@@ -44,9 +44,10 @@
     },
     "claude": {
       "name": "claude",
+      "authToken": "cli:claude:1782795960395",
       "selectedModels": [],
       "hideModelSelector": false,
-      "disabled": true
+      "disabled": false
     },
     "codex": {
       "name": "codex",
@@ -120,7 +121,7 @@
     },
     "local": {
       "name": "local",
-      "baseUrl": "localhost:8080",
+      "baseUrl": "http://localhost:8080",
       "selectedModels": [],
       "hideModelSelector": false,
       "disabled": false
@@ -305,6 +306,37 @@
     },
     "kimicode": {
       "name": "kimicode",
+      "selectedModels": [],
+      "hideModelSelector": false,
+      "disabled": true
+    },
+    "grok": {
+      "name": "grok",
+      "selectedModels": [],
+      "hideModelSelector": false,
+      "disabled": true
+    },
+    "antigravity": {
+      "name": "antigravity",
+      "authToken": "cli:antigravity:1782795960398",
+      "selectedModels": [],
+      "hideModelSelector": false,
+      "disabled": false
+    },
+    "jules": {
+      "name": "jules",
+      "selectedModels": [],
+      "hideModelSelector": false,
+      "disabled": true
+    },
+    "cline": {
+      "name": "cline",
+      "selectedModels": [],
+      "hideModelSelector": false,
+      "disabled": true
+    },
+    "cortecs": {
+      "name": "cortecs",
       "selectedModels": [],
       "hideModelSelector": false,
       "disabled": true

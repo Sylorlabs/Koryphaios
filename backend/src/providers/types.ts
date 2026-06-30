@@ -98,6 +98,8 @@ export interface StreamRequest {
   signal?: AbortSignal;
   /** Project working directory — agentic CLI providers (claude-code) run + edit files here. */
   workingDirectory?: string;
+  /** Koryphaios session id — used by cloud providers (Jules) for session continuity. */
+  sessionId?: string;
 }
 
 // ─── Provider interface ─────────────────────────────────────────────────────

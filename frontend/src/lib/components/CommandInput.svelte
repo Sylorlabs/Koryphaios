@@ -64,6 +64,7 @@
     if (provider === 'anthropic') return 'Anthropic';
     if (provider === 'claude') return 'Claude Code';
     if (provider === 'antigravity') return 'Antigravity';
+    if (provider === 'jules') return 'Jules (cloud)';
     if (provider === 'google') return 'Google';
     if (provider === 'xai') return 'xAI';
     if (provider === 'openrouter') return 'OpenRouter';

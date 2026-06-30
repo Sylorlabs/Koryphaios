@@ -18,7 +18,7 @@ const providers = [
   'replicate', 'modal', 'vercel', 'cloudflare', 'baseten', 'helicone',
   'portkey', 'scaleway', 'ovhcloud', 'stackit', 'nebius', 'togetherai',
   'venice', 'zenmux', 'opencodezen', 'firmware', '302ai', 'mistralai',
-  'claude', 'codex', 'mistral', 'cohere', 'perplexity', 'luma', 'fal',
+  'claude', 'codex', 'jules', 'mistral', 'cohere', 'perplexity', 'luma', 'fal',
   'elevenlabs', 'assemblyai', 'deepgram', 'gladia', 'lmnt', 'azurecognitive',
   'sapai', 'gitlab', 'nvidia', 'nim', 'friendliai', 'voyageai', 'mixedbread',
   'mem0', 'letta', 'chromeai', 'requesty', 'aihubmix', 'aimlapi',
@@ -96,6 +96,23 @@ async function run() {
     }
 
     let svg = '';
+    if (p === 'jules') {
+      try {
+        const res = await fetch(
+          'https://raw.githubusercontent.com/homarr-labs/dashboard-icons/main/svg/google-jules.svg',
+        );
+        if (res.ok) {
+          svg = await res.text();
+          await fs.writeFile(targetPath, svg);
+          await fs.writeFile(path.join(OUT_DIR, 'jules-color.svg'), svg);
+          console.log(`Downloaded icon for ${p}`);
+          continue;
+        }
+      } catch {
+        /* fall through to placeholder */
+      }
+    }
+
     const siKey = simpleIconsMap[p];
 
     if (siKey) {

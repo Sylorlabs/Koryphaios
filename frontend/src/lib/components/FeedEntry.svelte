@@ -85,6 +85,37 @@
     yml: 'yaml',
   };
 
+  // ── Wikilink extension: [[Note Title]] → clickable link ─────────────────
+  const wikilinkExtension = {
+    name: 'wikilink',
+    level: 'inline' as const,
+    start(src: string) { return src.indexOf('[['); },
+    tokenizer(src: string) {
+      const match = /^\[\[([^\]|#]+?)(?:\|([^\]]+?))?\]\]/.exec(src);
+      if (match) {
+        return {
+          type: 'wikilink',
+          raw: match[0],
+          title: match[1].trim(),
+          display: match[2]?.trim() ?? match[1].trim(),
+        };
+      }
+    },
+    renderer(token: { title: string; display: string }) {
+      const safe = token.title.replace(/'/g, "\\'");
+      return `<a class="wikilink" data-note-title="${token.title}" href="#" onclick="event.preventDefault();window.openNoteByTitle('${safe}')">${token.display}</a>`;
+    },
+  };
+
+  marked.use({ extensions: [wikilinkExtension] });
+
+  // Global handler: dispatches 'open-note' event so the Notes panel can intercept
+  if (typeof window !== 'undefined') {
+    (window as unknown as Record<string, unknown>).openNoteByTitle = (title: string) => {
+      window.dispatchEvent(new CustomEvent('open-note', { detail: { title } }));
+    };
+  }
+
   // Shared renderer configuration
   const renderer = new marked.Renderer();
   renderer.code = ({ text, lang }: { text: string, lang?: string }) => {
@@ -516,11 +547,14 @@
     >
       <X size={24} />
     </button>
-    <img 
-      src={`data:image/png;base64,${zoomedImage}`} 
-      alt="Zoomed attachment" 
-      class="max-w-full max-h-full object-contain rounded shadow-2xl" 
-      onclick={(e) => e.stopPropagation()}
-    />
+    <!-- svelte-ignore a11y_click_events_have_key_events -->
+    <!-- svelte-ignore a11y_no_static_element_interactions -->
+    <div class="max-w-full max-h-full" onclick={(e) => e.stopPropagation()}>
+      <img
+        src={`data:image/png;base64,${zoomedImage}`}
+        alt="Zoomed attachment"
+        class="max-w-full max-h-full object-contain rounded shadow-2xl"
+      />
+    </div>
   </div>
 {/if}

@@ -163,6 +163,9 @@ export {
   BEGINNER_TOOL_BLACKLIST,
 } from './config/ModeConfig';
 
+// ============== Notes Network ==============
+export * from './types/NoteTypes';
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Backward Compatibility Re-exports
 // ─────────────────────────────────────────────────────────────────────────────

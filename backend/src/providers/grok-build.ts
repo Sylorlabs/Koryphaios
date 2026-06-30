@@ -24,12 +24,18 @@ import {
   type StreamRequest,
   getModelsForProvider,
 } from './types';
+import { GrokModels } from './models/grok';
 import { detectGrokCLILogin } from './auth-utils';
 import { whichBinary } from './cli-detection';
 import { providerLog } from '../logger';
+import { isModelListCacheFresh } from './model-list-cache';
 
 const GROK_STREAM_TIMEOUT_MS = 300_000;
-const DEFAULT_CLI_MODEL = 'grok-build-0.1';
+const DEFAULT_CLI_MODEL = GrokModels[0]?.apiModelId ?? 'grok-composer-2.5-fast';
+
+let cachedModels: ModelDef[] | null = null;
+let cachedModelsAt = 0;
+let modelsFetchInProgress = false;
 
 export class GrokBuildProvider implements Provider {
   readonly name = 'grok' as const;
@@ -40,11 +46,20 @@ export class GrokBuildProvider implements Provider {
     if (this.config.disabled) return false;
     // Either the user explicitly connected (opt-in marker stored as authToken) or the
     // Grok Build CLI is logged in on this machine. The CLI itself owns the real credential.
-    return !!this.config.authToken || detectGrokCLILogin();
+    const available = !!this.config.authToken || detectGrokCLILogin();
+    if (available && !isModelListCacheFresh(cachedModelsAt)) {
+      refreshModelsInBackground();
+    }
+    return available;
   }
 
   listModels(): ModelDef[] {
-    return getModelsForProvider('grok');
+    const fallback = getModelsForProvider('grok');
+    if (cachedModels && isModelListCacheFresh(cachedModelsAt)) {
+      return cachedModels;
+    }
+    refreshModelsInBackground();
+    return cachedModels ?? fallback;
   }
 
   private resolveCliModel(modelId: string): string {
@@ -145,6 +160,139 @@ export class GrokBuildProvider implements Provider {
       finishReason: parsed.stopReason === 'tool_use' ? 'tool_use' : 'end_turn',
     };
   }
+}
+
+function refreshModelsInBackground(): void {
+  if (modelsFetchInProgress) return;
+  const bin = whichBinary('grok');
+  if (!bin) return;
+
+  modelsFetchInProgress = true;
+  fetchGrokModels(bin)
+    .then((models) => {
+      if (models.length > 0) {
+        cachedModels = models;
+        cachedModelsAt = Date.now();
+        providerLog.debug(
+          { provider: 'grok', models: models.map((m) => m.apiModelId ?? m.id) },
+          'Grok Build model list refreshed',
+        );
+      }
+    })
+    .catch((err) => {
+      providerLog.warn({ provider: 'grok', err }, 'Grok Build model list refresh failed');
+    })
+    .finally(() => {
+      modelsFetchInProgress = false;
+    });
+}
+
+async function fetchGrokModels(bin: string): Promise<ModelDef[]> {
+  return new Promise((resolve, reject) => {
+    const child = spawn(bin, ['models'], {
+      stdio: ['ignore', 'pipe', 'ignore'],
+      env: { ...process.env },
+    });
+    let out = '';
+    child.stdout.on('data', (c: Buffer) => (out += c.toString()));
+    child.once('error', reject);
+    child.once('exit', (code) => {
+      if (code !== 0) {
+        reject(new Error(`grok models exited with status ${code ?? 'unknown'}`));
+        return;
+      }
+      const parsed = parseGrokModelsOutput(out);
+      if (parsed.modelIds.length === 0) {
+        resolve([]);
+        return;
+      }
+      resolve(
+        parsed.modelIds.map((modelId) =>
+          modelDefFromGrokCliId(modelId, modelId === parsed.defaultModelId),
+        ),
+      );
+    });
+  });
+}
+
+function grokCliIdToDisplayName(cliId: string): string {
+  const known = GrokModels.find((m) => m.apiModelId === cliId);
+  if (known) return known.name;
+  const words = cliId
+    .replace(/^grok[-/]?/i, '')
+    .split(/[-._]+/)
+    .filter(Boolean)
+    .map((part) => (/^\d/.test(part) ? part : part.charAt(0).toUpperCase() + part.slice(1)));
+  return words.length > 0 ? `Grok ${words.join(' ')}` : cliId;
+}
+
+function modelDefFromGrokCliId(cliId: string, isDefault = false): ModelDef {
+  const existing = GrokModels.find((m) => m.apiModelId === cliId || m.id === cliId);
+  if (existing) {
+    return isDefault ? { ...existing, name: `${existing.name} (default)` } : existing;
+  }
+
+  const isFast = /fast|mini|flash/i.test(cliId);
+  const isReasoning = /reason|think/i.test(cliId);
+  const isBuild = /build/i.test(cliId);
+
+  return {
+    id: cliId,
+    name: grokCliIdToDisplayName(cliId) + (isDefault ? ' (default)' : ''),
+    provider: 'grok',
+    apiModelId: cliId,
+    contextWindow: 256_000,
+    maxOutputTokens: 50_000,
+    canReason: isBuild || isReasoning || /composer/i.test(cliId),
+    supportsAttachments: false,
+    supportsStreaming: true,
+    tier: isReasoning ? 'reasoning' : isFast ? 'fast' : isBuild ? 'flagship' : 'standard',
+  };
+}
+
+/**
+ * Parse `grok models` stdout. Example:
+ *   Default model: grok-composer-2.5-fast
+ *   Available models:
+ *     - grok-build
+ *     * grok-composer-2.5-fast (default)
+ */
+export function parseGrokModelsOutput(raw: string): {
+  defaultModelId?: string;
+  modelIds: string[];
+} {
+  const lines = (raw ?? '').split('\n').map((l) => l.trim()).filter(Boolean);
+  let defaultModelId: string | undefined;
+  const modelIds: string[] = [];
+  let inList = false;
+
+  for (const line of lines) {
+    const defaultMatch = line.match(/^Default model:\s*(.+)$/i);
+    if (defaultMatch?.[1]) {
+      defaultModelId = defaultMatch[1].trim();
+      continue;
+    }
+
+    if (/^Available models:/i.test(line)) {
+      inList = true;
+      continue;
+    }
+
+    if (!inList) continue;
+
+    const bulletMatch = line.match(/^[*-]\s+([^\s(]+)(?:\s+\(default\))?$/i);
+    if (bulletMatch?.[1]) {
+      const modelId = bulletMatch[1].trim();
+      if (!modelIds.includes(modelId)) modelIds.push(modelId);
+      if (/\(default\)/i.test(line)) defaultModelId = modelId;
+    }
+  }
+
+  if (defaultModelId && !modelIds.includes(defaultModelId)) {
+    modelIds.unshift(defaultModelId);
+  }
+
+  return { defaultModelId, modelIds };
 }
 
 // ── Output parsing (pure + exported for tests) ───────────────────────────────

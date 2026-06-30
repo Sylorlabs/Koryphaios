@@ -10,12 +10,16 @@ import {
   type StreamRequest,
   type ProviderContentBlock,
   getModelsForProvider,
-  createGenericModel,
   resolveModel,
 } from './types';
 import { withRetry, withTimeoutSignal } from './utils';
 import { createUsageInterceptingFetch } from '../credit-accountant';
 import { providerLog } from '../logger';
+import {
+  isModelListCacheFresh,
+  mergeModelLists,
+  modelFromRemoteId,
+} from './model-list-cache';
 
 export class AnthropicProvider implements Provider {
   readonly name: ProviderName;
@@ -43,44 +47,58 @@ export class AnthropicProvider implements Provider {
   }
 
   isAvailable(): boolean {
-    return !this.config.disabled && !!(this.config.apiKey || this.config.authToken);
+    const available = !this.config.disabled && !!(this.config.apiKey || this.config.authToken);
+    if (available && !isModelListCacheFresh(this.lastFetch)) {
+      this.refreshModelsInBackground(getModelsForProvider(this.name));
+    }
+    return available;
   }
 
   private cachedModels: ModelDef[] | null = null;
   private lastFetch = 0;
+  private fetchInProgress = false;
 
   listModels(): ModelDef[] {
-    const localModels = getModelsForProvider(this.name);
-
-    if (!this.isAvailable()) {
-      return localModels;
-    }
-
-    if (this.cachedModels && Date.now() - this.lastFetch < 5 * 60 * 1000) {
-      return this.cachedModels;
-    }
-
-    // Trigger background refresh
-    this.refreshModelsInBackground(localModels);
-    return this.cachedModels ?? localModels;
+    const fallback = getModelsForProvider(this.name);
+    if (!this.isAvailable()) return fallback;
+    if (this.cachedModels && isModelListCacheFresh(this.lastFetch)) return this.cachedModels;
+    this.refreshModelsInBackground(fallback);
+    return this.cachedModels ?? fallback;
   }
 
-  private refreshModelsInBackground(localModels: ModelDef[]) {
-    withRetry(() => this.client.models.list())
-      .then((response) => {
-        const remoteModels: ModelDef[] = [];
+  private refreshModelsInBackground(fallback: ModelDef[]) {
+    if (this.fetchInProgress) return;
+    this.fetchInProgress = true;
+
+    void (async () => {
+      try {
+        const response = await withRetry(() => this.client.models.list());
+        const discovered: ModelDef[] = [];
         for (const model of response.data) {
           const id = model.id;
-          const existing = localModels.find((m) => m.apiModelId === id || m.id === id);
-          if (existing) continue;
-          remoteModels.push(createGenericModel(id, this.name));
+          if (!id) continue;
+          discovered.push(modelFromRemoteId(id, this.name, fallback));
         }
-        this.cachedModels = [...localModels, ...remoteModels];
+        if (discovered.length > 0) {
+          this.cachedModels = mergeModelLists(fallback, discovered);
+          providerLog.debug(
+            { provider: this.name, count: this.cachedModels.length },
+            'Model list refreshed from provider API',
+          );
+        } else {
+          this.cachedModels ??= fallback;
+        }
         this.lastFetch = Date.now();
-      })
-      .catch(() => {
-        if (!this.cachedModels) this.cachedModels = localModels;
-      });
+      } catch (err) {
+        providerLog.debug(
+          { provider: this.name, err: err instanceof Error ? err.message : String(err) },
+          'Model list refresh failed; using catalog fallback',
+        );
+        this.cachedModels ??= fallback;
+      } finally {
+        this.fetchInProgress = false;
+      }
+    })();
   }
 
   async *streamResponse(request: StreamRequest): AsyncGenerator<ProviderEvent> {

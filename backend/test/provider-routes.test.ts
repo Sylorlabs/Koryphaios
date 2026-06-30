@@ -116,8 +116,25 @@ mock.module('../src/providers/auth-utils', () => ({
   createCodexCLIAuthMarker: () => `cli:codex:${Date.now()}`,
   detectClaudeCodeLogin: () => true,
   createClaudeCLIAuthMarker: () => `cli:claude:${Date.now()}`,
+  isClaudeCLIAuthMarker: (value: string | null | undefined) =>
+    typeof value === 'string' && value.startsWith('cli:claude:'),
+  detectGrokCLILogin: () => true,
+  createGrokCLIAuthMarker: () => `cli:grok:${Date.now()}`,
+  isGrokCLIAuthMarker: (value: string | null | undefined) =>
+    typeof value === 'string' && value.startsWith('cli:grok:'),
+  detectGrokXaiKey: () => null,
+  detectAntigravityCLILogin: () => true,
+  createAntigravityCLIAuthMarker: () => `cli:antigravity:${Date.now()}`,
+  isAntigravityCLIAuthMarker: (value: string | null | undefined) =>
+    typeof value === 'string' && value.startsWith('cli:antigravity:'),
+  detectAntigravityApiKey: () => null,
   detectGeminiCLIToken: () => null,
+  detectGeminiCLILogin: () => false,
+  detectCodexCLILogin: () => false,
+  detectCursorCLILogin: () => false,
   clearCachedToken: () => {},
+  clearTokenCache: () => {},
+  getKoryCodexHome: () => '/tmp/codex-home',
 }));
 
 const { initDb } = await import('../src/db');
@@ -319,6 +336,38 @@ describe('provider routes', () => {
 
     const finalList = await request('/api/providers/openai/accounts');
     expect(finalList.body.data.some((account: any) => account.id === accountId)).toBe(false);
+  });
+
+  test('Grok Build auth auto-detects the local grok CLI without a manual token', async () => {
+    const start = await request('/api/providers/grok/auth/start', {
+      method: 'POST',
+    });
+
+    expect(start.response.status).toBe(200);
+    expect(start.body.ok).toBe(true);
+    expect(start.body.data.status).toBe('connected');
+    expect(lastSetCredentials).toEqual({
+      name: 'grok',
+      body: {
+        authToken: expect.stringMatching(/^cli:grok:\d+$/),
+      },
+    });
+  });
+
+  test('Antigravity auth auto-detects the local agy CLI without a manual token', async () => {
+    const start = await request('/api/providers/antigravity/auth/start', {
+      method: 'POST',
+    });
+
+    expect(start.response.status).toBe(200);
+    expect(start.body.ok).toBe(true);
+    expect(start.body.data.status).toBe('connected');
+    expect(lastSetCredentials).toEqual({
+      name: 'antigravity',
+      body: {
+        authToken: expect.stringMatching(/^cli:antigravity:\d+$/),
+      },
+    });
   });
 
   test('browser auth is only exposed for providers Koryphaios manages directly', async () => {

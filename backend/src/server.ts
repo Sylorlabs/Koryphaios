@@ -35,6 +35,7 @@ import { spendCapsRoutes } from './routes/v1/spend-caps';
 import { billingRoutes } from './routes/v1/billing';
 import { messagingRoutes } from './routes/v1/messaging';
 import { processRoutes } from './routes/v1/processes';
+import { notesRoutes } from './routes/v1/notes';
 
 // Define base Elysia App for export
 const baseApp = new Elysia()
@@ -64,7 +65,8 @@ const baseApp = new Elysia()
   .use(spendCapsRoutes)
   .use(billingRoutes)
   .use(messagingRoutes)
-  .use(processRoutes);
+  .use(processRoutes)
+  .use(notesRoutes);
 
 export type App = typeof baseApp;
 

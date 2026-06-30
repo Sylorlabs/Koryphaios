@@ -1,12 +1,12 @@
 import type { ModelDef } from '@koryphaios/shared';
 
 /**
- * GitHub Copilot Model Catalog
+ * GitHub Copilot model catalog (metadata fallback).
+ *
+ * Live model ids are refreshed from the Copilot API `/models` endpoint when connected;
+ * this catalog enriches discovered ids with context windows, tiers, and reasoning metadata.
  *
  * Per https://docs.github.com/en/copilot/reference/ai-models/supported-models
- * Retired models are excluded (see Model retirement history on that page).
- *
- * Last updated: February 2026
  *
  * NOTE: Model IDs in this catalog do NOT include the "copilot." prefix.
  * The provider prefix is added by the frontend/backend when displaying/selecting models.

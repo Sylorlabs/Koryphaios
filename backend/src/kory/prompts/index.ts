@@ -88,6 +88,7 @@ Be gentle but thorough. Output either "PASS" or "FAIL" with brief, friendly feed
     web_fetch: 'Get content from a specific webpage',
     ask_user: 'Ask the user a question',
     delegate_to_worker: 'Get help from a specialist for complex tasks',
+    delegate_to_jules: 'Send a repo task to Google Jules (cloud async agent)',
     shell_manage: 'Manage background processes',
     delete_file: 'Remove a file',
     move_file: 'Move or rename a file',
@@ -137,6 +138,7 @@ Responsibilities:
 
 Rules:
 • Call delegate_to_worker IMMEDIATELY when delegating - no preamble
+• delegate_to_jules: Google Jules is CLOUD-ONLY (API). Remote VMs + GitHub/PRs — never local edits. After Jules completes, sync with git fetch/pull or gh pr checkout before continuing.
 • Workers run in isolated git worktrees when available
 • Shadow logger creates ghost commits for time-travel recovery
 • Ask user before first tool run unless YOLO mode enabled`,
@@ -173,6 +175,7 @@ Your final message MUST end with exactly "PASS" or "FAIL: <reason>"`,
     web_fetch: 'Fetch URL content',
     ask_user: 'Request user input',
     delegate_to_worker: 'Spawn domain-specific worker agent',
+    delegate_to_jules: 'Delegate to Google Jules cloud agent (remote VM, async, PRs)',
     shell_manage: 'List/kill background processes',
     delete_file: 'Delete a file',
     move_file: 'Move/rename a file',

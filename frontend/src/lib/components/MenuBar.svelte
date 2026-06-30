@@ -9,6 +9,7 @@
     Minus,
     Square,
     X,
+    StickyNote,
   } from 'lucide-svelte';
   import CheckForUpdatesButton from './CheckForUpdatesButton.svelte';
   import { getModKeyName } from '$lib/utils/platform';
@@ -23,6 +24,7 @@
     showSidebar: boolean;
     showGit: boolean;
     showAgents: boolean;
+    showNotes?: boolean;
     zenMode: boolean;
     projectName: string | null | undefined;
     koryPhase: string | null;
@@ -36,6 +38,7 @@
     showSidebar,
     showGit,
     showAgents,
+    showNotes = false,
     zenMode,
     projectName,
     koryPhase,
@@ -302,6 +305,17 @@
           <span class="text-xs font-medium">{showGit ? 'Git open' : 'Git'}</span>
         </button>
       {/if}
+      <button
+        type="button"
+        class="flex items-center gap-1.5 px-3 py-2 rounded-lg transition-colors hover:bg-[var(--color-surface-2)]"
+        style="color: {showNotes ? 'var(--color-accent)' : 'var(--color-text-secondary)'};"
+        onclick={() => action('toggle_notes')}
+        data-tauri-drag-region="false"
+        title="Notes (Ctrl+Shift+N)"
+      >
+        <StickyNote size={14} />
+        <span class="text-xs font-medium">{showNotes ? 'Notes open' : 'Notes'}</span>
+      </button>
       <button
         type="button"
         class="flex items-center gap-2 px-3 py-2 rounded-lg transition-colors hover:bg-[var(--color-surface-2)]"

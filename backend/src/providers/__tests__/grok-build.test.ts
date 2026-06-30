@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'bun:test';
-import { GrokBuildProvider, parseGrokOutput } from '../grok-build';
+import { GrokBuildProvider, parseGrokModelsOutput, parseGrokOutput } from '../grok-build';
 import type { ProviderConfig } from '@koryphaios/shared';
 import type { ProviderEvent, StreamRequest } from '../types';
 
@@ -41,14 +41,40 @@ describe('parseGrokOutput', () => {
   });
 });
 
+describe('parseGrokModelsOutput', () => {
+  it('parses grok models CLI output', () => {
+    const raw = [
+      'You are logged in with grok.com.',
+      '',
+      'Default model: grok-composer-2.5-fast',
+      '',
+      'Available models:',
+      '  - grok-build',
+      '  * grok-composer-2.5-fast (default)',
+    ].join('\n');
+
+    expect(parseGrokModelsOutput(raw)).toEqual({
+      defaultModelId: 'grok-composer-2.5-fast',
+      modelIds: ['grok-build', 'grok-composer-2.5-fast'],
+    });
+  });
+
+  it('returns empty list for unrecognized output', () => {
+    expect(parseGrokModelsOutput('not logged in')).toEqual({
+      defaultModelId: undefined,
+      modelIds: [],
+    });
+  });
+});
+
 describe('GrokBuildProvider', () => {
-  it('is a distinct provider named "grok" exposing the Grok Build model', () => {
+  it('is a distinct provider named "grok" exposing Grok Build models', () => {
     const p = new GrokBuildProvider(cfg({ authToken: 'cli:grok:123' }));
     expect(p.name).toBe('grok');
     const models = p.listModels();
     expect(models.length).toBeGreaterThan(0);
     expect(models.every((m) => m.provider === 'grok')).toBe(true);
-    expect(models.find((m) => m.apiModelId === 'grok-build-0.1')).toBeTruthy();
+    expect(models.find((m) => m.apiModelId === 'grok-build')).toBeTruthy();
   });
 
   it('isAvailable() respects disabled and the opt-in marker', () => {
@@ -57,7 +83,8 @@ describe('GrokBuildProvider', () => {
   });
 
   it('streamResponse yields a clear error when the grok CLI is not installed', async () => {
-    // grok is not installed in this environment → the harness should fail gracefully.
+    if (whichInstalled()) return;
+
     const p = new GrokBuildProvider(cfg({ authToken: 'cli:grok:1' }));
     const req: StreamRequest = {
       model: 'grok-build',
@@ -67,11 +94,8 @@ describe('GrokBuildProvider', () => {
     const events: ProviderEvent[] = [];
     for await (const e of p.streamResponse(req)) events.push(e);
     const err = events.find((e) => e.type === 'error') as { type: 'error'; error: string } | undefined;
-    // Either the CLI is genuinely absent (error) — the expected case here.
-    if (!whichInstalled()) {
-      expect(err).toBeTruthy();
-      expect(err!.error).toMatch(/not found|install|grok login/i);
-    }
+    expect(err).toBeTruthy();
+    expect(err!.error).toMatch(/not found|install|grok login/i);
   });
 });
 

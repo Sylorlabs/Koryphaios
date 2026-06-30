@@ -28,6 +28,9 @@ import {
   type Provider,
 } from '../providers';
 import type { ProviderMessage } from '../providers/types';
+import { detectJulesApiKey } from '../providers/auth-utils';
+import { runJulesTask } from '../providers/jules-runner';
+import { JULES_SYNC_INSTRUCTIONS, getProviderDisplay } from '../providers/provider-display';
 import { ToolRegistry, type ToolCallInput, type ToolContext, type ToolCallOutput } from '../tools';
 import { wsBroker } from '../pubsub';
 import { koryLog } from '../logger';
@@ -155,6 +158,7 @@ const KORY_SYSTEM_PROMPT = `You are Kory, the manager agent. The user talks to y
 • Sub-agents (workers: general, ui, backend, test, review) exist only for you to invoke when you decide a task needs a specialist coder. Call delegate_to_worker only for substantial implementation, refactoring, or multi-step coding—not for chat, simple questions, or minor edits.
 • When you delegate, the worker reports back; you verify and synthesize.
 • IMPORTANT: If you decide to delegate, call delegate_to_worker IMMEDIATELY without generating any explanatory text first. Do not write "I'll delegate this" or similar—just call the tool directly.
+• delegate_to_jules: Offload substantial repo work to Google Jules — a CLOUD-ONLY async agent (API). Jules runs in remote Google VMs (not locally), often takes minutes, and may open GitHub PRs. Never use for quick local edits or chat. Jules never writes to the local working tree — after it finishes you MUST sync remote work locally (\`git fetch && git pull\`, or \`gh pr checkout <n>\`) before continuing.
 • If you have successfully completed a task or edit and are ready to save the work, use the commit_and_create_pr tool to commit and create a pull request automatically.`;
 const WORKER_SYSTEM_PROMPT = `You are a specialist Worker Agent. EXECUTE the assigned task using tools. QUALITY FIRST. VERIFY. If you have successfully completed a task, you may use the commit_and_create_pr tool to save the work.
 FILE EDITS: ALWAYS create files with write_file and modify files with edit_file. NEVER use bash (cat >, tee, echo >, sed, heredocs) to write or modify file content — that bypasses the live code preview. Use bash only for running commands.`;
@@ -640,6 +644,120 @@ export class KoryManager {
       : 'Worker failed.';
   }
 
+  /** Whether Jules cloud delegation is configured (API key). */
+  isJulesAvailable(): boolean {
+    const jules = this.providers.get('jules');
+    if (jules?.isAvailable()) return true;
+    return !!detectJulesApiKey();
+  }
+
+  private resolveJulesApiKey(): string | null {
+    const cfg = this.providers.getConfigs().jules;
+    return cfg?.apiKey?.trim() || detectJulesApiKey();
+  }
+
+  /**
+   * Delegate a task to Google Jules (cloud async agent). Used by delegate_to_jules tool.
+   * Streams progress to the session feed while polling the Jules API.
+   */
+  async runJulesDelegation(
+    sessionId: string,
+    task: string,
+    options?: { createPr?: boolean; branch?: string },
+  ): Promise<string> {
+    const apiKey = this.resolveJulesApiKey();
+    if (!apiKey) {
+      return 'Jules is not configured. Add JULES_API_KEY in Settings (https://jules.google.com/settings#api).';
+    }
+
+    if (!this.isYoloMode) {
+      const selection = await this.waitForUserInputInternal(
+        sessionId,
+        'Delegate this task to Jules (cloud agent — runs remotely, may take minutes)?',
+        ['Yes, send to Jules', 'Cancel'],
+      );
+      if (selection === '__timeout__') return 'Timed out waiting for user response.';
+      if (selection.includes('Cancel')) return 'Jules delegation cancelled by user.';
+    }
+
+    this.emitThought(sessionId, 'executing', 'Jules cloud agent working…');
+    await this.updateWorkflowState(sessionId, 'executing');
+
+    let summary = '';
+    const automationMode = options?.createPr === false ? undefined : 'AUTO_CREATE_PR';
+
+    try {
+      for await (const event of runJulesTask({
+        apiKey,
+        prompt: task,
+        workingDirectory: this.workingDirectory,
+        korySessionId: sessionId,
+        defaultBranch: options?.branch,
+        automationMode,
+        signal: this.state.getAbortController(sessionId).signal,
+      })) {
+        this.emitJulesProviderEvent(sessionId, event);
+        if (event.type === 'content_delta' && event.content) summary += event.content;
+        if (event.type === 'error') {
+          await this.updateWorkflowState(sessionId, 'idle');
+          return event.error ?? 'Jules cloud delegation failed.';
+        }
+        if (event.type === 'complete') break;
+      }
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      await this.updateWorkflowState(sessionId, 'idle');
+      return `Jules cloud delegation failed: ${msg}`;
+    }
+
+    await this.updateWorkflowState(sessionId, 'idle');
+    const tail = summary.trim() || 'Jules cloud task finished. Check the session link or PR above.';
+    return `${tail}\n\n**Sync locally:** ${JULES_SYNC_INSTRUCTIONS}`;
+  }
+
+  private emitJulesProviderEvent(sessionId: string, event: ProviderEvent): void {
+    if (event.type === 'thinking_delta' && event.thinking) {
+      this.emitWSMessage(sessionId, 'stream.thinking', {
+        agentId: KORY_IDENTITY.id,
+        thinking: event.thinking,
+      } satisfies StreamThinkingPayload);
+    } else if (event.type === 'content_delta' && event.content) {
+      this.emitWSMessage(sessionId, 'stream.delta', {
+        agentId: KORY_IDENTITY.id,
+        content: event.content,
+        model: 'jules',
+      });
+    } else if (event.type === 'tool_executed') {
+      const callId = `jules-${nanoid(8)}`;
+      this.emitWSMessage(sessionId, 'stream.tool_call', {
+        agentId: KORY_IDENTITY.id,
+        toolCall: {
+          id: callId,
+          name: event.toolName ?? 'jules_cloud',
+          input: safeParseJson(event.toolInput),
+        },
+      });
+      this.emitWSMessage(sessionId, 'stream.tool_result', {
+        agentId: KORY_IDENTITY.id,
+        toolResult: {
+          callId,
+          name: event.toolName ?? 'jules_cloud',
+          output: event.toolOutput ?? '',
+          isError: event.isError === true,
+          durationMs: 0,
+        },
+      });
+    } else if (event.type === 'file_edit' && event.filePath) {
+      this.emitWSMessage(sessionId, 'stream.file_delta', {
+        agentId: KORY_IDENTITY.id,
+        path: event.filePath,
+        delta: event.fileContent ?? '',
+        totalLength: (event.fileContent ?? '').length,
+        operation: event.fileOperation ?? 'edit',
+      });
+    }
+  }
+
   private async routeToWorker(
     sessionId: string,
     userMessage: string,
@@ -919,6 +1037,7 @@ export class KoryManager {
             this.getWorkerReasoningLevel(),
             domainHint,
           ),
+        delegateToJules: (task: string, opts) => this.runJulesDelegation(sessionId, task, opts),
       };
 
       const history = await this.loadHistory(sessionId);
@@ -1181,15 +1300,28 @@ export class KoryManager {
       tools = tools.filter((t) => t.name !== 'web_search');
     }
 
+    if (!this.isJulesAvailable()) {
+      tools = tools.filter((t) => t.name !== 'delegate_to_jules');
+    } else {
+      systemPrompt +=
+        `\n\n• JULES (cloud): delegate_to_jules sends work to Google Jules — remote VMs, async, may take minutes, produces PRs. Never substitute for local tools on quick edits.\n• ${JULES_SYNC_INSTRUCTIONS}`;
+    }
+
+    if (provider.name === 'jules') {
+      const julesMeta = getProviderDisplay('jules');
+      systemPrompt +=
+        `\n\n• You are chatting through Jules (cloud provider). All code changes happen on Google's remote infrastructure and GitHub — not in this local workspace until synced.\n• ${julesMeta?.managerHint ?? JULES_SYNC_INSTRUCTIONS}`;
+    }
+
     // Agent execution mode (the composer pill, persisted in agent settings): gate delegation.
     //  • single → never delegate (remove the tool entirely — guaranteed solo)
     //  • multi  → actively prefer delegating substantial coding to specialist workers
     //  • auto   → Kory decides per-task (default)
     const execMode = settings.agentExecutionMode ?? 'auto';
     if (execMode === 'single') {
-      tools = tools.filter((t) => t.name !== 'delegate_to_worker');
+      tools = tools.filter((t) => t.name !== 'delegate_to_worker' && t.name !== 'delegate_to_jules');
       systemPrompt +=
-        '\n\n• AGENT MODE: SOLO — Do NOT delegate. Complete the entire task yourself; the delegate_to_worker tool is unavailable this turn.';
+        '\n\n• AGENT MODE: SOLO — Do NOT delegate. Complete the entire task yourself; delegate_to_worker and delegate_to_jules are unavailable this turn.';
     } else if (execMode === 'multi') {
       systemPrompt +=
         '\n\n• AGENT MODE: MULTI-AGENT — The user explicitly wants a coordinated team. Prefer delegating substantial implementation, refactoring, or multi-step coding to specialist workers via delegate_to_worker, and synthesize their results. Still answer trivial questions yourself.';
@@ -1207,6 +1339,7 @@ export class KoryManager {
         signal: streamSignal,
         // Agentic CLI providers (claude-code) run + edit files in the project directory.
         workingDirectory: this.workingDirectory,
+        sessionId,
       },
       provider.name,
     );
@@ -1739,6 +1872,8 @@ export class KoryManager {
         tools: this.tools.getToolDefsForRole(thread.toolRole),
         maxTokens: thread.maxTokens,
         signal: streamSignal,
+        workingDirectory: thread.ctx.workingDirectory,
+        sessionId: thread.sessionId,
         ...(normalizedReasoning !== undefined && { reasoningLevel: normalizedReasoning }),
       },
       provider.name,

@@ -11,11 +11,16 @@ import {
   type ProviderContentBlock,
   getModelsForProvider,
   resolveModel,
-  createGenericModel,
 } from './types';
 import { withRetry, withTimeoutSignal } from './utils';
 import { createUsageInterceptingFetch } from '../credit-accountant';
 import { providerLog } from '../logger';
+import {
+  isLikelyChatModelId,
+  isModelListCacheFresh,
+  mergeModelLists,
+  modelFromRemoteId,
+} from './model-list-cache';
 
 export class OpenAIProvider implements Provider {
   protected _client: OpenAI | null = null;
@@ -40,81 +45,67 @@ export class OpenAIProvider implements Provider {
   }
 
   isAvailable(): boolean {
-    return !this.config.disabled && !!(this.config.apiKey || this.config.authToken);
+    const available = !this.config.disabled && !!(this.config.apiKey || this.config.authToken);
+    if (available && !isModelListCacheFresh(this.lastFetch)) {
+      this.refreshModelsInBackground(this.getModelCatalogFallback());
+    }
+    return available;
   }
+
+  /** Static catalog used until live discovery succeeds. Subclasses may override. */
+  protected getModelCatalogFallback(): ModelDef[] {
+    return getModelsForProvider(this.name);
+  }
+
+  /** Optional async prep (OAuth exchange, etc.) before hitting /models. */
+  protected async prepareForModelDiscovery(): Promise<void> {}
 
   private cachedModels: ModelDef[] | null = null;
   private lastFetch = 0;
   private fetchInProgress = false;
 
   listModels(): ModelDef[] {
-    const localModels = getModelsForProvider(this.name);
-
-    if (!this.isAvailable()) {
-      return localModels;
-    }
-
-    // Return cached if fresh
-    if (this.cachedModels && Date.now() - this.lastFetch < 5 * 60 * 1000) {
-      return this.cachedModels;
-    }
-
-    // Trigger background refresh, return what we have now
-    this.refreshModelsInBackground(localModels);
-    return this.cachedModels ?? localModels;
+    const fallback = this.getModelCatalogFallback();
+    if (!this.isAvailable()) return fallback;
+    if (this.cachedModels && isModelListCacheFresh(this.lastFetch)) return this.cachedModels;
+    this.refreshModelsInBackground(fallback);
+    return this.cachedModels ?? fallback;
   }
 
-  private refreshModelsInBackground(localModels: ModelDef[]) {
+  private refreshModelsInBackground(fallback: ModelDef[]) {
     if (this.fetchInProgress) return;
     this.fetchInProgress = true;
 
-    withRetry(() => this.client.models.list())
-      .then(async (response) => {
-        const remoteModels: ModelDef[] = [];
+    void (async () => {
+      try {
+        await this.prepareForModelDiscovery();
+        const response = await withRetry(() => this.client.models.list());
+        const discovered: ModelDef[] = [];
         for await (const model of response) {
           const id = model.id;
-          const existing = localModels.find((m) => m.apiModelId === id || m.id === id);
-          if (existing) continue;
-
-          const lowerId = id.toLowerCase();
-          const isOpenAI = this.name === 'openai';
-          
-          // For OpenAI, keep strict filtering to avoid legacy noise
-          if (isOpenAI) {
-            if (
-              lowerId.includes('gpt') ||
-              lowerId.includes('o1') ||
-              lowerId.includes('o3') ||
-              lowerId.includes('o4')
-            ) {
-              remoteModels.push(createGenericModel(id, this.name));
-            }
-          } else {
-            // For other providers (Groq, Together, DeepSeek, etc), be more inclusive
-            // Filter out obviously non-chat models (embeddings, audio, etc)
-            if (
-              !lowerId.includes('embed') &&
-              !lowerId.includes('whisper') &&
-              !lowerId.includes('tts') &&
-              !lowerId.includes('dall-e') &&
-              !lowerId.includes('moderation') &&
-              !lowerId.includes('rerank')
-            ) {
-              remoteModels.push(createGenericModel(id, this.name));
-            }
-          }
+          if (!id || !isLikelyChatModelId(id, this.name)) continue;
+          discovered.push(modelFromRemoteId(id, this.name, fallback));
         }
-
-        this.cachedModels = [...localModels, ...remoteModels];
+        if (discovered.length > 0) {
+          this.cachedModels = mergeModelLists(fallback, discovered);
+          providerLog.debug(
+            { provider: this.name, count: this.cachedModels.length },
+            'Model list refreshed from provider API',
+          );
+        } else {
+          this.cachedModels ??= fallback;
+        }
         this.lastFetch = Date.now();
-      })
-      .catch(() => {
-        // Keep local models on failure
-        this.cachedModels ??= localModels;
-      })
-      .finally(() => {
+      } catch (err) {
+        providerLog.debug(
+          { provider: this.name, err: err instanceof Error ? err.message : String(err) },
+          'Model list refresh failed; using catalog fallback',
+        );
+        this.cachedModels ??= fallback;
+      } finally {
         this.fetchInProgress = false;
-      });
+      }
+    })();
   }
 
   async *streamResponse(request: StreamRequest): AsyncGenerator<ProviderEvent> {

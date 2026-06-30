@@ -22,6 +22,9 @@ import {
 } from 'node:fs';
 import { join, dirname, basename } from 'node:path';
 import { homedir } from 'node:os';
+import { db } from '../db';
+import { notes } from '../db/schema';
+import { eq } from 'drizzle-orm';
 
 // ============================================================================
 // Configuration
@@ -910,6 +913,47 @@ export function formatMemoryForContext(context: MemoryContext): string {
   }
 
   return `# Memory Context\n\n${parts.join('\n\n---\n\n')}`;
+}
+
+/**
+ * Build a ## Notes Network context block from notes flagged includeInContext.
+ * Returns an empty string when no such notes exist or if the DB is unavailable.
+ */
+export async function getNotesContext(maxTokens: number = 2000): Promise<string> {
+  let contextNotes: (typeof notes.$inferSelect)[];
+  try {
+    contextNotes = await db.select().from(notes).where(eq(notes.includeInContext, 1));
+  } catch {
+    // DB may not be initialized yet in some code paths (tests, CLI) — degrade gracefully
+    return '';
+  }
+
+  if (!contextNotes.length) return '';
+
+  const parts: string[] = ['## Notes Network\n'];
+  let tokenEstimate = 10;
+
+  for (const note of contextNotes) {
+    const block =
+      '### [[' +
+      note.title +
+      ']]\nPath: ' +
+      note.folderPath +
+      '\nTags: ' +
+      note.tags +
+      '\n\n' +
+      note.content +
+      '\n\n';
+    const blockTokens = Math.ceil(block.length / 4);
+    if (tokenEstimate + blockTokens > maxTokens) break;
+    parts.push(block);
+    tokenEstimate += blockTokens;
+  }
+
+  // If only the header was added (all notes exceeded budget) return empty
+  if (parts.length === 1) return '';
+
+  return parts.join('');
 }
 
 // ============================================================================

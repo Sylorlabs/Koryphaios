@@ -150,9 +150,10 @@ interface ParsedLogEvents {
   gotContent: boolean;
 }
 
-function parseLogChunk(chunk: string): ParsedLogEvents {
+function parseLogChunk(chunk: string, debug = false): ParsedLogEvents {
   const events: ProviderEvent[] = [];
   let gotContent = false;
+  if (debug && chunk.trim()) providerLog.debug({ chunk: chunk.slice(0, 500) }, '[agy-debug] raw log chunk');
 
   for (const line of chunk.split('\n')) {
     const trimmed = line.trim();
@@ -299,7 +300,7 @@ export class AntigravityProvider implements Provider {
         const newChunk = full.slice(logOffset);
         if (!newChunk) return [];
         logOffset = full.length;
-        const { events, gotContent } = parseLogChunk(newChunk);
+        const { events, gotContent } = parseLogChunk(newChunk, true);
         if (gotContent) totalContentEvents++;
         return events;
       } catch {

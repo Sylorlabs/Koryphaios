@@ -8,9 +8,10 @@
 
 import Anthropic from '@anthropic-ai/sdk';
 import { AnthropicBedrock } from '@anthropic-ai/bedrock-sdk';
-import type { ProviderConfig } from '@koryphaios/shared';
+import type { ModelDef, ProviderConfig } from '@koryphaios/shared';
 import { AnthropicProvider } from './anthropic';
 import { createUsageInterceptingFetch } from '../credit-accountant';
+import { getModelsForProvider } from './types';
 
 function awsRegion(): string {
   return process.env.AWS_REGION || process.env.AWS_DEFAULT_REGION || 'us-east-1';
@@ -31,6 +32,11 @@ export class BedrockProvider extends AnthropicProvider {
   override isAvailable(): boolean {
     // Bedrock authenticates via the AWS credential chain, not an apiKey/authToken.
     return !this.config.disabled && hasAwsCredentials();
+  }
+
+  /** Bedrock foundation model ids are region/account scoped — no Anthropic /models API. */
+  override listModels(): ModelDef[] {
+    return getModelsForProvider('bedrock');
   }
 
   protected override makeClient(): Anthropic {

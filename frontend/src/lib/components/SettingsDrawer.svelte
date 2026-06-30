@@ -36,6 +36,7 @@
     GripVertical,
     Plus,
     Trash2,
+    StickyNote,
   } from 'lucide-svelte';
   import MemoryEditor from './MemoryEditor.svelte';
   import AgentSettings from './AgentSettings.svelte';
@@ -46,6 +47,7 @@
   import { experimentalStore } from '$lib/stores/experimental.svelte';
   import { collaborationStore } from '$lib/stores/collaboration.svelte';
   import { modeStore } from '$lib/stores/mode.svelte';
+  import { notesStore } from '$lib/stores/notes.svelte';
   import ModelSelectionDialog from './ModelSelectionDialog.svelte';
   import ModeToggle from './ModeToggle.svelte';
   import { apiFetch, parseJsonResponse } from '$lib/api.svelte';
@@ -57,7 +59,7 @@
   }
 
   let { open = false, onClose }: Props = $props();
-  let activeTab = $state<'providers' | 'appearance' | 'shortcuts' | 'messaging' | 'billing' | 'memory' | 'agent' | 'experimental' | 'teams'>('providers');
+  let activeTab = $state<'providers' | 'appearance' | 'shortcuts' | 'messaging' | 'billing' | 'memory' | 'agent' | 'experimental' | 'teams' | 'notes'>('providers');
 
   let showModelSelector = $state(false);
   let selectorTarget = $state<any>(null);
@@ -97,7 +99,8 @@
     openrouter: 'OpenRouter', groq: 'Groq', copilot: 'GitHub Copilot', azure: 'Azure OpenAI',
     bedrock: 'AWS Bedrock', vertexai: 'Vertex AI', local: 'Local (custom endpoint)', ollama: 'Ollama',
     lmstudio: 'LM Studio', llamacpp: 'Llama.cpp', opencodezen: 'OpenCodeZen',
-    claude: 'Claude Code', codex: 'OpenAI Codex', grok: 'Grok Build', kimicode: 'Kimi Code',
+    claude: 'Claude Code', codex: 'OpenAI Codex', grok: 'Grok Build', jules: 'Google Jules (cloud)',
+    kimicode: 'Kimi Code',
     moonshot: 'Moonshot AI / Kimi API', mistral: 'Mistral AI',
   };
 
@@ -105,6 +108,7 @@
   let providersLoadAttempted = $state(false);
   let lastInitializedTab = $state<typeof activeTab | null>(null);
   const tokenPlaceholders: Record<string, string> = {
+    jules: 'Jules API key (jules.google.com/settings)',
     anthropic: 'Anthropic auth token',
     copilot: 'GitHub token or Copilot auth token',
     google: 'OAuth or access token',
@@ -134,7 +138,16 @@
   }
 
   function getKnownAuthMode(name: string, fallback: string): string {
-    if (name === 'copilot' || name === 'codex' || name === 'kimicode' || name === 'claude') return 'auth_only';
+    if (
+      name === 'copilot' ||
+      name === 'codex' ||
+      name === 'kimicode' ||
+      name === 'claude' ||
+      name === 'grok' ||
+      name === 'antigravity'
+    ) {
+      return 'auth_only';
+    }
     return fallback;
   }
 
@@ -201,7 +214,8 @@
       portkey: 'Portkey', scaleway: 'Scaleway', ovhcloud: 'OVHcloud', stackit: 'STACKIT',
       nebius: 'Nebius', togetherai: 'Together AI', venice: 'Venice AI', zenmux: 'ZenMux',
       opencodezen: 'OpenCodeZen', firmware: 'Firmware', '302ai': '302.ai',
-      claude: 'Claude Code', codex: 'OpenAI Codex', grok: 'Grok Build', mistral: 'Mistral AI',
+      claude: 'Claude Code', codex: 'OpenAI Codex', grok: 'Grok Build', jules: 'Google Jules',
+      antigravity: 'Antigravity', mistral: 'Mistral AI',
       mistralai: 'Mistral AI', cohere: 'Cohere', perplexity: 'Perplexity',
       luma: 'Luma', fal: 'Fal', elevenlabs: 'ElevenLabs', assemblyai: 'AssemblyAI',
       deepgram: 'Deepgram', gladia: 'Gladia', lmnt: 'LMNT', azurecognitive: 'Azure Cognitive',
@@ -226,8 +240,10 @@
       baseten: '...', helicone: 'sk-...', portkey: 'sk-...', scaleway: 'scw_...',
       ovhcloud: 'ovh-...', stackit: '...', nebius: '', togetherai: 'sk-...',
       venice: 'sk-...', zenmux: 'sk-...', opencodezen: 'Get key at opencode.ai/auth',
-      firmware: 'sk-...', '302ai': 'sk-...', mistralai: 'sk-...',
-      claude: 'Claude auth token', codex: 'Auth with ChatGPT', grok: 'Run "grok login" (or set GROK_CODE_XAI_API_KEY)',
+      firmware: 'sk-...', '302ai': 'sk-...', jules: 'Jules API key (jules.google.com/settings)',
+      mistralai: 'sk-...',
+      claude: 'Claude auth token', codex: 'Auth with ChatGPT', grok: 'Uses your local grok CLI — run "grok login" first',
+      antigravity: 'Uses your local agy CLI — run "agy login" first',
       mistral: 'sk-...', cohere: 'sk-...', perplexity: 'pplx-...', luma: 'lm-...',
       fal: 'sk-...', elevenlabs: 'sk-...', assemblyai: 'sk-...', deepgram: 'sk-...',
       gladia: 'sk-...', lmnt: 'sk-...', azurecognitive: 'sk-...', sapai: 'sk-...',
@@ -396,7 +412,9 @@
 
   const isTauri = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
 
-  const browserAuthProviders = new Set(['copilot', 'kimicode', 'codex', 'claude', 'google', 'google-subscription']);
+  const browserAuthProviders = new Set([
+    'copilot', 'kimicode', 'codex', 'claude', 'grok', 'antigravity', 'google', 'google-subscription',
+  ]);
 
   function usesBrowserAuth(name: string): boolean {
     return browserAuthProviders.has(name);
@@ -1367,7 +1385,8 @@
         { id: 'memory', label: 'Memory', icon: Brain },
         { id: 'agent', label: 'Agent', icon: Bot },
         { id: 'experimental', label: 'Advanced', icon: FlaskConical },
-        { id: 'teams', label: 'Teams', icon: Users }
+        { id: 'teams', label: 'Teams', icon: Users },
+        { id: 'notes', label: 'Notes', icon: StickyNote },
       ] as tab}
         {@const Icon = tab.icon}
         <button
@@ -1486,9 +1505,11 @@
                     <ProviderIcon provider={prov.key} size={20} class="w-full h-full" />
                   </div>
                   <div>
-                    <span class="text-sm font-semibold text-[var(--color-text-primary)]">{prov.label}</span>
+                    <span class="text-sm font-semibold text-[var(--color-text-primary)]">{status?.label ?? prov.label}</span>
                     <p class="text-[10px] text-[var(--color-text-muted)] group-hover:text-[var(--color-text-secondary)]">
-                      {#if status?.authenticated}
+                      {#if status?.deployment === 'cloud'}
+                        Cloud agent · sync via git pull / gh pr checkout
+                      {:else if status?.authenticated}
                         {@const selectedCount = status.models?.length ?? 0}
                         {@const availableCount = status.allAvailableModels?.length ?? 0}
                         Connected{availableCount > 0 ? ` · ${selectedCount}/${availableCount} enabled` : ''}
@@ -1512,6 +1533,14 @@
               {#if expandedProvider === prov.key}
                 {@const caps = getProviderCaps(prov.key)}
                 <div class="mt-4 space-y-3 pt-4 border-t border-[var(--color-border)]">
+                  {#if status?.description}
+                    <p class="text-[10px] text-[var(--color-text-muted)] leading-relaxed">{status.description}</p>
+                  {/if}
+                  {#if status?.deployment === 'cloud'}
+                    <div class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-violet-500/10 text-violet-300 text-[9px] font-semibold uppercase tracking-wide">
+                      Cloud — changes land on GitHub first
+                    </div>
+                  {/if}
                   {#if status?.authenticated}
                     <div class="flex items-center justify-between">
                       <div class="text-[10px] text-[var(--color-text-muted)]">
@@ -2302,6 +2331,178 @@
               </div>
             </div>
           {/if}
+        </div>
+      </div>
+
+      <!-- Notes Tab -->
+      <div class={activeTab === 'notes' ? 'flex-1 overflow-y-auto px-6 py-5 space-y-6 w-full max-w-7xl mx-auto' : 'hidden'}>
+        <div>
+          <h3 class="text-base font-semibold mb-1" style="color: var(--color-text-primary);">Note Network</h3>
+          <p class="text-xs" style="color: var(--color-text-muted);">Obsidian-style note network — link notes with [[wikilinks]], visualise connections, and include pinned notes in agent context.</p>
+        </div>
+
+        <!-- Enable / disable -->
+        <div class="space-y-3">
+          <div class="text-[10px] font-semibold uppercase tracking-[0.14em]" style="color: var(--color-text-muted);">General</div>
+
+          <label class="flex items-center justify-between gap-4 py-2 cursor-pointer">
+            <div>
+              <div class="text-sm font-medium" style="color: var(--color-text-primary);">Enable Notes</div>
+              <div class="text-xs mt-0.5" style="color: var(--color-text-muted);">Show the Notes panel button and enable note creation.</div>
+            </div>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={notesStore.settings.enabled}
+              aria-label="Toggle notes enabled"
+              class="relative inline-flex h-5 w-9 items-center rounded-full transition-colors shrink-0"
+              style="background: {notesStore.settings.enabled ? 'var(--color-accent)' : 'var(--color-surface-4)'};"
+              onclick={() => notesStore.updateSettings({ enabled: !notesStore.settings.enabled })}
+            >
+              <span
+                class="inline-block h-3.5 w-3.5 rounded-full bg-white shadow transition-transform"
+                style="transform: translateX({notesStore.settings.enabled ? '18px' : '2px'});"
+              ></span>
+            </button>
+          </label>
+
+          <label class="flex items-center justify-between gap-4 py-2 cursor-pointer">
+            <div>
+              <div class="text-sm font-medium" style="color: var(--color-text-primary);">Auto-include pinned notes in agent context</div>
+              <div class="text-xs mt-0.5" style="color: var(--color-text-muted);">Pinned notes are automatically injected into the agent's system context.</div>
+            </div>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={notesStore.settings.autoIncludeInContext}
+              aria-label="Toggle auto-include pinned notes"
+              class="relative inline-flex h-5 w-9 items-center rounded-full transition-colors shrink-0"
+              style="background: {notesStore.settings.autoIncludeInContext ? 'var(--color-accent)' : 'var(--color-surface-4)'};"
+              onclick={() => notesStore.updateSettings({ autoIncludeInContext: !notesStore.settings.autoIncludeInContext })}
+            >
+              <span
+                class="inline-block h-3.5 w-3.5 rounded-full bg-white shadow transition-transform"
+                style="transform: translateX({notesStore.settings.autoIncludeInContext ? '18px' : '2px'});"
+              ></span>
+            </button>
+          </label>
+
+          <div class="flex items-center justify-between gap-4 py-2">
+            <div>
+              <div class="text-sm font-medium" style="color: var(--color-text-primary);">Max context tokens</div>
+              <div class="text-xs mt-0.5" style="color: var(--color-text-muted);">Maximum tokens used by notes included in agent context (100–5000).</div>
+            </div>
+            <input
+              type="number"
+              min="100"
+              max="5000"
+              step="100"
+              class="input h-8 w-24 text-sm text-right"
+              value={notesStore.settings.maxContextTokens}
+              oninput={(e) => notesStore.updateSettings({ maxContextTokens: parseInt((e.currentTarget as HTMLInputElement).value, 10) || 2000 })}
+            />
+          </div>
+
+          <div class="flex items-center justify-between gap-4 py-2">
+            <div>
+              <div class="text-sm font-medium" style="color: var(--color-text-primary);">Default folder path</div>
+              <div class="text-xs mt-0.5" style="color: var(--color-text-muted);">New notes are created here by default.</div>
+            </div>
+            <input
+              type="text"
+              placeholder="/"
+              class="input h-8 w-32 text-sm"
+              value={notesStore.settings.defaultFolderPath}
+              onchange={(e) => notesStore.updateSettings({ defaultFolderPath: (e.currentTarget as HTMLInputElement).value || '/' })}
+            />
+          </div>
+        </div>
+
+        <!-- Separator -->
+        <div class="border-t" style="border-color: var(--color-border);"></div>
+
+        <!-- Graph physics -->
+        <div class="space-y-4">
+          <div class="text-[10px] font-semibold uppercase tracking-[0.14em]" style="color: var(--color-text-muted);">Graph Physics</div>
+
+          <div class="space-y-1">
+            <div class="flex items-center justify-between">
+              <label for="notes-gravity" class="text-sm" style="color: var(--color-text-primary);">Gravity</label>
+              <span class="text-xs tabular-nums" style="color: var(--color-text-muted);">{notesStore.settings.graphPhysics.gravity}</span>
+            </div>
+            <input
+              id="notes-gravity"
+              type="range"
+              min="-500"
+              max="0"
+              step="10"
+              class="w-full accent-[var(--color-accent)]"
+              value={notesStore.settings.graphPhysics.gravity}
+              oninput={(e) => notesStore.updateSettings({ graphPhysics: { ...notesStore.settings.graphPhysics, gravity: parseInt((e.currentTarget as HTMLInputElement).value, 10) } })}
+            />
+          </div>
+
+          <div class="space-y-1">
+            <div class="flex items-center justify-between">
+              <label for="notes-link-distance" class="text-sm" style="color: var(--color-text-primary);">Link distance</label>
+              <span class="text-xs tabular-nums" style="color: var(--color-text-muted);">{notesStore.settings.graphPhysics.linkDistance}</span>
+            </div>
+            <input
+              id="notes-link-distance"
+              type="range"
+              min="50"
+              max="300"
+              step="10"
+              class="w-full accent-[var(--color-accent)]"
+              value={notesStore.settings.graphPhysics.linkDistance}
+              oninput={(e) => notesStore.updateSettings({ graphPhysics: { ...notesStore.settings.graphPhysics, linkDistance: parseInt((e.currentTarget as HTMLInputElement).value, 10) } })}
+            />
+          </div>
+
+          <div class="space-y-1">
+            <div class="flex items-center justify-between">
+              <label for="notes-charge" class="text-sm" style="color: var(--color-text-primary);">Charge strength</label>
+              <span class="text-xs tabular-nums" style="color: var(--color-text-muted);">{notesStore.settings.graphPhysics.chargeStrength}</span>
+            </div>
+            <input
+              id="notes-charge"
+              type="range"
+              min="-500"
+              max="-50"
+              step="10"
+              class="w-full accent-[var(--color-accent)]"
+              value={notesStore.settings.graphPhysics.chargeStrength}
+              oninput={(e) => notesStore.updateSettings({ graphPhysics: { ...notesStore.settings.graphPhysics, chargeStrength: parseInt((e.currentTarget as HTMLInputElement).value, 10) } })}
+            />
+          </div>
+        </div>
+
+        <!-- Separator -->
+        <div class="border-t" style="border-color: var(--color-border);"></div>
+
+        <!-- Actions -->
+        <div class="space-y-3">
+          <div class="text-[10px] font-semibold uppercase tracking-[0.14em]" style="color: var(--color-text-muted);">Actions</div>
+
+          <button
+            type="button"
+            class="w-full flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-medium transition-colors border hover:bg-[var(--color-surface-3)]"
+            style="background: var(--color-surface-2); border-color: var(--color-border); color: var(--color-text-primary);"
+            onclick={() => { onClose?.(); window.dispatchEvent(new CustomEvent('open-notes-graph')); }}
+          >
+            <StickyNote size={14} style="color: var(--color-accent);" />
+            Open Graph View
+          </button>
+
+          <button
+            type="button"
+            class="w-full flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-medium transition-colors border hover:bg-[var(--color-surface-3)]"
+            style="background: var(--color-surface-2); border-color: var(--color-border); color: var(--color-text-primary);"
+            onclick={() => void notesStore.importMemoryAsNotes()}
+          >
+            <Brain size={14} style="color: var(--color-text-muted);" />
+            Import Memory as Notes
+          </button>
         </div>
       </div>
     </div>

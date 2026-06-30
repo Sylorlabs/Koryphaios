@@ -92,6 +92,11 @@ export const DEFAULT_PERMISSION_MATRIX: PermissionMatrix = {
       level: 'ask',
       conditions: { maxCost: 10.0 }, // Auto if under 10 cents
     },
+    delegate_to_jules: {
+      tool: 'delegate_to_jules',
+      level: 'ask',
+      conditions: { maxCost: 10.0 },
+    },
   },
 
   costThresholds: {

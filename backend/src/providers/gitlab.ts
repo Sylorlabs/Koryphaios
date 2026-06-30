@@ -34,6 +34,7 @@ export class GitLabProvider implements Provider {
     return !this.config.disabled && !!this.token();
   }
 
+  /** GitLab Duo Chat has no /models API — the endpoint picks the backend model. */
   listModels(): ModelDef[] {
     return getModelsForProvider('gitlab');
   }

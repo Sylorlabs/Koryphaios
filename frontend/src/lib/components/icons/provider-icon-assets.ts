@@ -5,6 +5,8 @@ export const EXISTING_PROVIDER_ICON_PATHS = new Set<string>([
   "/provider-icons/gitlab-color.svg",
   "/provider-icons/helicone-color.ico",
   "/provider-icons/ionet-color.svg",
+  "/provider-icons/jules-color.svg",
+  "/provider-icons/jules.svg",
   "/provider-icons/llamacpp-color.svg",
   "/provider-icons/lobehub/ace-text.svg",
   "/provider-icons/lobehub/ace.svg",

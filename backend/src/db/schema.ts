@@ -404,6 +404,42 @@ export const providerEndpointOverride = sqliteTable('provider_endpoint_override'
 });
 
 // ============================================================================
+// Notes — Obsidian-style note network
+// ============================================================================
+
+export const notes = sqliteTable('notes', {
+  id: text('id').primaryKey(),
+  title: text('title').notNull(),
+  content: text('content').notNull().default(''),
+  folderPath: text('folder_path').notNull().default('/'),
+  tags: text('tags').notNull().default('[]'),           // JSON string array
+  pinned: integer('pinned').notNull().default(0),       // boolean 0/1
+  includeInContext: integer('include_in_context').notNull().default(0), // auto-inject into agent context
+  userId: text('user_id').references(() => users.id, { onDelete: 'cascade' }),
+  createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
+  updatedAt: integer('updated_at', { mode: 'timestamp' }).notNull(),
+});
+
+// Wiki-link graph edges
+export const noteLinks = sqliteTable('note_links', {
+  fromNoteId: text('from_note_id').notNull().references(() => notes.id, { onDelete: 'cascade' }),
+  toNoteId: text('to_note_id').notNull().references(() => notes.id, { onDelete: 'cascade' }),
+}, (t) => ({
+  pk: primaryKey({ columns: [t.fromNoteId, t.toNoteId] }),
+}));
+
+// File attachments for notes
+export const noteAttachments = sqliteTable('note_attachments', {
+  id: text('id').primaryKey(),
+  noteId: text('note_id').notNull().references(() => notes.id, { onDelete: 'cascade' }),
+  filename: text('filename').notNull(),
+  mimeType: text('mime_type').notNull(),
+  size: integer('size').notNull(),
+  storagePath: text('storage_path').notNull(),          // absolute path on disk
+  createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
+});
+
+// ============================================================================
 // Type Exports
 // ============================================================================
 

@@ -16,9 +16,11 @@ import { CodexModels } from './codex';
 import { ClaudeCodeModels } from './claude-code';
 import { GrokModels } from './grok';
 import { AntigravityModels } from './antigravity';
+import { JulesModels } from './jules';
 import { ZAIModels, KimiCodeModels, DeepSeekModels, MoonshotModels } from './newproviders';
 
-// Combined list of all known models from REAL providers only
+// Combined fallback catalog — providers refresh live model lists from APIs/CLIs when connected.
+// Entries here supply metadata until discovery succeeds and enrich ids that match remotely.
 const ALL_MODELS: ModelDef[] = [
   ...OpenAIModels,
   ...AnthropicModels,
@@ -37,6 +39,7 @@ const ALL_MODELS: ModelDef[] = [
   ...ClaudeCodeModels,
   ...GrokModels,
   ...AntigravityModels,
+  ...JulesModels,
   ...KimiCodeModels,
   ...ZAIModels,
   ...DeepSeekModels,

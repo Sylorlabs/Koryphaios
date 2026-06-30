@@ -17,6 +17,7 @@ export const ProviderName = {
   Codex: 'codex',
   Grok: 'grok',
   Antigravity: 'antigravity',
+  Jules: 'jules',
   Copilot: 'copilot',
 
   // Curated coding models (OpenCode Zen)
@@ -71,6 +72,7 @@ export const IMPLEMENTED_PROVIDERS: ProviderName[] = [
   'codex',
   'grok',
   'antigravity',
+  'jules',
   'openai',
   'google',
   'google-subscription',
@@ -173,6 +175,7 @@ export const PROVIDER_AUTH_MODES: Record<ProviderName, ProviderAuthMode> = {
   openrouter: 'api_key',
   groq: 'api_key',
   copilot: 'auth_only',
+  jules: 'api_key',
   opencodezen: 'api_key',
   azure: 'api_key_or_auth',
   bedrock: 'env_auth',
@@ -225,6 +228,7 @@ export const PROVIDER_ENV_VARS: Record<
   openrouter: { apiKey: 'OPENROUTER_API_KEY', baseUrl: 'OPENROUTER_BASE_URL' },
   groq: { apiKey: 'GROQ_API_KEY' },
   copilot: { authToken: 'GITHUB_TOKEN' },
+  jules: { apiKey: 'JULES_API_KEY' },
   opencodezen: { apiKey: 'OPENCODE_ZEN_API_KEY' },
   azure: { apiKey: 'AZURE_OPENAI_API_KEY', baseUrl: 'AZURE_OPENAI_ENDPOINT' },
   bedrock: {}, // Uses AWS credentials

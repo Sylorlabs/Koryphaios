@@ -23,7 +23,7 @@ use error::{log_error, AppError, AppResult};
 /// Spawn the backend sidecar process
 fn spawn_backend_sidecar(
     app_handle: &tauri::AppHandle,
-) -> Result<Arc<std::sync::Mutex<std::process::Child>>, String> {
+) -> Result<Option<Arc<std::sync::Mutex<std::process::Child>>>, String> {
     let sidecar_path = app_handle
         .path()
         .resolve(
@@ -32,14 +32,10 @@ fn spawn_backend_sidecar(
         )
         .map_err(|e| format!("Failed to resolve sidecar path: {}", e))?;
 
-    // Check if sidecar exists (production build)
+    // In development, the launcher starts the backend separately.
     if !sidecar_path.exists() {
-        // In development, backend is started separately
-        println!(
-            "[Koryphaios] Sidecar not found at {:?}, assuming development mode",
-            sidecar_path
-        );
-        return Err("Sidecar not found - development mode".to_string());
+        println!("[Koryphaios] Dev mode: using external backend");
+        return Ok(None);
     }
 
     println!(
@@ -70,7 +66,7 @@ fn spawn_backend_sidecar(
         child.id()
     );
 
-    Ok(Arc::new(std::sync::Mutex::new(child)))
+    Ok(Some(Arc::new(std::sync::Mutex::new(child))))
 }
 
 /// Wait for backend to be ready by polling health endpoint
@@ -674,24 +670,22 @@ pub fn run() {
             let app_handle = app.handle().clone();
 
             match spawn_backend_sidecar(&app_handle) {
-                Ok(process) => {
-                    // Store process handle
+                Ok(Some(process)) => {
                     if let Ok(mut guard) = BACKEND_PROCESS.lock() {
                         *guard = Some(process);
                     }
 
-                    // Wait for backend to be ready (async block)
                     let host = config.server.host.clone();
                     let port = config.server.port;
                     tauri::async_runtime::spawn(async move {
-                        if let Err(e) = wait_for_backend_ready(&host, port, 30000).await {
+                        if let Err(e) = wait_for_backend_ready(&host, port, 120_000).await {
                             eprintln!("[Koryphaios] Warning: {}", e);
                         }
                     });
                 }
+                Ok(None) => {}
                 Err(e) => {
-                    // Development mode - backend started separately
-                    println!("[Koryphaios] {}", e);
+                    eprintln!("[Koryphaios] Warning: Failed to start backend sidecar: {}", e);
                 }
             }
 

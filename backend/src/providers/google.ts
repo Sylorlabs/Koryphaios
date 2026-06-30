@@ -9,10 +9,15 @@ import {
   type StreamRequest,
   getModelsForProvider,
   resolveModel,
-  createGenericModel,
 } from './types';
 import { GEMINI_V1BETA_BASE } from './api-endpoints';
 import { withRetry } from './utils';
+import {
+  isModelListCacheFresh,
+  mergeModelLists,
+  modelFromRemoteId,
+} from './model-list-cache';
+import { providerLog } from '../logger';
 
 export class GoogleProvider implements Provider {
   readonly name: 'google' | 'vertexai';
@@ -22,47 +27,66 @@ export class GoogleProvider implements Provider {
   }
 
   isAvailable(): boolean {
-    return !this.config.disabled && !!(this.config.apiKey || this.config.authToken);
+    const available = !this.config.disabled && !!(this.config.apiKey || this.config.authToken);
+    if (available && this.name === 'google' && !isModelListCacheFresh(this.lastFetch)) {
+      this.refreshModelsInBackground(getModelsForProvider(this.name));
+    }
+    return available;
   }
 
   private cachedModels: ModelDef[] | null = null;
   private lastFetch = 0;
+  private fetchInProgress = false;
 
   listModels(): ModelDef[] {
-    const localModels = getModelsForProvider(this.name);
-    if (this.name !== 'google') return localModels;
-    if (!this.isAvailable()) return localModels;
-    if (this.cachedModels && Date.now() - this.lastFetch < 5 * 60 * 1000) {
-      return this.cachedModels;
-    }
-    this.refreshModelsInBackground(localModels);
-    return this.cachedModels ?? localModels;
+    const fallback = getModelsForProvider(this.name);
+    if (this.name !== 'google') return fallback;
+    if (!this.isAvailable()) return fallback;
+    if (this.cachedModels && isModelListCacheFresh(this.lastFetch)) return this.cachedModels;
+    this.refreshModelsInBackground(fallback);
+    return this.cachedModels ?? fallback;
   }
 
-  private refreshModelsInBackground(localModels: ModelDef[]) {
+  private refreshModelsInBackground(fallback: ModelDef[]) {
+    if (this.fetchInProgress) return;
     const apiKey = this.config.apiKey || this.config.authToken;
     if (!apiKey) return;
+
+    this.fetchInProgress = true;
     const url = `${GEMINI_V1BETA_BASE}/models?key=${encodeURIComponent(apiKey)}`;
-    withRetry(() =>
-      fetch(url).then((r) => (r.ok ? r.json() : Promise.reject(new Error(r.statusText)))),
-    )
-      .then((body: { models?: Array<{ name?: string }> }) => {
-        const remote: ModelDef[] = [];
+
+    void (async () => {
+      try {
+        const body = await withRetry(() =>
+          fetch(url).then((r) => (r.ok ? r.json() : Promise.reject(new Error(r.statusText)))),
+        ) as { models?: Array<{ name?: string }> };
+        const discovered: ModelDef[] = [];
         for (const m of body.models ?? []) {
           const name = m.name;
           if (!name || !name.startsWith('models/')) continue;
           const id = name.replace(/^models\//, '');
-          if (localModels.some((l) => l.id === id || l.apiModelId === id)) continue;
-          const def = createGenericModel(id, 'google');
-          def.apiModelId = id;
-          remote.push(def);
+          discovered.push(modelFromRemoteId(id, 'google', fallback));
         }
-        this.cachedModels = [...localModels, ...remote];
+        if (discovered.length > 0) {
+          this.cachedModels = mergeModelLists(fallback, discovered);
+          providerLog.debug(
+            { provider: 'google', count: this.cachedModels.length },
+            'Model list refreshed from Gemini API',
+          );
+        } else {
+          this.cachedModels ??= fallback;
+        }
         this.lastFetch = Date.now();
-      })
-      .catch(() => {
-        if (!this.cachedModels) this.cachedModels = localModels;
-      });
+      } catch (err) {
+        providerLog.debug(
+          { provider: 'google', err: err instanceof Error ? err.message : String(err) },
+          'Model list refresh failed; using catalog fallback',
+        );
+        this.cachedModels ??= fallback;
+      } finally {
+        this.fetchInProgress = false;
+      }
+    })();
   }
 
   async *streamResponse(request: StreamRequest): AsyncGenerator<ProviderEvent> {

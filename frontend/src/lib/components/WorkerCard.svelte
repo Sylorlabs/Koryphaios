@@ -38,6 +38,7 @@
     if (provider === 'openrouter') return 'OpenRouter';
     if (provider === 'vertexai') return 'Vertex AI';
     if (provider === 'copilot') return 'Copilot';
+    if (provider === 'jules') return 'Jules (cloud)';
     return provider.charAt(0).toUpperCase() + provider.slice(1);
   }
 

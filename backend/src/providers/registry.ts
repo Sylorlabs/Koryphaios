@@ -30,12 +30,20 @@ import { CodexProvider } from './codex';
 import { ClaudeCodeProvider } from './claude-code';
 import { GrokBuildProvider } from './grok-build';
 import { AntigravityProvider } from './antigravity';
+import { JulesProvider } from './jules';
 import { BedrockProvider } from './bedrock';
 import { GitLabProvider } from './gitlab';
 import { SapAiProvider } from './sapai';
 import { CustomProvider } from './custom';
-import { detectCodexAuthToken, isCodexCLIAuthMarker, detectClaudeCodeLogin } from './auth-utils';
+import {
+  detectCodexAuthToken,
+  isCodexCLIAuthMarker,
+  detectClaudeCodeLogin,
+  detectGrokCLILogin,
+  detectAntigravityCLILogin,
+} from './auth-utils';
 import { cliAutoEnableCreds } from './cli-detection';
+import { getProviderDisplay } from './provider-display';
 import { KimiCodeProvider } from './kimicode';
 import { resolveKimiCodeAccessToken } from './kimicode-auth';
 import { secureDecrypt, isUsingSecureEncryption } from '../security';
@@ -176,6 +184,9 @@ class ProviderRegistry {
     custom?: boolean;
     /** Display label for custom providers. */
     label?: string;
+    iconPath?: string;
+    deployment?: 'cloud' | 'local' | 'hybrid';
+    description?: string;
   }> {
     const names = this.getVisibleProviderNames();
     const result: Array<{
@@ -196,6 +207,9 @@ class ProviderRegistry {
       baseUrlPlaceholder?: string;
       custom?: boolean;
       label?: string;
+      iconPath?: string;
+      deployment?: 'cloud' | 'local' | 'hybrid';
+      description?: string;
     }> = [];
 
     for (const name of names) {
@@ -242,6 +256,8 @@ class ProviderRegistry {
                   : undefined))
         : undefined;
 
+      const display = getProviderDisplay(name);
+
       result.push({
         name,
         enabled: isEnabled,
@@ -256,6 +272,10 @@ class ProviderRegistry {
         requiresBaseUrl,
         circuitOpen,
         ...(isCustom && { custom: true, label: config?.label ?? String(name) }),
+        ...(display?.label && !isCustom && { label: display.label }),
+        ...(display?.iconPath && { iconPath: display.iconPath }),
+        ...(display?.deployment && { deployment: display.deployment }),
+        ...(display?.description && { description: display.description }),
         ...(baseUrlPlaceholder && { baseUrlPlaceholder }),
       });
     }
@@ -488,6 +508,20 @@ class ProviderRegistry {
             error: 'Claude Code is not logged in. Run "claude login" in your terminal to connect your Claude subscription.',
           };
         }
+        case 'grok': {
+          if (detectGrokCLILogin()) return { success: true };
+          return {
+            success: false,
+            error: 'Grok Build CLI is not logged in. Install the grok CLI and run "grok login".',
+          };
+        }
+        case 'antigravity': {
+          if (detectAntigravityCLILogin()) return { success: true };
+          return {
+            success: false,
+            error: 'Antigravity CLI is not logged in. Install agy and run "agy login".',
+          };
+        }
         case 'anthropic': {
           if (!apiKey && !authToken)
             return { success: false, error: 'Missing apiKey or authToken' };
@@ -640,6 +674,13 @@ class ProviderRegistry {
           if (isMarker) return { success: true };
           return this.verifyHttp(CODEX_MODELS_URL, {
             headers: { Authorization: `Bearer ${resolvedCodexToken}` },
+          });
+        }
+        case 'jules': {
+          if (!apiKey) return { success: false, error: 'Missing JULES_API_KEY (create at jules.google.com/settings#api)' };
+          return this.verifyHttp('https://jules.googleapis.com/v1alpha/sources?pageSize=1', {
+            method: 'GET',
+            headers: { 'X-Goog-Api-Key': apiKey, 'User-Agent': 'Koryphaios/1.0' },
           });
         }
         case 'opencodezen': {
@@ -1004,6 +1045,10 @@ class ProviderRegistry {
       case 'antigravity':
         // Antigravity subscription — runs the official `agy` CLI harness (no direct API calls).
         return new AntigravityProvider(config);
+      case 'jules':
+        // Google Jules — cloud async agent (REST API only, remote VMs + GitHub PRs).
+        if (config.disabled || !config.apiKey) return null;
+        return new JulesProvider(config);
       case 'kimicode':
         return new KimiCodeProvider(config);
       case 'openrouter':

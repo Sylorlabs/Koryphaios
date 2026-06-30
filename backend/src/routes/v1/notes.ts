@@ -1,0 +1,183 @@
+/**
+ * Notes API Routes
+ *
+ * REST endpoints for the Obsidian-style note knowledge network.
+ * Prefix: /api/notes
+ */
+
+import { Elysia, t } from 'elysia';
+import { requireLocalRouteAuth } from '../../auth/local-route-auth';
+import * as notesService from '../../notes/notes-service';
+import { readFileSync, existsSync } from 'fs';
+import { PROJECT_ROOT } from '../../runtime/paths';
+
+export const notesRoutes = new Elysia({ prefix: '/api/notes' })
+
+  // ── List all notes (supports ?search=, ?folder=) ─────────────────────────
+  .get('/', async ({ request, query, set }) => {
+    if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
+    const notesList = await notesService.listNotes({
+      folderPath: query.folder as string | undefined,
+      search: query.search as string | undefined,
+    });
+    return { ok: true, data: notesList };
+  })
+
+  // ── Create note ───────────────────────────────────────────────────────────
+  .post(
+    '/',
+    async ({ request, body, set }) => {
+      if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
+      try {
+        const note = await notesService.createNote(body as any);
+        return { ok: true, data: note };
+      } catch (err: any) {
+        set.status = 500;
+        return { ok: false, error: err.message };
+      }
+    },
+    {
+      body: t.Object({
+        title: t.String(),
+        content: t.Optional(t.String()),
+        folderPath: t.Optional(t.String()),
+        tags: t.Optional(t.Array(t.String())),
+        pinned: t.Optional(t.Boolean()),
+        includeInContext: t.Optional(t.Boolean()),
+      }),
+    },
+  )
+
+  // ── Graph data ────────────────────────────────────────────────────────────
+  .get('/graph', async ({ request, set }) => {
+    if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
+    const graph = await notesService.getGraphData();
+    return { ok: true, data: graph };
+  })
+
+  // ── Folder tree ───────────────────────────────────────────────────────────
+  .get('/folders', async ({ request, set }) => {
+    if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
+    const tree = await notesService.getFolderTree();
+    return { ok: true, data: tree };
+  })
+
+  // ── Full-text search ──────────────────────────────────────────────────────
+  .get('/search', async ({ request, query, set }) => {
+    if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
+    const results = await notesService.searchNotes((query.q as string) ?? '');
+    return { ok: true, data: results };
+  })
+
+  // ── Import memory files as notes (must come before /:id to avoid collision) ─
+  .post('/import-memory', async ({ request, set }) => {
+    if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
+    try {
+      const notes = await notesService.importMemoryAsNotes(PROJECT_ROOT);
+      return { ok: true, data: notes };
+    } catch (err: any) {
+      set.status = 500;
+      return { ok: false, error: err.message };
+    }
+  })
+
+  // ── Serve attachment (must come before /:id to avoid path collision) ──────
+  .get('/attachments/:attachmentId', async ({ request, params, set }) => {
+    if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
+    const att = await notesService.getAttachment(params.attachmentId);
+    if (!att || !existsSync(att.storagePath)) {
+      set.status = 404;
+      return { ok: false, error: 'Not found' };
+    }
+    const data = readFileSync(att.storagePath);
+    (set.headers as Record<string, string>)['Content-Type'] = att.mimeType;
+    (set.headers as Record<string, string>)['Content-Disposition'] =
+      'inline; filename="' + att.filename + '"';
+    return data;
+  })
+
+  // ── Get single note with links ────────────────────────────────────────────
+  .get('/:id', async ({ request, params, set }) => {
+    if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
+    const note = await notesService.getNoteWithLinks(params.id);
+    if (!note) {
+      set.status = 404;
+      return { ok: false, error: 'Not found' };
+    }
+    return { ok: true, data: note };
+  })
+
+  // ── Update note ───────────────────────────────────────────────────────────
+  .put(
+    '/:id',
+    async ({ request, params, body, set }) => {
+      if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
+      try {
+        const note = await notesService.updateNote(params.id, body as any);
+        return { ok: true, data: note };
+      } catch (err: any) {
+        set.status = 500;
+        return { ok: false, error: err.message };
+      }
+    },
+    {
+      body: t.Object({
+        title: t.Optional(t.String()),
+        content: t.Optional(t.String()),
+        folderPath: t.Optional(t.String()),
+        tags: t.Optional(t.Array(t.String())),
+        pinned: t.Optional(t.Boolean()),
+        includeInContext: t.Optional(t.Boolean()),
+      }),
+    },
+  )
+
+  // ── Delete note ───────────────────────────────────────────────────────────
+  .delete('/:id', async ({ request, params, set }) => {
+    if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
+    await notesService.deleteNote(params.id);
+    return { ok: true };
+  })
+
+  // ── Get backlinks ─────────────────────────────────────────────────────────
+  .get('/:id/backlinks', async ({ request, params, set }) => {
+    if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
+    const backlinks = await notesService.getNoteBacklinks(params.id);
+    return { ok: true, data: backlinks };
+  })
+
+  // ── Upload attachment (multipart form) ────────────────────────────────────
+  .post('/:id/attachments', async ({ request, params, set }) => {
+    if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
+    try {
+      const formData = await request.formData();
+      const file = formData.get('file') as File | null;
+      if (!file) {
+        set.status = 400;
+        return { ok: false, error: 'No file provided' };
+      }
+      const buffer = Buffer.from(await file.arrayBuffer());
+      const attachment = await notesService.saveAttachment(
+        params.id,
+        file.name,
+        file.type || 'application/octet-stream',
+        buffer,
+      );
+      return { ok: true, data: attachment };
+    } catch (err: any) {
+      set.status = 500;
+      return { ok: false, error: err.message };
+    }
+  })
+
+  // ── Delete attachment ─────────────────────────────────────────────────────
+  .delete('/:id/attachments/:attachmentId', async ({ request, params, set }) => {
+    if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
+    try {
+      await notesService.deleteAttachment(params.attachmentId);
+      return { ok: true };
+    } catch (err: any) {
+      set.status = 500;
+      return { ok: false, error: err.message };
+    }
+  });

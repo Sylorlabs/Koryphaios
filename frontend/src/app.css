@@ -775,3 +775,20 @@ pre {
 .skip-link:focus {
   top: 0;
 }
+
+/* ── Wikilinks (rendered inside markdown feed entries) ── */
+a.wikilink {
+  color: var(--color-accent);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  text-decoration-color: rgba(213, 178, 97, 0.4);
+  cursor: pointer;
+  border-radius: 2px;
+  padding: 0 2px;
+  transition: background-color 0.12s;
+}
+
+a.wikilink:hover {
+  background: rgba(213, 178, 97, 0.12);
+  text-decoration-color: var(--color-accent);
+}

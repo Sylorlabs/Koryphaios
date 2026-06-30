@@ -35,6 +35,8 @@ import {
   WebFetchTool,
   AskUserTool,
   AskManagerTool,
+  DelegateToWorkerTool,
+  DelegateToJulesTool,
   MCPDetectErrorsTool,
   MCPAnalyzeErrorTool,
   MCPSuggestFixesTool,
@@ -154,6 +156,7 @@ async function initEncryption() {
 }
 
 import { registerGitTools } from './tools';
+import { noteTools } from './tools/notes';
 
 async function initTools() {
   const tools = new ToolRegistry();
@@ -174,6 +177,8 @@ async function initTools() {
     new WebFetchTool(),
     new AskUserTool(),
     new AskManagerTool(),
+    new DelegateToWorkerTool(),
+    new DelegateToJulesTool(),
     new MCPDetectErrorsTool(),
     new MCPAnalyzeErrorTool(),
     new MCPSuggestFixesTool(),
@@ -184,6 +189,10 @@ async function initTools() {
   }
 
   registerGitTools(tools);
+
+  for (const tool of noteTools) {
+    tools.register(tool);
+  }
 
   return tools;
 }

@@ -243,6 +243,14 @@ export interface ProviderInfo {
   extraAuthModes?: Array<{ id: string; label: string; description: string }>;
   error?: string;
   circuitOpen?: boolean;
+  /** Human-friendly name (e.g. "Google Jules") */
+  label?: string;
+  /** Static icon path served by the frontend (e.g. /provider-icons/jules.svg) */
+  iconPath?: string;
+  /** Where the provider executes work */
+  deployment?: 'cloud' | 'local' | 'hybrid';
+  /** Short UI description of provider behavior */
+  description?: string;
 }
 
 export interface ProviderStatusPayload {

@@ -20,6 +20,12 @@ export interface Session {
 
 export type SessionStatus = 'active' | 'archived' | 'deleted';
 
+export interface JulesSessionLink {
+  sessionId: string;
+  url?: string;
+  updatedAt: number;
+}
+
 export interface SessionMetadata {
   agentCount?: number;
   messageCount?: number;
@@ -27,6 +33,8 @@ export interface SessionMetadata {
   totalCost?: number;
   providerUsage?: Record<string, number>;
   lastActivityAt?: number;
+  /** Active Google Jules cloud session for continuity across turns */
+  jules?: JulesSessionLink;
 }
 
 export interface SessionSnapshot {

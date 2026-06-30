@@ -27,9 +27,11 @@
   import ThemePickerModal from '$lib/components/ThemePickerModal.svelte';
 
   import NoGitWarning from '$lib/components/NoGitWarning.svelte';
+  import NotesPanel from '$lib/components/NotesPanel.svelte';
   import { shortcutStore } from '$lib/stores/shortcuts.svelte';
   import { gitStore } from '$lib/stores/git.svelte';
-  import { ChevronLeft, ChevronRight, FolderOpen, FolderPlus, Clock } from 'lucide-svelte';
+  import { notesStore } from '$lib/stores/notes.svelte';
+  import { ChevronLeft, ChevronRight, FolderOpen, FolderPlus, Clock, StickyNote } from 'lucide-svelte';
   import { invoke } from '@tauri-apps/api/core';
   import {
     type RecentProject,
@@ -48,6 +50,7 @@
   let showAgents = $state(false);
   let showSidebar = $state(true);
   let showGit = $state(false);
+  let showNotes = $state(false);
   let showSidebarBeforeZen = $state(true);
   let showAgentsBeforeZen = $state(false);
   let showGitBeforeZen = $state(false);
@@ -89,10 +92,28 @@
     loadLayoutPrefs();
 
     window.addEventListener('keydown', handleGlobalKeydown);
+
+    // Listen for wikilink clicks from FeedEntry to open notes panel
+    const handleOpenNote = async (e: Event) => {
+      const title = (e as CustomEvent<{ title: string }>).detail?.title;
+      if (!title) return;
+      showNotes = true;
+      await notesStore.openNoteByTitle(title);
+    };
+    window.addEventListener('open-note', handleOpenNote);
+
+    // Listen for "open-notes-graph" dispatched from Settings → Notes tab
+    const handleOpenNotesGraph = () => {
+      showNotes = true;
+    };
+    window.addEventListener('open-notes-graph', handleOpenNotesGraph);
+
     return () => {
       cleanupTheme?.();
       wsStore.disconnect();
       window.removeEventListener('keydown', handleGlobalKeydown);
+      window.removeEventListener('open-note', handleOpenNote);
+      window.removeEventListener('open-notes-graph', handleOpenNotesGraph);
     };
   });
 
@@ -191,6 +212,13 @@
     if (shortcutStore.matches('toggle_yolo', e)) {
       e.preventDefault();
       setYoloMode(!wsStore.isYoloMode);
+      return;
+    }
+
+    // Ctrl+Shift+N / Cmd+Shift+N — toggle Notes panel
+    if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === 'N') {
+      e.preventDefault();
+      showNotes = !showNotes;
       return;
     }
 
@@ -666,6 +694,9 @@ RULES:
       case 'toggle_git':
         showGit = !showGit;
         break;
+      case 'toggle_notes':
+        showNotes = !showNotes;
+        break;
       case 'toggle_theme':
         showThemeQuickMenu = true;
         break;
@@ -916,6 +947,7 @@ RULES:
       {showSidebar}
       {showGit}
       {showAgents}
+      {showNotes}
       {zenMode}
       projectName={appStore.projectName}
       koryPhase={wsStore.koryPhase}
@@ -975,6 +1007,30 @@ RULES:
 
     <!-- File Edit Preview (Cursor-style streaming) -->
     <FileEditPreview />
+
+    <!-- Notes Panel (full-area overlay when active) -->
+    {#if showNotes}
+      <div class="absolute inset-0 z-30 flex min-h-0 min-w-0 flex-col" style="top: var(--header-height, 40px); background: var(--color-surface-1);">
+        <div class="flex items-center justify-between px-4 py-2 border-b shrink-0" style="border-color: var(--color-border); background: var(--color-surface-0);">
+          <div class="flex items-center gap-2">
+            <StickyNote size={14} style="color: var(--color-accent);" />
+            <span class="text-sm font-semibold" style="color: var(--color-text-primary);">Note Network</span>
+          </div>
+          <button
+            type="button"
+            class="p-1.5 rounded-lg transition-colors hover:bg-[var(--color-surface-3)] text-xs"
+            style="color: var(--color-text-muted);"
+            onclick={() => showNotes = false}
+            aria-label="Close notes"
+          >
+            Back to chat
+          </button>
+        </div>
+        <div class="flex-1 min-h-0">
+          <NotesPanel />
+        </div>
+      </div>
+    {/if}
 
     <!-- Chat / Feed area -->
 	    <section class="flex flex-1 min-h-0 flex-col overflow-hidden" role="main" aria-label="Chat feed">

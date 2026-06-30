@@ -34,6 +34,11 @@ export interface ToolContext {
   recordChange?: (change: ChangeSummary) => void;
   /** Optional: manager-only. When the manager calls delegate_to_worker, this runs the worker pipeline and returns a summary. */
   delegateToWorker?: (task: string, domain?: string) => Promise<string>;
+  /** Optional: manager-only. Delegates to Google Jules (cloud async agent, API only). */
+  delegateToJules?: (
+    task: string,
+    options?: { createPr?: boolean; branch?: string },
+  ) => Promise<string>;
 }
 
 export interface ToolCallInput {

@@ -1,7 +1,6 @@
 import OpenAI from 'openai';
-import type { ModelDef, ProviderConfig } from '@koryphaios/shared';
+import type { ProviderConfig } from '@koryphaios/shared';
 import { createUsageInterceptingFetch } from '../credit-accountant';
-import { getModelsForProvider } from './types';
 import { OpenAIProvider } from './openai';
 import {
   isKimiCodeAuthMarker,
@@ -29,8 +28,8 @@ export class KimiCodeProvider extends OpenAIProvider {
     return true;
   }
 
-  override listModels(): ModelDef[] {
-    return getModelsForProvider('kimicode');
+  protected override async prepareForModelDiscovery(): Promise<void> {
+    await this.ensureAccessToken();
   }
 
   protected override get client(): OpenAI {

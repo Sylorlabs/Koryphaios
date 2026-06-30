@@ -78,6 +78,7 @@
     zenmux: ['zenmux'],
     zai: ['zai'],
     antigravity: ['antigravity'],
+    jules: ['jules'],
     cursor: ['cursor'],
   };
 

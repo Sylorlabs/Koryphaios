@@ -64,6 +64,12 @@ export const PROVIDER_CONFIGS: ProviderConfig[] = [
     envAuthTokenKey: 'GITHUB_COPILOT_TOKEN',
   },
   { name: 'codex', baseUrl: '', authMode: 'auth_only', envKeys: [], envAuthTokenKey: 'CODEX_AUTH_TOKEN' },
+  {
+    name: 'jules',
+    baseUrl: 'https://jules.googleapis.com/v1alpha',
+    authMode: 'api_key',
+    envKeys: ['JULES_API_KEY'],
+  },
 
   // Enterprise
   {

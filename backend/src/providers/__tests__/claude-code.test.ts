@@ -42,7 +42,7 @@ describe('Claude Code provider — plumbing', () => {
     // IDs must be distinct from the API-key anthropic catalog (MODEL_CATALOG is keyed by id).
     for (const m of models) {
       expect(MODEL_CATALOG[m.id]?.provider).toBe('claude');
-      expect(m.apiModelId).toMatch(/^(opus|sonnet|haiku)$/);
+      expect(m.apiModelId).toMatch(/^(opus|sonnet|haiku|fable)$/);
     }
   });
 
