@@ -8,6 +8,13 @@
 import { Elysia, t } from 'elysia';
 import { requireLocalRouteAuth } from '../../auth/local-route-auth';
 import * as notesService from '../../notes/notes-service';
+import { broadcastNotesNetworkUpdate } from '../../notes/notes-events';
+import {
+  loadNotesAgentPermissions,
+  saveNotesAgentPermissions,
+  resetNotesAgentPermissions,
+} from '../../notes/notes-settings';
+import { DEFAULT_NOTES_AGENT_PERMISSIONS, type NotesAgentPermissions } from '@koryphaios/shared';
 import { readFileSync, existsSync } from 'fs';
 import { PROJECT_ROOT } from '../../runtime/paths';
 
@@ -30,6 +37,7 @@ export const notesRoutes = new Elysia({ prefix: '/api/notes' })
       if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
       try {
         const note = await notesService.createNote(body as any);
+        broadcastNotesNetworkUpdate('create', note.id);
         return { ok: true, data: note };
       } catch (err: any) {
         set.status = 500;
@@ -47,6 +55,56 @@ export const notesRoutes = new Elysia({ prefix: '/api/notes' })
       }),
     },
   )
+
+  // ── Agent permission settings ─────────────────────────────────────────────
+  .get('/settings/agent-permissions', async ({ request, set }) => {
+    if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
+    return { ok: true, data: loadNotesAgentPermissions(PROJECT_ROOT) };
+  })
+
+  .put(
+    '/settings/agent-permissions',
+    async ({ request, body, set }) => {
+      if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
+      try {
+        const merged = saveNotesAgentPermissions(
+          PROJECT_ROOT,
+          body as Partial<NotesAgentPermissions>,
+        );
+        return { ok: true, data: merged };
+      } catch (err: unknown) {
+        set.status = 500;
+        return {
+          ok: false,
+          error: err instanceof Error ? err.message : 'Failed to save permissions',
+        };
+      }
+    },
+    {
+      body: t.Object({
+        preset: t.Optional(
+          t.Union([
+            t.Literal('default'),
+            t.Literal('allow_all'),
+            t.Literal('ask_all'),
+            t.Literal('block_all'),
+            t.Literal('custom'),
+          ]),
+        ),
+        tools: t.Optional(t.Record(t.String(), t.String())),
+      }),
+    },
+  )
+
+  .post('/settings/agent-permissions/reset', async ({ request, set }) => {
+    if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
+    return { ok: true, data: resetNotesAgentPermissions(PROJECT_ROOT) };
+  })
+
+  .get('/settings/agent-permissions/defaults', async ({ request, set }) => {
+    if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
+    return { ok: true, data: DEFAULT_NOTES_AGENT_PERMISSIONS };
+  })
 
   // ── Graph data ────────────────────────────────────────────────────────────
   .get('/graph', async ({ request, set }) => {
@@ -74,6 +132,7 @@ export const notesRoutes = new Elysia({ prefix: '/api/notes' })
     if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
     try {
       const notes = await notesService.importMemoryAsNotes(PROJECT_ROOT);
+      broadcastNotesNetworkUpdate('update');
       return { ok: true, data: notes };
     } catch (err: any) {
       set.status = 500;
@@ -114,6 +173,7 @@ export const notesRoutes = new Elysia({ prefix: '/api/notes' })
       if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
       try {
         const note = await notesService.updateNote(params.id, body as any);
+        broadcastNotesNetworkUpdate('update', note.id);
         return { ok: true, data: note };
       } catch (err: any) {
         set.status = 500;
@@ -136,6 +196,7 @@ export const notesRoutes = new Elysia({ prefix: '/api/notes' })
   .delete('/:id', async ({ request, params, set }) => {
     if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
     await notesService.deleteNote(params.id);
+    broadcastNotesNetworkUpdate('delete', params.id);
     return { ok: true };
   })
 

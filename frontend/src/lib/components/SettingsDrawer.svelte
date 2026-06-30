@@ -47,6 +47,11 @@
   import { collaborationStore } from '$lib/stores/collaboration.svelte';
   import { modeStore } from '$lib/stores/mode.svelte';
   import { notesStore } from '$lib/stores/notes.svelte';
+  import {
+    NOTE_TOOL_DEFINITIONS,
+    type NotePermissionLevel,
+    type NotesPermissionPreset,
+  } from '@koryphaios/shared';
   import ModelSelectionDialog from './ModelSelectionDialog.svelte';
   import ModeToggle from './ModeToggle.svelte';
   import { apiFetch, parseJsonResponse } from '$lib/api.svelte';
@@ -75,6 +80,29 @@
   let managingAccountSaving = $state(false);
   let newKeyValue = $state('');
   let rotateKeyInput = $state<HTMLInputElement | null>(null);
+
+  const NOTE_PERMISSION_PRESETS: Array<{
+    id: Exclude<NotesPermissionPreset, 'custom'>
+    label: string
+    description: string
+  }> = [
+    { id: 'default', label: 'Default', description: 'Reads auto, writes ask' },
+    { id: 'allow_all', label: 'Allow all', description: 'Agents run without prompts' },
+    { id: 'ask_all', label: 'Ask all', description: 'Confirm every action' },
+    { id: 'block_all', label: 'Block all', description: 'Hide all note tools from agents' },
+  ];
+
+  const permissionLevelLabels: Record<NotePermissionLevel, string> = {
+    auto: 'Allow',
+    ask: 'Ask',
+    block: 'Hide',
+  };
+
+  $effect(() => {
+    if (open && activeTab === 'notes' && !notesStore.agentPermissionsLoaded) {
+      void notesStore.fetchAgentPermissions();
+    }
+  });
 
   $effect(() => {
     if (showRotateDialog) {
@@ -1448,6 +1476,109 @@
               value={notesStore.settings.defaultFolderPath}
               onchange={(e) => notesStore.updateSettings({ defaultFolderPath: (e.currentTarget as HTMLInputElement).value || '/' })}
             />
+          </div>
+        </div>
+
+        <!-- Separator -->
+        <div class="border-t" style="border-color: var(--color-border);"></div>
+
+        <!-- Agent permissions -->
+        <div class="space-y-4">
+          <div class="flex items-start justify-between gap-4">
+            <div>
+              <div class="flex items-center gap-2">
+                <Shield size={14} style="color: var(--color-accent);" />
+                <div class="text-[10px] font-semibold uppercase tracking-[0.14em]" style="color: var(--color-text-muted);">
+                  Agent Permissions
+                </div>
+              </div>
+              <p class="text-xs mt-1.5" style="color: var(--color-text-muted);">
+                Control what agents can do in the note network. Hidden tools are removed entirely — agents won't see them. YOLO mode still bypasses "Ask" prompts.
+              </p>
+            </div>
+            <button
+              type="button"
+              class="shrink-0 px-2.5 py-1 rounded-lg text-[11px] border transition-colors hover:bg-[var(--color-surface-3)]"
+              style="border-color: var(--color-border); color: var(--color-text-muted);"
+              onclick={() => void notesStore.resetAgentPermissions()}
+            >
+              Reset
+            </button>
+          </div>
+
+          <div class="flex flex-wrap gap-2">
+            {#each NOTE_PERMISSION_PRESETS as preset (preset.id)}
+              <button
+                type="button"
+                class="px-3 py-2 rounded-xl text-left border transition-colors min-w-[120px]"
+                style="
+                  background: {notesStore.agentPermissions.preset === preset.id ? 'rgba(var(--color-accent-rgb, 99 102 241) / 0.12)' : 'var(--color-surface-2)'};
+                  border-color: {notesStore.agentPermissions.preset === preset.id ? 'var(--color-accent)' : 'var(--color-border)'};
+                  color: var(--color-text-primary);
+                "
+                onclick={() => void notesStore.applyAgentPermissionPreset(preset.id)}
+              >
+                <div class="text-xs font-semibold">{preset.label}</div>
+                <div class="text-[10px] mt-0.5" style="color: var(--color-text-muted);">{preset.description}</div>
+              </button>
+            {/each}
+            {#if notesStore.agentPermissions.preset === 'custom'}
+              <div
+                class="px-3 py-2 rounded-xl border min-w-[120px]"
+                style="background: var(--color-surface-2); border-color: var(--color-accent); color: var(--color-text-primary);"
+              >
+                <div class="text-xs font-semibold">Custom</div>
+                <div class="text-[10px] mt-0.5" style="color: var(--color-text-muted);">Per-action overrides</div>
+              </div>
+            {/if}
+          </div>
+
+          {#if notesStore.agentPermissionsSaving}
+            <p class="text-[11px]" style="color: var(--color-text-muted);">Saving permissions…</p>
+          {/if}
+
+          <div class="grid gap-4 lg:grid-cols-2">
+            {#each ['read', 'write'] as category (category)}
+              <div
+                class="rounded-2xl border p-4 space-y-3"
+                style="background: var(--color-surface-2); border-color: var(--color-border);"
+              >
+                <div class="text-xs font-semibold capitalize" style="color: var(--color-text-primary);">
+                  {category === 'read' ? 'Read actions' : 'Write actions'}
+                </div>
+                <div class="space-y-2">
+                  {#each NOTE_TOOL_DEFINITIONS.filter((d) => d.category === category) as tool (tool.name)}
+                    <div class="flex items-center justify-between gap-3 py-1">
+                      <div class="min-w-0">
+                        <div class="text-xs font-medium truncate" style="color: var(--color-text-primary);">
+                          {tool.label}
+                        </div>
+                        <div class="text-[10px] truncate" style="color: var(--color-text-muted);">
+                          {tool.description}
+                        </div>
+                      </div>
+                      <select
+                        class="h-8 shrink-0 rounded-lg border px-2 text-[11px] font-medium"
+                        style="
+                          background: var(--color-surface-1);
+                          border-color: var(--color-border);
+                          color: var(--color-text-primary);
+                        "
+                        value={notesStore.agentPermissions.tools[tool.name]}
+                        onchange={(e) => {
+                          const level = (e.currentTarget as HTMLSelectElement).value as NotePermissionLevel;
+                          void notesStore.setAgentToolPermission(tool.name, level);
+                        }}
+                      >
+                        <option value="auto">{permissionLevelLabels.auto}</option>
+                        <option value="ask">{permissionLevelLabels.ask}</option>
+                        <option value="block">{permissionLevelLabels.block}</option>
+                      </select>
+                    </div>
+                  {/each}
+                </div>
+              </div>
+            {/each}
           </div>
         </div>
 

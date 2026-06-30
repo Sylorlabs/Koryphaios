@@ -46,7 +46,9 @@ export type WSEventType =
   | 'kory.routing'
   | 'kory.verification'
   | 'kory.task_breakdown'
-  | 'kory.ask_user';
+  | 'kory.ask_user'
+  // Notes network
+  | 'notes.updated';
 
 export interface WSMessage<T = unknown> {
   type: WSEventType;

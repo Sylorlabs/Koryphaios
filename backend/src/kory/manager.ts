@@ -36,6 +36,14 @@ import { wsBroker } from '../pubsub';
 import { koryLog } from '../logger';
 import { nanoid } from 'nanoid';
 import { sanitizeForPrompt } from '../security';
+import {
+  checkNoteToolPermission,
+  filterToolDefsForNotesPermissions,
+  buildNotesNetworkSystemHint,
+  hasAnyVisibleNoteTools,
+  formatNoteToolApprovalSummary,
+} from '../notes/notes-settings';
+import { isNoteToolName } from '@koryphaios/shared';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { z } from 'zod';
 import { join } from 'node:path';
@@ -1118,6 +1126,17 @@ export class KoryManager {
 
     let systemPrompt = KORY_SYSTEM_PROMPT;
 
+    if (hasAnyVisibleNoteTools(this.workingDirectory)) {
+      const hint = buildNotesNetworkSystemHint(this.workingDirectory);
+      if (hint) systemPrompt += `\n\n${hint}`;
+      try {
+        const { buildNotesNetworkPrompt } = await import('../memory/unified-memory');
+        systemPrompt += await buildNotesNetworkPrompt(2500, this.workingDirectory);
+      } catch {
+        // Notes DB may be unavailable — continue without network context
+      }
+    }
+
     // Multi-source research instruction
     if (settings.multiSourceResearch) {
       systemPrompt +=
@@ -1125,7 +1144,10 @@ export class KoryManager {
     }
 
     // Filter tools based on local web search setting
-    let tools = this.tools.getToolDefsForRole('manager');
+    let tools = filterToolDefsForNotesPermissions(
+      this.tools.getToolDefsForRole('manager'),
+      this.workingDirectory,
+    );
     if (settings.localWebSearch === 'off') {
       tools = tools.filter((t) => t.name !== 'web_search');
     }
@@ -1311,6 +1333,54 @@ export class KoryManager {
     });
   }
 
+  private async gateNoteToolCall(
+    sessionId: string,
+    tc: CompletedToolCall,
+  ): Promise<ToolCallOutput | null> {
+    if (!isNoteToolName(tc.name)) return null;
+
+    const check = checkNoteToolPermission(tc.name, this.workingDirectory, {
+      yoloMode: this.isYoloMode,
+    });
+
+    if (!check.allowed) {
+      // Tool was hidden from the schema — treat as unknown if the model hallucinates a call
+      return {
+        callId: tc.id,
+        name: tc.name,
+        output: `Unknown tool: ${tc.name}`,
+        isError: true,
+        durationMs: 0,
+      };
+    }
+
+    if (check.requiresApproval) {
+      const summary = formatNoteToolApprovalSummary(
+        tc.name,
+        (tc.input ?? {}) as Record<string, unknown>,
+      );
+      const selection = await this.waitForUserInputInternal(
+        sessionId,
+        `Allow agent to ${summary}?`,
+        ['Allow', 'Deny'],
+      );
+      if (selection === '__timeout__' || selection.includes('Deny') || selection.includes('Cancel')) {
+        return {
+          callId: tc.id,
+          name: tc.name,
+          output:
+            selection === '__timeout__'
+              ? 'Note action denied: timed out waiting for approval'
+              : 'Note action denied by user',
+          isError: true,
+          durationMs: 0,
+        };
+      }
+    }
+
+    return null;
+  }
+
   private async executeManagerToolCall(
     sessionId: string,
     tc: CompletedToolCall,
@@ -1328,6 +1398,8 @@ export class KoryManager {
         durationMs: 0,
       };
     }
+    const gated = await this.gateNoteToolCall(sessionId, tc);
+    if (gated) return gated;
     return await this.tools.execute(ctx, { id: tc.id, name: tc.name, input: tc.input });
   }
 
@@ -1402,6 +1474,18 @@ export class KoryManager {
     const messages: InternalMessage[] = [...history, { role: 'user', content: userMessage }];
     const resolvedReasoningLevel =
       reasoningLevel === 'auto' ? determineAutoReasoningLevel(userMessage) : reasoningLevel;
+    let workerSystemPrompt = WORKER_SYSTEM_PROMPT;
+    if (hasAnyVisibleNoteTools(this.workingDirectory)) {
+      const hint = buildNotesNetworkSystemHint(this.workingDirectory);
+      if (hint) workerSystemPrompt += `\n\n${hint}`;
+      try {
+        const { buildNotesNetworkPrompt } = await import('../memory/unified-memory');
+        workerSystemPrompt += await buildNotesNetworkPrompt(2500, this.workingDirectory);
+      } catch {
+        // Notes DB may be unavailable
+      }
+    }
+
     const thread: AgentThreadState = {
       sessionId,
       identity,
@@ -1409,7 +1493,7 @@ export class KoryManager {
       status: 'thinking',
       providerName: provider.name,
       modelId,
-      systemPrompt: WORKER_SYSTEM_PROMPT,
+      systemPrompt: workerSystemPrompt,
       toolRole: 'worker',
       reasoningLevel: resolvedReasoningLevel,
       maxTurns: 25,
@@ -1475,6 +1559,8 @@ export class KoryManager {
       );
       return { callId: tc.id, name: tc.name, output: ans, isError: false, durationMs: 0 };
     }
+    const gated = await this.gateNoteToolCall(sessionId, tc);
+    if (gated) return gated;
     return await this.tools.execute(ctx, { id: tc.id, name: tc.name, input: tc.input });
   }
   cancelWorker(agentId: string) {
@@ -1674,7 +1760,10 @@ export class KoryManager {
         model: thread.modelId,
         systemPrompt: thread.systemPrompt,
         messages: this.toProviderMessages(thread.messages),
-        tools: this.tools.getToolDefsForRole(thread.toolRole),
+        tools: filterToolDefsForNotesPermissions(
+          this.tools.getToolDefsForRole(thread.toolRole),
+          this.workingDirectory,
+        ),
         maxTokens: thread.maxTokens,
         signal: streamSignal,
         workingDirectory: thread.ctx.workingDirectory,

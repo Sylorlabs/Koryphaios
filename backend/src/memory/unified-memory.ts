@@ -916,6 +916,73 @@ export function formatMemoryForContext(context: MemoryContext): string {
 }
 
 /**
+ * Build a compact catalog of all notes so agents can discover and recall any note.
+ */
+function buildNotesCatalogUsageHint(visibleTools: Set<string>): string {
+  const hints: string[] = [];
+  if (visibleTools.has('recall_notes') || visibleTools.has('read_note')) {
+    hints.push('Use recall_notes or read_note to load full note content.');
+  }
+  if (visibleTools.has('search_notes') || visibleTools.has('list_notes')) {
+    hints.push('Use search_notes or list_notes to discover notes.');
+  }
+  if (visibleTools.has('link_notes') || visibleTools.has('unlink_notes')) {
+    hints.push('Use link_notes / unlink_notes to edit the graph; [[wikilinks]] in content also create edges.');
+  }
+  return hints.join('\n');
+}
+
+export async function getNotesCatalogPrompt(
+  maxEntries: number = 150,
+  visibleToolNames?: string[],
+): Promise<string> {
+  try {
+    const { getNotesCatalog } = await import('../notes/notes-service');
+    const catalog = await getNotesCatalog();
+    if (!catalog.length) return '';
+
+    const visible = new Set(visibleToolNames ?? []);
+    const canListCatalog =
+      !visibleToolNames?.length ||
+      visible.has('recall_notes') ||
+      visible.has('read_note') ||
+      visible.has('search_notes') ||
+      visible.has('list_notes') ||
+      visible.has('get_note_backlinks') ||
+      visible.has('get_note_graph_summary');
+
+    if (!canListCatalog) return '';
+
+    const lines = catalog.slice(0, maxEntries).map((entry) => {
+      const tags = entry.tags.length ? ` tags:${entry.tags.join(',')}` : '';
+      const ctx = entry.includeInContext ? ' [context]' : '';
+      return `- [${entry.id}] [[${entry.title}]] (${entry.folderPath}, ${entry.linkCount} links${tags})${ctx}`;
+    });
+
+    const discoverTools = ['recall_notes', 'search_notes'].filter((t) =>
+      !visibleToolNames?.length ? true : visible.has(t),
+    );
+    const suffix =
+      catalog.length > maxEntries && discoverTools.length
+        ? `\n... and ${catalog.length - maxEntries} more notes (use ${discoverTools.join(' or ')})`
+        : '';
+
+    const usageHint = buildNotesCatalogUsageHint(visible);
+
+    return (
+      '## Notes Catalog (' +
+      catalog.length +
+      ' notes)\n' +
+      (usageHint ? `${usageHint}\n\n` : '') +
+      lines.join('\n') +
+      suffix
+    );
+  } catch {
+    return '';
+  }
+}
+
+/**
  * Build a ## Notes Network context block from notes flagged includeInContext.
  * Returns an empty string when no such notes exist or if the DB is unavailable.
  */
@@ -930,7 +997,7 @@ export async function getNotesContext(maxTokens: number = 2000): Promise<string>
 
   if (!contextNotes.length) return '';
 
-  const parts: string[] = ['## Notes Network\n'];
+  const parts: string[] = ['## Pinned Notes (always in context)\n'];
   let tokenEstimate = 10;
 
   for (const note of contextNotes) {
@@ -954,6 +1021,31 @@ export async function getNotesContext(maxTokens: number = 2000): Promise<string>
   if (parts.length === 1) return '';
 
   return parts.join('');
+}
+
+/** Full notes network section for agent system prompts: catalog + pinned note bodies. */
+export async function buildNotesNetworkPrompt(
+  maxContextTokens: number = 2500,
+  projectRoot?: string,
+): Promise<string> {
+  let visibleTools: string[] | undefined;
+  if (projectRoot) {
+    const { getVisibleNoteToolNames } = await import('../notes/notes-settings');
+    visibleTools = getVisibleNoteToolNames(projectRoot);
+    if (!visibleTools.length) return '';
+  }
+
+  const includePinned =
+    !visibleTools?.length ||
+    visibleTools.includes('read_note') ||
+    visibleTools.includes('recall_notes');
+
+  const [catalog, pinned] = await Promise.all([
+    getNotesCatalogPrompt(150, visibleTools),
+    includePinned ? getNotesContext(maxContextTokens) : Promise.resolve(''),
+  ]);
+  if (!catalog && !pinned) return '';
+  return '\n\n# Knowledge Network\n\n' + [catalog, pinned].filter(Boolean).join('\n\n');
 }
 
 // ============================================================================

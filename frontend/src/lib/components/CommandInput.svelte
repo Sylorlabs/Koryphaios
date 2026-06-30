@@ -24,6 +24,7 @@
     value?: string;
     slashCommands?: Array<{ command: string; label: string; description: string }>;
     fileMentions?: string[];
+    onRefreshFileMentions?: (query?: string) => Promise<string[] | void>;
     /** When true, disables input because no project is open */
     disabled?: boolean;
     disabledMessage?: string;
@@ -40,6 +41,7 @@
     value = $bindable(''),
     slashCommands = [],
     fileMentions = [],
+    onRefreshFileMentions,
     disabled = false,
     disabledMessage = 'Open a project to start chatting',
     placeholder = 'Ask Koryphaios to inspect, explain, or change this project...',
@@ -52,7 +54,10 @@
   let selectedModel = $state<string>(_storedModel ?? '');
   let selectedPickerIndex = $state(0);
   let attachments = $state<Attachment[]>([]);
-  let fileInputRef = $state<HTMLInputElement>();
+  let referenceFileInputRef = $state<HTMLInputElement>();
+  let referenceFolderInputRef = $state<HTMLInputElement>();
+  let showReferenceMenu = $state(false);
+  let liveFileMentions = $state<string[]>([]);
 
   type ComposerPickerItem =
     | { type: 'command'; key: string; label: string; value: string; description: string }
@@ -147,15 +152,35 @@
   function getTriggerContext() {
     const caret = getCaretPosition();
     const beforeCaret = value.slice(0, caret);
-    const match = beforeCaret.match(/(?:^|\s)([/@])([^\s/]*)$/);
-    if (!match || match.index == null) return null;
-    const trigger = match[1] as '/' | '@';
-    const query = match[2] ?? '';
-    const start = match.index + (match[0].startsWith(' ') ? 1 : 0);
-    return { trigger, query, start, end: caret };
+
+    const atMatch = beforeCaret.match(/(?:^|\s)@([^\s]*)$/);
+    if (atMatch && atMatch.index != null) {
+      return {
+        trigger: '@' as const,
+        query: atMatch[1] ?? '',
+        start: atMatch.index + (atMatch[0].startsWith(' ') ? 1 : 0),
+        end: caret,
+      };
+    }
+
+    const slashMatch = beforeCaret.match(/(?:^|\s)\/([^\s]*)$/);
+    if (slashMatch && slashMatch.index != null) {
+      return {
+        trigger: '/' as const,
+        query: slashMatch[1] ?? '',
+        start: slashMatch.index + (slashMatch[0].startsWith(' ') ? 1 : 0),
+        end: caret,
+      };
+    }
+
+    return null;
   }
 
   let triggerContext = $derived(getTriggerContext());
+  let mentionPaths = $derived(
+    liveFileMentions.length > 0 ? liveFileMentions : fileMentions,
+  );
+
   let pickerItems = $derived.by<ComposerPickerItem[]>(() => {
     const ctx = triggerContext;
     if (!ctx) return [];
@@ -174,9 +199,9 @@
         }));
     }
 
-    return fileMentions
+    return mentionPaths
       .filter((path) => !query || path.toLowerCase().includes(query))
-      .slice(0, 8)
+      .slice(0, 20)
       .map((path) => ({
         type: 'file' as const,
         key: path,
@@ -185,7 +210,19 @@
         description: path,
       }));
   });
-  let pickerOpen = $derived(pickerItems.length > 0 && !!triggerContext);
+  let pickerOpen = $derived(!!triggerContext && (triggerContext.trigger === '@' || pickerItems.length > 0));
+
+  $effect(() => {
+    if (fileMentions.length > 0) liveFileMentions = fileMentions;
+  });
+
+  $effect(() => {
+    const ctx = triggerContext;
+    if (!ctx || ctx.trigger !== '@' || !onRefreshFileMentions) return;
+    void onRefreshFileMentions(ctx.query).then((paths) => {
+      if (Array.isArray(paths)) liveFileMentions = paths;
+    });
+  });
 
   $effect(() => {
     pickerItems;
@@ -230,7 +267,7 @@
 
   function handleKeydown(e: KeyboardEvent) {
     if (e.repeat) return; // ignore key repeat (e.g. holding Enter)
-    if (pickerOpen) {
+    if (pickerOpen && pickerItems.length > 0) {
       if (e.key === 'ArrowDown') {
         e.preventDefault();
         selectedPickerIndex = (selectedPickerIndex + 1) % pickerItems.length;
@@ -432,6 +469,7 @@
     const target = e.target as HTMLElement;
     if (!target.closest('.model-picker')) showModelPicker = false;
     if (!target.closest('.reasoning-picker')) showReasoningMenu = false;
+    if (!target.closest('.reference-picker')) showReferenceMenu = false;
   }
 
   let canSend = $derived(!disabled && !configurationWarning && (value.trim().length > 0 || attachments.length > 0));
@@ -475,23 +513,79 @@
     };
   });
 
-  async function handleFileInput(e: Event) {
+  function formatFileReference(path: string): string {
+    return path.includes(' ') ? `@"${path}"` : `@${path}`;
+  }
+
+  function insertFileReference(path: string): void {
+    const ref = formatFileReference(path);
+    const caret = getCaretPosition();
+    const before = value.slice(0, caret);
+    const after = value.slice(caret);
+    const needsSpace = before.length > 0 && !/\s$/.test(before);
+    value = before + (needsSpace ? ' ' : '') + ref + ' ' + after;
+    void focusComposer();
+    requestAnimationFrame(() => autoResize());
+  }
+
+  function handleReferenceFileInput(e: Event) {
     const target = e.target as HTMLInputElement;
-    if (!target.files) return;
+    if (!target.files?.length) return;
     for (const file of target.files) {
-      if (file.type.startsWith('image/')) {
-        const reader = new FileReader();
-        reader.onload = (e) => {
-          const result = e.target?.result as string;
-          if (result) {
-            const data = result.split(',')[1];
-            attachments = [...attachments, { type: 'image', data, name: file.name }];
-          }
-        };
-        reader.readAsDataURL(file);
-      }
+      const path =
+        (file as File & { webkitRelativePath?: string }).webkitRelativePath || file.name;
+      insertFileReference(path);
     }
     target.value = '';
+    showReferenceMenu = false;
+  }
+
+  function handleReferenceFolderInput(e: Event) {
+    const target = e.target as HTMLInputElement;
+    if (!target.files?.length) return;
+    const paths = new Set<string>();
+    for (const file of target.files) {
+      const rel = (file as File & { webkitRelativePath?: string }).webkitRelativePath;
+      if (rel) {
+        const folder = rel.includes('/') ? rel.split('/').slice(0, -1).join('/') : rel;
+        if (folder) paths.add(folder.endsWith('/') ? folder : `${folder}/`);
+      }
+    }
+    for (const path of paths) insertFileReference(path);
+    target.value = '';
+    showReferenceMenu = false;
+  }
+
+  async function pickReferenceFiles() {
+    showReferenceMenu = false;
+    const inTauri = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
+    if (inTauri) {
+      try {
+        const selected = await invoke<string[] | null>('select_files_dialog');
+        if (selected?.length) {
+          for (const path of selected) insertFileReference(path);
+        }
+        return;
+      } catch {
+        // Fall through to browser picker
+      }
+    }
+    referenceFileInputRef?.click();
+  }
+
+  async function pickReferenceFolder() {
+    showReferenceMenu = false;
+    const inTauri = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
+    if (inTauri) {
+      try {
+        const selected = await invoke<string | null>('select_folder_dialog');
+        if (selected) insertFileReference(selected.endsWith('/') ? selected : `${selected}/`);
+        return;
+      } catch {
+        // Fall through to browser picker
+      }
+    }
+    referenceFolderInputRef?.click();
   }
 
   function removeAttachment(index: number) {
@@ -709,30 +803,36 @@
             <div class="px-3 py-2 text-[11px] font-semibold uppercase tracking-[0.14em]" style="color: var(--color-text-muted); border-bottom: 1px solid var(--color-border);">
               {triggerContext?.trigger === '/' ? 'Commands' : 'Files'}
             </div>
-            <div class="py-1">
-              {#each pickerItems as item, index (item.key)}
-                <button
-                  type="button"
-                  class="flex w-full items-start justify-between gap-3 px-3 py-2 text-left transition-colors {index === selectedPickerIndex ? 'bg-[var(--color-surface-3)]' : 'hover:bg-[var(--color-surface-3)]'}"
-                  onclick={() => void applyPickerItem(item)}
-                >
-                  <div class="min-w-0">
-                    <div class="text-sm font-medium" style="color: var(--color-text-primary);">
-                      {item.type === 'command' ? `/${item.value}` : `@${item.label}`}
+            <div class="py-1 max-h-56 overflow-y-auto">
+              {#if pickerItems.length === 0}
+                <div class="px-3 py-2 text-xs" style="color: var(--color-text-muted);">
+                  {triggerContext?.trigger === '@' ? 'Loading project files…' : 'No matches'}
+                </div>
+              {:else}
+                {#each pickerItems as item, index (item.key)}
+                  <button
+                    type="button"
+                    class="flex w-full items-start justify-between gap-3 px-3 py-2 text-left transition-colors {index === selectedPickerIndex ? 'bg-[var(--color-surface-3)]' : 'hover:bg-[var(--color-surface-3)]'}"
+                    onclick={() => void applyPickerItem(item)}
+                  >
+                    <div class="min-w-0">
+                      <div class="text-sm font-medium" style="color: var(--color-text-primary);">
+                        {item.type === 'command' ? `/${item.value}` : `@${item.label}`}
+                      </div>
+                      <div class="truncate text-xs" style="color: var(--color-text-muted);">
+                        {item.description}
+                      </div>
                     </div>
-                    <div class="truncate text-xs" style="color: var(--color-text-muted);">
-                      {item.description}
+                    <div class="shrink-0 text-[10px] uppercase tracking-[0.12em]" style="color: var(--color-text-muted);">
+                      {item.type}
                     </div>
-                  </div>
-                  <div class="shrink-0 text-[10px] uppercase tracking-[0.12em]" style="color: var(--color-text-muted);">
-                    {item.type}
-                  </div>
-                </button>
-              {/each}
+                  </button>
+                {/each}
+              {/if}
             </div>
           </div>
         {/if}
-        
+
         <!-- Attachments Preview -->
         {#if attachments.length > 0}
           <div class="mb-3 flex flex-wrap gap-2">
@@ -752,20 +852,84 @@
             {/each}
           </div>
         {/if}
-        
-        <textarea
-          bind:this={inputRef}
-          bind:value={value}
-          oninput={autoResize}
-          onkeydown={handleKeydown}
-          onpaste={handlePaste}
-          placeholder={disabled ? disabledMessage : placeholder}
-          rows="1"
-          class="input flex-1"
-          class:yolo-active={wsStore.isYoloMode}
-          disabled={disabled || !!configurationWarning}
-          style="resize: none; min-height: {minHeightPx}px; max-height: 280px; font-size: 15px; line-height: 1.6; box-sizing: border-box; padding: 10px 12px; background: transparent; border: none; box-shadow: none; {disabled || configurationWarning ? 'opacity: 0.6; cursor: not-allowed;' : ''}"
-        ></textarea>
+
+        <div class="relative">
+          <textarea
+            bind:this={inputRef}
+            bind:value={value}
+            oninput={autoResize}
+            onkeydown={handleKeydown}
+            onpaste={handlePaste}
+            placeholder={disabled ? disabledMessage : placeholder}
+            rows="1"
+            class="input w-full"
+            class:yolo-active={wsStore.isYoloMode}
+            disabled={disabled || !!configurationWarning}
+            style="resize: none; min-height: {minHeightPx}px; max-height: 280px; font-size: 15px; line-height: 1.6; box-sizing: border-box; padding: 10px 88px 10px 12px; background: transparent; border: none; box-shadow: none; {disabled || configurationWarning ? 'opacity: 0.6; cursor: not-allowed;' : ''}"
+          ></textarea>
+          <div class="absolute bottom-1.5 right-1 flex items-center gap-0.5 reference-picker">
+            <input
+              type="file"
+              multiple
+              class="hidden"
+              bind:this={referenceFileInputRef}
+              onchange={handleReferenceFileInput}
+            />
+            <input
+              type="file"
+              multiple
+              class="hidden"
+              bind:this={referenceFolderInputRef}
+              onchange={handleReferenceFolderInput}
+              webkitdirectory
+            />
+            <div class="relative">
+              <button
+                type="button"
+                class="flex items-center justify-center w-8 h-8 rounded-lg transition-colors hover:bg-[var(--color-surface-3)] disabled:opacity-40 disabled:cursor-not-allowed"
+                style="color: var(--color-text-muted);"
+                onclick={() => (showReferenceMenu = !showReferenceMenu)}
+                disabled={disabled || !!configurationWarning}
+                title="Reference a file or folder"
+              >
+                <Paperclip size={16} />
+              </button>
+              {#if showReferenceMenu}
+                <div
+                  class="absolute bottom-full right-0 mb-1 w-40 rounded-lg border shadow-xl z-50 overflow-hidden"
+                  style="background: var(--color-surface-2); border-color: var(--color-border);"
+                >
+                  <button
+                    type="button"
+                    class="w-full text-left px-3 py-2 text-xs hover:bg-[var(--color-surface-3)]"
+                    style="color: var(--color-text-primary);"
+                    onclick={() => void pickReferenceFiles()}
+                  >
+                    Pick file…
+                  </button>
+                  <button
+                    type="button"
+                    class="w-full text-left px-3 py-2 text-xs hover:bg-[var(--color-surface-3)]"
+                    style="color: var(--color-text-primary);"
+                    onclick={() => void pickReferenceFolder()}
+                  >
+                    Pick folder…
+                  </button>
+                </div>
+              {/if}
+            </div>
+            <button
+              type="button"
+              class="flex items-center justify-center w-8 h-8 rounded-lg transition-colors hover:bg-[var(--color-surface-3)] disabled:opacity-40 disabled:cursor-not-allowed"
+              style="color: var(--color-text-muted);"
+              onclick={() => pasteImageFromClipboard()}
+              disabled={disabled || !!configurationWarning}
+              title="Paste image from clipboard (Ctrl+Shift+V)"
+            >
+              <Clipboard size={16} />
+            </button>
+          </div>
+        </div>
       </div>
       <div class="w-full xl:w-auto xl:self-start">
         <div
@@ -803,14 +967,6 @@
             </button>
           </div>
 
-          <input
-            type="file"
-            multiple
-            accept="image/*"
-            class="hidden"
-            bind:this={fileInputRef}
-            onchange={handleFileInput}
-          />
           <button
             type="button"
             onclick={isRunning ? stop : send}
@@ -843,27 +999,9 @@
         Enter to send · Shift+Enter for new line · Ctrl+V paste text · Ctrl+Shift+V paste image
       {/if}
     </span>
-    <div class="flex items-center gap-3">
-      <button
-        type="button"
-        class="text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] transition-colors"
-        onclick={() => fileInputRef?.click()}
-        title="Attach Image"
-      >
-        <Paperclip size={16} />
-      </button>
-      <button
-        type="button"
-        class="text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] transition-colors"
-        onclick={() => pasteImageFromClipboard()}
-        title="Paste Image (Ctrl+Shift+V)"
-      >
-        <Clipboard size={16} />
-      </button>
-      {#if value.length > 0}
-        <span class="text-xs" style="color: var(--color-text-muted);">{value.length} chars</span>
-      {/if}
-    </div>
+    {#if value.length > 0}
+      <span class="text-xs" style="color: var(--color-text-muted);">{value.length} chars</span>
+    {/if}
   </div>
 </div>
 

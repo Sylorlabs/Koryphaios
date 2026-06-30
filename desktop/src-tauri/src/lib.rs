@@ -235,6 +235,18 @@ async fn select_folder_dialog(app: tauri::AppHandle) -> Result<Option<String>, S
     Ok(result.map(|p| p.to_string()))
 }
 
+// Pick one or more files to reference in the composer (@path)
+#[tauri::command]
+async fn select_files_dialog(app: tauri::AppHandle) -> Result<Option<Vec<String>>, String> {
+    let result = app
+        .dialog()
+        .file()
+        .set_title("Select files to reference")
+        .blocking_pick_files();
+
+    Ok(result.map(|paths| paths.into_iter().map(|p| p.to_string()).collect()))
+}
+
 // Create a new project folder at the specified path
 #[tauri::command]
 fn create_project_folder(parent_path: String, project_name: String) -> Result<String, String> {
@@ -841,6 +853,7 @@ pub fn run() {
             toggle_maximize,
             close_window_cmd,
             select_folder_dialog,
+            select_files_dialog,
             create_project_folder,
             read_folder_contents,
             indexer::search_codebase,

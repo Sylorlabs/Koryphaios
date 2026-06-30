@@ -33,6 +33,7 @@ import { toastStore } from './toast.svelte';
 import { providersStore, loadProvidersFromApi } from './providers.svelte';
 import { feedStore } from './feed.svelte';
 import { agentStore } from './agents.svelte';
+import { notesStore } from './notes.svelte';
 
 export type { FeedEntry };
 export { feedStore } from './feed.svelte';
@@ -465,6 +466,17 @@ function handleMessage(msg: WSMessage) {
         ? (p as ProviderStatusPayload).providers
         : [];
       providersStore.setProviderStatusList(newList);
+      break;
+    }
+
+    case 'notes.updated': {
+      const p = msg.payload as { action?: string; noteId?: string };
+      void notesStore.fetchNotes();
+      void notesStore.fetchGraph();
+      void notesStore.fetchFolderTree();
+      if (p.noteId && notesStore.currentNote?.id === p.noteId) {
+        void notesStore.fetchNote(p.noteId);
+      }
       break;
     }
 

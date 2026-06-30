@@ -69,6 +69,19 @@ export const DEFAULT_PERMISSION_MATRIX: PermissionMatrix = {
     ls: { tool: 'ls', level: 'auto' },
     web_search: { tool: 'web_search', level: 'auto' },
 
+    // Notes network — reads auto, writes ask
+    read_note: { tool: 'read_note', level: 'auto' },
+    search_notes: { tool: 'search_notes', level: 'auto' },
+    list_notes: { tool: 'list_notes', level: 'auto' },
+    recall_notes: { tool: 'recall_notes', level: 'auto' },
+    get_note_backlinks: { tool: 'get_note_backlinks', level: 'auto' },
+    get_note_graph_summary: { tool: 'get_note_graph_summary', level: 'auto' },
+    create_note: { tool: 'create_note', level: 'ask' },
+    update_note: { tool: 'update_note', level: 'ask' },
+    delete_note: { tool: 'delete_note', level: 'ask' },
+    link_notes: { tool: 'link_notes', level: 'ask' },
+    unlink_notes: { tool: 'unlink_notes', level: 'ask' },
+
     // Write operations - depends
     write_file: {
       tool: 'write_file',

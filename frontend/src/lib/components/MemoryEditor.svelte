@@ -1,6 +1,7 @@
 <script lang="ts">
   import { memoryStore, type MemoryFile, DEFAULT_SETTINGS } from "$lib/stores/memory.svelte";
   import { sessionStore } from "$lib/stores/sessions.svelte";
+  import SettingsToggle from "$lib/components/SettingsToggle.svelte";
   import { 
     Brain, 
     FileText, 
@@ -490,7 +491,7 @@
               </div>
 
               <div class="grid gap-3 sm:grid-cols-2">
-                <label class="flex h-full cursor-pointer items-start justify-between gap-4 rounded-xl bg-[var(--color-surface-2)] p-4 hover:bg-[var(--color-surface-3)]">
+                <label class="flex h-full cursor-pointer items-center justify-between gap-4 rounded-xl bg-[var(--color-surface-2)] p-4 hover:bg-[var(--color-surface-3)]">
                   <div class="flex items-start gap-3">
                     <Brain size={18} class="mt-0.5 text-purple-400" />
                     <div>
@@ -498,15 +499,13 @@
                       <div class="mt-1 text-xs text-[var(--color-text-muted)]">Global across all projects in `~/.koryphaios/`.</div>
                     </div>
                   </div>
-                  <input
-                    type="checkbox"
+                  <SettingsToggle
                     checked={memoryStore.settings?.universalMemoryEnabled ?? true}
                     onchange={() => toggleSetting("universalMemoryEnabled")}
-                    class="mt-1 h-4 w-4 rounded border-[var(--color-border)] bg-[var(--color-surface-0)] text-[var(--color-accent)] focus:ring-[var(--color-accent)]"
                   />
                 </label>
 
-                <label class="flex h-full cursor-pointer items-start justify-between gap-4 rounded-xl bg-[var(--color-surface-2)] p-4 hover:bg-[var(--color-surface-3)]">
+                <label class="flex h-full cursor-pointer items-center justify-between gap-4 rounded-xl bg-[var(--color-surface-2)] p-4 hover:bg-[var(--color-surface-3)]">
                   <div class="flex items-start gap-3">
                     <FileText size={18} class="mt-0.5 text-blue-400" />
                     <div>
@@ -514,15 +513,13 @@
                       <div class="mt-1 text-xs text-[var(--color-text-muted)]">Project-specific context in `.koryphaios/project-memory/`.</div>
                     </div>
                   </div>
-                  <input
-                    type="checkbox"
+                  <SettingsToggle
                     checked={memoryStore.settings?.projectMemoryEnabled ?? true}
                     onchange={() => toggleSetting("projectMemoryEnabled")}
-                    class="mt-1 h-4 w-4 rounded border-[var(--color-border)] bg-[var(--color-surface-0)] text-[var(--color-accent)] focus:ring-[var(--color-accent)]"
                   />
                 </label>
 
-                <label class="flex h-full cursor-pointer items-start justify-between gap-4 rounded-xl bg-[var(--color-surface-2)] p-4 hover:bg-[var(--color-surface-3)]">
+                <label class="flex h-full cursor-pointer items-center justify-between gap-4 rounded-xl bg-[var(--color-surface-2)] p-4 hover:bg-[var(--color-surface-3)]">
                   <div class="flex items-start gap-3">
                     <MessageSquare size={18} class="mt-0.5 text-green-400" />
                     <div>
@@ -530,15 +527,13 @@
                       <div class="mt-1 text-xs text-[var(--color-text-muted)]">Persistent storage scoped to the active chat.</div>
                     </div>
                   </div>
-                  <input
-                    type="checkbox"
+                  <SettingsToggle
                     checked={memoryStore.settings?.sessionMemoryEnabled ?? true}
                     onchange={() => toggleSetting("sessionMemoryEnabled")}
-                    class="mt-1 h-4 w-4 rounded border-[var(--color-border)] bg-[var(--color-surface-0)] text-[var(--color-accent)] focus:ring-[var(--color-accent)]"
                   />
                 </label>
 
-                <label class="flex h-full cursor-pointer items-start justify-between gap-4 rounded-xl bg-[var(--color-surface-2)] p-4 hover:bg-[var(--color-surface-3)]">
+                <label class="flex h-full cursor-pointer items-center justify-between gap-4 rounded-xl bg-[var(--color-surface-2)] p-4 hover:bg-[var(--color-surface-3)]">
                   <div class="flex items-start gap-3">
                     <BookOpen size={18} class="mt-0.5 text-orange-400" />
                     <div>
@@ -546,11 +541,9 @@
                       <div class="mt-1 text-xs text-[var(--color-text-muted)]">Behavior rules and conventions added to context.</div>
                     </div>
                   </div>
-                  <input
-                    type="checkbox"
+                  <SettingsToggle
                     checked={memoryStore.settings?.rulesEnabled ?? true}
                     onchange={() => toggleSetting("rulesEnabled")}
-                    class="mt-1 h-4 w-4 rounded border-[var(--color-border)] bg-[var(--color-surface-0)] text-[var(--color-accent)] focus:ring-[var(--color-accent)]"
                   />
                 </label>
               </div>
@@ -565,29 +558,25 @@
               </div>
 
               <div class="grid gap-3 sm:grid-cols-2">
-                <label class="flex h-full cursor-pointer items-start justify-between gap-4 rounded-xl bg-[var(--color-surface-2)] p-4 hover:bg-[var(--color-surface-3)]">
+                <label class="flex h-full cursor-pointer items-center justify-between gap-4 rounded-xl bg-[var(--color-surface-2)] p-4 hover:bg-[var(--color-surface-3)]">
                   <div>
                     <div class="text-sm font-medium text-[var(--color-text-primary)]">Allow Agent to Add Memories</div>
                     <div class="mt-1 text-xs text-[var(--color-text-muted)]">AI can automatically update memory files during compaction.</div>
                   </div>
-                  <input
-                    type="checkbox"
+                  <SettingsToggle
                     checked={memoryStore.settings?.agentMemoryEnabled ?? true}
                     onchange={() => toggleSetting("agentMemoryEnabled")}
-                    class="mt-1 h-4 w-4 rounded border-[var(--color-border)] bg-[var(--color-surface-0)] text-[var(--color-accent)] focus:ring-[var(--color-accent)]"
                   />
                 </label>
 
-                <label class="flex h-full cursor-pointer items-start justify-between gap-4 rounded-xl bg-[var(--color-surface-2)] p-4 hover:bg-[var(--color-surface-3)]">
+                <label class="flex h-full cursor-pointer items-center justify-between gap-4 rounded-xl bg-[var(--color-surface-2)] p-4 hover:bg-[var(--color-surface-3)]">
                   <div>
                     <div class="text-sm font-medium text-[var(--color-text-primary)]">Auto-include in Context</div>
                     <div class="mt-1 text-xs text-[var(--color-text-muted)]">Automatically add selected memories to the AI context window.</div>
                   </div>
-                  <input
-                    type="checkbox"
+                  <SettingsToggle
                     checked={memoryStore.settings?.autoIncludeInContext ?? true}
                     onchange={() => toggleSetting("autoIncludeInContext")}
-                    class="mt-1 h-4 w-4 rounded border-[var(--color-border)] bg-[var(--color-surface-0)] text-[var(--color-accent)] focus:ring-[var(--color-accent)]"
                   />
                 </label>
               </div>

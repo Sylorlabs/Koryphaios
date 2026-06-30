@@ -60,6 +60,7 @@
   let recentProjects = $state<RecentProject[]>([]);
   let composerDraft = $state('');
   let currentProjectContent = $state('');
+  let composerProjectFiles = $state<string[]>([]);
 
   const agentRail = useAgentRail();
 
@@ -90,6 +91,9 @@
       if (authStore.isAuthenticated) {
         modeStore.fetchMode();
         wsStore.connect();
+      }
+      if (appStore.projectName) {
+        void refreshComposerFileMentions();
       }
     });
     recentProjects = parseRecentProjects();
@@ -281,6 +285,27 @@ RULES:
   function loadSuggestionIntoComposer(prompt: string) {
     composerDraft = prompt;
     inputRef?.focus();
+  }
+
+  async function refreshComposerFileMentions(query = ''): Promise<string[]> {
+    const fromContent = extractProjectFiles(currentProjectContent);
+    try {
+      const qs = query.trim() ? `?q=${encodeURIComponent(query.trim())}` : '';
+      const res = await apiFetch(apiUrl(`/api/workspace/files${qs}`));
+      if (res.ok) {
+        const data = await res.json();
+        if (data.ok && Array.isArray(data.data)) {
+          composerProjectFiles = [...new Set([...fromContent, ...data.data])].sort((a, b) =>
+            a.localeCompare(b),
+          );
+          return composerProjectFiles;
+        }
+      }
+    } catch {
+      // Workspace listing unavailable — use imported project content only
+    }
+    composerProjectFiles = fromContent;
+    return composerProjectFiles;
   }
 
   function extractProjectFiles(content: string): string[] {
@@ -476,6 +501,7 @@ RULES:
       path: options?.path,
     });
     currentProjectContent = text;
+    void refreshComposerFileMentions();
     inputRef?.focus();
   }
 
@@ -716,7 +742,11 @@ RULES:
   let activeAgents = $derived([...wsStore.agents.values()].filter(a =>
     a.sessionId === sessionStore.activeSessionId && a.status !== 'done' && a.status !== 'idle'
   ));
-  let composerFileMentions = $derived(extractProjectFiles(currentProjectContent));
+  let composerFileMentions = $derived(
+    composerProjectFiles.length > 0
+      ? composerProjectFiles
+      : extractProjectFiles(currentProjectContent),
+  );
   let connectedProviders = $derived(wsStore.providers.filter(p => p.authenticated).length);
   let connectionDot = $derived(
     wsStore.status === 'connected' ? 'bg-emerald-500' :
@@ -898,6 +928,7 @@ RULES:
       onOpenSettings={() => showSettings = true}
       slashCommands={composerSlashCommands}
       fileMentions={composerFileMentions}
+      onRefreshFileMentions={refreshComposerFileMentions}
       disabled={!appStore.projectName}
       disabledMessage="Open a project to start chatting with agents"
       placeholder={agentRail.inputPlaceholder}

@@ -116,6 +116,9 @@ export async function getNoteByTitle(title: string): Promise<Note | null> {
 }
 
 export async function updateNote(id: string, input: UpdateNoteInput): Promise<Note> {
+  const existing = await getNote(id);
+  if (!existing) throw new Error('Note not found');
+
   const now = new Date();
   const updateData: Partial<typeof notes.$inferInsert> = { updatedAt: now };
 
@@ -128,8 +131,13 @@ export async function updateNote(id: string, input: UpdateNoteInput): Promise<No
 
   await db.update(notes).set(updateData).where(eq(notes.id, id));
 
-  if (input.content !== undefined) {
-    await parseAndSaveLinks(id, input.content);
+  if (input.title !== undefined && input.title !== existing.title) {
+    await propagateTitleRename(existing.title, input.title);
+  }
+
+  const contentForLinks = input.content ?? (input.title !== undefined ? (await getNote(id))?.content : undefined);
+  if (contentForLinks !== undefined) {
+    await parseAndSaveLinks(id, contentForLinks);
   }
 
   return (await getNote(id))!;
@@ -207,6 +215,182 @@ export async function getNoteOutlinks(id: string): Promise<Note[]> {
   const ids = links.map((l) => l.toNoteId);
   const rows = await db.select().from(notes).where(inArray(notes.id, ids));
   return rows.map(rowToNote);
+}
+
+/** Resolve a note ID from id or title lookup. */
+export async function resolveNoteId(id?: string, title?: string): Promise<string | null> {
+  if (id) {
+    const note = await getNote(id);
+    return note?.id ?? null;
+  }
+  if (title) {
+    const note = await getNoteByTitle(title);
+    return note?.id ?? null;
+  }
+  return null;
+}
+
+/**
+ * Create an explicit graph edge between two notes.
+ * Optionally appends a [[wikilink]] to the source note content.
+ */
+export async function linkNotes(
+  fromId: string,
+  toId: string,
+  options?: { syncContent?: boolean },
+): Promise<void> {
+  if (fromId === toId) return;
+
+  const [fromNote, toNote] = await Promise.all([getNote(fromId), getNote(toId)]);
+  if (!fromNote || !toNote) throw new Error('Note not found');
+
+  try {
+    await db.insert(noteLinks).values({ fromNoteId: fromId, toNoteId: toId });
+  } catch {
+    // Already linked
+  }
+
+  if (options?.syncContent !== false) {
+    const linkPattern = new RegExp(
+      `!?\\[\\[${escapeRegExp(toNote.title)}(?:[|#][^\\]]+?)?\\]\\]`,
+    );
+    if (!linkPattern.test(fromNote.content)) {
+      const suffix = fromNote.content.endsWith('\n') || !fromNote.content ? '' : '\n';
+      await updateNote(fromId, {
+        content: fromNote.content + suffix + `[[${toNote.title}]]`,
+      });
+    }
+  }
+}
+
+/**
+ * Remove a directed edge between two notes.
+ * Optionally strips the matching [[wikilink]] from source content.
+ */
+export async function unlinkNotes(
+  fromId: string,
+  toId: string,
+  options?: { syncContent?: boolean },
+): Promise<void> {
+  const [fromNote, toNote] = await Promise.all([getNote(fromId), getNote(toId)]);
+  if (!fromNote || !toNote) throw new Error('Note not found');
+
+  await db
+    .delete(noteLinks)
+    .where(and(eq(noteLinks.fromNoteId, fromId), eq(noteLinks.toNoteId, toId)));
+
+  if (options?.syncContent !== false) {
+    const linkPattern = new RegExp(
+      `!?\\[\\[${escapeRegExp(toNote.title)}(?:[|#][^\\]]+?)?\\]\\]\\n?`,
+      'g',
+    );
+    const stripped = fromNote.content.replace(linkPattern, '').trimEnd();
+    if (stripped !== fromNote.content) {
+      await updateNote(fromId, { content: stripped });
+    }
+  }
+}
+
+/** Update [[wikilinks]] across the vault when a note is renamed. */
+async function propagateTitleRename(oldTitle: string, newTitle: string): Promise<void> {
+  const allNotes = await db.select().from(notes);
+  const pattern = new RegExp(
+    `(!?)\\[\\[${escapeRegExp(oldTitle)}((?:[|#][^\\]]+?)?)\\]\\]`,
+    'g',
+  );
+
+  for (const row of allNotes) {
+    if (!pattern.test(row.content)) continue;
+    pattern.lastIndex = 0;
+    const updated = row.content.replace(pattern, `$1[[${newTitle}$2]]`);
+    await db
+      .update(notes)
+      .set({ content: updated, updatedAt: new Date() })
+      .where(eq(notes.id, row.id));
+    await parseAndSaveLinks(row.id, updated);
+  }
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+export interface NoteCatalogEntry {
+  id: string;
+  title: string;
+  folderPath: string;
+  tags: string[];
+  linkCount: number;
+  includeInContext: boolean;
+  updatedAt: Date;
+}
+
+/** Compact index of every note for agent discovery and recall. */
+export async function getNotesCatalog(): Promise<NoteCatalogEntry[]> {
+  const graph = await getGraphData();
+  const linkCountById = new Map(graph.nodes.map((n) => [n.id, n.linkCount]));
+  const rows = await db.select().from(notes).orderBy(notes.updatedAt);
+  return rows.map((row) => {
+    const note = rowToNote(row);
+    return {
+      id: note.id,
+      title: note.title,
+      folderPath: note.folderPath,
+      tags: note.tags,
+      linkCount: linkCountById.get(note.id) ?? 0,
+      includeInContext: note.includeInContext,
+      updatedAt: note.updatedAt,
+    };
+  });
+}
+
+export interface RecallNotesOptions {
+  query?: string;
+  ids?: string[];
+  titles?: string[];
+  limit?: number;
+}
+
+/** Recall full note content by search query, IDs, or titles. */
+export async function recallNotes(options: RecallNotesOptions): Promise<NoteWithLinks[]> {
+  const limit = options.limit ?? 10;
+  const found = new Map<string, Note>();
+
+  if (options.ids?.length) {
+    for (const id of options.ids) {
+      const note = await getNote(id);
+      if (note) found.set(note.id, note);
+    }
+  }
+
+  if (options.titles?.length) {
+    for (const title of options.titles) {
+      const note = await getNoteByTitle(title);
+      if (note) found.set(note.id, note);
+    }
+  }
+
+  if (options.query?.trim()) {
+    const searched = await searchNotes(options.query);
+    for (const note of searched) {
+      found.set(note.id, note);
+    }
+  }
+
+  if (!options.query && !options.ids?.length && !options.titles?.length) {
+    const all = await listNotes();
+    for (const note of all.slice(0, limit)) {
+      found.set(note.id, note);
+    }
+  }
+
+  const results: NoteWithLinks[] = [];
+  for (const note of found.values()) {
+    if (results.length >= limit) break;
+    const withLinks = await getNoteWithLinks(note.id);
+    if (withLinks) results.push(withLinks);
+  }
+  return results;
 }
 
 /**

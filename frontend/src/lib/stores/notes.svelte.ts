@@ -17,8 +17,18 @@ import type {
   FolderNode,
   NoteAttachment,
   NotesSettings,
+  NotesAgentPermissions,
+  NoteToolName,
+  NotePermissionLevel,
+  NotesPermissionPreset,
 } from '@koryphaios/shared';
-import { DEFAULT_NOTES_SETTINGS } from '@koryphaios/shared';
+import {
+  DEFAULT_NOTES_SETTINGS,
+  DEFAULT_NOTES_AGENT_PERMISSIONS,
+  applyNotesPermissionPreset,
+  detectNotesPermissionPreset,
+  normalizeNotesAgentPermissions,
+} from '@koryphaios/shared';
 import { apiUrl } from '$lib/utils/api-url';
 import { toastStore } from './toast.svelte';
 import { apiFetch } from '$lib/api.svelte';
@@ -43,6 +53,9 @@ let _isSaving = $state(false);
 let _searchQuery = $state('');
 let _selectedFolder = $state('/');
 let _settings = $state<NotesSettings>(loadSettingsFromStorage());
+let _agentPermissions = $state<NotesAgentPermissions>({ ...DEFAULT_NOTES_AGENT_PERMISSIONS });
+let _agentPermissionsLoaded = $state(false);
+let _agentPermissionsSaving = $state(false);
 
 // ============================================================================
 // Helpers
@@ -395,6 +408,93 @@ async function importMemoryAsNotes(): Promise<void> {
   }
 }
 
+/** Fetch agent note-tool permissions from backend */
+async function fetchAgentPermissions(): Promise<void> {
+  try {
+    const res = await apiFetch(apiUrl('/api/notes/settings/agent-permissions'));
+    if (res.ok) {
+      const data = await res.json();
+      if (data.ok && data.data) {
+        _agentPermissions = normalizeNotesAgentPermissions(data.data as NotesAgentPermissions);
+        _agentPermissionsLoaded = true;
+      }
+    }
+  } catch (err) {
+    console.error('[notesStore] fetchAgentPermissions error:', err);
+  }
+}
+
+/** Apply a permission preset and persist */
+async function applyAgentPermissionPreset(
+  preset: Exclude<NotesPermissionPreset, 'custom'>,
+): Promise<void> {
+  const next = applyNotesPermissionPreset(preset);
+  _agentPermissions = next;
+  await saveAgentPermissions(next);
+}
+
+/** Update a single tool permission */
+async function setAgentToolPermission(
+  tool: NoteToolName,
+  level: NotePermissionLevel,
+): Promise<void> {
+  const tools = { ..._agentPermissions.tools, [tool]: level };
+  const next: NotesAgentPermissions = {
+    preset: detectNotesPermissionPreset(tools),
+    tools,
+  };
+  _agentPermissions = next;
+  await saveAgentPermissions(next);
+}
+
+/** Persist agent permissions to backend */
+async function saveAgentPermissions(permissions: NotesAgentPermissions): Promise<boolean> {
+  _agentPermissionsSaving = true;
+  try {
+    const res = await apiFetch(apiUrl('/api/notes/settings/agent-permissions'), {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(permissions),
+    });
+    if (res.ok) {
+      const data = await res.json();
+      if (data.ok && data.data) {
+        _agentPermissions = normalizeNotesAgentPermissions(data.data as NotesAgentPermissions);
+        return true;
+      }
+    }
+    toastStore.error('Failed to save note permissions');
+    return false;
+  } catch (err) {
+    console.error('[notesStore] saveAgentPermissions error:', err);
+    toastStore.error('Failed to save note permissions');
+    return false;
+  } finally {
+    _agentPermissionsSaving = false;
+  }
+}
+
+/** Reset agent permissions to defaults */
+async function resetAgentPermissions(): Promise<void> {
+  try {
+    const res = await apiFetch(apiUrl('/api/notes/settings/agent-permissions/reset'), {
+      method: 'POST',
+    });
+    if (res.ok) {
+      const data = await res.json();
+      if (data.ok && data.data) {
+        _agentPermissions = normalizeNotesAgentPermissions(data.data as NotesAgentPermissions);
+        toastStore.success('Note permissions reset');
+      }
+    } else {
+      toastStore.error('Failed to reset note permissions');
+    }
+  } catch (err) {
+    console.error('[notesStore] resetAgentPermissions error:', err);
+    toastStore.error('Failed to reset note permissions');
+  }
+}
+
 /** Update settings and persist to localStorage */
 function updateSettings(patch: Partial<NotesSettings>): void {
   _settings = {
@@ -458,6 +558,15 @@ export const notesStore = {
   get settings() {
     return _settings;
   },
+  get agentPermissions() {
+    return _agentPermissions;
+  },
+  get agentPermissionsLoaded() {
+    return _agentPermissionsLoaded;
+  },
+  get agentPermissionsSaving() {
+    return _agentPermissionsSaving;
+  },
 
   // Setters
   set currentNote(note: NoteWithLinks | null) {
@@ -478,6 +587,10 @@ export const notesStore = {
   deleteAttachment,
   importMemoryAsNotes,
   updateSettings,
+  fetchAgentPermissions,
+  applyAgentPermissionPreset,
+  setAgentToolPermission,
+  resetAgentPermissions,
   clearCurrentNote,
   setSearchQuery,
   selectFolder,

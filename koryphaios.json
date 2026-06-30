@@ -34,7 +34,7 @@
     "multiSourceResearch": true,
     "updatedAt": 1782797742979
   },
-  "updatedAt": 1782797742979,
+  "updatedAt": 1782802792832,
   "providers": {
     "anthropic": {
       "name": "anthropic",
@@ -340,6 +340,22 @@
       "selectedModels": [],
       "hideModelSelector": false,
       "disabled": true
+    }
+  },
+  "notesAgentPermissions": {
+    "preset": "default",
+    "tools": {
+      "read_note": "auto",
+      "search_notes": "auto",
+      "list_notes": "auto",
+      "recall_notes": "auto",
+      "get_note_backlinks": "auto",
+      "get_note_graph_summary": "auto",
+      "create_note": "ask",
+      "update_note": "ask",
+      "delete_note": "ask",
+      "link_notes": "ask",
+      "unlink_notes": "ask"
     }
   }
 }

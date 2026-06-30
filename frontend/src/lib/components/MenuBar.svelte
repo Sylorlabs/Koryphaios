@@ -283,16 +283,6 @@
 
     <!-- Right: Controls -->
     <div class="flex items-center gap-1.5">
-      <button
-        type="button"
-        class="px-3 py-2 text-xs font-medium rounded-lg transition-colors hover:bg-[var(--color-surface-2)]"
-        style="color: var(--color-text-secondary);"
-        onclick={() => action('toggle_sidebar')}
-        title={showSidebar ? 'Hide sidebar' : 'Show sidebar'}
-        data-tauri-drag-region="false"
-      >
-        {showSidebar ? 'Sidebar on' : 'Sidebar off'}
-      </button>
       {#if modeStore.showGitPanel}
         <button
           type="button"
