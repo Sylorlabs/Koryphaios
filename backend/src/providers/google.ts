@@ -179,11 +179,35 @@ export class GoogleProvider implements Provider {
     }
 
     try {
-      const response = await client.models.generateContentStream({
-        model: apiModel,
-        contents,
-        config: generationConfig,
-      });
+      let response: Awaited<ReturnType<typeof client.models.generateContentStream>>;
+      try {
+        response = await client.models.generateContentStream({
+          model: apiModel,
+          contents,
+          config: generationConfig,
+        });
+      } catch (err) {
+        // Gemini-compatible custom endpoints may reject inlineData images.
+        // Degrade gracefully: swap them for a text note and retry once.
+        const hasImages = contents.some((m) => m.parts.some((p: any) => p.inlineData));
+        const msg = err instanceof Error ? err.message : String(err);
+        if (hasImages && /image|vision|multimodal|inline_?data/i.test(msg)) {
+          for (const m of contents) {
+            m.parts = m.parts.map((p: any) =>
+              p.inlineData
+                ? { text: '[image attachment omitted — the selected model does not support image input]' }
+                : p,
+            );
+          }
+          response = await client.models.generateContentStream({
+            model: apiModel,
+            contents,
+            config: generationConfig,
+          });
+        } else {
+          throw err;
+        }
+      }
 
       for await (const chunk of response) {
         const candidate = chunk.candidates?.[0];
