@@ -328,6 +328,8 @@ export class CodexProvider implements Provider {
       fallback.find((model) => model.id === id || model.apiModelId === id) ?? resolveModel(id);
     const reasoningLevels = Array.isArray(item.supported_reasoning_levels)
       ? item.supported_reasoning_levels
+          .map((level) => (typeof level === 'string' ? level : level?.effort))
+          .filter((level): level is string => !!level)
       : [];
     const modalities = Array.isArray(item.input_modalities) ? item.input_modalities : [];
     const speedTiers = Array.isArray(item.additional_speed_tiers)
@@ -347,6 +349,7 @@ export class CodexProvider implements Provider {
       costPerMInputTokens: existing?.costPerMInputTokens ?? 0,
       costPerMOutputTokens: existing?.costPerMOutputTokens ?? 0,
       canReason: reasoningLevels.length > 0 || existing?.canReason === true,
+      reasoningLevels: reasoningLevels.length > 0 ? reasoningLevels : existing?.reasoningLevels,
       supportsAttachments: modalities.includes('image') || existing?.supportsAttachments === true,
       supportsStreaming: existing?.supportsStreaming ?? true,
       tier:
@@ -389,6 +392,10 @@ export class CodexProvider implements Provider {
    * a "session expired" error.
    */
   private async fetchWith401Recovery(request: StreamRequest): Promise<Response | Error> {
+    const allowedReasoningLevels = this.listModels().find(
+      (m) => m.id === request.model || m.apiModelId === request.model,
+    )?.reasoningLevels;
+
     const attempt = async (): Promise<Response | Error> => {
       try {
         return await withRetry(
@@ -399,7 +406,7 @@ export class CodexProvider implements Provider {
                 Accept: 'text/event-stream',
                 'Content-Type': 'application/json',
               }),
-              body: JSON.stringify(buildResponsesRequest(request)),
+              body: JSON.stringify(buildResponsesRequest(request, allowedReasoningLevels)),
               signal: withTimeoutSignal(request.signal, CODEX_STREAM_TIMEOUT_MS),
             });
 
@@ -436,7 +443,10 @@ export class CodexProvider implements Provider {
   }
 }
 
-function buildResponsesRequest(request: StreamRequest): Record<string, unknown> {
+function buildResponsesRequest(
+  request: StreamRequest,
+  allowedReasoningLevels?: string[],
+): Record<string, unknown> {
   return {
     model: request.model,
     instructions: request.systemPrompt || '',
@@ -444,7 +454,7 @@ function buildResponsesRequest(request: StreamRequest): Record<string, unknown> 
     tools: (request.tools ?? []).map(convertToolToCodexTool),
     tool_choice: 'auto',
     parallel_tool_calls: true,
-    reasoning: buildReasoning(request.reasoningLevel),
+    reasoning: buildReasoning(request.reasoningLevel, allowedReasoningLevels),
     store: false,
     stream: true,
     include: [],
@@ -518,10 +528,19 @@ function flattenMessageText(content: string | ProviderContentBlock[]): string {
     .join('\n');
 }
 
-function buildReasoning(reasoningLevel?: string): { effort?: string } | undefined {
+// Used only when the model's real supported_reasoning_levels aren't known (e.g. a bare
+// alias with no cached listModels() entry yet) — otherwise the live per-model list rules.
+const CODEX_REASONING_LEVELS_FALLBACK = ['none', 'minimal', 'low', 'medium', 'high', 'xhigh'];
+
+function buildReasoning(
+  reasoningLevel: string | undefined,
+  allowedLevels?: string[],
+): { effort?: string } | undefined {
   if (!reasoningLevel) return undefined;
   const normalized = reasoningLevel.toLowerCase();
-  if (!['none', 'minimal', 'low', 'medium', 'high', 'xhigh'].includes(normalized)) {
+  const allowed =
+    allowedLevels && allowedLevels.length > 0 ? allowedLevels : CODEX_REASONING_LEVELS_FALLBACK;
+  if (!allowed.includes(normalized)) {
     return undefined;
   }
   return { effort: normalized };

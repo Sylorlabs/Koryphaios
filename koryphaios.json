@@ -34,7 +34,7 @@
     "multiSourceResearch": true,
     "updatedAt": 1782797742979
   },
-  "updatedAt": 1782871880318,
+  "updatedAt": 1782872669070,
   "providers": {
     "anthropic": {
       "name": "anthropic",
@@ -51,11 +51,10 @@
     },
     "codex": {
       "name": "codex",
-      "authToken": "cli:codex:1782868203498",
+      "authToken": "cli:codex:1782872118044",
       "selectedModels": [
-        "gpt-5.4-mini",
-        "gpt-5.4",
-        "gpt-5.2"
+        "gpt-5.5",
+        "gpt-5.4-mini"
       ],
       "hideModelSelector": false,
       "disabled": false
@@ -124,8 +123,7 @@
         "opencodego.minimax-m3",
         "opencodego.qwen3.7-plus",
         "opencodego.kimi-k2.7-code",
-        "opencodego.qwen3.7-max",
-        "opencodego.default"
+        "opencodego.qwen3.7-max"
       ],
       "hideModelSelector": false,
       "disabled": false
@@ -374,7 +372,7 @@
     }
   },
   "notesAgentPermissions": {
-    "preset": "default",
+    "preset": "allow_all",
     "tools": {
       "read_note": "auto",
       "search_notes": "auto",
@@ -382,11 +380,11 @@
       "recall_notes": "auto",
       "get_note_backlinks": "auto",
       "get_note_graph_summary": "auto",
-      "create_note": "ask",
-      "update_note": "ask",
-      "delete_note": "ask",
-      "link_notes": "ask",
-      "unlink_notes": "ask"
+      "create_note": "auto",
+      "update_note": "auto",
+      "delete_note": "auto",
+      "link_notes": "auto",
+      "unlink_notes": "auto"
     }
   }
 }

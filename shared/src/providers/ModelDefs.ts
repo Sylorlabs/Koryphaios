@@ -21,6 +21,9 @@ export interface ModelDef {
   costPerMInputCached?: number;
   costPerMOutputCached?: number;
   canReason?: boolean;
+  /** Real effort levels this model supports (e.g. ['low','medium','high','xhigh']), when the
+   *  provider reports them live. Falls back to static ReasoningConfig tables when absent. */
+  reasoningLevels?: string[];
   supportsAttachments?: boolean;
   supportsStreaming?: boolean;
   tier?: ModelTier;

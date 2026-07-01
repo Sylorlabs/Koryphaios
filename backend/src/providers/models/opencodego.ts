@@ -225,20 +225,4 @@ export const OpenCodeGoModels: ModelDef[] = [
     supportsStreaming: true,
     tier: 'fast',
   },
-
-  // ── Catch-all for runtime-discovered models ───────────────────────────────
-  {
-    id: 'opencodego.default',
-    name: 'OpenCode Go (auto)',
-    provider: 'opencodego',
-    contextWindow: 128_000,
-    maxOutputTokens: 16_384,
-    costPerMInputTokens: 0,
-    costPerMOutputTokens: 0,
-    canReason: false,
-    supportsAttachments: false,
-    supportsStreaming: true,
-    tier: 'fast',
-    isGeneric: true,
-  },
 ];

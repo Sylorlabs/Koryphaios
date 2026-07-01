@@ -332,7 +332,7 @@ export const PROVIDER_CONFIGS: ProviderConfig[] = [
     name: 'opencodego',
     baseUrl: 'https://opencode.ai/zen/go',
     authMode: 'api_key',
-    envKeys: ['OPENCODE_GO_API_KEY', 'OPENCODEGO_API_KEY'],
+    envKeys: ['OPENCODE_GO_API_KEY', 'OPENCODE_ZEN_API_KEY'],
   },
   {
     name: '302ai',

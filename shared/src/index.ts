@@ -118,6 +118,7 @@ export {
   determineAutoReasoningLevel,
   DEFAULT_REASONING_RULES,
   STANDARD_REASONING_OPTIONS,
+  buildReasoningConfigFromLevels,
 } from './reasoning/ReasoningFunctions';
 
 export type {

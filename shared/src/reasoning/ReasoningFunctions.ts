@@ -209,6 +209,7 @@ export function determineAutoReasoningLevel(taskDescription: string): string {
 // Re-export types and constants for convenience
 export { DEFAULT_REASONING_RULES } from './ReasoningConfig';
 export { STANDARD_REASONING_OPTIONS } from './ReasoningConfig';
+export { buildReasoningConfigFromLevels } from './ReasoningConfig';
 export type {
   ReasoningConfig,
   ReasoningOption,

@@ -5,7 +5,7 @@
   import { shortcutStore } from '$lib/stores/shortcuts.svelte';
   import { experimentalStore } from '$lib/stores/experimental.svelte';
   import { agentSettingsStore } from '$lib/stores/agent-settings.svelte';
-  import { getReasoningConfig, hasReasoningSupport } from '@koryphaios/shared';
+  import { getReasoningConfig, buildReasoningConfigFromLevels } from '@koryphaios/shared';
   import BrainIcon from '$lib/components/icons/BrainIcon.svelte';
   import { getModelConfigurationWarning } from '$lib/utils/model-config';
   import { invoke } from '@tauri-apps/api/core';
@@ -101,8 +101,23 @@
   let currentProvider = $derived(!selectedModel ? fallbackProvider : (parseModelSelection(selectedModel).provider ?? fallbackProvider));
   let currentModel = $derived(parseModelSelection(selectedModel).model);
 
-  let reasoningConfig = $derived(!selectedModel ? null : getReasoningConfig(currentProvider, currentModel));
-  let reasoningSupported = $derived(!!selectedModel && hasReasoningSupport(currentProvider, currentModel));
+  /** A model's own live-reported effort levels (e.g. Codex's supported_reasoning_levels) take
+   *  priority over the static ReasoningConfig tables, which can go stale as providers ship
+   *  new models/levels. */
+  function findModelDef(provider: string, model: string | undefined): { reasoningLevels?: string[] } | undefined {
+    if (!model) return undefined;
+    const p = wsStore.providers.find((p) => p.name === provider);
+    const catalog = (p as any)?.allAvailableModels as Array<{ id: string; reasoningLevels?: string[] }> | undefined;
+    return catalog?.find((m) => m.id === model);
+  }
+
+  function effectiveReasoningConfig(provider: string, model: string | undefined) {
+    const liveLevels = findModelDef(provider, model)?.reasoningLevels;
+    return buildReasoningConfigFromLevels(liveLevels) ?? getReasoningConfig(provider, model);
+  }
+
+  let reasoningConfig = $derived(!selectedModel ? null : effectiveReasoningConfig(currentProvider, currentModel));
+  let reasoningSupported = $derived(!!selectedModel && !!reasoningConfig && reasoningConfig.options.length > 0);
 
   const configurationWarning = $derived(
     disabled ? null : getModelConfigurationWarning(wsStore.providers, selectedModel),
@@ -438,7 +453,7 @@
   }
 
   function reasoningLabel(value: string): string {
-    const config = getReasoningConfig(currentProvider, currentModel);
+    const config = effectiveReasoningConfig(currentProvider, currentModel);
     if (config) {
       const opt = config.options.find(o => o.value === value);
       if (opt) return opt.label;

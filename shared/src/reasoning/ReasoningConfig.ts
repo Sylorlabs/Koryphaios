@@ -227,9 +227,11 @@ const VERTEXAI_CONFIGS: Record<string, ReasoningConfig | null> = {
   ),
 };
 
-// Codex reasoning configuration
+// Codex reasoning configuration — static fallback only; CodexProvider reports each
+// model's real supported_reasoning_levels via ModelDef.reasoningLevels, and callers
+// should prefer buildReasoningConfigFromLevels() over this table when that's present.
 const CODEX_CONFIGS: Record<string, ReasoningConfig | null> = {
-  'default-codex': createConfig('reasoning.effort', ['none', 'low', 'medium', 'high'], 'medium'),
+  'default-codex': createConfig('reasoning.effort', ['low', 'medium', 'high', 'xhigh'], 'medium'),
 };
 
 const KIMICODE_CONFIGS: Record<string, ReasoningConfig | null> = {
@@ -398,3 +400,28 @@ export const DEFAULT_REASONING_RULES: ReasoningRule[] = [
     config: NO_REASONING,
   })),
 ];
+
+/**
+ * Build a ReasoningConfig from a model's own live-reported effort levels (e.g. Codex's
+ * `supported_reasoning_levels` from its models API) instead of the static tables above.
+ * Unrecognized level strings still get a usable option via a generic label/description.
+ */
+export function buildReasoningConfigFromLevels(
+  levels: string[] | undefined | null,
+  parameter = 'reasoning.effort',
+): ReasoningConfig | null {
+  if (!levels || levels.length === 0) return null;
+
+  const options = levels.map(
+    (level) =>
+      EXTENDED_REASONING_OPTIONS[level] ?? {
+        value: level,
+        label: level.charAt(0).toUpperCase() + level.slice(1),
+        description: `${level} reasoning effort`,
+      },
+  );
+
+  const defaultValue = levels.includes('medium') ? 'medium' : levels[Math.floor(levels.length / 2)];
+
+  return { parameter, options, defaultValue };
+}
