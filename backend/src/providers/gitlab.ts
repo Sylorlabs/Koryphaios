@@ -94,10 +94,18 @@ function flattenToQuestion(systemPrompt: string, messages: ProviderMessage[]): s
 }
 
 function flattenBlocks(blocks: ProviderContentBlock[]): string {
-  return blocks
+  const parts = blocks
     .filter((b) => b.type === 'text' && typeof b.text === 'string')
-    .map((b) => b.text)
-    .join('\n');
+    .map((b) => b.text as string);
+  const imageCount = blocks.filter((b) => b.type === 'image').length;
+  if (imageCount > 0) {
+    // GitLab Duo's chat endpoint is text-only — tell the model instead of
+    // silently dropping the attachment.
+    parts.push(
+      `[${imageCount} image attachment${imageCount === 1 ? '' : 's'} omitted — GitLab Duo does not support image input]`,
+    );
+  }
+  return parts.join('\n');
 }
 
 /** GitLab Duo returns the answer as a JSON string (or an object wrapping it). */
