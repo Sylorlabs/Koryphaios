@@ -1,5 +1,4 @@
 <script lang="ts">
-  import { ChevronDown, Brain, Clock } from 'lucide-svelte';
   import { slide } from 'svelte/transition';
 
   interface Props {
@@ -8,77 +7,230 @@
     agentName: string;
   }
 
-  let { text, durationMs, agentName }: Props = $props();
+  let { text, durationMs, agentName: _agentName }: Props = $props();
   let expanded = $state(false);
+  let panelEl = $state<HTMLDivElement>();
 
-  // Derive a summary from the first line or first 100 chars
-  let summary = $derived.by(() => {
-    if (!text) return 'Thinking...';
-    const firstLine = text.split('\n')[0].trim();
-    if (firstLine.length > 100) return firstLine.slice(0, 97) + '...';
-    return firstLine || 'Processing...';
+  // ── Live detection + stopwatch ─────────────────────────────────────────────
+  // The block is "live" while its text is still growing. When tokens stop
+  // arriving for STALL_MS the stopwatch freezes (and resumes if more arrive).
+  const STALL_MS = 1_500;
+  const TICK_MS = 100;
+
+  let now = $state(performance.now());
+  // Start "not live": a block restored from history must not tick on mount.
+  // Only text growth AFTER mount starts the stopwatch.
+  let lastGrowthAt = $state(performance.now() - STALL_MS);
+  // Anchor so the ticker continues from the server-computed duration when a
+  // block is mounted mid-stream (e.g. after a session switch). Deliberately
+  // captures the INITIAL durationMs — later updates flow through displayMs.
+  // svelte-ignore state_referenced_locally
+  let anchor = performance.now() - (durationMs ?? 0);
+  let frozenMs = $state<number | null>(null);
+  let sawMount = false;
+
+  $effect(() => {
+    void text.length;
+    if (!sawMount) {
+      // First run is the mount itself, not a streamed token.
+      sawMount = true;
+      return;
+    }
+    lastGrowthAt = performance.now();
+    if (frozenMs !== null) {
+      // Tokens resumed after a stall — re-anchor so elapsed continues from
+      // where the stopwatch froze instead of jumping.
+      anchor = performance.now() - frozenMs;
+      frozenMs = null;
+    }
+  });
+
+  let isLive = $derived(frozenMs === null && now - lastGrowthAt < STALL_MS);
+
+  $effect(() => {
+    if (!isLive) return;
+    const timer = setInterval(() => {
+      now = performance.now();
+      if (performance.now() - lastGrowthAt >= STALL_MS) {
+        frozenMs = performance.now() - anchor - STALL_MS;
+      }
+    }, TICK_MS);
+    return () => clearInterval(timer);
+  });
+
+  let displayMs = $derived.by(() => {
+    if (isLive) return Math.max(0, now - anchor);
+    // Frozen: prefer the server-computed duration when it's sane, else the
+    // client-side measurement.
+    if (durationMs && durationMs > 0) return durationMs;
+    return frozenMs ?? 0;
   });
 
   function formatDuration(ms: number): string {
-    if (ms < 1000) return `${ms}ms`;
-    return `${(ms / 1000).toFixed(1)}s`;
+    const s = ms / 1000;
+    if (s < 60) return `${s.toFixed(1)}s`;
+    const m = Math.floor(s / 60);
+    const rem = Math.round(s % 60);
+    return `${m}m ${rem}s`;
   }
+
+  // Auto-follow the reasoning stream when peeking live.
+  $effect(() => {
+    void text.length;
+    if (expanded && isLive && panelEl) {
+      panelEl.scrollTop = panelEl.scrollHeight;
+    }
+  });
 </script>
 
-<div class="thinking-block group mb-2 overflow-hidden border border-blue-500/20 rounded-xl bg-blue-500/5 transition-all hover:bg-blue-500/10">
-  <button 
-    class="w-full flex items-center gap-3 px-4 py-2.5 text-left transition-colors"
-    onclick={() => expanded = !expanded}
-  >
-    <div class="flex items-center justify-center w-6 h-6 rounded-full bg-blue-500/20 text-blue-400">
-      <Brain size={14} class={text ? 'animate-pulse' : ''} />
-    </div>
-    
-    <div class="flex-1 min-w-0">
-      <div class="flex items-center gap-2 mb-0.5">
-        <span class="text-[10px] font-bold uppercase tracking-wider text-blue-400/80">{agentName} is thinking</span>
-        {#if durationMs !== undefined}
-          <div class="flex items-center gap-1 text-[10px] text-blue-400/60 font-medium">
-            <Clock size={10} />
-            {formatDuration(durationMs)}
-          </div>
-        {/if}
-      </div>
-      <p class="text-sm text-blue-200/70 truncate font-medium">{summary}</p>
-    </div>
-
-    <div class="shrink-0 text-blue-400/40 transition-transform duration-300 {expanded ? 'rotate-180' : ''}">
-      <ChevronDown size={16} />
-    </div>
-  </button>
-
-  {#if expanded}
-    <div transition:slide={{ duration: 250 }}>
-      <div class="px-4 pb-4 pt-1 border-t border-blue-500/10">
-        <div class="thinking-content text-xs leading-relaxed text-blue-100/60 font-mono whitespace-pre-wrap selection:bg-blue-500/30 max-h-80 overflow-y-auto">
-          {text}
-        </div>
-      </div>
-    </div>
+<!-- Collapsed: reasoning fully hidden — just the stopwatch line -->
+<button
+  class="thinking-row group"
+  onclick={() => (expanded = !expanded)}
+  aria-expanded={expanded}
+  title={expanded ? 'Hide reasoning' : 'Show reasoning'}
+>
+  {#if isLive}
+    <span class="label shimmer">Thinking…</span>
+  {:else}
+    <span class="label done">Thought for</span>
   {/if}
-</div>
+  <span class="stopwatch tabular-nums" class:live={isLive}>{formatDuration(displayMs)}</span>
+  <span class="expand-cue {expanded ? 'rotated' : ''}" aria-hidden="true">▸</span>
+</button>
+
+<!-- Expanded: full reasoning (streams live while thinking) -->
+{#if expanded}
+  <div
+    class="thinking-expanded"
+    bind:this={panelEl}
+    transition:slide={{ duration: 180 }}
+  >
+    <p class="thinking-full-text">{text || '…'}</p>
+    {#if isLive}
+      <span class="live-caret" aria-hidden="true"></span>
+    {/if}
+  </div>
+{/if}
 
 <style>
-  .thinking-block {
-    max-width: 90%;
+  .thinking-row {
+    display: inline-flex;
+    align-items: baseline;
+    gap: 6px;
+    cursor: pointer;
+    border: none;
+    background: none;
+    padding: 2px 0;
+    text-align: left;
+    opacity: 0.75;
+    transition: opacity var(--duration-normal) var(--ease-in-out);
   }
 
-  .thinking-content::-webkit-scrollbar {
+  .thinking-row:hover {
+    opacity: 1;
+  }
+
+  .label {
+    font-style: italic;
+    font-size: var(--text-sm);
+    color: var(--color-text-muted);
+  }
+
+  .label.done {
+    font-style: normal;
+  }
+
+  /* Claude-style soft left-to-right shimmer while reasoning streams */
+  .label.shimmer {
+    background: linear-gradient(
+      90deg,
+      var(--color-text-muted) 30%,
+      var(--color-text-primary) 50%,
+      var(--color-text-muted) 70%
+    );
+    background-size: 200% 100%;
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+    animation: think-shimmer 1.8s linear infinite;
+  }
+
+  @keyframes think-shimmer {
+    0% {
+      background-position: 180% 0;
+    }
+    100% {
+      background-position: -80% 0;
+    }
+  }
+
+  .stopwatch {
+    font-size: var(--text-sm);
+    color: var(--color-text-muted);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .stopwatch.live {
+    color: var(--color-text-secondary);
+  }
+
+  .expand-cue {
+    display: inline-block;
+    font-size: 9px;
+    color: var(--color-text-muted);
+    opacity: 0.4;
+    transition: transform var(--duration-normal) var(--ease-in-out);
+    flex-shrink: 0;
+  }
+
+  .expand-cue.rotated {
+    transform: rotate(90deg);
+  }
+
+  .thinking-expanded {
+    position: relative;
+    padding: var(--space-md) var(--space-lg);
+    border-left: 2px solid var(--color-border);
+    margin: var(--space-sm) 0;
+    max-width: 90%;
+    max-height: 18rem;
+    overflow-y: auto;
+  }
+
+  .thinking-full-text {
+    font-size: var(--text-sm);
+    line-height: var(--leading-relaxed);
+    color: var(--color-text-secondary);
+    white-space: pre-wrap;
+    margin: 0;
+    display: inline;
+  }
+
+  .live-caret {
+    display: inline-block;
     width: 6px;
+    height: 12px;
+    margin-left: 2px;
+    vertical-align: text-bottom;
+    background: var(--color-text-muted);
+    animation: think-blink 1s steps(2, start) infinite;
   }
-  .thinking-content::-webkit-scrollbar-track {
-    background: transparent;
+
+  @keyframes think-blink {
+    50% {
+      opacity: 0;
+    }
   }
-  .thinking-content::-webkit-scrollbar-thumb {
-    background: rgba(96, 165, 250, 0.2);
-    border-radius: 3px;
-  }
-  .thinking-content::-webkit-scrollbar-thumb:hover {
-    background: rgba(96, 165, 250, 0.4);
+
+  @media (prefers-reduced-motion: reduce) {
+    .label.shimmer {
+      animation: none;
+      -webkit-text-fill-color: currentColor;
+      background: none;
+    }
+    .live-caret {
+      animation: none;
+    }
   }
 </style>
