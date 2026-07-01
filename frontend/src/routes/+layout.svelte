@@ -48,10 +48,42 @@
 		window.addEventListener('offline', goOffline);
 		window.addEventListener('online', goOnline);
 
+		// Global link interceptor to open external links in default browser when in Tauri
+		const handleExternalLinks = async (e: MouseEvent) => {
+			const target = e.target as HTMLElement | null;
+			const anchor = target?.closest('a');
+			if (!anchor) return;
+
+			const href = anchor.getAttribute('href');
+			if (!href) return;
+
+			// Check if it's an external link
+			const isExternal = href.startsWith('http://') || href.startsWith('https://');
+			const isLocalhost = href.includes('localhost:') || href.includes('127.0.0.1:');
+
+			if (isExternal && !isLocalhost) {
+				const inTauri = typeof window !== 'undefined' && 
+					('__TAURI_INTERNALS__' in window || '__TAURI__' in window);
+				
+				if (inTauri) {
+					e.preventDefault();
+					try {
+						const { open } = await import('@tauri-apps/plugin-shell');
+						await open(href);
+					} catch (err) {
+						console.error('Failed to open external link in browser:', err);
+					}
+				}
+			}
+		};
+
+		window.addEventListener('click', handleExternalLinks);
+
 		return () => {
 			clearTimeout(fallbackTimer);
 			window.removeEventListener('offline', goOffline);
 			window.removeEventListener('online', goOnline);
+			window.removeEventListener('click', handleExternalLinks);
 		};
 	});
 </script>

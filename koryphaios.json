@@ -34,7 +34,7 @@
     "multiSourceResearch": true,
     "updatedAt": 1782797742979
   },
-  "updatedAt": 1782802792832,
+  "updatedAt": 1782863822931,
   "providers": {
     "anthropic": {
       "name": "anthropic",
@@ -96,9 +96,20 @@
     },
     "opencodezen": {
       "name": "opencodezen",
-      "selectedModels": [],
+      "apiKey": "sk-D5aWDRTFEiHFsKIiQiFzRxI1goAwFJ1G689Yczj8u4NYsYui339gfC0EBl4JaJ7e",
+      "selectedModels": [
+        "big-pickle",
+        "deepseek-v4-flash-free",
+        "mimo-v2.5-free",
+        "nemotron-3-ultra-free",
+        "north-mini-code-free",
+        "opencodezen.default",
+        "deepseek-v4-pro",
+        "glm-5.2",
+        "deepseek-v4-flash"
+      ],
       "hideModelSelector": false,
-      "disabled": true
+      "disabled": false
     },
     "azure": {
       "name": "azure",
@@ -312,9 +323,10 @@
     },
     "grok": {
       "name": "grok",
+      "authToken": "cli:grok:1782862297088",
       "selectedModels": [],
       "hideModelSelector": false,
-      "disabled": true
+      "disabled": false
     },
     "antigravity": {
       "name": "antigravity",

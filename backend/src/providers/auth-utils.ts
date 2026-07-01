@@ -45,6 +45,7 @@ const CODEX_CLI_AUTH_PREFIX = 'cli:codex:';
 const CLAUDE_CLI_AUTH_PREFIX = 'cli:claude:';
 const GROK_CLI_AUTH_PREFIX = 'cli:grok:';
 const ANTIGRAVITY_CLI_AUTH_PREFIX = 'cli:antigravity:';
+const OPENCODE_CLI_AUTH_PREFIX = 'cli:opencode:';
 const KORY_CODEX_HOME = join(PROJECT_ROOT, '.koryphaios', 'codex-home');
 
 /** Grok Build CLI opt-in marker — the CLI owns its own auth (subscription or XAI key). */
@@ -60,6 +61,13 @@ export function isAntigravityCLIAuthMarker(value: string | null | undefined): bo
 }
 export function createAntigravityCLIAuthMarker(): string {
   return `${ANTIGRAVITY_CLI_AUTH_PREFIX}${Date.now()}`;
+}
+
+export function isOpenCodeCLIAuthMarker(value: string | null | undefined): boolean {
+  return typeof value === 'string' && value.startsWith(OPENCODE_CLI_AUTH_PREFIX);
+}
+export function createOpenCodeCLIAuthMarker(): string {
+  return `${OPENCODE_CLI_AUTH_PREFIX}${Date.now()}`;
 }
 
 export function getKoryCodexHome(): string {
@@ -323,6 +331,43 @@ export function detectAntigravityCLILogin(): boolean {
   const home = homeDir();
   if (!home) return false;
   return existsSync(join(home, '.gemini', 'antigravity-cli', 'settings.json'));
+}
+
+/** The OpenCode Go/Zen API key from the OpenCode CLI's auth store. */
+export function detectOpenCodeGoKey(): string | null {
+  return getCachedToken(
+    'opencode-go-key',
+    () => {
+      // 1. Check environment variable
+      const envKey = process.env.OPENCODE_GO_API_KEY?.trim() || process.env.OPENCODE_ZEN_API_KEY?.trim();
+      if (envKey) return envKey;
+
+      // 2. Read from OpenCode CLI auth store
+      const home = homeDir();
+      if (!home) return null;
+      const authPath = join(home, '.local', 'share', 'opencode', 'auth.json');
+      if (!existsSync(authPath)) return null;
+      try {
+        const data = JSON.parse(readFileSync(authPath, 'utf-8'));
+        const entry = data?.opencode;
+        if (entry?.type === 'api' && typeof entry?.key === 'string' && entry.key.trim()) {
+          return entry.key.trim();
+        }
+      } catch {
+        // Ignore malformed auth files
+      }
+      return null;
+    },
+    { cacheNull: false },
+  );
+}
+
+/**
+ * Detects whether the OpenCode CLI is set up with Go/Zen credentials:
+ * an API key in the environment or the CLI's auth store at ~/.local/share/opencode/auth.json.
+ */
+export function detectOpenCodeCLILogin(): boolean {
+  return !!detectOpenCodeGoKey();
 }
 
 /**
