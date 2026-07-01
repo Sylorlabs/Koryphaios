@@ -12,6 +12,7 @@ import { BedrockModels } from './bedrock';
 import { LocalModels } from './local';
 import { OllamaModels } from './ollama';
 import { OpenCodeZenModels } from './opencodezen';
+import { OpenCodeGoModels } from './opencodego';
 import { CodexModels } from './codex';
 import { ClaudeCodeModels } from './claude-code';
 import { GrokModels } from './grok';
@@ -35,6 +36,7 @@ const ALL_MODELS: ModelDef[] = [
   ...LocalModels,
   ...OllamaModels,
   ...OpenCodeZenModels,
+  ...OpenCodeGoModels,
   ...CodexModels,
   ...ClaudeCodeModels,
   ...GrokModels,

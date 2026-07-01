@@ -34,7 +34,7 @@
     "multiSourceResearch": true,
     "updatedAt": 1782797742979
   },
-  "updatedAt": 1782868216787,
+  "updatedAt": 1782871880318,
   "providers": {
     "anthropic": {
       "name": "anthropic",
@@ -109,6 +109,23 @@
         "deepseek-v4-pro",
         "glm-5.2",
         "deepseek-v4-flash"
+      ],
+      "hideModelSelector": false,
+      "disabled": false
+    },
+    "opencodego": {
+      "name": "opencodego",
+      "apiKey": "sk-D5aWDRTFEiHFsKIiQiFzRxI1goAwFJ1G689Yczj8u4NYsYui339gfC0EBl4JaJ7e",
+      "selectedModels": [
+        "opencodego.glm-5.2",
+        "opencodego.deepseek-v4-pro",
+        "opencodego.deepseek-v4-flash",
+        "opencodego.mimo-v2.5-pro",
+        "opencodego.minimax-m3",
+        "opencodego.qwen3.7-plus",
+        "opencodego.kimi-k2.7-code",
+        "opencodego.qwen3.7-max",
+        "opencodego.default"
       ],
       "hideModelSelector": false,
       "disabled": false

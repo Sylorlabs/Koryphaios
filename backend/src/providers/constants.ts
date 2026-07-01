@@ -14,6 +14,7 @@ export const ENV_API_KEY_MAP: Record<ProviderName, string[]> = {
   groq: ['GROQ_API_KEY'],
   copilot: [], // auth only - uses GitHub OAuth
   opencodezen: ['OPENCODE_ZEN_API_KEY'],
+  opencodego: ['OPENCODE_GO_API_KEY', 'OPENCODE_ZEN_API_KEY'],
   azure: ['AZURE_OPENAI_API_KEY'],
   bedrock: ['AWS_ACCESS_KEY_ID'],
   vertexai: ['GOOGLE_VERTEX_AI_API_KEY'],
@@ -75,6 +76,7 @@ export const ENV_AUTH_TOKEN_MAP: Partial<Record<ProviderName, string[]>> = {
 export const OPENCODE_DEFAULT_BASE_URL: Partial<Record<ProviderName, string>> = {
   '302ai': 'https://api.302.ai/v1',
   opencodezen: 'https://opencode.ai/zen/v1',
+  opencodego: 'https://opencode.ai/zen/go/v1',
   baseten: 'https://inference.baseten.co/v1',
   cerebras: 'https://api.cerebras.ai/v1',
   cloudflare: 'https://gateway.ai.cloudflare.com/v1',
@@ -143,6 +145,7 @@ export const PROVIDER_AUTH_MODE: Record<ProviderName, ProviderAuthMode> = {
   groq: 'api_key',
   copilot: 'auth_only',
   opencodezen: 'api_key',
+  opencodego: 'api_key',
   azure: 'api_key_or_auth',
   bedrock: 'env_auth',
   vertexai: 'api_key',

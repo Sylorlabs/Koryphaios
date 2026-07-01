@@ -221,7 +221,7 @@ function createProvidersStore() {
   }
 
   function getProviderDisplayLabel(name: string): string {
-    return PROVIDER_LABELS[name] ?? (name.charAt(0).toUpperCase() + name.slice(1));
+    return PROVIDER_LABELS[name] ?? name.charAt(0).toUpperCase() + name.slice(1);
   }
 
   function usesBrowserAuth(name: string): boolean {
@@ -236,9 +236,7 @@ function createProvidersStore() {
     const status = getProviderStatus(name);
     if (status) {
       const authMode =
-        typeof status.authMode === 'string'
-          ? status.authMode
-          : (status.authMode?.id ?? 'api_key');
+        typeof status.authMode === 'string' ? status.authMode : (status.authMode?.id ?? 'api_key');
       return {
         authMode: getKnownAuthMode(name, authMode),
         supportsApiKey: status.supportsApiKey,
@@ -336,7 +334,10 @@ function createProvidersStore() {
   async function loadAvailableProviders(): Promise<void> {
     try {
       const res = await apiFetch(apiUrl('/api/providers/available'));
-      const data = await parseJsonResponse<{ ok?: boolean; data?: Array<{ name: string; authMode: string }> }>(res);
+      const data = await parseJsonResponse<{
+        ok?: boolean;
+        data?: Array<{ name: string; authMode: string }>;
+      }>(res);
       if (data?.ok && Array.isArray(data.data)) {
         availableProviderTypes = data.data;
       }
@@ -923,12 +924,18 @@ function createProvidersStore() {
       browserAuthPending[name] = true;
       browserAuthMessages[name] = data.data.message ?? 'Continue sign-in in your browser';
 
-      const authUrl = data.data.verificationUriComplete ?? data.data.url ?? data.data.verificationUri;
+      const authUrl =
+        data.data.verificationUriComplete ?? data.data.url ?? data.data.verificationUri;
       if (authUrl) {
         await openAuthUrl(authUrl);
       }
 
-      if (name === 'copilot' && data.data.deviceCode && data.data.userCode && data.data.verificationUri) {
+      if (
+        name === 'copilot' &&
+        data.data.deviceCode &&
+        data.data.userCode &&
+        data.data.verificationUri
+      ) {
         copilotDeviceAuth = {
           deviceCode: data.data.deviceCode,
           userCode: data.data.userCode,
@@ -1356,6 +1363,7 @@ function createProvidersStore() {
       venice: 'Venice AI',
       zenmux: 'ZenMux',
       opencodezen: 'OpenCodeZen',
+      opencodego: 'OpenCode Go',
       firmware: 'Firmware',
       '302ai': '302.ai',
       claude: 'Claude Code',
@@ -1441,6 +1449,7 @@ function createProvidersStore() {
       venice: 'sk-...',
       zenmux: 'sk-...',
       opencodezen: 'Get key at opencode.ai/auth',
+      opencodego: 'Get key at opencode.ai/auth (subscribe to Go)',
       firmware: 'sk-...',
       '302ai': 'sk-...',
       jules: 'Jules API key (jules.google.com/settings)',

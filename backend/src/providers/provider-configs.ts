@@ -63,7 +63,13 @@ export const PROVIDER_CONFIGS: ProviderConfig[] = [
     envKeys: [],
     envAuthTokenKey: 'GITHUB_COPILOT_TOKEN',
   },
-  { name: 'codex', baseUrl: '', authMode: 'auth_only', envKeys: [], envAuthTokenKey: 'CODEX_AUTH_TOKEN' },
+  {
+    name: 'codex',
+    baseUrl: '',
+    authMode: 'auth_only',
+    envKeys: [],
+    envAuthTokenKey: 'CODEX_AUTH_TOKEN',
+  },
   {
     name: 'jules',
     baseUrl: 'https://jules.googleapis.com/v1alpha',
@@ -320,7 +326,13 @@ export const PROVIDER_CONFIGS: ProviderConfig[] = [
     name: 'opencodezen',
     baseUrl: 'https://opencode.ai/zen',
     authMode: 'api_key',
-    envKeys: ['OPENCODEZEN_API_KEY'],
+    envKeys: ['OPENCODE_ZEN_API_KEY'],
+  },
+  {
+    name: 'opencodego',
+    baseUrl: 'https://opencode.ai/zen/go',
+    authMode: 'api_key',
+    envKeys: ['OPENCODE_GO_API_KEY', 'OPENCODEGO_API_KEY'],
   },
   {
     name: '302ai',

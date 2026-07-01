@@ -413,6 +413,7 @@ const VALID_PROVIDERS = new Set<string>([
   'local',
   'ollama',
   'opencodezen',
+  'opencodego',
   '302ai',
   'azurecognitive',
   'baseten',

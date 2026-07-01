@@ -23,6 +23,7 @@ import {
   XAIProvider,
   AzureProvider,
 } from './openai';
+import { OpenCodeGoProvider } from './opencodego';
 
 import { GoogleProvider } from './google';
 import { CopilotProvider, exchangeGitHubTokenForCopilotAsync } from './copilot';
@@ -223,8 +224,7 @@ class ProviderRegistry {
       const isEnabled = config ? !config.disabled : false;
       let allModels = [] as ReturnType<Provider['listModels']>;
       if (isEnabled) {
-        allModels =
-          provider?.listModels() ?? getModelsForProvider(name);
+        allModels = provider?.listModels() ?? getModelsForProvider(name);
       }
 
       const selectedModels = config?.selectedModels ?? [];
@@ -302,7 +302,8 @@ class ProviderRegistry {
     headers?: Record<string, string>;
     models?: string[];
   }): { success: boolean; error?: string } {
-    if (!def.baseUrl?.trim()) return { success: false, error: 'Custom provider requires a base URL' };
+    if (!def.baseUrl?.trim())
+      return { success: false, error: 'Custom provider requires a base URL' };
     const providerConfig: ProviderConfig = {
       name: def.id,
       custom: true,
@@ -505,7 +506,8 @@ class ProviderRegistry {
           if (detectClaudeCodeLogin()) return { success: true };
           return {
             success: false,
-            error: 'Claude Code is not logged in. Run "claude login" in your terminal to connect your Claude subscription.',
+            error:
+              'Claude Code is not logged in. Run "claude login" in your terminal to connect your Claude subscription.',
           };
         }
         case 'grok': {
@@ -677,7 +679,11 @@ class ProviderRegistry {
           });
         }
         case 'jules': {
-          if (!apiKey) return { success: false, error: 'Missing JULES_API_KEY (create at jules.google.com/settings#api)' };
+          if (!apiKey)
+            return {
+              success: false,
+              error: 'Missing JULES_API_KEY (create at jules.google.com/settings#api)',
+            };
           return this.verifyHttp('https://jules.googleapis.com/v1alpha/sources?pageSize=1', {
             method: 'GET',
             headers: { 'X-Goog-Api-Key': apiKey, 'User-Agent': 'Koryphaios/1.0' },
@@ -687,6 +693,15 @@ class ProviderRegistry {
           if (!apiKey)
             return { success: false, error: 'Missing API key (get one at opencode.ai/auth)' };
           const base = 'https://opencode.ai/zen/v1';
+          return this.verifyBearerGet(`${base}/models`, apiKey);
+        }
+        case 'opencodego': {
+          if (!apiKey)
+            return {
+              success: false,
+              error: 'Missing API key — subscribe to OpenCode Go at opencode.ai/auth',
+            };
+          const base = 'https://opencode.ai/zen/go/v1';
           return this.verifyBearerGet(`${base}/models`, apiKey);
         }
         case 'llamacpp': {
@@ -779,8 +794,7 @@ class ProviderRegistry {
       // Auto-detect if blank
       const resolvedApiKey =
         credentials.apiKey?.trim() || existing?.apiKey || this.detectEnvKey(name) || undefined;
-      const resolvedAuthToken =
-        credentials.authToken?.trim() || existing?.authToken || undefined;
+      const resolvedAuthToken = credentials.authToken?.trim() || existing?.authToken || undefined;
       const resolvedBaseUrl =
         credentials.baseUrl?.trim() || existing?.baseUrl || this.detectEnvUrl(name) || undefined;
 
@@ -957,6 +971,17 @@ class ProviderRegistry {
       }
     }
 
+    // Proactively warm dynamic model-list caches (Claude Code / Codex / Grok Build fetch
+    // live from their CLI/backend on a lazy TTL) so a fresh app launch surfaces current
+    // models immediately instead of waiting for the first UI request to trigger it.
+    for (const provider of this.providers.values()) {
+      try {
+        provider.listModels();
+      } catch (error) {
+        providerLog.debug({ provider: provider.name, error }, 'Startup model-list warm-up failed');
+      }
+    }
+
     this.logProviderStatus();
   }
 
@@ -981,8 +1006,16 @@ class ProviderRegistry {
 
     const providerConfig: ProviderConfig = {
       name,
-      apiKey: userConfig?.apiKey ?? autoCli?.apiKey ?? (isDisabled ? undefined : this.detectEnvKey(name)) ?? undefined,
-      authToken: userConfig?.authToken ?? autoCli?.authToken ?? (isDisabled ? undefined : this.detectEnvAuthToken(name)) ?? undefined,
+      apiKey:
+        userConfig?.apiKey ??
+        autoCli?.apiKey ??
+        (isDisabled ? undefined : this.detectEnvKey(name)) ??
+        undefined,
+      authToken:
+        userConfig?.authToken ??
+        autoCli?.authToken ??
+        (isDisabled ? undefined : this.detectEnvAuthToken(name)) ??
+        undefined,
       baseUrl: userConfig?.baseUrl ?? this.detectEnvUrl(name) ?? undefined,
       selectedModels: userConfig?.selectedModels ?? [],
       hideModelSelector: userConfig?.hideModelSelector ?? false,
@@ -1053,6 +1086,9 @@ class ProviderRegistry {
         return new KimiCodeProvider(config);
       case 'openrouter':
         return new OpenRouterProvider(config);
+      case 'opencodego':
+        // OpenCode Go is dual-protocol — OpenCodeGoProvider dispatches per-model.
+        return new OpenCodeGoProvider(config);
       case 'groq':
         return new GroqProvider(config);
       case 'xai':

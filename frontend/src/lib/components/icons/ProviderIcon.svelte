@@ -54,6 +54,7 @@
     together: ['together', 'together-brand'],
     upstage: ['upstage'],
     opencodezen: ['opencode'],
+    opencodego: ['opencode'],
     copilot: ['githubcopilot'],
     github: ['github'],
     gitlab: ['gitlab'],

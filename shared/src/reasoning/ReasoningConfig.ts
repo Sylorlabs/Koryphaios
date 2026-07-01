@@ -229,19 +229,11 @@ const VERTEXAI_CONFIGS: Record<string, ReasoningConfig | null> = {
 
 // Codex reasoning configuration
 const CODEX_CONFIGS: Record<string, ReasoningConfig | null> = {
-  'default-codex': createConfig(
-    'reasoning.effort',
-    ['none', 'low', 'medium', 'high'],
-    'medium',
-  ),
+  'default-codex': createConfig('reasoning.effort', ['none', 'low', 'medium', 'high'], 'medium'),
 };
 
 const KIMICODE_CONFIGS: Record<string, ReasoningConfig | null> = {
-  'default-kimicode': createConfig(
-    'reasoning.effort',
-    ['none', 'low', 'medium', 'high'],
-    'medium',
-  ),
+  'default-kimicode': createConfig('reasoning.effort', ['none', 'low', 'medium', 'high'], 'medium'),
 };
 
 // DeepSeek reasoning configurations
@@ -250,7 +242,11 @@ const DEEPSEEK_CONFIGS: Record<string, ReasoningConfig | null> = {
   'deepseek-v4': createConfig('reasoning_effort', ['none', 'low', 'medium', 'high', 'max'], 'high'),
   // Legacy R1
   'deepseek-reasoner': createConfig('reasoning_effort', ['high', 'max'], 'high'),
-  'default-deepseek': createConfig('reasoning_effort', ['none', 'low', 'medium', 'high', 'max'], 'high'),
+  'default-deepseek': createConfig(
+    'reasoning_effort',
+    ['none', 'low', 'medium', 'high', 'max'],
+    'high',
+  ),
 };
 
 // Default configuration for providers without explicit reasoning
@@ -285,6 +281,7 @@ const NO_REASONING_PROVIDERS = [
   'zai',
   'zenmux',
   'opencodezen',
+  'opencodego',
   'azurecognitive',
   'gitlab',
   'mistralai',

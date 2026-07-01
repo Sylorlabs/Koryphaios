@@ -81,6 +81,7 @@ export const ProviderNameSchema = z
     'prodia',
     '302ai',
     'opencodezen',
+    'opencodego',
     'novita-ai',
     'upstage',
     'v0',

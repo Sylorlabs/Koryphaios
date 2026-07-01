@@ -1,5 +1,5 @@
 import type { ProviderConfig, ModelDef } from '@koryphaios/shared';
-import { spawn, type ChildProcessByStdio } from 'node:child_process';
+import { execFileSync, spawn, type ChildProcessByStdio } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, unlinkSync } from 'node:fs';
 import { join } from 'node:path';
 import type { Readable } from 'node:stream';
@@ -18,9 +18,34 @@ import {
 } from './types';
 
 const CODEX_BACKEND_BASE_URL = 'https://chatgpt.com/backend-api/codex';
-const CODEX_CLIENT_VERSION = '0.120.0';
+// Fallback used only when the local `codex` binary can't be probed for its real version.
+// The backend gates newer models (e.g. gpt-5.5) behind a minimal_client_version check, so
+// a stale pin here silently hides new models from listModels() — see getCodexClientVersion().
+const CODEX_CLIENT_VERSION_FALLBACK = '0.120.0';
 const CODEX_STREAM_TIMEOUT_MS = 300_000;
 const CODEX_MODELS_CACHE_MS = 5 * 60_000;
+const CODEX_CLIENT_VERSION_CACHE_MS = 60 * 60_000;
+
+let cachedClientVersion: string | null = null;
+let cachedClientVersionAt = 0;
+
+/** Read the installed `codex` CLI's real version so model-list requests aren't gated
+ *  behind a stale pinned client_version. Cached for an hour; falls back to a fixed
+ *  version string if the binary isn't found (e.g. token-only setups). */
+function getCodexClientVersion(): string {
+  if (cachedClientVersion && Date.now() - cachedClientVersionAt < CODEX_CLIENT_VERSION_CACHE_MS) {
+    return cachedClientVersion;
+  }
+  try {
+    const out = execFileSync('codex', ['--version'], { encoding: 'utf-8', timeout: 5_000 }).trim();
+    const match = out.match(/(\d+\.\d+\.\d+)/);
+    cachedClientVersion = match ? match[1] : CODEX_CLIENT_VERSION_FALLBACK;
+  } catch {
+    cachedClientVersion = CODEX_CLIENT_VERSION_FALLBACK;
+  }
+  cachedClientVersionAt = Date.now();
+  return cachedClientVersion;
+}
 
 type CodexModelRecord = {
   slug?: string;
@@ -335,7 +360,7 @@ export class CodexProvider implements Provider {
   }
 
   private modelsUrl(): string {
-    return `${CODEX_BACKEND_BASE_URL}/models?client_version=${encodeURIComponent(CODEX_CLIENT_VERSION)}`;
+    return `${CODEX_BACKEND_BASE_URL}/models?client_version=${encodeURIComponent(getCodexClientVersion())}`;
   }
 
   private resolveAuthToken(): string | null {

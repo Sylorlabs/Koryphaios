@@ -26,13 +26,11 @@ import {
   createClaudeCLIAuthMarker,
   createCodexCLIAuthMarker,
   createGrokCLIAuthMarker,
-  detectOpenCodeGoKey,
-  detectOpenCodeCLILogin,
 } from './auth-utils';
 
 export interface AgentCliStatus {
   /** Stable id for the CLI. */
-  id: 'claude' | 'codex' | 'antigravity' | 'grok' | 'cursor' | 'opencode';
+  id: 'claude' | 'codex' | 'antigravity' | 'grok' | 'cursor';
   displayName: string;
   /** Candidate binary names looked up on PATH. */
   binaries: string[];
@@ -92,8 +90,6 @@ export function canAutoEnable(provider: ProviderName): boolean {
     case 'grok':
       // Grok Build subscription CLI — installed + logged in (subscription or xAI key).
       return !!whichBinary('grok') && detectGrokCLILogin();
-    case 'opencodezen':
-      return !!whichBinary('opencode') && detectOpenCodeCLILogin();
     default:
       return false;
   }
@@ -119,11 +115,6 @@ export function cliAutoEnableCreds(
     case 'grok':
       // The CLI owns the real token; the marker just signals "use the CLI harness".
       return { authToken: createGrokCLIAuthMarker() };
-    case 'opencodezen': {
-      // OpenCode is an api_key provider — return the actual key from the CLI auth store.
-      const key = detectOpenCodeGoKey();
-      return key ? { apiKey: key } : null;
-    }
     default:
       return null;
   }
@@ -196,23 +187,6 @@ export function detectAgentClis(): AgentCliStatus[] {
     docsUrl: 'https://docs.x.ai/build/cli/headless-scripting',
   });
 
-  // ── OpenCode CLI → `opencodezen` provider (API key from CLI auth store). ──
-  const opencodeKey = !!detectOpenCodeGoKey();
-  const opencodeLogin = detectOpenCodeCLILogin();
-  const opencode = mk('opencode', 'OpenCode CLI', ['opencode'], 'opencodezen', {
-    loggedIn: opencodeLogin,
-    authSource: opencodeKey
-      ? '~/.local/share/opencode/auth.json'
-      : process.env.OPENCODE_GO_API_KEY
-        ? 'OPENCODE_GO_API_KEY'
-        : null,
-    autoEnabled: canAutoEnable('opencodezen'),
-    workingNote: opencodeKey
-      ? 'Chats through the OpenCode Zen provider using CLI credentials.'
-      : 'OpenCode CLI installed but no Go/Zen subscription key found.',
-    docsUrl: 'https://opencode.ai',
-  });
-
   // ── Cursor (cursor-agent) → no Koryphaios provider yet; detected + surfaced. ──
   const cursorLogin = detectCursorCLILogin();
   const cursor = mk('cursor', 'Cursor CLI', ['cursor-agent'], null, {
@@ -229,7 +203,7 @@ export function detectAgentClis(): AgentCliStatus[] {
     docsUrl: 'https://cursor.com/docs/cli',
   });
 
-  return [claude, codex, antigravity, grok, opencode, cursor];
+  return [claude, codex, antigravity, grok, cursor];
 }
 
 function mk(
