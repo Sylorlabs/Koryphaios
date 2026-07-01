@@ -1,7 +1,7 @@
 // OpenAI provider — supports GPT-4.1, O3, O4-mini, Codex.
 // Also used as base for Groq, OpenRouter, xAI (OpenAI-compatible endpoints).
 
-import OpenAI from 'openai';
+import OpenAI, { AzureOpenAI } from 'openai';
 import type { ProviderConfig, ProviderName, ModelDef } from '@koryphaios/shared';
 
 import {
@@ -11,11 +11,17 @@ import {
   type ProviderContentBlock,
   getModelsForProvider,
   resolveModel,
-  createGenericModel,
 } from './types';
 import { withRetry, withTimeoutSignal } from './utils';
 import { createUsageInterceptingFetch } from '../credit-accountant';
 import { providerLog } from '../logger';
+import {
+  enrichFromRemoteMetadata,
+  isLikelyChatModelId,
+  isModelListCacheFresh,
+  mergeModelLists,
+  modelFromRemoteId,
+} from './model-list-cache';
 
 export class OpenAIProvider implements Provider {
   protected _client: OpenAI | null = null;
@@ -40,81 +46,80 @@ export class OpenAIProvider implements Provider {
   }
 
   isAvailable(): boolean {
-    return !this.config.disabled && !!(this.config.apiKey || this.config.authToken);
+    const available = !this.config.disabled && !!(this.config.apiKey || this.config.authToken);
+    if (available && !isModelListCacheFresh(this.lastFetch)) {
+      this.refreshModelsInBackground(this.getModelCatalogFallback());
+    }
+    return available;
   }
+
+  /** Static catalog used until live discovery succeeds. Subclasses may override. */
+  protected getModelCatalogFallback(): ModelDef[] {
+    return getModelsForProvider(this.name);
+  }
+
+  /** Optional async prep (OAuth exchange, etc.) before hitting /models. */
+  protected async prepareForModelDiscovery(): Promise<void> {}
 
   private cachedModels: ModelDef[] | null = null;
   private lastFetch = 0;
   private fetchInProgress = false;
 
   listModels(): ModelDef[] {
-    const localModels = getModelsForProvider(this.name);
-
-    if (!this.isAvailable()) {
-      return localModels;
-    }
-
-    // Return cached if fresh
-    if (this.cachedModels && Date.now() - this.lastFetch < 5 * 60 * 1000) {
-      return this.cachedModels;
-    }
-
-    // Trigger background refresh, return what we have now
-    this.refreshModelsInBackground(localModels);
-    return this.cachedModels ?? localModels;
+    const fallback = this.getModelCatalogFallback();
+    if (!this.isAvailable()) return fallback;
+    if (this.cachedModels && isModelListCacheFresh(this.lastFetch)) return this.cachedModels;
+    this.refreshModelsInBackground(fallback);
+    return this.cachedModels ?? fallback;
   }
 
-  private refreshModelsInBackground(localModels: ModelDef[]) {
+  /**
+   * Many OpenAI-compatible /models endpoints return capability metadata beyond
+   * the bare id (OpenRouter: `context_length`; GitHub Copilot:
+   * `capabilities.limits.max_context_window_tokens` / `max_output_tokens`,
+   * `capabilities.supports.vision`; various gateways: `context_window`,
+   * `display_name`). The SDK preserves those extra fields on the raw objects —
+   * ingest them so the UI shows the provider's REAL numbers instead of the
+   * hand-maintained catalog's.
+   */
+  protected enrichDiscoveredModel(raw: unknown, def: ModelDef): ModelDef {
+    return enrichFromRemoteMetadata(raw, def);
+  }
+
+  private refreshModelsInBackground(fallback: ModelDef[]) {
     if (this.fetchInProgress) return;
     this.fetchInProgress = true;
 
-    withRetry(() => this.client.models.list())
-      .then(async (response) => {
-        const remoteModels: ModelDef[] = [];
+    void (async () => {
+      try {
+        await this.prepareForModelDiscovery();
+        const response = await withRetry(() => this.client.models.list());
+        const discovered: ModelDef[] = [];
         for await (const model of response) {
           const id = model.id;
-          const existing = localModels.find((m) => m.apiModelId === id || m.id === id);
-          if (existing) continue;
-
-          const lowerId = id.toLowerCase();
-          const isOpenAI = this.name === 'openai';
-          
-          // For OpenAI, keep strict filtering to avoid legacy noise
-          if (isOpenAI) {
-            if (
-              lowerId.includes('gpt') ||
-              lowerId.includes('o1') ||
-              lowerId.includes('o3') ||
-              lowerId.includes('o4')
-            ) {
-              remoteModels.push(createGenericModel(id, this.name));
-            }
-          } else {
-            // For other providers (Groq, Together, DeepSeek, etc), be more inclusive
-            // Filter out obviously non-chat models (embeddings, audio, etc)
-            if (
-              !lowerId.includes('embed') &&
-              !lowerId.includes('whisper') &&
-              !lowerId.includes('tts') &&
-              !lowerId.includes('dall-e') &&
-              !lowerId.includes('moderation') &&
-              !lowerId.includes('rerank')
-            ) {
-              remoteModels.push(createGenericModel(id, this.name));
-            }
-          }
+          if (!id || !isLikelyChatModelId(id, this.name)) continue;
+          discovered.push(this.enrichDiscoveredModel(model, modelFromRemoteId(id, this.name, fallback)));
         }
-
-        this.cachedModels = [...localModels, ...remoteModels];
+        if (discovered.length > 0) {
+          this.cachedModels = mergeModelLists(fallback, discovered);
+          providerLog.debug(
+            { provider: this.name, count: this.cachedModels.length },
+            'Model list refreshed from provider API',
+          );
+        } else {
+          this.cachedModels ??= fallback;
+        }
         this.lastFetch = Date.now();
-      })
-      .catch(() => {
-        // Keep local models on failure
-        this.cachedModels ??= localModels;
-      })
-      .finally(() => {
+      } catch (err) {
+        providerLog.debug(
+          { provider: this.name, err: err instanceof Error ? err.message : String(err) },
+          'Model list refresh failed; using catalog fallback',
+        );
+        this.cachedModels ??= fallback;
+      } finally {
         this.fetchInProgress = false;
-      });
+      }
+    })();
   }
 
   async *streamResponse(request: StreamRequest): AsyncGenerator<ProviderEvent> {
@@ -401,8 +406,33 @@ export class XAIProvider extends OpenAIProvider {
   }
 }
 
+// Azure OpenAI + Azure Cognitive Services. Unlike the OpenAI-compatible providers,
+// Azure authenticates with an `api-key` header (not Bearer) and routes to
+// `{endpoint}/openai/deployments/{deployment}/chat/completions?api-version=...`.
+// The official AzureOpenAI client builds exactly that wire shape; the selected model
+// id is used as the deployment name. All streaming/parsing logic is inherited.
+const AZURE_API_VERSION = process.env.AZURE_OPENAI_API_VERSION || '2024-10-21';
+
 export class AzureProvider extends OpenAIProvider {
-  constructor(config: ProviderConfig) {
-    super(config, 'azure', config.baseUrl);
+  constructor(config: ProviderConfig, name: ProviderName = 'azure') {
+    super(config, name, config.baseUrl);
+  }
+
+  protected override get client(): OpenAI {
+    if (!this._client) {
+      const endpoint = this.config.baseUrl;
+      if (!endpoint) {
+        throw new Error(
+          `${this.name} requires an endpoint (base URL), e.g. https://YOUR_RESOURCE.openai.azure.com`,
+        );
+      }
+      this._client = new AzureOpenAI({
+        apiKey: this.config.apiKey || this.config.authToken || 'placeholder',
+        endpoint,
+        apiVersion: AZURE_API_VERSION,
+        fetch: createUsageInterceptingFetch(globalThis.fetch),
+      });
+    }
+    return this._client;
   }
 }

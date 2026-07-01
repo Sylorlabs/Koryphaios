@@ -23,19 +23,28 @@ import {
   XAIProvider,
   AzureProvider,
 } from './openai';
+import { OpenCodeGoProvider } from './opencodego';
 
-import { GeminiProvider } from './gemini';
+import { GoogleProvider } from './google';
 import { CopilotProvider, exchangeGitHubTokenForCopilotAsync } from './copilot';
 import { CodexProvider } from './codex';
 import { ClaudeCodeProvider } from './claude-code';
 import { GrokBuildProvider } from './grok-build';
 import { AntigravityProvider } from './antigravity';
+import { JulesProvider } from './jules';
 import { BedrockProvider } from './bedrock';
 import { GitLabProvider } from './gitlab';
 import { SapAiProvider } from './sapai';
 import { CustomProvider } from './custom';
-import { detectCodexAuthToken, isCodexCLIAuthMarker, detectClaudeCodeLogin } from './auth-utils';
+import {
+  detectCodexAuthToken,
+  isCodexCLIAuthMarker,
+  detectClaudeCodeLogin,
+  detectGrokCLILogin,
+  detectAntigravityCLILogin,
+} from './auth-utils';
 import { cliAutoEnableCreds } from './cli-detection';
+import { getProviderDisplay } from './provider-display';
 import { KimiCodeProvider } from './kimicode';
 import { resolveKimiCodeAccessToken } from './kimicode-auth';
 import { secureDecrypt, isUsingSecureEncryption } from '../security';
@@ -43,6 +52,7 @@ import {
   resolveModel,
   getModelsForProvider,
   isLegacyModel,
+  registerLiveModelResolver,
   type StreamRequest,
   type ProviderEvent,
   type Provider,
@@ -81,6 +91,21 @@ class ProviderRegistry {
 
   constructor(private config?: KoryphaiosConfig) {
     this.initializeAll();
+    // Let resolveTrustedContextWindow consult live-discovered model defs
+    // (context windows the provider API / CLI reported itself).
+    registerLiveModelResolver((modelId, provider) => {
+      const p = this.providers.get(provider);
+      if (!p) return undefined;
+      try {
+        return p
+          .listModels()
+          .find(
+            (m) => m.id === modelId || m.apiModelId === modelId || m.realModelId === modelId,
+          );
+      } catch {
+        return undefined;
+      }
+    });
   }
 
   private getVisibleProviderNames(): ProviderName[] {
@@ -176,6 +201,9 @@ class ProviderRegistry {
     custom?: boolean;
     /** Display label for custom providers. */
     label?: string;
+    iconPath?: string;
+    deployment?: 'cloud' | 'local' | 'hybrid';
+    description?: string;
   }> {
     const names = this.getVisibleProviderNames();
     const result: Array<{
@@ -196,6 +224,9 @@ class ProviderRegistry {
       baseUrlPlaceholder?: string;
       custom?: boolean;
       label?: string;
+      iconPath?: string;
+      deployment?: 'cloud' | 'local' | 'hybrid';
+      description?: string;
     }> = [];
 
     for (const name of names) {
@@ -209,8 +240,7 @@ class ProviderRegistry {
       const isEnabled = config ? !config.disabled : false;
       let allModels = [] as ReturnType<Provider['listModels']>;
       if (isEnabled) {
-        allModels =
-          provider?.listModels() ?? getModelsForProvider(name);
+        allModels = provider?.listModels() ?? getModelsForProvider(name);
       }
 
       const selectedModels = config?.selectedModels ?? [];
@@ -242,6 +272,8 @@ class ProviderRegistry {
                   : undefined))
         : undefined;
 
+      const display = getProviderDisplay(name);
+
       result.push({
         name,
         enabled: isEnabled,
@@ -256,6 +288,10 @@ class ProviderRegistry {
         requiresBaseUrl,
         circuitOpen,
         ...(isCustom && { custom: true, label: config?.label ?? String(name) }),
+        ...(display?.label && !isCustom && { label: display.label }),
+        ...(display?.iconPath && { iconPath: display.iconPath }),
+        ...(display?.deployment && { deployment: display.deployment }),
+        ...(display?.description && { description: display.description }),
         ...(baseUrlPlaceholder && { baseUrlPlaceholder }),
       });
     }
@@ -282,7 +318,8 @@ class ProviderRegistry {
     headers?: Record<string, string>;
     models?: string[];
   }): { success: boolean; error?: string } {
-    if (!def.baseUrl?.trim()) return { success: false, error: 'Custom provider requires a base URL' };
+    if (!def.baseUrl?.trim())
+      return { success: false, error: 'Custom provider requires a base URL' };
     const providerConfig: ProviderConfig = {
       name: def.id,
       custom: true,
@@ -485,7 +522,22 @@ class ProviderRegistry {
           if (detectClaudeCodeLogin()) return { success: true };
           return {
             success: false,
-            error: 'Claude Code is not logged in. Run "claude login" in your terminal to connect your Claude subscription.',
+            error:
+              'Claude Code is not logged in. Run "claude login" in your terminal to connect your Claude subscription.',
+          };
+        }
+        case 'grok': {
+          if (detectGrokCLILogin()) return { success: true };
+          return {
+            success: false,
+            error: 'Grok Build CLI is not logged in. Install the grok CLI and run "grok login".',
+          };
+        }
+        case 'antigravity': {
+          if (detectAntigravityCLILogin()) return { success: true };
+          return {
+            success: false,
+            error: 'Antigravity CLI is not logged in. Install agy and run "agy login".',
           };
         }
         case 'anthropic': {
@@ -642,10 +694,30 @@ class ProviderRegistry {
             headers: { Authorization: `Bearer ${resolvedCodexToken}` },
           });
         }
+        case 'jules': {
+          if (!apiKey)
+            return {
+              success: false,
+              error: 'Missing JULES_API_KEY (create at jules.google.com/settings#api)',
+            };
+          return this.verifyHttp('https://jules.googleapis.com/v1alpha/sources?pageSize=1', {
+            method: 'GET',
+            headers: { 'X-Goog-Api-Key': apiKey, 'User-Agent': 'Koryphaios/1.0' },
+          });
+        }
         case 'opencodezen': {
           if (!apiKey)
             return { success: false, error: 'Missing API key (get one at opencode.ai/auth)' };
           const base = 'https://opencode.ai/zen/v1';
+          return this.verifyBearerGet(`${base}/models`, apiKey);
+        }
+        case 'opencodego': {
+          if (!apiKey)
+            return {
+              success: false,
+              error: 'Missing API key — subscribe to OpenCode Go at opencode.ai/auth',
+            };
+          const base = 'https://opencode.ai/zen/go/v1';
           return this.verifyBearerGet(`${base}/models`, apiKey);
         }
         case 'llamacpp': {
@@ -738,8 +810,7 @@ class ProviderRegistry {
       // Auto-detect if blank
       const resolvedApiKey =
         credentials.apiKey?.trim() || existing?.apiKey || this.detectEnvKey(name) || undefined;
-      const resolvedAuthToken =
-        credentials.authToken?.trim() || existing?.authToken || undefined;
+      const resolvedAuthToken = credentials.authToken?.trim() || existing?.authToken || undefined;
       const resolvedBaseUrl =
         credentials.baseUrl?.trim() || existing?.baseUrl || this.detectEnvUrl(name) || undefined;
 
@@ -916,6 +987,17 @@ class ProviderRegistry {
       }
     }
 
+    // Proactively warm dynamic model-list caches (Claude Code / Codex / Grok Build fetch
+    // live from their CLI/backend on a lazy TTL) so a fresh app launch surfaces current
+    // models immediately instead of waiting for the first UI request to trigger it.
+    for (const provider of this.providers.values()) {
+      try {
+        provider.listModels();
+      } catch (error) {
+        providerLog.debug({ provider: provider.name, error }, 'Startup model-list warm-up failed');
+      }
+    }
+
     this.logProviderStatus();
   }
 
@@ -940,8 +1022,16 @@ class ProviderRegistry {
 
     const providerConfig: ProviderConfig = {
       name,
-      apiKey: userConfig?.apiKey ?? autoCli?.apiKey ?? (isDisabled ? undefined : this.detectEnvKey(name)) ?? undefined,
-      authToken: userConfig?.authToken ?? autoCli?.authToken ?? (isDisabled ? undefined : this.detectEnvAuthToken(name)) ?? undefined,
+      apiKey:
+        userConfig?.apiKey ??
+        autoCli?.apiKey ??
+        (isDisabled ? undefined : this.detectEnvKey(name)) ??
+        undefined,
+      authToken:
+        userConfig?.authToken ??
+        autoCli?.authToken ??
+        (isDisabled ? undefined : this.detectEnvAuthToken(name)) ??
+        undefined,
       baseUrl: userConfig?.baseUrl ?? this.detectEnvUrl(name) ?? undefined,
       selectedModels: userConfig?.selectedModels ?? [],
       hideModelSelector: userConfig?.hideModelSelector ?? false,
@@ -993,7 +1083,7 @@ class ProviderRegistry {
       case 'openai':
         return new OpenAIProvider(config);
       case 'google':
-        return config.apiKey || config.authToken ? new GeminiProvider(config) : null;
+        return config.apiKey || config.authToken ? new GoogleProvider(config) : null;
       case 'copilot':
         return new CopilotProvider(config);
       case 'codex':
@@ -1004,10 +1094,17 @@ class ProviderRegistry {
       case 'antigravity':
         // Antigravity subscription — runs the official `agy` CLI harness (no direct API calls).
         return new AntigravityProvider(config);
+      case 'jules':
+        // Google Jules — cloud async agent (REST API only, remote VMs + GitHub PRs).
+        if (config.disabled || !config.apiKey) return null;
+        return new JulesProvider(config);
       case 'kimicode':
         return new KimiCodeProvider(config);
       case 'openrouter':
         return new OpenRouterProvider(config);
+      case 'opencodego':
+        // OpenCode Go is dual-protocol — OpenCodeGoProvider dispatches per-model.
+        return new OpenCodeGoProvider(config);
       case 'groq':
         return new GroqProvider(config);
       case 'xai':
@@ -1030,7 +1127,7 @@ class ProviderRegistry {
       case 'vertexai':
         // Requires explicit API key — never auto-enable from GCP environment variables
         if (config.disabled || !config.apiKey) return null;
-        return new GeminiProvider({ ...config, name: 'vertexai' });
+        return new GoogleProvider({ ...config, name: 'vertexai' });
       case 'local':
       case 'ollama':
       case 'llamacpp':

@@ -21,6 +21,9 @@ export interface ModelDef {
   costPerMInputCached?: number;
   costPerMOutputCached?: number;
   canReason?: boolean;
+  /** Real effort levels this model supports (e.g. ['low','medium','high','xhigh']), when the
+   *  provider reports them live. Falls back to static ReasoningConfig tables when absent. */
+  reasoningLevels?: string[];
   supportsAttachments?: boolean;
   supportsStreaming?: boolean;
   tier?: ModelTier;
@@ -33,6 +36,9 @@ export interface ModelDef {
   functionCall?: boolean;
   /** For alias-based CLI models: the real resolved model ID (e.g. 'claude-opus-4-8' for alias 'opus') */
   realModelId?: string;
+  /** True when contextWindow came from (or was confirmed against) a live provider/CLI
+   *  response rather than a hand-maintained catalog entry. Trusted for UI telemetry. */
+  contextVerified?: boolean;
 }
 
 export interface ProviderConfig {

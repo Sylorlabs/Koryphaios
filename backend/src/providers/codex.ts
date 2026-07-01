@@ -1,5 +1,5 @@
 import type { ProviderConfig, ModelDef } from '@koryphaios/shared';
-import { spawn, type ChildProcessByStdio } from 'node:child_process';
+import { execFileSync, spawn, type ChildProcessByStdio } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, unlinkSync } from 'node:fs';
 import { join } from 'node:path';
 import type { Readable } from 'node:stream';
@@ -18,9 +18,34 @@ import {
 } from './types';
 
 const CODEX_BACKEND_BASE_URL = 'https://chatgpt.com/backend-api/codex';
-const CODEX_CLIENT_VERSION = '0.120.0';
+// Fallback used only when the local `codex` binary can't be probed for its real version.
+// The backend gates newer models (e.g. gpt-5.5) behind a minimal_client_version check, so
+// a stale pin here silently hides new models from listModels() — see getCodexClientVersion().
+const CODEX_CLIENT_VERSION_FALLBACK = '0.120.0';
 const CODEX_STREAM_TIMEOUT_MS = 300_000;
 const CODEX_MODELS_CACHE_MS = 5 * 60_000;
+const CODEX_CLIENT_VERSION_CACHE_MS = 60 * 60_000;
+
+let cachedClientVersion: string | null = null;
+let cachedClientVersionAt = 0;
+
+/** Read the installed `codex` CLI's real version so model-list requests aren't gated
+ *  behind a stale pinned client_version. Cached for an hour; falls back to a fixed
+ *  version string if the binary isn't found (e.g. token-only setups). */
+function getCodexClientVersion(): string {
+  if (cachedClientVersion && Date.now() - cachedClientVersionAt < CODEX_CLIENT_VERSION_CACHE_MS) {
+    return cachedClientVersion;
+  }
+  try {
+    const out = execFileSync('codex', ['--version'], { encoding: 'utf-8', timeout: 5_000 }).trim();
+    const match = out.match(/(\d+\.\d+\.\d+)/);
+    cachedClientVersion = match ? match[1] : CODEX_CLIENT_VERSION_FALLBACK;
+  } catch {
+    cachedClientVersion = CODEX_CLIENT_VERSION_FALLBACK;
+  }
+  cachedClientVersionAt = Date.now();
+  return cachedClientVersion;
+}
 
 type CodexModelRecord = {
   slug?: string;
@@ -303,6 +328,8 @@ export class CodexProvider implements Provider {
       fallback.find((model) => model.id === id || model.apiModelId === id) ?? resolveModel(id);
     const reasoningLevels = Array.isArray(item.supported_reasoning_levels)
       ? item.supported_reasoning_levels
+          .map((level) => (typeof level === 'string' ? level : level?.effort))
+          .filter((level): level is string => !!level)
       : [];
     const modalities = Array.isArray(item.input_modalities) ? item.input_modalities : [];
     const speedTiers = Array.isArray(item.additional_speed_tiers)
@@ -318,10 +345,12 @@ export class CodexProvider implements Provider {
         typeof item.context_window === 'number' && item.context_window > 0
           ? item.context_window
           : (existing?.contextWindow ?? 0),
+      contextVerified: typeof item.context_window === 'number' && item.context_window > 0,
       maxOutputTokens: existing?.maxOutputTokens ?? 32_768,
       costPerMInputTokens: existing?.costPerMInputTokens ?? 0,
       costPerMOutputTokens: existing?.costPerMOutputTokens ?? 0,
       canReason: reasoningLevels.length > 0 || existing?.canReason === true,
+      reasoningLevels: reasoningLevels.length > 0 ? reasoningLevels : existing?.reasoningLevels,
       supportsAttachments: modalities.includes('image') || existing?.supportsAttachments === true,
       supportsStreaming: existing?.supportsStreaming ?? true,
       tier:
@@ -335,7 +364,7 @@ export class CodexProvider implements Provider {
   }
 
   private modelsUrl(): string {
-    return `${CODEX_BACKEND_BASE_URL}/models?client_version=${encodeURIComponent(CODEX_CLIENT_VERSION)}`;
+    return `${CODEX_BACKEND_BASE_URL}/models?client_version=${encodeURIComponent(getCodexClientVersion())}`;
   }
 
   private resolveAuthToken(): string | null {
@@ -364,6 +393,10 @@ export class CodexProvider implements Provider {
    * a "session expired" error.
    */
   private async fetchWith401Recovery(request: StreamRequest): Promise<Response | Error> {
+    const allowedReasoningLevels = this.listModels().find(
+      (m) => m.id === request.model || m.apiModelId === request.model,
+    )?.reasoningLevels;
+
     const attempt = async (): Promise<Response | Error> => {
       try {
         return await withRetry(
@@ -374,7 +407,7 @@ export class CodexProvider implements Provider {
                 Accept: 'text/event-stream',
                 'Content-Type': 'application/json',
               }),
-              body: JSON.stringify(buildResponsesRequest(request)),
+              body: JSON.stringify(buildResponsesRequest(request, allowedReasoningLevels)),
               signal: withTimeoutSignal(request.signal, CODEX_STREAM_TIMEOUT_MS),
             });
 
@@ -411,7 +444,10 @@ export class CodexProvider implements Provider {
   }
 }
 
-function buildResponsesRequest(request: StreamRequest): Record<string, unknown> {
+function buildResponsesRequest(
+  request: StreamRequest,
+  allowedReasoningLevels?: string[],
+): Record<string, unknown> {
   return {
     model: request.model,
     instructions: request.systemPrompt || '',
@@ -419,7 +455,7 @@ function buildResponsesRequest(request: StreamRequest): Record<string, unknown> 
     tools: (request.tools ?? []).map(convertToolToCodexTool),
     tool_choice: 'auto',
     parallel_tool_calls: true,
-    reasoning: buildReasoning(request.reasoningLevel),
+    reasoning: buildReasoning(request.reasoningLevel, allowedReasoningLevels),
     store: false,
     stream: true,
     include: [],
@@ -446,14 +482,33 @@ function convertMessageToCodexInput(message: ProviderMessage): Array<Record<stri
     ];
   }
 
-  const content = convertContentBlocks(message.content);
-  if (content.length === 0) return [];
+  // --- Assistant messages: content blocks use output_text/refusal types ---
+  if (message.role === 'assistant') {
+    const text = flattenMessageText(message.content);
+    const content: Array<Record<string, unknown>> = text
+      ? [{ type: 'output_text', text }]
+      : [];
+    if (content.length === 0) return [];
+    return [
+      {
+        type: 'message',
+        role: 'assistant',
+        content,
+      },
+    ];
+  }
 
+  // --- User / system messages: use plain string content (not array of blocks) ---
+  // The Codex Responses API now rejects content blocks with type "input_text";
+  // only "output_text" and "refusal" are accepted. Instead, use the EasyInputMessage
+  // format where content is a simple string for user/system roles.
+  const text = flattenMessageText(message.content);
+  if (!text.trim()) return [];
   return [
     {
       type: 'message',
       role: message.role,
-      content,
+      content: text,
     },
   ];
 }
@@ -461,15 +516,19 @@ function convertMessageToCodexInput(message: ProviderMessage): Array<Record<stri
 function convertContentBlocks(
   content: string | ProviderContentBlock[],
 ): Array<Record<string, unknown>> {
+  // NOTE: This function is kept for potential image-handling use but the
+  // Codex Responses API now rejects content blocks with type "input_text".
+  // Only "output_text" / "refusal" are valid content block types.
+  // New code should use convertMessageToCodexInput which handles this correctly.
   if (typeof content === 'string') {
     const text = content.trim();
-    return text ? [{ type: 'input_text', text }] : [];
+    return text ? [{ type: 'output_text', text }] : [];
   }
 
   const blocks: Array<Record<string, unknown>> = [];
   for (const block of content) {
     if (block.type === 'text' && block.text) {
-      blocks.push({ type: 'input_text', text: block.text });
+      blocks.push({ type: 'output_text', text: block.text });
       continue;
     }
 
@@ -493,10 +552,19 @@ function flattenMessageText(content: string | ProviderContentBlock[]): string {
     .join('\n');
 }
 
-function buildReasoning(reasoningLevel?: string): { effort?: string } | undefined {
+// Used only when the model's real supported_reasoning_levels aren't known (e.g. a bare
+// alias with no cached listModels() entry yet) — otherwise the live per-model list rules.
+const CODEX_REASONING_LEVELS_FALLBACK = ['none', 'minimal', 'low', 'medium', 'high', 'xhigh'];
+
+function buildReasoning(
+  reasoningLevel: string | undefined,
+  allowedLevels?: string[],
+): { effort?: string } | undefined {
   if (!reasoningLevel) return undefined;
   const normalized = reasoningLevel.toLowerCase();
-  if (!['none', 'minimal', 'low', 'medium', 'high', 'xhigh'].includes(normalized)) {
+  const allowed =
+    allowedLevels && allowedLevels.length > 0 ? allowedLevels : CODEX_REASONING_LEVELS_FALLBACK;
+  if (!allowed.includes(normalized)) {
     return undefined;
   }
   return { effort: normalized };

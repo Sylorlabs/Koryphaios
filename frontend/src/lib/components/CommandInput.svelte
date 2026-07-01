@@ -123,16 +123,33 @@
     disabled ? null : getModelConfigurationWarning(wsStore.providers, selectedModel),
   );
 
+  /** "200k" / "1M" / "272k" — compact real context window for the picker. */
+  function formatContextSize(tokens: number | undefined): string {
+    if (!tokens || tokens <= 0) return '';
+    if (tokens >= 1_000_000) {
+      const m = tokens / 1_000_000;
+      return `${Number.isInteger(m) ? m : m.toFixed(1)}M`;
+    }
+    return `${Math.round(tokens / 1000)}k`;
+  }
+
   let availableModels = $derived.by(() => {
-    const models: Array<{ label: string; value: string; provider: string }> = [];
+    const models: Array<{ label: string; value: string; provider: string; contextLabel?: string }> = [];
     for (const p of wsStore.providers) {
       if (p.authenticated) {
         const enabledIds = new Set(p.models);
-        const catalog = (p as any).allAvailableModels as Array<{ id: string; name: string }> | undefined;
+        const catalog = (p as any).allAvailableModels as Array<{ id: string; name: string; contextWindow?: number; contextVerified?: boolean }> | undefined;
         if (catalog && catalog.length > 0) {
           for (const m of catalog) {
             if (enabledIds.size === 0 || enabledIds.has(m.id)) {
-              models.push({ label: `(${providerLabel(p.name)}) ${m.name}`, value: `${p.name}:${m.id}`, provider: p.name });
+              models.push({
+                label: `(${providerLabel(p.name)}) ${m.name}`,
+                value: `${p.name}:${m.id}`,
+                provider: p.name,
+                // Only show context sizes the provider/CLI actually reported
+                // (or that chain to a verified catalog) — never a guess.
+                contextLabel: m.contextVerified ? formatContextSize(m.contextWindow) : '',
+              });
             }
           }
         } else {
@@ -768,7 +785,14 @@
                   style="color: {selectedModel === model.value ? 'var(--color-accent)' : 'var(--color-text-secondary)'};"
                   onclick={() => selectModel(model.value)}
                 >
-                  <span>{model.label}</span>
+                  <span class="flex-1 min-w-0 truncate">{model.label}</span>
+                  {#if model.contextLabel}
+                    <span
+                      class="text-[10px] tabular-nums px-1.5 py-0.5 rounded shrink-0"
+                      style="background: var(--color-surface-3); color: var(--color-text-muted);"
+                      title="Context window (reported by the provider)"
+                    >{model.contextLabel}</span>
+                  {/if}
                 </button>
               {/each}
             {/if}

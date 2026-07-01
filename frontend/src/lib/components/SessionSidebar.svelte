@@ -23,23 +23,11 @@
   // Track which session we last loaded feed for, so we load when active changes (e.g. new session from +)
   let lastLoadedSessionId = $state<string>('');
 
-  // Whenever the store's active session changes, sync and load its feed (including when + creates a new session)
   $effect(() => {
-    // Use untrack to prevent this effect from depending on wsStore state reads
-    const activeId = untrack(() => sessionStore.activeSessionId);
-    if (!activeId) {
-      // Clear feed when no active session (e.g., all sessions deleted)
-      // Only clear if we haven't already cleared for this state
-      if (lastLoadedSessionId !== '') {
-        wsStore.clearFeed();
-        lastLoadedSessionId = '';
-      }
-      return;
+    // Keep currentSessionId in sync if needed by other parts of the sidebar
+    if (sessionStore.activeSessionId && sessionStore.activeSessionId !== currentSessionId) {
+      currentSessionId = sessionStore.activeSessionId;
     }
-    if (activeId !== currentSessionId) currentSessionId = activeId;
-    if (activeId === lastLoadedSessionId) return;
-    lastLoadedSessionId = activeId;
-    void loadHistory(activeId);
   });
 
   async function handleCreateSession() {
@@ -54,10 +42,8 @@
 
   async function selectSession(id: string) {
     if (sessionStore.activeSessionId === id) return;
-    lastLoadedSessionId = id;
     sessionStore.activeSessionId = id;
-    wsStore.subscribeToSession(id);
-    await loadHistory(id);
+    // Note: loadHistory is now handled globally in +page.svelte based on activeSessionId changes
   }
 
   function startRename(id: string, currentTitle: string) {
@@ -84,7 +70,9 @@
 
   function confirmDelete(e: MouseEvent, id: string) {
     e.stopPropagation();
-    
+    // Deleting a row that's mid-rename must not leave the editor open.
+    if (editingId === id) cancelRename();
+
     // Shift-click bypasses all confirmation
     if (e.shiftKey) {
       sessionStore.deleteSession(id);
@@ -195,7 +183,10 @@
                     bind:value={editTitle}
                     maxlength={80}
                     oninput={() => { if (editTitle.trim()) editError = false; }}
+                    onclick={(e) => e.stopPropagation()}
+                    ondblclick={(e) => e.stopPropagation()}
                     onkeydown={(e) => {
+                      e.stopPropagation();
                       if (e.key === 'Enter') saveRename(session.id);
                       if (e.key === 'Escape') cancelRename();
                     }}
@@ -241,6 +232,7 @@
                   class="p-1.5 rounded-lg hover:bg-[var(--color-surface-4)] transition-colors"
                   style="color: var(--color-text-muted);"
                   onclick={(e) => { e.stopPropagation(); startRename(session.id, session.title); }}
+                  ondblclick={(e) => e.stopPropagation()}
                   title="Rename"
                   aria-label="Rename session"
                 >
@@ -251,6 +243,7 @@
                   class="p-1.5 rounded-lg hover:bg-[var(--color-surface-4)] transition-colors"
                   style="color: {confirmDeleteId === session.id ? 'var(--color-error)' : 'var(--color-text-muted)'};"
                   onclick={(e) => confirmDelete(e, session.id)}
+                  ondblclick={(e) => e.stopPropagation()}
                   title={confirmDeleteId === session.id ? 'Click again to confirm' : 'Delete (Shift+Click to skip confirmation)'}
                   aria-label="Delete session"
                 >
