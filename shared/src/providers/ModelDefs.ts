@@ -36,6 +36,9 @@ export interface ModelDef {
   functionCall?: boolean;
   /** For alias-based CLI models: the real resolved model ID (e.g. 'claude-opus-4-8' for alias 'opus') */
   realModelId?: string;
+  /** True when contextWindow came from (or was confirmed against) a live provider/CLI
+   *  response rather than a hand-maintained catalog entry. Trusted for UI telemetry. */
+  contextVerified?: boolean;
 }
 
 export interface ProviderConfig {

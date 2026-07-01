@@ -70,7 +70,9 @@
 
   function confirmDelete(e: MouseEvent, id: string) {
     e.stopPropagation();
-    
+    // Deleting a row that's mid-rename must not leave the editor open.
+    if (editingId === id) cancelRename();
+
     // Shift-click bypasses all confirmation
     if (e.shiftKey) {
       sessionStore.deleteSession(id);
@@ -181,7 +183,10 @@
                     bind:value={editTitle}
                     maxlength={80}
                     oninput={() => { if (editTitle.trim()) editError = false; }}
+                    onclick={(e) => e.stopPropagation()}
+                    ondblclick={(e) => e.stopPropagation()}
                     onkeydown={(e) => {
+                      e.stopPropagation();
                       if (e.key === 'Enter') saveRename(session.id);
                       if (e.key === 'Escape') cancelRename();
                     }}
@@ -227,6 +232,7 @@
                   class="p-1.5 rounded-lg hover:bg-[var(--color-surface-4)] transition-colors"
                   style="color: var(--color-text-muted);"
                   onclick={(e) => { e.stopPropagation(); startRename(session.id, session.title); }}
+                  ondblclick={(e) => e.stopPropagation()}
                   title="Rename"
                   aria-label="Rename session"
                 >
@@ -237,6 +243,7 @@
                   class="p-1.5 rounded-lg hover:bg-[var(--color-surface-4)] transition-colors"
                   style="color: {confirmDeleteId === session.id ? 'var(--color-error)' : 'var(--color-text-muted)'};"
                   onclick={(e) => confirmDelete(e, session.id)}
+                  ondblclick={(e) => e.stopPropagation()}
                   title={confirmDeleteId === session.id ? 'Click again to confirm' : 'Delete (Shift+Click to skip confirmation)'}
                   aria-label="Delete session"
                 >

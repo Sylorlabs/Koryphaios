@@ -52,6 +52,7 @@ import {
   resolveModel,
   getModelsForProvider,
   isLegacyModel,
+  registerLiveModelResolver,
   type StreamRequest,
   type ProviderEvent,
   type Provider,
@@ -90,6 +91,21 @@ class ProviderRegistry {
 
   constructor(private config?: KoryphaiosConfig) {
     this.initializeAll();
+    // Let resolveTrustedContextWindow consult live-discovered model defs
+    // (context windows the provider API / CLI reported itself).
+    registerLiveModelResolver((modelId, provider) => {
+      const p = this.providers.get(provider);
+      if (!p) return undefined;
+      try {
+        return p
+          .listModels()
+          .find(
+            (m) => m.id === modelId || m.apiModelId === modelId || m.realModelId === modelId,
+          );
+      } catch {
+        return undefined;
+      }
+    });
   }
 
   private getVisibleProviderNames(): ProviderName[] {

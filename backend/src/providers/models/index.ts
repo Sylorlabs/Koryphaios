@@ -98,20 +98,68 @@ const VERIFIED_CONTEXT_PROVIDERS = new Set<ProviderName>([
 ]);
 
 /**
+ * Hook for looking up LIVE model definitions (discovered from a provider API or
+ * CLI at runtime). Registered by the provider registry so this module stays free
+ * of an import cycle. Live defs carrying `contextVerified` beat the static
+ * catalog and the provider allowlist.
+ */
+type LiveModelResolver = (modelId: string, provider: ProviderName) => ModelDef | undefined;
+let liveModelResolver: LiveModelResolver | null = null;
+
+export function registerLiveModelResolver(resolver: LiveModelResolver): void {
+  liveModelResolver = resolver;
+}
+
+function hasUsableContext(model: ModelDef | undefined): model is ModelDef {
+  return !!model && Number.isFinite(model.contextWindow) && model.contextWindow > 0;
+}
+
+/**
  * Resolve trustworthy context metadata for UI telemetry.
+ *
+ * Trust order:
+ *  1. A live-discovered model def whose contextWindow the provider/CLI reported
+ *     itself (`contextVerified`).
+ *  2. A static catalog entry from a provider with verified documentation.
+ *  3. For alias CLI models (claude-code etc.): the REAL underlying model the
+ *     alias resolves to, looked up in the verified catalog via `realModelId`.
  */
 export function resolveTrustedContextWindow(
   modelId: string,
   provider: ProviderName,
 ): { contextWindow?: number; contextKnown: boolean } {
+  // 1. Live provider/CLI-reported context window.
+  const live = liveModelResolver?.(modelId, provider);
+  if (live?.contextVerified && hasUsableContext(live)) {
+    return { contextWindow: live.contextWindow, contextKnown: true };
+  }
+
   const model = resolveModel(modelId);
   if (!model) return { contextKnown: false };
   if (model.isGeneric) return { contextKnown: false };
   if (model.provider !== provider) return { contextKnown: false };
-  if (!VERIFIED_CONTEXT_PROVIDERS.has(provider)) return { contextKnown: false };
-  if (!Number.isFinite(model.contextWindow) || model.contextWindow <= 0)
-    return { contextKnown: false };
-  return { contextWindow: model.contextWindow, contextKnown: true };
+
+  // 2. Verified static catalog.
+  if (VERIFIED_CONTEXT_PROVIDERS.has(provider) && hasUsableContext(model)) {
+    return { contextWindow: model.contextWindow, contextKnown: true };
+  }
+
+  // 3. CLI alias → real model chain (use the live-resolved realModelId when the
+  //    probe has run, else the catalog's).
+  const realId = live?.realModelId ?? model.realModelId;
+  if (realId) {
+    const real = resolveModel(realId);
+    if (
+      real &&
+      !real.isGeneric &&
+      VERIFIED_CONTEXT_PROVIDERS.has(real.provider) &&
+      hasUsableContext(real)
+    ) {
+      return { contextWindow: real.contextWindow, contextKnown: true };
+    }
+  }
+
+  return { contextKnown: false };
 }
 
 /**

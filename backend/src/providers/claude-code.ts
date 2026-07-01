@@ -20,6 +20,7 @@ import {
   type ProviderMessage,
   type StreamRequest,
   getModelsForProvider,
+  resolveModel,
 } from './types';
 import { detectClaudeCodeLogin } from './auth-utils';
 import { providerLog } from '../logger';
@@ -118,10 +119,25 @@ function refreshModelsInBackground(): void {
       const models: ModelDef[] = ClaudeCodeModels.map((base, i) => {
         const realId = results[i];
         if (!realId) return base;
+        // The probe confirmed which real Anthropic model the alias resolves to —
+        // inherit that model's documented context window, output limit, and
+        // reasoning capability instead of the wrapper's hardcoded guesses.
+        const real = resolveModel(realId);
+        const realTrusted = !!real && !real.isGeneric && real.provider === 'anthropic';
         return {
           ...base,
           realModelId: realId,
           name: realIdToName(realId),
+          ...(realTrusted && real.contextWindow > 0
+            ? { contextWindow: real.contextWindow, contextVerified: true }
+            : {}),
+          ...(realTrusted && real.maxOutputTokens > 0
+            ? { maxOutputTokens: real.maxOutputTokens }
+            : {}),
+          ...(realTrusted && real.canReason !== undefined ? { canReason: real.canReason } : {}),
+          ...(realTrusted && real.reasoningLevels?.length
+            ? { reasoningLevels: real.reasoningLevels }
+            : {}),
         };
       });
       cachedModels = models;

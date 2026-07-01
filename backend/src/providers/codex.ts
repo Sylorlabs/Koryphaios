@@ -345,6 +345,7 @@ export class CodexProvider implements Provider {
         typeof item.context_window === 'number' && item.context_window > 0
           ? item.context_window
           : (existing?.contextWindow ?? 0),
+      contextVerified: typeof item.context_window === 'number' && item.context_window > 0,
       maxOutputTokens: existing?.maxOutputTokens ?? 32_768,
       costPerMInputTokens: existing?.costPerMInputTokens ?? 0,
       costPerMOutputTokens: existing?.costPerMOutputTokens ?? 0,

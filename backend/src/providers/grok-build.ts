@@ -168,13 +168,19 @@ function refreshModelsInBackground(): void {
   if (!bin) return;
 
   modelsFetchInProgress = true;
-  fetchGrokModels(bin)
-    .then((models) => {
+  Promise.all([fetchGrokModels(bin), probeGrokReasoningLevels(bin)])
+    .then(([models, reasoningLevels]) => {
       if (models.length > 0) {
-        cachedModels = models;
+        cachedModels = models.map((m) =>
+          m.canReason && reasoningLevels?.length ? { ...m, reasoningLevels } : m,
+        );
         cachedModelsAt = Date.now();
         providerLog.debug(
-          { provider: 'grok', models: models.map((m) => m.apiModelId ?? m.id) },
+          {
+            provider: 'grok',
+            models: models.map((m) => m.apiModelId ?? m.id),
+            reasoningLevels,
+          },
           'Grok Build model list refreshed',
         );
       }
@@ -185,6 +191,53 @@ function refreshModelsInBackground(): void {
     .finally(() => {
       modelsFetchInProgress = false;
     });
+}
+
+// The grok CLI does not document its effort values anywhere machine-readable,
+// but it enumerates them in the invalid-value error, e.g.:
+//   error: invalid value 'x' for '--reasoning-effort <EFFORT>': invalid reasoning
+//   effort: "x" (expected one of: none, minimal, low, medium, high, xhigh)
+// Probe with a bogus value (clap rejects it before any network call) and parse.
+let cachedReasoningLevels: string[] | null = null;
+
+async function probeGrokReasoningLevels(bin: string): Promise<string[] | null> {
+  if (cachedReasoningLevels) return cachedReasoningLevels;
+  return new Promise((resolve) => {
+    let settled = false;
+    const done = (levels: string[] | null) => {
+      if (settled) return;
+      settled = true;
+      if (levels?.length) cachedReasoningLevels = levels;
+      resolve(levels);
+    };
+
+    const child = spawn(bin, ['--reasoning-effort', '__koryphaios_probe__', '-p', ''], {
+      stdio: ['ignore', 'ignore', 'pipe'],
+      env: { ...process.env },
+    });
+    let err = '';
+    child.stderr.on('data', (c: Buffer) => (err += c.toString()));
+    child.once('error', () => done(null));
+    child.once('exit', () => {
+      const m = err.match(/expected one of:\s*([a-z0-9_\-,\s]+)\)/i);
+      done(
+        m
+          ? m[1]
+              .split(',')
+              .map((s) => s.trim())
+              .filter(Boolean)
+          : null,
+      );
+    });
+    setTimeout(() => {
+      try {
+        child.kill('SIGTERM');
+      } catch {
+        /* already gone */
+      }
+      done(null);
+    }, 8_000);
+  });
 }
 
 async function fetchGrokModels(bin: string): Promise<ModelDef[]> {

@@ -16,6 +16,7 @@ import { withRetry, withTimeoutSignal } from './utils';
 import { createUsageInterceptingFetch } from '../credit-accountant';
 import { providerLog } from '../logger';
 import {
+  enrichFromRemoteMetadata,
   isLikelyChatModelId,
   isModelListCacheFresh,
   mergeModelLists,
@@ -72,6 +73,19 @@ export class OpenAIProvider implements Provider {
     return this.cachedModels ?? fallback;
   }
 
+  /**
+   * Many OpenAI-compatible /models endpoints return capability metadata beyond
+   * the bare id (OpenRouter: `context_length`; GitHub Copilot:
+   * `capabilities.limits.max_context_window_tokens` / `max_output_tokens`,
+   * `capabilities.supports.vision`; various gateways: `context_window`,
+   * `display_name`). The SDK preserves those extra fields on the raw objects —
+   * ingest them so the UI shows the provider's REAL numbers instead of the
+   * hand-maintained catalog's.
+   */
+  protected enrichDiscoveredModel(raw: unknown, def: ModelDef): ModelDef {
+    return enrichFromRemoteMetadata(raw, def);
+  }
+
   private refreshModelsInBackground(fallback: ModelDef[]) {
     if (this.fetchInProgress) return;
     this.fetchInProgress = true;
@@ -84,7 +98,7 @@ export class OpenAIProvider implements Provider {
         for await (const model of response) {
           const id = model.id;
           if (!id || !isLikelyChatModelId(id, this.name)) continue;
-          discovered.push(modelFromRemoteId(id, this.name, fallback));
+          discovered.push(this.enrichDiscoveredModel(model, modelFromRemoteId(id, this.name, fallback)));
         }
         if (discovered.length > 0) {
           this.cachedModels = mergeModelLists(fallback, discovered);
