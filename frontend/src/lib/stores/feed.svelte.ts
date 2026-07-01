@@ -284,7 +284,12 @@ async function loadSessionMessages(
     console.warn('Failed to fetch timeline:', err);
   }
 
-  feed = messages.map((m) => {
+  // The user may have switched to another session while the timeline
+  // fetch was in flight; writing this (now stale) history would show the
+  // wrong chat's messages in the current chat.
+  if (sessionStore.activeSessionId !== sessionId) return;
+
+  const history = messages.map((m) => {
     const ghost = timeline.find((t) => t.messageId === m.id);
 
     return {
@@ -299,6 +304,10 @@ async function loadSessionMessages(
       ghostHash: ghost?.hash,
     };
   });
+  // Anything already in the feed streamed in live while we awaited the
+  // timeline fetch (clearFeed ran at the top) — keep it after history
+  // instead of wiping it.
+  feed = [...history, ...feed];
   feedVersion++;
   rebuildGroupedFeedCache();
 }

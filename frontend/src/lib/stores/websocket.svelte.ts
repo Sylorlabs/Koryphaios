@@ -50,9 +50,12 @@ let koryThought = $state<string>('');
 let koryPhase = $state<string>('');
 let isYoloMode = $state<boolean>(false);
 let pendingPermissions = $state<PermissionRequest[]>([]);
-let pendingQuestion = $state<{ question: string; options: string[]; allowOther: boolean } | null>(
-  null,
-);
+// Questions are per-session: a background chat's ask_user must survive
+// until the user switches back to it, and answering must target the
+// session that asked — not whichever chat happens to be open.
+let pendingQuestions = $state<
+  Map<string, { question: string; options: string[]; allowOther: boolean }>
+>(new Map());
 let sessionChanges = $state<Map<string, ChangeSummary[]>>(new Map());
 
 interface DetectedContextFile {
@@ -271,6 +274,9 @@ function handleMessage(msg: WSMessage) {
       const p = msg.payload as StreamThinkingPayload;
       agentStore.appendAgentThinking(p.agentId, p.thinking, msg.sessionId ?? undefined);
       if (isForActiveSession) {
+        // The ephemeral "Analyzing…" row must clear as soon as real
+        // thinking starts streaming, same as it does for content deltas.
+        feedStore.removeAnalyzingThoughtEntries();
         feedStore.accumulateFeedEntry({
           timestamp: msg.timestamp,
           type: 'thinking',
@@ -367,7 +373,12 @@ function handleMessage(msg: WSMessage) {
         const prior = activeFileEdits.get(p.path);
         const existing = prior && !prior.done ? prior : undefined;
         if (existing) {
-          existing.content += p.delta;
+          // $state does not proxy Map contents — reassign the Map so the
+          // live edit preview re-renders on every streamed delta instead
+          // of freezing until file_complete.
+          const next = new Map(activeFileEdits);
+          next.set(p.path, { ...existing, content: existing.content + p.delta });
+          activeFileEdits = next;
         } else {
           const t = fileEditTimers.get(p.path);
           if (t) {
@@ -450,12 +461,15 @@ function handleMessage(msg: WSMessage) {
 
     case 'kory.ask_user': {
       const p = msg.payload as { question: string; options: string[]; allowOther: boolean };
-      if (isForActiveSession) {
-        pendingQuestion = {
+      const sid = msg.sessionId ?? activeSessionId;
+      if (sid) {
+        const next = new Map(pendingQuestions);
+        next.set(sid, {
           question: p.question,
           options: p.options,
           allowOther: p.allowOther,
-        };
+        });
+        pendingQuestions = next;
       }
       break;
     }
@@ -495,21 +509,29 @@ function handleMessage(msg: WSMessage) {
     case 'session.changes': {
       const p = msg.payload as KorySessionChangesPayload;
       if (msg.sessionId) {
-        sessionChanges.set(msg.sessionId, p.changes);
+        // Reassign — Map mutation alone is not reactive under $state.
+        const next = new Map(sessionChanges);
+        next.set(msg.sessionId, p.changes);
+        sessionChanges = next;
       }
       break;
     }
 
     case 'session.accept_changes': {
-      if (msg.sessionId) {
-        sessionChanges.delete(msg.sessionId);
+      if (msg.sessionId && sessionChanges.has(msg.sessionId)) {
+        const next = new Map(sessionChanges);
+        next.delete(msg.sessionId);
+        sessionChanges = next;
       }
       break;
     }
 
     case 'permission.request': {
       const p = msg.payload as PermissionRequest;
-      if (isForActiveSession) {
+      // Always store — requests carry their own sessionId and the dialog
+      // filters by active session. Dropping background sessions' requests
+      // left those chats hanging on an approval nobody ever saw.
+      if (!pendingPermissions.some((perm) => perm.id === p.id)) {
         pendingPermissions = [...pendingPermissions, p];
       }
       break;
@@ -654,8 +676,13 @@ function connect(url?: string) {
       reconnectAttempts = 0;
       hasShownMalformedWsMessage = false;
       wsConnection = ws;
+      // Re-subscribe to every session viewed this app run, not just the
+      // active one — the server keeps per-connection subscriptions, so a
+      // reconnect would otherwise silently stop delivering events for
+      // background chats that are still running.
       const activeSid = sessionStore.activeSessionId;
-      if (activeSid) subscribeToSession(activeSid);
+      if (activeSid) subscribedSessions.add(activeSid);
+      for (const sid of subscribedSessions) subscribeToSession(sid);
     };
 
     ws.onmessage = (event) => {
@@ -713,8 +740,14 @@ function scheduleReconnect(url?: string) {
   reconnectTimer = setTimeout(() => connect(url), delay);
 }
 
+// Sessions this client has subscribed to during this app run. Used to
+// restore server-side subscriptions after a reconnect.
+const subscribedSessions = new Set<string>();
+
 function subscribeToSession(sessionId: string) {
-  if (!sessionId || wsConnection?.readyState !== WebSocket.OPEN) return;
+  if (!sessionId) return;
+  subscribedSessions.add(sessionId);
+  if (wsConnection?.readyState !== WebSocket.OPEN) return;
   wsConnection.send(
     JSON.stringify({ type: 'subscribe_session', sessionId, timestamp: Date.now() }),
   );
@@ -820,7 +853,11 @@ function sendUserInput(sessionId: string, selection: string, text?: string) {
           timestamp: Date.now(),
         }),
       );
-      pendingQuestion = null;
+      if (pendingQuestions.has(sessionId)) {
+        const next = new Map(pendingQuestions);
+        next.delete(sessionId);
+        pendingQuestions = next;
+      }
     } catch (err) {
       console.error('[ws] Failed to send user_input, keeping question pending', err);
       toastStore.error('Failed to send answer. Please try again.');
@@ -952,7 +989,7 @@ export const wsStore = {
     return pendingPermissions;
   },
   get pendingQuestion() {
-    return pendingQuestion;
+    return pendingQuestions.get(sessionStore.activeSessionId) ?? null;
   },
   get sessionChanges() {
     return sessionChanges;

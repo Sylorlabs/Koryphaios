@@ -1,7 +1,9 @@
 <script lang="ts">
   import { wsStore } from '$lib/stores/websocket.svelte';
   import { appStore } from '$lib/stores/app.svelte';
+  import { sessionStore } from '$lib/stores/sessions.svelte';
   import { isMac } from '$lib/utils/platform';
+  import { untrack } from 'svelte';
   import { fade } from 'svelte/transition';
   import {
     MessageSquare,
@@ -63,19 +65,42 @@
   );
   const autoScrollCtl = createAutoScroll(() => scrollEl, { threshold: 100 });
 
-  // Total content length, including text length of the last (streaming)
-  // entry. Watching both length *and* the streaming entry's text length
-  // makes the effect re-fire on per-token updates during streaming.
+  // Attach the scroll/observer listeners whenever the container element
+  // changes (e.g. empty-state ↔ VirtualList). We do this in an effect
+  // that reads `scrollEl` and explicitly calls `attach()`. The `attach`
+  // call is not tracked, so it cannot cause an update loop.
+  $effect(() => {
+    void scrollEl;
+    untrack(() => autoScrollCtl.attach());
+  });
+
+  // Per-token streaming signal: tracks the text length of the last
+  // (streaming) entry so we can keep the view pinned during fast
+  // streaming.
   let streamingTextSig = $derived.by(() => {
     const last = filteredFeed[filteredFeed.length - 1];
     return last?.text?.length ?? 0;
   });
+
+  // Pin on per-token text growth (no counter increment).
   $effect(() => {
-    // Re-pin whenever the feed grows OR the last entry's text grows
-    // (per-token streaming).
-    void filteredFeed.length;
     void streamingTextSig;
     autoScrollCtl.requestPin();
+  });
+
+  // Bump the "N new messages" counter only when a *new entry* is added
+  // to the feed (not on per-token updates of an existing entry).
+  $effect(() => {
+    void filteredFeed.length;
+    autoScrollCtl.notifyNewEntry();
+  });
+
+  // Switching chats must not inherit the previous chat's scroll state
+  // (follow=false + a stale "N new" badge). Re-engage follow and land at
+  // the bottom of the newly opened chat.
+  $effect(() => {
+    void sessionStore.activeSessionId;
+    untrack(() => autoScrollCtl.jumpToBottom('instant'));
   });
 
   function estimateFeedHeight(entry: FeedEntryLocal): number {

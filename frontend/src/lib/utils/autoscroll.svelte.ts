@@ -18,7 +18,7 @@
 //   - Attaches a ResizeObserver to the scroll container so that height
 //     changes (streaming tokens resizing rows, items mounting, etc.) also
 //     keep the view pinned when `follow` is on. The resize observer never
-//   flips `follow` on or off — it only re-pins when already following.
+//     flips `follow` on or off — it only re-pins when already following.
 //   - Tracks an `unseenCount` so callers can show "N new messages" badges
 //     in the Jump-to-bottom pill.
 //
@@ -31,6 +31,8 @@
 //       void filteredFeed.length;
 //       auto.requestPin();
 //     });
+
+import { untrack } from 'svelte';
 
 export interface AutoScrollOptions {
   /** Pixels from bottom that still count as "at the bottom". Default 100. */
@@ -50,11 +52,14 @@ export interface AutoScrollHandle {
    *  scrolled away. Resets to 0 when the user returns to the bottom or
    *  calls jumpToBottom(). */
   readonly unseenCount: number;
-  /** Call this when new content arrives (new entry, new token, new tool
-   *  call, etc.). If `follow` is on, it pins to the bottom. If `follow`
-   *  is off, it increments `unseenCount` so the caller can show a
-   *  "N new" pill. */
+  /** Call this whenever content grows (per-token or per-entry) so the
+   *  view stays pinned to the bottom if `follow` is on. Does NOT touch
+   *  the unseen counter. */
   requestPin: () => void;
+  /** Call this when a *new entry* (not a per-token update) is added to
+   *  the feed. Increments `unseenCount` if the user is scrolled away, so
+   *  the caller can show a "N new" pill. */
+  notifyNewEntry: () => void;
   /** Force the view to the bottom and re-enable follow mode. Used by the
    *  "Jump to bottom" button. */
   jumpToBottom: (behavior?: ScrollBehavior) => void;
@@ -62,6 +67,11 @@ export interface AutoScrollHandle {
   setFollow: (v: boolean) => void;
   /** Read the current distance from the bottom in pixels. */
   getDistanceFromBottom: () => number;
+  /** Attach the scroll/observer listeners to the current container.
+   *  Call this after the container ref binds, or whenever the container
+   *  element changes (e.g. switching between empty-state and virtual
+   *  list). */
+  attach: () => void;
   /** Tear down observers. */
   destroy: () => void;
 }
@@ -79,7 +89,6 @@ export function createAutoScroll(
   let rafId: number | null = null;
   let resizeObserver: ResizeObserver | null = null;
   let mutationObserver: MutationObserver | null = null;
-  let scrollHandler: ((e: Event) => void) | null = null;
   let currentEl: HTMLDivElement | null = null;
 
   function getEl(): HTMLDivElement | undefined {
@@ -111,21 +120,30 @@ export function createAutoScroll(
 
   function onUserScroll() {
     if (programmaticScroll) return;
-    const dist = getDistanceFromBottom();
-    const wasFollowing = follow;
-    const shouldFollow = dist <= threshold;
-    if (wasFollowing && !shouldFollow) {
-      follow = false;
-    } else if (!wasFollowing && shouldFollow) {
-      // User scrolled back to the bottom — re-engage and clear the
-      // unseen counter.
-      follow = true;
-      if (unseenCount > 0) unseenCount = 0;
-    }
+    // untrack: this handler runs in response to a real DOM event, not
+    // inside an effect. Reading `follow` here is a state READ, which is
+    // fine — but we use untrack defensively to make it explicit.
+    untrack(() => {
+      const dist = getDistanceFromBottom();
+      const wasFollowing = follow;
+      const shouldFollow = dist <= threshold;
+      if (wasFollowing && !shouldFollow) {
+        follow = false;
+      } else if (!wasFollowing && shouldFollow) {
+        // User scrolled back to the bottom — re-engage and clear the
+        // unseen counter.
+        follow = true;
+        if (unseenCount > 0) unseenCount = 0;
+      }
+    });
   }
 
   function requestPin() {
-    if (follow) {
+    // untrack: `follow` is read here, but we don't want the calling
+    // effect to re-run when `follow` changes — only when the consumer's
+    // own state (e.g. feed length) changes.
+    untrack(() => {
+      if (!follow) return;
       if (rafId !== null) return;
       rafId = requestAnimationFrame(() => {
         rafId = null;
@@ -136,9 +154,13 @@ export function createAutoScroll(
         // at 30-100Hz and would jank with a smooth animation.
         el.scrollTop = el.scrollHeight;
       });
-    } else {
-      unseenCount++;
-    }
+    });
+  }
+
+  function notifyNewEntry() {
+    untrack(() => {
+      if (!follow) unseenCount++;
+    });
   }
 
   function jumpToBottom(behavior: ScrollBehavior = 'smooth') {
@@ -153,27 +175,31 @@ export function createAutoScroll(
   }
 
   // ---- Observer wiring --------------------------------------------------
-  function attachObservers() {
+  function attach() {
     const el = getEl();
     if (!el) return;
-    currentEl = el;
+    if (el === currentEl) return; // already attached
+    // Detach from the previous element first
+    detach();
 
-    scrollHandler = onUserScroll;
-    el.addEventListener('scroll', scrollHandler, { passive: true });
+    currentEl = el;
+    el.addEventListener('scroll', onUserScroll, { passive: true });
 
     // Watch the container's size so that streaming tokens (which grow the
     // last row, which in turn grows the inner content height) re-pin the
     // view to the bottom when `follow` is on. The observer only ever
     // *re-pins*; it never toggles `follow`, so it cannot fight the user.
     resizeObserver = new ResizeObserver(() => {
-      if (!follow) return;
-      if (rafId !== null) return;
-      rafId = requestAnimationFrame(() => {
-        rafId = null;
+      untrack(() => {
         if (!follow) return;
-        const target = getEl();
-        if (!target) return;
-        target.scrollTop = target.scrollHeight;
+        if (rafId !== null) return;
+        rafId = requestAnimationFrame(() => {
+          rafId = null;
+          if (!follow) return;
+          const target = getEl();
+          if (!target) return;
+          target.scrollTop = target.scrollHeight;
+        });
       });
     });
     resizeObserver.observe(el);
@@ -185,25 +211,26 @@ export function createAutoScroll(
       // to call requestPin() (e.g. a new entry arrives that wasn't
       // accounted for in a $effect).
       mutationObserver = new MutationObserver(() => {
-        if (!follow) return;
-        if (rafId !== null) return;
-        rafId = requestAnimationFrame(() => {
-          rafId = null;
+        untrack(() => {
           if (!follow) return;
-          const target = getEl();
-          if (!target) return;
-          target.scrollTop = target.scrollHeight;
+          if (rafId !== null) return;
+          rafId = requestAnimationFrame(() => {
+            rafId = null;
+            if (!follow) return;
+            const target = getEl();
+            if (!target) return;
+            target.scrollTop = target.scrollHeight;
+          });
         });
       });
       mutationObserver.observe(el, { childList: true, subtree: true, characterData: true });
     }
   }
 
-  function detachObservers() {
-    if (currentEl && scrollHandler) {
-      currentEl.removeEventListener('scroll', scrollHandler);
+  function detach() {
+    if (currentEl) {
+      currentEl.removeEventListener('scroll', onUserScroll);
     }
-    scrollHandler = null;
     currentEl = null;
     if (resizeObserver) {
       resizeObserver.disconnect();
@@ -219,19 +246,6 @@ export function createAutoScroll(
     }
   }
 
-  // Attempt to attach immediately. The action also re-attaches if the
-  // container element changes (e.g. transitioning between empty-state
-  // and VirtualList). Callers can call attach() manually after the
-  // container ref binds if needed.
-  $effect(() => {
-    const el = getEl();
-    if (!el) return;
-    if (el === currentEl) return;
-    detachObservers();
-    attachObservers();
-    return detachObservers;
-  });
-
   return {
     get follow() {
       return follow;
@@ -240,9 +254,11 @@ export function createAutoScroll(
       return unseenCount;
     },
     requestPin,
+    notifyNewEntry,
     jumpToBottom,
     setFollow,
     getDistanceFromBottom,
-    destroy: detachObservers,
+    attach,
+    destroy: detach,
   };
 }

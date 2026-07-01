@@ -6,6 +6,7 @@
   import VirtualList from './VirtualList.svelte';
   import AnimatedStatusIcon from './AnimatedStatusIcon.svelte';
   import { MessageSquare, ArrowDown } from 'lucide-svelte';
+  import { untrack } from 'svelte';
   import { createAutoScroll } from '$lib/utils/autoscroll.svelte';
 
   interface Props {
@@ -29,16 +30,39 @@
   );
   const autoScrollCtl = createAutoScroll(() => scrollEl, { threshold: 100 });
 
-  // Re-pin when feed grows OR the last entry's text grows (per-token
-  // streaming).
+  // Attach the scroll/observer listeners whenever the container element
+  // changes (e.g. empty-state ↔ VirtualList).
+  $effect(() => {
+    void scrollEl;
+    untrack(() => autoScrollCtl.attach());
+  });
+
+  // Per-token streaming signal: tracks the text length of the last
+  // (streaming) entry so we can keep the view pinned during fast
+  // streaming.
   let streamingTextSig = $derived.by(() => {
     const last = feed[feed.length - 1];
     return last?.text?.length ?? 0;
   });
+
+  // Pin on per-token text growth (no counter increment).
   $effect(() => {
-    void feed.length;
     void streamingTextSig;
     autoScrollCtl.requestPin();
+  });
+
+  // Bump the "N new messages" counter only when a *new entry* is added
+  // to the feed (not on per-token updates of an existing entry).
+  $effect(() => {
+    void feed.length;
+    autoScrollCtl.notifyNewEntry();
+  });
+
+  // Switching to a different agent's thread must not inherit the
+  // previous thread's scroll state (follow=false + stale unseen badge).
+  $effect(() => {
+    void agent.identity.id;
+    untrack(() => autoScrollCtl.jumpToBottom('instant'));
   });
 
   function estimateFeedHeight(entry: FeedEntryLocal): number {

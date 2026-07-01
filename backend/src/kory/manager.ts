@@ -1790,6 +1790,17 @@ export class KoryManager {
           content: event.content,
           model: thread.modelId,
         });
+      } else if (event.type === 'thinking_delta') {
+        // Workers reason too — without this branch their thinking text was
+        // silently dropped and never reached the agent thread feed.
+        if (event.thinking) {
+          thread.status = 'thinking';
+          thread.updatedAt = Date.now();
+          this.emitWSMessage(thread.sessionId, 'stream.thinking', {
+            agentId: thread.identity.id,
+            thinking: event.thinking,
+          } satisfies StreamThinkingPayload);
+        }
       } else if (event.type === 'usage_update') {
         this.updateUsageFromEvent(
           thread.sessionId,

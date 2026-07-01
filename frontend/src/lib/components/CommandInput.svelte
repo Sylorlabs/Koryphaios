@@ -746,16 +746,32 @@
             class="absolute bottom-full left-0 mb-2 w-72 max-h-60 overflow-y-auto rounded-xl border shadow-2xl z-50"
             style="background: var(--color-surface-2); border-color: var(--color-border);"
           >
-            {#each availableModels as model}
-              <button
-                type="button"
-                class="w-full text-left px-4 py-3 text-sm transition-colors hover:bg-[var(--color-surface-3)] flex items-center gap-2 {selectedModel === model.value ? 'text-[var(--color-accent)]' : ''}"
-                style="color: {selectedModel === model.value ? 'var(--color-accent)' : 'var(--color-text-secondary)'};"
-                onclick={() => selectModel(model.value)}
-              >
-                <span>{model.label}</span>
-              </button>
-            {/each}
+            {#if availableModels.length === 0}
+              <div class="px-4 py-4 text-xs leading-relaxed" style="color: var(--color-text-muted);">
+                <div class="font-semibold mb-1" style="color: var(--color-text-secondary);">No model providers connected</div>
+                <div class="mb-3">Connect a provider in Settings to choose a model.</div>
+                {#if onOpenSettings}
+                  <button
+                    type="button"
+                    class="text-[var(--color-accent)] hover:underline"
+                    onclick={() => { showModelPicker = false; onOpenSettings(); }}
+                  >
+                    Open Settings →
+                  </button>
+                {/if}
+              </div>
+            {:else}
+              {#each availableModels as model}
+                <button
+                  type="button"
+                  class="w-full text-left px-4 py-3 text-sm transition-colors hover:bg-[var(--color-surface-3)] flex items-center gap-2 {selectedModel === model.value ? 'text-[var(--color-accent)]' : ''}"
+                  style="color: {selectedModel === model.value ? 'var(--color-accent)' : 'var(--color-text-secondary)'};"
+                  onclick={() => selectModel(model.value)}
+                >
+                  <span>{model.label}</span>
+                </button>
+              {/each}
+            {/if}
           </div>
         {/if}
       </div>

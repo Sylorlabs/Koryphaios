@@ -20,9 +20,23 @@ function mergePayload(
   existing: WSMessage['payload'],
   incoming: WSMessage['payload'],
 ): WSMessage['payload'] {
-  const a = existing as { content?: string };
-  const b = incoming as { content?: string };
-  return { ...existing, content: (a.content ?? '') + (b.content ?? '') };
+  // stream.delta carries `content`, stream.thinking carries `thinking` —
+  // concatenate whichever text field(s) the payload actually uses, and
+  // never invent a field the payload doesn't have (a bogus empty
+  // `content` on a thinking event would drop the incoming chunk).
+  const a = existing as { content?: string; thinking?: string };
+  const b = incoming as { content?: string; thinking?: string };
+  const merged: Record<string, unknown> = {
+    ...(existing as Record<string, unknown>),
+    ...(incoming as Record<string, unknown>),
+  };
+  if (a.content !== undefined || b.content !== undefined) {
+    merged.content = (a.content ?? '') + (b.content ?? '');
+  }
+  if (a.thinking !== undefined || b.thinking !== undefined) {
+    merged.thinking = (a.thinking ?? '') + (b.thinking ?? '');
+  }
+  return merged as WSMessage['payload'];
 }
 
 function truncateToolResult(message: WSMessage): WSMessage {

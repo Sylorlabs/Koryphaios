@@ -57,6 +57,28 @@ let agents = $state<Map<string, AgentState>>(initialAgents);
 let agentThreadFeeds = $state<Map<string, FeedEntry[]>>(new Map());
 let agentThreadVersion = $state(0);
 
+// The manager is a single agent shared by every session, so its
+// `sessionId` field flips to whichever session emitted an event last.
+// Track its status per session so concurrent chats don't clobber each
+// other's busy/running indicators.
+let managerStatusBySession = $state<Map<string, AgentStatus>>(new Map());
+
+// Svelte 5's $state does not proxy Map contents or the plain objects
+// stored in them — mutating an AgentState in place is invisible to the
+// UI. Every mutation must go through commitAgents() to publish a new
+// Map reference.
+function commitAgents() {
+  agents = new Map(agents);
+}
+
+function setManagerStatusForSession(sessionId: string | undefined, status: AgentStatus) {
+  if (!sessionId) return;
+  if (managerStatusBySession.get(sessionId) === status) return;
+  const next = new Map(managerStatusBySession);
+  next.set(sessionId, status);
+  managerStatusBySession = next;
+}
+
 const MAX_THREAD_ENTRIES = 2000;
 
 // ─── Agent Thread Helpers ───────────────────────────────────────────────────
@@ -149,6 +171,8 @@ export function updateAgentStatus(agentId: string, status: AgentStatus, sessionI
   if (agent) {
     agent.status = status;
     if (sessionId) agent.sessionId = sessionId;
+    if (agentId === 'kory-manager') setManagerStatusForSession(sessionId, status);
+    commitAgents();
   }
 }
 
@@ -158,6 +182,8 @@ export function appendAgentContent(agentId: string, content: string, sessionId?:
     agent.content += content;
     agent.status = 'streaming';
     if (sessionId) agent.sessionId = sessionId;
+    if (agentId === 'kory-manager') setManagerStatusForSession(sessionId, 'streaming');
+    commitAgents();
   }
 }
 
@@ -166,6 +192,8 @@ export function appendAgentThinking(agentId: string, thinking: string, sessionId
   if (agent) {
     agent.thinking += thinking;
     if (sessionId) agent.sessionId = sessionId;
+    if (agentId === 'kory-manager') setManagerStatusForSession(sessionId, 'thinking');
+    commitAgents();
   }
 }
 
@@ -175,6 +203,8 @@ export function addToolCall(agentId: string, name: string, sessionId?: string) {
     agent.toolCalls.push({ name, status: 'running' });
     agent.status = 'tool_calling';
     if (sessionId) agent.sessionId = sessionId;
+    if (agentId === 'kory-manager') setManagerStatusForSession(sessionId, 'tool_calling');
+    commitAgents();
   }
 }
 
@@ -188,6 +218,7 @@ export function updateUsage(agentId: string, payload: StreamUsagePayload, sessio
     agent.contextKnown = !!payload.contextKnown;
     agent.hasUsageData = !!payload.usageKnown;
     if (sessionId) agent.sessionId = sessionId;
+    commitAgents();
   }
 }
 
@@ -196,6 +227,8 @@ export function completeAgent(agentId: string, sessionId?: string) {
   if (agent) {
     agent.status = 'done';
     if (sessionId) agent.sessionId = sessionId;
+    if (agentId === 'kory-manager') setManagerStatusForSession(sessionId, 'done');
+    commitAgents();
   }
 }
 
@@ -205,6 +238,7 @@ export function clearAgentContent(agentId: string) {
     agent.content = '';
     agent.thinking = '';
     agent.toolCalls = [];
+    commitAgents();
   }
 }
 
@@ -214,12 +248,17 @@ export function clearAgentStreamingState(agentId: string, sessionId?: string) {
     agent.content = '';
     agent.status = 'idle';
     if (sessionId) agent.sessionId = sessionId;
+    if (agentId === 'kory-manager') setManagerStatusForSession(sessionId, 'idle');
+    commitAgents();
   }
 }
 
 export function setManagerSessionId(sessionId: string) {
   const manager = agents.get('kory-manager');
-  if (manager) manager.sessionId = sessionId;
+  if (manager && manager.sessionId !== sessionId) {
+    manager.sessionId = sessionId;
+    commitAgents();
+  }
 }
 
 export function removeAgent(agentId: string) {
@@ -229,11 +268,18 @@ export function removeAgent(agentId: string) {
 }
 
 export function clearNonManagerAgents() {
-  const manager = agents.get('kory-manager');
-  agents = new Map();
-  if (manager) {
-    agents.set('kory-manager', { ...manager, content: '', thinking: '', toolCalls: [] });
+  const next = new Map<string, AgentState>();
+  for (const [id, a] of agents) {
+    if (id === 'kory-manager') {
+      next.set(id, { ...a, content: '', thinking: '', toolCalls: [] });
+    } else if (isActiveStatus(a.status)) {
+      // Keep workers that are still running — this is called on every
+      // chat switch, and wiping another session's live agents would kill
+      // its busy indicator and orphan its incoming stream events.
+      next.set(id, a);
+    }
   }
+  agents = next;
 }
 
 /** Mark all agents for this session as done (optimistic UI when user clicks Stop). */
@@ -245,7 +291,8 @@ export function markSessionAgentsStopped(sessionId: string) {
       changed = true;
     }
   }
-  if (changed) agents = new Map(agents);
+  setManagerStatusForSession(sessionId, 'done');
+  if (changed) commitAgents();
 }
 
 /** Mark a single agent as done (optimistic UI when user cancels one worker). */
@@ -259,14 +306,22 @@ export function markAgentStopped(agentId: string) {
 
 // ─── Derived State ───────────────────────────────────────────────────────────
 
+function isActiveStatus(status: AgentStatus | undefined): boolean {
+  return !!status && status !== 'idle' && status !== 'done';
+}
+
 export function getManagerStatus(): AgentStatus {
   const activeSessionId = sessionStore.activeSessionId;
   const manager = agents.get('kory-manager');
 
+  // Per-session record wins: it is not clobbered when another session's
+  // manager event flips the shared entry's sessionId.
+  const perSession = activeSessionId ? managerStatusBySession.get(activeSessionId) : undefined;
+  if (isActiveStatus(perSession)) return perSession!;
+
   if (
     manager &&
-    manager.status !== 'idle' &&
-    manager.status !== 'done' &&
+    isActiveStatus(manager.status) &&
     (manager.sessionId === activeSessionId || !manager.sessionId)
   ) {
     return manager.status;
@@ -274,7 +329,7 @@ export function getManagerStatus(): AgentStatus {
 
   if (activeSessionId) {
     for (const a of agents.values()) {
-      if (a.sessionId === activeSessionId && a.status !== 'idle' && a.status !== 'done') {
+      if (a.sessionId === activeSessionId && isActiveStatus(a.status)) {
         return a.status;
       }
     }
@@ -284,8 +339,13 @@ export function getManagerStatus(): AgentStatus {
 }
 
 export function isSessionRunning(sessionId: string): boolean {
+  if (isActiveStatus(managerStatusBySession.get(sessionId))) return true;
   for (const a of agents.values()) {
-    if (a.sessionId === sessionId && a.status !== 'idle' && a.status !== 'done') {
+    if (a.sessionId === sessionId && isActiveStatus(a.status)) {
+      // The shared manager entry's sessionId flips to whichever session
+      // spoke last, so only trust it when the per-session record agrees
+      // it isn't finished.
+      if (a.identity.id === 'kory-manager' && managerStatusBySession.has(sessionId)) continue;
       return true;
     }
   }
@@ -357,6 +417,7 @@ async function loadAgentThreads(sessionId: string): Promise<void> {
         setAgentThreadFeed(sessionId, thread.agent.id, []);
       }
     }
+    if (data.data.length > 0) commitAgents();
   } catch (error) {
     if (import.meta.env.DEV) console.warn('Failed to load agent threads', error);
   }

@@ -26,6 +26,41 @@ describe('StreamCoalescer', () => {
     expect((published[0].payload as { content: string }).content).toBe('Hello world');
   });
 
+  test('coalesces stream.thinking chunks without dropping text', () => {
+    const published: WSMessage[] = [];
+    const coalescer = new StreamCoalescer((msg) => published.push(msg));
+
+    const thinking = (text: string): WSMessage => ({
+      type: 'stream.thinking',
+      sessionId: 's1',
+      agentId: 'kory-manager',
+      timestamp: Date.now(),
+      payload: { agentId: 'a1', thinking: text },
+    });
+
+    coalescer.enqueue(thinking('Let me '));
+    coalescer.enqueue(thinking('think about this'));
+    coalescer.flushAll();
+
+    expect(published.length).toBe(1);
+    const payload = published[0].payload as { thinking: string; content?: string };
+    expect(payload.thinking).toBe('Let me think about this');
+    expect(payload.content).toBeUndefined();
+  });
+
+  test('does not merge chunks across different sessions', () => {
+    const published: WSMessage[] = [];
+    const coalescer = new StreamCoalescer((msg) => published.push(msg));
+
+    coalescer.enqueue(delta('s1', 'a1', 'chat A'));
+    coalescer.enqueue(delta('s2', 'a1', 'chat B'));
+    coalescer.flushAll();
+
+    expect(published.length).toBe(2);
+    const texts = published.map((m) => (m.payload as { content: string }).content).sort();
+    expect(texts).toEqual(['chat A', 'chat B']);
+  });
+
   test('truncates oversized tool results', () => {
     const published: WSMessage[] = [];
     const coalescer = new StreamCoalescer((msg) => published.push(msg));
