@@ -132,10 +132,25 @@ export class GoogleProvider implements Provider {
         parts:
           typeof m.content === 'string'
             ? [{ text: m.content }]
-            : (m.content as any[]).map((b) =>
-                b.type === 'text' ? { text: b.text ?? '' } : { text: '' },
-              ),
-      }));
+            : (m.content as any[])
+                .map((b) => {
+                  if (b.type === 'text') return { text: b.text ?? '' };
+                  // Gemini is vision-capable — pass images as inlineData so the
+                  // model actually sees them (previously mapped to empty text).
+                  if (b.type === 'image' && b.imageData) {
+                    return {
+                      inlineData: {
+                        mimeType: b.imageMimeType ?? 'image/png',
+                        data: b.imageData,
+                      },
+                    };
+                  }
+                  return null;
+                })
+                .filter((p): p is NonNullable<typeof p> => p !== null),
+      }))
+      // The API rejects messages with zero parts.
+      .filter((m) => m.parts.length > 0);
 
     const generationConfig: any = {
       systemInstruction: request.systemPrompt,

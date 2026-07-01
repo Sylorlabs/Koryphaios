@@ -102,7 +102,33 @@ export class AnthropicProvider implements Provider {
   }
 
   async *streamResponse(request: StreamRequest): AsyncGenerator<ProviderEvent> {
-    const messages = this.convertMessages(request.messages);
+    let messages = this.convertMessages(request.messages);
+
+    // Vision guard: all Claude models accept images, but this provider also
+    // serves Anthropic-COMPATIBLE gateway models (e.g. OpenCode Go MiniMax/Qwen)
+    // that may not. When the model is explicitly known to lack vision, swap
+    // image blocks for a text note so the request doesn't 400.
+    const requestDef =
+      this.listModels().find((m) => m.id === request.model || m.apiModelId === request.model) ??
+      resolveModel(request.model);
+    if (requestDef?.vision === false && requestDef.supportsAttachments !== true) {
+      messages = messages.map((m) => {
+        if (!Array.isArray(m.content)) return m;
+        if (!m.content.some((b) => b.type === 'image')) return m;
+        return {
+          ...m,
+          content: m.content.map((b) =>
+            b.type === 'image'
+              ? ({
+                  type: 'text' as const,
+                  text: '[image attachment omitted — the selected model does not support image input]',
+                })
+              : b,
+          ),
+        };
+      });
+    }
+
     const tools = request.tools?.map((t) => ({
       name: t.name,
       description: t.description,

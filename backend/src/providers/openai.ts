@@ -123,7 +123,27 @@ export class OpenAIProvider implements Provider {
   }
 
   async *streamResponse(request: StreamRequest): AsyncGenerator<ProviderEvent> {
-    const messages = this.convertMessages(request);
+    let messages = this.convertMessages(request);
+
+    // Vision guard: if the model is KNOWN not to support images (live metadata
+    // reported vision: false), replace image parts with a text note up front so
+    // the request never 400s. Models with unknown metadata keep their images —
+    // a rejection is caught below and retried once without them.
+    if (messagesContainImages(messages)) {
+      const liveDef =
+        this.listModels().find(
+          (m) => m.id === request.model || m.apiModelId === request.model,
+        ) ?? resolveModel(request.model);
+      const supportsVision = liveDef?.vision === true || liveDef?.supportsAttachments === true;
+      if (liveDef?.vision === false && !supportsVision) {
+        messages = stripImageParts(messages);
+        providerLog.debug(
+          { provider: this.name, model: request.model },
+          'Model does not support images — attachments replaced with a text note',
+        );
+      }
+    }
+
     const tools = request.tools?.map((t) => ({
       type: 'function' as const,
       function: {
@@ -168,13 +188,31 @@ export class OpenAIProvider implements Provider {
     try {
       // Apply 60-second hard timeout to prevent indefinite hangs
       const timeoutSignal = withTimeoutSignal(request.signal, 60_000);
-      const stream = await withRetry(
-        () =>
-          this.client.chat.completions.create(params, {
-            signal: timeoutSignal,
-          }),
-        { providerName: this.name, modelName: request.model },
-      );
+      const createStream = () =>
+        this.client.chat.completions.create(params, { signal: timeoutSignal });
+      let stream: Awaited<ReturnType<typeof createStream>>;
+      try {
+        stream = await withRetry(createStream, {
+          providerName: this.name,
+          modelName: request.model,
+        });
+      } catch (err) {
+        // Some models reject images only at request time (metadata absent or
+        // wrong). Degrade gracefully: drop the images, note it, retry once.
+        if (messagesContainImages(params.messages) && isVisionRejectionError(err)) {
+          providerLog.warn(
+            { provider: this.name, model: request.model },
+            'Model rejected image input — retrying without attachments',
+          );
+          params.messages = stripImageParts(params.messages);
+          stream = await withRetry(createStream, {
+            providerName: this.name,
+            modelName: request.model,
+          });
+        } else {
+          throw err;
+        }
+      }
 
       const toolCallBuffers = new Map<number, { id: string; name: string; args: string }>();
 
@@ -384,6 +422,38 @@ export class OpenAIProvider implements Provider {
       result.push({ role: 'user', content });
     }
   }
+}
+
+// ─── Vision fallback helpers ─────────────────────────────────────────────────
+
+const IMAGE_OMITTED_NOTE =
+  '[image attachment omitted — the selected model does not support image input]';
+
+function messagesContainImages(messages: OpenAI.ChatCompletionMessageParam[]): boolean {
+  return messages.some(
+    (m) =>
+      m.role === 'user' &&
+      Array.isArray(m.content) &&
+      m.content.some((part) => part.type === 'image_url'),
+  );
+}
+
+function stripImageParts(
+  messages: OpenAI.ChatCompletionMessageParam[],
+): OpenAI.ChatCompletionMessageParam[] {
+  return messages.map((m) => {
+    if (m.role !== 'user' || !Array.isArray(m.content)) return m;
+    if (!m.content.some((part) => part.type === 'image_url')) return m;
+    const parts = m.content.map((part) =>
+      part.type === 'image_url' ? ({ type: 'text', text: IMAGE_OMITTED_NOTE } as const) : part,
+    );
+    return { ...m, content: parts };
+  });
+}
+
+function isVisionRejectionError(err: unknown): boolean {
+  const msg = err instanceof Error ? err.message : String(err);
+  return /image|vision|multimodal|image_url/i.test(msg);
 }
 
 // ─── OpenAI-Compatible Provider Factories ───────────────────────────────────
