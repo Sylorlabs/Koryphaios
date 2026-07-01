@@ -28,11 +28,22 @@ import {
   type Provider,
 } from '../providers';
 import type { ProviderMessage } from '../providers/types';
+import { detectJulesApiKey } from '../providers/auth-utils';
+import { runJulesTask } from '../providers/jules-runner';
+import { JULES_SYNC_INSTRUCTIONS, getProviderDisplay } from '../providers/provider-display';
 import { ToolRegistry, type ToolCallInput, type ToolContext, type ToolCallOutput } from '../tools';
 import { wsBroker } from '../pubsub';
 import { koryLog } from '../logger';
 import { nanoid } from 'nanoid';
 import { sanitizeForPrompt } from '../security';
+import {
+  checkNoteToolPermission,
+  filterToolDefsForNotesPermissions,
+  buildNotesNetworkSystemHint,
+  hasAnyVisibleNoteTools,
+  formatNoteToolApprovalSummary,
+} from '../notes/notes-settings';
+import { isNoteToolName } from '@koryphaios/shared';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { z } from 'zod';
 import { join } from 'node:path';
@@ -44,7 +55,12 @@ import type { ITaskStore } from '../stores/task-store';
 import { SnapshotManager } from './snapshot-manager';
 import { GitManager } from './git-manager';
 import { WorkspaceManager } from './workspace-manager';
-import { EventEmitterService, WorkerLifecycleService, SessionStateService } from './services';
+import {
+  EventEmitterService,
+  WorkerLifecycleService,
+  SessionStateService,
+  WorkerPipelineService,
+} from './services';
 import { TimeTravelService } from '../services';
 import { RoutingServiceEnhanced } from './services/RoutingServiceEnhanced';
 import {
@@ -53,7 +69,9 @@ import {
 } from './critic-util';
 import { AutoCommitService } from './auto-commit-service';
 import { getModeManager } from '../mode';
+import type { WorkerPipelineConfig } from './services/WorkerPipelineService';
 import type { UIMode } from '@koryphaios/shared';
+import { collaborationManager } from '../collaboration/manager';
 
 // ─── Internal Types ─────────────────────────────────────────────────────────
 
@@ -65,7 +83,7 @@ interface CompletedToolCall {
 
 interface InternalMessage {
   role: 'user' | 'assistant' | 'tool' | 'system';
-  content: string;
+  content: string | import('../providers/types').ProviderContentBlock[];
   tool_call_id?: string;
   tool_calls?: CompletedToolCall[];
 }
@@ -135,14 +153,29 @@ function koryIdentityWithModel(model: string, provider: ProviderName): AgentIden
 
 // ─── System Prompts ──────────────────────────────────────────────────────────
 
+/** Parse a JSON string into an object, tolerating malformed input (returns {}). */
+function safeParseJson(s?: string): Record<string, unknown> {
+  if (!s) return {};
+  try {
+    const o = JSON.parse(s);
+    return o && typeof o === 'object' && !Array.isArray(o) ? (o as Record<string, unknown>) : {};
+  } catch {
+    return {};
+  }
+}
+
 const KORY_SYSTEM_PROMPT = `You are Kory, the manager agent. The user talks to you only. Sub-agents (workers) run only when you explicitly call delegate_to_worker—never automatically.
 
 • Handle requests yourself: answer questions, use tools (read_file, grep, bash, web_search, etc.), do small edits. For conversation, clarification, or straightforward work, you are the sole agent.
+• FILE EDITS: ALWAYS create files with the write_file tool and modify files with the edit_file tool. NEVER use bash (cat >, tee, echo >, sed, heredocs, apply_patch) to create or modify files — those bypass the live code preview the user watches. Use bash only for running commands, never for writing file content.
 • You may run terminals in the background: use the bash tool with isBackground: true (and optional processName) to start long-lived processes (e.g. dev servers). Use shell_manage to list stored background processes, view their logs, or kill them. Only you can manage these background terminals.
 • Sub-agents (workers: general, ui, backend, test, review) exist only for you to invoke when you decide a task needs a specialist coder. Call delegate_to_worker only for substantial implementation, refactoring, or multi-step coding—not for chat, simple questions, or minor edits.
 • When you delegate, the worker reports back; you verify and synthesize.
-• IMPORTANT: If you decide to delegate, call delegate_to_worker IMMEDIATELY without generating any explanatory text first. Do not write "I'll delegate this" or similar—just call the tool directly.`;
-const WORKER_SYSTEM_PROMPT = `You are a specialist Worker Agent. EXECUTE the assigned task using tools. QUALITY FIRST. VERIFY.`;
+• IMPORTANT: If you decide to delegate, call delegate_to_worker IMMEDIATELY without generating any explanatory text first. Do not write "I'll delegate this" or similar—just call the tool directly.
+• delegate_to_jules: Offload substantial repo work to Google Jules — a CLOUD-ONLY async agent (API). Jules runs in remote Google VMs (not locally), often takes minutes, and may open GitHub PRs. Never use for quick local edits or chat. Jules never writes to the local working tree — after it finishes you MUST sync remote work locally (\`git fetch && git pull\`, or \`gh pr checkout <n>\`) before continuing.
+• If you have successfully completed a task or edit and are ready to save the work, use the commit_and_create_pr tool to commit and create a pull request automatically.`;
+const WORKER_SYSTEM_PROMPT = `You are a specialist Worker Agent. EXECUTE the assigned task using tools. QUALITY FIRST. VERIFY. If you have successfully completed a task, you may use the commit_and_create_pr tool to save the work.
+FILE EDITS: ALWAYS create files with write_file and modify files with edit_file. NEVER use bash (cat >, tee, echo >, sed, heredocs) to write or modify file content — that bypasses the live code preview. Use bash only for running commands.`;
 const CRITIC_SYSTEM_PROMPT = `You are an independent, fresh Critic AI model evaluating the work of a DIFFERENT agent (the Worker). You must evaluate their work objectively. You may only use read_file, grep, glob, and ls to inspect the codebase. Review the Worker's output and output either PASS or FAIL. If FAIL, give brief, actionable feedback. Your final message must end with a line that starts with exactly PASS or exactly FAIL (e.g. "PASS" or "FAIL: missing tests").`;
 
 // ─── Kory Manager Class ─────────────────────────────────────────────────────
@@ -165,7 +198,6 @@ export class KoryManager {
   private snapshotManager: SnapshotManager;
   public readonly git: GitManager;
   private workspaceManager: WorkspaceManager | null = null;
-  private autoCommitService: AutoCommitService;
   /** AbortController for the current manager run per session (so cancelSessionWorkers can abort manager too). */
   private managerAbortBySession = new Map<string, AbortController>();
   /** In-memory worker/critic chat threads keyed by agentId. */
@@ -175,6 +207,8 @@ export class KoryManager {
   private routing: RoutingServiceEnhanced;
   private workers: WorkerLifecycleService;
   private state: SessionStateService;
+  private workerPipeline: WorkerPipelineService;
+  private autoCommitService: AutoCommitService;
 
   constructor(
     private providers: ProviderRegistry,
@@ -190,7 +224,6 @@ export class KoryManager {
     mkdirSync(this.memoryDir, { recursive: true });
     this.snapshotManager = new SnapshotManager(workingDirectory);
     this.git = new GitManager(workingDirectory);
-    this.autoCommitService = new AutoCommitService(workingDirectory, this.git);
 
     // Initialize WorkspaceManager if git is available
     try {
@@ -204,9 +237,58 @@ export class KoryManager {
 
     // Initialize services
     this.events = new EventEmitterService({ managerAgentId: KORY_IDENTITY.id });
-    this.routing = new RoutingServiceEnhanced({ config: this.config });
+    this.routing = new RoutingServiceEnhanced({ config: this.config, providers: this.providers });
     this.workers = new WorkerLifecycleService({ events: this.events });
     this.state = new SessionStateService();
+    this.autoCommitService = new AutoCommitService(this.workingDirectory, this.git);
+
+    const pipelineConfig: WorkerPipelineConfig = {
+      getIsYoloMode: () => this.isYoloMode,
+      getWorkingDirectory: () => this.workingDirectory,
+      getWorkerReasoningLevel: () => this.getWorkerReasoningLevel(),
+      waitForUserInput: (sessionId, question, options) =>
+        this.waitForUserInputInternal(sessionId, question, options),
+      emitThought: (sessionId, phase, thought) => this.emitThought(sessionId, phase, thought),
+      updateWorkflowState: (sessionId, state) => this.updateWorkflowState(sessionId, state),
+      handleAutoCommit: (sessionId, taskDescription) =>
+        this.handleAutoCommit(sessionId, taskDescription),
+      resolveActiveRouting: (preferredModel, domain, avoidLegacy, prompt, preferCheap) =>
+        this.resolveActiveRouting(preferredModel, domain, avoidLegacy, prompt, preferCheap),
+      executeWithProvider: (
+        sessionId,
+        provider,
+        modelId,
+        userMessage,
+        domain,
+        reasoningLevel,
+        isAutoMode,
+        allowedPaths,
+        isSandboxed,
+      ) =>
+        this.executeWithProvider(
+          sessionId,
+          provider,
+          modelId,
+          userMessage,
+          domain,
+          reasoningLevel,
+          isAutoMode,
+          allowedPaths,
+          isSandboxed,
+        ),
+      runCriticGate: (sessionId, workerMessages, preferredModel) =>
+        this.runCriticGate(sessionId, workerMessages, preferredModel),
+    };
+
+    this.workerPipeline = new WorkerPipelineService({
+      providers: this.providers,
+      state: this.state,
+      git: this.git,
+      workspaceManager: this.workspaceManager,
+      snapshotManager: this.snapshotManager,
+      tasks: this.tasks,
+      config: pipelineConfig,
+    });
 
     // Recover state from persistent stores
     this.recoverState();
@@ -360,7 +442,7 @@ export class KoryManager {
       options,
       allowOther: true,
     } satisfies KoryAskUserPayload);
-    return this.state.requestUserInput(sessionId);
+    return this.state.requestUserInput(sessionId, AGENT.USER_INPUT_TIMEOUT_MS);
   }
 
   /** Main entry point for processing a task. */
@@ -369,13 +451,14 @@ export class KoryManager {
     userMessage: string,
     preferredModel?: string,
     reasoningLevel?: string,
+    attachments?: Array<{ type: string; data: string; name: string }>,
   ): Promise<void> {
     this.isProcessing = true;
     this.state.clearChanges(sessionId);
     userMessage = sanitizeForPrompt(userMessage);
 
     // Resolve provider before any UI updates or work. No provider = manager responds once and returns.
-    let routing = this.resolveActiveRouting(preferredModel, 'general', true);
+    let routing = this.resolveActiveRouting(preferredModel, 'general', true, userMessage);
     let provider = await this.providers.resolveProvider(routing.model, routing.provider);
     if (!provider && (!preferredModel || preferredModel === 'auto')) {
       const fallback = this.providers.getFirstAvailableRouting();
@@ -396,11 +479,34 @@ export class KoryManager {
       'Resolved provider for task',
     );
 
+    // Broadcast the user message to relay guests
+    collaborationManager.broadcastEvent({ type: 'chat', from: 'human', content: userMessage });
+
     await this.updateWorkflowState(sessionId, 'analyzing');
     try {
       koryLog.debug({ sessionId }, 'Calling handleDirectly');
       this.emitThought(sessionId, 'analyzing', `Analyzing request...`);
-      await this.handleDirectly(sessionId, userMessage, reasoningLevel, preferredModel);
+
+      // Global timeout: abort the task if it runs too long (prevents indefinite hangs)
+      const TIMEOUT_MIN = AGENT.PROCESS_TASK_TIMEOUT_MS / 60_000;
+      const processTimeout = setTimeout(() => {
+        // Abort any active LLM stream
+        const abort = this.managerAbortBySession.get(sessionId);
+        if (abort) {
+          abort.abort(
+            new DOMException(`Process task timed out after ${TIMEOUT_MIN} minutes`, 'TimeoutError'),
+          );
+        }
+        // Resolve any pending user input so the task doesn't hang forever
+        this.state.resolveUserInput(sessionId, '__timeout__');
+      }, AGENT.PROCESS_TASK_TIMEOUT_MS);
+
+      try {
+        await this.handleDirectly(sessionId, userMessage, reasoningLevel, preferredModel, attachments);
+      } finally {
+        clearTimeout(processTimeout);
+      }
+
       koryLog.debug({ sessionId }, 'handleDirectly completed');
 
       await this.updateWorkflowState(sessionId, 'idle');
@@ -423,8 +529,10 @@ export class KoryManager {
     preferredModel?: string,
     domain: WorkerDomain = 'general',
     avoidLegacy = false,
+    prompt?: string,
+    preferCheap?: boolean,
   ): { model: string; provider: ProviderName | undefined } {
-    return this.routing.resolveActiveRouting(preferredModel, domain, avoidLegacy);
+    return this.routing.resolveActiveRouting(preferredModel, domain, avoidLegacy, prompt, preferCheap);
   }
 
   private formatProviderName(provider: string): string {
@@ -484,231 +592,136 @@ export class KoryManager {
     reasoningLevel?: string,
     domainHint?: string,
   ): Promise<string> {
-    if (!this.isYoloMode) {
-      const selection = await this.waitForUserInputInternal(
-        sessionId,
-        'Ready to proceed with the delegated task?',
-        ['Yes, proceed', 'Cancel'],
-      );
-      if (selection.includes('Cancel')) return 'Cancelled by user.';
-    } else {
-      this.emitThought(sessionId, 'executing', 'YOLO mode: Proceeding with delegated task.');
-    }
-    await this.updateWorkflowState(sessionId, 'executing');
-    const domainOverride =
-      domainHint && ['general', 'ui', 'backend', 'test', 'review'].includes(domainHint)
-        ? (domainHint as WorkerDomain)
-        : undefined;
-
-    // Attempt to spawn an isolated worktree for this worker task
-    const taskId = nanoid(12);
-
-    // Create task in persistent store
-    const routing = this.resolveActiveRouting(preferredModel, domainOverride || 'general');
-    if (this.tasks) {
-      await this.tasks.create({
-        id: taskId,
-        sessionId,
-        description: task,
-        domain: domainOverride || 'general',
-        assignedModel: routing.model,
-        assignedProvider: routing.provider || 'copilot',
-      });
-    }
-
-    let workerDir = this.workingDirectory;
-    let worktreeSpawned = false;
-    if (this.workspaceManager) {
-      try {
-        const worktree = this.workspaceManager.spawn(taskId, task.slice(0, 60));
-        if (worktree) {
-          workerDir = worktree.path;
-          worktreeSpawned = true;
-          koryLog.info({ taskId, path: workerDir }, 'Worker running in isolated worktree');
-        }
-      } catch (err: unknown) {
-        const message = err instanceof Error ? err.message : String(err);
-        koryLog.warn({ err: message }, 'Worktree spawn failed — using main directory');
-      }
-    }
-
-    let result = await this.routeToWorker(
+    return this.workerPipeline.runWorkerPipeline(
       sessionId,
       task,
       preferredModel,
       reasoningLevel,
-      [workerDir],
-      domainOverride,
-      taskId,
+      domainHint,
     );
+  }
 
-    // Reconcile worktree changes back to main branch
-    if (worktreeSpawned && this.workspaceManager) {
-      try {
-        if (result.success) {
-          const reconcileResult = this.workspaceManager.reconcile(taskId);
-          if (!reconcileResult.success) {
-            koryLog.warn({ taskId, msg: reconcileResult.message }, 'Worktree reconcile failed');
-            result = {
-              success: false,
-              workerTranscript: result.workerTranscript,
-              criticFeedback: `Worktree reconcile failed: ${reconcileResult.message}`,
-            };
-          } else {
-            // Create ghost commit for time-travel after successful worker reconciliation
-            try {
-              const { ShadowLogger } = await import('./shadow-logger');
-              const shadowLogger = new ShadowLogger(this.workingDirectory);
-              await shadowLogger.createGhostCommit(task.slice(0, 72), {
-                agentId: sessionId,
-                model: preferredModel ?? 'unknown',
-                prompt: task.slice(0, 200),
-                cost: 0,
-              });
-            } catch {
-              // Shadow logging is non-critical; don't fail the task if it errors
-            }
+  private async handleAutoCommit(sessionId: string, taskDescription: string): Promise<void> {
+    if (!getModeManager().shouldAutoCommit()) return;
+    try {
+      await this.autoCommitService.autoCommitAndCreatePR(taskDescription);
+    } catch (err) {
+      koryLog.warn({ err, sessionId }, 'Auto-commit failed after worker task');
+    }
+  }
 
-            // Auto-commit for beginner mode after successful worker task
-            await this.handleAutoCommit(sessionId, task);
-          }
-        } else {
-          this.workspaceManager.cleanup(taskId);
-        }
-      } catch (err: unknown) {
-        const message = err instanceof Error ? err.message : String(err);
-        koryLog.warn({ taskId, err: message }, 'Worktree cleanup/reconcile error');
-      }
-    } else if (result.success) {
-      // Auto-commit for beginner mode even without worktree (direct worker execution)
-      await this.handleAutoCommit(sessionId, task);
+  /** Whether Jules cloud delegation is configured (API key). */
+  isJulesAvailable(): boolean {
+    const jules = this.providers.get('jules');
+    if (jules?.isAvailable()) return true;
+    return !!detectJulesApiKey();
+  }
+
+  private resolveJulesApiKey(): string | null {
+    const cfg = this.providers.getConfigs().jules;
+    return cfg?.apiKey?.trim() || detectJulesApiKey();
+  }
+
+  /**
+   * Delegate a task to Google Jules (cloud async agent). Used by delegate_to_jules tool.
+   * Streams progress to the session feed while polling the Jules API.
+   */
+  async runJulesDelegation(
+    sessionId: string,
+    task: string,
+    options?: { createPr?: boolean; branch?: string },
+  ): Promise<string> {
+    const apiKey = this.resolveJulesApiKey();
+    if (!apiKey) {
+      return 'Jules is not configured. Add JULES_API_KEY in Settings (https://jules.google.com/settings#api).';
     }
 
-    // Update task in persistent store after reconcile, so persisted state matches user-visible result.
-    if (this.tasks) {
-      await this.tasks.update(taskId, {
-        status: result.success ? 'done' : 'failed',
-        result: result.success ? result.criticFeedback || 'Done' : undefined,
-        error: !result.success ? result.criticFeedback || 'Worker failed' : undefined,
-      });
+    if (!this.isYoloMode) {
+      const selection = await this.waitForUserInputInternal(
+        sessionId,
+        'Delegate this task to Jules (cloud agent — runs remotely, may take minutes)?',
+        ['Yes, send to Jules', 'Cancel'],
+      );
+      if (selection === '__timeout__') return 'Timed out waiting for user response.';
+      if (selection.includes('Cancel')) return 'Jules delegation cancelled by user.';
+    }
+
+    this.emitThought(sessionId, 'executing', 'Jules cloud agent working…');
+    await this.updateWorkflowState(sessionId, 'executing');
+
+    let summary = '';
+    const automationMode = options?.createPr === false ? undefined : 'AUTO_CREATE_PR';
+
+    try {
+      for await (const event of runJulesTask({
+        apiKey,
+        prompt: task,
+        workingDirectory: this.workingDirectory,
+        korySessionId: sessionId,
+        defaultBranch: options?.branch,
+        automationMode,
+        signal: this.state.getAbortController(sessionId).signal,
+      })) {
+        this.emitJulesProviderEvent(sessionId, event);
+        if (event.type === 'content_delta' && event.content) summary += event.content;
+        if (event.type === 'error') {
+          await this.updateWorkflowState(sessionId, 'idle');
+          return event.error ?? 'Jules cloud delegation failed.';
+        }
+        if (event.type === 'complete') break;
+      }
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      await this.updateWorkflowState(sessionId, 'idle');
+      return `Jules cloud delegation failed: ${msg}`;
     }
 
     await this.updateWorkflowState(sessionId, 'idle');
-    if (result.success) {
-      return (
-        result.criticFeedback ??
-        (result.workerTranscript ? 'Worker completed. See transcript.' : 'Done.')
-      );
-    }
-    return result.workerTranscript
-      ? `Worker did not pass review. ${result.criticFeedback ?? ''}`
-      : 'Worker failed.';
+    const tail = summary.trim() || 'Jules cloud task finished. Check the session link or PR above.';
+    return `${tail}\n\n**Sync locally:** ${JULES_SYNC_INSTRUCTIONS}`;
   }
 
-  private async routeToWorker(
-    sessionId: string,
-    userMessage: string,
-    preferredModel?: string,
-    reasoningLevel?: string,
-    allowedPaths: string[] = [],
-    domainOverride?: WorkerDomain,
-    taskId?: string,
-  ): Promise<{ success: boolean; workerTranscript?: string; criticFeedback?: string }> {
-    let domain: WorkerDomain;
-    if (domainOverride) domain = domainOverride;
-    else
-      try {
-        domain = this.classifyDomainLLM(userMessage);
-      } catch {
-        domain = 'general';
-      }
-    const isSandboxed = this.isYoloMode ? false : !this.requiresSystemAccess(userMessage);
-    const effectivePaths = allowedPaths.length > 0 ? allowedPaths : [this.workingDirectory];
-
-    if (this.git.isGitRepo()) {
-      const hash = await this.git.getCurrentHash();
-      if (hash) this.state.saveCheckpoint(sessionId, hash);
-    } else {
-      await this.snapshotManager.createSnapshot(
-        sessionId,
-        'latest',
-        effectivePaths,
-        this.workingDirectory,
-      );
+  private emitJulesProviderEvent(sessionId: string, event: ProviderEvent): void {
+    if (event.type === 'thinking_delta' && event.thinking) {
+      this.emitWSMessage(sessionId, 'stream.thinking', {
+        agentId: KORY_IDENTITY.id,
+        thinking: event.thinking,
+      } satisfies StreamThinkingPayload);
+    } else if (event.type === 'content_delta' && event.content) {
+      this.emitWSMessage(sessionId, 'stream.delta', {
+        agentId: KORY_IDENTITY.id,
+        content: event.content,
+        model: 'jules',
+      });
+    } else if (event.type === 'tool_executed') {
+      const callId = `jules-${nanoid(8)}`;
+      this.emitWSMessage(sessionId, 'stream.tool_call', {
+        agentId: KORY_IDENTITY.id,
+        toolCall: {
+          id: callId,
+          name: event.toolName ?? 'jules_cloud',
+          input: safeParseJson(event.toolInput),
+        },
+      });
+      this.emitWSMessage(sessionId, 'stream.tool_result', {
+        agentId: KORY_IDENTITY.id,
+        toolResult: {
+          callId,
+          name: event.toolName ?? 'jules_cloud',
+          output: event.toolOutput ?? '',
+          isError: event.isError === true,
+          durationMs: 0,
+        },
+      });
+    } else if (event.type === 'file_edit' && event.filePath) {
+      this.emitWSMessage(sessionId, 'stream.file_delta', {
+        agentId: KORY_IDENTITY.id,
+        path: event.filePath,
+        delta: event.fileContent ?? '',
+        totalLength: (event.fileContent ?? '').length,
+        operation: event.fileOperation ?? 'edit',
+      });
     }
-
-    let workerTask = await this.generateWorkerTask(sessionId, userMessage, domain, preferredModel);
-
-    // Mark task as active in store
-    if (taskId && this.tasks) {
-      await this.tasks.update(taskId, { status: 'active' });
-    }
-
-    let attempts = 0;
-    while (attempts < 3) {
-      attempts++;
-      this.emitThought(sessionId, 'delegating', `Delegating to ${domain} worker...`);
-      const routing = this.resolveActiveRouting(preferredModel, domain);
-      const provider = this.providers.getAvailable().find((p) => p.name === routing.provider);
-      if (!provider) {
-        const alt = this.providers.getAvailable()[0];
-        if (!alt) return { success: false };
-        const res = await this.executeWithProvider(
-          sessionId,
-          alt,
-          routing.model,
-          workerTask,
-          domain,
-          reasoningLevel,
-          true,
-          effectivePaths,
-          isSandboxed,
-        );
-        if (res.success) {
-          const criticResult = await this.runCriticGate(
-            sessionId,
-            res.workerMessages,
-            preferredModel,
-          );
-          if (criticResult.passed)
-            return {
-              success: true,
-              workerTranscript: formatMessagesForCriticUtil(res.workerMessages ?? []),
-              criticFeedback: criticResult.feedback,
-            };
-          workerTask = `QUALITY FAILURE. Fix these:\n${criticResult.feedback}`;
-        } else return { success: false };
-        continue;
-      }
-
-      const result = await this.executeWithProvider(
-        sessionId,
-        provider,
-        routing.model,
-        workerTask,
-        domain,
-        reasoningLevel,
-        true,
-        effectivePaths,
-        isSandboxed,
-      );
-      if (result.success) {
-        const criticResult = await this.runCriticGate(
-          sessionId,
-          result.workerMessages,
-          preferredModel,
-        );
-        if (criticResult.passed)
-          return {
-            success: true,
-            workerTranscript: formatMessagesForCriticUtil(result.workerMessages ?? []),
-            criticFeedback: criticResult.feedback,
-          };
-        workerTask = `QUALITY FAILURE. Fix these:\n${criticResult.feedback}`;
-      }
-      if (!this.providers.isQuotaError(result.error)) return { success: false };
-    }
-    return { success: false };
   }
 
   /** Critic can only read files and grep. It sees the full worker transcript (truncated) and outputs PASS or FAIL with feedback. */
@@ -790,38 +803,27 @@ export class KoryManager {
     return { passed: !result.isError, output: result.output };
   }
 
-  private requiresSystemAccess(m: string): boolean {
-    const lower = m.toLowerCase();
-    const systemPatterns = [
-      /\b(sudo|apt|apt-get|yum|dnf|pacman|brew)\b/,
-      /\b(systemctl|service|journalctl)\b/,
-      /\b(chmod|chown)\b.*\/(etc|var|usr|bin|sbin|boot|lib|sys|dev)/,
-      /\/etc\//,
-      /\/var\/log\//,
-    ];
-    return systemPatterns.some((p) => p.test(lower));
-  }
-
-  private classifyDomainLLM(message: string): WorkerDomain {
-    const lower = message.toLowerCase();
-    const scores: Record<string, number> = {};
-    for (const [domain, keywords] of Object.entries(DOMAIN.KEYWORDS)) {
-      scores[domain] = (keywords as readonly string[]).filter((k) => lower.includes(k)).length;
-    }
-    const best = Object.entries(scores).sort((a, b) => b[1] - a[1])[0];
-    return (best && best[1] > 0 ? best[0] : 'general') as WorkerDomain;
-  }
-
   /** Manager handles simple tasks directly with full tool access (unsandboxed). Asks user before first tool run unless YOLO. Manager never uses legacy models. */
   private async handleDirectly(
     sessionId: string,
     userMessage: string,
     reasoningLevel?: string,
     preferredModel?: string,
+    attachments?: Array<{ type: string; data: string; name: string }>,
   ): Promise<void> {
     koryLog.debug({ sessionId, reasoningLevel, preferredModel }, 'Entering handleDirectly');
-    const routing = this.resolveActiveRouting(preferredModel, 'general', true);
-    const provider = await this.providers.resolveProvider(routing.model, routing.provider);
+    let routing = this.resolveActiveRouting(preferredModel, 'general', true, userMessage);
+    let provider = await this.providers.resolveProvider(routing.model, routing.provider);
+    // Mirror processTask's fallback: for "auto" (or no model), if the routed model has no
+    // available provider, fall back to the first available one — otherwise a configured
+    // session spuriously fails with "No provider." even though providers are connected.
+    if (!provider && (!preferredModel || preferredModel === 'auto')) {
+      const fallback = this.providers.getFirstAvailableRouting();
+      if (fallback) {
+        routing = { model: fallback.model, provider: fallback.provider };
+        provider = this.providers.resolveProvider(routing.model, routing.provider);
+      }
+    }
     if (!provider) throw new Error('No provider.');
     const providerName = provider.name as ProviderName;
     koryLog.debug({ routing, providerName }, 'Resolved routing and provider');
@@ -873,14 +875,46 @@ export class KoryManager {
             this.getWorkerReasoningLevel(),
             domainHint,
           ),
+        delegateToJules: (task: string, opts) => this.runJulesDelegation(sessionId, task, opts),
       };
 
       const history = await this.loadHistory(sessionId);
       koryLog.debug({ historyCount: history.length }, 'Loaded history');
-      const messages: InternalMessage[] = [...history, { role: 'user', content: userMessage }];
+      
+      let finalContent: string | import('../providers/types').ProviderContentBlock[] = userMessage;
+      if (attachments && attachments.length > 0) {
+        const imageAttachments = attachments.filter(a => a.type === 'image');
+        if (imageAttachments.length > 0) {
+          finalContent = [
+            { type: 'text', text: userMessage },
+            ...imageAttachments.map((att) => {
+              let mime = 'image/png';
+              const lowerName = att.name.toLowerCase();
+              if (lowerName.endsWith('.jpg') || lowerName.endsWith('.jpeg')) mime = 'image/jpeg';
+              if (lowerName.endsWith('.webp')) mime = 'image/webp';
+              if (lowerName.endsWith('.gif')) mime = 'image/gif';
+              return {
+                type: 'image' as const,
+                imageData: att.data,
+                imageMimeType: mime,
+              };
+            })
+          ];
+        }
+      }
+
+      const messages: InternalMessage[] = [...history, { role: 'user', content: finalContent }];
+      // Auto-run tools by default so the app "just works" on launch (changes stay reviewable
+      // after the fact + Critic-gated). Set autoRunTools:false to confirm before each run.
+      const { loadAgentSettings: loadAgentSettingsForRun } = await import('../agent-settings');
+      const autoRunTools = loadAgentSettingsForRun(this.workingDirectory).autoRunTools !== false;
       let turnCount = 0;
       let firstAskForDirectTools = true;
       let stoppedByUser = false;
+      // Track whether the run produced anything user-visible — so an empty LLM response
+      // surfaces a clear message instead of a silent "weird stop".
+      let streamedAnyContent = false;
+      let executedAnyTool = false;
 
       while (turnCount < 25) {
         if (abort.signal.aborted) {
@@ -919,6 +953,7 @@ export class KoryManager {
           tokensIn = Math.max(tokensIn, result.usage.tokensIn);
         if (typeof result.usage?.tokensOut === 'number')
           tokensOut = Math.max(tokensOut, result.usage.tokensOut);
+        if (result.content && result.content.trim()) streamedAnyContent = true;
 
         if (!result.success) break;
 
@@ -926,20 +961,22 @@ export class KoryManager {
         if (!completedToolCalls || completedToolCalls.length === 0) break;
 
         if (completedToolCalls && completedToolCalls.length > 0) {
-          if (!this.isYoloMode && firstAskForDirectTools) {
+          if (!autoRunTools && !this.isYoloMode && firstAskForDirectTools) {
             const selection = await this.waitForUserInputInternal(
               sessionId,
               'Manager will run tools to complete this task. Proceed?',
               ['Yes, proceed', 'Cancel'],
             );
             firstAskForDirectTools = false;
-            if (selection.includes('Cancel')) {
+            if (selection === '__timeout__' || selection.includes('Cancel')) {
               if (this.messages)
                 await this.messages.add(sessionId, {
                   id: nanoid(12),
                   sessionId,
                   role: 'assistant',
-                  content: '[Cancelled by user.]',
+                  content: selection === '__timeout__'
+                    ? '[Timed out waiting for user response.]'
+                    : '[Cancelled by user.]',
                   model: routing.model,
                   provider: providerName,
                   createdAt: Date.now(),
@@ -957,6 +994,7 @@ export class KoryManager {
               agentId: KORY_IDENTITY.id,
               toolResult,
             });
+            executedAnyTool = true;
             messages.push({
               role: 'tool',
               content: JSON.stringify(toolResult),
@@ -972,10 +1010,24 @@ export class KoryManager {
         'Filtering assistant messages for persistence',
       );
       const lastAssistant = assistants.pop();
-      const content = (lastAssistant?.content ?? '').trim();
+      const rawContent = lastAssistant?.content ?? '';
+      const content = (typeof rawContent === 'string' ? rawContent : JSON.stringify(rawContent)).trim();
+
+      // No silent stops: if the model returned nothing user-visible (no streamed text, no
+      // tools), say so live instead of leaving the user staring at a finished spinner.
+      const emptyResponse = !stoppedByUser && !streamedAnyContent && !executedAnyTool && !content;
+      const EMPTY_NOTICE = 'The model returned an empty response. Please resend or rephrase your request.';
+      if (emptyResponse) {
+        this.emitWSMessage(sessionId, 'stream.delta', {
+          agentId: KORY_IDENTITY.id,
+          content: EMPTY_NOTICE,
+          model: routing.model,
+        });
+      }
+
       const toPersist = stoppedByUser
         ? '[Stopped by user.]'
-        : content || '[Task completed using tools.]';
+        : content || (emptyResponse ? EMPTY_NOTICE : '[Task completed using tools.]');
       koryLog.debug({ toPersist, sessionId }, 'Attempting to persist assistant message');
       let finalMessageId: string | undefined;
       if (this.messages) {
@@ -1024,9 +1076,6 @@ export class KoryManager {
         } catch {
           // Shadow logging is non-critical; don't fail the task if it errors
         }
-
-        // Auto-commit for beginner mode
-        await this.handleAutoCommit(sessionId, userMessage);
       }
     } finally {
       this.managerAbortBySession.delete(sessionId);
@@ -1059,83 +1108,7 @@ export class KoryManager {
     }
   }
 
-  /**
-   * Handle auto-commit for beginner mode
-   * Creates a branch, commits changes, and opens a PR
-   */
-  private async handleAutoCommit(sessionId: string, taskDescription: string): Promise<void> {
-    try {
-      const modeManager = getModeManager();
-      const mode = modeManager.getMode();
 
-      // Only auto-commit in beginner mode when enabled
-      if (mode !== 'beginner' || !modeManager.shouldAutoCommit()) {
-        return;
-      }
-
-      // Check if we have a git repo
-      if (!this.git.isGitRepo()) {
-        return;
-      }
-
-      koryLog.info({ sessionId }, 'Auto-committing changes for beginner mode');
-
-      const result = await this.autoCommitService.autoCommitAndCreatePR(taskDescription);
-
-      if (result.success) {
-        // Emit a friendly message to the user
-        const message = result.prUrl
-          ? `✨ I've saved your work and created a pull request for review: ${result.prUrl}`
-          : `✨ I've saved your work to branch "${result.branch}". You can merge it when you're ready!`;
-
-        this.emitWSMessage(sessionId, 'system.notification', {
-          type: 'success',
-          title: 'Changes Saved',
-          message,
-          metadata: {
-            branch: result.branch,
-            commitHash: result.commitHash,
-            prUrl: result.prUrl,
-          },
-        });
-
-        koryLog.info(
-          {
-            sessionId,
-            branch: result.branch,
-            prUrl: result.prUrl,
-          },
-          'Auto-commit completed successfully',
-        );
-      } else {
-        // Log the error but don't fail the task
-        koryLog.warn(
-          {
-            sessionId,
-            error: result.message,
-          },
-          'Auto-commit failed',
-        );
-
-        // Notify user that changes were made but not committed
-        this.emitWSMessage(sessionId, 'system.notification', {
-          type: 'warning',
-          title: 'Changes Made',
-          message:
-            "Your changes are ready! I wasn't able to create a backup branch automatically, but your files have been updated.",
-        });
-      }
-    } catch (error) {
-      // Auto-commit should never fail the main task
-      koryLog.error(
-        {
-          sessionId,
-          error: error instanceof Error ? error.message : String(error),
-        },
-        'Auto-commit error',
-      );
-    }
-  }
 
   private async processManagerTurn(
     sessionId: string,
@@ -1153,6 +1126,17 @@ export class KoryManager {
 
     let systemPrompt = KORY_SYSTEM_PROMPT;
 
+    if (hasAnyVisibleNoteTools(this.workingDirectory)) {
+      const hint = buildNotesNetworkSystemHint(this.workingDirectory);
+      if (hint) systemPrompt += `\n\n${hint}`;
+      try {
+        const { buildNotesNetworkPrompt } = await import('../memory/unified-memory');
+        systemPrompt += await buildNotesNetworkPrompt(2500, this.workingDirectory);
+      } catch {
+        // Notes DB may be unavailable — continue without network context
+      }
+    }
+
     // Multi-source research instruction
     if (settings.multiSourceResearch) {
       systemPrompt +=
@@ -1160,9 +1144,39 @@ export class KoryManager {
     }
 
     // Filter tools based on local web search setting
-    let tools = this.tools.getToolDefsForRole('manager');
+    let tools = filterToolDefsForNotesPermissions(
+      this.tools.getToolDefsForRole('manager'),
+      this.workingDirectory,
+    );
     if (settings.localWebSearch === 'off') {
       tools = tools.filter((t) => t.name !== 'web_search');
+    }
+
+    if (!this.isJulesAvailable()) {
+      tools = tools.filter((t) => t.name !== 'delegate_to_jules');
+    } else {
+      systemPrompt +=
+        `\n\n• JULES (cloud): delegate_to_jules sends work to Google Jules — remote VMs, async, may take minutes, produces PRs. Never substitute for local tools on quick edits.\n• ${JULES_SYNC_INSTRUCTIONS}`;
+    }
+
+    if (provider.name === 'jules') {
+      const julesMeta = getProviderDisplay('jules');
+      systemPrompt +=
+        `\n\n• You are chatting through Jules (cloud provider). All code changes happen on Google's remote infrastructure and GitHub — not in this local workspace until synced.\n• ${julesMeta?.managerHint ?? JULES_SYNC_INSTRUCTIONS}`;
+    }
+
+    // Agent execution mode (the composer pill, persisted in agent settings): gate delegation.
+    //  • single → never delegate (remove the tool entirely — guaranteed solo)
+    //  • multi  → actively prefer delegating substantial coding to specialist workers
+    //  • auto   → Kory decides per-task (default)
+    const execMode = settings.agentExecutionMode ?? 'auto';
+    if (execMode === 'single') {
+      tools = tools.filter((t) => t.name !== 'delegate_to_worker' && t.name !== 'delegate_to_jules');
+      systemPrompt +=
+        '\n\n• AGENT MODE: SOLO — Do NOT delegate. Complete the entire task yourself; delegate_to_worker and delegate_to_jules are unavailable this turn.';
+    } else if (execMode === 'multi') {
+      systemPrompt +=
+        '\n\n• AGENT MODE: MULTI-AGENT — The user explicitly wants a coordinated team. Prefer delegating substantial implementation, refactoring, or multi-step coding to specialist workers via delegate_to_worker, and synthesize their results. Still answer trivial questions yourself.';
     }
     // If "fallback", we keep it in the list. The model can choose to use it if its native search fails or is unavailable.
 
@@ -1175,6 +1189,9 @@ export class KoryManager {
         tools,
         maxTokens: 16384,
         signal: streamSignal,
+        // Agentic CLI providers (claude-code) run + edit files in the project directory.
+        workingDirectory: this.workingDirectory,
+        sessionId,
       },
       provider.name,
     );
@@ -1185,8 +1202,6 @@ export class KoryManager {
     let hasToolCalls = false;
     let tokensIn = 0;
     let tokensOut = 0;
-    // Buffer content to avoid streaming if the turn only delegates to worker
-    let contentBuffer = '';
 
     for await (const event of stream) {
       if (signal?.aborted) throw new DOMException('Manager run aborted', 'AbortError');
@@ -1194,8 +1209,17 @@ export class KoryManager {
         throw new Error(event.error ?? 'LLM stream error');
       }
       if (event.type === 'content_delta') {
-        assistantContent += event.content ?? '';
-        contentBuffer += event.content ?? '';
+        const delta = event.content ?? '';
+        assistantContent += delta;
+        // Stream live, token-by-token — so the user sees text appear immediately (no
+        // "thinks then dumps" pause) and partial output survives a mid-stream error.
+        if (delta) {
+          this.emitWSMessage(sessionId, 'stream.delta', {
+            agentId: KORY_IDENTITY.id,
+            content: delta,
+            model: modelId,
+          });
+        }
       } else if (event.type === 'thinking_delta') {
         if (event.thinking) {
           this.emitWSMessage(sessionId, 'stream.thinking', {
@@ -1203,6 +1227,23 @@ export class KoryManager {
             thinking: event.thinking,
           } satisfies StreamThinkingPayload);
         }
+      } else if (event.type === 'file_edit') {
+        // Agentic provider (claude-code) already wrote the file — surface it in the live
+        // diff preview (it's done, not a tool for us to execute).
+        if (event.filePath) {
+          this.streamAgentFileEdit(ctx, event.filePath, event.fileContent ?? '', event.fileOperation ?? 'edit', event.fileOldContent);
+        }
+      } else if (event.type === 'tool_executed') {
+        // Agentic provider already ran a non-file tool — surface it in the tool feed.
+        const callId = `agent-${nanoid(8)}`;
+        this.emitWSMessage(sessionId, 'stream.tool_call', {
+          agentId: KORY_IDENTITY.id,
+          toolCall: { id: callId, name: event.toolName ?? 'tool', input: safeParseJson(event.toolInput) },
+        });
+        this.emitWSMessage(sessionId, 'stream.tool_result', {
+          agentId: KORY_IDENTITY.id,
+          toolResult: { callId, name: event.toolName ?? 'tool', output: event.toolOutput ?? '', isError: event.isError === true, durationMs: 0 },
+        });
       } else if (event.type === 'usage_update') {
         if (typeof event.tokensIn === 'number') tokensIn = Math.max(tokensIn, event.tokensIn);
         if (typeof event.tokensOut === 'number') tokensOut = Math.max(tokensOut, event.tokensOut);
@@ -1240,19 +1281,6 @@ export class KoryManager {
       }
     }
 
-    // Only emit content if this turn doesn't solely delegate to a worker
-    const isDelegationOnly =
-      hasToolCalls &&
-      completedToolCalls.length === 1 &&
-      completedToolCalls[0]!.name === 'delegate_to_worker';
-    if (!isDelegationOnly && contentBuffer) {
-      this.emitWSMessage(sessionId, 'stream.delta', {
-        agentId: KORY_IDENTITY.id,
-        content: contentBuffer,
-        model: modelId,
-      });
-    }
-
     messages.push({
       role: 'assistant',
       content: assistantContent,
@@ -1277,6 +1305,82 @@ export class KoryManager {
     };
   }
 
+  /**
+   * Surface a file edit an AGENTIC provider (claude-code) already performed, via the live
+   * diff preview pipeline (stream.file_delta/file_complete) + change tracking. The agent
+   * did the write; we only display it.
+   */
+  private streamAgentFileEdit(
+    ctx: ToolContext,
+    path: string,
+    content: string,
+    operation: 'create' | 'edit',
+    oldStr?: string,
+  ): void {
+    ctx.emitFileEdit?.({
+      path,
+      delta: content,
+      totalLength: content.length,
+      operation,
+      ...(operation === 'edit' && oldStr !== undefined ? { oldStr } : {}),
+    });
+    ctx.emitFileComplete?.({ path, totalLines: content.split('\n').length, operation });
+    ctx.recordChange?.({
+      path,
+      linesAdded: content ? content.split('\n').length : 0,
+      linesDeleted: oldStr ? oldStr.split('\n').length : 0,
+      operation,
+    });
+  }
+
+  private async gateNoteToolCall(
+    sessionId: string,
+    tc: CompletedToolCall,
+  ): Promise<ToolCallOutput | null> {
+    if (!isNoteToolName(tc.name)) return null;
+
+    const check = checkNoteToolPermission(tc.name, this.workingDirectory, {
+      yoloMode: this.isYoloMode,
+    });
+
+    if (!check.allowed) {
+      // Tool was hidden from the schema — treat as unknown if the model hallucinates a call
+      return {
+        callId: tc.id,
+        name: tc.name,
+        output: `Unknown tool: ${tc.name}`,
+        isError: true,
+        durationMs: 0,
+      };
+    }
+
+    if (check.requiresApproval) {
+      const summary = formatNoteToolApprovalSummary(
+        tc.name,
+        (tc.input ?? {}) as Record<string, unknown>,
+      );
+      const selection = await this.waitForUserInputInternal(
+        sessionId,
+        `Allow agent to ${summary}?`,
+        ['Allow', 'Deny'],
+      );
+      if (selection === '__timeout__' || selection.includes('Deny') || selection.includes('Cancel')) {
+        return {
+          callId: tc.id,
+          name: tc.name,
+          output:
+            selection === '__timeout__'
+              ? 'Note action denied: timed out waiting for approval'
+              : 'Note action denied by user',
+          isError: true,
+          durationMs: 0,
+        };
+      }
+    }
+
+    return null;
+  }
+
   private async executeManagerToolCall(
     sessionId: string,
     tc: CompletedToolCall,
@@ -1294,12 +1398,13 @@ export class KoryManager {
         durationMs: 0,
       };
     }
+    const gated = await this.gateNoteToolCall(sessionId, tc);
+    if (gated) return gated;
     return await this.tools.execute(ctx, { id: tc.id, name: tc.name, input: tc.input });
   }
 
   /**
-   * Runs a worker (sub-agent). Only called from routeToWorker, which is only called from
-   * runWorkerPipeline, which is invoked solely when the manager calls the delegate_to_worker tool.
+   * Runs a worker (sub-agent). Invoked by WorkerPipelineService when the manager calls delegate_to_worker.
    * The code never auto-spawns workers.
    */
   private async executeWithProvider(
@@ -1369,6 +1474,18 @@ export class KoryManager {
     const messages: InternalMessage[] = [...history, { role: 'user', content: userMessage }];
     const resolvedReasoningLevel =
       reasoningLevel === 'auto' ? determineAutoReasoningLevel(userMessage) : reasoningLevel;
+    let workerSystemPrompt = WORKER_SYSTEM_PROMPT;
+    if (hasAnyVisibleNoteTools(this.workingDirectory)) {
+      const hint = buildNotesNetworkSystemHint(this.workingDirectory);
+      if (hint) workerSystemPrompt += `\n\n${hint}`;
+      try {
+        const { buildNotesNetworkPrompt } = await import('../memory/unified-memory');
+        workerSystemPrompt += await buildNotesNetworkPrompt(2500, this.workingDirectory);
+      } catch {
+        // Notes DB may be unavailable
+      }
+    }
+
     const thread: AgentThreadState = {
       sessionId,
       identity,
@@ -1376,7 +1493,7 @@ export class KoryManager {
       status: 'thinking',
       providerName: provider.name,
       modelId,
-      systemPrompt: WORKER_SYSTEM_PROMPT,
+      systemPrompt: workerSystemPrompt,
       toolRole: 'worker',
       reasoningLevel: resolvedReasoningLevel,
       maxTurns: 25,
@@ -1442,6 +1559,8 @@ export class KoryManager {
       );
       return { callId: tc.id, name: tc.name, output: ans, isError: false, durationMs: 0 };
     }
+    const gated = await this.gateNoteToolCall(sessionId, tc);
+    if (gated) return gated;
     return await this.tools.execute(ctx, { id: tc.id, name: tc.name, input: tc.input });
   }
   cancelWorker(agentId: string) {
@@ -1482,30 +1601,6 @@ export class KoryManager {
     }
     this.isProcessing = false;
     koryLog.info('All workers cancelled via global cancel');
-  }
-
-  private async generateWorkerTask(
-    sessionId: string,
-    message: string,
-    domain: WorkerDomain,
-    preferredModel?: string,
-  ): Promise<string> {
-    const routing = this.resolveActiveRouting(preferredModel, 'general', true);
-    const provider = await this.providers.resolveProvider(routing.model, routing.provider);
-    if (!provider) return message;
-    let res = '';
-    try {
-      for await (const event of provider.streamResponse({
-        model: routing.model,
-        systemPrompt: 'Be brief and actionable.',
-        messages: [{ role: 'user', content: `Worker instruction for ${domain}: ${message}` }],
-        maxTokens: 200,
-      }))
-        if (event.type === 'content_delta') res += event.content;
-      return res.trim() || message;
-    } catch {
-      return message;
-    }
   }
 
   private async loadHistory(sessionId: string): Promise<InternalMessage[]> {
@@ -1665,9 +1760,14 @@ export class KoryManager {
         model: thread.modelId,
         systemPrompt: thread.systemPrompt,
         messages: this.toProviderMessages(thread.messages),
-        tools: this.tools.getToolDefsForRole(thread.toolRole),
+        tools: filterToolDefsForNotesPermissions(
+          this.tools.getToolDefsForRole(thread.toolRole),
+          this.workingDirectory,
+        ),
         maxTokens: thread.maxTokens,
         signal: streamSignal,
+        workingDirectory: thread.ctx.workingDirectory,
+        sessionId: thread.sessionId,
         ...(normalizedReasoning !== undefined && { reasoningLevel: normalizedReasoning }),
       },
       provider.name,
@@ -1690,6 +1790,17 @@ export class KoryManager {
           content: event.content,
           model: thread.modelId,
         });
+      } else if (event.type === 'thinking_delta') {
+        // Workers reason too — without this branch their thinking text was
+        // silently dropped and never reached the agent thread feed.
+        if (event.thinking) {
+          thread.status = 'thinking';
+          thread.updatedAt = Date.now();
+          this.emitWSMessage(thread.sessionId, 'stream.thinking', {
+            agentId: thread.identity.id,
+            thinking: event.thinking,
+          } satisfies StreamThinkingPayload);
+        }
       } else if (event.type === 'usage_update') {
         this.updateUsageFromEvent(
           thread.sessionId,
