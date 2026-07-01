@@ -481,14 +481,33 @@ function convertMessageToCodexInput(message: ProviderMessage): Array<Record<stri
     ];
   }
 
-  const content = convertContentBlocks(message.content);
-  if (content.length === 0) return [];
+  // --- Assistant messages: content blocks use output_text/refusal types ---
+  if (message.role === 'assistant') {
+    const text = flattenMessageText(message.content);
+    const content: Array<Record<string, unknown>> = text
+      ? [{ type: 'output_text', text }]
+      : [];
+    if (content.length === 0) return [];
+    return [
+      {
+        type: 'message',
+        role: 'assistant',
+        content,
+      },
+    ];
+  }
 
+  // --- User / system messages: use plain string content (not array of blocks) ---
+  // The Codex Responses API now rejects content blocks with type "input_text";
+  // only "output_text" and "refusal" are accepted. Instead, use the EasyInputMessage
+  // format where content is a simple string for user/system roles.
+  const text = flattenMessageText(message.content);
+  if (!text.trim()) return [];
   return [
     {
       type: 'message',
       role: message.role,
-      content,
+      content: text,
     },
   ];
 }
@@ -496,15 +515,19 @@ function convertMessageToCodexInput(message: ProviderMessage): Array<Record<stri
 function convertContentBlocks(
   content: string | ProviderContentBlock[],
 ): Array<Record<string, unknown>> {
+  // NOTE: This function is kept for potential image-handling use but the
+  // Codex Responses API now rejects content blocks with type "input_text".
+  // Only "output_text" / "refusal" are valid content block types.
+  // New code should use convertMessageToCodexInput which handles this correctly.
   if (typeof content === 'string') {
     const text = content.trim();
-    return text ? [{ type: 'input_text', text }] : [];
+    return text ? [{ type: 'output_text', text }] : [];
   }
 
   const blocks: Array<Record<string, unknown>> = [];
   for (const block of content) {
     if (block.type === 'text' && block.text) {
-      blocks.push({ type: 'input_text', text: block.text });
+      blocks.push({ type: 'output_text', text: block.text });
       continue;
     }
 

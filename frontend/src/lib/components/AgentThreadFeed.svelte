@@ -6,6 +6,7 @@
   import VirtualList from './VirtualList.svelte';
   import AnimatedStatusIcon from './AnimatedStatusIcon.svelte';
   import { MessageSquare, ArrowDown } from 'lucide-svelte';
+  import { createAutoScroll } from '$lib/utils/autoscroll.svelte';
 
   interface Props {
     agent: {
@@ -20,11 +21,25 @@
 
   let feedContainer = $state<HTMLDivElement>();
   let virtualList = $state<VirtualList<FeedEntryLocal>>();
-  let feedScrollEl = $state<HTMLDivElement | undefined>();
-  let autoScroll = $state(true);
   let expandedGroups = $state<Set<string>>(new Set());
-  let lastFeedLength = $state(0);
-  let lastUserScrollAt = $state(0);
+
+  // -- Autoscroll ----------------------------------------------------------
+  let scrollEl = $derived<HTMLDivElement | undefined>(
+    feed.length === 0 ? feedContainer : virtualList?.getScrollElement(),
+  );
+  const autoScrollCtl = createAutoScroll(() => scrollEl, { threshold: 100 });
+
+  // Re-pin when feed grows OR the last entry's text grows (per-token
+  // streaming).
+  let streamingTextSig = $derived.by(() => {
+    const last = feed[feed.length - 1];
+    return last?.text?.length ?? 0;
+  });
+  $effect(() => {
+    void feed.length;
+    void streamingTextSig;
+    autoScrollCtl.requestPin();
+  });
 
   function estimateFeedHeight(entry: FeedEntryLocal): number {
     switch (entry.type) {
@@ -42,87 +57,8 @@
   }
 
   function scrollFeedToBottom(behavior: ScrollBehavior = 'instant') {
-    if (virtualList) {
-      virtualList.scrollToBottom(behavior);
-    } else if (feedContainer) {
-      feedContainer.scrollTop = feedContainer.scrollHeight;
-    }
+    autoScrollCtl.jumpToBottom(behavior === 'smooth' ? 'smooth' : 'instant');
   }
-
-  function handleFeedScroll(distFromBottom: number) {
-    lastUserScrollAt = Date.now();
-    autoScroll = distFromBottom < 50;
-  }
-
-  function handleScrollNearBottom() {
-    if (autoScroll) {
-      scrollFeedToBottom('instant');
-    }
-  }
-
-  function handleVirtualListReady(el: HTMLDivElement) {
-    feedScrollEl = el;
-  }
-
-  $effect(() => {
-    const len = feed.length;
-    const justScrolled = Date.now() - lastUserScrollAt < 200;
-    if (autoScroll && len > lastFeedLength && !justScrolled) {
-      lastFeedLength = len;
-      requestAnimationFrame(() => {
-        if (autoScroll) scrollFeedToBottom('instant');
-      });
-    } else if (len !== lastFeedLength) {
-      lastFeedLength = len;
-    }
-  });
-
-  function handleScroll() {
-    if (!feedContainer) return;
-    const { scrollHeight, clientHeight } = feedContainer;
-    const dist = scrollHeight - feedContainer.scrollTop - clientHeight;
-    handleFeedScroll(dist);
-  }
-
-  $effect(() => {
-    if (feed.length === 0) {
-      feedScrollEl = feedContainer;
-    }
-  });
-
-  $effect(() => {
-    const container = feedScrollEl;
-    if (!container) return;
-
-    const ro = new ResizeObserver((entries) => {
-      for (const entry of entries) {
-        if (autoScroll) {
-          container.scrollTop = container.scrollHeight;
-        } else {
-          const dist = container.scrollHeight - container.scrollTop - entry.contentRect.height;
-          autoScroll = dist < 50;
-        }
-      }
-    });
-    ro.observe(container);
-
-    let rafId: number | null = null;
-    const mo = new MutationObserver(() => {
-      if (!autoScroll) return;
-      if (rafId !== null) return;
-      rafId = requestAnimationFrame(() => {
-        rafId = null;
-        if (autoScroll) container.scrollTop = container.scrollHeight;
-      });
-    });
-    mo.observe(container, { childList: true, subtree: true });
-
-    return () => {
-      ro.disconnect();
-      mo.disconnect();
-      if (rafId !== null) cancelAnimationFrame(rafId);
-    };
-  });
 
   function toggleGroup(id: string) {
     if (expandedGroups.has(id)) expandedGroups.delete(id);
@@ -164,7 +100,7 @@
 
   <div class="relative flex-1 min-h-0 overflow-hidden">
     {#if feed.length === 0}
-    <div bind:this={feedContainer} onscroll={handleScroll} class="absolute inset-0 overflow-y-auto p-4 feed-scroll">
+    <div bind:this={feedContainer} class="absolute inset-0 overflow-y-auto p-4 feed-scroll">
       <div class="flex h-full items-center justify-center">
         <div class="max-w-lg rounded-[20px] border px-6 py-8 text-center" style="background: var(--color-surface-2); border-color: var(--color-border);">
           <div class="text-lg font-semibold mb-2" style="color: var(--color-text-primary);">
@@ -183,9 +119,6 @@
           items={feed}
           estimateHeight={estimateFeedHeight}
           class="h-full p-4 feed-scroll"
-          onScroll={handleFeedScroll}
-          onScrollNearBottom={handleScrollNearBottom}
-          onReady={handleVirtualListReady}
         >
           {#snippet row(entry, i)}
             <div class="pb-3">
@@ -204,19 +137,25 @@
       </div>
     {/if}
 
-  {#if !autoScroll}
+  {#if !autoScrollCtl.follow}
     <div
       transition:fade={{ duration: 150 }}
       class="absolute bottom-4 left-1/2 z-10 -translate-x-1/2 pointer-events-none"
     >
       <button
-        onclick={() => { autoScroll = true; scrollFeedToBottom('smooth'); }}
+        onclick={() => autoScrollCtl.jumpToBottom('smooth')}
         class="pointer-events-auto flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-medium shadow-lg backdrop-blur-sm transition-transform hover:scale-105 active:scale-95"
         style="background: var(--color-surface-2); border-color: var(--color-border); color: var(--color-text-secondary); box-shadow: 0 4px 16px rgba(0,0,0,0.35);"
         aria-label="Scroll to bottom"
       >
         <ArrowDown size={12} />
-        <span>Jump to bottom</span>
+        <span>
+          {#if autoScrollCtl.unseenCount > 0}
+            {autoScrollCtl.unseenCount} new {autoScrollCtl.unseenCount === 1 ? 'message' : 'messages'}
+          {:else}
+            Jump to bottom
+          {/if}
+        </span>
       </button>
     </div>
   {/if}
