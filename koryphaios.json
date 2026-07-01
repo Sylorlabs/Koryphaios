@@ -34,7 +34,7 @@
     "multiSourceResearch": true,
     "updatedAt": 1782797742979
   },
-  "updatedAt": 1782863822931,
+  "updatedAt": 1782868216787,
   "providers": {
     "anthropic": {
       "name": "anthropic",
@@ -51,12 +51,14 @@
     },
     "codex": {
       "name": "codex",
+      "authToken": "cli:codex:1782868203498",
       "selectedModels": [
+        "gpt-5.4-mini",
         "gpt-5.4",
-        "gpt-5.4-mini"
+        "gpt-5.2"
       ],
       "hideModelSelector": false,
-      "disabled": true
+      "disabled": false
     },
     "openai": {
       "name": "openai",

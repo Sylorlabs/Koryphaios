@@ -1,0 +1,45 @@
+- generic [active] [ref=e1]:
+  - generic [ref=e2]:
+    - link "DuckDuckGo" [ref=e3] [cursor=pointer]:
+      - /url: /html/
+    - iframe [ref=e4]:
+      
+    - generic [ref=e5]:
+      - generic [ref=e6]:
+        - generic [ref=e7]: Unfortunately, bots use DuckDuckGo too.
+        - generic [ref=e8]: Please complete the following challenge to confirm this search was made by a human.
+        - generic [ref=e9]: "Select all squares containing a duck:"
+        - generic [ref=e11]:
+          - generic [ref=e13] [cursor=pointer]:
+            - text: █
+            - img [ref=e14]
+          - generic [ref=e16] [cursor=pointer]:
+            - text: █
+            - img [ref=e17]
+          - generic [ref=e19] [cursor=pointer]:
+            - text: █
+            - img [ref=e20]
+          - generic [ref=e22] [cursor=pointer]:
+            - text: █
+            - img [ref=e23]
+          - generic [ref=e25] [cursor=pointer]:
+            - text: █
+            - img [ref=e26]
+          - generic [ref=e28] [cursor=pointer]:
+            - text: █
+            - img [ref=e29]
+          - generic [ref=e31] [cursor=pointer]:
+            - text: █
+            - img [ref=e32]
+          - generic [ref=e34] [cursor=pointer]:
+            - text: █
+            - img [ref=e35]
+          - generic [ref=e37] [cursor=pointer]:
+            - text: █
+            - img [ref=e38]
+        - generic [ref=e39]:
+          - button "Submit" [ref=e40] [cursor=pointer]
+          - paragraph
+          - text: Images not loading?
+      - paragraph
+  - img [ref=e41]
