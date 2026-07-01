@@ -3,82 +3,132 @@
 // Supports both API key and Claude Code OAuth token (Pro/Max subscription).
 
 import Anthropic from '@anthropic-ai/sdk';
-import type { ProviderConfig, ModelDef } from '@koryphaios/shared';
+import type { ProviderConfig, ModelDef, ProviderName } from '@koryphaios/shared';
 import {
   type Provider,
   type ProviderEvent,
   type StreamRequest,
   type ProviderContentBlock,
   getModelsForProvider,
-  createGenericModel,
+  resolveModel,
 } from './types';
 import { withRetry, withTimeoutSignal } from './utils';
 import { createUsageInterceptingFetch } from '../credit-accountant';
 import { providerLog } from '../logger';
+import {
+  isModelListCacheFresh,
+  mergeModelLists,
+  modelFromRemoteId,
+} from './model-list-cache';
 
 export class AnthropicProvider implements Provider {
-  readonly name: 'anthropic';
-  private _client: Anthropic | null = null;
+  readonly name: ProviderName;
+  protected _client: Anthropic | null = null;
 
-  constructor(readonly config: ProviderConfig) {
-    this.name = 'anthropic';
+  constructor(readonly config: ProviderConfig, name: ProviderName = 'anthropic') {
+    this.name = name;
   }
 
   protected get client(): Anthropic {
     if (!this._client) {
-      this._client = new Anthropic({
-        apiKey: this.config.apiKey,
-        authToken: this.config.authToken,
-        baseURL: this.config.baseUrl || undefined,
-        fetch: createUsageInterceptingFetch(globalThis.fetch),
-      });
+      this._client = this.makeClient();
     }
     return this._client;
   }
 
+  /** Build the underlying client. Overridden by BedrockProvider to use AnthropicBedrock (SigV4). */
+  protected makeClient(): Anthropic {
+    return new Anthropic({
+      apiKey: this.config.apiKey,
+      authToken: this.config.authToken,
+      baseURL: this.config.baseUrl || undefined,
+      fetch: createUsageInterceptingFetch(globalThis.fetch),
+    });
+  }
+
   isAvailable(): boolean {
-    return !this.config.disabled && !!(this.config.apiKey || this.config.authToken);
+    const available = !this.config.disabled && !!(this.config.apiKey || this.config.authToken);
+    if (available && !isModelListCacheFresh(this.lastFetch)) {
+      this.refreshModelsInBackground(getModelsForProvider(this.name));
+    }
+    return available;
   }
 
   private cachedModels: ModelDef[] | null = null;
   private lastFetch = 0;
+  private fetchInProgress = false;
 
   listModels(): ModelDef[] {
-    const localModels = getModelsForProvider(this.name);
-
-    if (!this.isAvailable()) {
-      return localModels;
-    }
-
-    if (this.cachedModels && Date.now() - this.lastFetch < 5 * 60 * 1000) {
-      return this.cachedModels;
-    }
-
-    // Trigger background refresh
-    this.refreshModelsInBackground(localModels);
-    return this.cachedModels ?? localModels;
+    const fallback = getModelsForProvider(this.name);
+    if (!this.isAvailable()) return fallback;
+    if (this.cachedModels && isModelListCacheFresh(this.lastFetch)) return this.cachedModels;
+    this.refreshModelsInBackground(fallback);
+    return this.cachedModels ?? fallback;
   }
 
-  private refreshModelsInBackground(localModels: ModelDef[]) {
-    withRetry(() => this.client.models.list())
-      .then((response) => {
-        const remoteModels: ModelDef[] = [];
+  private refreshModelsInBackground(fallback: ModelDef[]) {
+    if (this.fetchInProgress) return;
+    this.fetchInProgress = true;
+
+    void (async () => {
+      try {
+        const response = await withRetry(() => this.client.models.list());
+        const discovered: ModelDef[] = [];
         for (const model of response.data) {
           const id = model.id;
-          const existing = localModels.find((m) => m.apiModelId === id || m.id === id);
-          if (existing) continue;
-          remoteModels.push(createGenericModel(id, this.name));
+          if (!id) continue;
+          discovered.push(modelFromRemoteId(id, this.name, fallback));
         }
-        this.cachedModels = [...localModels, ...remoteModels];
+        if (discovered.length > 0) {
+          this.cachedModels = mergeModelLists(fallback, discovered);
+          providerLog.debug(
+            { provider: this.name, count: this.cachedModels.length },
+            'Model list refreshed from provider API',
+          );
+        } else {
+          this.cachedModels ??= fallback;
+        }
         this.lastFetch = Date.now();
-      })
-      .catch(() => {
-        if (!this.cachedModels) this.cachedModels = localModels;
-      });
+      } catch (err) {
+        providerLog.debug(
+          { provider: this.name, err: err instanceof Error ? err.message : String(err) },
+          'Model list refresh failed; using catalog fallback',
+        );
+        this.cachedModels ??= fallback;
+      } finally {
+        this.fetchInProgress = false;
+      }
+    })();
   }
 
   async *streamResponse(request: StreamRequest): AsyncGenerator<ProviderEvent> {
-    const messages = this.convertMessages(request.messages);
+    let messages = this.convertMessages(request.messages);
+
+    // Vision guard: all Claude models accept images, but this provider also
+    // serves Anthropic-COMPATIBLE gateway models (e.g. OpenCode Go MiniMax/Qwen)
+    // that may not. When the model is explicitly known to lack vision, swap
+    // image blocks for a text note so the request doesn't 400.
+    const requestDef =
+      this.listModels().find((m) => m.id === request.model || m.apiModelId === request.model) ??
+      resolveModel(request.model);
+    if (requestDef?.vision === false && requestDef.supportsAttachments !== true) {
+      messages = messages.map((m) => {
+        if (!Array.isArray(m.content)) return m;
+        if (!m.content.some((b) => b.type === 'image')) return m;
+        return {
+          ...m,
+          content: m.content.map((b) =>
+            b.type === 'image'
+              ? ({
+                  type: 'text' as const,
+                  text: '[image attachment omitted — the selected model does not support image input]',
+                })
+              : b,
+          ),
+        };
+      });
+    }
+
     const tools = request.tools?.map((t) => ({
       name: t.name,
       description: t.description,
@@ -86,7 +136,8 @@ export class AnthropicProvider implements Provider {
     }));
 
     const params: Anthropic.MessageCreateParamsStreaming = {
-      model: request.model,
+      // Use the catalog's apiModelId (dated Anthropic id, or the Bedrock model id) when known.
+      model: resolveModel(request.model)?.apiModelId ?? request.model,
       max_tokens: request.maxTokens ?? 16_384,
       system: request.systemPrompt,
       messages,

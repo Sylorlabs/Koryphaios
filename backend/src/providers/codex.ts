@@ -546,10 +546,18 @@ function convertContentBlocks(
 
 function flattenMessageText(content: string | ProviderContentBlock[]): string {
   if (typeof content === 'string') return content;
-  return content
+  const parts = content
     .filter((block) => block.type === 'text' && typeof block.text === 'string')
-    .map((block) => block.text)
-    .join('\n');
+    .map((block) => block.text as string);
+  // The Codex Responses API only accepts plain-string user content here, so
+  // images can't be forwarded — say so instead of silently dropping them.
+  const imageCount = content.filter((block) => block.type === 'image').length;
+  if (imageCount > 0) {
+    parts.push(
+      `[${imageCount} image attachment${imageCount === 1 ? '' : 's'} omitted — the Codex harness is text-only]`,
+    );
+  }
+  return parts.join('\n');
 }
 
 // Used only when the model's real supported_reasoning_levels aren't known (e.g. a bare
