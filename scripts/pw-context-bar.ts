@@ -25,8 +25,8 @@ await page.goto(URL, { waitUntil: 'networkidle', timeout: 30_000 });
 await page.waitForTimeout(2500);
 
 // Fresh session so we don't collide with a busy one.
-await page.locator('aside button, [class*=sidebar] button').filter({ hasText: /^\+?$/ }).first().click().catch(() => {});
-await page.waitForTimeout(1000);
+await page.getByLabel('New session').click({ timeout: 5000 }).catch((e) => console.log('new-session:', e.message));
+await page.waitForTimeout(1500);
 
 async function selectModel(name: RegExp) {
   await page.locator('button', { hasText: /Select model|Claude|GPT|Grok|Composer/i }).first().click();

@@ -372,11 +372,16 @@ export function getContextUsage(): {
   if (candidates.length === 0) {
     return { used: 0, max: 0, percent: 0, isReliable: false, reason: 'usage_unknown' };
   }
-  if (candidates.length > 1) {
+  // The manager owns the conversation context; workers/critics report their own
+  // (separate) usage and must not blank the bar the moment they spawn.
+  const manager = candidates.find(
+    (a) => a.identity.role === 'manager' || a.identity.id === 'kory-manager',
+  );
+  if (!manager && candidates.length > 1) {
     return { used: 0, max: 0, percent: 0, isReliable: false, reason: 'multi_agent_usage' };
   }
 
-  const agent = candidates[0];
+  const agent = manager ?? candidates[0];
   if (!agent.contextKnown || agent.contextMax <= 0) {
     return { used: 0, max: 0, percent: 0, isReliable: false, reason: 'context_unknown' };
   }
