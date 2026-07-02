@@ -61,6 +61,38 @@
   let composerDraft = $state('');
   let currentProjectContent = $state('');
   let composerProjectFiles = $state<string[]>([]);
+  let contextBarHover = $state(false);
+
+  // Segmented context bar: what's occupying the window (system prompt, memory
+  // notes, tool defs, chat history). Segment ratios come from the backend's
+  // dispatch-time estimate; the TOTAL width stays pinned to the provider's real
+  // token count so estimates can't overstate usage.
+  const CONTEXT_SEGMENTS = [
+    { key: 'system', label: 'System', color: '#8b5cf6' },
+    { key: 'memory', label: 'Memory', color: '#14b8a6' },
+    { key: 'tools', label: 'Tools', color: '#f59e0b' },
+    { key: 'chat', label: 'Chat', color: '#3b82f6' },
+  ] as const;
+
+  let contextSegments = $derived.by(() => {
+    const usage = wsStore.contextUsage;
+    const b = usage.breakdown;
+    if (!b || !usage.isReliable) return null;
+    const sum = b.system + b.memory + b.tools + b.chat;
+    if (sum <= 0) return null;
+    return CONTEXT_SEGMENTS.map((s) => {
+      const share = b[s.key] / sum;
+      return {
+        ...s,
+        tokens: Math.round(usage.used * share),
+        widthPercent: usage.percent * share,
+      };
+    }).filter((s) => s.widthPercent > 0);
+  });
+
+  function formatTokenCount(n: number): string {
+    return n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n);
+  }
 
   const agentRail = useAgentRail();
 
@@ -892,26 +924,58 @@ RULES:
   {#snippet contextBar()}
     {#if wsStore.contextUsage.isReliable && modeStore.showCostTracking}
       <div
-        class="shrink-0 px-4 flex items-center gap-3"
+        class="shrink-0 px-4"
         style="padding-top: var(--space-2); padding-bottom: var(--space-2); border-top: 1px solid var(--color-border); background: var(--color-surface-1);"
+        role="group"
+        onmouseenter={() => (contextBarHover = true)}
+        onmouseleave={() => (contextBarHover = false)}
       >
-        <span class="shrink-0" style="font-size: var(--text-xs); color: var(--color-text-muted);">
-          Context
-        </span>
-        <div class="flex-1 rounded-full overflow-hidden" style="height: 6px; background: var(--color-surface-3);">
-          <div
-            class="h-full rounded-full transition-all"
-            style="width: {wsStore.contextUsage.percent}%; transition-duration: var(--duration-slower); background: {
-              wsStore.contextUsage.percent > 85 ? '#ef4444' :
-              wsStore.contextUsage.percent > 65 ? '#f59e0b' :
-              'var(--color-accent)'
-            };"
-          ></div>
-        </div>
-        {#if wsStore.contextUsage.max > 0}
-          <span class="shrink-0 tabular-nums" style="font-size: var(--text-xs); color: var(--color-text-muted);">
-            {wsStore.contextUsage.used >= 1000 ? `${(wsStore.contextUsage.used / 1000).toFixed(1)}k` : wsStore.contextUsage.used} / {(wsStore.contextUsage.max / 1000).toFixed(1)}k
+        <div class="flex items-center gap-3">
+          <span class="shrink-0" style="font-size: var(--text-xs); color: var(--color-text-muted);">
+            Context
           </span>
+          <div class="flex-1 rounded-full overflow-hidden flex" style="height: 6px; background: var(--color-surface-3);">
+            {#if contextSegments}
+              {#each contextSegments as seg (seg.key)}
+                <div
+                  class="h-full transition-all"
+                  title="{seg.label}: ~{formatTokenCount(seg.tokens)} tokens"
+                  style="width: {seg.widthPercent}%; transition-duration: var(--duration-slower); background: {seg.color};"
+                ></div>
+              {/each}
+            {:else}
+              <div
+                class="h-full rounded-full transition-all"
+                style="width: {wsStore.contextUsage.percent}%; transition-duration: var(--duration-slower); background: {
+                  wsStore.contextUsage.percent > 85 ? '#ef4444' :
+                  wsStore.contextUsage.percent > 65 ? '#f59e0b' :
+                  'var(--color-accent)'
+                };"
+              ></div>
+            {/if}
+          </div>
+          {#if wsStore.contextUsage.max > 0}
+            <span
+              class="shrink-0 tabular-nums"
+              style="font-size: var(--text-xs); color: {wsStore.contextUsage.percent > 85 ? '#ef4444' : 'var(--color-text-muted)'};"
+            >
+              {formatTokenCount(wsStore.contextUsage.used)} / {formatTokenCount(wsStore.contextUsage.max)}
+            </span>
+          {/if}
+        </div>
+        {#if contextSegments && contextBarHover}
+          <div class="flex items-center gap-4 flex-wrap" style="padding-top: var(--space-2);">
+            {#each contextSegments as seg (seg.key)}
+              <span class="flex items-center gap-1.5" style="font-size: var(--text-xs); color: var(--color-text-muted);">
+                <span class="rounded-full inline-block" style="width: 8px; height: 8px; background: {seg.color};"></span>
+                {seg.label}
+                <span class="tabular-nums">~{formatTokenCount(seg.tokens)}</span>
+              </span>
+            {/each}
+            <span style="font-size: var(--text-xs); color: var(--color-text-muted); opacity: 0.7;">
+              Free {formatTokenCount(Math.max(0, wsStore.contextUsage.max - wsStore.contextUsage.used))}
+            </span>
+          </div>
         {/if}
       </div>
     {/if}

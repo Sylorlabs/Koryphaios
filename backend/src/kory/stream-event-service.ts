@@ -6,7 +6,13 @@
  * from orchestration logic.
  */
 
-import type { WSMessage, WorkerDomain, ProviderName, StreamUsagePayload } from '@koryphaios/shared';
+import type {
+  WSMessage,
+  WorkerDomain,
+  ProviderName,
+  StreamUsagePayload,
+  ContextBreakdown,
+} from '@koryphaios/shared';
 import { wsBroker } from '../pubsub';
 import { resolveTrustedContextWindow } from '../providers';
 import { koryLog } from '../logger';
@@ -66,6 +72,7 @@ export class StreamEventService {
     tokensIn: number,
     tokensOut: number,
     usageKnown: boolean,
+    breakdown?: ContextBreakdown,
   ): void {
     const context = resolveTrustedContextWindow(model, provider);
     const payload: StreamUsagePayload = {
@@ -78,6 +85,7 @@ export class StreamEventService {
       usageKnown,
       contextKnown: context.contextKnown,
       ...(context.contextWindow ? { contextWindow: context.contextWindow } : {}),
+      ...(breakdown ? { breakdown } : {}),
     };
     this.emitWSMessage(sessionId, 'stream.usage', payload);
   }

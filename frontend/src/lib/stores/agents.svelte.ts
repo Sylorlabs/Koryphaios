@@ -5,6 +5,7 @@ import type {
   AgentIdentity,
   AgentStatus,
   StreamUsagePayload,
+  ContextBreakdown,
 } from '@koryphaios/shared';
 import type { FeedEntry } from '$lib/types';
 import { sessionStore } from './sessions.svelte';
@@ -25,6 +26,8 @@ export interface AgentState {
   contextMax: number;
   contextKnown: boolean;
   hasUsageData: boolean;
+  /** Estimated prompt composition from the backend (context-usage bar segments). */
+  contextBreakdown?: ContextBreakdown;
   sessionId: string;
 }
 
@@ -217,6 +220,7 @@ export function updateUsage(agentId: string, payload: StreamUsagePayload, sessio
     }
     agent.contextKnown = !!payload.contextKnown;
     agent.hasUsageData = !!payload.usageKnown;
+    if (payload.breakdown) agent.contextBreakdown = payload.breakdown;
     if (sessionId) agent.sessionId = sessionId;
     commitAgents();
   }
@@ -358,6 +362,7 @@ export function getContextUsage(): {
   percent: number;
   isReliable: boolean;
   reason?: string;
+  breakdown?: ContextBreakdown;
 } {
   const activeSessionId = sessionStore.activeSessionId;
   const candidates = [...agents.values()].filter(
@@ -379,7 +384,7 @@ export function getContextUsage(): {
   const used = Math.max(0, agent.tokensUsed);
   const max = agent.contextMax;
   const percent = Math.min(100, Math.round((used / max) * 100));
-  return { used, max, percent, isReliable: true };
+  return { used, max, percent, isReliable: true, breakdown: agent.contextBreakdown };
 }
 
 // ─── API Loading ─────────────────────────────────────────────────────────────

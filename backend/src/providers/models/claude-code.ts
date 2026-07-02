@@ -23,6 +23,9 @@ export const ClaudeCodeModels: ModelDef[] = [
     costPerMInputTokens: 0,
     costPerMOutputTokens: 0,
     canReason: true,
+    // Fallback until the live catalog probe lands (capabilitiesToLevels over
+    // the CLI binary's embedded model catalog is the runtime source of truth).
+    reasoningLevels: ['low', 'medium', 'high', 'xhigh', 'max'],
     supportsAttachments: true,
     supportsStreaming: true,
     tier: 'flagship',
@@ -38,21 +41,27 @@ export const ClaudeCodeModels: ModelDef[] = [
     costPerMInputTokens: 0,
     costPerMOutputTokens: 0,
     canReason: true,
+    // Fallback until the live catalog probe lands (capabilitiesToLevels over
+    // the CLI binary's embedded model catalog is the runtime source of truth).
+    reasoningLevels: ['low', 'medium', 'high', 'xhigh', 'max'],
     supportsAttachments: true,
     supportsStreaming: true,
     tier: 'flagship',
   },
   {
     id: 'claude-code-sonnet',
-    name: 'Claude Sonnet 4.6',
+    name: 'Claude Sonnet 5',
     provider: 'claude',
     apiModelId: 'sonnet',
-    realModelId: 'claude-sonnet-4-6',
+    realModelId: 'claude-sonnet-5',
     contextWindow: 200_000,
     maxOutputTokens: 32_000,
     costPerMInputTokens: 0,
     costPerMOutputTokens: 0,
     canReason: true,
+    // Fallback until the live catalog probe lands (capabilitiesToLevels over
+    // the CLI binary's embedded model catalog is the runtime source of truth).
+    reasoningLevels: ['low', 'medium', 'high', 'xhigh', 'max'],
     supportsAttachments: true,
     supportsStreaming: true,
     tier: 'flagship',
@@ -67,7 +76,12 @@ export const ClaudeCodeModels: ModelDef[] = [
     maxOutputTokens: 32_000,
     costPerMInputTokens: 0,
     costPerMOutputTokens: 0,
-    canReason: false,
+    // Haiku 4.5 supports extended thinking (verified: the CLI streams
+    // thinking_delta events for it, with and without --effort).
+    canReason: true,
+    // Haiku 4.5 thinks but exposes NO effort control in the CLI's own catalog
+    // (no 'effort' capability) — empty array means "no picker", verified.
+    reasoningLevels: [],
     supportsAttachments: true,
     supportsStreaming: true,
     tier: 'fast',

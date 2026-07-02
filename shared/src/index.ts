@@ -79,6 +79,7 @@ export type {
   ChangeSummaryPayload,
   KorySessionChangesPayload,
   StreamUsagePayload,
+  ContextBreakdown,
   StreamFileDeltaPayload,
   StreamFileCompletePayload,
   StreamClearContentPayload,

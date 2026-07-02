@@ -13,6 +13,10 @@
 
 import type { ProviderConfig, ModelDef } from '@koryphaios/shared';
 import { spawn } from 'node:child_process';
+import { readFileSync, realpathSync, statSync, readdirSync, existsSync } from 'node:fs';
+import { homedir } from 'node:os';
+import { dirname, join } from 'node:path';
+import { whichBinary } from './cli-detection';
 import {
   type Provider,
   type ProviderContentBlock,
@@ -32,7 +36,8 @@ const DEFAULT_CLI_MODEL = 'sonnet';
 const MODELS_CACHE_TTL_MS = 5 * 60_000;
 
 /** Map a UI reasoning level to a MAX_THINKING_TOKENS budget for the claude CLI.
- *  Returns null for absent/unknown levels (CLI default behavior). */
+ *  Legacy fallback for CLI versions without `--effort`, plus the 'none'/numeric
+ *  cases the effort flag can't express. Returns null for absent/unknown levels. */
 function reasoningLevelToThinkingTokens(level: string | undefined): string | null {
   if (!level) return null;
   const l = level.toLowerCase().trim();
@@ -46,6 +51,195 @@ function reasoningLevelToThinkingTokens(level: string | undefined): string | nul
   return null;
 }
 
+// ── Dynamic reasoning-effort discovery ──────────────────────────────────────
+
+// Modern claude CLIs expose `--effort <level>` and document the accepted values
+// in their own help text ("Effort level for the current session (low, medium,
+// high, xhigh, max)"). Parse them from the installed binary so the reasoning
+// picker reflects exactly what THIS CLI version accepts — never a hardcoded
+// list that goes stale when the CLI adds/renames tiers.
+let effortLevelsPromise: Promise<string[] | null> | null = null;
+let cachedEffortLevels: string[] | null = null;
+
+function detectEffortLevels(): Promise<string[] | null> {
+  if (!effortLevelsPromise) {
+    effortLevelsPromise = new Promise((resolve) => {
+      const child = spawn('claude', ['--help'], { stdio: ['ignore', 'pipe', 'ignore'] });
+      let out = '';
+      let settled = false;
+      const finish = () => {
+        if (settled) return;
+        settled = true;
+        const m = out.match(/--effort <level>[\s\S]{0,200}?\(([a-z][a-z, ]+)\)/);
+        cachedEffortLevels = m
+          ? m[1].split(',').map((s) => s.trim()).filter(Boolean)
+          : null;
+        if (!cachedEffortLevels) {
+          providerLog.debug(
+            { provider: 'claude' },
+            'claude CLI does not advertise --effort; falling back to MAX_THINKING_TOKENS',
+          );
+        }
+        resolve(cachedEffortLevels);
+      };
+      child.stdout.on('data', (chunk: Buffer) => {
+        out += chunk.toString();
+      });
+      child.once('exit', finish);
+      child.once('error', finish);
+      setTimeout(() => {
+        try { child.kill('SIGTERM'); } catch { /* already gone */ }
+        finish();
+      }, 10_000);
+    });
+  }
+  return effortLevelsPromise;
+}
+
+/** Map a UI reasoning level onto one of the CLI's advertised --effort values.
+ *  Returns null when the level has no effort equivalent (caller falls back to
+ *  the MAX_THINKING_TOKENS env var). */
+function mapToEffort(level: string, levels: string[] | null): string | null {
+  if (!levels?.length) return null;
+  const l = level.toLowerCase().trim();
+  if (levels.includes(l)) return l;
+  const synonyms: Record<string, string> = { minimal: 'low', default: 'medium', on: 'medium' };
+  const mapped = synonyms[l];
+  return mapped && levels.includes(mapped) ? mapped : null;
+}
+
+// ── Per-model capability catalog, extracted from the CLI's own binary ───────
+
+// The claude binary embeds its real model catalog: entries like
+//   {id:"claude-haiku-4-5",family:"haiku",display_name:"Haiku 4.5",...,
+//    capabilities:["effort","max_effort","xhigh_effort","adaptive_thinking",...],
+//    default_effort:"high",...}
+// The `effort` capability gates the low/medium/high tiers; `xhigh_effort` and
+// `max_effort` add their tiers. Haiku 4.5 has NO effort capability at all — the
+// CLI accepts --effort for it without a warning but ignores it, so probing flag
+// acceptance is NOT sufficient. This catalog is the same data the CLI's own
+// /model picker uses, so parsing it is the only accurate per-model source.
+interface CliCatalogEntry {
+  id: string;
+  displayName: string;
+  capabilities: string[];
+  defaultEffort?: string;
+}
+
+let cachedCatalog: Map<string, CliCatalogEntry> | null = null;
+let cachedCatalogKey = '';
+
+/** Locate the actual claude executable (the big bundled binary, not a shim). */
+function findClaudeBinaries(): string[] {
+  const found = whichBinary('claude');
+  if (!found) return [];
+  const candidates: string[] = [];
+  try {
+    const real = realpathSync(found);
+    candidates.push(real);
+    // npm installs resolve to <pkg>/bin/claude.exe (a small copied-over native
+    // binary) with the real platform binary in a sibling platform package —
+    // scan those too in case the bin stub is a JS wrapper.
+    const pkgRoot = dirname(dirname(real));
+    const platformDir = join(pkgRoot, 'node_modules', '@anthropic-ai');
+    if (existsSync(platformDir)) {
+      for (const entry of readdirSync(platformDir)) {
+        if (!entry.startsWith('claude-code-')) continue;
+        const bin = join(platformDir, entry, 'claude');
+        if (existsSync(bin)) candidates.push(bin);
+      }
+    }
+  } catch {
+    candidates.push(found);
+  }
+  return candidates;
+}
+
+function parseCatalogFromBuffer(buf: Buffer): Map<string, CliCatalogEntry> {
+  const catalog = new Map<string, CliCatalogEntry>();
+  const marker = Buffer.from('{id:"claude-');
+  let pos = 0;
+  for (;;) {
+    pos = buf.indexOf(marker, pos);
+    if (pos === -1) break;
+    // Entries are well under 1.6KB of minified JS; cut at the next entry start.
+    const chunk = buf.subarray(pos, pos + 1600).toString('latin1');
+    pos += marker.length;
+    const next = chunk.indexOf('{id:"claude-', 12);
+    const entry = next > 0 ? chunk.slice(0, next) : chunk;
+    const head = entry.match(/^\{id:"(claude-[a-z0-9.-]+)",family:"[a-z]+",display_name:"([^"]+)"/);
+    if (!head) continue;
+    const caps = entry.match(/capabilities:\[([^\]]*)\]/);
+    const de = entry.match(/default_effort:"([a-z]+)"/);
+    const capabilities = caps
+      ? caps[1].split(',').map((c) => c.trim().replace(/^"|"$/g, '')).filter(Boolean)
+      : [];
+    if (!catalog.has(head[1])) {
+      catalog.set(head[1], {
+        id: head[1],
+        displayName: head[2],
+        capabilities,
+        defaultEffort: de?.[1],
+      });
+    }
+  }
+  return catalog;
+}
+
+/** Parse the model catalog out of the installed CLI binary. Cached per
+ *  binary path+mtime so a CLI update transparently re-extracts. */
+function getCliModelCatalog(): Map<string, CliCatalogEntry> | null {
+  for (const path of findClaudeBinaries()) {
+    try {
+      const stat = statSync(path);
+      if (stat.size < 1_000_000) continue; // shims/wrappers can't hold the catalog
+      const key = `${path}:${stat.mtimeMs}:${stat.size}`;
+      if (cachedCatalog && cachedCatalogKey === key) return cachedCatalog;
+      const catalog = parseCatalogFromBuffer(readFileSync(path));
+      if (catalog.size > 0) {
+        cachedCatalog = catalog;
+        cachedCatalogKey = key;
+        providerLog.info(
+          { provider: 'claude', models: catalog.size, binary: path },
+          'Extracted model catalog from claude CLI binary',
+        );
+        return catalog;
+      }
+    } catch {
+      /* try next candidate */
+    }
+  }
+  return null;
+}
+
+/** Convert a catalog entry's capability flags to selectable effort tiers.
+ *  Empty array = the model has no effort control (e.g. Haiku 4.5). */
+function capabilitiesToLevels(caps: string[]): string[] {
+  if (!caps.includes('effort')) return [];
+  const levels = ['low', 'medium', 'high'];
+  if (caps.includes('xhigh_effort')) levels.push('xhigh');
+  if (caps.includes('max_effort')) levels.push('max');
+  return levels;
+}
+
+/** Look up the catalog entry for a real model ID (handles date suffixes like
+ *  claude-haiku-4-5-20251001 and the [1m] long-context marker). */
+function catalogEntryFor(
+  realId: string | undefined,
+  catalog: Map<string, CliCatalogEntry> | null,
+): CliCatalogEntry | null {
+  if (!realId || !catalog) return null;
+  const bare = realId.replace(/\[1m\]$/i, '');
+  const exact = catalog.get(bare);
+  if (exact) return exact;
+  // Longest catalog id that prefixes the real id (strips -YYYYMMDD suffixes).
+  let best: CliCatalogEntry | null = null;
+  for (const entry of catalog.values()) {
+    if (bare.startsWith(entry.id) && (!best || entry.id.length > best.id.length)) best = entry;
+  }
+  return best;
+}
+
 // ── Dynamic alias → real model ID discovery ────────────────────────────────
 
 // Module-level cache shared across all provider instances.
@@ -54,16 +248,22 @@ let cachedModelsAt = 0;
 let refreshInProgress = false;
 
 /**
- * Probe a single claude alias (e.g. 'opus') by spawning a minimal headless
- * run and reading the first assistant message's `model` field. Kills the child
- * immediately after getting the ID so we spend negligible tokens.
+ * Probe a single claude alias (e.g. 'opus') by spawning a headless run and
+ * reading the `init` system event's `model` field — the CLI resolves the alias
+ * to the real model ID before any inference starts, so killing the child on
+ * init costs ZERO tokens (the assistant-message path remains as a fallback for
+ * older CLIs whose init event lacked `model`).
  */
 async function probeAlias(alias: string): Promise<string | null> {
   return new Promise((resolve) => {
-    const child = spawn('claude', ['-p', '.', '--output-format', 'stream-json', '--model', alias], {
-      stdio: ['ignore', 'pipe', 'ignore'],
-      env: { ...process.env },
-    });
+    const child = spawn(
+      'claude',
+      ['-p', '.', '--output-format', 'stream-json', '--verbose', '--model', alias],
+      {
+        stdio: ['ignore', 'pipe', 'ignore'],
+        env: { ...process.env },
+      },
+    );
 
     let buf = '';
     let settled = false;
@@ -82,6 +282,10 @@ async function probeAlias(alias: string): Promise<string | null> {
       for (const line of lines) {
         try {
           const d = JSON.parse(line.trim()) as Record<string, unknown>;
+          if (d.type === 'system' && d.subtype === 'init' && typeof d.model === 'string') {
+            done(d.model);
+            return;
+          }
           if (
             d.type === 'assistant' &&
             d.message &&
@@ -103,24 +307,70 @@ async function probeAlias(alias: string): Promise<string | null> {
 }
 
 /** Convert a real model ID to a human display name.
- *  claude-opus-4-8        → "Claude Opus 4.8"
+ *  claude-opus-4-8           → "Claude Opus 4.8"
  *  claude-haiku-4-5-20251001 → "Claude Haiku 4.5"
- *  claude-fable-5         → "Claude Fable 5"
+ *  claude-fable-5            → "Claude Fable 5"
+ *  claude-fable-5[1m]        → "Claude Fable 5 (1M)"
  */
 function realIdToName(id: string): string {
+  const oneM = /\[1m\]$/i.test(id);
+  const bare = id.replace(/\[1m\]$/i, '');
+  const suffix = oneM ? ' (1M)' : '';
   // family + two-part version, optional date suffix
-  const m = id.match(/^claude-([a-z]+)-(\d+)-(\d+)/);
+  const m = bare.match(/^claude-([a-z]+)-(\d+)-(\d+)/);
   if (m) {
     const family = m[1].charAt(0).toUpperCase() + m[1].slice(1);
-    return `Claude ${family} ${m[2]}.${m[3]}`;
+    return `Claude ${family} ${m[2]}.${m[3]}${suffix}`;
   }
   // family + single version (e.g. claude-fable-5)
-  const s = id.match(/^claude-([a-z]+)-(\d+)$/);
+  const s = bare.match(/^claude-([a-z]+)-(\d+)$/);
   if (s) {
     const family = s[1].charAt(0).toUpperCase() + s[1].slice(1);
-    return `Claude ${family} ${s[2]}`;
+    return `Claude ${family} ${s[2]}${suffix}`;
   }
   return id;
+}
+
+/** Server-driven extra models from the CLI's own on-disk cache (~/.claude.json
+ *  `additionalModelOptionsCache`) — this is where the CLI stores models pushed
+ *  to it beyond the built-in aliases, e.g. `claude-fable-5[1m]` (1M context).
+ *  Reading it means new models appear here the moment the CLI learns about
+ *  them, with no Koryphaios release needed. */
+function readCliExtraModels(): ModelDef[] {
+  try {
+    const raw = readFileSync(join(homedir(), '.claude.json'), 'utf8');
+    const parsed = JSON.parse(raw) as {
+      additionalModelOptionsCache?: Array<{ value?: unknown; label?: unknown }>;
+    };
+    const opts = parsed.additionalModelOptionsCache;
+    if (!Array.isArray(opts)) return [];
+    return opts
+      .filter((o): o is { value: string } => typeof o?.value === 'string' && o.value.startsWith('claude-'))
+      .map((o) => {
+        const value = o.value;
+        const oneM = /\[1m\]$/i.test(value);
+        return {
+          id: `claude-code-${value.replace(/[^a-z0-9]+/gi, '-').replace(/-+$/, '')}`,
+          name: realIdToName(value),
+          provider: 'claude' as const,
+          // The raw cache value (including any [1m] suffix) is exactly what the
+          // CLI's own model picker passes to --model.
+          apiModelId: value,
+          realModelId: value.replace(/\[1m\]$/i, ''),
+          contextWindow: oneM ? 1_000_000 : 200_000,
+          contextVerified: oneM,
+          maxOutputTokens: 32_000,
+          costPerMInputTokens: 0,
+          costPerMOutputTokens: 0,
+          canReason: true,
+          supportsAttachments: true,
+          supportsStreaming: true,
+          tier: 'flagship' as const,
+        };
+      });
+  } catch {
+    return [];
+  }
 }
 
 function refreshModelsInBackground(): void {
@@ -129,18 +379,18 @@ function refreshModelsInBackground(): void {
 
   const aliases = ClaudeCodeModels.map((m) => m.apiModelId!);
 
-  Promise.all(aliases.map((alias) => probeAlias(alias)))
-    .then((results) => {
-      const models: ModelDef[] = ClaudeCodeModels.map((base, i) => {
+  Promise.all([Promise.all(aliases.map((alias) => probeAlias(alias))), detectEffortLevels()])
+    .then(([results, effortLevels]) => {
+      const base: ModelDef[] = ClaudeCodeModels.map((def, i) => {
         const realId = results[i];
-        if (!realId) return base;
+        if (!realId) return def;
         // The probe confirmed which real Anthropic model the alias resolves to —
         // inherit that model's documented context window, output limit, and
         // reasoning capability instead of the wrapper's hardcoded guesses.
         const real = resolveModel(realId);
         const realTrusted = !!real && !real.isGeneric && real.provider === 'anthropic';
         return {
-          ...base,
+          ...def,
           realModelId: realId,
           name: realIdToName(realId),
           ...(realTrusted && real.contextWindow > 0
@@ -150,10 +400,29 @@ function refreshModelsInBackground(): void {
             ? { maxOutputTokens: real.maxOutputTokens }
             : {}),
           ...(realTrusted && real.canReason !== undefined ? { canReason: real.canReason } : {}),
-          ...(realTrusted && real.reasoningLevels?.length
-            ? { reasoningLevels: real.reasoningLevels }
-            : {}),
         };
+      });
+      // Server-driven extras from the CLI's own cache (skip any that duplicate a
+      // model an alias already resolved to).
+      const extras = readCliExtraModels().filter(
+        (x) => !base.some((b) => b.realModelId === x.apiModelId),
+      );
+      // Per-model reasoning tiers from the catalog embedded in the CLI binary —
+      // the CLI silently ACCEPTS --effort for models that don't support it
+      // (e.g. Haiku 4.5), so the catalog's capability flags are the only
+      // accurate source. [] = the picker shows no effort control.
+      const catalog = getCliModelCatalog();
+      const models: ModelDef[] = [...base, ...extras].map((m) => {
+        const entry = catalogEntryFor(m.realModelId ?? m.apiModelId, catalog);
+        if (entry) {
+          const levels = capabilitiesToLevels(entry.capabilities).filter(
+            (l) => !effortLevels || effortLevels.includes(l),
+          );
+          return { ...m, reasoningLevels: levels };
+        }
+        // No catalog (binary not readable): fall back to the CLI's global
+        // --effort enum rather than nothing.
+        return effortLevels?.length ? { ...m, reasoningLevels: effortLevels } : m;
       });
       cachedModels = models;
       cachedModelsAt = Date.now();
@@ -253,12 +522,20 @@ export class ClaudeCodeProvider implements Provider {
   }
 
   listModels(): ModelDef[] {
-    const fallback = getModelsForProvider('claude');
     if (cachedModels && Date.now() - cachedModelsAt < MODELS_CACHE_TTL_MS) {
       return cachedModels;
     }
     refreshModelsInBackground();
-    return cachedModels ?? fallback;
+    if (cachedModels) return cachedModels;
+    // Static fallback until the first refresh lands — apply per-model levels
+    // from the binary catalog if it's already been extracted (never the global
+    // effort enum: it would show a picker for models like Haiku that have none).
+    const fallback = getModelsForProvider('claude');
+    if (!cachedCatalog) return fallback;
+    return fallback.map((m) => {
+      const entry = catalogEntryFor(m.realModelId ?? m.apiModelId, cachedCatalog);
+      return entry ? { ...m, reasoningLevels: capabilitiesToLevels(entry.capabilities) } : m;
+    });
   }
 
   private resolveCliModel(modelId: string): string {
@@ -299,12 +576,28 @@ export class ClaudeCodeProvider implements Provider {
 
     // Run in the project directory so the CLI edits the real files (falls back to cwd).
     const cwd = request.workingDirectory?.trim() || process.cwd();
-    // Claude Code has no reasoning CLI flag, but it honors the documented
-    // MAX_THINKING_TOKENS env var — map the UI's reasoning level onto it so
-    // the picker actually changes the thinking budget.
+    // Reasoning: prefer the CLI's native --effort flag, clamped to the levels
+    // THIS model supports (from the binary catalog — the CLI silently accepts
+    // --effort on models that ignore it, so acceptance can't be trusted). Fall
+    // back to the MAX_THINKING_TOKENS env var for levels the flag can't express
+    // ('none', numeric budgets) or for older CLIs without --effort.
     const env: NodeJS.ProcessEnv = { ...process.env };
-    const thinkingBudget = reasoningLevelToThinkingTokens(request.reasoningLevel);
-    if (thinkingBudget !== null) env.MAX_THINKING_TOKENS = thinkingBudget;
+    if (request.reasoningLevel) {
+      const cliLevels = await detectEffortLevels();
+      const modelDef = this.listModels().find(
+        (m) => m.id === request.model || m.apiModelId === request.model,
+      );
+      const allowed = Array.isArray(modelDef?.reasoningLevels)
+        ? modelDef.reasoningLevels.filter((l) => !cliLevels || cliLevels.includes(l))
+        : cliLevels;
+      const effort = mapToEffort(request.reasoningLevel, allowed ?? null);
+      if (effort) {
+        args.push('--effort', effort);
+      } else {
+        const thinkingBudget = reasoningLevelToThinkingTokens(request.reasoningLevel);
+        if (thinkingBudget !== null) env.MAX_THINKING_TOKENS = thinkingBudget;
+      }
+    }
     const child = spawn('claude', args, {
       cwd,
       stdio: ['pipe', 'pipe', 'pipe'],

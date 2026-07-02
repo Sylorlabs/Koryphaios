@@ -12,6 +12,7 @@ import type {
   WorkerDomain,
   ProviderName,
   StreamUsagePayload,
+  ContextBreakdown,
   KoryAskUserPayload,
 } from '@koryphaios/shared';
 import { resolveTrustedContextWindow } from '../../providers';
@@ -136,6 +137,7 @@ export class EventEmitterService {
     tokensIn: number,
     tokensOut: number,
     usageKnown: boolean,
+    breakdown?: ContextBreakdown,
   ): void {
     const context = resolveTrustedContextWindow(model, provider);
     const payload: StreamUsagePayload = {
@@ -148,6 +150,7 @@ export class EventEmitterService {
       usageKnown,
       contextKnown: context.contextKnown,
       ...(context.contextWindow ? { contextWindow: context.contextWindow } : {}),
+      ...(breakdown ? { breakdown } : {}),
     };
     this.emit(sessionId, 'stream.usage', payload);
   }

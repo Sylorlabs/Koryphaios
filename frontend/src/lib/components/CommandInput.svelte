@@ -113,9 +113,13 @@
 
   function effectiveReasoningConfig(provider: string, model: string | undefined) {
     const def = findModelDef(provider, model);
+    // 1. Levels the provider/CLI reported for this exact model are authoritative —
+    //    including an explicit [] meaning "this model has NO effort control"
+    //    (e.g. Claude Code's Haiku 4.5). Only an ABSENT array falls through.
+    if (Array.isArray(def?.reasoningLevels)) {
+      return buildReasoningConfigFromLevels(def.reasoningLevels);
+    }
     return (
-      // 1. Levels the provider/CLI reported for this exact model.
-      buildReasoningConfigFromLevels(def?.reasoningLevels) ??
       // 2. Static per-provider/model rules.
       getReasoningConfig(provider, model) ??
       // 3. Universal fallback: any reasoning-capable model gets at least the

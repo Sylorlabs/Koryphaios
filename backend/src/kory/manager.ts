@@ -13,6 +13,7 @@ import type {
   ChangeSummary,
   StreamUsagePayload,
   StreamThinkingPayload,
+  ContextBreakdown,
 } from '@koryphaios/shared';
 import { normalizeReasoningLevel, determineAutoReasoningLevel } from '@koryphaios/shared';
 import { AGENT, DOMAIN } from '../constants';
@@ -1125,8 +1126,12 @@ export class KoryManager {
     const settings = loadAgentSettings(this.workingDirectory);
 
     let systemPrompt = KORY_SYSTEM_PROMPT;
+    // Chars contributed by injected memory/notes — tracked separately so the
+    // context-usage bar can show memory as its own segment.
+    let memoryChars = 0;
 
     if (hasAnyVisibleNoteTools(this.workingDirectory)) {
+      const beforeNotes = systemPrompt.length;
       const hint = buildNotesNetworkSystemHint(this.workingDirectory);
       if (hint) systemPrompt += `\n\n${hint}`;
       try {
@@ -1135,6 +1140,7 @@ export class KoryManager {
       } catch {
         // Notes DB may be unavailable — continue without network context
       }
+      memoryChars = systemPrompt.length - beforeNotes;
     }
 
     // Multi-source research instruction
@@ -1180,12 +1186,22 @@ export class KoryManager {
     }
     // If "fallback", we keep it in the list. The model can choose to use it if its native search fails or is unavailable.
 
+    const providerMessages = this.toProviderMessages(messages);
+    // Estimated context composition at dispatch (chars/4) — segment ratios for
+    // the context-usage bar; the provider's usage_update stays the real total.
+    const contextBreakdown: ContextBreakdown = {
+      system: Math.ceil(Math.max(0, systemPrompt.length - memoryChars) / 4),
+      memory: Math.ceil(memoryChars / 4),
+      tools: Math.ceil(JSON.stringify(tools ?? []).length / 4),
+      chat: Math.ceil(estimateProviderMessagesChars(providerMessages) / 4),
+    };
+
     const streamSignal = withTimeoutSignal(signal, AGENT.LLM_STREAM_TIMEOUT_MS);
     const stream = this.providers.executeWithRetry(
       {
         model: modelId,
         systemPrompt,
-        messages: this.toProviderMessages(messages),
+        messages: providerMessages,
         tools,
         maxTokens: 16384,
         signal: streamSignal,
@@ -1255,6 +1271,7 @@ export class KoryManager {
           tokensIn,
           tokensOut,
           true,
+          contextBreakdown,
         );
       } else if (event.type === 'tool_use_start') {
         hasToolCalls = true;
@@ -2054,6 +2071,7 @@ export class KoryManager {
     tokensIn: number,
     tokensOut: number,
     usageKnown: boolean,
+    breakdown?: ContextBreakdown,
   ) {
     this.events.emitUsageUpdate(
       sessionId,
@@ -2063,9 +2081,30 @@ export class KoryManager {
       tokensIn,
       tokensOut,
       usageKnown,
+      breakdown,
     );
   }
   private emitWSMessage(sessionId: string, type: string, payload: WSMessage['payload']) {
     this.events.emit(sessionId, type, payload);
   }
+}
+
+/** Character weight of a provider message list — feeds the context bar's
+ *  "chat" segment estimate (images weighted as ~1k tokens' worth of chars). */
+function estimateProviderMessagesChars(messages: ProviderMessage[]): number {
+  let chars = 0;
+  for (const m of messages) {
+    if (typeof m.content === 'string') {
+      chars += m.content.length;
+      continue;
+    }
+    for (const b of m.content) {
+      if (b.type === 'text') chars += b.text?.length ?? 0;
+      else if (b.type === 'tool_use')
+        chars += (b.toolName?.length ?? 0) + JSON.stringify(b.toolInput ?? {}).length;
+      else if (b.type === 'tool_result') chars += b.toolOutput?.length ?? 0;
+      else if (b.type === 'image') chars += 4000;
+    }
+  }
+  return chars;
 }

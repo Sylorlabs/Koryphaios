@@ -12,6 +12,20 @@ export type ChangeSummary = {
   operation: 'create' | 'edit' | 'delete';
 };
 
+/** Estimated composition of the prompt context, measured at dispatch time
+ *  (chars/4 heuristic). Segment proportions for the context-usage bar; the
+ *  authoritative TOTAL is still tokensUsed from the provider. */
+export type ContextBreakdown = {
+  /** Base system prompt + behavior rules. */
+  system: number;
+  /** Injected memory/notes network context. */
+  memory: number;
+  /** Tool definitions sent with the request. */
+  tools: number;
+  /** Conversation history (user + assistant turns, tool results, attachments). */
+  chat: number;
+};
+
 export type StreamUsage = {
   agentId: string;
   model: string;
@@ -22,6 +36,7 @@ export type StreamUsage = {
   usageKnown: boolean;
   contextWindow?: number;
   contextKnown: boolean;
+  breakdown?: ContextBreakdown;
 };
 
 export interface AgentSpawnedPayload {

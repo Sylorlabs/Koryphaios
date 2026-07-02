@@ -61,7 +61,8 @@ export const AnthropicModels: ModelDef[] = [
     costPerMOutputTokens: 2.5,
     costPerMInputCached: 0.1,
     costPerMOutputCached: 0.02,
-    canReason: false,
+    // Haiku 4.5 supports extended thinking.
+    canReason: true,
     supportsAttachments: true,
     supportsStreaming: true,
     tier: 'fast',
