@@ -104,16 +104,25 @@
   /** A model's own live-reported effort levels (e.g. Codex's supported_reasoning_levels) take
    *  priority over the static ReasoningConfig tables, which can go stale as providers ship
    *  new models/levels. */
-  function findModelDef(provider: string, model: string | undefined): { reasoningLevels?: string[] } | undefined {
+  function findModelDef(provider: string, model: string | undefined): { reasoningLevels?: string[]; canReason?: boolean } | undefined {
     if (!model) return undefined;
     const p = wsStore.providers.find((p) => p.name === provider);
-    const catalog = (p as any)?.allAvailableModels as Array<{ id: string; reasoningLevels?: string[] }> | undefined;
+    const catalog = (p as any)?.allAvailableModels as Array<{ id: string; reasoningLevels?: string[]; canReason?: boolean }> | undefined;
     return catalog?.find((m) => m.id === model);
   }
 
   function effectiveReasoningConfig(provider: string, model: string | undefined) {
-    const liveLevels = findModelDef(provider, model)?.reasoningLevels;
-    return buildReasoningConfigFromLevels(liveLevels) ?? getReasoningConfig(provider, model);
+    const def = findModelDef(provider, model);
+    return (
+      // 1. Levels the provider/CLI reported for this exact model.
+      buildReasoningConfigFromLevels(def?.reasoningLevels) ??
+      // 2. Static per-provider/model rules.
+      getReasoningConfig(provider, model) ??
+      // 3. Universal fallback: any reasoning-capable model gets at least the
+      //    standard effort tiers — providers map/guard what's actually sent,
+      //    so no provider is silently excluded from the picker.
+      (def?.canReason ? buildReasoningConfigFromLevels(['low', 'medium', 'high']) : null)
+    );
   }
 
   let reasoningConfig = $derived(!selectedModel ? null : effectiveReasoningConfig(currentProvider, currentModel));
