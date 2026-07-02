@@ -77,17 +77,20 @@
   let contextSegments = $derived.by(() => {
     const usage = wsStore.contextUsage;
     const b = usage.breakdown;
-    if (!b || !usage.isReliable) return null;
+    if (!b || !usage.isReliable || usage.max <= 0) return null;
     const sum = b.system + b.memory + b.tools + b.chat;
     if (sum <= 0) return null;
+    // Unrounded percent — the store's integer percent collapses small
+    // sessions' segments to zero width.
+    const percentFloat = Math.min(100, (usage.used / usage.max) * 100);
     return CONTEXT_SEGMENTS.map((s) => {
       const share = b[s.key] / sum;
       return {
         ...s,
         tokens: Math.round(usage.used * share),
-        widthPercent: usage.percent * share,
+        widthPercent: percentFloat * share,
       };
-    }).filter((s) => s.widthPercent > 0);
+    }).filter((s) => s.tokens > 0);
   });
 
   function formatTokenCount(n: number): string {
