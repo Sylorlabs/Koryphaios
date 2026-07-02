@@ -157,7 +157,10 @@ export class OpenAIProvider implements Provider {
     const modelDef = resolveModel(request.model);
     const canReason = modelDef?.canReason ?? false;
     const reasoningEffort = request.reasoningLevel?.toLowerCase();
-    const supportedEfforts = ['none', 'minimal', 'low', 'medium', 'high', 'xhigh'];
+    // 'max' is offered per-model (e.g. Copilot's claude-opus-4.6) — the UI only
+    // shows levels the model's own metadata/config declares, so passing it
+    // through is safe; without it the selection was silently dropped.
+    const supportedEfforts = ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'];
 
     const params: OpenAI.ChatCompletionCreateParamsStreaming = {
       model: modelDef?.apiModelId ?? request.model,

@@ -1029,20 +1029,30 @@ export async function buildNotesNetworkPrompt(
   projectRoot?: string,
 ): Promise<string> {
   let visibleTools: string[] | undefined;
+  let effectiveMaxTokens = maxContextTokens;
+  let autoInclude = true;
   if (projectRoot) {
-    const { getVisibleNoteToolNames } = await import('../notes/notes-settings');
+    const { getVisibleNoteToolNames, loadNotesSettings } = await import('../notes/notes-settings');
+    // Honor the user's persisted Notes settings — previously these lived only
+    // in the frontend's localStorage, so the toggles never affected the
+    // context the backend actually built.
+    const settings = loadNotesSettings(projectRoot);
+    if (!settings.enabled) return '';
+    autoInclude = settings.autoIncludeInContext;
+    effectiveMaxTokens = settings.maxContextTokens;
     visibleTools = getVisibleNoteToolNames(projectRoot);
     if (!visibleTools.length) return '';
   }
 
   const includePinned =
-    !visibleTools?.length ||
-    visibleTools.includes('read_note') ||
-    visibleTools.includes('recall_notes');
+    autoInclude &&
+    (!visibleTools?.length ||
+      visibleTools.includes('read_note') ||
+      visibleTools.includes('recall_notes'));
 
   const [catalog, pinned] = await Promise.all([
     getNotesCatalogPrompt(150, visibleTools),
-    includePinned ? getNotesContext(maxContextTokens) : Promise.resolve(''),
+    includePinned ? getNotesContext(effectiveMaxTokens) : Promise.resolve(''),
   ]);
   if (!catalog && !pinned) return '';
   return '\n\n# Knowledge Network\n\n' + [catalog, pinned].filter(Boolean).join('\n\n');

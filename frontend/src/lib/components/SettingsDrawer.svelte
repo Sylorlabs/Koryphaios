@@ -99,8 +99,11 @@
   };
 
   $effect(() => {
-    if (open && activeTab === 'notes' && !notesStore.agentPermissionsLoaded) {
-      void notesStore.fetchAgentPermissions();
+    if (open && activeTab === 'notes') {
+      if (!notesStore.agentPermissionsLoaded) void notesStore.fetchAgentPermissions();
+      // Settings are persisted server-side (context injection honors them) —
+      // refresh from the source of truth instead of trusting the local mirror.
+      if (!notesStore.settingsFetched) void notesStore.fetchSettings();
     }
   });
 

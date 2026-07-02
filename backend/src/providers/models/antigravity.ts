@@ -35,7 +35,10 @@ export const AntigravityModels: ModelDef[] = [
     apiModelId: 'Gemini 3.5 Flash (High)',
     contextWindow: 1_048_576,
     maxOutputTokens: 65_536,
-    canReason: true,
+    // The agy CLI exposes no reasoning/thinking flag — the "(High)" variant IS
+    // the reasoning selection. canReason=false keeps the UI from offering a
+    // reasoning picker that the harness cannot honor.
+    canReason: false,
     supportsAttachments: false,
     supportsStreaming: true,
     tier: 'reasoning',

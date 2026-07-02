@@ -6,6 +6,7 @@ import { existsSync, readFileSync, writeFileSync, renameSync } from 'node:fs';
 import { join } from 'node:path';
 import {
   DEFAULT_NOTES_AGENT_PERMISSIONS,
+  DEFAULT_NOTES_SETTINGS,
   NOTE_TOOL_DEFINITIONS,
   NOTE_TOOL_NAMES,
   isNoteToolName,
@@ -13,6 +14,7 @@ import {
   type NotePermissionLevel,
   type NoteToolName,
   type NotesAgentPermissions,
+  type NotesSettings,
 } from '@koryphaios/shared';
 
 export interface NoteToolPermissionCheck {
@@ -48,13 +50,54 @@ export function loadNotesAgentPermissions(projectRoot: string): NotesAgentPermis
 
 export function saveNotesAgentPermissions(
   projectRoot: string,
-  permissions: NotesAgentPermissions,
+  permissions: Partial<NotesAgentPermissions>,
 ): NotesAgentPermissions {
   const config = loadKoryphaiosConfig(projectRoot);
   const normalized = normalizeNotesAgentPermissions(permissions);
   config.notesAgentPermissions = normalized;
   saveKoryphaiosConfig(projectRoot, config);
   return normalized;
+}
+
+// ── General notes settings (enabled / context injection / folder) ───────────
+// Persisted in koryphaios.json so the BACKEND honors them when building agent
+// context. Previously these lived only in the frontend's localStorage — the
+// toggles were decorative and the server always used its own defaults.
+
+export function loadNotesSettings(projectRoot: string): NotesSettings {
+  const config = loadKoryphaiosConfig(projectRoot);
+  const raw = (config.notesSettings ?? {}) as Partial<NotesSettings>;
+  return {
+    ...DEFAULT_NOTES_SETTINGS,
+    ...raw,
+    graphPhysics: {
+      ...DEFAULT_NOTES_SETTINGS.graphPhysics,
+      ...(raw.graphPhysics ?? {}),
+    },
+  };
+}
+
+export function saveNotesSettings(
+  projectRoot: string,
+  partial: Partial<NotesSettings>,
+): NotesSettings {
+  const config = loadKoryphaiosConfig(projectRoot);
+  const current = loadNotesSettings(projectRoot);
+  const merged: NotesSettings = {
+    ...current,
+    ...partial,
+    graphPhysics: {
+      ...current.graphPhysics,
+      ...(partial.graphPhysics ?? {}),
+    },
+    maxContextTokens: Math.min(
+      5000,
+      Math.max(100, partial.maxContextTokens ?? current.maxContextTokens),
+    ),
+  };
+  config.notesSettings = merged;
+  saveKoryphaiosConfig(projectRoot, config);
+  return merged;
 }
 
 export function resetNotesAgentPermissions(projectRoot: string): NotesAgentPermissions {

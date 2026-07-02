@@ -13,8 +13,14 @@ import {
   loadNotesAgentPermissions,
   saveNotesAgentPermissions,
   resetNotesAgentPermissions,
+  loadNotesSettings,
+  saveNotesSettings,
 } from '../../notes/notes-settings';
-import { DEFAULT_NOTES_AGENT_PERMISSIONS, type NotesAgentPermissions } from '@koryphaios/shared';
+import {
+  DEFAULT_NOTES_AGENT_PERMISSIONS,
+  type NotesAgentPermissions,
+  type NotesSettings,
+} from '@koryphaios/shared';
 import { readFileSync, existsSync } from 'fs';
 import { PROJECT_ROOT } from '../../runtime/paths';
 
@@ -52,6 +58,45 @@ export const notesRoutes = new Elysia({ prefix: '/api/notes' })
         tags: t.Optional(t.Array(t.String())),
         pinned: t.Optional(t.Boolean()),
         includeInContext: t.Optional(t.Boolean()),
+      }),
+    },
+  )
+
+  // ── General notes settings ────────────────────────────────────────────────
+  // Persisted server-side so context injection actually honors them.
+  .get('/settings', async ({ request, set }) => {
+    if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
+    return { ok: true, data: loadNotesSettings(PROJECT_ROOT) };
+  })
+
+  .put(
+    '/settings',
+    async ({ request, body, set }) => {
+      if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
+      try {
+        const merged = saveNotesSettings(PROJECT_ROOT, body as Partial<NotesSettings>);
+        return { ok: true, data: merged };
+      } catch (err: unknown) {
+        set.status = 500;
+        return {
+          ok: false,
+          error: err instanceof Error ? err.message : 'Failed to save notes settings',
+        };
+      }
+    },
+    {
+      body: t.Object({
+        enabled: t.Optional(t.Boolean()),
+        autoIncludeInContext: t.Optional(t.Boolean()),
+        maxContextTokens: t.Optional(t.Number()),
+        defaultFolderPath: t.Optional(t.String()),
+        graphPhysics: t.Optional(
+          t.Object({
+            gravity: t.Optional(t.Number()),
+            linkDistance: t.Optional(t.Number()),
+            chargeStrength: t.Optional(t.Number()),
+          }),
+        ),
       }),
     },
   )

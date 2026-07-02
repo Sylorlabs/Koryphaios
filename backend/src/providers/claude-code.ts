@@ -31,6 +31,21 @@ const CLAUDE_STREAM_TIMEOUT_MS = 300_000;
 const DEFAULT_CLI_MODEL = 'sonnet';
 const MODELS_CACHE_TTL_MS = 5 * 60_000;
 
+/** Map a UI reasoning level to a MAX_THINKING_TOKENS budget for the claude CLI.
+ *  Returns null for absent/unknown levels (CLI default behavior). */
+function reasoningLevelToThinkingTokens(level: string | undefined): string | null {
+  if (!level) return null;
+  const l = level.toLowerCase().trim();
+  if (l === 'none' || l === 'off' || l === '0') return '0';
+  if (l === 'minimal' || l === 'low') return '4096';
+  if (l === 'medium' || l === 'on' || l === 'default') return '16384';
+  if (l === 'high') return '32768';
+  if (l === 'xhigh' || l === 'max') return '63999';
+  // Numeric budget passthrough (e.g. '8192').
+  if (/^\d+$/.test(l)) return l;
+  return null;
+}
+
 // ── Dynamic alias → real model ID discovery ────────────────────────────────
 
 // Module-level cache shared across all provider instances.
@@ -284,10 +299,16 @@ export class ClaudeCodeProvider implements Provider {
 
     // Run in the project directory so the CLI edits the real files (falls back to cwd).
     const cwd = request.workingDirectory?.trim() || process.cwd();
+    // Claude Code has no reasoning CLI flag, but it honors the documented
+    // MAX_THINKING_TOKENS env var — map the UI's reasoning level onto it so
+    // the picker actually changes the thinking budget.
+    const env: NodeJS.ProcessEnv = { ...process.env };
+    const thinkingBudget = reasoningLevelToThinkingTokens(request.reasoningLevel);
+    if (thinkingBudget !== null) env.MAX_THINKING_TOKENS = thinkingBudget;
     const child = spawn('claude', args, {
       cwd,
       stdio: ['pipe', 'pipe', 'pipe'],
-      env: { ...process.env },
+      env,
     });
 
     const onAbort = () => {

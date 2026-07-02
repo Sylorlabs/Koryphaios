@@ -103,6 +103,19 @@ export class GrokBuildProvider implements Provider {
       tmpdir(),
     ];
 
+    // Only pass --reasoning-effort when the CLI's own metadata says this model
+    // supports it (canReason is derived from ~/.grok/models_cache.json).
+    if (request.reasoningLevel) {
+      const def = this.listModels().find(
+        (m) => m.id === request.model || m.apiModelId === request.model,
+      );
+      const level = request.reasoningLevel.toLowerCase().trim();
+      const allowed = def?.reasoningLevels ?? [];
+      if (def?.canReason && allowed.includes(level)) {
+        args.push('--reasoning-effort', level);
+      }
+    }
+
     const child = spawn(bin, args, {
       cwd: tmpdir(),
       stdio: ['ignore', 'pipe', 'pipe'],

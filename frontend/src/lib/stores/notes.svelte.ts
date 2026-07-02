@@ -495,7 +495,33 @@ async function resetAgentPermissions(): Promise<void> {
   }
 }
 
-/** Update settings and persist to localStorage */
+/** Fetch settings from the backend (source of truth for context injection).
+ *  Server values win over the localStorage mirror. */
+let _settingsFetched = $state(false);
+async function fetchSettings(): Promise<void> {
+  try {
+    const res = await apiFetch(apiUrl('/api/notes/settings'));
+    if (!res.ok) return;
+    const data = (await res.json()) as { ok?: boolean; data?: Partial<NotesSettings> };
+    if (data.ok && data.data) {
+      _settings = {
+        ..._settings,
+        ...data.data,
+        graphPhysics: {
+          ..._settings.graphPhysics,
+          ...(data.data.graphPhysics ?? {}),
+        },
+      };
+      saveSettingsToStorage(_settings);
+      _settingsFetched = true;
+    }
+  } catch (err) {
+    console.warn('[notesStore] fetchSettings failed:', err);
+  }
+}
+
+/** Update settings — persisted to the BACKEND (which honors them when building
+ *  agent context) with localStorage as a fast-boot mirror. */
 function updateSettings(patch: Partial<NotesSettings>): void {
   _settings = {
     ..._settings,
@@ -506,6 +532,23 @@ function updateSettings(patch: Partial<NotesSettings>): void {
     },
   };
   saveSettingsToStorage(_settings);
+  void apiFetch(apiUrl('/api/notes/settings'), {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(patch),
+  })
+    .then(async (res) => {
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = (await res.json()) as { ok?: boolean; data?: NotesSettings };
+      if (data.ok && data.data) {
+        _settings = { ...data.data };
+        saveSettingsToStorage(_settings);
+      }
+    })
+    .catch((err) => {
+      console.warn('[notesStore] failed to persist settings to backend:', err);
+      toastStore.warning('Notes settings saved locally but not synced to the server');
+    });
 }
 
 /** Set the active note to null (deselect) */
@@ -587,6 +630,10 @@ export const notesStore = {
   deleteAttachment,
   importMemoryAsNotes,
   updateSettings,
+  fetchSettings,
+  get settingsFetched() {
+    return _settingsFetched;
+  },
   fetchAgentPermissions,
   applyAgentPermissionPreset,
   setAgentToolPermission,
