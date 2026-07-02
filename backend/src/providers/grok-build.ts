@@ -15,7 +15,8 @@
 
 import type { ProviderConfig, ModelDef } from '@koryphaios/shared';
 import { spawn } from 'node:child_process';
-import { tmpdir } from 'node:os';
+import { readFileSync } from 'node:fs';
+import { homedir, tmpdir } from 'node:os';
 import {
   type Provider,
   type ProviderContentBlock,
@@ -171,15 +172,39 @@ function refreshModelsInBackground(): void {
   Promise.all([fetchGrokModels(bin), probeGrokReasoningLevels(bin)])
     .then(([models, reasoningLevels]) => {
       if (models.length > 0) {
-        cachedModels = models.map((m) =>
-          m.canReason && reasoningLevels?.length ? { ...m, reasoningLevels } : m,
-        );
+        // The CLI's own per-model metadata cache (~/.grok/models_cache.json)
+        // is authoritative: real context_window and, critically, whether the
+        // model ACTUALLY accepts --reasoning-effort. The flag exists globally
+        // in the CLI parser even for models that don't support it, so the
+        // probed levels are only attached when the cache says so.
+        const cliMeta = readGrokCliModelsCache();
+        cachedModels = models.map((m) => {
+          const key = m.apiModelId ?? m.id;
+          const meta = cliMeta?.get(key);
+          if (!meta) return m;
+          return {
+            ...m,
+            ...(meta.name ? { name: m.name.includes('(default)') ? `${meta.name} (default)` : meta.name } : {}),
+            ...(meta.contextWindow && meta.contextWindow > 0
+              ? { contextWindow: meta.contextWindow, contextVerified: true }
+              : {}),
+            ...(meta.maxOutputTokens && meta.maxOutputTokens > 0
+              ? { maxOutputTokens: meta.maxOutputTokens }
+              : {}),
+            canReason: meta.supportsReasoningEffort,
+            reasoningLevels:
+              meta.supportsReasoningEffort && reasoningLevels?.length
+                ? reasoningLevels
+                : undefined,
+          };
+        });
         cachedModelsAt = Date.now();
         providerLog.debug(
           {
             provider: 'grok',
-            models: models.map((m) => m.apiModelId ?? m.id),
+            models: cachedModels.map((m) => m.apiModelId ?? m.id),
             reasoningLevels,
+            cliMetaFound: !!cliMeta,
           },
           'Grok Build model list refreshed',
         );
@@ -191,6 +216,46 @@ function refreshModelsInBackground(): void {
     .finally(() => {
       modelsFetchInProgress = false;
     });
+}
+
+interface GrokCliModelMeta {
+  name?: string;
+  contextWindow?: number;
+  maxOutputTokens?: number;
+  supportsReasoningEffort: boolean;
+  hidden: boolean;
+}
+
+/** Parse the grok CLI's own model metadata cache (~/.grok/models_cache.json). */
+function readGrokCliModelsCache(): Map<string, GrokCliModelMeta> | null {
+  try {
+    const path = `${homedir()}/.grok/models_cache.json`;
+    const raw = readFileSync(path, 'utf8');
+    const parsed = JSON.parse(raw) as {
+      models?: Record<string, { info?: Record<string, unknown> }>;
+    };
+    if (!parsed.models) return null;
+    const out = new Map<string, GrokCliModelMeta>();
+    for (const [id, entry] of Object.entries(parsed.models)) {
+      const info = entry?.info ?? {};
+      out.set(id, {
+        name: typeof info.name === 'string' ? info.name : undefined,
+        contextWindow:
+          typeof info.context_window === 'number' && info.context_window > 0
+            ? info.context_window
+            : undefined,
+        maxOutputTokens:
+          typeof info.max_completion_tokens === 'number' && info.max_completion_tokens > 0
+            ? info.max_completion_tokens
+            : undefined,
+        supportsReasoningEffort: info.supports_reasoning_effort === true,
+        hidden: info.hidden === true,
+      });
+    }
+    return out;
+  } catch {
+    return null;
+  }
 }
 
 // The grok CLI does not document its effort values anywhere machine-readable,
