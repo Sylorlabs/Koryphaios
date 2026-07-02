@@ -124,6 +124,8 @@ interface CliCatalogEntry {
   displayName: string;
   capabilities: string[];
   defaultEffort?: string;
+  /** Documented context window from the catalog's context:{window:N} field. */
+  contextWindow?: number;
 }
 
 let cachedCatalog: Map<string, CliCatalogEntry> | null = null;
@@ -171,6 +173,7 @@ function parseCatalogFromBuffer(buf: Buffer): Map<string, CliCatalogEntry> {
     if (!head) continue;
     const caps = entry.match(/capabilities:\[([^\]]*)\]/);
     const de = entry.match(/default_effort:"([a-z]+)"/);
+    const ctx = entry.match(/context:\{window:(\d+)/);
     const capabilities = caps
       ? caps[1].split(',').map((c) => c.trim().replace(/^"|"$/g, '')).filter(Boolean)
       : [];
@@ -180,6 +183,7 @@ function parseCatalogFromBuffer(buf: Buffer): Map<string, CliCatalogEntry> {
         displayName: head[2],
         capabilities,
         defaultEffort: de?.[1],
+        ...(ctx ? { contextWindow: Number(ctx[1]) } : {}),
       });
     }
   }
@@ -418,7 +422,14 @@ function refreshModelsInBackground(): void {
           const levels = capabilitiesToLevels(entry.capabilities).filter(
             (l) => !effortLevels || effortLevels.includes(l),
           );
-          return { ...m, reasoningLevels: levels };
+          // Context window from the CLI's own catalog is live-verified truth.
+          // [1m]-suffixed variants keep their 1M window from readCliExtraModels.
+          const oneM = /\[1m\]$/i.test(m.apiModelId ?? '');
+          const ctx =
+            !oneM && entry.contextWindow && entry.contextWindow > 0
+              ? { contextWindow: entry.contextWindow, contextVerified: true }
+              : {};
+          return { ...m, reasoningLevels: levels, ...ctx };
         }
         // No catalog (binary not readable): fall back to the CLI's global
         // --effort enum rather than nothing.
@@ -534,7 +545,12 @@ export class ClaudeCodeProvider implements Provider {
     if (!cachedCatalog) return fallback;
     return fallback.map((m) => {
       const entry = catalogEntryFor(m.realModelId ?? m.apiModelId, cachedCatalog);
-      return entry ? { ...m, reasoningLevels: capabilitiesToLevels(entry.capabilities) } : m;
+      if (!entry) return m;
+      const ctx =
+        entry.contextWindow && entry.contextWindow > 0
+          ? { contextWindow: entry.contextWindow, contextVerified: true }
+          : {};
+      return { ...m, reasoningLevels: capabilitiesToLevels(entry.capabilities), ...ctx };
     });
   }
 
