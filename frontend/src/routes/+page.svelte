@@ -922,7 +922,8 @@ RULES:
   {/snippet}
 
   {#snippet contextBar()}
-    {#if wsStore.contextUsage.isReliable && modeStore.showCostTracking}
+    <!-- Context occupancy is informational (not cost tracking) — visible in every mode. -->
+    {#if wsStore.contextUsage.isReliable}
       <div
         class="shrink-0 px-4"
         style="padding-top: var(--space-2); padding-bottom: var(--space-2); border-top: 1px solid var(--color-border); background: var(--color-surface-1);"
