@@ -33,7 +33,6 @@ import { modeRoutes } from './routes/v1/mode';
 import { spendRoutes } from './routes/v1/spend';
 import { spendCapsRoutes } from './routes/v1/spend-caps';
 import { billingRoutes } from './routes/v1/billing';
-import { messagingRoutes } from './routes/v1/messaging';
 import { processRoutes } from './routes/v1/processes';
 import { notesRoutes } from './routes/v1/notes';
 import { workspaceRoutes } from './routes/v1/workspace';
@@ -65,7 +64,6 @@ const baseApp = new Elysia()
   .use(spendRoutes)
   .use(spendCapsRoutes)
   .use(billingRoutes)
-  .use(messagingRoutes)
   .use(processRoutes)
   .use(notesRoutes)
   .use(workspaceRoutes);
@@ -81,7 +79,7 @@ async function main() {
   // Bootstrap dependencies
   const ctx = await bootstrap();
   setContext(ctx);
-  const { config, kory, providers, sessions, messages, wsManager, telegram, discord, slack } = ctx;
+  const { config, kory, providers, sessions, messages, wsManager } = ctx;
 
   const rateLimiter = new RateLimiter(RATE_LIMIT.MAX_REQUESTS, RATE_LIMIT.WINDOW_MS);
 
@@ -203,12 +201,6 @@ async function main() {
 
   serverLog.info({ host: serverConfig.host, port: actualPort }, 'Server running');
 
-  if (telegram && process.env.TELEGRAM_POLLING === 'true') {
-    await telegram.startPolling();
-  }
-
-  if (discord) discord.start().catch((err) => serverLog.error({ err }, 'Discord bot failed'));
-  if (slack) slack.start().catch((err) => serverLog.error({ err }, 'Slack bot failed'));
 
   // ─── Graceful Shutdown ──────────────────────────────────────────────────
   async function gracefulShutdown(signal: string) {

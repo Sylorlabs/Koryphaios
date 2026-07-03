@@ -4,7 +4,6 @@
  */
 
 import { join } from 'node:path';
-import { Bot } from 'grammy';
 import { ProviderRegistry } from './providers';
 import { ToolRegistry } from './tools';
 import { KoryManager } from './kory/manager';
@@ -43,17 +42,6 @@ import {
 } from './tools';
 import { initMCP } from './mcp/client';
 import { serverLog } from './logger';
-import {
-  TelegramAdapter,
-  DiscordAdapter,
-  SlackAdapter,
-} from './messaging';
-import { MessagingGateway } from './messaging/gateway';
-import { TelegramBridge } from './telegram/bot';
-import { DiscordBridge } from './discord/bot';
-import { Client as DiscordClient, GatewayIntentBits } from 'discord.js';
-import { WebClient } from '@slack/web-api';
-import { SlackBridge } from './slack/bot';
 import { applyModeIntegration } from './kory/manager-mode-integration';
 import { initWSBroker } from './ws/broker';
 import { WSManager, setWsManager } from './ws/ws-manager';
@@ -116,9 +104,6 @@ export async function bootstrap(): Promise<AppContext> {
   setWsManager(wsManager);
   initWSBroker(wsManager);
 
-  // Bridges (Telegram, Discord, Slack)
-  const bridges = await initBridges(config, kory);
-
   const context: AppContext = {
     config,
     providers,
@@ -130,7 +115,6 @@ export async function bootstrap(): Promise<AppContext> {
     kory,
     wsManager,
     timeTravel,
-    ...bridges,
   };
 
   setContext(context);
@@ -197,61 +181,4 @@ async function initTools() {
   }
 
   return tools;
-}
-
-async function initBridges(config: any, kory: KoryManager) {
-  const messagingGateway = new MessagingGateway();
-
-  let telegram: TelegramBridge | undefined;
-  let discord: DiscordBridge | undefined;
-  let slack: SlackBridge | undefined;
-
-  if (config.telegram?.enabled && config.telegram?.botToken) {
-    telegram = new TelegramBridge(
-      {
-        botToken: config.telegram.botToken,
-        adminId: config.telegram.adminId ?? 0,
-      },
-      kory,
-      messagingGateway,
-      new TelegramAdapter(new Bot(config.telegram.botToken)),
-    );
-    serverLog.info('Telegram bridge enabled');
-  }
-
-  if (config.discord?.enabled && config.discord?.botToken) {
-    const client = new DiscordClient({
-      intents: [
-        GatewayIntentBits.Guilds,
-        GatewayIntentBits.GuildMessages,
-        GatewayIntentBits.MessageContent,
-      ],
-    });
-    discord = new DiscordBridge(
-      {
-        botToken: config.discord.botToken,
-        allowedUserIds: config.discord.allowedUserIds,
-      },
-      kory,
-      messagingGateway,
-      new DiscordAdapter(client),
-    );
-    serverLog.info('Discord bridge enabled');
-  }
-
-  if (config.slack?.enabled && config.slack?.botToken && config.slack?.appToken) {
-    slack = new SlackBridge(
-      {
-        botToken: config.slack.botToken,
-        appToken: config.slack.appToken,
-        allowedUserIds: config.slack.allowedUserIds,
-      },
-      kory,
-      messagingGateway,
-      new SlackAdapter(new WebClient(config.slack.botToken)),
-    );
-    serverLog.info('Slack bridge enabled');
-  }
-
-  return { telegram, discord, slack };
 }

@@ -28,6 +28,9 @@
   let projectContent = $state(memoryStore.project?.content ?? "");
   let sessionContent = $state(memoryStore.session?.content ?? "");
   let rulesContent = $state(memoryStore.rules?.content ?? "");
+  let newDocumentName = $state("");
+  let newDocumentKind = $state<'memory' | 'rules'>('memory');
+  let showNewDocument = $state(false);
   
   // Track dirty state
   let dirty = $state({
@@ -89,6 +92,14 @@
     }
   }
 
+  async function createDocument() {
+    if (!newDocumentName.trim()) return;
+    if (await memoryStore.createDocument(newDocumentName, newDocumentKind)) {
+      newDocumentName = '';
+      showNewDocument = false;
+    }
+  }
+
   function handleContentChange(type: keyof typeof dirty, value: string) {
     switch (type) {
       case "universal":
@@ -144,7 +155,7 @@
     { id: "project" as const, label: "Project Memory", icon: FileText, color: "text-blue-400" },
     { id: "universal" as const, label: "Universal Memory", icon: Brain, color: "text-purple-400" },
     { id: "session" as const, label: "Session Memory", icon: MessageSquare, color: "text-green-400" },
-    { id: "rules" as const, label: "Rules (.koryrules)", icon: BookOpen, color: "text-orange-400" },
+    { id: "rules" as const, label: "Project Rules", icon: BookOpen, color: "text-orange-400" },
     { id: "settings" as const, label: "Settings", icon: Settings2, color: "text-gray-400" },
   ];
 
@@ -169,6 +180,10 @@
       <Brain size={18} class="text-purple-400" />
       <h3 class="text-sm font-semibold text-[var(--color-text-primary)]">Memory & Rules</h3>
     </div>
+    <div class="flex items-center gap-2">
+      <span class="text-[10px]" style="color: var(--color-text-muted);">{memoryStore.documents.length} project documents</span>
+      <button type="button" class="flex items-center gap-1 rounded-lg border px-2 py-1 text-xs" style="border-color: var(--color-border); color: var(--color-accent);" onclick={() => showNewDocument = !showNewDocument}><Plus size={12} /> New .md</button>
+    </div>
     {#if onClose}
       <button
         onclick={onClose}
@@ -178,6 +193,18 @@
       </button>
     {/if}
   </div>
+
+  {#if showNewDocument}
+    <div class="flex items-center gap-2 border-b px-4 py-2" style="border-color: var(--color-border); background: var(--color-surface-2);">
+      <input class="input h-8 flex-1 text-xs" placeholder="document-name" bind:value={newDocumentName} onkeydown={(event) => { if (event.key === 'Enter') void createDocument(); }} />
+      <div class="flex rounded-lg border p-0.5" style="border-color: var(--color-border);">
+        {#each ['memory', 'rules'] as kind (kind)}
+          <button type="button" class="rounded-md px-2 py-1 text-[10px]" style="background: {newDocumentKind === kind ? 'var(--color-surface-4)' : 'transparent'}; color: var(--color-text-primary);" onclick={() => newDocumentKind = kind as 'memory' | 'rules'}>{kind}</button>
+        {/each}
+      </div>
+      <button type="button" class="btn btn-primary h-8 px-3 text-xs" onclick={() => void createDocument()}>Create</button>
+    </div>
+  {/if}
 
   <!-- Tabs -->
   <div class="flex shrink-0 overflow-x-auto border-b border-[var(--color-border)]">
@@ -537,7 +564,7 @@
                   <div class="flex items-start gap-3">
                     <BookOpen size={18} class="mt-0.5 text-orange-400" />
                     <div>
-                      <div class="text-sm font-medium text-[var(--color-text-primary)]">Rules (.koryrules)</div>
+                      <div class="text-sm font-medium text-[var(--color-text-primary)]">Project Rules</div>
                       <div class="mt-1 text-xs text-[var(--color-text-muted)]">Behavior rules and conventions added to context.</div>
                     </div>
                   </div>

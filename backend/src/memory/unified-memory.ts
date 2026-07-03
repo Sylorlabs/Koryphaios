@@ -33,13 +33,13 @@ import { eq } from 'drizzle-orm';
 export const MEMORY_CONFIG = {
   // Directory names (relative to project root or home)
   UNIVERSAL_MEMORY_DIR: '.koryphaios/universal-memory',
-  PROJECT_MEMORY_DIR: '.koryphaios/project-memory',
+  PROJECT_MEMORY_DIR: '.koryphaios/memory',
   SESSIONS_DIR: '.koryphaios/sessions',
-  RULES_FILE: '.koryrules',
+  RULES_FILE: '.koryphaios/rules/rules.md',
 
   // File names
   UNIVERSAL_MEMORY_FILE: 'universal-memory.md',
-  PROJECT_MEMORY_FILE: 'project-memory.md',
+  PROJECT_MEMORY_FILE: 'project.md',
   SESSION_MEMORY_FILE: 'memory.md',
 
   // Settings
@@ -131,6 +131,31 @@ export function getRulesPath(projectRoot: string): string {
   return join(projectRoot, MEMORY_CONFIG.RULES_FILE);
 }
 
+export interface ProjectMemoryDocument { name: string; path: string; kind: 'memory' | 'rules' }
+
+export function listProjectMemoryDocuments(projectRoot: string): ProjectMemoryDocument[] {
+  const roots = [
+    { dir: join(projectRoot, '.koryphaios/memory'), kind: 'memory' as const },
+    { dir: join(projectRoot, '.koryphaios/rules'), kind: 'rules' as const },
+  ];
+  return roots.flatMap(({ dir, kind }) => {
+    if (!existsSync(dir)) return [];
+    return readdirSync(dir, { withFileTypes: true })
+      .filter((entry) => entry.isFile() && entry.name.toLowerCase().endsWith('.md'))
+      .map((entry) => ({ name: entry.name, path: join(dir, entry.name), kind }));
+  });
+}
+
+export function createProjectMemoryDocument(projectRoot: string, name: string, kind: 'memory' | 'rules'): ProjectMemoryDocument {
+  const safe = name.trim().replace(/\.md$/i, '').replace(/[^a-zA-Z0-9._-]+/g, '-').replace(/^[-.]+|[-.]+$/g, '');
+  if (!safe) throw new Error('A valid document name is required');
+  const dir = join(projectRoot, `.koryphaios/${kind}`);
+  mkdirSync(dir, { recursive: true });
+  const path = join(dir, `${safe}.md`);
+  if (!existsSync(path)) writeFileSync(path, '', 'utf8');
+  return { name: `${safe}.md`, path, kind };
+}
+
 // ============================================================================
 // Universal Memory (Global)
 // ============================================================================
@@ -218,13 +243,7 @@ export function readUniversalMemory(): MemoryFile {
   const filePath = getUniversalMemoryPath();
 
   if (!existsSync(filePath)) {
-    return {
-      path: filePath,
-      content: '',
-      exists: false,
-      lastModified: null,
-      size: 0,
-    };
+    return { path: filePath, content: '', exists: false, lastModified: null, size: 0 };
   }
 
   try {
@@ -407,13 +426,7 @@ export function readProjectMemory(projectRoot: string): MemoryFile {
   const filePath = getProjectMemoryPath(projectRoot);
 
   if (!existsSync(filePath)) {
-    return {
-      path: filePath,
-      content: '',
-      exists: false,
-      lastModified: null,
-      size: 0,
-    };
+    return writeProjectMemory(projectRoot, '');
   }
 
   try {
@@ -770,13 +783,7 @@ export function readRules(projectRoot: string): MemoryFile {
   const filePath = getRulesPath(projectRoot);
 
   if (!existsSync(filePath)) {
-    return {
-      path: filePath,
-      content: '',
-      exists: false,
-      lastModified: null,
-      size: 0,
-    };
+    return writeRules(projectRoot, '');
   }
 
   try {
@@ -804,6 +811,8 @@ export function readRules(projectRoot: string): MemoryFile {
 
 export function writeRules(projectRoot: string, content: string): MemoryFile {
   const filePath = getRulesPath(projectRoot);
+  const dir = dirname(filePath);
+  if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
 
   if (content.length > MEMORY_CONFIG.MAX_RULES_SIZE) {
     throw new Error(`Rules file exceeds maximum size of ${MEMORY_CONFIG.MAX_RULES_SIZE} bytes`);

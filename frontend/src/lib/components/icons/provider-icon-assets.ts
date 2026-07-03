@@ -1,5 +1,6 @@
 // Generated from frontend/static/provider-icons
 export const EXISTING_PROVIDER_ICON_PATHS = new Set<string>([
+  "/provider-icons/cortex.svg",
   "/provider-icons/anthropic-color.svg",
   "/provider-icons/firmware-color.svg",
   "/provider-icons/gitlab-color.svg",

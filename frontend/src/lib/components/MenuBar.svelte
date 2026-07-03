@@ -10,8 +10,6 @@
     Square,
     X,
     StickyNote,
-    FolderOpen,
-    Plus,
   } from 'lucide-svelte';
   import CheckForUpdatesButton from './CheckForUpdatesButton.svelte';
   import { getModKeyName } from '$lib/utils/platform';
@@ -21,7 +19,7 @@
   import { onMount } from 'svelte';
   import { browser } from '$app/environment';
   import { invoke } from '@tauri-apps/api/core';
-  import { projectStore, projectDisplayName } from '$lib/stores/project.svelte';
+  import { projectStore } from '$lib/stores/project.svelte';
 
   interface Props {
     showSidebar: boolean;
@@ -30,7 +28,6 @@
     showNotes?: boolean;
     zenMode: boolean;
     projectName: string | null | undefined;
-    koryPhase: string | null;
     isYoloMode: boolean;
     activeAgents: Array<{ identity: { id: string } }>;
     recentProjects: RecentProject[];
@@ -44,7 +41,6 @@
     showNotes = false,
     zenMode,
     projectName,
-    koryPhase,
     isYoloMode,
     activeAgents,
     recentProjects,
@@ -251,13 +247,6 @@
         </div>
       </div>
 
-      {#if koryPhase}
-        <span class="flex items-center gap-2 min-w-0 max-w-[220px] px-1 py-2">
-            <div class="w-1.5 h-1.5 bg-amber-400 animate-pulse"></div>
-            <span class="text-xs font-medium leading-none truncate" style="color: var(--color-text-secondary);">Kory {koryPhase}</span>
-        </span>
-      {/if}
-
       {#if isYoloMode}
         <span class="flex items-center gap-1.5 px-1 py-2 text-red-400">
             <Zap size={12} fill="currentColor" />
@@ -270,18 +259,12 @@
       class="flex-1 flex items-center justify-center h-full"
       data-tauri-drag-region
     >
-      {#if projectStore.openProjects.length > 0}
-        <div class="flex items-center gap-1 min-w-0 max-w-[560px] overflow-hidden px-2" data-tauri-drag-region="false">
-          {#each projectStore.openProjects.slice(0, 4) as path (path)}
-            <button type="button" class="flex min-w-0 items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs transition-colors" style="background: {projectStore.currentPath === path ? 'var(--color-surface-3)' : 'var(--color-surface-1)'}; border-color: {projectStore.currentPath === path ? 'var(--color-accent)' : 'var(--color-border)'}; color: var(--color-text-primary);" onclick={() => action(`select_project:${encodeURIComponent(path)}`)} title={path}>
-              <FolderOpen size={11} class="shrink-0" />
-              <span class="truncate">{projectDisplayName(path)}</span>
-            </button>
-          {/each}
-          <button type="button" class="rounded-lg border p-1.5" style="border-color: var(--color-border); color: var(--color-text-muted);" onclick={() => action('open_project_folder')} title="Open another project"><Plus size={12} /></button>
+      {#if projectStore.currentPath}
+        <div class="max-w-[560px] truncate px-3 text-xs font-medium" style="color: var(--color-text-secondary);" title={projectStore.currentPath}>
+          {projectStore.currentPath}
         </div>
       {:else}
-        <button type="button" class="rounded-lg border px-3 py-1.5 text-xs" style="border-color: var(--color-border); color: var(--color-text-muted);" onclick={() => action('open_project_folder')} data-tauri-drag-region="false">Open project</button>
+        <span class="text-xs" style="color: var(--color-text-muted);">No project selected</span>
       {/if}
     </div>
 

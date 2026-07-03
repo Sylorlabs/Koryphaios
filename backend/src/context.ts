@@ -7,9 +7,6 @@ import { TaskStore } from './stores/task-store';
 import { WSManager } from './ws/ws-manager';
 import { MCPManager } from './mcp/client';
 import { TimeTravelService } from './services/timetravel';
-import { TelegramBridge } from './telegram/bot';
-import { DiscordBridge } from './discord/bot';
-import { SlackBridge } from './slack/bot';
 import type { AppConfig } from './config-schema';
 
 export interface AppContext {
@@ -23,9 +20,6 @@ export interface AppContext {
   kory: KoryManager;
   wsManager: WSManager;
   timeTravel: TimeTravelService;
-  telegram?: TelegramBridge;
-  discord?: DiscordBridge;
-  slack?: SlackBridge;
 }
 
 let context: AppContext | null = null;

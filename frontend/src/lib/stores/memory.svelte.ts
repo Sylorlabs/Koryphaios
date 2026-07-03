@@ -44,6 +44,7 @@ export interface MemoryState {
   isLoading: boolean;
   activeTab: 'universal' | 'project' | 'session' | 'rules' | 'settings';
 }
+export interface ProjectMemoryDocument { name: string; path: string; kind: 'memory' | 'rules' }
 
 // ============================================================================
 // Default Settings
@@ -73,6 +74,20 @@ function createMemoryStore() {
     isLoading: false,
     activeTab: 'project',
   });
+  let documents = $state<ProjectMemoryDocument[]>([]);
+
+  async function loadDocuments(): Promise<void> {
+    const res = await apiFetch(apiUrl('/api/memory/documents'));
+    if (res.ok) { const data = await res.json(); documents = data.ok ? data.data : []; }
+  }
+
+  async function createDocument(name: string, kind: 'memory' | 'rules'): Promise<boolean> {
+    const res = await apiFetch(apiUrl('/api/memory/documents'), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name, kind }) });
+    if (!res.ok) return false;
+    await loadDocuments();
+    toastStore.success('Markdown document created');
+    return true;
+  }
 
   // ========================================================================
   // Universal Memory
@@ -438,6 +453,7 @@ function createMemoryStore() {
         sessionId ? loadSessionMemory(sessionId) : Promise.resolve(),
         loadRules(),
         loadSettings(),
+        loadDocuments(),
       ]);
     } finally {
       state.isLoading = false;
@@ -479,6 +495,7 @@ function createMemoryStore() {
     get activeTab() {
       return state.activeTab;
     },
+    get documents() { return documents; },
 
     // Universal memory
     loadUniversalMemory,
@@ -510,6 +527,8 @@ function createMemoryStore() {
     // Bulk operations
     loadAllMemory,
     setActiveTab,
+    loadDocuments,
+    createDocument,
   };
 }
 

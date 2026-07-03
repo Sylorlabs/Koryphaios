@@ -19,12 +19,12 @@ function persist(key: string, value: string | string[] | null) {
   } catch { /* private mode */ }
 }
 
-let currentPath = $state<string | null>(readString(PROJECT_KEY));
-let openProjects = $state<string[]>(readList(PROJECTS_KEY));
+const initialCurrentPath = readString(PROJECT_KEY);
+const initialOpenProjects = readList(PROJECTS_KEY);
+let currentPath = $state<string | null>(initialCurrentPath);
+let openProjects = $state<string[]>(initialCurrentPath && !initialOpenProjects.includes(initialCurrentPath) ? [initialCurrentPath, ...initialOpenProjects] : initialOpenProjects);
 let workspaceRoot = $state<string | null>(readString(WORKSPACE_KEY));
 let scope = $state<SessionScope>(readString(SCOPE_KEY) === 'all' ? 'all' : 'project');
-
-if (currentPath && !openProjects.includes(currentPath)) openProjects = [currentPath, ...openProjects];
 
 export function projectDisplayName(path: string | null | undefined): string {
   if (!path) return '';

@@ -111,7 +111,10 @@ export function registerLiveModelResolver(resolver: LiveModelResolver): void {
 }
 
 function hasUsableContext(model: ModelDef | undefined): model is ModelDef {
-  return !!model && Number.isFinite(model.contextWindow) && model.contextWindow > 0;
+  // Provider/CLI metadata occasionally exposes a boolean capability as 1.
+  // Never present that as a one-token context window; fall through to the
+  // verified catalog/real-model chain instead.
+  return !!model && Number.isFinite(model.contextWindow) && model.contextWindow >= 1024;
 }
 
 /**

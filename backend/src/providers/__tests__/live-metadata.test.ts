@@ -78,3 +78,13 @@ describe('mergeModelLists live override', () => {
     expect(merged[0].name).toBe('Nice Name');
   });
 });
+
+describe('trusted context metadata', () => {
+  test('does not accept a boolean-like one-token context window', async () => {
+    const { resolveTrustedContextWindow, registerLiveModelResolver } = await import('../models');
+    registerLiveModelResolver(() => def({ provider: 'codex', contextWindow: 1, contextVerified: true }));
+    const resolved = resolveTrustedContextWindow('gpt-5.3-codex', 'codex');
+    expect(resolved.contextWindow).toBeGreaterThan(1024);
+    registerLiveModelResolver(() => undefined);
+  });
+});

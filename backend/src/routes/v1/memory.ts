@@ -20,11 +20,22 @@ import {
   initializeSessionMemory,
   initializeRules,
   DEFAULT_MEMORY_SETTINGS,
+  listProjectMemoryDocuments,
+  createProjectMemoryDocument,
 } from '../../memory/unified-memory';
 import { getRequestProjectRoot } from '../../runtime/request-project';
 import { requireLocalRouteAuth } from '../../auth/local-route-auth';
 
 export const memoryRoutes = new Elysia({ prefix: '/api/memory' })
+  .get('/documents', async ({ request, set }) => {
+    if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
+    return { ok: true, data: listProjectMemoryDocuments(getRequestProjectRoot(request)) };
+  })
+  .post('/documents', async ({ request, body, set }) => {
+    if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
+    try { return { ok: true, data: createProjectMemoryDocument(getRequestProjectRoot(request), body.name, body.kind) }; }
+    catch (err) { set.status = 400; return { ok: false, error: err instanceof Error ? err.message : 'Failed to create document' }; }
+  }, { body: t.Object({ name: t.String(), kind: t.Union([t.Literal('memory'), t.Literal('rules')]) }) })
   // Universal Memory
   .get('/universal', async ({ request, set }) => {
     if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };

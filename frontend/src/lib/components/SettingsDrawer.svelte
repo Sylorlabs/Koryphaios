@@ -11,12 +11,10 @@
     Copy,
     Zap,
     Server,
-    Globe,
     Cpu,
     X,
     User,
     Shield,
-    MessageCircle,
     Search,
     CreditCard,
     AlertTriangle,
@@ -26,9 +24,7 @@
     Sparkles,
     Terminal,
     Users,
-    Send,
     MessageSquare,
-    Slack,
     Type,
     RotateCcw,
     Save,
@@ -64,7 +60,7 @@
   }
 
   let { open = false, onClose }: Props = $props();
-  let activeTab = $state<'providers' | 'appearance' | 'shortcuts' | 'messaging' | 'billing' | 'memory' | 'agent' | 'experimental' | 'teams' | 'notes'>('providers');
+  let activeTab = $state<'providers' | 'appearance' | 'shortcuts' | 'billing' | 'memory' | 'agent' | 'experimental' | 'teams' | 'notes'>('providers');
 
   let showModelSelector = $state(false);
   let selectorTarget = $state<any>(null);
@@ -98,17 +94,22 @@
     ask: 'Ask',
     block: 'Hide',
   };
+  let loadedNotesProject: string | null = null;
+  let loadedMemoryProject: string | null = null;
 
   $effect(() => {
     const projectPath = projectStore.currentPath;
-    if (open && activeTab === 'notes') {
-      void projectPath;
+    if (open && activeTab === 'notes' && loadedNotesProject !== projectPath) {
+      loadedNotesProject = projectPath;
       void notesStore.fetchAgentPermissions();
       // Settings are persisted server-side (context injection honors them) —
       // refresh from the source of truth instead of trusting the local mirror.
       void notesStore.fetchSettings();
     }
-    if (open && activeTab === 'memory') { void projectPath; void memoryStore.loadAllMemory(); }
+    if (open && activeTab === 'memory' && loadedMemoryProject !== projectPath) {
+      loadedMemoryProject = projectPath;
+      void memoryStore.loadAllMemory();
+    }
   });
 
   $effect(() => {
@@ -184,7 +185,6 @@
     if (activeTab === 'memory') void memoryStore.loadAllMemory();
     if (activeTab === 'agent') void agentSettingsStore.loadAll();
     if (activeTab === 'experimental') void experimentalStore.loadAll();
-    if (activeTab === 'messaging') void loadMessaging();
   });
 
   $effect(() => {
@@ -377,42 +377,6 @@
   }
   function resetShortcuts() { shortcuts = structuredClone(defaultShortcuts); localStorage.removeItem('koryphaios-shortcuts'); toastStore.info('Shortcuts reset'); }
 
-  // ─── Messaging ───────────────────────────────────────────────────────
-  let messagingLoading = $state(false);
-  let messagingSaving = $state(false);
-  let telegramEnabled = $state(false);
-  let telegramAdminId = $state('');
-  let telegramBotToken = $state('');
-  let telegramBotTokenSet = $state(false);
-
-  async function loadMessaging() {
-    messagingLoading = true;
-    try {
-      const res = await apiFetch('/api/messaging');
-      const data = await parseJsonResponse(res);
-      if (data.ok && data.data) {
-        const t = data.data.telegram;
-        telegramEnabled = t?.enabled ?? false;
-        telegramAdminId = t?.adminId ? String(t.adminId) : '';
-        telegramBotTokenSet = t?.botTokenSet ?? false;
-      }
-    } catch { toastStore.error('Failed to load messaging config'); }
-    finally { messagingLoading = false; }
-  }
-
-  async function saveMessaging() {
-    const adminId = parseInt(telegramAdminId, 10);
-    if (telegramEnabled && !telegramBotToken.trim() && !telegramBotTokenSet) { toastStore.error('Bot token is required'); return; }
-    messagingSaving = true;
-    try {
-      const res = await apiFetch('/api/messaging', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ telegram: telegramEnabled ? { botToken: telegramBotToken.trim() || undefined, adminId } : null }) });
-      const data = await parseJsonResponse(res);
-      if (data.ok) { toastStore.success('Messaging config saved'); void loadMessaging(); }
-      else toastStore.error(data.error ?? 'Failed to save');
-    } catch (err: any) { toastStore.error(err.message ?? 'Failed to save'); }
-    finally { messagingSaving = false; }
-  }
-
   // ─── Billing ─────────────────────────────────────────────────────────
   let billingLoading = $state(false);
   let billingCredits = $state<any>(null);
@@ -448,7 +412,6 @@
         { id: 'providers', label: 'Providers', icon: Key },
         { id: 'appearance', label: 'Appearance', icon: Palette },
         { id: 'shortcuts', label: 'Shortcuts', icon: Keyboard },
-        { id: 'messaging', label: 'Messaging', icon: MessageCircle, action: loadMessaging },
         { id: 'billing', label: 'Billing', icon: CreditCard, action: loadBillingCredits },
         { id: 'memory', label: 'Memory', icon: Brain },
         { id: 'agent', label: 'Agent', icon: Bot },
@@ -580,7 +543,7 @@
                       {:else if status?.authenticated}
                         {@const selectedCount = status.models?.length ?? 0}
                         {@const availableCount = status.allAvailableModels?.length ?? 0}
-                        Connected{availableCount > 0 ? ` · ${selectedCount}/${availableCount} enabled` : ''}
+                        Connected{availableCount > 0 ? ` · ${selectedCount > 0 ? selectedCount : '—'}/${availableCount} enabled` : ' · —'}
                       {:else}
                         Not configured
                       {/if}
@@ -591,7 +554,7 @@
                   {#if status?.authenticated}
                     <div class="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 text-[9px] font-bold">
                       <span class="w-1 h-1 rounded-full bg-emerald-400"></span>
-                      {status.allAvailableModels?.length ?? status.models?.length ?? 0}
+                      {(status.allAvailableModels?.length ?? status.models?.length ?? 0) > 0 ? (status.allAvailableModels?.length ?? status.models?.length) : '—'}
                     </div>
                   {:else}
                     <div class="w-2 h-2 rounded-full bg-yellow-500/50 ring-4 ring-yellow-500/10"></div>
@@ -612,7 +575,7 @@
                   {#if status?.authenticated}
                     <div class="flex items-center justify-between">
                       <div class="text-[10px] text-[var(--color-text-muted)]">
-                        {(status.models?.length ?? 0)} enabled of {(status.allAvailableModels?.length ?? 0)} available
+                        {(status.models?.length ?? 0) > 0 ? status.models?.length : '—'} enabled of {(status.allAvailableModels?.length ?? 0) > 0 ? status.allAvailableModels?.length : '—'} available
                       </div>
                       <button type="button" onclick={() => { selectorTarget = status; showModelSelector = true; }} class="btn btn-secondary text-[10px] py-1 px-3">Manage Models</button>
                       <button type="button" onclick={() => disconnectProvider(prov.key)} class="text-[10px] text-red-400 hover:text-red-300 font-medium transition-colors">Disconnect</button>
@@ -1072,115 +1035,6 @@
               </button>
             </div>
           {/each}
-        </div>
-      </div>
-
-      <!-- Messaging Tab -->
-      <div class={activeTab === 'messaging' ? 'flex-1 overflow-y-auto px-6 py-5 w-full max-w-7xl mx-auto' : 'hidden'}>
-        <div class="grid gap-6 xl:grid-cols-[minmax(0,1.1fr)_minmax(320px,0.9fr)]">
-          <div class="space-y-6">
-            <div class="flex gap-4 rounded-2xl border border-[var(--color-accent)]/10 bg-[var(--color-accent)]/5 p-6">
-              <Globe size={24} class="shrink-0 text-[var(--color-accent)]" />
-              <div>
-                <h4 class="text-base font-bold text-[var(--color-text-primary)]">Real-time Messaging Bridge</h4>
-                <p class="mt-1 text-xs text-[var(--color-text-secondary)]">Connect your workspace to external apps. Tasks can be sent from Telegram or Slack and replies will stream back to the same chat.</p>
-              </div>
-            </div>
-
-            <div class="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-2)] p-5">
-              <div class="mb-6 flex items-center justify-between gap-4">
-                <div class="flex items-center gap-3">
-                  <div class="flex h-10 w-10 items-center justify-center rounded-xl bg-[#24A1DE] text-white shadow-lg shadow-[#24A1DE]/20">
-                    <Send size={20} />
-                  </div>
-                  <div>
-                    <h4 class="text-sm font-bold text-[var(--color-text-primary)]">Telegram</h4>
-                    <p class="text-[10px] text-[var(--color-text-muted)]">Native integration via bot API</p>
-                  </div>
-                </div>
-                <label class="relative inline-flex cursor-pointer items-center">
-                  <input type="checkbox" bind:checked={telegramEnabled} class="peer sr-only" />
-                  <div class="peer h-6 w-11 rounded-full bg-[var(--color-surface-4)] peer-focus:outline-none
-                    peer-checked:after:translate-x-full peer-checked:after:border-white after:absolute
-                    after:left-[2px] after:top-[2px] after:h-5 after:w-5 after:rounded-full after:bg-white
-                    after:transition-all after:content-[''] peer-checked:bg-[var(--color-accent)]"></div>
-                </label>
-              </div>
-
-              <div class="grid gap-4 lg:grid-cols-2">
-                <div class="space-y-4 lg:col-span-2">
-                  <div class="space-y-1.5">
-                    <label class="ml-1 text-[10px] font-bold uppercase tracking-widest text-[var(--color-text-muted)]" for="telegram-bot-token">Bot Token</label>
-                    <input id="telegram-bot-token" type="password" placeholder={telegramBotTokenSet ? '••••••••••••••••' : 'Token from @BotFather'} bind:value={telegramBotToken} class="input w-full" />
-                  </div>
-                  <div class="space-y-1.5">
-                    <label class="ml-1 text-[10px] font-bold uppercase tracking-widest text-[var(--color-text-muted)]" for="telegram-admin-id">Admin User ID</label>
-                    <input id="telegram-admin-id" type="text" placeholder="Your numeric ID (e.g. 1234567)" bind:value={telegramAdminId} class="input w-full" />
-                  </div>
-                </div>
-
-                <div class="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-1)] p-4">
-                  <div class="text-[10px] uppercase tracking-widest text-[var(--color-text-muted)]">Connection</div>
-                  <div class="mt-2 text-sm font-semibold text-[var(--color-text-primary)]">
-                    {telegramEnabled ? 'Enabled' : 'Disabled'}
-                  </div>
-                  <p class="mt-2 text-[10px] text-[var(--color-text-muted)]">
-                    {telegramBotTokenSet ? 'A bot token is already stored.' : 'No token has been stored yet.'}
-                  </p>
-                </div>
-
-                <div class="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-1)] p-4">
-                  <div class="text-[10px] uppercase tracking-widest text-[var(--color-text-muted)]">Delivery</div>
-                  <div class="mt-2 text-sm font-semibold text-[var(--color-text-primary)]">Task relay</div>
-                  <p class="mt-2 text-[10px] text-[var(--color-text-muted)]">
-                    Incoming tasks are forwarded into the current workspace and stream replies back to the same thread.
-                  </p>
-                </div>
-              </div>
-
-              <button type="button" onclick={saveMessaging} disabled={messagingSaving} class="btn btn-primary mt-5 w-full py-2.5">
-                {messagingSaving ? 'Saving...' : 'Save Telegram Config'}
-              </button>
-            </div>
-          </div>
-
-          <div class="space-y-6">
-            <div class="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-2)] p-5 opacity-60">
-              <div class="mb-4 flex items-center justify-between gap-4">
-                <div class="flex items-center gap-3">
-                  <div class="flex h-10 w-10 items-center justify-center rounded-xl bg-[#4A154B] text-white">
-                    <Slack size={20} />
-                  </div>
-                  <div>
-                    <h4 class="text-sm font-bold text-[var(--color-text-primary)]">Slack</h4>
-                    <p class="text-[10px] text-[var(--color-text-muted)]">Enterprise workspace bridge</p>
-                  </div>
-                </div>
-                <span class="rounded bg-[var(--color-surface-3)] px-2 py-0.5 text-[9px] font-bold uppercase tracking-widest text-[var(--color-text-muted)]">Coming Soon</span>
-              </div>
-              <p class="text-xs text-[var(--color-text-muted)]">Slack support will mirror the Telegram bridge but with workspace-scoped auth and channel routing.</p>
-            </div>
-
-            <div class="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-2)] p-5">
-              <h4 class="text-sm font-bold text-[var(--color-text-primary)]">Bridge Notes</h4>
-              <div class="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-1">
-                <div class="rounded-xl bg-[var(--color-surface-1)] p-4">
-                  <div class="text-[10px] uppercase tracking-widest text-[var(--color-text-muted)]">Recommended</div>
-                  <p class="mt-2 text-xs text-[var(--color-text-primary)]">Keep one admin user per bot while you validate the workflow.</p>
-                </div>
-                <div class="rounded-xl bg-[var(--color-surface-1)] p-4">
-                  <div class="text-[10px] uppercase tracking-widest text-[var(--color-text-muted)]">Safety</div>
-                  <p class="mt-2 text-xs text-[var(--color-text-primary)]">Use a dedicated bot token instead of reusing a general automation bot.</p>
-                </div>
-                <div class="rounded-xl bg-[var(--color-surface-1)] p-4 sm:col-span-2 xl:col-span-1">
-                  <div class="text-[10px] uppercase tracking-widest text-[var(--color-text-muted)]">Status</div>
-                  <p class="mt-2 text-xs text-[var(--color-text-primary)]">
-                    {messagingLoading ? 'Loading messaging configuration…' : 'Configuration loaded locally from the backend settings endpoint.'}
-                  </p>
-                </div>
-              </div>
-            </div>
-          </div>
         </div>
       </div>
 

@@ -34,7 +34,7 @@
     "multiSourceResearch": true,
     "updatedAt": 1782876859984
   },
-  "updatedAt": 1782876859984,
+  "updatedAt": 1783055223268,
   "providers": {
     "anthropic": {
       "name": "anthropic",
@@ -103,11 +103,7 @@
         "deepseek-v4-flash-free",
         "mimo-v2.5-free",
         "nemotron-3-ultra-free",
-        "north-mini-code-free",
-        "opencodezen.default",
-        "deepseek-v4-pro",
-        "glm-5.2",
-        "deepseek-v4-flash"
+        "north-mini-code-free"
       ],
       "hideModelSelector": false,
       "disabled": false

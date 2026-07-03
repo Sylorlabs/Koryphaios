@@ -175,7 +175,8 @@ export function addRecentProject(
   return updated;
 }
 
-/** Creates a new session from project text. Returns sessionId on success, null on failure. */
+/** Creates a blank project session. Opening a folder must never trigger an
+ * unsolicited model run; the project remains available through its working directory. */
 export async function createProjectSession(title: string, text: string): Promise<string | null> {
   const sessionId = await sessionStore.createSession();
   if (!sessionId) {
@@ -184,10 +185,6 @@ export async function createProjectSession(title: string, text: string): Promise
   }
 
   await sessionStore.renameSession(sessionId, title);
-
-  if (text.trim()) {
-    wsStore.sendMessage(sessionId, `Project brief loaded from file:\n\n${text}`);
-  }
 
   return sessionId;
 }

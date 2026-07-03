@@ -108,6 +108,7 @@
 
   const composerSlashCommands = [
     { command: 'new', label: 'New Session', description: 'Create a fresh session.' },
+    { command: 'resume', label: 'Resume Previous Chat', description: 'Resume the most recent earlier chat for this project.' },
     { command: 'compact', label: 'Compact Session', description: 'Summarize and compact the current session.' },
     { command: 'yolo', label: 'Toggle YOLO', description: 'Toggle YOLO mode on or off.' },
     { command: 'beginner', label: 'Beginner Mode', description: 'Switch to beginner UI mode.' },
@@ -385,13 +386,23 @@ RULES:
     if (!root) return false;
 
     if (root === 'help') {
-      toastStore.info('Commands: /new, /compact, /yolo, /beginner, /advanced, /clear, /settings, /theme, /sidebar, /zen');
+      toastStore.info('Commands: /new, /resume, /compact, /yolo, /beginner, /advanced, /clear, /settings, /theme, /sidebar, /zen');
       return true;
     }
 
     if (root === 'new') {
       await sessionStore.createSession();
       inputRef?.focus();
+      return true;
+    }
+
+    if (root === 'resume') {
+      const candidates = projectStore.currentPath ? sessionStore.sessionsForProject(projectStore.currentPath) : sessionStore.sessions;
+      const previous = [...candidates]
+        .filter((session) => session.id !== sessionStore.activeSessionId)
+        .sort((a, b) => b.updatedAt - a.updatedAt)[0];
+      if (previous) sessionStore.activeSessionId = previous.id;
+      else toastStore.info('No previous chat is available for this project');
       return true;
     }
 
@@ -521,30 +532,18 @@ RULES:
     }
   }
 
-  /** Open a project folder with proper chat scoping: if this path already has
-   *  chats, resume the most recent one (like an editor restoring a workspace);
-   *  otherwise start completely fresh with a new project session. */
+  /** Opening a project always creates a fresh chat. History is explicit via
+   * /resume or the sidebar and is never reopened as a folder-open side effect. */
   async function openProjectAtPath(
     path: string,
     fresh: { title: string; text: string; fileName?: string },
   ) {
     projectStore.setProject(path);
     await sessionStore.fetchSessions();
-    const existing = sessionStore.sessionsForProject(path);
-    if (existing.length > 0) {
-      const latest = [...existing].sort((a, b) => b.updatedAt - a.updatedAt)[0];
-      sessionStore.activeSessionId = latest.id;
-      toastStore.success(
-        `Opened ${projectDisplayName(path)} — restored ${existing.length} chat${existing.length === 1 ? '' : 's'}`,
-      );
-    } else {
-      await createProjectFromText(fresh.title, fresh.text, {
-        source: 'file',
-        fileName: fresh.fileName,
-        path,
-      });
-      toastStore.success(`Opened ${projectDisplayName(path)} — fresh start`);
-    }
+    await createProjectFromText(fresh.title, fresh.text, {
+      source: 'file', fileName: fresh.fileName, path,
+    });
+    toastStore.success(`Opened ${projectDisplayName(path)} — new chat`);
   }
 
   async function createProjectFromText(
@@ -796,9 +795,7 @@ RULES:
         } else if (action.startsWith('select_project:')) {
           const path = decodeURIComponent(action.slice('select_project:'.length));
           projectStore.setProject(path);
-          const sessions = sessionStore.sessionsForProject(path);
-          if (sessions[0]) sessionStore.activeSessionId = sessions[0].id;
-          else await sessionStore.createSession();
+          await sessionStore.createSession();
         }
         break;
     }
@@ -885,7 +882,6 @@ RULES:
       {showNotes}
       {zenMode}
       projectName={projectStore.displayName}
-      koryPhase={wsStore.koryPhase}
       isYoloMode={wsStore.isYoloMode}
       {activeAgents}
       {recentProjects}
@@ -1006,18 +1002,7 @@ RULES:
         isStreaming={agentRail.selectedAgentIsRunning}
       />
     {:else}
-      <div class="flex min-h-0 flex-1 flex-col">
-        <div class="flex items-center gap-2 overflow-x-auto border-b px-4 py-2" style="border-color: var(--color-border); background: var(--color-surface-0);">
-          <span class="shrink-0 text-[10px] font-semibold uppercase tracking-wider" style="color: var(--color-text-muted);">Working in</span>
-          {#each projectStore.openProjects as path (path)}
-            <button type="button" class="shrink-0 rounded-lg border px-2.5 py-1 text-xs transition-colors" style="background: {projectStore.currentPath === path ? 'var(--color-surface-3)' : 'transparent'}; border-color: {projectStore.currentPath === path ? 'var(--color-accent)' : 'var(--color-border)'}; color: var(--color-text-primary);" onclick={() => handleMenuAction(`select_project:${encodeURIComponent(path)}`)} title={path}>
-              {projectDisplayName(path)}
-            </button>
-          {/each}
-          <button type="button" class="shrink-0 rounded-lg px-2 py-1 text-xs" style="color: var(--color-accent);" onclick={() => handleMenuAction('open_project_folder')}>+ Open folder</button>
-        </div>
-        <ManagerFeed onUseSuggestion={loadSuggestionIntoComposer} />
-      </div>
+      <ManagerFeed onUseSuggestion={loadSuggestionIntoComposer} />
     {/if}
   {/snippet}
 
