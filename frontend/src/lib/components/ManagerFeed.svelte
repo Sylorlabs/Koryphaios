@@ -131,47 +131,9 @@
     expandedGroups = new Set(expandedGroups);
   }
 
-  function handleEntryClick(entry: FeedEntryLocal, e: MouseEvent) {
-    if (e.shiftKey) {
-      // Range select
-      e.preventDefault();
-      const next = new Set(selectedEntries);
-      if (lastSelectedId) {
-        const startIdx = filteredFeed.findIndex(f => f.id === lastSelectedId);
-        const endIdx = filteredFeed.findIndex(f => f.id === entry.id);
-        if (startIdx >= 0 && endIdx >= 0) {
-          const [lo, hi] = startIdx < endIdx ? [startIdx, endIdx] : [endIdx, startIdx];
-          for (let i = lo; i <= hi; i++) next.add(filteredFeed[i].id);
-        }
-      } else {
-        next.add(entry.id);
-      }
-      selectedEntries = next;
-      lastSelectedId = entry.id;
-    } else if (isMac() ? e.metaKey : e.ctrlKey) {
-      // Toggle individual selection
-      e.preventDefault();
-      const next = new Set(selectedEntries);
-      if (next.has(entry.id)) {
-        next.delete(entry.id);
-      } else {
-        next.add(entry.id);
-      }
-      selectedEntries = next;
-      lastSelectedId = entry.id;
-    } else {
-      // Normal click — set anchor, clear previous selection
-      selectedEntries = new Set([entry.id]);
-      lastSelectedId = entry.id;
-    }
-  }
-
-  function deleteSelected() {
-    if (selectedEntries.size === 0) return;
-    wsStore.removeEntries(selectedEntries);
-    selectedEntries = new Set();
-    lastSelectedId = '';
-  }
+  // Row selection removed — per-entry visibility controls (hide-from-agent /
+  // hide-from-me / delete) replaced the select-then-bulk-delete flow.
+  function handleEntryClick(_entry: FeedEntryLocal, _e: MouseEvent) {}
 
   function deleteSingle(id: string) {
     wsStore.removeEntries(new Set([id]));
@@ -214,17 +176,7 @@
       <MessageSquare size={16} />
       Agent feed
     </span>
-    <div class="flex items-center gap-2">
-      {#if selectedEntries.size > 0}
-        <button
-          onclick={deleteSelected}
-          class="btn btn-secondary flex items-center gap-1.5"
-          style="padding: 4px 10px; font-size: 11px; color: var(--color-error);"
-        >
-          <Trash2 size={12} />Delete {selectedEntries.size}
-        </button>
-      {/if}
-    </div>
+    <div class="flex items-center gap-2"></div>
   </div>
 
   <div class="relative flex-1 min-h-0 overflow-hidden">
@@ -390,7 +342,7 @@
             <div class="pb-3">
               <FeedEntry
                 {entry}
-                isSelected={selectedEntries.has(entry.id)}
+                isSelected={false}
                 isExpanded={expandedGroups.has(entry.id)}
                 isStreaming={i === filteredFeed.length - 1 && isManagerStreaming}
                 onSelect={(e) => handleEntryClick(entry, e)}
