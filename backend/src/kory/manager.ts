@@ -1259,9 +1259,10 @@ export class KoryManager {
         (bulky.length
           ? ` Largest prunable tool outputs: ${bulky.map((b) => `${b.id} (~${k(b.tok)})`).join(', ')}.`
           : '') +
-        ` You own this window: use prune_context to drop outputs you no longer need (recoverable via fetch_context)` +
+        ` You own this window: fetch_context with no arguments lists everything you did (with timestamps); ` +
+        `prune_context drops outputs you no longer need (always recoverable)` +
         (pct !== null && pct >= 70
-          ? `. Your context is getting full — prune stale outputs now before continuing.`
+          ? `. Note: your context is filling up. It's your call — prune stale outputs, keep going if you're nearly done, or if nothing is prunable, suggest the user compact the session.`
           : `.`);
     }
 
@@ -1564,7 +1565,7 @@ export class KoryManager {
       m.content = JSON.stringify({
         callId: original.callId ?? meta.tool_call_id,
         name: original.name,
-        output: `[Output pruned to save context: ${entry?.label ?? 'tool output'}. Recover the exact content with fetch_context id=${meta.archiveId}]`,
+        output: `[Output pruned to save context: ${entry?.label ?? 'tool output'}${entry ? ` at ${new Date(entry.ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : ''}. Recover the exact content with fetch_context id=${meta.archiveId}]`,
         isError: false,
         durationMs: 0,
       });

@@ -14,9 +14,9 @@ const FETCH_MAX_CHARS = 24_000;
 export class FetchContextTool implements Tool {
   readonly name = 'fetch_context';
   readonly description =
-    'Recover the exact content of an earlier action that was pruned from your context to save space. ' +
-    'Pass the archive id from a pruned stub (e.g. "cx_12"), or a search query to find past tool ' +
-    'outputs, file reads, and terminal runs from this session.';
+    'Recall past activity from this session. With no arguments, lists recent actions (file edits, ' +
+    'reads, terminal runs) with their archive ids and timestamps — use this to remember WHAT you did ' +
+    'and when. Pass an id (e.g. "cx_12") to recover the exact content, or a query to search past outputs.';
   readonly inputSchema = {
     type: 'object',
     properties: {
@@ -65,7 +65,22 @@ export class FetchContextTool implements Tool {
       return { callId: call.id, name: this.name, output, isError: false, durationMs: 0 };
     }
 
-    return fail('Provide an archive id or a search query.');
+    // No args: activity index — what happened, when, under which id. This is
+    // how the agent remembers "I edited that file at 10:32" without holding
+    // every output in context.
+    const recent = await archive.listRecent(ctx.sessionId, 30);
+    if (recent.length === 0) return fail('No archived activity in this session yet.');
+    const lines = recent.map((e) => {
+      const t = new Date(e.ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      return `[${e.id}] ${t} ${e.kind}: ${e.label} (${e.content.length} chars)`;
+    });
+    return {
+      callId: call.id,
+      name: this.name,
+      output: `Recent session activity (newest last):\n${lines.join('\n')}\n\nPass an id to fetch_context to recover full content.`,
+      isError: false,
+      durationMs: 0,
+    };
   }
 }
 

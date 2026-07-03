@@ -141,6 +141,12 @@ export class ContextArchiveService {
     return hits;
   }
 
+  /** Most recent N entries, oldest→newest, for the activity index. In-memory — fast. */
+  async listRecent(sessionId: string, limit = 30): Promise<ArchiveEntry[]> {
+    const s = await this.ensureLoaded(sessionId);
+    return s.entries.slice(-limit);
+  }
+
   async setPrunedForAgent(sessionId: string, id: string, pruned: boolean): Promise<boolean> {
     const s = await this.ensureLoaded(sessionId);
     const entry = s.byId.get(id);
