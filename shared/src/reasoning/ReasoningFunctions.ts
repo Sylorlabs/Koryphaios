@@ -120,6 +120,14 @@ export function normalizeReasoningLevel(
       }
     }
 
+    // CLI harnesses (claude-code, codex, grok, antigravity): pass the level
+    // through untouched — the harness clamps to the CLI/model's real
+    // capability (incl. xhigh/max). Dropping it here silently ran every chat
+    // at the CLI default.
+    if (['claude', 'codex', 'grok', 'antigravity'].includes(provider)) {
+      return level;
+    }
+
     // OpenAI / Anthropic / Groq / xAI / Azure / OpenRouter / Copilot (Effort-based)
     if (
       ['openai', 'anthropic', 'groq', 'xai', 'azure', 'openrouter', 'copilot', 'kimicode'].includes(provider)
