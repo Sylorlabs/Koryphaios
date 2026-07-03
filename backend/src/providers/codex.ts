@@ -299,9 +299,10 @@ export class CodexProvider implements Provider {
         if (payload.response?.usage) {
           yield {
             type: 'usage_update',
+            // OpenAI-style usage: input_tokens already INCLUDES cached tokens,
+            // so tokensCache is deliberately omitted (it would double count).
             tokensIn: payload.response.usage.input_tokens,
             tokensOut: payload.response.usage.output_tokens,
-            tokensCache: payload.response.usage.input_tokens_details?.cached_tokens,
           };
         }
         yield { type: 'complete', finishReason: 'end_turn' };

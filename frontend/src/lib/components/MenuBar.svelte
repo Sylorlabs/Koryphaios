@@ -259,12 +259,18 @@
       class="flex-1 flex items-center justify-center h-full"
       data-tauri-drag-region
     >
+      <!-- Fixed to the viewport center so the project name stays in the top
+           middle regardless of sidebar/panel state. -->
       {#if projectStore.currentPath}
-        <div class="max-w-[560px] truncate px-3 text-xs font-medium" style="color: var(--color-text-secondary);" title={projectStore.currentPath}>
-          {projectStore.currentPath}
+        <div
+          class="max-w-[360px] truncate px-3 text-xs font-medium pointer-events-none"
+          style="position: fixed; left: 50vw; transform: translateX(-50%); color: var(--color-text-secondary);"
+          title={projectStore.currentPath}
+        >
+          {projectStore.displayName}
         </div>
       {:else}
-        <span class="text-xs" style="color: var(--color-text-muted);">No project selected</span>
+        <span class="text-xs pointer-events-none" style="position: fixed; left: 50vw; transform: translateX(-50%); color: var(--color-text-muted);">No project selected</span>
       {/if}
     </div>
 

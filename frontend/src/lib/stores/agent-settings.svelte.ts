@@ -31,6 +31,14 @@ export interface AgentSettings {
   localWebSearch: 'off' | 'on' | 'fallback';
   /** Experimental: Multi-source research requirements */
   multiSourceResearch: boolean;
+  /** Context management: auto-stub stale tool outputs (recoverable via fetch_context) */
+  contextPruningEnabled: boolean;
+  /** Turns whose tool outputs stay full before auto-stubbing */
+  contextKeepRecentTurns: number;
+  /** Minimum tool-output size (chars) worth stubbing */
+  contextPruneMinChars: number;
+  /** Live context-usage report injected each turn so the agent self-manages */
+  contextSelfAwareness: boolean;
 }
 
 export interface CriticReviewResult {
@@ -79,6 +87,10 @@ export const DEFAULT_AGENT_SETTINGS: AgentSettings = {
   approvalThresholdLines: 100,
   localWebSearch: 'fallback',
   multiSourceResearch: true,
+  contextPruningEnabled: true,
+  contextKeepRecentTurns: 3,
+  contextPruneMinChars: 600,
+  contextSelfAwareness: true,
 };
 
 // ============================================================================

@@ -296,6 +296,77 @@
                 </div>
               </div>
             </section>
+
+            <section class="space-y-4 rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-1)] p-5">
+              <div class="space-y-1">
+                <h4 class="text-sm font-semibold text-[var(--color-text-primary)]">Context Window</h4>
+                <p class="text-xs text-[var(--color-text-muted)]">
+                  Everything the agent does is archived locally; stale tool outputs are collapsed out of its
+                  context and stay recoverable via fetch_context. Nothing is ever lost.
+                </p>
+              </div>
+
+              <div class="grid gap-3 sm:grid-cols-2">
+                <label class="flex h-full cursor-pointer items-start justify-between gap-4 rounded-xl bg-[var(--color-surface-2)] p-4 hover:bg-[var(--color-surface-3)]">
+                  <div>
+                    <div class="text-sm font-medium text-[var(--color-text-primary)]">Auto-Collapse Old Tool Output</div>
+                    <div class="mt-1 text-xs text-[var(--color-text-muted)]">Stub out stale file reads, terminal output, and search results to free context space.</div>
+                  </div>
+                  <input
+                    type="checkbox"
+                    checked={agentSettingsStore.settings.contextPruningEnabled ?? true}
+                    onchange={() => toggleSetting("contextPruningEnabled")}
+                    class="mt-1 h-4 w-4 rounded border-[var(--color-border)] bg-[var(--color-surface-0)] text-[var(--color-accent)] focus:ring-[var(--color-accent)]"
+                  />
+                </label>
+
+                <label class="flex h-full cursor-pointer items-start justify-between gap-4 rounded-xl bg-[var(--color-surface-2)] p-4 hover:bg-[var(--color-surface-3)]">
+                  <div>
+                    <div class="text-sm font-medium text-[var(--color-text-primary)]">Agent Context Awareness</div>
+                    <div class="mt-1 text-xs text-[var(--color-text-muted)]">Give the agent a live report of its window usage so it prunes or compacts on its own.</div>
+                  </div>
+                  <input
+                    type="checkbox"
+                    checked={agentSettingsStore.settings.contextSelfAwareness ?? true}
+                    onchange={() => toggleSetting("contextSelfAwareness")}
+                    class="mt-1 h-4 w-4 rounded border-[var(--color-border)] bg-[var(--color-surface-0)] text-[var(--color-accent)] focus:ring-[var(--color-accent)]"
+                  />
+                </label>
+
+                <div class="rounded-xl bg-[var(--color-surface-2)] p-4">
+                  <label for="ctx-keep-turns" class="mb-2 block text-xs text-[var(--color-text-muted)]">Keep Recent Turns Full</label>
+                  <input
+                    id="ctx-keep-turns"
+                    type="number"
+                    min="1"
+                    max="10"
+                    value={agentSettingsStore.settings.contextKeepRecentTurns ?? 3}
+                    onchange={(e) => agentSettingsStore.saveSettings({ contextKeepRecentTurns: parseInt(e.currentTarget.value) })}
+                    class="w-full rounded border border-[var(--color-border)] bg-[var(--color-surface-0)] px-3 py-2 text-sm text-[var(--color-text-primary)]"
+                  />
+                  <p class="mt-2 text-[10px] text-[var(--color-text-muted)]">
+                    Tool outputs from this many recent turns are never collapsed.
+                  </p>
+                </div>
+
+                <div class="rounded-xl bg-[var(--color-surface-2)] p-4">
+                  <label for="ctx-min-chars" class="mb-2 block text-xs text-[var(--color-text-muted)]">Minimum Size to Collapse</label>
+                  <input
+                    id="ctx-min-chars"
+                    type="number"
+                    min="100"
+                    max="10000"
+                    step="100"
+                    value={agentSettingsStore.settings.contextPruneMinChars ?? 600}
+                    onchange={(e) => agentSettingsStore.saveSettings({ contextPruneMinChars: parseInt(e.currentTarget.value) })}
+                    class="w-full rounded border border-[var(--color-border)] bg-[var(--color-surface-0)] px-3 py-2 text-sm text-[var(--color-text-primary)]"
+                  />
+                  <p class="mt-2 text-[10px] text-[var(--color-text-muted)]">
+                    Outputs smaller than this (characters) stay in context — not worth collapsing.
+                  </p>
+                </div>
+              </div>
+            </section>
           </div>
 
           <div class="space-y-6">

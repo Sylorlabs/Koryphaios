@@ -24,10 +24,12 @@
     FilePlus,
     GitMerge,
     MoveRight,
-    FileCode
+    FileCode,
+    Bot
   } from 'lucide-svelte';
   import { fly, fade } from 'svelte/transition';
   import { wsStore } from '$lib/stores/websocket.svelte';
+  import { sessionStore } from '$lib/stores/sessions.svelte';
   import AnimatedStatusIcon from './AnimatedStatusIcon.svelte';
   import ThinkingBlock from './ThinkingBlock.svelte';
   import { marked } from 'marked';
@@ -158,6 +160,34 @@
   let zoomedImage = $state<string | null>(null);
   let renderedNotes = $state<Record<string, Note | null>>({});
   const pendingNoteRenders = new Set<string>();
+
+  // Archive id set by the backend for tool outputs — enables the three
+  // visibility modes (hide-from-agent / hide-from-me / delete).
+  let archiveId = $derived(
+    ((entry.metadata as { toolResult?: { archiveId?: string } } | undefined)?.toolResult
+      ?.archiveId) ?? null,
+  );
+
+  async function setAgentHidden(e: MouseEvent, hidden: boolean) {
+    e.stopPropagation();
+    if (!archiveId) return;
+    const sid = sessionStore.activeSessionId;
+    if (!sid) return;
+    try {
+      await apiFetch(apiUrl(`/api/sessions/${sid}/context/${archiveId}/visibility`), {
+        method: 'POST',
+        body: JSON.stringify({ hiddenFromAgent: hidden }),
+      });
+      wsStore.setEntryVisibility(entry.id, { agentHidden: hidden });
+    } catch (err) {
+      console.error('Failed to update agent context visibility:', err);
+    }
+  }
+
+  function toggleUserHidden(e: MouseEvent) {
+    e.stopPropagation();
+    wsStore.setEntryVisibility(entry.id, { userHidden: !entry.userHidden });
+  }
 
   async function copyToClipboard() {
     try {
@@ -387,6 +417,18 @@
   in:fly={{ y: 20, duration: (Date.now() - entry.timestamp < 5000) ? 300 : 0 }}
   style="content-visibility: auto; contain-intrinsic-size: 80px;"
 >
+  {#if entry.userHidden}
+    <button
+      type="button"
+      class="flex items-center gap-2 py-1 px-[var(--space-md)] -mx-[var(--space-md)] rounded text-[11px] opacity-40 hover:opacity-80 transition-opacity text-left"
+      style="color: var(--color-text-muted);"
+      onclick={toggleUserHidden}
+      title="Hidden from your view — click to show (agent still has it unless also hidden from agent)"
+    >
+      <EyeOff size={11} />
+      <span class="truncate">Hidden — {entry.type.replace('_', ' ')} (click to show)</span>
+    </button>
+  {:else}
   <div
     class="flex items-start gap-[var(--space-md)] py-[var(--space-sm)] text-sm leading-relaxed rounded px-[var(--space-md)] -mx-[var(--space-md)] transition-all cursor-default
            {isSelected ? 'bg-[var(--color-accent)]/10 ring-1 ring-[var(--color-accent)]/30' : 'hover:bg-surface-2/30'}"
@@ -395,7 +437,7 @@
     role="row"
     tabindex="0"
   >
-    <span class="text-xs text-text-muted shrink-0 w-16 leading-6 tabular-nums pt-0.5">
+    <span class="text-xs text-text-muted shrink-0 w-16 leading-6 tabular-nums">
       {new Date(entry.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
     </span>
 
@@ -413,16 +455,26 @@
       </div>
     {:else}
       <div
-        class="shrink-0 flex items-center justify-center w-5 h-6 pt-1"
+        class="shrink-0 flex items-center justify-center w-5 h-6"
       >
         <AnimatedStatusIcon status={getStatusForType(entry.type, entry.metadata)} size={14} isManager={entry.agentId === 'kory-manager'} />
       </div>
     {/if}
 
     <div class="flex-1 min-w-0 {entry.type === 'content' ? 'markdown-content' : ''}">
-      <span class="text-xs font-semibold tracking-wide {entry.glowClass === 'glow-kory' ? 'text-yellow-400' : entry.type === 'user_message' ? 'text-accent' : 'text-text-secondary'}">
-        {entry.agentName}
-      </span>
+      {#if entry.agentHidden}
+        <span class="inline-flex items-center gap-1 mr-2 px-1.5 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider bg-amber-400/10 text-amber-400" title="This is stubbed out of the agent's context (recoverable via fetch_context)">
+          <Bot size={9} /> hidden from agent
+        </span>
+      {/if}
+      <!-- The agent name only appears when the agent is actually saying
+           something — tool calls, results, and reasoning stay unlabeled to
+           keep the feed compact. -->
+      {#if entry.type === 'user_message' || entry.type === 'content' || entry.type === 'thought' || entry.type === 'error'}
+        <span class="text-xs font-semibold tracking-wide {entry.glowClass === 'glow-kory' ? 'text-yellow-400' : entry.type === 'user_message' ? 'text-accent' : 'text-text-secondary'}">
+          {entry.agentName}
+        </span>
+      {/if}
       {#if entry.type === 'thinking'}
           <ThinkingBlock 
             text={entry.text} 
@@ -578,20 +630,42 @@
             {entry.text}
           </div>
       {/if}
-      {#if isStreaming}
-        <span class="inline-block w-2 h-4 bg-accent ml-0.5 animate-pulse" aria-hidden="true"></span>
+      {#if isStreaming && entry.type === 'content'}
+        <span class="flow-cursor" aria-hidden="true"></span>
       {/if}
     </div>
 
-    <button
-      class="shrink-0 p-1.5 rounded opacity-0 group-hover:opacity-60 hover:!opacity-100 transition-opacity flex items-center justify-center"
-      style="color: var(--color-text-muted);"
-      onclick={(e) => { e.stopPropagation(); onDelete(e); }}
-      title="Delete message"
-    >
-      <Trash2 size={14} />
-    </button>
+    <div class="shrink-0 flex items-center gap-0.5 opacity-0 group-hover:opacity-60 hover:!opacity-100 transition-opacity">
+      {#if archiveId}
+        <button
+          class="p-1.5 rounded flex items-center justify-center hover:bg-[var(--color-surface-3)] {entry.agentHidden ? 'text-amber-400' : ''}"
+          style={entry.agentHidden ? '' : 'color: var(--color-text-muted);'}
+          onclick={(e) => setAgentHidden(e, !entry.agentHidden)}
+          title={entry.agentHidden ? 'Hidden from agent — click to restore to its context' : 'Hide from agent (frees its context; you still see it)'}
+        >
+          <Bot size={14} />
+        </button>
+      {/if}
+      <button
+        class="p-1.5 rounded flex items-center justify-center hover:bg-[var(--color-surface-3)]"
+        style="color: var(--color-text-muted);"
+        onclick={toggleUserHidden}
+        title="Hide from my view (agent keeps it)"
+      >
+        <EyeOff size={14} />
+      </button>
+      <button
+        class="p-1.5 rounded flex items-center justify-center hover:bg-[var(--color-surface-3)]"
+        style="color: var(--color-text-muted);"
+        onclick={(e) => { e.stopPropagation(); if (archiveId) void setAgentHidden(e, true); onDelete(e); }}
+        title="Delete (removes from view and from agent context)"
+      >
+        <Trash2 size={14} />
+      </button>
+    </div>
   </div>
+
+  {/if}
 
   {#if entry.type === 'tool_group' && isExpanded}
     <div class="ml-20 border-l-2 border-[var(--color-border)] pl-4 py-2 space-y-2 my-1" transition:fly={{ y: -10, duration: 200 }}>
@@ -634,3 +708,35 @@
     </div>
   </div>
 {/if}
+
+<style>
+  /* Streaming cursor: a soft gradient that flows left-to-right, reading as
+     text "pouring in". Rendered only while tokens are actually arriving. */
+  .flow-cursor {
+    display: inline-block;
+    width: 28px;
+    height: 0.9em;
+    margin-left: 4px;
+    vertical-align: text-bottom;
+    border-radius: 999px;
+    background: linear-gradient(
+      90deg,
+      transparent 0%,
+      var(--color-accent) 45%,
+      transparent 90%
+    );
+    background-size: 200% 100%;
+    opacity: 0.7;
+    animation: flow-in 1.1s ease-in-out infinite;
+  }
+
+  @keyframes flow-in {
+    0% { background-position: 120% 0; opacity: 0.25; }
+    50% { background-position: 0% 0; opacity: 0.8; }
+    100% { background-position: -120% 0; opacity: 0.25; }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .flow-cursor { animation: none; }
+  }
+</style>

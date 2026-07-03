@@ -263,8 +263,10 @@ export class AntigravityProvider implements Provider {
       logPath,
     ];
 
+    // Run in the session's project directory when one is set so the CLI sees
+    // the real workspace; fall back to a neutral temp dir otherwise.
     const child = spawn(bin, args, {
-      cwd: tmpdir(),
+      cwd: request.workingDirectory?.trim() || tmpdir(),
       stdio: ['ignore', 'pipe', 'pipe'],
       env: { ...process.env },
     });
@@ -372,9 +374,16 @@ function* chunkText(text: string): Generator<ProviderEvent> {
   if (buf) yield { type: 'content_delta', content: buf };
 }
 
+// The agy CLI has no flag to disable native subagent/delegation behavior, so the
+// only lever is the prompt: delegation belongs to the Koryphaios layer.
+const HARNESS_SYSTEM_NOTE =
+  'You are running inside the Koryphaios orchestrator. Never spawn subagents or delegate ' +
+  'to other agents yourself; if work should be parallelized or delegated, say so in your ' +
+  'response and Koryphaios will dispatch its own worker agents.';
+
 function buildPrompt(systemPrompt: string | undefined, messages: ProviderMessage[]): string {
   const lines: string[] = [];
-  if (systemPrompt?.trim()) lines.push(systemPrompt.trim(), '');
+  lines.push(systemPrompt?.trim() ? `${systemPrompt.trim()}\n\n${HARNESS_SYSTEM_NOTE}` : HARNESS_SYSTEM_NOTE, '');
   const turns = messages.filter((m) => m.role !== 'system');
 
   if (turns.length === 1 && turns[0].role === 'user' && lines.length === 0) {

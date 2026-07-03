@@ -207,6 +207,24 @@ function handleMessage(msg: WSMessage) {
       break;
     }
 
+    case 'system.info': {
+      // Cancel notification → live stop marker as plain system text, not a
+      // Kory message. The backend persists a matching system row for reloads.
+      const info = msg.payload as { message?: string };
+      if (isForActiveSession && info?.message === 'Session cancelled') {
+        feedStore.removeAnalyzingThoughtEntries();
+        feedStore.addFeedEntry({
+          timestamp: msg.timestamp,
+          type: 'system',
+          agentId: 'system',
+          agentName: '',
+          glowClass: '',
+          text: 'Stopped by user.',
+        });
+      }
+      break;
+    }
+
     case 'agent.completed':
     case 'stream.complete': {
       const p = msg.payload as { agentId: string };
@@ -1024,6 +1042,7 @@ export const wsStore = {
   loadAgentThreadMessages: agentStore.loadAgentThreadMessages,
   getAgentThreadFeed: agentStore.getAgentThreadFeed,
   removeEntries: feedStore.removeEntries,
+  setEntryVisibility: feedStore.setEntryVisibility,
   respondToPermission,
   subscribeToSession,
   clearFeed,

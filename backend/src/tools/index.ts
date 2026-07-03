@@ -23,4 +23,5 @@ export { WebSearchTool, WebFetchTool } from './web';
 export { AskUserTool, AskManagerTool, DelegateToWorkerTool } from './interaction';
 export { DelegateToJulesTool } from './jules';
 export { MCPDetectErrorsTool, MCPAnalyzeErrorTool, MCPSuggestFixesTool } from './mcp';
+export { FetchContextTool, PruneContextTool } from './context';
 export { registerGitTools } from './git';

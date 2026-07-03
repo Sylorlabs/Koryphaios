@@ -174,6 +174,17 @@ function addClientError(text: string) {
   });
 }
 
+/** Toggle entry visibility flags (user-hide is UI-only; agent-hide is set after the API call). */
+function setEntryVisibility(id: string, patch: { userHidden?: boolean; agentHidden?: boolean }) {
+  const entry = feed.find((e) => e.id === id);
+  if (!entry) return;
+  if (patch.userHidden !== undefined) entry.userHidden = patch.userHidden;
+  if (patch.agentHidden !== undefined) entry.agentHidden = patch.agentHidden;
+  feed = [...feed];
+  feedVersion++;
+  rebuildGroupedFeedCache();
+}
+
 function removeEntries(ids: Set<string>) {
   if (ids.size === 0) return;
   feed = feed.filter((e) => !ids.has(e.id));
@@ -295,10 +306,16 @@ async function loadSessionMessages(
     return {
       id: `hist-${m.id}`,
       timestamp: m.createdAt,
-      type: m.role === 'user' ? ('user_message' as const) : ('content' as const),
-      agentId: m.role === 'user' ? 'user' : 'kory-manager',
-      agentName: m.role === 'user' ? 'You' : 'Kory',
-      glowClass: m.role === 'user' ? '' : 'glow-kory',
+      // System rows are plain markers ("Stopped by user.") — not Kory speech.
+      type:
+        m.role === 'user'
+          ? ('user_message' as const)
+          : m.role === 'system'
+            ? ('system' as const)
+            : ('content' as const),
+      agentId: m.role === 'user' ? 'user' : m.role === 'system' ? 'system' : 'kory-manager',
+      agentName: m.role === 'user' ? 'You' : m.role === 'system' ? '' : 'Kory',
+      glowClass: m.role === 'user' || m.role === 'system' ? '' : 'glow-kory',
       text: m.content,
       metadata: { sessionId, model: m.model, cost: m.cost },
       ghostHash: ghost?.hash,
@@ -330,6 +347,7 @@ export const feedStore = {
   removeAnalyzingThoughtEntries,
   addClientError,
   removeEntries,
+  setEntryVisibility,
   removeContentEntriesForAgent,
   clearFeed,
   loadSessionMessages,

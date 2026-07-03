@@ -100,6 +100,17 @@ export const sessionRoutes = new Elysia({ prefix: '/api/sessions' })
     });
     return { ok: true, message: 'Session cancelled' };
   })
+  .post('/:id/context/:archiveId/visibility', async ({ request, params: { id, archiveId }, body, set }) => {
+    if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
+    // User-driven "hide from agent": stubs this entry out of the model's
+    // context on the next turn. Content stays archived and recoverable.
+    const { getContextArchive } = await import('../../kory/context-archive');
+    const archive = getContextArchive();
+    if (!archive) return { ok: false, error: 'Context archive unavailable' };
+    const hidden = (body as { hiddenFromAgent?: boolean } | undefined)?.hiddenFromAgent === true;
+    const changed = await archive.setPrunedForAgent(id, archiveId, hidden);
+    return changed ? { ok: true } : { ok: false, error: 'Unknown archive entry' };
+  })
   .post(
     '/:id/rewind',
     async ({ request, params: { id }, body, set }) => {

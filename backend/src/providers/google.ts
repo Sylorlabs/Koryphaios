@@ -210,6 +210,16 @@ export class GoogleProvider implements Provider {
       }
 
       for await (const chunk of response) {
+        // Gemini reports usage per chunk; promptTokenCount already includes any
+        // cached content, so no separate tokensCache is emitted.
+        const meta = chunk.usageMetadata;
+        if (meta?.promptTokenCount || meta?.candidatesTokenCount) {
+          yield {
+            type: 'usage_update',
+            tokensIn: meta.promptTokenCount ?? 0,
+            tokensOut: (meta.candidatesTokenCount ?? 0) + (meta.thoughtsTokenCount ?? 0),
+          };
+        }
         const candidate = chunk.candidates?.[0];
         if (!candidate?.content?.parts) continue;
         for (const part of candidate.content.parts) {

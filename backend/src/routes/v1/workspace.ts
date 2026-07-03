@@ -1,4 +1,5 @@
 import { Elysia } from 'elysia';
+import { homedir } from 'node:os';
 import { requireLocalRouteAuth } from '../../auth/local-route-auth';
 import { PROJECT_ROOT } from '../../runtime/paths';
 
@@ -39,4 +40,9 @@ export const workspaceRoutes = new Elysia({ prefix: '/api/workspace' }).get(
     files.sort((a, b) => a.localeCompare(b));
     return { ok: true, data: files };
   },
-);
+).get('/home', ({ request, set }) => {
+  // Used by the no-project prompt: lets the user run a quick task scoped to
+  // their home folder instead of being forced to open a project.
+  if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
+  return { ok: true, data: homedir() };
+});

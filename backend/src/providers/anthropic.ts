@@ -299,10 +299,15 @@ export class AnthropicProvider implements Provider {
               type: 'usage_update',
               tokensIn: usage.input_tokens,
               tokensOut: usage.output_tokens,
-              // Anthropic reports cache reads in usage.cache_read_input_tokens
-              tokensCache: (usage as unknown as Record<string, unknown>).cache_read_input_tokens as
-                | number
-                | undefined,
+              // Anthropic's input_tokens EXCLUDES cached prompt tokens — report
+              // cache reads + writes separately so context occupancy is real.
+              tokensCache:
+                (((usage as unknown as Record<string, unknown>).cache_read_input_tokens as
+                  | number
+                  | undefined) ?? 0) +
+                (((usage as unknown as Record<string, unknown>).cache_creation_input_tokens as
+                  | number
+                  | undefined) ?? 0),
             };
             break;
           }

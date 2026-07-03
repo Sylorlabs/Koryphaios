@@ -466,6 +466,19 @@ const ALLOWED_TOOLS = [
   'WebSearch',
 ].join(',');
 
+// Hard-block the CLI's native delegation/orchestration tools. Sub-agents are
+// Koryphaios's job (manager → workers → critic); if the CLI spawned its own
+// Task/Agent sub-agents they'd bypass routing, the critic gate, and the UI.
+// (--allowedTools only pre-approves — it does not block unlisted tools.)
+const DISALLOWED_TOOLS = ['Task', 'Agent'].join(',');
+
+// Appended to every system prompt so the model routes delegation through
+// Koryphaios instead of trying its (blocked) native sub-agent tools.
+const HARNESS_SYSTEM_NOTE =
+  'You are running inside the Koryphaios orchestrator. Never spawn sub-agents or delegate ' +
+  'with native Task/Agent tools (they are disabled); if work should be parallelized or ' +
+  'delegated, say so in your response and Koryphaios will dispatch its own worker agents.';
+
 interface ClaudeToolUseBlock {
   type: string; // 'text' | 'tool_use' | 'tool_result'
   text?: string;
@@ -585,10 +598,15 @@ export class ClaudeCodeProvider implements Provider {
       'acceptEdits',
       '--allowedTools',
       ALLOWED_TOOLS,
+      '--disallowedTools',
+      DISALLOWED_TOOLS,
     ];
-    if (request.systemPrompt?.trim()) {
-      args.push('--append-system-prompt', request.systemPrompt);
-    }
+    args.push(
+      '--append-system-prompt',
+      request.systemPrompt?.trim()
+        ? `${request.systemPrompt}\n\n${HARNESS_SYSTEM_NOTE}`
+        : HARNESS_SYSTEM_NOTE,
+    );
 
     // Run in the project directory so the CLI edits the real files (falls back to cwd).
     const cwd = request.workingDirectory?.trim() || process.cwd();
@@ -739,7 +757,9 @@ export class ClaudeCodeProvider implements Provider {
             type: 'usage_update',
             tokensIn: u.input_tokens,
             tokensOut: u.output_tokens,
-            tokensCache: u.cache_read_input_tokens,
+            // Cached prompt tokens (read + written) still occupy the context
+            // window — without them the context bar reads near-zero.
+            tokensCache: (u.cache_read_input_tokens ?? 0) + (u.cache_creation_input_tokens ?? 0),
           };
         }
         return;
@@ -788,7 +808,9 @@ export class ClaudeCodeProvider implements Provider {
             type: 'usage_update',
             tokensIn: envelope.usage.input_tokens,
             tokensOut: envelope.usage.output_tokens,
-            tokensCache: envelope.usage.cache_read_input_tokens,
+            tokensCache:
+              (envelope.usage.cache_read_input_tokens ?? 0) +
+              (envelope.usage.cache_creation_input_tokens ?? 0),
           };
         }
         if (envelope.is_error) {

@@ -77,6 +77,18 @@ export interface AgentSettings {
   /** Experimental: Multi-source research requirements */
   multiSourceResearch: boolean;
 
+  /** Context management: auto-stub stale tool outputs (recoverable via fetch_context). */
+  contextPruningEnabled: boolean;
+
+  /** Turns whose tool outputs stay full before auto-stubbing kicks in. */
+  contextKeepRecentTurns: number;
+
+  /** Minimum tool-output size (chars) worth stubbing — tiny outputs are kept. */
+  contextPruneMinChars: number;
+
+  /** Give the agent a live context-usage report each turn so it can decide to prune/compact on its own. */
+  contextSelfAwareness: boolean;
+
   /** Timestamp of last update for synchronization */
   updatedAt?: number;
 }
@@ -97,6 +109,10 @@ export const DEFAULT_AGENT_SETTINGS: AgentSettings = {
   approvalThresholdLines: 100,
   localWebSearch: 'fallback',
   multiSourceResearch: true,
+  contextPruningEnabled: true,
+  contextKeepRecentTurns: 3,
+  contextPruneMinChars: 600,
+  contextSelfAwareness: true,
 };
 
 // Helper to load koryphaios.json

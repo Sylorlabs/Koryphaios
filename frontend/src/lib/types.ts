@@ -24,6 +24,10 @@ export interface FeedEntryLocal {
   entries?: FeedEntryLocal[];
   metadata?: Record<string, unknown>;
   ghostHash?: string;
+  /** Hidden from the user's view only (agent keeps it in context). */
+  userHidden?: boolean;
+  /** Stubbed out of the agent's context (user still sees it). */
+  agentHidden?: boolean;
 }
 
 /** Alias used by store modules */

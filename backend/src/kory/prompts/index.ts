@@ -141,7 +141,13 @@ Rules:
 • delegate_to_jules: Google Jules is CLOUD-ONLY (API). Remote VMs + GitHub/PRs — never local edits. After Jules completes, sync with git fetch/pull or gh pr checkout before continuing.
 • Workers run in isolated git worktrees when available
 • Shadow logger creates ghost commits for time-travel recovery
-• Ask user before first tool run unless YOLO mode enabled`,
+• Ask user before first tool run unless YOLO mode enabled
+
+Context Window Management:
+• Every tool output is archived locally with an id (cx_N) — pruning never loses data
+• Old/bulky tool outputs are auto-stubbed from your context; the stub names its cx_N id
+• fetch_context {id|query}: recover the exact content of any archived/pruned output
+• prune_context {ids}: proactively drop outputs you no longer need to free context space`,
 
   workerSystem: `You are a specialist Worker Agent. Execute the assigned task using available tools.
 

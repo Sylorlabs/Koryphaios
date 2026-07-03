@@ -27,21 +27,30 @@
   // svelte-ignore state_referenced_locally
   let anchor = performance.now() - (durationMs ?? 0);
   let frozenMs = $state<number | null>(null);
-  let sawMount = false;
+  // Only genuine growth counts — Svelte store reassignments can re-trigger the
+  // effect with the same text, which must not restart the stopwatch.
+  // Deliberately captures the INITIAL length; growth is tracked in the effect.
+  // svelte-ignore state_referenced_locally
+  let lastSeenLength = text.length;
 
   $effect(() => {
-    void text.length;
-    if (!sawMount) {
-      // First run is the mount itself, not a streamed token.
-      sawMount = true;
-      return;
-    }
+    const len = text.length;
+    if (len <= lastSeenLength) return;
+    lastSeenLength = len;
     lastGrowthAt = performance.now();
     if (frozenMs !== null) {
       // Tokens resumed after a stall — re-anchor so elapsed continues from
       // where the stopwatch froze instead of jumping.
       anchor = performance.now() - frozenMs;
       frozenMs = null;
+    }
+  });
+
+  // A server-computed duration arriving mid-flight means the block is done —
+  // freeze immediately instead of waiting out the stall window.
+  $effect(() => {
+    if (durationMs && durationMs > 0 && frozenMs === null && performance.now() - lastGrowthAt >= STALL_MS) {
+      frozenMs = durationMs;
     }
   });
 
@@ -52,7 +61,9 @@
     const timer = setInterval(() => {
       now = performance.now();
       if (performance.now() - lastGrowthAt >= STALL_MS) {
-        frozenMs = performance.now() - anchor - STALL_MS;
+        // Freeze at the moment tokens stopped, not at detection time, so the
+        // number never visibly jumps when the stopwatch stops.
+        frozenMs = Math.max(0, lastGrowthAt - anchor);
       }
     }, TICK_MS);
     return () => clearInterval(timer);
@@ -60,8 +71,9 @@
 
   let displayMs = $derived.by(() => {
     if (isLive) return Math.max(0, now - anchor);
-    // Frozen: prefer the server-computed duration when it's sane, else the
-    // client-side measurement.
+    // Frozen: keep the client-observed value if we watched it tick (so the
+    // display never jumps down); fall back to the server duration.
+    if (frozenMs !== null && frozenMs > 0) return frozenMs;
     if (durationMs && durationMs > 0) return durationMs;
     return frozenMs ?? 0;
   });

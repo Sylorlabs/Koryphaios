@@ -35,6 +35,7 @@ import { JULES_SYNC_INSTRUCTIONS, getProviderDisplay } from '../providers/provid
 import { ToolRegistry, type ToolCallInput, type ToolContext, type ToolCallOutput } from '../tools';
 import { wsBroker } from '../pubsub';
 import { koryLog } from '../logger';
+import { initContextArchive, getContextArchive } from './context-archive';
 import { nanoid } from 'nanoid';
 import { sanitizeForPrompt } from '../security';
 import {
@@ -225,6 +226,7 @@ export class KoryManager {
     mkdirSync(this.memoryDir, { recursive: true });
     this.snapshotManager = new SnapshotManager(workingDirectory);
     this.git = new GitManager(workingDirectory);
+    initContextArchive(workingDirectory);
 
     // Initialize WorkspaceManager if git is available
     try {
@@ -925,6 +927,9 @@ export class KoryManager {
         }
         turnCount++;
         koryLog.debug({ turnCount }, 'Starting manager turn');
+        // Reclaim context: stub out tool outputs the user hid from the agent
+        // or that are old enough to be dead weight (recoverable via fetch_context).
+        await this.applyContextPruning(sessionId, messages, turnCount);
         let result: LLMTurnResult;
         try {
           result = await this.processManagerTurn(
@@ -992,19 +997,30 @@ export class KoryManager {
               break;
             }
             const toolResult = await this.executeManagerToolCall(sessionId, tc, managerCtx);
+            // Archive the full output locally so pruning never loses anything —
+            // fetch_context can recover the exact content by this id.
+            const archiveId = await this.archiveToolResult(sessionId, tc, toolResult);
             this.emitWSMessage(sessionId, 'stream.tool_result', {
               agentId: KORY_IDENTITY.id,
-              toolResult,
+              toolResult: archiveId ? { ...toolResult, archiveId } : toolResult,
             });
             executedAnyTool = true;
-            messages.push({
+            const toolMsg: InternalMessage = {
               role: 'tool',
               content: JSON.stringify(toolResult),
               tool_call_id: tc.id,
-            });
+            };
+            if (archiveId)
+
+              Object.assign(toolMsg, { archiveId, archiveTurn: turnCount });
+            messages.push(toolMsg);
           }
         }
       }
+
+      // A stop that lands between turns (or breaks out of the stream loop)
+      // must still be reported as user-stopped, not a normal completion.
+      if (abort.signal.aborted) stoppedByUser = true;
 
       const assistants = messages.filter((m) => m.role === 'assistant');
       koryLog.debug(
@@ -1027,12 +1043,15 @@ export class KoryManager {
         });
       }
 
+      // Stopping must never erase work: persist whatever the model produced
+      // as Kory's message, and record the stop as a separate system marker so
+      // it renders as plain text — not as something Kory said.
       const toPersist = stoppedByUser
-        ? '[Stopped by user.]'
+        ? content
         : content || (emptyResponse ? EMPTY_NOTICE : '[Task completed using tools.]');
       koryLog.debug({ toPersist, sessionId }, 'Attempting to persist assistant message');
       let finalMessageId: string | undefined;
-      if (this.messages) {
+      if (this.messages && toPersist) {
         finalMessageId = nanoid(12);
         await this.messages.add(sessionId, {
           id: finalMessageId,
@@ -1044,6 +1063,17 @@ export class KoryManager {
           createdAt: Date.now(),
         });
         koryLog.debug('Assistant message persisted');
+      }
+      if (this.messages && stoppedByUser) {
+        await this.messages.add(sessionId, {
+          id: nanoid(12),
+          sessionId,
+          role: 'system',
+          content: 'Stopped by user.',
+          model: routing.model,
+          provider: providerName,
+          createdAt: Date.now(),
+        });
       }
       this.emitWSMessage(sessionId, 'agent.status', { agentId: KORY_IDENTITY.id, status: 'done' });
 
@@ -1197,6 +1227,44 @@ export class KoryManager {
       chat: Math.ceil(estimateProviderMessagesChars(providerMessages) / 4),
     };
 
+    // Context self-awareness: tell the model what its window looks like and
+    // what's prunable, so it can decide on its own to free space or compact.
+    if (settings.contextSelfAwareness !== false) {
+      const k = (n: number) => `${(n / 1000).toFixed(1)}k`;
+      const estTokens =
+        contextBreakdown.system +
+        contextBreakdown.memory +
+        contextBreakdown.tools +
+        contextBreakdown.chat;
+      const win = resolveTrustedContextWindow(modelId, provider.name);
+      const pct = win.contextWindow ? Math.round((estTokens / win.contextWindow) * 100) : null;
+      const bulky = messages
+        .filter(
+          (m): m is InternalMessage & { archiveId: string; content: string } =>
+            m.role === 'tool' &&
+            typeof (m as { archiveId?: string }).archiveId === 'string' &&
+            !(m as { pruneApplied?: boolean }).pruneApplied &&
+            typeof m.content === 'string' &&
+            m.content.length > 400,
+        )
+        .map((m) => ({ id: m.archiveId, tok: Math.ceil(m.content.length / 4) }))
+        .sort((a, b) => b.tok - a.tok)
+        .slice(0, 5);
+      systemPrompt +=
+        `
+
+[CONTEXT STATUS] ~${k(estTokens)} tokens in your context` +
+        (pct !== null ? ` (~${pct}% of a ${k(win.contextWindow!)} window)` : '') +
+        ` — system ${k(contextBreakdown.system)}, memory ${k(contextBreakdown.memory)}, tools ${k(contextBreakdown.tools)}, chat/tool-results ${k(contextBreakdown.chat)}.` +
+        (bulky.length
+          ? ` Largest prunable tool outputs: ${bulky.map((b) => `${b.id} (~${k(b.tok)})`).join(', ')}.`
+          : '') +
+        ` You own this window: use prune_context to drop outputs you no longer need (recoverable via fetch_context)` +
+        (pct !== null && pct >= 70
+          ? `. Your context is getting full — prune stale outputs now before continuing.`
+          : `.`);
+    }
+
     const streamSignal = withTimeoutSignal(signal, AGENT.LLM_STREAM_TIMEOUT_MS);
     const stream = this.providers.executeWithRetry(
       {
@@ -1220,8 +1288,12 @@ export class KoryManager {
     let tokensIn = 0;
     let tokensOut = 0;
 
+    try {
     for await (const event of stream) {
-      if (signal?.aborted) throw new DOMException('Manager run aborted', 'AbortError');
+      // On user stop, keep everything accumulated so far — breaking (instead of
+      // throwing) lets the partial response flow into `messages` and get
+      // persisted. Throwing here erased the user's proof-of-work on Stop.
+      if (signal?.aborted) break;
       if (event.type === 'error') {
         throw new Error(event.error ?? 'LLM stream error');
       }
@@ -1249,20 +1321,36 @@ export class KoryManager {
         // diff preview (it's done, not a tool for us to execute).
         if (event.filePath) {
           this.streamAgentFileEdit(ctx, event.filePath, event.fileContent ?? '', event.fileOperation ?? 'edit', event.fileOldContent);
+          // Archive the edit so fetch_context can recall exactly what was written.
+          await getContextArchive()?.record(
+            sessionId,
+            'file_edit',
+            `${event.fileOperation ?? 'edit'} ${event.filePath}`,
+            event.fileContent ?? '',
+          );
         }
       } else if (event.type === 'tool_executed') {
         // Agentic provider already ran a non-file tool — surface it in the tool feed.
         const callId = `agent-${nanoid(8)}`;
+        const agenticArchiveId = await getContextArchive()?.record(
+          sessionId,
+          'tool_result',
+          `${event.toolName ?? 'tool'} ${(event.toolInput ?? '').slice(0, 140)}`,
+          event.toolOutput ?? '',
+        );
         this.emitWSMessage(sessionId, 'stream.tool_call', {
           agentId: KORY_IDENTITY.id,
           toolCall: { id: callId, name: event.toolName ?? 'tool', input: safeParseJson(event.toolInput) },
         });
         this.emitWSMessage(sessionId, 'stream.tool_result', {
           agentId: KORY_IDENTITY.id,
-          toolResult: { callId, name: event.toolName ?? 'tool', output: event.toolOutput ?? '', isError: event.isError === true, durationMs: 0 },
+          toolResult: { callId, name: event.toolName ?? 'tool', output: event.toolOutput ?? '', isError: event.isError === true, durationMs: 0, ...(agenticArchiveId ? { archiveId: agenticArchiveId } : {}) },
         });
       } else if (event.type === 'usage_update') {
-        if (typeof event.tokensIn === 'number') tokensIn = Math.max(tokensIn, event.tokensIn);
+        // Cached prompt tokens still occupy the context window — fold them in
+        // so the context bar reflects real occupancy, not just billed input.
+        if (typeof event.tokensIn === 'number')
+          tokensIn = Math.max(tokensIn, event.tokensIn + (event.tokensCache ?? 0));
         if (typeof event.tokensOut === 'number') tokensOut = Math.max(tokensOut, event.tokensOut);
         this.emitUsageUpdate(
           sessionId,
@@ -1297,6 +1385,13 @@ export class KoryManager {
           pendingToolCalls.delete(event.toolCallId!);
         }
       }
+    }
+    } catch (err) {
+      // Provider streams can throw on abort (fetch AbortError) — salvage the
+      // partial response instead of discarding the turn. Real errors rethrow.
+      const aborted =
+        signal?.aborted || (err instanceof DOMException && err.name === 'AbortError');
+      if (!aborted) throw err;
     }
 
     messages.push({
@@ -1397,6 +1492,84 @@ export class KoryManager {
     }
 
     return null;
+  }
+
+  /** Archive a manager tool result for later recovery via fetch_context. */
+  private async archiveToolResult(
+    sessionId: string,
+    tc: CompletedToolCall,
+    toolResult: ToolCallOutput,
+  ): Promise<string | undefined> {
+    // The context meta-tools manage the archive; archiving them is noise.
+    if (tc.name === 'fetch_context' || tc.name === 'prune_context') return undefined;
+    const archive = getContextArchive();
+    if (!archive) return undefined;
+    try {
+      let inputSummary = '';
+      try {
+        inputSummary = JSON.stringify(tc.input ?? {}).slice(0, 140);
+      } catch {
+        /* unstringifiable input */
+      }
+      return await archive.record(
+        sessionId,
+        tc.name === 'bash' || tc.name === 'shell_manage' ? 'terminal' : 'tool_result',
+        `${tc.name} ${inputSummary}`,
+        toolResult.output ?? '',
+      );
+    } catch {
+      return undefined;
+    }
+  }
+
+  /**
+   * Replace stale/hidden tool outputs in the in-flight message array with tiny
+   * stubs pointing at the archive. Frees the context window without losing
+   * anything — the agent (or user) can always recover via fetch_context.
+   */
+  private async applyContextPruning(
+    sessionId: string,
+    messages: InternalMessage[],
+    currentTurn: number,
+  ): Promise<void> {
+    const archive = getContextArchive();
+    if (!archive) return;
+    const { loadAgentSettings } = await import('../agent-settings');
+    const settings = loadAgentSettings(this.workingDirectory);
+    const KEEP_FULL_TURNS = settings.contextKeepRecentTurns ?? 3; // recent turns keep full outputs
+    const MIN_PRUNE_CHARS = settings.contextPruneMinChars ?? 600; // tiny outputs aren't worth stubbing
+    const autoPrune = settings.contextPruningEnabled !== false;
+    for (const m of messages) {
+      const meta = m as InternalMessage & {
+        archiveId?: string;
+        archiveTurn?: number;
+        pruneApplied?: boolean;
+      };
+      if (m.role !== 'tool' || !meta.archiveId || meta.pruneApplied) continue;
+      if (typeof m.content !== 'string') continue;
+      const hiddenByUserOrAgent = await archive.isPrunedForAgent(sessionId, meta.archiveId);
+      const stale =
+        autoPrune &&
+        typeof meta.archiveTurn === 'number' &&
+        currentTurn - meta.archiveTurn > KEEP_FULL_TURNS &&
+        m.content.length > MIN_PRUNE_CHARS;
+      if (!hiddenByUserOrAgent && !stale) continue;
+      const entry = await archive.get(sessionId, meta.archiveId);
+      let original: Record<string, unknown> = {};
+      try {
+        original = JSON.parse(m.content) as Record<string, unknown>;
+      } catch {
+        /* keep empty shell */
+      }
+      m.content = JSON.stringify({
+        callId: original.callId ?? meta.tool_call_id,
+        name: original.name,
+        output: `[Output pruned to save context: ${entry?.label ?? 'tool output'}. Recover the exact content with fetch_context id=${meta.archiveId}]`,
+        isError: false,
+        durationMs: 0,
+      });
+      meta.pruneApplied = true;
+    }
   }
 
   private async executeManagerToolCall(
@@ -1547,7 +1720,8 @@ export class KoryManager {
     if (typeof event.tokensIn === 'number') {
       const usage = this.workers.getUsage(workerId);
       if (usage) {
-        usage.tokensIn = Math.max(usage.tokensIn, event.tokensIn);
+        // Include cached prompt tokens — they occupy the context window.
+        usage.tokensIn = Math.max(usage.tokensIn, event.tokensIn + (event.tokensCache ?? 0));
         if (event.tokensOut !== undefined)
           usage.tokensOut = Math.max(usage.tokensOut, event.tokensOut);
         usage.usageKnown = true;
@@ -1624,10 +1798,14 @@ export class KoryManager {
 
   private async loadHistory(sessionId: string): Promise<InternalMessage[]> {
     return (
-      (await this.messages?.getRecent(sessionId, 10))?.map((m) => ({
-        role: m.role as InternalMessage['role'],
-        content: m.content,
-      })) || []
+      (await this.messages?.getRecent(sessionId, 10))
+        // System rows are UI markers (e.g. "Stopped by user.") — never part of
+        // the conversation sent back to the model.
+        ?.filter((m) => m.role !== 'system')
+        .map((m) => ({
+          role: m.role as InternalMessage['role'],
+          content: m.content,
+        })) || []
     );
   }
 

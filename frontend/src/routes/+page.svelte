@@ -63,6 +63,14 @@
   let currentProjectContent = $state('');
   let composerProjectFiles = $state<string[]>([]);
   let contextBarHover = $state(false);
+  // Set when the user tries to send without a project open — holds the pending
+  // message so it can be dispatched after they pick a project or opt into home.
+  let noProjectPrompt = $state<{
+    message: string;
+    model?: string;
+    reasoningLevel?: string;
+    attachments?: Array<{ type: string; data: string; name: string }>;
+  } | null>(null);
 
   // Segmented context bar: what's occupying the window (system prompt, memory
   // notes, tool defs, chat history). Segment ratios come from the backend's
@@ -801,9 +809,34 @@ RULES:
     }
   }
 
+  async function runPendingInHome() {
+    const pending = noProjectPrompt;
+    if (!pending) return;
+    try {
+      const res = await apiFetch(apiUrl('/api/workspace/home'));
+      const data = await res.json();
+      if (!res.ok || !data.ok || typeof data.data !== 'string') {
+        toastStore.error('Could not resolve your home folder — open a project instead');
+        return;
+      }
+      noProjectPrompt = null;
+      projectStore.setProject(data.data);
+      await sessionStore.fetchSessions();
+      // Always a fresh session — any currently-active session belongs to a
+      // different (now closed) project scope.
+      await sessionStore.createSession();
+      toastStore.warning('Running in your home folder — no project scoping');
+      handleSend(pending.message, pending.model, pending.reasoningLevel, pending.attachments);
+    } catch {
+      toastStore.error('Could not resolve your home folder — open a project instead');
+    }
+  }
+
   function handleSend(message: string, model?: string, reasoningLevel?: string, attachments?: Array<{type: string, data: string, name: string}>) {
     if (!projectStore.currentPath) {
-      toastStore.error('Open a project first to chat with an agent');
+      // Don't hard-block: warn and let the user pick a project, or knowingly
+      // run a quick task scoped to their home folder.
+      noProjectPrompt = { message, model, reasoningLevel, attachments };
       return;
     }
     const configurationWarning = getModelConfigurationWarning(wsStore.providers, model);
@@ -1079,8 +1112,6 @@ RULES:
       slashCommands={composerSlashCommands}
       fileMentions={composerFileMentions}
       onRefreshFileMentions={refreshComposerFileMentions}
-      disabled={!projectStore.currentPath}
-      disabledMessage="Open a project to start chatting with agents"
       placeholder={agentRail.inputPlaceholder}
     />
   {/snippet}
@@ -1090,6 +1121,49 @@ RULES:
 <QuestionDialog />
 <ChangesSummary />
 <ThemePickerModal open={showThemeQuickMenu} onClose={() => showThemeQuickMenu = false} />
+
+{#if noProjectPrompt}
+  <div class="fixed inset-0 z-[90] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
+    <div
+      class="w-full max-w-md rounded-2xl border p-6 shadow-2xl"
+      style="background: var(--color-surface-2); border-color: var(--color-border);"
+      role="alertdialog"
+      aria-label="No project open"
+    >
+      <h3 class="text-base font-semibold mb-2" style="color: var(--color-text-primary);">No project open</h3>
+      <p class="text-sm mb-5 leading-relaxed" style="color: var(--color-text-secondary);">
+        The agent works inside a folder. Choose a project so it runs in the right place —
+        or, for a quick one-off task, run it scoped to your home folder.
+      </p>
+      <div class="flex flex-col gap-2">
+        <button
+          type="button"
+          class="w-full rounded-xl px-4 py-2.5 text-sm font-semibold transition-colors"
+          style="background: var(--color-accent); color: var(--color-surface-0);"
+          onclick={() => { composerDraft = noProjectPrompt?.message ?? ''; noProjectPrompt = null; handleMenuAction('open_project_folder'); }}
+        >
+          Choose Project Folder…
+        </button>
+        <button
+          type="button"
+          class="w-full rounded-xl border px-4 py-2.5 text-sm font-medium transition-colors hover:bg-[var(--color-surface-3)]"
+          style="border-color: var(--color-border); color: var(--color-text-primary);"
+          onclick={runPendingInHome}
+        >
+          Run in Home Folder (~)
+        </button>
+        <button
+          type="button"
+          class="w-full rounded-xl px-4 py-2 text-xs font-medium transition-colors hover:bg-[var(--color-surface-3)]"
+          style="color: var(--color-text-muted);"
+          onclick={() => { composerDraft = noProjectPrompt?.message ?? ''; noProjectPrompt = null; }}
+        >
+          Cancel
+        </button>
+      </div>
+    </div>
+  </div>
+{/if}
 
 <SettingsDrawer open={showSettings} onClose={() => showSettings = false} />
 <CommandPalette bind:open={showCommandPalette} onAction={handleMenuAction} />

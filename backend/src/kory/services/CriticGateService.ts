@@ -103,6 +103,10 @@ export class CriticGateService {
           tools: this.tools.getToolDefsForRole('critic'),
           maxTokens: 2048,
           signal: criticSignal,
+          // Agentic CLI providers resolve relative reads against this — without
+          // it the critic would inspect the backend's cwd, not the project.
+          workingDirectory: this.workingDirectory,
+          sessionId,
         },
         routing.provider,
         this.buildFallbackChain(routing.model),

@@ -96,11 +96,15 @@ export class GrokBuildProvider implements Provider {
       '--output-format',
       'json',
       '--no-alt-screen',
-      // Headless: never block on an interactive tool-approval prompt. The CLI runs in a
-      // neutral temp dir (no repo to act on), so it behaves as a generation endpoint.
+      // Headless: never block on an interactive tool-approval prompt.
       '--always-approve',
+      // Delegation is Koryphaios's job (manager → workers → critic) — never let
+      // the CLI spawn its own native subagents outside our orchestration/UI.
+      '--no-subagents',
+      // Run in the session's project directory when one is set so the CLI sees
+      // the real workspace; fall back to a neutral temp dir otherwise.
       '--cwd',
-      tmpdir(),
+      request.workingDirectory?.trim() || tmpdir(),
     ];
 
     // Only pass --reasoning-effort when the CLI's own metadata says this model
@@ -117,7 +121,7 @@ export class GrokBuildProvider implements Provider {
     }
 
     const child = spawn(bin, args, {
-      cwd: tmpdir(),
+      cwd: request.workingDirectory?.trim() || tmpdir(),
       stdio: ['ignore', 'pipe', 'pipe'],
       env: { ...process.env },
     });
@@ -513,9 +517,16 @@ export function parseGrokOutput(raw: string): {
 }
 
 /** Serialize the conversation into a single prompt for the CLI's print mode. */
+// The CLI's native subagents are disabled via --no-subagents; this note keeps the
+// model from trying (and tells it delegation happens at the Koryphaios layer).
+const HARNESS_SYSTEM_NOTE =
+  'You are running inside the Koryphaios orchestrator. Never spawn subagents or delegate ' +
+  'to other agents yourself (subagents are disabled); if work should be parallelized or ' +
+  'delegated, say so in your response and Koryphaios will dispatch its own worker agents.';
+
 function buildPrompt(systemPrompt: string | undefined, messages: ProviderMessage[]): string {
   const lines: string[] = [];
-  if (systemPrompt?.trim()) lines.push(systemPrompt.trim(), '');
+  lines.push(systemPrompt?.trim() ? `${systemPrompt.trim()}\n\n${HARNESS_SYSTEM_NOTE}` : HARNESS_SYSTEM_NOTE, '');
   const turns = messages.filter((m) => m.role !== 'system');
 
   // Single user turn → send its text verbatim after any system prompt.

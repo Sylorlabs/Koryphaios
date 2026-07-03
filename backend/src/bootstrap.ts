@@ -39,6 +39,8 @@ import {
   MCPDetectErrorsTool,
   MCPAnalyzeErrorTool,
   MCPSuggestFixesTool,
+  FetchContextTool,
+  PruneContextTool,
 } from './tools';
 import { initMCP } from './mcp/client';
 import { serverLog } from './logger';
@@ -168,6 +170,8 @@ async function initTools() {
     new MCPDetectErrorsTool(),
     new MCPAnalyzeErrorTool(),
     new MCPSuggestFixesTool(),
+    new FetchContextTool(),
+    new PruneContextTool(),
   ];
 
   for (const tool of defaultTools) {

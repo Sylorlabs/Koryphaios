@@ -225,9 +225,10 @@ export class OpenAIProvider implements Provider {
           if (chunk.usage) {
             yield {
               type: 'usage_update',
+              // prompt_tokens already includes cached tokens — omit tokensCache
+              // so context occupancy isn't double counted downstream.
               tokensIn: chunk.usage.prompt_tokens,
               tokensOut: chunk.usage.completion_tokens,
-              tokensCache: (chunk.usage as any).prompt_tokens_details?.cached_tokens,
             };
           }
           continue;

@@ -32,7 +32,11 @@ export interface ProviderEvent {
   toolInput?: string;
   tokensIn?: number;
   tokensOut?: number;
-  tokensCache?: number; // Added for caching support
+  // Cached prompt tokens NOT already counted in tokensIn (Anthropic-style
+  // usage, where input_tokens excludes cache reads/writes). Consumers add
+  // tokensIn + tokensCache to get real context occupancy. Providers whose
+  // prompt count already includes cached tokens (OpenAI-style) must omit this.
+  tokensCache?: number;
   finishReason?: 'end_turn' | 'tool_use' | 'max_tokens' | 'stop';
   error?: string;
   // file_edit (agentic providers): a file the agent just created/edited.
