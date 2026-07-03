@@ -40,31 +40,6 @@ export interface WorkspaceConfig {
   copyEnvFiles?: boolean;
 }
 
-export interface TelegramConfig {
-  botToken: string;
-  adminId: number;
-  webhookUrl?: string;
-  secretToken?: string;
-}
-
-export interface DiscordConfig {
-  botToken: string;
-  /** Guild (server) IDs the bot should respond in. Empty = all guilds. */
-  allowedGuildIds?: string[];
-  /** User IDs allowed to use the bot. Empty = all users in allowed guilds. */
-  allowedUserIds?: string[];
-}
-
-export interface SlackConfig {
-  botToken: string;
-  appToken: string;
-  signingSecret?: string;
-  /** Channel IDs the bot should respond in. Empty = all channels. */
-  allowedChannelIds?: string[];
-  /** Slack user IDs allowed to use the bot. Empty = all users. */
-  allowedUserIds?: string[];
-}
-
 export interface ServerConfig {
   port: number;
   host: string;
@@ -127,9 +102,6 @@ export interface KoryphaiosConfig {
    */
   fallbacks?: Record<string, string[]>;
   mcpServers?: Record<string, MCPServerConfig>;
-  telegram?: TelegramConfig;
-  discord?: DiscordConfig;
-  slack?: SlackConfig;
   /** Server infrastructure settings. Deprecated: Use app.config.json instead. */
   server?: ServerConfig;
   contextPaths?: string[];

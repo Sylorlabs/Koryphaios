@@ -84,7 +84,8 @@ describe('trusted context metadata', () => {
     const { resolveTrustedContextWindow, registerLiveModelResolver } = await import('../models');
     registerLiveModelResolver(() => def({ provider: 'codex', contextWindow: 1, contextVerified: true }));
     const resolved = resolveTrustedContextWindow('gpt-5.3-codex', 'codex');
-    expect(resolved.contextWindow).toBeGreaterThan(1024);
+    expect(resolved.contextKnown).toBe(false);
+    expect(resolved.contextWindow).toBeUndefined();
     registerLiveModelResolver(() => undefined);
   });
 });

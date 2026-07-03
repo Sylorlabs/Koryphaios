@@ -36,46 +36,6 @@ const PLUGIN_REGISTRY: Record<string, () => Promise<Plugin>> = {
     },
   }),
 
-  // Optional plugins (loaded on demand)
-  discord: async () => {
-    return {
-      name: 'discord',
-      version: '1.0.0',
-      description: 'Discord bot integration',
-      size: '30 MB',
-      dependencies: ['discord.js'],
-      initialize: async () => {
-        serverLog.info('Discord plugin loaded (mock)');
-      },
-    };
-  },
-
-  slack: async () => {
-    return {
-      name: 'slack',
-      version: '1.0.0',
-      description: 'Slack bot integration',
-      size: '20 MB',
-      dependencies: ['@slack/bolt'],
-      initialize: async () => {
-        serverLog.info('Slack plugin loaded (mock)');
-      },
-    };
-  },
-
-  telegram: async () => {
-    return {
-      name: 'telegram',
-      version: '1.0.0',
-      description: 'Telegram bot integration',
-      size: '5 MB',
-      dependencies: ['grammy'],
-      initialize: async () => {
-        serverLog.info('Telegram plugin loaded (mock)');
-      },
-    };
-  },
-
   postgres: async () => {
     return {
       name: 'postgres',

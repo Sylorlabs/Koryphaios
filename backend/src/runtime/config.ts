@@ -91,35 +91,6 @@ export function loadConfig(projectRoot: string): BackendConfig {
         appConfig.server?.host ??
         SERVER.DEFAULT_HOST,
     },
-    telegram:
-      fileConfig.telegram ??
-      (process.env.TELEGRAM_BOT_TOKEN
-        ? {
-            botToken: process.env.TELEGRAM_BOT_TOKEN,
-            adminId: Number(process.env.TELEGRAM_ADMIN_ID ?? 0),
-            secretToken: process.env.TELEGRAM_SECRET_TOKEN,
-          }
-        : undefined),
-    discord:
-      fileConfig.discord ??
-      (process.env.DISCORD_BOT_TOKEN
-        ? {
-            botToken: process.env.DISCORD_BOT_TOKEN,
-            allowedGuildIds: process.env.DISCORD_ALLOWED_GUILD_IDS?.split(',').filter(Boolean),
-            allowedUserIds: process.env.DISCORD_ALLOWED_USER_IDS?.split(',').filter(Boolean),
-          }
-        : undefined),
-    slack:
-      fileConfig.slack ??
-      (process.env.SLACK_BOT_TOKEN && process.env.SLACK_APP_TOKEN
-        ? {
-            botToken: process.env.SLACK_BOT_TOKEN,
-            appToken: process.env.SLACK_APP_TOKEN,
-            signingSecret: process.env.SLACK_SIGNING_SECRET,
-            allowedChannelIds: process.env.SLACK_ALLOWED_CHANNEL_IDS?.split(',').filter(Boolean),
-            allowedUserIds: process.env.SLACK_ALLOWED_USER_IDS?.split(',').filter(Boolean),
-          }
-        : undefined),
     mcpServers: fileConfig.mcpServers,
     contextPaths: fileConfig.contextPaths ?? DEFAULT_CONTEXT_PATHS,
     dataDirectory: fileConfig.dataDirectory ?? FS.DEFAULT_DATA_DIR,

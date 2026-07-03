@@ -135,9 +135,6 @@ export type {
   MCPServerConfig,
   SafetyLimits,
   WorkspaceConfig,
-  TelegramConfig,
-  DiscordConfig,
-  SlackConfig,
   ServerConfig,
 } from './config/ConfigTypes';
 

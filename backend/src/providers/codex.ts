@@ -342,10 +342,10 @@ export class CodexProvider implements Provider {
       provider: 'codex',
       apiModelId: id,
       contextWindow:
-        typeof item.context_window === 'number' && item.context_window > 0
+        typeof item.context_window === 'number' && item.context_window >= 1024
           ? item.context_window
           : (existing?.contextWindow ?? 0),
-      contextVerified: typeof item.context_window === 'number' && item.context_window > 0,
+      contextVerified: typeof item.context_window === 'number' && item.context_window >= 1024,
       maxOutputTokens: existing?.maxOutputTokens ?? 32_768,
       costPerMInputTokens: existing?.costPerMInputTokens ?? 0,
       costPerMOutputTokens: existing?.costPerMOutputTokens ?? 0,
