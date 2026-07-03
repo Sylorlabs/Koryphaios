@@ -226,6 +226,28 @@ export function updateUsage(agentId: string, payload: StreamUsagePayload, sessio
   }
 }
 
+/** Seed the manager's usage from a persisted snapshot (session reload) so the
+ *  context bar shows real data before any new turn runs. */
+export function seedManagerUsage(
+  sessionId: string,
+  usage: {
+    used: number;
+    max: number;
+    contextKnown: boolean;
+    breakdown?: ContextBreakdown;
+  },
+) {
+  const agent = agents.get('kory-manager');
+  if (!agent) return;
+  agent.tokensUsed = Math.max(0, usage.used);
+  if (usage.max > 0) agent.contextMax = usage.max;
+  agent.contextKnown = usage.contextKnown && usage.max > 0;
+  agent.hasUsageData = true;
+  if (usage.breakdown) agent.contextBreakdown = usage.breakdown;
+  agent.sessionId = sessionId;
+  commitAgents();
+}
+
 export function completeAgent(agentId: string, sessionId?: string) {
   const agent = agents.get(agentId);
   if (agent) {
@@ -514,6 +536,7 @@ export const agentStore = {
   clearNonManagerAgents,
   markSessionAgentsStopped,
   markAgentStopped,
+  seedManagerUsage,
   getAgentThreadKey,
   setAgentThreadFeed,
   upsertAgentThreadEntry,

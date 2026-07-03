@@ -328,6 +328,12 @@ async function loadSessionMessages(
     const res = await apiFetch(apiUrl(`/api/sessions/${sessionId}/context`));
     const data = await parseJsonResponse<{
       ok?: boolean;
+      lastUsage?: {
+        used: number;
+        max: number;
+        contextKnown: boolean;
+        breakdown?: { system: number; memory: number; tools: number; chat: number };
+      } | null;
       data?: Array<{
         id: string;
         ts: number;
@@ -337,6 +343,10 @@ async function loadSessionMessages(
         prunedForAgent: boolean;
       }>;
     }>(res);
+    if (data.ok && data.lastUsage && sessionStore.activeSessionId === sessionId) {
+      const { seedManagerUsage } = await import('./agents.svelte');
+      seedManagerUsage(sessionId, data.lastUsage);
+    }
     if (data.ok && Array.isArray(data.data)) {
       toolHistory = data.data.map((e) => ({
         id: `arch-${e.id}`,
