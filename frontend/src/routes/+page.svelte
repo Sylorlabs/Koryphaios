@@ -659,7 +659,10 @@ RULES:
         }
 
         try {
-          const selectedPath = await invoke<string | null>('select_folder_dialog');
+          // Inside a workspace, new projects default to the workspace folder —
+          // that's almost always where the user wants them.
+          const selectedPath =
+            projectStore.workspaceRoot ?? (await invoke<string | null>('select_folder_dialog'));
           if (!selectedPath) break;
 
           const projectName = prompt('Enter project name:', 'New Project');
@@ -946,8 +949,13 @@ RULES:
 
   {#snippet feed()}
     {#if !projectStore.currentPath}
-      <div class="flex-1 flex flex-col items-center justify-center px-8 py-10" style="background: var(--color-surface-1);">
-        <div class="max-w-xl w-full text-center rounded-[24px] border px-8 py-10" style="background: linear-gradient(180deg, rgba(213, 178, 97, 0.1), rgba(213, 178, 97, 0.03)); border-color: rgba(213, 178, 97, 0.22);">
+      <div class="flex-1" style="background: var(--color-surface-1);">
+        <!-- Fixed to the viewport center so the banner never shifts with the
+             sidebar or other panels — it stays in the true middle. -->
+        <div
+          class="max-w-xl w-full text-center rounded-[24px] border px-8 py-10 overflow-y-auto"
+          style="position: fixed; left: 50vw; top: 50%; transform: translate(-50%, -50%); max-height: calc(100vh - 200px); background: linear-gradient(180deg, rgba(213, 178, 97, 0.1), rgba(213, 178, 97, 0.03)); border-color: rgba(213, 178, 97, 0.22);"
+        >
           <div class="mb-8">
             <img src="/logo-64.png" alt="Koryphaios" class="mx-auto rounded-2xl opacity-90" style="width: 72px; height: 72px;" />
           </div>

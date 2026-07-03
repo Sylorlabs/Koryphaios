@@ -19,7 +19,7 @@
   import { onMount } from 'svelte';
   import { browser } from '$app/environment';
   import { invoke } from '@tauri-apps/api/core';
-  import { projectStore } from '$lib/stores/project.svelte';
+  import { projectStore, projectDisplayName } from '$lib/stores/project.svelte';
 
   interface Props {
     showSidebar: boolean;
@@ -268,6 +268,14 @@
           title={projectStore.currentPath}
         >
           {projectStore.displayName}
+        </div>
+      {:else if projectStore.workspaceRoot}
+        <div
+          class="max-w-[360px] truncate px-3 text-xs font-medium pointer-events-none"
+          style="position: fixed; left: 50vw; transform: translateX(-50%); color: var(--color-text-secondary);"
+          title={projectStore.workspaceRoot}
+        >
+          {projectDisplayName(projectStore.workspaceRoot)} (workspace)
         </div>
       {:else}
         <span class="text-xs pointer-events-none" style="position: fixed; left: 50vw; transform: translateX(-50%); color: var(--color-text-muted);">No project selected</span>
