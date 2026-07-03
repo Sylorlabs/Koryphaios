@@ -26,11 +26,20 @@ export interface ArchiveEntry {
   prunedForAgent?: boolean;
 }
 
+export interface UsageSnapshot {
+  used: number;
+  max: number;
+  contextKnown: boolean;
+  breakdown?: { system: number; memory: number; tools: number; chat: number };
+  ts: number;
+}
+
 interface SessionState {
   entries: ArchiveEntry[];
   byId: Map<string, ArchiveEntry>;
   counter: number;
   loaded: boolean;
+  lastUsage?: UsageSnapshot;
 }
 
 const MAX_CONTENT_CHARS = 200_000; // per entry cap so a runaway output can't bloat the file
@@ -73,6 +82,10 @@ export class ContextArchiveService {
           if (row.type === 'prune' || row.type === 'unprune') {
             const target = s.byId.get(row.id as string);
             if (target) target.prunedForAgent = row.type === 'prune';
+            continue;
+          }
+          if (row.type === 'usage') {
+            s.lastUsage = row.usage as UsageSnapshot;
             continue;
           }
           const entry = row as unknown as ArchiveEntry;
@@ -145,6 +158,19 @@ export class ContextArchiveService {
   async listRecent(sessionId: string, limit = 30): Promise<ArchiveEntry[]> {
     const s = await this.ensureLoaded(sessionId);
     return s.entries.slice(-limit);
+  }
+
+  /** Persist the latest context-usage snapshot so a reloaded session's bar
+   *  shows real data immediately instead of "awaiting usage data". */
+  async recordUsage(sessionId: string, usage: UsageSnapshot): Promise<void> {
+    const s = await this.ensureLoaded(sessionId);
+    s.lastUsage = usage;
+    await this.append(sessionId, { type: 'usage', usage });
+  }
+
+  async getLastUsage(sessionId: string): Promise<UsageSnapshot | undefined> {
+    const s = await this.ensureLoaded(sessionId);
+    return s.lastUsage;
   }
 
   async setPrunedForAgent(sessionId: string, id: string, pruned: boolean): Promise<boolean> {

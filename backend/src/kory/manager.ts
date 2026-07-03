@@ -2316,6 +2316,18 @@ export class KoryManager {
       usageKnown,
       breakdown,
     );
+    // Persist the manager's latest snapshot so a reloaded session's context
+    // bar has real data immediately (instead of waiting for the next turn).
+    if (agentId === KORY_IDENTITY.id) {
+      const win = resolveTrustedContextWindow(model, provider);
+      void getContextArchive()?.recordUsage(sessionId, {
+        used: tokensIn + tokensOut,
+        max: win.contextWindow ?? 0,
+        contextKnown: win.contextKnown,
+        ...(breakdown ? { breakdown } : {}),
+        ts: Date.now(),
+      });
+    }
   }
   private emitWSMessage(sessionId: string, type: string, payload: WSMessage['payload']) {
     this.events.emit(sessionId, type, payload);

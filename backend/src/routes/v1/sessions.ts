@@ -108,8 +108,10 @@ export const sessionRoutes = new Elysia({ prefix: '/api/sessions' })
     const archive = getContextArchive();
     if (!archive) return { ok: true, data: [] };
     const entries = await archive.listRecent(id, 500);
+    const lastUsage = await archive.getLastUsage(id);
     return {
       ok: true,
+      lastUsage: lastUsage ?? null,
       data: entries.map((e) => ({
         id: e.id,
         ts: e.ts,
