@@ -51,6 +51,9 @@
   import yaml from 'highlight.js/lib/languages/yaml';
   import 'highlight.js/styles/atom-one-dark.css';
   import type { FeedEntryLocal, FeedEntryType } from '$lib/types';
+  import type { Note } from '@koryphaios/shared';
+  import { apiFetch } from '$lib/api.svelte';
+  import { apiUrl } from '$lib/utils/api-url';
 
   hljs.registerLanguage('bash', bash);
   hljs.registerLanguage('cpp', cpp);
@@ -153,6 +156,8 @@
   let copied = $state(false);
   let expandedTerminal = $state(false);
   let zoomedImage = $state<string | null>(null);
+  let renderedNotes = $state<Record<string, Note | null>>({});
+  const pendingNoteRenders = new Set<string>();
 
   async function copyToClipboard() {
     try {
@@ -182,11 +187,43 @@
   });
 
   // While streaming, render plain text — markdown parse only after stream completes
+  let noteRenderIds = $derived.by(() => {
+    const ids: string[] = [];
+    for (const match of debouncedText.matchAll(/\{\{render_note:([^}\s]+)\}\}/g)) ids.push(match[1]);
+    return [...new Set(ids)];
+  });
+
+  $effect(() => {
+    for (const id of noteRenderIds) {
+      if (Object.hasOwn(renderedNotes, id) || pendingNoteRenders.has(id)) continue;
+      pendingNoteRenders.add(id);
+      void apiFetch(apiUrl(`/api/notes/${encodeURIComponent(id)}`))
+        .then(async (response) => {
+          const data = await response.json();
+          renderedNotes = { ...renderedNotes, [id]: response.ok && data.ok ? data.data as Note : null };
+        })
+        .catch(() => { renderedNotes = { ...renderedNotes, [id]: null }; })
+        .finally(() => pendingNoteRenders.delete(id));
+    }
+  });
+
+  function sandboxedHtml(content: string): string {
+    const csp = `<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data: blob:; style-src 'unsafe-inline'; font-src data:; media-src data: blob:; form-action 'none'; base-uri 'none'">`;
+    return /<head[\s>]/i.test(content)
+      ? content.replace(/<head([^>]*)>/i, `<head$1>${csp}`)
+      : `${csp}${content}`;
+  }
+
+  function renderedMarkdown(content: string): string {
+    return DOMPurify.sanitize(marked.parse(content, { async: false }) as string);
+  }
+
   let parsedHtml = $derived.by(() => {
     if (!debouncedText) return '';
     if (isStreaming) return '';
     try {
-      return DOMPurify.sanitize(marked.parse(debouncedText, { async: false }) as string);
+      const withoutRenderDirectives = debouncedText.replace(/\{\{render_note:[^}\s]+\}\}/g, '').trim();
+      return DOMPurify.sanitize(marked.parse(withoutRenderDirectives, { async: false }) as string);
     } catch {
       return debouncedText;
     }
@@ -454,6 +491,40 @@
               {@html parsedHtml}
             {/if}
           </div>
+
+          {#if !isStreaming && noteRenderIds.length > 0}
+            <div class="mt-3 space-y-3">
+              {#each noteRenderIds as noteId (noteId)}
+                {@const note = renderedNotes[noteId]}
+                <section class="overflow-hidden rounded-xl border" style="border-color: var(--color-border); background: var(--color-surface-1);">
+                  {#if note === undefined}
+                    <div class="px-4 py-3 text-xs" style="color: var(--color-text-muted);">Loading rendered note…</div>
+                  {:else if note === null}
+                    <div class="px-4 py-3 text-xs text-red-400">Unable to render this note.</div>
+                  {:else}
+                    <div class="flex items-center gap-2 border-b px-4 py-2" style="border-color: var(--color-border);">
+                      <FileText size={12} style="color: var(--color-accent);" />
+                      <span class="text-xs font-semibold" style="color: var(--color-text-primary);">{note.title}</span>
+                      {#if note.sourcePath}<span class="ml-auto truncate font-mono text-[10px]" style="color: var(--color-text-muted);">{note.sourcePath}</span>{/if}
+                    </div>
+                    {#if note.format === 'html'}
+                      <iframe
+                        class="h-[480px] w-full border-0 bg-white"
+                        title={`Rendered ${note.title}`}
+                        sandbox=""
+                        referrerpolicy="no-referrer"
+                        srcdoc={sandboxedHtml(note.content)}
+                      ></iframe>
+                    {:else}
+                      <div class="markdown-content max-h-[520px] overflow-auto px-5 py-4" style="color: var(--color-text-primary);">
+                        {@html renderedMarkdown(note.content)}
+                      </div>
+                    {/if}
+                  {/if}
+                </section>
+              {/each}
+            </div>
+          {/if}
 
           {#if entry.metadata?.attachments && Array.isArray(entry.metadata.attachments) && entry.metadata.attachments.length > 0}
             <div class="mt-3 flex flex-wrap gap-2">

@@ -129,13 +129,24 @@ export function filterToolDefsForNotesPermissions<T extends { name: string }>(
 export function buildNotesNetworkSystemHint(projectRoot: string): string {
   const visible = getVisibleNoteToolNames(projectRoot);
   if (!visible.length) return '';
+  const enabled = new Set<string>(visible);
+  const usage = [
+    ['list_notes', 'list_notes({folderPath?}) -> discover titles and IDs; never loads bodies'],
+    ['search_notes', 'search_notes({query}) -> locate relevant notes and short matches'],
+    ['render_note', 'render_note({id|title, mode:"excerpt", query?|heading?, maxChars?}) -> pull only the relevant bounded context; mode:"document" -> render the whole note in chat without copying it'],
+    ['read_note', 'read_note({id|title}) -> full body; use only when the complete document is genuinely required'],
+    ['recall_notes', 'recall_notes({query?|ids?|titles?, limit?}) -> full bodies for a small selected set; keep limit low'],
+    ['get_note_backlinks', 'get_note_backlinks({id|title}) -> find documents that reference one note'],
+    ['get_note_graph_summary', 'get_note_graph_summary({}) -> graph overview without loading note bodies'],
+    ['create_note', 'create_note({title, content?, folderPath?, tags?, includeInContext?}) -> create Markdown note'],
+    ['update_note', 'update_note({id|title, content?|newTitle?|folderPath?|tags?|pinned?|includeInContext?}) -> edit note or live project file'],
+    ['delete_note', 'delete_note({id|title}) -> delete note; live project documents delete the underlying file'],
+    ['link_notes', 'link_notes({fromId|fromTitle, toId|toTitle, syncContent?}) -> connect notes and optionally add [[wikilink]]'],
+    ['unlink_notes', 'unlink_notes({fromId|fromTitle, toId|toTitle, syncContent?}) -> remove connection'],
+  ].filter(([name]) => enabled.has(name)).map(([, help]) => `  - ${help}`).join('\n');
 
-  return (
-    '• KNOWLEDGE NETWORK: You have access to an Obsidian-style note vault. ' +
-    `Available note tools: ${visible.join(', ')}. ` +
-    'The Notes Catalog below lists notes you can load with recall_notes or read_note. ' +
-    '[[wikilinks]] in note content create graph edges when using write tools.'
-  );
+  return `• KNOWLEDGE NETWORK: Project Markdown, HTML, memories, and rules are indexed as a connected note vault.\n${usage}\n` +
+    '  Retrieval rule: start with catalog/search/graph metadata. Prefer render_note excerpt with a heading or query. Do not load, quote, or recommend an entire note when a focused excerpt answers the task. Use document rendering only when the user asks to see the artifact. Write tools may require approval according to Notes settings.';
 }
 
 export function checkNoteToolPermission(

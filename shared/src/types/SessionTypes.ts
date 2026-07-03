@@ -9,6 +9,9 @@ export interface Session {
   userId?: string;
   title: string;
   parentSessionId?: string;
+  /** Absolute path of the project folder this chat belongs to. Sessions without
+   *  one are "global" (created before project scoping, or with no folder open). */
+  workingDirectory?: string;
   messageCount: number;
   totalTokensIn: number;
   totalTokensOut: number;

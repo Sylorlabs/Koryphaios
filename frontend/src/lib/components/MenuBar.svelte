@@ -10,6 +10,8 @@
     Square,
     X,
     StickyNote,
+    FolderOpen,
+    Plus,
   } from 'lucide-svelte';
   import CheckForUpdatesButton from './CheckForUpdatesButton.svelte';
   import { getModKeyName } from '$lib/utils/platform';
@@ -19,6 +21,7 @@
   import { onMount } from 'svelte';
   import { browser } from '$app/environment';
   import { invoke } from '@tauri-apps/api/core';
+  import { projectStore, projectDisplayName } from '$lib/stores/project.svelte';
 
   interface Props {
     showSidebar: boolean;
@@ -166,8 +169,9 @@
           {#if openMenu === 'file'}
             <div class="absolute left-0 top-10 z-30 min-w-[260px] border p-1.5 shadow-2xl" style="background: var(--color-surface-2); border-color: var(--color-border); border-radius: 0.5rem;">
               <button type="button" class="w-full text-left px-2.5 py-1.5 text-xs hover:bg-[var(--color-surface-3)]" style="color: var(--color-text-primary);" onclick={() => action('new_project')}>New Project</button>
-              <button type="button" class="w-full text-left px-2.5 py-1.5 text-xs hover:bg-[var(--color-surface-3)]" style="color: var(--color-text-primary);" onclick={() => action('open_project_file')}>Open Project From File...</button>
-              <button type="button" class="w-full text-left px-2.5 py-1.5 text-xs hover:bg-[var(--color-surface-3)]" style="color: var(--color-text-primary);" onclick={() => action('open_project_folder')}>Open Project From Folder...</button>
+              <button type="button" class="w-full text-left px-2.5 py-1.5 text-xs hover:bg-[var(--color-surface-3)]" style="color: var(--color-text-primary);" onclick={() => action('open_project_folder')}>Open Project...</button>
+              <button type="button" class="w-full text-left px-2.5 py-1.5 text-xs hover:bg-[var(--color-surface-3)]" style="color: var(--color-text-primary);" onclick={() => action('open_workspace')}>Open Workspace...</button>
+              <button type="button" class="w-full text-left px-2.5 py-1.5 text-xs hover:bg-[var(--color-surface-3)]" style="color: var(--color-text-secondary);" onclick={() => action('open_project_file')}>Import Project File...</button>
               <div class="h-px my-1" style="background: var(--color-border);"></div>
               <div class="px-2.5 py-1.5 text-[10px] uppercase tracking-wider" style="color: var(--color-text-muted);">Recent projects</div>
               {#if recentProjects.length > 0}
@@ -266,18 +270,18 @@
       class="flex-1 flex items-center justify-center h-full"
       data-tauri-drag-region
     >
-      {#if projectName}
-        <div class="flex items-center gap-2 min-w-0 max-w-[420px] px-2 py-2" data-tauri-drag-region>
-          <div class="min-w-0 pointer-events-none">
-            <div class="text-[13px] font-medium truncate leading-tight opacity-80" style="color: var(--color-text-primary);" title={projectName}>
-              {projectName}
-            </div>
-          </div>
+      {#if projectStore.openProjects.length > 0}
+        <div class="flex items-center gap-1 min-w-0 max-w-[560px] overflow-hidden px-2" data-tauri-drag-region="false">
+          {#each projectStore.openProjects.slice(0, 4) as path (path)}
+            <button type="button" class="flex min-w-0 items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs transition-colors" style="background: {projectStore.currentPath === path ? 'var(--color-surface-3)' : 'var(--color-surface-1)'}; border-color: {projectStore.currentPath === path ? 'var(--color-accent)' : 'var(--color-border)'}; color: var(--color-text-primary);" onclick={() => action(`select_project:${encodeURIComponent(path)}`)} title={path}>
+              <FolderOpen size={11} class="shrink-0" />
+              <span class="truncate">{projectDisplayName(path)}</span>
+            </button>
+          {/each}
+          <button type="button" class="rounded-lg border p-1.5" style="border-color: var(--color-border); color: var(--color-text-muted);" onclick={() => action('open_project_folder')} title="Open another project"><Plus size={12} /></button>
         </div>
       {:else}
-        <div class="px-2 py-2 pointer-events-none" data-tauri-drag-region>
-          <span class="text-xs" style="color: var(--color-text-muted);">No project open</span>
-        </div>
+        <button type="button" class="rounded-lg border px-3 py-1.5 text-xs" style="border-color: var(--color-border); color: var(--color-text-muted);" onclick={() => action('open_project_folder')} data-tauri-drag-region="false">Open project</button>
       {/if}
     </div>
 

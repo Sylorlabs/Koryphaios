@@ -3,6 +3,7 @@
   import { wsStore } from '$lib/stores/websocket.svelte';
   import { theme } from '$lib/stores/theme.svelte';
   import { sessionStore } from '$lib/stores/sessions.svelte';
+  import { projectStore, projectDisplayName } from '$lib/stores/project.svelte';
   import { authStore } from '$lib/stores/auth.svelte';
   import { appStore } from '$lib/stores/app.svelte';
   import { toastStore } from '$lib/stores/toast.svelte';
@@ -127,7 +128,7 @@
         modeStore.fetchMode();
         wsStore.connect();
       }
-      if (appStore.projectName) {
+      if (projectStore.currentPath) {
         void refreshComposerFileMentions();
       }
     });
@@ -520,6 +521,32 @@ RULES:
     }
   }
 
+  /** Open a project folder with proper chat scoping: if this path already has
+   *  chats, resume the most recent one (like an editor restoring a workspace);
+   *  otherwise start completely fresh with a new project session. */
+  async function openProjectAtPath(
+    path: string,
+    fresh: { title: string; text: string; fileName?: string },
+  ) {
+    projectStore.setProject(path);
+    await sessionStore.fetchSessions();
+    const existing = sessionStore.sessionsForProject(path);
+    if (existing.length > 0) {
+      const latest = [...existing].sort((a, b) => b.updatedAt - a.updatedAt)[0];
+      sessionStore.activeSessionId = latest.id;
+      toastStore.success(
+        `Opened ${projectDisplayName(path)} — restored ${existing.length} chat${existing.length === 1 ? '' : 's'}`,
+      );
+    } else {
+      await createProjectFromText(fresh.title, fresh.text, {
+        source: 'file',
+        fileName: fresh.fileName,
+        path,
+      });
+      toastStore.success(`Opened ${projectDisplayName(path)} — fresh start`);
+    }
+  }
+
   async function createProjectFromText(
     title: string,
     text: string,
@@ -591,6 +618,18 @@ RULES:
       return;
     }
 
+    // Recent entries with a real absolute path get full project scoping
+    // (resume that folder's chats or start fresh); text-only briefs keep the
+    // legacy behavior. (Web folder picks store a bare folder name, not a path.)
+    if (found.path && (/^\//.test(found.path) || /^[A-Za-z]:[/\\]/.test(found.path))) {
+      await openProjectAtPath(found.path, {
+        title: found.title,
+        text: found.content,
+        fileName: found.fileName,
+      });
+      return;
+    }
+
     await createProjectFromText(found.title, found.content, {
       source: found.source,
       fileName: found.fileName,
@@ -626,10 +665,12 @@ RULES:
 
           toastStore.success(`Created project folder: ${projectPath}`);
 
+          // Brand-new folder → scope future chats to it and start fresh.
+          projectStore.setProject(projectPath);
           await createProjectFromText(
             projectName.trim(),
             buildNewProjectTemplate(),
-            { source: 'new' }
+            { source: 'new', path: projectPath }
           );
         } catch (error) {
           toastStore.error(String(error));
@@ -657,11 +698,27 @@ RULES:
             break;
           }
 
-          await createProjectFromText(result.title, result.text, { source: 'file', fileName: result.folderName, path: selectedPath });
-          toastStore.success(`Opened project from folder: ${result.folderName} (${result.fileCount} files)`);
+          await openProjectAtPath(selectedPath, {
+            title: result.title,
+            text: result.text,
+            fileName: result.folderName,
+          });
         } catch (error) {
           toastStore.error(String(error));
         }
+        break;
+      }
+      case 'open_workspace': {
+        const inTauri = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
+        if (!inTauri) { toastStore.error('Workspace folders require the desktop app'); break; }
+        try {
+          const selectedPath = await invoke<string | null>('select_folder_dialog');
+          if (!selectedPath) break;
+          const projects = await invoke<string[]>('list_workspace_projects', { folderPath: selectedPath });
+          projectStore.setWorkspace(selectedPath, projects);
+          sessionStore.activeSessionId = '';
+          toastStore.success(`Opened workspace ${projectDisplayName(selectedPath)} with ${projects.length} project folders`);
+        } catch (error) { toastStore.error(String(error)); }
         break;
       }
       case 'save_snapshot':
@@ -736,13 +793,19 @@ RULES:
       default:
         if (action.startsWith('open_recent:')) {
           await openRecentProject(action.slice('open_recent:'.length));
+        } else if (action.startsWith('select_project:')) {
+          const path = decodeURIComponent(action.slice('select_project:'.length));
+          projectStore.setProject(path);
+          const sessions = sessionStore.sessionsForProject(path);
+          if (sessions[0]) sessionStore.activeSessionId = sessions[0].id;
+          else await sessionStore.createSession();
         }
         break;
     }
   }
 
   function handleSend(message: string, model?: string, reasoningLevel?: string, attachments?: Array<{type: string, data: string, name: string}>) {
-    if (!appStore.projectName) {
+    if (!projectStore.currentPath) {
       toastStore.error('Open a project first to chat with an agent');
       return;
     }
@@ -797,7 +860,7 @@ RULES:
 </script>
 
 <svelte:head>
-  <title>{appStore.projectName ? `${appStore.projectName} — Koryphaios` : 'Koryphaios — AI Agent Orchestrator'}</title>
+  <title>{projectStore.currentPath ? `${projectStore.displayName} — Koryphaios` : 'Koryphaios — AI Agent Orchestrator'}</title>
 </svelte:head>
 
 <AppShell
@@ -821,7 +884,7 @@ RULES:
       {showAgents}
       {showNotes}
       {zenMode}
-      projectName={appStore.projectName}
+      projectName={projectStore.displayName}
       koryPhase={wsStore.koryPhase}
       isYoloMode={wsStore.isYoloMode}
       {activeAgents}
@@ -853,7 +916,7 @@ RULES:
   {/snippet}
 
   {#snippet feed()}
-    {#if !appStore.projectName}
+    {#if !projectStore.currentPath}
       <div class="flex-1 flex flex-col items-center justify-center px-8 py-10" style="background: var(--color-surface-1);">
         <div class="max-w-xl w-full text-center rounded-[24px] border px-8 py-10" style="background: linear-gradient(180deg, rgba(213, 178, 97, 0.1), rgba(213, 178, 97, 0.03)); border-color: rgba(213, 178, 97, 0.22);">
           <div class="mb-8">
@@ -876,6 +939,16 @@ RULES:
 
             <button
               type="button"
+              class="flex items-center justify-center gap-3 px-2 py-3 rounded-xl text-sm font-medium transition-colors hover:bg-[var(--color-surface-2)]"
+              style="color: var(--color-text-secondary);"
+              onclick={() => handleMenuAction('open_workspace')}
+            >
+              <FolderPlus size={18} />
+              <span>Open Workspace</span>
+            </button>
+
+            <button
+              type="button"
               class="flex items-center justify-center gap-3 px-2 py-3 rounded-xl text-sm font-semibold transition-colors hover:bg-[var(--color-surface-2)]"
               style="color: var(--color-text-primary);"
               onclick={() => handleMenuAction('new_project')}
@@ -884,6 +957,19 @@ RULES:
               <span>New Project</span>
             </button>
           </div>
+
+          {#if projectStore.openProjects.length > 0}
+            <div class="mb-8 text-left">
+              <div class="mb-3 px-1 text-xs font-semibold uppercase tracking-[0.14em]" style="color: var(--color-text-muted);">Choose a project for this chat</div>
+              <div class="flex flex-wrap gap-2">
+                {#each projectStore.openProjects as path (path)}
+                  <button type="button" class="rounded-xl border px-3 py-2 text-xs font-medium transition-colors hover:bg-[var(--color-surface-2)]" style="border-color: var(--color-border); color: var(--color-text-primary);" onclick={() => handleMenuAction(`select_project:${encodeURIComponent(path)}`)} title={path}>
+                    {projectDisplayName(path)}
+                  </button>
+                {/each}
+              </div>
+            </div>
+          {/if}
 
           {#if recentProjects.length > 0}
             <div class="text-left">
@@ -920,7 +1006,18 @@ RULES:
         isStreaming={agentRail.selectedAgentIsRunning}
       />
     {:else}
-      <ManagerFeed onUseSuggestion={loadSuggestionIntoComposer} />
+      <div class="flex min-h-0 flex-1 flex-col">
+        <div class="flex items-center gap-2 overflow-x-auto border-b px-4 py-2" style="border-color: var(--color-border); background: var(--color-surface-0);">
+          <span class="shrink-0 text-[10px] font-semibold uppercase tracking-wider" style="color: var(--color-text-muted);">Working in</span>
+          {#each projectStore.openProjects as path (path)}
+            <button type="button" class="shrink-0 rounded-lg border px-2.5 py-1 text-xs transition-colors" style="background: {projectStore.currentPath === path ? 'var(--color-surface-3)' : 'transparent'}; border-color: {projectStore.currentPath === path ? 'var(--color-accent)' : 'var(--color-border)'}; color: var(--color-text-primary);" onclick={() => handleMenuAction(`select_project:${encodeURIComponent(path)}`)} title={path}>
+              {projectDisplayName(path)}
+            </button>
+          {/each}
+          <button type="button" class="shrink-0 rounded-lg px-2 py-1 text-xs" style="color: var(--color-accent);" onclick={() => handleMenuAction('open_project_folder')}>+ Open folder</button>
+        </div>
+        <ManagerFeed onUseSuggestion={loadSuggestionIntoComposer} />
+      </div>
     {/if}
   {/snippet}
 
@@ -997,7 +1094,7 @@ RULES:
       slashCommands={composerSlashCommands}
       fileMentions={composerFileMentions}
       onRefreshFileMentions={refreshComposerFileMentions}
-      disabled={!appStore.projectName}
+      disabled={!projectStore.currentPath}
       disabledMessage="Open a project to start chatting with agents"
       placeholder={agentRail.inputPlaceholder}
     />

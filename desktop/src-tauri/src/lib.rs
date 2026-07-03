@@ -398,6 +398,24 @@ fn read_folder_contents(folder_path: String) -> Result<FolderContents, String> {
     Ok(FolderContents { folder_name, files })
 }
 
+// A workspace is an organizational root. Its immediate child directories are
+// offered as projects, but none becomes the working directory until selected.
+#[tauri::command]
+fn list_workspace_projects(folder_path: String) -> Result<Vec<String>, String> {
+    let root = std::path::Path::new(&folder_path);
+    if !root.is_dir() { return Err("Workspace folder does not exist".to_string()); }
+    let mut projects = std::fs::read_dir(root)
+        .map_err(|e| format!("Failed to read workspace: {}", e))?
+        .filter_map(Result::ok)
+        .map(|entry| entry.path())
+        .filter(|path| path.is_dir())
+        .filter(|path| path.file_name().and_then(|name| name.to_str()).map(|name| !name.starts_with('.')).unwrap_or(false))
+        .map(|path| path.to_string_lossy().to_string())
+        .collect::<Vec<_>>();
+    projects.sort();
+    Ok(projects)
+}
+
 fn window_state(window: &WebviewWindow) -> AppResult<WindowState> {
     let scale_factor = window
         .scale_factor()
@@ -856,6 +874,7 @@ pub fn run() {
             select_files_dialog,
             create_project_folder,
             read_folder_contents,
+            list_workspace_projects,
             indexer::search_codebase,
             check_for_updates,
             install_update,

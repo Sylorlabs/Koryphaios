@@ -1,37 +1,39 @@
 import { Elysia, t } from 'elysia';
-import { getContext } from '../../context';
 import { requireLocalRouteAuth } from '../../auth/local-route-auth';
+import { GitManager } from '../../kory/git-manager';
+import { getRequestProjectRoot } from '../../runtime/request-project';
+
+const requestGit = (request: Request) => new GitManager(getRequestProjectRoot(request));
 
 export const gitRoutes = new Elysia({ prefix: '/api/git' })
   .get('/repo', async ({ request, set }) => {
     if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
-    const { kory } = getContext();
-    const isRepo = kory.git.isGitRepo();
+    const isRepo = requestGit(request).isGitRepo();
     return { ok: true, data: { isRepo } };
   })
   .get('/status', async ({ request, set }) => {
     if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
-    const { kory } = getContext();
-    const isRepo = kory.git.isGitRepo();
+    const git = requestGit(request);
+    const isRepo = git.isGitRepo();
     if (!isRepo) {
       return { ok: true, data: { isRepo: false, status: [], branch: '', ahead: 0, behind: 0 } };
     }
-    const status = await kory.git.getStatus();
-    const branch = await kory.git.getBranch();
-    const { ahead, behind } = await kory.git.getAheadBehind();
+    const status = await git.getStatus();
+    const branch = await git.getBranch();
+    const { ahead, behind } = await git.getAheadBehind();
     return { ok: true, data: { isRepo: true, status, branch, ahead, behind } };
   })
   .get(
     '/diff',
     async ({ request, query, set }) => {
       if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
-      const { kory } = getContext();
+      const git = requestGit(request);
       if (!query.file) {
         set.status = 400;
         return { ok: false, error: 'file parameter required' };
       }
       const staged = query.staged === 'true';
-      const diff = await kory.git.getDiff(query.file, staged);
+      const diff = await git.getDiff(query.file, staged);
       return { ok: true, data: { diff } };
     },
     {
@@ -45,12 +47,12 @@ export const gitRoutes = new Elysia({ prefix: '/api/git' })
     '/file',
     async ({ request, query, set }) => {
       if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
-      const { kory } = getContext();
+      const git = requestGit(request);
       if (!query.path) {
         set.status = 400;
         return { ok: false, error: 'path parameter required' };
       }
-      const content = await kory.git.getFileContent(query.path);
+      const content = await git.getFileContent(query.path);
       return { ok: content !== null, data: { content } };
     },
     {
@@ -63,10 +65,10 @@ export const gitRoutes = new Elysia({ prefix: '/api/git' })
     '/stage',
     async ({ request, body, set }) => {
       if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
-      const { kory } = getContext();
+      const git = requestGit(request);
       const success = body.unstage
-        ? await kory.git.unstageFile(body.file)
-        : await kory.git.stageFile(body.file);
+        ? await git.unstageFile(body.file)
+        : await git.stageFile(body.file);
       if (!success) set.status = 500;
       return { ok: success };
     },
@@ -81,8 +83,7 @@ export const gitRoutes = new Elysia({ prefix: '/api/git' })
     '/restore',
     async ({ request, body, set }) => {
       if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
-      const { kory } = getContext();
-      const success = await kory.git.restoreFile(body.file);
+      const success = await requestGit(request).restoreFile(body.file);
       if (!success) set.status = 500;
       return { ok: success };
     },
@@ -96,8 +97,7 @@ export const gitRoutes = new Elysia({ prefix: '/api/git' })
     '/commit',
     async ({ request, body, set }) => {
       if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
-      const { kory } = getContext();
-      const success = await kory.git.commit(body.message);
+      const success = await requestGit(request).commit(body.message);
       if (!success) set.status = 500;
       return { ok: success };
     },
@@ -109,8 +109,7 @@ export const gitRoutes = new Elysia({ prefix: '/api/git' })
   )
   .get('/branches', async ({ request, set }) => {
     if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
-    const { kory } = getContext();
-    const { output } = (kory.git as any).runGit(['branch', '--format=%(refname:short)']);
+    const { output } = await requestGit(request).runGit(['branch', '--format=%(refname:short)']);
     const branches = output.split('\n').filter(Boolean);
     return { ok: true, data: { branches } };
   })
@@ -118,8 +117,7 @@ export const gitRoutes = new Elysia({ prefix: '/api/git' })
     '/checkout',
     async ({ request, body, set }) => {
       if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
-      const { kory } = getContext();
-      const success = await kory.git.checkout(body.branch, body.create);
+      const success = await requestGit(request).checkout(body.branch, body.create);
       if (!success) set.status = 500;
       return { ok: success };
     },
@@ -134,9 +132,9 @@ export const gitRoutes = new Elysia({ prefix: '/api/git' })
     '/merge',
     async ({ request, body, set }) => {
       if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
-      const { kory } = getContext();
-      const result = await kory.git.merge(body.branch);
-      const conflicts = result.hasConflicts ? await kory.git.getConflicts() : [];
+      const git = requestGit(request);
+      const result = await git.merge(body.branch);
+      const conflicts = result.hasConflicts ? await git.getConflicts() : [];
       return {
         ok: result.success,
         data: { output: result.output, conflicts, hasConflicts: result.hasConflicts },
@@ -150,18 +148,17 @@ export const gitRoutes = new Elysia({ prefix: '/api/git' })
   )
   .post('/push', async ({ request, set }) => {
     if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
-    const { kory } = getContext();
-    const result = await kory.git.push();
+    const result = await requestGit(request).push();
     if (!result.success) set.status = 500;
     return { ok: result.success, error: result.output };
   })
   .post('/pull', async ({ request, set }) => {
     if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
-    const { kory } = getContext();
-    const result = await kory.git.pull();
+    const git = requestGit(request);
+    const result = await git.pull();
     const hasConflicts =
       result.output.includes('CONFLICT') || result.output.includes('Automatic merge failed');
-    const conflicts = hasConflicts ? await kory.git.getConflicts() : [];
+    const conflicts = hasConflicts ? await git.getConflicts() : [];
     return {
       ok: result.success,
       data: { output: result.output, conflicts, hasConflicts },

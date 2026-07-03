@@ -16,7 +16,12 @@ export const sessionRoutes = new Elysia({ prefix: '/api/sessions' })
     async ({ request, body, set }) => {
       if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
       const { sessions } = getContext();
-      const session = await sessions.create('local-user', body.title, body.parentId);
+      const session = await sessions.create(
+        'local-user',
+        body.title,
+        body.parentId,
+        body.workingDirectory,
+      );
       return { ok: true, data: session };
     },
     {
@@ -24,6 +29,7 @@ export const sessionRoutes = new Elysia({ prefix: '/api/sessions' })
         userId: t.Optional(t.String()),
         title: t.Optional(t.String()),
         parentId: t.Optional(t.String()),
+        workingDirectory: t.Optional(t.String()),
       }),
     },
   )

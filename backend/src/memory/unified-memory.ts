@@ -921,7 +921,7 @@ export function formatMemoryForContext(context: MemoryContext): string {
 function buildNotesCatalogUsageHint(visibleTools: Set<string>): string {
   const hints: string[] = [];
   if (visibleTools.has('recall_notes') || visibleTools.has('read_note')) {
-    hints.push('Use recall_notes or read_note to load full note content.');
+    hints.push('Use read_note or recall_notes only when the full body is required.');
   }
   if (visibleTools.has('search_notes') || visibleTools.has('list_notes')) {
     hints.push('Use search_notes or list_notes to discover notes.');
@@ -929,16 +929,21 @@ function buildNotesCatalogUsageHint(visibleTools: Set<string>): string {
   if (visibleTools.has('link_notes') || visibleTools.has('unlink_notes')) {
     hints.push('Use link_notes / unlink_notes to edit the graph; [[wikilinks]] in content also create edges.');
   }
+  if (visibleTools.has('render_note')) {
+    hints.unshift('Default to render_note mode="excerpt" with query/heading and a small maxChars; mode="document" renders an HTML/Markdown artifact in chat without copying its source.');
+  }
+  hints.push('Retrieve and quote only the minimum context needed; do not recommend loading an entire document by default.');
   return hints.join('\n');
 }
 
 export async function getNotesCatalogPrompt(
   maxEntries: number = 150,
   visibleToolNames?: string[],
+  projectRoot?: string,
 ): Promise<string> {
   try {
     const { getNotesCatalog } = await import('../notes/notes-service');
-    const catalog = await getNotesCatalog();
+    const catalog = await getNotesCatalog(projectRoot);
     if (!catalog.length) return '';
 
     const visible = new Set(visibleToolNames ?? []);
@@ -1051,7 +1056,7 @@ export async function buildNotesNetworkPrompt(
       visibleTools.includes('recall_notes'));
 
   const [catalog, pinned] = await Promise.all([
-    getNotesCatalogPrompt(150, visibleTools),
+    getNotesCatalogPrompt(150, visibleTools, projectRoot),
     includePinned ? getNotesContext(effectiveMaxTokens) : Promise.resolve(''),
   ]);
   if (!catalog && !pinned) return '';

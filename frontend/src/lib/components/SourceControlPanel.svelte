@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { gitStore } from '$lib/stores/git.svelte';
+  import { projectStore } from '$lib/stores/project.svelte';
   import { RefreshCw, GitCommit, ArrowUp, ArrowDown, Plus, Minus, Check, Undo, MoreHorizontal, ChevronDown, GitBranch, AlertCircle } from 'lucide-svelte';
   import { isMac, getModKeyName } from '$lib/utils/platform';
   import FileIcon from './icons/FileIcon.svelte';
@@ -15,6 +16,10 @@
   let changedFiles = $derived(gitStore.state.status.filter(f => !f.staged));
 
   let hasConflicts = $derived(gitStore.state.conflicts.length > 0);
+
+  $effect(() => {
+    if (projectStore.currentPath) void gitStore.refreshStatus();
+  });
 
   $effect(() => {
     if (hasConflicts) showConflictDialog = true;

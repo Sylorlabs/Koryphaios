@@ -33,6 +33,10 @@ export async function apiFetch(
     for (const [key, value] of Object.entries(getAuthHeaders())) {
       if (!headers.has(key)) headers.set(key, value);
     }
+    try {
+      const projectPath = localStorage.getItem('koryphaios-current-project');
+      if (projectPath && !headers.has('X-Koryphaios-Project')) headers.set('X-Koryphaios-Project', projectPath);
+    } catch { /* SSR/private storage */ }
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), timeoutMs);
     try {

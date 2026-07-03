@@ -3,16 +3,17 @@
   import {
     Search, Plus, StickyNote, Share2, Folder, FolderOpen,
     Pin, PinOff, BookOpen, Paperclip, Trash2, X, ChevronRight,
-    ChevronDown, Save, FileText, Image, Download, Tag
+    ChevronDown, Save, FileText, Image, Download, Tag, RefreshCw, Eye, Code2
   } from 'lucide-svelte';
   import { notesStore } from '$lib/stores/notes.svelte';
   import { toastStore } from '$lib/stores/toast.svelte';
   import { apiUrl } from '$lib/utils/api-url';
+  import { projectStore } from '$lib/stores/project.svelte';
   import NotesGraph from './NotesGraph.svelte';
   import type { NoteWithLinks, NoteAttachment } from '@koryphaios/shared';
 
   // ── State ──────────────────────────────────────────────────────────────────
-  let activeView = $state<'editor' | 'graph'>('editor');
+  let activeView = $state<'editor' | 'preview' | 'graph'>('editor');
   let titleInput = $state('');
   let folderInput = $state('');
   let contentInput = $state('');
@@ -31,6 +32,7 @@
   let contentAreaEl = $state<HTMLTextAreaElement | undefined>(undefined);
   let folderSuggestions = $state<string[]>([]);
   let showFolderSuggestions = $state(false);
+  let lastOpenedNoteId = $state<string | null>(null);
 
   // ── Derived ───────────────────────────────────────────────────────────────
   let filteredNotes = $derived.by(() => {
@@ -52,6 +54,13 @@
 
   let currentNote = $derived(notesStore.currentNote);
   let attachments = $derived(currentNote?.attachments ?? []);
+  let htmlPreview = $derived.by(() => {
+    if (currentNote?.format !== 'html') return '';
+    const csp = `<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data: blob:; style-src 'unsafe-inline'; font-src data:; media-src data: blob:; form-action 'none'; base-uri 'none'">`;
+    return /<head[\s>]/i.test(contentInput)
+      ? contentInput.replace(/<head([^>]*)>/i, `<head$1>${csp}`)
+      : `${csp}${contentInput}`;
+  });
 
   // ── Load on mount ─────────────────────────────────────────────────────────
   onMount(() => {
@@ -65,6 +74,11 @@
     if (searchDebounceTimer) clearTimeout(searchDebounceTimer);
   });
 
+  $effect(() => {
+    const projectPath = projectStore.currentPath;
+    if (projectPath) void Promise.all([notesStore.fetchNotes(), notesStore.fetchFolderTree(), notesStore.fetchGraph()]);
+  });
+
   // ── Sync editor when current note changes ─────────────────────────────────
   $effect(() => {
     const note = notesStore.currentNote;
@@ -76,6 +90,10 @@
       pinned = note.pinned;
       includeInContext = note.includeInContext;
       isDirty = false;
+      if (note.id !== lastOpenedNoteId) {
+        lastOpenedNoteId = note.id;
+        activeView = note.format === 'html' ? 'preview' : 'editor';
+      }
     }
   });
 
@@ -91,7 +109,7 @@
   // ── Note CRUD ─────────────────────────────────────────────────────────────
   async function openNote(id: string) {
     await notesStore.fetchNote(id);
-    activeView = 'editor';
+    activeView = notesStore.currentNote?.format === 'html' ? 'preview' : 'editor';
   }
 
   async function createNewNote() {
@@ -289,6 +307,16 @@
         <span class="text-sm font-semibold" style="color: var(--color-text-primary);">Notes</span>
       </div>
       <div class="flex items-center gap-1">
+        <button
+          type="button"
+          class="p-1.5 rounded-lg transition-colors hover:bg-[var(--color-surface-3)]"
+          style="color: var(--color-text-muted);"
+          onclick={() => void notesStore.syncProjectDocuments()}
+          title="Re-index project Markdown and HTML"
+          aria-label="Re-index project documents"
+        >
+          <RefreshCw size={13} />
+        </button>
         <button
           type="button"
           class="p-1.5 rounded-lg transition-colors hover:bg-[var(--color-surface-3)]"
@@ -496,6 +524,18 @@
         <FileText size={12} />
         Editor
       </button>
+      {#if currentNote?.format === 'html'}
+        <button
+          type="button"
+          class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors"
+          style="background: {activeView === 'preview' ? 'var(--color-surface-3)' : 'transparent'}; color: {activeView === 'preview' ? 'var(--color-text-primary)' : 'var(--color-text-muted)'};"
+          onclick={() => { activeView = 'preview'; }}
+          title="Sandboxed HTML preview"
+        >
+          <Eye size={12} />
+          Preview
+        </button>
+      {/if}
       <button
         type="button"
         class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors"
@@ -509,7 +549,7 @@
         Graph
       </button>
 
-      {#if activeView === 'editor' && currentNote}
+      {#if (activeView === 'editor' || activeView === 'preview') && currentNote}
         <!-- Note actions -->
         <div class="ml-auto flex items-center gap-1">
           <!-- Pin toggle -->
@@ -568,6 +608,20 @@
     <div class="flex-1 min-h-0 overflow-hidden">
       {#if activeView === 'graph'}
         <NotesGraph onNodeClick={handleGraphNodeClick} />
+      {:else if activeView === 'preview' && currentNote?.format === 'html'}
+        <div class="h-full flex flex-col" style="background: var(--color-surface-1);">
+          <div class="flex items-center gap-2 px-4 py-2 border-b text-[11px]" style="border-color: var(--color-border); color: var(--color-text-muted);">
+            <Code2 size={12} />
+            Sandboxed preview — CSS and embedded media work; scripts, forms, navigation, and network requests are blocked.
+          </div>
+          <iframe
+            class="flex-1 w-full border-0 bg-white"
+            title="HTML note preview"
+            sandbox=""
+            referrerpolicy="no-referrer"
+            srcdoc={htmlPreview}
+          ></iframe>
+        </div>
       {:else if currentNote}
         <!-- Editor view -->
         <div
@@ -598,8 +652,17 @@
               class="w-full bg-transparent border-none outline-none text-2xl font-bold"
               style="color: var(--color-text-primary); font-family: var(--font-family-sans, inherit);"
               bind:value={titleInput}
+              disabled={Boolean(currentNote.sourcePath)}
               oninput={scheduleAutosave}
             />
+
+            {#if currentNote.sourcePath}
+              <div class="flex items-center gap-2 rounded-xl border px-3 py-2 text-xs" style="border-color: var(--color-border); background: var(--color-surface-2); color: var(--color-text-secondary);">
+                <FileText size={12} style="color: var(--color-accent);" />
+                <span class="font-mono truncate">{currentNote.sourcePath}</span>
+                <span class="ml-auto shrink-0 text-[10px] uppercase tracking-wider" style="color: var(--color-text-muted);">live project file</span>
+              </div>
+            {/if}
 
             <!-- Metadata row -->
             <div class="flex flex-wrap items-center gap-3">
@@ -612,6 +675,7 @@
                   class="bg-transparent border-none outline-none text-xs"
                   style="color: var(--color-text-secondary); width: 140px;"
                   bind:value={folderInput}
+                  disabled={Boolean(currentNote.sourcePath)}
                   oninput={handleFolderInput}
                   onblur={() => { showFolderSuggestions = false; scheduleAutosave(); }}
                 />

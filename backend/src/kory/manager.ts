@@ -657,7 +657,7 @@ export class KoryManager {
       for await (const event of runJulesTask({
         apiKey,
         prompt: task,
-        workingDirectory: this.workingDirectory,
+        workingDirectory: await this.resolveSessionWorkingDirectory(sessionId),
         korySessionId: sessionId,
         defaultBranch: options?.branch,
         automationMode,
@@ -752,10 +752,11 @@ export class KoryManager {
     };
     this.emitWSMessage(sessionId, 'agent.spawned', { agent: identity, task: 'Review delegated work' });
     const criticAbort = new AbortController();
+    const criticSessionWd = await this.resolveSessionWorkingDirectory(sessionId);
     const criticCtx: ToolContext = {
       sessionId,
-      workingDirectory: this.workingDirectory,
-      allowedPaths: [this.workingDirectory],
+      workingDirectory: criticSessionWd,
+      allowedPaths: [criticSessionWd],
       isSandboxed: true,
       signal: criticAbort.signal,
     };
@@ -852,7 +853,7 @@ export class KoryManager {
 
       const managerCtx: ToolContext = {
         sessionId,
-        workingDirectory: this.workingDirectory,
+        workingDirectory: await this.resolveSessionWorkingDirectory(sessionId),
         allowedPaths: [],
         isSandboxed: false,
         signal: abort.signal,
@@ -1205,8 +1206,8 @@ export class KoryManager {
         tools,
         maxTokens: 16384,
         signal: streamSignal,
-        // Agentic CLI providers (claude-code) run + edit files in the project directory.
-        workingDirectory: this.workingDirectory,
+        // Agentic CLI providers (claude-code) run + edit files in the session's project directory.
+        workingDirectory: await this.resolveSessionWorkingDirectory(sessionId),
         sessionId,
       },
       provider.name,
@@ -1437,7 +1438,8 @@ export class KoryManager {
   ): Promise<{ success: boolean; error?: string; workerMessages?: InternalMessage[] }> {
     const workerId = `worker-${nanoid(8)}`;
     const abort = new AbortController();
-    const workerWorkingDirectory = allowedPaths[0] ?? this.workingDirectory;
+    const workerWorkingDirectory =
+      allowedPaths[0] ?? (await this.resolveSessionWorkingDirectory(sessionId));
     const identity: AgentIdentity = {
       id: workerId,
       name: `${domain} Worker`,
@@ -2063,6 +2065,25 @@ export class KoryManager {
   private emitError(sessionId: string, error: string) {
     this.events.emitError(sessionId, error);
   }
+  // Per-session project folders: a chat created with a project open runs in THAT
+  // folder (tools, providers, workers), not the backend's launch directory.
+  private sessionWorkingDirs = new Map<string, string>();
+
+  private async resolveSessionWorkingDirectory(sessionId: string): Promise<string> {
+    const cached = this.sessionWorkingDirs.get(sessionId);
+    if (cached !== undefined) return cached;
+    let resolved = this.workingDirectory;
+    try {
+      const session = await this.sessions?.get(sessionId);
+      const wd = session?.workingDirectory?.trim();
+      if (wd && existsSync(wd)) resolved = wd;
+    } catch {
+      /* fall back to the global root */
+    }
+    this.sessionWorkingDirs.set(sessionId, resolved);
+    return resolved;
+  }
+
   private emitUsageUpdate(
     sessionId: string,
     agentId: string,

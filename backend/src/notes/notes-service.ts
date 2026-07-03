@@ -22,8 +22,8 @@ import type {
   FolderNode,
   NoteWithLinks,
 } from '@koryphaios/shared';
-import { existsSync, mkdirSync, writeFileSync, unlinkSync } from 'fs';
-import { join } from 'path';
+import { existsSync, mkdirSync, writeFileSync, unlinkSync, readFileSync, readdirSync, statSync } from 'fs';
+import { basename, dirname, extname, join, relative, resolve, sep } from 'path';
 import { PROJECT_ROOT } from '../runtime/paths';
 
 // ============================================================================
@@ -31,6 +31,36 @@ import { PROJECT_ROOT } from '../runtime/paths';
 // ============================================================================
 
 const ATTACHMENTS_DIR = join(PROJECT_ROOT, '.koryphaios', 'attachments');
+const PROJECT_DOCUMENT_PREFIX = 'project-document:';
+const DOCUMENT_EXTENSIONS = new Set(['.md', '.markdown', '.html', '.htm']);
+const IGNORED_DOCUMENT_DIRS = new Set([
+  '.git', 'node_modules', 'dist', 'build', 'target', '.svelte-kit', '.next', 'coverage',
+]);
+
+function projectDocumentId(projectRoot: string, sourcePath: string): string {
+  return PROJECT_DOCUMENT_PREFIX + Buffer.from(JSON.stringify([resolve(projectRoot), sourcePath])).toString('base64url');
+}
+
+function projectDocumentIdentity(id: string): { projectRoot: string; sourcePath: string } | undefined {
+  if (!id.startsWith(PROJECT_DOCUMENT_PREFIX)) return undefined;
+  try {
+    const [projectRoot, path] = JSON.parse(Buffer.from(id.slice(PROJECT_DOCUMENT_PREFIX.length), 'base64url').toString('utf8')) as [string, string];
+    if (!path || path.startsWith('/') || path.split(/[\\/]/).includes('..')) return undefined;
+    if (!projectRoot) return undefined;
+    return { projectRoot: resolve(projectRoot), sourcePath: path };
+  } catch {
+    return undefined;
+  }
+}
+
+function resolveProjectDocument(id: string): string | undefined {
+  const identity = projectDocumentIdentity(id);
+  if (!identity) return undefined;
+  const absolute = resolve(identity.projectRoot, identity.sourcePath);
+  const root = identity.projectRoot;
+  if (absolute !== root && !absolute.startsWith(root + sep)) return undefined;
+  return absolute;
+}
 
 function ensureDir(p: string): void {
   if (!existsSync(p)) mkdirSync(p, { recursive: true });
@@ -52,11 +82,33 @@ function extractWikilinks(content: string): string[] {
   return [...new Set(titles)];
 }
 
+function extractProjectDocumentLinks(sourcePath: string, content: string): string[] {
+  const links: string[] = [];
+  const pattern = /(?:\[[^\]]*\]\(|(?:href|src)\s*=\s*["'])([^)"'#?]+)(?:#[^)]*)?(?:\)|["'])/gi;
+  let match: RegExpExecArray | null;
+  while ((match = pattern.exec(content)) !== null) {
+    const target = match[1].trim();
+    if (!target || /^[a-z][a-z0-9+.-]*:/i.test(target) || target.startsWith('//')) continue;
+    const resolved = target.startsWith('/')
+      ? target.slice(1)
+      : join(dirname(sourcePath), target).split(sep).join('/');
+    const normalized = resolved.split('/').reduce<string[]>((parts, part) => {
+      if (!part || part === '.') return parts;
+      if (part === '..') parts.pop(); else parts.push(part);
+      return parts;
+    }, []).join('/');
+    if (DOCUMENT_EXTENSIONS.has(extname(normalized).toLowerCase())) links.push(normalized);
+  }
+  return [...new Set(links)];
+}
+
 /**
  * Convert a raw DB row to a typed Note object.
  * Handles JSON parsing for tags and boolean coercion.
  */
 function rowToNote(row: typeof notes.$inferSelect): Note {
+  const sourcePath = projectDocumentIdentity(row.id)?.sourcePath;
+  const extension = sourcePath ? extname(sourcePath).toLowerCase() : '';
   return {
     id: row.id,
     title: row.title,
@@ -74,6 +126,8 @@ function rowToNote(row: typeof notes.$inferSelect): Note {
     userId: row.userId ?? undefined,
     createdAt: row.createdAt instanceof Date ? row.createdAt : new Date((row.createdAt as number) * 1000),
     updatedAt: row.updatedAt instanceof Date ? row.updatedAt : new Date((row.updatedAt as number) * 1000),
+    sourcePath,
+    format: sourcePath ? (extension === '.html' || extension === '.htm' ? 'html' : 'markdown') : undefined,
   };
 }
 
@@ -131,6 +185,11 @@ export async function updateNote(id: string, input: UpdateNoteInput): Promise<No
 
   await db.update(notes).set(updateData).where(eq(notes.id, id));
 
+  const sourceFile = resolveProjectDocument(id);
+  if (sourceFile && input.content !== undefined) {
+    writeFileSync(sourceFile, input.content, 'utf8');
+  }
+
   if (input.title !== undefined && input.title !== existing.title) {
     await propagateTitleRename(existing.title, input.title);
   }
@@ -144,6 +203,8 @@ export async function updateNote(id: string, input: UpdateNoteInput): Promise<No
 }
 
 export async function deleteNote(id: string): Promise<void> {
+  const sourceFile = resolveProjectDocument(id);
+  if (sourceFile && existsSync(sourceFile)) unlinkSync(sourceFile);
   // Delete attachment files from disk before DB rows are cascade-deleted
   const attachments = await db
     .select()
@@ -161,11 +222,101 @@ export async function deleteNote(id: string): Promise<void> {
   await db.delete(notes).where(eq(notes.id, id));
 }
 
+export interface ProjectDocumentSyncResult {
+  discovered: number;
+  created: number;
+  updated: number;
+  removed: number;
+}
+
+/** Mirror every project Markdown/HTML document into the note graph. The real
+ * project file remains authoritative; edits through Koryphaios are written
+ * through to disk. Generated/vendor directories are intentionally excluded. */
+export async function syncProjectDocuments(projectRoot = PROJECT_ROOT): Promise<ProjectDocumentSyncResult> {
+  const root = resolve(projectRoot);
+  const files: string[] = [];
+
+  function walk(directory: string): void {
+    for (const entry of readdirSync(directory, { withFileTypes: true })) {
+      if (entry.isSymbolicLink()) continue;
+      if (entry.isDirectory()) {
+        if (!IGNORED_DOCUMENT_DIRS.has(entry.name)) walk(join(directory, entry.name));
+        continue;
+      }
+      if (entry.isFile() && DOCUMENT_EXTENSIONS.has(extname(entry.name).toLowerCase())) {
+        files.push(join(directory, entry.name));
+      }
+    }
+  }
+
+  walk(root);
+  const foundIds = new Set<string>();
+  let created = 0;
+  let updated = 0;
+
+  for (const absolute of files) {
+    const sourcePath = relative(root, absolute).split(sep).join('/');
+    const id = projectDocumentId(root, sourcePath);
+    foundIds.add(id);
+    const content = readFileSync(absolute, 'utf8');
+    const stat = statSync(absolute);
+    const title = basename(sourcePath, extname(sourcePath));
+    const parent = dirname(sourcePath).split(sep).join('/');
+    const folderPath = parent === '.' ? '/Project' : `/Project/${parent}`;
+    const extension = extname(sourcePath).toLowerCase();
+    const tags = JSON.stringify(['project-file', extension === '.html' || extension === '.htm' ? 'html' : 'markdown']);
+    const rows = await db.select().from(notes).where(eq(notes.id, id));
+    if (rows[0]) {
+      if (rows[0].content !== content || rows[0].title !== title || rows[0].folderPath !== folderPath) {
+        await db.update(notes).set({ title, content, folderPath, tags, updatedAt: stat.mtime }).where(eq(notes.id, id));
+        updated++;
+      }
+    } else {
+      await db.insert(notes).values({
+        id, title, content, folderPath, tags, pinned: 0, includeInContext: 0,
+        userId: null, createdAt: stat.birthtime, updatedAt: stat.mtime,
+      });
+      created++;
+    }
+  }
+
+  const projectRows = (await db.select().from(notes)).filter((row) => projectDocumentIdentity(row.id)?.projectRoot === root);
+  let removed = 0;
+  for (const row of projectRows) {
+    if (!foundIds.has(row.id)) {
+      await db.delete(notes).where(eq(notes.id, row.id));
+      removed++;
+    }
+  }
+
+  // Resolve links only after every file is present, so cross-file links work
+  // regardless of traversal order.
+  for (const id of foundIds) {
+    const row = (await db.select().from(notes).where(eq(notes.id, id)))[0];
+    if (row) {
+      await parseAndSaveLinks(id, row.content);
+      const sourcePath = projectDocumentIdentity(id)!.sourcePath;
+      for (const targetPath of extractProjectDocumentLinks(sourcePath, row.content)) {
+        const targetId = projectDocumentId(root, targetPath);
+        if (targetId === id || !foundIds.has(targetId)) continue;
+        try {
+          await db.insert(noteLinks).values({ fromNoteId: id, toNoteId: targetId });
+        } catch {
+          // Existing edge (for example a wikilink and a path link to the same document).
+        }
+      }
+    }
+  }
+
+  return { discovered: files.length, created, updated, removed };
+}
+
 export async function listNotes(filters?: {
   folderPath?: string;
   tags?: string[];
   search?: string;
-}): Promise<Note[]> {
+}, projectRoot?: string): Promise<Note[]> {
+  if (projectRoot) await syncProjectDocuments(projectRoot);
   let q = db.select().from(notes).$dynamic();
   const conditions = [];
 
@@ -184,7 +335,12 @@ export async function listNotes(filters?: {
   }
 
   const rows = await q.orderBy(notes.updatedAt);
-  return rows.map(rowToNote);
+  return rows
+    .filter((row) => {
+      const identity = projectDocumentIdentity(row.id);
+      return !identity || !projectRoot || identity.projectRoot === resolve(projectRoot);
+    })
+    .map(rowToNote);
 }
 
 // ============================================================================
@@ -326,11 +482,15 @@ export interface NoteCatalogEntry {
 }
 
 /** Compact index of every note for agent discovery and recall. */
-export async function getNotesCatalog(): Promise<NoteCatalogEntry[]> {
-  const graph = await getGraphData();
+export async function getNotesCatalog(projectRoot?: string): Promise<NoteCatalogEntry[]> {
+  if (projectRoot) await syncProjectDocuments(projectRoot);
+  const graph = await getGraphData(projectRoot);
   const linkCountById = new Map(graph.nodes.map((n) => [n.id, n.linkCount]));
   const rows = await db.select().from(notes).orderBy(notes.updatedAt);
-  return rows.map((row) => {
+  return rows.filter((row) => {
+    const identity = projectDocumentIdentity(row.id);
+    return !identity || !projectRoot || identity.projectRoot === resolve(projectRoot);
+  }).map((row) => {
     const note = rowToNote(row);
     return {
       id: note.id,
@@ -422,9 +582,14 @@ export async function parseAndSaveLinks(noteId: string, content: string): Promis
 // Graph
 // ============================================================================
 
-export async function getGraphData(): Promise<GraphData> {
-  const allNotes = await db.select().from(notes);
-  const allLinks = await db.select().from(noteLinks);
+export async function getGraphData(projectRoot?: string): Promise<GraphData> {
+  const allRows = await db.select().from(notes);
+  const allNotes = allRows.filter((row) => {
+    const identity = projectDocumentIdentity(row.id);
+    return !identity || !projectRoot || identity.projectRoot === resolve(projectRoot);
+  });
+  const visibleIds = new Set(allNotes.map((row) => row.id));
+  const allLinks = (await db.select().from(noteLinks)).filter((link) => visibleIds.has(link.fromNoteId) && visibleIds.has(link.toNoteId));
 
   // Build link-count map (both directions count as "connected")
   const linkCountMap = new Map<string, number>();
@@ -460,8 +625,13 @@ export async function getGraphData(): Promise<GraphData> {
 // Folder Tree
 // ============================================================================
 
-export async function getFolderTree(): Promise<FolderNode[]> {
-  const allNotes = await db.select({ folderPath: notes.folderPath }).from(notes);
+export async function getFolderTree(projectRoot?: string): Promise<FolderNode[]> {
+  const allNotes = (await db.select().from(notes))
+    .filter((row) => {
+      const identity = projectDocumentIdentity(row.id);
+      return !identity || !projectRoot || identity.projectRoot === resolve(projectRoot);
+    })
+    .map((row) => ({ folderPath: row.folderPath }));
 
   // Count notes per folder (exact path match)
   const folderCounts = new Map<string, number>();

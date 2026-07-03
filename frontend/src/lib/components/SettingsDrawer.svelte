@@ -47,6 +47,7 @@
   import { collaborationStore } from '$lib/stores/collaboration.svelte';
   import { modeStore } from '$lib/stores/mode.svelte';
   import { notesStore } from '$lib/stores/notes.svelte';
+  import { projectStore } from '$lib/stores/project.svelte';
   import {
     NOTE_TOOL_DEFINITIONS,
     type NotePermissionLevel,
@@ -99,12 +100,15 @@
   };
 
   $effect(() => {
+    const projectPath = projectStore.currentPath;
     if (open && activeTab === 'notes') {
-      if (!notesStore.agentPermissionsLoaded) void notesStore.fetchAgentPermissions();
+      void projectPath;
+      void notesStore.fetchAgentPermissions();
       // Settings are persisted server-side (context injection honors them) —
       // refresh from the source of truth instead of trusting the local mirror.
-      if (!notesStore.settingsFetched) void notesStore.fetchSettings();
+      void notesStore.fetchSettings();
     }
+    if (open && activeTab === 'memory') { void projectPath; void memoryStore.loadAllMemory(); }
   });
 
   $effect(() => {
@@ -1560,23 +1564,19 @@
                           {tool.description}
                         </div>
                       </div>
-                      <select
-                        class="h-8 shrink-0 rounded-lg border px-2 text-[11px] font-medium"
-                        style="
-                          background: var(--color-surface-1);
-                          border-color: var(--color-border);
-                          color: var(--color-text-primary);
-                        "
-                        value={notesStore.agentPermissions.tools[tool.name]}
-                        onchange={(e) => {
-                          const level = (e.currentTarget as HTMLSelectElement).value as NotePermissionLevel;
-                          void notesStore.setAgentToolPermission(tool.name, level);
-                        }}
-                      >
-                        <option value="auto">{permissionLevelLabels.auto}</option>
-                        <option value="ask">{permissionLevelLabels.ask}</option>
-                        <option value="block">{permissionLevelLabels.block}</option>
-                      </select>
+                      <div class="flex shrink-0 rounded-xl border p-0.5" style="background: var(--color-surface-1); border-color: var(--color-border);">
+                        {#each ['auto', 'ask', 'block'] as level (level)}
+                          <button
+                            type="button"
+                            class="rounded-lg px-2 py-1 text-[10px] font-semibold transition-colors"
+                            style="background: {notesStore.agentPermissions.tools[tool.name] === level ? 'var(--color-surface-4)' : 'transparent'}; color: {notesStore.agentPermissions.tools[tool.name] === level ? 'var(--color-text-primary)' : 'var(--color-text-muted)'}; box-shadow: {notesStore.agentPermissions.tools[tool.name] === level ? 'inset 0 0 0 1px var(--color-border)' : 'none'};"
+                            onclick={() => void notesStore.setAgentToolPermission(tool.name, level as NotePermissionLevel)}
+                            aria-pressed={notesStore.agentPermissions.tools[tool.name] === level}
+                          >
+                            {permissionLevelLabels[level as NotePermissionLevel]}
+                          </button>
+                        {/each}
+                      </div>
                     </div>
                   {/each}
                 </div>

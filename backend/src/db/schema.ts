@@ -29,6 +29,7 @@ export const sessions = sqliteTable('sessions', {
   tokensOut: integer('tokens_out').default(0),
   totalCost: real('total_cost').default(0),
   workflowState: text('workflow_state').default('idle'),
+  workingDirectory: text('working_directory'), // project folder this chat is scoped to
   metadata: text('metadata'), // JSON string
   tags: text('tags'), // JSON string
   version: integer('version').default(1),

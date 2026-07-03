@@ -3,6 +3,7 @@
 
 import type { Session } from '@koryphaios/shared';
 import { toastStore } from './toast.svelte';
+import { projectStore } from './project.svelte';
 import { browser } from '$app/environment';
 import { friendlyHttpError } from '$lib/utils/http-error';
 import { apiUrl } from '$lib/utils/api-url';
@@ -91,6 +92,8 @@ async function fetchSessions(): Promise<boolean> {
       // Save the resolved active session
       if (activeSessionId) {
         saveLastSession(activeSessionId);
+        const active = sessions.find((session) => session.id === activeSessionId);
+        if (active?.workingDirectory) projectStore.setProject(active.workingDirectory);
       }
       return true;
     }
@@ -109,7 +112,10 @@ async function createSession(): Promise<string | null> {
       headers: {
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({ title: 'New Session' }),
+      body: JSON.stringify({
+        title: 'New Session',
+        ...(projectStore.currentPath ? { workingDirectory: projectStore.currentPath } : {}),
+      }),
     });
     const text = await res.text();
     if (!res.ok) {
@@ -266,6 +272,8 @@ export const sessionStore = {
   set activeSessionId(id: string) {
     activeSessionId = id;
     saveLastSession(id);
+    const session = sessions.find((item) => item.id === id);
+    if (session?.workingDirectory) projectStore.setProject(session.workingDirectory);
   },
   get searchQuery() {
     return searchQuery;
@@ -278,9 +286,20 @@ export const sessionStore = {
   },
 
   get filteredSessions(): Session[] {
-    if (!searchQuery.trim()) return sessions;
+    // Project scope first: only the open project's chats (legacy sessions with
+    // no workingDirectory stay visible in the 'all' scope, never lost).
+    let scoped = sessions;
+    if (projectStore.scope === 'project' && projectStore.currentPath) {
+      scoped = sessions.filter((s) => s.workingDirectory === projectStore.currentPath);
+    }
+    if (!searchQuery.trim()) return scoped;
     const q = searchQuery.toLowerCase();
-    return sessions.filter((s) => s.title.toLowerCase().includes(q));
+    return scoped.filter((s) => s.title.toLowerCase().includes(q));
+  },
+
+  /** Sessions belonging to a specific project path (used on project open). */
+  sessionsForProject(path: string): Session[] {
+    return sessions.filter((s) => s.workingDirectory === path);
   },
 
   get groupedSessions(): SessionGroup[] {

@@ -559,6 +559,19 @@ export const MIGRATIONS: Migration[] = [
       DROP TABLE IF EXISTS notes;
     `,
   },
+
+  // ─── Version 0011: Project-scoped sessions ──────────────────────────────────
+  {
+    version: '0011',
+    description: 'Add working_directory to sessions (project-scoped chats)',
+    up: `
+      ALTER TABLE sessions ADD COLUMN working_directory TEXT;
+      CREATE INDEX IF NOT EXISTS idx_sessions_working_directory ON sessions(working_directory);
+    `,
+    down: `
+      DROP INDEX IF EXISTS idx_sessions_working_directory;
+    `,
+  },
 ];
 
 // ─── Migration Runner ────────────────────────────────────────────────────────

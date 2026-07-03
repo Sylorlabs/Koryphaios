@@ -102,7 +102,7 @@ export const readNoteTool: Tool = {
       id: { type: 'string', description: 'Note ID (use if you have it)' },
     },
   },
-  async run(_ctx: ToolContext, call: ToolCallInput): Promise<ToolCallOutput> {
+  async run(ctx: ToolContext, call: ToolCallInput): Promise<ToolCallOutput> {
     const input = call.input as Record<string, unknown>;
     const start = Date.now();
     try {
@@ -419,10 +419,11 @@ export const recallNotesTool: Tool = {
       limit: { type: 'number', description: 'Max notes to return (default 10)' },
     },
   },
-  async run(_ctx: ToolContext, call: ToolCallInput): Promise<ToolCallOutput> {
+  async run(ctx: ToolContext, call: ToolCallInput): Promise<ToolCallOutput> {
     const input = call.input as Record<string, unknown>;
     const start = Date.now();
     try {
+      await notesService.syncProjectDocuments(ctx.workingDirectory);
       const recalled = await notesService.recallNotes({
         query: input.query as string | undefined,
         titles: input.titles as string[] | undefined,
@@ -488,10 +489,11 @@ export const searchNotesTool: Tool = {
     },
     required: ['query'],
   },
-  async run(_ctx: ToolContext, call: ToolCallInput): Promise<ToolCallOutput> {
+  async run(ctx: ToolContext, call: ToolCallInput): Promise<ToolCallOutput> {
     const input = call.input as Record<string, unknown>;
     const start = Date.now();
     try {
+      await notesService.syncProjectDocuments(ctx.workingDirectory);
       const results = await notesService.searchNotes(String(input.query));
       if (!results.length) {
         return {
@@ -551,13 +553,13 @@ export const listNotesTool: Tool = {
       folderPath: { type: 'string', description: 'Filter by folder path prefix' },
     },
   },
-  async run(_ctx: ToolContext, call: ToolCallInput): Promise<ToolCallOutput> {
+  async run(ctx: ToolContext, call: ToolCallInput): Promise<ToolCallOutput> {
     const input = call.input as Record<string, unknown>;
     const start = Date.now();
     try {
       const notesList = await notesService.listNotes({
         folderPath: input.folderPath as string | undefined,
-      });
+      }, ctx.workingDirectory);
       if (!notesList.length) {
         return {
           callId: call.id,
@@ -711,6 +713,91 @@ export const noteGraphSummaryTool: Tool = {
 };
 
 // ============================================================================
+// render_note — bounded context extraction or a client-rendered chat artifact
+// ============================================================================
+
+export const renderNoteTool: Tool = {
+  name: 'render_note',
+  description:
+    'Use a note in chat without dumping it. mode=excerpt returns only a bounded relevant section. mode=document returns a render directive that displays the Markdown or sandboxed HTML in chat.',
+  role: 'any',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      id: { type: 'string', description: 'Note ID from the catalog (preferred)' },
+      title: { type: 'string', description: 'Exact title when ID is unavailable' },
+      mode: { type: 'string', enum: ['excerpt', 'document'], description: 'excerpt for context; document for rendered chat output' },
+      query: { type: 'string', description: 'Text to center the excerpt around' },
+      heading: { type: 'string', description: 'Markdown heading whose section should be extracted' },
+      maxChars: { type: 'number', description: 'Excerpt limit, 200–4000; default 1200' },
+    },
+  },
+  async run(ctx: ToolContext, call: ToolCallInput): Promise<ToolCallOutput> {
+    const input = call.input as Record<string, unknown>;
+    const start = Date.now();
+    try {
+      await notesService.syncProjectDocuments(ctx.workingDirectory);
+      const id = await resolveId({
+        id: input.id as string | undefined,
+        title: input.title as string | undefined,
+      });
+      const note = id ? await notesService.getNote(id) : null;
+      if (!note) throw new Error('Note not found');
+
+      if (input.mode === 'document') {
+        return {
+          callId: call.id,
+          name: call.name,
+          output: `Render [[${note.title}]] in chat by including this exact token in the final response:\n{{render_note:${note.id}}}\nDo not copy the document content into the response.`,
+          isError: false,
+          durationMs: Date.now() - start,
+        };
+      }
+
+      const limit = Math.min(4000, Math.max(200, Number(input.maxChars) || 1200));
+      let excerpt = note.content;
+      const heading = typeof input.heading === 'string' ? input.heading.trim() : '';
+      const query = typeof input.query === 'string' ? input.query.trim() : '';
+
+      if (heading) {
+        const escaped = heading.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        const match = new RegExp(`^#{1,6}\\s+${escaped}\\s*$`, 'im').exec(note.content);
+        if (match) {
+          const level = (match[0].match(/^#+/)?.[0].length ?? 6);
+          const rest = note.content.slice(match.index + match[0].length);
+          const next = new RegExp(`^#{1,${level}}\\s+`, 'm').exec(rest);
+          excerpt = match[0] + rest.slice(0, next?.index ?? rest.length);
+        }
+      } else if (query) {
+        const at = note.content.toLowerCase().indexOf(query.toLowerCase());
+        if (at >= 0) {
+          const startAt = Math.max(0, at - Math.floor(limit / 3));
+          excerpt = note.content.slice(startAt, startAt + limit);
+          if (startAt > 0) excerpt = '…' + excerpt;
+        }
+      }
+
+      if (excerpt.length > limit) excerpt = excerpt.slice(0, limit).trimEnd() + '\n…';
+      return {
+        callId: call.id,
+        name: call.name,
+        output: `Relevant excerpt from [[${note.title}]] (${excerpt.length}/${note.content.length} characters):\n\n${excerpt}`,
+        isError: false,
+        durationMs: Date.now() - start,
+      };
+    } catch (err: unknown) {
+      return {
+        callId: call.id,
+        name: call.name,
+        output: 'Error: ' + (err instanceof Error ? err.message : String(err)),
+        isError: true,
+        durationMs: Date.now() - start,
+      };
+    }
+  },
+};
+
+// ============================================================================
 // Export
 // ============================================================================
 
@@ -726,4 +813,5 @@ export const noteTools: Tool[] = [
   listNotesTool,
   getBacklinksTool,
   noteGraphSummaryTool,
+  renderNoteTool,
 ];

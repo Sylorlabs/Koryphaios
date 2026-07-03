@@ -33,6 +33,7 @@ import { apiUrl } from '$lib/utils/api-url';
 import { toastStore } from './toast.svelte';
 import { apiFetch } from '$lib/api.svelte';
 import { browser } from '$app/environment';
+import { projectStore } from './project.svelte';
 
 // ============================================================================
 // Constants
@@ -100,6 +101,7 @@ async function fetchNotes(folder?: string, query?: string): Promise<void> {
     const params = new URLSearchParams();
     if (folder && folder !== '/') params.set('folder', folder);
     if (query) params.set('search', query);
+    if (projectStore.currentPath) params.set('projectRoot', projectStore.currentPath);
     const qs = params.toString();
     const res = await apiFetch(apiUrl(`/api/notes${qs ? `?${qs}` : ''}`));
     if (res.ok) {
@@ -269,7 +271,9 @@ async function deleteNote(id: string): Promise<boolean> {
 /** Fetch graph data (nodes + edges) */
 async function fetchGraph(): Promise<void> {
   try {
-    const res = await apiFetch(apiUrl('/api/notes/graph'));
+    const params = new URLSearchParams();
+    if (projectStore.currentPath) params.set('projectRoot', projectStore.currentPath);
+    const res = await apiFetch(apiUrl(`/api/notes/graph?${params.toString()}`));
     if (res.ok) {
       const data = await res.json();
       if (data.ok && data.data) {
@@ -284,7 +288,9 @@ async function fetchGraph(): Promise<void> {
 /** Fetch folder tree */
 async function fetchFolderTree(): Promise<void> {
   try {
-    const res = await apiFetch(apiUrl('/api/notes/folders'));
+    const params = new URLSearchParams();
+    if (projectStore.currentPath) params.set('projectRoot', projectStore.currentPath);
+    const res = await apiFetch(apiUrl(`/api/notes/folders?${params.toString()}`));
     if (res.ok) {
       const data = await res.json();
       if (data.ok && Array.isArray(data.data)) {
@@ -405,6 +411,23 @@ async function importMemoryAsNotes(): Promise<void> {
   } catch (err) {
     console.error('[notesStore] importMemoryAsNotes error:', err);
     toastStore.error('Failed to import memory');
+  }
+}
+
+/** Re-index real Markdown and HTML files from the open project. */
+async function syncProjectDocuments(): Promise<void> {
+  try {
+    const params = new URLSearchParams();
+    if (projectStore.currentPath) params.set('projectRoot', projectStore.currentPath);
+    const res = await apiFetch(apiUrl(`/api/notes/sync-project?${params.toString()}`), { method: 'POST' });
+    const data = await res.json();
+    if (!res.ok || !data.ok) throw new Error(data.error ?? `HTTP ${res.status}`);
+    await Promise.all([fetchNotes(), fetchGraph(), fetchFolderTree()]);
+    const result = data.data as { discovered?: number };
+    toastStore.success(`Indexed ${result.discovered ?? 0} project documents`);
+  } catch (err) {
+    console.error('[notesStore] syncProjectDocuments error:', err);
+    toastStore.error('Failed to index project documents');
   }
 }
 
@@ -629,6 +652,7 @@ export const notesStore = {
   uploadAttachment,
   deleteAttachment,
   importMemoryAsNotes,
+  syncProjectDocuments,
   updateSettings,
   fetchSettings,
   get settingsFetched() {

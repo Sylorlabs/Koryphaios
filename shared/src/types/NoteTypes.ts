@@ -9,6 +9,9 @@ export interface Note {
   userId?: string
   createdAt: Date
   updatedAt: Date
+  /** Project-relative path when this note mirrors a real .md or .html file. */
+  sourcePath?: string
+  format?: 'markdown' | 'html'
 }
 
 export interface NoteLink {
@@ -116,6 +119,7 @@ export const NOTE_TOOL_NAMES = [
   'recall_notes',
   'get_note_backlinks',
   'get_note_graph_summary',
+  'render_note',
   'create_note',
   'update_note',
   'delete_note',
@@ -139,6 +143,7 @@ export const NOTE_TOOL_DEFINITIONS: NoteToolDefinition[] = [
   { name: 'recall_notes', label: 'Recall notes', description: 'Load full content for multiple notes', category: 'read' },
   { name: 'get_note_backlinks', label: 'Get backlinks', description: 'Find notes linking to a note', category: 'read' },
   { name: 'get_note_graph_summary', label: 'Graph summary', description: 'Summarize vault graph structure', category: 'read' },
+  { name: 'render_note', label: 'Use in chat', description: 'Pull a bounded excerpt or render a note in chat', category: 'read' },
   { name: 'create_note', label: 'Create note', description: 'Add a new note to the vault', category: 'write' },
   { name: 'update_note', label: 'Update note', description: 'Edit note content, title, or tags', category: 'write' },
   { name: 'delete_note', label: 'Delete note', description: 'Permanently remove a note', category: 'write' },
@@ -160,6 +165,7 @@ export const DEFAULT_NOTE_TOOL_PERMISSIONS: NoteToolPermissions = {
   recall_notes: 'auto',
   get_note_backlinks: 'auto',
   get_note_graph_summary: 'auto',
+  render_note: 'auto',
   create_note: 'ask',
   update_note: 'ask',
   delete_note: 'ask',

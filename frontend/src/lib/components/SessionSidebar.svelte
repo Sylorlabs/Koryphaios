@@ -3,7 +3,8 @@
   import { sessionStore } from '$lib/stores/sessions.svelte';
   import { wsStore } from '$lib/stores/websocket.svelte';
   import { toastStore } from '$lib/stores/toast.svelte';
-  import { Plus, Search, Pencil, Trash2, Check, X, MessageSquare, LoaderCircle } from 'lucide-svelte';
+  import { projectStore, projectDisplayName } from '$lib/stores/project.svelte';
+  import { Plus, Search, Pencil, Trash2, Check, X, MessageSquare, LoaderCircle, FolderOpen } from 'lucide-svelte';
   import AnimatedStatusIcon from './AnimatedStatusIcon.svelte';
   import ConfirmDialog from './ConfirmDialog.svelte';
 
@@ -144,6 +145,40 @@
     </button>
   </div>
 
+  <!-- Project scope -->
+  {#if projectStore.currentPath}
+    <div class="px-4 pt-3 flex items-center gap-2">
+      <span
+        class="flex items-center gap-1.5 min-w-0 text-xs font-medium"
+        style="color: var(--color-text-secondary);"
+        title={projectStore.currentPath}
+      >
+        <FolderOpen size={13} class="shrink-0" style="color: var(--color-accent);" />
+        <span class="truncate">{projectStore.displayName}</span>
+      </span>
+      <div class="ml-auto flex rounded-lg overflow-hidden border" style="border-color: var(--color-border);">
+        <button
+          type="button"
+          class="px-2 py-1 text-xs transition-colors"
+          style="background: {projectStore.scope === 'project' ? 'var(--color-surface-3)' : 'transparent'}; color: {projectStore.scope === 'project' ? 'var(--color-text-primary)' : 'var(--color-text-muted)'};"
+          onclick={() => projectStore.setScope('project')}
+          title="Only chats from this project"
+        >
+          Project
+        </button>
+        <button
+          type="button"
+          class="px-2 py-1 text-xs transition-colors"
+          style="background: {projectStore.scope === 'all' ? 'var(--color-surface-3)' : 'transparent'}; color: {projectStore.scope === 'all' ? 'var(--color-text-primary)' : 'var(--color-text-muted)'};"
+          onclick={() => projectStore.setScope('all')}
+          title="Chats from all projects"
+        >
+          All
+        </button>
+      </div>
+    </div>
+  {/if}
+
   <!-- Search -->
   <div class="px-4 py-3">
     <div class="relative flex items-center">
@@ -218,6 +253,15 @@
                 <div class="text-sm font-medium truncate" style="color: var(--color-text-primary);">{session.title}</div>
                 <div class="flex items-center gap-2.5 flex-wrap" style="margin-top: 6px;">
                   <span style="font-size: var(--text-xs); color: var(--color-text-muted);">{formatTime(session.updatedAt)}</span>
+                  {#if projectStore.scope === 'all' && session.workingDirectory}
+                    <span
+                      class="inline-flex items-center gap-1 px-1.5 rounded truncate"
+                      style="font-size: var(--text-xs); max-width: 120px; color: var(--color-accent); background: var(--color-surface-3);"
+                      title={session.workingDirectory}
+                    >
+                      <FolderOpen size={9} class="shrink-0" />{projectDisplayName(session.workingDirectory)}
+                    </span>
+                  {/if}
                   {#if session.messageCount > 0}
                     <span style="font-size: var(--text-xs); color: var(--color-text-muted);">{session.messageCount} msgs</span>
                   {/if}

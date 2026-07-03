@@ -23,6 +23,7 @@ import {
 } from '@koryphaios/shared';
 import { readFileSync, existsSync } from 'fs';
 import { PROJECT_ROOT } from '../../runtime/paths';
+import { getRequestProjectRoot } from '../../runtime/request-project';
 
 export const notesRoutes = new Elysia({ prefix: '/api/notes' })
 
@@ -32,8 +33,21 @@ export const notesRoutes = new Elysia({ prefix: '/api/notes' })
     const notesList = await notesService.listNotes({
       folderPath: query.folder as string | undefined,
       search: query.search as string | undefined,
-    });
+    }, (query.projectRoot as string | undefined) || PROJECT_ROOT);
     return { ok: true, data: notesList };
+  })
+
+  .post('/sync-project', async ({ request, set }) => {
+    if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
+    try {
+      const url = new URL(request.url);
+      const result = await notesService.syncProjectDocuments(url.searchParams.get('projectRoot') || PROJECT_ROOT);
+      broadcastNotesNetworkUpdate('update');
+      return { ok: true, data: result };
+    } catch (err: unknown) {
+      set.status = 500;
+      return { ok: false, error: err instanceof Error ? err.message : 'Failed to sync project documents' };
+    }
   })
 
   // ── Create note ───────────────────────────────────────────────────────────
@@ -66,7 +80,7 @@ export const notesRoutes = new Elysia({ prefix: '/api/notes' })
   // Persisted server-side so context injection actually honors them.
   .get('/settings', async ({ request, set }) => {
     if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
-    return { ok: true, data: loadNotesSettings(PROJECT_ROOT) };
+    return { ok: true, data: loadNotesSettings(getRequestProjectRoot(request)) };
   })
 
   .put(
@@ -74,7 +88,7 @@ export const notesRoutes = new Elysia({ prefix: '/api/notes' })
     async ({ request, body, set }) => {
       if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
       try {
-        const merged = saveNotesSettings(PROJECT_ROOT, body as Partial<NotesSettings>);
+        const merged = saveNotesSettings(getRequestProjectRoot(request), body as Partial<NotesSettings>);
         return { ok: true, data: merged };
       } catch (err: unknown) {
         set.status = 500;
@@ -104,7 +118,7 @@ export const notesRoutes = new Elysia({ prefix: '/api/notes' })
   // ── Agent permission settings ─────────────────────────────────────────────
   .get('/settings/agent-permissions', async ({ request, set }) => {
     if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
-    return { ok: true, data: loadNotesAgentPermissions(PROJECT_ROOT) };
+    return { ok: true, data: loadNotesAgentPermissions(getRequestProjectRoot(request)) };
   })
 
   .put(
@@ -113,7 +127,7 @@ export const notesRoutes = new Elysia({ prefix: '/api/notes' })
       if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
       try {
         const merged = saveNotesAgentPermissions(
-          PROJECT_ROOT,
+          getRequestProjectRoot(request),
           body as Partial<NotesAgentPermissions>,
         );
         return { ok: true, data: merged };
@@ -143,7 +157,7 @@ export const notesRoutes = new Elysia({ prefix: '/api/notes' })
 
   .post('/settings/agent-permissions/reset', async ({ request, set }) => {
     if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
-    return { ok: true, data: resetNotesAgentPermissions(PROJECT_ROOT) };
+    return { ok: true, data: resetNotesAgentPermissions(getRequestProjectRoot(request)) };
   })
 
   .get('/settings/agent-permissions/defaults', async ({ request, set }) => {
@@ -152,16 +166,16 @@ export const notesRoutes = new Elysia({ prefix: '/api/notes' })
   })
 
   // ── Graph data ────────────────────────────────────────────────────────────
-  .get('/graph', async ({ request, set }) => {
+  .get('/graph', async ({ request, query, set }) => {
     if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
-    const graph = await notesService.getGraphData();
+    const graph = await notesService.getGraphData(query.projectRoot as string | undefined);
     return { ok: true, data: graph };
   })
 
   // ── Folder tree ───────────────────────────────────────────────────────────
-  .get('/folders', async ({ request, set }) => {
+  .get('/folders', async ({ request, query, set }) => {
     if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
-    const tree = await notesService.getFolderTree();
+    const tree = await notesService.getFolderTree(query.projectRoot as string | undefined);
     return { ok: true, data: tree };
   })
 
@@ -176,7 +190,7 @@ export const notesRoutes = new Elysia({ prefix: '/api/notes' })
   .post('/import-memory', async ({ request, set }) => {
     if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
     try {
-      const notes = await notesService.importMemoryAsNotes(PROJECT_ROOT);
+      const notes = await notesService.importMemoryAsNotes(getRequestProjectRoot(request));
       broadcastNotesNetworkUpdate('update');
       return { ok: true, data: notes };
     } catch (err: any) {
