@@ -27,6 +27,8 @@ export interface ProviderEvent {
   type: ProviderEventType;
   content?: string;
   thinking?: string;
+  /** Reasoning-token estimate for redacted thinking streams (Claude Code -p). */
+  thinkingTokens?: number;
   toolCallId?: string;
   toolName?: string;
   toolInput?: string;

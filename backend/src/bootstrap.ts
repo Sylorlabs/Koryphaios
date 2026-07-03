@@ -5,6 +5,7 @@
 
 import { join } from 'node:path';
 import { ProviderRegistry } from './providers';
+import { registerLiveModelResolver } from './providers/models';
 import { ToolRegistry } from './tools';
 import { KoryManager } from './kory/manager';
 import { SessionStore } from './stores/session-store';
@@ -78,6 +79,21 @@ export async function bootstrap(): Promise<AppContext> {
   // Providers & Tools
   const providers = new ProviderRegistry(config);
   await providers.initializeEncryptedCredentials();
+
+  // Wire live model metadata (CLI/API-discovered context windows, verified
+  // flags) into context resolution — designed for this but never registered,
+  // which left every CLI model's context window "unknown".
+  registerLiveModelResolver((modelId, providerName) => {
+    try {
+      const p = providers.get(providerName);
+      if (!p?.listModels) return undefined;
+      return p
+        .listModels()
+        .find((m) => m.id === modelId || m.apiModelId === modelId || m.name === modelId);
+    } catch {
+      return undefined;
+    }
+  });
 
   const tools = await initTools();
 

@@ -72,6 +72,9 @@ export interface AgentThreadMessagePayload {
 export interface ThinkingPayload {
   agentId: string;
   thinking: string;
+  /** Estimated reasoning tokens so far — used when the provider redacts the
+   *  thinking text (Claude Code headless) but reports progress. */
+  thinkingTokens?: number;
 }
 export type StreamThinkingPayload = ThinkingPayload;
 

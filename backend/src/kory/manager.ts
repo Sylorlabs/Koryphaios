@@ -1344,10 +1344,13 @@ export class KoryManager {
           });
         }
       } else if (event.type === 'thinking_delta') {
-        if (event.thinking) {
+        if (event.thinking || typeof event.thinkingTokens === 'number') {
           this.emitWSMessage(sessionId, 'stream.thinking', {
             agentId: KORY_IDENTITY.id,
-            thinking: event.thinking,
+            thinking: event.thinking ?? '',
+            ...(typeof event.thinkingTokens === 'number'
+              ? { thinkingTokens: event.thinkingTokens }
+              : {}),
           } satisfies StreamThinkingPayload);
         }
       } else if (event.type === 'file_edit') {

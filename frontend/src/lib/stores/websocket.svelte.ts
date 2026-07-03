@@ -303,6 +303,8 @@ function handleMessage(msg: WSMessage) {
           glowClass: feedStore.resolveGlowClass(agents.get(p.agentId)?.identity),
           text: p.thinking,
           thinkingStartedAt: msg.timestamp,
+          metadata:
+            typeof p.thinkingTokens === 'number' ? { thinkingTokens: p.thinkingTokens } : {},
         });
       }
       if (msg.sessionId) {

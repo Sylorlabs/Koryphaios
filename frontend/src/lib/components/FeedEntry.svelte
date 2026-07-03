@@ -505,6 +505,7 @@
             text={entry.text} 
             durationMs={entry.durationMs} 
             agentName={entry.agentName} 
+            estimatedTokens={(entry.metadata as { thinkingTokens?: number } | undefined)?.thinkingTokens}
           />
       {:else if entry.type === 'tool_call' || entry.type === 'tool_result'}
           {@const toolCat = getToolCategory(entry.metadata)}

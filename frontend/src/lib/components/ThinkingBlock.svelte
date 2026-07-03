@@ -5,9 +5,12 @@
     text: string;
     durationMs?: number;
     agentName: string;
+    /** Reasoning-token estimate for providers that redact the thinking text
+     *  (Claude Code headless) but report progress. */
+    estimatedTokens?: number;
   }
 
-  let { text, durationMs, agentName: _agentName }: Props = $props();
+  let { text, durationMs, agentName: _agentName, estimatedTokens }: Props = $props();
   let expanded = $state(false);
   let panelEl = $state<HTMLDivElement>();
 
@@ -34,7 +37,9 @@
   let lastSeenLength = text.length;
 
   $effect(() => {
-    const len = text.length;
+    // Growth = new thinking text OR a rising token estimate (redacted streams
+    // have empty text but live token counts).
+    const len = Math.max(text.length, estimatedTokens ?? 0);
     if (len <= lastSeenLength) return;
     lastSeenLength = len;
     lastGrowthAt = performance.now();
@@ -108,6 +113,9 @@
     <span class="label done">Thought for</span>
   {/if}
   <span class="stopwatch tabular-nums" class:live={isLive}>{formatDuration(displayMs)}</span>
+  {#if !text && estimatedTokens && estimatedTokens > 0}
+    <span class="stopwatch tabular-nums" title="Reasoning tokens (text kept private by the provider)">· ~{estimatedTokens >= 1000 ? `${(estimatedTokens / 1000).toFixed(1)}k` : estimatedTokens} tok</span>
+  {/if}
   <span class="expand-cue {expanded ? 'rotated' : ''}" aria-hidden="true">▸</span>
 </button>
 
@@ -118,7 +126,7 @@
     bind:this={panelEl}
     transition:slide={{ duration: 180 }}
   >
-    <p class="thinking-full-text">{text || '…'}</p>
+    <p class="thinking-full-text">{text || (estimatedTokens ? `Reasoning text is kept private by this provider — ~${estimatedTokens} tokens of internal reasoning so far.` : '…')}</p>
     {#if isLive}
       <span class="live-caret" aria-hidden="true"></span>
     {/if}

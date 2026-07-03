@@ -118,6 +118,11 @@ function accumulateFeedEntry(entry: Omit<FeedEntry, 'id'>) {
     } else if (last.type === 'thinking' && !last.thinkingStartedAt) {
       updates.thinkingStartedAt = entry.timestamp;
     }
+    // Redacted-thinking progress (token estimates) rides in metadata and must
+    // keep updating as new deltas land.
+    if (entry.metadata && Object.keys(entry.metadata).length > 0) {
+      updates.metadata = { ...last.metadata, ...entry.metadata };
+    }
 
     Object.assign(last, updates);
     patchGroupedFeedEntry(last.id, last.text, last.timestamp, updates);

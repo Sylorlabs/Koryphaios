@@ -189,7 +189,10 @@ function parseCatalogFromBuffer(buf: Buffer): Map<string, CliCatalogEntry> {
     if (!head) continue;
     const caps = entry.match(/capabilities:\[([^\]]*)\]/);
     const de = entry.match(/default_effort:"([a-z]+)"/);
-    const ctx = entry.match(/context:\{window:(\d+)/);
+    // The catalog minifies numbers to scientific notation (window:1e6) — a
+    // plain \d+ match truncated that to "1" and broke context detection for
+    // every non-haiku model.
+    const ctx = entry.match(/context:\{window:(\d+(?:\.\d+)?(?:e\d+)?)/);
     const capabilities = caps
       ? caps[1].split(',').map((c) => c.trim().replace(/^"|"$/g, '')).filter(Boolean)
       : [];
@@ -780,8 +783,18 @@ export class ClaudeCodeProvider implements Provider {
           const delta = event.delta;
           if (delta?.type === 'text_delta' && delta.text) {
             yield { type: 'content_delta', content: delta.text };
-          } else if (delta?.type === 'thinking_delta' && delta.thinking) {
-            yield { type: 'thinking_delta', thinking: delta.thinking };
+          } else if (delta?.type === 'thinking_delta') {
+            // Headless CLI redacts the reasoning text (thinking:"") and only
+            // reports estimated_tokens — surface the progress so the UI shows
+            // a live thinking indicator instead of nothing.
+            const est = (delta as { estimated_tokens?: number }).estimated_tokens;
+            if (delta.thinking || typeof est === 'number') {
+              yield {
+                type: 'thinking_delta',
+                thinking: delta.thinking ?? '',
+                ...(typeof est === 'number' ? { thinkingTokens: est } : {}),
+              };
+            }
           }
         } else if (event.type === 'message_start' && event.message?.usage) {
           const u = event.message.usage;
