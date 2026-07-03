@@ -1812,6 +1812,24 @@ export class KoryManager {
     this.workers.cancelWorker(agentId);
   }
 
+  /** Re-baseline the session's context bar for a model the user just picked:
+   *  emits (and persists) a usage snapshot with the new model's trusted
+   *  window and the session's last-known occupancy. Backend stays the single
+   *  source of truth — works for every provider and CLI. */
+  async previewModelContext(sessionId: string, modelId: string, providerName: ProviderName) {
+    const last = await getContextArchive()?.getLastUsage(sessionId);
+    this.emitUsageUpdate(
+      sessionId,
+      KORY_IDENTITY.id,
+      modelId,
+      providerName,
+      last?.used ?? 0,
+      0,
+      true,
+      last?.breakdown,
+    );
+  }
+
   cancelSessionWorkers(sessionId: string) {
     this.abortManagerRun(sessionId);
     this.workers.cancelSessionWorkers(sessionId);

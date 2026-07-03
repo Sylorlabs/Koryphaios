@@ -82,6 +82,14 @@
   // ── Sync editor when current note changes ─────────────────────────────────
   $effect(() => {
     const note = notesStore.currentNote;
+    const id = note?.id ?? null;
+    // Only hydrate the editor fields when switching to a *different* note.
+    // updateNote() reassigns the currentNote object on every autosave, which
+    // re-fires this effect. Re-hydrating then would overwrite in-progress edits
+    // and yank the caret/scroll to the top/end while you type. Guarding on the
+    // note id keeps the editor stable during saves of the note you're editing.
+    if (id === lastOpenedNoteId) return;
+    lastOpenedNoteId = id;
     if (note) {
       titleInput = note.title;
       folderInput = note.folderPath;
@@ -90,10 +98,7 @@
       pinned = note.pinned;
       includeInContext = note.includeInContext;
       isDirty = false;
-      if (note.id !== lastOpenedNoteId) {
-        lastOpenedNoteId = note.id;
-        activeView = note.format === 'html' ? 'preview' : 'editor';
-      }
+      activeView = note.format === 'html' ? 'preview' : 'editor';
     }
   });
 

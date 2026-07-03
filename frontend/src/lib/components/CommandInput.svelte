@@ -11,6 +11,8 @@
   import { invoke } from '@tauri-apps/api/core';
   import { toastStore } from '$lib/stores/toast.svelte';
   import { sessionStore } from '$lib/stores/sessions.svelte';
+  import { apiFetch } from '$lib/api.svelte';
+  import { apiUrl } from '$lib/utils/api-url';
 
   export type Attachment = { type: 'image' | 'file'; data: string; name: string };
 
@@ -480,10 +482,22 @@
     selectedModel = value;
     showModelPicker = false;
     if (typeof localStorage !== 'undefined') localStorage.setItem(MODEL_STORAGE_KEY, value);
-    // Re-baseline the context bar to the new model's window immediately.
+    // Re-baseline the context bar immediately (optimistic, from local model
+    // data), then ask the backend for the trusted window — the backend answer
+    // arrives as a normal stream.usage event and always wins. Works for every
+    // harness and API provider.
     const target = availableModels.find((m) => m.value === value);
     const sid = sessionStore.activeSessionId;
-    if (sid) wsStore.setManagerContextWindow(sid, target?.contextWindow);
+    if (sid) {
+      wsStore.setManagerContextWindow(sid, target?.contextWindow);
+      const { provider, model } = parseModelSelection(value);
+      if (provider && model) {
+        void apiFetch(apiUrl(`/api/sessions/${sid}/context/model-preview`), {
+          method: 'POST',
+          body: JSON.stringify({ model, provider }),
+        }).catch(() => {});
+      }
+    }
   }
 
   function selectModel(value: string) {

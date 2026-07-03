@@ -49,7 +49,7 @@
     zhipuai: ['zhipu'],
     fireworks: ['fireworks'],
     deepinfra: ['deepinfra'],
-    codex: ['openai'],
+    codex: ['codex'],
     cortex: ['cortex', 'openai'],
     nebius: ['nebius'],
     together: ['together', 'together-brand'],
@@ -66,6 +66,9 @@
     nim: ['nvidia'],
     voyageai: ['voyage'],
     friendliai: ['friendli'],
+    cortecs: ['cortecs'],
+    cline: ['cline'],
+    cerebras: ['cerebras'],
     klingai: ['kling'],
     ionet: ['ionet'],
     ollamacloud: ['ollama'],
@@ -114,6 +117,8 @@
     'zenmux',
     'grok',
     'cursor',
+    'cline',
+    'cerebras',
   ]);
 
   const monochromeFirstProviders = new Set([
@@ -125,7 +130,18 @@
     'zenmux',
     'grok',
     'cursor',
+    'cline',
+    'cerebras',
+    'codex',
   ]);
+
+  // Cortecs does not publish an icon through the bundled LobeHub set. Use the
+  // avatar from its verified Hugging Face organization instead of a fabricated
+  // fallback mark.
+  const officialProviderIcons: Record<string, string> = {
+    cortecs:
+      'https://cdn-avatars.huggingface.co/v1/production/uploads/64158719bce2fed80ab26ebe/3kkigrx94iBGnQkER3EP2.png',
+  };
 
   let loadError = $state(false);
   let candidateIndex = $state(0);
@@ -145,11 +161,14 @@
     const seen = new Set<string>();
     const preferMonochrome = monochromeFirstProviders.has(normalized);
 
-    const pushCandidate = (src: string, themeAdaptive: boolean) => {
-      if (seen.has(src) || !EXISTING_PROVIDER_ICON_PATHS.has(src)) return;
+    const pushCandidate = (src: string, themeAdaptive: boolean, remote = false) => {
+      if (seen.has(src) || (!remote && !EXISTING_PROVIDER_ICON_PATHS.has(src))) return;
       seen.add(src);
       candidates.push({ src, themeAdaptive });
     };
+
+    const officialIcon = officialProviderIcons[normalized];
+    if (officialIcon) pushCandidate(officialIcon, false, true);
 
     const pushColorCandidates = () => {
       for (const slug of slugs) {

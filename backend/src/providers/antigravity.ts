@@ -19,9 +19,9 @@
 
 import type { ProviderConfig, ModelDef } from '@koryphaios/shared';
 import { spawn } from 'node:child_process';
-import { readFileSync, unlinkSync } from 'node:fs';
+import { readFileSync, unlinkSync, readdirSync, statSync, existsSync, openSync, readSync, closeSync, fstatSync } from 'node:fs';
 import { join } from 'node:path';
-import { tmpdir } from 'node:os';
+import { tmpdir, homedir } from 'node:os';
 import {
   type Provider,
   type ProviderContentBlock,
@@ -253,6 +253,7 @@ export class AntigravityProvider implements Provider {
     const cliModel = this.resolveCliModel(request.model);
     const logPath = join(tmpdir(), `agy-${Date.now()}.log`);
 
+    const cwd = request.workingDirectory?.trim();
     const args = [
       '--print',
       prompt,
@@ -261,6 +262,9 @@ export class AntigravityProvider implements Provider {
       '--dangerously-skip-permissions',
       '--log-file',
       logPath,
+      // agy scopes its workspace via --add-dir (process cwd alone is ignored
+      // for tool resolution — verified: it listed $HOME instead of cwd).
+      ...(cwd ? ['--add-dir', cwd] : []),
     ];
 
     // Run in the session's project directory when one is set so the CLI sees
@@ -284,7 +288,14 @@ export class AntigravityProvider implements Provider {
 
     let stdout = '';
     let stderr = '';
-    child.stdout.on('data', (c: Buffer) => (stdout += c.toString()));
+    // Live stdout queue: agy --print writes progressively — stream each chunk
+    // the moment it lands instead of dumping the whole reply at exit.
+    const stdoutQueue: string[] = [];
+    child.stdout.on('data', (c: Buffer) => {
+      const text = c.toString();
+      stdout += text;
+      stdoutQueue.push(text);
+    });
     child.stderr.on('data', (c: Buffer) => (stderr += c.toString()));
 
     const exitPromise = new Promise<number>((resolve) => {
@@ -295,6 +306,11 @@ export class AntigravityProvider implements Provider {
     // Tail the log file, parse Gemini SSE JSON, emit real streaming events.
     let logOffset = 0;
     let totalContentEvents = 0;
+    let emittedStdout = false;
+    // Primary live source: agy's own brain transcript (responses + tools).
+    const transcriptTail = newTranscriptTail(() => stdout);
+    // Reasoning source: the trajectory store (proto field 20.3 of model steps).
+    const trajectoryTail = newTrajectoryTail();
 
     const drainLog = (): ProviderEvent[] => {
       try {
@@ -318,10 +334,34 @@ export class AntigravityProvider implements Provider {
       ]);
 
       for (const event of drainLog()) yield event;
+      for (const event of drainTrajectoryThinking(trajectoryTail)) yield event;
+      for (const event of drainTranscript(transcriptTail)) {
+        if (event.type === 'content_delta') totalContentEvents++;
+        yield event;
+      }
+
+      // Stream stdout live — unless the transcript/SSE path is already
+      // delivering the response text (avoid double-emitting).
+      if (totalContentEvents === 0 && !transcriptTail.emittedContent) {
+        while (stdoutQueue.length > 0) {
+          const chunk = stdoutQueue.shift()!;
+          if (chunk) {
+            emittedStdout = true;
+            yield { type: 'content_delta', content: chunk };
+          }
+        }
+      }
 
       if (result.done) {
-        // Drain any final log bytes written before shutdown.
+        // Drain any final log/transcript bytes written before shutdown.
         for (const event of drainLog()) yield event;
+        // The transcript's final lines can land marginally after exit.
+        await new Promise((r) => setTimeout(r, 400));
+        for (const event of drainTrajectoryThinking(trajectoryTail)) yield event;
+        for (const event of drainTranscript(transcriptTail)) {
+          if (event.type === 'content_delta') totalContentEvents++;
+          yield event;
+        }
         clearTimeout(timeout);
         request.signal?.removeEventListener('abort', onAbort);
 
@@ -344,9 +384,19 @@ export class AntigravityProvider implements Provider {
           return;
         }
 
-        // Fall back to stdout chunking only if the log produced no content (e.g. log
-        // was unreadable or agy used a non-SSE output path).
-        if (totalContentEvents === 0 && text) {
+        // Flush any stdout that arrived after the last poll tick.
+        if (totalContentEvents === 0 && !transcriptTail.emittedContent) {
+          while (stdoutQueue.length > 0) {
+            const chunk = stdoutQueue.shift()!;
+            if (chunk) {
+              emittedStdout = true;
+              yield { type: 'content_delta', content: chunk };
+            }
+          }
+        }
+        // Last resort: nothing streamed at all but stdout has text (shouldn't
+        // happen — kept as a safety net).
+        if (totalContentEvents === 0 && !emittedStdout && text) {
           yield* chunkText(text);
         }
 
@@ -372,6 +422,262 @@ function* chunkText(text: string): Generator<ProviderEvent> {
     }
   }
   if (buf) yield { type: 'content_delta', content: buf };
+}
+
+// ── Live transcript tailer ───────────────────────────────────────────────────
+// The agy CLI writes a full JSONL transcript of every run to its local "brain"
+// store (~/.gemini/antigravity-cli/brain/<id>/.system_generated/logs/
+// transcript_full.jsonl): model responses, every tool call with output,
+// errors, subagent spawns — appended live as steps complete. Tailing it gives
+// Koryphaios the same real-time visibility the Antigravity app has, from the
+// CLI's own artifacts (no API access, no auth games).
+
+const AGY_BRAIN_DIR = join(homedir(), '.gemini', 'antigravity-cli', 'brain');
+const AGY_CONV_DIR = join(homedir(), '.gemini', 'antigravity-cli', 'conversations');
+
+// ── Trajectory thinking extraction ──────────────────────────────────────────
+// The reasoning text ("collapsible thinking" in the Antigravity app) is NOT in
+// the JSONL transcript — it lives in the conversation trajectory SQLite, in
+// model-response steps (step_type 15), protobuf field path 20.3. We decode the
+// proto generically (wire format only, no schema needed) and stream it.
+
+/** Walk protobuf wire format collecting [fieldPath, string] pairs. */
+function protoStrings(buf: Uint8Array, prefix = ''): Array<[string, string]> {
+  const out: Array<[string, string]> = [];
+  let i = 0;
+  const readVarint = (): number => {
+    let v = 0;
+    let shift = 0;
+    for (;;) {
+      if (i >= buf.length) throw new Error('eof');
+      const b = buf[i++];
+      v += (b & 0x7f) * 2 ** shift;
+      shift += 7;
+      if (!(b & 0x80)) break;
+    }
+    return v;
+  };
+  while (i < buf.length) {
+    let key: number;
+    try {
+      key = readVarint();
+    } catch {
+      break;
+    }
+    const field = Math.floor(key / 8);
+    const wire = key & 7;
+    try {
+      if (wire === 0) readVarint();
+      else if (wire === 2) {
+        const len = readVarint();
+        if (len < 0 || i + len > buf.length) break;
+        const data = buf.subarray(i, i + len);
+        i += len;
+        const path = prefix ? `${prefix}.${field}` : String(field);
+        let asText: string | null = null;
+        if (len > 0) {
+          try {
+            const t = new TextDecoder('utf-8', { fatal: true }).decode(data);
+            // Heuristic: leading chars must be printable — otherwise treat as
+            // a nested message and recurse.
+            const head = t.slice(0, 80);
+            if (/^[\x20-\x7e\n\t\r]*$/.test(head)) asText = t;
+          } catch {
+            /* not utf-8 */
+          }
+        }
+        if (asText !== null) out.push([path, asText]);
+        else out.push(...protoStrings(data, path));
+      } else if (wire === 5) i += 4;
+      else if (wire === 1) i += 8;
+      else break;
+    } catch {
+      break;
+    }
+  }
+  return out;
+}
+
+interface TrajectoryTailState {
+  spawnedAt: number;
+  /** last consumed step idx per conversation db */
+  lastIdx: Map<string, number>;
+  seenThinking: Set<string>;
+}
+
+function newTrajectoryTail(): TrajectoryTailState {
+  return { spawnedAt: Date.now(), lastIdx: new Map(), seenThinking: new Set() };
+}
+
+/** Poll live conversation dbs for new model-response steps; extract thinking. */
+function drainTrajectoryThinking(state: TrajectoryTailState): ProviderEvent[] {
+  const events: ProviderEvent[] = [];
+  let dbs: string[] = [];
+  try {
+    dbs = readdirSync(AGY_CONV_DIR)
+      .filter((f) => f.endsWith('.db'))
+      .map((f) => join(AGY_CONV_DIR, f))
+      .filter((f) => {
+        if (state.lastIdx.has(f)) return true;
+        try {
+          return statSync(f).mtimeMs >= state.spawnedAt - 2_000;
+        } catch {
+          return false;
+        }
+      });
+  } catch {
+    return events;
+  }
+  for (const file of dbs) {
+    try {
+      // Bun's sqlite reads WAL-mode dbs fine in readonly.
+      const { Database } = require('bun:sqlite') as typeof import('bun:sqlite');
+      const db = new Database(file, { readonly: true });
+      try {
+        const last = state.lastIdx.get(file) ?? -1;
+        const rows = db
+          .query('select idx, step_type, step_payload from steps where idx > ? order by idx')
+          .all(last) as Array<{ idx: number; step_type: number; step_payload: Uint8Array | null }>;
+        for (const row of rows) {
+          state.lastIdx.set(file, row.idx);
+          if (row.step_type !== 15 || !row.step_payload) continue;
+          for (const [path, text] of protoStrings(new Uint8Array(row.step_payload))) {
+            // 20.3 = reasoning text (20.1/20.8 are the final answer, streamed
+            // elsewhere; 20.14 is the encrypted thought signature).
+            if (path.endsWith('20.3') && text.trim().length > 10) {
+              const key = text.slice(0, 120);
+              if (state.seenThinking.has(key)) continue;
+              state.seenThinking.add(key);
+              events.push({ type: 'thinking_delta', thinking: text });
+            }
+          }
+        }
+      } finally {
+        db.close();
+      }
+    } catch {
+      /* db busy/locked this tick — retry next poll */
+    }
+  }
+  return events;
+}
+
+
+const AGY_TOOL_TYPES = new Set([
+  'RUN_COMMAND',
+  'VIEW_FILE',
+  'LIST_DIRECTORY',
+  'GREP_SEARCH',
+  'CODE_ACTION',
+  'SEARCH_WEB',
+  'READ_URL_CONTENT',
+  'GENERIC',
+  'INVOKE_SUBAGENT',
+  'MANAGE_TASK',
+]);
+
+interface TranscriptTailState {
+  /** byte offsets per transcript file */
+  offsets: Map<string, number>;
+  spawnedAt: number;
+  emittedContent: boolean;
+  /** Live stdout text so far — used to skip transcript responses the user
+   *  already saw streaming (the final answer is printed to stdout too). */
+  stdoutSoFar: () => string;
+}
+
+function newTranscriptTail(stdoutSoFar: () => string): TranscriptTailState {
+  return { offsets: new Map(), spawnedAt: Date.now(), emittedContent: false, stdoutSoFar };
+}
+
+/** Transcript files touched since this run started. */
+function findLiveTranscripts(state: TranscriptTailState): string[] {
+  const out: string[] = [];
+  try {
+    for (const id of readdirSync(AGY_BRAIN_DIR)) {
+      const f = join(AGY_BRAIN_DIR, id, '.system_generated', 'logs', 'transcript_full.jsonl');
+      try {
+        if (state.offsets.has(f) || statSync(f).mtimeMs >= state.spawnedAt - 2_000) out.push(f);
+      } catch {
+        /* no transcript in this brain dir */
+      }
+    }
+  } catch {
+    /* brain dir absent — older agy or different install */
+  }
+  return out;
+}
+
+/** Read new complete lines from a transcript, mapped to provider events. */
+function drainTranscript(state: TranscriptTailState): ProviderEvent[] {
+  const events: ProviderEvent[] = [];
+  for (const file of findLiveTranscripts(state)) {
+    try {
+      const start = state.offsets.get(file) ?? 0;
+      const fd = openSync(file, 'r');
+      const size = fstatSync(fd).size;
+      if (size <= start) {
+        closeSync(fd);
+        continue;
+      }
+      const buf = Buffer.alloc(size - start);
+      readSync(fd, buf, 0, buf.length, start);
+      closeSync(fd);
+      const text = buf.toString('utf-8');
+      // Only consume complete lines; partial tail re-reads next poll.
+      const lastNl = text.lastIndexOf('\n');
+      if (lastNl === -1) continue;
+      state.offsets.set(file, start + Buffer.byteLength(text.slice(0, lastNl + 1), 'utf-8'));
+      for (const line of text.slice(0, lastNl).split('\n')) {
+        const trimmed = line.trim();
+        if (!trimmed) continue;
+        try {
+          const row = JSON.parse(trimmed) as {
+            type?: string;
+            source?: string;
+            content?: string;
+            created_at?: string;
+          };
+          const kind = row.type ?? '';
+          const content = (row.content ?? '').trim();
+          if (kind === 'PLANNER_RESPONSE' && content) {
+            // The FINAL response is also printed to stdout (already streamed
+            // live) — only surface transcript responses the user hasn't seen.
+            const probe = content.slice(0, 200);
+            if (!state.stdoutSoFar().includes(probe)) {
+              events.push({
+                type: 'content_delta',
+                content: state.emittedContent ? `\n\n${content}` : content,
+              });
+              state.emittedContent = true;
+            }
+          } else if (kind === 'ERROR_MESSAGE' && content) {
+            events.push({
+              type: 'tool_executed',
+              toolName: 'antigravity',
+              toolInput: '{}',
+              toolOutput: content.slice(0, 4_000),
+              isError: true,
+            });
+          } else if (AGY_TOOL_TYPES.has(kind) && content) {
+            events.push({
+              type: 'tool_executed',
+              toolName: kind.toLowerCase(),
+              toolInput: '{}',
+              toolOutput: content.slice(0, 4_000),
+            });
+          }
+          // USER_INPUT / EPHEMERAL_MESSAGE / SYSTEM_MESSAGE / CHECKPOINT /
+          // CONVERSATION_HISTORY are prompt plumbing — not surfaced.
+        } catch {
+          /* partial or non-JSON line */
+        }
+      }
+    } catch {
+      /* file rotated/unreadable this tick — retry next poll */
+    }
+  }
+  return events;
 }
 
 // The agy CLI has no flag to disable native subagent/delegation behavior, so the

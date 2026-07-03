@@ -122,6 +122,16 @@ export const sessionRoutes = new Elysia({ prefix: '/api/sessions' })
       })),
     };
   })
+  .post('/:id/context/model-preview', async ({ request, params: { id }, body, set }) => {
+    if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
+    // Model switched in the composer: re-baseline the context bar from the
+    // backend's trusted window data (never a frontend guess).
+    const { kory } = getContext();
+    const b = body as { model?: string; provider?: string } | undefined;
+    if (!b?.model || !b?.provider) return { ok: false, error: 'model and provider required' };
+    await kory.previewModelContext(id, b.model, b.provider as never);
+    return { ok: true };
+  })
   .post('/:id/context/:archiveId/visibility', async ({ request, params: { id, archiveId }, body, set }) => {
     if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
     // User-driven "hide from agent": stubs this entry out of the model's
