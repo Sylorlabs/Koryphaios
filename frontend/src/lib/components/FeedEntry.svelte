@@ -199,6 +199,31 @@
     }
   }
 
+  // ── Streaming text: render arriving tokens as chunks that fade from
+  // translucent to full opacity — text "settles" as it lands. ──
+  let streamChunks = $state<Array<{ id: number; text: string }>>([]);
+  let chunkCounter = 0;
+  let lastStreamText = '';
+
+  $effect(() => {
+    if (!(isStreaming && entry.type === 'content')) {
+      if (streamChunks.length) {
+        streamChunks = [];
+        lastStreamText = '';
+      }
+      return;
+    }
+    const t = entry.text;
+    if (t === lastStreamText) return;
+    if (t.startsWith(lastStreamText)) {
+      const delta = t.slice(lastStreamText.length);
+      if (delta) streamChunks = [...streamChunks, { id: chunkCounter++, text: delta }];
+    } else {
+      streamChunks = [{ id: chunkCounter++, text: t }];
+    }
+    lastStreamText = t;
+  });
+
   // Debounced markdown parsing for performance
   let debouncedText = $state('');
   let timer: ReturnType<typeof setTimeout>;
@@ -537,7 +562,9 @@
           {/if}
       {:else if entry.type === 'user_message' || entry.type === 'content' || entry.type === 'thought'}
           <div class="{getEntryColor(entry.type)} break-words mt-1 markdown-content">
-            {#if isStreaming}
+            {#if isStreaming && entry.type === 'content'}
+              <span class="whitespace-pre-wrap">{#each streamChunks as c (c.id)}<span class="stream-chunk">{c.text}</span>{/each}</span>
+            {:else if isStreaming}
               {entry.text}
             {:else}
               {@html parsedHtml}
@@ -630,9 +657,6 @@
             {entry.text}
           </div>
       {/if}
-      {#if isStreaming && entry.type === 'content'}
-        <span class="flow-cursor" aria-hidden="true"></span>
-      {/if}
     </div>
 
     <div class="shrink-0 flex items-center gap-0.5 opacity-0 group-hover:opacity-60 hover:!opacity-100 transition-opacity">
@@ -710,33 +734,18 @@
 {/if}
 
 <style>
-  /* Streaming cursor: a soft gradient that flows left-to-right, reading as
-     text "pouring in". Rendered only while tokens are actually arriving. */
-  .flow-cursor {
-    display: inline-block;
-    width: 28px;
-    height: 0.9em;
-    margin-left: 4px;
-    vertical-align: text-bottom;
-    border-radius: 999px;
-    background: linear-gradient(
-      90deg,
-      transparent 0%,
-      var(--color-accent) 45%,
-      transparent 90%
-    );
-    background-size: 200% 100%;
-    opacity: 0.7;
-    animation: flow-in 1.1s ease-in-out infinite;
+  /* Streaming text: each arriving chunk starts translucent and settles to
+     full opacity — the newest words read as "landing" smoothly. */
+  .stream-chunk {
+    animation: chunk-settle 0.6s ease-out forwards;
   }
 
-  @keyframes flow-in {
-    0% { background-position: 120% 0; opacity: 0.25; }
-    50% { background-position: 0% 0; opacity: 0.8; }
-    100% { background-position: -120% 0; opacity: 0.25; }
+  @keyframes chunk-settle {
+    from { opacity: 0.25; }
+    to { opacity: 1; }
   }
 
   @media (prefers-reduced-motion: reduce) {
-    .flow-cursor { animation: none; }
+    .stream-chunk { animation: none; opacity: 1; }
   }
 </style>
