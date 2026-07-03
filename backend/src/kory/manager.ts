@@ -939,6 +939,7 @@ export class KoryManager {
             messages,
             managerCtx,
             abort.signal,
+            reasoningLevel,
           );
           koryLog.debug(
             {
@@ -1149,6 +1150,7 @@ export class KoryManager {
     messages: InternalMessage[],
     ctx: ToolContext,
     signal?: AbortSignal,
+    reasoningLevel?: string,
   ): Promise<LLMTurnResult> {
     if (signal?.aborted) throw new DOMException('Manager run aborted', 'AbortError');
 
@@ -1280,6 +1282,22 @@ export class KoryManager {
           : `.`);
     }
 
+    // The composer's reasoning tier MUST reach the provider — this was silently
+    // dropped for the main chat turn (only worker threads forwarded it).
+    const resolvedReasoning =
+      reasoningLevel === 'auto'
+        ? determineAutoReasoningLevel(
+            typeof messages[messages.length - 1]?.content === 'string'
+              ? (messages[messages.length - 1].content as string)
+              : '',
+          )
+        : reasoningLevel;
+    const normalizedReasoning = normalizeReasoningLevel(
+      provider.name,
+      modelId,
+      resolvedReasoning,
+    );
+
     const streamSignal = withTimeoutSignal(signal, AGENT.LLM_STREAM_TIMEOUT_MS);
     const stream = this.providers.executeWithRetry(
       {
@@ -1289,6 +1307,7 @@ export class KoryManager {
         tools,
         maxTokens: 16384,
         signal: streamSignal,
+        ...(normalizedReasoning !== undefined && { reasoningLevel: normalizedReasoning }),
         // Agentic CLI providers (claude-code) run + edit files in the session's project directory.
         workingDirectory: await this.resolveSessionWorkingDirectory(sessionId),
         sessionId,

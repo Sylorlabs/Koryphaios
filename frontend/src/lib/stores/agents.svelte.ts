@@ -383,7 +383,16 @@ export function getContextUsage(): {
 
   const agent = manager ?? candidates[0];
   if (!agent.contextKnown || agent.contextMax <= 0) {
-    return { used: 0, max: 0, percent: 0, isReliable: false, reason: 'context_unknown' };
+    // Window size unknown — still report real usage so the bar never lies by
+    // omission; the UI shows tokens-used with an "unknown window" treatment.
+    return {
+      used: Math.max(0, agent.tokensUsed),
+      max: 0,
+      percent: 0,
+      isReliable: false,
+      reason: 'context_unknown',
+      breakdown: agent.contextBreakdown,
+    };
   }
 
   const used = Math.max(0, agent.tokensUsed);

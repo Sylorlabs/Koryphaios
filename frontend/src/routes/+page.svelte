@@ -1048,8 +1048,11 @@ RULES:
   {/snippet}
 
   {#snippet contextBar()}
-    <!-- Context occupancy is informational (not cost tracking) — visible in every mode. -->
-    {#if wsStore.contextUsage.isReliable}
+    <!-- Context occupancy is informational (not cost tracking) — ALWAYS visible
+         for an open session: known window → segmented bar; unknown window →
+         tokens-used with an explicit "window unknown" label; no data yet →
+         muted awaiting state. Never silently absent. -->
+    {#if projectStore.currentPath && sessionStore.activeSessionId}
       <div
         class="shrink-0 px-4"
         style="padding-top: var(--space-2); padding-bottom: var(--space-2); border-top: 1px solid var(--color-border); background: var(--color-surface-1);"
@@ -1062,7 +1065,9 @@ RULES:
             Context
           </span>
           <div class="flex-1 rounded-full overflow-hidden flex" style="height: 6px; background: var(--color-surface-3);">
-            {#if contextSegments}
+            {#if !wsStore.contextUsage.isReliable}
+              <div class="h-full rounded-full" style="width: 100%; background: var(--color-surface-4, var(--color-surface-3)); opacity: 0.5;"></div>
+            {:else if contextSegments}
               {#each contextSegments as seg (seg.key)}
                 <div
                   class="h-full transition-all"
@@ -1087,6 +1092,14 @@ RULES:
               style="font-size: var(--text-xs); color: {wsStore.contextUsage.percent > 85 ? '#ef4444' : 'var(--color-text-muted)'};"
             >
               {formatTokenCount(wsStore.contextUsage.used)} / {formatTokenCount(wsStore.contextUsage.max)}
+            </span>
+          {:else if wsStore.contextUsage.used > 0}
+            <span class="shrink-0 tabular-nums" style="font-size: var(--text-xs); color: var(--color-text-muted);">
+              ~{formatTokenCount(wsStore.contextUsage.used)} used · window unknown
+            </span>
+          {:else}
+            <span class="shrink-0" style="font-size: var(--text-xs); color: var(--color-text-muted); opacity: 0.6;">
+              awaiting usage data
             </span>
           {/if}
         </div>
