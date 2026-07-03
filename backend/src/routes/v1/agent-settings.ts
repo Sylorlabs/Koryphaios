@@ -1,5 +1,5 @@
 import { Elysia, t } from 'elysia';
-import { PROJECT_ROOT } from '../../runtime/paths';
+import { getRequestProjectRoot } from '../../runtime/request-project';
 import { getContext } from '../../context';
 import {
   loadAgentSettings,
@@ -89,7 +89,7 @@ export const agentSettingsRoutes = new Elysia({ prefix: '/api/agent' })
   })
   .get('/settings', async ({ request, set }) => {
     if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
-    const settings = loadAgentSettings(PROJECT_ROOT);
+    const settings = loadAgentSettings(getRequestProjectRoot(request));
     return {
       ok: true,
       data: settings,
@@ -99,9 +99,10 @@ export const agentSettingsRoutes = new Elysia({ prefix: '/api/agent' })
   .put('/settings', async ({ request, body, set }) => {
     if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
     try {
-      const currentSettings = loadAgentSettings(PROJECT_ROOT);
+      const root = getRequestProjectRoot(request);
+      const currentSettings = loadAgentSettings(root);
       const newSettings = { ...currentSettings, ...(body as any) };
-      saveAgentSettings(PROJECT_ROOT, newSettings as any);
+      saveAgentSettings(root, newSettings as any);
       return {
         ok: true,
         data: newSettings,
@@ -114,7 +115,7 @@ export const agentSettingsRoutes = new Elysia({ prefix: '/api/agent' })
   })
   .post('/settings/reset', async ({ request, set }) => {
     if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
-    const settings = resetAgentSettings(PROJECT_ROOT);
+    const settings = resetAgentSettings(getRequestProjectRoot(request));
     return {
       ok: true,
       data: settings,
@@ -123,7 +124,7 @@ export const agentSettingsRoutes = new Elysia({ prefix: '/api/agent' })
   })
   .get('/preferences', async ({ request, set }) => {
     if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
-    const prefs = readPreferences(PROJECT_ROOT);
+    const prefs = readPreferences(getRequestProjectRoot(request));
     return { ok: true, data: prefs };
   })
   .put(
@@ -131,7 +132,7 @@ export const agentSettingsRoutes = new Elysia({ prefix: '/api/agent' })
     async ({ request, body, set }) => {
       if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
       try {
-        writePreferences(PROJECT_ROOT, body.content);
+        writePreferences(getRequestProjectRoot(request), body.content);
         return { ok: true, message: 'Preferences updated. Critic will enforce new rules.' };
       } catch (err: any) {
         set.status = 500;
@@ -146,7 +147,7 @@ export const agentSettingsRoutes = new Elysia({ prefix: '/api/agent' })
   )
   .post('/preferences/init', async ({ request, set }) => {
     if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
-    const prefs = initializePreferences(PROJECT_ROOT);
+    const prefs = initializePreferences(getRequestProjectRoot(request));
     return {
       ok: true,
       data: prefs,
@@ -155,8 +156,9 @@ export const agentSettingsRoutes = new Elysia({ prefix: '/api/agent' })
   })
   .get('/context', async ({ request, set }) => {
     if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
-    const settings = loadAgentSettings(PROJECT_ROOT);
-    const context = assembleAgentContext(PROJECT_ROOT, settings);
+    const root = getRequestProjectRoot(request);
+    const settings = loadAgentSettings(root);
+    const context = assembleAgentContext(root, settings);
     return { ok: true, data: context };
   })
   .post(
@@ -164,8 +166,9 @@ export const agentSettingsRoutes = new Elysia({ prefix: '/api/agent' })
     async ({ request, body, set }) => {
       if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
       try {
-        const settings = loadAgentSettings(PROJECT_ROOT);
-        const preferences = readPreferences(PROJECT_ROOT).content;
+        const root = getRequestProjectRoot(request);
+        const settings = loadAgentSettings(root);
+        const preferences = readPreferences(root).content;
         const result = enforceRules(
           body.code,
           body.filePath,
@@ -190,11 +193,12 @@ export const agentSettingsRoutes = new Elysia({ prefix: '/api/agent' })
     async ({ request, body, set }) => {
       if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
       try {
-        const settings = loadAgentSettings(PROJECT_ROOT);
-        const preferences = readPreferences(PROJECT_ROOT).content;
+        const root = getRequestProjectRoot(request);
+        const settings = loadAgentSettings(root);
+        const preferences = readPreferences(root).content;
         let rules = '';
         try {
-          rules = readFileSync(join(PROJECT_ROOT, '.koryrules'), 'utf-8');
+          rules = readFileSync(join(root, '.koryphaios/rules/rules.md'), 'utf-8');
         } catch {}
 
         const result = criticReview({
@@ -222,7 +226,7 @@ export const agentSettingsRoutes = new Elysia({ prefix: '/api/agent' })
   )
   .get('/stats', async ({ request, set }) => {
     if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
-    const stats = getAgentSettingsStats(PROJECT_ROOT);
+    const stats = getAgentSettingsStats(getRequestProjectRoot(request));
     return { ok: true, data: stats };
   })
   .get('/defaults', async ({ request, set }) => {

@@ -96,6 +96,7 @@
   };
   let loadedNotesProject: string | null = null;
   let loadedMemoryProject: string | null = null;
+  let loadedAgentProject: string | null = null;
 
   $effect(() => {
     const projectPath = projectStore.currentPath;
@@ -109,6 +110,10 @@
     if (open && activeTab === 'memory' && loadedMemoryProject !== projectPath) {
       loadedMemoryProject = projectPath;
       void memoryStore.loadAllMemory();
+    }
+    if (open && activeTab === 'agent' && loadedAgentProject !== projectPath) {
+      loadedAgentProject = projectPath;
+      void agentSettingsStore.loadAll();
     }
   });
 

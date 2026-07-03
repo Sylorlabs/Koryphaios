@@ -707,7 +707,8 @@ export function assembleAgentContext(
 } {
   const prefs = settings.preferencesEnabled ? readPreferences(projectRoot).content : '';
 
-  const rulesContent = readFileSync(join(projectRoot, '.koryphaios/rules/rules.md'), 'utf-8').toString() || '';
+  const rulesPath = join(projectRoot, '.koryphaios/rules/rules.md');
+  const rulesContent = existsSync(rulesPath) ? readFileSync(rulesPath, 'utf-8').toString() : '';
 
   const enforcementMessage = generateEnforcementMessage(settings);
 
