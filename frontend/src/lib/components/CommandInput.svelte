@@ -10,6 +10,7 @@
   import { getModelConfigurationWarning } from '$lib/utils/model-config';
   import { invoke } from '@tauri-apps/api/core';
   import { toastStore } from '$lib/stores/toast.svelte';
+  import { sessionStore } from '$lib/stores/sessions.svelte';
 
   export type Attachment = { type: 'image' | 'file'; data: string; name: string };
 
@@ -479,6 +480,10 @@
     selectedModel = value;
     showModelPicker = false;
     if (typeof localStorage !== 'undefined') localStorage.setItem(MODEL_STORAGE_KEY, value);
+    // Re-baseline the context bar to the new model's window immediately.
+    const target = availableModels.find((m) => m.value === value);
+    const sid = sessionStore.activeSessionId;
+    if (sid) wsStore.setManagerContextWindow(sid, target?.contextWindow);
   }
 
   function selectModel(value: string) {

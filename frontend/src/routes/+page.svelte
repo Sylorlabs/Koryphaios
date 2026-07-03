@@ -92,6 +92,22 @@
     // Unrounded percent — the store's integer percent collapses small
     // sessions' segments to zero width.
     const percentFloat = Math.min(100, (usage.used / usage.max) * 100);
+    if (usage.used > sum) {
+      // Provider reports MORE than we composed: the gap is the provider's own
+      // harness overhead (e.g. Claude Code's system prompt + native tool
+      // defs). Show each segment at its true estimate plus an explicit
+      // "Provider harness" segment — never smear the gap across our segments.
+      const harness = usage.used - sum;
+      const perToken = percentFloat / usage.used;
+      return [
+        ...CONTEXT_SEGMENTS.map((s) => ({
+          ...s,
+          tokens: b[s.key],
+          widthPercent: b[s.key] * perToken,
+        })),
+        { key: 'harness', label: 'Provider harness', color: '#9ca3af', tokens: harness, widthPercent: harness * perToken },
+      ].filter((s) => s.tokens > 0);
+    }
     return CONTEXT_SEGMENTS.map((s) => {
       const share = b[s.key] / sum;
       return {

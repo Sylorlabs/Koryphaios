@@ -331,6 +331,145 @@ export class EditFileTool implements Tool {
   }
 }
 
+// ─── Batch edit: atomic multi-site edits with full diff visibility ───────────
+
+export class BatchEditTool implements Tool {
+  readonly name = 'batch_edit';
+  readonly description =
+    'Apply MANY exact string replacements across one or more files in a single atomic operation: ' +
+    'every edit is validated first (each old_str must exist, and be unique unless replace_all), and ' +
+    'if ANY edit fails to match, NOTHING is written. Prefer this over repeated edit_file calls when ' +
+    'making several coordinated changes — it is faster and cannot leave files half-edited. ' +
+    'Each touched file still produces a full diff for the user.';
+
+  readonly inputSchema = {
+    type: 'object',
+    properties: {
+      files: {
+        type: 'array',
+        description: 'Files to edit, each with its ordered list of replacements.',
+        items: {
+          type: 'object',
+          properties: {
+            path: { type: 'string', description: 'Path to the file to edit.' },
+            edits: {
+              type: 'array',
+              items: {
+                type: 'object',
+                properties: {
+                  old_str: { type: 'string', description: 'Exact string to find.' },
+                  new_str: { type: 'string', description: 'Replacement string.' },
+                  replace_all: {
+                    type: 'boolean',
+                    description: 'Replace every occurrence (default: must be unique).',
+                  },
+                },
+                required: ['old_str', 'new_str'],
+              },
+            },
+          },
+          required: ['path', 'edits'],
+        },
+      },
+    },
+    required: ['files'],
+  };
+
+  async run(ctx: ToolContext, call: ToolCallInput): Promise<ToolCallOutput> {
+    const files = (call.input.files ?? []) as Array<{
+      path: string;
+      edits: Array<{ old_str: string; new_str: string; replace_all?: boolean }>;
+    }>;
+    const fail = (output: string): ToolCallOutput => ({
+      callId: call.id,
+      name: this.name,
+      output,
+      isError: true,
+      durationMs: 0,
+    });
+    if (!Array.isArray(files) || files.length === 0) return fail('No files given.');
+
+    // ── Phase 1: validate EVERYTHING before touching anything. ──
+    const allowedRoots = getAllowedRoots(ctx);
+    const staged: Array<{
+      absPath: string;
+      oldContent: string;
+      newContent: string;
+      replacements: number;
+    }> = [];
+    const errors: string[] = [];
+
+    for (const f of files) {
+      const absPath = f.path.startsWith('/') ? f.path : join(ctx.workingDirectory, f.path);
+      const access = validatePathAccess(absPath, allowedRoots);
+      if (!access.allowed) {
+        errors.push(`${f.path}: access denied (${access.reason})`);
+        continue;
+      }
+      if (!existsSync(absPath)) {
+        errors.push(`${f.path}: file not found`);
+        continue;
+      }
+      const oldContent = await Bun.file(absPath).text();
+      let working = oldContent;
+      let replacements = 0;
+      for (const [i, e] of (f.edits ?? []).entries()) {
+        const occurrences = working.split(e.old_str).length - 1;
+        if (occurrences === 0) {
+          errors.push(`${f.path} edit #${i + 1}: old_str not found`);
+          continue;
+        }
+        if (occurrences > 1 && !e.replace_all) {
+          errors.push(
+            `${f.path} edit #${i + 1}: old_str matches ${occurrences} times — add context or set replace_all`,
+          );
+          continue;
+        }
+        working = e.replace_all
+          ? working.split(e.old_str).join(e.new_str)
+          : working.replace(e.old_str, e.new_str);
+        replacements += e.replace_all ? occurrences : 1;
+      }
+      staged.push({ absPath, oldContent, newContent: working, replacements });
+    }
+
+    if (errors.length > 0) {
+      return fail(
+        `Atomic batch aborted — nothing was written. Fix these and retry:\n${errors.join('\n')}`,
+      );
+    }
+
+    // ── Phase 2: apply + stream a full-file diff per file for the live preview. ──
+    const summary: string[] = [];
+    for (const st of staged) {
+      if (ctx.emitFileEdit) {
+        await streamFileToUI(ctx.emitFileEdit, st.absPath, st.newContent, 'edit', st.oldContent);
+      }
+      await Bun.write(st.absPath, st.newContent);
+      ctx.emitFileComplete?.({
+        path: st.absPath,
+        totalLines: st.newContent.split('\n').length,
+        operation: 'edit',
+      });
+      ctx.recordChange?.({
+        path: st.absPath,
+        linesAdded: st.newContent.split('\n').length,
+        linesDeleted: st.oldContent.split('\n').length,
+        operation: 'edit',
+      });
+      summary.push(`${st.absPath}: ${st.replacements} replacement${st.replacements === 1 ? '' : 's'}`);
+    }
+
+    return {
+      callId: call.id,
+      name: this.name,
+      output: `Batch edit applied atomically:\n${summary.join('\n')}`,
+      isError: false,
+      durationMs: 0,
+    };
+  }
+}
+
 // ─── Grep (ripgrep wrapper) ─────────────────────────────────────────────────
 
 export class GrepTool implements Tool {

@@ -83,6 +83,16 @@
     return frozenMs ?? 0;
   });
 
+  // Reasoning-token display: provider-reported estimate when available,
+  // else derived from the streamed text (~4 chars/token). Always shown.
+  let displayTokens = $derived(
+    estimatedTokens && estimatedTokens > 0 ? estimatedTokens : Math.ceil(text.length / 4),
+  );
+
+  function formatTokens(n: number): string {
+    return n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n);
+  }
+
   function formatDuration(ms: number): string {
     const s = ms / 1000;
     if (s < 60) return `${s.toFixed(1)}s`;
@@ -113,8 +123,8 @@
     <span class="label done">Thought for</span>
   {/if}
   <span class="stopwatch tabular-nums" class:live={isLive}>{formatDuration(displayMs)}</span>
-  {#if !text && estimatedTokens && estimatedTokens > 0}
-    <span class="stopwatch tabular-nums" title="Reasoning tokens (text kept private by the provider)">· ~{estimatedTokens >= 1000 ? `${(estimatedTokens / 1000).toFixed(1)}k` : estimatedTokens} tok</span>
+  {#if displayTokens > 0}
+    <span class="stopwatch tabular-nums" title={text ? 'Estimated reasoning tokens' : 'Reasoning tokens (text kept private by the provider)'}>· ~{formatTokens(displayTokens)} tok</span>
   {/if}
   <span class="expand-cue {expanded ? 'rotated' : ''}" aria-hidden="true">▸</span>
 </button>
@@ -126,7 +136,7 @@
     bind:this={panelEl}
     transition:slide={{ duration: 180 }}
   >
-    <p class="thinking-full-text">{text || (estimatedTokens ? `Reasoning text is kept private by this provider — ~${estimatedTokens} tokens of internal reasoning so far.` : '…')}</p>
+    <p class="thinking-full-text">{text || (estimatedTokens ? `Anthropic keeps this model's raw reasoning on their servers (Claude Code only receives token counts) — ~${estimatedTokens} tokens of internal reasoning. Models with open reasoning (e.g. Haiku 4.5, most API providers) show their full text here.` : '…')}</p>
     {#if isLive}
       <span class="live-caret" aria-hidden="true"></span>
     {/if}

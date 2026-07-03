@@ -248,6 +248,24 @@ export function seedManagerUsage(
   commitAgents();
 }
 
+/** Update the manager's context window immediately when the user switches
+ *  models — the bar must re-baseline right away, not on the next turn. */
+export function setManagerContextWindow(sessionId: string, contextWindow?: number) {
+  const agent = agents.get('kory-manager');
+  if (!agent) return;
+  if (agent.sessionId && agent.sessionId !== sessionId) agent.sessionId = sessionId;
+  if (contextWindow && contextWindow > 0) {
+    agent.contextMax = contextWindow;
+    agent.contextKnown = true;
+  } else {
+    // Unknown window for the new model — show "window unknown" rather than
+    // the previous model's stale max.
+    agent.contextKnown = false;
+    agent.contextMax = 0;
+  }
+  commitAgents();
+}
+
 export function completeAgent(agentId: string, sessionId?: string) {
   const agent = agents.get(agentId);
   if (agent) {
@@ -537,6 +555,7 @@ export const agentStore = {
   markSessionAgentsStopped,
   markAgentStopped,
   seedManagerUsage,
+  setManagerContextWindow,
   getAgentThreadKey,
   setAgentThreadFeed,
   upsertAgentThreadEntry,

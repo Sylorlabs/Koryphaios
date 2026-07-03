@@ -1045,6 +1045,7 @@ export const wsStore = {
   getAgentThreadFeed: agentStore.getAgentThreadFeed,
   removeEntries: feedStore.removeEntries,
   setEntryVisibility: feedStore.setEntryVisibility,
+  setManagerContextWindow: agentStore.setManagerContextWindow,
   respondToPermission,
   subscribeToSession,
   clearFeed,

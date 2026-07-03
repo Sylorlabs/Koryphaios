@@ -303,7 +303,7 @@
   type ToolCategory = 'bash' | 'read' | 'write' | 'web' | 'other';
 
   const READ_TOOLS = new Set(['read_file', 'grep', 'glob', 'ls']);
-  const WRITE_TOOLS = new Set(['write_file', 'edit_file', 'patch', 'diff', 'delete_file', 'move_file']);
+  const WRITE_TOOLS = new Set(['write_file', 'edit_file', 'batch_edit', 'patch', 'diff', 'delete_file', 'move_file']);
   const WEB_TOOLS = new Set(['web_search', 'web_fetch']);
   const BASH_TOOLS = new Set(['bash', 'shell_manage']);
 
@@ -354,6 +354,12 @@
         return base ? `"${pat}" in ${base}` : `"${pat}"`;
       }
       case 'glob': return (input.pattern ?? '') as string;
+      case 'batch_edit': {
+        const files = (input.files ?? []) as Array<{ path?: string }>;
+        return files.length === 1
+          ? (files[0]?.path ?? '').split('/').pop() ?? ''
+          : `${files.length} files`;
+      }
       case 'ls': return base || '.';
       case 'patch':
       case 'diff': return base || name;
@@ -367,6 +373,7 @@
       case 'read_file': return 'read';
       case 'write_file': return 'write';
       case 'edit_file': return 'edit';
+      case 'batch_edit': return 'batch edit';
       case 'delete_file': return 'delete';
       case 'move_file': return 'move';
       case 'grep': return 'grep';
@@ -388,6 +395,7 @@
       case 'ls':          return Folder;
       case 'write_file':  return FilePlus;
       case 'edit_file':   return Pencil;
+      case 'batch_edit':  return Pencil;
       case 'patch':       return GitMerge;
       case 'diff':        return FileCode;
       case 'delete_file': return Trash2;
@@ -407,6 +415,7 @@
       case 'delete_file': return 'text-red-400/50';
       case 'write_file':
       case 'edit_file':
+      case 'batch_edit':
       case 'patch':
       case 'diff':
       case 'move_file':   return 'text-amber-400/50';

@@ -11,6 +11,7 @@ export {
   ReadFileTool,
   WriteFileTool,
   EditFileTool,
+  BatchEditTool,
   GrepTool,
   GlobTool,
   LsTool,

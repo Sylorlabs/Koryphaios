@@ -1222,10 +1222,18 @@ export class KoryManager {
     const providerMessages = this.toProviderMessages(messages);
     // Estimated context composition at dispatch (chars/4) — segment ratios for
     // the context-usage bar; the provider's usage_update stays the real total.
+    // Agentic CLI harnesses (claude/grok/antigravity) run their OWN tools —
+    // Koryphaios tool schemas are never sent to them, so counting our defs as
+    // "Tools" misattributes the CLI's harness overhead. Their real overhead
+    // shows up as the gap between this estimate and provider-reported usage
+    // (rendered as "Provider harness" in the context bar).
+    const NATIVE_TOOL_PROVIDERS = new Set(['claude', 'grok', 'antigravity']);
     const contextBreakdown: ContextBreakdown = {
       system: Math.ceil(Math.max(0, systemPrompt.length - memoryChars) / 4),
       memory: Math.ceil(memoryChars / 4),
-      tools: Math.ceil(JSON.stringify(tools ?? []).length / 4),
+      tools: NATIVE_TOOL_PROVIDERS.has(provider.name)
+        ? 0
+        : Math.ceil(JSON.stringify(tools ?? []).length / 4),
       chat: Math.ceil(estimateProviderMessagesChars(providerMessages) / 4),
     };
 
