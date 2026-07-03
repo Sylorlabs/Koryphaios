@@ -52,7 +52,6 @@ export interface ExperimentalFeatures {
   // Integrations
   vectorSearch: boolean;
   mcpServerV2: boolean;
-  telegramBotV2: boolean;
 
   // Security
   enhancedAuditLogs: boolean;
@@ -132,7 +131,6 @@ export const DEFAULT_EXPERIMENTAL_FEATURES: ExperimentalFeatures = {
   // Integrations
   vectorSearch: false,
   mcpServerV2: false,
-  telegramBotV2: false,
 
   // Security
   enhancedAuditLogs: false,

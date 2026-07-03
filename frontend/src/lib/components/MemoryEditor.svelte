@@ -537,7 +537,7 @@
                     <FileText size={18} class="mt-0.5 text-blue-400" />
                     <div>
                       <div class="text-sm font-medium text-[var(--color-text-primary)]">Project Memory</div>
-                      <div class="mt-1 text-xs text-[var(--color-text-muted)]">Project-specific context in `.koryphaios/project-memory/`.</div>
+                      <div class="mt-1 text-xs text-[var(--color-text-muted)]">Project-specific context in `.koryphaios/memory/`.</div>
                     </div>
                   </div>
                   <SettingsToggle

@@ -505,7 +505,7 @@
                 <div>
                   <h4 class="text-sm font-semibold text-red-400">Rules Are Always Enforced</h4>
                   <p class="mt-1 text-xs text-[var(--color-text-muted)]">
-                    There is no option to disable rule enforcement. The Critic will always check code against `.koryrules` and `preferences.md`.
+                    There is no option to disable rule enforcement. The Critic will always check project rules and `preferences.md`.
                     The enforcement level only changes how strictly violations are treated.
                   </p>
                 </div>
@@ -520,7 +520,7 @@
                   <div class="flex items-center gap-3">
                     <Shield size={18} style="color: var(--color-success);" />
                     <div>
-                      <div class="text-sm font-medium text-[var(--color-text-primary)]">.koryrules</div>
+                      <div class="text-sm font-medium text-[var(--color-text-primary)]">.koryphaios/rules/rules.md</div>
                       <div class="text-xs text-[var(--color-text-muted)]">Always enforced on all code</div>
                     </div>
                   </div>

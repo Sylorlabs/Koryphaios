@@ -4,7 +4,7 @@
  * Core principle: Load features dynamically, not at build time.
  * This allows:
  * - Core to stay small (~2MB)
- * - Heavy features (Discord, Slack) as optional plugins
+ * - Heavy optional features loaded on demand
  * - Users only download what they need
  */
 

@@ -150,7 +150,7 @@ export const CONFIG_PATHS = [
  * Context Files (loaded into agent context)
  */
 export const DEFAULT_CONTEXT_PATHS: string[] = [
-  '.koryrules',
+  '.koryphaios/rules/rules.md',
   'CLAUDE.md',
   'AGENTS.md',
   '.opencode.json',
@@ -208,18 +208,6 @@ export const PROVIDER = {
     OPENROUTER: 'OPENROUTER_API_KEY',
     VERTEXAI: 'GOOGLE_VERTEX_AI_API_KEY',
   } as const,
-} as const;
-
-/**
- * Telegram Configuration
- */
-export const TELEGRAM = {
-  /** Webhook path */
-  WEBHOOK_PATH: '/api/telegram/webhook',
-  /** Polling interval (ms) */
-  POLLING_INTERVAL: 1000,
-  /** Max message length */
-  MAX_MESSAGE_LENGTH: 4096,
 } as const;
 
 /**

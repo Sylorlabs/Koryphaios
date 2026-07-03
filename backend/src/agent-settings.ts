@@ -707,7 +707,7 @@ export function assembleAgentContext(
 } {
   const prefs = settings.preferencesEnabled ? readPreferences(projectRoot).content : '';
 
-  const rulesContent = readFileSync(join(projectRoot, '.koryrules'), 'utf-8').toString() || '';
+  const rulesContent = readFileSync(join(projectRoot, '.koryphaios/rules/rules.md'), 'utf-8').toString() || '';
 
   const enforcementMessage = generateEnforcementMessage(settings);
 
@@ -724,7 +724,7 @@ function generateEnforcementMessage(settings: AgentSettings): string {
     '🚨 RULE ENFORCEMENT IS ACTIVE',
     '',
     'The following rules MUST be followed:',
-    '1. ALL rules from .koryrules are mandatory',
+    '1. ALL rules from .koryphaios/rules/rules.md are mandatory',
     '2. ALL preferences from preferences.md are mandatory',
   ];
 

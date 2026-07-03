@@ -5,7 +5,7 @@
  * - Universal Memory: Global across all projects
  * - Project Memory: Specific to current project
  * - Session Memory: Per-chat persistent storage
- * - Cursor-style Rules: .koryrules file support
+ * - Project rules stored as Markdown under .koryphaios/rules/
  *
  * All files are stored relative to the project for portability.
  */
@@ -68,7 +68,7 @@ export interface MemorySettings {
   sessionMemoryEnabled: boolean;
   /** Enable agent-added memories */
   agentMemoryEnabled: boolean;
-  /** Enable .koryrules file */
+  /** Enable project rules files */
   rulesEnabled: boolean;
   /** Auto-include memories in agent context */
   autoIncludeInContext: boolean;
@@ -125,7 +125,7 @@ export function getSessionMemoryPath(projectRoot: string, sessionId: string): st
 }
 
 /**
- * Get .koryrules path
+ * Get the primary project-rules path
  */
 export function getRulesPath(projectRoot: string): string {
   return join(projectRoot, MEMORY_CONFIG.RULES_FILE);
@@ -393,7 +393,7 @@ project-root/
 - 
 
 ---
-*This file is stored in: .koryphaios/project-memory/project-memory.md*
+*This file is stored in: .koryphaios/memory/project.md*
 *Last updated: {timestamp}*
 `;
 
@@ -656,13 +656,13 @@ export function deleteSessionMemory(projectRoot: string, sessionId: string): boo
 }
 
 // ============================================================================
-// Rules (.koryrules)
+// Project rules
 // ============================================================================
 
 const DEFAULT_RULES_TEMPLATE = `# Koryphaios Rules
 
 > This file defines rules and conventions for AI assistance in this project.
-> Similar to .koryrules, these instructions guide the AI's behavior.
+> These project rules guide the AI's behavior.
 
 ## 🎯 General Principles
 
@@ -757,8 +757,7 @@ const DEFAULT_RULES_TEMPLATE = `# Koryphaios Rules
 - Keep setup instructions current
 
 ---
-*Place this file at: .koryrules (project root)*
-*Or at: .koryphaios/rules.md*
+*Stored at: .koryphaios/rules/rules.md*
 `;
 
 export function initializeRules(projectRoot: string): MemoryFile {
@@ -902,7 +901,7 @@ export function formatMemoryForContext(context: MemoryContext): string {
   const parts: string[] = [];
 
   if (context.rules?.exists && context.rules.content) {
-    parts.push(`## Project Rules (.koryrules)\n\n${context.rules.content}`);
+    parts.push(`## Project Rules\n\n${context.rules.content}`);
   }
 
   if (context.universal?.exists && context.universal.content) {
