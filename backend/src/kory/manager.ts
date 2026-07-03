@@ -1227,15 +1227,29 @@ export class KoryManager {
       chat: Math.ceil(estimateProviderMessagesChars(providerMessages) / 4),
     };
 
+    const estTokens =
+      contextBreakdown.system +
+      contextBreakdown.memory +
+      contextBreakdown.tools +
+      contextBreakdown.chat;
+    // Real context data at dispatch time — the bar updates the moment a turn
+    // starts (reflecting prunes/hides), instead of trusting a stale usage
+    // event from a previous turn or model. Provider usage refines it later.
+    this.emitUsageUpdate(
+      sessionId,
+      KORY_IDENTITY.id,
+      modelId,
+      provider.name,
+      estTokens,
+      0,
+      true,
+      contextBreakdown,
+    );
+
     // Context self-awareness: tell the model what its window looks like and
     // what's prunable, so it can decide on its own to free space or compact.
     if (settings.contextSelfAwareness !== false) {
       const k = (n: number) => `${(n / 1000).toFixed(1)}k`;
-      const estTokens =
-        contextBreakdown.system +
-        contextBreakdown.memory +
-        contextBreakdown.tools +
-        contextBreakdown.chat;
       const win = resolveTrustedContextWindow(modelId, provider.name);
       const pct = win.contextWindow ? Math.round((estTokens / win.contextWindow) * 100) : null;
       const bulky = messages

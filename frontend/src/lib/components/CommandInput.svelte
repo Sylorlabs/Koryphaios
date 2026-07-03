@@ -147,7 +147,7 @@
   }
 
   let availableModels = $derived.by(() => {
-    const models: Array<{ label: string; value: string; provider: string; contextLabel?: string }> = [];
+    const models: Array<{ label: string; value: string; provider: string; contextWindow?: number }> = [];
     for (const p of wsStore.providers) {
       if (p.authenticated) {
         const enabledIds = new Set(p.models);
@@ -159,9 +159,9 @@
                 label: `(${providerLabel(p.name)}) ${m.name}`,
                 value: `${p.name}:${m.id}`,
                 provider: p.name,
-                // Only show context sizes the provider/CLI actually reported
-                // (or that chain to a verified catalog) — never a guess.
-                contextLabel: m.contextVerified ? formatContextSize(m.contextWindow) : '',
+                // Verified window size kept internally for the switch-overflow
+                // guard — deliberately NOT shown in the picker.
+                contextWindow: m.contextVerified ? m.contextWindow : undefined,
               });
             }
           }
@@ -471,10 +471,58 @@
     requestAnimationFrame(() => autoResize());
   });
 
-  function selectModel(value: string) {
+  // Set when the user picks a model whose window can't hold the current
+  // session context — they choose how to shrink it instead of a silent break.
+  let overflowWarning = $state<{ value: string; label: string; window: number; used: number } | null>(null);
+
+  function applyModelSelection(value: string) {
     selectedModel = value;
     showModelPicker = false;
     if (typeof localStorage !== 'undefined') localStorage.setItem(MODEL_STORAGE_KEY, value);
+  }
+
+  function selectModel(value: string) {
+    const target = availableModels.find((m) => m.value === value);
+    const usage = wsStore.contextUsage;
+    if (
+      target?.contextWindow &&
+      usage.isReliable &&
+      usage.used > target.contextWindow
+    ) {
+      showModelPicker = false;
+      overflowWarning = {
+        value,
+        label: target.label,
+        window: target.contextWindow,
+        used: usage.used,
+      };
+      return;
+    }
+    applyModelSelection(value);
+  }
+
+  function overflowAskAgentPrune() {
+    const w = overflowWarning;
+    if (!w) return;
+    overflowWarning = null;
+    onSend(
+      `I want to switch to ${w.label}, which has a ~${formatContextSize(w.window)} context window, but this session currently uses ~${formatContextSize(w.used)} tokens. Please prune your context down below ${formatContextSize(w.window)}: run fetch_context (no arguments) to review what you did, then prune_context on everything nonessential. Keep only what's needed to continue.`,
+      selectedModel,
+      reasoningLevel,
+    );
+  }
+
+  async function overflowCompact() {
+    overflowWarning = null;
+    await onExecuteCommand?.('/compact');
+    toastStore.info('Once compaction finishes, pick the model again.');
+  }
+
+  async function overflowNewChat() {
+    const w = overflowWarning;
+    overflowWarning = null;
+    await onExecuteCommand?.('/new');
+    if (w) applyModelSelection(w.value);
   }
 
   function selectReasoning(value: string) {
@@ -799,13 +847,6 @@
                   onclick={() => selectModel(model.value)}
                 >
                   <span class="flex-1 min-w-0 truncate">{model.label}</span>
-                  {#if model.contextLabel}
-                    <span
-                      class="text-[10px] tabular-nums px-1.5 py-0.5 rounded shrink-0"
-                      style="background: var(--color-surface-3); color: var(--color-text-muted);"
-                      title="Context window (reported by the provider)"
-                    >{model.contextLabel}</span>
-                  {/if}
                 </button>
               {/each}
             {/if}
@@ -1072,6 +1113,72 @@
     {/if}
   </div>
 </div>
+
+
+
+{#if overflowWarning}
+  <div class="fixed inset-0 z-[95] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
+    <div
+      class="w-full max-w-md rounded-2xl border p-6 shadow-2xl"
+      style="background: var(--color-surface-2); border-color: var(--color-border);"
+      role="alertdialog"
+      aria-label="Context too large for model"
+    >
+      <h3 class="text-base font-semibold mb-2" style="color: var(--color-text-primary);">Context won't fit</h3>
+      <p class="text-sm mb-5 leading-relaxed" style="color: var(--color-text-secondary);">
+        This session uses ~{formatContextSize(overflowWarning.used)} tokens, but
+        <span class="font-medium" style="color: var(--color-text-primary);">{overflowWarning.label}</span>
+        has a ~{formatContextSize(overflowWarning.window)} window. Shrink the context first:
+      </p>
+      <div class="flex flex-col gap-2">
+        <button
+          type="button"
+          class="w-full rounded-xl border px-4 py-2.5 text-sm font-medium text-left transition-colors hover:bg-[var(--color-surface-3)]"
+          style="border-color: var(--color-border); color: var(--color-text-primary);"
+          onclick={() => { overflowWarning = null; toastStore.info('Hover tool outputs in the feed and use the agent-hide button to prune them.'); }}
+        >
+          Prune manually
+          <span class="block text-xs mt-0.5" style="color: var(--color-text-muted);">Hide bulky tool outputs from the agent yourself, then switch.</span>
+        </button>
+        <button
+          type="button"
+          class="w-full rounded-xl border px-4 py-2.5 text-sm font-medium text-left transition-colors hover:bg-[var(--color-surface-3)]"
+          style="border-color: var(--color-border); color: var(--color-text-primary);"
+          onclick={overflowAskAgentPrune}
+        >
+          Ask the agent to prune
+          <span class="block text-xs mt-0.5" style="color: var(--color-text-muted);">The current agent trims its own context below the new limit.</span>
+        </button>
+        <button
+          type="button"
+          class="w-full rounded-xl border px-4 py-2.5 text-sm font-medium text-left transition-colors hover:bg-[var(--color-surface-3)]"
+          style="border-color: var(--color-border); color: var(--color-text-primary);"
+          onclick={overflowCompact}
+        >
+          Compact the conversation
+          <span class="block text-xs mt-0.5" style="color: var(--color-text-muted);">The current large-window agent summarizes the session first.</span>
+        </button>
+        <button
+          type="button"
+          class="w-full rounded-xl border px-4 py-2.5 text-sm font-medium text-left transition-colors hover:bg-[var(--color-surface-3)]"
+          style="border-color: var(--color-border); color: var(--color-text-primary);"
+          onclick={overflowNewChat}
+        >
+          Start a new chat
+          <span class="block text-xs mt-0.5" style="color: var(--color-text-muted);">Fresh session on the new model.</span>
+        </button>
+        <button
+          type="button"
+          class="w-full rounded-xl px-4 py-2 text-xs font-medium transition-colors hover:bg-[var(--color-surface-3)]"
+          style="color: var(--color-text-muted);"
+          onclick={() => (overflowWarning = null)}
+        >
+          Cancel
+        </button>
+      </div>
+    </div>
+  </div>
+{/if}
 
 <style>
   .yolo-active {

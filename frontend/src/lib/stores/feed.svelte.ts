@@ -321,10 +321,55 @@ async function loadSessionMessages(
       ghostHash: ghost?.hash,
     };
   });
+  // Restore archived tool activity (tool runs aren't part of message history —
+  // without this, reopening a chat silently dropped all proof-of-work).
+  let toolHistory: FeedEntry[] = [];
+  try {
+    const res = await apiFetch(apiUrl(`/api/sessions/${sessionId}/context`));
+    const data = await parseJsonResponse<{
+      ok?: boolean;
+      data?: Array<{
+        id: string;
+        ts: number;
+        kind: string;
+        label: string;
+        content: string;
+        prunedForAgent: boolean;
+      }>;
+    }>(res);
+    if (data.ok && Array.isArray(data.data)) {
+      toolHistory = data.data.map((e) => ({
+        id: `arch-${e.id}`,
+        timestamp: e.ts,
+        type: 'tool_result' as const,
+        agentId: 'kory-manager',
+        agentName: 'Kory',
+        glowClass: '',
+        text: e.content || e.label,
+        agentHidden: e.prunedForAgent,
+        metadata: {
+          sessionId,
+          toolResult: {
+            callId: e.id,
+            name: e.label.split(' ')[0] || 'tool',
+            output: e.content,
+            isError: false,
+            durationMs: 0,
+            archiveId: e.id,
+          },
+        },
+      }));
+    }
+  } catch {
+    /* archive unavailable — text history still loads */
+  }
+  if (sessionStore.activeSessionId !== sessionId) return;
+
+  const merged = [...history, ...toolHistory].sort((a, b) => a.timestamp - b.timestamp);
   // Anything already in the feed streamed in live while we awaited the
   // timeline fetch (clearFeed ran at the top) — keep it after history
   // instead of wiping it.
-  feed = [...history, ...feed];
+  feed = [...merged, ...feed];
   feedVersion++;
   rebuildGroupedFeedCache();
 }

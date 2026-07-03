@@ -2,7 +2,6 @@
   import { wsStore } from '$lib/stores/websocket.svelte';
   import { appStore } from '$lib/stores/app.svelte';
   import { sessionStore } from '$lib/stores/sessions.svelte';
-  import { isMac } from '$lib/utils/platform';
   import { untrack } from 'svelte';
   import { fade } from 'svelte/transition';
   import {
@@ -25,8 +24,6 @@
 
   let feedContainer = $state<HTMLDivElement>();
   let virtualList = $state<VirtualList<FeedEntryLocal>>();
-  let selectedEntries = $state<Set<string>>(new Set());
-  let lastSelectedId = $state<string>('');
   let expandedGroups = $state<Set<string>>(new Set());
   let editingSuggestionId = $state<string | null>(null);
   let editingSuggestionText = $state('');

@@ -100,6 +100,26 @@ export const sessionRoutes = new Elysia({ prefix: '/api/sessions' })
     });
     return { ok: true, message: 'Session cancelled' };
   })
+  .get('/:id/context', async ({ request, params: { id }, set }) => {
+    if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
+    // Archived tool activity for this session — used to restore tool entries
+    // in the feed after a reload (they're not part of the message history).
+    const { getContextArchive } = await import('../../kory/context-archive');
+    const archive = getContextArchive();
+    if (!archive) return { ok: true, data: [] };
+    const entries = await archive.listRecent(id, 500);
+    return {
+      ok: true,
+      data: entries.map((e) => ({
+        id: e.id,
+        ts: e.ts,
+        kind: e.kind,
+        label: e.label,
+        content: e.content.slice(0, 4000),
+        prunedForAgent: e.prunedForAgent === true,
+      })),
+    };
+  })
   .post('/:id/context/:archiveId/visibility', async ({ request, params: { id, archiveId }, body, set }) => {
     if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
     // User-driven "hide from agent": stubs this entry out of the model's
