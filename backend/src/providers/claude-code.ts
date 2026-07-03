@@ -99,13 +99,29 @@ function detectEffortLevels(): Promise<string[] | null> {
 /** Map a UI reasoning level onto one of the CLI's advertised --effort values.
  *  Returns null when the level has no effort equivalent (caller falls back to
  *  the MAX_THINKING_TOKENS env var). */
+const EFFORT_ORDER = ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'];
+
 function mapToEffort(level: string, levels: string[] | null): string | null {
   if (!levels?.length) return null;
   const l = level.toLowerCase().trim();
   if (levels.includes(l)) return l;
   const synonyms: Record<string, string> = { minimal: 'low', default: 'medium', on: 'medium' };
   const mapped = synonyms[l];
-  return mapped && levels.includes(mapped) ? mapped : null;
+  if (mapped && levels.includes(mapped)) return mapped;
+  // Clamp to the nearest supported tier instead of giving up — otherwise a
+  // request for e.g. xhigh on a low/medium/high model silently ran at the
+  // model's DEFAULT effort (the env-var fallback is ignored by newer CLIs).
+  const want = EFFORT_ORDER.indexOf(l);
+  if (want === -1) return null;
+  const supported = levels
+    .map((lv) => EFFORT_ORDER.indexOf(lv))
+    .filter((i) => i !== -1)
+    .sort((a, b) => a - b);
+  if (!supported.length) return null;
+  // Highest supported tier at or below the request; else the lowest above it.
+  const below = supported.filter((i) => i <= want);
+  const pick = below.length ? below[below.length - 1] : supported[0];
+  return EFFORT_ORDER[pick];
 }
 
 // ── Per-model capability catalog, extracted from the CLI's own binary ───────
@@ -601,13 +617,6 @@ export class ClaudeCodeProvider implements Provider {
       '--disallowedTools',
       DISALLOWED_TOOLS,
     ];
-    args.push(
-      '--append-system-prompt',
-      request.systemPrompt?.trim()
-        ? `${request.systemPrompt}\n\n${HARNESS_SYSTEM_NOTE}`
-        : HARNESS_SYSTEM_NOTE,
-    );
-
     // Run in the project directory so the CLI edits the real files (falls back to cwd).
     const cwd = request.workingDirectory?.trim() || process.cwd();
     // Reasoning: prefer the CLI's native --effort flag, clamped to the levels
@@ -616,6 +625,7 @@ export class ClaudeCodeProvider implements Provider {
     // back to the MAX_THINKING_TOKENS env var for levels the flag can't express
     // ('none', numeric budgets) or for older CLIs without --effort.
     const env: NodeJS.ProcessEnv = { ...process.env };
+    let appliedEffort: string | null = null;
     if (request.reasoningLevel) {
       const cliLevels = await detectEffortLevels();
       const modelDef = this.listModels().find(
@@ -627,11 +637,33 @@ export class ClaudeCodeProvider implements Provider {
       const effort = mapToEffort(request.reasoningLevel, allowed ?? null);
       if (effort) {
         args.push('--effort', effort);
+        appliedEffort = effort;
       } else {
         const thinkingBudget = reasoningLevelToThinkingTokens(request.reasoningLevel);
         if (thinkingBudget !== null) env.MAX_THINKING_TOKENS = thinkingBudget;
+        appliedEffort = allowed && allowed.length === 0 ? 'adaptive' : null;
       }
+      providerLog.info(
+        { provider: 'claude', model: cliModel, requested: request.reasoningLevel, applied: appliedEffort },
+        'Claude Code reasoning effort applied',
+      );
     }
+
+    // Disclose the REAL effort to the model — the CLI doesn't, so without this
+    // "what tier are you?" answers are pure confabulation.
+    const effortNote =
+      appliedEffort === 'adaptive'
+        ? ' This model has no fixed effort tiers — it uses adaptive thinking.'
+        : appliedEffort
+          ? ` Your reasoning effort for this request is set to "${appliedEffort}".`
+          : '';
+    args.push(
+      '--append-system-prompt',
+      request.systemPrompt?.trim()
+        ? `${request.systemPrompt}\n\n${HARNESS_SYSTEM_NOTE}${effortNote}`
+        : `${HARNESS_SYSTEM_NOTE}${effortNote}`,
+    );
+
     const child = spawn('claude', args, {
       cwd,
       stdio: ['pipe', 'pipe', 'pipe'],
