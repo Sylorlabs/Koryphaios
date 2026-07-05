@@ -241,7 +241,7 @@
       showSettings = true;
     } else if (shortcutStore.matches('new_session', e)) {
       e.preventDefault();
-      sessionStore.createSession();
+      sessionStore.newChat();
     } else if (shortcutStore.matches('focus_input', e)) {
       e.preventDefault();
       inputRef?.focus();
@@ -420,7 +420,7 @@ RULES:
     }
 
     if (root === 'new') {
-      await sessionStore.createSession();
+      await sessionStore.newChat();
       inputRef?.focus();
       return true;
     }
@@ -756,7 +756,7 @@ RULES:
         exportCurrentProjectSnapshot();
         break;
       case 'new_session':
-        await sessionStore.createSession();
+        await sessionStore.newChat();
         inputRef?.focus();
         break;
       case 'focus_input':

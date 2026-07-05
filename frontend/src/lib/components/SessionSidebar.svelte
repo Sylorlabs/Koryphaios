@@ -34,7 +34,7 @@
 
   async function handleCreateSession() {
     creating = true;
-    try { await sessionStore.createSession(); } finally { creating = false; }
+    try { await sessionStore.newChat(); } finally { creating = false; }
   }
 
   async function loadHistory(id: string) {

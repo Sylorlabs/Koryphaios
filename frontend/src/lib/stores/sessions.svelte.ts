@@ -93,7 +93,13 @@ async function fetchSessions(): Promise<boolean> {
       if (activeSessionId) {
         saveLastSession(activeSessionId);
         const active = sessions.find((session) => session.id === activeSessionId);
-        if (active?.workingDirectory) projectStore.setProject(active.workingDirectory);
+        // Adopt the session's project only when the user hasn't chosen one —
+        // never override a persisted choice, and never yank someone off the
+        // workspace chooser (currentPath === null is a deliberate, persisted
+        // state whenever a workspace is open).
+        if (active?.workingDirectory && !projectStore.currentPath && !projectStore.workspaceRoot) {
+          projectStore.setProject(active.workingDirectory);
+        }
       }
       return true;
     }
@@ -103,6 +109,18 @@ async function fetchSessions(): Promise<boolean> {
     toastStore.error('Failed to load sessions', { onRetry: () => void fetchSessions() });
     return false;
   }
+}
+
+/** User-initiated "new chat". Inside a workspace this returns to the project
+ *  chooser (the workspace screen) instead of silently reusing the last chosen
+ *  project — picking a project there creates the session (see select_project).
+ *  Outside a workspace it behaves like createSession. */
+async function newChat(): Promise<string | null> {
+  if (projectStore.workspaceRoot) {
+    projectStore.setProject(null);
+    return null;
+  }
+  return createSession();
 }
 
 async function createSession(): Promise<string | null> {
@@ -308,6 +326,7 @@ export const sessionStore = {
 
   fetchSessions,
   createSession,
+  newChat,
   renameSession,
   deleteSession,
   fetchMessages,
