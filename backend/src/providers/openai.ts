@@ -162,7 +162,15 @@ export class OpenAIProvider implements Provider {
       (m) => m.id === request.model || m.apiModelId === request.model,
     );
     const canReason = liveDef?.canReason ?? modelDef?.canReason ?? false;
-    const reasoningEffort = request.reasoningLevel?.toLowerCase();
+    let reasoningEffort = request.reasoningLevel?.toLowerCase();
+    // Budget-token levels (Copilot claude-haiku-4.5 / gemini-2.5-pro declare
+    // '0'|'1024'|'8192'|'24576') can't ride the OpenAI wire verbatim — map to
+    // the nearest reasoning_effort instead of silently dropping the selection.
+    if (reasoningEffort && /^\d+$/.test(reasoningEffort)) {
+      const budget = Number(reasoningEffort);
+      reasoningEffort =
+        budget === 0 ? 'none' : budget <= 1024 ? 'low' : budget <= 8192 ? 'medium' : 'high';
+    }
     // 'max' is offered per-model (e.g. Copilot's claude-opus-4.6) — the UI only
     // shows levels the model's own metadata/config declares, so passing it
     // through is safe; without it the selection was silently dropped.

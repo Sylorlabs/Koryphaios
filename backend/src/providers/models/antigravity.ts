@@ -14,6 +14,8 @@ export const AntigravityModels: ModelDef[] = [
     canReason: false,
     supportsAttachments: false,
     supportsStreaming: true,
+    // Levels map to real agy model variants — the harness swaps the "(Level)" suffix.
+    reasoningLevels: ['low', 'medium', 'high'],
     tier: 'fast',
   },
   {
@@ -26,6 +28,8 @@ export const AntigravityModels: ModelDef[] = [
     canReason: false,
     supportsAttachments: false,
     supportsStreaming: true,
+    // Levels map to real agy model variants — the harness swaps the "(Level)" suffix.
+    reasoningLevels: ['low', 'medium', 'high'],
     tier: 'fast',
   },
   {
@@ -36,11 +40,13 @@ export const AntigravityModels: ModelDef[] = [
     contextWindow: 1_048_576,
     maxOutputTokens: 65_536,
     // The agy CLI exposes no reasoning/thinking flag — the "(High)" variant IS
-    // the reasoning selection. canReason=false keeps the UI from offering a
-    // reasoning picker that the harness cannot honor.
+    // the reasoning selection; the harness honors the picker by swapping to
+    // the sibling variant (resolveCliModel).
     canReason: false,
     supportsAttachments: false,
     supportsStreaming: true,
+    // Levels map to real agy model variants — the harness swaps the "(Level)" suffix.
+    reasoningLevels: ['low', 'medium', 'high'],
     tier: 'reasoning',
   },
   {
@@ -53,6 +59,8 @@ export const AntigravityModels: ModelDef[] = [
     canReason: false,
     supportsAttachments: false,
     supportsStreaming: true,
+    // Levels map to real agy model variants — the harness swaps the "(Level)" suffix.
+    reasoningLevels: ['low', 'high'],
     tier: 'flagship',
   },
   {
@@ -65,6 +73,8 @@ export const AntigravityModels: ModelDef[] = [
     canReason: true,
     supportsAttachments: false,
     supportsStreaming: true,
+    // Levels map to real agy model variants — the harness swaps the "(Level)" suffix.
+    reasoningLevels: ['low', 'high'],
     tier: 'reasoning',
   },
   {
@@ -77,6 +87,8 @@ export const AntigravityModels: ModelDef[] = [
     canReason: true,
     supportsAttachments: false,
     supportsStreaming: true,
+    // No sibling effort variants — empty list suppresses the UI's placebo picker.
+    reasoningLevels: [],
     tier: 'reasoning',
   },
   {
@@ -89,6 +101,8 @@ export const AntigravityModels: ModelDef[] = [
     canReason: true,
     supportsAttachments: false,
     supportsStreaming: true,
+    // No sibling effort variants — empty list suppresses the UI's placebo picker.
+    reasoningLevels: [],
     tier: 'flagship',
   },
   {
@@ -101,6 +115,8 @@ export const AntigravityModels: ModelDef[] = [
     canReason: false,
     supportsAttachments: false,
     supportsStreaming: true,
+    // No sibling effort variants — empty list suppresses the UI's placebo picker.
+    reasoningLevels: [],
     tier: 'fast',
   },
 ];

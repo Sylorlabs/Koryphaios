@@ -6,13 +6,13 @@
 // Headless interface:
 //   agy --print "<prompt>" --model "<model>" --dangerously-skip-permissions --log-file <path>
 //
-// Streaming (Option A): agy writes its raw Gemini SSE traffic to --log-file. We tail
-// that file at 150ms intervals, parse Gemini SSE JSON lines, and emit real ProviderEvents:
-//   • part.text + !part.thought → content_delta (live text streaming)
-//   • part.thought === true     → thinking_delta (reasoning tokens)
-//   • part.functionCall         → tool_executed  (tools agy ran internally)
-// If the log yields no content_delta events (e.g. log file unreadable) we fall back to
-// chunking stdout at word boundaries so the response always appears.
+// Streaming sources (agy ≥1.0.16 writes only glog server logs to --log-file, so
+// the SSE parser below is a legacy fallback for older builds):
+//   • trajectory SQLite (conversations/<id>.db, step_type 15, proto …20.3) —
+//     the step_payload GROWS IN PLACE while the model streams; we re-read the
+//     newest row each 150ms poll and emit the appended thinking suffix live.
+//   • brain transcript JSONL — responses + tool runs as steps complete.
+//   • stdout — the final answer, streamed as chunks arrive.
 //
 // Model discovery: `agy models` → one model name per line, refreshed with a 5-min TTL.
 // Antigravity exposes Gemini, Claude, and GPT models under a single Google subscription.
@@ -101,8 +101,41 @@ async function fetchAgyModels(bin: string): Promise<ModelDef[]> {
     child.once('error', reject);
     child.once('exit', () => {
       const lines = out.split('\n').map((l) => l.trim()).filter(Boolean);
-      resolve(lines.length === 0 ? [] : lines.map(modelDefFromCliName));
+      resolve(lines.length === 0 ? [] : withSiblingReasoningLevels(lines.map(modelDefFromCliName)));
     });
+  });
+}
+
+// agy exposes reasoning effort ONLY as sibling model variants — "Gemini 3.5
+// Flash (Low|Medium|High)". There is no CLI flag. So a model's reasoningLevels
+// are exactly the effort suffixes its family exposes, and selecting a level
+// swaps the "(Level)" suffix (see resolveCliModel).
+const EFFORT_SUFFIXES: Record<string, string> = { low: 'Low', medium: 'Medium', high: 'High' };
+
+/** "Gemini 3.5 Flash (Medium)" → { base: "Gemini 3.5 Flash", effort: "medium" } */
+function splitEffortVariant(cliName: string): { base: string; effort: string } | null {
+  const m = /^(.*)\s\((Low|Medium|High)\)$/.exec(cliName);
+  return m ? { base: m[1], effort: m[2].toLowerCase() } : null;
+}
+
+/** Fill reasoningLevels from the effort variants actually present in the list. */
+function withSiblingReasoningLevels(models: ModelDef[]): ModelDef[] {
+  const familyLevels = new Map<string, string[]>();
+  for (const m of models) {
+    const v = splitEffortVariant(m.apiModelId ?? m.name);
+    if (!v) continue;
+    const levels = familyLevels.get(v.base) ?? [];
+    if (!levels.includes(v.effort)) levels.push(v.effort);
+    familyLevels.set(v.base, levels);
+  }
+  const ORDER = ['low', 'medium', 'high'];
+  return models.map((m) => {
+    const v = splitEffortVariant(m.apiModelId ?? m.name);
+    const levels = v ? (familyLevels.get(v.base) ?? []) : [];
+    return {
+      ...m,
+      reasoningLevels: levels.length > 1 ? ORDER.filter((l) => levels.includes(l)) : [],
+    };
   });
 }
 
@@ -255,10 +288,21 @@ export class AntigravityProvider implements Provider {
     return cachedModels ?? fallback;
   }
 
-  private resolveCliModel(modelId: string): string {
-    const model = this.listModels().find((m) => m.id === modelId || m.apiModelId === modelId);
-    if (model?.apiModelId) return model.apiModelId;
-    return DEFAULT_CLI_MODEL;
+  private resolveCliModel(modelId: string, reasoningLevel?: string): string {
+    const models = this.listModels();
+    const model = models.find((m) => m.id === modelId || m.apiModelId === modelId);
+    const cliName = model?.apiModelId ?? DEFAULT_CLI_MODEL;
+
+    // Reasoning level → sibling effort variant ("… (Low|Medium|High)"): agy has
+    // no effort flag, the variant IS the selection. Only swap when the target
+    // variant actually exists; xhigh/max clamp to high.
+    if (!reasoningLevel) return cliName;
+    const level = reasoningLevel === 'xhigh' || reasoningLevel === 'max' ? 'high' : reasoningLevel;
+    const suffix = EFFORT_SUFFIXES[level];
+    const v = splitEffortVariant(cliName);
+    if (!suffix || !v || v.effort === level) return cliName;
+    const target = `${v.base} (${suffix})`;
+    return models.some((m) => m.apiModelId === target) ? target : cliName;
   }
 
   async *streamResponse(request: StreamRequest): AsyncGenerator<ProviderEvent> {
@@ -290,7 +334,7 @@ export class AntigravityProvider implements Provider {
       return;
     }
 
-    const cliModel = this.resolveCliModel(request.model);
+    const cliModel = this.resolveCliModel(request.model, request.reasoningLevel);
     const logPath = join(tmpdir(), `agy-${Date.now()}.log`);
 
     const cwd = request.workingDirectory?.trim();
@@ -374,7 +418,7 @@ export class AntigravityProvider implements Provider {
         const newChunk = full.slice(logOffset);
         if (!newChunk) return [];
         logOffset = full.length;
-        const { events, gotContent } = parseLogChunk(newChunk, true);
+        const { events, gotContent } = parseLogChunk(newChunk);
         if (gotContent) totalContentEvents++;
         sseThinkingEvents += events.filter((e) => e.type === 'thinking_delta').length;
         return events;
@@ -565,17 +609,21 @@ interface TrajectoryTailState {
   spawnedAt: number;
   /** Known agy conversation id — when set, only that db is polled. */
   convId?: string;
-  /** last consumed step idx per conversation db */
-  lastIdx: Map<string, number>;
-  seenThinking: Set<string>;
+  /** Highest step idx per db that is fully consumed AND closed (a later step
+   *  exists). The newest row is deliberately NOT finalized: agy grows its
+   *  step_payload in place while the model streams (verified: 287→1625 bytes
+   *  over ~2.5s), so it must be re-read every poll. */
+  finalizedIdx: Map<string, number>;
+  /** chars of thinking already emitted per `${file}:${idx}` row */
+  emittedLen: Map<string, number>;
 }
 
 function newTrajectoryTail(convId?: string): TrajectoryTailState {
   const state: TrajectoryTailState = {
     spawnedAt: Date.now(),
     convId,
-    lastIdx: new Map(),
-    seenThinking: new Set(),
+    finalizedIdx: new Map(),
+    emittedLen: new Map(),
   };
   // Resuming an existing conversation: its db already holds every prior turn's
   // steps — seed past them so old reasoning isn't replayed into this turn.
@@ -586,15 +634,26 @@ function newTrajectoryTail(convId?: string): TrajectoryTailState {
       const db = new Database(file, { readonly: true });
       try {
         const row = db.query('select max(idx) as m from steps').get() as { m: number | null };
-        if (row?.m != null) state.lastIdx.set(file, row.m);
+        if (row?.m != null) state.finalizedIdx.set(file, row.m);
       } finally {
         db.close();
       }
     } catch {
-      /* db missing/locked — worst case we re-emit; dedupe set still guards */
+      /* db missing/locked — worst case we re-emit prior-turn thinking once */
     }
   }
   return state;
+}
+
+/** Concatenated reasoning text (proto field …20.3) of a model-response step. */
+function stepThinkingText(payload: Uint8Array): string {
+  let out = '';
+  for (const [path, text] of protoStrings(payload)) {
+    // 20.3 = reasoning text (20.1/20.8 are the final answer, streamed
+    // elsewhere; 20.14 is the encrypted thought signature).
+    if (path.endsWith('20.3')) out += text;
+  }
+  return out;
 }
 
 /** Poll live conversation dbs for new model-response steps; extract thinking. */
@@ -611,7 +670,7 @@ function drainTrajectoryThinking(state: TrajectoryTailState): ProviderEvent[] {
         .filter((f) => f.endsWith('.db'))
         .map((f) => join(AGY_CONV_DIR, f))
         .filter((f) => {
-          if (state.lastIdx.has(f)) return true;
+          if (state.finalizedIdx.has(f)) return true;
           try {
             return statSync(f).mtimeMs >= state.spawnedAt - 2_000;
           } catch {
@@ -628,24 +687,26 @@ function drainTrajectoryThinking(state: TrajectoryTailState): ProviderEvent[] {
       const { Database } = require('bun:sqlite') as typeof import('bun:sqlite');
       const db = new Database(file, { readonly: true });
       try {
-        const last = state.lastIdx.get(file) ?? -1;
+        const fin = state.finalizedIdx.get(file) ?? -1;
+        // idx > fin includes the newest (still-growing) row every poll — its
+        // payload streams in place, so we diff and emit only the new suffix.
         const rows = db
           .query('select idx, step_type, step_payload from steps where idx > ? order by idx')
-          .all(last) as Array<{ idx: number; step_type: number; step_payload: Uint8Array | null }>;
+          .all(fin) as Array<{ idx: number; step_type: number; step_payload: Uint8Array | null }>;
+        if (rows.length === 0) continue;
         for (const row of rows) {
-          state.lastIdx.set(file, row.idx);
           if (row.step_type !== 15 || !row.step_payload) continue;
-          for (const [path, text] of protoStrings(new Uint8Array(row.step_payload))) {
-            // 20.3 = reasoning text (20.1/20.8 are the final answer, streamed
-            // elsewhere; 20.14 is the encrypted thought signature).
-            if (path.endsWith('20.3') && text.trim().length > 10) {
-              const key = text.slice(0, 120);
-              if (state.seenThinking.has(key)) continue;
-              state.seenThinking.add(key);
-              events.push({ type: 'thinking_delta', thinking: text });
-            }
+          const full = stepThinkingText(new Uint8Array(row.step_payload));
+          const key = `${file}:${row.idx}`;
+          const prev = state.emittedLen.get(key) ?? 0;
+          if (full.length > prev) {
+            events.push({ type: 'thinking_delta', thinking: full.slice(prev) });
+            state.emittedLen.set(key, full.length);
           }
         }
+        // Everything below the newest row can no longer change.
+        const maxIdx = rows[rows.length - 1].idx;
+        if (maxIdx - 1 > fin) state.finalizedIdx.set(file, maxIdx - 1);
       } finally {
         db.close();
       }

@@ -22,7 +22,10 @@ export const JulesModels: ModelDef[] = [
     apiModelId: 'gemini-3.1-pro',
     contextWindow: 2_097_152,
     maxOutputTokens: 65_536,
-    canReason: true,
+    // Jules is a cloud task agent — its API exposes no reasoning-effort
+    // control and streamResponse never reads reasoningLevel. canReason=true
+    // showed a picker whose selection was silently discarded.
+    canReason: false,
     supportsAttachments: false,
     supportsStreaming: true,
     tier: 'reasoning',
