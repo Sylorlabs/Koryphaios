@@ -82,11 +82,13 @@ export class CollaborationManager {
     tunnelUrl: string;
     inviteLinks: Record<string, string>;
     relayEnabled: boolean;
-    relayError?: string;
     policy: CollaborationPolicy;
   }> {
+    if (!relayEnabled || !relayClient) {
+      throw new Error('WAN collaboration relay is not configured. Hosting was not started.');
+    }
     // Check if already hosting this session
-    const [existing] = await db
+    const existingRows = await db
       .select()
       .from(collaborationSessions)
       .where(and(
@@ -94,25 +96,32 @@ export class CollaborationManager {
         eq(collaborationSessions.status, 'active'),
       ))
       .limit(1);
+    let existing: (typeof existingRows)[number] | undefined = existingRows[0];
+
+    // Relay sessions are in-memory on the WAN service. After either side
+    // restarts, a stale local row must not masquerade as an internet-reachable
+    // host. End it and create a fresh relay-backed session.
+    if (existing && !relayClient.isConnected) {
+      await db.update(collaborationSessions)
+        .set({ status: 'ended', endedAt: new Date() })
+        .where(eq(collaborationSessions.id, existing.id));
+      existing = undefined;
+    }
 
     let sessionId: string;
     let joinCode: string;
-    let localJoinCode: string;
     let tunnelUrl = '';
     let relayReady = false;
-    let relayError: string | undefined;
 
     const requestedWorkspacePaths = [...new Set(workspacePaths.map(path => path.trim()).filter(Boolean))].slice(0, 24);
 
     if (existing) {
       sessionId = existing.id;
       joinCode = existing.joinCode;
-      localJoinCode = existing.joinCode;
       tunnelUrl = existing.tunnelUrl ?? '';
     } else {
       sessionId = nanoid();
       joinCode = this.generateJoinCode();
-      localJoinCode = joinCode;
 
       // Start relay session if configured
       if (relayEnabled && relayClient) {
@@ -198,17 +207,14 @@ export class CollaborationManager {
         await relayClient.updatePolicy(policy);
         relayReady = true;
       } catch (err: any) {
-        // An older relay may support session creation but not host-owned policy.
-        // Never expose guests through a relay that cannot enforce the policy;
-        // keep the local collaboration session usable instead.
-        log.error({ err: err.message }, 'Relay does not support required host policy; continuing locally');
+        // Never expose guests through a relay that cannot enforce host policy.
+        log.error({ err: err.message }, 'WAN relay does not support required host policy');
         await relayClient.disconnect();
         relayReady = false;
-        relayError = 'The configured relay is outdated and does not support enforced host policies. Hosting is active locally; upgrade the relay to restore internet invites.';
-        joinCode = localJoinCode;
-        tunnelUrl = '';
-        await db.update(collaborationSessions).set({ joinCode, tunnelUrl })
+        await db.update(collaborationSessions)
+          .set({ status: 'ended', endedAt: new Date() })
           .where(eq(collaborationSessions.id, sessionId));
+        throw new Error('WAN relay upgrade required: the configured relay does not support enforced host policies. Hosting was not started.');
       }
     }
 
@@ -224,7 +230,7 @@ export class CollaborationManager {
       }
     }
 
-    return { id: sessionId, joinCode, tunnelUrl, inviteLinks, relayEnabled: relayReady, relayError, policy };
+    return { id: sessionId, joinCode, tunnelUrl, inviteLinks, relayEnabled: relayReady, policy };
   }
 
   async updatePolicy(id: string, patch: Partial<CollaborationPolicy>): Promise<CollaborationPolicy> {

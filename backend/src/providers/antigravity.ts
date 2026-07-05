@@ -40,6 +40,33 @@ const MODELS_CACHE_TTL_MS = 5 * 60_000;
 const LOG_POLL_INTERVAL_MS = 150;
 const DEFAULT_CLI_MODEL = 'Gemini 3.5 Flash (Medium)';
 
+// ── Session → agy conversation continuity ────────────────────────────────────
+// agy supports `--conversation <id>` to resume. Without it every Koryphaios turn
+// spawns a brand-new agentic session that re-explores the workspace (dozens of
+// tool runs before the answer). We map each Koryphaios session to the agy
+// conversation it created on its first turn and resume it afterwards, sending
+// only the NEW turn — agy keeps its own history.
+const sessionConversations = new Map<string, string>();
+
+/** Snapshot conversation ids currently on disk. */
+function listConversationIds(): Set<string> {
+  try {
+    return new Set(
+      readdirSync(AGY_CONV_DIR)
+        .filter((f) => f.endsWith('.db'))
+        .map((f) => f.slice(0, -3)),
+    );
+  } catch {
+    return new Set();
+  }
+}
+
+/** First conversation id present now that wasn't in `before`. */
+function detectNewConversation(before: Set<string>): string | null {
+  for (const id of listConversationIds()) if (!before.has(id)) return id;
+  return null;
+}
+
 // ── Dynamic model cache ────────────────────────────────────────────────────────
 
 let cachedModels: ModelDef[] | null = null;
@@ -244,7 +271,20 @@ export class AntigravityProvider implements Provider {
       return;
     }
 
-    const prompt = buildPrompt(request.systemPrompt, request.messages);
+    // Resume the agy conversation tied to this Koryphaios session when we have
+    // one — then only the NEW turn is sent (agy holds the prior history), which
+    // avoids a fresh agentic session re-exploring the workspace every message.
+    let convId = request.sessionId ? sessionConversations.get(request.sessionId) : undefined;
+    if (convId && !existsSync(join(AGY_CONV_DIR, `${convId}.db`))) {
+      // agy pruned it — start a fresh conversation with full history.
+      if (request.sessionId) sessionConversations.delete(request.sessionId);
+      convId = undefined;
+    }
+    const convsBefore = convId ? null : listConversationIds();
+
+    const prompt = convId
+      ? buildTurnPrompt(request.messages)
+      : buildPrompt(request.systemPrompt, request.messages);
     if (!prompt.trim()) {
       yield { type: 'error', error: 'Antigravity: empty prompt' };
       return;
@@ -262,6 +302,7 @@ export class AntigravityProvider implements Provider {
       '--dangerously-skip-permissions',
       '--log-file',
       logPath,
+      ...(convId ? ['--conversation', convId] : []),
       // agy scopes its workspace via --add-dir (process cwd alone is ignored
       // for tool resolution — verified: it listed $HOME instead of cwd).
       ...(cwd ? ['--add-dir', cwd] : []),
@@ -308,9 +349,24 @@ export class AntigravityProvider implements Provider {
     let totalContentEvents = 0;
     let emittedStdout = false;
     // Primary live source: agy's own brain transcript (responses + tools).
-    const transcriptTail = newTranscriptTail(() => stdout);
+    const transcriptTail = newTranscriptTail(() => stdout, convId);
     // Reasoning source: the trajectory store (proto field 20.3 of model steps).
-    const trajectoryTail = newTrajectoryTail();
+    const trajectoryTail = newTrajectoryTail(convId);
+    // Thinking from the SSE log is the primary reasoning stream; the trajectory
+    // db is the fallback — never mix both or reasoning shows twice/erratically.
+    let sseThinkingEvents = 0;
+
+    const rememberConversation = () => {
+      if (convId || !convsBefore) return;
+      const found = detectNewConversation(convsBefore);
+      if (found) {
+        convId = found;
+        if (request.sessionId) sessionConversations.set(request.sessionId, found);
+        // Focus the tailers on the discovered conversation.
+        transcriptTail.convId = found;
+        trajectoryTail.convId = found;
+      }
+    };
 
     const drainLog = (): ProviderEvent[] => {
       try {
@@ -320,6 +376,7 @@ export class AntigravityProvider implements Provider {
         logOffset = full.length;
         const { events, gotContent } = parseLogChunk(newChunk, true);
         if (gotContent) totalContentEvents++;
+        sseThinkingEvents += events.filter((e) => e.type === 'thinking_delta').length;
         return events;
       } catch {
         return [];
@@ -333,8 +390,11 @@ export class AntigravityProvider implements Provider {
         new Promise<{ done: false }>((res) => setTimeout(() => res({ done: false }), LOG_POLL_INTERVAL_MS)),
       ]);
 
+      rememberConversation();
       for (const event of drainLog()) yield event;
-      for (const event of drainTrajectoryThinking(trajectoryTail)) yield event;
+      if (sseThinkingEvents === 0) {
+        for (const event of drainTrajectoryThinking(trajectoryTail)) yield event;
+      }
       for (const event of drainTranscript(transcriptTail)) {
         if (event.type === 'content_delta') totalContentEvents++;
         yield event;
@@ -357,7 +417,10 @@ export class AntigravityProvider implements Provider {
         for (const event of drainLog()) yield event;
         // The transcript's final lines can land marginally after exit.
         await new Promise((r) => setTimeout(r, 400));
-        for (const event of drainTrajectoryThinking(trajectoryTail)) yield event;
+        rememberConversation();
+        if (sseThinkingEvents === 0) {
+          for (const event of drainTrajectoryThinking(trajectoryTail)) yield event;
+        }
         for (const event of drainTranscript(transcriptTail)) {
           if (event.type === 'content_delta') totalContentEvents++;
           yield event;
@@ -500,33 +563,64 @@ function protoStrings(buf: Uint8Array, prefix = ''): Array<[string, string]> {
 
 interface TrajectoryTailState {
   spawnedAt: number;
+  /** Known agy conversation id — when set, only that db is polled. */
+  convId?: string;
   /** last consumed step idx per conversation db */
   lastIdx: Map<string, number>;
   seenThinking: Set<string>;
 }
 
-function newTrajectoryTail(): TrajectoryTailState {
-  return { spawnedAt: Date.now(), lastIdx: new Map(), seenThinking: new Set() };
+function newTrajectoryTail(convId?: string): TrajectoryTailState {
+  const state: TrajectoryTailState = {
+    spawnedAt: Date.now(),
+    convId,
+    lastIdx: new Map(),
+    seenThinking: new Set(),
+  };
+  // Resuming an existing conversation: its db already holds every prior turn's
+  // steps — seed past them so old reasoning isn't replayed into this turn.
+  if (convId) {
+    const file = join(AGY_CONV_DIR, `${convId}.db`);
+    try {
+      const { Database } = require('bun:sqlite') as typeof import('bun:sqlite');
+      const db = new Database(file, { readonly: true });
+      try {
+        const row = db.query('select max(idx) as m from steps').get() as { m: number | null };
+        if (row?.m != null) state.lastIdx.set(file, row.m);
+      } finally {
+        db.close();
+      }
+    } catch {
+      /* db missing/locked — worst case we re-emit; dedupe set still guards */
+    }
+  }
+  return state;
 }
 
 /** Poll live conversation dbs for new model-response steps; extract thinking. */
 function drainTrajectoryThinking(state: TrajectoryTailState): ProviderEvent[] {
   const events: ProviderEvent[] = [];
   let dbs: string[] = [];
-  try {
-    dbs = readdirSync(AGY_CONV_DIR)
-      .filter((f) => f.endsWith('.db'))
-      .map((f) => join(AGY_CONV_DIR, f))
-      .filter((f) => {
-        if (state.lastIdx.has(f)) return true;
-        try {
-          return statSync(f).mtimeMs >= state.spawnedAt - 2_000;
-        } catch {
-          return false;
-        }
-      });
-  } catch {
-    return events;
+  if (state.convId) {
+    // Exact conversation known — no mtime-window guessing across all dbs.
+    const f = join(AGY_CONV_DIR, `${state.convId}.db`);
+    if (existsSync(f)) dbs = [f];
+  } else {
+    try {
+      dbs = readdirSync(AGY_CONV_DIR)
+        .filter((f) => f.endsWith('.db'))
+        .map((f) => join(AGY_CONV_DIR, f))
+        .filter((f) => {
+          if (state.lastIdx.has(f)) return true;
+          try {
+            return statSync(f).mtimeMs >= state.spawnedAt - 2_000;
+          } catch {
+            return false;
+          }
+        });
+    } catch {
+      return events;
+    }
   }
   for (const file of dbs) {
     try {
@@ -581,17 +675,43 @@ interface TranscriptTailState {
   offsets: Map<string, number>;
   spawnedAt: number;
   emittedContent: boolean;
+  /** Known agy conversation id — when set, only its transcript is tailed. */
+  convId?: string;
   /** Live stdout text so far — used to skip transcript responses the user
    *  already saw streaming (the final answer is printed to stdout too). */
   stdoutSoFar: () => string;
 }
 
-function newTranscriptTail(stdoutSoFar: () => string): TranscriptTailState {
-  return { offsets: new Map(), spawnedAt: Date.now(), emittedContent: false, stdoutSoFar };
+function transcriptPath(convId: string): string {
+  return join(AGY_BRAIN_DIR, convId, '.system_generated', 'logs', 'transcript_full.jsonl');
+}
+
+function newTranscriptTail(stdoutSoFar: () => string, convId?: string): TranscriptTailState {
+  const state: TranscriptTailState = {
+    offsets: new Map(),
+    spawnedAt: Date.now(),
+    emittedContent: false,
+    convId,
+    stdoutSoFar,
+  };
+  // Resuming: skip the transcript content from earlier turns.
+  if (convId) {
+    const f = transcriptPath(convId);
+    try {
+      state.offsets.set(f, statSync(f).size);
+    } catch {
+      /* transcript not created yet */
+    }
+  }
+  return state;
 }
 
 /** Transcript files touched since this run started. */
 function findLiveTranscripts(state: TranscriptTailState): string[] {
+  if (state.convId) {
+    const f = transcriptPath(state.convId);
+    return existsSync(f) ? [f] : [];
+  }
   const out: string[] = [];
   try {
     for (const id of readdirSync(AGY_BRAIN_DIR)) {
@@ -703,6 +823,30 @@ function buildPrompt(systemPrompt: string | undefined, messages: ProviderMessage
     lines.push(`${label}: ${text}`);
   }
   return lines.join('\n\n');
+}
+
+/** Prompt for a resumed conversation: only the turns since the last assistant
+ *  reply — agy already holds the earlier history in its own conversation. */
+function buildTurnPrompt(messages: ProviderMessage[]): string {
+  const turns = messages.filter((m) => m.role !== 'system');
+  let start = 0;
+  for (let i = turns.length - 1; i >= 0; i--) {
+    if (turns[i].role === 'assistant') {
+      start = i + 1;
+      break;
+    }
+  }
+  const fresh = turns.slice(start);
+  if (fresh.length === 1 && fresh[0].role === 'user') return flattenContent(fresh[0].content);
+  return fresh
+    .map((m) => {
+      const text = flattenContent(m.content);
+      if (!text.trim()) return '';
+      const label = m.role === 'tool' ? 'Tool result' : 'User';
+      return `${label}: ${text}`;
+    })
+    .filter(Boolean)
+    .join('\n\n');
 }
 
 function flattenContent(content: string | ProviderContentBlock[]): string {

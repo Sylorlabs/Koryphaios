@@ -54,6 +54,7 @@
   import ModeToggle from './ModeToggle.svelte';
   import TeamAccessProfiles from './TeamAccessProfiles.svelte';
   import NumberStepper from './NumberStepper.svelte';
+  import KorySelect from './KorySelect.svelte';
   import { apiFetch, parseJsonResponse } from '$lib/api.svelte';
   import { dndzone } from 'svelte-dnd-action';
   import { invoke } from '@tauri-apps/api/core';
@@ -111,13 +112,13 @@
     }
   }
 
-  function startHosting() {
+  async function startHosting() {
     const paths = [...new Set(hostWorkspacePaths.map(path => path.trim()).filter(Boolean))];
     if (!paths.length) {
       toastStore.error('Add at least one workspace path before hosting');
       return;
     }
-    void collaborationStore.hostSession(paths);
+    if (await collaborationStore.hostSession(paths)) onClose?.();
   }
 
   const NOTE_PERMISSION_PRESETS: Array<{
@@ -557,11 +558,11 @@
               </div>
               <div class="space-y-1">
                 <label class="text-[10px] uppercase tracking-wider text-[var(--color-text-muted)] font-medium" for="custom-kind">API format</label>
-                <select id="custom-kind" bind:value={customForm.kind} class="input w-full text-xs">
-                  <option value="openai">OpenAI-compatible (/v1/chat/completions)</option>
-                  <option value="anthropic">Anthropic-compatible (/v1/messages)</option>
-                  <option value="gemini">Gemini-compatible</option>
-                </select>
+                <KorySelect value={customForm.kind} label="Custom provider API format" options={[
+                  { value:'openai', label:'OpenAI-compatible', description:'/v1/chat/completions' },
+                  { value:'anthropic', label:'Anthropic-compatible', description:'/v1/messages' },
+                  { value:'gemini', label:'Gemini-compatible' },
+                ]} onchange={(value) => customForm.kind = value as typeof customForm.kind} />
               </div>
               <div class="space-y-1">
                 <label class="text-[10px] uppercase tracking-wider text-[var(--color-text-muted)] font-medium" for="custom-url">Base URL</label>
@@ -1228,7 +1229,7 @@
                       {collaborationStore.activeCollab.joinCode || '••••••'}
                     </code>
                     <p class="mt-3 text-[11px] text-[var(--color-text-muted)]">
-                      {collaborationStore.activeCollab.relayError ?? 'Configure RELAY_URL and RELAY_HOST_SECRET in your environment for internet-accessible invite links.'}
+                      Configure RELAY_URL and RELAY_HOST_SECRET in your environment for internet-accessible invite links.
                     </p>
                   </div>
                 {/if}

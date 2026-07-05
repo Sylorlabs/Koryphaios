@@ -7,6 +7,7 @@
 
 import { serverLog } from '../logger';
 import type { CollaborationPolicy } from '@koryphaios/shared';
+import { RTCPeerConnection, type RTCDataChannel } from 'werift';
 
 const log = serverLog.child({ module: 'collab-relay' });
 
@@ -17,6 +18,83 @@ interface RelayConfig {
 
 type EventHandler = (msg: Record<string, unknown>) => void;
 
+class HybridPeerTransport {
+  private peers = new Map<string, { pc: RTCPeerConnection; channel?: RTCDataChannel; tierId: string }>();
+
+  constructor(
+    private signal: (message: Record<string, unknown>) => void,
+    private receive: (message: Record<string, unknown>) => void,
+  ) {}
+
+  private createPeer(guestId: string, tierId: string) {
+    const iceServers = [{ urls: 'stun:stun.l.google.com:19302' }];
+    if (process.env.TURN_URL) {
+      iceServers.push({
+        urls: process.env.TURN_URL,
+        ...(process.env.TURN_USERNAME ? { username: process.env.TURN_USERNAME } : {}),
+        ...(process.env.TURN_CREDENTIAL ? { credential: process.env.TURN_CREDENTIAL } : {}),
+      } as never);
+    }
+    const pc = new RTCPeerConnection({ iceServers });
+    const peer = { pc, tierId } as { pc: RTCPeerConnection; channel?: RTCDataChannel; tierId: string };
+    this.peers.set(guestId, peer);
+    pc.onIceCandidate.subscribe((candidate) => {
+      if (candidate) this.signal({ type: 'rtc-ice', guestId, candidate: candidate.toJSON() });
+    });
+    pc.onDataChannel.subscribe((channel) => {
+      if (channel.label !== 'koryphaios') return;
+      peer.channel = channel;
+      channel.onMessage.subscribe((raw) => {
+        try {
+          const message = JSON.parse(String(raw)) as Record<string, unknown>;
+          this.receive({ ...message, guestId, tierId: peer.tierId, transport: 'p2p' });
+        } catch { /* ignore malformed peer payloads */ }
+      });
+    });
+    pc.connectionStateChange.subscribe((state) => {
+      if (state === 'failed' || state === 'closed') void this.closePeer(guestId);
+    });
+    return peer;
+  }
+
+  async handle(message: Record<string, unknown>) {
+    const guestId = String(message.guestId || '');
+    if (!guestId) return;
+    let peer = this.peers.get(guestId);
+    if (message.type === 'rtc-offer') {
+      if (peer) await this.closePeer(guestId);
+      peer = this.createPeer(guestId, String(message.tierId || 'viewer'));
+      const offer = message.description as { type: 'offer'; sdp: string };
+      await peer.pc.setRemoteDescription(offer);
+      const answer = await peer.pc.createAnswer();
+      await peer.pc.setLocalDescription(answer);
+      this.signal({ type: 'rtc-answer', guestId, description: { type: answer.type, sdp: answer.sdp } });
+    } else if (message.type === 'rtc-ice' && peer && message.candidate) {
+      await peer.pc.addIceCandidate(message.candidate as never);
+    }
+  }
+
+  broadcast(message: Record<string, unknown>): string[] {
+    const delivered: string[] = [];
+    const encoded = JSON.stringify(message);
+    for (const [guestId, peer] of this.peers) {
+      if (peer.channel?.readyState !== 'open') continue;
+      try { peer.channel.send(encoded); delivered.push(guestId); } catch { /* relay fallback handles it */ }
+    }
+    return delivered;
+  }
+
+  async closePeer(guestId: string) {
+    const peer = this.peers.get(guestId);
+    this.peers.delete(guestId);
+    if (peer) await peer.pc.close().catch(() => {});
+  }
+
+  async closeAll() {
+    await Promise.all([...this.peers.keys()].map((id) => this.closePeer(id)));
+  }
+}
+
 export class RelayClient {
   private ws: WebSocket | null = null;
   private sessionId: string | null = null;
@@ -24,6 +102,35 @@ export class RelayClient {
   private handlers: EventHandler[] = [];
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private intentionalClose = false;
+  private activePolicy: CollaborationPolicy | null = null;
+  private readonly peerTransport = new HybridPeerTransport(
+    (message) => this.sendRelay(message),
+    (message) => this.handlePeerMessage(message),
+  );
+
+  private handlePeerMessage(message: Record<string, unknown>) {
+    if (message.type !== 'guest-prompt' || !this.activePolicy) return;
+    const tier = this.activePolicy.accessTiers.find((item) => item.id === message.tierId);
+    if (!tier?.permissions.submitPrompts) return;
+    const requestedModel = String(message.model || '');
+    const model = requestedModel && (tier.allowedModels.includes('*') || tier.allowedModels.includes(requestedModel)) ? requestedModel : '';
+    const requestedReasoning = String(message.reasoningLevel || '');
+    const allowedReasoning = model ? (tier.reasoningByModel?.[model] || []) : [];
+    this.dispatch({
+      type: 'guest-prompt',
+      guestId: message.guestId,
+      name: String(message.name || 'Guest').slice(0, 40),
+      role: tier.id,
+      tierId: tier.id,
+      autoExecute: tier.permissions.autoExecutePrompts && tier.permissions.fullSystemAccess,
+      content: String(message.content || '').slice(0, 4000),
+      model,
+      reasoningLevel: requestedReasoning && allowedReasoning.includes(requestedReasoning) ? requestedReasoning : '',
+      commandAllowlist: tier.permissions.commandAllowlist || [],
+      commandBlocklist: tier.permissions.commandBlocklist || [],
+      transport: 'p2p',
+    });
+  }
 
   constructor(private config: RelayConfig) {}
 
@@ -109,6 +216,7 @@ export class RelayClient {
       body: JSON.stringify(policy),
     });
     if (!res.ok) throw new Error(`Failed to update team policy: ${res.status}`);
+    this.activePolicy = policy;
   }
 
   async resolveJoinCode(joinCode: string) {
@@ -120,11 +228,14 @@ export class RelayClient {
   /** Broadcast an event to all connected guests via the relay. */
   broadcast(msg: Record<string, unknown>) {
     if (!this.isConnected) return;
-    try {
-      this.ws!.send(JSON.stringify(msg));
-    } catch (err) {
-      log.warn({ err }, 'Failed to broadcast to relay');
-    }
+    const excludeGuestIds = this.peerTransport.broadcast(msg);
+    this.sendRelay(excludeGuestIds.length ? { ...msg, excludeGuestIds } : msg);
+  }
+
+  private sendRelay(msg: Record<string, unknown>) {
+    if (!this.isConnected) return;
+    try { this.ws!.send(JSON.stringify(msg)); }
+    catch (err) { log.warn({ err }, 'Failed to send to relay'); }
   }
 
   /** Approve or reject a guest prompt. */
@@ -138,6 +249,8 @@ export class RelayClient {
     if (this.ws) { this.ws.close(); this.ws = null; }
     this.sessionId = null;
     this.sessionToken = null;
+    this.activePolicy = null;
+    await this.peerTransport.closeAll();
   }
 
   private async connect(wsBase: string, token: string): Promise<void> {
@@ -162,6 +275,11 @@ export class RelayClient {
       ws.addEventListener('message', (e) => {
         try {
           const msg = JSON.parse(String(e.data));
+          if (msg.type === 'rtc-offer' || msg.type === 'rtc-ice') {
+            void this.peerTransport.handle(msg).catch((err) => log.warn({ err }, 'WebRTC signaling failed'));
+            return;
+          }
+          if (msg.type === 'guest-left' && msg.guestId) void this.peerTransport.closePeer(String(msg.guestId));
           this.dispatch(msg);
         } catch {}
       });

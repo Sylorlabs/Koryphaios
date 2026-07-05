@@ -29,7 +29,6 @@ export interface CollaborationSession {
   tunnelUrl: string;
   inviteLinks: InviteLinks;
   relayEnabled: boolean;
-  relayError?: string;
   policy: CollaborationPolicy;
 }
 
@@ -43,6 +42,7 @@ let joinedSessions = $state<JoinedTeamSession[]>([]);
 let activeJoinedSessionId = $state<string | null>(null);
 let settingsRequest = $state(0);
 let pollInterval: ReturnType<typeof setInterval> | null = null;
+let policyRevision = 0;
 
 function startPollingPending(sessionId: string) {
   stopPollingPending();
@@ -78,7 +78,7 @@ export const collaborationStore = {
 
   async hostSession(workspacePaths: string[] = []) {
     const sessionId = sessionStore.activeSessionId;
-    if (!sessionId) { toastStore.error('No active session to host'); return; }
+    if (!sessionId) { toastStore.error('No active session to host'); return false; }
 
     loading = true;
     try {
@@ -92,11 +92,14 @@ export const collaborationStore = {
         activeCollab = data.data;
         toastStore.success('Collaboration session started!');
         startPollingPending(data.data.id);
+        return true;
       } else {
         toastStore.error(data.error || 'Failed to start session');
+        return false;
       }
     } catch (err: any) {
       toastStore.error(err.message || 'Network error');
+      return false;
     } finally {
       loading = false;
     }
@@ -138,15 +141,20 @@ export const collaborationStore = {
 
   async updatePolicy(patch: Partial<CollaborationPolicy>, quiet = false) {
     if (!activeCollab) return;
+    const revision = ++policyRevision;
+    const previous = activeCollab;
+    activeCollab = { ...activeCollab, policy: { ...activeCollab.policy, ...patch } };
     try {
       const res = await apiFetch(apiUrl(`/api/collab/${activeCollab.id}/policy`), {
         method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(patch),
       });
       const data = await parseJsonResponse(res);
       if (!data.ok) throw new Error(data.error || 'Policy update failed');
-      activeCollab = { ...activeCollab, policy: data.data };
-      if (!quiet) toastStore.success('Team access updated');
-    } catch (err: any) { toastStore.error(err.message || 'Policy update failed'); }
+      if (revision === policyRevision && activeCollab) activeCollab = { ...activeCollab, policy: data.data };
+    } catch (err: any) {
+      if (revision === policyRevision) activeCollab = previous;
+      if (!quiet) toastStore.error(err.message || 'Policy update failed');
+    }
   },
 
   async decideJoin(guestId: string, approved: boolean, tierId?: string) {

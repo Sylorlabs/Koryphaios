@@ -51,18 +51,8 @@ export const collaborationRoutes = new Elysia({ prefix: '/api/collab' })
     async ({ request, body, set }) => {
       if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
       try {
-        let session;
-        if (relayAvailable) {
-          try {
-            session = await collaborationManager.joinRelaySession((body as any).joinCode);
-          } catch {
-            // A host may be running in secure local fallback mode when its
-            // configured relay is older or temporarily unavailable.
-            session = await collaborationManager.joinSession((body as any).joinCode, (body as any).userId, (body as any).name);
-          }
-        } else {
-          session = await collaborationManager.joinSession((body as any).joinCode, (body as any).userId, (body as any).name);
-        }
+        if (!relayAvailable) throw new Error('WAN collaboration relay is not configured');
+        const session = await collaborationManager.joinRelaySession((body as any).joinCode);
         return { ok: true, data: session };
       } catch (err: any) {
         set.status = 500;

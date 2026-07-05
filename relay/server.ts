@@ -173,8 +173,7 @@ const GUEST_HTML = `<!DOCTYPE html>
     #send-btn{background:#c890ab;color:#0a0a0f;border:none;border-radius:8px;padding:0 20px;font-weight:700;font-size:12px;cursor:pointer;white-space:nowrap}
     #send-btn:disabled{opacity:.35;cursor:not-allowed}
     .viewer-note{color:#475569;font-size:11px;text-align:center;padding:8px 0}
-    #model-select{background:#0d0d14;border:1px solid #2d2d3e;border-radius:8px;color:#e2e8f0;padding:0 10px;font:11px inherit;max-width:220px}
-    #reasoning-select{background:#0d0d14;border:1px solid #2d2d3e;border-radius:8px;color:#e2e8f0;padding:0 10px;font:11px inherit;max-width:170px}
+    .k-select{position:relative;min-width:170px;max-width:240px}.k-select-trigger{height:40px;width:100%;display:flex;align-items:center;justify-content:space-between;gap:8px;background:#0d0d14;border:1px solid #2d2d3e;border-radius:9px;color:#e2e8f0;padding:0 11px;font:11px inherit;cursor:pointer}.k-select-trigger:after{content:'⌄';color:#77778a}.k-select-menu{display:none;position:absolute;bottom:46px;left:0;z-index:30;min-width:100%;max-height:240px;overflow:auto;padding:5px;background:#16161f;border:1px solid #343442;border-radius:11px;box-shadow:0 18px 50px #0009}.k-select.open .k-select-menu{display:block}.k-select-option{display:block;width:100%;border:0;background:transparent;color:#c9c9d3;padding:9px 10px;border-radius:7px;text-align:left;font:11px inherit;cursor:pointer;white-space:nowrap}.k-select-option:hover,.k-select-option.selected{background:#292936;color:#fff}
     #policy-bar{display:flex;gap:8px;flex-wrap:wrap;padding:8px 16px;border-bottom:1px solid #1e1e2e;background:#0d0d14}
     .policy-chip{border:1px solid #2d2d3e;border-radius:999px;padding:3px 9px;font-size:10px;color:#94a3b8}.policy-chip.on{border-color:#22c55e50;color:#86efac}.policy-chip.off{color:#64748b;text-decoration:line-through}
     #connect-screen{position:fixed;inset:0;background:#0a0a0f;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px}
@@ -192,7 +191,7 @@ const GUEST_HTML = `<!DOCTYPE html>
     footer{padding:14px clamp(16px,5vw,72px);border-color:var(--line);background:#0f0f15e8;backdrop-filter:blur(18px)}footer>*{max-width:1056px;margin-left:auto;margin-right:auto}
     #connect-screen{background:radial-gradient(circle at 50% 20%,#351c2e 0,transparent 42%),#08080c;padding:24px;z-index:20}.join-card{width:min(440px,100%);border:1px solid #343442;background:#111117e8;backdrop-filter:blur(20px);border-radius:24px;padding:34px;box-shadow:0 30px 90px #0008;text-align:center}.join-logo{width:58px;height:58px;margin:0 auto 18px;border-radius:18px;background:linear-gradient(135deg,#edc0d7,#9f5c81);display:grid;place-items:center;color:#160d13;font-size:24px;font-weight:900}#connect-screen h2{font-size:22px;color:#f6e8ef;margin-bottom:8px}#connect-screen p{color:#9292a3;font-size:13px;line-height:1.5;margin:0 auto 20px}#guest-name{width:100%;border:1px solid #343442;background:#0b0b10;color:#f4f4f5;border-radius:12px;padding:13px 14px;font:14px inherit;outline:none;margin-bottom:10px}#guest-name:focus{border-color:#c890ab}#join-btn{width:100%;border:0;border-radius:12px;padding:13px;background:linear-gradient(135deg,#dba8c2,#b87398);color:#170d13;font:700 13px inherit;cursor:pointer}.join-security{font-size:10px;color:#626274;margin-top:14px}
     #participants,#policy-bar{padding-left:clamp(16px,3vw,32px);padding-right:clamp(16px,3vw,32px)}#access-panel{padding:12px clamp(16px,3vw,32px);border-bottom:1px solid var(--line);background:#0b0b10;display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:8px}.access-item{border:1px solid #252532;background:#111117;border-radius:10px;padding:9px 11px}.access-label{font-size:9px;text-transform:uppercase;letter-spacing:.1em;color:#666678}.access-value{font:11px 'SF Mono',monospace;color:#c9c9d3;margin-top:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-    @media(max-width:640px){.input-row{flex-wrap:wrap}#model-select{width:100%;max-width:none}#send-btn{height:40px}.join-card{padding:26px 20px}}
+    @media(max-width:640px){.input-row{flex-wrap:wrap}.k-select{width:100%;max-width:none}#send-btn{height:40px}.join-card{padding:26px 20px}}
     .native-cta{margin-left:auto;color:#d9a9c2;text-decoration:none;font-size:11px;font-weight:700;border:1px solid #56384a;border-radius:9px;padding:7px 10px}.native-cta:hover{background:#c890ab15}
   </style>
 </head>
@@ -222,8 +221,8 @@ const GUEST_HTML = `<!DOCTYPE html>
   <footer class="hidden" id="footer">
     <div id="viewer-note" class="viewer-note hidden">You have viewer access — read only</div>
     <div class="input-row" id="input-row" style="display:none">
-      <select id="model-select" title="Host-approved model"><option value="">Host selects model</option></select>
-      <select id="reasoning-select" title="Host-approved reasoning mode"><option value="">Default reasoning</option></select>
+      <div class="k-select" id="model-select"><button type="button" class="k-select-trigger">Host selects model</button><div class="k-select-menu"></div></div>
+      <div class="k-select" id="reasoning-select"><button type="button" class="k-select-trigger">Default reasoning</button><div class="k-select-menu"></div></div>
       <textarea id="prompt-in" placeholder="Send a prompt to the host's agent..."></textarea>
       <button id="send-btn">Send</button>
     </div>
@@ -242,14 +241,24 @@ const GUEST_HTML = `<!DOCTYPE html>
     let role = 'viewer';
     let participants = {};
     let ws;
+    let peer;
+    let dataChannel;
     let policy = {};
     let currentTier = null;
 
+    function selectValue(id){return document.getElementById(id).dataset.value||'';}
+    function setSelectOptions(id,options,onchange){
+      var root=document.getElementById(id),trigger=root.querySelector('.k-select-trigger'),menu=root.querySelector('.k-select-menu');menu.innerHTML='';
+      var current=root.dataset.value||'';if(!options.some(function(option){return option.value===current;}))current=options[0]&&options[0].value||'';root.dataset.value=current;
+      options.forEach(function(option){var button=document.createElement('button');button.type='button';button.className='k-select-option'+(option.value===current?' selected':'');button.textContent=option.label;button.onclick=function(){root.dataset.value=option.value;trigger.textContent=option.label;root.classList.remove('open');setSelectOptions(id,options,onchange);if(onchange)onchange();};menu.appendChild(button);if(option.value===current)trigger.textContent=option.label;});
+      trigger.onclick=function(){document.querySelectorAll('.k-select.open').forEach(function(item){if(item!==root)item.classList.remove('open');});root.classList.toggle('open');};
+    }
+    document.addEventListener('click',function(event){if(!event.target.closest('.k-select'))document.querySelectorAll('.k-select.open').forEach(function(item){item.classList.remove('open');});});
+
     function renderReasoning(){
-      var model=document.getElementById('model-select').value; var select=document.getElementById('reasoning-select');
-      select.innerHTML='<option value="">Default reasoning</option>';
+      var model=selectValue('model-select'); var select=document.getElementById('reasoning-select');
       var levels=currentTier&&currentTier.reasoningByModel&&currentTier.reasoningByModel[model]||[];
-      levels.forEach(function(level){var o=document.createElement('option');o.value=level;o.textContent=level==='off'?'Reasoning off':level.charAt(0).toUpperCase()+level.slice(1)+' reasoning';select.appendChild(o);});
+      setSelectOptions('reasoning-select',[{value:'',label:'Default reasoning'}].concat(levels.map(function(level){return{value:level,label:level==='off'?'Reasoning off':level.charAt(0).toUpperCase()+level.slice(1)+' reasoning'};})));
       select.style.display=levels.length?'':'none';
     }
 
@@ -261,9 +270,8 @@ const GUEST_HTML = `<!DOCTYPE html>
         var chip=document.createElement('span'); var on=permissions[item[0]]===true;
         chip.className='policy-chip '+(on?'on':'off'); chip.textContent=(on?'✓ ':'— ')+item[1]; bar.appendChild(chip);
       });
-      var select=document.getElementById('model-select'); select.innerHTML='<option value="">Host selects model</option>';
       var tierModels=(currentTier&&currentTier.allowedModels)||[]; var selectable=tierModels.includes('*')?(policy.modelCatalog||[]).map(function(model){return model.id;}):tierModels;
-      selectable.forEach(function(model){ var def=(policy.modelCatalog||[]).find(function(item){return item.id===model;});var o=document.createElement('option');o.value=model;o.textContent=def?def.label+' · '+def.provider:(model.split(':').slice(1).join(':')||model);select.appendChild(o); });
+      setSelectOptions('model-select',[{value:'',label:'Host selects model'}].concat(selectable.map(function(model){var def=(policy.modelCatalog||[]).find(function(item){return item.id===model;});return{value:model,label:def?def.label+' · '+def.provider:(model.split(':').slice(1).join(':')||model)};})),renderReasoning);
       renderReasoning();
       participantsEl.style.display = permissions.viewParticipants===false ? 'none' : '';
       document.getElementById('input-row').style.display = currentTier && currentTier.permissions.submitPrompts ? 'flex' : 'none';
@@ -300,6 +308,26 @@ const GUEST_HTML = `<!DOCTYPE html>
       logEl.scrollTop = logEl.scrollHeight;
     }
 
+    function sendToHost(payload){
+      var encoded=JSON.stringify(payload);
+      if(dataChannel&&dataChannel.readyState==='open'){dataChannel.send(encoded);return;}
+      if(ws&&ws.readyState===1)ws.send(encoded);
+    }
+
+    async function startPeer(){
+      if(peer||!ws||ws.readyState!==1||typeof RTCPeerConnection==='undefined')return;
+      try{
+        peer=new RTCPeerConnection({iceServers:[{urls:'stun:stun.l.google.com:19302'}]});
+        dataChannel=peer.createDataChannel('koryphaios',{ordered:true});
+        dataChannel.onopen=function(){setStatus('Connected directly · relay ready');};
+        dataChannel.onclose=function(){setStatus('Connected via relay');};
+        dataChannel.onmessage=function(event){try{handleMsg(JSON.parse(String(event.data)));}catch(err){}};
+        peer.onicecandidate=function(event){if(event.candidate&&ws&&ws.readyState===1)ws.send(JSON.stringify({type:'rtc-ice',candidate:event.candidate.toJSON()}));};
+        var offer=await peer.createOffer();await peer.setLocalDescription(offer);
+        ws.send(JSON.stringify({type:'rtc-offer',description:peer.localDescription}));
+      }catch(err){peer=null;dataChannel=null;setStatus('Connected via relay');}
+    }
+
     function handleMsg(msg){
       if(msg.type==='init'){
         document.getElementById('connect-screen').classList.add('hidden');
@@ -318,6 +346,7 @@ const GUEST_HTML = `<!DOCTYPE html>
           document.getElementById('input-row').style.display='flex';
         }
         (msg.history||[]).forEach(handleMsg);
+        startPeer();
       } else if(msg.type==='chat'){
         var cls = msg.from==='human'?'human':'agent';
         addEntry('chat','<div class="who '+cls+'">'+h(msg.from==='human'?'👤 User':'🤖 Agent')+'</div><div>'+h(msg.content)+'</div>');
@@ -358,6 +387,10 @@ const GUEST_HTML = `<!DOCTYPE html>
         setStatus('Host disconnected');
         document.getElementById('live-badge').textContent='○ OFFLINE';
         document.getElementById('live-badge').className='badge offline';
+      } else if(msg.type==='rtc-answer'&&peer){
+        peer.setRemoteDescription(msg.description).catch(function(){});
+      } else if(msg.type==='rtc-ice'&&peer&&msg.candidate){
+        peer.addIceCandidate(msg.candidate).catch(function(){});
       } else if(msg.type==='error'){
         setMsg(msg.message||'Error');
         spin(false);
@@ -391,13 +424,12 @@ const GUEST_HTML = `<!DOCTYPE html>
     document.getElementById('send-btn').onclick = function(){
       var val = document.getElementById('prompt-in').value.trim();
       if(!val || !ws || ws.readyState!==1) return;
-      ws.send(JSON.stringify({type:'guest-prompt', content:val, name:name, model:document.getElementById('model-select').value, reasoningLevel:document.getElementById('reasoning-select').value}));
+      sendToHost({type:'guest-prompt', content:val, name:name, model:selectValue('model-select'), reasoningLevel:selectValue('reasoning-select')});
       document.getElementById('prompt-in').value='';
     };
     document.getElementById('prompt-in').addEventListener('keydown', function(e){
       if(e.key==='Enter' && !e.shiftKey){ e.preventDefault(); document.getElementById('send-btn').click(); }
     });
-    document.getElementById('model-select').addEventListener('change',renderReasoning);
 
     function beginJoin(){
       var input=document.getElementById('guest-name'); name=(input.value||name||'Guest').trim().slice(0,40)||'Guest';
@@ -599,6 +631,10 @@ const server = Bun.serve<WsData>({
       try { msg = JSON.parse(String(message)); } catch { return; }
 
       if (role === 'host') {
+        if ((msg.type === 'rtc-answer' || msg.type === 'rtc-ice') && msg.guestId) {
+          session.guests.get(String(msg.guestId))?.ws.send(JSON.stringify(msg));
+          return;
+        }
         if (msg.type === 'join-decision' && msg.guestId) {
           const guest = session.guests.get(String(msg.guestId));
           if (!guest) return;
@@ -621,7 +657,13 @@ const server = Bun.serve<WsData>({
           return;
         }
         // Host → broadcast to all guests; also append relevant events to history
-        session.guests.forEach(g => { if (g.admitted && eventAllowed(msg, tierFor(session, g.tierId))) g.ws.send(JSON.stringify(msg)); });
+        const excluded = new Set(Array.isArray(msg.excludeGuestIds) ? msg.excludeGuestIds.map(String) : []);
+        session.guests.forEach((g, id) => {
+          if (!excluded.has(id) && g.admitted && eventAllowed(msg, tierFor(session, g.tierId))) {
+            const { excludeGuestIds: _excluded, ...payload } = msg;
+            g.ws.send(JSON.stringify(payload));
+          }
+        });
 
         // Keep a rolling history (last 200 events) for late-joining guests
         if (['chat', 'diff', 'agent-status'].includes(msg.type)) {
@@ -638,6 +680,10 @@ const server = Bun.serve<WsData>({
         const guest = session.guests.get(guestId);
         if (!guest?.admitted) return;
         const tier = tierFor(session, guest.tierId);
+        if (msg.type === 'rtc-offer' || msg.type === 'rtc-ice') {
+          session.hostWs?.send(JSON.stringify({ ...msg, guestId, tierId: guest.tierId }));
+          return;
+        }
         // Guest → forward to host only
         if (msg.type === 'guest-prompt' && tier?.permissions.submitPrompts) {
           const requestedModel = String(msg.model || '');
