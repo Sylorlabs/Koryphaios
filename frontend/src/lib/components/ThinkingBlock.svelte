@@ -8,9 +8,12 @@
     /** Reasoning-token estimate for providers that redact the thinking text
      *  (Claude Code headless) but report progress. */
     estimatedTokens?: number;
+    /** Called when the stopwatch freezes — lets the parent persist the
+     *  client-observed duration so remounts can't regress the number. */
+    onFreeze?: (ms: number) => void;
   }
 
-  let { text, durationMs, agentName: _agentName, estimatedTokens }: Props = $props();
+  let { text, durationMs, agentName: _agentName, estimatedTokens, onFreeze }: Props = $props();
   let expanded = $state(false);
   let panelEl = $state<HTMLDivElement>();
 
@@ -69,18 +72,19 @@
         // Freeze at the moment tokens stopped, not at detection time, so the
         // number never visibly jumps when the stopwatch stops.
         frozenMs = Math.max(0, lastGrowthAt - anchor);
+        onFreeze?.(frozenMs);
       }
     }, TICK_MS);
     return () => clearInterval(timer);
   });
 
   let displayMs = $derived.by(() => {
-    if (isLive) return Math.max(0, now - anchor);
-    // Frozen: keep the client-observed value if we watched it tick (so the
-    // display never jumps down); fall back to the server duration.
-    if (frozenMs !== null && frozenMs > 0) return frozenMs;
-    if (durationMs && durationMs > 0) return durationMs;
-    return frozenMs ?? 0;
+    // Live: count only up to the last token's arrival — NOT through the stall
+    // window. Ticking during the stall made the display run ~1.5s past the
+    // real duration and then visibly jump back on freeze.
+    if (isLive) return Math.max(0, Math.min(now, lastGrowthAt) - anchor);
+    // Frozen: never go backwards — larger of client-observed and server value.
+    return Math.max(frozenMs ?? 0, durationMs ?? 0);
   });
 
   // Reasoning-token display: provider-reported estimate when available,

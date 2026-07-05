@@ -128,6 +128,13 @@ export function normalizeReasoningLevel(
       return level;
     }
 
+    // OpenCode Zen / Go: effort tiers come from models.dev per-model metadata
+    // (may include 'max'); the picker only offers levels the model declares,
+    // so pass through untouched.
+    if (provider === 'opencodezen' || provider === 'opencodego') {
+      return level;
+    }
+
     // OpenAI / Anthropic / Groq / xAI / Azure / OpenRouter / Copilot (Effort-based)
     if (
       ['openai', 'anthropic', 'groq', 'xai', 'azure', 'openrouter', 'copilot', 'kimicode'].includes(provider)

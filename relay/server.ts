@@ -8,6 +8,29 @@
 
 import { randomBytes, createHmac, timingSafeEqual } from 'crypto';
 
+interface CollaborationPolicy {
+  sessionName: string;
+  modelCatalog: Array<{ id: string; label: string; provider: string; reasoningLevels: string[] }>;
+  joinMode: 'approval' | 'auto';
+  defaultTierId: string;
+  accessTiers: Array<{ id: string; name: string; color: string; allowedModels: string[]; reasoningByModel: Record<string, string[]>; permissions: Record<string, any> }>;
+  allowedModels: string[];
+  allowPrompts: boolean;
+  requirePromptApproval: boolean;
+  showDiffs: boolean;
+  showAgentStatus: boolean;
+  showParticipants: boolean;
+}
+const DEFAULT_POLICY: CollaborationPolicy = {
+  sessionName: 'Team session', modelCatalog: [], joinMode: 'approval', defaultTierId: 'viewer', accessTiers: [
+    { id: 'viewer', name: 'Viewer', color: '#60a5fa', allowedModels: [], reasoningByModel: {}, permissions: { viewChat: true, viewSystemMessages: false, viewDiffs: true, viewAgentStatus: true, viewParticipants: true, submitPrompts: false, autoExecutePrompts: false, useTools: false, fullSystemAccess: false, readPaths: [], writePaths: [], commandAllowlist: [], commandBlocklist: [] } },
+    { id: 'collaborator', name: 'Collaborator', color: '#f59e0b', allowedModels: [], reasoningByModel: {}, permissions: { viewChat: true, viewSystemMessages: false, viewDiffs: true, viewAgentStatus: true, viewParticipants: true, submitPrompts: true, autoExecutePrompts: false, useTools: false, fullSystemAccess: false, readPaths: [], writePaths: [], commandAllowlist: [], commandBlocklist: [] } },
+    { id: 'yolo', name: 'YOLO', color: '#ef4444', allowedModels: ['*'], reasoningByModel: {}, permissions: { viewChat: true, viewSystemMessages: true, viewDiffs: true, viewAgentStatus: true, viewParticipants: true, submitPrompts: true, autoExecutePrompts: true, useTools: true, fullSystemAccess: true, readPaths: ['**'], writePaths: ['**'], commandAllowlist: ['*'], commandBlocklist: [] } },
+  ],
+  allowedModels: [], allowPrompts: true, requirePromptApproval: true,
+  showDiffs: true, showAgentStatus: true, showParticipants: true,
+};
+
 // ─── Config ─────────────────────────────────────────────────────────────────
 
 const HOST_SECRET = process.env.HOST_SECRET;
@@ -26,17 +49,54 @@ interface WsData {
   role: 'host' | 'guest';
   guestId: string;
   name: string;
+  tierId: string;
+  admitted: boolean;
 }
 
 interface Session {
   id: string;
   hostWs: ReturnType<typeof Bun.serve> extends { upgrade: (...a: any[]) => any } ? any : any;
-  guests: Map<string, { ws: any; name: string; role: string }>;
+  guests: Map<string, { ws: any; name: string; tierId: string; admitted: boolean }>;
   history: object[];
   createdAt: number;
+  joinCode: string;
+  policy: CollaborationPolicy;
 }
 
 const sessions = new Map<string, Session>();
+
+function makeJoinCode(): string {
+  const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  let code = '';
+  do code = Array.from({ length: 8 }, () => alphabet[Math.floor(Math.random() * alphabet.length)]).join('');
+  while ([...sessions.values()].some(s => s.joinCode === code));
+  return code;
+}
+
+function tierFor(session: Session, tierId: string) {
+  return session.policy.accessTiers.find(t => t.id === tierId)
+    ?? session.policy.accessTiers.find(t => t.id === session.policy.defaultTierId)
+    ?? session.policy.accessTiers[0];
+}
+
+function pathAllowed(path: string, patterns: string[]): boolean {
+  if (patterns.includes('**')) return true;
+  const clean = path.replace(/^\.\//, '');
+  return patterns.some(pattern => {
+    const prefix = pattern.replace(/\*\*?$/, '').replace(/^\.\//, '');
+    return clean === prefix.replace(/\/$/, '') || clean.startsWith(prefix);
+  });
+}
+
+function eventAllowed(event: any, tier: ReturnType<typeof tierFor>): boolean {
+  if (!tier) return false;
+  const p = tier.permissions;
+  if (event.type === 'chat') return p.viewChat !== false;
+  if (event.type === 'diff') return p.viewDiffs !== false && pathAllowed(String(event.path || ''), p.readPaths?.length ? p.readPaths : ['**']);
+  if (event.type === 'agent-status') return p.viewAgentStatus !== false;
+  if (event.type === 'log') return p.viewSystemMessages === true;
+  return true;
+}
 
 // ─── JWT (simple HMAC-based, no deps) ───────────────────────────────────────
 
@@ -113,6 +173,10 @@ const GUEST_HTML = `<!DOCTYPE html>
     #send-btn{background:#c890ab;color:#0a0a0f;border:none;border-radius:8px;padding:0 20px;font-weight:700;font-size:12px;cursor:pointer;white-space:nowrap}
     #send-btn:disabled{opacity:.35;cursor:not-allowed}
     .viewer-note{color:#475569;font-size:11px;text-align:center;padding:8px 0}
+    #model-select{background:#0d0d14;border:1px solid #2d2d3e;border-radius:8px;color:#e2e8f0;padding:0 10px;font:11px inherit;max-width:220px}
+    #reasoning-select{background:#0d0d14;border:1px solid #2d2d3e;border-radius:8px;color:#e2e8f0;padding:0 10px;font:11px inherit;max-width:170px}
+    #policy-bar{display:flex;gap:8px;flex-wrap:wrap;padding:8px 16px;border-bottom:1px solid #1e1e2e;background:#0d0d14}
+    .policy-chip{border:1px solid #2d2d3e;border-radius:999px;padding:3px 9px;font-size:10px;color:#94a3b8}.policy-chip.on{border-color:#22c55e50;color:#86efac}.policy-chip.off{color:#64748b;text-decoration:line-through}
     #connect-screen{position:fixed;inset:0;background:#0a0a0f;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px}
     #connect-screen h2{font-size:18px;color:#c890ab}
     #connect-screen p{color:#64748b;font-size:13px;max-width:360px;text-align:center}
@@ -121,26 +185,45 @@ const GUEST_HTML = `<!DOCTYPE html>
     .hidden{display:none!important}
     #participants{display:flex;gap:6px;flex-wrap:wrap;padding:8px 16px;border-bottom:1px solid #1e1e2e;background:#0d0d14;flex-shrink:0}
     .participant{background:#1e1e2e;border-radius:20px;padding:2px 10px;font-size:10px;color:#94a3b8}
+    :root{color-scheme:dark;--panel:#111117;--line:#292936;--text:#f4f4f5;--muted:#9292a3;--accent:#d49ab8}
+    body{background:radial-gradient(circle at 50% -20%,#281724 0,transparent 38%),#08080c;color:var(--text);font-family:Inter,ui-sans-serif,system-ui,-apple-system,sans-serif}
+    header{background:#0f0f15e8;backdrop-filter:blur(18px);border-color:var(--line);padding:14px clamp(16px,3vw,32px);position:sticky;top:0;z-index:5}.brand-mark{width:30px;height:30px;border-radius:10px;background:linear-gradient(135deg,#e4b3cc,#9f5c81);display:grid;place-items:center;color:#160d13;font-weight:900}header h1{color:#f3d6e5}
+    #log{padding:24px clamp(16px,5vw,72px);gap:12px;max-width:1200px;width:100%;margin:0 auto}.entry{padding:14px 16px;border-radius:14px;font-size:13px;box-shadow:0 8px 30px #0002}.entry.chat{background:linear-gradient(145deg,#15151d,#111118);border-color:var(--line)}.entry.diff-view{border-color:#23402d;border-radius:14px}.entry.diff-view .fname{display:flex;justify-content:space-between;gap:12px;font-size:12px}.diff-stats{color:#94a3b8;font-size:10px}
+    footer{padding:14px clamp(16px,5vw,72px);border-color:var(--line);background:#0f0f15e8;backdrop-filter:blur(18px)}footer>*{max-width:1056px;margin-left:auto;margin-right:auto}
+    #connect-screen{background:radial-gradient(circle at 50% 20%,#351c2e 0,transparent 42%),#08080c;padding:24px;z-index:20}.join-card{width:min(440px,100%);border:1px solid #343442;background:#111117e8;backdrop-filter:blur(20px);border-radius:24px;padding:34px;box-shadow:0 30px 90px #0008;text-align:center}.join-logo{width:58px;height:58px;margin:0 auto 18px;border-radius:18px;background:linear-gradient(135deg,#edc0d7,#9f5c81);display:grid;place-items:center;color:#160d13;font-size:24px;font-weight:900}#connect-screen h2{font-size:22px;color:#f6e8ef;margin-bottom:8px}#connect-screen p{color:#9292a3;font-size:13px;line-height:1.5;margin:0 auto 20px}#guest-name{width:100%;border:1px solid #343442;background:#0b0b10;color:#f4f4f5;border-radius:12px;padding:13px 14px;font:14px inherit;outline:none;margin-bottom:10px}#guest-name:focus{border-color:#c890ab}#join-btn{width:100%;border:0;border-radius:12px;padding:13px;background:linear-gradient(135deg,#dba8c2,#b87398);color:#170d13;font:700 13px inherit;cursor:pointer}.join-security{font-size:10px;color:#626274;margin-top:14px}
+    #participants,#policy-bar{padding-left:clamp(16px,3vw,32px);padding-right:clamp(16px,3vw,32px)}#access-panel{padding:12px clamp(16px,3vw,32px);border-bottom:1px solid var(--line);background:#0b0b10;display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:8px}.access-item{border:1px solid #252532;background:#111117;border-radius:10px;padding:9px 11px}.access-label{font-size:9px;text-transform:uppercase;letter-spacing:.1em;color:#666678}.access-value{font:11px 'SF Mono',monospace;color:#c9c9d3;margin-top:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    @media(max-width:640px){.input-row{flex-wrap:wrap}#model-select{width:100%;max-width:none}#send-btn{height:40px}.join-card{padding:26px 20px}}
+    .native-cta{margin-left:auto;color:#d9a9c2;text-decoration:none;font-size:11px;font-weight:700;border:1px solid #56384a;border-radius:9px;padding:7px 10px}.native-cta:hover{background:#c890ab15}
   </style>
 </head>
 <body>
   <div id="connect-screen">
-    <div class="spinner" id="spinner"></div>
-    <h2>Koryphaios</h2>
-    <p id="connect-msg">Connecting to session...</p>
+    <div class="join-card">
+      <div class="join-logo">K</div>
+      <div class="spinner hidden" id="spinner"></div>
+      <h2>Join live workspace</h2>
+      <p id="connect-msg">You were invited to a Koryphaios team session. The host controls your access.</p>
+      <div id="join-form"><input id="guest-name" maxlength="40" autocomplete="name" placeholder="Your display name" /><button id="join-btn">Continue to session</button><div class="join-security">🔒 Signed invite · Host-controlled permissions</div></div>
+    </div>
   </div>
   <header class="hidden" id="app-header">
+    <span class="brand-mark">K</span>
     <h1>KORYPHAIOS</h1>
     <span class="badge live" id="live-badge">● LIVE</span>
     <span class="badge" id="role-badge"></span>
     <span class="badge" id="session-badge">Session</span>
+    <a class="native-cta" href="https://koryphaios.com" target="_blank" rel="noopener noreferrer">For full features, get the Koryphaios app →</a>
   </header>
   <div id="status-bar" class="hidden"></div>
   <div id="participants" class="hidden"></div>
+  <div id="policy-bar" class="hidden"></div>
+  <div id="access-panel" class="hidden"></div>
   <div id="log" class="hidden"></div>
   <footer class="hidden" id="footer">
     <div id="viewer-note" class="viewer-note hidden">You have viewer access — read only</div>
     <div class="input-row" id="input-row" style="display:none">
+      <select id="model-select" title="Host-approved model"><option value="">Host selects model</option></select>
+      <select id="reasoning-select" title="Host-approved reasoning mode"><option value="">Default reasoning</option></select>
       <textarea id="prompt-in" placeholder="Send a prompt to the host's agent..."></textarea>
       <button id="send-btn">Send</button>
     </div>
@@ -150,7 +233,7 @@ const GUEST_HTML = `<!DOCTYPE html>
   (function(){
     const params = new URLSearchParams(location.search);
     const token = params.get('token');
-    const name = params.get('name') || 'Guest';
+    let name = (params.get('name') || '').slice(0,40);
     if(!token){ setMsg('Invalid link — no token.'); spin(false); return; }
 
     const logEl = document.getElementById('log');
@@ -159,6 +242,40 @@ const GUEST_HTML = `<!DOCTYPE html>
     let role = 'viewer';
     let participants = {};
     let ws;
+    let policy = {};
+    let currentTier = null;
+
+    function renderReasoning(){
+      var model=document.getElementById('model-select').value; var select=document.getElementById('reasoning-select');
+      select.innerHTML='<option value="">Default reasoning</option>';
+      var levels=currentTier&&currentTier.reasoningByModel&&currentTier.reasoningByModel[model]||[];
+      levels.forEach(function(level){var o=document.createElement('option');o.value=level;o.textContent=level==='off'?'Reasoning off':level.charAt(0).toUpperCase()+level.slice(1)+' reasoning';select.appendChild(o);});
+      select.style.display=levels.length?'':'none';
+    }
+
+    function renderPolicy(){
+      if(policy.sessionName){document.getElementById('session-badge').textContent=policy.sessionName;document.title=policy.sessionName+' — Koryphaios';}
+      var bar=document.getElementById('policy-bar'); bar.innerHTML='';
+      var permissions=currentTier&&currentTier.permissions||{};
+      [['viewChat','Chat'],['viewDiffs','Code changes'],['viewSystemMessages','System messages'],['viewAgentStatus','Agent activity'],['viewParticipants','Participants'],['submitPrompts','Prompts'],['useTools','Tools']].forEach(function(item){
+        var chip=document.createElement('span'); var on=permissions[item[0]]===true;
+        chip.className='policy-chip '+(on?'on':'off'); chip.textContent=(on?'✓ ':'— ')+item[1]; bar.appendChild(chip);
+      });
+      var select=document.getElementById('model-select'); select.innerHTML='<option value="">Host selects model</option>';
+      var tierModels=(currentTier&&currentTier.allowedModels)||[]; var selectable=tierModels.includes('*')?(policy.modelCatalog||[]).map(function(model){return model.id;}):tierModels;
+      selectable.forEach(function(model){ var def=(policy.modelCatalog||[]).find(function(item){return item.id===model;});var o=document.createElement('option');o.value=model;o.textContent=def?def.label+' · '+def.provider:(model.split(':').slice(1).join(':')||model);select.appendChild(o); });
+      renderReasoning();
+      participantsEl.style.display = permissions.viewParticipants===false ? 'none' : '';
+      document.getElementById('input-row').style.display = currentTier && currentTier.permissions.submitPrompts ? 'flex' : 'none';
+      var panel=document.getElementById('access-panel');
+      var models=((currentTier&&currentTier.allowedModels)||[]); var reads=permissions.readPaths||[]; var writes=permissions.writePaths||[];
+      panel.innerHTML='<div class="access-item"><div class="access-label">Access profile</div><div class="access-value">'+h(currentTier&&currentTier.name||role)+'</div></div>'+
+        '<div class="access-item"><div class="access-label">Models</div><div class="access-value" title="'+h(models.join(', '))+'">'+h(models.includes('*')?'All host models':models.length?models.join(', '):'Host-selected only')+'</div></div>'+
+        '<div class="access-item"><div class="access-label">Readable paths</div><div class="access-value" title="'+h(reads.join(', '))+'">'+h(reads.length?reads.join(', '):'None')+'</div></div>'+
+        '<div class="access-item"><div class="access-label">Writable paths</div><div class="access-value" title="'+h(writes.join(', '))+'">'+h(writes.length?writes.join(', '):'None')+'</div></div>'+
+        '<div class="access-item"><div class="access-label">Allowed commands</div><div class="access-value">'+h((permissions.commandAllowlist||[]).length?(permissions.commandAllowlist||[]).join(', '):'Standard sandbox')+'</div></div>'+
+        '<div class="access-item"><div class="access-label">Blocked commands</div><div class="access-value">'+h((permissions.commandBlocklist||[]).length?(permissions.commandBlocklist||[]).join(', '):'None added by host')+'</div></div>';
+    }
 
     function spin(v){ document.getElementById('spinner').style.display = v?'':'none'; }
     function setMsg(t){ document.getElementById('connect-msg').textContent = t; }
@@ -185,14 +302,19 @@ const GUEST_HTML = `<!DOCTYPE html>
 
     function handleMsg(msg){
       if(msg.type==='init'){
+        document.getElementById('connect-screen').classList.add('hidden');
         role = msg.role;
-        document.getElementById('role-badge').textContent = role.toUpperCase();
-        document.getElementById('session-badge').textContent = 'Viewing ' + h(msg.hostName||'host') + "'s session";
+        currentTier = msg.tier || (msg.policy && msg.policy.accessTiers || []).find(function(t){return t.id===role;}) || null;
+        document.getElementById('role-badge').textContent = (currentTier&&currentTier.name||role).toUpperCase();
+        document.getElementById('session-badge').textContent = msg.sessionName || ('Viewing ' + h(msg.hostName||'host') + "'s session");
+        document.title = (msg.sessionName || 'Live Session') + ' — Koryphaios';
         participants = msg.participants || {};
+        policy = msg.policy || {};
+        renderPolicy();
         renderParticipants();
         if(role==='viewer'){
           document.getElementById('viewer-note').classList.remove('hidden');
-        } else {
+        } else if(currentTier && currentTier.permissions.submitPrompts) {
           document.getElementById('input-row').style.display='flex';
         }
         (msg.history||[]).forEach(handleMsg);
@@ -202,12 +324,13 @@ const GUEST_HTML = `<!DOCTYPE html>
       } else if(msg.type==='log'){
         addEntry('log-line', h(msg.content));
       } else if(msg.type==='diff'){
-        var lines = (msg.diff||'').split('\\n').map(function(l){
+        var rawLines=(msg.diff||'').split('\\n'); var added=rawLines.filter(function(l){return l.startsWith('+')&&!l.startsWith('+++')}).length; var removed=rawLines.filter(function(l){return l.startsWith('-')&&!l.startsWith('---')}).length;
+        var lines = rawLines.map(function(l){
           if(l.startsWith('+')) return '<span class="da">'+h(l)+'</span>';
           if(l.startsWith('-')) return '<span class="dr">'+h(l)+'</span>';
           return '<span class="dc">'+h(l)+'</span>';
         }).join('\\n');
-        addEntry('diff-view','<div class="fname">📄 '+h(msg.path)+'</div><pre class="diff">'+lines+'</pre>');
+        addEntry('diff-view','<div class="fname"><span>📄 '+h(msg.path)+'</span><span class="diff-stats">+'+added+' / −'+removed+'</span></div><pre class="diff">'+lines+'</pre>');
       } else if(msg.type==='agent-status'){
         setStatus(msg.status||'');
         addEntry('status-entry','<span class="dot"></span>'+h(msg.status));
@@ -215,6 +338,14 @@ const GUEST_HTML = `<!DOCTYPE html>
         addEntry('pending','<div class="who" style="color:#ca8a04">⏳ Pending approval from '+h(msg.name||'guest')+'</div><div>'+h(msg.content)+'</div>');
       } else if(msg.type==='approval-result'){
         addEntry('log-line', msg.approved ? '✅ Prompt approved' : '❌ Prompt rejected');
+      } else if(msg.type==='policy-updated'){
+        policy=msg.policy||{}; renderPolicy(); addEntry('log-line','Host updated team access controls');
+      } else if(msg.type==='tier-updated'){
+        currentTier=msg.tier; role=currentTier.id; policy=msg.policy||policy; document.getElementById('role-badge').textContent=currentTier.name.toUpperCase(); renderPolicy(); addEntry('log-line','Host assigned your access tier: '+h(currentTier.name));
+      } else if(msg.type==='join-pending'){
+        document.getElementById('connect-screen').classList.remove('hidden'); setMsg(msg.message||'Waiting for host approval'); spin(true);
+      } else if(msg.type==='join-rejected'){
+        document.getElementById('connect-screen').classList.remove('hidden'); setMsg('The host declined this join request.'); spin(false);
       } else if(msg.type==='guest-joined'){
         participants[msg.guestId] = {name:msg.name, role:msg.role};
         renderParticipants();
@@ -238,7 +369,7 @@ const GUEST_HTML = `<!DOCTYPE html>
       ws = new WebSocket(proto + location.host + '/ws?token=' + encodeURIComponent(token) + '&name=' + encodeURIComponent(name));
       ws.onopen = function(){
         document.getElementById('connect-screen').classList.add('hidden');
-        ['app-header','status-bar','participants','log','footer'].forEach(function(id){
+        ['app-header','status-bar','participants','policy-bar','access-panel','log','footer'].forEach(function(id){
           document.getElementById(id).classList.remove('hidden');
         });
         setStatus('Connected');
@@ -260,14 +391,21 @@ const GUEST_HTML = `<!DOCTYPE html>
     document.getElementById('send-btn').onclick = function(){
       var val = document.getElementById('prompt-in').value.trim();
       if(!val || !ws || ws.readyState!==1) return;
-      ws.send(JSON.stringify({type:'guest-prompt', content:val, name:name}));
+      ws.send(JSON.stringify({type:'guest-prompt', content:val, name:name, model:document.getElementById('model-select').value, reasoningLevel:document.getElementById('reasoning-select').value}));
       document.getElementById('prompt-in').value='';
     };
     document.getElementById('prompt-in').addEventListener('keydown', function(e){
       if(e.key==='Enter' && !e.shiftKey){ e.preventDefault(); document.getElementById('send-btn').click(); }
     });
+    document.getElementById('model-select').addEventListener('change',renderReasoning);
 
-    connect();
+    function beginJoin(){
+      var input=document.getElementById('guest-name'); name=(input.value||name||'Guest').trim().slice(0,40)||'Guest';
+      document.getElementById('join-form').classList.add('hidden'); setMsg('Connecting securely…'); spin(true); connect();
+    }
+    document.getElementById('join-btn').onclick=beginJoin;
+    document.getElementById('guest-name').addEventListener('keydown',function(e){if(e.key==='Enter')beginJoin();});
+    if(name){document.getElementById('guest-name').value=name;beginJoin();}else{document.getElementById('guest-name').focus();}
   })();
   </script>
 </body>
@@ -310,6 +448,8 @@ const server = Bun.serve<WsData>({
           guests: new Map(),
           history: [],
           createdAt: Date.now(),
+          joinCode: makeJoinCode(),
+          policy: { ...DEFAULT_POLICY },
         });
       }
 
@@ -319,7 +459,34 @@ const server = Bun.serve<WsData>({
         exp: Date.now() + 48 * 60 * 60 * 1000,
       });
 
-      return json({ ok: true, sessionId, sessionToken });
+      return json({ ok: true, sessionId, sessionToken, joinCode: sessions.get(sessionId)!.joinCode });
+    }
+
+    // Host-owned policy is the relay's source of truth for every guest.
+    if (url.pathname.match(/^\/session\/[^/]+\/policy$/) && req.method === 'POST') {
+      if (!checkHostSecret(req)) return json({ ok: false, error: 'Unauthorized' }, 401);
+      const session = sessions.get(url.pathname.split('/')[2]);
+      if (!session) return json({ ok: false, error: 'Session not found' }, 404);
+      const patch = await req.json().catch(() => ({})) as Partial<CollaborationPolicy>;
+      session.policy = { ...DEFAULT_POLICY, ...session.policy, ...patch, requirePromptApproval: true };
+      const update = JSON.stringify({ type: 'policy-updated', policy: session.policy });
+      session.guests.forEach(g => {
+        if (!session.policy.accessTiers.some(t => t.id === g.tierId)) g.tierId = session.policy.defaultTierId;
+        g.ws.data.tierId = g.tierId;
+        g.ws.send(update);
+        g.ws.send(JSON.stringify({ type: 'tier-updated', tier: tierFor(session, g.tierId), policy: session.policy }));
+      });
+      return json({ ok: true, policy: session.policy });
+    }
+
+    // Native Koryphaios clients exchange a short host code for a signed guest URL.
+    if (url.pathname.startsWith('/code/') && req.method === 'GET') {
+      const code = decodeURIComponent(url.pathname.slice(6)).trim().toUpperCase();
+      const session = [...sessions.values()].find(s => s.joinCode === code);
+      if (!session) return json({ ok: false, error: 'Invalid or inactive join code' }, 404);
+      const tierId = session.policy.defaultTierId;
+      const token = sign({ sessionId: session.id, role: 'guest', tierId, exp: Date.now() + 24 * 60 * 60 * 1000 });
+      return json({ ok: true, sessionId: session.id, sessionName: session.policy.sessionName, tierId, inviteUrl: `${url.protocol}//${url.host}/join?token=${encodeURIComponent(token)}` });
     }
 
     // Host creates an invite link for a session
@@ -329,13 +496,14 @@ const server = Bun.serve<WsData>({
       if (!sessions.has(sessionId)) return json({ ok: false, error: 'Session not found' }, 404);
 
       const body = await req.json().catch(() => ({})) as any;
-      const role: string = ['viewer', 'collaborator', 'copilot'].includes(body.role) ? body.role : 'viewer';
+      const requestedTier = String(body.tierId || body.role || 'viewer');
+      const tierId = sessions.get(sessionId)!.policy.accessTiers.some(t => t.id === requestedTier) ? requestedTier : sessions.get(sessionId)!.policy.defaultTierId;
       const ttlMs = Number(body.ttlMs) || 7 * 24 * 60 * 60 * 1000;
 
-      const inviteToken = sign({ sessionId, role, exp: Date.now() + ttlMs });
+      const inviteToken = sign({ sessionId, role: 'guest', tierId, exp: Date.now() + ttlMs });
       const inviteUrl = `${url.protocol}//${url.host}/join?token=${encodeURIComponent(inviteToken)}`;
 
-      return json({ ok: true, inviteUrl, inviteToken, role });
+      return json({ ok: true, inviteUrl, inviteToken, tierId });
     }
 
     // Guest join page
@@ -361,6 +529,8 @@ const server = Bun.serve<WsData>({
           role: payload.role,
           guestId: randomBytes(6).toString('hex'),
           name,
+          tierId: payload.tierId || 'viewer',
+          admitted: payload.role === 'host',
         } satisfies WsData,
       });
       if (upgraded) return undefined as any;
@@ -372,7 +542,7 @@ const server = Bun.serve<WsData>({
 
   websocket: {
     open(ws) {
-      const { sessionId, role, guestId, name } = ws.data;
+      const { sessionId, role, guestId, name, tierId } = ws.data;
       const session = sessions.get(sessionId);
       if (!session) { ws.close(4004, 'Session not found'); return; }
 
@@ -381,29 +551,42 @@ const server = Bun.serve<WsData>({
         console.log(`[${sessionId}] host connected`);
         // Send pending guest list to host
         const guestList = Array.from(session.guests.entries()).map(([id, g]) => ({
-          guestId: id, name: g.name, role: g.role,
+          guestId: id, name: g.name, tierId: g.tierId, admitted: g.admitted,
         }));
         ws.send(JSON.stringify({ type: 'guest-list', guests: guestList }));
       } else {
-        session.guests.set(guestId, { ws, name, role });
-        console.log(`[${sessionId}] guest "${name}" (${role}) connected`);
+        const admitted = session.policy.joinMode === 'auto';
+        ws.data.admitted = admitted;
+        session.guests.set(guestId, { ws, name, tierId, admitted });
+        console.log(`[${sessionId}] guest "${name}" (${tierId}) connected`);
+
+        if (!admitted) {
+          ws.send(JSON.stringify({ type: 'join-pending', message: 'Waiting for host approval' }));
+          session.hostWs?.send(JSON.stringify({ type: 'join-request', guestId, name, tierId }));
+          return;
+        }
 
         // Send init + history to new guest
         const participantMap: Record<string, { name: string; role: string }> = {};
-        session.guests.forEach((g, id) => { participantMap[id] = { name: g.name, role: g.role }; });
+        session.guests.forEach((g, id) => { if (g.admitted) participantMap[id] = { name: g.name, role: g.tierId }; });
 
         ws.send(JSON.stringify({
           type: 'init',
-          role,
+          role: tierId,
+          tier: tierFor(session, tierId),
           hostName: 'Host',
-          participants: participantMap,
-          history: session.history,
+          sessionName: session.policy.sessionName,
+          participants: session.policy.showParticipants ? participantMap : {},
+          history: session.history.filter((event: any) =>
+            (event.type !== 'diff' || session.policy.showDiffs) &&
+            (event.type !== 'agent-status' || session.policy.showAgentStatus)),
+          policy: session.policy,
         }));
 
         // Notify host and other guests
-        const joinMsg = JSON.stringify({ type: 'guest-joined', guestId, name, role });
+        const joinMsg = JSON.stringify({ type: 'guest-joined', guestId, name, role: tierId });
         session.hostWs?.send(joinMsg);
-        session.guests.forEach((g, id) => { if (id !== guestId) g.ws.send(joinMsg); });
+        if (session.policy.showParticipants) session.guests.forEach((g, id) => { if (id !== guestId) g.ws.send(joinMsg); });
       }
     },
 
@@ -416,9 +599,29 @@ const server = Bun.serve<WsData>({
       try { msg = JSON.parse(String(message)); } catch { return; }
 
       if (role === 'host') {
+        if (msg.type === 'join-decision' && msg.guestId) {
+          const guest = session.guests.get(String(msg.guestId));
+          if (!guest) return;
+          if (!msg.approved) { guest.ws.send(JSON.stringify({ type: 'join-rejected' })); guest.ws.close(4003, 'Join rejected'); return; }
+          const requestedTier = String(msg.tierId || guest.tierId);
+          guest.tierId = session.policy.accessTiers.some(t => t.id === requestedTier) ? requestedTier : session.policy.defaultTierId;
+          guest.admitted = true;
+          guest.ws.data.tierId = guest.tierId;
+          guest.ws.data.admitted = true;
+          const tier = tierFor(session, guest.tierId)!;
+          guest.ws.send(JSON.stringify({ type: 'init', role: guest.tierId, tier, hostName: 'Host', sessionName: session.policy.sessionName, participants: {}, history: session.history.filter(e => eventAllowed(e, tier)), policy: session.policy }));
+          session.guests.forEach(g => { if (g.admitted && tierFor(session, g.tierId)?.permissions.viewParticipants) g.ws.send(JSON.stringify({ type: 'guest-joined', guestId: msg.guestId, name: guest.name, role: guest.tierId })); });
+          return;
+        }
+        if (msg.type === 'assign-tier' && msg.guestId) {
+          const guest = session.guests.get(String(msg.guestId));
+          if (!guest || !session.policy.accessTiers.some(t => t.id === msg.tierId)) return;
+          guest.tierId = String(msg.tierId); guest.ws.data.tierId = guest.tierId;
+          guest.ws.send(JSON.stringify({ type: 'tier-updated', tier: tierFor(session, guest.tierId), policy: session.policy }));
+          return;
+        }
         // Host → broadcast to all guests; also append relevant events to history
-        const payload = JSON.stringify(msg);
-        session.guests.forEach(g => g.ws.send(payload));
+        session.guests.forEach(g => { if (g.admitted && eventAllowed(msg, tierFor(session, g.tierId))) g.ws.send(JSON.stringify(msg)); });
 
         // Keep a rolling history (last 200 events) for late-joining guests
         if (['chat', 'diff', 'agent-status'].includes(msg.type)) {
@@ -432,14 +635,28 @@ const server = Bun.serve<WsData>({
           target?.ws.send(JSON.stringify({ type: 'approval-result', approved: msg.approved }));
         }
       } else {
+        const guest = session.guests.get(guestId);
+        if (!guest?.admitted) return;
+        const tier = tierFor(session, guest.tierId);
         // Guest → forward to host only
-        if (msg.type === 'guest-prompt') {
+        if (msg.type === 'guest-prompt' && tier?.permissions.submitPrompts) {
+          const requestedModel = String(msg.model || '');
+          const model = requestedModel && (tier.allowedModels.includes('*') || tier.allowedModels.includes(requestedModel)) ? requestedModel : '';
+          const requestedReasoning = String(msg.reasoningLevel || '');
+          const allowedReasoning = model ? (tier.reasoningByModel?.[model] || []) : [];
+          const reasoningLevel = requestedReasoning && allowedReasoning.includes(requestedReasoning) ? requestedReasoning : '';
           session.hostWs?.send(JSON.stringify({
             type: 'guest-prompt',
             guestId,
             name,
-            role,
+            role: guest.tierId,
+            tierId: guest.tierId,
+            autoExecute: tier.permissions.autoExecutePrompts && tier.permissions.fullSystemAccess,
             content: String(msg.content).slice(0, 4000),
+            model,
+            reasoningLevel,
+            commandAllowlist: tier.permissions.commandAllowlist || [],
+            commandBlocklist: tier.permissions.commandBlocklist || [],
           }));
         }
       }

@@ -74,6 +74,7 @@ import { getModeManager } from '../mode';
 import type { WorkerPipelineConfig } from './services/WorkerPipelineService';
 import type { UIMode } from '@koryphaios/shared';
 import { collaborationManager } from '../collaboration/manager';
+import { setCollaborationToolPolicy, clearCollaborationToolPolicy, type CollaborationToolPolicy } from '../collaboration/tool-policy';
 
 // ─── Internal Types ─────────────────────────────────────────────────────────
 
@@ -279,8 +280,8 @@ export class KoryManager {
           allowedPaths,
           isSandboxed,
         ),
-      runCriticGate: (sessionId, workerMessages, preferredModel) =>
-        this.runCriticGate(sessionId, workerMessages, preferredModel),
+      runCriticGate: (sessionId, workerMessages, preferredModel, task) =>
+        this.runCriticGate(sessionId, workerMessages, preferredModel, task),
     };
 
     this.workerPipeline = new WorkerPipelineService({
@@ -455,6 +456,7 @@ export class KoryManager {
     preferredModel?: string,
     reasoningLevel?: string,
     attachments?: Array<{ type: string; data: string; name: string }>,
+    collaborationToolPolicy?: CollaborationToolPolicy,
   ): Promise<void> {
     this.isProcessing = true;
     this.state.clearChanges(sessionId);
@@ -486,6 +488,7 @@ export class KoryManager {
     collaborationManager.broadcastEvent({ type: 'chat', from: 'human', content: userMessage });
 
     await this.updateWorkflowState(sessionId, 'analyzing');
+    if (collaborationToolPolicy) setCollaborationToolPolicy(sessionId, collaborationToolPolicy);
     try {
       koryLog.debug({ sessionId }, 'Calling handleDirectly');
       this.emitThought(sessionId, 'analyzing', `Analyzing request...`);
@@ -520,6 +523,7 @@ export class KoryManager {
       await this.updateWorkflowState(sessionId, 'error');
       this.emitError(sessionId, `Error: ${String(err)}`);
     } finally {
+      if (collaborationToolPolicy) clearCollaborationToolPolicy(sessionId);
       this.isProcessing = false;
     }
   }
@@ -732,6 +736,7 @@ export class KoryManager {
     sessionId: string,
     workerMessages: InternalMessage[] | undefined,
     preferredModel?: string,
+    task?: string,
   ): Promise<{ passed: boolean; feedback?: string }> {
     const hardCheckResult = await this.runHardChecks(sessionId);
     if (!hardCheckResult.passed) return { passed: false, feedback: hardCheckResult.output };
@@ -741,7 +746,19 @@ export class KoryManager {
     if (!provider) return { passed: true };
 
     const transcriptText = formatMessagesForCriticUtil(workerMessages ?? [], 12_000);
-    const criticPrompt = `Worker transcript to review:\n\n${transcriptText}\n\nUse read_file/grep/glob/ls as needed. Then output PASS or FAIL and brief feedback.`;
+    // The critic is a FRESH-context agent — it never shares the manager's
+    // conversation. The manager briefs it here: the original objective plus
+    // what to scrutinize, so the review judges fitness-for-purpose instead of
+    // vibing over an anonymous transcript.
+    const objective = task?.trim()
+      ? `THE OBJECTIVE (what the worker was asked to accomplish):\n${task.trim().slice(0, 2_000)}\n\n`
+      : '';
+    const criticPrompt =
+      `${objective}Worker transcript to review:\n\n${transcriptText}\n\n` +
+      `Critique against the objective: (1) does the work actually accomplish it, ` +
+      `(2) is the implementation correct (verify claims by reading the real files — do not trust the transcript), ` +
+      `(3) did it break or regress anything nearby, (4) is anything incomplete or stubbed. ` +
+      `Use read_file/grep/glob/ls as needed. Then output PASS or FAIL and brief feedback.`;
     const criticId = `critic-${nanoid(8)}`;
     const identity: AgentIdentity = {
       id: criticId,
@@ -1897,7 +1914,12 @@ export class KoryManager {
     return [...thread.threadEntries];
   }
 
-  async sendMessageToAgent(sessionId: string, agentId: string, content: string): Promise<void> {
+  async sendMessageToAgent(
+    sessionId: string,
+    agentId: string,
+    content: string,
+    options?: { model?: string; reasoningLevel?: string },
+  ): Promise<void> {
     const thread = this.agentThreads.get(agentId);
     if (!thread || thread.sessionId !== sessionId) {
       throw new Error('Agent thread not found');
@@ -1909,6 +1931,21 @@ export class KoryManager {
     if (!trimmed) {
       throw new Error('Message cannot be empty');
     }
+    // Same controls as the manager: the user can retarget a sub-agent's model
+    // and reasoning tier per message (picker value is "provider:modelId").
+    if (options?.model && options.model !== 'auto') {
+      const [prov, ...rest] = options.model.split(':');
+      const bareModel = rest.join(':');
+      if (prov && bareModel) {
+        thread.providerName = prov as ProviderName;
+        thread.modelId = bareModel;
+      } else {
+        thread.modelId = options.model;
+      }
+      thread.identity.model = thread.modelId;
+      thread.identity.provider = thread.providerName;
+    }
+    if (options?.reasoningLevel) thread.reasoningLevel = options.reasoningLevel;
     if (thread.abort?.signal.aborted) {
       const abort = new AbortController();
       thread.abort = abort;
@@ -2356,6 +2393,27 @@ export class KoryManager {
         ...(breakdown ? { breakdown } : {}),
         ts: Date.now(),
       });
+      // Window resolution can lose the startup race (provider model lists
+      // refresh in the background). Retry once shortly after — if the window
+      // is known by then, re-emit so the bar stops saying "unknown".
+      if (!win.contextKnown) {
+        const t = setTimeout(() => {
+          const retry = resolveTrustedContextWindow(model, provider);
+          if (retry.contextKnown) {
+            this.emitUsageUpdate(
+              sessionId,
+              agentId,
+              model,
+              provider,
+              tokensIn,
+              tokensOut,
+              usageKnown,
+              breakdown,
+            );
+          }
+        }, 6_000);
+        t.unref?.();
+      }
     }
   }
   private emitWSMessage(sessionId: string, type: string, payload: WSMessage['payload']) {

@@ -9,6 +9,7 @@
 //
 // See: https://opencode.ai/docs/go/
 
+import { applyModelsDevMetadata } from './models-dev';
 import type { ProviderConfig, ProviderName, ModelDef } from '@koryphaios/shared';
 import {
   type Provider,
@@ -66,7 +67,9 @@ export class OpenCodeGoProvider implements Provider {
   }
 
   listModels(): ModelDef[] {
-    return getModelsForProvider(this.name);
+    // Enrich with models.dev capability data (reasoning tiers, real context
+    // windows) — the Go /models endpoint only returns bare ids.
+    return applyModelsDevMetadata(this.name, getModelsForProvider(this.name));
   }
 
   async *streamResponse(request: StreamRequest): AsyncGenerator<ProviderEvent> {

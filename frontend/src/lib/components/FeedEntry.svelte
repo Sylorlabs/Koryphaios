@@ -426,7 +426,15 @@
   function getStatusForType(type: FeedEntryType, meta?: Record<string, unknown>): import('@koryphaios/shared').AgentStatus {
     switch (type) {
       case 'user_message': return 'idle';
-      case 'thought': return meta?.phase === 'analyzing' ? 'analyzing' : 'thinking';
+      case 'thought': {
+        // Kory status lines ("Analyzing…", "Routing…") are NOT model
+        // reasoning — the icon must match the actual activity, never the
+        // thinking bulb. The bulb is reserved for type 'thinking'.
+        const phase = meta?.phase as string | undefined;
+        if (phase === 'routing') return 'verifying';
+        if (phase === 'synthesizing') return 'streaming';
+        return 'analyzing';
+      }
       case 'content': return 'streaming';
       case 'thinking': return 'thinking';
       case 'tool_call': {
@@ -515,6 +523,7 @@
             durationMs={entry.durationMs} 
             agentName={entry.agentName} 
             estimatedTokens={(entry.metadata as { thinkingTokens?: number } | undefined)?.thinkingTokens}
+            onFreeze={(ms) => wsStore.recordThinkingDuration(entry.id, ms)}
           />
       {:else if entry.type === 'tool_call' || entry.type === 'tool_result'}
           {@const toolCat = getToolCategory(entry.metadata)}

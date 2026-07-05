@@ -11,6 +11,7 @@ import {
 import { toolLog } from '../logger';
 import { shellManager } from './shell-manager';
 import { processSupervisor } from '../process-supervisor/supervisor';
+import { getCollaborationToolPolicy } from '../collaboration/tool-policy';
 import {
   buildCommandWithLimits,
   validateResourceRequest,
@@ -71,6 +72,15 @@ function parseBaseCommands(command: string): string[] {
   return bases;
 }
 
+function commandPatternMatches(command: string, pattern: string): boolean {
+  const base = command.split('/').pop() || command;
+  const normalized = pattern.trim();
+  if (normalized === '*') return true;
+  const escaped = normalized.replace(/[.+?^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*');
+  const re = new RegExp(`^${escaped}$`);
+  return re.test(command) || re.test(base);
+}
+
 export class BashTool implements Tool {
   readonly name = 'bash';
   readonly description = `Execute a shell command on the system.
@@ -123,6 +133,18 @@ Network access via curl/wget is blocked unless explicitly authorized.`;
         ? workingDirectory
         : resolve(ctx.workingDirectory, workingDirectory)
       : ctx.workingDirectory;
+
+    const collaborationPolicy = getCollaborationToolPolicy(ctx.sessionId);
+    if (collaborationPolicy) {
+      const commands = parseBaseCommands(command);
+      const blocked = commands.find(cmd => collaborationPolicy.commandBlocklist.some(pattern => commandPatternMatches(cmd, pattern)));
+      const notAllowed = collaborationPolicy.commandAllowlist.length && !collaborationPolicy.commandAllowlist.includes('*')
+        ? commands.find(cmd => !collaborationPolicy.commandAllowlist.some(pattern => commandPatternMatches(cmd, pattern)))
+        : undefined;
+      if (blocked || notAllowed) {
+        return { callId: call.id, name: this.name, output: `Command blocked by team access policy: ${blocked || notAllowed}`, isError: true, durationMs: 0 };
+      }
+    }
 
     // Check if requested path is inside project
     const isInsideProject = isWithinRoot(ctx.workingDirectory, requestedCwd);

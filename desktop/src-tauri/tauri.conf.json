@@ -38,7 +38,8 @@
         "img-src": "'self' data: https:",
         "style-src": "'self' 'unsafe-inline'",
         "script-src": "'self' 'unsafe-eval'",
-        "font-src": "'self' data:"
+        "font-src": "'self' data:",
+        "frame-src": "'self' https: http:"
       },
       "dangerousDisableAssetCspModification": false,
       "capabilities": []

@@ -6,6 +6,7 @@
  */
 
 import { serverLog } from '../logger';
+import type { CollaborationPolicy } from '@koryphaios/shared';
 
 const log = serverLog.child({ module: 'collab-relay' });
 
@@ -44,7 +45,7 @@ export class RelayClient {
   }
 
   /** Create or re-attach to a relay session, then open the host WS. */
-  async startSession(sessionId?: string): Promise<{ sessionId: string; inviteBase: string }> {
+  async startSession(sessionId?: string): Promise<{ sessionId: string; inviteBase: string; joinCode: string }> {
     const httpBase = this.config.relayUrl;
     const wsBase = httpBase.replace(/^http/, 'ws');
 
@@ -71,11 +72,12 @@ export class RelayClient {
     return {
       sessionId: data.sessionId,
       inviteBase: httpBase,
+      joinCode: data.joinCode,
     };
   }
 
   /** Create a signed invite link for a given role. */
-  async createInvite(role: 'viewer' | 'collaborator' | 'copilot' = 'viewer'): Promise<string> {
+  async createInvite(tierId = 'viewer'): Promise<string> {
     if (!this.sessionId) throw new Error('No active relay session');
     const res = await fetch(`${this.config.relayUrl}/session/${this.sessionId}/invite`, {
       method: 'POST',
@@ -83,12 +85,36 @@ export class RelayClient {
         'Content-Type': 'application/json',
         'x-host-secret': this.config.hostSecret,
       },
-      body: JSON.stringify({ role }),
+      body: JSON.stringify({ tierId }),
     });
     if (!res.ok) throw new Error(`Failed to create invite: ${res.status}`);
     const data = await res.json() as any;
     if (!data.ok) throw new Error(data.error || 'Relay error');
     return data.inviteUrl as string;
+  }
+
+  decideJoin(guestId: string, approved: boolean, tierId?: string) {
+    this.broadcast({ type: 'join-decision', guestId, approved, tierId });
+  }
+
+  assignTier(guestId: string, tierId: string) {
+    this.broadcast({ type: 'assign-tier', guestId, tierId });
+  }
+
+  async updatePolicy(policy: CollaborationPolicy): Promise<void> {
+    if (!this.sessionId) throw new Error('No active relay session');
+    const res = await fetch(`${this.config.relayUrl}/session/${this.sessionId}/policy`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-host-secret': this.config.hostSecret },
+      body: JSON.stringify(policy),
+    });
+    if (!res.ok) throw new Error(`Failed to update team policy: ${res.status}`);
+  }
+
+  async resolveJoinCode(joinCode: string) {
+    const res = await fetch(`${this.config.relayUrl}/code/${encodeURIComponent(joinCode)}`);
+    if (!res.ok) throw new Error(res.status === 404 ? 'Invalid or inactive join code' : 'Relay join failed');
+    return await res.json() as { ok: true; inviteUrl: string; sessionId: string; role: string };
   }
 
   /** Broadcast an event to all connected guests via the relay. */
@@ -171,6 +197,16 @@ function getRelayConfig(): RelayConfig | null {
   return { relayUrl: relayUrl.replace(/\/$/, ''), hostSecret };
 }
 
+const publicRelayUrl = process.env.RELAY_URL?.replace(/\/$/, '') ?? null;
+
+export async function resolveRelayJoinCode(joinCode: string) {
+  if (!publicRelayUrl) throw new Error('Internet relay URL is not configured on this Koryphaios installation');
+  const res = await fetch(`${publicRelayUrl}/code/${encodeURIComponent(joinCode)}`);
+  if (!res.ok) throw new Error(res.status === 404 ? 'Invalid or inactive join code' : 'Relay join failed');
+  return await res.json() as { ok: true; inviteUrl: string; sessionId: string; sessionName: string; tierId: string };
+}
+
 const _config = getRelayConfig();
 export const relayClient = _config ? new RelayClient(_config) : null;
 export const relayEnabled = _config !== null;
+export const relayAvailable = publicRelayUrl !== null;

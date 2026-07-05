@@ -66,7 +66,10 @@ export const agentSettingsRoutes = new Elysia({ prefix: '/api/agent' })
         return { ok: false, error: 'Session not found' };
       }
       try {
-        await kory.sendMessageToAgent(body.sessionId, agentId, body.content);
+        await kory.sendMessageToAgent(body.sessionId, agentId, body.content, {
+          model: body.model,
+          reasoningLevel: body.reasoningLevel,
+        });
         return { ok: true, data: { status: 'processing' } };
       } catch (err: any) {
         const message = err?.message ?? 'Failed to message agent';
@@ -78,6 +81,8 @@ export const agentSettingsRoutes = new Elysia({ prefix: '/api/agent' })
       body: t.Object({
         sessionId: t.String(),
         content: t.String(),
+        model: t.Optional(t.String()),
+        reasoningLevel: t.Optional(t.String()),
       }),
     },
   )

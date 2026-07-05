@@ -59,6 +59,7 @@ export interface WorkerPipelineConfig {
     sessionId: string,
     workerMessages: InternalMessage[] | undefined,
     preferredModel?: string,
+    task?: string,
   ) => Promise<{ passed: boolean; feedback?: string }>;
 }
 
@@ -289,6 +290,7 @@ export class WorkerPipelineService {
             sessionId,
             res.workerMessages,
             preferredModel,
+            workerTask,
           );
           if (criticResult.passed) {
             return {
@@ -318,6 +320,7 @@ export class WorkerPipelineService {
           sessionId,
           result.workerMessages,
           preferredModel,
+          workerTask,
         );
         if (criticResult.passed) {
           return {

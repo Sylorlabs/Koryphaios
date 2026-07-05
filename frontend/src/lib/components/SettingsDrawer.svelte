@@ -51,6 +51,7 @@
   } from '@koryphaios/shared';
   import ModelSelectionDialog from './ModelSelectionDialog.svelte';
   import ModeToggle from './ModeToggle.svelte';
+  import TeamAccessProfiles from './TeamAccessProfiles.svelte';
   import { apiFetch, parseJsonResponse } from '$lib/api.svelte';
   import { dndzone } from 'svelte-dnd-action';
 
@@ -76,6 +77,8 @@
   let managingAccountLabel = $state('');
   let managingAccountSaving = $state(false);
   let newKeyValue = $state('');
+  let teamJoinCode = $state('');
+  let teamGuestName = $state('');
   let rotateKeyInput = $state<HTMLInputElement | null>(null);
 
   const NOTE_PERMISSION_PRESETS: Array<{
@@ -162,6 +165,14 @@
 
   let providersLoadAttempted = $state(false);
   let lastInitializedTab = $state<typeof activeTab | null>(null);
+  let handledTeamSettingsRequest = 0;
+
+  $effect(() => {
+    if (collaborationStore.settingsRequest > handledTeamSettingsRequest) {
+      handledTeamSettingsRequest = collaborationStore.settingsRequest;
+      activeTab = 'teams';
+    }
+  });
 
   function showTokenInput(_name: string, _caps: ReturnType<typeof getProviderCaps>): boolean {
     return false;
@@ -219,6 +230,11 @@
       (p) => p.label.toLowerCase().includes(q) || p.key.toLowerCase().includes(q),
     );
   });
+  const teamModels = $derived.by(() => providersStore.statusList
+    .filter((provider) => provider.enabled && provider.authenticated)
+    .flatMap((provider) => (provider.selectedModels?.length ? provider.selectedModels : provider.models)
+      .map((model) => ({ id: `${provider.name}:${model}`, provider: getProviderDisplayLabel(provider.name), model, reasoningLevels: provider.allAvailableModels?.find(def => def.id === model || def.apiModelId === model)?.reasoningLevels ?? [] })))
+    .filter((item, index, all) => all.findIndex(other => other.id === item.id) === index));
 
   let expandedProvider = $state<string | null>(null);
   let showAddCustom = $state(false);
@@ -1121,7 +1137,7 @@
               <Users size={40} />
             </div>
             <h3 class="text-2xl font-black text-[var(--color-text-primary)]">Team Collaboration</h3>
-            <p class="text-sm text-[var(--color-text-muted)] mt-2">Invite teammates to watch or co-pilot your live AI agent session</p>
+            <p class="text-sm text-[var(--color-text-muted)] mt-2">The host controls what guests can see, submit, and which models are available</p>
           </div>
 
           {#if collaborationStore.activeCollab}
@@ -1135,12 +1151,12 @@
                 </div>
 
                 {#if collaborationStore.activeCollab.relayEnabled}
-                  <h4 class="text-sm font-bold text-[var(--color-text-primary)] mb-5">Invite Links — share the right link for each teammate's role</h4>
+                  <h4 class="text-sm font-bold text-[var(--color-text-primary)] mb-5">Browser invites</h4>
                   <div class="space-y-3">
                     {#each [
-                      { role: 'viewer', label: 'Viewer', desc: 'Watch only — no interaction', color: 'text-blue-400', bg: 'bg-blue-500/10' },
-                      { role: 'collaborator', label: 'Collaborator', desc: 'Can submit prompts — you approve each one before agents run', color: 'text-amber-400', bg: 'bg-amber-500/10' },
-                      { role: 'copilot', label: 'Co-Pilot', desc: 'Full shared control — prompts execute immediately', color: 'text-[var(--color-accent)]', bg: 'bg-[var(--color-accent)]/10' },
+                      { role: 'viewer', label: 'Viewer · Tier 1', desc: 'Read-only session feed. Cannot submit prompts or run models.', color: 'text-blue-400', bg: 'bg-blue-500/10' },
+                      { role: 'collaborator', label: 'Collaborator · Tier 2', desc: 'Can submit prompts when enabled. Host approval remains authoritative.', color: 'text-amber-400', bg: 'bg-amber-500/10' },
+                      { role: 'yolo', label: 'YOLO · Tier 3', desc: 'Unrestricted auto-execution, tools, models, and filesystem. Trusted users only.', color: 'text-red-400', bg: 'bg-red-500/10' },
                     ] as r}
                       <div class="flex items-center gap-4 rounded-2xl bg-[var(--color-surface-1)] p-4">
                         <div class="flex-1">
@@ -1151,13 +1167,24 @@
                         </div>
                         <button
                           type="button"
-                          onclick={() => collaborationStore.copyInviteLink(r.role as any)}
+                          onclick={() => collaborationStore.createInvite(r.role)}
                           class="shrink-0 rounded-xl {r.bg} {r.color} px-4 py-2 text-xs font-bold transition-all hover:opacity-80"
                         >
                           Copy Link
                         </button>
                       </div>
                     {/each}
+                  </div>
+                  <div class="mt-5 border-t border-[var(--color-border)] pt-5">
+                    <div class="flex items-center justify-between gap-4 rounded-2xl bg-[var(--color-surface-1)] p-4">
+                      <div>
+                        <div class="text-xs font-bold text-[var(--color-text-primary)]">Native Koryphaios join</div>
+                        <p class="mt-1 text-[11px] text-[var(--color-text-muted)]">Enter this code in Teams on another Koryphaios app.</p>
+                      </div>
+                      <button type="button" onclick={() => collaborationStore.copyJoinCode()} class="rounded-xl border border-[var(--color-border)] px-4 py-2 font-mono text-sm font-bold tracking-[0.16em] text-[var(--color-accent)] hover:bg-[var(--color-surface-3)]">
+                        {collaborationStore.activeCollab.joinCode}
+                      </button>
+                    </div>
                   </div>
                 {:else}
                   <!-- Relay not configured — show legacy join code -->
@@ -1172,6 +1199,9 @@
                   </div>
                 {/if}
               </div>
+
+              <!-- Host policy -->
+              <TeamAccessProfiles models={teamModels} />
 
               <!-- Pending approvals -->
               {#if collaborationStore.pendingPrompts.length > 0}
@@ -1189,6 +1219,7 @@
                               <span class="text-[10px] text-[var(--color-text-muted)]">· {p.role}</span>
                             </div>
                             <p class="text-sm text-[var(--color-text-primary)] break-words">{p.content}</p>
+                            {#if p.model}<p class="mt-2 text-[10px] text-[var(--color-text-muted)]">Model: {p.model}{p.reasoningLevel ? ` · Reasoning: ${p.reasoningLevel}` : ' · Provider default reasoning'}</p>{/if}
                           </div>
                           <div class="flex gap-2 shrink-0">
                             <button
@@ -1225,6 +1256,12 @@
 
           {:else}
             <!-- ── NOT HOSTING ── -->
+            {#if collaborationStore.joinedSessions.length}
+              <div class="mx-auto mb-8 max-w-4xl rounded-3xl border border-[var(--color-border)] bg-[var(--color-surface-2)] p-6">
+                <div class="mb-4"><h4 class="text-sm font-bold text-[var(--color-text-primary)]">Team sessions</h4><p class="mt-1 text-[11px] text-[var(--color-text-muted)]">These are separate from your personal session history. Joining never replaces or merges your local sessions.</p></div>
+                <div class="space-y-2">{#each collaborationStore.joinedSessions as team (team.sessionId)}<div class="flex items-center gap-3 rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-1)] p-4"><div class="min-w-0 flex-1"><div class="truncate text-xs font-bold text-[var(--color-text-primary)]">{team.sessionName}</div><div class="mt-1 text-[10px] text-[var(--color-text-muted)]">Access: {team.tierId} · Team workspace</div></div><button type="button" onclick={() => collaborationStore.openJoinedSession(team.sessionId)} class="rounded-xl bg-[var(--color-accent)]/10 px-4 py-2 text-xs font-bold text-[var(--color-accent)]">Open</button><button type="button" onclick={() => collaborationStore.leaveJoinedSession(team.sessionId)} class="rounded-xl px-3 py-2 text-xs text-red-400 hover:bg-red-500/10">Leave</button></div>{/each}</div>
+              </div>
+            {/if}
             <div class="grid grid-cols-1 md:grid-cols-2 gap-8 max-w-4xl mx-auto">
               <div class="p-8 rounded-3xl bg-[var(--color-surface-2)] border border-[var(--color-border)] hover:border-[var(--color-accent)]/30 transition-all flex flex-col text-center">
                 <div class="w-12 h-12 bg-emerald-500/10 text-emerald-400 rounded-2xl flex items-center justify-center mx-auto mb-6">
@@ -1248,13 +1285,16 @@
                 <div class="w-12 h-12 bg-blue-500/10 text-blue-400 rounded-2xl flex items-center justify-center mx-auto mb-6">
                   <Keyboard size={24} />
                 </div>
-                <h4 class="text-lg font-bold mb-2">Join via Invite Link</h4>
+                <h4 class="text-lg font-bold mb-2">Join in Koryphaios</h4>
                 <p class="text-xs text-[var(--color-text-muted)] mb-8">
-                  Ask the host for their viewer, collaborator, or co-pilot invite link and open it in any browser.
+                  Enter the host's eight-character code. The host's join policy decides whether you are admitted automatically and which access profile you receive.
                 </p>
-                <p class="text-[11px] text-[var(--color-text-muted)] mt-auto">
-                  Invite links open a live feed page — no Koryphaios install required.
-                </p>
+                <div class="space-y-3 text-left">
+                  <input bind:value={teamGuestName} placeholder="Your display name" class="w-full rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-1)] px-4 py-3 text-sm outline-none focus:border-[var(--color-accent)]" />
+                  <input bind:value={teamJoinCode} maxlength="8" placeholder="JOIN CODE" class="w-full rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-1)] px-4 py-3 text-center font-mono text-lg font-bold uppercase tracking-[0.2em] outline-none focus:border-[var(--color-accent)]" />
+                  <button type="button" disabled={teamJoinCode.trim().length !== 8 || collaborationStore.loading} onclick={() => collaborationStore.joinSession(teamJoinCode, teamGuestName || 'Guest')} class="btn btn-primary w-full rounded-xl py-3 font-bold disabled:opacity-40">{collaborationStore.loading ? 'Joining…' : 'Request to join'}</button>
+                  <p class="text-center text-[10px] text-[var(--color-text-muted)]">Browser guests can still use either signed invite link without installing Koryphaios.</p>
+                </div>
               </div>
             </div>
           {/if}

@@ -824,12 +824,18 @@ function sendMessage(
     });
 }
 
-function sendAgentMessage(sessionId: string, agentId: string, content: string) {
+function sendAgentMessage(
+  sessionId: string,
+  agentId: string,
+  content: string,
+  model?: string,
+  reasoningLevel?: string,
+) {
   if (!sessionId || !agentId || !content.trim()) return;
   void apiFetch(apiUrl(`/api/agent/${agentId}/message`), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ sessionId, content }),
+    body: JSON.stringify({ sessionId, content, model, reasoningLevel }),
   })
     .then(async (res) => {
       const data = await parseJsonResponse<{ ok?: boolean; error?: string }>(res);
@@ -1045,6 +1051,7 @@ export const wsStore = {
   getAgentThreadFeed: agentStore.getAgentThreadFeed,
   removeEntries: feedStore.removeEntries,
   setEntryVisibility: feedStore.setEntryVisibility,
+  recordThinkingDuration: feedStore.recordThinkingDuration,
   setManagerContextWindow: agentStore.setManagerContextWindow,
   respondToPermission,
   subscribeToSession,

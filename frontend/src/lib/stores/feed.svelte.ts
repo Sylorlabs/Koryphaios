@@ -179,6 +179,17 @@ function addClientError(text: string) {
   });
 }
 
+/** Persist the client-observed thinking duration — monotonic max, so a
+ *  virtual-list remount can never show a smaller number than the user saw. */
+function recordThinkingDuration(id: string, ms: number) {
+  const entry = feed.find((e) => e.id === id);
+  if (!entry || ms <= (entry.durationMs ?? 0)) return;
+  entry.durationMs = ms;
+  feed = [...feed];
+  feedVersion++;
+  rebuildGroupedFeedCache();
+}
+
 /** Toggle entry visibility flags (user-hide is UI-only; agent-hide is set after the API call). */
 function setEntryVisibility(id: string, patch: { userHidden?: boolean; agentHidden?: boolean }) {
   const entry = feed.find((e) => e.id === id);
@@ -408,6 +419,7 @@ export const feedStore = {
   addClientError,
   removeEntries,
   setEntryVisibility,
+  recordThinkingDuration,
   removeContentEntriesForAgent,
   clearFeed,
   loadSessionMessages,

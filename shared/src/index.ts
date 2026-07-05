@@ -47,6 +47,8 @@ export type { WorkerTask } from './types/TaskTypes';
 export { ProviderName } from './providers/ProviderNames';
 
 export type { ModelTier, ModelDef, ProviderConfig, ProviderStatus } from './providers/ModelDefs';
+export type { CollaborationRole, CollaborationJoinMode, CollaborationTierPermissions, CollaborationAccessTier, CollaborationPolicy } from './types/CollaborationTypes';
+export { DEFAULT_COLLABORATION_POLICY, DEFAULT_COLLABORATION_TIERS } from './types/CollaborationTypes';
 
 // Re-export from existing providers.ts for backward compatibility
 export { IMPLEMENTED_PROVIDERS, PROVIDER_AUTH_MODES, PROVIDER_ENV_VARS } from './providers';

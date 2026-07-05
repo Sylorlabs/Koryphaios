@@ -25,7 +25,8 @@
       "imgSrc": ["'self'", "data:", "https:"],
       "styleSrc": ["'self'", "'unsafe-inline'"],
       "scriptSrc": ["'self'"],
-      "fontSrc": ["'self'", "data:"]
+      "fontSrc": ["'self'", "data:"],
+      "frameSrc": ["'self'", "https:", "http:"]
     }
   }
 }

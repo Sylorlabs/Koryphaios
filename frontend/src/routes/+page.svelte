@@ -29,7 +29,9 @@
   import { shortcutStore } from '$lib/stores/shortcuts.svelte';
   import { gitStore } from '$lib/stores/git.svelte';
   import { notesStore } from '$lib/stores/notes.svelte';
+  import { collaborationStore } from '$lib/stores/collaboration.svelte';
   import { FolderOpen, FolderPlus, Clock } from 'lucide-svelte';
+  import TeamWorkspace from '$lib/components/TeamWorkspace.svelte';
   import { invoke } from '@tauri-apps/api/core';
   import {
     type RecentProject,
@@ -174,6 +176,8 @@
       showNotes = true;
     };
     window.addEventListener('open-notes-graph', handleOpenNotesGraph);
+    const handleOpenTeamSettings = () => { collaborationStore.requestTeamSettings(); showSettings = true; };
+    window.addEventListener('open-team-settings', handleOpenTeamSettings);
 
     return () => {
       cleanupTheme?.();
@@ -181,6 +185,7 @@
       window.removeEventListener('keydown', handleGlobalKeydown);
       window.removeEventListener('open-note', handleOpenNote);
       window.removeEventListener('open-notes-graph', handleOpenNotesGraph);
+      window.removeEventListener('open-team-settings', handleOpenTeamSettings);
     };
   });
 
@@ -866,7 +871,15 @@ RULES:
     }
     if (!sessionStore.activeSessionId || (!message.trim() && !(attachments && attachments.length > 0))) return;
     if (agentRail.selectedAgentId) {
-      wsStore.sendAgentMessage(sessionStore.activeSessionId, agentRail.selectedAgentId, message);
+      // Sub-agents get the same controls as the manager: the composer's model
+      // and reasoning pickers apply to the selected agent's next turn.
+      wsStore.sendAgentMessage(
+        sessionStore.activeSessionId,
+        agentRail.selectedAgentId,
+        message,
+        model,
+        reasoningLevel,
+      );
       return;
     }
     wsStore.sendMessage(sessionStore.activeSessionId, message, model, reasoningLevel, attachments);
@@ -909,14 +922,14 @@ RULES:
 </script>
 
 <svelte:head>
-  <title>{projectStore.currentPath ? `${projectStore.displayName} — Koryphaios` : 'Koryphaios — AI Agent Orchestrator'}</title>
+  <title>{collaborationStore.activeJoinedSession ? `${collaborationStore.activeJoinedSession.sessionName} — Koryphaios` : projectStore.currentPath ? `${projectStore.displayName} — Koryphaios` : 'Koryphaios — AI Agent Orchestrator'}</title>
 </svelte:head>
 
 <AppShell
   {showSidebar}
   {zenMode}
-  {showGit}
-  {showNotes}
+  showGit={showGit && !collaborationStore.activeJoinedSession}
+  showNotes={showNotes && !collaborationStore.activeJoinedSession}
   activeSessionId={sessionStore.activeSessionId}
   {connectionDot}
   {connectionStatusLabel}
@@ -933,7 +946,7 @@ RULES:
       {showAgents}
       {showNotes}
       {zenMode}
-      projectName={projectStore.displayName}
+      projectName={collaborationStore.activeJoinedSession?.sessionName ?? projectStore.displayName}
       isYoloMode={wsStore.isYoloMode}
       {activeAgents}
       {recentProjects}
@@ -960,11 +973,13 @@ RULES:
   {/snippet}
 
   {#snippet agentRailSlot()}
-    <AgentRail rail={agentRail} visible={showAgents} />
+    {#if !collaborationStore.activeJoinedSession}<AgentRail rail={agentRail} visible={showAgents} />{/if}
   {/snippet}
 
   {#snippet feed()}
-    {#if !projectStore.currentPath}
+    {#if collaborationStore.activeJoinedSession}
+      <TeamWorkspace />
+    {:else if !projectStore.currentPath}
       <div class="flex-1" style="background: var(--color-surface-1);">
         <!-- Fixed to the viewport center so the banner never shifts with the
              sidebar or other panels — it stays in the true middle. -->
@@ -1068,7 +1083,7 @@ RULES:
          for an open session: known window → segmented bar; unknown window →
          tokens-used with an explicit "window unknown" label; no data yet →
          muted awaiting state. Never silently absent. -->
-    {#if projectStore.currentPath && sessionStore.activeSessionId}
+    {#if !collaborationStore.activeJoinedSession && projectStore.currentPath && sessionStore.activeSessionId}
       <div
         class="shrink-0 px-4"
         style="padding-top: var(--space-2); padding-bottom: var(--space-2); border-top: 1px solid var(--color-border); background: var(--color-surface-1);"
@@ -1110,12 +1125,20 @@ RULES:
               {formatTokenCount(wsStore.contextUsage.used)} / {formatTokenCount(wsStore.contextUsage.max)}
             </span>
           {:else if wsStore.contextUsage.used > 0}
-            <span class="shrink-0 tabular-nums" style="font-size: var(--text-xs); color: var(--color-text-muted);">
-              ~{formatTokenCount(wsStore.contextUsage.used)} used · window unknown
+            <span
+              class="shrink-0 tabular-nums"
+              style="font-size: var(--text-xs); color: var(--color-text-muted);"
+              title="Usage is real (provider-reported). The provider/CLI did not report a verified window size for this model, so no percentage can be shown honestly."
+            >
+              ~{formatTokenCount(wsStore.contextUsage.used)} used · window not reported by provider
             </span>
           {:else}
-            <span class="shrink-0" style="font-size: var(--text-xs); color: var(--color-text-muted); opacity: 0.6;">
-              awaiting usage data
+            <span
+              class="shrink-0"
+              style="font-size: var(--text-xs); color: var(--color-text-muted); opacity: 0.6;"
+              title="No turn has run in this session yet — usage appears with the first message."
+            >
+              no usage yet — appears on first message
             </span>
           {/if}
         </div>
@@ -1138,7 +1161,7 @@ RULES:
   {/snippet}
 
   {#snippet composer()}
-    <CommandInput
+    {#if !collaborationStore.activeJoinedSession}<CommandInput
       bind:inputRef
       bind:value={composerDraft}
       onSend={handleSend}
@@ -1150,7 +1173,7 @@ RULES:
       fileMentions={composerFileMentions}
       onRefreshFileMentions={refreshComposerFileMentions}
       placeholder={agentRail.inputPlaceholder}
-    />
+    />{/if}
   {/snippet}
 </AppShell>
 

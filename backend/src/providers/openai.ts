@@ -15,6 +15,7 @@ import {
 import { withRetry, withTimeoutSignal } from './utils';
 import { createUsageInterceptingFetch } from '../credit-accountant';
 import { providerLog } from '../logger';
+import { applyModelsDevMetadata } from './models-dev';
 import {
   enrichFromRemoteMetadata,
   isLikelyChatModelId,
@@ -101,7 +102,7 @@ export class OpenAIProvider implements Provider {
           discovered.push(this.enrichDiscoveredModel(model, modelFromRemoteId(id, this.name, fallback)));
         }
         if (discovered.length > 0) {
-          this.cachedModels = mergeModelLists(fallback, discovered);
+          this.cachedModels = applyModelsDevMetadata(this.name, mergeModelLists(fallback, discovered));
           providerLog.debug(
             { provider: this.name, count: this.cachedModels.length },
             'Model list refreshed from provider API',
@@ -153,9 +154,14 @@ export class OpenAIProvider implements Provider {
       },
     }));
 
-    // Check if the specific model supports reasoning
+    // Check if the specific model supports reasoning — prefer live-discovered
+    // defs (models.dev enrichment for zen/go, remote metadata elsewhere) over
+    // the static catalog, which knows nothing about gateway models.
     const modelDef = resolveModel(request.model);
-    const canReason = modelDef?.canReason ?? false;
+    const liveDef = this.listModels().find(
+      (m) => m.id === request.model || m.apiModelId === request.model,
+    );
+    const canReason = liveDef?.canReason ?? modelDef?.canReason ?? false;
     const reasoningEffort = request.reasoningLevel?.toLowerCase();
     // 'max' is offered per-model (e.g. Copilot's claude-opus-4.6) — the UI only
     // shows levels the model's own metadata/config declares, so passing it
