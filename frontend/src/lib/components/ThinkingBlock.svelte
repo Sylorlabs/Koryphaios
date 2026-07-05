@@ -8,13 +8,18 @@
     /** Reasoning-token estimate for providers that redact the thinking text
      *  (Claude Code headless) but report progress. */
     estimatedTokens?: number;
+    /** Initial disclosure state. The user can still collapse each block. */
+    defaultExpanded?: boolean;
     /** Called when the stopwatch freezes — lets the parent persist the
      *  client-observed duration so remounts can't regress the number. */
     onFreeze?: (ms: number) => void;
   }
 
-  let { text, durationMs, agentName: _agentName, estimatedTokens, onFreeze }: Props = $props();
-  let expanded = $state(false);
+  let { text, durationMs, agentName: _agentName, estimatedTokens, defaultExpanded = false, onFreeze }: Props = $props();
+  // Disclosure state is intentionally captured at mount; changing the global
+  // preference must not reopen/close a block the user already toggled.
+  // svelte-ignore state_referenced_locally
+  let expanded = $state(defaultExpanded);
   let panelEl = $state<HTMLDivElement>();
 
   // ── Live detection + stopwatch ─────────────────────────────────────────────

@@ -31,6 +31,8 @@ export interface CollaborationAccessTier {
 
 export interface CollaborationPolicy {
   sessionName: string;
+  /** Host-selected workspace roots exposed to this collaboration session. */
+  workspacePaths: string[];
   modelCatalog: Array<{ id: string; label: string; provider: string; reasoningLevels: string[] }>;
   joinMode: CollaborationJoinMode;
   defaultTierId: string;
@@ -57,7 +59,7 @@ export const DEFAULT_COLLABORATION_TIERS: CollaborationAccessTier[] = [
 ];
 
 export const DEFAULT_COLLABORATION_POLICY: CollaborationPolicy = {
-  sessionName: 'Team session', modelCatalog: [], joinMode: 'approval', defaultTierId: 'viewer', accessTiers: DEFAULT_COLLABORATION_TIERS,
+  sessionName: 'Team session', workspacePaths: [], modelCatalog: [], joinMode: 'approval', defaultTierId: 'viewer', accessTiers: DEFAULT_COLLABORATION_TIERS,
   allowedModels: [], allowPrompts: true, requirePromptApproval: true,
   showDiffs: true, showAgentStatus: true, showParticipants: true,
 };

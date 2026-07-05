@@ -253,7 +253,14 @@ export function seedManagerUsage(
 export function setManagerContextWindow(sessionId: string, contextWindow?: number) {
   const agent = agents.get('kory-manager');
   if (!agent) return;
-  if (agent.sessionId && agent.sessionId !== sessionId) agent.sessionId = sessionId;
+  if (agent.sessionId !== sessionId) {
+    agent.sessionId = sessionId;
+    agent.tokensUsed = 0;
+    agent.contextBreakdown = undefined;
+  }
+  // Selecting a model is enough to render context metadata. A provider turn
+  // is not required just to show an empty window.
+  agent.hasUsageData = true;
   if (contextWindow && contextWindow > 0) {
     agent.contextMax = contextWindow;
     agent.contextKnown = true;

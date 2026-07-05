@@ -1132,13 +1132,21 @@ RULES:
             >
               ~{formatTokenCount(wsStore.contextUsage.used)} used · window not reported by provider
             </span>
+          {:else if wsStore.contextUsage.reason === 'context_unknown'}
+            <span
+              class="shrink-0 tabular-nums"
+              style="font-size: var(--text-xs); color: var(--color-text-muted);"
+              title="The selected provider or CLI did not report a verified context-window size for this model."
+            >
+              0 used · model window not reported
+            </span>
           {:else}
             <span
               class="shrink-0"
               style="font-size: var(--text-xs); color: var(--color-text-muted); opacity: 0.6;"
-              title="No turn has run in this session yet — usage appears with the first message."
+              title="Choose a model to show its context-window information."
             >
-              no usage yet — appears on first message
+              choose a model to show context
             </span>
           {/if}
         </div>

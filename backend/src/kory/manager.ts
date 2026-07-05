@@ -1600,6 +1600,10 @@ export class KoryManager {
     const settings = loadAgentSettings(this.workingDirectory);
     const KEEP_FULL_TURNS = settings.contextKeepRecentTurns ?? 3; // recent turns keep full outputs
     const MIN_PRUNE_CHARS = settings.contextPruneMinChars ?? 600; // tiny outputs aren't worth stubbing
+    // A single current-turn result can be enormous (for example a tool
+    // accidentally serializing image pixels). Do not let it overflow the next
+    // provider request before age-based pruning gets a chance to run.
+    const MAX_LIVE_TOOL_CHARS = 60_000;
     const autoPrune = settings.contextPruningEnabled !== false;
     for (const m of messages) {
       const meta = m as InternalMessage & {
@@ -1615,7 +1619,8 @@ export class KoryManager {
         typeof meta.archiveTurn === 'number' &&
         currentTurn - meta.archiveTurn > KEEP_FULL_TURNS &&
         m.content.length > MIN_PRUNE_CHARS;
-      if (!hiddenByUserOrAgent && !stale) continue;
+      const oversized = autoPrune && m.content.length > MAX_LIVE_TOOL_CHARS;
+      if (!hiddenByUserOrAgent && !stale && !oversized) continue;
       const entry = await archive.get(sessionId, meta.archiveId);
       let original: Record<string, unknown> = {};
       try {
@@ -1626,7 +1631,7 @@ export class KoryManager {
       m.content = JSON.stringify({
         callId: original.callId ?? meta.tool_call_id,
         name: original.name,
-        output: `[Output pruned to save context: ${entry?.label ?? 'tool output'}${entry ? ` at ${new Date(entry.ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : ''}. Recover the exact content with fetch_context id=${meta.archiveId}]`,
+        output: `[Output ${oversized ? 'was too large for the live context and was pruned' : 'pruned'} to save context: ${entry?.label ?? 'tool output'}${entry ? ` at ${new Date(entry.ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : ''}. Recover the exact content with fetch_context id=${meta.archiveId}]`,
         isError: false,
         durationMs: 0,
       });

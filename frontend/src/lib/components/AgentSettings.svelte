@@ -1,10 +1,11 @@
 <script lang="ts">
   import { agentSettingsStore, DEFAULT_AGENT_SETTINGS } from "$lib/stores/agent-settings.svelte";
+  import SettingsSwitch from './SettingsSwitch.svelte';
+  import NumberStepper from './NumberStepper.svelte';
   import { 
     Bot, 
     Shield, 
     FileText, 
-    Settings,
     AlertTriangle,
     CheckCircle,
     XCircle,
@@ -16,8 +17,7 @@
     EyeOff,
     AlertOctagon,
     FlaskConical,
-    Globe,
-    Layers
+    Globe
   } from "lucide-svelte";
 
   // Props
@@ -104,11 +104,6 @@
       <h3 class="text-sm font-semibold text-[var(--color-text-primary)]">Agent Configuration</h3>
     </div>
     <div class="flex flex-wrap items-center gap-2">
-      <!-- Always Enforced Badge -->
-      <span class="flex items-center gap-1 px-2 py-1 text-xs font-medium rounded-full" style="background: var(--color-error-bg); color: var(--color-error);">
-        <Shield size={12} />
-        Rules Always Enforced
-      </span>
       {#if onClose}
         <button
           onclick={onClose}
@@ -199,57 +194,13 @@
               </div>
 
               <div class="grid gap-3 sm:grid-cols-2">
-                <label class="flex h-full cursor-pointer items-start justify-between gap-4 rounded-xl bg-[var(--color-surface-2)] p-4 hover:bg-[var(--color-surface-3)]">
-                  <div>
-                    <div class="text-sm font-medium text-[var(--color-text-primary)]">Enable Critic Gate</div>
-                    <div class="mt-1 text-xs text-[var(--color-text-muted)]">Critic reviews all changes before application.</div>
-                  </div>
-                  <input
-                    type="checkbox"
-                    checked={agentSettingsStore.settings.criticGateEnabled}
-                    onchange={() => toggleSetting("criticGateEnabled")}
-                    class="mt-1 h-4 w-4 rounded border-[var(--color-border)] bg-[var(--color-surface-0)] text-[var(--color-accent)] focus:ring-[var(--color-accent)]"
-                  />
-                </label>
+                <SettingsSwitch checked={agentSettingsStore.settings.criticGateEnabled} label="Enable Critic Gate" description="Critic reviews all changes before application." onchange={() => toggleSetting("criticGateEnabled")} />
 
-                <label class="flex h-full cursor-pointer items-start justify-between gap-4 rounded-xl bg-[var(--color-surface-2)] p-4 hover:bg-[var(--color-surface-3)]">
-                  <div>
-                    <div class="text-sm font-medium text-[var(--color-text-primary)]">Critic Enforces Preferences</div>
-                    <div class="mt-1 text-xs text-[var(--color-text-muted)]">Apply `preferences.md` as a hard workflow contract.</div>
-                  </div>
-                  <input
-                    type="checkbox"
-                    checked={agentSettingsStore.settings.criticEnforcesPreferences}
-                    onchange={() => toggleSetting("criticEnforcesPreferences")}
-                    class="mt-1 h-4 w-4 rounded border-[var(--color-border)] bg-[var(--color-surface-0)] text-[var(--color-accent)] focus:ring-[var(--color-accent)]"
-                  />
-                </label>
+                <SettingsSwitch checked={agentSettingsStore.settings.criticEnforcesPreferences} label="Critic Enforces Preferences" description="Apply preferences.md as a hard workflow contract." onchange={() => toggleSetting("criticEnforcesPreferences")} />
 
-                <label class="flex h-full cursor-pointer items-start justify-between gap-4 rounded-xl bg-[var(--color-surface-2)] p-4 hover:bg-[var(--color-surface-3)]">
-                  <div>
-                    <div class="text-sm font-medium text-[var(--color-text-primary)]">Auto-Apply Safe Fixes</div>
-                    <div class="mt-1 text-xs text-[var(--color-text-muted)]">Apply low-risk changes without manual confirmation.</div>
-                  </div>
-                  <input
-                    type="checkbox"
-                    checked={agentSettingsStore.settings.autoApplySafeFixes}
-                    onchange={() => toggleSetting("autoApplySafeFixes")}
-                    class="mt-1 h-4 w-4 rounded border-[var(--color-border)] bg-[var(--color-surface-0)] text-[var(--color-accent)] focus:ring-[var(--color-accent)]"
-                  />
-                </label>
+                <SettingsSwitch checked={agentSettingsStore.settings.autoApplySafeFixes} label="Auto-Apply Safe Fixes" description="Apply low-risk changes without manual confirmation." onchange={() => toggleSetting("autoApplySafeFixes")} />
 
-                <label class="flex h-full cursor-pointer items-start justify-between gap-4 rounded-xl bg-[var(--color-surface-2)] p-4 hover:bg-[var(--color-surface-3)]">
-                  <div>
-                    <div class="text-sm font-medium text-[var(--color-text-primary)]">Confirm Rule Violations</div>
-                    <div class="mt-1 text-xs text-[var(--color-text-muted)]">Require human approval before applying risky overrides.</div>
-                  </div>
-                  <input
-                    type="checkbox"
-                    checked={agentSettingsStore.settings.confirmRuleViolations}
-                    onchange={() => toggleSetting("confirmRuleViolations")}
-                    class="mt-1 h-4 w-4 rounded border-[var(--color-border)] bg-[var(--color-surface-0)] text-[var(--color-accent)] focus:ring-[var(--color-accent)]"
-                  />
-                </label>
+                <SettingsSwitch checked={agentSettingsStore.settings.confirmRuleViolations} label="Confirm Rule Violations" description="Require human approval before applying risky overrides." onchange={() => toggleSetting("confirmRuleViolations")} />
               </div>
             </section>
 
@@ -264,14 +215,12 @@
               <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
                 <div class="rounded-xl bg-[var(--color-surface-2)] p-4">
                   <label for="max-files" class="mb-2 block text-xs text-[var(--color-text-muted)]">Max Files Changed</label>
-                  <input
-                    id="max-files"
-                    type="number"
-                    min="1"
-                    max="50"
+                  <NumberStepper
                     value={agentSettingsStore.settings.approvalThresholdFiles}
-                    onchange={(e) => agentSettingsStore.saveSettings({ approvalThresholdFiles: parseInt(e.currentTarget.value) })}
-                    class="w-full rounded border border-[var(--color-border)] bg-[var(--color-surface-0)] px-3 py-2 text-sm text-[var(--color-text-primary)]"
+                    min={1}
+                    max={50}
+                    label="Maximum files changed"
+                    onchange={(value) => agentSettingsStore.saveSettings({ approvalThresholdFiles: value }, { quietSuccess: true })}
                   />
                   <p class="mt-2 text-[10px] text-[var(--color-text-muted)]">
                     Require approval if more than this many files change.
@@ -280,15 +229,13 @@
 
                 <div class="rounded-xl bg-[var(--color-surface-2)] p-4">
                   <label for="max-lines" class="mb-2 block text-xs text-[var(--color-text-muted)]">Max Lines Changed</label>
-                  <input
-                    id="max-lines"
-                    type="number"
-                    min="10"
-                    max="1000"
-                    step="10"
+                  <NumberStepper
                     value={agentSettingsStore.settings.approvalThresholdLines}
-                    onchange={(e) => agentSettingsStore.saveSettings({ approvalThresholdLines: parseInt(e.currentTarget.value) })}
-                    class="w-full rounded border border-[var(--color-border)] bg-[var(--color-surface-0)] px-3 py-2 text-sm text-[var(--color-text-primary)]"
+                    min={10}
+                    max={1000}
+                    step={10}
+                    label="Maximum lines changed"
+                    onchange={(value) => agentSettingsStore.saveSettings({ approvalThresholdLines: value }, { quietSuccess: true })}
                   />
                   <p class="mt-2 text-[10px] text-[var(--color-text-muted)]">
                     Require approval if more than this many lines change.
@@ -307,42 +254,20 @@
               </div>
 
               <div class="grid gap-3 sm:grid-cols-2">
-                <label class="flex h-full cursor-pointer items-start justify-between gap-4 rounded-xl bg-[var(--color-surface-2)] p-4 hover:bg-[var(--color-surface-3)]">
-                  <div>
-                    <div class="text-sm font-medium text-[var(--color-text-primary)]">Auto-Collapse Old Tool Output</div>
-                    <div class="mt-1 text-xs text-[var(--color-text-muted)]">Stub out stale file reads, terminal output, and search results to free context space.</div>
-                  </div>
-                  <input
-                    type="checkbox"
-                    checked={agentSettingsStore.settings.contextPruningEnabled ?? true}
-                    onchange={() => toggleSetting("contextPruningEnabled")}
-                    class="mt-1 h-4 w-4 rounded border-[var(--color-border)] bg-[var(--color-surface-0)] text-[var(--color-accent)] focus:ring-[var(--color-accent)]"
-                  />
-                </label>
+                <SettingsSwitch checked={agentSettingsStore.settings.contextPruningEnabled ?? true} label="Auto-Collapse Old Tool Output" description="Stub stale file reads, terminal output, and search results while keeping them recoverable." onchange={() => toggleSetting("contextPruningEnabled")} />
 
-                <label class="flex h-full cursor-pointer items-start justify-between gap-4 rounded-xl bg-[var(--color-surface-2)] p-4 hover:bg-[var(--color-surface-3)]">
-                  <div>
-                    <div class="text-sm font-medium text-[var(--color-text-primary)]">Agent Context Awareness</div>
-                    <div class="mt-1 text-xs text-[var(--color-text-muted)]">Give the agent a live report of its window usage so it prunes or compacts on its own.</div>
-                  </div>
-                  <input
-                    type="checkbox"
-                    checked={agentSettingsStore.settings.contextSelfAwareness ?? true}
-                    onchange={() => toggleSetting("contextSelfAwareness")}
-                    class="mt-1 h-4 w-4 rounded border-[var(--color-border)] bg-[var(--color-surface-0)] text-[var(--color-accent)] focus:ring-[var(--color-accent)]"
-                  />
-                </label>
+                <SettingsSwitch checked={agentSettingsStore.settings.contextSelfAwareness ?? true} label="Agent Context Awareness" description="Give the agent a live window-usage report so it can prune or compact deliberately." onchange={() => toggleSetting("contextSelfAwareness")} />
+
+                <SettingsSwitch checked={agentSettingsStore.settings.reasoningExpandedByDefault ?? true} label="Expand Full Reasoning by Default" description="Show reasoning automatically while keeping every block individually collapsible." onchange={() => toggleSetting("reasoningExpandedByDefault")} />
 
                 <div class="rounded-xl bg-[var(--color-surface-2)] p-4">
                   <label for="ctx-keep-turns" class="mb-2 block text-xs text-[var(--color-text-muted)]">Keep Recent Turns Full</label>
-                  <input
-                    id="ctx-keep-turns"
-                    type="number"
-                    min="1"
-                    max="10"
+                  <NumberStepper
                     value={agentSettingsStore.settings.contextKeepRecentTurns ?? 3}
-                    onchange={(e) => agentSettingsStore.saveSettings({ contextKeepRecentTurns: parseInt(e.currentTarget.value) })}
-                    class="w-full rounded border border-[var(--color-border)] bg-[var(--color-surface-0)] px-3 py-2 text-sm text-[var(--color-text-primary)]"
+                    min={1}
+                    max={10}
+                    label="Recent turns kept full"
+                    onchange={(value) => agentSettingsStore.saveSettings({ contextKeepRecentTurns: value }, { quietSuccess: true })}
                   />
                   <p class="mt-2 text-[10px] text-[var(--color-text-muted)]">
                     Tool outputs from this many recent turns are never collapsed.
@@ -351,15 +276,13 @@
 
                 <div class="rounded-xl bg-[var(--color-surface-2)] p-4">
                   <label for="ctx-min-chars" class="mb-2 block text-xs text-[var(--color-text-muted)]">Minimum Size to Collapse</label>
-                  <input
-                    id="ctx-min-chars"
-                    type="number"
-                    min="100"
-                    max="10000"
-                    step="100"
+                  <NumberStepper
                     value={agentSettingsStore.settings.contextPruneMinChars ?? 600}
-                    onchange={(e) => agentSettingsStore.saveSettings({ contextPruneMinChars: parseInt(e.currentTarget.value) })}
-                    class="w-full rounded border border-[var(--color-border)] bg-[var(--color-surface-0)] px-3 py-2 text-sm text-[var(--color-text-primary)]"
+                    min={100}
+                    max={10000}
+                    step={100}
+                    label="Minimum output size to collapse"
+                    onchange={(value) => agentSettingsStore.saveSettings({ contextPruneMinChars: value }, { quietSuccess: true })}
                   />
                   <p class="mt-2 text-[10px] text-[var(--color-text-muted)]">
                     Outputs smaller than this (characters) stay in context — not worth collapsing.
@@ -379,31 +302,9 @@
               </div>
 
               <div class="space-y-3">
-                <label class="flex cursor-pointer items-start justify-between gap-4 rounded-xl bg-[var(--color-surface-2)] p-4 hover:bg-[var(--color-surface-3)]">
-                  <div>
-                    <div class="text-sm font-medium text-[var(--color-text-primary)]">Agent Can Update Memory</div>
-                    <div class="mt-1 text-xs text-[var(--color-text-muted)]">Allow agents to update memory files.</div>
-                  </div>
-                  <input
-                    type="checkbox"
-                    checked={agentSettingsStore.settings.agentMemoryEnabled}
-                    onchange={() => toggleSetting("agentMemoryEnabled")}
-                    class="mt-1 h-4 w-4 rounded border-[var(--color-border)] bg-[var(--color-surface-0)] text-[var(--color-accent)] focus:ring-[var(--color-accent)]"
-                  />
-                </label>
+                <SettingsSwitch checked={agentSettingsStore.settings.agentMemoryEnabled} label="Agent Can Update Memory" description="Allow agents to update project memory files." onchange={() => toggleSetting("agentMemoryEnabled")} />
 
-                <label class="flex cursor-pointer items-start justify-between gap-4 rounded-xl bg-[var(--color-surface-2)] p-4 hover:bg-[var(--color-surface-3)]">
-                  <div>
-                    <div class="text-sm font-medium text-[var(--color-text-primary)]">Agent Can Update Preferences</div>
-                    <div class="mt-1 text-xs text-[var(--color-text-muted)]">Allow updates to `preferences.md` based on learned patterns.</div>
-                  </div>
-                  <input
-                    type="checkbox"
-                    checked={agentSettingsStore.settings.agentCanUpdatePreferences}
-                    onchange={() => toggleSetting("agentCanUpdatePreferences")}
-                    class="mt-1 h-4 w-4 rounded border-[var(--color-border)] bg-[var(--color-surface-0)] text-[var(--color-accent)] focus:ring-[var(--color-accent)]"
-                  />
-                </label>
+                <SettingsSwitch checked={agentSettingsStore.settings.agentCanUpdatePreferences} label="Agent Can Update Preferences" description="Allow agents to update preferences.md from learned workflow patterns." onchange={() => toggleSetting("agentCanUpdatePreferences")} />
               </div>
             </section>
 
@@ -423,64 +324,29 @@
                         <div class="mt-1 text-[10px] text-[var(--color-text-muted)]">Use DuckDuckGo fallback for web search.</div>
                       </div>
                     </div>
-                    <select
-                      value={agentSettingsStore.settings.localWebSearch}
-                      onchange={(e) => agentSettingsStore.saveSettings({ localWebSearch: e.currentTarget.value as any })}
-                      class="rounded border border-[var(--color-border)] bg-[var(--color-surface-0)] px-2 py-1 text-xs text-[var(--color-text-primary)]"
-                    >
-                      <option value="off">Off</option>
-                      <option value="on">Always On</option>
-                      <option value="fallback">Fallback</option>
-                    </select>
-                  </div>
-                </div>
-
-                <label class="flex cursor-pointer items-start justify-between gap-4 rounded-xl bg-[var(--color-surface-2)] p-4 hover:bg-[var(--color-surface-3)]">
-                  <div class="flex items-center gap-2">
-                    <Layers size={14} class="mt-0.5 text-[var(--color-text-muted)]" />
-                    <div>
-                      <div class="text-sm font-medium text-[var(--color-text-primary)]">Multi-Source Research</div>
-                      <div class="mt-1 text-[10px] text-[var(--color-text-muted)]">Force the agent to verify against 3-5 sources.</div>
+                    <div class="flex shrink-0 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-0)] p-0.5" role="group" aria-label="Local web search mode">
+                      {#each [{ value: 'off', label: 'Off' }, { value: 'fallback', label: 'Fallback' }, { value: 'on', label: 'On' }] as option}
+                        <button
+                          type="button"
+                          aria-pressed={agentSettingsStore.settings.localWebSearch === option.value}
+                          onclick={() => agentSettingsStore.saveSettings({ localWebSearch: option.value as 'off' | 'on' | 'fallback' })}
+                          class="rounded-md px-2 py-1 text-[10px] font-medium transition-all {agentSettingsStore.settings.localWebSearch === option.value ? 'bg-[var(--color-accent)] text-white shadow-sm' : 'text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)]'}"
+                        >
+                          {option.label}
+                        </button>
+                      {/each}
                     </div>
                   </div>
-                  <input
-                    type="checkbox"
-                    checked={agentSettingsStore.settings.multiSourceResearch}
-                    onchange={() => toggleSetting("multiSourceResearch")}
-                    class="mt-1 h-4 w-4 rounded border-[var(--color-border)] bg-[var(--color-surface-0)] text-[var(--color-accent)] focus:ring-[var(--color-accent)]"
-                  />
-                </label>
+                </div>
+
+                <SettingsSwitch compact checked={agentSettingsStore.settings.multiSourceResearch} label="Multi-Source Research" description="Require verification across 3–5 sources for research tasks." onchange={() => toggleSetting("multiSourceResearch")} />
               </div>
             </section>
 
-            <section class="space-y-4 rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-1)] p-5">
-              <h4 class="text-sm font-semibold text-[var(--color-text-primary)]">Current Mode</h4>
-              <div class="grid gap-3 sm:grid-cols-3 xl:grid-cols-1">
-                <div class="rounded-xl bg-[var(--color-surface-2)] p-4">
-                  <div class="text-[10px] uppercase tracking-wide text-[var(--color-text-muted)]">Enforcement</div>
-                  <div class="mt-2 text-sm font-semibold text-[var(--color-text-primary)] capitalize">
-                    {agentSettingsStore.settings.ruleEnforcementLevel}
-                  </div>
-                </div>
-                <div class="rounded-xl bg-[var(--color-surface-2)] p-4">
-                  <div class="text-[10px] uppercase tracking-wide text-[var(--color-text-muted)]">Critic Gate</div>
-                  <div class="mt-2 text-sm font-semibold text-[var(--color-text-primary)]">
-                    {agentSettingsStore.settings.criticGateEnabled ? 'Enabled' : 'Disabled'}
-                  </div>
-                </div>
-                <div class="rounded-xl bg-[var(--color-surface-2)] p-4">
-                  <div class="text-[10px] uppercase tracking-wide text-[var(--color-text-muted)]">Auto-Apply</div>
-                  <div class="mt-2 text-sm font-semibold text-[var(--color-text-primary)]">
-                    {agentSettingsStore.settings.autoApplySafeFixes ? 'Safe fixes only' : 'Manual'}
-                  </div>
-                </div>
-              </div>
-            </section>
-
-            <section class="rounded-2xl border border-red-500/20 bg-red-500/5 p-5">
+            <section class="flex justify-end border-t border-[var(--color-border)] pt-4">
               <button
                 onclick={() => agentSettingsStore.resetSettings()}
-                class="flex items-center gap-2 rounded-lg px-4 py-2 text-sm text-red-400 transition-colors hover:bg-red-500/10"
+                class="flex items-center gap-2 rounded-lg px-3 py-2 text-xs text-[var(--color-text-muted)] transition-colors hover:bg-red-500/10 hover:text-red-400"
               >
                 <RotateCcw size={16} />
                 Reset to Defaults

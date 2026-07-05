@@ -55,6 +55,7 @@
   let _storedModel = typeof localStorage !== 'undefined' ? localStorage.getItem(MODEL_STORAGE_KEY) : null;
   if (_storedModel === 'auto') { localStorage.removeItem(MODEL_STORAGE_KEY); _storedModel = null; }
   let selectedModel = $state<string>(_storedModel ?? '');
+  let lastContextPreviewKey = $state('');
   let selectedPickerIndex = $state(0);
   let attachments = $state<Attachment[]>([]);
   let referenceFileInputRef = $state<HTMLInputElement>();
@@ -187,6 +188,35 @@
     const modelDef = catalog?.find(m => m.id === parsed.model);
     if (modelDef) return `(${providerLabel(parsed.provider)}) ${modelDef.name}`;
     return parsed.model;
+  });
+
+  function previewSelectedModelContext(value: string) {
+    const sid = sessionStore.activeSessionId;
+    if (!sid || !value) return;
+    const target = availableModels.find((m) => m.value === value);
+    wsStore.setManagerContextWindow(sid, target?.contextWindow);
+    const { provider, model } = parseModelSelection(value);
+    if (provider && model) {
+      void apiFetch(apiUrl(`/api/sessions/${sid}/context/model-preview`), {
+        method: 'POST',
+        body: JSON.stringify({ model, provider }),
+      }).catch(() => {});
+    }
+  }
+
+  // Also preview a model restored from local storage, or when a new session
+  // becomes active. Previously context metadata only appeared after the first
+  // message unless the user manually changed the picker during that session.
+  $effect(() => {
+    const sid = sessionStore.activeSessionId;
+    const model = selectedModel;
+    // Track catalog changes so a late provider discovery can replace an
+    // initially unknown window with verified metadata.
+    const targetWindow = availableModels.find((m) => m.value === model)?.contextWindow ?? 0;
+    const key = sid && model ? `${sid}:${model}:${targetWindow}` : '';
+    if (!key || key === lastContextPreviewKey) return;
+    lastContextPreviewKey = key;
+    previewSelectedModelContext(model);
   });
 
   // Cooldown to prevent duplicate sends (double Enter, key repeat, double-click)
@@ -486,18 +516,7 @@
     // data), then ask the backend for the trusted window — the backend answer
     // arrives as a normal stream.usage event and always wins. Works for every
     // harness and API provider.
-    const target = availableModels.find((m) => m.value === value);
-    const sid = sessionStore.activeSessionId;
-    if (sid) {
-      wsStore.setManagerContextWindow(sid, target?.contextWindow);
-      const { provider, model } = parseModelSelection(value);
-      if (provider && model) {
-        void apiFetch(apiUrl(`/api/sessions/${sid}/context/model-preview`), {
-          method: 'POST',
-          body: JSON.stringify({ model, provider }),
-        }).catch(() => {});
-      }
-    }
+    previewSelectedModelContext(value);
   }
 
   function selectModel(value: string) {

@@ -32,6 +32,7 @@
   import { sessionStore } from '$lib/stores/sessions.svelte';
   import AnimatedStatusIcon from './AnimatedStatusIcon.svelte';
   import ThinkingBlock from './ThinkingBlock.svelte';
+  import { agentSettingsStore } from '$lib/stores/agent-settings.svelte';
   import { marked } from 'marked';
   import DOMPurify from 'dompurify';
   import hljs from 'highlight.js/lib/core';
@@ -523,6 +524,7 @@
             durationMs={entry.durationMs} 
             agentName={entry.agentName} 
             estimatedTokens={(entry.metadata as { thinkingTokens?: number } | undefined)?.thinkingTokens}
+            defaultExpanded={agentSettingsStore.settings.reasoningExpandedByDefault ?? true}
             onFreeze={(ms) => wsStore.recordThinkingDuration(entry.id, ms)}
           />
       {:else if entry.type === 'tool_call' || entry.type === 'tool_result'}

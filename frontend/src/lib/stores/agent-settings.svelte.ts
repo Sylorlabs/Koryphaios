@@ -39,6 +39,8 @@ export interface AgentSettings {
   contextPruneMinChars: number;
   /** Live context-usage report injected each turn so the agent self-manages */
   contextSelfAwareness: boolean;
+  /** Show complete reasoning blocks expanded in the chat feed by default */
+  reasoningExpandedByDefault: boolean;
 }
 
 export interface CriticReviewResult {
@@ -91,6 +93,7 @@ export const DEFAULT_AGENT_SETTINGS: AgentSettings = {
   contextKeepRecentTurns: 3,
   contextPruneMinChars: 600,
   contextSelfAwareness: true,
+  reasoningExpandedByDefault: true,
 };
 
 // ============================================================================
@@ -103,6 +106,7 @@ function createAgentSettingsStore() {
   let isLoading = $state(false);
   let activeTab = $state<'settings' | 'preferences' | 'enforcement'>('settings');
   let lastCriticResult = $state<CriticReviewResult | null>(null);
+  let settingsSaveRevision = 0;
 
   // ========================================================================
   // Settings
@@ -130,7 +134,12 @@ function createAgentSettingsStore() {
     newSettings: Partial<AgentSettings>,
     options?: { quietSuccess?: boolean },
   ): Promise<boolean> {
-    isLoading = true;
+    const revision = ++settingsSaveRevision;
+    const previousSettings = settings;
+    // Keep controls stationary and responsive while the write happens. The
+    // server response remains authoritative, but saving no longer blanks the
+    // entire panel or waits before moving a switch/stepper.
+    settings = { ...settings, ...newSettings };
     try {
       const res = await apiFetch(apiUrl('/api/agent/settings'), {
         method: 'PUT',
@@ -141,7 +150,7 @@ function createAgentSettingsStore() {
       if (res.ok) {
         const data = await res.json();
         if (data.ok) {
-          settings = data.data;
+          if (revision === settingsSaveRevision) settings = data.data;
           if (!options?.quietSuccess) {
             toastStore.success('Agent settings saved');
           }
@@ -150,10 +159,9 @@ function createAgentSettingsStore() {
       }
       throw new Error('Failed to save');
     } catch (err) {
+      if (revision === settingsSaveRevision) settings = previousSettings;
       toastStore.error('Failed to save agent settings');
       return false;
-    } finally {
-      isLoading = false;
     }
   }
 

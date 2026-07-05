@@ -89,6 +89,9 @@ export interface AgentSettings {
   /** Give the agent a live context-usage report each turn so it can decide to prune/compact on its own. */
   contextSelfAwareness: boolean;
 
+  /** Show complete reasoning blocks expanded in the chat feed by default. */
+  reasoningExpandedByDefault: boolean;
+
   /** Timestamp of last update for synchronization */
   updatedAt?: number;
 }
@@ -113,6 +116,7 @@ export const DEFAULT_AGENT_SETTINGS: AgentSettings = {
   contextKeepRecentTurns: 3,
   contextPruneMinChars: 600,
   contextSelfAwareness: true,
+  reasoningExpandedByDefault: true,
 };
 
 // Helper to load koryphaios.json

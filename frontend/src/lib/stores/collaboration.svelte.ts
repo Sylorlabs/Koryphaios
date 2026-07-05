@@ -29,6 +29,7 @@ export interface CollaborationSession {
   tunnelUrl: string;
   inviteLinks: InviteLinks;
   relayEnabled: boolean;
+  relayError?: string;
   policy: CollaborationPolicy;
 }
 
@@ -75,13 +76,17 @@ export const collaborationStore = {
   closeJoinedSession() { activeJoinedSessionId = null; },
   leaveJoinedSession(sessionId: string) { joinedSessions = joinedSessions.filter(session => session.sessionId !== sessionId); if (activeJoinedSessionId === sessionId) activeJoinedSessionId = null; },
 
-  async hostSession() {
+  async hostSession(workspacePaths: string[] = []) {
     const sessionId = sessionStore.activeSessionId;
     if (!sessionId) { toastStore.error('No active session to host'); return; }
 
     loading = true;
     try {
-      const res = await apiFetch(apiUrl(`/api/collab/${sessionId}/start`), { method: 'POST' });
+      const res = await apiFetch(apiUrl('/api/collab/host/start'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sessionId, workspacePaths }),
+      });
       const data = await parseJsonResponse(res);
       if (data.ok) {
         activeCollab = data.data;

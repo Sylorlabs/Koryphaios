@@ -1,10 +1,32 @@
 import { Elysia, t } from 'elysia';
 import { collaborationManager } from '../collaboration/manager';
 import { requireLocalRouteAuth } from '../auth/local-route-auth';
-import { relayAvailable, relayEnabled } from '../collaboration/relay-client';
+import { relayAvailable } from '../collaboration/relay-client';
 import { getContext } from '../context';
 
 export const collaborationRoutes = new Elysia({ prefix: '/api/collab' })
+
+  // Canonical host start endpoint. Keeping the session id in the JSON body
+  // avoids route ambiguity and gives host configuration a stable contract.
+  .post(
+    '/host/start',
+    async ({ request, body, set }) => {
+      if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
+      const input = body as { sessionId: string; ownerId?: string; workspacePaths?: string[] };
+      try {
+        const result = await collaborationManager.hostSession(
+          input.sessionId,
+          input.ownerId || 'local-user',
+          input.workspacePaths || [],
+        );
+        return { ok: true, data: result };
+      } catch (err: any) {
+        set.status = 500;
+        return { ok: false, error: err.message };
+      }
+    },
+    { body: t.Object({ sessionId: t.String(), ownerId: t.Optional(t.String()), workspacePaths: t.Optional(t.Array(t.String())) }) },
+  )
 
   // Start hosting — returns session info + invite links
   .post(
@@ -13,14 +35,14 @@ export const collaborationRoutes = new Elysia({ prefix: '/api/collab' })
       if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
       const ownerId = (body as any)?.ownerId || 'local-user';
       try {
-        const result = await collaborationManager.hostSession(id, ownerId);
-        return { ok: true, data: { ...result, relayEnabled } };
+        const result = await collaborationManager.hostSession(id, ownerId, (body as any)?.workspacePaths || []);
+        return { ok: true, data: result };
       } catch (err: any) {
         set.status = 500;
         return { ok: false, error: err.message };
       }
     },
-    { body: t.Optional(t.Object({ ownerId: t.Optional(t.String()) })) },
+    { body: t.Optional(t.Object({ ownerId: t.Optional(t.String()), workspacePaths: t.Optional(t.Array(t.String())) })) },
   )
 
   // Join via legacy 6-char code (fallback for local network use)
@@ -29,9 +51,18 @@ export const collaborationRoutes = new Elysia({ prefix: '/api/collab' })
     async ({ request, body, set }) => {
       if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
       try {
-        const session = relayAvailable
-          ? await collaborationManager.joinRelaySession((body as any).joinCode)
-          : await collaborationManager.joinSession((body as any).joinCode, (body as any).userId, (body as any).name);
+        let session;
+        if (relayAvailable) {
+          try {
+            session = await collaborationManager.joinRelaySession((body as any).joinCode);
+          } catch {
+            // A host may be running in secure local fallback mode when its
+            // configured relay is older or temporarily unavailable.
+            session = await collaborationManager.joinSession((body as any).joinCode, (body as any).userId, (body as any).name);
+          }
+        } else {
+          session = await collaborationManager.joinSession((body as any).joinCode, (body as any).userId, (body as any).name);
+        }
         return { ok: true, data: session };
       } catch (err: any) {
         set.status = 500;
@@ -61,6 +92,7 @@ export const collaborationRoutes = new Elysia({ prefix: '/api/collab' })
     accessTiers: t.Optional(t.Array(t.Any())),
     modelCatalog: t.Optional(t.Array(t.Any())),
     sessionName: t.Optional(t.String({ maxLength: 80 })),
+    workspacePaths: t.Optional(t.Array(t.String(), { maxItems: 24 })),
   }) })
 
   // Get pending guest prompts waiting for host approval

@@ -28,6 +28,9 @@ function normalizePolicy(current: CollaborationPolicy, patch: Partial<Collaborat
   const defaultTierId = tiers.some(t => t.id === patch.defaultTierId) ? patch.defaultTierId! : (tiers.some(t => t.id === current.defaultTierId) ? current.defaultTierId : tiers[0].id);
   return { ...DEFAULT_COLLABORATION_POLICY, ...current, ...patch, accessTiers: tiers, defaultTierId,
     sessionName: String(patch.sessionName ?? current.sessionName ?? 'Team session').trim().slice(0, 80) || 'Team session',
+    workspacePaths: Array.isArray(patch.workspacePaths)
+      ? [...new Set(patch.workspacePaths.filter(v => typeof v === 'string').map(v => v.trim()).filter(Boolean))].slice(0, 24)
+      : current.workspacePaths,
     modelCatalog: Array.isArray(patch.modelCatalog) ? patch.modelCatalog.slice(0, 200).map(model => ({ id: String(model.id), label: String(model.label), provider: String(model.provider), reasoningLevels: [...new Set((model.reasoningLevels || []).filter(v => typeof v === 'string'))].slice(0, 12) })) : current.modelCatalog,
     joinMode: patch.joinMode === 'auto' ? 'auto' : patch.joinMode === 'approval' ? 'approval' : current.joinMode };
 }
@@ -73,12 +76,13 @@ export class CollaborationManager {
     return Array.from({ length: 6 }, () => chars[Math.floor(Math.random() * chars.length)]).join('');
   }
 
-  async hostSession(baseSessionId: string, ownerId: string): Promise<{
+  async hostSession(baseSessionId: string, ownerId: string, workspacePaths: string[] = []): Promise<{
     id: string;
     joinCode: string;
     tunnelUrl: string;
     inviteLinks: Record<string, string>;
     relayEnabled: boolean;
+    relayError?: string;
     policy: CollaborationPolicy;
   }> {
     // Check if already hosting this session
@@ -93,15 +97,22 @@ export class CollaborationManager {
 
     let sessionId: string;
     let joinCode: string;
+    let localJoinCode: string;
     let tunnelUrl = '';
+    let relayReady = false;
+    let relayError: string | undefined;
+
+    const requestedWorkspacePaths = [...new Set(workspacePaths.map(path => path.trim()).filter(Boolean))].slice(0, 24);
 
     if (existing) {
       sessionId = existing.id;
       joinCode = existing.joinCode;
+      localJoinCode = existing.joinCode;
       tunnelUrl = existing.tunnelUrl ?? '';
     } else {
       sessionId = nanoid();
       joinCode = this.generateJoinCode();
+      localJoinCode = joinCode;
 
       // Start relay session if configured
       if (relayEnabled && relayClient) {
@@ -110,6 +121,7 @@ export class CollaborationManager {
           tunnelUrl = `${inviteBase}/join`;
           if (relayJoinCode) joinCode = relayJoinCode;
           log.info({ relaySessionId }, 'Relay session started');
+          relayReady = true;
 
           // Wire up guest prompt handler
           relayClient.onMessage((msg) => {
@@ -151,6 +163,7 @@ export class CollaborationManager {
         }
       }
 
+      const initialPolicy = normalizePolicy(DEFAULT_COLLABORATION_POLICY, { workspacePaths: requestedWorkspacePaths });
       await db.insert(collaborationSessions).values({
         id: sessionId,
         baseSessionId,
@@ -158,6 +171,7 @@ export class CollaborationManager {
         joinCode,
         tunnelUrl,
         status: 'active',
+        aiState: JSON.stringify(initialPolicy),
         createdAt: new Date(),
       });
 
@@ -171,14 +185,36 @@ export class CollaborationManager {
       });
     }
 
-    const policy: CollaborationPolicy = existing?.aiState
+    let policy: CollaborationPolicy = existing?.aiState
       ? { ...DEFAULT_COLLABORATION_POLICY, ...JSON.parse(existing.aiState) }
-      : DEFAULT_COLLABORATION_POLICY;
-    if (relayClient?.isConnected) await relayClient.updatePolicy(policy);
+      : normalizePolicy(DEFAULT_COLLABORATION_POLICY, { workspacePaths: requestedWorkspacePaths });
+    if (existing && requestedWorkspacePaths.length) {
+      policy = normalizePolicy(policy, { workspacePaths: requestedWorkspacePaths });
+      await db.update(collaborationSessions).set({ aiState: JSON.stringify(policy) })
+        .where(eq(collaborationSessions.id, sessionId));
+    }
+    if (relayClient?.isConnected) {
+      try {
+        await relayClient.updatePolicy(policy);
+        relayReady = true;
+      } catch (err: any) {
+        // An older relay may support session creation but not host-owned policy.
+        // Never expose guests through a relay that cannot enforce the policy;
+        // keep the local collaboration session usable instead.
+        log.error({ err: err.message }, 'Relay does not support required host policy; continuing locally');
+        await relayClient.disconnect();
+        relayReady = false;
+        relayError = 'The configured relay is outdated and does not support enforced host policies. Hosting is active locally; upgrade the relay to restore internet invites.';
+        joinCode = localJoinCode;
+        tunnelUrl = '';
+        await db.update(collaborationSessions).set({ joinCode, tunnelUrl })
+          .where(eq(collaborationSessions.id, sessionId));
+      }
+    }
 
     // Generate an invite link for every host-defined access tier.
     const inviteLinks: Record<string, string> = {};
-    if (relayEnabled && relayClient) {
+    if (relayReady && relayClient) {
       for (const role of policy.accessTiers.map(t => t.id)) {
         try {
           inviteLinks[role] = await relayClient.createInvite(role);
@@ -188,7 +224,7 @@ export class CollaborationManager {
       }
     }
 
-    return { id: sessionId, joinCode, tunnelUrl, inviteLinks, relayEnabled, policy };
+    return { id: sessionId, joinCode, tunnelUrl, inviteLinks, relayEnabled: relayReady, relayError, policy };
   }
 
   async updatePolicy(id: string, patch: Partial<CollaborationPolicy>): Promise<CollaborationPolicy> {

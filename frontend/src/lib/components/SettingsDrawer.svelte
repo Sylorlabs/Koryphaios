@@ -32,6 +32,7 @@
     Plus,
     Trash2,
     StickyNote,
+    FolderOpen,
   } from 'lucide-svelte';
   import MemoryEditor from './MemoryEditor.svelte';
   import AgentSettings from './AgentSettings.svelte';
@@ -52,8 +53,10 @@
   import ModelSelectionDialog from './ModelSelectionDialog.svelte';
   import ModeToggle from './ModeToggle.svelte';
   import TeamAccessProfiles from './TeamAccessProfiles.svelte';
+  import NumberStepper from './NumberStepper.svelte';
   import { apiFetch, parseJsonResponse } from '$lib/api.svelte';
   import { dndzone } from 'svelte-dnd-action';
+  import { invoke } from '@tauri-apps/api/core';
 
   interface Props {
     open?: boolean;
@@ -79,7 +82,43 @@
   let newKeyValue = $state('');
   let teamJoinCode = $state('');
   let teamGuestName = $state('');
+  let hostWorkspacePaths = $state<string[]>(projectStore.currentPath ? [projectStore.currentPath] : []);
+  let hostPathsInitializedFor = $state<string | null>(projectStore.currentPath);
   let rotateKeyInput = $state<HTMLInputElement | null>(null);
+
+  $effect(() => {
+    const current = projectStore.currentPath;
+    if (activeTab !== 'teams' || collaborationStore.activeCollab || current === hostPathsInitializedFor) return;
+    hostPathsInitializedFor = current;
+    if (current) hostWorkspacePaths = [current];
+  });
+
+  function updateHostWorkspacePath(index: number, value: string) {
+    hostWorkspacePaths = hostWorkspacePaths.map((path, i) => i === index ? value : path);
+  }
+
+  function removeHostWorkspacePath(index: number) {
+    hostWorkspacePaths = hostWorkspacePaths.filter((_, i) => i !== index);
+  }
+
+  async function addHostWorkspacePath() {
+    try {
+      const selected = await invoke<string | null>('select_folder_dialog');
+      if (!selected || hostWorkspacePaths.includes(selected)) return;
+      hostWorkspacePaths = [...hostWorkspacePaths, selected];
+    } catch (error) {
+      toastStore.error(error instanceof Error ? error.message : 'Could not open folder picker');
+    }
+  }
+
+  function startHosting() {
+    const paths = [...new Set(hostWorkspacePaths.map(path => path.trim()).filter(Boolean))];
+    if (!paths.length) {
+      toastStore.error('Add at least one workspace path before hosting');
+      return;
+    }
+    void collaborationStore.hostSession(paths);
+  }
 
   const NOTE_PERMISSION_PRESETS: Array<{
     id: Exclude<NotesPermissionPreset, 'custom'>
@@ -198,8 +237,8 @@
     if (activeTab === lastInitializedTab) return;
     lastInitializedTab = activeTab;
 
-    if (activeTab === 'memory') void memoryStore.loadAllMemory();
-    if (activeTab === 'agent') void agentSettingsStore.loadAll();
+    // Project-aware effects above own Memory and Agent initialization. Calling
+    // them again here caused duplicate requests and visible loading flicker.
     if (activeTab === 'experimental') void experimentalStore.loadAll();
   });
 
@@ -448,11 +487,6 @@
           onclick={() => { activeTab = tab.id as any; if (tab.action) tab.action(); }}
         >
           <Icon size={13} /> {tab.label}
-          {#if tab.id === 'experimental' && experimentalStore.enabledCount > 0}
-            <span class="ml-1 min-w-[16px] h-4 px-1 rounded-full bg-amber-500 text-white text-[9px] flex items-center justify-center font-medium">
-              {experimentalStore.enabledCount}
-            </span>
-          {/if}
         </button>
       {/each}
     </div>
@@ -1194,7 +1228,7 @@
                       {collaborationStore.activeCollab.joinCode || '••••••'}
                     </code>
                     <p class="mt-3 text-[11px] text-[var(--color-text-muted)]">
-                      Configure <code class="font-mono">RELAY_URL</code> and <code class="font-mono">RELAY_HOST_SECRET</code> in your environment for internet-accessible invite links.
+                      {collaborationStore.activeCollab.relayError ?? 'Configure RELAY_URL and RELAY_HOST_SECRET in your environment for internet-accessible invite links.'}
                     </p>
                   </div>
                 {/if}
@@ -1271,10 +1305,60 @@
                 <p class="text-xs text-[var(--color-text-muted)] mb-8">
                   Generate invite links for teammates to watch or co-pilot your active AI session in real time.
                 </p>
+
+                <div class="mb-6 flex-1 rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-1)] p-4 text-left">
+                  <div class="mb-3 flex items-center justify-between gap-3">
+                    <div>
+                      <div class="text-xs font-bold text-[var(--color-text-primary)]">Working in</div>
+                      <div class="mt-0.5 text-[10px] text-[var(--color-text-muted)]">Workspace roots available to this hosted session.</div>
+                    </div>
+                    <button
+                      type="button"
+                      onclick={addHostWorkspacePath}
+                      class="flex shrink-0 items-center gap-1.5 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-2)] px-2.5 py-1.5 text-[10px] font-bold text-[var(--color-text-secondary)] transition-colors hover:border-[var(--color-accent)]/50 hover:text-[var(--color-text-primary)]"
+                    >
+                      <FolderOpen size={13} /> Add folder
+                    </button>
+                  </div>
+
+                  {#if hostWorkspacePaths.length}
+                    <div class="space-y-2">
+                      {#each hostWorkspacePaths as path, index (index)}
+                        <div class="group flex items-center gap-2 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-0)] p-2 transition-colors focus-within:border-[var(--color-accent)]/60">
+                          <FolderOpen size={14} class="ml-1 shrink-0 text-[var(--color-accent)]" />
+                          <input
+                            value={path}
+                            aria-label={`Hosted workspace path ${index + 1}`}
+                            oninput={(event) => updateHostWorkspacePath(index, event.currentTarget.value)}
+                            class="min-w-0 flex-1 bg-transparent px-1 py-1 font-mono text-[11px] text-[var(--color-text-primary)] outline-none"
+                            spellcheck="false"
+                          />
+                          <button
+                            type="button"
+                            aria-label={`Remove ${path || `workspace path ${index + 1}`}`}
+                            onclick={() => removeHostWorkspacePath(index)}
+                            class="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-[var(--color-text-muted)] transition-colors hover:bg-red-500/10 hover:text-red-400"
+                          >
+                            <X size={14} />
+                          </button>
+                        </div>
+                      {/each}
+                    </div>
+                  {:else}
+                    <button
+                      type="button"
+                      onclick={addHostWorkspacePath}
+                      class="flex min-h-24 w-full flex-col items-center justify-center rounded-xl border border-dashed border-[var(--color-border)] text-[var(--color-text-muted)] transition-colors hover:border-[var(--color-accent)]/50 hover:text-[var(--color-text-secondary)]"
+                    >
+                      <Plus size={18} />
+                      <span class="mt-2 text-[10px] font-medium">Add a workspace folder</span>
+                    </button>
+                  {/if}
+                </div>
                 <button
                   type="button"
-                  onclick={() => collaborationStore.hostSession()}
-                  disabled={collaborationStore.loading}
+                  onclick={startHosting}
+                  disabled={collaborationStore.loading || !hostWorkspacePaths.some(path => path.trim())}
                   class="btn btn-primary w-full py-3 mt-auto font-bold rounded-xl disabled:opacity-50"
                 >
                   {collaborationStore.loading ? 'Starting...' : 'Start Collaboration'}
@@ -1359,15 +1443,16 @@
               <div class="text-sm font-medium" style="color: var(--color-text-primary);">Max context tokens</div>
               <div class="text-xs mt-0.5" style="color: var(--color-text-muted);">Maximum tokens used by notes included in agent context (100–5000).</div>
             </div>
-            <input
-              type="number"
-              min="100"
-              max="5000"
-              step="100"
-              class="input h-8 w-24 text-sm text-right"
-              value={notesStore.settings.maxContextTokens}
-              oninput={(e) => notesStore.updateSettings({ maxContextTokens: parseInt((e.currentTarget as HTMLInputElement).value, 10) || 2000 })}
-            />
+            <div class="w-52 shrink-0">
+              <NumberStepper
+                value={notesStore.settings.maxContextTokens}
+                min={100}
+                max={5000}
+                step={100}
+                label="Maximum note context tokens"
+                onchange={(value) => notesStore.updateSettings({ maxContextTokens: value })}
+              />
+            </div>
           </div>
 
           <div class="flex items-center justify-between gap-4 py-2">
