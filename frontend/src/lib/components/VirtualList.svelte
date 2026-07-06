@@ -14,9 +14,13 @@
         onScrollNearBottom?: () => void;
         onReady?: (el: HTMLDivElement) => void;
         row?: Snippet<[T, number]>;
+        /** When true, keep the view pinned to the bottom authoritatively —
+         *  using totalHeight (which accounts for un-rendered rows), not DOM
+         *  scrollHeight. The parent flips this off when the user scrolls up. */
+        follow?: boolean;
     }
     
-    let { items, estimateHeight, overscan = 5, class: className = '', onScroll, onScrollNearBottom, onReady, row }: Props = $props();
+    let { items, estimateHeight, overscan = 5, class: className = '', onScroll, onScrollNearBottom, onReady, row, follow = false }: Props = $props();
     
     // DOM refs
     let containerEl = $state<HTMLDivElement>();
@@ -25,7 +29,8 @@
     let heightCache = $state<Map<string, number>>(new Map());
     
     // Scroll state
-    let scrollTop = $state(0);
+    // Initialize to a large value if follow is true to render bottom items first
+    let scrollTop = $state(follow ? Number.MAX_SAFE_INTEGER : 0);
     let clientHeight = $state(800);
     
     // Computed positions
@@ -48,6 +53,14 @@
             : 0
     );
     
+    // When following the bottom, compute visible range relative to total height
+    // rather than the raw DOM scrollTop, which lags by a frame/tick on load.
+    let effectiveScrollTop = $derived(
+        follow && totalHeight > clientHeight
+            ? totalHeight - clientHeight
+            : scrollTop
+    );
+    
     // Find visible range using binary search
     let visibleRange = $derived.by(() => {
         if (items.length === 0) return { start: 0, end: -1 };
@@ -60,7 +73,7 @@
         while (low <= high) {
             const mid = Math.floor((low + high) / 2);
             const pos = positions[mid];
-            if (pos && pos.top + pos.height < scrollTop) {
+            if (pos && pos.top + pos.height < effectiveScrollTop) {
                 low = mid + 1;
             } else {
                 high = mid - 1;
@@ -71,7 +84,7 @@
         // Find end
         for (let i = start; i < items.length; i++) {
             const pos = positions[i];
-            if (pos && pos.top > scrollTop + clientHeight + overscan * 100) {
+            if (pos && pos.top > effectiveScrollTop + clientHeight + overscan * 100) {
                 end = i - 1;
                 break;
             }
@@ -117,6 +130,28 @@
         }
     }
     
+    // Authoritative bottom-pin for virtualization. totalHeight is the TRUE
+    // content height (estimated rows included) and updates as real heights are
+    // measured — so pinning to it converges to the true bottom even for rows
+    // not yet rendered. A DOM ResizeObserver on a fixed-height scroll container
+    // never fires on inner growth, which is why scrollHeight-based pinning
+    // intermittently fell short. Only pins while `follow` is on (user hasn't
+    // scrolled up), so it can never fight the user.
+    $effect(() => {
+        // Track the signals that move the bottom.
+        void totalHeight;
+        void items.length;
+        if (!follow || !containerEl) return;
+        // rAF: let padding/layout settle this frame, then pin.
+        requestAnimationFrame(() => {
+            if (!follow || !containerEl) return;
+            const target = totalHeight; // scroll past rendered content
+            if (Math.abs(containerEl.scrollTop + containerEl.clientHeight - target) > 1) {
+                containerEl.scrollTop = target;
+            }
+        });
+    });
+
     // Measure item heights after render
     // FIX: Use ResizeObserver to batch updates instead of one-by-one state triggers
     function measureItem(element: HTMLElement, id: string) {
