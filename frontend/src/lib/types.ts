@@ -25,6 +25,8 @@ export interface FeedEntryLocal {
   entries?: FeedEntryLocal[];
   metadata?: Record<string, unknown>;
   ghostHash?: string;
+  /** Thinking block: provider signalled reasoning is over — timer is final. */
+  thinkingFinalized?: boolean;
   /** Hidden from the user's view only (agent keeps it in context). */
   userHidden?: boolean;
   /** Stubbed out of the agent's context (user still sees it). */

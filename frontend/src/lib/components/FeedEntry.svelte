@@ -653,7 +653,7 @@
             agentName={entry.agentName} 
             estimatedTokens={(entry.metadata as { thinkingTokens?: number } | undefined)?.thinkingTokens}
             defaultExpanded={agentSettingsStore.settings.reasoningExpandedByDefault ?? true}
-            onFreeze={(ms) => wsStore.recordThinkingDuration(entry.id, ms)}
+            finalized={entry.thinkingFinalized ?? false}
           />
       {:else if entry.type === 'tool_result' && viewImagePath(entry.metadata)}
           {@const imgPath = viewImagePath(entry.metadata)!}

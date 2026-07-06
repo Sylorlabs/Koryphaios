@@ -273,6 +273,7 @@ function handleMessage(msg: WSMessage) {
 
     case 'agent.completed':
     case 'stream.complete': {
+      if (isForActiveSession) feedStore.finalizeThinking();
       const p = msg.payload as { agentId: string };
       agentStore.completeAgent(p.agentId, msg.sessionId ?? undefined);
       if (isForActiveSession) feedStore.removeAnalyzingThoughtEntries();
@@ -299,6 +300,8 @@ function handleMessage(msg: WSMessage) {
 
     case 'stream.delta': {
       const p = msg.payload as StreamDeltaPayload;
+      // Answer text starting = the provider is done reasoning: freeze timers.
+      if (isForActiveSession) feedStore.finalizeThinking();
       agentStore.appendAgentContent(p.agentId, p.content, msg.sessionId ?? undefined);
       if (isForActiveSession) {
         feedStore.removeAnalyzingThoughtEntries();
@@ -1145,7 +1148,7 @@ export const wsStore = {
   getAgentThreadFeed: agentStore.getAgentThreadFeed,
   removeEntries: feedStore.removeEntries,
   setEntryVisibility: feedStore.setEntryVisibility,
-  recordThinkingDuration: feedStore.recordThinkingDuration,
+  finalizeThinking: feedStore.finalizeThinking,
   setManagerContextWindow: agentStore.setManagerContextWindow,
   respondToPermission,
   subscribeToSession,

@@ -48,9 +48,9 @@ export interface AgentSettings {
    *  Empty/missing = all available models allowed. */
   managerModelAccess: Record<string, string[]>;
 
-  /** Free-form user notes injected into the manager's system prompt —
-   *  standing guidance that doesn't fit a toggle. */
-  managerNotes: string;
+  /** Per-group user notes injected into the manager's system prompt —
+   *  standing guidance keyed by category (general, frontend, backend, etc.). */
+  managerNotes: Record<string, string>;
 
   /** Critic gate enabled - critic reviews all changes */
   criticGateEnabled: boolean;
@@ -117,7 +117,7 @@ export const DEFAULT_AGENT_SETTINGS: AgentSettings = {
   preferencesEnabled: true,
   allowExternalPaths: false,
   managerModelAccess: {},
-  managerNotes: '',
+  managerNotes: {},
   criticGateEnabled: true,
   criticEnforcesPreferences: true,
   autoApplySafeFixes: false,

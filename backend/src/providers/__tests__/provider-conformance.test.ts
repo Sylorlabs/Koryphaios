@@ -33,6 +33,8 @@ import {
   detectClaudeCodeLogin,
   detectCodexAuthToken,
   detectGrokCLILogin,
+  detectCursorCLILogin,
+  detectDevinCLILogin,
 } from '../auth-utils';
 import type { Provider, ProviderEvent } from '../types';
 import type { ProviderConfig, ProviderName } from '@koryphaios/shared';
@@ -377,6 +379,25 @@ describe('Provider conformance (contract + optional live)', () => {
         result.evidence = 'CLI harness (grok-build provider)';
         result.live = loggedIn ? 'LIVE_PASS' : 'SKIP';
         result.liveDetail = loggedIn ? 'grok CLI logged in' : 'no grok login';
+        results.push(result);
+        continue;
+      }
+
+      if (name === 'devin') {
+        const loggedIn = detectDevinCLILogin();
+        result.evidence = 'CLI harness (devin provider)';
+        result.live = loggedIn ? 'LIVE_PASS' : 'SKIP';
+        result.liveDetail = loggedIn ? 'devin CLI logged in' : 'no devin login';
+        results.push(result);
+        continue;
+      }
+
+      if (name === 'cursor') {
+        // Cursor subscription — `cursor-agent` CLI harness (subprocess, not fetch).
+        const loggedIn = detectCursorCLILogin();
+        result.evidence = 'CLI harness (cursor-agent provider)';
+        result.live = loggedIn ? 'LIVE_PASS' : 'SKIP';
+        result.liveDetail = loggedIn ? 'cursor-agent logged in' : 'no cursor login';
         results.push(result);
         continue;
       }

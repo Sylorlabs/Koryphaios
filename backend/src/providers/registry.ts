@@ -31,6 +31,8 @@ import { CodexProvider } from './codex';
 import { ClaudeCodeProvider } from './claude-code';
 import { GrokBuildProvider } from './grok-build';
 import { AntigravityProvider } from './antigravity';
+import { CursorProvider } from './cursor';
+import { DevinProvider } from './devin';
 import { JulesProvider } from './jules';
 import { BedrockProvider } from './bedrock';
 import { GitLabProvider } from './gitlab';
@@ -42,6 +44,8 @@ import {
   detectClaudeCodeLogin,
   detectGrokCLILogin,
   detectAntigravityCLILogin,
+  detectCursorCLILogin,
+  detectDevinCLILogin,
 } from './auth-utils';
 import { cliAutoEnableCreds } from './cli-detection';
 import { getProviderDisplay } from './provider-display';
@@ -538,6 +542,22 @@ class ProviderRegistry {
           return {
             success: false,
             error: 'Antigravity CLI is not logged in. Install agy and run "agy login".',
+          };
+        }
+        case 'cursor': {
+          // Subscription CLI harness — no API key; the logged-in cursor-agent
+          // binary authenticates itself.
+          if (detectCursorCLILogin()) return { success: true };
+          return {
+            success: false,
+            error: 'Cursor CLI is not logged in. Install cursor-agent and run "cursor-agent login".',
+          };
+        }
+        case 'devin': {
+          if (detectDevinCLILogin()) return { success: true };
+          return {
+            success: false,
+            error: 'Devin CLI is not logged in. Install devin and run "devin auth login".',
           };
         }
         case 'anthropic': {
@@ -1094,6 +1114,12 @@ class ProviderRegistry {
       case 'antigravity':
         // Antigravity subscription — runs the official `agy` CLI harness (no direct API calls).
         return new AntigravityProvider(config);
+      case 'cursor':
+        // Cursor subscription — runs the official `cursor-agent` CLI harness (no API key).
+        return new CursorProvider(config);
+      case 'devin':
+        // Devin subscription — runs Cognition's official `devin` CLI harness (no API key).
+        return new DevinProvider(config);
       case 'jules':
         // Google Jules — cloud async agent (REST API only, remote VMs + GitHub PRs).
         if (config.disabled || !config.apiKey) return null;

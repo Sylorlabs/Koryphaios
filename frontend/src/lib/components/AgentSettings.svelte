@@ -18,7 +18,9 @@
     EyeOff,
     AlertOctagon,
     FlaskConical,
-    Globe
+    Globe,
+    ChevronRight,
+    StickyNote
   } from "lucide-svelte";
 
   // Props
@@ -62,31 +64,46 @@
   function modelsFor(category: string): string[] {
     return agentSettingsStore.settings.managerModelAccess?.[category] ?? [];
   }
-  async function addCategoryModel(category: string, model: string) {
-    if (!model) return;
+  async function toggleCategoryModel(category: string, model: string) {
     const current = modelsFor(category);
-    if (current.includes(model)) return;
+    const next = current.includes(model)
+      ? current.filter((m) => m !== model)
+      : [...current, model];
     await agentSettingsStore.saveSettings({
-      managerModelAccess: { ...agentSettingsStore.settings.managerModelAccess, [category]: [...current, model] },
-    });
-  }
-  async function removeCategoryModel(category: string, model: string) {
-    await agentSettingsStore.saveSettings({
-      managerModelAccess: {
-        ...agentSettingsStore.settings.managerModelAccess,
-        [category]: modelsFor(category).filter((m) => m !== model),
-      },
+      managerModelAccess: { ...agentSettingsStore.settings.managerModelAccess, [category]: next },
     });
   }
 
-  let managerNotesDraft = $state('');
-  let managerNotesDirty = $state(false);
+  const collapsedNotesGroups = $state<Record<string, boolean>>(
+    Object.fromEntries(MODEL_ACCESS_CATEGORIES.map((c) => [c.id, true] as const)) as Record<string, boolean>
+  );
+  const notesDrafts = $state<Record<string, { text: string; dirty: boolean }>>(
+    Object.fromEntries(MODEL_ACCESS_CATEGORIES.map((c) => [c.id, { text: '', dirty: false }] as [string, { text: string; dirty: boolean }])) as Record<string, { text: string; dirty: boolean }>
+  );
   $effect(() => {
-    if (!managerNotesDirty) managerNotesDraft = agentSettingsStore.settings.managerNotes ?? '';
+    const allNotes = (agentSettingsStore.settings.managerNotes ?? {}) as unknown as Record<string, string>;
+    for (const cat of MODEL_ACCESS_CATEGORIES) {
+      if (!notesDrafts[cat.id]?.dirty) {
+        notesDrafts[cat.id] = { text: allNotes[cat.id] ?? '', dirty: false };
+      }
+    }
   });
-  async function saveManagerNotes() {
-    await agentSettingsStore.saveSettings({ managerNotes: managerNotesDraft });
-    managerNotesDirty = false;
+  async function saveGroupNotes(groupId: string) {
+    const draft = notesDrafts[groupId];
+    if (!draft) return;
+    const currentNotes = (agentSettingsStore.settings.managerNotes ?? {}) as unknown as Record<string, string>;
+    const allNotes = { ...currentNotes, [groupId]: draft.text } as unknown as Record<string, string>;
+    await agentSettingsStore.saveSettings({
+      managerNotes: allNotes as any,
+    });
+    notesDrafts[groupId] = { ...draft, dirty: false };
+  }
+  function toggleNotesGroup(groupId: string) {
+    collapsedNotesGroups[groupId] = !collapsedNotesGroups[groupId];
+  }
+  function hasGroupNotes(groupId: string): boolean {
+    const allNotes = (agentSettingsStore.settings.managerNotes ?? {}) as unknown as Record<string, string>;
+    return (allNotes[groupId] ?? '').trim().length > 0;
   }
 
   // Handler helpers
@@ -398,65 +415,92 @@
               </button>
             </section>
 
-            <!-- Manager model access: which models Kory may pick per category -->
+            <!-- Manager model access: checkbox grid per category -->
             <section class="rounded-2xl p-5" style="background: var(--color-surface-2); border: 1px solid var(--color-border);">
               <h4 class="text-sm font-semibold text-[var(--color-text-primary)]">Manager Model Access</h4>
-              <p class="mt-1 text-xs text-[var(--color-text-muted)]">Restrict which models the manager can auto-route to per category. Empty = all enabled models. Your explicit model pick in the composer always wins.</p>
-              <div class="mt-4 space-y-4">
+              <p class="mt-1 text-xs text-[var(--color-text-muted)]">Restrict which models the manager can auto-route to per category. Unchecked = all enabled models. Your explicit model pick in the composer always wins.</p>
+              <div class="mt-4 space-y-5">
                 {#each MODEL_ACCESS_CATEGORIES as cat (cat.id)}
-                  <div>
-                    <div class="flex items-center justify-between mb-1.5">
-                      <span class="text-xs font-medium text-[var(--color-text-secondary)]">{cat.label}</span>
-                      <select
-                        class="input text-[11px] py-1 px-2 max-w-[220px]"
-                        onchange={(e) => { void addCategoryModel(cat.id, (e.currentTarget as HTMLSelectElement).value); (e.currentTarget as HTMLSelectElement).value = ''; }}
-                      >
-                        <option value="">Add model…</option>
-                        {#each availableModels.filter((m) => !modelsFor(cat.id).includes(m)) as m (m)}
-                          <option value={m}>{m}</option>
+                  <div class="rounded-xl p-4" style="background: var(--color-surface-0); border: 1px solid var(--color-border);">
+                    <span class="mb-3 block text-xs font-medium text-[var(--color-text-secondary)]">{cat.label}</span>
+                    {#if availableModels.length === 0}
+                      <span class="text-[10px] text-[var(--color-text-muted)] italic">No enabled models available</span>
+                    {:else}
+                      <div class="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                        {#each availableModels as m (m)}
+                          {@const checked = modelsFor(cat.id).includes(m)}
+                          <label
+                            class="flex cursor-pointer items-center gap-3 rounded-lg px-3 py-2.5 text-xs transition-colors"
+                            style="background: {checked ? 'var(--color-accent)' + '18' : 'var(--color-surface-2)'}; border: 1px solid {checked ? 'var(--color-accent)' + '60' : 'var(--color-border)'};"
+                          >
+                            <input
+                              type="checkbox"
+                              {checked}
+                              onchange={() => void toggleCategoryModel(cat.id, m)}
+                              class="h-4 w-4 shrink-0 rounded accent-[var(--color-accent)]"
+                            />
+                            <span class="min-w-0 truncate font-mono text-[var(--color-text-primary)]">{m}</span>
+                          </label>
                         {/each}
-                      </select>
-                    </div>
-                    <div class="flex flex-wrap gap-1.5">
-                      {#if modelsFor(cat.id).length === 0}
-                        <span class="text-[10px] text-[var(--color-text-muted)] italic">All models allowed</span>
-                      {:else}
-                        {#each modelsFor(cat.id) as m (m)}
-                          <span class="flex items-center gap-1 rounded-full px-2.5 py-1 text-[10px] font-mono" style="background: var(--color-surface-3); color: var(--color-text-primary);">
-                            {m}
-                            <button type="button" class="opacity-60 hover:opacity-100 hover:text-red-400" onclick={() => void removeCategoryModel(cat.id, m)} aria-label={`Remove ${m}`}>×</button>
-                          </span>
-                        {/each}
-                      {/if}
-                    </div>
+                      </div>
+                    {/if}
                   </div>
                 {/each}
               </div>
             </section>
 
-            <!-- Free-form standing guidance for the manager -->
+            <!-- Per-group standing guidance for the manager -->
             <section class="rounded-2xl p-5" style="background: var(--color-surface-2); border: 1px solid var(--color-border);">
-              <div class="flex items-center justify-between">
-                <div>
-                  <h4 class="text-sm font-semibold text-[var(--color-text-primary)]">Notes for the Manager</h4>
-                  <p class="mt-1 text-xs text-[var(--color-text-muted)]">Anything else Kory should always know — injected into every conversation.</p>
-                </div>
-                <button
-                  type="button"
-                  class="rounded-lg px-3 py-1.5 text-xs font-medium transition-colors"
-                  style="background: {managerNotesDirty ? 'var(--color-accent)' : 'var(--color-surface-3)'}; color: {managerNotesDirty ? 'var(--color-surface-0)' : 'var(--color-text-muted)'};"
-                  onclick={() => void saveManagerNotes()}
-                >
-                  {managerNotesDirty ? 'Save' : 'Saved'}
-                </button>
+              <div class="flex items-center gap-2">
+                <StickyNote size={16} style="color: var(--color-accent);" />
+                <h4 class="text-sm font-semibold text-[var(--color-text-primary)]">Notes for the Manager</h4>
               </div>
-              <textarea
-                class="mt-3 w-full min-h-[110px] rounded-xl p-3 text-xs font-mono resize-y focus:outline-none"
-                style="background: var(--color-surface-0); color: var(--color-text-primary); border: 1px solid var(--color-border);"
-                placeholder="e.g. Prefer bun over npm. Never touch the legacy/ folder. Answer in short paragraphs."
-                bind:value={managerNotesDraft}
-                oninput={() => (managerNotesDirty = true)}
-              ></textarea>
+              <p class="mt-1 text-xs text-[var(--color-text-muted)]">Per-group standing guidance injected into every conversation. Expand a group to edit its notes.</p>
+              <div class="mt-4 space-y-2">
+                {#each MODEL_ACCESS_CATEGORIES as cat (cat.id)}
+                  {@const collapsed = collapsedNotesGroups[cat.id] ?? true}
+                  {@const draft = notesDrafts[cat.id] ?? { text: '', dirty: false }}
+                  <div class="rounded-xl overflow-hidden" style="background: var(--color-surface-0); border: 1px solid var(--color-border);">
+                    <button
+                      type="button"
+                      class="flex w-full items-center justify-between gap-3 px-4 py-3 text-left transition-colors hover:bg-[var(--color-surface-1)]"
+                      onclick={() => toggleNotesGroup(cat.id)}
+                    >
+                      <span class="text-xs font-medium text-[var(--color-text-primary)]">{cat.label}</span>
+                      <div class="flex items-center gap-2">
+                        {#if draft.dirty}
+                          <span class="rounded-full px-2 py-0.5 text-[10px] font-medium" style="background: var(--color-accent); color: var(--color-surface-0);">unsaved</span>
+                        {/if}
+                        {#if hasGroupNotes(cat.id)}
+                          <span class="rounded-full px-2 py-0.5 text-[10px]" style="background: var(--color-success); color: var(--color-surface-0);">has notes</span>
+                        {/if}
+                        <ChevronRight size={14} class="text-[var(--color-text-muted)] transition-transform {collapsed ? '' : 'rotate-90'}" />
+                      </div>
+                    </button>
+                    {#if !collapsed}
+                      <div class="border-t border-[var(--color-border)] px-4 py-3">
+                        <textarea
+                          class="w-full min-h-[100px] rounded-lg p-3 text-xs font-mono resize-y focus:outline-none"
+                          style="background: var(--color-surface-2); color: var(--color-text-primary); border: 1px solid var(--color-border);"
+                          placeholder="e.g. Prefer bun over npm. Never touch the legacy/ folder."
+                          value={draft.text}
+                          oninput={(e) => { notesDrafts[cat.id] = { text: e.currentTarget.value, dirty: true }; }}
+                        ></textarea>
+                        <div class="mt-2 flex justify-end">
+                          <button
+                            type="button"
+                            class="rounded-lg px-3 py-1.5 text-xs font-medium transition-colors"
+                            style="background: {draft.dirty ? 'var(--color-accent)' : 'var(--color-surface-3)'}; color: {draft.dirty ? 'var(--color-surface-0)' : 'var(--color-text-muted)'};"
+                            onclick={() => void saveGroupNotes(cat.id)}
+                          >
+                            {draft.dirty ? 'Save' : 'Saved'}
+                          </button>
+                        </div>
+                      </div>
+                    {/if}
+                  </div>
+                {/each}
+              </div>
             </section>
           </div>
         </div>

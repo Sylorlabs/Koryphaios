@@ -16,11 +16,12 @@
   let searchQuery = $state('');
   let localSelected = $state<string[]>([]);
   let dontAskAgain = $state(false);
+  let initialized = $state(false);
 
-  // Initialize and sync local selection
   $effect(() => {
-    if ((availableModels || []).length > 0 && localSelected.length === 0) {
+    if (!initialized && (availableModels || []).length > 0) {
       localSelected = (selectedModels || []).length > 0 ? [...(selectedModels || [])] : (availableModels || []).map(m => m.id);
+      initialized = true;
     }
   });
 

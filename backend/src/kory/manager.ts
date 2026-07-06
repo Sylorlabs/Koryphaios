@@ -75,7 +75,11 @@ import { getModeManager } from '../mode';
 import type { WorkerPipelineConfig } from './services/WorkerPipelineService';
 import type { UIMode } from '@koryphaios/shared';
 import { collaborationManager } from '../collaboration/manager';
-import { setCollaborationToolPolicy, clearCollaborationToolPolicy, type CollaborationToolPolicy } from '../collaboration/tool-policy';
+import {
+  setCollaborationToolPolicy,
+  clearCollaborationToolPolicy,
+  type CollaborationToolPolicy,
+} from '../collaboration/tool-policy';
 
 // ─── Internal Types ─────────────────────────────────────────────────────────
 
@@ -136,7 +140,6 @@ for (const [domain, modelId] of Object.entries(DOMAIN.DEFAULT_MODELS)) {
 }
 
 // ─── Clarification Gate ─────────────────────────────────────────────────────
-
 
 // ─── Kory Identity ──────────────────────────────────────────────────────────
 
@@ -275,7 +278,10 @@ export class KoryManager {
           `${e.status} with exit code ${e.exitCode ?? 'unknown'}.` +
           (e.logsTail ? `\nRecent output:\n${e.logsTail}` : '') +
           `\nReview the result (shell_manage logs id=${e.id} for full output), fix anything broken, or summarize for the user.`;
-        this.emitWSMessage(e.sessionId, 'agent.status', { agentId: KORY_IDENTITY.id, status: 'thinking' });
+        this.emitWSMessage(e.sessionId, 'agent.status', {
+          agentId: KORY_IDENTITY.id,
+          status: 'thinking',
+        });
         void this.handleDirectly(e.sessionId, summary, undefined, undefined).catch((err) =>
           koryLog.warn({ err, sessionId: e.sessionId }, 'Background-process wake-up failed'),
         );
@@ -434,26 +440,31 @@ export class KoryManager {
     try {
       const stream = provider.streamResponse({
         model: routing.model,
-        systemPrompt: 'You are helping route an inquiry. You must call exactly one tool to indicate your choice.',
+        systemPrompt:
+          'You are helping route an inquiry. You must call exactly one tool to indicate your choice.',
         messages: [{ role: 'user', content: question }],
-        tools: [{
-          name: 'route_inquiry',
-          description: 'Route the inquiry',
-          inputSchema: {
-            type: 'object',
-            properties: { decision: { type: 'string', enum: ['WEB_SEARCH', 'ANSWER'] } },
-            required: ['decision']
-          }
-        }],
+        tools: [
+          {
+            name: 'route_inquiry',
+            description: 'Route the inquiry',
+            inputSchema: {
+              type: 'object',
+              properties: { decision: { type: 'string', enum: ['WEB_SEARCH', 'ANSWER'] } },
+              required: ['decision'],
+            },
+          },
+        ],
         maxTokens: 50,
       });
 
       for await (const event of stream) {
         if (event.type === 'tool_use_stop' && event.toolName === 'route_inquiry') {
-           try {
-             const args = JSON.parse(event.toolInput || '{}');
-             if (args.decision) decision = args.decision;
-           } catch { /* default to ANSWER */ }
+          try {
+            const args = JSON.parse(event.toolInput || '{}');
+            if (args.decision) decision = args.decision;
+          } catch {
+            /* default to ANSWER */
+          }
         }
       }
     } catch (err) {
@@ -545,7 +556,14 @@ export class KoryManager {
       }, AGENT.PROCESS_TASK_TIMEOUT_MS);
 
       try {
-        await this.handleDirectly(sessionId, userMessage, reasoningLevel, preferredModel, attachments, responseVariant);
+        await this.handleDirectly(
+          sessionId,
+          userMessage,
+          reasoningLevel,
+          preferredModel,
+          attachments,
+          responseVariant,
+        );
       } finally {
         clearTimeout(processTimeout);
       }
@@ -576,20 +594,35 @@ export class KoryManager {
     prompt?: string,
     preferCheap?: boolean,
   ): { model: string; provider: ProviderName | undefined } {
-    const routed = this.routing.resolveActiveRouting(preferredModel, domain, avoidLegacy, prompt, preferCheap);
+    const routed = this.routing.resolveActiveRouting(
+      preferredModel,
+      domain,
+      avoidLegacy,
+      prompt,
+      preferCheap,
+    );
     // User-configured per-category allowlist: when set for this domain, the
     // manager may only use those models. An explicit user model pick wins.
     if (!preferredModel || preferredModel === 'auto') {
       try {
-        const { loadAgentSettings } = require('../agent-settings') as typeof import('../agent-settings');
+        const { loadAgentSettings } =
+          require('../agent-settings') as typeof import('../agent-settings');
         const allowed = loadAgentSettings(this.workingDirectory).managerModelAccess?.[domain];
         if (allowed?.length && !allowed.includes(routed.model)) {
           for (const candidate of allowed) {
-            const alt = this.routing.resolveActiveRouting(candidate, domain, avoidLegacy, prompt, preferCheap);
+            const alt = this.routing.resolveActiveRouting(
+              candidate,
+              domain,
+              avoidLegacy,
+              prompt,
+              preferCheap,
+            );
             if (this.providers.resolveProvider(alt.model, alt.provider)) return alt;
           }
         }
-      } catch { /* settings unavailable — use the routed default */ }
+      } catch {
+        /* settings unavailable — use the routed default */
+      }
     }
     return routed;
   }
@@ -821,7 +854,10 @@ export class KoryManager {
       domain: 'critic',
       glowColor: DOMAIN.GLOW_COLORS.critic,
     };
-    this.emitWSMessage(sessionId, 'agent.spawned', { agent: identity, task: 'Review delegated work' });
+    this.emitWSMessage(sessionId, 'agent.spawned', {
+      agent: identity,
+      task: 'Review delegated work',
+    });
     const criticAbort = new AbortController();
     const criticSessionWd = await this.resolveSessionWorkingDirectory(sessionId);
     const criticCtx: ToolContext = {
@@ -860,7 +896,8 @@ export class KoryManager {
     }
 
     const lastContent =
-      [...thread.threadEntries].reverse().find((entry) => entry.role === 'assistant')?.content ?? '';
+      [...thread.threadEntries].reverse().find((entry) => entry.role === 'assistant')?.content ??
+      '';
     const passed = parseCriticVerdict(lastContent);
     return { passed, feedback: lastContent.trim() };
   }
@@ -954,10 +991,10 @@ export class KoryManager {
 
       const history = await this.loadHistory(sessionId);
       koryLog.debug({ historyCount: history.length }, 'Loaded history');
-      
+
       let finalContent: string | import('../providers/types').ProviderContentBlock[] = userMessage;
       if (attachments && attachments.length > 0) {
-        const imageAttachments = attachments.filter(a => a.type === 'image');
+        const imageAttachments = attachments.filter((a) => a.type === 'image');
         if (imageAttachments.length > 0) {
           finalContent = [
             { type: 'text', text: userMessage },
@@ -972,7 +1009,7 @@ export class KoryManager {
                 imageData: att.data,
                 imageMimeType: mime,
               };
-            })
+            }),
           ];
         }
       }
@@ -1052,9 +1089,10 @@ export class KoryManager {
                   id: nanoid(12),
                   sessionId,
                   role: 'assistant',
-                  content: selection === '__timeout__'
-                    ? '[Timed out waiting for user response.]'
-                    : '[Cancelled by user.]',
+                  content:
+                    selection === '__timeout__'
+                      ? '[Timed out waiting for user response.]'
+                      : '[Cancelled by user.]',
                   model: routing.model,
                   provider: providerName,
                   createdAt: Date.now(),
@@ -1094,9 +1132,7 @@ export class KoryManager {
               content: JSON.stringify(cappedResult),
               tool_call_id: tc.id,
             };
-            if (archiveId)
-
-              Object.assign(toolMsg, { archiveId, archiveTurn: turnCount });
+            if (archiveId) Object.assign(toolMsg, { archiveId, archiveTurn: turnCount });
             messages.push(toolMsg);
             const visionMsg = this.buildViewImageMessage(toolResult);
             if (visionMsg) messages.push(visionMsg);
@@ -1115,12 +1151,15 @@ export class KoryManager {
       );
       const lastAssistant = assistants.pop();
       const rawContent = lastAssistant?.content ?? '';
-      const content = (typeof rawContent === 'string' ? rawContent : JSON.stringify(rawContent)).trim();
+      const content = (
+        typeof rawContent === 'string' ? rawContent : JSON.stringify(rawContent)
+      ).trim();
 
       // No silent stops: if the model returned nothing user-visible (no streamed text, no
       // tools), say so live instead of leaving the user staring at a finished spinner.
       const emptyResponse = !stoppedByUser && !streamedAnyContent && !executedAnyTool && !content;
-      const EMPTY_NOTICE = 'The model returned an empty response. Please resend or rephrase your request.';
+      const EMPTY_NOTICE =
+        'The model returned an empty response. Please resend or rephrase your request.';
       if (emptyResponse) {
         this.emitWSMessage(sessionId, 'system.info', {
           message: EMPTY_NOTICE,
@@ -1243,8 +1282,6 @@ export class KoryManager {
     }
   }
 
-
-
   private async processManagerTurn(
     sessionId: string,
     modelId: string,
@@ -1261,8 +1298,12 @@ export class KoryManager {
     const settings = loadAgentSettings(this.workingDirectory);
 
     let systemPrompt = KORY_SYSTEM_PROMPT;
-    if (settings.managerNotes?.trim()) {
-      systemPrompt += `\n\n## User Notes (standing guidance)\n${settings.managerNotes.trim()}`;
+    const notesEntries = Object.entries(settings.managerNotes ?? {}).filter(([, v]) => v?.trim());
+    if (notesEntries.length > 0) {
+      const notesSections = notesEntries
+        .map(([group, text]) => `### ${group}\n${text.trim()}`)
+        .join('\n\n');
+      systemPrompt += `\n\n## User Notes (standing guidance)\n${notesSections}`;
     }
     // Chars contributed by injected memory/notes — tracked separately so the
     // context-usage bar can show memory as its own segment.
@@ -1299,14 +1340,12 @@ export class KoryManager {
     if (!this.isJulesAvailable()) {
       tools = tools.filter((t) => t.name !== 'delegate_to_jules');
     } else {
-      systemPrompt +=
-        `\n\n• JULES (cloud): delegate_to_jules sends work to Google Jules — remote VMs, async, may take minutes, produces PRs. Never substitute for local tools on quick edits.\n• ${JULES_SYNC_INSTRUCTIONS}`;
+      systemPrompt += `\n\n• JULES (cloud): delegate_to_jules sends work to Google Jules — remote VMs, async, may take minutes, produces PRs. Never substitute for local tools on quick edits.\n• ${JULES_SYNC_INSTRUCTIONS}`;
     }
 
     if (provider.name === 'jules') {
       const julesMeta = getProviderDisplay('jules');
-      systemPrompt +=
-        `\n\n• You are chatting through Jules (cloud provider). All code changes happen on Google's remote infrastructure and GitHub — not in this local workspace until synced.\n• ${julesMeta?.managerHint ?? JULES_SYNC_INSTRUCTIONS}`;
+      systemPrompt += `\n\n• You are chatting through Jules (cloud provider). All code changes happen on Google's remote infrastructure and GitHub — not in this local workspace until synced.\n• ${julesMeta?.managerHint ?? JULES_SYNC_INSTRUCTIONS}`;
     }
 
     // Agent execution mode (the composer pill, persisted in agent settings): gate delegation.
@@ -1315,7 +1354,9 @@ export class KoryManager {
     //  • auto   → Kory decides per-task (default)
     const execMode = settings.agentExecutionMode ?? 'auto';
     if (execMode === 'single') {
-      tools = tools.filter((t) => t.name !== 'delegate_to_worker' && t.name !== 'delegate_to_jules');
+      tools = tools.filter(
+        (t) => t.name !== 'delegate_to_worker' && t.name !== 'delegate_to_jules',
+      );
       systemPrompt +=
         '\n\n• AGENT MODE: SOLO — Do NOT delegate. Complete the entire task yourself; delegate_to_worker and delegate_to_jules are unavailable this turn.';
     } else if (execMode === 'multi') {
@@ -1409,11 +1450,7 @@ export class KoryManager {
               : '',
           )
         : reasoningLevel;
-    const normalizedReasoning = normalizeReasoningLevel(
-      provider.name,
-      modelId,
-      resolvedReasoning,
-    );
+    const normalizedReasoning = normalizeReasoningLevel(provider.name, modelId, resolvedReasoning);
 
     const streamSignal = withTimeoutSignal(signal, AGENT.LLM_STREAM_TIMEOUT_MS);
     const stream = this.providers.executeWithRetry(
@@ -1440,135 +1477,152 @@ export class KoryManager {
     let tokensOut = 0;
 
     try {
-    for await (const event of stream) {
-      // On user stop, keep everything accumulated so far — breaking (instead of
-      // throwing) lets the partial response flow into `messages` and get
-      // persisted. Throwing here erased the user's proof-of-work on Stop.
-      if (signal?.aborted) break;
-      if (event.type === 'error') {
-        throw new Error(event.error ?? 'LLM stream error');
-      }
-      if (event.type === 'content_delta') {
-        const delta = event.content ?? '';
-        assistantContent += delta;
-        // Stream live, token-by-token — so the user sees text appear immediately (no
-        // "thinks then dumps" pause) and partial output survives a mid-stream error.
-        if (delta) {
-          this.emitWSMessage(sessionId, 'stream.delta', {
-            agentId: KORY_IDENTITY.id,
-            content: delta,
-            model: modelId,
-          });
+      for await (const event of stream) {
+        // On user stop, keep everything accumulated so far — breaking (instead of
+        // throwing) lets the partial response flow into `messages` and get
+        // persisted. Throwing here erased the user's proof-of-work on Stop.
+        if (signal?.aborted) break;
+        if (event.type === 'error') {
+          throw new Error(event.error ?? 'LLM stream error');
         }
-      } else if (event.type === 'thinking_delta') {
-        if (event.thinking || typeof event.thinkingTokens === 'number') {
-          this.emitWSMessage(sessionId, 'stream.thinking', {
-            agentId: KORY_IDENTITY.id,
-            thinking: event.thinking ?? '',
-            ...(typeof event.thinkingTokens === 'number'
-              ? { thinkingTokens: event.thinkingTokens }
-              : {}),
-          } satisfies StreamThinkingPayload);
-        }
-      } else if (event.type === 'file_edit') {
-        // Agentic provider (claude-code) already wrote the file — surface it in the live
-        // diff preview (it's done, not a tool for us to execute).
-        if (event.filePath) {
-          this.streamAgentFileEdit(ctx, event.filePath, event.fileContent ?? '', event.fileOperation ?? 'edit', event.fileOldContent);
-          // Archive the edit so fetch_context can recall exactly what was written.
-          await getContextArchive()?.record(
-            sessionId,
-            'file_edit',
-            `${event.fileOperation ?? 'edit'} ${event.filePath}`,
-            event.fileContent ?? '',
-          );
-        }
-      } else if (event.type === 'tool_executed') {
-        // Agentic provider already ran a non-file tool — surface it in the tool feed.
-        const callId = `agent-${nanoid(8)}`;
-        // CLI-native background command (Claude Code's Bash run_in_background):
-        // register it so the background-terminals UI tracks it with live logs.
-        const bgMatch = /running in background with ID:\s*(\S+?)\.[\s\S]*?written to:\s*(\S+?\.output)/i.exec(
-          event.toolOutput ?? '',
-        );
-        if (bgMatch) {
-          let bgCommand = event.toolName ?? 'background command';
-          try {
-            const input = JSON.parse(event.toolInput ?? '{}') as { command?: string };
-            if (input.command) bgCommand = input.command;
-          } catch {
-            /* keep tool name */
+        if (event.type === 'content_delta') {
+          const delta = event.content ?? '';
+          assistantContent += delta;
+          // Stream live, token-by-token — so the user sees text appear immediately (no
+          // "thinks then dumps" pause) and partial output survives a mid-stream error.
+          if (delta) {
+            this.emitWSMessage(sessionId, 'stream.delta', {
+              agentId: KORY_IDENTITY.id,
+              content: delta,
+              model: modelId,
+            });
           }
-          void processSupervisor
-            .registerExternal({
-              name: `cli:${bgMatch[1]}`,
-              command: bgCommand,
+        } else if (event.type === 'thinking_delta') {
+          if (event.thinking || typeof event.thinkingTokens === 'number') {
+            this.emitWSMessage(sessionId, 'stream.thinking', {
+              agentId: KORY_IDENTITY.id,
+              thinking: event.thinking ?? '',
+              ...(typeof event.thinkingTokens === 'number'
+                ? { thinkingTokens: event.thinkingTokens }
+                : {}),
+            } satisfies StreamThinkingPayload);
+          }
+        } else if (event.type === 'file_edit') {
+          // Agentic provider (claude-code) already wrote the file — surface it in the live
+          // diff preview (it's done, not a tool for us to execute).
+          if (event.filePath) {
+            this.streamAgentFileEdit(
+              ctx,
+              event.filePath,
+              event.fileContent ?? '',
+              event.fileOperation ?? 'edit',
+              event.fileOldContent,
+            );
+            // Archive the edit so fetch_context can recall exactly what was written.
+            await getContextArchive()?.record(
               sessionId,
-              outputFile: bgMatch[2],
-            })
-            .catch(() => {});
-        }
-        const agenticArchiveId = await getContextArchive()?.record(
-          sessionId,
-          'tool_result',
-          `${event.toolName ?? 'tool'} ${(event.toolInput ?? '').slice(0, 140)}`,
-          event.toolOutput ?? '',
-        );
-        this.emitWSMessage(sessionId, 'stream.tool_call', {
-          agentId: KORY_IDENTITY.id,
-          sourceProvider: provider.name,
-          toolCall: { id: callId, name: event.toolName ?? 'tool', input: safeParseJson(event.toolInput) },
-        });
-        this.emitWSMessage(sessionId, 'stream.tool_result', {
-          agentId: KORY_IDENTITY.id,
-          sourceProvider: provider.name,
-          toolResult: { callId, name: event.toolName ?? 'tool', output: event.toolOutput ?? '', isError: event.isError === true, durationMs: 0, ...(agenticArchiveId ? { archiveId: agenticArchiveId } : {}) },
-        });
-      } else if (event.type === 'usage_update') {
-        // Cached prompt tokens still occupy the context window — fold them in
-        // so the context bar reflects real occupancy, not just billed input.
-        if (typeof event.tokensIn === 'number')
-          tokensIn = Math.max(tokensIn, event.tokensIn + (event.tokensCache ?? 0));
-        if (typeof event.tokensOut === 'number') tokensOut = Math.max(tokensOut, event.tokensOut);
-        this.emitUsageUpdate(
-          sessionId,
-          KORY_IDENTITY.id,
-          modelId,
-          provider.name,
-          tokensIn,
-          tokensOut,
-          true,
-          contextBreakdown,
-        );
-      } else if (event.type === 'tool_use_start') {
-        hasToolCalls = true;
-        pendingToolCalls.set(event.toolCallId!, { name: event.toolName!, input: '' });
-        this.emitWSMessage(sessionId, 'stream.tool_call', {
-          agentId: KORY_IDENTITY.id,
-          toolCall: { id: event.toolCallId, name: event.toolName, input: {} },
-        });
-      } else if (event.type === 'tool_use_delta') {
-        const tc = pendingToolCalls.get(event.toolCallId!);
-        if (tc) tc.input += event.toolInput ?? '';
-      } else if (event.type === 'tool_use_stop') {
-        const call = pendingToolCalls.get(event.toolCallId!);
-        if (call) {
-          let parsedInput = {};
-          try {
-            parsedInput = JSON.parse(call.input || '{}');
-          } catch {
-            /* Expected: malformed tool input JSON, defaults to {} */
+              'file_edit',
+              `${event.fileOperation ?? 'edit'} ${event.filePath}`,
+              event.fileContent ?? '',
+            );
           }
-          completedToolCalls.push({ id: event.toolCallId!, name: call.name, input: parsedInput });
-          pendingToolCalls.delete(event.toolCallId!);
+        } else if (event.type === 'tool_executed') {
+          // Agentic provider already ran a non-file tool — surface it in the tool feed.
+          const callId = `agent-${nanoid(8)}`;
+          // CLI-native background command (Claude Code's Bash run_in_background):
+          // register it so the background-terminals UI tracks it with live logs.
+          const bgMatch =
+            /running in background with ID:\s*(\S+?)\.[\s\S]*?written to:\s*(\S+?\.output)/i.exec(
+              event.toolOutput ?? '',
+            );
+          if (bgMatch) {
+            let bgCommand = event.toolName ?? 'background command';
+            try {
+              const input = JSON.parse(event.toolInput ?? '{}') as { command?: string };
+              if (input.command) bgCommand = input.command;
+            } catch {
+              /* keep tool name */
+            }
+            void processSupervisor
+              .registerExternal({
+                name: `cli:${bgMatch[1]}`,
+                command: bgCommand,
+                sessionId,
+                outputFile: bgMatch[2],
+              })
+              .catch(() => {});
+          }
+          const agenticArchiveId = await getContextArchive()?.record(
+            sessionId,
+            'tool_result',
+            `${event.toolName ?? 'tool'} ${(event.toolInput ?? '').slice(0, 140)}`,
+            event.toolOutput ?? '',
+          );
+          this.emitWSMessage(sessionId, 'stream.tool_call', {
+            agentId: KORY_IDENTITY.id,
+            sourceProvider: provider.name,
+            toolCall: {
+              id: callId,
+              name: event.toolName ?? 'tool',
+              input: safeParseJson(event.toolInput),
+            },
+          });
+          this.emitWSMessage(sessionId, 'stream.tool_result', {
+            agentId: KORY_IDENTITY.id,
+            sourceProvider: provider.name,
+            toolResult: {
+              callId,
+              name: event.toolName ?? 'tool',
+              output: event.toolOutput ?? '',
+              isError: event.isError === true,
+              durationMs: 0,
+              ...(agenticArchiveId ? { archiveId: agenticArchiveId } : {}),
+            },
+          });
+        } else if (event.type === 'usage_update') {
+          // Cached prompt tokens still occupy the context window — fold them in
+          // so the context bar reflects real occupancy, not just billed input.
+          if (typeof event.tokensIn === 'number')
+            tokensIn = Math.max(tokensIn, event.tokensIn + (event.tokensCache ?? 0));
+          if (typeof event.tokensOut === 'number') tokensOut = Math.max(tokensOut, event.tokensOut);
+          this.emitUsageUpdate(
+            sessionId,
+            KORY_IDENTITY.id,
+            modelId,
+            provider.name,
+            tokensIn,
+            tokensOut,
+            true,
+            contextBreakdown,
+          );
+        } else if (event.type === 'tool_use_start') {
+          hasToolCalls = true;
+          pendingToolCalls.set(event.toolCallId!, { name: event.toolName!, input: '' });
+          this.emitWSMessage(sessionId, 'stream.tool_call', {
+            agentId: KORY_IDENTITY.id,
+            toolCall: { id: event.toolCallId, name: event.toolName, input: {} },
+          });
+        } else if (event.type === 'tool_use_delta') {
+          const tc = pendingToolCalls.get(event.toolCallId!);
+          if (tc) tc.input += event.toolInput ?? '';
+        } else if (event.type === 'tool_use_stop') {
+          const call = pendingToolCalls.get(event.toolCallId!);
+          if (call) {
+            let parsedInput = {};
+            try {
+              parsedInput = JSON.parse(call.input || '{}');
+            } catch {
+              /* Expected: malformed tool input JSON, defaults to {} */
+            }
+            completedToolCalls.push({ id: event.toolCallId!, name: call.name, input: parsedInput });
+            pendingToolCalls.delete(event.toolCallId!);
+          }
         }
       }
-    }
     } catch (err) {
       // Provider streams can throw on abort (fetch AbortError) — salvage the
       // partial response instead of discarding the turn. Real errors rethrow.
-      const aborted =
-        signal?.aborted || (err instanceof DOMException && err.name === 'AbortError');
+      const aborted = signal?.aborted || (err instanceof DOMException && err.name === 'AbortError');
       if (!aborted) throw err;
     }
 
@@ -1618,7 +1672,13 @@ export class KoryManager {
 
     if (!content || content.length < 200) {
       // Tiny edits: not worth animating.
-      ctx.emitFileEdit?.({ path, delta: content, totalLength: content.length, operation, ...firstDelta });
+      ctx.emitFileEdit?.({
+        path,
+        delta: content,
+        totalLength: content.length,
+        operation,
+        ...firstDelta,
+      });
       ctx.emitFileComplete?.({ path, totalLines: content.split('\n').length, operation });
     } else {
       const steps = Math.max(4, Math.min(30, Math.round(REVEAL_MS / MIN_STEP_MS)));
@@ -1685,7 +1745,11 @@ export class KoryManager {
         `Allow agent to ${summary}?`,
         ['Allow', 'Deny'],
       );
-      if (selection === '__timeout__' || selection.includes('Deny') || selection.includes('Cancel')) {
+      if (
+        selection === '__timeout__' ||
+        selection.includes('Deny') ||
+        selection.includes('Cancel')
+      ) {
         return {
           callId: tc.id,
           name: tc.name,
@@ -1951,14 +2015,20 @@ export class KoryManager {
     }
   }
 
-
   /** After a successful view_image call, attach the actual image bytes to the
    *  conversation as an image content block so vision-capable models can see
    *  it (the tool result itself carries only a small JSON descriptor). */
-  private buildViewImageMessage(toolResult: { name: string; output: string; isError: boolean }): InternalMessage | null {
+  private buildViewImageMessage(toolResult: {
+    name: string;
+    output: string;
+    isError: boolean;
+  }): InternalMessage | null {
     if (toolResult.name !== 'view_image' || toolResult.isError) return null;
     try {
-      const { path, mimeType } = JSON.parse(toolResult.output) as { path?: string; mimeType?: string };
+      const { path, mimeType } = JSON.parse(toolResult.output) as {
+        path?: string;
+        mimeType?: string;
+      };
       if (!path || !mimeType) return null;
       const { readFileSync } = require('node:fs') as typeof import('node:fs');
       const imageData = readFileSync(path).toString('base64');

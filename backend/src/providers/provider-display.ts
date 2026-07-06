@@ -34,6 +34,20 @@ export const PROVIDER_DISPLAY: Partial<Record<ProviderName, ProviderDisplayMeta>
     description:
       'Runs the official agy CLI on your machine. Install agy, run "agy login", then click Auth — credentials stay in the CLI.',
   },
+  cursor: {
+    label: 'Cursor',
+    iconPath: '/provider-icons/lobehub/cursor.svg',
+    deployment: 'local',
+    description:
+      'Runs the official cursor-agent CLI on your machine. Install cursor-agent and run "cursor-agent login" — no API key needed.',
+  },
+  devin: {
+    label: 'Devin',
+    iconPath: '/provider-icons/lobehub/windsurf.svg',
+    deployment: 'local',
+    description:
+      'Runs Cognition\'s official devin CLI on your machine (cloud-backed). Install devin and run "devin auth login" — no API key needed.',
+  },
   jules: {
     label: 'Google Jules',
     iconPath: '/provider-icons/jules.svg',

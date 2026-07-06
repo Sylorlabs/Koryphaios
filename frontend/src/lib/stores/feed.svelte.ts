@@ -130,9 +130,14 @@ function accumulateFeedEntry(entry: Omit<FeedEntry, 'id'>) {
       updates.thinkingStartedAt = entry.timestamp;
     }
     // Redacted-thinking progress (token estimates) rides in metadata and must
-    // keep updating as new deltas land.
+    // keep updating as new deltas land — monotonically (provider estimates can
+    // arrive out of order; the display must never count down).
     if (entry.metadata && Object.keys(entry.metadata).length > 0) {
-      updates.metadata = { ...last.metadata, ...entry.metadata };
+      const merged = { ...last.metadata, ...entry.metadata } as Record<string, unknown>;
+      const prevTok = (last.metadata as { thinkingTokens?: number } | undefined)?.thinkingTokens ?? 0;
+      const nextTok = (entry.metadata as { thinkingTokens?: number }).thinkingTokens ?? 0;
+      if (prevTok || nextTok) merged.thinkingTokens = Math.max(prevTok, nextTok);
+      updates.metadata = merged;
     }
 
     Object.assign(last, updates);
@@ -190,15 +195,21 @@ function addClientError(text: string) {
   });
 }
 
-/** Persist the client-observed thinking duration — monotonic max, so a
- *  virtual-list remount can never show a smaller number than the user saw. */
-function recordThinkingDuration(id: string, ms: number) {
-  const entry = feed.find((e) => e.id === id);
-  if (!entry || ms <= (entry.durationMs ?? 0)) return;
-  entry.durationMs = ms;
-  feed = [...feed];
-  feedVersion++;
-  rebuildGroupedFeedCache();
+/** Provider signalled reasoning is over (content started / turn completed):
+ *  freeze every live thinking block at its exact server-computed duration. */
+function finalizeThinking() {
+  let changed = false;
+  for (const e of feed) {
+    if (e.type === 'thinking' && !e.thinkingFinalized) {
+      e.thinkingFinalized = true;
+      changed = true;
+    }
+  }
+  if (changed) {
+    feed = [...feed];
+    feedVersion++;
+    rebuildGroupedFeedCache();
+  }
 }
 
 /** Toggle entry visibility flags (user-hide is UI-only; agent-hide is set after the API call). */
@@ -495,7 +506,7 @@ export const feedStore = {
   addClientError,
   removeEntries,
   setEntryVisibility,
-  recordThinkingDuration,
+  finalizeThinking,
   removeContentEntriesForAgent,
   clearFeed,
   loadSessionMessages,

@@ -55,6 +55,13 @@ export function createGrokCLIAuthMarker(): string {
   return `${GROK_CLI_AUTH_PREFIX}${Date.now()}`;
 }
 
+export function isCursorCLIAuthMarker(value: string | null | undefined): boolean {
+  return value === 'cursor-cli-session';
+}
+export function createCursorCLIAuthMarker(): string {
+  return 'cursor-cli-session';
+}
+
 export function isAntigravityCLIAuthMarker(value: string | null | undefined): boolean {
   return typeof value === 'string' && value.startsWith(ANTIGRAVITY_CLI_AUTH_PREFIX);
 }
@@ -344,6 +351,20 @@ export function detectGrokCLILogin(): boolean {
  * Detects whether the Cursor CLI (cursor-agent) is logged in: a CURSOR_API_KEY in the
  * environment or stored auth in ~/.cursor/cli-config.json (the `authInfo` block).
  */
+export function detectDevinCLILogin(): boolean {
+  if (process.env.COGNITION_API_KEY?.trim() || process.env.DEVIN_API_KEY?.trim()) return true;
+  const home = homeDir();
+  if (!home) return false;
+  // Credentials file written by `devin auth login`.
+  return existsSync(join(home, '.local', 'share', 'devin', 'credentials.toml'));
+}
+export function isDevinCLIAuthMarker(value: string | null | undefined): boolean {
+  return value === 'devin-cli-session';
+}
+export function createDevinCLIAuthMarker(): string {
+  return 'devin-cli-session';
+}
+
 export function detectCursorCLILogin(): boolean {
   if (process.env.CURSOR_API_KEY?.trim()) return true;
   const home = homeDir();

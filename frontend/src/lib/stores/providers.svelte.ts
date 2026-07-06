@@ -108,7 +108,10 @@ export const browserAuthProviders = new Set([
   'claude',
   'grok',
   'antigravity',
-  'google',
+  // NOTE: plain 'google' is the AI Studio / Gemini API-KEY provider — it must
+  // NOT use the gcloud browser-OAuth flow (that flow dead-ends with an auth
+  // code and no field to paste it). Only 'google-subscription' (Gemini CLI
+  // OAuth) is a real browser-auth provider.
   'google-subscription',
 ]);
 

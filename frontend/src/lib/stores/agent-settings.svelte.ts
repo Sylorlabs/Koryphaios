@@ -24,7 +24,7 @@ export interface AgentSettings {
   autoRunTools: boolean;
   allowExternalPaths: boolean;
   managerModelAccess: Record<string, string[]>;
-  managerNotes: string;
+  managerNotes: Record<string, string>;
   agentMemoryEnabled: boolean;
   agentCanUpdatePreferences: boolean;
   maxCriticIterations: number;
@@ -87,7 +87,7 @@ export const DEFAULT_AGENT_SETTINGS: AgentSettings = {
   autoRunTools: true,
   allowExternalPaths: false,
   managerModelAccess: {},
-  managerNotes: '',
+  managerNotes: {},
   agentMemoryEnabled: true,
   agentCanUpdatePreferences: false,
   maxCriticIterations: 3,

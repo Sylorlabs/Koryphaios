@@ -1,99 +1,52 @@
 <script lang="ts">
+  // Thinking timer — deliberately dumb. The displayed duration IS the
+  // server-computed value (first-delta → latest-delta timestamps): it only
+  // moves when reasoning tokens actually arrive, is monotonic by construction,
+  // and freezes the instant the provider signals reasoning is over
+  // (finalized). No client stopwatch, no stall heuristics, no jumping.
   import { slide } from 'svelte/transition';
 
   interface Props {
     text: string;
+    /** Server-computed elapsed ms (latest delta ts − first delta ts). */
     durationMs?: number;
     agentName: string;
+    /** Provider said reasoning is over — the number is final. */
+    finalized?: boolean;
     /** Reasoning-token estimate for providers that redact the thinking text
      *  (Claude Code headless) but report progress. */
     estimatedTokens?: number;
-    /** Initial disclosure state. The user can still collapse each block. */
+    /** Start with the reasoning panel open (user setting). */
     defaultExpanded?: boolean;
-    /** Called when the stopwatch freezes — lets the parent persist the
-     *  client-observed duration so remounts can't regress the number. */
-    onFreeze?: (ms: number) => void;
   }
 
-  let { text, durationMs, agentName: _agentName, estimatedTokens, defaultExpanded = false, onFreeze }: Props = $props();
-  // Disclosure state is intentionally captured at mount; changing the global
-  // preference must not reopen/close a block the user already toggled.
+  let { text, durationMs, agentName: _agentName, finalized = false, estimatedTokens, defaultExpanded = false }: Props = $props();
   // svelte-ignore state_referenced_locally
   let expanded = $state(defaultExpanded);
   let panelEl = $state<HTMLDivElement>();
 
-  // ── Live detection + stopwatch ─────────────────────────────────────────────
-  // The block is "live" while its text is still growing. When tokens stop
-  // arriving for STALL_MS the stopwatch freezes (and resumes if more arrive).
-  const STALL_MS = 1_500;
-  const TICK_MS = 100;
-
-  let now = $state(performance.now());
-  // Start "not live": a block restored from history must not tick on mount.
-  // Only text growth AFTER mount starts the stopwatch.
-  let lastGrowthAt = $state(performance.now() - STALL_MS);
-  // Anchor so the ticker continues from the server-computed duration when a
-  // block is mounted mid-stream (e.g. after a session switch). Deliberately
-  // captures the INITIAL durationMs — later updates flow through displayMs.
-  // svelte-ignore state_referenced_locally
-  let anchor = performance.now() - (durationMs ?? 0);
-  let frozenMs = $state<number | null>(null);
-  // Only genuine growth counts — Svelte store reassignments can re-trigger the
-  // effect with the same text, which must not restart the stopwatch.
-  // Deliberately captures the INITIAL length; growth is tracked in the effect.
-  // svelte-ignore state_referenced_locally
-  let lastSeenLength = text.length;
-
+  // Monotonic guard: even if a stale prop update arrives, never display a
+  // smaller number than the user has already seen.
+  let peakMs = $state(0);
   $effect(() => {
-    // Growth = new thinking text OR a rising token estimate (redacted streams
-    // have empty text but live token counts).
-    const len = Math.max(text.length, estimatedTokens ?? 0);
-    if (len <= lastSeenLength) return;
-    lastSeenLength = len;
-    lastGrowthAt = performance.now();
-    if (frozenMs !== null) {
-      // Tokens resumed after a stall — re-anchor so elapsed continues from
-      // where the stopwatch froze instead of jumping.
-      anchor = performance.now() - frozenMs;
-      frozenMs = null;
-    }
+    if ((durationMs ?? 0) > peakMs) peakMs = durationMs ?? 0;
   });
+  let displayMs = $derived(Math.max(peakMs, durationMs ?? 0));
 
-  // A server-computed duration arriving mid-flight means the block is done —
-  // freeze immediately instead of waiting out the stall window.
+  // Live = provider hasn't finalized yet. Safety valve: if no new duration
+  // arrives for 15s the run died mid-thought — stop shimmering.
+  let staleAt = $state(0);
   $effect(() => {
-    if (durationMs && durationMs > 0 && frozenMs === null && performance.now() - lastGrowthAt >= STALL_MS) {
-      frozenMs = durationMs;
-    }
+    void durationMs;
+    if (finalized) return;
+    staleAt = 0;
+    const t = setTimeout(() => (staleAt = Date.now()), 15_000);
+    return () => clearTimeout(t);
   });
+  let isLive = $derived(!finalized && staleAt === 0);
 
-  let isLive = $derived(frozenMs === null && now - lastGrowthAt < STALL_MS);
-
-  $effect(() => {
-    if (!isLive) return;
-    const timer = setInterval(() => {
-      now = performance.now();
-      if (performance.now() - lastGrowthAt >= STALL_MS) {
-        // Freeze at the moment tokens stopped, not at detection time, so the
-        // number never visibly jumps when the stopwatch stops.
-        frozenMs = Math.max(0, lastGrowthAt - anchor);
-        onFreeze?.(frozenMs);
-      }
-    }, TICK_MS);
-    return () => clearInterval(timer);
-  });
-
-  let displayMs = $derived.by(() => {
-    // Live: count only up to the last token's arrival — NOT through the stall
-    // window. Ticking during the stall made the display run ~1.5s past the
-    // real duration and then visibly jump back on freeze.
-    if (isLive) return Math.max(0, Math.min(now, lastGrowthAt) - anchor);
-    // Frozen: never go backwards — larger of client-observed and server value.
-    return Math.max(frozenMs ?? 0, durationMs ?? 0);
-  });
-
-  // Reasoning-token display: provider-reported estimate when available,
-  // else derived from the streamed text (~4 chars/token). Always shown.
+  // Reasoning tokens: provider estimate when reported, else ~4 chars/token
+  // from the streamed text. Monotonic via the same peak guard upstream.
   let displayTokens = $derived(
     estimatedTokens && estimatedTokens > 0 ? estimatedTokens : Math.ceil(text.length / 4),
   );
@@ -145,7 +98,7 @@
     bind:this={panelEl}
     transition:slide={{ duration: 180 }}
   >
-    <p class="thinking-full-text">{text || (estimatedTokens ? `Anthropic keeps this model's raw reasoning on their servers (Claude Code only receives token counts) — ~${estimatedTokens} tokens of internal reasoning. Models with open reasoning (e.g. Haiku 4.5, most API providers) show their full text here.` : '…')}</p>
+    <p class="thinking-full-text">{text || (estimatedTokens ? `Anthropic keeps this model's raw reasoning on their servers (Claude Code only receives token counts) — ~${estimatedTokens} tokens of internal reasoning. Models with open reasoning (e.g. Haiku 4.5, Cursor, Antigravity, most API providers) show their full text here.` : '…')}</p>
     {#if isLive}
       <span class="live-caret" aria-hidden="true"></span>
     {/if}
