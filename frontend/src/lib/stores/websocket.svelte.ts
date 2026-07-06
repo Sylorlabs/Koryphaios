@@ -66,6 +66,8 @@ interface DetectedContextFile {
 let detectedContext = $state<DetectedContextFile[]>([]);
 
 let busySessions = $state<Set<string>>(new Set());
+// Bumped on process.started/exited so the background-terminals strip refetches.
+let processEventTick = $state(0);
 
 interface ActiveFileEdit {
   path: string;
@@ -84,11 +86,16 @@ let fileEditTimers = new Map<string, ReturnType<typeof setTimeout>>();
 // ─── Session Busy Bridge ─────────────────────────────────────────────────────
 
 function markSessionBusy(sessionId: string) {
-  if (busySessions.has(sessionId)) return;
+  if (busySessions.has(sessionId)) {
+    kickBusyWatchdog(sessionId);
+    return;
+  }
   busySessions = new Set(busySessions).add(sessionId);
+  kickBusyWatchdog(sessionId);
 }
 
 function clearSessionBusy(sessionId: string) {
+  stopBusyWatchdog(sessionId);
   if (!busySessions.has(sessionId)) return;
   const next = new Set(busySessions);
   next.delete(sessionId);
@@ -98,6 +105,35 @@ function clearSessionBusy(sessionId: string) {
 function maybeClearBusy(sessionId: string | undefined) {
   if (!sessionId || !busySessions.has(sessionId)) return;
   if (!agentStore.isSessionRunning(sessionId)) clearSessionBusy(sessionId);
+}
+
+// Watchdog: if a session is marked busy but goes SILENT (no stream activity)
+// for this long, the agent is gone and a terminal event was dropped — force
+// the busy/Stop state off so the composer never gets stuck. Any stream event
+// for the session resets its timer.
+const BUSY_WATCHDOG_MS = 45_000;
+const busyWatchdogs = new Map<string, ReturnType<typeof setTimeout>>();
+
+function kickBusyWatchdog(sessionId: string | undefined) {
+  if (!sessionId) return;
+  const existing = busyWatchdogs.get(sessionId);
+  if (existing) clearTimeout(existing);
+  if (!busySessions.has(sessionId)) return;
+  busyWatchdogs.set(
+    sessionId,
+    setTimeout(() => {
+      busyWatchdogs.delete(sessionId);
+      // Silent too long — the run ended without a terminal event reaching us.
+      markSessionAgentsStopped(sessionId);
+      clearSessionBusy(sessionId);
+    }, BUSY_WATCHDOG_MS),
+  );
+}
+
+function stopBusyWatchdog(sessionId: string | undefined) {
+  if (!sessionId) return;
+  const t = busyWatchdogs.get(sessionId);
+  if (t) { clearTimeout(t); busyWatchdogs.delete(sessionId); }
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -142,6 +178,10 @@ function handleMessage(msg: WSMessage) {
   const activeSessionId = sessionStore.activeSessionId;
   const isForActiveSession = !msg.sessionId || msg.sessionId === activeSessionId;
   const agents = agentStore.agents;
+
+  // Any activity for a busy session proves the run is alive — reset its
+  // silence watchdog. (Terminal events clear busy entirely below.)
+  if (msg.sessionId && msg.type.startsWith('stream.')) kickBusyWatchdog(msg.sessionId);
 
   switch (msg.type) {
     case 'agent.spawned': {
@@ -201,8 +241,14 @@ function handleMessage(msg: WSMessage) {
     case 'agent.status': {
       const p = msg.payload as AgentStatusPayload;
       agentStore.updateAgentStatus(p.agentId, p.status, msg.sessionId ?? undefined);
-      if (p.status === 'done' || p.status === 'idle') {
+      if (p.status === 'done' || p.status === 'idle' || p.status === 'waiting') {
         maybeClearBusy(msg.sessionId ?? agents.get(p.agentId)?.sessionId);
+        const completedSessionId = msg.sessionId ?? agents.get(p.agentId)?.sessionId;
+        if (p.agentId === 'kory-manager' && completedSessionId && completedSessionId === sessionStore.activeSessionId) {
+          void sessionStore.fetchMessages(completedSessionId).then((messages) =>
+            loadSessionMessages(completedSessionId, messages),
+          );
+        }
       }
       break;
     }
@@ -211,7 +257,7 @@ function handleMessage(msg: WSMessage) {
       // Cancel notification → live stop marker as plain system text, not a
       // Kory message. The backend persists a matching system row for reloads.
       const info = msg.payload as { message?: string };
-      if (isForActiveSession && info?.message === 'Session cancelled') {
+      if (isForActiveSession && info?.message) {
         feedStore.removeAnalyzingThoughtEntries();
         feedStore.addFeedEntry({
           timestamp: msg.timestamp,
@@ -219,7 +265,7 @@ function handleMessage(msg: WSMessage) {
           agentId: 'system',
           agentName: '',
           glowClass: '',
-          text: 'Stopped by user.',
+          text: info.message === 'Session cancelled' ? 'Stopped by user.' : info.message,
         });
       }
       break;
@@ -333,7 +379,7 @@ function handleMessage(msg: WSMessage) {
           agentName: agents.get(p.agentId)?.identity.name ?? 'Worker',
           glowClass: feedStore.resolveGlowClass(agents.get(p.agentId)?.identity),
           text: `Calling tool: ${p.toolCall.name}`,
-          metadata: { toolCall: p.toolCall },
+          metadata: { toolCall: p.toolCall, sourceProvider: p.sourceProvider },
         });
       }
       if (msg.sessionId) {
@@ -344,7 +390,44 @@ function handleMessage(msg: WSMessage) {
           agentName: agentStore.getAgentFeedLabel(p.agentId),
           glowClass: feedStore.resolveGlowClass(agents.get(p.agentId)?.identity),
           text: `Calling tool: ${p.toolCall.name}`,
-          metadata: { toolCall: p.toolCall, sessionId: msg.sessionId },
+          metadata: { toolCall: p.toolCall, sessionId: msg.sessionId, sourceProvider: p.sourceProvider },
+        });
+      }
+      break;
+    }
+
+    case 'process.started':
+    case 'process.exited': {
+      processEventTick++;
+      // Background terminals are first-class: show start/exit in the feed as
+      // terminal entries so long-running commands never vanish from view.
+      const p = msg.payload as {
+        id: string; name: string; command: string; pid?: number;
+        exitCode?: number; status?: string; willRestart?: boolean; logsTail?: string;
+      };
+      if (isForActiveSession) {
+        const started = msg.type === 'process.started';
+        const text = started
+          ? `Background terminal started: ${p.name} (pid ${p.pid})\n$ ${p.command}`
+          : `Background terminal ${p.status}${p.exitCode !== undefined ? ` (exit ${p.exitCode})` : ''}: ${p.name}` +
+            (p.willRestart ? ' — restarting' : '') +
+            (p.logsTail ? `\n${p.logsTail}` : '');
+        feedStore.addFeedEntry({
+          timestamp: msg.timestamp,
+          type: 'tool_result',
+          agentId: 'kory-manager',
+          agentName: 'Kory',
+          glowClass: '',
+          text,
+          metadata: {
+            toolResult: {
+              callId: p.id,
+              name: 'bash',
+              output: text,
+              isError: !started && p.status === 'crashed',
+              durationMs: 0,
+            },
+          },
         });
       }
       break;
@@ -362,7 +445,7 @@ function handleMessage(msg: WSMessage) {
           text: p.toolResult.isError
             ? `Tool error: ${p.toolResult.output}`
             : `Tool result (${p.toolResult.durationMs.toFixed(0)}ms): ${p.toolResult.output}`,
-          metadata: { toolResult: p.toolResult },
+          metadata: { toolResult: p.toolResult, sourceProvider: p.sourceProvider },
         });
       }
       if (msg.sessionId) {
@@ -375,7 +458,7 @@ function handleMessage(msg: WSMessage) {
           text: p.toolResult.isError
             ? `Tool error: ${p.toolResult.output}`
             : `Tool result (${p.toolResult.durationMs.toFixed(0)}ms): ${p.toolResult.output}`,
-          metadata: { toolResult: p.toolResult, sessionId: msg.sessionId },
+          metadata: { toolResult: p.toolResult, sessionId: msg.sessionId, sourceProvider: p.sourceProvider },
         });
       }
       break;
@@ -924,9 +1007,16 @@ async function loadSessionMessages(
     createdAt: number;
     model?: string;
     cost?: number;
+    variantGroupId?: string;
+    variantIndex?: number;
   }>,
 ) {
-  clearFeed();
+  // Reset ancillary per-session UI state up front, but leave the feed itself
+  // alone — feedStore.loadSessionMessages swaps it in atomically once the
+  // fetched history is ready, avoiding a blank flash during the round trip.
+  activeFileEdits = new Map();
+  detectedContext = [];
+  agentStore.clearNonManagerAgents();
   koryThought = '';
   koryPhase = '';
   await feedStore.loadSessionMessages(sessionId, messages);
@@ -1029,10 +1119,14 @@ export const wsStore = {
   get contextUsage() {
     return agentStore.getContextUsage();
   },
+  get processEventTick() {
+    return processEventTick;
+  },
   get detectedContext() {
     return detectedContext;
   },
   isSessionRunning: agentStore.isSessionRunning,
+  isSessionWaiting: agentStore.isSessionWaiting,
   isSessionBusy: (sessionId: string | null | undefined) =>
     !!sessionId && (busySessions.has(sessionId) || agentStore.isSessionRunning(sessionId)),
   markSessionAgentsStopped,

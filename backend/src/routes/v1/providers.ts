@@ -560,6 +560,22 @@ export const providerRoutes = new Elysia({ prefix: '/api/providers' })
       data: detectAgentClis(),
     };
   })
+  .post('/test-connected', async ({ request, set }) => {
+    if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
+    const { providers } = getContext();
+    const connected = providers.getStatus().filter((provider) => provider.authenticated);
+    const results = await Promise.all(
+      connected.map(async (provider) => ({
+        provider: provider.name,
+        ...(await providers.testConnection(provider.name)),
+      })),
+    );
+    return {
+      ok: results.every((result) => result.ok),
+      tested: results.length,
+      results,
+    };
+  })
   // ─── Custom (bring-your-own) providers ──────────────────────────────────
   // Add an OpenAI-compatible (or Anthropic/Gemini-compatible) endpoint with a base URL,
   // optional API key, optional explicit model list, and optional custom headers.

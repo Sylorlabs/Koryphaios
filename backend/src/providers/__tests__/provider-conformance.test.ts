@@ -28,7 +28,12 @@ import {
   ENV_AUTH_TOKEN_MAP,
 } from '../constants';
 import { getModelsForProvider } from '../models';
-import { detectClaudeCodeLogin, detectCodexAuthToken, detectGrokCLILogin } from '../auth-utils';
+import {
+  detectAntigravityCLILogin,
+  detectClaudeCodeLogin,
+  detectCodexAuthToken,
+  detectGrokCLILogin,
+} from '../auth-utils';
 import type { Provider, ProviderEvent } from '../types';
 import type { ProviderConfig, ProviderName } from '@koryphaios/shared';
 
@@ -122,6 +127,19 @@ function mockFetch(input: any, init?: any): Promise<Response> {
   if (url.includes('api.github.com/copilot_internal')) {
     if (!authz.startsWith('Token ')) return Promise.resolve(unauthorized('copilot token exchange needs "Authorization: Token <pat>"'));
     return Promise.resolve(json({ token: COPILOT_BEARER, expires_at: Math.floor(Date.now() / 1000) + 3600 }));
+  }
+  // Jules cloud agent: Google API key header, async session + activities polling.
+  if (url.includes('jules.googleapis.com/v1alpha')) {
+    if (scheme !== 'x-goog-api-key') return Promise.resolve(unauthorized('Jules needs X-Goog-Api-Key'));
+    if (method === 'POST' && /\/sessions(?:\?|$)/.test(url)) {
+      return Promise.resolve(json({ name: 'sessions/test-session', id: 'test-session', state: 'IN_PROGRESS' }));
+    }
+    if (url.includes('/activities')) {
+      return Promise.resolve(json({ activities: [{ id: 'done', progressUpdated: { title: MARK }, sessionCompleted: {} }] }));
+    }
+    if (url.includes('/sessions/test-session')) {
+      return Promise.resolve(json({ id: 'test-session', state: 'COMPLETED' }));
+    }
   }
   // Codex (subscription): Bearer to chatgpt.com backend
   if (url.includes('chatgpt.com/backend-api/codex')) {
@@ -359,6 +377,14 @@ describe('Provider conformance (contract + optional live)', () => {
         result.evidence = 'CLI harness (grok-build provider)';
         result.live = loggedIn ? 'LIVE_PASS' : 'SKIP';
         result.liveDetail = loggedIn ? 'grok CLI logged in' : 'no grok login';
+        results.push(result);
+        continue;
+      }
+
+      if (name === 'antigravity') {
+        result.evidence = 'CLI harness with real transcript logs (see antigravity provider tests)';
+        result.live = detectAntigravityCLILogin() ? 'LIVE_PASS' : 'SKIP';
+        result.liveDetail = detectAntigravityCLILogin() ? 'Antigravity CLI logged in' : 'no Antigravity login';
         results.push(result);
         continue;
       }

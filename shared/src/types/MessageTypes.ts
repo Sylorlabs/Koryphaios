@@ -24,6 +24,8 @@ export interface Message {
   tokensIn?: number;
   tokensOut?: number;
   cost?: number;
+  variantGroupId?: string;
+  variantIndex?: number;
   createdAt: number;
 }
 
@@ -38,5 +40,7 @@ export interface StoredMessage {
   tokensIn?: number;
   tokensOut?: number;
   cost?: number;
+  variantGroupId?: string;
+  variantIndex?: number;
   createdAt: number;
 }

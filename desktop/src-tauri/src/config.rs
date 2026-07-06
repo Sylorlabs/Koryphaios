@@ -110,6 +110,11 @@ impl AppConfig {
                 }
 
                 // Check for config next to executable
+                // Linux AppImage: resources land in usr/lib/<product>/
+                let appimage_path = exe_dir.join("../lib/Koryphaios/config/app.config.json");
+                if appimage_path.exists() {
+                    return Ok(appimage_path);
+                }
                 let adjacent_path = exe_dir.join("config/app.config.json");
                 if adjacent_path.exists() {
                     return Ok(adjacent_path);

@@ -20,9 +20,9 @@ export type ContextBreakdown = {
   system: number;
   /** Injected memory/notes network context. */
   memory: number;
-  /** Tool definitions sent with the request. */
+  /** Tool definitions + all tool calls and results in the history. */
   tools: number;
-  /** Conversation history (user + assistant turns, tool results, attachments). */
+  /** Conversation only: what the user typed + what the agent typed back. */
   chat: number;
 };
 
@@ -36,6 +36,9 @@ export type StreamUsage = {
   usageKnown: boolean;
   contextWindow?: number;
   contextKnown: boolean;
+  /** Where the context limit came from. Live provider/CLI data is preferred;
+   * catalog is an explicit fallback when that surface exposes no limit. */
+  contextSource?: 'live' | 'catalog' | 'alias';
   breakdown?: ContextBreakdown;
 };
 
@@ -120,6 +123,7 @@ export interface MessageCompletePayload {
 
 export interface ToolCallPayload {
   agentId: string;
+  sourceProvider?: string;
   toolCall: {
     id: string;
     name: string;
@@ -130,6 +134,7 @@ export type StreamToolCallPayload = ToolCallPayload;
 
 export interface StreamToolResultPayload {
   agentId: string;
+  sourceProvider?: string;
   toolResult: {
     callId: string;
     name: string;

@@ -14,8 +14,7 @@ export const AntigravityModels: ModelDef[] = [
     canReason: false,
     supportsAttachments: false,
     supportsStreaming: true,
-    // Levels map to real agy model variants — the harness swaps the "(Level)" suffix.
-    reasoningLevels: ['low', 'medium', 'high'],
+    reasoningLevels: [],
     tier: 'fast',
   },
   {
@@ -28,8 +27,7 @@ export const AntigravityModels: ModelDef[] = [
     canReason: false,
     supportsAttachments: false,
     supportsStreaming: true,
-    // Levels map to real agy model variants — the harness swaps the "(Level)" suffix.
-    reasoningLevels: ['low', 'medium', 'high'],
+    reasoningLevels: [],
     tier: 'fast',
   },
   {
@@ -39,14 +37,12 @@ export const AntigravityModels: ModelDef[] = [
     apiModelId: 'Gemini 3.5 Flash (High)',
     contextWindow: 1_048_576,
     maxOutputTokens: 65_536,
-    // The agy CLI exposes no reasoning/thinking flag — the "(High)" variant IS
-    // the reasoning selection; the harness honors the picker by swapping to
-    // the sibling variant (resolveCliModel).
+    // The agy CLI exposes no separate reasoning/thinking flag. The suffix is
+    // part of this model's identity and must only change through model selection.
     canReason: false,
     supportsAttachments: false,
     supportsStreaming: true,
-    // Levels map to real agy model variants — the harness swaps the "(Level)" suffix.
-    reasoningLevels: ['low', 'medium', 'high'],
+    reasoningLevels: [],
     tier: 'reasoning',
   },
   {
@@ -59,8 +55,7 @@ export const AntigravityModels: ModelDef[] = [
     canReason: false,
     supportsAttachments: false,
     supportsStreaming: true,
-    // Levels map to real agy model variants — the harness swaps the "(Level)" suffix.
-    reasoningLevels: ['low', 'high'],
+    reasoningLevels: [],
     tier: 'flagship',
   },
   {
@@ -73,8 +68,7 @@ export const AntigravityModels: ModelDef[] = [
     canReason: true,
     supportsAttachments: false,
     supportsStreaming: true,
-    // Levels map to real agy model variants — the harness swaps the "(Level)" suffix.
-    reasoningLevels: ['low', 'high'],
+    reasoningLevels: [],
     tier: 'reasoning',
   },
   {

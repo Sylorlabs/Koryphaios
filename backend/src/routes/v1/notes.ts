@@ -6,7 +6,7 @@
  */
 
 import { Elysia, t } from 'elysia';
-import { requireLocalRouteAuth } from '../../auth/local-route-auth';
+import { requireLocalRouteAuth, validateLocalBearerToken } from '../../auth/local-route-auth';
 import * as notesService from '../../notes/notes-service';
 import { broadcastNotesNetworkUpdate } from '../../notes/notes-events';
 import {
@@ -72,6 +72,7 @@ export const notesRoutes = new Elysia({ prefix: '/api/notes' })
         tags: t.Optional(t.Array(t.String())),
         pinned: t.Optional(t.Boolean()),
         includeInContext: t.Optional(t.Boolean()),
+        format: t.Optional(t.Union([t.Literal('markdown'), t.Literal('html')])),
       }),
     },
   )
@@ -200,8 +201,15 @@ export const notesRoutes = new Elysia({ prefix: '/api/notes' })
   })
 
   // ── Serve attachment (must come before /:id to avoid path collision) ──────
-  .get('/attachments/:attachmentId', async ({ request, params, set }) => {
-    if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
+  .get('/attachments/:attachmentId', async ({ request, params, query, set }) => {
+    // <img src> can't send Authorization headers — accept the token via ?auth=.
+    const authed =
+      requireLocalRouteAuth(request) ??
+      validateLocalBearerToken(String((query as { auth?: string })?.auth ?? ''));
+    if (!authed) {
+      set.status = 401;
+      return { ok: false, error: 'Unauthorized' };
+    }
     const att = await notesService.getAttachment(params.attachmentId);
     if (!att || !existsSync(att.storagePath)) {
       set.status = 404;
@@ -247,6 +255,7 @@ export const notesRoutes = new Elysia({ prefix: '/api/notes' })
         tags: t.Optional(t.Array(t.String())),
         pinned: t.Optional(t.Boolean()),
         includeInContext: t.Optional(t.Boolean()),
+        format: t.Optional(t.Union([t.Literal('markdown'), t.Literal('html')])),
       }),
     },
   )

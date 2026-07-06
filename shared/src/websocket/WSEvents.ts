@@ -47,6 +47,8 @@ export type WSEventType =
   | 'kory.verification'
   | 'kory.task_breakdown'
   | 'kory.ask_user'
+  | 'process.started'
+  | 'process.exited'
   // Notes network
   | 'notes.updated';
 

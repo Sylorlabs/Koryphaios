@@ -6,6 +6,13 @@ import { runMigrations } from './migrations';
 
 // Get database path from env or default to data/ directory
 const dbPath = process.env.DATABASE_URL?.replace('sqlite://', '') || 'data/koryphaios.db';
+// First run (packaged app: cwd = per-user data dir): the data/ folder does not
+// exist yet and SQLite refuses to create intermediate directories itself.
+try {
+  const { mkdirSync } = require('node:fs') as typeof import('node:fs');
+  const { dirname } = require('node:path') as typeof import('node:path');
+  if (dirname(dbPath) !== '.') mkdirSync(dirname(dbPath), { recursive: true });
+} catch { /* open below will surface real permission problems */ }
 
 // Create bun:sqlite database instance
 const sqlite = new Database(dbPath);

@@ -572,6 +572,26 @@ export const MIGRATIONS: Migration[] = [
       DROP INDEX IF EXISTS idx_sessions_working_directory;
     `,
   },
+
+  // ─── Version 0012: HTML notes ───────────────────────────────────────────────
+  {
+    version: '0012',
+    description: "Add format column to notes ('markdown' | 'html')",
+    up: `
+      ALTER TABLE notes ADD COLUMN format TEXT NOT NULL DEFAULT 'markdown';
+    `,
+    down: ``,
+  },
+  {
+    version: '0013',
+    description: 'Persist regenerated response variants',
+    up: `
+      ALTER TABLE messages ADD COLUMN variant_group_id TEXT;
+      ALTER TABLE messages ADD COLUMN variant_index INTEGER NOT NULL DEFAULT 0;
+      CREATE INDEX IF NOT EXISTS idx_messages_variant_group ON messages(variant_group_id, variant_index);
+    `,
+    down: `DROP INDEX IF EXISTS idx_messages_variant_group;`,
+  },
 ];
 
 // ─── Migration Runner ────────────────────────────────────────────────────────

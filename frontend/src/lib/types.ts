@@ -8,7 +8,8 @@ export type FeedEntryType =
   | 'routing'
   | 'error'
   | 'system'
-  | 'tool_group';
+  | 'tool_group'
+  | 'agent_group';
 
 export interface FeedEntryLocal {
   id: string;

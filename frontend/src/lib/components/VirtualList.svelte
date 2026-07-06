@@ -130,13 +130,18 @@
         }
     }
     
-    // Authoritative bottom-pin for virtualization. totalHeight is the TRUE
-    // content height (estimated rows included) and updates as real heights are
-    // measured — so pinning to it converges to the true bottom even for rows
-    // not yet rendered. A DOM ResizeObserver on a fixed-height scroll container
-    // never fires on inner growth, which is why scrollHeight-based pinning
-    // intermittently fell short. Only pins while `follow` is on (user hasn't
-    // scrolled up), so it can never fight the user.
+    // Authoritative bottom-pin for virtualization. totalHeight is the
+    // estimated content height and updates as real heights are measured — but
+    // rows outside the rendered window (e.g. a collapsed tool/agent block
+    // whose real height is much taller than its flat estimate) can leave
+    // totalHeight *short* of the DOM's actual scrollHeight for the rows that
+    // ARE currently rendered near the bottom. Pinning to totalHeight alone in
+    // that case stops short of the true bottom (a "partial" scroll) because
+    // the browser clamps our assignment to the real (larger) max scrollTop.
+    // Taking the max of totalHeight and the live DOM scrollHeight guarantees
+    // we always reach the actual bottom, while still reacting to totalHeight
+    // changes as heights converge for rows not yet rendered. Only pins while
+    // `follow` is on (user hasn't scrolled up), so it can never fight the user.
     $effect(() => {
         // Track the signals that move the bottom.
         void totalHeight;
@@ -145,7 +150,7 @@
         // rAF: let padding/layout settle this frame, then pin.
         requestAnimationFrame(() => {
             if (!follow || !containerEl) return;
-            const target = totalHeight; // scroll past rendered content
+            const target = Math.max(totalHeight, containerEl.scrollHeight);
             if (Math.abs(containerEl.scrollTop + containerEl.clientHeight - target) > 1) {
                 containerEl.scrollTop = target;
             }

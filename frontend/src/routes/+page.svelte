@@ -22,6 +22,7 @@
   import CommandPalette from '$lib/components/CommandPalette.svelte';
   import MenuBar from '$lib/components/MenuBar.svelte';
   import ThemePickerModal from '$lib/components/ThemePickerModal.svelte';
+  import BackgroundShells from '$lib/components/BackgroundShells.svelte';
   import AppShell from '$lib/components/shell/AppShell.svelte';
   import AgentRail from '$lib/components/shell/AgentRail.svelte';
   import { useAgentRail } from '$lib/components/shell/useAgentRail.svelte';
@@ -41,7 +42,6 @@
     createProjectSession,
     readProjectFile,
     readProjectFolder,
-    exportCurrentProjectSnapshot,
     insertPromptTemplate,
   } from '$lib/utils/projectManager';
   import { getModelConfigurationWarning } from '$lib/utils/model-config';
@@ -561,18 +561,50 @@ RULES:
     }
   }
 
-  /** Opening a project always creates a fresh chat. History is explicit via
-   * /resume or the sidebar and is never reopened as a folder-open side effect. */
+  /**
+   * Resume the most recent session for `path`, or create a fresh one.
+   * Returns the session id that is now active.
+   */
+  async function resumeOrCreateSession(path: string): Promise<string | null> {
+    // Make sure the session list is fresh from the DB so we can search it.
+    await sessionStore.fetchSessions();
+    const existing = sessionStore.sessionsForProject(path);
+    if (existing.length > 0) {
+      // Resume the most-recently-updated session for this project.
+      const latest = existing.reduce((a, b) => (a.updatedAt >= b.updatedAt ? a : b));
+      sessionStore.activeSessionId = latest.id;
+      return latest.id;
+    }
+    // No prior chats for this project — start a new one.
+    return sessionStore.createSession();
+  }
+
+  /** Open a folder as a project. Resumes the last session for the path if one
+   *  exists; otherwise creates a fresh chat with the provided content. */
   async function openProjectAtPath(
     path: string,
     fresh: { title: string; text: string; fileName?: string },
   ) {
+    // Opening a folder outside the current workspace exits workspace mode —
+    // projects inside the workspace root stay workspace members.
+    const root = projectStore.workspaceRoot;
+    if (root && !path.startsWith(root.replace(/[/\\]+$/, '') + '/')) projectStore.clearWorkspace();
     projectStore.setProject(path);
+    // Refresh session list from DB so we find prior chats for this path.
     await sessionStore.fetchSessions();
-    await createProjectFromText(fresh.title, fresh.text, {
-      source: 'file', fileName: fresh.fileName, path,
-    });
-    toastStore.success(`Opened ${projectDisplayName(path)} — new chat`);
+    const existing = sessionStore.sessionsForProject(path);
+    if (existing.length > 0) {
+      // Resume the most recent session — don't create a blank one.
+      const latest = existing.reduce((a, b) => (a.updatedAt >= b.updatedAt ? a : b));
+      sessionStore.activeSessionId = latest.id;
+      toastStore.success(`Resumed ${projectDisplayName(path)} — ${latest.title}`);
+    } else {
+      // First time opening this project — bootstrap with the scanned content.
+      await createProjectFromText(fresh.title, fresh.text, {
+        source: 'file', fileName: fresh.fileName, path,
+      });
+      toastStore.success(`Opened ${projectDisplayName(path)} — new chat`);
+    }
   }
 
   async function createProjectFromText(
@@ -747,14 +779,18 @@ RULES:
           if (!selectedPath) break;
           const projects = await invoke<string[]>('list_workspace_projects', { folderPath: selectedPath });
           projectStore.setWorkspace(selectedPath, projects);
+          // Mark the root server-side so all its projects share ONE .koryphaios
+          // (memory/rules/preferences) instead of one per project.
+          apiFetch(apiUrl('/api/workspace/register'), {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ root: selectedPath }),
+          }).catch(() => {});
           sessionStore.activeSessionId = '';
           toastStore.success(`Opened workspace ${projectDisplayName(selectedPath)} with ${projects.length} project folders`);
         } catch (error) { toastStore.error(String(error)); }
         break;
       }
-      case 'save_snapshot':
-        exportCurrentProjectSnapshot();
-        break;
       case 'new_session':
         await sessionStore.newChat();
         inputRef?.focus();
@@ -827,7 +863,7 @@ RULES:
         } else if (action.startsWith('select_project:')) {
           const path = decodeURIComponent(action.slice('select_project:'.length));
           projectStore.setProject(path);
-          await sessionStore.createSession();
+          await resumeOrCreateSession(path);
         }
         break;
     }
@@ -845,10 +881,7 @@ RULES:
       }
       noProjectPrompt = null;
       projectStore.setProject(data.data);
-      await sessionStore.fetchSessions();
-      // Always a fresh session — any currently-active session belongs to a
-      // different (now closed) project scope.
-      await sessionStore.createSession();
+      await resumeOrCreateSession(data.data);
       toastStore.warning('Running in your home folder — no project scoping');
       handleSend(pending.message, pending.model, pending.reasoningLevel, pending.attachments);
     } catch {
@@ -900,7 +933,11 @@ RULES:
   }
 
   let activeAgents = $derived([...wsStore.agents.values()].filter(a =>
-    a.sessionId === sessionStore.activeSessionId && a.status !== 'done' && a.status !== 'idle'
+    a.identity.id !== 'kory-manager' &&
+    a.identity.role !== 'manager' &&
+    a.sessionId === sessionStore.activeSessionId &&
+    a.status !== 'done' &&
+    a.status !== 'idle'
   ));
   let composerFileMentions = $derived(
     composerProjectFiles.length > 0
@@ -1175,6 +1212,8 @@ RULES:
       onSend={handleSend}
       onExecuteCommand={handleSlashCommand}
       isRunning={agentRail.selectedAgent ? agentRail.selectedAgentIsRunning : wsStore.isSessionBusy(sessionStore.activeSessionId)}
+      isWaiting={!agentRail.selectedAgent && wsStore.isSessionWaiting(sessionStore.activeSessionId)}
+      waitingReason={wsStore.isSessionWaiting(sessionStore.activeSessionId) ? 'background terminal' : ''}
       onStop={handleStop}
       onOpenSettings={() => showSettings = true}
       slashCommands={composerSlashCommands}
@@ -1182,6 +1221,12 @@ RULES:
       onRefreshFileMentions={refreshComposerFileMentions}
       placeholder={agentRail.inputPlaceholder}
     />{/if}
+  {/snippet}
+
+  {#snippet backgroundShells()}
+    {#if !collaborationStore.activeJoinedSession && sessionStore.activeSessionId}
+      <BackgroundShells sessionId={sessionStore.activeSessionId} />
+    {/if}
   {/snippet}
 </AppShell>
 

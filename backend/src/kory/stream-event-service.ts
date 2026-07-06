@@ -84,6 +84,7 @@ export class StreamEventService {
       tokensUsed: tokensIn + tokensOut,
       usageKnown,
       contextKnown: context.contextKnown,
+      ...(context.contextSource ? { contextSource: context.contextSource } : {}),
       ...(context.contextWindow ? { contextWindow: context.contextWindow } : {}),
       ...(breakdown ? { breakdown } : {}),
     };

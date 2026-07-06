@@ -127,7 +127,11 @@ function rowToNote(row: typeof notes.$inferSelect): Note {
     createdAt: row.createdAt instanceof Date ? row.createdAt : new Date((row.createdAt as number) * 1000),
     updatedAt: row.updatedAt instanceof Date ? row.updatedAt : new Date((row.updatedAt as number) * 1000),
     sourcePath,
-    format: sourcePath ? (extension === '.html' || extension === '.htm' ? 'html' : 'markdown') : undefined,
+    // Project documents derive format from the file extension; DB notes carry
+    // their own format column ('markdown' default, 'html' → sandboxed preview).
+    format: sourcePath
+      ? (extension === '.html' || extension === '.htm' ? 'html' : 'markdown')
+      : ((row.format as 'markdown' | 'html' | undefined) ?? 'markdown'),
   };
 }
 
@@ -147,6 +151,7 @@ export async function createNote(input: CreateNoteInput): Promise<Note> {
     tags: JSON.stringify(input.tags ?? []),
     pinned: input.pinned ? 1 : 0,
     includeInContext: input.includeInContext ? 1 : 0,
+    format: input.format ?? 'markdown',
     userId: input.userId ?? null,
     createdAt: now,
     updatedAt: now,
@@ -182,6 +187,7 @@ export async function updateNote(id: string, input: UpdateNoteInput): Promise<No
   if (input.tags !== undefined) updateData.tags = JSON.stringify(input.tags);
   if (input.pinned !== undefined) updateData.pinned = input.pinned ? 1 : 0;
   if (input.includeInContext !== undefined) updateData.includeInContext = input.includeInContext ? 1 : 0;
+  if (input.format !== undefined) updateData.format = input.format;
 
   await db.update(notes).set(updateData).where(eq(notes.id, id));
 

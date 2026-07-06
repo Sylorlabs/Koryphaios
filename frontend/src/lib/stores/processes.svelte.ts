@@ -160,7 +160,7 @@ function createProcessStore() {
     return null;
   }
 
-  async function loadProcessLogs(id: string, lines = 100): Promise<void> {
+  async function loadProcessLogs(id: string, lines = 100): Promise<ProcessLogs | null> {
     isLogsLoading = true;
     try {
       const res = await apiFetch(apiUrl(`/api/processes/${id}/logs?lines=${lines}`));
@@ -169,6 +169,7 @@ function createProcessStore() {
         const data = await res.json();
         if (data.ok) {
           processLogs = data.logs;
+          return data.logs;
         }
       }
     } catch (err) {
@@ -176,6 +177,7 @@ function createProcessStore() {
     } finally {
       isLogsLoading = false;
     }
+    return null;
   }
 
   async function loadProcessEvents(id: string): Promise<void> {
@@ -237,6 +239,22 @@ function createProcessStore() {
       toastStore.error('Failed to restart process');
       return false;
     }
+  }
+
+  async function writeInput(id: string, input: string): Promise<boolean> {
+    try {
+      const res = await apiFetch(apiUrl(`/api/processes/${id}/input`), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ input }),
+      });
+      if (res.ok) return true;
+      const data = await res.json().catch(() => ({}));
+      toastStore.error(data.error || 'Failed to send terminal input');
+    } catch {
+      toastStore.error('Failed to send terminal input');
+    }
+    return false;
   }
 
   async function startProcess(options: {
@@ -414,6 +432,7 @@ function createProcessStore() {
     loadProcessEvents,
     killProcess,
     restartProcess,
+    writeInput,
     startProcess,
     cleanupOldProcesses,
     selectProcess,

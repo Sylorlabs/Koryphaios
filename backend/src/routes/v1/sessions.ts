@@ -129,8 +129,8 @@ export const sessionRoutes = new Elysia({ prefix: '/api/sessions' })
     const { kory } = getContext();
     const b = body as { model?: string; provider?: string } | undefined;
     if (!b?.model || !b?.provider) return { ok: false, error: 'model and provider required' };
-    await kory.previewModelContext(id, b.model, b.provider as never);
-    return { ok: true };
+    const usage = await kory.previewModelContext(id, b.model, b.provider as never);
+    return { ok: true, usage };
   })
   .post('/:id/context/:archiveId/visibility', async ({ request, params: { id, archiveId }, body, set }) => {
     if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };

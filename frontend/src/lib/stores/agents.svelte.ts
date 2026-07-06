@@ -358,7 +358,9 @@ export function markAgentStopped(agentId: string) {
 // ─── Derived State ───────────────────────────────────────────────────────────
 
 function isActiveStatus(status: AgentStatus | undefined): boolean {
-  return !!status && status !== 'idle' && status !== 'done';
+  // 'waiting' = parked on a background process / user input — the composer
+  // shows a Waiting state instead of Stop, and sending is allowed.
+  return !!status && status !== 'idle' && status !== 'done' && status !== 'waiting';
 }
 
 export function getManagerStatus(): AgentStatus {
@@ -387,6 +389,17 @@ export function getManagerStatus(): AgentStatus {
   }
 
   return 'idle';
+}
+
+/** True when the session's manager is parked waiting (background terminal or
+ *  a question to the user) — the composer shows the Waiting button state. */
+export function isSessionWaiting(sessionId: string | null | undefined): boolean {
+  if (!sessionId) return false;
+  const st = managerStatusBySession.get(sessionId);
+  if (st === 'waiting' || st === 'waiting_user') return true;
+  const manager = agents.get('kory-manager');
+  return !!manager && manager.sessionId === sessionId &&
+    (manager.status === 'waiting' || manager.status === 'waiting_user');
 }
 
 export function isSessionRunning(sessionId: string): boolean {
@@ -546,6 +559,7 @@ export const agentStore = {
   },
   getManagerStatus,
   isSessionRunning,
+  isSessionWaiting,
   getContextUsage,
   spawnAgent,
   updateAgentStatus,

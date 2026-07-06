@@ -77,7 +77,9 @@ export function getLocalTotals(): {
   const rows = d
     .query<{ model: string; cost_usd: number; tokens_in: number; tokens_out: number }, []>(
       `SELECT model, SUM(cost_usd) as cost_usd, SUM(tokens_in) as tokens_in, SUM(tokens_out) as tokens_out
-     FROM credit_usage GROUP BY model`,
+     FROM credit_usage
+     GROUP BY model
+     HAVING SUM(tokens_in) > 0 OR SUM(tokens_out) > 0`,
     )
     .all();
 
@@ -112,7 +114,10 @@ export function getLocalTotalsByProvider(): Array<{
   const rows = d
     .query<{ provider: string; cost_usd: number; tokens_in: number; tokens_out: number }, []>(
       `SELECT provider, SUM(cost_usd) as cost_usd, SUM(tokens_in) as tokens_in, SUM(tokens_out) as tokens_out
-       FROM credit_usage GROUP BY provider ORDER BY cost_usd DESC`,
+       FROM credit_usage
+       GROUP BY provider
+       HAVING SUM(tokens_in) > 0 OR SUM(tokens_out) > 0
+       ORDER BY cost_usd DESC`,
     )
     .all();
 

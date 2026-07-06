@@ -19,7 +19,7 @@
 
 import type { ProviderConfig, ModelDef } from '@koryphaios/shared';
 import { spawn } from 'node:child_process';
-import { readFileSync, unlinkSync, readdirSync, statSync, existsSync, openSync, readSync, closeSync, fstatSync } from 'node:fs';
+import { readFileSync, writeFileSync, unlinkSync, readdirSync, statSync, existsSync, openSync, readSync, closeSync, fstatSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir, homedir } from 'node:os';
 import {
@@ -61,10 +61,26 @@ function listConversationIds(): Set<string> {
   }
 }
 
-/** First conversation id present now that wasn't in `before`. */
+/** The conversation Koryphaios's agy just created — the NEWEST db that wasn't
+ *  in `before`. Picking newest-by-mtime (not "first") avoids grabbing the
+ *  user's OWN concurrently-running agy conversation: our just-spawned process
+ *  is the one actively writing, so its db is the freshest new one. */
 function detectNewConversation(before: Set<string>): string | null {
-  for (const id of listConversationIds()) if (!before.has(id)) return id;
-  return null;
+  let best: string | null = null;
+  let bestMtime = -1;
+  for (const id of listConversationIds()) {
+    if (before.has(id)) continue;
+    try {
+      const mt = statSync(join(AGY_CONV_DIR, `${id}.db`)).mtimeMs;
+      if (mt > bestMtime) {
+        bestMtime = mt;
+        best = id;
+      }
+    } catch {
+      /* raced away */
+    }
+  }
+  return best;
 }
 
 // ── Dynamic model cache ────────────────────────────────────────────────────────
@@ -101,41 +117,8 @@ async function fetchAgyModels(bin: string): Promise<ModelDef[]> {
     child.once('error', reject);
     child.once('exit', () => {
       const lines = out.split('\n').map((l) => l.trim()).filter(Boolean);
-      resolve(lines.length === 0 ? [] : withSiblingReasoningLevels(lines.map(modelDefFromCliName)));
+      resolve(lines.length === 0 ? [] : lines.map(modelDefFromCliName));
     });
-  });
-}
-
-// agy exposes reasoning effort ONLY as sibling model variants — "Gemini 3.5
-// Flash (Low|Medium|High)". There is no CLI flag. So a model's reasoningLevels
-// are exactly the effort suffixes its family exposes, and selecting a level
-// swaps the "(Level)" suffix (see resolveCliModel).
-const EFFORT_SUFFIXES: Record<string, string> = { low: 'Low', medium: 'Medium', high: 'High' };
-
-/** "Gemini 3.5 Flash (Medium)" → { base: "Gemini 3.5 Flash", effort: "medium" } */
-function splitEffortVariant(cliName: string): { base: string; effort: string } | null {
-  const m = /^(.*)\s\((Low|Medium|High)\)$/.exec(cliName);
-  return m ? { base: m[1], effort: m[2].toLowerCase() } : null;
-}
-
-/** Fill reasoningLevels from the effort variants actually present in the list. */
-function withSiblingReasoningLevels(models: ModelDef[]): ModelDef[] {
-  const familyLevels = new Map<string, string[]>();
-  for (const m of models) {
-    const v = splitEffortVariant(m.apiModelId ?? m.name);
-    if (!v) continue;
-    const levels = familyLevels.get(v.base) ?? [];
-    if (!levels.includes(v.effort)) levels.push(v.effort);
-    familyLevels.set(v.base, levels);
-  }
-  const ORDER = ['low', 'medium', 'high'];
-  return models.map((m) => {
-    const v = splitEffortVariant(m.apiModelId ?? m.name);
-    const levels = v ? (familyLevels.get(v.base) ?? []) : [];
-    return {
-      ...m,
-      reasoningLevels: levels.length > 1 ? ORDER.filter((l) => levels.includes(l)) : [],
-    };
   });
 }
 
@@ -157,6 +140,10 @@ function modelDefFromCliName(cliName: string): ModelDef {
     contextWindow: isPro || isOpus ? 2_097_152 : 1_048_576,
     maxOutputTokens: 65_536,
     canReason: isHigh || isThinking,
+    // Antigravity exposes effort choices as distinct model names, not a
+    // separate reasoning parameter. An explicit empty list suppresses the
+    // composer's reasoning picker for every dynamically discovered model.
+    reasoningLevels: [],
     supportsAttachments: false,
     supportsStreaming: true,
     tier: isHigh || isThinking ? 'reasoning' : isPro || isOpus ? 'flagship' : 'fast',
@@ -288,21 +275,10 @@ export class AntigravityProvider implements Provider {
     return cachedModels ?? fallback;
   }
 
-  private resolveCliModel(modelId: string, reasoningLevel?: string): string {
+  private resolveCliModel(modelId: string): string {
     const models = this.listModels();
     const model = models.find((m) => m.id === modelId || m.apiModelId === modelId);
-    const cliName = model?.apiModelId ?? DEFAULT_CLI_MODEL;
-
-    // Reasoning level → sibling effort variant ("… (Low|Medium|High)"): agy has
-    // no effort flag, the variant IS the selection. Only swap when the target
-    // variant actually exists; xhigh/max clamp to high.
-    if (!reasoningLevel) return cliName;
-    const level = reasoningLevel === 'xhigh' || reasoningLevel === 'max' ? 'high' : reasoningLevel;
-    const suffix = EFFORT_SUFFIXES[level];
-    const v = splitEffortVariant(cliName);
-    if (!suffix || !v || v.effort === level) return cliName;
-    const target = `${v.base} (${suffix})`;
-    return models.some((m) => m.apiModelId === target) ? target : cliName;
+    return model?.apiModelId ?? DEFAULT_CLI_MODEL;
   }
 
   async *streamResponse(request: StreamRequest): AsyncGenerator<ProviderEvent> {
@@ -334,7 +310,7 @@ export class AntigravityProvider implements Provider {
       return;
     }
 
-    const cliModel = this.resolveCliModel(request.model, request.reasoningLevel);
+    const cliModel = this.resolveCliModel(request.model);
     const logPath = join(tmpdir(), `agy-${Date.now()}.log`);
 
     const cwd = request.workingDirectory?.trim();
@@ -910,6 +886,21 @@ function buildTurnPrompt(messages: ProviderMessage[]): string {
     .join('\n\n');
 }
 
+
+/** Persist a pasted image to a temp file so the CLI's own tools can view it —
+ *  the piped prompt is text-only, but the agent has file access. */
+function imageBlockToTempFile(imageData: string | undefined, mime: string | undefined): string {
+  if (!imageData) return '[image attachment omitted — no data]';
+  try {
+    const ext = mime === 'image/jpeg' ? 'jpg' : mime === 'image/webp' ? 'webp' : mime === 'image/gif' ? 'gif' : 'png';
+    const file = join(tmpdir(), `kory-attach-${Math.random().toString(36).slice(2, 10)}.${ext}`);
+    writeFileSync(file, Buffer.from(imageData, 'base64'));
+    return `[image attached — saved to ${file}; use your image/file viewing tool to look at it]`;
+  } catch {
+    return '[image attachment omitted — could not persist to disk]';
+  }
+}
+
 function flattenContent(content: string | ProviderContentBlock[]): string {
   if (typeof content === 'string') return content;
   const parts: string[] = [];
@@ -918,7 +909,7 @@ function flattenContent(content: string | ProviderContentBlock[]): string {
     else if (block.type === 'tool_use')
       parts.push(`[tool call: ${block.toolName ?? 'tool'} ${JSON.stringify(block.toolInput ?? {})}]`);
     else if (block.type === 'tool_result') parts.push(`[tool result: ${block.toolOutput ?? ''}]`);
-    else if (block.type === 'image') parts.push('[image omitted — Antigravity harness is text-only]');
+    else if (block.type === 'image') parts.push(imageBlockToTempFile(block.imageData, block.imageMimeType));
   }
   return parts.join('\n');
 }

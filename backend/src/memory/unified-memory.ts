@@ -27,6 +27,53 @@ import { notes } from '../db/schema';
 import { eq } from 'drizzle-orm';
 
 // ============================================================================
+// Workspace-shared memory root
+// ============================================================================
+// When a project lives inside an opened workspace (marked by
+// .koryphaios/workspace.json at the workspace root), memory/rules/preferences
+// are stored ONCE at the workspace root and shared by all its projects —
+// instead of sprouting a duplicate .koryphaios folder per project.
+
+export const WORKSPACE_MARKER = '.koryphaios/workspace.json';
+
+const memoryRootCache = new Map<string, { root: string; at: number }>();
+const MEMORY_ROOT_CACHE_TTL_MS = 30_000;
+
+/** Resolve where a project's .koryphaios data lives: the nearest ancestor
+ *  workspace root if one is marked, otherwise the project itself. A project
+ *  that already has its own .koryphaios keeps it (no silent migration). */
+export function resolveMemoryRoot(projectRoot: string): string {
+  const cached = memoryRootCache.get(projectRoot);
+  if (cached && Date.now() - cached.at < MEMORY_ROOT_CACHE_TTL_MS) return cached.root;
+
+  let resolved = projectRoot;
+  if (!existsSync(join(projectRoot, '.koryphaios'))) {
+    const home = homedir();
+    let dir = dirname(projectRoot);
+    for (let hops = 0; hops < 8; hops++) {
+      if (!dir || dir === '/' || dir === home || dir === dirname(dir)) break;
+      if (existsSync(join(dir, WORKSPACE_MARKER))) {
+        resolved = dir;
+        break;
+      }
+      dir = dirname(dir);
+    }
+  }
+  memoryRootCache.set(projectRoot, { root: resolved, at: Date.now() });
+  return resolved;
+}
+
+/** Mark a folder as a workspace root so child projects share its memory. */
+export function registerWorkspaceRoot(root: string): void {
+  const markerPath = join(root, WORKSPACE_MARKER);
+  mkdirSync(dirname(markerPath), { recursive: true });
+  if (!existsSync(markerPath)) {
+    writeFileSync(markerPath, JSON.stringify({ workspace: true, createdAt: Date.now() }, null, 2), 'utf8');
+  }
+  memoryRootCache.clear();
+}
+
+// ============================================================================
 // Configuration
 // ============================================================================
 
@@ -109,7 +156,7 @@ export function getUniversalMemoryPath(): string {
  * Get project memory path
  */
 export function getProjectMemoryPath(projectRoot: string): string {
-  return join(projectRoot, MEMORY_CONFIG.PROJECT_MEMORY_DIR, MEMORY_CONFIG.PROJECT_MEMORY_FILE);
+  return join(resolveMemoryRoot(projectRoot), MEMORY_CONFIG.PROJECT_MEMORY_DIR, MEMORY_CONFIG.PROJECT_MEMORY_FILE);
 }
 
 /**
@@ -117,7 +164,7 @@ export function getProjectMemoryPath(projectRoot: string): string {
  */
 export function getSessionMemoryPath(projectRoot: string, sessionId: string): string {
   return join(
-    projectRoot,
+    resolveMemoryRoot(projectRoot),
     MEMORY_CONFIG.SESSIONS_DIR,
     sessionId,
     MEMORY_CONFIG.SESSION_MEMORY_FILE,
@@ -128,6 +175,8 @@ export function getSessionMemoryPath(projectRoot: string, sessionId: string): st
  * Get the primary project-rules path
  */
 export function getRulesPath(projectRoot: string): string {
+  // Rules always live in the selected working folder itself — they are scoped
+  // to the code the agent runs against, not shared across a workspace.
   return join(projectRoot, MEMORY_CONFIG.RULES_FILE);
 }
 
@@ -135,7 +184,8 @@ export interface ProjectMemoryDocument { name: string; path: string; kind: 'memo
 
 export function listProjectMemoryDocuments(projectRoot: string): ProjectMemoryDocument[] {
   const roots = [
-    { dir: join(projectRoot, '.koryphaios/memory'), kind: 'memory' as const },
+    // Memory is workspace-shared; rules stay with the working folder.
+    { dir: join(resolveMemoryRoot(projectRoot), '.koryphaios/memory'), kind: 'memory' as const },
     { dir: join(projectRoot, '.koryphaios/rules'), kind: 'rules' as const },
   ];
   return roots.flatMap(({ dir, kind }) => {
@@ -149,7 +199,8 @@ export function listProjectMemoryDocuments(projectRoot: string): ProjectMemoryDo
 export function createProjectMemoryDocument(projectRoot: string, name: string, kind: 'memory' | 'rules'): ProjectMemoryDocument {
   const safe = name.trim().replace(/\.md$/i, '').replace(/[^a-zA-Z0-9._-]+/g, '-').replace(/^[-.]+|[-.]+$/g, '');
   if (!safe) throw new Error('A valid document name is required');
-  const dir = join(projectRoot, `.koryphaios/${kind}`);
+  const base = kind === 'rules' ? projectRoot : resolveMemoryRoot(projectRoot);
+  const dir = join(base, `.koryphaios/${kind}`);
   mkdirSync(dir, { recursive: true });
   const path = join(dir, `${safe}.md`);
   if (!existsSync(path)) writeFileSync(path, '', 'utf8');

@@ -16,21 +16,58 @@ const PROVIDER_KEY: Record<string, string> = {
   opencodego: 'opencode-go',
 };
 
+/** Broader mapping used for PRICING lookups (capability enrichment stays
+ *  scoped to the opencode providers above). */
+const PRICING_PROVIDER_KEY: Record<string, string> = {
+  openai: 'openai',
+  anthropic: 'anthropic',
+  google: 'google',
+  gemini: 'google',
+  xai: 'xai',
+  deepseek: 'deepseek',
+  groq: 'groq',
+  mistral: 'mistral',
+  openrouter: 'openrouter',
+  togetherai: 'togetherai',
+  fireworks: 'fireworks-ai',
+  moonshot: 'moonshot',
+  kimicode: 'moonshot',
+  zai: 'zai',
+  cerebras: 'cerebras',
+  deepinfra: 'deepinfra',
+  minimax: 'minimax',
+  nebius: 'nebius',
+  opencodezen: 'opencode',
+  opencodego: 'opencode-go',
+};
+
 interface ModelsDevEntry {
   id: string;
   reasoning?: boolean;
   reasoning_options?: Array<{ type: string; values?: string[]; max?: number }>;
   limit?: { context?: number; output?: number };
+  /** $ per million tokens, straight from models.dev. */
+  cost?: { input?: number; output?: number; cache_read?: number; cache_write?: number };
 }
 
 let cache: Record<string, { models?: Record<string, ModelsDevEntry> }> | null = null;
 let fetchedAt = 0;
 let inflight = false;
+let inflightPromise: Promise<void> | null = null;
+
+/** Await a fresh-enough catalog (max ~5s) — for callers that need prices NOW. */
+export async function warmModelsDevCache(): Promise<void> {
+  kickRefresh();
+  if (cache && Date.now() - fetchedAt < CACHE_TTL_MS) return;
+  if (inflightPromise) {
+    await Promise.race([inflightPromise, new Promise((r) => setTimeout(r, 5_000))]);
+  }
+}
 
 function kickRefresh(): void {
   if (inflight || (cache && Date.now() - fetchedAt < CACHE_TTL_MS)) return;
   inflight = true;
-  void fetch(MODELS_DEV_URL)
+  inflightPromise = fetch(MODELS_DEV_URL)
     .then(async (res) => {
       if (!res.ok) throw new Error(`models.dev ${res.status}`);
       cache = (await res.json()) as typeof cache;
@@ -45,6 +82,7 @@ function kickRefresh(): void {
     })
     .finally(() => {
       inflight = false;
+      inflightPromise = null;
     });
 }
 
@@ -88,4 +126,43 @@ export function applyModelsDevMetadata(providerName: string, models: ModelDef[])
       ...(e.limit?.output && e.limit.output > 0 ? { maxOutputTokens: e.limit.output } : {}),
     };
   });
+}
+
+
+export interface ModelsDevPricing {
+  /** $ per million input tokens */
+  inPerM: number;
+  /** $ per million output tokens */
+  outPerM: number;
+  cacheReadPerM?: number;
+}
+
+/** Live per-token pricing from models.dev for any known provider/model.
+ *  Synchronous against the cached catalog (kicks a refresh); null when the
+ *  catalog has no verified price — callers must NOT invent one. */
+export function getModelsDevPricing(providerName: string, modelId: string): ModelsDevPricing | null {
+  kickRefresh();
+  if (!cache) return null;
+  // Gateways expose upstream ids like "anthropic/claude-sonnet-4-6".
+  const candidates = [modelId, modelId.includes('/') ? modelId.split('/').pop()! : ''].filter(Boolean);
+  const tryEntries = (entries?: Record<string, ModelsDevEntry>): ModelsDevPricing | null => {
+    if (!entries) return null;
+    for (const cand of candidates) {
+      const low = cand.toLowerCase();
+      const entry = entries[cand] ?? Object.values(entries).find((e) => e.id?.toLowerCase() === low);
+      const c = entry?.cost;
+      if (c && typeof c.input === 'number' && typeof c.output === 'number') {
+        return { inPerM: c.input, outPerM: c.output, cacheReadPerM: c.cache_read };
+      }
+    }
+    return null;
+  };
+  const key = PRICING_PROVIDER_KEY[providerName];
+  const direct = key ? tryEntries(cache[key]?.models) : null;
+  if (direct) return direct;
+  for (const prov of Object.values(cache)) {
+    const hit = tryEntries(prov?.models);
+    if (hit) return hit;
+  }
+  return null;
 }

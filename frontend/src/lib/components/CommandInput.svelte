@@ -21,6 +21,11 @@
     onExecuteCommand?: (command: string) => Promise<boolean> | boolean;
     /** When true, show Stop instead of Send; clicking stops manager and workers for the session. */
     isRunning?: boolean;
+    /** Kory is parked — waiting on a background terminal or your answer. The
+     *  button shows a distinct Waiting state; sending is still allowed. */
+    isWaiting?: boolean;
+    /** What Kory is waiting on, e.g. "background terminal: dev-server". */
+    waitingReason?: string;
     onStop?: () => void;
     onOpenSettings?: () => void;
     inputRef?: HTMLTextAreaElement;
@@ -38,6 +43,8 @@
     onSend,
     onExecuteCommand,
     isRunning = false,
+    isWaiting = false,
+    waitingReason = '',
     onStop,
     onOpenSettings,
     inputRef = $bindable(),
@@ -190,17 +197,48 @@
     return parsed.model;
   });
 
-  function previewSelectedModelContext(value: string) {
+  let contextPreviewGeneration = 0;
+
+  async function previewSelectedModelContext(value: string) {
     const sid = sessionStore.activeSessionId;
     if (!sid || !value) return;
+    const generation = ++contextPreviewGeneration;
     const target = availableModels.find((m) => m.value === value);
     wsStore.setManagerContextWindow(sid, target?.contextWindow);
     const { provider, model } = parseModelSelection(value);
     if (provider && model) {
-      void apiFetch(apiUrl(`/api/sessions/${sid}/context/model-preview`), {
-        method: 'POST',
-        body: JSON.stringify({ model, provider }),
-      }).catch(() => {});
+      // listModels() starts provider/CLI discovery in the background. Recheck
+      // a few times so a live limit replaces the catalog fallback as soon as
+      // discovery lands, without requiring another model change or message.
+      for (const delay of [0, 1_000, 3_000, 6_000]) {
+        if (delay) await new Promise((resolve) => setTimeout(resolve, delay));
+        if (
+          generation !== contextPreviewGeneration ||
+          sessionStore.activeSessionId !== sid ||
+          selectedModel !== value
+        ) return;
+        try {
+          const response = await apiFetch(apiUrl(`/api/sessions/${sid}/context/model-preview`), {
+            method: 'POST',
+            body: JSON.stringify({ model, provider }),
+          });
+          const result = await response.json() as {
+            usage?: {
+              contextWindow?: number;
+              contextKnown?: boolean;
+              contextSource?: 'live' | 'catalog' | 'alias';
+            };
+          };
+          if (generation !== contextPreviewGeneration) return;
+          wsStore.setManagerContextWindow(
+            sid,
+            result.usage?.contextKnown ? result.usage.contextWindow : undefined,
+          );
+          if (result.usage?.contextSource === 'live' || result.usage?.contextSource === 'alias') return;
+        } catch {
+          // Keep the current value and allow the next discovery recheck.
+        }
+      }
     }
   }
 
@@ -779,18 +817,45 @@
   // from the container + textarea both seeing the same bubbling event).
   let lastPasteEvent: ClipboardEvent | null = null;
 
-  /** Ctrl+V / Cmd+V → paste TEXT only (no image detection). */
+  /** Ctrl+V / Cmd+V → paste image if available, else text. */
   function handlePaste(e: ClipboardEvent) {
     // If this exact event was already handled (container + textarea both fire), skip.
     if (lastPasteEvent === e) return;
     lastPasteEvent = e;
+
+    let hasImage = false;
+    const items = e.clipboardData?.items;
+    if (items) {
+      for (const item of items) {
+        if (item.type.startsWith('image/')) {
+          hasImage = true;
+          e.preventDefault();
+          const file = item.getAsFile();
+          if (file) {
+            const reader = new FileReader();
+            reader.onload = (ev) => {
+              const data = (ev.target?.result as string).split(',')[1];
+              const ext = item.type === 'image/png' ? 'png' : item.type === 'image/jpeg' ? 'jpg' : item.type === 'image/gif' ? 'gif' : item.type === 'image/webp' ? 'webp' : 'png';
+              attachments = [...attachments, { type: 'image', data, name: `clipboard-image.${ext}` }];
+            };
+            reader.readAsDataURL(file);
+          }
+          break;
+        }
+      }
+    }
+
+    if (hasImage) {
+      requestAnimationFrame(() => { lastPasteEvent = null; });
+      return;
+    }
 
     e.preventDefault();
 
     // Focus the input if we're not already there
     inputRef?.focus();
 
-    // Read TEXT only from the clipboard.  Image pasting is Ctrl+Shift+V.
+    // Read TEXT only from the clipboard.
     void navigator.clipboard.readText().then((text) => {
       if (text && inputRef) {
         const start = inputRef.selectionStart ?? value.length;
@@ -1116,18 +1181,24 @@
 
           <button
             type="button"
-            onclick={isRunning ? stop : send}
-            disabled={disabled || (!isRunning && !canSend)}
-            class="btn flex w-full items-center justify-center gap-2 {isRunning ? 'stop-btn' : 'btn-primary'}"
+            onclick={isRunning ? stop : isWaiting && !canSend ? stop : send}
+            disabled={disabled || (!isRunning && !isWaiting && !canSend)}
+            class="btn flex w-full items-center justify-center gap-2 {isRunning ? 'stop-btn' : !canSend ? 'waiting-btn' : 'btn-primary'}"
             style="height: 52px; padding: 0 20px; font-size: 14px; {disabled || configurationWarning ? 'opacity: 0.5; cursor: not-allowed;' : ''}"
-            aria-label={isRunning ? 'Stop the running model' : 'Send message'}
-            title={isRunning ? 'Stop (Esc)' : 'Send (Enter)'}
+            aria-label={isRunning ? 'Stop the running model' : isWaiting && !canSend ? 'Kory is waiting — click to cancel' : 'Send message'}
+            title={isRunning ? 'Stop (Esc)' : isWaiting && !canSend ? (waitingReason ? `Waiting on ${waitingReason} — click to cancel` : 'Kory is waiting — click to cancel') : !canSend ? 'Waiting for your message — type to send' : 'Send (Enter)'}
           >
             {#if isRunning}
               <span class="stop-pulse" aria-hidden="true">
                 <Square size={10} fill="currentColor" strokeWidth={0} />
               </span>
               <span>Stop</span>
+            {:else if isWaiting && !canSend}
+              <span class="waiting-dots" aria-hidden="true"><span></span><span></span><span></span></span>
+              <span>Waiting{waitingReason ? ` — ${waitingReason}` : '…'}</span>
+            {:else if !canSend}
+              <span class="waiting-dots" aria-hidden="true"><span></span><span></span><span></span></span>
+              <span>Waiting</span>
             {:else}
               <Send size={18} />
               Send
@@ -1222,6 +1293,30 @@
   .yolo-active {
     border-color: #ef4444 !important;
     box-shadow: 0 0 0 1px #ef4444;
+  }
+
+  /* Waiting button — Kory is parked on something external (background
+     terminal, user input). Amber, calm slow pulse: alive but not burning. */
+  :global(.waiting-btn) {
+    background: color-mix(in srgb, #d5b261 14%, transparent);
+    color: #d5b261;
+    border: 1px solid color-mix(in srgb, #d5b261 45%, transparent);
+    animation: waiting-breathe 2.4s ease-in-out infinite;
+  }
+  @keyframes waiting-breathe {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(213, 178, 97, 0); }
+    50% { box-shadow: 0 0 14px 0 rgba(213, 178, 97, 0.35); }
+  }
+  .waiting-dots { display: inline-flex; gap: 3px; }
+  .waiting-dots span {
+    width: 5px; height: 5px; border-radius: 9999px; background: currentColor;
+    animation: waiting-dot 1.2s ease-in-out infinite;
+  }
+  .waiting-dots span:nth-child(2) { animation-delay: 0.2s; }
+  .waiting-dots span:nth-child(3) { animation-delay: 0.4s; }
+  @keyframes waiting-dot {
+    0%, 60%, 100% { opacity: 0.35; transform: translateY(0); }
+    30% { opacity: 1; transform: translateY(-2px); }
   }
 
   /* Stop button — unmistakably "live, click to stop" with a pulsing ring. */

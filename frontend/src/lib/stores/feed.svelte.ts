@@ -68,6 +68,17 @@ let groupedFeed = $derived.by(() => {
 
 // ─── Glow Class Resolver ────────────────────────────────────────────────────
 
+/** Reverse of resolveGlowClass, for entries that only carry a glow class. */
+function glowToDomain(glow: string): string {
+  switch (glow) {
+    case 'glow-codex': return 'frontend';
+    case 'glow-google': return 'backend';
+    case 'glow-test': return 'test';
+    case 'glow-claude': return 'general';
+    default: return 'general';
+  }
+}
+
 function resolveGlowClass(agent?: AgentIdentity): string {
   if (!agent) return '';
   switch (agent.domain) {
@@ -246,11 +257,44 @@ function getToolName(entry: FeedEntry): string {
   return metadata?.toolCall?.name ?? metadata?.toolResult?.name ?? '';
 }
 
+/** Agent ids that are NOT sub-agents (they render at top level). */
+const TOP_LEVEL_AGENTS = new Set(['kory-manager', 'kory', 'user', 'system']);
+
 export function getGroupedEntries(entries: FeedEntry[]): FeedEntry[] {
   const result: FeedEntry[] = [];
   let currentGroup: FeedEntry | null = null;
+  let agentGroup: FeedEntry | null = null;
 
   for (const entry of entries) {
+    // Sub-agent entries get a clear, expanded-by-default grouping so spawned
+    // workers never look like stray manager output.
+    const isSubAgent = !TOP_LEVEL_AGENTS.has(entry.agentId) && entry.type !== 'user_message';
+    if (isSubAgent) {
+      currentGroup = null;
+      if (agentGroup && agentGroup.agentId === entry.agentId) {
+        agentGroup.entries!.push(entry);
+        agentGroup.timestamp = entry.timestamp;
+        agentGroup.text = `${entry.agentName} — ${agentGroup.entries!.length} steps`;
+      } else {
+        const domain =
+          (entry.metadata?.domain as string | undefined) ?? glowToDomain(entry.glowClass);
+        agentGroup = {
+          id: `agent-group-${entry.id}`,
+          timestamp: entry.timestamp,
+          type: 'agent_group',
+          agentId: entry.agentId,
+          agentName: entry.agentName,
+          glowClass: entry.glowClass,
+          text: `${entry.agentName} — 1 step`,
+          entries: [entry],
+          isCollapsed: false,
+          metadata: { domain },
+        };
+        result.push(agentGroup);
+      }
+      continue;
+    }
+    agentGroup = null;
     const toolName = getToolName(entry);
     const isEphemeral =
       (entry.type === 'tool_call' || entry.type === 'tool_result') && EPHEMERAL_TOOLS.has(toolName);
@@ -296,9 +340,14 @@ async function loadSessionMessages(
     createdAt: number;
     model?: string;
     cost?: number;
+    variantGroupId?: string;
+    variantIndex?: number;
   }>,
 ) {
-  clearFeed();
+  // Don't wipe the feed up front — that leaves a visible blank flash for the
+  // whole round trip below. Instead remember where "new" entries begin and
+  // swap everything in atomically once the fetched history is ready.
+  const feedLengthAtStart = feed.length;
 
   let timeline: Array<{ messageId?: string; hash?: string }> = [];
   try {
@@ -316,7 +365,15 @@ async function loadSessionMessages(
   // wrong chat's messages in the current chat.
   if (sessionStore.activeSessionId !== sessionId) return;
 
-  const history = messages.map((m) => {
+  const variantsByGroup = new Map<string, typeof messages>();
+  for (const message of messages) {
+    if (!message.variantGroupId) continue;
+    const variants = variantsByGroup.get(message.variantGroupId) ?? [];
+    variants.push(message);
+    variantsByGroup.set(message.variantGroupId, variants);
+  }
+
+  const history = messages.filter((m) => !m.variantGroupId || (m.variantIndex ?? 0) === 0).map((m) => {
     const ghost = timeline.find((t) => t.messageId === m.id);
 
     return {
@@ -333,7 +390,23 @@ async function loadSessionMessages(
       agentName: m.role === 'user' ? 'You' : m.role === 'system' ? '' : 'Kory',
       glowClass: m.role === 'user' || m.role === 'system' ? '' : 'glow-kory',
       text: m.content,
-      metadata: { sessionId, model: m.model, cost: m.cost },
+      metadata: {
+        sessionId,
+        model: m.model,
+        cost: m.cost,
+        messageId: m.id,
+        variantGroupId: m.variantGroupId,
+        responseVariants: m.variantGroupId
+          ? (variantsByGroup.get(m.variantGroupId) ?? [])
+              .sort((a, b) => (a.variantIndex ?? 0) - (b.variantIndex ?? 0))
+              .map((variant) => ({
+                id: variant.id,
+                content: variant.content,
+                model: variant.model,
+                index: variant.variantIndex ?? 0,
+              }))
+          : [{ id: m.id, content: m.content, model: m.model, index: 0 }],
+      },
       ghostHash: ghost?.hash,
     };
   });
@@ -392,11 +465,14 @@ async function loadSessionMessages(
   if (sessionStore.activeSessionId !== sessionId) return;
 
   const merged = [...history, ...toolHistory].sort((a, b) => a.timestamp - b.timestamp);
-  // Anything already in the feed streamed in live while we awaited the
-  // timeline fetch (clearFeed ran at the top) — keep it after history
-  // instead of wiping it.
-  feed = [...merged, ...feed];
+  // Anything pushed onto the feed while we awaited (live stream events for
+  // this session) belongs after history — everything before
+  // feedLengthAtStart is stale (either the old session's content, on a
+  // switch, or this same session's now-persisted turn) and gets replaced.
+  feed = [...merged, ...feed.slice(feedLengthAtStart)];
   feedVersion++;
+  streamingRevision = 0;
+  analyzingThoughtId = null;
   rebuildGroupedFeedCache();
 }
 

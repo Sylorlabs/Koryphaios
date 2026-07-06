@@ -8,7 +8,8 @@
   import { notesStore } from '$lib/stores/notes.svelte';
   import { toastStore } from '$lib/stores/toast.svelte';
   import { apiUrl } from '$lib/utils/api-url';
-  import { projectStore } from '$lib/stores/project.svelte';
+  import { authStore } from '$lib/stores/auth.svelte';
+import { projectStore } from '$lib/stores/project.svelte';
   import NotesGraph from './NotesGraph.svelte';
   import type { NoteWithLinks, NoteAttachment } from '@koryphaios/shared';
 
@@ -56,7 +57,7 @@
   let attachments = $derived(currentNote?.attachments ?? []);
   let htmlPreview = $derived.by(() => {
     if (currentNote?.format !== 'html') return '';
-    const csp = `<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data: blob:; style-src 'unsafe-inline'; font-src data:; media-src data: blob:; form-action 'none'; base-uri 'none'">`;
+    const csp = `<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data: blob: http: https:; style-src 'unsafe-inline'; font-src data:; media-src data: blob:; form-action 'none'; base-uri 'none'">`;
     return /<head[\s>]/i.test(contentInput)
       ? contentInput.replace(/<head([^>]*)>/i, `<head$1>${csp}`)
       : `${csp}${contentInput}`;
@@ -66,10 +67,18 @@
   onMount(() => {
     void Promise.all([notesStore.fetchNotes(), notesStore.fetchFolderTree()]);
     window.addEventListener('keydown', handleGlobalKeydown);
+    window.addEventListener('open-notes-graph', handleOpenGraphEvent);
   });
+
+  // "Open Graph View" (Settings → Notes) must land ON the graph, not the editor.
+  function handleOpenGraphEvent() {
+    activeView = 'graph';
+    void notesStore.fetchGraph();
+  }
 
   onDestroy(() => {
     window.removeEventListener('keydown', handleGlobalKeydown);
+    window.removeEventListener('open-notes-graph', handleOpenGraphEvent);
     if (autosaveTimer) clearTimeout(autosaveTimer);
     if (searchDebounceTimer) clearTimeout(searchDebounceTimer);
   });
@@ -277,8 +286,19 @@
   }
 
   // ── Attachment helpers ─────────────────────────────────────────────────────
+  /** Flip a note between markdown and HTML format (persisted immediately). */
+  async function toggleNoteFormat() {
+    const note = notesStore.currentNote;
+    if (!note) return;
+    const next = note.format === 'html' ? 'markdown' : 'html';
+    const updated = await notesStore.updateNote(note.id, { format: next });
+    if (updated) activeView = next === 'html' ? 'preview' : 'editor';
+  }
+
   function attachmentSrc(a: NoteAttachment): string {
-    return apiUrl(`/api/notes/attachments/${a.id}`);
+    // <img> can't send Authorization headers — pass the token as a query param.
+    const auth = authStore.token ? `?auth=${encodeURIComponent(authStore.token)}` : '';
+    return apiUrl(`/api/notes/attachments/${a.id}${auth}`);
   }
 
   async function handleFileInputChange(e: Event) {
@@ -557,6 +577,30 @@
       {#if (activeView === 'editor' || activeView === 'preview') && currentNote}
         <!-- Note actions -->
         <div class="ml-auto flex items-center gap-1">
+          <!-- Format toggle: HTML notes render charts/diagrams in the sandboxed preview -->
+          <button
+            type="button"
+            class="flex items-center gap-1 px-2 py-1 rounded-lg text-xs transition-colors hover:bg-[var(--color-surface-3)]"
+            style="color: {currentNote.format === 'html' ? 'var(--color-accent)' : 'var(--color-text-muted)'};"
+            onclick={() => void toggleNoteFormat()}
+            title={currentNote.format === 'html' ? 'Convert to Markdown note' : 'Convert to HTML note (renders HTML+CSS)'}
+          >
+            <Code2 size={12} />
+            <span class="text-[10px]">{currentNote.format === 'html' ? 'HTML' : 'MD'}</span>
+          </button>
+
+          {#if currentNote.format === 'html'}
+            <button
+              type="button"
+              class="flex items-center gap-1 px-2 py-1 rounded-lg text-xs transition-colors hover:bg-[var(--color-surface-3)]"
+              style="color: var(--color-text-muted);"
+              onclick={() => (activeView = activeView === 'preview' ? 'editor' : 'preview')}
+              title={activeView === 'preview' ? 'Edit HTML source' : 'Render preview'}
+            >
+              {activeView === 'preview' ? 'Edit' : 'Preview'}
+            </button>
+          {/if}
+
           <!-- Pin toggle -->
           <button
             type="button"

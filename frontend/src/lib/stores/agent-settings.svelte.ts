@@ -22,6 +22,9 @@ export interface AgentSettings {
   autoApplySafeFixes: boolean;
   confirmRuleViolations: boolean;
   autoRunTools: boolean;
+  allowExternalPaths: boolean;
+  managerModelAccess: Record<string, string[]>;
+  managerNotes: string;
   agentMemoryEnabled: boolean;
   agentCanUpdatePreferences: boolean;
   maxCriticIterations: number;
@@ -82,6 +85,9 @@ export const DEFAULT_AGENT_SETTINGS: AgentSettings = {
   autoApplySafeFixes: false,
   confirmRuleViolations: true,
   autoRunTools: true,
+  allowExternalPaths: false,
+  managerModelAccess: {},
+  managerNotes: '',
   agentMemoryEnabled: true,
   agentCanUpdatePreferences: false,
   maxCriticIterations: 3,
@@ -104,7 +110,7 @@ function createAgentSettingsStore() {
   let settings = $state<AgentSettings>(DEFAULT_AGENT_SETTINGS);
   let preferences = $state<{ exists: boolean; content: string; path: string } | null>(null);
   let isLoading = $state(false);
-  let activeTab = $state<'settings' | 'preferences' | 'enforcement'>('settings');
+  let activeTab = $state<'settings' | 'preferences'>('settings');
   let lastCriticResult = $state<CriticReviewResult | null>(null);
   let settingsSaveRevision = 0;
 

@@ -172,6 +172,7 @@ async function createNote(input: {
   tags?: string[];
   pinned?: boolean;
   includeInContext?: boolean;
+  format?: 'markdown' | 'html';
 }): Promise<Note | null> {
   _isSaving = true;
   try {
@@ -209,6 +210,7 @@ async function updateNote(
     tags?: string[];
     pinned?: boolean;
     includeInContext?: boolean;
+    format?: 'markdown' | 'html';
   }
 ): Promise<Note | null> {
   _isSaving = true;

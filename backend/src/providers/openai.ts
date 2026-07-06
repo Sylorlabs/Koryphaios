@@ -197,6 +197,19 @@ export class OpenAIProvider implements Provider {
         if (reasoningEffort !== 'none') {
           (params as any).reasoning_effort = reasoningEffort === 'xhigh' ? 'max' : reasoningEffort;
         }
+      } else if (this.name === 'zai' || this.name === 'moonshot') {
+        // GLM / Kimi K2.5: only a round-level thinking toggle exists — no
+        // effort tiers ("none" = disabled, anything else = enabled).
+        (params as any).thinking = {
+          type: reasoningEffort === 'none' ? 'disabled' : 'enabled',
+        };
+      } else if (this.name === 'togetherai') {
+        // Qwen 3.5 thinking is on by default; "none" turns it off. Together
+        // reads the flag both top-level and via chat_template_kwargs.
+        if (reasoningEffort === 'none') {
+          (params as any).enable_thinking = false;
+          (params as any).chat_template_kwargs = { enable_thinking: false };
+        }
       } else {
         (params as any).reasoning_effort = reasoningEffort as any;
       }

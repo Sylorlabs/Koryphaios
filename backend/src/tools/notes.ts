@@ -47,6 +47,12 @@ export const createNoteTool: Tool = {
         type: 'boolean',
         description: 'If true, this note is always injected into agent context',
       },
+      format: {
+        type: 'string',
+        enum: ['markdown', 'html'],
+        description:
+          "Note format. Use 'html' for rich visualizations — full HTML+CSS renders in a sandboxed preview (charts, diagrams, dashboards; scripts are blocked, so use pure CSS/SVG).",
+      },
     },
     required: ['title'],
   },
@@ -57,6 +63,7 @@ export const createNoteTool: Tool = {
       const note = await notesService.createNote({
         title: String(input.title),
         content: (input.content as string) ?? '',
+        format: input.format === 'html' ? 'html' : undefined,
         folderPath: (input.folderPath as string) ?? '/',
         tags: (input.tags as string[]) ?? [],
         includeInContext: Boolean(input.includeInContext),
@@ -173,6 +180,11 @@ export const updateNoteTool: Tool = {
       folderPath: { type: 'string' },
       pinned: { type: 'boolean' },
       includeInContext: { type: 'boolean' },
+      format: {
+        type: 'string',
+        enum: ['markdown', 'html'],
+        description: "Switch note format; 'html' renders full HTML+CSS in the sandboxed preview.",
+      },
     },
   },
   async run(ctx: ToolContext, call: ToolCallInput): Promise<ToolCallOutput> {
@@ -197,6 +209,7 @@ export const updateNoteTool: Tool = {
         folderPath: input.folderPath as string | undefined,
         pinned: input.pinned as boolean | undefined,
         includeInContext: input.includeInContext as boolean | undefined,
+        format: input.format === 'html' || input.format === 'markdown' ? input.format : undefined,
       });
       broadcastNotesNetworkUpdate('update', note.id, ctx.sessionId);
       return {

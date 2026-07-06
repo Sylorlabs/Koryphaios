@@ -1,6 +1,6 @@
 <script lang="ts">
   import { wsStore } from '$lib/stores/websocket.svelte';
-  import { Loader, Check } from 'lucide-svelte';
+  import { Loader, Check, ChevronRight, ChevronDown } from 'lucide-svelte';
   import { tick } from 'svelte';
   import FileIcon from './icons/FileIcon.svelte';
   import hljs from 'highlight.js/lib/common';
@@ -10,9 +10,17 @@
   const dmp = new DiffMatchPatch();
 
   let codeContainers: Record<string, HTMLElement> = {};
-  let collapsed = $state<Set<string>>(new Set());
+  // Paths the user has explicitly toggled — their choice always wins over the
+  // default. Everything else is collapsed by default (a compact spinner pill),
+  // Cursor-style: expand to watch the code generate live.
+  let userToggled = $state<Set<string>>(new Set());
 
   let edits = $derived([...wsStore.activeFileEdits.values()]);
+
+  // An edit is collapsed unless the user opened it. (Default = collapsed.)
+  function isCollapsed(path: string): boolean {
+    return !userToggled.has(path);
+  }
 
   // Auto-scroll each still-streaming code container to the bottom as content grows.
   $effect(() => {
@@ -33,10 +41,10 @@
     return parts.length > 3 ? '.../' + parts.slice(-3).join('/') : path;
   }
   function toggleCollapse(path: string) {
-    const next = new Set(collapsed);
+    const next = new Set(userToggled);
     if (next.has(path)) next.delete(path);
     else next.add(path);
-    collapsed = next;
+    userToggled = next;
   }
 
   const EXT_LANG: Record<string, string> = {
@@ -121,6 +129,11 @@
           style="background: var(--color-surface-2);"
           onclick={() => toggleCollapse(edit.path)}
         >
+          {#if isCollapsed(edit.path)}
+            <ChevronRight size={13} class="shrink-0 text-[var(--color-text-muted)]" />
+          {:else}
+            <ChevronDown size={13} class="shrink-0 text-[var(--color-text-muted)]" />
+          {/if}
           <FileIcon path={edit.path} size={14} />
           <span class="text-xs font-mono truncate" style="color: var(--color-text-primary);">
             {getFileName(edit.path)}
@@ -154,7 +167,7 @@
         </button>
 
         <!-- Code content -->
-        {#if !collapsed.has(edit.path)}
+        {#if !isCollapsed(edit.path)}
           <div class="relative flex overflow-hidden" style="max-height: 420px;">
             <pre
               class="text-right pr-2 pl-3 py-2 text-[11px] leading-[1.5] select-none shrink-0 font-mono"

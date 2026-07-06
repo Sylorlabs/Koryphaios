@@ -9,6 +9,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync, renameSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { wsBroker } from './pubsub';
+import { resolveMemoryRoot } from './memory/unified-memory';
 
 // ============================================================================
 // Configuration
@@ -36,6 +37,20 @@ export interface AgentSettings {
 
   /** Whether to use preferences.md for workflow guidance */
   preferencesEnabled: boolean;
+
+  /** Allow the image renderer/tools to serve files OUTSIDE the home directory
+   *  (external drives, mounted volumes). Off by default. */
+  allowExternalPaths: boolean;
+
+  /** Per-category model allowlist for the manager's routing. Key = worker
+   *  domain ('general' | 'frontend' | 'backend' | 'review' | 'test' | 'critic'
+   *  | 'ui'); value = model ids the manager may pick for that category.
+   *  Empty/missing = all available models allowed. */
+  managerModelAccess: Record<string, string[]>;
+
+  /** Free-form user notes injected into the manager's system prompt —
+   *  standing guidance that doesn't fit a toggle. */
+  managerNotes: string;
 
   /** Critic gate enabled - critic reviews all changes */
   criticGateEnabled: boolean;
@@ -100,6 +115,9 @@ export const DEFAULT_AGENT_SETTINGS: AgentSettings = {
   ruleEnforcementLevel: 'strict',
   agentExecutionMode: 'auto',
   preferencesEnabled: true,
+  allowExternalPaths: false,
+  managerModelAccess: {},
+  managerNotes: '',
   criticGateEnabled: true,
   criticEnforcesPreferences: true,
   autoApplySafeFixes: false,
@@ -121,7 +139,7 @@ export const DEFAULT_AGENT_SETTINGS: AgentSettings = {
 
 // Helper to load koryphaios.json
 function loadKoryphaiosConfig(projectRoot: string): Record<string, unknown> {
-  const configPath = join(projectRoot, 'koryphaios.json');
+  const configPath = join(resolveMemoryRoot(projectRoot), 'koryphaios.json');
   if (!existsSync(configPath)) return {};
   try {
     return JSON.parse(readFileSync(configPath, 'utf-8'));
@@ -135,7 +153,7 @@ function loadKoryphaiosConfig(projectRoot: string): Record<string, unknown> {
  * Writes to a temporary file then renames to avoid corruption during race conditions.
  */
 function saveKoryphaiosConfig(projectRoot: string, config: Record<string, unknown>): void {
-  const configPath = join(projectRoot, 'koryphaios.json');
+  const configPath = join(resolveMemoryRoot(projectRoot), 'koryphaios.json');
   const tempPath = `${configPath}.${process.pid}.tmp`;
 
   try {
@@ -320,7 +338,7 @@ const PREFERENCES_TEMPLATE = `# Agent Preferences & Workflow
 // ============================================================================
 
 export function getPreferencesPath(projectRoot: string): string {
-  return join(projectRoot, AGENT_SETTINGS_CONFIG.PREFERENCES_FILE);
+  return join(resolveMemoryRoot(projectRoot), AGENT_SETTINGS_CONFIG.PREFERENCES_FILE);
 }
 
 /**

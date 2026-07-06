@@ -15,7 +15,9 @@
 
 import type { ProviderConfig, ModelDef } from '@koryphaios/shared';
 import { spawn } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { randomUUID } from 'node:crypto';
+import { existsSync, readFileSync, statSync } from 'node:fs';
+import { join } from 'node:path';
 import { homedir, tmpdir } from 'node:os';
 import {
   type Provider,
@@ -60,7 +62,11 @@ export class GrokBuildProvider implements Provider {
       return cachedModels;
     }
     refreshModelsInBackground();
-    return cachedModels ?? fallback;
+    // The CLI maintains this cache itself from its authenticated model API.
+    // Read it synchronously so context limits do not wait behind the slower
+    // `grok models` process or reasoning-level probe.
+    const cliCachedModels = modelsFromGrokCliCache(readGrokCliModelsCache());
+    return cachedModels ?? (cliCachedModels.length > 0 ? cliCachedModels : fallback);
   }
 
   private resolveCliModel(modelId: string): string {
@@ -88,13 +94,18 @@ export class GrokBuildProvider implements Provider {
     }
 
     const cliModel = this.resolveCliModel(request.model);
+    const grokSessionId = randomUUID();
     const args = [
       '-p',
       prompt,
       '--model',
       cliModel,
+      // streaming-json streams live 'thought' (reasoning) + 'text' tokens as
+      // they arrive; plain 'json' only returned one blob at exit, dropping
+      // reasoning entirely. Web search + built-in tools stay ENABLED (the CLI
+      // runs them internally and folds results/citations into the text).
       '--output-format',
-      'json',
+      'streaming-json',
       '--no-alt-screen',
       // Headless: never block on an interactive tool-approval prompt.
       '--always-approve',
@@ -105,7 +116,30 @@ export class GrokBuildProvider implements Provider {
       // the real workspace; fall back to a neutral temp dir otherwise.
       '--cwd',
       request.workingDirectory?.trim() || tmpdir(),
+      // Deterministic session id → we know EXACTLY which session dir holds the
+      // tool telemetry to tail (updates.jsonl), instead of guessing by mtime.
+      '--session-id',
+      grokSessionId,
+      // ISOLATION: grok coordinates invocations through a shared "leader"
+      // process (default ~/.grok/leader.sock). Without our own socket,
+      // Koryphaios's grok attaches to the SAME leader as the user's
+      // interactive `grok` in a terminal — cross-contaminating session lists
+      // and state. A dedicated Koryphaios leader socket keeps the two worlds
+      // completely separate; Koryphaios must never touch the user's sessions.
+      '--leader-socket',
+      join(tmpdir(), 'koryphaios-grok-leader.sock'),
     ];
+
+    // Web search + web fetch are ON by default (the model runs them internally
+    // and folds citations into its answer). Honor the user's global web-search
+    // setting: only disable when they explicitly turned it off.
+    try {
+      const cwd = request.workingDirectory?.trim();
+      if (cwd) {
+        const { loadAgentSettings } = require('../agent-settings') as typeof import('../agent-settings');
+        if (loadAgentSettings(cwd).localWebSearch === 'off') args.push('--disable-web-search');
+      }
+    } catch { /* settings unavailable — keep web search on */ }
 
     // Only pass --reasoning-effort when the CLI's own metadata says this model
     // supports it (canReason is derived from ~/.grok/models_cache.json).
@@ -141,15 +175,92 @@ export class GrokBuildProvider implements Provider {
     }, GROK_STREAM_TIMEOUT_MS);
     timeout.unref?.();
 
-    let stdout = '';
+    // Live NDJSON stream: each line is one event. Push parsed ProviderEvents
+    // into a queue the generator drains, so tokens reach the UI as they land.
+    const queue: ProviderEvent[] = [];
+    let resolveWaiter: (() => void) | null = null;
+    const wake = () => { resolveWaiter?.(); resolveWaiter = null; };
     let stderr = '';
-    child.stdout.on('data', (c: Buffer) => (stdout += c.toString()));
-    child.stderr.on('data', (c: Buffer) => (stderr += c.toString()));
+    let lineBuf = '';
+    let sawContent = false;
+    let sawThinking = false;
+    let stopReason: string | undefined;
+    let errorMsg: string | undefined;
 
-    const exitCode: number = await new Promise((resolve) => {
-      child.once('error', () => resolve(-1));
-      child.once('exit', (code) => resolve(code ?? 0));
+    const handleEvent = (ev: Record<string, unknown>) => {
+      if (ev.error || ev.is_error) {
+        errorMsg = extractError(ev);
+        return;
+      }
+      const type = ev.type as string | undefined;
+      // grok streaming-json: {type:'thought'|'text', data:'...'} then {type:'end', stopReason}.
+      if (type === 'thought') {
+        const t = typeof ev.data === 'string' ? ev.data : '';
+        if (t) { sawThinking = true; queue.push({ type: 'thinking_delta', thinking: t }); }
+      } else if (type === 'text') {
+        const t = typeof ev.data === 'string' ? ev.data : '';
+        if (t) { sawContent = true; queue.push({ type: 'content_delta', content: t }); }
+      } else if (type === 'end' || type === 'result') {
+        stopReason = (ev.stopReason ?? ev.stop_reason) as string | undefined;
+      } else {
+        // Non-streaming shapes (single json blob, or a final object): fold text
+        // + reasoning in so nothing is lost across CLI versions.
+        const thought = pickText({ text: ev.thought ?? ev.reasoning });
+        if (thought) { sawThinking = true; queue.push({ type: 'thinking_delta', thinking: thought }); }
+        const text = pickText(ev);
+        if (text) { sawContent = true; queue.push({ type: 'content_delta', content: text }); }
+        const s = (ev.stopReason ?? ev.stop_reason) as string | undefined;
+        if (s) stopReason = s;
+      }
+    };
+
+    child.stdout.on('data', (c: Buffer) => {
+      lineBuf += c.toString();
+      let nl: number;
+      while ((nl = lineBuf.indexOf('\n')) !== -1) {
+        const line = lineBuf.slice(0, nl).trim();
+        lineBuf = lineBuf.slice(nl + 1);
+        if (!line || line[0] !== '{') continue;
+        try { handleEvent(JSON.parse(line) as Record<string, unknown>); } catch { /* banner/progress */ }
+      }
+      wake();
     });
+    child.stderr.on('data', (c: Buffer) => { stderr += c.toString(); });
+
+    let exitCode = 0;
+    let done = false;
+    child.once('error', () => { exitCode = -1; done = true; wake(); });
+    child.once('exit', (code) => { exitCode = code ?? 0; done = true; wake(); });
+
+    // The grok CLI runs tools INTERNALLY and doesn't emit them on stdout — but
+    // it records every tool call (name, file path, diff, status) to its
+    // session's updates.jsonl. Tail that to surface file reads/writes/edits and
+    // other tool runs as real events, the same way the app shows every action.
+    const tailer = newGrokToolTailer(
+      request.workingDirectory?.trim() || tmpdir(),
+      grokSessionId,
+    );
+
+    // Drain the queue live until the process exits and the buffer is empty.
+    while (true) {
+      while (queue.length) {
+        if (request.signal?.aborted) break;
+        yield queue.shift()!;
+      }
+      for (const ev of drainGrokToolTailer(tailer)) yield ev;
+      if (done) break;
+      await new Promise<void>((r) => { resolveWaiter = r; setTimeout(r, 100); });
+    }
+
+    // Flush any trailing partial line.
+    const tail = lineBuf.trim();
+    if (tail && tail[0] === '{') {
+      try { handleEvent(JSON.parse(tail) as Record<string, unknown>); } catch { /* ignore */ }
+    }
+    while (queue.length) yield queue.shift()!;
+    // Final tool telemetry lands just after exit — give it a moment.
+    await new Promise((r) => setTimeout(r, 250));
+    for (const ev of drainGrokToolTailer(tailer)) yield ev;
 
     clearTimeout(timeout);
     request.signal?.removeEventListener('abort', onAbort);
@@ -159,10 +270,8 @@ export class GrokBuildProvider implements Provider {
       yield { type: 'error', error: 'Grok Build: failed to launch the grok CLI process.' };
       return;
     }
-
-    const parsed = parseGrokOutput(stdout);
-    if (parsed.error || (!parsed.text && exitCode !== 0)) {
-      const hint = parsed.error || stderr.trim() || `grok CLI exited with status ${exitCode}`;
+    if (errorMsg || (!sawContent && !sawThinking && exitCode !== 0)) {
+      const hint = errorMsg || stderr.trim() || `grok CLI exited with status ${exitCode}`;
       const loginHint = /not.*logged in|unauthorized|login|authenticate|api key/i.test(hint)
         ? ' — run "grok login" (or set GROK_CODE_XAI_API_KEY) to authenticate.'
         : '';
@@ -170,12 +279,9 @@ export class GrokBuildProvider implements Provider {
       return;
     }
 
-    if (parsed.text) {
-      yield { type: 'content_delta', content: parsed.text };
-    }
     yield {
       type: 'complete',
-      finishReason: parsed.stopReason === 'tool_use' ? 'tool_use' : 'end_turn',
+      finishReason: stopReason === 'tool_use' ? 'tool_use' : 'end_turn',
     };
   }
 }
@@ -247,7 +353,15 @@ interface GrokCliModelMeta {
 function readGrokCliModelsCache(): Map<string, GrokCliModelMeta> | null {
   try {
     const path = `${homedir()}/.grok/models_cache.json`;
-    const raw = readFileSync(path, 'utf8');
+    return parseGrokCliModelsCache(readFileSync(path, 'utf8'));
+  } catch {
+    return null;
+  }
+}
+
+/** Parse the authenticated cache written by the Grok CLI itself. */
+export function parseGrokCliModelsCache(raw: string): Map<string, GrokCliModelMeta> | null {
+  try {
     const parsed = JSON.parse(raw) as {
       models?: Record<string, { info?: Record<string, unknown> }>;
     };
@@ -258,7 +372,7 @@ function readGrokCliModelsCache(): Map<string, GrokCliModelMeta> | null {
       out.set(id, {
         name: typeof info.name === 'string' ? info.name : undefined,
         contextWindow:
-          typeof info.context_window === 'number' && info.context_window > 0
+          typeof info.context_window === 'number' && info.context_window >= 1024
             ? info.context_window
             : undefined,
         maxOutputTokens:
@@ -273,6 +387,28 @@ function readGrokCliModelsCache(): Map<string, GrokCliModelMeta> | null {
   } catch {
     return null;
   }
+}
+
+function modelsFromGrokCliCache(
+  cliMeta: Map<string, GrokCliModelMeta> | null,
+): ModelDef[] {
+  if (!cliMeta) return [];
+  const models: ModelDef[] = [];
+  for (const [id, meta] of cliMeta) {
+    if (meta.hidden) continue;
+    const model = modelDefFromGrokCliId(id);
+    models.push({
+      ...model,
+      ...(meta.name ? { name: meta.name } : {}),
+      ...(meta.contextWindow
+        ? { contextWindow: meta.contextWindow, contextVerified: true }
+        : {}),
+      ...(meta.maxOutputTokens ? { maxOutputTokens: meta.maxOutputTokens } : {}),
+      canReason: meta.supportsReasoningEffort,
+      reasoningLevels: undefined,
+    });
+  }
+  return models;
 }
 
 // The grok CLI does not document its effort values anywhere machine-readable,
@@ -381,7 +517,7 @@ function modelDefFromGrokCliId(cliId: string, isDefault = false): ModelDef {
     canReason: isBuild || isReasoning || /composer/i.test(cliId),
     supportsAttachments: false,
     supportsStreaming: true,
-    tier: isReasoning ? 'reasoning' : isFast ? 'fast' : isBuild ? 'flagship' : 'standard',
+    tier: isReasoning ? 'reasoning' : isFast ? 'fast' : isBuild ? 'flagship' : 'fast',
   };
 }
 
@@ -514,6 +650,107 @@ export function parseGrokOutput(raw: string): {
 
   // 3) Plain text.
   return { text: trimmed };
+}
+
+// ── Grok tool-call tailer ────────────────────────────────────────────────────
+// grok's headless stdout has only thought/text/end — but the session's
+// updates.jsonl carries the full ACP tool stream (tool_call + tool_call_update
+// with name, rawInput file paths, kind, status). We tail it so every file
+// read/write/edit and other tool run shows up in the app, live.
+
+const GROK_SESSIONS_DIR = join(homedir(), '.grok', 'sessions');
+
+// grok encodes the cwd as a single path segment: %2F for '/', %2E for '.', etc.
+function encodeGrokCwd(cwd: string): string {
+  return encodeURIComponent(cwd).replace(/\./g, '%2E');
+}
+
+interface GrokToolTailer {
+  updatesPath: string;
+  offset: number;
+  /** toolCallId → { name, filePath } captured from the initial tool_call so a
+   *  later completed update can be tied back to it. */
+  calls: Map<string, { name: string; filePath?: string; content?: string; emitted: boolean }>;
+}
+
+function newGrokToolTailer(cwd: string, sessionId: string): GrokToolTailer {
+  const dir = join(GROK_SESSIONS_DIR, encodeGrokCwd(cwd), sessionId);
+  return { updatesPath: join(dir, 'updates.jsonl'), offset: 0, calls: new Map() };
+}
+
+const GROK_FILE_WRITE_TOOLS = new Set(['write', 'create_file', 'write_file']);
+const GROK_FILE_EDIT_TOOLS = new Set(['edit', 'edit_file', 'apply_patch', 'str_replace']);
+const GROK_FILE_READ_TOOLS = new Set(['read_file', 'read', 'view_file']);
+
+function drainGrokToolTailer(state: GrokToolTailer): ProviderEvent[] {
+  const events: ProviderEvent[] = [];
+  let text: string;
+  try {
+    if (!existsSync(state.updatesPath)) return events;
+    const size = statSync(state.updatesPath).size;
+    if (size <= state.offset) return events;
+    text = readFileSync(state.updatesPath, 'utf-8');
+  } catch {
+    return events;
+  }
+  const fresh = text.slice(state.offset);
+  const lastNl = fresh.lastIndexOf('\n');
+  if (lastNl === -1) return events;
+  state.offset += Buffer.byteLength(fresh.slice(0, lastNl + 1), 'utf-8');
+
+  for (const line of fresh.slice(0, lastNl).split('\n')) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed[0] !== '{') continue;
+    let update: Record<string, unknown>;
+    try {
+      const row = JSON.parse(trimmed) as { params?: { update?: Record<string, unknown> } };
+      update = row.params?.update ?? {};
+    } catch {
+      continue;
+    }
+    const kind = update.sessionUpdate as string | undefined;
+    const toolCallId = update.toolCallId as string | undefined;
+    if (!toolCallId) continue;
+    const raw = (update.rawInput ?? {}) as Record<string, unknown>;
+    const path = (raw.file_path ?? raw.target_file ?? raw.path) as string | undefined;
+
+    if (kind === 'tool_call') {
+      state.calls.set(toolCallId, {
+        name: String(update.title ?? 'tool'),
+        filePath: path,
+        content: typeof raw.content === 'string' ? raw.content : undefined,
+        emitted: false,
+      });
+    } else if (kind === 'tool_call_update') {
+      const call = state.calls.get(toolCallId) ?? { name: 'tool', emitted: false };
+      if (path && !call.filePath) call.filePath = path;
+      if (typeof raw.content === 'string' && !call.content) call.content = raw.content;
+      state.calls.set(toolCallId, call);
+
+      // Emit once, when the tool completes.
+      if (update.status === 'completed' && !call.emitted) {
+        call.emitted = true;
+        const name = call.name.toLowerCase();
+        if (call.filePath && (GROK_FILE_WRITE_TOOLS.has(name) || GROK_FILE_EDIT_TOOLS.has(name))) {
+          events.push({
+            type: 'file_edit',
+            filePath: call.filePath,
+            fileContent: call.content ?? '',
+            fileOperation: GROK_FILE_WRITE_TOOLS.has(name) ? 'create' : 'edit',
+          });
+        } else {
+          const detail = call.filePath ? ` ${call.filePath}` : '';
+          events.push({
+            type: 'tool_executed',
+            toolName: call.name,
+            toolInput: JSON.stringify(call.filePath ? { path: call.filePath } : {}),
+            toolOutput: GROK_FILE_READ_TOOLS.has(name) ? `Read${detail}` : `Ran ${call.name}${detail}`,
+          });
+        }
+      }
+    }
+  }
+  return events;
 }
 
 /** Serialize the conversation into a single prompt for the CLI's print mode. */

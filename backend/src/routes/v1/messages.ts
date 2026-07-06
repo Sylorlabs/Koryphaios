@@ -65,4 +65,59 @@ export const messageRoutes = new Elysia({ prefix: '/api/messages' })
         ),
       }),
     },
+  )
+  .post(
+    '/regenerate',
+    async ({ request, body, set }) => {
+      if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
+      const { kory, sessions, messages, wsManager } = getContext();
+      if (!(await sessions.get(body.sessionId))) {
+        set.status = 404;
+        return { ok: false, error: 'Session not found' };
+      }
+      const history = await messages.getAll(body.sessionId);
+      const targetIndex = history.findIndex((message) => message.id === body.messageId);
+      const target = history[targetIndex];
+      if (!target || target.role !== 'assistant') {
+        set.status = 404;
+        return { ok: false, error: 'Assistant response not found' };
+      }
+      let userIndex = targetIndex - 1;
+      while (userIndex >= 0 && history[userIndex]?.role !== 'user') userIndex--;
+      const prompt = history[userIndex];
+      if (!prompt) {
+        set.status = 409;
+        return { ok: false, error: 'Original prompt not found' };
+      }
+      const groupId = target.variantGroupId ?? `response-${prompt.id}`;
+      const variants = history.filter((message) => message.variantGroupId === groupId);
+      const nextIndex = Math.max(target.variantIndex ?? 0, ...variants.map((message) => message.variantIndex ?? 0)) + 1;
+      if (!target.variantGroupId) await messages.assignVariantGroup(target.id, groupId, 0);
+
+      kory.processTask(
+        body.sessionId,
+        prompt.content,
+        body.model ?? target.model,
+        body.reasoningLevel,
+        undefined,
+        undefined,
+        { groupId, index: nextIndex },
+      ).catch((error) => {
+        wsManager.broadcastToSession(body.sessionId, {
+          type: 'system.error',
+          payload: { error: error instanceof Error ? error.message : String(error) },
+          timestamp: Date.now(),
+          sessionId: body.sessionId,
+        });
+      });
+      return { ok: true, data: { groupId, index: nextIndex } };
+    },
+    {
+      body: t.Object({
+        sessionId: t.String(),
+        messageId: t.String(),
+        model: t.Optional(t.String()),
+        reasoningLevel: t.Optional(t.String()),
+      }),
+    },
   );

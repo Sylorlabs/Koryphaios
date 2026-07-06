@@ -1,6 +1,7 @@
 <script lang="ts">
   import { agentSettingsStore, DEFAULT_AGENT_SETTINGS } from "$lib/stores/agent-settings.svelte";
   import SettingsSwitch from './SettingsSwitch.svelte';
+  import { providersStore } from "$lib/stores/providers.svelte";
   import NumberStepper from './NumberStepper.svelte';
   import { 
     Bot, 
@@ -42,8 +43,51 @@
   const tabs = [
     { id: "settings" as const, label: "Agent Settings", icon: Bot, color: "var(--color-info)" },
     { id: "preferences" as const, label: "Preferences.md", icon: FileText, color: "var(--color-success)" },
-    { id: "enforcement" as const, label: "Rule Enforcement", icon: Gavel, color: "var(--color-error)" },
   ];
+
+  // ── Manager model access ────────────────────────────────────────────────
+  const MODEL_ACCESS_CATEGORIES = [
+    { id: 'general', label: 'General chat & orchestration' },
+    { id: 'frontend', label: 'Frontend work' },
+    { id: 'backend', label: 'Backend work' },
+    { id: 'review', label: 'Review' },
+    { id: 'test', label: 'Testing' },
+    { id: 'critic', label: 'Critic' },
+  ];
+  const availableModels = $derived.by(() => providersStore.statusList
+    .filter((p) => p.enabled && p.authenticated)
+    .flatMap((p) => (p.selectedModels?.length ? p.selectedModels : p.models ?? []))
+    .filter((m, i, all) => all.indexOf(m) === i));
+
+  function modelsFor(category: string): string[] {
+    return agentSettingsStore.settings.managerModelAccess?.[category] ?? [];
+  }
+  async function addCategoryModel(category: string, model: string) {
+    if (!model) return;
+    const current = modelsFor(category);
+    if (current.includes(model)) return;
+    await agentSettingsStore.saveSettings({
+      managerModelAccess: { ...agentSettingsStore.settings.managerModelAccess, [category]: [...current, model] },
+    });
+  }
+  async function removeCategoryModel(category: string, model: string) {
+    await agentSettingsStore.saveSettings({
+      managerModelAccess: {
+        ...agentSettingsStore.settings.managerModelAccess,
+        [category]: modelsFor(category).filter((m) => m !== model),
+      },
+    });
+  }
+
+  let managerNotesDraft = $state('');
+  let managerNotesDirty = $state(false);
+  $effect(() => {
+    if (!managerNotesDirty) managerNotesDraft = agentSettingsStore.settings.managerNotes ?? '';
+  });
+  async function saveManagerNotes() {
+    await agentSettingsStore.saveSettings({ managerNotes: managerNotesDraft });
+    managerNotesDirty = false;
+  }
 
   // Handler helpers
   async function toggleSetting(key: keyof typeof DEFAULT_AGENT_SETTINGS) {
@@ -256,6 +300,7 @@
               <div class="grid gap-3 sm:grid-cols-2">
                 <SettingsSwitch checked={agentSettingsStore.settings.contextPruningEnabled ?? true} label="Auto-Collapse Old Tool Output" description="Stub stale file reads, terminal output, and search results while keeping them recoverable." onchange={() => toggleSetting("contextPruningEnabled")} />
 
+                <SettingsSwitch checked={agentSettingsStore.settings.allowExternalPaths ?? false} label="External File Access" description="Let the chat image renderer and viewers serve files outside your home folder (external drives, mounts)." onchange={() => toggleSetting("allowExternalPaths")} />
                 <SettingsSwitch checked={agentSettingsStore.settings.contextSelfAwareness ?? true} label="Agent Context Awareness" description="Give the agent a live window-usage report so it can prune or compact deliberately." onchange={() => toggleSetting("contextSelfAwareness")} />
 
                 <SettingsSwitch checked={agentSettingsStore.settings.reasoningExpandedByDefault ?? true} label="Expand Full Reasoning by Default" description="Show reasoning automatically while keeping every block individually collapsible." onchange={() => toggleSetting("reasoningExpandedByDefault")} />
@@ -352,6 +397,67 @@
                 Reset to Defaults
               </button>
             </section>
+
+            <!-- Manager model access: which models Kory may pick per category -->
+            <section class="rounded-2xl p-5" style="background: var(--color-surface-2); border: 1px solid var(--color-border);">
+              <h4 class="text-sm font-semibold text-[var(--color-text-primary)]">Manager Model Access</h4>
+              <p class="mt-1 text-xs text-[var(--color-text-muted)]">Restrict which models the manager can auto-route to per category. Empty = all enabled models. Your explicit model pick in the composer always wins.</p>
+              <div class="mt-4 space-y-4">
+                {#each MODEL_ACCESS_CATEGORIES as cat (cat.id)}
+                  <div>
+                    <div class="flex items-center justify-between mb-1.5">
+                      <span class="text-xs font-medium text-[var(--color-text-secondary)]">{cat.label}</span>
+                      <select
+                        class="input text-[11px] py-1 px-2 max-w-[220px]"
+                        onchange={(e) => { void addCategoryModel(cat.id, (e.currentTarget as HTMLSelectElement).value); (e.currentTarget as HTMLSelectElement).value = ''; }}
+                      >
+                        <option value="">Add model…</option>
+                        {#each availableModels.filter((m) => !modelsFor(cat.id).includes(m)) as m (m)}
+                          <option value={m}>{m}</option>
+                        {/each}
+                      </select>
+                    </div>
+                    <div class="flex flex-wrap gap-1.5">
+                      {#if modelsFor(cat.id).length === 0}
+                        <span class="text-[10px] text-[var(--color-text-muted)] italic">All models allowed</span>
+                      {:else}
+                        {#each modelsFor(cat.id) as m (m)}
+                          <span class="flex items-center gap-1 rounded-full px-2.5 py-1 text-[10px] font-mono" style="background: var(--color-surface-3); color: var(--color-text-primary);">
+                            {m}
+                            <button type="button" class="opacity-60 hover:opacity-100 hover:text-red-400" onclick={() => void removeCategoryModel(cat.id, m)} aria-label={`Remove ${m}`}>×</button>
+                          </span>
+                        {/each}
+                      {/if}
+                    </div>
+                  </div>
+                {/each}
+              </div>
+            </section>
+
+            <!-- Free-form standing guidance for the manager -->
+            <section class="rounded-2xl p-5" style="background: var(--color-surface-2); border: 1px solid var(--color-border);">
+              <div class="flex items-center justify-between">
+                <div>
+                  <h4 class="text-sm font-semibold text-[var(--color-text-primary)]">Notes for the Manager</h4>
+                  <p class="mt-1 text-xs text-[var(--color-text-muted)]">Anything else Kory should always know — injected into every conversation.</p>
+                </div>
+                <button
+                  type="button"
+                  class="rounded-lg px-3 py-1.5 text-xs font-medium transition-colors"
+                  style="background: {managerNotesDirty ? 'var(--color-accent)' : 'var(--color-surface-3)'}; color: {managerNotesDirty ? 'var(--color-surface-0)' : 'var(--color-text-muted)'};"
+                  onclick={() => void saveManagerNotes()}
+                >
+                  {managerNotesDirty ? 'Save' : 'Saved'}
+                </button>
+              </div>
+              <textarea
+                class="mt-3 w-full min-h-[110px] rounded-xl p-3 text-xs font-mono resize-y focus:outline-none"
+                style="background: var(--color-surface-0); color: var(--color-text-primary); border: 1px solid var(--color-border);"
+                placeholder="e.g. Prefer bun over npm. Never touch the legacy/ folder. Answer in short paragraphs."
+                bind:value={managerNotesDraft}
+                oninput={() => (managerNotesDirty = true)}
+              ></textarea>
+            </section>
           </div>
         </div>
       </div>
@@ -432,169 +538,6 @@
         {/if}
       </div>
 
-    {:else if agentSettingsStore.activeTab === "enforcement"}
-      <div class="h-full min-h-0 overflow-y-auto p-6">
-        <div class="grid gap-6 xl:grid-cols-[minmax(0,1.05fr)_minmax(340px,0.95fr)]">
-          <div class="space-y-6">
-            <div class="rounded-2xl p-5" style="background: rgba(239, 68, 68, 0.1); border: 1px solid rgba(239, 68, 68, 0.2);">
-              <div class="flex items-start gap-3">
-                <AlertOctagon size={20} class="mt-0.5 text-red-400" />
-                <div>
-                  <h4 class="text-sm font-semibold text-red-400">Rules Are Always Enforced</h4>
-                  <p class="mt-1 text-xs text-[var(--color-text-muted)]">
-                    There is no option to disable rule enforcement. The Critic will always check project rules and `preferences.md`.
-                    The enforcement level only changes how strictly violations are treated.
-                  </p>
-                </div>
-              </div>
-            </div>
-
-            <section class="space-y-4 rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-1)] p-5">
-              <h4 class="text-sm font-semibold text-[var(--color-text-primary)]">Current Enforcement</h4>
-
-              <div class="grid gap-3 sm:grid-cols-2 xl:grid-cols-1">
-                <div class="flex items-center justify-between rounded-xl bg-[var(--color-surface-2)] p-4">
-                  <div class="flex items-center gap-3">
-                    <Shield size={18} style="color: var(--color-success);" />
-                    <div>
-                      <div class="text-sm font-medium text-[var(--color-text-primary)]">.koryphaios/rules/rules.md</div>
-                      <div class="text-xs text-[var(--color-text-muted)]">Always enforced on all code</div>
-                    </div>
-                  </div>
-                  <CheckCircle size={18} style="color: var(--color-success);" />
-                </div>
-
-                <div class="flex items-center justify-between rounded-xl bg-[var(--color-surface-2)] p-4">
-                  <div class="flex items-center gap-3">
-                    <FileText size={18} style="color: var(--color-success);" />
-                    <div>
-                      <div class="text-sm font-medium text-[var(--color-text-primary)]">preferences.md</div>
-                      <div class="text-xs text-[var(--color-text-muted)]">
-                        {agentSettingsStore.settings.preferencesEnabled ? 'Enabled and enforced' : 'Disabled'}
-                      </div>
-                    </div>
-                  </div>
-                  {#if agentSettingsStore.settings.preferencesEnabled}
-                    <CheckCircle size={18} style="color: var(--color-success);" />
-                  {:else}
-                    <EyeOff size={18} class="text-gray-400" />
-                  {/if}
-                </div>
-
-                <div class="flex items-center justify-between rounded-xl bg-[var(--color-surface-2)] p-4">
-                  <div class="flex items-center gap-3">
-                    <Bot size={18} style="color: var(--color-success);" />
-                    <div>
-                      <div class="text-sm font-medium text-[var(--color-text-primary)]">Critic Gate</div>
-                      <div class="text-xs text-[var(--color-text-muted)]">
-                        {agentSettingsStore.settings.criticGateEnabled ? 'Active, reviewing all changes' : 'Disabled'}
-                      </div>
-                    </div>
-                  </div>
-                  {#if agentSettingsStore.settings.criticGateEnabled}
-                    <CheckCircle size={18} style="color: var(--color-success);" />
-                  {:else}
-                    <EyeOff size={18} class="text-gray-400" />
-                  {/if}
-                </div>
-              </div>
-            </section>
-
-            <section class="space-y-4 rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-1)] p-5">
-              <h4 class="text-sm font-semibold text-[var(--color-text-primary)]">What Critic Checks</h4>
-
-              <div class="grid gap-3 sm:grid-cols-2">
-                <div class="flex items-center gap-2 rounded-xl bg-[var(--color-surface-2)] p-3 text-xs text-[var(--color-text-muted)]">
-                  <XCircle size={12} style="color: var(--color-error);" />
-                  <span>Forbidden patterns like `eval`, production `console.log`, and secrets</span>
-                </div>
-                <div class="flex items-center gap-2 rounded-xl bg-[var(--color-surface-2)] p-3 text-xs text-[var(--color-text-muted)]">
-                  <XCircle size={12} style="color: var(--color-error);" />
-                  <span>Security vulnerabilities</span>
-                </div>
-                <div class="flex items-center gap-2 rounded-xl bg-[var(--color-surface-2)] p-3 text-xs text-[var(--color-text-muted)]">
-                  <XCircle size={12} style="color: var(--color-error);" />
-                  <span>Performance regressions</span>
-                </div>
-                <div class="flex items-center gap-2 rounded-xl bg-[var(--color-surface-2)] p-3 text-xs text-[var(--color-text-muted)]">
-                  <AlertTriangle size={12} style="color: var(--color-warning);" />
-                  <span>Missing error handling</span>
-                </div>
-                <div class="flex items-center gap-2 rounded-xl bg-[var(--color-surface-2)] p-3 text-xs text-[var(--color-text-muted)]">
-                  <AlertTriangle size={12} style="color: var(--color-warning);" />
-                  <span>Missing documentation</span>
-                </div>
-                <div class="flex items-center gap-2 rounded-xl bg-[var(--color-surface-2)] p-3 text-xs text-[var(--color-text-muted)]">
-                  <AlertTriangle size={12} style="color: var(--color-warning);" />
-                  <span>Workflow violations from `preferences.md`</span>
-                </div>
-              </div>
-            </section>
-          </div>
-
-          <div class="space-y-6">
-            <section class="space-y-4 rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-1)] p-5">
-              <h4 class="text-sm font-semibold text-[var(--color-text-primary)]">Enforcement Levels</h4>
-
-              <div class="space-y-3 text-xs">
-                <div class="rounded-xl p-4" style="background: rgba(239, 68, 68, 0.1); border: 1px solid rgba(239, 68, 68, 0.2);">
-                  <div class="mb-2 flex items-center gap-2 font-medium text-red-400">
-                    <AlertOctagon size={14} />
-                    Strict
-                  </div>
-                  <p class="text-[var(--color-text-muted)]">
-                    Critic blocks any rule violation. All violations must be fixed before changes can be applied.
-                  </p>
-                </div>
-
-                <div class="rounded-xl p-4" style="background: rgba(245, 158, 11, 0.1); border: 1px solid rgba(245, 158, 11, 0.2);">
-                  <div class="mb-2 flex items-center gap-2 font-medium text-yellow-400">
-                    <AlertTriangle size={14} />
-                    Moderate
-                  </div>
-                  <p class="text-[var(--color-text-muted)]">
-                    Critic blocks critical violations and warns on others. Non-critical issues can be overridden with confirmation.
-                  </p>
-                </div>
-
-                <div class="rounded-xl p-4" style="background: rgba(59, 130, 246, 0.1); border: 1px solid rgba(59, 130, 246, 0.2);">
-                  <div class="mb-2 flex items-center gap-2 font-medium text-blue-400">
-                    <Eye size={14} />
-                    Lenient
-                  </div>
-                  <p class="text-[var(--color-text-muted)]">
-                    Critic only blocks critical violations. All other issues stay warnings for faster iteration.
-                  </p>
-                </div>
-              </div>
-            </section>
-
-            <section class="space-y-4 rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-1)] p-5">
-              <h4 class="text-sm font-semibold text-[var(--color-text-primary)]">Active Profile</h4>
-              <div class="grid gap-3 sm:grid-cols-3 xl:grid-cols-1">
-                <div class="rounded-xl bg-[var(--color-surface-2)] p-4">
-                  <div class="text-[10px] uppercase tracking-wide text-[var(--color-text-muted)]">Mode</div>
-                  <div class="mt-2 text-sm font-semibold capitalize text-[var(--color-text-primary)]">
-                    {agentSettingsStore.settings.ruleEnforcementLevel}
-                  </div>
-                </div>
-                <div class="rounded-xl bg-[var(--color-surface-2)] p-4">
-                  <div class="text-[10px] uppercase tracking-wide text-[var(--color-text-muted)]">Preferences</div>
-                  <div class="mt-2 text-sm font-semibold text-[var(--color-text-primary)]">
-                    {agentSettingsStore.settings.preferencesEnabled ? 'Included' : 'Ignored'}
-                  </div>
-                </div>
-                <div class="rounded-xl bg-[var(--color-surface-2)] p-4">
-                  <div class="text-[10px] uppercase tracking-wide text-[var(--color-text-muted)]">Gate</div>
-                  <div class="mt-2 text-sm font-semibold text-[var(--color-text-primary)]">
-                    {agentSettingsStore.settings.criticGateEnabled ? 'Reviewing' : 'Off'}
-                  </div>
-                </div>
-              </div>
-            </section>
-          </div>
-        </div>
-      </div>
     {/if}
   </div>
 </div>

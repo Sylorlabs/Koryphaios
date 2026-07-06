@@ -135,8 +135,8 @@ export function detectAgentClis(): AgentCliStatus[] {
     docsUrl: 'https://docs.anthropic.com/en/docs/claude-code',
   });
 
-  // ── Codex → `codex` provider. Koryphaios uses an isolated codex-home for the actual
-  // token; a machine-wide ~/.codex login is surfaced too. ──
+  // ── Codex → `codex` provider. detectCodexAuthToken now reads ~/.codex too,
+  // so a machine-wide codex login IS a Koryphaios login — no second auth. ──
   const koryCodexToken = !!detectCodexAuthToken();
   const machineCodex = detectCodexCLILogin();
   const codex = mk('codex', 'OpenAI Codex', ['codex'], 'codex', {
@@ -148,10 +148,8 @@ export function detectAgentClis(): AgentCliStatus[] {
         : null,
     autoEnabled: canAutoEnable('codex'),
     workingNote: koryCodexToken
-      ? 'Chats through the Codex provider.'
-      : machineCodex
-        ? 'Codex CLI login found — run the in-app Codex connect to link it to Koryphaios.'
-        : 'Codex CLI is installed but not logged in.',
+      ? 'Signed in — your ChatGPT subscription is used automatically.'
+      : 'Not signed in — connect Codex from Providers (no CLI needed).',
     docsUrl: 'https://developers.openai.com/codex/cli',
   });
 

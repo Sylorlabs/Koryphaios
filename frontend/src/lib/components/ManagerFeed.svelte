@@ -333,6 +333,7 @@
           bind:this={virtualList}
           items={filteredFeed}
           estimateHeight={estimateFeedHeight}
+          follow={autoScrollCtl.follow}
           class="h-full p-4 feed-scroll"
         >
           {#snippet row(entry, i)}
@@ -340,7 +341,7 @@
               <FeedEntry
                 {entry}
                 isSelected={false}
-                isExpanded={expandedGroups.has(entry.id)}
+                isExpanded={entry.type === 'agent_group' ? !expandedGroups.has(entry.id) : expandedGroups.has(entry.id)}
                 isStreaming={i === filteredFeed.length - 1 && isManagerStreaming}
                 onSelect={(e) => handleEntryClick(entry, e)}
                 onToggleGroup={() => toggleGroup(entry.id)}

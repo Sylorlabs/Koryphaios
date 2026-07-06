@@ -47,6 +47,8 @@ export const messages = sqliteTable('messages', {
   tokensIn: integer('tokens_in').default(0),
   tokensOut: integer('tokens_out').default(0),
   cost: real('cost').default(0),
+  variantGroupId: text('variant_group_id'),
+  variantIndex: integer('variant_index').default(0),
   createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
 });
 
@@ -416,6 +418,7 @@ export const notes = sqliteTable('notes', {
   tags: text('tags').notNull().default('[]'),           // JSON string array
   pinned: integer('pinned').notNull().default(0),       // boolean 0/1
   includeInContext: integer('include_in_context').notNull().default(0), // auto-inject into agent context
+  format: text('format').notNull().default('markdown'), // 'markdown' | 'html' — html renders in the sandboxed preview
   userId: text('user_id').references(() => users.id, { onDelete: 'cascade' }),
   createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
   updatedAt: integer('updated_at', { mode: 'timestamp' }).notNull(),

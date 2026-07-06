@@ -33,6 +33,7 @@
     Trash2,
     StickyNote,
     FolderOpen,
+    RefreshCw,
   } from 'lucide-svelte';
   import MemoryEditor from './MemoryEditor.svelte';
   import AgentSettings from './AgentSettings.svelte';
@@ -55,7 +56,8 @@
   import TeamAccessProfiles from './TeamAccessProfiles.svelte';
   import NumberStepper from './NumberStepper.svelte';
   import KorySelect from './KorySelect.svelte';
-  import { apiFetch, parseJsonResponse } from '$lib/api.svelte';
+  import { apiUrl } from '$lib/utils/api-url';
+import { apiFetch, parseJsonResponse } from '$lib/api.svelte';
   import { dndzone } from 'svelte-dnd-action';
   import { invoke } from '@tauri-apps/api/core';
 
@@ -442,11 +444,32 @@
   let billingLoading = $state(false);
   let billingCredits = $state<any>(null);
   let billingError = $state<string | null>(null);
+  let billingSpendView = $state<'api' | 'subscription' | 'all'>('api');
 
-  async function loadBillingCredits() {
+  const billingSpendOptions = [
+    { value: 'api', label: 'API spend', description: 'Metered API-key provider charges' },
+    { value: 'subscription', label: 'Subscription spend', description: '30-day API-equivalent inference value' },
+    { value: 'all', label: 'All', description: 'API spend plus subscription inference value' },
+  ];
+
+  function selectedSpendCents(): number {
+    if (billingSpendView === 'subscription') return billingCredits?.subscriptionInferenceCents ?? 0;
+    if (billingSpendView === 'all') return billingCredits?.allSpendCents ?? 0;
+    return billingCredits?.totalSpendCents ?? 0;
+  }
+
+  function formatTokens(n: number): string {
+    if (!Number.isFinite(n) || n <= 0) return '0';
+    if (n >= 1e9) return (n / 1e9).toFixed(1) + 'B';
+    if (n >= 1e6) return (n / 1e6).toFixed(1) + 'M';
+    if (n >= 1e3) return (n / 1e3).toFixed(1) + 'k';
+    return String(n);
+  }
+
+  async function loadBillingCredits(forceRefresh = false) {
     billingLoading = true; billingError = null;
     try {
-      const res = await apiFetch('/api/billing/credits');
+      const res = await apiFetch(apiUrl(`/api/billing/credits${forceRefresh ? '?refresh=1' : ''}`));
       if (!res.ok) { billingError = 'Billing API not available'; return; }
       const data = await parseJsonResponse(res);
       billingCredits = data;
@@ -473,7 +496,7 @@
         { id: 'providers', label: 'Providers', icon: Key },
         { id: 'appearance', label: 'Appearance', icon: Palette },
         { id: 'shortcuts', label: 'Shortcuts', icon: Keyboard },
-        { id: 'billing', label: 'Billing', icon: CreditCard, action: loadBillingCredits },
+        { id: 'billing', label: 'Billing', icon: CreditCard, action: () => loadBillingCredits(true) },
         { id: 'memory', label: 'Memory', icon: Brain },
         { id: 'agent', label: 'Agent', icon: Bot },
         { id: 'experimental', label: 'Advanced', icon: FlaskConical },
@@ -539,13 +562,15 @@
         {/if}
 
         <!-- Add a custom (bring-your-own) provider -->
-        <div class="rounded-xl border border-dashed border-[var(--color-border)] p-4 bg-[var(--color-surface-1)]">
-          <button type="button" onclick={() => (showAddCustom = !showAddCustom)} class="w-full flex items-center justify-between text-left">
+        <div class="rounded-xl border border-dashed border-[var(--color-border)] p-4 bg-[var(--color-surface-1)] transition-colors duration-150 hover:border-[var(--color-accent)] hover:bg-[var(--color-surface-2)]">
+          <button type="button" onclick={() => (showAddCustom = !showAddCustom)} class="group w-full flex items-center justify-between text-left cursor-pointer">
             <div class="flex items-center gap-2">
-              <Plus size={15} style="color: var(--color-accent);" />
-              <span class="text-sm font-semibold text-[var(--color-text-primary)]">Add a custom provider</span>
+              <span class="flex h-7 w-7 items-center justify-center rounded-lg bg-[var(--color-accent)]/10 transition-colors duration-150 group-hover:bg-[var(--color-accent)]/20">
+                <Plus size={15} style="color: var(--color-accent);" />
+              </span>
+              <span class="text-sm font-semibold text-[var(--color-text-primary)] transition-colors duration-150 group-hover:text-[var(--color-accent)]">Add a custom provider</span>
             </div>
-            <span class="text-[10px] text-[var(--color-text-muted)]">OpenAI-compatible &amp; more</span>
+            <span class="text-[10px] text-[var(--color-text-muted)] transition-colors duration-150 group-hover:text-[var(--color-text-secondary)]">OpenAI-compatible &amp; more</span>
           </button>
           {#if showAddCustom}
             <div class="mt-4 space-y-3 pt-4 border-t border-[var(--color-border)]">
@@ -1096,53 +1121,200 @@
 
       <!-- Billing Tab -->
       <div class={activeTab === 'billing' ? 'flex-1 overflow-y-auto px-6 py-5 space-y-8 w-full max-w-7xl mx-auto' : 'hidden'}>
+        {#if billingError}
+          <div class="p-4 rounded-xl border text-xs" style="border-color: var(--color-error); color: var(--color-error); background: rgba(239,68,68,0.08);">
+            Billing data unavailable: {billingError}
+            <button type="button" class="ml-2 underline" onclick={() => loadBillingCredits(true)}>Retry</button>
+          </div>
+        {/if}
+        <div class="flex items-center justify-between gap-4">
+          <div>
+            <h3 class="text-sm font-bold text-[var(--color-text-primary)]">Usage and billing</h3>
+            <p class="mt-1 text-[10px] text-[var(--color-text-muted)]">Recorded provider usage and account-reported balances</p>
+          </div>
+          <button
+            type="button"
+            class="inline-flex min-h-9 items-center gap-2 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-2)] px-3 py-2 text-xs font-semibold text-[var(--color-text-secondary)] transition-colors hover:border-[var(--color-accent)]/50 hover:text-[var(--color-text-primary)] disabled:opacity-50"
+            disabled={billingLoading}
+            onclick={() => loadBillingCredits(true)}
+            aria-label="Refresh billing data"
+          >
+            <RefreshCw size={14} class={billingLoading ? 'animate-spin' : ''} />
+            {billingLoading ? 'Refreshing…' : 'Refresh'}
+          </button>
+        </div>
         <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-          <div class="p-6 rounded-2xl bg-gradient-to-br from-[var(--color-surface-2)] to-[var(--color-surface-1)] border border-[var(--color-border)] shadow-xl relative overflow-hidden">
+          <div class="p-6 rounded-2xl bg-gradient-to-br from-[var(--color-surface-2)] to-[var(--color-surface-1)] border border-[var(--color-border)] shadow-xl relative">
             <div class="absolute -top-4 -right-4 w-24 h-24 bg-[var(--color-accent)]/5 rounded-full blur-3xl"></div>
-            <div class="text-[10px] text-[var(--color-text-muted)] uppercase tracking-widest font-bold mb-2">Total Workspace Spend</div>
+            <div class="relative mb-3 flex items-start justify-between gap-4">
+              <div>
+                <div class="text-[10px] text-[var(--color-text-muted)] uppercase tracking-widest font-bold">
+                  {billingSpendView === 'api' ? 'API Spend' : billingSpendView === 'subscription' ? 'Subscription Spend' : 'All Spend'}
+                </div>
+                <div class="mt-1 text-[9px] text-[var(--color-text-muted)]">
+                  {billingSpendView === 'api' ? 'Metered keys' : billingSpendView === 'subscription' ? '30-day API-equivalent value' : 'Metered plus 30-day inference value'}
+                </div>
+              </div>
+              <div class="w-52 shrink-0">
+                <KorySelect
+                  compact
+                  value={billingSpendView}
+                  label="Spend type"
+                  options={billingSpendOptions}
+                  onchange={(value) => billingSpendView = value as 'api' | 'subscription' | 'all'}
+                />
+              </div>
+            </div>
             <div class="text-4xl font-black text-[var(--color-text-primary)] flex items-baseline gap-1">
-              {#if billingCredits === null}
+              {#if billingLoading && !billingCredits}
                 <div class="h-10 w-32 bg-[var(--color-surface-3)] animate-pulse rounded-lg"></div>
               {:else}
-                <span class="text-2xl opacity-50">$</span>{(billingCredits.totalSpendCents / 100).toFixed(2)}
+                <span class="text-2xl opacity-50">$</span>{(selectedSpendCents() / 100).toFixed(2)}
               {/if}
             </div>
-            <p class="text-[10px] text-[var(--color-text-muted)] mt-4">Estimated from local token usage tracking</p>
+            <p class="text-[10px] text-[var(--color-text-muted)] mt-4">
+              {billingSpendView === 'subscription'
+                ? 'Inference value is not an amount charged by subscription providers'
+                : billingSpendView === 'all'
+                  ? 'Combined comparison value; subscription inference is not an amount charged'
+                  : 'Computed from recorded metered tokens at verified model prices'}
+            </p>
           </div>
 
           <div class="p-6 rounded-2xl bg-[var(--color-surface-2)] border border-[var(--color-border)]">
-            <div class="text-[10px] text-[var(--color-text-muted)] uppercase tracking-widest font-bold mb-2">Available Budget</div>
+            <div class="text-[10px] text-[var(--color-text-muted)] uppercase tracking-widest font-bold mb-2">Provider Balance</div>
             <div class="text-4xl font-black text-emerald-400 flex items-baseline gap-1">
-              {#if billingCredits === null}
+              {#if billingLoading && !billingCredits}
                 <div class="h-10 w-32 bg-[var(--color-surface-3)] animate-pulse rounded-lg"></div>
-              {:else}
+              {:else if typeof billingCredits?.remainingCents === 'number'}
                 <span class="text-2xl opacity-50">$</span>{(billingCredits.remainingCents / 100).toFixed(2)}
+              {:else}
+                <span class="text-2xl text-[var(--color-text-muted)] font-semibold">Not reported</span>
               {/if}
             </div>
-            <div class="mt-4 h-2 w-full bg-[var(--color-surface-3)] rounded-full overflow-hidden">
-              <div class="h-full bg-emerald-500 rounded-full" style="width: 75%"></div>
-            </div>
+            <p class="text-[10px] text-[var(--color-text-muted)] mt-4">
+              {typeof billingCredits?.remainingCents === 'number'
+                ? 'Live balance from your provider account'
+                : 'Your configured providers do not expose a queryable balance'}
+            </p>
           </div>
         </div>
 
+        <!-- CLI subscriptions: real local usage + quota burn -->
+        {#if billingCredits?.cliUsage?.length}
+          <div class="space-y-4">
+            <h3 class="text-sm font-bold text-[var(--color-text-primary)] ml-1">CLI Subscriptions — real usage</h3>
+            <div class="grid grid-cols-1 xl:grid-cols-2 gap-4">
+              {#each billingCredits.cliUsage as cli (cli.provider)}
+                <div class="p-5 bg-[var(--color-surface-2)] rounded-2xl border border-[var(--color-border)] space-y-4">
+                  <div class="flex items-center justify-between">
+                    <div class="flex items-center gap-3">
+                      <div class="w-8 h-8 rounded-lg bg-[var(--color-surface-3)] flex items-center justify-center p-1.5">
+                        <ProviderIcon provider={cli.provider} size={20} class="w-full h-full" />
+                      </div>
+                      <span class="text-sm font-semibold">{getProviderDisplayLabel(cli.provider)}</span>
+                      {#if cli.planType}
+                        <span class="px-2 py-0.5 rounded-full text-[9px] uppercase tracking-wider font-bold bg-[var(--color-surface-3)] text-[var(--color-text-muted)]">{cli.planType}</span>
+                      {/if}
+                    </div>
+                    <span class="text-[10px] text-[var(--color-text-muted)]">from the CLI's own logs</span>
+                  </div>
+
+                  {#each cli.quotas as q (q.label)}
+                    <div>
+                      <div class="flex items-center justify-between text-[11px] mb-1">
+                        <span class="text-[var(--color-text-secondary)] font-medium">{q.label} quota</span>
+                        <span class="font-mono font-bold" style="color: {q.usedPercent >= 90 ? 'var(--color-error)' : q.usedPercent >= 70 ? '#f59e0b' : 'var(--color-text-secondary)'};">
+                          {q.usedPercent.toFixed(0)}% burned{q.resetsAt ? ` · resets ${new Date(q.resetsAt).toLocaleString(undefined, { weekday: 'short', hour: 'numeric', minute: '2-digit' })}` : ''}
+                        </span>
+                      </div>
+                      <div class="h-2 w-full bg-[var(--color-surface-3)] rounded-full overflow-hidden">
+                        <div class="h-full rounded-full transition-all" style="width: {Math.min(100, q.usedPercent)}%; background: {q.usedPercent >= 90 ? 'var(--color-error)' : q.usedPercent >= 70 ? '#f59e0b' : 'var(--color-accent)'};"></div>
+                      </div>
+                    </div>
+                  {/each}
+
+                  <div class="grid grid-cols-4 gap-2 text-center">
+                    {#each cli.windows as w (w.period)}
+                      <div class="p-2.5 rounded-xl bg-[var(--color-surface-1)] border border-[var(--color-border)]">
+                        <div class="text-[9px] uppercase tracking-wider text-[var(--color-text-muted)] font-bold">{w.period}</div>
+                        <div class="mt-1 text-xs font-mono font-bold text-[var(--color-text-primary)]">{formatTokens(w.tokensIn + w.tokensOut)}</div>
+                        <div class="text-[9px] text-[var(--color-text-muted)]">tokens</div>
+                        <div class="mt-1 text-[10px] font-mono" style="color: var(--color-accent);">
+                          {w.inferenceValueUsd != null ? `$${w.inferenceValueUsd.toFixed(2)}` : '—'}
+                        </div>
+                        <div class="text-[9px] text-[var(--color-text-muted)]">inference value</div>
+                      </div>
+                    {/each}
+                  </div>
+
+                  {#if cli.byModel?.length}
+                    <div class="space-y-1">
+                      {#each cli.byModel.slice(0, 4) as m (m.model)}
+                        <div class="flex items-center justify-between text-[11px]">
+                          <span class="font-mono text-[var(--color-text-secondary)] truncate">{m.model}</span>
+                          <span class="font-mono text-[var(--color-text-muted)] shrink-0 ml-3">
+                            {formatTokens(m.tokensIn + m.tokensOut)} · {m.inferenceValueUsd != null ? `$${m.inferenceValueUsd.toFixed(2)}` : 'unpriced'}
+                          </span>
+                        </div>
+                      {/each}
+                    </div>
+                  {/if}
+                </div>
+              {/each}
+            </div>
+          </div>
+        {/if}
+
+        {#if billingCredits?.balances?.length}
+          <div class="space-y-4">
+            <h3 class="text-sm font-bold text-[var(--color-text-primary)] ml-1">Live Account Balances</h3>
+            <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
+              {#each billingCredits.balances as bal (bal.provider)}
+                <div class="p-4 bg-[var(--color-surface-2)] rounded-xl border border-[var(--color-border)] text-center">
+                  <div class="w-8 h-8 mx-auto rounded-lg bg-[var(--color-surface-3)] flex items-center justify-center p-1.5 mb-2">
+                    <ProviderIcon provider={bal.provider} size={20} class="w-full h-full" />
+                  </div>
+                  <div class="text-lg font-black font-mono text-emerald-400">
+                    {bal.availableUsd != null ? `$${bal.availableUsd.toFixed(2)}` : '—'}
+                  </div>
+                  <div class="text-[9px] uppercase tracking-wider text-[var(--color-text-muted)] font-bold mt-1">{getProviderDisplayLabel(bal.provider)}</div>
+                </div>
+              {/each}
+            </div>
+          </div>
+        {/if}
+
         <div class="space-y-4">
-          <h3 class="text-sm font-bold text-[var(--color-text-primary)] ml-1">Consumption by Provider</h3>
+          <h3 class="text-sm font-bold text-[var(--color-text-primary)] ml-1">API Consumption by Provider</h3>
           <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            {#if billingCredits?.byProvider}
+            {#if billingCredits?.byProvider?.length}
               {#each billingCredits.byProvider as prov (prov.name)}
                 <div class="flex items-center justify-between p-4 bg-[var(--color-surface-2)] rounded-xl border border-[var(--color-border)]">
                   <div class="flex items-center gap-3">
                     <div class="w-8 h-8 rounded-lg bg-[var(--color-surface-3)] flex items-center justify-center p-1.5 shrink-0">
                       <ProviderIcon provider={prov.name} size={20} class="w-full h-full" />
                     </div>
-                    <span class="text-xs font-semibold">{getProviderDisplayLabel(prov.name)}</span>
+                    <div>
+                      <span class="text-xs font-semibold">{getProviderDisplayLabel(prov.name)}</span>
+                      <div class="text-[10px] text-[var(--color-text-muted)] font-mono">{formatTokens((prov.tokensIn ?? 0) + (prov.tokensOut ?? 0))} tokens</div>
+                    </div>
                   </div>
-                  <div class="text-xs font-mono font-bold text-[var(--color-text-secondary)]">${(prov.spendCents / 100).toFixed(3)}</div>
+                  <div class="text-right">
+                    <div class="text-xs font-mono font-bold text-[var(--color-text-secondary)]">
+                      {prov.subscription ? 'subscription' : `$${((prov.spendCents ?? 0) / 100).toFixed(3)} spent`}
+                    </div>
+                    {#if billingCredits?.balances?.find((b: any) => b.provider === prov.name)?.availableUsd != null}
+                      <div class="text-[10px] font-mono text-emerald-400">
+                        ${billingCredits.balances.find((b: any) => b.provider === prov.name).availableUsd.toFixed(2)} left
+                      </div>
+                    {/if}
+                  </div>
                 </div>
               {/each}
             {:else}
               <div class="col-span-full py-12 text-center border-2 border-dashed border-[var(--color-border)] rounded-2xl">
-                <p class="text-xs text-[var(--color-text-muted)]">No usage data recorded yet</p>
+                <p class="text-xs text-[var(--color-text-muted)]">No API usage recorded yet — chats through metered providers will appear here</p>
               </div>
             {/if}
           </div>

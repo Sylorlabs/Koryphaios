@@ -46,6 +46,19 @@ const DEFAULT_CONFIG: SupervisorConfig = {
   logRetentionDays: 7,
 };
 
+export interface ProcessLifecycleEvent {
+  type: 'started' | 'exited';
+  id: string;
+  name: string;
+  command: string;
+  sessionId?: string;
+  pid?: number;
+  exitCode?: number;
+  status?: string;
+  willRestart?: boolean;
+  logsTail?: string;
+}
+
 export class ProcessSupervisor {
   private static instance: ProcessSupervisor;
   private config: SupervisorConfig;
@@ -61,6 +74,29 @@ export class ProcessSupervisor {
   static getInstance(config?: Partial<SupervisorConfig>): ProcessSupervisor {
     if (!ProcessSupervisor.instance) ProcessSupervisor.instance = new ProcessSupervisor(config);
     return ProcessSupervisor.instance;
+  }
+
+  // ── Lifecycle listeners ────────────────────────────────────────────────
+  // The manager subscribes to surface background terminals in chat and to
+  // wake the agent when a process it was waiting on finishes.
+  private lifecycleListeners: Array<(e: ProcessLifecycleEvent) => void> = [];
+
+  onLifecycle(cb: (e: ProcessLifecycleEvent) => void): void {
+    this.lifecycleListeners.push(cb);
+  }
+
+  private emitLifecycle(e: ProcessLifecycleEvent): void {
+    for (const cb of this.lifecycleListeners) {
+      try { cb(e); } catch { /* listener errors must not kill supervision */ }
+    }
+  }
+
+  /** True if any supervised process for this session is still running. */
+  hasRunningForSession(sessionId: string): boolean {
+    for (const p of this.processes.values()) {
+      if (p.sessionId === sessionId && p.status === 'running') return true;
+    }
+    return false;
   }
 
   async initialize(): Promise<void> {
@@ -98,6 +134,7 @@ export class ProcessSupervisor {
     await logProcessEvent(id, 'start_requested', { command: options.command });
     const proc = Bun.spawn(['bash', '-c', options.command], {
       cwd: options.cwd,
+      stdin: 'pipe',
       stdout: 'pipe',
       stderr: 'pipe',
     });
@@ -112,11 +149,111 @@ export class ProcessSupervisor {
       lastOutputAt: now,
     };
     this.processes.set(id, supervised);
+    this.emitLifecycle({
+      type: 'started',
+      id,
+      name: supervised.name,
+      command: supervised.command,
+      sessionId: supervised.sessionId,
+      pid: supervised.pid,
+      status: 'running',
+    });
     this.readStream(proc.stdout.getReader(), id, 'stdout');
     this.readStream(proc.stderr.getReader(), id, 'stderr');
     this.monitorExit(supervised);
     this.startHealthChecks(id);
     return supervised;
+  }
+
+  /**
+   * Track a background command started by an agentic CLI harness (e.g. Claude
+   * Code's native background Bash). We didn't spawn it — no pid/stdin — but it
+   * must appear in the background-terminals UI with live logs (tailed from the
+   * CLI's own output file). Exit is inferred when the output goes quiet.
+   */
+  async registerExternal(options: {
+    name: string;
+    command: string;
+    sessionId: string;
+    outputFile?: string;
+  }): Promise<string> {
+    const id = `ext-${nanoid(10)}`;
+    const now = Date.now();
+    const persisted: PersistedProcess = {
+      id,
+      name: options.name,
+      command: options.command,
+      cwd: process.cwd(),
+      pid: 0,
+      sessionId: options.sessionId,
+      status: 'running',
+      restartCount: 0,
+      maxRestarts: 0,
+      restartPolicy: 'never',
+      createdAt: now,
+      updatedAt: now,
+      metadata: JSON.stringify({ external: true, outputFile: options.outputFile }),
+    };
+    await persistProcess(persisted);
+    await logProcessEvent(id, 'external_registered', { command: options.command });
+    const supervised: SupervisedProcess = {
+      ...persisted,
+      stdout: '',
+      stderr: '',
+      lastOutputAt: now,
+    };
+    this.processes.set(id, supervised);
+    this.emitLifecycle({
+      type: 'started',
+      id,
+      name: supervised.name,
+      command: supervised.command,
+      sessionId: supervised.sessionId,
+      pid: 0,
+      status: 'running',
+    });
+    // Tail the CLI's output file for logs + quiet-exit inference.
+    if (options.outputFile) {
+      const EXTERNAL_QUIET_EXIT_MS = 90_000;
+      let lastSize = 0;
+      supervised.healthCheckTimer = setInterval(() => {
+        void (async () => {
+          const current = this.processes.get(id);
+          if (!current || current.status !== 'running') return;
+          try {
+            const f = Bun.file(options.outputFile!);
+            if (await f.exists()) {
+              const size = f.size;
+              if (size > lastSize) {
+                lastSize = size;
+                current.lastOutputAt = Date.now();
+                const text = await f.text();
+                current.stdout = text.slice(-this.MAX_LOG_SIZE);
+              }
+            }
+          } catch {
+            /* file unreadable this tick */
+          }
+          if (Date.now() - current.lastOutputAt > EXTERNAL_QUIET_EXIT_MS) {
+            current.status = 'exited';
+            current.endedAt = Date.now();
+            void updateProcessStatus(id, 'exited', { endedAt: current.endedAt });
+            this.cleanupTimers(current);
+            this.processes.delete(id);
+            this.emitLifecycle({
+              type: 'exited',
+              id,
+              name: current.name,
+              command: current.command,
+              sessionId: current.sessionId,
+              status: 'exited',
+              logsTail: current.stdout.slice(-1_000),
+            });
+          }
+        })();
+      }, 2_000) as unknown as Timer;
+    }
+    return id;
   }
 
   async killProcess(id: string, signal: string = 'SIGTERM'): Promise<boolean> {
@@ -126,12 +263,27 @@ export class ProcessSupervisor {
       await logProcessEvent(id, 'kill_requested', { signal });
       proc.signal = signal;
       if (proc.proc) proc.proc.kill(signal as any);
-      else process.kill(proc.pid, signal as any);
+      // External (CLI-owned) entries have no pid we own — dismiss, never
+      // signal pid 0 (that would hit our whole process group).
+      else if (proc.pid > 0) process.kill(proc.pid, signal as any);
       proc.status = 'killed';
       proc.endedAt = Date.now();
       await updateProcessStatus(id, 'killed', { signal, endedAt: proc.endedAt });
       this.cleanupTimers(proc);
       this.processes.delete(id);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  async writeInput(id: string, input: string): Promise<boolean> {
+    const supervised = this.processes.get(id);
+    if (!supervised?.proc?.stdin || supervised.status !== 'running') return false;
+    try {
+      supervised.proc.stdin.write(input);
+      await supervised.proc.stdin.flush?.();
+      await logProcessEvent(id, 'stdin_written', { bytes: Buffer.byteLength(input) });
       return true;
     } catch {
       return false;
@@ -208,8 +360,21 @@ export class ProcessSupervisor {
     });
     await logProcessEvent(proc.id, 'process_exited', { code, error });
     this.cleanupTimers(proc);
-    if (!wasKilled && this.shouldRestart(proc, isCrash)) this.scheduleRestart(proc);
+    const willRestart = !wasKilled && this.shouldRestart(proc, isCrash);
+    if (willRestart) this.scheduleRestart(proc);
     else this.processes.delete(proc.id);
+    this.emitLifecycle({
+      type: 'exited',
+      id: proc.id,
+      name: proc.name,
+      command: proc.command,
+      sessionId: proc.sessionId,
+      pid: proc.pid,
+      exitCode: code ?? undefined,
+      status,
+      willRestart,
+      logsTail: [proc.stdout, proc.stderr].filter(Boolean).join('\n').slice(-2000) || undefined,
+    });
   }
 
   private shouldRestart(proc: any, isCrash: boolean): boolean {

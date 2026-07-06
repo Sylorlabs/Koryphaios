@@ -13,8 +13,8 @@
 
 import type { ProviderConfig, ModelDef } from '@koryphaios/shared';
 import { spawn } from 'node:child_process';
-import { readFileSync, realpathSync, statSync, readdirSync, existsSync } from 'node:fs';
-import { homedir } from 'node:os';
+import { readFileSync, realpathSync, statSync, readdirSync, existsSync, writeFileSync } from 'node:fs';
+import { homedir, tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { whichBinary } from './cli-detection';
 import {
@@ -493,6 +493,43 @@ const DISALLOWED_TOOLS = ['Task', 'Agent'].join(',');
 
 // Appended to every system prompt so the model routes delegation through
 // Koryphaios instead of trying its (blocked) native sub-agent tools.
+
+// ── Session isolation ─────────────────────────────────────────────────────
+// Koryphaios's headless `claude` runs must NOT commingle with the user's own
+// interactive `claude` sessions. Claude Code writes session transcripts to
+// $CLAUDE_CONFIG_DIR/projects/<cwd>/*.jsonl (default ~/.claude). We point it at
+// a Koryphaios-owned dir so our runs never appear in the user's `claude
+// --resume` list (and theirs never appear in ours), while symlinking the auth
+// files so the shared subscription login still works.
+let cachedClaudeConfigDir: string | null = null;
+export function getKoryphaiosClaudeConfigDir(): string {
+  if (cachedClaudeConfigDir) return cachedClaudeConfigDir;
+  const dir = join(homedir(), '.koryphaios', 'claude-home');
+  try {
+    const { mkdirSync, symlinkSync, rmSync, lstatSync } = require('node:fs') as typeof import('node:fs');
+    mkdirSync(dir, { recursive: true });
+    // Share auth (and settings) with the user's real ~/.claude via symlinks —
+    // isolation is about SESSIONS, not credentials.
+    const realHome = join(homedir(), '.claude');
+    for (const file of ['.credentials.json', 'settings.json']) {
+      const src = join(realHome, file);
+      const dst = join(dir, file);
+      if (!existsSync(src)) continue;
+      try {
+        // Refresh the link each boot in case the real path changed.
+        try { if (lstatSync(dst)) rmSync(dst, { force: true }); } catch { /* no existing link */ }
+        symlinkSync(src, dst);
+      } catch { /* symlink unsupported/exists — best effort */ }
+    }
+  } catch {
+    /* fall back to default ~/.claude if we can't build the isolated dir */
+    return join(homedir(), '.claude');
+  }
+  cachedClaudeConfigDir = dir;
+  return dir;
+}
+
+
 const HARNESS_SYSTEM_NOTE =
   'You are running inside the Koryphaios orchestrator. Never spawn sub-agents or delegate ' +
   'with native Task/Agent tools (they are disabled); if work should be parallelized or ' +
@@ -628,6 +665,8 @@ export class ClaudeCodeProvider implements Provider {
     // back to the MAX_THINKING_TOKENS env var for levels the flag can't express
     // ('none', numeric budgets) or for older CLIs without --effort.
     const env: NodeJS.ProcessEnv = { ...process.env };
+    // Isolate Koryphaios's claude sessions from the user's interactive ones.
+    env.CLAUDE_CONFIG_DIR = getKoryphaiosClaudeConfigDir();
     let appliedEffort: string | null = null;
     if (request.reasoningLevel) {
       const cliLevels = await detectEffortLevels();
@@ -962,6 +1001,21 @@ function buildPrompt(messages: ProviderMessage[]): string {
   return lines.join('\n\n');
 }
 
+
+/** Persist a pasted image to a temp file so the CLI's own tools can view it —
+ *  the piped prompt is text-only, but the agent has file access. */
+function imageBlockToTempFile(imageData: string | undefined, mime: string | undefined): string {
+  if (!imageData) return '[image attachment omitted — no data]';
+  try {
+    const ext = mime === 'image/jpeg' ? 'jpg' : mime === 'image/webp' ? 'webp' : mime === 'image/gif' ? 'gif' : 'png';
+    const file = join(tmpdir(), `kory-attach-${Math.random().toString(36).slice(2, 10)}.${ext}`);
+    writeFileSync(file, Buffer.from(imageData, 'base64'));
+    return `[image attached — saved to ${file}; use your image/file viewing tool to look at it]`;
+  } catch {
+    return '[image attachment omitted — could not persist to disk]';
+  }
+}
+
 function flattenContent(content: string | ProviderContentBlock[]): string {
   if (typeof content === 'string') return content;
   const parts: string[] = [];
@@ -973,7 +1027,7 @@ function flattenContent(content: string | ProviderContentBlock[]): string {
     } else if (block.type === 'tool_result') {
       parts.push(`[tool result: ${block.toolOutput ?? ''}]`);
     } else if (block.type === 'image') {
-      parts.push('[image attachment omitted — Claude Code harness is text-only]');
+      parts.push(imageBlockToTempFile(block.imageData, block.imageMimeType));
     }
   }
   return parts.join('\n');

@@ -216,6 +216,8 @@ async function fetchMessages(
     createdAt: number;
     model?: string;
     cost?: number;
+    variantGroupId?: string;
+    variantIndex?: number;
   }>
 > {
   try {

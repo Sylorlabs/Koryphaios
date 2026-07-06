@@ -78,21 +78,80 @@ export function createCodexCLIAuthMarker(): string {
  * Detects the active ChatGPT/Codex access token from Koryphaios's isolated Codex auth state.
  * This is intentionally separate from the user's machine-wide Codex login.
  */
+export const CODEX_OAUTH_CLIENT_ID = 'app_EMoamEEZ73f0CkXaXp7hrann';
+const CODEX_OAUTH_TOKEN_URL = 'https://auth.openai.com/oauth/token';
+
+/** The auth.json Koryphaios should use: its own store first, else the user's
+ *  machine-wide Codex login — being signed into the codex CLI means you are
+ *  signed into Koryphaios; no second login. */
+function codexAuthPaths(): string[] {
+  const paths = [join(KORY_CODEX_HOME, 'auth.json')];
+  const home = homeDir();
+  if (home) paths.push(join(home, '.codex', 'auth.json'));
+  return paths;
+}
+
+function readCodexAuthFile(path: string): { tokens?: { access_token?: string; refresh_token?: string } } | null {
+  try {
+    return JSON.parse(readFileSync(path, 'utf-8'));
+  } catch {
+    return null;
+  }
+}
+
+/** Refresh the ChatGPT/Codex token natively (no codex binary) and persist the
+ *  new pair back to the auth.json it came from. Returns the fresh token. */
+export async function refreshCodexAuthToken(): Promise<string | null> {
+  for (const path of codexAuthPaths()) {
+    if (!existsSync(path)) continue;
+    const data = readCodexAuthFile(path);
+    const refreshToken = data?.tokens?.refresh_token;
+    if (!refreshToken) continue;
+    try {
+      const res = await fetch(CODEX_OAUTH_TOKEN_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          grant_type: 'refresh_token',
+          client_id: CODEX_OAUTH_CLIENT_ID,
+          refresh_token: refreshToken,
+          scope: 'openid profile email',
+        }),
+        signal: AbortSignal.timeout(15_000),
+      });
+      if (!res.ok) continue;
+      const j = (await res.json()) as { access_token?: string; refresh_token?: string; id_token?: string };
+      if (!j.access_token) continue;
+      const merged = {
+        ...(data as Record<string, unknown>),
+        tokens: {
+          ...(data?.tokens ?? {}),
+          access_token: j.access_token,
+          ...(j.refresh_token ? { refresh_token: j.refresh_token } : {}),
+          ...(j.id_token ? { id_token: j.id_token } : {}),
+        },
+        last_refresh: new Date().toISOString(),
+      };
+      const { writeFileSync } = require('node:fs') as typeof import('node:fs');
+      writeFileSync(path, JSON.stringify(merged, null, 2), 'utf-8');
+      clearCachedToken('codex-cli-auth');
+      return j.access_token;
+    } catch {
+      /* try the next store */
+    }
+  }
+  return null;
+}
+
 export function detectCodexAuthToken(): string | null {
   return getCachedToken('codex-cli-auth', () => {
-    const authPath = join(KORY_CODEX_HOME, 'auth.json');
-    if (!existsSync(authPath)) return null;
-
-    try {
-      const data = JSON.parse(readFileSync(authPath, 'utf-8'));
-      const accessToken = data?.tokens?.access_token;
+    for (const authPath of codexAuthPaths()) {
+      if (!existsSync(authPath)) continue;
+      const accessToken = readCodexAuthFile(authPath)?.tokens?.access_token;
       if (typeof accessToken === 'string' && accessToken.trim()) {
         return accessToken.trim();
       }
-    } catch {
-      // Ignore malformed auth files and treat as signed out.
     }
-
     return null;
   });
 }

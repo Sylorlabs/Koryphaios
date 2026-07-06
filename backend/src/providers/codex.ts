@@ -1,11 +1,10 @@
 import type { ProviderConfig, ModelDef } from '@koryphaios/shared';
-import { execFileSync, spawn, type ChildProcessByStdio } from 'node:child_process';
+import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, unlinkSync } from 'node:fs';
 import { join } from 'node:path';
-import type { Readable } from 'node:stream';
 import { serverLog } from '../logger';
 import { withRetry, withTimeoutSignal } from './utils';
-import { detectCodexAuthToken, getKoryCodexHome, isCodexCLIAuthMarker, clearCachedToken } from './auth-utils';
+import { detectCodexAuthToken, refreshCodexAuthToken, CODEX_OAUTH_CLIENT_ID, getKoryCodexHome, isCodexCLIAuthMarker, clearCachedToken } from './auth-utils';
 import {
   type Provider,
   type ProviderContentBlock,
@@ -430,7 +429,9 @@ export class CodexProvider implements Provider {
     if (result instanceof Error && (result as Error & { status?: number }).status === 401) {
       serverLog.info({ provider: 'codex' }, 'Received 401 from Codex — attempting token recovery');
       clearCachedToken('codex-cli-auth');
-      const freshToken = detectCodexAuthToken();
+      // Re-read stored tokens first; if still rejected, refresh natively via
+      // auth.openai.com (no codex binary involved).
+      const freshToken = detectCodexAuthToken() ?? (await refreshCodexAuthToken());
       if (freshToken) {
         serverLog.info({ provider: 'codex' }, 'Recovered fresh Codex auth token — retrying request');
         result = await attempt();
@@ -645,341 +646,187 @@ export interface CodexDeviceAuthPoll {
 }
 
 type CodexAuthSession = {
-  id: string;
-  userCode?: string;
-  verificationUri?: string;
+  id: string; // device_auth_id from auth.openai.com
+  userCode: string;
   expiresAt: number;
   intervalMs: number;
-  status: 'starting' | 'pending' | 'connected' | 'error';
-  error?: string;
-  process: ChildProcessByStdio<null, Readable, Readable>;
-  logPath: string;
 };
 
+// Native ChatGPT/Codex device-auth — the SAME endpoints `codex login
+// --device-auth` uses (verified live), spoken directly: no codex binary, no
+// terminal scraping. The user enters the code at CODEX_DEVICE_URL; we poll
+// until tokens arrive, then persist them in Koryphaios's codex-home.
 const CODEX_DEVICE_URL = 'https://auth.openai.com/codex/device';
-const CODEX_DEVICE_CODE_REGEX = /\b([A-Z0-9]{4,5}-[A-Z0-9]{4,6})\b/;
-const CODEX_DEVICE_URL_REGEX = /https:\/\/auth\.openai\.com\/codex\/device\b/;
-const ANSI_ESCAPE_REGEX = /\x1B\[[0-9;]*m/g;
+const CODEX_DEVICEAUTH_BASE = 'https://auth.openai.com/api/accounts/deviceauth';
+const CODEX_TOKEN_URL = 'https://auth.openai.com/oauth/token';
 const CODEX_DEVICE_EXPIRES_MS = 15 * 60_000;
 const CODEX_DEVICE_INTERVAL_MS = 5_000;
 const codexAuthSessions = new Map<string, CodexAuthSession>();
 
-function summarizeCodexAuthLog(logPath: string): string | undefined {
-  try {
-    if (!existsSync(logPath)) return undefined;
-    const raw = readFileSync(logPath, 'utf-8').replace(ANSI_ESCAPE_REGEX, '');
-    const lines = raw
-      .split(/\r?\n/)
-      .map((line) => line.trim())
-      .filter(Boolean);
-    if (lines.length === 0) return undefined;
-    return lines.slice(-8).join(' | ');
-  } catch (error: any) {
-    return `failed to read auth log: ${error?.message ?? String(error)}`;
-  }
-}
-
-function describeCodexAuthSession(session: CodexAuthSession): Record<string, unknown> {
-  return {
-    provider: 'codex',
-    sessionId: session.id,
-    status: session.status,
-    userCode: session.userCode,
-    verificationUri: session.verificationUri,
-    expiresAt: new Date(session.expiresAt).toISOString(),
-    logPath: session.logPath,
-    error: session.error,
-    logTail: summarizeCodexAuthLog(session.logPath),
-  };
-}
-
-function getReusableCodexAuthSession(): CodexAuthSession | null {
-  const now = Date.now();
-  for (const session of codexAuthSessions.values()) {
-    if (
-      session.expiresAt > now &&
-      (session.status === 'starting' || session.status === 'pending') &&
-      session.userCode &&
-      session.verificationUri
-    ) {
-      return session;
-    }
-  }
-  return null;
-}
-
-function cleanupCodexAuthSession(id: string): void {
-  const session = codexAuthSessions.get(id);
-  if (!session) return;
-  codexAuthSessions.delete(id);
-  if (!session.process.killed) {
-    session.process.kill('SIGTERM');
-  }
-}
-
-function scheduleCodexAuthSessionCleanup(id: string, delayMs = CODEX_DEVICE_EXPIRES_MS): void {
-  setTimeout(() => {
-    cleanupCodexAuthSession(id);
-  }, delayMs).unref?.();
-}
-
 export function resetCodexDeviceAuthSessions(): void {
-  for (const sessionId of [...codexAuthSessions.keys()]) {
-    cleanupCodexAuthSession(sessionId);
-  }
+  codexAuthSessions.clear();
   serverLog.info({ provider: 'codex' }, 'Reset Codex device auth sessions');
 }
 
-/**
- * Delete device-auth log files older than 1 hour to prevent unbounded accumulation.
- */
-function cleanStaleAuthLogs(logDir: string): void {
-  const maxAgeMs = 60 * 60_000; // 1 hour
-  const cutoff = Date.now() - maxAgeMs;
+function persistCodexTokens(tokens: {
+  id_token?: string;
+  access_token?: string;
+  refresh_token?: string;
+  account_id?: string;
+}): void {
+  const home = getKoryCodexHome();
+  mkdirSync(home, { recursive: true });
+  const authPath = join(home, 'auth.json');
+  let existing: Record<string, unknown> = {};
   try {
-    for (const entry of readdirSync(logDir)) {
-      if (!entry.startsWith('device-auth-') || !entry.endsWith('.log')) continue;
-      const filePath = join(logDir, entry);
-      try {
-        if (statSync(filePath).mtimeMs < cutoff) {
-          unlinkSync(filePath);
-        }
-      } catch {
-        // Ignore individual file cleanup failures.
-      }
-    }
-  } catch {
-    // Directory may not exist yet or be unreadable — safe to ignore.
-  }
+    if (existsSync(authPath)) existing = JSON.parse(readFileSync(authPath, 'utf-8'));
+  } catch { /* rewrite from scratch */ }
+  const prevTokens = (existing.tokens as Record<string, unknown> | undefined) ?? {};
+  const merged = {
+    ...existing,
+    auth_mode: 'chatgpt',
+    OPENAI_API_KEY: (existing.OPENAI_API_KEY as string | null | undefined) ?? null,
+    tokens: {
+      ...prevTokens,
+      ...(tokens.id_token ? { id_token: tokens.id_token } : {}),
+      ...(tokens.access_token ? { access_token: tokens.access_token } : {}),
+      ...(tokens.refresh_token ? { refresh_token: tokens.refresh_token } : {}),
+      ...(tokens.account_id ? { account_id: tokens.account_id } : {}),
+    },
+    last_refresh: new Date().toISOString(),
+  };
+  const { writeFileSync } = require('node:fs') as typeof import('node:fs');
+  writeFileSync(authPath, JSON.stringify(merged, null, 2), 'utf-8');
+  clearCachedToken('codex-cli-auth');
 }
 
 export async function startCodexDeviceAuth(): Promise<CodexDeviceAuthStart> {
-  return await new Promise((resolve, reject) => {
-    const reusable = getReusableCodexAuthSession();
-    if (reusable) {
-      serverLog.info(
-        {
-          ...describeCodexAuthSession(reusable),
-          expiresInSeconds: Math.max(1, Math.floor((reusable.expiresAt - Date.now()) / 1000)),
-        },
-        'Reusing pending Codex device auth session',
-      );
-      resolve({
-        deviceAuthId: reusable.id,
-        userCode: reusable.userCode!,
-        verificationUri: reusable.verificationUri!,
-        verificationUriComplete: reusable.verificationUri!,
-        expiresIn: Math.max(1, Math.floor((reusable.expiresAt - Date.now()) / 1000)),
-        interval: Math.floor(reusable.intervalMs / 1000),
-      });
-      return;
-    }
-
-    const codexHome = getKoryCodexHome();
-    mkdirSync(codexHome, { recursive: true });
-    const logDir = join(codexHome, 'log');
-    mkdirSync(logDir, { recursive: true });
-    cleanStaleAuthLogs(logDir);
-    const sessionId = crypto.randomUUID();
-    const logPath = join(logDir, `device-auth-${sessionId}.log`);
-    serverLog.info(
-      {
-        provider: 'codex',
-        sessionId,
-        codexHome,
-        logPath,
-        command: 'codex login --device-auth',
-      },
-      'Starting Codex device auth session',
-    );
-    const proc = spawn('script', ['-q', '-f', logPath, '-c', 'codex login --device-auth'], {
-      stdio: ['ignore', 'pipe', 'pipe'],
-      env: {
-        ...process.env,
-        CODEX_HOME: codexHome,
-      },
-    });
-
-    const session: CodexAuthSession = {
-      id: sessionId,
-      expiresAt: Date.now() + CODEX_DEVICE_EXPIRES_MS,
-      intervalMs: CODEX_DEVICE_INTERVAL_MS,
-      status: 'starting',
-      process: proc,
-      logPath,
-    };
-    codexAuthSessions.set(sessionId, session);
-    scheduleCodexAuthSessionCleanup(sessionId);
-
-    let settled = false;
-
-    const tryResolve = () => {
-      if (settled || !session.userCode || !session.verificationUri) return;
-      settled = true;
-      session.status = 'pending';
-      serverLog.info(
-        {
-          ...describeCodexAuthSession(session),
-          expiresInSeconds: Math.max(1, Math.floor((session.expiresAt - Date.now()) / 1000)),
-        },
-        'Codex device auth code became available',
-      );
-      resolve({
-        deviceAuthId: sessionId,
+  // Reuse a still-valid pending session so refresh-spamming the UI doesn't
+  // mint a new code every time.
+  const now = Date.now();
+  for (const session of codexAuthSessions.values()) {
+    if (session.expiresAt > now) {
+      return {
+        deviceAuthId: session.id,
         userCode: session.userCode,
-        verificationUri: session.verificationUri,
-        verificationUriComplete: session.verificationUri,
-        expiresIn: Math.max(1, Math.floor((session.expiresAt - Date.now()) / 1000)),
+        verificationUri: CODEX_DEVICE_URL,
+        verificationUriComplete: CODEX_DEVICE_URL,
+        expiresIn: Math.max(1, Math.floor((session.expiresAt - now) / 1000)),
         interval: Math.floor(session.intervalMs / 1000),
-      });
-    };
+      };
+    }
+  }
 
-    const ingest = (chunk: string) => {
-      const cleaned = chunk.replace(ANSI_ESCAPE_REGEX, '');
-      if (!session.verificationUri) {
-        const urlMatch = cleaned.match(CODEX_DEVICE_URL_REGEX);
-        if (urlMatch) {
-          session.verificationUri = urlMatch[0];
-          serverLog.debug(
-            { provider: 'codex', sessionId: session.id, verificationUri: session.verificationUri },
-            'Captured Codex verification URL',
-          );
-        }
-      }
-      if (!session.userCode) {
-        const codeMatch = cleaned.match(CODEX_DEVICE_CODE_REGEX);
-        if (codeMatch) {
-          session.userCode = codeMatch[1];
-          serverLog.debug(
-            { provider: 'codex', sessionId: session.id, userCode: session.userCode },
-            'Captured Codex device auth code',
-          );
-        }
-      }
-      tryResolve();
-    };
-
-    const pollLogForCode = () => {
-      if (settled || session.status === 'error' || session.status === 'connected') return;
-      try {
-        if (existsSync(logPath)) {
-          ingest(readFileSync(logPath, 'utf-8'));
-        }
-      } catch {
-        // Ignore transient read errors while the file is being written.
-      }
-      if (!settled) {
-        setTimeout(pollLogForCode, 100);
-      }
-    };
-    pollLogForCode();
-
-    proc.once('error', (error) => {
-      session.status = 'error';
-      session.error = error.message;
-       serverLog.error(
-        {
-          ...describeCodexAuthSession(session),
-          spawnError: error.message,
-        },
-        'Codex device auth process failed to start',
-      );
-      if (!settled) {
-        settled = true;
-        reject(new Error(`Failed to start Codex login: ${error.message}`));
-      }
-    });
-
-    proc.once('exit', (code) => {
-      if (detectCodexAuthToken()) {
-        session.status = 'connected';
-        serverLog.info(describeCodexAuthSession(session), 'Codex device auth process exited after credentials became available');
-        return;
-      }
-
-      if (session.status !== 'connected') {
-        session.status = 'error';
-        session.error =
-          code === 0
-            ? 'Codex login ended before credentials became available'
-            : `Codex login exited with code ${code}`;
-      }
-
-      serverLog.warn(
-        {
-          ...describeCodexAuthSession(session),
-          exitCode: code,
-        },
-        'Codex device auth process exited before auth completed',
-      );
-
-      if (!settled) {
-        settled = true;
-        reject(new Error(session.error ?? 'Codex login exited before device auth was ready'));
-      }
-    });
-
-    // Fallback timeout so the route returns a real error instead of hanging forever.
-    setTimeout(() => {
-      if (settled) return;
-      session.status = 'error';
-      session.error = 'Timed out waiting for Codex device-auth code';
-      serverLog.error(describeCodexAuthSession(session), 'Timed out waiting for Codex device auth code');
-      settled = true;
-      reject(new Error(session.error));
-    }, 10_000).unref?.();
+  const res = await fetch(`${CODEX_DEVICEAUTH_BASE}/usercode`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ client_id: CODEX_OAUTH_CLIENT_ID }),
+    signal: AbortSignal.timeout(15_000),
   });
+  if (!res.ok) {
+    throw new Error(`Codex device auth start failed: HTTP ${res.status}`);
+  }
+  const data = (await res.json()) as {
+    device_auth_id?: string;
+    user_code?: string;
+    interval?: string | number;
+    expires_at?: string;
+  };
+  if (!data.device_auth_id || !data.user_code) {
+    throw new Error('Codex device auth start returned no code');
+  }
+  const expiresAt = data.expires_at ? Date.parse(data.expires_at) : now + CODEX_DEVICE_EXPIRES_MS;
+  const intervalMs = Math.max(2, Number(data.interval) || 5) * 1000;
+  const session: CodexAuthSession = {
+    id: data.device_auth_id,
+    userCode: data.user_code,
+    expiresAt: Number.isFinite(expiresAt) ? expiresAt : now + CODEX_DEVICE_EXPIRES_MS,
+    intervalMs,
+  };
+  codexAuthSessions.set(session.id, session);
+  setTimeout(() => codexAuthSessions.delete(session.id), CODEX_DEVICE_EXPIRES_MS).unref?.();
+  serverLog.info(
+    { provider: 'codex', sessionId: session.id, userCode: session.userCode },
+    'Started native Codex device auth',
+  );
+  return {
+    deviceAuthId: session.id,
+    userCode: session.userCode,
+    verificationUri: CODEX_DEVICE_URL,
+    verificationUriComplete: CODEX_DEVICE_URL,
+    expiresIn: Math.max(1, Math.floor((session.expiresAt - now) / 1000)),
+    interval: Math.floor(intervalMs / 1000),
+  };
 }
 
 export async function pollCodexDeviceAuth(
   deviceAuthId: string,
   userCode: string,
 ): Promise<CodexDeviceAuthPoll> {
-  const session = codexAuthSessions.get(deviceAuthId);
-  if (!session) {
+  try {
+    const res = await fetch(`${CODEX_DEVICEAUTH_BASE}/token`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        device_auth_id: deviceAuthId,
+        user_code: userCode,
+        client_id: CODEX_OAUTH_CLIENT_ID,
+      }),
+      signal: AbortSignal.timeout(15_000),
+    });
+    const data = (await res.json().catch(() => ({}))) as Record<string, unknown>;
+    const err = data.error as { code?: string; message?: string } | undefined;
+    if (err?.code === 'deviceauth_authorization_pending') {
+      return { error: 'authorization_pending' };
+    }
+
+    // Success can carry the tokens directly or an authorization_code to
+    // exchange at /oauth/token — handle both shapes.
+    const tokens =
+      (data.tokens as Record<string, string> | undefined) ??
+      (typeof data.access_token === 'string' ? (data as Record<string, string>) : undefined);
+    if (tokens?.access_token) {
+      persistCodexTokens(tokens);
+      codexAuthSessions.delete(deviceAuthId);
+      serverLog.info({ provider: 'codex' }, 'Native Codex device auth completed');
+      return { accessToken: tokens.access_token, refreshToken: tokens.refresh_token, tokenType: 'bearer' };
+    }
+    const authCode = data.authorization_code as string | undefined;
+    if (authCode) {
+      const ex = await fetch(CODEX_TOKEN_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({
+          grant_type: 'authorization_code',
+          code: authCode,
+          client_id: CODEX_OAUTH_CLIENT_ID,
+          redirect_uri: 'https://auth.openai.com/deviceauth/callback',
+        }),
+        signal: AbortSignal.timeout(15_000),
+      });
+      const exData = (await ex.json().catch(() => ({}))) as Record<string, string>;
+      if (exData.access_token) {
+        persistCodexTokens(exData);
+        codexAuthSessions.delete(deviceAuthId);
+        serverLog.info({ provider: 'codex' }, 'Native Codex device auth completed (code exchange)');
+        return { accessToken: exData.access_token, refreshToken: exData.refresh_token, tokenType: 'bearer' };
+      }
+      serverLog.warn({ provider: 'codex', keys: Object.keys(exData) }, 'Codex token exchange returned no token');
+    }
+
+    if (err) {
+      codexAuthSessions.delete(deviceAuthId);
+      return { error: err.code ?? 'authorization_failed', errorDescription: err.message };
+    }
     serverLog.warn(
-      { provider: 'codex', sessionId: deviceAuthId, userCode },
-      'Codex auth poll received for unknown or expired session',
+      { provider: 'codex', keys: Object.keys(data) },
+      'Codex device auth poll returned unrecognized payload',
     );
+    return { error: 'authorization_pending' };
+  } catch (error: unknown) {
     return {
-      error: 'authorization_unknown',
-      errorDescription: 'This Codex sign-in session expired. Start auth again.',
+      error: 'authorization_error',
+      errorDescription: error instanceof Error ? error.message : String(error),
     };
   }
-
-  if (session.userCode && session.userCode !== userCode) {
-    serverLog.warn(
-      {
-        ...describeCodexAuthSession(session),
-        providedUserCode: userCode,
-      },
-      'Codex auth poll received mismatched user code',
-    );
-    return {
-      error: 'authorization_mismatch',
-      errorDescription: 'The provided Codex sign-in code does not match the active login session.',
-    };
-  }
-
-  const liveToken = detectCodexAuthToken();
-  if (liveToken) {
-    session.status = 'connected';
-    serverLog.info(describeCodexAuthSession(session), 'Codex auth poll detected stored credentials');
-    cleanupCodexAuthSession(deviceAuthId);
-    return {
-      accessToken: liveToken,
-      tokenType: 'bearer',
-    };
-  }
-
-  if (session.status === 'error') {
-    serverLog.warn(describeCodexAuthSession(session), 'Codex auth poll observed failed auth session');
-    cleanupCodexAuthSession(deviceAuthId);
-    return {
-      error: 'authorization_failed',
-      errorDescription: session.error ?? 'Codex sign-in failed',
-    };
-  }
-
-  return { error: 'authorization_pending' };
 }

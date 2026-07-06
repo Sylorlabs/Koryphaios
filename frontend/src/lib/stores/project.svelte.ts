@@ -43,7 +43,10 @@ export const projectStore = {
     persist(PROJECT_KEY, currentPath);
     if (currentPath) {
       this.addProject(currentPath);
-      this.setScope('project');
+      // Scope is a sticky user toggle — never auto-flip it here. Switching
+      // chats calls setProject(session.workingDirectory), so forcing 'project'
+      // would stomp a deliberate 'All' choice on every chat hop. The toggle
+      // (setScope) is the only thing that changes scope.
     }
   },
   addProject(path: string) {
@@ -63,6 +66,11 @@ export const projectStore = {
     for (const project of projects) this.addProject(project);
     // Workspaces restore without silently choosing an agent working directory.
     this.setProject(null);
+  },
+  /** Exit workspace mode (e.g. File → Open Folder outside the workspace). */
+  clearWorkspace() {
+    workspaceRoot = null;
+    persist(WORKSPACE_KEY, null);
   },
   setScope(next: SessionScope) { scope = next; persist(SCOPE_KEY, next); },
 };

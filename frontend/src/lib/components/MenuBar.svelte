@@ -10,6 +10,7 @@
     Square,
     X,
     StickyNote,
+    Flag,
   } from 'lucide-svelte';
   import CheckForUpdatesButton from './CheckForUpdatesButton.svelte';
   import { getModKeyName } from '$lib/utils/platform';
@@ -139,6 +140,20 @@
     openMenu = null;
     onAction(name);
   }
+
+  async function sendFeedback() {
+    const url = 'mailto:micah.cooley@sylorlabs.com?subject=Koryphaios%20Feedback&body=What%20happened%3F%0A%0AWhat%20did%20you%20expect%3F%0A%0AAnything%20else%3F%0A';
+    if (inTauri) {
+      try {
+        const { open } = await import('@tauri-apps/plugin-shell');
+        await open(url);
+        return;
+      } catch (error) {
+        console.error('Failed to open feedback email:', error);
+      }
+    }
+    window.location.href = url;
+  }
 </script>
 
 {#if !zenMode}
@@ -181,7 +196,6 @@
                 <div class="px-2.5 py-1.5 text-xs" style="color: var(--color-text-muted);">No recent projects yet</div>
               {/if}
               <div class="h-px my-1" style="background: var(--color-border);"></div>
-              <button type="button" class="w-full text-left px-2.5 py-1.5 text-xs hover:bg-[var(--color-surface-3)]" style="color: var(--color-text-primary);" onclick={() => action('save_snapshot')}>Save Project As .kory.json</button>
               <button type="button" class="w-full text-left px-2.5 py-1.5 text-xs hover:bg-[var(--color-surface-3)]" style="color: var(--color-text-primary);" onclick={() => action('new_session')}>New Session</button>
             </div>
           {/if}
@@ -296,6 +310,16 @@
           <span class="text-xs font-medium">{showGit ? 'Git open' : 'Git'}</span>
         </button>
       {/if}
+      <button
+        type="button"
+        class="group flex items-center gap-1.5 rounded-lg px-3 py-2 text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-surface-2)]"
+        data-tauri-drag-region="false"
+        title="Send feedback to micah.cooley@sylorlabs.com"
+        onclick={sendFeedback}
+      >
+        <Flag size={14} class="transition-colors group-hover:text-red-400" />
+        <span class="text-xs font-medium">Feedback</span>
+      </button>
       <button
         type="button"
         class="flex items-center gap-1.5 px-3 py-2 rounded-lg transition-colors hover:bg-[var(--color-surface-2)]"

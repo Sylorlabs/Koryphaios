@@ -62,6 +62,12 @@ export function normalizeReasoningLevel(
 
   // Adaptive means let the model decide
   const normalizedLevel = reasoningLevel.toLowerCase().trim();
+
+  // Antigravity exposes Low/Medium/High as separate model entries. It has no
+  // independent reasoning parameter, so stale UI/session values must not be
+  // forwarded or interpreted as a request to switch models.
+  if (provider === 'antigravity') return undefined;
+
   if (normalizedLevel === 'adaptive') {
     return undefined;
   }
@@ -120,11 +126,11 @@ export function normalizeReasoningLevel(
       }
     }
 
-    // CLI harnesses (claude-code, codex, grok, antigravity): pass the level
+    // CLI harnesses (claude-code, codex, grok): pass the level
     // through untouched — the harness clamps to the CLI/model's real
     // capability (incl. xhigh/max). Dropping it here silently ran every chat
     // at the CLI default.
-    if (['claude', 'codex', 'grok', 'antigravity'].includes(provider)) {
+    if (['claude', 'codex', 'grok'].includes(provider)) {
       return level;
     }
 

@@ -21,6 +21,7 @@ export type AgentStatus =
   | 'verifying'
   | 'compacting'
   | 'waiting_user'
+  | 'waiting'
   | 'error'
   | 'done'
   | 'reading'

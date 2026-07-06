@@ -1,5 +1,10 @@
 import { describe, it, expect } from 'bun:test';
-import { GrokBuildProvider, parseGrokModelsOutput, parseGrokOutput } from '../grok-build';
+import {
+  GrokBuildProvider,
+  parseGrokCliModelsCache,
+  parseGrokModelsOutput,
+  parseGrokOutput,
+} from '../grok-build';
 import type { ProviderConfig } from '@koryphaios/shared';
 import type { ProviderEvent, StreamRequest } from '../types';
 
@@ -64,6 +69,19 @@ describe('parseGrokModelsOutput', () => {
       defaultModelId: undefined,
       modelIds: [],
     });
+  });
+});
+
+describe('parseGrokCliModelsCache', () => {
+  it('reads real context limits and rejects boolean-like values', () => {
+    const parsed = parseGrokCliModelsCache(JSON.stringify({
+      models: {
+        'grok-build': { info: { name: 'Grok Build', context_window: 512_000, hidden: false } },
+        broken: { info: { context_window: 1, hidden: false } },
+      },
+    }));
+    expect(parsed?.get('grok-build')?.contextWindow).toBe(512_000);
+    expect(parsed?.get('broken')?.contextWindow).toBeUndefined();
   });
 });
 

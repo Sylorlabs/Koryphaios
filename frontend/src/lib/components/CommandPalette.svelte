@@ -47,7 +47,6 @@
     { id: 'new_session', label: 'New Session', description: 'Start a fresh conversation', icon: Plus, shortcut: 'N', category: 'Session' },
     { id: 'open_project_file', label: 'Import Project', description: 'Load project from a local file', icon: FileCode, category: 'Project' },
     { id: 'open_project_folder', label: 'Open Project From Folder', description: 'Load project from a folder on your computer', icon: FolderOpen, category: 'Project' },
-    { id: 'save_snapshot', label: 'Export Snapshot', description: 'Save current session as .kory.json', icon: FileCode, category: 'Project' },
     { id: 'session_compact', label: 'Compact Session', description: 'Request an implementation-focused session summary', icon: FileCode, category: 'Session' },
     { id: 'toggle_sidebar', label: 'Toggle Sidebar', description: 'Show or hide the session sidebar', icon: Sidebar, shortcut: 'B', category: 'View' },
     { id: 'toggle_zen_mode', label: 'Toggle Zen Mode', description: 'Focus on the conversation', icon: Layout, shortcut: 'Shift+Z', category: 'View' },

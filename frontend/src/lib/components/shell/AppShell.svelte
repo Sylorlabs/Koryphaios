@@ -26,6 +26,7 @@
     agentRailSlot,
     feed,
     contextBar,
+    backgroundShells,
     composer,
   }: {
     showSidebar?: boolean;
@@ -45,6 +46,7 @@
     agentRailSlot?: Snippet;
     feed?: Snippet;
     contextBar?: Snippet;
+    backgroundShells?: Snippet;
     composer?: Snippet;
   } = $props();
 </script>
@@ -199,6 +201,8 @@
 
       {@render contextBar?.()}
 
+      {@render backgroundShells?.()}
+
       <div class="shrink-0" style="background: var(--color-surface-1);">
         {@render composer?.()}
       </div>
@@ -220,4 +224,3 @@
     {/if}
   </div>
 </div>
-

@@ -17,6 +17,7 @@ import { PROJECT_ROOT } from './runtime/paths';
 import { createWebSocketHandlers } from './server/websocket-handler';
 import type { WSClientData } from './ws/ws-manager';
 import { validateLocalBearerToken } from './auth/local-route-auth';
+import { serveMcp } from './mcp/koryphaios-mcp-endpoint';
 import { getDb } from './db';
 import { shutdownAllBrokers } from './pubsub';
 
@@ -141,13 +142,24 @@ async function main() {
         });
       }
 
+      // 1b. MCP endpoint — Koryphaios's own tools (notes/memory) for any
+      // MCP-capable CLI harness (grok, claude-code, codex…).
+      if (url.pathname === '/mcp') {
+        return serveMcp(req, PROJECT_ROOT, (t) => !!validateLocalBearerToken(t));
+      }
+
       // 2. API Routes
       if (url.pathname.startsWith('/api')) {
         return runningApp.handle(req);
       }
 
-      // 3. Static Frontend Files
-      const frontendBuildDir = resolve(join(PROJECT_ROOT, "frontend", "build", "client"));
+      // 3. Static Frontend Files — packaged app ships the build as a Tauri
+      // resource and points KORYPHAIOS_FRONTEND_DIST at it; dev serves the
+      // repo's build output. Same server either way: one app, one origin.
+      const frontendBuildDir = resolve(
+        process.env.KORYPHAIOS_FRONTEND_DIST?.trim() ||
+          join(PROJECT_ROOT, "frontend", "build", "client"),
+      );
       let filePath = resolve(join(frontendBuildDir, url.pathname));
 
       if (url.pathname === '/' || url.pathname.endsWith('/')) {

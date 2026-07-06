@@ -8,7 +8,7 @@
  * - API: expose local estimate vs cloud reality and highlight drift > 5%.
  */
 
-import { computeCost2026 } from './models';
+import { computeCostUsd, SUBSCRIPTION_PROVIDERS } from '../pricing';
 import {
   initCreditDb,
   getCreditDb,
@@ -36,7 +36,14 @@ export function recordUsage(
   tokensIn: number,
   tokensOut: number,
 ): void {
-  const costUsd = computeCost2026(model, tokensIn ?? 0, tokensOut ?? 0);
+  if (!model.trim() || !provider.trim() || (tokensIn <= 0 && tokensOut <= 0)) return;
+  // Real prices: models.dev live catalog → static ModelDef catalog. Unpriced
+  // models record cost 0 and are surfaced as "unpriced" by the billing route.
+  // Subscription/auth harness usage is real usage but not metered API spend.
+  const priced = SUBSCRIPTION_PROVIDERS.has(provider)
+    ? null
+    : computeCostUsd(provider, model, tokensIn ?? 0, tokensOut ?? 0);
+  const costUsd = priced?.costUsd ?? 0;
   dbRecordUsage(model, provider, tokensIn ?? 0, tokensOut ?? 0, costUsd);
 }
 

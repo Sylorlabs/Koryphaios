@@ -37,6 +37,7 @@ export interface CreateNoteInput {
   pinned?: boolean
   includeInContext?: boolean
   userId?: string
+  format?: 'markdown' | 'html'
 }
 
 export interface UpdateNoteInput {
@@ -46,6 +47,7 @@ export interface UpdateNoteInput {
   tags?: string[]
   pinned?: boolean
   includeInContext?: boolean
+  format?: 'markdown' | 'html'
 }
 
 export interface NoteWithLinks extends Note {

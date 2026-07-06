@@ -1,12 +1,13 @@
 import type { StoredMessage } from '@koryphaios/shared';
 import { db, messages, type Message as DbMessage } from '../db';
-import { eq, desc, sql, and, gt } from 'drizzle-orm';
+import { eq, asc, desc, sql, and, gt } from 'drizzle-orm';
 
 export interface IMessageStore {
   add(sessionId: string, msg: StoredMessage): Promise<void>;
   getAll(sessionId: string, limit?: number): Promise<StoredMessage[]>;
   getRecent(sessionId: string, limit?: number): Promise<StoredMessage[]>;
   truncateAfter(sessionId: string, messageId: string): Promise<void>;
+  assignVariantGroup(messageId: string, groupId: string, index: number): Promise<void>;
 }
 
 function toStoredMessage(m: DbMessage): StoredMessage {
@@ -37,11 +38,16 @@ function toStoredMessage(m: DbMessage): StoredMessage {
     tokensIn: m.tokensIn ?? 0,
     tokensOut: m.tokensOut ?? 0,
     cost: m.cost ?? 0,
+    variantGroupId: m.variantGroupId ?? undefined,
+    variantIndex: m.variantIndex ?? 0,
     createdAt: m.createdAt.getTime(),
   };
 }
 
 export class MessageStore implements IMessageStore {
+  async assignVariantGroup(messageId: string, groupId: string, index: number): Promise<void> {
+    await db.update(messages).set({ variantGroupId: groupId, variantIndex: index }).where(eq(messages.id, messageId));
+  }
   async add(sessionId: string, msg: StoredMessage): Promise<void> {
     await db.insert(messages).values({
       id: msg.id,
@@ -53,6 +59,8 @@ export class MessageStore implements IMessageStore {
       tokensIn: msg.tokensIn ?? 0,
       tokensOut: msg.tokensOut ?? 0,
       cost: msg.cost ?? 0,
+      variantGroupId: msg.variantGroupId ?? null,
+      variantIndex: msg.variantIndex ?? 0,
       createdAt: new Date(msg.createdAt),
     });
   }
@@ -62,6 +70,7 @@ export class MessageStore implements IMessageStore {
       .select()
       .from(messages)
       .where(eq(messages.sessionId, sessionId))
+      .orderBy(asc(messages.createdAt))
       .limit(limit);
     return results.map(toStoredMessage);
   }

@@ -131,6 +131,19 @@ export const processRoutes = new Elysia({ prefix: '/api/processes' })
       return { ok: false, error: error?.message ?? 'Failed to restart process' };
     }
   })
+  .post(
+    '/:id/input',
+    async ({ request, params: { id }, body, set }) => {
+      if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
+      const success = await processSupervisor.writeInput(id, body.input);
+      if (!success) {
+        set.status = 409;
+        return { ok: false, error: 'Process is not running or does not accept input' };
+      }
+      return { ok: true };
+    },
+    { body: t.Object({ input: t.String({ maxLength: 16_384 }) }) },
+  )
   .get(
     '/:id/logs',
     async ({ request, params: { id }, query, set }) => {

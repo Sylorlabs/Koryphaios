@@ -256,6 +256,7 @@ const NO_REASONING: ReasoningConfig | null = null;
 
 // Provider list that doesn't support reasoning (static list)
 const NO_REASONING_PROVIDERS = [
+  'antigravity',
   'bedrock',
   'local',
   // 'deepseek' removed from here

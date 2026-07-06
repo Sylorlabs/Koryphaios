@@ -7,6 +7,13 @@ import { serverLog } from '../logger';
 import { safeJsonParse, ConfigError } from '../errors';
 import { AGENT, DEFAULT_CONTEXT_PATHS, FS, SERVER, WORKSPACE } from '../constants';
 import { wsBroker } from '../pubsub';
+import {
+  migrateSecretsOutOfConfig,
+  hydrateProviderSecrets,
+  stripProviderSecrets,
+  upsertProviderSecrets,
+  removeProviderSecrets,
+} from '../security/secret-store';
 
 /** Merge file corsOrigins with CORS_ORIGINS env (comma-separated). Production can set CORS_ORIGINS=https://app.example.com */
 function mergeCorsOrigins(fromFile: string[], envValue?: string): string[] {
@@ -47,6 +54,10 @@ export function loadConfig(projectRoot: string): BackendConfig {
     join(homedir(), '.koryphaios.json'),
   ];
 
+  // Heal any credentials still living in koryphaios.json (moves them into
+  // the 0600 secret store) BEFORE reading — settings and secrets never mix.
+  migrateSecretsOutOfConfig(projectRoot);
+
   let fileConfig: Partial<KoryphaiosConfig> = {};
 
   for (const path of configPaths) {
@@ -69,7 +80,9 @@ export function loadConfig(projectRoot: string): BackendConfig {
   const appConfig = loadAppConfig(projectRoot);
 
   const config: KoryphaiosConfig = {
-    providers: fileConfig.providers ?? {},
+    // Runtime gets real keys from the 0600 secret store; the on-disk
+    // koryphaios.json stays credential-free.
+    providers: hydrateProviderSecrets(projectRoot, (fileConfig.providers ?? {}) as Record<string, unknown>) as KoryphaiosConfig['providers'],
     agents: fileConfig.agents ?? {
       manager: {
         model: AGENT.DEFAULT_MANAGER_MODEL,
@@ -215,6 +228,7 @@ export function removeProviderFromConfig(projectRoot: string, providerId: string
     const config = JSON.parse(readFileSync(configPath, 'utf-8'));
     if (config.providers && config.providers[providerId]) {
       delete config.providers[providerId];
+      removeProviderSecrets(projectRoot, providerId);
       config.updatedAt = Date.now();
       writeFileSync(tempPath, JSON.stringify(config, null, 2), 'utf-8');
       renameSync(tempPath, configPath);
@@ -244,10 +258,17 @@ export function syncProviderConfigsToConfig(
     const content = readFileSync(configPath, 'utf-8');
     const config = JSON.parse(content);
 
-    config.providers = {
-      ...(config.providers || {}),
-      ...providers,
-    };
+    // Secrets go to the 0600 store; koryphaios.json gets everything else.
+    const { clean, secrets } = stripProviderSecrets(providers);
+    for (const [name, vals] of Object.entries(secrets)) {
+      upsertProviderSecrets(projectRoot, name, vals);
+    }
+    const merged: Record<string, unknown> = { ...(config.providers || {}) };
+    for (const [name, cfg] of Object.entries(clean)) {
+      merged[name] = { ...((merged[name] as Record<string, unknown>) ?? {}), ...(cfg as Record<string, unknown>) };
+      for (const field of ['apiKey', 'authToken']) delete (merged[name] as Record<string, unknown>)[field];
+    }
+    config.providers = merged;
 
     // Track global update
     const updatedAt = Date.now();
