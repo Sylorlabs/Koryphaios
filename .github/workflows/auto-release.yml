@@ -272,71 +272,8 @@ jobs:
             latest.json > latest.json.tmp && mv latest.json.tmp latest.json
           gh release upload "$TAG" latest.json --clobber
 
-  build-macos-universal:
-    needs: [check-update-trigger, build-and-release]
-    if: needs.check-update-trigger.outputs.should_release == 'true'
-    runs-on: blacksmith-12vcpu-macos-latest
-    permissions:
-      contents: write
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Setup Bun
-        uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: latest
-
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: 'aarch64-apple-darwin,x86_64-apple-darwin'
-
-      - name: Install workspace dependencies
-        run: bun install
-
-      - name: Build backend sidecar (both macOS targets for universal)
-        run: |
-          bun build --compile --target=bun-darwin-arm64 backend/src/server.ts \
-            --outfile=desktop/src-tauri/sidecar/koryphaios-backend-aarch64-apple-darwin
-          bun build --compile --target=bun-darwin-x64 backend/src/server.ts \
-            --outfile=desktop/src-tauri/sidecar/koryphaios-backend-x86_64-apple-darwin
-
-      - name: Build frontend
-        working-directory: ./frontend
-        run: bun run build
-        env:
-          BUILD_MODE: static
-          NODE_ENV: production
-
-      - name: Inject signing public key
-        shell: bash
-        run: |
-          jq --arg key "$TAURI_SIGNING_PUBLIC_KEY" \
-            '.plugins.updater.pubkey = $key' \
-            desktop/src-tauri/tauri.conf.json > tauri.conf.json.tmp
-          mv tauri.conf.json.tmp desktop/src-tauri/tauri.conf.json
-        env:
-          TAURI_SIGNING_PUBLIC_KEY: ${{ secrets.TAURI_SIGNING_PUBLIC_KEY }}
-
-      - name: Build Universal Binary
-        uses: tauri-apps/tauri-action@v0
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-          TAURI_SIGNING_PUBLIC_KEY: ${{ secrets.TAURI_SIGNING_PUBLIC_KEY }}
-        with:
-          projectPath: ./desktop
-          args: '--target universal-apple-darwin'
-          includeUpdaterJson: false
-          tagName: v${{ needs.check-update-trigger.outputs.new_version }}
-          releaseName: "Koryphaios v${{ needs.check-update-trigger.outputs.new_version }}"
-          releaseBody: "macOS Universal binary (Apple Silicon + Intel)."
-          releaseDraft: false
-          prerelease: false
-
   notify-website:
-    needs: [check-update-trigger, build-and-release, build-macos-universal]
+    needs: [check-update-trigger, build-and-release]
     if: needs.check-update-trigger.outputs.should_release == 'true'
     runs-on: blacksmith-2vcpu-ubuntu-2404
     steps:
