@@ -53,6 +53,10 @@ export const MODEL_CATALOG: Record<string, ModelDef> = Object.fromEntries(
   ALL_MODELS.map((m) => [m.id, m]),
 );
 
+const MODEL_CATALOG_BY_PROVIDER = new Map<string, ModelDef>(
+  ALL_MODELS.map((model) => [`${model.provider}:${model.id}`, model]),
+);
+
 /**
  * Resolve a model ID to its definition.
  */
@@ -60,10 +64,28 @@ export function resolveModel(modelId: string): ModelDef | undefined {
   return MODEL_CATALOG[modelId];
 }
 
+/** Resolve without allowing an identical model ID from another provider to win. */
+export function resolveModelForProvider(
+  modelId: string,
+  provider: ProviderName,
+): ModelDef | undefined {
+  return MODEL_CATALOG_BY_PROVIDER.get(`${provider}:${modelId}`);
+}
+
 /**
  * Get all known models for a specific provider.
  */
 export function getModelsForProvider(providerName: ProviderName): ModelDef[] {
+  // AI Studio is the same Gemini model catalog as 'google' under a distinct
+  // API-key-only provider entry — reuse it (with ids re-tagged to aistudio).
+  if (providerName === 'aistudio') {
+    return ALL_MODELS.filter((m) => m.provider === 'google').map((m) => ({
+      ...m,
+      id: `aistudio-${m.id}`,
+      apiModelId: m.apiModelId ?? m.id,
+      provider: 'aistudio' as ProviderName,
+    }));
+  }
   return ALL_MODELS.filter((m) => m.provider === providerName);
 }
 
@@ -87,17 +109,6 @@ export function createGenericModel(id: string, provider: ProviderName): ModelDef
 }
 
 /**
- * Providers with verified context window documentation.
- */
-const VERIFIED_CONTEXT_PROVIDERS = new Set<ProviderName>([
-  'openai',
-  'anthropic',
-  'google',
-  'groq',
-  'xai',
-]);
-
-/**
  * Hook for looking up LIVE model definitions (discovered from a provider API or
  * CLI at runtime). Registered by the provider registry so this module stays free
  * of an import cycle. Live defs carrying `contextVerified` beat the static
@@ -110,8 +121,11 @@ export function registerLiveModelResolver(resolver: LiveModelResolver): void {
   liveModelResolver = resolver;
 }
 
-function hasUsableContext(model: ModelDef | undefined): model is ModelDef {
-  return !!model && Number.isFinite(model.contextWindow) && model.contextWindow > 0;
+function hasUsableContext(model: ModelDef | undefined): boolean {
+  // Provider/CLI metadata occasionally exposes a boolean capability as 1.
+  // Never present that as a one-token context window; fall through to the
+  // verified catalog/real-model chain instead.
+  return !!model && Number.isFinite(model.contextWindow) && model.contextWindow >= 1024;
 }
 
 /**
@@ -127,21 +141,26 @@ function hasUsableContext(model: ModelDef | undefined): model is ModelDef {
 export function resolveTrustedContextWindow(
   modelId: string,
   provider: ProviderName,
-): { contextWindow?: number; contextKnown: boolean } {
+): {
+  contextWindow?: number;
+  contextKnown: boolean;
+  contextSource?: 'live' | 'catalog' | 'alias';
+} {
   // 1. Live provider/CLI-reported context window.
   const live = liveModelResolver?.(modelId, provider);
   if (live?.contextVerified && hasUsableContext(live)) {
-    return { contextWindow: live.contextWindow, contextKnown: true };
+    return { contextWindow: live.contextWindow, contextKnown: true, contextSource: 'live' };
   }
 
-  const model = resolveModel(modelId);
+  const model = resolveModelForProvider(modelId, provider);
   if (!model) return { contextKnown: false };
   if (model.isGeneric) return { contextKnown: false };
-  if (model.provider !== provider) return { contextKnown: false };
 
-  // 2. Verified static catalog.
-  if (VERIFIED_CONTEXT_PROVIDERS.has(provider) && hasUsableContext(model)) {
-    return { contextWindow: model.contextWindow, contextKnown: true };
+  // 2. Provider-scoped built-in catalog. These definitions are the fallback
+  // metadata for every API provider and CLI harness when live discovery does
+  // not report a window itself.
+  if (hasUsableContext(model)) {
+    return { contextWindow: model.contextWindow, contextKnown: true, contextSource: 'catalog' };
   }
 
   // 3. CLI alias → real model chain (use the live-resolved realModelId when the
@@ -152,10 +171,9 @@ export function resolveTrustedContextWindow(
     if (
       real &&
       !real.isGeneric &&
-      VERIFIED_CONTEXT_PROVIDERS.has(real.provider) &&
       hasUsableContext(real)
     ) {
-      return { contextWindow: real.contextWindow, contextKnown: true };
+      return { contextWindow: real.contextWindow, contextKnown: true, contextSource: 'alias' };
     }
   }
 

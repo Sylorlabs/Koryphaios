@@ -26,11 +26,16 @@ import {
   createClaudeCLIAuthMarker,
   createCodexCLIAuthMarker,
   createGrokCLIAuthMarker,
+  createCursorCLIAuthMarker,
+  detectDevinCLILogin,
+  createDevinCLIAuthMarker,
+  detectClineCLILogin,
+  createClineCLIAuthMarker,
 } from './auth-utils';
 
 export interface AgentCliStatus {
   /** Stable id for the CLI. */
-  id: 'claude' | 'codex' | 'antigravity' | 'grok' | 'cursor';
+  id: 'claude' | 'codex' | 'antigravity' | 'grok' | 'cursor' | 'devin' | 'cline';
   displayName: string;
   /** Candidate binary names looked up on PATH. */
   binaries: string[];
@@ -90,6 +95,12 @@ export function canAutoEnable(provider: ProviderName): boolean {
     case 'grok':
       // Grok Build subscription CLI — installed + logged in (subscription or xAI key).
       return !!whichBinary('grok') && detectGrokCLILogin();
+    case 'cursor':
+      return !!whichBinary('cursor-agent') && detectCursorCLILogin();
+    case 'devin':
+      return !!whichBinary('devin') && detectDevinCLILogin();
+    case 'cline':
+      return !!whichBinary('cline') && detectClineCLILogin();
     default:
       return false;
   }
@@ -115,6 +126,12 @@ export function cliAutoEnableCreds(
     case 'grok':
       // The CLI owns the real token; the marker just signals "use the CLI harness".
       return { authToken: createGrokCLIAuthMarker() };
+    case 'cursor':
+      return { authToken: createCursorCLIAuthMarker() };
+    case 'devin':
+      return { authToken: createDevinCLIAuthMarker() };
+    case 'cline':
+      return { authToken: createClineCLIAuthMarker() };
     default:
       return null;
   }
@@ -135,8 +152,8 @@ export function detectAgentClis(): AgentCliStatus[] {
     docsUrl: 'https://docs.anthropic.com/en/docs/claude-code',
   });
 
-  // ── Codex → `codex` provider. Koryphaios uses an isolated codex-home for the actual
-  // token; a machine-wide ~/.codex login is surfaced too. ──
+  // ── Codex → `codex` provider. detectCodexAuthToken now reads ~/.codex too,
+  // so a machine-wide codex login IS a Koryphaios login — no second auth. ──
   const koryCodexToken = !!detectCodexAuthToken();
   const machineCodex = detectCodexCLILogin();
   const codex = mk('codex', 'OpenAI Codex', ['codex'], 'codex', {
@@ -148,10 +165,8 @@ export function detectAgentClis(): AgentCliStatus[] {
         : null,
     autoEnabled: canAutoEnable('codex'),
     workingNote: koryCodexToken
-      ? 'Chats through the Codex provider.'
-      : machineCodex
-        ? 'Codex CLI login found — run the in-app Codex connect to link it to Koryphaios.'
-        : 'Codex CLI is installed but not logged in.',
+      ? 'Signed in — your ChatGPT subscription is used automatically.'
+      : 'Not signed in — connect Codex from Providers (no CLI needed).',
     docsUrl: 'https://developers.openai.com/codex/cli',
   });
 
@@ -187,23 +202,50 @@ export function detectAgentClis(): AgentCliStatus[] {
     docsUrl: 'https://docs.x.ai/build/cli/headless-scripting',
   });
 
-  // ── Cursor (cursor-agent) → no Koryphaios provider yet; detected + surfaced. ──
+  // ── Cursor (cursor-agent) → `cursor` provider (CLI harness, fully working). ──
   const cursorLogin = detectCursorCLILogin();
-  const cursor = mk('cursor', 'Cursor CLI', ['cursor-agent'], null, {
+  const cursor = mk('cursor', 'Cursor CLI', ['cursor-agent'], 'cursor', {
     loggedIn: cursorLogin,
     authSource: cursorLogin
       ? process.env.CURSOR_API_KEY
         ? 'CURSOR_API_KEY'
         : '~/.cursor/cli-config.json'
       : null,
-    autoEnabled: false,
+    autoEnabled: canAutoEnable('cursor'),
     workingNote: cursorLogin
-      ? 'Cursor CLI detected and logged in — direct chat needs the Cursor CLI harness (not yet wired).'
-      : 'Cursor CLI is installed but not logged in.',
+      ? 'Cursor CLI detected and logged in — chat runs through the cursor-agent harness (no API key needed).'
+      : 'Cursor CLI is installed but not logged in — run "cursor-agent login".',
     docsUrl: 'https://cursor.com/docs/cli',
   });
 
-  return [claude, codex, antigravity, grok, cursor];
+  // ── Devin (devin) → `devin` provider (CLI harness, cloud-backed subscription). ──
+  const devinLogin = detectDevinCLILogin();
+  const devin = mk('devin', 'Devin CLI', ['devin'], 'devin', {
+    loggedIn: devinLogin,
+    authSource: devinLogin
+      ? process.env.COGNITION_API_KEY
+        ? 'COGNITION_API_KEY'
+        : '~/.local/share/devin/credentials.toml'
+      : null,
+    autoEnabled: canAutoEnable('devin'),
+    workingNote: devinLogin
+      ? 'Devin CLI detected and logged in — chat runs through the devin harness (no API key needed).'
+      : 'Devin CLI is installed but not logged in — run "devin auth login".',
+    docsUrl: 'https://docs.devin.ai/',
+  });
+
+  const clineLogin = detectClineCLILogin();
+  const cline = mk('cline', 'Cline CLI', ['cline'], 'cline', {
+    loggedIn: clineLogin,
+    authSource: clineLogin ? '~/.cline/data/secrets.json' : null,
+    autoEnabled: canAutoEnable('cline'),
+    workingNote: clineLogin
+      ? 'Cline CLI detected and signed in — CLI-only, runs through the cline harness (Cline manages its own key).'
+      : 'Cline CLI is installed but not signed in — run "cline auth --provider <p> --apikey <k>".',
+    docsUrl: 'https://docs.cline.bot/cli',
+  });
+
+  return [claude, codex, antigravity, grok, cursor, devin, cline];
 }
 
 function mk(

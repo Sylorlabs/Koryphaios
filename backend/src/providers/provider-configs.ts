@@ -35,6 +35,12 @@ export const PROVIDER_CONFIGS: ProviderConfig[] = [
     envKeys: ['GEMINI_API_KEY', 'GOOGLE_API_KEY'],
   },
   {
+    name: 'aistudio',
+    baseUrl: 'https://generativelanguage.googleapis.com',
+    authMode: 'api_key',
+    envKeys: ['GEMINI_API_KEY', 'GOOGLE_API_KEY', 'AI_STUDIO_API_KEY'],
+  },
+  {
     name: 'google-subscription',
     baseUrl: 'https://generativelanguage.googleapis.com',
     authMode: 'auth_only',
@@ -63,7 +69,19 @@ export const PROVIDER_CONFIGS: ProviderConfig[] = [
     envKeys: [],
     envAuthTokenKey: 'GITHUB_COPILOT_TOKEN',
   },
-  { name: 'codex', baseUrl: '', authMode: 'auth_only', envKeys: [], envAuthTokenKey: 'CODEX_AUTH_TOKEN' },
+  {
+    name: 'codex',
+    baseUrl: '',
+    authMode: 'auth_only',
+    envKeys: [],
+    envAuthTokenKey: 'CODEX_AUTH_TOKEN',
+  },
+  {
+    name: 'jules',
+    baseUrl: 'https://jules.googleapis.com/v1alpha',
+    authMode: 'api_key',
+    envKeys: ['JULES_API_KEY'],
+  },
 
   // Enterprise
   {
@@ -314,13 +332,13 @@ export const PROVIDER_CONFIGS: ProviderConfig[] = [
     name: 'opencodezen',
     baseUrl: 'https://opencode.ai/zen',
     authMode: 'api_key',
-    envKeys: ['OPENCODEZEN_API_KEY'],
+    envKeys: ['OPENCODE_ZEN_API_KEY'],
   },
   {
-    name: 'firmware',
-    baseUrl: 'https://api.firmware.ai/v1',
+    name: 'opencodego',
+    baseUrl: 'https://opencode.ai/zen/go',
     authMode: 'api_key',
-    envKeys: ['FIRMWARE_API_KEY'],
+    envKeys: ['OPENCODE_GO_API_KEY', 'OPENCODE_ZEN_API_KEY'],
   },
   {
     name: '302ai',
