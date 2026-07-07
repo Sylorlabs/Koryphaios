@@ -79,8 +79,13 @@
             style="width: var(--size-8); height: var(--size-8);"
           />
           <div class="flex flex-col justify-center min-w-0">
-            <h1 class="text-sm font-semibold leading-tight" style="color: var(--color-text-primary);">
+            <h1 class="flex items-center gap-1.5 text-sm font-semibold leading-tight" style="color: var(--color-text-primary);">
               Koryphaios
+              <span
+                class="rounded px-1 py-px text-[9px] font-bold uppercase tracking-wider"
+                style="background: color-mix(in srgb, var(--color-accent) 18%, transparent); color: var(--color-accent);"
+                title="Koryphaios is in beta — expect rapid changes"
+              >Beta</span>
             </h1>
             <p class="leading-tight" style="font-size: var(--text-xs); color: var(--color-text-muted);">
               Agent workspace
