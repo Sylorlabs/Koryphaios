@@ -962,6 +962,11 @@ RULES:
     reasoningLevel?: string,
     attachments?: Array<{ type: string; data: string; name: string }>,
   ) {
+    if (isDemoMode) {
+      composerDraft = '';
+      void import('$lib/demo.svelte').then((m) => m.replayDemo());
+      return;
+    }
     if (!projectStore.currentPath) {
       // Don't hard-block: warn and let the user pick a project, or knowingly
       // run a quick task scoped to their home folder.
