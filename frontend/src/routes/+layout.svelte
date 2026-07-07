@@ -4,6 +4,7 @@
 	import { onMount } from 'svelte';
 	import { loadProvidersFromApi } from '$lib/stores/providers.svelte';
 	import { authStore } from '$lib/stores/auth.svelte';
+	import { isDemoMode } from '$lib/demo.svelte';
 	import { initUrls } from '$lib/utils/api-url';
 	import UpdateBanner from '$lib/components/UpdateBanner.svelte';
 	import UpdateDialog from '$lib/components/UpdateDialog.svelte';
@@ -25,6 +26,11 @@
 		import('$lib/utils/error-monitor').then((m) => m.initErrorMonitoring()).catch(() => {});
 		
 		// Resolve backend URLs first, then wait for auth before requesting protected data.
+		if (isDemoMode) {
+			import('$lib/demo.svelte').then((m) => m.seedDemo()).catch(() => {});
+			hideLoading();
+			return;
+		}
 		Promise.resolve()
 			.then(() => initUrls())
 			.then(() => authStore.initialize())
