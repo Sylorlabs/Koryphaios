@@ -1,6 +1,8 @@
 <script lang="ts">
   import WorkerCard from '$lib/components/WorkerCard.svelte';
   import { modeStore } from '$lib/stores/mode.svelte';
+  import { fly } from 'svelte/transition';
+  import { cubicOut } from 'svelte/easing';
   import type { AgentRailState } from './useAgentRail.svelte';
 
   let {
@@ -31,12 +33,17 @@
         Talk to Kory and review the full session.
       </div>
     </button>
-    {#each rail.sessionAgentChats as agent (agent.identity.id)}
-      <WorkerCard
-        {agent}
-        selected={rail.selectedAgentId === agent.identity.id}
-        onSelect={() => rail.selectAgent(agent.identity.id)}
-      />
+    {#each rail.sessionAgentChats as agent, i (agent.identity.id)}
+      <div
+        class="contents-fly flex shrink-0"
+        in:fly={{ y: -28, duration: 380, delay: i * 90, easing: cubicOut }}
+      >
+        <WorkerCard
+          {agent}
+          selected={rail.selectedAgentId === agent.identity.id}
+          onSelect={() => rail.selectAgent(agent.identity.id)}
+        />
+      </div>
     {/each}
   </div>
 {:else if visible && modeStore.showAgentDetails}

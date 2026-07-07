@@ -74,8 +74,10 @@ function spawnWorkers() {
 function playScript() {
   clearTimers();
   feedStore.clearFeed();
+  // Remove the workers so they visibly fly back in from the top when Kory
+  // routes — mirrors the real spawn animation each turn.
+  agentStore.clearNonManagerAgents();
   agentStore.updateAgentStatus('kory-manager', 'idle', 's1');
-  for (const w of WORKERS) agentStore.updateAgentStatus(w.id, 'idle', 's1');
 
   at(600, () => {
     feedStore.addFeedEntry({
@@ -112,9 +114,13 @@ function playScript() {
       text: 'Routing: frontend → gpt-5.5 · backend → gemini-3-pro · tests → claude-sonnet-5',
       metadata: { phase: 'routing' },
     });
-    agentStore.updateAgentStatus('w-fe', 'writing', 's1');
-    agentStore.updateAgentStatus('w-be', 'thinking', 's1');
-    agentStore.updateAgentStatus('w-test', 'thinking', 's1');
+    // Workers spawn now — they fly in from the top of the agent rail.
+    spawnWorkers();
+    at(250, () => {
+      agentStore.updateAgentStatus('w-fe', 'writing', 's1');
+      agentStore.updateAgentStatus('w-be', 'thinking', 's1');
+      agentStore.updateAgentStatus('w-test', 'thinking', 's1');
+    });
   });
 
   at(4600, () => {
@@ -177,7 +183,6 @@ export function seedDemo(): void {
     ],
     's1',
   );
-  spawnWorkers();
   playScript();
 }
 
