@@ -10,6 +10,7 @@
  * - Settings (persisted to localStorage)
  */
 
+import { isDemoMode } from '$lib/demo.svelte';
 import type {
   Note,
   NoteWithLinks,
@@ -95,7 +96,17 @@ function saveSettingsToStorage(s: NotesSettings): void {
 // ============================================================================
 
 /** Fetch all notes, optionally filtered by folder or search query */
+const DEMO_NOTES = [
+  { id: 'n1', title: 'Dashboard spec', sourcePath: 'notes/spec.md', format: 'markdown', content: '# Analytics Dashboard\n\n- Revenue over time (line)\n- Top sources (bar)\n- Conversion funnel', updatedAt: Date.now() },
+  { id: 'n2', title: 'API contract', sourcePath: 'notes/api.md', format: 'markdown', content: '## /api/metrics\n\nReturns { revenue[], sources[], funnel[] }', updatedAt: Date.now() },
+];
+
 async function fetchNotes(folder?: string, query?: string): Promise<void> {
+  if (isDemoMode) {
+    _notes = DEMO_NOTES as unknown as Note[];
+    _isLoading = false;
+    return;
+  }
   _isLoading = true;
   try {
     const params = new URLSearchParams();
@@ -272,6 +283,7 @@ async function deleteNote(id: string): Promise<boolean> {
 
 /** Fetch graph data (nodes + edges) */
 async function fetchGraph(): Promise<void> {
+  if (isDemoMode) return;
   try {
     const params = new URLSearchParams();
     if (projectStore.currentPath) params.set('projectRoot', projectStore.currentPath);
@@ -289,6 +301,7 @@ async function fetchGraph(): Promise<void> {
 
 /** Fetch folder tree */
 async function fetchFolderTree(): Promise<void> {
+  if (isDemoMode) return;
   try {
     const params = new URLSearchParams();
     if (projectStore.currentPath) params.set('projectRoot', projectStore.currentPath);
