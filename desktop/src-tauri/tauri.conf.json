@@ -1,13 +1,13 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "Koryphaios",
-  "version": "1.0.13",
+  "version": "1.0.14",
   "identifier": "com.sylorlabs.koryphaios",
   "build": {
-    "frontendDist": "../../frontend/build",
+    "frontendDist": "../../frontend/build/client",
     "devUrl": "http://127.0.0.1:3003",
     "beforeDevCommand": null,
-    "beforeBuildCommand": "cd ../frontend && bun run build",
+    "beforeBuildCommand": "cd ../frontend && BUILD_MODE=static bun run build",
     "features": null
   },
   "app": {
@@ -38,7 +38,8 @@
         "img-src": "'self' data: https:",
         "style-src": "'self' 'unsafe-inline'",
         "script-src": "'self' 'unsafe-eval'",
-        "font-src": "'self' data:"
+        "font-src": "'self' data:",
+        "frame-src": "'self' https: http:"
       },
       "dangerousDisableAssetCspModification": false,
       "capabilities": []
@@ -92,7 +93,8 @@
       }
     },
     "resources": {
-      "../../config": "config"
+      "../../config": "config",
+      "../../frontend/build/client": "frontend"
     },
     "externalBin": [
       "sidecar/koryphaios-backend"
