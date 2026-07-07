@@ -33,6 +33,7 @@ function createUpdaterStore() {
   let downloaded = $state(false);
   let downloadProgress = $state(0);
   let showUpdateBanner = $state(false);
+  let dialogOpen = $state(false);
 
   // Private
   let checkInterval: ReturnType<typeof setInterval> | null = null;
@@ -191,7 +192,7 @@ function createUpdaterStore() {
    * Open the changelog page in browser
    */
   async function openChangelog(): Promise<void> {
-    await open('https://github.com/sylorlabs/Koryphaios/releases');
+    await open('https://koryphaios.com/changelog');
   }
 
   /**
@@ -247,8 +248,38 @@ function createUpdaterStore() {
     setupEventListeners();
   }
 
+  function openDialog(): void {
+    dialogOpen = true;
+    showUpdateBanner = false;
+  }
+  function closeDialog(): void {
+    dialogOpen = false;
+  }
+
+  /** Release notes → clean, readable sections. Strips the CHANGES_JSON HTML
+   *  comment, the download boilerplate, and horizontal rules. */
+  function getCleanNotes(): string {
+    const raw = updateInfo?.notes ?? '';
+    if (!raw.trim()) return '';
+    return raw
+      .replace(/<!--[\s\S]*?-->/g, '') // CHANGES_JSON block
+      .split('\n')
+      .filter((l) => {
+        const t = l.trim();
+        if (!t) return false;
+        if (t === '---') return false;
+        if (/download below or update automatically/i.test(t)) return false;
+        return true;
+      })
+      .join('\n')
+      .trim();
+  }
+
   return {
     // State getters
+    get dialogOpen() {
+      return dialogOpen;
+    },
     get checking() {
       return checking;
     },
@@ -282,6 +313,9 @@ function createUpdaterStore() {
     startPeriodicChecks,
     stopPeriodicChecks,
     openChangelog,
+    openDialog,
+    closeDialog,
+    getCleanNotes,
     getLastCheckedText,
     getUpdateMessage,
   };

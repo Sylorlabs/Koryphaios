@@ -4,11 +4,14 @@
     Activity,
     ChevronDown,
     GitBranch,
+    Download,
     Zap,
     Search,
     Minus,
     Square,
     X,
+    StickyNote,
+    Flag,
   } from 'lucide-svelte';
   import CheckForUpdatesButton from './CheckForUpdatesButton.svelte';
   import { getModKeyName } from '$lib/utils/platform';
@@ -18,14 +21,16 @@
   import { onMount } from 'svelte';
   import { browser } from '$app/environment';
   import { invoke } from '@tauri-apps/api/core';
+  import { projectStore, projectDisplayName } from '$lib/stores/project.svelte';
+  import { updater } from '$lib/stores/updater.svelte';
 
   interface Props {
     showSidebar: boolean;
     showGit: boolean;
     showAgents: boolean;
+    showNotes?: boolean;
     zenMode: boolean;
     projectName: string | null | undefined;
-    koryPhase: string | null;
     isYoloMode: boolean;
     activeAgents: Array<{ identity: { id: string } }>;
     recentProjects: RecentProject[];
@@ -36,9 +41,9 @@
     showSidebar,
     showGit,
     showAgents,
+    showNotes = false,
     zenMode,
     projectName,
-    koryPhase,
     isYoloMode,
     activeAgents,
     recentProjects,
@@ -137,6 +142,20 @@
     openMenu = null;
     onAction(name);
   }
+
+  async function sendFeedback() {
+    const url = 'mailto:micah.cooley@sylorlabs.com?subject=Koryphaios%20Feedback&body=What%20happened%3F%0A%0AWhat%20did%20you%20expect%3F%0A%0AAnything%20else%3F%0A';
+    if (inTauri) {
+      try {
+        const { open } = await import('@tauri-apps/plugin-shell');
+        await open(url);
+        return;
+      } catch (error) {
+        console.error('Failed to open feedback email:', error);
+      }
+    }
+    window.location.href = url;
+  }
 </script>
 
 {#if !zenMode}
@@ -163,8 +182,9 @@
           {#if openMenu === 'file'}
             <div class="absolute left-0 top-10 z-30 min-w-[260px] border p-1.5 shadow-2xl" style="background: var(--color-surface-2); border-color: var(--color-border); border-radius: 0.5rem;">
               <button type="button" class="w-full text-left px-2.5 py-1.5 text-xs hover:bg-[var(--color-surface-3)]" style="color: var(--color-text-primary);" onclick={() => action('new_project')}>New Project</button>
-              <button type="button" class="w-full text-left px-2.5 py-1.5 text-xs hover:bg-[var(--color-surface-3)]" style="color: var(--color-text-primary);" onclick={() => action('open_project_file')}>Open Project From File...</button>
-              <button type="button" class="w-full text-left px-2.5 py-1.5 text-xs hover:bg-[var(--color-surface-3)]" style="color: var(--color-text-primary);" onclick={() => action('open_project_folder')}>Open Project From Folder...</button>
+              <button type="button" class="w-full text-left px-2.5 py-1.5 text-xs hover:bg-[var(--color-surface-3)]" style="color: var(--color-text-primary);" onclick={() => action('open_project_folder')}>Open Project...</button>
+              <button type="button" class="w-full text-left px-2.5 py-1.5 text-xs hover:bg-[var(--color-surface-3)]" style="color: var(--color-text-primary);" onclick={() => action('open_workspace')}>Open Workspace...</button>
+              <button type="button" class="w-full text-left px-2.5 py-1.5 text-xs hover:bg-[var(--color-surface-3)]" style="color: var(--color-text-secondary);" onclick={() => action('open_project_file')}>Import Project File...</button>
               <div class="h-px my-1" style="background: var(--color-border);"></div>
               <div class="px-2.5 py-1.5 text-[10px] uppercase tracking-wider" style="color: var(--color-text-muted);">Recent projects</div>
               {#if recentProjects.length > 0}
@@ -178,7 +198,6 @@
                 <div class="px-2.5 py-1.5 text-xs" style="color: var(--color-text-muted);">No recent projects yet</div>
               {/if}
               <div class="h-px my-1" style="background: var(--color-border);"></div>
-              <button type="button" class="w-full text-left px-2.5 py-1.5 text-xs hover:bg-[var(--color-surface-3)]" style="color: var(--color-text-primary);" onclick={() => action('save_snapshot')}>Save Project As .kory.json</button>
               <button type="button" class="w-full text-left px-2.5 py-1.5 text-xs hover:bg-[var(--color-surface-3)]" style="color: var(--color-text-primary);" onclick={() => action('new_session')}>New Session</button>
             </div>
           {/if}
@@ -244,13 +263,6 @@
         </div>
       </div>
 
-      {#if koryPhase}
-        <span class="flex items-center gap-2 min-w-0 max-w-[220px] px-1 py-2">
-            <div class="w-1.5 h-1.5 bg-amber-400 animate-pulse"></div>
-            <span class="text-xs font-medium leading-none truncate" style="color: var(--color-text-secondary);">Kory {koryPhase}</span>
-        </span>
-      {/if}
-
       {#if isYoloMode}
         <span class="flex items-center gap-1.5 px-1 py-2 text-red-400">
             <Zap size={12} fill="currentColor" />
@@ -263,33 +275,44 @@
       class="flex-1 flex items-center justify-center h-full"
       data-tauri-drag-region
     >
-      {#if projectName}
-        <div class="flex items-center gap-2 min-w-0 max-w-[420px] px-2 py-2" data-tauri-drag-region>
-          <div class="min-w-0 pointer-events-none">
-            <div class="text-[13px] font-medium truncate leading-tight opacity-80" style="color: var(--color-text-primary);" title={projectName}>
-              {projectName}
-            </div>
-          </div>
+      <!-- Fixed to the viewport center so the project name stays in the top
+           middle regardless of sidebar/panel state. -->
+      {#if projectStore.currentPath}
+        <div
+          class="max-w-[360px] truncate px-3 text-xs font-medium pointer-events-none"
+          style="position: fixed; left: 50vw; transform: translateX(-50%); color: var(--color-text-secondary);"
+          title={projectStore.currentPath}
+        >
+          {projectStore.displayName}
+        </div>
+      {:else if projectStore.workspaceRoot}
+        <div
+          class="max-w-[360px] truncate px-3 text-xs font-medium pointer-events-none"
+          style="position: fixed; left: 50vw; transform: translateX(-50%); color: var(--color-text-secondary);"
+          title={projectStore.workspaceRoot}
+        >
+          {projectDisplayName(projectStore.workspaceRoot)} (workspace)
         </div>
       {:else}
-        <div class="px-2 py-2 pointer-events-none" data-tauri-drag-region>
-          <span class="text-xs" style="color: var(--color-text-muted);">No project open</span>
-        </div>
+        <span class="text-xs pointer-events-none" style="position: fixed; left: 50vw; transform: translateX(-50%); color: var(--color-text-muted);">No project selected</span>
       {/if}
     </div>
 
     <!-- Right: Controls -->
     <div class="flex items-center gap-1.5">
-      <button
-        type="button"
-        class="px-3 py-2 text-xs font-medium rounded-lg transition-colors hover:bg-[var(--color-surface-2)]"
-        style="color: var(--color-text-secondary);"
-        onclick={() => action('toggle_sidebar')}
-        title={showSidebar ? 'Hide sidebar' : 'Show sidebar'}
-        data-tauri-drag-region="false"
-      >
-        {showSidebar ? 'Sidebar on' : 'Sidebar off'}
-      </button>
+      {#if updater.updateAvailable}
+        <button
+          type="button"
+          class="flex items-center gap-1.5 px-3 py-2 rounded-lg transition-colors bg-[var(--color-accent)]/12 hover:bg-[var(--color-accent)]/20"
+          style="color: var(--color-accent);"
+          onclick={() => updater.openDialog()}
+          data-tauri-drag-region="false"
+          title="Update available — v{updater.updateInfo?.version ?? ''}"
+        >
+          <Download size={14} />
+          <span class="text-xs font-semibold">Update{updater.updateInfo?.version ? ` v${updater.updateInfo.version}` : ''}</span>
+        </button>
+      {/if}
       {#if modeStore.showGitPanel}
         <button
           type="button"
@@ -302,6 +325,27 @@
           <span class="text-xs font-medium">{showGit ? 'Git open' : 'Git'}</span>
         </button>
       {/if}
+      <button
+        type="button"
+        class="group flex items-center gap-1.5 rounded-lg px-3 py-2 text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-surface-2)]"
+        data-tauri-drag-region="false"
+        title="Send feedback to micah.cooley@sylorlabs.com"
+        onclick={sendFeedback}
+      >
+        <Flag size={14} class="transition-colors group-hover:text-red-400" />
+        <span class="text-xs font-medium">Feedback</span>
+      </button>
+      <button
+        type="button"
+        class="flex items-center gap-1.5 px-3 py-2 rounded-lg transition-colors hover:bg-[var(--color-surface-2)]"
+        style="color: {showNotes ? 'var(--color-accent)' : 'var(--color-text-secondary)'};"
+        onclick={() => action('toggle_notes')}
+        data-tauri-drag-region="false"
+        title="Notes (Ctrl+Shift+N)"
+      >
+        <StickyNote size={14} />
+        <span class="text-xs font-medium">{showNotes ? 'Notes open' : 'Notes'}</span>
+      </button>
       <button
         type="button"
         class="flex items-center gap-2 px-3 py-2 rounded-lg transition-colors hover:bg-[var(--color-surface-2)]"
@@ -385,7 +429,7 @@
   
   <button
     type="button"
-    class="absolute top-2.5 right-4 z-20 px-3.5 py-1.5 text-xs border rounded-full transition-all duration-200 hover:bg-[var(--color-surface-3)] hover:border-[var(--color-border-bright)] hover:scale-105 active:scale-95 shadow-lg"
+    class="absolute top-1.5 right-4 z-20 px-3.5 py-1.5 text-xs border rounded-full transition-all duration-200 hover:bg-[var(--color-surface-3)] hover:border-[var(--color-border-bright)] hover:scale-105 active:scale-95 shadow-lg"
     style="background: var(--color-surface-2); border-color: var(--color-border); color: var(--color-text-secondary); -webkit-app-region: no-drag;"
     onclick={() => action('toggle_zen_mode')}
   >
