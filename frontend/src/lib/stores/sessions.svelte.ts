@@ -3,6 +3,7 @@
 
 import type { Session } from '@koryphaios/shared';
 import { toastStore } from './toast.svelte';
+import { projectStore } from './project.svelte';
 import { browser } from '$app/environment';
 import { friendlyHttpError } from '$lib/utils/http-error';
 import { apiUrl } from '$lib/utils/api-url';
@@ -91,6 +92,14 @@ async function fetchSessions(): Promise<boolean> {
       // Save the resolved active session
       if (activeSessionId) {
         saveLastSession(activeSessionId);
+        const active = sessions.find((session) => session.id === activeSessionId);
+        // Adopt the session's project only when the user hasn't chosen one —
+        // never override a persisted choice, and never yank someone off the
+        // workspace chooser (currentPath === null is a deliberate, persisted
+        // state whenever a workspace is open).
+        if (active?.workingDirectory && !projectStore.currentPath && !projectStore.workspaceRoot) {
+          projectStore.setProject(active.workingDirectory);
+        }
       }
       return true;
     }
@@ -102,14 +111,59 @@ async function fetchSessions(): Promise<boolean> {
   }
 }
 
-async function createSession(): Promise<string | null> {
+/** Resolve the working directory a brand-new chat should be scoped to.
+ *  - Inside a workspace: scope='all' → no workingDirectory (workspace-level chat);
+ *    scope='project' → use the active project's path. Falls back to workspace-level
+ *    if no project is open.
+ *  - Outside a workspace: use the active project if one is open, otherwise none. */
+function resolveNewChatWorkingDirectory(): string | undefined {
+  if (projectStore.workspaceRoot) {
+    if (projectStore.scope === 'project' && projectStore.currentPath) {
+      return projectStore.currentPath;
+    }
+    return undefined;
+  }
+  return projectStore.currentPath ?? undefined;
+}
+
+/** User-initiated "new chat".
+ *
+ *  Behavior:
+ *  - shift=true → always create a brand-new session.
+ *  - shift=false (default) and an active session exists with zero messages →
+ *    just keep using it (no new session is created, prevents spam).
+ *  - Inside a workspace: opens a session scoped to either the workspace root
+ *    (scope='all') or the active project (scope='project'), based on the
+ *    sidebar slider.
+ *  - Outside a workspace: opens a session scoped to the active project (or
+ *    unscoped if no project is open). */
+async function newChat(opts: { shift?: boolean } = {}): Promise<string | null> {
+  const shift = opts.shift === true;
+  if (!shift) {
+    const active = sessions.find((s) => s.id === activeSessionId);
+    if (active && (active.messageCount ?? 0) === 0) {
+      // The user already has a fresh empty session active — reuse it instead
+      // of creating another one. Focus is handled by the caller.
+      return active.id;
+    }
+  }
+  return createSession({ workingDirectory: resolveNewChatWorkingDirectory() });
+}
+
+async function createSession(
+  opts: { workingDirectory?: string | null } = {},
+): Promise<string | null> {
   try {
+    const workingDirectory = opts.workingDirectory ?? null;
     const res = await apiFetch(apiUrl('/api/sessions'), {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({ title: 'New Session' }),
+      body: JSON.stringify({
+        title: 'New Session',
+        ...(workingDirectory ? { workingDirectory } : {}),
+      }),
     });
     const text = await res.text();
     if (!res.ok) {
@@ -123,9 +177,20 @@ async function createSession(): Promise<string | null> {
       return null;
     }
     if (data?.ok && data?.data) {
+      // Prepend the new session. If the new session is filtered out of the
+      // current sidebar view (e.g. it's workspace-level but the slider is on
+      // 'project'), flip the slider to 'all' so the user can always see the
+      // chat they just created.
       sessions = [data.data, ...sessions];
       activeSessionId = data.data.id;
       saveLastSession(activeSessionId);
+      if (
+        projectStore.workspaceRoot &&
+        projectStore.scope === 'project' &&
+        !data.data.workingDirectory
+      ) {
+        projectStore.setScope('all');
+      }
       return data.data.id;
     }
   } catch {
@@ -182,9 +247,7 @@ async function deleteSession(id: string) {
   }
 }
 
-async function fetchMessages(
-  sessionId: string,
-): Promise<
+async function fetchMessages(sessionId: string): Promise<
   Array<{
     id: string;
     role: string;
@@ -192,6 +255,8 @@ async function fetchMessages(
     createdAt: number;
     model?: string;
     cost?: number;
+    variantGroupId?: string;
+    variantIndex?: number;
   }>
 > {
   try {
@@ -266,6 +331,8 @@ export const sessionStore = {
   set activeSessionId(id: string) {
     activeSessionId = id;
     saveLastSession(id);
+    const session = sessions.find((item) => item.id === id);
+    if (session?.workingDirectory) projectStore.setProject(session.workingDirectory);
   },
   get searchQuery() {
     return searchQuery;
@@ -278,17 +345,34 @@ export const sessionStore = {
   },
 
   get filteredSessions(): Session[] {
-    if (!searchQuery.trim()) return sessions;
+    // Project scope first: only the open project's chats (legacy sessions with
+    // no workingDirectory stay visible in the 'all' scope, never lost).
+    let scoped = sessions;
+    if (projectStore.scope === 'project' && projectStore.currentPath) {
+      scoped = sessions.filter((s) => s.workingDirectory === projectStore.currentPath);
+    }
+    if (!searchQuery.trim()) return scoped;
     const q = searchQuery.toLowerCase();
-    return sessions.filter((s) => s.title.toLowerCase().includes(q));
+    return scoped.filter((s) => s.title.toLowerCase().includes(q));
+  },
+
+  /** Sessions belonging to a specific project path (used on project open). */
+  sessionsForProject(path: string): Session[] {
+    return sessions.filter((s) => s.workingDirectory === path);
   },
 
   get groupedSessions(): SessionGroup[] {
     return groupByDate(this.filteredSessions);
   },
 
+  /** Demo-mode only: inject canned sessions + active id (no backend). */
+  seedDemoSessions(list: Session[], activeId: string) {
+    sessions = list;
+    activeSessionId = activeId;
+  },
   fetchSessions,
   createSession,
+  newChat,
   renameSession,
   deleteSession,
   fetchMessages,
