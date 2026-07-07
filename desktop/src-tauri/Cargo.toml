@@ -1,6 +1,6 @@
 [package]
 name = "koryphaios-desktop"
-version = "1.0.17"
+version = "1.0.18"
 description = "Koryphaios — The Autonomous Workspace for 100% AI-Generated Code"
 authors = ["Sylorlabs"]
 edition = "2021"
