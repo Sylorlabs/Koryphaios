@@ -1,6 +1,6 @@
 {
   "name": "koryphaios",
-  "version": "1.0.15",
+  "version": "1.0.16",
   "private": true,
   "workspaces": [
     "backend",
