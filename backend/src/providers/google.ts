@@ -20,15 +20,24 @@ import {
 import { providerLog } from '../logger';
 
 export class GoogleProvider implements Provider {
-  readonly name: 'google' | 'vertexai';
+  // 'aistudio' is the AI Studio brand of the same Gemini (generativelanguage)
+  // API — behaves exactly like 'google', just a distinct, unambiguous
+  // API-key-only provider entry so users never hit the gcloud OAuth path.
+  readonly name: 'google' | 'vertexai' | 'aistudio';
 
   constructor(readonly config: ProviderConfig) {
-    this.name = config.name === 'vertexai' ? 'vertexai' : 'google';
+    this.name =
+      config.name === 'vertexai' ? 'vertexai' : config.name === 'aistudio' ? 'aistudio' : 'google';
+  }
+
+  /** True for the Gemini AI Studio API (generativelanguage), false for Vertex. */
+  private get isAiStudio(): boolean {
+    return this.name !== 'vertexai';
   }
 
   isAvailable(): boolean {
     const available = !this.config.disabled && !!(this.config.apiKey || this.config.authToken);
-    if (available && this.name === 'google' && !isModelListCacheFresh(this.lastFetch)) {
+    if (available && this.isAiStudio && !isModelListCacheFresh(this.lastFetch)) {
       this.refreshModelsInBackground(getModelsForProvider(this.name));
     }
     return available;
@@ -40,7 +49,7 @@ export class GoogleProvider implements Provider {
 
   listModels(): ModelDef[] {
     const fallback = getModelsForProvider(this.name);
-    if (this.name !== 'google') return fallback;
+    if (!this.isAiStudio) return fallback;
     if (!this.isAvailable()) return fallback;
     if (this.cachedModels && isModelListCacheFresh(this.lastFetch)) return this.cachedModels;
     this.refreshModelsInBackground(fallback);

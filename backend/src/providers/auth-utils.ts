@@ -351,6 +351,25 @@ export function detectGrokCLILogin(): boolean {
  * Detects whether the Cursor CLI (cursor-agent) is logged in: a CURSOR_API_KEY in the
  * environment or stored auth in ~/.cursor/cli-config.json (the `authInfo` block).
  */
+export function detectClineCLILogin(): boolean {
+  const home = homeDir();
+  if (!home) return false;
+  const secrets = join(home, '.cline', 'data', 'secrets.json');
+  if (!existsSync(secrets)) return false;
+  try {
+    const data = JSON.parse(readFileSync(secrets, 'utf-8')) as Record<string, unknown>;
+    return Object.values(data).some((v) => typeof v === 'string' && v.length > 0);
+  } catch {
+    return false;
+  }
+}
+export function isClineCLIAuthMarker(value: string | null | undefined): boolean {
+  return value === 'cline-cli-session';
+}
+export function createClineCLIAuthMarker(): string {
+  return 'cline-cli-session';
+}
+
 export function detectDevinCLILogin(): boolean {
   if (process.env.COGNITION_API_KEY?.trim() || process.env.DEVIN_API_KEY?.trim()) return true;
   const home = homeDir();

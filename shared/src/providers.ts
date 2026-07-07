@@ -76,6 +76,7 @@ export const IMPLEMENTED_PROVIDERS: ProviderName[] = [
   'jules',
   'openai',
   'google',
+  'aistudio',
   'google-subscription',
   'xai',
   'openrouter',

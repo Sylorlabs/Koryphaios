@@ -25,28 +25,42 @@ export const PROVIDER_DISPLAY: Partial<Record<ProviderName, ProviderDisplayMeta>
     iconPath: '/provider-icons/lobehub/grok.svg',
     deployment: 'local',
     description:
-      'Runs the official grok CLI on your machine. Install grok, run "grok login", then click Auth — no API key or token entry needed.',
+      'CLI only. Runs the official grok CLI on your machine. Install grok, run "grok login", then click Auth — no API key or token entry needed.',
   },
   antigravity: {
     label: 'Antigravity',
     iconPath: '/provider-icons/lobehub/antigravity.svg',
     deployment: 'local',
     description:
-      'Runs the official agy CLI on your machine. Install agy, run "agy login", then click Auth — credentials stay in the CLI.',
+      'CLI only. Runs the official agy CLI on your machine. Install agy, run "agy login", then click Auth — credentials stay in the CLI.',
   },
   cursor: {
     label: 'Cursor',
     iconPath: '/provider-icons/lobehub/cursor.svg',
     deployment: 'local',
     description:
-      'Runs the official cursor-agent CLI on your machine. Install cursor-agent and run "cursor-agent login" — no API key needed.',
+      'CLI only. Runs the official cursor-agent CLI on your machine. Install cursor-agent and run "cursor-agent login" — no API key needed.',
   },
   devin: {
     label: 'Devin',
     iconPath: '/provider-icons/lobehub/windsurf.svg',
     deployment: 'local',
     description:
-      'Runs Cognition\'s official devin CLI on your machine (cloud-backed). Install devin and run "devin auth login" — no API key needed.',
+      'CLI only. Runs Cognition\'s official devin CLI on your machine (cloud-backed). Install devin and run "devin auth login" — no API key needed.',
+  },
+  aistudio: {
+    label: 'Google AI Studio',
+    iconPath: '/provider-icons/lobehub/gemini.svg',
+    deployment: 'cloud',
+    description:
+      'Google AI Studio — paste your Gemini API key (aistudio.google.com/apikey). Direct Gemini API, no gcloud sign-in.',
+  },
+  cline: {
+    label: 'Cline',
+    iconPath: '/provider-icons/lobehub/cline.svg',
+    deployment: 'local',
+    description:
+      'CLI only. Runs the official cline CLI on your machine — Cline manages its own provider key (run "cline auth …"). No Koryphaios API key.',
   },
   jules: {
     label: 'Google Jules',

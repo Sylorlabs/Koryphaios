@@ -35,6 +35,12 @@ export const PROVIDER_CONFIGS: ProviderConfig[] = [
     envKeys: ['GEMINI_API_KEY', 'GOOGLE_API_KEY'],
   },
   {
+    name: 'aistudio',
+    baseUrl: 'https://generativelanguage.googleapis.com',
+    authMode: 'api_key',
+    envKeys: ['GEMINI_API_KEY', 'GOOGLE_API_KEY', 'AI_STUDIO_API_KEY'],
+  },
+  {
     name: 'google-subscription',
     baseUrl: 'https://generativelanguage.googleapis.com',
     authMode: 'auth_only',

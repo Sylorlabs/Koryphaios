@@ -76,6 +76,16 @@ export function resolveModelForProvider(
  * Get all known models for a specific provider.
  */
 export function getModelsForProvider(providerName: ProviderName): ModelDef[] {
+  // AI Studio is the same Gemini model catalog as 'google' under a distinct
+  // API-key-only provider entry — reuse it (with ids re-tagged to aistudio).
+  if (providerName === 'aistudio') {
+    return ALL_MODELS.filter((m) => m.provider === 'google').map((m) => ({
+      ...m,
+      id: `aistudio-${m.id}`,
+      apiModelId: m.apiModelId ?? m.id,
+      provider: 'aistudio' as ProviderName,
+    }));
+  }
   return ALL_MODELS.filter((m) => m.provider === providerName);
 }
 

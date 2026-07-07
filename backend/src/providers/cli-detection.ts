@@ -29,11 +29,13 @@ import {
   createCursorCLIAuthMarker,
   detectDevinCLILogin,
   createDevinCLIAuthMarker,
+  detectClineCLILogin,
+  createClineCLIAuthMarker,
 } from './auth-utils';
 
 export interface AgentCliStatus {
   /** Stable id for the CLI. */
-  id: 'claude' | 'codex' | 'antigravity' | 'grok' | 'cursor' | 'devin';
+  id: 'claude' | 'codex' | 'antigravity' | 'grok' | 'cursor' | 'devin' | 'cline';
   displayName: string;
   /** Candidate binary names looked up on PATH. */
   binaries: string[];
@@ -97,6 +99,8 @@ export function canAutoEnable(provider: ProviderName): boolean {
       return !!whichBinary('cursor-agent') && detectCursorCLILogin();
     case 'devin':
       return !!whichBinary('devin') && detectDevinCLILogin();
+    case 'cline':
+      return !!whichBinary('cline') && detectClineCLILogin();
     default:
       return false;
   }
@@ -126,6 +130,8 @@ export function cliAutoEnableCreds(
       return { authToken: createCursorCLIAuthMarker() };
     case 'devin':
       return { authToken: createDevinCLIAuthMarker() };
+    case 'cline':
+      return { authToken: createClineCLIAuthMarker() };
     default:
       return null;
   }
@@ -228,7 +234,18 @@ export function detectAgentClis(): AgentCliStatus[] {
     docsUrl: 'https://docs.devin.ai/',
   });
 
-  return [claude, codex, antigravity, grok, cursor, devin];
+  const clineLogin = detectClineCLILogin();
+  const cline = mk('cline', 'Cline CLI', ['cline'], 'cline', {
+    loggedIn: clineLogin,
+    authSource: clineLogin ? '~/.cline/data/secrets.json' : null,
+    autoEnabled: canAutoEnable('cline'),
+    workingNote: clineLogin
+      ? 'Cline CLI detected and signed in — CLI-only, runs through the cline harness (Cline manages its own key).'
+      : 'Cline CLI is installed but not signed in — run "cline auth --provider <p> --apikey <k>".',
+    docsUrl: 'https://docs.cline.bot/cli',
+  });
+
+  return [claude, codex, antigravity, grok, cursor, devin, cline];
 }
 
 function mk(

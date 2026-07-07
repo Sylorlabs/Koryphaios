@@ -47,7 +47,7 @@ afterEach(() => {
 describe('detectAgentClis', () => {
   it('reports all five agent CLIs with their provider mappings', () => {
     const list = detectAgentClis();
-    expect(list.map((c) => c.id).sort()).toEqual(['antigravity', 'claude', 'codex', 'cursor', 'devin', 'grok']);
+    expect(list.map((c) => c.id).sort()).toEqual(['antigravity', 'claude', 'cline', 'codex', 'cursor', 'devin', 'grok']);
     const byId = Object.fromEntries(list.map((c) => [c.id, c]));
     expect(byId.claude.provider).toBe('claude');
     expect(byId.codex.provider).toBe('codex');
@@ -55,6 +55,7 @@ describe('detectAgentClis', () => {
     expect(byId.grok.provider).toBe('grok'); // Grok Build has its own CLI-harness provider
     expect(byId.cursor.provider).toBe('cursor'); // Cursor CLI harness provider
     expect(byId.devin.provider).toBe('devin'); // Devin CLI harness provider
+    expect(byId.cline.provider).toBe('cline'); // Cline CLI harness provider
   });
 
   it('every entry carries a binary path when installed, and a human note', () => {

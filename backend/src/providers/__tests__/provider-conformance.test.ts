@@ -35,6 +35,7 @@ import {
   detectGrokCLILogin,
   detectCursorCLILogin,
   detectDevinCLILogin,
+  detectClineCLILogin,
 } from '../auth-utils';
 import type { Provider, ProviderEvent } from '../types';
 import type { ProviderConfig, ProviderName } from '@koryphaios/shared';
@@ -379,6 +380,15 @@ describe('Provider conformance (contract + optional live)', () => {
         result.evidence = 'CLI harness (grok-build provider)';
         result.live = loggedIn ? 'LIVE_PASS' : 'SKIP';
         result.liveDetail = loggedIn ? 'grok CLI logged in' : 'no grok login';
+        results.push(result);
+        continue;
+      }
+
+      if (name === 'cline') {
+        const loggedIn = detectClineCLILogin();
+        result.evidence = 'CLI harness (cline provider)';
+        result.live = loggedIn ? 'LIVE_PASS' : 'SKIP';
+        result.liveDetail = loggedIn ? 'cline CLI signed in' : 'no cline login';
         results.push(result);
         continue;
       }
