@@ -7,7 +7,7 @@
     "frontendDist": "../../frontend/build/client",
     "devUrl": "http://127.0.0.1:3003",
     "beforeDevCommand": null,
-    "beforeBuildCommand": "cd ../frontend && BUILD_MODE=static bun run build",
+    "beforeBuildCommand": "cd ../frontend && bun run build",
     "features": null
   },
   "app": {
