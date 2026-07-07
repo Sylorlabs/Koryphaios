@@ -148,16 +148,16 @@ jobs:
             args: '--target x86_64-apple-darwin --bundles app'
             bun-target: 'bun-darwin-x64'
             sidecar-suffix: 'x86_64-apple-darwin'
-          - platform: 'ubuntu-22.04'
-            runner: 'blacksmith-8vcpu-ubuntu-2204'
-            args: '--bundles deb,appimage'
-            bun-target: 'bun-linux-x64'
-            sidecar-suffix: 'x86_64-unknown-linux-gnu'
           - platform: 'windows-latest'
             runner: 'blacksmith-8vcpu-windows-2025'
             args: '--bundles msi,nsis'
             bun-target: 'bun-windows-x64'
             sidecar-suffix: 'x86_64-pc-windows-msvc'
+          - platform: 'ubuntu-22.04'
+            runner: 'blacksmith-8vcpu-ubuntu-2204'
+            args: '--bundles deb,appimage'
+            bun-target: 'bun-linux-x64'
+            sidecar-suffix: 'x86_64-unknown-linux-gnu'
 
     runs-on: ${{ matrix.runner }}
     steps:
@@ -264,7 +264,7 @@ jobs:
             --password "$TAURI_SIGNING_PRIVATE_KEY_PASSWORD" && cd ..
           TAG="v${{ needs.check-update-trigger.outputs.new_version }}"
           gh release upload "$TAG" "$APP" "$APP.sig" --clobber
-          gh release download "$TAG" -p latest.json -O latest.json
+          gh release download "$TAG" -p latest.json -O latest.json --clobber
           SIG=$(cat "$APP.sig")
           URL="https://github.com/${{ github.repository }}/releases/download/$TAG/$(basename "$APP")"
           jq --arg sig "$SIG" --arg url "$URL" \
