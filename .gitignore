@@ -45,6 +45,7 @@ opencode-reference/
 
 # Koryphaios AI worktrees
 .trees/
+.claude/worktrees/
 .keys
 desktop/src-tauri/sidecar/
 koryphaios.json

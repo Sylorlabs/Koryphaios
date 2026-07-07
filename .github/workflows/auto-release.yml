@@ -132,14 +132,18 @@ jobs:
       contents: write
     strategy:
       fail-fast: false
+      # Serialize: each job fully builds + merges its platform into the shared
+      # latest.json before the next starts, so parallel uploads never collide
+      # ("latest.json already exists").
+      max-parallel: 1
       matrix:
         include:
           - platform: 'macos-latest'
-            args: '--target aarch64-apple-darwin'
+            args: '--target aarch64-apple-darwin --bundles app'
             bun-target: 'bun-darwin-arm64'
             sidecar-suffix: 'aarch64-apple-darwin'
           - platform: 'macos-latest'
-            args: '--target x86_64-apple-darwin'
+            args: '--target x86_64-apple-darwin --bundles app'
             bun-target: 'bun-darwin-x64'
             sidecar-suffix: 'x86_64-apple-darwin'
           - platform: 'ubuntu-22.04'
