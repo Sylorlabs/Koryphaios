@@ -4,6 +4,7 @@
     Activity,
     ChevronDown,
     GitBranch,
+    Download,
     Zap,
     Search,
     Minus,
@@ -21,6 +22,7 @@
   import { browser } from '$app/environment';
   import { invoke } from '@tauri-apps/api/core';
   import { projectStore, projectDisplayName } from '$lib/stores/project.svelte';
+  import { updater } from '$lib/stores/updater.svelte';
 
   interface Props {
     showSidebar: boolean;
@@ -298,6 +300,19 @@
 
     <!-- Right: Controls -->
     <div class="flex items-center gap-1.5">
+      {#if updater.updateAvailable}
+        <button
+          type="button"
+          class="flex items-center gap-1.5 px-3 py-2 rounded-lg transition-colors bg-[var(--color-accent)]/12 hover:bg-[var(--color-accent)]/20"
+          style="color: var(--color-accent);"
+          onclick={() => updater.openDialog()}
+          data-tauri-drag-region="false"
+          title="Update available — v{updater.updateInfo?.version ?? ''}"
+        >
+          <Download size={14} />
+          <span class="text-xs font-semibold">Update{updater.updateInfo?.version ? ` v${updater.updateInfo.version}` : ''}</span>
+        </button>
+      {/if}
       {#if modeStore.showGitPanel}
         <button
           type="button"
