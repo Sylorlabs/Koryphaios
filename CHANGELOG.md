@@ -4,6 +4,8 @@ All notable Koryphaios changes are recorded here. Release automation prepends a 
 
 ## Unreleased
 
+## [1.0.22] - 2026-07-08
+
 ### Added
 
 - Native in-app feedback reporting with anonymous-by-default delivery, optional reply email, basic diagnostic consent, and Koryphaios-styled client and email presentation.
