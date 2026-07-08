@@ -9,12 +9,20 @@
  */
 
 import { describe, it, expect, beforeAll, beforeEach, afterAll } from 'bun:test';
-import { UserCredentialsService } from '../../src/services/user-credentials';
-import { createAuditLogService } from '../../src/services/audit';
-import { initDb, getDb } from '../../src/db';
+import type { UserCredentialsService } from '../../src/services/user-credentials';
 import { mkdirSync, rmSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
+
+const isolatedTestDir = join(tmpdir(), `koryphaios-creds-test-${process.pid}-${Date.now()}`);
+mkdirSync(isolatedTestDir, { recursive: true });
+process.env.DATABASE_URL = `sqlite://${join(isolatedTestDir, 'credentials.sqlite')}`;
+process.env.KORYPHAIOS_MASTER_KEY =
+  '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef';
+
+const { UserCredentialsService } = await import('../../src/services/user-credentials');
+const { createAuditLogService } = await import('../../src/services/audit');
+const { initDb, getDb, db, users } = await import('../../src/db');
 
 describe('Credentials Service', () => {
   let service: UserCredentialsService;
@@ -22,14 +30,8 @@ describe('Credentials Service', () => {
   let userId: string;
 
   beforeAll(() => {
-    testDir = join(tmpdir(), `koryphaios-creds-test-${Date.now()}`);
-    mkdirSync(testDir, { recursive: true });
-    // Set master key for encryption tests
-    process.env.KORYPHAIOS_MASTER_KEY =
-      '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef';
-    initDb(testDir);
-    // Disable FK constraints for tests (audit log FK causes issues with test isolation)
-    getDb().run('PRAGMA foreign_keys = OFF;');
+    testDir = isolatedTestDir;
+    initDb();
     // Create service directly with fresh DB connection to avoid singleton issues
     service = new UserCredentialsService(getDb());
   });
@@ -40,8 +42,13 @@ describe('Credentials Service', () => {
     } catch {}
   });
 
-  beforeEach(() => {
+  beforeEach(async () => {
     userId = `user_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+    await db.insert(users).values({
+      id: userId,
+      username: userId,
+      passwordHash: 'test-only',
+    });
   });
 
   describe('create', () => {
@@ -118,6 +125,11 @@ describe('Credentials Service', () => {
 
     it("should not allow accessing other user's credential", async () => {
       const otherUserId = `other_${Date.now()}`;
+      await db.insert(users).values({
+        id: otherUserId,
+        username: otherUserId,
+        passwordHash: 'test-only',
+      });
       const credential = 'sk-secret';
 
       const id = await service.create({
@@ -169,6 +181,11 @@ describe('Credentials Service', () => {
   describe('list', () => {
     it("should list only user's credentials", async () => {
       const otherUserId = `other_${Date.now()}`;
+      await db.insert(users).values({
+        id: otherUserId,
+        username: otherUserId,
+        passwordHash: 'test-only',
+      });
 
       await service.create({ userId, provider: 'openai', credential: 'sk-1', metadata: {} });
       await service.create({ userId, provider: 'anthropic', credential: 'sk-2', metadata: {} });
@@ -238,6 +255,11 @@ describe('Credentials Service', () => {
 
     it("should not allow deleting other user's credential", async () => {
       const otherUserId = `other_${Date.now()}`;
+      await db.insert(users).values({
+        id: otherUserId,
+        username: otherUserId,
+        passwordHash: 'test-only',
+      });
 
       const id = await service.create({
         userId,
