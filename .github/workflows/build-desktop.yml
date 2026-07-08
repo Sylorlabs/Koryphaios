@@ -269,7 +269,14 @@ jobs:
           # Repack with appimagetool (does NOT re-run patchelf)
           APPIMAGETOOL="$HOME/.cache/tauri/appimagetool-x86_64.AppImage"
           if [ ! -x "$APPIMAGETOOL" ]; then
-            echo "appimagetool not found at $APPIMAGETOOL"
+            echo "appimagetool not cached — downloading..."
+            mkdir -p "$HOME/.cache/tauri"
+            curl -sL -o "$APPIMAGETOOL" \
+              "https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage"
+            chmod +x "$APPIMAGETOOL"
+          fi
+          if [ ! -x "$APPIMAGETOOL" ]; then
+            echo "ERROR: appimagetool could not be obtained"
             exit 1
           fi
 
