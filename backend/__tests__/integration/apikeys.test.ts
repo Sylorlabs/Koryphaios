@@ -10,11 +10,17 @@
  */
 
 import { describe, it, expect, beforeAll, beforeEach, afterAll } from 'bun:test';
-import { createApiKeyService, ApiKeyService } from '../../src/apikeys/service';
-import { initDb, getDb } from '../../src/db';
+import type { ApiKeyService } from '../../src/apikeys/service';
 import { mkdirSync, rmSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
+
+const isolatedTestDir = join(tmpdir(), `koryphaios-apikey-test-${process.pid}-${Date.now()}`);
+mkdirSync(isolatedTestDir, { recursive: true });
+process.env.DATABASE_URL = `sqlite://${join(isolatedTestDir, 'apikeys.sqlite')}`;
+
+const { createApiKeyService } = await import('../../src/apikeys/service');
+const { initDb, db, users } = await import('../../src/db');
 
 describe('API Key Authentication', () => {
   let service: ApiKeyService;
@@ -23,9 +29,8 @@ describe('API Key Authentication', () => {
   let testCounter = 0;
 
   beforeAll(() => {
-    testDir = join(tmpdir(), `koryphaios-test-${Date.now()}`);
-    mkdirSync(testDir, { recursive: true });
-    initDb(testDir);
+    testDir = isolatedTestDir;
+    initDb();
     service = createApiKeyService();
   });
 
@@ -35,8 +40,13 @@ describe('API Key Authentication', () => {
     } catch {}
   });
 
-  beforeEach(() => {
+  beforeEach(async () => {
     userId = `test_user_${Date.now()}_${++testCounter}`;
+    await db.insert(users).values({
+      id: userId,
+      username: userId,
+      passwordHash: 'test-only',
+    });
   });
 
   describe('create', () => {
@@ -220,6 +230,11 @@ describe('API Key Authentication', () => {
   describe('listForUser', () => {
     it("should list only user's keys", async () => {
       const otherUserId = `other_${Date.now()}`;
+      await db.insert(users).values({
+        id: otherUserId,
+        username: otherUserId,
+        passwordHash: 'test-only',
+      });
 
       await service.create({ userId, name: 'Key 1' });
       await service.create({ userId, name: 'Key 2' });
