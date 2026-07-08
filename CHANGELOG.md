@@ -15,9 +15,9 @@ All notable Koryphaios changes are recorded here. Release automation prepends a 
 
 ### Fixed
 
-- Desktop packaging now compiles the backend sidecar for Windows, macOS Intel, macOS Apple Silicon, Linux x64, and universal macOS builds before Tauri bundles the frontend.
-- Removed the known-broken Linux ARM cross-build until its WebKit/sysroot and Bun sidecar toolchain can be supported end to end.
-- The desktop now fails closed when its bundled backend is absent, verifies health against the spawned PID, restarts unhealthy sidecars, and serves the frontend and API from one origin.
+- Desktop packaging now embeds the compiled backend payload directly in the main executable for Windows, macOS Intel, macOS Apple Silicon, Linux x64, and universal macOS builds; there is no Tauri external sidecar to ship or repair.
+- Removed the known-broken Linux ARM cross-build until its WebKit/sysroot and Bun payload toolchain can be supported end to end.
+- The desktop materializes its internal backend privately, verifies health against the spawned PID, restarts it if unhealthy, and serves the frontend and API from one origin.
 - Managers animate into the agent rail from the left while every spawned non-manager agent appears from the top.
 - Release automation now builds from the committed version bump and rejects package, Cargo, Tauri, and release-tag version drift.
 - The website release-dispatch workflow can push its rebuild marker instead of failing with a read-only token.

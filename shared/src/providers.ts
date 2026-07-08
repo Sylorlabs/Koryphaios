@@ -6,6 +6,7 @@ export const ProviderName = {
   OpenAI: 'openai',
   Google: 'google',
   GoogleSubscription: 'google-subscription',
+  AIStudio: 'aistudio',
   XAI: 'xai',
 
   // Aggregators (OpenAI-compatible APIs)
@@ -17,6 +18,9 @@ export const ProviderName = {
   Codex: 'codex',
   Grok: 'grok',
   Antigravity: 'antigravity',
+  Cline: 'cline',
+  Cursor: 'cursor',
+  Devin: 'devin',
   Jules: 'jules',
   Copilot: 'copilot',
 

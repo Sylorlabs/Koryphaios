@@ -16,9 +16,13 @@
     "build:desktop": "cd desktop && bun run build",
     "typecheck": "bun run --filter '*' typecheck",
     "test": "bun run --filter '*' test",
+    "test:backend:isolated": "bash scripts/test-backend-isolated.sh",
+    "test:core": "bun run test:backend:isolated && bun run --filter frontend test",
     "test:e2e": "playwright test",
     "format": "prettier --write \"**/*.{ts,tsx,js,jsx,json,md}\"",
     "format:check": "prettier --check \"**/*.{ts,tsx,js,jsx,json,md}\"",
+    "format:changed": "bash scripts/check-changed-format.sh",
+    "build:ci": "bun run --filter backend build && bun run --filter frontend build && bun run --filter @koryphaios/mcp-server build",
     "dev:workspace": "bun run --filter \"*\" dev"
   },
   "devDependencies": {

@@ -173,22 +173,22 @@ jobs:
             runner: 'blacksmith-12vcpu-macos-latest'
             args: '--target aarch64-apple-darwin --bundles app,dmg'
             bun-target: 'bun-darwin-arm64'
-            sidecar-suffix: 'aarch64-apple-darwin'
+            backend-target: 'aarch64-apple-darwin'
           - platform: 'macos-latest'
             runner: 'blacksmith-12vcpu-macos-latest'
             args: '--target x86_64-apple-darwin --bundles app,dmg'
             bun-target: 'bun-darwin-x64'
-            sidecar-suffix: 'x86_64-apple-darwin'
+            backend-target: 'x86_64-apple-darwin'
           - platform: 'windows-latest'
             runner: 'blacksmith-8vcpu-windows-2025'
             args: '--bundles msi,nsis'
             bun-target: 'bun-windows-x64'
-            sidecar-suffix: 'x86_64-pc-windows-msvc'
+            backend-target: 'x86_64-pc-windows-msvc'
           - platform: 'ubuntu-22.04'
             runner: 'blacksmith-8vcpu-ubuntu-2204'
             args: '--bundles deb,appimage'
             bun-target: 'bun-linux-x64'
-            sidecar-suffix: 'x86_64-unknown-linux-gnu'
+            backend-target: 'x86_64-unknown-linux-gnu'
 
     runs-on: ${{ matrix.runner }}
     steps:
@@ -229,17 +229,16 @@ jobs:
       - name: Install workspace dependencies
         run: bun install
 
-      - name: Build backend sidecar
+      - name: Compile embedded backend payload
         shell: bash
         run: |
           EXT=""
-          if [[ "${{ matrix.sidecar-suffix }}" == *"windows"* ]]; then EXT=".exe"; fi
-          OUTFILE="$(pwd)/desktop/src-tauri/sidecar/koryphaios-backend-${{ matrix.sidecar-suffix }}${EXT}"
+          if [[ "${{ matrix.backend-target }}" == *"windows"* ]]; then EXT=".exe"; fi
+          OUTFILE="$(pwd)/desktop/src-tauri/embedded-backend/koryphaios-backend-${{ matrix.backend-target }}${EXT}"
           bun build --compile \
             --target=${{ matrix.bun-target }} \
             backend/src/server.ts \
             --outfile="$OUTFILE"
-          cp "$OUTFILE" "desktop/src-tauri/sidecar/koryphaios-backend${EXT}" 2>/dev/null || true
 
       - name: Build frontend
         working-directory: ./frontend
@@ -258,22 +257,6 @@ jobs:
         env:
           TAURI_SIGNING_PUBLIC_KEY: ${{ secrets.TAURI_SIGNING_PUBLIC_KEY }}
 
-      - name: Prepare Linux AppImage tooling
-        if: contains(matrix.platform, 'ubuntu')
-        run: |
-          # Ship a current linuxdeploy (the pinned 2024 build aborts on bun
-          # sidecars) and shim ldd so an empty-output failure on the
-          # self-contained bun binary reads as "no dependencies".
-          mkdir -p ~/.cache/tauri
-          curl -sL -o ~/.cache/tauri/linuxdeploy-x86_64.AppImage \
-            "https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage"
-          chmod +x ~/.cache/tauri/linuxdeploy-x86_64.AppImage
-          mkdir -p "$HOME/build-shims"
-          printf '#!/bin/bash\nout=$(/usr/bin/ldd "$@" 2>&1); status=$?; echo "$out"\nif [ $status -ne 0 ] && [ -z "$out" ]; then exit 0; fi\nexit $status\n' > "$HOME/build-shims/ldd"
-          chmod +x "$HOME/build-shims/ldd"
-          echo "$HOME/build-shims" >> $GITHUB_PATH
-          echo "NO_STRIP=true" >> $GITHUB_ENV
-
       - name: Build Tauri app
         uses: tauri-apps/tauri-action@v0
         env:
@@ -291,33 +274,6 @@ jobs:
           releaseBody: ${{ needs.check-update-trigger.outputs.release_body }}
           releaseDraft: false
           prerelease: false
-
-      - name: Repair AppImage sidecar and re-sign
-        if: contains(matrix.platform, 'ubuntu')
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-        run: |
-          set -euo pipefail
-          # linuxdeploy's bundled patchelf corrupts bun-compiled binaries
-          # (blob offset breaks) — swap the pristine sidecar back in, then
-          # re-sign the artifact and fix latest.json so the updater verifies.
-          APP=$(ls desktop/src-tauri/target/release/bundle/appimage/*.AppImage | head -1)
-          [ -n "$APP" ] || { echo "no AppImage built"; exit 1; }
-          ./desktop/scripts/fix-appimage-sidecar.sh "$APP" desktop/src-tauri/sidecar/koryphaios-backend-x86_64-unknown-linux-gnu
-          cd desktop && bunx tauri signer sign "../$APP" \
-            --private-key "$TAURI_SIGNING_PRIVATE_KEY" \
-            --password "$TAURI_SIGNING_PRIVATE_KEY_PASSWORD" && cd ..
-          TAG="v${{ needs.check-update-trigger.outputs.new_version }}"
-          gh release upload "$TAG" "$APP" "$APP.sig" --clobber
-          gh release download "$TAG" -p latest.json -O latest.json --clobber
-          SIG=$(cat "$APP.sig")
-          URL="https://github.com/${{ github.repository }}/releases/download/$TAG/$(basename "$APP")"
-          jq --arg sig "$SIG" --arg url "$URL" \
-            '.platforms."linux-x86_64" = { signature: $sig, url: $url }' \
-            latest.json > latest.json.tmp && mv latest.json.tmp latest.json
-          gh release upload "$TAG" latest.json --clobber
 
   notify-website:
     needs: [check-update-trigger, build-and-release]
