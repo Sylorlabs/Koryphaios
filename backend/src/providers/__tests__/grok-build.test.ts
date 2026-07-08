@@ -9,11 +9,22 @@ import type { ProviderConfig } from '@koryphaios/shared';
 import type { ProviderEvent, StreamRequest } from '../types';
 
 const cfg = (over: Partial<ProviderConfig> = {}): ProviderConfig =>
-  ({ name: 'grok', disabled: false, selectedModels: [], hideModelSelector: false, ...over }) as ProviderConfig;
+  ({
+    name: 'grok',
+    disabled: false,
+    selectedModels: [],
+    hideModelSelector: false,
+    ...over,
+  }) as ProviderConfig;
 
 describe('parseGrokOutput', () => {
   it('parses the documented --output-format json final object', () => {
-    const raw = JSON.stringify({ text: 'Hello from Grok', stopReason: 'end_turn', sessionId: 's1', requestId: 'r1' });
+    const raw = JSON.stringify({
+      text: 'Hello from Grok',
+      stopReason: 'end_turn',
+      sessionId: 's1',
+      requestId: 'r1',
+    });
     expect(parseGrokOutput(raw)).toEqual({ text: 'Hello from Grok', stopReason: 'end_turn' });
   });
 
@@ -74,12 +85,14 @@ describe('parseGrokModelsOutput', () => {
 
 describe('parseGrokCliModelsCache', () => {
   it('reads real context limits and rejects boolean-like values', () => {
-    const parsed = parseGrokCliModelsCache(JSON.stringify({
-      models: {
-        'grok-build': { info: { name: 'Grok Build', context_window: 512_000, hidden: false } },
-        broken: { info: { context_window: 1, hidden: false } },
-      },
-    }));
+    const parsed = parseGrokCliModelsCache(
+      JSON.stringify({
+        models: {
+          'grok-build': { info: { name: 'Grok Build', context_window: 512_000, hidden: false } },
+          broken: { info: { context_window: 1, hidden: false } },
+        },
+      }),
+    );
     expect(parsed?.get('grok-build')?.contextWindow).toBe(512_000);
     expect(parsed?.get('broken')?.contextWindow).toBeUndefined();
   });
@@ -96,7 +109,9 @@ describe('GrokBuildProvider', () => {
   });
 
   it('isAvailable() respects disabled and the opt-in marker', () => {
-    expect(new GrokBuildProvider(cfg({ disabled: true, authToken: 'cli:grok:1' })).isAvailable()).toBe(false);
+    expect(
+      new GrokBuildProvider(cfg({ disabled: true, authToken: 'cli:grok:1' })).isAvailable(),
+    ).toBe(false);
     expect(new GrokBuildProvider(cfg({ authToken: 'cli:grok:1' })).isAvailable()).toBe(true);
   });
 
@@ -111,7 +126,9 @@ describe('GrokBuildProvider', () => {
     } as StreamRequest;
     const events: ProviderEvent[] = [];
     for await (const e of p.streamResponse(req)) events.push(e);
-    const err = events.find((e) => e.type === 'error') as { type: 'error'; error: string } | undefined;
+    const err = events.find((e) => e.type === 'error') as
+      | { type: 'error'; error: string }
+      | undefined;
     expect(err).toBeTruthy();
     expect(err!.error).toMatch(/not found|install|grok login/i);
   });
