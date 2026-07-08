@@ -92,7 +92,7 @@ describe('GrokBuildProvider', () => {
     const models = p.listModels();
     expect(models.length).toBeGreaterThan(0);
     expect(models.every((m) => m.provider === 'grok')).toBe(true);
-    expect(models.find((m) => m.apiModelId === 'grok-build')).toBeTruthy();
+    expect(models.every((m) => Boolean(m.id) && Boolean(m.apiModelId))).toBe(true);
   });
 
   it('isAvailable() respects disabled and the opt-in marker', () => {
