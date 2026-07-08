@@ -236,23 +236,6 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
 
-      - name: Verify Linux build produced expected artifacts
-        if: matrix.target == 'x86_64-unknown-linux-gnu'
-        shell: bash
-        run: |
-          # After the repair step, verify the deb/rpm exist (these are built
-          # before linuxdeploy runs and don't need repair) and the AppImage
-          # was repacked.
-          BUNDLE_DIR="desktop/src-tauri/target/${{ matrix.target }}/release/bundle"
-          DEB_COUNT=$(find "$BUNDLE_DIR/deb" -name "*.deb" 2>/dev/null | wc -l)
-          RPM_COUNT=$(find "$BUNDLE_DIR/rpm" -name "*.rpm" 2>/dev/null | wc -l)
-          APPIMAGE_COUNT=$(find "$BUNDLE_DIR/appimage" -name "*.AppImage" 2>/dev/null | wc -l)
-          echo "Artifacts: deb=$DEB_COUNT rpm=$RPM_COUNT appimage=$APPIMAGE_COUNT"
-          if [ "$APPIMAGE_COUNT" -eq 0 ]; then
-            echo "ERROR: No AppImage produced — repair step failed"
-            exit 1
-          fi
-
       - name: Repair AppImage sidecar (linuxdeploy corrupts bun-compiled binaries)
         if: matrix.target == 'x86_64-unknown-linux-gnu'
         shell: bash
@@ -301,6 +284,23 @@ jobs:
           ARCH=x86_64 "$APPIMAGETOOL" --appimage-extract-and-run -n "$APPDIR" "$OUTPUT"
           echo "Repacked AppImage: $OUTPUT"
           ls -la "$OUTPUT"
+
+      - name: Verify Linux build produced expected artifacts
+        if: matrix.target == 'x86_64-unknown-linux-gnu'
+        shell: bash
+        run: |
+          # After the repair step, verify the deb/rpm exist (these are built
+          # before linuxdeploy runs and don't need repair) and the AppImage
+          # was repacked.
+          BUNDLE_DIR="desktop/src-tauri/target/${{ matrix.target }}/release/bundle"
+          DEB_COUNT=$(find "$BUNDLE_DIR/deb" -name "*.deb" 2>/dev/null | wc -l)
+          RPM_COUNT=$(find "$BUNDLE_DIR/rpm" -name "*.rpm" 2>/dev/null | wc -l)
+          APPIMAGE_COUNT=$(find "$BUNDLE_DIR/appimage" -name "*.AppImage" 2>/dev/null | wc -l)
+          echo "Artifacts: deb=$DEB_COUNT rpm=$RPM_COUNT appimage=$APPIMAGE_COUNT"
+          if [ "$APPIMAGE_COUNT" -eq 0 ]; then
+            echo "ERROR: No AppImage produced — repair step failed"
+            exit 1
+          fi
 
       - name: Upload Linux artifacts
         uses: actions/upload-artifact@v7
