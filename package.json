@@ -1,6 +1,6 @@
 {
   "name": "koryphaios",
-  "version": "1.0.20",
+  "version": "1.0.21",
   "private": true,
   "workspaces": [
     "backend",
@@ -16,6 +16,7 @@
     "build:desktop": "cd desktop && bun run build",
     "typecheck": "bun run --filter '*' typecheck",
     "test": "bun run --filter '*' test",
+    "test:e2e": "playwright test",
     "format": "prettier --write \"**/*.{ts,tsx,js,jsx,json,md}\"",
     "format:check": "prettier --check \"**/*.{ts,tsx,js,jsx,json,md}\"",
     "dev:workspace": "bun run --filter \"*\" dev"

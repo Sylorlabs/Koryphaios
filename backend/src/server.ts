@@ -37,6 +37,7 @@ import { billingRoutes } from './routes/v1/billing';
 import { processRoutes } from './routes/v1/processes';
 import { notesRoutes } from './routes/v1/notes';
 import { workspaceRoutes } from './routes/v1/workspace';
+import { feedbackRoutes } from './routes/v1/feedback';
 
 // Define base Elysia App for export
 const baseApp = new Elysia()
@@ -45,6 +46,9 @@ const baseApp = new Elysia()
     data: {
       version: VERSION,
       uptime: process.uptime(),
+      // Lets the desktop supervisor reject a stale process already bound to
+      // the configured port instead of mistaking it for the new sidecar.
+      pid: process.pid,
     },
   }))
   .get('/api/project', async () => {
@@ -67,7 +71,8 @@ const baseApp = new Elysia()
   .use(billingRoutes)
   .use(processRoutes)
   .use(notesRoutes)
-  .use(workspaceRoutes);
+  .use(workspaceRoutes)
+  .use(feedbackRoutes);
 
 export type App = typeof baseApp;
 

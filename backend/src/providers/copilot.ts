@@ -1,7 +1,7 @@
 // Copilot provider — uses GitHub Copilot's chat completions API.
 // Auth flow uses only Koryphaios-managed or explicitly supplied tokens.
 
-import type { ProviderConfig } from '@koryphaios/shared';
+import type { ModelDef, ProviderConfig } from '@koryphaios/shared';
 import { OpenAIProvider } from './openai';
 import OpenAI from 'openai';
 import { CopilotModels } from './models/copilot';

@@ -10,17 +10,17 @@ export function useAgentRail() {
         (a) =>
           a.sessionId === sessionStore.activeSessionId &&
           a.identity.id !== 'kory-manager' &&
-          (a.identity.role === 'critic' || a.identity.role === 'coder')
+          a.identity.role !== 'manager',
       )
       .sort((a, b) => {
         const activeWeight = (status: typeof a.status) =>
           status !== 'done' && status !== 'idle' ? 1 : 0;
         return activeWeight(b.status) - activeWeight(a.status);
-      })
+      }),
   );
 
   let selectedAgent = $derived(
-    selectedAgentId ? (wsStore.agents.get(selectedAgentId) ?? null) : null
+    selectedAgentId ? (wsStore.agents.get(selectedAgentId) ?? null) : null,
   );
 
   let selectedAgentFeed = $derived.by(() => {
@@ -31,13 +31,11 @@ export function useAgentRail() {
   });
 
   let selectedAgentIsRunning = $derived(
-    !!selectedAgent && selectedAgent.status !== 'done' && selectedAgent.status !== 'idle'
+    !!selectedAgent && selectedAgent.status !== 'done' && selectedAgent.status !== 'idle',
   );
 
   let inputPlaceholder = $derived(
-    selectedAgent
-      ? `What's the move for ${selectedAgent.identity.name}?`
-      : "What's the move?"
+    selectedAgent ? `What's the move for ${selectedAgent.identity.name}?` : "What's the move?",
   );
 
   let lastLoadedAgentThreadKey = $state('');

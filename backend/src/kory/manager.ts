@@ -16,7 +16,7 @@ import type {
   ContextBreakdown,
 } from '@koryphaios/shared';
 import { normalizeReasoningLevel, determineAutoReasoningLevel } from '@koryphaios/shared';
-import { AGENT, DOMAIN } from '../constants';
+import { AGENT, DOMAIN, SESSION } from '../constants';
 import {
   ProviderRegistry,
   resolveModel,
@@ -217,6 +217,10 @@ export class KoryManager {
   private state: SessionStateService;
   private workerPipeline: WorkerPipelineService;
   private autoCommitService: AutoCommitService;
+  /** Sessions whose title has already been auto-generated. Prevents racing
+   *  LLM calls when the user sends a second message before the first title
+   *  resolves. */
+  private titledSessions = new Set<string>();
 
   constructor(
     private providers: ProviderRegistry,
@@ -707,6 +711,105 @@ export class KoryManager {
     const jules = this.providers.get('jules');
     if (jules?.isAvailable()) return true;
     return !!detectJulesApiKey();
+  }
+
+  /** Fire-and-forget session title generation. Called by the messages route
+   *  the first time a user sends a message into a session whose title is still
+   *  the default. A small/cheap LLM is asked for a 3-6 word title; if the call
+   *  fails or the model isn't available we fall back to a truncated first-line
+   *  summary of the user message so the session is never stuck on "New Session".
+   *
+   *  The result is persisted to the DB and broadcast as `session.updated` so
+   *  the sidebar updates in place without a full refetch. */
+  async generateSessionTitle(sessionId: string, userMessage: string): Promise<void> {
+    if (!this.sessions) return;
+    // De-dupe across overlapping calls: if the user fires a second message
+    // before the first title resolves, we don't want two LLM calls racing.
+    if (this.titledSessions.has(sessionId)) return;
+    this.titledSessions.add(sessionId);
+
+    const session = await this.sessions.get(sessionId);
+    if (!session) {
+      this.titledSessions.delete(sessionId);
+      return;
+    }
+    // Only rename sessions that are still on the default title — user-renamed
+    // sessions are sacred.
+    if (session.title !== SESSION.DEFAULT_TITLE) return;
+    // Only rename the very first user message; later turns keep the existing
+    // name even if the user hasn't renamed it manually.
+    if ((session.messageCount ?? 0) > 0) return;
+
+    const cleaned = userMessage.replace(/\s+/g, ' ').trim();
+    let title = this.fallbackTitle(cleaned);
+
+    try {
+      const llmTitle = await this.askForTitle(cleaned);
+      if (llmTitle) title = llmTitle;
+    } catch (err) {
+      koryLog.debug(
+        { sessionId, err: String(err) },
+        'Agent title generation failed, using fallback',
+      );
+    }
+
+    title = title.slice(0, SESSION.MAX_TITLE_LENGTH).trim();
+    if (!title || title === SESSION.DEFAULT_TITLE) return;
+
+    const updated = await this.sessions.update(sessionId, { title });
+    if (updated) this.events.emit(sessionId, 'session.updated', { session: updated });
+  }
+
+  /** Ask a small/fast model for a 3-6 word title. Returns null on any failure. */
+  private async askForTitle(userMessage: string): Promise<string | null> {
+    // Pick the cheapest available routing so title generation stays cheap.
+    let routing;
+    try {
+      routing = this.resolveActiveRouting(undefined, 'general', true, undefined, true);
+    } catch {
+      return null;
+    }
+    const provider = await this.providers.resolveProvider(routing.model, routing.provider);
+    if (!provider) return null;
+
+    const systemPrompt =
+      'You generate short chat titles. Output ONLY the title, no quotes, no punctuation ' +
+      'at the ends, no prefix like "Title:". 3-6 words, sentence case, specific to the ' +
+      "user's actual topic. Never reuse the literal text of the message unless it is a " +
+      'proper noun or unique identifier.';
+    const userPrompt = `First user message in a chat:\n\n"""${userMessage.slice(0, 1000)}"""\n\nTitle:`;
+
+    let out = '';
+    try {
+      const stream = provider.streamResponse({
+        model: routing.model,
+        systemPrompt,
+        messages: [{ role: 'user', content: userPrompt }],
+        maxTokens: 32,
+      });
+      for await (const event of stream) {
+        if (event.type === 'content_delta') out += event.content ?? '';
+      }
+    } catch (err) {
+      koryLog.debug({ err: String(err) }, 'title LLM stream failed');
+      return null;
+    }
+
+    const cleaned = out
+      .replace(/^["'`\s]+|["'`\s]+$/g, '')
+      .replace(/^title\s*[:\-]\s*/i, '')
+      .replace(/\s+/g, ' ')
+      .trim();
+    if (!cleaned || cleaned.length < 2) return null;
+    return cleaned;
+  }
+
+  /** Deterministic, no-LLM fallback. Truncates to AUTO_TITLE_CHARS. */
+  private fallbackTitle(content: string): string {
+    if (!content) return SESSION.DEFAULT_TITLE;
+    return content.length > SESSION.AUTO_TITLE_CHARS
+      ? content.slice(0, SESSION.AUTO_TITLE_CHARS - 3).trim() + '...'
+      : content.trim();
   }
 
   private resolveJulesApiKey(): string | null {

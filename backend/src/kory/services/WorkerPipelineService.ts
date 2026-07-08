@@ -7,6 +7,7 @@
 import type { ProviderName, WorkerDomain } from '@koryphaios/shared';
 import { DOMAIN } from '../../constants';
 import type { ProviderRegistry, Provider } from '../../providers';
+import type { ProviderMessage } from '../../providers/types';
 import { nanoid } from 'nanoid';
 import { koryLog } from '../../logger';
 import type { SessionStateService } from './SessionStateService';
@@ -16,12 +17,10 @@ import type { SnapshotManager } from '../snapshot-manager';
 import type { ITaskStore } from '../../stores/task-store';
 import { formatMessagesForCritic } from '../critic-util';
 
-interface InternalMessage {
-  role: 'user' | 'assistant' | 'tool' | 'system';
-  content: string;
-  tool_call_id?: string;
-  tool_calls?: Array<{ id: string; name: string; input: Record<string, unknown> }>;
-}
+// Keep the provider-native block form intact. Image/tool blocks are valid
+// worker context and must not be narrowed to text merely to cross the service
+// boundary back into KoryManager.
+type InternalMessage = ProviderMessage;
 
 interface WorkerPipelineResult {
   success: boolean;

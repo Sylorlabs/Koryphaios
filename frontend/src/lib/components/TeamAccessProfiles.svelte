@@ -155,11 +155,62 @@
         </div>
         <div class="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-1)] p-4">
           <div class="mb-3 text-xs font-bold">Model access</div>
-          <label class="mb-2 flex items-center gap-2 text-[11px]"><input type="checkbox" checked={selectedTier.allowedModels.includes('*')} onchange={(e) => saveTier({ ...selectedTier, allowedModels: e.currentTarget.checked ? ['*'] : [] })} /> All host models</label>
+          <button
+            type="button"
+            role="switch"
+            aria-checked={selectedTier.allowedModels.includes('*')}
+            onclick={() => saveTier({
+              ...selectedTier,
+              allowedModels: selectedTier.allowedModels.includes('*') ? [] : ['*'],
+            })}
+            class="mb-2 flex w-full items-center justify-between rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-2)] px-3 py-2.5 text-left text-[11px] transition-colors hover:bg-[var(--color-surface-3)]"
+          >
+            <span class="font-semibold text-[var(--color-text-primary)]">All host models</span>
+            <span
+              class="h-5 w-9 shrink-0 rounded-full p-0.5 transition-colors"
+              style="background:{selectedTier.allowedModels.includes('*') ? 'var(--color-accent)' : 'var(--color-surface-4)'}"
+              aria-hidden="true"
+            >
+              <span
+                class="block h-4 w-4 rounded-full transition-transform"
+                style="background:var(--color-surface-0);transform:translateX({selectedTier.allowedModels.includes('*') ? '16px' : '0'})"
+              ></span>
+            </span>
+          </button>
             <div class="max-h-72 space-y-1 overflow-y-auto">
               {#each models as item (item.id)}
+                {@const modelEnabled = selectedTier.allowedModels.includes('*') || selectedTier.allowedModels.includes(item.id)}
                 <div class="rounded-lg p-2 hover:bg-[var(--color-surface-3)]">
-                  <label class="flex items-center gap-2 text-[11px]"><input type="checkbox" checked={selectedTier.allowedModels.includes('*') || selectedTier.allowedModels.includes(item.id)} onchange={(e) => { const current = selectedTier.allowedModels.includes('*') ? models.map(model => model.id) : selectedTier.allowedModels; saveTier({ ...selectedTier, allowedModels: e.currentTarget.checked ? [...new Set([...current, item.id])] : current.filter(id => id !== item.id) }); }} /><span class="truncate">{item.model} <span class="text-[var(--color-text-muted)]">· {item.provider}</span></span></label>
+                  <button
+                    type="button"
+                    role="switch"
+                    aria-checked={modelEnabled}
+                    aria-label={`${item.model} model access`}
+                    onclick={() => {
+                      const current = selectedTier.allowedModels.includes('*')
+                        ? models.map(model => model.id)
+                        : selectedTier.allowedModels;
+                      saveTier({
+                        ...selectedTier,
+                        allowedModels: modelEnabled
+                          ? current.filter(id => id !== item.id)
+                          : [...new Set([...current, item.id])],
+                      });
+                    }}
+                    class="flex w-full items-center justify-between gap-3 rounded-lg px-1 py-1 text-left text-[11px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]/50"
+                  >
+                    <span class="truncate">{item.model} <span class="text-[var(--color-text-muted)]">· {item.provider}</span></span>
+                    <span
+                      class="h-4 w-7 shrink-0 rounded-full p-0.5 transition-colors"
+                      style="background:{modelEnabled ? 'var(--color-accent)' : 'var(--color-surface-4)'}"
+                      aria-hidden="true"
+                    >
+                      <span
+                        class="block h-3 w-3 rounded-full transition-transform"
+                        style="background:var(--color-surface-0);transform:translateX({modelEnabled ? '12px' : '0'})"
+                      ></span>
+                    </span>
+                  </button>
                   {#if (selectedTier.allowedModels.includes('*') || selectedTier.allowedModels.includes(item.id)) && item.reasoningLevels.length}
                     <div class="ml-5 mt-2 flex flex-wrap gap-1">
                       {#each item.reasoningLevels as level}

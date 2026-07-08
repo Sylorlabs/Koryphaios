@@ -26,6 +26,7 @@ export function handleHealthRoutes(
         data: {
           status: 'healthy',
           version: VERSION,
+          pid: process.pid,
           config: {
             port: config.server.port,
             host: config.server.host,

@@ -7,7 +7,7 @@ import { EventEmitter } from 'events';
 import { DevelopmentEnvironment } from '../debug/development-environment.js';
 import { DebugSessionManager } from '../debug/debug-session-manager.js';
 import { PerformanceMonitor } from '../debug/performance-monitor.js';
-import { SupportedLanguage } from '../types/languages.js';
+import { SupportedLanguage, type LanguageDebugConfig } from '../types/languages.js';
 import { Logger } from '../utils/logger.js';
 
 export interface WindsurfIntegrationConfig {
@@ -223,7 +223,10 @@ export class WindsurfIntegration extends EventEmitter {
   /**
    * Create advanced debug session
    */
-  async createAdvancedDebugSession(language: SupportedLanguage, config: Record<string, unknown>): Promise<string> {
+  async createAdvancedDebugSession(
+    language: SupportedLanguage,
+    config: LanguageDebugConfig
+  ): Promise<string> {
     try {
       this.logger.debug('Creating advanced debug session', { language, config });
 

@@ -34,9 +34,21 @@ export const messageRoutes = new Elysia({ prefix: '/api/messages' })
 
       await messages.add(body.sessionId, userMsg);
 
+      // Fire-and-forget agent title generation. Only fires on the very first
+      // user message of a session whose title is still the default — the
+      // manager method is a no-op otherwise, so this is safe to call every
+      // turn.
+      kory.generateSessionTitle(body.sessionId, body.content).catch(() => {});
+
       // Trigger Kory processing
       kory
-        .processTask(body.sessionId, body.content, body.model, body.reasoningLevel, body.attachments)
+        .processTask(
+          body.sessionId,
+          body.content,
+          body.model,
+          body.reasoningLevel,
+          body.attachments,
+        )
         .catch((err) => {
           wsManager.broadcast({
             type: 'system.error',
@@ -91,25 +103,31 @@ export const messageRoutes = new Elysia({ prefix: '/api/messages' })
       }
       const groupId = target.variantGroupId ?? `response-${prompt.id}`;
       const variants = history.filter((message) => message.variantGroupId === groupId);
-      const nextIndex = Math.max(target.variantIndex ?? 0, ...variants.map((message) => message.variantIndex ?? 0)) + 1;
+      const nextIndex =
+        Math.max(
+          target.variantIndex ?? 0,
+          ...variants.map((message) => message.variantIndex ?? 0),
+        ) + 1;
       if (!target.variantGroupId) await messages.assignVariantGroup(target.id, groupId, 0);
 
-      kory.processTask(
-        body.sessionId,
-        prompt.content,
-        body.model ?? target.model,
-        body.reasoningLevel,
-        undefined,
-        undefined,
-        { groupId, index: nextIndex },
-      ).catch((error) => {
-        wsManager.broadcastToSession(body.sessionId, {
-          type: 'system.error',
-          payload: { error: error instanceof Error ? error.message : String(error) },
-          timestamp: Date.now(),
-          sessionId: body.sessionId,
+      kory
+        .processTask(
+          body.sessionId,
+          prompt.content,
+          body.model ?? target.model,
+          body.reasoningLevel,
+          undefined,
+          undefined,
+          { groupId, index: nextIndex },
+        )
+        .catch((error) => {
+          wsManager.broadcastToSession(body.sessionId, {
+            type: 'system.error',
+            payload: { error: error instanceof Error ? error.message : String(error) },
+            timestamp: Date.now(),
+            sessionId: body.sessionId,
+          });
         });
-      });
       return { ok: true, data: { groupId, index: nextIndex } };
     },
     {

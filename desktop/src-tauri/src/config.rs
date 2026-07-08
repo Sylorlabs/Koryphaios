@@ -89,13 +89,19 @@ impl AppConfig {
     }
 
     pub fn backend_url(&self) -> String {
-        format!("http://{}:{}", self.server.host, self.server.port)
+        format!(
+            "http://{}:{}",
+            browser_host(&self.server.host),
+            self.server.port
+        )
     }
 
     pub fn websocket_url(&self) -> String {
         format!(
             "ws://{}:{}{}",
-            self.server.host, self.server.port, self.server.ws_path
+            browser_host(&self.server.host),
+            self.server.port,
+            self.server.ws_path
         )
     }
 
@@ -135,6 +141,28 @@ impl AppConfig {
         }
 
         Err(ConfigError::NotFound)
+    }
+}
+
+/// Wildcard addresses are valid bind targets but invalid navigation targets.
+pub(crate) fn browser_host(host: &str) -> &str {
+    match host {
+        "0.0.0.0" => "127.0.0.1",
+        "::" | "[::]" => "[::1]",
+        _ => host,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::browser_host;
+
+    #[test]
+    fn wildcard_bind_hosts_become_browser_safe_loopback_hosts() {
+        assert_eq!(browser_host("0.0.0.0"), "127.0.0.1");
+        assert_eq!(browser_host("::"), "[::1]");
+        assert_eq!(browser_host("[::]"), "[::1]");
+        assert_eq!(browser_host("localhost"), "localhost");
     }
 }
 

@@ -3,6 +3,12 @@ import { sessionStore } from './sessions.svelte';
 import { toastStore } from './toast.svelte';
 import { apiUrl } from '$lib/utils/api-url';
 import type { CollaborationPolicy, CollaborationAccessTier } from '@koryphaios/shared';
+import {
+  activateJoinedTeamSession,
+  leaveJoinedTeamSession as removeJoinedTeamSession,
+  upsertJoinedTeamSession,
+  type JoinedTeamSessionRecord,
+} from '$lib/utils/joined-team-sessions';
 
 export type InviteLinks = Record<string, string>;
 
@@ -35,9 +41,13 @@ export interface CollaborationSession {
 let activeCollab = $state<CollaborationSession | null>(null);
 let loading = $state(false);
 let pendingPrompts = $state<PendingPrompt[]>([]);
-let pendingJoins = $state<Array<{ guestId: string; name: string; tierId: string; timestamp: number }>>([]);
-let participants = $state<Array<{ guestId: string; name: string; tierId: string; admitted: boolean }>>([]);
-export interface JoinedTeamSession { sessionId: string; sessionName: string; inviteUrl: string; tierId: string; joinedAt: number }
+let pendingJoins = $state<
+  Array<{ guestId: string; name: string; tierId: string; timestamp: number }>
+>([]);
+let participants = $state<
+  Array<{ guestId: string; name: string; tierId: string; admitted: boolean }>
+>([]);
+export interface JoinedTeamSession extends JoinedTeamSessionRecord {}
 let joinedSessions = $state<JoinedTeamSession[]>([]);
 let activeJoinedSessionId = $state<string | null>(null);
 let settingsRequest = $state(0);
@@ -50,35 +60,71 @@ function startPollingPending(sessionId: string) {
     try {
       const res = await apiFetch(apiUrl(`/api/collab/${sessionId}/pending`));
       const data = await parseJsonResponse(res);
-      if (data.ok) { pendingPrompts = data.data?.prompts ?? []; pendingJoins = data.data?.joins ?? []; participants = data.data?.participants ?? []; }
+      if (data.ok) {
+        pendingPrompts = data.data?.prompts ?? [];
+        pendingJoins = data.data?.joins ?? [];
+        participants = data.data?.participants ?? [];
+      }
     } catch {}
   }, 3000);
 }
 
 function stopPollingPending() {
-  if (pollInterval) { clearInterval(pollInterval); pollInterval = null; }
+  if (pollInterval) {
+    clearInterval(pollInterval);
+    pollInterval = null;
+  }
   pendingPrompts = [];
   pendingJoins = [];
   participants = [];
 }
 
 export const collaborationStore = {
-  get activeCollab() { return activeCollab; },
-  get loading() { return loading; },
-  get pendingPrompts() { return pendingPrompts; },
-  get pendingJoins() { return pendingJoins; },
-  get participants() { return participants; },
-  get joinedSessions() { return joinedSessions; },
-  get activeJoinedSession() { return joinedSessions.find(session => session.sessionId === activeJoinedSessionId) ?? null; },
-  get settingsRequest() { return settingsRequest; },
-  requestTeamSettings() { settingsRequest += 1; },
-  openJoinedSession(sessionId: string) { activeJoinedSessionId = sessionId; },
-  closeJoinedSession() { activeJoinedSessionId = null; },
-  leaveJoinedSession(sessionId: string) { joinedSessions = joinedSessions.filter(session => session.sessionId !== sessionId); if (activeJoinedSessionId === sessionId) activeJoinedSessionId = null; },
+  get activeCollab() {
+    return activeCollab;
+  },
+  get loading() {
+    return loading;
+  },
+  get pendingPrompts() {
+    return pendingPrompts;
+  },
+  get pendingJoins() {
+    return pendingJoins;
+  },
+  get participants() {
+    return participants;
+  },
+  get joinedSessions() {
+    return joinedSessions;
+  },
+  get activeJoinedSession() {
+    return joinedSessions.find((session) => session.sessionId === activeJoinedSessionId) ?? null;
+  },
+  get settingsRequest() {
+    return settingsRequest;
+  },
+  requestTeamSettings() {
+    settingsRequest += 1;
+  },
+  openJoinedSession(sessionId: string) {
+    activeJoinedSessionId = activateJoinedTeamSession(joinedSessions, sessionId);
+  },
+  closeJoinedSession() {
+    activeJoinedSessionId = null;
+  },
+  leaveJoinedSession(sessionId: string) {
+    const next = removeJoinedTeamSession(joinedSessions, activeJoinedSessionId, sessionId);
+    joinedSessions = next.sessions;
+    activeJoinedSessionId = next.activeSessionId;
+  },
 
   async hostSession(workspacePaths: string[] = []) {
     const sessionId = sessionStore.activeSessionId;
-    if (!sessionId) { toastStore.error('No active session to host'); return false; }
+    if (!sessionId) {
+      toastStore.error('No active session to host');
+      return false;
+    }
 
     loading = true;
     try {
@@ -115,7 +161,7 @@ export const collaborationStore = {
       });
       const data = await parseJsonResponse(res);
       if (data.ok) {
-        pendingPrompts = pendingPrompts.filter(p => p.promptId !== promptId);
+        pendingPrompts = pendingPrompts.filter((p) => p.promptId !== promptId);
         if (approved && data.data?.prompt?.content) {
           toastStore.info(`Guest prompt queued: "${data.data.prompt.content.slice(0, 60)}..."`);
         }
@@ -127,7 +173,10 @@ export const collaborationStore = {
 
   copyInviteLink(role: keyof InviteLinks) {
     const link = activeCollab?.inviteLinks?.[role];
-    if (!link) { toastStore.error('No invite link — relay not configured'); return; }
+    if (!link) {
+      toastStore.error('No invite link — relay not configured');
+      return;
+    }
     navigator.clipboard.writeText(link).then(() => {
       toastStore.success(`${role.charAt(0).toUpperCase() + role.slice(1)} invite link copied!`);
     });
@@ -146,11 +195,14 @@ export const collaborationStore = {
     activeCollab = { ...activeCollab, policy: { ...activeCollab.policy, ...patch } };
     try {
       const res = await apiFetch(apiUrl(`/api/collab/${activeCollab.id}/policy`), {
-        method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(patch),
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(patch),
       });
       const data = await parseJsonResponse(res);
       if (!data.ok) throw new Error(data.error || 'Policy update failed');
-      if (revision === policyRevision && activeCollab) activeCollab = { ...activeCollab, policy: data.data };
+      if (revision === policyRevision && activeCollab)
+        activeCollab = { ...activeCollab, policy: data.data };
     } catch (err: any) {
       if (revision === policyRevision) activeCollab = previous;
       if (!quiet) toastStore.error(err.message || 'Policy update failed');
@@ -159,26 +211,51 @@ export const collaborationStore = {
 
   async decideJoin(guestId: string, approved: boolean, tierId?: string) {
     if (!activeCollab) return;
-    const res = await apiFetch(apiUrl(`/api/collab/${activeCollab.id}/join-decision`), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ guestId, approved, tierId }) });
+    const res = await apiFetch(apiUrl(`/api/collab/${activeCollab.id}/join-decision`), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ guestId, approved, tierId }),
+    });
     const data = await parseJsonResponse(res);
-    if (data.ok) pendingJoins = pendingJoins.filter(join => join.guestId !== guestId); else toastStore.error(data.error || 'Could not resolve join request');
+    if (data.ok) pendingJoins = pendingJoins.filter((join) => join.guestId !== guestId);
+    else toastStore.error(data.error || 'Could not resolve join request');
   },
 
   async assignTier(guestId: string, tierId: string) {
     if (!activeCollab) return;
-    const res = await apiFetch(apiUrl(`/api/collab/${activeCollab.id}/assign-tier`), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ guestId, tierId }) });
+    const res = await apiFetch(apiUrl(`/api/collab/${activeCollab.id}/assign-tier`), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ guestId, tierId }),
+    });
     const data = await parseJsonResponse(res);
-    if (data.ok) participants = participants.map(p => p.guestId === guestId ? { ...p, tierId } : p); else toastStore.error(data.error || 'Could not assign profile');
+    if (data.ok)
+      participants = participants.map((p) => (p.guestId === guestId ? { ...p, tierId } : p));
+    else toastStore.error(data.error || 'Could not assign profile');
   },
 
   async createInvite(tierId: string) {
     if (!activeCollab) return;
     const existing = activeCollab.inviteLinks[tierId as keyof InviteLinks];
-    if (existing) { await navigator.clipboard.writeText(existing); toastStore.success('Invite link copied'); return; }
-    const res = await apiFetch(apiUrl(`/api/collab/${activeCollab.id}/invite`), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ tierId }) });
+    if (existing) {
+      await navigator.clipboard.writeText(existing);
+      toastStore.success('Invite link copied');
+      return;
+    }
+    const res = await apiFetch(apiUrl(`/api/collab/${activeCollab.id}/invite`), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ tierId }),
+    });
     const data = await parseJsonResponse(res);
-    if (data.ok) { activeCollab = { ...activeCollab, inviteLinks: { ...activeCollab.inviteLinks, [tierId]: data.data.url } }; await navigator.clipboard.writeText(data.data.url); toastStore.success('Invite link copied'); }
-    else toastStore.error(data.error || 'Could not create invite');
+    if (data.ok) {
+      activeCollab = {
+        ...activeCollab,
+        inviteLinks: { ...activeCollab.inviteLinks, [tierId]: data.data.url },
+      };
+      await navigator.clipboard.writeText(data.data.url);
+      toastStore.success('Invite link copied');
+    } else toastStore.error(data.error || 'Could not create invite');
   },
 
   async joinSession(joinCode: string, name: string) {
@@ -187,13 +264,23 @@ export const collaborationStore = {
       const res = await apiFetch(apiUrl(`/api/collab/join`), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ joinCode: joinCode.trim().toUpperCase(), userId: 'guest-' + Date.now(), name }),
+        body: JSON.stringify({
+          joinCode: joinCode.trim().toUpperCase(),
+          userId: 'guest-' + Date.now(),
+          name,
+        }),
       });
       const data = await parseJsonResponse(res);
       if (data.ok) {
         toastStore.success('Join code accepted');
-        const joined: JoinedTeamSession = { sessionId: data.data.sessionId, sessionName: data.data.sessionName || 'Team session', inviteUrl: data.data.inviteUrl, tierId: data.data.tierId || 'viewer', joinedAt: Date.now() };
-        joinedSessions = [...joinedSessions.filter(session => session.sessionId !== joined.sessionId), joined];
+        const joined: JoinedTeamSession = {
+          sessionId: data.data.sessionId,
+          sessionName: data.data.sessionName || 'Team session',
+          inviteUrl: data.data.inviteUrl,
+          tierId: data.data.tierId || 'viewer',
+          joinedAt: Date.now(),
+        };
+        joinedSessions = upsertJoinedTeamSession(joinedSessions, joined);
         activeJoinedSessionId = joined.sessionId;
         return data.data;
       } else {

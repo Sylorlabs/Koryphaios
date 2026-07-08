@@ -14,8 +14,9 @@ jobs:
       should_release: ${{ steps.check.outputs.should_release }}
       new_version: ${{ steps.bump.outputs.new_version }}
       release_body: ${{ steps.changelog.outputs.release_body }}
+      version_commit: ${{ steps.commit.outputs.version_commit }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
@@ -53,6 +54,7 @@ jobs:
         if: steps.check.outputs.should_release == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NEW_VERSION: ${{ steps.bump.outputs.new_version }}
         run: |
           # Get last release tag
           LAST_TAG=$(gh release list --limit 1 --json tagName --jq '.[0].tagName' 2>/dev/null || echo "")
@@ -61,7 +63,7 @@ jobs:
 
           node -e "
           const { execSync } = require('child_process');
-          const { writeFileSync } = require('fs');
+          const { existsSync, readFileSync, writeFileSync } = require('fs');
 
           const raw = execSync('git log $RANGE --pretty=format:\"%s\" --no-merges 2>/dev/null || echo \"\"').toString();
           const commits = raw.split('\n').filter(Boolean);
@@ -99,6 +101,33 @@ jobs:
           if (fixes.length)    md += '### 🐛 Bug Fixes\n' + fixes.map(f => '- ' + f).join('\n') + '\n\n';
           if (improvements.length) md += '### 🚀 Improvements\n' + improvements.map(i => '- ' + i).join('\n') + '\n\n';
 
+          const date = new Date().toISOString().slice(0, 10);
+          const version = process.env.NEW_VERSION;
+          const existing = existsSync('CHANGELOG.md')
+            ? readFileSync('CHANGELOG.md', 'utf8')
+            : '# Changelog\n\n## Unreleased\n';
+          const marker = '## Unreleased';
+          let versioned;
+          if (existing.includes(marker)) {
+            const markerEnd = existing.indexOf(marker) + marker.length;
+            const afterMarker = existing.slice(markerEnd);
+            const priorVersionOffset = afterMarker.search(/\n## \[/);
+            const unreleased = (priorVersionOffset >= 0
+              ? afterMarker.slice(0, priorVersionOffset)
+              : afterMarker).trim();
+            const priorVersions = priorVersionOffset >= 0
+              ? afterMarker.slice(priorVersionOffset).trimStart()
+              : '';
+            const releaseContent = unreleased || md.trim();
+            versioned = existing.slice(0, markerEnd) + '\n\n## [' + version + '] - ' + date +
+              '\n\n' + releaseContent +
+              (priorVersions ? '\n\n' + priorVersions : '') + '\n';
+          } else {
+            versioned = '# Changelog\n\n## Unreleased\n\n## [' + version + '] - ' + date +
+              '\n\n' + md.trim() + '\n\n' + existing.trimStart();
+          }
+          writeFileSync('CHANGELOG.md', versioned);
+
           md += '---\n\n';
           md += '**macOS** · **Windows** · **Linux** — download below or update automatically on next launch.\n\n';
           md += '<!-- CHANGES_JSON\n' + JSON.stringify(changesJson) + '\n-->';
@@ -117,13 +146,15 @@ jobs:
           } >> $GITHUB_OUTPUT
 
       - name: Commit version bump
+        id: commit
         if: steps.check.outputs.should_release == 'true'
         run: |
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
-          git add package.json desktop/src-tauri/Cargo.toml desktop/src-tauri/tauri.conf.json
+          git add package.json desktop/src-tauri/Cargo.toml desktop/src-tauri/tauri.conf.json CHANGELOG.md
           git commit -m "chore: bump version to ${{ steps.bump.outputs.new_version }} [skip ci]"
           git push
+          echo "version_commit=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
   build-and-release:
     needs: check-update-trigger
@@ -161,7 +192,23 @@ jobs:
 
     runs-on: ${{ matrix.runner }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.check-update-trigger.outputs.version_commit }}
+          fetch-depth: 0
+
+      - name: Verify release version source
+        shell: bash
+        env:
+          EXPECTED_VERSION: ${{ needs.check-update-trigger.outputs.new_version }}
+        run: |
+          PACKAGE_VERSION=$(jq -r .version package.json)
+          CARGO_VERSION=$(sed -n 's/^version = "\([^"]*\)"/\1/p' desktop/src-tauri/Cargo.toml | head -1)
+          TAURI_VERSION=$(jq -r .version desktop/src-tauri/tauri.conf.json)
+          test "$PACKAGE_VERSION" = "$EXPECTED_VERSION"
+          test "$CARGO_VERSION" = "$EXPECTED_VERSION"
+          test "$TAURI_VERSION" = "$EXPECTED_VERSION"
+          echo "Building verified Koryphaios v$EXPECTED_VERSION from $(git rev-parse --short HEAD)"
 
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
@@ -240,7 +287,7 @@ jobs:
           includeUpdaterJson: true
           updaterJsonPreferNsis: true
           tagName: v${{ needs.check-update-trigger.outputs.new_version }}
-          releaseName: "Koryphaios v${{ needs.check-update-trigger.outputs.new_version }}"
+          releaseName: 'Koryphaios v${{ needs.check-update-trigger.outputs.new_version }}'
           releaseBody: ${{ needs.check-update-trigger.outputs.release_body }}
           releaseDraft: false
           prerelease: false

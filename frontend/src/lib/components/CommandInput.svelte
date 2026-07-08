@@ -37,6 +37,10 @@
     disabled?: boolean;
     disabledMessage?: string;
     placeholder?: string;
+    /** Optional preselected model for controlled surfaces such as the static demo. */
+    initialModel?: string;
+    /** Keep context preview entirely client-side on static surfaces with no backend. */
+    disableModelPreviewRequests?: boolean;
   }
 
   let {
@@ -55,6 +59,8 @@
     disabled = false,
     disabledMessage = 'Open a project to start chatting',
     placeholder = 'Ask Koryphaios to inspect, explain, or change this project...',
+    initialModel = '',
+    disableModelPreviewRequests = false,
   }: Props = $props();
   let actionPanelRef = $state<HTMLDivElement>();
   let showModelPicker = $state(false);
@@ -69,6 +75,10 @@
   let referenceFolderInputRef = $state<HTMLInputElement>();
   let showReferenceMenu = $state(false);
   let liveFileMentions = $state<string[]>([]);
+
+  $effect(() => {
+    if (!selectedModel && initialModel) selectedModel = initialModel;
+  });
 
   type ComposerPickerItem =
     | { type: 'command'; key: string; label: string; value: string; description: string }
@@ -205,6 +215,7 @@
     const generation = ++contextPreviewGeneration;
     const target = availableModels.find((m) => m.value === value);
     wsStore.setManagerContextWindow(sid, target?.contextWindow);
+    if (disableModelPreviewRequests) return;
     const { provider, model } = parseModelSelection(value);
     if (provider && model) {
       // listModels() starts provider/CLI discovery in the background. Recheck

@@ -22,10 +22,18 @@
     <button
       type="button"
       class="shrink-0 rounded-xl border px-4 py-2 text-left transition-colors"
-      style="min-width: 160px; background: {rail.selectedAgentId ? 'var(--color-surface-2)' : 'rgba(213, 178, 97, 0.12)'}; border-color: {rail.selectedAgentId ? 'var(--color-border)' : 'rgba(213, 178, 97, 0.35)'}; color: var(--color-text-primary);"
+      style="min-width: 160px; background: {rail.selectedAgentId
+        ? 'var(--color-surface-2)'
+        : 'rgba(213, 178, 97, 0.12)'}; border-color: {rail.selectedAgentId
+        ? 'var(--color-border)'
+        : 'rgba(213, 178, 97, 0.35)'}; color: var(--color-text-primary);"
       onclick={() => rail.clearSelection()}
+      in:fly={{ x: -28, duration: 380, easing: cubicOut }}
     >
-      <div class="text-xs font-semibold uppercase tracking-[0.14em]" style="color: var(--color-text-muted);">
+      <div
+        class="text-xs font-semibold uppercase tracking-[0.14em]"
+        style="color: var(--color-text-muted);"
+      >
         Main chat
       </div>
       <div class="mt-2 text-sm font-semibold">Manager feed</div>
