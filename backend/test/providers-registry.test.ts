@@ -1,7 +1,23 @@
-import { describe, test, expect } from 'bun:test';
+import { describe, test, expect, beforeAll, afterAll } from 'bun:test';
 import { ProviderRegistry } from '../src/providers/registry';
 import { ProviderName } from '@koryphaios/shared';
+import { PROVIDER_AUTH_MODE } from '../src/providers/constants';
 import type { KoryphaiosConfig } from '@koryphaios/shared';
+
+// These tests assert auth-MODE acceptance (which credentials a provider accepts), not real
+// connectivity. setCredentials() now verifies over the network, so stub fetch with a 200 so
+// verification succeeds for valid-shaped (but fake) credentials. Restored after this file.
+const realFetch = globalThis.fetch;
+beforeAll(() => {
+  globalThis.fetch = (async () =>
+    new Response('{"data":[]}', {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    })) as unknown as typeof fetch;
+});
+afterAll(() => {
+  globalThis.fetch = realFetch;
+});
 
 function minimalConfig(): KoryphaiosConfig {
   return {
@@ -110,11 +126,11 @@ describe('ProviderRegistry auth modes', () => {
   );
 
   test(
-    'getStatus returns exactly ALL providers (every ProviderName)',
+    'getStatus returns every runtime provider',
     () => {
       const registry = new ProviderRegistry(minimalConfig());
       const status = registry.getStatus();
-      const expectedNames = new Set(Object.values(ProviderName));
+      const expectedNames = new Set(Object.keys(PROVIDER_AUTH_MODE));
       const returnedNames = new Set(status.map((s: any) => s.name));
       const missing = [...expectedNames].filter((n) => !returnedNames.has(n));
       const extra = [...returnedNames].filter((n) => !expectedNames.has(n));

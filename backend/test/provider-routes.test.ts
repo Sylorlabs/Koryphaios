@@ -1,5 +1,10 @@
 import { afterAll, beforeAll, describe, expect, mock, test } from 'bun:test';
 import { existsSync, rmSync } from 'node:fs';
+// Real model catalogs (these module paths are NOT mocked) so the stub Provider classes
+// below expose the true catalogs — bun applies mock.module process-wide, so other test
+// files (copilot-models, provider-conformance) would otherwise see empty model lists.
+import { CopilotModels } from '../src/providers/models/copilot';
+import { CodexModels } from '../src/providers/models/codex';
 
 process.env.NODE_ENV = 'test';
 process.env.SESSION_TOKEN_SECRET =
@@ -63,7 +68,7 @@ mock.module('../src/providers/copilot', () => ({
       return !!this.config && !this.config.disabled;
     }
     listModels() {
-      return [];
+      return CopilotModels;
     }
     async *streamResponse() {}
   },
@@ -95,7 +100,7 @@ mock.module('../src/providers/codex', () => ({
       return !!this.config && !this.config.disabled;
     }
     listModels() {
-      return [];
+      return CodexModels;
     }
     async *streamResponse() {}
   },
@@ -107,8 +112,38 @@ mock.module('../src/providers/codex', () => ({
 mock.module('../src/providers/auth-utils', () => ({
   detectCodexAuthToken: detectCodexAuthTokenMock,
   clearCodexAuthState: clearCodexAuthStateMock,
-  isCodexCLIAuthMarker: (value: string | null | undefined) => typeof value === 'string' && value.startsWith('cli:codex:'),
+  isCodexCLIAuthMarker: (value: string | null | undefined) =>
+    typeof value === 'string' && value.startsWith('cli:codex:'),
   createCodexCLIAuthMarker: () => `cli:codex:${Date.now()}`,
+  detectClaudeCodeLogin: () => true,
+  createClaudeCLIAuthMarker: () => `cli:claude:${Date.now()}`,
+  isClaudeCLIAuthMarker: (value: string | null | undefined) =>
+    typeof value === 'string' && value.startsWith('cli:claude:'),
+  detectGrokCLILogin: () => true,
+  createGrokCLIAuthMarker: () => `cli:grok:${Date.now()}`,
+  isGrokCLIAuthMarker: (value: string | null | undefined) =>
+    typeof value === 'string' && value.startsWith('cli:grok:'),
+  detectGrokXaiKey: () => null,
+  detectAntigravityCLILogin: () => true,
+  createAntigravityCLIAuthMarker: () => `cli:antigravity:${Date.now()}`,
+  isAntigravityCLIAuthMarker: (value: string | null | undefined) =>
+    typeof value === 'string' && value.startsWith('cli:antigravity:'),
+  detectAntigravityApiKey: () => null,
+  detectGeminiCLIToken: () => null,
+  detectGeminiCLILogin: () => false,
+  detectCodexCLILogin: () => false,
+  detectCursorCLILogin: () => false,
+  createCursorCLIAuthMarker: () => 'cursor-cli-session',
+  isCursorCLIAuthMarker: (value: string | null | undefined) => value === 'cursor-cli-session',
+  detectDevinCLILogin: () => false,
+  createDevinCLIAuthMarker: () => 'devin-cli-session',
+  isDevinCLIAuthMarker: (value: string | null | undefined) => value === 'devin-cli-session',
+  detectClineCLILogin: () => false,
+  createClineCLIAuthMarker: () => 'cline-cli-session',
+  isClineCLIAuthMarker: (value: string | null | undefined) => value === 'cline-cli-session',
+  clearCachedToken: () => {},
+  clearTokenCache: () => {},
+  getKoryCodexHome: () => '/tmp/codex-home',
 }));
 
 const { initDb } = await import('../src/db');
@@ -228,6 +263,9 @@ beforeAll(async () => {
 
 afterAll(() => {
   if (existsSync(dbPath)) rmSync(dbPath, { force: true });
+  // Undo the process-wide module mocks so other test files (copilot-models,
+  // provider-conformance) see the REAL codex/copilot/auth-utils modules.
+  mock.restore();
 });
 
 describe('provider routes', () => {
@@ -309,6 +347,38 @@ describe('provider routes', () => {
     expect(finalList.body.data.some((account: any) => account.id === accountId)).toBe(false);
   });
 
+  test('Grok Build auth auto-detects the local grok CLI without a manual token', async () => {
+    const start = await request('/api/providers/grok/auth/start', {
+      method: 'POST',
+    });
+
+    expect(start.response.status).toBe(200);
+    expect(start.body.ok).toBe(true);
+    expect(start.body.data.status).toBe('connected');
+    expect(lastSetCredentials).toEqual({
+      name: 'grok',
+      body: {
+        authToken: expect.stringMatching(/^cli:grok:\d+$/),
+      },
+    });
+  });
+
+  test('Antigravity auth auto-detects the local agy CLI without a manual token', async () => {
+    const start = await request('/api/providers/antigravity/auth/start', {
+      method: 'POST',
+    });
+
+    expect(start.response.status).toBe(200);
+    expect(start.body.ok).toBe(true);
+    expect(start.body.data.status).toBe('connected');
+    expect(lastSetCredentials).toEqual({
+      name: 'antigravity',
+      body: {
+        authToken: expect.stringMatching(/^cli:antigravity:\d+$/),
+      },
+    });
+  });
+
   test('browser auth is only exposed for providers Koryphaios manages directly', async () => {
     const start = await request('/api/providers/anthropic/auth/start', {
       method: 'POST',
@@ -317,7 +387,9 @@ describe('provider routes', () => {
     expect(start.response.status).toBe(404);
     expect(start.body.ok).toBe(false);
 
-    const complete = await request('/api/providers/google/auth/complete', {
+    // openai is an API-key provider (not a browser/OAuth-managed one) → no auth flow.
+    // (google IS browser-auth managed, so it would not 404 here.)
+    const complete = await request('/api/providers/openai/auth/complete', {
       method: 'POST',
     });
 

@@ -23,65 +23,69 @@ const UPDATE_DOWNLOAD_TIMEOUT_SECS: u64 = 120;
 static BACKEND_PROCESS: Mutex<Option<Arc<std::sync::Mutex<std::process::Child>>>> =
     Mutex::new(None);
 
+include!(concat!(env!("OUT_DIR"), "/embedded_backend.rs"));
+
 mod config;
 mod error;
 mod indexer;
 use config::{browser_host, AppConfig};
 use error::{log_error, AppError, AppResult};
 
-fn backend_executable_name() -> &'static str {
-    if cfg!(target_os = "windows") {
-        "koryphaios-backend.exe"
-    } else {
-        "koryphaios-backend"
+fn materialize_embedded_backend(
+    app_handle: &tauri::AppHandle,
+) -> Result<Option<std::path::PathBuf>, String> {
+    let Some(payload) = EMBEDDED_BACKEND else {
+        return Ok(None);
+    };
+    let runtime_dir = app_handle
+        .path()
+        .app_cache_dir()
+        .map_err(|e| format!("Failed to resolve app cache directory: {e}"))?
+        .join("runtime");
+    std::fs::create_dir_all(&runtime_dir)
+        .map_err(|e| format!("Failed to create backend runtime directory: {e}"))?;
+    let destination = runtime_dir.join(format!(
+        "koryphaios-service-{}-{}{}",
+        env!("CARGO_PKG_VERSION"),
+        EMBEDDED_BACKEND_ID,
+        if cfg!(target_os = "windows") {
+            ".exe"
+        } else {
+            ""
+        }
+    ));
+    let current_size = std::fs::metadata(&destination).map(|m| m.len()).ok();
+    if current_size != Some(payload.len() as u64) {
+        let temporary = destination.with_extension("new");
+        std::fs::write(&temporary, payload)
+            .map_err(|e| format!("Failed to materialize embedded backend: {e}"))?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&temporary, std::fs::Permissions::from_mode(0o700))
+                .map_err(|e| format!("Failed to make embedded backend executable: {e}"))?;
+        }
+        std::fs::rename(&temporary, &destination)
+            .map_err(|e| format!("Failed to activate embedded backend: {e}"))?;
     }
+    Ok(Some(destination))
 }
 
-/// Spawn the backend sidecar process
-fn spawn_backend_sidecar(
+/// Start the backend embedded in the desktop executable.
+fn spawn_embedded_backend(
     app_handle: &tauri::AppHandle,
 ) -> Result<Option<Arc<std::sync::Mutex<std::process::Child>>>, String> {
-    // Tauri places externalBin next to the app executable (AppImage: usr/bin/),
-    // NOT under resources/ — check both, then fall back to dev mode.
-    let sidecar_name = backend_executable_name();
-    let resource_sidecar_path = app_handle
-        .path()
-        .resolve(
-            format!("sidecar/{sidecar_name}"),
-            tauri::path::BaseDirectory::Resource,
-        )
-        .ok();
-    let resource_root_path = app_handle
-        .path()
-        .resolve(sidecar_name, tauri::path::BaseDirectory::Resource)
-        .ok();
-    let exe_sibling = std::env::current_exe()
-        .ok()
-        .and_then(|p| p.parent().map(|d| d.join(sidecar_name)));
-    let sidecar_path = match [exe_sibling, resource_sidecar_path, resource_root_path]
-        .into_iter()
-        .flatten()
-        .find(|p| p.is_file())
-    {
-        Some(p) => p,
-        None if cfg!(debug_assertions) => {
-            // In `tauri dev`, scripts/launch-desktop.ts owns the backend.
-            println!("[Koryphaios] Dev mode: using external backend");
-            return Ok(None);
-        }
+    let backend_path = match materialize_embedded_backend(app_handle)? {
+        Some(path) => path,
         None => {
-            return Err(format!(
-                "Bundled backend sidecar '{sidecar_name}' was not found next to the app or in its resources"
-            ));
+            println!("[Koryphaios] Dev mode: launcher owns the backend");
+            return Ok(None);
         }
     };
 
-    println!(
-        "[Koryphaios] Starting backend sidecar from {:?}",
-        sidecar_path
-    );
+    println!("[Koryphaios] Starting embedded backend service");
 
-    let mut cmd = std::process::Command::new(&sidecar_path);
+    let mut cmd = std::process::Command::new(&backend_path);
     // NEVER pipe without a reader: the backend logs heavily and a full 64KB
     // pipe buffer blocks its writes — the whole backend freezes mid-session.
     // Log to files in the data dir instead (also gives users a crash log).
@@ -116,7 +120,7 @@ fn spawn_backend_sidecar(
     cmd.env("KORYPHAIOS_HOST", &config.server.host);
     cmd.env("NODE_ENV", "production");
 
-    // Set data directory — also the sidecar's cwd so relative paths (SQLite
+    // Set data directory — also the service's cwd so relative paths (SQLite
     // dbs, koryphaios.json) never land in whatever dir launched the AppImage.
     if let Ok(app_data_dir) = app_handle.path().app_data_dir() {
         let _ = std::fs::create_dir_all(&app_data_dir);
@@ -140,7 +144,7 @@ fn spawn_backend_sidecar(
         .map_err(|e| format!("Failed to spawn backend: {}", e))?;
 
     println!(
-        "[Koryphaios] Backend sidecar started with PID {}",
+        "[Koryphaios] Embedded backend started with PID {}",
         child.id()
     );
 
@@ -168,7 +172,7 @@ async fn wait_for_backend_ready(
             if let Ok(mut child) = process.lock() {
                 if let Ok(Some(status)) = child.try_wait() {
                     return Err(format!(
-                        "Backend sidecar exited before becoming ready ({status})"
+                        "Embedded backend exited before becoming ready ({status})"
                     ));
                 }
             }
@@ -206,7 +210,7 @@ fn kill_backend() {
     if let Ok(mut guard) = BACKEND_PROCESS.lock() {
         if let Some(process_arc) = guard.take() {
             if let Ok(mut process) = process_arc.lock() {
-                println!("[Koryphaios] Stopping backend sidecar...");
+                println!("[Koryphaios] Stopping embedded backend...");
                 let _ = process.kill();
             }
         }
@@ -573,13 +577,20 @@ fn read_folder_contents(folder_path: String) -> Result<FolderContents, String> {
 #[tauri::command]
 fn list_workspace_projects(folder_path: String) -> Result<Vec<String>, String> {
     let root = std::path::Path::new(&folder_path);
-    if !root.is_dir() { return Err("Workspace folder does not exist".to_string()); }
+    if !root.is_dir() {
+        return Err("Workspace folder does not exist".to_string());
+    }
     let mut projects = std::fs::read_dir(root)
         .map_err(|e| format!("Failed to read workspace: {}", e))?
         .filter_map(Result::ok)
         .map(|entry| entry.path())
         .filter(|path| path.is_dir())
-        .filter(|path| path.file_name().and_then(|name| name.to_str()).map(|name| !name.starts_with('.')).unwrap_or(false))
+        .filter(|path| {
+            path.file_name()
+                .and_then(|name| name.to_str())
+                .map(|name| !name.starts_with('.'))
+                .unwrap_or(false)
+        })
         .map(|path| path.to_string_lossy().to_string())
         .collect::<Vec<_>>();
     projects.sort();
@@ -867,11 +878,11 @@ pub fn run() {
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_process::init())
         .setup(|app| {
-            // Spawn backend sidecar in production mode
+            // Start the backend payload embedded in production builds.
             let config = AppConfig::get();
             let app_handle = app.handle().clone();
 
-            match spawn_backend_sidecar(&app_handle) {
+            match spawn_embedded_backend(&app_handle) {
                 Ok(Some(process)) => {
                     let process_pid = process.lock().ok().map(|child| child.id());
                     if let Ok(mut guard) = BACKEND_PROCESS.lock() {
@@ -936,7 +947,7 @@ pub fn run() {
                                 continue;
                             }
                             eprintln!("[Koryphaios] Backend died — restarting...");
-                            match spawn_backend_sidecar(&watch_handle) {
+                            match spawn_embedded_backend(&watch_handle) {
                                 Ok(Some(new_proc)) => {
                                     let new_pid = new_proc.lock().ok().map(|child| child.id());
                                     if let Ok(mut guard) = BACKEND_PROCESS.lock() {
@@ -980,7 +991,7 @@ pub fn run() {
                     // Fail startup instead of showing a frontend that can
                     // never authenticate, load data, or recover.
                     return Err(std::io::Error::other(format!(
-                        "Failed to start backend sidecar: {e}"
+                        "Failed to start embedded backend: {e}"
                     ))
                     .into());
                 }

@@ -47,7 +47,7 @@ const baseApp = new Elysia()
       version: VERSION,
       uptime: process.uptime(),
       // Lets the desktop supervisor reject a stale process already bound to
-      // the configured port instead of mistaking it for the new sidecar.
+      // the configured port instead of mistaking it for the embedded service.
       pid: process.pid,
     },
   }))

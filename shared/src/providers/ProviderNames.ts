@@ -6,6 +6,8 @@ export const ProviderName = {
   Anthropic: 'anthropic',
   OpenAI: 'openai',
   Google: 'google',
+  GoogleSubscription: 'google-subscription',
+  AIStudio: 'aistudio',
   XAI: 'xai',
 
   // Aggregators (OpenAI-compatible APIs with implementations)
@@ -14,12 +16,18 @@ export const ProviderName = {
 
   // Auth-only providers (OAuth/CLI based)
   Claude: 'claude',
+  Antigravity: 'antigravity',
   Copilot: 'copilot',
   Cline: 'cline',
   Codex: 'codex',
+  Cursor: 'cursor',
+  Devin: 'devin',
+  Grok: 'grok',
+  Jules: 'jules',
 
   // Curated coding models
   OpenCodeZen: 'opencodezen',
+  OpenCodeGo: 'opencodego',
 
   // Enterprise (with implementations)
   Azure: 'azure',
@@ -39,7 +47,6 @@ export const ProviderName = {
   Cortecs: 'cortecs',
   DeepSeek: 'deepseek',
   DeepInfra: 'deepinfra',
-  Firmware: 'firmware',
   Fireworks: 'fireworks',
   GitLab: 'gitlab',
   HuggingFace: 'huggingface',

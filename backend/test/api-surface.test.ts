@@ -3,7 +3,8 @@ import { describe, expect, test } from 'bun:test';
 process.env.NODE_ENV = 'test';
 process.env.SESSION_TOKEN_SECRET =
   process.env.SESSION_TOKEN_SECRET ?? 'test_only_not_for_production_aaaaaaaaaa';
-process.env.DATABASE_URL = process.env.DATABASE_URL ?? `sqlite:///tmp/koryphaios-api-surface.sqlite`;
+process.env.DATABASE_URL =
+  process.env.DATABASE_URL ?? `sqlite:///tmp/koryphaios-api-surface.sqlite`;
 
 const { Elysia } = await import('elysia');
 const { sessionRoutes } = await import('../src/routes/v1/sessions');
@@ -18,7 +19,6 @@ const { modeRoutes } = await import('../src/routes/v1/mode');
 const { spendRoutes } = await import('../src/routes/v1/spend');
 const { spendCapsRoutes } = await import('../src/routes/v1/spend-caps');
 const { billingRoutes } = await import('../src/routes/v1/billing');
-const { messagingRoutes } = await import('../src/routes/v1/messaging');
 const { processRoutes } = await import('../src/routes/v1/processes');
 
 const app = new Elysia()
@@ -48,7 +48,6 @@ const app = new Elysia()
   .use(spendRoutes)
   .use(spendCapsRoutes)
   .use(billingRoutes)
-  .use(messagingRoutes)
   .use(processRoutes);
 
 type RouteCheck = {
@@ -83,7 +82,11 @@ const protectedRoutes: RouteCheck[] = [
   { method: 'DELETE', path: '/api/providers/openai/accounts/account-1' },
   { method: 'DELETE', path: '/api/providers/openai' },
   { method: 'POST', path: '/api/collab/s1/start', body: { ownerId: 'local-user' } },
-  { method: 'POST', path: '/api/collab/join', body: { joinCode: 'ABC123', userId: 'u1', name: 'User' } },
+  {
+    method: 'POST',
+    path: '/api/collab/join',
+    body: { joinCode: 'ABC123', userId: 'u1', name: 'User' },
+  },
   { method: 'GET', path: '/api/collab/s1/state' },
   { method: 'POST', path: '/api/collab/s1/end' },
   { method: 'DELETE', path: '/api/auth/session' },
@@ -98,7 +101,11 @@ const protectedRoutes: RouteCheck[] = [
   { method: 'PUT', path: '/api/agent/preferences', body: { content: 'Be concise' } },
   { method: 'POST', path: '/api/agent/preferences/init' },
   { method: 'GET', path: '/api/agent/context' },
-  { method: 'POST', path: '/api/agent/enforce', body: { code: 'const x = 1;', filePath: 'src/app.ts' } },
+  {
+    method: 'POST',
+    path: '/api/agent/enforce',
+    body: { code: 'const x = 1;', filePath: 'src/app.ts' },
+  },
   {
     method: 'POST',
     path: '/api/agent/critic-review',
@@ -147,10 +154,12 @@ const protectedRoutes: RouteCheck[] = [
   { method: 'GET', path: '/api/spend-caps/sessions/s1' },
   { method: 'POST', path: '/api/spend-caps/sessions/s1/resume' },
   { method: 'GET', path: '/api/spend-caps/history?limit=5' },
-  { method: 'POST', path: '/api/spend-caps/check', body: { sessionId: 's1', estimatedCostCents: 1 } },
+  {
+    method: 'POST',
+    path: '/api/spend-caps/check',
+    body: { sessionId: 's1', estimatedCostCents: 1 },
+  },
   { method: 'GET', path: '/api/billing/credits' },
-  { method: 'GET', path: '/api/messaging' },
-  { method: 'PUT', path: '/api/messaging', body: { telegram: null } },
   { method: 'GET', path: '/api/processes?includeInactive=true&limit=100' },
   {
     method: 'POST',

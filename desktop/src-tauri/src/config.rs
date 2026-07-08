@@ -81,10 +81,23 @@ impl AppConfig {
 
     pub fn get() -> &'static AppConfig {
         CONFIG.get_or_init(|| {
-            Self::load().unwrap_or_else(|e| {
+            let mut config = Self::load().unwrap_or_else(|e| {
                 eprintln!("[Koryphaios] Failed to load config: {}. Using defaults.", e);
                 Self::default()
-            })
+            });
+            if let Ok(host) = std::env::var("KORYPHAIOS_HOST") {
+                if !host.trim().is_empty() {
+                    config.server.host = host;
+                }
+            }
+            if let Ok(port) = std::env::var("KORYPHAIOS_PORT") {
+                if let Ok(port) = port.parse::<u16>() {
+                    if port > 0 {
+                        config.server.port = port;
+                    }
+                }
+            }
+            config
         })
     }
 

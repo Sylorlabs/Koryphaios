@@ -33,12 +33,19 @@ describe('ProviderRegistry credential verification', () => {
   });
 
   it('preserves the last working provider config when a replacement key fails verification', async () => {
-    const responses = [
-      new Response(JSON.stringify({ data: [] }), { status: 200 }),
-      new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401 }),
-    ];
-
-    globalThis.fetch = mock(() => Promise.resolve(responses.shift()!)) as typeof fetch;
+    let openAiRequests = 0;
+    globalThis.fetch = mock((input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes('api.openai.com')) {
+        openAiRequests += 1;
+        return Promise.resolve(
+          openAiRequests === 1
+            ? new Response(JSON.stringify({ data: [] }), { status: 200 })
+            : new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401 }),
+        );
+      }
+      return Promise.resolve(new Response(JSON.stringify({}), { status: 200 }));
+    }) as typeof fetch;
 
     const registry = new ProviderRegistry(mockConfig);
 
