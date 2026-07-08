@@ -72,13 +72,13 @@ impl AppConfig {
         let config_path = Self::config_path()?;
         let contents = fs::read_to_string(&config_path)
             .map_err(|e| ConfigError::ReadError(config_path.clone(), e.to_string()))?;
-        
-        let config: AppConfig = serde_json::from_str(&contents)
-            .map_err(|e| ConfigError::ParseError(e.to_string()))?;
-        
+
+        let config: AppConfig =
+            serde_json::from_str(&contents).map_err(|e| ConfigError::ParseError(e.to_string()))?;
+
         Ok(config)
     }
-    
+
     pub fn get() -> &'static AppConfig {
         CONFIG.get_or_init(|| {
             Self::load().unwrap_or_else(|e| {
@@ -87,15 +87,24 @@ impl AppConfig {
             })
         })
     }
-    
+
     pub fn backend_url(&self) -> String {
-        format!("http://{}:{}", self.server.host, self.server.port)
+        format!(
+            "http://{}:{}",
+            browser_host(&self.server.host),
+            self.server.port
+        )
     }
-    
+
     pub fn websocket_url(&self) -> String {
-        format!("ws://{}:{}{}", self.server.host, self.server.port, self.server.ws_path)
+        format!(
+            "ws://{}:{}{}",
+            browser_host(&self.server.host),
+            self.server.port,
+            self.server.ws_path
+        )
     }
-    
+
     fn config_path() -> Result<PathBuf, ConfigError> {
         // Try to find config relative to executable
         if let Ok(exe_path) = std::env::current_exe() {
@@ -105,28 +114,55 @@ impl AppConfig {
                 if resource_path.exists() {
                     return Ok(resource_path);
                 }
-                
+
                 // Check for config next to executable
+                // Linux AppImage: resources land in usr/lib/<product>/
+                let appimage_path = exe_dir.join("../lib/Koryphaios/config/app.config.json");
+                if appimage_path.exists() {
+                    return Ok(appimage_path);
+                }
                 let adjacent_path = exe_dir.join("config/app.config.json");
                 if adjacent_path.exists() {
                     return Ok(adjacent_path);
                 }
             }
         }
-        
+
         // Development: check project root (from desktop/src-tauri/target/debug/ -> project root)
         let dev_path = PathBuf::from("../../../../config/app.config.json");
         if dev_path.exists() {
             return Ok(dev_path);
         }
-        
+
         // Alternative: check from project root directly
         let dev_path2 = PathBuf::from("../../config/app.config.json");
         if dev_path2.exists() {
             return Ok(dev_path2);
         }
-        
+
         Err(ConfigError::NotFound)
+    }
+}
+
+/// Wildcard addresses are valid bind targets but invalid navigation targets.
+pub(crate) fn browser_host(host: &str) -> &str {
+    match host {
+        "0.0.0.0" => "127.0.0.1",
+        "::" | "[::]" => "[::1]",
+        _ => host,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::browser_host;
+
+    #[test]
+    fn wildcard_bind_hosts_become_browser_safe_loopback_hosts() {
+        assert_eq!(browser_host("0.0.0.0"), "127.0.0.1");
+        assert_eq!(browser_host("::"), "[::1]");
+        assert_eq!(browser_host("[::]"), "[::1]");
+        assert_eq!(browser_host("localhost"), "localhost");
     }
 }
 
@@ -151,9 +187,7 @@ impl Default for AppConfig {
                 max_width: 3840,
                 max_height: 2160,
             },
-            security: SecurityConfig {
-                csp: None,
-            },
+            security: SecurityConfig { csp: None },
         }
     }
 }
@@ -169,7 +203,9 @@ impl std::fmt::Display for ConfigError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             ConfigError::NotFound => write!(f, "Config file not found"),
-            ConfigError::ReadError(path, e) => write!(f, "Failed to read config at {:?}: {}", path, e),
+            ConfigError::ReadError(path, e) => {
+                write!(f, "Failed to read config at {:?}: {}", path, e)
+            }
             ConfigError::ParseError(e) => write!(f, "Failed to parse config: {}", e),
         }
     }

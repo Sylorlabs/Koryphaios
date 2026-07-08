@@ -134,6 +134,7 @@
   const agentRail = useAgentRail();
 
   useSessionSync({
+    disabled: isDemoMode,
     onActiveSessionChange: () => {
       agentRail.selectedAgentId = '';
     },
@@ -190,10 +191,18 @@
     window.addEventListener('open-note', handleOpenNote);
 
     const handleOpenNotesGraph = () => {
+      if (isDemoMode) {
+        toastStore.warning('Project notes are available in the real app.');
+        return;
+      }
       showNotes = true;
     };
     window.addEventListener('open-notes-graph', handleOpenNotesGraph);
     const handleOpenTeamSettings = () => {
+      if (isDemoMode) {
+        toastStore.warning('Team hosting is available in the real app.');
+        return;
+      }
       collaborationStore.requestTeamSettings();
       showSettings = true;
     };
@@ -262,6 +271,10 @@
 
     if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === 'N') {
       e.preventDefault();
+      if (isDemoMode) {
+        toastStore.warning('Project notes are available in the real app.');
+        return;
+      }
       showNotes = !showNotes;
       return;
     }
@@ -271,6 +284,10 @@
       showSettings = true;
     } else if (shortcutStore.matches('new_session', e)) {
       e.preventDefault();
+      if (isDemoMode) {
+        toastStore.warning('The guided demo uses a fixed sample workspace. Try the real app to create sessions.');
+        return;
+      }
       // Ctrl/Cmd+Shift+N forces a brand-new session; Ctrl/Cmd+N reuses the
       // active empty session to prevent spam.
       void sessionStore.newChat({ shift: e.shiftKey });
@@ -859,6 +876,10 @@ RULES:
         break;
       }
       case 'new_session':
+        if (isDemoMode) {
+          toastStore.warning('The guided demo uses a fixed sample workspace. Try the real app to create sessions.');
+          break;
+        }
         await sessionStore.newChat();
         inputRef?.focus();
         break;
@@ -876,6 +897,10 @@ RULES:
         showGit = !showGit;
         break;
       case 'toggle_notes':
+        if (isDemoMode) {
+          toastStore.warning('Project notes are available in the real app.');
+          break;
+        }
         showNotes = !showNotes;
         break;
       case 'toggle_theme':
@@ -1000,6 +1025,10 @@ RULES:
   }
 
   function handleStop() {
+    if (isDemoMode) {
+      toastStore.warning('The sample run resets automatically. Send a prompt to replay it.');
+      return;
+    }
     const sid = sessionStore.activeSessionId;
     if (!sid) return;
     if (agentRail.selectedAgentId) {
@@ -1376,11 +1405,13 @@ RULES:
         fileMentions={composerFileMentions}
         onRefreshFileMentions={refreshComposerFileMentions}
         placeholder={agentRail.inputPlaceholder}
+        initialModel={isDemoMode ? 'codex:gpt-5.5' : ''}
+        disableModelPreviewRequests={isDemoMode}
       />{/if}
   {/snippet}
 
   {#snippet backgroundShells()}
-    {#if !collaborationStore.activeJoinedSession && sessionStore.activeSessionId}
+    {#if !isDemoMode && !collaborationStore.activeJoinedSession && sessionStore.activeSessionId}
       <BackgroundShells sessionId={sessionStore.activeSessionId} />
     {/if}
   {/snippet}
@@ -1388,7 +1419,7 @@ RULES:
 
 <PermissionDialog />
 <QuestionDialog />
-<ChangesSummary />
+{#if !isDemoMode}<ChangesSummary />{/if}
 <ThemePickerModal open={showThemeQuickMenu} onClose={() => (showThemeQuickMenu = false)} />
 
 {#if noProjectPrompt}

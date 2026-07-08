@@ -39,17 +39,31 @@ function createUpdaterStore() {
   let checkInterval: ReturnType<typeof setInterval> | null = null;
   const isTauri = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
   let updateDownloaded = false;
+  // Running total of bytes downloaded, so we can compute a percentage from
+  // the incremental chunk_length events the Rust side emits.
+  let downloadedBytes = 0;
 
   async function setupEventListeners() {
     if (!isTauri) return;
 
     try {
-      // Listen for download progress events
-      await listen('tauri://update-download-progress', (event: any) => {
-        if (event.payload?.chunkLength) {
-          downloadProgress += event.payload.chunkLength;
-        }
-      });
+      // Listen for download progress events emitted by install_update's
+      // on_chunk callback. payload = { chunkLength, contentLength }.
+      await listen<{ chunkLength: number; contentLength: number | null }>(
+        'tauri://update-download-progress',
+        (event) => {
+          const payload = event.payload;
+          if (!payload) return;
+          downloadedBytes += payload.chunkLength;
+          const total = payload.contentLength;
+          if (total && total > 0) {
+            downloadProgress = Math.min(100, Math.round((downloadedBytes / total) * 100));
+          } else {
+            // No content-length — show bytes downloaded in MB as a fallback.
+            downloadProgress = Math.round(downloadedBytes / (1024 * 1024));
+          }
+        },
+      );
     } catch (e) {
       // Event listeners might not be available in all Tauri versions
     }
@@ -86,12 +100,16 @@ function createUpdaterStore() {
       updateAvailable = result.available;
       lastChecked = new Date();
 
-      // If update is available, show the banner
+      // If update is available, show the banner.
+      // NOTE: we do NOT auto-download here — the previous implementation called
+      // downloadUpdate() which was a no-op (it just set downloadProgress = 0),
+      // giving the false impression that the update was pre-downloaded. The
+      // real download happens during installUpdateAndRestart(), with live
+      // progress events wired through to the UI.
       if (result.available) {
         showUpdateBanner = true;
-
-        // Auto-download the update in background
-        downloadUpdate();
+        downloadedBytes = 0;
+        downloadProgress = 0;
       }
 
       return info;
@@ -110,40 +128,43 @@ function createUpdaterStore() {
   }
 
   /**
-   * Download the update in the background
-   */
-  async function downloadUpdate(): Promise<void> {
-    if (!isTauri || !updateAvailable) {
-      return;
-    }
-
-    try {
-      // The update is automatically downloaded when we call installUpdate
-      // But we'll track the state
-      downloadProgress = 0;
-    } catch (err) {
-      console.error('Failed to download update:', err);
-    }
-  }
-
-  /**
-   * Install the available update and restart
+   * Install the available update and restart.
+   * Resets progress state, invokes the Rust install_update command (which
+   * downloads + verifies + installs + restarts), and surfaces errors so the
+   * caller can reset its UI state.
    */
   async function installUpdateAndRestart(): Promise<boolean> {
     if (!isTauri || !updateAvailable) {
       return false;
     }
 
+    // Reset progress tracking for this install attempt.
+    downloadedBytes = 0;
+    downloadProgress = 0;
+    error = null;
+
     try {
       await invoke('install_update');
-      // App will restart automatically after update
+      // On Linux/macOS the app restarts via request_restart() inside the
+      // Rust command, so this line rarely executes. On Windows the NSIS/MSI
+      // installer handles relaunch. Return true either way.
       return true;
     } catch (err) {
       const errorMsg = err instanceof Error ? err.message : String(err);
       error = errorMsg;
       console.error('Failed to install update:', err);
+      // Reset progress so the UI doesn't show a stale percentage after failure.
+      downloadProgress = 0;
+      downloadedBytes = 0;
       return false;
     }
+  }
+
+  /** Reset the install/error state so the UI can recover after a failure. */
+  function resetInstallState(): void {
+    error = null;
+    downloadProgress = 0;
+    downloadedBytes = 0;
   }
 
   /**
@@ -318,6 +339,7 @@ function createUpdaterStore() {
     getCleanNotes,
     getLastCheckedText,
     getUpdateMessage,
+    resetInstallState,
   };
 }
 

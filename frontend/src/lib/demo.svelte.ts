@@ -8,6 +8,7 @@ import { sessionStore } from '$lib/stores/sessions.svelte';
 import { projectStore } from '$lib/stores/project.svelte';
 import { feedStore } from '$lib/stores/feed.svelte';
 import { agentStore } from '$lib/stores/agents.svelte';
+import { providersStore } from '$lib/stores/providers.svelte';
 import type { Session } from '@koryphaios/shared';
 
 export const isDemoMode =
@@ -35,6 +36,95 @@ const WORKERS = [
   { id: 'w-be', name: 'backend', domain: 'backend', model: 'gemini-3-pro', provider: 'google', glow: 'rgba(66,133,244,0.5)' },
   { id: 'w-test', name: 'testing', domain: 'test', model: 'claude-sonnet-5', provider: 'anthropic', glow: 'rgba(0,255,128,0.5)' },
 ];
+
+const DEMO_PROVIDERS = [
+  {
+    name: 'codex',
+    label: 'Codex',
+    enabled: true,
+    authenticated: true,
+    authSource: 'CLI session',
+    models: ['gpt-5.5', 'gpt-5.4-mini'],
+    selectedModels: ['gpt-5.5', 'gpt-5.4-mini'],
+    allAvailableModels: [
+      {
+        id: 'gpt-5.5',
+        name: 'GPT-5.5',
+        provider: 'codex',
+        contextWindow: 400_000,
+        maxOutputTokens: 128_000,
+        contextVerified: true,
+        canReason: true,
+        reasoningLevels: ['low', 'medium', 'high', 'xhigh'],
+      },
+      {
+        id: 'gpt-5.4-mini',
+        name: 'GPT-5.4 Mini',
+        provider: 'codex',
+        contextWindow: 400_000,
+        maxOutputTokens: 128_000,
+        contextVerified: true,
+        canReason: true,
+        reasoningLevels: ['low', 'medium', 'high'],
+      },
+    ],
+    hideModelSelector: false,
+    authMode: 'auth_only',
+    supportsApiKey: false,
+    supportsAuthToken: true,
+    requiresBaseUrl: false,
+  },
+  {
+    name: 'claude',
+    label: 'Claude Code',
+    enabled: true,
+    authenticated: true,
+    authSource: 'CLI session',
+    models: ['claude-sonnet-5'],
+    selectedModels: ['claude-sonnet-5'],
+    allAvailableModels: [
+      {
+        id: 'claude-sonnet-5',
+        name: 'Claude Sonnet 5',
+        provider: 'claude',
+        contextWindow: 200_000,
+        maxOutputTokens: 64_000,
+        contextVerified: true,
+        canReason: true,
+      },
+    ],
+    hideModelSelector: false,
+    authMode: 'auth_only',
+    supportsApiKey: false,
+    supportsAuthToken: true,
+    requiresBaseUrl: false,
+  },
+  {
+    name: 'google-subscription',
+    label: 'Gemini CLI',
+    enabled: true,
+    authenticated: true,
+    authSource: 'CLI session',
+    models: ['gemini-3-pro'],
+    selectedModels: ['gemini-3-pro'],
+    allAvailableModels: [
+      {
+        id: 'gemini-3-pro',
+        name: 'Gemini 3 Pro',
+        provider: 'google-subscription',
+        contextWindow: 1_000_000,
+        maxOutputTokens: 64_000,
+        contextVerified: true,
+        canReason: true,
+      },
+    ],
+    hideModelSelector: false,
+    authMode: 'auth_only',
+    supportsApiKey: false,
+    supportsAuthToken: true,
+    requiresBaseUrl: false,
+  },
+] as const;
 
 const REPLY =
   "I've delegated the three subtasks to specialist workers running in isolated git worktrees. " +
@@ -173,6 +263,7 @@ function playScript() {
 /** Seed static state + start the looping playback. */
 export function seedDemo(): void {
   authStore.setUser({ id: 'demo', email: 'demo@koryphaios.com', name: 'Demo' } as never);
+  providersStore.setProviderStatusList(DEMO_PROVIDERS as never);
   projectStore.setProject('/demo/analytics-dashboard');
   sessionStore.seedDemoSessions(
     [

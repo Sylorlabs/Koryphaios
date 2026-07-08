@@ -10,6 +10,15 @@ use tauri::{
 };
 use tauri_plugin_dialog::DialogExt;
 
+// Cached updater so install_update doesn't re-fetch the manifest every click.
+// tauri_plugin_updater::Update is not Clone, so we hold it behind a Mutex.
+static CACHED_UPDATE: Mutex<Option<tauri_plugin_updater::Update>> = Mutex::new(None);
+
+// Download timeout: 137 MB at even 1 Mbps = ~1100s; 120s is generous for
+// healthy connections and prevents the "stalled download hangs forever" bug
+// (tauri-plugin-updater hardcodes Update.timeout = None on check()).
+const UPDATE_DOWNLOAD_TIMEOUT_SECS: u64 = 120;
+
 // Global backend process handle
 static BACKEND_PROCESS: Mutex<Option<Arc<std::sync::Mutex<std::process::Child>>>> =
     Mutex::new(None);
@@ -17,30 +26,55 @@ static BACKEND_PROCESS: Mutex<Option<Arc<std::sync::Mutex<std::process::Child>>>
 mod config;
 mod error;
 mod indexer;
-use config::AppConfig;
+use config::{browser_host, AppConfig};
 use error::{log_error, AppError, AppResult};
+
+fn backend_executable_name() -> &'static str {
+    if cfg!(target_os = "windows") {
+        "koryphaios-backend.exe"
+    } else {
+        "koryphaios-backend"
+    }
+}
 
 /// Spawn the backend sidecar process
 fn spawn_backend_sidecar(
     app_handle: &tauri::AppHandle,
-) -> Result<Arc<std::sync::Mutex<std::process::Child>>, String> {
-    let sidecar_path = app_handle
+) -> Result<Option<Arc<std::sync::Mutex<std::process::Child>>>, String> {
+    // Tauri places externalBin next to the app executable (AppImage: usr/bin/),
+    // NOT under resources/ — check both, then fall back to dev mode.
+    let sidecar_name = backend_executable_name();
+    let resource_sidecar_path = app_handle
         .path()
         .resolve(
-            "sidecar/koryphaios-backend",
+            format!("sidecar/{sidecar_name}"),
             tauri::path::BaseDirectory::Resource,
         )
-        .map_err(|e| format!("Failed to resolve sidecar path: {}", e))?;
-
-    // Check if sidecar exists (production build)
-    if !sidecar_path.exists() {
-        // In development, backend is started separately
-        println!(
-            "[Koryphaios] Sidecar not found at {:?}, assuming development mode",
-            sidecar_path
-        );
-        return Err("Sidecar not found - development mode".to_string());
-    }
+        .ok();
+    let resource_root_path = app_handle
+        .path()
+        .resolve(sidecar_name, tauri::path::BaseDirectory::Resource)
+        .ok();
+    let exe_sibling = std::env::current_exe()
+        .ok()
+        .and_then(|p| p.parent().map(|d| d.join(sidecar_name)));
+    let sidecar_path = match [exe_sibling, resource_sidecar_path, resource_root_path]
+        .into_iter()
+        .flatten()
+        .find(|p| p.is_file())
+    {
+        Some(p) => p,
+        None if cfg!(debug_assertions) => {
+            // In `tauri dev`, scripts/launch-desktop.ts owns the backend.
+            println!("[Koryphaios] Dev mode: using external backend");
+            return Ok(None);
+        }
+        None => {
+            return Err(format!(
+                "Bundled backend sidecar '{sidecar_name}' was not found next to the app or in its resources"
+            ));
+        }
+    };
 
     println!(
         "[Koryphaios] Starting backend sidecar from {:?}",
@@ -48,7 +82,33 @@ fn spawn_backend_sidecar(
     );
 
     let mut cmd = std::process::Command::new(&sidecar_path);
-    cmd.stdout(Stdio::piped()).stderr(Stdio::piped());
+    // NEVER pipe without a reader: the backend logs heavily and a full 64KB
+    // pipe buffer blocks its writes — the whole backend freezes mid-session.
+    // Log to files in the data dir instead (also gives users a crash log).
+    let log_dir = app_handle
+        .path()
+        .app_data_dir()
+        .map(|d| d.join("logs"))
+        .ok();
+    if let Some(dir) = &log_dir {
+        let _ = std::fs::create_dir_all(dir);
+        let open = |name: &str| {
+            std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(dir.join(name))
+        };
+        match (open("backend.log"), open("backend.err.log")) {
+            (Ok(out), Ok(err)) => {
+                cmd.stdout(Stdio::from(out)).stderr(Stdio::from(err));
+            }
+            _ => {
+                cmd.stdout(Stdio::null()).stderr(Stdio::null());
+            }
+        }
+    } else {
+        cmd.stdout(Stdio::null()).stderr(Stdio::null());
+    }
 
     // Set environment variables for the backend
     let config = AppConfig::get();
@@ -56,9 +116,23 @@ fn spawn_backend_sidecar(
     cmd.env("KORYPHAIOS_HOST", &config.server.host);
     cmd.env("NODE_ENV", "production");
 
-    // Set data directory
+    // Set data directory — also the sidecar's cwd so relative paths (SQLite
+    // dbs, koryphaios.json) never land in whatever dir launched the AppImage.
     if let Ok(app_data_dir) = app_handle.path().app_data_dir() {
+        let _ = std::fs::create_dir_all(&app_data_dir);
         cmd.env("KORYPHAIOS_DATA_DIR", &app_data_dir);
+        cmd.current_dir(&app_data_dir);
+    }
+
+    // One app: the backend serves the bundled frontend, the window loads it
+    // from the backend origin — frontend and backend are never separate.
+    if let Ok(frontend_dir) = app_handle
+        .path()
+        .resolve("frontend", tauri::path::BaseDirectory::Resource)
+    {
+        if frontend_dir.exists() {
+            cmd.env("KORYPHAIOS_FRONTEND_DIST", &frontend_dir);
+        }
     }
 
     let child = cmd
@@ -70,20 +144,51 @@ fn spawn_backend_sidecar(
         child.id()
     );
 
-    Ok(Arc::new(std::sync::Mutex::new(child)))
+    Ok(Some(Arc::new(std::sync::Mutex::new(child))))
 }
 
 /// Wait for backend to be ready by polling health endpoint
-async fn wait_for_backend_ready(host: &str, port: u16, max_wait_ms: u64) -> Result<(), String> {
+async fn wait_for_backend_ready(
+    host: &str,
+    port: u16,
+    max_wait_ms: u64,
+    expected_pid: Option<u32>,
+    process: Option<Arc<std::sync::Mutex<std::process::Child>>>,
+) -> Result<(), String> {
     let start = std::time::Instant::now();
     let health_url = format!("http://{}:{}/api/health", host, port);
+    let client = reqwest::Client::builder()
+        .connect_timeout(std::time::Duration::from_secs(2))
+        .timeout(std::time::Duration::from_secs(3))
+        .build()
+        .map_err(|e| format!("Failed to create backend health client: {e}"))?;
 
     while (start.elapsed().as_millis() as u64) < max_wait_ms {
-        // Try to connect to health endpoint
-        if let Ok(response) = reqwest::get(&health_url).await {
+        if let Some(process) = &process {
+            if let Ok(mut child) = process.lock() {
+                if let Ok(Some(status)) = child.try_wait() {
+                    return Err(format!(
+                        "Backend sidecar exited before becoming ready ({status})"
+                    ));
+                }
+            }
+        }
+
+        if let Ok(response) = client.get(&health_url).send().await {
             if response.status().is_success() {
-                println!("[Koryphaios] Backend is ready!");
-                return Ok(());
+                if let Ok(body) = response.json::<serde_json::Value>().await {
+                    let healthy = body.get("ok").and_then(|value| value.as_bool()) == Some(true);
+                    let responding_pid = body
+                        .get("data")
+                        .and_then(|data| data.get("pid"))
+                        .and_then(|value| value.as_u64())
+                        .and_then(|value| u32::try_from(value).ok());
+                    let correct_process = expected_pid.is_none() || responding_pid == expected_pid;
+                    if healthy && correct_process {
+                        println!("[Koryphaios] Backend is ready!");
+                        return Ok(());
+                    }
+                }
             }
         }
 
@@ -139,13 +244,25 @@ async fn check_for_updates(app: tauri::AppHandle) -> Result<UpdateCheckResult, S
     let updater = app.updater().map_err(|e| e.to_string())?;
     let update = updater.check().await.map_err(|e| e.to_string())?;
     if let Some(update) = update {
+        // Cache the Update so install_update can use it without re-fetching
+        // the manifest (saves ~0.5–2s and a network round-trip per install click).
+        if let Ok(mut cache) = CACHED_UPDATE.lock() {
+            *cache = Some(update);
+        }
+        // Re-acquire to read version/notes/date for the response.
+        let cache = CACHED_UPDATE.lock().map_err(|e| e.to_string())?;
+        let cached = cache.as_ref().ok_or("update vanished from cache")?;
         Ok(UpdateCheckResult {
             available: true,
-            version: Some(update.version.clone()),
-            notes: update.body.clone(),
-            pub_date: update.date.as_ref().map(|d| d.to_string()),
+            version: Some(cached.version.clone()),
+            notes: cached.body.clone(),
+            pub_date: cached.date.as_ref().map(|d| d.to_string()),
         })
     } else {
+        // No update — clear any stale cache.
+        if let Ok(mut cache) = CACHED_UPDATE.lock() {
+            *cache = None;
+        }
         Ok(UpdateCheckResult {
             available: false,
             version: None,
@@ -158,15 +275,64 @@ async fn check_for_updates(app: tauri::AppHandle) -> Result<UpdateCheckResult, S
 #[tauri::command]
 async fn install_update(app: tauri::AppHandle) -> Result<(), String> {
     use tauri_plugin_updater::UpdaterExt;
-    let updater = app.updater().map_err(|e| e.to_string())?;
-    let update = updater.check().await.map_err(|e| e.to_string())?;
-    if let Some(update) = update {
-        update
-            .download_and_install(|_, _| {}, || {})
-            .await
-            .map_err(|e| e.to_string())?;
-        app.restart();
-    }
+
+    // Try the cached Update from check_for_updates first; only re-fetch if the
+    // cache is empty (e.g. the user clicked Install without a prior check, or
+    // the app was restarted and the static was cleared).
+    let update_opt = CACHED_UPDATE.lock().ok().and_then(|mut c| c.take());
+    let mut update = match update_opt {
+        Some(u) => u,
+        None => {
+            let updater = app.updater().map_err(|e| e.to_string())?;
+            updater
+                .check()
+                .await
+                .map_err(|e| e.to_string())?
+                .ok_or("no update available")?
+        }
+    };
+
+    // tauri-plugin-updater 2.10.1 hardcodes `Update.timeout = None` when it
+    // builds the Update in check(). The field is pub, so we set it here to
+    // prevent a stalled download from blocking forever (the root cause of
+    // "updates take a decade").
+    update.timeout = Some(std::time::Duration::from_secs(UPDATE_DOWNLOAD_TIMEOUT_SECS));
+
+    // Wire the on_chunk callback to emit real progress events to the frontend.
+    // The plugin does NOT auto-emit these from download_and_install — without
+    // this, the UI shows a spinner with no progress bar for the whole download.
+    let app_handle = app.clone();
+    update
+        .download_and_install(
+            move |chunk_length, content_length| {
+                let _ = app_handle.emit(
+                    "tauri://update-download-progress",
+                    serde_json::json!({
+                        "chunkLength": chunk_length,
+                        "contentLength": content_length,
+                    }),
+                );
+            },
+            || {
+                // on_download_finish: the plugin verifies the signature and
+                // installs the bytes. On Linux it replaces the AppImage file
+                // in place; on macOS it swaps the .app bundle; on Windows it
+                // shells out to the NSIS/MSI installer.
+            },
+        )
+        .await
+        .map_err(|e| e.to_string())?;
+
+    // download_and_install has already installed the update. On Windows the
+    // NSIS/MSI installer relaunches the app itself (we must NOT call restart
+    // there or we race the installer). On Linux/macOS the file is replaced
+    // and we need to restart into the new binary. request_restart() triggers
+    // a clean ExitRequested → Exit → restart cycle via the event loop, which
+    // is the safe path (app.restart() can skip cleanup when called off the
+    // main thread).
+    #[cfg(not(target_os = "windows"))]
+    app.request_restart();
+
     Ok(())
 }
 
@@ -237,6 +403,18 @@ async fn select_folder_dialog(app: tauri::AppHandle) -> Result<Option<String>, S
         .blocking_pick_folder();
 
     Ok(result.map(|p| p.to_string()))
+}
+
+// Pick one or more files to reference in the composer (@path)
+#[tauri::command]
+async fn select_files_dialog(app: tauri::AppHandle) -> Result<Option<Vec<String>>, String> {
+    let result = app
+        .dialog()
+        .file()
+        .set_title("Select files to reference")
+        .blocking_pick_files();
+
+    Ok(result.map(|paths| paths.into_iter().map(|p| p.to_string()).collect()))
 }
 
 // Create a new project folder at the specified path
@@ -390,6 +568,24 @@ fn read_folder_contents(folder_path: String) -> Result<FolderContents, String> {
     Ok(FolderContents { folder_name, files })
 }
 
+// A workspace is an organizational root. Its immediate child directories are
+// offered as projects, but none becomes the working directory until selected.
+#[tauri::command]
+fn list_workspace_projects(folder_path: String) -> Result<Vec<String>, String> {
+    let root = std::path::Path::new(&folder_path);
+    if !root.is_dir() { return Err("Workspace folder does not exist".to_string()); }
+    let mut projects = std::fs::read_dir(root)
+        .map_err(|e| format!("Failed to read workspace: {}", e))?
+        .filter_map(Result::ok)
+        .map(|entry| entry.path())
+        .filter(|path| path.is_dir())
+        .filter(|path| path.file_name().and_then(|name| name.to_str()).map(|name| !name.starts_with('.')).unwrap_or(false))
+        .map(|path| path.to_string_lossy().to_string())
+        .collect::<Vec<_>>();
+    projects.sort();
+    Ok(projects)
+}
+
 fn window_state(window: &WebviewWindow) -> AppResult<WindowState> {
     let scale_factor = window
         .scale_factor()
@@ -429,6 +625,8 @@ fn save_window_state(app: &tauri::AppHandle, state: WindowState) -> AppResult<()
     Ok(())
 }
 
+// Kept for potential per-window restore; startup now always maximizes.
+#[allow(dead_code)]
 fn load_window_state(app: &tauri::AppHandle) -> Option<WindowState> {
     let app_config_dir = app.path().app_config_dir().ok()?;
     let state_path = app_config_dir.join("window-state.json");
@@ -674,24 +872,117 @@ pub fn run() {
             let app_handle = app.handle().clone();
 
             match spawn_backend_sidecar(&app_handle) {
-                Ok(process) => {
-                    // Store process handle
+                Ok(Some(process)) => {
+                    let process_pid = process.lock().ok().map(|child| child.id());
                     if let Ok(mut guard) = BACKEND_PROCESS.lock() {
-                        *guard = Some(process);
+                        *guard = Some(process.clone());
                     }
 
-                    // Wait for backend to be ready (async block)
-                    let host = config.server.host.clone();
+                    let host = browser_host(&config.server.host).to_string();
                     let port = config.server.port;
+                    let nav_handle = app_handle.clone();
+                    let nav_host = host.clone();
+                    let nav_process = process.clone();
                     tauri::async_runtime::spawn(async move {
-                        if let Err(e) = wait_for_backend_ready(&host, port, 30000).await {
+                        if let Err(e) = wait_for_backend_ready(
+                            &nav_host,
+                            port,
+                            120_000,
+                            process_pid,
+                            Some(nav_process.clone()),
+                        )
+                        .await
+                        {
                             eprintln!("[Koryphaios] Warning: {}", e);
+                            // A live-but-unhealthy process would otherwise sit
+                            // outside the exit-only watchdog forever. Killing
+                            // it hands recovery to the normal restart loop.
+                            if let Ok(mut child) = nav_process.lock() {
+                                let _ = child.kill();
+                            }
+                            return;
+                        }
+                        // Backend is up and serving the bundled frontend —
+                        // navigate the window there so the ENTIRE app runs
+                        // from one origin (API, WS, images: all same-origin).
+                        if let Some(window) = nav_handle.get_webview_window("main") {
+                            let url = format!("http://{}:{}/", nav_host, port);
+                            if let Ok(parsed) = url.parse() {
+                                if let Err(e) = window.navigate(parsed) {
+                                    eprintln!("[Koryphaios] Failed to navigate to backend: {}", e);
+                                }
+                            }
+                        }
+                    });
+
+                    // Supervise: if the backend ever dies, restart it and
+                    // reload the window. The app and backend live and die
+                    // together — never a dead UI over a dead server.
+                    let watch_handle = app_handle.clone();
+                    tauri::async_runtime::spawn(async move {
+                        loop {
+                            tokio::time::sleep(tokio::time::Duration::from_secs(3)).await;
+                            let exited = {
+                                let guard = BACKEND_PROCESS.lock().ok();
+                                match guard.as_ref().and_then(|g| g.as_ref()) {
+                                    Some(proc_arc) => match proc_arc.lock() {
+                                        Ok(mut child) => child.try_wait().ok().flatten().is_some(),
+                                        Err(_) => false,
+                                    },
+                                    None => break, // intentionally stopped (app quit)
+                                }
+                            };
+                            if !exited {
+                                continue;
+                            }
+                            eprintln!("[Koryphaios] Backend died — restarting...");
+                            match spawn_backend_sidecar(&watch_handle) {
+                                Ok(Some(new_proc)) => {
+                                    let new_pid = new_proc.lock().ok().map(|child| child.id());
+                                    if let Ok(mut guard) = BACKEND_PROCESS.lock() {
+                                        *guard = Some(new_proc.clone());
+                                    }
+                                    let ready = wait_for_backend_ready(
+                                        &host,
+                                        port,
+                                        60_000,
+                                        new_pid,
+                                        Some(new_proc.clone()),
+                                    )
+                                    .await
+                                    .is_ok();
+                                    if ready {
+                                        if let Some(window) =
+                                            watch_handle.get_webview_window("main")
+                                        {
+                                            let url = format!("http://{}:{}/", host, port);
+                                            if let Ok(parsed) = url.parse() {
+                                                let _ = window.navigate(parsed);
+                                            }
+                                        }
+                                    } else if let Ok(mut child) = new_proc.lock() {
+                                        let _ = child.kill();
+                                    }
+                                }
+                                _ => {
+                                    eprintln!(
+                                        "[Koryphaios] Backend restart failed; retrying in 5s"
+                                    );
+                                    tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
+                                }
+                            }
                         }
                     });
                 }
+                Ok(None) => {}
                 Err(e) => {
-                    // Development mode - backend started separately
-                    println!("[Koryphaios] {}", e);
+                    // A release without its backend is not a functioning app.
+                    // Fail startup instead of showing a frontend that can
+                    // never authenticate, load data, or recover.
+                    return Err(std::io::Error::other(format!(
+                        "Failed to start backend sidecar: {e}"
+                    ))
+                    .into());
                 }
             }
 
@@ -775,23 +1066,9 @@ pub fn run() {
 
             // Get main window and ensure visibility
             if let Some(window) = app.get_webview_window("main") {
-                // Load and apply window state if available
-                if let Some(state) = load_window_state(app.handle()) {
-                    if !state.maximized {
-                        let _ = window.set_size(tauri::Size::Physical(tauri::PhysicalSize {
-                            width: state.width,
-                            height: state.height,
-                        }));
-                        let _ = window.set_position(tauri::Position::Physical(
-                            tauri::PhysicalPosition {
-                                x: state.x,
-                                y: state.y,
-                            },
-                        ));
-                    } else {
-                        let _ = window.maximize();
-                    }
-                }
+                // Startup default is always full-screen (maximized) regardless
+                // of the saved window state — the user can resize afterwards.
+                let _ = window.maximize();
 
                 // CRITICAL: Always force show, focus, and unminimize to ensure window is visible on launch
                 println!("[Koryphaios] Main window initialized, forcing visibility...");
@@ -847,8 +1124,10 @@ pub fn run() {
             toggle_maximize,
             close_window_cmd,
             select_folder_dialog,
+            select_files_dialog,
             create_project_folder,
             read_folder_contents,
+            list_workspace_projects,
             indexer::search_codebase,
             check_for_updates,
             install_update,

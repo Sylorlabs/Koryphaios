@@ -17,6 +17,8 @@ data/*.db-*
 
 # Local / scratch
 typecheck_output*.txt
+*.AppImage
+test-results/
 
 # Environment
 .env

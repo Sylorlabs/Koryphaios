@@ -13,9 +13,10 @@ import type {
   ChangeSummary,
   StreamUsagePayload,
   StreamThinkingPayload,
+  ContextBreakdown,
 } from '@koryphaios/shared';
 import { normalizeReasoningLevel, determineAutoReasoningLevel } from '@koryphaios/shared';
-import { AGENT, DOMAIN } from '../constants';
+import { AGENT, DOMAIN, SESSION } from '../constants';
 import {
   ProviderRegistry,
   resolveModel,
@@ -34,6 +35,7 @@ import { JULES_SYNC_INSTRUCTIONS, getProviderDisplay } from '../providers/provid
 import { ToolRegistry, type ToolCallInput, type ToolContext, type ToolCallOutput } from '../tools';
 import { wsBroker } from '../pubsub';
 import { koryLog } from '../logger';
+import { initContextArchive, getContextArchive } from './context-archive';
 import { nanoid } from 'nanoid';
 import { sanitizeForPrompt } from '../security';
 import {
@@ -53,6 +55,7 @@ import type { ISessionStore } from '../stores/session-store';
 import type { IMessageStore } from '../stores/message-store';
 import type { ITaskStore } from '../stores/task-store';
 import { SnapshotManager } from './snapshot-manager';
+import { processSupervisor } from '../process-supervisor/supervisor';
 import { GitManager } from './git-manager';
 import { WorkspaceManager } from './workspace-manager';
 import {
@@ -72,6 +75,11 @@ import { getModeManager } from '../mode';
 import type { WorkerPipelineConfig } from './services/WorkerPipelineService';
 import type { UIMode } from '@koryphaios/shared';
 import { collaborationManager } from '../collaboration/manager';
+import {
+  setCollaborationToolPolicy,
+  clearCollaborationToolPolicy,
+  type CollaborationToolPolicy,
+} from '../collaboration/tool-policy';
 
 // ─── Internal Types ─────────────────────────────────────────────────────────
 
@@ -133,7 +141,6 @@ for (const [domain, modelId] of Object.entries(DOMAIN.DEFAULT_MODELS)) {
 
 // ─── Clarification Gate ─────────────────────────────────────────────────────
 
-
 // ─── Kory Identity ──────────────────────────────────────────────────────────
 
 let KORY_IDENTITY: AgentIdentity = {
@@ -171,6 +178,7 @@ const KORY_SYSTEM_PROMPT = `You are Kory, the manager agent. The user talks to y
 • You may run terminals in the background: use the bash tool with isBackground: true (and optional processName) to start long-lived processes (e.g. dev servers). Use shell_manage to list stored background processes, view their logs, or kill them. Only you can manage these background terminals.
 • Sub-agents (workers: general, ui, backend, test, review) exist only for you to invoke when you decide a task needs a specialist coder. Call delegate_to_worker only for substantial implementation, refactoring, or multi-step coding—not for chat, simple questions, or minor edits.
 • When you delegate, the worker reports back; you verify and synthesize.
+• RESPONSE VISUALS: Use standard Markdown tables for structured comparisons. When quantitative data is materially clearer as a chart, emit a fenced \`chart\` JSON block with \`type\` (\`bar\`, \`line\`, or \`pie\`), optional \`title\`, \`labels\`, and \`datasets\` containing \`label\` and numeric \`data\` arrays. Do not fake tables with spaces or ASCII art.
 • IMPORTANT: If you decide to delegate, call delegate_to_worker IMMEDIATELY without generating any explanatory text first. Do not write "I'll delegate this" or similar—just call the tool directly.
 • delegate_to_jules: Offload substantial repo work to Google Jules — a CLOUD-ONLY async agent (API). Jules runs in remote Google VMs (not locally), often takes minutes, and may open GitHub PRs. Never use for quick local edits or chat. Jules never writes to the local working tree — after it finishes you MUST sync remote work locally (\`git fetch && git pull\`, or \`gh pr checkout <n>\`) before continuing.
 • If you have successfully completed a task or edit and are ready to save the work, use the commit_and_create_pr tool to commit and create a pull request automatically.`;
@@ -209,6 +217,10 @@ export class KoryManager {
   private state: SessionStateService;
   private workerPipeline: WorkerPipelineService;
   private autoCommitService: AutoCommitService;
+  /** Sessions whose title has already been auto-generated. Prevents racing
+   *  LLM calls when the user sends a second message before the first title
+   *  resolves. */
+  private titledSessions = new Set<string>();
 
   constructor(
     private providers: ProviderRegistry,
@@ -224,6 +236,7 @@ export class KoryManager {
     mkdirSync(this.memoryDir, { recursive: true });
     this.snapshotManager = new SnapshotManager(workingDirectory);
     this.git = new GitManager(workingDirectory);
+    initContextArchive(workingDirectory);
 
     // Initialize WorkspaceManager if git is available
     try {
@@ -241,6 +254,43 @@ export class KoryManager {
     this.workers = new WorkerLifecycleService({ events: this.events });
     this.state = new SessionStateService();
     this.autoCommitService = new AutoCommitService(this.workingDirectory, this.git);
+
+    // Background terminals: surface start/exit in the chat feed and wake the
+    // agent when a process it was waiting on finishes.
+    processSupervisor.onLifecycle((e) => {
+      if (!e.sessionId) return;
+      this.emitWSMessage(e.sessionId, e.type === 'started' ? 'process.started' : 'process.exited', {
+        id: e.id,
+        name: e.name,
+        command: e.command,
+        pid: e.pid,
+        exitCode: e.exitCode,
+        status: e.status,
+        willRestart: e.willRestart,
+        logsTail: e.logsTail,
+      });
+      if (
+        e.type === 'exited' &&
+        e.status !== 'killed' &&
+        !e.willRestart &&
+        !this.isSessionRunning(e.sessionId)
+      ) {
+        // The manager's turn already ended (button shows "Waiting…") — wake it
+        // with the outcome so it can react or report back to the user.
+        const summary =
+          `[background terminal] Process "${e.name}" (${e.command.slice(0, 120)}) ` +
+          `${e.status} with exit code ${e.exitCode ?? 'unknown'}.` +
+          (e.logsTail ? `\nRecent output:\n${e.logsTail}` : '') +
+          `\nReview the result (shell_manage logs id=${e.id} for full output), fix anything broken, or summarize for the user.`;
+        this.emitWSMessage(e.sessionId, 'agent.status', {
+          agentId: KORY_IDENTITY.id,
+          status: 'thinking',
+        });
+        void this.handleDirectly(e.sessionId, summary, undefined, undefined).catch((err) =>
+          koryLog.warn({ err, sessionId: e.sessionId }, 'Background-process wake-up failed'),
+        );
+      }
+    });
 
     const pipelineConfig: WorkerPipelineConfig = {
       getIsYoloMode: () => this.isYoloMode,
@@ -276,8 +326,8 @@ export class KoryManager {
           allowedPaths,
           isSandboxed,
         ),
-      runCriticGate: (sessionId, workerMessages, preferredModel) =>
-        this.runCriticGate(sessionId, workerMessages, preferredModel),
+      runCriticGate: (sessionId, workerMessages, preferredModel, task) =>
+        this.runCriticGate(sessionId, workerMessages, preferredModel, task),
     };
 
     this.workerPipeline = new WorkerPipelineService({
@@ -394,26 +444,31 @@ export class KoryManager {
     try {
       const stream = provider.streamResponse({
         model: routing.model,
-        systemPrompt: 'You are helping route an inquiry. You must call exactly one tool to indicate your choice.',
+        systemPrompt:
+          'You are helping route an inquiry. You must call exactly one tool to indicate your choice.',
         messages: [{ role: 'user', content: question }],
-        tools: [{
-          name: 'route_inquiry',
-          description: 'Route the inquiry',
-          inputSchema: {
-            type: 'object',
-            properties: { decision: { type: 'string', enum: ['WEB_SEARCH', 'ANSWER'] } },
-            required: ['decision']
-          }
-        }],
+        tools: [
+          {
+            name: 'route_inquiry',
+            description: 'Route the inquiry',
+            inputSchema: {
+              type: 'object',
+              properties: { decision: { type: 'string', enum: ['WEB_SEARCH', 'ANSWER'] } },
+              required: ['decision'],
+            },
+          },
+        ],
         maxTokens: 50,
       });
 
       for await (const event of stream) {
         if (event.type === 'tool_use_stop' && event.toolName === 'route_inquiry') {
-           try {
-             const args = JSON.parse(event.toolInput || '{}');
-             if (args.decision) decision = args.decision;
-           } catch { /* default to ANSWER */ }
+          try {
+            const args = JSON.parse(event.toolInput || '{}');
+            if (args.decision) decision = args.decision;
+          } catch {
+            /* default to ANSWER */
+          }
         }
       }
     } catch (err) {
@@ -452,6 +507,8 @@ export class KoryManager {
     preferredModel?: string,
     reasoningLevel?: string,
     attachments?: Array<{ type: string; data: string; name: string }>,
+    collaborationToolPolicy?: CollaborationToolPolicy,
+    responseVariant?: { groupId: string; index: number },
   ): Promise<void> {
     this.isProcessing = true;
     this.state.clearChanges(sessionId);
@@ -483,6 +540,7 @@ export class KoryManager {
     collaborationManager.broadcastEvent({ type: 'chat', from: 'human', content: userMessage });
 
     await this.updateWorkflowState(sessionId, 'analyzing');
+    if (collaborationToolPolicy) setCollaborationToolPolicy(sessionId, collaborationToolPolicy);
     try {
       koryLog.debug({ sessionId }, 'Calling handleDirectly');
       this.emitThought(sessionId, 'analyzing', `Analyzing request...`);
@@ -502,7 +560,14 @@ export class KoryManager {
       }, AGENT.PROCESS_TASK_TIMEOUT_MS);
 
       try {
-        await this.handleDirectly(sessionId, userMessage, reasoningLevel, preferredModel, attachments);
+        await this.handleDirectly(
+          sessionId,
+          userMessage,
+          reasoningLevel,
+          preferredModel,
+          attachments,
+          responseVariant,
+        );
       } finally {
         clearTimeout(processTimeout);
       }
@@ -517,6 +582,7 @@ export class KoryManager {
       await this.updateWorkflowState(sessionId, 'error');
       this.emitError(sessionId, `Error: ${String(err)}`);
     } finally {
+      if (collaborationToolPolicy) clearCollaborationToolPolicy(sessionId);
       this.isProcessing = false;
     }
   }
@@ -532,7 +598,37 @@ export class KoryManager {
     prompt?: string,
     preferCheap?: boolean,
   ): { model: string; provider: ProviderName | undefined } {
-    return this.routing.resolveActiveRouting(preferredModel, domain, avoidLegacy, prompt, preferCheap);
+    const routed = this.routing.resolveActiveRouting(
+      preferredModel,
+      domain,
+      avoidLegacy,
+      prompt,
+      preferCheap,
+    );
+    // User-configured per-category allowlist: when set for this domain, the
+    // manager may only use those models. An explicit user model pick wins.
+    if (!preferredModel || preferredModel === 'auto') {
+      try {
+        const { loadAgentSettings } =
+          require('../agent-settings') as typeof import('../agent-settings');
+        const allowed = loadAgentSettings(this.workingDirectory).managerModelAccess?.[domain];
+        if (allowed?.length && !allowed.includes(routed.model)) {
+          for (const candidate of allowed) {
+            const alt = this.routing.resolveActiveRouting(
+              candidate,
+              domain,
+              avoidLegacy,
+              prompt,
+              preferCheap,
+            );
+            if (this.providers.resolveProvider(alt.model, alt.provider)) return alt;
+          }
+        }
+      } catch {
+        /* settings unavailable — use the routed default */
+      }
+    }
+    return routed;
   }
 
   private formatProviderName(provider: string): string {
@@ -617,6 +713,105 @@ export class KoryManager {
     return !!detectJulesApiKey();
   }
 
+  /** Fire-and-forget session title generation. Called by the messages route
+   *  the first time a user sends a message into a session whose title is still
+   *  the default. A small/cheap LLM is asked for a 3-6 word title; if the call
+   *  fails or the model isn't available we fall back to a truncated first-line
+   *  summary of the user message so the session is never stuck on "New Session".
+   *
+   *  The result is persisted to the DB and broadcast as `session.updated` so
+   *  the sidebar updates in place without a full refetch. */
+  async generateSessionTitle(sessionId: string, userMessage: string): Promise<void> {
+    if (!this.sessions) return;
+    // De-dupe across overlapping calls: if the user fires a second message
+    // before the first title resolves, we don't want two LLM calls racing.
+    if (this.titledSessions.has(sessionId)) return;
+    this.titledSessions.add(sessionId);
+
+    const session = await this.sessions.get(sessionId);
+    if (!session) {
+      this.titledSessions.delete(sessionId);
+      return;
+    }
+    // Only rename sessions that are still on the default title — user-renamed
+    // sessions are sacred.
+    if (session.title !== SESSION.DEFAULT_TITLE) return;
+    // Only rename the very first user message; later turns keep the existing
+    // name even if the user hasn't renamed it manually.
+    if ((session.messageCount ?? 0) > 0) return;
+
+    const cleaned = userMessage.replace(/\s+/g, ' ').trim();
+    let title = this.fallbackTitle(cleaned);
+
+    try {
+      const llmTitle = await this.askForTitle(cleaned);
+      if (llmTitle) title = llmTitle;
+    } catch (err) {
+      koryLog.debug(
+        { sessionId, err: String(err) },
+        'Agent title generation failed, using fallback',
+      );
+    }
+
+    title = title.slice(0, SESSION.MAX_TITLE_LENGTH).trim();
+    if (!title || title === SESSION.DEFAULT_TITLE) return;
+
+    const updated = await this.sessions.update(sessionId, { title });
+    if (updated) this.events.emit(sessionId, 'session.updated', { session: updated });
+  }
+
+  /** Ask a small/fast model for a 3-6 word title. Returns null on any failure. */
+  private async askForTitle(userMessage: string): Promise<string | null> {
+    // Pick the cheapest available routing so title generation stays cheap.
+    let routing;
+    try {
+      routing = this.resolveActiveRouting(undefined, 'general', true, undefined, true);
+    } catch {
+      return null;
+    }
+    const provider = await this.providers.resolveProvider(routing.model, routing.provider);
+    if (!provider) return null;
+
+    const systemPrompt =
+      'You generate short chat titles. Output ONLY the title, no quotes, no punctuation ' +
+      'at the ends, no prefix like "Title:". 3-6 words, sentence case, specific to the ' +
+      "user's actual topic. Never reuse the literal text of the message unless it is a " +
+      'proper noun or unique identifier.';
+    const userPrompt = `First user message in a chat:\n\n"""${userMessage.slice(0, 1000)}"""\n\nTitle:`;
+
+    let out = '';
+    try {
+      const stream = provider.streamResponse({
+        model: routing.model,
+        systemPrompt,
+        messages: [{ role: 'user', content: userPrompt }],
+        maxTokens: 32,
+      });
+      for await (const event of stream) {
+        if (event.type === 'content_delta') out += event.content ?? '';
+      }
+    } catch (err) {
+      koryLog.debug({ err: String(err) }, 'title LLM stream failed');
+      return null;
+    }
+
+    const cleaned = out
+      .replace(/^["'`\s]+|["'`\s]+$/g, '')
+      .replace(/^title\s*[:\-]\s*/i, '')
+      .replace(/\s+/g, ' ')
+      .trim();
+    if (!cleaned || cleaned.length < 2) return null;
+    return cleaned;
+  }
+
+  /** Deterministic, no-LLM fallback. Truncates to AUTO_TITLE_CHARS. */
+  private fallbackTitle(content: string): string {
+    if (!content) return SESSION.DEFAULT_TITLE;
+    return content.length > SESSION.AUTO_TITLE_CHARS
+      ? content.slice(0, SESSION.AUTO_TITLE_CHARS - 3).trim() + '...'
+      : content.trim();
+  }
+
   private resolveJulesApiKey(): string | null {
     const cfg = this.providers.getConfigs().jules;
     return cfg?.apiKey?.trim() || detectJulesApiKey();
@@ -656,7 +851,7 @@ export class KoryManager {
       for await (const event of runJulesTask({
         apiKey,
         prompt: task,
-        workingDirectory: this.workingDirectory,
+        workingDirectory: await this.resolveSessionWorkingDirectory(sessionId),
         korySessionId: sessionId,
         defaultBranch: options?.branch,
         automationMode,
@@ -729,6 +924,7 @@ export class KoryManager {
     sessionId: string,
     workerMessages: InternalMessage[] | undefined,
     preferredModel?: string,
+    task?: string,
   ): Promise<{ passed: boolean; feedback?: string }> {
     const hardCheckResult = await this.runHardChecks(sessionId);
     if (!hardCheckResult.passed) return { passed: false, feedback: hardCheckResult.output };
@@ -738,7 +934,19 @@ export class KoryManager {
     if (!provider) return { passed: true };
 
     const transcriptText = formatMessagesForCriticUtil(workerMessages ?? [], 12_000);
-    const criticPrompt = `Worker transcript to review:\n\n${transcriptText}\n\nUse read_file/grep/glob/ls as needed. Then output PASS or FAIL and brief feedback.`;
+    // The critic is a FRESH-context agent — it never shares the manager's
+    // conversation. The manager briefs it here: the original objective plus
+    // what to scrutinize, so the review judges fitness-for-purpose instead of
+    // vibing over an anonymous transcript.
+    const objective = task?.trim()
+      ? `THE OBJECTIVE (what the worker was asked to accomplish):\n${task.trim().slice(0, 2_000)}\n\n`
+      : '';
+    const criticPrompt =
+      `${objective}Worker transcript to review:\n\n${transcriptText}\n\n` +
+      `Critique against the objective: (1) does the work actually accomplish it, ` +
+      `(2) is the implementation correct (verify claims by reading the real files — do not trust the transcript), ` +
+      `(3) did it break or regress anything nearby, (4) is anything incomplete or stubbed. ` +
+      `Use read_file/grep/glob/ls as needed. Then output PASS or FAIL and brief feedback.`;
     const criticId = `critic-${nanoid(8)}`;
     const identity: AgentIdentity = {
       id: criticId,
@@ -749,12 +957,16 @@ export class KoryManager {
       domain: 'critic',
       glowColor: DOMAIN.GLOW_COLORS.critic,
     };
-    this.emitWSMessage(sessionId, 'agent.spawned', { agent: identity, task: 'Review delegated work' });
+    this.emitWSMessage(sessionId, 'agent.spawned', {
+      agent: identity,
+      task: 'Review delegated work',
+    });
     const criticAbort = new AbortController();
+    const criticSessionWd = await this.resolveSessionWorkingDirectory(sessionId);
     const criticCtx: ToolContext = {
       sessionId,
-      workingDirectory: this.workingDirectory,
-      allowedPaths: [this.workingDirectory],
+      workingDirectory: criticSessionWd,
+      allowedPaths: [criticSessionWd],
       isSandboxed: true,
       signal: criticAbort.signal,
     };
@@ -787,7 +999,8 @@ export class KoryManager {
     }
 
     const lastContent =
-      [...thread.threadEntries].reverse().find((entry) => entry.role === 'assistant')?.content ?? '';
+      [...thread.threadEntries].reverse().find((entry) => entry.role === 'assistant')?.content ??
+      '';
     const passed = parseCriticVerdict(lastContent);
     return { passed, feedback: lastContent.trim() };
   }
@@ -810,6 +1023,7 @@ export class KoryManager {
     reasoningLevel?: string,
     preferredModel?: string,
     attachments?: Array<{ type: string; data: string; name: string }>,
+    responseVariant?: { groupId: string; index: number },
   ): Promise<void> {
     koryLog.debug({ sessionId, reasoningLevel, preferredModel }, 'Entering handleDirectly');
     let routing = this.resolveActiveRouting(preferredModel, 'general', true, userMessage);
@@ -851,7 +1065,7 @@ export class KoryManager {
 
       const managerCtx: ToolContext = {
         sessionId,
-        workingDirectory: this.workingDirectory,
+        workingDirectory: await this.resolveSessionWorkingDirectory(sessionId),
         allowedPaths: [],
         isSandboxed: false,
         signal: abort.signal,
@@ -880,10 +1094,10 @@ export class KoryManager {
 
       const history = await this.loadHistory(sessionId);
       koryLog.debug({ historyCount: history.length }, 'Loaded history');
-      
+
       let finalContent: string | import('../providers/types').ProviderContentBlock[] = userMessage;
       if (attachments && attachments.length > 0) {
-        const imageAttachments = attachments.filter(a => a.type === 'image');
+        const imageAttachments = attachments.filter((a) => a.type === 'image');
         if (imageAttachments.length > 0) {
           finalContent = [
             { type: 'text', text: userMessage },
@@ -898,7 +1112,7 @@ export class KoryManager {
                 imageData: att.data,
                 imageMimeType: mime,
               };
-            })
+            }),
           ];
         }
       }
@@ -923,6 +1137,9 @@ export class KoryManager {
         }
         turnCount++;
         koryLog.debug({ turnCount }, 'Starting manager turn');
+        // Reclaim context: stub out tool outputs the user hid from the agent
+        // or that are old enough to be dead weight (recoverable via fetch_context).
+        await this.applyContextPruning(sessionId, messages, turnCount);
         let result: LLMTurnResult;
         try {
           result = await this.processManagerTurn(
@@ -932,6 +1149,7 @@ export class KoryManager {
             messages,
             managerCtx,
             abort.signal,
+            reasoningLevel,
           );
           koryLog.debug(
             {
@@ -974,9 +1192,10 @@ export class KoryManager {
                   id: nanoid(12),
                   sessionId,
                   role: 'assistant',
-                  content: selection === '__timeout__'
-                    ? '[Timed out waiting for user response.]'
-                    : '[Cancelled by user.]',
+                  content:
+                    selection === '__timeout__'
+                      ? '[Timed out waiting for user response.]'
+                      : '[Cancelled by user.]',
                   model: routing.model,
                   provider: providerName,
                   createdAt: Date.now(),
@@ -990,19 +1209,43 @@ export class KoryManager {
               break;
             }
             const toolResult = await this.executeManagerToolCall(sessionId, tc, managerCtx);
+            // Archive the full output locally so pruning never loses anything —
+            // fetch_context can recover the exact content by this id.
+            const archiveId = await this.archiveToolResult(sessionId, tc, toolResult);
             this.emitWSMessage(sessionId, 'stream.tool_result', {
               agentId: KORY_IDENTITY.id,
-              toolResult,
+              toolResult: archiveId ? { ...toolResult, archiveId } : toolResult,
             });
             executedAnyTool = true;
-            messages.push({
+            // Cap what enters the MODEL context — a megabyte build log would
+            // blow the window (and made the context bar spike absurdly). The
+            // archive keeps the full output; fetch_context recovers it.
+            const TOOL_OUTPUT_CONTEXT_CAP = 30_000;
+            const cappedResult =
+              (toolResult.output?.length ?? 0) > TOOL_OUTPUT_CONTEXT_CAP
+                ? {
+                    ...toolResult,
+                    output:
+                      toolResult.output.slice(0, TOOL_OUTPUT_CONTEXT_CAP) +
+                      `\n…[truncated ${toolResult.output.length - TOOL_OUTPUT_CONTEXT_CAP} chars${archiveId ? ` — full output via fetch_context id=${archiveId}` : ''}]`,
+                  }
+                : toolResult;
+            const toolMsg: InternalMessage = {
               role: 'tool',
-              content: JSON.stringify(toolResult),
+              content: JSON.stringify(cappedResult),
               tool_call_id: tc.id,
-            });
+            };
+            if (archiveId) Object.assign(toolMsg, { archiveId, archiveTurn: turnCount });
+            messages.push(toolMsg);
+            const visionMsg = this.buildViewImageMessage(toolResult);
+            if (visionMsg) messages.push(visionMsg);
           }
         }
       }
+
+      // A stop that lands between turns (or breaks out of the stream loop)
+      // must still be reported as user-stopped, not a normal completion.
+      if (abort.signal.aborted) stoppedByUser = true;
 
       const assistants = messages.filter((m) => m.role === 'assistant');
       koryLog.debug(
@@ -1011,26 +1254,30 @@ export class KoryManager {
       );
       const lastAssistant = assistants.pop();
       const rawContent = lastAssistant?.content ?? '';
-      const content = (typeof rawContent === 'string' ? rawContent : JSON.stringify(rawContent)).trim();
+      const content = (
+        typeof rawContent === 'string' ? rawContent : JSON.stringify(rawContent)
+      ).trim();
 
       // No silent stops: if the model returned nothing user-visible (no streamed text, no
       // tools), say so live instead of leaving the user staring at a finished spinner.
       const emptyResponse = !stoppedByUser && !streamedAnyContent && !executedAnyTool && !content;
-      const EMPTY_NOTICE = 'The model returned an empty response. Please resend or rephrase your request.';
+      const EMPTY_NOTICE =
+        'The model returned an empty response. Please resend or rephrase your request.';
       if (emptyResponse) {
-        this.emitWSMessage(sessionId, 'stream.delta', {
-          agentId: KORY_IDENTITY.id,
-          content: EMPTY_NOTICE,
-          model: routing.model,
+        this.emitWSMessage(sessionId, 'system.info', {
+          message: EMPTY_NOTICE,
         });
       }
 
+      // Stopping must never erase work: persist whatever the model produced
+      // as Kory's message, and record the stop as a separate system marker so
+      // it renders as plain text — not as something Kory said.
       const toPersist = stoppedByUser
-        ? '[Stopped by user.]'
-        : content || (emptyResponse ? EMPTY_NOTICE : '[Task completed using tools.]');
+        ? content
+        : content || (emptyResponse ? '' : '[Task completed using tools.]');
       koryLog.debug({ toPersist, sessionId }, 'Attempting to persist assistant message');
       let finalMessageId: string | undefined;
-      if (this.messages) {
+      if (this.messages && toPersist) {
         finalMessageId = nanoid(12);
         await this.messages.add(sessionId, {
           id: finalMessageId,
@@ -1039,11 +1286,41 @@ export class KoryManager {
           content: toPersist,
           model: routing.model,
           provider: providerName,
+          variantGroupId: responseVariant?.groupId,
+          variantIndex: responseVariant?.index,
           createdAt: Date.now(),
         });
         koryLog.debug('Assistant message persisted');
       }
-      this.emitWSMessage(sessionId, 'agent.status', { agentId: KORY_IDENTITY.id, status: 'done' });
+      if (this.messages && emptyResponse) {
+        await this.messages.add(sessionId, {
+          id: nanoid(12),
+          sessionId,
+          role: 'system',
+          content: EMPTY_NOTICE,
+          model: routing.model,
+          provider: providerName,
+          createdAt: Date.now(),
+        });
+      }
+      if (this.messages && stoppedByUser) {
+        await this.messages.add(sessionId, {
+          id: nanoid(12),
+          sessionId,
+          role: 'system',
+          content: 'Stopped by user.',
+          model: routing.model,
+          provider: providerName,
+          createdAt: Date.now(),
+        });
+      }
+      this.emitWSMessage(sessionId, 'agent.status', {
+        agentId: KORY_IDENTITY.id,
+        // Background terminals still running → the agent is waiting on them,
+        // not done; the composer button shows "Waiting…" and the exit event
+        // wakes the agent back up.
+        status: processSupervisor.hasRunningForSession(sessionId) ? 'waiting' : 'done',
+      });
 
       // Create rewind point after final response
       if (finalMessageId) {
@@ -1108,8 +1385,6 @@ export class KoryManager {
     }
   }
 
-
-
   private async processManagerTurn(
     sessionId: string,
     modelId: string,
@@ -1117,6 +1392,7 @@ export class KoryManager {
     messages: InternalMessage[],
     ctx: ToolContext,
     signal?: AbortSignal,
+    reasoningLevel?: string,
   ): Promise<LLMTurnResult> {
     if (signal?.aborted) throw new DOMException('Manager run aborted', 'AbortError');
 
@@ -1125,8 +1401,19 @@ export class KoryManager {
     const settings = loadAgentSettings(this.workingDirectory);
 
     let systemPrompt = KORY_SYSTEM_PROMPT;
+    const notesEntries = Object.entries(settings.managerNotes ?? {}).filter(([, v]) => v?.trim());
+    if (notesEntries.length > 0) {
+      const notesSections = notesEntries
+        .map(([group, text]) => `### ${group}\n${text.trim()}`)
+        .join('\n\n');
+      systemPrompt += `\n\n## User Notes (standing guidance)\n${notesSections}`;
+    }
+    // Chars contributed by injected memory/notes — tracked separately so the
+    // context-usage bar can show memory as its own segment.
+    let memoryChars = 0;
 
     if (hasAnyVisibleNoteTools(this.workingDirectory)) {
+      const beforeNotes = systemPrompt.length;
       const hint = buildNotesNetworkSystemHint(this.workingDirectory);
       if (hint) systemPrompt += `\n\n${hint}`;
       try {
@@ -1135,6 +1422,7 @@ export class KoryManager {
       } catch {
         // Notes DB may be unavailable — continue without network context
       }
+      memoryChars = systemPrompt.length - beforeNotes;
     }
 
     // Multi-source research instruction
@@ -1155,14 +1443,12 @@ export class KoryManager {
     if (!this.isJulesAvailable()) {
       tools = tools.filter((t) => t.name !== 'delegate_to_jules');
     } else {
-      systemPrompt +=
-        `\n\n• JULES (cloud): delegate_to_jules sends work to Google Jules — remote VMs, async, may take minutes, produces PRs. Never substitute for local tools on quick edits.\n• ${JULES_SYNC_INSTRUCTIONS}`;
+      systemPrompt += `\n\n• JULES (cloud): delegate_to_jules sends work to Google Jules — remote VMs, async, may take minutes, produces PRs. Never substitute for local tools on quick edits.\n• ${JULES_SYNC_INSTRUCTIONS}`;
     }
 
     if (provider.name === 'jules') {
       const julesMeta = getProviderDisplay('jules');
-      systemPrompt +=
-        `\n\n• You are chatting through Jules (cloud provider). All code changes happen on Google's remote infrastructure and GitHub — not in this local workspace until synced.\n• ${julesMeta?.managerHint ?? JULES_SYNC_INSTRUCTIONS}`;
+      systemPrompt += `\n\n• You are chatting through Jules (cloud provider). All code changes happen on Google's remote infrastructure and GitHub — not in this local workspace until synced.\n• ${julesMeta?.managerHint ?? JULES_SYNC_INSTRUCTIONS}`;
     }
 
     // Agent execution mode (the composer pill, persisted in agent settings): gate delegation.
@@ -1171,7 +1457,9 @@ export class KoryManager {
     //  • auto   → Kory decides per-task (default)
     const execMode = settings.agentExecutionMode ?? 'auto';
     if (execMode === 'single') {
-      tools = tools.filter((t) => t.name !== 'delegate_to_worker' && t.name !== 'delegate_to_jules');
+      tools = tools.filter(
+        (t) => t.name !== 'delegate_to_worker' && t.name !== 'delegate_to_jules',
+      );
       systemPrompt +=
         '\n\n• AGENT MODE: SOLO — Do NOT delegate. Complete the entire task yourself; delegate_to_worker and delegate_to_jules are unavailable this turn.';
     } else if (execMode === 'multi') {
@@ -1180,17 +1468,105 @@ export class KoryManager {
     }
     // If "fallback", we keep it in the list. The model can choose to use it if its native search fails or is unavailable.
 
+    const providerMessages = this.toProviderMessages(messages);
+    // Estimated context composition at dispatch (chars/4) — segment ratios for
+    // the context-usage bar; the provider's usage_update stays the real total.
+    // Agentic CLI harnesses (claude/grok/antigravity) run their OWN tools —
+    // Koryphaios tool schemas are never sent to them, so counting our defs as
+    // "Tools" misattributes the CLI's harness overhead. Their real overhead
+    // shows up as the gap between this estimate and provider-reported usage
+    // (rendered as "Provider harness" in the context bar).
+    const NATIVE_TOOL_PROVIDERS = new Set(['claude', 'grok', 'antigravity']);
+    // Chat = user + assistant text only. Tools = tool definitions + all tool
+    // calls/results in the history. Keep them strictly separate in the bar.
+    const msgSplit = estimateProviderMessagesChars(providerMessages);
+    const toolDefsChars = NATIVE_TOOL_PROVIDERS.has(provider.name)
+      ? 0
+      : JSON.stringify(tools ?? []).length;
+    const contextBreakdown: ContextBreakdown = {
+      system: Math.ceil(Math.max(0, systemPrompt.length - memoryChars) / 4),
+      memory: Math.ceil(memoryChars / 4),
+      tools: Math.ceil((toolDefsChars + msgSplit.tools) / 4),
+      chat: Math.ceil(msgSplit.chat / 4),
+    };
+
+    const estTokens =
+      contextBreakdown.system +
+      contextBreakdown.memory +
+      contextBreakdown.tools +
+      contextBreakdown.chat;
+    // Real context data at dispatch time — the bar updates the moment a turn
+    // starts (reflecting prunes/hides), instead of trusting a stale usage
+    // event from a previous turn or model. Provider usage refines it later.
+    this.emitUsageUpdate(
+      sessionId,
+      KORY_IDENTITY.id,
+      modelId,
+      provider.name,
+      estTokens,
+      0,
+      true,
+      contextBreakdown,
+    );
+
+    // Context self-awareness: tell the model what its window looks like and
+    // what's prunable, so it can decide on its own to free space or compact.
+    if (settings.contextSelfAwareness !== false) {
+      const k = (n: number) => `${(n / 1000).toFixed(1)}k`;
+      const win = resolveTrustedContextWindow(modelId, provider.name);
+      const pct = win.contextWindow ? Math.round((estTokens / win.contextWindow) * 100) : null;
+      const bulky = messages
+        .filter(
+          (m): m is InternalMessage & { archiveId: string; content: string } =>
+            m.role === 'tool' &&
+            typeof (m as { archiveId?: string }).archiveId === 'string' &&
+            !(m as { pruneApplied?: boolean }).pruneApplied &&
+            typeof m.content === 'string' &&
+            m.content.length > 400,
+        )
+        .map((m) => ({ id: m.archiveId, tok: Math.ceil(m.content.length / 4) }))
+        .sort((a, b) => b.tok - a.tok)
+        .slice(0, 5);
+      systemPrompt +=
+        `
+
+[CONTEXT STATUS] ~${k(estTokens)} tokens in your context` +
+        (pct !== null ? ` (~${pct}% of a ${k(win.contextWindow!)} window)` : '') +
+        ` — system ${k(contextBreakdown.system)}, memory ${k(contextBreakdown.memory)}, tools ${k(contextBreakdown.tools)}, chat/tool-results ${k(contextBreakdown.chat)}.` +
+        (bulky.length
+          ? ` Largest prunable tool outputs: ${bulky.map((b) => `${b.id} (~${k(b.tok)})`).join(', ')}.`
+          : '') +
+        ` You own this window: fetch_context with no arguments lists everything you did (with timestamps); ` +
+        `prune_context drops outputs you no longer need (always recoverable)` +
+        (pct !== null && pct >= 70
+          ? `. Note: your context is filling up. It's your call — prune stale outputs, keep going if you're nearly done, or if nothing is prunable, suggest the user compact the session.`
+          : `.`);
+    }
+
+    // The composer's reasoning tier MUST reach the provider — this was silently
+    // dropped for the main chat turn (only worker threads forwarded it).
+    const resolvedReasoning =
+      reasoningLevel === 'auto'
+        ? determineAutoReasoningLevel(
+            typeof messages[messages.length - 1]?.content === 'string'
+              ? (messages[messages.length - 1].content as string)
+              : '',
+          )
+        : reasoningLevel;
+    const normalizedReasoning = normalizeReasoningLevel(provider.name, modelId, resolvedReasoning);
+
     const streamSignal = withTimeoutSignal(signal, AGENT.LLM_STREAM_TIMEOUT_MS);
     const stream = this.providers.executeWithRetry(
       {
         model: modelId,
         systemPrompt,
-        messages: this.toProviderMessages(messages),
+        messages: providerMessages,
         tools,
         maxTokens: 16384,
         signal: streamSignal,
-        // Agentic CLI providers (claude-code) run + edit files in the project directory.
-        workingDirectory: this.workingDirectory,
+        ...(normalizedReasoning !== undefined && { reasoningLevel: normalizedReasoning }),
+        // Agentic CLI providers (claude-code) run + edit files in the session's project directory.
+        workingDirectory: await this.resolveSessionWorkingDirectory(sessionId),
         sessionId,
       },
       provider.name,
@@ -1203,82 +1579,154 @@ export class KoryManager {
     let tokensIn = 0;
     let tokensOut = 0;
 
-    for await (const event of stream) {
-      if (signal?.aborted) throw new DOMException('Manager run aborted', 'AbortError');
-      if (event.type === 'error') {
-        throw new Error(event.error ?? 'LLM stream error');
-      }
-      if (event.type === 'content_delta') {
-        const delta = event.content ?? '';
-        assistantContent += delta;
-        // Stream live, token-by-token — so the user sees text appear immediately (no
-        // "thinks then dumps" pause) and partial output survives a mid-stream error.
-        if (delta) {
-          this.emitWSMessage(sessionId, 'stream.delta', {
-            agentId: KORY_IDENTITY.id,
-            content: delta,
-            model: modelId,
-          });
+    try {
+      for await (const event of stream) {
+        // On user stop, keep everything accumulated so far — breaking (instead of
+        // throwing) lets the partial response flow into `messages` and get
+        // persisted. Throwing here erased the user's proof-of-work on Stop.
+        if (signal?.aborted) break;
+        if (event.type === 'error') {
+          throw new Error(event.error ?? 'LLM stream error');
         }
-      } else if (event.type === 'thinking_delta') {
-        if (event.thinking) {
-          this.emitWSMessage(sessionId, 'stream.thinking', {
-            agentId: KORY_IDENTITY.id,
-            thinking: event.thinking,
-          } satisfies StreamThinkingPayload);
-        }
-      } else if (event.type === 'file_edit') {
-        // Agentic provider (claude-code) already wrote the file — surface it in the live
-        // diff preview (it's done, not a tool for us to execute).
-        if (event.filePath) {
-          this.streamAgentFileEdit(ctx, event.filePath, event.fileContent ?? '', event.fileOperation ?? 'edit', event.fileOldContent);
-        }
-      } else if (event.type === 'tool_executed') {
-        // Agentic provider already ran a non-file tool — surface it in the tool feed.
-        const callId = `agent-${nanoid(8)}`;
-        this.emitWSMessage(sessionId, 'stream.tool_call', {
-          agentId: KORY_IDENTITY.id,
-          toolCall: { id: callId, name: event.toolName ?? 'tool', input: safeParseJson(event.toolInput) },
-        });
-        this.emitWSMessage(sessionId, 'stream.tool_result', {
-          agentId: KORY_IDENTITY.id,
-          toolResult: { callId, name: event.toolName ?? 'tool', output: event.toolOutput ?? '', isError: event.isError === true, durationMs: 0 },
-        });
-      } else if (event.type === 'usage_update') {
-        if (typeof event.tokensIn === 'number') tokensIn = Math.max(tokensIn, event.tokensIn);
-        if (typeof event.tokensOut === 'number') tokensOut = Math.max(tokensOut, event.tokensOut);
-        this.emitUsageUpdate(
-          sessionId,
-          KORY_IDENTITY.id,
-          modelId,
-          provider.name,
-          tokensIn,
-          tokensOut,
-          true,
-        );
-      } else if (event.type === 'tool_use_start') {
-        hasToolCalls = true;
-        pendingToolCalls.set(event.toolCallId!, { name: event.toolName!, input: '' });
-        this.emitWSMessage(sessionId, 'stream.tool_call', {
-          agentId: KORY_IDENTITY.id,
-          toolCall: { id: event.toolCallId, name: event.toolName, input: {} },
-        });
-      } else if (event.type === 'tool_use_delta') {
-        const tc = pendingToolCalls.get(event.toolCallId!);
-        if (tc) tc.input += event.toolInput ?? '';
-      } else if (event.type === 'tool_use_stop') {
-        const call = pendingToolCalls.get(event.toolCallId!);
-        if (call) {
-          let parsedInput = {};
-          try {
-            parsedInput = JSON.parse(call.input || '{}');
-          } catch {
-            /* Expected: malformed tool input JSON, defaults to {} */
+        if (event.type === 'content_delta') {
+          const delta = event.content ?? '';
+          assistantContent += delta;
+          // Stream live, token-by-token — so the user sees text appear immediately (no
+          // "thinks then dumps" pause) and partial output survives a mid-stream error.
+          if (delta) {
+            this.emitWSMessage(sessionId, 'stream.delta', {
+              agentId: KORY_IDENTITY.id,
+              content: delta,
+              model: modelId,
+            });
           }
-          completedToolCalls.push({ id: event.toolCallId!, name: call.name, input: parsedInput });
-          pendingToolCalls.delete(event.toolCallId!);
+        } else if (event.type === 'thinking_delta') {
+          if (event.thinking || typeof event.thinkingTokens === 'number') {
+            this.emitWSMessage(sessionId, 'stream.thinking', {
+              agentId: KORY_IDENTITY.id,
+              thinking: event.thinking ?? '',
+              ...(typeof event.thinkingTokens === 'number'
+                ? { thinkingTokens: event.thinkingTokens }
+                : {}),
+            } satisfies StreamThinkingPayload);
+          }
+        } else if (event.type === 'file_edit') {
+          // Agentic provider (claude-code) already wrote the file — surface it in the live
+          // diff preview (it's done, not a tool for us to execute).
+          if (event.filePath) {
+            this.streamAgentFileEdit(
+              ctx,
+              event.filePath,
+              event.fileContent ?? '',
+              event.fileOperation ?? 'edit',
+              event.fileOldContent,
+            );
+            // Archive the edit so fetch_context can recall exactly what was written.
+            await getContextArchive()?.record(
+              sessionId,
+              'file_edit',
+              `${event.fileOperation ?? 'edit'} ${event.filePath}`,
+              event.fileContent ?? '',
+            );
+          }
+        } else if (event.type === 'tool_executed') {
+          // Agentic provider already ran a non-file tool — surface it in the tool feed.
+          const callId = `agent-${nanoid(8)}`;
+          // CLI-native background command (Claude Code's Bash run_in_background):
+          // register it so the background-terminals UI tracks it with live logs.
+          const bgMatch =
+            /running in background with ID:\s*(\S+?)\.[\s\S]*?written to:\s*(\S+?\.output)/i.exec(
+              event.toolOutput ?? '',
+            );
+          if (bgMatch) {
+            let bgCommand = event.toolName ?? 'background command';
+            try {
+              const input = JSON.parse(event.toolInput ?? '{}') as { command?: string };
+              if (input.command) bgCommand = input.command;
+            } catch {
+              /* keep tool name */
+            }
+            void processSupervisor
+              .registerExternal({
+                name: `cli:${bgMatch[1]}`,
+                command: bgCommand,
+                sessionId,
+                outputFile: bgMatch[2],
+              })
+              .catch(() => {});
+          }
+          const agenticArchiveId = await getContextArchive()?.record(
+            sessionId,
+            'tool_result',
+            `${event.toolName ?? 'tool'} ${(event.toolInput ?? '').slice(0, 140)}`,
+            event.toolOutput ?? '',
+          );
+          this.emitWSMessage(sessionId, 'stream.tool_call', {
+            agentId: KORY_IDENTITY.id,
+            sourceProvider: provider.name,
+            toolCall: {
+              id: callId,
+              name: event.toolName ?? 'tool',
+              input: safeParseJson(event.toolInput),
+            },
+          });
+          this.emitWSMessage(sessionId, 'stream.tool_result', {
+            agentId: KORY_IDENTITY.id,
+            sourceProvider: provider.name,
+            toolResult: {
+              callId,
+              name: event.toolName ?? 'tool',
+              output: event.toolOutput ?? '',
+              isError: event.isError === true,
+              durationMs: 0,
+              ...(agenticArchiveId ? { archiveId: agenticArchiveId } : {}),
+            },
+          });
+        } else if (event.type === 'usage_update') {
+          // Cached prompt tokens still occupy the context window — fold them in
+          // so the context bar reflects real occupancy, not just billed input.
+          if (typeof event.tokensIn === 'number')
+            tokensIn = Math.max(tokensIn, event.tokensIn + (event.tokensCache ?? 0));
+          if (typeof event.tokensOut === 'number') tokensOut = Math.max(tokensOut, event.tokensOut);
+          this.emitUsageUpdate(
+            sessionId,
+            KORY_IDENTITY.id,
+            modelId,
+            provider.name,
+            tokensIn,
+            tokensOut,
+            true,
+            contextBreakdown,
+          );
+        } else if (event.type === 'tool_use_start') {
+          hasToolCalls = true;
+          pendingToolCalls.set(event.toolCallId!, { name: event.toolName!, input: '' });
+          this.emitWSMessage(sessionId, 'stream.tool_call', {
+            agentId: KORY_IDENTITY.id,
+            toolCall: { id: event.toolCallId, name: event.toolName, input: {} },
+          });
+        } else if (event.type === 'tool_use_delta') {
+          const tc = pendingToolCalls.get(event.toolCallId!);
+          if (tc) tc.input += event.toolInput ?? '';
+        } else if (event.type === 'tool_use_stop') {
+          const call = pendingToolCalls.get(event.toolCallId!);
+          if (call) {
+            let parsedInput = {};
+            try {
+              parsedInput = JSON.parse(call.input || '{}');
+            } catch {
+              /* Expected: malformed tool input JSON, defaults to {} */
+            }
+            completedToolCalls.push({ id: event.toolCallId!, name: call.name, input: parsedInput });
+            pendingToolCalls.delete(event.toolCallId!);
+          }
         }
       }
+    } catch (err) {
+      // Provider streams can throw on abort (fetch AbortError) — salvage the
+      // partial response instead of discarding the turn. Real errors rethrow.
+      const aborted = signal?.aborted || (err instanceof DOMException && err.name === 'AbortError');
+      if (!aborted) throw err;
     }
 
     messages.push({
@@ -1317,14 +1765,50 @@ export class KoryManager {
     operation: 'create' | 'edit',
     oldStr?: string,
   ): void {
-    ctx.emitFileEdit?.({
-      path,
-      delta: content,
-      totalLength: content.length,
-      operation,
-      ...(operation === 'edit' && oldStr !== undefined ? { oldStr } : {}),
-    });
-    ctx.emitFileComplete?.({ path, totalLines: content.split('\n').length, operation });
+    // CLI harnesses (grok/antigravity) hand us the COMPLETE file in one shot —
+    // no per-token stream. To get the Cursor-style live reveal instead of the
+    // file popping in whole, chunk it into progressive deltas over a short,
+    // capped window (~1.2s max) — non-blocking so the agent never waits.
+    const REVEAL_MS = 1200;
+    const MIN_STEP_MS = 40;
+    const firstDelta = operation === 'edit' && oldStr !== undefined ? { oldStr } : {};
+
+    if (!content || content.length < 200) {
+      // Tiny edits: not worth animating.
+      ctx.emitFileEdit?.({
+        path,
+        delta: content,
+        totalLength: content.length,
+        operation,
+        ...firstDelta,
+      });
+      ctx.emitFileComplete?.({ path, totalLines: content.split('\n').length, operation });
+    } else {
+      const steps = Math.max(4, Math.min(30, Math.round(REVEAL_MS / MIN_STEP_MS)));
+      const chunkSize = Math.ceil(content.length / steps);
+      const stepMs = Math.max(MIN_STEP_MS, Math.round(REVEAL_MS / steps));
+      let sent = 0;
+      let first = true;
+      const emitNext = () => {
+        if (sent >= content.length) {
+          ctx.emitFileComplete?.({ path, totalLines: content.split('\n').length, operation });
+          return;
+        }
+        const chunk = content.slice(sent, sent + chunkSize);
+        sent += chunk.length;
+        ctx.emitFileEdit?.({
+          path,
+          delta: chunk,
+          totalLength: sent,
+          operation,
+          ...(first ? firstDelta : {}),
+        });
+        first = false;
+        setTimeout(emitNext, stepMs).unref?.();
+      };
+      emitNext();
+    }
+
     ctx.recordChange?.({
       path,
       linesAdded: content ? content.split('\n').length : 0,
@@ -1364,7 +1848,11 @@ export class KoryManager {
         `Allow agent to ${summary}?`,
         ['Allow', 'Deny'],
       );
-      if (selection === '__timeout__' || selection.includes('Deny') || selection.includes('Cancel')) {
+      if (
+        selection === '__timeout__' ||
+        selection.includes('Deny') ||
+        selection.includes('Cancel')
+      ) {
         return {
           callId: tc.id,
           name: tc.name,
@@ -1379,6 +1867,89 @@ export class KoryManager {
     }
 
     return null;
+  }
+
+  /** Archive a manager tool result for later recovery via fetch_context. */
+  private async archiveToolResult(
+    sessionId: string,
+    tc: CompletedToolCall,
+    toolResult: ToolCallOutput,
+  ): Promise<string | undefined> {
+    // The context meta-tools manage the archive; archiving them is noise.
+    if (tc.name === 'fetch_context' || tc.name === 'prune_context') return undefined;
+    const archive = getContextArchive();
+    if (!archive) return undefined;
+    try {
+      let inputSummary = '';
+      try {
+        inputSummary = JSON.stringify(tc.input ?? {}).slice(0, 140);
+      } catch {
+        /* unstringifiable input */
+      }
+      return await archive.record(
+        sessionId,
+        tc.name === 'bash' || tc.name === 'shell_manage' ? 'terminal' : 'tool_result',
+        `${tc.name} ${inputSummary}`,
+        toolResult.output ?? '',
+      );
+    } catch {
+      return undefined;
+    }
+  }
+
+  /**
+   * Replace stale/hidden tool outputs in the in-flight message array with tiny
+   * stubs pointing at the archive. Frees the context window without losing
+   * anything — the agent (or user) can always recover via fetch_context.
+   */
+  private async applyContextPruning(
+    sessionId: string,
+    messages: InternalMessage[],
+    currentTurn: number,
+  ): Promise<void> {
+    const archive = getContextArchive();
+    if (!archive) return;
+    const { loadAgentSettings } = await import('../agent-settings');
+    const settings = loadAgentSettings(this.workingDirectory);
+    const KEEP_FULL_TURNS = settings.contextKeepRecentTurns ?? 3; // recent turns keep full outputs
+    const MIN_PRUNE_CHARS = settings.contextPruneMinChars ?? 600; // tiny outputs aren't worth stubbing
+    // A single current-turn result can be enormous (for example a tool
+    // accidentally serializing image pixels). Do not let it overflow the next
+    // provider request before age-based pruning gets a chance to run.
+    const MAX_LIVE_TOOL_CHARS = 60_000;
+    const autoPrune = settings.contextPruningEnabled !== false;
+    for (const m of messages) {
+      const meta = m as InternalMessage & {
+        archiveId?: string;
+        archiveTurn?: number;
+        pruneApplied?: boolean;
+      };
+      if (m.role !== 'tool' || !meta.archiveId || meta.pruneApplied) continue;
+      if (typeof m.content !== 'string') continue;
+      const hiddenByUserOrAgent = await archive.isPrunedForAgent(sessionId, meta.archiveId);
+      const stale =
+        autoPrune &&
+        typeof meta.archiveTurn === 'number' &&
+        currentTurn - meta.archiveTurn > KEEP_FULL_TURNS &&
+        m.content.length > MIN_PRUNE_CHARS;
+      const oversized = autoPrune && m.content.length > MAX_LIVE_TOOL_CHARS;
+      if (!hiddenByUserOrAgent && !stale && !oversized) continue;
+      const entry = await archive.get(sessionId, meta.archiveId);
+      let original: Record<string, unknown> = {};
+      try {
+        original = JSON.parse(m.content) as Record<string, unknown>;
+      } catch {
+        /* keep empty shell */
+      }
+      m.content = JSON.stringify({
+        callId: original.callId ?? meta.tool_call_id,
+        name: original.name,
+        output: `[Output ${oversized ? 'was too large for the live context and was pruned' : 'pruned'} to save context: ${entry?.label ?? 'tool output'}${entry ? ` at ${new Date(entry.ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : ''}. Recover the exact content with fetch_context id=${meta.archiveId}]`,
+        isError: false,
+        durationMs: 0,
+      });
+      meta.pruneApplied = true;
+    }
   }
 
   private async executeManagerToolCall(
@@ -1420,7 +1991,8 @@ export class KoryManager {
   ): Promise<{ success: boolean; error?: string; workerMessages?: InternalMessage[] }> {
     const workerId = `worker-${nanoid(8)}`;
     const abort = new AbortController();
-    const workerWorkingDirectory = allowedPaths[0] ?? this.workingDirectory;
+    const workerWorkingDirectory =
+      allowedPaths[0] ?? (await this.resolveSessionWorkingDirectory(sessionId));
     const identity: AgentIdentity = {
       id: workerId,
       name: `${domain} Worker`,
@@ -1528,7 +2100,8 @@ export class KoryManager {
     if (typeof event.tokensIn === 'number') {
       const usage = this.workers.getUsage(workerId);
       if (usage) {
-        usage.tokensIn = Math.max(usage.tokensIn, event.tokensIn);
+        // Include cached prompt tokens — they occupy the context window.
+        usage.tokensIn = Math.max(usage.tokensIn, event.tokensIn + (event.tokensCache ?? 0));
         if (event.tokensOut !== undefined)
           usage.tokensOut = Math.max(usage.tokensOut, event.tokensOut);
         usage.usageKnown = true;
@@ -1542,6 +2115,35 @@ export class KoryManager {
           usage.usageKnown,
         );
       }
+    }
+  }
+
+  /** After a successful view_image call, attach the actual image bytes to the
+   *  conversation as an image content block so vision-capable models can see
+   *  it (the tool result itself carries only a small JSON descriptor). */
+  private buildViewImageMessage(toolResult: {
+    name: string;
+    output: string;
+    isError: boolean;
+  }): InternalMessage | null {
+    if (toolResult.name !== 'view_image' || toolResult.isError) return null;
+    try {
+      const { path, mimeType } = JSON.parse(toolResult.output) as {
+        path?: string;
+        mimeType?: string;
+      };
+      if (!path || !mimeType) return null;
+      const { readFileSync } = require('node:fs') as typeof import('node:fs');
+      const imageData = readFileSync(path).toString('base64');
+      return {
+        role: 'user',
+        content: [
+          { type: 'text', text: `[Image from view_image: ${path}]` },
+          { type: 'image', imageData, imageMimeType: mimeType },
+        ],
+      };
+    } catch {
+      return null;
     }
   }
 
@@ -1572,6 +2174,33 @@ export class KoryManager {
       this.emitWSMessage(thread.sessionId, 'agent.status', { agentId, status: 'done' });
     }
     this.workers.cancelWorker(agentId);
+  }
+
+  /** Re-baseline the session's context bar for a model the user just picked:
+   *  emits (and persists) a usage snapshot with the new model's trusted
+   *  window and the session's last-known occupancy. Backend stays the single
+   *  source of truth — works for every provider and CLI. */
+  async previewModelContext(sessionId: string, modelId: string, providerName: ProviderName) {
+    const last = await getContextArchive()?.getLastUsage(sessionId);
+    const context = resolveTrustedContextWindow(modelId, providerName);
+    this.emitUsageUpdate(
+      sessionId,
+      KORY_IDENTITY.id,
+      modelId,
+      providerName,
+      last?.used ?? 0,
+      0,
+      true,
+      last?.breakdown,
+    );
+    return {
+      used: last?.used ?? 0,
+      contextWindow: context.contextWindow ?? 0,
+      contextKnown: context.contextKnown,
+      contextSource: context.contextSource,
+      usageKnown: true,
+      ...(last?.breakdown ? { breakdown: last.breakdown } : {}),
+    };
   }
 
   cancelSessionWorkers(sessionId: string) {
@@ -1605,10 +2234,14 @@ export class KoryManager {
 
   private async loadHistory(sessionId: string): Promise<InternalMessage[]> {
     return (
-      (await this.messages?.getRecent(sessionId, 10))?.map((m) => ({
-        role: m.role as InternalMessage['role'],
-        content: m.content,
-      })) || []
+      (await this.messages?.getRecent(sessionId, 10))
+        // System rows are UI markers (e.g. "Stopped by user.") — never part of
+        // the conversation sent back to the model.
+        ?.filter((m) => m.role !== 'system')
+        .map((m) => ({
+          role: m.role as InternalMessage['role'],
+          content: m.content,
+        })) || []
     );
   }
 
@@ -1637,7 +2270,12 @@ export class KoryManager {
     return [...thread.threadEntries];
   }
 
-  async sendMessageToAgent(sessionId: string, agentId: string, content: string): Promise<void> {
+  async sendMessageToAgent(
+    sessionId: string,
+    agentId: string,
+    content: string,
+    options?: { model?: string; reasoningLevel?: string },
+  ): Promise<void> {
     const thread = this.agentThreads.get(agentId);
     if (!thread || thread.sessionId !== sessionId) {
       throw new Error('Agent thread not found');
@@ -1649,6 +2287,21 @@ export class KoryManager {
     if (!trimmed) {
       throw new Error('Message cannot be empty');
     }
+    // Same controls as the manager: the user can retarget a sub-agent's model
+    // and reasoning tier per message (picker value is "provider:modelId").
+    if (options?.model && options.model !== 'auto') {
+      const [prov, ...rest] = options.model.split(':');
+      const bareModel = rest.join(':');
+      if (prov && bareModel) {
+        thread.providerName = prov as ProviderName;
+        thread.modelId = bareModel;
+      } else {
+        thread.modelId = options.model;
+      }
+      thread.identity.model = thread.modelId;
+      thread.identity.provider = thread.providerName;
+    }
+    if (options?.reasoningLevel) thread.reasoningLevel = options.reasoningLevel;
     if (thread.abort?.signal.aborted) {
       const abort = new AbortController();
       thread.abort = abort;
@@ -1861,6 +2514,8 @@ export class KoryManager {
         toolResult: result,
       });
       thread.messages.push({ role: 'tool', content: JSON.stringify(result), tool_call_id: tc.id });
+      const visionMsg = this.buildViewImageMessage(result);
+      if (visionMsg) thread.messages.push(visionMsg);
     }
 
     return true;
@@ -2046,6 +2701,25 @@ export class KoryManager {
   private emitError(sessionId: string, error: string) {
     this.events.emitError(sessionId, error);
   }
+  // Per-session project folders: a chat created with a project open runs in THAT
+  // folder (tools, providers, workers), not the backend's launch directory.
+  private sessionWorkingDirs = new Map<string, string>();
+
+  private async resolveSessionWorkingDirectory(sessionId: string): Promise<string> {
+    const cached = this.sessionWorkingDirs.get(sessionId);
+    if (cached !== undefined) return cached;
+    let resolved = this.workingDirectory;
+    try {
+      const session = await this.sessions?.get(sessionId);
+      const wd = session?.workingDirectory?.trim();
+      if (wd && existsSync(wd)) resolved = wd;
+    } catch {
+      /* fall back to the global root */
+    }
+    this.sessionWorkingDirs.set(sessionId, resolved);
+    return resolved;
+  }
+
   private emitUsageUpdate(
     sessionId: string,
     agentId: string,
@@ -2054,6 +2728,7 @@ export class KoryManager {
     tokensIn: number,
     tokensOut: number,
     usageKnown: boolean,
+    breakdown?: ContextBreakdown,
   ) {
     this.events.emitUsageUpdate(
       sessionId,
@@ -2063,9 +2738,73 @@ export class KoryManager {
       tokensIn,
       tokensOut,
       usageKnown,
+      breakdown,
     );
+    // Persist the manager's latest snapshot so a reloaded session's context
+    // bar has real data immediately (instead of waiting for the next turn).
+    if (agentId === KORY_IDENTITY.id) {
+      const win = resolveTrustedContextWindow(model, provider);
+      void getContextArchive()?.recordUsage(sessionId, {
+        used: tokensIn + tokensOut,
+        max: win.contextWindow ?? 0,
+        contextKnown: win.contextKnown,
+        ...(breakdown ? { breakdown } : {}),
+        ts: Date.now(),
+      });
+      // Window resolution can lose the startup race (provider model lists
+      // refresh in the background). Retry once shortly after — if the window
+      // is known by then, re-emit so the bar stops saying "unknown".
+      if (!win.contextKnown) {
+        const t = setTimeout(() => {
+          const retry = resolveTrustedContextWindow(model, provider);
+          if (retry.contextKnown) {
+            this.emitUsageUpdate(
+              sessionId,
+              agentId,
+              model,
+              provider,
+              tokensIn,
+              tokensOut,
+              usageKnown,
+              breakdown,
+            );
+          }
+        }, 6_000);
+        t.unref?.();
+      }
+    }
   }
   private emitWSMessage(sessionId: string, type: string, payload: WSMessage['payload']) {
     this.events.emit(sessionId, type, payload);
   }
+}
+
+/** Character weight of a provider message list — feeds the context bar's
+ *  "chat" segment estimate (images weighted as ~1k tokens' worth of chars). */
+/** Split conversation size into CHAT (what the user typed + what the agent
+ *  typed back) vs TOOL traffic (tool calls + tool results). The context bar
+ *  shows these separately — "chat" should be only the conversation, never the
+ *  tool plumbing. */
+function estimateProviderMessagesChars(messages: ProviderMessage[]): {
+  chat: number;
+  tools: number;
+} {
+  let chat = 0;
+  let tools = 0;
+  for (const m of messages) {
+    // role:'tool' messages are tool results even when content is a plain string.
+    if (typeof m.content === 'string') {
+      if (m.role === 'tool') tools += m.content.length;
+      else chat += m.content.length;
+      continue;
+    }
+    for (const b of m.content) {
+      if (b.type === 'text') chat += b.text?.length ?? 0;
+      else if (b.type === 'image') chat += 4000;
+      else if (b.type === 'tool_use')
+        tools += (b.toolName?.length ?? 0) + JSON.stringify(b.toolInput ?? {}).length;
+      else if (b.type === 'tool_result') tools += b.toolOutput?.length ?? 0;
+    }
+  }
+  return { chat, tools };
 }

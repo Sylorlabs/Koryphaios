@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "Koryphaios",
-  "version": "1.0.20",
+  "version": "1.0.21",
   "identifier": "com.sylorlabs.koryphaios",
   "build": {
     "frontendDist": "../../frontend/build/client",
@@ -77,16 +77,10 @@
     },
     "linux": {
       "deb": {
-        "depends": [
-          "libwebkit2gtk-4.1-0",
-          "libgtk-3-0"
-        ]
+        "depends": ["libwebkit2gtk-4.1-0", "libgtk-3-0"]
       },
       "rpm": {
-        "depends": [
-          "webkit2gtk4.1",
-          "gtk3"
-        ]
+        "depends": ["webkit2gtk4.1", "gtk3"]
       },
       "appimage": {
         "bundleMediaFramework": false
@@ -96,18 +90,14 @@
       "../../config": "config",
       "../../frontend/build/client": "frontend"
     },
-    "externalBin": [
-      "sidecar/koryphaios-backend"
-    ]
+    "externalBin": ["sidecar/koryphaios-backend"]
   },
   "plugins": {
     "shell": {
       "open": true
     },
     "updater": {
-      "endpoints": [
-        "https://github.com/Sylorlabs/Koryphaios/releases/latest/download/latest.json"
-      ],
+      "endpoints": ["https://github.com/Sylorlabs/Koryphaios/releases/latest/download/latest.json"],
       "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDdFMUI1QzIzQzI4QjM2OTQKUldTVU5vdkNJMXdiZmhSbzU4QWI4OTlzN0ROdWpOdTNtaUpPWVBaS3RKNURJMktSUVlUVWRiMWcK"
     }
   }

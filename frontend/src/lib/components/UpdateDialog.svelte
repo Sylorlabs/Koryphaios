@@ -1,17 +1,37 @@
 <script lang="ts">
-  import { updater } from "$lib/stores/updater.svelte";
-  import { Download, ExternalLink, Loader2 } from "lucide-svelte";
+  import { updater } from '$lib/stores/updater.svelte';
+  import { Download, ExternalLink, Loader2, AlertCircle } from 'lucide-svelte';
 
   let installing = $state(false);
 
   async function handleInstall() {
+    if (installing) return;
     installing = true;
-    await updater.installUpdateAndRestart();
+    try {
+      const ok = await updater.installUpdateAndRestart();
+      // On success the app restarts (Linux/macOS) or the installer relaunches
+      // (Windows), so we usually never reach here. If we do and it failed,
+      // the error is already in updater.error — the finally block resets UI.
+      if (!ok && !updater.error) {
+        // Defensive: store didn't set an error but returned false.
+        console.error('installUpdateAndRestart returned false without an error');
+      }
+    } catch (err) {
+      console.error('Unexpected error during install:', err);
+    } finally {
+      // Reset so the user can retry. If the install actually succeeded, the
+      // app is already restarting and this state doesn't matter.
+      installing = false;
+    }
   }
 
   function handleDismiss() {
     updater.closeDialog();
     updater.dismissUpdate();
+  }
+
+  function handleRetry() {
+    updater.resetInstallState();
   }
 
   function handleKeydown(e: KeyboardEvent) {
@@ -68,9 +88,7 @@
       <div class="update-header">
         <Download size={22} class="text-[var(--color-accent)] shrink-0" />
         <div class="min-w-0">
-          <h2 class="update-title" id="update-dialog-title">
-            Update available
-          </h2>
+          <h2 class="update-title" id="update-dialog-title">Update available</h2>
           <p class="update-subtitle">
             Koryphaios v{updater.updateInfo.version}{releasedText ? ` · ${releasedText}` : ''}
           </p>
@@ -78,6 +96,16 @@
       </div>
 
       <div class="update-body">
+        {#if updater.error}
+          <div class="install-error">
+            <AlertCircle size={16} class="shrink-0" />
+            <div class="min-w-0">
+              <p class="error-title">Update failed</p>
+              <p class="error-msg">{updater.error}</p>
+            </div>
+          </div>
+        {/if}
+
         {#if noteBlocks.length > 0}
           <div class="notes">
             {#each noteBlocks as block}
@@ -101,6 +129,7 @@
       <div class="update-footer">
         <button
           onclick={updater.openChangelog}
+          disabled={installing}
           class="btn btn-secondary flex items-center gap-1.5"
         >
           <ExternalLink size={14} />
@@ -110,10 +139,21 @@
         <button onclick={handleDismiss} disabled={installing} class="btn btn-secondary">
           Later
         </button>
-        <button onclick={handleInstall} disabled={installing} class="btn btn-primary flex items-center gap-1.5">
+        {#if updater.error}
+          <button onclick={handleRetry} class="btn btn-secondary"> Retry </button>
+        {/if}
+        <button
+          onclick={handleInstall}
+          disabled={installing || !!updater.error}
+          class="btn btn-primary flex items-center gap-1.5"
+        >
           {#if installing}
             <Loader2 size={14} class="animate-spin" />
-            Installing…
+            {#if updater.downloadProgress > 0}
+              {updater.downloadProgress}%
+            {:else}
+              Installing…
+            {/if}
           {:else}
             <Download size={14} />
             Install & Restart
@@ -212,6 +252,27 @@
     font-size: 0.9rem;
     line-height: 1.5;
     color: var(--color-text-secondary);
+  }
+
+  .install-error {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    padding: 12px 14px;
+    margin: 8px 0 4px;
+    border-radius: var(--radius-md);
+    background: rgba(239, 68, 68, 0.1);
+    border: 1px solid rgba(239, 68, 68, 0.25);
+    color: var(--color-error);
+  }
+  .error-title {
+    font-size: 0.85rem;
+    font-weight: 600;
+  }
+  .error-msg {
+    font-size: 0.8rem;
+    margin-top: 2px;
+    word-break: break-word;
   }
 
   .update-footer {

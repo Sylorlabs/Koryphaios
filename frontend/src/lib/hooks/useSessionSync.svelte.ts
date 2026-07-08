@@ -3,6 +3,8 @@ import { sessionStore } from '$lib/stores/sessions.svelte';
 
 export interface SessionSyncOptions {
   onActiveSessionChange?: () => void;
+  /** Static website demo data never has a backend to synchronize with. */
+  disabled?: boolean;
 }
 
 export function useSessionSync(options: SessionSyncOptions = {}) {
@@ -15,6 +17,7 @@ export function useSessionSync(options: SessionSyncOptions = {}) {
   let loadGeneration = 0;
 
   $effect(() => {
+    if (options.disabled) return;
     const activeId = sessionStore.activeSessionId;
     if (!activeId) {
       if (lastSubscribedSessionId !== '') {
@@ -53,6 +56,7 @@ export function useSessionSync(options: SessionSyncOptions = {}) {
   });
 
   $effect(() => {
+    if (options.disabled) return;
     const activeId = sessionStore.activeSessionId;
     if (activeId && activeId !== lastLoadedAgentThreadsSessionId) {
       lastLoadedAgentThreadsSessionId = activeId;

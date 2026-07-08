@@ -17,6 +17,7 @@ import { PROJECT_ROOT } from './runtime/paths';
 import { createWebSocketHandlers } from './server/websocket-handler';
 import type { WSClientData } from './ws/ws-manager';
 import { validateLocalBearerToken } from './auth/local-route-auth';
+import { serveMcp } from './mcp/koryphaios-mcp-endpoint';
 import { getDb } from './db';
 import { shutdownAllBrokers } from './pubsub';
 
@@ -33,8 +34,10 @@ import { modeRoutes } from './routes/v1/mode';
 import { spendRoutes } from './routes/v1/spend';
 import { spendCapsRoutes } from './routes/v1/spend-caps';
 import { billingRoutes } from './routes/v1/billing';
-import { messagingRoutes } from './routes/v1/messaging';
 import { processRoutes } from './routes/v1/processes';
+import { notesRoutes } from './routes/v1/notes';
+import { workspaceRoutes } from './routes/v1/workspace';
+import { feedbackRoutes } from './routes/v1/feedback';
 
 // Define base Elysia App for export
 const baseApp = new Elysia()
@@ -43,6 +46,9 @@ const baseApp = new Elysia()
     data: {
       version: VERSION,
       uptime: process.uptime(),
+      // Lets the desktop supervisor reject a stale process already bound to
+      // the configured port instead of mistaking it for the new sidecar.
+      pid: process.pid,
     },
   }))
   .get('/api/project', async () => {
@@ -63,8 +69,10 @@ const baseApp = new Elysia()
   .use(spendRoutes)
   .use(spendCapsRoutes)
   .use(billingRoutes)
-  .use(messagingRoutes)
-  .use(processRoutes);
+  .use(processRoutes)
+  .use(notesRoutes)
+  .use(workspaceRoutes)
+  .use(feedbackRoutes);
 
 export type App = typeof baseApp;
 
@@ -77,7 +85,7 @@ async function main() {
   // Bootstrap dependencies
   const ctx = await bootstrap();
   setContext(ctx);
-  const { config, kory, providers, sessions, messages, wsManager, telegram, discord, slack } = ctx;
+  const { config, kory, providers, sessions, messages, wsManager } = ctx;
 
   const rateLimiter = new RateLimiter(RATE_LIMIT.MAX_REQUESTS, RATE_LIMIT.WINDOW_MS);
 
@@ -130,8 +138,7 @@ async function main() {
           });
         }
         const upgraded = srv.upgrade(req, {
-          data: { id: nanoid(ID.WS_CLIENT_ID_LENGTH), userId: authSession.id },
-          headers: protocols.length > 0 ? { 'Sec-WebSocket-Protocol': protocols[0] } : undefined
+          data: { id: nanoid(ID.WS_CLIENT_ID_LENGTH), userId: authSession.id }
         });
         if (upgraded) return undefined;
         return new Response(JSON.stringify({ ok: false, error: 'WebSocket upgrade failed' }), {
@@ -140,13 +147,24 @@ async function main() {
         });
       }
 
+      // 1b. MCP endpoint — Koryphaios's own tools (notes/memory) for any
+      // MCP-capable CLI harness (grok, claude-code, codex…).
+      if (url.pathname === '/mcp') {
+        return serveMcp(req, PROJECT_ROOT, (t) => !!validateLocalBearerToken(t));
+      }
+
       // 2. API Routes
       if (url.pathname.startsWith('/api')) {
         return runningApp.handle(req);
       }
 
-      // 3. Static Frontend Files
-      const frontendBuildDir = resolve(join(PROJECT_ROOT, "frontend", "build", "client"));
+      // 3. Static Frontend Files — packaged app ships the build as a Tauri
+      // resource and points KORYPHAIOS_FRONTEND_DIST at it; dev serves the
+      // repo's build output. Same server either way: one app, one origin.
+      const frontendBuildDir = resolve(
+        process.env.KORYPHAIOS_FRONTEND_DIST?.trim() ||
+          join(PROJECT_ROOT, "frontend", "build", "client"),
+      );
       let filePath = resolve(join(frontendBuildDir, url.pathname));
 
       if (url.pathname === '/' || url.pathname.endsWith('/')) {
@@ -200,12 +218,6 @@ async function main() {
 
   serverLog.info({ host: serverConfig.host, port: actualPort }, 'Server running');
 
-  if (telegram && process.env.TELEGRAM_POLLING === 'true') {
-    await telegram.startPolling();
-  }
-
-  if (discord) discord.start().catch((err) => serverLog.error({ err }, 'Discord bot failed'));
-  if (slack) slack.start().catch((err) => serverLog.error({ err }, 'Slack bot failed'));
 
   // ─── Graceful Shutdown ──────────────────────────────────────────────────
   async function gracefulShutdown(signal: string) {

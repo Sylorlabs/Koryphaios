@@ -10,6 +10,9 @@
   import { getModelConfigurationWarning } from '$lib/utils/model-config';
   import { invoke } from '@tauri-apps/api/core';
   import { toastStore } from '$lib/stores/toast.svelte';
+  import { sessionStore } from '$lib/stores/sessions.svelte';
+  import { apiFetch } from '$lib/api.svelte';
+  import { apiUrl } from '$lib/utils/api-url';
 
   export type Attachment = { type: 'image' | 'file'; data: string; name: string };
 
@@ -18,6 +21,11 @@
     onExecuteCommand?: (command: string) => Promise<boolean> | boolean;
     /** When true, show Stop instead of Send; clicking stops manager and workers for the session. */
     isRunning?: boolean;
+    /** Kory is parked — waiting on a background terminal or your answer. The
+     *  button shows a distinct Waiting state; sending is still allowed. */
+    isWaiting?: boolean;
+    /** What Kory is waiting on, e.g. "background terminal: dev-server". */
+    waitingReason?: string;
     onStop?: () => void;
     onOpenSettings?: () => void;
     inputRef?: HTMLTextAreaElement;
@@ -29,12 +37,18 @@
     disabled?: boolean;
     disabledMessage?: string;
     placeholder?: string;
+    /** Optional preselected model for controlled surfaces such as the static demo. */
+    initialModel?: string;
+    /** Keep context preview entirely client-side on static surfaces with no backend. */
+    disableModelPreviewRequests?: boolean;
   }
 
   let {
     onSend,
     onExecuteCommand,
     isRunning = false,
+    isWaiting = false,
+    waitingReason = '',
     onStop,
     onOpenSettings,
     inputRef = $bindable(),
@@ -45,6 +59,8 @@
     disabled = false,
     disabledMessage = 'Open a project to start chatting',
     placeholder = 'Ask Koryphaios to inspect, explain, or change this project...',
+    initialModel = '',
+    disableModelPreviewRequests = false,
   }: Props = $props();
   let actionPanelRef = $state<HTMLDivElement>();
   let showModelPicker = $state(false);
@@ -52,12 +68,17 @@
   let _storedModel = typeof localStorage !== 'undefined' ? localStorage.getItem(MODEL_STORAGE_KEY) : null;
   if (_storedModel === 'auto') { localStorage.removeItem(MODEL_STORAGE_KEY); _storedModel = null; }
   let selectedModel = $state<string>(_storedModel ?? '');
+  let lastContextPreviewKey = $state('');
   let selectedPickerIndex = $state(0);
   let attachments = $state<Attachment[]>([]);
   let referenceFileInputRef = $state<HTMLInputElement>();
   let referenceFolderInputRef = $state<HTMLInputElement>();
   let showReferenceMenu = $state(false);
   let liveFileMentions = $state<string[]>([]);
+
+  $effect(() => {
+    if (!selectedModel && initialModel) selectedModel = initialModel;
+  });
 
   type ComposerPickerItem =
     | { type: 'command'; key: string; label: string; value: string; description: string }
@@ -113,9 +134,13 @@
 
   function effectiveReasoningConfig(provider: string, model: string | undefined) {
     const def = findModelDef(provider, model);
+    // 1. Levels the provider/CLI reported for this exact model are authoritative —
+    //    including an explicit [] meaning "this model has NO effort control"
+    //    (e.g. Claude Code's Haiku 4.5). Only an ABSENT array falls through.
+    if (Array.isArray(def?.reasoningLevels)) {
+      return buildReasoningConfigFromLevels(def.reasoningLevels);
+    }
     return (
-      // 1. Levels the provider/CLI reported for this exact model.
-      buildReasoningConfigFromLevels(def?.reasoningLevels) ??
       // 2. Static per-provider/model rules.
       getReasoningConfig(provider, model) ??
       // 3. Universal fallback: any reasoning-capable model gets at least the
@@ -143,7 +168,7 @@
   }
 
   let availableModels = $derived.by(() => {
-    const models: Array<{ label: string; value: string; provider: string; contextLabel?: string }> = [];
+    const models: Array<{ label: string; value: string; provider: string; contextWindow?: number }> = [];
     for (const p of wsStore.providers) {
       if (p.authenticated) {
         const enabledIds = new Set(p.models);
@@ -155,9 +180,9 @@
                 label: `(${providerLabel(p.name)}) ${m.name}`,
                 value: `${p.name}:${m.id}`,
                 provider: p.name,
-                // Only show context sizes the provider/CLI actually reported
-                // (or that chain to a verified catalog) — never a guess.
-                contextLabel: m.contextVerified ? formatContextSize(m.contextWindow) : '',
+                // Verified window size kept internally for the switch-overflow
+                // guard — deliberately NOT shown in the picker.
+                contextWindow: m.contextVerified ? m.contextWindow : undefined,
               });
             }
           }
@@ -180,6 +205,67 @@
     const modelDef = catalog?.find(m => m.id === parsed.model);
     if (modelDef) return `(${providerLabel(parsed.provider)}) ${modelDef.name}`;
     return parsed.model;
+  });
+
+  let contextPreviewGeneration = 0;
+
+  async function previewSelectedModelContext(value: string) {
+    const sid = sessionStore.activeSessionId;
+    if (!sid || !value) return;
+    const generation = ++contextPreviewGeneration;
+    const target = availableModels.find((m) => m.value === value);
+    wsStore.setManagerContextWindow(sid, target?.contextWindow);
+    if (disableModelPreviewRequests) return;
+    const { provider, model } = parseModelSelection(value);
+    if (provider && model) {
+      // listModels() starts provider/CLI discovery in the background. Recheck
+      // a few times so a live limit replaces the catalog fallback as soon as
+      // discovery lands, without requiring another model change or message.
+      for (const delay of [0, 1_000, 3_000, 6_000]) {
+        if (delay) await new Promise((resolve) => setTimeout(resolve, delay));
+        if (
+          generation !== contextPreviewGeneration ||
+          sessionStore.activeSessionId !== sid ||
+          selectedModel !== value
+        ) return;
+        try {
+          const response = await apiFetch(apiUrl(`/api/sessions/${sid}/context/model-preview`), {
+            method: 'POST',
+            body: JSON.stringify({ model, provider }),
+          });
+          const result = await response.json() as {
+            usage?: {
+              contextWindow?: number;
+              contextKnown?: boolean;
+              contextSource?: 'live' | 'catalog' | 'alias';
+            };
+          };
+          if (generation !== contextPreviewGeneration) return;
+          wsStore.setManagerContextWindow(
+            sid,
+            result.usage?.contextKnown ? result.usage.contextWindow : undefined,
+          );
+          if (result.usage?.contextSource === 'live' || result.usage?.contextSource === 'alias') return;
+        } catch {
+          // Keep the current value and allow the next discovery recheck.
+        }
+      }
+    }
+  }
+
+  // Also preview a model restored from local storage, or when a new session
+  // becomes active. Previously context metadata only appeared after the first
+  // message unless the user manually changed the picker during that session.
+  $effect(() => {
+    const sid = sessionStore.activeSessionId;
+    const model = selectedModel;
+    // Track catalog changes so a late provider discovery can replace an
+    // initially unknown window with verified metadata.
+    const targetWindow = availableModels.find((m) => m.value === model)?.contextWindow ?? 0;
+    const key = sid && model ? `${sid}:${model}:${targetWindow}` : '';
+    if (!key || key === lastContextPreviewKey) return;
+    lastContextPreviewKey = key;
+    previewSelectedModelContext(model);
   });
 
   // Cooldown to prevent duplicate sends (double Enter, key repeat, double-click)
@@ -467,10 +553,63 @@
     requestAnimationFrame(() => autoResize());
   });
 
-  function selectModel(value: string) {
+  // Set when the user picks a model whose window can't hold the current
+  // session context — they choose how to shrink it instead of a silent break.
+  let overflowWarning = $state<{ value: string; label: string; window: number; used: number } | null>(null);
+
+  function applyModelSelection(value: string) {
     selectedModel = value;
     showModelPicker = false;
     if (typeof localStorage !== 'undefined') localStorage.setItem(MODEL_STORAGE_KEY, value);
+    // Re-baseline the context bar immediately (optimistic, from local model
+    // data), then ask the backend for the trusted window — the backend answer
+    // arrives as a normal stream.usage event and always wins. Works for every
+    // harness and API provider.
+    previewSelectedModelContext(value);
+  }
+
+  function selectModel(value: string) {
+    const target = availableModels.find((m) => m.value === value);
+    const usage = wsStore.contextUsage;
+    if (
+      target?.contextWindow &&
+      usage.isReliable &&
+      usage.used > target.contextWindow
+    ) {
+      showModelPicker = false;
+      overflowWarning = {
+        value,
+        label: target.label,
+        window: target.contextWindow,
+        used: usage.used,
+      };
+      return;
+    }
+    applyModelSelection(value);
+  }
+
+  function overflowAskAgentPrune() {
+    const w = overflowWarning;
+    if (!w) return;
+    overflowWarning = null;
+    onSend(
+      `I want to switch to ${w.label}, which has a ~${formatContextSize(w.window)} context window, but this session currently uses ~${formatContextSize(w.used)} tokens. Please prune your context down below ${formatContextSize(w.window)}: run fetch_context (no arguments) to review what you did, then prune_context on everything nonessential. Keep only what's needed to continue.`,
+      selectedModel,
+      reasoningLevel,
+    );
+  }
+
+  async function overflowCompact() {
+    overflowWarning = null;
+    await onExecuteCommand?.('/compact');
+    toastStore.info('Once compaction finishes, pick the model again.');
+  }
+
+  async function overflowNewChat() {
+    const w = overflowWarning;
+    overflowWarning = null;
+    await onExecuteCommand?.('/new');
+    if (w) applyModelSelection(w.value);
   }
 
   function selectReasoning(value: string) {
@@ -689,18 +828,45 @@
   // from the container + textarea both seeing the same bubbling event).
   let lastPasteEvent: ClipboardEvent | null = null;
 
-  /** Ctrl+V / Cmd+V → paste TEXT only (no image detection). */
+  /** Ctrl+V / Cmd+V → paste image if available, else text. */
   function handlePaste(e: ClipboardEvent) {
     // If this exact event was already handled (container + textarea both fire), skip.
     if (lastPasteEvent === e) return;
     lastPasteEvent = e;
+
+    let hasImage = false;
+    const items = e.clipboardData?.items;
+    if (items) {
+      for (const item of items) {
+        if (item.type.startsWith('image/')) {
+          hasImage = true;
+          e.preventDefault();
+          const file = item.getAsFile();
+          if (file) {
+            const reader = new FileReader();
+            reader.onload = (ev) => {
+              const data = (ev.target?.result as string).split(',')[1];
+              const ext = item.type === 'image/png' ? 'png' : item.type === 'image/jpeg' ? 'jpg' : item.type === 'image/gif' ? 'gif' : item.type === 'image/webp' ? 'webp' : 'png';
+              attachments = [...attachments, { type: 'image', data, name: `clipboard-image.${ext}` }];
+            };
+            reader.readAsDataURL(file);
+          }
+          break;
+        }
+      }
+    }
+
+    if (hasImage) {
+      requestAnimationFrame(() => { lastPasteEvent = null; });
+      return;
+    }
 
     e.preventDefault();
 
     // Focus the input if we're not already there
     inputRef?.focus();
 
-    // Read TEXT only from the clipboard.  Image pasting is Ctrl+Shift+V.
+    // Read TEXT only from the clipboard.
     void navigator.clipboard.readText().then((text) => {
       if (text && inputRef) {
         const start = inputRef.selectionStart ?? value.length;
@@ -795,13 +961,6 @@
                   onclick={() => selectModel(model.value)}
                 >
                   <span class="flex-1 min-w-0 truncate">{model.label}</span>
-                  {#if model.contextLabel}
-                    <span
-                      class="text-[10px] tabular-nums px-1.5 py-0.5 rounded shrink-0"
-                      style="background: var(--color-surface-3); color: var(--color-text-muted);"
-                      title="Context window (reported by the provider)"
-                    >{model.contextLabel}</span>
-                  {/if}
                 </button>
               {/each}
             {/if}
@@ -1033,18 +1192,24 @@
 
           <button
             type="button"
-            onclick={isRunning ? stop : send}
-            disabled={disabled || (!isRunning && !canSend)}
-            class="btn flex w-full items-center justify-center gap-2 {isRunning ? 'stop-btn' : 'btn-primary'}"
+            onclick={isRunning ? stop : isWaiting && !canSend ? stop : send}
+            disabled={disabled || (!isRunning && !isWaiting && !canSend)}
+            class="btn flex w-full items-center justify-center gap-2 {isRunning ? 'stop-btn' : !canSend ? 'waiting-btn' : 'btn-primary'}"
             style="height: 52px; padding: 0 20px; font-size: 14px; {disabled || configurationWarning ? 'opacity: 0.5; cursor: not-allowed;' : ''}"
-            aria-label={isRunning ? 'Stop the running model' : 'Send message'}
-            title={isRunning ? 'Stop (Esc)' : 'Send (Enter)'}
+            aria-label={isRunning ? 'Stop the running model' : isWaiting && !canSend ? 'Kory is waiting — click to cancel' : 'Send message'}
+            title={isRunning ? 'Stop (Esc)' : isWaiting && !canSend ? (waitingReason ? `Waiting on ${waitingReason} — click to cancel` : 'Kory is waiting — click to cancel') : !canSend ? 'Waiting for your message — type to send' : 'Send (Enter)'}
           >
             {#if isRunning}
               <span class="stop-pulse" aria-hidden="true">
                 <Square size={10} fill="currentColor" strokeWidth={0} />
               </span>
               <span>Stop</span>
+            {:else if isWaiting && !canSend}
+              <span class="waiting-dots" aria-hidden="true"><span></span><span></span><span></span></span>
+              <span>Waiting{waitingReason ? ` — ${waitingReason}` : '…'}</span>
+            {:else if !canSend}
+              <span class="waiting-dots" aria-hidden="true"><span></span><span></span><span></span></span>
+              <span>Waiting</span>
             {:else}
               <Send size={18} />
               Send
@@ -1069,10 +1234,100 @@
   </div>
 </div>
 
+
+
+{#if overflowWarning}
+  <div class="fixed inset-0 z-[95] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
+    <div
+      class="w-full max-w-md rounded-2xl border p-6 shadow-2xl"
+      style="background: var(--color-surface-2); border-color: var(--color-border);"
+      role="alertdialog"
+      aria-label="Context too large for model"
+    >
+      <h3 class="text-base font-semibold mb-2" style="color: var(--color-text-primary);">Context won't fit</h3>
+      <p class="text-sm mb-5 leading-relaxed" style="color: var(--color-text-secondary);">
+        This session uses ~{formatContextSize(overflowWarning.used)} tokens, but
+        <span class="font-medium" style="color: var(--color-text-primary);">{overflowWarning.label}</span>
+        has a ~{formatContextSize(overflowWarning.window)} window. Shrink the context first:
+      </p>
+      <div class="flex flex-col gap-2">
+        <button
+          type="button"
+          class="w-full rounded-xl border px-4 py-2.5 text-sm font-medium text-left transition-colors hover:bg-[var(--color-surface-3)]"
+          style="border-color: var(--color-border); color: var(--color-text-primary);"
+          onclick={() => { overflowWarning = null; toastStore.info('Hover tool outputs in the feed and use the agent-hide button to prune them.'); }}
+        >
+          Prune manually
+          <span class="block text-xs mt-0.5" style="color: var(--color-text-muted);">Hide bulky tool outputs from the agent yourself, then switch.</span>
+        </button>
+        <button
+          type="button"
+          class="w-full rounded-xl border px-4 py-2.5 text-sm font-medium text-left transition-colors hover:bg-[var(--color-surface-3)]"
+          style="border-color: var(--color-border); color: var(--color-text-primary);"
+          onclick={overflowAskAgentPrune}
+        >
+          Ask the agent to prune
+          <span class="block text-xs mt-0.5" style="color: var(--color-text-muted);">The current agent trims its own context below the new limit.</span>
+        </button>
+        <button
+          type="button"
+          class="w-full rounded-xl border px-4 py-2.5 text-sm font-medium text-left transition-colors hover:bg-[var(--color-surface-3)]"
+          style="border-color: var(--color-border); color: var(--color-text-primary);"
+          onclick={overflowCompact}
+        >
+          Compact the conversation
+          <span class="block text-xs mt-0.5" style="color: var(--color-text-muted);">The current large-window agent summarizes the session first.</span>
+        </button>
+        <button
+          type="button"
+          class="w-full rounded-xl border px-4 py-2.5 text-sm font-medium text-left transition-colors hover:bg-[var(--color-surface-3)]"
+          style="border-color: var(--color-border); color: var(--color-text-primary);"
+          onclick={overflowNewChat}
+        >
+          Start a new chat
+          <span class="block text-xs mt-0.5" style="color: var(--color-text-muted);">Fresh session on the new model.</span>
+        </button>
+        <button
+          type="button"
+          class="w-full rounded-xl px-4 py-2 text-xs font-medium transition-colors hover:bg-[var(--color-surface-3)]"
+          style="color: var(--color-text-muted);"
+          onclick={() => (overflowWarning = null)}
+        >
+          Cancel
+        </button>
+      </div>
+    </div>
+  </div>
+{/if}
+
 <style>
   .yolo-active {
     border-color: #ef4444 !important;
     box-shadow: 0 0 0 1px #ef4444;
+  }
+
+  /* Waiting button — Kory is parked on something external (background
+     terminal, user input). Amber, calm slow pulse: alive but not burning. */
+  :global(.waiting-btn) {
+    background: color-mix(in srgb, #d5b261 14%, transparent);
+    color: #d5b261;
+    border: 1px solid color-mix(in srgb, #d5b261 45%, transparent);
+    animation: waiting-breathe 2.4s ease-in-out infinite;
+  }
+  @keyframes waiting-breathe {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(213, 178, 97, 0); }
+    50% { box-shadow: 0 0 14px 0 rgba(213, 178, 97, 0.35); }
+  }
+  .waiting-dots { display: inline-flex; gap: 3px; }
+  .waiting-dots span {
+    width: 5px; height: 5px; border-radius: 9999px; background: currentColor;
+    animation: waiting-dot 1.2s ease-in-out infinite;
+  }
+  .waiting-dots span:nth-child(2) { animation-delay: 0.2s; }
+  .waiting-dots span:nth-child(3) { animation-delay: 0.4s; }
+  @keyframes waiting-dot {
+    0%, 60%, 100% { opacity: 0.35; transform: translateY(0); }
+    30% { opacity: 1; transform: translateY(-2px); }
   }
 
   /* Stop button — unmistakably "live, click to stop" with a pulsing ring. */
