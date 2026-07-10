@@ -231,12 +231,20 @@ jobs:
 
       - name: Compile embedded backend payload
         shell: bash
+        env:
+          RELAY_URL: ${{ secrets.RELAY_URL }}
         run: |
           EXT=""
           if [[ "${{ matrix.backend-target }}" == *"windows"* ]]; then EXT=".exe"; fi
           OUTFILE="$(pwd)/desktop/src-tauri/embedded-backend/koryphaios-backend-${{ matrix.backend-target }}${EXT}"
+          # Bake the collaboration relay endpoint so shipped/released builds can
+          # host/join out of the box (endpoint only — the host secret stays
+          # runtime). Without this, model-sharing is disabled in the release.
+          DEFINE=()
+          [ -n "$RELAY_URL" ] && DEFINE+=(--define "process.env.RELAY_URL=\"$RELAY_URL\"")
           bun build --compile \
             --target=${{ matrix.bun-target }} \
+            "${DEFINE[@]}" \
             backend/src/server.ts \
             --outfile="$OUTFILE"
 
