@@ -1,5 +1,6 @@
 <script lang="ts">
   import type { Snippet } from 'svelte';
+  import { onMount } from 'svelte';
   import { ChevronLeft, ChevronRight, StickyNote } from 'lucide-svelte';
   import SessionSidebar from '$lib/components/SessionSidebar.svelte';
   import NoGitWarning from '$lib/components/NoGitWarning.svelte';
@@ -49,12 +50,49 @@
     backgroundShells?: Snippet;
     composer?: Snippet;
   } = $props();
+
+  // On phone-width screens the fixed session sidebar leaves no room for the main
+  // content, so collapse it to the thin rail automatically (users still reach it
+  // via the rail's "show" button). Desktop behaviour is unchanged.
+  let isNarrow = $state(false);
+  let mobileClosed = $state(true); // on phones the sidebar starts closed (as an overlay)
+  function updateNarrow() {
+    const narrow = typeof window !== 'undefined' && window.innerWidth < 700;
+    if (narrow && !isNarrow) mobileClosed = true; // collapse when entering narrow
+    isNarrow = narrow;
+  }
+  onMount(() => {
+    updateNarrow();
+    window.addEventListener('resize', updateNarrow);
+    return () => window.removeEventListener('resize', updateNarrow);
+  });
+  // Desktop: in-flow sidebar. Narrow: a dismissible overlay opened from the rail.
+  let desktopSidebar = $derived(showSidebar && !isNarrow);
+  let mobileSidebar = $derived(isNarrow && !mobileClosed);
+  let sidebarVisible = $derived(desktopSidebar || mobileSidebar);
+  function hideSidebar() {
+    if (isNarrow) mobileClosed = true;
+    else onHideSidebar?.();
+  }
+  function revealSidebar() {
+    if (isNarrow) mobileClosed = false;
+    else onShowSidebar?.();
+  }
 </script>
 
 <div class="flex h-screen min-h-0 min-w-0 overflow-hidden" style="background: var(--color-surface-0);">
-  {#if showSidebar}
+  {#if mobileSidebar}
+    <!-- Tap-outside backdrop for the phone sidebar overlay -->
+    <button
+      type="button"
+      class="fixed inset-0 z-40 bg-black/50"
+      aria-label="Close sidebar"
+      onclick={() => (mobileClosed = true)}
+    ></button>
+  {/if}
+  {#if sidebarVisible}
     <nav
-      class="shrink-0 border-r flex min-h-0 flex-col"
+      class="{mobileSidebar ? 'fixed inset-y-0 left-0 z-50 shadow-2xl' : 'shrink-0'} border-r flex min-h-0 flex-col"
       style="
         width: var(--sidebar-width);
         min-width: var(--sidebar-min-width);
@@ -96,7 +134,7 @@
           type="button"
           class="sidebar-header-button rounded-lg transition-colors hover:bg-[var(--color-surface-3)]"
           style="padding: var(--space-2); color: var(--color-text-muted);"
-          onclick={onHideSidebar}
+          onclick={hideSidebar}
           title="Hide sidebar"
           aria-label="Hide sidebar"
         >
@@ -149,7 +187,7 @@
           type="button"
           class="rounded-lg transition-colors hover:bg-[var(--color-surface-3)]"
           style="padding: var(--space-2); color: var(--color-text-muted);"
-          onclick={onShowSidebar}
+          onclick={revealSidebar}
           title="Show sidebar"
           aria-label="Show sidebar"
         >

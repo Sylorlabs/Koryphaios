@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { Send, ChevronDown, Sparkles, Square, Users, User, ShieldCheck, ShieldAlert, Circle, Paperclip, Clipboard, X } from 'lucide-svelte';
+  import { Send, ChevronDown, Sparkles, Square, Users, User, ShieldCheck, ShieldAlert, Circle, Paperclip, Clipboard, X, Check } from 'lucide-svelte';
   import { wsStore } from '$lib/stores/websocket.svelte';
   import { shortcutStore } from '$lib/stores/shortcuts.svelte';
   import { experimentalStore } from '$lib/stores/experimental.svelte';
@@ -188,7 +188,9 @@
           }
         } else {
           for (const m of p.models) {
-            models.push({ label: m, value: `${p.name}:${m}`, provider: p.name });
+            // Same "(Provider) model" labeling as the rich-catalog branch —
+            // bare-id providers shouldn't render as anonymous raw strings.
+            models.push({ label: `(${providerLabel(p.name)}) ${m}`, value: `${p.name}:${m}`, provider: p.name });
           }
         }
       }
@@ -650,17 +652,24 @@
     if (!target.closest('.model-picker')) showModelPicker = false;
     if (!target.closest('.reasoning-picker')) showReasoningMenu = false;
     if (!target.closest('.reference-picker')) showReferenceMenu = false;
+    if (!target.closest('.agent-mode-picker')) showAgentModeMenu = false;
   }
 
   let canSend = $derived(!disabled && !configurationWarning && (value.trim().length > 0 || attachments.length > 0));
 
-  function cycleAgentExecutionMode() {
-    const current = agentSettingsStore.settings.agentExecutionMode ?? 'auto';
-    const next =
-      current === 'auto' ? 'single' :
-      current === 'single' ? 'multi' :
-      'auto';
+  // Dropdown, not a blind cycle button — all three modes stay visible and
+  // pickable without clicking through the others.
+  let showAgentModeMenu = $state(false);
 
+  const AGENT_MODE_OPTIONS = [
+    { value: 'auto', label: 'Auto', description: 'Kory decides per task', icon: Sparkles },
+    { value: 'single', label: 'Single Agent', description: 'One agent handles everything', icon: User },
+    { value: 'multi', label: 'Multi-Agent', description: 'Always delegate to specialist workers', icon: Users },
+  ] as const;
+
+  function setAgentExecutionMode(next: 'auto' | 'single' | 'multi') {
+    showAgentModeMenu = false;
+    if ((agentSettingsStore.settings.agentExecutionMode ?? 'auto') === next) return;
     void agentSettingsStore.saveSettings({
       ...agentSettingsStore.settings,
       agentExecutionMode: next,
@@ -940,8 +949,8 @@
           >
             {#if availableModels.length === 0}
               <div class="px-4 py-4 text-xs leading-relaxed" style="color: var(--color-text-muted);">
-                <div class="font-semibold mb-1" style="color: var(--color-text-secondary);">No model providers connected</div>
-                <div class="mb-3">Connect a provider in Settings to choose a model.</div>
+                <div class="font-semibold mb-1" style="color: var(--color-text-secondary);">No provider connected</div>
+                <div class="mb-3">Open Settings → Providers and connect one to choose a model.</div>
                 {#if onOpenSettings}
                   <button
                     type="button"
@@ -1161,15 +1170,47 @@
           style="background: rgba(12, 10, 9, 0.34); border-color: var(--color-border);"
         >
           <div class="flex flex-wrap items-center gap-2 xl:justify-end">
-            <button
-              type="button"
-              class="flex items-center gap-1.5 text-[11px] font-medium px-2.5 py-1.5 rounded-md transition-colors {agentExecutionModeMeta.className}"
-              onclick={cycleAgentExecutionMode}
-              title={agentExecutionModeMeta.title}
-            >
-              <agentExecutionModeMeta.icon size={12} />
-              <span>{agentExecutionModeMeta.label}</span>
-            </button>
+            <div class="agent-mode-picker relative">
+              <button
+                type="button"
+                class="flex items-center gap-1.5 text-[11px] font-medium px-2.5 py-1.5 rounded-md transition-colors {agentExecutionModeMeta.className}"
+                onclick={() => (showAgentModeMenu = !showAgentModeMenu)}
+                title={agentExecutionModeMeta.title}
+                aria-haspopup="menu"
+                aria-expanded={showAgentModeMenu}
+              >
+                <agentExecutionModeMeta.icon size={12} />
+                <span>{agentExecutionModeMeta.label}</span>
+                <ChevronDown size={10} class="opacity-60" />
+              </button>
+              {#if showAgentModeMenu}
+                <div
+                  class="absolute bottom-full right-0 mb-1.5 w-56 rounded-xl border shadow-xl z-30 overflow-hidden"
+                  style="background: var(--color-surface-2); border-color: var(--color-border);"
+                  role="menu"
+                >
+                  {#each AGENT_MODE_OPTIONS as option (option.value)}
+                    {@const active = (agentSettingsStore.settings.agentExecutionMode ?? 'auto') === option.value}
+                    <button
+                      type="button"
+                      role="menuitemradio"
+                      aria-checked={active}
+                      class="w-full flex items-start gap-2.5 px-3 py-2 text-left transition-colors hover:bg-[var(--color-surface-3)]"
+                      onclick={() => setAgentExecutionMode(option.value)}
+                    >
+                      <option.icon size={13} class="mt-0.5 shrink-0" style="color: {active ? 'var(--color-accent)' : 'var(--color-text-muted)'};" />
+                      <span class="min-w-0 flex-1">
+                        <span class="block text-[11px] font-medium" style="color: {active ? 'var(--color-accent)' : 'var(--color-text-primary)'};">{option.label}</span>
+                        <span class="block text-[10px]" style="color: var(--color-text-muted);">{option.description}</span>
+                      </span>
+                      {#if active}
+                        <Check size={12} class="mt-0.5 shrink-0" style="color: var(--color-accent);" />
+                      {/if}
+                    </button>
+                  {/each}
+                </div>
+              {/if}
+            </div>
 
             <button
               type="button"
@@ -1194,10 +1235,10 @@
             type="button"
             onclick={isRunning ? stop : isWaiting && !canSend ? stop : send}
             disabled={disabled || (!isRunning && !isWaiting && !canSend)}
-            class="btn flex w-full items-center justify-center gap-2 {isRunning ? 'stop-btn' : !canSend ? 'waiting-btn' : 'btn-primary'}"
-            style="height: 52px; padding: 0 20px; font-size: 14px; {disabled || configurationWarning ? 'opacity: 0.5; cursor: not-allowed;' : ''}"
+            class="btn flex w-full items-center justify-center gap-2 {isRunning ? 'stop-btn' : isWaiting && !canSend ? 'waiting-btn' : 'btn-primary'}"
+            style="height: 52px; padding: 0 20px; font-size: 14px; {disabled || configurationWarning || (!isRunning && !isWaiting && !canSend) ? 'opacity: 0.5; cursor: not-allowed;' : ''}"
             aria-label={isRunning ? 'Stop the running model' : isWaiting && !canSend ? 'Kory is waiting — click to cancel' : 'Send message'}
-            title={isRunning ? 'Stop (Esc)' : isWaiting && !canSend ? (waitingReason ? `Waiting on ${waitingReason} — click to cancel` : 'Kory is waiting — click to cancel') : !canSend ? 'Waiting for your message — type to send' : 'Send (Enter)'}
+            title={isRunning ? 'Stop (Esc)' : isWaiting && !canSend ? (waitingReason ? `Waiting on ${waitingReason} — click to cancel` : 'Kory is waiting — click to cancel') : !canSend ? 'Type a message to send' : 'Send (Enter)'}
           >
             {#if isRunning}
               <span class="stop-pulse" aria-hidden="true">
@@ -1207,10 +1248,10 @@
             {:else if isWaiting && !canSend}
               <span class="waiting-dots" aria-hidden="true"><span></span><span></span><span></span></span>
               <span>Waiting{waitingReason ? ` — ${waitingReason}` : '…'}</span>
-            {:else if !canSend}
-              <span class="waiting-dots" aria-hidden="true"><span></span><span></span><span></span></span>
-              <span>Waiting</span>
             {:else}
+              <!-- Empty composer is a plain disabled Send. "Waiting" is reserved
+                   for Kory genuinely parked on something external, so an idle
+                   app never reads as a busy app. -->
               <Send size={18} />
               Send
             {/if}

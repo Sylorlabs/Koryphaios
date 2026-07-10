@@ -63,11 +63,16 @@ export interface GraphNode {
   tags: string[]
   linkCount: number
   includeInContext: boolean
+  /** True for a placeholder node representing a [[wikilink]] whose target note
+   *  doesn't exist yet (an "unresolved"/ghost node, like Obsidian). */
+  unresolved?: boolean
 }
 
 export interface GraphEdge {
   from: string
   to: string
+  /** Edge pointing at an unresolved ghost node. */
+  unresolved?: boolean
 }
 
 export interface GraphData {

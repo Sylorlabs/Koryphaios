@@ -2,7 +2,9 @@
   import { onDestroy, tick } from 'svelte';
   import { providersStore } from '$lib/stores/providers.svelte';
   import { theme, type ThemePreset, type AccentColor, type FontFamily } from '$lib/stores/theme.svelte';
-  import { toastStore } from '$lib/stores/toast.svelte';
+  import { shortcutStore } from '$lib/stores/shortcuts.svelte';
+import { defaultShortcuts as globalDefaultShortcuts } from '$lib/stores/shortcuts.svelte';
+import { toastStore } from '$lib/stores/toast.svelte';
   import {
     Key,
     Palette,
@@ -54,6 +56,7 @@
   import ModelSelectionDialog from './ModelSelectionDialog.svelte';
   import ModeToggle from './ModeToggle.svelte';
   import TeamAccessProfiles from './TeamAccessProfiles.svelte';
+  import ModelSharingPanel from './ModelSharingPanel.svelte';
   import NumberStepper from './NumberStepper.svelte';
   import KorySelect from './KorySelect.svelte';
   import { apiUrl } from '$lib/utils/api-url';
@@ -228,9 +231,12 @@ import { apiFetch, parseJsonResponse } from '$lib/api.svelte';
     }
 
     if (activeTab === 'providers') {
-      if (providersStore.availableProviderTypes.length === 0 && !providersLoadAttempted) {
+      if (!providersLoadAttempted) {
         providersLoadAttempted = true;
-        void loadAvailableProviders();
+        if (providersStore.availableProviderTypes.length === 0) void loadAvailableProviders();
+        // CLI login state changes underneath us (terminal logins/logouts), so
+        // detection refreshes every time the Providers tab is opened — never
+        // a stale "Connected automatically" for a logged-out CLI.
         void loadDetectedClis();
       }
     } else {
@@ -392,7 +398,7 @@ import { apiFetch, parseJsonResponse } from '$lib/api.svelte';
   async function confirmCodexProfileAuth() {
     const label = codexProfileInput.trim();
     if (!label) {
-      toastStore.error('Enter a profile name');
+      toastStore.error('Enter an account name');
       return;
     }
     const options = pendingCodexAuthOptions ?? {};
@@ -408,21 +414,6 @@ import { apiFetch, parseJsonResponse } from '$lib/api.svelte';
 
 
   // ─── Shortcuts ───────────────────────────────────────────────────────
-  interface Shortcut { id: string; keys: string[]; action: string; description?: string }
-  const defaultShortcuts: Shortcut[] = [
-    { id: 'send', keys: ['Ctrl', 'Enter'], action: 'Send message', description: 'Submit task' },
-    { id: 'settings', keys: ['Ctrl', ','], action: 'Open settings', description: 'Preferences' },
-    { id: 'new_session', keys: ['Ctrl', 'N'], action: 'New session', description: 'Clear' },
-    { id: 'focus_input', keys: ['Ctrl', 'K'], action: 'Focus input', description: 'Jump' },
-    { id: 'close', keys: ['Esc'], action: 'Close dialogs', description: 'Back' },
-  ];
-
-  function loadShortcuts(): Shortcut[] {
-    try { const stored = localStorage.getItem('koryphaios-shortcuts'); if (stored) return JSON.parse(stored); } catch {}
-    return structuredClone(defaultShortcuts);
-  }
-
-  let shortcuts = $state<Shortcut[]>(loadShortcuts());
   let editingShortcutId = $state<string | null>(null);
   let capturedKeys = $state<string[]>([]);
 
@@ -433,12 +424,13 @@ import { apiFetch, parseJsonResponse } from '$lib/api.svelte';
     const key = e.key; if (!['Control', 'Shift', 'Alt', 'Meta'].includes(key)) keys.push(key.length === 1 ? key.toUpperCase() : key);
     if (keys.length === 0) return; capturedKeys = keys;
     if (!['Control', 'Shift', 'Alt', 'Meta'].includes(key)) {
+      const shortcuts = shortcutStore.list;
       const idx = shortcuts.findIndex(s => s.id === editingShortcutId);
-      if (idx >= 0) { shortcuts[idx] = { ...shortcuts[idx], keys: capturedKeys }; shortcuts = [...shortcuts]; localStorage.setItem('koryphaios-shortcuts', JSON.stringify(shortcuts)); }
+      if (idx >= 0) { shortcuts[idx] = { ...shortcuts[idx], keys: capturedKeys }; shortcutStore.list = [...shortcuts]; shortcutStore.save(); }
       editingShortcutId = null; capturedKeys = [];
     }
   }
-  function resetShortcuts() { shortcuts = structuredClone(defaultShortcuts); localStorage.removeItem('koryphaios-shortcuts'); toastStore.info('Shortcuts reset'); }
+  function resetShortcuts() { shortcutStore.reset(); shortcutStore.save(); toastStore.info('Shortcuts reset'); }
 
   // ─── Billing ─────────────────────────────────────────────────────────
   let billingLoading = $state(false);
@@ -529,7 +521,19 @@ import { apiFetch, parseJsonResponse } from '$lib/api.svelte';
           <div class="rounded-xl border border-[var(--color-border)] p-4 bg-[var(--color-surface-1)]">
             <div class="flex items-center justify-between mb-3">
               <span class="text-sm font-semibold text-[var(--color-text-primary)]">Detected on your system</span>
-              <span class="text-[10px] text-[var(--color-text-muted)]">Auto-picked up — no setup needed</span>
+              <div class="flex items-center gap-2">
+                <span class="text-[10px] text-[var(--color-text-muted)]">Auto-picked up — no setup needed</span>
+                <button
+                  type="button"
+                  class="p-1 rounded-md transition-colors hover:bg-[var(--color-surface-3)]"
+                  style="color: var(--color-text-muted);"
+                  title="Re-check installed CLIs"
+                  aria-label="Re-check installed CLIs"
+                  onclick={() => void loadDetectedClis()}
+                >
+                  <RefreshCw size={12} />
+                </button>
+              </div>
             </div>
             <div class="space-y-2.5">
               {#each providersStore.detectedClis.filter((c) => c.installed) as cli (cli.id)}
@@ -548,12 +552,17 @@ import { apiFetch, parseJsonResponse } from '$lib/api.svelte';
                       {#if cli.autoEnabled}
                         <span class="text-[10px] px-1.5 py-0.5 rounded-full font-medium" style="background: var(--color-success-bg, rgba(34,197,94,0.15)); color: var(--color-success, #22c55e);">Connected automatically</span>
                       {:else if cli.loggedIn}
-                        <span class="text-[10px] px-1.5 py-0.5 rounded-full font-medium" style="background: var(--color-warning-bg, rgba(245,158,11,0.15)); color: var(--color-warning, #f59e0b);">Logged in — needs a key</span>
+                        <span class="text-[10px] px-1.5 py-0.5 rounded-full font-medium" style="background: var(--color-warning-bg, rgba(245,158,11,0.15)); color: var(--color-warning, #f59e0b);">Logged in — connect below</span>
                       {:else}
                         <span class="text-[10px] text-[var(--color-text-muted)]">Installed — not logged in</span>
                       {/if}
                     </div>
-                    <p class="text-[10px] text-[var(--color-text-muted)] leading-relaxed mt-0.5">{cli.note}</p>
+                    <p class="text-[10px] text-[var(--color-text-muted)] leading-relaxed mt-0.5">
+                      {cli.note}
+                      {#if cli.docsUrl && !cli.autoEnabled}
+                        <a href={cli.docsUrl} target="_blank" rel="noreferrer" class="underline hover:text-[var(--color-accent)]">Setup guide</a>
+                      {/if}
+                    </p>
                   </div>
                 </div>
               {/each}
@@ -659,6 +668,16 @@ import { apiFetch, parseJsonResponse } from '$lib/api.svelte';
                         {(status.models?.length ?? 0) > 0 ? status.models?.length : '—'} enabled of {(status.allAvailableModels?.length ?? 0) > 0 ? status.allAvailableModels?.length : '—'} available
                       </div>
                       <button type="button" onclick={() => { selectorTarget = status; showModelSelector = true; }} class="btn btn-secondary text-[10px] py-1 px-3">Manage Models</button>
+                      {#if caps.supportsApiKey && !usesBrowserAuth(prov.key)}
+                        <button
+                          type="button"
+                          onclick={() => { rotateProvider = { name: prov.key, keyType: 'apiKey' }; showRotateDialog = true; }}
+                          class="inline-flex items-center gap-1 text-[10px] text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] font-medium transition-colors"
+                          title="Replace the stored API key without disconnecting"
+                        >
+                          <RotateCcw size={10} /> Rotate key
+                        </button>
+                      {/if}
                       <button type="button" onclick={() => disconnectProvider(prov.key)} class="text-[10px] text-red-400 hover:text-red-300 font-medium transition-colors">Disconnect</button>
                     </div>
                   {:else}
@@ -680,57 +699,40 @@ import { apiFetch, parseJsonResponse } from '$lib/api.svelte';
                           {#if providersStore.browserAuthMessages[prov.key]}
                             <p class="text-[10px] text-[var(--color-text-muted)]">{providersStore.browserAuthMessages[prov.key]}</p>
                           {/if}
-                          {#if prov.key === 'copilot' && providersStore.copilotDeviceAuth}
+                          <!-- One shared device-code panel for every device-code
+                               provider — identical copy, code, copy-button, and
+                               waiting line, so no provider gets a lesser flow. -->
+                          {#if prov.key === 'copilot' || prov.key === 'kimicode' || prov.key === 'codex'}
+                            {@const deviceAuth =
+                              prov.key === 'copilot' ? providersStore.copilotDeviceAuth
+                              : prov.key === 'kimicode' ? providersStore.kimicodeDeviceAuth
+                              : providersStore.codexDeviceAuth}
+                            {#if deviceAuth}
+                            {@const userCode = deviceAuth.userCode}
                             <div class="rounded-md bg-[var(--color-surface-2)] px-2.5 py-2 text-[10px] text-[var(--color-text-secondary)]">
-                              <div>User code: <span class="font-semibold text-[var(--color-text-primary)]">{providersStore.copilotDeviceAuth.userCode}</span></div>
-                              <div class="mt-1 break-all">{providersStore.copilotDeviceAuth.verificationUri}</div>
-                            </div>
-                          {/if}
-                          {#if prov.key === 'kimicode' && providersStore.kimicodeDeviceAuth}
-                            {@const kimiUserCode = providersStore.kimicodeDeviceAuth.userCode}
-                            <div class="rounded-md bg-[var(--color-surface-2)] px-2.5 py-2 text-[10px] text-[var(--color-text-secondary)]">
-                              <div class="font-medium text-[var(--color-text-primary)]">Kimi Code sign-in needs approval.</div>
+                              <div class="font-medium text-[var(--color-text-primary)]">{getProviderDisplayLabel(prov.key)} sign-in needs approval.</div>
                               <div class="mt-1">The browser was opened automatically.</div>
-                              <div>Paste this code if Kimi asks for it.</div>
+                              <div>Paste this code if you're asked for it.</div>
                               <div class="mt-2 flex items-center gap-2">
                                 <span>Code:</span>
-                                <span class="font-semibold tracking-[0.18em] text-[var(--color-text-primary)]">{kimiUserCode}</span>
+                                <span class="font-semibold tracking-[0.18em] text-[var(--color-text-primary)]">{userCode}</span>
                                 <button
                                   type="button"
                                   class="inline-flex items-center gap-1 rounded border border-[var(--color-border)] px-1.5 py-0.5 text-[10px] hover:bg-[var(--color-surface-3)]"
-                                  onclick={() => copyToClipboard(kimiUserCode, 'deviceCode')}
+                                  onclick={() => copyToClipboard(userCode, 'deviceCode')}
                                 >
                                   <Copy size={10} />
-                                  {providersStore.copiedDeviceCode === kimiUserCode ? 'Copied' : 'Copy code'}
+                                  {providersStore.copiedDeviceCode === userCode ? 'Copied' : 'Copy code'}
                                 </button>
                               </div>
+                              {#if deviceAuth.verificationUri}
+                                <div class="mt-1 break-all">{deviceAuth.verificationUri}</div>
+                              {/if}
                               <div class="mt-2 text-[10px] text-[var(--color-text-muted)]">
-                                Waiting for Kimi Code approval to complete…
+                                Waiting for {getProviderDisplayLabel(prov.key)} approval to complete…
                               </div>
                             </div>
-                          {/if}
-                          {#if prov.key === 'codex' && providersStore.codexDeviceAuth}
-                            {@const codexUserCode = providersStore.codexDeviceAuth.userCode}
-                            <div class="rounded-md bg-[var(--color-surface-2)] px-2.5 py-2 text-[10px] text-[var(--color-text-secondary)]">
-                              <div class="font-medium text-[var(--color-text-primary)]">Codex sign-in needs a code.</div>
-                              <div class="mt-1">The browser was opened automatically.</div>
-                              <div>Paste this code if Codex asks for it.</div>
-                              <div class="mt-2 flex items-center gap-2">
-                                <span>Code:</span>
-                                <span class="font-semibold tracking-[0.18em] text-[var(--color-text-primary)]">{codexUserCode}</span>
-                                <button
-                                  type="button"
-                                  class="inline-flex items-center gap-1 rounded border border-[var(--color-border)] px-1.5 py-0.5 text-[10px] hover:bg-[var(--color-surface-3)]"
-                                  onclick={() => copyToClipboard(codexUserCode, 'deviceCode')}
-                                >
-                                  <Copy size={10} />
-                                  {providersStore.copiedDeviceCode === codexUserCode ? 'Copied' : 'Copy code'}
-                                </button>
-                              </div>
-                              <div class="mt-2 text-[10px] text-[var(--color-text-muted)]">
-                                Waiting for Codex approval to complete…
-                              </div>
-                            </div>
+                            {/if}
                           {/if}
                           <div class="flex gap-2">
                             <button
@@ -743,7 +745,7 @@ import { apiFetch, parseJsonResponse } from '$lib/api.svelte';
                                 ? 'Opening...'
                                 : 'Auth'}
                             </button>
-                            {#if providersStore.browserAuthPending[prov.key] && prov.key !== 'copilot' && prov.key !== 'codex' && prov.key !== 'kimicode' && prov.key !== 'google-subscription'}
+                            {#if providersStore.browserAuthPending[prov.key] && prov.key !== 'copilot' && prov.key !== 'codex' && prov.key !== 'kimicode'}
                               <button
                                 type="button"
                                 onclick={() => handleFinishBrowserAuth(prov.key)}
@@ -1093,7 +1095,7 @@ import { apiFetch, parseJsonResponse } from '$lib/api.svelte';
           </button>
         </div>
         <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
-          {#each shortcuts as shortcut}
+          {#each shortcutStore.list as shortcut}
             <div class="group flex items-center justify-between p-4 bg-[var(--color-surface-2)] rounded-xl border border-[var(--color-border)] transition-colors hover:border-[var(--color-text-muted)]">
               <div>
                 <div class="text-sm font-semibold text-[var(--color-text-primary)]">{shortcut.action}</div>
@@ -1555,6 +1557,12 @@ import { apiFetch, parseJsonResponse } from '$lib/api.svelte';
               </div>
             </div>
           {/if}
+
+          <!-- ── SECOND SECTION: Share Models ── separate from collaboration;
+               its own models-only invite link so it never grants session access. -->
+          <div class="mx-auto max-w-4xl mt-16 pt-12 border-t border-[var(--color-border)]">
+            <ModelSharingPanel />
+          </div>
         </div>
       </div>
 
@@ -1857,7 +1865,7 @@ import { apiFetch, parseJsonResponse } from '$lib/api.svelte';
           </div>
           <div>
             <p class="text-[11px] font-bold uppercase tracking-[0.28em] text-[var(--color-text-muted)]">Codex Account Auth</p>
-            <h3 class="mt-2 text-2xl font-black text-[var(--color-text-primary)]">Enter a profile name before sign-in</h3>
+            <h3 class="mt-2 text-2xl font-black text-[var(--color-text-primary)]">Name this account before sign-in</h3>
           </div>
         </div>
         <p class="mt-4 max-w-xl text-sm text-[var(--color-text-muted)]">
@@ -1913,7 +1921,7 @@ import { apiFetch, parseJsonResponse } from '$lib/api.svelte';
     <div class="w-full max-w-md rounded-2xl border p-5 shadow-2xl" style="background: var(--color-surface-1); border-color: var(--color-border);">
       <div class="flex items-center justify-between gap-3">
         <div>
-          <h3 class="text-base font-semibold text-[var(--color-text-primary)]">Saved Profile</h3>
+          <h3 class="text-base font-semibold text-[var(--color-text-primary)]">Saved Account</h3>
           <p class="text-xs text-[var(--color-text-muted)]">{getProviderDisplayLabel(managingAccountProvider)}</p>
         </div>
         <button type="button" class="rounded-lg p-2 hover:bg-[var(--color-surface-3)]" onclick={() => showAccountManageDialog = false} aria-label="Close">
@@ -1927,7 +1935,7 @@ import { apiFetch, parseJsonResponse } from '$lib/api.svelte';
         </div>
         <div class="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-0)]/70 p-3">
           <div class="text-xs font-semibold text-[var(--color-text-primary)]">{managingAccountLabel || 'Unnamed profile'}</div>
-          <div class="mt-1 text-[11px] text-[var(--color-text-muted)]">Use this saved profile name when switching accounts. Model management opens the provider model selector.</div>
+          <div class="mt-1 text-[11px] text-[var(--color-text-muted)]">This name identifies the account when switching. Model management opens the provider model selector.</div>
         </div>
       </div>
       <div class="mt-5 flex gap-2">

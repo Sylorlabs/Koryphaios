@@ -142,6 +142,12 @@ export class RelayClient {
     return this.sessionId;
   }
 
+  /** The active collaboration policy (tiers/permissions), used by the remote
+   *  provider host to apply a joining guest's permissions to their CLI turn. */
+  get policy(): CollaborationPolicy | null {
+    return this.activePolicy;
+  }
+
   onMessage(fn: EventHandler) {
     this.handlers.push(fn);
     return () => { this.handlers = this.handlers.filter(h => h !== fn); };
@@ -236,6 +242,12 @@ export class RelayClient {
     if (!this.isConnected) return;
     try { this.ws!.send(JSON.stringify(msg)); }
     catch (err) { log.warn({ err }, 'Failed to send to relay'); }
+  }
+
+  /** Send a message to ONE guest (relay routes by guestId). Used for
+   *  remote-inference stream events, which must reach only the requester. */
+  sendToGuest(guestId: string, msg: Record<string, unknown>) {
+    this.sendRelay({ ...msg, guestId });
   }
 
   /** Approve or reject a guest prompt. */

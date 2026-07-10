@@ -27,6 +27,7 @@ import {
   resolveModel,
 } from './types';
 import { detectClaudeCodeLogin } from './auth-utils';
+import { wrapCommand, buildSoftJail } from '../collaboration/sandbox-runner';
 import { providerLog } from '../logger';
 import { recordClaudeCodeRateLimit } from '../credit-accountant';
 import { ClaudeCodeModels } from './models/claude-code';
@@ -640,6 +641,16 @@ export class ClaudeCodeProvider implements Provider {
       return;
     }
 
+    // Host-imposed sandbox for a REMOTE guest turn. Absent for local runs =
+    // full access. Tool gating here is the cross-platform floor; the OS jail
+    // (bubblewrap, applied at spawn below) is the real containment. Note
+    // --allowedTools only pre-approves; --disallowedTools hard-blocks.
+    const sandbox = request.sandbox;
+    const disallowed = ['Task', 'Agent'];
+    if (sandbox && !sandbox.allowEdits) disallowed.push('Edit', 'Write', 'MultiEdit', 'NotebookEdit');
+    if (sandbox && !sandbox.allowShell) disallowed.push('Bash');
+    if (sandbox && !sandbox.allowWebSearch) disallowed.push('WebFetch', 'WebSearch');
+
     const args = [
       '-p',
       '--output-format',
@@ -655,7 +666,7 @@ export class ClaudeCodeProvider implements Provider {
       '--allowedTools',
       ALLOWED_TOOLS,
       '--disallowedTools',
-      DISALLOWED_TOOLS,
+      disallowed.join(','),
     ];
     // Run in the project directory so the CLI edits the real files (falls back to cwd).
     const cwd = request.workingDirectory?.trim() || process.cwd();
@@ -706,7 +717,29 @@ export class ClaudeCodeProvider implements Provider {
         : `${HARNESS_SYSTEM_NOTE}${effortNote}`,
     );
 
-    const child = spawn('claude', args, {
+    // Remote sandbox, two stacked layers:
+    //   1. Soft jail (ALL platforms): scrub the host's other secrets from the
+    //      env + redirect HOME so `~/.ssh` etc. resolve to an empty dir.
+    //   2. OS jail (Linux bwrap / macOS Seatbelt, where available): kernel-
+    //      enforced filesystem + network confinement on top.
+    // No-op for local turns or the "trusted" (no-isolation) preset.
+    let softCleanup: (() => void) | null = null;
+    if (sandbox?.filesystemIsolation) {
+      const soft = buildSoftJail(env, [env.CLAUDE_CONFIG_DIR!]);
+      Object.assign(env, soft.env);
+      softCleanup = soft.cleanup;
+    }
+    const { command: spawnBin, args: spawnArgs, isolated, mechanism } = sandbox
+      ? wrapCommand('claude', args, { cwd, configDirs: [env.CLAUDE_CONFIG_DIR!], policy: sandbox })
+      : { command: 'claude', args, isolated: false, mechanism: 'none' as const };
+    if (sandbox) {
+      providerLog.info(
+        { provider: 'claude', mechanism, osIsolated: isolated, softJail: !!softCleanup, network: sandbox.allowNetwork, shell: sandbox.allowShell },
+        'Running remote CLI turn under sandbox policy',
+      );
+    }
+
+    const child = spawn(spawnBin, spawnArgs, {
       cwd,
       stdio: ['pipe', 'pipe', 'pipe'],
       env,
@@ -721,10 +754,15 @@ export class ClaudeCodeProvider implements Provider {
     };
     request.signal?.addEventListener('abort', onAbort, { once: true });
 
+    // A remote sandbox may cap turn runtime; otherwise use the standard cap.
+    const runtimeMs =
+      sandbox && sandbox.maxRuntimeSeconds > 0
+        ? sandbox.maxRuntimeSeconds * 1000
+        : CLAUDE_STREAM_TIMEOUT_MS;
     const timeout = setTimeout(() => {
       providerLog.warn({ provider: 'claude' }, 'Claude Code harness timed out — killing CLI');
       onAbort();
-    }, CLAUDE_STREAM_TIMEOUT_MS);
+    }, runtimeMs);
     timeout.unref?.();
 
     let stderr = '';
@@ -783,6 +821,7 @@ export class ClaudeCodeProvider implements Provider {
       }
       clearTimeout(timeout);
       request.signal?.removeEventListener('abort', onAbort);
+      softCleanup?.();
       return;
     }
 
@@ -793,6 +832,7 @@ export class ClaudeCodeProvider implements Provider {
 
     clearTimeout(timeout);
     request.signal?.removeEventListener('abort', onAbort);
+    softCleanup?.();
 
     if (request.signal?.aborted) return;
 

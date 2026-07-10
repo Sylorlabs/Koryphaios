@@ -12,8 +12,9 @@
   "scripts": {
     "dev": "bun run dev:desktop",
     "dev:desktop": "bun run scripts/launch-desktop.ts",
-    "build": "bun run --filter '*' build",
-    "build:desktop": "cd desktop && bun run build",
+    "write-compat-hash": "bun run scripts/write-compat-hash.ts",
+    "build": "bun run write-compat-hash && bun run --filter '*' build",
+    "build:desktop": "bun run write-compat-hash && cd desktop && bun run build",
     "typecheck": "bun run --filter '*' typecheck",
     "typecheck:ci": "bun run --filter backend typecheck && bun run --filter frontend check",
     "test": "bun run --filter '*' test",
@@ -23,7 +24,7 @@
     "format": "prettier --write \"**/*.{ts,tsx,js,jsx,json,md}\"",
     "format:check": "prettier --check \"**/*.{ts,tsx,js,jsx,json,md}\"",
     "format:changed": "bash scripts/check-changed-format.sh",
-    "build:ci": "bun run --filter backend build && bun run --filter frontend build",
+    "build:ci": "bun run write-compat-hash && bun run --filter backend build && bun run --filter frontend build",
     "dev:workspace": "bun run --filter \"*\" dev"
   },
   "devDependencies": {

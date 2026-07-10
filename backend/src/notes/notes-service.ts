@@ -7,7 +7,7 @@
  */
 
 import { nanoid } from 'nanoid';
-import { db } from '../db';
+import { db, getDb } from '../db';
 import { notes, noteLinks, noteAttachments } from '../db/schema';
 import { eq, like, and, or, inArray } from 'drizzle-orm';
 import type {
@@ -64,6 +64,95 @@ function resolveProjectDocument(id: string): string | undefined {
 
 function ensureDir(p: string): void {
   if (!existsSync(p)) mkdirSync(p, { recursive: true });
+}
+
+// ============================================================================
+// Caches & throttles (scale: avoid O(n) work on every read)
+// ============================================================================
+
+// Graph payload is expensive to build, so cache it and drop the cache whenever
+// any note/link changes. Keyed by resolved project root ('' = all).
+const graphCache = new Map<string, GraphData>();
+// Lowercased title|alias → note id, for wikilink resolution. Rebuilt on demand.
+let resolveIndexCache: Map<string, string> | null = null;
+
+/** Drop derived caches. Called by every mutation path. */
+export function invalidateNotesCache(): void {
+  graphCache.clear();
+  resolveIndexCache = null;
+}
+
+// Project-document sync is heavy (recursive FS walk). Throttle it per project so
+// it runs at most once per window on the request path; refreshes happen in the
+// background so reads never block on a full re-scan after the first one.
+const SYNC_THROTTLE_MS = 5_000;
+const lastSyncAt = new Map<string, number>();
+const fileMtimeCache = new Map<string, number>(); // absolute path -> mtimeMs
+
+/** Ensure a project's docs are mirrored without blocking every call on a full
+ *  re-scan. First call for a project awaits; later calls return immediately and
+ *  refresh in the background when the throttle window has elapsed. */
+export async function ensureProjectSync(projectRoot: string): Promise<void> {
+  const key = resolve(projectRoot);
+  const now = Date.now();
+  const last = lastSyncAt.get(key);
+  if (last === undefined) {
+    lastSyncAt.set(key, now);
+    await syncProjectDocuments(projectRoot);
+    return;
+  }
+  if (now - last >= SYNC_THROTTLE_MS) {
+    lastSyncAt.set(key, now);
+    void syncProjectDocuments(projectRoot).catch(() => {});
+  }
+}
+
+// ============================================================================
+// Frontmatter & aliases
+// ============================================================================
+
+export interface ParsedFrontmatter {
+  aliases: string[];
+  tags: string[];
+  body: string;
+}
+
+/** Parse a leading YAML frontmatter block for `aliases` and `tags` (the two
+ *  Obsidian properties that affect linking/search). Supports inline
+ *  `[a, b]` lists and block `- a` lists. Content without frontmatter is
+ *  returned unchanged with empty aliases/tags. */
+export function parseFrontmatter(content: string): ParsedFrontmatter {
+  const m = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?/.exec(content);
+  if (!m) return { aliases: [], tags: [], body: content };
+  const lines = m[1].split(/\r?\n/);
+  const body = content.slice(m[0].length);
+  const unquote = (s: string) => s.trim().replace(/^["']|["']$/g, '');
+
+  const readList = (key: string): string[] => {
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+      const head = new RegExp(`^${key}\\s*:(.*)$`, 'i').exec(line);
+      if (!head) continue;
+      const rest = head[1].trim();
+      // inline list: key: [a, b]
+      const inline = /^\[(.*)\]$/.exec(rest);
+      if (inline) return inline[1].split(',').map(unquote).filter(Boolean);
+      // scalar: key: value
+      if (rest) return [unquote(rest)];
+      // block list: subsequent indented "- item" lines
+      const items: string[] = [];
+      for (let j = i + 1; j < lines.length; j++) {
+        const item = /^\s+-\s+(.+)$/.exec(lines[j]);
+        if (!item) break;
+        const v = unquote(item[1]);
+        if (v) items.push(v);
+      }
+      return items;
+    }
+    return [];
+  };
+
+  return { aliases: readList('aliases'), tags: readList('tags'), body };
 }
 
 /**
@@ -157,6 +246,8 @@ export async function createNote(input: CreateNoteInput): Promise<Note> {
     updatedAt: now,
   });
 
+  // New title/alias → the resolution index is stale.
+  invalidateNotesCache();
   if (input.content) {
     await parseAndSaveLinks(id, input.content);
   }
@@ -196,8 +287,11 @@ export async function updateNote(id: string, input: UpdateNoteInput): Promise<No
     writeFileSync(sourceFile, input.content, 'utf8');
   }
 
+  // Title/alias may have changed → drop the resolution index before re-linking.
+  invalidateNotesCache();
+
   if (input.title !== undefined && input.title !== existing.title) {
-    await propagateTitleRename(existing.title, input.title);
+    await propagateTitleRename(id, existing.title, input.title);
   }
 
   const contentForLinks = input.content ?? (input.title !== undefined ? (await getNote(id))?.content : undefined);
@@ -205,6 +299,7 @@ export async function updateNote(id: string, input: UpdateNoteInput): Promise<No
     await parseAndSaveLinks(id, contentForLinks);
   }
 
+  invalidateNotesCache();
   return (await getNote(id))!;
 }
 
@@ -226,6 +321,7 @@ export async function deleteNote(id: string): Promise<void> {
   }
 
   await db.delete(notes).where(eq(notes.id, id));
+  invalidateNotesCache();
 }
 
 export interface ProjectDocumentSyncResult {
@@ -257,6 +353,7 @@ export async function syncProjectDocuments(projectRoot = PROJECT_ROOT): Promise<
 
   walk(root);
   const foundIds = new Set<string>();
+  const changed: Array<{ id: string; content: string; sourcePath: string }> = [];
   let created = 0;
   let updated = 0;
 
@@ -264,8 +361,11 @@ export async function syncProjectDocuments(projectRoot = PROJECT_ROOT): Promise<
     const sourcePath = relative(root, absolute).split(sep).join('/');
     const id = projectDocumentId(root, sourcePath);
     foundIds.add(id);
-    const content = readFileSync(absolute, 'utf8');
     const stat = statSync(absolute);
+    // Skip unchanged files entirely — no read, no DB write, no re-link.
+    if (fileMtimeCache.get(absolute) === stat.mtimeMs) continue;
+
+    const content = readFileSync(absolute, 'utf8');
     const title = basename(sourcePath, extname(sourcePath));
     const parent = dirname(sourcePath).split(sep).join('/');
     const folderPath = parent === '.' ? '/Project' : `/Project/${parent}`;
@@ -284,6 +384,8 @@ export async function syncProjectDocuments(projectRoot = PROJECT_ROOT): Promise<
       });
       created++;
     }
+    fileMtimeCache.set(absolute, stat.mtimeMs);
+    changed.push({ id, content, sourcePath });
   }
 
   const projectRows = (await db.select().from(notes)).filter((row) => projectDocumentIdentity(row.id)?.projectRoot === root);
@@ -295,23 +397,24 @@ export async function syncProjectDocuments(projectRoot = PROJECT_ROOT): Promise<
     }
   }
 
-  // Resolve links only after every file is present, so cross-file links work
-  // regardless of traversal order.
-  for (const id of foundIds) {
-    const row = (await db.select().from(notes).where(eq(notes.id, id)))[0];
-    if (row) {
-      await parseAndSaveLinks(id, row.content);
-      const sourcePath = projectDocumentIdentity(id)!.sourcePath;
-      for (const targetPath of extractProjectDocumentLinks(sourcePath, row.content)) {
+  // Re-resolve links only for files that changed this pass. Build the
+  // title/alias index ONCE and reuse it (no per-link DB round-trip).
+  if (changed.length > 0 || removed > 0) {
+    invalidateNotesCache();
+    const index = await getResolveIndex();
+    for (const { id, content, sourcePath } of changed) {
+      await parseAndSaveLinks(id, content, { index, skipInvalidate: true });
+      for (const targetPath of extractProjectDocumentLinks(sourcePath, content)) {
         const targetId = projectDocumentId(root, targetPath);
         if (targetId === id || !foundIds.has(targetId)) continue;
         try {
           await db.insert(noteLinks).values({ fromNoteId: id, toNoteId: targetId });
         } catch {
-          // Existing edge (for example a wikilink and a path link to the same document).
+          // Existing edge (a wikilink and a path link to the same document).
         }
       }
     }
+    invalidateNotesCache();
   }
 
   return { discovered: files.length, created, updated, removed };
@@ -321,32 +424,42 @@ export async function listNotes(filters?: {
   folderPath?: string;
   tags?: string[];
   search?: string;
+  /** Page size. Omit for all (agent context injection caps elsewhere). */
+  limit?: number;
+  offset?: number;
 }, projectRoot?: string): Promise<Note[]> {
-  if (projectRoot) await syncProjectDocuments(projectRoot);
+  if (projectRoot) await ensureProjectSync(projectRoot);
+
+  const isProjectVisible = (id: string) => {
+    const identity = projectDocumentIdentity(id);
+    return !identity || !projectRoot || identity.projectRoot === resolve(projectRoot);
+  };
+
+  // Full-text search goes through the FTS index, not a LIKE scan.
+  if (filters?.search?.trim()) {
+    const ids = ftsSearchIds(filters.search, filters.limit ?? 200);
+    if (ids.length === 0) return [];
+    const rows = await db.select().from(notes).where(inArray(notes.id, ids));
+    const byId = new Map(rows.map((r) => [r.id, r]));
+    let out = ids.map((id) => byId.get(id)).filter((r): r is typeof rows[number] => !!r);
+    if (filters.folderPath && filters.folderPath !== '/') {
+      out = out.filter((r) => r.folderPath.startsWith(filters.folderPath!));
+    }
+    out = out.filter((r) => isProjectVisible(r.id));
+    const start = filters.offset ?? 0;
+    return out.slice(start, filters.limit ? start + filters.limit : undefined).map(rowToNote);
+  }
+
   let q = db.select().from(notes).$dynamic();
-  const conditions = [];
-
   if (filters?.folderPath && filters.folderPath !== '/') {
-    conditions.push(like(notes.folderPath, filters.folderPath + '%'));
+    q = q.where(like(notes.folderPath, filters.folderPath + '%'));
   }
+  q = q.orderBy(notes.updatedAt);
+  if (filters?.limit) q = q.limit(filters.limit);
+  if (filters?.offset) q = q.offset(filters.offset);
 
-  if (filters?.search) {
-    const term = '%' + filters.search + '%';
-    const searchCond = or(like(notes.title, term), like(notes.content, term));
-    if (searchCond) conditions.push(searchCond);
-  }
-
-  if (conditions.length > 0) {
-    q = q.where(and(...conditions));
-  }
-
-  const rows = await q.orderBy(notes.updatedAt);
-  return rows
-    .filter((row) => {
-      const identity = projectDocumentIdentity(row.id);
-      return !identity || !projectRoot || identity.projectRoot === resolve(projectRoot);
-    })
-    .map(rowToNote);
+  const rows = await q;
+  return rows.filter((row) => isProjectVisible(row.id)).map(rowToNote);
 }
 
 // ============================================================================
@@ -411,6 +524,7 @@ export async function linkNotes(
   } catch {
     // Already linked
   }
+  graphCache.clear();
 
   if (options?.syncContent !== false) {
     const linkPattern = new RegExp(
@@ -440,6 +554,7 @@ export async function unlinkNotes(
   await db
     .delete(noteLinks)
     .where(and(eq(noteLinks.fromNoteId, fromId), eq(noteLinks.toNoteId, toId)));
+  graphCache.clear();
 
   if (options?.syncContent !== false) {
     const linkPattern = new RegExp(
@@ -453,24 +568,28 @@ export async function unlinkNotes(
   }
 }
 
-/** Update [[wikilinks]] across the vault when a note is renamed. */
-async function propagateTitleRename(oldTitle: string, newTitle: string): Promise<void> {
-  const allNotes = await db.select().from(notes);
-  const pattern = new RegExp(
-    `(!?)\\[\\[${escapeRegExp(oldTitle)}((?:[|#][^\\]]+?)?)\\]\\]`,
-    'g',
-  );
+/** Update [[wikilinks]] across the vault when a note is renamed. Only the notes
+ *  that actually link to the renamed note are touched — found via the link graph
+ *  (indexed), not a full-table scan. */
+async function propagateTitleRename(renamedId: string, oldTitle: string, newTitle: string): Promise<void> {
+  // Notes that link to the renamed one are exactly its backlinks.
+  const backlinks = await db
+    .select({ id: noteLinks.fromNoteId })
+    .from(noteLinks)
+    .where(eq(noteLinks.toNoteId, renamedId));
+  if (backlinks.length === 0) return;
 
-  for (const row of allNotes) {
+  const pattern = new RegExp(`(!?)\\[\\[${escapeRegExp(oldTitle)}((?:[|#][^\\]]+?)?)\\]\\]`, 'g');
+  const ids = backlinks.map((b) => b.id);
+  const rows = await db.select().from(notes).where(inArray(notes.id, ids));
+  for (const row of rows) {
+    pattern.lastIndex = 0;
     if (!pattern.test(row.content)) continue;
     pattern.lastIndex = 0;
     const updated = row.content.replace(pattern, `$1[[${newTitle}$2]]`);
-    await db
-      .update(notes)
-      .set({ content: updated, updatedAt: new Date() })
-      .where(eq(notes.id, row.id));
-    await parseAndSaveLinks(row.id, updated);
+    await db.update(notes).set({ content: updated, updatedAt: new Date() }).where(eq(notes.id, row.id));
   }
+  graphCache.clear();
 }
 
 function escapeRegExp(value: string): string {
@@ -489,7 +608,7 @@ export interface NoteCatalogEntry {
 
 /** Compact index of every note for agent discovery and recall. */
 export async function getNotesCatalog(projectRoot?: string): Promise<NoteCatalogEntry[]> {
-  if (projectRoot) await syncProjectDocuments(projectRoot);
+  if (projectRoot) await ensureProjectSync(projectRoot);
   const graph = await getGraphData(projectRoot);
   const linkCountById = new Map(graph.nodes.map((n) => [n.id, n.linkCount]));
   const rows = await db.select().from(notes).orderBy(notes.updatedAt);
@@ -561,27 +680,34 @@ export async function recallNotes(options: RecallNotesOptions): Promise<NoteWith
 
 /**
  * Re-parse wikilinks in a note's content and update the noteLinks table.
- * Removes all previous outgoing edges from this note, then re-inserts.
+ * Removes all previous outgoing edges from this note, then re-inserts resolved
+ * ones. Resolution is a single indexed map lookup per link (title OR alias) —
+ * no per-link database round-trip.
  */
-export async function parseAndSaveLinks(noteId: string, content: string): Promise<void> {
-  // Remove old outgoing links from this note
+export async function parseAndSaveLinks(
+  noteId: string,
+  content: string,
+  opts?: { index?: Map<string, string>; skipInvalidate?: boolean },
+): Promise<void> {
   await db.delete(noteLinks).where(eq(noteLinks.fromNoteId, noteId));
 
   const titles = extractWikilinks(content);
-
-  for (const title of titles) {
-    const target = await getNoteByTitle(title);
-    if (target && target.id !== noteId) {
+  if (titles.length > 0) {
+    const index = opts?.index ?? (await getResolveIndex());
+    const targetIds = new Set<string>();
+    for (const title of titles) {
+      const id = index.get(title.toLowerCase());
+      if (id && id !== noteId) targetIds.add(id);
+    }
+    for (const toId of targetIds) {
       try {
-        await db.insert(noteLinks).values({
-          fromNoteId: noteId,
-          toNoteId: target.id,
-        });
+        await db.insert(noteLinks).values({ fromNoteId: noteId, toNoteId: toId });
       } catch {
         // Ignore duplicate primary key (already linked)
       }
     }
   }
+  if (!opts?.skipInvalidate) graphCache.clear();
 }
 
 // ============================================================================
@@ -589,6 +715,10 @@ export async function parseAndSaveLinks(noteId: string, content: string): Promis
 // ============================================================================
 
 export async function getGraphData(projectRoot?: string): Promise<GraphData> {
+  const cacheKey = projectRoot ? resolve(projectRoot) : '';
+  const cached = graphCache.get(cacheKey);
+  if (cached) return cached;
+
   const allRows = await db.select().from(notes);
   const allNotes = allRows.filter((row) => {
     const identity = projectDocumentIdentity(row.id);
@@ -619,12 +749,31 @@ export async function getGraphData(projectRoot?: string): Promise<GraphData> {
     includeInContext: Boolean(n.includeInContext),
   }));
 
-  const edges: GraphEdge[] = allLinks.map((l) => ({
-    from: l.fromNoteId,
-    to: l.toNoteId,
-  }));
+  const edges: GraphEdge[] = allLinks.map((l) => ({ from: l.fromNoteId, to: l.toNoteId }));
 
-  return { nodes, edges };
+  // Ghost nodes: [[wikilinks]] whose target title/alias doesn't exist yet.
+  // Resolve against title + aliases so an alias link isn't falsely "unresolved".
+  const resolveMap = await getResolveIndex();
+  const titleSet = new Set(allNotes.map((n) => n.title.toLowerCase()));
+  const ghostNodes = new Map<string, GraphNode>(); // lowered title -> ghost node
+  for (const n of allNotes) {
+    for (const ref of extractWikilinks(n.content)) {
+      const key = ref.toLowerCase();
+      if (resolveMap.has(key) || titleSet.has(key)) continue; // resolved
+      let ghost = ghostNodes.get(key);
+      if (!ghost) {
+        ghost = { id: 'ghost:' + key, title: ref, folderPath: '/', tags: [], linkCount: 0, includeInContext: false, unresolved: true };
+        ghostNodes.set(key, ghost);
+        nodes.push(ghost);
+      }
+      ghost.linkCount += 1;
+      edges.push({ from: n.id, to: ghost.id, unresolved: true });
+    }
+  }
+
+  const data = { nodes, edges };
+  graphCache.set(cacheKey, data);
+  return data;
 }
 
 // ============================================================================
@@ -673,25 +822,69 @@ export async function getFolderTree(projectRoot?: string): Promise<FolderNode[]>
 }
 
 // ============================================================================
-// Search
+// Search (FTS5 — indexed & ranked)
 // ============================================================================
 
-export async function searchNotes(query: string): Promise<Note[]> {
-  if (!query.trim()) return listNotes();
+/** Build an FTS5 MATCH expression: prefix-match each alphanumeric token, ANDed.
+ *  Tokens are alphanumeric only, so they're safe to interpolate as `token*`. */
+function ftsMatchExpr(query: string): string {
+  const tokens = query.toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? [];
+  return tokens.map((t) => `${t}*`).join(' ');
+}
 
-  const term = '%' + query + '%';
-  const cond = or(
-    like(notes.title, term),
-    like(notes.content, term),
-    like(notes.tags, term),
-  );
-  const rows = await db
-    .select()
-    .from(notes)
-    .where(cond!)
-    .limit(20);
+/** Ranked full-text search over the notes_fts index. Falls back to a bounded
+ *  LIKE scan only if the FTS table is somehow unavailable (pre-migration DBs). */
+function ftsSearchIds(query: string, limit: number): string[] {
+  const match = ftsMatchExpr(query);
+  if (!match) return [];
+  const raw = getDb();
+  try {
+    const rows = raw
+      .query('SELECT note_id FROM notes_fts WHERE notes_fts MATCH ? ORDER BY bm25(notes_fts) LIMIT ?')
+      .all(match, limit) as Array<{ note_id: string }>;
+    return rows.map((r) => r.note_id);
+  } catch {
+    const term = '%' + query + '%';
+    const rows = raw
+      .query('SELECT id FROM notes WHERE title LIKE ? OR content LIKE ? LIMIT ?')
+      .all(term, term, limit) as Array<{ id: string }>;
+    return rows.map((r) => r.id);
+  }
+}
 
-  return rows.map(rowToNote);
+export async function searchNotes(query: string, limit = 50): Promise<Note[]> {
+  if (!query.trim()) return listNotes({ limit });
+  const ids = ftsSearchIds(query, limit);
+  if (ids.length === 0) return [];
+  const rows = await db.select().from(notes).where(inArray(notes.id, ids));
+  const byId = new Map(rows.map((r) => [r.id, r]));
+  // Preserve FTS rank order.
+  return ids.map((id) => byId.get(id)).filter((r): r is typeof rows[number] => !!r).map(rowToNote);
+}
+
+// ============================================================================
+// Link resolution index (title + frontmatter aliases → note id)
+// ============================================================================
+
+/** Lowercased title|alias → note id. Cached; invalidated on any note change. */
+async function getResolveIndex(): Promise<Map<string, string>> {
+  if (resolveIndexCache) return resolveIndexCache;
+  const rows = await db.select({ id: notes.id, title: notes.title, content: notes.content }).from(notes);
+  const map = new Map<string, string>();
+  for (const r of rows) {
+    map.set(r.title.toLowerCase(), r.id);
+    for (const alias of parseFrontmatter(r.content).aliases) {
+      const key = alias.toLowerCase();
+      if (!map.has(key)) map.set(key, r.id);
+    }
+  }
+  resolveIndexCache = map;
+  return map;
+}
+
+/** Resolve a wikilink reference (title or alias) to a note id. */
+export async function resolveNoteRef(ref: string): Promise<string | null> {
+  return (await getResolveIndex()).get(ref.trim().toLowerCase()) ?? null;
 }
 
 // ============================================================================

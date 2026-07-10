@@ -641,7 +641,7 @@
       <!-- The agent name only appears when the agent is actually saying
            something — tool calls, results, and reasoning stay unlabeled to
            keep the feed compact. -->
-      {#if entry.type === 'user_message' || entry.type === 'content' || entry.type === 'thought' || entry.type === 'error'}
+      {#if (entry.type === 'user_message' || entry.type === 'content' || entry.type === 'thought' || entry.type === 'error') && entry.agentName}
         <span class="text-xs font-semibold tracking-wide {entry.glowClass === 'glow-kory' ? 'text-yellow-400' : entry.type === 'user_message' ? 'text-accent' : 'text-text-secondary'}">
           {entry.agentName}
         </span>

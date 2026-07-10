@@ -133,7 +133,10 @@ function kickBusyWatchdog(sessionId: string | undefined) {
 function stopBusyWatchdog(sessionId: string | undefined) {
   if (!sessionId) return;
   const t = busyWatchdogs.get(sessionId);
-  if (t) { clearTimeout(t); busyWatchdogs.delete(sessionId); }
+  if (t) {
+    clearTimeout(t);
+    busyWatchdogs.delete(sessionId);
+  }
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -244,10 +247,14 @@ function handleMessage(msg: WSMessage) {
       if (p.status === 'done' || p.status === 'idle' || p.status === 'waiting') {
         maybeClearBusy(msg.sessionId ?? agents.get(p.agentId)?.sessionId);
         const completedSessionId = msg.sessionId ?? agents.get(p.agentId)?.sessionId;
-        if (p.agentId === 'kory-manager' && completedSessionId && completedSessionId === sessionStore.activeSessionId) {
-          void sessionStore.fetchMessages(completedSessionId).then((messages) =>
-            loadSessionMessages(completedSessionId, messages),
-          );
+        if (
+          p.agentId === 'kory-manager' &&
+          completedSessionId &&
+          completedSessionId === sessionStore.activeSessionId
+        ) {
+          void sessionStore
+            .fetchMessages(completedSessionId)
+            .then((messages) => loadSessionMessages(completedSessionId, messages));
         }
       }
       break;
@@ -393,7 +400,11 @@ function handleMessage(msg: WSMessage) {
           agentName: agentStore.getAgentFeedLabel(p.agentId),
           glowClass: feedStore.resolveGlowClass(agents.get(p.agentId)?.identity),
           text: `Calling tool: ${p.toolCall.name}`,
-          metadata: { toolCall: p.toolCall, sessionId: msg.sessionId, sourceProvider: p.sourceProvider },
+          metadata: {
+            toolCall: p.toolCall,
+            sessionId: msg.sessionId,
+            sourceProvider: p.sourceProvider,
+          },
         });
       }
       break;
@@ -405,8 +416,14 @@ function handleMessage(msg: WSMessage) {
       // Background terminals are first-class: show start/exit in the feed as
       // terminal entries so long-running commands never vanish from view.
       const p = msg.payload as {
-        id: string; name: string; command: string; pid?: number;
-        exitCode?: number; status?: string; willRestart?: boolean; logsTail?: string;
+        id: string;
+        name: string;
+        command: string;
+        pid?: number;
+        exitCode?: number;
+        status?: string;
+        willRestart?: boolean;
+        logsTail?: string;
       };
       if (isForActiveSession) {
         const started = msg.type === 'process.started';
@@ -461,7 +478,11 @@ function handleMessage(msg: WSMessage) {
           text: p.toolResult.isError
             ? `Tool error: ${p.toolResult.output}`
             : `Tool result (${p.toolResult.durationMs.toFixed(0)}ms): ${p.toolResult.output}`,
-          metadata: { toolResult: p.toolResult, sessionId: msg.sessionId, sourceProvider: p.sourceProvider },
+          metadata: {
+            toolResult: p.toolResult,
+            sessionId: msg.sessionId,
+            sourceProvider: p.sourceProvider,
+          },
         });
       }
       break;
@@ -680,7 +701,7 @@ function handleMessage(msg: WSMessage) {
           timestamp: msg.timestamp,
           type: 'error',
           agentId: '',
-          agentName: 'System',
+          agentName: '',
           glowClass: '',
           text: errorText,
         });
@@ -692,13 +713,15 @@ function handleMessage(msg: WSMessage) {
       const p = msg.payload as Partial<NotificationPayload>;
       if (!isForActiveSession) break;
       const notificationType = p.type ?? 'info';
-      const text = p.title ? `${p.title}: ${p.message ?? ''}`.trim() : (p.message ?? 'Notification');
+      const text = p.title
+        ? `${p.title}: ${p.message ?? ''}`.trim()
+        : (p.message ?? 'Notification');
       pushToast(notificationType, text);
       feedStore.addFeedEntry({
         timestamp: msg.timestamp,
         type: notificationType === 'error' ? 'error' : 'system',
         agentId: '',
-        agentName: 'System',
+        agentName: '',
         glowClass: '',
         text,
         metadata: { notificationType },

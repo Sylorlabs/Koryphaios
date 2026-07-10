@@ -83,8 +83,13 @@
   $effect(() => {
     const allNotes = (agentSettingsStore.settings.managerNotes ?? {}) as unknown as Record<string, string>;
     for (const cat of MODEL_ACCESS_CATEGORIES) {
-      if (!notesDrafts[cat.id]?.dirty) {
-        notesDrafts[cat.id] = { text: allNotes[cat.id] ?? '', dirty: false };
+      const draft = notesDrafts[cat.id];
+      const next = allNotes[cat.id] ?? '';
+      // Only write when the text actually changed — unconditionally assigning a
+      // fresh object re-triggers this effect (it reads notesDrafts too) and
+      // blows Svelte's max update depth, freezing all reactivity.
+      if (!draft?.dirty && draft?.text !== next) {
+        notesDrafts[cat.id] = { text: next, dirty: false };
       }
     }
   });

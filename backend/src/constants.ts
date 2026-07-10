@@ -4,6 +4,24 @@
 export const VERSION = '1.0.0';
 
 /**
+ * Frontend/Backend compatibility contract.
+ *
+ * `minFrontend` is the oldest frontend build allowed to operate normally
+ * against this backend. Older frontends see the mismatch overlay and halt
+ * rather than running in a broken half-state. `currentFrontend` is the
+ * frontend build that shipped in lockstep with THIS backend build
+ * (informational only).
+ *
+ * Bump `minFrontend` whenever a backend change breaks the public /api or ws
+ * contract older frontends rely on. Bump `currentFrontend` whenever a new
+ * frontend ships alongside this backend.
+ */
+export const COMPAT = {
+  minFrontend: '1.0.0',
+  currentFrontend: '1.0.0',
+} as const;
+
+/**
  * Session and Message Limits
  */
 export const SESSION = {

@@ -29,9 +29,15 @@
     let heightCache = $state<Map<string, number>>(new Map());
     
     // Scroll state
-    // Initialize to a large value if follow is true to render bottom items first
-    let scrollTop = $state(follow ? Number.MAX_SAFE_INTEGER : 0);
+    let scrollTop = $state(0);
     let clientHeight = $state(800);
+
+    // Initialize scrollTop based on follow prop
+    $effect(() => {
+        if (follow) {
+            scrollTop = Number.MAX_SAFE_INTEGER;
+        }
+    });
     
     // Computed positions
     let positions = $derived.by(() => {

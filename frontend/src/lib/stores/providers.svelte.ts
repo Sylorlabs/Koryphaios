@@ -108,11 +108,8 @@ export const browserAuthProviders = new Set([
   'claude',
   'grok',
   'antigravity',
-  // NOTE: plain 'google' is the AI Studio / Gemini API-KEY provider — it must
-  // NOT use the gcloud browser-OAuth flow (that flow dead-ends with an auth
-  // code and no field to paste it). Only 'google-subscription' (Gemini CLI
-  // OAuth) is a real browser-auth provider.
-  'google-subscription',
+  // NOTE: 'google-subscription' (the Gemini CLI) is RETIRED — never re-add
+  // it. Gemini models are served by the plain 'google' (API-key) provider.
 ]);
 
 const PROVIDER_LABELS: Record<string, string> = {
@@ -202,10 +199,6 @@ function createProvidersStore() {
   let codexAuthMessage = $state<string>('');
   let codexPollTimer: ReturnType<typeof setTimeout> | null = null;
 
-  let googleDeviceAuth = $state<DeviceAuthInfo | null>(null);
-  let googleAuthStatus = $state<'idle' | 'pending' | 'connected' | 'error'>('idle');
-  let googleAuthMessage = $state<string>('');
-  let googlePollTimer: ReturnType<typeof setTimeout> | null = null;
 
   // ─── Helpers ───────────────────────────────────────────────────────────
 
@@ -422,22 +415,33 @@ function createProvidersStore() {
     }
   }
 
-  function clearGooglePollTimer(): void {
-    if (googlePollTimer) {
-      clearTimeout(googlePollTimer);
-      googlePollTimer = null;
-    }
-  }
-
   function destroy(): void {
     clearCopilotPollTimer();
     clearKimiCodePollTimer();
     clearCodexPollTimer();
-    clearGooglePollTimer();
+  }
+
+  // Device codes are short-lived. Every poll tick checks the deadline so an
+  // unapproved sign-in ends with an honest "expired" message instead of
+  // polling forever behind a "Waiting…" line.
+  const AUTH_EXPIRED_MESSAGE = 'Sign-in code expired — click Auth to start a new one.';
+
+  function deviceAuthCountdown(expiresAt: number | undefined): string {
+    if (!expiresAt) return '';
+    const mins = Math.max(1, Math.ceil((expiresAt - Date.now()) / 60_000));
+    return ` Code expires in ~${mins} min.`;
   }
 
   async function pollCopilotAuth(deviceCode: string, intervalMs: number): Promise<void> {
     clearCopilotPollTimer();
+    if (copilotDeviceAuth && Date.now() > copilotDeviceAuth.expiresAt) {
+      copilotAuthStatus = 'error';
+      copilotAuthMessage = AUTH_EXPIRED_MESSAGE;
+      browserAuthMessages.copilot = copilotAuthMessage;
+      browserAuthPending.copilot = false;
+      copilotDeviceAuth = null;
+      return;
+    }
     try {
       const res = await apiFetch(apiUrl('/api/providers/copilot/auth/poll'), {
         method: 'POST',
@@ -488,6 +492,7 @@ function createProvidersStore() {
 
       copilotAuthStatus = 'pending';
       browserAuthPending.copilot = true;
+      browserAuthMessages.copilot = `${copilotAuthMessage}${deviceAuthCountdown(copilotDeviceAuth?.expiresAt)}`;
       copilotPollTimer = setTimeout(() => {
         void pollCopilotAuth(deviceCode, intervalMs);
       }, intervalMs);
@@ -502,6 +507,14 @@ function createProvidersStore() {
 
   async function pollKimiCodeAuth(deviceCode: string, intervalMs: number): Promise<void> {
     clearKimiCodePollTimer();
+    if (kimicodeDeviceAuth && Date.now() > kimicodeDeviceAuth.expiresAt) {
+      kimicodeAuthStatus = 'error';
+      kimicodeAuthMessage = AUTH_EXPIRED_MESSAGE;
+      browserAuthMessages.kimicode = kimicodeAuthMessage;
+      browserAuthPending.kimicode = false;
+      kimicodeDeviceAuth = null;
+      return;
+    }
     try {
       const res = await apiFetch(apiUrl('/api/providers/kimicode/auth/poll'), {
         method: 'POST',
@@ -551,6 +564,7 @@ function createProvidersStore() {
 
       kimicodeAuthStatus = 'pending';
       browserAuthPending.kimicode = true;
+      browserAuthMessages.kimicode = `${kimicodeAuthMessage}${deviceAuthCountdown(kimicodeDeviceAuth?.expiresAt)}`;
       kimicodePollTimer = setTimeout(() => {
         void pollKimiCodeAuth(deviceCode, intervalMs);
       }, intervalMs);
@@ -571,6 +585,14 @@ function createProvidersStore() {
     label?: string,
   ): Promise<void> {
     clearCodexPollTimer();
+    if (codexDeviceAuth && Date.now() > codexDeviceAuth.expiresAt) {
+      codexAuthStatus = 'error';
+      codexAuthMessage = AUTH_EXPIRED_MESSAGE;
+      browserAuthMessages.codex = codexAuthMessage;
+      browserAuthPending.codex = false;
+      codexDeviceAuth = null;
+      return;
+    }
     try {
       const res = await apiFetch(apiUrl('/api/providers/codex/auth/poll'), {
         method: 'POST',
@@ -606,7 +628,7 @@ function createProvidersStore() {
         await syncProviderUi('codex', {
           openModelSelector: true,
           successMessage: saveAccount
-            ? `Codex profile "${data.data?.savedAccount?.label ?? label ?? 'profile'}" saved`
+            ? `Codex account "${data.data?.savedAccount?.label ?? label ?? 'account'}" saved`
             : 'Codex connected',
         });
         if (saveAccount) {
@@ -630,6 +652,7 @@ function createProvidersStore() {
 
       codexAuthStatus = 'pending';
       browserAuthPending.codex = true;
+      browserAuthMessages.codex = `${codexAuthMessage}${deviceAuthCountdown(codexDeviceAuth?.expiresAt)}`;
       codexPollTimer = setTimeout(() => {
         void pollCodexAuth(deviceAuthId, userCode, intervalMs, saveAccount, label);
       }, intervalMs);
@@ -639,65 +662,6 @@ function createProvidersStore() {
       codexAuthMessage = message;
       browserAuthMessages.codex = codexAuthMessage;
       browserAuthPending.codex = false;
-    }
-  }
-
-  async function pollGoogleAuth(deviceCode: string, intervalMs: number): Promise<void> {
-    clearGooglePollTimer();
-    try {
-      const res = await apiFetch(apiUrl('/api/providers/google-subscription/auth/poll'), {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ deviceCode }),
-      });
-      const data = await parseJsonResponse<{
-        ok?: boolean;
-        error?: string;
-        data?: { status?: string; error?: string; errorDescription?: string };
-      }>(res);
-
-      if (!data.ok) {
-        googleAuthStatus = 'error';
-        googleAuthMessage = data.error ?? 'Google sign-in failed';
-        browserAuthMessages['google-subscription'] = googleAuthMessage;
-        browserAuthPending['google-subscription'] = false;
-        return;
-      }
-
-      const status = data.data?.status;
-      if (status === 'connected') {
-        googleAuthStatus = 'connected';
-        googleAuthMessage = 'Google connected';
-        browserAuthMessages['google-subscription'] = googleAuthMessage;
-        browserAuthPending['google-subscription'] = false;
-        googleDeviceAuth = null;
-        await syncProviderUi('google-subscription', {
-          openModelSelector: true,
-          successMessage: 'Google connected',
-        });
-        return;
-      }
-
-      const pollError = data.data?.error;
-      if (pollError && pollError !== 'authorization_pending') {
-        googleAuthStatus = 'error';
-        googleAuthMessage = data.data?.errorDescription ?? pollError;
-        browserAuthMessages['google-subscription'] = googleAuthMessage;
-        browserAuthPending['google-subscription'] = false;
-        return;
-      }
-
-      googleAuthStatus = 'pending';
-      browserAuthPending['google-subscription'] = true;
-      googlePollTimer = setTimeout(() => {
-        void pollGoogleAuth(deviceCode, intervalMs);
-      }, intervalMs);
-    } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : 'Google sign-in failed';
-      googleAuthStatus = 'error';
-      googleAuthMessage = message;
-      browserAuthMessages['google-subscription'] = googleAuthMessage;
-      browserAuthPending['google-subscription'] = false;
     }
   }
 
@@ -736,7 +700,7 @@ function createProvidersStore() {
   ): Promise<boolean> {
     const trimmed = label.trim();
     if (!trimmed) {
-      toastStore.error('Enter a profile name');
+      toastStore.error('Enter an account name');
       return false;
     }
     try {
@@ -857,7 +821,7 @@ function createProvidersStore() {
         tokenInputs[name] = '';
         urlInputs[name] = '';
         const status = await refreshProviderStatus(name, { warmModelList: true });
-        toastStore.success(`${name} connected ✓`);
+        toastStore.success(`${getProviderDisplayLabel(name)} connected ✓`);
         const openModelSelector =
           !!status && !status.hideModelSelector && (status.allAvailableModels?.length ?? 0) > 0;
         return { ok: true, openModelSelector, status };
@@ -991,19 +955,6 @@ function createProvidersStore() {
             options.label,
           );
         }
-      } else if (name === 'google-subscription' && data.data.userCode && data.data.deviceCode) {
-        googleDeviceAuth = {
-          deviceCode: data.data.deviceCode,
-          userCode: data.data.userCode,
-          verificationUri: data.data.verificationUri ?? '',
-          verificationUriComplete: data.data.verificationUriComplete,
-          expiresAt: Date.now() + (data.data.expiresIn || 1800) * 1000,
-          intervalMs: Math.max(1000, (data.data.interval ?? 5) * 1000),
-        };
-        googleAuthStatus = 'pending';
-        googleAuthMessage = 'Approve Google Device Auth in the browser to finish connecting.';
-        browserAuthMessages[name] = googleAuthMessage;
-        void pollGoogleAuth(googleDeviceAuth.deviceCode, googleDeviceAuth.intervalMs);
       } else {
         toastStore.info(data.data.message ?? 'Finish sign-in in the browser, then confirm here.');
       }
@@ -1055,7 +1006,7 @@ function createProvidersStore() {
       const data = await parseJsonResponse<{ ok?: boolean }>(res);
       if (data.ok) {
         await loadProvidersFromApi();
-        toastStore.info(`${name} disconnected`);
+        toastStore.info(`${getProviderDisplayLabel(name)} disconnected`);
       }
     } catch {
       // ignore
@@ -1642,15 +1593,6 @@ function createProvidersStore() {
     },
     get codexAuthMessage() {
       return codexAuthMessage;
-    },
-    get googleDeviceAuth() {
-      return googleDeviceAuth;
-    },
-    get googleAuthStatus() {
-      return googleAuthStatus;
-    },
-    get googleAuthMessage() {
-      return googleAuthMessage;
     },
     get tokenPlaceholders() {
       return TOKEN_PLACEHOLDERS;

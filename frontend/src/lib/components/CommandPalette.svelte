@@ -45,6 +45,7 @@
     // Always available
     { id: 'new_project', label: 'New Project', description: 'Create a new project workspace', icon: Plus, shortcut: 'P', category: 'Project' },
     { id: 'new_session', label: 'New Session', description: 'Start a fresh conversation', icon: Plus, shortcut: 'N', category: 'Session' },
+    { id: 'resume_chat', label: 'Resume Previous Chat', description: 'Switch back to the most recent earlier chat', icon: Activity, category: 'Session' },
     { id: 'open_project_file', label: 'Import Project', description: 'Load project from a local file', icon: FileCode, category: 'Project' },
     { id: 'open_project_folder', label: 'Open Project From Folder', description: 'Load project from a folder on your computer', icon: FolderOpen, category: 'Project' },
     { id: 'session_compact', label: 'Compact Session', description: 'Request an implementation-focused session summary', icon: FileCode, category: 'Session' },
@@ -54,6 +55,10 @@
     { id: 'toggle_yolo', label: 'Toggle YOLO Mode', description: 'Bypass all confirmation dialogs', icon: Zap, shortcut: 'Y', category: 'System' },
     { id: 'open_settings', label: 'Settings', description: 'Configure providers and preferences', icon: Settings, shortcut: ',', category: 'System' },
     { id: 'clear_feed', label: 'Clear Feed', description: 'Remove all messages from view', icon: Trash2, category: 'System' },
+    { id: 'toggle_notes', label: 'Toggle Notes', description: 'Show or hide the project notes panel', icon: FileCode, shortcut: 'Shift+N', category: 'View' },
+    // Mode switches — each only shows in the OTHER mode
+    { id: 'mode_advanced', label: 'Switch to Advanced Mode', description: 'Full controls: git panel, agents, cost tracking', icon: Command, category: 'System', mode: 'beginner' },
+    { id: 'mode_beginner', label: 'Switch to Beginner Mode', description: 'Simplified UI with fewer controls', icon: Command, category: 'System', mode: 'advanced' },
     // Advanced only
     { id: 'toggle_git', label: 'Toggle Source Control', description: 'Show or hide the Git panel', icon: GitBranch, category: 'View', mode: 'advanced' },
     { id: 'toggle_agents', label: 'Toggle Active Agents', description: 'Show or hide the agents panel', icon: Activity, category: 'View', mode: 'advanced' },
