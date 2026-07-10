@@ -13,7 +13,14 @@ interface CollaborationPolicy {
   modelCatalog: Array<{ id: string; label: string; provider: string; reasoningLevels: string[] }>;
   joinMode: 'approval' | 'auto';
   defaultTierId: string;
-  accessTiers: Array<{ id: string; name: string; color: string; allowedModels: string[]; reasoningByModel: Record<string, string[]>; permissions: Record<string, any> }>;
+  accessTiers: Array<{
+    id: string;
+    name: string;
+    color: string;
+    allowedModels: string[];
+    reasoningByModel: Record<string, string[]>;
+    permissions: Record<string, any>;
+  }>;
   allowedModels: string[];
   allowPrompts: boolean;
   requirePromptApproval: boolean;
@@ -22,14 +29,108 @@ interface CollaborationPolicy {
   showParticipants: boolean;
 }
 const DEFAULT_POLICY: CollaborationPolicy = {
-  sessionName: 'Team session', modelCatalog: [], joinMode: 'approval', defaultTierId: 'viewer', accessTiers: [
-    { id: 'viewer', name: 'Viewer', color: '#60a5fa', allowedModels: [], reasoningByModel: {}, permissions: { viewChat: true, viewSystemMessages: false, viewDiffs: true, viewAgentStatus: true, viewParticipants: true, submitPrompts: false, autoExecutePrompts: false, useTools: false, fullSystemAccess: false, readPaths: [], writePaths: [], commandAllowlist: [], commandBlocklist: [] } },
-    { id: 'collaborator', name: 'Collaborator', color: '#f59e0b', allowedModels: [], reasoningByModel: {}, permissions: { viewChat: true, viewSystemMessages: false, viewDiffs: true, viewAgentStatus: true, viewParticipants: true, submitPrompts: true, autoExecutePrompts: false, useTools: false, fullSystemAccess: false, readPaths: [], writePaths: [], commandAllowlist: [], commandBlocklist: [] } },
-    { id: 'yolo', name: 'YOLO', color: '#ef4444', allowedModels: ['*'], reasoningByModel: {}, permissions: { viewChat: true, viewSystemMessages: true, viewDiffs: true, viewAgentStatus: true, viewParticipants: true, submitPrompts: true, autoExecutePrompts: true, useTools: true, fullSystemAccess: true, readPaths: ['**'], writePaths: ['**'], commandAllowlist: ['*'], commandBlocklist: [], useRemoteProviders: true } },
-    { id: 'models', name: 'Model Access', color: '#a78bfa', allowedModels: ['*'], reasoningByModel: {}, permissions: { viewChat: false, viewSystemMessages: false, viewDiffs: false, viewAgentStatus: false, viewParticipants: false, submitPrompts: false, autoExecutePrompts: false, useTools: true, fullSystemAccess: false, readPaths: [], writePaths: [], commandAllowlist: [], commandBlocklist: [], useRemoteProviders: true } },
+  sessionName: 'Team session',
+  modelCatalog: [],
+  joinMode: 'approval',
+  defaultTierId: 'viewer',
+  accessTiers: [
+    {
+      id: 'viewer',
+      name: 'Viewer',
+      color: '#60a5fa',
+      allowedModels: [],
+      reasoningByModel: {},
+      permissions: {
+        viewChat: true,
+        viewSystemMessages: false,
+        viewDiffs: true,
+        viewAgentStatus: true,
+        viewParticipants: true,
+        submitPrompts: false,
+        autoExecutePrompts: false,
+        useTools: false,
+        fullSystemAccess: false,
+        readPaths: [],
+        writePaths: [],
+        commandAllowlist: [],
+        commandBlocklist: [],
+      },
+    },
+    {
+      id: 'collaborator',
+      name: 'Collaborator',
+      color: '#f59e0b',
+      allowedModels: [],
+      reasoningByModel: {},
+      permissions: {
+        viewChat: true,
+        viewSystemMessages: false,
+        viewDiffs: true,
+        viewAgentStatus: true,
+        viewParticipants: true,
+        submitPrompts: true,
+        autoExecutePrompts: false,
+        useTools: false,
+        fullSystemAccess: false,
+        readPaths: [],
+        writePaths: [],
+        commandAllowlist: [],
+        commandBlocklist: [],
+      },
+    },
+    {
+      id: 'yolo',
+      name: 'YOLO',
+      color: '#ef4444',
+      allowedModels: ['*'],
+      reasoningByModel: {},
+      permissions: {
+        viewChat: true,
+        viewSystemMessages: true,
+        viewDiffs: true,
+        viewAgentStatus: true,
+        viewParticipants: true,
+        submitPrompts: true,
+        autoExecutePrompts: true,
+        useTools: true,
+        fullSystemAccess: true,
+        readPaths: ['**'],
+        writePaths: ['**'],
+        commandAllowlist: ['*'],
+        commandBlocklist: [],
+        useRemoteProviders: true,
+      },
+    },
+    {
+      id: 'models',
+      name: 'Model Access',
+      color: '#a78bfa',
+      allowedModels: ['*'],
+      reasoningByModel: {},
+      permissions: {
+        viewChat: false,
+        viewSystemMessages: false,
+        viewDiffs: false,
+        viewAgentStatus: false,
+        viewParticipants: false,
+        submitPrompts: false,
+        autoExecutePrompts: false,
+        useTools: true,
+        fullSystemAccess: false,
+        readPaths: [],
+        writePaths: [],
+        commandAllowlist: [],
+        commandBlocklist: [],
+        useRemoteProviders: true,
+      },
+    },
   ],
-  allowedModels: [], allowPrompts: true, requirePromptApproval: true,
-  showDiffs: true, showAgentStatus: true, showParticipants: true,
+  allowedModels: [],
+  allowPrompts: true,
+  requirePromptApproval: true,
+  showDiffs: true,
+  showAgentStatus: true,
+  showParticipants: true,
 };
 
 // ─── Config ─────────────────────────────────────────────────────────────────
@@ -69,21 +170,27 @@ const sessions = new Map<string, Session>();
 function makeJoinCode(): string {
   const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
   let code = '';
-  do code = Array.from({ length: 8 }, () => alphabet[Math.floor(Math.random() * alphabet.length)]).join('');
-  while ([...sessions.values()].some(s => s.joinCode === code));
+  do
+    code = Array.from(
+      { length: 8 },
+      () => alphabet[Math.floor(Math.random() * alphabet.length)],
+    ).join('');
+  while ([...sessions.values()].some((s) => s.joinCode === code));
   return code;
 }
 
 function tierFor(session: Session, tierId: string) {
-  return session.policy.accessTiers.find(t => t.id === tierId)
-    ?? session.policy.accessTiers.find(t => t.id === session.policy.defaultTierId)
-    ?? session.policy.accessTiers[0];
+  return (
+    session.policy.accessTiers.find((t) => t.id === tierId) ??
+    session.policy.accessTiers.find((t) => t.id === session.policy.defaultTierId) ??
+    session.policy.accessTiers[0]
+  );
 }
 
 function pathAllowed(path: string, patterns: string[]): boolean {
   if (patterns.includes('**')) return true;
   const clean = path.replace(/^\.\//, '');
-  return patterns.some(pattern => {
+  return patterns.some((pattern) => {
     const prefix = pattern.replace(/\*\*?$/, '').replace(/^\.\//, '');
     return clean === prefix.replace(/\/$/, '') || clean.startsWith(prefix);
   });
@@ -93,7 +200,11 @@ function eventAllowed(event: any, tier: ReturnType<typeof tierFor>): boolean {
   if (!tier) return false;
   const p = tier.permissions;
   if (event.type === 'chat') return p.viewChat !== false;
-  if (event.type === 'diff') return p.viewDiffs !== false && pathAllowed(String(event.path || ''), p.readPaths?.length ? p.readPaths : ['**']);
+  if (event.type === 'diff')
+    return (
+      p.viewDiffs !== false &&
+      pathAllowed(String(event.path || ''), p.readPaths?.length ? p.readPaths : ['**'])
+    );
   if (event.type === 'agent-status') return p.viewAgentStatus !== false;
   if (event.type === 'log') return p.viewSystemMessages === true;
   return true;
@@ -461,7 +572,10 @@ const server = Bun.serve<WsData>({
     if (req.method === 'OPTIONS') return new Response(null, { status: 204, headers: cors });
 
     const json = (body: object, status = 200) =>
-      new Response(JSON.stringify(body), { status, headers: { ...cors, 'Content-Type': 'application/json' } });
+      new Response(JSON.stringify(body), {
+        status,
+        headers: { ...cors, 'Content-Type': 'application/json' },
+      });
 
     // Health
     if (url.pathname === '/health') {
@@ -471,7 +585,7 @@ const server = Bun.serve<WsData>({
     // Host creates / retrieves a session
     if (url.pathname === '/session' && req.method === 'POST') {
       if (!checkHostSecret(req)) return json({ ok: false, error: 'Unauthorized' }, 401);
-      const body = await req.json().catch(() => ({})) as any;
+      const body = (await req.json().catch(() => ({}))) as any;
       const sessionId: string = body.sessionId || randomBytes(12).toString('hex');
 
       if (!sessions.has(sessionId)) {
@@ -492,7 +606,12 @@ const server = Bun.serve<WsData>({
         exp: Date.now() + 48 * 60 * 60 * 1000,
       });
 
-      return json({ ok: true, sessionId, sessionToken, joinCode: sessions.get(sessionId)!.joinCode });
+      return json({
+        ok: true,
+        sessionId,
+        sessionToken,
+        joinCode: sessions.get(sessionId)!.joinCode,
+      });
     }
 
     // Host-owned policy is the relay's source of truth for every guest.
@@ -500,14 +619,26 @@ const server = Bun.serve<WsData>({
       if (!checkHostSecret(req)) return json({ ok: false, error: 'Unauthorized' }, 401);
       const session = sessions.get(url.pathname.split('/')[2]);
       if (!session) return json({ ok: false, error: 'Session not found' }, 404);
-      const patch = await req.json().catch(() => ({})) as Partial<CollaborationPolicy>;
-      session.policy = { ...DEFAULT_POLICY, ...session.policy, ...patch, requirePromptApproval: true };
+      const patch = (await req.json().catch(() => ({}))) as Partial<CollaborationPolicy>;
+      session.policy = {
+        ...DEFAULT_POLICY,
+        ...session.policy,
+        ...patch,
+        requirePromptApproval: true,
+      };
       const update = JSON.stringify({ type: 'policy-updated', policy: session.policy });
-      session.guests.forEach(g => {
-        if (!session.policy.accessTiers.some(t => t.id === g.tierId)) g.tierId = session.policy.defaultTierId;
+      session.guests.forEach((g) => {
+        if (!session.policy.accessTiers.some((t) => t.id === g.tierId))
+          g.tierId = session.policy.defaultTierId;
         g.ws.data.tierId = g.tierId;
         g.ws.send(update);
-        g.ws.send(JSON.stringify({ type: 'tier-updated', tier: tierFor(session, g.tierId), policy: session.policy }));
+        g.ws.send(
+          JSON.stringify({
+            type: 'tier-updated',
+            tier: tierFor(session, g.tierId),
+            policy: session.policy,
+          }),
+        );
       });
       return json({ ok: true, policy: session.policy });
     }
@@ -515,11 +646,22 @@ const server = Bun.serve<WsData>({
     // Native Koryphaios clients exchange a short host code for a signed guest URL.
     if (url.pathname.startsWith('/code/') && req.method === 'GET') {
       const code = decodeURIComponent(url.pathname.slice(6)).trim().toUpperCase();
-      const session = [...sessions.values()].find(s => s.joinCode === code);
+      const session = [...sessions.values()].find((s) => s.joinCode === code);
       if (!session) return json({ ok: false, error: 'Invalid or inactive join code' }, 404);
       const tierId = session.policy.defaultTierId;
-      const token = sign({ sessionId: session.id, role: 'guest', tierId, exp: Date.now() + 24 * 60 * 60 * 1000 });
-      return json({ ok: true, sessionId: session.id, sessionName: session.policy.sessionName, tierId, inviteUrl: `${url.protocol}//${url.host}/join?token=${encodeURIComponent(token)}` });
+      const token = sign({
+        sessionId: session.id,
+        role: 'guest',
+        tierId,
+        exp: Date.now() + 24 * 60 * 60 * 1000,
+      });
+      return json({
+        ok: true,
+        sessionId: session.id,
+        sessionName: session.policy.sessionName,
+        tierId,
+        inviteUrl: `${url.protocol}//${url.host}/join?token=${encodeURIComponent(token)}`,
+      });
     }
 
     // Host creates an invite link for a session
@@ -528,9 +670,11 @@ const server = Bun.serve<WsData>({
       const sessionId = url.pathname.split('/')[2];
       if (!sessions.has(sessionId)) return json({ ok: false, error: 'Session not found' }, 404);
 
-      const body = await req.json().catch(() => ({})) as any;
+      const body = (await req.json().catch(() => ({}))) as any;
       const requestedTier = String(body.tierId || body.role || 'viewer');
-      const tierId = sessions.get(sessionId)!.policy.accessTiers.some(t => t.id === requestedTier) ? requestedTier : sessions.get(sessionId)!.policy.defaultTierId;
+      const tierId = sessions.get(sessionId)!.policy.accessTiers.some((t) => t.id === requestedTier)
+        ? requestedTier
+        : sessions.get(sessionId)!.policy.defaultTierId;
       const ttlMs = Number(body.ttlMs) || 7 * 24 * 60 * 60 * 1000;
 
       const inviteToken = sign({ sessionId, role: 'guest', tierId, exp: Date.now() + ttlMs });
@@ -577,14 +721,20 @@ const server = Bun.serve<WsData>({
     open(ws) {
       const { sessionId, role, guestId, name, tierId } = ws.data;
       const session = sessions.get(sessionId);
-      if (!session) { ws.close(4004, 'Session not found'); return; }
+      if (!session) {
+        ws.close(4004, 'Session not found');
+        return;
+      }
 
       if (role === 'host') {
         session.hostWs = ws;
         console.log(`[${sessionId}] host connected`);
         // Send pending guest list to host
         const guestList = Array.from(session.guests.entries()).map(([id, g]) => ({
-          guestId: id, name: g.name, tierId: g.tierId, admitted: g.admitted,
+          guestId: id,
+          name: g.name,
+          tierId: g.tierId,
+          admitted: g.admitted,
         }));
         ws.send(JSON.stringify({ type: 'guest-list', guests: guestList }));
       } else {
@@ -601,25 +751,34 @@ const server = Bun.serve<WsData>({
 
         // Send init + history to new guest
         const participantMap: Record<string, { name: string; role: string }> = {};
-        session.guests.forEach((g, id) => { if (g.admitted) participantMap[id] = { name: g.name, role: g.tierId }; });
+        session.guests.forEach((g, id) => {
+          if (g.admitted) participantMap[id] = { name: g.name, role: g.tierId };
+        });
 
-        ws.send(JSON.stringify({
-          type: 'init',
-          role: tierId,
-          tier: tierFor(session, tierId),
-          hostName: 'Host',
-          sessionName: session.policy.sessionName,
-          participants: session.policy.showParticipants ? participantMap : {},
-          history: session.history.filter((event: any) =>
-            (event.type !== 'diff' || session.policy.showDiffs) &&
-            (event.type !== 'agent-status' || session.policy.showAgentStatus)),
-          policy: session.policy,
-        }));
+        ws.send(
+          JSON.stringify({
+            type: 'init',
+            role: tierId,
+            tier: tierFor(session, tierId),
+            hostName: 'Host',
+            sessionName: session.policy.sessionName,
+            participants: session.policy.showParticipants ? participantMap : {},
+            history: session.history.filter(
+              (event: any) =>
+                (event.type !== 'diff' || session.policy.showDiffs) &&
+                (event.type !== 'agent-status' || session.policy.showAgentStatus),
+            ),
+            policy: session.policy,
+          }),
+        );
 
         // Notify host and other guests
         const joinMsg = JSON.stringify({ type: 'guest-joined', guestId, name, role: tierId });
         session.hostWs?.send(joinMsg);
-        if (session.policy.showParticipants) session.guests.forEach((g, id) => { if (id !== guestId) g.ws.send(joinMsg); });
+        if (session.policy.showParticipants)
+          session.guests.forEach((g, id) => {
+            if (id !== guestId) g.ws.send(joinMsg);
+          });
       }
     },
 
@@ -629,7 +788,11 @@ const server = Bun.serve<WsData>({
       if (!session) return;
 
       let msg: any;
-      try { msg = JSON.parse(String(message)); } catch { return; }
+      try {
+        msg = JSON.parse(String(message));
+      } catch {
+        return;
+      }
 
       if (role === 'host') {
         if ((msg.type === 'rtc-answer' || msg.type === 'rtc-ice') && msg.guestId) {
@@ -657,26 +820,62 @@ const server = Bun.serve<WsData>({
         if (msg.type === 'join-decision' && msg.guestId) {
           const guest = session.guests.get(String(msg.guestId));
           if (!guest) return;
-          if (!msg.approved) { guest.ws.send(JSON.stringify({ type: 'join-rejected' })); guest.ws.close(4003, 'Join rejected'); return; }
+          if (!msg.approved) {
+            guest.ws.send(JSON.stringify({ type: 'join-rejected' }));
+            guest.ws.close(4003, 'Join rejected');
+            return;
+          }
           const requestedTier = String(msg.tierId || guest.tierId);
-          guest.tierId = session.policy.accessTiers.some(t => t.id === requestedTier) ? requestedTier : session.policy.defaultTierId;
+          guest.tierId = session.policy.accessTiers.some((t) => t.id === requestedTier)
+            ? requestedTier
+            : session.policy.defaultTierId;
           guest.admitted = true;
           guest.ws.data.tierId = guest.tierId;
           guest.ws.data.admitted = true;
           const tier = tierFor(session, guest.tierId)!;
-          guest.ws.send(JSON.stringify({ type: 'init', role: guest.tierId, tier, hostName: 'Host', sessionName: session.policy.sessionName, participants: {}, history: session.history.filter(e => eventAllowed(e, tier)), policy: session.policy }));
-          session.guests.forEach(g => { if (g.admitted && tierFor(session, g.tierId)?.permissions.viewParticipants) g.ws.send(JSON.stringify({ type: 'guest-joined', guestId: msg.guestId, name: guest.name, role: guest.tierId })); });
+          guest.ws.send(
+            JSON.stringify({
+              type: 'init',
+              role: guest.tierId,
+              tier,
+              hostName: 'Host',
+              sessionName: session.policy.sessionName,
+              participants: {},
+              history: session.history.filter((e) => eventAllowed(e, tier)),
+              policy: session.policy,
+            }),
+          );
+          session.guests.forEach((g) => {
+            if (g.admitted && tierFor(session, g.tierId)?.permissions.viewParticipants)
+              g.ws.send(
+                JSON.stringify({
+                  type: 'guest-joined',
+                  guestId: msg.guestId,
+                  name: guest.name,
+                  role: guest.tierId,
+                }),
+              );
+          });
           return;
         }
         if (msg.type === 'assign-tier' && msg.guestId) {
           const guest = session.guests.get(String(msg.guestId));
-          if (!guest || !session.policy.accessTiers.some(t => t.id === msg.tierId)) return;
-          guest.tierId = String(msg.tierId); guest.ws.data.tierId = guest.tierId;
-          guest.ws.send(JSON.stringify({ type: 'tier-updated', tier: tierFor(session, guest.tierId), policy: session.policy }));
+          if (!guest || !session.policy.accessTiers.some((t) => t.id === msg.tierId)) return;
+          guest.tierId = String(msg.tierId);
+          guest.ws.data.tierId = guest.tierId;
+          guest.ws.send(
+            JSON.stringify({
+              type: 'tier-updated',
+              tier: tierFor(session, guest.tierId),
+              policy: session.policy,
+            }),
+          );
           return;
         }
         // Host → broadcast to all guests; also append relevant events to history
-        const excluded = new Set(Array.isArray(msg.excludeGuestIds) ? msg.excludeGuestIds.map(String) : []);
+        const excluded = new Set(
+          Array.isArray(msg.excludeGuestIds) ? msg.excludeGuestIds.map(String) : [],
+        );
         session.guests.forEach((g, id) => {
           if (!excluded.has(id) && g.admitted && eventAllowed(msg, tierFor(session, g.tierId))) {
             const { excludeGuestIds: _excluded, ...payload } = msg;
@@ -716,23 +915,32 @@ const server = Bun.serve<WsData>({
         // Guest → forward to host only
         if (msg.type === 'guest-prompt' && tier?.permissions.submitPrompts) {
           const requestedModel = String(msg.model || '');
-          const model = requestedModel && (tier.allowedModels.includes('*') || tier.allowedModels.includes(requestedModel)) ? requestedModel : '';
+          const model =
+            requestedModel &&
+            (tier.allowedModels.includes('*') || tier.allowedModels.includes(requestedModel))
+              ? requestedModel
+              : '';
           const requestedReasoning = String(msg.reasoningLevel || '');
-          const allowedReasoning = model ? (tier.reasoningByModel?.[model] || []) : [];
-          const reasoningLevel = requestedReasoning && allowedReasoning.includes(requestedReasoning) ? requestedReasoning : '';
-          session.hostWs?.send(JSON.stringify({
-            type: 'guest-prompt',
-            guestId,
-            name,
-            role: guest.tierId,
-            tierId: guest.tierId,
-            autoExecute: tier.permissions.autoExecutePrompts && tier.permissions.fullSystemAccess,
-            content: String(msg.content).slice(0, 4000),
-            model,
-            reasoningLevel,
-            commandAllowlist: tier.permissions.commandAllowlist || [],
-            commandBlocklist: tier.permissions.commandBlocklist || [],
-          }));
+          const allowedReasoning = model ? tier.reasoningByModel?.[model] || [] : [];
+          const reasoningLevel =
+            requestedReasoning && allowedReasoning.includes(requestedReasoning)
+              ? requestedReasoning
+              : '';
+          session.hostWs?.send(
+            JSON.stringify({
+              type: 'guest-prompt',
+              guestId,
+              name,
+              role: guest.tierId,
+              tierId: guest.tierId,
+              autoExecute: tier.permissions.autoExecutePrompts && tier.permissions.fullSystemAccess,
+              content: String(msg.content).slice(0, 4000),
+              model,
+              reasoningLevel,
+              commandAllowlist: tier.permissions.commandAllowlist || [],
+              commandBlocklist: tier.permissions.commandBlocklist || [],
+            }),
+          );
         }
       }
     },
@@ -746,27 +954,30 @@ const server = Bun.serve<WsData>({
         session.hostWs = null;
         console.log(`[${sessionId}] host disconnected`);
         const msg = JSON.stringify({ type: 'host-disconnected' });
-        session.guests.forEach(g => g.ws.send(msg));
+        session.guests.forEach((g) => g.ws.send(msg));
       } else {
         session.guests.delete(guestId);
         console.log(`[${sessionId}] guest "${name}" disconnected`);
         const msg = JSON.stringify({ type: 'guest-left', guestId, name });
         session.hostWs?.send(msg);
-        session.guests.forEach(g => g.ws.send(msg));
+        session.guests.forEach((g) => g.ws.send(msg));
       }
     },
   },
 });
 
 // Evict sessions older than 48 hours with no host
-setInterval(() => {
-  const cutoff = Date.now() - 48 * 60 * 60 * 1000;
-  for (const [id, s] of sessions) {
-    if (s.createdAt < cutoff && !s.hostWs) {
-      sessions.delete(id);
-      console.log(`[${id}] session evicted`);
+setInterval(
+  () => {
+    const cutoff = Date.now() - 48 * 60 * 60 * 1000;
+    for (const [id, s] of sessions) {
+      if (s.createdAt < cutoff && !s.hostWs) {
+        sessions.delete(id);
+        console.log(`[${id}] session evicted`);
+      }
     }
-  }
-}, 60 * 60 * 1000);
+  },
+  60 * 60 * 1000,
+);
 
 console.log(`Koryphaios relay running on :${PORT}`);

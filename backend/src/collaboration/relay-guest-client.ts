@@ -62,7 +62,8 @@ export class RelayGuestClient {
       const resolved = await resolveRelayJoinCode(codeOrUrl.trim());
       inviteUrl = new URL(resolved.inviteUrl);
     }
-    const token = inviteUrl.searchParams.get('token') || inviteUrl.hash.replace(/^#?token=/, '') || '';
+    const token =
+      inviteUrl.searchParams.get('token') || inviteUrl.hash.replace(/^#?token=/, '') || '';
     if (!token) throw new Error('Invite did not yield a token');
     const wsBase = `${inviteUrl.origin.replace(/^http/, 'ws')}/ws`;
     const url = `${wsBase}?token=${encodeURIComponent(token)}&name=${encodeURIComponent(displayName)}`;
@@ -106,7 +107,11 @@ export class RelayGuestClient {
       case 'provider-catalog': {
         this.catalog = msg.catalog as SharedProviderCatalog;
         for (const fn of this.catalogListeners) {
-          try { fn(this.catalog); } catch { /* listener error is not fatal */ }
+          try {
+            fn(this.catalog);
+          } catch {
+            /* listener error is not fatal */
+          }
         }
         return;
       }
@@ -149,16 +154,33 @@ export class RelayGuestClient {
     let finished = false;
     let failure: string | null = null;
     let wake: (() => void) | null = null;
-    const notify = () => { wake?.(); wake = null; };
+    const notify = () => {
+      wake?.();
+      wake = null;
+    };
 
     this.streams.set(requestId, {
-      push: (event) => { queue.push(event); notify(); },
-      done: () => { finished = true; notify(); },
-      fail: (error) => { failure = error; finished = true; notify(); },
+      push: (event) => {
+        queue.push(event);
+        notify();
+      },
+      done: () => {
+        finished = true;
+        notify();
+      },
+      fail: (error) => {
+        failure = error;
+        finished = true;
+        notify();
+      },
     });
 
     const onAbort = () => {
-      try { this.send({ type: 'inference-cancel', requestId }); } catch { /* already gone */ }
+      try {
+        this.send({ type: 'inference-cancel', requestId });
+      } catch {
+        /* already gone */
+      }
       failure = 'Cancelled';
       finished = true;
       notify();
@@ -173,7 +195,9 @@ export class RelayGuestClient {
         }
         if (failure) throw new Error(failure);
         if (finished) return;
-        await new Promise<void>((resolve) => { wake = resolve; });
+        await new Promise<void>((resolve) => {
+          wake = resolve;
+        });
       }
     } finally {
       signal?.removeEventListener('abort', onAbort);

@@ -24,7 +24,12 @@ import type {
   SandboxPolicy,
 } from '@koryphaios/shared';
 import type { RelayClient } from './relay-client';
-import type { StreamRequest, ProviderMessage, ProviderToolDef, ProviderEvent } from '../providers/types';
+import type {
+  StreamRequest,
+  ProviderMessage,
+  ProviderToolDef,
+  ProviderEvent,
+} from '../providers/types';
 
 const log = serverLog.child({ module: 'remote-provider-host' });
 
@@ -119,7 +124,11 @@ function sandboxKey(guestId: string, provider: string): string {
 
 /** Materialize / update a guest's project in a host temp sandbox. Returns the
  *  sandbox root. Applies a full snapshot or a delta (+ deletions). */
-async function applyProjectSync(guestId: string, provider: string, sync: ProjectSync): Promise<string> {
+async function applyProjectSync(
+  guestId: string,
+  provider: string,
+  sync: ProjectSync,
+): Promise<string> {
   const key = sandboxKey(guestId, provider);
   let root = sandboxes.get(key);
   if (!root) {

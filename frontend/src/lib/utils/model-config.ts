@@ -14,9 +14,7 @@ function formatProviderName(provider: string): string {
   return provider.charAt(0).toUpperCase() + provider.slice(1);
 }
 
-export function parseProviderModelSelection(
-  value?: string,
-): { provider?: string; model?: string } {
+export function parseProviderModelSelection(value?: string): { provider?: string; model?: string } {
   if (!value || value === 'auto') return {};
   const separator = value.indexOf(':');
   if (separator === -1) return {};

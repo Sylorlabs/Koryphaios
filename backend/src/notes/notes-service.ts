@@ -22,7 +22,15 @@ import type {
   FolderNode,
   NoteWithLinks,
 } from '@koryphaios/shared';
-import { existsSync, mkdirSync, writeFileSync, unlinkSync, readFileSync, readdirSync, statSync } from 'fs';
+import {
+  existsSync,
+  mkdirSync,
+  writeFileSync,
+  unlinkSync,
+  readFileSync,
+  readdirSync,
+  statSync,
+} from 'fs';
 import { basename, dirname, extname, join, relative, resolve, sep } from 'path';
 import { PROJECT_ROOT } from '../runtime/paths';
 
@@ -34,17 +42,31 @@ const ATTACHMENTS_DIR = join(PROJECT_ROOT, '.koryphaios', 'attachments');
 const PROJECT_DOCUMENT_PREFIX = 'project-document:';
 const DOCUMENT_EXTENSIONS = new Set(['.md', '.markdown', '.html', '.htm']);
 const IGNORED_DOCUMENT_DIRS = new Set([
-  '.git', 'node_modules', 'dist', 'build', 'target', '.svelte-kit', '.next', 'coverage',
+  '.git',
+  'node_modules',
+  'dist',
+  'build',
+  'target',
+  '.svelte-kit',
+  '.next',
+  'coverage',
 ]);
 
 function projectDocumentId(projectRoot: string, sourcePath: string): string {
-  return PROJECT_DOCUMENT_PREFIX + Buffer.from(JSON.stringify([resolve(projectRoot), sourcePath])).toString('base64url');
+  return (
+    PROJECT_DOCUMENT_PREFIX +
+    Buffer.from(JSON.stringify([resolve(projectRoot), sourcePath])).toString('base64url')
+  );
 }
 
-function projectDocumentIdentity(id: string): { projectRoot: string; sourcePath: string } | undefined {
+function projectDocumentIdentity(
+  id: string,
+): { projectRoot: string; sourcePath: string } | undefined {
   if (!id.startsWith(PROJECT_DOCUMENT_PREFIX)) return undefined;
   try {
-    const [projectRoot, path] = JSON.parse(Buffer.from(id.slice(PROJECT_DOCUMENT_PREFIX.length), 'base64url').toString('utf8')) as [string, string];
+    const [projectRoot, path] = JSON.parse(
+      Buffer.from(id.slice(PROJECT_DOCUMENT_PREFIX.length), 'base64url').toString('utf8'),
+    ) as [string, string];
     if (!path || path.startsWith('/') || path.split(/[\\/]/).includes('..')) return undefined;
     if (!projectRoot) return undefined;
     return { projectRoot: resolve(projectRoot), sourcePath: path };
@@ -181,11 +203,15 @@ function extractProjectDocumentLinks(sourcePath: string, content: string): strin
     const resolved = target.startsWith('/')
       ? target.slice(1)
       : join(dirname(sourcePath), target).split(sep).join('/');
-    const normalized = resolved.split('/').reduce<string[]>((parts, part) => {
-      if (!part || part === '.') return parts;
-      if (part === '..') parts.pop(); else parts.push(part);
-      return parts;
-    }, []).join('/');
+    const normalized = resolved
+      .split('/')
+      .reduce<string[]>((parts, part) => {
+        if (!part || part === '.') return parts;
+        if (part === '..') parts.pop();
+        else parts.push(part);
+        return parts;
+      }, [])
+      .join('/');
     if (DOCUMENT_EXTENSIONS.has(extname(normalized).toLowerCase())) links.push(normalized);
   }
   return [...new Set(links)];
@@ -213,13 +239,17 @@ function rowToNote(row: typeof notes.$inferSelect): Note {
     pinned: Boolean(row.pinned),
     includeInContext: Boolean(row.includeInContext),
     userId: row.userId ?? undefined,
-    createdAt: row.createdAt instanceof Date ? row.createdAt : new Date((row.createdAt as number) * 1000),
-    updatedAt: row.updatedAt instanceof Date ? row.updatedAt : new Date((row.updatedAt as number) * 1000),
+    createdAt:
+      row.createdAt instanceof Date ? row.createdAt : new Date((row.createdAt as number) * 1000),
+    updatedAt:
+      row.updatedAt instanceof Date ? row.updatedAt : new Date((row.updatedAt as number) * 1000),
     sourcePath,
     // Project documents derive format from the file extension; DB notes carry
     // their own format column ('markdown' default, 'html' → sandboxed preview).
     format: sourcePath
-      ? (extension === '.html' || extension === '.htm' ? 'html' : 'markdown')
+      ? extension === '.html' || extension === '.htm'
+        ? 'html'
+        : 'markdown'
       : ((row.format as 'markdown' | 'html' | undefined) ?? 'markdown'),
   };
 }
@@ -277,7 +307,8 @@ export async function updateNote(id: string, input: UpdateNoteInput): Promise<No
   if (input.folderPath !== undefined) updateData.folderPath = input.folderPath;
   if (input.tags !== undefined) updateData.tags = JSON.stringify(input.tags);
   if (input.pinned !== undefined) updateData.pinned = input.pinned ? 1 : 0;
-  if (input.includeInContext !== undefined) updateData.includeInContext = input.includeInContext ? 1 : 0;
+  if (input.includeInContext !== undefined)
+    updateData.includeInContext = input.includeInContext ? 1 : 0;
   if (input.format !== undefined) updateData.format = input.format;
 
   await db.update(notes).set(updateData).where(eq(notes.id, id));
@@ -294,7 +325,8 @@ export async function updateNote(id: string, input: UpdateNoteInput): Promise<No
     await propagateTitleRename(id, existing.title, input.title);
   }
 
-  const contentForLinks = input.content ?? (input.title !== undefined ? (await getNote(id))?.content : undefined);
+  const contentForLinks =
+    input.content ?? (input.title !== undefined ? (await getNote(id))?.content : undefined);
   if (contentForLinks !== undefined) {
     await parseAndSaveLinks(id, contentForLinks);
   }
@@ -307,10 +339,7 @@ export async function deleteNote(id: string): Promise<void> {
   const sourceFile = resolveProjectDocument(id);
   if (sourceFile && existsSync(sourceFile)) unlinkSync(sourceFile);
   // Delete attachment files from disk before DB rows are cascade-deleted
-  const attachments = await db
-    .select()
-    .from(noteAttachments)
-    .where(eq(noteAttachments.noteId, id));
+  const attachments = await db.select().from(noteAttachments).where(eq(noteAttachments.noteId, id));
 
   for (const att of attachments) {
     try {
@@ -334,7 +363,9 @@ export interface ProjectDocumentSyncResult {
 /** Mirror every project Markdown/HTML document into the note graph. The real
  * project file remains authoritative; edits through Koryphaios are written
  * through to disk. Generated/vendor directories are intentionally excluded. */
-export async function syncProjectDocuments(projectRoot = PROJECT_ROOT): Promise<ProjectDocumentSyncResult> {
+export async function syncProjectDocuments(
+  projectRoot = PROJECT_ROOT,
+): Promise<ProjectDocumentSyncResult> {
   const root = resolve(projectRoot);
   const files: string[] = [];
 
@@ -370,17 +401,35 @@ export async function syncProjectDocuments(projectRoot = PROJECT_ROOT): Promise<
     const parent = dirname(sourcePath).split(sep).join('/');
     const folderPath = parent === '.' ? '/Project' : `/Project/${parent}`;
     const extension = extname(sourcePath).toLowerCase();
-    const tags = JSON.stringify(['project-file', extension === '.html' || extension === '.htm' ? 'html' : 'markdown']);
+    const tags = JSON.stringify([
+      'project-file',
+      extension === '.html' || extension === '.htm' ? 'html' : 'markdown',
+    ]);
     const rows = await db.select().from(notes).where(eq(notes.id, id));
     if (rows[0]) {
-      if (rows[0].content !== content || rows[0].title !== title || rows[0].folderPath !== folderPath) {
-        await db.update(notes).set({ title, content, folderPath, tags, updatedAt: stat.mtime }).where(eq(notes.id, id));
+      if (
+        rows[0].content !== content ||
+        rows[0].title !== title ||
+        rows[0].folderPath !== folderPath
+      ) {
+        await db
+          .update(notes)
+          .set({ title, content, folderPath, tags, updatedAt: stat.mtime })
+          .where(eq(notes.id, id));
         updated++;
       }
     } else {
       await db.insert(notes).values({
-        id, title, content, folderPath, tags, pinned: 0, includeInContext: 0,
-        userId: null, createdAt: stat.birthtime, updatedAt: stat.mtime,
+        id,
+        title,
+        content,
+        folderPath,
+        tags,
+        pinned: 0,
+        includeInContext: 0,
+        userId: null,
+        createdAt: stat.birthtime,
+        updatedAt: stat.mtime,
       });
       created++;
     }
@@ -388,7 +437,9 @@ export async function syncProjectDocuments(projectRoot = PROJECT_ROOT): Promise<
     changed.push({ id, content, sourcePath });
   }
 
-  const projectRows = (await db.select().from(notes)).filter((row) => projectDocumentIdentity(row.id)?.projectRoot === root);
+  const projectRows = (await db.select().from(notes)).filter(
+    (row) => projectDocumentIdentity(row.id)?.projectRoot === root,
+  );
   let removed = 0;
   for (const row of projectRows) {
     if (!foundIds.has(row.id)) {
@@ -420,14 +471,17 @@ export async function syncProjectDocuments(projectRoot = PROJECT_ROOT): Promise<
   return { discovered: files.length, created, updated, removed };
 }
 
-export async function listNotes(filters?: {
-  folderPath?: string;
-  tags?: string[];
-  search?: string;
-  /** Page size. Omit for all (agent context injection caps elsewhere). */
-  limit?: number;
-  offset?: number;
-}, projectRoot?: string): Promise<Note[]> {
+export async function listNotes(
+  filters?: {
+    folderPath?: string;
+    tags?: string[];
+    search?: string;
+    /** Page size. Omit for all (agent context injection caps elsewhere). */
+    limit?: number;
+    offset?: number;
+  },
+  projectRoot?: string,
+): Promise<Note[]> {
   if (projectRoot) await ensureProjectSync(projectRoot);
 
   const isProjectVisible = (id: string) => {
@@ -441,7 +495,7 @@ export async function listNotes(filters?: {
     if (ids.length === 0) return [];
     const rows = await db.select().from(notes).where(inArray(notes.id, ids));
     const byId = new Map(rows.map((r) => [r.id, r]));
-    let out = ids.map((id) => byId.get(id)).filter((r): r is typeof rows[number] => !!r);
+    let out = ids.map((id) => byId.get(id)).filter((r): r is (typeof rows)[number] => !!r);
     if (filters.folderPath && filters.folderPath !== '/') {
       out = out.filter((r) => r.folderPath.startsWith(filters.folderPath!));
     }
@@ -467,10 +521,7 @@ export async function listNotes(filters?: {
 // ============================================================================
 
 export async function getNoteBacklinks(id: string): Promise<Note[]> {
-  const links = await db
-    .select()
-    .from(noteLinks)
-    .where(eq(noteLinks.toNoteId, id));
+  const links = await db.select().from(noteLinks).where(eq(noteLinks.toNoteId, id));
 
   if (!links.length) return [];
 
@@ -480,10 +531,7 @@ export async function getNoteBacklinks(id: string): Promise<Note[]> {
 }
 
 export async function getNoteOutlinks(id: string): Promise<Note[]> {
-  const links = await db
-    .select()
-    .from(noteLinks)
-    .where(eq(noteLinks.fromNoteId, id));
+  const links = await db.select().from(noteLinks).where(eq(noteLinks.fromNoteId, id));
 
   if (!links.length) return [];
 
@@ -527,9 +575,7 @@ export async function linkNotes(
   graphCache.clear();
 
   if (options?.syncContent !== false) {
-    const linkPattern = new RegExp(
-      `!?\\[\\[${escapeRegExp(toNote.title)}(?:[|#][^\\]]+?)?\\]\\]`,
-    );
+    const linkPattern = new RegExp(`!?\\[\\[${escapeRegExp(toNote.title)}(?:[|#][^\\]]+?)?\\]\\]`);
     if (!linkPattern.test(fromNote.content)) {
       const suffix = fromNote.content.endsWith('\n') || !fromNote.content ? '' : '\n';
       await updateNote(fromId, {
@@ -571,7 +617,11 @@ export async function unlinkNotes(
 /** Update [[wikilinks]] across the vault when a note is renamed. Only the notes
  *  that actually link to the renamed note are touched — found via the link graph
  *  (indexed), not a full-table scan. */
-async function propagateTitleRename(renamedId: string, oldTitle: string, newTitle: string): Promise<void> {
+async function propagateTitleRename(
+  renamedId: string,
+  oldTitle: string,
+  newTitle: string,
+): Promise<void> {
   // Notes that link to the renamed one are exactly its backlinks.
   const backlinks = await db
     .select({ id: noteLinks.fromNoteId })
@@ -587,7 +637,10 @@ async function propagateTitleRename(renamedId: string, oldTitle: string, newTitl
     if (!pattern.test(row.content)) continue;
     pattern.lastIndex = 0;
     const updated = row.content.replace(pattern, `$1[[${newTitle}$2]]`);
-    await db.update(notes).set({ content: updated, updatedAt: new Date() }).where(eq(notes.id, row.id));
+    await db
+      .update(notes)
+      .set({ content: updated, updatedAt: new Date() })
+      .where(eq(notes.id, row.id));
   }
   graphCache.clear();
 }
@@ -612,21 +665,23 @@ export async function getNotesCatalog(projectRoot?: string): Promise<NoteCatalog
   const graph = await getGraphData(projectRoot);
   const linkCountById = new Map(graph.nodes.map((n) => [n.id, n.linkCount]));
   const rows = await db.select().from(notes).orderBy(notes.updatedAt);
-  return rows.filter((row) => {
-    const identity = projectDocumentIdentity(row.id);
-    return !identity || !projectRoot || identity.projectRoot === resolve(projectRoot);
-  }).map((row) => {
-    const note = rowToNote(row);
-    return {
-      id: note.id,
-      title: note.title,
-      folderPath: note.folderPath,
-      tags: note.tags,
-      linkCount: linkCountById.get(note.id) ?? 0,
-      includeInContext: note.includeInContext,
-      updatedAt: note.updatedAt,
-    };
-  });
+  return rows
+    .filter((row) => {
+      const identity = projectDocumentIdentity(row.id);
+      return !identity || !projectRoot || identity.projectRoot === resolve(projectRoot);
+    })
+    .map((row) => {
+      const note = rowToNote(row);
+      return {
+        id: note.id,
+        title: note.title,
+        folderPath: note.folderPath,
+        tags: note.tags,
+        linkCount: linkCountById.get(note.id) ?? 0,
+        includeInContext: note.includeInContext,
+        updatedAt: note.updatedAt,
+      };
+    });
 }
 
 export interface RecallNotesOptions {
@@ -725,7 +780,9 @@ export async function getGraphData(projectRoot?: string): Promise<GraphData> {
     return !identity || !projectRoot || identity.projectRoot === resolve(projectRoot);
   });
   const visibleIds = new Set(allNotes.map((row) => row.id));
-  const allLinks = (await db.select().from(noteLinks)).filter((link) => visibleIds.has(link.fromNoteId) && visibleIds.has(link.toNoteId));
+  const allLinks = (await db.select().from(noteLinks)).filter(
+    (link) => visibleIds.has(link.fromNoteId) && visibleIds.has(link.toNoteId),
+  );
 
   // Build link-count map (both directions count as "connected")
   const linkCountMap = new Map<string, number>();
@@ -762,7 +819,15 @@ export async function getGraphData(projectRoot?: string): Promise<GraphData> {
       if (resolveMap.has(key) || titleSet.has(key)) continue; // resolved
       let ghost = ghostNodes.get(key);
       if (!ghost) {
-        ghost = { id: 'ghost:' + key, title: ref, folderPath: '/', tags: [], linkCount: 0, includeInContext: false, unresolved: true };
+        ghost = {
+          id: 'ghost:' + key,
+          title: ref,
+          folderPath: '/',
+          tags: [],
+          linkCount: 0,
+          includeInContext: false,
+          unresolved: true,
+        };
         ghostNodes.set(key, ghost);
         nodes.push(ghost);
       }
@@ -840,7 +905,9 @@ function ftsSearchIds(query: string, limit: number): string[] {
   const raw = getDb();
   try {
     const rows = raw
-      .query('SELECT note_id FROM notes_fts WHERE notes_fts MATCH ? ORDER BY bm25(notes_fts) LIMIT ?')
+      .query(
+        'SELECT note_id FROM notes_fts WHERE notes_fts MATCH ? ORDER BY bm25(notes_fts) LIMIT ?',
+      )
       .all(match, limit) as Array<{ note_id: string }>;
     return rows.map((r) => r.note_id);
   } catch {
@@ -859,7 +926,10 @@ export async function searchNotes(query: string, limit = 50): Promise<Note[]> {
   const rows = await db.select().from(notes).where(inArray(notes.id, ids));
   const byId = new Map(rows.map((r) => [r.id, r]));
   // Preserve FTS rank order.
-  return ids.map((id) => byId.get(id)).filter((r): r is typeof rows[number] => !!r).map(rowToNote);
+  return ids
+    .map((id) => byId.get(id))
+    .filter((r): r is (typeof rows)[number] => !!r)
+    .map(rowToNote);
 }
 
 // ============================================================================
@@ -869,7 +939,9 @@ export async function searchNotes(query: string, limit = 50): Promise<Note[]> {
 /** Lowercased title|alias → note id. Cached; invalidated on any note change. */
 async function getResolveIndex(): Promise<Map<string, string>> {
   if (resolveIndexCache) return resolveIndexCache;
-  const rows = await db.select({ id: notes.id, title: notes.title, content: notes.content }).from(notes);
+  const rows = await db
+    .select({ id: notes.id, title: notes.title, content: notes.content })
+    .from(notes);
   const map = new Map<string, string>();
   for (const r of rows) {
     map.set(r.title.toLowerCase(), r.id);
@@ -927,10 +999,7 @@ export async function saveAttachment(
 }
 
 export async function getAttachment(id: string): Promise<NoteAttachment | null> {
-  const rows = await db
-    .select()
-    .from(noteAttachments)
-    .where(eq(noteAttachments.id, id));
+  const rows = await db.select().from(noteAttachments).where(eq(noteAttachments.id, id));
 
   if (!rows[0]) return null;
 
@@ -942,9 +1011,8 @@ export async function getAttachment(id: string): Promise<NoteAttachment | null> 
     mimeType: row.mimeType,
     size: row.size,
     storagePath: row.storagePath,
-    createdAt: row.createdAt instanceof Date
-      ? row.createdAt
-      : new Date((row.createdAt as number) * 1000),
+    createdAt:
+      row.createdAt instanceof Date ? row.createdAt : new Date((row.createdAt as number) * 1000),
   };
 }
 
@@ -1026,9 +1094,8 @@ export async function getNoteWithLinks(id: string): Promise<NoteWithLinks | null
       mimeType: a.mimeType,
       size: a.size,
       storagePath: a.storagePath,
-      createdAt: a.createdAt instanceof Date
-        ? a.createdAt
-        : new Date((a.createdAt as number) * 1000),
+      createdAt:
+        a.createdAt instanceof Date ? a.createdAt : new Date((a.createdAt as number) * 1000),
     })),
   };
 }

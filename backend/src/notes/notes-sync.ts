@@ -65,7 +65,12 @@ export async function deriveKey(passphrase: string, salt: string): Promise<Crypt
     ['deriveKey'],
   );
   return crypto.subtle.deriveKey(
-    { name: 'PBKDF2', salt: enc.encode(salt) as BufferSource, iterations: PBKDF2_ITERS, hash: 'SHA-256' },
+    {
+      name: 'PBKDF2',
+      salt: enc.encode(salt) as BufferSource,
+      iterations: PBKDF2_ITERS,
+      hash: 'SHA-256',
+    },
     baseKey,
     { name: 'AES-GCM', length: 256 },
     false,
@@ -124,11 +129,16 @@ export function mergeRecords(local: NoteRecord[], remote: NoteRecord[]): MergeRe
       // keep local
     } else {
       // Same timestamp, possibly divergent content → deterministic tiebreak.
-      const same = loc.content === rem.content && loc.title === rem.title && !!loc.deleted === !!rem.deleted;
+      const same =
+        loc.content === rem.content && loc.title === rem.title && !!loc.deleted === !!rem.deleted;
       if (!same) {
         const chooseRemote = rem.content > loc.content;
         byId.set(rem.id, chooseRemote ? rem : loc);
-        conflicts.push({ id: rem.id, chosen: chooseRemote ? 'remote' : 'local', reason: 'equal-timestamp' });
+        conflicts.push({
+          id: rem.id,
+          chosen: chooseRemote ? 'remote' : 'local',
+          reason: 'equal-timestamp',
+        });
       }
     }
   }

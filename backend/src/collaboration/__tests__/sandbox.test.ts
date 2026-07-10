@@ -1,5 +1,10 @@
 import { test, expect, describe } from 'bun:test';
-import { wrapCommand, sandboxCapabilities, buildSeatbeltProfile, buildSoftJail } from '../sandbox-runner';
+import {
+  wrapCommand,
+  sandboxCapabilities,
+  buildSeatbeltProfile,
+  buildSoftJail,
+} from '../sandbox-runner';
 import { existsSync } from 'node:fs';
 import { SANDBOX_PRESETS, DEFAULT_SANDBOX_POLICY, tightenSandbox } from '@koryphaios/shared';
 
@@ -123,14 +128,21 @@ describe('soft jail (cross-platform)', () => {
 // structure here even when running the suite on Linux.
 describe('macOS Seatbelt profile', () => {
   test('confines writes to the project + denies network when blocked', () => {
-    const balanced = buildSeatbeltProfile({ cwd: '/Users/me/proj', configDirs: ['/Users/me/.claude'], policy: { ...SANDBOX_PRESETS.balanced } });
+    const balanced = buildSeatbeltProfile({
+      cwd: '/Users/me/proj',
+      configDirs: ['/Users/me/.claude'],
+      policy: { ...SANDBOX_PRESETS.balanced },
+    });
     expect(balanced).toContain('(version 1)');
     expect(balanced).toContain('(deny file-write*)');
     expect(balanced).toContain('/Users/me/proj'); // project is writable
     expect(balanced).toContain('/Users/me/.claude'); // CLI config writable
     expect(balanced).not.toContain('(deny network*)'); // balanced allows net
 
-    const hardened = buildSeatbeltProfile({ cwd: '/Users/me/proj', policy: { ...SANDBOX_PRESETS.hardened } });
+    const hardened = buildSeatbeltProfile({
+      cwd: '/Users/me/proj',
+      policy: { ...SANDBOX_PRESETS.hardened },
+    });
     expect(hardened).toContain('(deny network*)'); // hardened cuts net
     // Secret stores are read-denied.
     expect(hardened).toContain('.ssh');

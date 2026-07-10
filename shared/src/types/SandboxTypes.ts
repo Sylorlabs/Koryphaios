@@ -42,7 +42,14 @@ export interface SandboxPolicy {
 // A short list of catastrophic command fragments blocked even in permissive
 // presets — cheap insurance against the worst accidents.
 const CATASTROPHIC = [
-  'rm -rf /', 'rm -rf ~', 'mkfs', ':(){', 'shutdown', 'reboot', 'dd if=', '> /dev/sda',
+  'rm -rf /',
+  'rm -rf ~',
+  'mkfs',
+  ':(){',
+  'shutdown',
+  'reboot',
+  'dd if=',
+  '> /dev/sda',
 ];
 
 export const SANDBOX_PRESETS: Record<Exclude<SandboxPreset, 'custom'>, SandboxPolicy> = {

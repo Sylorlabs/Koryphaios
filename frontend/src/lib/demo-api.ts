@@ -182,8 +182,18 @@ const BILLING_CREDITS = {
         { period: '30d', tokensIn: 9_100_000, tokensOut: 2_020_000, inferenceValueUsd: 128.5 },
       ],
       byModel: [
-        { model: 'claude-sonnet-5', tokensIn: 7_800_000, tokensOut: 1_700_000, inferenceValueUsd: 96.1 },
-        { model: 'claude-haiku-4-5', tokensIn: 1_300_000, tokensOut: 320_000, inferenceValueUsd: 12.4 },
+        {
+          model: 'claude-sonnet-5',
+          tokensIn: 7_800_000,
+          tokensOut: 1_700_000,
+          inferenceValueUsd: 96.1,
+        },
+        {
+          model: 'claude-haiku-4-5',
+          tokensIn: 1_300_000,
+          tokensOut: 320_000,
+          inferenceValueUsd: 12.4,
+        },
       ],
     },
     {
@@ -207,9 +217,27 @@ const BILLING_CREDITS = {
     { provider: 'google', availableUsd: 6.48 },
   ],
   byProvider: [
-    { name: 'codex', tokensIn: 3_400_000, tokensOut: 810_000, spendCents: 212, subscription: false },
-    { name: 'claude', tokensIn: 9_100_000, tokensOut: 2_020_000, spendCents: 0, subscription: true },
-    { name: 'google', tokensIn: 1_150_000, tokensOut: 240_000, spendCents: 200, subscription: false },
+    {
+      name: 'codex',
+      tokensIn: 3_400_000,
+      tokensOut: 810_000,
+      spendCents: 212,
+      subscription: false,
+    },
+    {
+      name: 'claude',
+      tokensIn: 9_100_000,
+      tokensOut: 2_020_000,
+      spendCents: 0,
+      subscription: true,
+    },
+    {
+      name: 'google',
+      tokensIn: 1_150_000,
+      tokensOut: 240_000,
+      spendCents: 200,
+      subscription: false,
+    },
   ],
 };
 
@@ -330,7 +358,12 @@ export function demoFetch(url: string, init: RequestInit = {}): Response {
   }
   if (path.startsWith('/api/memory/sessions/')) {
     if (method !== 'GET') return ok(true);
-    return ok(DEMO_MEMORY_FILE('.koryphaios/sessions/demo.md', '# Session memory\n\n- Working on the analytics dashboard.'));
+    return ok(
+      DEMO_MEMORY_FILE(
+        '.koryphaios/sessions/demo.md',
+        '# Session memory\n\n- Working on the analytics dashboard.',
+      ),
+    );
   }
   if (path === '/api/memory/settings' || path === '/api/memory/settings/reset') {
     return ok(MEMORY_SETTINGS);

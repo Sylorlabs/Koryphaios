@@ -1,10 +1,45 @@
 import { describe, expect, it } from 'bun:test';
-import { parseDataviewQuery, runDataviewQuery, renderDataviewQuery, type DataviewNote } from './dataview';
+import {
+  parseDataviewQuery,
+  runDataviewQuery,
+  renderDataviewQuery,
+  type DataviewNote,
+} from './dataview';
 
 const notes: DataviewNote[] = [
-  { id: 'a', title: 'Alpha', content: 'about kubernetes', folderPath: '/projects', tags: ['work', 'infra'], pinned: true, includeInContext: false, createdAt: new Date('2024-01-01'), updatedAt: new Date('2024-06-01') },
-  { id: 'b', title: 'Beta', content: 'about design', folderPath: '/projects/ui', tags: ['work'], pinned: false, includeInContext: true, createdAt: new Date('2024-02-01'), updatedAt: new Date('2024-05-01') },
-  { id: 'c', title: 'Gamma', content: 'personal note', folderPath: '/personal', tags: ['life'], pinned: false, includeInContext: false, createdAt: new Date('2024-03-01'), updatedAt: new Date('2024-04-01') },
+  {
+    id: 'a',
+    title: 'Alpha',
+    content: 'about kubernetes',
+    folderPath: '/projects',
+    tags: ['work', 'infra'],
+    pinned: true,
+    includeInContext: false,
+    createdAt: new Date('2024-01-01'),
+    updatedAt: new Date('2024-06-01'),
+  },
+  {
+    id: 'b',
+    title: 'Beta',
+    content: 'about design',
+    folderPath: '/projects/ui',
+    tags: ['work'],
+    pinned: false,
+    includeInContext: true,
+    createdAt: new Date('2024-02-01'),
+    updatedAt: new Date('2024-05-01'),
+  },
+  {
+    id: 'c',
+    title: 'Gamma',
+    content: 'personal note',
+    folderPath: '/personal',
+    tags: ['life'],
+    pinned: false,
+    includeInContext: false,
+    createdAt: new Date('2024-03-01'),
+    updatedAt: new Date('2024-04-01'),
+  },
 ];
 
 describe('dataview parser', () => {
@@ -42,12 +77,18 @@ describe('dataview evaluation', () => {
 
   it('applies WHERE with boolean and contains', () => {
     expect(runDataviewQuery('LIST WHERE pinned = true', notes).map((r) => r.id)).toEqual(['a']);
-    expect(runDataviewQuery('LIST WHERE content contains design', notes).map((r) => r.id)).toEqual(['b']);
+    expect(runDataviewQuery('LIST WHERE content contains design', notes).map((r) => r.id)).toEqual([
+      'b',
+    ]);
   });
 
   it('supports AND / OR joiners', () => {
     expect(runDataviewQuery('LIST WHERE pinned = true AND context = true', notes)).toHaveLength(0);
-    expect(runDataviewQuery('LIST WHERE pinned = true OR context = true', notes).map((r) => r.id).sort()).toEqual(['a', 'b']);
+    expect(
+      runDataviewQuery('LIST WHERE pinned = true OR context = true', notes)
+        .map((r) => r.id)
+        .sort(),
+    ).toEqual(['a', 'b']);
   });
 
   it('sorts and limits', () => {

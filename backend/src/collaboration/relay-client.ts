@@ -12,14 +12,17 @@ import { RTCPeerConnection, type RTCDataChannel } from 'werift';
 const log = serverLog.child({ module: 'collab-relay' });
 
 interface RelayConfig {
-  relayUrl: string;   // e.g. http://158.51.125.29:8080
+  relayUrl: string; // e.g. http://158.51.125.29:8080
   hostSecret: string;
 }
 
 type EventHandler = (msg: Record<string, unknown>) => void;
 
 class HybridPeerTransport {
-  private peers = new Map<string, { pc: RTCPeerConnection; channel?: RTCDataChannel; tierId: string }>();
+  private peers = new Map<
+    string,
+    { pc: RTCPeerConnection; channel?: RTCDataChannel; tierId: string }
+  >();
 
   constructor(
     private signal: (message: Record<string, unknown>) => void,
@@ -36,7 +39,11 @@ class HybridPeerTransport {
       } as never);
     }
     const pc = new RTCPeerConnection({ iceServers });
-    const peer = { pc, tierId } as { pc: RTCPeerConnection; channel?: RTCDataChannel; tierId: string };
+    const peer = { pc, tierId } as {
+      pc: RTCPeerConnection;
+      channel?: RTCDataChannel;
+      tierId: string;
+    };
     this.peers.set(guestId, peer);
     pc.onIceCandidate.subscribe((candidate) => {
       if (candidate) this.signal({ type: 'rtc-ice', guestId, candidate: candidate.toJSON() });
@@ -48,7 +55,9 @@ class HybridPeerTransport {
         try {
           const message = JSON.parse(String(raw)) as Record<string, unknown>;
           this.receive({ ...message, guestId, tierId: peer.tierId, transport: 'p2p' });
-        } catch { /* ignore malformed peer payloads */ }
+        } catch {
+          /* ignore malformed peer payloads */
+        }
       });
     });
     pc.connectionStateChange.subscribe((state) => {
@@ -68,7 +77,11 @@ class HybridPeerTransport {
       await peer.pc.setRemoteDescription(offer);
       const answer = await peer.pc.createAnswer();
       await peer.pc.setLocalDescription(answer);
-      this.signal({ type: 'rtc-answer', guestId, description: { type: answer.type, sdp: answer.sdp } });
+      this.signal({
+        type: 'rtc-answer',
+        guestId,
+        description: { type: answer.type, sdp: answer.sdp },
+      });
     } else if (message.type === 'rtc-ice' && peer && message.candidate) {
       await peer.pc.addIceCandidate(message.candidate as never);
     }
@@ -79,7 +92,12 @@ class HybridPeerTransport {
     const encoded = JSON.stringify(message);
     for (const [guestId, peer] of this.peers) {
       if (peer.channel?.readyState !== 'open') continue;
-      try { peer.channel.send(encoded); delivered.push(guestId); } catch { /* relay fallback handles it */ }
+      try {
+        peer.channel.send(encoded);
+        delivered.push(guestId);
+      } catch {
+        /* relay fallback handles it */
+      }
     }
     return delivered;
   }
@@ -113,9 +131,13 @@ export class RelayClient {
     const tier = this.activePolicy.accessTiers.find((item) => item.id === message.tierId);
     if (!tier?.permissions.submitPrompts) return;
     const requestedModel = String(message.model || '');
-    const model = requestedModel && (tier.allowedModels.includes('*') || tier.allowedModels.includes(requestedModel)) ? requestedModel : '';
+    const model =
+      requestedModel &&
+      (tier.allowedModels.includes('*') || tier.allowedModels.includes(requestedModel))
+        ? requestedModel
+        : '';
     const requestedReasoning = String(message.reasoningLevel || '');
-    const allowedReasoning = model ? (tier.reasoningByModel?.[model] || []) : [];
+    const allowedReasoning = model ? tier.reasoningByModel?.[model] || [] : [];
     this.dispatch({
       type: 'guest-prompt',
       guestId: message.guestId,
@@ -125,7 +147,10 @@ export class RelayClient {
       autoExecute: tier.permissions.autoExecutePrompts && tier.permissions.fullSystemAccess,
       content: String(message.content || '').slice(0, 4000),
       model,
-      reasoningLevel: requestedReasoning && allowedReasoning.includes(requestedReasoning) ? requestedReasoning : '',
+      reasoningLevel:
+        requestedReasoning && allowedReasoning.includes(requestedReasoning)
+          ? requestedReasoning
+          : '',
       commandAllowlist: tier.permissions.commandAllowlist || [],
       commandBlocklist: tier.permissions.commandBlocklist || [],
       transport: 'p2p',
@@ -150,15 +175,23 @@ export class RelayClient {
 
   onMessage(fn: EventHandler) {
     this.handlers.push(fn);
-    return () => { this.handlers = this.handlers.filter(h => h !== fn); };
+    return () => {
+      this.handlers = this.handlers.filter((h) => h !== fn);
+    };
   }
 
   private dispatch(msg: Record<string, unknown>) {
-    this.handlers.forEach(h => { try { h(msg); } catch {} });
+    this.handlers.forEach((h) => {
+      try {
+        h(msg);
+      } catch {}
+    });
   }
 
   /** Create or re-attach to a relay session, then open the host WS. */
-  async startSession(sessionId?: string): Promise<{ sessionId: string; inviteBase: string; joinCode: string }> {
+  async startSession(
+    sessionId?: string,
+  ): Promise<{ sessionId: string; inviteBase: string; joinCode: string }> {
     const httpBase = this.config.relayUrl;
     const wsBase = httpBase.replace(/^http/, 'ws');
 
@@ -173,7 +206,7 @@ export class RelayClient {
     });
 
     if (!res.ok) throw new Error(`Relay rejected session create: ${res.status}`);
-    const data = await res.json() as any;
+    const data = (await res.json()) as any;
     if (!data.ok) throw new Error(data.error || 'Relay error');
 
     this.sessionId = data.sessionId;
@@ -201,7 +234,7 @@ export class RelayClient {
       body: JSON.stringify({ tierId }),
     });
     if (!res.ok) throw new Error(`Failed to create invite: ${res.status}`);
-    const data = await res.json() as any;
+    const data = (await res.json()) as any;
     if (!data.ok) throw new Error(data.error || 'Relay error');
     return data.inviteUrl as string;
   }
@@ -227,8 +260,9 @@ export class RelayClient {
 
   async resolveJoinCode(joinCode: string) {
     const res = await fetch(`${this.config.relayUrl}/code/${encodeURIComponent(joinCode)}`);
-    if (!res.ok) throw new Error(res.status === 404 ? 'Invalid or inactive join code' : 'Relay join failed');
-    return await res.json() as { ok: true; inviteUrl: string; sessionId: string; role: string };
+    if (!res.ok)
+      throw new Error(res.status === 404 ? 'Invalid or inactive join code' : 'Relay join failed');
+    return (await res.json()) as { ok: true; inviteUrl: string; sessionId: string; role: string };
   }
 
   /** Broadcast an event to all connected guests via the relay. */
@@ -240,8 +274,11 @@ export class RelayClient {
 
   private sendRelay(msg: Record<string, unknown>) {
     if (!this.isConnected) return;
-    try { this.ws!.send(JSON.stringify(msg)); }
-    catch (err) { log.warn({ err }, 'Failed to send to relay'); }
+    try {
+      this.ws!.send(JSON.stringify(msg));
+    } catch (err) {
+      log.warn({ err }, 'Failed to send to relay');
+    }
   }
 
   /** Send a message to ONE guest (relay routes by guestId). Used for
@@ -257,8 +294,14 @@ export class RelayClient {
 
   async disconnect() {
     this.intentionalClose = true;
-    if (this.reconnectTimer) { clearTimeout(this.reconnectTimer); this.reconnectTimer = null; }
-    if (this.ws) { this.ws.close(); this.ws = null; }
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
+    if (this.ws) {
+      this.ws.close();
+      this.ws = null;
+    }
     this.sessionId = null;
     this.sessionToken = null;
     this.activePolicy = null;
@@ -288,10 +331,13 @@ export class RelayClient {
         try {
           const msg = JSON.parse(String(e.data));
           if (msg.type === 'rtc-offer' || msg.type === 'rtc-ice') {
-            void this.peerTransport.handle(msg).catch((err) => log.warn({ err }, 'WebRTC signaling failed'));
+            void this.peerTransport
+              .handle(msg)
+              .catch((err) => log.warn({ err }, 'WebRTC signaling failed'));
             return;
           }
-          if (msg.type === 'guest-left' && msg.guestId) void this.peerTransport.closePeer(String(msg.guestId));
+          if (msg.type === 'guest-left' && msg.guestId)
+            void this.peerTransport.closePeer(String(msg.guestId));
           this.dispatch(msg);
         } catch {}
       });
@@ -302,7 +348,9 @@ export class RelayClient {
         if (!this.intentionalClose && this.sessionToken) {
           log.warn({ code: e.code }, 'Relay WS closed, reconnecting in 5s');
           this.reconnectTimer = setTimeout(async () => {
-            try { await this.connect(wsBase, this.sessionToken!); } catch (err) {
+            try {
+              await this.connect(wsBase, this.sessionToken!);
+            } catch (err) {
               log.error({ err }, 'Relay reconnect failed');
             }
           }, 5_000);
@@ -330,10 +378,18 @@ function getRelayConfig(): RelayConfig | null {
 const publicRelayUrl = process.env.RELAY_URL?.replace(/\/$/, '') ?? null;
 
 export async function resolveRelayJoinCode(joinCode: string) {
-  if (!publicRelayUrl) throw new Error('Internet relay URL is not configured on this Koryphaios installation');
+  if (!publicRelayUrl)
+    throw new Error('Internet relay URL is not configured on this Koryphaios installation');
   const res = await fetch(`${publicRelayUrl}/code/${encodeURIComponent(joinCode)}`);
-  if (!res.ok) throw new Error(res.status === 404 ? 'Invalid or inactive join code' : 'Relay join failed');
-  return await res.json() as { ok: true; inviteUrl: string; sessionId: string; sessionName: string; tierId: string };
+  if (!res.ok)
+    throw new Error(res.status === 404 ? 'Invalid or inactive join code' : 'Relay join failed');
+  return (await res.json()) as {
+    ok: true;
+    inviteUrl: string;
+    sessionId: string;
+    sessionName: string;
+    tierId: string;
+  };
 }
 
 const _config = getRelayConfig();

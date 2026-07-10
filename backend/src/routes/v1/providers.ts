@@ -97,7 +97,11 @@ async function startBrowserAuth(
       case 'copilot': {
         const result = await startCopilotDeviceAuth();
         serverLog.info(
-          { provider: name, deviceCode: result.deviceCode, verificationUri: result.verificationUri },
+          {
+            provider: name,
+            deviceCode: result.deviceCode,
+            verificationUri: result.verificationUri,
+          },
           'Browser auth flow started',
         );
         return {
@@ -264,7 +268,10 @@ async function startBrowserAuth(
         // Start gcloud ADC login flow
         const authResult = await googleAuth.startGeminiCLIAuth();
         if (authResult.success && authResult.url) {
-          serverLog.info({ provider: name, url: authResult.url }, 'Google gcloud auth flow started');
+          serverLog.info(
+            { provider: name, url: authResult.url },
+            'Google gcloud auth flow started',
+          );
           return {
             ok: true,
             data: {
@@ -293,7 +300,9 @@ async function startBrowserAuth(
         }
         return {
           ok: false,
-          error: authResult.message || 'Google Cloud SDK (gcloud) is required. Install it or enter an API key instead.',
+          error:
+            authResult.message ||
+            'Google Cloud SDK (gcloud) is required. Install it or enter an API key instead.',
         };
       }
     }
@@ -317,7 +326,10 @@ async function completeBrowserAuth(
       case 'codex': {
         const localCodexToken = detectCodexAuthToken();
         if (!localCodexToken) {
-          serverLog.warn({ provider: name }, 'Codex browser auth completion requested before credentials existed');
+          serverLog.warn(
+            { provider: name },
+            'Codex browser auth completion requested before credentials existed',
+          );
           return { ok: false, error: 'Codex sign-in is not complete yet' };
         }
         const codexMarker = createCodexCLIAuthMarker();
@@ -334,7 +346,10 @@ async function completeBrowserAuth(
       case 'claude': {
         clearCachedToken('claude-login');
         if (!detectClaudeCodeLogin()) {
-          return { ok: false, error: 'Claude Code is not logged in. Run "claude login" in your terminal first.' };
+          return {
+            ok: false,
+            error: 'Claude Code is not logged in. Run "claude login" in your terminal first.',
+          };
         }
         const claudeResult = await providers.setCredentials('claude', {
           authToken: createClaudeCLIAuthMarker(),
@@ -384,7 +399,10 @@ async function completeBrowserAuth(
         clearCachedToken('gemini');
         const token = detectGeminiCLIToken();
         if (!token) {
-          return { ok: false, error: 'Google sign-in not complete yet. Finish authentication in the browser.' };
+          return {
+            ok: false,
+            error: 'Google sign-in not complete yet. Finish authentication in the browser.',
+          };
         }
         const googleResult = await providers.setCredentials('google', { authToken: token });
         if (!googleResult.success) {
@@ -476,7 +494,10 @@ async function listStoredAccounts(provider: string): Promise<Array<StoredProvide
   return groupStoredAccounts(provider, credentials);
 }
 
-async function getStoredAccountBundle(provider: string, accountId: string): Promise<{
+async function getStoredAccountBundle(
+  provider: string,
+  accountId: string,
+): Promise<{
   account: StoredProviderAccount;
   values: { apiKey?: string; authToken?: string; baseUrl?: string };
 } | null> {
@@ -639,7 +660,10 @@ export const providerRoutes = new Elysia({ prefix: '/api/providers' })
 
     const result = await completeBrowserAuth(name);
     if (!result.ok) {
-      serverLog.warn({ provider: name, error: result.error }, 'Browser auth completion request failed');
+      serverLog.warn(
+        { provider: name, error: result.error },
+        'Browser auth completion request failed',
+      );
       set.status = 400;
       return { ok: false, error: result.error ?? 'Failed to complete auth flow' };
     }
@@ -736,14 +760,13 @@ export const providerRoutes = new Elysia({ prefix: '/api/providers' })
             data: {
               status: 'connected',
               provider: 'codex',
-              savedAccount:
-                savedAccountId
-                  ? {
-                      id: savedAccountId,
-                      provider: 'codex',
-                      label: savedAccountLabel,
-                    }
-                  : undefined,
+              savedAccount: savedAccountId
+                ? {
+                    id: savedAccountId,
+                    provider: 'codex',
+                    label: savedAccountLabel,
+                  }
+                : undefined,
             },
           };
         }
