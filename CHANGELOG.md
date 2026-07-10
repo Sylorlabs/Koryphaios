@@ -4,6 +4,32 @@ All notable Koryphaios changes are recorded here. Release automation prepends a 
 
 ## Unreleased
 
+## [1.0.23] - 2026-07-10
+
+### ✨ Features
+- embed backend and harden release validation
+- sub-agent worker cards fly in from the top of the rail on spawn
+- looping scripted playback + guard dead-ends (notes, send)
+- demo mode for the marketing site's live embed
+
+### 🐛 Bug Fixes
+- bake RELAY_URL into the release build too
+- make model-sharing work for a Windows client + all-platform build
+- declare Bun test types
+- declare runtime auth and telemetry dependencies
+- isolate supported gates on clean runners
+- download appimagetool if not cached on CI runner
+- reorder AppImage repair before verify step
+- repair AppImage sidecar after linuxdeploy corrupts bun binary
+- remove conflicting libappindicator3-dev on Ubuntu 24.04
+- repair self-update download, progress, restart, and button UI
+
+### 🚀 Improvements
+- style(tests): format isolated provider fixtures
+- test(grok): accept live CLI model catalogs
+- test(credentials): isolate user and audit fixtures
+- test(auth): isolate API key database fixtures
+
 ## [1.0.22] - 2026-07-08
 
 ### Added
@@ -26,3 +52,4 @@ All notable Koryphaios changes are recorded here. Release automation prepends a 
 
 - Team workspaces remain separate from personal sessions and retain host-defined access-policy enforcement at the relay and tool layers.
 - The embedded demo performs no backend requests during its guided interactions and does not expose destructive, collaboration, notes, or feedback dead ends.
+
