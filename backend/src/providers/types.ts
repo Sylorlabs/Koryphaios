@@ -15,6 +15,11 @@ export type ProviderEventType =
   | 'tool_use_delta'
   | 'tool_use_stop'
   | 'usage_update'
+  // Emitted by AGENTIC providers (CLI harnesses like claude-code) that execute their own
+  // tools internally. Unlike tool_use_*, these are already-done actions to DISPLAY, not to
+  // execute — the manager surfaces them (live file preview / tool feed) without re-running.
+  | 'file_edit'
+  | 'tool_executed'
   | 'complete'
   | 'error';
 
@@ -22,14 +27,28 @@ export interface ProviderEvent {
   type: ProviderEventType;
   content?: string;
   thinking?: string;
+  /** Reasoning-token estimate for redacted thinking streams (Claude Code -p). */
+  thinkingTokens?: number;
   toolCallId?: string;
   toolName?: string;
   toolInput?: string;
   tokensIn?: number;
   tokensOut?: number;
-  tokensCache?: number; // Added for caching support
+  // Cached prompt tokens NOT already counted in tokensIn (Anthropic-style
+  // usage, where input_tokens excludes cache reads/writes). Consumers add
+  // tokensIn + tokensCache to get real context occupancy. Providers whose
+  // prompt count already includes cached tokens (OpenAI-style) must omit this.
+  tokensCache?: number;
   finishReason?: 'end_turn' | 'tool_use' | 'max_tokens' | 'stop';
   error?: string;
+  // file_edit (agentic providers): a file the agent just created/edited.
+  filePath?: string;
+  fileContent?: string;
+  fileOldContent?: string;
+  fileOperation?: 'create' | 'edit';
+  // tool_executed (agentic providers): a non-file tool the agent already ran.
+  toolOutput?: string;
+  isError?: boolean;
 }
 
 // ─── Tool definition for provider calls ─────────────────────────────────────
@@ -83,6 +102,14 @@ export interface StreamRequest {
   reasoningLevel?: string;
   /** Signal to abort the stream */
   signal?: AbortSignal;
+  /** Project working directory — agentic CLI providers (claude-code) run + edit files here. */
+  workingDirectory?: string;
+  /** Koryphaios session id — used by cloud providers (Jules) for session continuity. */
+  sessionId?: string;
+  /** Host-imposed sandbox for a REMOTE agentic turn: the CLI runs on the host,
+   *  so the host confines it (OS jail + tool gating). Absent for local turns
+   *  (full access). See SandboxPolicy. */
+  sandbox?: import('@koryphaios/shared').SandboxPolicy;
 }
 
 // ─── Provider interface ─────────────────────────────────────────────────────

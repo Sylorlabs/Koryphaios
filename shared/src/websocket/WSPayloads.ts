@@ -12,6 +12,20 @@ export type ChangeSummary = {
   operation: 'create' | 'edit' | 'delete';
 };
 
+/** Estimated composition of the prompt context, measured at dispatch time
+ *  (chars/4 heuristic). Segment proportions for the context-usage bar; the
+ *  authoritative TOTAL is still tokensUsed from the provider. */
+export type ContextBreakdown = {
+  /** Base system prompt + behavior rules. */
+  system: number;
+  /** Injected memory/notes network context. */
+  memory: number;
+  /** Tool definitions + all tool calls and results in the history. */
+  tools: number;
+  /** Conversation only: what the user typed + what the agent typed back. */
+  chat: number;
+};
+
 export type StreamUsage = {
   agentId: string;
   model: string;
@@ -22,6 +36,10 @@ export type StreamUsage = {
   usageKnown: boolean;
   contextWindow?: number;
   contextKnown: boolean;
+  /** Where the context limit came from. Live provider/CLI data is preferred;
+   * catalog is an explicit fallback when that surface exposes no limit. */
+  contextSource?: 'live' | 'catalog' | 'alias';
+  breakdown?: ContextBreakdown;
 };
 
 export interface AgentSpawnedPayload {
@@ -57,6 +75,9 @@ export interface AgentThreadMessagePayload {
 export interface ThinkingPayload {
   agentId: string;
   thinking: string;
+  /** Estimated reasoning tokens so far — used when the provider redacts the
+   *  thinking text (Claude Code headless) but reports progress. */
+  thinkingTokens?: number;
 }
 export type StreamThinkingPayload = ThinkingPayload;
 
@@ -102,6 +123,7 @@ export interface MessageCompletePayload {
 
 export interface ToolCallPayload {
   agentId: string;
+  sourceProvider?: string;
   toolCall: {
     id: string;
     name: string;
@@ -112,6 +134,7 @@ export type StreamToolCallPayload = ToolCallPayload;
 
 export interface StreamToolResultPayload {
   agentId: string;
+  sourceProvider?: string;
   toolResult: {
     callId: string;
     name: string;
@@ -151,6 +174,8 @@ export interface StreamFileDeltaPayload {
   delta: string;
   totalLength: number;
   operation: 'create' | 'edit';
+  /** For edits: the original text being replaced, sent once on the first delta (enables a live diff). */
+  oldStr?: string;
 }
 
 export interface StreamFileCompletePayload {
@@ -241,6 +266,21 @@ export interface ProviderInfo {
   extraAuthModes?: Array<{ id: string; label: string; description: string }>;
   error?: string;
   circuitOpen?: boolean;
+  /** Human-friendly name (e.g. "Google Jules") */
+  label?: string;
+  /** Static icon path served by the frontend (e.g. /provider-icons/jules.svg) */
+  iconPath?: string;
+  /** Where the provider executes work */
+  deployment?: 'cloud' | 'local' | 'hybrid';
+  /** Short UI description of provider behavior */
+  description?: string;
+  /** True for a REMOTE provider served by another machine (id `remote-*`). */
+  remote?: boolean;
+  /** Remote CLI harness: using it copies the client's project to the host and
+   *  runs the CLI there. The composer confirms this before the first send. */
+  remoteAgentic?: boolean;
+  /** Display name of the host serving this remote provider. */
+  remoteHostName?: string;
 }
 
 export interface ProviderStatusPayload {

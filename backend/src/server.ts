@@ -11,9 +11,10 @@ import type { Server } from 'bun';
 import { bootstrap } from './bootstrap';
 import { setContext } from './context';
 import { serverLog } from './logger';
-import { VERSION, ID, RATE_LIMIT } from './constants';
+import { VERSION, ID, RATE_LIMIT, COMPAT } from './constants';
 import { RateLimiter } from './security/rate-limit';
 import { PROJECT_ROOT } from './runtime/paths';
+import { resolveBundleHash, isBundleHashEnforced } from './config/compat';
 import { createWebSocketHandlers } from './server/websocket-handler';
 import type { WSClientData } from './ws/ws-manager';
 import { validateLocalBearerToken } from './auth/local-route-auth';
@@ -49,6 +50,17 @@ const baseApp = new Elysia()
       // Lets the desktop supervisor reject a stale process already bound to
       // the configured port instead of mistaking it for the embedded service.
       pid: process.pid,
+      // Frontend/backend compatibility contract. The frontend reads this and
+      // halts normal operation when its own version/bundle-hash falls outside
+      // the range the backend reports. Prevents a stale frontend from running
+      // silently against a fresh backend (or vice versa).
+      compat: {
+        minFrontend: COMPAT.minFrontend,
+        currentFrontend: COMPAT.currentFrontend,
+        bundleHash: resolveBundleHash(),
+        bundleHashEnforced: isBundleHashEnforced(),
+        serverStartedAt: Date.now(),
+      },
     },
   }))
   .get('/api/project', async () => {
@@ -97,6 +109,15 @@ async function main() {
       }),
     )
     .onRequest(({ request, set }) => {
+      const url = new URL(request.url);
+
+      // Never rate-limit the liveness endpoint. /api/health is used by the
+      // Tauri supervisor (every 3s), the frontend sentinel (every 5s), and
+      // the dev-mode launcher watchdog. Rate-limiting it would make those
+      // monitoring loops unreliable — the whole point of the health endpoint
+      // is to ALWAYS be reachable when the process is alive.
+      if (url.pathname === '/api/health') return;
+
       const clientIp = (request.headers.get('x-forwarded-for') ?? 'local').split(',')[0].trim();
       const rateCheck = rateLimiter.check(clientIp);
       if (!rateCheck.allowed) {
@@ -111,11 +132,11 @@ async function main() {
     });
 
   // ─── Start Server ───────────────────────────────────────────────────────────
-  // Default to 127.0.0.1 for local-only security. 
+  // Default to 127.0.0.1 for local-only security.
   // User must explicitly override with 0.0.0.0 to expose to network.
   const serverConfig = {
     port: config.server?.port || 3001,
-    host: config.server?.host || '127.0.0.1'
+    host: config.server?.host || '127.0.0.1',
   };
 
   const server = Bun.serve<WSClientData>({
@@ -126,19 +147,26 @@ async function main() {
 
       // 1. WebSocket upgrade
       if (url.pathname === '/ws') {
-        const protocols = req.headers.get('sec-websocket-protocol')?.split(',').map(s => s.trim()) || [];
+        const protocols =
+          req.headers
+            .get('sec-websocket-protocol')
+            ?.split(',')
+            .map((s) => s.trim()) || [];
         // First protocol is usually 'koryphaios', second is the token
         const authToken = protocols.length > 1 ? protocols[1] : url.searchParams.get('auth');
-        
+
         const authSession = validateLocalBearerToken(authToken);
         if (!authSession) {
-          return new Response(JSON.stringify({ ok: false, error: 'Unauthorized WebSocket request' }), {
-            status: 401,
-            headers: { 'Content-Type': 'application/json' },
-          });
+          return new Response(
+            JSON.stringify({ ok: false, error: 'Unauthorized WebSocket request' }),
+            {
+              status: 401,
+              headers: { 'Content-Type': 'application/json' },
+            },
+          );
         }
         const upgraded = srv.upgrade(req, {
-          data: { id: nanoid(ID.WS_CLIENT_ID_LENGTH), userId: authSession.id }
+          data: { id: nanoid(ID.WS_CLIENT_ID_LENGTH), userId: authSession.id },
         });
         if (upgraded) return undefined;
         return new Response(JSON.stringify({ ok: false, error: 'WebSocket upgrade failed' }), {
@@ -163,7 +191,7 @@ async function main() {
       // repo's build output. Same server either way: one app, one origin.
       const frontendBuildDir = resolve(
         process.env.KORYPHAIOS_FRONTEND_DIST?.trim() ||
-          join(PROJECT_ROOT, "frontend", "build", "client"),
+          join(PROJECT_ROOT, 'frontend', 'build', 'client'),
       );
       let filePath = resolve(join(frontendBuildDir, url.pathname));
 
@@ -218,14 +246,17 @@ async function main() {
 
   serverLog.info({ host: serverConfig.host, port: actualPort }, 'Server running');
 
-
   // ─── Graceful Shutdown ──────────────────────────────────────────────────
   async function gracefulShutdown(signal: string) {
     serverLog.info({ signal }, 'Graceful shutdown');
     server.stop(true);
     kory.cancel();
     shutdownAllBrokers();
-    try { getDb().close(); } catch (e) { /* ignore */ }
+    try {
+      getDb().close();
+    } catch (e) {
+      /* ignore */
+    }
     process.exit(0);
   }
 

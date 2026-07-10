@@ -5,7 +5,7 @@ export const ProviderName = {
   Anthropic: 'anthropic',
   OpenAI: 'openai',
   Google: 'google',
-  GoogleSubscription: 'google-subscription',
+  // 'google-subscription' (Gemini CLI) is RETIRED — never re-add it.
   AIStudio: 'aistudio',
   XAI: 'xai',
 
@@ -81,7 +81,6 @@ export const IMPLEMENTED_PROVIDERS: ProviderName[] = [
   'openai',
   'google',
   'aistudio',
-  'google-subscription',
   'xai',
   'openrouter',
   'groq',
@@ -177,7 +176,6 @@ export const PROVIDER_AUTH_MODES: Record<ProviderName, ProviderAuthMode> = {
   grok: 'auth_only',
   openai: 'api_key',
   google: 'api_key_or_auth',
-  'google-subscription': 'auth_only',
   xai: 'api_key',
   openrouter: 'api_key',
   groq: 'api_key',
@@ -231,7 +229,6 @@ export const PROVIDER_ENV_VARS: Record<
   openai: { apiKey: 'OPENAI_API_KEY' },
   grok: { authToken: 'GROK_CODE_XAI_API_KEY' },
   google: { apiKey: 'GEMINI_API_KEY', authToken: 'GEMINI_AUTH_TOKEN' },
-  'google-subscription': { authToken: 'GOOGLE_SUBSCRIPTION_OAUTH_TOKEN' },
   xai: { apiKey: 'XAI_API_KEY' },
   openrouter: { apiKey: 'OPENROUTER_API_KEY', baseUrl: 'OPENROUTER_BASE_URL' },
   groq: { apiKey: 'GROQ_API_KEY' },

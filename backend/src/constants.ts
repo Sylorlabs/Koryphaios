@@ -4,6 +4,24 @@
 export const VERSION = '1.0.0';
 
 /**
+ * Frontend/Backend compatibility contract.
+ *
+ * `minFrontend` is the oldest frontend build allowed to operate normally
+ * against this backend. Older frontends see the mismatch overlay and halt
+ * rather than running in a broken half-state. `currentFrontend` is the
+ * frontend build that shipped in lockstep with THIS backend build
+ * (informational only).
+ *
+ * Bump `minFrontend` whenever a backend change breaks the public /api or ws
+ * contract older frontends rely on. Bump `currentFrontend` whenever a new
+ * frontend ships alongside this backend.
+ */
+export const COMPAT = {
+  minFrontend: '1.0.0',
+  currentFrontend: '1.0.0',
+} as const;
+
+/**
  * Session and Message Limits
  */
 export const SESSION = {
@@ -129,6 +147,12 @@ export const AGENT = {
 
   /** Max time a single LLM stream can run before being aborted (prevents stuck requests) */
   LLM_STREAM_TIMEOUT_MS: 600_000, // 10 minutes
+
+  /** Max total wall-clock time for processTask before hard abort (prevents indefinite hangs) */
+  PROCESS_TASK_TIMEOUT_MS: 1_800_000, // 30 minutes
+
+  /** Max time to wait for a single user input response before auto-resolving (prevents indefinite hangs) */
+  USER_INPUT_TIMEOUT_MS: 300_000, // 5 minutes
 } as const;
 
 /**
@@ -144,7 +168,7 @@ export const CONFIG_PATHS = [
  * Context Files (loaded into agent context)
  */
 export const DEFAULT_CONTEXT_PATHS: string[] = [
-  '.koryrules',
+  '.koryphaios/rules/rules.md',
   'CLAUDE.md',
   'AGENTS.md',
   '.opencode.json',
@@ -202,18 +226,6 @@ export const PROVIDER = {
     OPENROUTER: 'OPENROUTER_API_KEY',
     VERTEXAI: 'GOOGLE_VERTEX_AI_API_KEY',
   } as const,
-} as const;
-
-/**
- * Telegram Configuration
- */
-export const TELEGRAM = {
-  /** Webhook path */
-  WEBHOOK_PATH: '/api/telegram/webhook',
-  /** Polling interval (ms) */
-  POLLING_INTERVAL: 1000,
-  /** Max message length */
-  MAX_MESSAGE_LENGTH: 4096,
 } as const;
 
 /**

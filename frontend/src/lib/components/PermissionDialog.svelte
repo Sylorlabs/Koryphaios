@@ -41,6 +41,21 @@
   }
 
   let pendingPermissions = $derived(wsStore.pendingPermissions.filter(p => p.sessionId === sessionStore.activeSessionId));
+  // Approvals stalled in sessions the user is NOT looking at. Without a
+  // surface for these, a backgrounded agent waits forever in silence.
+  let otherSessionPermissions = $derived(
+    wsStore.pendingPermissions.filter(p => p.sessionId && p.sessionId !== sessionStore.activeSessionId)
+  );
+
+  function jumpToPendingSession() {
+    const target = otherSessionPermissions[0];
+    if (target?.sessionId) sessionStore.activeSessionId = target.sessionId;
+  }
+
+  function pendingSessionTitle(): string {
+    const target = otherSessionPermissions[0];
+    return sessionStore.sessions.find(s => s.id === target?.sessionId)?.title ?? 'another session';
+  }
   let dialogEl = $state<HTMLElement | null>(null);
 
   $effect(() => {
@@ -80,6 +95,23 @@
     }
   }
 </script>
+
+{#if pendingPermissions.length === 0 && otherSessionPermissions.length > 0}
+  <!-- Floating jump-pill: approvals are waiting somewhere the user can't see. -->
+  <button
+    type="button"
+    onclick={jumpToPendingSession}
+    class="fixed bottom-24 left-1/2 -translate-x-1/2 z-50 flex items-center gap-2 px-4 py-2 rounded-full border shadow-lg transition-transform hover:scale-[1.02]"
+    style="background: rgba(245, 158, 11, 0.12); border-color: rgba(245, 158, 11, 0.4); color: #f59e0b; backdrop-filter: blur(8px);"
+  >
+    <ShieldAlert size={14} />
+    <span class="text-xs font-medium">
+      {otherSessionPermissions.length === 1
+        ? `Approval needed in "${pendingSessionTitle()}"`
+        : `${otherSessionPermissions.length} approvals waiting in other sessions`} — click to review
+    </span>
+  </button>
+{/if}
 
 {#if pendingPermissions.length > 0}
   <div class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">

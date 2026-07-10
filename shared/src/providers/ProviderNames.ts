@@ -6,7 +6,7 @@ export const ProviderName = {
   Anthropic: 'anthropic',
   OpenAI: 'openai',
   Google: 'google',
-  GoogleSubscription: 'google-subscription',
+  // 'google-subscription' (Gemini CLI) is RETIRED — never re-add it.
   AIStudio: 'aistudio',
   XAI: 'xai',
 

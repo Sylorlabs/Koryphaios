@@ -18,11 +18,33 @@ type AppConfig = {
   };
 };
 
+type ManagedChild = {
+  name: string;
+  proc: Child;
+  owned: boolean;
+};
+
 const PROJECT_ROOT = resolve(import.meta.dir, '..');
 const BACKEND_DIR = resolve(PROJECT_ROOT, 'backend');
 const FRONTEND_DIR = resolve(PROJECT_ROOT, 'frontend');
 const DESKTOP_DIR = resolve(PROJECT_ROOT, 'desktop');
 const APP_CONFIG_PATH = resolve(PROJECT_ROOT, 'config', 'app.config.json');
+
+const BACKEND_READY_TIMEOUT_MS = Number(process.env.KORYPHAIOS_BACKEND_READY_TIMEOUT_MS ?? 120_000);
+const FRONTEND_READY_TIMEOUT_MS = Number(
+  process.env.KORYPHAIOS_FRONTEND_READY_TIMEOUT_MS ?? 60_000,
+);
+const POLL_INTERVAL_MS = 500;
+const PROGRESS_INTERVAL_MS = 5_000;
+// Post-start watchdog: how often to poll /api/health after everything is up.
+const BACKEND_WATCHDOG_INTERVAL_MS = Number(
+  process.env.KORYPHAIOS_BACKEND_WATCHDOG_INTERVAL_MS ?? 3_000,
+);
+// Consecutive failed health checks before tearing the whole workflow down.
+// At 3s cadence, 5 failures ~= 15s of sustained regression.
+const BACKEND_WATCHDOG_FAIL_THRESHOLD = Number(
+  process.env.KORYPHAIOS_BACKEND_WATCHDOG_FAIL_THRESHOLD ?? 5,
+);
 
 const colors = {
   reset: '\x1b[0m',
@@ -57,6 +79,7 @@ const frontendPort = Number(process.env.KORYPHAIOS_FRONTEND_PORT ?? 3003);
 const backendUrl = `http://${backendClientHost}:${backendPort}`;
 const frontendUrl = `http://${frontendHost}:${frontendPort}`;
 const websocketUrl = `ws://${backendClientHost}:${backendPort}/ws`;
+const backendHealthUrl = `${backendUrl}/api/health`;
 
 const sharedEnv = {
   ...process.env,
@@ -64,13 +87,21 @@ const sharedEnv = {
   KORYPHAIOS_PORT: String(backendPort),
   KORYPHAIOS_FRONTEND_HOST: frontendHost,
   KORYPHAIOS_FRONTEND_PORT: String(frontendPort),
+  KORYPHAIOS_DESKTOP_DEV: '1',
+  // Inherit any pinned compat hash so the dev backend's /api/health reports
+  // the same value the dev frontend's Vite define baked in. Without this the
+  // backend falls back to its own resolution (env, then compat-hash.json) —
+  // keeping them aligned via the file too is fine, but env wins.
+  ...(process.env.KORYPHAIOS_FRONTEND_BUNDLE_HASH
+    ? { KORYPHAIOS_FRONTEND_BUNDLE_HASH: process.env.KORYPHAIOS_FRONTEND_BUNDLE_HASH }
+    : {}),
 };
 
-const children: Array<{ name: string; proc: Child }> = [];
+const children: ManagedChild[] = [];
 let shuttingDown = false;
 
-function track(name: string, proc: Child) {
-  children.push({ name, proc });
+function track(name: string, proc: Child, owned = true) {
+  children.push({ name, proc, owned });
   proc.on('exit', (code, signal) => {
     if (shuttingDown) return;
     log(`\n${name} exited unexpectedly (code=${code}, signal=${signal})`, colors.red);
@@ -87,8 +118,8 @@ async function cleanup(exitCode = 0) {
   if (shuttingDown) return;
   shuttingDown = true;
   log('\nShutting down desktop workflow...', colors.yellow);
-  for (const { name, proc } of children.reverse()) {
-    if (proc.killed) continue;
+  for (const { name, proc, owned } of [...children].reverse()) {
+    if (!owned || proc.killed) continue;
     log(`  stopping ${name}`, colors.dim);
     try {
       proc.kill('SIGTERM');
@@ -96,14 +127,18 @@ async function cleanup(exitCode = 0) {
       // ignore
     }
   }
-  await new Promise((resolve) => setTimeout(resolve, 750));
+  await new Promise((resolvePromise) => setTimeout(resolvePromise, 750));
   process.exit(exitCode);
 }
 
 process.on('SIGINT', () => void cleanup(0));
 process.on('SIGTERM', () => void cleanup(0));
 
-function pipeLogs(name: string, stream: NodeJS.ReadableStream | null | undefined, color = colors.dim) {
+function pipeLogs(
+  name: string,
+  stream: NodeJS.ReadableStream | null | undefined,
+  color = colors.dim,
+) {
   if (!stream) return;
   let buffer = '';
   stream.on('data', (chunk: Buffer | string) => {
@@ -118,42 +153,86 @@ function pipeLogs(name: string, stream: NodeJS.ReadableStream | null | undefined
 }
 
 async function isPortListening(host: string, port: number): Promise<boolean> {
-  return await new Promise((resolve) => {
+  return await new Promise((resolvePromise) => {
     const socket = net.createConnection({ host, port });
-    socket.setTimeout(500);
+    socket.setTimeout(1000);
     socket.once('connect', () => {
       socket.destroy();
-      resolve(true);
+      resolvePromise(true);
     });
     socket.once('timeout', () => {
       socket.destroy();
-      resolve(true);
+      resolvePromise(false);
     });
-    socket.once('error', () => resolve(false));
+    socket.once('error', () => resolvePromise(false));
   });
 }
 
-async function assertPortAvailable(label: string, host: string, port: number) {
-  if (await isPortListening(host, port)) {
-    throw new Error(`${label} port ${host}:${port} is already in use. Stop the existing process and rerun bun run dev.`);
+async function fetchText(url: string, timeoutMs = 3_000): Promise<string | null> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetch(url, { signal: controller.signal });
+    if (!response.ok) return null;
+    return await response.text();
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timer);
   }
 }
 
-async function waitForHttpOk(label: string, url: string, timeoutMs: number, validate?: (body: string) => boolean) {
-  const started = Date.now();
-  while (Date.now() - started < timeoutMs) {
-    try {
-      const response = await fetch(url);
-      if (response.ok) {
-        const body = await response.text();
-        if (!validate || validate(body)) return;
-      }
-    } catch {
-      // keep waiting
-    }
-    await new Promise((resolve) => setTimeout(resolve, 500));
+async function isBackendHealthy(): Promise<boolean> {
+  const body = await fetchText(backendHealthUrl);
+  return body?.includes('"ok":true') ?? false;
+}
+
+async function isFrontendHealthy(): Promise<boolean> {
+  const body = await fetchText(frontendUrl);
+  if (!body) return false;
+  const lower = body.toLowerCase();
+  return lower.includes('<!doctype html') || lower.includes('<html');
+}
+
+async function resolvePortState(
+  label: string,
+  host: string,
+  port: number,
+  isHealthy: () => Promise<boolean>,
+): Promise<'free' | 'reusable'> {
+  if (!(await isPortListening(host, port))) return 'free';
+  if (await isHealthy()) {
+    log(`${label} already running at ${host}:${port} — reusing`, colors.yellow);
+    return 'reusable';
   }
-  throw new Error(`${label} did not become ready at ${url} within ${timeoutMs}ms`);
+  throw new Error(
+    `${label} port ${host}:${port} is already in use by another process. Stop it and rerun bun run dev.`,
+  );
+}
+
+async function waitForReady(
+  label: string,
+  isHealthy: () => Promise<boolean>,
+  timeoutMs: number,
+  hint?: string,
+) {
+  const started = Date.now();
+  let lastProgress = started;
+
+  while (Date.now() - started < timeoutMs) {
+    if (await isHealthy()) return;
+
+    if (Date.now() - lastProgress >= PROGRESS_INTERVAL_MS) {
+      const elapsed = Math.round((Date.now() - started) / 1000);
+      const suffix = hint ? ` — ${hint}` : '';
+      log(`  still waiting for ${label}... (${elapsed}s${suffix})`, colors.dim);
+      lastProgress = Date.now();
+    }
+
+    await new Promise((resolvePromise) => setTimeout(resolvePromise, POLL_INTERVAL_MS));
+  }
+
+  throw new Error(`${label} did not become ready within ${timeoutMs}ms`);
 }
 
 async function main() {
@@ -166,39 +245,66 @@ async function main() {
   log(`Backend:  ${backendUrl}`, colors.dim);
   log(`Frontend: ${frontendUrl} (internal dev server for Tauri)`, colors.dim);
   log(`Socket:   ${websocketUrl}`, colors.dim);
+  log('Open the native Koryphaios window — no browser required.', colors.dim);
   log('', colors.reset);
 
-  await assertPortAvailable('Backend', backendClientHost, backendPort);
-  await assertPortAvailable('Frontend', frontendHost, frontendPort);
+  const backendState = await resolvePortState(
+    'Backend',
+    backendClientHost,
+    backendPort,
+    isBackendHealthy,
+  );
 
-  const backend = spawn('bun', ['run', 'src/server.ts'], {
-    cwd: BACKEND_DIR,
-    env: sharedEnv,
-    stdio: ['ignore', 'pipe', 'pipe'],
-  });
-  track('backend', backend);
-  pipeLogs('backend', backend.stdout, colors.dim);
-  pipeLogs('backend', backend.stderr, colors.yellow);
+  if (backendState === 'free') {
+    const backend = spawn('bun', ['run', 'src/server.ts'], {
+      cwd: BACKEND_DIR,
+      env: sharedEnv,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    track('backend', backend);
+    pipeLogs('backend', backend.stdout, colors.dim);
+    pipeLogs('backend', backend.stderr, colors.yellow);
 
-  log('Waiting for backend health...', colors.blue);
-  await waitForHttpOk('Backend', `${backendUrl}/api/health`, 30000, (body) => body.includes('"ok":true'));
+    log('Waiting for backend health...', colors.blue);
+    await waitForReady(
+      'Backend',
+      isBackendHealthy,
+      BACKEND_READY_TIMEOUT_MS,
+      'MCP servers may take up to ~60s on first launch',
+    );
+  }
+
   log('Backend ready', colors.green);
 
-  const frontend = spawn('bun', ['x', 'vite', 'dev', '--host', frontendHost, '--port', String(frontendPort), '--strictPort'], {
-    cwd: FRONTEND_DIR,
-    env: {
-      ...sharedEnv,
-      VITE_BACKEND_URL: backendUrl,
-      VITE_BACKEND_WS_URL: websocketUrl,
-    },
-    stdio: ['ignore', 'pipe', 'pipe'],
-  });
-  track('frontend', frontend);
-  pipeLogs('frontend', frontend.stdout, colors.dim);
-  pipeLogs('frontend', frontend.stderr, colors.yellow);
+  const frontendState = await resolvePortState(
+    'Frontend',
+    frontendHost,
+    frontendPort,
+    isFrontendHealthy,
+  );
 
-  log('Waiting for frontend dev server...', colors.blue);
-  await waitForHttpOk('Frontend', frontendUrl, 30000, (body) => body.includes('<!doctype html') || body.includes('<!DOCTYPE html'));
+  if (frontendState === 'free') {
+    const frontend = spawn(
+      'bun',
+      ['x', 'vite', 'dev', '--host', frontendHost, '--port', String(frontendPort), '--strictPort'],
+      {
+        cwd: FRONTEND_DIR,
+        env: {
+          ...sharedEnv,
+          VITE_BACKEND_URL: backendUrl,
+          VITE_BACKEND_WS_URL: websocketUrl,
+        },
+        stdio: ['ignore', 'pipe', 'pipe'],
+      },
+    );
+    track('frontend', frontend);
+    pipeLogs('frontend', frontend.stdout, colors.dim);
+    pipeLogs('frontend', frontend.stderr, colors.yellow);
+
+    log('Waiting for frontend dev server...', colors.blue);
+    await waitForReady('Frontend', isFrontendHealthy, FRONTEND_READY_TIMEOUT_MS);
+  }
+
   log('Frontend ready', colors.green);
 
   log('Launching native Tauri shell...', colors.blue);
@@ -212,6 +318,37 @@ async function main() {
   log('', colors.reset);
   log('Native desktop app is running.', colors.green);
   log('Press Ctrl+C to stop all processes.', colors.dim);
+
+  // Post-start watchdog: the launcher already exits on raw process death,
+  // but a backend can hang or stop responding while still alive. Poll health
+  // continuously and tear down EVERYTHING (frontend + Tauri) when the backend
+  // is sustained-unhealthy — a working UI without a working backend is the
+  // exact failure mode we're preventing.
+  let consecutiveFailures = 0;
+  (async () => {
+    while (!shuttingDown) {
+      await new Promise((r) => setTimeout(r, BACKEND_WATCHDOG_INTERVAL_MS));
+      if (shuttingDown) return;
+      const healthy = await isBackendHealthy().catch(() => false);
+      if (healthy) {
+        consecutiveFailures = 0;
+        continue;
+      }
+      consecutiveFailures++;
+      log(
+        `Backend health regression (${consecutiveFailures}/${BACKEND_WATCHDOG_FAIL_THRESHOLD})`,
+        colors.yellow,
+      );
+      if (consecutiveFailures >= BACKEND_WATCHDOG_FAIL_THRESHOLD) {
+        log(
+          `Backend stayed unhealthy for ~${consecutiveFailures * Math.round(BACKEND_WATCHDOG_INTERVAL_MS / 1000)}s — shutting down frontend + Tauri. A stale UI without a working backend is not allowed.`,
+          colors.red,
+        );
+        void cleanup(1);
+        return;
+      }
+    }
+  })();
 }
 
 main().catch((err) => {

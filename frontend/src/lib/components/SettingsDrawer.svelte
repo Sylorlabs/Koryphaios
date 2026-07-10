@@ -2,7 +2,9 @@
   import { onDestroy, tick } from 'svelte';
   import { providersStore } from '$lib/stores/providers.svelte';
   import { theme, type ThemePreset, type AccentColor, type FontFamily } from '$lib/stores/theme.svelte';
-  import { toastStore } from '$lib/stores/toast.svelte';
+  import { shortcutStore } from '$lib/stores/shortcuts.svelte';
+import { defaultShortcuts as globalDefaultShortcuts } from '$lib/stores/shortcuts.svelte';
+import { toastStore } from '$lib/stores/toast.svelte';
   import {
     Key,
     Palette,
@@ -11,12 +13,10 @@
     Copy,
     Zap,
     Server,
-    Globe,
     Cpu,
     X,
     User,
     Shield,
-    MessageCircle,
     Search,
     CreditCard,
     AlertTriangle,
@@ -26,9 +26,7 @@
     Sparkles,
     Terminal,
     Users,
-    Send,
     MessageSquare,
-    Slack,
     Type,
     RotateCcw,
     Save,
@@ -36,6 +34,8 @@
     Plus,
     Trash2,
     StickyNote,
+    FolderOpen,
+    RefreshCw,
   } from 'lucide-svelte';
   import MemoryEditor from './MemoryEditor.svelte';
   import AgentSettings from './AgentSettings.svelte';
@@ -47,6 +47,7 @@
   import { collaborationStore } from '$lib/stores/collaboration.svelte';
   import { modeStore } from '$lib/stores/mode.svelte';
   import { notesStore } from '$lib/stores/notes.svelte';
+  import { projectStore } from '$lib/stores/project.svelte';
   import {
     NOTE_TOOL_DEFINITIONS,
     type NotePermissionLevel,
@@ -54,8 +55,14 @@
   } from '@koryphaios/shared';
   import ModelSelectionDialog from './ModelSelectionDialog.svelte';
   import ModeToggle from './ModeToggle.svelte';
-  import { apiFetch, parseJsonResponse } from '$lib/api.svelte';
+  import TeamAccessProfiles from './TeamAccessProfiles.svelte';
+  import ModelSharingPanel from './ModelSharingPanel.svelte';
+  import NumberStepper from './NumberStepper.svelte';
+  import KorySelect from './KorySelect.svelte';
+  import { apiUrl } from '$lib/utils/api-url';
+import { apiFetch, parseJsonResponse } from '$lib/api.svelte';
   import { dndzone } from 'svelte-dnd-action';
+  import { invoke } from '@tauri-apps/api/core';
 
   interface Props {
     open?: boolean;
@@ -63,7 +70,7 @@
   }
 
   let { open = false, onClose }: Props = $props();
-  let activeTab = $state<'providers' | 'appearance' | 'shortcuts' | 'messaging' | 'billing' | 'memory' | 'agent' | 'experimental' | 'teams' | 'notes'>('providers');
+  let activeTab = $state<'providers' | 'appearance' | 'shortcuts' | 'billing' | 'memory' | 'agent' | 'experimental' | 'teams' | 'notes'>('providers');
 
   let showModelSelector = $state(false);
   let selectorTarget = $state<any>(null);
@@ -79,7 +86,45 @@
   let managingAccountLabel = $state('');
   let managingAccountSaving = $state(false);
   let newKeyValue = $state('');
+  let teamJoinCode = $state('');
+  let teamGuestName = $state('');
+  let hostWorkspacePaths = $state<string[]>(projectStore.currentPath ? [projectStore.currentPath] : []);
+  let hostPathsInitializedFor = $state<string | null>(projectStore.currentPath);
   let rotateKeyInput = $state<HTMLInputElement | null>(null);
+
+  $effect(() => {
+    const current = projectStore.currentPath;
+    if (activeTab !== 'teams' || collaborationStore.activeCollab || current === hostPathsInitializedFor) return;
+    hostPathsInitializedFor = current;
+    if (current) hostWorkspacePaths = [current];
+  });
+
+  function updateHostWorkspacePath(index: number, value: string) {
+    hostWorkspacePaths = hostWorkspacePaths.map((path, i) => i === index ? value : path);
+  }
+
+  function removeHostWorkspacePath(index: number) {
+    hostWorkspacePaths = hostWorkspacePaths.filter((_, i) => i !== index);
+  }
+
+  async function addHostWorkspacePath() {
+    try {
+      const selected = await invoke<string | null>('select_folder_dialog');
+      if (!selected || hostWorkspacePaths.includes(selected)) return;
+      hostWorkspacePaths = [...hostWorkspacePaths, selected];
+    } catch (error) {
+      toastStore.error(error instanceof Error ? error.message : 'Could not open folder picker');
+    }
+  }
+
+  async function startHosting() {
+    const paths = [...new Set(hostWorkspacePaths.map(path => path.trim()).filter(Boolean))];
+    if (!paths.length) {
+      toastStore.error('Add at least one workspace path before hosting');
+      return;
+    }
+    if (await collaborationStore.hostSession(paths)) onClose?.();
+  }
 
   const NOTE_PERMISSION_PRESETS: Array<{
     id: Exclude<NotesPermissionPreset, 'custom'>
@@ -97,13 +142,26 @@
     ask: 'Ask',
     block: 'Hide',
   };
+  let loadedNotesProject: string | null = null;
+  let loadedMemoryProject: string | null = null;
+  let loadedAgentProject: string | null = null;
 
   $effect(() => {
-    if (open && activeTab === 'notes') {
-      if (!notesStore.agentPermissionsLoaded) void notesStore.fetchAgentPermissions();
+    const projectPath = projectStore.currentPath;
+    if (open && activeTab === 'notes' && loadedNotesProject !== projectPath) {
+      loadedNotesProject = projectPath;
+      void notesStore.fetchAgentPermissions();
       // Settings are persisted server-side (context injection honors them) —
       // refresh from the source of truth instead of trusting the local mirror.
-      if (!notesStore.settingsFetched) void notesStore.fetchSettings();
+      void notesStore.fetchSettings();
+    }
+    if (open && activeTab === 'memory' && loadedMemoryProject !== projectPath) {
+      loadedMemoryProject = projectPath;
+      void memoryStore.loadAllMemory();
+    }
+    if (open && activeTab === 'agent' && loadedAgentProject !== projectPath) {
+      loadedAgentProject = projectPath;
+      void agentSettingsStore.loadAll();
     }
   });
 
@@ -152,6 +210,14 @@
 
   let providersLoadAttempted = $state(false);
   let lastInitializedTab = $state<typeof activeTab | null>(null);
+  let handledTeamSettingsRequest = 0;
+
+  $effect(() => {
+    if (collaborationStore.settingsRequest > handledTeamSettingsRequest) {
+      handledTeamSettingsRequest = collaborationStore.settingsRequest;
+      activeTab = 'teams';
+    }
+  });
 
   function showTokenInput(_name: string, _caps: ReturnType<typeof getProviderCaps>): boolean {
     return false;
@@ -165,9 +231,12 @@
     }
 
     if (activeTab === 'providers') {
-      if (providersStore.availableProviderTypes.length === 0 && !providersLoadAttempted) {
+      if (!providersLoadAttempted) {
         providersLoadAttempted = true;
-        void loadAvailableProviders();
+        if (providersStore.availableProviderTypes.length === 0) void loadAvailableProviders();
+        // CLI login state changes underneath us (terminal logins/logouts), so
+        // detection refreshes every time the Providers tab is opened — never
+        // a stale "Connected automatically" for a logged-out CLI.
         void loadDetectedClis();
       }
     } else {
@@ -177,10 +246,9 @@
     if (activeTab === lastInitializedTab) return;
     lastInitializedTab = activeTab;
 
-    if (activeTab === 'memory') void memoryStore.loadAllMemory();
-    if (activeTab === 'agent') void agentSettingsStore.loadAll();
+    // Project-aware effects above own Memory and Agent initialization. Calling
+    // them again here caused duplicate requests and visible loading flicker.
     if (activeTab === 'experimental') void experimentalStore.loadAll();
-    if (activeTab === 'messaging') void loadMessaging();
   });
 
   $effect(() => {
@@ -210,6 +278,11 @@
       (p) => p.label.toLowerCase().includes(q) || p.key.toLowerCase().includes(q),
     );
   });
+  const teamModels = $derived.by(() => providersStore.statusList
+    .filter((provider) => provider.enabled && provider.authenticated)
+    .flatMap((provider) => (provider.selectedModels?.length ? provider.selectedModels : provider.models)
+      .map((model) => ({ id: `${provider.name}:${model}`, provider: getProviderDisplayLabel(provider.name), model, reasoningLevels: provider.allAvailableModels?.find(def => def.id === model || def.apiModelId === model)?.reasoningLevels ?? [] })))
+    .filter((item, index, all) => all.findIndex(other => other.id === item.id) === index));
 
   let expandedProvider = $state<string | null>(null);
   let showAddCustom = $state(false);
@@ -325,7 +398,7 @@
   async function confirmCodexProfileAuth() {
     const label = codexProfileInput.trim();
     if (!label) {
-      toastStore.error('Enter a profile name');
+      toastStore.error('Enter an account name');
       return;
     }
     const options = pendingCodexAuthOptions ?? {};
@@ -341,21 +414,6 @@
 
 
   // ─── Shortcuts ───────────────────────────────────────────────────────
-  interface Shortcut { id: string; keys: string[]; action: string; description?: string }
-  const defaultShortcuts: Shortcut[] = [
-    { id: 'send', keys: ['Ctrl', 'Enter'], action: 'Send message', description: 'Submit task' },
-    { id: 'settings', keys: ['Ctrl', ','], action: 'Open settings', description: 'Preferences' },
-    { id: 'new_session', keys: ['Ctrl', 'N'], action: 'New session', description: 'Clear' },
-    { id: 'focus_input', keys: ['Ctrl', 'K'], action: 'Focus input', description: 'Jump' },
-    { id: 'close', keys: ['Esc'], action: 'Close dialogs', description: 'Back' },
-  ];
-
-  function loadShortcuts(): Shortcut[] {
-    try { const stored = localStorage.getItem('koryphaios-shortcuts'); if (stored) return JSON.parse(stored); } catch {}
-    return structuredClone(defaultShortcuts);
-  }
-
-  let shortcuts = $state<Shortcut[]>(loadShortcuts());
   let editingShortcutId = $state<string | null>(null);
   let capturedKeys = $state<string[]>([]);
 
@@ -366,58 +424,44 @@
     const key = e.key; if (!['Control', 'Shift', 'Alt', 'Meta'].includes(key)) keys.push(key.length === 1 ? key.toUpperCase() : key);
     if (keys.length === 0) return; capturedKeys = keys;
     if (!['Control', 'Shift', 'Alt', 'Meta'].includes(key)) {
+      const shortcuts = shortcutStore.list;
       const idx = shortcuts.findIndex(s => s.id === editingShortcutId);
-      if (idx >= 0) { shortcuts[idx] = { ...shortcuts[idx], keys: capturedKeys }; shortcuts = [...shortcuts]; localStorage.setItem('koryphaios-shortcuts', JSON.stringify(shortcuts)); }
+      if (idx >= 0) { shortcuts[idx] = { ...shortcuts[idx], keys: capturedKeys }; shortcutStore.list = [...shortcuts]; shortcutStore.save(); }
       editingShortcutId = null; capturedKeys = [];
     }
   }
-  function resetShortcuts() { shortcuts = structuredClone(defaultShortcuts); localStorage.removeItem('koryphaios-shortcuts'); toastStore.info('Shortcuts reset'); }
-
-  // ─── Messaging ───────────────────────────────────────────────────────
-  let messagingLoading = $state(false);
-  let messagingSaving = $state(false);
-  let telegramEnabled = $state(false);
-  let telegramAdminId = $state('');
-  let telegramBotToken = $state('');
-  let telegramBotTokenSet = $state(false);
-
-  async function loadMessaging() {
-    messagingLoading = true;
-    try {
-      const res = await apiFetch('/api/messaging');
-      const data = await parseJsonResponse(res);
-      if (data.ok && data.data) {
-        const t = data.data.telegram;
-        telegramEnabled = t?.enabled ?? false;
-        telegramAdminId = t?.adminId ? String(t.adminId) : '';
-        telegramBotTokenSet = t?.botTokenSet ?? false;
-      }
-    } catch { toastStore.error('Failed to load messaging config'); }
-    finally { messagingLoading = false; }
-  }
-
-  async function saveMessaging() {
-    const adminId = parseInt(telegramAdminId, 10);
-    if (telegramEnabled && !telegramBotToken.trim() && !telegramBotTokenSet) { toastStore.error('Bot token is required'); return; }
-    messagingSaving = true;
-    try {
-      const res = await apiFetch('/api/messaging', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ telegram: telegramEnabled ? { botToken: telegramBotToken.trim() || undefined, adminId } : null }) });
-      const data = await parseJsonResponse(res);
-      if (data.ok) { toastStore.success('Messaging config saved'); void loadMessaging(); }
-      else toastStore.error(data.error ?? 'Failed to save');
-    } catch (err: any) { toastStore.error(err.message ?? 'Failed to save'); }
-    finally { messagingSaving = false; }
-  }
+  function resetShortcuts() { shortcutStore.reset(); shortcutStore.save(); toastStore.info('Shortcuts reset'); }
 
   // ─── Billing ─────────────────────────────────────────────────────────
   let billingLoading = $state(false);
   let billingCredits = $state<any>(null);
   let billingError = $state<string | null>(null);
+  let billingSpendView = $state<'api' | 'subscription' | 'all'>('api');
 
-  async function loadBillingCredits() {
+  const billingSpendOptions = [
+    { value: 'api', label: 'API spend', description: 'Metered API-key provider charges' },
+    { value: 'subscription', label: 'Subscription spend', description: '30-day API-equivalent inference value' },
+    { value: 'all', label: 'All', description: 'API spend plus subscription inference value' },
+  ];
+
+  function selectedSpendCents(): number {
+    if (billingSpendView === 'subscription') return billingCredits?.subscriptionInferenceCents ?? 0;
+    if (billingSpendView === 'all') return billingCredits?.allSpendCents ?? 0;
+    return billingCredits?.totalSpendCents ?? 0;
+  }
+
+  function formatTokens(n: number): string {
+    if (!Number.isFinite(n) || n <= 0) return '0';
+    if (n >= 1e9) return (n / 1e9).toFixed(1) + 'B';
+    if (n >= 1e6) return (n / 1e6).toFixed(1) + 'M';
+    if (n >= 1e3) return (n / 1e3).toFixed(1) + 'k';
+    return String(n);
+  }
+
+  async function loadBillingCredits(forceRefresh = false) {
     billingLoading = true; billingError = null;
     try {
-      const res = await apiFetch('/api/billing/credits');
+      const res = await apiFetch(apiUrl(`/api/billing/credits${forceRefresh ? '?refresh=1' : ''}`));
       if (!res.ok) { billingError = 'Billing API not available'; return; }
       const data = await parseJsonResponse(res);
       billingCredits = data;
@@ -444,8 +488,7 @@
         { id: 'providers', label: 'Providers', icon: Key },
         { id: 'appearance', label: 'Appearance', icon: Palette },
         { id: 'shortcuts', label: 'Shortcuts', icon: Keyboard },
-        { id: 'messaging', label: 'Messaging', icon: MessageCircle, action: loadMessaging },
-        { id: 'billing', label: 'Billing', icon: CreditCard, action: loadBillingCredits },
+        { id: 'billing', label: 'Billing', icon: CreditCard, action: () => loadBillingCredits(true) },
         { id: 'memory', label: 'Memory', icon: Brain },
         { id: 'agent', label: 'Agent', icon: Bot },
         { id: 'experimental', label: 'Advanced', icon: FlaskConical },
@@ -460,11 +503,6 @@
           onclick={() => { activeTab = tab.id as any; if (tab.action) tab.action(); }}
         >
           <Icon size={13} /> {tab.label}
-          {#if tab.id === 'experimental' && experimentalStore.enabledCount > 0}
-            <span class="ml-1 min-w-[16px] h-4 px-1 rounded-full bg-amber-500 text-white text-[9px] flex items-center justify-center font-medium">
-              {experimentalStore.enabledCount}
-            </span>
-          {/if}
         </button>
       {/each}
     </div>
@@ -483,7 +521,19 @@
           <div class="rounded-xl border border-[var(--color-border)] p-4 bg-[var(--color-surface-1)]">
             <div class="flex items-center justify-between mb-3">
               <span class="text-sm font-semibold text-[var(--color-text-primary)]">Detected on your system</span>
-              <span class="text-[10px] text-[var(--color-text-muted)]">Auto-picked up — no setup needed</span>
+              <div class="flex items-center gap-2">
+                <span class="text-[10px] text-[var(--color-text-muted)]">Auto-picked up — no setup needed</span>
+                <button
+                  type="button"
+                  class="p-1 rounded-md transition-colors hover:bg-[var(--color-surface-3)]"
+                  style="color: var(--color-text-muted);"
+                  title="Re-check installed CLIs"
+                  aria-label="Re-check installed CLIs"
+                  onclick={() => void loadDetectedClis()}
+                >
+                  <RefreshCw size={12} />
+                </button>
+              </div>
             </div>
             <div class="space-y-2.5">
               {#each providersStore.detectedClis.filter((c) => c.installed) as cli (cli.id)}
@@ -502,12 +552,17 @@
                       {#if cli.autoEnabled}
                         <span class="text-[10px] px-1.5 py-0.5 rounded-full font-medium" style="background: var(--color-success-bg, rgba(34,197,94,0.15)); color: var(--color-success, #22c55e);">Connected automatically</span>
                       {:else if cli.loggedIn}
-                        <span class="text-[10px] px-1.5 py-0.5 rounded-full font-medium" style="background: var(--color-warning-bg, rgba(245,158,11,0.15)); color: var(--color-warning, #f59e0b);">Logged in — needs a key</span>
+                        <span class="text-[10px] px-1.5 py-0.5 rounded-full font-medium" style="background: var(--color-warning-bg, rgba(245,158,11,0.15)); color: var(--color-warning, #f59e0b);">Logged in — connect below</span>
                       {:else}
                         <span class="text-[10px] text-[var(--color-text-muted)]">Installed — not logged in</span>
                       {/if}
                     </div>
-                    <p class="text-[10px] text-[var(--color-text-muted)] leading-relaxed mt-0.5">{cli.note}</p>
+                    <p class="text-[10px] text-[var(--color-text-muted)] leading-relaxed mt-0.5">
+                      {cli.note}
+                      {#if cli.docsUrl && !cli.autoEnabled}
+                        <a href={cli.docsUrl} target="_blank" rel="noreferrer" class="underline hover:text-[var(--color-accent)]">Setup guide</a>
+                      {/if}
+                    </p>
                   </div>
                 </div>
               {/each}
@@ -516,13 +571,15 @@
         {/if}
 
         <!-- Add a custom (bring-your-own) provider -->
-        <div class="rounded-xl border border-dashed border-[var(--color-border)] p-4 bg-[var(--color-surface-1)]">
-          <button type="button" onclick={() => (showAddCustom = !showAddCustom)} class="w-full flex items-center justify-between text-left">
+        <div class="rounded-xl border border-dashed border-[var(--color-border)] p-4 bg-[var(--color-surface-1)] transition-colors duration-150 hover:border-[var(--color-accent)] hover:bg-[var(--color-surface-2)]">
+          <button type="button" onclick={() => (showAddCustom = !showAddCustom)} class="group w-full flex items-center justify-between text-left cursor-pointer">
             <div class="flex items-center gap-2">
-              <Plus size={15} style="color: var(--color-accent);" />
-              <span class="text-sm font-semibold text-[var(--color-text-primary)]">Add a custom provider</span>
+              <span class="flex h-7 w-7 items-center justify-center rounded-lg bg-[var(--color-accent)]/10 transition-colors duration-150 group-hover:bg-[var(--color-accent)]/20">
+                <Plus size={15} style="color: var(--color-accent);" />
+              </span>
+              <span class="text-sm font-semibold text-[var(--color-text-primary)] transition-colors duration-150 group-hover:text-[var(--color-accent)]">Add a custom provider</span>
             </div>
-            <span class="text-[10px] text-[var(--color-text-muted)]">OpenAI-compatible &amp; more</span>
+            <span class="text-[10px] text-[var(--color-text-muted)] transition-colors duration-150 group-hover:text-[var(--color-text-secondary)]">OpenAI-compatible &amp; more</span>
           </button>
           {#if showAddCustom}
             <div class="mt-4 space-y-3 pt-4 border-t border-[var(--color-border)]">
@@ -535,11 +592,11 @@
               </div>
               <div class="space-y-1">
                 <label class="text-[10px] uppercase tracking-wider text-[var(--color-text-muted)] font-medium" for="custom-kind">API format</label>
-                <select id="custom-kind" bind:value={customForm.kind} class="input w-full text-xs">
-                  <option value="openai">OpenAI-compatible (/v1/chat/completions)</option>
-                  <option value="anthropic">Anthropic-compatible (/v1/messages)</option>
-                  <option value="gemini">Gemini-compatible</option>
-                </select>
+                <KorySelect value={customForm.kind} label="Custom provider API format" options={[
+                  { value:'openai', label:'OpenAI-compatible', description:'/v1/chat/completions' },
+                  { value:'anthropic', label:'Anthropic-compatible', description:'/v1/messages' },
+                  { value:'gemini', label:'Gemini-compatible' },
+                ]} onchange={(value) => customForm.kind = value as typeof customForm.kind} />
               </div>
               <div class="space-y-1">
                 <label class="text-[10px] uppercase tracking-wider text-[var(--color-text-muted)] font-medium" for="custom-url">Base URL</label>
@@ -576,7 +633,7 @@
                       {:else if status?.authenticated}
                         {@const selectedCount = status.models?.length ?? 0}
                         {@const availableCount = status.allAvailableModels?.length ?? 0}
-                        Connected{availableCount > 0 ? ` · ${selectedCount}/${availableCount} enabled` : ''}
+                        Connected{availableCount > 0 ? ` · ${selectedCount > 0 ? selectedCount : '—'}/${availableCount} enabled` : ' · —'}
                       {:else}
                         Not configured
                       {/if}
@@ -587,7 +644,7 @@
                   {#if status?.authenticated}
                     <div class="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 text-[9px] font-bold">
                       <span class="w-1 h-1 rounded-full bg-emerald-400"></span>
-                      {status.allAvailableModels?.length ?? status.models?.length ?? 0}
+                      {(status.allAvailableModels?.length ?? status.models?.length ?? 0) > 0 ? (status.allAvailableModels?.length ?? status.models?.length) : '—'}
                     </div>
                   {:else}
                     <div class="w-2 h-2 rounded-full bg-yellow-500/50 ring-4 ring-yellow-500/10"></div>
@@ -608,9 +665,19 @@
                   {#if status?.authenticated}
                     <div class="flex items-center justify-between">
                       <div class="text-[10px] text-[var(--color-text-muted)]">
-                        {(status.models?.length ?? 0)} enabled of {(status.allAvailableModels?.length ?? 0)} available
+                        {(status.models?.length ?? 0) > 0 ? status.models?.length : '—'} enabled of {(status.allAvailableModels?.length ?? 0) > 0 ? status.allAvailableModels?.length : '—'} available
                       </div>
                       <button type="button" onclick={() => { selectorTarget = status; showModelSelector = true; }} class="btn btn-secondary text-[10px] py-1 px-3">Manage Models</button>
+                      {#if caps.supportsApiKey && !usesBrowserAuth(prov.key)}
+                        <button
+                          type="button"
+                          onclick={() => { rotateProvider = { name: prov.key, keyType: 'apiKey' }; showRotateDialog = true; }}
+                          class="inline-flex items-center gap-1 text-[10px] text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] font-medium transition-colors"
+                          title="Replace the stored API key without disconnecting"
+                        >
+                          <RotateCcw size={10} /> Rotate key
+                        </button>
+                      {/if}
                       <button type="button" onclick={() => disconnectProvider(prov.key)} class="text-[10px] text-red-400 hover:text-red-300 font-medium transition-colors">Disconnect</button>
                     </div>
                   {:else}
@@ -632,57 +699,40 @@
                           {#if providersStore.browserAuthMessages[prov.key]}
                             <p class="text-[10px] text-[var(--color-text-muted)]">{providersStore.browserAuthMessages[prov.key]}</p>
                           {/if}
-                          {#if prov.key === 'copilot' && providersStore.copilotDeviceAuth}
+                          <!-- One shared device-code panel for every device-code
+                               provider — identical copy, code, copy-button, and
+                               waiting line, so no provider gets a lesser flow. -->
+                          {#if prov.key === 'copilot' || prov.key === 'kimicode' || prov.key === 'codex'}
+                            {@const deviceAuth =
+                              prov.key === 'copilot' ? providersStore.copilotDeviceAuth
+                              : prov.key === 'kimicode' ? providersStore.kimicodeDeviceAuth
+                              : providersStore.codexDeviceAuth}
+                            {#if deviceAuth}
+                            {@const userCode = deviceAuth.userCode}
                             <div class="rounded-md bg-[var(--color-surface-2)] px-2.5 py-2 text-[10px] text-[var(--color-text-secondary)]">
-                              <div>User code: <span class="font-semibold text-[var(--color-text-primary)]">{providersStore.copilotDeviceAuth.userCode}</span></div>
-                              <div class="mt-1 break-all">{providersStore.copilotDeviceAuth.verificationUri}</div>
-                            </div>
-                          {/if}
-                          {#if prov.key === 'kimicode' && providersStore.kimicodeDeviceAuth}
-                            {@const kimiUserCode = providersStore.kimicodeDeviceAuth.userCode}
-                            <div class="rounded-md bg-[var(--color-surface-2)] px-2.5 py-2 text-[10px] text-[var(--color-text-secondary)]">
-                              <div class="font-medium text-[var(--color-text-primary)]">Kimi Code sign-in needs approval.</div>
+                              <div class="font-medium text-[var(--color-text-primary)]">{getProviderDisplayLabel(prov.key)} sign-in needs approval.</div>
                               <div class="mt-1">The browser was opened automatically.</div>
-                              <div>Paste this code if Kimi asks for it.</div>
+                              <div>Paste this code if you're asked for it.</div>
                               <div class="mt-2 flex items-center gap-2">
                                 <span>Code:</span>
-                                <span class="font-semibold tracking-[0.18em] text-[var(--color-text-primary)]">{kimiUserCode}</span>
+                                <span class="font-semibold tracking-[0.18em] text-[var(--color-text-primary)]">{userCode}</span>
                                 <button
                                   type="button"
                                   class="inline-flex items-center gap-1 rounded border border-[var(--color-border)] px-1.5 py-0.5 text-[10px] hover:bg-[var(--color-surface-3)]"
-                                  onclick={() => copyToClipboard(kimiUserCode, 'deviceCode')}
+                                  onclick={() => copyToClipboard(userCode, 'deviceCode')}
                                 >
                                   <Copy size={10} />
-                                  {providersStore.copiedDeviceCode === kimiUserCode ? 'Copied' : 'Copy code'}
+                                  {providersStore.copiedDeviceCode === userCode ? 'Copied' : 'Copy code'}
                                 </button>
                               </div>
+                              {#if deviceAuth.verificationUri}
+                                <div class="mt-1 break-all">{deviceAuth.verificationUri}</div>
+                              {/if}
                               <div class="mt-2 text-[10px] text-[var(--color-text-muted)]">
-                                Waiting for Kimi Code approval to complete…
+                                Waiting for {getProviderDisplayLabel(prov.key)} approval to complete…
                               </div>
                             </div>
-                          {/if}
-                          {#if prov.key === 'codex' && providersStore.codexDeviceAuth}
-                            {@const codexUserCode = providersStore.codexDeviceAuth.userCode}
-                            <div class="rounded-md bg-[var(--color-surface-2)] px-2.5 py-2 text-[10px] text-[var(--color-text-secondary)]">
-                              <div class="font-medium text-[var(--color-text-primary)]">Codex sign-in needs a code.</div>
-                              <div class="mt-1">The browser was opened automatically.</div>
-                              <div>Paste this code if Codex asks for it.</div>
-                              <div class="mt-2 flex items-center gap-2">
-                                <span>Code:</span>
-                                <span class="font-semibold tracking-[0.18em] text-[var(--color-text-primary)]">{codexUserCode}</span>
-                                <button
-                                  type="button"
-                                  class="inline-flex items-center gap-1 rounded border border-[var(--color-border)] px-1.5 py-0.5 text-[10px] hover:bg-[var(--color-surface-3)]"
-                                  onclick={() => copyToClipboard(codexUserCode, 'deviceCode')}
-                                >
-                                  <Copy size={10} />
-                                  {providersStore.copiedDeviceCode === codexUserCode ? 'Copied' : 'Copy code'}
-                                </button>
-                              </div>
-                              <div class="mt-2 text-[10px] text-[var(--color-text-muted)]">
-                                Waiting for Codex approval to complete…
-                              </div>
-                            </div>
+                            {/if}
                           {/if}
                           <div class="flex gap-2">
                             <button
@@ -695,7 +745,7 @@
                                 ? 'Opening...'
                                 : 'Auth'}
                             </button>
-                            {#if providersStore.browserAuthPending[prov.key] && prov.key !== 'copilot' && prov.key !== 'codex' && prov.key !== 'kimicode' && prov.key !== 'google-subscription'}
+                            {#if providersStore.browserAuthPending[prov.key] && prov.key !== 'copilot' && prov.key !== 'codex' && prov.key !== 'kimicode'}
                               <button
                                 type="button"
                                 onclick={() => handleFinishBrowserAuth(prov.key)}
@@ -1045,7 +1095,7 @@
           </button>
         </div>
         <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
-          {#each shortcuts as shortcut}
+          {#each shortcutStore.list as shortcut}
             <div class="group flex items-center justify-between p-4 bg-[var(--color-surface-2)] rounded-xl border border-[var(--color-border)] transition-colors hover:border-[var(--color-text-muted)]">
               <div>
                 <div class="text-sm font-semibold text-[var(--color-text-primary)]">{shortcut.action}</div>
@@ -1071,164 +1121,202 @@
         </div>
       </div>
 
-      <!-- Messaging Tab -->
-      <div class={activeTab === 'messaging' ? 'flex-1 overflow-y-auto px-6 py-5 w-full max-w-7xl mx-auto' : 'hidden'}>
-        <div class="grid gap-6 xl:grid-cols-[minmax(0,1.1fr)_minmax(320px,0.9fr)]">
-          <div class="space-y-6">
-            <div class="flex gap-4 rounded-2xl border border-[var(--color-accent)]/10 bg-[var(--color-accent)]/5 p-6">
-              <Globe size={24} class="shrink-0 text-[var(--color-accent)]" />
-              <div>
-                <h4 class="text-base font-bold text-[var(--color-text-primary)]">Real-time Messaging Bridge</h4>
-                <p class="mt-1 text-xs text-[var(--color-text-secondary)]">Connect your workspace to external apps. Tasks can be sent from Telegram or Slack and replies will stream back to the same chat.</p>
-              </div>
-            </div>
-
-            <div class="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-2)] p-5">
-              <div class="mb-6 flex items-center justify-between gap-4">
-                <div class="flex items-center gap-3">
-                  <div class="flex h-10 w-10 items-center justify-center rounded-xl bg-[#24A1DE] text-white shadow-lg shadow-[#24A1DE]/20">
-                    <Send size={20} />
-                  </div>
-                  <div>
-                    <h4 class="text-sm font-bold text-[var(--color-text-primary)]">Telegram</h4>
-                    <p class="text-[10px] text-[var(--color-text-muted)]">Native integration via bot API</p>
-                  </div>
-                </div>
-                <label class="relative inline-flex cursor-pointer items-center">
-                  <input type="checkbox" bind:checked={telegramEnabled} class="peer sr-only" />
-                  <div class="peer h-6 w-11 rounded-full bg-[var(--color-surface-4)] peer-focus:outline-none
-                    peer-checked:after:translate-x-full peer-checked:after:border-white after:absolute
-                    after:left-[2px] after:top-[2px] after:h-5 after:w-5 after:rounded-full after:bg-white
-                    after:transition-all after:content-[''] peer-checked:bg-[var(--color-accent)]"></div>
-                </label>
-              </div>
-
-              <div class="grid gap-4 lg:grid-cols-2">
-                <div class="space-y-4 lg:col-span-2">
-                  <div class="space-y-1.5">
-                    <label class="ml-1 text-[10px] font-bold uppercase tracking-widest text-[var(--color-text-muted)]" for="telegram-bot-token">Bot Token</label>
-                    <input id="telegram-bot-token" type="password" placeholder={telegramBotTokenSet ? '••••••••••••••••' : 'Token from @BotFather'} bind:value={telegramBotToken} class="input w-full" />
-                  </div>
-                  <div class="space-y-1.5">
-                    <label class="ml-1 text-[10px] font-bold uppercase tracking-widest text-[var(--color-text-muted)]" for="telegram-admin-id">Admin User ID</label>
-                    <input id="telegram-admin-id" type="text" placeholder="Your numeric ID (e.g. 1234567)" bind:value={telegramAdminId} class="input w-full" />
-                  </div>
-                </div>
-
-                <div class="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-1)] p-4">
-                  <div class="text-[10px] uppercase tracking-widest text-[var(--color-text-muted)]">Connection</div>
-                  <div class="mt-2 text-sm font-semibold text-[var(--color-text-primary)]">
-                    {telegramEnabled ? 'Enabled' : 'Disabled'}
-                  </div>
-                  <p class="mt-2 text-[10px] text-[var(--color-text-muted)]">
-                    {telegramBotTokenSet ? 'A bot token is already stored.' : 'No token has been stored yet.'}
-                  </p>
-                </div>
-
-                <div class="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-1)] p-4">
-                  <div class="text-[10px] uppercase tracking-widest text-[var(--color-text-muted)]">Delivery</div>
-                  <div class="mt-2 text-sm font-semibold text-[var(--color-text-primary)]">Task relay</div>
-                  <p class="mt-2 text-[10px] text-[var(--color-text-muted)]">
-                    Incoming tasks are forwarded into the current workspace and stream replies back to the same thread.
-                  </p>
-                </div>
-              </div>
-
-              <button type="button" onclick={saveMessaging} disabled={messagingSaving} class="btn btn-primary mt-5 w-full py-2.5">
-                {messagingSaving ? 'Saving...' : 'Save Telegram Config'}
-              </button>
-            </div>
-          </div>
-
-          <div class="space-y-6">
-            <div class="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-2)] p-5 opacity-60">
-              <div class="mb-4 flex items-center justify-between gap-4">
-                <div class="flex items-center gap-3">
-                  <div class="flex h-10 w-10 items-center justify-center rounded-xl bg-[#4A154B] text-white">
-                    <Slack size={20} />
-                  </div>
-                  <div>
-                    <h4 class="text-sm font-bold text-[var(--color-text-primary)]">Slack</h4>
-                    <p class="text-[10px] text-[var(--color-text-muted)]">Enterprise workspace bridge</p>
-                  </div>
-                </div>
-                <span class="rounded bg-[var(--color-surface-3)] px-2 py-0.5 text-[9px] font-bold uppercase tracking-widest text-[var(--color-text-muted)]">Coming Soon</span>
-              </div>
-              <p class="text-xs text-[var(--color-text-muted)]">Slack support will mirror the Telegram bridge but with workspace-scoped auth and channel routing.</p>
-            </div>
-
-            <div class="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-2)] p-5">
-              <h4 class="text-sm font-bold text-[var(--color-text-primary)]">Bridge Notes</h4>
-              <div class="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-1">
-                <div class="rounded-xl bg-[var(--color-surface-1)] p-4">
-                  <div class="text-[10px] uppercase tracking-widest text-[var(--color-text-muted)]">Recommended</div>
-                  <p class="mt-2 text-xs text-[var(--color-text-primary)]">Keep one admin user per bot while you validate the workflow.</p>
-                </div>
-                <div class="rounded-xl bg-[var(--color-surface-1)] p-4">
-                  <div class="text-[10px] uppercase tracking-widest text-[var(--color-text-muted)]">Safety</div>
-                  <p class="mt-2 text-xs text-[var(--color-text-primary)]">Use a dedicated bot token instead of reusing a general automation bot.</p>
-                </div>
-                <div class="rounded-xl bg-[var(--color-surface-1)] p-4 sm:col-span-2 xl:col-span-1">
-                  <div class="text-[10px] uppercase tracking-widest text-[var(--color-text-muted)]">Status</div>
-                  <p class="mt-2 text-xs text-[var(--color-text-primary)]">
-                    {messagingLoading ? 'Loading messaging configuration…' : 'Configuration loaded locally from the backend settings endpoint.'}
-                  </p>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-
       <!-- Billing Tab -->
       <div class={activeTab === 'billing' ? 'flex-1 overflow-y-auto px-6 py-5 space-y-8 w-full max-w-7xl mx-auto' : 'hidden'}>
+        {#if billingError}
+          <div class="p-4 rounded-xl border text-xs" style="border-color: var(--color-error); color: var(--color-error); background: rgba(239,68,68,0.08);">
+            Billing data unavailable: {billingError}
+            <button type="button" class="ml-2 underline" onclick={() => loadBillingCredits(true)}>Retry</button>
+          </div>
+        {/if}
+        <div class="flex items-center justify-between gap-4">
+          <div>
+            <h3 class="text-sm font-bold text-[var(--color-text-primary)]">Usage and billing</h3>
+            <p class="mt-1 text-[10px] text-[var(--color-text-muted)]">Recorded provider usage and account-reported balances</p>
+          </div>
+          <button
+            type="button"
+            class="inline-flex min-h-9 items-center gap-2 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-2)] px-3 py-2 text-xs font-semibold text-[var(--color-text-secondary)] transition-colors hover:border-[var(--color-accent)]/50 hover:text-[var(--color-text-primary)] disabled:opacity-50"
+            disabled={billingLoading}
+            onclick={() => loadBillingCredits(true)}
+            aria-label="Refresh billing data"
+          >
+            <RefreshCw size={14} class={billingLoading ? 'animate-spin' : ''} />
+            {billingLoading ? 'Refreshing…' : 'Refresh'}
+          </button>
+        </div>
         <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-          <div class="p-6 rounded-2xl bg-gradient-to-br from-[var(--color-surface-2)] to-[var(--color-surface-1)] border border-[var(--color-border)] shadow-xl relative overflow-hidden">
+          <div class="p-6 rounded-2xl bg-gradient-to-br from-[var(--color-surface-2)] to-[var(--color-surface-1)] border border-[var(--color-border)] shadow-xl relative">
             <div class="absolute -top-4 -right-4 w-24 h-24 bg-[var(--color-accent)]/5 rounded-full blur-3xl"></div>
-            <div class="text-[10px] text-[var(--color-text-muted)] uppercase tracking-widest font-bold mb-2">Total Workspace Spend</div>
+            <div class="relative mb-3 flex items-start justify-between gap-4">
+              <div>
+                <div class="text-[10px] text-[var(--color-text-muted)] uppercase tracking-widest font-bold">
+                  {billingSpendView === 'api' ? 'API Spend' : billingSpendView === 'subscription' ? 'Subscription Spend' : 'All Spend'}
+                </div>
+                <div class="mt-1 text-[9px] text-[var(--color-text-muted)]">
+                  {billingSpendView === 'api' ? 'Metered keys' : billingSpendView === 'subscription' ? '30-day API-equivalent value' : 'Metered plus 30-day inference value'}
+                </div>
+              </div>
+              <div class="w-52 shrink-0">
+                <KorySelect
+                  compact
+                  value={billingSpendView}
+                  label="Spend type"
+                  options={billingSpendOptions}
+                  onchange={(value) => billingSpendView = value as 'api' | 'subscription' | 'all'}
+                />
+              </div>
+            </div>
             <div class="text-4xl font-black text-[var(--color-text-primary)] flex items-baseline gap-1">
-              {#if billingCredits === null}
+              {#if billingLoading && !billingCredits}
                 <div class="h-10 w-32 bg-[var(--color-surface-3)] animate-pulse rounded-lg"></div>
               {:else}
-                <span class="text-2xl opacity-50">$</span>{(billingCredits.totalSpendCents / 100).toFixed(2)}
+                <span class="text-2xl opacity-50">$</span>{(selectedSpendCents() / 100).toFixed(2)}
               {/if}
             </div>
-            <p class="text-[10px] text-[var(--color-text-muted)] mt-4">Estimated from local token usage tracking</p>
+            <p class="text-[10px] text-[var(--color-text-muted)] mt-4">
+              {billingSpendView === 'subscription'
+                ? 'Inference value is not an amount charged by subscription providers'
+                : billingSpendView === 'all'
+                  ? 'Combined comparison value; subscription inference is not an amount charged'
+                  : 'Computed from recorded metered tokens at verified model prices'}
+            </p>
           </div>
 
           <div class="p-6 rounded-2xl bg-[var(--color-surface-2)] border border-[var(--color-border)]">
-            <div class="text-[10px] text-[var(--color-text-muted)] uppercase tracking-widest font-bold mb-2">Available Budget</div>
+            <div class="text-[10px] text-[var(--color-text-muted)] uppercase tracking-widest font-bold mb-2">Provider Balance</div>
             <div class="text-4xl font-black text-emerald-400 flex items-baseline gap-1">
-              {#if billingCredits === null}
+              {#if billingLoading && !billingCredits}
                 <div class="h-10 w-32 bg-[var(--color-surface-3)] animate-pulse rounded-lg"></div>
-              {:else}
+              {:else if typeof billingCredits?.remainingCents === 'number'}
                 <span class="text-2xl opacity-50">$</span>{(billingCredits.remainingCents / 100).toFixed(2)}
+              {:else}
+                <span class="text-2xl text-[var(--color-text-muted)] font-semibold">Not reported</span>
               {/if}
             </div>
-            <div class="mt-4 h-2 w-full bg-[var(--color-surface-3)] rounded-full overflow-hidden">
-              <div class="h-full bg-emerald-500 rounded-full" style="width: 75%"></div>
-            </div>
+            <p class="text-[10px] text-[var(--color-text-muted)] mt-4">
+              {typeof billingCredits?.remainingCents === 'number'
+                ? 'Live balance from your provider account'
+                : 'Your configured providers do not expose a queryable balance'}
+            </p>
           </div>
         </div>
 
+        <!-- CLI subscriptions: real local usage + quota burn -->
+        {#if billingCredits?.cliUsage?.length}
+          <div class="space-y-4">
+            <h3 class="text-sm font-bold text-[var(--color-text-primary)] ml-1">CLI Subscriptions — real usage</h3>
+            <div class="grid grid-cols-1 xl:grid-cols-2 gap-4">
+              {#each billingCredits.cliUsage as cli (cli.provider)}
+                <div class="p-5 bg-[var(--color-surface-2)] rounded-2xl border border-[var(--color-border)] space-y-4">
+                  <div class="flex items-center justify-between">
+                    <div class="flex items-center gap-3">
+                      <div class="w-8 h-8 rounded-lg bg-[var(--color-surface-3)] flex items-center justify-center p-1.5">
+                        <ProviderIcon provider={cli.provider} size={20} class="w-full h-full" />
+                      </div>
+                      <span class="text-sm font-semibold">{getProviderDisplayLabel(cli.provider)}</span>
+                      {#if cli.planType}
+                        <span class="px-2 py-0.5 rounded-full text-[9px] uppercase tracking-wider font-bold bg-[var(--color-surface-3)] text-[var(--color-text-muted)]">{cli.planType}</span>
+                      {/if}
+                    </div>
+                    <span class="text-[10px] text-[var(--color-text-muted)]">from the CLI's own logs</span>
+                  </div>
+
+                  {#each cli.quotas as q (q.label)}
+                    <div>
+                      <div class="flex items-center justify-between text-[11px] mb-1">
+                        <span class="text-[var(--color-text-secondary)] font-medium">{q.label} quota</span>
+                        <span class="font-mono font-bold" style="color: {q.usedPercent >= 90 ? 'var(--color-error)' : q.usedPercent >= 70 ? '#f59e0b' : 'var(--color-text-secondary)'};">
+                          {q.usedPercent.toFixed(0)}% burned{q.resetsAt ? ` · resets ${new Date(q.resetsAt).toLocaleString(undefined, { weekday: 'short', hour: 'numeric', minute: '2-digit' })}` : ''}
+                        </span>
+                      </div>
+                      <div class="h-2 w-full bg-[var(--color-surface-3)] rounded-full overflow-hidden">
+                        <div class="h-full rounded-full transition-all" style="width: {Math.min(100, q.usedPercent)}%; background: {q.usedPercent >= 90 ? 'var(--color-error)' : q.usedPercent >= 70 ? '#f59e0b' : 'var(--color-accent)'};"></div>
+                      </div>
+                    </div>
+                  {/each}
+
+                  <div class="grid grid-cols-4 gap-2 text-center">
+                    {#each cli.windows as w (w.period)}
+                      <div class="p-2.5 rounded-xl bg-[var(--color-surface-1)] border border-[var(--color-border)]">
+                        <div class="text-[9px] uppercase tracking-wider text-[var(--color-text-muted)] font-bold">{w.period}</div>
+                        <div class="mt-1 text-xs font-mono font-bold text-[var(--color-text-primary)]">{formatTokens(w.tokensIn + w.tokensOut)}</div>
+                        <div class="text-[9px] text-[var(--color-text-muted)]">tokens</div>
+                        <div class="mt-1 text-[10px] font-mono" style="color: var(--color-accent);">
+                          {w.inferenceValueUsd != null ? `$${w.inferenceValueUsd.toFixed(2)}` : '—'}
+                        </div>
+                        <div class="text-[9px] text-[var(--color-text-muted)]">inference value</div>
+                      </div>
+                    {/each}
+                  </div>
+
+                  {#if cli.byModel?.length}
+                    <div class="space-y-1">
+                      {#each cli.byModel.slice(0, 4) as m (m.model)}
+                        <div class="flex items-center justify-between text-[11px]">
+                          <span class="font-mono text-[var(--color-text-secondary)] truncate">{m.model}</span>
+                          <span class="font-mono text-[var(--color-text-muted)] shrink-0 ml-3">
+                            {formatTokens(m.tokensIn + m.tokensOut)} · {m.inferenceValueUsd != null ? `$${m.inferenceValueUsd.toFixed(2)}` : 'unpriced'}
+                          </span>
+                        </div>
+                      {/each}
+                    </div>
+                  {/if}
+                </div>
+              {/each}
+            </div>
+          </div>
+        {/if}
+
+        {#if billingCredits?.balances?.length}
+          <div class="space-y-4">
+            <h3 class="text-sm font-bold text-[var(--color-text-primary)] ml-1">Live Account Balances</h3>
+            <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
+              {#each billingCredits.balances as bal (bal.provider)}
+                <div class="p-4 bg-[var(--color-surface-2)] rounded-xl border border-[var(--color-border)] text-center">
+                  <div class="w-8 h-8 mx-auto rounded-lg bg-[var(--color-surface-3)] flex items-center justify-center p-1.5 mb-2">
+                    <ProviderIcon provider={bal.provider} size={20} class="w-full h-full" />
+                  </div>
+                  <div class="text-lg font-black font-mono text-emerald-400">
+                    {bal.availableUsd != null ? `$${bal.availableUsd.toFixed(2)}` : '—'}
+                  </div>
+                  <div class="text-[9px] uppercase tracking-wider text-[var(--color-text-muted)] font-bold mt-1">{getProviderDisplayLabel(bal.provider)}</div>
+                </div>
+              {/each}
+            </div>
+          </div>
+        {/if}
+
         <div class="space-y-4">
-          <h3 class="text-sm font-bold text-[var(--color-text-primary)] ml-1">Consumption by Provider</h3>
+          <h3 class="text-sm font-bold text-[var(--color-text-primary)] ml-1">API Consumption by Provider</h3>
           <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            {#if billingCredits?.byProvider}
+            {#if billingCredits?.byProvider?.length}
               {#each billingCredits.byProvider as prov (prov.name)}
                 <div class="flex items-center justify-between p-4 bg-[var(--color-surface-2)] rounded-xl border border-[var(--color-border)]">
                   <div class="flex items-center gap-3">
                     <div class="w-8 h-8 rounded-lg bg-[var(--color-surface-3)] flex items-center justify-center p-1.5 shrink-0">
                       <ProviderIcon provider={prov.name} size={20} class="w-full h-full" />
                     </div>
-                    <span class="text-xs font-semibold">{getProviderDisplayLabel(prov.name)}</span>
+                    <div>
+                      <span class="text-xs font-semibold">{getProviderDisplayLabel(prov.name)}</span>
+                      <div class="text-[10px] text-[var(--color-text-muted)] font-mono">{formatTokens((prov.tokensIn ?? 0) + (prov.tokensOut ?? 0))} tokens</div>
+                    </div>
                   </div>
-                  <div class="text-xs font-mono font-bold text-[var(--color-text-secondary)]">${(prov.spendCents / 100).toFixed(3)}</div>
+                  <div class="text-right">
+                    <div class="text-xs font-mono font-bold text-[var(--color-text-secondary)]">
+                      {prov.subscription ? 'subscription' : `$${((prov.spendCents ?? 0) / 100).toFixed(3)} spent`}
+                    </div>
+                    {#if billingCredits?.balances?.find((b: any) => b.provider === prov.name)?.availableUsd != null}
+                      <div class="text-[10px] font-mono text-emerald-400">
+                        ${billingCredits.balances.find((b: any) => b.provider === prov.name).availableUsd.toFixed(2)} left
+                      </div>
+                    {/if}
+                  </div>
                 </div>
               {/each}
             {:else}
               <div class="col-span-full py-12 text-center border-2 border-dashed border-[var(--color-border)] rounded-2xl">
-                <p class="text-xs text-[var(--color-text-muted)]">No usage data recorded yet</p>
+                <p class="text-xs text-[var(--color-text-muted)]">No API usage recorded yet — chats through metered providers will appear here</p>
               </div>
             {/if}
           </div>
@@ -1258,7 +1346,7 @@
               <Users size={40} />
             </div>
             <h3 class="text-2xl font-black text-[var(--color-text-primary)]">Team Collaboration</h3>
-            <p class="text-sm text-[var(--color-text-muted)] mt-2">Invite teammates to watch or co-pilot your live AI agent session</p>
+            <p class="text-sm text-[var(--color-text-muted)] mt-2">The host controls what guests can see, submit, and which models are available</p>
           </div>
 
           {#if collaborationStore.activeCollab}
@@ -1272,12 +1360,12 @@
                 </div>
 
                 {#if collaborationStore.activeCollab.relayEnabled}
-                  <h4 class="text-sm font-bold text-[var(--color-text-primary)] mb-5">Invite Links — share the right link for each teammate's role</h4>
+                  <h4 class="text-sm font-bold text-[var(--color-text-primary)] mb-5">Browser invites</h4>
                   <div class="space-y-3">
                     {#each [
-                      { role: 'viewer', label: 'Viewer', desc: 'Watch only — no interaction', color: 'text-blue-400', bg: 'bg-blue-500/10' },
-                      { role: 'collaborator', label: 'Collaborator', desc: 'Can submit prompts — you approve each one before agents run', color: 'text-amber-400', bg: 'bg-amber-500/10' },
-                      { role: 'copilot', label: 'Co-Pilot', desc: 'Full shared control — prompts execute immediately', color: 'text-[var(--color-accent)]', bg: 'bg-[var(--color-accent)]/10' },
+                      { role: 'viewer', label: 'Viewer · Tier 1', desc: 'Read-only session feed. Cannot submit prompts or run models.', color: 'text-blue-400', bg: 'bg-blue-500/10' },
+                      { role: 'collaborator', label: 'Collaborator · Tier 2', desc: 'Can submit prompts when enabled. Host approval remains authoritative.', color: 'text-amber-400', bg: 'bg-amber-500/10' },
+                      { role: 'yolo', label: 'YOLO · Tier 3', desc: 'Unrestricted auto-execution, tools, models, and filesystem. Trusted users only.', color: 'text-red-400', bg: 'bg-red-500/10' },
                     ] as r}
                       <div class="flex items-center gap-4 rounded-2xl bg-[var(--color-surface-1)] p-4">
                         <div class="flex-1">
@@ -1288,13 +1376,24 @@
                         </div>
                         <button
                           type="button"
-                          onclick={() => collaborationStore.copyInviteLink(r.role as any)}
+                          onclick={() => collaborationStore.createInvite(r.role)}
                           class="shrink-0 rounded-xl {r.bg} {r.color} px-4 py-2 text-xs font-bold transition-all hover:opacity-80"
                         >
                           Copy Link
                         </button>
                       </div>
                     {/each}
+                  </div>
+                  <div class="mt-5 border-t border-[var(--color-border)] pt-5">
+                    <div class="flex items-center justify-between gap-4 rounded-2xl bg-[var(--color-surface-1)] p-4">
+                      <div>
+                        <div class="text-xs font-bold text-[var(--color-text-primary)]">Native Koryphaios join</div>
+                        <p class="mt-1 text-[11px] text-[var(--color-text-muted)]">Enter this code in Teams on another Koryphaios app.</p>
+                      </div>
+                      <button type="button" onclick={() => collaborationStore.copyJoinCode()} class="rounded-xl border border-[var(--color-border)] px-4 py-2 font-mono text-sm font-bold tracking-[0.16em] text-[var(--color-accent)] hover:bg-[var(--color-surface-3)]">
+                        {collaborationStore.activeCollab.joinCode}
+                      </button>
+                    </div>
                   </div>
                 {:else}
                   <!-- Relay not configured — show legacy join code -->
@@ -1304,11 +1403,14 @@
                       {collaborationStore.activeCollab.joinCode || '••••••'}
                     </code>
                     <p class="mt-3 text-[11px] text-[var(--color-text-muted)]">
-                      Configure <code class="font-mono">RELAY_URL</code> and <code class="font-mono">RELAY_HOST_SECRET</code> in your environment for internet-accessible invite links.
+                      Configure RELAY_URL and RELAY_HOST_SECRET in your environment for internet-accessible invite links.
                     </p>
                   </div>
                 {/if}
               </div>
+
+              <!-- Host policy -->
+              <TeamAccessProfiles models={teamModels} />
 
               <!-- Pending approvals -->
               {#if collaborationStore.pendingPrompts.length > 0}
@@ -1326,6 +1428,7 @@
                               <span class="text-[10px] text-[var(--color-text-muted)]">· {p.role}</span>
                             </div>
                             <p class="text-sm text-[var(--color-text-primary)] break-words">{p.content}</p>
+                            {#if p.model}<p class="mt-2 text-[10px] text-[var(--color-text-muted)]">Model: {p.model}{p.reasoningLevel ? ` · Reasoning: ${p.reasoningLevel}` : ' · Provider default reasoning'}</p>{/if}
                           </div>
                           <div class="flex gap-2 shrink-0">
                             <button
@@ -1362,6 +1465,12 @@
 
           {:else}
             <!-- ── NOT HOSTING ── -->
+            {#if collaborationStore.joinedSessions.length}
+              <div class="mx-auto mb-8 max-w-4xl rounded-3xl border border-[var(--color-border)] bg-[var(--color-surface-2)] p-6">
+                <div class="mb-4"><h4 class="text-sm font-bold text-[var(--color-text-primary)]">Team sessions</h4><p class="mt-1 text-[11px] text-[var(--color-text-muted)]">These are separate from your personal session history. Joining never replaces or merges your local sessions.</p></div>
+                <div class="space-y-2">{#each collaborationStore.joinedSessions as team (team.sessionId)}<div class="flex items-center gap-3 rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-1)] p-4"><div class="min-w-0 flex-1"><div class="truncate text-xs font-bold text-[var(--color-text-primary)]">{team.sessionName}</div><div class="mt-1 text-[10px] text-[var(--color-text-muted)]">Access: {team.tierId} · Team workspace</div></div><button type="button" onclick={() => collaborationStore.openJoinedSession(team.sessionId)} class="rounded-xl bg-[var(--color-accent)]/10 px-4 py-2 text-xs font-bold text-[var(--color-accent)]">Open</button><button type="button" onclick={() => collaborationStore.leaveJoinedSession(team.sessionId)} class="rounded-xl px-3 py-2 text-xs text-red-400 hover:bg-red-500/10">Leave</button></div>{/each}</div>
+              </div>
+            {/if}
             <div class="grid grid-cols-1 md:grid-cols-2 gap-8 max-w-4xl mx-auto">
               <div class="p-8 rounded-3xl bg-[var(--color-surface-2)] border border-[var(--color-border)] hover:border-[var(--color-accent)]/30 transition-all flex flex-col text-center">
                 <div class="w-12 h-12 bg-emerald-500/10 text-emerald-400 rounded-2xl flex items-center justify-center mx-auto mb-6">
@@ -1371,10 +1480,60 @@
                 <p class="text-xs text-[var(--color-text-muted)] mb-8">
                   Generate invite links for teammates to watch or co-pilot your active AI session in real time.
                 </p>
+
+                <div class="mb-6 flex-1 rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-1)] p-4 text-left">
+                  <div class="mb-3 flex items-center justify-between gap-3">
+                    <div>
+                      <div class="text-xs font-bold text-[var(--color-text-primary)]">Working in</div>
+                      <div class="mt-0.5 text-[10px] text-[var(--color-text-muted)]">Workspace roots available to this hosted session.</div>
+                    </div>
+                    <button
+                      type="button"
+                      onclick={addHostWorkspacePath}
+                      class="flex shrink-0 items-center gap-1.5 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-2)] px-2.5 py-1.5 text-[10px] font-bold text-[var(--color-text-secondary)] transition-colors hover:border-[var(--color-accent)]/50 hover:text-[var(--color-text-primary)]"
+                    >
+                      <FolderOpen size={13} /> Add folder
+                    </button>
+                  </div>
+
+                  {#if hostWorkspacePaths.length}
+                    <div class="space-y-2">
+                      {#each hostWorkspacePaths as path, index (index)}
+                        <div class="group flex items-center gap-2 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-0)] p-2 transition-colors focus-within:border-[var(--color-accent)]/60">
+                          <FolderOpen size={14} class="ml-1 shrink-0 text-[var(--color-accent)]" />
+                          <input
+                            value={path}
+                            aria-label={`Hosted workspace path ${index + 1}`}
+                            oninput={(event) => updateHostWorkspacePath(index, event.currentTarget.value)}
+                            class="min-w-0 flex-1 bg-transparent px-1 py-1 font-mono text-[11px] text-[var(--color-text-primary)] outline-none"
+                            spellcheck="false"
+                          />
+                          <button
+                            type="button"
+                            aria-label={`Remove ${path || `workspace path ${index + 1}`}`}
+                            onclick={() => removeHostWorkspacePath(index)}
+                            class="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-[var(--color-text-muted)] transition-colors hover:bg-red-500/10 hover:text-red-400"
+                          >
+                            <X size={14} />
+                          </button>
+                        </div>
+                      {/each}
+                    </div>
+                  {:else}
+                    <button
+                      type="button"
+                      onclick={addHostWorkspacePath}
+                      class="flex min-h-24 w-full flex-col items-center justify-center rounded-xl border border-dashed border-[var(--color-border)] text-[var(--color-text-muted)] transition-colors hover:border-[var(--color-accent)]/50 hover:text-[var(--color-text-secondary)]"
+                    >
+                      <Plus size={18} />
+                      <span class="mt-2 text-[10px] font-medium">Add a workspace folder</span>
+                    </button>
+                  {/if}
+                </div>
                 <button
                   type="button"
-                  onclick={() => collaborationStore.hostSession()}
-                  disabled={collaborationStore.loading}
+                  onclick={startHosting}
+                  disabled={collaborationStore.loading || !hostWorkspacePaths.some(path => path.trim())}
                   class="btn btn-primary w-full py-3 mt-auto font-bold rounded-xl disabled:opacity-50"
                 >
                   {collaborationStore.loading ? 'Starting...' : 'Start Collaboration'}
@@ -1385,16 +1544,25 @@
                 <div class="w-12 h-12 bg-blue-500/10 text-blue-400 rounded-2xl flex items-center justify-center mx-auto mb-6">
                   <Keyboard size={24} />
                 </div>
-                <h4 class="text-lg font-bold mb-2">Join via Invite Link</h4>
+                <h4 class="text-lg font-bold mb-2">Join in Koryphaios</h4>
                 <p class="text-xs text-[var(--color-text-muted)] mb-8">
-                  Ask the host for their viewer, collaborator, or co-pilot invite link and open it in any browser.
+                  Enter the host's eight-character code. The host's join policy decides whether you are admitted automatically and which access profile you receive.
                 </p>
-                <p class="text-[11px] text-[var(--color-text-muted)] mt-auto">
-                  Invite links open a live feed page — no Koryphaios install required.
-                </p>
+                <div class="space-y-3 text-left">
+                  <input bind:value={teamGuestName} placeholder="Your display name" class="w-full rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-1)] px-4 py-3 text-sm outline-none focus:border-[var(--color-accent)]" />
+                  <input bind:value={teamJoinCode} maxlength="8" placeholder="JOIN CODE" class="w-full rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-1)] px-4 py-3 text-center font-mono text-lg font-bold uppercase tracking-[0.2em] outline-none focus:border-[var(--color-accent)]" />
+                  <button type="button" disabled={teamJoinCode.trim().length !== 8 || collaborationStore.loading} onclick={() => collaborationStore.joinSession(teamJoinCode, teamGuestName || 'Guest')} class="btn btn-primary w-full rounded-xl py-3 font-bold disabled:opacity-40">{collaborationStore.loading ? 'Joining…' : 'Request to join'}</button>
+                  <p class="text-center text-[10px] text-[var(--color-text-muted)]">Browser guests can still use either signed invite link without installing Koryphaios.</p>
+                </div>
               </div>
             </div>
           {/if}
+
+          <!-- ── SECOND SECTION: Share Models ── separate from collaboration;
+               its own models-only invite link so it never grants session access. -->
+          <div class="mx-auto max-w-4xl mt-16 pt-12 border-t border-[var(--color-border)]">
+            <ModelSharingPanel />
+          </div>
         </div>
       </div>
 
@@ -1456,15 +1624,16 @@
               <div class="text-sm font-medium" style="color: var(--color-text-primary);">Max context tokens</div>
               <div class="text-xs mt-0.5" style="color: var(--color-text-muted);">Maximum tokens used by notes included in agent context (100–5000).</div>
             </div>
-            <input
-              type="number"
-              min="100"
-              max="5000"
-              step="100"
-              class="input h-8 w-24 text-sm text-right"
-              value={notesStore.settings.maxContextTokens}
-              oninput={(e) => notesStore.updateSettings({ maxContextTokens: parseInt((e.currentTarget as HTMLInputElement).value, 10) || 2000 })}
-            />
+            <div class="w-52 shrink-0">
+              <NumberStepper
+                value={notesStore.settings.maxContextTokens}
+                min={100}
+                max={5000}
+                step={100}
+                label="Maximum note context tokens"
+                onchange={(value) => notesStore.updateSettings({ maxContextTokens: value })}
+              />
+            </div>
           </div>
 
           <div class="flex items-center justify-between gap-4 py-2">
@@ -1560,23 +1729,19 @@
                           {tool.description}
                         </div>
                       </div>
-                      <select
-                        class="h-8 shrink-0 rounded-lg border px-2 text-[11px] font-medium"
-                        style="
-                          background: var(--color-surface-1);
-                          border-color: var(--color-border);
-                          color: var(--color-text-primary);
-                        "
-                        value={notesStore.agentPermissions.tools[tool.name]}
-                        onchange={(e) => {
-                          const level = (e.currentTarget as HTMLSelectElement).value as NotePermissionLevel;
-                          void notesStore.setAgentToolPermission(tool.name, level);
-                        }}
-                      >
-                        <option value="auto">{permissionLevelLabels.auto}</option>
-                        <option value="ask">{permissionLevelLabels.ask}</option>
-                        <option value="block">{permissionLevelLabels.block}</option>
-                      </select>
+                      <div class="flex shrink-0 rounded-xl border p-0.5" style="background: var(--color-surface-1); border-color: var(--color-border);">
+                        {#each ['auto', 'ask', 'block'] as level (level)}
+                          <button
+                            type="button"
+                            class="rounded-lg px-2 py-1 text-[10px] font-semibold transition-colors"
+                            style="background: {notesStore.agentPermissions.tools[tool.name] === level ? 'var(--color-surface-4)' : 'transparent'}; color: {notesStore.agentPermissions.tools[tool.name] === level ? 'var(--color-text-primary)' : 'var(--color-text-muted)'}; box-shadow: {notesStore.agentPermissions.tools[tool.name] === level ? 'inset 0 0 0 1px var(--color-border)' : 'none'};"
+                            onclick={() => void notesStore.setAgentToolPermission(tool.name, level as NotePermissionLevel)}
+                            aria-pressed={notesStore.agentPermissions.tools[tool.name] === level}
+                          >
+                            {permissionLevelLabels[level as NotePermissionLevel]}
+                          </button>
+                        {/each}
+                      </div>
                     </div>
                   {/each}
                 </div>
@@ -1700,7 +1865,7 @@
           </div>
           <div>
             <p class="text-[11px] font-bold uppercase tracking-[0.28em] text-[var(--color-text-muted)]">Codex Account Auth</p>
-            <h3 class="mt-2 text-2xl font-black text-[var(--color-text-primary)]">Enter a profile name before sign-in</h3>
+            <h3 class="mt-2 text-2xl font-black text-[var(--color-text-primary)]">Name this account before sign-in</h3>
           </div>
         </div>
         <p class="mt-4 max-w-xl text-sm text-[var(--color-text-muted)]">
@@ -1756,7 +1921,7 @@
     <div class="w-full max-w-md rounded-2xl border p-5 shadow-2xl" style="background: var(--color-surface-1); border-color: var(--color-border);">
       <div class="flex items-center justify-between gap-3">
         <div>
-          <h3 class="text-base font-semibold text-[var(--color-text-primary)]">Saved Profile</h3>
+          <h3 class="text-base font-semibold text-[var(--color-text-primary)]">Saved Account</h3>
           <p class="text-xs text-[var(--color-text-muted)]">{getProviderDisplayLabel(managingAccountProvider)}</p>
         </div>
         <button type="button" class="rounded-lg p-2 hover:bg-[var(--color-surface-3)]" onclick={() => showAccountManageDialog = false} aria-label="Close">
@@ -1770,7 +1935,7 @@
         </div>
         <div class="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-0)]/70 p-3">
           <div class="text-xs font-semibold text-[var(--color-text-primary)]">{managingAccountLabel || 'Unnamed profile'}</div>
-          <div class="mt-1 text-[11px] text-[var(--color-text-muted)]">Use this saved profile name when switching accounts. Model management opens the provider model selector.</div>
+          <div class="mt-1 text-[11px] text-[var(--color-text-muted)]">This name identifies the account when switching. Model management opens the provider model selector.</div>
         </div>
       </div>
       <div class="mt-5 flex gap-2">
