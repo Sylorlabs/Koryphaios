@@ -20,6 +20,7 @@ data/*.db-*
 typecheck_output*.txt
 *.AppImage
 test-results/
+compat-hash.json
 
 # Environment
 .env

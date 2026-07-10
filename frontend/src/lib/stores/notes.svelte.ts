@@ -15,6 +15,8 @@ import type {
   Note,
   NoteWithLinks,
   GraphData,
+  GraphNode,
+  GraphEdge,
   FolderNode,
   NoteAttachment,
   NotesSettings,
@@ -96,14 +98,87 @@ function saveSettingsToStorage(s: NotesSettings): void {
 // ============================================================================
 
 /** Fetch all notes, optionally filtered by folder or search query */
+// Full Note shape — the panel reads folderPath/tags/pinned during render, so
+// partial objects crash the note list.
 const DEMO_NOTES = [
-  { id: 'n1', title: 'Dashboard spec', sourcePath: 'notes/spec.md', format: 'markdown', content: '# Analytics Dashboard\n\n- Revenue over time (line)\n- Top sources (bar)\n- Conversion funnel', updatedAt: Date.now() },
-  { id: 'n2', title: 'API contract', sourcePath: 'notes/api.md', format: 'markdown', content: '## /api/metrics\n\nReturns { revenue[], sources[], funnel[] }', updatedAt: Date.now() },
+  { id: 'n1', title: 'Dashboard spec', sourcePath: 'notes/spec.md', format: 'markdown', content: '# Analytics Dashboard\n\n- Revenue over time (line)\n- Top sources (bar)\n- Conversion funnel\n\nData comes from the [[API contract]]. See also [[Roadmap]].', folderPath: '/', tags: ['spec'], pinned: true, includeInContext: true, createdAt: new Date(), updatedAt: new Date() },
+  { id: 'n2', title: 'API contract', sourcePath: 'notes/api.md', format: 'markdown', content: '## /api/metrics\n\nReturns { revenue[], sources[], funnel[] }\n\nConsumed by the [[Dashboard spec]].', folderPath: '/', tags: ['api'], pinned: false, includeInContext: false, createdAt: new Date(), updatedAt: new Date() },
+  { id: 'n3', title: 'Roadmap', sourcePath: 'notes/roadmap.md', format: 'markdown', content: '# Roadmap\n\n- Ship the [[Dashboard spec]]\n- Firm up the [[API contract]]\n- Explore [[Realtime streaming]]', folderPath: '/planning', tags: ['planning'], pinned: false, includeInContext: false, createdAt: new Date(), updatedAt: new Date() },
 ];
 
+// Build a real graph from the demo notes (wikilinks → edges, unresolved → ghost
+// nodes), matching what the backend graph endpoint returns. A demo-only
+// `?graphn=N` query param seeds N synthetic interlinked nodes so the canvas
+// renderer can be exercised at scale without a backend.
+function buildDemoGraph(source: Note[]): GraphData {
+  const search = typeof location !== 'undefined' ? location.search : '';
+  const synthN = Number(new URLSearchParams(search).get('graphn') ?? 0);
+  if (synthN > 0) {
+    const nodes: GraphNode[] = Array.from({ length: synthN }, (_, i) => ({
+      id: `s${i}`,
+      title: `Node ${i}`,
+      folderPath: `/cluster-${i % 12}`,
+      tags: [],
+      linkCount: 0,
+      includeInContext: i % 50 === 0,
+    }));
+    const edges: GraphEdge[] = [];
+    for (let i = 1; i < synthN; i++) {
+      const t = Math.floor(i * Math.random());
+      edges.push({ from: `s${i}`, to: `s${t}` });
+      nodes[i].linkCount++;
+      nodes[t].linkCount++;
+    }
+    return { nodes, edges };
+  }
+
+  const byTitle = new Map(source.map((n) => [n.title.toLowerCase(), n]));
+  const nodes: GraphNode[] = source.map((n) => ({
+    id: n.id,
+    title: n.title,
+    folderPath: n.folderPath,
+    tags: n.tags ?? [],
+    linkCount: 0,
+    includeInContext: n.includeInContext,
+  }));
+  const nodeById = new Map(nodes.map((n) => [n.id, n]));
+  const edges: GraphEdge[] = [];
+  const ghosts = new Map<string, GraphNode>();
+  const re = /!?\[\[([^\]|#]+?)(?:[|#][^\]]+?)?\]\]/g;
+  for (const n of source) {
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(n.content ?? ''))) {
+      const targetTitle = m[1].trim();
+      const target = byTitle.get(targetTitle.toLowerCase());
+      if (target) {
+        edges.push({ from: n.id, to: target.id });
+        nodeById.get(n.id)!.linkCount++;
+        nodeById.get(target.id)!.linkCount++;
+      } else {
+        const gid = `ghost:${targetTitle.toLowerCase()}`;
+        if (!ghosts.has(gid)) {
+          ghosts.set(gid, { id: gid, title: targetTitle, folderPath: '', tags: [], linkCount: 0, includeInContext: false, unresolved: true });
+        }
+        edges.push({ from: n.id, to: gid, unresolved: true });
+        nodeById.get(n.id)!.linkCount++;
+        ghosts.get(gid)!.linkCount++;
+      }
+    }
+  }
+  return { nodes: [...nodes, ...ghosts.values()], edges };
+}
+
+let _demoSeeded = false;
 async function fetchNotes(folder?: string, query?: string): Promise<void> {
   if (isDemoMode) {
-    _notes = DEMO_NOTES as unknown as Note[];
+    // Seed once. Reassigning on every call would hand $state a fresh reference
+    // each time; because fetchGraph() reads _notes synchronously inside the
+    // project effect, that turns into a write-a-dep-you-read feedback loop
+    // (effect_update_depth_exceeded). User edits still mutate _notes normally.
+    if (!_demoSeeded) {
+      _notes = DEMO_NOTES.map((n) => ({ ...n })) as unknown as Note[];
+      _demoSeeded = true;
+    }
     _isLoading = false;
     return;
   }
@@ -132,6 +207,17 @@ async function fetchNotes(folder?: string, query?: string): Promise<void> {
 
 /** Fetch a single note by ID (includes links and attachments) */
 async function fetchNote(id: string): Promise<void> {
+  if (isDemoMode) {
+    // No backend in the full demo — resolve the note from the in-memory list
+    // so opening a note actually loads its content (the /api/notes shim only
+    // returns an empty array, which would blank the editor/preview pane).
+    const found = _notes.find((n) => n.id === id) as Note | undefined;
+    _currentNote = found
+      ? ({ ...found, outlinks: [], backlinks: [], attachments: [] } as NoteWithLinks)
+      : null;
+    _isLoading = false;
+    return;
+  }
   _isLoading = true;
   try {
     const res = await apiFetch(apiUrl(`/api/notes/${id}`));
@@ -185,6 +271,23 @@ async function createNote(input: {
   includeInContext?: boolean;
   format?: 'markdown' | 'html';
 }): Promise<Note | null> {
+  if (isDemoMode) {
+    const now = new Date();
+    const note = {
+      id: (globalThis.crypto?.randomUUID?.() ?? `demo-${now.getTime()}`),
+      title: input.title ?? 'Untitled',
+      content: input.content ?? '',
+      folderPath: input.folderPath ?? '/',
+      tags: input.tags ?? [],
+      pinned: input.pinned ?? false,
+      includeInContext: input.includeInContext ?? false,
+      format: input.format ?? 'markdown',
+      createdAt: now,
+      updatedAt: now,
+    } as Note;
+    _notes = [note, ..._notes];
+    return note;
+  }
   _isSaving = true;
   try {
     const res = await apiFetch(apiUrl('/api/notes'), {
@@ -224,6 +327,19 @@ async function updateNote(
     format?: 'markdown' | 'html';
   }
 ): Promise<Note | null> {
+  if (isDemoMode) {
+    // No backend in the demo — edit the in-memory note in place. Without this
+    // the /api/notes shim returns [], which would overwrite the note with an
+    // empty array and corrupt the list on every autosave.
+    const existing = _notes.find((n) => n.id === id) as Note | undefined;
+    if (!existing) return null;
+    const updated = { ...existing, ...input, updatedAt: new Date() } as Note;
+    _notes = _notes.map((n) => (n.id === id ? updated : n));
+    if (_currentNote && _currentNote.id === id) {
+      _currentNote = { ..._currentNote, ...updated };
+    }
+    return updated;
+  }
   _isSaving = true;
   try {
     const res = await apiFetch(apiUrl(`/api/notes/${id}`), {
@@ -260,6 +376,12 @@ async function updateNote(
 
 /** Delete a note by ID */
 async function deleteNote(id: string): Promise<boolean> {
+  if (isDemoMode) {
+    _notes = _notes.filter((n) => n.id !== id);
+    if (_currentNote?.id === id) _currentNote = null;
+    toastStore.success('Note deleted');
+    return true;
+  }
   try {
     const res = await apiFetch(apiUrl(`/api/notes/${id}`), {
       method: 'DELETE',
@@ -283,7 +405,10 @@ async function deleteNote(id: string): Promise<boolean> {
 
 /** Fetch graph data (nodes + edges) */
 async function fetchGraph(): Promise<void> {
-  if (isDemoMode) return;
+  if (isDemoMode) {
+    _graphData = buildDemoGraph(_notes);
+    return;
+  }
   try {
     const params = new URLSearchParams();
     if (projectStore.currentPath) params.set('projectRoot', projectStore.currentPath);
@@ -342,6 +467,10 @@ async function uploadAttachment(
   noteId: string,
   file: File
 ): Promise<NoteAttachment | null> {
+  if (isDemoMode) {
+    toastStore.error('Attachments are not available in the demo');
+    return null;
+  }
   try {
     const formData = new FormData();
     formData.append('file', file);
@@ -431,6 +560,10 @@ async function importMemoryAsNotes(): Promise<void> {
 
 /** Re-index real Markdown and HTML files from the open project. */
 async function syncProjectDocuments(): Promise<void> {
+  if (isDemoMode) {
+    toastStore.success('Notes are already loaded in the demo');
+    return;
+  }
   try {
     const params = new URLSearchParams();
     if (projectStore.currentPath) params.set('projectRoot', projectStore.currentPath);

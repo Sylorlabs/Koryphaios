@@ -35,6 +35,8 @@ import {
 
 export interface AgentCliStatus {
   /** Stable id for the CLI. */
+  // NOTE: no 'gemini' here — the standalone Gemini CLI is unsupported and must
+  // never be re-added (Antigravity is its successor).
   id: 'claude' | 'codex' | 'antigravity' | 'grok' | 'cursor' | 'devin' | 'cline';
   displayName: string;
   /** Candidate binary names looked up on PATH. */
@@ -183,13 +185,23 @@ export function detectAgentClis(): AgentCliStatus[] {
         ? '~/.gemini/antigravity-cli/'
         : null,
     autoEnabled: canAutoEnable('antigravity'),
-    workingNote: antigravityKey
-      ? 'Chats through the Google (Gemini) provider.'
-      : antigravityLogin
-        ? 'Antigravity CLI configured — set ANTIGRAVITY_API_KEY to chat through the Google provider.'
+    // agy login alone is enough — Koryphaios drives the agy CLI harness
+    // directly. ANTIGRAVITY_API_KEY is an optional extra route, never a
+    // required step (the old note dead-ended users on an env var the GUI
+    // has no field for).
+    workingNote: antigravityLogin
+      ? 'Chats through the Antigravity CLI harness.'
+      : antigravityKey
+        ? 'Chats through the Google (Gemini) provider via ANTIGRAVITY_API_KEY.'
         : 'Antigravity CLI is installed but not configured.',
+    loggedOutNote: 'Antigravity CLI is installed but not logged in — run "agy login".',
     docsUrl: 'https://antigravity.google/docs/cli-getting-started',
   });
+
+  // ── Gemini CLI: DO NOT ADD. The standalone `gemini` CLI is no longer
+  // supported by Koryphaios — Antigravity (`agy`, above) is Google's successor
+  // and the only Google CLI integration we detect. Do not re-add a `gemini`
+  // detection entry here. ──
 
   // ── Grok Build → `grok` provider (its own CLI harness, like Claude Code / Codex). ──
   const grokKey = detectGrokXaiKey();
@@ -212,9 +224,9 @@ export function detectAgentClis(): AgentCliStatus[] {
         : '~/.cursor/cli-config.json'
       : null,
     autoEnabled: canAutoEnable('cursor'),
-    workingNote: cursorLogin
-      ? 'Cursor CLI detected and logged in — chat runs through the cursor-agent harness (no API key needed).'
-      : 'Cursor CLI is installed but not logged in — run "cursor-agent login".',
+    workingNote:
+      'Cursor CLI detected and logged in — chat runs through the cursor-agent harness (no API key needed).',
+    loggedOutNote: 'Cursor CLI is installed but not logged in — run "cursor-agent login".',
     docsUrl: 'https://cursor.com/docs/cli',
   });
 
@@ -228,9 +240,9 @@ export function detectAgentClis(): AgentCliStatus[] {
         : '~/.local/share/devin/credentials.toml'
       : null,
     autoEnabled: canAutoEnable('devin'),
-    workingNote: devinLogin
-      ? 'Devin CLI detected and logged in — chat runs through the devin harness (no API key needed).'
-      : 'Devin CLI is installed but not logged in — run "devin auth login".',
+    workingNote:
+      'Devin CLI detected and logged in — chat runs through the devin harness (no API key needed).',
+    loggedOutNote: 'Devin CLI is installed but not logged in — run "devin auth login".',
     docsUrl: 'https://docs.devin.ai/',
   });
 
@@ -239,9 +251,10 @@ export function detectAgentClis(): AgentCliStatus[] {
     loggedIn: clineLogin,
     authSource: clineLogin ? '~/.cline/data/secrets.json' : null,
     autoEnabled: canAutoEnable('cline'),
-    workingNote: clineLogin
-      ? 'Cline CLI detected and signed in — CLI-only, runs through the cline harness (Cline manages its own key).'
-      : 'Cline CLI is installed but not signed in — run "cline auth --provider <p> --apikey <k>".',
+    workingNote:
+      'Cline CLI detected and signed in — CLI-only, runs through the cline harness (Cline manages its own key).',
+    loggedOutNote:
+      'Cline CLI is installed but not signed in — run "cline auth --provider <p> --apikey <k>".',
     docsUrl: 'https://docs.cline.bot/cli',
   });
 
@@ -258,6 +271,8 @@ function mk(
     authSource: string | null;
     autoEnabled: boolean;
     workingNote: string;
+    /** Shown when installed but not logged in — the "run X login" hint. */
+    loggedOutNote?: string;
     docsUrl: string;
   },
 ): AgentCliStatus {
@@ -266,7 +281,7 @@ function mk(
   const note = !installed
     ? `${displayName} CLI not found on PATH.`
     : !opts.loggedIn
-      ? `${displayName} CLI installed but not logged in.`
+      ? (opts.loggedOutNote ?? `${displayName} CLI installed but not logged in.`)
       : opts.workingNote;
   return {
     id,

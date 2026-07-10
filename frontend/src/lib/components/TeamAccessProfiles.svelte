@@ -234,7 +234,7 @@
         </div>
         <div class="grid gap-2 sm:grid-cols-2">
           {#each [
-            ['viewChat','View chats'],['viewSystemMessages','View system/log messages'],['viewDiffs','View code changes'],['viewAgentStatus','View agent status'],['viewParticipants','View participants'],['submitPrompts','Submit prompts'],['useTools','Use agent tools'],['autoExecutePrompts','Auto-execute prompts'],['fullSystemAccess','Full system access']
+            ['viewChat','View chats'],['viewSystemMessages','View system/log messages'],['viewDiffs','View code changes'],['viewAgentStatus','View agent status'],['viewParticipants','View participants'],['submitPrompts','Submit prompts'],['useRemoteProviders','Use my shared providers (their own workspace)'],['useTools','Use agent tools'],['autoExecutePrompts','Auto-execute prompts'],['fullSystemAccess','Full system access']
           ] as item}
             <button type="button" role="switch" aria-checked={(selectedTier.permissions as any)[item[0]]} onclick={() => updatePermission(item[0] as any, !(selectedTier.permissions as any)[item[0]])} class="flex items-center justify-between rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-1)] px-3 py-3 text-left text-[11px]"><span>{item[1]}</span><span class="h-4 w-7 rounded-full p-0.5" style="background:{(selectedTier.permissions as any)[item[0]] ? 'var(--color-accent)' : 'var(--color-surface-4)'}"><span class="block h-3 w-3 rounded-full bg-white" style="transform:translateX({(selectedTier.permissions as any)[item[0]] ? '12px' : '0'})"></span></span></button>
           {/each}

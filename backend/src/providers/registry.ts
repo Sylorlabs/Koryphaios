@@ -299,6 +299,13 @@ class ProviderRegistry {
         ...(display?.deployment && { deployment: display.deployment }),
         ...(display?.description && { description: display.description }),
         ...(baseUrlPlaceholder && { baseUrlPlaceholder }),
+        // Remote providers (served by another machine) carry an agentic flag so
+        // the composer can confirm the "your files go to the host" CLI flow.
+        ...(String(name).startsWith('remote-') && {
+          remote: true,
+          remoteAgentic: (provider as { agentic?: boolean } | undefined)?.agentic === true,
+          label: config?.label ?? String(name),
+        }),
       });
     }
 
@@ -361,6 +368,24 @@ class ProviderRegistry {
     this.customProviderIds.delete(id);
     this.circuitStates.delete(id);
     providerLog.info({ provider: id }, 'Custom provider removed');
+  }
+
+  /** Register a REMOTE provider (inference served by another machine's host).
+   *  Appears in the picker like any provider; the manager runs tools locally. */
+  registerRemoteProvider(provider: Provider): void {
+    const id = provider.name;
+    this.providerConfigs.set(id, provider.config);
+    this.customProviderIds.add(id);
+    this.providers.set(id, provider);
+    this.circuitStates.delete(id);
+    providerLog.info({ provider: id }, 'Remote provider registered');
+  }
+
+  /** Remove every registered remote provider (id prefix `remote-`). */
+  clearRemoteProviders(): void {
+    for (const id of [...this.customProviderIds]) {
+      if (String(id).startsWith('remote-')) this.removeCustomProvider(id);
+    }
   }
 
   /** Find the best available provider for a given model ID. */

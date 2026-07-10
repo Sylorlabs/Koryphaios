@@ -19,6 +19,12 @@ declare global {
   interface ImportMeta {
     readonly env: ImportMetaEnv;
   }
+
+  // Build-time constants injected by vite.config.ts (define). Used by the
+  // backend-health sentinel to evaluate the backend /api/health compat block.
+  // Both default to 'dev'/null when no compat-hash.json is present (dev mode).
+  const __KORYPHAIOS_FRONTEND_VERSION__: string | undefined;
+  const __KORYPHAIOS_FRONTEND_BUNDLE_HASH__: string | undefined;
 }
 
 export {};

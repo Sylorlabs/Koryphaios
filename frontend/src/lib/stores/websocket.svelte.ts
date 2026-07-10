@@ -66,6 +66,8 @@ interface DetectedContextFile {
 let detectedContext = $state<DetectedContextFile[]>([]);
 
 let busySessions = $state<Set<string>>(new Set());
+// Bumped on process.started/exited so the background-terminals strip refetches.
+let processEventTick = $state(0);
 
 interface ActiveFileEdit {
   path: string;
@@ -84,11 +86,16 @@ let fileEditTimers = new Map<string, ReturnType<typeof setTimeout>>();
 // ─── Session Busy Bridge ─────────────────────────────────────────────────────
 
 function markSessionBusy(sessionId: string) {
-  if (busySessions.has(sessionId)) return;
+  if (busySessions.has(sessionId)) {
+    kickBusyWatchdog(sessionId);
+    return;
+  }
   busySessions = new Set(busySessions).add(sessionId);
+  kickBusyWatchdog(sessionId);
 }
 
 function clearSessionBusy(sessionId: string) {
+  stopBusyWatchdog(sessionId);
   if (!busySessions.has(sessionId)) return;
   const next = new Set(busySessions);
   next.delete(sessionId);
@@ -98,6 +105,38 @@ function clearSessionBusy(sessionId: string) {
 function maybeClearBusy(sessionId: string | undefined) {
   if (!sessionId || !busySessions.has(sessionId)) return;
   if (!agentStore.isSessionRunning(sessionId)) clearSessionBusy(sessionId);
+}
+
+// Watchdog: if a session is marked busy but goes SILENT (no stream activity)
+// for this long, the agent is gone and a terminal event was dropped — force
+// the busy/Stop state off so the composer never gets stuck. Any stream event
+// for the session resets its timer.
+const BUSY_WATCHDOG_MS = 45_000;
+const busyWatchdogs = new Map<string, ReturnType<typeof setTimeout>>();
+
+function kickBusyWatchdog(sessionId: string | undefined) {
+  if (!sessionId) return;
+  const existing = busyWatchdogs.get(sessionId);
+  if (existing) clearTimeout(existing);
+  if (!busySessions.has(sessionId)) return;
+  busyWatchdogs.set(
+    sessionId,
+    setTimeout(() => {
+      busyWatchdogs.delete(sessionId);
+      // Silent too long — the run ended without a terminal event reaching us.
+      markSessionAgentsStopped(sessionId);
+      clearSessionBusy(sessionId);
+    }, BUSY_WATCHDOG_MS),
+  );
+}
+
+function stopBusyWatchdog(sessionId: string | undefined) {
+  if (!sessionId) return;
+  const t = busyWatchdogs.get(sessionId);
+  if (t) {
+    clearTimeout(t);
+    busyWatchdogs.delete(sessionId);
+  }
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -142,6 +181,10 @@ function handleMessage(msg: WSMessage) {
   const activeSessionId = sessionStore.activeSessionId;
   const isForActiveSession = !msg.sessionId || msg.sessionId === activeSessionId;
   const agents = agentStore.agents;
+
+  // Any activity for a busy session proves the run is alive — reset its
+  // silence watchdog. (Terminal events clear busy entirely below.)
+  if (msg.sessionId && msg.type.startsWith('stream.')) kickBusyWatchdog(msg.sessionId);
 
   switch (msg.type) {
     case 'agent.spawned': {
@@ -201,14 +244,43 @@ function handleMessage(msg: WSMessage) {
     case 'agent.status': {
       const p = msg.payload as AgentStatusPayload;
       agentStore.updateAgentStatus(p.agentId, p.status, msg.sessionId ?? undefined);
-      if (p.status === 'done' || p.status === 'idle') {
+      if (p.status === 'done' || p.status === 'idle' || p.status === 'waiting') {
         maybeClearBusy(msg.sessionId ?? agents.get(p.agentId)?.sessionId);
+        const completedSessionId = msg.sessionId ?? agents.get(p.agentId)?.sessionId;
+        if (
+          p.agentId === 'kory-manager' &&
+          completedSessionId &&
+          completedSessionId === sessionStore.activeSessionId
+        ) {
+          void sessionStore
+            .fetchMessages(completedSessionId)
+            .then((messages) => loadSessionMessages(completedSessionId, messages));
+        }
+      }
+      break;
+    }
+
+    case 'system.info': {
+      // Cancel notification → live stop marker as plain system text, not a
+      // Kory message. The backend persists a matching system row for reloads.
+      const info = msg.payload as { message?: string };
+      if (isForActiveSession && info?.message) {
+        feedStore.removeAnalyzingThoughtEntries();
+        feedStore.addFeedEntry({
+          timestamp: msg.timestamp,
+          type: 'system',
+          agentId: 'system',
+          agentName: '',
+          glowClass: '',
+          text: info.message === 'Session cancelled' ? 'Stopped by user.' : info.message,
+        });
       }
       break;
     }
 
     case 'agent.completed':
     case 'stream.complete': {
+      if (isForActiveSession) feedStore.finalizeThinking();
       const p = msg.payload as { agentId: string };
       agentStore.completeAgent(p.agentId, msg.sessionId ?? undefined);
       if (isForActiveSession) feedStore.removeAnalyzingThoughtEntries();
@@ -235,6 +307,8 @@ function handleMessage(msg: WSMessage) {
 
     case 'stream.delta': {
       const p = msg.payload as StreamDeltaPayload;
+      // Answer text starting = the provider is done reasoning: freeze timers.
+      if (isForActiveSession) feedStore.finalizeThinking();
       agentStore.appendAgentContent(p.agentId, p.content, msg.sessionId ?? undefined);
       if (isForActiveSession) {
         feedStore.removeAnalyzingThoughtEntries();
@@ -285,6 +359,8 @@ function handleMessage(msg: WSMessage) {
           glowClass: feedStore.resolveGlowClass(agents.get(p.agentId)?.identity),
           text: p.thinking,
           thinkingStartedAt: msg.timestamp,
+          metadata:
+            typeof p.thinkingTokens === 'number' ? { thinkingTokens: p.thinkingTokens } : {},
         });
       }
       if (msg.sessionId) {
@@ -313,7 +389,7 @@ function handleMessage(msg: WSMessage) {
           agentName: agents.get(p.agentId)?.identity.name ?? 'Worker',
           glowClass: feedStore.resolveGlowClass(agents.get(p.agentId)?.identity),
           text: `Calling tool: ${p.toolCall.name}`,
-          metadata: { toolCall: p.toolCall },
+          metadata: { toolCall: p.toolCall, sourceProvider: p.sourceProvider },
         });
       }
       if (msg.sessionId) {
@@ -324,7 +400,54 @@ function handleMessage(msg: WSMessage) {
           agentName: agentStore.getAgentFeedLabel(p.agentId),
           glowClass: feedStore.resolveGlowClass(agents.get(p.agentId)?.identity),
           text: `Calling tool: ${p.toolCall.name}`,
-          metadata: { toolCall: p.toolCall, sessionId: msg.sessionId },
+          metadata: {
+            toolCall: p.toolCall,
+            sessionId: msg.sessionId,
+            sourceProvider: p.sourceProvider,
+          },
+        });
+      }
+      break;
+    }
+
+    case 'process.started':
+    case 'process.exited': {
+      processEventTick++;
+      // Background terminals are first-class: show start/exit in the feed as
+      // terminal entries so long-running commands never vanish from view.
+      const p = msg.payload as {
+        id: string;
+        name: string;
+        command: string;
+        pid?: number;
+        exitCode?: number;
+        status?: string;
+        willRestart?: boolean;
+        logsTail?: string;
+      };
+      if (isForActiveSession) {
+        const started = msg.type === 'process.started';
+        const text = started
+          ? `Background terminal started: ${p.name} (pid ${p.pid})\n$ ${p.command}`
+          : `Background terminal ${p.status}${p.exitCode !== undefined ? ` (exit ${p.exitCode})` : ''}: ${p.name}` +
+            (p.willRestart ? ' — restarting' : '') +
+            (p.logsTail ? `\n${p.logsTail}` : '');
+        feedStore.addFeedEntry({
+          timestamp: msg.timestamp,
+          type: 'tool_result',
+          agentId: 'kory-manager',
+          agentName: 'Kory',
+          glowClass: '',
+          text,
+          metadata: {
+            toolResult: {
+              callId: p.id,
+              name: 'bash',
+              output: text,
+              isError: !started && p.status === 'crashed',
+              durationMs: 0,
+            },
+          },
         });
       }
       break;
@@ -342,7 +465,7 @@ function handleMessage(msg: WSMessage) {
           text: p.toolResult.isError
             ? `Tool error: ${p.toolResult.output}`
             : `Tool result (${p.toolResult.durationMs.toFixed(0)}ms): ${p.toolResult.output}`,
-          metadata: { toolResult: p.toolResult },
+          metadata: { toolResult: p.toolResult, sourceProvider: p.sourceProvider },
         });
       }
       if (msg.sessionId) {
@@ -355,7 +478,11 @@ function handleMessage(msg: WSMessage) {
           text: p.toolResult.isError
             ? `Tool error: ${p.toolResult.output}`
             : `Tool result (${p.toolResult.durationMs.toFixed(0)}ms): ${p.toolResult.output}`,
-          metadata: { toolResult: p.toolResult, sessionId: msg.sessionId },
+          metadata: {
+            toolResult: p.toolResult,
+            sessionId: msg.sessionId,
+            sourceProvider: p.sourceProvider,
+          },
         });
       }
       break;
@@ -574,7 +701,7 @@ function handleMessage(msg: WSMessage) {
           timestamp: msg.timestamp,
           type: 'error',
           agentId: '',
-          agentName: 'System',
+          agentName: '',
           glowClass: '',
           text: errorText,
         });
@@ -586,13 +713,15 @@ function handleMessage(msg: WSMessage) {
       const p = msg.payload as Partial<NotificationPayload>;
       if (!isForActiveSession) break;
       const notificationType = p.type ?? 'info';
-      const text = p.title ? `${p.title}: ${p.message ?? ''}`.trim() : (p.message ?? 'Notification');
+      const text = p.title
+        ? `${p.title}: ${p.message ?? ''}`.trim()
+        : (p.message ?? 'Notification');
       pushToast(notificationType, text);
       feedStore.addFeedEntry({
         timestamp: msg.timestamp,
         type: notificationType === 'error' ? 'error' : 'system',
         agentId: '',
-        agentName: 'System',
+        agentName: '',
         glowClass: '',
         text,
         metadata: { notificationType },
@@ -804,12 +933,18 @@ function sendMessage(
     });
 }
 
-function sendAgentMessage(sessionId: string, agentId: string, content: string) {
+function sendAgentMessage(
+  sessionId: string,
+  agentId: string,
+  content: string,
+  model?: string,
+  reasoningLevel?: string,
+) {
   if (!sessionId || !agentId || !content.trim()) return;
   void apiFetch(apiUrl(`/api/agent/${agentId}/message`), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ sessionId, content }),
+    body: JSON.stringify({ sessionId, content, model, reasoningLevel }),
   })
     .then(async (res) => {
       const data = await parseJsonResponse<{ ok?: boolean; error?: string }>(res);
@@ -898,9 +1033,16 @@ async function loadSessionMessages(
     createdAt: number;
     model?: string;
     cost?: number;
+    variantGroupId?: string;
+    variantIndex?: number;
   }>,
 ) {
-  clearFeed();
+  // Reset ancillary per-session UI state up front, but leave the feed itself
+  // alone — feedStore.loadSessionMessages swaps it in atomically once the
+  // fetched history is ready, avoiding a blank flash during the round trip.
+  activeFileEdits = new Map();
+  detectedContext = [];
+  agentStore.clearNonManagerAgents();
   koryThought = '';
   koryPhase = '';
   await feedStore.loadSessionMessages(sessionId, messages);
@@ -1003,10 +1145,14 @@ export const wsStore = {
   get contextUsage() {
     return agentStore.getContextUsage();
   },
+  get processEventTick() {
+    return processEventTick;
+  },
   get detectedContext() {
     return detectedContext;
   },
   isSessionRunning: agentStore.isSessionRunning,
+  isSessionWaiting: agentStore.isSessionWaiting,
   isSessionBusy: (sessionId: string | null | undefined) =>
     !!sessionId && (busySessions.has(sessionId) || agentStore.isSessionRunning(sessionId)),
   markSessionAgentsStopped,
@@ -1024,6 +1170,9 @@ export const wsStore = {
   loadAgentThreadMessages: agentStore.loadAgentThreadMessages,
   getAgentThreadFeed: agentStore.getAgentThreadFeed,
   removeEntries: feedStore.removeEntries,
+  setEntryVisibility: feedStore.setEntryVisibility,
+  finalizeThinking: feedStore.finalizeThinking,
+  setManagerContextWindow: agentStore.setManagerContextWindow,
   respondToPermission,
   subscribeToSession,
   clearFeed,

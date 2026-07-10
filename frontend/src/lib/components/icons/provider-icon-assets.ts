@@ -1,10 +1,13 @@
 // Generated from frontend/static/provider-icons
 export const EXISTING_PROVIDER_ICON_PATHS = new Set<string>([
+  "/provider-icons/cortex.svg",
   "/provider-icons/anthropic-color.svg",
   "/provider-icons/firmware-color.svg",
   "/provider-icons/gitlab-color.svg",
   "/provider-icons/helicone-color.ico",
   "/provider-icons/ionet-color.svg",
+  "/provider-icons/jules-color.svg",
+  "/provider-icons/jules.svg",
   "/provider-icons/llamacpp-color.svg",
   "/provider-icons/lobehub/ace-text.svg",
   "/provider-icons/lobehub/ace.svg",
@@ -265,6 +268,9 @@ export const EXISTING_PROVIDER_ICON_PATHS = new Set<string>([
   "/provider-icons/lobehub/deepseek-color.svg",
   "/provider-icons/lobehub/deepseek-text.svg",
   "/provider-icons/lobehub/deepseek.svg",
+  "/provider-icons/lobehub/devin-color.svg",
+  "/provider-icons/lobehub/devin-text.svg",
+  "/provider-icons/lobehub/devin.svg",
   "/provider-icons/lobehub/dify-color.svg",
   "/provider-icons/lobehub/dify-text.svg",
   "/provider-icons/lobehub/dify.svg",

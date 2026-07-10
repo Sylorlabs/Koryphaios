@@ -2,7 +2,8 @@ import { eq } from 'drizzle-orm';
 import { Elysia, t } from 'elysia';
 import { getContext } from '../../context';
 import { PROJECT_ROOT } from '../../runtime/paths';
-import { syncProviderConfigsToConfig } from '../../runtime/config';
+import { syncProviderConfigsToConfig, removeProviderFromConfig } from '../../runtime/config';
+import { customProviderId } from '../../providers/custom';
 import type { ProviderName } from '@koryphaios/shared';
 import { serverLog } from '../../logger';
 import { requireLocalRouteAuth } from '../../auth/local-route-auth';
@@ -14,7 +15,20 @@ import {
   resetCodexDeviceAuthSessions,
   startCodexDeviceAuth,
 } from '../../providers/codex';
-import { clearCodexAuthState, createCodexCLIAuthMarker, detectCodexAuthToken, detectClaudeCodeToken, detectGeminiCLIToken, clearCachedToken } from '../../providers/auth-utils';
+import {
+  clearCodexAuthState,
+  createCodexCLIAuthMarker,
+  detectCodexAuthToken,
+  detectClaudeCodeLogin,
+  createClaudeCLIAuthMarker,
+  detectGeminiCLIToken,
+  clearCachedToken,
+  detectGrokCLILogin,
+  createGrokCLIAuthMarker,
+  detectAntigravityCLILogin,
+  createAntigravityCLIAuthMarker,
+} from '../../providers/auth-utils';
+import { detectAgentClis } from '../../providers/cli-detection';
 import { googleAuth } from '../../providers/google-auth';
 import {
   clearKimiCodeAuthState,
@@ -23,7 +37,6 @@ import {
   saveKimiCodeAuthState,
   startKimiCodeDeviceAuth,
 } from '../../providers/kimicode-auth';
-import { pollGoogleDeviceAuth, startGoogleDeviceAuth } from '../../providers/google-subscription';
 
 const LOCAL_USER_ID = 'local-user';
 const credentialsService = createUserCredentialsService();
@@ -52,10 +65,27 @@ const providerConfigBody = t.Object({
   hideModelSelector: t.Optional(t.Boolean()),
 });
 
-type BrowserAuthProvider = 'copilot' | 'codex' | 'kimicode' | 'claude' | 'google' | 'google-subscription';
+type BrowserAuthProvider =
+  | 'copilot'
+  | 'codex'
+  | 'kimicode'
+  | 'claude'
+  | 'grok'
+  | 'antigravity'
+  | 'google';
+// NOTE: 'google-subscription' (the Gemini CLI) is RETIRED — never re-add it.
+// Gemini models are served by the plain 'google' (Gemini API) provider.
 
 function isBrowserAuthProvider(name: string): name is BrowserAuthProvider {
-  return name === 'copilot' || name === 'codex' || name === 'kimicode' || name === 'claude' || name === 'google' || name === 'google-subscription';
+  return (
+    name === 'copilot' ||
+    name === 'codex' ||
+    name === 'kimicode' ||
+    name === 'claude' ||
+    name === 'grok' ||
+    name === 'antigravity' ||
+    name === 'google'
+  );
 }
 
 async function startBrowserAuth(
@@ -118,53 +148,93 @@ async function startBrowserAuth(
           },
         };
       }
-      case 'google-subscription': {
-        const result = await startGoogleDeviceAuth();
-        serverLog.info(
-          {
-            provider: name,
-            userCode: result.userCode,
-            verificationUri: result.verificationUri,
-          },
-          'Browser auth flow started',
-        );
-        return {
-          ok: true,
-          data: {
-            provider: name,
-            ...result,
-          },
-        };
-      }
       case 'claude': {
-        // Detect existing Claude CLI authentication
-        const detected = detectClaudeCodeToken();
-        if (detected.token) {
+        // Claude Code subscription connects through the official `claude` CLI harness.
+        // We never store the raw OAuth token — only an opt-in marker; the CLI owns auth.
+        if (detectClaudeCodeLogin()) {
           const { providers } = getContext();
           const setResult = await providers.setCredentials('claude', {
-            authToken: detected.token,
-            baseUrl: detected.baseUrl,
+            authToken: createClaudeCLIAuthMarker(),
           });
           if (!setResult.success) {
             return { ok: false, error: setResult.error ?? 'Failed to activate Claude auth' };
           }
           syncProviderConfigsSafely(providers);
-          serverLog.info({ provider: name }, 'Claude Code auto-connected via CLI auth');
+          serverLog.info({ provider: name }, 'Claude Code connected via CLI subscription');
           return {
             ok: true,
             data: {
               status: 'connected',
               provider: 'claude',
-              message: 'Claude Code connected via CLI credentials',
+              message: 'Claude Code connected via your Claude subscription (CLI harness)',
             },
           };
         }
-        serverLog.info({ provider: name }, 'No Claude CLI auth detected');
+        serverLog.info({ provider: name }, 'No Claude CLI login detected');
         return {
           ok: true,
           data: {
             provider: 'claude',
             message: 'Run "claude login" in your terminal, then click Auth again to connect.',
+          },
+        };
+      }
+      case 'grok': {
+        // Grok Build subscription — the official `grok` CLI owns auth (no token entry in UI).
+        if (detectGrokCLILogin()) {
+          const { providers } = getContext();
+          const setResult = await providers.setCredentials('grok', {
+            authToken: createGrokCLIAuthMarker(),
+          });
+          if (!setResult.success) {
+            return { ok: false, error: setResult.error ?? 'Failed to activate Grok Build auth' };
+          }
+          syncProviderConfigsSafely(providers);
+          serverLog.info({ provider: name }, 'Grok Build connected via CLI subscription');
+          return {
+            ok: true,
+            data: {
+              status: 'connected',
+              provider: 'grok',
+              message: 'Grok Build connected via your local grok CLI (subscription or xAI key)',
+            },
+          };
+        }
+        serverLog.info({ provider: name }, 'No Grok Build CLI login detected');
+        return {
+          ok: true,
+          data: {
+            provider: 'grok',
+            message: 'Install the grok CLI and run "grok login", then click Auth again to connect.',
+          },
+        };
+      }
+      case 'antigravity': {
+        if (detectAntigravityCLILogin()) {
+          const { providers } = getContext();
+          const setResult = await providers.setCredentials('antigravity', {
+            authToken: createAntigravityCLIAuthMarker(),
+          });
+          if (!setResult.success) {
+            return { ok: false, error: setResult.error ?? 'Failed to activate Antigravity auth' };
+          }
+          syncProviderConfigsSafely(providers);
+          serverLog.info({ provider: name }, 'Antigravity connected via CLI');
+          return {
+            ok: true,
+            data: {
+              status: 'connected',
+              provider: 'antigravity',
+              message: 'Antigravity connected via your local agy CLI',
+            },
+          };
+        }
+        serverLog.info({ provider: name }, 'No Antigravity CLI login detected');
+        return {
+          ok: true,
+          data: {
+            provider: 'antigravity',
+            message: 'Install the agy CLI and run "agy login", then click Auth again to connect.',
           },
         };
       }
@@ -262,14 +332,12 @@ async function completeBrowserAuth(
         return { ok: true, data: { status: 'connected', provider: 'codex' } };
       }
       case 'claude': {
-        clearCachedToken('claude-full');
-        const detected = detectClaudeCodeToken();
-        if (!detected.token) {
+        clearCachedToken('claude-login');
+        if (!detectClaudeCodeLogin()) {
           return { ok: false, error: 'Claude Code is not logged in. Run "claude login" in your terminal first.' };
         }
         const claudeResult = await providers.setCredentials('claude', {
-          authToken: detected.token,
-          baseUrl: detected.baseUrl,
+          authToken: createClaudeCLIAuthMarker(),
         });
         if (!claudeResult.success) {
           return { ok: false, error: claudeResult.error ?? 'Failed to activate Claude auth' };
@@ -277,6 +345,40 @@ async function completeBrowserAuth(
         syncProviderConfigsSafely(providers);
         serverLog.info({ provider: name }, 'Claude Code auth completed');
         return { ok: true, data: { status: 'connected', provider: 'claude' } };
+      }
+      case 'grok': {
+        if (!detectGrokCLILogin()) {
+          return {
+            ok: false,
+            error: 'Grok Build CLI is not logged in. Install grok and run "grok login" first.',
+          };
+        }
+        const grokResult = await providers.setCredentials('grok', {
+          authToken: createGrokCLIAuthMarker(),
+        });
+        if (!grokResult.success) {
+          return { ok: false, error: grokResult.error ?? 'Failed to activate Grok Build auth' };
+        }
+        syncProviderConfigsSafely(providers);
+        serverLog.info({ provider: name }, 'Grok Build auth completed');
+        return { ok: true, data: { status: 'connected', provider: 'grok' } };
+      }
+      case 'antigravity': {
+        if (!detectAntigravityCLILogin()) {
+          return {
+            ok: false,
+            error: 'Antigravity CLI is not logged in. Install agy and run "agy login" first.',
+          };
+        }
+        const agyResult = await providers.setCredentials('antigravity', {
+          authToken: createAntigravityCLIAuthMarker(),
+        });
+        if (!agyResult.success) {
+          return { ok: false, error: agyResult.error ?? 'Failed to activate Antigravity auth' };
+        }
+        syncProviderConfigsSafely(providers);
+        serverLog.info({ provider: name }, 'Antigravity auth completed');
+        return { ok: true, data: { status: 'connected', provider: 'antigravity' } };
       }
       case 'google': {
         clearCachedToken('gemini');
@@ -294,7 +396,6 @@ async function completeBrowserAuth(
       }
       case 'copilot':
       case 'kimicode':
-      case 'google-subscription':
         return { ok: false, error: `${name} auth completes automatically after browser approval` };
     }
   } catch (error: any) {
@@ -429,6 +530,89 @@ export const providerRoutes = new Elysia({ prefix: '/api/providers' })
       ok: true,
       data: providers.getAvailableProviderTypes(),
     };
+  })
+  // Agent-CLI auto-detection: which coding CLIs (Claude Code, Codex, Gemini, Grok, Cursor)
+  // are installed + logged in on this machine, and which Koryphaios auto-enabled.
+  .get('/detect', async ({ request, set }) => {
+    if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
+    return {
+      ok: true,
+      data: detectAgentClis(),
+    };
+  })
+  .post('/test-connected', async ({ request, set }) => {
+    if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
+    const { providers } = getContext();
+    const connected = providers.getStatus().filter((provider) => provider.authenticated);
+    const results = await Promise.all(
+      connected.map(async (provider) => ({
+        provider: provider.name,
+        ...(await providers.testConnection(provider.name)),
+      })),
+    );
+    return {
+      ok: results.every((result) => result.ok),
+      tested: results.length,
+      results,
+    };
+  })
+  // ─── Custom (bring-your-own) providers ──────────────────────────────────
+  // Add an OpenAI-compatible (or Anthropic/Gemini-compatible) endpoint with a base URL,
+  // optional API key, optional explicit model list, and optional custom headers.
+  .post(
+    '/custom',
+    async ({ request, body, set }) => {
+      if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
+      const label = body.label?.trim();
+      const baseUrl = body.baseUrl?.trim();
+      if (!label) {
+        set.status = 400;
+        return { ok: false, error: 'A display name is required' };
+      }
+      if (!baseUrl) {
+        set.status = 400;
+        return { ok: false, error: 'A base URL is required (e.g. https://api.example.com/v1)' };
+      }
+      const { providers } = getContext();
+      const id = customProviderId(label);
+      const result = providers.registerCustomProvider({
+        id,
+        label,
+        kind: body.kind ?? 'openai',
+        baseUrl,
+        apiKey: body.apiKey?.trim() || undefined,
+        authToken: body.authToken?.trim() || undefined,
+        headers: body.headers,
+        models: body.models?.map((m) => m.trim()).filter(Boolean),
+      });
+      if (!result.success) {
+        set.status = 400;
+        return { ok: false, error: result.error ?? 'Failed to add custom provider' };
+      }
+      syncProviderConfigsSafely(providers);
+      serverLog.info({ provider: id, kind: body.kind ?? 'openai' }, 'Custom provider added');
+      return { ok: true, data: { id, label, kind: body.kind ?? 'openai' } };
+    },
+    {
+      body: t.Object({
+        label: t.String(),
+        kind: t.Optional(
+          t.Union([t.Literal('openai'), t.Literal('anthropic'), t.Literal('gemini')]),
+        ),
+        baseUrl: t.String(),
+        apiKey: t.Optional(t.String()),
+        authToken: t.Optional(t.String()),
+        models: t.Optional(t.Array(t.String())),
+        headers: t.Optional(t.Record(t.String(), t.String())),
+      }),
+    },
+  )
+  .delete('/custom/:id', async ({ request, params: { id }, set }) => {
+    if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
+    const { providers } = getContext();
+    providers.removeCustomProvider(id as ProviderName);
+    if (process.env.NODE_ENV !== 'test') removeProviderFromConfig(PROJECT_ROOT, id);
+    return { ok: true };
   })
   .post('/:name/auth/start', async ({ request, params: { name }, set }) => {
     if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };

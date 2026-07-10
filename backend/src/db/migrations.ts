@@ -469,6 +469,174 @@ export const MIGRATIONS: Migration[] = [
       PRAGMA foreign_keys = OFF;
     `,
   },
+  {
+    version: '0009',
+    description: 'Add collaboration_sessions and session_participants tables',
+    up: `
+      CREATE TABLE IF NOT EXISTS collaboration_sessions (
+        id TEXT PRIMARY KEY,
+        base_session_id TEXT NOT NULL,
+        owner_id TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'active',
+        join_code TEXT NOT NULL UNIQUE,
+        tunnel_url TEXT,
+        ai_state TEXT,
+        context_snapshot TEXT,
+        created_at INTEGER NOT NULL,
+        ended_at INTEGER
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_collab_base_session ON collaboration_sessions(base_session_id);
+      CREATE INDEX IF NOT EXISTS idx_collab_join_code ON collaboration_sessions(join_code);
+      CREATE INDEX IF NOT EXISTS idx_collab_status ON collaboration_sessions(status);
+
+      CREATE TABLE IF NOT EXISTS session_participants (
+        id TEXT PRIMARY KEY,
+        session_id TEXT NOT NULL,
+        user_id TEXT NOT NULL,
+        name TEXT NOT NULL,
+        role TEXT NOT NULL DEFAULT 'viewer',
+        cursor_file TEXT,
+        cursor_line INTEGER,
+        last_active INTEGER NOT NULL,
+        FOREIGN KEY(session_id) REFERENCES collaboration_sessions(id) ON DELETE CASCADE
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_participants_session ON session_participants(session_id);
+    `,
+    down: `
+      DROP TABLE IF EXISTS session_participants;
+      DROP TABLE IF EXISTS collaboration_sessions;
+    `,
+  },
+
+  // ─── Version 010: Notes network (Obsidian-style graph) ─────────────────────
+  {
+    version: '0010',
+    description: 'Add notes, note_links, and note_attachments tables',
+    up: `
+      CREATE TABLE IF NOT EXISTS notes (
+        id TEXT PRIMARY KEY,
+        title TEXT NOT NULL,
+        content TEXT NOT NULL DEFAULT '',
+        folder_path TEXT NOT NULL DEFAULT '/',
+        tags TEXT NOT NULL DEFAULT '[]',
+        pinned INTEGER NOT NULL DEFAULT 0,
+        include_in_context INTEGER NOT NULL DEFAULT 0,
+        user_id TEXT REFERENCES users(id) ON DELETE CASCADE,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS note_links (
+        from_note_id TEXT NOT NULL REFERENCES notes(id) ON DELETE CASCADE,
+        to_note_id TEXT NOT NULL REFERENCES notes(id) ON DELETE CASCADE,
+        PRIMARY KEY (from_note_id, to_note_id)
+      );
+
+      CREATE TABLE IF NOT EXISTS note_attachments (
+        id TEXT PRIMARY KEY,
+        note_id TEXT NOT NULL REFERENCES notes(id) ON DELETE CASCADE,
+        filename TEXT NOT NULL,
+        mime_type TEXT NOT NULL,
+        size INTEGER NOT NULL,
+        storage_path TEXT NOT NULL,
+        created_at INTEGER NOT NULL
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_notes_user_id ON notes(user_id);
+      CREATE INDEX IF NOT EXISTS idx_notes_folder_path ON notes(folder_path);
+      CREATE INDEX IF NOT EXISTS idx_note_links_from ON note_links(from_note_id);
+      CREATE INDEX IF NOT EXISTS idx_note_links_to ON note_links(to_note_id);
+    `,
+    down: `
+      DROP INDEX IF EXISTS idx_note_links_to;
+      DROP INDEX IF EXISTS idx_note_links_from;
+      DROP INDEX IF EXISTS idx_notes_folder_path;
+      DROP INDEX IF EXISTS idx_notes_user_id;
+      DROP TABLE IF EXISTS note_attachments;
+      DROP TABLE IF EXISTS note_links;
+      DROP TABLE IF EXISTS notes;
+    `,
+  },
+
+  // ─── Version 0011: Project-scoped sessions ──────────────────────────────────
+  {
+    version: '0011',
+    description: 'Add working_directory to sessions (project-scoped chats)',
+    up: `
+      ALTER TABLE sessions ADD COLUMN working_directory TEXT;
+      CREATE INDEX IF NOT EXISTS idx_sessions_working_directory ON sessions(working_directory);
+    `,
+    down: `
+      DROP INDEX IF EXISTS idx_sessions_working_directory;
+    `,
+  },
+
+  // ─── Version 0012: HTML notes ───────────────────────────────────────────────
+  {
+    version: '0012',
+    description: "Add format column to notes ('markdown' | 'html')",
+    up: `
+      ALTER TABLE notes ADD COLUMN format TEXT NOT NULL DEFAULT 'markdown';
+    `,
+    down: ``,
+  },
+  {
+    version: '0013',
+    description: 'Persist regenerated response variants',
+    up: `
+      ALTER TABLE messages ADD COLUMN variant_group_id TEXT;
+      ALTER TABLE messages ADD COLUMN variant_index INTEGER NOT NULL DEFAULT 0;
+      CREATE INDEX IF NOT EXISTS idx_messages_variant_group ON messages(variant_group_id, variant_index);
+    `,
+    down: `DROP INDEX IF EXISTS idx_messages_variant_group;`,
+  },
+
+  // ─── Version 0014: Notes scale — FTS5 search + title index ───────────────────
+  // Replaces the O(n) leading-wildcard LIKE search with an indexed, ranked
+  // full-text index, kept in sync by triggers. Also indexes note titles so
+  // wikilink resolution and rename propagation stop doing table scans.
+  {
+    version: '0014',
+    description: 'Notes FTS5 full-text index + title index',
+    up: `
+      CREATE INDEX IF NOT EXISTS idx_notes_title ON notes(title);
+
+      CREATE VIRTUAL TABLE IF NOT EXISTS notes_fts USING fts5(
+        note_id UNINDEXED,
+        title,
+        content,
+        tags,
+        tokenize = 'porter unicode61'
+      );
+
+      -- Backfill existing rows.
+      INSERT INTO notes_fts(note_id, title, content, tags)
+        SELECT id, title, content, tags FROM notes;
+
+      -- Keep the index in sync with the notes table.
+      CREATE TRIGGER IF NOT EXISTS notes_fts_ai AFTER INSERT ON notes BEGIN
+        INSERT INTO notes_fts(note_id, title, content, tags)
+          VALUES (new.id, new.title, new.content, new.tags);
+      END;
+      CREATE TRIGGER IF NOT EXISTS notes_fts_ad AFTER DELETE ON notes BEGIN
+        DELETE FROM notes_fts WHERE note_id = old.id;
+      END;
+      CREATE TRIGGER IF NOT EXISTS notes_fts_au AFTER UPDATE ON notes BEGIN
+        DELETE FROM notes_fts WHERE note_id = old.id;
+        INSERT INTO notes_fts(note_id, title, content, tags)
+          VALUES (new.id, new.title, new.content, new.tags);
+      END;
+    `,
+    down: `
+      DROP TRIGGER IF EXISTS notes_fts_au;
+      DROP TRIGGER IF EXISTS notes_fts_ad;
+      DROP TRIGGER IF EXISTS notes_fts_ai;
+      DROP TABLE IF EXISTS notes_fts;
+      DROP INDEX IF EXISTS idx_notes_title;
+    `,
+  },
 ];
 
 // ─── Migration Runner ────────────────────────────────────────────────────────

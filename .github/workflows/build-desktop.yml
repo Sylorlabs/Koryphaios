@@ -59,11 +59,18 @@ jobs:
 
       - name: Compile embedded backend payload
         shell: bash
+        env:
+          RELAY_URL: ${{ secrets.RELAY_URL }}
         run: |
           TARGET="x86_64-pc-windows-msvc"
           OUTFILE="$GITHUB_WORKSPACE/desktop/src-tauri/embedded-backend/koryphaios-backend-${TARGET}.exe"
           mkdir -p "$(dirname "$OUTFILE")"
-          bun build --compile --target=bun-windows-x64 backend/src/server.ts --outfile="$OUTFILE"
+          # Bake the collaboration relay endpoint so shipped builds can host/join
+          # out of the box (it's an endpoint, not a secret; the host secret stays
+          # runtime-only). Overridable at dev time via the .env RELAY_URL.
+          DEFINE=()
+          [ -n "$RELAY_URL" ] && DEFINE+=(--define "process.env.RELAY_URL=\"$RELAY_URL\"")
+          bun build --compile --target=bun-windows-x64 "${DEFINE[@]}" backend/src/server.ts --outfile="$OUTFILE"
 
       - name: Build Tauri app
         working-directory: ./desktop
@@ -136,10 +143,14 @@ jobs:
 
       - name: Compile embedded backend payload
         shell: bash
+        env:
+          RELAY_URL: ${{ secrets.RELAY_URL }}
         run: |
           OUTFILE="$GITHUB_WORKSPACE/desktop/src-tauri/embedded-backend/koryphaios-backend-${{ matrix.target }}"
           mkdir -p "$(dirname "$OUTFILE")"
-          bun build --compile --target=${{ matrix.bun-target }} backend/src/server.ts --outfile="$OUTFILE"
+          DEFINE=()
+          [ -n "$RELAY_URL" ] && DEFINE+=(--define "process.env.RELAY_URL=\"$RELAY_URL\"")
+          bun build --compile --target=${{ matrix.bun-target }} "${DEFINE[@]}" backend/src/server.ts --outfile="$OUTFILE"
 
       - name: Build Tauri app (Universal Binary)
         working-directory: ./desktop
@@ -220,10 +231,14 @@ jobs:
 
       - name: Compile embedded backend payload
         shell: bash
+        env:
+          RELAY_URL: ${{ secrets.RELAY_URL }}
         run: |
           OUTFILE="$GITHUB_WORKSPACE/desktop/src-tauri/embedded-backend/koryphaios-backend-${{ matrix.target }}"
           mkdir -p "$(dirname "$OUTFILE")"
-          bun build --compile --target=${{ matrix.bun-target }} backend/src/server.ts --outfile="$OUTFILE"
+          DEFINE=()
+          [ -n "$RELAY_URL" ] && DEFINE+=(--define "process.env.RELAY_URL=\"$RELAY_URL\"")
+          bun build --compile --target=${{ matrix.bun-target }} "${DEFINE[@]}" backend/src/server.ts --outfile="$OUTFILE"
 
       - name: Build Tauri app
         working-directory: ./desktop
@@ -309,11 +324,15 @@ jobs:
 
       - name: Compile universal embedded backend payload
         shell: bash
+        env:
+          RELAY_URL: ${{ secrets.RELAY_URL }}
         run: |
           PAYLOAD_DIR="$GITHUB_WORKSPACE/desktop/src-tauri/embedded-backend"
           mkdir -p "$PAYLOAD_DIR"
-          bun build --compile --target=bun-darwin-arm64 backend/src/server.ts --outfile="$PAYLOAD_DIR/koryphaios-backend-arm64"
-          bun build --compile --target=bun-darwin-x64 backend/src/server.ts --outfile="$PAYLOAD_DIR/koryphaios-backend-x64"
+          DEFINE=()
+          [ -n "$RELAY_URL" ] && DEFINE+=(--define "process.env.RELAY_URL=\"$RELAY_URL\"")
+          bun build --compile --target=bun-darwin-arm64 "${DEFINE[@]}" backend/src/server.ts --outfile="$PAYLOAD_DIR/koryphaios-backend-arm64"
+          bun build --compile --target=bun-darwin-x64 "${DEFINE[@]}" backend/src/server.ts --outfile="$PAYLOAD_DIR/koryphaios-backend-x64"
           lipo -create "$PAYLOAD_DIR/koryphaios-backend-arm64" "$PAYLOAD_DIR/koryphaios-backend-x64" -output "$PAYLOAD_DIR/koryphaios-backend-universal-apple-darwin"
 
       - name: Build Universal Binary

@@ -18,10 +18,10 @@
     Users,
     LogOut,
     UserPlus,
+    ShieldAlert,
   } from 'lucide-svelte';
   import AnimatedStatusIcon from './AnimatedStatusIcon.svelte';
   import ConfirmDialog from './ConfirmDialog.svelte';
-  import { isDemoMode } from '$lib/demo.svelte';
 
   interface Props {
     currentSessionId?: string;
@@ -32,7 +32,6 @@
   let editingId = $state<string>('');
   let editTitle = $state<string>('');
   let editError = $state<boolean>(false);
-  let confirmDeleteId = $state<string>('');
   let showConfirmDialog = $state<boolean>(false);
   let sessionToDeleteId = $state<string>('');
   let creating = $state(false);
@@ -47,10 +46,6 @@
   });
 
   async function handleCreateSession(event?: MouseEvent) {
-    if (isDemoMode) {
-      toastStore.warning('The guided demo uses a fixed sample workspace. Try the real app to create sessions.');
-      return;
-    }
     creating = true;
     try {
       // Shift+click always creates a fresh session; plain click reuses the
@@ -80,11 +75,6 @@
   }
 
   function saveRename(id: string) {
-    if (isDemoMode) {
-      toastStore.warning('Renaming is disabled in the guided demo.');
-      cancelRename();
-      return;
-    }
     if (editTitle.trim()) {
       sessionStore.renameSession(id, editTitle.trim());
       editError = false;
@@ -103,37 +93,21 @@
 
   function confirmDelete(e: MouseEvent, id: string) {
     e.stopPropagation();
-    if (isDemoMode) {
-      toastStore.warning('Deleting sample sessions is disabled in the guided demo.');
-      return;
-    }
     // Deleting a row that's mid-rename must not leave the editor open.
     if (editingId === id) cancelRename();
 
-    // Shift-click bypasses all confirmation
+    // Shift-click bypasses all confirmation (power-user escape hatch).
     if (e.shiftKey) {
       sessionStore.deleteSession(id);
       return;
     }
 
-    const isRunning = wsStore.isSessionRunning(id);
-
-    if (isRunning) {
-      sessionToDeleteId = id;
-      showConfirmDialog = true;
-      return;
-    }
-
-    // Standard double-click for idle sessions
-    if (confirmDeleteId === id) {
-      sessionStore.deleteSession(id);
-      confirmDeleteId = '';
-    } else {
-      confirmDeleteId = id;
-      setTimeout(() => {
-        if (confirmDeleteId === id) confirmDeleteId = '';
-      }, 3000);
-    }
+    // ONE confirmation model for every delete: the same dialog, with a
+    // stronger message when the session is still running. (Previously idle
+    // rows used a hidden arm-to-confirm click while running rows opened a
+    // modal — same icon, three behaviors.)
+    sessionToDeleteId = id;
+    showConfirmDialog = true;
   }
 
   function handleConfirmDelete() {
@@ -258,11 +232,7 @@
     <button
       type="button"
       onclick={() => {
-        if (isDemoMode) {
-          toastStore.warning('Team hosting is available in the real app.');
-        } else {
-          window.dispatchEvent(new CustomEvent('open-team-settings'));
-        }
+        window.dispatchEvent(new CustomEvent('open-team-settings'));
       }}
       class="mx-1 mb-2 flex items-center gap-3 rounded-xl border border-dashed px-3 py-2.5 text-left transition-colors hover:bg-[var(--color-surface-2)]"
       style="width:calc(100% - 0.5rem);border-color:var(--color-border);color:var(--color-text-secondary)"
@@ -434,6 +404,17 @@
                   {session.title}
                 </div>
                 <div class="flex items-center gap-2.5 flex-wrap" style="margin-top: 6px;">
+                  {#if wsStore.pendingPermissions.some((p) => p.sessionId === session.id) && sessionStore.activeSessionId !== session.id}
+                    <!-- A backgrounded session stalled on an approval must never
+                         look like it's just "still running". -->
+                    <span
+                      class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full font-medium animate-pulse"
+                      style="font-size: var(--text-xs); color: #f59e0b; background: rgba(245, 158, 11, 0.14);"
+                      title="An agent in this session is waiting for your approval — open it to respond"
+                    >
+                      <ShieldAlert size={9} class="shrink-0" />Needs approval
+                    </span>
+                  {/if}
                   <span style="font-size: var(--text-xs); color: var(--color-text-muted);"
                     >{formatTime(session.updatedAt)}</span
                   >
@@ -483,14 +464,10 @@
                 <button
                   type="button"
                   class="p-1.5 rounded-lg hover:bg-[var(--color-surface-4)] transition-colors"
-                  style="color: {confirmDeleteId === session.id
-                    ? 'var(--color-error)'
-                    : 'var(--color-text-muted)'};"
+                  style="color: var(--color-text-muted);"
                   onclick={(e) => confirmDelete(e, session.id)}
                   ondblclick={(e) => e.stopPropagation()}
-                  title={confirmDeleteId === session.id
-                    ? 'Click again to confirm'
-                    : 'Delete (Shift+Click to skip confirmation)'}
+                  title="Delete (Shift+Click to skip confirmation)"
                   aria-label="Delete session"
                 >
                   <Trash2 size={12} />
@@ -518,8 +495,12 @@
 
 <ConfirmDialog
   open={showConfirmDialog}
-  title="Delete Active Session?"
-  message="This session is currently running. Deleting it will cancel all active workers and their progress. Are you sure you want to continue?"
+  title={sessionToDeleteId && wsStore.isSessionRunning(sessionToDeleteId)
+    ? 'Delete Running Session?'
+    : 'Delete Session?'}
+  message={sessionToDeleteId && wsStore.isSessionRunning(sessionToDeleteId)
+    ? 'This session is currently running. Deleting it will cancel all active workers and their progress. Are you sure you want to continue?'
+    : 'This permanently deletes the session and its history. Tip: Shift+Click the trash icon to skip this confirmation.'}
   confirmLabel="Delete Session"
   cancelLabel="Cancel"
   variant="danger"
