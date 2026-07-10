@@ -100,8 +100,20 @@ describe('NotesSyncSession', () => {
     let alice: NoteRecord[] = [rec('a', 100, { content: 'alice-a' })];
     let bob: NoteRecord[] = [rec('b', 150, { content: 'bob-b' })];
 
-    const aliceSession = new NotesSyncSession(key, () => alice, (m) => { alice = m; });
-    const bobSession = new NotesSyncSession(key, () => bob, (m) => { bob = m; });
+    const aliceSession = new NotesSyncSession(
+      key,
+      () => alice,
+      (m) => {
+        alice = m;
+      },
+    );
+    const bobSession = new NotesSyncSession(
+      key,
+      () => bob,
+      (m) => {
+        bob = m;
+      },
+    );
 
     // Alice pushes → Bob applies; Bob pushes → Alice applies.
     const aPush = await aliceSession.createPush();
@@ -109,7 +121,11 @@ describe('NotesSyncSession', () => {
     const bPush = await bobSession.createPush();
     await aliceSession.applyPull(bPush);
 
-    const ids = (rs: NoteRecord[]) => rs.map((r) => r.id).sort().join(',');
+    const ids = (rs: NoteRecord[]) =>
+      rs
+        .map((r) => r.id)
+        .sort()
+        .join(',');
     expect(ids(alice)).toBe('a,b');
     expect(ids(bob)).toBe('a,b');
     expect(bob.find((r) => r.id === 'a')?.content).toBe('alice-a');
@@ -119,7 +135,11 @@ describe('NotesSyncSession', () => {
   test('watermark advances so a second push skips already-synced edits', async () => {
     const key = await deriveKey('pw', 'room-1');
     let store: NoteRecord[] = [rec('a', 100)];
-    const session = new NotesSyncSession(key, () => store, () => {});
+    const session = new NotesSyncSession(
+      key,
+      () => store,
+      () => {},
+    );
     // Prime the watermark by pulling a remote delta up to ts 200.
     await session.applyPull(await encryptRecords(key, [rec('z', 200)]));
     expect(session.watermark).toBe(200);

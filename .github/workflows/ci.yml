@@ -70,4 +70,4 @@ jobs:
           bun-version: latest
       - run: bun install --frozen-lockfile
       - name: Run legacy MCP regression suite
-        run: bun run --filter mcp-server test
+        run: bun run --filter '@koryphaios/mcp-server' test

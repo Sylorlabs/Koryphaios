@@ -46,16 +46,46 @@ export const PROVIDER_SHARE_RISK: Record<string, ProviderShareClassification> = 
   llamacpp: { risk: 'ok', reason: 'Your local llama.cpp — nothing metered.' },
 
   // Subscription-backed — sharing is account-sharing the provider's ToS forbids.
-  claude: { risk: 'prohibited', reason: "Sharing a Claude subscription violates Anthropic's terms (account sharing) — they enforce this." },
-  codex: { risk: 'caution', reason: 'Sharing a ChatGPT subscription is a gray area OpenAI currently tolerates; use at your own risk.' },
-  copilot: { risk: 'prohibited', reason: "Sharing Copilot violates GitHub's terms; proxy usage is a bannable offense." },
+  claude: {
+    risk: 'prohibited',
+    reason:
+      "Sharing a Claude subscription violates Anthropic's terms (account sharing) — they enforce this.",
+  },
+  codex: {
+    risk: 'caution',
+    reason:
+      'Sharing a ChatGPT subscription is a gray area OpenAI currently tolerates; use at your own risk.',
+  },
+  copilot: {
+    risk: 'prohibited',
+    reason: "Sharing Copilot violates GitHub's terms; proxy usage is a bannable offense.",
+  },
   'google-subscription': { risk: 'prohibited', reason: 'Retired provider — do not use.' },
-  grok: { risk: 'caution', reason: "Sharing a Grok subscription likely breaches xAI's terms; a metered API key is the safe path." },
-  kimicode: { risk: 'caution', reason: 'Sharing a Kimi Code subscription is risky; a Console-issued API key is safer.' },
-  cursor: { risk: 'caution', reason: "Sharing a Cursor subscription likely breaches Cursor's terms." },
-  devin: { risk: 'caution', reason: "Sharing a Devin subscription likely breaches Cognition's terms." },
-  antigravity: { risk: 'caution', reason: 'Sharing a Google/Antigravity subscription is risky; a metered API key is safer.' },
-  cline: { risk: 'ok', reason: 'Cline is BYO-key and open source — nothing subscription-bound to share.' },
+  grok: {
+    risk: 'caution',
+    reason:
+      "Sharing a Grok subscription likely breaches xAI's terms; a metered API key is the safe path.",
+  },
+  kimicode: {
+    risk: 'caution',
+    reason: 'Sharing a Kimi Code subscription is risky; a Console-issued API key is safer.',
+  },
+  cursor: {
+    risk: 'caution',
+    reason: "Sharing a Cursor subscription likely breaches Cursor's terms.",
+  },
+  devin: {
+    risk: 'caution',
+    reason: "Sharing a Devin subscription likely breaches Cognition's terms.",
+  },
+  antigravity: {
+    risk: 'caution',
+    reason: 'Sharing a Google/Antigravity subscription is risky; a metered API key is safer.',
+  },
+  cline: {
+    risk: 'ok',
+    reason: 'Cline is BYO-key and open source — nothing subscription-bound to share.',
+  },
 };
 
 export function classifyProviderShare(providerName: string): ProviderShareClassification {

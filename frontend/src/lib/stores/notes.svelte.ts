@@ -101,9 +101,48 @@ function saveSettingsToStorage(s: NotesSettings): void {
 // Full Note shape — the panel reads folderPath/tags/pinned during render, so
 // partial objects crash the note list.
 const DEMO_NOTES = [
-  { id: 'n1', title: 'Dashboard spec', sourcePath: 'notes/spec.md', format: 'markdown', content: '# Analytics Dashboard\n\n- Revenue over time (line)\n- Top sources (bar)\n- Conversion funnel\n\nData comes from the [[API contract]]. See also [[Roadmap]].', folderPath: '/', tags: ['spec'], pinned: true, includeInContext: true, createdAt: new Date(), updatedAt: new Date() },
-  { id: 'n2', title: 'API contract', sourcePath: 'notes/api.md', format: 'markdown', content: '## /api/metrics\n\nReturns { revenue[], sources[], funnel[] }\n\nConsumed by the [[Dashboard spec]].', folderPath: '/', tags: ['api'], pinned: false, includeInContext: false, createdAt: new Date(), updatedAt: new Date() },
-  { id: 'n3', title: 'Roadmap', sourcePath: 'notes/roadmap.md', format: 'markdown', content: '# Roadmap\n\n- Ship the [[Dashboard spec]]\n- Firm up the [[API contract]]\n- Explore [[Realtime streaming]]', folderPath: '/planning', tags: ['planning'], pinned: false, includeInContext: false, createdAt: new Date(), updatedAt: new Date() },
+  {
+    id: 'n1',
+    title: 'Dashboard spec',
+    sourcePath: 'notes/spec.md',
+    format: 'markdown',
+    content:
+      '# Analytics Dashboard\n\n- Revenue over time (line)\n- Top sources (bar)\n- Conversion funnel\n\nData comes from the [[API contract]]. See also [[Roadmap]].',
+    folderPath: '/',
+    tags: ['spec'],
+    pinned: true,
+    includeInContext: true,
+    createdAt: new Date(),
+    updatedAt: new Date(),
+  },
+  {
+    id: 'n2',
+    title: 'API contract',
+    sourcePath: 'notes/api.md',
+    format: 'markdown',
+    content:
+      '## /api/metrics\n\nReturns { revenue[], sources[], funnel[] }\n\nConsumed by the [[Dashboard spec]].',
+    folderPath: '/',
+    tags: ['api'],
+    pinned: false,
+    includeInContext: false,
+    createdAt: new Date(),
+    updatedAt: new Date(),
+  },
+  {
+    id: 'n3',
+    title: 'Roadmap',
+    sourcePath: 'notes/roadmap.md',
+    format: 'markdown',
+    content:
+      '# Roadmap\n\n- Ship the [[Dashboard spec]]\n- Firm up the [[API contract]]\n- Explore [[Realtime streaming]]',
+    folderPath: '/planning',
+    tags: ['planning'],
+    pinned: false,
+    includeInContext: false,
+    createdAt: new Date(),
+    updatedAt: new Date(),
+  },
 ];
 
 // Build a real graph from the demo notes (wikilinks → edges, unresolved → ghost
@@ -157,7 +196,15 @@ function buildDemoGraph(source: Note[]): GraphData {
       } else {
         const gid = `ghost:${targetTitle.toLowerCase()}`;
         if (!ghosts.has(gid)) {
-          ghosts.set(gid, { id: gid, title: targetTitle, folderPath: '', tags: [], linkCount: 0, includeInContext: false, unresolved: true });
+          ghosts.set(gid, {
+            id: gid,
+            title: targetTitle,
+            folderPath: '',
+            tags: [],
+            linkCount: 0,
+            includeInContext: false,
+            unresolved: true,
+          });
         }
         edges.push({ from: n.id, to: gid, unresolved: true });
         nodeById.get(n.id)!.linkCount++;
@@ -239,17 +286,13 @@ async function fetchNote(id: string): Promise<void> {
 
 /** Open a note by title (searches notes list, then fetches by ID) */
 async function openNoteByTitle(title: string): Promise<void> {
-  const found = _notes.find(
-    (n) => n.title.toLowerCase() === title.toLowerCase()
-  );
+  const found = _notes.find((n) => n.title.toLowerCase() === title.toLowerCase());
   if (found) {
     await fetchNote(found.id);
     return;
   }
   // Fallback: search then open first match
-  const searchRes = await apiFetch(
-    apiUrl(`/api/notes?q=${encodeURIComponent(title)}&limit=1`)
-  );
+  const searchRes = await apiFetch(apiUrl(`/api/notes?q=${encodeURIComponent(title)}&limit=1`));
   if (searchRes.ok) {
     const data = await searchRes.json();
     if (data.ok && Array.isArray(data.data) && data.data.length > 0) {
@@ -274,7 +317,7 @@ async function createNote(input: {
   if (isDemoMode) {
     const now = new Date();
     const note = {
-      id: (globalThis.crypto?.randomUUID?.() ?? `demo-${now.getTime()}`),
+      id: globalThis.crypto?.randomUUID?.() ?? `demo-${now.getTime()}`,
       title: input.title ?? 'Untitled',
       content: input.content ?? '',
       folderPath: input.folderPath ?? '/',
@@ -325,7 +368,7 @@ async function updateNote(
     pinned?: boolean;
     includeInContext?: boolean;
     format?: 'markdown' | 'html';
-  }
+  },
 ): Promise<Note | null> {
   if (isDemoMode) {
     // No backend in the demo — edit the in-memory note in place. Without this
@@ -446,9 +489,7 @@ async function fetchFolderTree(): Promise<void> {
 async function searchNotes(q: string): Promise<Note[]> {
   if (!q.trim()) return [];
   try {
-    const res = await apiFetch(
-      apiUrl(`/api/notes?q=${encodeURIComponent(q)}`)
-    );
+    const res = await apiFetch(apiUrl(`/api/notes?q=${encodeURIComponent(q)}`));
     if (res.ok) {
       const data = await res.json();
       if (data.ok && Array.isArray(data.data)) {
@@ -463,10 +504,7 @@ async function searchNotes(q: string): Promise<Note[]> {
 }
 
 /** Upload an attachment for a note */
-async function uploadAttachment(
-  noteId: string,
-  file: File
-): Promise<NoteAttachment | null> {
+async function uploadAttachment(noteId: string, file: File): Promise<NoteAttachment | null> {
   if (isDemoMode) {
     toastStore.error('Attachments are not available in the demo');
     return null;
@@ -474,13 +512,10 @@ async function uploadAttachment(
   try {
     const formData = new FormData();
     formData.append('file', file);
-    const res = await apiFetch(
-      apiUrl(`/api/notes/${noteId}/attachments`),
-      {
-        method: 'POST',
-        body: formData,
-      }
-    );
+    const res = await apiFetch(apiUrl(`/api/notes/${noteId}/attachments`), {
+      method: 'POST',
+      body: formData,
+    });
     if (res.ok) {
       const data = await res.json();
       if (data.ok && data.data) {
@@ -506,22 +541,16 @@ async function uploadAttachment(
 }
 
 /** Delete an attachment */
-async function deleteAttachment(
-  noteId: string,
-  attachmentId: string
-): Promise<boolean> {
+async function deleteAttachment(noteId: string, attachmentId: string): Promise<boolean> {
   try {
-    const res = await apiFetch(
-      apiUrl(`/api/notes/${noteId}/attachments/${attachmentId}`),
-      { method: 'DELETE' }
-    );
+    const res = await apiFetch(apiUrl(`/api/notes/${noteId}/attachments/${attachmentId}`), {
+      method: 'DELETE',
+    });
     if (res.ok) {
       if (_currentNote && _currentNote.id === noteId) {
         _currentNote = {
           ..._currentNote,
-          attachments: (_currentNote.attachments ?? []).filter(
-            (a) => a.id !== attachmentId
-          ),
+          attachments: (_currentNote.attachments ?? []).filter((a) => a.id !== attachmentId),
         };
       }
       return true;
@@ -567,7 +596,9 @@ async function syncProjectDocuments(): Promise<void> {
   try {
     const params = new URLSearchParams();
     if (projectStore.currentPath) params.set('projectRoot', projectStore.currentPath);
-    const res = await apiFetch(apiUrl(`/api/notes/sync-project?${params.toString()}`), { method: 'POST' });
+    const res = await apiFetch(apiUrl(`/api/notes/sync-project?${params.toString()}`), {
+      method: 'POST',
+    });
     const data = await res.json();
     if (!res.ok || !data.ok) throw new Error(data.error ?? `HTTP ${res.status}`);
     await Promise.all([fetchNotes(), fetchGraph(), fetchFolderTree()]);

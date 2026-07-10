@@ -93,7 +93,13 @@ export function parseDataviewQuery(src: string): ParsedQuery {
   if (kind === 'TABLE') {
     const firstKw = kwRe.exec(rest);
     const colPart = (firstKw ? rest.slice(0, firstKw.index) : rest).trim();
-    if (colPart) columns.push(...colPart.split(',').map((c) => c.trim()).filter(Boolean));
+    if (colPart)
+      columns.push(
+        ...colPart
+          .split(',')
+          .map((c) => c.trim())
+          .filter(Boolean),
+      );
     rest = firstKw ? rest.slice(firstKw.index) : '';
   }
 
@@ -102,9 +108,12 @@ export function parseDataviewQuery(src: string): ParsedQuery {
   const re = /\b(FROM|WHERE|SORT|LIMIT)\b/gi;
   const marks: { kw: string; start: number; end: number }[] = [];
   let m: RegExpExecArray | null;
-  while ((m = re.exec(rest))) marks.push({ kw: m[1].toUpperCase(), start: m.index, end: m.index + m[0].length });
+  while ((m = re.exec(rest)))
+    marks.push({ kw: m[1].toUpperCase(), start: m.index, end: m.index + m[0].length });
   for (let i = 0; i < marks.length; i++) {
-    const seg = rest.slice(marks[i].end, i + 1 < marks.length ? marks[i + 1].start : undefined).trim();
+    const seg = rest
+      .slice(marks[i].end, i + 1 < marks.length ? marks[i + 1].start : undefined)
+      .trim();
     sections[marks[i].kw] = seg;
   }
 
@@ -135,7 +144,8 @@ export function parseDataviewQuery(src: string): ParsedQuery {
 
   if (sections.SORT) {
     const sm = /^(\S+)\s*(asc|desc)?$/i.exec(sections.SORT.trim());
-    if (sm) parsed.sort = { field: normField(sm[1]), dir: (sm[2]?.toLowerCase() as SortDir) || 'asc' };
+    if (sm)
+      parsed.sort = { field: normField(sm[1]), dir: (sm[2]?.toLowerCase() as SortDir) || 'asc' };
   }
 
   if (sections.LIMIT) {
@@ -148,16 +158,26 @@ export function parseDataviewQuery(src: string): ParsedQuery {
 
 function fieldValue(note: DataviewNote, field: string): string | number | boolean | string[] {
   switch (field) {
-    case 'title': return note.title;
-    case 'folder': return note.folderPath;
-    case 'tags': return note.tags ?? [];
-    case 'pinned': return !!note.pinned;
-    case 'context': return !!note.includeInContext;
-    case 'content': return note.content ?? '';
-    case 'created': return new Date(note.createdAt).getTime();
-    case 'updated': return new Date(note.updatedAt).getTime();
-    case 'links': return (note.outlinks?.length ?? 0) + (note.backlinks?.length ?? 0);
-    default: return '';
+    case 'title':
+      return note.title;
+    case 'folder':
+      return note.folderPath;
+    case 'tags':
+      return note.tags ?? [];
+    case 'pinned':
+      return !!note.pinned;
+    case 'context':
+      return !!note.includeInContext;
+    case 'content':
+      return note.content ?? '';
+    case 'created':
+      return new Date(note.createdAt).getTime();
+    case 'updated':
+      return new Date(note.updatedAt).getTime();
+    case 'links':
+      return (note.outlinks?.length ?? 0) + (note.backlinks?.length ?? 0);
+    default:
+      return '';
   }
 }
 
@@ -182,24 +202,37 @@ function evalClause(note: DataviewNote, c: Clause): boolean {
   if (c.op === 'contains') return String(lhs).toLowerCase().includes(String(rhs).toLowerCase());
   if (typeof lhs === 'number' && typeof rhs === 'number') {
     switch (c.op) {
-      case '=': return lhs === rhs;
-      case '!=': return lhs !== rhs;
-      case '>': return lhs > rhs;
-      case '<': return lhs < rhs;
-      case '>=': return lhs >= rhs;
-      case '<=': return lhs <= rhs;
+      case '=':
+        return lhs === rhs;
+      case '!=':
+        return lhs !== rhs;
+      case '>':
+        return lhs > rhs;
+      case '<':
+        return lhs < rhs;
+      case '>=':
+        return lhs >= rhs;
+      case '<=':
+        return lhs <= rhs;
     }
   }
   const a = String(lhs).toLowerCase();
   const b = String(rhs).toLowerCase();
   switch (c.op) {
-    case '=': return a === b;
-    case '!=': return a !== b;
-    case '>': return a > b;
-    case '<': return a < b;
-    case '>=': return a >= b;
-    case '<=': return a <= b;
-    default: return false;
+    case '=':
+      return a === b;
+    case '!=':
+      return a !== b;
+    case '>':
+      return a > b;
+    case '<':
+      return a < b;
+    case '>=':
+      return a >= b;
+    case '<=':
+      return a <= b;
+    default:
+      return false;
   }
 }
 
@@ -224,7 +257,10 @@ export function runDataviewQuery(src: string, notes: DataviewNote[]): DataviewNo
       rows = rows.filter((n) => (n.tags ?? []).some((t) => t.toLowerCase() === tag));
     } else {
       const folder = '/' + q.from.value.replace(/^\/+|\/+$/g, '');
-      rows = rows.filter((n) => n.folderPath === folder || n.folderPath.startsWith(folder === '/' ? '/' : folder + '/'));
+      rows = rows.filter(
+        (n) =>
+          n.folderPath === folder || n.folderPath.startsWith(folder === '/' ? '/' : folder + '/'),
+      );
     }
   }
 
@@ -249,7 +285,11 @@ export function runDataviewQuery(src: string, notes: DataviewNote[]): DataviewNo
 }
 
 function esc(s: string): string {
-  return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  return String(s)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
 }
 
 function noteLink(n: DataviewNote): string {

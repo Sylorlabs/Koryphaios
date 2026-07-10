@@ -32,7 +32,15 @@ beforeEach(() => {
   // Neutralize ambient signals so tests are deterministic regardless of the dev machine.
   process.env.HOME = tmpHome;
   process.env.USERPROFILE = tmpHome;
-  for (const k of ['KORY_DISABLE_CLI_AUTODETECT', 'GROK_CODE_XAI_API_KEY', 'GROK_API_KEY', 'ANTIGRAVITY_API_KEY', 'GEMINI_API_KEY', 'GOOGLE_API_KEY', 'CURSOR_API_KEY']) {
+  for (const k of [
+    'KORY_DISABLE_CLI_AUTODETECT',
+    'GROK_CODE_XAI_API_KEY',
+    'GROK_API_KEY',
+    'ANTIGRAVITY_API_KEY',
+    'GEMINI_API_KEY',
+    'GOOGLE_API_KEY',
+    'CURSOR_API_KEY',
+  ]) {
     delete process.env[k];
   }
 });
@@ -49,7 +57,15 @@ describe('detectAgentClis', () => {
     const list = detectAgentClis();
     // The standalone Gemini CLI is unsupported and must never appear here —
     // Antigravity is its successor.
-    expect(list.map((c) => c.id).sort()).toEqual(['antigravity', 'claude', 'cline', 'codex', 'cursor', 'devin', 'grok']);
+    expect(list.map((c) => c.id).sort()).toEqual([
+      'antigravity',
+      'claude',
+      'cline',
+      'codex',
+      'cursor',
+      'devin',
+      'grok',
+    ]);
     const byId = Object.fromEntries(list.map((c) => [c.id, c]));
     expect(byId.claude.provider).toBe('claude');
     expect(byId.codex.provider).toBe('codex');
@@ -96,7 +112,10 @@ describe('login detectors (deterministic via temp HOME)', () => {
     expect(detectAntigravityCLILogin()).toBe(true);
     delete process.env.ANTIGRAVITY_API_KEY;
     mkdirSync(join(tmpHome, '.gemini', 'antigravity-cli'), { recursive: true });
-    writeFileSync(join(tmpHome, '.gemini', 'antigravity-cli', 'settings.json'), JSON.stringify({ theme: 'dark' }));
+    writeFileSync(
+      join(tmpHome, '.gemini', 'antigravity-cli', 'settings.json'),
+      JSON.stringify({ theme: 'dark' }),
+    );
     expect(detectAntigravityCLILogin()).toBe(true);
   });
 
@@ -104,7 +123,10 @@ describe('login detectors (deterministic via temp HOME)', () => {
     mkdirSync(join(tmpHome, '.cursor'), { recursive: true });
     writeFileSync(join(tmpHome, '.cursor', 'cli-config.json'), JSON.stringify({ authInfo: {} }));
     expect(detectCursorCLILogin()).toBe(false); // empty authInfo = not logged in
-    writeFileSync(join(tmpHome, '.cursor', 'cli-config.json'), JSON.stringify({ authInfo: { userId: 'u1' } }));
+    writeFileSync(
+      join(tmpHome, '.cursor', 'cli-config.json'),
+      JSON.stringify({ authInfo: { userId: 'u1' } }),
+    );
     expect(detectCursorCLILogin()).toBe(true);
     delete process.env.CURSOR_API_KEY;
   });
@@ -122,7 +144,10 @@ describe('login detectors (deterministic via temp HOME)', () => {
   it('detects machine Codex login from ~/.codex/auth.json tokens', () => {
     expect(detectCodexCLILogin()).toBe(false);
     mkdirSync(join(tmpHome, '.codex'), { recursive: true });
-    writeFileSync(join(tmpHome, '.codex', 'auth.json'), JSON.stringify({ tokens: { access_token: 'a' } }));
+    writeFileSync(
+      join(tmpHome, '.codex', 'auth.json'),
+      JSON.stringify({ tokens: { access_token: 'a' } }),
+    );
     expect(detectCodexCLILogin()).toBe(true);
   });
 });

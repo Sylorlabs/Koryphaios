@@ -11,13 +11,20 @@ import type { ProviderEvent, StreamRequest } from '../types';
 describe('RemoteProvider agentic write-back', () => {
   let root: string;
   const original = {
-    isConnected: Object.getOwnPropertyDescriptor(Object.getPrototypeOf(relayGuestClient), 'isConnected'),
+    isConnected: Object.getOwnPropertyDescriptor(
+      Object.getPrototypeOf(relayGuestClient),
+      'isConnected',
+    ),
     requestInference: relayGuestClient.requestInference,
   };
 
   afterEach(async () => {
     if (original.isConnected) {
-      Object.defineProperty(Object.getPrototypeOf(relayGuestClient), 'isConnected', original.isConnected);
+      Object.defineProperty(
+        Object.getPrototypeOf(relayGuestClient),
+        'isConnected',
+        original.isConnected,
+      );
     }
     relayGuestClient.requestInference = original.requestInference;
     if (root) await rm(root, { recursive: true, force: true });
@@ -49,7 +56,15 @@ describe('RemoteProvider agentic write-back', () => {
       label: "Micah's PC · Claude Code (runs on host)",
       hostProvider: 'claude',
       agentic: true,
-      models: [{ id: 'claude-sonnet-5', name: 'Claude Sonnet 5', provider: 'remote-claude' as never, contextWindow: 200_000, maxOutputTokens: 64_000 }],
+      models: [
+        {
+          id: 'claude-sonnet-5',
+          name: 'Claude Sonnet 5',
+          provider: 'remote-claude' as never,
+          contextWindow: 200_000,
+          maxOutputTokens: 64_000,
+        },
+      ],
     });
 
     const request: StreamRequest = {

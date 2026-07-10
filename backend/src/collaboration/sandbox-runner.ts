@@ -52,7 +52,9 @@ function detect(): { mechanism: SandboxMechanism; path: string | null } {
     }
   } else if (process.platform === 'darwin') {
     // sandbox-exec ships with macOS at a fixed path.
-    const sb = which('sandbox-exec') ?? (existsSync('/usr/bin/sandbox-exec') ? '/usr/bin/sandbox-exec' : null);
+    const sb =
+      which('sandbox-exec') ??
+      (existsSync('/usr/bin/sandbox-exec') ? '/usr/bin/sandbox-exec' : null);
     if (sb) {
       cached = { mechanism: 'seatbelt', path: sb };
       return cached;
@@ -71,7 +73,11 @@ export interface SandboxCapabilities {
 
 export function sandboxCapabilities(): SandboxCapabilities {
   const d = detect();
-  return { osIsolation: d.mechanism !== 'none', mechanism: d.mechanism, platform: process.platform };
+  return {
+    osIsolation: d.mechanism !== 'none',
+    mechanism: d.mechanism,
+    platform: process.platform,
+  };
 }
 
 export interface WrapOptions {
@@ -96,12 +102,16 @@ function buildBwrap(bw: string, bin: string, args: string[], opts: WrapOptions):
     '--unshare-uts',
     '--unshare-cgroup-try',
     ...(opts.policy.allowNetwork ? [] : ['--unshare-net']),
-    '--proc', '/proc',
-    '--dev', '/dev',
-    '--tmpfs', '/tmp',
+    '--proc',
+    '/proc',
+    '--dev',
+    '/dev',
+    '--tmpfs',
+    '/tmp',
   ];
   for (const p of SYSTEM_RO) if (existsSync(p)) flags.push('--ro-bind-try', p, p);
-  if (opts.policy.allowNetwork) for (const p of NET_RO) if (existsSync(p)) flags.push('--ro-bind-try', p, p);
+  if (opts.policy.allowNetwork)
+    for (const p of NET_RO) if (existsSync(p)) flags.push('--ro-bind-try', p, p);
   flags.push('--bind', opts.cwd, opts.cwd, '--chdir', opts.cwd);
   for (const dir of opts.configDirs ?? []) if (existsSync(dir)) flags.push('--bind', dir, dir);
   flags.push('--tmpfs', '/root', '--setenv', 'HOME', opts.cwd);
@@ -114,8 +124,16 @@ function buildBwrap(bw: string, bin: string, args: string[], opts: WrapOptions):
 // high-value targets; writes are confined to the project regardless.
 function seatbeltSecretDenies(home: string): string {
   const dirs = [
-    '.ssh', '.aws', '.gnupg', '.kube', '.docker', '.config/gcloud', '.azure',
-    '.netrc', '.npmrc', 'Library/Keychains',
+    '.ssh',
+    '.aws',
+    '.gnupg',
+    '.kube',
+    '.docker',
+    '.config/gcloud',
+    '.azure',
+    '.netrc',
+    '.npmrc',
+    'Library/Keychains',
   ];
   return dirs.map((d) => `  (subpath ${JSON.stringify(join(home, d))})`).join('\n');
 }
@@ -129,8 +147,13 @@ export function buildSeatbeltProfile(opts: WrapOptions): string {
   const writable = [
     opts.cwd,
     ...(opts.configDirs ?? []),
-    '/tmp', '/private/tmp', '/private/var/folders', '/dev',
-  ].map(quoteSub).join(' ');
+    '/tmp',
+    '/private/tmp',
+    '/private/var/folders',
+    '/dev',
+  ]
+    .map(quoteSub)
+    .join(' ');
 
   // allow-default keeps the CLI runnable; specific denies do the confining.
   // (Later matching rules win in SBPL, so denies after allow-default apply.)
@@ -162,15 +185,38 @@ export function buildSeatbeltProfile(opts: WrapOptions): string {
 // It layers UNDER the kernel jail (bwrap/Seatbelt) where those exist.
 
 const SCRUB_ENV = [
-  /_TOKEN$/i, /_KEY$/i, /_SECRET/i, /_PASSWORD/i, /_CREDENTIAL/i, /PASSWD/i,
-  /^AWS_/i, /^AZURE_/i, /^GOOGLE_/i, /^GCP_/i, /^GH_/i, /^GITHUB_/i, /^NPM_/i,
-  /^OPENAI/i, /^ANTHROPIC/i, /^XAI/i, /^GROQ/i, /^MISTRAL/i, /^COHERE/i,
-  /SSH_AUTH_SOCK/i, /^VAULT_/i, /^DOCKER_/i,
+  /_TOKEN$/i,
+  /_KEY$/i,
+  /_SECRET/i,
+  /_PASSWORD/i,
+  /_CREDENTIAL/i,
+  /PASSWD/i,
+  /^AWS_/i,
+  /^AZURE_/i,
+  /^GOOGLE_/i,
+  /^GCP_/i,
+  /^GH_/i,
+  /^GITHUB_/i,
+  /^NPM_/i,
+  /^OPENAI/i,
+  /^ANTHROPIC/i,
+  /^XAI/i,
+  /^GROQ/i,
+  /^MISTRAL/i,
+  /^COHERE/i,
+  /SSH_AUTH_SOCK/i,
+  /^VAULT_/i,
+  /^DOCKER_/i,
 ];
 // Env vars the CLI harness itself needs — never scrubbed even if they match.
 const KEEP_ENV = new Set([
-  'CLAUDE_CONFIG_DIR', 'MAX_THINKING_TOKENS', 'CLAUDE_CODE_MAX_OUTPUT_TOKENS',
-  'GROK_CODE_XAI_API_KEY', 'ANTIGRAVITY_API_KEY', 'CURSOR_API_KEY', 'COGNITION_API_KEY',
+  'CLAUDE_CONFIG_DIR',
+  'MAX_THINKING_TOKENS',
+  'CLAUDE_CODE_MAX_OUTPUT_TOKENS',
+  'GROK_CODE_XAI_API_KEY',
+  'ANTIGRAVITY_API_KEY',
+  'CURSOR_API_KEY',
+  'COGNITION_API_KEY',
 ]);
 
 export interface SoftJail {
@@ -243,7 +289,12 @@ export function wrapCommand(bin: string, args: string[], opts: WrapOptions): Wra
     return { command: bin, args, isolated: false, mechanism: 'none' };
   }
   if (d.mechanism === 'bubblewrap') {
-    return { command: d.path, args: buildBwrap(d.path, bin, args, opts), isolated: true, mechanism: 'bubblewrap' };
+    return {
+      command: d.path,
+      args: buildBwrap(d.path, bin, args, opts),
+      isolated: true,
+      mechanism: 'bubblewrap',
+    };
   }
   // seatbelt: sandbox-exec -p '<profile>' -- bin ...args
   const profile = buildSeatbeltProfile(opts);

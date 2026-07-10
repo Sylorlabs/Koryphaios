@@ -24,14 +24,24 @@ describe('plugin registry', () => {
 
   it('isolates a throwing plugin (does not break the pipeline)', () => {
     const reg = createPluginRegistry();
-    reg.register({ id: 'boom', name: 'boom', markdownTransform: () => { throw new Error('nope'); } });
+    reg.register({
+      id: 'boom',
+      name: 'boom',
+      markdownTransform: () => {
+        throw new Error('nope');
+      },
+    });
     reg.register({ id: 'ok', name: 'ok', markdownTransform: (s) => s + '!' });
     expect(reg.transformMarkdown('x')).toBe('x!');
   });
 
   it('collects commands from all plugins', () => {
     const reg = createPluginRegistry();
-    reg.register({ id: 'd', name: 'd', commands: [{ id: 'd.hi', name: 'Say hi', run: () => 'hi' }] });
+    reg.register({
+      id: 'd',
+      name: 'd',
+      commands: [{ id: 'd.hi', name: 'Say hi', run: () => 'hi' }],
+    });
     expect(reg.commands.map((c) => c.id)).toContain('d.hi');
   });
 
@@ -44,7 +54,9 @@ describe('plugin registry', () => {
 
   it('loads a user plugin from source', () => {
     const reg = createPluginRegistry();
-    const id = reg.loadUserPlugin(`function(){ return { id: 'user.up', name: 'Upper', markdownTransform: s => s.toUpperCase() }; }`);
+    const id = reg.loadUserPlugin(
+      `function(){ return { id: 'user.up', name: 'Upper', markdownTransform: s => s.toUpperCase() }; }`,
+    );
     expect(id).toBe('user.up');
     expect(reg.transformMarkdown('hi')).toBe('HI');
   });
@@ -74,7 +86,9 @@ describe('built-in plugins', () => {
     expect(out).toContain('target="_blank"');
     expect(out).toContain('rel="noreferrer"');
     // internal wikilinks untouched
-    expect(externalLinkPlugin.htmlPostProcess!('<a class="wikilink" data-note-title="A">A</a>')).not.toContain('target=');
+    expect(
+      externalLinkPlugin.htmlPostProcess!('<a class="wikilink" data-note-title="A">A</a>'),
+    ).not.toContain('target=');
   });
 
   it('ships the expected built-ins', () => {

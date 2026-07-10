@@ -47,8 +47,17 @@ export type { WorkerTask } from './types/TaskTypes';
 export { ProviderName } from './providers/ProviderNames';
 
 export type { ModelTier, ModelDef, ProviderConfig, ProviderStatus } from './providers/ModelDefs';
-export type { CollaborationRole, CollaborationJoinMode, CollaborationTierPermissions, CollaborationAccessTier, CollaborationPolicy } from './types/CollaborationTypes';
-export { DEFAULT_COLLABORATION_POLICY, DEFAULT_COLLABORATION_TIERS } from './types/CollaborationTypes';
+export type {
+  CollaborationRole,
+  CollaborationJoinMode,
+  CollaborationTierPermissions,
+  CollaborationAccessTier,
+  CollaborationPolicy,
+} from './types/CollaborationTypes';
+export {
+  DEFAULT_COLLABORATION_POLICY,
+  DEFAULT_COLLABORATION_TIERS,
+} from './types/CollaborationTypes';
 export type {
   ProviderShareRisk,
   ProviderShareClassification,

@@ -6,9 +6,11 @@ if [[ -z "$base" || "$base" =~ ^0+$ ]] || ! git cat-file -e "${base}^{commit}" 2
   base="$(git rev-parse HEAD^)"
 fi
 
+# Scope matches the canonical `format` script (prettier isn't configured with the
+# svelte plugin, so .svelte is intentionally excluded — svelte-check covers it).
 mapfile -t files < <(
   git diff --name-only --diff-filter=ACMR "$base" HEAD -- \
-    '*.ts' '*.tsx' '*.js' '*.jsx' '*.json' '*.md' '*.svelte' \
+    '*.ts' '*.tsx' '*.js' '*.jsx' '*.json' '*.md' \
     | grep -Ev '^(frontend/build/|test-results/|playwright-report/)' || true
 )
 

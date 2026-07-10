@@ -38,9 +38,30 @@ function mkSession(id: string, title: string, ago: number, cost: number, msgs: n
 // Gemini the MODEL is fine — it's served by Google's API (`google` provider).
 // The Gemini CLI is a different, retired thing and must never appear.
 const WORKERS = [
-  { id: 'w-fe', name: 'frontend', domain: 'ui', model: 'gpt-5.6-sol', provider: 'codex', glow: 'rgba(0,255,255,0.5)' },
-  { id: 'w-be', name: 'backend', domain: 'backend', model: 'gemini-3.1-pro', provider: 'google', glow: 'rgba(66,133,244,0.5)' },
-  { id: 'w-test', name: 'testing', domain: 'test', model: 'claude-sonnet-5', provider: 'anthropic', glow: 'rgba(0,255,128,0.5)' },
+  {
+    id: 'w-fe',
+    name: 'frontend',
+    domain: 'ui',
+    model: 'gpt-5.6-sol',
+    provider: 'codex',
+    glow: 'rgba(0,255,255,0.5)',
+  },
+  {
+    id: 'w-be',
+    name: 'backend',
+    domain: 'backend',
+    model: 'gemini-3.1-pro',
+    provider: 'google',
+    glow: 'rgba(66,133,244,0.5)',
+  },
+  {
+    id: 'w-test',
+    name: 'testing',
+    domain: 'test',
+    model: 'claude-sonnet-5',
+    provider: 'anthropic',
+    glow: 'rgba(0,255,128,0.5)',
+  },
 ];
 
 const DEMO_PROVIDERS = [
@@ -133,8 +154,7 @@ const DEMO_PROVIDERS = [
   },
 ] as const;
 
-const SCRIPT_PROMPT =
-  'Build a full-stack analytics dashboard with charts, API routes, and tests.';
+const SCRIPT_PROMPT = 'Build a full-stack analytics dashboard with charts, API routes, and tests.';
 
 const REPLY =
   "I've delegated the three subtasks to specialist workers running in isolated git worktrees. " +
@@ -250,7 +270,8 @@ function playTurn(prompt: string, opts: { loop: boolean; clear: boolean }) {
         toolResult: {
           callId: 'demo-1',
           name: 'batch_edit',
-          output: 'Created src/components/RevenueChart.tsx (+142)\nCreated src/api/metrics.ts (+88)',
+          output:
+            'Created src/components/RevenueChart.tsx (+142)\nCreated src/api/metrics.ts (+88)',
           isError: false,
           durationMs: 0,
         },

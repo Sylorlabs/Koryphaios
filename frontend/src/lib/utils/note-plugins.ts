@@ -130,7 +130,10 @@ export const calloutPlugin: NotePlugin = {
     const out: string[] = [];
     for (let i = 0; i < lines.length; i++) {
       const head = /^>\s*\[!(\w+)\]([+-]?)\s*(.*)$/.exec(lines[i]);
-      if (!head) { out.push(lines[i]); continue; }
+      if (!head) {
+        out.push(lines[i]);
+        continue;
+      }
       const type = head[1].toLowerCase();
       const title = head[3].trim() || type.charAt(0).toUpperCase() + type.slice(1);
       const body: string[] = [];
@@ -147,7 +150,10 @@ export const calloutPlugin: NotePlugin = {
       out.push(
         `<div class="callout callout-${type}"><div class="callout-title">${title
           .replace(/&/g, '&amp;')
-          .replace(/</g, '&lt;')}</div>${bodyHtml ? `<div class="callout-body">${bodyHtml}</div>` : ''}</div>`,
+          .replace(
+            /</g,
+            '&lt;',
+          )}</div>${bodyHtml ? `<div class="callout-body">${bodyHtml}</div>` : ''}</div>`,
       );
     }
     return out.join('\n');

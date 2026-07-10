@@ -199,7 +199,6 @@ function createProvidersStore() {
   let codexAuthMessage = $state<string>('');
   let codexPollTimer: ReturnType<typeof setTimeout> | null = null;
 
-
   // ─── Helpers ───────────────────────────────────────────────────────────
 
   function getKnownAuthMode(name: string, fallback: string): string {

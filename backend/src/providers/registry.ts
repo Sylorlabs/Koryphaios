@@ -105,9 +105,7 @@ class ProviderRegistry {
       try {
         return p
           .listModels()
-          .find(
-            (m) => m.id === modelId || m.apiModelId === modelId || m.realModelId === modelId,
-          );
+          .find((m) => m.id === modelId || m.apiModelId === modelId || m.realModelId === modelId);
       } catch {
         return undefined;
       }
@@ -577,7 +575,8 @@ class ProviderRegistry {
           if (detectCursorCLILogin()) return { success: true };
           return {
             success: false,
-            error: 'Cursor CLI is not logged in. Install cursor-agent and run "cursor-agent login".',
+            error:
+              'Cursor CLI is not logged in. Install cursor-agent and run "cursor-agent login".',
           };
         }
         case 'devin': {
@@ -591,7 +590,8 @@ class ProviderRegistry {
           if (detectClineCLILogin()) return { success: true };
           return {
             success: false,
-            error: 'Cline CLI is not signed in. Install cline and run "cline auth --provider <p> --apikey <k>".',
+            error:
+              'Cline CLI is not signed in. Install cline and run "cline auth --provider <p> --apikey <k>".',
           };
         }
         case 'anthropic': {

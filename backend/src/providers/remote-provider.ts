@@ -15,7 +15,12 @@ import { dirname, join, isAbsolute } from 'node:path';
 import type { ModelDef, ProviderConfig, ProviderName } from '@koryphaios/shared';
 import type { Provider, ProviderEvent, StreamRequest } from './types';
 import { relayGuestClient } from '../collaboration/relay-guest-client';
-import { scanProject, buildSync, newSyncState, type SyncState } from '../collaboration/project-sync';
+import {
+  scanProject,
+  buildSync,
+  newSyncState,
+  type SyncState,
+} from '../collaboration/project-sync';
 import { serverLog } from '../logger';
 
 const log = serverLog.child({ module: 'remote-provider' });
@@ -154,11 +159,19 @@ export class RemoteProvider implements Provider {
       projectSync = buildSync(scanned, state);
       this.syncStates.set(projectRoot, state);
       log.info(
-        { provider: this.name, mode: projectSync.mode, files: projectSync.files.length, deletes: projectSync.deletes.length },
+        {
+          provider: this.name,
+          mode: projectSync.mode,
+          files: projectSync.files.length,
+          deletes: projectSync.deletes.length,
+        },
         'Synced project to host sandbox',
       );
     } catch (err) {
-      yield { type: 'error', error: `Could not package your project to send to the host: ${err instanceof Error ? err.message : String(err)}` };
+      yield {
+        type: 'error',
+        error: `Could not package your project to send to the host: ${err instanceof Error ? err.message : String(err)}`,
+      };
       return;
     }
 
@@ -185,7 +198,10 @@ export class RemoteProvider implements Provider {
             // Reflect the applied edit in our sync state so it isn't re-sent.
             this.syncStates.get(projectRoot)?.sent.set(event.filePath, Date.now());
           } else if (outcome === 'not-found') {
-            log.warn({ path: event.filePath }, 'Remote edit target text not found locally; skipped to avoid corruption');
+            log.warn(
+              { path: event.filePath },
+              'Remote edit target text not found locally; skipped to avoid corruption',
+            );
           }
         } catch (err) {
           log.warn({ err, path: event.filePath }, 'Failed to apply remote edit locally');

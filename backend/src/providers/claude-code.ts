@@ -13,7 +13,14 @@
 
 import type { ProviderConfig, ModelDef } from '@koryphaios/shared';
 import { spawn } from 'node:child_process';
-import { readFileSync, realpathSync, statSync, readdirSync, existsSync, writeFileSync } from 'node:fs';
+import {
+  readFileSync,
+  realpathSync,
+  statSync,
+  readdirSync,
+  existsSync,
+  writeFileSync,
+} from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { whichBinary } from './cli-detection';
@@ -73,7 +80,10 @@ function detectEffortLevels(): Promise<string[] | null> {
         settled = true;
         const m = out.match(/--effort <level>[\s\S]{0,200}?\(([a-z][a-z, ]+)\)/);
         cachedEffortLevels = m
-          ? m[1].split(',').map((s) => s.trim()).filter(Boolean)
+          ? m[1]
+              .split(',')
+              .map((s) => s.trim())
+              .filter(Boolean)
           : null;
         if (!cachedEffortLevels) {
           providerLog.debug(
@@ -89,7 +99,11 @@ function detectEffortLevels(): Promise<string[] | null> {
       child.once('exit', finish);
       child.once('error', finish);
       setTimeout(() => {
-        try { child.kill('SIGTERM'); } catch { /* already gone */ }
+        try {
+          child.kill('SIGTERM');
+        } catch {
+          /* already gone */
+        }
         finish();
       }, 10_000);
     });
@@ -195,7 +209,10 @@ function parseCatalogFromBuffer(buf: Buffer): Map<string, CliCatalogEntry> {
     // every non-haiku model.
     const ctx = entry.match(/context:\{window:(\d+(?:\.\d+)?(?:e\d+)?)/);
     const capabilities = caps
-      ? caps[1].split(',').map((c) => c.trim().replace(/^"|"$/g, '')).filter(Boolean)
+      ? caps[1]
+          .split(',')
+          .map((c) => c.trim().replace(/^"|"$/g, ''))
+          .filter(Boolean)
       : [];
     if (!catalog.has(head[1])) {
       catalog.set(head[1], {
@@ -295,7 +312,11 @@ async function probeAlias(alias: string): Promise<string | null> {
     const done = (id: string | null) => {
       if (settled) return;
       settled = true;
-      try { child.kill('SIGTERM'); } catch { /* already gone */ }
+      try {
+        child.kill('SIGTERM');
+      } catch {
+        /* already gone */
+      }
       resolve(id);
     };
 
@@ -319,7 +340,9 @@ async function probeAlias(alias: string): Promise<string | null> {
             done((d.message as Record<string, unknown>).model as string);
             return;
           }
-        } catch { /* skip non-JSON */ }
+        } catch {
+          /* skip non-JSON */
+        }
       }
     });
 
@@ -369,7 +392,10 @@ function readCliExtraModels(): ModelDef[] {
     const opts = parsed.additionalModelOptionsCache;
     if (!Array.isArray(opts)) return [];
     return opts
-      .filter((o): o is { value: string } => typeof o?.value === 'string' && o.value.startsWith('claude-'))
+      .filter(
+        (o): o is { value: string } =>
+          typeof o?.value === 'string' && o.value.startsWith('claude-'),
+      )
       .map((o) => {
         const value = o.value;
         const oneM = /\[1m\]$/i.test(value);
@@ -457,7 +483,10 @@ function refreshModelsInBackground(): void {
       });
       cachedModels = models;
       cachedModelsAt = Date.now();
-      providerLog.debug({ provider: 'claude', models: models.map((m) => m.name) }, 'Claude Code model names refreshed');
+      providerLog.debug(
+        { provider: 'claude', models: models.map((m) => m.name) },
+        'Claude Code model names refreshed',
+      );
     })
     .catch((err) => {
       providerLog.warn({ provider: 'claude', err }, 'Claude Code alias probe failed');
@@ -507,7 +536,8 @@ export function getKoryphaiosClaudeConfigDir(): string {
   if (cachedClaudeConfigDir) return cachedClaudeConfigDir;
   const dir = join(homedir(), '.koryphaios', 'claude-home');
   try {
-    const { mkdirSync, symlinkSync, rmSync, lstatSync } = require('node:fs') as typeof import('node:fs');
+    const { mkdirSync, symlinkSync, rmSync, lstatSync } =
+      require('node:fs') as typeof import('node:fs');
     mkdirSync(dir, { recursive: true });
     // Share auth (and settings) with the user's real ~/.claude via symlinks —
     // isolation is about SESSIONS, not credentials.
@@ -518,9 +548,15 @@ export function getKoryphaiosClaudeConfigDir(): string {
       if (!existsSync(src)) continue;
       try {
         // Refresh the link each boot in case the real path changed.
-        try { if (lstatSync(dst)) rmSync(dst, { force: true }); } catch { /* no existing link */ }
+        try {
+          if (lstatSync(dst)) rmSync(dst, { force: true });
+        } catch {
+          /* no existing link */
+        }
         symlinkSync(src, dst);
-      } catch { /* symlink unsupported/exists — best effort */ }
+      } catch {
+        /* symlink unsupported/exists — best effort */
+      }
     }
   } catch {
     /* fall back to default ~/.claude if we can't build the isolated dir */
@@ -529,7 +565,6 @@ export function getKoryphaiosClaudeConfigDir(): string {
   cachedClaudeConfigDir = dir;
   return dir;
 }
-
 
 const HARNESS_SYSTEM_NOTE =
   'You are running inside the Koryphaios orchestrator. Never spawn sub-agents or delegate ' +
@@ -559,9 +594,7 @@ interface ClaudeStreamEnvelope {
     message?: { usage?: ClaudeUsage };
   };
   // assistant/user payloads carry a full message with content blocks (tool_use/tool_result)
-  message?:
-    | string
-    | { content?: ClaudeToolUseBlock[]; usage?: ClaudeUsage };
+  message?: string | { content?: ClaudeToolUseBlock[]; usage?: ClaudeUsage };
   // result payloads
   is_error?: boolean;
   result?: string;
@@ -647,7 +680,8 @@ export class ClaudeCodeProvider implements Provider {
     // --allowedTools only pre-approves; --disallowedTools hard-blocks.
     const sandbox = request.sandbox;
     const disallowed = ['Task', 'Agent'];
-    if (sandbox && !sandbox.allowEdits) disallowed.push('Edit', 'Write', 'MultiEdit', 'NotebookEdit');
+    if (sandbox && !sandbox.allowEdits)
+      disallowed.push('Edit', 'Write', 'MultiEdit', 'NotebookEdit');
     if (sandbox && !sandbox.allowShell) disallowed.push('Bash');
     if (sandbox && !sandbox.allowWebSearch) disallowed.push('WebFetch', 'WebSearch');
 
@@ -697,7 +731,12 @@ export class ClaudeCodeProvider implements Provider {
         appliedEffort = allowed && allowed.length === 0 ? 'adaptive' : null;
       }
       providerLog.info(
-        { provider: 'claude', model: cliModel, requested: request.reasoningLevel, applied: appliedEffort },
+        {
+          provider: 'claude',
+          model: cliModel,
+          requested: request.reasoningLevel,
+          applied: appliedEffort,
+        },
         'Claude Code reasoning effort applied',
       );
     }
@@ -729,12 +768,24 @@ export class ClaudeCodeProvider implements Provider {
       Object.assign(env, soft.env);
       softCleanup = soft.cleanup;
     }
-    const { command: spawnBin, args: spawnArgs, isolated, mechanism } = sandbox
+    const {
+      command: spawnBin,
+      args: spawnArgs,
+      isolated,
+      mechanism,
+    } = sandbox
       ? wrapCommand('claude', args, { cwd, configDirs: [env.CLAUDE_CONFIG_DIR!], policy: sandbox })
       : { command: 'claude', args, isolated: false, mechanism: 'none' as const };
     if (sandbox) {
       providerLog.info(
-        { provider: 'claude', mechanism, osIsolated: isolated, softJail: !!softCleanup, network: sandbox.allowNetwork, shell: sandbox.allowShell },
+        {
+          provider: 'claude',
+          mechanism,
+          osIsolated: isolated,
+          softJail: !!softCleanup,
+          network: sandbox.allowNetwork,
+          shell: sandbox.allowShell,
+        },
         'Running remote CLI turn under sandbox policy',
       );
     }
@@ -1034,20 +1085,25 @@ function buildPrompt(messages: ProviderMessage[]): string {
   for (const m of turns) {
     const text = flattenContent(m.content);
     if (!text.trim()) continue;
-    const label =
-      m.role === 'assistant' ? 'Assistant' : m.role === 'tool' ? 'Tool result' : 'User';
+    const label = m.role === 'assistant' ? 'Assistant' : m.role === 'tool' ? 'Tool result' : 'User';
     lines.push(`${label}: ${text}`);
   }
   return lines.join('\n\n');
 }
-
 
 /** Persist a pasted image to a temp file so the CLI's own tools can view it —
  *  the piped prompt is text-only, but the agent has file access. */
 function imageBlockToTempFile(imageData: string | undefined, mime: string | undefined): string {
   if (!imageData) return '[image attachment omitted — no data]';
   try {
-    const ext = mime === 'image/jpeg' ? 'jpg' : mime === 'image/webp' ? 'webp' : mime === 'image/gif' ? 'gif' : 'png';
+    const ext =
+      mime === 'image/jpeg'
+        ? 'jpg'
+        : mime === 'image/webp'
+          ? 'webp'
+          : mime === 'image/gif'
+            ? 'gif'
+            : 'png';
     const file = join(tmpdir(), `kory-attach-${Math.random().toString(36).slice(2, 10)}.${ext}`);
     writeFileSync(file, Buffer.from(imageData, 'base64'));
     return `[image attached — saved to ${file}; use your image/file viewing tool to look at it]`;
@@ -1063,7 +1119,9 @@ function flattenContent(content: string | ProviderContentBlock[]): string {
     if (block.type === 'text' && block.text) {
       parts.push(block.text);
     } else if (block.type === 'tool_use') {
-      parts.push(`[tool call: ${block.toolName ?? 'tool'} ${JSON.stringify(block.toolInput ?? {})}]`);
+      parts.push(
+        `[tool call: ${block.toolName ?? 'tool'} ${JSON.stringify(block.toolInput ?? {})}]`,
+      );
     } else if (block.type === 'tool_result') {
       parts.push(`[tool result: ${block.toolOutput ?? ''}]`);
     } else if (block.type === 'image') {

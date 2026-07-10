@@ -96,7 +96,9 @@ describe('notes at scale', () => {
     const ms = performance.now() - t0;
     // Even with 3k notes, rename is bounded by backlink count (fast).
     expect(ms).toBeLessThan(150);
-    const linkerAfter = (await listNotes({ search: 'RenamedTarget' })).find((n) => n.title === 'Linker');
+    const linkerAfter = (await listNotes({ search: 'RenamedTarget' })).find(
+      (n) => n.title === 'Linker',
+    );
     expect(linkerAfter?.content).toContain('[[RenamedTarget]]');
   });
 });
@@ -116,14 +118,19 @@ describe('frontmatter, aliases, ghost nodes', () => {
 
   test('wikilinks resolve by alias', async () => {
     invalidateNotesCache();
-    const aliased = await createNote({ title: 'Canonical Title', content: '---\naliases: [AKA]\n---\nI go by AKA.' });
+    const aliased = await createNote({
+      title: 'Canonical Title',
+      content: '---\naliases: [AKA]\n---\nI go by AKA.',
+    });
     await createNote({ title: 'Refs', content: 'linking [[AKA]] by alias' });
     expect(await resolveNoteRef('AKA')).toBe(aliased.id);
     expect(await resolveNoteRef('aka')).toBe(aliased.id); // case-insensitive
     const graph = await getGraphData();
     // The alias link is a real edge, not a ghost.
     const refsNode = graph.nodes.find((n) => n.title === 'Refs');
-    const edgeToCanonical = graph.edges.some((e) => e.from === refsNode!.id && e.to === aliased.id && !e.unresolved);
+    const edgeToCanonical = graph.edges.some(
+      (e) => e.from === refsNode!.id && e.to === aliased.id && !e.unresolved,
+    );
     expect(edgeToCanonical).toBe(true);
   });
 
