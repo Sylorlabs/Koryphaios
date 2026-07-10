@@ -1,5 +1,6 @@
 <script lang="ts">
   import { memoryStore, type MemoryFile, DEFAULT_SETTINGS } from "$lib/stores/memory.svelte";
+  import { agentSettingsStore } from "$lib/stores/agent-settings.svelte";
   import { sessionStore } from "$lib/stores/sessions.svelte";
   import SettingsToggle from "$lib/components/SettingsToggle.svelte";
   import { 
@@ -585,14 +586,20 @@
               </div>
 
               <div class="grid gap-3 sm:grid-cols-2">
+                <!-- Same setting as "Agent Can Update Memory" in the Agent tab —
+                     one source of truth (agent settings), mirrored here so the
+                     two tabs can never disagree. -->
                 <label class="flex h-full cursor-pointer items-center justify-between gap-4 rounded-xl bg-[var(--color-surface-2)] p-4 hover:bg-[var(--color-surface-3)]">
                   <div>
                     <div class="text-sm font-medium text-[var(--color-text-primary)]">Allow Agent to Add Memories</div>
-                    <div class="mt-1 text-xs text-[var(--color-text-muted)]">AI can automatically update memory files during compaction.</div>
+                    <div class="mt-1 text-xs text-[var(--color-text-muted)]">AI can automatically update memory files. Also shown in Agent settings.</div>
                   </div>
                   <SettingsToggle
-                    checked={memoryStore.settings?.agentMemoryEnabled ?? true}
-                    onchange={() => toggleSetting("agentMemoryEnabled")}
+                    checked={agentSettingsStore.settings.agentMemoryEnabled}
+                    onchange={() => agentSettingsStore.saveSettings(
+                      { agentMemoryEnabled: !agentSettingsStore.settings.agentMemoryEnabled },
+                      { quietSuccess: true },
+                    )}
                   />
                 </label>
 
@@ -661,7 +668,7 @@
                 <div class="rounded-xl bg-[var(--color-surface-2)] p-4">
                   <div class="text-[10px] uppercase tracking-wide text-[var(--color-text-muted)]">Agent Writes</div>
                   <div class="mt-2 text-sm font-semibold text-[var(--color-text-primary)]">
-                    {memoryStore.settings?.agentMemoryEnabled ?? true ? 'Allowed' : 'Blocked'}
+                    {agentSettingsStore.settings.agentMemoryEnabled ? 'Allowed' : 'Blocked'}
                   </div>
                 </div>
                 <div class="rounded-xl bg-[var(--color-surface-2)] p-4">

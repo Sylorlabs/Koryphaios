@@ -31,9 +31,20 @@ const DESKTOP_DIR = resolve(PROJECT_ROOT, 'desktop');
 const APP_CONFIG_PATH = resolve(PROJECT_ROOT, 'config', 'app.config.json');
 
 const BACKEND_READY_TIMEOUT_MS = Number(process.env.KORYPHAIOS_BACKEND_READY_TIMEOUT_MS ?? 120_000);
-const FRONTEND_READY_TIMEOUT_MS = Number(process.env.KORYPHAIOS_FRONTEND_READY_TIMEOUT_MS ?? 60_000);
+const FRONTEND_READY_TIMEOUT_MS = Number(
+  process.env.KORYPHAIOS_FRONTEND_READY_TIMEOUT_MS ?? 60_000,
+);
 const POLL_INTERVAL_MS = 500;
 const PROGRESS_INTERVAL_MS = 5_000;
+// Post-start watchdog: how often to poll /api/health after everything is up.
+const BACKEND_WATCHDOG_INTERVAL_MS = Number(
+  process.env.KORYPHAIOS_BACKEND_WATCHDOG_INTERVAL_MS ?? 3_000,
+);
+// Consecutive failed health checks before tearing the whole workflow down.
+// At 3s cadence, 5 failures ~= 15s of sustained regression.
+const BACKEND_WATCHDOG_FAIL_THRESHOLD = Number(
+  process.env.KORYPHAIOS_BACKEND_WATCHDOG_FAIL_THRESHOLD ?? 5,
+);
 
 const colors = {
   reset: '\x1b[0m',
@@ -77,6 +88,13 @@ const sharedEnv = {
   KORYPHAIOS_FRONTEND_HOST: frontendHost,
   KORYPHAIOS_FRONTEND_PORT: String(frontendPort),
   KORYPHAIOS_DESKTOP_DEV: '1',
+  // Inherit any pinned compat hash so the dev backend's /api/health reports
+  // the same value the dev frontend's Vite define baked in. Without this the
+  // backend falls back to its own resolution (env, then compat-hash.json) —
+  // keeping them aligned via the file too is fine, but env wins.
+  ...(process.env.KORYPHAIOS_FRONTEND_BUNDLE_HASH
+    ? { KORYPHAIOS_FRONTEND_BUNDLE_HASH: process.env.KORYPHAIOS_FRONTEND_BUNDLE_HASH }
+    : {}),
 };
 
 const children: ManagedChild[] = [];
@@ -116,7 +134,11 @@ async function cleanup(exitCode = 0) {
 process.on('SIGINT', () => void cleanup(0));
 process.on('SIGTERM', () => void cleanup(0));
 
-function pipeLogs(name: string, stream: NodeJS.ReadableStream | null | undefined, color = colors.dim) {
+function pipeLogs(
+  name: string,
+  stream: NodeJS.ReadableStream | null | undefined,
+  color = colors.dim,
+) {
   if (!stream) return;
   let buffer = '';
   stream.on('data', (chunk: Buffer | string) => {
@@ -226,7 +248,12 @@ async function main() {
   log('Open the native Koryphaios window — no browser required.', colors.dim);
   log('', colors.reset);
 
-  const backendState = await resolvePortState('Backend', backendClientHost, backendPort, isBackendHealthy);
+  const backendState = await resolvePortState(
+    'Backend',
+    backendClientHost,
+    backendPort,
+    isBackendHealthy,
+  );
 
   if (backendState === 'free') {
     const backend = spawn('bun', ['run', 'src/server.ts'], {
@@ -249,7 +276,12 @@ async function main() {
 
   log('Backend ready', colors.green);
 
-  const frontendState = await resolvePortState('Frontend', frontendHost, frontendPort, isFrontendHealthy);
+  const frontendState = await resolvePortState(
+    'Frontend',
+    frontendHost,
+    frontendPort,
+    isFrontendHealthy,
+  );
 
   if (frontendState === 'free') {
     const frontend = spawn(
@@ -286,6 +318,37 @@ async function main() {
   log('', colors.reset);
   log('Native desktop app is running.', colors.green);
   log('Press Ctrl+C to stop all processes.', colors.dim);
+
+  // Post-start watchdog: the launcher already exits on raw process death,
+  // but a backend can hang or stop responding while still alive. Poll health
+  // continuously and tear down EVERYTHING (frontend + Tauri) when the backend
+  // is sustained-unhealthy — a working UI without a working backend is the
+  // exact failure mode we're preventing.
+  let consecutiveFailures = 0;
+  (async () => {
+    while (!shuttingDown) {
+      await new Promise((r) => setTimeout(r, BACKEND_WATCHDOG_INTERVAL_MS));
+      if (shuttingDown) return;
+      const healthy = await isBackendHealthy().catch(() => false);
+      if (healthy) {
+        consecutiveFailures = 0;
+        continue;
+      }
+      consecutiveFailures++;
+      log(
+        `Backend health regression (${consecutiveFailures}/${BACKEND_WATCHDOG_FAIL_THRESHOLD})`,
+        colors.yellow,
+      );
+      if (consecutiveFailures >= BACKEND_WATCHDOG_FAIL_THRESHOLD) {
+        log(
+          `Backend stayed unhealthy for ~${consecutiveFailures * Math.round(BACKEND_WATCHDOG_INTERVAL_MS / 1000)}s — shutting down frontend + Tauri. A stale UI without a working backend is not allowed.`,
+          colors.red,
+        );
+        void cleanup(1);
+        return;
+      }
+    }
+  })();
 }
 
 main().catch((err) => {

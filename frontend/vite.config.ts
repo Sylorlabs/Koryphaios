@@ -64,6 +64,55 @@ const target = loadBackendTargetFromConfig();
 const wsBase = target.replace(/^http/, 'ws');
 const wsTarget = wsBase.endsWith('/ws') ? wsBase : `${wsBase}/ws`;
 
+// ─── Build-time frontend identity (compat contract with backend) ───────────
+// `__KORYPHAIOS_FRONTEND_VERSION__` mirrors the frontend package version; the
+// backend-health sentinel compares it against the backend's `minFrontend`
+// to decide whether this build may operate against the running backend.
+//
+// `__KORYPHAIOS_FRONTEND_BUNDLE_HASH__` is a strong-coupling hash sourced from
+// `compat-hash.json` (written by `scripts/write-compat-hash.ts`). In dev, where
+// the file is absent, both backend and frontend resolve to 'dev' and the
+// strong-coupling comparator is skipped. In release both pin to the same value
+// and a mismatch halts the frontend via the BackendDownOverlay.
+
+function readFrontendVersion(): string {
+  const candidates = [resolve(process.cwd(), 'package.json')];
+  for (const path of candidates) {
+    if (!existsSync(path)) continue;
+    try {
+      const parsed = JSON.parse(readFileSync(path, 'utf-8')) as { version?: string };
+      if (parsed.version) return parsed.version;
+    } catch {
+      /* ignore */
+    }
+  }
+  return '0.0.0';
+}
+
+function readFrontendBundleHash(): string {
+  // Walk up from cwd (Vite runs in frontend/) to find the project-root
+  // compat-hash.json. Absent in dev — fall back to 'dev' so the comparator
+  // skips the strong check.
+  const candidatePaths = [
+    resolve(process.cwd(), 'compat-hash.json'),
+    resolve(process.cwd(), '..', 'compat-hash.json'),
+  ];
+  for (const path of candidatePaths) {
+    if (!existsSync(path)) continue;
+    try {
+      const parsed = JSON.parse(readFileSync(path, 'utf-8')) as { hash?: string };
+      const h = parsed.hash?.trim();
+      if (h) return h;
+    } catch {
+      /* ignore */
+    }
+  }
+  return 'dev';
+}
+
+const frontendVersion = readFrontendVersion();
+const frontendBundleHash = readFrontendBundleHash();
+
 export default defineConfig({
   plugins: [tailwindcss(), sveltekit()],
   server: {
@@ -80,6 +129,8 @@ export default defineConfig({
   define: {
     'import.meta.env.VITE_BACKEND_URL': JSON.stringify(target),
     'import.meta.env.VITE_BACKEND_WS_URL': JSON.stringify(wsTarget),
+    __KORYPHAIOS_FRONTEND_VERSION__: JSON.stringify(frontendVersion),
+    __KORYPHAIOS_FRONTEND_BUNDLE_HASH__: JSON.stringify(frontendBundleHash),
   },
   // Build settings - use ES2020 for Svelte 5 runes support
   build: {

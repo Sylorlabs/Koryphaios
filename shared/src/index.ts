@@ -49,6 +49,26 @@ export { ProviderName } from './providers/ProviderNames';
 export type { ModelTier, ModelDef, ProviderConfig, ProviderStatus } from './providers/ModelDefs';
 export type { CollaborationRole, CollaborationJoinMode, CollaborationTierPermissions, CollaborationAccessTier, CollaborationPolicy } from './types/CollaborationTypes';
 export { DEFAULT_COLLABORATION_POLICY, DEFAULT_COLLABORATION_TIERS } from './types/CollaborationTypes';
+export type {
+  ProviderShareRisk,
+  ProviderShareClassification,
+  SharedProviderModel,
+  SharedProviderEntry,
+  SharedProviderCatalog,
+  ProjectSyncFile,
+  ProjectSync,
+  RemoteInferenceRequestPayload,
+  RemoteInferenceRequestMessage,
+  RemoteInferenceCancelMessage,
+  RemoteInferenceEventMessage,
+  RemoteInferenceDoneMessage,
+  RemoteInferenceErrorMessage,
+  ProviderCatalogMessage,
+  RemoteProviderMessage,
+} from './types/RemoteProviderTypes';
+export { PROVIDER_SHARE_RISK, classifyProviderShare } from './types/RemoteProviderTypes';
+export type { SandboxPreset, SandboxPolicy } from './types/SandboxTypes';
+export { SANDBOX_PRESETS, DEFAULT_SANDBOX_POLICY, tightenSandbox } from './types/SandboxTypes';
 
 // Re-export from existing providers.ts for backward compatibility
 export { IMPLEMENTED_PROVIDERS, PROVIDER_AUTH_MODES, PROVIDER_ENV_VARS } from './providers';

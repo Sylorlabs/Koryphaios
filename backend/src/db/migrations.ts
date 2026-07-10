@@ -592,6 +592,51 @@ export const MIGRATIONS: Migration[] = [
     `,
     down: `DROP INDEX IF EXISTS idx_messages_variant_group;`,
   },
+
+  // ─── Version 0014: Notes scale — FTS5 search + title index ───────────────────
+  // Replaces the O(n) leading-wildcard LIKE search with an indexed, ranked
+  // full-text index, kept in sync by triggers. Also indexes note titles so
+  // wikilink resolution and rename propagation stop doing table scans.
+  {
+    version: '0014',
+    description: 'Notes FTS5 full-text index + title index',
+    up: `
+      CREATE INDEX IF NOT EXISTS idx_notes_title ON notes(title);
+
+      CREATE VIRTUAL TABLE IF NOT EXISTS notes_fts USING fts5(
+        note_id UNINDEXED,
+        title,
+        content,
+        tags,
+        tokenize = 'porter unicode61'
+      );
+
+      -- Backfill existing rows.
+      INSERT INTO notes_fts(note_id, title, content, tags)
+        SELECT id, title, content, tags FROM notes;
+
+      -- Keep the index in sync with the notes table.
+      CREATE TRIGGER IF NOT EXISTS notes_fts_ai AFTER INSERT ON notes BEGIN
+        INSERT INTO notes_fts(note_id, title, content, tags)
+          VALUES (new.id, new.title, new.content, new.tags);
+      END;
+      CREATE TRIGGER IF NOT EXISTS notes_fts_ad AFTER DELETE ON notes BEGIN
+        DELETE FROM notes_fts WHERE note_id = old.id;
+      END;
+      CREATE TRIGGER IF NOT EXISTS notes_fts_au AFTER UPDATE ON notes BEGIN
+        DELETE FROM notes_fts WHERE note_id = old.id;
+        INSERT INTO notes_fts(note_id, title, content, tags)
+          VALUES (new.id, new.title, new.content, new.tags);
+      END;
+    `,
+    down: `
+      DROP TRIGGER IF EXISTS notes_fts_au;
+      DROP TRIGGER IF EXISTS notes_fts_ad;
+      DROP TRIGGER IF EXISTS notes_fts_ai;
+      DROP TABLE IF EXISTS notes_fts;
+      DROP INDEX IF EXISTS idx_notes_title;
+    `,
+  },
 ];
 
 // ─── Migration Runner ────────────────────────────────────────────────────────

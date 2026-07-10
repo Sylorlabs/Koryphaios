@@ -6,6 +6,8 @@
 	import { authStore } from '$lib/stores/auth.svelte';
 	import { isDemoMode } from '$lib/demo.svelte';
 	import { initUrls } from '$lib/utils/api-url';
+	import { startBackendHealthSentinel } from '$lib/stores/backend-health.svelte';
+	import BackendDownOverlay from '$lib/components/BackendDownOverlay.svelte';
 	import UpdateBanner from '$lib/components/UpdateBanner.svelte';
 	import UpdateDialog from '$lib/components/UpdateDialog.svelte';
 
@@ -24,13 +26,23 @@
 		};
 
 		import('$lib/utils/error-monitor').then((m) => m.initErrorMonitoring()).catch(() => {});
-		
-		// Resolve backend URLs first, then wait for auth before requesting protected data.
+
+		// Demo builds have no backend at all: skip the health sentinel (its
+		// overlay would block the whole demo after a few failed polls) and seed
+		// the in-memory workspace instead.
 		if (isDemoMode) {
 			import('$lib/demo.svelte').then((m) => m.seedDemo()).catch(() => {});
 			hideLoading();
 			return;
 		}
+
+		// Start the backend health sentinel immediately — it polls /api/health
+		// and surfaces the BackendDownOverlay if the backend goes away or the
+		// version contract rejects this frontend. A working UI without a
+		// working backend is never allowed.
+		startBackendHealthSentinel();
+
+		// Resolve backend URLs first, then wait for auth before requesting protected data.
 		Promise.resolve()
 			.then(() => initUrls())
 			.then(() => authStore.initialize())
@@ -114,10 +126,14 @@
 	<main id="main-content">
 		{@render children()}
 	</main>
-	
+
+	<!-- Backend unavailable / version-skew overlay. Mounted only when the
+	     backend is sustained-unhealthy or rejects this frontend build. -->
+	<BackendDownOverlay />
+
 	<!-- Update Banner - shows at top when update is available -->
 	<UpdateBanner />
-	
+
 	<!-- Update Dialog - modal for detailed update info -->
 	<UpdateDialog />
 </div>

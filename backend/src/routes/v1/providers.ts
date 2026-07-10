@@ -37,7 +37,6 @@ import {
   saveKimiCodeAuthState,
   startKimiCodeDeviceAuth,
 } from '../../providers/kimicode-auth';
-import { pollGoogleDeviceAuth, startGoogleDeviceAuth } from '../../providers/google-subscription';
 
 const LOCAL_USER_ID = 'local-user';
 const credentialsService = createUserCredentialsService();
@@ -73,8 +72,9 @@ type BrowserAuthProvider =
   | 'claude'
   | 'grok'
   | 'antigravity'
-  | 'google'
-  | 'google-subscription';
+  | 'google';
+// NOTE: 'google-subscription' (the Gemini CLI) is RETIRED — never re-add it.
+// Gemini models are served by the plain 'google' (Gemini API) provider.
 
 function isBrowserAuthProvider(name: string): name is BrowserAuthProvider {
   return (
@@ -84,8 +84,7 @@ function isBrowserAuthProvider(name: string): name is BrowserAuthProvider {
     name === 'claude' ||
     name === 'grok' ||
     name === 'antigravity' ||
-    name === 'google' ||
-    name === 'google-subscription'
+    name === 'google'
   );
 }
 
@@ -133,24 +132,6 @@ async function startBrowserAuth(
       case 'kimicode': {
         clearKimiCodeAuthState();
         const result = await startKimiCodeDeviceAuth();
-        serverLog.info(
-          {
-            provider: name,
-            userCode: result.userCode,
-            verificationUri: result.verificationUri,
-          },
-          'Browser auth flow started',
-        );
-        return {
-          ok: true,
-          data: {
-            provider: name,
-            ...result,
-          },
-        };
-      }
-      case 'google-subscription': {
-        const result = await startGoogleDeviceAuth();
         serverLog.info(
           {
             provider: name,
@@ -415,7 +396,6 @@ async function completeBrowserAuth(
       }
       case 'copilot':
       case 'kimicode':
-      case 'google-subscription':
         return { ok: false, error: `${name} auth completes automatically after browser approval` };
     }
   } catch (error: any) {

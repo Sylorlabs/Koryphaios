@@ -19,6 +19,12 @@ let flushTimer: ReturnType<typeof setTimeout> | null = null;
 
 async function flushErrors() {
   if (errorBuffer.length === 0) return;
+  // Demo builds have no backend to receive logs — posting would just 404.
+  const { isDemoMode } = await import('$lib/demo-flags');
+  if (isDemoMode) {
+    errorBuffer = [];
+    return;
+  }
 
   const errors = [...errorBuffer];
   errorBuffer = [];

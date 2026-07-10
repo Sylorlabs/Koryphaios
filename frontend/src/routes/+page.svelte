@@ -5,7 +5,7 @@
   import { sessionStore } from '$lib/stores/sessions.svelte';
   import { projectStore, projectDisplayName } from '$lib/stores/project.svelte';
   import { authStore } from '$lib/stores/auth.svelte';
-  import { isDemoMode } from '$lib/demo.svelte';
+  import { isDemoMode, isFullDemo, isGuidedDemo } from '$lib/demo.svelte';
   import { appStore } from '$lib/stores/app.svelte';
   import { toastStore } from '$lib/stores/toast.svelte';
   import { modeStore } from '$lib/stores/mode.svelte';
@@ -134,9 +134,15 @@
   const agentRail = useAgentRail();
 
   useSessionSync({
-    disabled: isDemoMode,
+    // Guided demo: the scripted loop owns the feed — never clobber it.
+    // Full demo: real session sync, served by the in-memory shim, so
+    // switching sessions restores the tab-scoped conversation history.
+    disabled: isGuidedDemo,
     onActiveSessionChange: () => {
       agentRail.selectedAgentId = '';
+      // Full demo: finalize any simulated turn left running in the session
+      // the user just navigated away from.
+      if (isFullDemo) void import('$lib/demo.svelte').then((m) => m.demoOnSessionSwitch());
     },
   });
 
@@ -191,18 +197,10 @@
     window.addEventListener('open-note', handleOpenNote);
 
     const handleOpenNotesGraph = () => {
-      if (isDemoMode) {
-        toastStore.warning('Project notes are available in the real app.');
-        return;
-      }
       showNotes = true;
     };
     window.addEventListener('open-notes-graph', handleOpenNotesGraph);
     const handleOpenTeamSettings = () => {
-      if (isDemoMode) {
-        toastStore.warning('Team hosting is available in the real app.');
-        return;
-      }
       collaborationStore.requestTeamSettings();
       showSettings = true;
     };
@@ -271,10 +269,6 @@
 
     if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === 'N') {
       e.preventDefault();
-      if (isDemoMode) {
-        toastStore.warning('Project notes are available in the real app.');
-        return;
-      }
       showNotes = !showNotes;
       return;
     }
@@ -284,10 +278,6 @@
       showSettings = true;
     } else if (shortcutStore.matches('new_session', e)) {
       e.preventDefault();
-      if (isDemoMode) {
-        toastStore.warning('The guided demo uses a fixed sample workspace. Try the real app to create sessions.');
-        return;
-      }
       // Ctrl/Cmd+Shift+N forces a brand-new session; Ctrl/Cmd+N reuses the
       // active empty session to prevent spam.
       void sessionStore.newChat({ shift: e.shiftKey });
@@ -454,6 +444,17 @@ RULES:
     return Array.from(unique).slice(0, 500);
   }
 
+  function resumePreviousChat() {
+    const candidates = projectStore.currentPath
+      ? sessionStore.sessionsForProject(projectStore.currentPath)
+      : sessionStore.sessions;
+    const previous = [...candidates]
+      .filter((session) => session.id !== sessionStore.activeSessionId)
+      .sort((a, b) => b.updatedAt - a.updatedAt)[0];
+    if (previous) sessionStore.activeSessionId = previous.id;
+    else toastStore.info('No previous chat is available for this project');
+  }
+
   async function handleSlashCommand(command: string): Promise<boolean> {
     const parts = command.trim().slice(1).split(/\s+/).filter(Boolean);
     const root = parts[0]?.toLowerCase();
@@ -474,14 +475,7 @@ RULES:
     }
 
     if (root === 'resume') {
-      const candidates = projectStore.currentPath
-        ? sessionStore.sessionsForProject(projectStore.currentPath)
-        : sessionStore.sessions;
-      const previous = [...candidates]
-        .filter((session) => session.id !== sessionStore.activeSessionId)
-        .sort((a, b) => b.updatedAt - a.updatedAt)[0];
-      if (previous) sessionStore.activeSessionId = previous.id;
-      else toastStore.info('No previous chat is available for this project');
+      resumePreviousChat();
       return true;
     }
 
@@ -773,6 +767,32 @@ RULES:
     toastStore.success(`Opened recent project: ${found.title}`);
   }
 
+  // Themed replacement for the old native prompt() when naming a new project.
+  let newProjectPrompt = $state<{ parentPath: string } | null>(null);
+  let newProjectNameInput = $state('New Project');
+
+  async function confirmNewProjectName() {
+    const pending = newProjectPrompt;
+    const projectName = newProjectNameInput.trim();
+    if (!pending || !projectName) return;
+    newProjectPrompt = null;
+    try {
+      const projectPath = await invoke<string>('create_project_folder', {
+        parentPath: pending.parentPath,
+        projectName,
+      });
+      toastStore.success(`Created project folder: ${projectPath}`);
+      // Brand-new folder → scope future chats to it and start fresh.
+      projectStore.setProject(projectPath);
+      await createProjectFromText(projectName, buildNewProjectTemplate(), {
+        source: 'new',
+        path: projectPath,
+      });
+    } catch (error) {
+      toastStore.error(String(error));
+    }
+  }
+
   async function handleMenuAction(action: string) {
     switch (action) {
       case 'new_project': {
@@ -794,22 +814,9 @@ RULES:
             projectStore.workspaceRoot ?? (await invoke<string | null>('select_folder_dialog'));
           if (!selectedPath) break;
 
-          const projectName = prompt('Enter project name:', 'New Project');
-          if (!projectName || !projectName.trim()) break;
-
-          const projectPath = await invoke<string>('create_project_folder', {
-            parentPath: selectedPath,
-            projectName: projectName.trim(),
-          });
-
-          toastStore.success(`Created project folder: ${projectPath}`);
-
-          // Brand-new folder → scope future chats to it and start fresh.
-          projectStore.setProject(projectPath);
-          await createProjectFromText(projectName.trim(), buildNewProjectTemplate(), {
-            source: 'new',
-            path: projectPath,
-          });
+          // Themed dialog (not a native prompt()) — see newProjectPrompt modal.
+          newProjectNameInput = 'New Project';
+          newProjectPrompt = { parentPath: selectedPath };
         } catch (error) {
           toastStore.error(String(error));
         }
@@ -876,12 +883,17 @@ RULES:
         break;
       }
       case 'new_session':
-        if (isDemoMode) {
-          toastStore.warning('The guided demo uses a fixed sample workspace. Try the real app to create sessions.');
-          break;
-        }
         await sessionStore.newChat();
         inputRef?.focus();
+        break;
+      case 'resume_chat':
+        resumePreviousChat();
+        break;
+      case 'mode_beginner':
+        await modeStore.setMode('beginner');
+        break;
+      case 'mode_advanced':
+        await modeStore.setMode('advanced');
         break;
       case 'focus_input':
         inputRef?.focus();
@@ -897,10 +909,6 @@ RULES:
         showGit = !showGit;
         break;
       case 'toggle_notes':
-        if (isDemoMode) {
-          toastStore.warning('Project notes are available in the real app.');
-          break;
-        }
         showNotes = !showNotes;
         break;
       case 'toggle_theme':
@@ -981,6 +989,23 @@ RULES:
     }
   }
 
+  // Session-scoped consent for remote CLI (agentic) providers that copy the
+  // project to the host. Keyed by provider name.
+  let agenticConsent = $state<Set<string>>(new Set());
+  let agenticConsentPrompt = $state<{
+    provider: string;
+    hostName: string;
+    pending: { message: string; model?: string; reasoningLevel?: string; attachments?: Array<{ type: string; data: string; name: string }> };
+  } | null>(null);
+
+  function confirmAgenticConsent() {
+    const p = agenticConsentPrompt;
+    if (!p) return;
+    agenticConsent = new Set([...agenticConsent, p.provider]);
+    agenticConsentPrompt = null;
+    handleSend(p.pending.message, p.pending.model, p.pending.reasoningLevel, p.pending.attachments);
+  }
+
   function handleSend(
     message: string,
     model?: string,
@@ -989,7 +1014,11 @@ RULES:
   ) {
     if (isDemoMode) {
       composerDraft = '';
-      void import('$lib/demo.svelte').then((m) => m.replayDemo());
+      // Full demo: simulate a manager turn for the user's own prompt.
+      // Guided demo: replay the scripted example turn.
+      void import('$lib/demo.svelte').then((m) =>
+        isFullDemo ? m.demoSend(message) : m.replayDemo(),
+      );
       return;
     }
     if (!projectStore.currentPath) {
@@ -1002,6 +1031,18 @@ RULES:
     if (configurationWarning) {
       toastStore.error(configurationWarning);
       showSettings = true;
+      return;
+    }
+    // Remote CLI model: copies this project to the host to run there. Confirm
+    // once per session so the client always knows their files are leaving.
+    const providerName = model?.includes(':') ? model.split(':')[0] : '';
+    const remoteProvider = providerName ? wsStore.providers.find((p) => p.name === providerName) : undefined;
+    if (remoteProvider?.remoteAgentic && !agenticConsent.has(providerName)) {
+      agenticConsentPrompt = {
+        provider: providerName,
+        hostName: remoteProvider.remoteHostName ?? remoteProvider.label ?? 'the host',
+        pending: { message, model, reasoningLevel, attachments },
+      };
       return;
     }
     if (
@@ -1026,7 +1067,7 @@ RULES:
 
   function handleStop() {
     if (isDemoMode) {
-      toastStore.warning('The sample run resets automatically. Send a prompt to replay it.');
+      void import('$lib/demo.svelte').then((m) => m.demoStop());
       return;
     }
     const sid = sessionStore.activeSessionId;
@@ -1060,20 +1101,24 @@ RULES:
   );
   let connectedProviders = $derived(wsStore.providers.filter((p) => p.authenticated).length);
   let connectionDot = $derived(
-    wsStore.status === 'connected'
+    isDemoMode
       ? 'bg-emerald-500'
-      : wsStore.status === 'connecting'
-        ? 'bg-amber-500 animate-pulse'
-        : 'bg-red-500',
+      : wsStore.status === 'connected'
+        ? 'bg-emerald-500'
+        : wsStore.status === 'connecting'
+          ? 'bg-amber-500 animate-pulse'
+          : 'bg-red-500',
   );
   let connectionStatusLabel = $derived(
-    wsStore.status === 'connected'
-      ? 'Realtime connected'
-      : wsStore.status === 'connecting'
-        ? 'Realtime connecting'
-        : wsStore.status === 'error'
-          ? 'Realtime connection error'
-          : 'Realtime offline',
+    isDemoMode
+      ? 'Demo sandbox — nothing is saved'
+      : wsStore.status === 'connected'
+        ? 'Realtime connected'
+        : wsStore.status === 'connecting'
+          ? 'Realtime connecting'
+          : wsStore.status === 'error'
+            ? 'Realtime connection error'
+            : 'Realtime offline',
   );
 </script>
 
@@ -1405,7 +1450,7 @@ RULES:
         fileMentions={composerFileMentions}
         onRefreshFileMentions={refreshComposerFileMentions}
         placeholder={agentRail.inputPlaceholder}
-        initialModel={isDemoMode ? 'codex:gpt-5.5' : ''}
+        initialModel={isDemoMode ? 'codex:gpt-5.6-sol' : ''}
         disableModelPreviewRequests={isDemoMode}
       />{/if}
   {/snippet}
@@ -1470,6 +1515,96 @@ RULES:
           }}
         >
           Cancel
+        </button>
+      </div>
+    </div>
+  </div>
+{/if}
+
+{#if newProjectPrompt}
+  <div class="fixed inset-0 z-[90] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
+    <div
+      class="w-full max-w-md rounded-2xl border p-6 shadow-2xl"
+      style="background: var(--color-surface-2); border-color: var(--color-border);"
+      role="dialog"
+      aria-label="Name your project"
+    >
+      <h3 class="text-base font-semibold mb-2" style="color: var(--color-text-primary);">
+        Name your project
+      </h3>
+      <p class="text-sm mb-4 leading-relaxed" style="color: var(--color-text-secondary);">
+        A folder with this name will be created in {newProjectPrompt.parentPath}.
+      </p>
+      <!-- svelte-ignore a11y_autofocus -->
+      <input
+        type="text"
+        class="input w-full text-sm mb-4"
+        bind:value={newProjectNameInput}
+        autofocus
+        onkeydown={(e) => {
+          if (e.key === 'Enter') void confirmNewProjectName();
+          if (e.key === 'Escape') newProjectPrompt = null;
+        }}
+      />
+      <div class="flex justify-end gap-2">
+        <button
+          type="button"
+          class="rounded-xl px-4 py-2 text-xs font-medium transition-colors hover:bg-[var(--color-surface-3)]"
+          style="color: var(--color-text-muted);"
+          onclick={() => (newProjectPrompt = null)}
+        >
+          Cancel
+        </button>
+        <button
+          type="button"
+          class="rounded-xl px-4 py-2 text-sm font-semibold transition-colors disabled:opacity-50"
+          style="background: var(--color-accent); color: var(--color-surface-0);"
+          disabled={!newProjectNameInput.trim()}
+          onclick={() => void confirmNewProjectName()}
+        >
+          Create Project
+        </button>
+      </div>
+    </div>
+  </div>
+{/if}
+
+{#if agenticConsentPrompt}
+  <div class="fixed inset-0 z-[90] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
+    <div
+      class="w-full max-w-md rounded-2xl border p-6 shadow-2xl"
+      style="background: var(--color-surface-2); border-color: var(--color-border);"
+      role="alertdialog"
+      aria-label="Remote CLI model"
+    >
+      <h3 class="text-base font-semibold mb-2" style="color: var(--color-text-primary);">
+        This model runs on {agenticConsentPrompt.hostName}
+      </h3>
+      <p class="text-sm mb-3 leading-relaxed" style="color: var(--color-text-secondary);">
+        It's a CLI tool, so it runs on the host's computer — not yours. To do that,
+        <strong>your project files are copied to a temporary folder on the host</strong> each turn,
+        the CLI edits them there, and the changes are written back to your project here.
+      </p>
+      <p class="text-xs mb-5 leading-relaxed" style="color: var(--color-text-muted);">
+        Only text files are sent (node_modules, .git, and build output are skipped). Regular API
+        models never do this — their files stay on your machine.
+      </p>
+      <div class="flex justify-end gap-2">
+        <button
+          type="button"
+          class="rounded-xl px-4 py-2 text-xs font-medium transition-colors hover:bg-[var(--color-surface-3)]"
+          style="color: var(--color-text-muted);"
+          onclick={() => (agenticConsentPrompt = null)}
+        >
+          Cancel
+        </button>
+        <button
+          type="button"
+          class="rounded-xl px-4 py-2 text-sm font-semibold transition-colors"
+          style="background: var(--color-accent); color: var(--color-surface-0);"
+          onclick={confirmAgenticConsent}
+        >
+          Send my files &amp; run
         </button>
       </div>
     </div>

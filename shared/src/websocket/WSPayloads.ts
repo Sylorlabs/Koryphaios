@@ -274,6 +274,13 @@ export interface ProviderInfo {
   deployment?: 'cloud' | 'local' | 'hybrid';
   /** Short UI description of provider behavior */
   description?: string;
+  /** True for a REMOTE provider served by another machine (id `remote-*`). */
+  remote?: boolean;
+  /** Remote CLI harness: using it copies the client's project to the host and
+   *  runs the CLI there. The composer confirms this before the first send. */
+  remoteAgentic?: boolean;
+  /** Display name of the host serving this remote provider. */
+  remoteHostName?: string;
 }
 
 export interface ProviderStatusPayload {

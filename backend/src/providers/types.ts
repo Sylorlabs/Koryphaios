@@ -106,6 +106,10 @@ export interface StreamRequest {
   workingDirectory?: string;
   /** Koryphaios session id — used by cloud providers (Jules) for session continuity. */
   sessionId?: string;
+  /** Host-imposed sandbox for a REMOTE agentic turn: the CLI runs on the host,
+   *  so the host confines it (OS jail + tool gating). Absent for local turns
+   *  (full access). See SandboxPolicy. */
+  sandbox?: import('@koryphaios/shared').SandboxPolicy;
 }
 
 // ─── Provider interface ─────────────────────────────────────────────────────

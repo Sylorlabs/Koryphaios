@@ -1,5 +1,6 @@
 <script lang="ts">
   import { EXISTING_PROVIDER_ICON_PATHS } from './provider-icon-assets';
+  import { base } from '$app/paths';
 
   interface Props {
     provider: string;
@@ -118,6 +119,7 @@
     'grok',
     'cursor',
     'cline',
+    'devin',
     'cerebras',
   ]);
 
@@ -131,6 +133,7 @@
     'grok',
     'cursor',
     'cline',
+    'devin',
     'cerebras',
   ]);
 
@@ -163,7 +166,9 @@
     const pushCandidate = (src: string, themeAdaptive: boolean, remote = false) => {
       if (seen.has(src) || (!remote && !EXISTING_PROVIDER_ICON_PATHS.has(src))) return;
       seen.add(src);
-      candidates.push({ src, themeAdaptive });
+      // Local assets must respect the SvelteKit base path (e.g. /demo-app on
+      // the koryphaios.com embed); remote URLs pass through untouched.
+      candidates.push({ src: remote ? src : `${base}${src}`, themeAdaptive });
     };
 
     const officialIcon = officialProviderIcons[normalized];

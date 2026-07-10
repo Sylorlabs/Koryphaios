@@ -10,7 +10,7 @@
 
   let { onNodeClick }: Props = $props();
 
-  let svgEl = $state<SVGSVGElement | undefined>(undefined);
+  let canvasEl = $state<HTMLCanvasElement | undefined>(undefined);
   let containerEl = $state<HTMLDivElement | undefined>(undefined);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let simulation: d3.Simulation<any, any> | null = null;
@@ -36,12 +36,7 @@
 
   type SimNode = d3.SimulationNodeDatum &
     GraphNode & { x: number; y: number; vx: number; vy: number };
-
-  type SimLink = d3.SimulationLinkDatum<SimNode> & {
-    source: SimNode;
-    target: SimNode;
-    key: string;
-  };
+  type SimLink = { source: SimNode; target: SimNode };
 
   function getFolderColor(folderPath: string): string {
     if (!folderColorMap.has(folderPath)) {
@@ -66,241 +61,181 @@
     return neighbors;
   }
 
-  function getVisibleGraph(): { nodes: GraphNode[]; edges: GraphEdge[] } {
-    const { nodes, edges } = notesStore.graphData;
-    if (!localGraph || !selectedNodeId) return { nodes, edges };
+  // ── Canvas render state ─────────────────────────────────────────────────────
+  // Canvas 2D scales to thousands of nodes where an equivalent SVG DOM janks, so
+  // there is no node cap — the whole vault renders. World↔screen is a manual
+  // affine transform (scale + translate) we also use for hit-testing.
+  let simNodes: SimNode[] = [];
+  let simLinks: SimLink[] = [];
+  let scale = 1;
+  let tx = 0;
+  let ty = 0;
+  let width = 0;
+  let height = 0;
+  let dpr = 1;
 
-    const keep = getNeighborSet(selectedNodeId, edges);
-    const filteredNodes = nodes.filter((n) => keep.has(n.id));
-    const ids = new Set(filteredNodes.map((n) => n.id));
-    const filteredEdges = edges.filter((e) => ids.has(e.from) && ids.has(e.to));
-    return { nodes: filteredNodes, edges: filteredEdges };
+  function toWorld(sx: number, sy: number): [number, number] {
+    return [(sx - tx) / scale, (sy - ty) / scale];
   }
 
-  function linkPath(d: SimLink): string {
-    const sx = (d.source as SimNode).x;
-    const sy = (d.source as SimNode).y;
-    const tx = (d.target as SimNode).x;
-    const ty = (d.target as SimNode).y;
-    const mx = (sx + tx) / 2;
-    const my = (sy + ty) / 2;
-    const dx = tx - sx;
-    const dy = ty - sy;
-    const dist = Math.sqrt(dx * dx + dy * dy) || 1;
-    const curvature = Math.min(36, dist * 0.15);
-    const cx = mx + (-dy / dist) * curvature;
-    const cy = my + (dx / dist) * curvature;
-    return `M${sx},${sy} Q${cx},${cy} ${tx},${ty}`;
+  function getVisibleGraph(): { nodes: GraphNode[]; edges: GraphEdge[] } {
+    const { nodes, edges } = notesStore.graphData;
+    if (localGraph && selectedNodeId) {
+      const keep = getNeighborSet(selectedNodeId, edges);
+      const filteredNodes = nodes.filter((n) => keep.has(n.id));
+      const ids = new Set(filteredNodes.map((n) => n.id));
+      const filteredEdges = edges.filter((e) => ids.has(e.from) && ids.has(e.to));
+      return { nodes: filteredNodes, edges: filteredEdges };
+    }
+    return { nodes, edges };
+  }
+
+  function nodeAt(sx: number, sy: number): SimNode | null {
+    const [wx, wy] = toWorld(sx, sy);
+    // Search nearest within its radius; iterate in reverse so topmost wins.
+    for (let i = simNodes.length - 1; i >= 0; i--) {
+      const n = simNodes[i];
+      const r = getNodeRadius(n.linkCount, n.includeInContext) + 3;
+      const dx = n.x - wx;
+      const dy = n.y - wy;
+      if (dx * dx + dy * dy <= r * r) return n;
+    }
+    return null;
+  }
+
+  function draw() {
+    const canvas = canvasEl;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    ctx.save();
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, width, height);
+    ctx.translate(tx, ty);
+    ctx.scale(scale, scale);
+
+    const edges = notesStore.graphData.edges;
+    const focusId = hoveredNodeId ?? selectedNodeId;
+    const neighbors = getNeighborSet(focusId, edges);
+    const q = searchQuery.trim().toLowerCase();
+
+    // Links
+    for (const l of simLinks) {
+      const s = l.source;
+      const t = l.target;
+      const lit = focusId && (s.id === focusId || t.id === focusId);
+      const dx = t.x - s.x;
+      const dy = t.y - s.y;
+      const dist = Math.sqrt(dx * dx + dy * dy) || 1;
+      const curv = Math.min(36, dist * 0.15);
+      const mx = (s.x + t.x) / 2 + (-dy / dist) * curv;
+      const my = (s.y + t.y) / 2 + (dx / dist) * curv;
+      ctx.beginPath();
+      ctx.moveTo(s.x, s.y);
+      ctx.quadraticCurveTo(mx, my, t.x, t.y);
+      ctx.strokeStyle = lit
+        ? 'rgba(139, 126, 200, 0.8)'
+        : focusId
+          ? 'rgba(120, 130, 160, 0.10)'
+          : 'rgba(120, 130, 160, 0.22)';
+      ctx.lineWidth = (lit ? 1.8 : 1) / scale;
+      ctx.stroke();
+    }
+
+    // Nodes
+    const drawLabels = showLabels && (scale >= 0.85 || simNodes.length <= 220);
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    for (const n of simNodes) {
+      const r = getNodeRadius(n.linkCount, n.includeInContext);
+      const matches = !q || n.title.toLowerCase().includes(q);
+      const dim = (focusId && !neighbors.has(n.id)) || !matches;
+      const color = getFolderColor(n.folderPath);
+      ctx.globalAlpha = dim ? 0.14 : 1;
+
+      // halo
+      ctx.beginPath();
+      ctx.arc(n.x, n.y, r + 4, 0, Math.PI * 2);
+      ctx.fillStyle = color;
+      ctx.globalAlpha = dim ? 0.05 : 0.18;
+      ctx.fill();
+
+      // core
+      ctx.globalAlpha = dim ? 0.16 : 1;
+      ctx.beginPath();
+      ctx.arc(n.x, n.y, r, 0, Math.PI * 2);
+      ctx.fillStyle = color;
+      ctx.fill();
+      ctx.lineWidth = (n.id === focusId ? 2.5 : n.includeInContext ? 2 : 1.2) / scale;
+      ctx.strokeStyle = n.includeInContext
+        ? 'rgba(255, 220, 140, 0.9)'
+        : n.id === focusId
+          ? 'rgba(255,255,255,0.7)'
+          : 'rgba(255, 255, 255, 0.15)';
+      ctx.stroke();
+
+      if (drawLabels && !dim) {
+        ctx.globalAlpha = 0.85;
+        ctx.fillStyle = 'rgba(220, 225, 240, 0.9)';
+        ctx.font = `${n.linkCount >= 3 ? '600 ' : ''}${9.5 / Math.max(scale, 0.75)}px ui-sans-serif, system-ui, sans-serif`;
+        const label = n.title.length > 24 ? n.title.slice(0, 22) + '…' : n.title;
+        ctx.fillText(label, n.x, n.y + r + 9 / Math.max(scale, 0.75));
+      }
+    }
+    ctx.globalAlpha = 1;
+    ctx.restore();
+  }
+
+  function resize() {
+    if (!canvasEl || !containerEl) return;
+    dpr = Math.min(globalThis.devicePixelRatio || 1, 2);
+    width = containerEl.clientWidth || 800;
+    height = containerEl.clientHeight || 600;
+    canvasEl.width = Math.floor(width * dpr);
+    canvasEl.height = Math.floor(height * dpr);
+    canvasEl.style.width = `${width}px`;
+    canvasEl.style.height = `${height}px`;
+    draw();
   }
 
   function buildGraph() {
-    if (!svgEl || !containerEl) return;
-
-    d3.select(svgEl).selectAll('*').remove();
+    if (!canvasEl || !containerEl) return;
     folderColorMap.clear();
     colorIndex = 0;
     simulation?.stop();
+    resize();
 
     const { nodes, edges } = getVisibleGraph();
-    if (!nodes.length) return;
+    if (!nodes.length) {
+      simNodes = [];
+      simLinks = [];
+      draw();
+      return;
+    }
 
     const settings = notesStore.settings;
     const { chargeStrength, linkDistance, gravity } = settings.graphPhysics;
 
-    const width = containerEl.clientWidth || 800;
-    const height = containerEl.clientHeight || 600;
-
-    const svg = d3
-      .select(svgEl)
-      .attr('width', width)
-      .attr('height', height)
-      .attr('viewBox', `0 0 ${width} ${height}`);
-
-    const defs = svg.append('defs');
-
-    const glowFilter = defs
-      .append('filter')
-      .attr('id', 'node-glow')
-      .attr('x', '-50%')
-      .attr('y', '-50%')
-      .attr('width', '200%')
-      .attr('height', '200%');
-    glowFilter.append('feGaussianBlur').attr('stdDeviation', '2.5').attr('result', 'blur');
-    const merge = glowFilter.append('feMerge');
-    merge.append('feMergeNode').attr('in', 'blur');
-    merge.append('feMergeNode').attr('in', 'SourceGraphic');
-
-    const g = svg.append('g');
-
-    const zoom = d3
-      .zoom<SVGSVGElement, unknown>()
-      .scaleExtent([0.15, 5])
-      .on('zoom', (event) => {
-        g.attr('transform', event.transform);
-      });
-    svg.call(zoom);
-
-    const simNodes: SimNode[] = nodes.map((n) => ({
+    simNodes = nodes.map((n) => ({
       ...n,
       x: width / 2 + (Math.random() - 0.5) * width * 0.35,
       y: height / 2 + (Math.random() - 0.5) * height * 0.35,
       vx: 0,
       vy: 0,
     }));
-
     const nodeById = new Map(simNodes.map((n) => [n.id, n]));
-
-    const simLinks: SimLink[] = edges
+    simLinks = edges
       .filter((e) => nodeById.has(e.from) && nodeById.has(e.to))
-      .map((e) => ({
-        source: nodeById.get(e.from)!,
-        target: nodeById.get(e.to)!,
-        key: `${e.from}->${e.to}`,
-      }));
+      .map((e) => ({ source: nodeById.get(e.from)!, target: nodeById.get(e.to)! }));
 
-    const focusId = hoveredNodeId ?? selectedNodeId;
-    const focusNeighbors = getNeighborSet(focusId, edges);
-
-    const linkSel = g
-      .append('g')
-      .attr('class', 'links')
-      .selectAll('path')
-      .data(simLinks, (d) => (d as SimLink).key)
-      .enter()
-      .append('path')
-      .attr('fill', 'none')
-      .attr('stroke', (d) => {
-        const active =
-          focusId &&
-          ((d.source as SimNode).id === focusId || (d.target as SimNode).id === focusId);
-        return active ? 'rgba(139, 126, 200, 0.75)' : 'rgba(120, 130, 160, 0.22)';
-      })
-      .attr('stroke-width', (d) => {
-        const active =
-          focusId &&
-          ((d.source as SimNode).id === focusId || (d.target as SimNode).id === focusId);
-        return active ? 1.8 : 1;
-      });
-
-    const nodeSel = g
-      .append('g')
-      .attr('class', 'nodes')
-      .selectAll('g')
-      .data(simNodes, (d) => (d as SimNode).id)
-      .enter()
-      .append('g')
-      .attr('class', 'node-group')
-      .style('cursor', 'pointer')
-      .on('mouseover', function (event: MouseEvent, d: SimNode) {
-        hoveredNodeId = d.id;
-        updateFocusStyles();
-        tooltipTitle = d.title;
-        tooltipMeta = `${d.linkCount} links · ${d.folderPath}`;
-        const rect = containerEl!.getBoundingClientRect();
-        tooltipX = event.clientX - rect.left + 14;
-        tooltipY = event.clientY - rect.top - 12;
-        tooltipVisible = true;
-      })
-      .on('mousemove', function (event: MouseEvent) {
-        const rect = containerEl!.getBoundingClientRect();
-        tooltipX = event.clientX - rect.left + 14;
-        tooltipY = event.clientY - rect.top - 12;
-      })
-      .on('mouseout', function () {
-        hoveredNodeId = null;
-        updateFocusStyles();
-        tooltipVisible = false;
-      })
-      .on('click', (_event: MouseEvent, d: SimNode) => {
-        selectedNodeId = selectedNodeId === d.id ? null : d.id;
-        if (localGraph) buildGraph();
-        onNodeClick(d.id);
-      })
-      .call(
-        d3
-          .drag<SVGGElement, SimNode>()
-          .on('start', function (event, d) {
-            if (!event.active) simulation?.alphaTarget(0.25).restart();
-            d.fx = d.x;
-            d.fy = d.y;
-          })
-          .on('drag', function (event, d) {
-            d.fx = event.x;
-            d.fy = event.y;
-          })
-          .on('end', function (event, d) {
-            if (!event.active) simulation?.alphaTarget(0);
-            d.fx = null;
-            d.fy = null;
-          }),
-      );
-
-    nodeSel
-      .append('circle')
-      .attr('class', 'node-halo')
-      .attr('r', (d) => getNodeRadius(d.linkCount, d.includeInContext) + 5)
-      .attr('fill', (d) => getFolderColor(d.folderPath))
-      .attr('opacity', 0.18);
-
-    nodeSel
-      .append('circle')
-      .attr('class', 'node-core')
-      .attr('r', (d) => getNodeRadius(d.linkCount, d.includeInContext))
-      .attr('fill', (d) => getFolderColor(d.folderPath))
-      .attr('stroke', (d) =>
-        d.includeInContext ? 'rgba(255, 220, 140, 0.9)' : 'rgba(255, 255, 255, 0.15)',
-      )
-      .attr('stroke-width', (d) => (d.includeInContext ? 2 : 1.2))
-      .attr('filter', 'url(#node-glow)');
-
-    const labelSel = g
-      .append('g')
-      .attr('class', 'labels')
-      .selectAll('text')
-      .data(simNodes, (d) => (d as SimNode).id)
-      .enter()
-      .append('text')
-      .attr('text-anchor', 'middle')
-      .attr('dy', (d) => getNodeRadius(d.linkCount, d.includeInContext) + 12)
-      .attr('font-size', '9.5px')
-      .attr('font-weight', (d) => (d.linkCount >= 3 ? '600' : '400'))
-      .attr('fill', 'rgba(220, 225, 240, 0.82)')
-      .attr('pointer-events', 'none')
-      .text((d) => (d.title.length > 24 ? d.title.slice(0, 22) + '…' : d.title));
-
-    function updateFocusStyles() {
-      const activeId = hoveredNodeId ?? selectedNodeId;
-      const neighbors = getNeighborSet(activeId, edges);
-
-      nodeSel.attr('opacity', (d) => {
-        if (!activeId) return 1;
-        return neighbors.has(d.id) ? 1 : 0.15;
-      });
-
-      linkSel
-        .attr('stroke', (d) => {
-          const lit =
-            activeId &&
-            ((d.source as SimNode).id === activeId || (d.target as SimNode).id === activeId);
-          return lit ? 'rgba(139, 126, 200, 0.85)' : 'rgba(120, 130, 160, 0.12)';
-        })
-        .attr('stroke-width', (d) => {
-          const lit =
-            activeId &&
-            ((d.source as SimNode).id === activeId || (d.target as SimNode).id === activeId);
-          return lit ? 2 : 0.8;
-        });
-
-      nodeSel.select('.node-core').attr('stroke-width', (d) => {
-        if (d.id === activeId) return 2.5;
-        if (d.includeInContext) return 2;
-        return 1.2;
-      });
-    }
-
+    // Adaptive physics: big vaults drop the (expensive) collide force, cap the
+    // charge range, and settle faster so the sim reaches idle quickly — once
+    // idle it stops ticking, so a large static graph costs nothing to display.
+    const big = simNodes.length > 800;
     simulation = d3
       .forceSimulation(simNodes)
-      .force('charge', d3.forceManyBody().strength(chargeStrength).distanceMax(280))
+      .force('charge', d3.forceManyBody().strength(chargeStrength).distanceMax(big ? 160 : 280))
       .force(
         'link',
         d3
@@ -312,57 +247,153 @@
       .force('center', d3.forceCenter(width / 2, height / 2).strength(0.04))
       .force('x', d3.forceX(width / 2).strength(Math.abs(gravity) / 8000))
       .force('y', d3.forceY(height / 2).strength(Math.abs(gravity) / 8000))
-      .force(
+      .velocityDecay(big ? 0.5 : 0.35)
+      .alphaDecay(big ? 0.045 : 0.0228);
+    if (!big) {
+      simulation.force(
         'collide',
-        d3.forceCollide<SimNode>().radius(
-          (d) => getNodeRadius(d.linkCount, d.includeInContext) + 10,
-        ),
-      )
-      .velocityDecay(0.35)
-      .on('tick', () => {
-        linkSel.attr('d', linkPath);
-        nodeSel.attr('transform', (d) => `translate(${d.x},${d.y})`);
-        labelSel
-          .attr('x', (d) => d.x)
-          .attr('y', (d) => d.y)
-          .attr('opacity', showLabels ? 1 : 0);
-      });
-
-    updateFocusStyles();
+        d3.forceCollide<SimNode>().radius((d) => getNodeRadius(d.linkCount, d.includeInContext) + 10),
+      );
+    }
+    simulation.on('tick', draw);
   }
 
+  // ── Pointer interaction (pan / zoom / node drag / hover) ────────────────────
+  let dragNode: SimNode | null = null;
+  let panning = false;
+  let panStart = { x: 0, y: 0, tx: 0, ty: 0 };
+  let moved = false;
+
+  function onPointerDown(event: PointerEvent) {
+    if (!canvasEl) return;
+    const rect = canvasEl.getBoundingClientRect();
+    const sx = event.clientX - rect.left;
+    const sy = event.clientY - rect.top;
+    moved = false;
+    const hit = nodeAt(sx, sy);
+    canvasEl.setPointerCapture(event.pointerId);
+    if (hit) {
+      dragNode = hit;
+      simulation?.alphaTarget(0.25).restart();
+      const [wx, wy] = toWorld(sx, sy);
+      hit.fx = wx;
+      hit.fy = wy;
+    } else {
+      panning = true;
+      panStart = { x: sx, y: sy, tx, ty };
+    }
+  }
+
+  function onPointerMove(event: PointerEvent) {
+    if (!canvasEl) return;
+    const rect = canvasEl.getBoundingClientRect();
+    const sx = event.clientX - rect.left;
+    const sy = event.clientY - rect.top;
+
+    if (dragNode) {
+      moved = true;
+      const [wx, wy] = toWorld(sx, sy);
+      dragNode.fx = wx;
+      dragNode.fy = wy;
+      return;
+    }
+    if (panning) {
+      moved = true;
+      tx = panStart.tx + (sx - panStart.x);
+      ty = panStart.ty + (sy - panStart.y);
+      draw();
+      return;
+    }
+    // Hover
+    const hit = nodeAt(sx, sy);
+    const id = hit?.id ?? null;
+    if (id !== hoveredNodeId) {
+      hoveredNodeId = id;
+      draw();
+    }
+    if (hit) {
+      tooltipTitle = hit.title;
+      tooltipMeta = `${hit.linkCount} links · ${hit.folderPath}${hit.unresolved ? ' · unresolved' : ''}`;
+      tooltipX = sx + 14;
+      tooltipY = sy - 12;
+      tooltipVisible = true;
+    } else {
+      tooltipVisible = false;
+    }
+  }
+
+  function onPointerUp(event: PointerEvent) {
+    if (canvasEl) canvasEl.releasePointerCapture?.(event.pointerId);
+    if (dragNode) {
+      if (!event.altKey) {
+        dragNode.fx = null;
+        dragNode.fy = null;
+      }
+      simulation?.alphaTarget(0);
+      const clicked = dragNode;
+      dragNode = null;
+      if (!moved) {
+        selectedNodeId = selectedNodeId === clicked.id ? null : clicked.id;
+        if (localGraph) buildGraph();
+        onNodeClick(clicked.id);
+        draw();
+      }
+      return;
+    }
+    panning = false;
+  }
+
+  function onWheel(event: WheelEvent) {
+    if (!canvasEl) return;
+    event.preventDefault();
+    const rect = canvasEl.getBoundingClientRect();
+    const sx = event.clientX - rect.left;
+    const sy = event.clientY - rect.top;
+    const factor = Math.exp(-event.deltaY * 0.0015);
+    const next = Math.min(6, Math.max(0.1, scale * factor));
+    // Keep the point under the cursor fixed while zooming.
+    const [wx, wy] = toWorld(sx, sy);
+    scale = next;
+    tx = sx - wx * scale;
+    ty = sy - wy * scale;
+    draw();
+  }
+
+  let resizeObserver: ResizeObserver | null = null;
+
   $effect(() => {
-    if (!svgEl) return;
-    const q = searchQuery.trim().toLowerCase();
-    d3.select(svgEl)
-      .selectAll<SVGCircleElement, SimNode>('.node-core')
-      .attr('opacity', (d) => {
-        if (!q) return 1;
-        return d.title.toLowerCase().includes(q) ? 1 : 0.12;
-      });
-    d3.select(svgEl)
-      .selectAll<SVGTextElement, SimNode>('text')
-      .attr('opacity', (d) => {
-        if (!showLabels) return 0;
-        if (!q) return 0.9;
-        return d.title.toLowerCase().includes(q) ? 1 : 0.15;
-      });
+    // Redraw when label/search toggles change (no rebuild needed).
+    void showLabels;
+    void searchQuery;
+    draw();
   });
 
   $effect(() => {
-    const _data = notesStore.graphData;
-    const _local = localGraph;
-    const _selected = selectedNodeId;
+    void notesStore.graphData;
+    void localGraph;
+    void selectedNodeId;
     requestAnimationFrame(() => buildGraph());
   });
 
   onMount(() => {
     void notesStore.fetchGraph().then(() => buildGraph());
+    if (containerEl && 'ResizeObserver' in globalThis) {
+      resizeObserver = new ResizeObserver(() => resize());
+      resizeObserver.observe(containerEl);
+    }
   });
 
   onDestroy(() => {
     simulation?.stop();
+    resizeObserver?.disconnect();
   });
+
+  function resetView() {
+    scale = 1;
+    tx = 0;
+    ty = 0;
+    draw();
+  }
 
   let legendEntries = $derived.by(() => {
     const seen = new Set<string>();
@@ -378,10 +409,7 @@
 
   let stats = $derived.by(() => {
     const g = notesStore.graphData;
-    return {
-      notes: g.nodes.length,
-      links: g.edges.length,
-    };
+    return { notes: g.nodes.length, links: g.edges.length };
   });
 </script>
 
@@ -430,6 +458,14 @@
     >
       Local
     </button>
+    <button
+      type="button"
+      class="h-8 px-2.5 rounded-md text-[11px] border transition-colors hover:bg-white/5"
+      style="background: rgba(22, 25, 38, 0.85); border-color: rgba(120, 130, 160, 0.25); color: rgba(220, 225, 240, 0.9);"
+      onclick={resetView}
+    >
+      Reset view
+    </button>
   </div>
 
   <div
@@ -450,7 +486,16 @@
     </button>
   </div>
 
-  <svg bind:this={svgEl} class="w-full h-full" style="display: block;"></svg>
+  <canvas
+    bind:this={canvasEl}
+    class="w-full h-full touch-none"
+    style="display: block; cursor: grab;"
+    onpointerdown={onPointerDown}
+    onpointermove={onPointerMove}
+    onpointerup={onPointerUp}
+    onpointerleave={() => { tooltipVisible = false; }}
+    onwheel={onWheel}
+  ></canvas>
 
   {#if tooltipVisible}
     <div
@@ -497,7 +542,7 @@
         {/each}
       </div>
       <div class="mt-2 pt-2 border-t text-[10px]" style="border-color: rgba(120,130,160,0.15); color: rgba(150,160,180,0.7);">
-        Gold ring = pinned in agent context
+        Gold ring = pinned in agent context · scroll to zoom, drag to pan
       </div>
     </div>
   {/if}

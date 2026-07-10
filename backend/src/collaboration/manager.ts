@@ -132,6 +132,13 @@ export class CollaborationManager {
           log.info({ relaySessionId }, 'Relay session started');
           relayReady = true;
 
+          // Serve shared providers to remote clients over this relay
+          // connection (separate from the guest-prompt/session path below).
+          const hostRelay = relayClient;
+          void import('./remote-provider-host').then(({ startProviderHost }) =>
+            startProviderHost(hostRelay, 'Host'),
+          );
+
           // Wire up guest prompt handler
           relayClient.onMessage((msg) => {
             if (msg.type === 'guest-prompt') {

@@ -4,6 +4,8 @@
  */
 
 import { authStore } from '$lib/stores/auth.svelte';
+import { isDemoMode } from '$lib/demo-flags';
+import { demoFetch } from '$lib/demo-api';
 
 const DEFAULT_TIMEOUT_MS = 30_000;
 
@@ -18,6 +20,20 @@ export const apiLoading = {
   },
 };
 
+/**
+ * Hard halt flag set by the backend-health sentinel. When the backend is
+ * sustained-unhealthy or version-mismatched, all `apiFetch` calls short-circuit
+ * to a synthetic 503 so callers fail fast instead of queuing forever against a
+ * dead backend. The frontend overlay owns turning this back off once healthy.
+ */
+let _halted = false;
+export function setApiHalted(halted: boolean): void {
+  _halted = halted;
+}
+export function isApiHalted(): boolean {
+  return _halted;
+}
+
 export function getAuthHeaders(): Record<string, string> {
   return authStore.token ? { Authorization: authStore.token } : {};
 }
@@ -27,6 +43,20 @@ export async function apiFetch(
   init: RequestInit = {},
   timeoutMs: number = DEFAULT_TIMEOUT_MS,
 ): Promise<Response> {
+  if (isDemoMode) {
+    // Demo builds have no backend: answer every API call from the in-memory
+    // shim so the UI stays fully interactive with zero network dependencies.
+    return demoFetch(url, init);
+  }
+  if (_halted) {
+    // Backend is down or version-mismatched: fail fast so callers don't
+    // queue against a dead server. Returning a synthetic 503 keeps the
+    // Response-shaped contract intact for downstream JSON parsers.
+    return new Response(JSON.stringify({ ok: false, error: 'Backend unavailable' }), {
+      status: 503,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
   _inflight++;
   try {
     const headers = new Headers(init.headers);
@@ -35,8 +65,11 @@ export async function apiFetch(
     }
     try {
       const projectPath = localStorage.getItem('koryphaios-current-project');
-      if (projectPath && !headers.has('X-Koryphaios-Project')) headers.set('X-Koryphaios-Project', projectPath);
-    } catch { /* SSR/private storage */ }
+      if (projectPath && !headers.has('X-Koryphaios-Project'))
+        headers.set('X-Koryphaios-Project', projectPath);
+    } catch {
+      /* SSR/private storage */
+    }
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), timeoutMs);
     try {

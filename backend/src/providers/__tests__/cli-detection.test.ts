@@ -45,13 +45,16 @@ afterEach(() => {
 });
 
 describe('detectAgentClis', () => {
-  it('reports all five agent CLIs with their provider mappings', () => {
+  it('reports all agent CLIs with their provider mappings', () => {
     const list = detectAgentClis();
+    // The standalone Gemini CLI is unsupported and must never appear here —
+    // Antigravity is its successor.
     expect(list.map((c) => c.id).sort()).toEqual(['antigravity', 'claude', 'cline', 'codex', 'cursor', 'devin', 'grok']);
     const byId = Object.fromEntries(list.map((c) => [c.id, c]));
     expect(byId.claude.provider).toBe('claude');
     expect(byId.codex.provider).toBe('codex');
     expect(byId.antigravity.provider).toBe('antigravity');
+    expect(byId.gemini).toBeUndefined(); // unsupported — never re-add
     expect(byId.grok.provider).toBe('grok'); // Grok Build has its own CLI-harness provider
     expect(byId.cursor.provider).toBe('cursor'); // Cursor CLI harness provider
     expect(byId.devin.provider).toBe('devin'); // Devin CLI harness provider

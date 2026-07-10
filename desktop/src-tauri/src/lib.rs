@@ -71,6 +71,34 @@ fn materialize_embedded_backend(
     Ok(Some(destination))
 }
 
+// ─── Supervisor events (consumed by the frontend backend-health sentinel) ────
+// These give the UI a sub-second signal alongside its own /api/health polling.
+// `backend://down` flips the frontend to its halted "Backend unavailable"
+// overlay; `backend://ready` triggers an immediate health re-check that, if
+// healthy + contract-matched, lifts the overlay.
+
+#[derive(serde::Serialize, Clone)]
+struct BackendDownEvent {
+    reason: &'static str,
+    pid: Option<u32>,
+    message: String,
+}
+
+#[derive(serde::Serialize, Clone)]
+struct BackendReadyEvent {
+    pid: Option<u32>,
+    host: String,
+    port: u16,
+}
+
+fn emit_backend_down(app: &tauri::AppHandle, reason: &'static str, message: String, pid: Option<u32>) {
+    let _ = app.emit("backend://down", BackendDownEvent { reason, pid, message });
+}
+
+fn emit_backend_ready(app: &tauri::AppHandle, pid: Option<u32>, host: String, port: u16) {
+    let _ = app.emit("backend://ready", BackendReadyEvent { pid, host, port });
+}
+
 /// Start the backend embedded in the desktop executable.
 fn spawn_embedded_backend(
     app_handle: &tauri::AppHandle,
@@ -86,6 +114,16 @@ fn spawn_embedded_backend(
     println!("[Koryphaios] Starting embedded backend service");
 
     let mut cmd = std::process::Command::new(&backend_path);
+    // The backend is a console-subsystem .exe on Windows; without CREATE_NO_WINDOW
+    // a Tauri GUI app pops an (empty) console window on every spawn — and the
+    // supervisor respawns on exit, so it would flash repeatedly. stdout/stderr are
+    // already redirected to log files below, so nothing is lost by hiding it.
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        cmd.creation_flags(CREATE_NO_WINDOW);
+    }
     // NEVER pipe without a reader: the backend logs heavily and a full 64KB
     // pipe buffer blocks its writes — the whole backend freezes mid-session.
     // Log to files in the data dir instead (also gives users a crash log).
@@ -119,6 +157,32 @@ fn spawn_embedded_backend(
     cmd.env("KORYPHAIOS_PORT", config.server.port.to_string());
     cmd.env("KORYPHAIOS_HOST", &config.server.host);
     cmd.env("NODE_ENV", "production");
+
+    // Collaboration relay config. RELAY_URL is baked into the backend at build
+    // time (so shipped clients can join out of the box), but the host secret and
+    // TURN creds are runtime-only — forward them from this process's environment
+    // when present so a host can enable hosting from an installed build without
+    // editing files. Never logged.
+    for key in [
+        "RELAY_URL",
+        "RELAY_HOST_SECRET",
+        "TURN_URL",
+        "TURN_USERNAME",
+        "TURN_CREDENTIAL",
+    ] {
+        if let Ok(val) = std::env::var(key) {
+            if !val.is_empty() {
+                cmd.env(key, val);
+            }
+        }
+    }
+
+    // Pin the build-coherent bundle hash so the embedded backend reports it on
+    // /api/health (compat.bundleHash). The frontend sentinel compares this to
+    // its own compile-time hash and halts if they differ — production builds
+    // cannot run a stale frontend against a fresh backend (or vice versa).
+    // In dev this resolves to "dev" on both sides, which skips the check.
+    cmd.env("KORYPHAIOS_FRONTEND_BUNDLE_HASH", EMBEDDED_BUNDLE_HASH);
 
     // Set data directory — also the service's cwd so relative paths (SQLite
     // dbs, koryphaios.json) never land in whatever dir launched the AppImage.
@@ -894,6 +958,7 @@ pub fn run() {
                     let nav_handle = app_handle.clone();
                     let nav_host = host.clone();
                     let nav_process = process.clone();
+                    let ready_handle = app_handle.clone();
                     tauri::async_runtime::spawn(async move {
                         if let Err(e) = wait_for_backend_ready(
                             &nav_host,
@@ -905,6 +970,16 @@ pub fn run() {
                         .await
                         {
                             eprintln!("[Koryphaios] Warning: {}", e);
+                            // Surface the initial readiness failure to the UI so
+                            // the user sees the BackendDownOverlay instead of a
+                            // blank WebView waiting for a navigation that never
+                            // arrives.
+                            emit_backend_down(
+                                &nav_handle,
+                                "initial-timeout",
+                                format!("Backend did not become ready: {e}"),
+                                process_pid,
+                            );
                             // A live-but-unhealthy process would otherwise sit
                             // outside the exit-only watchdog forever. Killing
                             // it hands recovery to the normal restart loop.
@@ -924,12 +999,14 @@ pub fn run() {
                                 }
                             }
                         }
+                        emit_backend_ready(&ready_handle, process_pid, nav_host.clone(), port);
                     });
 
                     // Supervise: if the backend ever dies, restart it and
                     // reload the window. The app and backend live and die
                     // together — never a dead UI over a dead server.
                     let watch_handle = app_handle.clone();
+                    let watch_host = host.clone();
                     tauri::async_runtime::spawn(async move {
                         loop {
                             tokio::time::sleep(tokio::time::Duration::from_secs(3)).await;
@@ -946,7 +1023,17 @@ pub fn run() {
                             if !exited {
                                 continue;
                             }
+                            let dead_pid = BACKEND_PROCESS
+                                .lock()
+                                .ok()
+                                .and_then(|g| g.as_ref().and_then(|p| p.lock().ok().map(|c| c.id())));
                             eprintln!("[Koryphaios] Backend died — restarting...");
+                            emit_backend_down(
+                                &watch_handle,
+                                "exited",
+                                "Backend process exited; supervisor is restarting it.".to_string(),
+                                dead_pid,
+                            );
                             match spawn_embedded_backend(&watch_handle) {
                                 Ok(Some(new_proc)) => {
                                     let new_pid = new_proc.lock().ok().map(|child| child.id());
@@ -954,7 +1041,7 @@ pub fn run() {
                                         *guard = Some(new_proc.clone());
                                     }
                                     let ready = wait_for_backend_ready(
-                                        &host,
+                                        &watch_host,
                                         port,
                                         60_000,
                                         new_pid,
@@ -966,18 +1053,38 @@ pub fn run() {
                                         if let Some(window) =
                                             watch_handle.get_webview_window("main")
                                         {
-                                            let url = format!("http://{}:{}/", host, port);
+                                            let url = format!("http://{}:{}/", watch_host, port);
                                             if let Ok(parsed) = url.parse() {
                                                 let _ = window.navigate(parsed);
                                             }
                                         }
-                                    } else if let Ok(mut child) = new_proc.lock() {
-                                        let _ = child.kill();
+                                        emit_backend_ready(
+                                            &watch_handle,
+                                            new_pid,
+                                            watch_host.clone(),
+                                            port,
+                                        );
+                                    } else {
+                                        emit_backend_down(
+                                            &watch_handle,
+                                            "restart-timeout",
+                                            "Restarted backend did not become ready; retrying.".to_string(),
+                                            new_pid,
+                                        );
+                                        if let Ok(mut child) = new_proc.lock() {
+                                            let _ = child.kill();
+                                        }
                                     }
                                 }
                                 _ => {
                                     eprintln!(
                                         "[Koryphaios] Backend restart failed; retrying in 5s"
+                                    );
+                                    emit_backend_down(
+                                        &watch_handle,
+                                        "restart-failed",
+                                        "Supervisor could not spawn a new backend process; retrying.".to_string(),
+                                        None,
                                     );
                                     tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
                                 }

@@ -6,20 +6,38 @@ export interface Shortcut {
   id: string;
   keys: string[];
   action: string;
+  description?: string;
 }
 
 const STORAGE_KEY = 'koryphaios-shortcuts';
 
 const defaultShortcuts: Shortcut[] = [
-  { id: 'send', keys: ['Mod', 'Enter'], action: 'Send message' },
-  { id: 'settings', keys: ['Mod', ','], action: 'Open settings' },
-  { id: 'new_session', keys: ['Mod', 'N'], action: 'New session' },
-  { id: 'focus_input', keys: ['Mod', 'Shift', 'K'], action: 'Focus input' },
-  { id: 'toggle_palette', keys: ['Mod', 'K'], action: 'Command palette' },
-  { id: 'toggle_zen_mode', keys: ['Mod', 'Shift', 'Z'], action: 'Toggle Zen mode' },
-  { id: 'toggle_yolo', keys: ['Mod', 'Y'], action: 'Toggle YOLO mode' },
-  { id: 'close', keys: ['Esc'], action: 'Close dialogs' },
+  { id: 'send', keys: ['Mod', 'Enter'], action: 'Send message', description: 'Submit task' },
+  { id: 'settings', keys: ['Mod', ','], action: 'Open settings', description: 'Preferences' },
+  { id: 'new_session', keys: ['Mod', 'N'], action: 'New session', description: 'Clear' },
+  { id: 'focus_input', keys: ['Mod', 'Shift', 'K'], action: 'Focus input', description: 'Jump' },
+  {
+    id: 'toggle_palette',
+    keys: ['Mod', 'K'],
+    action: 'Command palette',
+    description: 'Open palette',
+  },
+  {
+    id: 'toggle_zen_mode',
+    keys: ['Mod', 'Shift', 'Z'],
+    action: 'Toggle Zen mode',
+    description: 'Focus',
+  },
+  {
+    id: 'toggle_yolo',
+    keys: ['Mod', 'Y'],
+    action: 'Toggle YOLO mode',
+    description: 'Bypass confirmations',
+  },
+  { id: 'close', keys: ['Esc'], action: 'Close dialogs', description: 'Back' },
 ];
+
+export { defaultShortcuts };
 
 function loadShortcuts(): Shortcut[] {
   try {

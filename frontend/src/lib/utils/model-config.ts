@@ -32,7 +32,7 @@ export function getModelConfigurationWarning(
 ): string | null {
   const authenticatedProviders = providers.filter((provider) => provider.authenticated);
   if (authenticatedProviders.length === 0) {
-    return 'No model provider is configured. Open Settings and connect a provider before chatting.';
+    return 'No provider connected. Open Settings → Providers and connect one before chatting.';
   }
 
   const { provider, model } = parseProviderModelSelection(preferredModel);

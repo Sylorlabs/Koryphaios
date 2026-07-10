@@ -148,4 +148,100 @@ export const collaborationRoutes = new Elysia({ prefix: '/api/collab' })
       set.status = 500;
       return { ok: false, error: err.message };
     }
+  })
+
+  // ─── Shared providers (host side): which providers to serve remotely ──────
+  .get('/providers/shared', async ({ request, set }) => {
+    if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
+    const { getSharedProviders, isAgenticProvider } = await import('../collaboration/remote-provider-host');
+    // Attach the risk classification for the UI's compliance gating.
+    const { classifyProviderShare } = await import('@koryphaios/shared');
+    const status = getContext().providers.getStatus();
+    const shared = new Set(getSharedProviders());
+    return {
+      ok: true,
+      data: {
+        shared: [...shared],
+        candidates: status
+          .filter((p) => p.authenticated && p.enabled)
+          .map((p) => ({
+            provider: p.name,
+            label: p.label ?? p.name,
+            modelCount: p.models.length,
+            // CLI harnesses run on the host and see the guest's files.
+            agentic: isAgenticProvider(p.name),
+            ...classifyProviderShare(p.name),
+          })),
+      },
+    };
+  })
+  .post(
+    '/providers/shared',
+    async ({ request, body, set }) => {
+      if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
+      const { setSharedProviders } = await import('../collaboration/remote-provider-host');
+      setSharedProviders(((body as any)?.providers as string[]) ?? []);
+      return { ok: true };
+    },
+    { body: t.Object({ providers: t.Array(t.String()) }) },
+  )
+
+  // ─── Sandbox policy (host side): how remote CLI turns are confined ────────
+  .get('/providers/sandbox', async ({ request, set }) => {
+    if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
+    const { getSandboxPolicy } = await import('../collaboration/remote-provider-host');
+    const { sandboxCapabilities } = await import('../collaboration/sandbox-runner');
+    return { ok: true, data: { policy: getSandboxPolicy(), capabilities: sandboxCapabilities() } };
+  })
+  .post(
+    '/providers/sandbox',
+    async ({ request, body, set }) => {
+      if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
+      const { setSandboxPolicy } = await import('../collaboration/remote-provider-host');
+      setSandboxPolicy((body as any)?.policy);
+      return { ok: true };
+    },
+    {
+      body: t.Object({
+        policy: t.Object({
+          preset: t.String(),
+          filesystemIsolation: t.Boolean(),
+          allowNetwork: t.Boolean(),
+          allowShell: t.Boolean(),
+          allowEdits: t.Boolean(),
+          allowWebSearch: t.Boolean(),
+          commandBlocklist: t.Array(t.String()),
+          maxRuntimeSeconds: t.Number(),
+        }),
+      }),
+    },
+  )
+
+  // ─── Remote providers (client side): consume a host's shared providers ────
+  .post(
+    '/providers/connect',
+    async ({ request, body, set }) => {
+      if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
+      try {
+        const { connectToProviderHost } = await import('../collaboration/remote-provider-client');
+        const input = body as { joinCode: string; name?: string };
+        const result = await connectToProviderHost(input.joinCode, input.name || 'Koryphaios client');
+        return { ok: true, data: result };
+      } catch (err: any) {
+        set.status = 500;
+        return { ok: false, error: err.message };
+      }
+    },
+    { body: t.Object({ joinCode: t.String(), name: t.Optional(t.String()) }) },
+  )
+  .post('/providers/disconnect', async ({ request, set }) => {
+    if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
+    const { disconnectFromProviderHost } = await import('../collaboration/remote-provider-client');
+    disconnectFromProviderHost();
+    return { ok: true };
+  })
+  .get('/providers/remote-status', async ({ request, set }) => {
+    if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
+    const { remoteProviderStatus } = await import('../collaboration/remote-provider-client');
+    return { ok: true, data: remoteProviderStatus() };
   });

@@ -25,7 +25,8 @@ const DEFAULT_POLICY: CollaborationPolicy = {
   sessionName: 'Team session', modelCatalog: [], joinMode: 'approval', defaultTierId: 'viewer', accessTiers: [
     { id: 'viewer', name: 'Viewer', color: '#60a5fa', allowedModels: [], reasoningByModel: {}, permissions: { viewChat: true, viewSystemMessages: false, viewDiffs: true, viewAgentStatus: true, viewParticipants: true, submitPrompts: false, autoExecutePrompts: false, useTools: false, fullSystemAccess: false, readPaths: [], writePaths: [], commandAllowlist: [], commandBlocklist: [] } },
     { id: 'collaborator', name: 'Collaborator', color: '#f59e0b', allowedModels: [], reasoningByModel: {}, permissions: { viewChat: true, viewSystemMessages: false, viewDiffs: true, viewAgentStatus: true, viewParticipants: true, submitPrompts: true, autoExecutePrompts: false, useTools: false, fullSystemAccess: false, readPaths: [], writePaths: [], commandAllowlist: [], commandBlocklist: [] } },
-    { id: 'yolo', name: 'YOLO', color: '#ef4444', allowedModels: ['*'], reasoningByModel: {}, permissions: { viewChat: true, viewSystemMessages: true, viewDiffs: true, viewAgentStatus: true, viewParticipants: true, submitPrompts: true, autoExecutePrompts: true, useTools: true, fullSystemAccess: true, readPaths: ['**'], writePaths: ['**'], commandAllowlist: ['*'], commandBlocklist: [] } },
+    { id: 'yolo', name: 'YOLO', color: '#ef4444', allowedModels: ['*'], reasoningByModel: {}, permissions: { viewChat: true, viewSystemMessages: true, viewDiffs: true, viewAgentStatus: true, viewParticipants: true, submitPrompts: true, autoExecutePrompts: true, useTools: true, fullSystemAccess: true, readPaths: ['**'], writePaths: ['**'], commandAllowlist: ['*'], commandBlocklist: [], useRemoteProviders: true } },
+    { id: 'models', name: 'Model Access', color: '#a78bfa', allowedModels: ['*'], reasoningByModel: {}, permissions: { viewChat: false, viewSystemMessages: false, viewDiffs: false, viewAgentStatus: false, viewParticipants: false, submitPrompts: false, autoExecutePrompts: false, useTools: true, fullSystemAccess: false, readPaths: [], writePaths: [], commandAllowlist: [], commandBlocklist: [], useRemoteProviders: true } },
   ],
   allowedModels: [], allowPrompts: true, requirePromptApproval: true,
   showDiffs: true, showAgentStatus: true, showParticipants: true,
@@ -635,6 +636,24 @@ const server = Bun.serve<WsData>({
           session.guests.get(String(msg.guestId))?.ws.send(JSON.stringify(msg));
           return;
         }
+        // Remote-inference stream events are addressed to the requesting guest.
+        if (
+          (msg.type === 'inference-event' ||
+            msg.type === 'inference-done' ||
+            msg.type === 'inference-error') &&
+          msg.guestId
+        ) {
+          const { guestId: _g, ...payload } = msg;
+          session.guests.get(String(msg.guestId))?.ws.send(JSON.stringify(payload));
+          return;
+        }
+        // The host's shared-provider catalog fans out to every admitted guest.
+        if (msg.type === 'provider-catalog') {
+          session.guests.forEach((g) => {
+            if (g.admitted) g.ws.send(JSON.stringify(msg));
+          });
+          return;
+        }
         if (msg.type === 'join-decision' && msg.guestId) {
           const guest = session.guests.get(String(msg.guestId));
           if (!guest) return;
@@ -681,6 +700,16 @@ const server = Bun.serve<WsData>({
         if (!guest?.admitted) return;
         const tier = tierFor(session, guest.tierId);
         if (msg.type === 'rtc-offer' || msg.type === 'rtc-ice') {
+          session.hostWs?.send(JSON.stringify({ ...msg, guestId, tierId: guest.tierId }));
+          return;
+        }
+        // Remote inference: the guest runs its OWN workspace and only borrows
+        // the host's providers. Gated by the useRemoteProviders permission,
+        // separate from submitPrompts (which is joining the host's session).
+        if (
+          (msg.type === 'inference-request' || msg.type === 'inference-cancel') &&
+          tier?.permissions.useRemoteProviders
+        ) {
           session.hostWs?.send(JSON.stringify({ ...msg, guestId, tierId: guest.tierId }));
           return;
         }
