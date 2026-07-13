@@ -88,7 +88,7 @@ export const authStore = {
       isInitialized = true;
       return true;
     }
-    if (isInitialized) return true;
+    if (isInitialized) return !!user;
 
     token = loadStoredToken();
     try {

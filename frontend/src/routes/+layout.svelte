@@ -6,7 +6,7 @@
 	import { authStore } from '$lib/stores/auth.svelte';
 	import { isDemoMode } from '$lib/demo.svelte';
 	import { initUrls } from '$lib/utils/api-url';
-	import { startBackendHealthSentinel } from '$lib/stores/backend-health.svelte';
+	import { startBackendHealthSentinel, waitForBackendHealthy } from '$lib/stores/backend-health.svelte';
 	import BackendDownOverlay from '$lib/components/BackendDownOverlay.svelte';
 	import UpdateBanner from '$lib/components/UpdateBanner.svelte';
 	import UpdateDialog from '$lib/components/UpdateDialog.svelte';
@@ -15,6 +15,8 @@
 	let showInitialLoad = $state(true);
 	let isOffline = $state(false);
 	let loadError = $state<string | null>(null);
+	let appReady = $state(false);
+	let retrying = $state(false);
 
 	onMount(() => {
 		// Direct DOM fallback for hiding loading screen
@@ -31,8 +33,17 @@
 		// overlay would block the whole demo after a few failed polls) and seed
 		// the in-memory workspace instead.
 		if (isDemoMode) {
-			import('$lib/demo.svelte').then((m) => m.seedDemo()).catch(() => {});
-			hideLoading();
+			void import('$lib/demo.svelte')
+				.then((m) => {
+					m.seedDemo();
+					appReady = true;
+					hideLoading();
+				})
+				.catch((error: unknown) => {
+					loadError = error instanceof Error
+						? `Koryphaios demo could not start: ${error.message}`
+						: 'Koryphaios demo could not start.';
+				});
 			return;
 		}
 
@@ -43,22 +54,23 @@
 		startBackendHealthSentinel();
 
 		// Resolve backend URLs first, then wait for auth before requesting protected data.
-		Promise.resolve()
+		void Promise.resolve()
 			.then(() => initUrls())
+			.then(() => waitForBackendHealthy())
 			.then(() => authStore.initialize())
 			.then((authReady) => {
-				if (authReady) {
-					return loadProvidersFromApi();
-				}
+				if (!authReady) throw new Error('Backend authentication did not initialize.');
+				return loadProvidersFromApi();
 			})
-			.catch(() => {})
-			.finally(() => {
-			// Hide loading screen after init or on error
-			setTimeout(hideLoading, 500);
-		});
-
-		// Fallback: always hide after max 3 seconds
-		const fallbackTimer = setTimeout(hideLoading, 3000);
+			.then((providersReady) => {
+				if (!providersReady) throw new Error('Backend provider catalog failed to load.');
+				appReady = true;
+				hideLoading();
+			})
+			.catch((error: unknown) => {
+				loadError = error instanceof Error ? error.message : 'Koryphaios could not initialize.';
+				showInitialLoad = true;
+			});
 
 		isOffline = !navigator.onLine;
 		const goOffline = () => { isOffline = true; };
@@ -98,12 +110,27 @@
 		window.addEventListener('click', handleExternalLinks);
 
 		return () => {
-			clearTimeout(fallbackTimer);
 			window.removeEventListener('offline', goOffline);
 			window.removeEventListener('online', goOnline);
 			window.removeEventListener('click', handleExternalLinks);
 		};
 	});
+
+	async function retryStartup() {
+		retrying = true;
+		loadError = null;
+		try {
+			await waitForBackendHealthy();
+			const authReady = await authStore.initialize();
+			if (!authReady || !(await loadProvidersFromApi())) throw new Error('Backend initialization is still incomplete.');
+			appReady = true;
+			showInitialLoad = false;
+		} catch (error: unknown) {
+			loadError = error instanceof Error ? error.message : 'Koryphaios could not initialize.';
+		} finally {
+			retrying = false;
+		}
+	}
 </script>
 
 <svelte:head>
@@ -117,14 +144,22 @@
 			You are offline. Changes may not be saved.
 		</div>
 	{/if}
-	{#if showInitialLoad}
+	{#if showInitialLoad || !appReady}
 		<div class="initial-load" aria-live="polite" data-tauri-drag-region>
-			<div class="initial-load-dot"></div>
-			<span data-tauri-drag-region>Loading Koryphaios…</span>
+			{#if loadError}
+				<div class="startup-error" data-tauri-drag-region="false">
+					<strong>Koryphaios is waiting for its backend</strong>
+					<span>{loadError}</span>
+					<button type="button" onclick={retryStartup} disabled={retrying}>{retrying ? 'Retrying…' : 'Retry now'}</button>
+				</div>
+			{:else}
+				<div class="initial-load-dot"></div>
+				<span data-tauri-drag-region>Starting backend services…</span>
+			{/if}
 		</div>
 	{/if}
 	<main id="main-content">
-		{@render children()}
+		{#if appReady}{@render children()}{/if}
 	</main>
 
 	<!-- Backend unavailable / version-skew overlay. Mounted only when the
@@ -164,6 +199,11 @@
 		background: var(--color-accent);
 		animation: pulse 1s ease-in-out infinite;
 	}
+	.startup-error { display: flex; flex-direction: column; align-items: center; gap: var(--space-md); max-width: 32rem; padding: var(--space-xl); text-align: center; }
+	.startup-error strong { color: var(--color-text-primary); font-size: var(--text-lg); }
+	.startup-error span { color: var(--color-text-secondary); font-size: var(--text-sm); }
+	.startup-error button { padding: var(--space-sm) var(--space-lg); border: 1px solid var(--color-accent); border-radius: var(--radius-md); background: var(--color-accent); color: var(--color-surface-0); cursor: pointer; }
+	.startup-error button:disabled { opacity: 0.6; cursor: wait; }
 	@keyframes pulse {
 		0%, 100% { opacity: 1; }
 		50% { opacity: 0.4; }

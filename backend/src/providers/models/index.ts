@@ -18,7 +18,29 @@ import { ClaudeCodeModels } from './claude-code';
 import { GrokModels } from './grok';
 import { AntigravityModels } from './antigravity';
 import { JulesModels } from './jules';
-import { ZAIModels, KimiCodeModels, DeepSeekModels, MoonshotModels } from './newproviders';
+import {
+  BasetenModels,
+  CerebrasModels,
+  CloudflareModels,
+  CortecsModels,
+  DeepInfraModels,
+  DeepSeekModels,
+  FireworksModels,
+  GitLabModels,
+  HuggingFaceModels,
+  IonetModels,
+  KimiCodeModels,
+  MiniMaxModels,
+  MoonshotModels,
+  NebiusModels,
+  OllamaCloudModels,
+  ScalewayModels,
+  TogetherAIModels,
+  VeniceModels,
+  VercelModels,
+  ZAIModels,
+  ZenMuxModels,
+} from './newproviders';
 
 // Combined fallback catalog — providers refresh live model lists from APIs/CLIs when connected.
 // Entries here supply metadata until discovery succeeds and enrich ids that match remotely.
@@ -46,6 +68,23 @@ const ALL_MODELS: ModelDef[] = [
   ...ZAIModels,
   ...DeepSeekModels,
   ...MoonshotModels,
+  ...TogetherAIModels,
+  ...CerebrasModels,
+  ...FireworksModels,
+  ...HuggingFaceModels,
+  ...DeepInfraModels,
+  ...MiniMaxModels,
+  ...NebiusModels,
+  ...VeniceModels,
+  ...ScalewayModels,
+  ...IonetModels,
+  ...ZenMuxModels,
+  ...OllamaCloudModels,
+  ...CloudflareModels,
+  ...VercelModels,
+  ...GitLabModels,
+  ...BasetenModels,
+  ...CortecsModels,
 ];
 
 // Map for fast lookup by ID

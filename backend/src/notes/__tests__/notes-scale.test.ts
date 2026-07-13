@@ -118,16 +118,20 @@ describe('frontmatter, aliases, ghost nodes', () => {
 
   test('wikilinks resolve by alias', async () => {
     invalidateNotesCache();
+    // Keep this unit test independent even when it is run directly against a
+    // developer's long-lived database instead of the isolated suite runner.
+    const suffix = nanoid();
+    const alias = `AKA-${suffix}`;
     const aliased = await createNote({
-      title: 'Canonical Title',
-      content: '---\naliases: [AKA]\n---\nI go by AKA.',
+      title: `Canonical Title ${suffix}`,
+      content: `---\naliases: [${alias}]\n---\nI go by ${alias}.`,
     });
-    await createNote({ title: 'Refs', content: 'linking [[AKA]] by alias' });
-    expect(await resolveNoteRef('AKA')).toBe(aliased.id);
-    expect(await resolveNoteRef('aka')).toBe(aliased.id); // case-insensitive
+    await createNote({ title: `Refs ${suffix}`, content: `linking [[${alias}]] by alias` });
+    expect(await resolveNoteRef(alias)).toBe(aliased.id);
+    expect(await resolveNoteRef(alias.toLowerCase())).toBe(aliased.id); // case-insensitive
     const graph = await getGraphData();
     // The alias link is a real edge, not a ghost.
-    const refsNode = graph.nodes.find((n) => n.title === 'Refs');
+    const refsNode = graph.nodes.find((n) => n.title === `Refs ${suffix}`);
     const edgeToCanonical = graph.edges.some(
       (e) => e.from === refsNode!.id && e.to === aliased.id && !e.unresolved,
     );

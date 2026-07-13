@@ -134,15 +134,13 @@
   const agentRail = useAgentRail();
 
   useSessionSync({
-    // Guided demo: the scripted loop owns the feed — never clobber it.
-    // Full demo: real session sync, served by the in-memory shim, so
-    // switching sessions restores the tab-scoped conversation history.
-    disabled: isGuidedDemo,
+    // Both demo variants are served by the in-memory API shim. This keeps the
+    // guided sample's four workflows independently navigable.
+    disabled: false,
     onActiveSessionChange: () => {
       agentRail.selectedAgentId = '';
-      // Full demo: finalize any simulated turn left running in the session
-      // the user just navigated away from.
-      if (isFullDemo) void import('$lib/demo.svelte').then((m) => m.demoOnSessionSwitch());
+      // Finalize or stop a simulated turn left running in the prior session.
+      if (isDemoMode) void import('$lib/demo.svelte').then((m) => m.demoOnSessionSwitch());
     },
   });
 
@@ -1111,7 +1109,7 @@ RULES:
   );
   let connectionStatusLabel = $derived(
     isDemoMode
-      ? 'Demo sandbox — nothing is saved'
+      ? 'Realtime online'
       : wsStore.status === 'connected'
         ? 'Realtime connected'
         : wsStore.status === 'connecting'

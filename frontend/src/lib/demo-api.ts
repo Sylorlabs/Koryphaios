@@ -207,8 +207,9 @@ const BILLING_CREDITS = {
         { period: '30d', tokensIn: 3_400_000, tokensOut: 810_000, inferenceValueUsd: 47.3 },
       ],
       byModel: [
-        { model: 'gpt-5.6-sol', tokensIn: 2_900_000, tokensOut: 700_000, inferenceValueUsd: 41.0 },
-        { model: 'gpt-5.4-mini', tokensIn: 500_000, tokensOut: 110_000, inferenceValueUsd: 6.3 },
+        { model: 'gpt-5.6-terra', tokensIn: 850_000, tokensOut: 180_000, inferenceValueUsd: 13.2 },
+        { model: 'gpt-5.6-sol', tokensIn: 2_100_000, tokensOut: 510_000, inferenceValueUsd: 30.6 },
+        { model: 'gpt-5.6-luna', tokensIn: 450_000, tokensOut: 120_000, inferenceValueUsd: 5.1 },
       ],
     },
   ],

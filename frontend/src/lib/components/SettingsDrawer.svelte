@@ -477,7 +477,7 @@ import { apiFetch, parseJsonResponse } from '$lib/api.svelte';
     <!-- Header -->
     <div class="flex items-center justify-between px-6 py-4 shrink-0 border-b" style="border-color: var(--color-border); background: var(--color-surface-0);">
       <h2 id="settings-title" class="text-base font-semibold" style="color: var(--color-text-primary);">Settings</h2>
-      <button class="p-1.5 rounded-lg transition-colors hover:bg-[var(--color-surface-3)]" style="color: var(--color-text-muted);" onclick={onClose} aria-label="Close">
+      <button type="button" class="p-1.5 rounded-lg transition-colors hover:bg-[var(--color-surface-3)]" style="color: var(--color-text-muted);" onclick={() => onClose?.()} aria-label="Close settings">
         <X size={18} />
       </button>
     </div>

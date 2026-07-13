@@ -310,19 +310,22 @@ function createProvidersStore() {
 
   // ─── API: status & catalog ─────────────────────────────────────────────
 
-  async function loadProvidersFromApi(): Promise<void> {
-    if (!browser) return;
+  async function loadProvidersFromApi(): Promise<boolean> {
+    if (!browser) return false;
     try {
       const res = await apiFetch(apiUrl('/api/providers'));
       if (!res.ok) {
         if (import.meta.env.DEV) console.warn(`Failed to load providers: HTTP ${res.status}`);
-        return;
+        return false;
       }
-      const json = await parseJsonResponse<{ data?: ProviderInfo[] }>(res);
+      const json = await parseJsonResponse<{ ok?: boolean; data?: ProviderInfo[] }>(res);
       const list = json?.data;
-      if (Array.isArray(list)) statusList = list;
+      if (json?.ok !== true || !Array.isArray(list)) return false;
+      statusList = list;
+      return true;
     } catch (error) {
       if (import.meta.env.DEV) console.warn('Failed to load providers from API', error);
+      return false;
     }
   }
 
@@ -1636,6 +1639,6 @@ function createProvidersStore() {
 export const providersStore = createProvidersStore();
 
 /** @deprecated Use providersStore.loadProvidersFromApi — kept for gradual migration */
-export async function loadProvidersFromApi(): Promise<void> {
+export async function loadProvidersFromApi(): Promise<boolean> {
   return providersStore.loadProvidersFromApi();
 }

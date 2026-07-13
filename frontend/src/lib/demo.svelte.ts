@@ -71,9 +71,19 @@ const DEMO_PROVIDERS = [
     enabled: true,
     authenticated: true,
     authSource: 'CLI session',
-    models: ['gpt-5.6-sol', 'gpt-5.4-mini'],
-    selectedModels: ['gpt-5.6-sol', 'gpt-5.4-mini'],
+    models: ['gpt-5.6-terra', 'gpt-5.6-sol', 'gpt-5.6-luna'],
+    selectedModels: ['gpt-5.6-terra', 'gpt-5.6-sol', 'gpt-5.6-luna'],
     allAvailableModels: [
+      {
+        id: 'gpt-5.6-terra',
+        name: 'GPT 5.6 Terra',
+        provider: 'codex',
+        contextWindow: 400_000,
+        maxOutputTokens: 128_000,
+        contextVerified: true,
+        canReason: true,
+        reasoningLevels: ['low', 'medium', 'high', 'xhigh'],
+      },
       {
         id: 'gpt-5.6-sol',
         name: 'GPT 5.6 Sol',
@@ -85,14 +95,14 @@ const DEMO_PROVIDERS = [
         reasoningLevels: ['low', 'medium', 'high', 'xhigh'],
       },
       {
-        id: 'gpt-5.4-mini',
-        name: 'GPT-5.4 Mini',
+        id: 'gpt-5.6-luna',
+        name: 'GPT 5.6 Luna',
         provider: 'codex',
         contextWindow: 400_000,
         maxOutputTokens: 128_000,
         contextVerified: true,
         canReason: true,
-        reasoningLevels: ['low', 'medium', 'high'],
+        reasoningLevels: ['low', 'medium', 'high', 'xhigh'],
       },
     ],
     hideModelSelector: false,
@@ -132,7 +142,7 @@ const DEMO_PROVIDERS = [
     label: 'Google',
     enabled: true,
     authenticated: true,
-    authSource: 'API key',
+    authSource: 'Google account',
     models: ['gemini-3.1-pro'],
     selectedModels: ['gemini-3.1-pro'],
     allAvailableModels: [
@@ -175,6 +185,7 @@ function clearTimers() {
 // has been recorded. Lets a mid-turn session switch finalize the turn instead
 // of leaking streamed text into the newly opened session.
 let pendingReplySid: string | null = null;
+let guidedPlaybackSessionId: string | null = null;
 
 function activeSessionId(): string {
   return sessionStore.activeSessionId || 's1';
@@ -204,6 +215,7 @@ function spawnWorkers(sessionId: string) {
 function playTurn(prompt: string, opts: { loop: boolean; clear: boolean }) {
   clearTimers();
   const sid = activeSessionId();
+  if (opts.loop) guidedPlaybackSessionId = sid;
   if (isFullDemo) pendingReplySid = sid;
   if (opts.clear) feedStore.clearFeed();
   // Remove the workers so they visibly fly back in from the top when Kory
@@ -329,6 +341,31 @@ export function seedDemo(): void {
       mkSession('s4', 'API v2 migration', 90_000_000, 0.37, 45),
     ];
     registerDemoSessions(sessions);
+    // Each visible chat is a real, independently seeded workflow. Selecting a
+    // session loads its own conversation instead of reusing the analytics run.
+    const seededChats = {
+      s1: [
+        ['user', SCRIPT_PROMPT],
+        ['assistant', REPLY],
+      ],
+      s2: [
+        ['user', 'Refactor authentication to support passkeys and preserve existing OAuth sessions.'],
+        ['assistant', 'I mapped the current session boundary, added a passkey enrollment flow, and kept the OAuth callback contract stable. The migration includes rollback-safe session invalidation tests.'],
+      ],
+      s3: [
+        ['user', 'Fix the CI pipeline failures and make preview deployments deterministic.'],
+        ['assistant', 'The pipeline now caches Bun dependencies by lockfile, runs the typecheck before the test fan-out, and publishes one immutable preview artifact per commit.'],
+      ],
+      s4: [
+        ['user', 'Migrate the public API to v2 without breaking existing integrations.'],
+        ['assistant', 'The v2 routes use explicit versioned schemas, translate v1 payloads during the deprecation window, and include contract tests for both response shapes.'],
+      ],
+    } as const;
+    for (const [sessionId, messages] of Object.entries(seededChats)) {
+      for (const [role, content] of messages) {
+        recordDemoMessage(sessionId, role, content, role === 'assistant' ? 'gpt-5.6-sol' : undefined);
+      }
+    }
     sessionStore.seedDemoSessions(sessions, 's1');
     playTurn(SCRIPT_PROMPT, { loop: true, clear: true });
   }
@@ -367,6 +404,16 @@ export function demoStop(): void {
  *  newly opened one. A turn running in the still-active session is left alone
  *  (this also fires right after demoSend auto-creates a session). */
 export function demoOnSessionSwitch(): void {
+  // Guided mode has four independent canned chats. Stop the animated run
+  // before its stale timers can write analytics events into the newly selected
+  // workflow; session sync then atomically swaps in that chat's own history.
+  if (isGuidedDemo && guidedPlaybackSessionId && sessionStore.activeSessionId !== guidedPlaybackSessionId) {
+    const previousSessionId = guidedPlaybackSessionId;
+    clearTimers();
+    guidedPlaybackSessionId = null;
+    agentStore.updateAgentStatus('kory-manager', 'done', previousSessionId);
+    return;
+  }
   if (!isFullDemo || !pendingReplySid) return;
   if (sessionStore.activeSessionId === pendingReplySid) return;
   clearTimers();

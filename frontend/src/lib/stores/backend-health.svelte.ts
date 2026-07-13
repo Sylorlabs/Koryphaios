@@ -255,6 +255,26 @@ export function recheckBackendHealth(): void {
   void tick();
 }
 
+/**
+ * Startup gate: resolve only after the backend has passed its health and
+ * compatibility checks. The app must not render a partially initialized UI.
+ */
+export async function waitForBackendHealthy(timeoutMs = 30_000): Promise<void> {
+  if (!browser) return;
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const body = await fetchHealth();
+    const outcome = evaluate(body);
+    publish(outcome, body);
+    if (outcome.status === 'healthy') return;
+    if (outcome.status === 'mismatch') {
+      throw new Error('Frontend and backend are incompatible. Restart Koryphaios.');
+    }
+    await new Promise((resolve) => setTimeout(resolve, 500));
+  }
+  throw new Error('The Koryphaios backend did not become ready in time.');
+}
+
 export const backendHealth = {
   get status() {
     return _status;
