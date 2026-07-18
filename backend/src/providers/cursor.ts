@@ -11,6 +11,9 @@ import { spawn } from 'node:child_process';
 import { whichBinary } from './cli-detection';
 import { detectCursorCLILogin } from './auth-utils';
 import { providerLog } from '../logger';
+import { homedir } from 'node:os';
+import { join } from 'node:path';
+import { buildSoftJail, wrapCommand } from '../collaboration/sandbox-runner';
 import {
   type Provider,
   type ProviderEvent,
@@ -35,7 +38,9 @@ function buildPrompt(systemPrompt: string | undefined, messages: ProviderMessage
       typeof m.content === 'string'
         ? m.content
         : m.content
-            .map((b) => (b.type === 'text' ? b.text : b.type === 'image' ? '[image attachment]' : ''))
+            .map((b) =>
+              b.type === 'text' ? b.text : b.type === 'image' ? '[image attachment]' : '',
+            )
             .filter(Boolean)
             .join('\n');
     if (!content.trim()) continue;
@@ -129,7 +134,10 @@ export class CursorProvider implements Provider {
       if (models.length > 0) {
         this.cachedModels = models;
         this.modelsFetchedAt = Date.now();
-        providerLog.debug({ provider: 'cursor', count: models.length }, 'Cursor model list refreshed');
+        providerLog.debug(
+          { provider: 'cursor', count: models.length },
+          'Cursor model list refreshed',
+        );
       }
     };
     child.once('exit', finish);
@@ -183,10 +191,15 @@ export class CursorProvider implements Provider {
     const cliModel = this.resolveCliModel(request.model);
     if (cliModel && cliModel !== 'auto') args.push('--model', cliModel);
 
-    const child = spawn(bin, args, {
-      cwd: request.workingDirectory?.trim() || process.cwd(),
+    const cwd = request.workingDirectory?.trim() || process.cwd();
+    const jail = request.sandbox ? buildSoftJail(process.env, [join(homedir(), '.cursor')]) : null;
+    const wrapped = request.sandbox
+      ? wrapCommand(bin, args, { cwd, policy: request.sandbox })
+      : { command: bin, args };
+    const child = spawn(wrapped.command, wrapped.args, {
+      cwd,
       stdio: ['ignore', 'pipe', 'pipe'],
-      env: { ...process.env },
+      env: jail?.env ?? { ...process.env },
     });
 
     const onAbort = () => {
@@ -197,6 +210,7 @@ export class CursorProvider implements Provider {
       }
     };
     request.signal?.addEventListener('abort', onAbort, { once: true });
+    child.once('close', () => jail?.cleanup());
     const timeout = setTimeout(() => {
       providerLog.warn({ provider: 'cursor' }, 'Cursor harness timed out — killing CLI');
       onAbort();
@@ -227,7 +241,8 @@ export class CursorProvider implements Provider {
             continue;
           }
           for (const event of this.mapLine(row)) {
-            if (event.type === 'content_delta' || event.type === 'thinking_delta') sawContent = true;
+            if (event.type === 'content_delta' || event.type === 'thinking_delta')
+              sawContent = true;
             if (event.type === 'complete') emittedComplete = true;
             yield event;
           }

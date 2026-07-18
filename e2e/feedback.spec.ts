@@ -8,7 +8,38 @@ async function mockAppApi(
   },
 ) {
   await page.route('**/api/**', async (route) => {
-    if (route.request().url().includes('/api/feedback')) {
+    const url = route.request().url();
+    if (url.includes('/api/health')) {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          ok: true,
+          data: { id: 'koryphaios', version: '1.0.0', pid: 1, compat: { serverStartedAt: 1 } },
+        }),
+      });
+      return;
+    }
+    if (url.includes('/api/auth/session') && route.request().method() === 'POST') {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ ok: true, data: { bearerToken: 'test-local-token' } }),
+      });
+      return;
+    }
+    if (url.includes('/api/auth/me')) {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          ok: true,
+          data: { user: { id: 'local-user', username: 'Local User', isAdmin: true } },
+        }),
+      });
+      return;
+    }
+    if (url.includes('/api/feedback')) {
       const response = feedback(route.request().postDataJSON());
       await route.fulfill({
         status: response.status,

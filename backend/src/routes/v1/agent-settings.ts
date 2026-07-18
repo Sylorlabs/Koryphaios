@@ -4,6 +4,7 @@ import { getContext } from '../../context';
 import {
   loadAgentSettings,
   saveAgentSettings,
+  mergeAgentSettings,
   resetAgentSettings,
   initializePreferences,
   readPreferences,
@@ -19,19 +20,16 @@ import { join } from 'node:path';
 import { requireLocalRouteAuth } from '../../auth/local-route-auth';
 
 export const agentSettingsRoutes = new Elysia({ prefix: '/api/agent' })
-  .get(
-    '/threads/:sessionId',
-    async ({ request, params: { sessionId }, set }) => {
-      if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
-      const { sessions, kory } = getContext();
-      const session = await sessions.get(sessionId);
-      if (!session) {
-        set.status = 404;
-        return { ok: false, error: 'Session not found' };
-      }
-      return { ok: true, data: kory.getAgentThreadsForSession(sessionId) };
-    },
-  )
+  .get('/threads/:sessionId', async ({ request, params: { sessionId }, set }) => {
+    if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
+    const { sessions, kory } = getContext();
+    const session = await sessions.get(sessionId);
+    if (!session) {
+      set.status = 404;
+      return { ok: false, error: 'Session not found' };
+    }
+    return { ok: true, data: kory.getAgentThreadsForSession(sessionId) };
+  })
   .get(
     '/:agentId/thread',
     async ({ request, params: { agentId }, query, set }) => {
@@ -106,8 +104,8 @@ export const agentSettingsRoutes = new Elysia({ prefix: '/api/agent' })
     try {
       const root = getRequestProjectRoot(request);
       const currentSettings = loadAgentSettings(root);
-      const newSettings = { ...currentSettings, ...(body as any) };
-      saveAgentSettings(root, newSettings as any);
+      const newSettings = mergeAgentSettings(currentSettings, body);
+      saveAgentSettings(root, newSettings);
       return {
         ok: true,
         data: newSettings,

@@ -15,7 +15,7 @@ import {
 } from './types';
 import { OpenAIProvider } from './openai';
 import { AnthropicProvider } from './anthropic';
-import { GeminiProvider } from './gemini';
+import { GoogleProvider } from './google';
 
 export type CustomProviderKind = 'openai' | 'anthropic' | 'gemini';
 
@@ -29,7 +29,7 @@ export class CustomProvider implements Provider {
     if (kind === 'anthropic') {
       this.inner = new AnthropicProvider(config, config.name);
     } else if (kind === 'gemini') {
-      this.inner = new GeminiProvider({ ...config });
+      this.inner = new GoogleProvider({ ...config });
     } else {
       this.inner = new OpenAIProvider(config, config.name, config.baseUrl);
     }

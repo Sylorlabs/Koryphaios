@@ -5,7 +5,7 @@
   import FeedEntry from './FeedEntry.svelte';
   import VirtualList from './VirtualList.svelte';
   import AnimatedStatusIcon from './AnimatedStatusIcon.svelte';
-  import { MessageSquare, ArrowDown } from 'lucide-svelte';
+  import { MessageSquare, ArrowDown, Send } from 'lucide-svelte';
   import { untrack } from 'svelte';
   import { createAutoScroll } from '$lib/utils/autoscroll.svelte';
 
@@ -98,6 +98,7 @@
     if (provider === 'codex') return 'Codex';
     if (provider === 'anthropic') return 'Anthropic';
     if (provider === 'google') return 'Google';
+    if (provider === 'aistudio') return 'Google AI Studio';
     if (provider === 'xai') return 'xAI';
     if (provider === 'openrouter') return 'OpenRouter';
     if (provider === 'vertexai') return 'Vertex AI';
@@ -119,6 +120,13 @@
           {providerLabel(agent.identity.provider)} · {agent.identity.model} · {agent.identity.domain}
         </div>
       </div>
+    </div>
+    <div class="ml-4 flex shrink-0 items-center gap-2 rounded-lg border px-3 py-1.5" style="border-color: var(--color-border); background: var(--color-surface-2);">
+      <AnimatedStatusIcon status={agent.status} size={12} isManager={false} />
+      <span class="text-[10px] font-bold uppercase tracking-wider" style="color: {agent.status === 'error' ? 'var(--color-error)' : agent.status === 'done' ? 'var(--color-success)' : 'var(--color-accent)'};">{agent.status.replace('_', ' ')}</span>
+      <span class="h-3 w-px" style="background: var(--color-border);"></span>
+      <Send size={11} style="color: var(--color-accent);" />
+      <span class="text-[10px]" style="color: var(--color-text-secondary);">Composer steers this agent directly</span>
     </div>
   </div>
 

@@ -60,7 +60,6 @@ export const PROVIDER_SHARE_RISK: Record<string, ProviderShareClassification> = 
     risk: 'prohibited',
     reason: "Sharing Copilot violates GitHub's terms; proxy usage is a bannable offense.",
   },
-  'google-subscription': { risk: 'prohibited', reason: 'Retired provider — do not use.' },
   grok: {
     risk: 'caution',
     reason:

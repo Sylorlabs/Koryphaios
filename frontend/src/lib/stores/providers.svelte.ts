@@ -26,6 +26,11 @@ export interface StoredProviderAccount {
   hasApiKey: boolean;
   hasAuthToken: boolean;
   hasBaseUrl: boolean;
+  source?: 'saved' | 'cli-autodetect';
+  email?: string | null;
+  plan?: string | null;
+  health?: 'ready' | 'expired' | 'unknown';
+  profileDir?: string;
 }
 
 export type SavedAccountSummary = {
@@ -108,14 +113,13 @@ export const browserAuthProviders = new Set([
   'claude',
   'grok',
   'antigravity',
-  // NOTE: 'google-subscription' (the Gemini CLI) is RETIRED — never re-add
-  // it. Gemini models are served by the plain 'google' (API-key) provider.
 ]);
 
 const PROVIDER_LABELS: Record<string, string> = {
   anthropic: 'Anthropic',
   openai: 'OpenAI',
   google: 'Google',
+  aistudio: 'Google AI Studio',
   xai: 'xAI',
   openrouter: 'OpenRouter',
   groq: 'Groq',
@@ -141,7 +145,8 @@ const TOKEN_PLACEHOLDERS: Record<string, string> = {
   jules: 'Jules API key (jules.google.com/settings)',
   anthropic: 'Anthropic auth token',
   copilot: 'GitHub token or Copilot auth token',
-  google: 'OAuth or access token',
+  google: 'Gemini API key',
+  aistudio: 'Gemini API key (AI Studio)',
   kimicode: 'Auth with Kimi Code',
   azure: 'Bearer token',
 };
@@ -156,6 +161,8 @@ function createProvidersStore() {
   let statusList = $state<ProviderInfo[]>([]);
   let availableProviderTypes = $state<Array<{ name: string; authMode: string }>>([]);
   let detectedClis = $state<DetectedCli[]>([]);
+  let cliAccountSelectionRequired = $state<string[]>([]);
+  let cliAccountNoticeShown = false;
 
   let keyInputs = $state<Record<string, string>>({});
   let tokenInputs = $state<Record<string, string>>({});
@@ -322,10 +329,37 @@ function createProvidersStore() {
       const list = json?.data;
       if (json?.ok !== true || !Array.isArray(list)) return false;
       statusList = list;
+      if (!cliAccountNoticeShown) {
+        cliAccountNoticeShown = true;
+        void loadCliAccountAmbiguity();
+      }
       return true;
     } catch (error) {
       if (import.meta.env.DEV) console.warn('Failed to load providers from API', error);
       return false;
+    }
+  }
+
+  async function loadCliAccountAmbiguity(): Promise<void> {
+    try {
+      const res = await apiFetch(apiUrl('/api/providers/cli-accounts'));
+      const data = await parseJsonResponse<{ ok?: boolean; selectionRequired?: string[] }>(res);
+      cliAccountSelectionRequired = data.ok && Array.isArray(data.selectionRequired)
+        ? data.selectionRequired
+        : [];
+      if (cliAccountSelectionRequired.length > 0) {
+        const labels = cliAccountSelectionRequired.map((name) => PROVIDER_LABELS[name] ?? name).join(', ');
+        toastStore.warning(
+          `Multiple CLI accounts detected for ${labels}. Choose which accounts Koryphaios may use.`,
+          {
+            duration: 15_000,
+            actionLabel: 'Choose accounts',
+            action: () => window.dispatchEvent(new CustomEvent('open-provider-account-settings')),
+          },
+        );
+      }
+    } catch {
+      cliAccountSelectionRequired = [];
     }
   }
 
@@ -764,14 +798,18 @@ function createProvidersStore() {
     for (const acc of accounts) {
       if (!seen.has(acc.id)) ordered.push(acc);
     }
+    const staged = fallbackItems[name];
+    // This getter is called while Svelte evaluates the template. Mutating a
+    // rune here triggers state_unsafe_mutation, so only reuse an already
+    // staged drag order when it still describes the same account set.
     if (
-      !fallbackItems[name] ||
-      fallbackItems[name].length !== ordered.length ||
-      fallbackItems[name].some((a, i) => a.id !== ordered[i].id)
+      staged &&
+      staged.length === ordered.length &&
+      staged.every((account) => ordered.some((candidate) => candidate.id === account.id))
     ) {
-      fallbackItems[name] = [...ordered];
+      return staged;
     }
-    return fallbackItems[name];
+    return ordered;
   }
 
   function handleFallbackDndFinalize(name: string, items: StoredProviderAccount[]): void {
@@ -1279,6 +1317,7 @@ function createProvidersStore() {
       anthropic: 'Anthropic',
       openai: 'OpenAI',
       google: 'Google',
+      aistudio: 'Google AI Studio',
       xai: 'xAI',
       openrouter: 'OpenRouter',
       groq: 'Groq',
@@ -1365,6 +1404,7 @@ function createProvidersStore() {
       anthropic: 'sk-ant-...',
       openai: 'sk-...',
       google: 'AIza...',
+      aistudio: 'AIza...',
       xai: 'xai-...',
       openrouter: 'sk-or-...',
       groq: 'gsk_...',
@@ -1475,6 +1515,9 @@ function createProvidersStore() {
     },
     get detectedClis() {
       return detectedClis;
+    },
+    get cliAccountSelectionRequired() {
+      return cliAccountSelectionRequired;
     },
     get providerList() {
       return providerList;

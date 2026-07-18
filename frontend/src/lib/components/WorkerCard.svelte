@@ -34,6 +34,7 @@
     if (provider === 'codex') return 'Codex';
     if (provider === 'anthropic') return 'Anthropic';
     if (provider === 'google') return 'Google';
+    if (provider === 'aistudio') return 'Google AI Studio';
     if (provider === 'xai') return 'xAI';
     if (provider === 'openrouter') return 'OpenRouter';
     if (provider === 'vertexai') return 'Vertex AI';
@@ -50,20 +51,24 @@
   );
 
   let statusText = $derived(
-    agent.status === 'thinking' ? 'Thinking...' :
-    agent.status === 'streaming' ? 'Generating...' :
-    agent.status === 'tool_calling' ? `Tool: ${agent.toolCalls.at(-1)?.name ?? '...'}` :
-    agent.status === 'verifying' ? 'Verifying...' :
-    agent.status === 'compacting' ? 'Compacting context...' :
-    agent.status === 'waiting_user' ? 'Waiting for input...' :
+    agent.status === 'thinking' ? 'Thinking…' :
+    agent.status === 'analyzing' ? 'Analyzing…' :
+    agent.status === 'streaming' ? 'Responding…' :
+    agent.status === 'tool_calling' ? `Running ${agent.toolCalls.at(-1)?.name ?? 'tool'}…` :
+    agent.status === 'reading' ? 'Reading files…' :
+    agent.status === 'writing' ? 'Editing files…' :
+    agent.status === 'searching' ? 'Searching…' :
+    agent.status === 'verifying' ? 'Verifying…' :
+    agent.status === 'criticizing' ? 'Reviewing…' :
+    agent.status === 'compacting' ? 'Compacting context…' :
+    agent.status === 'waiting_user' ? 'Waiting for your input' :
+    agent.status === 'waiting' ? 'Waiting on a process' :
     agent.status === 'done' ? 'Complete' :
-    agent.status === 'error' ? 'Error' :
+    agent.status === 'error' ? 'Failed' :
     'Idle'
   );
 
-  let isActive = $derived(
-    agent.status === 'thinking' || agent.status === 'streaming' || agent.status === 'tool_calling' || agent.status === 'compacting'
-  );
+  let isActive = $derived(!['idle', 'done', 'error'].includes(agent.status));
 
   let contextPercent = $derived(
     agent.contextMax > 0 ? Math.min((agent.tokensUsed / agent.contextMax) * 100, 100) : 0
@@ -158,4 +163,13 @@
       </div>
     {/if}
   {/if}
+
+  {#if agent.task}
+    <div class="mt-2 line-clamp-2 text-[10px] leading-relaxed" style="color: var(--color-text-muted);" title={agent.task}>
+      {agent.task}
+    </div>
+  {/if}
+  <div class="mt-2 border-t pt-1.5 text-[9px] font-bold uppercase tracking-wider" style="border-color: var(--color-border); color: {selected ? 'var(--color-accent)' : 'var(--color-text-muted)'};">
+    {selected ? 'Transcript open · type below to steer' : 'Open transcript & steer'}
+  </div>
 </div>

@@ -4,7 +4,7 @@
 import { Elysia, t } from 'elysia';
 import { cors } from '@elysiajs/cors';
 import { nanoid } from 'nanoid';
-import { writeFileSync } from 'node:fs';
+import { readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import type { Server } from 'bun';
 
@@ -40,11 +40,15 @@ import { notesRoutes } from './routes/v1/notes';
 import { workspaceRoutes } from './routes/v1/workspace';
 import { feedbackRoutes } from './routes/v1/feedback';
 
+const SERVER_STARTED_AT = Date.now();
+const BACKEND_SERVICE_ID = 'koryphaios';
+
 // Define base Elysia App for export
 const baseApp = new Elysia()
   .get('/api/health', () => ({
     ok: true,
     data: {
+      id: BACKEND_SERVICE_ID,
       version: VERSION,
       uptime: process.uptime(),
       // Lets the desktop supervisor reject a stale process already bound to
@@ -59,7 +63,7 @@ const baseApp = new Elysia()
         currentFrontend: COMPAT.currentFrontend,
         bundleHash: resolveBundleHash(),
         bundleHashEnforced: isBundleHashEnforced(),
-        serverStartedAt: Date.now(),
+        serverStartedAt: SERVER_STARTED_AT,
       },
     },
   }))
@@ -99,6 +103,23 @@ async function main() {
   setContext(ctx);
   const { config, kory, providers, sessions, messages, wsManager } = ctx;
 
+  // Default to 127.0.0.1 for local-only security. A network-exposed server
+  // keeps the normal per-client rate limit below; a desktop loopback server
+  // must not throttle its own UI, health sentinel, or auxiliary windows as
+  // though they were unrelated public clients.
+  const requestedPort = Number(process.env.KORYPHAIOS_PORT);
+  const serverConfig = {
+    // The desktop launcher owns the dev port contract. Respect its explicit
+    // override so it can keep frontend, backend, and Tauri on the same
+    // isolated stack when the default port is occupied.
+    port:
+      Number.isInteger(requestedPort) && requestedPort > 0 && requestedPort <= 65_535
+        ? requestedPort
+        : (config.server?.port ?? 3001),
+    host: process.env.KORYPHAIOS_HOST || config.server?.host || '127.0.0.1',
+  };
+  const isLoopbackServer = ['127.0.0.1', '::1', 'localhost'].includes(serverConfig.host);
+
   const rateLimiter = new RateLimiter(RATE_LIMIT.MAX_REQUESTS, RATE_LIMIT.WINDOW_MS);
 
   // Setup actual running app with middleware
@@ -118,7 +139,15 @@ async function main() {
       // is to ALWAYS be reachable when the process is alive.
       if (url.pathname === '/api/health') return;
 
-      const clientIp = (request.headers.get('x-forwarded-for') ?? 'local').split(',')[0].trim();
+      const forwardedFor = request.headers.get('x-forwarded-for');
+      // Direct requests to the loopback-only desktop backend have no client
+      // address available through the Fetch Request API. They are all placed
+      // in the old shared `local` bucket, so a normal busy UI could exhaust
+      // 120 requests/minute and turn unrelated calls into 429s. Loopback is
+      // the trust boundary for the desktop app, not an internet client.
+      if (isLoopbackServer && !forwardedFor) return;
+
+      const clientIp = (forwardedFor ?? 'local').split(',')[0].trim();
       const rateCheck = rateLimiter.check(clientIp);
       if (!rateCheck.allowed) {
         set.status = 429;
@@ -132,12 +161,6 @@ async function main() {
     });
 
   // ─── Start Server ───────────────────────────────────────────────────────────
-  // Default to 127.0.0.1 for local-only security.
-  // User must explicitly override with 0.0.0.0 to expose to network.
-  const serverConfig = {
-    port: config.server?.port || 3001,
-    host: config.server?.host || '127.0.0.1',
-  };
 
   const server = Bun.serve<WSClientData>({
     port: serverConfig.port,
@@ -246,10 +269,21 @@ async function main() {
 
   serverLog.info({ host: serverConfig.host, port: actualPort }, 'Server running');
 
+  function clearActivePortFile() {
+    try {
+      const active = JSON.parse(readFileSync(activePortPath, 'utf-8')) as { pid?: number };
+      // Never remove a marker written by a replacement backend.
+      if (active.pid === process.pid) rmSync(activePortPath, { force: true });
+    } catch {
+      // The marker is advisory; shutdown must still complete if it is absent or malformed.
+    }
+  }
+
   // ─── Graceful Shutdown ──────────────────────────────────────────────────
   async function gracefulShutdown(signal: string) {
     serverLog.info({ signal }, 'Graceful shutdown');
     server.stop(true);
+    clearActivePortFile();
     kory.cancel();
     shutdownAllBrokers();
     try {
@@ -264,4 +298,11 @@ async function main() {
   process.on('SIGINT', () => gracefulShutdown('SIGINT'));
 }
 
-main().catch((err) => serverLog.fatal(err, 'Server startup failed'));
+main().catch((err) => {
+  serverLog.fatal(err, 'Server startup failed');
+  // Bootstrap may have started timers before Bun attempts its socket bind. A
+  // failed bind must still terminate the process so the desktop launcher can
+  // tear down the frontend instead of waiting for a backend that can never
+  // become healthy.
+  process.exit(1);
+});

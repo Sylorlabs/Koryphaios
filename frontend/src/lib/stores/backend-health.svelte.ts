@@ -259,7 +259,7 @@ export function recheckBackendHealth(): void {
  * Startup gate: resolve only after the backend has passed its health and
  * compatibility checks. The app must not render a partially initialized UI.
  */
-export async function waitForBackendHealthy(timeoutMs = 30_000): Promise<void> {
+export async function waitForBackendHealthy(timeoutMs = 10_000): Promise<void> {
   if (!browser) return;
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {

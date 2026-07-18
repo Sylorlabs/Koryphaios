@@ -88,6 +88,17 @@ describe('sandbox runner (bwrap wrap)', () => {
       expect(r.args).toContain('--unshare-net');
     }
   });
+
+  test('readonly policy mounts the project read-only when OS isolation is available', () => {
+    const r = wrapCommand('claude', ['-p'], {
+      cwd: '/tmp/p',
+      policy: { ...SANDBOX_PRESETS.readonly },
+    });
+    if (r.isolated && r.mechanism === 'bubblewrap') {
+      expect(r.args.join(' ')).toContain('--ro-bind /tmp/p /tmp/p');
+      expect(r.args.join(' ')).not.toContain('--bind /tmp/p /tmp/p');
+    }
+  });
 });
 
 // Our own cross-platform "soft jail" — works on every platform, incl. Windows.
@@ -147,5 +158,13 @@ describe('macOS Seatbelt profile', () => {
     // Secret stores are read-denied.
     expect(hardened).toContain('.ssh');
     expect(hardened).toContain('Keychains');
+
+    const readonly = buildSeatbeltProfile({
+      cwd: '/Users/me/proj',
+      configDirs: ['/Users/me/.claude'],
+      policy: { ...SANDBOX_PRESETS.readonly },
+    });
+    expect(readonly).not.toContain('/Users/me/proj');
+    expect(readonly).toContain('/Users/me/.claude');
   });
 });

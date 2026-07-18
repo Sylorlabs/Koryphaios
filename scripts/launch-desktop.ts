@@ -29,6 +29,8 @@ const BACKEND_DIR = resolve(PROJECT_ROOT, 'backend');
 const FRONTEND_DIR = resolve(PROJECT_ROOT, 'frontend');
 const DESKTOP_DIR = resolve(PROJECT_ROOT, 'desktop');
 const APP_CONFIG_PATH = resolve(PROJECT_ROOT, 'config', 'app.config.json');
+const ACTIVE_PORT_PATH = resolve(PROJECT_ROOT, '.koryphaios', '.active-port.json');
+const KORYPHAIOS_BACKEND_ID = 'koryphaios';
 
 const BACKEND_READY_TIMEOUT_MS = Number(process.env.KORYPHAIOS_BACKEND_READY_TIMEOUT_MS ?? 120_000);
 const FRONTEND_READY_TIMEOUT_MS = Number(
@@ -168,13 +170,42 @@ async function isPortListening(host: string, port: number): Promise<boolean> {
   });
 }
 
-async function fetchText(url: string, timeoutMs = 3_000): Promise<string | null> {
+type BackendHealth = {
+  ok?: boolean;
+  data?: { id?: string; pid?: number; version?: string; compat?: { serverStartedAt?: number } };
+};
+
+type ActivePort = { host?: string; port?: number; pid?: number };
+
+function readActivePort(): ActivePort | null {
+  if (!existsSync(ACTIVE_PORT_PATH)) return null;
+  try {
+    const parsed = JSON.parse(readFileSync(ACTIVE_PORT_PATH, 'utf-8')) as ActivePort;
+    return typeof parsed.port === 'number' && typeof parsed.pid === 'number' ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function isProcessAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function fetchBackendHealth(timeoutMs = 3_000): Promise<BackendHealth | null> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    const response = await fetch(url, { signal: controller.signal });
+    const response = await fetch(backendHealthUrl, {
+      signal: controller.signal,
+      headers: { Accept: 'application/json' },
+    });
     if (!response.ok) return null;
-    return await response.text();
+    return (await response.json()) as BackendHealth;
   } catch {
     return null;
   } finally {
@@ -183,12 +214,27 @@ async function fetchText(url: string, timeoutMs = 3_000): Promise<string | null>
 }
 
 async function isBackendHealthy(): Promise<boolean> {
-  const body = await fetchText(backendHealthUrl);
-  return body?.includes('"ok":true') ?? false;
+  const health = await fetchBackendHealth();
+  return (
+    health?.ok === true &&
+    health.data?.id === KORYPHAIOS_BACKEND_ID &&
+    typeof health.data.pid === 'number' &&
+    typeof health.data.compat?.serverStartedAt === 'number'
+  );
 }
 
 async function isFrontendHealthy(): Promise<boolean> {
-  const body = await fetchText(frontendUrl);
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 3_000);
+  let body: string | null = null;
+  try {
+    const response = await fetch(frontendUrl, { signal: controller.signal });
+    body = response.ok ? await response.text() : null;
+  } catch {
+    body = null;
+  } finally {
+    clearTimeout(timer);
+  }
   if (!body) return false;
   const lower = body.toLowerCase();
   return lower.includes('<!doctype html') || lower.includes('<html');
@@ -201,7 +247,23 @@ async function resolvePortState(
   isHealthy: () => Promise<boolean>,
 ): Promise<'free' | 'reusable'> {
   if (!(await isPortListening(host, port))) return 'free';
-  if (await isHealthy()) {
+  if (label === 'Backend' && (await isHealthy())) {
+    const activePort = readActivePort();
+    const health = await fetchBackendHealth();
+    const markerMatches =
+      activePort?.host === backendClientHost &&
+      activePort.port === backendPort &&
+      activePort.pid === health?.data?.pid &&
+      isProcessAlive(activePort.pid);
+    if (!markerMatches) {
+      throw new Error(
+        `Backend port ${host}:${port} is occupied by an unverified process. Refusing to attach the frontend. Stop that process, then rerun bun run dev.`,
+      );
+    }
+    log(`${label} already running at ${host}:${port} — reusing`, colors.yellow);
+    return 'reusable';
+  }
+  if (label !== 'Backend' && (await isHealthy())) {
     log(`${label} already running at ${host}:${port} — reusing`, colors.yellow);
     return 'reusable';
   }

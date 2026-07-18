@@ -19,6 +19,7 @@ import { tmpdir, homedir } from 'node:os';
 import { whichBinary } from './cli-detection';
 import { detectDevinCLILogin } from './auth-utils';
 import { providerLog } from '../logger';
+import { buildSoftJail, wrapCommand } from '../collaboration/sandbox-runner';
 import {
   type Provider,
   type ProviderEvent,
@@ -62,7 +63,9 @@ function buildPrompt(systemPrompt: string | undefined, messages: ProviderMessage
       typeof m.content === 'string'
         ? m.content
         : m.content
-            .map((b) => (b.type === 'text' ? b.text : b.type === 'image' ? '[image attachment]' : ''))
+            .map((b) =>
+              b.type === 'text' ? b.text : b.type === 'image' ? '[image attachment]' : '',
+            )
             .filter(Boolean)
             .join('\n');
     if (!content.trim()) continue;
@@ -159,10 +162,15 @@ export class DevinProvider implements Provider {
     const cliModel = this.resolveCliModel(request.model);
     if (cliModel) args.push('--model', cliModel);
 
-    const child = spawn(bin, args, {
-      cwd: request.workingDirectory?.trim() || process.cwd(),
+    const cwd = request.workingDirectory?.trim() || process.cwd();
+    const jail = request.sandbox ? buildSoftJail(process.env, [join(homedir(), '.devin')]) : null;
+    const wrapped = request.sandbox
+      ? wrapCommand(bin, args, { cwd, policy: request.sandbox })
+      : { command: bin, args };
+    const child = spawn(wrapped.command, wrapped.args, {
+      cwd,
       stdio: ['ignore', 'pipe', 'pipe'],
-      env: { ...process.env },
+      env: jail?.env ?? { ...process.env },
     });
 
     const onAbort = () => {
@@ -173,6 +181,7 @@ export class DevinProvider implements Provider {
       }
     };
     request.signal?.addEventListener('abort', onAbort, { once: true });
+    child.once('close', () => jail?.cleanup());
     const timeout = setTimeout(() => {
       providerLog.warn({ provider: 'devin' }, 'Devin harness timed out — killing CLI');
       onAbort();

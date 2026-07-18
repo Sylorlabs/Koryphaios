@@ -32,17 +32,15 @@ export const PROVIDER_CONFIGS: ProviderConfig[] = [
     name: 'google',
     baseUrl: 'https://generativelanguage.googleapis.com',
     authMode: 'api_key',
-    envKeys: ['GEMINI_API_KEY', 'GOOGLE_API_KEY'],
+    // Google direct API is deliberately separate from the AI Studio account.
+    envKeys: ['GOOGLE_API_KEY'],
   },
   {
     name: 'aistudio',
     baseUrl: 'https://generativelanguage.googleapis.com',
     authMode: 'api_key',
-    envKeys: ['GEMINI_API_KEY', 'GOOGLE_API_KEY', 'AI_STUDIO_API_KEY'],
+    envKeys: ['GEMINI_API_KEY', 'AI_STUDIO_API_KEY'],
   },
-  // NOTE: 'google-subscription' (the Gemini CLI OAuth provider) is RETIRED —
-  // never re-add it. Gemini models are served by the 'google' / 'aistudio'
-  // API-key providers above.
   { name: 'xai', baseUrl: 'https://api.x.ai', authMode: 'api_key', envKeys: ['XAI_API_KEY'] },
 
   // Aggregators

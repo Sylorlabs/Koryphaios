@@ -203,6 +203,10 @@
       showSettings = true;
     };
     window.addEventListener('open-team-settings', handleOpenTeamSettings);
+    const handleOpenProviderAccountSettings = () => {
+      showSettings = true;
+    };
+    window.addEventListener('open-provider-account-settings', handleOpenProviderAccountSettings);
 
     const handleFocusInput = () => inputRef?.focus();
     window.addEventListener('kory:focus-input', handleFocusInput);
@@ -213,6 +217,8 @@
       window.removeEventListener('keydown', handleGlobalKeydown);
       window.removeEventListener('open-note', handleOpenNote);
       window.removeEventListener('open-notes-graph', handleOpenNotesGraph);
+      window.removeEventListener('open-team-settings', handleOpenTeamSettings);
+      window.removeEventListener('open-provider-account-settings', handleOpenProviderAccountSettings);
       window.removeEventListener('open-team-settings', handleOpenTeamSettings);
       window.removeEventListener('kory:focus-input', handleFocusInput);
     };
@@ -276,8 +282,6 @@
       showSettings = true;
     } else if (shortcutStore.matches('new_session', e)) {
       e.preventDefault();
-      // Ctrl/Cmd+Shift+N forces a brand-new session; Ctrl/Cmd+N reuses the
-      // active empty session to prevent spam.
       void sessionStore.newChat({ shift: e.shiftKey });
       inputRef?.focus();
     } else if (shortcutStore.matches('focus_input', e)) {
@@ -1396,9 +1400,9 @@ RULES:
             <span
               class="shrink-0"
               style="font-size: var(--text-xs); color: var(--color-text-muted); opacity: 0.6;"
-              title="Choose a model to show its context-window information."
+              title="Waiting for the selected provider or CLI to report an authoritative token count. Local character estimates are intentionally not shown as token truth."
             >
-              choose a model to show context
+              awaiting provider token report
             </span>
           {/if}
         </div>

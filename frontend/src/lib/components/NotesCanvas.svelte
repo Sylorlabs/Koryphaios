@@ -1,5 +1,4 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
   import { Plus, Save, Trash2, FileText, X, StickyNote } from 'lucide-svelte';
   import { notesStore } from '$lib/stores/notes.svelte';
   import { toastStore } from '$lib/stores/toast.svelte';
@@ -249,10 +248,14 @@
       .slice(0, 8),
   );
 
-  onMount(() => {
-    // Auto-open the most recent saved canvas, if any.
-    const first = notesStore.notes.find((n) => (n.tags ?? []).includes(CANVAS_TAG));
-    if (first) loadCanvas(first.id);
+  let autoOpenedDemoCanvas = $state(false);
+  $effect(() => {
+    // Notes seed asynchronously in the website demo. Waiting for the reactive
+    // collection avoids an empty canvas caused by mounting before that seed.
+    if (!autoOpenedDemoCanvas && savedCanvases.length > 0) {
+      loadCanvas(savedCanvases[0].id);
+      autoOpenedDemoCanvas = true;
+    }
   });
 </script>
 

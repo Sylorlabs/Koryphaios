@@ -82,7 +82,7 @@ export function normalizeReasoningLevel(
     const level = normalizedLevel;
 
     // Gemini (Budget-based)
-    if (provider === 'google' || provider === 'vertexai') {
+    if (provider === 'google' || provider === 'aistudio' || provider === 'vertexai') {
       const isGemini3 = model ? /gemini-3/i.test(model) : false;
       if (isGemini3) {
         if (level === 'none') return 'low';

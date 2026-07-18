@@ -143,6 +143,31 @@ const DEMO_NOTES = [
     createdAt: new Date(),
     updatedAt: new Date(),
   },
+  {
+    id: 'n4',
+    title: 'Dashboard delivery map',
+    sourcePath: 'canvases/dashboard-delivery-map.canvas.json',
+    format: 'markdown',
+    content: JSON.stringify({
+      v: 1,
+      name: 'Dashboard delivery map',
+      cards: [
+        { id: 'c-spec', x: 120, y: 130, w: 190, h: 120, text: 'Dashboard spec', noteId: 'n1', color: '#8b7ec8' },
+        { id: 'c-api', x: 420, y: 250, w: 190, h: 120, text: 'API contract', noteId: 'n2', color: '#6b9bd1' },
+        { id: 'c-roadmap', x: 720, y: 130, w: 190, h: 120, text: 'Roadmap', noteId: 'n3', color: '#5ec4a0' },
+      ],
+      edges: [
+        { id: 'e-spec-api', from: 'c-spec', to: 'c-api' },
+        { id: 'e-api-roadmap', from: 'c-api', to: 'c-roadmap' },
+      ],
+    }),
+    folderPath: '/canvases',
+    tags: ['canvas'],
+    pinned: true,
+    includeInContext: false,
+    createdAt: new Date(),
+    updatedAt: new Date(),
+  },
 ];
 
 // Build a real graph from the demo notes (wikilinks → edges, unresolved → ghost

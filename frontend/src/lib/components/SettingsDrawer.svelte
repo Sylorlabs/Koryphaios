@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onDestroy, tick } from 'svelte';
+  import { onDestroy, onMount, tick } from 'svelte';
   import { providersStore } from '$lib/stores/providers.svelte';
   import { theme, type ThemePreset, type AccentColor, type FontFamily } from '$lib/stores/theme.svelte';
   import { shortcutStore } from '$lib/stores/shortcuts.svelte';
@@ -36,6 +36,8 @@ import { toastStore } from '$lib/stores/toast.svelte';
     StickyNote,
     FolderOpen,
     RefreshCw,
+    Eye,
+    EyeOff,
   } from 'lucide-svelte';
   import MemoryEditor from './MemoryEditor.svelte';
   import AgentSettings from './AgentSettings.svelte';
@@ -48,6 +50,7 @@ import { toastStore } from '$lib/stores/toast.svelte';
   import { modeStore } from '$lib/stores/mode.svelte';
   import { notesStore } from '$lib/stores/notes.svelte';
   import { projectStore } from '$lib/stores/project.svelte';
+  import { sessionStore, type NewChatBehavior } from '$lib/stores/sessions.svelte';
   import {
     NOTE_TOOL_DEFINITIONS,
     type NotePermissionLevel,
@@ -58,6 +61,7 @@ import { toastStore } from '$lib/stores/toast.svelte';
   import TeamAccessProfiles from './TeamAccessProfiles.svelte';
   import ModelSharingPanel from './ModelSharingPanel.svelte';
   import NumberStepper from './NumberStepper.svelte';
+  import SettingsSwitch from './SettingsSwitch.svelte';
   import KorySelect from './KorySelect.svelte';
   import { apiUrl } from '$lib/utils/api-url';
 import { apiFetch, parseJsonResponse } from '$lib/api.svelte';
@@ -91,6 +95,28 @@ import { apiFetch, parseJsonResponse } from '$lib/api.svelte';
   let hostWorkspacePaths = $state<string[]>(projectStore.currentPath ? [projectStore.currentPath] : []);
   let hostPathsInitializedFor = $state<string | null>(projectStore.currentPath);
   let rotateKeyInput = $state<HTMLInputElement | null>(null);
+  let visibleSecrets = $state<Record<string, boolean>>({});
+
+  onMount(() => {
+    const openProviderAccounts = () => {
+      activeTab = 'providers';
+      const ambiguous = providersStore.cliAccountSelectionRequired[0];
+      if (ambiguous) {
+        expandedProvider = ambiguous;
+        void loadProviderAccounts(ambiguous, true);
+      }
+    };
+    window.addEventListener('open-provider-account-settings', openProviderAccounts);
+    return () => window.removeEventListener('open-provider-account-settings', openProviderAccounts);
+  });
+
+  function secretInputType(id: string): 'text' | 'password' {
+    return visibleSecrets[id] ? 'text' : 'password';
+  }
+
+  function toggleSecretVisibility(id: string) {
+    visibleSecrets = { ...visibleSecrets, [id]: !visibleSecrets[id] };
+  }
 
   $effect(() => {
     const current = projectStore.currentPath;
@@ -205,8 +231,24 @@ import { apiFetch, parseJsonResponse } from '$lib/api.svelte';
     saveAccountProfileLabel,
     getOrderedFallbackAccounts,
     handleFallbackDndFinalize,
+    saveFallbackOrder,
     copyToClipboard,
   } = providersStore;
+
+  function isAccountSelected(provider: string, accountId: string): boolean {
+    return (providersStore.fallbackOrders[provider] ?? []).includes(accountId);
+  }
+
+  async function toggleCliAccount(provider: string, accountId: string, enabled: boolean) {
+    const current = providersStore.fallbackOrders[provider] ?? [];
+    const next = enabled
+      ? [...current.filter((id) => id !== accountId), accountId]
+      : current.filter((id) => id !== accountId);
+    await saveFallbackOrder(provider, next);
+    if (enabled && current.length === 0) {
+      await activateProviderAccount(provider, accountId);
+    }
+  }
 
   let providersLoadAttempted = $state(false);
   let lastInitializedTab = $state<typeof activeTab | null>(null);
@@ -513,7 +555,7 @@ import { apiFetch, parseJsonResponse } from '$lib/api.svelte';
       <div class={activeTab === 'providers' ? 'flex-1 overflow-y-auto px-6 py-5 space-y-6' : 'hidden'}>
         <div class="relative">
           <Search size={14} class="absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" style="color: var(--color-text-muted);" />
-          <input type="text" placeholder="Search providers..." bind:value={providerSearchQuery} class="input w-full pl-12 py-2 text-sm" />
+          <input type="text" placeholder="Search providers..." bind:value={providerSearchQuery} class="input w-full py-2 text-sm" style="padding-left: 2.75rem;" />
         </div>
 
         <!-- Detected on your system — agent CLIs Koryphaios auto-picked up -->
@@ -604,7 +646,12 @@ import { apiFetch, parseJsonResponse } from '$lib/api.svelte';
               </div>
               <div class="space-y-1">
                 <label class="text-[10px] uppercase tracking-wider text-[var(--color-text-muted)] font-medium" for="custom-key">API key <span class="opacity-60 normal-case">(optional — leave blank if not required)</span></label>
-                <input id="custom-key" type="password" placeholder="sk-..." bind:value={customForm.apiKey} class="input w-full text-xs" />
+                <div class="relative">
+                  <input id="custom-key" type={secretInputType('custom-key')} placeholder="sk-..." bind:value={customForm.apiKey} class="input w-full text-xs" style="padding-right: 2.75rem;" />
+                  <button type="button" class="secret-visibility absolute inset-y-0 right-1 my-auto z-10" onclick={() => toggleSecretVisibility('custom-key')} aria-label={visibleSecrets['custom-key'] ? 'Hide API key' : 'Show API key'} title={visibleSecrets['custom-key'] ? 'Hide API key' : 'Show API key'}>
+                    {#if visibleSecrets['custom-key']}<EyeOff size={15} />{:else}<Eye size={15} />{/if}
+                  </button>
+                </div>
               </div>
               <div class="space-y-1">
                 <label class="text-[10px] uppercase tracking-wider text-[var(--color-text-muted)] font-medium" for="custom-models">Models <span class="opacity-60 normal-case">(optional, comma-separated)</span></label>
@@ -684,11 +731,21 @@ import { apiFetch, parseJsonResponse } from '$lib/api.svelte';
                     <div class="space-y-2">
                       {#if caps.supportsApiKey}
                         <label class="text-[10px] text-[var(--color-text-muted)] font-medium uppercase tracking-wider" for={`provider-key-${prov.key}`}>API Key</label>
-                        <input id={`provider-key-${prov.key}`} type="password" placeholder={prov.placeholder} bind:value={providersStore.keyInputs[prov.key]} class="input w-full text-xs" onkeydown={(e) => e.key === 'Enter' && handleConnectProvider(prov.key)} />
+                        <div class="relative">
+                          <input id={`provider-key-${prov.key}`} type={secretInputType(`provider-key-${prov.key}`)} placeholder={prov.placeholder} bind:value={providersStore.keyInputs[prov.key]} class="input w-full text-xs" style="padding-right: 2.75rem;" onkeydown={(e) => e.key === 'Enter' && handleConnectProvider(prov.key)} />
+                          <button type="button" class="secret-visibility absolute inset-y-0 right-1 my-auto z-10" onclick={() => toggleSecretVisibility(`provider-key-${prov.key}`)} aria-label={visibleSecrets[`provider-key-${prov.key}`] ? 'Hide API key' : 'Show API key'} title={visibleSecrets[`provider-key-${prov.key}`] ? 'Hide API key' : 'Show API key'}>
+                            {#if visibleSecrets[`provider-key-${prov.key}`]}<EyeOff size={15} />{:else}<Eye size={15} />{/if}
+                          </button>
+                        </div>
                       {/if}
                       {#if showTokenInput(prov.key, caps)}
                         <label class="text-[10px] text-[var(--color-text-muted)] font-medium uppercase tracking-wider" for={`provider-token-${prov.key}`}>Auth Token</label>
-                        <input id={`provider-token-${prov.key}`} type="password" placeholder={providersStore.tokenPlaceholders[prov.key] ?? 'Auth token'} bind:value={providersStore.tokenInputs[prov.key]} class="input w-full text-xs" onkeydown={(e) => e.key === 'Enter' && handleConnectProvider(prov.key)} />
+                        <div class="relative">
+                          <input id={`provider-token-${prov.key}`} type={secretInputType(`provider-token-${prov.key}`)} placeholder={providersStore.tokenPlaceholders[prov.key] ?? 'Auth token'} bind:value={providersStore.tokenInputs[prov.key]} class="input w-full pr-11 text-xs" onkeydown={(e) => e.key === 'Enter' && handleConnectProvider(prov.key)} />
+                          <button type="button" class="secret-visibility absolute inset-y-0 right-1 my-auto z-10" onclick={() => toggleSecretVisibility(`provider-token-${prov.key}`)} aria-label={visibleSecrets[`provider-token-${prov.key}`] ? 'Hide auth token' : 'Show auth token'}>
+                            {#if visibleSecrets[`provider-token-${prov.key}`]}<EyeOff size={15} />{:else}<Eye size={15} />{/if}
+                          </button>
+                        </div>
                       {/if}
                       {#if caps.requiresBaseUrl}
                         <label class="text-[10px] text-[var(--color-text-muted)] font-medium uppercase tracking-wider" for={`provider-url-${prov.key}`}>Endpoint URL</label>
@@ -792,6 +849,19 @@ import { apiFetch, parseJsonResponse } from '$lib/api.svelte';
                       <div class="space-y-2">
                         {#each getProviderAccounts(prov.key) as account (account.id)}
                           <div class="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-1)] p-2.5">
+                            {#if account.source === 'cli-autodetect'}
+                              <SettingsSwitch
+                                compact
+                                checked={isAccountSelected(prov.key, account.id)}
+                                label={account.email ?? account.label}
+                                description={[
+                                  account.plan ? `${account.plan.toUpperCase()} plan` : 'Plan not reported by CLI',
+                                  account.health === 'ready' ? 'Login ready' : account.health === 'expired' ? 'Login expired' : 'Login status unverified',
+                                  account.profileDir,
+                                ].filter(Boolean).join(' · ')}
+                                onchange={() => toggleCliAccount(prov.key, account.id, !isAccountSelected(prov.key, account.id))}
+                              />
+                            {:else}
                             <div class="flex items-start justify-between gap-3">
                               <div>
                                 <div class="text-xs font-semibold text-[var(--color-text-primary)]">{account.label}</div>
@@ -829,6 +899,7 @@ import { apiFetch, parseJsonResponse } from '$lib/api.svelte';
                                 </button>
                               </div>
                             </div>
+                            {/if}
                           </div>
                         {/each}
                       </div>
@@ -842,20 +913,20 @@ import { apiFetch, parseJsonResponse } from '$lib/api.svelte';
                         class="input w-full text-xs"
                       />
                       {#if caps.supportsApiKey}
-                        <input
-                          type="password"
-                          placeholder={prov.placeholder}
-                          bind:value={providersStore.accountKeyInputs[prov.key]}
-                          class="input w-full text-xs"
-                        />
+                        <div class="relative">
+                          <input type={secretInputType(`account-key-${prov.key}`)} placeholder={prov.placeholder} bind:value={providersStore.accountKeyInputs[prov.key]} class="input w-full pr-11 text-xs" />
+                          <button type="button" class="secret-visibility absolute inset-y-0 right-1 my-auto z-10" onclick={() => toggleSecretVisibility(`account-key-${prov.key}`)} aria-label={visibleSecrets[`account-key-${prov.key}`] ? 'Hide account API key' : 'Show account API key'}>
+                            {#if visibleSecrets[`account-key-${prov.key}`]}<EyeOff size={15} />{:else}<Eye size={15} />{/if}
+                          </button>
+                        </div>
                       {/if}
                       {#if showTokenInput(prov.key, caps)}
-                        <input
-                          type="password"
-                          placeholder={providersStore.tokenPlaceholders[prov.key] ?? 'Auth token'}
-                          bind:value={providersStore.accountTokenInputs[prov.key]}
-                          class="input w-full text-xs"
-                        />
+                        <div class="relative">
+                          <input type={secretInputType(`account-token-${prov.key}`)} placeholder={providersStore.tokenPlaceholders[prov.key] ?? 'Auth token'} bind:value={providersStore.accountTokenInputs[prov.key]} class="input w-full pr-11 text-xs" />
+                          <button type="button" class="secret-visibility absolute inset-y-0 right-1 my-auto z-10" onclick={() => toggleSecretVisibility(`account-token-${prov.key}`)} aria-label={visibleSecrets[`account-token-${prov.key}`] ? 'Hide account auth token' : 'Show account auth token'}>
+                            {#if visibleSecrets[`account-token-${prov.key}`]}<EyeOff size={15} />{:else}<Eye size={15} />{/if}
+                          </button>
+                        </div>
                       {/if}
                       {#if caps.requiresBaseUrl}
                         <input
@@ -1119,6 +1190,21 @@ import { apiFetch, parseJsonResponse } from '$lib/api.svelte';
             </div>
           {/each}
         </div>
+        <section class="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-2)] p-4">
+          <h4 class="text-sm font-semibold text-[var(--color-text-primary)]">New chat behavior</h4>
+          <p class="mt-1 text-xs text-[var(--color-text-muted)]">Choose whether the new-chat control reuses an untouched composer or always opens another session.</p>
+          <div class="mt-3 max-w-xl">
+            <KorySelect
+              value={sessionStore.newChatBehavior}
+              label="New chat behavior"
+              options={[
+                { value: 'reuse-empty', label: 'Reuse untouched chat', description: 'Default. + and Ctrl/Cmd+N keep the active chat when it has no messages. Shift-click or Shift+Ctrl/Cmd+N forces a new one.' },
+                { value: 'always-create', label: 'Always create a new chat', description: 'Every new-chat action opens a separate session.' },
+              ]}
+              onchange={(value) => sessionStore.setNewChatBehavior(value as NewChatBehavior)}
+            />
+          </div>
+        </section>
       </div>
 
       <!-- Billing Tab -->
@@ -1207,14 +1293,19 @@ import { apiFetch, parseJsonResponse } from '$lib/api.svelte';
           <div class="space-y-4">
             <h3 class="text-sm font-bold text-[var(--color-text-primary)] ml-1">CLI Subscriptions — real usage</h3>
             <div class="grid grid-cols-1 xl:grid-cols-2 gap-4">
-              {#each billingCredits.cliUsage as cli (cli.provider)}
+              {#each billingCredits.cliUsage as cli (`${cli.provider}:${cli.accountId ?? 'aggregate'}`)}
                 <div class="p-5 bg-[var(--color-surface-2)] rounded-2xl border border-[var(--color-border)] space-y-4">
                   <div class="flex items-center justify-between">
                     <div class="flex items-center gap-3">
                       <div class="w-8 h-8 rounded-lg bg-[var(--color-surface-3)] flex items-center justify-center p-1.5">
                         <ProviderIcon provider={cli.provider} size={20} class="w-full h-full" />
                       </div>
-                      <span class="text-sm font-semibold">{getProviderDisplayLabel(cli.provider)}</span>
+                      <div>
+                        <div class="text-sm font-semibold">{getProviderDisplayLabel(cli.provider)}</div>
+                        {#if cli.accountEmail || cli.accountLabel}
+                          <div class="text-[10px] text-[var(--color-text-muted)]">{cli.accountEmail ?? cli.accountLabel}</div>
+                        {/if}
+                      </div>
                       {#if cli.planType}
                         <span class="px-2 py-0.5 rounded-full text-[9px] uppercase tracking-wider font-bold bg-[var(--color-surface-3)] text-[var(--color-text-muted)]">{cli.planType}</span>
                       {/if}
@@ -1266,6 +1357,48 @@ import { apiFetch, parseJsonResponse } from '$lib/api.svelte';
               {/each}
             </div>
           </div>
+        {/if}
+
+        <!-- Saved provider accounts are credential inventory, not a claim of
+             account-level spend. Usage is currently recorded per provider. -->
+        {#if billingCredits?.accounts?.length}
+          <div class="space-y-4">
+          <div class="ml-1 flex items-end justify-between gap-4">
+            <div>
+              <h3 class="text-sm font-bold text-[var(--color-text-primary)]">Configured Accounts</h3>
+              <p class="mt-1 text-[10px] text-[var(--color-text-muted)]">Every active account saved in Providers. Usage totals remain provider-level unless the provider reports account attribution.</p>
+            </div>
+            <span class="shrink-0 text-[10px] font-mono text-[var(--color-text-muted)]">{billingCredits.accounts.length} account{billingCredits.accounts.length === 1 ? '' : 's'}</span>
+          </div>
+          <div class="grid grid-cols-1 xl:grid-cols-2 gap-3">
+              {#each billingCredits.accounts as account (`${account.provider}:${account.id}`)}
+                <div class="flex items-center gap-3 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-2)] p-4">
+                  <div class="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-[var(--color-surface-3)] p-2">
+                    <ProviderIcon provider={account.provider} size={20} class="h-full w-full" />
+                  </div>
+                  <div class="min-w-0 flex-1">
+                    <div class="flex items-center gap-2">
+                      <span class="truncate text-xs font-semibold text-[var(--color-text-primary)]">{account.label}</span>
+                      <span class="shrink-0 rounded-full px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider" style="color: {account.subscription ? 'var(--color-accent)' : 'var(--color-text-secondary)'}; background: var(--color-surface-3);">{account.subscription ? 'Subscription-backed' : 'Metered API'}</span>
+                    </div>
+                    <div class="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-[10px] text-[var(--color-text-muted)]">
+                      <span>{getProviderDisplayLabel(account.provider)}</span>
+                      <span>·</span>
+                      <span>{account.credentialTypes.map((type: string) => type === 'apiKey' ? 'API key' : type === 'authToken' ? 'Auth token' : type === 'cliProfile' ? 'Detected CLI profile' : 'Endpoint URL').join(' + ')}</span>
+                      {#if account.email}<span>· {account.email}</span>{/if}
+                      {#if account.plan}<span>· {String(account.plan).toUpperCase()} plan</span>{/if}
+                      {#if account.health === 'expired'}<span class="text-amber-400">· Login expired</span>{/if}
+                      {#if account.lastUsedAt}<span>· Last used {new Date(account.lastUsedAt).toLocaleString()}</span>{/if}
+                    </div>
+                  </div>
+                  <div class="shrink-0 text-right">
+                    <div class="text-[10px] font-bold uppercase tracking-wider text-[var(--color-text-muted)]">Usage</div>
+                    <div class="mt-1 text-[10px] text-[var(--color-text-secondary)]">Provider aggregate</div>
+                  </div>
+                </div>
+              {/each}
+          </div>
+        </div>
         {/if}
 
         {#if billingCredits?.balances?.length}
@@ -1846,7 +1979,12 @@ import { apiFetch, parseJsonResponse } from '$lib/api.svelte';
     <div class="bg-[var(--color-surface-1)] rounded-3xl p-8 w-full max-w-md border border-[var(--color-border)] shadow-2xl">
       <h3 class="text-xl font-black mb-2 text-[var(--color-text-primary)]">Rotate API Key</h3>
       <p class="text-xs text-[var(--color-text-muted)] mb-6">Enter a new key for {getProviderDisplayLabel(rotateProvider.name)}. Your previous key will be immediately discarded.</p>
-      <input bind:this={rotateKeyInput} type="password" bind:value={newKeyValue} placeholder="sk-..." class="input w-full text-base py-3 mb-6 font-mono" />
+      <div class="relative mb-6">
+        <input bind:this={rotateKeyInput} type={secretInputType('rotate-key')} bind:value={newKeyValue} placeholder="sk-..." class="input w-full pr-12 text-base py-3 font-mono" />
+        <button type="button" class="secret-visibility absolute inset-y-0 right-1 my-auto z-10" onclick={() => toggleSecretVisibility('rotate-key')} aria-label={visibleSecrets['rotate-key'] ? 'Hide replacement API key' : 'Show replacement API key'}>
+          {#if visibleSecrets['rotate-key']}<EyeOff size={15} />{:else}<Eye size={15} />{/if}
+        </button>
+      </div>
       <div class="flex justify-end gap-3">
         <button type="button" onclick={() => { showRotateDialog = false; newKeyValue = ''; }} class="px-6 py-2.5 text-xs font-bold rounded-xl bg-[var(--color-surface-3)] hover:bg-[var(--color-surface-4)] transition-colors">Cancel</button>
         <button type="button" onclick={() => { rotateProviderKey(rotateProvider!.name, newKeyValue, rotateProvider!.keyType); showRotateDialog = false; newKeyValue = ''; }} class="btn btn-primary px-8 py-2.5 text-xs font-bold rounded-xl shadow-lg shadow-[var(--color-accent)]/20">Rotate Key</button>
@@ -1963,5 +2101,20 @@ import { apiFetch, parseJsonResponse } from '$lib/api.svelte';
     border-color: var(--color-accent) !important;
     box-shadow: 0 0 0 4px var(--color-accent-transparent, rgba(213, 178, 97, 0.1)) !important;
     background: var(--color-surface-1) !important;
+  }
+  .secret-visibility {
+    display: inline-flex;
+    height: 1.9rem;
+    width: 1.9rem;
+    align-items: center;
+    justify-content: center;
+    border-radius: 0.45rem;
+    color: var(--color-text-muted);
+  }
+  .secret-visibility:hover,
+  .secret-visibility:focus-visible {
+    color: var(--color-text-primary);
+    background: var(--color-surface-3);
+    outline: none;
   }
 </style>

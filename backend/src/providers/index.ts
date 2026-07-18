@@ -10,7 +10,6 @@ export {
 } from './openai';
 
 export { GoogleProvider } from './google';
-export { GoogleProvider as GeminiProvider } from './google'; // compat
 export { CopilotProvider } from './copilot';
 
 export { withTimeoutSignal } from './utils';

@@ -3,6 +3,7 @@ import { getContext } from '../../context';
 import { requireLocalRouteAuth } from '../../auth/local-route-auth';
 import { processSupervisor } from '../../process-supervisor/supervisor';
 import { serializeProcess } from '../../process-supervisor/serialize';
+import { serverLog } from '../../logger';
 
 export const sessionRoutes = new Elysia({ prefix: '/api/sessions' })
   .get('/', async ({ request, set }) => {
@@ -159,7 +160,24 @@ export const sessionRoutes = new Elysia({ prefix: '/api/sessions' })
   )
   .get('/:id/timetravel', async ({ request, params: { id }, set }) => {
     if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
-    const { timeTravel } = getContext();
-    const state = await timeTravel.getState(id);
-    return { ok: true, data: state };
+    try {
+      const { timeTravel } = getContext();
+      const state = await timeTravel.getState(id);
+      return { ok: true, data: state };
+    } catch (err) {
+      // Timeline history is supplementary UI. A git/reflog edge case must not
+      // turn opening an otherwise valid session into a browser-console 500.
+      // Return the empty, non-rewindable state the UI already understands.
+      serverLog.warn({ err, sessionId: id }, 'Failed to load time travel timeline');
+      return {
+        ok: true,
+        data: {
+          currentHash: '',
+          timeline: [],
+          canUndo: false,
+          canRedo: false,
+          stats: { totalStates: 0, totalCost: 0, modelsUsed: [] },
+        },
+      };
+    }
   });

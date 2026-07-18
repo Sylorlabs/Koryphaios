@@ -724,7 +724,7 @@ export function writeTokenToFile(token: string, sessionId: string): string {
 /**
  * CLI auth token types that need special handling
  */
-export type CLIAuthProvider = 'gemini' | 'codex';
+export type CLIAuthProvider = 'codex';
 
 /**
  * Create a secure marker for CLI-based authentication.
@@ -801,7 +801,7 @@ export async function parseCLIAuthToken(
   }
 
   const provider = parts[1] as CLIAuthProvider;
-  if (!['gemini', 'codex'].includes(provider)) {
+  if (provider !== 'codex') {
     return null;
   }
 
@@ -822,7 +822,6 @@ export async function migrateCLIAuthTokens(
   let migrated = 0;
 
   const cliTokenPatterns = [
-    { key: 'GOOGLE_AUTH_TOKEN', providers: ['gemini'] as CLIAuthProvider[] },
     { key: 'CODEX_AUTH_TOKEN', providers: ['codex'] as CLIAuthProvider[] },
   ];
 
@@ -833,7 +832,6 @@ export async function migrateCLIAuthTokens(
     // Check if it's a legacy plaintext token
     if (
       value.startsWith('cli:') &&
-      !value.startsWith('cli:gemini:') &&
       !value.startsWith('cli:codex:')
     ) {
       // This is a legacy format token, migrate it

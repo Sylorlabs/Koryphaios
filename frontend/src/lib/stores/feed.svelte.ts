@@ -18,6 +18,11 @@ let feedIdCounter = 0;
 // ─── Reactive State ──────────────────────────────────────────────────────────
 
 let feed = $state<FeedEntry[]>([]);
+let feedSessionId = $state('');
+let loadingSessionId = $state('');
+let feedTransitionGeneration = 0;
+let feedTransitionBaseLength = 0;
+const sessionFeedCache = new Map<string, FeedEntry[]>();
 
 // Cache for grouped feed — rebuild only on structural changes, not per token
 let lastGroupedFeed = $state<FeedEntry[]>([]);
@@ -26,9 +31,58 @@ let streamingRevision = $state(0);
 
 // Track analyzing thought index to avoid O(N) filtering
 let analyzingThoughtId = $state<string | null>(null);
+// A thought can arrive as one buffered provider event. Keep the server time at
+// which the agent entered its thinking state so that case still has an honest
+// elapsed duration instead of being displayed as 0.0s.
+const activeThinkingStartedAt = new Map<string, number>();
 
 function rebuildGroupedFeedCache(): void {
   lastGroupedFeed = getGroupedEntries(feed);
+}
+
+function cloneEntries(entries: FeedEntry[]): FeedEntry[] {
+  return entries.map((entry) => ({
+    ...entry,
+    metadata: entry.metadata ? { ...entry.metadata } : entry.metadata,
+    entries: entry.entries ? cloneEntries(entry.entries) : entry.entries,
+  }));
+}
+
+/**
+ * Atomically move the visible feed to another session. The old feed is saved
+ * under its owner and the target's last complete snapshot is restored
+ * immediately, so rapid switching never shows another chat or a blank wait.
+ */
+function activateSessionFeed(sessionId: string): number {
+  if (feedSessionId === sessionId) return feedTransitionGeneration;
+  if (feedSessionId) sessionFeedCache.set(feedSessionId, cloneEntries(feed));
+  feedTransitionGeneration++;
+  feedSessionId = sessionId;
+  const hasSnapshot = sessionId ? sessionFeedCache.has(sessionId) : true;
+  feed = sessionId ? cloneEntries(sessionFeedCache.get(sessionId) ?? []) : [];
+  loadingSessionId = sessionId && !hasSnapshot ? sessionId : '';
+  feedTransitionBaseLength = feed.length;
+  streamingRevision = 0;
+  analyzingThoughtId = null;
+  activeThinkingStartedAt.clear();
+  feedVersion++;
+  rebuildGroupedFeedCache();
+  return feedTransitionGeneration;
+}
+
+function finishSessionLoad(sessionId: string, generation?: number): void {
+  if (ownsFeed(sessionId, generation) && loadingSessionId === sessionId) {
+    loadingSessionId = '';
+  }
+}
+
+function ownsFeed(sessionId: string, generation?: number): boolean {
+  return (
+    !!sessionId &&
+    feedSessionId === sessionId &&
+    sessionStore.activeSessionId === sessionId &&
+    (generation === undefined || generation === feedTransitionGeneration)
+  );
 }
 
 function patchGroupedFeedEntry(
@@ -148,11 +202,23 @@ function accumulateFeedEntry(entry: Omit<FeedEntry, 'id'>) {
   }
 }
 
+function beginThinking(agentId: string, timestamp: number): number {
+  const existing = activeThinkingStartedAt.get(agentId);
+  if (existing !== undefined) return existing;
+  activeThinkingStartedAt.set(agentId, timestamp);
+  return timestamp;
+}
+
+function getThinkingStart(agentId: string, fallbackTimestamp: number): number {
+  return beginThinking(agentId, fallbackTimestamp);
+}
+
 function addUserMessage(
   sessionId: string,
   content: string,
   attachments?: Array<{ type: string; data: string; name: string }>,
 ) {
+  if (!ownsFeed(sessionId)) return;
   const userEntry: FeedEntry = {
     id: nextFeedId('user'),
     timestamp: Date.now(),
@@ -196,20 +262,40 @@ function addClientError(text: string) {
 }
 
 /** Provider signalled reasoning is over (content started / turn completed):
- *  freeze every live thinking block at its exact server-computed duration. */
-function finalizeThinking() {
+ * freeze matching live blocks at their server-timestamp duration. */
+function finalizeThinking(agentId?: string, endedAt = Date.now()) {
   let changed = false;
   for (const e of feed) {
-    if (e.type === 'thinking' && !e.thinkingFinalized) {
+    if (e.type === 'thinking' && !e.thinkingFinalized && (!agentId || e.agentId === agentId)) {
+      const startedAt = e.thinkingStartedAt ?? activeThinkingStartedAt.get(e.agentId);
+      if (startedAt !== undefined) e.durationMs = Math.max(e.durationMs ?? 0, endedAt - startedAt);
       e.thinkingFinalized = true;
       changed = true;
     }
   }
+  if (agentId) activeThinkingStartedAt.delete(agentId);
+  else activeThinkingStartedAt.clear();
   if (changed) {
     feed = [...feed];
     feedVersion++;
     rebuildGroupedFeedCache();
   }
+}
+
+/** A tool starts before its JSON input is completely streamed. Patch that
+ * existing card once the backend has the final arguments rather than adding a
+ * second, duplicate "Calling tool" row. */
+function updateToolCall(toolCall: { id: string; name: string; input: Record<string, unknown> }, timestamp: number) {
+  const entry = feed.findLast((candidate) =>
+    candidate.type === 'tool_call' &&
+    (candidate.metadata as { toolCall?: { id?: string } } | undefined)?.toolCall?.id === toolCall.id,
+  );
+  if (!entry) return false;
+  entry.timestamp = timestamp;
+  entry.metadata = { ...entry.metadata, toolCall };
+  patchGroupedFeedEntry(entry.id, entry.text, timestamp, { metadata: entry.metadata });
+  streamingRevision++;
+  return true;
 }
 
 /** Toggle entry visibility flags (user-hide is UI-only; agent-hide is set after the API call). */
@@ -251,6 +337,7 @@ function clearFeed() {
   feedVersion++;
   streamingRevision = 0;
   analyzingThoughtId = null;
+  activeThinkingStartedAt.clear();
   rebuildGroupedFeedCache();
 }
 
@@ -354,27 +441,39 @@ async function loadSessionMessages(
     variantGroupId?: string;
     variantIndex?: number;
   }>,
+  options: {
+    generation?: number;
+    signal?: AbortSignal;
+    onUsage?: (usage: {
+      used: number;
+      max: number;
+      contextKnown: boolean;
+      breakdown?: { system: number; memory: number; tools: number; chat: number };
+    }) => void;
+  } = {},
 ) {
+  if (!ownsFeed(sessionId, options.generation)) return false;
   // Don't wipe the feed up front — that leaves a visible blank flash for the
   // whole round trip below. Instead remember where "new" entries begin and
   // swap everything in atomically once the fetched history is ready.
-  const feedLengthAtStart = feed.length;
+  const liveTailAtLoad = feed.slice(feedTransitionBaseLength);
 
   let timeline: Array<{ messageId?: string; hash?: string }> = [];
-  try {
-    const res = await apiFetch(apiUrl(`/api/sessions/${sessionId}/timetravel`));
-    const data = await parseJsonResponse<{ ok?: boolean; data?: { timeline?: typeof timeline } }>(
-      res,
-    );
-    if (data.ok) timeline = data.data?.timeline ?? [];
-  } catch (err) {
-    console.warn('Failed to fetch timeline:', err);
-  }
+  let contextData: {
+    lastUsage?: { used: number; max: number; contextKnown: boolean; breakdown?: { system: number; memory: number; tools: number; chat: number } } | null;
+    data?: Array<{ id: string; ts: number; kind: string; label: string; content: string; prunedForAgent: boolean }>;
+  } = {};
+  const ancillary = Promise.allSettled([
+    apiFetch(apiUrl(`/api/sessions/${sessionId}/timetravel`), { signal: options.signal })
+      .then((res) => parseJsonResponse<{ ok?: boolean; data?: { timeline?: typeof timeline } }>(res)),
+    apiFetch(apiUrl(`/api/sessions/${sessionId}/context`), { signal: options.signal })
+      .then((res) => parseJsonResponse<{ ok?: boolean; lastUsage?: typeof contextData.lastUsage; data?: typeof contextData.data }>(res)),
+  ]);
 
   // The user may have switched to another session while the timeline
   // fetch was in flight; writing this (now stale) history would show the
   // wrong chat's messages in the current chat.
-  if (sessionStore.activeSessionId !== sessionId) return;
+  if (!ownsFeed(sessionId, options.generation)) return false;
 
   const variantsByGroup = new Map<string, typeof messages>();
   for (const message of messages) {
@@ -385,8 +484,6 @@ async function loadSessionMessages(
   }
 
   const history = messages.filter((m) => !m.variantGroupId || (m.variantIndex ?? 0) === 0).map((m) => {
-    const ghost = timeline.find((t) => t.messageId === m.id);
-
     return {
       id: `hist-${m.id}`,
       timestamp: m.createdAt,
@@ -418,37 +515,37 @@ async function loadSessionMessages(
               }))
           : [{ id: m.id, content: m.content, model: m.model, index: 0 }],
       },
-      ghostHash: ghost?.hash,
+      ghostHash: undefined,
     };
   });
+  // Text history is the critical path. Commit it immediately; timeline hashes
+  // and archived tool proof enrich the same isolated session afterward.
+  feed = [...history, ...liveTailAtLoad];
+  loadingSessionId = '';
+  feedTransitionBaseLength = history.length;
+  sessionFeedCache.set(sessionId, cloneEntries(feed));
+  feedVersion++;
+  streamingRevision = 0;
+  analyzingThoughtId = null;
+  rebuildGroupedFeedCache();
+
+  const [timelineResult, contextResult] = await ancillary;
+  if (options.signal?.aborted || !ownsFeed(sessionId, options.generation)) return true;
+  if (timelineResult.status === 'fulfilled' && timelineResult.value.ok) {
+    timeline = timelineResult.value.data?.timeline ?? [];
+  }
+  if (contextResult.status === 'fulfilled' && contextResult.value.ok) {
+    contextData = contextResult.value;
+  }
   // Restore archived tool activity (tool runs aren't part of message history —
   // without this, reopening a chat silently dropped all proof-of-work).
   let toolHistory: FeedEntry[] = [];
   try {
-    const res = await apiFetch(apiUrl(`/api/sessions/${sessionId}/context`));
-    const data = await parseJsonResponse<{
-      ok?: boolean;
-      lastUsage?: {
-        used: number;
-        max: number;
-        contextKnown: boolean;
-        breakdown?: { system: number; memory: number; tools: number; chat: number };
-      } | null;
-      data?: Array<{
-        id: string;
-        ts: number;
-        kind: string;
-        label: string;
-        content: string;
-        prunedForAgent: boolean;
-      }>;
-    }>(res);
-    if (data.ok && data.lastUsage && sessionStore.activeSessionId === sessionId) {
-      const { seedManagerUsage } = await import('./agents.svelte');
-      seedManagerUsage(sessionId, data.lastUsage);
+    if (contextData.lastUsage && ownsFeed(sessionId, options.generation)) {
+      options.onUsage?.(contextData.lastUsage);
     }
-    if (data.ok && Array.isArray(data.data)) {
-      toolHistory = data.data.map((e) => ({
+    if (Array.isArray(contextData.data)) {
+      toolHistory = contextData.data.map((e) => ({
         id: `arch-${e.id}`,
         timestamp: e.ts,
         type: 'tool_result' as const,
@@ -473,18 +570,27 @@ async function loadSessionMessages(
   } catch {
     /* archive unavailable — text history still loads */
   }
-  if (sessionStore.activeSessionId !== sessionId) return;
+  if (!ownsFeed(sessionId, options.generation)) return false;
 
-  const merged = [...history, ...toolHistory].sort((a, b) => a.timestamp - b.timestamp);
+  const enrichedHistory = history.map((entry) => ({
+    ...entry,
+    ghostHash: timeline.find((item) => item.messageId === entry.metadata?.messageId)?.hash,
+  }));
+  const merged = [...enrichedHistory, ...toolHistory].sort((a, b) => a.timestamp - b.timestamp);
   // Anything pushed onto the feed while we awaited (live stream events for
   // this session) belongs after history — everything before
   // feedLengthAtStart is stale (either the old session's content, on a
   // switch, or this same session's now-persisted turn) and gets replaced.
-  feed = [...merged, ...feed.slice(feedLengthAtStart)];
+  // Preserve only events that arrived after the immediate text-history commit.
+  // Cached pre-switch rows were replaced above and can never leak back in.
+  feed = [...merged, ...feed.slice(feedTransitionBaseLength)];
+  feedTransitionBaseLength = merged.length;
+  sessionFeedCache.set(sessionId, cloneEntries(feed));
   feedVersion++;
   streamingRevision = 0;
   analyzingThoughtId = null;
   rebuildGroupedFeedCache();
+  return true;
 }
 
 // ─── Exported Store ─────────────────────────────────────────────────────────
@@ -499,6 +605,15 @@ export const feedStore = {
   get length() {
     return feed.length;
   },
+  get sessionId() {
+    return feedSessionId;
+  },
+  get transitionGeneration() {
+    return feedTransitionGeneration;
+  },
+  get isLoadingSession() {
+    return !!feedSessionId && loadingSessionId === feedSessionId;
+  },
   addFeedEntry,
   accumulateFeedEntry,
   addUserMessage,
@@ -507,8 +622,14 @@ export const feedStore = {
   removeEntries,
   setEntryVisibility,
   finalizeThinking,
+  beginThinking,
+  getThinkingStart,
+  updateToolCall,
   removeContentEntriesForAgent,
   clearFeed,
+  activateSessionFeed,
+  finishSessionLoad,
+  ownsFeed,
   loadSessionMessages,
   resolveGlowClass,
   getGroupedEntries,

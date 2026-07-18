@@ -31,11 +31,11 @@ export function useAgentRail() {
   });
 
   let selectedAgentIsRunning = $derived(
-    !!selectedAgent && selectedAgent.status !== 'done' && selectedAgent.status !== 'idle',
+    !!selectedAgent && !['done', 'idle', 'error'].includes(selectedAgent.status),
   );
 
   let inputPlaceholder = $derived(
-    selectedAgent ? `What's the move for ${selectedAgent.identity.name}?` : "What's the move?",
+    selectedAgent ? `Steer ${selectedAgent.identity.name} directly…` : "What's the move?",
   );
 
   let lastLoadedAgentThreadKey = $state('');

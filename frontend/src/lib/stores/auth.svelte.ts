@@ -13,6 +13,7 @@ export interface AuthUser {
 let user = $state<AuthUser | null>(null);
 let isInitialized = $state(false);
 let token = $state<string | undefined>(undefined);
+let initialization: Promise<boolean> | null = null;
 
 const LOCAL_AUTH_TOKEN_KEY = 'koryphaios-local-auth-token';
 
@@ -82,34 +83,56 @@ export const authStore = {
     return token;
   },
 
-  /** Returns true if backend responded (even with no user), false if backend unreachable (5xx or network error). */
-  async initialize(): Promise<boolean> {
+  /**
+   * Establishes and validates the local bearer session. This intentionally
+   * validates even when a token is already in memory: the local backend is
+   * restarted during development and its in-memory session registry is reset,
+   * while the desktop webview keeps its token in localStorage. Revalidating
+   * through /api/auth/me (which returns 200 for an invalid bearer) lets us
+   * mint a replacement before any protected route can emit a noisy 401.
+   */
+  async ensureSession(): Promise<boolean> {
     if (!browser) {
       isInitialized = true;
       return true;
     }
-    if (isInitialized) return !!user;
 
-    token = loadStoredToken();
-    try {
-      let resolvedUser: AuthUser | null = token ? await validateToken(token) : null;
+    // Coalesce mount-time and API callers so they create at most one session.
+    if (initialization) return initialization;
 
-      if (!resolvedUser) {
-        token = await createLocalSession();
-        persistToken(token);
-        resolvedUser = token ? await validateToken(token) : null;
+    initialization = (async () => {
+      token = token ?? loadStoredToken();
+      try {
+        let resolvedUser: AuthUser | null = token ? await validateToken(token) : null;
+
+        if (!resolvedUser) {
+          token = await createLocalSession();
+          persistToken(token);
+          resolvedUser = token ? await validateToken(token) : null;
+        }
+
+        user = resolvedUser;
+        isInitialized = true;
+        return !!resolvedUser;
+      } catch {
+        user = null;
+        token = undefined;
+        persistToken(undefined);
+        isInitialized = true;
+        return false;
       }
+    })();
 
-      user = resolvedUser;
-      isInitialized = true;
-      return !!resolvedUser;
-    } catch {
-      user = null;
-      token = undefined;
-      persistToken(undefined);
-      isInitialized = true;
-      return false;
+    try {
+      return await initialization;
+    } finally {
+      initialization = null;
     }
+  },
+
+  /** Backward-compatible startup entrypoint. */
+  async initialize(): Promise<boolean> {
+    return this.ensureSession();
   },
 
   setUser(u: AuthUser | null) {

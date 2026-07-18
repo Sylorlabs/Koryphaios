@@ -199,7 +199,7 @@
 		background: var(--color-accent);
 		animation: pulse 1s ease-in-out infinite;
 	}
-	.startup-error { display: flex; flex-direction: column; align-items: center; gap: var(--space-md); max-width: 32rem; padding: var(--space-xl); text-align: center; }
+	.startup-error { display: flex; flex-direction: column; align-items: center; gap: var(--space-md); max-width: 32rem; padding: var(--space-xl); text-align: center; pointer-events: auto; }
 	.startup-error strong { color: var(--color-text-primary); font-size: var(--text-lg); }
 	.startup-error span { color: var(--color-text-secondary); font-size: var(--text-sm); }
 	.startup-error button { padding: var(--space-sm) var(--space-lg); border: 1px solid var(--color-accent); border-radius: var(--radius-md); background: var(--color-accent); color: var(--color-surface-0); cursor: pointer; }

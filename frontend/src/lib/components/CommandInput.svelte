@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { Send, ChevronDown, Sparkles, Square, Users, User, ShieldCheck, ShieldAlert, Circle, Paperclip, Clipboard, X, Check } from 'lucide-svelte';
+  import { Send, ChevronDown, Sparkles, Square, Users, User, ShieldCheck, ShieldAlert, Circle, Paperclip, Clipboard, X, Check, Search } from 'lucide-svelte';
   import { wsStore } from '$lib/stores/websocket.svelte';
   import { shortcutStore } from '$lib/stores/shortcuts.svelte';
   import { experimentalStore } from '$lib/stores/experimental.svelte';
@@ -64,6 +64,7 @@
   }: Props = $props();
   let actionPanelRef = $state<HTMLDivElement>();
   let showModelPicker = $state(false);
+  let modelSearchQuery = $state('');
   const MODEL_STORAGE_KEY = 'koryphaios-selected-model';
   let _storedModel = typeof localStorage !== 'undefined' ? localStorage.getItem(MODEL_STORAGE_KEY) : null;
   if (_storedModel === 'auto') { localStorage.removeItem(MODEL_STORAGE_KEY); _storedModel = null; }
@@ -92,6 +93,7 @@
     if (provider === 'antigravity') return 'Antigravity';
     if (provider === 'jules') return 'Jules (cloud)';
     if (provider === 'google') return 'Google';
+    if (provider === 'aistudio') return 'Google AI Studio';
     if (provider === 'xai') return 'xAI';
     if (provider === 'openrouter') return 'OpenRouter';
     if (provider === 'vertexai') return 'Vertex AI';
@@ -196,6 +198,14 @@
       }
     }
     return models;
+  });
+
+  let filteredQuickModels = $derived.by(() => {
+    const query = modelSearchQuery.trim().toLowerCase();
+    if (!query) return availableModels;
+    return availableModels.filter((model) =>
+      `${model.label} ${model.provider} ${model.value}`.toLowerCase().includes(query),
+    );
   });
 
   let selectedModelLabel = $derived.by(() => {
@@ -936,7 +946,10 @@
           type="button"
           class="flex items-center gap-2 px-3.5 h-10 rounded-xl text-sm font-medium transition-all hover:brightness-110 active:scale-[0.98]"
           style="background: var(--color-surface-3); color: {selectedModel ? 'var(--color-text-primary)' : 'var(--color-text-muted)'}; border: 1px solid var(--color-border);"
-          onclick={() => showModelPicker = !showModelPicker}
+          onclick={() => {
+            showModelPicker = !showModelPicker;
+            if (showModelPicker) modelSearchQuery = '';
+          }}
         >
           <span>{selectedModelLabel}</span>
           <ChevronDown size={14} class="text-text-muted" />
@@ -944,9 +957,21 @@
 
         {#if showModelPicker}
           <div
-            class="absolute bottom-full left-0 mb-2 w-72 max-h-60 overflow-y-auto rounded-xl border shadow-2xl z-50"
+            class="absolute bottom-full left-0 mb-2 w-80 overflow-hidden rounded-xl border shadow-2xl z-50"
             style="background: var(--color-surface-2); border-color: var(--color-border);"
           >
+            <div class="relative border-b p-2.5" style="border-color: var(--color-border);">
+              <Search class="pointer-events-none absolute left-5 top-1/2 -translate-y-1/2" size={15} style="color: var(--color-text-muted);" />
+              <input
+                type="search"
+                bind:value={modelSearchQuery}
+                aria-label="Search quick models"
+                placeholder="Search models…"
+                class="w-full rounded-lg border bg-[var(--color-surface-1)] py-2 pr-3 text-sm text-[var(--color-text-primary)] outline-none placeholder:text-[var(--color-text-muted)] focus:border-[var(--color-accent)]"
+                style="border-color: var(--color-border); padding-left: 2.25rem;"
+              />
+            </div>
+            <div class="max-h-60 overflow-y-auto">
             {#if availableModels.length === 0}
               <div class="px-4 py-4 text-xs leading-relaxed" style="color: var(--color-text-muted);">
                 <div class="font-semibold mb-1" style="color: var(--color-text-secondary);">No provider connected</div>
@@ -961,8 +986,10 @@
                   </button>
                 {/if}
               </div>
+            {:else if filteredQuickModels.length === 0}
+              <div class="px-4 py-5 text-center text-xs" style="color: var(--color-text-muted);">No models match “{modelSearchQuery}”.</div>
             {:else}
-              {#each availableModels as model}
+              {#each filteredQuickModels as model}
                 <button
                   type="button"
                   class="w-full text-left px-4 py-3 text-sm transition-colors hover:bg-[var(--color-surface-3)] flex items-center gap-2 {selectedModel === model.value ? 'text-[var(--color-accent)]' : ''}"
@@ -973,6 +1000,7 @@
                 </button>
               {/each}
             {/if}
+            </div>
           </div>
         {/if}
       </div>

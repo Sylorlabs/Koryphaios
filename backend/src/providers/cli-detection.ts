@@ -35,8 +35,6 @@ import {
 
 export interface AgentCliStatus {
   /** Stable id for the CLI. */
-  // NOTE: no 'gemini' here — the standalone Gemini CLI is unsupported and must
-  // never be re-added (Antigravity is its successor).
   id: 'claude' | 'codex' | 'antigravity' | 'grok' | 'cursor' | 'devin' | 'cline';
   displayName: string;
   /** Candidate binary names looked up on PATH. */
@@ -172,9 +170,7 @@ export function detectAgentClis(): AgentCliStatus[] {
     docsUrl: 'https://developers.openai.com/codex/cli',
   });
 
-  // ── Antigravity CLI (`agy`) → `google` provider. Google's Gemini CLI successor;
-  // auto-enables when ANTIGRAVITY_API_KEY is set. OAuth-only login is surfaced but
-  // needs an API key to drive the Google provider directly. ──
+  // ── Antigravity CLI (`agy`) → its own `antigravity` provider. ──
   const antigravityKey = detectAntigravityApiKey();
   const antigravityLogin = detectAntigravityCLILogin();
   const antigravity = mk('antigravity', 'Antigravity CLI', ['agy'], 'antigravity', {
@@ -192,16 +188,12 @@ export function detectAgentClis(): AgentCliStatus[] {
     workingNote: antigravityLogin
       ? 'Chats through the Antigravity CLI harness.'
       : antigravityKey
-        ? 'Chats through the Google (Gemini) provider via ANTIGRAVITY_API_KEY.'
+        ? 'Chats through the Antigravity CLI harness via ANTIGRAVITY_API_KEY.'
         : 'Antigravity CLI is installed but not configured.',
     loggedOutNote: 'Antigravity CLI is installed but not logged in — run "agy login".',
     docsUrl: 'https://antigravity.google/docs/cli-getting-started',
   });
 
-  // ── Gemini CLI: DO NOT ADD. The standalone `gemini` CLI is no longer
-  // supported by Koryphaios — Antigravity (`agy`, above) is Google's successor
-  // and the only Google CLI integration we detect. Do not re-add a `gemini`
-  // detection entry here. ──
 
   // ── Grok Build → `grok` provider (its own CLI harness, like Claude Code / Codex). ──
   const grokKey = detectGrokXaiKey();

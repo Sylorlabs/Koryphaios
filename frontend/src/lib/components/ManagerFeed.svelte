@@ -15,7 +15,8 @@
     GitBranch,
     Pencil,
     Check,
-    X
+    X,
+    LoaderCircle
   } from 'lucide-svelte';
   import FeedEntry from './FeedEntry.svelte';
   import VirtualList from './VirtualList.svelte';
@@ -177,7 +178,19 @@
   </div>
 
   <div class="relative flex-1 min-h-0 overflow-hidden">
-    {#if filteredFeed.length === 0}
+    {#if wsStore.isLoadingSession && filteredFeed.length === 0}
+      <div
+        bind:this={feedContainer}
+        class="absolute inset-0 flex items-center justify-center p-6 feed-scroll"
+        role="status"
+        aria-live="polite"
+      >
+        <div class="flex items-center gap-3 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-raised)] px-4 py-3 text-sm text-[var(--color-text-secondary)] shadow-lg">
+          <LoaderCircle size={18} class="animate-spin text-[var(--color-accent)]" />
+          <span>Loading this chat…</span>
+        </div>
+      </div>
+    {:else if filteredFeed.length === 0}
     <div
       bind:this={feedContainer}
       class="absolute inset-0 overflow-y-auto p-4 feed-scroll"

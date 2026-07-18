@@ -146,6 +146,7 @@ function providerDisplayName(provider: string): string {
   if (provider === 'codex') return 'Codex';
   if (provider === 'anthropic') return 'Anthropic';
   if (provider === 'google') return 'Google';
+  if (provider === 'aistudio') return 'Google AI Studio';
   if (provider === 'xai') return 'xAI';
   if (provider === 'openrouter') return 'OpenRouter';
   if (provider === 'vertexai') return 'Vertex AI';
@@ -179,7 +180,10 @@ function isWSMessageLike(value: unknown): value is WSMessage {
 
 function handleMessage(msg: WSMessage) {
   const activeSessionId = sessionStore.activeSessionId;
-  const isForActiveSession = !msg.sessionId || msg.sessionId === activeSessionId;
+  // Feed-affecting realtime events must carry an exact session identity.
+  // Unscoped events are global control/catalog events only; treating them as
+  // belonging to "whatever is open now" is a cross-chat data leak.
+  const isForActiveSession = !!msg.sessionId && msg.sessionId === activeSessionId;
   const agents = agentStore.agents;
 
   // Any activity for a busy session proves the run is alive — reset its
@@ -244,6 +248,10 @@ function handleMessage(msg: WSMessage) {
     case 'agent.status': {
       const p = msg.payload as AgentStatusPayload;
       agentStore.updateAgentStatus(p.agentId, p.status, msg.sessionId ?? undefined);
+      if (isForActiveSession) {
+        if (p.status === 'thinking') feedStore.beginThinking(p.agentId, msg.timestamp);
+        else feedStore.finalizeThinking(p.agentId, msg.timestamp);
+      }
       if (p.status === 'done' || p.status === 'idle' || p.status === 'waiting') {
         maybeClearBusy(msg.sessionId ?? agents.get(p.agentId)?.sessionId);
         const completedSessionId = msg.sessionId ?? agents.get(p.agentId)?.sessionId;
@@ -280,8 +288,8 @@ function handleMessage(msg: WSMessage) {
 
     case 'agent.completed':
     case 'stream.complete': {
-      if (isForActiveSession) feedStore.finalizeThinking();
       const p = msg.payload as { agentId: string };
+      if (isForActiveSession) feedStore.finalizeThinking(p.agentId, msg.timestamp);
       agentStore.completeAgent(p.agentId, msg.sessionId ?? undefined);
       if (isForActiveSession) feedStore.removeAnalyzingThoughtEntries();
       maybeClearBusy(msg.sessionId ?? agents.get(p.agentId)?.sessionId);
@@ -300,6 +308,7 @@ function handleMessage(msg: WSMessage) {
           agentName: agents.get(p.agentId ?? '')?.identity.name ?? 'Unknown',
           glowClass: '',
           text: p.error ?? 'Unknown error',
+          metadata: { source: 'agent', sessionId: msg.sessionId },
         });
       }
       break;
@@ -308,7 +317,7 @@ function handleMessage(msg: WSMessage) {
     case 'stream.delta': {
       const p = msg.payload as StreamDeltaPayload;
       // Answer text starting = the provider is done reasoning: freeze timers.
-      if (isForActiveSession) feedStore.finalizeThinking();
+      if (isForActiveSession) feedStore.finalizeThinking(p.agentId, msg.timestamp);
       agentStore.appendAgentContent(p.agentId, p.content, msg.sessionId ?? undefined);
       if (isForActiveSession) {
         feedStore.removeAnalyzingThoughtEntries();
@@ -358,7 +367,7 @@ function handleMessage(msg: WSMessage) {
           agentName: agents.get(p.agentId)?.identity.name ?? 'Worker',
           glowClass: feedStore.resolveGlowClass(agents.get(p.agentId)?.identity),
           text: p.thinking,
-          thinkingStartedAt: msg.timestamp,
+          thinkingStartedAt: feedStore.getThinkingStart(p.agentId, msg.timestamp),
           metadata:
             typeof p.thinkingTokens === 'number' ? { thinkingTokens: p.thinkingTokens } : {},
         });
@@ -371,7 +380,7 @@ function handleMessage(msg: WSMessage) {
           agentName: agentStore.getAgentFeedLabel(p.agentId),
           glowClass: feedStore.resolveGlowClass(agents.get(p.agentId)?.identity),
           text: p.thinking,
-          thinkingStartedAt: msg.timestamp,
+          thinkingStartedAt: feedStore.getThinkingStart(p.agentId, msg.timestamp),
           metadata: { sessionId: msg.sessionId },
         });
       }
@@ -380,17 +389,22 @@ function handleMessage(msg: WSMessage) {
 
     case 'stream.tool_call': {
       const p = msg.payload as StreamToolCallPayload;
-      agentStore.addToolCall(p.agentId, p.toolCall.name, msg.sessionId ?? undefined);
+      if (isForActiveSession) feedStore.finalizeThinking(p.agentId, msg.timestamp);
+      const existingToolCall =
+        isForActiveSession && feedStore.updateToolCall(p.toolCall, msg.timestamp);
+      if (!existingToolCall)
+        agentStore.addToolCall(p.agentId, p.toolCall.name, msg.sessionId ?? undefined);
       if (isForActiveSession) {
-        feedStore.addFeedEntry({
-          timestamp: msg.timestamp,
-          type: 'tool_call',
-          agentId: p.agentId,
-          agentName: agents.get(p.agentId)?.identity.name ?? 'Worker',
-          glowClass: feedStore.resolveGlowClass(agents.get(p.agentId)?.identity),
-          text: `Calling tool: ${p.toolCall.name}`,
-          metadata: { toolCall: p.toolCall, sourceProvider: p.sourceProvider },
-        });
+        if (!existingToolCall)
+          feedStore.addFeedEntry({
+            timestamp: msg.timestamp,
+            type: 'tool_call',
+            agentId: p.agentId,
+            agentName: agents.get(p.agentId)?.identity.name ?? 'Worker',
+            glowClass: feedStore.resolveGlowClass(agents.get(p.agentId)?.identity),
+            text: `Calling tool: ${p.toolCall.name}`,
+            metadata: { toolCall: p.toolCall, sourceProvider: p.sourceProvider },
+          });
       }
       if (msg.sessionId) {
         agentStore.upsertAgentThreadEntry(msg.sessionId, p.agentId, {
@@ -455,6 +469,11 @@ function handleMessage(msg: WSMessage) {
 
     case 'stream.tool_result': {
       const p = msg.payload as StreamToolResultPayload;
+      const resultText = p.toolResult.isError
+        ? `Tool error: ${p.toolResult.output}`
+        : p.toolResult.durationMs > 0
+          ? `Tool result (${p.toolResult.durationMs.toFixed(0)}ms): ${p.toolResult.output}`
+          : `Tool result (time not reported by provider): ${p.toolResult.output}`;
       if (isForActiveSession) {
         feedStore.addFeedEntry({
           timestamp: msg.timestamp,
@@ -462,9 +481,7 @@ function handleMessage(msg: WSMessage) {
           agentId: p.agentId,
           agentName: agents.get(p.agentId)?.identity.name ?? 'Worker',
           glowClass: feedStore.resolveGlowClass(agents.get(p.agentId)?.identity),
-          text: p.toolResult.isError
-            ? `Tool error: ${p.toolResult.output}`
-            : `Tool result (${p.toolResult.durationMs.toFixed(0)}ms): ${p.toolResult.output}`,
+          text: resultText,
           metadata: { toolResult: p.toolResult, sourceProvider: p.sourceProvider },
         });
       }
@@ -475,9 +492,7 @@ function handleMessage(msg: WSMessage) {
           agentId: p.agentId,
           agentName: agentStore.getAgentFeedLabel(p.agentId),
           glowClass: feedStore.resolveGlowClass(agents.get(p.agentId)?.identity),
-          text: p.toolResult.isError
-            ? `Tool error: ${p.toolResult.output}`
-            : `Tool result (${p.toolResult.durationMs.toFixed(0)}ms): ${p.toolResult.output}`,
+          text: resultText,
           metadata: {
             toolResult: p.toolResult,
             sessionId: msg.sessionId,
@@ -704,6 +719,7 @@ function handleMessage(msg: WSMessage) {
           agentName: '',
           glowClass: '',
           text: errorText,
+          metadata: { source: 'backend', sessionId: msg.sessionId },
         });
       }
       break;
@@ -805,6 +821,7 @@ function connect(url?: string) {
       reconnectAttempts = 0;
       hasShownMalformedWsMessage = false;
       wsConnection = ws;
+      sentSessionSubscriptions.clear();
       // Re-subscribe to every session viewed this app run, not just the
       // active one — the server keeps per-connection subscriptions, so a
       // reconnect would otherwise silently stop delivering events for
@@ -839,6 +856,7 @@ function connect(url?: string) {
       console.log('[WS] Connection closed:', event.code, event.reason);
       connectionStatus = 'disconnected';
       wsConnection = null;
+      sentSessionSubscriptions.clear();
 
       if (wsCandidateIndex < wsCandidates.length - 1) {
         wsCandidateIndex++;
@@ -872,11 +890,16 @@ function scheduleReconnect(url?: string) {
 // Sessions this client has subscribed to during this app run. Used to
 // restore server-side subscriptions after a reconnect.
 const subscribedSessions = new Set<string>();
+// Tracks what was actually sent on the current socket. This is distinct from
+// subscribedSessions, which is the desired set restored after reconnects.
+const sentSessionSubscriptions = new Set<string>();
 
 function subscribeToSession(sessionId: string) {
   if (!sessionId) return;
   subscribedSessions.add(sessionId);
   if (wsConnection?.readyState !== WebSocket.OPEN) return;
+  if (sentSessionSubscriptions.has(sessionId)) return;
+  sentSessionSubscriptions.add(sessionId);
   wsConnection.send(
     JSON.stringify({ type: 'subscribe_session', sessionId, timestamp: Date.now() }),
   );
@@ -895,6 +918,7 @@ function disconnect() {
   fileEditTimers.clear();
   wsConnection?.close();
   wsConnection = null;
+  sentSessionSubscriptions.clear();
   connectionStatus = 'disconnected';
 }
 
@@ -1024,6 +1048,16 @@ function clearFeed() {
   agentStore.clearNonManagerAgents();
 }
 
+function activateSessionFeed(sessionId: string): number {
+  const generation = feedStore.activateSessionFeed(sessionId);
+  activeFileEdits = new Map();
+  detectedContext = [];
+  agentStore.clearNonManagerAgents();
+  koryThought = '';
+  koryPhase = '';
+  return generation;
+}
+
 async function loadSessionMessages(
   sessionId: string,
   messages: Array<{
@@ -1036,7 +1070,9 @@ async function loadSessionMessages(
     variantGroupId?: string;
     variantIndex?: number;
   }>,
+  options: { generation?: number; signal?: AbortSignal } = {},
 ) {
+  if (!feedStore.ownsFeed(sessionId, options.generation)) return;
   // Reset ancillary per-session UI state up front, but leave the feed itself
   // alone — feedStore.loadSessionMessages swaps it in atomically once the
   // fetched history is ready, avoiding a blank flash during the round trip.
@@ -1045,7 +1081,10 @@ async function loadSessionMessages(
   agentStore.clearNonManagerAgents();
   koryThought = '';
   koryPhase = '';
-  await feedStore.loadSessionMessages(sessionId, messages);
+  await feedStore.loadSessionMessages(sessionId, messages, {
+    ...options,
+    onUsage: (usage) => agentStore.seedManagerUsage(sessionId, usage),
+  });
 }
 
 async function rewind(hash: string) {
@@ -1112,6 +1151,9 @@ export const wsStore = {
   get groupedFeed() {
     return feedStore.groupedFeed;
   },
+  get isLoadingSession() {
+    return feedStore.isLoadingSession;
+  },
   get agentThreadVersion() {
     return agentStore.agentThreadVersion;
   },
@@ -1159,6 +1201,8 @@ export const wsStore = {
   markAgentStopped: agentStore.markAgentStopped,
   clearSessionBusy,
   clearAnalyzing: feedStore.removeAnalyzingThoughtEntries,
+  addClientError: feedStore.addClientError,
+  finishSessionLoad: feedStore.finishSessionLoad,
   connect,
   disconnect,
   sendMessage,
@@ -1176,6 +1220,7 @@ export const wsStore = {
   respondToPermission,
   subscribeToSession,
   clearFeed,
+  activateSessionFeed,
   rewind,
   toggleYolo,
   setYoloMode,

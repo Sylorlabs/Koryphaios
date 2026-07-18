@@ -1,15 +1,35 @@
 <script lang="ts">
   import { onMount, onDestroy, tick } from 'svelte';
   import {
-    Search, Plus, StickyNote, Share2, Folder, FolderOpen,
-    Pin, PinOff, BookOpen, Paperclip, Trash2, X, ChevronRight,
-    ChevronDown, Save, FileText, Image, Download, Tag, RefreshCw, Eye, Code2, LayoutGrid
+    Search,
+    Plus,
+    StickyNote,
+    Share2,
+    Folder,
+    FolderOpen,
+    Pin,
+    PinOff,
+    BookOpen,
+    Paperclip,
+    Trash2,
+    X,
+    ChevronRight,
+    ChevronDown,
+    Save,
+    FileText,
+    Image,
+    Download,
+    Tag,
+    RefreshCw,
+    Eye,
+    Code2,
+    LayoutGrid,
   } from 'lucide-svelte';
   import { notesStore } from '$lib/stores/notes.svelte';
   import { toastStore } from '$lib/stores/toast.svelte';
   import { apiUrl } from '$lib/utils/api-url';
   import { authStore } from '$lib/stores/auth.svelte';
-import { projectStore } from '$lib/stores/project.svelte';
+  import { projectStore } from '$lib/stores/project.svelte';
   import NotesGraph from './NotesGraph.svelte';
   import NotesCanvas from './NotesCanvas.svelte';
   import VirtualList from './VirtualList.svelte';
@@ -28,11 +48,19 @@ import { projectStore } from '$lib/stores/project.svelte';
       {
         name: 'wikilink',
         level: 'inline',
-        start(src: string) { return src.indexOf('[['); },
+        start(src: string) {
+          return src.indexOf('[[');
+        },
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         tokenizer(src: string): any {
           const m = /^!?\[\[([^\]|#]+?)(?:[|#]([^\]]+?))?\]\]/.exec(src);
-          if (m) return { type: 'wikilink', raw: m[0], text: (m[2] || m[1]).trim(), target: m[1].trim() };
+          if (m)
+            return {
+              type: 'wikilink',
+              raw: m[0],
+              text: (m[2] || m[1]).trim(),
+              target: m[1].trim(),
+            };
         },
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         renderer(token: any) {
@@ -50,7 +78,10 @@ import { projectStore } from '$lib/stores/project.svelte';
     renderer: {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       code(this: any, token: any): string | false {
-        const lang = String(token?.lang ?? '').trim().split(/\s+/)[0].toLowerCase();
+        const lang = String(token?.lang ?? '')
+          .trim()
+          .split(/\s+/)[0]
+          .toLowerCase();
         const text = String(token?.text ?? '');
         if (lang === 'mermaid') {
           // base64 keeps the source intact through DOMPurify + HTML attributes.
@@ -72,11 +103,18 @@ import { projectStore } from '$lib/stores/project.svelte';
   let contentInput = $state('');
   let tagsInput = $state('');
   let tags = $state<string[]>([]);
+  let showTagMenu = $state(false);
+  let availableTags = $derived(
+    [...new Set(notesStore.notes.flatMap((note) => note.tags ?? []))]
+      .filter((tag) => !tags.includes(tag))
+      .slice(0, 8),
+  );
   let pinned = $state(false);
   let includeInContext = $state(false);
   let isDirty = $state(false);
   let autosaveTimer: ReturnType<typeof setTimeout> | null = null;
   let searchDebounceTimer: ReturnType<typeof setTimeout> | null = null;
+  let searchInput = $state('');
   let searchQuery = $state('');
   let expandedFolders = $state<Set<string>>(new Set(['/']));
   let dragOver = $state(false);
@@ -102,9 +140,7 @@ import { projectStore } from '$lib/stores/project.svelte';
     const folder = notesStore.selectedFolder;
     return notesStore.notes.filter((n) => {
       const inFolder =
-        folder === '/'
-          ? true
-          : n.folderPath === folder || n.folderPath.startsWith(folder + '/');
+        folder === '/' ? true : n.folderPath === folder || n.folderPath.startsWith(folder + '/');
       const matchesQuery =
         !q ||
         n.title.toLowerCase().includes(q) ||
@@ -123,14 +159,17 @@ import { projectStore } from '$lib/stores/project.svelte';
 
   // Live Markdown preview: resolve ![[transclusions]] from loaded notes (depth
   // 1), then render + sanitize. Wikilinks become clickable via noteMarked.
-  let markdownPreview = $derived.by(() => {
+  function renderMarkdownPreview(): string {
     if (!currentNote || currentNote.format === 'html') return '';
     const byTitle = new Map(notesStore.notes.map((n) => [n.title.toLowerCase(), n]));
-    const transcluded = contentInput.replace(/!\[\[([^\]|#]+?)(?:[|#][^\]]+?)?\]\]/g, (raw, title) => {
-      const target = byTitle.get(String(title).trim().toLowerCase());
-      if (!target || target.id === currentNote.id) return raw;
-      return `\n> **${target.title}**\n>\n${String(target.content).replace(/^/gm, '> ')}\n`;
-    });
+    const transcluded = contentInput.replace(
+      /!\[\[([^\]|#]+?)(?:[|#][^\]]+?)?\]\]/g,
+      (raw, title) => {
+        const target = byTitle.get(String(title).trim().toLowerCase());
+        if (!target || target.id === currentNote.id) return raw;
+        return `\n> **${target.title}**\n>\n${String(target.content).replace(/^/gm, '> ')}\n`;
+      },
+    );
     try {
       // Plugin markdown transforms run before parse; HTML post-processors after.
       const src = notePlugins.transformMarkdown(transcluded);
@@ -142,6 +181,26 @@ import { projectStore } from '$lib/stores/project.svelte';
     } catch {
       return '';
     }
+  }
+
+  // Parsing Markdown, running plugins, and sanitizing HTML can be expensive for
+  // large notes. Keep typing responsive by coalescing rapid edits into one
+  // preview render instead of rebuilding the whole document per keystroke.
+  let markdownPreview = $state('');
+  let previewRenderTimer: ReturnType<typeof setTimeout> | null = null;
+  $effect(() => {
+    void currentNote?.id;
+    void currentNote?.format;
+    void contentInput;
+    void notesStore.notes;
+    if (previewRenderTimer) clearTimeout(previewRenderTimer);
+    previewRenderTimer = setTimeout(() => {
+      markdownPreview = renderMarkdownPreview();
+      previewRenderTimer = null;
+    }, 100);
+    return () => {
+      if (previewRenderTimer) clearTimeout(previewRenderTimer);
+    };
   });
 
   // [[ wikilink autocomplete for the content textarea.
@@ -212,7 +271,6 @@ import { projectStore } from '$lib/stores/project.svelte';
 
   // ── Load on mount ─────────────────────────────────────────────────────────
   onMount(() => {
-    void Promise.all([notesStore.fetchNotes(), notesStore.fetchFolderTree()]);
     window.addEventListener('keydown', handleGlobalKeydown);
     window.addEventListener('open-notes-graph', handleOpenGraphEvent);
     updateNarrow();
@@ -231,11 +289,17 @@ import { projectStore } from '$lib/stores/project.svelte';
     window.removeEventListener('resize', updateNarrow);
     if (autosaveTimer) clearTimeout(autosaveTimer);
     if (searchDebounceTimer) clearTimeout(searchDebounceTimer);
+    if (previewRenderTimer) clearTimeout(previewRenderTimer);
   });
 
   $effect(() => {
     const projectPath = projectStore.currentPath;
-    if (projectPath) void Promise.all([notesStore.fetchNotes(), notesStore.fetchFolderTree(), notesStore.fetchGraph()]);
+    if (projectPath)
+      void Promise.all([
+        notesStore.fetchNotes(),
+        notesStore.fetchFolderTree(),
+        notesStore.fetchGraph(),
+      ]);
   });
 
   // ── Mermaid diagrams ──────────────────────────────────────────────────────
@@ -257,14 +321,23 @@ import { projectStore } from '$lib/stores/project.svelte';
       try {
         if (!mermaidMod) {
           mermaidMod = (await import('mermaid')).default;
-          mermaidMod.initialize({ startOnLoad: false, theme: 'dark', securityLevel: 'strict', fontFamily: 'inherit' });
+          mermaidMod.initialize({
+            startOnLoad: false,
+            theme: 'dark',
+            securityLevel: 'strict',
+            fontFamily: 'inherit',
+          });
         }
         for (const el of blocks) {
           if (el.dataset.rendered) continue;
           el.dataset.rendered = '1';
           const b64 = el.getAttribute('data-mermaid') ?? '';
           let source = '';
-          try { source = decodeURIComponent(escape(atob(b64))); } catch { source = ''; }
+          try {
+            source = decodeURIComponent(escape(atob(b64)));
+          } catch {
+            source = '';
+          }
           if (!source.trim()) continue;
           try {
             const { svg } = await mermaidMod.render(`mmd-${mermaidSeq++}`, source);
@@ -322,7 +395,10 @@ import { projectStore } from '$lib/stores/project.svelte';
     const note = await notesStore.createNote({
       title: 'Untitled',
       content: '',
-      folderPath: notesStore.selectedFolder !== '/' ? notesStore.selectedFolder : (notesStore.settings.defaultFolderPath ?? '/'),
+      folderPath:
+        notesStore.selectedFolder !== '/'
+          ? notesStore.selectedFolder
+          : (notesStore.settings.defaultFolderPath ?? '/'),
       tags: [],
       pinned: false,
       includeInContext: false,
@@ -394,7 +470,10 @@ import { projectStore } from '$lib/stores/project.svelte';
   }
 
   // ── Folder autocomplete ───────────────────────────────────────────────────
-  function collectAllFolderPaths(nodes: typeof notesStore.folderTree, acc: string[] = []): string[] {
+  function collectAllFolderPaths(
+    nodes: typeof notesStore.folderTree,
+    acc: string[] = [],
+  ): string[] {
     for (const n of nodes) {
       acc.push(n.path);
       collectAllFolderPaths(n.children, acc);
@@ -435,10 +514,9 @@ import { projectStore } from '$lib/stores/project.svelte';
       const attachment = await notesStore.uploadAttachment(note.id, file);
       if (attachment) {
         // Insert embed at cursor in textarea
-        const embedText =
-          attachment.mimeType.startsWith('image/')
-            ? `![[${attachment.filename}]]`
-            : `[[${attachment.filename}]]`;
+        const embedText = attachment.mimeType.startsWith('image/')
+          ? `![[${attachment.filename}]]`
+          : `[[${attachment.filename}]]`;
         insertAtCursor(contentAreaEl, embedText);
         scheduleAutosave();
       }
@@ -449,8 +527,7 @@ import { projectStore } from '$lib/stores/project.svelte';
     if (!el) return;
     const start = el.selectionStart ?? contentInput.length;
     const end = el.selectionEnd ?? contentInput.length;
-    contentInput =
-      contentInput.slice(0, start) + text + contentInput.slice(end);
+    contentInput = contentInput.slice(0, start) + text + contentInput.slice(end);
     tick().then(() => {
       el.selectionStart = el.selectionEnd = start + text.length;
     });
@@ -532,11 +609,18 @@ import { projectStore } from '$lib/stores/project.svelte';
   {/if}
   <!-- ── Left sidebar ──────────────────────────────────────────────────────── -->
   <aside
-    class="border-r flex flex-col min-h-0 {isNarrow ? 'absolute inset-y-0 left-0 z-30 w-full max-w-xs shadow-2xl' : 'shrink-0'} {isNarrow && !showSidebar ? 'hidden' : ''}"
-    style="{isNarrow ? '' : 'width: 280px;'} border-color: var(--color-border); background: var(--color-surface-1);"
+    class="border-r flex flex-col min-h-0 {isNarrow
+      ? 'absolute inset-y-0 left-0 z-30 w-full max-w-xs shadow-2xl'
+      : 'shrink-0'} {isNarrow && !showSidebar ? 'hidden' : ''}"
+    style="{isNarrow
+      ? ''
+      : 'width: 280px;'} border-color: var(--color-border); background: var(--color-surface-1);"
   >
     <!-- Header -->
-    <div class="flex items-center justify-between px-4 py-3 border-b shrink-0" style="border-color: var(--color-border);">
+    <div
+      class="flex items-center justify-between px-4 py-3 border-b shrink-0"
+      style="border-color: var(--color-border);"
+    >
       <div class="flex items-center gap-2">
         <StickyNote size={15} style="color: var(--color-accent);" />
         <span class="text-sm font-semibold" style="color: var(--color-text-primary);">Notes</span>
@@ -578,7 +662,11 @@ import { projectStore } from '$lib/stores/project.svelte';
     <!-- Search -->
     <div class="px-3 py-2 shrink-0">
       <div class="relative flex items-center">
-        <Search size={12} class="absolute left-2.5 pointer-events-none" style="color: var(--color-text-muted);" />
+        <Search
+          size={12}
+          class="absolute left-2.5 pointer-events-none"
+          style="color: var(--color-text-muted);"
+        />
         <input
           type="text"
           placeholder="Search notes..."
@@ -588,11 +676,12 @@ import { projectStore } from '$lib/stores/project.svelte';
             border-color: var(--color-border);
             color: var(--color-text-primary);
           "
-          bind:value={searchQuery}
+          bind:value={searchInput}
           oninput={() => {
             if (searchDebounceTimer) clearTimeout(searchDebounceTimer);
             searchDebounceTimer = setTimeout(() => {
-              void notesStore.setSearchQuery(searchQuery);
+              searchQuery = searchInput;
+              void notesStore.setSearchQuery(searchInput);
             }, 300);
           }}
         />
@@ -602,13 +691,20 @@ import { projectStore } from '$lib/stores/project.svelte';
     <!-- Folder tree -->
     {#if notesStore.folderTree.length > 0}
       <div class="shrink-0 px-2 pb-1">
-        <div class="text-[10px] font-semibold uppercase tracking-widest px-2 mb-1" style="color: var(--color-text-muted);">Folders</div>
-        {#snippet folderNode(node: typeof notesStore.folderTree[0], depth: number)}
+        <div
+          class="text-[10px] font-semibold uppercase tracking-widest px-2 mb-1"
+          style="color: var(--color-text-muted);"
+        >
+          Folders
+        </div>
+        {#snippet folderNode(node: (typeof notesStore.folderTree)[0], depth: number)}
           <div style="padding-left: {depth * 12}px;">
             <button
               type="button"
               class="flex w-full items-center gap-1.5 rounded-lg px-2 py-1 text-xs transition-colors hover:bg-[var(--color-surface-3)]"
-              style="color: {notesStore.selectedFolder === node.path ? 'var(--color-accent)' : 'var(--color-text-secondary)'};"
+              style="color: {notesStore.selectedFolder === node.path
+                ? 'var(--color-accent)'
+                : 'var(--color-text-secondary)'};"
               onclick={() => {
                 void notesStore.selectFolder(node.path);
                 if (node.children.length > 0) toggleFolder(node.path);
@@ -643,7 +739,9 @@ import { projectStore } from '$lib/stores/project.svelte';
         <button
           type="button"
           class="flex w-full items-center gap-1.5 rounded-lg px-2 py-1 text-xs transition-colors hover:bg-[var(--color-surface-3)]"
-          style="color: {notesStore.selectedFolder === '/' ? 'var(--color-accent)' : 'var(--color-text-secondary)'};"
+          style="color: {notesStore.selectedFolder === '/'
+            ? 'var(--color-accent)'
+            : 'var(--color-text-secondary)'};"
           onclick={() => void notesStore.selectFolder('/')}
         >
           <Folder size={11} />
@@ -660,14 +758,23 @@ import { projectStore } from '$lib/stores/project.svelte';
     {#if notesStore.notes.some((n) => n.tags.length > 0)}
       {@const allTags = [...new Set(notesStore.notes.flatMap((n) => n.tags))].slice(0, 15)}
       <div class="shrink-0 px-3 pb-2">
-        <div class="text-[10px] font-semibold uppercase tracking-widest mb-1.5" style="color: var(--color-text-muted);">Tags</div>
+        <div
+          class="text-[10px] font-semibold uppercase tracking-widest mb-1.5"
+          style="color: var(--color-text-muted);"
+        >
+          Tags
+        </div>
         <div class="flex flex-wrap gap-1">
           {#each allTags as tag (tag)}
             <button
               type="button"
               class="inline-flex items-center gap-0.5 rounded px-1.5 py-0.5 text-[10px] transition-colors hover:bg-[var(--color-surface-4)]"
               style="background: var(--color-surface-3); color: var(--color-text-secondary);"
-              onclick={() => { searchQuery = tag; void notesStore.setSearchQuery(tag); }}
+              onclick={() => {
+                searchInput = tag;
+                searchQuery = tag;
+                void notesStore.setSearchQuery(tag);
+              }}
             >
               <Tag size={8} />
               {tag}
@@ -687,7 +794,7 @@ import { projectStore } from '$lib/stores/project.svelte';
         <div class="flex flex-col items-center justify-center py-10 text-center px-4">
           <StickyNote size={24} class="opacity-20 mb-2" style="color: var(--color-text-muted);" />
           <div class="text-xs" style="color: var(--color-text-muted);">
-            {searchQuery ? 'No matching notes' : 'No notes yet'}
+            {searchInput ? 'No matching notes' : 'No notes yet'}
           </div>
           <button
             type="button"
@@ -699,14 +806,22 @@ import { projectStore } from '$lib/stores/project.svelte';
           </button>
         </div>
       {:else}
-        <VirtualList items={filteredNotes} estimateHeight={estimateNoteHeight} class="h-full px-2 pb-3">
+        <VirtualList
+          items={filteredNotes}
+          estimateHeight={estimateNoteHeight}
+          class="h-full px-2 pb-3"
+        >
           {#snippet row(note)}
             <button
               type="button"
               class="w-full text-left rounded-xl px-3 py-2.5 mb-1 transition-colors border border-transparent"
               style="
-                background: {notesStore.currentNote?.id === note.id ? 'var(--color-surface-3)' : 'transparent'};
-                border-color: {notesStore.currentNote?.id === note.id ? 'var(--color-border)' : 'transparent'};
+                background: {notesStore.currentNote?.id === note.id
+                ? 'var(--color-surface-3)'
+                : 'transparent'};
+                border-color: {notesStore.currentNote?.id === note.id
+                ? 'var(--color-border)'
+                : 'transparent'};
               "
               onclick={() => void openNote(note.id)}
             >
@@ -714,12 +829,24 @@ import { projectStore } from '$lib/stores/project.svelte';
                 {#if note.pinned}
                   <Pin size={10} class="mt-0.5 shrink-0" style="color: var(--color-accent);" />
                 {:else}
-                  <FileText size={10} class="mt-0.5 shrink-0 opacity-40" style="color: var(--color-text-muted);" />
+                  <FileText
+                    size={10}
+                    class="mt-0.5 shrink-0 opacity-40"
+                    style="color: var(--color-text-muted);"
+                  />
                 {/if}
                 <div class="min-w-0 flex-1">
-                  <div class="truncate text-xs font-medium" style="color: var(--color-text-primary);">{note.title}</div>
+                  <div
+                    class="truncate text-xs font-medium"
+                    style="color: var(--color-text-primary);"
+                  >
+                    {note.title}
+                  </div>
                   {#if note.content}
-                    <div class="truncate text-[10px] mt-0.5" style="color: var(--color-text-muted);">
+                    <div
+                      class="truncate text-[10px] mt-0.5"
+                      style="color: var(--color-text-muted);"
+                    >
                       {note.content.slice(0, 60).replace(/\n/g, ' ')}
                     </div>
                   {/if}
@@ -729,7 +856,8 @@ import { projectStore } from '$lib/stores/project.svelte';
                         <span
                           class="rounded px-1 py-0 text-[9px]"
                           style="background: var(--color-surface-3); color: var(--color-text-muted);"
-                        >{tag}</span>
+                          >{tag}</span
+                        >
                       {/each}
                     </div>
                   {/if}
@@ -766,9 +894,13 @@ import { projectStore } from '$lib/stores/project.svelte';
         class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors"
         style="
           background: {activeView === 'editor' ? 'var(--color-surface-3)' : 'transparent'};
-          color: {activeView === 'editor' ? 'var(--color-text-primary)' : 'var(--color-text-muted)'};
+          color: {activeView === 'editor'
+          ? 'var(--color-text-primary)'
+          : 'var(--color-text-muted)'};
         "
-        onclick={() => { activeView = 'editor'; }}
+        onclick={() => {
+          activeView = 'editor';
+        }}
       >
         <FileText size={12} />
         Editor
@@ -777,9 +909,17 @@ import { projectStore } from '$lib/stores/project.svelte';
         <button
           type="button"
           class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors"
-          style="background: {activeView === 'preview' ? 'var(--color-surface-3)' : 'transparent'}; color: {activeView === 'preview' ? 'var(--color-text-primary)' : 'var(--color-text-muted)'};"
-          onclick={() => { activeView = 'preview'; }}
-          title={currentNote.format === 'html' ? 'Sandboxed HTML preview' : 'Rendered Markdown preview'}
+          style="background: {activeView === 'preview'
+            ? 'var(--color-surface-3)'
+            : 'transparent'}; color: {activeView === 'preview'
+            ? 'var(--color-text-primary)'
+            : 'var(--color-text-muted)'};"
+          onclick={() => {
+            activeView = 'preview';
+          }}
+          title={currentNote.format === 'html'
+            ? 'Sandboxed HTML preview'
+            : 'Rendered Markdown preview'}
         >
           <Eye size={12} />
           Preview
@@ -802,7 +942,9 @@ import { projectStore } from '$lib/stores/project.svelte';
         class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors"
         style="
           background: {activeView === 'canvas' ? 'var(--color-surface-3)' : 'transparent'};
-          color: {activeView === 'canvas' ? 'var(--color-text-primary)' : 'var(--color-text-muted)'};
+          color: {activeView === 'canvas'
+          ? 'var(--color-text-primary)'
+          : 'var(--color-text-muted)'};
         "
         onclick={switchToCanvas}
       >
@@ -817,9 +959,13 @@ import { projectStore } from '$lib/stores/project.svelte';
           <button
             type="button"
             class="flex items-center gap-1 px-2 py-1 rounded-lg text-xs transition-colors hover:bg-[var(--color-surface-3)]"
-            style="color: {currentNote.format === 'html' ? 'var(--color-accent)' : 'var(--color-text-muted)'};"
+            style="color: {currentNote.format === 'html'
+              ? 'var(--color-accent)'
+              : 'var(--color-text-muted)'};"
             onclick={() => void toggleNoteFormat()}
-            title={currentNote.format === 'html' ? 'Convert to Markdown note' : 'Convert to HTML note (renders HTML+CSS)'}
+            title={currentNote.format === 'html'
+              ? 'Convert to Markdown note'
+              : 'Convert to HTML note (renders HTML+CSS)'}
           >
             <Code2 size={12} />
             <span class="text-[10px]">{currentNote.format === 'html' ? 'HTML' : 'MD'}</span>
@@ -837,15 +983,58 @@ import { projectStore } from '$lib/stores/project.svelte';
             </button>
           {/if}
 
+          <!-- Tag picker: quick selection of tags already used in this workspace. -->
+          <div class="relative">
+            <button
+              type="button"
+              class="flex items-center gap-1 px-2 py-1 rounded-lg text-xs transition-colors hover:bg-[var(--color-surface-3)]"
+              style="color: {showTagMenu || tags.length > 0 ? 'var(--color-accent)' : 'var(--color-text-muted)'};"
+              onclick={() => (showTagMenu = !showTagMenu)}
+              title="Choose tags"
+            >
+              <Tag size={12} />
+              <span class="text-[10px]">{tags.length ? `Tags (${tags.length})` : 'Tags'}</span>
+            </button>
+            {#if showTagMenu}
+              <div
+                class="absolute right-0 top-full z-30 mt-1 min-w-40 rounded-lg border p-1 shadow-xl"
+                style="background: var(--color-surface-2); border-color: var(--color-border);"
+              >
+                {#each availableTags as tag (tag)}
+                  <button
+                    type="button"
+                    class="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-xs hover:bg-[var(--color-surface-3)]"
+                    style="color: var(--color-text-secondary);"
+                    onclick={() => {
+                      addTag(tag);
+                      scheduleAutosave();
+                      showTagMenu = false;
+                    }}
+                  >
+                    <Tag size={11} /> {tag}
+                  </button>
+                {:else}
+                  <span class="block px-2 py-1.5 text-xs" style="color: var(--color-text-muted);">
+                    Add a tag below
+                  </span>
+                {/each}
+              </div>
+            {/if}
+          </div>
+
           <!-- Pin toggle -->
           <button
             type="button"
             class="flex items-center gap-1 px-2 py-1 rounded-lg text-xs transition-colors hover:bg-[var(--color-surface-3)]"
             style="color: {pinned ? 'var(--color-accent)' : 'var(--color-text-muted)'};"
-            onclick={() => { pinned = !pinned; scheduleAutosave(); }}
+            onclick={() => {
+              pinned = !pinned;
+              scheduleAutosave();
+            }}
             title={pinned ? 'Unpin note' : 'Pin note'}
           >
             {#if pinned}<Pin size={12} />{:else}<PinOff size={12} />{/if}
+            <span class="text-[10px]">{pinned ? 'Pinned' : 'Pin'}</span>
           </button>
 
           <!-- Include in context toggle -->
@@ -853,7 +1042,10 @@ import { projectStore } from '$lib/stores/project.svelte';
             type="button"
             class="flex items-center gap-1 px-2 py-1 rounded-lg text-xs transition-colors hover:bg-[var(--color-surface-3)]"
             style="color: {includeInContext ? 'var(--color-accent)' : 'var(--color-text-muted)'};"
-            onclick={() => { includeInContext = !includeInContext; scheduleAutosave(); }}
+            onclick={() => {
+              includeInContext = !includeInContext;
+              scheduleAutosave();
+            }}
             title={includeInContext ? 'Remove from agent context' : 'Include in agent context'}
           >
             <BookOpen size={12} />
@@ -897,9 +1089,13 @@ import { projectStore } from '$lib/stores/project.svelte';
         <NotesGraph onNodeClick={handleGraphNodeClick} />
       {:else if activeView === 'preview' && currentNote?.format === 'html'}
         <div class="h-full flex flex-col" style="background: var(--color-surface-1);">
-          <div class="flex items-center gap-2 px-4 py-2 border-b text-[11px]" style="border-color: var(--color-border); color: var(--color-text-muted);">
+          <div
+            class="flex items-center gap-2 px-4 py-2 border-b text-[11px]"
+            style="border-color: var(--color-border); color: var(--color-text-muted);"
+          >
             <Code2 size={12} />
-            Sandboxed preview — CSS and embedded media work; scripts, forms, navigation, and network requests are blocked.
+            Sandboxed preview — CSS and embedded media work; scripts, forms, navigation, and network requests
+            are blocked.
           </div>
           <iframe
             class="flex-1 w-full border-0 bg-white"
@@ -938,7 +1134,9 @@ import { projectStore } from '$lib/stores/project.svelte';
               class="absolute inset-0 z-10 flex items-center justify-center rounded-lg border-2 border-dashed pointer-events-none"
               style="border-color: var(--color-accent); background: rgba(213,178,97,0.08);"
             >
-              <div class="text-sm font-medium" style="color: var(--color-accent);">Drop files to attach</div>
+              <div class="text-sm font-medium" style="color: var(--color-accent);">
+                Drop files to attach
+              </div>
             </div>
           {/if}
 
@@ -956,10 +1154,16 @@ import { projectStore } from '$lib/stores/project.svelte';
             />
 
             {#if currentNote.sourcePath}
-              <div class="flex items-center gap-2 rounded-xl border px-3 py-2 text-xs" style="border-color: var(--color-border); background: var(--color-surface-2); color: var(--color-text-secondary);">
+              <div
+                class="flex items-center gap-2 rounded-xl border px-3 py-2 text-xs"
+                style="border-color: var(--color-border); background: var(--color-surface-2); color: var(--color-text-secondary);"
+              >
                 <FileText size={12} style="color: var(--color-accent);" />
                 <span class="font-mono truncate">{currentNote.sourcePath}</span>
-                <span class="ml-auto shrink-0 text-[10px] uppercase tracking-wider" style="color: var(--color-text-muted);">live project file</span>
+                <span
+                  class="ml-auto shrink-0 text-[10px] uppercase tracking-wider"
+                  style="color: var(--color-text-muted);">live project file</span
+                >
               </div>
             {/if}
 
@@ -976,7 +1180,10 @@ import { projectStore } from '$lib/stores/project.svelte';
                   bind:value={folderInput}
                   disabled={Boolean(currentNote.sourcePath)}
                   oninput={handleFolderInput}
-                  onblur={() => { showFolderSuggestions = false; scheduleAutosave(); }}
+                  onblur={() => {
+                    showFolderSuggestions = false;
+                    scheduleAutosave();
+                  }}
                 />
                 {#if showFolderSuggestions}
                   <div
@@ -992,8 +1199,8 @@ import { projectStore } from '$lib/stores/project.svelte';
                           folderInput = sug;
                           showFolderSuggestions = false;
                           isDirty = true;
-                        }}
-                      >{sug}</button>
+                        }}>{sug}</button
+                      >
                     {/each}
                   </div>
                 {/if}
@@ -1025,7 +1232,9 @@ import { projectStore } from '$lib/stores/project.svelte';
                   style="color: var(--color-text-muted); width: 80px;"
                   bind:value={tagsInput}
                   onkeydown={handleTagsKeydown}
-                  onblur={() => { if (tagsInput.trim()) addTag(tagsInput); }}
+                  onblur={() => {
+                    if (tagsInput.trim()) addTag(tagsInput);
+                  }}
                 />
               </div>
             </div>
@@ -1042,21 +1251,32 @@ import { projectStore } from '$lib/stores/project.svelte';
                 placeholder="Start writing... Use [[Note Title]] to link notes."
                 bind:value={contentInput}
                 oninput={onContentInput}
-                onblur={() => { setTimeout(() => (showWikilinkMenu = false), 150); if (isDirty) void saveCurrentNote(); }}
+                onblur={() => {
+                  setTimeout(() => (showWikilinkMenu = false), 150);
+                  if (isDirty) void saveCurrentNote();
+                }}
               ></textarea>
               {#if showWikilinkMenu && wikilinkSuggestions.length > 0}
                 <div
                   class="absolute z-30 mt-1 rounded-lg border shadow-xl overflow-hidden"
                   style="background: var(--color-surface-2); border-color: var(--color-border); min-width: 200px; max-width: 320px;"
                 >
-                  <div class="px-3 py-1 text-[10px] uppercase tracking-wider" style="color: var(--color-text-muted);">Link a note</div>
+                  <div
+                    class="px-3 py-1 text-[10px] uppercase tracking-wider"
+                    style="color: var(--color-text-muted);"
+                  >
+                    Link a note
+                  </div>
                   {#each wikilinkSuggestions as sug (sug.id)}
                     <button
                       type="button"
                       class="w-full text-left px-3 py-1.5 text-xs hover:bg-[var(--color-surface-3)] transition-colors truncate"
                       style="color: var(--color-text-secondary);"
-                      onmousedown={(e) => { e.preventDefault(); insertWikilink(sug.title); }}
-                    >{sug.title}</button>
+                      onmousedown={(e) => {
+                        e.preventDefault();
+                        insertWikilink(sug.title);
+                      }}>{sug.title}</button
+                    >
                   {/each}
                 </div>
               {/if}
@@ -1066,7 +1286,10 @@ import { projectStore } from '$lib/stores/project.svelte';
             {#if attachments.length > 0 || true}
               <div class="border-t pt-4" style="border-color: var(--color-border);">
                 <div class="flex items-center justify-between mb-3">
-                  <div class="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-widest" style="color: var(--color-text-muted);">
+                  <div
+                    class="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-widest"
+                    style="color: var(--color-text-muted);"
+                  >
                     <Paperclip size={11} />
                     Attachments
                   </div>
@@ -1077,12 +1300,7 @@ import { projectStore } from '$lib/stores/project.svelte';
                   >
                     <Plus size={10} />
                     Add
-                    <input
-                      type="file"
-                      class="hidden"
-                      multiple
-                      onchange={handleFileInputChange}
-                    />
+                    <input type="file" class="hidden" multiple onchange={handleFileInputChange} />
                   </label>
                 </div>
 
@@ -1113,10 +1331,17 @@ import { projectStore } from '$lib/stores/project.svelte';
                           </div>
                         {/if}
                         <div class="p-1.5">
-                          <div class="text-[10px] truncate" style="color: var(--color-text-secondary);">{att.filename}</div>
+                          <div
+                            class="text-[10px] truncate"
+                            style="color: var(--color-text-secondary);"
+                          >
+                            {att.filename}
+                          </div>
                         </div>
                         <!-- Actions overlay -->
-                        <div class="absolute top-1 right-1 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                        <div
+                          class="absolute top-1 right-1 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity"
+                        >
                           <a
                             href={attachmentSrc(att)}
                             download={att.filename}
@@ -1147,7 +1372,10 @@ import { projectStore } from '$lib/stores/project.svelte';
             <!-- Backlinks -->
             {#if currentNote && currentNote.backlinks && currentNote.backlinks.length > 0}
               <div class="border-t pt-4" style="border-color: var(--color-border);">
-                <div class="text-xs font-semibold uppercase tracking-widest mb-2" style="color: var(--color-text-muted);">
+                <div
+                  class="text-xs font-semibold uppercase tracking-widest mb-2"
+                  style="color: var(--color-text-muted);"
+                >
                   Backlinks ({currentNote.backlinks.length})
                 </div>
                 <div class="space-y-1">
@@ -1172,7 +1400,10 @@ import { projectStore } from '$lib/stores/project.svelte';
             <!-- Outlinks -->
             {#if currentNote && currentNote.outlinks && currentNote.outlinks.length > 0}
               <div class="border-t pt-4 pb-8" style="border-color: var(--color-border);">
-                <div class="text-xs font-semibold uppercase tracking-widest mb-2" style="color: var(--color-text-muted);">
+                <div
+                  class="text-xs font-semibold uppercase tracking-widest mb-2"
+                  style="color: var(--color-text-muted);"
+                >
                   Outlinks ({currentNote.outlinks.length})
                 </div>
                 <div class="space-y-1">
@@ -1197,10 +1428,19 @@ import { projectStore } from '$lib/stores/project.svelte';
         </div>
       {:else}
         <!-- Empty state: no note selected -->
-        <div class="flex-1 flex flex-col items-center justify-center h-full" style="background: var(--color-surface-1);">
+        <div
+          class="flex-1 flex flex-col items-center justify-center h-full"
+          style="background: var(--color-surface-1);"
+        >
           <div class="text-center max-w-xs">
-            <StickyNote size={48} class="mx-auto mb-4 opacity-20" style="color: var(--color-text-muted);" />
-            <div class="text-sm font-medium mb-1" style="color: var(--color-text-secondary);">No note selected</div>
+            <StickyNote
+              size={48}
+              class="mx-auto mb-4 opacity-20"
+              style="color: var(--color-text-muted);"
+            />
+            <div class="text-sm font-medium mb-1" style="color: var(--color-text-secondary);">
+              No note selected
+            </div>
             <div class="text-xs mb-4" style="color: var(--color-text-muted);">
               Pick a note from the list or create a new one.
             </div>
@@ -1221,41 +1461,174 @@ import { projectStore } from '$lib/stores/project.svelte';
 
 <style>
   /* Rendered Markdown preview typography */
-  .note-markdown :global(h1) { font-size: 1.5rem; font-weight: 700; margin: 0.6em 0 0.4em; color: var(--color-text-primary); }
-  .note-markdown :global(h2) { font-size: 1.25rem; font-weight: 700; margin: 0.6em 0 0.4em; color: var(--color-text-primary); }
-  .note-markdown :global(h3) { font-size: 1.05rem; font-weight: 600; margin: 0.6em 0 0.3em; color: var(--color-text-primary); }
-  .note-markdown :global(p) { margin: 0.5em 0; }
-  .note-markdown :global(ul), .note-markdown :global(ol) { margin: 0.5em 0; padding-left: 1.4em; }
-  .note-markdown :global(li) { margin: 0.2em 0; }
-  .note-markdown :global(a) { color: var(--color-accent); text-decoration: underline; }
-  .note-markdown :global(a.wikilink) { color: var(--color-accent); cursor: pointer; text-decoration: none; border-bottom: 1px dashed color-mix(in srgb, var(--color-accent) 50%, transparent); }
-  .note-markdown :global(code) { font-family: var(--font-mono, monospace); font-size: 0.85em; background: var(--color-surface-3); padding: 0.1em 0.35em; border-radius: 4px; }
-  .note-markdown :global(pre) { background: var(--color-surface-2); border: 1px solid var(--color-border); border-radius: 10px; padding: 0.8em 1em; overflow-x: auto; margin: 0.7em 0; }
-  .note-markdown :global(pre code) { background: none; padding: 0; }
-  .note-markdown :global(blockquote) { border-left: 3px solid var(--color-border); padding-left: 1em; margin: 0.6em 0; color: var(--color-text-secondary); }
-  .note-markdown :global(table) { border-collapse: collapse; margin: 0.7em 0; }
-  .note-markdown :global(th), .note-markdown :global(td) { border: 1px solid var(--color-border); padding: 0.4em 0.7em; }
-  .note-markdown :global(hr) { border: none; border-top: 1px solid var(--color-border); margin: 1em 0; }
-  .note-markdown :global(img) { max-width: 100%; border-radius: 8px; }
-  .note-markdown :global(mark) { background: color-mix(in srgb, var(--kintsugi-gold, #d4a548) 35%, transparent); color: inherit; padding: 0.05em 0.2em; border-radius: 3px; }
+  .note-markdown :global(h1) {
+    font-size: 1.5rem;
+    font-weight: 700;
+    margin: 0.6em 0 0.4em;
+    color: var(--color-text-primary);
+  }
+  .note-markdown :global(h2) {
+    font-size: 1.25rem;
+    font-weight: 700;
+    margin: 0.6em 0 0.4em;
+    color: var(--color-text-primary);
+  }
+  .note-markdown :global(h3) {
+    font-size: 1.05rem;
+    font-weight: 600;
+    margin: 0.6em 0 0.3em;
+    color: var(--color-text-primary);
+  }
+  .note-markdown :global(p) {
+    margin: 0.5em 0;
+  }
+  .note-markdown :global(ul),
+  .note-markdown :global(ol) {
+    margin: 0.5em 0;
+    padding-left: 1.4em;
+  }
+  .note-markdown :global(li) {
+    margin: 0.2em 0;
+  }
+  .note-markdown :global(a) {
+    color: var(--color-accent);
+    text-decoration: underline;
+  }
+  .note-markdown :global(a.wikilink) {
+    color: var(--color-accent);
+    cursor: pointer;
+    text-decoration: none;
+    border-bottom: 1px dashed color-mix(in srgb, var(--color-accent) 50%, transparent);
+  }
+  .note-markdown :global(code) {
+    font-family: var(--font-mono, monospace);
+    font-size: 0.85em;
+    background: var(--color-surface-3);
+    padding: 0.1em 0.35em;
+    border-radius: 4px;
+  }
+  .note-markdown :global(pre) {
+    background: var(--color-surface-2);
+    border: 1px solid var(--color-border);
+    border-radius: 10px;
+    padding: 0.8em 1em;
+    overflow-x: auto;
+    margin: 0.7em 0;
+  }
+  .note-markdown :global(pre code) {
+    background: none;
+    padding: 0;
+  }
+  .note-markdown :global(blockquote) {
+    border-left: 3px solid var(--color-border);
+    padding-left: 1em;
+    margin: 0.6em 0;
+    color: var(--color-text-secondary);
+  }
+  .note-markdown :global(table) {
+    border-collapse: collapse;
+    margin: 0.7em 0;
+  }
+  .note-markdown :global(th),
+  .note-markdown :global(td) {
+    border: 1px solid var(--color-border);
+    padding: 0.4em 0.7em;
+  }
+  .note-markdown :global(hr) {
+    border: none;
+    border-top: 1px solid var(--color-border);
+    margin: 1em 0;
+  }
+  .note-markdown :global(img) {
+    max-width: 100%;
+    border-radius: 8px;
+  }
+  .note-markdown :global(mark) {
+    background: color-mix(in srgb, var(--kintsugi-gold, #d4a548) 35%, transparent);
+    color: inherit;
+    padding: 0.05em 0.2em;
+    border-radius: 3px;
+  }
   /* KaTeX: keep block math scrollable, inherit color */
-  .note-markdown :global(.katex) { color: var(--color-text-primary); }
-  .note-markdown :global(.katex-display) { overflow-x: auto; overflow-y: hidden; padding: 0.3em 0; }
+  .note-markdown :global(.katex) {
+    color: var(--color-text-primary);
+  }
+  .note-markdown :global(.katex-display) {
+    overflow-x: auto;
+    overflow-y: hidden;
+    padding: 0.3em 0;
+  }
   /* Mermaid diagrams */
-  .note-markdown :global(.mermaid-block) { display: flex; justify-content: center; margin: 0.8em 0; }
-  .note-markdown :global(.mermaid-block svg) { max-width: 100%; height: auto; }
-  .note-markdown :global(.mermaid-error) { color: #e06c75; font-size: 0.8em; white-space: pre-wrap; }
+  .note-markdown :global(.mermaid-block) {
+    display: flex;
+    justify-content: center;
+    margin: 0.8em 0;
+  }
+  .note-markdown :global(.mermaid-block svg) {
+    max-width: 100%;
+    height: auto;
+  }
+  .note-markdown :global(.mermaid-error) {
+    color: #e06c75;
+    font-size: 0.8em;
+    white-space: pre-wrap;
+  }
   /* Dataview query results */
-  .note-markdown :global(.dataview-result) { margin: 0.7em 0; }
-  .note-markdown :global(.dataview-table) { border-collapse: collapse; width: 100%; font-size: 0.9em; }
-  .note-markdown :global(.dataview-table th) { text-align: left; background: var(--color-surface-2); color: var(--color-text-secondary); font-weight: 600; }
-  .note-markdown :global(.dataview-empty), .note-markdown :global(.dataview-error) { font-size: 0.85em; color: var(--color-text-secondary); font-style: italic; padding: 0.4em 0; }
-  .note-markdown :global(.dataview-error) { color: #e06c75; font-style: normal; }
+  .note-markdown :global(.dataview-result) {
+    margin: 0.7em 0;
+  }
+  .note-markdown :global(.dataview-table) {
+    border-collapse: collapse;
+    width: 100%;
+    font-size: 0.9em;
+  }
+  .note-markdown :global(.dataview-table th) {
+    text-align: left;
+    background: var(--color-surface-2);
+    color: var(--color-text-secondary);
+    font-weight: 600;
+  }
+  .note-markdown :global(.dataview-empty),
+  .note-markdown :global(.dataview-error) {
+    font-size: 0.85em;
+    color: var(--color-text-secondary);
+    font-style: italic;
+    padding: 0.4em 0;
+  }
+  .note-markdown :global(.dataview-error) {
+    color: #e06c75;
+    font-style: normal;
+  }
   /* Callouts */
-  .note-markdown :global(.callout) { border: 1px solid var(--color-border); border-left-width: 3px; border-radius: 8px; padding: 0.6em 0.9em; margin: 0.7em 0; background: var(--color-surface-2); }
-  .note-markdown :global(.callout-title) { font-weight: 700; margin-bottom: 0.2em; }
-  .note-markdown :global(.callout-body) { color: var(--color-text-secondary); font-size: 0.95em; }
-  .note-markdown :global(.callout-warning), .note-markdown :global(.callout-caution) { border-left-color: #e5c07b; }
-  .note-markdown :global(.callout-danger), .note-markdown :global(.callout-error), .note-markdown :global(.callout-bug) { border-left-color: #e06c75; }
-  .note-markdown :global(.callout-tip), .note-markdown :global(.callout-success), .note-markdown :global(.callout-info), .note-markdown :global(.callout-note) { border-left-color: var(--color-accent); }
+  .note-markdown :global(.callout) {
+    border: 1px solid var(--color-border);
+    border-left-width: 3px;
+    border-radius: 8px;
+    padding: 0.6em 0.9em;
+    margin: 0.7em 0;
+    background: var(--color-surface-2);
+  }
+  .note-markdown :global(.callout-title) {
+    font-weight: 700;
+    margin-bottom: 0.2em;
+  }
+  .note-markdown :global(.callout-body) {
+    color: var(--color-text-secondary);
+    font-size: 0.95em;
+  }
+  .note-markdown :global(.callout-warning),
+  .note-markdown :global(.callout-caution) {
+    border-left-color: #e5c07b;
+  }
+  .note-markdown :global(.callout-danger),
+  .note-markdown :global(.callout-error),
+  .note-markdown :global(.callout-bug) {
+    border-left-color: #e06c75;
+  }
+  .note-markdown :global(.callout-tip),
+  .note-markdown :global(.callout-success),
+  .note-markdown :global(.callout-info),
+  .note-markdown :global(.callout-note) {
+    border-left-color: var(--color-accent);
+  }
 </style>

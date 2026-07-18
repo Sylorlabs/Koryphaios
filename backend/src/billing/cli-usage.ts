@@ -12,9 +12,11 @@
 //   codex   ~/.codex/sessions/**/*.jsonl         token_count events + rate_limits
 
 import { readdirSync, statSync, readFileSync, existsSync } from 'node:fs';
+import { readdir, stat, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
 import { computeCostUsd } from '../pricing';
+import { discoverCliAccounts, type DiscoveredCliAccount } from '../providers/cli-accounts';
 
 export interface UsageWindow {
   /** 'hour' | 'day' | 'week' | 'month' */
@@ -35,6 +37,9 @@ export interface QuotaWindow {
 
 export interface CliUsageReport {
   provider: string;
+  accountId?: string;
+  accountLabel?: string;
+  accountEmail?: string;
   available: boolean;
   planType?: string;
   windows: UsageWindow[];
@@ -73,13 +78,13 @@ function hasReportedUsage(samples: UsageSample[]): boolean {
 let cached: { at: number; reports: CliUsageReport[] } | null = null;
 const CACHE_TTL_MS = 60_000;
 
-function* walkJsonl(root: string, newerThan: number): Generator<string> {
+async function* walkJsonlAsync(root: string, newerThan: number): AsyncGenerator<string> {
   const stack = [root];
   while (stack.length) {
     const dir = stack.pop()!;
     let entries: import('node:fs').Dirent[];
     try {
-      entries = readdirSync(dir, { withFileTypes: true });
+      entries = await readdir(dir, { withFileTypes: true });
     } catch {
       continue;
     }
@@ -88,10 +93,26 @@ function* walkJsonl(root: string, newerThan: number): Generator<string> {
       if (e.isDirectory()) stack.push(full);
       else if (e.name.endsWith('.jsonl')) {
         try {
-          if (statSync(full).mtimeMs >= newerThan) yield full;
+          if ((await stat(full)).mtimeMs >= newerThan) yield full;
         } catch {
           /* raced */
         }
+      }
+    }
+  }
+}
+
+function* walkJsonl(root: string, newerThan: number): Generator<string> {
+  const stack = [root];
+  while (stack.length) {
+    const dir = stack.pop()!;
+    let entries: import('node:fs').Dirent[];
+    try { entries = readdirSync(dir, { withFileTypes: true }); } catch { continue; }
+    for (const entry of entries) {
+      const full = join(dir, entry.name);
+      if (entry.isDirectory()) stack.push(full);
+      else if (entry.name.endsWith('.jsonl')) {
+        try { if (statSync(full).mtimeMs >= newerThan) yield full; } catch { /* raced */ }
       }
     }
   }
@@ -153,10 +174,10 @@ const fileCache = new Map<string, { mtimeMs: number; size: number; samples: Usag
 
 type LineParser = (line: string, now: number) => UsageSample | null;
 
-function samplesFromFile(file: string, parse: LineParser, now: number): UsageSample[] {
+async function samplesFromFile(file: string, parse: LineParser, now: number): Promise<UsageSample[]> {
   let st: import('node:fs').Stats;
   try {
-    st = statSync(file);
+    st = await stat(file);
   } catch {
     return [];
   }
@@ -165,7 +186,7 @@ function samplesFromFile(file: string, parse: LineParser, now: number): UsageSam
   const out: UsageSample[] = [];
   let text: string;
   try {
-    text = readFileSync(file, 'utf8');
+    text = await readFile(file, 'utf8');
   } catch {
     return [];
   }
@@ -215,7 +236,7 @@ function parseClaudeLine(line: string, now: number): UsageSample | null {
 
 // ── Claude Code ───────────────────────────────────────────────────────────────
 
-function readClaude(now: number): CliUsageReport {
+async function readClaude(now: number): Promise<CliUsageReport> {
   currentCliProvider = 'claude';
   // Scan BOTH the user's ~/.claude AND Koryphaios's isolated claude-home so
   // the billing view reflects TOTAL subscription burn (theirs + ours).
@@ -229,8 +250,8 @@ function readClaude(now: number): CliUsageReport {
   const byId = new Map<string, UsageSample>();
   for (const root of roots) {
     if (!existsSync(root)) continue;
-    for (const file of walkJsonl(root, now - SCAN_HORIZON_MS)) {
-      for (const sample of samplesFromFile(file, parseClaudeLine, now)) {
+    for await (const file of walkJsonlAsync(root, now - SCAN_HORIZON_MS)) {
+      for (const sample of await samplesFromFile(file, parseClaudeLine, now)) {
         const id = (sample as UsageSample & { id?: string }).id;
         if (id) byId.set(id, sample);
         else samples.push(sample);
@@ -250,9 +271,9 @@ function readClaude(now: number): CliUsageReport {
 
 // ── Codex ─────────────────────────────────────────────────────────────────────
 
-function readCodex(now: number): CliUsageReport {
+async function readCodex(now: number, account?: DiscoveredCliAccount): Promise<CliUsageReport> {
   currentCliProvider = 'codex';
-  const root = join(homedir(), '.codex', 'sessions');
+  const root = join(account?.profileDir ?? join(homedir(), '.codex'), 'sessions');
   const samples: UsageSample[] = [];
   let latestLimits: {
     ts: number;
@@ -262,10 +283,10 @@ function readCodex(now: number): CliUsageReport {
   } | null = null;
 
   if (existsSync(root)) {
-    for (const file of walkJsonl(root, now - SCAN_HORIZON_MS)) {
+    for await (const file of walkJsonlAsync(root, now - SCAN_HORIZON_MS)) {
       let text: string;
       try {
-        text = readFileSync(file, 'utf8');
+        text = await readFile(file, 'utf8');
       } catch {
         continue;
       }
@@ -342,6 +363,11 @@ function readCodex(now: number): CliUsageReport {
 
   return {
     provider: 'codex',
+    ...(account ? {
+      accountId: account.id,
+      accountLabel: account.label,
+      ...(account.email ? { accountEmail: account.email } : {}),
+    } : {}),
     available: hasReportedUsage(samples),
     planType: latestLimits?.plan,
     windows: windowsFromSamples(samples, now),
@@ -568,9 +594,18 @@ export async function getCliUsageReports(opts?: {
   const quotaJobs = Promise.allSettled([fetchClaudeQuota(), fetchCopilotQuota(opts?.githubToken)]);
 
   const reports: CliUsageReport[] = [];
-  for (const reader of [readClaude, readCodex, readCopilot, readGrok]) {
+  const codexAccounts = discoverCliAccounts().filter((account) => account.provider === 'codex');
+  const readers: Array<(now: number) => CliUsageReport | Promise<CliUsageReport>> = [
+    readClaude,
+    ...(codexAccounts.length > 0
+      ? codexAccounts.map((account) => (at: number) => readCodex(at, account))
+      : [readCodex]),
+    readCopilot,
+    readGrok,
+  ];
+  for (const reader of readers) {
     try {
-      const r = reader(now);
+      const r = await reader(now);
       if (r.available) reports.push(r);
     } catch {
       /* a broken store must not kill billing */

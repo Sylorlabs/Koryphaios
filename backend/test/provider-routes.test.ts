@@ -115,6 +115,8 @@ mock.module('../src/providers/auth-utils', () => ({
   isCodexCLIAuthMarker: (value: string | null | undefined) =>
     typeof value === 'string' && value.startsWith('cli:codex:'),
   createCodexCLIAuthMarker: () => `cli:codex:${Date.now()}`,
+  createCodexCLIProfileMarker: (profileDir: string) =>
+    `cli:codex:${Buffer.from(profileDir).toString('base64url')}`,
   detectClaudeCodeLogin: () => true,
   createClaudeCLIAuthMarker: () => `cli:claude:${Date.now()}`,
   isClaudeCLIAuthMarker: (value: string | null | undefined) =>
@@ -129,8 +131,6 @@ mock.module('../src/providers/auth-utils', () => ({
   isAntigravityCLIAuthMarker: (value: string | null | undefined) =>
     typeof value === 'string' && value.startsWith('cli:antigravity:'),
   detectAntigravityApiKey: () => null,
-  detectGeminiCLIToken: () => null,
-  detectGeminiCLILogin: () => false,
   detectCodexCLILogin: () => false,
   detectCursorCLILogin: () => false,
   createCursorCLIAuthMarker: () => 'cursor-cli-session',
@@ -387,14 +387,18 @@ describe('provider routes', () => {
     expect(start.response.status).toBe(404);
     expect(start.body.ok).toBe(false);
 
-    // openai is an API-key provider (not a browser/OAuth-managed one) → no auth flow.
-    // (google IS browser-auth managed, so it would not 404 here.)
+    // API-key providers do not expose a browser/OAuth flow. Google AI Studio
+    // uses a Gemini API key; Google Cloud is separately represented by Vertex AI.
     const complete = await request('/api/providers/openai/auth/complete', {
       method: 'POST',
     });
 
     expect(complete.response.status).toBe(404);
     expect(complete.body.ok).toBe(false);
+
+    const google = await request('/api/providers/google/auth/start', { method: 'POST' });
+    expect(google.response.status).toBe(404);
+    expect(google.body.ok).toBe(false);
   });
 
   test('Codex browser auth uses the device flow and activates on poll', async () => {
@@ -421,7 +425,7 @@ describe('provider routes', () => {
     expect(lastSetCredentials).toEqual({
       name: 'codex',
       body: {
-        authToken: expect.stringMatching(/^cli:codex:\d+$/),
+        authToken: `cli:codex:${Buffer.from('/tmp/codex-home').toString('base64url')}`,
       },
     });
   });

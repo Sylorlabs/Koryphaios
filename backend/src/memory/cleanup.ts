@@ -2,6 +2,7 @@
 // Domain: Centralized cleanup orchestration, memory leak prevention, resource disposal
 
 import { serverLog } from '../logger';
+import { getHeapStatistics } from 'node:v8';
 
 // ─── Types ─────────────────────────────────────────────────────────────────────
 
@@ -88,8 +89,11 @@ class MemoryMonitor {
   private checkInterval: Timer | null = null;
   private lastAlertTime = 0;
   private readonly ALERT_COOLDOWN_MS = 60000; // 1 minute
-  private readonly WARNING_THRESHOLD = 0.75; // 75%
-  private readonly CRITICAL_THRESHOLD = 0.9; // 90%
+  // nodeHeap.percentage is expressed on a 0-100 scale. Keep these thresholds
+  // on the same scale so ordinary sub-1% startup usage is never reported as
+  // memory pressure.
+  private readonly WARNING_THRESHOLD = 75;
+  private readonly CRITICAL_THRESHOLD = 90;
 
   constructor(
     private getStats: () => MemoryStats,
@@ -128,7 +132,12 @@ class MemoryMonitor {
       if (now - this.lastAlertTime >= this.ALERT_COOLDOWN_MS) {
         this.lastAlertTime = now;
         serverLog.warn(
-          { usage: `${usage.toFixed(1)}%`, used: stats.nodeHeap.used, total: stats.nodeHeap.total },
+          {
+            usage: `${usage.toFixed(1)}%`,
+            used: stats.nodeHeap.used,
+            allocated: stats.nodeHeap.total,
+            limit: stats.nodeHeap.limit,
+          },
           'High memory usage detected',
         );
         this.onMemoryPressure('warning', stats);
@@ -141,7 +150,12 @@ class MemoryMonitor {
       if (now - this.lastAlertTime >= this.ALERT_COOLDOWN_MS) {
         this.lastAlertTime = now;
         serverLog.error(
-          { usage: `${usage.toFixed(1)}%`, used: stats.nodeHeap.used, total: stats.nodeHeap.total },
+          {
+            usage: `${usage.toFixed(1)}%`,
+            used: stats.nodeHeap.used,
+            allocated: stats.nodeHeap.total,
+            limit: stats.nodeHeap.limit,
+          },
           'Critical memory usage detected',
         );
         this.onMemoryPressure('critical', stats);
@@ -316,8 +330,13 @@ export function getHeapStats(): MemoryStats['nodeHeap'] {
   const mem = process.memoryUsage();
   const total = mem.heapTotal;
   const used = mem.heapUsed;
-  const limit = mem.heapTotal || 2147483648; // Default 2GB limit if not available
-  const percentage = (used / total) * 100;
+  // heapTotal is the currently allocated heap, not its capacity. Bun may also
+  // report heapUsed slightly above heapTotal while its allocator is growing,
+  // which previously produced impossible diagnostics such as "123.5% used".
+  // Pressure thresholds must be measured against the runtime heap limit.
+  const runtimeLimit = getHeapStatistics().heap_size_limit;
+  const limit = Math.max(runtimeLimit || 0, total, used, 1);
+  const percentage = Math.min(100, (used / limit) * 100);
 
   return {
     total,

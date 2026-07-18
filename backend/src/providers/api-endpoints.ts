@@ -14,6 +14,9 @@ export const PROVIDER_BASE_URLS: Partial<Record<ProviderName, string>> = {
   anthropic: 'https://api.anthropic.com/v1',
   openai: 'https://api.openai.com/v1',
   google: 'https://generativelanguage.googleapis.com/v1beta',
+  // AI Studio is Google's API-key surface for the same Gemini API. It is not
+  // Vertex AI and it does not use Google Cloud ADC/OAuth.
+  aistudio: 'https://generativelanguage.googleapis.com/v1beta',
   deepseek: 'https://api.deepseek.com/v1',
   kimicode: 'https://api.kimi.com/coding/v1',
   mistral: 'https://api.mistral.ai/v1',
@@ -87,7 +90,8 @@ export function buildAuthHeaders(
       if (token) headers['Authorization'] = `Bearer ${token}`;
       return { headers };
 
-    case 'google': {
+    case 'google':
+    case 'aistudio': {
       // Gemini: support both ?key= (query) and x-goog-api-key (header) as fallbacks.
       if (options?.useGeminiHeader && token) {
         headers['x-goog-api-key'] = token;
@@ -129,7 +133,8 @@ export function getVerifyUrl(
     case 'moonshot':
     case 'mistral':
       return `${base.replace(/\/?$/, '')}/models`;
-    case 'google': {
+    case 'google':
+    case 'aistudio': {
       const suffix = credentials ? (buildAuthHeaders(provider, credentials).urlSuffix ?? '') : '';
       return `${base.replace(/\/?$/, '')}${GEMINI_VERIFY_PATH}${suffix}`;
     }

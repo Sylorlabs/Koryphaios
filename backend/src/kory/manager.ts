@@ -15,6 +15,7 @@ import type {
   StreamThinkingPayload,
   ContextBreakdown,
 } from '@koryphaios/shared';
+import { SANDBOX_PRESETS } from '@koryphaios/shared';
 import { normalizeReasoningLevel, determineAutoReasoningLevel } from '@koryphaios/shared';
 import { AGENT, DOMAIN, SESSION } from '../constants';
 import {
@@ -46,7 +47,16 @@ import {
   formatNoteToolApprovalSummary,
 } from '../notes/notes-settings';
 import { isNoteToolName } from '@koryphaios/shared';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import {
+  cpSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
+import { tmpdir } from 'node:os';
 import { z } from 'zod';
 import { join } from 'node:path';
 import { db, sessions } from '../db';
@@ -74,7 +84,10 @@ import { AutoCommitService } from './auto-commit-service';
 import { getModeManager } from '../mode';
 import type { WorkerPipelineConfig } from './services/WorkerPipelineService';
 import type { UIMode } from '@koryphaios/shared';
+import { compilePrompt, createTaskContract } from './prompts';
+import { buildIntentDiscoveryBatch } from './clarification-gate';
 import { collaborationManager } from '../collaboration/manager';
+import { loadAgentSettings } from '../agent-settings';
 import {
   setCollaborationToolPolicy,
   clearCollaborationToolPolicy,
@@ -171,21 +184,6 @@ function safeParseJson(s?: string): Record<string, unknown> {
   }
 }
 
-const KORY_SYSTEM_PROMPT = `You are Kory, the manager agent. The user talks to you only. Sub-agents (workers) run only when you explicitly call delegate_to_worker—never automatically.
-
-• Handle requests yourself: answer questions, use tools (read_file, grep, bash, web_search, etc.), do small edits. For conversation, clarification, or straightforward work, you are the sole agent.
-• FILE EDITS: ALWAYS create files with the write_file tool and modify files with the edit_file tool. NEVER use bash (cat >, tee, echo >, sed, heredocs, apply_patch) to create or modify files — those bypass the live code preview the user watches. Use bash only for running commands, never for writing file content.
-• You may run terminals in the background: use the bash tool with isBackground: true (and optional processName) to start long-lived processes (e.g. dev servers). Use shell_manage to list stored background processes, view their logs, or kill them. Only you can manage these background terminals.
-• Sub-agents (workers: general, ui, backend, test, review) exist only for you to invoke when you decide a task needs a specialist coder. Call delegate_to_worker only for substantial implementation, refactoring, or multi-step coding—not for chat, simple questions, or minor edits.
-• When you delegate, the worker reports back; you verify and synthesize.
-• RESPONSE VISUALS: Use standard Markdown tables for structured comparisons. When quantitative data is materially clearer as a chart, emit a fenced \`chart\` JSON block with \`type\` (\`bar\`, \`line\`, or \`pie\`), optional \`title\`, \`labels\`, and \`datasets\` containing \`label\` and numeric \`data\` arrays. Do not fake tables with spaces or ASCII art.
-• IMPORTANT: If you decide to delegate, call delegate_to_worker IMMEDIATELY without generating any explanatory text first. Do not write "I'll delegate this" or similar—just call the tool directly.
-• delegate_to_jules: Offload substantial repo work to Google Jules — a CLOUD-ONLY async agent (API). Jules runs in remote Google VMs (not locally), often takes minutes, and may open GitHub PRs. Never use for quick local edits or chat. Jules never writes to the local working tree — after it finishes you MUST sync remote work locally (\`git fetch && git pull\`, or \`gh pr checkout <n>\`) before continuing.
-• If you have successfully completed a task or edit and are ready to save the work, use the commit_and_create_pr tool to commit and create a pull request automatically.`;
-const WORKER_SYSTEM_PROMPT = `You are a specialist Worker Agent. EXECUTE the assigned task using tools. QUALITY FIRST. VERIFY. If you have successfully completed a task, you may use the commit_and_create_pr tool to save the work.
-FILE EDITS: ALWAYS create files with write_file and modify files with edit_file. NEVER use bash (cat >, tee, echo >, sed, heredocs) to write or modify file content — that bypasses the live code preview. Use bash only for running commands.`;
-const CRITIC_SYSTEM_PROMPT = `You are an independent, fresh Critic AI model evaluating the work of a DIFFERENT agent (the Worker). You must evaluate their work objectively. You may only use read_file, grep, glob, and ls to inspect the codebase. Review the Worker's output and output either PASS or FAIL. If FAIL, give brief, actionable feedback. Your final message must end with a line that starts with exactly PASS or exactly FAIL (e.g. "PASS" or "FAIL: missing tests").`;
-
 // ─── Kory Manager Class ─────────────────────────────────────────────────────
 
 export interface KoryTask {
@@ -221,6 +219,8 @@ export class KoryManager {
    *  LLM calls when the user sends a second message before the first title
    *  resolves. */
   private titledSessions = new Set<string>();
+  /** Last visible prompt manifest per session; prevents repeated disclosure on tool-loop turns. */
+  private promptManifestHashBySession = new Map<string, string>();
 
   constructor(
     private providers: ProviderRegistry,
@@ -296,6 +296,15 @@ export class KoryManager {
       getIsYoloMode: () => this.isYoloMode,
       getWorkingDirectory: () => this.workingDirectory,
       getWorkerReasoningLevel: () => this.getWorkerReasoningLevel(),
+      getQualityPolicy: () => {
+        const settings = loadAgentSettings(this.workingDirectory);
+        return {
+          gateStrictness: settings.criticGateEnabled
+            ? (settings.gateStrictness ?? 'strict')
+            : 'off',
+          maxCriticIterations: settings.maxCriticIterations,
+        };
+      },
       waitForUserInput: (sessionId, question, options) =>
         this.waitForUserInputInternal(sessionId, question, options),
       emitThought: (sessionId, phase, thought) => this.emitThought(sessionId, phase, thought),
@@ -326,8 +335,10 @@ export class KoryManager {
           allowedPaths,
           isSandboxed,
         ),
-      runCriticGate: (sessionId, workerMessages, preferredModel, task) =>
-        this.runCriticGate(sessionId, workerMessages, preferredModel, task),
+      runCriticGate: (sessionId, workerMessages, preferredModel, task, reviewDirectory) =>
+        this.runCriticGate(sessionId, workerMessages, preferredModel, task, reviewDirectory),
+      runDestinationChecks: (sessionId, workingDirectory) =>
+        this.runHardChecks(sessionId, workingDirectory),
     };
 
     this.workerPipeline = new WorkerPipelineService({
@@ -514,6 +525,28 @@ export class KoryManager {
     this.state.clearChanges(sessionId);
     userMessage = sanitizeForPrompt(userMessage);
 
+    const workflowSettings = loadAgentSettings(this.workingDirectory);
+    const initialContract = createTaskContract(userMessage);
+    const discoveryQuestions = buildIntentDiscoveryBatch(
+      userMessage,
+      initialContract.taskKind,
+      workflowSettings.intentInterview,
+    );
+    const decisions: string[] = [];
+    for (const question of discoveryQuestions) {
+      const answer = await this.waitForUserInputInternal(
+        sessionId,
+        question.question,
+        question.options,
+      );
+      if (answer === '__timeout__' || answer === '__cancelled__' || answer.includes('Stop asking'))
+        break;
+      decisions.push(`${question.question} ${answer}`);
+    }
+    if (decisions.length > 0) {
+      userMessage += `\n\nResolved intent decisions:\n- ${decisions.join('\n- ')}`;
+    }
+
     // Resolve provider before any UI updates or work. No provider = manager responds once and returns.
     let routing = this.resolveActiveRouting(preferredModel, 'general', true, userMessage);
     let provider = await this.providers.resolveProvider(routing.model, routing.provider);
@@ -636,6 +669,7 @@ export class KoryManager {
     if (provider === 'codex') return 'Codex';
     if (provider === 'anthropic') return 'Anthropic';
     if (provider === 'google') return 'Google';
+    if (provider === 'aistudio') return 'Google AI Studio';
     if (provider === 'xai') return 'xAI';
     if (provider === 'openrouter') return 'OpenRouter';
     if (provider === 'vertexai') return 'Vertex AI';
@@ -925,13 +959,22 @@ export class KoryManager {
     workerMessages: InternalMessage[] | undefined,
     preferredModel?: string,
     task?: string,
+    reviewDirectory = this.workingDirectory,
   ): Promise<{ passed: boolean; feedback?: string }> {
-    const hardCheckResult = await this.runHardChecks(sessionId);
+    const hardCheckResult = await this.runHardChecks(sessionId, reviewDirectory);
     if (!hardCheckResult.passed) return { passed: false, feedback: hardCheckResult.output };
 
     const routing = this.resolveActiveRouting(preferredModel, 'critic');
     const provider = await this.providers.resolveProvider(routing.model, routing.provider);
-    if (!provider) return { passed: true };
+    if (!provider) return { passed: false, feedback: 'Critic unavailable; result is unverified.' };
+    const criticCompilation = compilePrompt({
+      role: 'critic',
+      mode: getModeManager().getMode(),
+      provider: provider.name,
+      workingDirectory: reviewDirectory,
+      taskContract: createTaskContract(task ?? 'Review delegated work'),
+      contextPaths: this.config.contextPaths,
+    });
 
     const transcriptText = formatMessagesForCriticUtil(workerMessages ?? [], 12_000);
     // The critic is a FRESH-context agent — it never shares the manager's
@@ -946,7 +989,7 @@ export class KoryManager {
       `Critique against the objective: (1) does the work actually accomplish it, ` +
       `(2) is the implementation correct (verify claims by reading the real files — do not trust the transcript), ` +
       `(3) did it break or regress anything nearby, (4) is anything incomplete or stubbed. ` +
-      `Use read_file/grep/glob/ls as needed. Then output PASS or FAIL and brief feedback.`;
+      `Use read_file/grep/glob/ls as needed. Return the structured JSON critic report required by your system contract.`;
     const criticId = `critic-${nanoid(8)}`;
     const identity: AgentIdentity = {
       id: criticId,
@@ -962,7 +1005,31 @@ export class KoryManager {
       task: 'Review delegated work',
     });
     const criticAbort = new AbortController();
-    const criticSessionWd = await this.resolveSessionWorkingDirectory(sessionId);
+    let criticSessionWd: string;
+    try {
+      criticSessionWd = mkdtempSync(join(tmpdir(), 'kory-critic-'));
+      cpSync(reviewDirectory, criticSessionWd, {
+        recursive: true,
+        filter: (source) => {
+          const relativePath = source.slice(reviewDirectory.length).replace(/^\/+/, '');
+          const top = relativePath.split('/')[0];
+          return ![
+            '.git',
+            '.trees',
+            '.koryphaios',
+            'node_modules',
+            'build',
+            'dist',
+            '.svelte-kit',
+          ].includes(top);
+        },
+      });
+    } catch (error) {
+      return {
+        passed: false,
+        feedback: `Could not create the critic's disposable filesystem mirror: ${error instanceof Error ? error.message : String(error)}`,
+      };
+    }
     const criticCtx: ToolContext = {
       sessionId,
       workingDirectory: criticSessionWd,
@@ -978,7 +1045,7 @@ export class KoryManager {
       status: 'thinking',
       providerName: provider.name,
       modelId: routing.model,
-      systemPrompt: CRITIC_SYSTEM_PROMPT,
+      systemPrompt: criticCompilation.systemPrompt,
       toolRole: 'critic',
       maxTurns: 5,
       maxTokens: 2048,
@@ -995,6 +1062,7 @@ export class KoryManager {
     try {
       await this.runAgentThread(criticId, provider);
     } catch {
+      rmSync(criticSessionWd, { recursive: true, force: true });
       return { passed: false, feedback: 'Critic failed to run.' };
     }
 
@@ -1002,18 +1070,48 @@ export class KoryManager {
       [...thread.threadEntries].reverse().find((entry) => entry.role === 'assistant')?.content ??
       '';
     const passed = parseCriticVerdict(lastContent);
+    rmSync(criticSessionWd, { recursive: true, force: true });
     return { passed, feedback: lastContent.trim() };
   }
 
-  private async runHardChecks(sessionId: string): Promise<{ passed: boolean; output: string }> {
-    const pkgPath = join(this.workingDirectory, 'package.json');
+  private async runHardChecks(
+    sessionId: string,
+    workingDirectory: string,
+  ): Promise<{ passed: boolean; output: string }> {
+    const pkgPath = join(workingDirectory, 'package.json');
     if (!existsSync(pkgPath)) return { passed: true, output: '' };
-    const bash = this.tools.get('bash')!;
-    const result = await bash.run(
-      { sessionId, workingDirectory: this.workingDirectory, isSandboxed: true },
-      { id: nanoid(), name: 'bash', input: { command: 'bun test', timeout: 60 } },
+    const pkg = safeParseJson(readFileSync(pkgPath, 'utf8'));
+    const scripts = (pkg.scripts && typeof pkg.scripts === 'object' ? pkg.scripts : {}) as Record<
+      string,
+      unknown
+    >;
+    const checks = ['typecheck', 'check', 'test'].filter(
+      (name) => typeof scripts[name] === 'string',
     );
-    return { passed: !result.isError, output: result.output };
+    if (checks.length === 0) {
+      return {
+        passed: false,
+        output: 'No deterministic verification script was found; result is unverified.',
+      };
+    }
+    const bash = this.tools.get('bash');
+    if (!bash) {
+      return {
+        passed: false,
+        output: 'The deterministic-check runner is unavailable; result is unverified.',
+      };
+    }
+    const outputs: string[] = [];
+    for (const check of checks) {
+      const command = `bun run ${check}`;
+      const result = await bash.run(
+        { sessionId, workingDirectory, allowedPaths: [workingDirectory], isSandboxed: true },
+        { id: nanoid(), name: 'bash', input: { command, timeout: 120 } },
+      );
+      outputs.push(`$ ${command}\n${result.output}`);
+      if (result.isError) return { passed: false, output: outputs.join('\n\n') };
+    }
+    return { passed: true, output: outputs.join('\n\n') };
   }
 
   /** Manager handles simple tasks directly with full tool access (unsandboxed). Asks user before first tool run unless YOLO. Manager never uses legacy models. */
@@ -1247,6 +1345,56 @@ export class KoryManager {
       // must still be reported as user-stopped, not a normal completion.
       if (abort.signal.aborted) stoppedByUser = true;
 
+      // Direct manager edits must pass the same gate as delegated work. This
+      // happens before the final response is persisted so a model's optimistic
+      // self-assessment cannot become the authoritative completion state.
+      const directChanges = this.state.getChanges(sessionId);
+      if (!stoppedByUser && directChanges.length > 0) {
+        const settingsForGate = loadAgentSettings(this.workingDirectory);
+        const hardBoundaryTask = createTaskContract(userMessage).taskKind === 'security-infra';
+        const strictness = hardBoundaryTask
+          ? 'strict'
+          : settingsForGate.criticGateEnabled
+            ? settingsForGate.gateStrictness
+            : 'off';
+        if (strictness === 'off') {
+          messages.push({
+            role: 'assistant',
+            content:
+              'UNVERIFIED: The requested edits were applied, but quality gates are disabled. No verified-success claim can be made.',
+          });
+        } else {
+          const diffSections = await Promise.all(
+            directChanges.map(async (change) => {
+              const diff = await this.git.getDiff(change.path);
+              return `FILE: ${change.path}\n${diff || '[No Git diff available; inspect the file directly.]'}`;
+            }),
+          );
+          const directEvidence: InternalMessage[] = [
+            {
+              role: 'user',
+              content: `Direct manager change set:\n${JSON.stringify(directChanges, null, 2)}\n\nACTUAL DIFF:\n${diffSections.join('\n\n')}`,
+            },
+          ];
+          const gate = await this.runCriticGate(
+            sessionId,
+            directEvidence,
+            preferredModel,
+            userMessage,
+            managerCtx.workingDirectory,
+          );
+          if (!gate.passed) {
+            messages.push({
+              role: 'assistant',
+              content:
+                strictness === 'strict'
+                  ? `QUALITY GATE FAILED: The edits remain available for inspection, but the task is not complete.\n\n${gate.feedback ?? 'Verification failed without usable evidence.'}`
+                  : `UNVERIFIED: Advisory quality checks found issues.\n\n${gate.feedback ?? 'Verification failed without usable evidence.'}`,
+            });
+          }
+        }
+      }
+
       const assistants = messages.filter((m) => m.role === 'assistant');
       koryLog.debug(
         { assistantCount: assistants.length },
@@ -1400,7 +1548,37 @@ export class KoryManager {
     const { loadAgentSettings } = await import('../agent-settings');
     const settings = loadAgentSettings(this.workingDirectory);
 
-    let systemPrompt = KORY_SYSTEM_PROMPT;
+    const latestUserMessage = [...messages].reverse().find((message) => message.role === 'user');
+    const taskGoal =
+      typeof latestUserMessage?.content === 'string'
+        ? latestUserMessage.content
+        : 'Continue the current user-requested task.';
+    const managerCompilation = compilePrompt({
+      role: 'manager',
+      mode: getModeManager().getMode(),
+      provider: provider.name,
+      workingDirectory: await this.resolveSessionWorkingDirectory(sessionId),
+      taskContract: createTaskContract(taskGoal),
+      contextPaths: this.config.contextPaths,
+    });
+    let systemPrompt = managerCompilation.systemPrompt;
+    if (this.promptManifestHashBySession.get(sessionId) !== managerCompilation.manifest.hash) {
+      this.promptManifestHashBySession.set(sessionId, managerCompilation.manifest.hash);
+      const manifest = managerCompilation.manifest;
+      this.emitWSMessage(sessionId, 'system.info', {
+        message:
+          `Prompt ${manifest.version} · ${manifest.providerAdapter} · ${manifest.hash.slice(0, 12)}\n` +
+          (manifest.instructions.length
+            ? `Instructions: ${manifest.instructions
+                .map(
+                  (source) =>
+                    `${source.path} [scope=${source.scope}, priority=${source.priority}, sha256=${source.hash.slice(0, 12)}${source.truncated ? ', truncated' : ''}]`,
+                )
+                .join('; ')}`
+            : 'Instructions: none found') +
+          (manifest.conflicts.length ? `\nConflicts: ${manifest.conflicts.join('; ')}` : ''),
+      });
+    }
     const notesEntries = Object.entries(settings.managerNotes ?? {}).filter(([, v]) => v?.trim());
     if (notesEntries.length > 0) {
       const notesSections = notesEntries
@@ -1495,9 +1673,9 @@ export class KoryManager {
       contextBreakdown.memory +
       contextBreakdown.tools +
       contextBreakdown.chat;
-    // Real context data at dispatch time — the bar updates the moment a turn
-    // starts (reflecting prunes/hides), instead of trusting a stale usage
-    // event from a previous turn or model. Provider usage refines it later.
+    // This is deliberately a chars/4 planning estimate, not a token count.
+    // Do not mark it provider-known or let the UI present it as truth. A
+    // provider/CLI usage event replaces it as soon as one is available.
     this.emitUsageUpdate(
       sessionId,
       KORY_IDENTITY.id,
@@ -1505,7 +1683,7 @@ export class KoryManager {
       provider.name,
       estTokens,
       0,
-      true,
+      false,
       contextBreakdown,
     );
 
@@ -1717,6 +1895,10 @@ export class KoryManager {
             } catch {
               /* Expected: malformed tool input JSON, defaults to {} */
             }
+            this.emitWSMessage(sessionId, 'stream.tool_call', {
+              agentId: KORY_IDENTITY.id,
+              toolCall: { id: event.toolCallId, name: call.name, input: parsedInput },
+            });
             completedToolCalls.push({ id: event.toolCallId!, name: call.name, input: parsedInput });
             pendingToolCalls.delete(event.toolCallId!);
           }
@@ -2041,12 +2223,24 @@ export class KoryManager {
       emitFileComplete: (e) =>
         this.emitWSMessage(sessionId, 'stream.file_complete', { agentId: workerId, ...e }),
       recordChange: (c) => this.state.recordChange(sessionId, c),
+      waitForUserInput: (question, options) =>
+        this.waitForUserInputInternal(sessionId, question, options),
     };
     const history = await this.loadHistory(sessionId);
     const messages: InternalMessage[] = [...history, { role: 'user', content: userMessage }];
     const resolvedReasoningLevel =
       reasoningLevel === 'auto' ? determineAutoReasoningLevel(userMessage) : reasoningLevel;
-    let workerSystemPrompt = WORKER_SYSTEM_PROMPT;
+    let workerSystemPrompt = compilePrompt({
+      role: 'worker',
+      mode: getModeManager().getMode(),
+      provider: provider.name,
+      workingDirectory: workerWorkingDirectory,
+      taskContract: createTaskContract(userMessage, {
+        scope: allowedPaths,
+        constraints: isSandboxed ? ['Stay within the granted filesystem paths'] : [],
+      }),
+      contextPaths: this.config.contextPaths,
+    }).systemPrompt;
     if (hasAnyVisibleNoteTools(this.workingDirectory)) {
       const hint = buildNotesNetworkSystemHint(this.workingDirectory);
       if (hint) workerSystemPrompt += `\n\n${hint}`;
@@ -2421,6 +2615,7 @@ export class KoryManager {
         signal: streamSignal,
         workingDirectory: thread.ctx.workingDirectory,
         sessionId: thread.sessionId,
+        sandbox: thread.toolRole === 'critic' ? SANDBOX_PRESETS.readonly : SANDBOX_PRESETS.balanced,
         ...(normalizedReasoning !== undefined && { reasoningLevel: normalizedReasoning }),
       },
       provider.name,
@@ -2482,6 +2677,10 @@ export class KoryManager {
           } catch {
             /* Expected: malformed tool input JSON, defaults to {} */
           }
+          this.emitWSMessage(thread.sessionId, 'stream.tool_call', {
+            agentId: thread.identity.id,
+            toolCall: { id: event.toolCallId, name: call.name, input: parsedInput },
+          });
           completedToolCalls.push({ id: event.toolCallId!, name: call.name, input: parsedInput });
           pendingToolCalls.delete(event.toolCallId!);
         }
@@ -2530,6 +2729,11 @@ export class KoryManager {
     ctx: ToolContext,
     reasoningLevel?: string,
   ): Promise<boolean> {
+    const latestWorkerRequest = [...messages].reverse().find((message) => message.role === 'user');
+    const workerGoal =
+      typeof latestWorkerRequest?.content === 'string'
+        ? latestWorkerRequest.content
+        : 'Continue the assigned worker task.';
     const thread = this.agentThreads.get(workerId);
     if (thread) {
       thread.sessionId = sessionId;
@@ -2556,7 +2760,14 @@ export class KoryManager {
       status: 'thinking',
       providerName: provider.name,
       modelId,
-      systemPrompt: WORKER_SYSTEM_PROMPT,
+      systemPrompt: compilePrompt({
+        role: 'worker',
+        mode: getModeManager().getMode(),
+        provider: provider.name,
+        workingDirectory: ctx.workingDirectory,
+        taskContract: createTaskContract(workerGoal, { scope: ctx.allowedPaths ?? [] }),
+        contextPaths: this.config.contextPaths,
+      }).systemPrompt,
       toolRole: 'worker',
       reasoningLevel,
       maxTurns: 1,
@@ -2740,9 +2951,9 @@ export class KoryManager {
       usageKnown,
       breakdown,
     );
-    // Persist the manager's latest snapshot so a reloaded session's context
-    // bar has real data immediately (instead of waiting for the next turn).
-    if (agentId === KORY_IDENTITY.id) {
+    // Persist only provider/CLI-reported usage. A chars/4 planning estimate
+    // must never survive a reload looking like a real token count.
+    if (agentId === KORY_IDENTITY.id && usageKnown) {
       const win = resolveTrustedContextWindow(model, provider);
       void getContextArchive()?.recordUsage(sessionId, {
         used: tokensIn + tokensOut,

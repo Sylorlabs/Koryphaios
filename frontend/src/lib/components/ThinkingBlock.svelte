@@ -1,26 +1,23 @@
 <script lang="ts">
-  // Thinking timer — deliberately dumb. The displayed duration IS the
-  // server-computed value (first-delta → latest-delta timestamps): it only
-  // moves when reasoning tokens actually arrive, is monotonic by construction,
-  // and freezes the instant the provider signals reasoning is over
-  // (finalized). No client stopwatch, no stall heuristics, no jumping.
+  // The duration is measured from the server timestamp when the agent entered
+  // thinking until its next action. This includes providers that buffer all
+  // reasoning into one event, while avoiding an inaccurate client stopwatch.
   import { slide } from 'svelte/transition';
 
   interface Props {
     text: string;
-    /** Server-computed elapsed ms (latest delta ts − first delta ts). */
+    /** Server-computed elapsed ms (thinking state start → next action). */
     durationMs?: number;
+    /** Server timestamp at which the agent entered the thinking state. */
+    thinkingStartedAt?: number;
     agentName: string;
     /** Provider said reasoning is over — the number is final. */
     finalized?: boolean;
-    /** Reasoning-token estimate for providers that redact the thinking text
-     *  (Claude Code headless) but report progress. */
-    estimatedTokens?: number;
     /** Start with the reasoning panel open (user setting). */
     defaultExpanded?: boolean;
   }
 
-  let { text, durationMs, agentName: _agentName, finalized = false, estimatedTokens, defaultExpanded = false }: Props = $props();
+  let { text, durationMs, thinkingStartedAt, agentName: _agentName, finalized = false, defaultExpanded = false }: Props = $props();
   // svelte-ignore state_referenced_locally
   let expanded = $state(defaultExpanded);
   let panelEl = $state<HTMLDivElement>();
@@ -31,7 +28,19 @@
   $effect(() => {
     if ((durationMs ?? 0) > peakMs) peakMs = durationMs ?? 0;
   });
-  let displayMs = $derived(Math.max(peakMs, durationMs ?? 0));
+  let now = $state(Date.now());
+  $effect(() => {
+    if (finalized || !thinkingStartedAt) return;
+    now = Date.now();
+    const timer = setInterval(() => (now = Date.now()), 100);
+    return () => clearInterval(timer);
+  });
+  // Keep the live counter moving even when a provider buffers its reasoning
+  // into a single event. The final server event replaces this with the exact
+  // timestamp-to-timestamp duration when the next action arrives.
+  let displayMs = $derived(
+    Math.max(peakMs, durationMs ?? 0, !finalized && thinkingStartedAt ? now - thinkingStartedAt : 0),
+  );
 
   // Live = provider hasn't finalized yet. Safety valve: if no new duration
   // arrives for 15s the run died mid-thought — stop shimmering.
@@ -44,16 +53,6 @@
     return () => clearTimeout(t);
   });
   let isLive = $derived(!finalized && staleAt === 0);
-
-  // Reasoning tokens: provider estimate when reported, else ~4 chars/token
-  // from the streamed text. Monotonic via the same peak guard upstream.
-  let displayTokens = $derived(
-    estimatedTokens && estimatedTokens > 0 ? estimatedTokens : Math.ceil(text.length / 4),
-  );
-
-  function formatTokens(n: number): string {
-    return n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n);
-  }
 
   function formatDuration(ms: number): string {
     const s = ms / 1000;
@@ -85,9 +84,6 @@
     <span class="label done">Thought for</span>
   {/if}
   <span class="stopwatch tabular-nums" class:live={isLive}>{formatDuration(displayMs)}</span>
-  {#if displayTokens > 0}
-    <span class="stopwatch tabular-nums" title={text ? 'Estimated reasoning tokens' : 'Reasoning tokens (text kept private by the provider)'}>· ~{formatTokens(displayTokens)} tok</span>
-  {/if}
   <span class="expand-cue {expanded ? 'rotated' : ''}" aria-hidden="true">▸</span>
 </button>
 
@@ -98,7 +94,7 @@
     bind:this={panelEl}
     transition:slide={{ duration: 180 }}
   >
-    <p class="thinking-full-text">{text || (estimatedTokens ? `Anthropic keeps this model's raw reasoning on their servers (Claude Code only receives token counts) — ~${estimatedTokens} tokens of internal reasoning. Models with open reasoning (e.g. Haiku 4.5, Cursor, Antigravity, most API providers) show their full text here.` : '…')}</p>
+    <p class="thinking-full-text">{text || 'This provider keeps its raw reasoning private.'}</p>
     {#if isLive}
       <span class="live-caret" aria-hidden="true"></span>
     {/if}

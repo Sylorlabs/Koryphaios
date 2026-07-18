@@ -35,9 +35,12 @@
         return id.includes(q) || name.includes(q);
       })
   );
+  // Membership checks run once per rendered row. A Set avoids an O(n²)
+  // includes() sweep when Select All/None changes a large provider catalog.
+  let selectedModelIds = $derived(new Set(localSelected));
 
   function toggleModel(id: string) {
-    if (localSelected.includes(id)) {
+    if (selectedModelIds.has(id)) {
       localSelected = localSelected.filter(m => m !== id);
     } else {
       localSelected = [...localSelected, id];
@@ -45,11 +48,14 @@
   }
 
   function selectAll() {
-    localSelected = (availableModels || []).map(m => m.id);
+    const allIds = (availableModels || []).map(m => m.id);
+    if (localSelected.length !== allIds.length || allIds.some((id) => !selectedModelIds.has(id))) {
+      localSelected = allIds;
+    }
   }
 
   function selectNone() {
-    localSelected = [];
+    if (localSelected.length > 0) localSelected = [];
   }
 
   function handleSave() {
@@ -107,18 +113,18 @@
         {#each filteredModels as model}
           <button 
             class="w-full flex items-center justify-between p-3 rounded-xl transition-all border
-                   {localSelected.includes(model.id) ? 'bg-[var(--color-accent)]/5 border-[var(--color-accent)]/30' : 'bg-transparent border-transparent hover:bg-[var(--color-surface-2)]'}"
+                   {selectedModelIds.has(model.id) ? 'bg-[var(--color-accent)]/5 border-[var(--color-accent)]/30' : 'bg-transparent border-transparent hover:bg-[var(--color-surface-2)]'}"
             onclick={() => toggleModel(model.id)}
           >
             <div class="flex items-center gap-3">
               <div class="w-5 h-5 rounded-md border flex items-center justify-center transition-colors
-                          {localSelected.includes(model.id) ? 'bg-[var(--color-accent)] border-[var(--color-accent)]' : 'border-white/10'}">
-                {#if localSelected.includes(model.id)}
+                          {selectedModelIds.has(model.id) ? 'bg-[var(--color-accent)] border-[var(--color-accent)]' : 'border-white/10'}">
+                {#if selectedModelIds.has(model.id)}
                   <Check size={14} class="text-white" />
                 {/if}
               </div>
               <div class="flex flex-col items-start">
-                <span class="text-sm font-medium" style="color: {localSelected.includes(model.id) ? 'var(--color-text-primary)' : 'var(--color-text-secondary)'};">
+                <span class="text-sm font-medium" style="color: {selectedModelIds.has(model.id) ? 'var(--color-text-primary)' : 'var(--color-text-secondary)'};">
                   {model.name}
                 </span>
                 <span class="text-[10px] opacity-40">{model.id}</span>

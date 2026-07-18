@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { serverLog } from '../logger';
 import { withRetry, withTimeoutSignal } from './utils';
 import { detectCodexAuthToken, refreshCodexAuthToken, CODEX_OAUTH_CLIENT_ID, getKoryCodexHome, isCodexCLIAuthMarker, clearCachedToken } from './auth-utils';
+import { getDiscoveredCliAccount } from './cli-accounts';
 import {
   type Provider,
   type ProviderContentBlock,
@@ -115,8 +116,11 @@ export class CodexProvider implements Provider {
   private cachedModels: ModelDef[] | null = null;
   private cachedModelsAt = 0;
   private fetchInProgress = false;
+  private activeAuthMarker: string | undefined;
 
-  constructor(readonly config: ProviderConfig) {}
+  constructor(readonly config: ProviderConfig) {
+    this.activeAuthMarker = config.authToken?.trim() || undefined;
+  }
 
   isAvailable(): boolean {
     return !this.config.disabled && !!this.resolveAuthToken();
@@ -367,17 +371,17 @@ export class CodexProvider implements Provider {
     return `${CODEX_BACKEND_BASE_URL}/models?client_version=${encodeURIComponent(getCodexClientVersion())}`;
   }
 
-  private resolveAuthToken(): string | null {
-    const authToken = this.config.authToken?.trim();
+  private resolveAuthToken(marker = this.activeAuthMarker): string | null {
+    const authToken = marker?.trim();
     if (!authToken) return null;
     if (isCodexCLIAuthMarker(authToken)) {
-      return detectCodexAuthToken();
+      return detectCodexAuthToken(authToken);
     }
     return authToken;
   }
 
-  private authHeaders(extra?: Record<string, string>): HeadersInit {
-    const authToken = this.resolveAuthToken();
+  private authHeaders(extra?: Record<string, string>, marker = this.activeAuthMarker): HeadersInit {
+    const authToken = this.resolveAuthToken(marker);
     if (!authToken) {
       throw new Error('Codex auth token not found. Sign in with Codex again.');
     }
@@ -397,7 +401,7 @@ export class CodexProvider implements Provider {
       (m) => m.id === request.model || m.apiModelId === request.model,
     )?.reasoningLevels;
 
-    const attempt = async (): Promise<Response | Error> => {
+    const attempt = async (marker = this.activeAuthMarker): Promise<Response | Error> => {
       try {
         return await withRetry(
           async () => {
@@ -406,7 +410,7 @@ export class CodexProvider implements Provider {
               headers: this.authHeaders({
                 Accept: 'text/event-stream',
                 'Content-Type': 'application/json',
-              }),
+              }, marker),
               body: JSON.stringify(buildResponsesRequest(request, allowedReasoningLevels)),
               signal: withTimeoutSignal(request.signal, CODEX_STREAM_TIMEOUT_MS),
             });
@@ -431,14 +435,34 @@ export class CodexProvider implements Provider {
       clearCachedToken('codex-cli-auth');
       // Re-read stored tokens first; if still rejected, refresh natively via
       // auth.openai.com (no codex binary involved).
-      const freshToken = detectCodexAuthToken() ?? (await refreshCodexAuthToken());
+      const marker = this.activeAuthMarker;
+      const freshToken = detectCodexAuthToken(marker) ?? (await refreshCodexAuthToken(marker));
       if (freshToken) {
         serverLog.info({ provider: 'codex' }, 'Recovered fresh Codex auth token — retrying request');
         result = await attempt();
       } else {
-        return new Error(
-          'Codex session expired. Please sign in with Codex again to continue.',
-        );
+        const expired = new Error('Codex session expired. Select another Codex account or sign in again.');
+        (expired as Error & { status?: number }).status = 401;
+        result = expired;
+      }
+    }
+
+    const status = result instanceof Error ? (result as Error & { status?: number }).status : undefined;
+    if (result instanceof Error && (status === 401 || status === 429)) {
+      for (const accountId of this.config.fallbackOrder ?? []) {
+        const account = getDiscoveredCliAccount(accountId);
+        if (!account || account.provider !== 'codex') continue;
+        const marker = `cli:codex:${Buffer.from(account.profileDir).toString('base64url')}`;
+        if (marker === this.activeAuthMarker) continue;
+        const fallback = await attempt(marker);
+        if (!(fallback instanceof Error)) {
+          this.activeAuthMarker = marker;
+          serverLog.info(
+            { provider: 'codex', account: account.email ?? account.label, priorStatus: status },
+            'Switched to selected Codex CLI fallback account',
+          );
+          return fallback;
+        }
       }
     }
 

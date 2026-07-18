@@ -18,6 +18,13 @@ export interface AgentSettings {
   agentExecutionMode: 'auto' | 'single' | 'multi';
   preferencesEnabled: boolean;
   criticGateEnabled: boolean;
+  gateStrictness: 'strict' | 'advisory' | 'off';
+  intentInterview: 'off' | 'adaptive' | 'deep';
+  designDiscovery: boolean;
+  planApproval: 'always' | 'material' | 'never';
+  modelQualification: 'enforce' | 'warn' | 'off';
+  feedbackSharing: 'local' | 'sanitized-opt-in';
+  skillLearningMode: 'human-only' | 'propose-then-verify' | 'automatic';
   criticEnforcesPreferences: boolean;
   autoApplySafeFixes: boolean;
   confirmRuleViolations: boolean;
@@ -81,6 +88,13 @@ export const DEFAULT_AGENT_SETTINGS: AgentSettings = {
   agentExecutionMode: 'auto',
   preferencesEnabled: true,
   criticGateEnabled: true,
+  gateStrictness: 'strict',
+  intentInterview: 'adaptive',
+  designDiscovery: true,
+  planApproval: 'material',
+  modelQualification: 'enforce',
+  feedbackSharing: 'local',
+  skillLearningMode: 'propose-then-verify',
   criticEnforcesPreferences: true,
   autoApplySafeFixes: false,
   confirmRuleViolations: true,

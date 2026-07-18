@@ -3,8 +3,49 @@
  * Extracted for testability and single responsibility.
  */
 
-/** Parse critic output: last non-empty line should start with PASS or FAIL; otherwise fallback to includes("PASS"). */
+import { z } from 'zod';
+
+export const CriticReportSchema = z.object({
+  verdict: z.enum(['PASS', 'FAIL']),
+  findings: z.array(
+    z.object({
+      severity: z.enum(['critical', 'major', 'minor']),
+      evidence: z.string().min(1),
+      criterion: z.string().min(1),
+      finding: z.string().min(1),
+    }),
+  ),
+  checksReviewed: z.array(z.string()),
+  unmetCriteria: z.array(z.string()),
+});
+
+export type CriticReport = z.infer<typeof CriticReportSchema>;
+
+export function parseCriticReport(content: string): CriticReport | null {
+  const candidate = content
+    .trim()
+    .replace(/^```json\s*/i, '')
+    .replace(/```$/, '')
+    .trim();
+  try {
+    const result = CriticReportSchema.safeParse(JSON.parse(candidate));
+    if (!result.success) return null;
+    if (
+      result.data.verdict === 'PASS' &&
+      result.data.findings.some((f) => f.severity !== 'minor')
+    ) {
+      return null;
+    }
+    return result.data;
+  } catch {
+    return null;
+  }
+}
+
+/** Legacy plain verdict parsing remains strict; ambiguous prose can never pass. */
 export function parseCriticVerdict(content: string): boolean {
+  const report = parseCriticReport(content);
+  if (report) return report.verdict === 'PASS';
   const lines = content
     .trim()
     .split(/\n/)
@@ -12,9 +53,9 @@ export function parseCriticVerdict(content: string): boolean {
     .filter(Boolean);
   const lastLine = lines[lines.length - 1] ?? '';
   const upper = lastLine.toUpperCase();
-  if (upper.startsWith('PASS')) return true;
+  if (upper === 'PASS') return true;
   if (upper.startsWith('FAIL')) return false;
-  return content.toUpperCase().includes('PASS');
+  return false;
 }
 
 /** Format message list for critic prompt; truncate to maxLength to avoid token overflow. */

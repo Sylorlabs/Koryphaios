@@ -18,8 +18,8 @@ describe('parseCriticVerdict', () => {
     expect(parseCriticVerdict('The code does not PASS our bar.\nFAIL')).toBe(false);
   });
 
-  test('fallback to includes(PASS) when last line is neither PASS nor FAIL', () => {
-    expect(parseCriticVerdict('Overall assessment: PASS.')).toBe(true);
+  test('fails closed when PASS appears only inside ambiguous prose', () => {
+    expect(parseCriticVerdict('Overall assessment: PASS.')).toBe(false);
     expect(parseCriticVerdict('No issues found.')).toBe(false);
   });
 

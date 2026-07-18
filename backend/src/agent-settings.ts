@@ -55,6 +55,27 @@ export interface AgentSettings {
   /** Critic gate enabled - critic reviews all changes */
   criticGateEnabled: boolean;
 
+  /** Strict blocks completion, advisory reports failures, off marks results unverified. */
+  gateStrictness: 'strict' | 'advisory' | 'off';
+
+  /** How aggressively Kory resolves material ambiguity before implementation. */
+  intentInterview: 'off' | 'adaptive' | 'deep';
+
+  /** Whether design discovery is offered for materially ambiguous interface work. */
+  designDiscovery: boolean;
+
+  /** When an implementation plan requires explicit approval. */
+  planApproval: 'always' | 'material' | 'never';
+
+  /** Enforce empirically qualified provider/model roles. */
+  modelQualification: 'enforce' | 'warn' | 'off';
+
+  /** Sharing is opt-in and restricted to sanitized categories and ratings. */
+  feedbackSharing: 'local' | 'sanitized-opt-in';
+
+  /** Controls whether locally learned workflow changes may be proposed or applied. */
+  skillLearningMode: 'human-only' | 'propose-then-verify' | 'automatic';
+
   /** Critic enforces preferences.md workflow strictly */
   criticEnforcesPreferences: boolean;
 
@@ -119,6 +140,13 @@ export const DEFAULT_AGENT_SETTINGS: AgentSettings = {
   managerModelAccess: {},
   managerNotes: {},
   criticGateEnabled: true,
+  gateStrictness: 'strict',
+  intentInterview: 'adaptive',
+  designDiscovery: true,
+  planApproval: 'material',
+  modelQualification: 'enforce',
+  feedbackSharing: 'local',
+  skillLearningMode: 'propose-then-verify',
   criticEnforcesPreferences: true,
   autoApplySafeFixes: false,
   confirmRuleViolations: true,
@@ -359,6 +387,62 @@ export function loadAgentSettings(projectRoot: string): AgentSettings {
     ...(enableCritic !== undefined && { criticGateEnabled: enableCritic }),
     ...persistedSettings,
   };
+}
+
+/** Resolve explicit layers in increasing authority: global, workspace, session. */
+export function resolveAgentSettingsLayers(
+  globalSettings?: Partial<AgentSettings>,
+  workspaceSettings?: Partial<AgentSettings>,
+  sessionOverride?: Partial<AgentSettings>,
+): AgentSettings {
+  return {
+    ...DEFAULT_AGENT_SETTINGS,
+    ...globalSettings,
+    ...workspaceSettings,
+    ...sessionOverride,
+    managerModelAccess: {
+      ...DEFAULT_AGENT_SETTINGS.managerModelAccess,
+      ...globalSettings?.managerModelAccess,
+      ...workspaceSettings?.managerModelAccess,
+      ...sessionOverride?.managerModelAccess,
+    },
+    managerNotes: {
+      ...DEFAULT_AGENT_SETTINGS.managerNotes,
+      ...globalSettings?.managerNotes,
+      ...workspaceSettings?.managerNotes,
+      ...sessionOverride?.managerNotes,
+    },
+  };
+}
+
+const SETTING_ENUMS: Partial<Record<keyof AgentSettings, readonly string[]>> = {
+  ruleEnforcementLevel: ['strict', 'moderate', 'lenient'],
+  agentExecutionMode: ['auto', 'single', 'multi'],
+  gateStrictness: ['strict', 'advisory', 'off'],
+  intentInterview: ['off', 'adaptive', 'deep'],
+  planApproval: ['always', 'material', 'never'],
+  modelQualification: ['enforce', 'warn', 'off'],
+  feedbackSharing: ['local', 'sanitized-opt-in'],
+  skillLearningMode: ['human-only', 'propose-then-verify', 'automatic'],
+  localWebSearch: ['off', 'on', 'fallback'],
+};
+
+/** Strip unknown or ill-typed API fields rather than persisting arbitrary configuration. */
+export function mergeAgentSettings(current: AgentSettings, patch: unknown): AgentSettings {
+  if (!patch || typeof patch !== 'object' || Array.isArray(patch)) return current;
+  const next = { ...current } as Record<string, unknown>;
+  for (const [key, value] of Object.entries(patch)) {
+    if (!(key in DEFAULT_AGENT_SETTINGS) || key === 'updatedAt') continue;
+    const typedKey = key as keyof AgentSettings;
+    const allowed = SETTING_ENUMS[typedKey];
+    if (allowed) {
+      if (typeof value === 'string' && allowed.includes(value)) next[key] = value;
+      continue;
+    }
+    const expected = DEFAULT_AGENT_SETTINGS[typedKey];
+    if (typeof value === typeof expected) next[key] = value;
+  }
+  return next as unknown as AgentSettings;
 }
 
 /**

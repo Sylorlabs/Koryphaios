@@ -40,6 +40,20 @@ const NETWORK_CMD_BLACKLIST = new Set([
   'wireshark',
 ]);
 
+const CATASTROPHIC_COMMAND_PATTERNS = [
+  /\brm\s+[^\n]*(?:-[a-z]*r[a-z]*f|-rf|-fr)[^\n]*(?:\s\/\s*$|\s\/\*|\s~(?:\/|\s|$)|\$HOME|\/home\/[^/\s]+\/?\s*$)/i,
+  /\bmkfs(?:\.[a-z0-9]+)?\b/i,
+  /\bdd\s+[^\n]*\bof=\/dev\/(?:sd|hd|nvme|vd)[a-z0-9]*/i,
+  /(?:^|\s)>\s*\/dev\/(?:sd|hd|nvme|vd)[a-z0-9]*/i,
+  /\b(?:shutdown|reboot|poweroff|halt)\b/i,
+  /\bsystemctl\s+(?:poweroff|reboot|halt)\b/i,
+  /:\(\)\s*\{\s*:\|:&\s*;\s*\}\s*;/,
+];
+
+export function isCatastrophicBashCommand(command: string): boolean {
+  return CATASTROPHIC_COMMAND_PATTERNS.some((pattern) => pattern.test(command));
+}
+
 function isWithinRoot(root: string, target: string): boolean {
   const rel = relative(root, target);
   return rel === '' || (!rel.startsWith('..') && !isAbsolute(rel));
@@ -137,12 +151,53 @@ Network access via curl/wget is blocked unless explicitly authorized.`;
     const collaborationPolicy = getCollaborationToolPolicy(ctx.sessionId);
     if (collaborationPolicy) {
       const commands = parseBaseCommands(command);
-      const blocked = commands.find(cmd => collaborationPolicy.commandBlocklist.some(pattern => commandPatternMatches(cmd, pattern)));
-      const notAllowed = collaborationPolicy.commandAllowlist.length && !collaborationPolicy.commandAllowlist.includes('*')
-        ? commands.find(cmd => !collaborationPolicy.commandAllowlist.some(pattern => commandPatternMatches(cmd, pattern)))
-        : undefined;
+      const blocked = commands.find((cmd) =>
+        collaborationPolicy.commandBlocklist.some((pattern) => commandPatternMatches(cmd, pattern)),
+      );
+      const notAllowed =
+        collaborationPolicy.commandAllowlist.length &&
+        !collaborationPolicy.commandAllowlist.includes('*')
+          ? commands.find(
+              (cmd) =>
+                !collaborationPolicy.commandAllowlist.some((pattern) =>
+                  commandPatternMatches(cmd, pattern),
+                ),
+            )
+          : undefined;
       if (blocked || notAllowed) {
-        return { callId: call.id, name: this.name, output: `Command blocked by team access policy: ${blocked || notAllowed}`, isError: true, durationMs: 0 };
+        return {
+          callId: call.id,
+          name: this.name,
+          output: `Command blocked by team access policy: ${blocked || notAllowed}`,
+          isError: true,
+          durationMs: 0,
+        };
+      }
+    }
+
+    const catastrophic = isCatastrophicBashCommand(command);
+    if (catastrophic) {
+      if (!ctx.waitForUserInput) {
+        return {
+          callId: call.id,
+          name: this.name,
+          output: 'Catastrophic command blocked because no human approval channel is available.',
+          isError: true,
+          durationMs: 0,
+        };
+      }
+      const selection = await ctx.waitForUserInput(
+        `This command can destroy broad system or home-directory data:\n\n${command}\n\nRun it anyway?`,
+        ['Cancel (Recommended)', 'Run catastrophic command'],
+      );
+      if (selection !== 'Run catastrophic command') {
+        return {
+          callId: call.id,
+          name: this.name,
+          output: 'Catastrophic command cancelled by the user.',
+          isError: true,
+          durationMs: 0,
+        };
       }
     }
 
@@ -176,7 +231,7 @@ Network access via curl/wget is blocked unless explicitly authorized.`;
       reason: validation.reason,
     });
 
-    if (!validation.safe) {
+    if (!validation.safe && !catastrophic) {
       return {
         callId: call.id,
         name: this.name,

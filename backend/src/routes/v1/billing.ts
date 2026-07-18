@@ -10,7 +10,94 @@ import { getProviderBalances } from '../../billing/provider-balances';
 import { getContext } from '../../context';
 import { resolvePricing, SUBSCRIPTION_PROVIDERS } from '../../pricing';
 import { warmModelsDevCache } from '../../providers/models-dev';
+import { discoverCliAccounts } from '../../providers/cli-accounts';
 import { requireLocalRouteAuth } from '../../auth/local-route-auth';
+import { createUserCredentialsService, type UserCredential } from '../../services';
+
+const LOCAL_USER_ID = 'local-user';
+const credentialsService = createUserCredentialsService();
+
+function credentialMetadata(credential: UserCredential): { accountId?: string; label?: string } {
+  if (credential.metadata && typeof credential.metadata === 'object') {
+    return credential.metadata as { accountId?: string; label?: string };
+  }
+  if (typeof credential.metadata === 'string') {
+    try {
+      return JSON.parse(credential.metadata) as { accountId?: string; label?: string };
+    } catch {
+      return {};
+    }
+  }
+  return {};
+}
+
+export function configuredAccounts(credentials: UserCredential[]) {
+  const accounts = new Map<string, {
+    id: string;
+    provider: string;
+    label: string;
+    credentialTypes: Set<string>;
+    createdAt: number;
+    lastUsedAt?: number;
+  }>();
+  for (const credential of credentials.filter((entry) => entry.isActive)) {
+    const metadata = credentialMetadata(credential);
+    const id = metadata.accountId ?? credential.id;
+    const key = `${credential.provider}:${id}`;
+    const existing = accounts.get(key) ?? {
+      id,
+      provider: credential.provider,
+      label: metadata.label?.trim() || `${credential.provider} account`,
+      credentialTypes: new Set<string>(),
+      createdAt: credential.createdAt,
+    };
+    existing.credentialTypes.add(credential.type);
+    existing.createdAt = Math.min(existing.createdAt, credential.createdAt);
+    if (credential.lastUsedAt != null) {
+      existing.lastUsedAt = Math.max(existing.lastUsedAt ?? 0, credential.lastUsedAt);
+    }
+    accounts.set(key, existing);
+  }
+  return [...accounts.values()]
+    .map((account) => ({
+      ...account,
+      credentialTypes: [...account.credentialTypes].sort(),
+      subscription: SUBSCRIPTION_PROVIDERS.has(account.provider),
+      usageAttribution: 'provider' as const,
+    }))
+    .sort((a, b) => b.createdAt - a.createdAt);
+}
+
+export function withDetectedCliAccounts(
+  accounts: ReturnType<typeof configuredAccounts>,
+  detected = discoverCliAccounts(),
+) {
+  const counts = new Map<string, number>();
+  for (const account of detected) counts.set(account.provider, (counts.get(account.provider) ?? 0) + 1);
+  const existing = new Set(accounts.map((account) => `${account.provider}:${account.id}`));
+  const cliAccounts = detected
+    // A single implicit CLI login is normal provider configuration, not a
+    // useful Billing "accounts" section. Surface autodetection here only when
+    // the user genuinely has multiple identities to distinguish.
+    .filter((account) => (counts.get(account.provider) ?? 0) > 1)
+    .filter((account) => !existing.has(`${account.provider}:${account.id}`))
+    .map((account) => ({
+      id: account.id,
+      provider: account.provider,
+      label: account.label,
+      credentialTypes: ['cliProfile'],
+      createdAt: 0,
+      lastUsedAt: undefined,
+      subscription: SUBSCRIPTION_PROVIDERS.has(account.provider),
+      usageAttribution: 'provider' as const,
+      source: account.source,
+      email: account.email,
+      plan: account.plan,
+      health: account.health,
+      profileDir: account.profileDir,
+    }));
+  return [...accounts, ...cliAccounts];
+}
 
 export const billingRoutes = new Elysia({ prefix: '/api/billing' }).get(
   '/credits',
@@ -23,10 +110,9 @@ export const billingRoutes = new Elysia({ prefix: '/api/billing' }).get(
 
     const reconciliation = getReconciliation();
     const totals = getLocalTotals();
-    // `gemini` was previously emitted by the legacy CLI-log reader even though
+    // `gemini` was previously emitted by an obsolete provider path even though
     // it is a model family, not a configured provider. Do not resurrect those
-    // stale rows; current Google usage is recorded as google, vertexai, or
-    // antigravity (custom provider ids remain supported).
+    // stale rows; Google providers are google, aistudio, vertexai, and jules.
     const providerTotals = getLocalTotalsByProvider().filter((entry) => entry.provider !== 'gemini');
     const byProvider = providerTotals.map((entry) => ({
       name: entry.provider,
@@ -57,12 +143,13 @@ export const billingRoutes = new Elysia({ prefix: '/api/billing' }).get(
     const configs = getContext().providers.getConfigs();
     const keys: Record<string, string | undefined> = {};
     for (const [name, cfg] of Object.entries(configs)) keys[name] = (cfg as { apiKey?: string }).apiKey;
-    const [cliUsage, balances] = await Promise.all([
+    const [cliUsage, balances, savedCredentials] = await Promise.all([
       getCliUsageReports({
         githubToken: (configs as Record<string, { authToken?: string }>).copilot?.authToken,
         forceRefresh,
       }),
       getProviderBalances(keys, { forceRefresh }),
+      credentialsService.list(LOCAL_USER_ID, { isActive: true }),
     ]);
     const subscriptionInferenceCents = Math.round(
       cliUsage.reduce((sum, report) => {
@@ -93,6 +180,7 @@ export const billingRoutes = new Elysia({ prefix: '/api/billing' }).get(
       // windows (hour/day/week/month), quota % + resets, inference value.
       cliUsage,
       balances,
+      accounts: withDetectedCliAccounts(configuredAccounts(savedCredentials)),
       reconciliation,
     };
   },

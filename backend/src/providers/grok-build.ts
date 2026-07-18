@@ -19,6 +19,7 @@ import { randomUUID } from 'node:crypto';
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { homedir, tmpdir } from 'node:os';
+import { buildSoftJail, wrapCommand } from '../collaboration/sandbox-runner';
 import {
   type Provider,
   type ProviderContentBlock,
@@ -136,10 +137,13 @@ export class GrokBuildProvider implements Provider {
     try {
       const cwd = request.workingDirectory?.trim();
       if (cwd) {
-        const { loadAgentSettings } = require('../agent-settings') as typeof import('../agent-settings');
+        const { loadAgentSettings } =
+          require('../agent-settings') as typeof import('../agent-settings');
         if (loadAgentSettings(cwd).localWebSearch === 'off') args.push('--disable-web-search');
       }
-    } catch { /* settings unavailable — keep web search on */ }
+    } catch {
+      /* settings unavailable — keep web search on */
+    }
 
     // Only pass --reasoning-effort when the CLI's own metadata says this model
     // supports it (canReason is derived from ~/.grok/models_cache.json).
@@ -154,10 +158,15 @@ export class GrokBuildProvider implements Provider {
       }
     }
 
-    const child = spawn(bin, args, {
-      cwd: request.workingDirectory?.trim() || tmpdir(),
+    const cwd = request.workingDirectory?.trim() || tmpdir();
+    const jail = request.sandbox ? buildSoftJail(process.env, [join(homedir(), '.grok')]) : null;
+    const wrapped = request.sandbox
+      ? wrapCommand(bin, args, { cwd, policy: request.sandbox })
+      : { command: bin, args };
+    const child = spawn(wrapped.command, wrapped.args, {
+      cwd,
       stdio: ['ignore', 'pipe', 'pipe'],
-      env: { ...process.env },
+      env: jail?.env ?? { ...process.env },
     });
 
     const onAbort = () => {
@@ -168,6 +177,7 @@ export class GrokBuildProvider implements Provider {
       }
     };
     request.signal?.addEventListener('abort', onAbort, { once: true });
+    child.once('close', () => jail?.cleanup());
 
     const timeout = setTimeout(() => {
       providerLog.warn({ provider: 'grok' }, 'Grok Build harness timed out — killing CLI');
@@ -179,7 +189,10 @@ export class GrokBuildProvider implements Provider {
     // into a queue the generator drains, so tokens reach the UI as they land.
     const queue: ProviderEvent[] = [];
     let resolveWaiter: (() => void) | null = null;
-    const wake = () => { resolveWaiter?.(); resolveWaiter = null; };
+    const wake = () => {
+      resolveWaiter?.();
+      resolveWaiter = null;
+    };
     let stderr = '';
     let lineBuf = '';
     let sawContent = false;
@@ -196,19 +209,31 @@ export class GrokBuildProvider implements Provider {
       // grok streaming-json: {type:'thought'|'text', data:'...'} then {type:'end', stopReason}.
       if (type === 'thought') {
         const t = typeof ev.data === 'string' ? ev.data : '';
-        if (t) { sawThinking = true; queue.push({ type: 'thinking_delta', thinking: t }); }
+        if (t) {
+          sawThinking = true;
+          queue.push({ type: 'thinking_delta', thinking: t });
+        }
       } else if (type === 'text') {
         const t = typeof ev.data === 'string' ? ev.data : '';
-        if (t) { sawContent = true; queue.push({ type: 'content_delta', content: t }); }
+        if (t) {
+          sawContent = true;
+          queue.push({ type: 'content_delta', content: t });
+        }
       } else if (type === 'end' || type === 'result') {
         stopReason = (ev.stopReason ?? ev.stop_reason) as string | undefined;
       } else {
         // Non-streaming shapes (single json blob, or a final object): fold text
         // + reasoning in so nothing is lost across CLI versions.
         const thought = pickText({ text: ev.thought ?? ev.reasoning });
-        if (thought) { sawThinking = true; queue.push({ type: 'thinking_delta', thinking: thought }); }
+        if (thought) {
+          sawThinking = true;
+          queue.push({ type: 'thinking_delta', thinking: thought });
+        }
         const text = pickText(ev);
-        if (text) { sawContent = true; queue.push({ type: 'content_delta', content: text }); }
+        if (text) {
+          sawContent = true;
+          queue.push({ type: 'content_delta', content: text });
+        }
         const s = (ev.stopReason ?? ev.stop_reason) as string | undefined;
         if (s) stopReason = s;
       }
@@ -221,25 +246,36 @@ export class GrokBuildProvider implements Provider {
         const line = lineBuf.slice(0, nl).trim();
         lineBuf = lineBuf.slice(nl + 1);
         if (!line || line[0] !== '{') continue;
-        try { handleEvent(JSON.parse(line) as Record<string, unknown>); } catch { /* banner/progress */ }
+        try {
+          handleEvent(JSON.parse(line) as Record<string, unknown>);
+        } catch {
+          /* banner/progress */
+        }
       }
       wake();
     });
-    child.stderr.on('data', (c: Buffer) => { stderr += c.toString(); });
+    child.stderr.on('data', (c: Buffer) => {
+      stderr += c.toString();
+    });
 
     let exitCode = 0;
     let done = false;
-    child.once('error', () => { exitCode = -1; done = true; wake(); });
-    child.once('exit', (code) => { exitCode = code ?? 0; done = true; wake(); });
+    child.once('error', () => {
+      exitCode = -1;
+      done = true;
+      wake();
+    });
+    child.once('exit', (code) => {
+      exitCode = code ?? 0;
+      done = true;
+      wake();
+    });
 
     // The grok CLI runs tools INTERNALLY and doesn't emit them on stdout — but
     // it records every tool call (name, file path, diff, status) to its
     // session's updates.jsonl. Tail that to surface file reads/writes/edits and
     // other tool runs as real events, the same way the app shows every action.
-    const tailer = newGrokToolTailer(
-      request.workingDirectory?.trim() || tmpdir(),
-      grokSessionId,
-    );
+    const tailer = newGrokToolTailer(request.workingDirectory?.trim() || tmpdir(), grokSessionId);
 
     // Drain the queue live until the process exits and the buffer is empty.
     while (true) {
@@ -249,13 +285,20 @@ export class GrokBuildProvider implements Provider {
       }
       for (const ev of drainGrokToolTailer(tailer)) yield ev;
       if (done) break;
-      await new Promise<void>((r) => { resolveWaiter = r; setTimeout(r, 100); });
+      await new Promise<void>((r) => {
+        resolveWaiter = r;
+        setTimeout(r, 100);
+      });
     }
 
     // Flush any trailing partial line.
     const tail = lineBuf.trim();
     if (tail && tail[0] === '{') {
-      try { handleEvent(JSON.parse(tail) as Record<string, unknown>); } catch { /* ignore */ }
+      try {
+        handleEvent(JSON.parse(tail) as Record<string, unknown>);
+      } catch {
+        /* ignore */
+      }
     }
     while (queue.length) yield queue.shift()!;
     // Final tool telemetry lands just after exit — give it a moment.
@@ -307,7 +350,9 @@ function refreshModelsInBackground(): void {
           if (!meta) return m;
           return {
             ...m,
-            ...(meta.name ? { name: m.name.includes('(default)') ? `${meta.name} (default)` : meta.name } : {}),
+            ...(meta.name
+              ? { name: m.name.includes('(default)') ? `${meta.name} (default)` : meta.name }
+              : {}),
             ...(meta.contextWindow && meta.contextWindow > 0
               ? { contextWindow: meta.contextWindow, contextVerified: true }
               : {}),
@@ -316,9 +361,7 @@ function refreshModelsInBackground(): void {
               : {}),
             canReason: meta.supportsReasoningEffort,
             reasoningLevels:
-              meta.supportsReasoningEffort && reasoningLevels?.length
-                ? reasoningLevels
-                : undefined,
+              meta.supportsReasoningEffort && reasoningLevels?.length ? reasoningLevels : undefined,
           };
         });
         cachedModelsAt = Date.now();
@@ -389,9 +432,7 @@ export function parseGrokCliModelsCache(raw: string): Map<string, GrokCliModelMe
   }
 }
 
-function modelsFromGrokCliCache(
-  cliMeta: Map<string, GrokCliModelMeta> | null,
-): ModelDef[] {
+function modelsFromGrokCliCache(cliMeta: Map<string, GrokCliModelMeta> | null): ModelDef[] {
   if (!cliMeta) return [];
   const models: ModelDef[] = [];
   for (const [id, meta] of cliMeta) {
@@ -400,9 +441,7 @@ function modelsFromGrokCliCache(
     models.push({
       ...model,
       ...(meta.name ? { name: meta.name } : {}),
-      ...(meta.contextWindow
-        ? { contextWindow: meta.contextWindow, contextVerified: true }
-        : {}),
+      ...(meta.contextWindow ? { contextWindow: meta.contextWindow, contextVerified: true } : {}),
       ...(meta.maxOutputTokens ? { maxOutputTokens: meta.maxOutputTokens } : {}),
       canReason: meta.supportsReasoningEffort,
       reasoningLevels: undefined,
@@ -532,7 +571,10 @@ export function parseGrokModelsOutput(raw: string): {
   defaultModelId?: string;
   modelIds: string[];
 } {
-  const lines = (raw ?? '').split('\n').map((l) => l.trim()).filter(Boolean);
+  const lines = (raw ?? '')
+    .split('\n')
+    .map((l) => l.trim())
+    .filter(Boolean);
   let defaultModelId: string | undefined;
   const modelIds: string[] = [];
   let inList = false;
@@ -625,7 +667,10 @@ export function parseGrokOutput(raw: string): {
   }
 
   // 2) NDJSON (--output-format streaming-json): accumulate text across events.
-  const lines = trimmed.split('\n').map((l) => l.trim()).filter(Boolean);
+  const lines = trimmed
+    .split('\n')
+    .map((l) => l.trim())
+    .filter(Boolean);
   if (lines.some((l) => l.startsWith('{'))) {
     let acc = '';
     let stop: string | undefined;
@@ -744,7 +789,9 @@ function drainGrokToolTailer(state: GrokToolTailer): ProviderEvent[] {
             type: 'tool_executed',
             toolName: call.name,
             toolInput: JSON.stringify(call.filePath ? { path: call.filePath } : {}),
-            toolOutput: GROK_FILE_READ_TOOLS.has(name) ? `Read${detail}` : `Ran ${call.name}${detail}`,
+            toolOutput: GROK_FILE_READ_TOOLS.has(name)
+              ? `Read${detail}`
+              : `Ran ${call.name}${detail}`,
           });
         }
       }
@@ -763,7 +810,10 @@ const HARNESS_SYSTEM_NOTE =
 
 function buildPrompt(systemPrompt: string | undefined, messages: ProviderMessage[]): string {
   const lines: string[] = [];
-  lines.push(systemPrompt?.trim() ? `${systemPrompt.trim()}\n\n${HARNESS_SYSTEM_NOTE}` : HARNESS_SYSTEM_NOTE, '');
+  lines.push(
+    systemPrompt?.trim() ? `${systemPrompt.trim()}\n\n${HARNESS_SYSTEM_NOTE}` : HARNESS_SYSTEM_NOTE,
+    '',
+  );
   const turns = messages.filter((m) => m.role !== 'system');
 
   // Single user turn → send its text verbatim after any system prompt.
@@ -786,9 +836,12 @@ function flattenContent(content: string | ProviderContentBlock[]): string {
   for (const block of content) {
     if (block.type === 'text' && block.text) parts.push(block.text);
     else if (block.type === 'tool_use')
-      parts.push(`[tool call: ${block.toolName ?? 'tool'} ${JSON.stringify(block.toolInput ?? {})}]`);
+      parts.push(
+        `[tool call: ${block.toolName ?? 'tool'} ${JSON.stringify(block.toolInput ?? {})}]`,
+      );
     else if (block.type === 'tool_result') parts.push(`[tool result: ${block.toolOutput ?? ''}]`);
-    else if (block.type === 'image') parts.push('[image attachment omitted — Grok Build harness is text-only]');
+    else if (block.type === 'image')
+      parts.push('[image attachment omitted — Grok Build harness is text-only]');
   }
   return parts.join('\n');
 }

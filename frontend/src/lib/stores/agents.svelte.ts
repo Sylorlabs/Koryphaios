@@ -476,6 +476,11 @@ async function loadAgentThreads(sessionId: string): Promise<void> {
     }>(res);
     if (!res.ok || data?.ok === false || !Array.isArray(data?.data)) return;
 
+    // Agent identities are held in a shared map (not one map per chat). A slow
+    // response for the previously viewed chat must never replace the manager
+    // or worker identities belonging to the chat now on screen.
+    if (sessionStore.activeSessionId !== sessionId) return;
+
     for (const thread of data.data) {
       const existing = agents.get(thread.agent.id);
       agents.set(thread.agent.id, {

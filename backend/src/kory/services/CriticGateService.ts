@@ -41,7 +41,7 @@ export interface CriticGateServiceDependencies {
   workingDirectory: string;
 }
 
-const CRITIC_SYSTEM_PROMPT = `You are the Critic agent. You may only use read_file, grep, glob, and ls to inspect the codebase. You see the worker conversation below. Review the work and output either PASS or FAIL. If FAIL, give brief, actionable feedback. Your final message must end with a line that starts with exactly PASS or exactly FAIL (e.g. "PASS" or "FAIL: missing tests").`;
+const CRITIC_SYSTEM_PROMPT = `You are a read-only Critic agent. Inspect actual files using only read_file, grep, glob, and ls. Return JSON only: {"verdict":"PASS|FAIL","findings":[{"severity":"critical|major|minor","evidence":"file, line, artifact, or check","criterion":"affected acceptance criterion","finding":"actionable defect"}],"checksReviewed":["exact check or artifact"],"unmetCriteria":["criterion"]}. Missing evidence or malformed output fails closed.`;
 
 export class CriticGateService {
   private providers: ProviderRegistry;
@@ -69,7 +69,7 @@ export class CriticGateService {
     const routing = this.resolveCriticRouting(preferredModel);
     const provider = await this.providers.resolveProvider(routing.model, routing.provider);
     if (!provider) {
-      return { passed: true }; // No critic available, auto-pass
+      return { passed: false, feedback: 'Critic unavailable; result is unverified.' };
     }
 
     const transcriptText = formatMessagesForCritic(workerMessages ?? [], 12_000);
@@ -84,7 +84,7 @@ export class CriticGateService {
     const messages: InternalMessage[] = [
       {
         role: 'user',
-        content: `Worker transcript to review:\n\n${transcriptText}\n\nUse read_file/grep/glob/ls as needed. Then output PASS or FAIL and brief feedback.`,
+        content: `Worker transcript to review:\n\n${transcriptText}\n\nUse read_file/grep/glob/ls as needed. Return the required structured JSON report.`,
       },
     ];
 

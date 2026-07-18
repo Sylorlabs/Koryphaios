@@ -54,6 +54,13 @@ export interface AgentSettings {
   preferencesEnabled: boolean;
   /** Critic gate enabled - critic reviews all changes */
   criticGateEnabled: boolean;
+  gateStrictness?: 'strict' | 'advisory' | 'off';
+  intentInterview?: 'off' | 'adaptive' | 'deep';
+  designDiscovery?: boolean;
+  planApproval?: 'always' | 'material' | 'never';
+  modelQualification?: 'enforce' | 'warn' | 'off';
+  feedbackSharing?: 'local' | 'sanitized-opt-in';
+  skillLearningMode?: 'human-only' | 'propose-then-verify' | 'automatic';
   /** Critic enforces preferences.md workflow strictly */
   criticEnforcesPreferences: boolean;
   /** Auto-apply fixes that don't violate rules */

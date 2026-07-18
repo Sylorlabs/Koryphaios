@@ -19,7 +19,18 @@
 
 import type { ProviderConfig, ModelDef } from '@koryphaios/shared';
 import { spawn } from 'node:child_process';
-import { readFileSync, writeFileSync, unlinkSync, readdirSync, statSync, existsSync, openSync, readSync, closeSync, fstatSync } from 'node:fs';
+import {
+  readFileSync,
+  writeFileSync,
+  unlinkSync,
+  readdirSync,
+  statSync,
+  existsSync,
+  openSync,
+  readSync,
+  closeSync,
+  fstatSync,
+} from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir, homedir } from 'node:os';
 import {
@@ -33,6 +44,7 @@ import {
 import { detectAntigravityCLILogin } from './auth-utils';
 import { whichBinary } from './cli-detection';
 import { providerLog } from '../logger';
+import { buildSoftJail, wrapCommand } from '../collaboration/sandbox-runner';
 import { AntigravityModels } from './models/antigravity';
 
 const AGY_TIMEOUT_MS = 300_000;
@@ -102,8 +114,12 @@ function refreshModelsInBackground(): void {
         cachedModelsAt = Date.now();
       }
     })
-    .catch(() => { /* best-effort; static list remains the fallback */ })
-    .finally(() => { modelsFetchInProgress = false; });
+    .catch(() => {
+      /* best-effort; static list remains the fallback */
+    })
+    .finally(() => {
+      modelsFetchInProgress = false;
+    });
 }
 
 async function fetchAgyModels(bin: string): Promise<ModelDef[]> {
@@ -116,7 +132,10 @@ async function fetchAgyModels(bin: string): Promise<ModelDef[]> {
     child.stdout.on('data', (c: Buffer) => (out += c.toString()));
     child.once('error', reject);
     child.once('exit', () => {
-      const lines = out.split('\n').map((l) => l.trim()).filter(Boolean);
+      const lines = out
+        .split('\n')
+        .map((l) => l.trim())
+        .filter(Boolean);
       resolve(lines.length === 0 ? [] : lines.map(modelDefFromCliName));
     });
   });
@@ -126,7 +145,10 @@ function modelDefFromCliName(cliName: string): ModelDef {
   const existing = AntigravityModels.find((m) => m.apiModelId === cliName);
   if (existing) return existing;
 
-  const id = `antigravity-${cliName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/-+$/, '')}`;
+  const id = `antigravity-${cliName
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/-+$/, '')}`;
   const isHigh = /\(high\)/i.test(cliName);
   const isThinking = /thinking/i.test(cliName);
   const isPro = /pro/i.test(cliName);
@@ -157,10 +179,7 @@ const AGY_CREATE_TOOLS = new Set(['write_to_file', 'write_file']);
 // agy tool names that patch/replace content within an existing file.
 const AGY_EDIT_TOOLS = new Set(['replace_file_content', 'multi_replace_file_content', 'edit_file']);
 
-function tryEmitFileEdit(
-  name: string,
-  args: Record<string, unknown>,
-): ProviderEvent | null {
+function tryEmitFileEdit(name: string, args: Record<string, unknown>): ProviderEvent | null {
   const isCreate = AGY_CREATE_TOOLS.has(name);
   const isEdit = AGY_EDIT_TOOLS.has(name);
   if (!isCreate && !isEdit) return null;
@@ -200,7 +219,8 @@ interface ParsedLogEvents {
 function parseLogChunk(chunk: string, debug = false): ParsedLogEvents {
   const events: ProviderEvent[] = [];
   let gotContent = false;
-  if (debug && chunk.trim()) providerLog.debug({ chunk: chunk.slice(0, 500) }, '[agy-debug] raw log chunk');
+  if (debug && chunk.trim())
+    providerLog.debug({ chunk: chunk.slice(0, 500) }, '[agy-debug] raw log chunk');
 
   for (const line of chunk.split('\n')) {
     const trimmed = line.trim();
@@ -330,16 +350,27 @@ export class AntigravityProvider implements Provider {
 
     // Run in the session's project directory when one is set so the CLI sees
     // the real workspace; fall back to a neutral temp dir otherwise.
-    const child = spawn(bin, args, {
+    const jail = request.sandbox
+      ? buildSoftJail(process.env, [join(homedir(), '.gemini'), join(homedir(), '.antigravity')])
+      : null;
+    const wrapped = request.sandbox
+      ? wrapCommand(bin, args, { cwd: cwd || tmpdir(), policy: request.sandbox })
+      : { command: bin, args };
+    const child = spawn(wrapped.command, wrapped.args, {
       cwd: request.workingDirectory?.trim() || tmpdir(),
       stdio: ['ignore', 'pipe', 'pipe'],
-      env: { ...process.env },
+      env: jail?.env ?? { ...process.env },
     });
 
     const onAbort = () => {
-      try { child.kill('SIGTERM'); } catch { /* already gone */ }
+      try {
+        child.kill('SIGTERM');
+      } catch {
+        /* already gone */
+      }
     };
     request.signal?.addEventListener('abort', onAbort, { once: true });
+    child.once('close', () => jail?.cleanup());
 
     const timeout = setTimeout(() => {
       providerLog.warn({ provider: 'antigravity' }, 'Antigravity harness timed out — killing CLI');
@@ -407,7 +438,9 @@ export class AntigravityProvider implements Provider {
     while (true) {
       const result = await Promise.race([
         exitPromise.then((code) => ({ done: true as const, code })),
-        new Promise<{ done: false }>((res) => setTimeout(() => res({ done: false }), LOG_POLL_INTERVAL_MS)),
+        new Promise<{ done: false }>((res) =>
+          setTimeout(() => res({ done: false }), LOG_POLL_INTERVAL_MS),
+        ),
       ]);
 
       rememberConversation();
@@ -448,7 +481,11 @@ export class AntigravityProvider implements Provider {
         clearTimeout(timeout);
         request.signal?.removeEventListener('abort', onAbort);
 
-        try { unlinkSync(logPath); } catch { /* best-effort */ }
+        try {
+          unlinkSync(logPath);
+        } catch {
+          /* best-effort */
+        }
 
         if (request.signal?.aborted) return;
 
@@ -693,7 +730,6 @@ function drainTrajectoryThinking(state: TrajectoryTailState): ProviderEvent[] {
   return events;
 }
 
-
 const AGY_TOOL_TYPES = new Set([
   'RUN_COMMAND',
   'VIEW_FILE',
@@ -846,7 +882,10 @@ const HARNESS_SYSTEM_NOTE =
 
 function buildPrompt(systemPrompt: string | undefined, messages: ProviderMessage[]): string {
   const lines: string[] = [];
-  lines.push(systemPrompt?.trim() ? `${systemPrompt.trim()}\n\n${HARNESS_SYSTEM_NOTE}` : HARNESS_SYSTEM_NOTE, '');
+  lines.push(
+    systemPrompt?.trim() ? `${systemPrompt.trim()}\n\n${HARNESS_SYSTEM_NOTE}` : HARNESS_SYSTEM_NOTE,
+    '',
+  );
   const turns = messages.filter((m) => m.role !== 'system');
 
   if (turns.length === 1 && turns[0].role === 'user' && lines.length === 0) {
@@ -886,13 +925,19 @@ function buildTurnPrompt(messages: ProviderMessage[]): string {
     .join('\n\n');
 }
 
-
 /** Persist a pasted image to a temp file so the CLI's own tools can view it —
  *  the piped prompt is text-only, but the agent has file access. */
 function imageBlockToTempFile(imageData: string | undefined, mime: string | undefined): string {
   if (!imageData) return '[image attachment omitted — no data]';
   try {
-    const ext = mime === 'image/jpeg' ? 'jpg' : mime === 'image/webp' ? 'webp' : mime === 'image/gif' ? 'gif' : 'png';
+    const ext =
+      mime === 'image/jpeg'
+        ? 'jpg'
+        : mime === 'image/webp'
+          ? 'webp'
+          : mime === 'image/gif'
+            ? 'gif'
+            : 'png';
     const file = join(tmpdir(), `kory-attach-${Math.random().toString(36).slice(2, 10)}.${ext}`);
     writeFileSync(file, Buffer.from(imageData, 'base64'));
     return `[image attached — saved to ${file}; use your image/file viewing tool to look at it]`;
@@ -907,9 +952,12 @@ function flattenContent(content: string | ProviderContentBlock[]): string {
   for (const block of content) {
     if (block.type === 'text' && block.text) parts.push(block.text);
     else if (block.type === 'tool_use')
-      parts.push(`[tool call: ${block.toolName ?? 'tool'} ${JSON.stringify(block.toolInput ?? {})}]`);
+      parts.push(
+        `[tool call: ${block.toolName ?? 'tool'} ${JSON.stringify(block.toolInput ?? {})}]`,
+      );
     else if (block.type === 'tool_result') parts.push(`[tool result: ${block.toolOutput ?? ''}]`);
-    else if (block.type === 'image') parts.push(imageBlockToTempFile(block.imageData, block.imageMimeType));
+    else if (block.type === 'image')
+      parts.push(imageBlockToTempFile(block.imageData, block.imageMimeType));
   }
   return parts.join('\n');
 }
