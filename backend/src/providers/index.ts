@@ -1,5 +1,6 @@
 export { ProviderRegistry } from './registry';
 export { AnthropicProvider } from './anthropic';
+export { ClaudeCodeProvider } from './claude-code';
 export {
   OpenAIProvider,
   GroqProvider,
@@ -8,7 +9,7 @@ export {
   AzureProvider,
 } from './openai';
 
-export { GeminiProvider } from './gemini';
+export { GoogleProvider } from './google';
 export { CopilotProvider } from './copilot';
 
 export { withTimeoutSignal } from './utils';

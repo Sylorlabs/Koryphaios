@@ -3,6 +3,7 @@ import { getContext } from '../../context';
 import { requireLocalRouteAuth } from '../../auth/local-route-auth';
 import { processSupervisor } from '../../process-supervisor/supervisor';
 import { serializeProcess } from '../../process-supervisor/serialize';
+import { serverLog } from '../../logger';
 
 export const sessionRoutes = new Elysia({ prefix: '/api/sessions' })
   .get('/', async ({ request, set }) => {
@@ -16,7 +17,12 @@ export const sessionRoutes = new Elysia({ prefix: '/api/sessions' })
     async ({ request, body, set }) => {
       if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
       const { sessions } = getContext();
-      const session = await sessions.create('local-user', body.title, body.parentId);
+      const session = await sessions.create(
+        'local-user',
+        body.title,
+        body.parentId,
+        body.workingDirectory,
+      );
       return { ok: true, data: session };
     },
     {
@@ -24,6 +30,7 @@ export const sessionRoutes = new Elysia({ prefix: '/api/sessions' })
         userId: t.Optional(t.String()),
         title: t.Optional(t.String()),
         parentId: t.Optional(t.String()),
+        workingDirectory: t.Optional(t.String()),
       }),
     },
   )
@@ -80,6 +87,8 @@ export const sessionRoutes = new Elysia({ prefix: '/api/sessions' })
     const { kory, wsManager } = getContext();
     // Cancel all workers for this session
     kory.cancelSessionWorkers(id);
+    // Abort manager thread for this session
+    kory.abortManagerRun(id);
     // Cancel any LLM jobs for this session
     const { cancelLLMJobsForSession } = await import('../../queue/workers/llm-worker');
     await cancelLLMJobsForSession(id);
@@ -91,6 +100,49 @@ export const sessionRoutes = new Elysia({ prefix: '/api/sessions' })
       sessionId: id,
     });
     return { ok: true, message: 'Session cancelled' };
+  })
+  .get('/:id/context', async ({ request, params: { id }, set }) => {
+    if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
+    // Archived tool activity for this session — used to restore tool entries
+    // in the feed after a reload (they're not part of the message history).
+    const { getContextArchive } = await import('../../kory/context-archive');
+    const archive = getContextArchive();
+    if (!archive) return { ok: true, data: [] };
+    const entries = await archive.listRecent(id, 500);
+    const lastUsage = await archive.getLastUsage(id);
+    return {
+      ok: true,
+      lastUsage: lastUsage ?? null,
+      data: entries.map((e) => ({
+        id: e.id,
+        ts: e.ts,
+        kind: e.kind,
+        label: e.label,
+        content: e.content.slice(0, 4000),
+        prunedForAgent: e.prunedForAgent === true,
+      })),
+    };
+  })
+  .post('/:id/context/model-preview', async ({ request, params: { id }, body, set }) => {
+    if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
+    // Model switched in the composer: re-baseline the context bar from the
+    // backend's trusted window data (never a frontend guess).
+    const { kory } = getContext();
+    const b = body as { model?: string; provider?: string } | undefined;
+    if (!b?.model || !b?.provider) return { ok: false, error: 'model and provider required' };
+    const usage = await kory.previewModelContext(id, b.model, b.provider as never);
+    return { ok: true, usage };
+  })
+  .post('/:id/context/:archiveId/visibility', async ({ request, params: { id, archiveId }, body, set }) => {
+    if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
+    // User-driven "hide from agent": stubs this entry out of the model's
+    // context on the next turn. Content stays archived and recoverable.
+    const { getContextArchive } = await import('../../kory/context-archive');
+    const archive = getContextArchive();
+    if (!archive) return { ok: false, error: 'Context archive unavailable' };
+    const hidden = (body as { hiddenFromAgent?: boolean } | undefined)?.hiddenFromAgent === true;
+    const changed = await archive.setPrunedForAgent(id, archiveId, hidden);
+    return changed ? { ok: true } : { ok: false, error: 'Unknown archive entry' };
   })
   .post(
     '/:id/rewind',
@@ -108,7 +160,24 @@ export const sessionRoutes = new Elysia({ prefix: '/api/sessions' })
   )
   .get('/:id/timetravel', async ({ request, params: { id }, set }) => {
     if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
-    const { timeTravel } = getContext();
-    const state = await timeTravel.getState(id);
-    return { ok: true, data: state };
+    try {
+      const { timeTravel } = getContext();
+      const state = await timeTravel.getState(id);
+      return { ok: true, data: state };
+    } catch (err) {
+      // Timeline history is supplementary UI. A git/reflog edge case must not
+      // turn opening an otherwise valid session into a browser-console 500.
+      // Return the empty, non-rewindable state the UI already understands.
+      serverLog.warn({ err, sessionId: id }, 'Failed to load time travel timeline');
+      return {
+        ok: true,
+        data: {
+          currentHash: '',
+          timeline: [],
+          canUndo: false,
+          canRedo: false,
+          stats: { totalStates: 0, totalCost: 0, modelsUsed: [] },
+        },
+      };
+    }
   });

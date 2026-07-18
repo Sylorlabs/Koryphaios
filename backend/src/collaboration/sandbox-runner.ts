@@ -112,7 +112,13 @@ function buildBwrap(bw: string, bin: string, args: string[], opts: WrapOptions):
   for (const p of SYSTEM_RO) if (existsSync(p)) flags.push('--ro-bind-try', p, p);
   if (opts.policy.allowNetwork)
     for (const p of NET_RO) if (existsSync(p)) flags.push('--ro-bind-try', p, p);
-  flags.push('--bind', opts.cwd, opts.cwd, '--chdir', opts.cwd);
+  flags.push(
+    opts.policy.allowEdits ? '--bind' : '--ro-bind',
+    opts.cwd,
+    opts.cwd,
+    '--chdir',
+    opts.cwd,
+  );
   for (const dir of opts.configDirs ?? []) if (existsSync(dir)) flags.push('--bind', dir, dir);
   flags.push('--tmpfs', '/root', '--setenv', 'HOME', opts.cwd);
   return [...flags, '--', bin, ...args];
@@ -145,7 +151,7 @@ function quoteSub(p: string): string {
 export function buildSeatbeltProfile(opts: WrapOptions): string {
   const home = homedir();
   const writable = [
-    opts.cwd,
+    ...(opts.policy.allowEdits ? [opts.cwd] : []),
     ...(opts.configDirs ?? []),
     '/tmp',
     '/private/tmp',

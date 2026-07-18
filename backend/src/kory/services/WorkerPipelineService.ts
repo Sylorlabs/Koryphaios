@@ -16,6 +16,7 @@ import type { WorkspaceManager } from '../workspace-manager';
 import type { SnapshotManager } from '../snapshot-manager';
 import type { ITaskStore } from '../../stores/task-store';
 import { formatMessagesForCritic } from '../critic-util';
+import { classifyTask, createTaskContract } from '../prompts';
 
 // Keep the provider-native block form intact. Image/tool blocks are valid
 // worker context and must not be narrowed to text merely to cross the service
@@ -24,6 +25,7 @@ type InternalMessage = ProviderMessage;
 
 interface WorkerPipelineResult {
   success: boolean;
+  verification?: 'verified' | 'unverified';
   workerTranscript?: string;
   criticFeedback?: string;
 }
@@ -32,6 +34,10 @@ export interface WorkerPipelineConfig {
   getIsYoloMode: () => boolean;
   getWorkingDirectory: () => string;
   getWorkerReasoningLevel: () => string;
+  getQualityPolicy: () => {
+    gateStrictness: 'strict' | 'advisory' | 'off';
+    maxCriticIterations: number;
+  };
   waitForUserInput: (sessionId: string, question: string, options: string[]) => Promise<string>;
   emitThought: (sessionId: string, phase: string, thought: string) => void;
   updateWorkflowState: (sessionId: string, state: string) => Promise<void>;
@@ -59,7 +65,12 @@ export interface WorkerPipelineConfig {
     workerMessages: InternalMessage[] | undefined,
     preferredModel?: string,
     task?: string,
+    reviewDirectory?: string,
   ) => Promise<{ passed: boolean; feedback?: string }>;
+  runDestinationChecks: (
+    sessionId: string,
+    workingDirectory: string,
+  ) => Promise<{ passed: boolean; output: string }>;
 }
 
 export interface WorkerPipelineServiceDependencies {
@@ -105,17 +116,11 @@ export class WorkerPipelineService {
     reasoningLevel?: string,
     domainHint?: string,
   ): Promise<string> {
-    if (!this.config.getIsYoloMode()) {
-      const selection = await this.config.waitForUserInput(
-        sessionId,
-        'Ready to proceed with the delegated task?',
-        ['Yes, proceed', 'Cancel'],
-      );
-      if (selection === '__timeout__') return 'Timed out waiting for user response.';
-      if (selection.includes('Cancel')) return 'Cancelled by user.';
-    } else {
-      this.config.emitThought(sessionId, 'executing', 'YOLO mode: Proceeding with delegated task.');
-    }
+    this.config.emitThought(
+      sessionId,
+      'executing',
+      'Running delegated work inside the configured project jail.',
+    );
 
     await this.config.updateWorkflowState(sessionId, 'executing');
 
@@ -175,6 +180,19 @@ export class WorkerPipelineService {
               criticFeedback: `Worktree reconcile failed: ${reconcileResult.message}`,
             };
           } else {
+            const destinationGate = await this.config.runDestinationChecks(
+              sessionId,
+              this.config.getWorkingDirectory(),
+            );
+            if (!destinationGate.passed) {
+              result = {
+                success: false,
+                verification: 'unverified',
+                workerTranscript: result.workerTranscript,
+                criticFeedback: `Destination-tree verification failed after reconciliation:\n${destinationGate.output}`,
+              };
+              return await this.finishPipeline(sessionId, taskId, result);
+            }
             try {
               const { ShadowLogger } = await import('../shadow-logger');
               const shadowLogger = new ShadowLogger(this.config.getWorkingDirectory());
@@ -222,6 +240,26 @@ export class WorkerPipelineService {
       : 'Worker failed.';
   }
 
+  private async finishPipeline(
+    sessionId: string,
+    taskId: string,
+    result: WorkerPipelineResult,
+  ): Promise<string> {
+    if (this.tasks) {
+      await this.tasks.update(taskId, {
+        status: result.success ? 'done' : 'failed',
+        result: result.success ? result.criticFeedback || 'Done' : undefined,
+        error: !result.success ? result.criticFeedback || 'Worker failed' : undefined,
+      });
+    }
+    await this.config.updateWorkflowState(sessionId, 'idle');
+    return result.success
+      ? (result.criticFeedback ?? 'Done.')
+      : result.workerTranscript
+        ? `Worker did not pass review. ${result.criticFeedback ?? ''}`
+        : 'Worker failed.';
+  }
+
   private async _routeToWorker(
     sessionId: string,
     userMessage: string,
@@ -258,14 +296,24 @@ export class WorkerPipelineService {
       );
     }
 
-    let workerTask = await this.generateWorkerTask(sessionId, userMessage, domain, preferredModel);
+    const immutableContract = createTaskContract(userMessage, {
+      taskKind: undefined,
+      scope: effectivePaths,
+      constraints: isSandboxed ? ['Stay within the granted filesystem paths'] : [],
+    });
+    const immutableObjective = `IMMUTABLE TASK CONTRACT:\n${JSON.stringify(immutableContract, null, 2)}`;
+    let workerTask = immutableObjective;
 
     if (taskId && this.tasks) {
       await this.tasks.update(taskId, { status: 'active' });
     }
 
     let attempts = 0;
-    while (attempts < 3) {
+    const configuredPolicy = this.config.getQualityPolicy();
+    const hardBoundaryTask = classifyTask(userMessage, domain) === 'security-infra';
+    const gateStrictness = hardBoundaryTask ? 'strict' : configuredPolicy.gateStrictness;
+    const maxAttempts = Math.max(1, Math.min(10, configuredPolicy.maxCriticIterations));
+    while (attempts < maxAttempts) {
       attempts++;
       this.config.emitThought(sessionId, 'delegating', `Delegating to ${domain} worker...`);
       const routing = this.config.resolveActiveRouting(preferredModel, domain);
@@ -285,20 +333,38 @@ export class WorkerPipelineService {
           isSandboxed,
         );
         if (res.success) {
+          if (gateStrictness === 'off') {
+            return {
+              success: true,
+              verification: 'unverified',
+              workerTranscript: formatMessagesForCritic(res.workerMessages ?? []),
+              criticFeedback: 'UNVERIFIED: Quality gates were disabled for this run.',
+            };
+          }
           const criticResult = await this.config.runCriticGate(
             sessionId,
             res.workerMessages,
             preferredModel,
-            workerTask,
+            userMessage,
+            effectivePaths[0],
           );
           if (criticResult.passed) {
             return {
               success: true,
+              verification: 'verified',
               workerTranscript: formatMessagesForCritic(res.workerMessages ?? []),
               criticFeedback: criticResult.feedback,
             };
           }
-          workerTask = `QUALITY FAILURE. Fix these:\n${criticResult.feedback}`;
+          if (gateStrictness === 'advisory') {
+            return {
+              success: true,
+              verification: 'unverified',
+              workerTranscript: formatMessagesForCritic(res.workerMessages ?? []),
+              criticFeedback: `UNVERIFIED: Advisory gate findings:\n${criticResult.feedback ?? 'Review failed without structured findings.'}`,
+            };
+          }
+          workerTask = `${immutableObjective}\n\nREVIEW FINDINGS FROM ATTEMPT ${attempts}:\n${criticResult.feedback ?? 'Critic rejected the attempt without valid findings.'}\n\nAddress the findings without changing or narrowing the original objective.`;
         } else return { success: false };
         continue;
       }
@@ -315,50 +381,42 @@ export class WorkerPipelineService {
         isSandboxed,
       );
       if (result.success) {
+        if (gateStrictness === 'off') {
+          return {
+            success: true,
+            verification: 'unverified',
+            workerTranscript: formatMessagesForCritic(result.workerMessages ?? []),
+            criticFeedback: 'UNVERIFIED: Quality gates were disabled for this run.',
+          };
+        }
         const criticResult = await this.config.runCriticGate(
           sessionId,
           result.workerMessages,
           preferredModel,
-          workerTask,
+          userMessage,
+          effectivePaths[0],
         );
         if (criticResult.passed) {
           return {
             success: true,
+            verification: 'verified',
             workerTranscript: formatMessagesForCritic(result.workerMessages ?? []),
             criticFeedback: criticResult.feedback,
           };
         }
-        workerTask = `QUALITY FAILURE. Fix these:\n${criticResult.feedback}`;
+        if (gateStrictness === 'advisory') {
+          return {
+            success: true,
+            verification: 'unverified',
+            workerTranscript: formatMessagesForCritic(result.workerMessages ?? []),
+            criticFeedback: `UNVERIFIED: Advisory gate findings:\n${criticResult.feedback ?? 'Review failed without structured findings.'}`,
+          };
+        }
+        workerTask = `${immutableObjective}\n\nREVIEW FINDINGS FROM ATTEMPT ${attempts}:\n${criticResult.feedback ?? 'Critic rejected the attempt without valid findings.'}\n\nAddress the findings without changing or narrowing the original objective.`;
       }
       if (!this.providers.isQuotaError(result.error)) return { success: false };
     }
     return { success: false };
-  }
-
-  private async generateWorkerTask(
-    sessionId: string,
-    message: string,
-    domain: WorkerDomain,
-    preferredModel?: string,
-  ): Promise<string> {
-    const routing = this.config.resolveActiveRouting(preferredModel, 'general', true);
-    const provider = await this.providers.resolveProvider(routing.model, routing.provider);
-    if (!provider) return message;
-
-    let res = '';
-    try {
-      for await (const event of provider.streamResponse({
-        model: routing.model,
-        systemPrompt: 'Be brief and actionable.',
-        messages: [{ role: 'user', content: `Worker instruction for ${domain}: ${message}` }],
-        maxTokens: 200,
-      })) {
-        if (event.type === 'content_delta') res += event.content;
-      }
-      return res.trim() || message;
-    } catch {
-      return message;
-    }
   }
 
   private classifyDomainLLM(message: string): WorkerDomain {

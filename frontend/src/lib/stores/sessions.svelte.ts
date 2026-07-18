@@ -10,11 +10,40 @@ import { apiUrl } from '$lib/utils/api-url';
 import { apiFetch } from '$lib/api.svelte';
 
 const LAST_SESSION_KEY = 'koryphaios-last-session';
+const NEW_CHAT_BEHAVIOR_KEY = 'koryphaios-new-chat-behavior';
+
+export type NewChatBehavior = 'reuse-empty' | 'always-create';
 
 let sessions = $state<Session[]>([]);
 let activeSessionId = $state<string>('');
 let searchQuery = $state<string>('');
 let loading = $state<boolean>(false);
+let createSessionPromise: Promise<string | null> | null = null;
+let fetchGeneration = 0;
+let hasRestoredInitialSession = false;
+
+function loadNewChatBehavior(): NewChatBehavior {
+  if (!browser) return 'reuse-empty';
+  try {
+    return localStorage.getItem(NEW_CHAT_BEHAVIOR_KEY) === 'always-create'
+      ? 'always-create'
+      : 'reuse-empty';
+  } catch {
+    return 'reuse-empty';
+  }
+}
+
+let newChatBehavior = $state<NewChatBehavior>(loadNewChatBehavior());
+
+function setNewChatBehavior(behavior: NewChatBehavior): void {
+  newChatBehavior = behavior;
+  if (!browser) return;
+  try {
+    localStorage.setItem(NEW_CHAT_BEHAVIOR_KEY, behavior);
+  } catch {
+    // Keep the in-memory preference when storage is unavailable.
+  }
+}
 
 // Load last session from localStorage on startup
 function loadLastSession(): string {
@@ -46,6 +75,7 @@ function saveLastSession(id: string): void {
 /** Returns true if sessions loaded successfully, false otherwise (e.g. backend down). */
 async function fetchSessions(): Promise<boolean> {
   if (!browser) return false;
+  const myGeneration = ++fetchGeneration;
   try {
     const res = await apiFetch(apiUrl('/api/sessions'));
     const text = await res.text();
@@ -75,16 +105,20 @@ async function fetchSessions(): Promise<boolean> {
       return false;
     }
     if (data?.ok && Array.isArray(data.data)) {
+      // Session refreshes can overlap during startup, workspace changes, and
+      // reconnects. Only the newest response may alter selection or the list.
+      if (myGeneration !== fetchGeneration) return true;
       sessions = data.data;
-      // Try to restore last session from localStorage
-      const lastSessionId = loadLastSession();
+      const lastSessionId = hasRestoredInitialSession ? '' : loadLastSession();
+      hasRestoredInitialSession = true;
 
       // If we have a stored session and it still exists, use it
       if (lastSessionId && sessions.find((s) => s.id === lastSessionId)) {
         activeSessionId = lastSessionId;
       } else if (activeSessionId && !sessions.find((s) => s.id === activeSessionId)) {
-        // If the active session is no longer in the list, clear it or select the first one
-        activeSessionId = sessions[0]?.id ?? '';
+        // Never jump to an unrelated conversation because a refresh returned a
+        // differently scoped list. Deletion explicitly chooses a replacement.
+        activeSessionId = '';
       } else if (!activeSessionId && sessions.length > 0) {
         activeSessionId = sessions[0].id;
       }
@@ -130,7 +164,8 @@ function resolveNewChatWorkingDirectory(): string | undefined {
  *
  *  Behavior:
  *  - shift=true → always create a brand-new session.
- *  - shift=false (default) and an active session exists with zero messages →
+ *  - With the default "reuse-empty" preference, shift=false and an active
+ *    session exists with zero messages →
  *    just keep using it (no new session is created, prevents spam).
  *  - Inside a workspace: opens a session scoped to either the workspace root
  *    (scope='all') or the active project (scope='project'), based on the
@@ -138,8 +173,8 @@ function resolveNewChatWorkingDirectory(): string | undefined {
  *  - Outside a workspace: opens a session scoped to the active project (or
  *    unscoped if no project is open). */
 async function newChat(opts: { shift?: boolean } = {}): Promise<string | null> {
-  const shift = opts.shift === true;
-  if (!shift) {
+  const forceNew = opts.shift === true || newChatBehavior === 'always-create';
+  if (!forceNew) {
     const active = sessions.find((s) => s.id === activeSessionId);
     if (active && (active.messageCount ?? 0) === 0) {
       // The user already has a fresh empty session active — reuse it instead
@@ -151,6 +186,18 @@ async function newChat(opts: { shift?: boolean } = {}): Promise<string | null> {
 }
 
 async function createSession(
+  opts: { workingDirectory?: string | null } = {},
+): Promise<string | null> {
+  if (createSessionPromise) return createSessionPromise;
+  createSessionPromise = createSessionRequest(opts);
+  try {
+    return await createSessionPromise;
+  } finally {
+    createSessionPromise = null;
+  }
+}
+
+async function createSessionRequest(
   opts: { workingDirectory?: string | null } = {},
 ): Promise<string | null> {
   try {
@@ -247,7 +294,7 @@ async function deleteSession(id: string) {
   }
 }
 
-async function fetchMessages(sessionId: string): Promise<
+async function fetchMessages(sessionId: string, signal?: AbortSignal): Promise<
   Array<{
     id: string;
     role: string;
@@ -259,12 +306,21 @@ async function fetchMessages(sessionId: string): Promise<
     variantIndex?: number;
   }>
 > {
+  const res = await apiFetch(apiUrl(`/api/messages/${sessionId}`), { signal });
+  const text = await res.text();
+  if (!res.ok) {
+    throw new Error(friendlyHttpError(res.status, 'load chat history'));
+  }
+  let data: { ok?: boolean; data?: unknown; error?: string };
   try {
-    const res = await apiFetch(apiUrl(`/api/messages/${sessionId}`));
-    const data = await res.json();
-    if (data.ok) return data.data;
-  } catch {}
-  return [];
+    data = text ? JSON.parse(text) : {};
+  } catch {
+    throw new Error('Chat history returned an invalid response.');
+  }
+  if (!data.ok || !Array.isArray(data.data)) {
+    throw new Error(data.error || 'Chat history was not returned by the backend.');
+  }
+  return data.data;
 }
 
 // ─── Session grouping by date ───────────────────────────────────────────────
@@ -343,6 +399,10 @@ export const sessionStore = {
   get loading() {
     return loading;
   },
+  get newChatBehavior() {
+    return newChatBehavior;
+  },
+  setNewChatBehavior,
 
   get filteredSessions(): Session[] {
     // Project scope first: only the open project's chats (legacy sessions with

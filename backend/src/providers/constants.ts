@@ -10,8 +10,8 @@ export const ENV_API_KEY_MAP: Record<ProviderName, string[]> = {
   devin: [],
   jules: ['JULES_API_KEY'],
   openai: ['OPENAI_API_KEY'],
-  google: ['ANTIGRAVITY_API_KEY', 'GEMINI_API_KEY', 'GOOGLE_API_KEY'],
-  aistudio: ['GEMINI_API_KEY', 'GOOGLE_API_KEY', 'AI_STUDIO_API_KEY'],
+  google: ['GOOGLE_API_KEY'],
+  aistudio: ['GEMINI_API_KEY', 'AI_STUDIO_API_KEY'],
   cline: [],
   xai: ['XAI_API_KEY'],
   openrouter: ['OPENROUTER_API_KEY'],
@@ -72,7 +72,6 @@ export const ENV_AUTH_TOKEN_MAP: Partial<Record<ProviderName, string[]>> = {
   grok: ['GROK_CODE_XAI_API_KEY', 'XAI_API_KEY'],
   copilot: ['GITHUB_COPILOT_TOKEN', 'GITHUB_TOKEN'],
   azure: ['AZURE_OPENAI_AUTH_TOKEN'],
-  google: ['GEMINI_AUTH_TOKEN'],
   kimicode: ['KIMI_CODE_AUTH_TOKEN'],
 };
 

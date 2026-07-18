@@ -24,6 +24,7 @@
   let tooltipY = $state(0);
   let tooltipTitle = $state('');
   let tooltipMeta = $state('');
+  let performanceLayout = $state(false);
 
   const FOLDER_COLORS = [
     '#8b7ec8', '#6b9bd1', '#5ec4a0', '#d4845c', '#c47fd0',
@@ -229,6 +230,42 @@
       .filter((e) => nodeById.has(e.from) && nodeById.has(e.to))
       .map((e) => ({ source: nodeById.get(e.from)!, target: nodeById.get(e.to)! }));
 
+    // Force simulation is attractive for normal vaults but creates sustained
+    // main-thread frame drops at very large sizes. Above this boundary, place
+    // every node deterministically in folder clusters and draw once. The full
+    // graph remains searchable, pannable, zoomable, hoverable, and clickable.
+    const STATIC_LAYOUT_THRESHOLD = 2500;
+    if (simNodes.length > STATIC_LAYOUT_THRESHOLD) {
+      performanceLayout = true;
+      const groups = new Map<string, SimNode[]>();
+      for (const node of simNodes) {
+        const group = groups.get(node.folderPath) ?? [];
+        group.push(node);
+        groups.set(node.folderPath, group);
+      }
+      const entries = [...groups.values()];
+      const columns = Math.max(1, Math.ceil(Math.sqrt(entries.length)));
+      const clusterGap = 260;
+      const rows = Math.ceil(entries.length / columns);
+      entries.forEach((group, groupIndex) => {
+        const column = groupIndex % columns;
+        const row = Math.floor(groupIndex / columns);
+        const cx = width / 2 + (column - (columns - 1) / 2) * clusterGap;
+        const cy = height / 2 + (row - (rows - 1) / 2) * clusterGap;
+        group.forEach((node, index) => {
+          const angle = index * 2.399963229728653;
+          const radius = 10 * Math.sqrt(index);
+          node.x = cx + Math.cos(angle) * radius;
+          node.y = cy + Math.sin(angle) * radius;
+          node.vx = 0;
+          node.vy = 0;
+        });
+      });
+      draw();
+      return;
+    }
+    performanceLayout = false;
+
     // Adaptive physics: big vaults drop the (expensive) collide force, cap the
     // charge range, and settle faster so the sim reaches idle quickly — once
     // idle it stops ticking, so a large static graph costs nothing to display.
@@ -295,6 +332,9 @@
       const [wx, wy] = toWorld(sx, sy);
       dragNode.fx = wx;
       dragNode.fy = wy;
+      dragNode.x = wx;
+      dragNode.y = wy;
+      if (performanceLayout) draw();
       return;
     }
     if (panning) {
@@ -473,6 +513,9 @@
     style="color: rgba(180, 190, 210, 0.75);"
   >
     <span>{stats.notes} notes · {stats.links} links</span>
+    {#if performanceLayout}
+      <span class="rounded-full border px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider" style="border-color: rgba(94,196,160,0.35); color: #5ec4a0;">Performance layout</span>
+    {/if}
     <button
       type="button"
       class="px-2.5 py-1 rounded-md border transition-colors hover:bg-white/5"

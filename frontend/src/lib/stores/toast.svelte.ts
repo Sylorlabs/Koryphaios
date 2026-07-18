@@ -8,14 +8,15 @@ export interface Toast {
   message: string;
   duration: number;
   onRetry?: () => void;
+  actionLabel?: string;
 }
 
 let toasts = $state<Toast[]>([]);
 let idCounter = 0;
 
-function add(type: ToastType, message: string, duration = 4000, onRetry?: () => void) {
+function add(type: ToastType, message: string, duration = 4000, onRetry?: () => void, actionLabel?: string) {
   const id = `toast-${++idCounter}`;
-  toasts = [...toasts, { id, type, message, duration, onRetry }];
+  toasts = [...toasts, { id, type, message, duration, onRetry, actionLabel }];
   setTimeout(() => dismiss(id), duration);
 }
 
@@ -41,7 +42,8 @@ export const toastStore = {
   error: (msg: string, options?: { duration?: number; onRetry?: () => void }) =>
     add('error', msg, options?.duration ?? 6000, options?.onRetry),
   info: (msg: string) => add('info', msg),
-  warning: (msg: string) => add('warning', msg, 5000),
+  warning: (msg: string, options?: { duration?: number; action?: () => void; actionLabel?: string }) =>
+    add('warning', msg, options?.duration ?? 8000, options?.action, options?.actionLabel),
   dismiss,
   dismissMany,
   clear,

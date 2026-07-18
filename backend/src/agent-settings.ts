@@ -9,6 +9,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync, renameSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { wsBroker } from './pubsub';
+import { resolveMemoryRoot } from './memory/unified-memory';
 
 // ============================================================================
 // Configuration
@@ -37,8 +38,43 @@ export interface AgentSettings {
   /** Whether to use preferences.md for workflow guidance */
   preferencesEnabled: boolean;
 
+  /** Allow the image renderer/tools to serve files OUTSIDE the home directory
+   *  (external drives, mounted volumes). Off by default. */
+  allowExternalPaths: boolean;
+
+  /** Per-category model allowlist for the manager's routing. Key = worker
+   *  domain ('general' | 'frontend' | 'backend' | 'review' | 'test' | 'critic'
+   *  | 'ui'); value = model ids the manager may pick for that category.
+   *  Empty/missing = all available models allowed. */
+  managerModelAccess: Record<string, string[]>;
+
+  /** Per-group user notes injected into the manager's system prompt —
+   *  standing guidance keyed by category (general, frontend, backend, etc.). */
+  managerNotes: Record<string, string>;
+
   /** Critic gate enabled - critic reviews all changes */
   criticGateEnabled: boolean;
+
+  /** Strict blocks completion, advisory reports failures, off marks results unverified. */
+  gateStrictness: 'strict' | 'advisory' | 'off';
+
+  /** How aggressively Kory resolves material ambiguity before implementation. */
+  intentInterview: 'off' | 'adaptive' | 'deep';
+
+  /** Whether design discovery is offered for materially ambiguous interface work. */
+  designDiscovery: boolean;
+
+  /** When an implementation plan requires explicit approval. */
+  planApproval: 'always' | 'material' | 'never';
+
+  /** Enforce empirically qualified provider/model roles. */
+  modelQualification: 'enforce' | 'warn' | 'off';
+
+  /** Sharing is opt-in and restricted to sanitized categories and ratings. */
+  feedbackSharing: 'local' | 'sanitized-opt-in';
+
+  /** Controls whether locally learned workflow changes may be proposed or applied. */
+  skillLearningMode: 'human-only' | 'propose-then-verify' | 'automatic';
 
   /** Critic enforces preferences.md workflow strictly */
   criticEnforcesPreferences: boolean;
@@ -48,6 +84,13 @@ export interface AgentSettings {
 
   /** Require confirmation for rule violations */
   confirmRuleViolations: boolean;
+
+  /**
+   * Run the manager's tools automatically without an upfront "proceed?" prompt. On by
+   * default so the app just works on launch — changes are still reviewable after the fact
+   * (keep/reject + time-travel) and gated by the Critic. Turn off to confirm before each run.
+   */
+  autoRunTools: boolean;
 
   /** Agent memory - allow agents to update memory files */
   agentMemoryEnabled: boolean;
@@ -70,6 +113,21 @@ export interface AgentSettings {
   /** Experimental: Multi-source research requirements */
   multiSourceResearch: boolean;
 
+  /** Context management: auto-stub stale tool outputs (recoverable via fetch_context). */
+  contextPruningEnabled: boolean;
+
+  /** Turns whose tool outputs stay full before auto-stubbing kicks in. */
+  contextKeepRecentTurns: number;
+
+  /** Minimum tool-output size (chars) worth stubbing — tiny outputs are kept. */
+  contextPruneMinChars: number;
+
+  /** Give the agent a live context-usage report each turn so it can decide to prune/compact on its own. */
+  contextSelfAwareness: boolean;
+
+  /** Show complete reasoning blocks expanded in the chat feed by default. */
+  reasoningExpandedByDefault: boolean;
+
   /** Timestamp of last update for synchronization */
   updatedAt?: number;
 }
@@ -78,10 +136,21 @@ export const DEFAULT_AGENT_SETTINGS: AgentSettings = {
   ruleEnforcementLevel: 'strict',
   agentExecutionMode: 'auto',
   preferencesEnabled: true,
+  allowExternalPaths: false,
+  managerModelAccess: {},
+  managerNotes: {},
   criticGateEnabled: true,
+  gateStrictness: 'strict',
+  intentInterview: 'adaptive',
+  designDiscovery: true,
+  planApproval: 'material',
+  modelQualification: 'enforce',
+  feedbackSharing: 'local',
+  skillLearningMode: 'propose-then-verify',
   criticEnforcesPreferences: true,
   autoApplySafeFixes: false,
   confirmRuleViolations: true,
+  autoRunTools: true,
   agentMemoryEnabled: true,
   agentCanUpdatePreferences: false,
   maxCriticIterations: 3,
@@ -89,11 +158,16 @@ export const DEFAULT_AGENT_SETTINGS: AgentSettings = {
   approvalThresholdLines: 100,
   localWebSearch: 'fallback',
   multiSourceResearch: true,
+  contextPruningEnabled: true,
+  contextKeepRecentTurns: 3,
+  contextPruneMinChars: 600,
+  contextSelfAwareness: true,
+  reasoningExpandedByDefault: true,
 };
 
 // Helper to load koryphaios.json
 function loadKoryphaiosConfig(projectRoot: string): Record<string, unknown> {
-  const configPath = join(projectRoot, 'koryphaios.json');
+  const configPath = join(resolveMemoryRoot(projectRoot), 'koryphaios.json');
   if (!existsSync(configPath)) return {};
   try {
     return JSON.parse(readFileSync(configPath, 'utf-8'));
@@ -107,7 +181,7 @@ function loadKoryphaiosConfig(projectRoot: string): Record<string, unknown> {
  * Writes to a temporary file then renames to avoid corruption during race conditions.
  */
 function saveKoryphaiosConfig(projectRoot: string, config: Record<string, unknown>): void {
-  const configPath = join(projectRoot, 'koryphaios.json');
+  const configPath = join(resolveMemoryRoot(projectRoot), 'koryphaios.json');
   const tempPath = `${configPath}.${process.pid}.tmp`;
 
   try {
@@ -292,7 +366,7 @@ const PREFERENCES_TEMPLATE = `# Agent Preferences & Workflow
 // ============================================================================
 
 export function getPreferencesPath(projectRoot: string): string {
-  return join(projectRoot, AGENT_SETTINGS_CONFIG.PREFERENCES_FILE);
+  return join(resolveMemoryRoot(projectRoot), AGENT_SETTINGS_CONFIG.PREFERENCES_FILE);
 }
 
 /**
@@ -313,6 +387,62 @@ export function loadAgentSettings(projectRoot: string): AgentSettings {
     ...(enableCritic !== undefined && { criticGateEnabled: enableCritic }),
     ...persistedSettings,
   };
+}
+
+/** Resolve explicit layers in increasing authority: global, workspace, session. */
+export function resolveAgentSettingsLayers(
+  globalSettings?: Partial<AgentSettings>,
+  workspaceSettings?: Partial<AgentSettings>,
+  sessionOverride?: Partial<AgentSettings>,
+): AgentSettings {
+  return {
+    ...DEFAULT_AGENT_SETTINGS,
+    ...globalSettings,
+    ...workspaceSettings,
+    ...sessionOverride,
+    managerModelAccess: {
+      ...DEFAULT_AGENT_SETTINGS.managerModelAccess,
+      ...globalSettings?.managerModelAccess,
+      ...workspaceSettings?.managerModelAccess,
+      ...sessionOverride?.managerModelAccess,
+    },
+    managerNotes: {
+      ...DEFAULT_AGENT_SETTINGS.managerNotes,
+      ...globalSettings?.managerNotes,
+      ...workspaceSettings?.managerNotes,
+      ...sessionOverride?.managerNotes,
+    },
+  };
+}
+
+const SETTING_ENUMS: Partial<Record<keyof AgentSettings, readonly string[]>> = {
+  ruleEnforcementLevel: ['strict', 'moderate', 'lenient'],
+  agentExecutionMode: ['auto', 'single', 'multi'],
+  gateStrictness: ['strict', 'advisory', 'off'],
+  intentInterview: ['off', 'adaptive', 'deep'],
+  planApproval: ['always', 'material', 'never'],
+  modelQualification: ['enforce', 'warn', 'off'],
+  feedbackSharing: ['local', 'sanitized-opt-in'],
+  skillLearningMode: ['human-only', 'propose-then-verify', 'automatic'],
+  localWebSearch: ['off', 'on', 'fallback'],
+};
+
+/** Strip unknown or ill-typed API fields rather than persisting arbitrary configuration. */
+export function mergeAgentSettings(current: AgentSettings, patch: unknown): AgentSettings {
+  if (!patch || typeof patch !== 'object' || Array.isArray(patch)) return current;
+  const next = { ...current } as Record<string, unknown>;
+  for (const [key, value] of Object.entries(patch)) {
+    if (!(key in DEFAULT_AGENT_SETTINGS) || key === 'updatedAt') continue;
+    const typedKey = key as keyof AgentSettings;
+    const allowed = SETTING_ENUMS[typedKey];
+    if (allowed) {
+      if (typeof value === 'string' && allowed.includes(value)) next[key] = value;
+      continue;
+    }
+    const expected = DEFAULT_AGENT_SETTINGS[typedKey];
+    if (typeof value === typeof expected) next[key] = value;
+  }
+  return next as unknown as AgentSettings;
 }
 
 /**
@@ -699,7 +829,8 @@ export function assembleAgentContext(
 } {
   const prefs = settings.preferencesEnabled ? readPreferences(projectRoot).content : '';
 
-  const rulesContent = readFileSync(join(projectRoot, '.koryrules'), 'utf-8').toString() || '';
+  const rulesPath = join(projectRoot, '.koryphaios/rules/rules.md');
+  const rulesContent = existsSync(rulesPath) ? readFileSync(rulesPath, 'utf-8').toString() : '';
 
   const enforcementMessage = generateEnforcementMessage(settings);
 
@@ -716,7 +847,7 @@ function generateEnforcementMessage(settings: AgentSettings): string {
     '🚨 RULE ENFORCEMENT IS ACTIVE',
     '',
     'The following rules MUST be followed:',
-    '1. ALL rules from .koryrules are mandatory',
+    '1. ALL rules from .koryphaios/rules/rules.md are mandatory',
     '2. ALL preferences from preferences.md are mandatory',
   ];
 

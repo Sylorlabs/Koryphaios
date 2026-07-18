@@ -17,11 +17,11 @@ import {
 } from '../../providers/codex';
 import {
   clearCodexAuthState,
-  createCodexCLIAuthMarker,
+  createCodexCLIProfileMarker,
+  getKoryCodexHome,
   detectCodexAuthToken,
   detectClaudeCodeLogin,
   createClaudeCLIAuthMarker,
-  detectGeminiCLIToken,
   clearCachedToken,
   detectGrokCLILogin,
   createGrokCLIAuthMarker,
@@ -29,7 +29,7 @@ import {
   createAntigravityCLIAuthMarker,
 } from '../../providers/auth-utils';
 import { detectAgentClis } from '../../providers/cli-detection';
-import { googleAuth } from '../../providers/google-auth';
+import { discoverCliAccounts, getDiscoveredCliAccount } from '../../providers/cli-accounts';
 import {
   clearKimiCodeAuthState,
   createKimiCodeAuthMarker,
@@ -50,6 +50,11 @@ type StoredProviderAccount = {
   hasApiKey: boolean;
   hasAuthToken: boolean;
   hasBaseUrl: boolean;
+  source?: 'saved' | 'cli-autodetect';
+  email?: string | null;
+  plan?: string | null;
+  health?: 'ready' | 'expired' | 'unknown';
+  profileDir?: string;
 };
 
 type StoredAccountMetadata = {
@@ -71,10 +76,7 @@ type BrowserAuthProvider =
   | 'kimicode'
   | 'claude'
   | 'grok'
-  | 'antigravity'
-  | 'google';
-// NOTE: 'google-subscription' (the Gemini CLI) is RETIRED — never re-add it.
-// Gemini models are served by the plain 'google' (Gemini API) provider.
+  | 'antigravity';
 
 function isBrowserAuthProvider(name: string): name is BrowserAuthProvider {
   return (
@@ -83,8 +85,7 @@ function isBrowserAuthProvider(name: string): name is BrowserAuthProvider {
     name === 'kimicode' ||
     name === 'claude' ||
     name === 'grok' ||
-    name === 'antigravity' ||
-    name === 'google'
+    name === 'antigravity'
   );
 }
 
@@ -242,69 +243,6 @@ async function startBrowserAuth(
           },
         };
       }
-      case 'google': {
-        // Check for existing gcloud / Gemini CLI credentials
-        clearCachedToken('gemini');
-        const existingToken = detectGeminiCLIToken();
-        if (existingToken) {
-          const { providers } = getContext();
-          const setResult = await providers.setCredentials('google', {
-            authToken: existingToken,
-          });
-          if (!setResult.success) {
-            return { ok: false, error: setResult.error ?? 'Failed to activate Google auth' };
-          }
-          syncProviderConfigsSafely(providers);
-          serverLog.info({ provider: name }, 'Google auto-connected via CLI credentials');
-          return {
-            ok: true,
-            data: {
-              status: 'connected',
-              provider: 'google',
-              message: 'Google connected via existing gcloud credentials',
-            },
-          };
-        }
-        // Start gcloud ADC login flow
-        const authResult = await googleAuth.startGeminiCLIAuth();
-        if (authResult.success && authResult.url) {
-          serverLog.info(
-            { provider: name, url: authResult.url },
-            'Google gcloud auth flow started',
-          );
-          return {
-            ok: true,
-            data: {
-              provider: 'google',
-              url: authResult.url,
-              message: 'Complete Google sign-in in the browser, then click "I Finished Sign-In".',
-            },
-          };
-        }
-        if (authResult.success) {
-          clearCachedToken('gemini');
-          const freshToken = detectGeminiCLIToken();
-          if (freshToken) {
-            const { providers } = getContext();
-            await providers.setCredentials('google', { authToken: freshToken });
-            syncProviderConfigsSafely(providers);
-          }
-          return {
-            ok: true,
-            data: {
-              status: 'connected',
-              provider: 'google',
-              message: authResult.message,
-            },
-          };
-        }
-        return {
-          ok: false,
-          error:
-            authResult.message ||
-            'Google Cloud SDK (gcloud) is required. Install it or enter an API key instead.',
-        };
-      }
     }
   } catch (error: any) {
     serverLog.error(
@@ -324,7 +262,8 @@ async function completeBrowserAuth(
     serverLog.info({ provider: name }, 'Completing browser auth flow');
     switch (name) {
       case 'codex': {
-        const localCodexToken = detectCodexAuthToken();
+        const koryMarker = createCodexCLIProfileMarker(getKoryCodexHome());
+        const localCodexToken = detectCodexAuthToken(koryMarker);
         if (!localCodexToken) {
           serverLog.warn(
             { provider: name },
@@ -332,7 +271,7 @@ async function completeBrowserAuth(
           );
           return { ok: false, error: 'Codex sign-in is not complete yet' };
         }
-        const codexMarker = createCodexCLIAuthMarker();
+        const codexMarker = koryMarker;
         const result = await providers.setCredentials('codex', {
           authToken: codexMarker,
         });
@@ -394,23 +333,6 @@ async function completeBrowserAuth(
         syncProviderConfigsSafely(providers);
         serverLog.info({ provider: name }, 'Antigravity auth completed');
         return { ok: true, data: { status: 'connected', provider: 'antigravity' } };
-      }
-      case 'google': {
-        clearCachedToken('gemini');
-        const token = detectGeminiCLIToken();
-        if (!token) {
-          return {
-            ok: false,
-            error: 'Google sign-in not complete yet. Finish authentication in the browser.',
-          };
-        }
-        const googleResult = await providers.setCredentials('google', { authToken: token });
-        if (!googleResult.success) {
-          return { ok: false, error: googleResult.error ?? 'Failed to activate Google auth' };
-        }
-        syncProviderConfigsSafely(providers);
-        serverLog.info({ provider: name }, 'Google auth completed');
-        return { ok: true, data: { status: 'connected', provider: 'google' } };
       }
       case 'copilot':
       case 'kimicode':
@@ -491,7 +413,29 @@ async function listStoredAccounts(provider: string): Promise<Array<StoredProvide
     provider,
     isActive: true,
   });
-  return groupStoredAccounts(provider, credentials);
+  const stored = groupStoredAccounts(provider, credentials).map((account) => ({
+    ...account,
+    source: 'saved' as const,
+  }));
+  const storedIds = new Set(stored.map((account) => account.id));
+  const detected = discoverCliAccounts()
+    .filter((account) => account.provider === provider && !storedIds.has(account.id))
+    .map((account) => ({
+      id: account.id,
+      provider: account.provider,
+      label: account.label,
+      createdAt: 0,
+      updatedAt: account.expiresAt ?? 0,
+      hasApiKey: false,
+      hasAuthToken: true,
+      hasBaseUrl: false,
+      source: account.source,
+      email: account.email,
+      plan: account.plan,
+      health: account.health,
+      profileDir: account.profileDir,
+    }));
+  return [...detected, ...stored];
 }
 
 async function getStoredAccountBundle(
@@ -542,6 +486,21 @@ export const providerRoutes = new Elysia({ prefix: '/api/providers' })
     return {
       ok: true,
       data: providers.getStatus(),
+    };
+  })
+  .get('/cli-accounts', ({ request, set }) => {
+    if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
+    const accounts = discoverCliAccounts();
+    const providerCounts = new Map<string, number>();
+    for (const account of accounts) {
+      providerCounts.set(account.provider, (providerCounts.get(account.provider) ?? 0) + 1);
+    }
+    return {
+      ok: true,
+      data: accounts,
+      selectionRequired: [...providerCounts.entries()]
+        .filter(([, count]) => count > 1)
+        .map(([provider]) => provider),
     };
   })
   .get('/available', async ({ request, set }) => {
@@ -736,7 +695,7 @@ export const providerRoutes = new Elysia({ prefix: '/api/providers' })
           const { providers } = getContext();
           // Store CLI auth marker so CodexProvider reads from auth.json on demand,
           // avoiding a synchronous HTTP verification that may fail or time out.
-          const codexMarker = createCodexCLIAuthMarker();
+          const codexMarker = createCodexCLIProfileMarker(getKoryCodexHome());
           const result = await providers.setCredentials('codex', { authToken: codexMarker });
           if (!result.success) {
             set.status = 400;
@@ -995,6 +954,28 @@ export const providerRoutes = new Elysia({ prefix: '/api/providers' })
   .post('/:name/accounts/:accountId/activate', async ({ request, params, set }) => {
     if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
 
+    const discovered = getDiscoveredCliAccount(params.accountId);
+    if (discovered && discovered.provider === params.name) {
+      const values = params.name === 'codex'
+        ? { authToken: createCodexCLIProfileMarker(discovered.profileDir) }
+        : null;
+      if (!values) {
+        set.status = 400;
+        return {
+          ok: false,
+          error: `${params.name} exposes this CLI identity, but its harness does not provide a safe profile-selection mechanism yet.`,
+        };
+      }
+      const { providers } = getContext();
+      const result = await providers.setCredentials(params.name as ProviderName, values);
+      if (!result.success) {
+        set.status = 400;
+        return { ok: false, error: result.error ?? 'Failed to activate detected CLI account' };
+      }
+      syncProviderConfigsSafely(providers);
+      return { ok: true, data: { account: discovered, activated: true } };
+    }
+
     const bundle = await getStoredAccountBundle(params.name, params.accountId);
     if (!bundle) {
       set.status = 404;
@@ -1019,6 +1000,10 @@ export const providerRoutes = new Elysia({ prefix: '/api/providers' })
   })
   .delete('/:name/accounts/:accountId', async ({ request, params, set }) => {
     if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
+    if (getDiscoveredCliAccount(params.accountId)) {
+      set.status = 400;
+      return { ok: false, error: 'Detected CLI accounts are managed by their CLI profile directory.' };
+    }
 
     const credentials = await credentialsService.list(LOCAL_USER_ID, {
       provider: params.name,

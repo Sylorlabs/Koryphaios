@@ -94,7 +94,17 @@ const CODEX_OAUTH_TOKEN_URL = 'https://auth.openai.com/oauth/token';
 function codexAuthPaths(): string[] {
   const paths = [join(KORY_CODEX_HOME, 'auth.json')];
   const home = homeDir();
-  if (home) paths.push(join(home, '.codex', 'auth.json'));
+  if (home) {
+    paths.push(join(home, '.codex', 'auth.json'));
+    try {
+      for (const entry of require('node:fs').readdirSync(home) as string[]) {
+        if (!entry.startsWith('.codex') || entry === '.codex') continue;
+        paths.push(join(home, entry, 'auth.json'));
+      }
+    } catch {
+      // A missing/unreadable home simply means no additional CLI profiles.
+    }
+  }
   return paths;
 }
 
@@ -108,8 +118,9 @@ function readCodexAuthFile(path: string): { tokens?: { access_token?: string; re
 
 /** Refresh the ChatGPT/Codex token natively (no codex binary) and persist the
  *  new pair back to the auth.json it came from. Returns the fresh token. */
-export async function refreshCodexAuthToken(): Promise<string | null> {
-  for (const path of codexAuthPaths()) {
+export async function refreshCodexAuthToken(marker?: string | null): Promise<string | null> {
+  const selectedPath = codexMarkerAuthPath(marker);
+  for (const path of selectedPath ? [selectedPath] : codexAuthPaths()) {
     if (!existsSync(path)) continue;
     const data = readCodexAuthFile(path);
     const refreshToken = data?.tokens?.refresh_token;
@@ -141,7 +152,7 @@ export async function refreshCodexAuthToken(): Promise<string | null> {
       };
       const { writeFileSync } = require('node:fs') as typeof import('node:fs');
       writeFileSync(path, JSON.stringify(merged, null, 2), 'utf-8');
-      clearCachedToken('codex-cli-auth');
+      clearCachedToken(selectedPath ? `codex-cli-auth:${selectedPath}` : 'codex-cli-auth');
       return j.access_token;
     } catch {
       /* try the next store */
@@ -150,16 +161,64 @@ export async function refreshCodexAuthToken(): Promise<string | null> {
   return null;
 }
 
-export function detectCodexAuthToken(): string | null {
-  return getCachedToken('codex-cli-auth', () => {
-    for (const authPath of codexAuthPaths()) {
+function codexMarkerAuthPath(marker?: string | null): string | null {
+  if (!marker?.startsWith(CODEX_CLI_AUTH_PREFIX)) return null;
+  const encoded = marker.slice(CODEX_CLI_AUTH_PREFIX.length);
+  if (!encoded || /^\d+$/.test(encoded)) return null;
+  try {
+    const profileDir = Buffer.from(encoded, 'base64url').toString('utf8');
+    const home = homeDir();
+    if (!home || (!profileDir.startsWith(`${home}/.codex`) && profileDir !== KORY_CODEX_HOME)) return null;
+    return join(profileDir, 'auth.json');
+  } catch {
+    return null;
+  }
+}
+
+function jwtExpiresAt(token: string): number | null {
+  try {
+    const payload = JSON.parse(Buffer.from(token.split('.')[1] ?? '', 'base64url').toString('utf8'));
+    return typeof payload.exp === 'number' ? payload.exp * 1000 : null;
+  } catch {
+    return null;
+  }
+}
+
+export function createCodexCLIProfileMarker(profileDir: string): string {
+  return `${CODEX_CLI_AUTH_PREFIX}${Buffer.from(profileDir).toString('base64url')}`;
+}
+
+export function detectCodexAuthToken(marker?: string | null): string | null {
+  const selectedPath = codexMarkerAuthPath(marker);
+  const cacheKey = selectedPath ? `codex-cli-auth:${selectedPath}` : 'codex-cli-auth';
+  return getCachedToken(cacheKey, () => {
+    const candidates = selectedPath ? [selectedPath] : codexAuthPaths();
+    if (!selectedPath) {
+      const identities = new Set<string>();
+      for (const authPath of candidates) {
+        const data = readCodexAuthFile(authPath);
+        const accountId = (data as any)?.tokens?.account_id;
+        const token = data?.tokens?.access_token;
+        if (typeof token === 'string' && token.trim()) {
+          identities.add(typeof accountId === 'string' && accountId ? accountId : authPath);
+        }
+      }
+      // Multiple verified identities require an explicit profile marker. Never
+      // silently select a personal/work subscription based on directory order.
+      if (identities.size > 1) return null;
+    }
+    let expiredFallback: string | null = null;
+    for (const authPath of candidates) {
       if (!existsSync(authPath)) continue;
       const accessToken = readCodexAuthFile(authPath)?.tokens?.access_token;
       if (typeof accessToken === 'string' && accessToken.trim()) {
-        return accessToken.trim();
+        const token = accessToken.trim();
+        const expiresAt = jwtExpiresAt(token);
+        if (expiresAt == null || expiresAt > Date.now()) return token;
+        expiredFallback ??= token;
       }
     }
-    return null;
+    return expiredFallback;
   });
 }
 
@@ -289,30 +348,6 @@ function homeDir(): string {
   return process.env.HOME ?? process.env.USERPROFILE ?? '';
 }
 
-/** A usable Gemini/Google API key from the environment (NOT the CLI's OAuth token). */
-export function detectGeminiApiKey(): string | null {
-  const k = process.env.GEMINI_API_KEY?.trim() || process.env.GOOGLE_API_KEY?.trim();
-  return k || null;
-}
-
-/**
- * Detects whether the Gemini CLI is logged in: either an API key in the environment
- * or the CLI's cached OAuth credentials at ~/.gemini/oauth_creds.json.
- */
-export function detectGeminiCLILogin(): boolean {
-  if (detectGeminiApiKey()) return true;
-  const home = homeDir();
-  if (!home) return false;
-  const creds = join(home, '.gemini', 'oauth_creds.json');
-  if (!existsSync(creds)) return false;
-  try {
-    const data = JSON.parse(readFileSync(creds, 'utf-8'));
-    return !!(data?.access_token || data?.refresh_token);
-  } catch {
-    return false;
-  }
-}
-
 /**
  * Detects a machine-wide Codex CLI login at ~/.codex/auth.json. This is separate from
  * Koryphaios's isolated codex-home (see detectCodexAuthToken) and is informational —
@@ -419,40 +454,4 @@ export function detectAntigravityCLILogin(): boolean {
   const home = homeDir();
   if (!home) return false;
   return existsSync(join(home, '.gemini', 'antigravity-cli', 'settings.json'));
-}
-
-/**
- * Detects a Gemini/Google API auth token from environment variables or gcloud ADC credentials.
- */
-export function detectGeminiCLIToken(): string | null {
-  return getCachedToken(
-    'gemini',
-    () => {
-      // 1. Check environment variable
-      const envToken = process.env.GEMINI_AUTH_TOKEN;
-      if (typeof envToken === 'string' && envToken.trim()) {
-        return envToken.trim();
-      }
-
-      // 2. Check gcloud Application Default Credentials (ADC)
-      const home = process.env.HOME ?? process.env.USERPROFILE ?? '';
-      const adcPath = join(home, '.config', 'gcloud', 'application_default_credentials.json');
-      if (existsSync(adcPath)) {
-        try {
-          const data = JSON.parse(readFileSync(adcPath, 'utf-8'));
-          // ADC file contains client_id, client_secret, refresh_token, type
-          // The presence of a valid refresh_token means gcloud ADC is set up
-          if (data?.type === 'authorized_user' && typeof data?.refresh_token === 'string') {
-            // Return a marker that tells the provider to use ADC
-            return `gcloud-adc:${data.refresh_token.slice(0, 8)}`;
-          }
-        } catch {
-          // Ignore malformed ADC files
-        }
-      }
-
-      return null;
-    },
-    { cacheNull: false },
-  );
 }

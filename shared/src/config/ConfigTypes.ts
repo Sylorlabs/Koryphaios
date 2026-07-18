@@ -40,31 +40,6 @@ export interface WorkspaceConfig {
   copyEnvFiles?: boolean;
 }
 
-export interface TelegramConfig {
-  botToken: string;
-  adminId: number;
-  webhookUrl?: string;
-  secretToken?: string;
-}
-
-export interface DiscordConfig {
-  botToken: string;
-  /** Guild (server) IDs the bot should respond in. Empty = all guilds. */
-  allowedGuildIds?: string[];
-  /** User IDs allowed to use the bot. Empty = all users in allowed guilds. */
-  allowedUserIds?: string[];
-}
-
-export interface SlackConfig {
-  botToken: string;
-  appToken: string;
-  signingSecret?: string;
-  /** Channel IDs the bot should respond in. Empty = all channels. */
-  allowedChannelIds?: string[];
-  /** Slack user IDs allowed to use the bot. Empty = all users. */
-  allowedUserIds?: string[];
-}
-
 export interface ServerConfig {
   port: number;
   host: string;
@@ -79,12 +54,21 @@ export interface AgentSettings {
   preferencesEnabled: boolean;
   /** Critic gate enabled - critic reviews all changes */
   criticGateEnabled: boolean;
+  gateStrictness?: 'strict' | 'advisory' | 'off';
+  intentInterview?: 'off' | 'adaptive' | 'deep';
+  designDiscovery?: boolean;
+  planApproval?: 'always' | 'material' | 'never';
+  modelQualification?: 'enforce' | 'warn' | 'off';
+  feedbackSharing?: 'local' | 'sanitized-opt-in';
+  skillLearningMode?: 'human-only' | 'propose-then-verify' | 'automatic';
   /** Critic enforces preferences.md workflow strictly */
   criticEnforcesPreferences: boolean;
   /** Auto-apply fixes that don't violate rules */
   autoApplySafeFixes: boolean;
   /** Require confirmation for rule violations */
   confirmRuleViolations: boolean;
+  /** Run the agent's tools without an upfront "proceed?" prompt (on by default). */
+  autoRunTools?: boolean;
   /** Agent memory - allow agents to update memory files */
   agentMemoryEnabled: boolean;
   /** Agent can update preferences.md based on learned patterns */
@@ -125,9 +109,6 @@ export interface KoryphaiosConfig {
    */
   fallbacks?: Record<string, string[]>;
   mcpServers?: Record<string, MCPServerConfig>;
-  telegram?: TelegramConfig;
-  discord?: DiscordConfig;
-  slack?: SlackConfig;
   /** Server infrastructure settings. Deprecated: Use app.config.json instead. */
   server?: ServerConfig;
   contextPaths?: string[];

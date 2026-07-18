@@ -5,6 +5,7 @@ function formatProviderName(provider: string): string {
   if (provider === 'codex') return 'Codex';
   if (provider === 'anthropic') return 'Anthropic';
   if (provider === 'google') return 'Google';
+  if (provider === 'aistudio') return 'Google AI Studio';
   if (provider === 'xai') return 'xAI';
   if (provider === 'openrouter') return 'OpenRouter';
   if (provider === 'vertexai') return 'Vertex AI';

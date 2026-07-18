@@ -15,9 +15,10 @@ export const ProviderNameSchema = z
     'anthropic',
     'openai',
     'google',
-    'gemini',
+    'aistudio',
     'copilot',
     'codex',
+    'grok',
     'openrouter',
     'groq',
     'xai',
@@ -57,7 +58,6 @@ export const ProviderNameSchema = z
     'scaleway',
     'venice',
     'zenmux',
-    'firmware',
     'mistralai',
     'cohere',
     'perplexity',
@@ -81,6 +81,7 @@ export const ProviderNameSchema = z
     'prodia',
     '302ai',
     'opencodezen',
+    'opencodego',
     'novita-ai',
     'upstage',
     'v0',
@@ -97,8 +98,7 @@ export const ProviderNameSchema = z
     'synthetic',
     'moark',
     'nova',
-  ])
-  .transform((val) => (val === 'gemini' ? 'google' : val));
+  ]);
 
 export const ContentSchema = z
   .string()

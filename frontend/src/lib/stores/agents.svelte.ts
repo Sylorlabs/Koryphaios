@@ -5,6 +5,7 @@ import type {
   AgentIdentity,
   AgentStatus,
   StreamUsagePayload,
+  ContextBreakdown,
 } from '@koryphaios/shared';
 import type { FeedEntry } from '$lib/types';
 import { sessionStore } from './sessions.svelte';
@@ -25,6 +26,8 @@ export interface AgentState {
   contextMax: number;
   contextKnown: boolean;
   hasUsageData: boolean;
+  /** Estimated prompt composition from the backend (context-usage bar segments). */
+  contextBreakdown?: ContextBreakdown;
   sessionId: string;
 }
 
@@ -217,9 +220,57 @@ export function updateUsage(agentId: string, payload: StreamUsagePayload, sessio
     }
     agent.contextKnown = !!payload.contextKnown;
     agent.hasUsageData = !!payload.usageKnown;
+    if (payload.breakdown) agent.contextBreakdown = payload.breakdown;
     if (sessionId) agent.sessionId = sessionId;
     commitAgents();
   }
+}
+
+/** Seed the manager's usage from a persisted snapshot (session reload) so the
+ *  context bar shows real data before any new turn runs. */
+export function seedManagerUsage(
+  sessionId: string,
+  usage: {
+    used: number;
+    max: number;
+    contextKnown: boolean;
+    breakdown?: ContextBreakdown;
+  },
+) {
+  const agent = agents.get('kory-manager');
+  if (!agent) return;
+  agent.tokensUsed = Math.max(0, usage.used);
+  if (usage.max > 0) agent.contextMax = usage.max;
+  agent.contextKnown = usage.contextKnown && usage.max > 0;
+  agent.hasUsageData = true;
+  if (usage.breakdown) agent.contextBreakdown = usage.breakdown;
+  agent.sessionId = sessionId;
+  commitAgents();
+}
+
+/** Update the manager's context window immediately when the user switches
+ *  models — the bar must re-baseline right away, not on the next turn. */
+export function setManagerContextWindow(sessionId: string, contextWindow?: number) {
+  const agent = agents.get('kory-manager');
+  if (!agent) return;
+  if (agent.sessionId !== sessionId) {
+    agent.sessionId = sessionId;
+    agent.tokensUsed = 0;
+    agent.contextBreakdown = undefined;
+  }
+  // Selecting a model is enough to render context metadata. A provider turn
+  // is not required just to show an empty window.
+  agent.hasUsageData = true;
+  if (contextWindow && contextWindow > 0) {
+    agent.contextMax = contextWindow;
+    agent.contextKnown = true;
+  } else {
+    // Unknown window for the new model — show "window unknown" rather than
+    // the previous model's stale max.
+    agent.contextKnown = false;
+    agent.contextMax = 0;
+  }
+  commitAgents();
 }
 
 export function completeAgent(agentId: string, sessionId?: string) {
@@ -307,7 +358,9 @@ export function markAgentStopped(agentId: string) {
 // ─── Derived State ───────────────────────────────────────────────────────────
 
 function isActiveStatus(status: AgentStatus | undefined): boolean {
-  return !!status && status !== 'idle' && status !== 'done';
+  // 'waiting' = parked on a background process / user input — the composer
+  // shows a Waiting state instead of Stop, and sending is allowed.
+  return !!status && status !== 'idle' && status !== 'done' && status !== 'waiting';
 }
 
 export function getManagerStatus(): AgentStatus {
@@ -338,6 +391,17 @@ export function getManagerStatus(): AgentStatus {
   return 'idle';
 }
 
+/** True when the session's manager is parked waiting (background terminal or
+ *  a question to the user) — the composer shows the Waiting button state. */
+export function isSessionWaiting(sessionId: string | null | undefined): boolean {
+  if (!sessionId) return false;
+  const st = managerStatusBySession.get(sessionId);
+  if (st === 'waiting' || st === 'waiting_user') return true;
+  const manager = agents.get('kory-manager');
+  return !!manager && manager.sessionId === sessionId &&
+    (manager.status === 'waiting' || manager.status === 'waiting_user');
+}
+
 export function isSessionRunning(sessionId: string): boolean {
   if (isActiveStatus(managerStatusBySession.get(sessionId))) return true;
   for (const a of agents.values()) {
@@ -358,6 +422,7 @@ export function getContextUsage(): {
   percent: number;
   isReliable: boolean;
   reason?: string;
+  breakdown?: ContextBreakdown;
 } {
   const activeSessionId = sessionStore.activeSessionId;
   const candidates = [...agents.values()].filter(
@@ -367,19 +432,33 @@ export function getContextUsage(): {
   if (candidates.length === 0) {
     return { used: 0, max: 0, percent: 0, isReliable: false, reason: 'usage_unknown' };
   }
-  if (candidates.length > 1) {
+  // The manager owns the conversation context; workers/critics report their own
+  // (separate) usage and must not blank the bar the moment they spawn.
+  const manager = candidates.find(
+    (a) => a.identity.role === 'manager' || a.identity.id === 'kory-manager',
+  );
+  if (!manager && candidates.length > 1) {
     return { used: 0, max: 0, percent: 0, isReliable: false, reason: 'multi_agent_usage' };
   }
 
-  const agent = candidates[0];
+  const agent = manager ?? candidates[0];
   if (!agent.contextKnown || agent.contextMax <= 0) {
-    return { used: 0, max: 0, percent: 0, isReliable: false, reason: 'context_unknown' };
+    // Window size unknown — still report real usage so the bar never lies by
+    // omission; the UI shows tokens-used with an "unknown window" treatment.
+    return {
+      used: Math.max(0, agent.tokensUsed),
+      max: 0,
+      percent: 0,
+      isReliable: false,
+      reason: 'context_unknown',
+      breakdown: agent.contextBreakdown,
+    };
   }
 
   const used = Math.max(0, agent.tokensUsed);
   const max = agent.contextMax;
   const percent = Math.min(100, Math.round((used / max) * 100));
-  return { used, max, percent, isReliable: true };
+  return { used, max, percent, isReliable: true, breakdown: agent.contextBreakdown };
 }
 
 // ─── API Loading ─────────────────────────────────────────────────────────────
@@ -396,6 +475,11 @@ async function loadAgentThreads(sessionId: string): Promise<void> {
       }>;
     }>(res);
     if (!res.ok || data?.ok === false || !Array.isArray(data?.data)) return;
+
+    // Agent identities are held in a shared map (not one map per chat). A slow
+    // response for the previously viewed chat must never replace the manager
+    // or worker identities belonging to the chat now on screen.
+    if (sessionStore.activeSessionId !== sessionId) return;
 
     for (const thread of data.data) {
       const existing = agents.get(thread.agent.id);
@@ -480,6 +564,7 @@ export const agentStore = {
   },
   getManagerStatus,
   isSessionRunning,
+  isSessionWaiting,
   getContextUsage,
   spawnAgent,
   updateAgentStatus,
@@ -495,6 +580,8 @@ export const agentStore = {
   clearNonManagerAgents,
   markSessionAgentsStopped,
   markAgentStopped,
+  seedManagerUsage,
+  setManagerContextWindow,
   getAgentThreadKey,
   setAgentThreadFeed,
   upsertAgentThreadEntry,

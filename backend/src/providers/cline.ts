@@ -11,6 +11,9 @@ import { spawn } from 'node:child_process';
 import { whichBinary } from './cli-detection';
 import { detectClineCLILogin } from './auth-utils';
 import { providerLog } from '../logger';
+import { homedir } from 'node:os';
+import { join } from 'node:path';
+import { buildSoftJail, wrapCommand } from '../collaboration/sandbox-runner';
 import {
   type Provider,
   type ProviderEvent,
@@ -34,7 +37,9 @@ function buildPrompt(systemPrompt: string | undefined, messages: ProviderMessage
       typeof m.content === 'string'
         ? m.content
         : m.content
-            .map((b) => (b.type === 'text' ? b.text : b.type === 'image' ? '[image attachment]' : ''))
+            .map((b) =>
+              b.type === 'text' ? b.text : b.type === 'image' ? '[image attachment]' : '',
+            )
             .filter(Boolean)
             .join('\n');
     if (!content.trim()) continue;
@@ -112,10 +117,15 @@ export class ClineProvider implements Provider {
     const cliModel = request.model?.replace(/^cline-/, '');
     if (cliModel && cliModel !== 'default') args.push('--model', cliModel);
 
-    const child = spawn(bin, args, {
-      cwd: request.workingDirectory?.trim() || process.cwd(),
+    const cwd = request.workingDirectory?.trim() || process.cwd();
+    const jail = request.sandbox ? buildSoftJail(process.env, [join(homedir(), '.cline')]) : null;
+    const wrapped = request.sandbox
+      ? wrapCommand(bin, args, { cwd, policy: request.sandbox })
+      : { command: bin, args };
+    const child = spawn(wrapped.command, wrapped.args, {
+      cwd,
       stdio: ['ignore', 'pipe', 'pipe'],
-      env: { ...process.env },
+      env: jail?.env ?? { ...process.env },
     });
 
     const onAbort = () => {
@@ -126,6 +136,7 @@ export class ClineProvider implements Provider {
       }
     };
     request.signal?.addEventListener('abort', onAbort, { once: true });
+    child.once('close', () => jail?.cleanup());
     const timeout = setTimeout(() => {
       providerLog.warn({ provider: 'cline' }, 'Cline harness timed out — killing CLI');
       onAbort();
@@ -155,7 +166,11 @@ export class ClineProvider implements Provider {
           } catch {
             continue;
           }
-          for (const out of this.mapEvent(ev, () => lastText, (t) => (lastText = t))) {
+          for (const out of this.mapEvent(
+            ev,
+            () => lastText,
+            (t) => (lastText = t),
+          )) {
             if (out.type === 'content_delta' || out.type === 'thinking_delta') sawContent = true;
             yield out;
           }

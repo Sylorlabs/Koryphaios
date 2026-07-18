@@ -35,8 +35,6 @@ function mkSession(id: string, title: string, ago: number, cost: number, msgs: n
   };
 }
 
-// Gemini the MODEL is fine — it's served by Google's API (`google` provider).
-// The Gemini CLI is a different, retired thing and must never appear.
 const WORKERS = [
   {
     id: 'w-fe',
@@ -58,7 +56,7 @@ const WORKERS = [
     id: 'w-test',
     name: 'testing',
     domain: 'test',
-    model: 'claude-sonnet-5',
+    model: 'claude-sonnet-4-6',
     provider: 'anthropic',
     glow: 'rgba(0,255,128,0.5)',
   },
@@ -71,28 +69,50 @@ const DEMO_PROVIDERS = [
     enabled: true,
     authenticated: true,
     authSource: 'CLI session',
-    models: ['gpt-5.6-sol', 'gpt-5.4-mini'],
-    selectedModels: ['gpt-5.6-sol', 'gpt-5.4-mini'],
+    // Keep the picker in the same capability order people see in Codex:
+    // flagship first, then the quality/cost balance, then the fast tier.
+    models: ['gpt-5.6-sol-pro', 'gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna'],
+    selectedModels: ['gpt-5.6-sol-pro', 'gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna'],
     allAvailableModels: [
+      {
+        id: 'gpt-5.6-sol-pro',
+        name: 'GPT 5.6 Sol Pro',
+        provider: 'codex',
+        contextWindow: 1_050_000,
+        maxOutputTokens: 128_000,
+        contextVerified: true,
+        canReason: true,
+        reasoningLevels: ['none', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra'],
+      },
       {
         id: 'gpt-5.6-sol',
         name: 'GPT 5.6 Sol',
         provider: 'codex',
-        contextWindow: 400_000,
+        contextWindow: 1_050_000,
         maxOutputTokens: 128_000,
         contextVerified: true,
         canReason: true,
-        reasoningLevels: ['low', 'medium', 'high', 'xhigh'],
+        reasoningLevels: ['none', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra'],
       },
       {
-        id: 'gpt-5.4-mini',
-        name: 'GPT-5.4 Mini',
+        id: 'gpt-5.6-terra',
+        name: 'GPT 5.6 Terra',
         provider: 'codex',
-        contextWindow: 400_000,
+        contextWindow: 1_050_000,
         maxOutputTokens: 128_000,
         contextVerified: true,
         canReason: true,
-        reasoningLevels: ['low', 'medium', 'high'],
+        reasoningLevels: ['none', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra'],
+      },
+      {
+        id: 'gpt-5.6-luna',
+        name: 'GPT 5.6 Luna',
+        provider: 'codex',
+        contextWindow: 1_050_000,
+        maxOutputTokens: 128_000,
+        contextVerified: true,
+        canReason: true,
+        reasoningLevels: ['none', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra'],
       },
     ],
     hideModelSelector: false,
@@ -107,17 +127,38 @@ const DEMO_PROVIDERS = [
     enabled: true,
     authenticated: true,
     authSource: 'CLI session',
-    models: ['claude-sonnet-5'],
-    selectedModels: ['claude-sonnet-5'],
+    models: ['claude-opus-4-6', 'claude-sonnet-4-6', 'claude-haiku-4-5'],
+    selectedModels: ['claude-opus-4-6', 'claude-sonnet-4-6', 'claude-haiku-4-5'],
     allAvailableModels: [
       {
-        id: 'claude-sonnet-5',
-        name: 'Claude Sonnet 5',
+        id: 'claude-opus-4-6',
+        name: 'Claude Opus 4.6',
         provider: 'claude',
         contextWindow: 200_000,
         maxOutputTokens: 64_000,
         contextVerified: true,
         canReason: true,
+        reasoningLevels: ['low', 'medium', 'high', 'max'],
+      },
+      {
+        id: 'claude-sonnet-4-6',
+        name: 'Claude Sonnet 4.6',
+        provider: 'claude',
+        contextWindow: 200_000,
+        maxOutputTokens: 64_000,
+        contextVerified: true,
+        canReason: true,
+        reasoningLevels: ['low', 'medium', 'high'],
+      },
+      {
+        id: 'claude-haiku-4-5',
+        name: 'Claude Haiku 4.5',
+        provider: 'claude',
+        contextWindow: 200_000,
+        maxOutputTokens: 64_000,
+        contextVerified: true,
+        canReason: true,
+        reasoningLevels: ['0', '1024', '8192', '24576'],
       },
     ],
     hideModelSelector: false,
@@ -127,14 +168,13 @@ const DEMO_PROVIDERS = [
     requiresBaseUrl: false,
   },
   {
-    // Gemini models come from Google's API — never from the retired Gemini CLI.
     name: 'google',
     label: 'Google',
     enabled: true,
     authenticated: true,
-    authSource: 'API key',
-    models: ['gemini-3.1-pro'],
-    selectedModels: ['gemini-3.1-pro'],
+    authSource: 'Google account',
+    models: ['gemini-3.1-pro', 'gemini-3-flash'],
+    selectedModels: ['gemini-3.1-pro', 'gemini-3-flash'],
     allAvailableModels: [
       {
         id: 'gemini-3.1-pro',
@@ -144,6 +184,17 @@ const DEMO_PROVIDERS = [
         maxOutputTokens: 64_000,
         contextVerified: true,
         canReason: true,
+        reasoningLevels: ['low', 'medium', 'high'],
+      },
+      {
+        id: 'gemini-3-flash',
+        name: 'Gemini 3 Flash',
+        provider: 'google',
+        contextWindow: 1_000_000,
+        maxOutputTokens: 64_000,
+        contextVerified: true,
+        canReason: true,
+        reasoningLevels: ['low', 'medium', 'high'],
       },
     ],
     hideModelSelector: false,
@@ -175,6 +226,7 @@ function clearTimers() {
 // has been recorded. Lets a mid-turn session switch finalize the turn instead
 // of leaking streamed text into the newly opened session.
 let pendingReplySid: string | null = null;
+let guidedPlaybackSessionId: string | null = null;
 
 function activeSessionId(): string {
   return sessionStore.activeSessionId || 's1';
@@ -204,6 +256,7 @@ function spawnWorkers(sessionId: string) {
 function playTurn(prompt: string, opts: { loop: boolean; clear: boolean }) {
   clearTimers();
   const sid = activeSessionId();
+  if (opts.loop) guidedPlaybackSessionId = sid;
   if (isFullDemo) pendingReplySid = sid;
   if (opts.clear) feedStore.clearFeed();
   // Remove the workers so they visibly fly back in from the top when Kory
@@ -246,7 +299,7 @@ function playTurn(prompt: string, opts: { loop: boolean; clear: boolean }) {
       agentId: 'kory-manager',
       agentName: 'Kory',
       glowClass: 'glow-kory',
-      text: 'Routing: frontend → gpt-5.6-sol · backend → gemini-3.1-pro · tests → claude-sonnet-5',
+      text: 'Routing: frontend → gpt-5.6-sol · backend → gemini-3.1-pro · tests → claude-sonnet-4-6',
       metadata: { phase: 'routing' },
     });
     // Workers spawn now — they fly in from the top of the agent rail.
@@ -320,21 +373,47 @@ export function seedDemo(): void {
   authStore.setUser({ id: 'demo', email: 'demo@koryphaios.com', name: 'Demo' } as never);
   providersStore.setProviderStatusList(DEMO_PROVIDERS as never);
   projectStore.setProject('/demo/analytics-dashboard');
+  // Both demos start with the same protected workspace. The guided embed
+  // animates it; the full-screen demo leaves it ready for hands-on prompts.
+  const sessions = [
+    mkSession('s1', 'Analytics Dashboard', 0, 0.08, 12),
+    mkSession('s2', 'Auth refactor', 3_600_000, 0.21, 34),
+    mkSession('s3', 'CI pipeline fixes', 7_200_000, 0.14, 18),
+    mkSession('s4', 'API v2 migration', 90_000_000, 0.37, 45),
+  ];
+  registerDemoSessions(sessions);
+  sessionStore.seedDemoSessions(sessions, 's1');
   if (isGuidedDemo) {
-    // Guided demo only: canned example sessions + the scripted loop.
-    const sessions = [
-      mkSession('s1', 'Analytics Dashboard', 0, 0.08, 12),
-      mkSession('s2', 'Auth refactor', 3_600_000, 0.21, 34),
-      mkSession('s3', 'CI pipeline fixes', 7_200_000, 0.14, 18),
-      mkSession('s4', 'API v2 migration', 90_000_000, 0.37, 45),
-    ];
-    registerDemoSessions(sessions);
-    sessionStore.seedDemoSessions(sessions, 's1');
+    // Guided demo only: canned example conversations + the scripted loop.
+    // Each visible chat is a real, independently seeded workflow. Selecting a
+    // session loads its own conversation instead of reusing the analytics run.
+    const seededChats = {
+      s1: [
+        ['user', SCRIPT_PROMPT],
+        ['assistant', REPLY],
+      ],
+      s2: [
+        ['user', 'Refactor authentication to support passkeys and preserve existing OAuth sessions.'],
+        ['assistant', 'I mapped the current session boundary, added a passkey enrollment flow, and kept the OAuth callback contract stable. The migration includes rollback-safe session invalidation tests.'],
+      ],
+      s3: [
+        ['user', 'Fix the CI pipeline failures and make preview deployments deterministic.'],
+        ['assistant', 'The pipeline now caches Bun dependencies by lockfile, runs the typecheck before the test fan-out, and publishes one immutable preview artifact per commit.'],
+      ],
+      s4: [
+        ['user', 'Migrate the public API to v2 without breaking existing integrations.'],
+        ['assistant', 'The v2 routes use explicit versioned schemas, translate v1 payloads during the deprecation window, and include contract tests for both response shapes.'],
+      ],
+    } as const;
+    for (const [sessionId, messages] of Object.entries(seededChats)) {
+      for (const [role, content] of messages) {
+        recordDemoMessage(sessionId, role, content, role === 'assistant' ? 'gpt-5.6-sol' : undefined);
+      }
+    }
     playTurn(SCRIPT_PROMPT, { loop: true, clear: true });
   }
-  // Full demo: NO canned content. The workspace starts fresh, exactly like
-  // regular Koryphaios — sessions and messages the user creates live in the
-  // in-memory shim for the lifetime of the tab, then vanish.
+  // Full demo: the protected workspace starts without canned feed content;
+  // prompts remain tab-scoped and are never saved anywhere.
 }
 
 /** Guided demo: replay the scripted turn when the user hits Send. */
@@ -367,6 +446,16 @@ export function demoStop(): void {
  *  newly opened one. A turn running in the still-active session is left alone
  *  (this also fires right after demoSend auto-creates a session). */
 export function demoOnSessionSwitch(): void {
+  // Guided mode has four independent canned chats. Stop the animated run
+  // before its stale timers can write analytics events into the newly selected
+  // workflow; session sync then atomically swaps in that chat's own history.
+  if (isGuidedDemo && guidedPlaybackSessionId && sessionStore.activeSessionId !== guidedPlaybackSessionId) {
+    const previousSessionId = guidedPlaybackSessionId;
+    clearTimers();
+    guidedPlaybackSessionId = null;
+    agentStore.updateAgentStatus('kory-manager', 'done', previousSessionId);
+    return;
+  }
   if (!isFullDemo || !pendingReplySid) return;
   if (sessionStore.activeSessionId === pendingReplySid) return;
   clearTimers();

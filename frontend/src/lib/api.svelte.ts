@@ -6,6 +6,7 @@
 import { authStore } from '$lib/stores/auth.svelte';
 import { isDemoMode } from '$lib/demo-flags';
 import { demoFetch } from '$lib/demo-api';
+import { untrack } from 'svelte';
 
 const DEFAULT_TIMEOUT_MS = 30_000;
 
@@ -38,7 +39,20 @@ export function getAuthHeaders(): Record<string, string> {
   return authStore.token ? { Authorization: authStore.token } : {};
 }
 
-export async function apiFetch(
+export function apiFetch(
+  url: string,
+  init: RequestInit = {},
+  timeoutMs: number = DEFAULT_TIMEOUT_MS,
+): Promise<Response> {
+  // API bookkeeping must never become a dependency of the caller's $effect.
+  // In particular, incrementing the reactive in-flight counter inside an
+  // effect made that effect depend on the counter it was itself changing.
+  // Settings → Teams consequently re-ran its three status loads until Svelte
+  // hit its maximum update depth and Chromium ran out of request resources.
+  return untrack(() => apiFetchUntracked(url, init, timeoutMs));
+}
+
+async function apiFetchUntracked(
   url: string,
   init: RequestInit = {},
   timeoutMs: number = DEFAULT_TIMEOUT_MS,
@@ -57,6 +71,19 @@ export async function apiFetch(
       headers: { 'Content-Type': 'application/json' },
     });
   }
+
+  // The desktop webview can survive a backend restart, but the backend's
+  // in-memory local-session registry cannot. Validate the bearer before each
+  // protected request so a replacement is issued through the non-error auth
+  // endpoint before a route such as /api/processes can produce a browser 401.
+  const authenticated = await authStore.ensureSession();
+  if (!authenticated) {
+    return new Response(JSON.stringify({ ok: false, error: 'Backend authentication unavailable' }), {
+      status: 503,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
+
   _inflight++;
   try {
     const headers = new Headers(init.headers);

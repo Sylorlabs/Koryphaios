@@ -5,6 +5,7 @@
   import { toastStore } from '$lib/stores/toast.svelte';
   import { projectStore, projectDisplayName } from '$lib/stores/project.svelte';
   import { collaborationStore } from '$lib/stores/collaboration.svelte';
+  import { isDemoMode } from '$lib/demo-flags';
   import {
     Plus,
     Search,
@@ -46,10 +47,12 @@
   });
 
   async function handleCreateSession(event?: MouseEvent) {
+    if (isDemoMode) {
+      toastStore.info('Sample sessions are read-only in the demo. Run the app to create a workspace.');
+      return;
+    }
     creating = true;
     try {
-      // Shift+click always creates a fresh session; plain click reuses the
-      // active empty session (no spam) but still scopes to the slider.
       const id = await sessionStore.newChat({ shift: event?.shiftKey === true });
       if (id) window.dispatchEvent(new CustomEvent('kory:focus-input'));
     } finally {
@@ -70,6 +73,7 @@
   }
 
   function startRename(id: string, currentTitle: string) {
+    if (isDemoMode) return;
     editingId = id;
     editTitle = currentTitle;
   }
@@ -93,6 +97,10 @@
 
   function confirmDelete(e: MouseEvent, id: string) {
     e.stopPropagation();
+    if (isDemoMode) {
+      toastStore.info('Sample sessions are protected in the demo.');
+      return;
+    }
     // Deleting a row that's mid-rename must not leave the editor open.
     if (editingId === id) cancelRename();
 
@@ -151,9 +159,9 @@
       type="button"
       class="p-2 rounded-lg transition-colors hover:bg-[var(--color-surface-3)] flex items-center justify-center"
       style="color: var(--color-text-secondary);"
-      disabled={creating}
+      disabled={creating || isDemoMode}
       onclick={(e) => handleCreateSession(e)}
-      title="New session (Ctrl+N) — Shift+click for a fresh session"
+      title={isDemoMode ? 'Sample sessions are read-only in the demo' : 'New session (Ctrl+N; Shift-click forces a new chat)'}
       aria-label="New session"
     >
       {#if creating}
@@ -324,7 +332,7 @@
             onkeydown={(e) => {
               if (e.key === 'Enter') selectSession(session.id);
             }}
-            ondblclick={() => startRename(session.id, session.title)}
+            ondblclick={() => !isDemoMode && startRename(session.id, session.title)}
           >
             {#if editingId === session.id}
               <div class="flex-1 flex flex-col gap-0.5">
@@ -404,6 +412,13 @@
                   {session.title}
                 </div>
                 <div class="flex items-center gap-2.5 flex-wrap" style="margin-top: 6px;">
+                  {#if sessionStore.activeSessionId === session.id && !collaborationStore.activeJoinedSession}
+                    <span
+                      class="inline-flex items-center rounded-full px-1.5 py-0.5 font-bold uppercase tracking-wider"
+                      style="font-size: 9px; color: var(--color-accent); background: color-mix(in srgb, var(--color-accent) 14%, transparent);"
+                      aria-label="Currently open chat"
+                    >Open</span>
+                  {/if}
                   {#if wsStore.pendingPermissions.some((p) => p.sessionId === session.id) && sessionStore.activeSessionId !== session.id}
                     <!-- A backgrounded session stalled on an approval must never
                          look like it's just "still running". -->
@@ -441,7 +456,7 @@
                   {/if}
                 </div>
               </div>
-              <div
+              {#if !isDemoMode}<div
                 class="flex items-center gap-1 transition-opacity {sessionStore.activeSessionId ===
                 session.id
                   ? 'opacity-70 group-hover:opacity-100 group-focus-within:opacity-100'
@@ -472,7 +487,7 @@
                 >
                   <Trash2 size={12} />
                 </button>
-              </div>
+              </div>{/if}
             {/if}
           </div>
         {/each}

@@ -55,8 +55,6 @@ afterEach(() => {
 describe('detectAgentClis', () => {
   it('reports all agent CLIs with their provider mappings', () => {
     const list = detectAgentClis();
-    // The standalone Gemini CLI is unsupported and must never appear here —
-    // Antigravity is its successor.
     expect(list.map((c) => c.id).sort()).toEqual([
       'antigravity',
       'claude',

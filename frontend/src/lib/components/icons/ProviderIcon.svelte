@@ -20,6 +20,7 @@
     claude: ['claudecode', 'claude'],
     openai: ['openai'],
     google: ['google', 'google-brand'],
+    aistudio: ['aistudio', 'gemini'],
     xai: ['xai'],
     openrouter: ['openrouter'],
     groq: ['groq'],

@@ -20,6 +20,13 @@ export const JULES_SYNC_INSTRUCTIONS = `Jules runs in Google's cloud — it does
 Never assume local files changed until you have pulled or checked out the remote work.`;
 
 export const PROVIDER_DISPLAY: Partial<Record<ProviderName, ProviderDisplayMeta>> = {
+  google: {
+    label: 'Google',
+    iconPath: '/provider-icons/lobehub/google.svg',
+    deployment: 'cloud',
+    description:
+      'Direct Google Gemini API. Uses only GOOGLE_API_KEY; it does not use AI Studio, Vertex AI, gcloud, or Jules credentials.',
+  },
   grok: {
     label: 'Grok Build',
     iconPath: '/provider-icons/lobehub/grok.svg',
@@ -54,6 +61,13 @@ export const PROVIDER_DISPLAY: Partial<Record<ProviderName, ProviderDisplayMeta>
     deployment: 'cloud',
     description:
       'Google AI Studio — paste your Gemini API key (aistudio.google.com/apikey). Direct Gemini API, no gcloud sign-in.',
+  },
+  vertexai: {
+    label: 'Vertex AI',
+    iconPath: '/provider-icons/lobehub/vertexai.svg',
+    deployment: 'cloud',
+    description:
+      'Google Cloud Vertex AI. Uses GOOGLE_VERTEX_AI_API_KEY with your GCP project and location; it is not the Google or AI Studio provider.',
   },
   cline: {
     label: 'Cline',

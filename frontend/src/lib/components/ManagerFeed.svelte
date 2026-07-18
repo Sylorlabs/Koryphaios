@@ -2,7 +2,6 @@
   import { wsStore } from '$lib/stores/websocket.svelte';
   import { appStore } from '$lib/stores/app.svelte';
   import { sessionStore } from '$lib/stores/sessions.svelte';
-  import { isMac } from '$lib/utils/platform';
   import { untrack } from 'svelte';
   import { fade } from 'svelte/transition';
   import {
@@ -16,7 +15,8 @@
     GitBranch,
     Pencil,
     Check,
-    X
+    X,
+    LoaderCircle
   } from 'lucide-svelte';
   import FeedEntry from './FeedEntry.svelte';
   import VirtualList from './VirtualList.svelte';
@@ -25,8 +25,6 @@
 
   let feedContainer = $state<HTMLDivElement>();
   let virtualList = $state<VirtualList<FeedEntryLocal>>();
-  let selectedEntries = $state<Set<string>>(new Set());
-  let lastSelectedId = $state<string>('');
   let expandedGroups = $state<Set<string>>(new Set());
   let editingSuggestionId = $state<string | null>(null);
   let editingSuggestionText = $state('');
@@ -131,47 +129,9 @@
     expandedGroups = new Set(expandedGroups);
   }
 
-  function handleEntryClick(entry: FeedEntryLocal, e: MouseEvent) {
-    if (e.shiftKey) {
-      // Range select
-      e.preventDefault();
-      const next = new Set(selectedEntries);
-      if (lastSelectedId) {
-        const startIdx = filteredFeed.findIndex(f => f.id === lastSelectedId);
-        const endIdx = filteredFeed.findIndex(f => f.id === entry.id);
-        if (startIdx >= 0 && endIdx >= 0) {
-          const [lo, hi] = startIdx < endIdx ? [startIdx, endIdx] : [endIdx, startIdx];
-          for (let i = lo; i <= hi; i++) next.add(filteredFeed[i].id);
-        }
-      } else {
-        next.add(entry.id);
-      }
-      selectedEntries = next;
-      lastSelectedId = entry.id;
-    } else if (isMac() ? e.metaKey : e.ctrlKey) {
-      // Toggle individual selection
-      e.preventDefault();
-      const next = new Set(selectedEntries);
-      if (next.has(entry.id)) {
-        next.delete(entry.id);
-      } else {
-        next.add(entry.id);
-      }
-      selectedEntries = next;
-      lastSelectedId = entry.id;
-    } else {
-      // Normal click — set anchor, clear previous selection
-      selectedEntries = new Set([entry.id]);
-      lastSelectedId = entry.id;
-    }
-  }
-
-  function deleteSelected() {
-    if (selectedEntries.size === 0) return;
-    wsStore.removeEntries(selectedEntries);
-    selectedEntries = new Set();
-    lastSelectedId = '';
-  }
+  // Row selection removed — per-entry visibility controls (hide-from-agent /
+  // hide-from-me / delete) replaced the select-then-bulk-delete flow.
+  function handleEntryClick(_entry: FeedEntryLocal, _e: MouseEvent) {}
 
   function deleteSingle(id: string) {
     wsStore.removeEntries(new Set([id]));
@@ -214,21 +174,23 @@
       <MessageSquare size={16} />
       Agent feed
     </span>
-    <div class="flex items-center gap-2">
-      {#if selectedEntries.size > 0}
-        <button
-          onclick={deleteSelected}
-          class="btn btn-secondary flex items-center gap-1.5"
-          style="padding: 4px 10px; font-size: 11px; color: var(--color-error);"
-        >
-          <Trash2 size={12} />Delete {selectedEntries.size}
-        </button>
-      {/if}
-    </div>
+    <div class="flex items-center gap-2"></div>
   </div>
 
   <div class="relative flex-1 min-h-0 overflow-hidden">
-    {#if filteredFeed.length === 0}
+    {#if wsStore.isLoadingSession && filteredFeed.length === 0}
+      <div
+        bind:this={feedContainer}
+        class="absolute inset-0 flex items-center justify-center p-6 feed-scroll"
+        role="status"
+        aria-live="polite"
+      >
+        <div class="flex items-center gap-3 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-raised)] px-4 py-3 text-sm text-[var(--color-text-secondary)] shadow-lg">
+          <LoaderCircle size={18} class="animate-spin text-[var(--color-accent)]" />
+          <span>Loading this chat…</span>
+        </div>
+      </div>
+    {:else if filteredFeed.length === 0}
     <div
       bind:this={feedContainer}
       class="absolute inset-0 overflow-y-auto p-4 feed-scroll"
@@ -384,14 +346,15 @@
           bind:this={virtualList}
           items={filteredFeed}
           estimateHeight={estimateFeedHeight}
+          follow={autoScrollCtl.follow}
           class="h-full p-4 feed-scroll"
         >
           {#snippet row(entry, i)}
             <div class="pb-3">
               <FeedEntry
                 {entry}
-                isSelected={selectedEntries.has(entry.id)}
-                isExpanded={expandedGroups.has(entry.id)}
+                isSelected={false}
+                isExpanded={entry.type === 'agent_group' ? !expandedGroups.has(entry.id) : expandedGroups.has(entry.id)}
                 isStreaming={i === filteredFeed.length - 1 && isManagerStreaming}
                 onSelect={(e) => handleEntryClick(entry, e)}
                 onToggleGroup={() => toggleGroup(entry.id)}

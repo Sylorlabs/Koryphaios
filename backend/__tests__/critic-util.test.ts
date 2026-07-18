@@ -18,8 +18,8 @@ describe('parseCriticVerdict', () => {
     expect(parseCriticVerdict('The code does not PASS our bar.\nFAIL')).toBe(false);
   });
 
-  test('fallback to includes(PASS) when last line is neither PASS nor FAIL', () => {
-    expect(parseCriticVerdict('Overall assessment: PASS.')).toBe(true);
+  test('fails closed when PASS appears only inside ambiguous prose', () => {
+    expect(parseCriticVerdict('Overall assessment: PASS.')).toBe(false);
     expect(parseCriticVerdict('No issues found.')).toBe(false);
   });
 
@@ -37,11 +37,11 @@ describe('formatMessagesForCritic', () => {
       { role: 'tool', content: 'result' },
     ];
     const out = formatMessagesForCritic(messages);
-    expect(out).toContain('[USER]');
+    expect(out).toContain('[MANAGER INSTRUCTION]');
     expect(out).toContain('Hello');
-    expect(out).toContain('[ASSISTANT]');
+    expect(out).toContain('[WORKER OUTPUT]');
     expect(out).toContain('Hi');
-    expect(out).toContain('[TOOL RESULT]');
+    expect(out).toContain('[WORKER TOOL RESULT]');
     expect(out).toContain('result');
   });
 
@@ -56,6 +56,6 @@ describe('formatMessagesForCritic', () => {
   test('does not truncate when under maxLength', () => {
     const messages = [{ role: 'user', content: 'short' }];
     const out = formatMessagesForCritic(messages, 1000);
-    expect(out).toBe('[USER]\nshort');
+    expect(out).toBe('[MANAGER INSTRUCTION]\nshort');
   });
 });

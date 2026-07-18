@@ -12,9 +12,22 @@
     rail: AgentRailState;
     visible?: boolean;
   } = $props();
+
+  let autoRevealed = $state(false);
+  let seenAgentIds = new Set<string>();
+  let hasActiveAgents = $derived(
+    rail.sessionAgentChats.some((agent) => !['done', 'idle', 'error'].includes(agent.status)),
+  );
+
+  $effect(() => {
+    const ids = new Set(rail.sessionAgentChats.map((agent) => agent.identity.id));
+    if ([...ids].some((id) => !seenAgentIds.has(id))) autoRevealed = true;
+    if (ids.size === 0) autoRevealed = false;
+    seenAgentIds = ids;
+  });
 </script>
 
-{#if visible && modeStore.showAgentDetails && rail.sessionAgentChats.length > 0}
+{#if (visible || autoRevealed || hasActiveAgents) && rail.sessionAgentChats.length > 0}
   <div
     class="px-4 py-2 border-b flex gap-2 overflow-x-auto shrink-0 items-stretch"
     style="border-color: var(--color-border); background: var(--color-surface-1);"

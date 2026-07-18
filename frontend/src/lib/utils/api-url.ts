@@ -90,7 +90,6 @@ export async function initUrls(): Promise<void> {
     // Check if we're in Tauri v2
     const inTauri = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
     if (!inTauri) {
-      console.log('[API] Tauri API not available (Browser mode)');
       cachedBackendUrl = getDefaultBackendUrl();
       cachedWebsocketUrl = getDefaultWebSocketUrl();
       urlsInitialized = true;

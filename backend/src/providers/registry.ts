@@ -615,7 +615,8 @@ class ProviderRegistry {
         }
         case 'openai':
           return this.verifyBearerGet('https://api.openai.com/v1/models', apiKey);
-        case 'google': {
+        case 'google':
+        case 'aistudio': {
           if (!apiKey && !authToken)
             return { success: false, error: 'Missing apiKey or authToken' };
           // Gemini 3.1 / Thinking: v1beta often required; support ?key= and x-goog-api-key as fallbacks.
@@ -1057,7 +1058,7 @@ class ProviderRegistry {
 
   /**
    * Auto-enable providers backed by an agent CLI the user already has installed +
-   * logged in on this machine (Claude Code, Codex, Gemini CLI, Grok Build) — so they
+   * logged in on this machine (Claude Code, Codex, Grok Build) — so they
    * "just work" with no manual Connect step. A logged-in CLI is clear user intent,
    * unlike a stray environment variable (which we still don't auto-auth). Returns the
    * credentials to inject, or null when there's nothing to auto-enable.
@@ -1069,7 +1070,7 @@ class ProviderRegistry {
     // Default to disabled to prevent "auto-authing" from environment variables without user intent.
     // Explicit opt-in (via UI "Connect" or config) is required — EXCEPT for providers backed by
     // an agent CLI the user has installed + logged in, which we treat as intent and auto-enable
-    // (Claude Code, Codex, Gemini CLI, Grok Build). Opt out with KORY_DISABLE_CLI_AUTODETECT=1.
+    // (Claude Code, Codex, Grok Build). Opt out with KORY_DISABLE_CLI_AUTODETECT=1.
     const defaultDisabled = true;
     const autoCli = cliAutoEnableCreds(name);
     const isDisabled = autoCli ? false : (userConfig?.disabled ?? defaultDisabled);
@@ -1137,7 +1138,9 @@ class ProviderRegistry {
       case 'openai':
         return new OpenAIProvider(config);
       case 'google':
-        return config.apiKey || config.authToken ? new GoogleProvider(config) : null;
+        // Direct Google Gemini API only. It never consumes CLI OAuth, ADC, or
+        // any other Google provider's credentials.
+        return config.apiKey ? new GoogleProvider(config) : null;
       case 'aistudio':
         // Google AI Studio — Gemini API key only (no gcloud OAuth).
         return config.apiKey ? new GoogleProvider({ ...config, name: 'aistudio' }) : null;

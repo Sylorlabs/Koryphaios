@@ -1,70 +1,58 @@
 <script lang="ts">
+  // The duration is measured from the server timestamp when the agent entered
+  // thinking until its next action. This includes providers that buffer all
+  // reasoning into one event, while avoiding an inaccurate client stopwatch.
   import { slide } from 'svelte/transition';
 
   interface Props {
     text: string;
+    /** Server-computed elapsed ms (thinking state start → next action). */
     durationMs?: number;
+    /** Server timestamp at which the agent entered the thinking state. */
+    thinkingStartedAt?: number;
     agentName: string;
+    /** Provider said reasoning is over — the number is final. */
+    finalized?: boolean;
+    /** Start with the reasoning panel open (user setting). */
+    defaultExpanded?: boolean;
   }
 
-  let { text, durationMs, agentName: _agentName }: Props = $props();
-  let expanded = $state(false);
+  let { text, durationMs, thinkingStartedAt, agentName: _agentName, finalized = false, defaultExpanded = false }: Props = $props();
+  // svelte-ignore state_referenced_locally
+  let expanded = $state(defaultExpanded);
   let panelEl = $state<HTMLDivElement>();
 
-  // ── Live detection + stopwatch ─────────────────────────────────────────────
-  // The block is "live" while its text is still growing. When tokens stop
-  // arriving for STALL_MS the stopwatch freezes (and resumes if more arrive).
-  const STALL_MS = 1_500;
-  const TICK_MS = 100;
-
-  let now = $state(performance.now());
-  // Start "not live": a block restored from history must not tick on mount.
-  // Only text growth AFTER mount starts the stopwatch.
-  let lastGrowthAt = $state(performance.now() - STALL_MS);
-  // Anchor so the ticker continues from the server-computed duration when a
-  // block is mounted mid-stream (e.g. after a session switch). Deliberately
-  // captures the INITIAL durationMs — later updates flow through displayMs.
-  // svelte-ignore state_referenced_locally
-  let anchor = performance.now() - (durationMs ?? 0);
-  let frozenMs = $state<number | null>(null);
-  let sawMount = false;
-
+  // Monotonic guard: even if a stale prop update arrives, never display a
+  // smaller number than the user has already seen.
+  let peakMs = $state(0);
   $effect(() => {
-    void text.length;
-    if (!sawMount) {
-      // First run is the mount itself, not a streamed token.
-      sawMount = true;
-      return;
-    }
-    lastGrowthAt = performance.now();
-    if (frozenMs !== null) {
-      // Tokens resumed after a stall — re-anchor so elapsed continues from
-      // where the stopwatch froze instead of jumping.
-      anchor = performance.now() - frozenMs;
-      frozenMs = null;
-    }
+    if ((durationMs ?? 0) > peakMs) peakMs = durationMs ?? 0;
   });
-
-  let isLive = $derived(frozenMs === null && now - lastGrowthAt < STALL_MS);
-
+  let now = $state(Date.now());
   $effect(() => {
-    if (!isLive) return;
-    const timer = setInterval(() => {
-      now = performance.now();
-      if (performance.now() - lastGrowthAt >= STALL_MS) {
-        frozenMs = performance.now() - anchor - STALL_MS;
-      }
-    }, TICK_MS);
+    if (finalized || !thinkingStartedAt) return;
+    now = Date.now();
+    const timer = setInterval(() => (now = Date.now()), 100);
     return () => clearInterval(timer);
   });
+  // Keep the live counter moving even when a provider buffers its reasoning
+  // into a single event. The final server event replaces this with the exact
+  // timestamp-to-timestamp duration when the next action arrives.
+  let displayMs = $derived(
+    Math.max(peakMs, durationMs ?? 0, !finalized && thinkingStartedAt ? now - thinkingStartedAt : 0),
+  );
 
-  let displayMs = $derived.by(() => {
-    if (isLive) return Math.max(0, now - anchor);
-    // Frozen: prefer the server-computed duration when it's sane, else the
-    // client-side measurement.
-    if (durationMs && durationMs > 0) return durationMs;
-    return frozenMs ?? 0;
+  // Live = provider hasn't finalized yet. Safety valve: if no new duration
+  // arrives for 15s the run died mid-thought — stop shimmering.
+  let staleAt = $state(0);
+  $effect(() => {
+    void durationMs;
+    if (finalized) return;
+    staleAt = 0;
+    const t = setTimeout(() => (staleAt = Date.now()), 15_000);
+    return () => clearTimeout(t);
   });
+  let isLive = $derived(!finalized && staleAt === 0);
 
   function formatDuration(ms: number): string {
     const s = ms / 1000;
@@ -106,7 +94,7 @@
     bind:this={panelEl}
     transition:slide={{ duration: 180 }}
   >
-    <p class="thinking-full-text">{text || '…'}</p>
+    <p class="thinking-full-text">{text || 'This provider keeps its raw reasoning private.'}</p>
     {#if isLive}
       <span class="live-caret" aria-hidden="true"></span>
     {/if}

@@ -62,6 +62,12 @@ export function normalizeReasoningLevel(
 
   // Adaptive means let the model decide
   const normalizedLevel = reasoningLevel.toLowerCase().trim();
+
+  // Antigravity exposes Low/Medium/High as separate model entries. It has no
+  // independent reasoning parameter, so stale UI/session values must not be
+  // forwarded or interpreted as a request to switch models.
+  if (provider === 'antigravity') return undefined;
+
   if (normalizedLevel === 'adaptive') {
     return undefined;
   }
@@ -76,7 +82,7 @@ export function normalizeReasoningLevel(
     const level = normalizedLevel;
 
     // Gemini (Budget-based)
-    if (provider === 'google' || provider === 'vertexai') {
+    if (provider === 'google' || provider === 'aistudio' || provider === 'vertexai') {
       const isGemini3 = model ? /gemini-3/i.test(model) : false;
       if (isGemini3) {
         if (level === 'none') return 'low';
@@ -118,6 +124,21 @@ export function normalizeReasoningLevel(
         if (level === 'high') return '24576';
         if (level === 'xhigh') return '24576'; // Max for Haiku
       }
+    }
+
+    // CLI harnesses (claude-code, codex, grok): pass the level
+    // through untouched — the harness clamps to the CLI/model's real
+    // capability (incl. xhigh/max). Dropping it here silently ran every chat
+    // at the CLI default.
+    if (['claude', 'codex', 'grok'].includes(provider)) {
+      return level;
+    }
+
+    // OpenCode Zen / Go: effort tiers come from models.dev per-model metadata
+    // (may include 'max'); the picker only offers levels the model declares,
+    // so pass through untouched.
+    if (provider === 'opencodezen' || provider === 'opencodego') {
+      return level;
     }
 
     // OpenAI / Anthropic / Groq / xAI / Azure / OpenRouter / Copilot (Effort-based)
@@ -209,6 +230,7 @@ export function determineAutoReasoningLevel(taskDescription: string): string {
 // Re-export types and constants for convenience
 export { DEFAULT_REASONING_RULES } from './ReasoningConfig';
 export { STANDARD_REASONING_OPTIONS } from './ReasoningConfig';
+export { buildReasoningConfigFromLevels } from './ReasoningConfig';
 export type {
   ReasoningConfig,
   ReasoningOption,

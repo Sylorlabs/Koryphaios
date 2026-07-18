@@ -18,9 +18,20 @@ export interface AgentSettings {
   agentExecutionMode: 'auto' | 'single' | 'multi';
   preferencesEnabled: boolean;
   criticGateEnabled: boolean;
+  gateStrictness: 'strict' | 'advisory' | 'off';
+  intentInterview: 'off' | 'adaptive' | 'deep';
+  designDiscovery: boolean;
+  planApproval: 'always' | 'material' | 'never';
+  modelQualification: 'enforce' | 'warn' | 'off';
+  feedbackSharing: 'local' | 'sanitized-opt-in';
+  skillLearningMode: 'human-only' | 'propose-then-verify' | 'automatic';
   criticEnforcesPreferences: boolean;
   autoApplySafeFixes: boolean;
   confirmRuleViolations: boolean;
+  autoRunTools: boolean;
+  allowExternalPaths: boolean;
+  managerModelAccess: Record<string, string[]>;
+  managerNotes: Record<string, string>;
   agentMemoryEnabled: boolean;
   agentCanUpdatePreferences: boolean;
   maxCriticIterations: number;
@@ -30,6 +41,16 @@ export interface AgentSettings {
   localWebSearch: 'off' | 'on' | 'fallback';
   /** Experimental: Multi-source research requirements */
   multiSourceResearch: boolean;
+  /** Context management: auto-stub stale tool outputs (recoverable via fetch_context) */
+  contextPruningEnabled: boolean;
+  /** Turns whose tool outputs stay full before auto-stubbing */
+  contextKeepRecentTurns: number;
+  /** Minimum tool-output size (chars) worth stubbing */
+  contextPruneMinChars: number;
+  /** Live context-usage report injected each turn so the agent self-manages */
+  contextSelfAwareness: boolean;
+  /** Show complete reasoning blocks expanded in the chat feed by default */
+  reasoningExpandedByDefault: boolean;
 }
 
 export interface CriticReviewResult {
@@ -67,9 +88,20 @@ export const DEFAULT_AGENT_SETTINGS: AgentSettings = {
   agentExecutionMode: 'auto',
   preferencesEnabled: true,
   criticGateEnabled: true,
+  gateStrictness: 'strict',
+  intentInterview: 'adaptive',
+  designDiscovery: true,
+  planApproval: 'material',
+  modelQualification: 'enforce',
+  feedbackSharing: 'local',
+  skillLearningMode: 'propose-then-verify',
   criticEnforcesPreferences: true,
   autoApplySafeFixes: false,
   confirmRuleViolations: true,
+  autoRunTools: true,
+  allowExternalPaths: false,
+  managerModelAccess: {},
+  managerNotes: {},
   agentMemoryEnabled: true,
   agentCanUpdatePreferences: false,
   maxCriticIterations: 3,
@@ -77,6 +109,11 @@ export const DEFAULT_AGENT_SETTINGS: AgentSettings = {
   approvalThresholdLines: 100,
   localWebSearch: 'fallback',
   multiSourceResearch: true,
+  contextPruningEnabled: true,
+  contextKeepRecentTurns: 3,
+  contextPruneMinChars: 600,
+  contextSelfAwareness: true,
+  reasoningExpandedByDefault: true,
 };
 
 // ============================================================================
@@ -87,8 +124,9 @@ function createAgentSettingsStore() {
   let settings = $state<AgentSettings>(DEFAULT_AGENT_SETTINGS);
   let preferences = $state<{ exists: boolean; content: string; path: string } | null>(null);
   let isLoading = $state(false);
-  let activeTab = $state<'settings' | 'preferences' | 'enforcement'>('settings');
+  let activeTab = $state<'settings' | 'preferences'>('settings');
   let lastCriticResult = $state<CriticReviewResult | null>(null);
+  let settingsSaveRevision = 0;
 
   // ========================================================================
   // Settings
@@ -116,7 +154,12 @@ function createAgentSettingsStore() {
     newSettings: Partial<AgentSettings>,
     options?: { quietSuccess?: boolean },
   ): Promise<boolean> {
-    isLoading = true;
+    const revision = ++settingsSaveRevision;
+    const previousSettings = settings;
+    // Keep controls stationary and responsive while the write happens. The
+    // server response remains authoritative, but saving no longer blanks the
+    // entire panel or waits before moving a switch/stepper.
+    settings = { ...settings, ...newSettings };
     try {
       const res = await apiFetch(apiUrl('/api/agent/settings'), {
         method: 'PUT',
@@ -127,7 +170,7 @@ function createAgentSettingsStore() {
       if (res.ok) {
         const data = await res.json();
         if (data.ok) {
-          settings = data.data;
+          if (revision === settingsSaveRevision) settings = data.data;
           if (!options?.quietSuccess) {
             toastStore.success('Agent settings saved');
           }
@@ -136,10 +179,9 @@ function createAgentSettingsStore() {
       }
       throw new Error('Failed to save');
     } catch (err) {
+      if (revision === settingsSaveRevision) settings = previousSettings;
       toastStore.error('Failed to save agent settings');
       return false;
-    } finally {
-      isLoading = false;
     }
   }
 

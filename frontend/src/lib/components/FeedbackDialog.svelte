@@ -4,7 +4,17 @@
   import { apiFetch, parseJsonResponse } from '$lib/api.svelte';
   import { apiUrl } from '$lib/utils/api-url';
 
-  type FeedbackCategory = 'bug' | 'idea' | 'question' | 'other';
+  type FeedbackCategory =
+    | 'wrong-scope'
+    | 'overengineered'
+    | 'ignored-instructions'
+    | 'generic-ugly-ui'
+    | 'broke-existing-behavior'
+    | 'claimed-done-without-proof'
+    | 'too-many-questions'
+    | 'too-verbose'
+    | 'slow'
+    | 'other';
 
   interface Props {
     open?: boolean;
@@ -12,7 +22,7 @@
   }
 
   let { open = false, onClose }: Props = $props();
-  let category = $state<FeedbackCategory>('bug');
+  let category = $state<FeedbackCategory>('wrong-scope');
   let message = $state('');
   let email = $state('');
   let includeDiagnostics = $state(true);
@@ -22,11 +32,17 @@
   let appVersion = $state<string | undefined>();
   let messageInput = $state<HTMLTextAreaElement | null>(null);
 
-  const categories = [
-    { id: 'bug' as const, label: 'Bug', icon: Bug },
-    { id: 'idea' as const, label: 'Idea', icon: Lightbulb },
-    { id: 'question' as const, label: 'Question', icon: HelpCircle },
-    { id: 'other' as const, label: 'Other', icon: Flag },
+  const categories: Array<{ id: FeedbackCategory; label: string; icon: typeof Flag }> = [
+    { id: 'wrong-scope', label: 'Wrong scope', icon: Flag },
+    { id: 'overengineered', label: 'Overengineered', icon: Flag },
+    { id: 'ignored-instructions', label: 'Ignored instructions', icon: Flag },
+    { id: 'generic-ugly-ui', label: 'Generic / ugly UI', icon: Flag },
+    { id: 'broke-existing-behavior', label: 'Broke behavior', icon: Bug },
+    { id: 'claimed-done-without-proof', label: 'No proof', icon: Flag },
+    { id: 'too-many-questions', label: 'Too many questions', icon: HelpCircle },
+    { id: 'too-verbose', label: 'Too verbose', icon: Flag },
+    { id: 'slow', label: 'Slow', icon: Flag },
+    { id: 'other', label: 'Other', icon: Lightbulb },
   ];
 
   $effect(() => {
@@ -65,17 +81,13 @@
     error = '';
     try {
       const response = await apiFetch(
-        apiUrl('/api/feedback'),
+        apiUrl('/api/feedback/local'),
         {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             category,
             message: trimmed,
-            email: email.trim() || undefined,
-            appVersion,
-            platform: includeDiagnostics ? navigator.userAgent.slice(0, 300) : undefined,
-            context: includeDiagnostics ? { route: window.location.pathname } : undefined,
           }),
         },
         15_000,
@@ -126,7 +138,7 @@
               Help shape Koryphaios
             </h2>
             <p class="mt-1 text-xs leading-5 text-[var(--color-text-muted)]">
-              Sent privately to the Koryphaios team. No email app or account required.
+              Stored locally by default. It never changes production prompts automatically.
             </p>
           </div>
           <button
@@ -171,7 +183,7 @@
               class="mb-2 text-[11px] font-bold uppercase tracking-wider text-[var(--color-text-muted)]"
               >What kind of feedback?</legend
             >
-            <div class="grid grid-cols-4 gap-2">
+            <div class="grid grid-cols-2 gap-2 sm:grid-cols-3">
               {#each categories as option (option.id)}
                 <button
                   type="button"
@@ -198,9 +210,7 @@
               maxlength="8000"
               rows="6"
               required
-              placeholder={category === 'bug'
-                ? 'What happened, what did you expect, and how can we reproduce it?'
-                : 'Share the details that would help us act on this.'}
+              placeholder="What happened, what did you expect, and what evidence would prove the correction?"
               class="w-full resize-y rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-2)] px-4 py-3 text-sm leading-6 text-[var(--color-text-primary)] outline-none transition focus:border-[var(--color-accent)] focus:ring-2 focus:ring-[var(--color-accent)]/15"
             ></textarea>
             <span class="mt-1 block text-right text-[10px] text-[var(--color-text-muted)]"
@@ -208,7 +218,7 @@
             >
           </label>
 
-          <label class="block">
+          <label class="hidden">
             <span
               class="mb-2 block text-[11px] font-bold uppercase tracking-wider text-[var(--color-text-muted)]"
               >Reply email <span class="normal-case tracking-normal">(optional)</span></span
@@ -227,7 +237,7 @@
             type="button"
             role="switch"
             aria-checked={includeDiagnostics}
-            class="flex w-full items-center justify-between gap-4 rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-2)] px-4 py-3 text-left"
+            class="hidden w-full items-center justify-between gap-4 rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-2)] px-4 py-3 text-left"
             onclick={() => (includeDiagnostics = !includeDiagnostics)}
           >
             <span
@@ -258,7 +268,7 @@
 
           <div class="flex items-center justify-between gap-4 pt-1">
             <p class="text-[10px] leading-4 text-[var(--color-text-muted)]">
-              Delivered to micah.cooley@sylorlabs.com
+              Local evaluation candidate — no source, prompts, screenshots, or paths are uploaded.
             </p>
             <div class="flex gap-2">
               <button

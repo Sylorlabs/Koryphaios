@@ -5,7 +5,6 @@ export const ProviderName = {
   Anthropic: 'anthropic',
   OpenAI: 'openai',
   Google: 'google',
-  // 'google-subscription' (Gemini CLI) is RETIRED — never re-add it.
   AIStudio: 'aistudio',
   XAI: 'xai',
 
@@ -175,7 +174,8 @@ export const PROVIDER_AUTH_MODES: Record<ProviderName, ProviderAuthMode> = {
   codex: 'auth_only',
   grok: 'auth_only',
   openai: 'api_key',
-  google: 'api_key_or_auth',
+  google: 'api_key',
+  aistudio: 'api_key',
   xai: 'api_key',
   openrouter: 'api_key',
   groq: 'api_key',
@@ -228,7 +228,8 @@ export const PROVIDER_ENV_VARS: Record<
   claude: { authToken: 'CLAUDE_CODE_OAUTH_TOKEN' },
   openai: { apiKey: 'OPENAI_API_KEY' },
   grok: { authToken: 'GROK_CODE_XAI_API_KEY' },
-  google: { apiKey: 'GEMINI_API_KEY', authToken: 'GEMINI_AUTH_TOKEN' },
+  google: { apiKey: 'GOOGLE_API_KEY' },
+  aistudio: { apiKey: 'GEMINI_API_KEY' },
   xai: { apiKey: 'XAI_API_KEY' },
   openrouter: { apiKey: 'OPENROUTER_API_KEY', baseUrl: 'OPENROUTER_BASE_URL' },
   groq: { apiKey: 'GROQ_API_KEY' },
@@ -238,7 +239,7 @@ export const PROVIDER_ENV_VARS: Record<
   opencodego: { apiKey: 'OPENCODE_GO_API_KEY' },
   azure: { apiKey: 'AZURE_OPENAI_API_KEY', baseUrl: 'AZURE_OPENAI_ENDPOINT' },
   bedrock: {}, // Uses AWS credentials
-  vertexai: {}, // Uses Google Application Default Credentials
+  vertexai: { apiKey: 'GOOGLE_VERTEX_AI_API_KEY' },
   local: { baseUrl: 'LOCAL_ENDPOINT' },
   ollama: { baseUrl: 'OLLAMA_BASE_URL' },
   codex: { authToken: 'CODEX_AUTH_TOKEN' },

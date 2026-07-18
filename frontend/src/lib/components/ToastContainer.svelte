@@ -85,9 +85,9 @@
           <button
             class="text-xs underline opacity-75 hover:opacity-100 ml-2 shrink-0"
             onclick={() => { toast.onRetry?.(); toastStore.dismiss(toast.id); }}
-            aria-label="Retry action"
+            aria-label={toast.actionLabel ?? 'Retry action'}
           >
-            Retry
+            {toast.actionLabel ?? 'Retry'}
           </button>
         {/if}
         <button 

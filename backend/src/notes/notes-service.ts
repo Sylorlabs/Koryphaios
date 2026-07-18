@@ -384,7 +384,12 @@ export async function syncProjectDocuments(
 
   walk(root);
   const foundIds = new Set<string>();
-  const changed: Array<{ id: string; content: string; sourcePath: string }> = [];
+  const changed: Array<{ id: string; content: string; sourcePath: string; existed: boolean }> = [];
+  const existingProjectRows = (await db.select().from(notes)).filter(
+    (row) => projectDocumentIdentity(row.id)?.projectRoot === root,
+  );
+  const existingById = new Map(existingProjectRows.map((row) => [row.id, row]));
+  const pendingInserts: Array<typeof notes.$inferInsert> = [];
   let created = 0;
   let updated = 0;
 
@@ -405,12 +410,12 @@ export async function syncProjectDocuments(
       'project-file',
       extension === '.html' || extension === '.htm' ? 'html' : 'markdown',
     ]);
-    const rows = await db.select().from(notes).where(eq(notes.id, id));
-    if (rows[0]) {
+    const existing = existingById.get(id);
+    if (existing) {
       if (
-        rows[0].content !== content ||
-        rows[0].title !== title ||
-        rows[0].folderPath !== folderPath
+        existing.content !== content ||
+        existing.title !== title ||
+        existing.folderPath !== folderPath
       ) {
         await db
           .update(notes)
@@ -419,7 +424,7 @@ export async function syncProjectDocuments(
         updated++;
       }
     } else {
-      await db.insert(notes).values({
+      pendingInserts.push({
         id,
         title,
         content,
@@ -434,14 +439,18 @@ export async function syncProjectDocuments(
       created++;
     }
     fileMtimeCache.set(absolute, stat.mtimeMs);
-    changed.push({ id, content, sourcePath });
+    changed.push({ id, content, sourcePath, existed: Boolean(existing) });
   }
 
-  const projectRows = (await db.select().from(notes)).filter(
-    (row) => projectDocumentIdentity(row.id)?.projectRoot === root,
-  );
+  // A fresh project used to perform one SELECT and one INSERT per document.
+  // Bulk insertion removes that N+1 startup cost while preserving per-file
+  // write-through updates for documents already in the graph.
+  for (let i = 0; i < pendingInserts.length; i += 500) {
+    await db.insert(notes).values(pendingInserts.slice(i, i + 500));
+  }
+
   let removed = 0;
-  for (const row of projectRows) {
+  for (const row of existingProjectRows) {
     if (!foundIds.has(row.id)) {
       await db.delete(notes).where(eq(notes.id, row.id));
       removed++;
@@ -452,9 +461,14 @@ export async function syncProjectDocuments(
   // title/alias index ONCE and reuse it (no per-link DB round-trip).
   if (changed.length > 0 || removed > 0) {
     invalidateNotesCache();
-    const index = await getResolveIndex();
-    for (const { id, content, sourcePath } of changed) {
-      await parseAndSaveLinks(id, content, { index, skipInvalidate: true });
+    const needsWikilinkIndex = changed.some(({ content }) => content.includes('[['));
+    const index = needsWikilinkIndex ? await getResolveIndex() : undefined;
+    for (const { id, content, sourcePath, existed } of changed) {
+      // Existing documents must clear stale links even if their new content
+      // has none. Brand-new unlinked documents need no DELETE/INSERT work.
+      if (existed || content.includes('[[')) {
+        await parseAndSaveLinks(id, content, { index, skipInvalidate: true });
+      }
       for (const targetPath of extractProjectDocumentLinks(sourcePath, content)) {
         const targetId = projectDocumentId(root, targetPath);
         if (targetId === id || !foundIds.has(targetId)) continue;

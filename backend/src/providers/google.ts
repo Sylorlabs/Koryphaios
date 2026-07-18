@@ -36,7 +36,7 @@ export class GoogleProvider implements Provider {
   }
 
   isAvailable(): boolean {
-    const available = !this.config.disabled && !!(this.config.apiKey || this.config.authToken);
+    const available = !this.config.disabled && !!this.config.apiKey;
     if (available && this.isAiStudio && !isModelListCacheFresh(this.lastFetch)) {
       this.refreshModelsInBackground(getModelsForProvider(this.name));
     }
@@ -58,7 +58,7 @@ export class GoogleProvider implements Provider {
 
   private refreshModelsInBackground(fallback: ModelDef[]) {
     if (this.fetchInProgress) return;
-    const apiKey = this.config.apiKey || this.config.authToken;
+    const apiKey = this.config.apiKey;
     if (!apiKey) return;
 
     this.fetchInProgress = true;
@@ -74,12 +74,12 @@ export class GoogleProvider implements Provider {
           const name = m.name;
           if (!name || !name.startsWith('models/')) continue;
           const id = name.replace(/^models\//, '');
-          discovered.push(modelFromRemoteId(id, 'google', fallback));
+          discovered.push(modelFromRemoteId(id, this.name, fallback));
         }
         if (discovered.length > 0) {
           this.cachedModels = mergeModelLists(fallback, discovered);
           providerLog.debug(
-            { provider: 'google', count: this.cachedModels.length },
+            { provider: this.name, count: this.cachedModels.length },
             'Model list refreshed from Gemini API',
           );
         } else {
@@ -88,7 +88,7 @@ export class GoogleProvider implements Provider {
         this.lastFetch = Date.now();
       } catch (err) {
         providerLog.debug(
-          { provider: 'google', err: err instanceof Error ? err.message : String(err) },
+          { provider: this.name, err: err instanceof Error ? err.message : String(err) },
           'Model list refresh failed; using catalog fallback',
         );
         this.cachedModels ??= fallback;
@@ -101,7 +101,7 @@ export class GoogleProvider implements Provider {
   async *streamResponse(request: StreamRequest): AsyncGenerator<ProviderEvent> {
     const { GoogleGenAI } = await import('@google/genai');
 
-    const apiKey = this.config.apiKey || this.config.authToken;
+    const apiKey = this.config.apiKey;
     if (!apiKey) {
       yield {
         type: 'error',
