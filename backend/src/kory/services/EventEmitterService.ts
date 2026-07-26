@@ -23,6 +23,27 @@ export interface EventEmitterServiceConfig {
   managerAgentId: string;
 }
 
+export type WorkflowHookEvent =
+  | 'before-tool'
+  | 'after-tool'
+  | 'before-delegate'
+  | 'after-worker'
+  | 'before-critic'
+  | 'after-critic'
+  | 'before-complete';
+
+export interface WorkflowHookDecision {
+  decision: 'allow' | 'deny';
+  reason?: string;
+  evidence?: string[];
+}
+
+export type WorkflowHook = (context: {
+  event: WorkflowHookEvent;
+  sessionId: string;
+  data: Record<string, unknown>;
+}) => Promise<WorkflowHookDecision | void> | WorkflowHookDecision | void;
+
 /**
  * Centralized event emission service.
  *
@@ -31,9 +52,32 @@ export interface EventEmitterServiceConfig {
  */
 export class EventEmitterService {
   private managerAgentId: string;
+  private workflowHooks = new Map<WorkflowHookEvent, Set<WorkflowHook>>();
 
   constructor(config: EventEmitterServiceConfig) {
     this.managerAgentId = config.managerAgentId;
+  }
+
+  registerWorkflowHook(event: WorkflowHookEvent, hook: WorkflowHook): () => void {
+    const hooks = this.workflowHooks.get(event) ?? new Set<WorkflowHook>();
+    hooks.add(hook);
+    this.workflowHooks.set(event, hooks);
+    return () => hooks.delete(hook);
+  }
+
+  async runWorkflowHooks(
+    event: WorkflowHookEvent,
+    sessionId: string,
+    data: Record<string, unknown>,
+  ): Promise<WorkflowHookDecision> {
+    const evidence: string[] = [];
+    for (const hook of this.workflowHooks.get(event) ?? []) {
+      const result = await hook({ event, sessionId, data });
+      if (!result) continue;
+      evidence.push(...(result.evidence ?? []));
+      if (result.decision === 'deny') return { ...result, evidence };
+    }
+    return { decision: 'allow', evidence };
   }
 
   // ─── Kory Events ─────────────────────────────────────────────────────────────

@@ -66,6 +66,7 @@ export class UnifiedFileWatcher extends EventEmitter {
   private eventBatch: FileChangeEvent[] = [];
   private batchTimer: NodeJS.Timeout | null = null;
   private debouncedEmit: (event: FileChangeEvent) => void;
+  private performanceMonitorTimer: NodeJS.Timeout | null = null;
 
   // Performance monitoring
   private stats: FileWatchingStats = {
@@ -132,6 +133,11 @@ export class UnifiedFileWatcher extends EventEmitter {
       this.batchTimer = null;
     }
 
+    if (this.performanceMonitorTimer) {
+      clearInterval(this.performanceMonitorTimer);
+      this.performanceMonitorTimer = null;
+    }
+
     // Emit any remaining batched events
     if (this.eventBatch.length > 0) {
       this.emitBatchedEvents();
@@ -142,12 +148,24 @@ export class UnifiedFileWatcher extends EventEmitter {
   }
 
   private async initializeWatcher(): Promise<void> {
-    this.watcher = watch(this.config.workspaceRoot, {
+    const watchedPaths = Array.from(
+      new Set([
+        ...this.config.watchPatterns.source,
+        ...this.config.watchPatterns.test,
+        ...this.config.watchPatterns.config,
+        ...this.config.watchPatterns.build,
+      ])
+    );
+
+    this.watcher = watch(watchedPaths, {
+      cwd: this.config.workspaceRoot,
       ignored: this.config.ignorePatterns,
       persistent: true,
       ignoreInitial: true,
       followSymlinks: false,
+      dot: true,
       usePolling: false,
+      ignorePermissionErrors: true,
       awaitWriteFinish: {
         stabilityThreshold: 100,
         pollInterval: 100,
@@ -194,6 +212,15 @@ export class UnifiedFileWatcher extends EventEmitter {
     });
 
     this.watcher.on('error', (error: Error) => {
+      const fsError = error as NodeJS.ErrnoException;
+      if (fsError.code === 'EACCES' || fsError.code === 'EPERM') {
+        this.logger.warn('Ignoring file watcher permission error', {
+          code: fsError.code,
+          path: fsError.path,
+        });
+        return;
+      }
+
       this.logger.error('File watcher error', error);
       this.emit('watcher-error', error);
     });
@@ -415,7 +442,7 @@ export class UnifiedFileWatcher extends EventEmitter {
     this.stats.memoryUsage = process.memoryUsage().heapUsed;
     this.emit('performance-stats', { ...this.stats });
 
-    setInterval(() => {
+    this.performanceMonitorTimer = setInterval(() => {
       this.stats.memoryUsage = process.memoryUsage().heapUsed;
       this.emit('performance-stats', { ...this.stats });
     }, 1000);
@@ -448,6 +475,7 @@ export class UnifiedFileWatcher extends EventEmitter {
       performanceMonitoring: true,
       watchPatterns: {
         source: [
+          '*.{ts,tsx,js,jsx,py,go,rs,java,c,cpp}',
           'src/**/*.{ts,tsx,js,jsx,py,go,rs,java,c,cpp}',
           'lib/**/*.{ts,tsx,js,jsx,py,go,rs,java,c,cpp}',
           'app/**/*.{ts,tsx,js,jsx,py,go,rs,java,c,cpp}',
@@ -457,15 +485,24 @@ export class UnifiedFileWatcher extends EventEmitter {
           'services/**/*.{ts,tsx,js,jsx}',
         ],
         test: [
+          '*.{test,spec}.{ts,tsx,js,jsx,py,go,rs}',
           '**/*.{test,spec}.{ts,tsx,js,jsx,py,go,rs}',
           'tests/**/*.{ts,tsx,js,jsx,py,go,rs}',
           '__tests__/**/*.{ts,tsx,js,jsx,py,go,rs}',
         ],
         config: [
+          '.eslintrc*',
           'package.json',
           'tsconfig*.json',
           'jsconfig.json',
-          '.eslintrc*',
+          '.eslintrc',
+          '.eslintrc.*',
+          '.eslintrc.js',
+          '.eslintrc.json',
+          '.eslintrc.yaml',
+          '.eslintrc.yml',
+          '.eslintrc.cjs',
+          '.eslintrc.mjs',
           '.prettierrc*',
           'vite.config.*',
           'webpack.config.*',

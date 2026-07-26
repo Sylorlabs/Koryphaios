@@ -65,7 +65,7 @@ const WORKERS = [
 const DEMO_PROVIDERS = [
   {
     name: 'codex',
-    label: 'Codex',
+    label: 'OpenAI Codex (CLI)',
     enabled: true,
     authenticated: true,
     authSource: 'CLI session',

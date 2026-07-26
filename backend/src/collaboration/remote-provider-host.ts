@@ -185,6 +185,9 @@ function toStreamRequest(
     maxTokens: payload.maxTokens,
     temperature: payload.temperature,
     reasoningLevel: payload.reasoningLevel,
+    harnessRole: payload.harnessRole,
+    promptManifestHash: payload.promptManifestHash,
+    taskContractHash: payload.taskContractHash,
     signal,
     // Agentic turns run the CLI in the host sandbox; pure inference ignores it.
     workingDirectory: sandboxRoot,

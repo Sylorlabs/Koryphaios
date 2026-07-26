@@ -45,8 +45,8 @@ describe('CLI account autodetection', () => {
       'work@example.com',
     ]);
     expect(accounts.map((account) => account.plan).sort()).toEqual(['plus', 'pro']);
+    expect(accounts.map((account) => account.label).sort()).toEqual(['codex', 'codex 2']);
     expect(accounts.every((account) => account.health === 'ready')).toBe(true);
     expect(JSON.stringify(accounts)).not.toContain('must-never-be-returned');
   });
 });
-

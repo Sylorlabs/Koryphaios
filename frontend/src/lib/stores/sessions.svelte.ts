@@ -12,7 +12,7 @@ import { apiFetch } from '$lib/api.svelte';
 const LAST_SESSION_KEY = 'koryphaios-last-session';
 const NEW_CHAT_BEHAVIOR_KEY = 'koryphaios-new-chat-behavior';
 
-export type NewChatBehavior = 'reuse-empty' | 'always-create';
+export type NewChatBehavior = 'always-create';
 
 let sessions = $state<Session[]>([]);
 let activeSessionId = $state<string>('');
@@ -23,13 +23,12 @@ let fetchGeneration = 0;
 let hasRestoredInitialSession = false;
 
 function loadNewChatBehavior(): NewChatBehavior {
-  if (!browser) return 'reuse-empty';
+  if (!browser) return 'always-create';
   try {
-    return localStorage.getItem(NEW_CHAT_BEHAVIOR_KEY) === 'always-create'
-      ? 'always-create'
-      : 'reuse-empty';
+    localStorage.setItem(NEW_CHAT_BEHAVIOR_KEY, 'always-create');
+    return 'always-create';
   } catch {
-    return 'reuse-empty';
+    return 'always-create';
   }
 }
 
@@ -164,24 +163,14 @@ function resolveNewChatWorkingDirectory(): string | undefined {
  *
  *  Behavior:
  *  - shift=true → always create a brand-new session.
- *  - With the default "reuse-empty" preference, shift=false and an active
- *    session exists with zero messages →
- *    just keep using it (no new session is created, prevents spam).
+ *  - Always create is the default behavior for this app: no untouched composer
+ *    reuse is performed from the new-chat control.
  *  - Inside a workspace: opens a session scoped to either the workspace root
  *    (scope='all') or the active project (scope='project'), based on the
  *    sidebar slider.
  *  - Outside a workspace: opens a session scoped to the active project (or
  *    unscoped if no project is open). */
-async function newChat(opts: { shift?: boolean } = {}): Promise<string | null> {
-  const forceNew = opts.shift === true || newChatBehavior === 'always-create';
-  if (!forceNew) {
-    const active = sessions.find((s) => s.id === activeSessionId);
-    if (active && (active.messageCount ?? 0) === 0) {
-      // The user already has a fresh empty session active — reuse it instead
-      // of creating another one. Focus is handled by the caller.
-      return active.id;
-    }
-  }
+async function newChat(_opts: { shift?: boolean } = {}): Promise<string | null> {
   return createSession({ workingDirectory: resolveNewChatWorkingDirectory() });
 }
 

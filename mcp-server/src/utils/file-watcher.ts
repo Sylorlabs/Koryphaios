@@ -13,7 +13,9 @@ export interface FileWatcherOptions {
   persistent?: boolean;
   ignoreInitial?: boolean;
   followSymlinks?: boolean;
+  dot?: boolean;
   cwd?: string;
+  ignorePermissionErrors?: boolean;
   disableGlobbing?: boolean;
   usePolling?: boolean;
   interval?: number;
@@ -33,6 +35,9 @@ export class FileWatcher extends EventEmitter {
   private watchedPaths: Set<string> = new Set();
   private options: FileWatcherOptions;
   private debouncedEmit: (event: WorkspaceEvent) => void;
+  private isWatcherReady = false;
+  private readyPromise: Promise<void>;
+  private readyResolve: (() => void) | null = null;
 
   constructor(options: FileWatcherOptions = {}) {
     super();
@@ -41,7 +46,9 @@ export class FileWatcher extends EventEmitter {
       persistent: true,
       ignoreInitial: true,
       followSymlinks: false,
+      dot: false,
       usePolling: false,
+      ignorePermissionErrors: true,
       awaitWriteFinish: {
         stabilityThreshold: 100,
         pollInterval: 100,
@@ -49,10 +56,29 @@ export class FileWatcher extends EventEmitter {
       ...options,
     };
 
+    this.readyPromise = new Promise(resolve => {
+      this.readyResolve = resolve;
+    });
+
     // Debounce events to avoid spam
     this.debouncedEmit = debounce((event: WorkspaceEvent) => {
       this.emit('change', event);
     }, 100);
+  }
+
+  private createReadyPromise(): void {
+    this.readyPromise = new Promise(resolve => {
+      this.readyResolve = resolve;
+    });
+    this.isWatcherReady = false;
+  }
+
+  async waitForReady(): Promise<void> {
+    await this.readyPromise;
+  }
+
+  isWatchingReady(): boolean {
+    return this.isWatcherReady;
   }
 
   watch(paths: string | string[]): void {
@@ -91,11 +117,12 @@ export class FileWatcher extends EventEmitter {
     }
   }
 
-  close(): void {
+  async close(): Promise<void> {
     if (this.watcher) {
-      this.watcher.close();
+      await this.watcher.close();
       this.watcher = null;
       this.watchedPaths.clear();
+      this.createReadyPromise();
     }
   }
 
@@ -109,6 +136,18 @@ export class FileWatcher extends EventEmitter {
 
   private setupEventHandlers(): void {
     if (!this.watcher) return;
+
+    if (this.isWatcherReady && this.readyResolve) {
+      return;
+    }
+
+    this.watcher.once('ready', () => {
+      this.isWatcherReady = true;
+      if (this.readyResolve) {
+        this.readyResolve();
+        this.readyResolve = null;
+      }
+    });
 
     this.watcher.on('add', (path: string) => {
       this.emitWorkspaceEvent('workspace:file-changed', path, 'added');
@@ -131,10 +170,26 @@ export class FileWatcher extends EventEmitter {
     });
 
     this.watcher.on('error', (error: Error) => {
+      const fsError = error as NodeJS.ErrnoException;
+      if (fsError.code === 'EACCES' || fsError.code === 'EPERM') {
+        console.warn('Ignoring file watcher permission error', {
+          code: fsError.code,
+          path: fsError.path,
+        });
+        return;
+      }
+
       this.emit('error', error);
     });
 
     this.watcher.on('ready', () => {
+      if (!this.isWatcherReady) {
+        this.isWatcherReady = true;
+        if (this.readyResolve) {
+          this.readyResolve();
+          this.readyResolve = null;
+        }
+      }
       this.emit('ready');
     });
   }
@@ -228,6 +283,7 @@ export class FileWatcher extends EventEmitter {
     options: Partial<FileWatcherOptions> = {}
   ): FileWatcher {
     const watcher = new FileWatcher({
+      dot: true,
       cwd: workspaceRoot,
       ...options,
     });
@@ -237,7 +293,14 @@ export class FileWatcher extends EventEmitter {
       'package.json',
       'tsconfig.json',
       'jsconfig.json',
+      '.eslintrc',
       '.eslintrc.*',
+      '.eslintrc.js',
+      '.eslintrc.json',
+      '.eslintrc.yaml',
+      '.eslintrc.yml',
+      '.eslintrc.cjs',
+      '.eslintrc.mjs',
       '.prettierrc.*',
       'vite.config.*',
       'webpack.config.*',

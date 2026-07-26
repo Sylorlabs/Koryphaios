@@ -2,7 +2,7 @@
 
 import type { ProviderName } from '@koryphaios/shared';
 
-export type ProviderDeployment = 'cloud' | 'local' | 'hybrid';
+export type ProviderDeployment = 'cloud' | 'api' | 'local' | 'hybrid';
 
 export interface ProviderDisplayMeta {
   label: string;
@@ -20,12 +20,38 @@ export const JULES_SYNC_INSTRUCTIONS = `Jules runs in Google's cloud — it does
 Never assume local files changed until you have pulled or checked out the remote work.`;
 
 export const PROVIDER_DISPLAY: Partial<Record<ProviderName, ProviderDisplayMeta>> = {
+  codex: {
+    label: 'OpenAI Codex (CLI)',
+    iconPath: '/provider-icons/lobehub/codex.svg',
+    deployment: 'local',
+    description:
+      'Legacy CLI-backed subscription mode for Codex. Koryphaios connects to the local `codex` CLI session.',
+  },
+  'codex-auth': {
+    label: 'OpenAI Codex (Auth)',
+    iconPath: '/provider-icons/lobehub/codex.svg',
+    deployment: 'api',
+    description: 'OpenAI API-compatible mode. Provide an API key and use API-based execution.',
+  },
   google: {
     label: 'Google',
     iconPath: '/provider-icons/lobehub/google.svg',
-    deployment: 'cloud',
+    deployment: 'api',
     description:
       'Direct Google Gemini API. Uses only GOOGLE_API_KEY; it does not use AI Studio, Vertex AI, gcloud, or Jules credentials.',
+  },
+  kimicode: {
+    label: 'Kimi Code (CLI)',
+    iconPath: '/provider-icons/lobehub/kimi-color.svg',
+    deployment: 'local',
+    description:
+      'Legacy CLI-backed subscription mode for Kimi Code. Koryphaios connects through device-auth session markers.',
+  },
+  'kimicode-auth': {
+    label: 'Kimi Code (Auth)',
+    iconPath: '/provider-icons/lobehub/kimi-color.svg',
+    deployment: 'api',
+    description: 'OpenAI-compatible mode. Provide a Kimi API key and call Kimi endpoints directly.',
   },
   grok: {
     label: 'Grok Build',
@@ -33,6 +59,13 @@ export const PROVIDER_DISPLAY: Partial<Record<ProviderName, ProviderDisplayMeta>
     deployment: 'local',
     description:
       'CLI only. Runs the official grok CLI on your machine. Install grok, run "grok login", then click Auth — no API key or token entry needed.',
+  },
+  cohere: {
+    label: 'Cohere',
+    iconPath: '/provider-icons/lobehub/cohere.svg',
+    deployment: 'api',
+    description:
+      'API model via OpenAI-compatible compatibility endpoint (set API key, then verify connection).',
   },
   antigravity: {
     label: 'Antigravity',
@@ -53,19 +86,19 @@ export const PROVIDER_DISPLAY: Partial<Record<ProviderName, ProviderDisplayMeta>
     iconPath: '/provider-icons/lobehub/windsurf.svg',
     deployment: 'local',
     description:
-      'CLI only. Runs Cognition\'s official devin CLI on your machine (cloud-backed). Install devin and run "devin auth login" — no API key needed.',
+      'CLI only. Runs Cognition\'s official devin CLI on your machine. Install devin and run "devin auth login" — no API key needed.',
   },
   aistudio: {
     label: 'Google AI Studio',
-    iconPath: '/provider-icons/lobehub/gemini.svg',
-    deployment: 'cloud',
+    iconPath: '/provider-icons/lobehub/aistudio.svg',
+    deployment: 'api',
     description:
       'Google AI Studio — paste your Gemini API key (aistudio.google.com/apikey). Direct Gemini API, no gcloud sign-in.',
   },
   vertexai: {
     label: 'Vertex AI',
     iconPath: '/provider-icons/lobehub/vertexai.svg',
-    deployment: 'cloud',
+    deployment: 'api',
     description:
       'Google Cloud Vertex AI. Uses GOOGLE_VERTEX_AI_API_KEY with your GCP project and location; it is not the Google or AI Studio provider.',
   },

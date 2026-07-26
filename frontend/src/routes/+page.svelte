@@ -180,6 +180,7 @@
           void refreshComposerFileMentions();
         }
       });
+      void notesStore.fetchSettings();
     }
     recentProjects = parseRecentProjects();
     loadLayoutPrefs();
@@ -187,6 +188,7 @@
     window.addEventListener('keydown', handleGlobalKeydown);
 
     const handleOpenNote = async (e: Event) => {
+      if (!notesStore.settings.enabled) return;
       const title = (e as CustomEvent<{ title: string }>).detail?.title;
       if (!title) return;
       showNotes = true;
@@ -195,6 +197,7 @@
     window.addEventListener('open-note', handleOpenNote);
 
     const handleOpenNotesGraph = () => {
+      if (!notesStore.settings.enabled) return;
       showNotes = true;
     };
     window.addEventListener('open-notes-graph', handleOpenNotesGraph);
@@ -222,6 +225,12 @@
       window.removeEventListener('open-team-settings', handleOpenTeamSettings);
       window.removeEventListener('kory:focus-input', handleFocusInput);
     };
+  });
+
+  // Enforce the product setting immediately: closing a currently open panel
+  // also prevents every dashboard entry point from keeping it reachable.
+  $effect(() => {
+    if (!notesStore.settings.enabled) showNotes = false;
   });
 
   async function startDragging(e: MouseEvent) {
@@ -273,7 +282,7 @@
 
     if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === 'N') {
       e.preventDefault();
-      showNotes = !showNotes;
+      if (notesStore.settings.enabled) showNotes = !showNotes;
       return;
     }
 
@@ -911,7 +920,7 @@ RULES:
         showGit = !showGit;
         break;
       case 'toggle_notes':
-        showNotes = !showNotes;
+        if (notesStore.settings.enabled) showNotes = !showNotes;
         break;
       case 'toggle_theme':
         showThemeQuickMenu = true;
@@ -1138,7 +1147,7 @@ RULES:
   {showSidebar}
   {zenMode}
   showGit={showGit && !collaborationStore.activeJoinedSession}
-  showNotes={showNotes && !collaborationStore.activeJoinedSession}
+  showNotes={notesStore.settings.enabled && showNotes && !collaborationStore.activeJoinedSession}
   activeSessionId={sessionStore.activeSessionId}
   {connectionDot}
   {connectionStatusLabel}
@@ -1154,6 +1163,7 @@ RULES:
       {showGit}
       {showAgents}
       {showNotes}
+      notesEnabled={notesStore.settings.enabled}
       {zenMode}
       projectName={collaborationStore.activeJoinedSession?.sessionName ?? projectStore.displayName}
       isYoloMode={wsStore.isYoloMode}

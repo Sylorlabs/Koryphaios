@@ -26,6 +26,18 @@ type ProfileDefinition = {
   authFiles: string[];
 };
 
+/** A stable, human-facing name for a local CLI profile. This deliberately
+ * describes the command context, not an email address or extracted token. */
+export function cliAccountCommandLabel(definition: Pick<ProfileDefinition, 'provider' | 'directoryPrefix'>, profileDir: string): string {
+  const profileName = basename(profileDir);
+  if (profileName === definition.directoryPrefix) return definition.provider;
+  const suffix = profileName.slice(definition.directoryPrefix.length).replace(/^[-_\s]+/, '');
+  if (!suffix) return definition.provider;
+  // `.codex2` is conventionally invoked through CODEX_HOME=~/.codex2. Present
+  // that context as the command users recognize: “codex 2”.
+  return `${definition.provider} ${suffix.replace(/([a-zA-Z])([0-9])/g, '$1 $2').replace(/([0-9])([a-zA-Z])/g, '$1 $2').replace(/[-_]+/g, ' ')}`.replace(/\s+/g, ' ').trim();
+}
+
 // These are login stores owned by the official CLI harnesses. Numbered or
 // suffixed sibling homes are intentionally included: users commonly isolate
 // work/personal subscriptions with wrappers such as CODEX_HOME=~/.codex2.
@@ -112,13 +124,14 @@ export function discoverCliAccounts(home = homedir()): DiscoveredCliAccount[] {
     for (const profileDir of candidateDirectories(home, definition)) {
       const authFile = definition.authFiles.map((file) => join(profileDir, file)).find(existsSync);
       if (!authFile) continue;
-      const profileName = basename(profileDir);
       const identity = identityFromAuth(authFile);
-      const suffix = profileName === definition.directoryPrefix ? 'Default' : profileName.replace(/^\./, '');
+      const commandLabel = cliAccountCommandLabel(definition, profileDir);
       accounts.push({
         id: `cli:${definition.provider}:${Buffer.from(profileDir).toString('base64url')}`,
         provider: definition.provider,
-        label: identity.email ? `${identity.email} (${suffix})` : `${definition.provider} ${suffix}`,
+        // Keep the command profile first: it is what distinguishes accounts in
+        // model pickers, billing, and an actual spawned CLI process.
+        label: commandLabel,
         ...identity,
         profileDir,
         authFile,
@@ -134,4 +147,3 @@ export function discoverCliAccounts(home = homedir()): DiscoveredCliAccount[] {
 export function getDiscoveredCliAccount(id: string): DiscoveredCliAccount | null {
   return discoverCliAccounts().find((account) => account.id === id) ?? null;
 }
-

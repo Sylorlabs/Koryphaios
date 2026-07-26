@@ -15,7 +15,6 @@ import { toastStore } from '$lib/stores/toast.svelte';
     Server,
     Cpu,
     X,
-    User,
     Shield,
     Search,
     CreditCard,
@@ -50,7 +49,7 @@ import { toastStore } from '$lib/stores/toast.svelte';
   import { modeStore } from '$lib/stores/mode.svelte';
   import { notesStore } from '$lib/stores/notes.svelte';
   import { projectStore } from '$lib/stores/project.svelte';
-  import { sessionStore, type NewChatBehavior } from '$lib/stores/sessions.svelte';
+  import { sessionStore } from '$lib/stores/sessions.svelte';
   import {
     NOTE_TOOL_DEFINITIONS,
     type NotePermissionLevel,
@@ -80,10 +79,6 @@ import { apiFetch, parseJsonResponse } from '$lib/api.svelte';
   let selectorTarget = $state<any>(null);
   let showRotateDialog = $state(false);
   let rotateProvider = $state<{ name: string; keyType: 'apiKey' | 'authToken' } | null>(null);
-  let showCodexProfileDialog = $state(false);
-  let codexProfileInput = $state('');
-  let codexProfileInputRef = $state<HTMLInputElement | null>(null);
-  let pendingCodexAuthOptions = $state<{ saveAccount?: boolean; label?: string } | null>(null);
   let showAccountManageDialog = $state(false);
   let managingAccountProvider = $state<string | null>(null);
   let managingAccountId = $state<string | null>(null);
@@ -197,11 +192,7 @@ import { apiFetch, parseJsonResponse } from '$lib/api.svelte';
     }
   });
 
-  $effect(() => {
-    if (showCodexProfileDialog) {
-      void tick().then(() => codexProfileInputRef?.focus());
-    }
-  });
+
 
   function handleKeydown(e: KeyboardEvent) {
     if (e.key === 'Escape' && open && onClose) onClose();
@@ -214,6 +205,9 @@ import { apiFetch, parseJsonResponse } from '$lib/api.svelte';
     getProviderStatus,
     getProviderAccounts,
     usesBrowserAuth,
+    usesLocalCliConnection,
+    getLocalCliConnectLabel,
+    loadProvidersFromApi,
     loadAvailableProviders,
     loadDetectedClis,
     loadProviderAccounts,
@@ -265,6 +259,12 @@ import { apiFetch, parseJsonResponse } from '$lib/api.svelte';
     return false;
   }
 
+  function refreshProviderSection() {
+    if (providersStore.availableProviderTypes.length === 0) void loadAvailableProviders();
+    void loadProvidersFromApi({ forceRefreshModels: true });
+    void loadDetectedClis();
+  }
+
   $effect(() => {
     if (!open) {
       providersLoadAttempted = false;
@@ -275,11 +275,7 @@ import { apiFetch, parseJsonResponse } from '$lib/api.svelte';
     if (activeTab === 'providers') {
       if (!providersLoadAttempted) {
         providersLoadAttempted = true;
-        if (providersStore.availableProviderTypes.length === 0) void loadAvailableProviders();
-        // CLI login state changes underneath us (terminal logins/logouts), so
-        // detection refreshes every time the Providers tab is opened — never
-        // a stale "Connected automatically" for a logged-out CLI.
-        void loadDetectedClis();
+        refreshProviderSection();
       }
     } else {
       providersLoadAttempted = false;
@@ -313,13 +309,85 @@ import { apiFetch, parseJsonResponse } from '$lib/api.svelte';
   });
 
   let providerSearchQuery = $state('');
+  const clineSignInCommand = 'cline auth --provider cline --apikey <YOUR_KEY>';
+  type ProviderCategory = 'all' | 'ready' | 'subscriptions' | 'api' | 'local' | 'custom';
+  let providerCategory = $state<ProviderCategory>('all');
+  const PROVIDER_CATEGORIES: Array<{ id: ProviderCategory; label: string }> = [
+    { id: 'all', label: 'All' },
+    { id: 'ready', label: 'Ready now' },
+    { id: 'subscriptions', label: 'CLI subscriptions' },
+    { id: 'api', label: 'API' },
+    { id: 'local', label: 'Local' },
+    { id: 'custom', label: 'Custom' },
+  ];
+  const LOCAL_PROVIDER_KEYS = new Set(['local', 'ollama', 'lmstudio', 'llamacpp']);
+  const CUSTOM_PROVIDER_KEYS = new Set(['custom']);
+  // Categorization is based on the provider being used, not incidental CLI
+  // detection. For example, installing `claude` must not reclassify the
+  // direct `anthropic` API provider as a subscription.
+  const CLI_SUBSCRIPTION_PROVIDER_KEYS = new Set([
+    'claude',
+    'codex',
+    'grok',
+    'antigravity',
+    'cursor',
+    'devin',
+    'cline',
+    'copilot',
+  ]);
+  const LOCAL_ENDPOINT_PROVIDER_KEYS = new Set(['local', 'ollama', 'lmstudio', 'llamacpp']);
+  const isCliExecutionProvider = (providerKey: string): boolean =>
+    CLI_SUBSCRIPTION_PROVIDER_KEYS.has(providerKey) && !LOCAL_ENDPOINT_PROVIDER_KEYS.has(providerKey);
+  const providerCategoryFor = (provider: { key: string }): Exclude<ProviderCategory, 'all' | 'ready'> => {
+    if (LOCAL_PROVIDER_KEYS.has(provider.key)) return 'local';
+    if (CUSTOM_PROVIDER_KEYS.has(provider.key)) return 'custom';
+    if (CLI_SUBSCRIPTION_PROVIDER_KEYS.has(provider.key)) {
+      return 'subscriptions';
+    }
+    return 'api';
+  };
   const filteredProviderList = $derived.by(() => {
     const q = providerSearchQuery.trim().toLowerCase();
-    if (!q) return providersStore.providerList;
-    return providersStore.providerList.filter(
-      (p) => p.label.toLowerCase().includes(q) || p.key.toLowerCase().includes(q),
-    );
+    return providersStore.providerList
+      .filter((provider) => {
+        const status = getProviderStatus(provider.key);
+        if (providerCategory === 'ready') return Boolean(status?.authenticated);
+        return providerCategory === 'all' || providerCategoryFor(provider) === providerCategory;
+      })
+      .filter(
+        (provider) =>
+          !q ||
+          provider.label.toLowerCase().includes(q) ||
+          provider.key.toLowerCase().includes(q),
+      )
+      .sort((left, right) => {
+        const leftReady = getProviderStatus(left.key)?.authenticated ? 0 : 1;
+        const rightReady = getProviderStatus(right.key)?.authenticated ? 0 : 1;
+        return leftReady - rightReady || left.label.localeCompare(right.label);
+      });
   });
+
+  function deploymentLabel(
+    deployment: 'cloud' | 'api' | 'local' | 'hybrid' | undefined | null,
+    providerKey: string,
+  ): string | null {
+    if (deployment === 'cloud') return 'Cloud agent';
+    if (deployment === 'local') return isCliExecutionProvider(providerKey) ? 'CLI' : 'Local endpoint';
+    return null;
+  }
+
+  function deploymentDescription(
+    deployment: 'cloud' | 'api' | 'local' | 'hybrid' | undefined | null,
+    providerKey: string,
+  ): string | null {
+    if (deployment === 'cloud') {
+      return 'Cloud agent · sync via git pull / gh pr checkout';
+    }
+    if (deployment === 'local') {
+      return isCliExecutionProvider(providerKey) ? 'CLI provider — runs via local CLI' : 'Local endpoint';
+    }
+    return null;
+  }
   const teamModels = $derived.by(() => providersStore.statusList
     .filter((provider) => provider.enabled && provider.authenticated)
     .flatMap((provider) => (provider.selectedModels?.length ? provider.selectedModels : provider.models)
@@ -359,15 +427,9 @@ import { apiFetch, parseJsonResponse } from '$lib/api.svelte';
 
   async function handleStartBrowserAuth(
     name: string,
-    options: { saveAccount?: boolean; label?: string; profileConfirmed?: boolean } = {},
+    options: { saveAccount?: boolean } = {},
   ) {
     const result = await startBrowserAuthFlow(name, options);
-    if (result.kind === 'needs_codex_profile') {
-      pendingCodexAuthOptions = result.options;
-      codexProfileInput = result.options.label?.trim() ?? '';
-      showCodexProfileDialog = true;
-      return;
-    }
     if (result.kind === 'connected') {
       expandedProvider = name;
       if (result.openModelSelector && result.status) {
@@ -437,24 +499,6 @@ import { apiFetch, parseJsonResponse } from '$lib/api.svelte';
     providersStore.destroy();
   });
 
-  async function confirmCodexProfileAuth() {
-    const label = codexProfileInput.trim();
-    if (!label) {
-      toastStore.error('Enter an account name');
-      return;
-    }
-    const options = pendingCodexAuthOptions ?? {};
-    showCodexProfileDialog = false;
-    pendingCodexAuthOptions = null;
-    await handleStartBrowserAuth('codex', {
-      ...options,
-      saveAccount: true,
-      label,
-      profileConfirmed: true,
-    });
-  }
-
-
   // ─── Shortcuts ───────────────────────────────────────────────────────
   let editingShortcutId = $state<string | null>(null);
   let capturedKeys = $state<string[]>([]);
@@ -479,6 +523,7 @@ import { apiFetch, parseJsonResponse } from '$lib/api.svelte';
   let billingCredits = $state<any>(null);
   let billingError = $state<string | null>(null);
   let billingSpendView = $state<'api' | 'subscription' | 'all'>('api');
+  let billingCodexAccount = $state('all');
 
   const billingSpendOptions = [
     { value: 'api', label: 'API spend', description: 'Metered API-key provider charges' },
@@ -500,12 +545,47 @@ import { apiFetch, parseJsonResponse } from '$lib/api.svelte';
     return String(n);
   }
 
+  function codexBillingAccountOptions() {
+    const accounts = (billingCredits?.cliUsage ?? []).filter((cli: any) => cli.provider === 'codex' && cli.accountId);
+    return [
+      { value: 'all', label: 'All Codex CLI accounts', description: 'Combined view of every detected Codex profile' },
+      ...accounts.map((cli: any) => ({
+        value: cli.accountId as string,
+        label: cli.accountLabel || 'codex',
+        description: cli.accountEmail || 'Codex CLI profile',
+      })),
+    ];
+  }
+
+  function visibleCliUsage() {
+    const entries = billingCredits?.cliUsage ?? [];
+    if (billingCodexAccount === 'all') return entries;
+    return entries.filter((cli: any) => cli.provider !== 'codex' || cli.accountId === billingCodexAccount);
+  }
+
   async function loadBillingCredits(forceRefresh = false) {
     billingLoading = true; billingError = null;
     try {
-      const res = await apiFetch(apiUrl(`/api/billing/credits${forceRefresh ? '?refresh=1' : ''}`));
-      if (!res.ok) { billingError = 'Billing API not available'; return; }
+      const requestUrl = `/api/billing/credits${forceRefresh ? '?refresh=1' : ''}`;
+      let res = await apiFetch(apiUrl(requestUrl), {}, 60_000);
+      if (!res.ok) {
+        if (res.status === 500 && forceRefresh) {
+          // Some environments stall during refresh work (provider APIs, heavy log
+          // scans); drop to cached mode and keep the UI usable.
+          res = await apiFetch(apiUrl('/api/billing/credits'), {}, 60_000);
+        }
+        if (!res.ok) {
+          const text = await res.text().catch(() => '');
+          billingError =
+            text && text.trim() ? `Billing API not available (${res.status})` : 'Billing API not available';
+          return;
+        }
+      }
       const data = await parseJsonResponse(res);
+      if (data?.ok === false) {
+        billingError = data.error || 'Billing API returned an error';
+        return;
+      }
       billingCredits = data;
     } catch (e: any) { billingError = e.message; }
     finally { billingLoading = false; }
@@ -553,9 +633,34 @@ import { apiFetch, parseJsonResponse } from '$lib/api.svelte';
     <div class="flex-1 min-h-0 overflow-hidden flex flex-col">
       <!-- Providers Tab -->
       <div class={activeTab === 'providers' ? 'flex-1 overflow-y-auto px-6 py-5 space-y-6' : 'hidden'}>
-        <div class="relative">
-          <Search size={14} class="absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" style="color: var(--color-text-muted);" />
-          <input type="text" placeholder="Search providers..." bind:value={providerSearchQuery} class="input w-full py-2 text-sm" style="padding-left: 2.75rem;" />
+        <div class="flex items-center gap-2">
+          <div class="relative flex-1">
+            <Search size={14} class="absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" style="color: var(--color-text-muted);" />
+            <input type="text" placeholder="Search providers..." bind:value={providerSearchQuery} class="input w-full py-2 text-sm" style="padding-left: 2.75rem;" />
+          </div>
+          <button
+            type="button"
+            class="inline-flex shrink-0 items-center gap-1 rounded-md border border-[var(--color-border)] px-2.5 py-2 text-xs text-[var(--color-text-muted)] hover:bg-[var(--color-surface-3)]"
+            title="Refresh providers and detected CLIs"
+            aria-label="Refresh providers and detected CLIs"
+            onclick={refreshProviderSection}
+          >
+            <RefreshCw size={12} />
+            Refresh
+          </button>
+        </div>
+
+        <div class="flex flex-wrap gap-2" aria-label="Provider category">
+          {#each PROVIDER_CATEGORIES as category (category.id)}
+            <button
+              type="button"
+              class="rounded-full border px-3 py-1.5 text-xs font-medium transition-colors {providerCategory === category.id ? 'border-[var(--color-accent)] bg-[var(--color-accent)]/12 text-[var(--color-text-primary)]' : 'border-[var(--color-border)] text-[var(--color-text-muted)] hover:bg-[var(--color-surface-3)] hover:text-[var(--color-text-secondary)]'}"
+              aria-pressed={providerCategory === category.id}
+              onclick={() => (providerCategory = category.id)}
+            >
+              {category.label}
+            </button>
+          {/each}
         </div>
 
         <!-- Detected on your system — agent CLIs Koryphaios auto-picked up -->
@@ -569,9 +674,9 @@ import { apiFetch, parseJsonResponse } from '$lib/api.svelte';
                   type="button"
                   class="p-1 rounded-md transition-colors hover:bg-[var(--color-surface-3)]"
                   style="color: var(--color-text-muted);"
-                  title="Re-check installed CLIs"
-                  aria-label="Re-check installed CLIs"
-                  onclick={() => void loadDetectedClis()}
+                  title="Re-check providers and installed CLIs"
+                  aria-label="Re-check providers and installed CLIs"
+                  onclick={refreshProviderSection}
                 >
                   <RefreshCw size={12} />
                 </button>
@@ -613,8 +718,8 @@ import { apiFetch, parseJsonResponse } from '$lib/api.svelte';
         {/if}
 
         <!-- Add a custom (bring-your-own) provider -->
-        <div class="rounded-xl border border-dashed border-[var(--color-border)] p-4 bg-[var(--color-surface-1)] transition-colors duration-150 hover:border-[var(--color-accent)] hover:bg-[var(--color-surface-2)]">
-          <button type="button" onclick={() => (showAddCustom = !showAddCustom)} class="group w-full flex items-center justify-between text-left cursor-pointer">
+        {#if !showAddCustom}
+          <button type="button" onclick={() => (showAddCustom = true)} class="group w-full rounded-xl border border-dashed border-[var(--color-border)] bg-[var(--color-surface-1)] p-4 text-left transition-colors duration-150 hover:border-[var(--color-accent)] hover:bg-[var(--color-surface-2)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]/50">
             <div class="flex items-center gap-2">
               <span class="flex h-7 w-7 items-center justify-center rounded-lg bg-[var(--color-accent)]/10 transition-colors duration-150 group-hover:bg-[var(--color-accent)]/20">
                 <Plus size={15} style="color: var(--color-accent);" />
@@ -623,8 +728,16 @@ import { apiFetch, parseJsonResponse } from '$lib/api.svelte';
             </div>
             <span class="text-[10px] text-[var(--color-text-muted)] transition-colors duration-150 group-hover:text-[var(--color-text-secondary)]">OpenAI-compatible &amp; more</span>
           </button>
-          {#if showAddCustom}
-            <div class="mt-4 space-y-3 pt-4 border-t border-[var(--color-border)]">
+        {:else}
+          <section class="rounded-xl border border-dashed border-[var(--color-accent)]/60 bg-[var(--color-surface-1)] p-4">
+            <button type="button" onclick={() => (showAddCustom = false)} class="group flex w-full items-center justify-between text-left">
+              <div class="flex items-center gap-2">
+                <span class="flex h-7 w-7 items-center justify-center rounded-lg bg-[var(--color-accent)]/10"><Plus size={15} style="color: var(--color-accent);" /></span>
+                <span class="text-sm font-semibold text-[var(--color-text-primary)]">Add a custom provider</span>
+              </div>
+              <span class="text-[10px] text-[var(--color-text-muted)]">Close</span>
+            </button>
+            <div class="mt-4 space-y-3 border-t border-[var(--color-border)] pt-4">
               <p class="text-[10px] text-[var(--color-text-muted)] leading-relaxed">
                 Bring your own endpoint — works with any OpenAI-compatible API (vLLM, LiteLLM, LM Studio, self-hosted gateways, OpenRouter-style services), plus Anthropic- and Gemini-compatible servers. Models are auto-fetched from <code>/models</code> when available, or list them explicitly below.
               </p>
@@ -659,13 +772,15 @@ import { apiFetch, parseJsonResponse } from '$lib/api.svelte';
               </div>
               <button type="button" onclick={addCustomProvider} disabled={providersStore.addingCustom} class="btn btn-primary w-full text-xs py-2">{providersStore.addingCustom ? 'Adding…' : 'Add provider'}</button>
             </div>
-          {/if}
-        </div>
+          </section>
+        {/if}
 
         <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 items-start">
           {#each filteredProviderList as prov (prov.key)}
             {@const status = getProviderStatus(prov.key)}
             {@const caps = getProviderCaps(prov.key)}
+            {@const deployment = deploymentDescription(status?.deployment, prov.key)}
+            {@const badge = deploymentLabel(status?.deployment, prov.key)}
             <div class="rounded-xl border border-[var(--color-border)] p-4 transition-all {expandedProvider === prov.key ? 'bg-[var(--color-surface-2)] ring-1 ring-[var(--color-accent)]/30' : 'bg-[var(--color-surface-1)] hover:bg-[var(--color-surface-2)] shadow-sm'}">
               <button type="button" onclick={() => expandedProvider = expandedProvider === prov.key ? null : prov.key} class="w-full flex items-center justify-between text-left group">
                 <div class="flex items-center gap-3">
@@ -675,8 +790,8 @@ import { apiFetch, parseJsonResponse } from '$lib/api.svelte';
                   <div>
                     <span class="text-sm font-semibold text-[var(--color-text-primary)]">{status?.label ?? prov.label}</span>
                     <p class="text-[10px] text-[var(--color-text-muted)] group-hover:text-[var(--color-text-secondary)]">
-                      {#if status?.deployment === 'cloud'}
-                        Cloud agent · sync via git pull / gh pr checkout
+                      {#if deployment}
+                        {deployment}
                       {:else if status?.authenticated}
                         {@const selectedCount = status.models?.length ?? 0}
                         {@const availableCount = status.allAvailableModels?.length ?? 0}
@@ -704,9 +819,17 @@ import { apiFetch, parseJsonResponse } from '$lib/api.svelte';
                   {#if status?.description}
                     <p class="text-[10px] text-[var(--color-text-muted)] leading-relaxed">{status.description}</p>
                   {/if}
-                  {#if status?.deployment === 'cloud'}
-                    <div class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-violet-500/10 text-violet-300 text-[9px] font-semibold uppercase tracking-wide">
-                      Cloud — changes land on GitHub first
+                  {#if badge}
+                    <div
+                      class={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[9px] font-semibold uppercase tracking-wide ${
+                        status?.deployment === 'cloud'
+                          ? 'bg-violet-500/10 text-violet-300'
+                          : status?.deployment === 'local'
+                            ? 'bg-emerald-500/10 text-emerald-300'
+                            : 'bg-slate-500/10 text-slate-300'
+                      }`}
+                    >
+                      {badge}
                     </div>
                   {/if}
                   {#if status?.authenticated}
@@ -759,11 +882,10 @@ import { apiFetch, parseJsonResponse } from '$lib/api.svelte';
                           <!-- One shared device-code panel for every device-code
                                provider — identical copy, code, copy-button, and
                                waiting line, so no provider gets a lesser flow. -->
-                          {#if prov.key === 'copilot' || prov.key === 'kimicode' || prov.key === 'codex'}
+                          {#if prov.key === 'copilot' || prov.key === 'kimicode'}
                             {@const deviceAuth =
                               prov.key === 'copilot' ? providersStore.copilotDeviceAuth
-                              : prov.key === 'kimicode' ? providersStore.kimicodeDeviceAuth
-                              : providersStore.codexDeviceAuth}
+                              : providersStore.kimicodeDeviceAuth}
                             {#if deviceAuth}
                             {@const userCode = deviceAuth.userCode}
                             <div class="rounded-md bg-[var(--color-surface-2)] px-2.5 py-2 text-[10px] text-[var(--color-text-secondary)]">
@@ -802,7 +924,7 @@ import { apiFetch, parseJsonResponse } from '$lib/api.svelte';
                                 ? 'Opening...'
                                 : 'Auth'}
                             </button>
-                            {#if providersStore.browserAuthPending[prov.key] && prov.key !== 'copilot' && prov.key !== 'codex' && prov.key !== 'kimicode'}
+                            {#if providersStore.browserAuthPending[prov.key] && prov.key !== 'copilot' && prov.key !== 'kimicode'}
                               <button
                                 type="button"
                                 onclick={() => handleFinishBrowserAuth(prov.key)}
@@ -815,6 +937,25 @@ import { apiFetch, parseJsonResponse } from '$lib/api.svelte';
                           </div>
                         </div>
                       {/if}
+                      {#if usesLocalCliConnection(prov.key)}
+                        <div class="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-0)]/80 p-3 text-[10px] leading-relaxed text-[var(--color-text-muted)]">
+                          {#if prov.key === 'cline'}
+                            This provider signs in via the Cline CLI. Run this in your terminal:
+                            <div class="mt-1.5 flex items-start gap-1.5">
+                              <code class="break-all rounded border border-[var(--color-border)] bg-[var(--color-surface-2)] px-2 py-1.5">{clineSignInCommand}</code>
+                              <button
+                                type="button"
+                                class="inline-flex shrink-0 items-center gap-1 rounded border border-[var(--color-border)] px-1.5 py-1 text-[10px] hover:bg-[var(--color-surface-3)]"
+                                onclick={() => copyToClipboard(clineSignInCommand, 'deviceCode')}
+                              >
+                                {providersStore.copiedDeviceCode === clineSignInCommand ? 'Copied' : 'Copy command'}
+                              </button>
+                            </div>
+                          {:else}
+                            Connects through the provider CLI. Koryphaios detects the existing sign-in and never stores a CLI provider token.
+                          {/if}
+                        </div>
+                      {/if}
                       {#if usesBrowserAuth(prov.key) && caps.supportsApiKey}
                         <div class="flex items-center gap-3 py-1">
                           <div class="flex-1 border-t border-[var(--color-border)]"></div>
@@ -823,7 +964,7 @@ import { apiFetch, parseJsonResponse } from '$lib/api.svelte';
                         </div>
                         <button type="button" onclick={() => handleConnectProvider(prov.key)} disabled={providersStore.saving === prov.key} class="btn btn-primary w-full text-xs py-2 shadow-lg shadow-[var(--color-accent)]/10">{providersStore.saving === prov.key ? 'Testing...' : 'Connect with API Key'}</button>
                       {:else if !usesBrowserAuth(prov.key)}
-                        <button type="button" onclick={() => handleConnectProvider(prov.key)} disabled={providersStore.saving === prov.key} class="btn btn-primary w-full text-xs py-2 shadow-lg shadow-[var(--color-accent)]/10">{providersStore.saving === prov.key ? 'Testing...' : 'Connect Provider'}</button>
+                        <button type="button" onclick={() => handleConnectProvider(prov.key)} disabled={providersStore.saving === prov.key} class="btn btn-primary w-full text-xs py-2 shadow-lg shadow-[var(--color-accent)]/10">{providersStore.saving === prov.key ? 'Checking CLI...' : usesLocalCliConnection(prov.key) ? getLocalCliConnectLabel(prov.key) : 'Connect Provider'}</button>
                       {/if}
                       {#if prov.key.startsWith('custom:')}
                         <button type="button" onclick={() => deleteCustomProvider(prov.key)} class="btn btn-ghost w-full text-[10px] py-1.5 mt-1 text-red-400 hover:bg-red-500/10 flex items-center justify-center gap-1.5">
@@ -906,6 +1047,15 @@ import { apiFetch, parseJsonResponse } from '$lib/api.svelte';
                     {/if}
 
                     <div class="space-y-2 pt-2 border-t border-[var(--color-border)]">
+                      {#if usesLocalCliConnection(prov.key)}
+                        <p class="text-[11px] leading-relaxed text-[var(--color-text-muted)]">
+                          {#if prov.key === 'cline'}
+                            Cline CLI manages login. If needed, sign in with <code>{clineSignInCommand}</code> and then use the reconnect button above.
+                          {:else}
+                            This provider's accounts are managed by its CLI. Sign in there, then use the reconnect button above.
+                          {/if}
+                        </p>
+                      {:else}
                       <input
                         type="text"
                         placeholder="Label this saved account"
@@ -936,16 +1086,7 @@ import { apiFetch, parseJsonResponse } from '$lib/api.svelte';
                           class="input w-full text-xs"
                         />
                       {/if}
-                      {#if prov.key === 'codex'}
-                        <button
-                          type="button"
-                          onclick={() => handleStartBrowserAuth('codex', { saveAccount: true, label: providersStore.accountLabelInputs[prov.key] })}
-                          disabled={providersStore.browserAuthBusy === 'codex'}
-                          class="btn btn-primary w-full text-[10px] py-2 shadow-lg shadow-[var(--color-accent)]/10"
-                        >
-                          {providersStore.browserAuthBusy === 'codex' ? 'Opening...' : 'Auth'}
-                        </button>
-                      {:else if usesBrowserAuth(prov.key)}
+                      {#if usesBrowserAuth(prov.key)}
                         <p class="text-[11px] text-[var(--color-text-muted)]">
                           This provider connects through browser sign-in instead of manual saved credentials.
                         </p>
@@ -976,6 +1117,7 @@ import { apiFetch, parseJsonResponse } from '$lib/api.svelte';
                             {providersStore.accountBusy === `${prov.key}:save` ? 'Saving...' : 'Save + Activate'}
                           </button>
                         </div>
+                      {/if}
                       {/if}
                     </div>
                   </div>
@@ -1190,21 +1332,6 @@ import { apiFetch, parseJsonResponse } from '$lib/api.svelte';
             </div>
           {/each}
         </div>
-        <section class="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-2)] p-4">
-          <h4 class="text-sm font-semibold text-[var(--color-text-primary)]">New chat behavior</h4>
-          <p class="mt-1 text-xs text-[var(--color-text-muted)]">Choose whether the new-chat control reuses an untouched composer or always opens another session.</p>
-          <div class="mt-3 max-w-xl">
-            <KorySelect
-              value={sessionStore.newChatBehavior}
-              label="New chat behavior"
-              options={[
-                { value: 'reuse-empty', label: 'Reuse untouched chat', description: 'Default. + and Ctrl/Cmd+N keep the active chat when it has no messages. Shift-click or Shift+Ctrl/Cmd+N forces a new one.' },
-                { value: 'always-create', label: 'Always create a new chat', description: 'Every new-chat action opens a separate session.' },
-              ]}
-              onchange={(value) => sessionStore.setNewChatBehavior(value as NewChatBehavior)}
-            />
-          </div>
-        </section>
       </div>
 
       <!-- Billing Tab -->
@@ -1291,9 +1418,25 @@ import { apiFetch, parseJsonResponse } from '$lib/api.svelte';
         <!-- CLI subscriptions: real local usage + quota burn -->
         {#if billingCredits?.cliUsage?.length}
           <div class="space-y-4">
-            <h3 class="text-sm font-bold text-[var(--color-text-primary)] ml-1">CLI Subscriptions — real usage</h3>
+            <div class="ml-1 flex flex-wrap items-end justify-between gap-3">
+              <div>
+                <h3 class="text-sm font-bold text-[var(--color-text-primary)]">CLI Subscriptions — real usage</h3>
+                <p class="mt-1 text-[10px] text-[var(--color-text-muted)]">Each Codex profile runs and reports separately; account names match the CLI command context.</p>
+              </div>
+              {#if codexBillingAccountOptions().length > 2}
+                <div class="w-64 max-w-full">
+                  <KorySelect
+                    compact
+                    value={billingCodexAccount}
+                    label="Codex CLI account"
+                    options={codexBillingAccountOptions()}
+                    onchange={(value) => billingCodexAccount = value}
+                  />
+                </div>
+              {/if}
+            </div>
             <div class="grid grid-cols-1 xl:grid-cols-2 gap-4">
-              {#each billingCredits.cliUsage as cli (`${cli.provider}:${cli.accountId ?? 'aggregate'}`)}
+              {#each visibleCliUsage() as cli (`${cli.provider}:${cli.accountId ?? 'aggregate'}`)}
                 <div class="p-5 bg-[var(--color-surface-2)] rounded-2xl border border-[var(--color-border)] space-y-4">
                   <div class="flex items-center justify-between">
                     <div class="flex items-center gap-3">
@@ -1301,9 +1444,9 @@ import { apiFetch, parseJsonResponse } from '$lib/api.svelte';
                         <ProviderIcon provider={cli.provider} size={20} class="w-full h-full" />
                       </div>
                       <div>
-                        <div class="text-sm font-semibold">{getProviderDisplayLabel(cli.provider)}</div>
+                        <div class="text-sm font-semibold">{getProviderDisplayLabel(cli.provider)}{cli.accountLabel ? ` · ${cli.accountLabel}` : ''}</div>
                         {#if cli.accountEmail || cli.accountLabel}
-                          <div class="text-[10px] text-[var(--color-text-muted)]">{cli.accountEmail ?? cli.accountLabel}</div>
+                          <div class="text-[10px] text-[var(--color-text-muted)]">{cli.accountEmail || 'CLI profile'}</div>
                         {/if}
                       </div>
                       {#if cli.planType}
@@ -1988,63 +2131,6 @@ import { apiFetch, parseJsonResponse } from '$lib/api.svelte';
       <div class="flex justify-end gap-3">
         <button type="button" onclick={() => { showRotateDialog = false; newKeyValue = ''; }} class="px-6 py-2.5 text-xs font-bold rounded-xl bg-[var(--color-surface-3)] hover:bg-[var(--color-surface-4)] transition-colors">Cancel</button>
         <button type="button" onclick={() => { rotateProviderKey(rotateProvider!.name, newKeyValue, rotateProvider!.keyType); showRotateDialog = false; newKeyValue = ''; }} class="btn btn-primary px-8 py-2.5 text-xs font-bold rounded-xl shadow-lg shadow-[var(--color-accent)]/20">Rotate Key</button>
-      </div>
-    </div>
-  </div>
-{/if}
-
-{#if showCodexProfileDialog}
-  <div class="fixed inset-0 z-50 flex items-center justify-center bg-[radial-gradient(circle_at_top,rgba(255,255,255,0.08),transparent_45%),rgba(3,7,18,0.94)] p-4 backdrop-blur-md">
-    <div class="w-full max-w-2xl overflow-hidden rounded-[2rem] border border-[var(--color-accent)]/20 bg-[var(--color-surface-1)] shadow-2xl shadow-black/40">
-      <div class="border-b border-[var(--color-border)] bg-[linear-gradient(135deg,var(--color-surface-2),var(--color-surface-1))] px-8 py-8">
-        <div class="flex items-center gap-4">
-          <div class="flex h-14 w-14 items-center justify-center rounded-2xl bg-[var(--color-accent)]/12 text-[var(--color-accent)]">
-            <User size={26} />
-          </div>
-          <div>
-            <p class="text-[11px] font-bold uppercase tracking-[0.28em] text-[var(--color-text-muted)]">Codex Account Auth</p>
-            <h3 class="mt-2 text-2xl font-black text-[var(--color-text-primary)]">Name this account before sign-in</h3>
-          </div>
-        </div>
-        <p class="mt-4 max-w-xl text-sm text-[var(--color-text-muted)]">
-          This label is how the Codex account will appear inside Koryphaios after the browser sign-in finishes.
-        </p>
-      </div>
-
-      <div class="px-8 py-8">
-        <label for="codex-profile-name" class="mb-3 block text-[11px] font-bold uppercase tracking-[0.22em] text-[var(--color-text-muted)]">
-          Profile Name
-        </label>
-        <input
-          bind:this={codexProfileInputRef}
-          id="codex-profile-name"
-          type="text"
-          bind:value={codexProfileInput}
-          placeholder="Personal Codex, Work Codex, Team Sandbox..."
-          class="input w-full py-4 text-base"
-          onkeydown={(e) => e.key === 'Enter' && void confirmCodexProfileAuth()}
-        />
-
-        <div class="mt-8 flex justify-end gap-3">
-          <button
-            type="button"
-            onclick={() => {
-              showCodexProfileDialog = false;
-              pendingCodexAuthOptions = null;
-              codexProfileInput = '';
-            }}
-            class="rounded-xl bg-[var(--color-surface-3)] px-6 py-3 text-xs font-bold text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-surface-4)]"
-          >
-            Cancel
-          </button>
-          <button
-            type="button"
-            onclick={() => void confirmCodexProfileAuth()}
-            class="btn btn-primary rounded-xl px-8 py-3 text-xs font-bold shadow-lg shadow-[var(--color-accent)]/20"
-          >
-            Continue To Codex Auth
-          </button>
-        </div>
       </div>
     </div>
   </div>

@@ -30,11 +30,23 @@ export const notesRoutes = new Elysia({ prefix: '/api/notes' })
   // ── List all notes (supports ?search=, ?folder=) ─────────────────────────
   .get('/', async ({ request, query, set }) => {
     if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
-    const notesList = await notesService.listNotes({
-      folderPath: query.folder as string | undefined,
-      search: query.search as string | undefined,
-    }, (query.projectRoot as string | undefined) || PROJECT_ROOT);
-    return { ok: true, data: notesList };
+    try {
+      const notesList = await notesService.listNotes(
+        {
+          folderPath: query.folder as string | undefined,
+          search: query.search as string | undefined,
+        },
+        (query.projectRoot as string | undefined) || PROJECT_ROOT,
+      );
+      return { ok: true, data: notesList };
+    } catch (err: unknown) {
+      set.status = 500;
+      console.error('[notesRoute] Failed to list notes:', err);
+      return {
+        ok: false,
+        error: err instanceof Error ? err.message : 'Failed to load notes',
+      };
+    }
   })
 
   .post('/sync-project', async ({ request, set }) => {

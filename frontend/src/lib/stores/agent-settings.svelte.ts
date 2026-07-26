@@ -79,6 +79,104 @@ export interface AgentContext {
   enforcementMessage: string;
 }
 
+export interface SkillRevision {
+  name: string;
+  description: string;
+  source: 'personal' | 'project';
+  state: 'active' | 'draft';
+  path: string;
+  content: string;
+  hash: string;
+  metadata: {
+    version: string;
+    baseVersion: string;
+    baseHash: string;
+    parent?: string;
+    depth: number;
+    requires: string[];
+    conflicts: string[];
+    activation: string[];
+    excludes: string[];
+    domains: string[];
+    targetMedia: string[];
+    contextBudget: number;
+  };
+  validation: {
+    valid: boolean;
+    errors: string[];
+    warnings: string[];
+    ignoredAuthorityClaims: string[];
+  };
+}
+
+export interface HarnessQualificationRecord {
+  provider: string;
+  model: string;
+  harnessVersion: string;
+  skill: string;
+  role: 'worker' | 'critic';
+  medium?: string;
+  sampleSize: number;
+  successes: number;
+  quality: number;
+  verification: number;
+  updatedAt: string;
+  evidence: string[];
+}
+
+export interface SkillPromotionGate {
+  status: 'unmeasured' | 'insufficient-evidence' | 'blocked' | 'ready';
+  candidateRuns: number;
+  distinctHarnesses: number;
+  humanBlindReviews: number;
+  passRate: number | null;
+  quality: number | null;
+  verification: number | null;
+  baselineDelta: number | null;
+  reasons: string[];
+}
+
+export interface SkillEvaluationCard {
+  skill: string;
+  revisionHash: string;
+  cases: Array<{
+    id: string;
+    prompt: string;
+    expectedSelection: boolean;
+    requiredEvidence: string[];
+  }>;
+  gate: SkillPromotionGate;
+  runs: Array<{
+    id: string;
+    provider: string;
+    model: string;
+    evaluator: string;
+    passed: boolean;
+    quality: number;
+    verification: number;
+    evidence: string[];
+    recordedAt: string;
+  }>;
+}
+
+export interface SkillRevisionComparison {
+  activeHash: string;
+  draftHash: string;
+  changed: boolean;
+  active: string;
+  draft: string;
+}
+
+export interface SkillResolutionPreview {
+  selected: Array<{ skill: SkillRevision; reason: string; contextCost: number }>;
+  collisions: Array<{ name: string; personalHash: string; projectHash: string }>;
+  selectionConflicts: Array<{ left: string; right: string }>;
+  hierarchyErrors: string[];
+  omittedByBudget: string[];
+  blocked: boolean;
+  totalContextCost: number;
+}
+
 // ============================================================================
 // Default Settings
 // ============================================================================
@@ -124,7 +222,12 @@ function createAgentSettingsStore() {
   let settings = $state<AgentSettings>(DEFAULT_AGENT_SETTINGS);
   let preferences = $state<{ exists: boolean; content: string; path: string } | null>(null);
   let isLoading = $state(false);
-  let activeTab = $state<'settings' | 'preferences'>('settings');
+  let activeTab = $state<'settings' | 'preferences' | 'skills'>('settings');
+  let skills = $state<SkillRevision[]>([]);
+  let skillQualifications = $state<HarnessQualificationRecord[]>([]);
+  let skillEvaluationCards = $state<Record<string, SkillEvaluationCard>>({});
+  let skillComparison = $state<SkillRevisionComparison | null>(null);
+  let skillResolutionPreview = $state<SkillResolutionPreview | null>(null);
   let lastCriticResult = $state<CriticReviewResult | null>(null);
   let settingsSaveRevision = 0;
 
@@ -265,6 +368,145 @@ function createAgentSettingsStore() {
     }
   }
 
+  async function loadSkills(): Promise<void> {
+    try {
+      const res = await apiFetch(apiUrl('/api/agent/skills'));
+      const data = await res.json();
+      if (res.ok && data.ok) skills = data.data;
+    } catch (err) {
+      console.error('Failed to load skills:', err);
+    }
+  }
+
+  async function loadSkillQualifications(): Promise<void> {
+    try {
+      const res = await apiFetch(apiUrl('/api/agent/skills/qualifications'));
+      const data = await res.json();
+      if (res.ok && data.ok) skillQualifications = data.data;
+    } catch (err) {
+      console.error('Failed to load skill qualifications:', err);
+    }
+  }
+
+  async function loadSkillEvaluationCard(skill: SkillRevision): Promise<void> {
+    const key = `${skill.source}:${skill.name}:${skill.state}:${skill.hash}`;
+    if (skillEvaluationCards[key]) return;
+    try {
+      const query = new URLSearchParams({ source: skill.source, state: skill.state });
+      const res = await apiFetch(
+        apiUrl(`/api/agent/skills/${skill.name}/evaluation-card?${query}`),
+      );
+      const data = await res.json();
+      if (res.ok && data.ok) skillEvaluationCards = { ...skillEvaluationCards, [key]: data.data };
+    } catch (err) {
+      console.error('Failed to load skill evaluation card:', err);
+    }
+  }
+
+  async function saveSkillDraft(skill: SkillRevision, content: string): Promise<boolean> {
+    try {
+      const res = await apiFetch(apiUrl(`/api/agent/skills/${skill.name}/draft`), {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ source: skill.source, content }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.ok) throw new Error(data.error);
+      await loadSkills();
+      toastStore.success('Skill saved as draft');
+      return true;
+    } catch (err: any) {
+      toastStore.error(err?.message ?? 'Failed to save skill draft');
+      return false;
+    }
+  }
+
+  async function testAndActivateSkill(skill: SkillRevision): Promise<boolean> {
+    try {
+      const testRes = await apiFetch(apiUrl(`/api/agent/skills/${skill.name}/test`), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ source: skill.source, state: 'draft' }),
+      });
+      const tested = await testRes.json();
+      if (!testRes.ok || !tested.ok || !tested.data.passed)
+        throw new Error('Trigger tests did not pass');
+      const res = await apiFetch(apiUrl(`/api/agent/skills/${skill.name}/activate`), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ source: skill.source }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.ok) throw new Error(data.error);
+      await loadSkills();
+      toastStore.success('Validated skill activated');
+      return true;
+    } catch (err: any) {
+      toastStore.error(err?.message ?? 'Failed to activate skill');
+      return false;
+    }
+  }
+
+  async function compareSkillDraft(skill: SkillRevision): Promise<boolean> {
+    try {
+      const query = new URLSearchParams({ source: skill.source });
+      const res = await apiFetch(apiUrl(`/api/agent/skills/${skill.name}/compare?${query}`));
+      const data = await res.json();
+      if (!res.ok || !data.ok) throw new Error(data.error);
+      skillComparison = data.data;
+      return true;
+    } catch (err: any) {
+      skillComparison = null;
+      toastStore.error(err?.message ?? 'Active and draft revisions are required');
+      return false;
+    }
+  }
+
+  async function applyBundledSkillUpdate(
+    skill: SkillRevision,
+    choice: 'replace' | 'merge' | 'keep-local',
+  ): Promise<boolean> {
+    try {
+      const res = await apiFetch(apiUrl(`/api/agent/skills/${skill.name}/update-default`), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ choice }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.ok) throw new Error(data.error);
+      await loadSkills();
+      skillComparison = null;
+      toastStore.success(
+        choice === 'merge' ? 'Bundled update saved as a draft' : 'Skill update choice applied',
+      );
+      return true;
+    } catch (err: any) {
+      toastStore.error(err?.message ?? 'Failed to apply bundled update');
+      return false;
+    }
+  }
+
+  async function previewSkillResolution(
+    prompt: string,
+    collisionChoices: Record<string, 'personal' | 'project'> = {},
+  ): Promise<boolean> {
+    try {
+      const res = await apiFetch(apiUrl('/api/agent/skills/resolve'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prompt, options: { collisionChoices } }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.ok) throw new Error(data.error);
+      skillResolutionPreview = data.data;
+      return true;
+    } catch (err: any) {
+      skillResolutionPreview = null;
+      toastStore.error(err?.message ?? 'Failed to preview skill selection');
+      return false;
+    }
+  }
+
   // ========================================================================
   // Context & Enforcement
   // ========================================================================
@@ -322,13 +564,18 @@ function createAgentSettingsStore() {
   async function loadAll(): Promise<void> {
     isLoading = true;
     try {
-      await Promise.all([loadSettings(), loadPreferences()]);
+      await Promise.all([
+        loadSettings(),
+        loadPreferences(),
+        loadSkills(),
+        loadSkillQualifications(),
+      ]);
     } finally {
       isLoading = false;
     }
   }
 
-  function setActiveTab(tab: typeof activeTab): void {
+  function setActiveTab(tab: 'settings' | 'preferences' | 'skills'): void {
     activeTab = tab;
   }
 
@@ -353,6 +600,21 @@ function createAgentSettingsStore() {
     get lastCriticResult() {
       return lastCriticResult;
     },
+    get skills() {
+      return skills;
+    },
+    get skillQualifications() {
+      return skillQualifications;
+    },
+    get skillEvaluationCards() {
+      return skillEvaluationCards;
+    },
+    get skillComparison() {
+      return skillComparison;
+    },
+    get skillResolutionPreview() {
+      return skillResolutionPreview;
+    },
 
     // Rules are always enforced - no getter to disable
     get rulesAlwaysEnforced() {
@@ -374,6 +636,14 @@ function createAgentSettingsStore() {
     loadPreferences,
     savePreferences,
     initializePreferences,
+    loadSkills,
+    loadSkillQualifications,
+    loadSkillEvaluationCard,
+    saveSkillDraft,
+    testAndActivateSkill,
+    compareSkillDraft,
+    applyBundledSkillUpdate,
+    previewSkillResolution,
 
     // Context & Enforcement
     loadContext,

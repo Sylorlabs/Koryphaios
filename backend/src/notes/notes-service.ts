@@ -120,12 +120,18 @@ export async function ensureProjectSync(projectRoot: string): Promise<void> {
   const last = lastSyncAt.get(key);
   if (last === undefined) {
     lastSyncAt.set(key, now);
-    await syncProjectDocuments(projectRoot);
+    try {
+      await syncProjectDocuments(projectRoot);
+    } catch (err) {
+      console.error(`[notesService] Initial project sync failed for ${key}`, err);
+    }
     return;
   }
   if (now - last >= SYNC_THROTTLE_MS) {
     lastSyncAt.set(key, now);
-    void syncProjectDocuments(projectRoot).catch(() => {});
+    void syncProjectDocuments(projectRoot).catch((err) => {
+      console.error(`[notesService] Background project sync failed for ${key}`, err);
+    });
   }
 }
 
@@ -370,7 +376,15 @@ export async function syncProjectDocuments(
   const files: string[] = [];
 
   function walk(directory: string): void {
-    for (const entry of readdirSync(directory, { withFileTypes: true })) {
+    let entries;
+    try {
+      entries = readdirSync(directory, { withFileTypes: true });
+    } catch (err) {
+      console.error(`[notesService] Failed to read directory during project sync: ${directory}`, err);
+      return;
+    }
+
+    for (const entry of entries) {
       if (entry.isSymbolicLink()) continue;
       if (entry.isDirectory()) {
         if (!IGNORED_DOCUMENT_DIRS.has(entry.name)) walk(join(directory, entry.name));
@@ -397,11 +411,25 @@ export async function syncProjectDocuments(
     const sourcePath = relative(root, absolute).split(sep).join('/');
     const id = projectDocumentId(root, sourcePath);
     foundIds.add(id);
-    const stat = statSync(absolute);
+
+    let stat: ReturnType<typeof statSync>;
+    try {
+      stat = statSync(absolute);
+    } catch (err) {
+      console.error(`[notesService] Failed to stat file during project sync: ${absolute}`, err);
+      continue;
+    }
     // Skip unchanged files entirely — no read, no DB write, no re-link.
     if (fileMtimeCache.get(absolute) === stat.mtimeMs) continue;
 
-    const content = readFileSync(absolute, 'utf8');
+    let content: string;
+    try {
+      content = readFileSync(absolute, 'utf8');
+    } catch (err) {
+      console.error(`[notesService] Failed to read file during project sync: ${absolute}`, err);
+      continue;
+    }
+
     const title = basename(sourcePath, extname(sourcePath));
     const parent = dirname(sourcePath).split(sep).join('/');
     const folderPath = parent === '.' ? '/Project' : `/Project/${parent}`;
@@ -411,17 +439,25 @@ export async function syncProjectDocuments(
       extension === '.html' || extension === '.htm' ? 'html' : 'markdown',
     ]);
     const existing = existingById.get(id);
+    let synced = false;
     if (existing) {
       if (
         existing.content !== content ||
         existing.title !== title ||
         existing.folderPath !== folderPath
       ) {
-        await db
-          .update(notes)
-          .set({ title, content, folderPath, tags, updatedAt: stat.mtime })
-          .where(eq(notes.id, id));
-        updated++;
+        try {
+          await db
+            .update(notes)
+            .set({ title, content, folderPath, tags, updatedAt: stat.mtime })
+            .where(eq(notes.id, id));
+          updated++;
+          synced = true;
+        } catch (err) {
+          console.error(`[notesService] Failed to update synced note ${id}`, err);
+        }
+      } else {
+        synced = true;
       }
     } else {
       pendingInserts.push({
@@ -436,8 +472,10 @@ export async function syncProjectDocuments(
         createdAt: stat.birthtime,
         updatedAt: stat.mtime,
       });
+      synced = true;
       created++;
     }
+    if (!synced) continue;
     fileMtimeCache.set(absolute, stat.mtimeMs);
     changed.push({ id, content, sourcePath, existed: Boolean(existing) });
   }
@@ -446,14 +484,30 @@ export async function syncProjectDocuments(
   // Bulk insertion removes that N+1 startup cost while preserving per-file
   // write-through updates for documents already in the graph.
   for (let i = 0; i < pendingInserts.length; i += 500) {
-    await db.insert(notes).values(pendingInserts.slice(i, i + 500));
+    const batch = pendingInserts.slice(i, i + 500);
+    try {
+      await db.insert(notes).values(batch);
+    } catch (err) {
+      console.error('[notesService] Bulk note insert failed during project sync; retrying row-by-row', err);
+      for (const row of batch) {
+        try {
+          await db.insert(notes).values(row);
+        } catch (rowErr) {
+          console.error(`[notesService] Failed to insert project document note ${row.id}`, rowErr);
+        }
+      }
+    }
   }
 
   let removed = 0;
   for (const row of existingProjectRows) {
     if (!foundIds.has(row.id)) {
-      await db.delete(notes).where(eq(notes.id, row.id));
-      removed++;
+      try {
+        await db.delete(notes).where(eq(notes.id, row.id));
+        removed++;
+      } catch (err) {
+        console.error(`[notesService] Failed to remove orphaned project note ${row.id}`, err);
+      }
     }
   }
 
@@ -467,7 +521,11 @@ export async function syncProjectDocuments(
       // Existing documents must clear stale links even if their new content
       // has none. Brand-new unlinked documents need no DELETE/INSERT work.
       if (existed || content.includes('[[')) {
-        await parseAndSaveLinks(id, content, { index, skipInvalidate: true });
+        try {
+          await parseAndSaveLinks(id, content, { index, skipInvalidate: true });
+        } catch (err) {
+          console.error(`[notesService] Failed to sync wikilinks for note ${id}`, err);
+        }
       }
       for (const targetPath of extractProjectDocumentLinks(sourcePath, content)) {
         const targetId = projectDocumentId(root, targetPath);

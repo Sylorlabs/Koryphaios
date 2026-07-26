@@ -11,7 +11,23 @@ export type { FeedEntry, FeedEntryType };
 
 // ─── Constants ──────────────────────────────────────────────────────────────
 
-const EPHEMERAL_TOOLS = new Set(['ls', 'read_file', 'grep', 'glob']);
+// Routine inspection is useful while an agent works, but it is not a separate
+// conversation item. Keep it in one collapsed "Explored codebase" group.
+const EPHEMERAL_TOOLS = new Set([
+  'ls',
+  'list_directory',
+  'read_file',
+  'read',
+  'view_file',
+  'grep',
+  'grep_search',
+  'glob',
+  'glob_search',
+  'find',
+  'codebase_search',
+  'search_notes',
+  'recall_notes',
+]);
 const MAX_FEED_ENTRIES = 2000;
 let feedIdCounter = 0;
 

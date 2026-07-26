@@ -696,7 +696,7 @@ export class ClaudeCodeProvider implements Provider {
       // Agentic, non-interactive: auto-approve edits + the pre-approved toolset so a
       // headless run never hangs waiting for a permission prompt.
       '--permission-mode',
-      'acceptEdits',
+      request.harnessRole === 'critic' ? 'plan' : 'acceptEdits',
       '--allowedTools',
       ALLOWED_TOOLS,
       '--disallowedTools',

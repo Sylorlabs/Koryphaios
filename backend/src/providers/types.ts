@@ -110,6 +110,11 @@ export interface StreamRequest {
    *  so the host confines it (OS jail + tool gating). Absent for local turns
    *  (full access). See SandboxPolicy. */
   sandbox?: import('@koryphaios/shared').SandboxPolicy;
+  /** Harness-owned role. Native providers translate this into real CLI tool policy. */
+  harnessRole?: 'manager' | 'worker' | 'critic';
+  /** Versioned prompt/task provenance; providers transport but never invent these values. */
+  promptManifestHash?: string;
+  taskContractHash?: string;
 }
 
 // ─── Provider interface ─────────────────────────────────────────────────────
@@ -126,6 +131,9 @@ export interface Provider {
 
   /** List models available for this provider. */
   listModels(): ModelDef[];
+
+  /** Optional provider-level model refresh hook for cache reset/refresh control. */
+  refreshModels?: (forceRefresh?: boolean) => void;
 }
 
 // ─── Provider factory ───────────────────────────────────────────────────────

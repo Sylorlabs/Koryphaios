@@ -128,6 +128,9 @@ export interface AgentSettings {
   /** Show complete reasoning blocks expanded in the chat feed by default. */
   reasoningExpandedByDefault: boolean;
 
+  /** Persisted default source selection when both personal and project revisions exist. */
+  skillCollisionChoices: Record<string, 'personal' | 'project'>;
+
   /** Timestamp of last update for synchronization */
   updatedAt?: number;
 }
@@ -163,6 +166,7 @@ export const DEFAULT_AGENT_SETTINGS: AgentSettings = {
   contextPruneMinChars: 600,
   contextSelfAwareness: true,
   reasoningExpandedByDefault: true,
+  skillCollisionChoices: {},
 };
 
 // Helper to load koryphaios.json

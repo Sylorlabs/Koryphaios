@@ -143,7 +143,8 @@ function stopBusyWatchdog(sessionId: string | undefined) {
 
 function providerDisplayName(provider: string): string {
   if (provider === 'openai') return 'OpenAI';
-  if (provider === 'codex') return 'Codex';
+  if (provider === 'codex') return 'OpenAI Codex (CLI)';
+  if (provider === 'codex-auth') return 'OpenAI Codex (Auth)';
   if (provider === 'anthropic') return 'Anthropic';
   if (provider === 'google') return 'Google';
   if (provider === 'aistudio') return 'Google AI Studio';
@@ -151,6 +152,8 @@ function providerDisplayName(provider: string): string {
   if (provider === 'openrouter') return 'OpenRouter';
   if (provider === 'vertexai') return 'Vertex AI';
   if (provider === 'copilot') return 'Copilot';
+  if (provider === 'kimicode') return 'Kimi Code (CLI)';
+  if (provider === 'kimicode-auth') return 'Kimi Code (Auth)';
   return provider.charAt(0).toUpperCase() + provider.slice(1);
 }
 
@@ -272,6 +275,12 @@ function handleMessage(msg: WSMessage) {
       // Cancel notification → live stop marker as plain system text, not a
       // Kory message. The backend persists a matching system row for reloads.
       const info = msg.payload as { message?: string };
+      // Prompt-manifest provenance is available in diagnostics, but dumping its
+      // full filesystem paths, hashes, and skill list into the human feed makes
+      // every turn noisy and expensive to render.
+      const isPromptDiagnostic =
+        info?.message?.startsWith('Prompt ') && info.message.includes('Instructions:');
+      if (isPromptDiagnostic) break;
       if (isForActiveSession && info?.message) {
         feedStore.removeAnalyzingThoughtEntries();
         feedStore.addFeedEntry({

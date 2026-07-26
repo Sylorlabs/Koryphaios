@@ -95,7 +95,8 @@
 
   function providerLabel(provider: string): string {
     if (provider === 'openai') return 'OpenAI';
-    if (provider === 'codex') return 'Codex';
+    if (provider === 'codex') return 'OpenAI Codex (CLI)';
+    if (provider === 'codex-auth') return 'OpenAI Codex (Auth)';
     if (provider === 'anthropic') return 'Anthropic';
     if (provider === 'google') return 'Google';
     if (provider === 'aistudio') return 'Google AI Studio';
@@ -103,6 +104,8 @@
     if (provider === 'openrouter') return 'OpenRouter';
     if (provider === 'vertexai') return 'Vertex AI';
     if (provider === 'copilot') return 'Copilot';
+    if (provider === 'kimicode') return 'Kimi Code (CLI)';
+    if (provider === 'kimicode-auth') return 'Kimi Code (Auth)';
     return provider.charAt(0).toUpperCase() + provider.slice(1);
   }
 </script>

@@ -10,9 +10,8 @@
 // See: https://opencode.ai/docs/go/
 
 import { applyModelsDevMetadata } from './models-dev';
-import type { ProviderConfig, ProviderName, ModelDef } from '@koryphaios/shared';
+import type { ProviderConfig, ModelDef } from '@koryphaios/shared';
 import {
-  type Provider,
   type ProviderEvent,
   type StreamRequest,
   getModelsForProvider,
@@ -47,26 +46,15 @@ function isAnthropicCompatible(modelId: string): boolean {
  * AnthropicProvider (for /v1/messages-compatible models). The underlying clients
  * share the same base URL and API key; only the wire protocol differs.
  */
-export class OpenCodeGoProvider implements Provider {
-  readonly name: ProviderName = 'opencodego';
-  readonly config: ProviderConfig;
-
-  private readonly openai: OpenAIProvider;
+export class OpenCodeGoProvider extends OpenAIProvider {
   private readonly anthropic: AnthropicProvider;
-  private readonly baseUrl: string;
 
   constructor(config: ProviderConfig, baseUrl: string = OPENCODE_GO_BASE) {
-    this.config = config;
-    this.baseUrl = baseUrl;
-    this.openai = new OpenAIProvider({ ...config, baseUrl }, 'opencodego', baseUrl);
+    super({ ...config, baseUrl }, 'opencodego', baseUrl);
     this.anthropic = new AnthropicProvider({ ...config, baseUrl }, 'opencodego');
   }
 
-  isAvailable(): boolean {
-    return !this.config.disabled && !!(this.config.apiKey || this.config.authToken);
-  }
-
-  listModels(): ModelDef[] {
+  protected getModelCatalogFallback(): ModelDef[] {
     // Enrich with models.dev capability data (reasoning tiers, real context
     // windows) — the Go /models endpoint only returns bare ids.
     return applyModelsDevMetadata(this.name, getModelsForProvider(this.name));
@@ -85,6 +73,6 @@ export class OpenCodeGoProvider implements Provider {
       { provider: this.name, model: request.model },
       'Routing OpenCode Go request through OpenAI-compatible /v1/chat/completions',
     );
-    yield* this.openai.streamResponse(request);
+    yield* super.streamResponse(request);
   }
 }

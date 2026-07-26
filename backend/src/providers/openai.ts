@@ -64,13 +64,20 @@ export class OpenAIProvider implements Provider {
 
   private cachedModels: ModelDef[] | null = null;
   private lastFetch = 0;
-  private fetchInProgress = false;
+  private refreshInProgress: Promise<void> | null = null;
+
+  refreshModels(forceRefresh = false): Promise<void> {
+    if (!forceRefresh) return Promise.resolve();
+    this.cachedModels = null;
+    this.lastFetch = 0;
+    return this.refreshModelsInBackground(this.getModelCatalogFallback());
+  }
 
   listModels(): ModelDef[] {
     const fallback = this.getModelCatalogFallback();
     if (!this.isAvailable()) return fallback;
     if (this.cachedModels && isModelListCacheFresh(this.lastFetch)) return this.cachedModels;
-    this.refreshModelsInBackground(fallback);
+    void this.refreshModelsInBackground(fallback);
     return this.cachedModels ?? fallback;
   }
 
@@ -87,19 +94,60 @@ export class OpenAIProvider implements Provider {
     return enrichFromRemoteMetadata(raw, def);
   }
 
-  private refreshModelsInBackground(fallback: ModelDef[]) {
-    if (this.fetchInProgress) return;
-    this.fetchInProgress = true;
+  private getModelIdFromRemote(raw: unknown): string | undefined {
+    if (!raw || typeof raw !== 'object') return undefined;
+    const model = raw as Record<string, unknown>;
+    const candidates = [model.id, model.name, model.model];
+    for (const candidate of candidates) {
+      if (typeof candidate === 'string') {
+        const value = candidate.trim();
+        if (value) return value;
+      }
+    }
+    return undefined;
+  }
 
-    void (async () => {
+  private isChatModelCandidate(raw: unknown, id: string): boolean {
+    if (!isLikelyChatModelId(id, this.name)) return false;
+    if (this.name !== 'cohere') return true;
+
+    if (!raw || typeof raw !== 'object') return true;
+    const model = raw as Record<string, unknown>;
+    const rawEndpoints = model.endpoints;
+    if (!rawEndpoints) return true;
+    if (Array.isArray(rawEndpoints)) {
+      return (rawEndpoints as unknown[]).some(
+        (endpoint) => typeof endpoint === 'string' && endpoint.toLowerCase().includes('chat'),
+      );
+    }
+    if (typeof rawEndpoints === 'string') {
+      return rawEndpoints.toLowerCase().includes('chat');
+    }
+    const endpointContainer = rawEndpoints as { value?: unknown };
+    const valueEndpoints = endpointContainer.value;
+    if (Array.isArray(valueEndpoints)) {
+      return (valueEndpoints as unknown[]).some(
+        (endpoint: unknown) =>
+          typeof endpoint === 'string' && endpoint.toLowerCase().includes('chat'),
+      );
+    }
+    return true;
+  }
+
+  private refreshModelsInBackground(fallback: ModelDef[]): Promise<void> {
+    if (this.refreshInProgress) return this.refreshInProgress;
+
+    this.refreshInProgress = (async () => {
       try {
         await this.prepareForModelDiscovery();
         const response = await withRetry(() => this.client.models.list());
         const discovered: ModelDef[] = [];
         for await (const model of response) {
-          const id = model.id;
-          if (!id || !isLikelyChatModelId(id, this.name)) continue;
-          discovered.push(this.enrichDiscoveredModel(model, modelFromRemoteId(id, this.name, fallback)));
+          const id = this.getModelIdFromRemote(model);
+          if (!id || !this.isChatModelCandidate(model, id)) continue;
+          discovered.push(
+            this.enrichDiscoveredModel(model, modelFromRemoteId(id, this.name, fallback)),
+          );
         }
         if (discovered.length > 0) {
           this.cachedModels = applyModelsDevMetadata(this.name, mergeModelLists(fallback, discovered));
@@ -118,9 +166,11 @@ export class OpenAIProvider implements Provider {
         );
         this.cachedModels ??= fallback;
       } finally {
-        this.fetchInProgress = false;
+        this.refreshInProgress = null;
       }
     })();
+
+    return this.refreshInProgress;
   }
 
   async *streamResponse(request: StreamRequest): AsyncGenerator<ProviderEvent> {

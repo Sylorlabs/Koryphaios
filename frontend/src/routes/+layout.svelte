@@ -60,7 +60,7 @@
 			.then(() => authStore.initialize())
 			.then((authReady) => {
 				if (!authReady) throw new Error('Backend authentication did not initialize.');
-				return loadProvidersFromApi();
+				return loadProvidersFromApi({ forceRefreshModels: true });
 			})
 			.then((providersReady) => {
 				if (!providersReady) throw new Error('Backend provider catalog failed to load.');
@@ -122,7 +122,7 @@
 		try {
 			await waitForBackendHealthy();
 			const authReady = await authStore.initialize();
-			if (!authReady || !(await loadProvidersFromApi())) throw new Error('Backend initialization is still incomplete.');
+			if (!authReady || !(await loadProvidersFromApi({ forceRefreshModels: true }))) throw new Error('Backend initialization is still incomplete.');
 			appReady = true;
 			showInitialLoad = false;
 		} catch (error: unknown) {

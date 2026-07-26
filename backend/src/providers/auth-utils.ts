@@ -348,6 +348,65 @@ function homeDir(): string {
   return process.env.HOME ?? process.env.USERPROFILE ?? '';
 }
 
+const CLINE_AUTH_KEY_HINTS = [
+  'token',
+  'apikey',
+  'api_key',
+  'api-key',
+  'access_token',
+  'access-token',
+  'refresh_token',
+  'refresh-token',
+  'secret',
+  'secret_key',
+  'secret-key',
+  'auth',
+  'auth_token',
+  'auth-token',
+  'authorization',
+  'credential',
+  'credentials',
+  'session',
+];
+
+function hasClineAuthKeyHint(key: string): boolean {
+  const normalized = key.toLowerCase();
+  return CLINE_AUTH_KEY_HINTS.some((hint) => normalized.includes(hint));
+}
+
+function looksLikeClineAuthValue(value: string): boolean {
+  const token = value.trim();
+  if (!token || token === 'cline-cli-session') return false;
+  if (token.length < 16) return false;
+  if (token.length > 3_000) return false;
+  if (/\s/.test(token)) return false;
+  // API keys are usually encoded tokens. For unknown formats, we only
+  // accept sufficiently long opaque values or JWT-like structures.
+  if (/^[A-Za-z0-9._~+/\-=%$@]+$/u.test(token)) return true;
+  return token.split('.').length >= 2;
+}
+
+function isClineAuthValue(value: unknown, key: string): boolean {
+  return typeof value === 'string' && hasClineAuthKeyHint(key) && looksLikeClineAuthValue(value);
+}
+
+function hasClineCLILoginSignal(node: unknown, key: string): boolean {
+  if (typeof node === 'string') return isClineAuthValue(node, key);
+  if (!node || typeof node !== 'object') return false;
+
+  if (Array.isArray(node)) {
+    for (const item of node) {
+      if (hasClineCLILoginSignal(item, key)) return true;
+    }
+    return false;
+  }
+
+  for (const [entryKey, entryValue] of Object.entries(node as Record<string, unknown>)) {
+    if (hasClineCLILoginSignal(entryValue, entryKey)) return true;
+  }
+  return false;
+}
+
 /**
  * Detects a machine-wide Codex CLI login at ~/.codex/auth.json. This is separate from
  * Koryphaios's isolated codex-home (see detectCodexAuthToken) and is informational —
@@ -393,7 +452,7 @@ export function detectClineCLILogin(): boolean {
   if (!existsSync(secrets)) return false;
   try {
     const data = JSON.parse(readFileSync(secrets, 'utf-8')) as Record<string, unknown>;
-    return Object.values(data).some((v) => typeof v === 'string' && v.length > 0);
+    return hasClineCLILoginSignal(data, 'secrets');
   } catch {
     return false;
   }

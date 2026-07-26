@@ -1,7 +1,7 @@
 # yaml-language-server: $schema=https://aka.ms/winget-manifest.singleton.1.5.0.schema.json
 
 PackageIdentifier: Sylorlabs.Koryphaios
-PackageVersion: 0.2.0
+PackageVersion: 1.0.23
 PackageLocale: en-US
 Publisher: Sylorlabs
 PublisherUrl: https://sylorlabs.com
@@ -32,13 +32,10 @@ Tags:
   - productivity
   - developer-tools
 ReleaseNotes: |
-  ## What's New in v0.2.0
+  ## What's New in v1.0.23
   
-  - Feature: Automatic update checking every 2 hours with manual check option
-  - Feature: New changelog page at koryphaios.com/changelog
-  - Improvement: Enhanced update system with codeword verification
-  - Improvement: Better error handling for provider connections
-  - Fix: Fixed memory cleanup issues in long-running sessions
+  - Maintenance: Installer and package metadata updated for release 1.0.23.
+  - Release notes for feature-level changes: https://koryphaios.com/changelog
 ReleaseNotesUrl: https://koryphaios.com/changelog
 PurchaseUrl: https://koryphaios.com/pricing
 InstallationNotes: |
@@ -71,7 +68,7 @@ ManifestVersion: 1.5.0
 Installers:
   - Architecture: x64
     InstallerType: nullsoft
-    InstallerUrl: https://github.com/sylorlabs/koryphaios/releases/download/v0.2.0/Koryphaios_0.2.0_x64-setup.exe
+    InstallerUrl: https://github.com/sylorlabs/koryphaios/releases/download/v1.0.23/Koryphaios_1.0.23_x64-setup.exe
     InstallerSha256: PLACEHOLDER_INSTALLER_SHA256
     Scope: user
     InstallerSwitches:
@@ -79,11 +76,11 @@ Installers:
       SilentWithProgress: /S
     ProductCode: '{com.sylorlabs.koryphaios}'
     UpgradeBehavior: install
-    ReleaseDate: 2026-03-09
+    ReleaseDate: 2026-07-10
     ElevationRequirement: elevationProhibited
     AppsAndFeaturesEntries:
       - DisplayName: Koryphaios
-        DisplayVersion: 0.2.0
+        DisplayVersion: 1.0.23
         Publisher: Sylorlabs
         ProductCode: '{com.sylorlabs.koryphaios}'
     ExpectedReturnCodes:

@@ -4,6 +4,7 @@
 
 import { mcpLog } from '../logger';
 import type { Tool, ToolCallInput, ToolContext, ToolCallOutput } from '../tools/registry';
+import { VERSION } from '../constants';
 import { registerMCPToolsInRegistry } from './tool-bridge';
 
 // ─── MCP Protocol Types ─────────────────────────────────────────────────────
@@ -185,7 +186,7 @@ export class MCPClient {
       },
       clientInfo: {
         name: 'koryphaios',
-        version: '0.1.0',
+        version: VERSION,
       },
     });
 
@@ -228,7 +229,7 @@ export class MCPClient {
         params: {
           protocolVersion: '2024-11-05',
           capabilities: { roots: { listChanged: false } },
-          clientInfo: { name: 'koryphaios', version: '0.1.0' },
+          clientInfo: { name: 'koryphaios', version: VERSION },
         },
       }),
     });

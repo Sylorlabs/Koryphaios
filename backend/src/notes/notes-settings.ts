@@ -106,11 +106,16 @@ export function resetNotesAgentPermissions(projectRoot: string): NotesAgentPermi
 
 export function isNoteToolBlocked(toolName: string, projectRoot: string): boolean {
   if (!isNoteToolName(toolName)) return false;
+  // "Enable Notes" is a product-wide boundary, not just a panel preference.
+  // Disabled notes must not remain available to agents through stale tool
+  // definitions or an existing session.
+  if (!loadNotesSettings(projectRoot).enabled) return true;
   const { tools } = loadNotesAgentPermissions(projectRoot);
   return tools[toolName] === 'block';
 }
 
 export function getVisibleNoteToolNames(projectRoot: string): NoteToolName[] {
+  if (!loadNotesSettings(projectRoot).enabled) return [];
   const { tools } = loadNotesAgentPermissions(projectRoot);
   return NOTE_TOOL_NAMES.filter((name) => tools[name] !== 'block');
 }
@@ -160,6 +165,15 @@ export function checkNoteToolPermission(
       level: 'auto',
       requiresApproval: false,
       reason: 'Not a note tool',
+    };
+  }
+
+  if (!loadNotesSettings(projectRoot).enabled) {
+    return {
+      allowed: false,
+      level: 'block',
+      requiresApproval: false,
+      reason: 'Notes are disabled for this project',
     };
   }
 

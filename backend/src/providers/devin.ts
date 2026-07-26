@@ -155,7 +155,8 @@ export class DevinProvider implements Provider {
       // Non-interactive: auto-approve so a headless run never blocks. Koryphaios
       // remains the permission/orchestration owner.
       '--permission-mode',
-      'dangerous',
+      request.harnessRole === 'critic' ? 'auto' : 'dangerous',
+      ...(request.harnessRole === 'critic' ? ['--sandbox'] : []),
       '--export',
       exportPath,
     ];

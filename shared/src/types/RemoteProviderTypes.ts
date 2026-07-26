@@ -56,6 +56,10 @@ export const PROVIDER_SHARE_RISK: Record<string, ProviderShareClassification> = 
     reason:
       'Sharing a ChatGPT subscription is a gray area OpenAI currently tolerates; use at your own risk.',
   },
+  'codex-auth': {
+    risk: 'ok',
+    reason: 'Your OpenAI API key — you pay for their usage.',
+  },
   copilot: {
     risk: 'prohibited',
     reason: "Sharing Copilot violates GitHub's terms; proxy usage is a bannable offense.",
@@ -68,6 +72,10 @@ export const PROVIDER_SHARE_RISK: Record<string, ProviderShareClassification> = 
   kimicode: {
     risk: 'caution',
     reason: 'Sharing a Kimi Code subscription is risky; a Console-issued API key is safer.',
+  },
+  'kimicode-auth': {
+    risk: 'ok',
+    reason: 'Your Kimi API key — you pay for their usage.',
   },
   cursor: {
     risk: 'caution',
@@ -155,6 +163,9 @@ export interface RemoteInferenceRequestPayload {
   maxTokens?: number;
   temperature?: number;
   reasoningLevel?: string;
+  harnessRole?: 'manager' | 'worker' | 'critic';
+  promptManifestHash?: string;
+  taskContractHash?: string;
   /** CLIENT's working directory — passed through for agentic-remote turns only;
    *  ignored for pure-inference providers (the client runs its own tools). */
   workingDirectory?: string;

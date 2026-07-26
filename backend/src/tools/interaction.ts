@@ -65,7 +65,7 @@ export class DelegateToWorkerTool implements Tool {
   readonly name = 'delegate_to_worker';
   readonly role = 'manager' as const;
   readonly description =
-    'Delegate a task to a specialist worker (sub-agent) only when you have explicitly decided that the task needs a dedicated coder and cannot be handled by you. Sub-agents (general, ui, backend, test, review) run only when you call this tool—never for conversation, clarification, or small edits. Use only for substantial implementation, refactoring, or multi-file work. Provide a clear, self-contained task description. Optional: domain hint (ui | backend | general | test | review).';
+    'Delegate a task to a specialist worker (sub-agent) only when you have explicitly decided that the task needs one. The user manually selects the manager and configures the eligible model pool for each subagent category; Kory chooses only within that pool, preferring an identity independent from the manager. If the pool contains only the manager model, reuse it and disclose the lack of independence rather than blocking. Sub-agents (general, ui, backend, test, review) run only when you call this tool. Provide a clear, self-contained task description and the most accurate domain hint so the correct user-enabled pool is used.';
   readonly inputSchema = {
     type: 'object',
     properties: {

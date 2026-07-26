@@ -75,6 +75,7 @@ function createMemoryStore() {
     activeTab: 'project',
   });
   let documents = $state<ProjectMemoryDocument[]>([]);
+  let settingsSaveRevision = 0;
 
   async function loadDocuments(): Promise<void> {
     const res = await apiFetch(apiUrl('/api/memory/documents'));
@@ -396,28 +397,36 @@ function createMemoryStore() {
   }
 
   async function saveSettings(settings: Partial<MemorySettings>): Promise<boolean> {
-    state.isLoading = true;
+    const pendingSettings = settings;
+    const previousSettings = state.settings ?? DEFAULT_SETTINGS;
+    const revision = ++settingsSaveRevision;
+
+    state.settings = { ...previousSettings, ...pendingSettings };
+
     try {
       const res = await apiFetch(apiUrl('/api/memory/settings'), {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(settings),
+        body: JSON.stringify(pendingSettings),
       });
 
       if (res.ok) {
         const data = await res.json();
         if (data.ok) {
-          state.settings = { ...state.settings, ...data.data } as MemorySettings;
+          if (revision === settingsSaveRevision) {
+            state.settings = { ...state.settings, ...data.data } as MemorySettings;
+          }
           toastStore.success('Memory settings saved');
           return true;
         }
       }
       throw new Error('Failed to save');
     } catch (err) {
+      if (revision === settingsSaveRevision) {
+        state.settings = previousSettings;
+      }
       toastStore.error('Failed to save memory settings');
       return false;
-    } finally {
-      state.isLoading = false;
     }
   }
 

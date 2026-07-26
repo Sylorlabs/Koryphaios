@@ -18,6 +18,9 @@
   } from 'lucide-svelte';
   import { getModKeyName } from '$lib/utils/platform';
   import { modeStore } from '$lib/stores/mode.svelte';
+  import { notesStore } from '$lib/stores/notes.svelte';
+
+  const frontendVersion = __KORYPHAIOS_FRONTEND_VERSION__ ?? '1.0.23';
 
   let { 
     open = $bindable(false), 
@@ -68,6 +71,7 @@
   let filteredActions = $derived(
     allActions
       .filter(a => !a.mode || a.mode === modeStore.mode)
+      .filter(a => a.id !== 'toggle_notes' || notesStore.settings.enabled)
       .filter(a => 
         a.label.toLowerCase().includes(query.toLowerCase()) || 
         a.category.toLowerCase().includes(query.toLowerCase())
@@ -194,7 +198,7 @@
           </div>
         </div>
         <div class="text-[10px]" style="color: var(--color-text-muted);">
-          Koryphaios <span class="opacity-50">v0.1.0</span>
+          Koryphaios <span class="opacity-50">v{frontendVersion}</span>
         </div>
       </div>
     </div>

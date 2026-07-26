@@ -405,6 +405,7 @@ export class MultiLanguageDetector extends BaseErrorDetector {
       ignored: ['**/node_modules/**', '**/.git/**', '**/target/**', '**/dist/**', '**/build/**'],
       persistent: true,
       ignoreInitial: true,
+      ignorePermissionErrors: true,
     });
 
     this.fileWatcher.on('change', async (filePath: string) => {
@@ -418,6 +419,15 @@ export class MultiLanguageDetector extends BaseErrorDetector {
     });
 
     this.fileWatcher.on('error', (error: Error) => {
+      const fsError = error as NodeJS.ErrnoException;
+      if (fsError.code === 'EACCES' || fsError.code === 'EPERM') {
+        this.logger.warn('Ignoring file watcher permission error', {
+          code: fsError.code,
+          path: fsError.path,
+        });
+        return;
+      }
+
       this.logger.error('File watcher error', error);
       this.emit('detector-error', error);
     });

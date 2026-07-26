@@ -16,7 +16,8 @@ import type { WorkspaceManager } from '../workspace-manager';
 import type { SnapshotManager } from '../snapshot-manager';
 import type { ITaskStore } from '../../stores/task-store';
 import { formatMessagesForCritic } from '../critic-util';
-import { classifyTask, createTaskContract } from '../prompts';
+import { classifyTask, createTaskContract, type TaskContract } from '../prompts';
+import { getProviderHarnessCapabilities } from '../../providers/provider-harness';
 
 // Keep the provider-native block form intact. Image/tool blocks are valid
 // worker context and must not be narrowed to text merely to cross the service
@@ -41,7 +42,6 @@ export interface WorkerPipelineConfig {
   waitForUserInput: (sessionId: string, question: string, options: string[]) => Promise<string>;
   emitThought: (sessionId: string, phase: string, thought: string) => void;
   updateWorkflowState: (sessionId: string, state: string) => Promise<void>;
-  handleAutoCommit: (sessionId: string, taskDescription: string) => Promise<void>;
   resolveActiveRouting: (
     preferredModel?: string,
     domain?: WorkerDomain,
@@ -59,6 +59,7 @@ export interface WorkerPipelineConfig {
     isAutoMode: boolean,
     allowedPaths: string[],
     isSandboxed: boolean,
+    taskContract?: TaskContract,
   ) => Promise<{ success: boolean; error?: string; workerMessages?: InternalMessage[] }>;
   runCriticGate: (
     sessionId: string,
@@ -201,12 +202,11 @@ export class WorkerPipelineService {
                 model: preferredModel ?? 'unknown',
                 prompt: task.slice(0, 200),
                 cost: 0,
+                checkpointType: 'auto_save',
               });
             } catch {
               // Shadow logging is non-critical; don't fail the task if it errors
             }
-
-            await this.config.handleAutoCommit(sessionId, task);
           }
         } else {
           this.workspaceManager.cleanup(taskId);
@@ -215,8 +215,6 @@ export class WorkerPipelineService {
         const message = err instanceof Error ? err.message : String(err);
         koryLog.warn({ taskId, err: message }, 'Worktree cleanup/reconcile error');
       }
-    } else if (result.success) {
-      await this.config.handleAutoCommit(sessionId, task);
     }
 
     if (this.tasks) {
@@ -331,6 +329,7 @@ export class WorkerPipelineService {
           true,
           effectivePaths,
           isSandboxed,
+          immutableContract,
         );
         if (res.success) {
           if (gateStrictness === 'off') {
@@ -349,11 +348,14 @@ export class WorkerPipelineService {
             effectivePaths[0],
           );
           if (criticResult.passed) {
+            const harness = getProviderHarnessCapabilities(alt.name);
             return {
               success: true,
-              verification: 'verified',
+              verification: harness.verificationEligible ? 'verified' : 'unverified',
               workerTranscript: formatMessagesForCritic(res.workerMessages ?? []),
-              criticFeedback: criticResult.feedback,
+              criticFeedback: harness.verificationEligible
+                ? criticResult.feedback
+                : `UNVERIFIED: ${alt.name} completed the worker role without OS filesystem isolation.\n${criticResult.feedback ?? ''}`,
             };
           }
           if (gateStrictness === 'advisory') {
@@ -379,6 +381,7 @@ export class WorkerPipelineService {
         true,
         effectivePaths,
         isSandboxed,
+        immutableContract,
       );
       if (result.success) {
         if (gateStrictness === 'off') {
@@ -397,11 +400,14 @@ export class WorkerPipelineService {
           effectivePaths[0],
         );
         if (criticResult.passed) {
+          const harness = getProviderHarnessCapabilities(provider.name);
           return {
             success: true,
-            verification: 'verified',
+            verification: harness.verificationEligible ? 'verified' : 'unverified',
             workerTranscript: formatMessagesForCritic(result.workerMessages ?? []),
-            criticFeedback: criticResult.feedback,
+            criticFeedback: harness.verificationEligible
+              ? criticResult.feedback
+              : `UNVERIFIED: ${provider.name} completed the worker role without OS filesystem isolation.\n${criticResult.feedback ?? ''}`,
           };
         }
         if (gateStrictness === 'advisory') {

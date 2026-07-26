@@ -79,19 +79,9 @@ export type DeviceAuthInfo = {
   intervalMs: number;
 };
 
-export type CodexDeviceAuthInfo = {
-  deviceAuthId?: string;
-  userCode: string;
-  verificationUri: string;
-  verificationUriComplete?: string;
-  expiresAt: number;
-  intervalMs: number;
-};
-
 export type BrowserAuthStartResult =
   | { kind: 'connected'; name: string; openModelSelector: boolean; status?: ProviderInfo }
   | { kind: 'started' }
-  | { kind: 'needs_codex_profile'; options: { saveAccount?: boolean; label?: string } }
   | { kind: 'error' };
 
 export type ConnectProviderResult = {
@@ -109,11 +99,15 @@ export type SyncProviderUiResult = {
 export const browserAuthProviders = new Set([
   'copilot',
   'kimicode',
-  'codex',
   'claude',
   'grok',
   'antigravity',
 ]);
+
+// Cline is deliberately not a browser/device-code flow. Its own local CLI owns
+// authentication, so reconnecting means probing that CLI and activating its
+// non-secret session marker.
+export const localCliConnectProviders = new Set(['codex', 'cursor', 'devin', 'cline']);
 
 const PROVIDER_LABELS: Record<string, string> = {
   anthropic: 'Anthropic',
@@ -133,10 +127,12 @@ const PROVIDER_LABELS: Record<string, string> = {
   llamacpp: 'Llama.cpp',
   opencodezen: 'OpenCodeZen',
   claude: 'Claude Code',
-  codex: 'OpenAI Codex',
+  codex: 'OpenAI Codex (CLI)',
+  'codex-auth': 'OpenAI Codex (Auth)',
   grok: 'Grok Build',
   jules: 'Google Jules (cloud)',
-  kimicode: 'Kimi Code',
+  kimicode: 'Kimi Code (CLI)',
+  'kimicode-auth': 'Kimi Code (Auth)',
   moonshot: 'Moonshot AI / Kimi API',
   mistral: 'Mistral AI',
 };
@@ -147,7 +143,9 @@ const TOKEN_PLACEHOLDERS: Record<string, string> = {
   copilot: 'GitHub token or Copilot auth token',
   google: 'Gemini API key',
   aistudio: 'Gemini API key (AI Studio)',
+  'codex-auth': 'OpenAI API key',
   kimicode: 'Auth with Kimi Code',
+  'kimicode-auth': 'Kimi API key',
   azure: 'Bearer token',
 };
 
@@ -201,11 +199,6 @@ function createProvidersStore() {
   let kimicodeAuthMessage = $state<string>('');
   let kimicodePollTimer: ReturnType<typeof setTimeout> | null = null;
 
-  let codexDeviceAuth = $state<CodexDeviceAuthInfo | null>(null);
-  let codexAuthStatus = $state<'idle' | 'pending' | 'connected' | 'error'>('idle');
-  let codexAuthMessage = $state<string>('');
-  let codexPollTimer: ReturnType<typeof setTimeout> | null = null;
-
   // ─── Helpers ───────────────────────────────────────────────────────────
 
   function getKnownAuthMode(name: string, fallback: string): string {
@@ -228,6 +221,15 @@ function createProvidersStore() {
 
   function usesBrowserAuth(name: string): boolean {
     return browserAuthProviders.has(name);
+  }
+
+  function usesLocalCliConnection(name: string): boolean {
+    return localCliConnectProviders.has(name);
+  }
+
+  function getLocalCliConnectLabel(name: string): string {
+    const label = { codex: 'Codex', cursor: 'Cursor', devin: 'Devin', cline: 'Cline' }[name] ?? name;
+    return `Connect ${label} CLI`;
   }
 
   function getProviderStatus(name: string): ProviderInfo | undefined {
@@ -317,10 +319,11 @@ function createProvidersStore() {
 
   // ─── API: status & catalog ─────────────────────────────────────────────
 
-  async function loadProvidersFromApi(): Promise<boolean> {
+  async function loadProvidersFromApi(options: { forceRefreshModels?: boolean } = {}): Promise<boolean> {
     if (!browser) return false;
-    try {
-      const res = await apiFetch(apiUrl('/api/providers'));
+
+    const loadOnce = async (refreshModels: '0' | '1'): Promise<boolean> => {
+      const res = await apiFetch(apiUrl(`/api/providers${refreshModels === '1' ? '?refreshModels=1' : ''}`));
       if (!res.ok) {
         if (import.meta.env.DEV) console.warn(`Failed to load providers: HTTP ${res.status}`);
         return false;
@@ -333,6 +336,21 @@ function createProvidersStore() {
         cliAccountNoticeShown = true;
         void loadCliAccountAmbiguity();
       }
+      return true;
+    };
+
+    try {
+      const refreshModels = options.forceRefreshModels ? '1' : '0';
+      const first = await loadOnce(refreshModels);
+      if (!first) return false;
+
+      if (options.forceRefreshModels) {
+        // Refresh is async in providers, so we allow one extra short polling cycle
+        // to capture the freshly discovered model catalog on startup and settings open.
+        await new Promise((resolve) => setTimeout(resolve, 700));
+        return await loadOnce('1');
+      }
+
       return true;
     } catch (error) {
       if (import.meta.env.DEV) console.warn('Failed to load providers from API', error);
@@ -392,7 +410,7 @@ function createProvidersStore() {
     name: string,
     options?: { warmModelList?: boolean },
   ): Promise<ProviderInfo | undefined> {
-    await loadProvidersFromApi();
+    await loadProvidersFromApi({ forceRefreshModels: options?.warmModelList });
     if (options?.warmModelList) {
       await new Promise((resolve) => setTimeout(resolve, 700));
       await loadProvidersFromApi();
@@ -444,17 +462,9 @@ function createProvidersStore() {
     }
   }
 
-  function clearCodexPollTimer(): void {
-    if (codexPollTimer) {
-      clearTimeout(codexPollTimer);
-      codexPollTimer = null;
-    }
-  }
-
   function destroy(): void {
     clearCopilotPollTimer();
     clearKimiCodePollTimer();
-    clearCodexPollTimer();
   }
 
   // Device codes are short-lived. Every poll tick checks the deadline so an
@@ -613,94 +623,6 @@ function createProvidersStore() {
     }
   }
 
-  async function pollCodexAuth(
-    deviceAuthId: string,
-    userCode: string,
-    intervalMs: number,
-    saveAccount = false,
-    label?: string,
-  ): Promise<void> {
-    clearCodexPollTimer();
-    if (codexDeviceAuth && Date.now() > codexDeviceAuth.expiresAt) {
-      codexAuthStatus = 'error';
-      codexAuthMessage = AUTH_EXPIRED_MESSAGE;
-      browserAuthMessages.codex = codexAuthMessage;
-      browserAuthPending.codex = false;
-      codexDeviceAuth = null;
-      return;
-    }
-    try {
-      const res = await apiFetch(apiUrl('/api/providers/codex/auth/poll'), {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ deviceAuthId, userCode, saveAccount, label }),
-      });
-      const data = await parseJsonResponse<{
-        ok?: boolean;
-        error?: string;
-        data?: {
-          status?: string;
-          error?: string;
-          errorDescription?: string;
-          savedAccount?: SavedAccountSummary;
-        };
-      }>(res);
-
-      if (!data.ok) {
-        codexAuthStatus = 'error';
-        codexAuthMessage = data.error ?? 'Codex sign-in failed';
-        browserAuthMessages.codex = codexAuthMessage;
-        browserAuthPending.codex = false;
-        return;
-      }
-
-      const status = data.data?.status;
-      if (status === 'connected') {
-        codexAuthStatus = 'connected';
-        codexAuthMessage = 'Codex connected';
-        browserAuthMessages.codex = codexAuthMessage;
-        browserAuthPending.codex = false;
-        codexDeviceAuth = null;
-        await syncProviderUi('codex', {
-          openModelSelector: true,
-          successMessage: saveAccount
-            ? `Codex account "${data.data?.savedAccount?.label ?? label ?? 'account'}" saved`
-            : 'Codex connected',
-        });
-        if (saveAccount) {
-          accountLabelInputs.codex = '';
-          await loadProviderAccounts('codex', true);
-          if (data.data?.savedAccount) {
-            accountManagerRequest = { provider: 'codex', account: data.data.savedAccount };
-          }
-        }
-        return;
-      }
-
-      const pollError = data.data?.error;
-      if (pollError && pollError !== 'authorization_pending') {
-        codexAuthStatus = 'error';
-        codexAuthMessage = data.data?.errorDescription ?? pollError;
-        browserAuthMessages.codex = codexAuthMessage;
-        browserAuthPending.codex = false;
-        return;
-      }
-
-      codexAuthStatus = 'pending';
-      browserAuthPending.codex = true;
-      browserAuthMessages.codex = `${codexAuthMessage}${deviceAuthCountdown(codexDeviceAuth?.expiresAt)}`;
-      codexPollTimer = setTimeout(() => {
-        void pollCodexAuth(deviceAuthId, userCode, intervalMs, saveAccount, label);
-      }, intervalMs);
-    } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : 'Codex sign-in failed';
-      codexAuthStatus = 'error';
-      codexAuthMessage = message;
-      browserAuthMessages.codex = codexAuthMessage;
-      browserAuthPending.codex = false;
-    }
-  }
-
   // ─── Accounts ──────────────────────────────────────────────────────────
 
   async function loadProviderAccounts(name: string, force = false): Promise<void> {
@@ -833,7 +755,12 @@ function createProvidersStore() {
       toastStore.error('Enter API key');
       return { ok: false };
     }
-    if (caps.authMode === 'auth_only' && !authToken && !usesBrowserAuth(name)) {
+    if (
+      caps.authMode === 'auth_only' &&
+      !authToken &&
+      !usesBrowserAuth(name) &&
+      !usesLocalCliConnection(name)
+    ) {
       toastStore.error('Enter auth token');
       return { ok: false };
     }
@@ -880,11 +807,9 @@ function createProvidersStore() {
 
   async function startBrowserAuthFlow(
     name: string,
-    options: { saveAccount?: boolean; label?: string; profileConfirmed?: boolean } = {},
+    options: { saveAccount?: boolean } = {},
   ): Promise<BrowserAuthStartResult> {
-    if (name === 'codex' && options.saveAccount && !options.profileConfirmed) {
-      return { kind: 'needs_codex_profile', options };
-    }
+    void options;
     browserAuthBusy = name;
     browserAuthMessages[name] = '';
     try {
@@ -973,28 +898,6 @@ function createProvidersStore() {
         kimicodeAuthMessage = 'Approve Kimi Code in the browser to finish connecting.';
         browserAuthMessages[name] = kimicodeAuthMessage;
         void pollKimiCodeAuth(kimicodeDeviceAuth.deviceCode, kimicodeDeviceAuth.intervalMs);
-      } else if (name === 'codex' && data.data.userCode && data.data.verificationUri) {
-        codexDeviceAuth = {
-          deviceAuthId: data.data.deviceAuthId,
-          userCode: data.data.userCode,
-          verificationUri: data.data.verificationUri,
-          verificationUriComplete: data.data.verificationUriComplete,
-          expiresAt: Date.now() + (data.data.expiresIn ?? 900) * 1000,
-          intervalMs: Math.max(1000, (data.data.interval ?? 5) * 1000),
-        };
-        codexAuthStatus = 'pending';
-        await copyToClipboard(codexDeviceAuth.userCode, 'deviceCode');
-        codexAuthMessage = `Codex sign-in code ${codexDeviceAuth.userCode} copied to clipboard. Finish approval in the browser.`;
-        browserAuthMessages[name] = codexAuthMessage;
-        if (codexDeviceAuth.deviceAuthId) {
-          void pollCodexAuth(
-            codexDeviceAuth.deviceAuthId,
-            codexDeviceAuth.userCode,
-            codexDeviceAuth.intervalMs,
-            options.saveAccount === true,
-            options.label,
-          );
-        }
       } else {
         toastStore.info(data.data.message ?? 'Finish sign-in in the browser, then confirm here.');
       }
@@ -1331,9 +1234,10 @@ function createProvidersStore() {
       llamacpp: 'Llama.cpp',
       ollamacloud: 'Ollama Cloud',
       deepseek: 'DeepSeek',
-      kimicode: 'Kimi Code',
+      kimicode: 'Kimi Code (CLI)',
       minimax: 'MiniMax',
       moonshot: 'Moonshot AI / Kimi API',
+      'kimicode-auth': 'Kimi Code (Auth)',
       zai: 'ZAI',
       stepfun: 'StepFun',
       cerebras: 'Cerebras',
@@ -1362,7 +1266,8 @@ function createProvidersStore() {
       firmware: 'Firmware',
       '302ai': '302.ai',
       claude: 'Claude Code',
-      codex: 'OpenAI Codex',
+      codex: 'OpenAI Codex (CLI)',
+      'codex-auth': 'OpenAI Codex (Auth)',
       grok: 'Grok Build',
       jules: 'Google Jules',
       antigravity: 'Antigravity',
@@ -1419,6 +1324,7 @@ function createProvidersStore() {
       ollamacloud: 'sk-...',
       deepseek: 'sk-...',
       kimicode: 'Auth with Kimi Code',
+      'kimicode-auth': 'Kimi API key',
       minimax: 'sk-...',
       moonshot: 'sk-...',
       zai: 'sk-...',
@@ -1452,8 +1358,9 @@ function createProvidersStore() {
       mistralai: 'sk-...',
       claude: 'Claude auth token',
       codex: 'Auth with ChatGPT',
-      grok: 'Uses your local grok CLI — run "grok login" first',
-      antigravity: 'Uses your local agy CLI — run "agy login" first',
+      'codex-auth': 'OpenAI API key',
+      grok: 'Uses your grok CLI — run "grok login" first',
+      antigravity: 'Uses your agy CLI — run "agy login" first',
       mistral: 'sk-...',
       cohere: 'sk-...',
       perplexity: 'pplx-...',
@@ -1630,15 +1537,6 @@ function createProvidersStore() {
     get kimicodeAuthMessage() {
       return kimicodeAuthMessage;
     },
-    get codexDeviceAuth() {
-      return codexDeviceAuth;
-    },
-    get codexAuthStatus() {
-      return codexAuthStatus;
-    },
-    get codexAuthMessage() {
-      return codexAuthMessage;
-    },
     get tokenPlaceholders() {
       return TOKEN_PLACEHOLDERS;
     },
@@ -1647,6 +1545,8 @@ function createProvidersStore() {
     getProviderDisplayLabel,
     getKnownAuthMode,
     usesBrowserAuth,
+    usesLocalCliConnection,
+    getLocalCliConnectLabel,
     getProviderCaps,
     getProviderStatus,
     getProviderAccounts,
@@ -1682,6 +1582,8 @@ function createProvidersStore() {
 export const providersStore = createProvidersStore();
 
 /** @deprecated Use providersStore.loadProvidersFromApi — kept for gradual migration */
-export async function loadProvidersFromApi(): Promise<boolean> {
-  return providersStore.loadProvidersFromApi();
+export async function loadProvidersFromApi(options?: {
+  forceRefreshModels?: boolean;
+}): Promise<boolean> {
+  return providersStore.loadProvidersFromApi(options);
 }

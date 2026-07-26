@@ -97,6 +97,23 @@ describe('Proactive Monitoring Integration', () => {
     }
   });
 
+  const waitFor = async (
+    predicate: () => boolean,
+    options: { attempts?: number; delayMs?: number } = {}
+  ): Promise<void> => {
+    const { attempts = 25, delayMs = 120 } = options;
+    for (let i = 0; i < attempts; i += 1) {
+      if (predicate()) {
+        return;
+      }
+      await new Promise(resolve => setTimeout(resolve, delayMs));
+    }
+    throw new Error('Timed out waiting for watcher events');
+  };
+
+  const settleFs = async (delayMs = 80): Promise<void> =>
+    new Promise(resolve => setTimeout(resolve, delayMs));
+
   describe('Proactive Monitoring Coordinator', () => {
     it('should initialize proactive monitoring when configured', async () => {
       const status = detectorManager.getProactiveMonitoringStatus();
@@ -216,50 +233,51 @@ describe('Proactive Monitoring Integration', () => {
       const coordinator = new ProactiveMonitoringCoordinator(detectorManager, proactiveConfig);
       coordinator.on('config-file-changed', configFileChanged);
 
-      await coordinator.start();
+      try {
+        await coordinator.start();
 
-      // Create tsconfig.json
-      const tsconfigPath = join(tempDir, 'tsconfig.json');
-      await fs.writeFile(
-        tsconfigPath,
-        JSON.stringify(
-          {
-            compilerOptions: {
-              target: 'es2020',
-              module: 'esnext',
+        // Create tsconfig.json
+        const tsconfigPath = join(tempDir, 'tsconfig.json');
+        await fs.writeFile(
+          tsconfigPath,
+          JSON.stringify(
+            {
+              compilerOptions: {
+                target: 'es2020',
+                module: 'esnext',
+              },
             },
-          },
-          null,
-          2
-        )
-      );
+            null,
+            2
+          )
+        );
 
-      // Wait for file watching to detect the change
-      await new Promise(resolve => setTimeout(resolve, 300));
+        // Wait for file watching to detect the change
+        await waitFor(() => configFileChanged.mock.calls.length > 0, { attempts: 30 });
 
-      // Modify tsconfig.json
-      await fs.writeFile(
-        tsconfigPath,
-        JSON.stringify(
-          {
-            compilerOptions: {
-              target: 'es2021',
-              module: 'esnext',
-              strict: true,
+        // Modify tsconfig.json
+        await fs.writeFile(
+          tsconfigPath,
+          JSON.stringify(
+            {
+              compilerOptions: {
+                target: 'es2021',
+                module: 'esnext',
+                strict: true,
+              },
             },
-          },
-          null,
-          2
-        )
-      );
+            null,
+            2
+          )
+        );
 
-      // Wait for change detection
-      await new Promise(resolve => setTimeout(resolve, 300));
+        await waitFor(() => configFileChanged.mock.calls.length > 1, { attempts: 30 });
 
-      await coordinator.stop();
-
-      // Should have detected the config file change
-      expect(configFileChanged).toHaveBeenCalled();
+        // Should have detected the config file change
+        expect(configFileChanged).toHaveBeenCalled();
+      } finally {
+        await coordinator.stop();
+      }
     });
 
     it('should detect package.json changes', async () => {
@@ -268,52 +286,52 @@ describe('Proactive Monitoring Integration', () => {
       const coordinator = new ProactiveMonitoringCoordinator(detectorManager, proactiveConfig);
       coordinator.on('dependency-change-detected', dependencyChangeDetected);
 
-      await coordinator.start();
+      try {
+        await coordinator.start();
 
-      // Create package.json
-      const packageJsonPath = join(tempDir, 'package.json');
-      await fs.writeFile(
-        packageJsonPath,
-        JSON.stringify(
-          {
-            name: 'test-project',
-            version: '1.0.0',
-            dependencies: {
-              lodash: '^4.17.21',
+        // Create package.json
+        const packageJsonPath = join(tempDir, 'package.json');
+        await fs.writeFile(
+          packageJsonPath,
+          JSON.stringify(
+            {
+              name: 'test-project',
+              version: '1.0.0',
+              dependencies: {
+                lodash: '^4.17.21',
+              },
             },
-          },
-          null,
-          2
-        )
-      );
+            null,
+            2
+          )
+        );
 
-      // Wait for file watching to detect the change
-      await new Promise(resolve => setTimeout(resolve, 300));
+        await waitFor(() => dependencyChangeDetected.mock.calls.length > 0, { attempts: 30 });
 
-      // Modify package.json
-      await fs.writeFile(
-        packageJsonPath,
-        JSON.stringify(
-          {
-            name: 'test-project',
-            version: '1.0.0',
-            dependencies: {
-              lodash: '^4.17.21',
-              axios: '^1.0.0',
+        // Modify package.json
+        await fs.writeFile(
+          packageJsonPath,
+          JSON.stringify(
+            {
+              name: 'test-project',
+              version: '1.0.0',
+              dependencies: {
+                lodash: '^4.17.21',
+                axios: '^1.0.0',
+              },
             },
-          },
-          null,
-          2
-        )
-      );
+            null,
+            2
+          )
+        );
 
-      // Wait for change detection
-      await new Promise(resolve => setTimeout(resolve, 300));
+        await waitFor(() => dependencyChangeDetected.mock.calls.length > 0, { attempts: 30 });
 
-      await coordinator.stop();
-
-      // Should have detected the dependency change
-      expect(dependencyChangeDetected).toHaveBeenCalled();
+        // Should have detected the dependency change
+        expect(dependencyChangeDetected).toHaveBeenCalled();
+      } finally {
+        await coordinator.stop();
+      }
     });
   });
 
@@ -431,23 +449,33 @@ describe('Proactive Monitoring Integration', () => {
       coordinator.on('config-file-changed', configFileChanged);
       coordinator.on('test-file-changed', testFileChanged);
 
-      await coordinator.start();
+      try {
+        await coordinator.start();
 
-      // Create different types of files
-      await fs.writeFile(join(tempDir, 'source.ts'), 'export const value = 42;');
-      await fs.writeFile(join(tempDir, 'test.spec.ts'), 'describe("test", () => {});');
-      await fs.writeFile(join(tempDir, 'tsconfig.json'), '{"compilerOptions": {}}');
+        // Create different types of files
+        await fs.writeFile(join(tempDir, 'source.ts'), 'export const value = 42;');
+        await settleFs();
+        await fs.writeFile(join(tempDir, 'test.spec.ts'), 'describe("test", () => {});');
+        await settleFs();
+        await fs.writeFile(join(tempDir, 'tsconfig.json'), '{"compilerOptions": {}}');
+        await settleFs();
 
-      // Wait for categorization
-      await new Promise(resolve => setTimeout(resolve, 600));
-
-      await coordinator.stop();
+        await waitFor(
+          () =>
+            sourceFileChanged.mock.calls.length > 0 &&
+            testFileChanged.mock.calls.length > 0 &&
+            configFileChanged.mock.calls.length > 0
+          , { attempts: 80, delayMs: 120 }
+        );
+      } finally {
+        await coordinator.stop();
+      }
 
       // Should have categorized files correctly
       expect(sourceFileChanged).toHaveBeenCalled();
       expect(testFileChanged).toHaveBeenCalled();
       expect(configFileChanged).toHaveBeenCalled();
-    });
+    }, 12000);
 
     it('should provide file watching statistics', async () => {
       const coordinator = new ProactiveMonitoringCoordinator(detectorManager, proactiveConfig);
@@ -507,40 +535,50 @@ describe('Proactive Monitoring Integration', () => {
       coordinator.on('package-json-changed', packageJsonChanged);
       coordinator.on('eslint-config-changed', eslintConfigChanged);
 
-      await coordinator.start();
+      try {
+        await coordinator.start();
 
-      // Create and modify specific config files
-      await fs.writeFile(
-        join(tempDir, 'tsconfig.json'),
-        JSON.stringify({
-          compilerOptions: { target: 'es2020' },
-        })
-      );
+        // Create and modify specific config files
+        await fs.writeFile(
+          join(tempDir, 'tsconfig.json'),
+          JSON.stringify({
+            compilerOptions: { target: 'es2020' },
+          })
+        );
+        await settleFs();
 
-      await fs.writeFile(
-        join(tempDir, 'package.json'),
-        JSON.stringify({
-          name: 'test',
-          dependencies: { lodash: '^4.0.0' },
-        })
-      );
+        await fs.writeFile(
+          join(tempDir, 'package.json'),
+          JSON.stringify({
+            name: 'test',
+            dependencies: { lodash: '^4.0.0' },
+          })
+        );
+        await settleFs();
 
-      await fs.writeFile(
-        join(tempDir, '.eslintrc.json'),
-        JSON.stringify({
-          extends: ['@typescript-eslint/recommended'],
-        })
-      );
+        await fs.writeFile(
+          join(tempDir, '.eslintrc.json'),
+          JSON.stringify({
+            extends: ['@typescript-eslint/recommended'],
+          })
+        );
+        await settleFs();
 
-      // Wait for config detection
-      await new Promise(resolve => setTimeout(resolve, 500));
-
-      await coordinator.stop();
+        await waitFor(
+          () =>
+            tsconfigChanged.mock.calls.length > 0 &&
+            packageJsonChanged.mock.calls.length > 0 &&
+            eslintConfigChanged.mock.calls.length > 0
+          , { attempts: 80, delayMs: 120 }
+        );
+      } finally {
+        await coordinator.stop();
+      }
 
       // Should have detected specific config changes
       expect(tsconfigChanged).toHaveBeenCalled();
       expect(packageJsonChanged).toHaveBeenCalled();
       expect(eslintConfigChanged).toHaveBeenCalled();
-    });
+    }, 12000);
   });
 });

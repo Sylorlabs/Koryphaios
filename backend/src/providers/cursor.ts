@@ -23,6 +23,54 @@ import {
 
 const CURSOR_STREAM_TIMEOUT_MS = 300_000;
 const MODELS_CACHE_TTL_MS = 5 * 60_000;
+const MODELS_LIST_PATTERNS: Array<RegExp> = [
+  /\*?\s*([a-z0-9._\/+\+=-]+)\s+[-–—]\s+(.+?)(?:\s+\((?:current|active|default)\))?\s*$/i,
+  /\s*[\u2022\-\*]?\s*([a-z0-9._\/+\+=-]+)\s*(?:\(?(?:current|active|default)\)?)\s*$/i,
+  /^([a-z0-9._\/+\+=-]+)$/i,
+];
+const CURSOR_MODEL_COMMANDS: string[][] = [['--list-models'], ['models']];
+
+function stripAnsi(value: string): string {
+  return value.replace(/\x1b\[[0-9;]*m/g, '').trim();
+}
+
+function parseCursorModelJsonChunk(value: unknown, models: ModelDef[]): void {
+  if (Array.isArray(value)) {
+    for (const entry of value as unknown[]) {
+      parseCursorModelJsonChunk(entry, models);
+    }
+    return;
+  }
+
+  if (typeof value === 'string') {
+    const id = value.trim();
+    if (id) models.push(buildModelFromId(id, id));
+    return;
+  }
+
+  if (!value || typeof value !== 'object') return;
+  const raw = value as Record<string, unknown>;
+
+  if (Array.isArray(raw.models)) {
+    for (const item of raw.models as unknown[]) {
+      if (typeof item === 'string') {
+        models.push(buildModelFromId(item, item));
+      } else if (item && typeof item === 'object') {
+        const nested = item as { id?: unknown; name?: unknown };
+        const id = String((nested.id as unknown) || '').trim();
+        const name = String((nested.name as unknown) || id).trim();
+        if (id) models.push(buildModelFromId(id, name || id));
+      }
+    }
+    return;
+  }
+
+  const id = String(
+    (raw.id as unknown) || (raw.name as unknown) || (raw.model as unknown) || '',
+  ).trim();
+  if (!id) return;
+  models.push(buildModelFromId(id, String((raw.name as unknown) ?? id)));
+}
 
 const HARNESS_SYSTEM_NOTE =
   'You are running inside the Koryphaios orchestrator. Never spawn subagents or delegate to ' +
@@ -70,6 +118,105 @@ interface CursorStreamLine {
   };
 }
 
+export function parseCursorModelList(output: string): ModelDef[] {
+  const models: ModelDef[] = [];
+  if (/No models available for this account/i.test(output)) return [];
+  const lines = output.replace(/\r\n/g, '\n').split('\n').map((line) => line.trim());
+
+  try {
+    const jsonValue = JSON.parse(output);
+    parseCursorModelJsonChunk(jsonValue, models);
+  } catch {
+    /* not json */
+  }
+
+  for (const line of lines) {
+    if (!line || line.startsWith('#')) continue;
+    const parsed = stripAnsi(line);
+    if (!parsed || /no\s+models\s+available/i.test(parsed)) continue;
+    if (/^[A-Za-z][A-Za-z0-9 _-]+:\s*$/i.test(parsed)) continue;
+    if (/^available\s+models?:?\s*$/i.test(parsed)) continue;
+
+    const jsonLine = parsed.replace(/^.*?(\{[\s\S]*\}|\[[\s\S]*\]).*$/, '$1');
+    if (jsonLine !== parsed || /^\s*[\[{]/.test(parsed)) {
+      try {
+        parseCursorModelJsonChunk(JSON.parse(jsonLine), models);
+        if (models.length > 0) continue;
+      } catch {
+        /* not json */
+      }
+    }
+
+    if (/^default\s+model:/i.test(parsed)) {
+      const match = parsed.match(/^default\s+model:\s*(.+?)\s*$/i);
+      if (match?.[1]) {
+        models.push(buildModelFromId(match[1], match[1]));
+        continue;
+      }
+    }
+
+    let match: RegExpMatchArray | null = null;
+    const table = parsed
+      .split('|')
+      .map((chunk) => chunk.trim())
+      .filter((chunk) => chunk && !/^[-=]+$/.test(chunk));
+    const fallbackCandidates = table.length > 1 ? [table[0], parsed] : [parsed];
+
+    for (const candidate of [
+      ...fallbackCandidates,
+      parsed.replace(/^\s*\d+[.)]\s*/, ''),
+      parsed.replace(/^\s*[\u2022\-\*]\s*/, ''),
+    ]) {
+      if (match) break;
+      if (!candidate) continue;
+      for (const re of MODELS_LIST_PATTERNS) {
+        match = re.exec(candidate);
+        if (match) break;
+      }
+    }
+
+    if (!match) continue;
+
+    const modelId = String(match[1] || '').trim();
+    const modelName = String(match[2] || modelId).trim();
+    if (modelId) models.push(buildModelFromId(modelId, modelName || modelId));
+  }
+
+  if (models.length > 0) return dedupeById(models);
+
+  return [];
+}
+
+function buildModelFromId(modelId: string, displayName?: string): ModelDef {
+  const trimmed = modelId.trim();
+  const humanName = (displayName || trimmed).replace(/\s+\((?:current|active|default)\)\s*$/i, '').trim();
+  const fallbackName = humanName || trimmed;
+
+  return {
+    id: `cursor-${trimmed}`,
+    name: fallbackName,
+    provider: 'cursor',
+    apiModelId: trimmed,
+    contextWindow: 200_000,
+    maxOutputTokens: 32_000,
+    supportsStreaming: true,
+    supportsAttachments: false,
+    canReason: /think|high|low|max|auto/i.test(trimmed),
+  } as ModelDef;
+}
+
+function dedupeById(models: ModelDef[]): ModelDef[] {
+  const seen = new Set<string>();
+  const out: ModelDef[] = [];
+  for (const model of models) {
+    const key = model.id.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(model);
+  }
+  return out;
+}
+
 export class CursorProvider implements Provider {
   readonly name = 'cursor' as const;
   private cachedModels: ModelDef[] | null = null;
@@ -103,52 +250,57 @@ export class CursorProvider implements Provider {
     );
   }
 
-  private refreshModels(): void {
-    if (this.modelsInFlight) return;
-    this.modelsInFlight = true;
-    const child = spawn('cursor-agent', ['--list-models'], {
-      stdio: ['ignore', 'pipe', 'ignore'],
-    });
-    let out = '';
-    child.stdout.on('data', (c: Buffer) => (out += c.toString()));
-    const finish = () => {
+  refreshModels(forceRefresh = false): void {
+    if (forceRefresh) {
+      this.cachedModels = null;
+      this.modelsFetchedAt = 0;
       this.modelsInFlight = false;
-      // Lines look like: `gpt-5.3-codex-high - Codex 5.3 High` (reasoning tier
-      // is baked into the model id — no separate effort flag).
-      const models: ModelDef[] = [];
-      for (const line of out.split('\n')) {
-        const m = /^\s*([a-z0-9._[\]=,-]+)\s+-\s+(.+?)(?:\s+\(current\))?\s*$/i.exec(line);
-        if (!m) continue;
-        models.push({
-          id: `cursor-${m[1]}`,
-          name: m[2].trim(),
-          provider: 'cursor',
-          apiModelId: m[1],
-          contextWindow: 200_000,
-          maxOutputTokens: 32_000,
-          supportsStreaming: true,
-          supportsAttachments: false,
-          canReason: /think|high|low|max|auto/i.test(m[1]),
-        } as ModelDef);
+    }
+    if (this.modelsInFlight) return;
+
+    const runCandidate = (index: number): void => {
+      if (index >= CURSOR_MODEL_COMMANDS.length) {
+        this.modelsInFlight = false;
+        return;
       }
-      if (models.length > 0) {
-        this.cachedModels = models;
-        this.modelsFetchedAt = Date.now();
-        providerLog.debug(
-          { provider: 'cursor', count: models.length },
-          'Cursor model list refreshed',
-        );
-      }
+
+      const args = CURSOR_MODEL_COMMANDS[index];
+      const child = spawn('cursor-agent', args, {
+        stdio: ['ignore', 'pipe', 'pipe'],
+      });
+
+      let out = '';
+      child.stdout.on('data', (c: Buffer) => (out += c.toString()));
+      child.stderr.on('data', (c: Buffer) => (out += c.toString()));
+
+      const finish = () => {
+        const models = parseCursorModelList(out);
+        if (models.length > 0) {
+          this.cachedModels = models;
+          this.modelsFetchedAt = Date.now();
+          this.modelsInFlight = false;
+          providerLog.debug(
+            { provider: 'cursor', count: models.length, command: args.join(' ') },
+            'Cursor model list refreshed',
+          );
+          return;
+        }
+        runCandidate(index + 1);
+      };
+
+      child.once('error', finish);
+      child.once('exit', finish);
+      setTimeout(() => {
+        try {
+          child.kill('SIGTERM');
+        } catch {
+          /* gone */
+        }
+      }, 20_000).unref?.();
     };
-    child.once('exit', finish);
-    child.once('error', finish);
-    setTimeout(() => {
-      try {
-        child.kill('SIGTERM');
-      } catch {
-        /* gone */
-      }
-    }, 20_000).unref?.();
+
+    this.modelsInFlight = true;
+    runCandidate(0);
   }
 
   private resolveCliModel(modelId: string | undefined): string | undefined {
@@ -184,9 +336,10 @@ export class CursorProvider implements Provider {
       '--output-format',
       'stream-json',
       '--stream-partial-output',
-      // Headless: never block on interactive approval prompts.
-      '--force',
       '--trust',
+      ...(request.harnessRole === 'critic'
+        ? ['--mode', 'ask', '--sandbox', 'enabled']
+        : ['--force']),
     ];
     const cliModel = this.resolveCliModel(request.model);
     if (cliModel && cliModel !== 'auto') args.push('--model', cliModel);

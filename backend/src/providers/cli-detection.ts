@@ -15,7 +15,6 @@ import { join, delimiter } from 'node:path';
 import type { ProviderName } from '@koryphaios/shared';
 import {
   detectClaudeCodeLogin,
-  detectCodexAuthToken,
   detectCodexCLILogin,
   detectAntigravityApiKey,
   detectAntigravityCLILogin,
@@ -32,6 +31,7 @@ import {
   detectClineCLILogin,
   createClineCLIAuthMarker,
 } from './auth-utils';
+import { discoverCliAccounts } from './cli-accounts';
 
 export interface AgentCliStatus {
   /** Stable id for the CLI. */
@@ -89,7 +89,10 @@ export function canAutoEnable(provider: ProviderName): boolean {
     case 'claude':
       return !!whichBinary('claude') && detectClaudeCodeLogin();
     case 'codex':
-      return !!whichBinary('codex') && !!detectCodexAuthToken();
+      return !!whichBinary('codex') && (
+        detectCodexCLILogin()
+        || discoverCliAccounts().some((account) => account.provider === 'codex')
+      );
     case 'antigravity':
       return !!whichBinary('agy') && detectAntigravityCLILogin();
     case 'grok':
@@ -152,21 +155,16 @@ export function detectAgentClis(): AgentCliStatus[] {
     docsUrl: 'https://docs.anthropic.com/en/docs/claude-code',
   });
 
-  // ── Codex → `codex` provider. detectCodexAuthToken now reads ~/.codex too,
-  // so a machine-wide codex login IS a Koryphaios login — no second auth. ──
-  const koryCodexToken = !!detectCodexAuthToken();
+  // ── Codex → `codex` provider. The installed CLI owns its own login. ──
   const machineCodex = detectCodexCLILogin();
-  const codex = mk('codex', 'OpenAI Codex', ['codex'], 'codex', {
-    loggedIn: koryCodexToken || machineCodex,
-    authSource: koryCodexToken
-      ? 'Koryphaios codex-home'
-      : machineCodex
-        ? '~/.codex/auth.json'
-        : null,
+  const codex = mk('codex', 'OpenAI Codex (CLI)', ['codex'], 'codex', {
+    loggedIn: machineCodex,
+    authSource: machineCodex ? '~/.codex/auth.json' : null,
     autoEnabled: canAutoEnable('codex'),
-    workingNote: koryCodexToken
-      ? 'Signed in — your ChatGPT subscription is used automatically.'
-      : 'Not signed in — connect Codex from Providers (no CLI needed).',
+    workingNote: machineCodex
+      ? 'Chats through the installed Codex CLI; its login stays local to the CLI.'
+      : 'Codex CLI is installed but not logged in.',
+    loggedOutNote: 'Codex CLI is installed but not logged in — run "codex login".',
     docsUrl: 'https://developers.openai.com/codex/cli',
   });
 

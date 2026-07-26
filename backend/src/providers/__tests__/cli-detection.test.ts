@@ -8,6 +8,7 @@ import {
   detectCursorCLILogin,
   detectGrokCLILogin,
   detectCodexCLILogin,
+  detectClineCLILogin,
 } from '../auth-utils';
 
 // Snapshot the env vars these tests mutate so each test is isolated and the suite is restored.
@@ -147,6 +148,27 @@ describe('login detectors (deterministic via temp HOME)', () => {
       JSON.stringify({ tokens: { access_token: 'a' } }),
     );
     expect(detectCodexCLILogin()).toBe(true);
+  });
+
+  it('detects Cline CLI login only from auth-like fields in ~/.cline/data/secrets.json', () => {
+    expect(detectClineCLILogin()).toBe(false);
+    mkdirSync(join(tmpHome, '.cline', 'data'), { recursive: true });
+    writeFileSync(
+      join(tmpHome, '.cline', 'data', 'secrets.json'),
+      JSON.stringify({
+        providers: { cline: { settings: { model: 'gpt-4o' }, apiUrl: 'https://example.com' } },
+      }),
+    );
+    expect(detectClineCLILogin()).toBe(false);
+
+    writeFileSync(
+      join(tmpHome, '.cline', 'data', 'secrets.json'),
+      JSON.stringify({
+        providers: { cline: { settings: { model: 'gpt-4o' } },
+        auth: { apiKey: 'sk-long-api-key-like-value-for-testing-1234567890' } },
+      }),
+    );
+    expect(detectClineCLILogin()).toBe(true);
   });
 });
 

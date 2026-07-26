@@ -10,6 +10,7 @@
 import { getContext } from '../context';
 import type { ToolContext } from '../tools/registry';
 import { mcpLog } from '../logger';
+import { VERSION } from '../constants';
 
 // Only Koryphaios's KNOWLEDGE tools are exposed over MCP — file edits and shell
 // stay with each CLI's native tools (their strength); this is purely so CLIs
@@ -61,7 +62,7 @@ export async function handleMcpRequest(
       return rpcResult(id, {
         protocolVersion: '2024-11-05',
         capabilities: { tools: {} },
-        serverInfo: { name: 'koryphaios', version: '1.0.0' },
+        serverInfo: { name: 'koryphaios', version: VERSION },
       });
 
     case 'notifications/initialized':

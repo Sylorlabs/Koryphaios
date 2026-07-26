@@ -334,12 +334,28 @@ export class AntigravityProvider implements Provider {
     const logPath = join(tmpdir(), `agy-${Date.now()}.log`);
 
     const cwd = request.workingDirectory?.trim();
+    const latestUserText = [...request.messages]
+      .reverse()
+      .find((message) => message.role === 'user');
+    const taskText = latestUserText ? flattenContent(latestUserText.content) : prompt;
+    const requestsChange = /\b(implement|fix|edit|create|add|change|refactor|write|build|remove|delete)\b/i.test(taskText);
+    const isReadOnlyTask =
+      !requestsChange &&
+      /\b(inspect|summari[sz]e|review|explain|analy[sz]e|architecture|status|what|why)\b/i.test(taskText);
+
     const args = [
       '--print',
       prompt,
       '--model',
       cliModel,
-      '--dangerously-skip-permissions',
+      ...(request.harnessRole === 'critic'
+        ? ['--mode', 'plan', '--sandbox']
+        : isReadOnlyTask
+          // The harness enforces planning mode for an explicitly read-only
+          // request. A request to inspect/summarize must not silently become
+          // an accept-edits session just because it is running through a CLI.
+          ? ['--mode', 'plan', '--sandbox']
+        : ['--mode', 'accept-edits', '--dangerously-skip-permissions']),
       '--log-file',
       logPath,
       ...(convId ? ['--conversation', convId] : []),
@@ -878,7 +894,9 @@ function drainTranscript(state: TranscriptTailState): ProviderEvent[] {
 const HARNESS_SYSTEM_NOTE =
   'You are running inside the Koryphaios orchestrator. Never spawn subagents or delegate ' +
   'to other agents yourself; if work should be parallelized or delegated, say so in your ' +
-  'response and Koryphaios will dispatch its own worker agents.';
+  'response and Koryphaios will dispatch its own worker agents. Do not start background ' +
+  'tasks that require a later notification: complete the requested work in this turn and ' +
+  'always finish with a concise user-facing answer.';
 
 function buildPrompt(systemPrompt: string | undefined, messages: ProviderMessage[]): string {
   const lines: string[] = [];

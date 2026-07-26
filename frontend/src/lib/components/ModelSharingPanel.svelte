@@ -4,13 +4,15 @@
   import { toastStore } from '$lib/stores/toast.svelte';
   import { loadProvidersFromApi } from '$lib/stores/providers.svelte';
   import { collaborationStore } from '$lib/stores/collaboration.svelte';
-  import { Share2, MonitorSmartphone, ShieldAlert, ShieldCheck, ShieldX, Loader2, Link2, HardDrive, Lock, Wifi, Terminal, FilePenLine, Globe } from 'lucide-svelte';
+  import { Share2, MonitorSmartphone, ShieldAlert, ShieldCheck, ShieldX, Loader2, Link2, HardDrive, Lock, Wifi, Terminal, FilePenLine, Globe, Search } from 'lucide-svelte';
   import { SANDBOX_PRESETS, type ProviderShareRisk, type SandboxPolicy, type SandboxPreset } from '@koryphaios/shared';
+  import SettingsSwitch from './SettingsSwitch.svelte';
 
   interface ShareCandidate {
     provider: string;
     label: string;
     modelCount: number;
+    available: boolean;
     agentic: boolean;
     risk: ProviderShareRisk;
     reason: string;
@@ -20,6 +22,7 @@
   let sharedSet = $state<Set<string>>(new Set());
   let loadingHost = $state(false);
   let savingHost = $state(false);
+  let providerSearch = $state('');
 
   let joinCode = $state('');
   let connecting = $state(false);
@@ -195,6 +198,24 @@
   }
 
   const anyRisky = $derived(candidates.some((c) => sharedSet.has(c.provider) && c.risk !== 'ok'));
+  const filteredCandidates = $derived.by(() => {
+    const query = providerSearch.trim().toLowerCase();
+    return candidates
+      .filter((candidate) =>
+        !query ||
+        candidate.label.toLowerCase().includes(query) ||
+        candidate.provider.toLowerCase().includes(query),
+      )
+      .sort((left, right) => Number(right.available) - Number(left.available) || left.label.localeCompare(right.label));
+  });
+
+  function candidateDescription(candidate: ShareCandidate): string {
+    if (!candidate.available) return 'Not connected — configure this provider in Providers before sharing it.';
+    const modelText = `${candidate.modelCount} model${candidate.modelCount === 1 ? '' : 's'}`;
+    return candidate.agentic
+      ? `${modelText} · CLI runs in a temporary sandbox on this computer.`
+      : `${modelText} · ${candidate.reason}`;
+  }
 </script>
 
 <div class="space-y-8">
@@ -215,8 +236,7 @@
       <h4 class="text-sm font-bold text-[var(--color-text-primary)]">Share my models</h4>
     </div>
     <p class="text-[11px] text-[var(--color-text-muted)] mb-5">
-      Pick which providers to lend. The other person uses them on <strong>their own</strong> computer and files —
-      only the model call runs here, nothing touches your filesystem.
+      Every provider is listed here. Search by name, then enable the connected providers you want to lend.
     </p>
 
     {#if loadingHost}
@@ -224,47 +244,32 @@
     {:else if candidates.length === 0}
       <p class="text-xs text-[var(--color-text-muted)]">Connect a provider first — authenticated providers appear here to share.</p>
     {:else}
-      <div class="space-y-2">
-        {#each candidates as c (c.provider)}
+      <div class="mb-3 flex items-center gap-2 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-1)] px-3 py-2">
+        <Search size={14} class="shrink-0 text-[var(--color-text-muted)]" />
+        <input bind:value={providerSearch} type="search" placeholder="Search all providers…" class="min-w-0 flex-1 bg-transparent text-xs text-[var(--color-text-primary)] outline-none placeholder:text-[var(--color-text-muted)]" aria-label="Search providers to share" />
+        <span class="text-[10px] text-[var(--color-text-muted)]">{filteredCandidates.length}/{candidates.length}</span>
+      </div>
+      <div class="max-h-[34rem] space-y-2 overflow-y-auto pr-1">
+        {#each filteredCandidates as c (c.provider)}
           {@const meta = riskMeta[c.risk]}
           {@const on = sharedSet.has(c.provider)}
-          <label
-            class="flex items-start gap-3 rounded-2xl p-3.5 cursor-pointer transition-colors"
-            style="background: {on && c.risk === 'prohibited' ? 'color-mix(in srgb, #ef4444 8%, var(--color-surface-1))' : 'var(--color-surface-1)'};"
-          >
-            <input type="checkbox" class="mt-1" checked={on} onchange={() => toggleShare(c)} />
-            <div class="min-w-0 flex-1">
-              <div class="flex items-center gap-2 flex-wrap">
-                <span class="text-xs font-semibold text-[var(--color-text-primary)]">{c.label}</span>
-                <span class="text-[10px] text-[var(--color-text-muted)]">{c.modelCount} model{c.modelCount === 1 ? '' : 's'}</span>
-                <span class="inline-flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded-full" style="color: {meta.color}; background: color-mix(in srgb, {meta.color} 14%, transparent);">
-                  <meta.icon size={10} /> {meta.label}
-                </span>
-                {#if c.agentic}
-                  <span class="inline-flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded-full" style="color: #a78bfa; background: color-mix(in srgb, #a78bfa 14%, transparent);">
-                    <HardDrive size={10} /> CLI · runs on your PC
-                  </span>
-                {/if}
-              </div>
-              <p class="text-[10px] text-[var(--color-text-muted)] mt-0.5">{c.reason}</p>
-              {#if c.agentic}
-                <p class="text-[10px] mt-1" style="color: #a78bfa;">
-                  This is a CLI tool. When someone uses it, <strong>their project files are copied into a temp folder on your PC</strong>
-                  and the CLI runs on your machine. Their edits are sent back to them. API providers never do this — files stay on their side.
-                </p>
-              {/if}
-              {#if on && c.risk === 'prohibited'}
-                <p class="text-[10px] font-semibold mt-1" style="color: #ef4444;">
-                  ⚠ Sharing this violates the provider's Terms of Service. Providers enforce this. Use at your own risk.
-                </p>
-              {:else if on && c.risk === 'caution'}
-                <p class="text-[10px] font-semibold mt-1" style="color: #f59e0b;">
-                  ⚠ Sharing this may violate the provider's Terms of Service. Use at your own risk.
-                </p>
-              {/if}
+          <div class="rounded-2xl" style="background: {on && c.risk === 'prohibited' ? 'color-mix(in srgb, #ef4444 8%, var(--color-surface-1))' : 'transparent'};">
+            <SettingsSwitch
+              compact
+              checked={on}
+              disabled={!c.available}
+              label={c.label}
+              description={candidateDescription(c)}
+              onchange={() => toggleShare(c)}
+            />
+            <div class="-mt-2 flex flex-wrap gap-1.5 px-3 pb-3">
+              <span class="inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[10px] font-medium" style="color: {meta.color}; background: color-mix(in srgb, {meta.color} 14%, transparent);"><meta.icon size={10} /> {meta.label}</span>
+              {#if c.agentic}<span class="inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[10px] font-medium" style="color: #a78bfa; background: color-mix(in srgb, #a78bfa 14%, transparent);"><HardDrive size={10} /> CLI</span>{/if}
+              {#if !c.available}<span class="rounded-full bg-[var(--color-surface-3)] px-1.5 py-0.5 text-[10px] text-[var(--color-text-muted)]">Not connected</span>{/if}
             </div>
-          </label>
+          </div>
         {/each}
+        {#if filteredCandidates.length === 0}<p class="px-3 py-5 text-center text-xs text-[var(--color-text-muted)]">No providers match “{providerSearch}”.</p>{/if}
       </div>
 
       {#if anyRisky}

@@ -1,7 +1,7 @@
 // Backend Constants — Extract magic numbers and configuration defaults
 
 /** Application version (single source of truth) */
-export const VERSION = '1.0.0';
+export const VERSION = '1.0.23';
 
 /**
  * Frontend/Backend compatibility contract.
