@@ -66,6 +66,7 @@ export const feedbackRoutes = new Elysia({ prefix: '/api/feedback' })
         email: body.email?.trim() || undefined,
         appVersion: body.appVersion?.trim() || undefined,
         platform: body.platform?.trim() || undefined,
+        turnstileToken: body.turnstileToken?.trim() || undefined,
         context: body.context?.route ? { route: body.context.route.slice(0, 500) } : undefined,
       };
 
@@ -91,6 +92,7 @@ export const feedbackRoutes = new Elysia({ prefix: '/api/feedback' })
         email: t.Optional(t.String({ format: 'email', maxLength: 254 })),
         appVersion: t.Optional(t.String({ maxLength: 50 })),
         platform: t.Optional(t.String({ maxLength: 300 })),
+        turnstileToken: t.Optional(t.String({ maxLength: 2048 })),
         context: t.Optional(t.Object({ route: t.Optional(t.String({ maxLength: 500 })) })),
       }),
     },

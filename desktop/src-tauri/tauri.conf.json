@@ -34,10 +34,10 @@
     "security": {
       "csp": {
         "default-src": "'self'",
-        "connect-src": "'self' http://localhost:* http://127.0.0.1:* ws://localhost:* ws://127.0.0.1:*",
+        "connect-src": "'self' http://localhost:* http://127.0.0.1:* ws://localhost:* ws://127.0.0.1:* https://koryphaios.com https://challenges.cloudflare.com",
         "img-src": "'self' data: https:",
         "style-src": "'self' 'unsafe-inline'",
-        "script-src": "'self' 'unsafe-eval'",
+        "script-src": "'self' 'unsafe-eval' https://challenges.cloudflare.com",
         "font-src": "'self' data:",
         "frame-src": "'self' https: http:"
       },
