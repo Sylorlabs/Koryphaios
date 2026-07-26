@@ -25,6 +25,8 @@
 	function reasonText(r: BackendHealthReason | null): string {
 		switch (r) {
 			case 'unreachable': return 'Cannot reach the backend at the configured address.';
+			case 'http-error': return 'The backend responded, but its health endpoint returned an error.';
+			case 'invalid-response': return 'The backend responded with an invalid health-check payload.';
 			case 'not-ok': return 'Backend responded but reported unhealthy.';
 			case 'min-frontend':
 				return `This frontend is older than the backend's minimum supported build (frontend ${backendHealth.frontendVersion} < backend min ${backendHealth.backendMinFrontend ?? '?'}).`;
@@ -62,6 +64,9 @@
 
 			{#if reason}
 				<p class="reason">{reasonText(reason)}</p>
+			{/if}
+			{#if backendHealth.failureDetail}
+				<p class="failure-detail">{backendHealth.failureDetail}</p>
 			{/if}
 
 			<dl class="meta">
@@ -141,6 +146,15 @@
 		text-align: left;
 		white-space: pre-wrap;
 		word-break: break-word;
+	}
+	.failure-detail {
+		color: var(--color-text-secondary);
+		font-size: var(--text-xs);
+		background: var(--color-surface-2);
+		border-radius: var(--radius-md);
+		padding: var(--space-2) var(--space-md);
+		text-align: left;
+		line-height: 1.45;
 	}
 	.meta {
 		display: grid;

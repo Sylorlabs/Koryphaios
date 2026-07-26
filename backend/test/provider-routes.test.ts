@@ -39,17 +39,6 @@ const pollKimiCodeDeviceAuthMock = mock(async () => ({
   expiresIn: 3600,
   scope: 'openid profile',
 }));
-const startCodexDeviceAuthMock = mock(async () => ({
-  deviceAuthId: 'codex-device-auth-id-123',
-  userCode: 'WXYZ-1234',
-  verificationUri: 'https://auth.openai.com/device',
-  verificationUriComplete: 'https://auth.openai.com/device?user_code=WXYZ-1234',
-  expiresIn: 900,
-  interval: 5,
-}));
-const pollCodexDeviceAuthMock = mock(async () => ({
-  accessToken: 'codex-device-token',
-}));
 const detectCodexAuthTokenMock = mock(() => null);
 const resetCodexDeviceAuthSessionsMock = mock(() => {});
 const clearCodexAuthStateMock = mock(() => {});
@@ -104,8 +93,6 @@ mock.module('../src/providers/codex', () => ({
     }
     async *streamResponse() {}
   },
-  startCodexDeviceAuth: startCodexDeviceAuthMock,
-  pollCodexDeviceAuth: pollCodexDeviceAuthMock,
   resetCodexDeviceAuthSessions: resetCodexDeviceAuthSessionsMock,
 }));
 
@@ -399,35 +386,20 @@ describe('provider routes', () => {
     const google = await request('/api/providers/google/auth/start', { method: 'POST' });
     expect(google.response.status).toBe(404);
     expect(google.body.ok).toBe(false);
-  });
 
-  test('Codex browser auth uses the device flow and activates on poll', async () => {
     const codexStart = await request('/api/providers/codex/auth/start', {
       method: 'POST',
     });
-    expect(codexStart.response.status).toBe(200);
-    expect(codexStart.body.ok).toBe(true);
-    expect(codexStart.body.data.deviceAuthId).toBe('codex-device-auth-id-123');
-    expect(codexStart.body.data.userCode).toBe('WXYZ-1234');
-    expect(codexStart.body.data.verificationUri).toBe('https://auth.openai.com/device');
 
-    const codexPoll = await request('/api/providers/codex/auth/poll', {
+    expect(codexStart.response.status).toBe(404);
+    expect(codexStart.body.ok).toBe(false);
+
+    const codexComplete = await request('/api/providers/codex/auth/complete', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        deviceAuthId: 'codex-device-auth-id-123',
-        userCode: 'WXYZ-1234',
-      }),
     });
-    expect(codexPoll.response.status).toBe(200);
-    expect(codexPoll.body.ok).toBe(true);
-    expect(codexPoll.body.data.status).toBe('connected');
-    expect(lastSetCredentials).toEqual({
-      name: 'codex',
-      body: {
-        authToken: `cli:codex:${Buffer.from('/tmp/codex-home').toString('base64url')}`,
-      },
-    });
+
+    expect(codexComplete.response.status).toBe(404);
+    expect(codexComplete.body.ok).toBe(false);
   });
 
   test('Copilot browser auth returns device flow details and activates on poll', async () => {

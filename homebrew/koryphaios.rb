@@ -12,18 +12,18 @@
 class Koryphaios < Formula
   desc "The Autonomous Workspace for 100% AI-Generated Code"
   homepage "https://koryphaios.com"
-  version "0.2.0"
+  version "1.0.23"
 
   # Stable releases
   stable do
     if OS.mac? && Hardware::CPU.arm?
-      url "https://github.com/sylorlabs/koryphaios/releases/download/v0.2.0/Koryphaios_0.2.0_aarch64.dmg"
+      url "https://github.com/sylorlabs/koryphaios/releases/download/v1.0.23/Koryphaios_1.0.23_aarch64.dmg"
       sha256 "PLACEHOLDER_SHA256_AARCH64"
     elsif OS.mac? && Hardware::CPU.intel?
-      url "https://github.com/sylorlabs/koryphaios/releases/download/v0.2.0/Koryphaios_0.2.0_x64.dmg"
+      url "https://github.com/sylorlabs/koryphaios/releases/download/v1.0.23/Koryphaios_1.0.23_x64.dmg"
       sha256 "PLACEHOLDER_SHA256_X64"
     elsif OS.linux?
-      url "https://github.com/sylorlabs/koryphaios/releases/download/v0.2.0/koryphaios_0.2.0_amd64.AppImage"
+      url "https://github.com/sylorlabs/koryphaios/releases/download/v1.0.23/koryphaios_1.0.23_amd64.AppImage"
       sha256 "PLACEHOLDER_SHA256_APPIMAGE"
     end
   end
@@ -50,7 +50,7 @@ class Koryphaios < Formula
         prefix.install "desktop/src-tauri/target/release/bundle/macos/Koryphaios.app"
         bin.install_symlink prefix/"Koryphaios.app/Contents/MacOS/koryphaios-desktop" => "koryphaios"
       else
-        bin.install "desktop/src-tauri/target/release/bundle/appimage/koryphaios-0.2.0.AppImage" => "koryphaios"
+        bin.install "desktop/src-tauri/target/release/bundle/appimage/koryphaios-1.0.23.AppImage" => "koryphaios"
       end
     else
       # Install from pre-built binary

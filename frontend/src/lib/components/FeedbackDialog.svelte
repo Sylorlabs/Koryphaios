@@ -4,17 +4,7 @@
   import { apiFetch, parseJsonResponse } from '$lib/api.svelte';
   import { apiUrl } from '$lib/utils/api-url';
 
-  type FeedbackCategory =
-    | 'wrong-scope'
-    | 'overengineered'
-    | 'ignored-instructions'
-    | 'generic-ugly-ui'
-    | 'broke-existing-behavior'
-    | 'claimed-done-without-proof'
-    | 'too-many-questions'
-    | 'too-verbose'
-    | 'slow'
-    | 'other';
+  type FeedbackCategory = 'bug' | 'idea' | 'question' | 'other';
 
   interface Props {
     open?: boolean;
@@ -22,7 +12,7 @@
   }
 
   let { open = false, onClose }: Props = $props();
-  let category = $state<FeedbackCategory>('wrong-scope');
+  let category = $state<FeedbackCategory>('idea');
   let message = $state('');
   let email = $state('');
   let includeDiagnostics = $state(true);
@@ -33,15 +23,9 @@
   let messageInput = $state<HTMLTextAreaElement | null>(null);
 
   const categories: Array<{ id: FeedbackCategory; label: string; icon: typeof Flag }> = [
-    { id: 'wrong-scope', label: 'Wrong scope', icon: Flag },
-    { id: 'overengineered', label: 'Overengineered', icon: Flag },
-    { id: 'ignored-instructions', label: 'Ignored instructions', icon: Flag },
-    { id: 'generic-ugly-ui', label: 'Generic / ugly UI', icon: Flag },
-    { id: 'broke-existing-behavior', label: 'Broke behavior', icon: Bug },
-    { id: 'claimed-done-without-proof', label: 'No proof', icon: Flag },
-    { id: 'too-many-questions', label: 'Too many questions', icon: HelpCircle },
-    { id: 'too-verbose', label: 'Too verbose', icon: Flag },
-    { id: 'slow', label: 'Slow', icon: Flag },
+    { id: 'bug', label: 'Bug', icon: Bug },
+    { id: 'idea', label: 'Idea', icon: Lightbulb },
+    { id: 'question', label: 'Question', icon: HelpCircle },
     { id: 'other', label: 'Other', icon: Lightbulb },
   ];
 
@@ -80,14 +64,24 @@
     submitting = true;
     error = '';
     try {
+      const diagnostics = includeDiagnostics
+        ? {
+            platform: typeof navigator !== 'undefined' ? navigator.platform : undefined,
+            context:
+              typeof window !== 'undefined' ? { route: window.location.pathname } : undefined,
+          }
+        : {};
       const response = await apiFetch(
-        apiUrl('/api/feedback/local'),
+        apiUrl('/api/feedback'),
         {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             category,
             message: trimmed,
+            ...diagnostics,
+            ...(email.trim() ? { email: email.trim() } : {}),
+            ...(appVersion ? { appVersion } : {}),
           }),
         },
         15_000,
@@ -210,7 +204,7 @@
               maxlength="8000"
               rows="6"
               required
-              placeholder="What happened, what did you expect, and what evidence would prove the correction?"
+              placeholder="Share the details that would help us act on this."
               class="w-full resize-y rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-2)] px-4 py-3 text-sm leading-6 text-[var(--color-text-primary)] outline-none transition focus:border-[var(--color-accent)] focus:ring-2 focus:ring-[var(--color-accent)]/15"
             ></textarea>
             <span class="mt-1 block text-right text-[10px] text-[var(--color-text-muted)]"
@@ -218,7 +212,7 @@
             >
           </label>
 
-          <label class="hidden">
+          <label class="block">
             <span
               class="mb-2 block text-[11px] font-bold uppercase tracking-wider text-[var(--color-text-muted)]"
               >Reply email <span class="normal-case tracking-normal">(optional)</span></span
@@ -237,7 +231,7 @@
             type="button"
             role="switch"
             aria-checked={includeDiagnostics}
-            class="hidden w-full items-center justify-between gap-4 rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-2)] px-4 py-3 text-left"
+            class="flex w-full items-center justify-between gap-4 rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-2)] px-4 py-3 text-left"
             onclick={() => (includeDiagnostics = !includeDiagnostics)}
           >
             <span
@@ -268,7 +262,7 @@
 
           <div class="flex items-center justify-between gap-4 pt-1">
             <p class="text-[10px] leading-4 text-[var(--color-text-muted)]">
-              Local evaluation candidate — no source, prompts, screenshots, or paths are uploaded.
+              We never upload source, prompts, screenshots, or API keys.
             </p>
             <div class="flex gap-2">
               <button

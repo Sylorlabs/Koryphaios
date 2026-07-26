@@ -8,6 +8,7 @@
 
 import type { ModelDef, ProviderConfig } from '@koryphaios/shared';
 import { spawn } from 'node:child_process';
+import { existsSync, readFileSync } from 'node:fs';
 import { whichBinary } from './cli-detection';
 import { detectClineCLILogin } from './auth-utils';
 import { providerLog } from '../logger';
@@ -22,6 +23,7 @@ import {
 } from './types';
 
 const CLINE_STREAM_TIMEOUT_MS = 300_000;
+const MODELS_CACHE_TTL_MS = 5 * 60_000;
 
 const HARNESS_SYSTEM_NOTE =
   'You are running inside the Koryphaios orchestrator. Never spawn subagents or delegate to ' +
@@ -51,6 +53,105 @@ function buildPrompt(systemPrompt: string | undefined, messages: ProviderMessage
   return lines.join('\n').trim();
 }
 
+function readJsonFile<T = unknown>(path: string): T | null {
+  try {
+    return JSON.parse(readFileSync(path, 'utf-8')) as T;
+  } catch {
+    return null;
+  }
+}
+
+function looksLikeClineModelId(value: string): boolean {
+  const trimmed = value.trim();
+  if (!trimmed || trimmed.length < 2 || trimmed.length > 200) return false;
+  if (/\s/.test(trimmed)) return false;
+  if (trimmed === 'default') return false;
+  if (!/^[^\n\r]+$/.test(trimmed)) return false;
+  // Common Cline models are short identifiers, not arbitrary long secrets.
+  return trimmed.length >= 2 && /^[A-Za-z0-9._/:+-]+$/.test(trimmed);
+}
+
+function isClineModelKey(key: string): boolean {
+  const normalized = key.toLowerCase();
+  return (
+    normalized === 'model' ||
+    normalized === 'modelid' ||
+    normalized === 'model_id' ||
+    normalized === 'cline_model' ||
+    normalized === 'actmodel' ||
+    normalized.includes('modelid') ||
+    normalized.includes('model_id') ||
+    normalized.includes('clinemodel') ||
+    normalized.includes('cline-model') ||
+    normalized.includes('model')
+  );
+}
+
+function collectConfiguredClineModels(
+  source: unknown,
+  path: string[] = [],
+  models: Set<string> = new Set<string>(),
+): Set<string> {
+  if (!source || typeof source !== 'object') return models;
+
+  if (Array.isArray(source)) {
+    for (const item of source) {
+      collectConfiguredClineModels(item, path, models);
+    }
+    return models;
+  }
+
+  const record = source as Record<string, unknown>;
+  const includesClinePath = path.some((segment) => /cline/i.test(segment));
+
+  for (const [key, value] of Object.entries(record)) {
+    const normalized = key.toLowerCase();
+    const nextPath = [...path, key];
+    if (typeof value === 'string') {
+      if (isClineModelKey(normalized) || (includesClinePath && normalized.includes('id'))) {
+        const modelId = value.trim();
+        if (looksLikeClineModelId(modelId)) {
+          models.add(modelId);
+        }
+      }
+      continue;
+    }
+    collectConfiguredClineModels(value, nextPath, models);
+  }
+  return models;
+}
+
+function readConfiguredClineModels(): ModelDef[] {
+  const clineData = join(homedir(), '.cline', 'data');
+  const sources = [
+    join(clineData, 'settings', 'providers.json'),
+    join(clineData, 'globalState.json'),
+  ];
+
+  const modelIds = new Set<string>();
+  for (const sourcePath of sources) {
+    if (!existsSync(sourcePath)) continue;
+    const payload = readJsonFile(sourcePath);
+    if (!payload || typeof payload !== 'object') continue;
+    for (const modelId of collectConfiguredClineModels(payload)) {
+      modelIds.add(modelId);
+    }
+  }
+
+  return [...modelIds].map((modelId) => ({
+    id: `cline-${modelId}`,
+    name: modelId,
+    provider: 'cline',
+    apiModelId: modelId,
+    contextWindow: 200_000,
+    maxOutputTokens: 32_000,
+    supportsStreaming: true,
+    supportsAttachments: false,
+    canReason: true,
+    reasoningLevels: ['none', 'low', 'medium', 'high', 'xhigh'],
+  } as ModelDef));
+}
+
 interface ClineEvent {
   type?: string; // 'say' | 'ask' | 'task_started' | 'error' | 'completion' | …
   say?: string; // 'text' | 'reasoning' | 'tool' | 'command' | 'api_req_started' | 'completion_result'
@@ -60,30 +161,132 @@ interface ClineEvent {
 
 export class ClineProvider implements Provider {
   readonly name = 'cline' as const;
+  private cachedModels: ModelDef[] | null = null;
+  private modelsFetchedAt = 0;
+  private modelsInFlight = false;
 
   constructor(readonly config: ProviderConfig) {}
 
-  isAvailable(): boolean {
-    return !this.config.disabled && !!whichBinary('cline') && detectClineCLILogin();
-  }
+  private static MODEL_LINE_PATTERNS = [
+    /^\s*([a-z0-9._\/=:+-]+)\s+-\s+(.+?)\s*(?:\((?:current|active|default)\))?\s*$/i,
+    /^\s*([a-z0-9._\/=:+-]+)\s*$/i,
+    /^\s*\*?\s*([a-z0-9._\/=:+-]+)\s*$/i,
+  ];
 
-  listModels(): ModelDef[] {
-    // Cline uses whatever provider/model its own config selects; expose a
-    // single passthrough entry (the CLI resolves the actual model).
-    return [
-      {
-        id: 'cline-default',
-        name: 'Cline (configured model)',
+  private parseModelOutput(output: string): ModelDef[] {
+    const models: ModelDef[] = [];
+    const lines = output.replace(/\r\n/g, '\n').split('\n');
+
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed) continue;
+
+      let match: RegExpMatchArray | null = null;
+      let modelId = '';
+      let modelName = '';
+
+      for (const pattern of ClineProvider.MODEL_LINE_PATTERNS) {
+        const m = pattern.exec(trimmed);
+        if (!m) continue;
+
+        match = m;
+        modelId = m[1]?.trim() ?? '';
+        modelName = (m[2] || m[1] || '').trim();
+        break;
+      }
+
+      if (!match || !modelId) continue;
+
+      const normalized = modelName.replace(/\s+\(current\)\s*$/i, '').trim();
+      models.push({
+        id: `cline-${modelId}`,
+        name: normalized || modelId,
         provider: 'cline',
-        apiModelId: '',
+        apiModelId: modelId,
         contextWindow: 200_000,
         maxOutputTokens: 32_000,
         supportsStreaming: true,
         supportsAttachments: false,
         canReason: true,
         reasoningLevels: ['none', 'low', 'medium', 'high', 'xhigh'],
-      } as ModelDef,
-    ];
+      } as ModelDef);
+    }
+
+    const deduped = new Map<string, ModelDef>();
+    for (const model of models) {
+      deduped.set(model.id, model);
+    }
+    return [...deduped.values()];
+  }
+
+  refreshModels(forceRefresh = false): void {
+    if (!forceRefresh && this.modelsFetchedAt > 0 && !this.modelsInFlight && this.cachedModels?.length) {
+      return;
+    }
+    if (this.modelsInFlight) return;
+    this.modelsInFlight = true;
+
+    const finalize = (models: ModelDef[]): void => {
+      this.cachedModels = models;
+      this.modelsFetchedAt = Date.now();
+      this.modelsInFlight = false;
+      if (models.length) {
+        providerLog.debug({ provider: 'cline', count: models.length }, 'Cline model list refreshed');
+      }
+    };
+
+    const fallbackFromConfig = (): void => {
+      const configured = readConfiguredClineModels();
+      finalize(configured);
+    };
+
+    const candidates: string[][] = [['--list-models'], ['models'], ['list-models'], ['-l']];
+    const runCandidate = (index: number): void => {
+      if (index >= candidates.length) {
+        fallbackFromConfig();
+        return;
+      }
+
+      const args = candidates[index] ?? ['--list-models'];
+      let out = '';
+
+      const child = spawn('cline', args, {
+        stdio: ['ignore', 'pipe', 'pipe'],
+      });
+
+      child.stdout.on('data', (c: Buffer) => (out += c.toString()));
+      child.once('error', () => {
+        runCandidate(index + 1);
+      });
+      child.once('exit', () => {
+        const models = this.parseModelOutput(out);
+        if (models.length > 0) {
+          finalize(models);
+          return;
+        }
+        runCandidate(index + 1);
+      });
+      setTimeout(() => {
+        try {
+          child.kill('SIGTERM');
+        } catch {
+          /* gone */
+        }
+      }, 12_000).unref?.();
+    };
+
+    runCandidate(0);
+  }
+
+  isAvailable(): boolean {
+    return !this.config.disabled && !!whichBinary('cline') && detectClineCLILogin();
+  }
+
+  listModels(): ModelDef[] {
+    if (!this.cachedModels || Date.now() - this.modelsFetchedAt > MODELS_CACHE_TTL_MS) {
+      this.refreshModels();
+    }
+    return this.cachedModels ?? [];
   }
 
   async *streamResponse(request: StreamRequest): AsyncGenerator<ProviderEvent> {
@@ -107,7 +310,13 @@ export class ClineProvider implements Provider {
       return;
     }
 
-    const args = ['-p', prompt, '--act', '--yolo', '--json'];
+    const args = [
+      ...(request.harnessRole === 'critic' ? ['--plan'] : []),
+      '--auto-approve',
+      'true',
+      '--json',
+      prompt,
+    ];
     if (request.reasoningLevel && request.reasoningLevel !== 'auto') {
       const lvl = request.reasoningLevel.toLowerCase();
       if (['none', 'low', 'medium', 'high', 'xhigh'].includes(lvl)) {

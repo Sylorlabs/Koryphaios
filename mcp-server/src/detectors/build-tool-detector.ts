@@ -4,6 +4,7 @@
  */
 
 import { spawn, type ChildProcess } from 'child_process';
+import { existsSync } from 'fs';
 
 import { join, extname } from 'path';
 import { watch, type FSWatcher } from 'chokidar';
@@ -55,6 +56,7 @@ export class BuildToolDetector extends BaseErrorDetector {
   private fileWatcher: FSWatcher | null = null;
   private buildProcesses: Map<string, BuildProcess> = new Map();
   private pollingTimer: NodeJS.Timeout | null = null;
+  private commandAvailability: Map<string, boolean> = new Map();
 
   constructor(options: ErrorDetectorOptions, config?: Partial<BuildToolConfig>) {
     super(options);
@@ -310,6 +312,7 @@ export class BuildToolDetector extends BaseErrorDetector {
       ignored: ['**/node_modules/**', '**/.git/**'],
       persistent: true,
       ignoreInitial: true,
+      ignorePermissionErrors: true,
     });
 
     this.fileWatcher.on('change', async (filePath: string) => {
@@ -318,6 +321,15 @@ export class BuildToolDetector extends BaseErrorDetector {
     });
 
     this.fileWatcher.on('error', (error: Error) => {
+      const fsError = error as NodeJS.ErrnoException;
+      if (fsError.code === 'EACCES' || fsError.code === 'EPERM') {
+        this.logger.warn('Ignoring file watcher permission error', {
+          code: fsError.code,
+          path: fsError.path,
+        });
+        return;
+      }
+
       this.logger.error('File watcher error', error);
       this.emit('detector-error', error);
     });
@@ -340,33 +352,17 @@ export class BuildToolDetector extends BaseErrorDetector {
       if (!tool.enabled) continue;
 
       try {
-        // Check if command is available
-        const process = spawn(tool.command, ['--version'], {
-          stdio: ['ignore', 'pipe', 'pipe'],
-          timeout: 5000,
-        });
+        const isAvailable = await this.checkCommandAvailability(tool.command);
+        this.commandAvailability.set(tool.command, isAvailable);
 
-        await new Promise<void>(resolve => {
-          process.on('close', code => {
-            if (code === 0) {
-              this.logger.debug(`Build tool ${tool.name} is available`);
-              resolve();
-            } else {
-              this.logger.debug(`Build tool ${tool.name} is not available (exit code: ${code})`);
-              tool.enabled = false;
-              resolve();
-            }
-          });
-
-          process.on('error', () => {
-            this.logger.debug(`Build tool ${tool.name} is not available`);
-            tool.enabled = false;
-            resolve();
-          });
-        });
+        if (isAvailable) {
+          this.logger.debug(`Build tool ${tool.name} is available`);
+        } else {
+          this.logger.debug(`Build tool ${tool.name} is not available`);
+        }
       } catch (error) {
         this.logger.debug(`Build tool ${tool.name} check failed`, error);
-        tool.enabled = false;
+        this.commandAvailability.set(tool.command, false);
       }
     }
   }
@@ -382,9 +378,32 @@ export class BuildToolDetector extends BaseErrorDetector {
     }, pollInterval);
   }
 
+  private async checkCommandAvailability(command: string): Promise<boolean> {
+    return new Promise<boolean>(resolve => {
+      try {
+        const process = spawn(command, ['--version'], {
+          stdio: ['ignore', 'pipe', 'pipe'],
+          timeout: 5000,
+        });
+
+        process.on('close', code => {
+          resolve(code === 0);
+        });
+
+        process.on('error', () => {
+          resolve(false);
+        });
+      } catch {
+        resolve(false);
+      }
+    });
+  }
+
   private async runAllBuildTools(): Promise<DetectedError[]> {
     const errors: DetectedError[] = [];
-    const enabledTools = this.config.buildTools.filter(tool => tool.enabled);
+    const enabledTools = this.config.buildTools.filter(
+      tool => tool.enabled && this.isToolConfigRelevantForWorkspace(tool) && this.isToolCommandAvailable(tool)
+    );
 
     if (this.config.parallelBuilds) {
       // Run builds in parallel with concurrency limit
@@ -416,6 +435,17 @@ export class BuildToolDetector extends BaseErrorDetector {
     const errors: DetectedError[] = [];
 
     try {
+      if (!this.isToolConfigRelevantForWorkspace(tool)) {
+        return errors;
+      }
+
+      if (!this.isToolCommandAvailable(tool)) {
+        if (tool.name === 'TypeScript') {
+          errors.push(this.createUnavailableBuildToolError(tool));
+        }
+        return errors;
+      }
+
       this.logger.info(`Running build tool: ${tool.name}`);
 
       const process = spawn(tool.command, tool.args, {
@@ -467,9 +497,15 @@ export class BuildToolDetector extends BaseErrorDetector {
         });
 
         process.on('error', error => {
+          if (this.isCommandUnavailableError(error)) {
+            const processError = this.createUnavailableBuildToolError(tool, error);
+            errors.push(processError);
+          } else {
+            const processError = this.createProcessError(tool, error);
+            errors.push(processError);
+          }
+
           buildProcess.status = 'failed';
-          const processError = this.createProcessError(tool, error);
-          errors.push(processError);
           resolve();
         });
       });
@@ -577,6 +613,10 @@ export class BuildToolDetector extends BaseErrorDetector {
   }
 
   private createExecutionError(tool: BuildToolDefinition, error: unknown): DetectedError {
+    if (tool.name === 'TypeScript' && this.isCommandUnavailableError(error)) {
+      return this.createUnavailableBuildToolError(tool, error instanceof Error ? error : undefined);
+    }
+
     const errorMessage = error instanceof Error ? error.message : String(error);
 
     return {
@@ -599,6 +639,33 @@ export class BuildToolDetector extends BaseErrorDetector {
       source: this.getSource(),
       patterns: [],
       confidence: 1.0,
+    };
+  }
+
+  private createUnavailableBuildToolError(
+    tool: BuildToolDefinition,
+    error?: Error
+  ): DetectedError {
+    return {
+      id: `build-tool-unavailable-${tool.name}-${Date.now()}`,
+      message: `${tool.name} build tool is not available in this environment${error ? ` (${error.message})` : ''}`,
+      type: 'BuildFailure',
+      category: ErrorCategory.SYNTAX,
+      severity: ErrorSeverity.HIGH,
+      stackTrace: [],
+      context: {
+        timestamp: new Date(),
+        environment: 'build',
+        metadata: {
+          tool: tool.name,
+          command: tool.command,
+          args: tool.args,
+          reason: 'command-unavailable',
+        },
+      },
+      source: this.getSource(),
+      patterns: ['command-not-found'],
+      confidence: 0.95,
     };
   }
 
@@ -629,6 +696,10 @@ export class BuildToolDetector extends BaseErrorDetector {
     });
 
     for (const tool of relevantTools) {
+      if (!this.isToolConfigRelevantForWorkspace(tool)) {
+        continue;
+      }
+
       const toolErrors = await this.runBuildTool(tool);
       errors.push(...toolErrors);
     }
@@ -685,5 +756,26 @@ export class BuildToolDetector extends BaseErrorDetector {
       Object.assign(tool, updates);
       this.emit('config-updated', { tool: toolName, updates });
     }
+  }
+
+  private isToolConfigRelevantForWorkspace(tool: BuildToolDefinition): boolean {
+    if (tool.configFiles.length === 0) {
+      return true;
+    }
+
+    return tool.configFiles.some(file => existsSync(join(this.config.workspaceRoot, file)));
+  }
+
+  private isToolCommandAvailable(tool: BuildToolDefinition): boolean {
+    return this.commandAvailability.get(tool.command) ?? false;
+  }
+
+  private isCommandUnavailableError(error: unknown): boolean {
+    if (!(error instanceof Error)) {
+      return false;
+    }
+
+    const fsError = error as NodeJS.ErrnoException;
+    return fsError.code === 'ENOENT';
   }
 }

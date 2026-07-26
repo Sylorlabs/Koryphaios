@@ -242,12 +242,14 @@ export const collaborationRoutes = new Elysia({ prefix: '/api/collab' })
       ok: true,
       data: {
         shared: [...shared],
-        candidates: status
-          .filter((p) => p.authenticated && p.enabled)
-          .map((p) => ({
+        // Show the complete provider catalog. An unavailable provider remains
+        // visible (and explains why it cannot be shared) rather than vanishing
+        // from the user's mental model of what Koryphaios supports.
+        candidates: status.map((p) => ({
             provider: p.name,
             label: p.label ?? p.name,
-            modelCount: p.models.length,
+            modelCount: p.allAvailableModels.length || p.models.length,
+            available: p.authenticated && p.enabled,
             // CLI harnesses run on the host and see the guest's files.
             agentic: isAgenticProvider(p.name),
             ...classifyProviderShare(p.name),

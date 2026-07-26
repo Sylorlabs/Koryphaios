@@ -32,6 +32,7 @@
     showGit: boolean;
     showAgents: boolean;
     showNotes?: boolean;
+    notesEnabled?: boolean;
     zenMode: boolean;
     projectName: string | null | undefined;
     isYoloMode: boolean;
@@ -45,6 +46,7 @@
     showGit,
     showAgents,
     showNotes = false,
+    notesEnabled = true,
     zenMode,
     projectName,
     isYoloMode,
@@ -431,6 +433,7 @@
           <span class="text-xs font-medium">{showGit ? 'Git open' : 'Git'}</span>
         </button>
       {/if}
+      {#if notesEnabled}
       <button
         type="button"
         class="group flex items-center gap-1.5 rounded-lg px-3 py-2 text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-surface-2)]"
@@ -452,6 +455,7 @@
         <StickyNote size={14} />
         <span class="text-xs font-medium">{showNotes ? 'Notes open' : 'Notes'}</span>
       </button>
+      {/if}
       <button
         type="button"
         class="flex items-center gap-2 px-3 py-2 rounded-lg transition-colors hover:bg-[var(--color-surface-2)]"

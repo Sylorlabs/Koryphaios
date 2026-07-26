@@ -173,6 +173,7 @@ export class BuildErrorDetector extends BaseErrorDetector {
         errors.push(...bufferedErrors);
         buildCheckSucceeded = bufferedErrors.length === 0;
       } catch (error) {
+        this.emit('detector-error', error);
         console.warn(
           'TypeScript build check failed:',
           error instanceof Error ? error.message : error

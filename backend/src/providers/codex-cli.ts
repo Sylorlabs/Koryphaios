@@ -1,0 +1,305 @@
+// OpenAI Codex subscription provider — runs the official local `codex` CLI.
+//
+// Koryphaios never copies, refreshes, or sends the CLI's ChatGPT credential.
+// The installed, logged-in CLI owns authentication and performs each turn.
+
+import type { ModelDef, ProviderConfig } from '@koryphaios/shared';
+import { spawn } from 'node:child_process';
+import { whichBinary } from './cli-detection';
+import { discoverCliAccounts, type DiscoveredCliAccount } from './cli-accounts';
+import {
+  type Provider,
+  type ProviderContentBlock,
+  type ProviderEvent,
+  type ProviderMessage,
+  type StreamRequest,
+} from './types';
+import { providerLog } from '../logger';
+
+const CODEX_TIMEOUT_MS = 300_000;
+const CODEX_MODEL_LIST_TIMEOUT_MS = 15_000;
+const CODEX_MODELS_CACHE_MS = 5 * 60_000;
+
+type CodexCliModel = {
+  id?: string;
+  model?: string;
+  displayName?: string;
+  description?: string;
+  hidden?: boolean;
+  isDefault?: boolean;
+  supportedReasoningEfforts?: Array<{ reasoningEffort?: string }>;
+  defaultReasoningEffort?: string;
+  inputModalities?: string[];
+};
+
+function modelDefinition(model: CodexCliModel, account: DiscoveredCliAccount): ModelDef | null {
+  const cliModel = typeof model.model === 'string' ? model.model : model.id;
+  if (!cliModel) return null;
+  const reasoningLevels = (model.supportedReasoningEfforts ?? [])
+    .map((entry) => entry.reasoningEffort)
+    .filter((level): level is string => typeof level === 'string' && level.length > 0);
+  return {
+    // The provider model is account-scoped. The real model name stays in
+    // apiModelId and is the only value passed to `codex --model`.
+    id: `codex-account:${Buffer.from(account.id).toString('base64url')}:${cliModel}`,
+    apiModelId: cliModel,
+    name: `${model.displayName?.trim() || cliModel} · ${account.label}`,
+    provider: 'codex',
+    contextWindow: 0,
+    contextVerified: false,
+    maxOutputTokens: 0,
+    costPerMInputTokens: 0,
+    costPerMOutputTokens: 0,
+    canReason: reasoningLevels.length > 0,
+    reasoningLevels,
+    supportsAttachments: model.inputModalities?.includes('image') === true,
+    supportsStreaming: true,
+    tier: model.isDefault ? 'flagship' : undefined,
+  };
+}
+
+/** Query the official local app-server protocol. This returns exactly the
+ * models the installed, authenticated Codex CLI makes available to this user. */
+async function queryCliModels(binary: string, account: DiscoveredCliAccount): Promise<CodexCliModel[]> {
+  return await new Promise((resolve, reject) => {
+    const child = spawn(binary, ['app-server', '--stdio'], {
+      stdio: ['pipe', 'pipe', 'pipe'],
+      // This is the actual profile boundary. A second account is not just a
+      // display label: the official CLI reads its own auth store from here.
+      env: { ...process.env, CODEX_HOME: account.profileDir },
+    });
+    let buffer = '';
+    let stderr = '';
+    let settled = false;
+    const finish = (result?: CodexCliModel[], error?: Error) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeout);
+      try { child.kill('SIGTERM'); } catch { /* already exited */ }
+      error ? reject(error) : resolve(result ?? []);
+    };
+    const send = (id: number, method: string, params: Record<string, unknown>) =>
+      child.stdin?.write(`${JSON.stringify({ jsonrpc: '2.0', id, method, params })}\n`);
+    const timeout = setTimeout(
+      () => finish(undefined, new Error('Codex CLI model discovery timed out')),
+      CODEX_MODEL_LIST_TIMEOUT_MS,
+    );
+    timeout.unref?.();
+    child.stderr?.on('data', (chunk: Buffer) => (stderr += chunk.toString()));
+    child.once('error', (error) => finish(undefined, error));
+    child.once('exit', (code) => {
+      if (!settled) finish(undefined, new Error((stderr.trim() || `Codex app-server exited with status ${code}`).slice(0, 500)));
+    });
+    child.stdout?.on('data', (chunk: Buffer) => {
+      buffer += chunk.toString();
+      const lines = buffer.split('\n');
+      buffer = lines.pop() ?? '';
+      for (const line of lines) {
+        try {
+          const message = JSON.parse(line) as { id?: number; result?: Record<string, unknown>; error?: { message?: string } };
+          if (message.id === 1) {
+            send(2, 'model/list', { limit: 100, includeHidden: false });
+          } else if (message.id === 2) {
+            if (message.error) return finish(undefined, new Error(message.error.message ?? 'Codex model discovery failed'));
+            const data = Array.isArray(message.result?.data) ? message.result.data as CodexCliModel[] : [];
+            return finish(data.filter((model) => !model.hidden));
+          }
+        } catch {
+          // Ignore non-JSON diagnostics/partial lines from the CLI.
+        }
+      }
+    });
+    send(1, 'initialize', { clientInfo: { name: 'Koryphaios', version: '1.0' }, capabilities: null });
+  });
+}
+
+function flatten(content: string | ProviderContentBlock[]): string {
+  if (typeof content === 'string') return content;
+  return content
+    .filter((block) => block.type === 'text' && typeof block.text === 'string')
+    .map((block) => block.text as string)
+    .join('\n');
+}
+
+function buildPrompt(systemPrompt: string | undefined, messages: ProviderMessage[]): string {
+  const turns = messages
+    .filter((message) => message.role !== 'system')
+    .map((message) => {
+      const text = flatten(message.content).trim();
+      if (!text) return '';
+      const label = message.role === 'assistant' ? 'Assistant' : message.role === 'tool' ? 'Tool result' : 'User';
+      return `${label}: ${text}`;
+    })
+    .filter(Boolean);
+  return [
+    systemPrompt?.trim(),
+    'You are running inside Koryphaios. Follow its supplied instructions and finish every turn with a concise user-facing answer. Do not delegate to native subagents or leave background tasks awaiting a later notification.',
+    ...turns,
+  ]
+    .filter(Boolean)
+    .join('\n\n');
+}
+
+function resolveCliModel(modelId: string, models: ModelDef[]): string {
+  const match = models.find(
+    (model) => model.id === modelId || model.apiModelId === modelId,
+  );
+  return match?.apiModelId ?? modelId;
+}
+
+export class CodexCliProvider implements Provider {
+  readonly name = 'codex' as const;
+  private models: ModelDef[] = [];
+  private modelsAt = 0;
+  private refreshInFlight: Promise<ModelDef[]> | null = null;
+  private accountByModelId = new Map<string, DiscoveredCliAccount>();
+
+  constructor(readonly config: ProviderConfig) {
+    if (this.isAvailable()) void this.refreshModels();
+  }
+
+  isAvailable(): boolean {
+    return !this.config.disabled && !!whichBinary('codex') && this.accounts().length > 0;
+  }
+
+  private accounts(): DiscoveredCliAccount[] {
+    // Expiry decoded from a cached JWT is only a hint. The official CLI owns
+    // refresh and can still have a valid session, so do not hide a discovered
+    // profile before the CLI itself gets a chance to report its model list.
+    return discoverCliAccounts().filter((account) => account.provider === 'codex');
+  }
+
+  listModels(): ModelDef[] {
+    if (this.isAvailable() && Date.now() - this.modelsAt > CODEX_MODELS_CACHE_MS) {
+      void this.refreshModels();
+    }
+    return this.models;
+  }
+
+  async refreshModels(): Promise<ModelDef[]> {
+    if (this.refreshInFlight) return this.refreshInFlight;
+    const binary = whichBinary('codex');
+    const accounts = this.accounts();
+    if (!binary || accounts.length === 0) return [];
+    this.refreshInFlight = Promise.allSettled(accounts.map(async (account) => ({
+      account,
+      models: await queryCliModels(binary, account),
+    })))
+      .then((results) => {
+        const accountByModelId = new Map<string, DiscoveredCliAccount>();
+        const models = results.flatMap((result) => {
+          if (result.status === 'rejected') {
+            providerLog.warn({ provider: 'codex', error: result.reason instanceof Error ? result.reason.message : String(result.reason) }, 'Could not load models for one Codex CLI account');
+            return [];
+          }
+          return result.value.models
+            .map((model) => modelDefinition(model, result.value.account))
+            .filter((model): model is ModelDef => !!model)
+            .map((model) => {
+              accountByModelId.set(model.id, result.value.account);
+              return model;
+            });
+        });
+        this.accountByModelId = accountByModelId;
+        this.models = models;
+        this.modelsAt = Date.now();
+        providerLog.info({ provider: 'codex', models: models.map((model) => ({ model: model.apiModelId, account: this.accountByModelId.get(model.id)?.label })) }, 'Loaded provider-reported Codex CLI models');
+        return models;
+      })
+      .finally(() => { this.refreshInFlight = null; });
+    return this.refreshInFlight;
+  }
+
+  async *streamResponse(request: StreamRequest): AsyncGenerator<ProviderEvent> {
+    const binary = whichBinary('codex');
+    if (!binary) {
+      yield { type: 'error', error: 'Codex CLI was not found on PATH. Install `codex`, then reconnect.' };
+      return;
+    }
+    const account = this.accountByModelId.get(request.model) ?? this.accounts()[0];
+    if (!account) {
+      yield { type: 'error', error: 'Codex CLI is not signed in. Run `codex login` in your terminal, then reconnect.' };
+      return;
+    }
+
+    const prompt = buildPrompt(request.systemPrompt, request.messages);
+    const sandbox = request.harnessRole === 'critic' ? 'read-only' : 'workspace-write';
+    const args = [
+      '--ask-for-approval',
+      'never',
+      'exec',
+      '--json',
+      '--ephemeral',
+      '--skip-git-repo-check',
+      '--color',
+      'never',
+      '--sandbox',
+      sandbox,
+      '--model',
+      resolveCliModel(request.model, this.models),
+      prompt,
+    ];
+    const child = spawn(binary, args, {
+      cwd: request.workingDirectory?.trim() || process.cwd(),
+      stdio: ['ignore', 'pipe', 'pipe'],
+      env: { ...process.env, CODEX_HOME: account.profileDir },
+    });
+    let stderr = '';
+    let stdoutBuffer = '';
+    let completed = false;
+    const onAbort = () => child.kill('SIGTERM');
+    request.signal?.addEventListener('abort', onAbort, { once: true });
+    const timeout = setTimeout(() => child.kill('SIGTERM'), CODEX_TIMEOUT_MS);
+    timeout.unref?.();
+
+    child.stderr.on('data', (chunk: Buffer) => (stderr += chunk.toString()));
+    const queue: ProviderEvent[] = [];
+    child.stdout.on('data', (chunk: Buffer) => {
+      stdoutBuffer += chunk.toString();
+      const lines = stdoutBuffer.split('\n');
+      stdoutBuffer = lines.pop() ?? '';
+      for (const line of lines) {
+        try {
+          const event = JSON.parse(line) as Record<string, any>;
+          const item = event.item as Record<string, any> | undefined;
+          if (event.type === 'item.completed' && item?.type === 'agent_message' && item.text) {
+            queue.push({ type: 'content_delta', content: String(item.text) });
+          } else if (event.type === 'item.completed' && item?.type === 'reasoning' && item.text) {
+            queue.push({ type: 'thinking_delta', thinking: String(item.text) });
+          } else if (event.type === 'item.completed' && item?.type === 'command_execution') {
+            queue.push({
+              type: 'tool_executed',
+              toolName: 'codex_command',
+              toolInput: JSON.stringify({ command: item.command ?? '' }),
+              toolOutput: String(item.aggregated_output ?? item.output ?? '').slice(0, 4_000),
+              isError: item.exit_code != null && item.exit_code !== 0,
+            });
+          } else if (event.type === 'turn.completed') {
+            const usage = event.usage as Record<string, unknown> | undefined;
+            if (typeof usage?.input_tokens === 'number' || typeof usage?.output_tokens === 'number') {
+              queue.push({ type: 'usage_update', tokensIn: usage.input_tokens as number | undefined, tokensOut: usage.output_tokens as number | undefined });
+            }
+            completed = true;
+          }
+        } catch {
+          // Codex's JSON mode is JSONL; ignore a malformed partial line.
+        }
+      }
+    });
+
+    const exitCode = await new Promise<number>((resolve) => {
+      child.once('error', () => resolve(-1));
+      child.once('exit', (code) => resolve(code ?? 0));
+    });
+    clearTimeout(timeout);
+    request.signal?.removeEventListener('abort', onAbort);
+    while (queue.length) yield queue.shift()!;
+    if (request.signal?.aborted) return;
+    if (exitCode !== 0) {
+      yield { type: 'error', error: `Codex CLI failed: ${(stderr.trim() || `exit status ${exitCode}`).slice(0, 500)}` };
+      return;
+    }
+    if (!completed) providerLog.warn({ provider: 'codex' }, 'Codex CLI exited without a turn.completed event');
+    yield { type: 'complete', finishReason: 'end_turn' };
+  }
+}

@@ -27,7 +27,7 @@ import { OpenCodeGoProvider } from './opencodego';
 
 import { GoogleProvider } from './google';
 import { CopilotProvider, exchangeGitHubTokenForCopilotAsync } from './copilot';
-import { CodexProvider } from './codex';
+import { CodexCliProvider } from './codex-cli';
 import { ClaudeCodeProvider } from './claude-code';
 import { GrokBuildProvider } from './grok-build';
 import { AntigravityProvider } from './antigravity';
@@ -40,8 +40,7 @@ import { GitLabProvider } from './gitlab';
 import { SapAiProvider } from './sapai';
 import { CustomProvider } from './custom';
 import {
-  detectCodexAuthToken,
-  isCodexCLIAuthMarker,
+  detectCodexCLILogin,
   detectClaudeCodeLogin,
   detectGrokCLILogin,
   detectAntigravityCLILogin,
@@ -49,8 +48,9 @@ import {
   detectDevinCLILogin,
   detectClineCLILogin,
 } from './auth-utils';
-import { cliAutoEnableCreds } from './cli-detection';
-import { getProviderDisplay } from './provider-display';
+import { cliAutoEnableCreds, whichBinary } from './cli-detection';
+import { discoverCliAccounts } from './cli-accounts';
+import { type ProviderDeployment, getProviderDisplay } from './provider-display';
 import { KimiCodeProvider } from './kimicode';
 import { resolveKimiCodeAccessToken } from './kimicode-auth';
 import { secureDecrypt, isUsingSecureEncryption } from '../security';
@@ -76,7 +76,36 @@ import {
   PROVIDER_AUTH_MODE,
 } from './constants';
 
-const CODEX_MODELS_URL = 'https://chatgpt.com/backend-api/codex/models?client_version=0.120.0';
+const CLI_HARNESS_PROVIDERS = new Set<ProviderName>([
+  'claude',
+  'codex',
+  'grok',
+  'antigravity',
+  'cursor',
+  'devin',
+  'cline',
+]);
+
+const LOCAL_PROVIDER_KEYS = new Set<ProviderName>([
+  'local',
+  'ollama',
+  'lmstudio',
+  'llamacpp',
+]);
+
+function inferProviderDeployment(
+  name: ProviderName,
+  authMode: ProviderAuthMode,
+  isCustom: boolean,
+  hasDisplayDeployment?: ProviderDeployment,
+): ProviderDeployment {
+  if (hasDisplayDeployment) return hasDisplayDeployment;
+  if (LOCAL_PROVIDER_KEYS.has(name) || CLI_HARNESS_PROVIDERS.has(name)) return 'local';
+  if (String(name).startsWith('remote-')) return 'cloud';
+  if (isCustom) return 'api';
+  if (authMode === 'base_url_only') return 'local';
+  return 'api';
+}
 
 // Circuit breaker states
 interface CircuitState {
@@ -184,7 +213,7 @@ class ProviderRegistry {
   }
 
   /** Get provider status only for providers the user has authenticated. No hardcoded list. */
-  getStatus(): Array<{
+  getStatus(options: { refreshModels?: boolean } = {}): Array<{
     name: ProviderName;
     enabled: boolean;
     authenticated: boolean;
@@ -206,7 +235,7 @@ class ProviderRegistry {
     /** Display label for custom providers. */
     label?: string;
     iconPath?: string;
-    deployment?: 'cloud' | 'local' | 'hybrid';
+    deployment?: 'cloud' | 'api' | 'local' | 'hybrid';
     description?: string;
   }> {
     const names = this.getVisibleProviderNames();
@@ -229,7 +258,7 @@ class ProviderRegistry {
       custom?: boolean;
       label?: string;
       iconPath?: string;
-      deployment?: 'cloud' | 'local' | 'hybrid';
+    deployment?: 'cloud' | 'api' | 'local' | 'hybrid';
       description?: string;
     }> = [];
 
@@ -244,7 +273,14 @@ class ProviderRegistry {
       const isEnabled = config ? !config.disabled : false;
       let allModels = [] as ReturnType<Provider['listModels']>;
       if (isEnabled) {
-        allModels = provider?.listModels() ?? getModelsForProvider(name);
+        if (!provider) {
+          allModels = getModelsForProvider(name);
+        } else {
+          if (options.refreshModels) {
+            provider.refreshModels?.(true);
+          }
+          allModels = provider.listModels() ?? getModelsForProvider(name);
+        }
       }
 
       const selectedModels = config?.selectedModels ?? [];
@@ -277,6 +313,7 @@ class ProviderRegistry {
         : undefined;
 
       const display = getProviderDisplay(name);
+      const inferredDeployment = inferProviderDeployment(name, authMode, isCustom, display?.deployment);
 
       result.push({
         name,
@@ -294,7 +331,7 @@ class ProviderRegistry {
         ...(isCustom && { custom: true, label: config?.label ?? String(name) }),
         ...(display?.label && !isCustom && { label: display.label }),
         ...(display?.iconPath && { iconPath: display.iconPath }),
-        ...(display?.deployment && { deployment: display.deployment }),
+        deployment: inferredDeployment,
         ...(display?.description && { description: display.description }),
         ...(baseUrlPlaceholder && { baseUrlPlaceholder }),
         // Remote providers (served by another machine) carry an agentic flag so
@@ -308,6 +345,33 @@ class ProviderRegistry {
     }
 
     return result;
+  }
+
+  /** Refresh model catalogs for enabled providers that expose a refresh hook. */
+  async refreshModelCatalogs(): Promise<void> {
+    const refreshes: Promise<unknown>[] = [];
+    const names = this.getVisibleProviderNames();
+
+    for (const name of names) {
+      const provider = this.providers.get(name);
+      const config = this.providerConfigs.get(name);
+      const isEnabled = config ? !config.disabled : false;
+      if (!provider || !isEnabled) continue;
+
+      try {
+        const result = provider.refreshModels?.(true);
+        if (result && typeof (result as Promise<unknown>).then === 'function') {
+          refreshes.push(result);
+        }
+      } catch {
+        // Refresh failures are non-fatal here; provider status can still render
+        // with cached/fallback models and users can retry manually from settings.
+      }
+    }
+
+    if (refreshes.length > 0) {
+      await Promise.allSettled(refreshes);
+    }
   }
 
   /** All provider types that can be added (for "Add provider" UI). Not filtered by auth. */
@@ -548,6 +612,9 @@ class ProviderRegistry {
           // Claude Code subscription is verified by confirming the official CLI is
           // logged in. We never validate a raw token against the API — the CLI owns
           // auth and runs every request, keeping us compliant with Anthropic's terms.
+          if (!whichBinary('claude')) {
+            return { success: false, error: 'Claude Code CLI (claude) was not found on PATH. Install it, then reconnect.' };
+          }
           if (detectClaudeCodeLogin()) return { success: true };
           return {
             success: false,
@@ -556,6 +623,9 @@ class ProviderRegistry {
           };
         }
         case 'grok': {
+          if (!whichBinary('grok')) {
+            return { success: false, error: 'Grok Build CLI (grok) was not found on PATH. Install it, then reconnect.' };
+          }
           if (detectGrokCLILogin()) return { success: true };
           return {
             success: false,
@@ -563,6 +633,9 @@ class ProviderRegistry {
           };
         }
         case 'antigravity': {
+          if (!whichBinary('agy')) {
+            return { success: false, error: 'Antigravity CLI (agy) was not found on PATH. Install it, then reconnect.' };
+          }
           if (detectAntigravityCLILogin()) return { success: true };
           return {
             success: false,
@@ -572,6 +645,9 @@ class ProviderRegistry {
         case 'cursor': {
           // Subscription CLI harness — no API key; the logged-in cursor-agent
           // binary authenticates itself.
+          if (!whichBinary('cursor-agent')) {
+            return { success: false, error: 'Cursor CLI (cursor-agent) was not found on PATH. Install it, then reconnect.' };
+          }
           if (detectCursorCLILogin()) return { success: true };
           return {
             success: false,
@@ -580,6 +656,9 @@ class ProviderRegistry {
           };
         }
         case 'devin': {
+          if (!whichBinary('devin')) {
+            return { success: false, error: 'Devin CLI (devin) was not found on PATH. Install it, then reconnect.' };
+          }
           if (detectDevinCLILogin()) return { success: true };
           return {
             success: false,
@@ -587,6 +666,12 @@ class ProviderRegistry {
           };
         }
         case 'cline': {
+          if (!whichBinary('cline')) {
+            return {
+              success: false,
+              error: 'Cline CLI was not found on PATH. Install the Cline CLI, then reconnect.',
+            };
+          }
           if (detectClineCLILogin()) return { success: true };
           return {
             success: false,
@@ -731,23 +816,12 @@ class ProviderRegistry {
                 'Vertex AI requires an explicit API key (set GOOGLE_VERTEX_AI_API_KEY or add apiKey in settings)',
             };
           return { success: true };
-        case 'codex': {
-          const isMarker = authToken && isCodexCLIAuthMarker(authToken);
-          const resolvedCodexToken = isMarker ? detectCodexAuthToken() : authToken;
-          if (!resolvedCodexToken) {
-            return {
-              success: false,
-              error: 'Missing authToken',
-            };
+      case 'codex': {
+          if (!whichBinary('codex')) {
+            return { success: false, error: 'Codex CLI (codex) was not found on PATH. Install it, then reconnect.' };
           }
-          // If auth came from CLI device flow (marker), trust the token without
-          // a synchronous verification — the ChatGPT backend can be slow to
-          // accept freshly issued tokens and the CodexProvider will validate
-          // on first real API call anyway.
-          if (isMarker) return { success: true };
-          return this.verifyHttp(CODEX_MODELS_URL, {
-            headers: { Authorization: `Bearer ${resolvedCodexToken}` },
-          });
+          if (detectCodexCLILogin() || discoverCliAccounts().some((account) => account.provider === 'codex')) return { success: true };
+          return { success: false, error: 'Codex CLI is not signed in. Run "codex login" in your terminal, then reconnect.' };
         }
         case 'jules': {
           if (!apiKey)
@@ -865,9 +939,20 @@ class ProviderRegistry {
       // Auto-detect if blank
       const resolvedApiKey =
         credentials.apiKey?.trim() || existing?.apiKey || this.detectEnvKey(name) || undefined;
-      const resolvedAuthToken = credentials.authToken?.trim() || existing?.authToken || undefined;
+      // CLI harnesses own their credentials. A reconnect must re-read the local
+      // CLI state, never ask the user to paste a token Koryphaios does not own.
+      const localCliAuth = CLI_HARNESS_PROVIDERS.has(name) ? cliAutoEnableCreds(name) : null;
+      const resolvedAuthToken = CLI_HARNESS_PROVIDERS.has(name)
+        ? localCliAuth?.authToken
+        : credentials.authToken?.trim() || existing?.authToken || undefined;
       const resolvedBaseUrl =
         credentials.baseUrl?.trim() || existing?.baseUrl || this.detectEnvUrl(name) || undefined;
+
+      // Return the CLI's actionable local state rather than the generic
+      // auth-only validation error when there is no existing session marker.
+      if (CLI_HARNESS_PROVIDERS.has(name) && !resolvedAuthToken) {
+        return this.verifyConnection(name);
+      }
 
       const nextConnection = {
         apiKey: resolvedApiKey,
@@ -883,7 +968,9 @@ class ProviderRegistry {
         existing?.authToken !== nextConnection.authToken ||
         existing?.baseUrl !== nextConnection.baseUrl;
 
-      if (connectionChanged) {
+      // A CLI may have moved off PATH or been signed out since its marker was
+      // saved. Always prove the actual CLI is usable on reconnect.
+      if (connectionChanged || CLI_HARNESS_PROVIDERS.has(name)) {
         const verification = await this.verifyConnection(name, nextConnection);
         if (!verification.success) return verification;
       }
@@ -903,6 +990,12 @@ class ProviderRegistry {
 
       const provider = this.createProvider(name, providerConfig);
       if (provider) {
+        // The Codex app-server exposes its authenticated model catalog. Wait
+        // for it on explicit connect so the picker never opens with a stale
+        // hardcoded fallback list.
+        if (provider instanceof CodexCliProvider) {
+          await provider.refreshModels();
+        }
         this.providers.set(name, provider);
         this.circuitStates.delete(name); // Reset circuit breaker
         this.clearKeyInvalid(name); // New key may be valid
@@ -1147,7 +1240,7 @@ class ProviderRegistry {
       case 'copilot':
         return new CopilotProvider(config);
       case 'codex':
-        return new CodexProvider(config);
+        return new CodexCliProvider(config);
       case 'grok':
         // Grok Build subscription — runs the official `grok` CLI harness (no direct API calls).
         return new GrokBuildProvider(config);

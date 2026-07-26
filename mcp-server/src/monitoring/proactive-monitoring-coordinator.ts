@@ -4,10 +4,10 @@
  */
 
 import { EventEmitter } from 'events';
-import { watch } from 'chokidar';
+import { watch, type FSWatcher as ChokidarFSWatcher } from 'chokidar';
+import { promises as fs, watchFile, unwatchFile } from 'fs';
 import { type ChildProcess } from 'child_process';
-import { promises as fs } from 'fs';
-import { join, extname, basename } from 'path';
+import { join, extname, basename, relative } from 'path';
 
 import type { DetectedError } from '@/types/index.js';
 import type { ErrorDetectorManager } from '@/detectors/error-detector-manager.js';
@@ -70,7 +70,9 @@ export class ProactiveMonitoringCoordinator extends EventEmitter {
   private logger: Logger;
 
   private fileWatcher: FileWatcher | null = null;
+  private configFileWatcher: FileWatcher | null = null;
   private unifiedFileWatcher: UnifiedFileWatcher | null = null;
+  private configWatchers = new Map<string, { close: () => void | Promise<void> }>();
   private buildProcesses: Map<string, BuildProcessInfo> = new Map();
   private compilationStatuses: Map<string, CompilationStatus> = new Map();
 
@@ -139,9 +141,19 @@ export class ProactiveMonitoringCoordinator extends EventEmitter {
 
     // Stop legacy file watching
     if (this.fileWatcher) {
-      this.fileWatcher.close();
+      await this.fileWatcher.close();
       this.fileWatcher = null;
     }
+
+    if (this.configFileWatcher) {
+      await this.configFileWatcher.close();
+      this.configFileWatcher = null;
+    }
+
+    for (const watcher of this.configWatchers.values()) {
+      await watcher.close();
+    }
+    this.configWatchers.clear();
 
     // Stop all build processes
     for (const [, buildInfo] of this.buildProcesses) {
@@ -206,6 +218,27 @@ export class ProactiveMonitoringCoordinator extends EventEmitter {
     this.fileWatcher.on('change', (event: WorkspaceEvent) => {
       this.handleFileChange(event);
     });
+    this.fileWatcher.on('error', (error: Error) => {
+      this.logger.warn('Legacy source file watcher error', {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    });
+
+    // Also watch configuration files explicitly for reliable config-event coverage
+    this.configFileWatcher = FileWatcher.createForConfigFiles(this.config.workspaceRoot, {
+      ignored: this.config.fileWatching.ignorePatterns,
+    });
+
+    this.configFileWatcher.on('change', (event: WorkspaceEvent) => {
+      this.handleConfigFileEvent(event);
+    });
+    this.configFileWatcher.on('error', (error: Error) => {
+      this.logger.warn('Config file watcher error', {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    });
+
+    await Promise.all([this.fileWatcher.waitForReady(), this.configFileWatcher.waitForReady()]);
 
     this.logger.info('Enhanced file watching started for proactive monitoring');
   }
@@ -213,13 +246,7 @@ export class ProactiveMonitoringCoordinator extends EventEmitter {
   private async startBuildProcessMonitoring(): Promise<void> {
     // Monitor package.json changes for build script updates
     if (this.config.buildProcessMonitoring.watchConfigFiles) {
-      const packageJsonPath = join(this.config.workspaceRoot, 'package.json');
-      try {
-        await fs.access(packageJsonPath);
-        this.watchConfigFile(packageJsonPath, 'package.json');
-      } catch {
-        // package.json doesn't exist, skip
-      }
+      await this.watchConfigFilePattern('package.json', 'package.json');
     }
 
     this.logger.info('Build process monitoring started');
@@ -228,48 +255,155 @@ export class ProactiveMonitoringCoordinator extends EventEmitter {
   private async startCompilationMonitoring(): Promise<void> {
     // Watch TypeScript config files
     if (this.config.compilationMonitoring.watchTsConfig) {
-      const tsconfigPath = join(this.config.workspaceRoot, 'tsconfig.json');
-      try {
-        await fs.access(tsconfigPath);
-        this.watchConfigFile(tsconfigPath, 'tsconfig.json');
-      } catch {
-        // tsconfig.json doesn't exist, skip
-      }
+      await this.watchConfigFilePattern('tsconfig*.json', 'tsconfig.json');
     }
+
+    if (this.config.compilationMonitoring.watchPackageJson) {
+      await this.watchConfigFilePattern('package.json', 'package.json');
+    }
+
+    await this.watchEslintConfigFiles();
 
     this.logger.info('Compilation monitoring started');
   }
 
-  private watchConfigFile(filePath: string, type: string): void {
-    const watcher = watch(filePath, { persistent: true });
+  private async watchConfigFilePattern(pattern: string, type: string): Promise<void> {
+    if (this.configWatchers.has(pattern)) {
+      return;
+    }
 
-    watcher.on('change', () => {
-      this.logger.info(`Configuration file changed: ${type}`);
-      this.emit('config-file-changed', { type, path: filePath });
-
-      // Trigger relevant detectors
-      if (type === 'tsconfig.json') {
-        this.triggerBuildDetection();
-      } else if (type === 'package.json') {
-        this.triggerDependencyAnalysis();
-      }
+    const watcherPatterns = this.expandConfigWatchPattern(pattern);
+    const watcher = watch(watcherPatterns, {
+      cwd: this.config.workspaceRoot,
+      persistent: true,
+      ignoreInitial: true,
+      dot: true,
+      ignorePermissionErrors: true,
     });
+    this.configWatchers.set(pattern, watcher);
+
+    const emitConfigFileChange = (filePath: string) => {
+      const absolutePath = join(this.config.workspaceRoot, filePath);
+      this.logger.info(`Configuration file changed: ${type}`, { path: filePath });
+      const event: FileChangeEvent = {
+        type: 'config-changed',
+        path: absolutePath,
+        relativePath: filePath,
+        extension: extname(filePath),
+        language: null,
+        category: 'config',
+        timestamp: new Date(),
+      };
+      this.handleConfigFileChange(event);
+    };
+
+    watcher.on('add', emitConfigFileChange);
+    watcher.on('change', emitConfigFileChange);
+    watcher.on('error', error => {
+      this.logger.warn(`Failed to watch config pattern ${pattern}`, error);
+    });
+
+    await this.waitForChokidarReady(watcher);
+  }
+
+  private async watchEslintConfigFiles(): Promise<void> {
+    const configFiles = [
+      '.eslintrc',
+      '.eslintrc.js',
+      '.eslintrc.json',
+      '.eslintrc.yaml',
+      '.eslintrc.yml',
+      '.eslintrc.cjs',
+      '.eslintrc.mjs',
+    ];
+
+    const watcherPromises = configFiles.map(async fileName => {
+      const filePath = join(this.config.workspaceRoot, fileName);
+      if (this.configWatchers.has(filePath)) {
+        return;
+      }
+
+      let lastKnownMtime = 0;
+
+      try {
+        const existingStat = await fs.stat(filePath);
+        lastKnownMtime = existingStat.mtimeMs;
+      } catch (error) {
+        this.logger.debug(
+          `ESLint config file ${fileName} does not exist yet, polling until creation`
+        );
+      }
+
+      const emitConfigFileChange = (path: string) => {
+        const relativePath = relative(this.config.workspaceRoot, path);
+        this.logger.info('Configuration file changed: eslint', { path: relativePath });
+        const event: FileChangeEvent = {
+          type: 'config-changed',
+          path,
+          relativePath,
+          extension: extname(path),
+          language: null,
+          category: 'config',
+          timestamp: new Date(),
+        };
+        this.handleConfigFileChange(event);
+      };
+
+      watchFile(
+        filePath,
+        {
+          persistent: true,
+          interval: 300,
+        },
+        current => {
+          if (current.mtimeMs === lastKnownMtime || current.mtimeMs === 0) {
+            return;
+          }
+          lastKnownMtime = current.mtimeMs;
+          emitConfigFileChange(filePath);
+        }
+      );
+
+      this.configWatchers.set(filePath, {
+        close: () => {
+          unwatchFile(filePath);
+        },
+      });
+    });
+
+    await Promise.all(watcherPromises);
+  }
+
+  private async waitForChokidarReady(watcher: ChokidarFSWatcher): Promise<void> {
+    await new Promise<void>((resolve, reject) => {
+      const handleReady = () => {
+        watcher.off('ready', handleReady);
+        watcher.off('error', handleError);
+        resolve();
+      };
+      const handleError = (error: Error) => {
+        watcher.off('ready', handleReady);
+        reject(error);
+      };
+
+      watcher.once('ready', handleReady);
+      watcher.once('error', handleError);
+    }).catch(error => {
+      this.logger.warn('Failed to wait for config watcher ready', error);
+    });
+  }
+
+  private expandConfigWatchPattern(pattern: string): string | string[] {
+    return pattern;
   }
 
   private handleFileChange(event: WorkspaceEvent): void {
     const { path: filePath, type } = event;
-
-    if (type === 'workspace:file-changed') {
-      this.queueFileForAnalysis(filePath);
-
-      // Update compilation status based on file type
-      const ext = extname(filePath);
-      if (['.ts', '.tsx'].includes(ext)) {
-        this.updateCompilationStatus('typescript', 'compiling');
-      } else if (['.js', '.jsx'].includes(ext)) {
-        this.updateCompilationStatus('javascript', 'compiling');
-      }
+    if (type !== 'workspace:file-changed') {
+      return;
     }
+
+    this.emitLegacySourceEvents(filePath);
   }
 
   private handleUnifiedFileChange(event: FileChangeEvent): void {
@@ -350,6 +484,105 @@ export class ProactiveMonitoringCoordinator extends EventEmitter {
     this.emit('config-file-changed', event);
   }
 
+  private emitLegacySourceEvents(filePath: string): void {
+    const absolutePath = join(this.config.workspaceRoot, filePath);
+    const extension = extname(filePath);
+    const language = this.inferLanguageFromExtension(extension);
+    const category = this.inferCategoryFromPath(filePath);
+
+    const event: FileChangeEvent = {
+      type: 'file-changed',
+      path: absolutePath,
+      relativePath: filePath,
+      extension,
+      language,
+      category,
+      timestamp: new Date(),
+    };
+
+    if (category === 'config') {
+      this.handleConfigFileChange({ ...event, type: 'config-changed' });
+      return;
+    }
+
+    if (category === 'source' || category === 'test') {
+      this.queueFileForAnalysis(event.path);
+    }
+
+    this.emit(`${category}-file-changed`, event);
+    this.emit('file-changed', event);
+    if (language) {
+      this.updateCompilationStatus(language, 'compiling');
+      this.emit(`${language}-file-changed`, event);
+    }
+  }
+
+  private handleConfigFileEvent(event: WorkspaceEvent): void {
+    const absolutePath = join(this.config.workspaceRoot, event.path);
+    const configEvent: FileChangeEvent = {
+      type: 'config-changed',
+      path: absolutePath,
+      relativePath: event.path,
+      extension: extname(event.path),
+      language: null,
+      category: 'config',
+      timestamp: new Date(),
+    };
+
+    this.handleConfigFileChange(configEvent);
+  }
+
+  private inferCategoryFromPath(filePath: string): FileChangeEvent['category'] {
+    const fileName = basename(filePath);
+    const lowerPath = filePath.toLowerCase();
+    const extension = extname(filePath).toLowerCase();
+
+    if (
+      fileName.includes('tsconfig') ||
+      fileName.includes('package.json') ||
+      fileName.includes('.eslintrc') ||
+      lowerPath.includes('.prettierrc') ||
+      lowerPath.includes('.env')
+    ) {
+      return 'config';
+    }
+
+    if (lowerPath.includes('.test.') || lowerPath.includes('.spec.')) {
+      return 'test';
+    }
+
+    if (['.ts', '.tsx', '.js', '.jsx', '.py', '.go', '.rs', '.java', '.c', '.cpp'].includes(extension)) {
+      return 'source';
+    }
+
+    return 'other';
+  }
+
+  private inferLanguageFromExtension(extension: string): string | null {
+    switch (extension) {
+      case '.ts':
+      case '.tsx':
+        return 'typescript';
+      case '.js':
+      case '.jsx':
+        return 'javascript';
+      case '.py':
+        return 'python';
+      case '.go':
+        return 'go';
+      case '.rs':
+        return 'rust';
+      case '.java':
+        return 'java';
+      case '.c':
+        return 'c';
+      case '.cpp':
+        return 'cpp';
+      default:
+        return null;
+    }
+  }
+
   private queueFileForAnalysis(filePath: string): void {
     if (!this.config.realTimeAnalysis.enabled) {
       return;
@@ -400,8 +633,8 @@ export class ProactiveMonitoringCoordinator extends EventEmitter {
         target: filePath,
       });
 
+      this.emit('proactive-errors-detected', { filePath, errors });
       if (errors.length > 0) {
-        this.emit('proactive-errors-detected', { filePath, errors });
         this.logger.debug(
           `Proactive analysis found ${errors.length} issues in ${basename(filePath)}`
         );
@@ -483,6 +716,7 @@ export class ProactiveMonitoringCoordinator extends EventEmitter {
 
   private triggerDependencyAnalysis(): void {
     this.logger.debug('Triggering dependency analysis due to package.json change');
+    this.emit('dependency-change-detected');
     this.emit('trigger-dependency-analysis');
   }
 

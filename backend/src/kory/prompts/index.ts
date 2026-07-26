@@ -4,8 +4,10 @@ import type { ProviderName, UIMode, WorkerDomain } from '@koryphaios/shared';
 import { createHash } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
+import { getProviderHarnessCapabilities } from '../../providers/provider-harness';
+import { resolveSkills, type SkillResolverResult } from '../skills';
 
-export const PROMPT_VERSION = 'kory-workflow-v1';
+export const PROMPT_VERSION = 'kory-workflow-v3-skills';
 
 export type TaskKind =
   | 'question'
@@ -46,6 +48,11 @@ export interface ProviderCapabilityProfile {
   browser: boolean;
   filesystemIsolation: boolean;
   qualifiedRoles: PromptRole[];
+  version: string;
+  hash: string;
+  isolationMechanism: string;
+  verificationEligible: boolean;
+  limitations: string[];
 }
 
 export interface PromptManifest {
@@ -56,8 +63,17 @@ export interface PromptManifest {
   instructions: Array<Omit<InstructionSource, 'content'>>;
   providerAdapter: string;
   capabilityProfile: ProviderCapabilityProfile;
-  qualityProfile: TaskKind;
+  skills: Array<{
+    name: string;
+    version: string;
+    source: string;
+    hash: string;
+    reason: string;
+    contextCost: number;
+  }>;
+  skillManifestHash: string;
   conflicts: string[];
+  taskContractHash: string;
 }
 
 export interface QualityGateReport {
@@ -187,7 +203,10 @@ export function loadRepositoryInstructions(
     current = dirname(current);
   }
 
-  const candidates = directories.map((directory) => join(directory, 'AGENTS.md'));
+  const candidates = directories.map((directory) => {
+    const override = join(directory, 'AGENTS.override.md');
+    return existsSync(override) ? override : join(directory, 'AGENTS.md');
+  });
   for (const configuredPath of configuredPaths) {
     const path = isAbsolute(configuredPath) ? configuredPath : join(root, configuredPath);
     candidates.push(path);
@@ -209,6 +228,33 @@ export function loadRepositoryInstructions(
     });
 }
 
+/** Report instruction conditions which must be visible instead of silently guessed. */
+export function inspectInstructionSources(
+  workingDirectory: string,
+  configuredPaths: string[] = [],
+): { sources: InstructionSource[]; conflicts: string[] } {
+  const sources = loadRepositoryInstructions(workingDirectory, configuredPaths);
+  const conflicts: string[] = [];
+  for (const source of sources) {
+    if (source.truncated) conflicts.push(`Instruction source was truncated: ${source.path}`);
+  }
+  const byScope = new Map<string, InstructionSource[]>();
+  for (const source of sources) {
+    const scoped = byScope.get(source.scope) ?? [];
+    scoped.push(source);
+    byScope.set(source.scope, scoped);
+  }
+  for (const [scope, scoped] of byScope) {
+    const unique = new Set(scoped.map((source) => source.hash));
+    if (unique.size > 1) {
+      conflicts.push(
+        `Multiple distinct instruction sources apply at scope ${scope}: ${scoped.map((source) => source.path).join(', ')}`,
+      );
+    }
+  }
+  return { sources, conflicts };
+}
+
 const UNIVERSAL_CORE = `## Non-negotiable execution contract
 - Obey the current task scope and applicable repository instructions. Current user constraints override standing preferences; more specific repository instructions override broader ones.
 - Inspect relevant code, tests, configuration, and existing patterns before changing anything.
@@ -218,23 +264,6 @@ const UNIVERSAL_CORE = `## Non-negotiable execution contract
 - Do not disguise stubs, uncertainty, skipped checks, unavailable evidence, or partial work. Never claim completion without exact evidence.
 - Publishing is separate from implementation. Do not commit, push, or open a pull request unless the user or an explicit workspace policy requested it.
 - Work autonomously inside the granted project jail. Do not ask for routine edits, shell commands, tests, installs, network access, or delegation. Ask only immediately before catastrophic broad destruction such as recursively deleting a home/root directory, formatting a disk, destructive raw-device writes, or powering down the host.`;
-
-const QUALITY_PROFILES: Record<TaskKind, string> = {
-  question:
-    'Answer directly. Inspect or research when correctness depends on repository or current facts. Do not mutate the workspace.',
-  bug: 'Reproduce or establish the failure, trace the root cause, implement the narrow fix, and add or run regression evidence.',
-  'mechanical-edit':
-    'Confirm the exact match set, make only the requested transformation, and check for accidental replacements.',
-  refactor:
-    'Preserve observable behavior, reuse existing abstractions, avoid parallel architecture, and verify before and after behavior.',
-  feature:
-    'Identify acceptance criteria and integration points first. Implement in coherent slices, including failure states and regression coverage.',
-  ui: 'Inspect the existing interface, components, tokens, interaction patterns, target medium, and accessibility conventions. Reuse the native toolkit. Verify real interactions and relevant states when browser, device, terminal, game, spatial, or other runtime tooling is available. Visual design expertise must come from a domain-specific skill/profile, not generic web assumptions.',
-  'research-docs':
-    'Separate sourced fact from inference, use authoritative evidence, preserve documentation conventions, and do not present research as implementation proof.',
-  'security-infra':
-    'Fail closed, preserve hard permission boundaries, avoid exposing secrets, require explicit approval for consequential changes, and verify the real boundary rather than prompt intent.',
-};
 
 function providerAdapter(provider: ProviderName | string): string {
   if (provider === 'openai' || provider === 'codex') return 'openai-v1';
@@ -252,24 +281,20 @@ function providerAdapter(provider: ProviderName | string): string {
 }
 
 function capabilities(provider: ProviderName | string): ProviderCapabilityProfile {
-  const native = [
-    'claude',
-    'grok',
-    'antigravity',
-    'gemini-cli',
-    'jules',
-    'cursor',
-    'devin',
-    'cline',
-  ].includes(provider);
+  const harness = getProviderHarnessCapabilities(provider);
   return {
-    mode: native ? 'native-passthrough' : 'managed',
-    hardToolPolicy: !native,
-    edit: true,
-    shell: true,
-    browser: false,
-    filesystemIsolation: !native,
+    mode: harness.mode,
+    hardToolPolicy: harness.hardRoleToolPolicy,
+    edit: harness.edit,
+    shell: harness.shell,
+    browser: harness.browser,
+    filesystemIsolation: harness.filesystemIsolation,
     qualifiedRoles: ['manager', 'worker', 'critic'],
+    version: harness.version,
+    hash: harness.hash,
+    isolationMechanism: harness.isolationMechanism,
+    verificationEligible: harness.verificationEligible,
+    limitations: harness.limitations,
   };
 }
 
@@ -285,6 +310,20 @@ Risk: ${contract.risk}
 Required evidence:\n${contract.requiredEvidence.map((item) => `- ${item}`).join('\n')}`;
 }
 
+function renderForProvider(adapter: string, sections: string[]): string {
+  if (adapter === 'anthropic-v1') {
+    return sections
+      .map((section, index) => `<kory_section index="${index + 1}">\n${section}\n</kory_section>`)
+      .join('\n\n');
+  }
+  if (adapter === 'google-v1') {
+    return sections
+      .map((section, index) => `--- KORY SECTION ${index + 1} ---\n${section}`)
+      .join('\n\n');
+  }
+  return sections.join('\n\n');
+}
+
 export function compilePrompt(input: {
   role: PromptRole;
   mode: UIMode;
@@ -292,13 +331,20 @@ export function compilePrompt(input: {
   workingDirectory: string;
   taskContract: TaskContract;
   contextPaths?: string[];
+  skillSelection?: {
+    pins?: string[];
+    remove?: string[];
+    collisionChoices?: Record<string, 'personal' | 'project'>;
+    targetMedium?: string;
+  };
 }): CompiledPrompt {
-  const sources = loadRepositoryInstructions(input.workingDirectory, input.contextPaths);
+  const instructionState = inspectInstructionSources(input.workingDirectory, input.contextPaths);
+  const sources = instructionState.sources;
   const adapter = providerAdapter(input.provider);
   const capabilityProfile = capabilities(input.provider);
   const roleRules =
     input.role === 'manager'
-      ? 'You are Kory, the user-facing manager. Handle direct work yourself and delegate only substantial bounded work. Apply the same evidence standard to direct and delegated edits.'
+      ? 'You are Kory, the user-facing manager. The user manually chose your model; never replace or auto-rank the manager. Choose subagents only from the user-enabled category pool. Prefer an agent identity distinct from yourself and prefer a different provider harness for material work, but when the user enabled only one eligible model, reuse it rather than blocking delegation. Disclose that the agent is not independent. Apply the same evidence standard to direct and delegated edits.'
       : input.role === 'worker'
         ? 'You are a bounded implementation worker. Preserve the immutable objective across retries, stay within granted paths, and return changed files plus exact verification evidence.'
         : 'You are a fresh independent critic. You are read-only. Judge the actual diff and evidence against every acceptance criterion. Missing or malformed evidence is not a pass.';
@@ -320,19 +366,54 @@ export function compilePrompt(input: {
     : 'No repository instruction files were found.';
   const providerRules =
     capabilityProfile.mode === 'native-passthrough'
-      ? 'This provider uses a native harness wrapped by Kory role policy, filesystem isolation, and verification. Provider-specific quality measurements may influence recommendations but never remove role capability.'
+      ? 'This provider uses a native harness wrapped by Kory role policy and verification. Filesystem isolation is guaranteed only when the runtime capability manifest reports it active; otherwise label it unavailable. Provider-specific quality measurements may influence recommendations but never remove role capability.'
       : 'This is Kory-managed execution. Tool and filesystem policy are enforced by the harness; do not attempt to bypass them.';
-  const systemPrompt = [
+  const skillResolution: SkillResolverResult = resolveSkills(
+    input.workingDirectory,
+    input.taskContract.goal,
+    input.taskContract,
+    input.skillSelection,
+  );
+  if (skillResolution.blocked) {
+    const conflicts = [
+      ...skillResolution.collisions.map((item) => item.name),
+      ...skillResolution.selectionConflicts.map((item) => `${item.left} <> ${item.right}`),
+      ...skillResolution.hierarchyErrors,
+      ...(skillResolution.omittedByBudget.length
+        ? [`bundle exceeds context limit: ${skillResolution.omittedByBudget.join(', ')}`]
+        : []),
+    ];
+    throw new Error(
+      `Skill collision requires a user choice before work starts: ${conflicts.join(', ')}`,
+    );
+  }
+  const skillManifest = skillResolution.selected.map(({ skill, reason, contextCost }) => ({
+    name: skill.name,
+    version: skill.metadata.version,
+    source: skill.source,
+    hash: skill.hash,
+    reason,
+    contextCost,
+  }));
+  const skillText = skillResolution.selected.length
+    ? skillResolution.selected
+        .map(
+          ({ skill, reason, contextCost }) =>
+            `### ${skill.name} v${skill.metadata.version} (${skill.source}; ${contextCost} chars)\nReason: ${reason}\n${skill.instructions}`,
+        )
+        .join('\n\n')
+    : 'No local skills were selected.';
+  const systemPrompt = renderForProvider(adapter, [
     `# Koryphaios prompt ${PROMPT_VERSION} (${adapter})`,
     roleRules,
     criticOutputContract,
     style,
     UNIVERSAL_CORE,
     renderTaskContract(input.taskContract),
-    `## Conditional quality profile: ${input.taskContract.taskKind}\n${QUALITY_PROFILES[input.taskContract.taskKind]}`,
     `## Provider capability truth\n${providerRules}`,
     `## Applicable repository instructions (broad to specific)\n${instructionText}`,
-  ].join('\n\n');
+    `## Active local skills\nManifest: ${JSON.stringify(skillManifest)}\nManifest sha256: ${skillResolution.manifestHash}\n${skillText}`,
+  ]);
   const manifestBase = {
     version: PROMPT_VERSION,
     role: input.role,
@@ -340,8 +421,10 @@ export function compilePrompt(input: {
     instructions: sources.map(({ content: _content, ...source }) => source),
     providerAdapter: adapter,
     capabilityProfile,
-    qualityProfile: input.taskContract.taskKind,
-    conflicts: [],
+    skills: skillManifest,
+    skillManifestHash: skillResolution.manifestHash,
+    conflicts: instructionState.conflicts,
+    taskContractHash: sha256(JSON.stringify(input.taskContract)),
   };
   return {
     systemPrompt,

@@ -18,7 +18,29 @@ import { ClaudeCodeModels } from './claude-code';
 import { GrokModels } from './grok';
 import { AntigravityModels } from './antigravity';
 import { JulesModels } from './jules';
-import { ZAIModels, KimiCodeModels, DeepSeekModels, MoonshotModels } from './newproviders';
+import {
+  BasetenModels,
+  CerebrasModels,
+  CloudflareModels,
+  CortecsModels,
+  DeepInfraModels,
+  DeepSeekModels,
+  FireworksModels,
+  GitLabModels,
+  HuggingFaceModels,
+  IonetModels,
+  KimiCodeModels,
+  MiniMaxModels,
+  MoonshotModels,
+  NebiusModels,
+  OllamaCloudModels,
+  ScalewayModels,
+  TogetherAIModels,
+  VeniceModels,
+  VercelModels,
+  ZAIModels,
+  ZenMuxModels,
+} from './newproviders';
 
 // Combined fallback catalog — providers refresh live model lists from APIs/CLIs when connected.
 // Entries here supply metadata until discovery succeeds and enrich ids that match remotely.
@@ -46,6 +68,23 @@ const ALL_MODELS: ModelDef[] = [
   ...ZAIModels,
   ...DeepSeekModels,
   ...MoonshotModels,
+  ...TogetherAIModels,
+  ...CerebrasModels,
+  ...FireworksModels,
+  ...HuggingFaceModels,
+  ...DeepInfraModels,
+  ...MiniMaxModels,
+  ...NebiusModels,
+  ...VeniceModels,
+  ...ScalewayModels,
+  ...IonetModels,
+  ...ZenMuxModels,
+  ...OllamaCloudModels,
+  ...CloudflareModels,
+  ...VercelModels,
+  ...GitLabModels,
+  ...BasetenModels,
+  ...CortecsModels,
 ];
 
 // Map for fast lookup by ID
@@ -84,6 +123,18 @@ export function getModelsForProvider(providerName: ProviderName): ModelDef[] {
       id: `aistudio-${m.id}`,
       apiModelId: m.apiModelId ?? m.id,
       provider: 'aistudio' as ProviderName,
+    }));
+  }
+  if (providerName === 'codex-auth') {
+    return ALL_MODELS.filter((m) => m.provider === 'codex').map((m) => ({
+      ...m,
+      provider: 'codex-auth' as ProviderName,
+    }));
+  }
+  if (providerName === 'kimicode-auth') {
+    return ALL_MODELS.filter((m) => m.provider === 'kimicode').map((m) => ({
+      ...m,
+      provider: 'kimicode-auth' as ProviderName,
     }));
   }
   return ALL_MODELS.filter((m) => m.provider === providerName);

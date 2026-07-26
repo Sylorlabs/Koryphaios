@@ -2,7 +2,7 @@
   "$schema": "./schema.json",
   "app": {
     "name": "Koryphaios",
-    "version": "0.1.0",
+    "version": "1.0.23",
     "identifier": "com.sylorlabs.koryphaios"
   },
   "server": {
@@ -25,7 +25,8 @@
       "imgSrc": ["'self'", "data:", "https:"],
       "styleSrc": ["'self'", "'unsafe-inline'"],
       "scriptSrc": ["'self'"],
-      "fontSrc": ["'self'", "data:"]
+      "fontSrc": ["'self'", "data:"],
+      "frameSrc": ["'self'", "https:", "http:"]
     }
   }
 }

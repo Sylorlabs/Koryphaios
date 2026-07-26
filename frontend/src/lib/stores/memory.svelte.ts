@@ -5,7 +5,7 @@
  * - Universal Memory (global across all projects)
  * - Project Memory (specific to current project)
  * - Session Memory (per-chat persistent storage)
- * - Rules (.koryrules file)
+ * - Project rules Markdown files
  * - Memory Settings (toggles and configuration)
  */
 
@@ -44,6 +44,7 @@ export interface MemoryState {
   isLoading: boolean;
   activeTab: 'universal' | 'project' | 'session' | 'rules' | 'settings';
 }
+export interface ProjectMemoryDocument { name: string; path: string; kind: 'memory' | 'rules' }
 
 // ============================================================================
 // Default Settings
@@ -73,6 +74,21 @@ function createMemoryStore() {
     isLoading: false,
     activeTab: 'project',
   });
+  let documents = $state<ProjectMemoryDocument[]>([]);
+  let settingsSaveRevision = 0;
+
+  async function loadDocuments(): Promise<void> {
+    const res = await apiFetch(apiUrl('/api/memory/documents'));
+    if (res.ok) { const data = await res.json(); documents = data.ok ? data.data : []; }
+  }
+
+  async function createDocument(name: string, kind: 'memory' | 'rules'): Promise<boolean> {
+    const res = await apiFetch(apiUrl('/api/memory/documents'), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name, kind }) });
+    if (!res.ok) return false;
+    await loadDocuments();
+    toastStore.success('Markdown document created');
+    return true;
+  }
 
   // ========================================================================
   // Universal Memory
@@ -381,28 +397,36 @@ function createMemoryStore() {
   }
 
   async function saveSettings(settings: Partial<MemorySettings>): Promise<boolean> {
-    state.isLoading = true;
+    const pendingSettings = settings;
+    const previousSettings = state.settings ?? DEFAULT_SETTINGS;
+    const revision = ++settingsSaveRevision;
+
+    state.settings = { ...previousSettings, ...pendingSettings };
+
     try {
       const res = await apiFetch(apiUrl('/api/memory/settings'), {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(settings),
+        body: JSON.stringify(pendingSettings),
       });
 
       if (res.ok) {
         const data = await res.json();
         if (data.ok) {
-          state.settings = { ...state.settings, ...data.data } as MemorySettings;
+          if (revision === settingsSaveRevision) {
+            state.settings = { ...state.settings, ...data.data } as MemorySettings;
+          }
           toastStore.success('Memory settings saved');
           return true;
         }
       }
       throw new Error('Failed to save');
     } catch (err) {
+      if (revision === settingsSaveRevision) {
+        state.settings = previousSettings;
+      }
       toastStore.error('Failed to save memory settings');
       return false;
-    } finally {
-      state.isLoading = false;
     }
   }
 
@@ -438,6 +462,7 @@ function createMemoryStore() {
         sessionId ? loadSessionMemory(sessionId) : Promise.resolve(),
         loadRules(),
         loadSettings(),
+        loadDocuments(),
       ]);
     } finally {
       state.isLoading = false;
@@ -479,6 +504,7 @@ function createMemoryStore() {
     get activeTab() {
       return state.activeTab;
     },
+    get documents() { return documents; },
 
     // Universal memory
     loadUniversalMemory,
@@ -510,6 +536,8 @@ function createMemoryStore() {
     // Bulk operations
     loadAllMemory,
     setActiveTab,
+    loadDocuments,
+    createDocument,
   };
 }
 

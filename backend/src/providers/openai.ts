@@ -15,6 +15,7 @@ import {
 import { withRetry, withTimeoutSignal } from './utils';
 import { createUsageInterceptingFetch } from '../credit-accountant';
 import { providerLog } from '../logger';
+import { applyModelsDevMetadata } from './models-dev';
 import {
   enrichFromRemoteMetadata,
   isLikelyChatModelId,
@@ -63,13 +64,20 @@ export class OpenAIProvider implements Provider {
 
   private cachedModels: ModelDef[] | null = null;
   private lastFetch = 0;
-  private fetchInProgress = false;
+  private refreshInProgress: Promise<void> | null = null;
+
+  refreshModels(forceRefresh = false): Promise<void> {
+    if (!forceRefresh) return Promise.resolve();
+    this.cachedModels = null;
+    this.lastFetch = 0;
+    return this.refreshModelsInBackground(this.getModelCatalogFallback());
+  }
 
   listModels(): ModelDef[] {
     const fallback = this.getModelCatalogFallback();
     if (!this.isAvailable()) return fallback;
     if (this.cachedModels && isModelListCacheFresh(this.lastFetch)) return this.cachedModels;
-    this.refreshModelsInBackground(fallback);
+    void this.refreshModelsInBackground(fallback);
     return this.cachedModels ?? fallback;
   }
 
@@ -86,22 +94,63 @@ export class OpenAIProvider implements Provider {
     return enrichFromRemoteMetadata(raw, def);
   }
 
-  private refreshModelsInBackground(fallback: ModelDef[]) {
-    if (this.fetchInProgress) return;
-    this.fetchInProgress = true;
+  private getModelIdFromRemote(raw: unknown): string | undefined {
+    if (!raw || typeof raw !== 'object') return undefined;
+    const model = raw as Record<string, unknown>;
+    const candidates = [model.id, model.name, model.model];
+    for (const candidate of candidates) {
+      if (typeof candidate === 'string') {
+        const value = candidate.trim();
+        if (value) return value;
+      }
+    }
+    return undefined;
+  }
 
-    void (async () => {
+  private isChatModelCandidate(raw: unknown, id: string): boolean {
+    if (!isLikelyChatModelId(id, this.name)) return false;
+    if (this.name !== 'cohere') return true;
+
+    if (!raw || typeof raw !== 'object') return true;
+    const model = raw as Record<string, unknown>;
+    const rawEndpoints = model.endpoints;
+    if (!rawEndpoints) return true;
+    if (Array.isArray(rawEndpoints)) {
+      return (rawEndpoints as unknown[]).some(
+        (endpoint) => typeof endpoint === 'string' && endpoint.toLowerCase().includes('chat'),
+      );
+    }
+    if (typeof rawEndpoints === 'string') {
+      return rawEndpoints.toLowerCase().includes('chat');
+    }
+    const endpointContainer = rawEndpoints as { value?: unknown };
+    const valueEndpoints = endpointContainer.value;
+    if (Array.isArray(valueEndpoints)) {
+      return (valueEndpoints as unknown[]).some(
+        (endpoint: unknown) =>
+          typeof endpoint === 'string' && endpoint.toLowerCase().includes('chat'),
+      );
+    }
+    return true;
+  }
+
+  private refreshModelsInBackground(fallback: ModelDef[]): Promise<void> {
+    if (this.refreshInProgress) return this.refreshInProgress;
+
+    this.refreshInProgress = (async () => {
       try {
         await this.prepareForModelDiscovery();
         const response = await withRetry(() => this.client.models.list());
         const discovered: ModelDef[] = [];
         for await (const model of response) {
-          const id = model.id;
-          if (!id || !isLikelyChatModelId(id, this.name)) continue;
-          discovered.push(this.enrichDiscoveredModel(model, modelFromRemoteId(id, this.name, fallback)));
+          const id = this.getModelIdFromRemote(model);
+          if (!id || !this.isChatModelCandidate(model, id)) continue;
+          discovered.push(
+            this.enrichDiscoveredModel(model, modelFromRemoteId(id, this.name, fallback)),
+          );
         }
         if (discovered.length > 0) {
-          this.cachedModels = mergeModelLists(fallback, discovered);
+          this.cachedModels = applyModelsDevMetadata(this.name, mergeModelLists(fallback, discovered));
           providerLog.debug(
             { provider: this.name, count: this.cachedModels.length },
             'Model list refreshed from provider API',
@@ -117,9 +166,11 @@ export class OpenAIProvider implements Provider {
         );
         this.cachedModels ??= fallback;
       } finally {
-        this.fetchInProgress = false;
+        this.refreshInProgress = null;
       }
     })();
+
+    return this.refreshInProgress;
   }
 
   async *streamResponse(request: StreamRequest): AsyncGenerator<ProviderEvent> {
@@ -153,10 +204,23 @@ export class OpenAIProvider implements Provider {
       },
     }));
 
-    // Check if the specific model supports reasoning
+    // Check if the specific model supports reasoning — prefer live-discovered
+    // defs (models.dev enrichment for zen/go, remote metadata elsewhere) over
+    // the static catalog, which knows nothing about gateway models.
     const modelDef = resolveModel(request.model);
-    const canReason = modelDef?.canReason ?? false;
-    const reasoningEffort = request.reasoningLevel?.toLowerCase();
+    const liveDef = this.listModels().find(
+      (m) => m.id === request.model || m.apiModelId === request.model,
+    );
+    const canReason = liveDef?.canReason ?? modelDef?.canReason ?? false;
+    let reasoningEffort = request.reasoningLevel?.toLowerCase();
+    // Budget-token levels (Copilot claude-haiku-4.5 / gemini-2.5-pro declare
+    // '0'|'1024'|'8192'|'24576') can't ride the OpenAI wire verbatim — map to
+    // the nearest reasoning_effort instead of silently dropping the selection.
+    if (reasoningEffort && /^\d+$/.test(reasoningEffort)) {
+      const budget = Number(reasoningEffort);
+      reasoningEffort =
+        budget === 0 ? 'none' : budget <= 1024 ? 'low' : budget <= 8192 ? 'medium' : 'high';
+    }
     // 'max' is offered per-model (e.g. Copilot's claude-opus-4.6) — the UI only
     // shows levels the model's own metadata/config declares, so passing it
     // through is safe; without it the selection was silently dropped.
@@ -182,6 +246,19 @@ export class OpenAIProvider implements Provider {
         // Use reasoning_effort string directly (low, medium, high, max)
         if (reasoningEffort !== 'none') {
           (params as any).reasoning_effort = reasoningEffort === 'xhigh' ? 'max' : reasoningEffort;
+        }
+      } else if (this.name === 'zai' || this.name === 'moonshot') {
+        // GLM / Kimi K2.5: only a round-level thinking toggle exists — no
+        // effort tiers ("none" = disabled, anything else = enabled).
+        (params as any).thinking = {
+          type: reasoningEffort === 'none' ? 'disabled' : 'enabled',
+        };
+      } else if (this.name === 'togetherai') {
+        // Qwen 3.5 thinking is on by default; "none" turns it off. Together
+        // reads the flag both top-level and via chat_template_kwargs.
+        if (reasoningEffort === 'none') {
+          (params as any).enable_thinking = false;
+          (params as any).chat_template_kwargs = { enable_thinking: false };
         }
       } else {
         (params as any).reasoning_effort = reasoningEffort as any;
@@ -225,9 +302,10 @@ export class OpenAIProvider implements Provider {
           if (chunk.usage) {
             yield {
               type: 'usage_update',
+              // prompt_tokens already includes cached tokens — omit tokensCache
+              // so context occupancy isn't double counted downstream.
               tokensIn: chunk.usage.prompt_tokens,
               tokensOut: chunk.usage.completion_tokens,
-              tokensCache: (chunk.usage as any).prompt_tokens_details?.cached_tokens,
             };
           }
           continue;

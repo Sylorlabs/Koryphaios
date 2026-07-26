@@ -74,20 +74,24 @@ import {
   SessionStateService,
   WorkerPipelineService,
 } from './services';
+import type { WorkflowHook, WorkflowHookEvent } from './services/EventEmitterService';
 import { TimeTravelService } from '../services';
 import { RoutingServiceEnhanced } from './services/RoutingServiceEnhanced';
 import {
   parseCriticVerdict,
   formatMessagesForCritic as formatMessagesForCriticUtil,
 } from './critic-util';
-import { AutoCommitService } from './auto-commit-service';
 import { getModeManager } from '../mode';
 import type { WorkerPipelineConfig } from './services/WorkerPipelineService';
 import type { UIMode } from '@koryphaios/shared';
 import { compilePrompt, createTaskContract } from './prompts';
+import { discoverVerificationChecks, emptyQualityGateReport } from './verification';
+import { getProviderHarnessCapabilities } from '../providers/provider-harness';
 import { buildIntentDiscoveryBatch } from './clarification-gate';
 import { collaborationManager } from '../collaboration/manager';
-import { loadAgentSettings } from '../agent-settings';
+import { loadAgentSettings, saveAgentSettings } from '../agent-settings';
+import { resolveSkills } from './skills';
+import { rankHarnessCandidates, type QualificationRole } from './skill-qualifications';
 import {
   setCollaborationToolPolicy,
   clearCollaborationToolPolicy,
@@ -114,6 +118,8 @@ interface LLMTurnResult {
   content?: string;
   usage?: { tokensIn: number; tokensOut: number };
   completedToolCalls?: CompletedToolCall[];
+  /** A native CLI harness performed work, even though it did not request a Kory tool call. */
+  observedNativeTool?: boolean;
 }
 
 export interface AgentThreadEntry {
@@ -131,6 +137,8 @@ interface AgentThreadState {
   providerName: ProviderName;
   modelId: string;
   systemPrompt: string;
+  promptManifestHash: string;
+  taskContractHash: string;
   toolRole: 'worker' | 'critic';
   reasoningLevel?: string;
   maxTurns: number;
@@ -214,13 +222,27 @@ export class KoryManager {
   private workers: WorkerLifecycleService;
   private state: SessionStateService;
   private workerPipeline: WorkerPipelineService;
-  private autoCommitService: AutoCommitService;
   /** Sessions whose title has already been auto-generated. Prevents racing
    *  LLM calls when the user sends a second message before the first title
    *  resolves. */
   private titledSessions = new Set<string>();
   /** Last visible prompt manifest per session; prevents repeated disclosure on tool-loop turns. */
   private promptManifestHashBySession = new Map<string, string>();
+  /** Collision choices persist per project and are reused by task workers/critics. */
+  private skillCollisionChoicesBySession = new Map<
+    string,
+    Record<string, 'personal' | 'project'>
+  >();
+  /** User-selected manager identity, used only to enforce role independence. */
+  private managerRoutingBySession = new Map<
+    string,
+    { model: string; provider: ProviderName | undefined }
+  >();
+
+  /** Extend lifecycle policy without embedding provider-specific behavior in prompts. */
+  public registerWorkflowHook(event: WorkflowHookEvent, hook: WorkflowHook): () => void {
+    return this.events.registerWorkflowHook(event, hook);
+  }
 
   constructor(
     private providers: ProviderRegistry,
@@ -253,7 +275,6 @@ export class KoryManager {
     this.routing = new RoutingServiceEnhanced({ config: this.config, providers: this.providers });
     this.workers = new WorkerLifecycleService({ events: this.events });
     this.state = new SessionStateService();
-    this.autoCommitService = new AutoCommitService(this.workingDirectory, this.git);
 
     // Background terminals: surface start/exit in the chat feed and wake the
     // agent when a process it was waiting on finishes.
@@ -309,8 +330,6 @@ export class KoryManager {
         this.waitForUserInputInternal(sessionId, question, options),
       emitThought: (sessionId, phase, thought) => this.emitThought(sessionId, phase, thought),
       updateWorkflowState: (sessionId, state) => this.updateWorkflowState(sessionId, state),
-      handleAutoCommit: (sessionId, taskDescription) =>
-        this.handleAutoCommit(sessionId, taskDescription),
       resolveActiveRouting: (preferredModel, domain, avoidLegacy, prompt, preferCheap) =>
         this.resolveActiveRouting(preferredModel, domain, avoidLegacy, prompt, preferCheap),
       executeWithProvider: (
@@ -323,6 +342,7 @@ export class KoryManager {
         isAutoMode,
         allowedPaths,
         isSandboxed,
+        taskContract,
       ) =>
         this.executeWithProvider(
           sessionId,
@@ -334,6 +354,7 @@ export class KoryManager {
           isAutoMode,
           allowedPaths,
           isSandboxed,
+          taskContract,
         ),
       runCriticGate: (sessionId, workerMessages, preferredModel, task, reviewDirectory) =>
         this.runCriticGate(sessionId, workerMessages, preferredModel, task, reviewDirectory),
@@ -511,6 +532,42 @@ export class KoryManager {
     return this.state.requestUserInput(sessionId, AGENT.USER_INPUT_TIMEOUT_MS);
   }
 
+  private async resolveSkillCollisionsForTask(
+    sessionId: string,
+    workingDirectory: string,
+    goal: string,
+    collisionChoices: Record<string, 'personal' | 'project'> = {},
+  ): Promise<Record<string, 'personal' | 'project'>> {
+    const contract = createTaskContract(goal);
+    const initial = resolveSkills(workingDirectory, goal, contract, { collisionChoices });
+    const choices: Record<string, 'personal' | 'project'> = { ...collisionChoices };
+    let updated = false;
+    for (const collision of initial.collisions) {
+      const personal = `Use personal ${collision.name}`;
+      const project = `Use project ${collision.name}`;
+      const answer = await this.waitForUserInputInternal(
+        sessionId,
+        `Both this project and your personal library define “${collision.name}”. Which revision should apply to this task?`,
+        [project, personal, 'Cancel this task'],
+      );
+      if (answer === project) choices[collision.name] = 'project';
+      else if (answer === personal) choices[collision.name] = 'personal';
+      else throw new Error(`Skill collision for ${collision.name} was not resolved.`);
+      if (collisionChoices[collision.name] !== choices[collision.name]) updated = true;
+    }
+    this.skillCollisionChoicesBySession.set(sessionId, choices);
+
+    if (updated) {
+      const settings = loadAgentSettings(this.workingDirectory);
+      saveAgentSettings(this.workingDirectory, {
+        ...settings,
+        skillCollisionChoices: { ...settings.skillCollisionChoices, ...choices },
+      });
+    }
+
+    return choices;
+  }
+
   /** Main entry point for processing a task. */
   async processTask(
     sessionId: string,
@@ -526,6 +583,7 @@ export class KoryManager {
     userMessage = sanitizeForPrompt(userMessage);
 
     const workflowSettings = loadAgentSettings(this.workingDirectory);
+    const configuredCollisionChoices = workflowSettings.skillCollisionChoices ?? {};
     const initialContract = createTaskContract(userMessage);
     const discoveryQuestions = buildIntentDiscoveryBatch(
       userMessage,
@@ -547,6 +605,13 @@ export class KoryManager {
       userMessage += `\n\nResolved intent decisions:\n- ${decisions.join('\n- ')}`;
     }
 
+    await this.resolveSkillCollisionsForTask(
+      sessionId,
+      await this.resolveSessionWorkingDirectory(sessionId),
+      userMessage,
+      configuredCollisionChoices,
+    );
+
     // Resolve provider before any UI updates or work. No provider = manager responds once and returns.
     let routing = this.resolveActiveRouting(preferredModel, 'general', true, userMessage);
     let provider = await this.providers.resolveProvider(routing.model, routing.provider);
@@ -563,6 +628,10 @@ export class KoryManager {
       this.isProcessing = false;
       return;
     }
+    this.managerRoutingBySession.set(sessionId, {
+      model: routing.model,
+      provider: provider.name,
+    });
 
     koryLog.debug(
       { sessionId, routing, providerName: provider.name },
@@ -616,6 +685,7 @@ export class KoryManager {
       this.emitError(sessionId, `Error: ${String(err)}`);
     } finally {
       if (collaborationToolPolicy) clearCollaborationToolPolicy(sessionId);
+      this.skillCollisionChoicesBySession.delete(sessionId);
       this.isProcessing = false;
     }
   }
@@ -664,9 +734,65 @@ export class KoryManager {
     return routed;
   }
 
+  /**
+   * Resolve a delegated role from the user's configured category pool while
+   * keeping the manually selected manager identity out of material work.
+   * Different providers are preferred because a second alias of the same
+   * harness is weaker independence than a genuinely separate harness.
+   */
+  private resolveIndependentRouting(
+    avoidModel: string | undefined,
+    avoidProvider: ProviderName | undefined,
+    domain: WorkerDomain,
+    additionalAvoid: Array<{ model: string | undefined; provider: ProviderName | undefined }> = [],
+    task?: string,
+    qualificationRole: QualificationRole = 'worker',
+  ): { model: string; provider: ProviderName | undefined } | null {
+    const settings = loadAgentSettings(this.workingDirectory);
+    const configured = settings.managerModelAccess?.[domain] ?? [];
+    const candidates =
+      configured.length > 0
+        ? configured
+        : this.providers
+            .getStatus()
+            .filter((status) => status.authenticated)
+            .flatMap((status) => status.models.map((model) => `${status.name}:${model}`));
+    const resolved: Array<{ model: string; provider: ProviderName | undefined }> = [];
+    for (const candidate of candidates) {
+      try {
+        const route = this.routing.resolveActiveRouting(candidate, domain);
+        const provider = this.providers.resolveProvider(route.model, route.provider);
+        const excluded =
+          (route.model === avoidModel && route.provider === avoidProvider) ||
+          additionalAvoid.some(
+            (identity) => route.model === identity.model && route.provider === identity.provider,
+          );
+        if (provider && !excluded) {
+          resolved.push(route);
+        }
+      } catch {
+        // Stale user-enabled model: skip it and continue through the pool.
+      }
+    }
+    const independent = resolved.filter((route) => route.provider !== avoidProvider);
+    const differentModel = resolved.filter((route) => route.model !== avoidModel);
+    const pool = independent.length ? independent : differentModel;
+    const contract = createTaskContract(task ?? 'Delegate task');
+    const skillResolution = resolveSkills(this.workingDirectory, contract.goal, contract);
+    const ranked = rankHarnessCandidates(
+      this.workingDirectory,
+      pool,
+      qualificationRole,
+      skillResolution.selected.map((item) => item.skill.name),
+      skillResolution.evidence.declaredMedia[0],
+    );
+    return ranked[0] ?? null;
+  }
+
   private formatProviderName(provider: string): string {
     if (provider === 'openai') return 'OpenAI';
-    if (provider === 'codex') return 'Codex';
+    if (provider === 'codex') return 'OpenAI Codex (CLI)';
+    if (provider === 'codex-auth') return 'OpenAI Codex (Auth)';
     if (provider === 'anthropic') return 'Anthropic';
     if (provider === 'google') return 'Google';
     if (provider === 'aistudio') return 'Google AI Studio';
@@ -674,7 +800,8 @@ export class KoryManager {
     if (provider === 'openrouter') return 'OpenRouter';
     if (provider === 'vertexai') return 'Vertex AI';
     if (provider === 'copilot') return 'Copilot';
-    if (provider === 'kimicode') return 'Kimi Code';
+    if (provider === 'kimicode') return 'Kimi Code (CLI)';
+    if (provider === 'kimicode-auth') return 'Kimi Code (Auth)';
     if (provider === 'moonshot') return 'Moonshot AI / Kimi API';
     return provider.charAt(0).toUpperCase() + provider.slice(1);
   }
@@ -722,22 +849,49 @@ export class KoryManager {
     reasoningLevel?: string,
     domainHint?: string,
   ): Promise<string> {
-    return this.workerPipeline.runWorkerPipeline(
+    const before = await this.events.runWorkflowHooks('before-delegate', sessionId, {
+      task,
+      preferredModel: preferredModel ?? null,
+      domainHint: domainHint ?? null,
+    });
+    if (before.decision === 'deny') {
+      return `Delegation denied by workflow hook: ${before.reason ?? 'no reason supplied'}`;
+    }
+    const managerRouting = this.resolveActiveRouting(preferredModel, 'general', true, task);
+    const workerDomain =
+      domainHint && ['general', 'ui', 'backend', 'test', 'review'].includes(domainHint)
+        ? (domainHint as WorkerDomain)
+        : 'general';
+    const workerRouting = this.resolveIndependentRouting(
+      managerRouting.model,
+      managerRouting.provider,
+      workerDomain,
+      [],
+      task,
+      'worker',
+    );
+    const selectedWorkerRouting = workerRouting ?? managerRouting;
+    if (!workerRouting) {
+      this.emitThought(
+        sessionId,
+        'delegating',
+        `The user-enabled ${workerDomain} pool has only the manager model; reusing ${managerRouting.provider ?? 'unknown'}:${managerRouting.model} for the subagent.`,
+      );
+    }
+    const workerChoice = selectedWorkerRouting.provider
+      ? `${selectedWorkerRouting.provider}:${selectedWorkerRouting.model}`
+      : selectedWorkerRouting.model;
+    const result = await this.workerPipeline.runWorkerPipeline(
       sessionId,
       task,
-      preferredModel,
+      workerChoice,
       reasoningLevel,
       domainHint,
     );
-  }
-
-  private async handleAutoCommit(sessionId: string, taskDescription: string): Promise<void> {
-    if (!getModeManager().shouldAutoCommit()) return;
-    try {
-      await this.autoCommitService.autoCommitAndCreatePR(taskDescription);
-    } catch (err) {
-      koryLog.warn({ err, sessionId }, 'Auto-commit failed after worker task');
-    }
+    const after = await this.events.runWorkflowHooks('after-worker', sessionId, { task, result });
+    return after.decision === 'deny'
+      ? `Worker result rejected by workflow hook: ${after.reason ?? 'no reason supplied'}`
+      : result;
   }
 
   /** Whether Jules cloud delegation is configured (API key). */
@@ -961,11 +1115,49 @@ export class KoryManager {
     task?: string,
     reviewDirectory = this.workingDirectory,
   ): Promise<{ passed: boolean; feedback?: string }> {
+    const beforeCritic = await this.events.runWorkflowHooks('before-critic', sessionId, {
+      task: task ?? 'Review delegated work',
+      reviewDirectory,
+    });
+    if (beforeCritic.decision === 'deny') {
+      return {
+        passed: false,
+        feedback: `Critic denied by workflow hook: ${beforeCritic.reason ?? 'no reason supplied'}`,
+      };
+    }
     const hardCheckResult = await this.runHardChecks(sessionId, reviewDirectory);
     if (!hardCheckResult.passed) return { passed: false, feedback: hardCheckResult.output };
 
-    const routing = this.resolveActiveRouting(preferredModel, 'critic');
-    const provider = await this.providers.resolveProvider(routing.model, routing.provider);
+    const producerRouting = preferredModel
+      ? this.resolveActiveRouting(preferredModel, 'general')
+      : { model: undefined, provider: undefined };
+    const managerIdentity = this.managerRoutingBySession.get(sessionId);
+    const routing = this.resolveIndependentRouting(
+      producerRouting.model,
+      producerRouting.provider,
+      'critic',
+      managerIdentity ? [managerIdentity] : [],
+      task,
+      'critic',
+    );
+    const criticRouting = routing ?? {
+      model: producerRouting.model,
+      provider: producerRouting.provider,
+    };
+    if (!criticRouting.model) {
+      return { passed: false, feedback: 'Critic unavailable; result is unverified.' };
+    }
+    if (!routing) {
+      this.emitThought(
+        sessionId,
+        'reviewing',
+        `The user-enabled critic pool has no independent alternative; reusing ${criticRouting.provider ?? 'unknown'}:${criticRouting.model}.`,
+      );
+    }
+    const provider = await this.providers.resolveProvider(
+      criticRouting.model,
+      criticRouting.provider,
+    );
     if (!provider) return { passed: false, feedback: 'Critic unavailable; result is unverified.' };
     const criticCompilation = compilePrompt({
       role: 'critic',
@@ -974,6 +1166,9 @@ export class KoryManager {
       workingDirectory: reviewDirectory,
       taskContract: createTaskContract(task ?? 'Review delegated work'),
       contextPaths: this.config.contextPaths,
+      skillSelection: {
+        collisionChoices: this.skillCollisionChoicesBySession.get(sessionId),
+      },
     });
 
     const transcriptText = formatMessagesForCriticUtil(workerMessages ?? [], 12_000);
@@ -995,7 +1190,7 @@ export class KoryManager {
       id: criticId,
       name: 'Critic',
       role: 'critic',
-      model: routing.model,
+      model: criticRouting.model,
       provider: provider.name,
       domain: 'critic',
       glowColor: DOMAIN.GLOW_COLORS.critic,
@@ -1044,8 +1239,10 @@ export class KoryManager {
       kind: 'critic',
       status: 'thinking',
       providerName: provider.name,
-      modelId: routing.model,
+      modelId: criticRouting.model,
       systemPrompt: criticCompilation.systemPrompt,
+      promptManifestHash: criticCompilation.manifest.hash,
+      taskContractHash: criticCompilation.manifest.taskContractHash,
       toolRole: 'critic',
       maxTurns: 5,
       maxTokens: 2048,
@@ -1071,6 +1268,17 @@ export class KoryManager {
       '';
     const passed = parseCriticVerdict(lastContent);
     rmSync(criticSessionWd, { recursive: true, force: true });
+    const afterCritic = await this.events.runWorkflowHooks('after-critic', sessionId, {
+      task: task ?? 'Review delegated work',
+      passed,
+      feedback: lastContent.trim(),
+    });
+    if (afterCritic.decision === 'deny') {
+      return {
+        passed: false,
+        feedback: `Critic result rejected by workflow hook: ${afterCritic.reason ?? 'no reason supplied'}`,
+      };
+    }
     return { passed, feedback: lastContent.trim() };
   }
 
@@ -1078,20 +1286,14 @@ export class KoryManager {
     sessionId: string,
     workingDirectory: string,
   ): Promise<{ passed: boolean; output: string }> {
-    const pkgPath = join(workingDirectory, 'package.json');
-    if (!existsSync(pkgPath)) return { passed: true, output: '' };
-    const pkg = safeParseJson(readFileSync(pkgPath, 'utf8'));
-    const scripts = (pkg.scripts && typeof pkg.scripts === 'object' ? pkg.scripts : {}) as Record<
-      string,
-      unknown
-    >;
-    const checks = ['typecheck', 'check', 'test'].filter(
-      (name) => typeof scripts[name] === 'string',
-    );
+    const checks = discoverVerificationChecks(workingDirectory);
     if (checks.length === 0) {
+      const report = emptyQualityGateReport(
+        'No repository-owned deterministic verification command was discovered.',
+      );
       return {
         passed: false,
-        output: 'No deterministic verification script was found; result is unverified.',
+        output: `QUALITY_GATE_REPORT ${JSON.stringify(report)}`,
       };
     }
     const bash = this.tools.get('bash');
@@ -1103,12 +1305,14 @@ export class KoryManager {
     }
     const outputs: string[] = [];
     for (const check of checks) {
-      const command = `bun run ${check}`;
+      const command = check.command;
       const result = await bash.run(
         { sessionId, workingDirectory, allowedPaths: [workingDirectory], isSandboxed: true },
         { id: nanoid(), name: 'bash', input: { command, timeout: 120 } },
       );
-      outputs.push(`$ ${command}\n${result.output}`);
+      outputs.push(
+        `SOURCE: ${check.source}\nREASON: ${check.reason}\n$ ${command}\n${result.output}`,
+      );
       if (result.isError) return { passed: false, output: outputs.join('\n\n') };
     }
     return { passed: true, output: outputs.join('\n\n') };
@@ -1226,7 +1430,7 @@ export class KoryManager {
       // Track whether the run produced anything user-visible — so an empty LLM response
       // surfaces a clear message instead of a silent "weird stop".
       let streamedAnyContent = false;
-      let executedAnyTool = false;
+      let observedNativeTool = false;
 
       while (turnCount < 25) {
         if (abort.signal.aborted) {
@@ -1270,6 +1474,7 @@ export class KoryManager {
         if (typeof result.usage?.tokensOut === 'number')
           tokensOut = Math.max(tokensOut, result.usage.tokensOut);
         if (result.content && result.content.trim()) streamedAnyContent = true;
+        observedNativeTool ||= result.observedNativeTool === true;
 
         if (!result.success) break;
 
@@ -1314,7 +1519,6 @@ export class KoryManager {
               agentId: KORY_IDENTITY.id,
               toolResult: archiveId ? { ...toolResult, archiveId } : toolResult,
             });
-            executedAnyTool = true;
             // Cap what enters the MODEL context — a megabyte build log would
             // blow the window (and made the context bar spike absurdly). The
             // archive keeps the full output; fetch_context recovers it.
@@ -1391,8 +1595,29 @@ export class KoryManager {
                   ? `QUALITY GATE FAILED: The edits remain available for inspection, but the task is not complete.\n\n${gate.feedback ?? 'Verification failed without usable evidence.'}`
                   : `UNVERIFIED: Advisory quality checks found issues.\n\n${gate.feedback ?? 'Verification failed without usable evidence.'}`,
             });
+          } else {
+            const harness = getProviderHarnessCapabilities(providerName);
+            messages.push({
+              role: 'assistant',
+              content: harness.verificationEligible
+                ? 'VERIFIED: The harness ran repository-derived deterministic checks and a fresh read-only critic against the actual change set. The persisted completion state is verified.'
+                : `UNVERIFIED: Checks and criticism passed, but the ${providerName} native harness ran without OS filesystem isolation. Role capability remains available; verified-success is withheld.`,
+            });
           }
         }
+      }
+
+      const beforeComplete = await this.events.runWorkflowHooks('before-complete', sessionId, {
+        stoppedByUser,
+        changedFiles: directChanges.map((change) => change.path),
+        lastAssistant:
+          messages.filter((message) => message.role === 'assistant').at(-1)?.content ?? '',
+      });
+      if (!stoppedByUser && beforeComplete.decision === 'deny') {
+        messages.push({
+          role: 'assistant',
+          content: `QUALITY GATE FAILED: Completion was rejected by a lifecycle hook.\n\n${beforeComplete.reason ?? 'No reason supplied.'}`,
+        });
       }
 
       const assistants = messages.filter((m) => m.role === 'assistant');
@@ -1406,14 +1631,22 @@ export class KoryManager {
         typeof rawContent === 'string' ? rawContent : JSON.stringify(rawContent)
       ).trim();
 
-      // No silent stops: if the model returned nothing user-visible (no streamed text, no
-      // tools), say so live instead of leaving the user staring at a finished spinner.
-      const emptyResponse = !stoppedByUser && !streamedAnyContent && !executedAnyTool && !content;
-      const EMPTY_NOTICE =
-        'The model returned an empty response. Please resend or rephrase your request.';
-      if (emptyResponse) {
+      // A native harness can inspect the project using its own tools and then
+      // exit without ever returning a user-facing answer. That is a failed
+      // turn, not a successful "tool-only" completion. Surface it plainly so
+      // a user never has to infer the outcome from raw CLI activity.
+      const missingFinalResponse = !stoppedByUser && !streamedAnyContent && !content;
+      const EMPTY_NOTICE = observedNativeTool
+        ? 'The CLI provider completed tool activity but did not return a final answer. Nothing was claimed as complete. Retry the request; if it repeats, reconnect that CLI provider.'
+        : 'The model returned an empty response. Please resend or rephrase your request.';
+      if (missingFinalResponse) {
         this.emitWSMessage(sessionId, 'system.info', {
           message: EMPTY_NOTICE,
+        });
+        this.emitWSMessage(sessionId, 'stream.delta', {
+          agentId: KORY_IDENTITY.id,
+          content: EMPTY_NOTICE,
+          model: routing.model,
         });
       }
 
@@ -1422,7 +1655,7 @@ export class KoryManager {
       // it renders as plain text — not as something Kory said.
       const toPersist = stoppedByUser
         ? content
-        : content || (emptyResponse ? '' : '[Task completed using tools.]');
+        : content || (missingFinalResponse ? EMPTY_NOTICE : '[Task completed using tools.]');
       koryLog.debug({ toPersist, sessionId }, 'Attempting to persist assistant message');
       let finalMessageId: string | undefined;
       if (this.messages && toPersist) {
@@ -1439,17 +1672,6 @@ export class KoryManager {
           createdAt: Date.now(),
         });
         koryLog.debug('Assistant message persisted');
-      }
-      if (this.messages && emptyResponse) {
-        await this.messages.add(sessionId, {
-          id: nanoid(12),
-          sessionId,
-          role: 'system',
-          content: EMPTY_NOTICE,
-          model: routing.model,
-          provider: providerName,
-          createdAt: Date.now(),
-        });
       }
       if (this.messages && stoppedByUser) {
         await this.messages.add(sessionId, {
@@ -1485,25 +1707,10 @@ export class KoryManager {
       const changes = this.state.getChanges(sessionId);
       if (changes.length > 0) {
         this.emitWSMessage(sessionId, 'session.changes', { changes });
-
-        // Create ghost commit for time-travel after direct manager tool use
-        try {
-          const { ShadowLogger } = await import('./shadow-logger');
-          const shadowLogger = new ShadowLogger(this.workingDirectory);
-          await shadowLogger.createGhostCommit(userMessage.slice(0, 72), {
-            agentId: sessionId,
-            model: routing.model,
-            prompt: userMessage.slice(0, 200),
-            tokensIn,
-            tokensOut,
-            cost: 0,
-          });
-        } catch {
-          // Shadow logging is non-critical; don't fail the task if it errors
-        }
       }
     } finally {
       this.managerAbortBySession.delete(sessionId);
+      this.managerRoutingBySession.delete(sessionId);
       await this.updateWorkflowState(sessionId, 'idle');
     }
   }
@@ -1516,9 +1723,8 @@ export class KoryManager {
     tokensIn = 0,
     tokensOut = 0,
   ) {
-    if (!this.timeTravel) return;
     try {
-      await this.timeTravel.checkpoint(prompt.slice(0, 72), {
+      const metadata = {
         agentId: sessionId,
         model,
         prompt: prompt.slice(0, 200),
@@ -1526,8 +1732,17 @@ export class KoryManager {
         tokensOut,
         cost: 0,
         messageId,
-        checkpointType: 'turn_end',
-      });
+        checkpointType: 'turn_end' as const,
+      };
+      if (this.timeTravel) {
+        await this.timeTravel.checkpoint(prompt.slice(0, 72), metadata);
+      } else {
+        const { ShadowLogger } = await import('./shadow-logger');
+        await new ShadowLogger(this.workingDirectory).createGhostCommit(
+          prompt.slice(0, 72),
+          metadata,
+        );
+      }
     } catch (err) {
       koryLog.warn({ err, sessionId }, 'Failed to create rewind checkpoint');
     }
@@ -1560,24 +1775,29 @@ export class KoryManager {
       workingDirectory: await this.resolveSessionWorkingDirectory(sessionId),
       taskContract: createTaskContract(taskGoal),
       contextPaths: this.config.contextPaths,
+      skillSelection: {
+        collisionChoices: this.skillCollisionChoicesBySession.get(sessionId),
+      },
     });
     let systemPrompt = managerCompilation.systemPrompt;
     if (this.promptManifestHashBySession.get(sessionId) !== managerCompilation.manifest.hash) {
       this.promptManifestHashBySession.set(sessionId, managerCompilation.manifest.hash);
       const manifest = managerCompilation.manifest;
-      this.emitWSMessage(sessionId, 'system.info', {
-        message:
-          `Prompt ${manifest.version} · ${manifest.providerAdapter} · ${manifest.hash.slice(0, 12)}\n` +
-          (manifest.instructions.length
-            ? `Instructions: ${manifest.instructions
-                .map(
-                  (source) =>
-                    `${source.path} [scope=${source.scope}, priority=${source.priority}, sha256=${source.hash.slice(0, 12)}${source.truncated ? ', truncated' : ''}]`,
-                )
-                .join('; ')}`
-            : 'Instructions: none found') +
-          (manifest.conflicts.length ? `\nConflicts: ${manifest.conflicts.join('; ')}` : ''),
-      });
+      // Manifest provenance is operational diagnostics, not conversation. Keep
+      // it in structured logs; surfacing its path/hash payload in the feed made
+      // normal chats unreadable and caused needless rendering work.
+      koryLog.debug(
+        {
+          sessionId,
+          promptVersion: manifest.version,
+          providerAdapter: manifest.providerAdapter,
+          promptManifestHash: manifest.hash,
+          instructionCount: manifest.instructions.length,
+          skillCount: manifest.skills.length,
+          conflictCount: manifest.conflicts.length,
+        },
+        'Prompt manifest applied',
+      );
     }
     const notesEntries = Object.entries(settings.managerNotes ?? {}).filter(([, v]) => v?.trim());
     if (notesEntries.length > 0) {
@@ -1654,7 +1874,7 @@ export class KoryManager {
     // "Tools" misattributes the CLI's harness overhead. Their real overhead
     // shows up as the gap between this estimate and provider-reported usage
     // (rendered as "Provider harness" in the context bar).
-    const NATIVE_TOOL_PROVIDERS = new Set(['claude', 'grok', 'antigravity']);
+    const NATIVE_TOOL_PROVIDERS = new Set(['claude', 'codex', 'grok', 'antigravity']);
     // Chat = user + assistant text only. Tools = tool definitions + all tool
     // calls/results in the history. Keep them strictly separate in the bar.
     const msgSplit = estimateProviderMessagesChars(providerMessages);
@@ -1746,6 +1966,10 @@ export class KoryManager {
         // Agentic CLI providers (claude-code) run + edit files in the session's project directory.
         workingDirectory: await this.resolveSessionWorkingDirectory(sessionId),
         sessionId,
+        harnessRole: 'manager',
+        promptManifestHash: managerCompilation.manifest.hash,
+        taskContractHash: managerCompilation.manifest.taskContractHash,
+        sandbox: SANDBOX_PRESETS.balanced,
       },
       provider.name,
     );
@@ -1754,6 +1978,7 @@ export class KoryManager {
     let pendingToolCalls = new Map<string, { name: string; input: string }>();
     const completedToolCalls: CompletedToolCall[] = [];
     let hasToolCalls = false;
+    let observedNativeTool = false;
     let tokensIn = 0;
     let tokensOut = 0;
 
@@ -1808,6 +2033,7 @@ export class KoryManager {
             );
           }
         } else if (event.type === 'tool_executed') {
+          observedNativeTool = true;
           // Agentic provider already ran a non-file tool — surface it in the tool feed.
           const callId = `agent-${nanoid(8)}`;
           // CLI-native background command (Claude Code's Bash run_in_background):
@@ -1926,12 +2152,14 @@ export class KoryManager {
         content: assistantContent,
         usage: { tokensIn, tokensOut },
         completedToolCalls,
+        observedNativeTool,
       };
     }
     return {
       success: assistantContent.length > 0,
       content: assistantContent,
       usage: { tokensIn, tokensOut },
+      observedNativeTool,
     };
   }
 
@@ -2139,6 +2367,20 @@ export class KoryManager {
     tc: CompletedToolCall,
     ctx: ToolContext,
   ): Promise<ToolCallOutput> {
+    const before = await this.events.runWorkflowHooks('before-tool', sessionId, {
+      role: 'manager',
+      tool: tc.name,
+      input: tc.input,
+    });
+    if (before.decision === 'deny') {
+      return {
+        callId: tc.id,
+        name: tc.name,
+        output: `Tool denied by workflow hook: ${before.reason ?? 'no reason supplied'}`,
+        isError: true,
+        durationMs: 0,
+      };
+    }
     if (tc.name === 'ask_user') {
       const question = (tc.input?.question as string) ?? 'Proceed?';
       const options = (tc.input?.options as string[]) ?? ['Yes', 'No'];
@@ -2153,7 +2395,13 @@ export class KoryManager {
     }
     const gated = await this.gateNoteToolCall(sessionId, tc);
     if (gated) return gated;
-    return await this.tools.execute(ctx, { id: tc.id, name: tc.name, input: tc.input });
+    const result = await this.tools.execute(ctx, { id: tc.id, name: tc.name, input: tc.input });
+    await this.events.runWorkflowHooks('after-tool', sessionId, {
+      role: 'manager',
+      tool: tc.name,
+      isError: result.isError,
+    });
+    return result;
   }
 
   /**
@@ -2170,6 +2418,7 @@ export class KoryManager {
     isAutoMode: boolean,
     allowedPaths: string[],
     isSandboxed: boolean,
+    taskContract?: import('./prompts').TaskContract,
   ): Promise<{ success: boolean; error?: string; workerMessages?: InternalMessage[] }> {
     const workerId = `worker-${nanoid(8)}`;
     const abort = new AbortController();
@@ -2230,17 +2479,23 @@ export class KoryManager {
     const messages: InternalMessage[] = [...history, { role: 'user', content: userMessage }];
     const resolvedReasoningLevel =
       reasoningLevel === 'auto' ? determineAutoReasoningLevel(userMessage) : reasoningLevel;
-    let workerSystemPrompt = compilePrompt({
+    const workerCompilation = compilePrompt({
       role: 'worker',
       mode: getModeManager().getMode(),
       provider: provider.name,
       workingDirectory: workerWorkingDirectory,
-      taskContract: createTaskContract(userMessage, {
-        scope: allowedPaths,
-        constraints: isSandboxed ? ['Stay within the granted filesystem paths'] : [],
-      }),
+      taskContract:
+        taskContract ??
+        createTaskContract(userMessage, {
+          scope: allowedPaths,
+          constraints: isSandboxed ? ['Stay within the granted filesystem paths'] : [],
+        }),
       contextPaths: this.config.contextPaths,
-    }).systemPrompt;
+      skillSelection: {
+        collisionChoices: this.skillCollisionChoicesBySession.get(sessionId),
+      },
+    });
+    let workerSystemPrompt = workerCompilation.systemPrompt;
     if (hasAnyVisibleNoteTools(this.workingDirectory)) {
       const hint = buildNotesNetworkSystemHint(this.workingDirectory);
       if (hint) workerSystemPrompt += `\n\n${hint}`;
@@ -2260,6 +2515,8 @@ export class KoryManager {
       providerName: provider.name,
       modelId,
       systemPrompt: workerSystemPrompt,
+      promptManifestHash: workerCompilation.manifest.hash,
+      taskContractHash: workerCompilation.manifest.taskContractHash,
       toolRole: 'worker',
       reasoningLevel: resolvedReasoningLevel,
       maxTurns: 25,
@@ -2347,6 +2604,21 @@ export class KoryManager {
     tc: CompletedToolCall,
     ctx: ToolContext,
   ): Promise<ToolCallOutput> {
+    const before = await this.events.runWorkflowHooks('before-tool', sessionId, {
+      role: 'worker',
+      workerId,
+      tool: tc.name,
+      input: tc.input,
+    });
+    if (before.decision === 'deny') {
+      return {
+        callId: tc.id,
+        name: tc.name,
+        output: `Tool denied by workflow hook: ${before.reason ?? 'no reason supplied'}`,
+        isError: true,
+        durationMs: 0,
+      };
+    }
     if (tc.name === 'ask_manager') {
       const ans = await this.handleManagerInquiry(
         sessionId,
@@ -2357,7 +2629,14 @@ export class KoryManager {
     }
     const gated = await this.gateNoteToolCall(sessionId, tc);
     if (gated) return gated;
-    return await this.tools.execute(ctx, { id: tc.id, name: tc.name, input: tc.input });
+    const result = await this.tools.execute(ctx, { id: tc.id, name: tc.name, input: tc.input });
+    await this.events.runWorkflowHooks('after-tool', sessionId, {
+      role: 'worker',
+      workerId,
+      tool: tc.name,
+      isError: result.isError,
+    });
+    return result;
   }
   cancelWorker(agentId: string) {
     const thread = this.agentThreads.get(agentId);
@@ -2616,6 +2895,9 @@ export class KoryManager {
         workingDirectory: thread.ctx.workingDirectory,
         sessionId: thread.sessionId,
         sandbox: thread.toolRole === 'critic' ? SANDBOX_PRESETS.readonly : SANDBOX_PRESETS.balanced,
+        harnessRole: thread.toolRole,
+        promptManifestHash: thread.promptManifestHash,
+        taskContractHash: thread.taskContractHash,
         ...(normalizedReasoning !== undefined && { reasoningLevel: normalizedReasoning }),
       },
       provider.name,
@@ -2745,6 +3027,17 @@ export class KoryManager {
       return this.processAgentThreadTurn(thread, provider);
     }
 
+    const fallbackCompilation = compilePrompt({
+      role: 'worker',
+      mode: getModeManager().getMode(),
+      provider: provider.name,
+      workingDirectory: ctx.workingDirectory,
+      taskContract: createTaskContract(workerGoal, { scope: ctx.allowedPaths ?? [] }),
+      contextPaths: this.config.contextPaths,
+      skillSelection: {
+        collisionChoices: this.skillCollisionChoicesBySession.get(sessionId),
+      },
+    });
     const fallbackThread: AgentThreadState = {
       sessionId,
       identity: {
@@ -2760,14 +3053,9 @@ export class KoryManager {
       status: 'thinking',
       providerName: provider.name,
       modelId,
-      systemPrompt: compilePrompt({
-        role: 'worker',
-        mode: getModeManager().getMode(),
-        provider: provider.name,
-        workingDirectory: ctx.workingDirectory,
-        taskContract: createTaskContract(workerGoal, { scope: ctx.allowedPaths ?? [] }),
-        contextPaths: this.config.contextPaths,
-      }).systemPrompt,
+      systemPrompt: fallbackCompilation.systemPrompt,
+      promptManifestHash: fallbackCompilation.manifest.hash,
+      taskContractHash: fallbackCompilation.manifest.taskContractHash,
       toolRole: 'worker',
       reasoningLevel,
       maxTurns: 1,
@@ -2820,6 +3108,7 @@ export class KoryManager {
 
     // Clear session-specific data
     this.state.cleanupSession(sessionId);
+    this.managerRoutingBySession.delete(sessionId);
     this.managerAbortBySession.delete(sessionId);
     for (const [agentId, thread] of this.agentThreads.entries()) {
       if (thread.sessionId === sessionId) this.agentThreads.delete(agentId);

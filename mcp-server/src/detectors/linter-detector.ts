@@ -36,6 +36,7 @@ export class LinterErrorDetector extends BaseErrorDetector {
   private fileWatcher?: FSWatcher | undefined;
   private pollingTimer?: NodeJS.Timeout | undefined;
   private lastLintTime = 0;
+  private isLinterAvailable = true;
 
   constructor(options: ErrorDetectorOptions, config?: Partial<LinterConfig>) {
     super(options);
@@ -78,20 +79,31 @@ export class LinterErrorDetector extends BaseErrorDetector {
 
     try {
       // Verify linter is available
-      await this.verifyLinterAvailable();
+      this.isLinterAvailable = true;
+      try {
+        await this.verifyLinterAvailable();
+      } catch (error) {
+        this.isLinterAvailable = false;
+        this.logger.warn(
+          `${this.config.linterCommand} not available; linter checks will be skipped`,
+          error instanceof Error ? error.message : error
+        );
+      }
 
       // Start file watching if enabled
-      if (this.options.realTime) {
+      if (this.options.realTime && this.isLinterAvailable) {
         await this.startFileWatching();
       }
 
       // Start polling if enabled
-      if (this.options.polling) {
+      if (this.options.polling && this.isLinterAvailable) {
         this.startPolling();
       }
 
       // Run initial lint check
-      await this.runLintCheck();
+      if (this.isLinterAvailable) {
+        await this.runLintCheck();
+      }
 
       this.emit('detector-started');
     } catch (error) {
@@ -134,6 +146,10 @@ export class LinterErrorDetector extends BaseErrorDetector {
       await this.start();
     }
 
+    if (!this.isLinterAvailable) {
+      return [];
+    }
+
     // If target is specified, lint specific file/directory
     if (target) {
       return await this.lintSpecificTarget(target);
@@ -146,7 +162,11 @@ export class LinterErrorDetector extends BaseErrorDetector {
 
   private async verifyLinterAvailable(): Promise<void> {
     return new Promise((resolve, reject) => {
-      const linter = spawn('npx', [this.config.linterCommand, '--version'], { stdio: 'pipe' });
+      const linter = spawn('npx', [this.config.linterCommand, '--version'], {
+        cwd: this.config.projectRoot,
+        stdio: 'pipe',
+        timeout: 3000,
+      });
 
       linter.on('close', code => {
         if (code === 0) {

@@ -13,6 +13,11 @@ import { spawnSync } from 'bun';
 
 const TEST_DIR = join(process.cwd(), '.test-git-workflow');
 
+function gitOutput(...args: string[]): string {
+  const result = spawnSync(['git', ...args], { cwd: TEST_DIR, stdout: 'pipe', stderr: 'pipe' });
+  return new TextDecoder().decode(result.stdout).trim();
+}
+
 describe('Git Workflow Integration Tests', () => {
   // Setup: Create a fresh git repo for testing
   beforeAll(() => {
@@ -96,8 +101,8 @@ describe('Git Workflow Integration Tests', () => {
     test('should rollback to previous hash', async () => {
       const git = new GitManager(TEST_DIR);
 
-      // Get current hash
-      const originalHash = git.getCurrentHash();
+      // Get current hash (getCurrentHash is async — must await, else a Promise leaks into rollback)
+      const originalHash = await git.getCurrentHash();
       expect(originalHash).toBeDefined();
 
       // Create and commit a new file
@@ -288,8 +293,13 @@ describe('Git Workflow Integration Tests', () => {
     });
 
     test('should create ghost commit', async () => {
-      // Create a file to commit
+      writeFileSync(join(TEST_DIR, 'README.md'), '# User staged version');
+      spawnSync(['git', 'add', 'README.md'], { cwd: TEST_DIR, stdout: 'pipe', stderr: 'pipe' });
       writeFileSync(join(TEST_DIR, 'ghost-test.txt'), 'Ghost content');
+      const headBefore = gitOutput('rev-parse', 'HEAD');
+      const branchBefore = gitOutput('branch', '--show-current');
+      const indexBefore = gitOutput('diff', '--cached', '--binary');
+      const normalLogBefore = gitOutput('log', '--format=%H');
 
       const hash = await shadowLogger.createGhostCommit('Test ghost commit', {
         model: 'gpt-4',
@@ -300,6 +310,13 @@ describe('Git Workflow Integration Tests', () => {
 
       expect(hash).toBeDefined();
       expect(hash?.length).toBe(40);
+      expect(gitOutput('rev-parse', 'HEAD')).toBe(headBefore);
+      expect(gitOutput('branch', '--show-current')).toBe(branchBefore);
+      expect(gitOutput('diff', '--cached', '--binary')).toBe(indexBefore);
+      expect(gitOutput('log', '--format=%H')).toBe(normalLogBefore);
+      expect(gitOutput('for-each-ref', '--format=%(refname)', 'refs/kory/checkpoints')).toContain(
+        'refs/kory/checkpoints/test-agent/',
+      );
     });
 
     test('should get timeline', async () => {
@@ -314,6 +331,8 @@ describe('Git Workflow Integration Tests', () => {
       expect(timeline.length).toBeGreaterThan(0);
 
       const targetHash = timeline[0].hash;
+      const headBefore = gitOutput('rev-parse', 'HEAD');
+      const branchBefore = gitOutput('branch', '--show-current');
 
       // Create a new file
       writeFileSync(join(TEST_DIR, 'post-ghost.txt'), 'This should be removed');
@@ -322,6 +341,8 @@ describe('Git Workflow Integration Tests', () => {
       // Recover to ghost state
       const result = await shadowLogger.recover(targetHash);
       expect(result.success).toBe(true);
+      expect(gitOutput('rev-parse', 'HEAD')).toBe(headBefore);
+      expect(gitOutput('branch', '--show-current')).toBe(branchBefore);
 
       // File should be gone
       expect(existsSync(join(TEST_DIR, 'post-ghost.txt'))).toBe(false);

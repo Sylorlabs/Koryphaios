@@ -14,6 +14,9 @@
 
 import { koryLog } from '../logger';
 import { gitMutex } from './git-mutex';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
 export interface GhostCommitMetadata {
   /** Unique ID for this ghost commit */
@@ -75,14 +78,19 @@ export interface TimelineEntry {
 export class ShadowLogger {
   private readonly GHOST_PREFIX = '[GHOST]';
   private readonly NOTES_REF = 'refs/notes/shadow-logger';
+  private readonly CHECKPOINT_REF_ROOT = 'refs/kory/checkpoints';
 
   constructor(protected workingDirectory: string) {}
 
-  private async runGit(args: string[]): Promise<{ success: boolean; output: string }> {
+  private async runGit(
+    args: string[],
+    env?: Record<string, string>,
+  ): Promise<{ success: boolean; output: string }> {
     const release = await gitMutex.acquire();
     try {
       const proc = Bun.spawn(['git', ...args], {
         cwd: this.workingDirectory,
+        env: { ...process.env, ...env },
         stdout: 'pipe',
         stderr: 'pipe',
       });
@@ -99,10 +107,9 @@ export class ShadowLogger {
   }
 
   /**
-   * Create a ghost commit from the current index/state
+   * Create an immutable checkpoint from the working tree using a private index.
    *
-   * This creates a dangling commit (not attached to any branch) that captures
-   * the current working directory state. The commit is reachable via reflog.
+   * The user's index, HEAD, branch and ordinary git log are never modified.
    *
    * @param message Description of what changed
    * @param metadata Optional metadata about the AI operation
@@ -112,28 +119,48 @@ export class ShadowLogger {
     message: string,
     metadata?: Omit<GhostCommitMetadata, 'id' | 'timestamp'>,
   ): Promise<string | null> {
-    // Stage all current changes first
-    await this.runGit(['add', '-A']);
-
-    // Get the current HEAD to use as parent
     const parentResult = await this.runGit(['rev-parse', 'HEAD']);
     if (!parentResult.success) {
       koryLog.error('Failed to get HEAD for ghost commit');
       return null;
     }
     const parent = parentResult.output.trim();
-
-    // Write the tree from the index
-    const treeResult = await this.runGit(['write-tree']);
-    if (!treeResult.success) {
-      koryLog.error('Failed to write tree for ghost commit');
+    const checkpointMetadata: GhostCommitMetadata = {
+      ...metadata,
+      id: this.generateId(),
+      timestamp: Date.now(),
+    };
+    const privateIndexDirectory = mkdtempSync(join(tmpdir(), 'kory-checkpoint-index-'));
+    const privateIndex = join(privateIndexDirectory, 'index');
+    const indexEnv = { GIT_INDEX_FILE: privateIndex };
+    let tree: string;
+    try {
+      const readTree = await this.runGit(['read-tree', parent], indexEnv);
+      if (!readTree.success) throw new Error(readTree.output);
+      const addResult = await this.runGit(['add', '-A', '--', '.'], indexEnv);
+      if (!addResult.success) throw new Error(addResult.output);
+      const treeResult = await this.runGit(['write-tree'], indexEnv);
+      if (!treeResult.success) throw new Error(treeResult.output);
+      tree = treeResult.output.trim();
+    } catch (error) {
+      koryLog.error({ error }, 'Failed to create private checkpoint tree');
       return null;
+    } finally {
+      rmSync(privateIndexDirectory, { recursive: true, force: true });
     }
-    const tree = treeResult.output.trim();
 
     // Create the ghost commit using commit-tree (creates dangling commit)
     const ghostMessage = `${this.GHOST_PREFIX} ${message}`;
-    const commitResult = await this.runGit(['commit-tree', tree, '-p', parent, '-m', ghostMessage]);
+    const commitResult = await this.runGit([
+      'commit-tree',
+      tree,
+      '-p',
+      parent,
+      '-m',
+      ghostMessage,
+      '-m',
+      `Kory-Checkpoint-ID: ${checkpointMetadata.id}`,
+    ]);
 
     if (!commitResult.success) {
       koryLog.error({ output: commitResult.output }, 'Failed to create ghost commit');
@@ -142,20 +169,16 @@ export class ShadowLogger {
 
     const ghostHash = commitResult.output.trim();
 
-    // Add metadata via git notes
-    if (metadata) {
-      await this.attachMetadata(ghostHash, {
-        ...metadata,
-        id: this.generateId(),
-        timestamp: Date.now(),
-      });
+    await this.attachMetadata(ghostHash, checkpointMetadata);
+    const session = this.sanitizeRefPart(metadata?.agentId ?? 'unscoped');
+    const checkpointRef = `${this.CHECKPOINT_REF_ROOT}/${session}/${checkpointMetadata.timestamp}-${this.sanitizeRefPart(checkpointMetadata.id)}`;
+    const refResult = await this.runGit(['update-ref', checkpointRef, ghostHash]);
+    if (!refResult.success) {
+      koryLog.error({ checkpointRef, output: refResult.output }, 'Failed to retain checkpoint ref');
+      return null;
     }
 
-    // Update HEAD reflog so this ghost commit appears in timeline
-    // This makes it reachable for get_timeline() but doesn't affect branches
-    await this.runGit(['update-ref', '-m', `ghost: ${message.slice(0, 50)}`, 'HEAD', ghostHash, parent]);
-
-    koryLog.info({ ghostHash, message }, 'Ghost commit created');
+    koryLog.info({ ghostHash, checkpointRef, message }, 'Checkpoint created');
 
     return ghostHash;
   }
@@ -207,7 +230,36 @@ export class ShadowLogger {
    * @returns Array of timeline entries, newest first
    */
   async getTimeline(limit = 50, filterAgentId?: string): Promise<TimelineEntry[]> {
-    // Get reflog entries
+    const entries: TimelineEntry[] = [];
+    const seenHashes = new Set<string>();
+    const refsResult = await this.runGit([
+      'for-each-ref',
+      '--sort=-creatordate',
+      '--format=%(objectname)|%(refname)|%(creatordate:unix)|%(subject)',
+      this.CHECKPOINT_REF_ROOT,
+    ]);
+    if (refsResult.success) {
+      for (const line of refsResult.output.split('\n').filter(Boolean)) {
+        const [hash, _ref, timestamp, subject] = line.split('|');
+        if (!hash || seenHashes.has(hash)) continue;
+        const metadata = await this.getMetadata(hash);
+        if (filterAgentId && metadata?.agentId !== filterAgentId) continue;
+        seenHashes.add(hash);
+        entries.push({
+          hash,
+          description: this.formatDescription(subject ?? '', metadata),
+          timestamp: metadata?.timestamp ?? (timestamp ? parseInt(timestamp) * 1000 : Date.now()),
+          model: metadata?.model,
+          cost: metadata?.cost,
+          recoverable: true,
+          messageId: metadata?.messageId,
+          checkpointType: metadata?.checkpointType,
+        });
+        if (entries.length >= limit) return entries;
+      }
+    }
+
+    // Backward compatibility: retain discovery of checkpoints made by older releases.
     const reflogResult = await this.runGit([
       'reflog',
       'show',
@@ -217,16 +269,10 @@ export class ShadowLogger {
       String(limit * 5), // Get more to filter for ghosts and agent IDs
     ]);
 
-    if (!reflogResult.success) {
-      koryLog.error('Failed to read reflog');
-      return [];
-    }
-
-    const entries: TimelineEntry[] = [];
-    const seenHashes = new Set<string>();
+    if (!reflogResult.success) return entries;
 
     for (const line of reflogResult.output.split('\n').filter(Boolean)) {
-      const [hash, reflogSelector, subject, timestamp] = line.split('|');
+      const [hash, _reflogSelector, subject, timestamp] = line.split('|');
 
       if (!hash || seenHashes.has(hash)) continue;
       seenHashes.add(hash);
@@ -234,9 +280,8 @@ export class ShadowLogger {
       // Check if this is a ghost commit
       const isGhost = subject?.includes(this.GHOST_PREFIX) || subject?.startsWith('ghost:');
 
-      // Also include regular commits that have shadow metadata
       const metadata = await this.getMetadata(hash);
-      
+
       // Filter by agentId if requested
       if (filterAgentId && metadata?.agentId !== filterAgentId) continue;
 
@@ -280,7 +325,13 @@ export class ShadowLogger {
     const [commitHash, parent, subject, timestamp] = showResult.output.split('|');
 
     // Get file changes
-    const diffResult = await this.runGit(['diff-tree', '--no-commit-id', '--name-status', '-r', hash]);
+    const diffResult = await this.runGit([
+      'diff-tree',
+      '--no-commit-id',
+      '--name-status',
+      '-r',
+      hash,
+    ]);
 
     const filesChanged = diffResult.success
       ? diffResult.output
@@ -305,13 +356,14 @@ export class ShadowLogger {
   /**
    * Recover to a specific ghost commit state
    *
-   * Performs a hard reset to the ghost commit hash, instantly reverting
-   * the working directory to that state.
+   * Restores the checkpoint into the index/worktree without moving HEAD or the branch.
    *
    * @param ghostHash The ghost commit hash to recover to
    * @returns Success status and details
    */
-  async recover(ghostHash: string): Promise<{ success: boolean; message: string; previousHash?: string }> {
+  async recover(
+    ghostHash: string,
+  ): Promise<{ success: boolean; message: string; previousHash?: string }> {
     // Verify the ghost commit exists
     const ghost = await this.getGhostCommit(ghostHash);
     if (!ghost) {
@@ -329,8 +381,15 @@ export class ShadowLogger {
       });
     }
 
-    // Perform hard reset to ghost state
-    const resetResult = await this.runGit(['reset', '--hard', ghostHash]);
+    const resetResult = await this.runGit([
+      'restore',
+      '--source',
+      ghostHash,
+      '--staged',
+      '--worktree',
+      '--',
+      '.',
+    ]);
 
     if (!resetResult.success) {
       koryLog.error({ ghostHash, output: resetResult.output }, 'Recovery failed');
@@ -340,7 +399,7 @@ export class ShadowLogger {
     // Clean any untracked files that might remain
     await this.runGit(['clean', '-fd']);
 
-    koryLog.info({ ghostHash, previousHash }, 'Recovered to ghost state');
+    koryLog.info({ ghostHash, previousHash }, 'Recovered checkpoint without moving HEAD');
 
     return {
       success: true,
@@ -373,32 +432,26 @@ export class ShadowLogger {
     const cutoffDate = new Date();
     cutoffDate.setDate(cutoffDate.getDate() - olderThanDays);
 
-    // Expire reflog entries older than cutoff
-    const expireResult = await this.runGit([
-      'reflog',
-      'expire',
-      '--expire-unreachable=' + cutoffDate.toISOString(),
-      '--all',
+    const refs = await this.runGit([
+      'for-each-ref',
+      '--format=%(refname)|%(creatordate:unix)',
+      this.CHECKPOINT_REF_ROOT,
     ]);
-
-    if (!expireResult.success) {
-      return { removed: 0, message: 'Failed to prune: ' + expireResult.output };
+    if (!refs.success) return { removed: 0, message: 'Failed to list checkpoints' };
+    let removed = 0;
+    for (const line of refs.output.split('\n').filter(Boolean)) {
+      const [ref, timestamp] = line.split('|');
+      if (ref && Number(timestamp) * 1000 < cutoffDate.getTime()) {
+        const deleted = await this.runGit(['update-ref', '-d', ref]);
+        if (deleted.success) removed++;
+      }
     }
-
-    // Also prune shadow notes
-    await this.runGit([
-      'notes',
-      '--ref',
-      this.NOTES_REF,
-      'expire',
-      '--expire-unreachable=' + olderThanDays + '.days.ago',
-    ]);
 
     koryLog.info({ olderThanDays }, 'Pruned old ghost commits');
 
     return {
-      removed: 0, // Git doesn't give us an exact count
-      message: `Pruned entries older than ${olderThanDays} days`,
+      removed,
+      message: `Pruned ${removed} checkpoints older than ${olderThanDays} days`,
     };
   }
 
@@ -435,6 +488,16 @@ export class ShadowLogger {
 
   private generateId(): string {
     return `ghost_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
+  }
+
+  private sanitizeRefPart(value: string): string {
+    const sanitized = value
+      .trim()
+      .replace(/[^A-Za-z0-9._-]+/g, '-')
+      .replace(/^\.+|\.+$/g, '')
+      .replace(/\.\.+/g, '.')
+      .slice(0, 80);
+    return sanitized || 'unscoped';
   }
 
   private formatDescription(subject: string, metadata?: GhostCommitMetadata): string {

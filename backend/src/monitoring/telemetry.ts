@@ -20,6 +20,7 @@ import {
 import { HttpInstrumentation } from '@opentelemetry/instrumentation-http';
 import { OTLPTraceExporter } from '@opentelemetry/exporter-trace-otlp-grpc';
 import { registerInstrumentations } from '@opentelemetry/instrumentation';
+import { VERSION } from '../constants';
 import { serverLog } from '../logger';
 
 let tracerInitialized = false;
@@ -48,7 +49,7 @@ export function initTelemetry(config: {
     const resource = Resource.default().merge(
       new Resource({
         [SEMRESATTRS_SERVICE_NAME]: config.serviceName || 'koryphaios',
-        [SEMRESATTRS_SERVICE_VERSION]: process.env.npm_package_version || '1.0.0',
+        [SEMRESATTRS_SERVICE_VERSION]: process.env.npm_package_version || VERSION,
         [SEMRESATTRS_DEPLOYMENT_ENVIRONMENT]:
           config.environment || process.env.NODE_ENV || 'production',
       }),

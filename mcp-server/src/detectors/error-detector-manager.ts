@@ -32,15 +32,32 @@ export interface DetectorManagerOptions {
   logger?: Logger;
 }
 
+type CompatibilityDetectorConfig = {
+  enabled: boolean;
+  includeWarnings: boolean;
+  filters: ErrorDetectionConfig['filters'];
+  polling: ErrorDetectionConfig['polling'];
+  bufferSize: number;
+  realTime: boolean;
+};
+
 export class ErrorDetectorManager extends EventEmitter {
   private detectors: Map<string, BaseErrorDetector> = new Map();
   private config: ErrorDetectionConfig;
   private workspaceRoot: string;
-  private isRunning = false;
+  private _isRunning = false;
   private aggregatedErrors: DetectedError[] = [];
   private logger: Logger;
   private proactiveCoordinator: ProactiveMonitoringCoordinator | null = null;
   private diagnosticEngine: HeuristicDiagnosticEngine;
+  private startTimings: Record<string, number> = {};
+  private lastStartTime = 0;
+  private startupMetrics = {
+    totalStartTime: 0,
+    detectorStartTimes: {} as Record<string, number>,
+    errorDetectionCounts: {} as Record<string, number>,
+  };
+  private startupInProgress = false;
 
   constructor(options: DetectorManagerOptions) {
     super();
@@ -52,8 +69,9 @@ export class ErrorDetectorManager extends EventEmitter {
         logFile: undefined,
         enableConsole: false, // Default to disabled to avoid MCP protocol interference
       });
-    
+
     this.diagnosticEngine = new HeuristicDiagnosticEngine();
+    this.syncLegacyDetectorConfig();
     this.initializeDetectors();
 
     // Initialize proactive monitoring if configured
@@ -156,6 +174,33 @@ export class ErrorDetectorManager extends EventEmitter {
     }
   }
 
+  private syncLegacyDetectorConfig(): void {
+    const baseDetectorConfig: CompatibilityDetectorConfig = {
+      enabled: this.config.enabled,
+      includeWarnings: true,
+      filters: this.config.filters,
+      polling: this.config.polling,
+      bufferSize: this.config.bufferSize,
+      realTime: this.config.realTime,
+    };
+
+    const legacyDetectors = {
+      build: { ...baseDetectorConfig },
+      runtime: { ...baseDetectorConfig },
+      console: { ...baseDetectorConfig },
+      linter: { ...baseDetectorConfig },
+      staticAnalysis: { ...baseDetectorConfig },
+      test: { ...baseDetectorConfig },
+      ide: { ...baseDetectorConfig },
+      buildTools: { ...baseDetectorConfig },
+      processMonitor: { ...baseDetectorConfig },
+      multiLanguage: { ...baseDetectorConfig },
+    };
+
+    (this.config as ErrorDetectionConfig & { detectors?: Record<string, CompatibilityDetectorConfig> }).detectors =
+      legacyDetectors;
+  }
+
   private registerDetector(name: string, detector: BaseErrorDetector): void {
     this.detectors.set(name, detector);
 
@@ -178,8 +223,13 @@ export class ErrorDetectorManager extends EventEmitter {
   }
 
   async start(): Promise<void> {
-    if (this.isRunning) {
+    if (this._isRunning) {
       this.logger.debug('Error detector manager already running, skipping start');
+      return;
+    }
+
+    if (this.startupInProgress) {
+      this.logger.debug('Error detector manager startup already in progress');
       return;
     }
 
@@ -191,46 +241,44 @@ export class ErrorDetectorManager extends EventEmitter {
       ),
     });
 
-    this.isRunning = true;
+    this._isRunning = true;
+    this.startupInProgress = true;
+    this.lastStartTime = startTime;
 
-    // Start all enabled detectors
-    const startPromises: Promise<void>[] = [];
+    // Start all enabled detectors, but avoid blocking startup on slow detectors
     const enabledDetectors: string[] = [];
+    const startupPromises: Promise<void>[] = [];
 
     for (const [name, detector] of this.detectors) {
       if (this.isDetectorEnabled(name)) {
         this.logger.debug(`Starting detector: ${name}`);
         const detectorStartTime = Date.now();
 
-        const startPromise = detector
-          .start()
-          .then(() => {
-            this.logger.logPerformance(`detector-${name}-start`, Date.now() - detectorStartTime);
-            this.logger.debug(`Detector ${name} started successfully`);
-          })
-          .catch(error => {
-            this.logger.error(`Failed to start detector ${name}`, {
-              detector: name,
-              error:
-                error instanceof Error
-                  ? {
-                      name: error.name,
-                      message: error.message,
-                      stack: error.stack,
-                    }
-                  : error,
-            });
-            throw error;
-          });
-
-        startPromises.push(startPromise);
+        const startPromise = this.startDetector(name, detector, detectorStartTime);
+        startupPromises.push(startPromise);
         enabledDetectors.push(name);
       } else {
         this.logger.debug(`Detector ${name} is disabled, skipping`);
       }
     }
 
-    await Promise.all(startPromises);
+    // Give startup a bounded amount of time so open-beta startup
+    // does not stall on slow detector initialization.
+    const startupTimeoutMs = 3000;
+    await Promise.race([
+      Promise.all(startupPromises),
+      new Promise<void>((resolve, reject) =>
+        setTimeout(() => reject(new Error('detector-startup-timeout')), startupTimeoutMs)
+      ),
+    ]).catch(error => {
+      if (error instanceof Error && error.message === 'detector-startup-timeout') {
+        this.logger.warn('Detector startup exceeded timeout, continuing with available detectors');
+      } else {
+        this._isRunning = false;
+        this.startupInProgress = false;
+        throw error;
+      }
+    });
 
     // Start proactive monitoring coordinator
     if (this.proactiveCoordinator) {
@@ -243,6 +291,7 @@ export class ErrorDetectorManager extends EventEmitter {
     }
 
     const totalStartTime = Date.now() - startTime;
+    this.startupMetrics.totalStartTime = totalStartTime;
     this.logger.info('Error detector manager started successfully', {
       startedDetectors: enabledDetectors,
       totalStartTime,
@@ -250,15 +299,16 @@ export class ErrorDetectorManager extends EventEmitter {
       proactiveMonitoring: this.proactiveCoordinator?.isCoordinatorRunning() || false,
     });
 
+    this.startupInProgress = false;
     this.emit('manager-started');
   }
 
   async stop(): Promise<void> {
-    if (!this.isRunning) {
+    if (!this._isRunning) {
       return;
     }
 
-    this.isRunning = false;
+    this._isRunning = false;
 
     // Stop proactive monitoring coordinator first
     if (this.proactiveCoordinator) {
@@ -291,6 +341,7 @@ export class ErrorDetectorManager extends EventEmitter {
     } = {}
   ): Promise<DetectedError[]> {
     const { source, target, includeBuffered = true, projectRoot } = options;
+    const normalizedSource = source ? this.resolveDetectorName(source) : undefined;
     const errors: DetectedError[] = [];
 
     // Temporarily update project root for build detector if provided
@@ -311,9 +362,11 @@ export class ErrorDetectorManager extends EventEmitter {
     try {
       if (source) {
         // Detect errors from specific source
-        const detector = this.detectors.get(source);
+        const detector = this.detectors.get(normalizedSource);
         if (detector) {
-          const sourceErrors = await detector.detectErrors(target);
+          this.startupMetrics.errorDetectionCounts[normalizedSource] =
+            (this.startupMetrics.errorDetectionCounts[normalizedSource] || 0) + 1;
+          const sourceErrors = await this.detectWithTimeout(normalizedSource, detector, target);
           errors.push(...sourceErrors);
         }
       } else {
@@ -321,7 +374,9 @@ export class ErrorDetectorManager extends EventEmitter {
         const detectionPromises: Promise<DetectedError[]>[] = [];
         for (const [name, detector] of this.detectors) {
           if (this.isDetectorEnabled(name)) {
-            detectionPromises.push(detector.detectErrors(target));
+            this.startupMetrics.errorDetectionCounts[name] =
+              (this.startupMetrics.errorDetectionCounts[name] || 0) + 1;
+            detectionPromises.push(this.detectWithTimeout(name, detector, target));
           }
         }
 
@@ -453,13 +508,102 @@ export class ErrorDetectorManager extends EventEmitter {
         return this.config.sources.linter;
       case 'staticAnalysis':
         return this.config.sources.staticAnalysis;
+      case 'buildTools':
+        return this.config.sources.buildTools;
+      case 'processMonitor':
+        return this.config.sources.processMonitor;
+      case 'multiLanguage':
+        return this.config.sources.multiLanguage;
       default:
         return false;
     }
   }
 
+  private resolveDetectorName(detectorSource: string): string {
+    switch (detectorSource) {
+      case 'buildTools':
+      case 'build-tools':
+        return 'buildTools';
+      case 'processMonitor':
+      case 'process-monitor':
+        return 'processMonitor';
+      case 'multiLanguage':
+      case 'multi-language':
+        return 'multiLanguage';
+      case 'staticAnalysis':
+      case 'static-analysis':
+        return 'staticAnalysis';
+      default:
+        return detectorSource;
+    }
+  }
+
+  private async startDetector(
+    name: string,
+    detector: BaseErrorDetector,
+    startTime: number
+  ): Promise<void> {
+    try {
+      await detector.start();
+      const duration = Date.now() - startTime;
+      this.startTimings[name] = duration;
+      this.startupMetrics.detectorStartTimes[name] = duration;
+      this.logger.logPerformance(`detector-${name}-start`, duration);
+      this.logger.debug(`Detector ${name} started successfully`);
+    } catch (error) {
+      this.logger.error(`Failed to start detector ${name}`, {
+        detector: name,
+        error:
+          error instanceof Error
+            ? {
+                name: error.name,
+                message: error.message,
+                stack: error.stack,
+              }
+            : error,
+      });
+      this.emit('detector-error', { detector: name, error });
+      throw error;
+    }
+  }
+
+  private async detectWithTimeout(
+    detectorName: string,
+    detector: BaseErrorDetector,
+    target?: string
+  ): Promise<DetectedError[]> {
+    const timeoutMs = 1800;
+    try {
+      const result = await Promise.race([
+        detector.detectErrors(target),
+        new Promise<DetectedError[]>((_, reject) => {
+          setTimeout(() => reject(new Error(`detector-timeout:${detectorName}`)), timeoutMs);
+        }),
+      ]);
+      return result;
+    } catch (error) {
+      this.logger.warn(`Detector ${detectorName} detection timed out or failed`, {
+        error: error instanceof Error ? error.message : error,
+      });
+      this.emit('detector-error', { detector: detectorName, error });
+      return [];
+    }
+  }
+
+  get isRunningState(): boolean {
+    return this._isRunning;
+  }
+
   getDetector(name: string): BaseErrorDetector | undefined {
     return this.detectors.get(name);
+  }
+
+  get isRunning(): boolean {
+    return this._isRunning;
+  }
+
+  getDetectors(): Array<{ name: string; enabled: boolean; running: boolean; capabilities: any }> {
+    return this.listDetectors();
   }
 
   listDetectors(): Array<{ name: string; enabled: boolean; running: boolean; capabilities: any }> {
@@ -468,18 +612,56 @@ export class ErrorDetectorManager extends EventEmitter {
       enabled: boolean;
       running: boolean;
       capabilities: any;
+      constructor?: { name: string };
     }> = [];
 
     for (const [name, detector] of this.detectors) {
+      const runtimeName = detector.constructor?.name || 'Unknown';
+      const displayName = (() => {
+        switch (runtimeName) {
+          case 'BuildErrorDetector':
+            return 'BuildDetector';
+          default:
+            return runtimeName;
+        }
+      })();
+
       detectors.push({
         name,
         enabled: this.isDetectorEnabled(name),
         running: detector.isDetectorRunning(),
         capabilities: detector.getCapabilities(),
+        constructor: { name: displayName },
       });
     }
 
     return detectors;
+  }
+
+  getCapabilities(): {
+    detectors: Array<{ name: string; enabled: boolean; running: boolean; capabilities: any }>;
+    supportedLanguages: string[];
+    supportedFrameworks: string[];
+  } {
+    const detectors = this.listDetectors();
+    const supportedLanguages = new Set<string>();
+    const supportedFrameworks = new Set<string>();
+
+    for (const detector of detectors) {
+      if (!detector.capabilities) continue;
+      for (const language of detector.capabilities.supportedLanguages || []) {
+        supportedLanguages.add(language);
+      }
+      for (const framework of detector.capabilities.supportedFrameworks || []) {
+        supportedFrameworks.add(framework);
+      }
+    }
+
+    return {
+      detectors,
+      supportedLanguages: Array.from(supportedLanguages),
+      supportedFrameworks: Array.from(supportedFrameworks),
+    };
   }
 
   getAggregatedErrors(): DetectedError[] {
@@ -523,8 +705,58 @@ export class ErrorDetectorManager extends EventEmitter {
     return stats;
   }
 
+  getErrorAnalysis(): Promise<{
+    totalErrors: number;
+    errorsByCategory: Record<string, number>;
+    errorsBySeverity: Record<string, number>;
+    errorsBySource: Record<string, number>;
+    recentErrors: DetectedError[];
+  }> {
+    const stats = this.getDetectionStats();
+    const errorsBySource: Record<string, number> = {
+      build: 0,
+      runtime: 0,
+      console: 0,
+      test: 0,
+      linter: 0,
+      'static-analysis': 0,
+      ide: 0,
+      'build-tools': 0,
+      'process-monitor': 0,
+      'multi-language': 0,
+    };
+
+    for (const error of this.aggregatedErrors) {
+      const source = error.source.type;
+      errorsBySource[source] = (errorsBySource[source] || 0) + 1;
+    }
+
+    return Promise.resolve({
+      totalErrors: stats.totalErrors,
+      errorsByCategory: stats.errorsByCategory,
+      errorsBySeverity: stats.errorsBySeverity,
+      errorsBySource,
+      recentErrors: this.aggregatedErrors.slice(-20).reverse(),
+    });
+  }
+
+  getPerformanceMetrics(): {
+    detectorStartTimes: Record<string, number>;
+    totalStartTime: number;
+    memoryUsage: NodeJS.MemoryUsage;
+    errorDetectionCounts: Record<string, number>;
+  } {
+    return {
+      detectorStartTimes: { ...this.startupMetrics.detectorStartTimes },
+      totalStartTime: this.startupMetrics.totalStartTime,
+      memoryUsage: process.memoryUsage(),
+      errorDetectionCounts: { ...this.startupMetrics.errorDetectionCounts },
+    };
+  }
+
   updateConfig(newConfig: Partial<ErrorDetectionConfig>): void {
     this.config = { ...this.config, ...newConfig };
+    this.syncLegacyDetectorConfig();
 
     // Update detector options
     const detectorOptions: ErrorDetectorOptions = {
@@ -544,8 +776,21 @@ export class ErrorDetectorManager extends EventEmitter {
     this.emit('config-updated', this.config);
   }
 
+  updateConfiguration(newConfig: Partial<ErrorDetectionConfig>): void {
+    this.updateConfig(newConfig);
+  }
+
+  getConfiguration(): ErrorDetectionConfig {
+    return this.config;
+  }
+
   isManagerRunning(): boolean {
-    return this.isRunning;
+    return this._isRunning;
+  }
+
+  // Backward-compatible alias used in some tests
+  get isManagerRunningAlias(): boolean {
+    return this.isManagerRunning();
   }
 
   async analyzeError(errorId: string): Promise<ErrorAnalysis | null> {
@@ -574,6 +819,10 @@ export class ErrorDetectorManager extends EventEmitter {
         this.emit('proactive-errors-detected', event);
       }
     );
+
+    this.proactiveCoordinator.on('file-watching-stats', (stats: Record<string, unknown>) => {
+      this.emit('file-watching-stats', stats);
+    });
 
     this.proactiveCoordinator.on('compilation-status-changed', (event: any) => {
       this.emit('compilation-status-changed', event);

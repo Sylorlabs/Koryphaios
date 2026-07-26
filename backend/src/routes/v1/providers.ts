@@ -11,15 +11,6 @@ import { db, userCredentials } from '../../db';
 import { createUserCredentialsService, type UserCredential } from '../../services';
 import { pollCopilotDeviceAuth, startCopilotDeviceAuth } from '../../providers/copilot';
 import {
-  pollCodexDeviceAuth,
-  resetCodexDeviceAuthSessions,
-  startCodexDeviceAuth,
-} from '../../providers/codex';
-import {
-  clearCodexAuthState,
-  createCodexCLIProfileMarker,
-  getKoryCodexHome,
-  detectCodexAuthToken,
   detectClaudeCodeLogin,
   createClaudeCLIAuthMarker,
   clearCachedToken,
@@ -72,7 +63,6 @@ const providerConfigBody = t.Object({
 
 type BrowserAuthProvider =
   | 'copilot'
-  | 'codex'
   | 'kimicode'
   | 'claude'
   | 'grok'
@@ -81,7 +71,6 @@ type BrowserAuthProvider =
 function isBrowserAuthProvider(name: string): name is BrowserAuthProvider {
   return (
     name === 'copilot' ||
-    name === 'codex' ||
     name === 'kimicode' ||
     name === 'claude' ||
     name === 'grok' ||
@@ -101,27 +90,6 @@ async function startBrowserAuth(
           {
             provider: name,
             deviceCode: result.deviceCode,
-            verificationUri: result.verificationUri,
-          },
-          'Browser auth flow started',
-        );
-        return {
-          ok: true,
-          data: {
-            provider: name,
-            ...result,
-          },
-        };
-      }
-      case 'codex': {
-        resetCodexDeviceAuthSessions();
-        clearCodexAuthState();
-        const result = await startCodexDeviceAuth();
-        serverLog.info(
-          {
-            provider: name,
-            deviceAuthId: result.deviceAuthId,
-            userCode: result.userCode,
             verificationUri: result.verificationUri,
           },
           'Browser auth flow started',
@@ -261,27 +229,6 @@ async function completeBrowserAuth(
   try {
     serverLog.info({ provider: name }, 'Completing browser auth flow');
     switch (name) {
-      case 'codex': {
-        const koryMarker = createCodexCLIProfileMarker(getKoryCodexHome());
-        const localCodexToken = detectCodexAuthToken(koryMarker);
-        if (!localCodexToken) {
-          serverLog.warn(
-            { provider: name },
-            'Codex browser auth completion requested before credentials existed',
-          );
-          return { ok: false, error: 'Codex sign-in is not complete yet' };
-        }
-        const codexMarker = koryMarker;
-        const result = await providers.setCredentials('codex', {
-          authToken: codexMarker,
-        });
-        if (!result.success) {
-          return { ok: false, error: result.error ?? 'Failed to activate Codex auth' };
-        }
-        syncProviderConfigsSafely(providers);
-        serverLog.info({ provider: name }, 'Browser auth flow completed');
-        return { ok: true, data: { status: 'connected', provider: 'codex' } };
-      }
       case 'claude': {
         clearCachedToken('claude-login');
         if (!detectClaudeCodeLogin()) {
@@ -475,6 +422,10 @@ export const providerRoutes = new Elysia({ prefix: '/api/providers' })
   .get('/', async ({ request, set }) => {
     if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
     const { providers } = getContext();
+    const forceRefreshModels = new URL(request.url).searchParams.get('refreshModels') === '1';
+    if (forceRefreshModels) {
+      await providers.refreshModelCatalogs();
+    }
     return {
       ok: true,
       data: providers.getStatus(),
@@ -483,6 +434,10 @@ export const providerRoutes = new Elysia({ prefix: '/api/providers' })
   .get('/status', async ({ request, set }) => {
     if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
     const { providers } = getContext();
+    const forceRefreshModels = new URL(request.url).searchParams.get('refreshModels') === '1';
+    if (forceRefreshModels) {
+      await providers.refreshModelCatalogs();
+    }
     return {
       ok: true,
       data: providers.getStatus(),
@@ -672,108 +627,6 @@ export const providerRoutes = new Elysia({ prefix: '/api/providers' })
       }),
     },
   )
-  .post(
-    '/codex/auth/poll',
-    async ({ request, body, set }) => {
-      if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
-
-      try {
-        const poll = await pollCodexDeviceAuth(body.deviceAuthId, body.userCode);
-        if (poll.accessToken) {
-          const savedAccountId = body.saveAccount ? crypto.randomUUID() : undefined;
-          const savedAccountLabel =
-            body.label?.trim() || `Codex account ${new Date().toLocaleString()}`;
-          serverLog.info(
-            {
-              provider: 'codex',
-              deviceAuthId: body.deviceAuthId,
-              saveAccount: body.saveAccount === true,
-              label: body.label?.trim() || undefined,
-            },
-            'Codex auth poll completed with credentials',
-          );
-          const { providers } = getContext();
-          // Store CLI auth marker so CodexProvider reads from auth.json on demand,
-          // avoiding a synchronous HTTP verification that may fail or time out.
-          const codexMarker = createCodexCLIProfileMarker(getKoryCodexHome());
-          const result = await providers.setCredentials('codex', { authToken: codexMarker });
-          if (!result.success) {
-            set.status = 400;
-            return { ok: false, error: result.error ?? 'Failed to activate Codex auth' };
-          }
-          if (body.saveAccount) {
-            await credentialsService.createCredential({
-              userId: LOCAL_USER_ID,
-              provider: 'codex',
-              value: poll.accessToken,
-              type: 'authToken',
-              metadata: {
-                accountId: savedAccountId,
-                label: savedAccountLabel,
-              },
-            });
-          }
-          syncProviderConfigsSafely(providers);
-          return {
-            ok: true,
-            data: {
-              status: 'connected',
-              provider: 'codex',
-              savedAccount: savedAccountId
-                ? {
-                    id: savedAccountId,
-                    provider: 'codex',
-                    label: savedAccountLabel,
-                  }
-                : undefined,
-            },
-          };
-        }
-
-        if (poll.error && poll.error !== 'authorization_pending') {
-          serverLog.warn(
-            {
-              provider: 'codex',
-              deviceAuthId: body.deviceAuthId,
-              userCode: body.userCode,
-              pollError: poll.error,
-              errorDescription: poll.errorDescription,
-            },
-            'Codex auth poll returned a non-pending status',
-          );
-        }
-
-        return {
-          ok: true,
-          data: {
-            status: poll.error === 'authorization_pending' ? 'pending' : 'polling',
-            provider: 'codex',
-            ...poll,
-          },
-        };
-      } catch (error: any) {
-        serverLog.error(
-          {
-            provider: 'codex',
-            deviceAuthId: body.deviceAuthId,
-            userCode: body.userCode,
-            error: error?.message ?? String(error),
-          },
-          'Codex auth poll request threw an error',
-        );
-        set.status = 400;
-        return { ok: false, error: error?.message ?? 'Failed to poll Codex auth' };
-      }
-    },
-    {
-      body: t.Object({
-        deviceAuthId: t.String(),
-        userCode: t.String(),
-        saveAccount: t.Optional(t.Boolean()),
-        label: t.Optional(t.String()),
-      }),
-    },
-  )
   .put(
     '/:name',
     async ({ request, params: { name }, body, set }) => {
@@ -956,9 +809,9 @@ export const providerRoutes = new Elysia({ prefix: '/api/providers' })
 
     const discovered = getDiscoveredCliAccount(params.accountId);
     if (discovered && discovered.provider === params.name) {
-      const values = params.name === 'codex'
-        ? { authToken: createCodexCLIProfileMarker(discovered.profileDir) }
-        : null;
+      // Codex runs its installed CLI directly and that CLI chooses its active
+      // local account. Koryphaios deliberately does not copy profile tokens.
+      const values = null;
       if (!values) {
         set.status = 400;
         return {
@@ -1117,10 +970,6 @@ export const providerRoutes = new Elysia({ prefix: '/api/providers' })
     if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
     const { providers } = getContext();
     providers.removeApiKey(name as ProviderName);
-    if (name === 'codex') {
-      resetCodexDeviceAuthSessions();
-      clearCodexAuthState();
-    }
     if (name === 'kimicode') {
       clearKimiCodeAuthState();
     }

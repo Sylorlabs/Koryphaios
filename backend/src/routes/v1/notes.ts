@@ -6,7 +6,7 @@
  */
 
 import { Elysia, t } from 'elysia';
-import { requireLocalRouteAuth } from '../../auth/local-route-auth';
+import { requireLocalRouteAuth, validateLocalBearerToken } from '../../auth/local-route-auth';
 import * as notesService from '../../notes/notes-service';
 import { broadcastNotesNetworkUpdate } from '../../notes/notes-events';
 import {
@@ -23,17 +23,43 @@ import {
 } from '@koryphaios/shared';
 import { readFileSync, existsSync } from 'fs';
 import { PROJECT_ROOT } from '../../runtime/paths';
+import { getRequestProjectRoot } from '../../runtime/request-project';
 
 export const notesRoutes = new Elysia({ prefix: '/api/notes' })
 
   // ── List all notes (supports ?search=, ?folder=) ─────────────────────────
   .get('/', async ({ request, query, set }) => {
     if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
-    const notesList = await notesService.listNotes({
-      folderPath: query.folder as string | undefined,
-      search: query.search as string | undefined,
-    });
-    return { ok: true, data: notesList };
+    try {
+      const notesList = await notesService.listNotes(
+        {
+          folderPath: query.folder as string | undefined,
+          search: query.search as string | undefined,
+        },
+        (query.projectRoot as string | undefined) || PROJECT_ROOT,
+      );
+      return { ok: true, data: notesList };
+    } catch (err: unknown) {
+      set.status = 500;
+      console.error('[notesRoute] Failed to list notes:', err);
+      return {
+        ok: false,
+        error: err instanceof Error ? err.message : 'Failed to load notes',
+      };
+    }
+  })
+
+  .post('/sync-project', async ({ request, set }) => {
+    if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
+    try {
+      const url = new URL(request.url);
+      const result = await notesService.syncProjectDocuments(url.searchParams.get('projectRoot') || PROJECT_ROOT);
+      broadcastNotesNetworkUpdate('update');
+      return { ok: true, data: result };
+    } catch (err: unknown) {
+      set.status = 500;
+      return { ok: false, error: err instanceof Error ? err.message : 'Failed to sync project documents' };
+    }
   })
 
   // ── Create note ───────────────────────────────────────────────────────────
@@ -58,6 +84,7 @@ export const notesRoutes = new Elysia({ prefix: '/api/notes' })
         tags: t.Optional(t.Array(t.String())),
         pinned: t.Optional(t.Boolean()),
         includeInContext: t.Optional(t.Boolean()),
+        format: t.Optional(t.Union([t.Literal('markdown'), t.Literal('html')])),
       }),
     },
   )
@@ -66,7 +93,7 @@ export const notesRoutes = new Elysia({ prefix: '/api/notes' })
   // Persisted server-side so context injection actually honors them.
   .get('/settings', async ({ request, set }) => {
     if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
-    return { ok: true, data: loadNotesSettings(PROJECT_ROOT) };
+    return { ok: true, data: loadNotesSettings(getRequestProjectRoot(request)) };
   })
 
   .put(
@@ -74,7 +101,7 @@ export const notesRoutes = new Elysia({ prefix: '/api/notes' })
     async ({ request, body, set }) => {
       if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
       try {
-        const merged = saveNotesSettings(PROJECT_ROOT, body as Partial<NotesSettings>);
+        const merged = saveNotesSettings(getRequestProjectRoot(request), body as Partial<NotesSettings>);
         return { ok: true, data: merged };
       } catch (err: unknown) {
         set.status = 500;
@@ -104,7 +131,7 @@ export const notesRoutes = new Elysia({ prefix: '/api/notes' })
   // ── Agent permission settings ─────────────────────────────────────────────
   .get('/settings/agent-permissions', async ({ request, set }) => {
     if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
-    return { ok: true, data: loadNotesAgentPermissions(PROJECT_ROOT) };
+    return { ok: true, data: loadNotesAgentPermissions(getRequestProjectRoot(request)) };
   })
 
   .put(
@@ -113,7 +140,7 @@ export const notesRoutes = new Elysia({ prefix: '/api/notes' })
       if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
       try {
         const merged = saveNotesAgentPermissions(
-          PROJECT_ROOT,
+          getRequestProjectRoot(request),
           body as Partial<NotesAgentPermissions>,
         );
         return { ok: true, data: merged };
@@ -143,7 +170,7 @@ export const notesRoutes = new Elysia({ prefix: '/api/notes' })
 
   .post('/settings/agent-permissions/reset', async ({ request, set }) => {
     if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
-    return { ok: true, data: resetNotesAgentPermissions(PROJECT_ROOT) };
+    return { ok: true, data: resetNotesAgentPermissions(getRequestProjectRoot(request)) };
   })
 
   .get('/settings/agent-permissions/defaults', async ({ request, set }) => {
@@ -152,16 +179,16 @@ export const notesRoutes = new Elysia({ prefix: '/api/notes' })
   })
 
   // ── Graph data ────────────────────────────────────────────────────────────
-  .get('/graph', async ({ request, set }) => {
+  .get('/graph', async ({ request, query, set }) => {
     if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
-    const graph = await notesService.getGraphData();
+    const graph = await notesService.getGraphData(query.projectRoot as string | undefined);
     return { ok: true, data: graph };
   })
 
   // ── Folder tree ───────────────────────────────────────────────────────────
-  .get('/folders', async ({ request, set }) => {
+  .get('/folders', async ({ request, query, set }) => {
     if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
-    const tree = await notesService.getFolderTree();
+    const tree = await notesService.getFolderTree(query.projectRoot as string | undefined);
     return { ok: true, data: tree };
   })
 
@@ -176,7 +203,7 @@ export const notesRoutes = new Elysia({ prefix: '/api/notes' })
   .post('/import-memory', async ({ request, set }) => {
     if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
     try {
-      const notes = await notesService.importMemoryAsNotes(PROJECT_ROOT);
+      const notes = await notesService.importMemoryAsNotes(getRequestProjectRoot(request));
       broadcastNotesNetworkUpdate('update');
       return { ok: true, data: notes };
     } catch (err: any) {
@@ -186,8 +213,15 @@ export const notesRoutes = new Elysia({ prefix: '/api/notes' })
   })
 
   // ── Serve attachment (must come before /:id to avoid path collision) ──────
-  .get('/attachments/:attachmentId', async ({ request, params, set }) => {
-    if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
+  .get('/attachments/:attachmentId', async ({ request, params, query, set }) => {
+    // <img src> can't send Authorization headers — accept the token via ?auth=.
+    const authed =
+      requireLocalRouteAuth(request) ??
+      validateLocalBearerToken(String((query as { auth?: string })?.auth ?? ''));
+    if (!authed) {
+      set.status = 401;
+      return { ok: false, error: 'Unauthorized' };
+    }
     const att = await notesService.getAttachment(params.attachmentId);
     if (!att || !existsSync(att.storagePath)) {
       set.status = 404;
@@ -233,6 +267,7 @@ export const notesRoutes = new Elysia({ prefix: '/api/notes' })
         tags: t.Optional(t.Array(t.String())),
         pinned: t.Optional(t.Boolean()),
         includeInContext: t.Optional(t.Boolean()),
+        format: t.Optional(t.Union([t.Literal('markdown'), t.Literal('html')])),
       }),
     },
   )

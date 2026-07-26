@@ -109,7 +109,7 @@ export class GrokBuildProvider implements Provider {
       'streaming-json',
       '--no-alt-screen',
       // Headless: never block on an interactive tool-approval prompt.
-      '--always-approve',
+      ...(request.harnessRole === 'critic' ? ['--permission-mode', 'plan'] : ['--always-approve']),
       // Delegation is Koryphaios's job (manager → workers → critic) — never let
       // the CLI spawn its own native subagents outside our orchestration/UI.
       '--no-subagents',
@@ -134,12 +134,17 @@ export class GrokBuildProvider implements Provider {
     // Web search + web fetch are ON by default (the model runs them internally
     // and folds citations into its answer). Honor the user's global web-search
     // setting: only disable when they explicitly turned it off.
+    if (request.harnessRole === 'critic') args.push('--disable-web-search');
     try {
       const cwd = request.workingDirectory?.trim();
       if (cwd) {
         const { loadAgentSettings } =
           require('../agent-settings') as typeof import('../agent-settings');
-        if (loadAgentSettings(cwd).localWebSearch === 'off') args.push('--disable-web-search');
+        if (
+          loadAgentSettings(cwd).localWebSearch === 'off' &&
+          !args.includes('--disable-web-search')
+        )
+          args.push('--disable-web-search');
       }
     } catch {
       /* settings unavailable — keep web search on */

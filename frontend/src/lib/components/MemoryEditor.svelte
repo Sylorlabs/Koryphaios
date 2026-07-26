@@ -2,7 +2,8 @@
   import { memoryStore, type MemoryFile, DEFAULT_SETTINGS } from "$lib/stores/memory.svelte";
   import { agentSettingsStore } from "$lib/stores/agent-settings.svelte";
   import { sessionStore } from "$lib/stores/sessions.svelte";
-  import SettingsToggle from "$lib/components/SettingsToggle.svelte";
+  import SettingsSwitch from "$lib/components/SettingsSwitch.svelte";
+  import NumberStepper from "$lib/components/NumberStepper.svelte";
   import { 
     Brain, 
     FileText, 
@@ -144,11 +145,8 @@
     await memoryStore.saveSettings({ [key]: !current });
   }
 
-  async function handleMaxTokensChange(value: string) {
-    const num = parseInt(value, 10);
-    if (!isNaN(num) && num > 0) {
-      await memoryStore.saveSettings({ maxContextTokens: num });
-    }
+  function handleMaxTokensChange(value: number) {
+    void memoryStore.saveSettings({ maxContextTokens: value });
   }
 
   // Tab configuration
@@ -518,62 +516,35 @@
                 </p>
               </div>
 
-              <div class="grid gap-3 sm:grid-cols-2">
-                <label class="flex h-full cursor-pointer items-center justify-between gap-4 rounded-xl bg-[var(--color-surface-2)] p-4 hover:bg-[var(--color-surface-3)]">
-                  <div class="flex items-start gap-3">
-                    <Brain size={18} class="mt-0.5 text-purple-400" />
-                    <div>
-                      <div class="text-sm font-medium text-[var(--color-text-primary)]">Universal Memory</div>
-                      <div class="mt-1 text-xs text-[var(--color-text-muted)]">Global across all projects in `~/.koryphaios/`.</div>
-                    </div>
-                  </div>
-                  <SettingsToggle
-                    checked={memoryStore.settings?.universalMemoryEnabled ?? true}
-                    onchange={() => toggleSetting("universalMemoryEnabled")}
-                  />
-                </label>
-
-                <label class="flex h-full cursor-pointer items-center justify-between gap-4 rounded-xl bg-[var(--color-surface-2)] p-4 hover:bg-[var(--color-surface-3)]">
-                  <div class="flex items-start gap-3">
-                    <FileText size={18} class="mt-0.5 text-blue-400" />
-                    <div>
-                      <div class="text-sm font-medium text-[var(--color-text-primary)]">Project Memory</div>
-                      <div class="mt-1 text-xs text-[var(--color-text-muted)]">Project-specific context in `.koryphaios/memory/`.</div>
-                    </div>
-                  </div>
-                  <SettingsToggle
-                    checked={memoryStore.settings?.projectMemoryEnabled ?? true}
-                    onchange={() => toggleSetting("projectMemoryEnabled")}
-                  />
-                </label>
-
-                <label class="flex h-full cursor-pointer items-center justify-between gap-4 rounded-xl bg-[var(--color-surface-2)] p-4 hover:bg-[var(--color-surface-3)]">
-                  <div class="flex items-start gap-3">
-                    <MessageSquare size={18} class="mt-0.5 text-green-400" />
-                    <div>
-                      <div class="text-sm font-medium text-[var(--color-text-primary)]">Session Memory</div>
-                      <div class="mt-1 text-xs text-[var(--color-text-muted)]">Persistent storage scoped to the active chat.</div>
-                    </div>
-                  </div>
-                  <SettingsToggle
-                    checked={memoryStore.settings?.sessionMemoryEnabled ?? true}
-                    onchange={() => toggleSetting("sessionMemoryEnabled")}
-                  />
-                </label>
-
-                <label class="flex h-full cursor-pointer items-center justify-between gap-4 rounded-xl bg-[var(--color-surface-2)] p-4 hover:bg-[var(--color-surface-3)]">
-                  <div class="flex items-start gap-3">
-                    <BookOpen size={18} class="mt-0.5 text-orange-400" />
-                    <div>
-                      <div class="text-sm font-medium text-[var(--color-text-primary)]">Project Rules</div>
-                      <div class="mt-1 text-xs text-[var(--color-text-muted)]">Behavior rules and conventions added to context.</div>
-                    </div>
-                  </div>
-                  <SettingsToggle
-                    checked={memoryStore.settings?.rulesEnabled ?? true}
-                    onchange={() => toggleSetting("rulesEnabled")}
-                  />
-                </label>
+              <div class="space-y-3">
+                <SettingsSwitch
+                  checked={memoryStore.settings?.universalMemoryEnabled ?? true}
+                  label="Universal Memory"
+                  description="Global across all projects in `~/.koryphaios/`."
+                  onchange={() => toggleSetting("universalMemoryEnabled")}
+                  compact
+                />
+                <SettingsSwitch
+                  checked={memoryStore.settings?.projectMemoryEnabled ?? true}
+                  label="Project Memory"
+                  description="Project-specific context in `.koryphaios/memory/`."
+                  onchange={() => toggleSetting("projectMemoryEnabled")}
+                  compact
+                />
+                <SettingsSwitch
+                  checked={memoryStore.settings?.sessionMemoryEnabled ?? true}
+                  label="Session Memory"
+                  description="Persistent storage scoped to the active chat."
+                  onchange={() => toggleSetting("sessionMemoryEnabled")}
+                  compact
+                />
+                <SettingsSwitch
+                  checked={memoryStore.settings?.rulesEnabled ?? true}
+                  label="Project Rules"
+                  description="Behavior rules and conventions added to context."
+                  onchange={() => toggleSetting("rulesEnabled")}
+                  compact
+                />
               </div>
             </section>
 
@@ -585,34 +556,30 @@
                 </p>
               </div>
 
-              <div class="grid gap-3 sm:grid-cols-2">
+              <div class="space-y-3">
                 <!-- Same setting as "Agent Can Update Memory" in the Agent tab —
                      one source of truth (agent settings), mirrored here so the
                      two tabs can never disagree. -->
-                <label class="flex h-full cursor-pointer items-center justify-between gap-4 rounded-xl bg-[var(--color-surface-2)] p-4 hover:bg-[var(--color-surface-3)]">
-                  <div>
-                    <div class="text-sm font-medium text-[var(--color-text-primary)]">Allow Agent to Add Memories</div>
-                    <div class="mt-1 text-xs text-[var(--color-text-muted)]">AI can automatically update memory files. Also shown in Agent settings.</div>
-                  </div>
-                  <SettingsToggle
-                    checked={agentSettingsStore.settings.agentMemoryEnabled}
-                    onchange={() => agentSettingsStore.saveSettings(
+                <SettingsSwitch
+                  checked={agentSettingsStore.settings.agentMemoryEnabled}
+                  label="Allow Agent to Add Memories"
+                  description="AI can automatically update memory files. Also shown in Agent settings."
+                  onchange={() => {
+                    void agentSettingsStore.saveSettings(
                       { agentMemoryEnabled: !agentSettingsStore.settings.agentMemoryEnabled },
                       { quietSuccess: true },
-                    )}
-                  />
-                </label>
+                    );
+                  }}
+                  compact
+                />
 
-                <label class="flex h-full cursor-pointer items-center justify-between gap-4 rounded-xl bg-[var(--color-surface-2)] p-4 hover:bg-[var(--color-surface-3)]">
-                  <div>
-                    <div class="text-sm font-medium text-[var(--color-text-primary)]">Auto-include in Context</div>
-                    <div class="mt-1 text-xs text-[var(--color-text-muted)]">Automatically add selected memories to the AI context window.</div>
-                  </div>
-                  <SettingsToggle
-                    checked={memoryStore.settings?.autoIncludeInContext ?? true}
-                    onchange={() => toggleSetting("autoIncludeInContext")}
-                  />
-                </label>
+                <SettingsSwitch
+                  checked={memoryStore.settings?.autoIncludeInContext ?? true}
+                  label="Auto-include in Context"
+                  description="Automatically add selected memories to the AI context window."
+                  onchange={() => toggleSetting("autoIncludeInContext")}
+                  compact
+                />
               </div>
             </section>
           </div>
@@ -628,24 +595,20 @@
 
               <div class="rounded-xl bg-[var(--color-surface-2)] p-4">
                 <div class="mb-3 flex items-center justify-between gap-3">
-                  <label for="max-tokens" class="text-sm text-[var(--color-text-primary)]">Max Context Tokens</label>
+                  <span class="text-sm text-[var(--color-text-primary)]">Max Context Tokens</span>
                   <span class="text-xs text-[var(--color-text-muted)]">
                     {memoryStore.settings?.maxContextTokens ?? 2000} tokens
                   </span>
                 </div>
-                <input
-                  id="max-tokens"
-                  type="range"
-                  min="500"
-                  max="8000"
-                  step="100"
-                  value={memoryStore.settings?.maxContextTokens ?? 2000}
-                  onchange={(e) => handleMaxTokensChange(e.currentTarget.value)}
-                  class="h-2 w-full cursor-pointer appearance-none rounded-lg bg-[var(--color-surface-3)] accent-[var(--color-accent)]"
-                />
-                <div class="mt-2 flex justify-between text-xs text-[var(--color-text-muted)]">
-                  <span>500</span>
-                  <span>8000</span>
+                <div class="w-72">
+                  <NumberStepper
+                    value={memoryStore.settings?.maxContextTokens ?? 2000}
+                    min={500}
+                    max={8000}
+                    step={100}
+                    label="Max context tokens"
+                    onchange={handleMaxTokensChange}
+                  />
                 </div>
               </div>
             </section>

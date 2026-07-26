@@ -138,6 +138,9 @@ export class RemoteProvider implements Provider {
         maxTokens: request.maxTokens,
         temperature: request.temperature,
         reasoningLevel: request.reasoningLevel,
+        harnessRole: request.harnessRole,
+        promptManifestHash: request.promptManifestHash,
+        taskContractHash: request.taskContractHash,
         agentic: false,
       };
       yield* relayGuestClient.requestInference(payload, request.signal);
@@ -184,6 +187,9 @@ export class RemoteProvider implements Provider {
       maxTokens: request.maxTokens,
       temperature: request.temperature,
       reasoningLevel: request.reasoningLevel,
+      harnessRole: request.harnessRole,
+      promptManifestHash: request.promptManifestHash,
+      taskContractHash: request.taskContractHash,
       agentic: true,
       projectSync,
     };

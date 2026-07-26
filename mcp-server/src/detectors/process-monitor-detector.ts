@@ -98,7 +98,7 @@ export class ProcessMonitorDetector extends BaseErrorDetector {
 
   getSource(): ErrorSource {
     return {
-      type: 'runtime',
+      type: 'process-monitor',
       tool: 'process-monitor-detector',
       version: '1.0.0',
       configuration: {

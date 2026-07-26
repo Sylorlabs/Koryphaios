@@ -22,6 +22,7 @@
     Globe,
     ChevronRight,
     StickyNote,
+    Wrench,
   } from 'lucide-svelte';
 
   // Props
@@ -34,6 +35,60 @@
   // Local state for preferences editing
   let preferencesContent = $state(agentSettingsStore.preferences?.content ?? '');
   let preferencesDirty = $state(false);
+  let selectedSkillKey = $state('');
+  let skillDraftContent = $state('');
+  let skillDraftDirty = $state(false);
+  let skillPreviewPrompt = $state('');
+  let skillCollisionChoices = $state<Record<string, 'personal' | 'project'>>({});
+  let showSkillComparison = $state(false);
+
+  async function runSkillPreview() {
+    if (!skillPreviewPrompt.trim()) return;
+    await agentSettingsStore.previewSkillResolution(
+      skillPreviewPrompt.trim(),
+      skillCollisionChoices,
+    );
+  }
+
+  async function compareSelectedSkill() {
+    if (!selectedSkill) return;
+    showSkillComparison = await agentSettingsStore.compareSkillDraft(selectedSkill);
+  }
+
+  async function saveSelectedSkillDraft() {
+    if (!selectedSkill) return;
+    if (await agentSettingsStore.saveSkillDraft(selectedSkill, skillDraftContent))
+      skillDraftDirty = false;
+  }
+
+  const selectedSkill = $derived(
+    agentSettingsStore.skills.find(
+      (skill) => `${skill.source}:${skill.name}:${skill.state}` === selectedSkillKey,
+    ) ??
+      agentSettingsStore.skills.find((skill) => skill.state === 'draft') ??
+      agentSettingsStore.skills[0],
+  );
+  const selectedSkillQualifications = $derived(
+    selectedSkill
+      ? agentSettingsStore.skillQualifications.filter(
+          (record) => record.skill === selectedSkill.name,
+        )
+      : [],
+  );
+  const selectedSkillEvaluation = $derived(
+    selectedSkill
+      ? agentSettingsStore.skillEvaluationCards[
+          `${selectedSkill.source}:${selectedSkill.name}:${selectedSkill.state}:${selectedSkill.hash}`
+        ]
+      : undefined,
+  );
+  $effect(() => {
+    if (selectedSkill && !skillDraftDirty && skillDraftContent !== selectedSkill.content)
+      skillDraftContent = selectedSkill.content;
+  });
+  $effect(() => {
+    if (selectedSkill) void agentSettingsStore.loadSkillEvaluationCard(selectedSkill);
+  });
 
   // Sync preferences content
   $effect(() => {
@@ -51,6 +106,7 @@
       icon: FileText,
       color: 'var(--color-success)',
     },
+    { id: 'skills' as const, label: 'Skills', icon: Wrench, color: 'var(--color-warning)' },
   ];
 
   // ── Manager model access ────────────────────────────────────────────────
@@ -848,6 +904,307 @@
               </div>
             </section>
           </div>
+        </div>
+      </div>
+    {:else if agentSettingsStore.activeTab === 'skills'}
+      <div class="flex h-full min-h-0 flex-col">
+        <section class="border-b border-[var(--color-border)] bg-[var(--color-surface-2)] p-3">
+          <div class="flex gap-2">
+            <input
+              bind:value={skillPreviewPrompt}
+              onkeydown={(event) => event.key === 'Enter' && void runSkillPreview()}
+              aria-label="Task to preview skill selection"
+              placeholder="Preview which local skills a task will use…"
+              class="min-w-0 flex-1 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-0)] px-3 py-2 text-xs text-[var(--color-text-primary)] focus:border-[var(--color-accent)] focus:outline-none"
+            />
+            <button
+              type="button"
+              onclick={() => void runSkillPreview()}
+              disabled={!skillPreviewPrompt.trim()}
+              class="rounded-lg bg-[var(--color-accent)] px-3 py-2 text-xs font-medium text-white disabled:opacity-40"
+              >Preview selection</button
+            >
+          </div>
+          {#if agentSettingsStore.skillResolutionPreview}
+            {@const preview = agentSettingsStore.skillResolutionPreview}
+            <div class="mt-2 text-[10px] text-[var(--color-text-muted)]">
+              {preview.selected.length} selected · {preview.totalContextCost} context characters ·
+              {preview.blocked ? 'blocked pending a decision' : 'ready'}
+            </div>
+            {#if preview.selected.length}
+              <div class="mt-2 flex flex-wrap gap-1.5">
+                {#each preview.selected as item}
+                  <span
+                    title={item.reason}
+                    class="rounded bg-[var(--color-accent)]/10 px-2 py-1 text-[10px] text-[var(--color-accent)]"
+                    >{item.skill.name} · {item.contextCost}</span
+                  >
+                {/each}
+              </div>
+            {/if}
+            {#each preview.collisions as collision}
+              <div
+                class="mt-2 flex flex-wrap items-center gap-2 rounded-lg border border-[var(--color-warning)]/40 bg-[var(--color-warning)]/5 p-2 text-[10px]"
+              >
+                <span class="text-[var(--color-text-secondary)]"
+                  >Choose {collision.name} for this preview:</span
+                >
+                {#each ['project', 'personal'] as source}
+                  <button
+                    type="button"
+                    onclick={() => {
+                      skillCollisionChoices = {
+                        ...skillCollisionChoices,
+                        [collision.name]: source as 'personal' | 'project',
+                      };
+                      void runSkillPreview();
+                    }}
+                    class="rounded px-2 py-1 {skillCollisionChoices[collision.name] === source
+                      ? 'bg-[var(--color-accent)] text-white'
+                      : 'bg-[var(--color-surface-3)] text-[var(--color-text-secondary)]'}"
+                    >Use {source}</button
+                  >
+                {/each}
+              </div>
+            {/each}
+            {#if preview.selectionConflicts.length || preview.hierarchyErrors.length || preview.omittedByBudget.length}
+              <div class="mt-2 text-[10px] text-[var(--color-error)]">
+                {[
+                  ...preview.selectionConflicts.map(
+                    (item) => `${item.left} conflicts with ${item.right}`,
+                  ),
+                  ...preview.hierarchyErrors,
+                  ...preview.omittedByBudget.map((name) => `${name} omitted by context budget`),
+                ].join(' · ')}
+              </div>
+            {/if}
+          {/if}
+        </section>
+        <div class="grid min-h-0 flex-1 grid-cols-[minmax(190px,0.36fr)_minmax(0,1fr)]">
+          <aside
+            class="min-h-0 overflow-y-auto border-r border-[var(--color-border)] bg-[var(--color-surface-1)] p-2"
+          >
+            <div
+              class="px-2 py-2 text-[10px] font-semibold uppercase tracking-wide text-[var(--color-text-muted)]"
+            >
+              Local library · {agentSettingsStore.skills.filter((skill) => skill.state === 'active')
+                .length} active
+            </div>
+            {#each agentSettingsStore.skills as skill (`${skill.source}:${skill.name}:${skill.state}`)}
+              <button
+                onclick={() => {
+                  selectedSkillKey = `${skill.source}:${skill.name}:${skill.state}`;
+                  skillDraftDirty = false;
+                }}
+                class="mb-1 w-full rounded-lg border py-2 pr-2.5 text-left transition-colors {selectedSkill?.name ===
+                  skill.name &&
+                selectedSkill?.source === skill.source &&
+                selectedSkill?.state === skill.state
+                  ? 'border-[var(--color-accent)] bg-[var(--color-surface-3)]'
+                  : 'border-transparent hover:bg-[var(--color-surface-2)]'}"
+                style={`padding-left: ${10 + Math.min(skill.metadata.depth, 4) * 12}px`}
+              >
+                <div class="flex items-center justify-between gap-2">
+                  <span class="truncate text-xs font-medium text-[var(--color-text-primary)]"
+                    >{skill.name}</span
+                  ><span
+                    class="rounded px-1.5 py-0.5 text-[9px] {skill.state === 'active'
+                      ? 'bg-[var(--color-success)]/15 text-[var(--color-success)]'
+                      : 'bg-[var(--color-warning)]/15 text-[var(--color-warning)]'}"
+                    >{skill.state}</span
+                  >
+                </div>
+                <div class="mt-1 text-[10px] text-[var(--color-text-muted)]">
+                  {skill.source} · v{skill.metadata.version}
+                </div>
+              </button>
+            {/each}
+          </aside>
+          {#if selectedSkill}
+            <section class="flex min-h-0 flex-col">
+              <div
+                class="flex flex-wrap items-center justify-between gap-2 border-b border-[var(--color-border)] bg-[var(--color-surface-2)] px-4 py-2"
+              >
+                <div class="min-w-0">
+                  <div class="text-sm font-semibold text-[var(--color-text-primary)]">
+                    {selectedSkill.name}
+                  </div>
+                  <div class="truncate text-[10px] text-[var(--color-text-muted)]">
+                    {selectedSkill.description} · base {selectedSkill.metadata.baseVersion} · budget {selectedSkill
+                      .metadata.contextBudget}
+                  </div>
+                </div>
+                <div class="flex items-center gap-2">
+                  <button
+                    onclick={() => void compareSelectedSkill()}
+                    class="rounded-md border border-[var(--color-border)] px-2 py-1 text-xs text-[var(--color-text-secondary)]"
+                    >Compare</button
+                  >
+                  <button
+                    onclick={() => {
+                      skillDraftContent = selectedSkill.content;
+                      skillDraftDirty = false;
+                    }}
+                    disabled={!skillDraftDirty}
+                    class="rounded-md border border-[var(--color-border)] px-2 py-1 text-xs text-[var(--color-text-secondary)] disabled:opacity-40"
+                    >Reset</button
+                  >
+                  <button
+                    onclick={() => void saveSelectedSkillDraft()}
+                    disabled={!skillDraftDirty}
+                    class="rounded-md bg-[var(--color-accent)] px-2 py-1 text-xs text-white disabled:opacity-40"
+                    >Save draft</button
+                  >
+                  {#if selectedSkill.state === 'draft'}<button
+                      onclick={() => agentSettingsStore.testAndActivateSkill(selectedSkill)}
+                      class="rounded-md bg-[var(--color-success)] px-2 py-1 text-xs text-white"
+                      >Test & activate</button
+                    >{/if}
+                </div>
+              </div>
+              <div
+                class="flex flex-wrap gap-1.5 border-b border-[var(--color-border)] px-4 py-2 text-[10px] text-[var(--color-text-muted)]"
+              >
+                {#if selectedSkill.metadata.parent}<span
+                    class="rounded bg-[var(--color-accent)]/10 px-1.5 py-0.5 text-[var(--color-accent)]"
+                    >parent: {selectedSkill.metadata.parent}</span
+                  >{/if}
+                {#each selectedSkill.metadata.domains as domain}<span
+                    class="rounded bg-[var(--color-surface-3)] px-1.5 py-0.5">{domain}</span
+                  >{/each}
+                {#each selectedSkill.metadata.activation as term}<span
+                    class="rounded bg-[var(--color-surface-3)] px-1.5 py-0.5">trigger: {term}</span
+                  >{/each}
+                {#each selectedSkill.metadata.requires as requirement}<span
+                    class="rounded bg-[var(--color-info)]/10 px-1.5 py-0.5 text-[var(--color-info)]"
+                    >requires: {requirement}</span
+                  >{/each}
+                {#each selectedSkill.metadata.conflicts as conflict}<span
+                    class="rounded bg-[var(--color-warning)]/10 px-1.5 py-0.5 text-[var(--color-warning)]"
+                    >conflicts: {conflict}</span
+                  >{/each}
+                {#if selectedSkill.validation.warnings.length}<span
+                    class="text-[var(--color-warning)]"
+                    >{selectedSkill.validation.warnings.join(' · ')}</span
+                  >{/if}
+                {#if selectedSkill.validation.errors.length}<span class="text-[var(--color-error)]"
+                    >{selectedSkill.validation.errors.join(' · ')}</span
+                  >{/if}
+              </div>
+              <div
+                class="border-b border-[var(--color-border)] px-4 py-2 text-[10px] text-[var(--color-text-muted)]"
+              >
+                {#if selectedSkillQualifications.length}
+                  <span class="font-semibold text-[var(--color-text-secondary)]"
+                    >Measured harness evidence:</span
+                  >
+                  {#each selectedSkillQualifications as record}
+                    <span class="ml-2"
+                      >{record.provider}:{record.model} · {record.role} · {record.successes}/{record.sampleSize}
+                      pass · quality {Math.round(record.quality * 100)}%</span
+                    >
+                  {/each}
+                {:else}
+                  No measured harness qualification yet. Unknown models are not assigned a
+                  fabricated rank.
+                {/if}
+              </div>
+              <div
+                class="border-b border-[var(--color-border)] px-4 py-2 text-[10px] text-[var(--color-text-muted)]"
+              >
+                {#if selectedSkillEvaluation}
+                  {@const gate = selectedSkillEvaluation.gate}
+                  <span class="font-semibold text-[var(--color-text-secondary)]"
+                    >Promotion evidence:</span
+                  >
+                  <span
+                    class="ml-2 rounded px-1.5 py-0.5 {gate.status === 'ready'
+                      ? 'bg-[var(--color-success)]/15 text-[var(--color-success)]'
+                      : gate.status === 'blocked'
+                        ? 'bg-[var(--color-error)]/15 text-[var(--color-error)]'
+                        : 'bg-[var(--color-warning)]/15 text-[var(--color-warning)]'}"
+                    >{gate.status}</span
+                  >
+                  <span class="ml-2"
+                    >{gate.candidateRuns} observed runs · {gate.humanBlindReviews} blinded review{gate.humanBlindReviews ===
+                    1
+                      ? ''
+                      : 's'}</span
+                  >
+                  {#if gate.reasons.length}<div class="mt-1">{gate.reasons.join(' · ')}</div>{/if}
+                  <div class="mt-1">
+                    {selectedSkillEvaluation.cases.length} evaluation cases are derived from the skill’s
+                    visible trigger and non-trigger contract. No model score is shown until evidence is
+                    recorded.
+                  </div>
+                {:else}
+                  Loading the evidence card…
+                {/if}
+              </div>
+              <textarea
+                bind:value={skillDraftContent}
+                oninput={() => (skillDraftDirty = true)}
+                spellcheck="false"
+                aria-label="Skill Markdown editor"
+                class="min-h-0 flex-1 resize-none bg-[var(--color-surface-0)] p-4 font-mono text-xs text-[var(--color-text-primary)] focus:outline-none"
+              ></textarea>
+              {#if showSkillComparison && agentSettingsStore.skillComparison}
+                <div
+                  class="max-h-[45%] overflow-auto border-t border-[var(--color-border)] bg-[var(--color-surface-1)] p-3"
+                >
+                  <div class="mb-2 flex flex-wrap items-center justify-between gap-2">
+                    <span class="text-xs font-semibold text-[var(--color-text-primary)]"
+                      >Active versus draft</span
+                    >
+                    <div class="flex flex-wrap gap-1.5">
+                      <button
+                        type="button"
+                        onclick={() =>
+                          void agentSettingsStore.applyBundledSkillUpdate(
+                            selectedSkill,
+                            'keep-local',
+                          )}
+                        class="rounded bg-[var(--color-surface-3)] px-2 py-1 text-[10px] text-[var(--color-text-secondary)]"
+                        >Keep local</button
+                      >
+                      <button
+                        type="button"
+                        onclick={() =>
+                          void agentSettingsStore.applyBundledSkillUpdate(selectedSkill, 'merge')}
+                        class="rounded bg-[var(--color-warning)] px-2 py-1 text-[10px] text-white"
+                        >Merge to draft</button
+                      >
+                      <button
+                        type="button"
+                        onclick={() =>
+                          void agentSettingsStore.applyBundledSkillUpdate(selectedSkill, 'replace')}
+                        class="rounded bg-[var(--color-error)] px-2 py-1 text-[10px] text-white"
+                        >Replace with bundled</button
+                      >
+                      <button
+                        type="button"
+                        onclick={() => (showSkillComparison = false)}
+                        class="rounded border border-[var(--color-border)] px-2 py-1 text-[10px] text-[var(--color-text-secondary)]"
+                        >Close</button
+                      >
+                    </div>
+                  </div>
+                  <div class="grid gap-2 xl:grid-cols-2">
+                    <pre
+                      class="overflow-auto whitespace-pre-wrap rounded bg-[var(--color-surface-0)] p-2 text-[9px] text-[var(--color-text-secondary)]">{agentSettingsStore
+                        .skillComparison.active}</pre>
+                    <pre
+                      class="overflow-auto whitespace-pre-wrap rounded bg-[var(--color-surface-0)] p-2 text-[9px] text-[var(--color-text-secondary)]">{agentSettingsStore
+                        .skillComparison.draft}</pre>
+                  </div>
+                </div>
+              {/if}
+            </section>
+          {:else}
+            <div class="flex items-center justify-center text-sm text-[var(--color-text-muted)]">
+              No local skills found.
+            </div>
+          {/if}
         </div>
       </div>
     {:else if agentSettingsStore.activeTab === 'preferences'}

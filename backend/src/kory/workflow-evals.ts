@@ -1,4 +1,7 @@
 import type { TaskKind } from './prompts';
+import { mkdirSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { getProviderHarnessCapabilities } from '../providers/provider-harness';
 
 export interface WorkflowEvalScenario {
   id: string;
@@ -152,7 +155,7 @@ export const LONGITUDINAL_EVALS: Array<{
 
 export function buildEvalRunPlan(
   suite: 'smoke' | 'full',
-  providerModels: Array<{ provider: string; model: string }>,
+  providerModels: Array<{ provider: string; model: string; reasoningLevel: string }>,
 ) {
   const scenarios =
     suite === 'smoke'
@@ -206,4 +209,180 @@ export function rolloutDecision(
   }
   if (observation.stage === 100) return 'complete';
   return observation.qualityDelta === 0 ? 'soak' : 'promote';
+}
+
+export interface WorkflowEvalResult {
+  provider: string;
+  model: string;
+  requestedReasoningLevel: string;
+  /** Provider/harness-reported value; absent means the effort was not proven. */
+  appliedReasoningLevel?: string;
+  seed: number;
+  scenarioId: string;
+  passed: boolean;
+  assertions: Record<string, boolean>;
+  severeIntegrityFailure: boolean;
+  durationMs: number;
+  evidence: string[];
+  failureReasons: string[];
+}
+
+export interface WorkflowEvalReport {
+  version: 1;
+  suite: 'smoke' | 'full';
+  startedAt: string;
+  completedAt: string;
+  results: WorkflowEvalResult[];
+  summary: {
+    total: number;
+    passed: number;
+    acceptanceRate: number;
+    severeIntegrityFailures: number;
+    falseVerified: number;
+  };
+}
+
+export type WorkflowEvalExecutor = (input: {
+  provider: string;
+  model: string;
+  requestedReasoningLevel: string;
+  seed: number;
+  scenario: WorkflowEvalScenario;
+}) => Promise<
+  Omit<
+    WorkflowEvalResult,
+    'provider' | 'model' | 'requestedReasoningLevel' | 'seed' | 'scenarioId' | 'durationMs'
+  >
+>;
+
+/** Execute the matrix through a supplied provider adapter while Kory owns scoring and evidence. */
+export async function runWorkflowEvals(options: {
+  suite: 'smoke' | 'full';
+  providerModels: Array<{ provider: string; model: string; reasoningLevel: string }>;
+  execute: WorkflowEvalExecutor;
+  artifactDirectory?: string;
+}): Promise<WorkflowEvalReport> {
+  const startedAt = new Date().toISOString();
+  const scenarios = new Map(CORE_WORKFLOW_EVALS.map((scenario) => [scenario.id, scenario]));
+  const results: WorkflowEvalResult[] = [];
+  for (const item of buildEvalRunPlan(options.suite, options.providerModels)) {
+    const scenario = scenarios.get(item.scenarioId);
+    if (!scenario) throw new Error(`Unknown workflow eval scenario: ${item.scenarioId}`);
+    const start = Date.now();
+    try {
+      const result = await options.execute({
+        ...item,
+        requestedReasoningLevel: item.reasoningLevel,
+        scenario,
+      });
+      const reasoningVerified = result.appliedReasoningLevel === item.reasoningLevel;
+      const requiredPassed = scenario.requiredAssertions.every(
+        (assertion) => result.assertions[assertion] === true,
+      );
+      results.push({
+        ...item,
+        ...result,
+        requestedReasoningLevel: item.reasoningLevel,
+        passed:
+          result.passed && requiredPassed && !result.severeIntegrityFailure && reasoningVerified,
+        durationMs: Date.now() - start,
+        failureReasons: reasoningVerified
+          ? result.failureReasons
+          : [
+              ...result.failureReasons,
+              `Requested reasoning level ${item.reasoningLevel} was not provider-confirmed.`,
+            ],
+      });
+    } catch (error) {
+      results.push({
+        ...item,
+        requestedReasoningLevel: item.reasoningLevel,
+        passed: false,
+        assertions: {},
+        severeIntegrityFailure: false,
+        durationMs: Date.now() - start,
+        evidence: [],
+        failureReasons: [error instanceof Error ? error.message : String(error)],
+      });
+    }
+  }
+  const passed = results.filter((result) => result.passed).length;
+  const report: WorkflowEvalReport = {
+    version: 1,
+    suite: options.suite,
+    startedAt,
+    completedAt: new Date().toISOString(),
+    results,
+    summary: {
+      total: results.length,
+      passed,
+      acceptanceRate: results.length ? passed / results.length : 0,
+      severeIntegrityFailures: results.filter((result) => result.severeIntegrityFailure).length,
+      falseVerified: results.filter(
+        (result) => result.assertions['no false verified result'] === false,
+      ).length,
+    },
+  };
+  if (options.artifactDirectory) {
+    mkdirSync(options.artifactDirectory, { recursive: true });
+    const filename = `${options.suite}-${startedAt.replace(/[:.]/g, '-')}.json`;
+    writeFileSync(
+      join(options.artifactDirectory, filename),
+      `${JSON.stringify(report, null, 2)}\n`,
+    );
+  }
+  return report;
+}
+
+export function compareEvalReports(
+  baseline: WorkflowEvalReport,
+  candidate: WorkflowEvalReport,
+): { acceptanceDelta: number; integrityRegressed: boolean; eligibleForPromotion: boolean } {
+  const acceptanceDelta = candidate.summary.acceptanceRate - baseline.summary.acceptanceRate;
+  const integrityRegressed =
+    candidate.summary.severeIntegrityFailures > baseline.summary.severeIntegrityFailures ||
+    candidate.summary.falseVerified > baseline.summary.falseVerified;
+  return {
+    acceptanceDelta,
+    integrityRegressed,
+    eligibleForPromotion:
+      !integrityRegressed && candidate.summary.falseVerified === 0 && acceptanceDelta >= 0,
+  };
+}
+
+export interface ProviderHarnessEvalResult {
+  provider: string;
+  passed: boolean;
+  verification: 'verified' | 'unverified';
+  roles: Array<{ role: 'manager' | 'worker' | 'critic'; available: boolean }>;
+  capabilityHash: string;
+  reasons: string[];
+}
+
+/** Deterministic release gate for provider adapters; role availability never becomes a deny list. */
+export function runProviderHarnessEval(providers: string[]): ProviderHarnessEvalResult[] {
+  return providers.map((provider) => {
+    const capabilities = getProviderHarnessCapabilities(provider);
+    const roles = (['manager', 'worker', 'critic'] as const).map((role) => ({
+      role,
+      available: capabilities.roles.includes(role),
+    }));
+    const reasons = [...capabilities.limitations];
+    if (!roles.every((role) => role.available))
+      reasons.push('One or more universal roles are missing.');
+    if (!capabilities.hardRoleToolPolicy) reasons.push('Hard role tool policy is unavailable.');
+    if (!/^[a-f0-9]{64}$/.test(capabilities.hash))
+      reasons.push('Capability manifest hash is invalid.');
+    return {
+      provider,
+      passed:
+        roles.every((role) => role.available) &&
+        capabilities.hardRoleToolPolicy &&
+        /^[a-f0-9]{64}$/.test(capabilities.hash),
+      verification: capabilities.verificationEligible ? 'verified' : 'unverified',
+      roles,
+      capabilityHash: capabilities.hash,
+      reasons,
+    };
+  });
 }

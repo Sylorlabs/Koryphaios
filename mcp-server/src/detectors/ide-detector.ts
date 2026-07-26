@@ -74,7 +74,7 @@ export class IDEErrorDetector extends BaseErrorDetector {
 
     try {
       // Check if we're running in VS Code environment
-      if (this.config.enableVSCodeIntegration && this.isVSCodeEnvironment()) {
+      if (this.config.enableVSCodeIntegration) {
         await this.initializeVSCodeIntegration();
       }
 

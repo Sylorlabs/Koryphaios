@@ -26,11 +26,18 @@ export type BackendHealthStatus =
   | 'unhealthy' // last N checks failed
   | 'mismatch'; // backend up but contract (version/hash) rejected us
 
-export type BackendHealthReason = 'unreachable' | 'not-ok' | 'min-frontend' | 'bundle-hash';
+export type BackendHealthReason =
+  | 'unreachable'
+  | 'http-error'
+  | 'invalid-response'
+  | 'not-ok'
+  | 'min-frontend'
+  | 'bundle-hash';
 
 export interface BackendHealthSnapshot {
   status: BackendHealthStatus;
   reason: BackendHealthReason | null;
+  failureDetail: string | null;
   lastCheckedAt: number | null;
   lastHealthyAt: number | null;
   backendVersion: string | null;
@@ -71,6 +78,7 @@ function compareVersions(a: string, b: string): number {
 
 let _status = $state<BackendHealthStatus>('unknown');
 let _reason = $state<BackendHealthReason | null>(null);
+let _failureDetail = $state<string | null>(null);
 let _lastCheckedAt = $state<number | null>(null);
 let _lastHealthyAt = $state<number | null>(null);
 let _backendVersion = $state<string | null>(null);
@@ -109,9 +117,21 @@ type HealthResponse = {
   };
 };
 
-async function fetchHealth(): Promise<HealthResponse | null> {
+type HealthFetchResult = {
+  body: HealthResponse | null;
+  reason: BackendHealthReason | null;
+  detail: string | null;
+};
+
+async function fetchHealth(): Promise<HealthFetchResult> {
   const base = getApiBaseUrl();
-  if (!base) return null;
+  if (!base) {
+    return {
+      body: null,
+      reason: 'unreachable',
+      detail: 'No backend address is configured.',
+    };
+  }
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), HEALTH_TIMEOUT_MS);
   try {
@@ -119,10 +139,32 @@ async function fetchHealth(): Promise<HealthResponse | null> {
       signal: controller.signal,
       headers: { Accept: 'application/json' },
     });
-    if (!res.ok) return null;
-    return (await res.json()) as HealthResponse;
-  } catch {
-    return null;
+    if (!res.ok) {
+      return {
+        body: null,
+        reason: 'http-error',
+        detail: `Health check returned HTTP ${res.status}${res.statusText ? ` ${res.statusText}` : ''}.`,
+      };
+    }
+    try {
+      return {
+        body: (await res.json()) as HealthResponse,
+        reason: null,
+        detail: null,
+      };
+    } catch {
+      return {
+        body: null,
+        reason: 'invalid-response',
+        detail: 'Health check returned a response that was not valid JSON.',
+      };
+    }
+  } catch (error) {
+    const message =
+      error instanceof DOMException && error.name === 'AbortError'
+        ? `Health check timed out after ${HEALTH_TIMEOUT_MS / 1000}s.`
+        : 'The backend connection was refused or interrupted.';
+    return { body: null, reason: 'unreachable', detail: message };
   } finally {
     clearTimeout(timer);
   }
@@ -133,9 +175,12 @@ type CheckOutcome = {
   reason: BackendHealthReason | null;
 };
 
-function evaluate(body: HealthResponse | null): CheckOutcome {
+function evaluate(
+  body: HealthResponse | null,
+  fetchReason: BackendHealthReason | null,
+): CheckOutcome {
   if (!body || body.ok !== true) {
-    return { status: 'unhealthy', reason: body ? 'not-ok' : 'unreachable' };
+    return { status: 'unhealthy', reason: body ? 'not-ok' : (fetchReason ?? 'unreachable') };
   }
   const minFrontend = body.data?.compat?.minFrontend ?? null;
   const currentFrontend = body.data?.compat?.currentFrontend ?? null;
@@ -155,7 +200,11 @@ function evaluate(body: HealthResponse | null): CheckOutcome {
   return { status: 'healthy', reason: null };
 }
 
-function publish(outcome: CheckOutcome, body: HealthResponse | null) {
+function publish(
+  outcome: CheckOutcome,
+  body: HealthResponse | null,
+  failureDetail: string | null = null,
+) {
   _lastCheckedAt = Date.now();
   _backendVersion = body?.data?.version ?? _backendVersion;
   _backendPid = body?.data?.pid ?? _backendPid;
@@ -165,10 +214,12 @@ function publish(outcome: CheckOutcome, body: HealthResponse | null) {
 
   if (outcome.status === 'healthy') {
     _consecutiveFailures = 0;
+    _failureDetail = null;
     _lastHealthyAt = Date.now();
     setApiHalted(false);
   } else if (outcome.status === 'mismatch') {
     _consecutiveFailures = 0; // mismatch isn't a flaky-network signal
+    _failureDetail = null;
     setApiHalted(true);
   } else {
     _consecutiveFailures++;
@@ -183,11 +234,12 @@ function publish(outcome: CheckOutcome, body: HealthResponse | null) {
 
   _status = outcome.status;
   _reason = outcome.reason;
+  _failureDetail = failureDetail;
 }
 
 async function tick() {
-  const body = await fetchHealth();
-  publish(evaluate(body), body);
+  const result = await fetchHealth();
+  publish(evaluate(result.body, result.reason), result.body, result.detail);
 }
 
 // ─── Tauri event fast-path (Step 4) ──────────────────────────────────────────
@@ -206,6 +258,8 @@ async function attachTauriListeners() {
       _consecutiveFailures++;
       _status = 'unhealthy';
       _reason = 'unreachable';
+      _failureDetail =
+        'The desktop supervisor reported that the backend process is not responding.';
       setApiHalted(true);
     });
     const unReady = await listen('backend://ready', () => {
@@ -263,9 +317,9 @@ export async function waitForBackendHealthy(timeoutMs = 10_000): Promise<void> {
   if (!browser) return;
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
-    const body = await fetchHealth();
-    const outcome = evaluate(body);
-    publish(outcome, body);
+    const result = await fetchHealth();
+    const outcome = evaluate(result.body, result.reason);
+    publish(outcome, result.body, result.detail);
     if (outcome.status === 'healthy') return;
     if (outcome.status === 'mismatch') {
       throw new Error('Frontend and backend are incompatible. Restart Koryphaios.');
@@ -281,6 +335,9 @@ export const backendHealth = {
   },
   get reason() {
     return _reason;
+  },
+  get failureDetail() {
+    return _failureDetail;
   },
   get lastCheckedAt() {
     return _lastCheckedAt;
@@ -316,6 +373,7 @@ export const backendHealth = {
     return {
       status: _status,
       reason: _reason,
+      failureDetail: _failureDetail,
       lastCheckedAt: _lastCheckedAt,
       lastHealthyAt: _lastHealthyAt,
       backendVersion: _backendVersion,

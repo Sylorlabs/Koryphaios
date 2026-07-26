@@ -271,7 +271,7 @@ export interface ProviderInfo {
   /** Static icon path served by the frontend (e.g. /provider-icons/jules.svg) */
   iconPath?: string;
   /** Where the provider executes work */
-  deployment?: 'cloud' | 'local' | 'hybrid';
+  deployment?: 'cloud' | 'api' | 'local' | 'hybrid';
   /** Short UI description of provider behavior */
   description?: string;
   /** True for a REMOTE provider served by another machine (id `remote-*`). */

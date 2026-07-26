@@ -181,7 +181,7 @@ Network access via curl/wget is blocked unless explicitly authorized.`;
         return {
           callId: call.id,
           name: this.name,
-          output: 'Catastrophic command blocked because no human approval channel is available.',
+          output: 'Blocked catastrophic command because no human approval channel is available.',
           isError: true,
           durationMs: 0,
         };

@@ -13,6 +13,7 @@ import { warmModelsDevCache } from '../../providers/models-dev';
 import { discoverCliAccounts } from '../../providers/cli-accounts';
 import { requireLocalRouteAuth } from '../../auth/local-route-auth';
 import { createUserCredentialsService, type UserCredential } from '../../services';
+import { serverLog } from '../../logger';
 
 const LOCAL_USER_ID = 'local-user';
 const credentialsService = createUserCredentialsService();
@@ -104,16 +105,38 @@ export const billingRoutes = new Elysia({ prefix: '/api/billing' }).get(
   async ({ request, set }) => {
     if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
     const forceRefresh = new URL(request.url).searchParams.get('refresh') === '1';
+    const safeResult = async <T>(name: string, work: () => Promise<T>, fallback: T): Promise<T> => {
+      try {
+        return await work();
+      } catch (err) {
+        serverLog.error({ err }, `Billing route failed while collecting ${name}`);
+        return fallback;
+      }
+    };
     // Prices come from the live models.dev catalog — make sure it is loaded
     // before computing anything (bounded to ~5s; falls back to static catalog).
-    await warmModelsDevCache();
+    await safeResult('models cache', () => warmModelsDevCache(), undefined);
 
-    const reconciliation = getReconciliation();
-    const totals = getLocalTotals();
+    const reconciliation = await safeResult('reconciliation', async () => getReconciliation(), {
+      localEstimate: { totalCostUsd: 0, tokensIn: 0, tokensOut: 0, byModel: [] },
+      cloudReality: [],
+      driftPercent: null,
+      highlightDrift: false,
+    });
+    const totals = await safeResult('totals', async () => getLocalTotals(), {
+      totalCostUsd: 0,
+      tokensIn: 0,
+      tokensOut: 0,
+      byModel: [],
+    });
     // `gemini` was previously emitted by an obsolete provider path even though
     // it is a model family, not a configured provider. Do not resurrect those
     // stale rows; Google providers are google, aistudio, vertexai, and jules.
-    const providerTotals = getLocalTotalsByProvider().filter((entry) => entry.provider !== 'gemini');
+    const providerTotals = (await safeResult(
+      'providerTotals',
+      async () => getLocalTotalsByProvider(),
+      [],
+    )).filter((entry) => entry.provider !== 'gemini');
     const byProvider = providerTotals.map((entry) => ({
       name: entry.provider,
       spendCents: Math.round(entry.costUsd * 100),
@@ -140,7 +163,7 @@ export const billingRoutes = new Elysia({ prefix: '/api/billing' }).get(
         : null;
 
     // Live balances for the providers that expose one to a normal API key.
-    const configs = getContext().providers.getConfigs();
+    const configs = await safeResult('providerConfig', async () => getContext().providers.getConfigs(), {});
     const keys: Record<string, string | undefined> = {};
     for (const [name, cfg] of Object.entries(configs)) keys[name] = (cfg as { apiKey?: string }).apiKey;
     const [cliUsage, balances, savedCredentials] = await Promise.all([
@@ -148,8 +171,8 @@ export const billingRoutes = new Elysia({ prefix: '/api/billing' }).get(
         githubToken: (configs as Record<string, { authToken?: string }>).copilot?.authToken,
         forceRefresh,
       }),
-      getProviderBalances(keys, { forceRefresh }),
-      credentialsService.list(LOCAL_USER_ID, { isActive: true }),
+      safeResult('providerBalances', () => getProviderBalances(keys, { forceRefresh }), []),
+      safeResult('savedCredentials', () => credentialsService.list(LOCAL_USER_ID, { isActive: true }), []),
     ]);
     const subscriptionInferenceCents = Math.round(
       cliUsage.reduce((sum, report) => {

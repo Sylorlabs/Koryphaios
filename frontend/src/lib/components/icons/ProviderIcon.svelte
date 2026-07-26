@@ -46,12 +46,14 @@
     baichuan: ['baichuan'],
     minimax: ['minimax'],
     kimicode: ['kimicode', 'kimi'],
+    'kimicode-auth': ['kimicode', 'kimi'],
     moonshot: ['moonshot'],
     stepfun: ['stepfun'],
     zhipuai: ['zhipu'],
     fireworks: ['fireworks'],
     deepinfra: ['deepinfra'],
     codex: ['codex'],
+    'codex-auth': ['codex'],
     cortex: ['cortex', 'openai'],
     nebius: ['nebius'],
     together: ['together', 'together-brand'],
@@ -213,7 +215,7 @@
   });
 </script>
 
-{#if provider.toLowerCase() === 'codex'}
+{#if provider.toLowerCase() === 'codex' || provider.toLowerCase() === 'codex-auth'}
   <svg
     width={size}
     height={size}

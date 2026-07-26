@@ -149,6 +149,10 @@ describe('KoryManager Orchestration', () => {
     const autoCommit = mock(async () => {});
 
     manager.setYoloMode(true);
+    manager['resolveIndependentRouting'] = mock(() => ({
+      model: 'independent-worker',
+      provider: 'anthropic',
+    }));
     manager['workerPipeline']['routeToWorker'] = mock(async () => ({
       success: true,
       workerTranscript: 'worker transcript',
@@ -165,6 +169,21 @@ describe('KoryManager Orchestration', () => {
 
     expect(result).toContain('Worktree reconcile failed: merge conflict');
     expect(autoCommit).not.toHaveBeenCalled();
+  });
+
+  test('material delegation reuses the manager when it is the only user-enabled model', async () => {
+    manager['resolveIndependentRouting'] = mock(() => null);
+    manager['workerPipeline']['runWorkerPipeline'] = mock(async (...args: any[]) =>
+      `worker:${args[2]}`,
+    );
+    const result = await manager.runWorkerPipeline(
+      'session-independent',
+      'Implement a material feature',
+      'openai:gpt-4o',
+      undefined,
+      'backend',
+    );
+    expect(result).toContain('worker:openai:gpt-4o');
   });
 
   test('prompt compiler loads repository instructions broad-to-specific with manifest truth', () => {
@@ -206,13 +225,15 @@ describe('KoryManager Orchestration', () => {
     });
 
     expect(compiled.manifest.capabilityProfile.mode).toBe('native-passthrough');
-    expect(compiled.manifest.capabilityProfile.hardToolPolicy).toBe(false);
+    expect(compiled.manifest.capabilityProfile.hardToolPolicy).toBe(true);
     expect(compiled.manifest.capabilityProfile.qualifiedRoles).toEqual([
       'manager',
       'worker',
       'critic',
     ]);
     expect(compiled.systemPrompt).toContain('wrapped by Kory role policy');
+    expect(compiled.manifest.capabilityProfile.hash).toMatch(/^[a-f0-9]{64}$/);
+    expect(compiled.manifest.taskContractHash).toMatch(/^[a-f0-9]{64}$/);
   });
 
   test('adaptive discovery is conservative and always exposes an immediate stop', () => {
