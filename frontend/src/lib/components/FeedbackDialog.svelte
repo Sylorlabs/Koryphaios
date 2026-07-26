@@ -4,6 +4,7 @@
   import { apiFetch, parseJsonResponse } from '$lib/api.svelte';
   import { apiUrl } from '$lib/utils/api-url';
   import KorySelect from '$lib/components/KorySelect.svelte';
+  import Turnstile from '$lib/components/Turnstile.svelte';
 
   type FeedbackCategory = 'bug' | 'idea' | 'question' | 'other';
   type FeedbackVisibility = 'private' | 'public';
@@ -24,6 +25,8 @@
   let error = $state('');
   let appVersion = $state<string | undefined>();
   let messageInput = $state<HTMLTextAreaElement | null>(null);
+  let turnstile = $state<Turnstile | null>(null);
+  let turnstileSiteKey = $state(import.meta.env.VITE_TURNSTILE_SITE_KEY?.trim() || '');
 
   const categories: Array<{ id: FeedbackCategory; label: string; icon: typeof Flag }> = [
     { id: 'bug', label: 'Bug', icon: Bug },
@@ -42,6 +45,14 @@
         .then(({ getVersion }) => getVersion())
         .then((version) => {
           appVersion = version;
+        })
+        .catch(() => {});
+    }
+    if (!turnstileSiteKey) {
+      void fetch('https://koryphaios.com/api/feedback')
+        .then((response) => (response.ok ? response.json() : null))
+        .then((config: { turnstileSiteKey?: unknown } | null) => {
+          if (typeof config?.turnstileSiteKey === 'string') turnstileSiteKey = config.turnstileSiteKey;
         })
         .catch(() => {});
     }
@@ -75,6 +86,8 @@
           }
         : {};
       const isPublic = visibility === 'public';
+      // Invisible for normal users; Cloudflare only shows a challenge when risk warrants it.
+      const turnstileToken = await turnstile?.execute();
       const response = await apiFetch(
         apiUrl('/api/feedback'),
         {
@@ -84,6 +97,7 @@
             category,
             visibility,
             message: trimmed,
+            ...(turnstileToken ? { turnstileToken } : {}),
             ...(!isPublic ? diagnostics : {}),
             ...(!isPublic && email.trim() ? { email: email.trim() } : {}),
             ...(appVersion ? { appVersion } : {}),
@@ -95,6 +109,7 @@
       if (!response.ok || !result.ok)
         throw new Error(result.error || 'Feedback could not be delivered right now');
       sent = true;
+      turnstile?.reset();
       message = '';
       email = '';
     } catch (submitError) {
@@ -228,7 +243,7 @@
             />
           </label>
 
-          {#if visibility === 'private'}<label class="block">
+          <label class="block">
             <span
               class="mb-2 block text-[11px] font-bold uppercase tracking-wider text-[var(--color-text-muted)]"
               >What should we know?</span
@@ -245,7 +260,7 @@
             <span class="mt-1 block text-right text-[10px] text-[var(--color-text-muted)]"
               >{message.length.toLocaleString()} / 8,000</span
             >
-          </label>{/if}
+          </label>
 
           <label class="block">
             <span
@@ -298,6 +313,10 @@
             >
               {error}
             </p>{/if}
+
+          {#if turnstileSiteKey}
+            <Turnstile bind:this={turnstile} siteKey={turnstileSiteKey} />
+          {/if}
 
           <div class="flex items-center justify-between gap-4 pt-1">
             <p class="text-[10px] leading-4 text-[var(--color-text-muted)]">

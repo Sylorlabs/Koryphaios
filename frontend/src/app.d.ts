@@ -13,11 +13,24 @@ declare global {
   interface ImportMetaEnv {
     readonly VITE_BACKEND_URL?: string;
     readonly VITE_BACKEND_WS_URL?: string;
+    /** Public Cloudflare Turnstile site key. Safe to ship in the desktop bundle. */
+    readonly VITE_TURNSTILE_SITE_KEY?: string;
     readonly DEV?: boolean;
   }
 
   interface ImportMeta {
     readonly env: ImportMetaEnv;
+  }
+
+  interface CloudflareTurnstileApi {
+    render: (container: HTMLElement, options: Record<string, unknown>) => string;
+    execute: (widgetId: string) => void;
+    reset: (widgetId: string) => void;
+    remove: (widgetId: string) => void;
+  }
+
+  interface Window {
+    turnstile?: CloudflareTurnstileApi;
   }
 
   // Build-time constants injected by vite.config.ts (define). Used by the

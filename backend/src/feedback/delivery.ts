@@ -8,6 +8,7 @@ export interface FeedbackSubmission {
   email?: string;
   appVersion?: string;
   platform?: string;
+  turnstileToken?: string;
   context?: {
     route?: string;
   };
