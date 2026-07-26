@@ -3,8 +3,10 @@
   import { Bug, CheckCircle2, Flag, HelpCircle, Lightbulb, LoaderCircle, X } from 'lucide-svelte';
   import { apiFetch, parseJsonResponse } from '$lib/api.svelte';
   import { apiUrl } from '$lib/utils/api-url';
+  import KorySelect from '$lib/components/KorySelect.svelte';
 
   type FeedbackCategory = 'bug' | 'idea' | 'question' | 'other';
+  type FeedbackVisibility = 'private' | 'public';
 
   interface Props {
     open?: boolean;
@@ -13,6 +15,7 @@
 
   let { open = false, onClose }: Props = $props();
   let category = $state<FeedbackCategory>('idea');
+  let visibility = $state<FeedbackVisibility>('private');
   let message = $state('');
   let email = $state('');
   let includeDiagnostics = $state(true);
@@ -71,6 +74,7 @@
               typeof window !== 'undefined' ? { route: window.location.pathname } : undefined,
           }
         : {};
+      const isPublic = visibility === 'public';
       const response = await apiFetch(
         apiUrl('/api/feedback'),
         {
@@ -78,9 +82,10 @@
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             category,
+            visibility,
             message: trimmed,
-            ...diagnostics,
-            ...(email.trim() ? { email: email.trim() } : {}),
+            ...(!isPublic ? diagnostics : {}),
+            ...(!isPublic && email.trim() ? { email: email.trim() } : {}),
             ...(appVersion ? { appVersion } : {}),
           }),
         },
@@ -196,6 +201,36 @@
           <label class="block">
             <span
               class="mb-2 block text-[11px] font-bold uppercase tracking-wider text-[var(--color-text-muted)]"
+              >Who should see this?</span
+            >
+            <KorySelect
+              value={visibility}
+              label="Feedback visibility"
+              options={[
+                {
+                  value: 'private',
+                  label: 'Private feedback',
+                  description: 'Sent only to the Koryphaios team inbox.',
+                },
+                {
+                  value: 'public',
+                  label: 'Public feedback',
+                  description: 'Published as a public community report on koryphaios.com. Never includes your email or diagnostics.',
+                },
+              ]}
+              onchange={(value) => {
+                visibility = value as FeedbackVisibility;
+                if (visibility === 'public') {
+                  email = '';
+                  includeDiagnostics = false;
+                }
+              }}
+            />
+          </label>
+
+          {#if visibility === 'private'}<label class="block">
+            <span
+              class="mb-2 block text-[11px] font-bold uppercase tracking-wider text-[var(--color-text-muted)]"
               >What should we know?</span
             >
             <textarea
@@ -210,7 +245,7 @@
             <span class="mt-1 block text-right text-[10px] text-[var(--color-text-muted)]"
               >{message.length.toLocaleString()} / 8,000</span
             >
-          </label>
+          </label>{/if}
 
           <label class="block">
             <span
@@ -227,7 +262,7 @@
             />
           </label>
 
-          <button
+          {#if visibility === 'private'}<button
             type="button"
             role="switch"
             aria-checked={includeDiagnostics}
@@ -251,7 +286,11 @@
                   : 'translate-x-0.5'}"
               ></span></span
             >
-          </button>
+          </button>{:else}<p
+              class="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-2)] px-4 py-3 text-[10px] leading-5 text-[var(--color-text-muted)]"
+            >
+              Public reports include only the category, message, and optional app version. Do not include private project details, secrets, or contact information.
+            </p>{/if}
 
           {#if error}<p
               role="alert"
@@ -262,7 +301,9 @@
 
           <div class="flex items-center justify-between gap-4 pt-1">
             <p class="text-[10px] leading-4 text-[var(--color-text-muted)]">
-              We never upload source, prompts, screenshots, or API keys.
+              {visibility === 'public'
+                ? 'Public reports are published without email, diagnostics, source, prompts, screenshots, or API keys.'
+                : 'We never upload source, prompts, screenshots, or API keys.'}
             </p>
             <div class="flex gap-2">
               <button

@@ -1,7 +1,9 @@
 export type FeedbackCategory = 'bug' | 'idea' | 'question' | 'other';
+export type FeedbackVisibility = 'private' | 'public';
 
 export interface FeedbackSubmission {
   category: FeedbackCategory;
+  visibility?: FeedbackVisibility;
   message: string;
   email?: string;
   appVersion?: string;
