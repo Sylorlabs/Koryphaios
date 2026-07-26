@@ -61,6 +61,7 @@ export const feedbackRoutes = new Elysia({ prefix: '/api/feedback' })
 
       const submission: FeedbackSubmission = {
         category: body.category,
+        visibility: body.visibility ?? 'private',
         message: body.message.trim(),
         email: body.email?.trim() || undefined,
         appVersion: body.appVersion?.trim() || undefined,
@@ -85,6 +86,7 @@ export const feedbackRoutes = new Elysia({ prefix: '/api/feedback' })
           t.Literal('question'),
           t.Literal('other'),
         ]),
+        visibility: t.Optional(t.Union([t.Literal('private'), t.Literal('public')])),
         message: t.String({ minLength: 1, maxLength: 8_000 }),
         email: t.Optional(t.String({ format: 'email', maxLength: 254 })),
         appVersion: t.Optional(t.String({ maxLength: 50 })),
