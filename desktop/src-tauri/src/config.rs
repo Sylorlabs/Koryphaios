@@ -102,6 +102,12 @@ impl AppConfig {
     }
 
     pub fn backend_url(&self) -> String {
+        // Check for active-port.json (written by the backend when it uses a
+        // dynamic port). This lets the frontend discover the actual port when
+        // the backend fell back from the default due to EADDRINUSE.
+        if let Some((host, port)) = read_active_port() {
+            return format!("http://{}:{}", host, port);
+        }
         format!(
             "http://{}:{}",
             browser_host(&self.server.host),
@@ -110,6 +116,9 @@ impl AppConfig {
     }
 
     pub fn websocket_url(&self) -> String {
+        if let Some((host, port)) = read_active_port() {
+            return format!("ws://{}:{}/ws", host, port);
+        }
         format!(
             "ws://{}:{}{}",
             browser_host(&self.server.host),
@@ -225,3 +234,49 @@ impl std::fmt::Display for ConfigError {
 }
 
 impl std::error::Error for ConfigError {}
+
+/// Read the backend's `.active-port.json` file to discover the actual port
+/// it bound to (may differ from the config default when EADDRINUSE caused
+/// a fallback). Returns `(host, port)` if the file exists and is fresh.
+fn read_active_port() -> Option<(String, u16)> {
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    // Search candidate paths: project root (dev) and cwd-relative.
+    let candidates = [
+        PathBuf::from("../../../../.koryphaios/.active-port.json"),
+        PathBuf::from("../../../.koryphaios/.active-port.json"),
+        PathBuf::from("../../.koryphaios/.active-port.json"),
+        PathBuf::from("../.koryphaios/.active-port.json"),
+        PathBuf::from(".koryphaios/.active-port.json"),
+    ];
+
+    for path in &candidates {
+        let Ok(raw) = fs::read_to_string(path) else {
+            continue;
+        };
+        let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&raw) else {
+            continue;
+        };
+
+        // Ignore stale files older than 5 minutes
+        if let Some(ts) = parsed.get("timestamp").and_then(|v| v.as_u64()) {
+            let now = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_millis() as u64;
+            if now.saturating_sub(ts) > 5 * 60 * 1000 {
+                continue;
+            }
+        }
+
+        let port = parsed.get("port").and_then(|v| v.as_u64())? as u16;
+        let host = parsed
+            .get("host")
+            .and_then(|v| v.as_str())
+            .unwrap_or("127.0.0.1")
+            .to_string();
+        return Some((host, port));
+    }
+
+    None
+}

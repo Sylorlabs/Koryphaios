@@ -1430,7 +1430,7 @@
   }
 
   /* Stop button — unmistakably "live, click to stop" with a pulsing ring. */
-  .stop-btn {
+  :global(.stop-btn) {
     background: rgb(239 68 68 / 0.12);
     border: 1px solid rgb(239 68 68 / 0.45);
     color: #fca5a5;
@@ -1440,12 +1440,12 @@
       border-color 0.15s ease,
       color 0.15s ease;
   }
-  .stop-btn:hover {
+  :global(.stop-btn:hover) {
     background: rgb(239 68 68 / 0.2);
     border-color: rgb(239 68 68 / 0.85);
     color: #fecaca;
   }
-  .stop-pulse {
+  :global(.stop-pulse) {
     position: relative;
     display: flex;
     align-items: center;
@@ -1457,7 +1457,7 @@
     color: #fff;
     flex-shrink: 0;
   }
-  .stop-pulse::after {
+  :global(.stop-pulse::after) {
     content: '';
     position: absolute;
     inset: 0;
@@ -1477,7 +1477,7 @@
     }
   }
   @media (prefers-reduced-motion: reduce) {
-    .stop-pulse::after {
+    :global(.stop-pulse::after) {
       animation: none;
     }
   }

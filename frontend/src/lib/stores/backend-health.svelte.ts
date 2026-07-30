@@ -15,7 +15,7 @@
 // instead of a hundred scattered broken states.
 
 import { browser } from '$app/environment';
-import { getDirectBackendUrl } from '$lib/utils/api-url';
+import { getDirectBackendUrl, refreshUrls } from '$lib/utils/api-url';
 import { setApiHalted } from '$lib/api.svelte';
 
 // ─── Public types ────────────────────────────────────────────────────────────
@@ -363,6 +363,12 @@ function publish(
 }
 
 async function tick() {
+  // After several consecutive failures, the backend may have restarted on a
+  // different port. Refresh the URL discovery so we don't keep polling a
+  // dead port forever.
+  if (_consecutiveFailures > 0 && _consecutiveFailures % 5 === 0) {
+    await refreshUrls();
+  }
   const result = await fetchHealth();
   publish(evaluate(result.body, result.reason), result.body, result.detail, {
     healthUrl: result.healthUrl,
@@ -409,9 +415,10 @@ async function attachTauriListeners() {
       setApiHalted(true);
     });
     const unReady = await listen('backend://ready', () => {
-      // Trigger an immediate poll to confirm and re-evaluate the contract.
+      // The backend may have restarted on a different port (EADDRINUSE
+      // fallback). Re-fetch the URL from Tauri before health-checking.
       console.info('[Koryphaios] Supervisor reported backend ready — re-checking health');
-      void tick();
+      void refreshUrls().then(() => tick());
     });
     tauriUnlistens.push(unDown, unReady);
   } catch {
