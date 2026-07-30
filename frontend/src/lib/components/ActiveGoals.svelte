@@ -5,6 +5,7 @@
   import { projectStore } from '$lib/stores/project.svelte';
   import { sessionStore } from '$lib/stores/sessions.svelte';
   import { agentSettingsStore } from '$lib/stores/agent-settings.svelte';
+  import { goalDisplayStore } from '$lib/stores/goal-display.svelte';
   import KorySelect from './KorySelect.svelte';
   import { onMount } from 'svelte';
 
@@ -55,11 +56,20 @@
   });
 </script>
 
-<section class="shrink-0 border-t border-[var(--color-border)] p-3" aria-label="Active Goals">
-  <button type="button" class="flex w-full items-center gap-2 text-left text-xs font-semibold text-[var(--color-text-secondary)]" aria-expanded={expanded} onclick={() => expanded = !expanded}>
-    <Target size={14} /> Goals <span class="text-[10px] font-normal text-[var(--color-text-muted)]">{goalStore.goals.filter((goal) => ['queued', 'planning', 'running', 'paused', 'blocked'].includes(goal.status)).length || ''}</span><span class="ml-auto">{#if expanded}<ChevronDown size={14} />{:else}<ChevronRight size={14} />{/if}</span>
-  </button>
-  {#if expanded}<div class="mt-2 space-y-2">
+<section class="shrink-0 border-t border-[var(--color-border)] p-3 {expanded ? 'flex min-h-[260px] max-h-[42%] flex-col' : ''}" aria-label="Active Goals">
+  <div class="flex items-center gap-1">
+    <button type="button" class="flex min-w-0 flex-1 items-center gap-2 text-left text-xs font-semibold text-[var(--color-text-secondary)]" aria-expanded={expanded} onclick={() => expanded = !expanded}>
+      <Target size={14} /> Goals <span class="text-[10px] font-normal text-[var(--color-text-muted)]">{goalStore.goals.filter((goal) => ['queued', 'planning', 'running', 'paused', 'blocked'].includes(goal.status)).length || ''}</span><span class="ml-auto">{#if expanded}<ChevronDown size={14} />{:else}<ChevronRight size={14} />{/if}</span>
+    </button>
+    <button
+      type="button"
+      class="rounded p-1 text-[var(--color-text-muted)] transition-colors hover:bg-[var(--color-surface-3)] hover:text-[var(--color-text-primary)]"
+      aria-label="Hide Goals panel"
+      title="Hide Goals panel"
+      onclick={() => goalDisplayStore.update({ sidebar: false })}
+    ><X size={13} /></button>
+  </div>
+  {#if expanded}<div class="mt-2 min-h-0 flex-1 space-y-2 overflow-y-auto pr-1">
   <div class="space-y-1.5">
     <input bind:this={composer} aria-label="New goal" class="min-w-0 w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-1)] px-2 py-1.5 text-xs text-[var(--color-text-primary)]" placeholder="What should Koryphaios accomplish?" bind:value={objective} onkeydown={(event) => { if (event.key === 'Enter') void create(); }} />
     <div class="flex gap-1"><div class="min-w-0 flex-1"><KorySelect compact value={scope} label="Goal scope" options={scopeOptions} onchange={(value) => scope = value as GoalScope} /></div><button type="button" class="rounded-lg border border-[var(--color-border)] px-2 text-[var(--color-text-primary)] hover:bg-[var(--color-surface-3)]" onclick={() => void create()} aria-label="Create goal"><Plus size={13} /></button></div>

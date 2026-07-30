@@ -59,6 +59,7 @@
   let showCommandPalette = $state(false);
   let showThemeQuickMenu = $state(false);
   let zenMode = $state(false);
+  let settingsInitialTab = $state<'providers' | 'experimental'>('providers');
   let inputRef = $state<HTMLTextAreaElement>();
   let projectFileInput = $state<HTMLInputElement>();
   let projectFolderInput = $state<HTMLInputElement>();
@@ -555,8 +556,11 @@ RULES:
       return true;
     }
 
-    toastStore.error(`Unknown command: /${root}. Use /help`);
-    return true;
+    // Unknown slash input: fall through and send it to the model as a
+    // regular message. Other harnesses (Claude Code, etc.) treat unknown
+    // /-prefixed text as normal user input, not commands — paths like
+    // /home/user/project should reach the model, not error out.
+    return false;
   }
 
   function loadLayoutPrefs() {
@@ -1483,7 +1487,10 @@ RULES:
           ? 'background terminal'
           : ''}
         onStop={handleStop}
-        onOpenSettings={() => (showSettings = true)}
+        onOpenSettings={(section) => {
+          settingsInitialTab = section === 'advanced' ? 'experimental' : 'providers';
+          showSettings = true;
+        }}
         slashCommands={composerSlashCommands}
         fileMentions={composerFileMentions}
         onRefreshFileMentions={refreshComposerFileMentions}
@@ -1649,6 +1656,6 @@ RULES:
   </div>
 {/if}
 
-<SettingsDrawer open={showSettings} onClose={() => (showSettings = false)} />
+<SettingsDrawer open={showSettings} initialTab={settingsInitialTab} onClose={() => (showSettings = false)} />
 <CommandPalette bind:open={showCommandPalette} onAction={handleMenuAction} />
 <ToastContainer />

@@ -93,7 +93,6 @@ export function createAutoScroll(
 
   let follow = $state(true);
   let unseenCount = $state(0);
-  let programmaticScroll = false;
   let rafId: number | null = null;
   let resizeObserver: ResizeObserver | null = null;
   let mutationObserver: MutationObserver | null = null;
@@ -112,13 +111,6 @@ export function createAutoScroll(
   function scrollToBottomNow(behavior: ScrollBehavior = 'instant') {
     const el = getEl();
     if (!el) return;
-    // Only raise the guard if this assignment will actually move the
-    // scroll position — otherwise no 'scroll' event fires to consume (and
-    // clear) it, and the guard would incorrectly swallow the *next* real
-    // user scroll event.
-    if (el.scrollTop !== el.scrollHeight) {
-      programmaticScroll = true;
-    }
     if (behavior === 'instant') {
       el.scrollTop = el.scrollHeight;
     } else {
@@ -141,18 +133,11 @@ export function createAutoScroll(
   }
 
   function onUserScroll() {
-    // Consume the guard here rather than on a timer: a timer can race with
-    // a delayed 'scroll' event under heavy DOM churn (streaming tool
-    // output), leaving the guard down before the corresponding event
-    // arrives — which then gets misread as user-driven scroll-away and
-    // spuriously breaks follow mode mid-stream.
-    if (programmaticScroll) {
-      programmaticScroll = false;
-      return;
-    }
-    // untrack: this handler runs in response to a real DOM event, not
-    // inside an effect. Reading `follow` here is a state READ, which is
-    // fine — but we use untrack defensively to make it explicit.
+    // A programmatic bottom-pin still reports a distance of zero here, so it
+    // is safe to handle it exactly like every other scroll event. Keeping a
+    // one-shot "programmatic" guard made rapid scrollbar drags and keyboard
+    // scrolling get misclassified as the pin event, leaving follow enabled
+    // and pulling the reader back to the bottom on the next DOM mutation.
     untrack(() => {
       const dist = getDistanceFromBottom();
       const wasFollowing = follow;
@@ -172,15 +157,10 @@ export function createAutoScroll(
     });
   }
 
-  // Pins `el` to its bottom, raising the programmatic-scroll guard only when
-  // the assignment actually moves scrollTop. The guard is consumed (cleared)
-  // by the resulting 'scroll' event in onUserScroll — never by a timer — so
-  // it can't race a delayed event and can't outlive the scroll it was meant
-  // to cover.
+  // Pins `el` to its bottom. The resulting scroll event is intentionally
+  // handled normally: its distance is zero, while a real user scroll-away is
+  // always allowed to disengage follow.
   function pinToBottom(el: HTMLDivElement) {
-    if (el.scrollTop !== el.scrollHeight) {
-      programmaticScroll = true;
-    }
     // Setting scrollTop directly (instead of scrollTo) skips smooth
     // scrolling entirely — important for per-token updates which fire
     // at 30-100Hz and would jank with a smooth animation.

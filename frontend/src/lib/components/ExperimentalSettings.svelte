@@ -27,14 +27,6 @@
     void experimentalStore.loadAll();
   });
 
-  // Status badge colors
-  const statusColors = {
-    stable: { bg: "rgba(34, 197, 94, 0.2)", text: "#22c55e", label: "Stable" },
-    beta: { bg: "rgba(245, 158, 11, 0.2)", text: "#f59e0b", label: "Beta" },
-    alpha: { bg: "rgba(239, 68, 68, 0.2)", text: "#ef4444", label: "Alpha" },
-    "coming-soon": { bg: "rgba(107, 114, 128, 0.2)", text: "#6b7280", label: "Soon" },
-  };
-
   // Category icons
   const categoryIcons: Record<string, any> = {
     Billing: Zap,
@@ -74,8 +66,7 @@
     <div class="flex-1 min-w-0">
       <p class="text-[11px] font-medium" style="color: var(--color-text-primary);">Advanced Settings</p>
       <p class="text-[10px] mt-0.5" style="color: var(--color-text-muted);">
-        <span style="color: #22c55e;">Stable</span> features are production-ready and on by default.
-        <span style="color: #f59e0b;">Beta</span>/<span style="color: #ef4444;">Alpha</span> are experimental — enable at your own risk.
+        Tune power-user behavior without maturity labels getting in the way.
       </p>
     </div>
   </div>
@@ -170,7 +161,6 @@
           <div class="grid gap-3 xl:grid-cols-2">
             {#each features as feature}
               {@const isEnabled = experimentalStore.features[feature.key]}
-              {@const status = statusColors[feature.status]}
               <div 
                 class="flex h-full items-start gap-3 rounded-xl p-3 transition-colors"
                 style="background: var(--color-surface-0); border: 1px solid {isEnabled ? 'var(--color-accent)' : 'var(--color-border)'};
@@ -195,12 +185,6 @@
                   <div class="flex items-center gap-2 flex-wrap">
                     <span class="text-xs font-medium" style="color: var(--color-text-primary);">
                       {feature.label}
-                    </span>
-                    <span 
-                      class="text-[9px] px-1.5 py-0.5 rounded-full font-medium"
-                      style="background: {status.bg}; color: {status.text};"
-                    >
-                      {status.label}
                     </span>
                     {#if feature.requiresRestart}
                       <span 
@@ -233,19 +217,5 @@
       <RefreshCw size={11} /> Reset to defaults
     </button>
     
-    <div class="flex items-center gap-3 text-[9px]" style="color: var(--color-text-muted);">
-      <span class="flex items-center gap-1">
-        <span class="w-2 h-2 rounded-full" style="background: #22c55e;"></span> Stable
-      </span>
-      <span class="flex items-center gap-1">
-        <span class="w-2 h-2 rounded-full" style="background: #f59e0b;"></span> Beta
-      </span>
-      <span class="flex items-center gap-1">
-        <span class="w-2 h-2 rounded-full" style="background: #ef4444;"></span> Alpha
-      </span>
-      <span class="flex items-center gap-1">
-        <span class="w-2 h-2 rounded-full" style="background: #6b7280;"></span> Soon
-      </span>
-    </div>
   </div>
 </div>
