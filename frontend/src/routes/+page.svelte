@@ -1237,7 +1237,7 @@ RULES:
              sidebar or other panels — it stays in the true middle. -->
         <div
           class="max-w-xl w-full text-center rounded-[24px] border px-8 py-10 overflow-y-auto"
-          style="position: fixed; left: 50vw; top: 50%; transform: translate(-50%, -50%); max-height: calc(100vh - 200px); background: linear-gradient(180deg, rgba(213, 178, 97, 0.1), rgba(213, 178, 97, 0.03)); border-color: rgba(213, 178, 97, 0.22);"
+          style="position: fixed; left: 50vw; top: 50%; transform: translate(-50%, -50%); max-height: calc(100vh - 200px); background: linear-gradient(180deg, rgba(var(--color-accent-rgb), 0.1), rgba(var(--color-accent-rgb), 0.03)); border-color: rgba(var(--color-accent-rgb), 0.22);"
         >
           <div class="mb-8">
             <img

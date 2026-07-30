@@ -46,15 +46,25 @@ export function isAgenticProvider(name: string): boolean {
 // ─── Shared-provider selection (which providers the host offers) ──────────────
 
 let sharedProviderNames = new Set<string>();
+let sharedModelIds = new Map<string, Set<string>>();
 
-export function setSharedProviders(names: string[]): void {
+export function setSharedProviders(names: string[], modelSelections: Record<string, string[]> = {}): void {
   sharedProviderNames = new Set(names);
+  sharedModelIds = new Map(
+    Object.entries(modelSelections)
+      .filter(([provider]) => sharedProviderNames.has(provider))
+      .map(([provider, models]) => [provider, new Set(models)]),
+  );
   // Re-advertise whenever the selection changes and we're hosting.
   broadcastCatalog();
 }
 
 export function getSharedProviders(): string[] {
   return [...sharedProviderNames];
+}
+
+export function getSharedModels(): Record<string, string[]> {
+  return Object.fromEntries([...sharedModelIds].map(([provider, models]) => [provider, [...models]]));
 }
 
 // The host's base sandbox policy for remote CLI turns (a joining guest's tier
@@ -79,8 +89,10 @@ function buildCatalog(hostName: string): SharedProviderCatalog {
     if (!sharedProviderNames.has(p.name)) continue;
     if (!p.authenticated || !p.enabled) continue;
     const enabledIds = new Set(p.models);
+    const selectedModelIds = sharedModelIds.get(p.name);
     const models = p.allAvailableModels
       .filter((m) => enabledIds.size === 0 || enabledIds.has(m.id))
+      .filter((m) => !selectedModelIds || selectedModelIds.has(m.id))
       .map((m) => ({
         id: m.id,
         name: m.name,
@@ -207,6 +219,11 @@ async function handleInferenceRequest(
   // Only serve providers the host actually chose to share.
   if (!sharedProviderNames.has(payload.provider)) {
     fail(`Provider "${payload.provider}" is not shared by this host.`);
+    return;
+  }
+  const selectedModelIds = sharedModelIds.get(payload.provider);
+  if (selectedModelIds && !selectedModelIds.has(payload.model)) {
+    fail(`Model "${payload.model}" is not shared by this host.`);
     return;
   }
 

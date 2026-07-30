@@ -198,8 +198,8 @@
       <div class="px-6 py-10 max-w-5xl mx-auto">
         <div class="flex gap-5 animate-in fade-in slide-in-from-bottom-4 duration-700">
           <div class="flex-1 space-y-6 min-w-0">
-            <div class="rounded-[28px] border p-8 shadow-2xl backdrop-blur-sm" style="background: linear-gradient(165deg, rgba(213, 178, 97, 0.12), rgba(12, 10, 9, 0.4)); border-color: rgba(213, 178, 97, 0.24);">
-              <div class="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full border mb-6" style="background: rgba(0, 0, 0, 0.2); border-color: rgba(213, 178, 97, 0.15); color: var(--color-text-secondary);">
+            <div class="rounded-[28px] border p-8 shadow-2xl backdrop-blur-sm" style="background: linear-gradient(165deg, rgba(var(--color-accent-rgb), 0.12), rgba(12, 10, 9, 0.4)); border-color: rgba(var(--color-accent-rgb), 0.24);">
+              <div class="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full border mb-6" style="background: rgba(0, 0, 0, 0.2); border-color: rgba(var(--color-accent-rgb), 0.15); color: var(--color-text-secondary);">
                 <div class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></div>
                 <span class="text-[10px] font-bold uppercase tracking-[0.2em] opacity-70">Workspace Analyzed</span>
               </div>
@@ -430,7 +430,7 @@
   }
   .suggestion-card:hover {
     transform: translateY(-2px);
-    border-color: rgba(213, 178, 97, 0.4) !important;
-    box-shadow: 0 10px 30px -10px rgba(0,0,0,0.5), 0 0 20px rgba(213, 178, 97, 0.05);
+    border-color: rgba(var(--color-accent-rgb), 0.4) !important;
+    box-shadow: 0 10px 30px -10px rgba(0,0,0,0.5), 0 0 20px rgba(var(--color-accent-rgb), 0.05);
   }
 </style>

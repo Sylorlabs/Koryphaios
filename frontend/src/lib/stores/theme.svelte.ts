@@ -289,6 +289,14 @@ const FONT_FAMILIES: Record<FontFamily, string> = {
 
 import { browser } from '$app/environment';
 
+/** Convert a hex color (#RRGGBB) to an "R, G, B" string for use in
+ *  `rgba(var(--color-accent-rgb), alpha)` expressions. */
+function hexToRgb(hex: string): string {
+  const m = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex.trim());
+  if (!m) return '213, 178, 97'; // fallback to kintsugi gold
+  return `${parseInt(m[1], 16)}, ${parseInt(m[2], 16)}, ${parseInt(m[3], 16)}`;
+}
+
 function createThemeStore() {
   const defaults: ThemeConfig = { preset: 'kintsugi', accent: 'gold', font: 'inter' };
 
@@ -326,6 +334,10 @@ function createThemeStore() {
     }
     root.style.setProperty('--color-accent', accentVars.main);
     root.style.setProperty('--color-accent-hover', accentVars.hover);
+    // Expose the accent as an RGB triplet so components can write
+    // rgba(var(--color-accent-rgb), 0.12) for alpha-blended backgrounds,
+    // borders, and shadows that follow the user's selected accent color.
+    root.style.setProperty('--color-accent-rgb', hexToRgb(accentVars.main));
     root.style.setProperty('--font-sans', FONT_FAMILIES[font]);
 
     const isLight = resolvedPreset === 'light';

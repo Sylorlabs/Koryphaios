@@ -27,13 +27,14 @@
 
 @layer base {
   :root {
+    --color-accent-rgb: 213, 178, 97;
     --color-surface-0: #0d0b0a;
     --color-surface-1: #151210;
     --color-surface-2: #1d1916;
     --color-surface-3: #26211d;
     --color-surface-4: #332c27;
-    --color-border: rgba(213, 178, 97, 0.18);
-    --color-border-bright: rgba(213, 178, 97, 0.42);
+    --color-border: rgba(var(--color-accent-rgb), 0.18);
+    --color-border-bright: rgba(var(--color-accent-rgb), 0.42);
     --color-text-primary: #F6EFE2;
     --color-text-secondary: rgba(235, 226, 212, 0.8);
     --color-text-muted: rgba(214, 206, 192, 0.54);
@@ -461,7 +462,7 @@ pre {
 .btn-primary {
   background: var(--color-accent);
   color: #17120d;
-  box-shadow: 0 8px 24px rgba(213, 178, 97, 0.18);
+  box-shadow: 0 8px 24px rgba(var(--color-accent-rgb), 0.18);
 }
 
 .btn-primary:hover:not(:disabled) {
@@ -513,8 +514,8 @@ pre {
 
 /* Active session highlight fallback for environments where Tailwind arbitrary classes are not applied */
 .active-session {
-  background: linear-gradient(180deg, rgba(213, 178, 97, 0.14), rgba(213, 178, 97, 0.08));
-  border: 1px solid rgba(213, 178, 97, 0.34);
+  background: linear-gradient(180deg, rgba(var(--color-accent-rgb), 0.14), rgba(var(--color-accent-rgb), 0.08));
+  border: 1px solid rgba(var(--color-accent-rgb), 0.34);
   box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.02);
 }
 
@@ -528,7 +529,7 @@ pre {
   outline: none;
   border-color: var(--color-accent);
   background: var(--color-surface-1);
-  box-shadow: 0 0 0 3px rgba(213, 178, 97, 0.12);
+  box-shadow: 0 0 0 3px rgba(var(--color-accent-rgb), 0.12);
 }
 
 .input::placeholder {
@@ -781,7 +782,7 @@ a.wikilink {
   color: var(--color-accent);
   text-decoration: underline;
   text-underline-offset: 2px;
-  text-decoration-color: rgba(213, 178, 97, 0.4);
+  text-decoration-color: rgba(var(--color-accent-rgb), 0.4);
   cursor: pointer;
   border-radius: 2px;
   padding: 0 2px;
@@ -789,6 +790,6 @@ a.wikilink {
 }
 
 a.wikilink:hover {
-  background: rgba(213, 178, 97, 0.12);
+  background: rgba(var(--color-accent-rgb), 0.12);
   text-decoration-color: var(--color-accent);
 }

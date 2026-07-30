@@ -1414,8 +1414,8 @@
     animation: waiting-breathe 2.4s ease-in-out infinite;
   }
   @keyframes waiting-breathe {
-    0%, 100% { box-shadow: 0 0 0 0 rgba(213, 178, 97, 0); }
-    50% { box-shadow: 0 0 14px 0 rgba(213, 178, 97, 0.35); }
+    0%, 100% { box-shadow: 0 0 0 0 rgba(var(--color-accent-rgb), 0); }
+    50% { box-shadow: 0 0 14px 0 rgba(var(--color-accent-rgb), 0.35); }
   }
   .waiting-dots { display: inline-flex; gap: 3px; }
   .waiting-dots span {

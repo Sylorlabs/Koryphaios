@@ -1132,7 +1132,7 @@
           {#if dragOver}
             <div
               class="absolute inset-0 z-10 flex items-center justify-center rounded-lg border-2 border-dashed pointer-events-none"
-              style="border-color: var(--color-accent); background: rgba(213,178,97,0.08);"
+              style="border-color: var(--color-accent); background: rgba(var(--color-accent-rgb), 0.08);"
             >
               <div class="text-sm font-medium" style="color: var(--color-accent);">
                 Drop files to attach
@@ -1447,7 +1447,7 @@
             <button
               type="button"
               class="px-4 py-2 rounded-xl text-xs font-semibold transition-colors"
-              style="background: rgba(213,178,97,0.12); color: var(--color-accent); border: 1px solid rgba(213,178,97,0.25);"
+              style="background: rgba(var(--color-accent-rgb), 0.12); color: var(--color-accent); border: 1px solid rgba(var(--color-accent-rgb), 0.25);"
               onclick={createNewNote}
             >
               + New Note
