@@ -196,6 +196,7 @@
   }>();
 
   let copied = $state(false);
+  let entryElement = $state<HTMLDivElement>();
   let regenerating = $state(false);
   let selectedVariant = $state(-1);
   let toolDetailsOpen = $state(false);
@@ -259,8 +260,18 @@
     };
   }
 
+  function selectedEntryText(): string | null {
+    if (typeof window === 'undefined' || !entryElement) return null;
+    const selection = window.getSelection();
+    if (!selection || selection.rangeCount === 0 || !selection.toString().trim()) return null;
+    const range = selection.getRangeAt(0);
+    return entryElement.contains(range.startContainer) && entryElement.contains(range.endContainer)
+      ? selection.toString()
+      : null;
+  }
+
   async function copyEntryText() {
-    await navigator.clipboard.writeText(currentText);
+    await navigator.clipboard.writeText(selectedEntryText() ?? currentText);
     copied = true;
     contextMenu = null;
     setTimeout(() => copied = false, 2000);
@@ -797,8 +808,8 @@
 </script>
 
 <div
+  bind:this={entryElement}
   class="flex flex-col group"
-  in:fly={{ y: 20, duration: Date.now() - entry.timestamp < 5000 ? 300 : 0 }}
 >
   {#if entry.userHidden}
     <button

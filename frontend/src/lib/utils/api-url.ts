@@ -85,9 +85,19 @@ function getCachedWebSocketUrl(): string {
  */
 export async function initUrls(): Promise<void> {
   if (!browser || urlsInitialized) return;
+  await refreshUrls();
+}
+
+/**
+ * Re-fetch backend URLs from the Tauri layer. Call this when the backend
+ * may have restarted on a different port (e.g. after EADDRINUSE fallback).
+ * The Tauri get_backend_url command reads .active-port.json to discover
+ * the actual port.
+ */
+export async function refreshUrls(): Promise<void> {
+  if (!browser) return;
 
   try {
-    // Check if we're in Tauri v2
     const inTauri = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
     if (!inTauri) {
       cachedBackendUrl = getDefaultBackendUrl();

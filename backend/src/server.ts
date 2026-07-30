@@ -164,8 +164,43 @@ async function main() {
 
   // ─── Start Server ───────────────────────────────────────────────────────────
 
+  // Try the requested port; if it's already in use (EADDRINUSE), automatically
+  // scan upward for a free port. This prevents the backend from crashing when
+  // a stale process is still holding the default port — the desktop app and
+  // frontend discover the actual port via .active-port.json.
+  //
+  // Bun.serve() throws EADDRINUSE asynchronously (outside any try/catch), so
+  // we pre-check the port with a TCP probe using node:net before binding.
+  const { createServer: createTcpServer } = await import('node:net');
+
+  function isPortFree(port: number, host: string): Promise<boolean> {
+    return new Promise((resolve) => {
+      const tester = createTcpServer();
+      tester.once('error', () => resolve(false));
+      tester.once('listening', () => {
+        tester.close(() => resolve(true));
+      });
+      tester.listen(port, host);
+    });
+  }
+
+  async function findFreePort(startPort: number, host: string): Promise<number> {
+    for (let p = startPort; p <= 65_535; p++) {
+      if (await isPortFree(p, host)) return p;
+    }
+    return startPort; // give up; let Bun.serve throw the real error
+  }
+
+  const actualPort = await findFreePort(serverConfig.port, serverConfig.host);
+  if (actualPort !== serverConfig.port) {
+    serverLog.warn(
+      { requestedPort: serverConfig.port, actualPort },
+      'Requested port in use, using next available port',
+    );
+  }
+
   const server = Bun.serve<WSClientData>({
-    port: serverConfig.port,
+    port: actualPort,
     hostname: serverConfig.host,
     async fetch(req, srv) {
       const url = new URL(req.url);
@@ -246,7 +281,6 @@ async function main() {
   });
 
   const clientHost = serverConfig.host === '0.0.0.0' ? '127.0.0.1' : serverConfig.host;
-  const actualPort = server.port;
   const activePortPath = join(PROJECT_ROOT, '.koryphaios', '.active-port.json');
 
   try {
