@@ -29,6 +29,12 @@ describe('model-list-cache', () => {
     expect(merged[1].name).toBe('grok-composer-2.5-fast');
   });
 
+  it('never appends a catalog-only model after a successful provider listing', () => {
+    const stale = { ...fallback[0], id: 'grok-retired', apiModelId: 'grok-retired', name: 'Retired Grok' };
+    const merged = mergeModelLists([...fallback, stale], [modelFromRemoteId('grok-build', 'grok', fallback)]);
+    expect(merged.map((model) => model.apiModelId)).toEqual(['grok-build']);
+  });
+
   it('isLikelyChatModelId filters embedding models for openai-compatible providers', () => {
     expect(isLikelyChatModelId('text-embedding-3-small', 'groq')).toBe(false);
     expect(isLikelyChatModelId('llama-3.3-70b-versatile', 'groq')).toBe(true);

@@ -31,6 +31,7 @@ import {
   readdirSync,
   statSync,
 } from 'fs';
+import { readdir, readFile, stat } from 'fs/promises';
 import { basename, dirname, extname, join, relative, resolve, sep } from 'path';
 import { PROJECT_ROOT } from '../runtime/paths';
 
@@ -110,21 +111,36 @@ export function invalidateNotesCache(): void {
 const SYNC_THROTTLE_MS = 5_000;
 const lastSyncAt = new Map<string, number>();
 const fileMtimeCache = new Map<string, number>(); // absolute path -> mtimeMs
+/** Tracks whether the initial sync has completed for a given project root.
+ * The notes catalog is empty until this resolves — skipping catalog assembly
+ * during the initial sync avoids racing with synchronous SQLite writes that
+ * would block the event loop. */
+const initialSyncComplete = new Map<string, boolean>();
 
 /** Ensure a project's docs are mirrored without blocking every call on a full
- *  re-scan. First call for a project awaits; later calls return immediately and
- *  refresh in the background when the throttle window has elapsed. */
+ *  re-scan. First call for a project fires the sync in the background (the
+ *  notes catalog will be empty until it completes); later calls refresh in
+ *  the background when the throttle window has elapsed. */
 export async function ensureProjectSync(projectRoot: string): Promise<void> {
   const key = resolve(projectRoot);
   const now = Date.now();
   const last = lastSyncAt.get(key);
   if (last === undefined) {
     lastSyncAt.set(key, now);
-    try {
-      await syncProjectDocuments(projectRoot);
-    } catch (err) {
-      console.error(`[notesService] Initial project sync failed for ${key}`, err);
-    }
+    // Fire-and-forget: the initial sync does a recursive walk of the entire
+    // project tree + SQLite writes for every .md/.html file. On large projects
+    // this can take 10+ seconds and would block the event loop if awaited —
+    // making the backend unresponsive to health checks and other API calls.
+    // The notes catalog will simply be empty until the background sync
+    // completes; subsequent messages get the full catalog.
+    void syncProjectDocuments(projectRoot)
+      .then(() => {
+        initialSyncComplete.set(key, true);
+      })
+      .catch((err) => {
+        console.error(`[notesService] Initial project sync failed for ${key}`, err);
+        initialSyncComplete.set(key, true); // allow catalog reads even on failure
+      });
     return;
   }
   if (now - last >= SYNC_THROTTLE_MS) {
@@ -133,6 +149,11 @@ export async function ensureProjectSync(projectRoot: string): Promise<void> {
       console.error(`[notesService] Background project sync failed for ${key}`, err);
     });
   }
+}
+
+/** Returns true when the initial project sync has completed (or failed). */
+export function isInitialSyncComplete(projectRoot: string): boolean {
+  return initialSyncComplete.get(resolve(projectRoot)) === true;
 }
 
 // ============================================================================
@@ -375,10 +396,14 @@ export async function syncProjectDocuments(
   const root = resolve(projectRoot);
   const files: string[] = [];
 
-  function walk(directory: string): void {
+  // Use async readdir so the event loop stays responsive during the
+  // recursive directory walk. The synchronous readdirSync would block
+  // for 10+ seconds on large projects, making the backend unresponsive
+  // to health checks and other API calls.
+  async function walk(directory: string): Promise<void> {
     let entries;
     try {
-      entries = readdirSync(directory, { withFileTypes: true });
+      entries = await readdir(directory, { withFileTypes: true });
     } catch (err) {
       console.error(`[notesService] Failed to read directory during project sync: ${directory}`, err);
       return;
@@ -387,7 +412,7 @@ export async function syncProjectDocuments(
     for (const entry of entries) {
       if (entry.isSymbolicLink()) continue;
       if (entry.isDirectory()) {
-        if (!IGNORED_DOCUMENT_DIRS.has(entry.name)) walk(join(directory, entry.name));
+        if (!IGNORED_DOCUMENT_DIRS.has(entry.name)) await walk(join(directory, entry.name));
         continue;
       }
       if (entry.isFile() && DOCUMENT_EXTENSIONS.has(extname(entry.name).toLowerCase())) {
@@ -396,7 +421,7 @@ export async function syncProjectDocuments(
     }
   }
 
-  walk(root);
+  await walk(root);
   const foundIds = new Set<string>();
   const changed: Array<{ id: string; content: string; sourcePath: string; existed: boolean }> = [];
   const existingProjectRows = (await db.select().from(notes)).filter(
@@ -407,24 +432,28 @@ export async function syncProjectDocuments(
   let created = 0;
   let updated = 0;
 
-  for (const absolute of files) {
+  for (let fileIdx = 0; fileIdx < files.length; fileIdx++) {
+    // Yield every 25 files to let health checks and API calls run between
+    // synchronous SQLite writes (bun:sqlite is synchronous).
+    if (fileIdx > 0 && fileIdx % 25 === 0) await new Promise<void>((r) => setImmediate(r));
+    const absolute = files[fileIdx];
     const sourcePath = relative(root, absolute).split(sep).join('/');
     const id = projectDocumentId(root, sourcePath);
     foundIds.add(id);
 
-    let stat: ReturnType<typeof statSync>;
+    let fileStat;
     try {
-      stat = statSync(absolute);
+      fileStat = await stat(absolute);
     } catch (err) {
       console.error(`[notesService] Failed to stat file during project sync: ${absolute}`, err);
       continue;
     }
     // Skip unchanged files entirely — no read, no DB write, no re-link.
-    if (fileMtimeCache.get(absolute) === stat.mtimeMs) continue;
+    if (fileMtimeCache.get(absolute) === fileStat.mtimeMs) continue;
 
     let content: string;
     try {
-      content = readFileSync(absolute, 'utf8');
+      content = await readFile(absolute, 'utf8');
     } catch (err) {
       console.error(`[notesService] Failed to read file during project sync: ${absolute}`, err);
       continue;
@@ -449,7 +478,7 @@ export async function syncProjectDocuments(
         try {
           await db
             .update(notes)
-            .set({ title, content, folderPath, tags, updatedAt: stat.mtime })
+            .set({ title, content, folderPath, tags, updatedAt: fileStat.mtime })
             .where(eq(notes.id, id));
           updated++;
           synced = true;
@@ -469,22 +498,26 @@ export async function syncProjectDocuments(
         pinned: 0,
         includeInContext: 0,
         userId: null,
-        createdAt: stat.birthtime,
-        updatedAt: stat.mtime,
+        createdAt: fileStat.birthtime,
+        updatedAt: fileStat.mtime,
       });
       synced = true;
       created++;
     }
     if (!synced) continue;
-    fileMtimeCache.set(absolute, stat.mtimeMs);
+    fileMtimeCache.set(absolute, fileStat.mtimeMs);
     changed.push({ id, content, sourcePath, existed: Boolean(existing) });
   }
 
   // A fresh project used to perform one SELECT and one INSERT per document.
   // Bulk insertion removes that N+1 startup cost while preserving per-file
   // write-through updates for documents already in the graph.
-  for (let i = 0; i < pendingInserts.length; i += 500) {
-    const batch = pendingInserts.slice(i, i + 500);
+  // Yield between batches so synchronous SQLite writes don't block the
+  // event loop for too long in a single chunk.
+  const yieldBetweenBatches = () => new Promise<void>((r) => setImmediate(r));
+  for (let i = 0; i < pendingInserts.length; i += 100) {
+    if (i > 0) await yieldBetweenBatches();
+    const batch = pendingInserts.slice(i, i + 100);
     try {
       await db.insert(notes).values(batch);
     } catch (err) {
@@ -492,6 +525,7 @@ export async function syncProjectDocuments(
       for (const row of batch) {
         try {
           await db.insert(notes).values(row);
+          await yieldBetweenBatches();
         } catch (rowErr) {
           console.error(`[notesService] Failed to insert project document note ${row.id}`, rowErr);
         }
@@ -500,7 +534,9 @@ export async function syncProjectDocuments(
   }
 
   let removed = 0;
-  for (const row of existingProjectRows) {
+  for (let idx = 0; idx < existingProjectRows.length; idx++) {
+    if (idx > 0 && idx % 50 === 0) await yieldBetweenBatches();
+    const row = existingProjectRows[idx];
     if (!foundIds.has(row.id)) {
       try {
         await db.delete(notes).where(eq(notes.id, row.id));
@@ -517,7 +553,9 @@ export async function syncProjectDocuments(
     invalidateNotesCache();
     const needsWikilinkIndex = changed.some(({ content }) => content.includes('[['));
     const index = needsWikilinkIndex ? await getResolveIndex() : undefined;
-    for (const { id, content, sourcePath, existed } of changed) {
+    for (let ci = 0; ci < changed.length; ci++) {
+      if (ci > 0 && ci % 25 === 0) await new Promise<void>((r) => setImmediate(r));
+      const { id, content, sourcePath, existed } = changed[ci];
       // Existing documents must clear stale links even if their new content
       // has none. Brand-new unlinked documents need no DELETE/INSERT work.
       if (existed || content.includes('[[')) {
@@ -733,7 +771,14 @@ export interface NoteCatalogEntry {
 
 /** Compact index of every note for agent discovery and recall. */
 export async function getNotesCatalog(projectRoot?: string): Promise<NoteCatalogEntry[]> {
-  if (projectRoot) await ensureProjectSync(projectRoot);
+  if (projectRoot) {
+    await ensureProjectSync(projectRoot);
+    // Skip catalog assembly while the initial sync is still running.
+    // The sync does recursive FS walks + SQLite writes that block the event
+    // loop; racing a catalog read against it causes multi-second stalls.
+    // The catalog will be populated on the next message after sync completes.
+    if (!isInitialSyncComplete(projectRoot)) return [];
+  }
   const graph = await getGraphData(projectRoot);
   const linkCountById = new Map(graph.nodes.map((n) => [n.id, n.linkCount]));
   const rows = await db.select().from(notes).orderBy(notes.updatedAt);

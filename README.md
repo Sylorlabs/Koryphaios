@@ -162,6 +162,6 @@ Check `config/app.config.json` for the expected backend host and port. After sta
 
 ---
 
-**Version:** 1.0.23
+**Version:** 0.1.0
 **License:** Apache 2.0
 **Cost:** Free, forever

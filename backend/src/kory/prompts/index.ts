@@ -29,6 +29,8 @@ export interface TaskContract {
   acceptanceCriteria: string[];
   risk: 'low' | 'medium' | 'high';
   requiredEvidence: string[];
+  /** Durable Goal Mode context; preserved through manager, worker, critic, and retries. */
+  goalContext?: { goalId: string; objective: string; itemId: string; itemTitle: string; verification: 'eligible' | 'unverified' | 'remote-pending-review' };
 }
 
 export interface InstructionSource {
@@ -174,6 +176,7 @@ export function createTaskContract(
     requiredEvidence:
       options.requiredEvidence ??
       (changesCode ? ['Actual diff', 'Relevant deterministic checks'] : ['Evidence-backed answer']),
+    goalContext: options.goalContext,
   };
 }
 
@@ -299,6 +302,9 @@ function capabilities(provider: ProviderName | string): ProviderCapabilityProfil
 }
 
 function renderTaskContract(contract: TaskContract): string {
+  const goalContext = contract.goalContext
+    ? `\n\n## Goal Mode execution context (immutable)\nGoal ID: ${contract.goalContext.goalId}\nGoal objective: ${contract.goalContext.objective}\nActive checklist item: ${contract.goalContext.itemTitle} (${contract.goalContext.itemId})\nProvider verification: ${contract.goalContext.verification}\nDo not mark this item or goal complete without concrete verified evidence. ${contract.goalContext.verification === 'eligible' ? '' : 'This provider result is not sufficient completion evidence; require independent managed/local verification.'}`
+    : '';
   return `## Immutable task contract
 Goal: ${contract.goal}
 Kind: ${contract.taskKind}
@@ -307,7 +313,7 @@ Non-goals: ${contract.nonGoals.join('; ')}
 Constraints: ${contract.constraints.length ? contract.constraints.join('; ') : 'none supplied'}
 Acceptance criteria:\n${contract.acceptanceCriteria.map((item) => `- ${item}`).join('\n')}
 Risk: ${contract.risk}
-Required evidence:\n${contract.requiredEvidence.map((item) => `- ${item}`).join('\n')}`;
+Required evidence:\n${contract.requiredEvidence.map((item) => `- ${item}`).join('\n')}${goalContext}`;
 }
 
 function renderForProvider(adapter: string, sections: string[]): string {

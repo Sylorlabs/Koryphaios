@@ -7,6 +7,9 @@ import { describe, it, expect } from 'bun:test';
 import { KoryManager } from '../manager';
 import type { ProviderRegistry, ToolRegistry } from '../../providers';
 import type { KoryphaiosConfig, ProviderName } from '@koryphaios/shared';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
 describe('KoryManager (Original) - Smoke Tests', () => {
   it('should have KoryManager class', () => {
@@ -58,7 +61,66 @@ describe('KoryManager - Method Signatures', () => {
 
   it('processTask should accept sessionId, message, and optional parameters', () => {
     const descriptor = Object.getOwnPropertyDescriptor(KoryManager.prototype, 'processTask');
-    expect(descriptor?.value?.length).toBe(7); // sessionId, content, model?, reasoningLevel?, attachments?, collabPolicy?, responseVariant?
+    expect(descriptor?.value?.length).toBe(8); // sessionId, content, model?, reasoningLevel?, attachments?, collabPolicy?, responseVariant?, immutable goal context?
+  });
+});
+
+describe('KoryManager live agent-thread retention', () => {
+  it('expires completed threads that no longer have a live session state entry', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'koryphaios-manager-memory-'));
+    try {
+      const manager = new KoryManager(
+        {} as ProviderRegistry,
+        {} as ToolRegistry,
+        dir,
+        {} as KoryphaiosConfig,
+      );
+      const internal = manager as unknown as {
+        agentThreads: Map<string, { sessionId: string; busy: boolean; updatedAt: number }>;
+      };
+      internal.agentThreads.set('finished-worker', {
+        sessionId: 'old-session',
+        busy: false,
+        updatedAt: Date.now() - 1_000,
+      });
+
+      manager.cleanupAbandonedResources(1);
+
+      expect(internal.agentThreads.has('finished-worker')).toBe(false);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('bounds completed threads for an active session', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'koryphaios-manager-memory-'));
+    try {
+      const manager = new KoryManager(
+        {} as ProviderRegistry,
+        {} as ToolRegistry,
+        dir,
+        {} as KoryphaiosConfig,
+      );
+      const internal = manager as unknown as {
+        agentThreads: Map<string, { sessionId: string; busy: boolean; updatedAt: number }>;
+        enforceCompletedAgentThreadLimit(sessionId: string): void;
+      };
+      for (let index = 0; index < 25; index++) {
+        internal.agentThreads.set(`worker-${index}`, {
+          sessionId: 'active-session',
+          busy: false,
+          updatedAt: index,
+        });
+      }
+
+      internal.enforceCompletedAgentThreadLimit('active-session');
+
+      expect(internal.agentThreads.size).toBe(24);
+      expect(internal.agentThreads.has('worker-0')).toBe(false);
+      expect(internal.agentThreads.has('worker-24')).toBe(true);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
 

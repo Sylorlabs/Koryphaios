@@ -51,10 +51,22 @@ export const PROVIDER_CONFIGS: ProviderConfig[] = [
     envKeys: ['OPENROUTER_API_KEY'],
   },
   {
+    name: 'tokenrouter',
+    baseUrl: 'https://tokenrouter.me/v1',
+    authMode: 'api_key',
+    envKeys: ['TOKENROUTER_API_KEY'],
+  },
+  {
     name: 'groq',
     baseUrl: 'https://api.groq.com/openai/v1',
     authMode: 'api_key',
     envKeys: ['GROQ_API_KEY'],
+  },
+  {
+    name: 'digitalocean',
+    baseUrl: 'https://inference.do-ai.run/v1',
+    authMode: 'api_key',
+    envKeys: ['DIGITALOCEAN_API_KEY'],
   },
   {
     name: 'copilot',
@@ -72,10 +84,16 @@ export const PROVIDER_CONFIGS: ProviderConfig[] = [
     },
     {
       name: 'codex-auth',
-      baseUrl: 'https://api.openai.com/v1',
-      authMode: 'api_key',
-      envKeys: ['OPENAI_API_KEY'],
+      baseUrl: '',
+      authMode: 'auth_only',
+      envKeys: [],
     },
+  // CLI harness providers — authenticated via their own CLI login, no API key.
+  { name: 'grok', baseUrl: '', authMode: 'auth_only', envKeys: [], envAuthTokenKey: 'GROK_CODE_XAI_API_KEY' },
+  { name: 'antigravity', baseUrl: '', authMode: 'auth_only', envKeys: [] },
+  { name: 'cursor', baseUrl: '', authMode: 'auth_only', envKeys: [] },
+  { name: 'devin', baseUrl: '', authMode: 'auth_only', envKeys: [] },
+  { name: 'cline', baseUrl: '', authMode: 'auth_only', envKeys: [] },
   {
     name: 'jules',
     baseUrl: 'https://jules.googleapis.com/v1alpha',
@@ -91,8 +109,8 @@ export const PROVIDER_CONFIGS: ProviderConfig[] = [
     envKeys: ['AZURE_OPENAI_API_KEY'],
     envUrlKey: 'AZURE_OPENAI_ENDPOINT',
   },
-  { name: 'bedrock', baseUrl: '', authMode: 'env_auth', envKeys: [] },
-  { name: 'vertexai', baseUrl: '', authMode: 'env_auth', envKeys: [] },
+  { name: 'bedrock', baseUrl: '', authMode: 'env_auth', envKeys: ['AWS_ACCESS_KEY_ID'] },
+  { name: 'vertexai', baseUrl: '', authMode: 'env_auth', envKeys: ['GOOGLE_VERTEX_AI_API_KEY'] },
 
   // Local
   {
@@ -105,21 +123,21 @@ export const PROVIDER_CONFIGS: ProviderConfig[] = [
   {
     name: 'ollama',
     baseUrl: 'http://localhost:11434',
-    authMode: 'api_key',
-    envKeys: ['OLLAMA_API_KEY'],
+    authMode: 'base_url_only',
+    envKeys: [],
     envUrlKey: 'OLLAMA_BASE_URL',
   },
   {
     name: 'lmstudio',
     baseUrl: 'http://localhost:1234',
-    authMode: 'api_key',
-    envKeys: ['LMSTUDIO_API_KEY'],
+    authMode: 'base_url_only',
+    envKeys: [],
   },
   {
     name: 'llamacpp',
     baseUrl: 'http://localhost:8080',
-    authMode: 'api_key',
-    envKeys: ['LLAMACPP_API_KEY'],
+    authMode: 'base_url_only',
+    envKeys: [],
   },
   {
     name: 'ollamacloud',
@@ -184,12 +202,6 @@ export const PROVIDER_CONFIGS: ProviderConfig[] = [
     baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
     authMode: 'api_key',
     envKeys: ['QWEN_API_KEY', 'ALIBABA_API_KEY'],
-  },
-  {
-    name: 'zhipuai',
-    baseUrl: 'https://open.bigmodel.cn/api/paas/v4',
-    authMode: 'api_key',
-    envKeys: ['ZHIPUAI_API_KEY'],
   },
   {
     name: 'modelscope',
@@ -270,7 +282,7 @@ export const PROVIDER_CONFIGS: ProviderConfig[] = [
   },
   {
     name: 'baseten',
-    baseUrl: 'https://api.baseten.co/v1',
+    baseUrl: 'https://inference.baseten.co/v1',
     authMode: 'api_key',
     envKeys: ['BASETEN_API_KEY'],
   },
@@ -378,11 +390,10 @@ export const PROVIDER_CONFIGS: ProviderConfig[] = [
   },
   {
     name: 'perplexity',
-    baseUrl: 'https://api.perplexity.ai',
+    baseUrl: 'https://api.perplexity.ai/v1',
     authMode: 'api_key',
     envKeys: ['PERPLEXITY_API_KEY'],
   },
-  // Note: Perplexity doesn't use /v1 path - keep as is
   // Note: Luma AI (lu.ma) is for event management - not an LLM API
   // For Luma Dream Machine (video generation), use fal.ai provider
   { name: 'luma', baseUrl: 'https://api.luma.ai', authMode: 'api_key', envKeys: ['LUMA_API_KEY'] },
@@ -426,12 +437,6 @@ export const PROVIDER_CONFIGS: ProviderConfig[] = [
     baseUrl: 'https://integrate.api.nvidia.com/v1',
     authMode: 'api_key',
     envKeys: ['NVIDIA_API_KEY'],
-  },
-  {
-    name: 'nim',
-    baseUrl: 'https://integrate.api.nvidia.com/v1',
-    authMode: 'api_key',
-    envKeys: ['NVIDIA_API_KEY', 'NIM_API_KEY'],
   },
   // Friendli AI - serverless inference
   {
@@ -507,13 +512,13 @@ export const PROVIDER_CONFIGS: ProviderConfig[] = [
   },
   {
     name: 'abacus',
-    baseUrl: 'https://routellm.abacus.ai',
+    baseUrl: 'https://routellm.abacus.ai/v1',
     authMode: 'api_key',
     envKeys: ['ABACUS_API_KEY'],
   },
   {
     name: 'llama',
-    baseUrl: 'https://api.llama.com/compat',
+    baseUrl: 'https://api.llama.com/compat/v1',
     authMode: 'api_key',
     envKeys: ['LLAMA_API_KEY'],
   },
@@ -566,6 +571,10 @@ export const PROVIDER_CONFIGS: ProviderConfig[] = [
     authMode: 'api_key',
     envKeys: ['MOARK_API_KEY'],
   },
+  // Legacy/enterprise providers kept for backward compatibility with existing configs.
+  { name: 'azurecognitive', baseUrl: '', authMode: 'api_key', envKeys: ['AZURE_COGNITIVE_API_KEY'], envUrlKey: 'AZURE_COGNITIVE_RESOURCE_URL' },
+  { name: 'sapai', baseUrl: '', authMode: 'api_key', envKeys: ['AICORE_SERVICE_KEY'] },
+  { name: 'gitlab', baseUrl: 'https://gitlab.com/api/v4', authMode: 'api_key', envKeys: ['GITLAB_API_KEY'] },
   // Note: Amazon Nova models are accessed through AWS Bedrock, not a separate API
   // Use 'bedrock' provider with nova models instead
 ];

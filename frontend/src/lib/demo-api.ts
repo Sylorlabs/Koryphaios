@@ -7,7 +7,8 @@
 // nothing). Unknown endpoints get a fast, well-formed "not available" JSON
 // response — never a hang, never a network error, never a dead end.
 
-import type { Session } from '@koryphaios/shared';
+import type { Goal, GoalChecklistItem, GoalScope, Session } from '@koryphaios/shared';
+import type { ChangeSummary } from '@koryphaios/shared';
 
 const now = Date.now();
 
@@ -21,6 +22,189 @@ let sessionCounter = 0;
 type DemoMessage = { id: string; role: string; content: string; createdAt: number; model?: string };
 const demoMessages = new Map<string, DemoMessage[]>();
 let messageCounter = 0;
+
+// ─── Browser-trial virtual workspace ───────────────────────────────────────
+//
+// The desktop app owns a real repository. The browser trial owns a deliberately
+// small, tab-lifetime-only repository so visitors can inspect files, diffs,
+// tests, staging, commits, and review decisions without touching their machine.
+// This is stateful simulation, not a claim that browser code can run native
+// CLIs or mutate a visitor's disk.
+type VirtualFile = { original: string | null; content: string | null; staged: boolean };
+
+const virtualFiles = new Map<string, VirtualFile>([
+  ['README.md', {
+    original: '# Starter project\n\nA small revenue dashboard used by the Koryphaios browser trial.\n',
+    content: '# Starter project\n\nA small revenue dashboard used by the Koryphaios browser trial.\n',
+    staged: false,
+  }],
+  ['src/app.ts', {
+    original: "export const appName = 'Starter project';\n",
+    content: "export const appName = 'Starter project';\n",
+    staged: false,
+  }],
+  ['src/lib/formatCurrency.ts', {
+    original: "export const formatCurrency = (value: number) => `$${value.toFixed(2)}`;\n",
+    content: "export const formatCurrency = (value: number) => `$${value.toFixed(2)}`;\n",
+    staged: false,
+  }],
+  ['tests/formatCurrency.test.ts', {
+    original: "import { formatCurrency } from '../src/lib/formatCurrency';\n\nexport const smokeTest = () => formatCurrency(12) === '$12.00';\n",
+    content: "import { formatCurrency } from '../src/lib/formatCurrency';\n\nexport const smokeTest = () => formatCurrency(12) === '$12.00';\n",
+    staged: false,
+  }],
+]);
+
+let virtualBranch = 'trial/main';
+let virtualAhead = 0;
+let virtualCommitCount = 0;
+const virtualBranches = ['trial/main'];
+
+function changedFiles(): Array<[string, VirtualFile]> {
+  return [...virtualFiles.entries()].filter(([, file]) => file.original !== file.content);
+}
+
+function lineCount(value: string | null): number {
+  return value ? value.split('\n').filter(Boolean).length : 0;
+}
+
+function gitStatus() {
+  return changedFiles().map(([path, file]) => ({
+    path,
+    status: file.original === null ? 'added' : file.content === null ? 'deleted' : 'modified',
+    staged: file.staged,
+    additions: Math.max(0, lineCount(file.content) - lineCount(file.original)),
+    deletions: Math.max(0, lineCount(file.original) - lineCount(file.content)),
+  }));
+}
+
+function demoDiff(path: string): string {
+  const file = virtualFiles.get(path);
+  if (!file || file.original === file.content) return '';
+  const before = file.original?.trimEnd().split('\n') ?? [];
+  const after = file.content?.trimEnd().split('\n') ?? [];
+  return [
+    `diff --git a/${path} b/${path}`,
+    file.original === null ? 'new file mode 100644' : '',
+    `--- ${file.original === null ? '/dev/null' : `a/${path}`}`,
+    `+++ ${file.content === null ? '/dev/null' : `b/${path}`}`,
+    '@@ browser-trial simulated diff @@',
+    ...before.map((line) => `-${line}`),
+    ...after.map((line) => `+${line}`),
+  ].filter(Boolean).join('\n') + '\n';
+}
+
+function reviewChanges(): ChangeSummary[] {
+  return gitStatus().map((file) => ({
+    path: file.path,
+    operation: file.status === 'added' ? 'create' : file.status === 'deleted' ? 'delete' : 'edit',
+    linesAdded: file.additions ?? 0,
+    linesDeleted: file.deletions ?? 0,
+  }));
+}
+
+export function getDemoReviewChanges(): ChangeSummary[] {
+  return reviewChanges();
+}
+
+/** Make a reproducible, inspectable change-set for a simulated manager run. */
+export function applyDemoRunArtifacts(prompt: string, sessionId?: string): ChangeSummary[] {
+  const request = prompt.trim() || 'Improve the starter project';
+  virtualFiles.set('src/lib/trialPlan.ts', {
+    original: null,
+    staged: false,
+    content: [
+      `export const trialPlan = ${JSON.stringify(request)};`,
+      '',
+      'export const reviewChecklist = [',
+      "  'Inspect the diff',",
+      "  'Run the simulated test suite',",
+      "  'Accept or reject the changes',",
+      '];',
+      '',
+    ].join('\n'),
+  });
+  virtualFiles.set('tests/trialPlan.test.ts', {
+    original: null,
+    staged: false,
+    content: [
+      "import { trialPlan, reviewChecklist } from '../src/lib/trialPlan';",
+      '',
+      "export const trialPlanTest = () => trialPlan.length > 0 && reviewChecklist.length === 3;",
+      '',
+    ].join('\n'),
+  });
+  const readme = virtualFiles.get('README.md');
+  if (readme?.content) {
+    const baseReadme = readme.content.replace(/\n\nLatest browser-trial request:.*\n?$/, '');
+    virtualFiles.set('README.md', {
+      ...readme,
+      staged: false,
+      content: `${baseReadme.trimEnd()}\n\nLatest browser-trial request: ${request}\n`,
+    });
+  }
+  if (sessionId) {
+    const session = demoSessions.get(sessionId);
+    if (session) {
+      demoSessions.set(sessionId, {
+        ...session,
+        totalTokensIn: session.totalTokensIn + 940,
+        totalTokensOut: session.totalTokensOut + 760,
+        totalCost: Number((session.totalCost + 0.0124).toFixed(4)),
+        updatedAt: Date.now(),
+      });
+    }
+  }
+  return reviewChanges();
+}
+
+export function resolveDemoReview(accepted: boolean): void {
+  for (const [, file] of changedFiles()) {
+    if (accepted) file.staged = true;
+    else {
+      file.content = file.original;
+      file.staged = false;
+    }
+  }
+}
+
+// ─── Browser-trial goals ───────────────────────────────────────────────────
+const demoGoals = new Map<string, Goal>();
+let goalCounter = 0;
+
+function goalItems(): GoalChecklistItem[] {
+  const timestamp = Date.now();
+  return [
+    { id: `trial-check-${goalCounter}-1`, title: 'Inspect the virtual workspace', status: 'running', order: 0, dependsOn: [], evidence: [], startedAt: timestamp },
+    { id: `trial-check-${goalCounter}-2`, title: 'Review the proposed diff', status: 'pending', order: 1, dependsOn: [], evidence: [] },
+    { id: `trial-check-${goalCounter}-3`, title: 'Record test evidence', status: 'pending', order: 2, dependsOn: [], evidence: [] },
+  ];
+}
+
+function createDemoGoal(body: Record<string, unknown>): Goal {
+  const createdAt = Date.now();
+  const id = `trial-goal-${++goalCounter}`;
+  const scope = (body.scope === 'project' || body.scope === 'session' ? body.scope : 'workspace') as GoalScope;
+  const goal: Goal = {
+    id,
+    objective: typeof body.objective === 'string' ? body.objective : 'Improve the starter project',
+    scope,
+    projectPath: typeof body.projectPath === 'string' ? body.projectPath : undefined,
+    sessionId: typeof body.sessionId === 'string' ? body.sessionId : undefined,
+    priority: 0,
+    sortOrder: demoGoals.size,
+    status: 'running',
+    checklist: goalItems(),
+    linkedSessionIds: typeof body.sessionId === 'string' ? [body.sessionId] : [],
+    activity: [{ id: `${id}-created`, type: 'created', message: 'Browser trial goal created with an inspectable checklist.', createdAt }],
+    activeDurationMs: 0,
+    activeStartedAt: createdAt,
+    createdAt,
+    updatedAt: createdAt,
+  };
+  demoGoals.set(id, goal);
+  return goal;
+}
 
 export function recordDemoMessage(
   sessionId: string,
@@ -49,6 +233,10 @@ export function recordDemoMessage(
 
 export function registerDemoSessions(list: Session[]): void {
   for (const s of list) demoSessions.set(s.id, s);
+}
+
+export function getDemoSession(id: string): Session | undefined {
+  return demoSessions.get(id);
 }
 
 function createDemoSession(title: string, workingDirectory?: string | null): Session {
@@ -99,7 +287,7 @@ const PROJECT_RULES = `# Project Rules
 3. Keep bundle size under 400 kB gzipped.
 `;
 
-const MEMORY_SETTINGS = {
+let demoMemorySettings = {
   universalMemoryEnabled: true,
   projectMemoryEnabled: true,
   sessionMemoryEnabled: true,
@@ -109,7 +297,7 @@ const MEMORY_SETTINGS = {
   maxContextTokens: 2000,
 };
 
-const AGENT_SETTINGS = {
+let demoAgentSettings = {
   ruleEnforcementLevel: 'strict',
   agentExecutionMode: 'auto',
   preferencesEnabled: true,
@@ -190,7 +378,7 @@ const BILLING_CREDITS = {
       ],
       byModel: [
         {
-          model: 'claude-sonnet-5',
+          model: 'claude-code-sonnet',
           tokensIn: 7_800_000,
           tokensOut: 1_700_000,
           inferenceValueUsd: 96.1,
@@ -374,13 +562,22 @@ export function demoFetch(url: string, init: RequestInit = {}): Response {
     );
   }
   if (path === '/api/memory/settings' || path === '/api/memory/settings/reset') {
-    return ok(MEMORY_SETTINGS);
+    if (path.endsWith('/reset')) {
+      demoMemorySettings = { ...demoMemorySettings, universalMemoryEnabled: true, projectMemoryEnabled: true, sessionMemoryEnabled: true, agentMemoryEnabled: true, rulesEnabled: true, autoIncludeInContext: true, maxContextTokens: 2000 };
+    } else if (method === 'PUT') {
+      demoMemorySettings = { ...demoMemorySettings, ...parseBody(init) };
+    }
+    return ok(demoMemorySettings);
   }
 
   // Agent tab.
   if (path === '/api/agent/settings' || path === '/api/agent/settings/reset') {
-    if (method === 'PUT') return ok({ ...AGENT_SETTINGS, ...parseBody(init) });
-    return ok(AGENT_SETTINGS);
+    if (path.endsWith('/reset')) {
+      demoAgentSettings = { ...demoAgentSettings, ruleEnforcementLevel: 'strict', agentExecutionMode: 'auto', criticGateEnabled: true, autoRunTools: true };
+    } else if (method === 'PUT') {
+      demoAgentSettings = { ...demoAgentSettings, ...parseBody(init) };
+    }
+    return ok(demoAgentSettings);
   }
   if (path.startsWith('/api/agent/preferences')) {
     if (method !== 'GET') return ok(true);
@@ -388,7 +585,7 @@ export function demoFetch(url: string, init: RequestInit = {}): Response {
   }
   if (path === '/api/agent/context') {
     return ok({
-      settings: AGENT_SETTINGS,
+      settings: demoAgentSettings,
       preferences: AGENT_PREFERENCES.content,
       rules: PROJECT_RULES,
       enforcementMessage: 'Rules are enforced by the critic gate.',
@@ -404,6 +601,125 @@ export function demoFetch(url: string, init: RequestInit = {}): Response {
   if (path === '/api/providers/detect') return ok([]);
   if (path.startsWith('/api/providers/') && path.endsWith('/accounts')) return ok([]);
 
+  // Virtual project browser. The actual desktop backend reads a repository;
+  // the trial exposes a small in-memory repository with the same response
+  // shapes so mentions and file previews are meaningful.
+  if (path === '/api/workspace/files') {
+    const query = new URL(url, 'http://demo.local').searchParams.get('q')?.toLowerCase() ?? '';
+    return ok([...virtualFiles.entries()]
+      .filter(([file, value]) => value.content !== null && file.toLowerCase().includes(query))
+      .map(([file]) => file)
+      .sort());
+  }
+  if (path === '/api/workspace/raw') {
+    const file = new URL(url, 'http://demo.local').searchParams.get('path') ?? '';
+    const value = virtualFiles.get(file)?.content;
+    return value === null || value === undefined
+      ? json({ ok: false, error: 'Virtual file not found' }, 404)
+      : new Response(value, { status: 200, headers: { 'Content-Type': 'text/plain; charset=utf-8' } });
+  }
+  if (path === '/api/workspace/register') return ok({ path: '/demo/starter-project', trial: true });
+
+  // Virtual Git review. Changes are real state transitions inside this tab:
+  // inspect, stage, restore, commit, and branch operations all mutate only the
+  // browser-trial repository.
+  if (path === '/api/git/status') {
+    return ok({ isRepo: true, status: gitStatus(), branch: virtualBranch, ahead: virtualAhead, behind: 0 });
+  }
+  if (path === '/api/git/branches') return ok({ branches: virtualBranches });
+  if (path === '/api/git/diff') {
+    const file = new URL(url, 'http://demo.local').searchParams.get('file') ?? '';
+    return ok({ diff: demoDiff(file) });
+  }
+  if (path === '/api/git/file') {
+    const file = new URL(url, 'http://demo.local').searchParams.get('path') ?? '';
+    const content = virtualFiles.get(file)?.content;
+    return content === null || content === undefined
+      ? json({ ok: false, error: 'Virtual file not found' }, 404)
+      : ok({ content });
+  }
+  if (path === '/api/git/stage' && method === 'POST') {
+    const file = typeof parseBody(init).file === 'string' ? parseBody(init).file as string : '';
+    const entry = virtualFiles.get(file);
+    if (entry) entry.staged = !parseBody(init).unstage;
+    return ok(true);
+  }
+  if (path === '/api/git/restore' && method === 'POST') {
+    const file = typeof parseBody(init).file === 'string' ? parseBody(init).file as string : '';
+    const entry = virtualFiles.get(file);
+    if (entry) { entry.content = entry.original; entry.staged = false; }
+    return ok(true);
+  }
+  if (path === '/api/git/commit' && method === 'POST') {
+    const staged = changedFiles().filter(([, file]) => file.staged);
+    if (!staged.length) return json({ ok: false, error: 'Stage a browser-trial change before committing.' }, 400);
+    for (const [, file] of staged) { file.original = file.content; file.staged = false; }
+    virtualAhead += 1;
+    virtualCommitCount += 1;
+    return ok({ id: `trial-${virtualCommitCount}`, branch: virtualBranch });
+  }
+  if (path === '/api/git/checkout' && method === 'POST') {
+    const body = parseBody(init);
+    const branch = typeof body.branch === 'string' ? body.branch : virtualBranch;
+    if (body.create && !virtualBranches.includes(branch)) virtualBranches.push(branch);
+    virtualBranch = branch;
+    return ok({ branch });
+  }
+  if (path === '/api/git/merge' || path === '/api/git/push' || path === '/api/git/pull') return ok({ hasConflicts: false });
+
+  // Durable trial goals are deliberately small but fully stateful: visitors
+  // can create, drive, attach evidence to, pause, and finalize them.
+  if (path === '/api/goals') {
+    if (method === 'POST') return ok(createDemoGoal(parseBody(init)));
+    return ok([...demoGoals.values()].sort((a, b) => a.sortOrder - b.sortOrder));
+  }
+  const goalMatch = path.match(/^\/api\/goals\/([^/]+)(?:\/(.*))?$/);
+  if (goalMatch) {
+    const [, id, action] = goalMatch;
+    const goal = demoGoals.get(id);
+    if (!goal) return json({ ok: false, error: 'Trial goal not found.' }, 404);
+    const body = parseBody(init);
+    if (!action && method === 'PATCH') {
+      Object.assign(goal, body, { updatedAt: Date.now() });
+      return ok(goal);
+    }
+    if (action === 'drive' && method === 'POST') {
+      const next = goal.checklist.find((item) => item.status === 'pending');
+      if (next) { next.status = 'running'; next.startedAt = Date.now(); }
+      goal.status = 'running';
+      goal.activity.push({ id: `${id}-drive-${Date.now()}`, type: 'drive', message: 'Manager simulated the next checklist step in the browser trial.', createdAt: Date.now(), sessionId: typeof body.sessionId === 'string' ? body.sessionId : undefined });
+      goal.updatedAt = Date.now();
+      return ok(goal);
+    }
+    const checkMatch = action?.match(/^checklist\/([^/]+)\/complete$/);
+    if (checkMatch && method === 'POST') {
+      const item = goal.checklist.find((entry) => entry.id === checkMatch[1]);
+      if (!item) return json({ ok: false, error: 'Checklist item not found.' }, 404);
+      const value = typeof body.value === 'string' ? body.value.trim() : '';
+      if (!value) return json({ ok: false, error: 'Verification evidence is required.' }, 400);
+      item.status = 'completed'; item.completedAt = Date.now();
+      item.evidence.push({ id: `${item.id}-e${item.evidence.length + 1}`, kind: 'check', value, verified: true, createdAt: Date.now() });
+      const next = goal.checklist.find((entry) => entry.status === 'pending');
+      if (next) { next.status = 'running'; next.startedAt = Date.now(); }
+      goal.updatedAt = Date.now();
+      return ok(goal);
+    }
+    if (action === 'finalize' && method === 'POST') {
+      if (goal.checklist.some((item) => item.status !== 'completed')) return json({ ok: false, error: 'Complete each checklist item with evidence first.' }, 400);
+      goal.status = 'completed'; goal.updatedAt = Date.now();
+      goal.activity.push({ id: `${id}-finalized`, type: 'finalized', message: 'Goal finalized with visitor-supplied verification evidence.', createdAt: Date.now() });
+      return ok(goal);
+    }
+  }
+
+  // The skills surface has enough state to explore qualification and selection
+  // without pretending that a browser can execute a local SKILL.md toolchain.
+  if (path === '/api/agent/skills') return ok([
+    { name: 'code-review', description: 'Review a diff in the virtual workspace.', enabled: true, source: 'browser-trial' },
+    { name: 'test-plan', description: 'Plan and record test evidence for a trial change.', enabled: true, source: 'browser-trial' },
+  ]);
+  if (path === '/api/agent/skills/qualifications') return ok({ verified: ['code-review', 'test-plan'], note: 'Browser-trial skills are simulated and cannot access local executables.' });
+
   // Notes endpoints the notes store doesn't already demo-guard.
   if (path.startsWith('/api/notes')) return ok([]);
 
@@ -412,7 +728,7 @@ export function demoFetch(url: string, init: RequestInit = {}): Response {
     return json({ ok: false, error: 'Team hosting is not available in the demo' });
   }
 
-  if (path === '/api/workspace/home') return ok('/demo');
+  if (path === '/api/workspace/home') return ok('/demo/starter-project');
 
   // Default: fast, well-formed failure — callers show a toast at worst,
   // and nothing ever hangs waiting on a dead backend.

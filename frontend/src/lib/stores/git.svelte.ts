@@ -1,6 +1,9 @@
 import { toastStore } from './toast.svelte';
 import { apiUrl } from '$lib/utils/api-url';
 import { apiFetch } from '$lib/api.svelte';
+import { isDemoMode } from '$lib/demo-flags';
+import { sessionStore } from './sessions.svelte';
+import { wsStore } from './websocket.svelte';
 
 export interface GitFileStatus {
   path: string;
@@ -39,6 +42,13 @@ let state = $state<GitState>({
   behind: 0,
   isRepo: false,
 });
+
+function syncDemoReview(): void {
+  if (!isDemoMode || !sessionStore.activeSessionId) return;
+  void import('$lib/demo-api').then(({ getDemoReviewChanges }) =>
+    wsStore.setDemoSessionChanges(sessionStore.activeSessionId!, getDemoReviewChanges()),
+  );
+}
 
 async function refreshStatus() {
   state.loading = true;
@@ -226,6 +236,7 @@ async function discardChanges(file: string) {
     if (res.ok) {
       toastStore.success('Changes discarded');
       await refreshStatus();
+      syncDemoReview();
     } else {
       toastStore.error('Failed to discard changes');
     }
@@ -244,6 +255,7 @@ async function commit(message: string) {
     if (res.ok) {
       toastStore.success('Commit successful');
       await refreshStatus();
+      syncDemoReview();
       return true;
     } else {
       toastStore.error('Commit failed');

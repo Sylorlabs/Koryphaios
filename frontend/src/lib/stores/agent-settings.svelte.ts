@@ -20,6 +20,8 @@ export interface AgentSettings {
   criticGateEnabled: boolean;
   gateStrictness: 'strict' | 'advisory' | 'off';
   intentInterview: 'off' | 'adaptive' | 'deep';
+  goalPlanningDepth: 'minimal' | 'adaptive' | 'structured';
+  automaticGoalDriving: boolean;
   designDiscovery: boolean;
   planApproval: 'always' | 'material' | 'never';
   modelQualification: 'enforce' | 'warn' | 'off';
@@ -188,6 +190,8 @@ export const DEFAULT_AGENT_SETTINGS: AgentSettings = {
   criticGateEnabled: true,
   gateStrictness: 'strict',
   intentInterview: 'adaptive',
+  goalPlanningDepth: 'adaptive',
+  automaticGoalDriving: true,
   designDiscovery: true,
   planApproval: 'material',
   modelQualification: 'enforce',

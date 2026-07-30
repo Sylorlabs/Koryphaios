@@ -20,18 +20,30 @@ export const JULES_SYNC_INSTRUCTIONS = `Jules runs in Google's cloud — it does
 Never assume local files changed until you have pulled or checked out the remote work.`;
 
 export const PROVIDER_DISPLAY: Partial<Record<ProviderName, ProviderDisplayMeta>> = {
+  tokenrouter: {
+    label: 'TokenRouter',
+    iconPath: '/provider-icons/tokenrouter.svg',
+    deployment: 'api',
+    description: 'OpenAI-compatible model gateway. Uses TOKENROUTER_API_KEY and refreshes the model list from /v1/models.',
+  },
+  digitalocean: {
+    label: 'DigitalOcean Inference',
+    iconPath: '/provider-icons/digitalocean.svg',
+    deployment: 'api',
+    description: 'DigitalOcean serverless inference. Uses DIGITALOCEAN_API_KEY and refreshes the model list from /v1/models.',
+  },
   codex: {
-    label: 'OpenAI Codex (CLI)',
+    label: 'Codex CLI',
     iconPath: '/provider-icons/lobehub/codex.svg',
     deployment: 'local',
     description:
-      'Legacy CLI-backed subscription mode for Codex. Koryphaios connects to the local `codex` CLI session.',
+      'Use an existing login from the local `codex` CLI. This is separate from Koryphaios-managed ChatGPT sign-in.',
   },
   'codex-auth': {
-    label: 'OpenAI Codex (Auth)',
+    label: 'OpenAI Codex',
     iconPath: '/provider-icons/lobehub/codex.svg',
-    deployment: 'api',
-    description: 'OpenAI API-compatible mode. Provide an API key and use API-based execution.',
+    deployment: 'local',
+    description: 'Sign in with ChatGPT. The official local Codex app-server owns OAuth, refreshes, and subscription access.',
   },
   google: {
     label: 'Google',

@@ -9,10 +9,8 @@ import {
   type Provider,
   type ProviderEvent,
   type StreamRequest,
-  getModelsForProvider,
 } from './types';
 import { detectJulesApiKey } from './auth-utils';
-import { JulesModels } from './models/jules';
 import { buildPrompt, runJulesTask } from './jules-runner';
 
 export class JulesProvider implements Provider {
@@ -26,7 +24,7 @@ export class JulesProvider implements Provider {
 
   /** Jules v1alpha has no models endpoint — these are virtual cloud agent selectors. */
   listModels(): ModelDef[] {
-    return JulesModels.length > 0 ? JulesModels : getModelsForProvider('jules');
+    return [];
   }
 
   private resolveApiKey(): string | null {
@@ -57,9 +55,9 @@ export class JulesProvider implements Provider {
       this.readHeader('x-kory-jules-automation-mode') ??
       process.env.JULES_AUTOMATION_MODE ??
       'AUTO_CREATE_PR';
-    const requirePlanApproval =
-      this.readHeader('x-kory-jules-require-plan-approval') === 'true' ||
-      process.env.JULES_REQUIRE_PLAN_APPROVAL === 'true';
+    // Cloud execution is never an implicit approval boundary. Jules must show
+    // its plan before it may make a remote change or create a PR.
+    const requirePlanApproval = this.readHeader('x-kory-jules-require-plan-approval') !== 'false';
     const repolessFallback =
       this.readHeader('x-kory-jules-repoless-fallback') !== 'false' &&
       process.env.JULES_REPOLESS_FALLBACK !== 'false';

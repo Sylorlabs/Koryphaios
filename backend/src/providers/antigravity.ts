@@ -287,12 +287,11 @@ export class AntigravityProvider implements Provider {
   }
 
   listModels(): ModelDef[] {
-    const fallback = getModelsForProvider('antigravity');
     if (cachedModels && Date.now() - cachedModelsAt < MODELS_CACHE_TTL_MS) {
       return cachedModels;
     }
     refreshModelsInBackground();
-    return cachedModels ?? fallback;
+    return cachedModels ?? [];
   }
 
   private resolveCliModel(modelId: string): string {

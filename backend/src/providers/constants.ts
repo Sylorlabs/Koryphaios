@@ -1,85 +1,61 @@
 import type { ProviderAuthMode, ProviderName } from '@koryphaios/shared';
+import { PROVIDER_CONFIGS } from './provider-configs';
 
-export const ENV_API_KEY_MAP: Record<ProviderName, string[]> = {
-  anthropic: ['ANTHROPIC_API_KEY'],
-  claude: [],
-  codex: [],
-  'codex-auth': ['OPENAI_API_KEY'],
-  grok: [],
-  antigravity: [],
-  cursor: [],
-  devin: [],
-  jules: ['JULES_API_KEY'],
-  openai: ['OPENAI_API_KEY'],
-  google: ['GOOGLE_API_KEY'],
-  aistudio: ['GEMINI_API_KEY', 'AI_STUDIO_API_KEY'],
-  cline: [],
-  xai: ['XAI_API_KEY'],
-  openrouter: ['OPENROUTER_API_KEY'],
-  groq: ['GROQ_API_KEY'],
-  copilot: [], // auth only - uses GitHub OAuth
-  opencodezen: ['OPENCODE_ZEN_API_KEY'],
-  opencodego: ['OPENCODE_GO_API_KEY', 'OPENCODE_ZEN_API_KEY'],
-  azure: ['AZURE_OPENAI_API_KEY'],
-  bedrock: ['AWS_ACCESS_KEY_ID'],
-  vertexai: ['GOOGLE_VERTEX_AI_API_KEY'],
-  local: [],
-  ollama: [],
-  '302ai': ['A302AI_API_KEY'],
-  azurecognitive: ['AZURE_COGNITIVE_API_KEY'],
-  baseten: ['BASETEN_API_KEY'],
-  cohere: ['COHERE_API_KEY'],
-  cerebras: ['CEREBRAS_API_KEY'],
-  cloudflare: ['CLOUDFLARE_API_TOKEN'],
-  deepseek: ['DEEPSEEK_API_KEY'],
-  deepinfra: ['DEEPINFRA_API_KEY'],
-  fireworks: ['FIREWORKS_API_KEY'],
-  gitlab: ['GITLAB_API_KEY'],
-  huggingface: ['HUGGINGFACE_API_KEY'],
-  helicone: ['HELICONE_API_KEY'],
-  llamacpp: [],
-  ionet: ['IONET_API_KEY'],
-  lmstudio: [],
-  kimicode: [],
-  'kimicode-auth': ['KIMI_CODE_API_KEY'],
-  mistral: ['MISTRAL_API_KEY'],
-  moonshot: ['MOONSHOT_API_KEY'],
-  minimax: ['MINIMAX_API_KEY'],
-  nebius: ['NEBIUS_API_KEY'],
-  ollamacloud: ['OLLAMA_CLOUD_API_KEY'],
-  sapai: ['AICORE_SERVICE_KEY'],
-  stackit: ['STACKIT_API_KEY'],
-  ovhcloud: ['OVHCLOUD_API_KEY'],
-  scaleway: ['SCALEWAY_API_KEY'],
-  togetherai: ['TOGETHER_API_KEY'],
-  venice: ['VENICE_API_KEY'],
-  vercel: ['VERCEL_AI_API_KEY'],
-  zai: ['ZAI_API_KEY'],
-  zenmux: ['ZENMUX_API_KEY'],
-};
+// ── Derived maps (single source of truth: PROVIDER_CONFIGS) ──────────────
+// Previously these were hardcoded lists that drifted out of sync with
+// provider-configs.ts, causing 40+ providers to be invisible in the app.
+// Now they derive from the canonical PROVIDER_CONFIGS array so adding a
+// provider there automatically makes it visible everywhere.
 
-export const ENV_URL_MAP: Partial<Record<ProviderName, string>> = {
-  azure: 'AZURE_OPENAI_ENDPOINT',
-  local: 'LOCAL_ENDPOINT',
-  ollama: 'OLLAMA_BASE_URL',
-  openrouter: 'OPENROUTER_BASE_URL',
-  azurecognitive: 'AZURE_COGNITIVE_RESOURCE_URL',
-  llamacpp: 'LLAMACPP_BASE_URL',
-  lmstudio: 'LMSTUDIO_BASE_URL',
-};
+export const PROVIDER_AUTH_MODE: Record<string, ProviderAuthMode> = Object.fromEntries(
+  PROVIDER_CONFIGS.map((c) => [c.name, c.authMode]),
+);
 
-export const ENV_AUTH_TOKEN_MAP: Partial<Record<ProviderName, string[]>> = {
-  anthropic: ['ANTHROPIC_AUTH_TOKEN'],
-  claude: ['CLAUDE_CODE_OAUTH_TOKEN'],
-  codex: ['CODEX_AUTH_TOKEN'],
+export const ENV_API_KEY_MAP: Record<string, string[]> = Object.fromEntries(
+  PROVIDER_CONFIGS.map((c) => [c.name, c.envKeys]),
+);
+
+export const ENV_URL_MAP: Record<string, string | undefined> = Object.fromEntries(
+  PROVIDER_CONFIGS.map((c) => [c.name, c.envUrlKey]),
+);
+
+// provider-configs.ts stores a single envAuthTokenKey; the old constants.ts
+// had arrays for some providers (e.g. grok accepted two env vars). Merge both.
+export const ENV_AUTH_TOKEN_MAP: Record<string, string[]> = Object.fromEntries(
+  PROVIDER_CONFIGS.map((c) => [c.name, c.envAuthTokenKey ? [c.envAuthTokenKey] : []]),
+);
+
+// Merge in extra env token keys that the old hardcoded map had but
+// provider-configs.ts doesn't capture (multi-env-var providers).
+const EXTRA_ENV_AUTH_TOKENS: Record<string, string[]> = {
   grok: ['GROK_CODE_XAI_API_KEY', 'XAI_API_KEY'],
   copilot: ['GITHUB_COPILOT_TOKEN', 'GITHUB_TOKEN'],
-  azure: ['AZURE_OPENAI_AUTH_TOKEN'],
-  kimicode: ['KIMI_CODE_AUTH_TOKEN'],
 };
+for (const [name, keys] of Object.entries(EXTRA_ENV_AUTH_TOKENS)) {
+  const existing = ENV_AUTH_TOKEN_MAP[name] ?? [];
+  ENV_AUTH_TOKEN_MAP[name] = [...new Set([...existing, ...keys])];
+}
 
-/** Default base URLs for OpenAI-compatible OpenCode parity providers (verify + chat use these). */
-export const OPENCODE_DEFAULT_BASE_URL: Partial<Record<ProviderName, string>> = {
+// Merge in extra env URL keys that the old hardcoded map had.
+const EXTRA_ENV_URLS: Record<string, string> = {
+  openrouter: 'OPENROUTER_BASE_URL',
+};
+for (const [name, key] of Object.entries(EXTRA_ENV_URLS)) {
+  if (!ENV_URL_MAP[name]) ENV_URL_MAP[name] = key;
+}
+
+// Merge in extra env API keys that the old hardcoded map had but configs didn't.
+const EXTRA_ENV_API_KEYS: Record<string, string[]> = {
+  bedrock: ['AWS_ACCESS_KEY_ID'],
+};
+for (const [name, keys] of Object.entries(EXTRA_ENV_API_KEYS)) {
+  const existing = ENV_API_KEY_MAP[name] ?? [];
+  ENV_API_KEY_MAP[name] = [...new Set([...existing, ...keys])];
+}
+
+/** Default base URLs for OpenAI-compatible OpenCode parity providers (verify + chat use these).
+ *  Providers not listed here use the baseUrl from PROVIDER_CONFIGS. */
+export const OPENCODE_DEFAULT_BASE_URL: Partial<Record<string, string>> = {
   '302ai': 'https://api.302.ai/v1',
   opencodezen: 'https://opencode.ai/zen/v1',
   opencodego: 'https://opencode.ai/zen/go/v1',
@@ -93,7 +69,6 @@ export const OPENCODE_DEFAULT_BASE_URL: Partial<Record<ProviderName, string>> = 
   helicone: 'https://oai.hconeai.com/v1',
   huggingface: 'https://router.huggingface.co/v1',
   ionet: 'https://api.intelligence.io.solutions/api/v1',
-  'codex-auth': 'https://api.openai.com/v1',
   kimicode: 'https://api.kimi.com/coding/v1',
   'kimicode-auth': 'https://api.kimi.com/coding/v1',
   minimax: 'https://api.minimax.chat/v1',
@@ -111,9 +86,11 @@ export const OPENCODE_DEFAULT_BASE_URL: Partial<Record<ProviderName, string>> = 
   zenmux: 'https://zenmux.ai/api/v1',
   cortecs: 'https://api.cortecs.ai/v1',
   cohere: 'https://api.cohere.ai/compatibility/v1',
-  perplexity: 'https://api.perplexity.ai',
+  perplexity: 'https://api.perplexity.ai/v1',
   groq: 'https://api.groq.com/openai/v1',
   openrouter: 'https://openrouter.ai/api/v1',
+  tokenrouter: 'https://tokenrouter.me/v1',
+  digitalocean: 'https://inference.do-ai.run/v1',
   xai: 'https://api.x.ai/v1',
   novita: 'https://api.novita.ai/v3/openai',
   upstage: 'https://api.upstage.ai/v1/solar',
@@ -123,13 +100,15 @@ export const OPENCODE_DEFAULT_BASE_URL: Partial<Record<ProviderName, string>> = 
   together: 'https://api.together.xyz/v1',
   deepgram: 'https://api.deepgram.com/v1',
   elevenlabs: 'https://api.elevenlabs.io/v1',
+  abacus: 'https://routellm.abacus.ai/v1',
+  llama: 'https://api.llama.com/compat/v1',
 };
 
 export const LLAMACPP_DEFAULT = 'http://127.0.0.1:8080/v1';
 export const LMSTUDIO_DEFAULT = 'http://localhost:1234/v1';
 
 /** Placeholder/hint for the base URL input in the UI. Backend is the single source of truth; frontend uses this instead of hardcoding. */
-export const BASE_URL_PLACEHOLDERS: Partial<Record<ProviderName, string>> = {
+export const BASE_URL_PLACEHOLDERS: Partial<Record<string, string>> = {
   zai: 'https://api.z.ai/api/paas/v4 (Standard) or .../api/coding/paas/v4 (Coding Plan) or https://open.bigmodel.cn/api/paas/v4 (China)',
   azure: 'https://YOUR_RESOURCE.cognitiveservices.azure.com',
   local: 'http://localhost:1234/v1 (or your local server)',
@@ -138,64 +117,4 @@ export const BASE_URL_PLACEHOLDERS: Partial<Record<ProviderName, string>> = {
   lmstudio: 'http://localhost:1234/v1',
   kimicode: 'https://api.kimi.com/coding/v1',
   'kimicode-auth': 'https://api.kimi.com/coding/v1',
-  'codex-auth': 'https://api.openai.com/v1',
-};
-
-export const PROVIDER_AUTH_MODE: Record<ProviderName, ProviderAuthMode> = {
-  anthropic: 'api_key_or_auth',
-  claude: 'auth_only',
-  codex: 'auth_only',
-  'codex-auth': 'api_key',
-  grok: 'auth_only',
-  antigravity: 'auth_only',
-  cursor: 'auth_only',
-  devin: 'auth_only',
-  jules: 'api_key',
-  openai: 'api_key',
-  google: 'api_key_or_auth',
-  aistudio: 'api_key',
-  xai: 'api_key',
-  openrouter: 'api_key',
-  groq: 'api_key',
-  copilot: 'auth_only',
-  opencodezen: 'api_key',
-  opencodego: 'api_key',
-  azure: 'api_key_or_auth',
-  bedrock: 'env_auth',
-  vertexai: 'api_key',
-  local: 'base_url_only',
-  ollama: 'base_url_only',
-  '302ai': 'api_key',
-  azurecognitive: 'api_key',
-  baseten: 'api_key',
-  cerebras: 'api_key',
-  cloudflare: 'api_key',
-  cohere: 'api_key',
-  deepseek: 'api_key',
-  deepinfra: 'api_key',
-  fireworks: 'api_key',
-  gitlab: 'api_key',
-  huggingface: 'api_key',
-  helicone: 'api_key',
-  llamacpp: 'base_url_only',
-  ionet: 'api_key',
-  lmstudio: 'base_url_only',
-  kimicode: 'auth_only',
-  'kimicode-auth': 'api_key',
-  mistral: 'api_key',
-  moonshot: 'api_key',
-  minimax: 'api_key',
-  nebius: 'api_key',
-  ollamacloud: 'api_key',
-  sapai: 'api_key',
-  stackit: 'api_key',
-  ovhcloud: 'api_key',
-  scaleway: 'api_key',
-  togetherai: 'api_key',
-  venice: 'api_key',
-  vercel: 'api_key',
-  zai: 'api_key',
-  zenmux: 'api_key',
-  cline: 'auth_only',
-  cortecs: 'api_key',
 };

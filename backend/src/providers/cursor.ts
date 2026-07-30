@@ -233,21 +233,7 @@ export class CursorProvider implements Provider {
     if (!this.cachedModels || Date.now() - this.modelsFetchedAt > MODELS_CACHE_TTL_MS) {
       this.refreshModels();
     }
-    return (
-      this.cachedModels ?? [
-        {
-          id: 'cursor-auto',
-          name: 'Cursor Auto',
-          provider: 'cursor',
-          apiModelId: 'auto',
-          contextWindow: 200_000,
-          maxOutputTokens: 32_000,
-          supportsStreaming: true,
-          supportsAttachments: false,
-          canReason: true,
-        } as ModelDef,
-      ]
-    );
+    return this.cachedModels ?? [];
   }
 
   refreshModels(forceRefresh = false): void {

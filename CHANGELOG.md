@@ -4,7 +4,7 @@ All notable Koryphaios changes are recorded here. Release automation prepends a 
 
 ## Unreleased
 
-## [1.0.23] - 2026-07-10
+## [0.1.0] - 2026-07-10
 
 ### ✨ Features
 - embed backend and harden release validation
@@ -52,4 +52,3 @@ All notable Koryphaios changes are recorded here. Release automation prepends a 
 
 - Team workspaces remain separate from personal sessions and retain host-defined access-policy enforcement at the relay and tool layers.
 - The embedded demo performs no backend requests during its guided interactions and does not expose destructive, collaboration, notes, or feedback dead ends.
-

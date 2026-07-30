@@ -115,7 +115,10 @@ export function validateConfig(config: Partial<KoryphaiosConfig>): void {
     ]);
 
     for (const [name, providerConfig] of Object.entries(config.providers)) {
-      if (!validProviders.has(name)) {
+      // Keep an old disabled provider record inert rather than making the
+      // whole desktop app unbootable after a provider registry update. It is
+      // not exposed or executable until a real adapter is registered.
+      if (!validProviders.has(name) && providerConfig.disabled !== true) {
         errors.push(`Invalid provider name: ${name}`);
       }
       if (providerConfig.disabled !== undefined && typeof providerConfig.disabled !== 'boolean') {

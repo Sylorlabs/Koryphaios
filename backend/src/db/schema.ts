@@ -68,6 +68,16 @@ export const tasks = sqliteTable('tasks', {
   updatedAt: integer('updated_at', { mode: 'timestamp' }).notNull(),
 });
 
+export const goals = sqliteTable('goals', {
+  id: text('id').primaryKey(), userId: text('user_id'), objective: text('objective').notNull(),
+  scope: text('scope').notNull(), projectPath: text('project_path'), sessionId: text('session_id'),
+  priority: integer('priority').notNull().default(0), sortOrder: integer('sort_order').notNull().default(0),
+  status: text('status').notNull().default('queued'), checklist: text('checklist').notNull().default('[]'),
+  linkedSessionIds: text('linked_session_ids').notNull().default('[]'), activity: text('activity').notNull().default('[]'),
+  blocker: text('blocker'), activeDurationMs: integer('active_duration_ms').notNull().default(0),
+  activeStartedAt: integer('active_started_at', { mode: 'timestamp' }), createdAt: integer('created_at', { mode: 'timestamp' }).notNull(), updatedAt: integer('updated_at', { mode: 'timestamp' }).notNull(),
+});
+
 // ============================================================================
 // Auth & Security Tables
 // ============================================================================

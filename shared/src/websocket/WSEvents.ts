@@ -50,7 +50,9 @@ export type WSEventType =
   | 'process.started'
   | 'process.exited'
   // Notes network
-  | 'notes.updated';
+  | 'notes.updated'
+  // Goal mode
+  | 'goals.updated';
 
 export interface WSMessage<T = unknown> {
   type: WSEventType;

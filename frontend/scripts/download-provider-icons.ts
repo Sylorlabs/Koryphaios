@@ -38,7 +38,6 @@ const providers = [
   'stepfun',
   'qwen',
   'baichuan',
-  'zhipuai',
   'replicate',
   'modal',
   'vercel',
@@ -75,7 +74,6 @@ const providers = [
   'sapai',
   'gitlab',
   'nvidia',
-  'nim',
   'friendliai',
   'voyageai',
   'mixedbread',
@@ -155,7 +153,6 @@ const simpleIconsMap: Record<string, string> = {
   '302ai': 'si302',
   gladia: 'siGladia',
   lmnt: 'siLmnt',
-  nim: 'siNvidia',
   requesty: 'siRequesty',
   klingai: 'siKuaishou',
 };

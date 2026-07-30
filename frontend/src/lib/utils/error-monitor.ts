@@ -72,27 +72,35 @@ export function initErrorMonitoring() {
       })
       .join(' ');
 
-    errorBuffer.push({
-      timestamp: Date.now(),
-      type: 'error',
-      message,
-      userAgent: navigator.userAgent,
-    });
+    // Don't relay the backend-health sentinel's own failures — that creates
+    // a feedback loop where each health-check timeout logs an error, which
+    // triggers a flush to /api/debug/log-error, which adds more concurrent
+    // requests to the same origin, which can cause more health-check timeouts.
+    if (!message.includes('[Koryphaios]')) {
+      errorBuffer.push({
+        timestamp: Date.now(),
+        type: 'error',
+        message,
+        userAgent: navigator.userAgent,
+      });
+      scheduleFlush();
+    }
     if (_originalError) _originalError.apply(console, args);
-    scheduleFlush();
   };
 
   // Capture console warnings
   console.warn = (...args: unknown[]) => {
     const message = args.map((a) => String(a)).join(' ');
-    errorBuffer.push({
-      timestamp: Date.now(),
-      type: 'warn',
-      message,
-      userAgent: navigator.userAgent,
-    });
+    if (!message.includes('[Koryphaios]')) {
+      errorBuffer.push({
+        timestamp: Date.now(),
+        type: 'warn',
+        message,
+        userAgent: navigator.userAgent,
+      });
+      scheduleFlush();
+    }
     if (_originalWarn) _originalWarn.apply(console, args);
-    scheduleFlush();
   };
 
   // Capture window errors

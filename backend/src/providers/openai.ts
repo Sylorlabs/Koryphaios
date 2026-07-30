@@ -75,10 +75,10 @@ export class OpenAIProvider implements Provider {
 
   listModels(): ModelDef[] {
     const fallback = this.getModelCatalogFallback();
-    if (!this.isAvailable()) return fallback;
+    if (!this.isAvailable()) return [];
     if (this.cachedModels && isModelListCacheFresh(this.lastFetch)) return this.cachedModels;
     void this.refreshModelsInBackground(fallback);
-    return this.cachedModels ?? fallback;
+    return this.cachedModels ?? [];
   }
 
   /**
@@ -155,16 +155,13 @@ export class OpenAIProvider implements Provider {
             { provider: this.name, count: this.cachedModels.length },
             'Model list refreshed from provider API',
           );
-        } else {
-          this.cachedModels ??= fallback;
         }
         this.lastFetch = Date.now();
       } catch (err) {
         providerLog.debug(
           { provider: this.name, err: err instanceof Error ? err.message : String(err) },
-          'Model list refresh failed; using catalog fallback',
+          'Model list refresh failed; leaving catalog empty rather than exposing a fallback list',
         );
-        this.cachedModels ??= fallback;
       } finally {
         this.refreshInProgress = null;
       }

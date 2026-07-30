@@ -105,21 +105,9 @@ export class DevinProvider implements Provider {
   }
 
   listModels(): ModelDef[] {
-    return DEVIN_MODELS.map(
-      (m) =>
-        ({
-          id: `devin-${m.id}`,
-          name: m.name,
-          provider: 'devin',
-          apiModelId: m.id,
-          contextWindow: m.ctx ?? 200_000,
-          contextVerified: !!m.ctx,
-          maxOutputTokens: 32_000,
-          supportsStreaming: true,
-          supportsAttachments: false,
-          canReason: true,
-        }) as ModelDef,
-    );
+    // Devin does not report a model catalog through its local CLI. Do not
+    // manufacture one; execution uses the provider-selected default.
+    return [];
   }
 
   private resolveCliModel(modelId: string | undefined): string | undefined {

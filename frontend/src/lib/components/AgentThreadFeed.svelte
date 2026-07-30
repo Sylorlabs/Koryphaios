@@ -95,8 +95,8 @@
 
   function providerLabel(provider: string): string {
     if (provider === 'openai') return 'OpenAI';
-    if (provider === 'codex') return 'OpenAI Codex (CLI)';
-    if (provider === 'codex-auth') return 'OpenAI Codex (Auth)';
+    if (provider === 'codex') return 'Codex CLI';
+    if (provider === 'codex-auth') return 'OpenAI Codex';
     if (provider === 'anthropic') return 'Anthropic';
     if (provider === 'google') return 'Google';
     if (provider === 'aistudio') return 'Google AI Studio';

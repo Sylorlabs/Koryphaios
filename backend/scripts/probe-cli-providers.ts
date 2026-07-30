@@ -16,7 +16,6 @@ import {
   detectClaudeCodeLogin,
   detectGrokCLILogin,
   detectAntigravityCLILogin,
-  detectCodexAuthToken,
   detectCodexCLILogin,
 } from '../src/providers/auth-utils';
 import { whichBinary } from '../src/providers/cli-detection';
@@ -91,9 +90,6 @@ async function main() {
 
     const notes: string[] = [];
     if (cfg?.disabled) notes.push('disabled in koryphaios.json');
-    if (name === 'codex' && !detectCodexAuthToken() && detectCodexCLILogin()) {
-      notes.push('~/.codex/auth.json exists but .koryphaios/codex-home/auth.json missing');
-    }
 
     rows.push({
       provider: name,
@@ -105,7 +101,7 @@ async function main() {
             ? detectGrokCLILogin()
             : name === 'antigravity'
               ? detectAntigravityCLILogin()
-              : detectCodexCLILogin() || !!detectCodexAuthToken(),
+              : detectCodexCLILogin(),
       configDisabled: cfg?.disabled ?? null,
       registryConnected: connected,
       modelCount: models.length,

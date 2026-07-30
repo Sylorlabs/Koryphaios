@@ -34,6 +34,8 @@ import { providersStore, loadProvidersFromApi } from './providers.svelte';
 import { feedStore } from './feed.svelte';
 import { agentStore } from './agents.svelte';
 import { notesStore } from './notes.svelte';
+import { goalStore } from './goals.svelte';
+import { isDemoMode } from '$lib/demo-flags';
 
 export type { FeedEntry };
 export { feedStore } from './feed.svelte';
@@ -143,8 +145,8 @@ function stopBusyWatchdog(sessionId: string | undefined) {
 
 function providerDisplayName(provider: string): string {
   if (provider === 'openai') return 'OpenAI';
-  if (provider === 'codex') return 'OpenAI Codex (CLI)';
-  if (provider === 'codex-auth') return 'OpenAI Codex (Auth)';
+  if (provider === 'codex') return 'Codex CLI';
+  if (provider === 'codex-auth') return 'OpenAI Codex';
   if (provider === 'anthropic') return 'Anthropic';
   if (provider === 'google') return 'Google';
   if (provider === 'aistudio') return 'Google AI Studio';
@@ -645,6 +647,11 @@ function handleMessage(msg: WSMessage) {
       break;
     }
 
+    case 'goals.updated': {
+      goalStore.handleUpdated(msg.payload as { goal?: import('@koryphaios/shared').Goal; deletedId?: string });
+      break;
+    }
+
     case 'session.updated': {
       const p = msg.payload as { session: Session };
       if (p.session) sessionStore.handleSessionUpdate(p.session);
@@ -1037,6 +1044,11 @@ function sendUserInput(sessionId: string, selection: string, text?: string) {
 }
 
 function respondToChanges(sessionId: string, accepted: boolean) {
+  // Browser trials have no websocket, but review decisions must still mutate
+  // their tab-scoped virtual repository before the pending-review UI closes.
+  if (isDemoMode) {
+    void import('$lib/demo-api').then((demo) => demo.resolveDemoReview(accepted));
+  }
   if (wsConnection?.readyState === WebSocket.OPEN) {
     wsConnection.send(
       JSON.stringify({
@@ -1048,6 +1060,13 @@ function respondToChanges(sessionId: string, accepted: boolean) {
   }
   sessionChanges.delete(sessionId);
   sessionChanges = new Map(sessionChanges);
+}
+
+function setDemoSessionChanges(sessionId: string, changes: ChangeSummary[]) {
+  const next = new Map(sessionChanges);
+  if (changes.length) next.set(sessionId, changes);
+  else next.delete(sessionId);
+  sessionChanges = next;
 }
 
 function clearFeed() {
@@ -1218,6 +1237,7 @@ export const wsStore = {
   sendAgentMessage,
   sendUserInput,
   respondToChanges,
+  setDemoSessionChanges,
   loadSessionMessages,
   loadAgentThreads: agentStore.loadAgentThreads,
   loadAgentThreadMessages: agentStore.loadAgentThreadMessages,

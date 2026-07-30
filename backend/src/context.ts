@@ -4,6 +4,7 @@ import { KoryManager } from './kory/manager';
 import { SessionStore } from './stores/session-store';
 import { MessageStore } from './stores/message-store';
 import { TaskStore } from './stores/task-store';
+import { GoalStore } from './stores/goal-store';
 import { WSManager } from './ws/ws-manager';
 import { MCPManager } from './mcp/client';
 import { TimeTravelService } from './services/timetravel';
@@ -17,6 +18,7 @@ export interface AppContext {
   sessions: SessionStore;
   messages: MessageStore;
   tasks: TaskStore;
+  goals: GoalStore;
   kory: KoryManager;
   wsManager: WSManager;
   timeTravel: TimeTravelService;

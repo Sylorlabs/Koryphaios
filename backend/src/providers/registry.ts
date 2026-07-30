@@ -28,6 +28,8 @@ import { OpenCodeGoProvider } from './opencodego';
 import { GoogleProvider } from './google';
 import { CopilotProvider, exchangeGitHubTokenForCopilotAsync } from './copilot';
 import { CodexCliProvider } from './codex-cli';
+import { CodexAuthProvider } from './codex-auth';
+import { getManagedCodexAppServer } from './codex-app-server';
 import { ClaudeCodeProvider } from './claude-code';
 import { GrokBuildProvider } from './grok-build';
 import { AntigravityProvider } from './antigravity';
@@ -112,6 +114,127 @@ interface CircuitState {
   failures: number;
   lastFailure: number;
   isOpen: boolean;
+}
+
+/**
+ * Generate a human-readable display label from a provider's machine name.
+ * Used when no explicit label is defined in PROVIDER_DISPLAY, so every
+ * provider in PROVIDER_CONFIGS gets a readable label without a hardcoded list.
+ *
+ *   '302ai'        -> '302.ai'
+ *   'opencodezen'  -> 'OpenCode Zen'
+ *   'codex-auth'   -> 'Codex Auth'
+ *   'novita-ai'    -> 'Novita AI'
+ *   'togetherai'   -> 'Together AI'
+ *   'huggingface'  -> 'HuggingFace'
+ */
+function generateProviderLabel(name: string): string {
+  // Special-case a few names where naive splitting looks wrong.
+  const SPECIAL: Record<string, string> = {
+    '302ai': '302.ai',
+    aistudio: 'Google AI Studio',
+    huggingface: 'HuggingFace',
+    ollamacloud: 'Ollama Cloud',
+    opencodezen: 'OpenCode Zen',
+    opencodego: 'OpenCode Go',
+    blackforestlabs: 'Black Forest Labs',
+    klingai: 'Kling AI',
+    novitaai: 'Novita AI',
+    novita: 'Novita AI',
+    'novita-ai': 'Novita AI',
+    togetherai: 'Together AI',
+    together: 'Together AI',
+    zai: 'ZAI',
+    xai: 'xAI',
+    groq: 'Groq',
+    'codex-auth': 'Codex Auth',
+    'kimicode-auth': 'Kimi Code (Auth)',
+    kimicode: 'Kimi Code (CLI)',
+    moonshot: 'Moonshot AI',
+    mixedbread: 'Mixedbread',
+    mem0: 'Mem0',
+    letta: 'Letta',
+    prodia: 'Prodia',
+    gladia: 'Gladia',
+    lmnt: 'LMNT',
+    fal: 'Fal',
+    luma: 'Luma',
+    poe: 'Poe',
+    moark: 'Moark',
+    wandb: 'Weights & Biases',
+    submodel: 'SubModel',
+    synthetic: 'Synthetic',
+    inference: 'Inference.net',
+    requesty: 'Requesty',
+    'github-models': 'GitHub Models',
+    vultr: 'Vultr',
+    abacus: 'Abacus',
+    llama: 'Meta Llama',
+    friendli: 'Friendli',
+    voyageai: 'Voyage AI',
+    perplexity: 'Perplexity',
+    elevenlabs: 'ElevenLabs',
+    assemblyai: 'AssemblyAI',
+    deepgram: 'Deepgram',
+    nvidia: 'NVIDIA NIM',
+    upstage: 'Upstage',
+    siliconflow: 'SiliconFlow',
+    stepfun: 'StepFun',
+    modelscope: 'ModelScope',
+    qwen: 'Qwen',
+    hyperbolic: 'Hyperbolic',
+    deepinfra: 'DeepInfra',
+    ionet: 'IO.net',
+    fireworks: 'Fireworks AI',
+    cerebras: 'Cerebras',
+    cortecs: 'Cortecs',
+    minimax: 'MiniMax',
+    nebius: 'Nebius',
+    scaleway: 'Scaleway',
+    ovhcloud: 'OVHcloud',
+    stackit: 'STACKIT',
+    venice: 'Venice AI',
+    zenmux: 'ZenMux',
+    baseten: 'Baseten',
+    helicone: 'Helicone',
+    portkey: 'Portkey',
+    modal: 'Modal',
+    replicate: 'Replicate',
+    cloudflare: 'Cloudflare',
+    vercel: 'Vercel',
+    mistral: 'Mistral AI',
+    cohere: 'Cohere',
+    // Well-known providers that need proper capitalization.
+    anthropic: 'Anthropic',
+    openai: 'OpenAI',
+    openrouter: 'OpenRouter',
+    google: 'Google',
+    copilot: 'GitHub Copilot',
+    azure: 'Azure OpenAI',
+    bedrock: 'AWS Bedrock',
+    vertexai: 'Vertex AI',
+    local: 'Local (custom endpoint)',
+    ollama: 'Ollama',
+    lmstudio: 'LM Studio',
+    llamacpp: 'Llama.cpp',
+    deepseek: 'DeepSeek',
+    claude: 'Claude Code',
+    jules: 'Google Jules',
+    azurecognitive: 'Azure Cognitive',
+    sapai: 'SAP AI',
+    gitlab: 'GitLab',
+  };
+  if (SPECIAL[name]) return SPECIAL[name];
+
+  // Generic: split on hyphens and camelCase boundaries, title-case each part.
+  const parts = name
+    .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+    .split(/[-_]/)
+    .map((part) => {
+      if (part.length <= 3) return part.toUpperCase();
+      return part.charAt(0).toUpperCase() + part.slice(1);
+    });
+  return parts.join(' ');
 }
 
 const CIRCUIT_THRESHOLD = 5;
@@ -330,6 +453,10 @@ class ProviderRegistry {
         circuitOpen,
         ...(isCustom && { custom: true, label: config?.label ?? String(name) }),
         ...(display?.label && !isCustom && { label: display.label }),
+        // Auto-generate a human-readable label for providers without a display entry.
+        ...(!display?.label && !isCustom && !String(name).startsWith('remote-') && {
+          label: generateProviderLabel(String(name)),
+        }),
         ...(display?.iconPath && { iconPath: display.iconPath }),
         deployment: inferredDeployment,
         ...(display?.description && { description: display.description }),
@@ -700,6 +827,18 @@ class ProviderRegistry {
         }
         case 'openai':
           return this.verifyBearerGet('https://api.openai.com/v1/models', apiKey);
+        case 'codex-auth': {
+          try {
+            // This runs while connecting, before the provider instance exists.
+            // The official app-server is the OAuth authority, so query it directly.
+            const account = await getManagedCodexAppServer().account(true);
+            return account.account?.type === 'chatgpt'
+              ? { success: true }
+              : { success: false, error: 'OpenAI Codex is not signed in with ChatGPT' };
+          } catch (error) {
+            return { success: false, error: error instanceof Error ? error.message : 'Could not verify OpenAI Codex' };
+          }
+        }
         case 'google':
         case 'aistudio': {
           if (!apiKey && !authToken)
@@ -993,7 +1132,7 @@ class ProviderRegistry {
         // The Codex app-server exposes its authenticated model catalog. Wait
         // for it on explicit connect so the picker never opens with a stale
         // hardcoded fallback list.
-        if (provider instanceof CodexCliProvider) {
+        if (provider instanceof CodexCliProvider || provider instanceof CodexAuthProvider) {
           await provider.refreshModels();
         }
         this.providers.set(name, provider);
@@ -1241,6 +1380,8 @@ class ProviderRegistry {
         return new CopilotProvider(config);
       case 'codex':
         return new CodexCliProvider(config);
+      case 'codex-auth':
+        return new CodexAuthProvider(config);
       case 'grok':
         // Grok Build subscription — runs the official `grok` CLI harness (no direct API calls).
         return new GrokBuildProvider(config);

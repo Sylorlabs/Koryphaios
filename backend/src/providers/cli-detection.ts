@@ -157,7 +157,7 @@ export function detectAgentClis(): AgentCliStatus[] {
 
   // ── Codex → `codex` provider. The installed CLI owns its own login. ──
   const machineCodex = detectCodexCLILogin();
-  const codex = mk('codex', 'OpenAI Codex (CLI)', ['codex'], 'codex', {
+  const codex = mk('codex', 'Codex CLI', ['codex'], 'codex', {
     loggedIn: machineCodex,
     authSource: machineCodex ? '~/.codex/auth.json' : null,
     autoEnabled: canAutoEnable('codex'),

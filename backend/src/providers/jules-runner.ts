@@ -189,7 +189,7 @@ export async function* runJulesTask(config: JulesRunConfig): AsyncGenerator<Prov
   const automationMode =
     config.automationMode ?? process.env.JULES_AUTOMATION_MODE ?? 'AUTO_CREATE_PR';
   const requirePlanApproval =
-    config.requirePlanApproval ?? process.env.JULES_REQUIRE_PLAN_APPROVAL === 'true';
+    config.requirePlanApproval ?? process.env.JULES_REQUIRE_PLAN_APPROVAL !== 'false';
 
   let julesSessionId = config.resumeSessionId;
   let isFollowUp = false;

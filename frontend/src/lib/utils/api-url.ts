@@ -123,6 +123,35 @@ export function getApiBaseUrl(): string {
 }
 
 /**
+ * Get the DIRECT backend URL, bypassing the Vite dev-server proxy.
+ *
+ * In dev mode (browser, not Tauri), `getApiBaseUrl()` returns
+ * `window.location.origin` (e.g. http://127.0.0.1:5173) so that API
+ * calls go through Vite's `/api` proxy. That's fine for normal API
+ * calls, but the backend-health sentinel must NOT go through the
+ * proxy: Vite's HTTP/1.1 dev server has a 6-connection-per-origin
+ * limit, and when the app is busy (error logging, process polling,
+ * session loading) the health check can queue behind other requests
+ * and exceed its 4s timeout — producing a false "backend down" alarm.
+ *
+ * This function returns the direct backend URL from the VITE_BACKEND_URL
+ * env var (injected by vite.config.ts), falling back to the proxy URL
+ * if the env var is unavailable (e.g. Tauri production builds where the
+ * proxy URL IS the direct URL).
+ */
+export function getDirectBackendUrl(): string {
+  if (!browser) return '';
+  // In Tauri, the cached URL is already direct (no proxy).
+  const inTauri = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
+  if (inTauri) return getCachedBackendUrl();
+  // In browser dev mode, prefer the Vite-injected direct backend URL.
+  const viteUrl = import.meta.env.VITE_BACKEND_URL;
+  if (viteUrl) return normalizeUrlForBrowser(viteUrl as string);
+  // Fallback: use the proxy URL (same as getApiBaseUrl).
+  return getCachedBackendUrl();
+}
+
+/**
  * Build a full API URL
  *
  * Usage:

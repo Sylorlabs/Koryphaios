@@ -65,9 +65,28 @@ describe('local Koryphaios skills', () => {
   test('loads professional playbooks only with their selected skill revision', () => {
     const skills = listSkills(root);
     const experience = skills.find((skill) => skill.name === 'human-experience')!;
+    const visualDesign = skills.find((skill) => skill.name === 'visual-interface-design')!;
+    const visualVerification = skills.find((skill) => skill.name === 'visual-verification')!;
     const routing = skills.find((skill) => skill.name === 'task-routing')!;
     expect(experience.instructions).toContain('Map entry, orientation, setup');
+    expect(visualDesign.instructions).toContain('State a concise visual read before implementation');
+    expect(visualDesign.instructions).toContain('Run a visual pre-flight before declaring completion');
+    expect(visualDesign.instructions).toContain('These are universal checks, not web prescriptions');
+    expect(visualVerification.instructions).toContain('Mark each visual claim passed, failed, or unavailable');
+    expect(visualVerification.instructions).toContain('do not force browser responsiveness');
     expect(routing.instructions).not.toContain('Map entry, orientation, setup');
+  });
+
+  test('keeps medium anti-slop guidance specific without weakening web checks', () => {
+    const skills = listSkills(root);
+    const web = skills.find((skill) => skill.name === 'web-interface')!;
+    const native = skills.find((skill) => skill.name === 'native-interface')!;
+    const terminal = skills.find((skill) => skill.name === 'terminal-interface')!;
+    const embedded = skills.find((skill) => skill.name === 'embedded-interface')!;
+    expect(web.instructions).toContain('For web visual anti-slop');
+    expect(native.instructions).toContain('For native visual anti-slop');
+    expect(terminal.instructions).toContain('For terminal anti-slop');
+    expect(embedded.instructions).toContain('For embedded anti-slop');
   });
 
   test('ships deep professional playbooks for every specialist branch', () => {

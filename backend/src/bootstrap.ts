@@ -11,6 +11,7 @@ import { KoryManager } from './kory/manager';
 import { SessionStore } from './stores/session-store';
 import { MessageStore } from './stores/message-store';
 import { TaskStore } from './stores/task-store';
+import { GoalStore } from './stores/goal-store';
 import { loadConfig } from './runtime/config';
 import { PROJECT_ROOT } from './runtime/paths';
 import { loadEnvFromProject, validateEnvironment } from './runtime/env';
@@ -106,6 +107,7 @@ export async function bootstrap(): Promise<AppContext> {
   const sessions = new SessionStore();
   const messages = new MessageStore();
   const tasks = new TaskStore();
+  const goals = new GoalStore();
   const timeTravel = new TimeTravelService(PROJECT_ROOT, messages);
 
   const kory = new KoryManager(
@@ -132,6 +134,7 @@ export async function bootstrap(): Promise<AppContext> {
     sessions,
     messages,
     tasks,
+    goals,
     kory,
     wsManager,
     timeTravel,
@@ -162,6 +165,7 @@ async function initEncryption() {
 }
 
 import { registerGitTools } from './tools';
+import { CreateGoalTool } from './tools/goals';
 import { noteTools } from './tools/notes';
 
 async function initTools() {
@@ -192,6 +196,7 @@ async function initTools() {
     new MCPSuggestFixesTool(),
     new FetchContextTool(),
     new PruneContextTool(),
+    new CreateGoalTool(),
   ];
 
   for (const tool of defaultTools) {

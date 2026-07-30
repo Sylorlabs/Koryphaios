@@ -306,7 +306,6 @@ const NO_REASONING_PROVIDERS = [
   'gladia',
   'lmnt',
   'nvidia',
-  'nim',
   'friendliai',
   'voyageai',
   'mixedbread',

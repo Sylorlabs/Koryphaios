@@ -21,6 +21,7 @@ export interface ProviderHarnessCapabilities {
 }
 
 const NATIVE_PROVIDERS = new Set([
+  'codex',
   'claude',
   'grok',
   'antigravity',
@@ -29,7 +30,26 @@ const NATIVE_PROVIDERS = new Set([
   'cursor',
   'devin',
   'cline',
+  'kimicode',
 ]);
+
+// These harnesses execute their own CLI tools. They can report completed native
+// actions, but cannot receive or return Kory's structured tool protocol. Do not
+// offer Kory control-plane tools (especially delegation) until an adapter adds a
+// real bridge like the Codex CLI envelope bridge.
+const NATIVE_PROVIDERS_WITHOUT_KORY_TOOL_BRIDGE = new Set([
+  'claude',
+  'grok',
+  'antigravity',
+  'gemini-cli',
+  'cursor',
+  'devin',
+  'cline',
+]);
+
+export function supportsKoryControlPlaneTools(provider: ProviderName | string): boolean {
+  return !NATIVE_PROVIDERS_WITHOUT_KORY_TOOL_BRIDGE.has(String(provider));
+}
 
 /** Runtime truth shared by prompt manifests, routing UI, and qualification evidence. */
 export function getProviderHarnessCapabilities(

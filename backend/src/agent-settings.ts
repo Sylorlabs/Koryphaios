@@ -60,6 +60,10 @@ export interface AgentSettings {
 
   /** How aggressively Kory resolves material ambiguity before implementation. */
   intentInterview: 'off' | 'adaptive' | 'deep';
+  /** How much up-front checklist planning Goal Mode performs. */
+  goalPlanningDepth: 'minimal' | 'adaptive' | 'structured';
+  /** Let Goal Mode advance one eligible checklist item at a time. */
+  automaticGoalDriving: boolean;
 
   /** Whether design discovery is offered for materially ambiguous interface work. */
   designDiscovery: boolean;
@@ -145,6 +149,8 @@ export const DEFAULT_AGENT_SETTINGS: AgentSettings = {
   criticGateEnabled: true,
   gateStrictness: 'strict',
   intentInterview: 'adaptive',
+  goalPlanningDepth: 'adaptive',
+  automaticGoalDriving: true,
   designDiscovery: true,
   planApproval: 'material',
   modelQualification: 'enforce',
@@ -424,6 +430,7 @@ const SETTING_ENUMS: Partial<Record<keyof AgentSettings, readonly string[]>> = {
   agentExecutionMode: ['auto', 'single', 'multi'],
   gateStrictness: ['strict', 'advisory', 'off'],
   intentInterview: ['off', 'adaptive', 'deep'],
+  goalPlanningDepth: ['minimal', 'adaptive', 'structured'],
   planApproval: ['always', 'material', 'never'],
   modelQualification: ['enforce', 'warn', 'off'],
   feedbackSharing: ['local', 'sanitized-opt-in'],

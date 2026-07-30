@@ -5,7 +5,7 @@
   import { toastStore } from '$lib/stores/toast.svelte';
   import { projectStore, projectDisplayName } from '$lib/stores/project.svelte';
   import { collaborationStore } from '$lib/stores/collaboration.svelte';
-  import { isDemoMode } from '$lib/demo-flags';
+  import { isFullDemo, isGuidedDemo } from '$lib/demo-flags';
   import {
     Plus,
     Search,
@@ -23,6 +23,8 @@
   } from 'lucide-svelte';
   import AnimatedStatusIcon from './AnimatedStatusIcon.svelte';
   import ConfirmDialog from './ConfirmDialog.svelte';
+  import ActiveGoals from './ActiveGoals.svelte';
+  import { goalDisplayStore } from '$lib/stores/goal-display.svelte';
 
   interface Props {
     currentSessionId?: string;
@@ -47,7 +49,7 @@
   });
 
   async function handleCreateSession(event?: MouseEvent) {
-    if (isDemoMode) {
+    if (isGuidedDemo) {
       toastStore.info('Sample sessions are read-only in the demo. Run the app to create a workspace.');
       return;
     }
@@ -73,7 +75,7 @@
   }
 
   function startRename(id: string, currentTitle: string) {
-    if (isDemoMode) return;
+    if (isGuidedDemo) return;
     editingId = id;
     editTitle = currentTitle;
   }
@@ -97,7 +99,7 @@
 
   function confirmDelete(e: MouseEvent, id: string) {
     e.stopPropagation();
-    if (isDemoMode) {
+    if (isGuidedDemo) {
       toastStore.info('Sample sessions are protected in the demo.');
       return;
     }
@@ -159,9 +161,9 @@
       type="button"
       class="p-2 rounded-lg transition-colors hover:bg-[var(--color-surface-3)] flex items-center justify-center"
       style="color: var(--color-text-secondary);"
-      disabled={creating || isDemoMode}
+      disabled={creating || isGuidedDemo}
       onclick={(e) => handleCreateSession(e)}
-      title={isDemoMode ? 'Sample sessions are read-only in the demo' : 'New session (Ctrl+N; Shift-click forces a new chat)'}
+      title={isGuidedDemo ? 'Sample sessions are read-only in the guided demo' : isFullDemo ? 'New ephemeral session' : 'New session (Ctrl+N; Shift-click forces a new chat)'}
       aria-label="New session"
     >
       {#if creating}
@@ -332,7 +334,7 @@
             onkeydown={(e) => {
               if (e.key === 'Enter') selectSession(session.id);
             }}
-            ondblclick={() => !isDemoMode && startRename(session.id, session.title)}
+            ondblclick={() => !isGuidedDemo && startRename(session.id, session.title)}
           >
             {#if editingId === session.id}
               <div class="flex-1 flex flex-col gap-0.5">
@@ -456,7 +458,7 @@
                   {/if}
                 </div>
               </div>
-              {#if !isDemoMode}<div
+              {#if !isGuidedDemo}<div
                 class="flex items-center gap-1 transition-opacity {sessionStore.activeSessionId ===
                 session.id
                   ? 'opacity-70 group-hover:opacity-100 group-focus-within:opacity-100'
@@ -506,6 +508,7 @@
       </div>
     {/if}
   </div>
+  {#if goalDisplayStore.sidebar}<ActiveGoals />{/if}
 </div>
 
 <ConfirmDialog

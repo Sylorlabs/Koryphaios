@@ -44,7 +44,7 @@ export interface AppConfig {
 const defaultConfig: AppConfig = {
   app: {
     name: 'Koryphaios',
-    version: '1.0.23',
+    version: '0.1.0',
     identifier: 'com.sylorlabs.koryphaios',
   },
   server: {

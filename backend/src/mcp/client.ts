@@ -49,6 +49,9 @@ interface MCPToolResult {
   isError?: boolean;
 }
 
+const MCP_REQUEST_TIMEOUT_MS = 30_000;
+const MCP_IDLE_SHUTDOWN_MS = 2 * 60_000;
+
 // ─── MCP Client ─────────────────────────────────────────────────────────────
 
 export class MCPClient {
@@ -66,6 +69,7 @@ export class MCPClient {
   private connected = false;
   private serverName: string;
   private serverCapabilities: Record<string, unknown> = {};
+  private idleShutdown: ReturnType<typeof setTimeout> | null = null;
 
   constructor(private config: MCPServerConfig) {
     this.serverName = config.name;
@@ -82,6 +86,7 @@ export class MCPClient {
   }
 
   async connect(): Promise<void> {
+    if (this.connected) return;
     if (this.config.transport === 'stdio') {
       await this.connectStdio();
     } else {
@@ -209,6 +214,7 @@ export class MCPClient {
     }
 
     this.connected = true;
+    this.scheduleIdleShutdown();
     mcpLog.info({ server: this.serverName, tools: this.tools.length }, 'MCP connected via stdio');
   }
 
@@ -256,10 +262,14 @@ export class MCPClient {
     }
 
     this.connected = true;
+    this.scheduleIdleShutdown();
     mcpLog.info({ server: this.serverName, tools: this.tools.length }, 'MCP connected via SSE');
   }
 
   async callTool(name: string, args: Record<string, unknown>): Promise<MCPToolResult> {
+    if (!this.connected) await this.connect();
+    this.clearIdleShutdown();
+    try {
     if (this.config.transport === 'stdio') {
       const response = await this.request('tools/call', { name, arguments: args });
       if (response.error) {
@@ -298,6 +308,9 @@ export class MCPClient {
       }
       return data.result as MCPToolResult;
     }
+    } finally {
+      this.scheduleIdleShutdown();
+    }
   }
 
   private async request(method: string, params: unknown): Promise<MCPResponse> {
@@ -309,7 +322,22 @@ export class MCPClient {
     const request: MCPRequest = { jsonrpc: '2.0', id, method, params };
 
     return new Promise((resolve, reject) => {
-      this.pending.set(id, { resolve, reject });
+      const timeout = setTimeout(() => {
+        if (!this.pending.delete(id)) return;
+        reject(new Error(`MCP server ${this.serverName} timed out while handling ${method}`));
+      }, MCP_REQUEST_TIMEOUT_MS);
+      timeout.unref?.();
+      this.pending.set(id, {
+        resolve: (response) => {
+          clearTimeout(timeout);
+          resolve(response);
+        },
+        reject: (error) => {
+          clearTimeout(timeout);
+          reject(error);
+        },
+      });
+      this.clearIdleShutdown();
 
       if (this.config.transport === 'stdio') {
         const stdin = this.process!.stdin as unknown as { write: (chunk: string | Uint8Array) => void, flush: () => void };
@@ -350,12 +378,28 @@ export class MCPClient {
   }
 
   async shutdown(): Promise<void> {
+    this.clearIdleShutdown();
     if (this.process) {
       this.process.kill();
       this.process = undefined;
     }
     this.connected = false;
     this.pending.clear();
+  }
+
+  private clearIdleShutdown(): void {
+    if (this.idleShutdown) clearTimeout(this.idleShutdown);
+    this.idleShutdown = null;
+  }
+
+  private scheduleIdleShutdown(): void {
+    if (!this.connected || this.pending.size > 0) return;
+    this.clearIdleShutdown();
+    this.idleShutdown = setTimeout(() => {
+      mcpLog.info({ server: this.serverName }, 'Shutting down idle MCP server');
+      void this.shutdown();
+    }, MCP_IDLE_SHUTDOWN_MS);
+    this.idleShutdown.unref?.();
   }
 }
 

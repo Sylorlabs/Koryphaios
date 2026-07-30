@@ -13,7 +13,6 @@ export const ANTHROPIC_VERSION = '2026-01-01';
 export const PROVIDER_BASE_URLS: Partial<Record<ProviderName, string>> = {
   anthropic: 'https://api.anthropic.com/v1',
   openai: 'https://api.openai.com/v1',
-  'codex-auth': 'https://api.openai.com/v1',
   google: 'https://generativelanguage.googleapis.com/v1beta',
   // AI Studio is Google's API-key surface for the same Gemini API. It is not
   // Vertex AI and it does not use Google Cloud ADC/OAuth.
@@ -82,7 +81,6 @@ export function buildAuthHeaders(
       return { headers };
 
     case 'openai':
-    case 'codex-auth':
     case 'kimicode':
     case 'kimicode-auth':
     case 'groq':
