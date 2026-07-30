@@ -110,6 +110,9 @@
     return rgbToHex(r, g, b);
   });
 
+  // Derived RGB triplet for the readout inputs
+  let currentRgb = $derived.by(() => hsvToRgb(hue, sat, val));
+
   // Auto-derive a hover color: lighten the main by mixing toward white.
   function deriveHover(main: string): string {
     const rgb = hexToRgb(main);
@@ -261,7 +264,6 @@
     const EyeDropper = window.EyeDropper;
     if (!EyeDropper) return;
     try {
-      // @ts-expect-error EyeDropper API
       const result = await new EyeDropper().open();
       const picked = String(result.sRGBHex).toUpperCase();
       hexInput = picked;
@@ -368,8 +370,8 @@
           <div class="relative" style={wheelStyle}>
             <canvas
               bind:this={wheelCanvas}
-              {wheelSize}
-              {wheelStyle}
+              width={wheelSize}
+              height={wheelSize}
               class="rounded-full cursor-crosshair touch-none select-none"
               style="display:block;"
               onpointerdown={handleWheelPointer}
@@ -385,6 +387,8 @@
           <div class="relative" style={barStyle}>
             <canvas
               bind:this={valueBar}
+              width={barWidth}
+              height={barHeight}
               class="rounded-lg cursor-pointer touch-none select-none"
               style="display:block;"
               onpointerdown={handleBarPointer}
@@ -401,10 +405,11 @@
         <!-- Hex + eyedropper -->
         <div class="flex items-center gap-3">
           <div class="flex-1">
-            <label class="block text-[10px] font-bold uppercase tracking-wider mb-1.5" style="color: var(--color-text-muted);">Hex</label>
+            <label for="cp-hex" class="block text-[10px] font-bold uppercase tracking-wider mb-1.5" style="color: var(--color-text-muted);">Hex</label>
             <div class="flex items-center gap-2">
               <input
                 type="text"
+                id="cp-hex"
                 bind:value={hexInput}
                 onfocus={() => (typingHex = true)}
                 onblur={() => { typingHex = false; commitHexInput(); }}
@@ -429,15 +434,14 @@
         </div>
 
         <!-- RGB readout -->
-        {@const [rr, gg, bb] = hsvToRgb(hue, sat, val)}
         <div class="grid grid-cols-3 gap-3">
           <div>
-            <label class="block text-[10px] font-bold uppercase tracking-wider mb-1.5" style="color: var(--color-text-muted);">R</label>
+            <label for="cp-r" class="block text-[10px] font-bold uppercase tracking-wider mb-1.5" style="color: var(--color-text-muted);">R</label>
             <input
-              type="number" min="0" max="255" value={rr}
+              type="number" min="0" max="255" id="cp-r" value={currentRgb[0]}
               oninput={(e) => {
                 const r = Math.max(0, Math.min(255, Number((e.target as HTMLInputElement).value) || 0));
-                const [h, s, v] = rgbToHsv(r, gg, bb);
+                const [h, s, v] = rgbToHsv(r, currentRgb[1], currentRgb[2]);
                 hue = h; sat = s; val = v;
               }}
               class="w-full px-2.5 py-1.5 rounded-lg text-sm font-mono border outline-none"
@@ -445,12 +449,12 @@
             />
           </div>
           <div>
-            <label class="block text-[10px] font-bold uppercase tracking-wider mb-1.5" style="color: var(--color-text-muted);">G</label>
+            <label for="cp-g" class="block text-[10px] font-bold uppercase tracking-wider mb-1.5" style="color: var(--color-text-muted);">G</label>
             <input
-              type="number" min="0" max="255" value={gg}
+              type="number" min="0" max="255" id="cp-g" value={currentRgb[1]}
               oninput={(e) => {
                 const g = Math.max(0, Math.min(255, Number((e.target as HTMLInputElement).value) || 0));
-                const [h, s, v] = rgbToHsv(rr, g, bb);
+                const [h, s, v] = rgbToHsv(currentRgb[0], g, currentRgb[2]);
                 hue = h; sat = s; val = v;
               }}
               class="w-full px-2.5 py-1.5 rounded-lg text-sm font-mono border outline-none"
@@ -458,12 +462,12 @@
             />
           </div>
           <div>
-            <label class="block text-[10px] font-bold uppercase tracking-wider mb-1.5" style="color: var(--color-text-muted);">B</label>
+            <label for="cp-b" class="block text-[10px] font-bold uppercase tracking-wider mb-1.5" style="color: var(--color-text-muted);">B</label>
             <input
-              type="number" min="0" max="255" value={bb}
+              type="number" min="0" max="255" id="cp-b" value={currentRgb[2]}
               oninput={(e) => {
                 const b = Math.max(0, Math.min(255, Number((e.target as HTMLInputElement).value) || 0));
-                const [h, s, v] = rgbToHsv(rr, gg, b);
+                const [h, s, v] = rgbToHsv(currentRgb[0], currentRgb[1], b);
                 hue = h; sat = s; val = v;
               }}
               class="w-full px-2.5 py-1.5 rounded-lg text-sm font-mono border outline-none"
@@ -475,7 +479,7 @@
         <!-- Hover color -->
         <div class="pt-3 border-t" style="border-color: var(--color-border);">
           <div class="flex items-center justify-between mb-2">
-            <label class="text-[10px] font-bold uppercase tracking-wider" style="color: var(--color-text-muted);">Hover Color</label>
+            <span class="text-[10px] font-bold uppercase tracking-wider" style="color: var(--color-text-muted);">Hover Color</span>
             <button
               type="button"
               class="text-[10px] px-2 py-1 rounded-md border transition-colors"

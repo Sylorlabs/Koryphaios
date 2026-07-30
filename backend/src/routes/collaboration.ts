@@ -232,7 +232,7 @@ export const collaborationRoutes = new Elysia({ prefix: '/api/collab' })
   // ─── Shared providers (host side): which providers to serve remotely ──────
   .get('/providers/shared', async ({ request, set }) => {
     if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
-    const { getSharedProviders, isAgenticProvider } =
+    const { getSharedProviders, getSharedModels, isAgenticProvider } =
       await import('../collaboration/remote-provider-host');
     // Attach the risk classification for the UI's compliance gating.
     const { classifyProviderShare } = await import('@koryphaios/shared');
@@ -242,6 +242,7 @@ export const collaborationRoutes = new Elysia({ prefix: '/api/collab' })
       ok: true,
       data: {
         shared: [...shared],
+        sharedModels: getSharedModels(),
         // Show the complete provider catalog. An unavailable provider remains
         // visible (and explains why it cannot be shared) rather than vanishing
         // from the user's mental model of what Koryphaios supports.
@@ -249,6 +250,7 @@ export const collaborationRoutes = new Elysia({ prefix: '/api/collab' })
             provider: p.name,
             label: p.label ?? p.name,
             modelCount: p.allAvailableModels.length || p.models.length,
+            models: p.allAvailableModels.map((model) => ({ id: model.id, name: model.name })),
             available: p.authenticated && p.enabled,
             // CLI harnesses run on the host and see the guest's files.
             agentic: isAgenticProvider(p.name),
@@ -262,10 +264,11 @@ export const collaborationRoutes = new Elysia({ prefix: '/api/collab' })
     async ({ request, body, set }) => {
       if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
       const { setSharedProviders } = await import('../collaboration/remote-provider-host');
-      setSharedProviders(((body as any)?.providers as string[]) ?? []);
+      const input = body as { providers: string[]; models?: Record<string, string[]> };
+      setSharedProviders(input.providers ?? [], input.models ?? {});
       return { ok: true };
     },
-    { body: t.Object({ providers: t.Array(t.String()) }) },
+    { body: t.Object({ providers: t.Array(t.String()), models: t.Optional(t.Record(t.String(), t.Array(t.String()))) }) },
   )
 
   // ─── Sandbox policy (host side): how remote CLI turns are confined ────────

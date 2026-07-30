@@ -2336,7 +2336,7 @@ import { apiFetch, parseJsonResponse } from '$lib/api.svelte';
   }
   :global(.input:focus) {
     border-color: var(--color-accent) !important;
-    box-shadow: 0 0 0 4px var(--color-accent-transparent, rgba(213, 178, 97, 0.1)) !important;
+    box-shadow: 0 0 0 4px var(--color-accent-transparent, rgba(var(--color-accent-rgb), 0.1)) !important;
     background: var(--color-surface-1) !important;
   }
   .secret-visibility {

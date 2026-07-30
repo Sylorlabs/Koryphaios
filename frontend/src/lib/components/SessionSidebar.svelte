@@ -392,7 +392,7 @@
               {#if sessionStore.activeSessionId === session.id && wsStore.managerStatus !== 'idle'}
                 <div
                   class="shrink-0 flex items-center justify-center rounded-lg"
-                  style="width: 18px; height: 18px; background: rgba(213, 178, 97, 0.08);"
+                  style="width: 18px; height: 18px; background: rgba(var(--color-accent-rgb), 0.08);"
                 >
                   <AnimatedStatusIcon
                     status={wsStore.managerStatus}

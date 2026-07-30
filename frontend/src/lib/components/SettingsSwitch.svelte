@@ -5,10 +5,11 @@
     description: string;
     onchange: () => void | Promise<void>;
     compact?: boolean;
+    large?: boolean;
     disabled?: boolean;
   }
 
-  let { checked, label, description, onchange, compact = false, disabled = false }: Props = $props();
+  let { checked, label, description, onchange, compact = false, large = false, disabled = false }: Props = $props();
 </script>
 
 <button
@@ -26,13 +27,13 @@
     <span class="mt-1 block text-xs leading-relaxed text-[var(--color-text-muted)]">{description}</span>
   </span>
   <span
-    class="relative mt-0.5 inline-flex h-6 w-11 shrink-0 items-center rounded-full border transition-all duration-200"
+    class="relative mt-0.5 inline-flex shrink-0 items-center rounded-full border transition-all duration-200 {large ? 'h-8 w-14' : 'h-6 w-11'}"
     style="border-color: {checked ? 'var(--color-accent)' : 'var(--color-border)'}; background: {checked ? 'var(--color-accent)' : 'var(--color-surface-4)'}; box-shadow: {checked ? '0 0 0 3px color-mix(in srgb, var(--color-accent) 14%, transparent)' : 'none'};"
     aria-hidden="true"
   >
     <span
-      class="h-4 w-4 rounded-full bg-white shadow-sm transition-transform duration-200"
-      style="transform: translateX({checked ? '22px' : '3px'});"
+      class="rounded-full bg-white shadow-sm transition-transform duration-200 {large ? 'h-6 w-6' : 'h-4 w-4'}"
+      style="transform: translateX({checked ? (large ? '30px' : '22px') : '3px'});"
     ></span>
   </span>
 </button>

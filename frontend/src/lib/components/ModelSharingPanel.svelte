@@ -4,7 +4,7 @@
   import { toastStore } from '$lib/stores/toast.svelte';
   import { loadProvidersFromApi } from '$lib/stores/providers.svelte';
   import { collaborationStore } from '$lib/stores/collaboration.svelte';
-  import { Share2, MonitorSmartphone, ShieldAlert, ShieldCheck, ShieldX, Loader2, Link2, HardDrive, Lock, Wifi, Terminal, FilePenLine, Globe, Search } from 'lucide-svelte';
+  import { Share2, MonitorSmartphone, ShieldAlert, ShieldCheck, ShieldX, Loader2, Link2, HardDrive, Lock, Wifi, Terminal, FilePenLine, Globe, Search, ChevronDown, SlidersHorizontal } from 'lucide-svelte';
   import { SANDBOX_PRESETS, type ProviderShareRisk, type SandboxPolicy, type SandboxPreset } from '@koryphaios/shared';
   import SettingsSwitch from './SettingsSwitch.svelte';
 
@@ -16,10 +16,13 @@
     agentic: boolean;
     risk: ProviderShareRisk;
     reason: string;
+    models: Array<{ id: string; name: string }>;
   }
 
   let candidates = $state<ShareCandidate[]>([]);
   let sharedSet = $state<Set<string>>(new Set());
+  let sharedModels = $state<Record<string, string[]>>({});
+  let expandedProvider = $state<string | null>(null);
   let loadingHost = $state(false);
   let savingHost = $state(false);
   let providerSearch = $state('');
@@ -46,10 +49,11 @@
     loadingHost = true;
     try {
       const res = await apiFetch(apiUrl('/api/collab/providers/shared'));
-      const data = await parseJsonResponse<{ ok?: boolean; data?: { shared: string[]; candidates: ShareCandidate[] } }>(res);
+      const data = await parseJsonResponse<{ ok?: boolean; data?: { shared: string[]; sharedModels?: Record<string, string[]>; candidates: ShareCandidate[] } }>(res);
       if (data.ok && data.data) {
-        candidates = data.data.candidates;
+        candidates = data.data.candidates.map((candidate) => ({ ...candidate, models: candidate.models ?? [] }));
         sharedSet = new Set(data.data.shared);
+        sharedModels = data.data.sharedModels ?? {};
       }
     } catch {
       /* backend offline — panel stays empty */
@@ -138,8 +142,21 @@
     }
     const next = new Set(sharedSet);
     if (next.has(c.provider)) next.delete(c.provider);
-    else next.add(c.provider);
+    else {
+      next.add(c.provider);
+      if (!sharedModels[c.provider]) sharedModels = { ...sharedModels, [c.provider]: c.models.map((model) => model.id) };
+    }
     sharedSet = next;
+  }
+
+  function modelsFor(candidate: ShareCandidate): string[] {
+    return sharedModels[candidate.provider] ?? candidate.models.map((model) => model.id);
+  }
+
+  function toggleModel(candidate: ShareCandidate, modelId: string) {
+    const current = modelsFor(candidate);
+    const next = current.includes(modelId) ? current.filter((id) => id !== modelId) : [...current, modelId];
+    sharedModels = { ...sharedModels, [candidate.provider]: next };
   }
 
   async function saveHost() {
@@ -148,7 +165,7 @@
       const res = await apiFetch(apiUrl('/api/collab/providers/shared'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ providers: [...sharedSet] }),
+        body: JSON.stringify({ providers: [...sharedSet], models: sharedModels }),
       });
       if (res.ok) toastStore.success('Shared providers updated');
       else toastStore.error('Could not update shared providers');
@@ -256,12 +273,31 @@
           <div class="rounded-2xl" style="background: {on && c.risk === 'prohibited' ? 'color-mix(in srgb, #ef4444 8%, var(--color-surface-1))' : 'transparent'};">
             <SettingsSwitch
               compact
+              large
               checked={on}
               disabled={!c.available}
               label={c.label}
               description={candidateDescription(c)}
               onchange={() => toggleShare(c)}
             />
+            {#if c.available && c.models.length > 0}
+              <div class="-mt-1 flex items-center justify-between gap-3 px-3 pb-2">
+                <span class="text-[10px] text-[var(--color-text-muted)]">{modelsFor(c).length} of {c.models.length} models shared</span>
+                <button type="button" onclick={() => expandedProvider = expandedProvider === c.provider ? null : c.provider} class="inline-flex items-center gap-1.5 rounded-lg border border-[var(--color-border)] px-2.5 py-1.5 text-[10px] font-medium text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-surface-3)]" aria-expanded={expandedProvider === c.provider}>
+                  <SlidersHorizontal size={12} /> Choose models <ChevronDown size={12} class={expandedProvider === c.provider ? 'rotate-180' : ''} />
+                </button>
+              </div>
+              {#if expandedProvider === c.provider}
+                <div class="mx-3 mb-3 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-2)] p-2">
+                  <div class="mb-2 px-1 text-[10px] text-[var(--color-text-muted)]">Only these models are advertised to guests and accepted by the host.</div>
+                  <div class="grid gap-1 sm:grid-cols-2">
+                    {#each c.models as model (model.id)}
+                      <SettingsSwitch compact checked={modelsFor(c).includes(model.id)} label={model.name} description={model.id} onchange={() => toggleModel(c, model.id)} />
+                    {/each}
+                  </div>
+                </div>
+              {/if}
+            {/if}
             <div class="-mt-2 flex flex-wrap gap-1.5 px-3 pb-3">
               <span class="inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[10px] font-medium" style="color: {meta.color}; background: color-mix(in srgb, {meta.color} 14%, transparent);"><meta.icon size={10} /> {meta.label}</span>
               {#if c.agentic}<span class="inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[10px] font-medium" style="color: #a78bfa; background: color-mix(in srgb, #a78bfa 14%, transparent);"><HardDrive size={10} /> CLI</span>{/if}

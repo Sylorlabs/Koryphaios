@@ -88,9 +88,9 @@
 
 <div
   class="agent-card rounded-lg border text-left transition-all duration-300
-            {selected ? `ring-1 ring-[var(--color-accent)] bg-[var(--color-surface-2)] shadow-[0_0_0_1px_rgba(213,178,97,0.2)]` : ''}
+            {selected ? `ring-1 ring-[var(--color-accent)] bg-[var(--color-surface-2)] shadow-[0_0_0_1px_rgba(var(--color-accent-rgb), 0.2)]` : ''}
             {isActive ? `active ${glowClass} glow-active min-w-[188px] max-w-[252px]` : 'min-w-[188px] max-w-[252px] opacity-85'}"
-  style="background: var(--color-surface-2); border-color: {selected ? 'rgba(213,178,97,0.42)' : 'var(--color-border)'}; padding: {isActive || selected ? '10px 12px' : '8px 10px'};"
+  style="background: var(--color-surface-2); border-color: {selected ? 'rgba(var(--color-accent-rgb), 0.42)' : 'var(--color-border)'}; padding: {isActive || selected ? '10px 12px' : '8px 10px'};"
   onclick={() => onSelect?.()}
   onkeydown={(event) => {
     if (event.key === 'Enter' || event.key === ' ') {
