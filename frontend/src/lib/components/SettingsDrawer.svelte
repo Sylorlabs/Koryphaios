@@ -58,6 +58,7 @@ import { toastStore } from '$lib/stores/toast.svelte';
   import ModelSelectionDialog from './ModelSelectionDialog.svelte';
   import ModeToggle from './ModeToggle.svelte';
   import TeamAccessProfiles from './TeamAccessProfiles.svelte';
+  import ColorPickerModal from './ColorPickerModal.svelte';
   import ConfirmDialog from './ConfirmDialog.svelte';
   import ModelSharingPanel from './ModelSharingPanel.svelte';
   import NumberStepper from './NumberStepper.svelte';
@@ -82,6 +83,7 @@ import { apiFetch, parseJsonResponse } from '$lib/api.svelte';
 
   let showModelSelector = $state(false);
   let selectorTarget = $state<any>(null);
+  let showColorPicker = $state(false);
   let showRotateDialog = $state(false);
   let rotateProvider = $state<{ name: string; keyType: 'apiKey' | 'authToken' } | null>(null);
   let showAccountManageDialog = $state(false);
@@ -101,7 +103,14 @@ import { apiFetch, parseJsonResponse } from '$lib/api.svelte';
   // contextual shortcut (such as Goal settings) land on Advanced without
   // forcing the user back there when they explore another settings tab.
   $effect(() => {
-    if (open && !wasOpen) activeTab = initialTab;
+    if (open && !wasOpen) {
+      activeTab = initialTab;
+      // Memory and Agent are single-page consoles. Their specialised editors
+      // remain available from within the page, rather than becoming a second
+      // row of navigation under Settings.
+      memoryStore.setActiveTab('settings');
+      agentSettingsStore.setActiveTab('settings');
+    }
     wasOpen = open;
   });
 
@@ -1236,7 +1245,7 @@ import { apiFetch, parseJsonResponse } from '$lib/api.svelte';
                       </div>
                       <div
                         class="space-y-2"
-                        use:dndzone={{ items: orderedAccounts, dragDisabled: providersStore.fallbackEnabled[prov.key] !== true, type: `fallback-order:${prov.key}` }}
+                        use:dndzone={{ items: orderedAccounts, flipDurationMs: 250, dragDisabled: providersStore.fallbackEnabled[prov.key] !== true, type: `fallback-order:${prov.key}` }}
                         onconsider={(e) => handleFallbackDndConsider(prov.key, e.detail.items)}
                         onfinalize={(e) => handleFallbackDndFinalize(prov.key, e.detail.items)}
                       >
@@ -1361,6 +1370,30 @@ import { apiFetch, parseJsonResponse } from '$lib/api.svelte';
                 {/if}
               </button>
             {/each}
+            <!-- Custom accent swatch (only shown when a custom color is active) -->
+            {#if theme.accent === 'custom' && theme.customAccent}
+              <button 
+                type="button"
+                class="group relative w-12 h-12 rounded-xl transition-all hover:scale-110 active:scale-95 shadow-md ring-2 ring-[var(--color-text-primary)] ring-offset-4 ring-offset-[var(--color-surface-2)]" 
+                style="background-color: {theme.customAccent.main};" 
+                onclick={() => showColorPicker = true}
+                title="Custom color — click to edit"
+              >
+                <Check size={20} class="mx-auto text-white drop-shadow-md" strokeWidth={3} />
+              </button>
+            {/if}
+            <!-- + button to open the custom color picker -->
+            <button 
+              type="button"
+              class="group relative w-12 h-12 rounded-xl transition-all hover:scale-110 active:scale-95 shadow-md border-2 border-dashed flex items-center justify-center
+                     {theme.accent === 'custom' ? 'border-[var(--color-text-primary)]' : 'border-[var(--color-text-muted)] hover:border-[var(--color-text-secondary)]'}" 
+              style="background: var(--color-surface-3);"
+              onclick={() => showColorPicker = true}
+              title="Custom color picker"
+              aria-label="Open custom color picker"
+            >
+              <Plus size={20} class="text-[var(--color-text-secondary)] group-hover:text-[var(--color-text-primary)]" />
+            </button>
           </div>
         </section>
 
@@ -2241,6 +2274,10 @@ import { apiFetch, parseJsonResponse } from '$lib/api.svelte';
 
 {#if showModelSelector && selectorTarget}
   <ModelSelectionDialog providerName={selectorTarget.name} availableModels={selectorTarget.allAvailableModels} selectedModels={selectorTarget.selectedModels} emptyMessage={selectorTarget.emptyMessage} onSave={saveSelectedModels} onClose={() => { showModelSelector = false; selectorTarget = null; }} />
+{/if}
+
+{#if showColorPicker}
+  <ColorPickerModal open={showColorPicker} onClose={() => { showColorPicker = false; }} />
 {/if}
 
 {#if pendingDeleteProvider}

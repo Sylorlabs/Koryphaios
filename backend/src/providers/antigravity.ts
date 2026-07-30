@@ -333,15 +333,10 @@ export class AntigravityProvider implements Provider {
     const logPath = join(tmpdir(), `agy-${Date.now()}.log`);
 
     const cwd = request.workingDirectory?.trim();
-    const latestUserText = [...request.messages]
-      .reverse()
-      .find((message) => message.role === 'user');
-    const taskText = latestUserText ? flattenContent(latestUserText.content) : prompt;
-    const requestsChange = /\b(implement|fix|edit|create|add|change|refactor|write|build|remove|delete)\b/i.test(taskText);
-    const isReadOnlyTask =
-      !requestsChange &&
-      /\b(inspect|summari[sz]e|review|explain|analy[sz]e|architecture|status|what|why)\b/i.test(taskText);
-
+    // Mode selection: only the critic role uses planning (read-only) mode.
+    // The manager and worker roles always get accept-edits — never guess
+    // read-only from the user's message text. A question like "what tools
+    // do you have?" should not silently strip the agent's write capability.
     const args = [
       '--print',
       prompt,
@@ -349,11 +344,6 @@ export class AntigravityProvider implements Provider {
       cliModel,
       ...(request.harnessRole === 'critic'
         ? ['--mode', 'plan', '--sandbox']
-        : isReadOnlyTask
-          // The harness enforces planning mode for an explicitly read-only
-          // request. A request to inspect/summarize must not silently become
-          // an accept-edits session just because it is running through a CLI.
-          ? ['--mode', 'plan', '--sandbox']
         : ['--mode', 'accept-edits', '--dangerously-skip-permissions']),
       '--log-file',
       logPath,

@@ -100,18 +100,6 @@
     }
   });
 
-  // Tab configuration - uses semantic theme colors
-  const tabs = [
-    { id: 'settings' as const, label: 'Agent Settings', icon: Bot, color: 'var(--color-info)' },
-    {
-      id: 'preferences' as const,
-      label: 'Preferences.md',
-      icon: FileText,
-      color: 'var(--color-success)',
-    },
-    { id: 'skills' as const, label: 'Skills', icon: Wrench, color: 'var(--color-warning)' },
-  ];
-
   // ── Manager model access ────────────────────────────────────────────────
   const MODEL_ACCESS_CATEGORIES = [
     { id: 'general', label: 'General chat & orchestration' },
@@ -247,54 +235,6 @@
 </script>
 
 <div class="flex h-full min-h-0 min-w-0 flex-col">
-  <!-- Header -->
-  <div
-    class="flex flex-wrap items-center justify-between gap-3 px-4 py-3 border-b border-[var(--color-border)]"
-  >
-    <div class="flex flex-wrap items-center gap-2">
-      <Bot size={18} style="color: var(--color-info);" />
-      <h3 class="text-sm font-semibold text-[var(--color-text-primary)]">Agent Configuration</h3>
-    </div>
-    <div class="flex flex-wrap items-center gap-2">
-      {#if onClose}
-        <button
-          onclick={onClose}
-          aria-label="Close"
-          class="p-1.5 rounded-lg hover:bg-[var(--color-surface-3)] text-[var(--color-text-muted)]"
-        >
-          <svg
-            xmlns="http://www.w3.org/2000/svg"
-            width="16"
-            height="16"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="2"
-            stroke-linecap="round"
-            stroke-linejoin="round"><path d="M18 6 6 18" /><path d="m6 6 12 12" /></svg
-          >
-        </button>
-      {/if}
-    </div>
-  </div>
-
-  <!-- Tabs -->
-  <div class="flex shrink-0 overflow-x-auto border-b border-[var(--color-border)]">
-    {#each tabs as tab}
-      <button
-        onclick={() => agentSettingsStore.setActiveTab(tab.id)}
-        class="shrink-0 whitespace-nowrap flex items-center gap-1.5 px-3 py-2 text-xs font-medium transition-colors border-b-2
-          {agentSettingsStore.activeTab === tab.id
-          ? 'border-[var(--color-accent)] bg-[var(--color-surface-2)]'
-          : 'border-transparent text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-1)]'}"
-        style={agentSettingsStore.activeTab === tab.id ? `color: ${tab.color};` : ''}
-      >
-        <tab.icon size={14} />
-        {tab.label}
-      </button>
-    {/each}
-  </div>
-
   <!-- Content -->
   <div class="flex-1 min-h-0 overflow-hidden">
     {#if agentSettingsStore.isLoading}
@@ -312,6 +252,8 @@
           <span class="rounded-full bg-[var(--color-surface-3)] px-2.5 py-1 text-[10px] text-[var(--color-text-muted)]">
             critic {agentSettingsStore.settings.criticGateEnabled ? 'on' : 'off'}
           </span>
+          <button type="button" class="rounded-lg border border-[var(--color-border)] px-3 py-1.5 text-xs text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-surface-3)]" onclick={() => agentSettingsStore.setActiveTab('preferences')}>Preferences</button>
+          <button type="button" class="rounded-lg border border-[var(--color-border)] px-3 py-1.5 text-xs text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-surface-3)]" onclick={() => agentSettingsStore.setActiveTab('skills')}>Skills</button>
         </SettingsPageIntro>
         <div class="h-full min-h-0 overflow-y-auto p-5">
         <div class="mx-auto grid max-w-6xl gap-5 xl:grid-cols-[minmax(0,1.15fr)_minmax(320px,0.85fr)]">
@@ -948,6 +890,10 @@
     {:else if agentSettingsStore.activeTab === 'skills'}
       <div class="flex h-full min-h-0 flex-col">
         <section class="border-b border-[var(--color-border)] bg-[var(--color-surface-2)] p-3">
+          <div class="mb-3 flex items-center justify-between gap-3">
+            <div><h3 class="text-sm font-semibold text-[var(--color-text-primary)]">Skills</h3><p class="mt-1 text-xs text-[var(--color-text-muted)]">Manage and test the local instructions available to the agent.</p></div>
+            <button type="button" onclick={() => agentSettingsStore.setActiveTab('settings')} class="rounded-lg px-3 py-1.5 text-xs text-[var(--color-text-muted)] hover:bg-[var(--color-surface-3)]">Back to controls</button>
+          </div>
           <div class="flex gap-2">
             <input
               bind:value={skillPreviewPrompt}
@@ -1271,6 +1217,7 @@
               {/if}
             </div>
             <div class="flex items-center gap-2 ml-4">
+              <button type="button" onclick={() => agentSettingsStore.setActiveTab('settings')} class="px-2 py-1 text-xs text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)]">Back to controls</button>
               {#if !prefs?.exists}
                 <button
                   onclick={() => agentSettingsStore.initializePreferences()}

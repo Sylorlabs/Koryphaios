@@ -150,15 +150,6 @@
     void memoryStore.saveSettings({ maxContextTokens: value });
   }
 
-  // Tab configuration
-  const tabs = [
-    { id: "project" as const, label: "Project Memory", icon: FileText, color: "text-blue-400" },
-    { id: "universal" as const, label: "Universal Memory", icon: Brain, color: "text-purple-400" },
-    { id: "session" as const, label: "Session Memory", icon: MessageSquare, color: "text-green-400" },
-    { id: "rules" as const, label: "Project Rules", icon: BookOpen, color: "text-orange-400" },
-    { id: "settings" as const, label: "Settings", icon: Settings2, color: "text-gray-400" },
-  ];
-
   // Helper to format file info
   function getFileInfo(file: MemoryFile | null) {
     if (!file?.exists) {
@@ -174,54 +165,6 @@
 </script>
 
 <div class="flex h-full min-h-0 min-w-0 flex-col">
-  <!-- Header -->
-  <div class="flex items-center justify-between px-4 py-3 border-b border-[var(--color-border)]">
-    <div class="flex items-center gap-2">
-      <Brain size={18} class="text-purple-400" />
-      <h3 class="text-sm font-semibold text-[var(--color-text-primary)]">Memory & Rules</h3>
-    </div>
-    <div class="flex items-center gap-2">
-      <span class="text-[10px]" style="color: var(--color-text-muted);">{memoryStore.documents.length} project documents</span>
-      <button type="button" class="flex items-center gap-1 rounded-lg border px-2 py-1 text-xs" style="border-color: var(--color-border); color: var(--color-accent);" onclick={() => showNewDocument = !showNewDocument}><Plus size={12} /> New .md</button>
-    </div>
-    {#if onClose}
-      <button
-        onclick={onClose}
-        class="p-1.5 rounded-lg hover:bg-[var(--color-surface-3)] text-[var(--color-text-muted)]"
-      >
-        <X size={16} />
-      </button>
-    {/if}
-  </div>
-
-  {#if showNewDocument}
-    <div class="flex items-center gap-2 border-b px-4 py-2" style="border-color: var(--color-border); background: var(--color-surface-2);">
-      <input class="input h-8 flex-1 text-xs" placeholder="document-name" bind:value={newDocumentName} onkeydown={(event) => { if (event.key === 'Enter') void createDocument(); }} />
-      <div class="flex rounded-lg border p-0.5" style="border-color: var(--color-border);">
-        {#each ['memory', 'rules'] as kind (kind)}
-          <button type="button" class="rounded-md px-2 py-1 text-[10px]" style="background: {newDocumentKind === kind ? 'var(--color-surface-4)' : 'transparent'}; color: var(--color-text-primary);" onclick={() => newDocumentKind = kind as 'memory' | 'rules'}>{kind}</button>
-        {/each}
-      </div>
-      <button type="button" class="btn btn-primary h-8 px-3 text-xs" onclick={() => void createDocument()}>Create</button>
-    </div>
-  {/if}
-
-  <!-- Tabs -->
-  <div class="flex shrink-0 overflow-x-auto border-b border-[var(--color-border)]">
-    {#each tabs as tab}
-      <button
-        onclick={() => memoryStore.setActiveTab(tab.id)}
-        class="shrink-0 whitespace-nowrap flex items-center gap-1.5 px-3 py-2 text-xs font-medium transition-colors border-b-2
-          {memoryStore.activeTab === tab.id 
-            ? `border-[var(--color-accent)] ${tab.color} bg-[var(--color-surface-2)]` 
-            : 'border-transparent text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-1)]'}"
-      >
-        <tab.icon size={14} />
-        {tab.label}
-      </button>
-    {/each}
-  </div>
-
   <!-- Content -->
   <div class="flex-1 min-h-0 overflow-hidden">
     {#if memoryStore.isLoading}
@@ -253,6 +196,7 @@
               {/if}
             </div>
             <div class="flex items-center gap-2 ml-4">
+              <button type="button" onclick={() => memoryStore.setActiveTab('settings')} class="px-2 py-1 text-xs text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)]">Overview</button>
               {#if !info.exists}
                 <button
                   onclick={() => memoryStore.initializeUniversalMemory()}
@@ -318,6 +262,7 @@
               {/if}
             </div>
             <div class="flex items-center gap-2 ml-4">
+              <button type="button" onclick={() => memoryStore.setActiveTab('settings')} class="px-2 py-1 text-xs text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)]">Overview</button>
               {#if !info.exists}
                 <button
                   onclick={() => memoryStore.initializeProjectMemory()}
@@ -383,6 +328,7 @@
               {/if}
             </div>
             <div class="flex items-center gap-2 ml-4">
+              <button type="button" onclick={() => memoryStore.setActiveTab('settings')} class="px-2 py-1 text-xs text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)]">Overview</button>
               {#if !info.exists}
                 <button
                   onclick={() => {
@@ -462,6 +408,7 @@
               {/if}
             </div>
             <div class="flex items-center gap-2 ml-4">
+              <button type="button" onclick={() => memoryStore.setActiveTab('settings')} class="px-2 py-1 text-xs text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)]">Overview</button>
               {#if !info.exists}
                 <button
                   onclick={() => memoryStore.initializeRules()}
@@ -513,9 +460,23 @@
               memoryStore.settings?.rulesEnabled ?? true,
             ].filter(Boolean).length} of 4 sources active
           </span>
+          <button type="button" class="rounded-lg border border-[var(--color-border)] px-3 py-1.5 text-xs text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-surface-3)]" onclick={() => showNewDocument = !showNewDocument}>
+            <span class="inline-flex items-center gap-1.5"><Plus size={13} /> New document</span>
+          </button>
         </SettingsPageIntro>
         <div class="h-full overflow-y-auto p-5">
           <div class="mx-auto max-w-5xl space-y-5">
+            {#if showNewDocument}
+              <section class="flex flex-wrap items-center gap-2 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-1)] p-3">
+                <input class="input h-8 min-w-48 flex-1 text-xs" placeholder="document-name" bind:value={newDocumentName} onkeydown={(event) => { if (event.key === 'Enter') void createDocument(); }} />
+                <div class="flex rounded-lg border p-0.5" style="border-color: var(--color-border);">
+                  {#each ['memory', 'rules'] as kind (kind)}
+                    <button type="button" class="rounded-md px-2 py-1 text-[10px]" style="background: {newDocumentKind === kind ? 'var(--color-surface-4)' : 'transparent'}; color: var(--color-text-primary);" onclick={() => newDocumentKind = kind as 'memory' | 'rules'}>{kind}</button>
+                  {/each}
+                </div>
+                <button type="button" class="btn btn-primary h-8 px-3 text-xs" onclick={() => void createDocument()}>Create</button>
+              </section>
+            {/if}
             <section class="border-b border-[var(--color-border)] pb-5">
               <div class="space-y-1">
                 <h4 class="flex items-center gap-2 text-sm font-semibold text-[var(--color-text-primary)]">
@@ -612,6 +573,28 @@
                 <RotateCcw size={16} />
                 Reset to Defaults
               </button>
+            </section>
+            <section>
+              <div class="mb-3 flex items-center justify-between gap-3">
+                <div>
+                  <h4 class="text-sm font-semibold text-[var(--color-text-primary)]">Memory files</h4>
+                  <p class="mt-1 text-xs text-[var(--color-text-muted)]">Open a file when you want to read or edit its saved instructions.</p>
+                </div>
+                <span class="text-[10px] text-[var(--color-text-muted)]">{memoryStore.documents.length} project documents</span>
+              </div>
+              <div class="grid gap-3 sm:grid-cols-2">
+                {#each [
+                  { id: 'project' as const, label: 'Project memory', description: 'Shared context for this workspace.', icon: FileText },
+                  { id: 'universal' as const, label: 'Universal memory', description: 'Context shared across workspaces.', icon: Brain },
+                  { id: 'session' as const, label: 'Session memory', description: 'Context for the active conversation.', icon: MessageSquare },
+                  { id: 'rules' as const, label: 'Project rules', description: 'Instructions and conventions for this workspace.', icon: BookOpen },
+                ] as document}
+                  <button type="button" onclick={() => memoryStore.setActiveTab(document.id)} class="flex items-start gap-3 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-1)] p-4 text-left transition-colors hover:bg-[var(--color-surface-2)]">
+                    <document.icon size={16} class="mt-0.5 text-[var(--color-accent)]" />
+                    <span><span class="block text-sm font-medium text-[var(--color-text-primary)]">{document.label}</span><span class="mt-1 block text-xs text-[var(--color-text-muted)]">{document.description}</span></span>
+                  </button>
+                {/each}
+              </div>
             </section>
           </div>
         </div>

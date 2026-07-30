@@ -11,7 +11,20 @@ export type ThemePreset =
   | 'solarized'
   | 'light'
   | 'system';
-export type AccentColor = 'gold' | 'indigo' | 'cyan' | 'emerald' | 'amber' | 'rose' | 'violet';
+export type AccentColor =
+  | 'gold'
+  | 'indigo'
+  | 'cyan'
+  | 'emerald'
+  | 'amber'
+  | 'rose'
+  | 'violet'
+  | 'custom';
+
+export interface CustomAccent {
+  main: string;
+  hover: string;
+}
 export type FontFamily =
   | 'inter'
   | 'geist'
@@ -32,6 +45,7 @@ export interface ThemeConfig {
   preset: ThemePreset;
   accent: AccentColor;
   font: FontFamily;
+  customAccent?: CustomAccent;
 }
 
 const THEME_PRESETS: Record<Exclude<ThemePreset, 'system'>, Record<string, string>> = {
@@ -253,6 +267,7 @@ const ACCENT_COLORS: Record<AccentColor, { main: string; hover: string }> = {
   amber: { main: '#f59e0b', hover: '#fbbf24' },
   rose: { main: '#f43f5e', hover: '#fb7185' },
   violet: { main: '#8b5cf6', hover: '#a78bfa' },
+  custom: { main: '#D5B261', hover: '#F3DDB0' }, // placeholder; replaced at runtime
 };
 
 const FONT_FAMILIES: Record<FontFamily, string> = {
@@ -289,16 +304,22 @@ function createThemeStore() {
   let preset = $state<ThemePreset>(savedConfig.preset);
   let accent = $state<AccentColor>(savedConfig.accent);
   let font = $state<FontFamily>(savedConfig.font);
+  let customAccent = $state<CustomAccent | undefined>(savedConfig.customAccent);
 
   function applyToDOM() {
     if (!browser) return;
 
     const resolvedPreset = resolvePreset(preset);
     const vars = THEME_PRESETS[resolvedPreset];
-    const accentVars = ACCENT_COLORS[accent];
+    let accentVars = ACCENT_COLORS[accent];
     const root = document.documentElement;
 
     if (!vars || !accentVars) return;
+
+    // Override accent vars with the saved custom color when applicable
+    if (accent === 'custom' && customAccent) {
+      accentVars = customAccent;
+    }
 
     for (const [key, val] of Object.entries(vars)) {
       root.style.setProperty(key, val);
@@ -322,7 +343,10 @@ function createThemeStore() {
 
   function save() {
     if (browser) {
-      localStorage.setItem('koryphaios-theme', JSON.stringify({ preset, accent, font }));
+      localStorage.setItem(
+        'koryphaios-theme',
+        JSON.stringify({ preset, accent, font, customAccent }),
+      );
     }
     applyToDOM();
   }
@@ -337,6 +361,9 @@ function createThemeStore() {
     get font() {
       return font;
     },
+    get customAccent() {
+      return customAccent;
+    },
     get isDark() {
       return resolvePreset(preset) !== 'light';
     },
@@ -347,6 +374,11 @@ function createThemeStore() {
     },
     setAccent(a: AccentColor) {
       accent = a;
+      save();
+    },
+    setCustomAccent(c: CustomAccent) {
+      customAccent = c;
+      accent = 'custom';
       save();
     },
     setFont(f: FontFamily) {
@@ -378,6 +410,11 @@ function createThemeStore() {
         { id: 'rose', label: 'Rose', color: '#f43f5e' },
         { id: 'violet', label: 'Violet', color: '#8b5cf6' },
       ];
+    },
+    /** Current effective accent color pair (resolves custom). */
+    get currentAccent(): { main: string; hover: string } {
+      if (accent === 'custom' && customAccent) return customAccent;
+      return ACCENT_COLORS[accent] ?? ACCENT_COLORS.gold;
     },
     get fonts(): Array<{ id: FontFamily; label: string; category: string }> {
       // Curated for VISUAL DISTINCTION — each option is a clearly different typeface
