@@ -43,7 +43,15 @@ export interface AutoScrollOptions {
   observeMutations?: boolean;
 }
 
-const DEFAULT_THRESHOLD = 100;
+const DEFAULT_THRESHOLD = 10;
+// Distance (px) that still counts as "genuinely at the bottom" for
+// re-engaging follow mode from a scroll event. This is intentionally much
+// smaller than the (larger, tolerant-of-jitter) disengage threshold. Using
+// the same value for both meant a user's small upward scroll (a few px)
+// was immediately reversed by the very next scroll event, because that
+// event's distance was still within the generous disengage threshold —
+// making it feel like scrolling up was blocked entirely.
+const REENGAGE_EPSILON = 4;
 
 export interface AutoScrollHandle {
   /** Reactive: whether the view should stay pinned to the bottom. */
@@ -85,7 +93,6 @@ export function createAutoScroll(
 
   let follow = $state(true);
   let unseenCount = $state(0);
-  let programmaticScroll = false;
   let rafId: number | null = null;
   let resizeObserver: ResizeObserver | null = null;
   let mutationObserver: MutationObserver | null = null;
@@ -104,38 +111,60 @@ export function createAutoScroll(
   function scrollToBottomNow(behavior: ScrollBehavior = 'instant') {
     const el = getEl();
     if (!el) return;
-    programmaticScroll = true;
     if (behavior === 'instant') {
       el.scrollTop = el.scrollHeight;
     } else {
       el.scrollTo({ top: el.scrollHeight, behavior });
     }
-    // Release the guard on the next frame. The scroll event handler will
-    // see the synthetic scroll, but because `programmaticScroll` is true
-    // it will not flip `follow` off.
-    requestAnimationFrame(() => {
-      programmaticScroll = false;
-    });
+  }
+
+  // Upward intent (wheel up / touch drag) releases follow IMMEDIATELY — before
+  // the resulting scroll — so auto-pin can never fight the user or stutter.
+  function onWheel(e: WheelEvent) {
+    if (e.deltaY < 0 && follow) untrack(() => { follow = false; });
+  }
+  let touchStartY = 0;
+  function onTouchStart(e: TouchEvent) {
+    touchStartY = e.touches[0]?.clientY ?? 0;
+  }
+  function onTouchMove(e: TouchEvent) {
+    const y = e.touches[0]?.clientY ?? 0;
+    if (y > touchStartY + 4 && follow) untrack(() => { follow = false; }); // finger down = content up = scrolling up
   }
 
   function onUserScroll() {
-    if (programmaticScroll) return;
-    // untrack: this handler runs in response to a real DOM event, not
-    // inside an effect. Reading `follow` here is a state READ, which is
-    // fine — but we use untrack defensively to make it explicit.
+    // A programmatic bottom-pin still reports a distance of zero here, so it
+    // is safe to handle it exactly like every other scroll event. Keeping a
+    // one-shot "programmatic" guard made rapid scrollbar drags and keyboard
+    // scrolling get misclassified as the pin event, leaving follow enabled
+    // and pulling the reader back to the bottom on the next DOM mutation.
     untrack(() => {
       const dist = getDistanceFromBottom();
       const wasFollowing = follow;
-      const shouldFollow = dist <= threshold;
-      if (wasFollowing && !shouldFollow) {
+      const shouldDisengage = dist > threshold;
+      // Re-engaging requires genuinely reaching the bottom (small epsilon),
+      // not just being back within the generous disengage threshold — see
+      // REENGAGE_EPSILON above.
+      const shouldReengage = dist <= REENGAGE_EPSILON;
+      if (wasFollowing && shouldDisengage) {
         follow = false;
-      } else if (!wasFollowing && shouldFollow) {
+      } else if (!wasFollowing && shouldReengage) {
         // User scrolled back to the bottom — re-engage and clear the
         // unseen counter.
         follow = true;
         if (unseenCount > 0) unseenCount = 0;
       }
     });
+  }
+
+  // Pins `el` to its bottom. The resulting scroll event is intentionally
+  // handled normally: its distance is zero, while a real user scroll-away is
+  // always allowed to disengage follow.
+  function pinToBottom(el: HTMLDivElement) {
+    // Setting scrollTop directly (instead of scrollTo) skips smooth
+    // scrolling entirely — important for per-token updates which fire
+    // at 30-100Hz and would jank with a smooth animation.
+    el.scrollTop = el.scrollHeight;
   }
 
   function requestPin() {
@@ -149,10 +178,7 @@ export function createAutoScroll(
         rafId = null;
         const el = getEl();
         if (!el || !follow) return;
-        // Setting scrollTop directly (instead of scrollTo) skips smooth
-        // scrolling entirely — important for per-token updates which fire
-        // at 30-100Hz and would jank with a smooth animation.
-        el.scrollTop = el.scrollHeight;
+        pinToBottom(el);
       });
     });
   }
@@ -184,6 +210,9 @@ export function createAutoScroll(
 
     currentEl = el;
     el.addEventListener('scroll', onUserScroll, { passive: true });
+    el.addEventListener('wheel', onWheel, { passive: true });
+    el.addEventListener('touchstart', onTouchStart, { passive: true });
+    el.addEventListener('touchmove', onTouchMove, { passive: true });
 
     // Watch the container's size so that streaming tokens (which grow the
     // last row, which in turn grows the inner content height) re-pin the
@@ -198,7 +227,7 @@ export function createAutoScroll(
           if (!follow) return;
           const target = getEl();
           if (!target) return;
-          target.scrollTop = target.scrollHeight;
+          pinToBottom(target);
         });
       });
     });
@@ -219,7 +248,7 @@ export function createAutoScroll(
             if (!follow) return;
             const target = getEl();
             if (!target) return;
-            target.scrollTop = target.scrollHeight;
+            pinToBottom(target);
           });
         });
       });
@@ -230,6 +259,9 @@ export function createAutoScroll(
   function detach() {
     if (currentEl) {
       currentEl.removeEventListener('scroll', onUserScroll);
+      currentEl.removeEventListener('wheel', onWheel);
+      currentEl.removeEventListener('touchstart', onTouchStart);
+      currentEl.removeEventListener('touchmove', onTouchMove);
     }
     currentEl = null;
     if (resizeObserver) {

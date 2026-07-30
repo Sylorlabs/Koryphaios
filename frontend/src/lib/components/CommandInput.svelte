@@ -29,7 +29,7 @@
     /** What Kory is waiting on, e.g. "background terminal: dev-server". */
     waitingReason?: string;
     onStop?: () => void;
-    onOpenSettings?: () => void;
+    onOpenSettings?: (section?: 'advanced') => void;
     inputRef?: HTMLTextAreaElement;
     value?: string;
     slashCommands?: Array<{ command: string; label: string; description: string }>;
@@ -1140,7 +1140,7 @@
             disabled={disabled || !!configurationWarning}
             style="resize: none; min-height: {minHeightPx}px; max-height: 280px; font-size: 15px; line-height: 1.6; box-sizing: border-box; padding: 10px 88px 10px 12px; background: transparent; border: none; box-shadow: none; {disabled || configurationWarning ? 'opacity: 0.6; cursor: not-allowed;' : ''}"
           ></textarea>
-          <div class="absolute bottom-1.5 right-1 flex items-center gap-0.5 reference-picker">
+          <div class="absolute bottom-2 right-1 flex items-center gap-0.5 reference-picker">
             <input
               type="file"
               multiple
@@ -1169,7 +1169,7 @@
               {#if showGoalActions}
                 <div class="absolute bottom-full right-0 mb-1 w-48 rounded-lg border shadow-xl z-50 overflow-hidden" style="background: var(--color-surface-2); border-color: var(--color-border);">
                   <button type="button" class="flex w-full items-center gap-2 px-3 py-2 text-left text-xs hover:bg-[var(--color-surface-3)]" style="color: var(--color-text-primary);" onclick={() => { showGoalActions = false; goalDisplayStore.update({ sidebar: true }); queueMicrotask(() => window.dispatchEvent(new CustomEvent('kory:goal-action', { detail: 'goal_create' }))); }}><Target size={14} /> Create verified goal</button>
-                  <button type="button" class="flex w-full items-center gap-2 px-3 py-2 text-left text-xs hover:bg-[var(--color-surface-3)]" style="color: var(--color-text-primary);" onclick={() => { showGoalActions = false; onOpenSettings?.(); }}><Settings size={14} /> Goal settings</button>
+                  <button type="button" class="flex w-full items-center gap-2 px-3 py-2 text-left text-xs hover:bg-[var(--color-surface-3)]" style="color: var(--color-text-primary);" onclick={() => { showGoalActions = false; onOpenSettings?.('advanced'); }}><Settings size={14} /> Goal settings</button>
                 </div>
               {/if}
             </div>

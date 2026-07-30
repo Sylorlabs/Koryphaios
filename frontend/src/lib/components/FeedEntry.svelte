@@ -799,7 +799,6 @@
 <div
   class="flex flex-col group"
   in:fly={{ y: 20, duration: Date.now() - entry.timestamp < 5000 ? 300 : 0 }}
-  style="content-visibility: auto; contain-intrinsic-size: 80px;"
 >
   {#if entry.userHidden}
     <button

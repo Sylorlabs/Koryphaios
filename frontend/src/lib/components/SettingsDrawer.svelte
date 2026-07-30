@@ -70,11 +70,15 @@ import { apiFetch, parseJsonResponse } from '$lib/api.svelte';
 
   interface Props {
     open?: boolean;
+    initialTab?: SettingsTab;
     onClose?: () => void;
   }
 
-  let { open = false, onClose }: Props = $props();
-  let activeTab = $state<'providers' | 'appearance' | 'shortcuts' | 'billing' | 'memory' | 'agent' | 'experimental' | 'teams' | 'notes'>('providers');
+  type SettingsTab = 'providers' | 'appearance' | 'shortcuts' | 'billing' | 'memory' | 'agent' | 'experimental' | 'teams' | 'notes';
+
+  let { open = false, initialTab = 'providers', onClose }: Props = $props();
+  let activeTab = $state<SettingsTab>('providers');
+  let wasOpen = $state(false);
 
   let showModelSelector = $state(false);
   let selectorTarget = $state<any>(null);
@@ -92,6 +96,14 @@ import { apiFetch, parseJsonResponse } from '$lib/api.svelte';
   let hostPathsInitializedFor = $state<string | null>(projectStore.currentPath);
   let rotateKeyInput = $state<HTMLInputElement | null>(null);
   let visibleSecrets = $state<Record<string, boolean>>({});
+
+  // Apply a requested destination only as the drawer opens. This lets a
+  // contextual shortcut (such as Goal settings) land on Advanced without
+  // forcing the user back there when they explore another settings tab.
+  $effect(() => {
+    if (open && !wasOpen) activeTab = initialTab;
+    wasOpen = open;
+  });
 
   onMount(() => {
     const openProviderAccounts = () => {

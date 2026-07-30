@@ -519,12 +519,12 @@ export async function syncProjectDocuments(
     if (i > 0) await yieldBetweenBatches();
     const batch = pendingInserts.slice(i, i + 100);
     try {
-      await db.insert(notes).values(batch);
+      await db.insert(notes).values(batch).onConflictDoNothing();
     } catch (err) {
       console.error('[notesService] Bulk note insert failed during project sync; retrying row-by-row', err);
       for (const row of batch) {
         try {
-          await db.insert(notes).values(row);
+          await db.insert(notes).values(row).onConflictDoNothing();
           await yieldBetweenBatches();
         } catch (rowErr) {
           console.error(`[notesService] Failed to insert project document note ${row.id}`, rowErr);

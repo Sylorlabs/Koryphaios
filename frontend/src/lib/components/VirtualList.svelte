@@ -171,7 +171,19 @@
             let changed = false;
             for (const entry of entries) {
                 const height = entry.borderBoxSize[0]?.blockSize ?? entry.contentRect.height;
-                if (height > 0 && heightCache.get(currentId) !== height) {
+                const currentItem = items.find((item) => item.id === currentId);
+                const previousHeight = heightCache.get(currentId) ?? (currentItem ? estimateHeight(currentItem) : height);
+                if (height > 0 && previousHeight !== height) {
+                    // Rows are initially estimated, then measured after they
+                    // mount. If a tall rich response above the reader grows
+                    // from its estimate, compensate by the same delta so the
+                    // visible message stays put instead of jumping. Native
+                    // scroll anchoring is disabled below to avoid applying
+                    // this correction twice.
+                    const position = positions.find((item) => item.id === currentId);
+                    if (!follow && containerEl && position && position.top < containerEl.scrollTop) {
+                        containerEl.scrollTop += height - previousHeight;
+                    }
                     heightCache.set(currentId, height);
                     changed = true;
                 }
@@ -256,6 +268,7 @@
         height: 100%;
         overflow-y: auto;
         position: relative;
+        overflow-anchor: none;
     }
     
     .virtual-list-content {

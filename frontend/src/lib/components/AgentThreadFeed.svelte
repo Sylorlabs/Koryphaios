@@ -153,6 +153,7 @@
           bind:this={virtualList}
           items={feed}
           estimateHeight={estimateFeedHeight}
+          follow={autoScrollCtl.follow}
           class="h-full p-4 feed-scroll"
         >
           {#snippet row(entry, i)}
