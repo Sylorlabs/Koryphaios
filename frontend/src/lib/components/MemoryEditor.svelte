@@ -4,6 +4,7 @@
   import { sessionStore } from "$lib/stores/sessions.svelte";
   import SettingsSwitch from "$lib/components/SettingsSwitch.svelte";
   import NumberStepper from "$lib/components/NumberStepper.svelte";
+  import SettingsPageIntro from "$lib/components/SettingsPageIntro.svelte";
   import { 
     Brain, 
     FileText, 
@@ -502,21 +503,31 @@
       </div>
 
     {:else if memoryStore.activeTab === "settings"}
-      <div class="h-full overflow-y-auto p-6">
-        <div class="grid gap-6 xl:grid-cols-[minmax(0,1.15fr)_minmax(320px,0.85fr)]">
-          <div class="space-y-6">
-            <section class="space-y-4 rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-1)] p-5">
+      <div class="flex h-full min-h-0 flex-col overflow-hidden">
+        <SettingsPageIntro title="Memory context" description="Decide what enters an agent’s working context and who can maintain it.">
+          <span class="rounded-full bg-[var(--color-surface-3)] px-2.5 py-1 text-[10px] text-[var(--color-text-muted)]">
+            {[
+              memoryStore.settings?.universalMemoryEnabled ?? true,
+              memoryStore.settings?.projectMemoryEnabled ?? true,
+              memoryStore.settings?.sessionMemoryEnabled ?? true,
+              memoryStore.settings?.rulesEnabled ?? true,
+            ].filter(Boolean).length} of 4 sources active
+          </span>
+        </SettingsPageIntro>
+        <div class="h-full overflow-y-auto p-5">
+          <div class="mx-auto max-w-5xl space-y-5">
+            <section class="border-b border-[var(--color-border)] pb-5">
               <div class="space-y-1">
                 <h4 class="flex items-center gap-2 text-sm font-semibold text-[var(--color-text-primary)]">
                   <Settings2 size={16} />
-                  Memory Sources
+                  What enters context
                 </h4>
                 <p class="text-xs text-[var(--color-text-muted)]">
-                  Choose which memory sources are included in the AI context.
+                  Select sources, automatic inclusion, and the context budget in one policy.
                 </p>
               </div>
 
-              <div class="space-y-3">
+              <div class="mt-4 divide-y divide-[var(--color-border)] rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-1)] px-4">
                 <SettingsSwitch
                   checked={memoryStore.settings?.universalMemoryEnabled ?? true}
                   label="Universal Memory"
@@ -545,25 +556,41 @@
                   onchange={() => toggleSetting("rulesEnabled")}
                   compact
                 />
+                <SettingsSwitch
+                  checked={memoryStore.settings?.autoIncludeInContext ?? true}
+                  label="Auto-include in Context"
+                  description="Add selected sources to the agent context automatically."
+                  onchange={() => toggleSetting("autoIncludeInContext")}
+                  compact
+                />
+                <div class="flex flex-wrap items-center justify-between gap-4 py-3">
+                  <div>
+                    <div class="text-sm font-medium text-[var(--color-text-primary)]">Memory token budget</div>
+                    <p class="mt-1 text-xs text-[var(--color-text-muted)]">Limit injected memory to preserve room for the task.</p>
+                  </div>
+                  <div class="w-full sm:w-72">
+                    <NumberStepper value={memoryStore.settings?.maxContextTokens ?? 2000} min={500} max={8000} step={100} label="Memory context tokens" onchange={handleMaxTokensChange} />
+                  </div>
+                </div>
               </div>
             </section>
 
-            <section class="space-y-4 rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-1)] p-5">
+            <section class="border-b border-[var(--color-border)] pb-5">
               <div class="space-y-1">
-                <h4 class="text-sm font-semibold text-[var(--color-text-primary)]">Agent Behavior</h4>
+                <h4 class="text-sm font-semibold text-[var(--color-text-primary)]">Write permission</h4>
                 <p class="text-xs text-[var(--color-text-muted)]">
-                  Configure how the agent writes and consumes memory.
+                  A linked policy shared with Agent settings.
                 </p>
               </div>
 
-              <div class="space-y-3">
+              <div class="mt-4 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-1)] px-4">
                 <!-- Same setting as "Agent Can Update Memory" in the Agent tab —
                      one source of truth (agent settings), mirrored here so the
                      two tabs can never disagree. -->
                 <SettingsSwitch
                   checked={agentSettingsStore.settings.agentMemoryEnabled}
-                  label="Allow Agent to Add Memories"
-                  description="AI can automatically update memory files. Also shown in Agent settings."
+                  label="Agent can update memory"
+                  description="Linked to Agent settings — changing either control updates the same policy."
                   onchange={() => {
                     void agentSettingsStore.saveSettings(
                       { agentMemoryEnabled: !agentSettingsStore.settings.agentMemoryEnabled },
@@ -572,81 +599,15 @@
                   }}
                   compact
                 />
-
-                <SettingsSwitch
-                  checked={memoryStore.settings?.autoIncludeInContext ?? true}
-                  label="Auto-include in Context"
-                  description="Automatically add selected memories to the AI context window."
-                  onchange={() => toggleSetting("autoIncludeInContext")}
-                  compact
-                />
               </div>
             </section>
-          </div>
-
-          <div class="space-y-6">
-            <section class="space-y-4 rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-1)] p-5">
-              <div class="space-y-1">
-                <h4 class="text-sm font-semibold text-[var(--color-text-primary)]">Context Limits</h4>
-                <p class="text-xs text-[var(--color-text-muted)]">
-                  Cap how much memory content is injected into prompts.
-                </p>
+            <section class="flex flex-wrap items-center justify-between gap-3">
+              <div class="text-xs text-[var(--color-text-muted)]">
+                Context: {memoryStore.settings?.maxContextTokens ?? 2000} tokens · writes {agentSettingsStore.settings.agentMemoryEnabled ? 'allowed' : 'blocked'} · {memoryStore.settings?.autoIncludeInContext ?? true ? 'automatic' : 'manual'} inclusion
               </div>
-
-              <div class="rounded-xl bg-[var(--color-surface-2)] p-4">
-                <div class="mb-3 flex items-center justify-between gap-3">
-                  <span class="text-sm text-[var(--color-text-primary)]">Max Context Tokens</span>
-                  <span class="text-xs text-[var(--color-text-muted)]">
-                    {memoryStore.settings?.maxContextTokens ?? 2000} tokens
-                  </span>
-                </div>
-                <div class="w-72">
-                  <NumberStepper
-                    value={memoryStore.settings?.maxContextTokens ?? 2000}
-                    min={500}
-                    max={8000}
-                    step={100}
-                    label="Max context tokens"
-                    onchange={handleMaxTokensChange}
-                  />
-                </div>
-              </div>
-            </section>
-
-            <section class="space-y-4 rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-1)] p-5">
-              <h4 class="text-sm font-semibold text-[var(--color-text-primary)]">Active Context</h4>
-              <div class="grid gap-3 sm:grid-cols-3 xl:grid-cols-1">
-                <div class="rounded-xl bg-[var(--color-surface-2)] p-4">
-                  <div class="text-[10px] uppercase tracking-wide text-[var(--color-text-muted)]">Sources Enabled</div>
-                  <div class="mt-2 text-sm font-semibold text-[var(--color-text-primary)]">
-                    {[
-                      memoryStore.settings?.universalMemoryEnabled ?? true,
-                      memoryStore.settings?.projectMemoryEnabled ?? true,
-                      memoryStore.settings?.sessionMemoryEnabled ?? true,
-                      memoryStore.settings?.rulesEnabled ?? true,
-                    ].filter(Boolean).length}
-                    / 4
-                  </div>
-                </div>
-                <div class="rounded-xl bg-[var(--color-surface-2)] p-4">
-                  <div class="text-[10px] uppercase tracking-wide text-[var(--color-text-muted)]">Agent Writes</div>
-                  <div class="mt-2 text-sm font-semibold text-[var(--color-text-primary)]">
-                    {agentSettingsStore.settings.agentMemoryEnabled ? 'Allowed' : 'Blocked'}
-                  </div>
-                </div>
-                <div class="rounded-xl bg-[var(--color-surface-2)] p-4">
-                  <div class="text-[10px] uppercase tracking-wide text-[var(--color-text-muted)]">Auto Include</div>
-                  <div class="mt-2 text-sm font-semibold text-[var(--color-text-primary)]">
-                    {memoryStore.settings?.autoIncludeInContext ?? true ? 'Enabled' : 'Manual'}
-                  </div>
-                </div>
-              </div>
-            </section>
-
-            <section class="rounded-2xl border border-red-500/20 bg-red-500/5 p-5">
               <button
                 onclick={() => memoryStore.resetSettings()}
-                class="flex items-center gap-2 rounded-lg px-4 py-2 text-sm text-red-400 transition-colors hover:bg-red-500/10"
+                class="flex items-center gap-2 rounded-lg px-3 py-2 text-xs text-[var(--color-text-muted)] transition-colors hover:bg-red-500/10 hover:text-red-400"
               >
                 <RotateCcw size={16} />
                 Reset to Defaults

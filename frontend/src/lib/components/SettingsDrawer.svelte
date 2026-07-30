@@ -1225,9 +1225,14 @@ import { apiFetch, parseJsonResponse } from '$lib/api.svelte';
                           description="Try the next selected CLI profile when the first one cannot run."
                           onchange={() => setFallbackEnabled(prov.key, providersStore.fallbackEnabled[prov.key] !== true)}
                         />
-                        {#if providersStore.fallbackSaving === prov.key}
-                          <span class="text-[10px] text-[var(--color-text-muted)]">Saving...</span>
-                        {/if}
+                        <span
+                          class="text-[10px] text-[var(--color-text-muted)] transition-opacity duration-150 shrink-0 w-16 text-right"
+                          class:opacity-0={providersStore.fallbackSaving !== prov.key}
+                          class:opacity-100={providersStore.fallbackSaving === prov.key}
+                          aria-hidden={providersStore.fallbackSaving !== prov.key}
+                        >
+                          {providersStore.fallbackSaving === prov.key ? 'Saving...' : ''}
+                        </span>
                       </div>
                       <div
                         class="space-y-2"
@@ -1709,7 +1714,7 @@ import { apiFetch, parseJsonResponse } from '$lib/api.svelte';
 
       <!-- Experimental Tab -->
       <div class={activeTab === 'experimental' ? 'flex-1 min-h-0 min-w-0 overflow-hidden flex flex-col' : 'hidden'}>
-        <div class="flex-1 min-h-0 overflow-y-auto px-6 py-5"><ExperimentalSettings /></div>
+        <ExperimentalSettings />
       </div>
 
       <!-- Teams Tab -->

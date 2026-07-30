@@ -215,16 +215,21 @@ fn spawn_embedded_backend(
     Ok(Some(Arc::new(std::sync::Mutex::new(child))))
 }
 
-/// Wait for backend to be ready by polling health endpoint
+/// Wait for backend to be ready by polling health endpoint.
+///
+/// The backend may bind to a different port than `port` if the requested
+/// port was already in use (EADDRINUSE fallback). In that case it writes
+/// the actual port to `.koryphaios/.active-port.json`. We check that file
+/// on every poll iteration and switch to the discovered port if it differs.
 async fn wait_for_backend_ready(
     host: &str,
     port: u16,
     max_wait_ms: u64,
     expected_pid: Option<u32>,
     process: Option<Arc<std::sync::Mutex<std::process::Child>>>,
-) -> Result<(), String> {
+) -> Result<u16, String> {
     let start = std::time::Instant::now();
-    let health_url = format!("http://{}:{}/api/health", host, port);
+    let mut current_port = port;
     let client = reqwest::Client::builder()
         .connect_timeout(std::time::Duration::from_secs(2))
         .timeout(std::time::Duration::from_secs(3))
@@ -242,6 +247,19 @@ async fn wait_for_backend_ready(
             }
         }
 
+        // Check if the backend wrote a different port to .active-port.json
+        // (EADDRINUSE fallback). The function is in config.rs.
+        if let Some((_, discovered_port)) = crate::config::read_active_port_public() {
+            if discovered_port != current_port {
+                eprintln!(
+                    "[Koryphaios] Backend fell back from port {} to {}",
+                    current_port, discovered_port
+                );
+                current_port = discovered_port;
+            }
+        }
+
+        let health_url = format!("http://{}:{}/api/health", host, current_port);
         if let Ok(response) = client.get(&health_url).send().await {
             if response.status().is_success() {
                 if let Ok(body) = response.json::<serde_json::Value>().await {
@@ -253,8 +271,8 @@ async fn wait_for_backend_ready(
                         .and_then(|value| u32::try_from(value).ok());
                     let correct_process = expected_pid.is_none() || responding_pid == expected_pid;
                     if healthy && correct_process {
-                        println!("[Koryphaios] Backend is ready!");
-                        return Ok(());
+                        println!("[Koryphaios] Backend is ready on port {}!", current_port);
+                        return Ok(current_port);
                     }
                 }
             }
@@ -264,8 +282,8 @@ async fn wait_for_backend_ready(
     }
 
     Err(format!(
-        "Backend failed to become ready within {}ms",
-        max_wait_ms
+        "Backend failed to become ready within {}ms (last port: {})",
+        max_wait_ms, current_port
     ))
 }
 
@@ -960,46 +978,52 @@ pub fn run() {
                     let nav_process = process.clone();
                     let ready_handle = app_handle.clone();
                     tauri::async_runtime::spawn(async move {
-                        if let Err(e) = wait_for_backend_ready(
+                        let ready_result = wait_for_backend_ready(
                             &nav_host,
                             port,
                             120_000,
                             process_pid,
                             Some(nav_process.clone()),
                         )
-                        .await
-                        {
-                            eprintln!("[Koryphaios] Warning: {}", e);
-                            // Surface the initial readiness failure to the UI so
-                            // the user sees the BackendDownOverlay instead of a
-                            // blank WebView waiting for a navigation that never
-                            // arrives.
-                            emit_backend_down(
-                                &nav_handle,
-                                "initial-timeout",
-                                format!("Backend did not become ready: {e}"),
-                                process_pid,
-                            );
-                            // A live-but-unhealthy process would otherwise sit
-                            // outside the exit-only watchdog forever. Killing
-                            // it hands recovery to the normal restart loop.
-                            if let Ok(mut child) = nav_process.lock() {
-                                let _ = child.kill();
-                            }
-                            return;
-                        }
-                        // Backend is up and serving the bundled frontend —
-                        // navigate the window there so the ENTIRE app runs
-                        // from one origin (API, WS, images: all same-origin).
-                        if let Some(window) = nav_handle.get_webview_window("main") {
-                            let url = format!("http://{}:{}/", nav_host, port);
-                            if let Ok(parsed) = url.parse() {
-                                if let Err(e) = window.navigate(parsed) {
-                                    eprintln!("[Koryphaios] Failed to navigate to backend: {}", e);
+                        .await;
+                        match ready_result {
+                            Err(e) => {
+                                eprintln!("[Koryphaios] Warning: {}", e);
+                                // Surface the initial readiness failure to the UI so
+                                // the user sees the BackendDownOverlay instead of a
+                                // blank WebView waiting for a navigation that never
+                                // arrives.
+                                emit_backend_down(
+                                    &nav_handle,
+                                    "initial-timeout",
+                                    format!("Backend did not become ready: {e}"),
+                                    process_pid,
+                                );
+                                // A live-but-unhealthy process would otherwise sit
+                                // outside the exit-only watchdog forever. Killing
+                                // it hands recovery to the normal restart loop.
+                                if let Ok(mut child) = nav_process.lock() {
+                                    let _ = child.kill();
                                 }
+                                return;
+                            }
+                            Ok(actual_port) => {
+                                // Backend is up and serving the bundled frontend —
+                                // navigate the window there so the ENTIRE app runs
+                                // from one origin (API, WS, images: all same-origin).
+                                // Use actual_port (may differ from config port if
+                                // the backend fell back due to EADDRINUSE).
+                                if let Some(window) = nav_handle.get_webview_window("main") {
+                                    let url = format!("http://{}:{}/", nav_host, actual_port);
+                                    if let Ok(parsed) = url.parse() {
+                                        if let Err(e) = window.navigate(parsed) {
+                                            eprintln!("[Koryphaios] Failed to navigate to backend: {}", e);
+                                        }
+                                    }
+                                }
+                                emit_backend_ready(&ready_handle, process_pid, nav_host.clone(), actual_port);
                             }
                         }
-                        emit_backend_ready(&ready_handle, process_pid, nav_host.clone(), port);
                     });
 
                     // Supervise: if the backend ever dies, restart it and
@@ -1047,32 +1071,34 @@ pub fn run() {
                                         new_pid,
                                         Some(new_proc.clone()),
                                     )
-                                    .await
-                                    .is_ok();
-                                    if ready {
-                                        if let Some(window) =
-                                            watch_handle.get_webview_window("main")
-                                        {
-                                            let url = format!("http://{}:{}/", watch_host, port);
-                                            if let Ok(parsed) = url.parse() {
-                                                let _ = window.navigate(parsed);
+                                    .await;
+                                    match ready {
+                                        Ok(actual_port) => {
+                                            if let Some(window) =
+                                                watch_handle.get_webview_window("main")
+                                            {
+                                                let url = format!("http://{}:{}/", watch_host, actual_port);
+                                                if let Ok(parsed) = url.parse() {
+                                                    let _ = window.navigate(parsed);
+                                                }
                                             }
+                                            emit_backend_ready(
+                                                &watch_handle,
+                                                new_pid,
+                                                watch_host.clone(),
+                                                actual_port,
+                                            );
                                         }
-                                        emit_backend_ready(
-                                            &watch_handle,
-                                            new_pid,
-                                            watch_host.clone(),
-                                            port,
-                                        );
-                                    } else {
-                                        emit_backend_down(
-                                            &watch_handle,
-                                            "restart-timeout",
-                                            "Restarted backend did not become ready; retrying.".to_string(),
-                                            new_pid,
-                                        );
-                                        if let Ok(mut child) = new_proc.lock() {
-                                            let _ = child.kill();
+                                        Err(_) => {
+                                            emit_backend_down(
+                                                &watch_handle,
+                                                "restart-timeout",
+                                                "Restarted backend did not become ready; retrying.".to_string(),
+                                                new_pid,
+                                            );
+                                            if let Ok(mut child) = new_proc.lock() {
+                                                let _ = child.kill();
+                                            }
                                         }
                                     }
                                 }
