@@ -20,6 +20,8 @@ import {
   createAntigravityCLIAuthMarker,
 } from '../../providers/auth-utils';
 import { detectAgentClis } from '../../providers/cli-detection';
+import { getManagedCodexAppServer } from '../../providers/codex-app-server';
+import { CODEX_MANAGED_AUTH_MARKER } from '../../providers/codex-auth';
 import { discoverCliAccounts, getDiscoveredCliAccount } from '../../providers/cli-accounts';
 import {
   clearKimiCodeAuthState,
@@ -63,6 +65,7 @@ const providerConfigBody = t.Object({
 
 type BrowserAuthProvider =
   | 'copilot'
+  | 'codex-auth'
   | 'kimicode'
   | 'claude'
   | 'grok'
@@ -71,6 +74,7 @@ type BrowserAuthProvider =
 function isBrowserAuthProvider(name: string): name is BrowserAuthProvider {
   return (
     name === 'copilot' ||
+    name === 'codex-auth' ||
     name === 'kimicode' ||
     name === 'claude' ||
     name === 'grok' ||
@@ -99,6 +103,41 @@ async function startBrowserAuth(
           data: {
             provider: name,
             ...result,
+          },
+        };
+      }
+      case 'codex-auth': {
+        const appServer = getManagedCodexAppServer();
+        const result = await appServer.startChatgptDeviceCodeLogin();
+        void appServer.waitForLoginCompletion(result.loginId)
+          .then(async (completion) => {
+            if (!completion.success) {
+              serverLog.warn({ provider: name, error: completion.error }, 'OpenAI Codex sign-in was not approved');
+              return;
+            }
+            const activation = await activateManagedCodexAuth();
+            if (!activation.ok) {
+              serverLog.error({ provider: name, error: activation.error }, 'OpenAI Codex sign-in completed but activation failed');
+              return;
+            }
+            serverLog.info({ provider: name }, 'OpenAI Codex signed in and activated automatically');
+          })
+          .catch((error) => {
+            serverLog.warn(
+              { provider: name, error: error instanceof Error ? error.message : String(error) },
+              'OpenAI Codex sign-in did not complete',
+            );
+          });
+        return {
+          ok: true,
+          data: {
+            provider: name,
+            // Device auth is intentionally UI-owned: it avoids the hosted
+            // success page attempting to open Codex's private `codex://` URI.
+            deviceCode: result.loginId,
+            userCode: result.userCode,
+            verificationUri: result.verificationUrl,
+            message: 'Open the verification page, enter this code, then confirm the sign-in here.',
           },
         };
       }
@@ -221,6 +260,56 @@ async function startBrowserAuth(
   }
 }
 
+async function activateManagedCodexAuth(): Promise<{
+  ok: boolean;
+  data?: Record<string, unknown>;
+  error?: string;
+}> {
+  const { providers } = getContext();
+  const account = await getManagedCodexAppServer().account(true);
+  if (account.account?.type !== 'chatgpt') {
+    return { ok: false, error: 'ChatGPT sign-in is not complete yet.' };
+  }
+  // This is an activation marker only, never an OAuth access or refresh token.
+  const result = await providers.setCredentials('codex-auth', {
+    authToken: CODEX_MANAGED_AUTH_MARKER,
+  });
+  if (!result.success) {
+    return { ok: false, error: result.error ?? 'Failed to activate OpenAI Codex' };
+  }
+  await providers.get('codex-auth')?.refreshModels?.(true);
+  syncProviderConfigsSafely(providers);
+  return {
+    ok: true,
+    data: {
+      status: 'connected',
+      provider: 'codex-auth',
+      planType: account.account.planType ?? null,
+    },
+  };
+}
+
+/** Adopt an already-persisted app-server ChatGPT session during normal status refreshes. */
+async function adoptManagedCodexSession(): Promise<void> {
+  const { providers } = getContext();
+  const status = providers.getStatus().find((provider) => provider.name === 'codex-auth');
+  if (!status || status.authenticated) return;
+  try {
+    const account = await getManagedCodexAppServer().account(false);
+    if (account.account?.type !== 'chatgpt') return;
+    const activation = await activateManagedCodexAuth();
+    if (activation.ok) {
+      serverLog.info({ provider: 'codex-auth' }, 'Adopted existing OpenAI Codex ChatGPT session');
+    }
+  } catch (error) {
+    // Status polling must remain available when Codex is absent or its profile is not signed in.
+    serverLog.debug(
+      { provider: 'codex-auth', error: error instanceof Error ? error.message : String(error) },
+      'Could not adopt managed OpenAI Codex session during status refresh',
+    );
+  }
+}
+
 async function completeBrowserAuth(
   name: BrowserAuthProvider,
 ): Promise<{ ok: boolean; data?: Record<string, unknown>; error?: string }> {
@@ -284,6 +373,9 @@ async function completeBrowserAuth(
       case 'copilot':
       case 'kimicode':
         return { ok: false, error: `${name} auth completes automatically after browser approval` };
+      case 'codex-auth': {
+        return await activateManagedCodexAuth();
+      }
     }
   } catch (error: any) {
     serverLog.error(
@@ -422,6 +514,7 @@ export const providerRoutes = new Elysia({ prefix: '/api/providers' })
   .get('/', async ({ request, set }) => {
     if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
     const { providers } = getContext();
+    await adoptManagedCodexSession();
     const forceRefreshModels = new URL(request.url).searchParams.get('refreshModels') === '1';
     if (forceRefreshModels) {
       await providers.refreshModelCatalogs();
@@ -434,6 +527,7 @@ export const providerRoutes = new Elysia({ prefix: '/api/providers' })
   .get('/status', async ({ request, set }) => {
     if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
     const { providers } = getContext();
+    await adoptManagedCodexSession();
     const forceRefreshModels = new URL(request.url).searchParams.get('refreshModels') === '1';
     if (forceRefreshModels) {
       await providers.refreshModelCatalogs();
@@ -446,6 +540,8 @@ export const providerRoutes = new Elysia({ prefix: '/api/providers' })
   .get('/cli-accounts', ({ request, set }) => {
     if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
     const accounts = discoverCliAccounts();
+    const { providers } = getContext();
+    const configs = providers.getConfigs();
     const providerCounts = new Map<string, number>();
     for (const account of accounts) {
       providerCounts.set(account.provider, (providerCounts.get(account.provider) ?? 0) + 1);
@@ -454,7 +550,15 @@ export const providerRoutes = new Elysia({ prefix: '/api/providers' })
       ok: true,
       data: accounts,
       selectionRequired: [...providerCounts.entries()]
-        .filter(([, count]) => count > 1)
+        .filter(([provider, count]) => {
+          if (count < 2) return false;
+          // A saved fallback order is the user's durable CLI-account choice.
+          // Ignore stale IDs so a newly discovered set is surfaced once.
+          const discoveredIds = new Set(
+            accounts.filter((account) => account.provider === provider).map((account) => account.id),
+          );
+          return !(configs[provider]?.fallbackOrder ?? []).some((id) => discoveredIds.has(id));
+        })
         .map(([provider]) => provider),
     };
   })
@@ -731,6 +835,7 @@ export const providerRoutes = new Elysia({ prefix: '/api/providers' })
       ok: true,
       data: await listStoredAccounts(name),
       fallbackOrder: providerConfig?.fallbackOrder ?? [],
+      fallbackEnabled: providerConfig?.fallbackEnabled ?? false,
     };
   })
   .post(
@@ -955,6 +1060,7 @@ export const providerRoutes = new Elysia({ prefix: '/api/providers' })
         return { ok: false, error: 'Provider not found' };
       }
       config.fallbackOrder = body.order;
+      if (typeof body.enabled === 'boolean') config.fallbackEnabled = body.enabled;
       configs[name] = config;
       syncProviderConfigsToConfig(PROJECT_ROOT, configs);
 
@@ -963,12 +1069,17 @@ export const providerRoutes = new Elysia({ prefix: '/api/providers' })
     {
       body: t.Object({
         order: t.Array(t.String()),
+        enabled: t.Optional(t.Boolean()),
       }),
     },
   )
   .delete('/:name', async ({ request, params: { name }, set }) => {
     if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
     const { providers } = getContext();
+    if (name === 'codex-auth') {
+      // The managed app-server, not Koryphaios, persists ChatGPT OAuth tokens.
+      await getManagedCodexAppServer().logout();
+    }
     providers.removeApiKey(name as ProviderName);
     if (name === 'kimicode') {
       clearKimiCodeAuthState();

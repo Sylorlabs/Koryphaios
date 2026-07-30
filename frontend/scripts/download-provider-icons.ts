@@ -11,20 +11,96 @@ import * as simpleIcons from 'simple-icons';
 const OUT_DIR = path.resolve('static/provider-icons');
 
 const providers = [
-  'anthropic', 'openai', 'google', 'xai', 'openrouter', 'groq', 'copilot', 'azure',
-  'bedrock', 'vertexai', 'local', 'ollama', 'ollamacloud', 'llamacpp', 'lmstudio',
-  'deepseek', 'togetherai', 'cerebras', 'fireworks', 'huggingface', 'deepinfra',
-  'minimax', 'moonshot', 'zai', 'stepfun', 'qwen', 'baichuan', 'zhipuai',
-  'replicate', 'modal', 'vercel', 'cloudflare', 'baseten', 'helicone',
-  'portkey', 'scaleway', 'ovhcloud', 'stackit', 'nebius', 'togetherai',
-  'venice', 'zenmux', 'opencodezen', 'firmware', '302ai', 'mistralai',
-  'claude', 'codex', 'mistral', 'cohere', 'perplexity', 'luma', 'fal',
-  'elevenlabs', 'assemblyai', 'deepgram', 'gladia', 'lmnt', 'azurecognitive',
-  'sapai', 'gitlab', 'nvidia', 'nim', 'friendliai', 'voyageai', 'mixedbread',
-  'mem0', 'letta', 'chromeai', 'requesty', 'aihubmix', 'aimlapi',
-  'blackforestlabs', 'klingai', 'prodia', 'novita', 'upstage', 'v0',
-  'siliconflow', 'abacus', 'llama', 'vultr', 'wandb', 'poe', 'github-models',
-  'submodel', 'synthetic', 'moark', 'nova', 'banbri'
+  'anthropic',
+  'openai',
+  'google',
+  'xai',
+  'openrouter',
+  'groq',
+  'copilot',
+  'azure',
+  'bedrock',
+  'vertexai',
+  'local',
+  'ollama',
+  'ollamacloud',
+  'llamacpp',
+  'lmstudio',
+  'deepseek',
+  'togetherai',
+  'cerebras',
+  'fireworks',
+  'huggingface',
+  'deepinfra',
+  'minimax',
+  'moonshot',
+  'zai',
+  'stepfun',
+  'qwen',
+  'baichuan',
+  'replicate',
+  'modal',
+  'vercel',
+  'cloudflare',
+  'baseten',
+  'helicone',
+  'portkey',
+  'scaleway',
+  'ovhcloud',
+  'stackit',
+  'nebius',
+  'togetherai',
+  'venice',
+  'zenmux',
+  'opencodezen',
+  'opencodego',
+  'firmware',
+  '302ai',
+  'mistralai',
+  'claude',
+  'codex',
+  'jules',
+  'mistral',
+  'cohere',
+  'perplexity',
+  'luma',
+  'fal',
+  'elevenlabs',
+  'assemblyai',
+  'deepgram',
+  'gladia',
+  'lmnt',
+  'azurecognitive',
+  'sapai',
+  'gitlab',
+  'nvidia',
+  'friendliai',
+  'voyageai',
+  'mixedbread',
+  'mem0',
+  'letta',
+  'chromeai',
+  'requesty',
+  'aihubmix',
+  'aimlapi',
+  'blackforestlabs',
+  'klingai',
+  'prodia',
+  'novita',
+  'upstage',
+  'v0',
+  'siliconflow',
+  'abacus',
+  'llama',
+  'vultr',
+  'wandb',
+  'poe',
+  'github-models',
+  'submodel',
+  'synthetic',
+  'moark',
+  'nova',
+  'banbri',
 ];
 
 // SimpleIcons mapping for providers not in LobeHub or where SimpleIcons is preferred
@@ -72,13 +148,13 @@ const simpleIconsMap: Record<string, string> = {
   stackit: 'siStackit',
   venice: 'siVenice',
   opencodezen: 'siOpencode',
+  opencodego: 'siOpencode',
   firmware: 'siFirmware',
   '302ai': 'si302',
   gladia: 'siGladia',
   lmnt: 'siLmnt',
-  nim: 'siNvidia',
   requesty: 'siRequesty',
-  klingai: 'siKuaishou'
+  klingai: 'siKuaishou',
 };
 
 async function run() {
@@ -86,7 +162,7 @@ async function run() {
 
   for (const p of providers) {
     const targetPath = path.join(OUT_DIR, `${p}.svg`);
-    
+
     // Skip if exists
     try {
       await fs.access(targetPath);
@@ -96,6 +172,23 @@ async function run() {
     }
 
     let svg = '';
+    if (p === 'jules') {
+      try {
+        const res = await fetch(
+          'https://raw.githubusercontent.com/homarr-labs/dashboard-icons/main/svg/google-jules.svg',
+        );
+        if (res.ok) {
+          svg = await res.text();
+          await fs.writeFile(targetPath, svg);
+          await fs.writeFile(path.join(OUT_DIR, 'jules-color.svg'), svg);
+          console.log(`Downloaded icon for ${p}`);
+          continue;
+        }
+      } catch {
+        /* fall through to placeholder */
+      }
+    }
+
     const siKey = simpleIconsMap[p];
 
     if (siKey) {

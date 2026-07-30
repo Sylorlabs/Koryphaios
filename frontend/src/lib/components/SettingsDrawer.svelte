@@ -58,6 +58,7 @@ import { toastStore } from '$lib/stores/toast.svelte';
   import ModelSelectionDialog from './ModelSelectionDialog.svelte';
   import ModeToggle from './ModeToggle.svelte';
   import TeamAccessProfiles from './TeamAccessProfiles.svelte';
+  import ConfirmDialog from './ConfirmDialog.svelte';
   import ModelSharingPanel from './ModelSharingPanel.svelte';
   import NumberStepper from './NumberStepper.svelte';
   import SettingsSwitch from './SettingsSwitch.svelte';
@@ -224,8 +225,10 @@ import { apiFetch, parseJsonResponse } from '$lib/api.svelte';
     deleteCustomProvider: deleteCustomProviderFromStore,
     saveAccountProfileLabel,
     getOrderedFallbackAccounts,
+    handleFallbackDndConsider,
     handleFallbackDndFinalize,
     saveFallbackOrder,
+    setFallbackEnabled,
     copyToClipboard,
   } = providersStore;
 
@@ -239,9 +242,14 @@ import { apiFetch, parseJsonResponse } from '$lib/api.svelte';
       ? [...current.filter((id) => id !== accountId), accountId]
       : current.filter((id) => id !== accountId);
     await saveFallbackOrder(provider, next);
-    if (enabled && current.length === 0) {
-      await activateProviderAccount(provider, accountId);
-    }
+  }
+
+  function getCliProfileAccounts(provider: string) {
+    return getProviderAccounts(provider).filter((account) => account.source === 'cli-autodetect');
+  }
+
+  function hasMultipleCliProfiles(provider: string): boolean {
+    return getCliProfileAccounts(provider).length > 1;
   }
 
   let providersLoadAttempted = $state(false);
@@ -310,17 +318,19 @@ import { apiFetch, parseJsonResponse } from '$lib/api.svelte';
 
   let providerSearchQuery = $state('');
   const clineSignInCommand = 'cline auth --provider cline --apikey <YOUR_KEY>';
-  type ProviderCategory = 'all' | 'ready' | 'subscriptions' | 'api' | 'local' | 'custom';
+  type ProviderCategory = 'all' | 'ready' | 'auth' | 'subscriptions' | 'api' | 'local' | 'custom';
   let providerCategory = $state<ProviderCategory>('all');
   const PROVIDER_CATEGORIES: Array<{ id: ProviderCategory; label: string }> = [
     { id: 'all', label: 'All' },
     { id: 'ready', label: 'Ready now' },
+    { id: 'auth', label: 'ChatGPT auth' },
     { id: 'subscriptions', label: 'CLI subscriptions' },
     { id: 'api', label: 'API' },
     { id: 'local', label: 'Local' },
     { id: 'custom', label: 'Custom' },
   ];
   const LOCAL_PROVIDER_KEYS = new Set(['local', 'ollama', 'lmstudio', 'llamacpp']);
+  const CHATGPT_AUTH_PROVIDER_KEYS = new Set(['codex-auth']);
   const CUSTOM_PROVIDER_KEYS = new Set(['custom']);
   // Categorization is based on the provider being used, not incidental CLI
   // detection. For example, installing `claude` must not reclassify the
@@ -341,6 +351,7 @@ import { apiFetch, parseJsonResponse } from '$lib/api.svelte';
   const providerCategoryFor = (provider: { key: string }): Exclude<ProviderCategory, 'all' | 'ready'> => {
     if (LOCAL_PROVIDER_KEYS.has(provider.key)) return 'local';
     if (CUSTOM_PROVIDER_KEYS.has(provider.key)) return 'custom';
+    if (CHATGPT_AUTH_PROVIDER_KEYS.has(provider.key)) return 'auth';
     if (CLI_SUBSCRIPTION_PROVIDER_KEYS.has(provider.key)) {
       return 'subscriptions';
     }
@@ -371,6 +382,7 @@ import { apiFetch, parseJsonResponse } from '$lib/api.svelte';
     deployment: 'cloud' | 'api' | 'local' | 'hybrid' | undefined | null,
     providerKey: string,
   ): string | null {
+    if (CHATGPT_AUTH_PROVIDER_KEYS.has(providerKey)) return 'ChatGPT auth';
     if (deployment === 'cloud') return 'Cloud agent';
     if (deployment === 'local') return isCliExecutionProvider(providerKey) ? 'CLI' : 'Local endpoint';
     return null;
@@ -380,6 +392,7 @@ import { apiFetch, parseJsonResponse } from '$lib/api.svelte';
     deployment: 'cloud' | 'api' | 'local' | 'hybrid' | undefined | null,
     providerKey: string,
   ): string | null {
+    if (CHATGPT_AUTH_PROVIDER_KEYS.has(providerKey)) return 'ChatGPT OAuth · managed by local Codex app-server';
     if (deployment === 'cloud') {
       return 'Cloud agent · sync via git pull / gh pr checkout';
     }
@@ -398,6 +411,7 @@ import { apiFetch, parseJsonResponse } from '$lib/api.svelte';
   let showAddCustom = $state(false);
   let customForm = $state({ label: '', kind: 'openai', baseUrl: '', apiKey: '', models: '' });
   let copiedEndpoint = $state(false);
+  let pendingDeleteProvider = $state<{ id: string; label: string } | null>(null);
 
   async function addCustomProvider() {
     const ok = await addCustomProviderToStore(customForm);
@@ -408,8 +422,15 @@ import { apiFetch, parseJsonResponse } from '$lib/api.svelte';
   }
 
   async function deleteCustomProvider(id: string) {
-    const ok = await deleteCustomProviderFromStore(id);
+    const provider = providersStore.providerList.find((p) => p.key === id);
+    pendingDeleteProvider = { id, label: provider?.label ?? id };
+  }
+
+  async function confirmDeleteCustomProvider() {
+    if (!pendingDeleteProvider) return;
+    const ok = await deleteCustomProviderFromStore(pendingDeleteProvider.id);
     if (ok) expandedProvider = null;
+    pendingDeleteProvider = null;
   }
 
   async function handleConnectProvider(name: string) {
@@ -456,6 +477,27 @@ import { apiFetch, parseJsonResponse } from '$lib/api.svelte';
     }
   }
 
+  function modelSelectorTarget(status: any) {
+    const accounts = getProviderAccounts(status.name).filter((account) => account.source === 'cli-autodetect');
+    // A single CLI profile is the provider's normal connection, not an
+    // account-selection flow. Filtering it through fallback state can make
+    // its models disappear even though there is nothing to choose between.
+    if (accounts.length < 2) return status;
+    const enabledAccounts = new Set(providersStore.fallbackOrders[status.name] ?? []);
+    const models = (status.allAvailableModels ?? []).filter((model: any) => enabledAccounts.has(model.accountId));
+    return {
+      ...status,
+      allAvailableModels: models,
+      selectedModels: (status.selectedModels ?? []).filter((id: string) => models.some((model: any) => model.id === id)),
+      emptyMessage: enabledAccounts.size === 0 ? 'Turn on an account to manage models.' : 'The enabled accounts did not report any models.',
+    };
+  }
+
+  function openModelSelector(status: any) {
+    selectorTarget = modelSelectorTarget(status);
+    showModelSelector = true;
+  }
+
   function openAccountManager(provider: string, account: { id: string; label: string }) {
     managingAccountProvider = provider;
     managingAccountId = account.id;
@@ -485,8 +527,7 @@ import { apiFetch, parseJsonResponse } from '$lib/api.svelte';
       toastStore.error('Provider is not connected');
       return;
     }
-    selectorTarget = status;
-    showModelSelector = true;
+    openModelSelector(status);
   }
 
   $effect(() => {
@@ -775,6 +816,26 @@ import { apiFetch, parseJsonResponse } from '$lib/api.svelte';
           </section>
         {/if}
 
+        {#if providerSearchQuery.trim()}
+          <div class="text-xs text-[var(--color-text-muted)]">
+            {filteredProviderList.length} provider{filteredProviderList.length === 1 ? '' : 's'} matching "{providerSearchQuery.trim()}"
+          </div>
+        {/if}
+
+        {#if filteredProviderList.length === 0}
+          <div class="rounded-xl border border-[var(--color-border)] p-8 text-center bg-[var(--color-surface-1)]">
+            <Search size={24} class="mx-auto mb-3 opacity-40" style="color: var(--color-text-muted);" />
+            <p class="text-sm text-[var(--color-text-secondary)] mb-1">No providers found</p>
+            <p class="text-xs text-[var(--color-text-muted)]">
+              {#if providerSearchQuery.trim()}
+                Try a different search term or clear the filter.
+              {:else}
+                No providers in the "{PROVIDER_CATEGORIES.find((c) => c.id === providerCategory)?.label ?? providerCategory}" category.
+                Try switching to "All" or add a custom provider.
+              {/if}
+            </p>
+          </div>
+        {:else}
         <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 items-start">
           {#each filteredProviderList as prov (prov.key)}
             {@const status = getProviderStatus(prov.key)}
@@ -837,7 +898,7 @@ import { apiFetch, parseJsonResponse } from '$lib/api.svelte';
                       <div class="text-[10px] text-[var(--color-text-muted)]">
                         {(status.models?.length ?? 0) > 0 ? status.models?.length : '—'} enabled of {(status.allAvailableModels?.length ?? 0) > 0 ? status.allAvailableModels?.length : '—'} available
                       </div>
-                      <button type="button" onclick={() => { selectorTarget = status; showModelSelector = true; }} class="btn btn-secondary text-[10px] py-1 px-3">Manage Models</button>
+                      <button type="button" onclick={() => openModelSelector(status)} class="btn btn-secondary text-[10px] py-1 px-3">Manage Models</button>
                       {#if caps.supportsApiKey && !usesBrowserAuth(prov.key)}
                         <button
                           type="button"
@@ -882,10 +943,11 @@ import { apiFetch, parseJsonResponse } from '$lib/api.svelte';
                           <!-- One shared device-code panel for every device-code
                                provider — identical copy, code, copy-button, and
                                waiting line, so no provider gets a lesser flow. -->
-                          {#if prov.key === 'copilot' || prov.key === 'kimicode'}
+                          {#if prov.key === 'copilot' || prov.key === 'kimicode' || prov.key === 'codex-auth'}
                             {@const deviceAuth =
                               prov.key === 'copilot' ? providersStore.copilotDeviceAuth
-                              : providersStore.kimicodeDeviceAuth}
+                              : prov.key === 'kimicode' ? providersStore.kimicodeDeviceAuth
+                              : providersStore.codexDeviceAuth}
                             {#if deviceAuth}
                             {@const userCode = deviceAuth.userCode}
                             <div class="rounded-md bg-[var(--color-surface-2)] px-2.5 py-2 text-[10px] text-[var(--color-text-secondary)]">
@@ -924,7 +986,7 @@ import { apiFetch, parseJsonResponse } from '$lib/api.svelte';
                                 ? 'Opening...'
                                 : 'Auth'}
                             </button>
-                            {#if providersStore.browserAuthPending[prov.key] && prov.key !== 'copilot' && prov.key !== 'kimicode'}
+                            {#if providersStore.browserAuthPending[prov.key] && prov.key !== 'copilot' && prov.key !== 'kimicode' && prov.key !== 'codex-auth'}
                               <button
                                 type="button"
                                 onclick={() => handleFinishBrowserAuth(prov.key)}
@@ -971,8 +1033,15 @@ import { apiFetch, parseJsonResponse } from '$lib/api.svelte';
                           <Trash2 size={12} /> Remove this custom provider
                         </button>
                       {/if}
+                      {#if providersStore.connectErrors[prov.key]}
+                        <div class="flex items-start gap-2 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-400">
+                          <AlertTriangle size={14} class="shrink-0 mt-0.5" />
+                          <span class="flex-1">{providersStore.connectErrors[prov.key]}</span>
+                        </div>
+                      {/if}
                     </div>
                   {/if}
+                  {#if getProviderAccounts(prov.key).length > 1}
                   <div class="space-y-3 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-0)]/70 p-3">
                     <div class="flex items-center justify-between gap-3">
                       <div>
@@ -990,7 +1059,7 @@ import { apiFetch, parseJsonResponse } from '$lib/api.svelte';
                       <div class="space-y-2">
                         {#each getProviderAccounts(prov.key) as account (account.id)}
                           <div class="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-1)] p-2.5">
-                            {#if account.source === 'cli-autodetect'}
+                            {#if account.source === 'cli-autodetect' && hasMultipleCliProfiles(prov.key)}
                               <SettingsSwitch
                                 compact
                                 checked={isAccountSelected(prov.key, account.id)}
@@ -1002,6 +1071,13 @@ import { apiFetch, parseJsonResponse } from '$lib/api.svelte';
                                 ].filter(Boolean).join(' · ')}
                                 onchange={() => toggleCliAccount(prov.key, account.id, !isAccountSelected(prov.key, account.id))}
                               />
+                            {:else if account.source === 'cli-autodetect'}
+                              <div>
+                                <div class="text-xs font-semibold text-[var(--color-text-primary)]">{account.email ?? account.label}</div>
+                                <div class="mt-1 text-[10px] text-[var(--color-text-muted)]">
+                                  {[account.plan ? `${account.plan.toUpperCase()} plan` : 'Plan not reported by CLI', account.health === 'ready' ? 'Login ready' : account.health === 'expired' ? 'Login expired' : 'Login status unverified'].join(' · ')}
+                                </div>
+                              </div>
                             {:else}
                             <div class="flex items-start justify-between gap-3">
                               <div>
@@ -1121,25 +1197,34 @@ import { apiFetch, parseJsonResponse } from '$lib/api.svelte';
                       {/if}
                     </div>
                   </div>
-                  {#if getProviderAccounts(prov.key).length >= 2}
+                  {/if}
+                  {#if hasMultipleCliProfiles(prov.key)}
                     {@const orderedAccounts = getOrderedFallbackAccounts(prov.key)}
                     <div class="space-y-3 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-0)]/70 p-3">
                       <div class="flex items-center justify-between gap-3">
                         <div>
                           <p class="text-[10px] font-semibold uppercase tracking-[0.2em] text-[var(--color-text-muted)]">Fallback Order</p>
-                          <p class="text-[11px] text-[var(--color-text-muted)]">Drag to set priority. When the active account fails, the next one is tried automatically.</p>
+                          <p class="text-[11px] text-[var(--color-text-muted)]">Choose the CLI profiles Koryphaios may use, then drag to set their priority.</p>
                         </div>
+                        <SettingsSwitch
+                          compact
+                          checked={providersStore.fallbackEnabled[prov.key] === true}
+                          label="Enable fallback"
+                          description="Try the next selected CLI profile when the first one cannot run."
+                          onchange={() => setFallbackEnabled(prov.key, providersStore.fallbackEnabled[prov.key] !== true)}
+                        />
                         {#if providersStore.fallbackSaving === prov.key}
                           <span class="text-[10px] text-[var(--color-text-muted)]">Saving...</span>
                         {/if}
                       </div>
                       <div
                         class="space-y-2"
-                        use:dndzone={{ items: orderedAccounts, dragDisabled: false }}
+                        use:dndzone={{ items: orderedAccounts, dragDisabled: providersStore.fallbackEnabled[prov.key] !== true, type: `fallback-order:${prov.key}` }}
+                        onconsider={(e) => handleFallbackDndConsider(prov.key, e.detail.items)}
                         onfinalize={(e) => handleFallbackDndFinalize(prov.key, e.detail.items)}
                       >
                         {#each orderedAccounts as account, i (account.id)}
-                          <div class="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-1)] p-2.5 flex items-center gap-2.5 cursor-grab active:cursor-grabbing">
+                          <div class="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-1)] p-2.5 flex items-center gap-2.5 {providersStore.fallbackEnabled[prov.key] === true ? 'cursor-grab active:cursor-grabbing' : 'opacity-60'}">
                             <GripVertical size={14} class="text-[var(--color-text-muted)] shrink-0" />
                             <span class="text-[10px] font-bold text-[var(--color-accent)] shrink-0 w-5 text-center">{i + 1}</span>
                             <div class="flex-1 min-w-0">
@@ -1163,6 +1248,7 @@ import { apiFetch, parseJsonResponse } from '$lib/api.svelte';
             </div>
           {/each}
         </div>
+        {/if}
       </div>
 
       <!-- Appearance Tab -->
@@ -2137,7 +2223,18 @@ import { apiFetch, parseJsonResponse } from '$lib/api.svelte';
 {/if}
 
 {#if showModelSelector && selectorTarget}
-  <ModelSelectionDialog providerName={selectorTarget.name} availableModels={selectorTarget.allAvailableModels} selectedModels={selectorTarget.selectedModels} onSave={saveSelectedModels} onClose={() => { showModelSelector = false; selectorTarget = null; }} />
+  <ModelSelectionDialog providerName={selectorTarget.name} availableModels={selectorTarget.allAvailableModels} selectedModels={selectorTarget.selectedModels} emptyMessage={selectorTarget.emptyMessage} onSave={saveSelectedModels} onClose={() => { showModelSelector = false; selectorTarget = null; }} />
+{/if}
+
+{#if pendingDeleteProvider}
+  <ConfirmDialog
+    title="Delete custom provider"
+    message={'Remove "' + pendingDeleteProvider.label + '" from your provider list? This cannot be undone.'}
+    variant="danger"
+    confirmLabel="Delete"
+    onConfirm={confirmDeleteCustomProvider}
+    onCancel={() => (pendingDeleteProvider = null)}
+  />
 {/if}
 
 {#if showAccountManageDialog && managingAccountProvider && managingAccountId}

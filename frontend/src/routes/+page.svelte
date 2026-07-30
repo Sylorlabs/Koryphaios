@@ -21,6 +21,7 @@
   import SettingsDrawer from '$lib/components/SettingsDrawer.svelte';
   import ToastContainer from '$lib/components/ToastContainer.svelte';
   import CommandPalette from '$lib/components/CommandPalette.svelte';
+  import { goalDisplayStore } from '$lib/stores/goal-display.svelte';
   import MenuBar from '$lib/components/MenuBar.svelte';
   import ThemePickerModal from '$lib/components/ThemePickerModal.svelte';
   import BackgroundShells from '$lib/components/BackgroundShells.svelte';
@@ -164,6 +165,7 @@
     { command: 'theme', label: 'Theme Picker', description: 'Open theme selection.' },
     { command: 'sidebar', label: 'Toggle Sidebar', description: 'Show or hide the sidebar.' },
     { command: 'zen', label: 'Toggle Zen', description: 'Enter or exit zen mode.' },
+    { command: 'goal', label: 'Goal Mode', description: 'Create, open, or ask Kory to advance a verified goal.' },
   ];
 
   const LAYOUT_PREFS_KEY = 'koryphaios-layout-prefs';
@@ -180,6 +182,13 @@
           void refreshComposerFileMentions();
         }
       });
+      void notesStore.fetchSettings();
+    } else {
+      // The browser trial intentionally has no desktop app bootstrap or
+      // websocket. It still loads the advanced-mode controls and virtual
+      // workspace mentions so Git review and Goal Mode are discoverable.
+      void modeStore.fetchMode();
+      void refreshComposerFileMentions();
       void notesStore.fetchSettings();
     }
     recentProjects = parseRecentProjects();
@@ -474,7 +483,7 @@ RULES:
 
     if (root === 'help') {
       toastStore.info(
-        'Commands: /new, /resume, /compact, /yolo, /beginner, /advanced, /clear, /settings, /theme, /sidebar, /zen',
+        'Commands: /new, /resume, /compact, /goal, /yolo, /beginner, /advanced, /clear, /settings, /theme, /sidebar, /zen',
       );
       return true;
     }
@@ -537,6 +546,12 @@ RULES:
 
     if (root === 'zen') {
       handleMenuAction('toggle_zen_mode');
+      return true;
+    }
+
+    if (root === 'goal') {
+      goalDisplayStore.update({ sidebar: true });
+      queueMicrotask(() => window.dispatchEvent(new CustomEvent('kory:goal-action', { detail: parts.length > 1 ? 'goal_create' : 'goal_open' })));
       return true;
     }
 
@@ -805,6 +820,17 @@ RULES:
   }
 
   async function handleMenuAction(action: string) {
+    if (action.startsWith('goal_')) {
+      if (action === 'goal_open') {
+        goalDisplayStore.update({ sidebar: true });
+        // The Goal panel is conditionally mounted; dispatch after Svelte has
+        // committed the visibility change so its onMount listener receives it.
+        queueMicrotask(() => window.dispatchEvent(new CustomEvent('kory:goal-action', { detail: action })));
+      } else {
+        window.dispatchEvent(new CustomEvent('kory:goal-action', { detail: action }));
+      }
+      return;
+    }
     switch (action) {
       case 'new_project': {
         const inTauri = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
@@ -1476,7 +1502,7 @@ RULES:
 
 <PermissionDialog />
 <QuestionDialog />
-{#if !isDemoMode}<ChangesSummary />{/if}
+<ChangesSummary />
 <ThemePickerModal open={showThemeQuickMenu} onClose={() => (showThemeQuickMenu = false)} />
 
 {#if noProjectPrompt}

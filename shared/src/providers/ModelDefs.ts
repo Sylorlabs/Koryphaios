@@ -14,6 +14,9 @@ export interface ModelDef {
   provider: ProviderName;
   /** Model ID sent to the API. Defaults to `id` if omitted. Used when API expects a different name (e.g., OpenRouter "openai/gpt-4.1"). */
   apiModelId?: string;
+  /** Provider-owned account/profile that reported this model. Present only
+   * when a CLI exposes multiple independently authenticated accounts. */
+  accountId?: string;
   contextWindow: number;
   maxOutputTokens: number;
   costPerMInputTokens?: number;
@@ -53,6 +56,8 @@ export interface ProviderConfig {
   hideModelSelector?: boolean;
   /** Ordered list of saved account IDs for automatic fallback on failure. */
   fallbackOrder?: string[];
+  /** Whether automatic fallback between selected account profiles is enabled. */
+  fallbackEnabled?: boolean;
   headers?: Record<string, string>;
 
   // ─── Custom (user-defined / bring-your-own) provider fields ───────────────

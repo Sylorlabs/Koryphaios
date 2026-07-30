@@ -97,7 +97,10 @@ function identityFromAuth(path: string): Pick<DiscoveredCliAccount, 'email' | 'p
     email,
     plan,
     expiresAt,
-    health: expiresAt == null ? 'unknown' : expiresAt > Date.now() ? 'ready' : 'expired',
+    // A decoded access-token expiry is not a CLI login verdict: the official
+    // CLI can refresh it transparently. Only an actual provider probe may say
+    // "expired". Keep an elapsed token as unverified rather than lying in UI.
+    health: expiresAt == null ? 'unknown' : expiresAt > Date.now() ? 'ready' : 'unknown',
   };
 }
 

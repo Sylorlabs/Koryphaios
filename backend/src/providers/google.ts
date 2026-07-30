@@ -49,11 +49,11 @@ export class GoogleProvider implements Provider {
 
   listModels(): ModelDef[] {
     const fallback = getModelsForProvider(this.name);
-    if (!this.isAiStudio) return fallback;
-    if (!this.isAvailable()) return fallback;
+    if (!this.isAiStudio) return [];
+    if (!this.isAvailable()) return [];
     if (this.cachedModels && isModelListCacheFresh(this.lastFetch)) return this.cachedModels;
     this.refreshModelsInBackground(fallback);
-    return this.cachedModels ?? fallback;
+    return this.cachedModels ?? [];
   }
 
   private refreshModelsInBackground(fallback: ModelDef[]) {
@@ -82,16 +82,13 @@ export class GoogleProvider implements Provider {
             { provider: this.name, count: this.cachedModels.length },
             'Model list refreshed from Gemini API',
           );
-        } else {
-          this.cachedModels ??= fallback;
         }
         this.lastFetch = Date.now();
       } catch (err) {
         providerLog.debug(
           { provider: this.name, err: err instanceof Error ? err.message : String(err) },
-          'Model list refresh failed; using catalog fallback',
+          'Model list refresh failed; leaving catalog empty rather than exposing a fallback list',
         );
-        this.cachedModels ??= fallback;
       } finally {
         this.fetchInProgress = false;
       }

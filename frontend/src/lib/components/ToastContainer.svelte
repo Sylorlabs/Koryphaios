@@ -75,9 +75,13 @@
 
     {#each visibleToasts as toast (toast.id)}
       {@const ToastIcon = iconMap[toast.type]}
-      <div 
+      <div
         class="flex items-start gap-3 px-4 py-3 rounded-xl border backdrop-blur-xl shadow-xl
                animate-slide-in {colorMap[toast.type]}"
+        onmouseenter={() => toastStore.pause(toast.id)}
+        onmouseleave={() => toastStore.resume(toast.id)}
+        role="alert"
+        aria-live="assertive"
       >
         <ToastIcon size={18} class="shrink-0 mt-0.5" />
         <p class="text-sm flex-1">{toast.message}</p>

@@ -152,6 +152,8 @@ export {
   STANDARD_REASONING_OPTIONS,
   buildReasoningConfigFromLevels,
 } from './reasoning/ReasoningFunctions';
+export type { Goal, GoalScope, GoalStatus, GoalItemStatus, GoalChecklistItem, GoalEvidence, GoalActivity } from './types/GoalTypes';
+export { goalProgress } from './types/GoalTypes';
 
 export type {
   ReasoningLevel,

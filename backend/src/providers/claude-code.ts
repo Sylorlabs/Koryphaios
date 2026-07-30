@@ -641,19 +641,18 @@ export class ClaudeCodeProvider implements Provider {
     }
     refreshModelsInBackground();
     if (cachedModels) return cachedModels;
-    // Static fallback until the first refresh lands — apply per-model levels
-    // from the binary catalog if it's already been extracted (never the global
-    // effort enum: it would show a picker for models like Haiku that have none).
+    // The CLI catalog is the authority. Never show a static menu while it is
+    // unavailable, because account/plan availability is not inferable.
     const fallback = getModelsForProvider('claude');
-    if (!cachedCatalog) return fallback;
-    return fallback.map((m) => {
+    if (!cachedCatalog) return [];
+    return fallback.flatMap((m) => {
       const entry = catalogEntryFor(m.realModelId ?? m.apiModelId, cachedCatalog);
-      if (!entry) return m;
+      if (!entry) return [];
       const ctx =
         entry.contextWindow && entry.contextWindow > 0
           ? { contextWindow: entry.contextWindow, contextVerified: true }
           : {};
-      return { ...m, reasoningLevels: capabilitiesToLevels(entry.capabilities), ...ctx };
+      return [{ ...m, reasoningLevels: capabilitiesToLevels(entry.capabilities), ...ctx }];
     });
   }
 

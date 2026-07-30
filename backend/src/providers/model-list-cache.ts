@@ -7,9 +7,14 @@ export function isModelListCacheFresh(fetchedAt: number, ttlMs = MODEL_LIST_CACH
   return fetchedAt > 0 && Date.now() - fetchedAt < ttlMs;
 }
 
-/** Prefer discovered models, enrich from fallback catalog metadata when ids match.
- *  When the remote listing reported its own capability metadata (contextVerified),
- *  those live numbers override the hand-maintained catalog values. */
+/**
+ * Turn a provider-reported list into display definitions.
+ *
+ * `fallback` is metadata only: it may enrich a model whose exact ID was
+ * reported by the provider, but it must never add a model the provider did not
+ * return. Appending the fallback here made removed, plan-gated, and otherwise
+ * unavailable models look selectable in Settings.
+ */
 export function mergeModelLists(fallback: ModelDef[], discovered: ModelDef[]): ModelDef[] {
   const byApiId = new Map<string, ModelDef>();
   for (const model of fallback) {
@@ -38,13 +43,6 @@ export function mergeModelLists(fallback: ModelDef[], discovered: ModelDef[]): M
     } else {
       merged.push(catalog);
     }
-  }
-
-  for (const model of fallback) {
-    const key = model.apiModelId ?? model.id;
-    if (seen.has(key)) continue;
-    seen.add(key);
-    merged.push(model);
   }
 
   return merged;

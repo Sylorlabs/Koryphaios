@@ -125,12 +125,6 @@ export function getModelsForProvider(providerName: ProviderName): ModelDef[] {
       provider: 'aistudio' as ProviderName,
     }));
   }
-  if (providerName === 'codex-auth') {
-    return ALL_MODELS.filter((m) => m.provider === 'codex').map((m) => ({
-      ...m,
-      provider: 'codex-auth' as ProviderName,
-    }));
-  }
   if (providerName === 'kimicode-auth') {
     return ALL_MODELS.filter((m) => m.provider === 'kimicode').map((m) => ({
       ...m,

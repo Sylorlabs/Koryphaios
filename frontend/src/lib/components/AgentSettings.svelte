@@ -4,6 +4,7 @@
   import { providersStore } from '$lib/stores/providers.svelte';
   import NumberStepper from './NumberStepper.svelte';
   import KorySelect from './KorySelect.svelte';
+  import { goalDisplayStore } from '$lib/stores/goal-display.svelte';
   import {
     Bot,
     Shield,
@@ -486,6 +487,12 @@
                     )}
                 />
                 <KorySelect
+                  label="Goal planning"
+                  value={agentSettingsStore.settings.goalPlanningDepth ?? 'adaptive'}
+                  options={[{ value: 'minimal', label: 'Minimal' }, { value: 'adaptive', label: 'Adaptive' }, { value: 'structured', label: 'Structured' }]}
+                  onchange={(value) => agentSettingsStore.saveSettings({ goalPlanningDepth: value as 'minimal' | 'adaptive' | 'structured' }, { quietSuccess: true })}
+                />
+                <KorySelect
                   label="Skill learning"
                   value={agentSettingsStore.settings.skillLearningMode ?? 'propose-then-verify'}
                   options={[
@@ -510,6 +517,24 @@
                 label="Design Discovery"
                 description="Resolve audience, medium, hierarchy, accessibility, references, and dislikes before ambiguous interface work."
                 onchange={() => toggleSetting('designDiscovery')}
+              />
+              <SettingsSwitch
+                checked={agentSettingsStore.settings.automaticGoalDriving ?? true}
+                label="Automatic Goal Driving"
+                description="Advance one ready checklist item at a time and pause on a real blocker."
+                onchange={() => toggleSetting('automaticGoalDriving')}
+              />
+              <SettingsSwitch
+                checked={goalDisplayStore.sidebar}
+                label="Show Active Goals in sidebar"
+                description="Keep the compact cross-chat goal list visible in the session sidebar."
+                onchange={() => goalDisplayStore.update({ sidebar: !goalDisplayStore.sidebar })}
+              />
+              <SettingsSwitch
+                checked={goalDisplayStore.composer}
+                label="Show goal context in composer"
+                description="Place the optional goal selector to the right of model and reasoning controls."
+                onchange={() => goalDisplayStore.update({ composer: !goalDisplayStore.composer })}
               />
             </section>
 

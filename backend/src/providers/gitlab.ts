@@ -14,7 +14,6 @@ import {
   type ProviderContentBlock,
   type ProviderMessage,
   type StreamRequest,
-  getModelsForProvider,
 } from './types';
 import { withTimeoutSignal } from './utils';
 import { providerLog } from '../logger';
@@ -36,7 +35,7 @@ export class GitLabProvider implements Provider {
 
   /** GitLab Duo Chat has no /models API — the endpoint picks the backend model. */
   listModels(): ModelDef[] {
-    return getModelsForProvider('gitlab');
+    return [];
   }
 
   async *streamResponse(request: StreamRequest): AsyncGenerator<ProviderEvent> {

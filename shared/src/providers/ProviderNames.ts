@@ -11,7 +11,9 @@ export const ProviderName = {
 
   // Aggregators (OpenAI-compatible APIs with implementations)
   OpenRouter: 'openrouter',
+  TokenRouter: 'tokenrouter',
   Groq: 'groq',
+  DigitalOcean: 'digitalocean',
 
   // Auth-only providers (OAuth/CLI based)
   Claude: 'claude',

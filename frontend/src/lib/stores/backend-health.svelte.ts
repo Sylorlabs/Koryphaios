@@ -15,7 +15,7 @@
 // instead of a hundred scattered broken states.
 
 import { browser } from '$app/environment';
-import { getApiBaseUrl } from '$lib/utils/api-url';
+import { getDirectBackendUrl } from '$lib/utils/api-url';
 import { setApiHalted } from '$lib/api.svelte';
 
 // ─── Public types ────────────────────────────────────────────────────────────
@@ -32,12 +32,36 @@ export type BackendHealthReason =
   | 'invalid-response'
   | 'not-ok'
   | 'min-frontend'
-  | 'bundle-hash';
+  | 'bundle-hash'
+  | 'supervisor'; // Tauri supervisor reported the backend down (see supervisorReason)
+
+// Mirror of the BackendDownEvent payload emitted by the desktop supervisor
+// (desktop/src-tauri/src/lib.rs). Kept loose-typed because the supervisor is
+// the source of truth and may add reasons without a frontend redeploy.
+export type SupervisorReason =
+  | 'initial-timeout'
+  | 'exited'
+  | 'restart-timeout'
+  | 'restart-failed'
+  | (string & {}); // forward-compatible with future supervisor codes
 
 export interface BackendHealthSnapshot {
   status: BackendHealthStatus;
   reason: BackendHealthReason | null;
   failureDetail: string | null;
+  /** Raw supervisor reason code when the failure originated upstream of the
+   *  health-check poller (e.g. the embedded process exited before binding). */
+  supervisorReason: SupervisorReason | null;
+  /** Human-readable message supplied by the supervisor alongside the code. */
+  supervisorMessage: string | null;
+  /** The exact URL the sentinel polled when this failure was recorded. */
+  healthUrl: string | null;
+  /** HTTP status code when the backend answered but with an error status. */
+  httpStatus: number | null;
+  /** Underlying network error name/message when the fetch threw (e.g.
+   *  TypeError: Failed to fetch). Useful for distinguishing a refused port
+   *  from a DNS failure from a CORS rejection. */
+  networkError: string | null;
   lastCheckedAt: number | null;
   lastHealthyAt: number | null;
   backendVersion: string | null;
@@ -79,6 +103,11 @@ function compareVersions(a: string, b: string): number {
 let _status = $state<BackendHealthStatus>('unknown');
 let _reason = $state<BackendHealthReason | null>(null);
 let _failureDetail = $state<string | null>(null);
+let _supervisorReason = $state<SupervisorReason | null>(null);
+let _supervisorMessage = $state<string | null>(null);
+let _healthUrl = $state<string | null>(null);
+let _httpStatus = $state<number | null>(null);
+let _networkError = $state<string | null>(null);
 let _lastCheckedAt = $state<number | null>(null);
 let _lastHealthyAt = $state<number | null>(null);
 let _backendVersion = $state<string | null>(null);
@@ -90,7 +119,9 @@ let _consecutiveFailures = $state(0);
 
 // ─── Tunables ───────────────────────────────────────────────────────────────
 
-const POLL_INTERVAL_MS = 5_000;
+/** Poll cadence for the health sentinel. Exported so the overlay can drive a
+ *  live "retrying in N…" countdown that stays in sync with the actual poll. */
+export const POLL_INTERVAL_MS = 5_000;
 // Need this many consecutive failed checks before flipping to 'unhealthy'.
 // At a 5s cadence, 3 failures ~= 15s of sustained regression.
 const UNHEALTHY_FAIL_THRESHOLD = 3;
@@ -121,21 +152,28 @@ type HealthFetchResult = {
   body: HealthResponse | null;
   reason: BackendHealthReason | null;
   detail: string | null;
+  healthUrl: string | null;
+  httpStatus: number | null;
+  networkError: string | null;
 };
 
 async function fetchHealth(): Promise<HealthFetchResult> {
-  const base = getApiBaseUrl();
+  const base = getDirectBackendUrl();
   if (!base) {
     return {
       body: null,
       reason: 'unreachable',
       detail: 'No backend address is configured.',
+      healthUrl: null,
+      httpStatus: null,
+      networkError: null,
     };
   }
+  const healthUrl = `${base}/api/health`;
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), HEALTH_TIMEOUT_MS);
   try {
-    const res = await fetch(`${base}/api/health`, {
+    const res = await fetch(healthUrl, {
       signal: controller.signal,
       headers: { Accept: 'application/json' },
     });
@@ -143,28 +181,59 @@ async function fetchHealth(): Promise<HealthFetchResult> {
       return {
         body: null,
         reason: 'http-error',
-        detail: `Health check returned HTTP ${res.status}${res.statusText ? ` ${res.statusText}` : ''}.`,
+        detail: `Health endpoint returned HTTP ${res.status}${res.statusText ? ` ${res.statusText}` : ''} from ${healthUrl}.`,
+        healthUrl,
+        httpStatus: res.status,
+        networkError: null,
       };
     }
     try {
+      const body = (await res.json()) as HealthResponse;
+      // The backend answered with 200 but body.ok !== true — capture what it
+      // actually said so the overlay/console can show the real reason instead
+      // of a generic "reported unhealthy" with no context.
+      if (body.ok !== true) {
+        const bodySnippet = JSON.stringify(body).slice(0, 500);
+        return {
+          body,
+          reason: 'not-ok',
+          detail: `Backend at ${healthUrl} responded with ok=false. Body: ${bodySnippet}`,
+          healthUrl,
+          httpStatus: res.status,
+          networkError: null,
+        };
+      }
       return {
-        body: (await res.json()) as HealthResponse,
+        body,
         reason: null,
         detail: null,
+        healthUrl,
+        httpStatus: res.status,
+        networkError: null,
       };
-    } catch {
+    } catch (err) {
       return {
         body: null,
         reason: 'invalid-response',
-        detail: 'Health check returned a response that was not valid JSON.',
+        detail: `Health endpoint at ${healthUrl} returned a response that was not valid JSON (${err instanceof Error ? err.message : String(err)}).`,
+        healthUrl,
+        httpStatus: res.status,
+        networkError: err instanceof Error ? `${err.name}: ${err.message}` : String(err),
       };
     }
   } catch (error) {
-    const message =
-      error instanceof DOMException && error.name === 'AbortError'
-        ? `Health check timed out after ${HEALTH_TIMEOUT_MS / 1000}s.`
-        : 'The backend connection was refused or interrupted.';
-    return { body: null, reason: 'unreachable', detail: message };
+    const aborted = error instanceof DOMException && error.name === 'AbortError';
+    const message = aborted
+      ? `Health check to ${healthUrl} timed out after ${HEALTH_TIMEOUT_MS / 1000}s.`
+      : `Could not reach ${healthUrl}: ${error instanceof Error ? error.message : String(error)}. The backend process may not be running, may not be listening on this port, or a firewall/cors policy blocked the request.`;
+    return {
+      body: null,
+      reason: 'unreachable',
+      detail: message,
+      healthUrl,
+      httpStatus: null,
+      networkError: error instanceof Error ? `${error.name}: ${error.message}` : String(error),
+    };
   } finally {
     clearTimeout(timer);
   }
@@ -204,6 +273,11 @@ function publish(
   outcome: CheckOutcome,
   body: HealthResponse | null,
   failureDetail: string | null = null,
+  diagnostics: {
+    healthUrl?: string | null;
+    httpStatus?: number | null;
+    networkError?: string | null;
+  } = {},
 ) {
   _lastCheckedAt = Date.now();
   _backendVersion = body?.data?.version ?? _backendVersion;
@@ -215,31 +289,86 @@ function publish(
   if (outcome.status === 'healthy') {
     _consecutiveFailures = 0;
     _failureDetail = null;
+    _supervisorReason = null;
+    _supervisorMessage = null;
+    _httpStatus = null;
+    _networkError = null;
+    _healthUrl = diagnostics.healthUrl ?? _healthUrl;
     _lastHealthyAt = Date.now();
+    if (_status !== 'healthy') {
+      console.info('[Koryphaios] Backend is healthy again', {
+        backendVersion: _backendVersion,
+        backendPid: _backendPid,
+        healthUrl: _healthUrl,
+      });
+    }
     setApiHalted(false);
   } else if (outcome.status === 'mismatch') {
     _consecutiveFailures = 0; // mismatch isn't a flaky-network signal
     _failureDetail = null;
+    _supervisorReason = null;
+    _supervisorMessage = null;
+    _httpStatus = diagnostics.httpStatus ?? null;
+    _networkError = diagnostics.networkError ?? null;
+    _healthUrl = diagnostics.healthUrl ?? _healthUrl;
+    if (_status !== 'mismatch') {
+      console.error('[Koryphaios] Backend/frontend compatibility mismatch', {
+        reason: outcome.reason,
+        frontendVersion: frontendVersion(),
+        frontendBundleHash: frontendBundleHash(),
+        backendVersion: _backendVersion,
+        backendMinFrontend: _backendMinFrontend,
+        backendCurrentFrontend: _backendCurrentFrontend,
+        backendBundleHash: _backendBundleHash,
+        healthUrl: _healthUrl,
+      });
+    }
     setApiHalted(true);
   } else {
     _consecutiveFailures++;
-    if (_consecutiveFailures >= UNHEALTHY_FAIL_THRESHOLD) {
-      setApiHalted(true);
-    } else if (_status === 'healthy') {
-      // Don't flap to 'unhealthy' on a single blip — stay 'healthy' until
-      // the threshold is reached.
+    _failureDetail = failureDetail;
+    _healthUrl = diagnostics.healthUrl ?? _healthUrl;
+    _httpStatus = diagnostics.httpStatus ?? null;
+    _networkError = diagnostics.networkError ?? null;
+    // Don't flap to 'unhealthy' on a single blip — stay 'healthy' until
+    // the threshold is reached.
+    if (_consecutiveFailures < UNHEALTHY_FAIL_THRESHOLD && _status === 'healthy') {
+      console.warn('[Koryphaios] Backend health check failed (transient)', {
+        reason: outcome.reason,
+        detail: failureDetail,
+        healthUrl: _healthUrl,
+        httpStatus: _httpStatus,
+        networkError: _networkError,
+        consecutiveFailures: _consecutiveFailures,
+      });
       return;
     }
+    if (_consecutiveFailures >= UNHEALTHY_FAIL_THRESHOLD) {
+      setApiHalted(true);
+    }
+    console.error('[Koryphaios] Backend health check failed', {
+      reason: outcome.reason,
+      detail: failureDetail,
+      healthUrl: _healthUrl,
+      httpStatus: _httpStatus,
+      networkError: _networkError,
+      consecutiveFailures: _consecutiveFailures,
+      supervisorReason: _supervisorReason,
+      supervisorMessage: _supervisorMessage,
+    });
   }
 
   _status = outcome.status;
   _reason = outcome.reason;
-  _failureDetail = failureDetail;
 }
 
 async function tick() {
   const result = await fetchHealth();
-  publish(evaluate(result.body, result.reason), result.body, result.detail);
+  publish(evaluate(result.body, result.reason), result.body, result.detail, {
+    healthUrl: result.healthUrl,
+    httpStatus: result.httpStatus,
+    networkError: result.networkError,
+  });
 }
 
 // ─── Tauri event fast-path (Step 4) ──────────────────────────────────────────
@@ -253,17 +382,35 @@ async function attachTauriListeners() {
   if (!inTauri) return;
   try {
     const { listen } = await import('@tauri-apps/api/event');
-    const unDown = await listen('backend://down', () => {
+
+    // Payload mirror of BackendDownEvent in desktop/src-tauri/src/lib.rs.
+    type BackendDownPayload = {
+      reason: SupervisorReason;
+      pid: number | null;
+      message: string;
+    };
+
+    const unDown = await listen<BackendDownPayload>('backend://down', (event) => {
+      const payload = event.payload;
       _lastCheckedAt = Date.now();
       _consecutiveFailures++;
       _status = 'unhealthy';
-      _reason = 'unreachable';
-      _failureDetail =
-        'The desktop supervisor reported that the backend process is not responding.';
+      _reason = 'supervisor';
+      _supervisorReason = payload?.reason ?? null;
+      _supervisorMessage = payload?.message ?? null;
+      _failureDetail = payload?.message ?? null;
+      if (typeof payload?.pid === 'number') _backendPid = payload.pid;
+      console.error('[Koryphaios] Supervisor reported backend down', {
+        supervisorReason: _supervisorReason,
+        supervisorMessage: _supervisorMessage,
+        pid: _backendPid,
+        consecutiveFailures: _consecutiveFailures,
+      });
       setApiHalted(true);
     });
     const unReady = await listen('backend://ready', () => {
       // Trigger an immediate poll to confirm and re-evaluate the contract.
+      console.info('[Koryphaios] Supervisor reported backend ready — re-checking health');
       void tick();
     });
     tauriUnlistens.push(unDown, unReady);
@@ -339,6 +486,21 @@ export const backendHealth = {
   get failureDetail() {
     return _failureDetail;
   },
+  get supervisorReason() {
+    return _supervisorReason;
+  },
+  get supervisorMessage() {
+    return _supervisorMessage;
+  },
+  get healthUrl() {
+    return _healthUrl;
+  },
+  get httpStatus() {
+    return _httpStatus;
+  },
+  get networkError() {
+    return _networkError;
+  },
   get lastCheckedAt() {
     return _lastCheckedAt;
   },
@@ -374,6 +536,11 @@ export const backendHealth = {
       status: _status,
       reason: _reason,
       failureDetail: _failureDetail,
+      supervisorReason: _supervisorReason,
+      supervisorMessage: _supervisorMessage,
+      healthUrl: _healthUrl,
+      httpStatus: _httpStatus,
+      networkError: _networkError,
       lastCheckedAt: _lastCheckedAt,
       lastHealthyAt: _lastHealthyAt,
       backendVersion: _backendVersion,

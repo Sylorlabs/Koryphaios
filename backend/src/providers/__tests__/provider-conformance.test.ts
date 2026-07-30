@@ -31,7 +31,7 @@ import { getModelsForProvider } from '../models';
 import {
   detectAntigravityCLILogin,
   detectClaudeCodeLogin,
-  detectCodexAuthToken,
+  detectCodexCLILogin,
   detectGrokCLILogin,
   detectCursorCLILogin,
   detectDevinCLILogin,
@@ -288,7 +288,7 @@ function realCred(name: ProviderName): { kind: string } | null {
     if (v && v.trim()) return { kind: env };
   }
   if (name === 'claude' && detectClaudeCodeLogin()) return { kind: 'claude login' };
-  if (name === 'codex' && detectCodexAuthToken()) return { kind: 'codex login' };
+  if (name === 'codex' && detectCodexCLILogin()) return { kind: 'codex login' };
   return null;
 }
 
@@ -534,7 +534,7 @@ describe('Provider conformance (contract + optional live)', () => {
     // codex/copilot). Bespoke shims (azure/bedrock/vertexai/sapai/gitlab) are excluded —
     // they're verified separately to be FLAGGED, not real-ready.
     const mustPass = [
-      'openai', 'anthropic', 'groq', 'openrouter', 'xai', 'deepseek', 'mistral', 'moonshot',
+      'openai', 'anthropic', 'groq', 'openrouter', 'tokenrouter', 'digitalocean', 'xai', 'deepseek', 'mistral', 'moonshot',
       'codex', 'copilot', 'google', 'kimicode', 'opencodezen', 'cerebras',
       'fireworks', 'togetherai', 'zai', 'baseten', 'deepinfra', 'nebius', 'venice', 'ovhcloud',
       'scaleway', 'stackit', '302ai', 'huggingface', 'helicone', 'cloudflare', 'ionet',

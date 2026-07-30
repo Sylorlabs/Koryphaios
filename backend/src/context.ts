@@ -4,12 +4,10 @@ import { KoryManager } from './kory/manager';
 import { SessionStore } from './stores/session-store';
 import { MessageStore } from './stores/message-store';
 import { TaskStore } from './stores/task-store';
+import { GoalStore } from './stores/goal-store';
 import { WSManager } from './ws/ws-manager';
 import { MCPManager } from './mcp/client';
 import { TimeTravelService } from './services/timetravel';
-import { TelegramBridge } from './telegram/bot';
-import { DiscordBridge } from './discord/bot';
-import { SlackBridge } from './slack/bot';
 import type { AppConfig } from './config-schema';
 
 export interface AppContext {
@@ -20,12 +18,10 @@ export interface AppContext {
   sessions: SessionStore;
   messages: MessageStore;
   tasks: TaskStore;
+  goals: GoalStore;
   kory: KoryManager;
   wsManager: WSManager;
   timeTravel: TimeTravelService;
-  telegram?: TelegramBridge;
-  discord?: DiscordBridge;
-  slack?: SlackBridge;
 }
 
 let context: AppContext | null = null;

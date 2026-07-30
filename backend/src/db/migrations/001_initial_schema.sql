@@ -60,6 +60,7 @@ CREATE TABLE IF NOT EXISTS tasks (
   domain TEXT,
   status TEXT DEFAULT 'pending',
   assigned_model TEXT,
+  assigned_provider TEXT,
   allowed_paths TEXT,
   result TEXT,
   error TEXT,

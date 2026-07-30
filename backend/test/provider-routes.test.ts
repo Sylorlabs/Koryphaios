@@ -39,12 +39,25 @@ const pollKimiCodeDeviceAuthMock = mock(async () => ({
   expiresIn: 3600,
   scope: 'openid profile',
 }));
-const detectCodexAuthTokenMock = mock(() => null);
 const resetCodexDeviceAuthSessionsMock = mock(() => {});
-const clearCodexAuthStateMock = mock(() => {});
+const logoutCodexAppServerMock = mock(async () => {});
 const clearKimiCodeAuthStateMock = mock(() => {});
 const saveKimiCodeAuthStateMock = mock(() => {});
 const createKimiCodeAuthMarkerMock = mock(() => 'oauth:kimicode:test-marker');
+const startCodexChatgptDeviceCodeLoginMock = mock(async () => ({
+  loginId: 'codex-login-123',
+  verificationUrl: 'https://auth.openai.com/codex/device',
+  userCode: 'CODEX-1234',
+}));
+const waitForCodexLoginCompletionMock = mock(async () => ({
+  loginId: 'codex-login-123',
+  success: false,
+  error: 'authorization_pending',
+}));
+const codexAccountMock = mock(async () => ({
+  account: { type: 'chatgpt', email: 'user@example.com', planType: 'plus' },
+  requiresOpenaiAuth: true,
+}));
 
 mock.module('../src/providers/copilot', () => ({
   CopilotProvider: class {
@@ -96,9 +109,16 @@ mock.module('../src/providers/codex', () => ({
   resetCodexDeviceAuthSessions: resetCodexDeviceAuthSessionsMock,
 }));
 
+mock.module('../src/providers/codex-app-server', () => ({
+  getManagedCodexAppServer: () => ({
+    startChatgptDeviceCodeLogin: startCodexChatgptDeviceCodeLoginMock,
+    waitForLoginCompletion: waitForCodexLoginCompletionMock,
+    account: codexAccountMock,
+    logout: logoutCodexAppServerMock,
+  }),
+}));
+
 mock.module('../src/providers/auth-utils', () => ({
-  detectCodexAuthToken: detectCodexAuthTokenMock,
-  clearCodexAuthState: clearCodexAuthStateMock,
   isCodexCLIAuthMarker: (value: string | null | undefined) =>
     typeof value === 'string' && value.startsWith('cli:codex:'),
   createCodexCLIAuthMarker: () => `cli:codex:${Date.now()}`,
@@ -227,6 +247,7 @@ beforeAll(async () => {
       );
       return { success: true };
     },
+    get: () => ({ refreshModels: async () => {} }),
     getConfigs: () => ({}),
     removeApiKey(name: string) {
       providerStatus = providerStatus.map((status) =>
@@ -400,6 +421,52 @@ describe('provider routes', () => {
 
     expect(codexComplete.response.status).toBe(404);
     expect(codexComplete.body.ok).toBe(false);
+  });
+
+  test('OpenAI Codex uses the managed ChatGPT device-code flow without accepting an API key', async () => {
+    const start = await request('/api/providers/codex-auth/auth/start', { method: 'POST' });
+    expect(start.response.status).toBe(200);
+    expect(start.body.ok).toBe(true);
+    expect(start.body.data.verificationUri).toBe('https://auth.openai.com/codex/device');
+    expect(start.body.data.userCode).toBe('CODEX-1234');
+    expect(startCodexChatgptDeviceCodeLoginMock).toHaveBeenCalledTimes(1);
+
+    const complete = await request('/api/providers/codex-auth/auth/complete', { method: 'POST' });
+    expect(complete.response.status).toBe(200);
+    expect(complete.body.ok).toBe(true);
+    expect(codexAccountMock).toHaveBeenCalledWith(true);
+    expect(lastSetCredentials).toEqual({
+      name: 'codex-auth',
+      body: { authToken: 'codex-managed-chatgpt' },
+    });
+  });
+
+  test('OpenAI Codex activates itself after the official login completion notification', async () => {
+    lastSetCredentials = null;
+    waitForCodexLoginCompletionMock.mockResolvedValueOnce({
+      loginId: 'codex-login-123',
+      success: true,
+      error: null,
+    });
+
+    const start = await request('/api/providers/codex-auth/auth/start', { method: 'POST' });
+    expect(start.response.status).toBe(200);
+
+    // The notification handler runs independently of the HTTP request because
+    // device approval happens later in the browser.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(lastSetCredentials).toEqual({
+      name: 'codex-auth',
+      body: { authToken: 'codex-managed-chatgpt' },
+    });
+  });
+
+  test('disconnecting OpenAI Codex logs out the managed app-server session', async () => {
+    const result = await request('/api/providers/codex-auth', { method: 'DELETE' });
+
+    expect(result.response.status).toBe(200);
+    expect(result.body).toEqual({ ok: true });
+    expect(logoutCodexAppServerMock).toHaveBeenCalledTimes(1);
   });
 
   test('Copilot browser auth returns device flow details and activates on poll', async () => {

@@ -39,6 +39,7 @@ import { processRoutes } from './routes/v1/processes';
 import { notesRoutes } from './routes/v1/notes';
 import { workspaceRoutes } from './routes/v1/workspace';
 import { feedbackRoutes } from './routes/v1/feedback';
+import { goalRoutes } from './routes/v1/goals';
 
 const SERVER_STARTED_AT = Date.now();
 const BACKEND_SERVICE_ID = 'koryphaios';
@@ -88,7 +89,8 @@ const baseApp = new Elysia()
   .use(processRoutes)
   .use(notesRoutes)
   .use(workspaceRoutes)
-  .use(feedbackRoutes);
+  .use(feedbackRoutes)
+  .use(goalRoutes);
 
 export type App = typeof baseApp;
 

@@ -4,13 +4,14 @@
  */
 
 import { join } from 'node:path';
-import { Bot } from 'grammy';
 import { ProviderRegistry } from './providers';
+import { registerLiveModelResolver } from './providers/models';
 import { ToolRegistry } from './tools';
 import { KoryManager } from './kory/manager';
 import { SessionStore } from './stores/session-store';
 import { MessageStore } from './stores/message-store';
 import { TaskStore } from './stores/task-store';
+import { GoalStore } from './stores/goal-store';
 import { loadConfig } from './runtime/config';
 import { PROJECT_ROOT } from './runtime/paths';
 import { loadEnvFromProject, validateEnvironment } from './runtime/env';
@@ -22,8 +23,10 @@ import {
   BashTool,
   ShellManageTool,
   ReadFileTool,
+  ViewImageTool,
   WriteFileTool,
   EditFileTool,
+  BatchEditTool,
   DeleteFileTool,
   MoveFileTool,
   DiffTool,
@@ -35,23 +38,16 @@ import {
   WebFetchTool,
   AskUserTool,
   AskManagerTool,
+  DelegateToWorkerTool,
+  DelegateToJulesTool,
   MCPDetectErrorsTool,
   MCPAnalyzeErrorTool,
   MCPSuggestFixesTool,
+  FetchContextTool,
+  PruneContextTool,
 } from './tools';
 import { initMCP } from './mcp/client';
 import { serverLog } from './logger';
-import {
-  TelegramAdapter,
-  DiscordAdapter,
-  SlackAdapter,
-} from './messaging';
-import { MessagingGateway } from './messaging/gateway';
-import { TelegramBridge } from './telegram/bot';
-import { DiscordBridge } from './discord/bot';
-import { Client as DiscordClient, GatewayIntentBits } from 'discord.js';
-import { WebClient } from '@slack/web-api';
-import { SlackBridge } from './slack/bot';
 import { applyModeIntegration } from './kory/manager-mode-integration';
 import { initWSBroker } from './ws/broker';
 import { WSManager, setWsManager } from './ws/ws-manager';
@@ -59,6 +55,7 @@ import { loadPlugins } from './server/plugins';
 import { setContext, type AppContext } from './context';
 import { getModeManager } from './mode';
 import { TimeTravelService } from './services/timetravel';
+import { startBackgroundCleanup } from './memory/background-cleanup';
 
 export async function bootstrap(): Promise<AppContext> {
   // Load environment and validate
@@ -86,6 +83,21 @@ export async function bootstrap(): Promise<AppContext> {
   const providers = new ProviderRegistry(config);
   await providers.initializeEncryptedCredentials();
 
+  // Wire live model metadata (CLI/API-discovered context windows, verified
+  // flags) into context resolution — designed for this but never registered,
+  // which left every CLI model's context window "unknown".
+  registerLiveModelResolver((modelId, providerName) => {
+    try {
+      const p = providers.get(providerName);
+      if (!p?.listModels) return undefined;
+      return p
+        .listModels()
+        .find((m) => m.id === modelId || m.apiModelId === modelId || m.name === modelId);
+    } catch {
+      return undefined;
+    }
+  });
+
   const tools = await initTools();
 
   // MCP Connections
@@ -95,6 +107,7 @@ export async function bootstrap(): Promise<AppContext> {
   const sessions = new SessionStore();
   const messages = new MessageStore();
   const tasks = new TaskStore();
+  const goals = new GoalStore();
   const timeTravel = new TimeTravelService(PROJECT_ROOT, messages);
 
   const kory = new KoryManager(
@@ -113,9 +126,6 @@ export async function bootstrap(): Promise<AppContext> {
   setWsManager(wsManager);
   initWSBroker(wsManager);
 
-  // Bridges (Telegram, Discord, Slack)
-  const bridges = await initBridges(config, kory);
-
   const context: AppContext = {
     config,
     providers,
@@ -124,13 +134,14 @@ export async function bootstrap(): Promise<AppContext> {
     sessions,
     messages,
     tasks,
+    goals,
     kory,
     wsManager,
     timeTravel,
-    ...bridges,
   };
 
   setContext(context);
+  startBackgroundCleanup(kory, wsManager);
   return context;
 }
 
@@ -153,14 +164,20 @@ async function initEncryption() {
   }
 }
 
+import { registerGitTools } from './tools';
+import { CreateGoalTool } from './tools/goals';
+import { noteTools } from './tools/notes';
+
 async function initTools() {
   const tools = new ToolRegistry();
   const defaultTools = [
     new BashTool(),
     new ShellManageTool(),
     new ReadFileTool(),
+    new ViewImageTool(),
     new WriteFileTool(),
     new EditFileTool(),
+    new BatchEditTool(),
     new DeleteFileTool(),
     new MoveFileTool(),
     new DiffTool(),
@@ -172,71 +189,25 @@ async function initTools() {
     new WebFetchTool(),
     new AskUserTool(),
     new AskManagerTool(),
+    new DelegateToWorkerTool(),
+    new DelegateToJulesTool(),
     new MCPDetectErrorsTool(),
     new MCPAnalyzeErrorTool(),
     new MCPSuggestFixesTool(),
+    new FetchContextTool(),
+    new PruneContextTool(),
+    new CreateGoalTool(),
   ];
 
   for (const tool of defaultTools) {
     tools.register(tool);
   }
 
+  registerGitTools(tools);
+
+  for (const tool of noteTools) {
+    tools.register(tool);
+  }
+
   return tools;
-}
-
-async function initBridges(config: any, kory: KoryManager) {
-  const messagingGateway = new MessagingGateway();
-
-  let telegram: TelegramBridge | undefined;
-  let discord: DiscordBridge | undefined;
-  let slack: SlackBridge | undefined;
-
-  if (config.telegram?.enabled && config.telegram?.botToken) {
-    telegram = new TelegramBridge(
-      {
-        botToken: config.telegram.botToken,
-        adminId: config.telegram.adminId ?? 0,
-      },
-      kory,
-      messagingGateway,
-      new TelegramAdapter(new Bot(config.telegram.botToken)),
-    );
-    serverLog.info('Telegram bridge enabled');
-  }
-
-  if (config.discord?.enabled && config.discord?.botToken) {
-    const client = new DiscordClient({
-      intents: [
-        GatewayIntentBits.Guilds,
-        GatewayIntentBits.GuildMessages,
-        GatewayIntentBits.MessageContent,
-      ],
-    });
-    discord = new DiscordBridge(
-      {
-        botToken: config.discord.botToken,
-        allowedUserIds: config.discord.allowedUserIds,
-      },
-      kory,
-      messagingGateway,
-      new DiscordAdapter(client),
-    );
-    serverLog.info('Discord bridge enabled');
-  }
-
-  if (config.slack?.enabled && config.slack?.botToken && config.slack?.appToken) {
-    slack = new SlackBridge(
-      {
-        botToken: config.slack.botToken,
-        appToken: config.slack.appToken,
-        allowedUserIds: config.slack.allowedUserIds,
-      },
-      kory,
-      messagingGateway,
-      new SlackAdapter(new WebClient(config.slack.botToken)),
-    );
-    serverLog.info('Slack bridge enabled');
-  }
-
-  return { telegram, discord, slack };
 }

@@ -10,6 +10,24 @@
 		<meta name="theme-color" content="#0D0B0A" />
 		<meta name="description" content="Koryphaios — The Autonomous Workspace for 100% AI-Generated Code" />
 		<title>Koryphaios</title>
+		<script>
+			/*
+			 * Browser demos are real Koryphaios frontends backed by an in-memory
+			 * API. Route every normal localStorage call to sessionStorage before
+			 * the app modules evaluate so settings, themes, sessions, and composer
+			 * choices belong to this tab and disappear when it closes.
+			 */
+			if (new URLSearchParams(location.search).has('demo') || location.hash.includes('demo')) {
+				try {
+					Object.defineProperty(window, 'localStorage', {
+						configurable: true,
+						value: window.sessionStorage,
+					});
+				} catch {
+					/* Stores already tolerate unavailable browser storage. */
+				}
+			}
+		</script>
 		%sveltekit.head%
 	</head>
 	<body data-sveltekit-preload-data="hover">

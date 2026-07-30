@@ -5,6 +5,7 @@
 
 import type { ModelDef, ProviderConfig } from '@koryphaios/shared';
 import { spawn } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
 import { whichBinary } from './cli-detection';
 import { discoverCliAccounts, type DiscoveredCliAccount } from './cli-accounts';
 import {
@@ -43,6 +44,7 @@ function modelDefinition(model: CodexCliModel, account: DiscoveredCliAccount): M
     // apiModelId and is the only value passed to `codex --model`.
     id: `codex-account:${Buffer.from(account.id).toString('base64url')}:${cliModel}`,
     apiModelId: cliModel,
+    accountId: account.id,
     name: `${model.displayName?.trim() || cliModel} · ${account.label}`,
     provider: 'codex',
     contextWindow: 0,
@@ -121,7 +123,50 @@ function flatten(content: string | ProviderContentBlock[]): string {
     .join('\n');
 }
 
-function buildPrompt(systemPrompt: string | undefined, messages: ProviderMessage[]): string {
+type KoryToolEnvelope = {
+  name: string;
+  input: Record<string, unknown>;
+};
+
+const KORY_TOOL_OPEN = '<KORY_TOOL_CALL>';
+const KORY_TOOL_CLOSE = '</KORY_TOOL_CALL>';
+
+/** Convert Codex's explicit control-plane envelope into Kory tool events. */
+export function extractKoryToolEnvelope(
+  text: string,
+  allowedToolNames: readonly string[],
+): { content: string; tool?: KoryToolEnvelope } {
+  const start = text.indexOf(KORY_TOOL_OPEN);
+  const end = text.indexOf(KORY_TOOL_CLOSE, start + KORY_TOOL_OPEN.length);
+  if (start === -1 || end === -1) return { content: text };
+
+  const raw = text.slice(start + KORY_TOOL_OPEN.length, end).trim();
+  try {
+    const parsed = JSON.parse(raw) as { name?: unknown; input?: unknown };
+    if (
+      typeof parsed.name !== 'string' ||
+      !allowedToolNames.includes(parsed.name) ||
+      !parsed.input ||
+      typeof parsed.input !== 'object' ||
+      Array.isArray(parsed.input)
+    ) {
+      return { content: text };
+    }
+    return {
+      content: `${text.slice(0, start)}${text.slice(end + KORY_TOOL_CLOSE.length)}`.trim(),
+      tool: { name: parsed.name, input: parsed.input as Record<string, unknown> },
+    };
+  } catch {
+    return { content: text };
+  }
+}
+
+function buildPrompt(
+  systemPrompt: string | undefined,
+  messages: ProviderMessage[],
+  tools: StreamRequest['tools'],
+  harnessRole: StreamRequest['harnessRole'],
+): string {
   const turns = messages
     .filter((message) => message.role !== 'system')
     .map((message) => {
@@ -131,9 +176,18 @@ function buildPrompt(systemPrompt: string | undefined, messages: ProviderMessage
       return `${label}: ${text}`;
     })
     .filter(Boolean);
+  const toolProtocol =
+    harnessRole === 'manager' && tools?.length
+      ? [
+          'Kory control-plane tools are available. When you need one, emit exactly one final line and nothing after it:',
+          `${KORY_TOOL_OPEN}{"name":"tool_name","input":{}}${KORY_TOOL_CLOSE}`,
+          `Only use: ${tools.map((tool) => tool.name).join(', ')}. Do not claim a Kory tool ran unless you emitted that envelope.`,
+        ].join('\n')
+      : '';
   return [
     systemPrompt?.trim(),
     'You are running inside Koryphaios. Follow its supplied instructions and finish every turn with a concise user-facing answer. Do not delegate to native subagents or leave background tasks awaiting a later notification.',
+    toolProtocol,
     ...turns,
   ]
     .filter(Boolean)
@@ -166,7 +220,14 @@ export class CodexCliProvider implements Provider {
     // Expiry decoded from a cached JWT is only a hint. The official CLI owns
     // refresh and can still have a valid session, so do not hide a discovered
     // profile before the CLI itself gets a chance to report its model list.
-    return discoverCliAccounts().filter((account) => account.provider === 'codex');
+    const discovered = discoverCliAccounts().filter((account) => account.provider === 'codex');
+    const selectedOrder = this.config.fallbackOrder ?? [];
+    if (selectedOrder.length === 0) return discovered;
+
+    const byId = new Map(discovered.map((account) => [account.id, account]));
+    // Once the user has selected profiles, only those profiles may be used;
+    // their saved order is the stable priority for model discovery and runs.
+    return selectedOrder.map((id) => byId.get(id)).filter((account): account is DiscoveredCliAccount => !!account);
   }
 
   listModels(): ModelDef[] {
@@ -222,7 +283,7 @@ export class CodexCliProvider implements Provider {
       return;
     }
 
-    const prompt = buildPrompt(request.systemPrompt, request.messages);
+    const prompt = buildPrompt(request.systemPrompt, request.messages, request.tools, request.harnessRole);
     const sandbox = request.harnessRole === 'critic' ? 'read-only' : 'workspace-write';
     const args = [
       '--ask-for-approval',
@@ -247,6 +308,9 @@ export class CodexCliProvider implements Provider {
     let stderr = '';
     let stdoutBuffer = '';
     let completed = false;
+    const allowedToolNames = request.harnessRole === 'manager'
+      ? (request.tools ?? []).map((tool) => tool.name)
+      : [];
     const onAbort = () => child.kill('SIGTERM');
     request.signal?.addEventListener('abort', onAbort, { once: true });
     const timeout = setTimeout(() => child.kill('SIGTERM'), CODEX_TIMEOUT_MS);
@@ -254,36 +318,48 @@ export class CodexCliProvider implements Provider {
 
     child.stderr.on('data', (chunk: Buffer) => (stderr += chunk.toString()));
     const queue: ProviderEvent[] = [];
+    const consumeLine = (line: string) => {
+      if (!line.trim()) return;
+      try {
+        const event = JSON.parse(line) as Record<string, any>;
+        const item = event.item as Record<string, any> | undefined;
+        if (event.type === 'item.completed' && item?.type === 'agent_message' && item.text) {
+          const extracted = extractKoryToolEnvelope(String(item.text), allowedToolNames);
+          if (extracted.content) queue.push({ type: 'content_delta', content: extracted.content });
+          if (extracted.tool) {
+            const toolCallId = `codex-kory-${randomUUID()}`;
+            const input = JSON.stringify(extracted.tool.input);
+            queue.push({ type: 'tool_use_start', toolCallId, toolName: extracted.tool.name });
+            queue.push({ type: 'tool_use_delta', toolCallId, toolName: extracted.tool.name, toolInput: input });
+            queue.push({ type: 'tool_use_stop', toolCallId, toolName: extracted.tool.name, toolInput: input });
+          }
+        } else if (event.type === 'item.completed' && item?.type === 'reasoning' && item.text) {
+          queue.push({ type: 'thinking_delta', thinking: String(item.text) });
+        } else if (event.type === 'item.completed' && item?.type === 'command_execution') {
+          queue.push({
+            type: 'tool_executed',
+            toolName: 'codex_command',
+            toolInput: JSON.stringify({ command: item.command ?? '' }),
+            toolOutput: String(item.aggregated_output ?? item.output ?? '').slice(0, 4_000),
+            isError: item.exit_code != null && item.exit_code !== 0,
+          });
+        } else if (event.type === 'turn.completed') {
+          const usage = event.usage as Record<string, unknown> | undefined;
+          if (typeof usage?.input_tokens === 'number' || typeof usage?.output_tokens === 'number') {
+            queue.push({ type: 'usage_update', tokensIn: usage.input_tokens as number | undefined, tokensOut: usage.output_tokens as number | undefined });
+          }
+          completed = true;
+        }
+      } catch {
+        // Codex's JSON mode is JSONL; ignore a malformed partial line.
+      }
+    };
     child.stdout.on('data', (chunk: Buffer) => {
       stdoutBuffer += chunk.toString();
       const lines = stdoutBuffer.split('\n');
       stdoutBuffer = lines.pop() ?? '';
       for (const line of lines) {
-        try {
-          const event = JSON.parse(line) as Record<string, any>;
-          const item = event.item as Record<string, any> | undefined;
-          if (event.type === 'item.completed' && item?.type === 'agent_message' && item.text) {
-            queue.push({ type: 'content_delta', content: String(item.text) });
-          } else if (event.type === 'item.completed' && item?.type === 'reasoning' && item.text) {
-            queue.push({ type: 'thinking_delta', thinking: String(item.text) });
-          } else if (event.type === 'item.completed' && item?.type === 'command_execution') {
-            queue.push({
-              type: 'tool_executed',
-              toolName: 'codex_command',
-              toolInput: JSON.stringify({ command: item.command ?? '' }),
-              toolOutput: String(item.aggregated_output ?? item.output ?? '').slice(0, 4_000),
-              isError: item.exit_code != null && item.exit_code !== 0,
-            });
-          } else if (event.type === 'turn.completed') {
-            const usage = event.usage as Record<string, unknown> | undefined;
-            if (typeof usage?.input_tokens === 'number' || typeof usage?.output_tokens === 'number') {
-              queue.push({ type: 'usage_update', tokensIn: usage.input_tokens as number | undefined, tokensOut: usage.output_tokens as number | undefined });
-            }
-            completed = true;
-          }
-        } catch {
-          // Codex's JSON mode is JSONL; ignore a malformed partial line.
-        }
+        consumeLine(line);
       }
     });
 
@@ -293,6 +369,7 @@ export class CodexCliProvider implements Provider {
     });
     clearTimeout(timeout);
     request.signal?.removeEventListener('abort', onAbort);
+    consumeLine(stdoutBuffer);
     while (queue.length) yield queue.shift()!;
     if (request.signal?.aborted) return;
     if (exitCode !== 0) {

@@ -7,11 +7,12 @@
     providerName: ProviderName;
     availableModels: ModelDef[];
     selectedModels: string[];
+    emptyMessage?: string;
     onSave: (selected: string[], hideSelector: boolean) => void;
     onClose: () => void;
   }
 
-  let { providerName, availableModels = [], selectedModels = [], onSave, onClose }: Props = $props();
+  let { providerName, availableModels = [], selectedModels = [], emptyMessage, onSave, onClose }: Props = $props();
 
   let searchQuery = $state('');
   let localSelected = $state<string[]>([]);
@@ -110,6 +111,9 @@
     <!-- List -->
     <div class="flex-1 overflow-y-auto px-4 py-2 custom-scrollbar">
       <div class="space-y-1">
+        {#if filteredModels.length === 0}
+          <p class="px-3 py-8 text-center text-xs" style="color: var(--color-text-muted);">{emptyMessage ?? 'No provider-reported models are available.'}</p>
+        {:else}
         {#each filteredModels as model}
           <button 
             class="w-full flex items-center justify-between p-3 rounded-xl transition-all border
@@ -132,6 +136,7 @@
             </div>
           </button>
         {/each}
+        {/if}
       </div>
     </div>
 

@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { Send, ChevronDown, Sparkles, Square, Users, User, ShieldCheck, ShieldAlert, Circle, Paperclip, Clipboard, X, Check, Search } from 'lucide-svelte';
+  import { Send, ChevronDown, Sparkles, Square, Users, User, ShieldCheck, ShieldAlert, Circle, Paperclip, Clipboard, X, Check, Search, Plus, Target, Settings } from 'lucide-svelte';
   import { wsStore } from '$lib/stores/websocket.svelte';
   import { shortcutStore } from '$lib/stores/shortcuts.svelte';
   import { experimentalStore } from '$lib/stores/experimental.svelte';
@@ -13,6 +13,8 @@
   import { sessionStore } from '$lib/stores/sessions.svelte';
   import { apiFetch } from '$lib/api.svelte';
   import { apiUrl } from '$lib/utils/api-url';
+  import { goalStore } from '$lib/stores/goals.svelte';
+  import { goalDisplayStore } from '$lib/stores/goal-display.svelte';
 
   export type Attachment = { type: 'image' | 'file'; data: string; name: string };
 
@@ -75,6 +77,7 @@
   let referenceFileInputRef = $state<HTMLInputElement>();
   let referenceFolderInputRef = $state<HTMLInputElement>();
   let showReferenceMenu = $state(false);
+  let showGoalActions = $state(false);
   let liveFileMentions = $state<string[]>([]);
 
   $effect(() => {
@@ -87,8 +90,8 @@
 
   function providerLabel(provider: string): string {
     if (provider === 'openai') return 'OpenAI';
-    if (provider === 'codex') return 'OpenAI Codex (CLI)';
-    if (provider === 'codex-auth') return 'OpenAI Codex (Auth)';
+    if (provider === 'codex') return 'Codex CLI';
+    if (provider === 'codex-auth') return 'OpenAI Codex';
     if (provider === 'anthropic') return 'Anthropic';
     if (provider === 'claude') return 'Claude Code';
     if (provider === 'antigravity') return 'Antigravity';
@@ -473,6 +476,13 @@
     const now = Date.now();
     if (now - lastSendAt < SEND_COOLDOWN_MS) return; // debounce duplicate sends
     lastSendAt = now;
+    const goal = goalStore.selectedGoal;
+    if (goal) {
+      void goalStore.drive(goal.id, { model: selectedModel, reasoningLevel, instructions: trimmed }).catch((error) => toastStore.error(error instanceof Error ? error.message : String(error)));
+      value = '';
+      attachments = [];
+      return;
+    }
     onSend(trimmed, selectedModel, reasoningLevel, attachments.length > 0 ? [...attachments] : undefined);
     value = '';
     attachments = [];
@@ -1146,6 +1156,23 @@
               onchange={handleReferenceFolderInput}
               webkitdirectory
             />
+            <div class="relative">
+              <button
+                type="button"
+                class="flex items-center justify-center w-8 h-8 rounded-lg transition-colors hover:bg-[var(--color-surface-3)] disabled:opacity-40 disabled:cursor-not-allowed"
+                style="color: var(--color-text-muted);"
+                onclick={() => showGoalActions = !showGoalActions}
+                disabled={disabled || !!configurationWarning}
+                aria-label="More composer actions"
+                title="More actions"
+              ><Plus size={16} /></button>
+              {#if showGoalActions}
+                <div class="absolute bottom-full right-0 mb-1 w-48 rounded-lg border shadow-xl z-50 overflow-hidden" style="background: var(--color-surface-2); border-color: var(--color-border);">
+                  <button type="button" class="flex w-full items-center gap-2 px-3 py-2 text-left text-xs hover:bg-[var(--color-surface-3)]" style="color: var(--color-text-primary);" onclick={() => { showGoalActions = false; goalDisplayStore.update({ sidebar: true }); queueMicrotask(() => window.dispatchEvent(new CustomEvent('kory:goal-action', { detail: 'goal_create' }))); }}><Target size={14} /> Create verified goal</button>
+                  <button type="button" class="flex w-full items-center gap-2 px-3 py-2 text-left text-xs hover:bg-[var(--color-surface-3)]" style="color: var(--color-text-primary);" onclick={() => { showGoalActions = false; onOpenSettings?.(); }}><Settings size={14} /> Goal settings</button>
+                </div>
+              {/if}
+            </div>
             <div class="relative">
               <button
                 type="button"

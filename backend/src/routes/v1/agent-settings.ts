@@ -42,6 +42,44 @@ import {
 } from '../../kory/skill-evaluations';
 
 export const agentSettingsRoutes = new Elysia({ prefix: '/api/agent' })
+  .post(
+    '/delegate',
+    async ({ request, body, set }) => {
+      if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
+      const { sessions, kory } = getContext();
+      if (!(await sessions.get(body.sessionId))) {
+        set.status = 404;
+        return { ok: false, error: 'Session not found' };
+      }
+      // This is the deterministic control-plane path for an explicit human
+      // delegation. It does not depend on a provider translating a prose
+      // request into a tool call, and it still uses the normal independent
+      // worker routing, worktree, and critic gates.
+      const result = await kory.runWorkerPipeline(
+        body.sessionId,
+        body.task,
+        body.managerModel,
+        body.reasoningLevel,
+        body.domain,
+      );
+      return { ok: true, data: { result } };
+    },
+    {
+      body: t.Object({
+        sessionId: t.String(),
+        task: t.String({ minLength: 1 }),
+        managerModel: t.Optional(t.String()),
+        reasoningLevel: t.Optional(t.String()),
+        domain: t.Optional(t.Union([
+          t.Literal('general'),
+          t.Literal('ui'),
+          t.Literal('backend'),
+          t.Literal('test'),
+          t.Literal('review'),
+        ])),
+      }),
+    },
+  )
   .get(
     '/skills/evaluations',
     ({ request, query, set }) => {

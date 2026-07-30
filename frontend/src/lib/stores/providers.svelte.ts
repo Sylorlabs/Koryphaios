@@ -98,6 +98,7 @@ export type SyncProviderUiResult = {
 
 export const browserAuthProviders = new Set([
   'copilot',
+  'codex-auth',
   'kimicode',
   'claude',
   'grok',
@@ -109,14 +110,19 @@ export const browserAuthProviders = new Set([
 // non-secret session marker.
 export const localCliConnectProviders = new Set(['codex', 'cursor', 'devin', 'cline']);
 
-const PROVIDER_LABELS: Record<string, string> = {
+// Provider display labels are sourced from the backend status response
+// (which returns `label` per provider). This fallback is only used before
+// the first status load completes.
+const PROVIDER_LABEL_FALLBACK: Record<string, string> = {
   anthropic: 'Anthropic',
   openai: 'OpenAI',
   google: 'Google',
   aistudio: 'Google AI Studio',
   xai: 'xAI',
   openrouter: 'OpenRouter',
+  tokenrouter: 'TokenRouter',
   groq: 'Groq',
+  digitalocean: 'DigitalOcean Inference',
   copilot: 'GitHub Copilot',
   azure: 'Azure OpenAI',
   bedrock: 'AWS Bedrock',
@@ -127,8 +133,8 @@ const PROVIDER_LABELS: Record<string, string> = {
   llamacpp: 'Llama.cpp',
   opencodezen: 'OpenCodeZen',
   claude: 'Claude Code',
-  codex: 'OpenAI Codex (CLI)',
-  'codex-auth': 'OpenAI Codex (Auth)',
+  codex: 'Codex CLI',
+  'codex-auth': 'OpenAI Codex',
   grok: 'Grok Build',
   jules: 'Google Jules (cloud)',
   kimicode: 'Kimi Code (CLI)',
@@ -143,13 +149,41 @@ const TOKEN_PLACEHOLDERS: Record<string, string> = {
   copilot: 'GitHub token or Copilot auth token',
   google: 'Gemini API key',
   aistudio: 'Gemini API key (AI Studio)',
-  'codex-auth': 'OpenAI API key',
   kimicode: 'Auth with Kimi Code',
   'kimicode-auth': 'Kimi API key',
   azure: 'Bearer token',
 };
 
 const isTauri = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
+const CLI_ACCOUNT_NOTICE_DISMISSALS_KEY = 'koryphaios.dismissed-cli-account-notices.v1';
+
+type CliAccountNotice = { id: string; provider: string };
+
+function cliAccountNoticeFingerprint(accounts: CliAccountNotice[], providers: string[]): string {
+  return providers
+    .map((provider) => `${provider}:${accounts.filter((account) => account.provider === provider).map((account) => account.id).sort().join(',')}`)
+    .sort()
+    .join('|');
+}
+
+function hasDismissedCliAccountNotice(fingerprint: string): boolean {
+  try {
+    const dismissed = JSON.parse(window.localStorage.getItem(CLI_ACCOUNT_NOTICE_DISMISSALS_KEY) ?? '[]');
+    return Array.isArray(dismissed) && dismissed.includes(fingerprint);
+  } catch {
+    return false;
+  }
+}
+
+function dismissCliAccountNotice(fingerprint: string): void {
+  try {
+    const dismissed = JSON.parse(window.localStorage.getItem(CLI_ACCOUNT_NOTICE_DISMISSALS_KEY) ?? '[]');
+    const next = Array.isArray(dismissed) ? [...new Set([...dismissed, fingerprint])].slice(-20) : [fingerprint];
+    window.localStorage.setItem(CLI_ACCOUNT_NOTICE_DISMISSALS_KEY, JSON.stringify(next));
+  } catch {
+    // A private-storage failure must never block provider discovery.
+  }
+}
 
 // ============================================================================
 // Store Factory
@@ -173,10 +207,13 @@ function createProvidersStore() {
   let accountsLoading = $state<Record<string, boolean>>({});
   let accountBusy = $state<string | null>(null);
   let fallbackOrders = $state<Record<string, string[]>>({});
+  let fallbackEnabled = $state<Record<string, boolean>>({});
   let fallbackItems = $state<Record<string, StoredProviderAccount[]>>({});
   let fallbackSaving = $state<string | null>(null);
   let saving = $state<string | null>(null);
   let verifying = $state<string | null>(null);
+  /** Per-provider inline error message from the last connection attempt. */
+  let connectErrors = $state<Record<string, string>>({});
   let browserAuthBusy = $state<string | null>(null);
   let browserAuthPending = $state<Record<string, boolean>>({});
   let browserAuthMessages = $state<Record<string, string>>({});
@@ -199,11 +236,15 @@ function createProvidersStore() {
   let kimicodeAuthMessage = $state<string>('');
   let kimicodePollTimer: ReturnType<typeof setTimeout> | null = null;
 
+  let codexDeviceAuth = $state<DeviceAuthInfo | null>(null);
+  let codexAuthPollTimer: ReturnType<typeof setTimeout> | null = null;
+
   // ─── Helpers ───────────────────────────────────────────────────────────
 
   function getKnownAuthMode(name: string, fallback: string): string {
     if (
       name === 'copilot' ||
+      name === 'codex-auth' ||
       name === 'codex' ||
       name === 'kimicode' ||
       name === 'claude' ||
@@ -216,7 +257,10 @@ function createProvidersStore() {
   }
 
   function getProviderDisplayLabel(name: string): string {
-    return PROVIDER_LABELS[name] ?? name.charAt(0).toUpperCase() + name.slice(1);
+    // Prefer the label from the backend status response (single source of truth).
+    const fromStatus = statusList.find((p) => p.name === name)?.label;
+    if (fromStatus) return fromStatus;
+    return PROVIDER_LABEL_FALLBACK[name] ?? name.charAt(0).toUpperCase() + name.slice(1);
   }
 
   function usesBrowserAuth(name: string): boolean {
@@ -361,12 +405,22 @@ function createProvidersStore() {
   async function loadCliAccountAmbiguity(): Promise<void> {
     try {
       const res = await apiFetch(apiUrl('/api/providers/cli-accounts'));
-      const data = await parseJsonResponse<{ ok?: boolean; selectionRequired?: string[] }>(res);
+      const data = await parseJsonResponse<{
+        ok?: boolean;
+        data?: CliAccountNotice[];
+        selectionRequired?: string[];
+      }>(res);
       cliAccountSelectionRequired = data.ok && Array.isArray(data.selectionRequired)
         ? data.selectionRequired
         : [];
       if (cliAccountSelectionRequired.length > 0) {
-        const labels = cliAccountSelectionRequired.map((name) => PROVIDER_LABELS[name] ?? name).join(', ');
+        const fingerprint = cliAccountNoticeFingerprint(data.data ?? [], cliAccountSelectionRequired);
+        if (hasDismissedCliAccountNotice(fingerprint)) return;
+        // A setup reminder is non-blocking: once it has been seen, closed, or
+        // acted on, do not reintroduce it on every launch. New CLI profiles
+        // produce a different fingerprint and can be surfaced once.
+        dismissCliAccountNotice(fingerprint);
+        const labels = cliAccountSelectionRequired.map((name) => getProviderDisplayLabel(name)).join(', ');
         toastStore.warning(
           `Multiple CLI accounts detected for ${labels}. Choose which accounts Koryphaios may use.`,
           {
@@ -462,9 +516,17 @@ function createProvidersStore() {
     }
   }
 
+  function clearCodexAuthPollTimer(): void {
+    if (codexAuthPollTimer) {
+      clearTimeout(codexAuthPollTimer);
+      codexAuthPollTimer = null;
+    }
+  }
+
   function destroy(): void {
     clearCopilotPollTimer();
     clearKimiCodePollTimer();
+    clearCodexAuthPollTimer();
   }
 
   // Device codes are short-lived. Every poll tick checks the deadline so an
@@ -476,6 +538,31 @@ function createProvidersStore() {
     if (!expiresAt) return '';
     const mins = Math.max(1, Math.ceil((expiresAt - Date.now()) / 60_000));
     return ` Code expires in ~${mins} min.`;
+  }
+
+  async function pollCodexAuth(): Promise<void> {
+    clearCodexAuthPollTimer();
+    if (codexDeviceAuth && Date.now() > codexDeviceAuth.expiresAt) {
+      browserAuthMessages['codex-auth'] = AUTH_EXPIRED_MESSAGE;
+      browserAuthPending['codex-auth'] = false;
+      codexDeviceAuth = null;
+      return;
+    }
+    try {
+      await loadProvidersFromApi();
+      if (getProviderStatus('codex-auth')?.authenticated) {
+        browserAuthPending['codex-auth'] = false;
+        browserAuthMessages['codex-auth'] = 'OpenAI Codex connected';
+        codexDeviceAuth = null;
+        toastStore.success('OpenAI Codex connected');
+        return;
+      }
+      browserAuthMessages['codex-auth'] = `Waiting for ChatGPT approval.${deviceAuthCountdown(codexDeviceAuth?.expiresAt)}`;
+      codexAuthPollTimer = setTimeout(() => void pollCodexAuth(), 1_500);
+    } catch {
+      // Retain the code and retry; a transient status refresh must not lose the login.
+      codexAuthPollTimer = setTimeout(() => void pollCodexAuth(), 1_500);
+    }
   }
 
   async function pollCopilotAuth(deviceCode: string, intervalMs: number): Promise<void> {
@@ -634,6 +721,7 @@ function createProvidersStore() {
         ok?: boolean;
         data?: StoredProviderAccount[];
         fallbackOrder?: string[];
+        fallbackEnabled?: boolean;
         error?: string;
       }>(res);
       if (data.ok && Array.isArray(data.data)) {
@@ -641,6 +729,7 @@ function createProvidersStore() {
         if (data.fallbackOrder) {
           fallbackOrders[name] = data.fallbackOrder;
         }
+        fallbackEnabled[name] = data.fallbackEnabled === true;
       } else if (force) {
         providerAccounts[name] = [];
       }
@@ -682,17 +771,18 @@ function createProvidersStore() {
     }
   }
 
-  async function saveFallbackOrder(name: string, order: string[]): Promise<void> {
+  async function saveFallbackOrder(name: string, order: string[], enabled = fallbackEnabled[name] ?? false): Promise<void> {
     fallbackSaving = name;
     try {
       const res = await apiFetch(apiUrl(`/api/providers/${name}/fallback-order`), {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ order }),
+        body: JSON.stringify({ order, enabled }),
       });
       const data = await parseJsonResponse<{ ok?: boolean; error?: string }>(res);
       if (data.ok) {
         fallbackOrders[name] = order;
+        fallbackEnabled[name] = enabled;
       } else {
         toastStore.error(data.error ?? 'Failed to save fallback order');
       }
@@ -705,7 +795,7 @@ function createProvidersStore() {
   }
 
   function getOrderedFallbackAccounts(name: string): StoredProviderAccount[] {
-    const accounts = providerAccounts[name] ?? [];
+    const accounts = (providerAccounts[name] ?? []).filter((account) => account.source === 'cli-autodetect');
     if (accounts.length < 2) return [];
     const order = fallbackOrders[name] ?? [];
     const ordered: StoredProviderAccount[] = [];
@@ -735,9 +825,41 @@ function createProvidersStore() {
   }
 
   function handleFallbackDndFinalize(name: string, items: StoredProviderAccount[]): void {
-    fallbackItems[name] = items;
-    const newOrder = items.map((a) => a.id);
+    const ordered = normalizeFallbackItems(name, items);
+    fallbackItems[name] = ordered;
+    const newOrder = ordered.map((a) => a.id);
     void saveFallbackOrder(name, newOrder);
+  }
+
+  /** Keep Svelte's keyed list aligned with svelte-dnd-action while a drag is in flight.
+   * Without this, the action moves DOM nodes but the next reactive render restores the
+   * old array, which makes account tiles appear to consume or vanish. */
+  function handleFallbackDndConsider(name: string, items: StoredProviderAccount[]): void {
+    fallbackItems[name] = normalizeFallbackItems(name, items);
+  }
+
+  function normalizeFallbackItems(name: string, items: StoredProviderAccount[]): StoredProviderAccount[] {
+    const accounts = (providerAccounts[name] ?? []).filter((account) => account.source === 'cli-autodetect');
+    const known = new Map(accounts.map((account) => [account.id, account]));
+    const normalized: StoredProviderAccount[] = [];
+    const seen = new Set<string>();
+    for (const item of items) {
+      const account = known.get(item.id);
+      if (account && !seen.has(account.id)) {
+        normalized.push(account);
+        seen.add(account.id);
+      }
+    }
+    for (const account of accounts) {
+      if (!seen.has(account.id)) normalized.push(account);
+    }
+    return normalized;
+  }
+
+  function setFallbackEnabled(name: string, enabled: boolean): void {
+    const accounts = getOrderedFallbackAccounts(name);
+    const order = fallbackOrders[name]?.length ? fallbackOrders[name] : accounts.map((account) => account.id);
+    void saveFallbackOrder(name, order, enabled);
   }
 
   // ─── Connect / disconnect / auth ───────────────────────────────────────
@@ -770,6 +892,7 @@ function createProvidersStore() {
     }
 
     saving = name;
+    connectErrors[name] = '';
     try {
       const body: Record<string, string> = {};
       if (apiKey) body.apiKey = apiKey;
@@ -793,10 +916,13 @@ function createProvidersStore() {
           !!status && !status.hideModelSelector && (status.allAvailableModels?.length ?? 0) > 0;
         return { ok: true, openModelSelector, status };
       }
-      toastStore.error(data.error ?? 'Connection failed');
+      const errMsg = data.error ?? 'Connection failed';
+      connectErrors[name] = errMsg;
+      toastStore.error(errMsg);
       return { ok: false };
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : 'Network error';
+      connectErrors[name] = message;
       toastStore.error(message);
       return { ok: false };
     } finally {
@@ -898,6 +1024,22 @@ function createProvidersStore() {
         kimicodeAuthMessage = 'Approve Kimi Code in the browser to finish connecting.';
         browserAuthMessages[name] = kimicodeAuthMessage;
         void pollKimiCodeAuth(kimicodeDeviceAuth.deviceCode, kimicodeDeviceAuth.intervalMs);
+      } else if (
+        name === 'codex-auth' &&
+        data.data.deviceCode &&
+        data.data.userCode &&
+        data.data.verificationUri
+      ) {
+        codexDeviceAuth = {
+          deviceCode: data.data.deviceCode,
+          userCode: data.data.userCode,
+          verificationUri: data.data.verificationUri,
+          verificationUriComplete: data.data.verificationUriComplete,
+          expiresAt: Date.now() + (data.data.expiresIn ?? 900) * 1000,
+          intervalMs: Math.max(1000, (data.data.interval ?? 5) * 1000),
+        };
+        browserAuthMessages[name] = 'Enter the displayed code in ChatGPT. Koryphaios connects automatically after approval.';
+        void pollCodexAuth();
       } else {
         toastStore.info(data.data.message ?? 'Finish sign-in in the browser, then confirm here.');
       }
@@ -1216,198 +1358,22 @@ function createProvidersStore() {
             ),
           }));
 
-    const providerLabels: Record<string, string> = {
-      anthropic: 'Anthropic',
-      openai: 'OpenAI',
-      google: 'Google',
-      aistudio: 'Google AI Studio',
-      xai: 'xAI',
-      openrouter: 'OpenRouter',
-      groq: 'Groq',
-      copilot: 'GitHub Copilot',
-      azure: 'Azure OpenAI',
-      bedrock: 'AWS Bedrock',
-      vertexai: 'Vertex AI',
-      local: 'Local (custom endpoint)',
-      ollama: 'Ollama',
-      lmstudio: 'LM Studio',
-      llamacpp: 'Llama.cpp',
-      ollamacloud: 'Ollama Cloud',
-      deepseek: 'DeepSeek',
-      kimicode: 'Kimi Code (CLI)',
-      minimax: 'MiniMax',
-      moonshot: 'Moonshot AI / Kimi API',
-      'kimicode-auth': 'Kimi Code (Auth)',
-      zai: 'ZAI',
-      stepfun: 'StepFun',
-      cerebras: 'Cerebras',
-      fireworks: 'Fireworks AI',
-      deepinfra: 'DeepInfra',
-      ionet: 'IO.net',
-      hyperbolic: 'Hyperbolic',
-      huggingface: 'HuggingFace',
-      replicate: 'Replicate',
-      modal: 'Modal',
-      vercel: 'Vercel',
-      cloudflare: 'Cloudflare',
-      cloudflareworkers: 'Cloudflare Workers',
-      baseten: 'Baseten',
-      helicone: 'Helicone',
-      portkey: 'Portkey',
-      scaleway: 'Scaleway',
-      ovhcloud: 'OVHcloud',
-      stackit: 'STACKIT',
-      nebius: 'Nebius',
-      togetherai: 'Together AI',
-      venice: 'Venice AI',
-      zenmux: 'ZenMux',
-      opencodezen: 'OpenCodeZen',
-      opencodego: 'OpenCode Go',
-      firmware: 'Firmware',
-      '302ai': '302.ai',
-      claude: 'Claude Code',
-      codex: 'OpenAI Codex (CLI)',
-      'codex-auth': 'OpenAI Codex (Auth)',
-      grok: 'Grok Build',
-      jules: 'Google Jules',
-      antigravity: 'Antigravity',
-      mistral: 'Mistral AI',
-      mistralai: 'Mistral AI',
-      cohere: 'Cohere',
-      perplexity: 'Perplexity',
-      luma: 'Luma',
-      fal: 'Fal',
-      elevenlabs: 'ElevenLabs',
-      assemblyai: 'AssemblyAI',
-      deepgram: 'Deepgram',
-      gladia: 'Gladia',
-      lmnt: 'LMNT',
-      azurecognitive: 'Azure Cognitive',
-      sapai: 'SAP AI',
-      gitlab: 'GitLab',
-      nvidia: 'NVIDIA',
-      nim: 'NIM',
-      friendliai: 'FriendliAI',
-      voyageai: 'VoyageAI',
-      mixedbread: 'Mixedbread',
-      mem0: 'Mem0',
-      letta: 'Letta',
-      qwen: 'Qwen',
-      alibaba: 'Alibaba',
-      chromeai: 'ChromeAI',
-      requesty: 'Requesty',
-      aihubmix: 'AIHubMix',
-      aimlapi: 'AIMLAPI',
-      blackforestlabs: 'Black Forest Labs',
-      klingai: 'KlingAI',
-      prodia: 'Prodia',
-      novita: 'Novita',
-      banbri: 'Banbri',
-    };
-
-    const providerPlaceholders: Record<string, string> = {
-      anthropic: 'sk-ant-...',
-      openai: 'sk-...',
-      google: 'AIza...',
-      aistudio: 'AIza...',
-      xai: 'xai-...',
-      openrouter: 'sk-or-...',
-      groq: 'gsk_...',
-      copilot: 'gho_...',
-      azure: 'key...',
-      bedrock: 'AKIA...',
-      vertexai: '/path/to/creds.json',
-      local: 'http://localhost:1234',
-      ollama: 'http://localhost:11434',
-      lmstudio: 'http://localhost:1234',
-      llamacpp: 'http://localhost:8080',
-      ollamacloud: 'sk-...',
-      deepseek: 'sk-...',
-      kimicode: 'Auth with Kimi Code',
-      'kimicode-auth': 'Kimi API key',
-      minimax: 'sk-...',
-      moonshot: 'sk-...',
-      zai: 'sk-...',
-      stepfun: 'sk-...',
-      cerebras: 'sk-...',
-      fireworks: 'sk-...',
-      deepinfra: 'sk-...',
-      ionet: 'sk-...',
-      hyperbolic: 'sk-...',
-      huggingface: 'hf_...',
-      replicate: 'r8_...',
-      modal: 'md-...',
-      vercel: '...',
-      cloudflare: '...',
-      cloudflareworkers: '...',
-      baseten: '...',
-      helicone: 'sk-...',
-      portkey: 'sk-...',
-      scaleway: 'scw_...',
-      ovhcloud: 'ovh-...',
-      stackit: '...',
-      nebius: '',
-      togetherai: 'sk-...',
-      venice: 'sk-...',
-      zenmux: 'sk-...',
-      opencodezen: 'Get key at opencode.ai/auth',
-      opencodego: 'Get key at opencode.ai/auth (subscribe to Go)',
-      firmware: 'sk-...',
-      '302ai': 'sk-...',
-      jules: 'Jules API key (jules.google.com/settings)',
-      mistralai: 'sk-...',
-      claude: 'Claude auth token',
-      codex: 'Auth with ChatGPT',
-      'codex-auth': 'OpenAI API key',
-      grok: 'Uses your grok CLI — run "grok login" first',
-      antigravity: 'Uses your agy CLI — run "agy login" first',
-      mistral: 'sk-...',
-      cohere: 'sk-...',
-      perplexity: 'pplx-...',
-      luma: 'lm-...',
-      fal: 'sk-...',
-      elevenlabs: 'sk-...',
-      assemblyai: 'sk-...',
-      deepgram: 'sk-...',
-      gladia: 'sk-...',
-      lmnt: 'sk-...',
-      azurecognitive: 'sk-...',
-      sapai: 'sk-...',
-      gitlab: 'glpat-...',
-      nvidia: 'nvapi-...',
-      nim: 'nvapi-...',
-      friendliai: '',
-      voyageai: 'sk-...',
-      mixedbread: 'sk-...',
-      mem0: 'm0-...',
-      letta: 'lt-...',
-      qwen: 'sk-...',
-      alibaba: 'sk-...',
-      chromeai: '',
-      requesty: 'sk-...',
-      aihubmix: 'sk-...',
-      aimlapi: 'sk-...',
-      blackforestlabs: 'sk-...',
-      klingai: 'sk-...',
-      prodia: 'sk-...',
-      novita: 'sk-...',
-      banbri: 'sk-...',
-    };
-
-    const providersNeedingUrl = new Set(['local', 'ollama', 'lmstudio', 'llamacpp', 'azure']);
-
+    // All display metadata (label, placeholder, requiresBaseUrl) comes from
+    // the backend status response — the single source of truth. No hardcoded
+    // provider label/placeholder dicts that drift out of sync.
     return types
-      .map((type) => ({
-        key: type.name,
-        label:
-          providerLabels[type.name] ||
-          statusList.find((p) => p.name === type.name)?.label ||
+      .map((type) => {
+        const status = statusList.find((p) => p.name === type.name);
+        const label =
+          status?.label ||
+          PROVIDER_LABEL_FALLBACK[type.name] ||
           (type.name.startsWith('custom:')
             ? type.name.slice('custom:'.length)
-            : type.name.charAt(0).toUpperCase() + type.name.slice(1)),
-        placeholder: providerPlaceholders[type.name] || 'API key...',
-        needsUrl: providersNeedingUrl.has(type.name) || type.name.startsWith('custom:'),
-      }))
+            : type.name.charAt(0).toUpperCase() + type.name.slice(1));
+        const placeholder = status?.baseUrlPlaceholder || 'API key...';
+        const needsUrl = !!status?.requiresBaseUrl || type.name.startsWith('custom:');
+        return { key: type.name, label, placeholder, needsUrl };
+      })
       .sort((a, b) => a.label.localeCompare(b.label));
   }
 
@@ -1483,6 +1449,9 @@ function createProvidersStore() {
     get fallbackOrders() {
       return fallbackOrders;
     },
+    get fallbackEnabled() {
+      return fallbackEnabled;
+    },
     get fallbackItems() {
       return fallbackItems;
     },
@@ -1494,6 +1463,9 @@ function createProvidersStore() {
     },
     get verifying() {
       return verifying;
+    },
+    get connectErrors() {
+      return connectErrors;
     },
     get browserAuthBusy() {
       return browserAuthBusy;
@@ -1531,6 +1503,9 @@ function createProvidersStore() {
     get kimicodeDeviceAuth() {
       return kimicodeDeviceAuth;
     },
+    get codexDeviceAuth() {
+      return codexDeviceAuth;
+    },
     get kimicodeAuthStatus() {
       return kimicodeAuthStatus;
     },
@@ -1559,7 +1534,9 @@ function createProvidersStore() {
     loadProviderAccounts,
     saveAccountProfileLabel,
     saveFallbackOrder,
+    setFallbackEnabled,
     getOrderedFallbackAccounts,
+    handleFallbackDndConsider,
     handleFallbackDndFinalize,
     connectProvider,
     startBrowserAuthFlow,

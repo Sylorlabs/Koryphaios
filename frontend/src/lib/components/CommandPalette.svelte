@@ -14,13 +14,17 @@
     FolderOpen,
     Command,
     GitBranch,
-    Activity
+    Activity,
+    Target,
+    Pause,
+    Play,
+    ArrowUp
   } from 'lucide-svelte';
   import { getModKeyName } from '$lib/utils/platform';
   import { modeStore } from '$lib/stores/mode.svelte';
   import { notesStore } from '$lib/stores/notes.svelte';
 
-  const frontendVersion = __KORYPHAIOS_FRONTEND_VERSION__ ?? '1.0.23';
+  const frontendVersion = __KORYPHAIOS_FRONTEND_VERSION__ ?? '0.1.0';
 
   let { 
     open = $bindable(false), 
@@ -59,6 +63,12 @@
     { id: 'open_settings', label: 'Settings', description: 'Configure providers and preferences', icon: Settings, shortcut: ',', category: 'System' },
     { id: 'clear_feed', label: 'Clear Feed', description: 'Remove all messages from view', icon: Trash2, category: 'System' },
     { id: 'toggle_notes', label: 'Toggle Notes', description: 'Show or hide the project notes panel', icon: FileCode, shortcut: 'Shift+N', category: 'View' },
+    { id: 'goal_create', label: 'Create Goal', description: 'Create a workspace, project, or chat goal', icon: Target, category: 'Goals' },
+    { id: 'goal_open', label: 'Open Active Goal', description: 'Open the selected goal checklist and activity', icon: Target, category: 'Goals' },
+    { id: 'goal_invoke', label: 'Ask Manager to Advance Goal', description: 'Dispatch the selected ready checklist item through the manager', icon: Play, category: 'Goals' },
+    { id: 'goal_pause', label: 'Pause Active Goal', description: 'Pause the selected goal', icon: Pause, category: 'Goals' },
+    { id: 'goal_resume', label: 'Resume Active Goal', description: 'Resume the selected paused goal', icon: Play, category: 'Goals' },
+    { id: 'goal_prioritize', label: 'Prioritize Active Goal', description: 'Move the selected goal ahead of other eligible work', icon: ArrowUp, category: 'Goals' },
     // Mode switches — each only shows in the OTHER mode
     { id: 'mode_advanced', label: 'Switch to Advanced Mode', description: 'Full controls: git panel, agents, cost tracking', icon: Command, category: 'System', mode: 'beginner' },
     { id: 'mode_beginner', label: 'Switch to Beginner Mode', description: 'Simplified UI with fewer controls', icon: Command, category: 'System', mode: 'advanced' },

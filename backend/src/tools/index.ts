@@ -11,6 +11,7 @@ export {
   ReadFileTool,
   WriteFileTool,
   EditFileTool,
+  BatchEditTool,
   GrepTool,
   GlobTool,
   LsTool,
@@ -20,5 +21,10 @@ export {
   PatchTool,
 } from './files';
 export { WebSearchTool, WebFetchTool } from './web';
-export { AskUserTool, AskManagerTool } from './interaction';
+export { ViewImageTool } from './image';
+export { AskUserTool, AskManagerTool, DelegateToWorkerTool } from './interaction';
+export { DelegateToJulesTool } from './jules';
 export { MCPDetectErrorsTool, MCPAnalyzeErrorTool, MCPSuggestFixesTool } from './mcp';
+export { FetchContextTool, PruneContextTool } from './context';
+export { CreateGoalTool } from './goals';
+export { registerGitTools } from './git';

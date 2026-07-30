@@ -36,6 +36,8 @@ export const PROVIDER_SHARE_RISK: Record<string, ProviderShareClassification> = 
   xai: { risk: 'ok', reason: 'Your xAI API key — you pay for their usage.' },
   groq: { risk: 'ok', reason: 'Your Groq API key — you pay for their usage.' },
   openrouter: { risk: 'ok', reason: 'Your OpenRouter key — you pay for their usage.' },
+  tokenrouter: { risk: 'ok', reason: 'Your TokenRouter key — you pay for their usage.' },
+  digitalocean: { risk: 'ok', reason: 'Your DigitalOcean API key — you pay for their usage.' },
   mistral: { risk: 'ok', reason: 'Your API key — you pay for their usage.' },
   azure: { risk: 'ok', reason: 'Your Azure deployment — you pay for their usage.' },
   bedrock: { risk: 'ok', reason: 'Your AWS Bedrock account — you pay for their usage.' },
@@ -58,7 +60,7 @@ export const PROVIDER_SHARE_RISK: Record<string, ProviderShareClassification> = 
   },
   'codex-auth': {
     risk: 'ok',
-    reason: 'Your OpenAI API key — you pay for their usage.',
+    reason: 'Your ChatGPT subscription through Koryphaios-managed Codex OAuth.',
   },
   copilot: {
     risk: 'prohibited',

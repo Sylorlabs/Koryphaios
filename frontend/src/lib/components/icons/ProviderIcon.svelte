@@ -20,10 +20,12 @@
     claude: ['claudecode', 'claude'],
     openai: ['openai'],
     google: ['google', 'google-brand'],
-    aistudio: ['aistudio', 'gemini'],
+    aistudio: ['aistudio'],
     xai: ['xai'],
     openrouter: ['openrouter'],
+    tokenrouter: ['tokenrouter'],
     groq: ['groq'],
+    digitalocean: ['digitalocean'],
     togetherai: ['together', 'together-brand'],
     deepseek: ['deepseek'],
     mistralai: ['mistral'],
@@ -49,7 +51,6 @@
     'kimicode-auth': ['kimicode', 'kimi'],
     moonshot: ['moonshot'],
     stepfun: ['stepfun'],
-    zhipuai: ['zhipu'],
     fireworks: ['fireworks'],
     deepinfra: ['deepinfra'],
     codex: ['codex'],
@@ -67,10 +68,14 @@
     local: ['local', 'lmstudio'],
     lmstudio: ['lmstudio'],
     nvidia: ['nvidia'],
-    nim: ['nvidia'],
     voyageai: ['voyage'],
     friendliai: ['friendli'],
     cortecs: ['cortecs'],
+    // Catalog keys whose public asset uses a different brand slug.
+    blackforestlabs: ['bfl'],
+    'novita-ai': ['novita'],
+    llama: ['meta-brand', 'meta'],
+    'github-models': ['github'],
     cline: ['cline'],
     cerebras: ['cerebras'],
     klingai: ['kling'],
@@ -144,8 +149,33 @@
   // avatar from its verified Hugging Face organization instead of a fabricated
   // fallback mark.
   const officialProviderIcons: Record<string, string> = {
+    // Served by Google on the live AI Studio application; this is the current
+    // AI Studio ribbon, not the Gemini product mark.
+    aistudio:
+      'https://www.gstatic.com/images/branding/productlogos/ai_studio/v1/web-96dp/logo_ai_studio_color_1x_web_96dp.png',
     cortecs:
       'https://cdn-avatars.huggingface.co/v1/production/uploads/64158719bce2fed80ab26ebe/3kkigrx94iBGnQkER3EP2.png',
+    // Current logo served by Qwen's official site. The bundled LobeHub asset
+    // is the previous mark and is retained only as the offline fallback.
+    qwen: 'https://qwenlm.github.io/img/logo.png',
+    // These vendors do not publish a bundled LobeHub asset. Their first-party
+    // marks keep a configured card from degrading into a generic placeholder.
+    modal: 'https://modal.com/assets/favicon.svg',
+    portkey: 'https://framerusercontent.com/images/pkFK3AGXHirogqiN67JGtlnMVM.png',
+    gladia: 'https://gladia.io/favicon.svg',
+    lmnt: 'https://lmnt.com/lmnt.svg',
+    mem0: 'https://framerusercontent.com/images/2ys67ADJdvcyGmQnhp8vKWSq8.svg',
+    letta: 'https://www.letta.com/assets/images/webclip.png',
+    mixedbread: 'https://www.mixedbread.com/favicon.ico',
+    siliconflow: 'https://siliconflow.cn/favicon.ico',
+    abacus: 'https://abacus.ai/favicon.ico',
+    requesty: 'https://www.requesty.ai/favicon.ico',
+    synthetic: 'https://synthetic.new/favicon.ico',
+    moark: 'https://moark.ai/favicon.ico',
+    prodia: 'https://framerusercontent.com/images/mSECxGqYySTb64MVE0crc5q6z8k.png',
+    deepgram: 'https://cdn.simpleicons.org/deepgram',
+    vultr: 'https://cdn.simpleicons.org/vultr',
+    wandb: 'https://cdn.simpleicons.org/weightsandbiases',
   };
 
   let loadError = $state(false);
@@ -255,6 +285,19 @@
       d="M15.407 10.836a2.24 2.24 0 00-.51-.409 1.084 1.084 0 00-.544-.152c-.255 0-.483.047-.684.14a1.58 1.58 0 00-.84.912c-.074.203-.11.416-.11.631 0 .218.036.43.11.631a1.594 1.594 0 00.84.913c.2.093.43.14.684.14.216 0 .417-.046.602-.135.188-.09.35-.225.475-.392l.928 1.006c-.14.14-.3.261-.482.363a3.367 3.367 0 01-1.083.38c-.17.026-.317.04-.44.04a3.315 3.315 0 01-1.182-.21 2.825 2.825 0 01-.961-.597 2.816 2.816 0 01-.644-.929 2.987 2.987 0 01-.238-1.21c0-.444.08-.847.238-1.21.15-.35.368-.666.643-.929.278-.261.605-.464.962-.596a3.315 3.315 0 011.182-.21c.355 0 .712.068 1.072.204.361.138.685.36.944.649l-.962.97z"
       fill="currentColor"
     />
+  </svg>
+{:else if provider.toLowerCase() === 'digitalocean'}
+  <svg width={size} height={size} viewBox="0 0 24 24" class={`provider-icon ${className}`} role="img" aria-label="DigitalOcean logo">
+    <circle cx="12" cy="12" r="10" fill="#0080ff" />
+    <path d="M7 12a5 5 0 1 1 5 5H7v-5Z" fill="white" />
+    <circle cx="7" cy="17" r="1.5" fill="white" />
+    <circle cx="10.5" cy="17" r="1.5" fill="white" />
+  </svg>
+{:else if provider.toLowerCase() === 'tokenrouter'}
+  <svg width={size} height={size} viewBox="0 0 24 24" class={`provider-icon ${className}`} role="img" aria-label="TokenRouter logo">
+    <circle cx="12" cy="12" r="10" fill="#5b4bdb" />
+    <path d="M6.5 9.5h7.25l-1.9-1.9 1.4-1.4L17.5 10l-4.25 3.8-1.4-1.4 1.9-1.9H6.5v-1Z" fill="white" />
+    <path d="M17.5 14.5h-7.25l1.9 1.9-1.4 1.4L6.5 14l4.25-3.8 1.4 1.4-1.9 1.9h7.25v1Z" fill="#b9b5ff" />
   </svg>
 {:else if !loadError && currentCandidate}
   <img

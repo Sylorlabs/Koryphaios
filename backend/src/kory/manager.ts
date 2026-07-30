@@ -86,7 +86,10 @@ import type { WorkerPipelineConfig } from './services/WorkerPipelineService';
 import type { UIMode } from '@koryphaios/shared';
 import { compilePrompt, createTaskContract } from './prompts';
 import { discoverVerificationChecks, emptyQualityGateReport } from './verification';
-import { getProviderHarnessCapabilities } from '../providers/provider-harness';
+import {
+  getProviderHarnessCapabilities,
+  supportsKoryControlPlaneTools,
+} from '../providers/provider-harness';
 import { buildIntentDiscoveryBatch } from './clarification-gate';
 import { collaborationManager } from '../collaboration/manager';
 import { loadAgentSettings, saveAgentSettings } from '../agent-settings';
@@ -150,6 +153,13 @@ interface AgentThreadState {
   busy: boolean;
   updatedAt: number;
 }
+
+// Agent threads contain complete prompts, provider replies, and tool results.
+// They are useful while a user is inspecting or continuing an agent, but must
+// never become an unbounded process-lifetime transcript store. Persistent chat
+// history belongs in the session/message stores, not this live UI cache.
+const AGENT_THREAD_IDLE_TTL_MS = 30 * 60 * 1000;
+const MAX_COMPLETED_AGENT_THREADS_PER_SESSION = 24;
 
 // ─── Default Model Assignments per Domain ───────────────────────────────────
 
@@ -238,6 +248,8 @@ export class KoryManager {
     string,
     { model: string; provider: ProviderName | undefined }
   >();
+  /** Goal state is immutable task context, not a conversational suggestion. */
+  private goalContextBySession = new Map<string, NonNullable<import('./prompts').TaskContract['goalContext']>>();
 
   /** Extend lifecycle policy without embedding provider-specific behavior in prompts. */
   public registerWorkflowHook(event: WorkflowHookEvent, hook: WorkflowHook): () => void {
@@ -577,6 +589,7 @@ export class KoryManager {
     attachments?: Array<{ type: string; data: string; name: string }>,
     collaborationToolPolicy?: CollaborationToolPolicy,
     responseVariant?: { groupId: string; index: number },
+    goalContext?: import('./prompts').TaskContract['goalContext'],
   ): Promise<void> {
     this.isProcessing = true;
     this.state.clearChanges(sessionId);
@@ -584,7 +597,8 @@ export class KoryManager {
 
     const workflowSettings = loadAgentSettings(this.workingDirectory);
     const configuredCollisionChoices = workflowSettings.skillCollisionChoices ?? {};
-    const initialContract = createTaskContract(userMessage);
+    if (goalContext) this.goalContextBySession.set(sessionId, goalContext);
+    const initialContract = createTaskContract(userMessage, { goalContext: goalContext ?? this.goalContextBySession.get(sessionId) });
     const discoveryQuestions = buildIntentDiscoveryBatch(
       userMessage,
       initialContract.taskKind,
@@ -686,6 +700,7 @@ export class KoryManager {
     } finally {
       if (collaborationToolPolicy) clearCollaborationToolPolicy(sessionId);
       this.skillCollisionChoicesBySession.delete(sessionId);
+      this.goalContextBySession.delete(sessionId);
       this.isProcessing = false;
     }
   }
@@ -791,8 +806,8 @@ export class KoryManager {
 
   private formatProviderName(provider: string): string {
     if (provider === 'openai') return 'OpenAI';
-    if (provider === 'codex') return 'OpenAI Codex (CLI)';
-    if (provider === 'codex-auth') return 'OpenAI Codex (Auth)';
+    if (provider === 'codex') return 'Codex CLI';
+    if (provider === 'codex-auth') return 'OpenAI Codex';
     if (provider === 'anthropic') return 'Anthropic';
     if (provider === 'google') return 'Google';
     if (provider === 'aistudio') return 'Google AI Studio';
@@ -1773,7 +1788,7 @@ export class KoryManager {
       mode: getModeManager().getMode(),
       provider: provider.name,
       workingDirectory: await this.resolveSessionWorkingDirectory(sessionId),
-      taskContract: createTaskContract(taskGoal),
+      taskContract: createTaskContract(taskGoal, { goalContext: this.goalContextBySession.get(sessionId) }),
       contextPaths: this.config.contextPaths,
       skillSelection: {
         collisionChoices: this.skillCollisionChoicesBySession.get(sessionId),
@@ -1847,6 +1862,15 @@ export class KoryManager {
     if (provider.name === 'jules') {
       const julesMeta = getProviderDisplay('jules');
       systemPrompt += `\n\n• You are chatting through Jules (cloud provider). All code changes happen on Google's remote infrastructure and GitHub — not in this local workspace until synced.\n• ${julesMeta?.managerHint ?? JULES_SYNC_INSTRUCTIONS}`;
+    }
+
+    if (!supportsKoryControlPlaneTools(provider.name)) {
+      // Native CLI harnesses may execute and report their own tools, but cannot
+      // call back into Kory's control plane. Hiding the schemas prevents a
+      // manager from claiming a delegation that Kory never received.
+      tools = [];
+      systemPrompt +=
+        '\n\n• This native CLI harness cannot invoke Kory control-plane tools in this build. Do not claim to delegate, ask Kory for input, or run a Kory-managed tool; complete only work the native harness can actually perform.';
     }
 
     // Agent execution mode (the composer pill, persisted in agent settings): gate delegation.
@@ -2484,12 +2508,13 @@ export class KoryManager {
       mode: getModeManager().getMode(),
       provider: provider.name,
       workingDirectory: workerWorkingDirectory,
-      taskContract:
-        taskContract ??
-        createTaskContract(userMessage, {
+      taskContract: {
+        ...(taskContract ?? createTaskContract(userMessage, {
           scope: allowedPaths,
           constraints: isSandboxed ? ['Stay within the granted filesystem paths'] : [],
-        }),
+        })),
+        goalContext: this.goalContextBySession.get(sessionId) ?? taskContract?.goalContext,
+      },
       contextPaths: this.config.contextPaths,
       skillSelection: {
         collisionChoices: this.skillCollisionChoicesBySession.get(sessionId),
@@ -2868,6 +2893,11 @@ export class KoryManager {
       if (thread.kind === 'worker') {
         this.workers.removeWorker(agentId);
       }
+      // A completed worker/critic remains available for the current session's
+      // agent feed, but retain a bounded recent set. Before this, every
+      // completed thread (including its full prompt, responses, and tool
+      // results) remained in agentThreads until the backend exited.
+      this.enforceCompletedAgentThreadLimit(thread.sessionId);
     }
   }
 
@@ -3032,7 +3062,7 @@ export class KoryManager {
       mode: getModeManager().getMode(),
       provider: provider.name,
       workingDirectory: ctx.workingDirectory,
-      taskContract: createTaskContract(workerGoal, { scope: ctx.allowedPaths ?? [] }),
+      taskContract: createTaskContract(workerGoal, { scope: ctx.allowedPaths ?? [], goalContext: this.goalContextBySession.get(sessionId) }),
       contextPaths: this.config.contextPaths,
       skillSelection: {
         collisionChoices: this.skillCollisionChoicesBySession.get(sessionId),
@@ -3140,16 +3170,31 @@ export class KoryManager {
    * Cleanup abandoned resources.
    * Call this periodically to prevent memory leaks from abandoned sessions.
    */
-  cleanupAbandonedResources(_maxSessionAgeMs = 30 * 60 * 1000): void {
+  cleanupAbandonedResources(maxSessionAgeMs = AGENT_THREAD_IDLE_TTL_MS): void {
+    const now = Date.now();
     const activeSessionIds = new Set(this.workers.getActiveSessionIds());
 
     // Clean up worker usage for workers that no longer exist
     this.workers.cleanupStaleWorkers();
 
-    // Clean up old session data not associated with any active worker
+    // Clean up old session data not associated with any active worker. Use the
+    // complete session cleanup path so its companion live caches (notably
+    // agentThreads) cannot outlive the state entry that triggered cleanup.
     for (const sessionId of this.state.getSessionIds()) {
       if (!activeSessionIds.has(sessionId)) {
-        this.state.cleanupSession(sessionId);
+        this.cleanupSession(sessionId);
+      }
+    }
+
+    // A finished agent thread can exist without a SessionStateService entry
+    // (for example after a completed worker). Expire those directly. This is
+    // the missing ownership edge that caused the backend's retained memory to
+    // grow for the life of the process.
+    let expiredAgentThreads = 0;
+    for (const [agentId, thread] of this.agentThreads) {
+      if (!thread.busy && now - thread.updatedAt >= maxSessionAgeMs) {
+        this.agentThreads.delete(agentId);
+        expiredAgentThreads++;
       }
     }
 
@@ -3157,9 +3202,21 @@ export class KoryManager {
       {
         activeWorkers: this.workers.getActiveCount(),
         trackedSessions: activeSessionIds.size,
+        expiredAgentThreads,
+        retainedAgentThreads: this.agentThreads.size,
       },
       'Abandoned resources cleaned up',
     );
+  }
+
+  /** Keep the live agent-feed cache bounded even during a very active session. */
+  private enforceCompletedAgentThreadLimit(sessionId: string): void {
+    const completed = [...this.agentThreads.entries()]
+      .filter(([, thread]) => thread.sessionId === sessionId && !thread.busy)
+      .sort(([, a], [, b]) => b.updatedAt - a.updatedAt);
+    for (const [agentId] of completed.slice(MAX_COMPLETED_AGENT_THREADS_PER_SESSION)) {
+      this.agentThreads.delete(agentId);
+    }
   }
 
   /**

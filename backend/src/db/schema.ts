@@ -29,6 +29,7 @@ export const sessions = sqliteTable('sessions', {
   tokensOut: integer('tokens_out').default(0),
   totalCost: real('total_cost').default(0),
   workflowState: text('workflow_state').default('idle'),
+  workingDirectory: text('working_directory'), // project folder this chat is scoped to
   metadata: text('metadata'), // JSON string
   tags: text('tags'), // JSON string
   version: integer('version').default(1),
@@ -46,6 +47,8 @@ export const messages = sqliteTable('messages', {
   tokensIn: integer('tokens_in').default(0),
   tokensOut: integer('tokens_out').default(0),
   cost: real('cost').default(0),
+  variantGroupId: text('variant_group_id'),
+  variantIndex: integer('variant_index').default(0),
   createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
 });
 
@@ -63,6 +66,16 @@ export const tasks = sqliteTable('tasks', {
   error: text('error'),
   createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
   updatedAt: integer('updated_at', { mode: 'timestamp' }).notNull(),
+});
+
+export const goals = sqliteTable('goals', {
+  id: text('id').primaryKey(), userId: text('user_id'), objective: text('objective').notNull(),
+  scope: text('scope').notNull(), projectPath: text('project_path'), sessionId: text('session_id'),
+  priority: integer('priority').notNull().default(0), sortOrder: integer('sort_order').notNull().default(0),
+  status: text('status').notNull().default('queued'), checklist: text('checklist').notNull().default('[]'),
+  linkedSessionIds: text('linked_session_ids').notNull().default('[]'), activity: text('activity').notNull().default('[]'),
+  blocker: text('blocker'), activeDurationMs: integer('active_duration_ms').notNull().default(0),
+  activeStartedAt: integer('active_started_at', { mode: 'timestamp' }), createdAt: integer('created_at', { mode: 'timestamp' }).notNull(), updatedAt: integer('updated_at', { mode: 'timestamp' }).notNull(),
 });
 
 // ============================================================================
@@ -401,6 +414,43 @@ export const providerEndpointOverride = sqliteTable('provider_endpoint_override'
   provider: text('provider').primaryKey(),
   baseUrl: text('base_url').notNull(),
   updatedAt: integer('updated_at', { mode: 'timestamp' }).notNull(),
+});
+
+// ============================================================================
+// Notes — Obsidian-style note network
+// ============================================================================
+
+export const notes = sqliteTable('notes', {
+  id: text('id').primaryKey(),
+  title: text('title').notNull(),
+  content: text('content').notNull().default(''),
+  folderPath: text('folder_path').notNull().default('/'),
+  tags: text('tags').notNull().default('[]'),           // JSON string array
+  pinned: integer('pinned').notNull().default(0),       // boolean 0/1
+  includeInContext: integer('include_in_context').notNull().default(0), // auto-inject into agent context
+  format: text('format').notNull().default('markdown'), // 'markdown' | 'html' — html renders in the sandboxed preview
+  userId: text('user_id').references(() => users.id, { onDelete: 'cascade' }),
+  createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
+  updatedAt: integer('updated_at', { mode: 'timestamp' }).notNull(),
+});
+
+// Wiki-link graph edges
+export const noteLinks = sqliteTable('note_links', {
+  fromNoteId: text('from_note_id').notNull().references(() => notes.id, { onDelete: 'cascade' }),
+  toNoteId: text('to_note_id').notNull().references(() => notes.id, { onDelete: 'cascade' }),
+}, (t) => ({
+  pk: primaryKey({ columns: [t.fromNoteId, t.toNoteId] }),
+}));
+
+// File attachments for notes
+export const noteAttachments = sqliteTable('note_attachments', {
+  id: text('id').primaryKey(),
+  noteId: text('note_id').notNull().references(() => notes.id, { onDelete: 'cascade' }),
+  filename: text('filename').notNull(),
+  mimeType: text('mime_type').notNull(),
+  size: integer('size').notNull(),
+  storagePath: text('storage_path').notNull(),          // absolute path on disk
+  createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
 });
 
 // ============================================================================
