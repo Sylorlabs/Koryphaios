@@ -36,8 +36,10 @@ async function flushErrors() {
       body: JSON.stringify({ errors }),
     });
   } catch (err) {
-    // Don't log monitoring errors to avoid infinite loop
-    console.warn('Failed to send error logs', err);
+    // Don't log monitoring errors to avoid infinite loop — use the original
+    // console.warn so we don't re-enter our own wrapper (which would push
+    // to errorBuffer, schedule another flush, and feedback-loop).
+    if (_originalWarn) _originalWarn.call(console, '[ERROR MONITOR] Failed to send error logs', err);
   }
 }
 
@@ -48,6 +50,51 @@ function scheduleFlush() {
 
 let _originalError: typeof console.error;
 let _originalWarn: typeof console.warn;
+let _initialized = false;
+
+// Store the real console methods on globalThis so they survive Vite HMR
+// (which re-evaluates the module and resets module-level variables, while
+// console.error stays wrapped from the previous instance). Without this,
+// a hot-reload would capture the old wrapper as _originalError and create
+// infinite recursion: wrapper → _originalError (old wrapper) → _originalError (itself) → …
+const _g = globalThis as unknown as {
+  __koryOriginalConsoleError?: typeof console.error;
+  __koryOriginalConsoleWarn?: typeof console.warn;
+};
+
+/** Safely serialize a value for the error log message. Never throws —
+ *  falls back to a placeholder on circular references or stringify failures. */
+function safeStringify(value: unknown): string {
+  if (value === null) return 'null';
+  if (typeof value === 'string') return value;
+  if (typeof value === 'number' || typeof value === 'boolean') return String(value);
+  if (typeof value === 'function') return `[Function: ${value.name || 'anonymous'}]`;
+  if (value instanceof Error) return `${value.name}: ${value.message}\n${value.stack ?? ''}`;
+  if (typeof value === 'object') {
+    try {
+      return JSON.stringify(value);
+    } catch {
+      // Circular reference or other stringify failure — don't let this
+      // throw out of console.error and trigger a cascading error loop.
+      try {
+        return Object.prototype.toString.call(value);
+      } catch {
+        return '[Unserializable object]';
+      }
+    }
+  }
+  return String(value);
+}
+
+/** Quick check whether any arg is a string starting with the sentinel prefix.
+ *  Used to skip [Koryphaios] messages BEFORE running the (potentially
+ *  throwing) serialization map. */
+function argsHaveKoryphaiosSentinel(args: unknown[]): boolean {
+  for (const a of args) {
+    if (typeof a === 'string' && a.includes('[Koryphaios]')) return true;
+  }
+  return false;
+}
 
 function logError(error: ErrorLog) {
   errorBuffer.push(error);
@@ -58,25 +105,32 @@ function logError(error: ErrorLog) {
 
 export function initErrorMonitoring() {
   if (typeof window === 'undefined') return;
+  // Guard against double-initialization (e.g. HMR re-mounting the layout).
+  // Without this, the second call captures the already-wrapped console.error
+  // as _originalError, so _originalError.apply() re-enters the wrapper →
+  // infinite recursion → Maximum call stack size exceeded.
+  if (_initialized) return;
+  _initialized = true;
 
-  _originalError = console.error;
-  _originalWarn = console.warn;
+  // Always capture the REAL console methods — never a previous wrapper.
+  // On HMR, module-level _originalError is reset, but globalThis survives.
+  _originalError = _g.__koryOriginalConsoleError ?? console.error;
+  _originalWarn = _g.__koryOriginalConsoleWarn ?? console.warn;
+  _g.__koryOriginalConsoleError = _originalError;
+  _g.__koryOriginalConsoleWarn = _originalWarn;
 
   // Capture console errors — must call _originalError so our own logError doesn't recurse
   console.error = (...args: unknown[]) => {
-    const message = args
-      .map((a) => {
-        if (a instanceof Error) return `${a.name}: ${a.message}\n${a.stack}`;
-        if (typeof a === 'object') return JSON.stringify(a);
-        return String(a);
-      })
-      .join(' ');
-
     // Don't relay the backend-health sentinel's own failures — that creates
     // a feedback loop where each health-check timeout logs an error, which
     // triggers a flush to /api/debug/log-error, which adds more concurrent
     // requests to the same origin, which can cause more health-check timeouts.
-    if (!message.includes('[Koryphaios]')) {
+    // Check BEFORE serializing so a circular object in a [Koryphaios] call
+    // doesn't throw out of safeStringify before we get a chance to skip it.
+    const isSentinel = argsHaveKoryphaiosSentinel(args);
+
+    if (!isSentinel) {
+      const message = args.map(safeStringify).join(' ');
       errorBuffer.push({
         timestamp: Date.now(),
         type: 'error',
@@ -90,8 +144,8 @@ export function initErrorMonitoring() {
 
   // Capture console warnings
   console.warn = (...args: unknown[]) => {
-    const message = args.map((a) => String(a)).join(' ');
-    if (!message.includes('[Koryphaios]')) {
+    const message = args.map((a) => (typeof a === 'string' ? a : safeStringify(a))).join(' ');
+    if (!message.includes('[Koryphaios]') && !message.includes('[ERROR MONITOR]')) {
       errorBuffer.push({
         timestamp: Date.now(),
         type: 'warn',

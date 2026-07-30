@@ -4,6 +4,7 @@
   import { providersStore } from '$lib/stores/providers.svelte';
   import NumberStepper from './NumberStepper.svelte';
   import KorySelect from './KorySelect.svelte';
+  import SettingsPageIntro from './SettingsPageIntro.svelte';
   import { goalDisplayStore } from '$lib/stores/goal-display.svelte';
   import {
     Bot,
@@ -42,6 +43,7 @@
   let skillPreviewPrompt = $state('');
   let skillCollisionChoices = $state<Record<string, 'personal' | 'project'>>({});
   let showSkillComparison = $state(false);
+  let showModelAccess = $state(false);
 
   async function runSkillPreview() {
     if (!skillPreviewPrompt.trim()) return;
@@ -302,8 +304,17 @@
         ></div>
       </div>
     {:else if agentSettingsStore.activeTab === 'settings'}
-      <div class="h-full min-h-0 overflow-y-auto p-6">
-        <div class="grid gap-6 xl:grid-cols-[minmax(0,1.15fr)_minmax(320px,0.85fr)]">
+      <div class="flex h-full min-h-0 flex-col overflow-hidden">
+        <SettingsPageIntro title="Agent control center" description="Guardrails, workflow, autonomy, context, research, and routing for every run.">
+          <span class="rounded-full bg-[var(--color-surface-3)] px-2.5 py-1 text-[10px] text-[var(--color-text-muted)]">
+            {agentSettingsStore.settings.agentExecutionMode} execution
+          </span>
+          <span class="rounded-full bg-[var(--color-surface-3)] px-2.5 py-1 text-[10px] text-[var(--color-text-muted)]">
+            critic {agentSettingsStore.settings.criticGateEnabled ? 'on' : 'off'}
+          </span>
+        </SettingsPageIntro>
+        <div class="h-full min-h-0 overflow-y-auto p-5">
+        <div class="mx-auto grid max-w-6xl gap-5 xl:grid-cols-[minmax(0,1.15fr)_minmax(320px,0.85fr)]">
           <div class="space-y-6">
             <section
               class="space-y-4 rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-1)] p-5"
@@ -313,10 +324,10 @@
                   class="flex items-center gap-2 text-sm font-semibold text-[var(--color-text-primary)]"
                 >
                   <Gavel size={16} style="color: var(--color-error);" />
-                  Rule Enforcement Level
+                  Guardrails
                 </h4>
                 <p class="text-xs text-[var(--color-text-muted)]">
-                  How strictly the Critic enforces rules. Rules are always applied.
+                  Choose how strictly the Critic enforces rules. Rules are always applied.
                 </p>
               </div>
 
@@ -363,7 +374,7 @@
                   class="flex items-center gap-2 text-sm font-semibold text-[var(--color-text-primary)]"
                 >
                   <Shield size={16} class="text-purple-400" />
-                  Critic Workflow
+                  Guardrail workflow
                 </h4>
                 <p class="text-xs text-[var(--color-text-muted)]">
                   Review behavior and auto-apply controls for the Critic.
@@ -437,7 +448,7 @@
             >
               <div class="space-y-1">
                 <h4 class="text-sm font-semibold text-[var(--color-text-primary)]">
-                  Intent and Governance
+                  Workflow
                 </h4>
                 <p class="text-xs text-[var(--color-text-muted)]">
                   Control clarification, consequential plan approval, local feedback, and reversible
@@ -543,7 +554,7 @@
             >
               <div class="space-y-1">
                 <h4 class="text-sm font-semibold text-[var(--color-text-primary)]">
-                  Approval Thresholds
+                  Autonomy limits
                 </h4>
                 <p class="text-xs text-[var(--color-text-muted)]">
                   Escalate larger edits before the agent applies them.
@@ -599,7 +610,7 @@
             >
               <div class="space-y-1">
                 <h4 class="text-sm font-semibold text-[var(--color-text-primary)]">
-                  Context Window
+                  Context & memory
                 </h4>
                 <p class="text-xs text-[var(--color-text-muted)]">
                   Everything the agent does is archived locally; stale tool outputs are collapsed
@@ -688,7 +699,7 @@
               class="space-y-4 rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-1)] p-5"
             >
               <div class="space-y-1">
-                <h4 class="text-sm font-semibold text-[var(--color-text-primary)]">Agent Memory</h4>
+                <h4 class="text-sm font-semibold text-[var(--color-text-primary)]">Memory policy</h4>
                 <p class="text-xs text-[var(--color-text-muted)]">
                   Control whether the agent can persist what it learns.
                 </p>
@@ -716,7 +727,7 @@
             >
               <div class="flex items-center gap-2 text-[var(--color-warning)]">
                 <FlaskConical size={16} />
-                <h4 class="text-sm font-semibold">Experimental Research</h4>
+                <h4 class="text-sm font-semibold">Research</h4>
               </div>
 
               <div class="space-y-3">
@@ -783,13 +794,14 @@
               class="rounded-2xl p-5"
               style="background: var(--color-surface-2); border: 1px solid var(--color-border);"
             >
-              <h4 class="text-sm font-semibold text-[var(--color-text-primary)]">
-                Manager Model Access
-              </h4>
-              <p class="mt-1 text-xs text-[var(--color-text-muted)]">
-                Restrict which models the manager can auto-route to per category. Unchecked = all
-                enabled models. Your explicit model pick in the composer always wins.
-              </p>
+              <button type="button" class="flex w-full items-start justify-between gap-4 text-left" aria-expanded={showModelAccess} onclick={() => showModelAccess = !showModelAccess}>
+                <span>
+                  <span class="block text-sm font-semibold text-[var(--color-text-primary)]">Routing access</span>
+                  <span class="mt-1 block text-xs text-[var(--color-text-muted)]">Restrict auto-routing by category. Your explicit composer choice always wins.</span>
+                </span>
+                <ChevronRight size={16} class="shrink-0 text-[var(--color-text-muted)] transition-transform {showModelAccess ? 'rotate-90' : ''}" />
+              </button>
+              {#if showModelAccess}
               <div class="mt-4 space-y-5">
                 {#each MODEL_ACCESS_CATEGORIES as cat (cat.id)}
                   <div
@@ -841,6 +853,7 @@
                   </div>
                 {/each}
               </div>
+              {/if}
             </section>
 
             <!-- Per-group standing guidance for the manager -->
@@ -929,6 +942,7 @@
               </div>
             </section>
           </div>
+        </div>
         </div>
       </div>
     {:else if agentSettingsStore.activeTab === 'skills'}

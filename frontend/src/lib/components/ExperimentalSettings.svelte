@@ -1,221 +1,68 @@
 <script lang="ts">
-  import { experimentalStore, FEATURE_METADATA, FEATURE_CATEGORIES } from "$lib/stores/experimental.svelte";
-  import { toastStore } from "$lib/stores/toast.svelte";
-  import { 
-    FlaskConical, 
-    Search,
-    RefreshCw,
-    AlertTriangle,
-    Check,
-    X,
-    Zap,
-    Beaker,
-    Clock,
-    Shield,
-    Cpu,
-    Database,
-    Layers,
-    MessageSquare,
-    Lock,
-    Terminal,
-    Settings2
-  } from "lucide-svelte";
-  import { onMount } from "svelte";
+  import { onMount } from 'svelte';
+  import { experimentalStore, FEATURE_METADATA } from '$lib/stores/experimental.svelte';
+  import SettingsSwitch from './SettingsSwitch.svelte';
+  import SettingsPageIntro from './SettingsPageIntro.svelte';
+  import { RefreshCw, FlaskConical, Shield, Terminal, Cpu, Beaker, Zap } from 'lucide-svelte';
 
-  // Load data on mount
-  onMount(() => {
-    void experimentalStore.loadAll();
-  });
+  onMount(() => void experimentalStore.loadAll());
 
-  // Category icons
   const categoryIcons: Record<string, any> = {
     Billing: Zap,
-    Database: Database,
-    Reliability: Shield,
     Processes: Terminal,
     Performance: Cpu,
-    UX: Settings2,
     AI: Beaker,
-    Integrations: Layers,
-    Security: Lock,
   };
-
-  // Group features by category for display
-  const groupedFeatures = $derived(experimentalStore.filteredFeatures.reduce((acc, feature) => {
-    if (!acc[feature.category]) acc[feature.category] = [];
-    acc[feature.category].push(feature);
-    return acc;
+  const groupedFeatures = $derived(FEATURE_METADATA.reduce((groups, feature) => {
+    (groups[feature.category] ??= []).push(feature);
+    return groups;
   }, {} as Record<string, typeof FEATURE_METADATA>));
-
-  const sortedCategories = $derived(Object.keys(groupedFeatures).sort());
+  const categories = $derived(Object.keys(groupedFeatures).sort());
 
   function toggleFeature(key: keyof typeof experimentalStore.features) {
-    const meta = FEATURE_METADATA.find(f => f.key === key);
-    if (meta?.status === "coming-soon") {
-      toastStore.info(`${meta.label} is coming soon!`);
-      return;
-    }
     experimentalStore.toggleFeature(key);
   }
 </script>
 
-<div class="flex h-full min-h-0 min-w-0 flex-col gap-4">
-  <!-- Intro Banner -->
-  <div class="flex items-start gap-3 p-3 rounded-lg" style="background: var(--color-surface-1); border: 1px solid var(--color-border);">
-    <Beaker size={16} class="shrink-0 mt-0.5" style="color: var(--color-accent);" />
-    <div class="flex-1 min-w-0">
-      <p class="text-[11px] font-medium" style="color: var(--color-text-primary);">Advanced Settings</p>
-      <p class="text-[10px] mt-0.5" style="color: var(--color-text-muted);">
-        Tune power-user behavior without maturity labels getting in the way.
-      </p>
-    </div>
-  </div>
-
-  <!-- Search & Filter Bar -->
-  <div class="flex flex-col gap-2">
-    <!-- Search -->
-    <div class="relative">
-      <Search size={14} class="absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" style="color: var(--color-text-muted);" />
-      <input
-        type="text"
-        placeholder="Search advanced settings..."
-        value={experimentalStore.searchQuery}
-        oninput={(e) => experimentalStore.setSearchQuery(e.currentTarget.value)}
-        class="w-full pl-9 pr-3 py-2 text-xs rounded-lg border"
-        style="background: var(--color-surface-0); border-color: var(--color-border); color: var(--color-text-primary);"
-      />
-      {#if experimentalStore.searchQuery}
-        <button
-          class="absolute right-2 top-1/2 -translate-y-1/2 p-1 rounded"
-          style="color: var(--color-text-muted);"
-          onclick={() => experimentalStore.setSearchQuery("")}
-        >
-          <X size={12} />
-        </button>
-      {/if}
-    </div>
-
-    <!-- Category Pills -->
-    <div class="flex flex-wrap gap-1">
-      <button
-        class="px-2 py-1 text-[10px] rounded-full transition-colors"
-        style="background: {experimentalStore.selectedCategory === 'All' ? 'var(--color-accent)' : 'var(--color-surface-0)'};
-               color: {experimentalStore.selectedCategory === 'All' ? 'white' : 'var(--color-text-muted)'};
-               border: 1px solid {experimentalStore.selectedCategory === 'All' ? 'var(--color-accent)' : 'var(--color-border)'};"
-        onclick={() => experimentalStore.setSelectedCategory("All")}
-      >
-        All ({FEATURE_METADATA.length})
-      </button>
-      {#each FEATURE_CATEGORIES as category}
-        {@const count = FEATURE_METADATA.filter(f => f.category === category).length}
-        <button
-          class="px-2 py-1 text-[10px] rounded-full transition-colors"
-          style="background: {experimentalStore.selectedCategory === category ? 'var(--color-accent)' : 'var(--color-surface-0)'};
-                 color: {experimentalStore.selectedCategory === category ? 'white' : 'var(--color-text-muted)'};
-                 border: 1px solid {experimentalStore.selectedCategory === category ? 'var(--color-accent)' : 'var(--color-border)'};"
-          onclick={() => experimentalStore.setSelectedCategory(category)}
-        >
-          {category} ({count})
-        </button>
-      {/each}
-    </div>
-  </div>
-
-  <!-- Stats -->
-  <div class="flex items-center justify-between text-[10px]" style="color: var(--color-text-muted);">
-    <span>
-      {experimentalStore.enabledCount} of {FEATURE_METADATA.length} enabled
+<div class="flex h-full min-h-0 flex-col overflow-hidden">
+  <SettingsPageIntro title="Advanced controls" description="Power controls for runtime behavior. Changes are saved immediately.">
+    <span class="rounded-full bg-[var(--color-surface-3)] px-2.5 py-1 text-[10px] text-[var(--color-text-muted)]">
+      {experimentalStore.enabledCount} active
     </span>
-    {#if experimentalStore.searchQuery}
-      <span>
-        {experimentalStore.filteredFeatures.length} results
-      </span>
-    {/if}
-  </div>
+  </SettingsPageIntro>
 
-  <!-- Feature List -->
-  <div class="flex-1 min-h-0 space-y-4 overflow-y-auto pr-1">
-    {#if experimentalStore.filteredFeatures.length === 0}
-      <div class="text-center py-8">
-        <FlaskConical size={32} class="mx-auto mb-2 opacity-30" style="color: var(--color-text-muted);" />
-        <p class="text-xs" style="color: var(--color-text-muted);">No features found</p>
-        <p class="text-[10px] mt-1" style="color: var(--color-text-muted);">Try a different search term</p>
-      </div>
-    {:else}
-      {#each sortedCategories as category}
-        {@const features = groupedFeatures[category]}
-        {@const Icon = categoryIcons[category] || FlaskConical}
-        <div class="space-y-2">
-          <!-- Category Header -->
-          <div class="flex items-center gap-2 sticky top-0 py-1" style="background: var(--color-surface-1);">
-            <Icon size={12} style="color: var(--color-text-muted);" />
-            <span class="text-[10px] font-medium uppercase tracking-wide" style="color: var(--color-text-muted);">
-              {category}
-            </span>
-            <span class="text-[9px] px-1.5 rounded-full" style="background: var(--color-surface-0); color: var(--color-text-muted);">
-              {features.length}
-            </span>
+  <div class="min-h-0 flex-1 overflow-y-auto p-5">
+    <div class="mx-auto max-w-5xl space-y-6">
+      {#each categories as category}
+        {@const Icon = categoryIcons[category] ?? Shield}
+        <section>
+          <div class="mb-2 flex items-center gap-2 px-1">
+            <Icon size={14} style="color: var(--color-text-muted);" />
+            <h4 class="text-xs font-semibold uppercase tracking-wide text-[var(--color-text-muted)]">{category}</h4>
           </div>
-
-          <!-- Features -->
-          <div class="grid gap-3 xl:grid-cols-2">
-            {#each features as feature}
-              {@const isEnabled = experimentalStore.features[feature.key]}
-              <div 
-                class="flex h-full items-start gap-3 rounded-xl p-3 transition-colors"
-                style="background: var(--color-surface-0); border: 1px solid {isEnabled ? 'var(--color-accent)' : 'var(--color-border)'};
-                         opacity: {feature.status === 'coming-soon' ? 0.6 : 1};"
-              >
-                <!-- Checkbox -->
-                <button
-                  class="shrink-0 w-5 h-5 rounded border flex items-center justify-center transition-colors mt-0.5"
-                  style="background: {isEnabled ? 'var(--color-accent)' : 'transparent'};
-                             border-color: {isEnabled ? 'var(--color-accent)' : 'var(--color-border)'};"
-                  onclick={() => toggleFeature(feature.key)}
-                  disabled={feature.status === "coming-soon"}
-                  aria-label="Toggle {feature.label}"
-                >
-                  {#if isEnabled}
-                    <Check size={12} color="white" />
-                  {/if}
-                </button>
-
-                <!-- Content -->
-                <div class="flex-1 min-w-0">
-                  <div class="flex items-center gap-2 flex-wrap">
-                    <span class="text-xs font-medium" style="color: var(--color-text-primary);">
-                      {feature.label}
-                    </span>
-                    {#if feature.requiresRestart}
-                      <span 
-                        class="text-[9px] px-1.5 py-0.5 rounded-full"
-                        style="background: rgba(59, 130, 246, 0.2); color: #3b82f6;"
-                      >
-                        Requires restart
-                      </span>
-                    {/if}
-                  </div>
-                  <p class="text-[10px] mt-1" style="color: var(--color-text-muted); line-height: 1.4;">
-                    {feature.description}
-                  </p>
-                </div>
+          <div class="divide-y divide-[var(--color-border)] rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-1)] px-4">
+            {#each groupedFeatures[category] as feature (feature.key)}
+              {@const unavailable = feature.status === 'coming-soon'}
+              <div class:opacity-50={unavailable}>
+                <SettingsSwitch
+                  checked={Boolean(experimentalStore.features[feature.key])}
+                  label={feature.label}
+                  description={`${feature.description}${feature.requiresRestart ? ' Restart Koryphaios to apply.' : ''}${unavailable ? ' This control is not available yet.' : ''}`}
+                  disabled={unavailable}
+                  onchange={() => toggleFeature(feature.key)}
+                  compact
+                />
               </div>
             {/each}
           </div>
-        </div>
+        </section>
       {/each}
-    {/if}
-  </div>
 
-  <!-- Footer -->
-  <div class="shrink-0 pt-3 border-t flex flex-wrap items-center justify-between gap-2" style="border-color: var(--color-border);">
-    <button
-      class="flex items-center gap-1.5 text-[10px] transition-colors hover:opacity-80"
-      style="color: var(--color-text-muted);"
-      onclick={() => experimentalStore.resetToDefaults()}
-    >
-      <RefreshCw size={11} /> Reset to defaults
-    </button>
-    
+      <div class="flex justify-end border-t border-[var(--color-border)] pt-4">
+        <button type="button" onclick={() => experimentalStore.resetToDefaults()} class="flex items-center gap-2 rounded-lg px-3 py-2 text-xs text-[var(--color-text-muted)] transition-colors hover:bg-red-500/10 hover:text-red-400">
+          <RefreshCw size={14} /> Reset to defaults
+        </button>
+      </div>
+    </div>
   </div>
 </div>

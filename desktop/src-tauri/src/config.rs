@@ -238,6 +238,13 @@ impl std::error::Error for ConfigError {}
 /// Read the backend's `.active-port.json` file to discover the actual port
 /// it bound to (may differ from the config default when EADDRINUSE caused
 /// a fallback). Returns `(host, port)` if the file exists and is fresh.
+pub fn read_active_port_public() -> Option<(String, u16)> {
+    read_active_port()
+}
+
+/// Read the backend's `.active-port.json` file to discover the actual port
+/// it bound to (may differ from the config default when EADDRINUSE caused
+/// a fallback). Returns `(host, port)` if the file exists and is fresh.
 fn read_active_port() -> Option<(String, u16)> {
     use std::time::{SystemTime, UNIX_EPOCH};
 
