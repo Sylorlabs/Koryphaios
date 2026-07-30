@@ -694,7 +694,10 @@ export class KoryManager {
       const changes = this.state.getChanges(sessionId);
       if (changes.length > 0) this.emitWSMessage(sessionId, 'session.changes', { changes });
     } catch (err) {
-      koryLog.error({ sessionId, err }, 'Error in processTask');
+      const errDetail = err instanceof Error
+        ? { message: err.message, name: err.name, stack: err.stack, cause: err.cause }
+        : { raw: String(err), typeof: typeof err };
+      koryLog.error({ sessionId, err, errDetail }, 'Error in processTask');
       await this.updateWorkflowState(sessionId, 'error');
       this.emitError(sessionId, `Error: ${String(err)}`);
     } finally {
@@ -1477,7 +1480,10 @@ export class KoryManager {
             'Turn completed',
           );
         } catch (err: unknown) {
-          koryLog.error({ err }, 'Error in processManagerTurn');
+          const errDetail = err instanceof Error
+            ? { message: err.message, name: err.name, stack: err.stack, cause: err.cause }
+            : { raw: String(err), typeof: typeof err };
+          koryLog.error({ err, errDetail }, 'Error in processManagerTurn');
           if (err instanceof DOMException && err.name === 'AbortError') {
             stoppedByUser = true;
             break;
