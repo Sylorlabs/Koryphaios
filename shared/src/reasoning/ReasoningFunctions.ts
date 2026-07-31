@@ -141,6 +141,23 @@ export function normalizeReasoningLevel(
       return level;
     }
 
+    // Gateway / hosted providers enriched via models.dev (togetherai, fireworks,
+    // cerebras, deepinfra, etc.): reasoning tiers come from per-model metadata.
+    // The picker only offers levels the model declares, so pass through
+    // untouched — the OpenAIProvider clamps to the model's real capability.
+    // Bedrock uses the Anthropic wire format and is handled by AnthropicProvider.
+    const MODEL_DEV_ENRICHED_PROVIDERS = [
+      'togetherai', 'cerebras', 'fireworks', 'huggingface', 'baseten',
+      'cloudflare', 'vercel', 'ollama', 'ollamacloud', 'minimax', 'moonshot',
+      'nebius', 'venice', 'deepinfra', 'scaleway', 'ovhcloud', 'stackit',
+      'zai', 'zenmux', 'gitlab', 'mistralai', 'cohere', 'perplexity',
+      'hyperbolic', 'stepfun', 'alibaba', 'helicone', 'nvidia', 'friendliai',
+      'requesty', 'aihubmix', '302ai', 'bedrock',
+    ];
+    if (MODEL_DEV_ENRICHED_PROVIDERS.includes(provider)) {
+      return level;
+    }
+
     // OpenAI / Anthropic / Groq / xAI / Azure / OpenRouter / Copilot (Effort-based)
     if (
       ['openai', 'anthropic', 'groq', 'xai', 'azure', 'openrouter', 'copilot', 'kimicode'].includes(provider)

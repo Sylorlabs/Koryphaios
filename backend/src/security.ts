@@ -425,7 +425,6 @@ const VALID_PROVIDERS = new Set<string>([
   'deepseek',
   'deepinfra',
   'codex-auth',
-  'kimicode-auth',
   'fireworks',
   'gitlab',
   'huggingface',

@@ -137,8 +137,7 @@ const PROVIDER_LABEL_FALLBACK: Record<string, string> = {
   'codex-auth': 'OpenAI Codex',
   grok: 'Grok Build',
   jules: 'Google Jules (cloud)',
-  kimicode: 'Kimi Code (CLI)',
-  'kimicode-auth': 'Kimi Code (Auth)',
+  kimicode: 'Kimi Code',
   moonshot: 'Moonshot AI / Kimi API',
   mistral: 'Mistral AI',
 };
@@ -150,7 +149,6 @@ const TOKEN_PLACEHOLDERS: Record<string, string> = {
   google: 'Gemini API key',
   aistudio: 'Gemini API key (AI Studio)',
   kimicode: 'Auth with Kimi Code',
-  'kimicode-auth': 'Kimi API key',
   azure: 'Bearer token',
 };
 

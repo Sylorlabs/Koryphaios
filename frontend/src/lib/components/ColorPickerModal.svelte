@@ -146,7 +146,6 @@
     const size = wheelSize;
     const radius = size / 2;
     const cx = radius, cy = radius;
-    const innerRadius = radius * 0.18; // small hole in the middle
     const imageData = ctx.createImageData(size, size);
     const data = imageData.data;
     for (let y = 0; y < size; y++) {
@@ -155,13 +154,13 @@
         const dy = y - cy;
         const dist = Math.sqrt(dx * dx + dy * dy);
         const idx = (y * size + x) * 4;
-        if (dist > radius || dist < innerRadius) {
+        if (dist > radius) {
           data[idx + 3] = 0;
           continue;
         }
         let h = (Math.atan2(dy, dx) * 180) / Math.PI;
         if (h < 0) h += 360;
-        const s = Math.min(1, (dist - innerRadius) / (radius - innerRadius));
+        const s = Math.min(1, dist / radius);
         const [r, g, b] = hsvToRgb(h, s, val);
         data[idx] = r;
         data[idx + 1] = g;
@@ -198,13 +197,12 @@
     const x = clientX - rect.left - rect.width / 2;
     const y = clientY - rect.top - rect.height / 2;
     const radius = rect.width / 2;
-    const innerRadius = radius * 0.18;
     let dist = Math.sqrt(x * x + y * y);
-    dist = Math.min(radius, Math.max(innerRadius, dist));
+    dist = Math.min(radius, Math.max(0, dist));
     let h = (Math.atan2(y, x) * 180) / Math.PI;
     if (h < 0) h += 360;
     hue = h;
-    sat = (dist - innerRadius) / (radius - innerRadius);
+    sat = dist / radius;
   }
 
   function updateFromBar(clientY: number) {
@@ -300,9 +298,16 @@
   }
 
   function reset() {
-    const cur = theme.accents[0];
-    theme.setAccent(cur.id);
-    onClose();
+    // Reset the picker to the default gold accent without closing the modal
+    const defaultAccent = theme.accents[0]; // gold
+    const rgb = hexToRgb(defaultAccent.color);
+    if (rgb) {
+      const [h, s, v] = rgbToHsv(rgb[0], rgb[1], rgb[2]);
+      hue = h; sat = s; val = v;
+    }
+    hexInput = defaultAccent.color.toUpperCase();
+    hoverAuto = true;
+    hoverHex = deriveHover(defaultAccent.color).toUpperCase();
   }
 
   function handleKey(e: KeyboardEvent) {
@@ -319,8 +324,7 @@
   // Pointer position indicator on the wheel
   let indicator = $derived.by(() => {
     const radius = wheelSize / 2;
-    const innerRadius = radius * 0.18;
-    const dist = innerRadius + sat * (radius - innerRadius);
+    const dist = sat * radius;
     const rad = (hue * Math.PI) / 180;
     return { x: radius + dist * Math.cos(rad), y: radius + dist * Math.sin(rad) };
   });
@@ -482,34 +486,33 @@
             <span class="text-[10px] font-bold uppercase tracking-wider" style="color: var(--color-text-muted);">Hover Color</span>
             <button
               type="button"
-              class="text-[10px] px-2 py-1 rounded-md border transition-colors"
+              class="text-[10px] px-2 py-1 rounded-md border transition-colors flex items-center gap-1"
               style="background: var(--color-surface-2); border-color: var(--color-border); color: {hoverAuto ? 'var(--color-accent)' : 'var(--color-text-secondary)'};"
-              onclick={() => (hoverAuto = !hoverAuto)}
+              onclick={() => {
+                hoverAuto = !hoverAuto;
+                if (hoverAuto) hoverHex = deriveHover(currentHex).toUpperCase();
+              }}
+              title="Toggle auto-derive from main color"
             >
               {hoverAuto ? 'Auto' : 'Manual'}
             </button>
           </div>
+          <div class="flex items-center gap-3">
+            <div class="w-10 h-10 rounded-lg border shadow-inner shrink-0" style="background:{effectiveHover};border-color: var(--color-border);"></div>
+            <input
+              type="text"
+              bind:value={hoverHex}
+              onfocus={() => { typingHover = true; hoverAuto = false; }}
+              onblur={() => { typingHover = false; commitHoverHex(); }}
+              onkeydown={(e) => { if (e.key === 'Enter') { (e.target as HTMLInputElement).blur(); } }}
+              class="flex-1 px-3 py-2 rounded-lg text-sm font-mono border outline-none transition-colors"
+              style="background: var(--color-surface-2); border-color: var(--color-border); color: var(--color-text-primary);"
+              maxlength="7"
+              spellcheck="false"
+            />
+          </div>
           {#if hoverAuto}
-            <div class="flex items-center gap-3">
-              <div class="w-10 h-10 rounded-lg border" style="background:{effectiveHover};border-color: var(--color-border);"></div>
-              <span class="text-sm font-mono" style="color: var(--color-text-secondary);">{effectiveHover}</span>
-              <span class="text-[10px] ml-auto" style="color: var(--color-text-muted);">Derived from main (+35% toward white)</span>
-            </div>
-          {:else}
-            <div class="flex items-center gap-3">
-              <div class="w-10 h-10 rounded-lg border" style="background:{effectiveHover};border-color: var(--color-border);"></div>
-              <input
-                type="text"
-                bind:value={hoverHex}
-                onfocus={() => (typingHover = true)}
-                onblur={() => { typingHover = false; commitHoverHex(); }}
-                onkeydown={(e) => { if (e.key === 'Enter') { (e.target as HTMLInputElement).blur(); } }}
-                class="flex-1 px-3 py-2 rounded-lg text-sm font-mono border outline-none"
-                style="background: var(--color-surface-2); border-color: var(--color-border); color: var(--color-text-primary);"
-                maxlength="7"
-                spellcheck="false"
-              />
-            </div>
+            <p class="text-[10px] mt-1.5" style="color: var(--color-text-muted);">Auto-derived from main (+35% toward white). Click the hex field or toggle to Manual to customize.</p>
           {/if}
         </div>
 

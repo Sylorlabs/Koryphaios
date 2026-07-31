@@ -46,6 +46,7 @@ import { whichBinary } from './cli-detection';
 import { providerLog } from '../logger';
 import { buildSoftJail, wrapCommand } from '../collaboration/sandbox-runner';
 import { AntigravityModels } from './models/antigravity';
+import { getCliBridge } from './cli-bridges';
 
 const AGY_TIMEOUT_MS = 300_000;
 const MODELS_CACHE_TTL_MS = 5 * 60_000;
@@ -889,8 +890,19 @@ const HARNESS_SYSTEM_NOTE =
 
 function buildPrompt(systemPrompt: string | undefined, messages: ProviderMessage[]): string {
   const lines: string[] = [];
+  // Use the AntigravityCliBridge's harness note for consistency (Phase 1).
+  const agyBridge = getCliBridge('antigravity');
+  const bridgeConfig = agyBridge?.buildAgentConfig({
+    provider: 'antigravity',
+    role: 'manager',
+    sandbox: undefined,
+    workingDirectory: process.cwd(),
+    systemPrompt: systemPrompt ?? '',
+    tools: [],
+  });
+  const harnessNote = bridgeConfig?.systemInstructions?.[1] ?? HARNESS_SYSTEM_NOTE;
   lines.push(
-    systemPrompt?.trim() ? `${systemPrompt.trim()}\n\n${HARNESS_SYSTEM_NOTE}` : HARNESS_SYSTEM_NOTE,
+    systemPrompt?.trim() ? `${systemPrompt.trim()}\n\n${harnessNote}` : harnessNote,
     '',
   );
   const turns = messages.filter((m) => m.role !== 'system');

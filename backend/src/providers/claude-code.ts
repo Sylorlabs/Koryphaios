@@ -24,6 +24,8 @@ import {
 import { homedir, tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { whichBinary } from './cli-detection';
+import { getCliBridge } from './cli-bridges';
+import { ClaudeCodeCliBridge } from './cli-bridges';
 import {
   type Provider,
   type ProviderContentBlock,
@@ -677,12 +679,31 @@ export class ClaudeCodeProvider implements Provider {
     // full access. Tool gating here is the cross-platform floor; the OS jail
     // (bubblewrap, applied at spawn below) is the real containment. Note
     // --allowedTools only pre-approves; --disallowedTools hard-blocks.
+    // The ClaudeCodeCliBridge translates the Kory SandboxPolicy + role into
+    // the CLI's tool-name allow/deny lists (Phase 1 deep-integration).
     const sandbox = request.sandbox;
-    const disallowed = ['Task', 'Agent'];
-    if (sandbox && !sandbox.allowEdits)
-      disallowed.push('Edit', 'Write', 'MultiEdit', 'NotebookEdit');
-    if (sandbox && !sandbox.allowShell) disallowed.push('Bash');
-    if (sandbox && !sandbox.allowWebSearch) disallowed.push('WebFetch', 'WebSearch');
+    const claudeBridge = getCliBridge('claude') as ClaudeCodeCliBridge | null;
+    const bridgeCtx = {
+      provider: 'claude' as const,
+      role: request.harnessRole ?? 'manager',
+      sandbox,
+      workingDirectory: request.workingDirectory?.trim() || process.cwd(),
+      sessionId: request.sessionId,
+      systemPrompt: request.systemPrompt ?? '',
+      tools: request.tools ?? [],
+    };
+    const bridgeScopes = claudeBridge?.buildPermissionScopes(bridgeCtx);
+    const bridgeConfig = claudeBridge?.buildAgentConfig(bridgeCtx);
+    const disallowed = bridgeScopes?.deny ?? (() => {
+      // Fallback to the inline computation if the bridge isn't available.
+      const d = ['Task', 'Agent'];
+      if (sandbox && !sandbox.allowEdits)
+        d.push('Edit', 'Write', 'MultiEdit', 'NotebookEdit');
+      if (sandbox && !sandbox.allowShell) d.push('Bash');
+      if (sandbox && !sandbox.allowWebSearch) d.push('WebFetch', 'WebSearch');
+      return d;
+    })();
+    const allowedTools = bridgeScopes?.allow?.join(',') ?? ALLOWED_TOOLS;
 
     const args = [
       '-p',
@@ -697,7 +718,7 @@ export class ClaudeCodeProvider implements Provider {
       '--permission-mode',
       request.harnessRole === 'critic' ? 'plan' : 'acceptEdits',
       '--allowedTools',
-      ALLOWED_TOOLS,
+      allowedTools,
       '--disallowedTools',
       disallowed.join(','),
     ];
@@ -751,9 +772,45 @@ export class ClaudeCodeProvider implements Provider {
     args.push(
       '--append-system-prompt',
       request.systemPrompt?.trim()
-        ? `${request.systemPrompt}\n\n${HARNESS_SYSTEM_NOTE}${effortNote}`
-        : `${HARNESS_SYSTEM_NOTE}${effortNote}`,
+        ? `${request.systemPrompt}\n\n${bridgeConfig?.systemInstructions?.[0] ?? HARNESS_SYSTEM_NOTE}${effortNote}`
+        : `${bridgeConfig?.systemInstructions?.[0] ?? HARNESS_SYSTEM_NOTE}${effortNote}`,
     );
+
+    // Write the kory MCP server config to the isolated Claude home so the CLI
+    // discovers it on startup. This is how the CLI gets access to kory__ tools.
+    const mcpConfigs = claudeBridge?.buildMcpConfig(bridgeCtx);
+    if (mcpConfigs && mcpConfigs.length > 0) {
+      try {
+        const mcpConfigPath = join(env.CLAUDE_CONFIG_DIR!, '.claude.json');
+        const existing = existsSync(mcpConfigPath)
+          ? JSON.parse(readFileSync(mcpConfigPath, 'utf-8'))
+          : {};
+        existing.mcpServers = existing.mcpServers ?? {};
+        for (const srv of mcpConfigs) {
+          existing.mcpServers[srv.name] = {
+            command: srv.command,
+            args: srv.args,
+            env: srv.env,
+          };
+        }
+        writeFileSync(mcpConfigPath, JSON.stringify(existing, null, 2));
+      } catch (mcpErr) {
+        providerLog.warn({ err: mcpErr }, 'Failed to write kory MCP config for Claude Code');
+      }
+    }
+
+    // Write hooks config to the isolated Claude home — this enforces native
+    // tool blocking at the CLI level (defense in depth before the MCP layer).
+    const hookConfigs = claudeBridge?.buildHooks(bridgeCtx);
+    if (hookConfigs && hookConfigs.length > 0 && claudeBridge) {
+      try {
+        const hooksJson = claudeBridge.serializeHooks(hookConfigs);
+        const hooksPath = join(env.CLAUDE_CONFIG_DIR!, 'hooks.json');
+        writeFileSync(hooksPath, hooksJson);
+      } catch (hookErr) {
+        providerLog.warn({ err: hookErr }, 'Failed to write hooks config for Claude Code');
+      }
+    }
 
     // Remote sandbox, two stacked layers:
     //   1. Soft jail (ALL platforms): scrub the host's other secrets from the

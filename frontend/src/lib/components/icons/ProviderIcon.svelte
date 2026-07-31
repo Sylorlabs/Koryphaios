@@ -48,7 +48,6 @@
     baichuan: ['baichuan'],
     minimax: ['minimax'],
     kimicode: ['kimicode', 'kimi'],
-    'kimicode-auth': ['kimicode', 'kimi'],
     moonshot: ['moonshot'],
     stepfun: ['stepfun'],
     fireworks: ['fireworks'],
@@ -74,7 +73,7 @@
     // Catalog keys whose public asset uses a different brand slug.
     blackforestlabs: ['bfl'],
     'novita-ai': ['novita'],
-    llama: ['meta-brand', 'meta'],
+    llama: ['meta', 'meta-brand'],
     'github-models': ['github'],
     cline: ['cline'],
     cerebras: ['cerebras'],
@@ -96,41 +95,10 @@
     cursor: ['cursor'],
   };
 
-  const themeAdaptiveSlugs = new Set([
-    'openai',
-    'anthropic',
-    'claude',
-    'claudecode',
-    'xai',
-    'deepseek',
-    'mistral',
-    'moonshot',
-    'kimicode',
-    'cohere',
-    'perplexity',
-    'together',
-    'groq',
-    'openrouter',
-    'opencode',
-    'replicate',
-    'ollama',
-    'codex',
-    'copilot',
-    'github',
-    'gitlab',
-    'vercel',
-    'zai',
-    'baseten',
-    'nebius',
-    'lmstudio',
-    'zenmux',
-    'grok',
-    'cursor',
-    'cline',
-    'devin',
-    'cerebras',
-  ]);
-
+  // All monochrome (currentColor) SVGs render black inside an <img> tag
+  // because the SVG's own context has no inherited color. They must be
+  // inverted on dark backgrounds, so every monochrome candidate is
+  // theme-adaptive by default. Color variants keep their original colors.
   const monochromeFirstProviders = new Set([
     'zai',
     'moonshot',
@@ -191,7 +159,12 @@
 
   const getIconCandidates = (p: string): IconCandidate[] => {
     const normalized = p.toLowerCase();
-    const slugs = getSlugCandidates(normalized);
+    const slugs = getSlugCandidates(normalized).filter(
+      // Wordmark variants (-brand, -text) have wide, non-square viewBoxes
+      // that render as a tiny sliver inside a square icon container. Only
+      // the compact icon variants are suitable for small provider badges.
+      (slug) => !slug.endsWith('-brand') && !slug.endsWith('-text'),
+    );
     const candidates: IconCandidate[] = [];
     const seen = new Set<string>();
     const preferMonochrome = monochromeFirstProviders.has(normalized);
@@ -218,9 +191,11 @@
 
     const pushMonochromeCandidates = () => {
       for (const slug of slugs) {
-        const themeAdaptive = themeAdaptiveSlugs.has(slug) || themeAdaptiveSlugs.has(normalized);
-        pushCandidate(`/provider-icons/lobehub/${slug}.svg`, themeAdaptive);
-        pushCandidate(`/provider-icons/${slug}.svg`, themeAdaptive);
+        // Every monochrome SVG uses fill="currentColor", which resolves to
+        // black inside an <img> tag. Mark them all as theme-adaptive so the
+        // dark-mode CSS filter inverts them to white.
+        pushCandidate(`/provider-icons/lobehub/${slug}.svg`, true);
+        pushCandidate(`/provider-icons/${slug}.svg`, true);
       }
     };
 

@@ -49,6 +49,10 @@ const PROFILE_DEFINITIONS: ProfileDefinition[] = [
   { provider: 'cline', command: 'cline', directoryPrefix: '.cline', authFiles: ['data/secrets.json'] },
   { provider: 'antigravity', command: 'agy', directoryPrefix: '.gemini', authFiles: ['antigravity-cli/auth.json'] },
   { provider: 'devin', command: 'devin', directoryPrefix: '.local/share/devin', authFiles: ['credentials.toml'] },
+  // Kimi Code stores its OAuth device-flow credentials under ~/.kimi (the
+  // official kimi CLI's home). Sibling homes like ~/.kimi2 are discovered
+  // too, so users with multiple Kimi accounts can pick + order them.
+  { provider: 'kimicode', command: 'kimi', directoryPrefix: '.kimi', authFiles: ['credentials/kimi-code.json'] },
 ];
 
 function decodeJwt(token: unknown): Record<string, any> | null {
@@ -92,7 +96,12 @@ function identityFromAuth(path: string): Pick<DiscoveredCliAccount, 'email' | 'p
     data.subscription?.plan,
     data.account?.plan,
   );
-  const expiresAt = typeof claims.exp === 'number' ? claims.exp * 1000 : null;
+  // Some credential stores (e.g. Kimi Code's kimi-code.json) persist a
+  // file-level expires_at in milliseconds alongside the JWT. Prefer the
+  // JWT claim when present (it is the authority), then fall back to the
+  // file-level field so a non-JWT or stripped token still reports expiry.
+  const fileExpiresAt = typeof data.expires_at === 'number' ? data.expires_at : null;
+  const expiresAt = typeof claims.exp === 'number' ? claims.exp * 1000 : fileExpiresAt;
   return {
     email,
     plan,

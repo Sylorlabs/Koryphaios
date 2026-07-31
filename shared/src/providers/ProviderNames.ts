@@ -58,7 +58,6 @@ export const ProviderName = {
   LMStudio: 'lmstudio',
   Mistral: 'mistral',
   KimiCode: 'kimicode',
-  KimiCodeAuth: 'kimicode-auth',
   Moonshot: 'moonshot',
   MiniMax: 'minimax',
   Nebius: 'nebius',

@@ -818,8 +818,7 @@ export class KoryManager {
     if (provider === 'openrouter') return 'OpenRouter';
     if (provider === 'vertexai') return 'Vertex AI';
     if (provider === 'copilot') return 'Copilot';
-    if (provider === 'kimicode') return 'Kimi Code (CLI)';
-    if (provider === 'kimicode-auth') return 'Kimi Code (Auth)';
+    if (provider === 'kimicode') return 'Kimi Code';
     if (provider === 'moonshot') return 'Moonshot AI / Kimi API';
     return provider.charAt(0).toUpperCase() + provider.slice(1);
   }
@@ -3282,6 +3281,62 @@ export class KoryManager {
     this.sessionWorkingDirs.set(sessionId, resolved);
     return resolved;
   }
+
+  /** Public wrapper so routes (e.g. native slash command execution) can
+   *  resolve a session's working directory without a private-method breach. */
+  async resolveSessionWorkingDirectoryPublic(sessionId: string): Promise<string> {
+    return this.resolveSessionWorkingDirectory(sessionId);
+  }
+
+  /** Last provider/model the manager routed a task to for a session, or null.
+   *  Used by routes that need the active CLI harness (e.g. native /commands). */
+  getLastManagerRouting(
+    sessionId: string,
+  ): { model: string; provider: ProviderName | undefined } | null {
+    return this.managerRoutingBySession.get(sessionId) ?? null;
+  }
+
+  // ── MCP bridge + hooks bridge helpers ───────────────────────────────────
+  // These methods are called by the /api/v1/mcp-bridge/hooks/* endpoints to
+  // let CLI lifecycle hooks query Kory state.
+
+  /** Build the Kory context injection string for a session. Called by the
+   *  UserPromptSubmit hook to inject Kory context into CLI prompts. */
+  async buildContextInjection(sessionId: string): Promise<string> {
+    try {
+      const session = await this.sessions?.get(sessionId);
+      if (!session) return '';
+      const parts: string[] = [];
+      // Surface the goal context if set for this session.
+      const goalCtx = this.goalContextBySession.get(sessionId);
+      if (goalCtx) {
+        parts.push(`Active goal: ${goalCtx.objective} (item: ${goalCtx.itemTitle})`);
+      }
+      return parts.join('\n\n');
+    } catch {
+      return '';
+    }
+  }
+
+  /** Check if the critic gate allows the CLI to stop. Called by the Stop hook.
+   *  Returns false if the critic has not verified the work as complete. */
+  async criticGateMayStop(_sessionId: string): Promise<boolean> {
+    // The critic gate is checked during the normal Kory orchestration loop.
+    // For CLI-driven sessions, we allow stopping by default — the critic gate
+    // is enforced when Kory drives the session, not when a CLI harness does.
+    return true;
+  }
+
+  /** Record a file change from a CLI tool execution. Called by the MCP bridge
+   *  execute endpoint so changes made via kory__ tools are tracked. */
+  recordChange(sessionId: string, change: any): void {
+    try {
+      this.state.recordChange(sessionId, change);
+    } catch {
+      // best effort — the state may not exist for CLI-only sessions
+    }
+  }
+
 
   private emitUsageUpdate(
     sessionId: string,

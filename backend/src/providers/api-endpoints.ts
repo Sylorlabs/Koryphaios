@@ -19,7 +19,6 @@ export const PROVIDER_BASE_URLS: Partial<Record<ProviderName, string>> = {
   aistudio: 'https://generativelanguage.googleapis.com/v1beta',
   deepseek: 'https://api.deepseek.com/v1',
   kimicode: 'https://api.kimi.com/coding/v1',
-  'kimicode-auth': 'https://api.kimi.com/coding/v1',
   mistral: 'https://api.mistral.ai/v1',
   moonshot: 'https://api.moonshot.ai/v1',
   groq: 'https://api.groq.com/openai/v1',
@@ -82,7 +81,6 @@ export function buildAuthHeaders(
 
     case 'openai':
     case 'kimicode':
-    case 'kimicode-auth':
     case 'groq':
     case 'xai':
     case 'openrouter':

@@ -10,10 +10,50 @@ import { providerLog } from '../logger';
 const MODELS_DEV_URL = 'https://models.dev/api.json';
 const CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 
-/** Koryphaios provider name → models.dev provider key. */
+/** Koryphaios provider name → models.dev provider key.
+ *  Used for capability enrichment (reasoning tiers, real context windows).
+ *  Only providers whose /models endpoint returns bare ids (or no /models at
+ *  all) need this — the rest get context/vision from enrichFromRemoteMetadata
+ *  and reasoning from their own static ReasoningConfig tables. */
 const PROVIDER_KEY: Record<string, string> = {
+  // OpenCode providers — /models returns bare ids only
   opencodezen: 'opencode',
   opencodego: 'opencode-go',
+  // Gateway / hosted providers — /models returns bare ids or namespaced ids
+  // that match models.dev; enrichment adds reasoning + real context windows.
+  togetherai: 'togetherai',
+  cerebras: 'cerebras',
+  fireworks: 'fireworks-ai',
+  huggingface: 'huggingface',
+  baseten: 'baseten',
+  cloudflare: 'cloudflare-ai-gateway',
+  vercel: 'vercel',
+  ollama: 'ollama-cloud',
+  ollamacloud: 'ollama-cloud',
+  minimax: 'minimax',
+  moonshot: 'moonshotai',
+  nebius: 'nebius',
+  venice: 'venice',
+  deepinfra: 'deepinfra',
+  scaleway: 'scaleway',
+  ovhcloud: 'ovhcloud',
+  stackit: 'stackit',
+  zai: 'zai',
+  zenmux: 'zenmux',
+  gitlab: 'gitlab',
+  mistralai: 'mistral',
+  cohere: 'cohere',
+  perplexity: 'perplexity',
+  hyperbolic: 'hyper',
+  stepfun: 'stepfun',
+  alibaba: 'alibaba',
+  helicone: 'helicone',
+  nvidia: 'nvidia',
+  friendliai: 'friendli',
+  requesty: 'requesty',
+  aihubmix: 'aihubmix',
+  '302ai': '302ai',
+  bedrock: 'amazon-bedrock',
 };
 
 /** Broader mapping used for PRICING lookups (capability enrichment stays
@@ -64,6 +104,12 @@ export async function warmModelsDevCache(): Promise<void> {
   }
 }
 
+/** Kick a background refresh of the models.dev catalog if stale. Safe to call
+ *  from any provider's listModels() — non-blocking, idempotent within the TTL. */
+export function refreshModelsDevCache(): void {
+  kickRefresh();
+}
+
 function kickRefresh(): void {
   if (inflight || (cache && Date.now() - fetchedAt < CACHE_TTL_MS)) return;
   inflight = true;
@@ -103,18 +149,41 @@ function levelsFromOptions(
 
 /**
  * Enrich a provider's model defs with models.dev capability data. Synchronous
- * (uses the cached catalog) and kicks a background refresh — callers get
- * enriched defs from the second listModels() call onward.
+ * against the cached catalog — callers get enriched defs once the background
+ * refresh has populated it. Does NOT trigger a refresh itself; call
+ * warmModelsDevCache() or rely on the provider's refreshModelsInBackground
+ * (which calls applyModelsDevMetadata after live discovery) to populate it.
  */
 export function applyModelsDevMetadata(providerName: string, models: ModelDef[]): ModelDef[] {
   const key = PROVIDER_KEY[providerName];
   if (!key) return models;
-  kickRefresh();
   const entries = cache?.[key]?.models;
   if (!entries) return models;
+
+  // Build a case-insensitive lookup so provider-reported ids (which may differ
+  // in casing) still match models.dev keys.
+  const entriesByLower = new Map<string, ModelsDevEntry>();
+  for (const [k, v] of Object.entries(entries)) {
+    entriesByLower.set(k.toLowerCase(), v);
+  }
+
   return models.map((m) => {
-    const bare = (m.apiModelId ?? m.id).replace(new RegExp(`^${providerName}\\.`), '');
-    const e = entries[bare];
+    const rawId = m.apiModelId ?? m.id;
+    // Strip the Koryphaios provider prefix (e.g. "opencodezen.claude-sonnet-4" → "claude-sonnet-4")
+    const bare = rawId.replace(new RegExp(`^${providerName}\\.`), '');
+    // Try: exact key, case-insensitive key, last segment after "/" (namespaced ids)
+    const candidates = [
+      bare,
+      bare.toLowerCase(),
+      bare.includes('/') ? bare.split('/').pop()! : '',
+      rawId,
+      rawId.toLowerCase(),
+    ].filter(Boolean);
+    let e: ModelsDevEntry | undefined;
+    for (const c of candidates) {
+      e = entries[c] ?? entriesByLower.get(c.toLowerCase());
+      if (e) break;
+    }
     if (!e) return m;
     const levels = levelsFromOptions(e.reasoning_options);
     const ctx = e.limit?.context;

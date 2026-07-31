@@ -70,7 +70,6 @@ export const OPENCODE_DEFAULT_BASE_URL: Partial<Record<string, string>> = {
   huggingface: 'https://router.huggingface.co/v1',
   ionet: 'https://api.intelligence.io.solutions/api/v1',
   kimicode: 'https://api.kimi.com/coding/v1',
-  'kimicode-auth': 'https://api.kimi.com/coding/v1',
   minimax: 'https://api.minimax.chat/v1',
   mistral: 'https://api.mistral.ai/v1',
   moonshot: 'https://api.moonshot.ai/v1',
@@ -116,5 +115,4 @@ export const BASE_URL_PLACEHOLDERS: Partial<Record<string, string>> = {
   llamacpp: 'http://127.0.0.1:8080/v1',
   lmstudio: 'http://localhost:1234/v1',
   kimicode: 'https://api.kimi.com/coding/v1',
-  'kimicode-auth': 'https://api.kimi.com/coding/v1',
 };

@@ -30,12 +30,14 @@ import {
   createDevinCLIAuthMarker,
   detectClineCLILogin,
   createClineCLIAuthMarker,
+  detectKimiCodeCLILogin,
 } from './auth-utils';
 import { discoverCliAccounts } from './cli-accounts';
+import { createKimiCodeAuthMarker, createKimiCodeCliMarker } from './kimicode-auth';
 
 export interface AgentCliStatus {
   /** Stable id for the CLI. */
-  id: 'claude' | 'codex' | 'antigravity' | 'grok' | 'cursor' | 'devin' | 'cline';
+  id: 'claude' | 'codex' | 'antigravity' | 'grok' | 'cursor' | 'devin' | 'cline' | 'kimi';
   displayName: string;
   /** Candidate binary names looked up on PATH. */
   binaries: string[];
@@ -53,6 +55,22 @@ export interface AgentCliStatus {
   /** Human-readable status / next step. */
   note: string;
   docsUrl: string;
+  /** Deep-integration capability flags (Phase 0). Populated lazily by each
+   *  provider's capability probe; false/0 when not yet probed. These drive
+   *  the UI's "what's wired" indicators and the bridge transport selection. */
+  capabilities?: {
+    supportsAgentConfig: boolean;
+    supportsSandbox: boolean;
+    supportsExport: boolean;
+    supportsPermissionMode: boolean;
+    supportsAcp: boolean;
+    supportsMcp: boolean;
+    supportsRules: boolean;
+    supportsSkills: boolean;
+    supportsHooks: boolean;
+    version: string | null;
+    probedAt: number;
+  };
 }
 
 /** Locate an executable on PATH without spawning a process. */
@@ -104,6 +122,14 @@ export function canAutoEnable(provider: ProviderName): boolean {
       return !!whichBinary('devin') && detectDevinCLILogin();
     case 'cline':
       return !!whichBinary('cline') && detectClineCLILogin();
+    case 'kimicode':
+      // The kimi CLI owns its own OAuth session. Koryphaios reads the stored
+      // token directly, so the binary is NOT required — a ~/.kimi session
+      // from a prior `kimi login` is enough (the user may have uninstalled
+      // the CLI but kept the credentials). The binary is still the preferred
+      // intent signal, so we check it first.
+      return detectKimiCodeCLILogin()
+        || (!!whichBinary('kimi') && discoverCliAccounts().some((account) => account.provider === 'kimicode'));
     default:
       return false;
   }
@@ -135,6 +161,14 @@ export function cliAutoEnableCreds(
       return { authToken: createDevinCLIAuthMarker() };
     case 'cline':
       return { authToken: createClineCLIAuthMarker() };
+    case 'kimicode': {
+      // Point at the first discovered ~/.kimi* profile. If none are found
+      // (e.g. only KIMI_CODE_AUTH_TOKEN is set), fall back to a managed
+      // marker so the provider still lights up and the user can sign in
+      // via the device flow.
+      const account = discoverCliAccounts().find((a) => a.provider === 'kimicode');
+      return { authToken: account ? createKimiCodeCliMarker(account.profileDir) : createKimiCodeAuthMarker() };
+    }
     default:
       return null;
   }
@@ -248,7 +282,27 @@ export function detectAgentClis(): AgentCliStatus[] {
     docsUrl: 'https://docs.cline.bot/cli',
   });
 
-  return [claude, codex, antigravity, grok, cursor, devin, cline];
+  // ── Kimi Code → `kimicode` provider. The official `kimi` CLI owns its OAuth
+  // session at ~/.kimi; Koryphaios reads the stored token directly and calls
+  // api.kimi.com/coding/v1 (no subprocess). The binary is optional — a prior
+  // `kimi login` is enough — but its presence is the strongest intent signal. ──
+  const kimiLogin = detectKimiCodeCLILogin();
+  const kimi = mk('kimi', 'Kimi Code CLI', ['kimi'], 'kimicode', {
+    loggedIn: kimiLogin,
+    authSource: kimiLogin
+      ? process.env.KIMI_CODE_AUTH_TOKEN
+        ? 'KIMI_CODE_AUTH_TOKEN'
+        : '~/.kimi/credentials/kimi-code.json'
+      : null,
+    autoEnabled: canAutoEnable('kimicode'),
+    workingNote:
+      'Kimi Code CLI detected and logged in — Koryphaios reads the stored OAuth session and calls the Kimi API directly (no subprocess).',
+    loggedOutNote:
+      'Kimi Code CLI is not logged in — run "kimi login", or sign in from Settings.',
+    docsUrl: 'https://kimi.com/docs/cli',
+  });
+
+  return [claude, codex, antigravity, grok, cursor, devin, cline, kimi];
 }
 
 function mk(

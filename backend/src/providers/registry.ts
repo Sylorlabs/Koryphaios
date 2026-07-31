@@ -148,8 +148,7 @@ function generateProviderLabel(name: string): string {
     xai: 'xAI',
     groq: 'Groq',
     'codex-auth': 'Codex Auth',
-    'kimicode-auth': 'Kimi Code (Auth)',
-    kimicode: 'Kimi Code (CLI)',
+    kimicode: 'Kimi Code',
     moonshot: 'Moonshot AI',
     mixedbread: 'Mixedbread',
     mem0: 'Mem0',
@@ -804,6 +803,18 @@ class ProviderRegistry {
             success: false,
             error:
               'Cline CLI is not signed in. Install cline and run "cline auth --provider <p> --apikey <k>".',
+          };
+        }
+        case 'kimicode': {
+          // Kimi Code is verified by confirming the auth token resolves to a
+          // live access token — either the managed device-flow session at
+          // KORY_KIMI_HOME, a discovered ~/.kimi* CLI profile, or a raw token.
+          const token = await resolveKimiCodeAccessToken(authToken);
+          if (token) return { success: true };
+          return {
+            success: false,
+            error:
+              'Kimi Code is not signed in. Run "kimi login" in your terminal, or sign in from Settings.',
           };
         }
         case 'anthropic': {

@@ -33,6 +33,7 @@ import { detectGrokCLILogin } from './auth-utils';
 import { whichBinary } from './cli-detection';
 import { providerLog } from '../logger';
 import { isModelListCacheFresh } from './model-list-cache';
+import { getCliBridge } from './cli-bridges';
 
 const GROK_STREAM_TIMEOUT_MS = 300_000;
 const DEFAULT_CLI_MODEL = GrokModels[0]?.apiModelId ?? 'grok-composer-2.5-fast';
@@ -814,8 +815,19 @@ const HARNESS_SYSTEM_NOTE =
 
 function buildPrompt(systemPrompt: string | undefined, messages: ProviderMessage[]): string {
   const lines: string[] = [];
+  // Use the GrokCliBridge's harness note for consistency (Phase 1).
+  const grokBridge = getCliBridge('grok');
+  const bridgeConfig = grokBridge?.buildAgentConfig({
+    provider: 'grok',
+    role: 'manager',
+    sandbox: undefined,
+    workingDirectory: process.cwd(),
+    systemPrompt: systemPrompt ?? '',
+    tools: [],
+  });
+  const harnessNote = bridgeConfig?.systemInstructions?.[1] ?? HARNESS_SYSTEM_NOTE;
   lines.push(
-    systemPrompt?.trim() ? `${systemPrompt.trim()}\n\n${HARNESS_SYSTEM_NOTE}` : HARNESS_SYSTEM_NOTE,
+    systemPrompt?.trim() ? `${systemPrompt.trim()}\n\n${harnessNote}` : harnessNote,
     '',
   );
   const turns = messages.filter((m) => m.role !== 'system');

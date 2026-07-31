@@ -34,7 +34,6 @@ export const ProviderNameSchema = z
     'huggingface',
     'deepinfra',
     'kimicode',
-    'kimicode-auth',
     'minimax',
     'moonshot',
     'ollama',

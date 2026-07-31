@@ -125,6 +125,7 @@ export type {
   ProviderStatusPayload,
   ProviderInfo,
   RateLimitPayload,
+  NativeCommandPayload,
 } from './websocket/WSPayloads';
 
 // ============== REST API Types ==============
