@@ -15,7 +15,7 @@ import {
 import { withRetry, withTimeoutSignal } from './utils';
 import { createUsageInterceptingFetch } from '../credit-accountant';
 import { providerLog } from '../logger';
-import { applyModelsDevMetadata } from './models-dev';
+import { applyModelsDevMetadata, refreshModelsDevCache } from './models-dev';
 import {
   enrichFromRemoteMetadata,
   isLikelyChatModelId,
@@ -56,7 +56,9 @@ export class OpenAIProvider implements Provider {
 
   /** Static catalog used until live discovery succeeds. Subclasses may override. */
   protected getModelCatalogFallback(): ModelDef[] {
-    return getModelsForProvider(this.name);
+    // Enrich with models.dev capability data (reasoning tiers, real context
+    // windows) for providers in PROVIDER_KEY — no-op for unmapped providers.
+    return applyModelsDevMetadata(this.name, getModelsForProvider(this.name));
   }
 
   /** Optional async prep (OAuth exchange, etc.) before hitting /models. */
@@ -78,7 +80,7 @@ export class OpenAIProvider implements Provider {
     if (!this.isAvailable()) return [];
     if (this.cachedModels && isModelListCacheFresh(this.lastFetch)) return this.cachedModels;
     void this.refreshModelsInBackground(fallback);
-    return this.cachedModels ?? [];
+    return this.cachedModels ?? fallback;
   }
 
   /**
@@ -140,6 +142,9 @@ export class OpenAIProvider implements Provider {
     this.refreshInProgress = (async () => {
       try {
         await this.prepareForModelDiscovery();
+        // Kick models.dev refresh early so enrichment has data by the time
+        // discovery completes (non-blocking, idempotent within TTL).
+        refreshModelsDevCache();
         const response = await withRetry(() => this.client.models.list());
         const discovered: ModelDef[] = [];
         for await (const model of response) {

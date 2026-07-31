@@ -22,6 +22,7 @@ import type {
   PermissionRequest,
   Session,
   NotificationPayload,
+  NativeCommandPayload,
 } from '@koryphaios/shared';
 import { sessionStore } from './sessions.svelte';
 import { authStore } from './auth.svelte';
@@ -154,8 +155,7 @@ function providerDisplayName(provider: string): string {
   if (provider === 'openrouter') return 'OpenRouter';
   if (provider === 'vertexai') return 'Vertex AI';
   if (provider === 'copilot') return 'Copilot';
-  if (provider === 'kimicode') return 'Kimi Code (CLI)';
-  if (provider === 'kimicode-auth') return 'Kimi Code (Auth)';
+  if (provider === 'kimicode') return 'Kimi Code';
   return provider.charAt(0).toUpperCase() + provider.slice(1);
 }
 
@@ -649,6 +649,32 @@ function handleMessage(msg: WSMessage) {
 
     case 'goals.updated': {
       goalStore.handleUpdated(msg.payload as { goal?: import('@koryphaios/shared').Goal; deletedId?: string });
+      break;
+    }
+
+    case 'native.command': {
+      // Output from a CLI provider's own /command, attributed to that harness
+      // (e.g. "Claude Code", "Devin") so the user sees the harness's reply in
+      // the feed. Chunks share a messageId and accumulate into one entry.
+      const p = msg.payload as NativeCommandPayload;
+      if (!isForActiveSession) break;
+      const agentId = `native-${p.messageId}`;
+      if (p.text) {
+        feedStore.accumulateFeedEntry({
+          timestamp: msg.timestamp,
+          type: 'content',
+          agentId,
+          agentName: p.providerLabel,
+          glowClass: '',
+          text: p.text,
+          metadata: {
+            sourceProvider: p.provider,
+            nativeCommand: p.command,
+            rawCommand: p.rawCommand,
+            isError: p.isError,
+          },
+        });
+      }
       break;
     }
 

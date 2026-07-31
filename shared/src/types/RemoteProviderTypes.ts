@@ -75,10 +75,6 @@ export const PROVIDER_SHARE_RISK: Record<string, ProviderShareClassification> = 
     risk: 'caution',
     reason: 'Sharing a Kimi Code subscription is risky; a Console-issued API key is safer.',
   },
-  'kimicode-auth': {
-    risk: 'ok',
-    reason: 'Your Kimi API key — you pay for their usage.',
-  },
   cursor: {
     risk: 'caution',
     reason: "Sharing a Cursor subscription likely breaches Cursor's terms.",

@@ -11,6 +11,8 @@ import { AnthropicBedrock } from '@anthropic-ai/bedrock-sdk';
 import type { ModelDef, ProviderConfig } from '@koryphaios/shared';
 import { AnthropicProvider } from './anthropic';
 import { createUsageInterceptingFetch } from '../credit-accountant';
+import { applyModelsDevMetadata, refreshModelsDevCache } from './models-dev';
+import { getModelsForProvider } from './models';
 
 function awsRegion(): string {
   return process.env.AWS_REGION || process.env.AWS_DEFAULT_REGION || 'us-east-1';
@@ -33,9 +35,13 @@ export class BedrockProvider extends AnthropicProvider {
     return !this.config.disabled && hasAwsCredentials();
   }
 
-  /** Bedrock foundation model ids are region/account scoped — no Anthropic /models API. */
+  /** Bedrock foundation model ids are region/account scoped — there is no
+   *  Anthropic /models API to discover them from. Return the static catalog
+   *  (enriched with models.dev capability data) so the models actually appear
+   *  in the picker — returning [] made bedrock unusable through the UI. */
   override listModels(): ModelDef[] {
-    return [];
+    refreshModelsDevCache();
+    return applyModelsDevMetadata(this.name, getModelsForProvider(this.name));
   }
 
   protected override makeClient(): Anthropic {

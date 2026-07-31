@@ -166,12 +166,6 @@ export const PROVIDER_CONFIGS: ProviderConfig[] = [
       envKeys: [],
       envAuthTokenKey: 'KIMI_CODE_AUTH_TOKEN',
     },
-    {
-      name: 'kimicode-auth',
-      baseUrl: 'https://api.kimi.com/coding/v1',
-      authMode: 'api_key',
-      envKeys: ['KIMI_CODE_API_KEY'],
-    },
   {
     name: 'moonshot',
     baseUrl: 'https://api.moonshot.ai/v1',

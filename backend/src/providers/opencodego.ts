@@ -9,12 +9,10 @@
 //
 // See: https://opencode.ai/docs/go/
 
-import { applyModelsDevMetadata } from './models-dev';
-import type { ProviderConfig, ModelDef } from '@koryphaios/shared';
+import type { ProviderConfig } from '@koryphaios/shared';
 import {
   type ProviderEvent,
   type StreamRequest,
-  getModelsForProvider,
   resolveModel,
 } from './types';
 import { OpenAIProvider } from './openai';
@@ -52,12 +50,6 @@ export class OpenCodeGoProvider extends OpenAIProvider {
   constructor(config: ProviderConfig, baseUrl: string = OPENCODE_GO_BASE) {
     super({ ...config, baseUrl }, 'opencodego', baseUrl);
     this.anthropic = new AnthropicProvider({ ...config, baseUrl }, 'opencodego');
-  }
-
-  protected getModelCatalogFallback(): ModelDef[] {
-    // Enrich with models.dev capability data (reasoning tiers, real context
-    // windows) — the Go /models endpoint only returns bare ids.
-    return applyModelsDevMetadata(this.name, getModelsForProvider(this.name));
   }
 
   async *streamResponse(request: StreamRequest): AsyncGenerator<ProviderEvent> {

@@ -11,8 +11,7 @@ function formatProviderName(provider: string): string {
   if (provider === 'openrouter') return 'OpenRouter';
   if (provider === 'vertexai') return 'Vertex AI';
   if (provider === 'copilot') return 'Copilot';
-  if (provider === 'kimicode') return 'Kimi Code (CLI)';
-  if (provider === 'kimicode-auth') return 'Kimi Code (Auth)';
+  if (provider === 'kimicode') return 'Kimi Code';
   if (provider === 'moonshot') return 'Moonshot AI / Kimi API';
   return provider.charAt(0).toUpperCase() + provider.slice(1);
 }

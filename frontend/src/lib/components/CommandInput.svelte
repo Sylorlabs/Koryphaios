@@ -43,6 +43,10 @@
     initialModel?: string;
     /** Keep context preview entirely client-side on static surfaces with no backend. */
     disableModelPreviewRequests?: boolean;
+    /** Bindable mirror of the composer's selected model (e.g. "claude:sonnet")
+     *  so the parent can react to provider changes (e.g. to surface that CLI
+     *  provider's native /commands in the slash picker). */
+    selectedModel?: string;
   }
 
   let {
@@ -63,6 +67,7 @@
     placeholder = 'Ask Koryphaios to inspect, explain, or change this project...',
     initialModel = '',
     disableModelPreviewRequests = false,
+    selectedModel = $bindable(''),
   }: Props = $props();
   let actionPanelRef = $state<HTMLDivElement>();
   let showModelPicker = $state(false);
@@ -70,7 +75,10 @@
   const MODEL_STORAGE_KEY = 'koryphaios-selected-model';
   let _storedModel = typeof localStorage !== 'undefined' ? localStorage.getItem(MODEL_STORAGE_KEY) : null;
   if (_storedModel === 'auto') { localStorage.removeItem(MODEL_STORAGE_KEY); _storedModel = null; }
-  let selectedModel = $state<string>(_storedModel ?? '');
+  // Bindable selectedModel: seeded from localStorage once, then kept in sync
+  // with the parent so the composer's slash picker can surface the active CLI
+  // provider's native /commands.
+  if (!selectedModel && _storedModel) selectedModel = _storedModel;
   let lastContextPreviewKey = $state('');
   let selectedPickerIndex = $state(0);
   let attachments = $state<Attachment[]>([]);
@@ -102,8 +110,7 @@
     if (provider === 'openrouter') return 'OpenRouter';
     if (provider === 'vertexai') return 'Vertex AI';
     if (provider === 'copilot') return 'Copilot';
-    if (provider === 'kimicode') return 'Kimi Code (CLI)';
-    if (provider === 'kimicode-auth') return 'Kimi Code (Auth)';
+    if (provider === 'kimicode') return 'Kimi Code';
     if (provider === 'grok') return 'Grok Build';
     return provider.charAt(0).toUpperCase() + provider.slice(1);
   }

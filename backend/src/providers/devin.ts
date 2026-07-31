@@ -26,6 +26,8 @@ import {
   type ProviderMessage,
   type StreamRequest,
 } from './types';
+import { DevinCliBridge, getKoryphaiosDevinHome, resolveDevinReasoningModel } from './devin-bridge';
+import { getDevinCapabilitiesAsync, getDevinCapabilities as getDevinCapabilitiesSync } from './devin-capabilities';
 
 const DEVIN_STREAM_TIMEOUT_MS = 300_000;
 const EXPORT_POLL_MS = 250;
@@ -77,22 +79,29 @@ function buildPrompt(systemPrompt: string | undefined, messages: ProviderMessage
   return lines.join('\n').trim();
 }
 
-interface DevinExportStep {
-  step_id?: number;
-  source?: string;
-  message?: string;
-  reasoning_content?: string;
-  tool_calls?: Array<{ function_name?: string; arguments?: unknown }>;
-  observation?: { results?: Array<{ content?: string }> };
-}
-
-interface DevinExport {
-  steps?: DevinExportStep[];
-  final_metrics?: {
-    total_prompt_tokens?: number;
-    total_completion_tokens?: number;
-    total_cached_tokens?: number;
-  };
+/** Build the prompt body from user/assistant/tool messages ONLY — used when
+ *  --agent-config carries the system prompt via system_instructions, so the
+ *  HARNESS_SYSTEM_NOTE is not duplicated into the body. */
+function buildPromptBodyOnly(messages: ProviderMessage[]): string {
+  const lines: string[] = [];
+  for (const m of messages) {
+    if (m.role === 'system') continue;
+    const content =
+      typeof m.content === 'string'
+        ? m.content
+        : m.content
+            .map((b) =>
+              b.type === 'text' ? b.text : b.type === 'image' ? '[image attachment]' : '',
+            )
+            .filter(Boolean)
+            .join('\n');
+    if (!content.trim()) continue;
+    if (m.role === 'user') lines.push(`User: ${content}`);
+    else if (m.role === 'assistant') lines.push(`Assistant: ${content}`);
+    else if (m.role === 'tool') lines.push(`Tool result: ${content.slice(0, 8_000)}`);
+    lines.push('');
+  }
+  return lines.join('\n').trim();
 }
 
 export class DevinProvider implements Provider {
@@ -105,9 +114,28 @@ export class DevinProvider implements Provider {
   }
 
   listModels(): ModelDef[] {
-    // Devin does not report a model catalog through its local CLI. Do not
-    // manufacture one; execution uses the provider-selected default.
-    return [];
+    // Prefer the live account-available models from `devin models` (Phase 0
+    // capability probe), falling back to the static DEVIN_MODELS table when
+    // the probe hasn't settled or the CLI doesn't report a catalog.
+    const caps = getDevinCapabilitiesSync();
+    const live: ModelDef[] = caps.models.map((m) => ({
+      id: m.id,
+      name: m.name,
+      provider: 'devin' as const,
+      apiModelId: m.id,
+      contextWindow: m.contextWindow ?? 200_000,
+      maxOutputTokens: 64_000,
+    }));
+    const seen = new Set(live.map((m) => m.id));
+    const fallback: ModelDef[] = DEVIN_MODELS.filter((m) => !seen.has(m.id)).map((m) => ({
+      id: m.id,
+      name: m.name,
+      provider: 'devin' as const,
+      apiModelId: m.id,
+      contextWindow: m.ctx ?? 200_000,
+      maxOutputTokens: 64_000,
+    }));
+    return [...live, ...fallback];
   }
 
   private resolveCliModel(modelId: string | undefined): string | undefined {
@@ -130,36 +158,87 @@ export class DevinProvider implements Provider {
       return;
     }
 
-    const prompt = buildPrompt(request.systemPrompt, request.messages);
+    // Probe the CLI for its extensibility levers (Phase 0). Awaiting here means
+    // the first turn pays the probe cost; subsequent turns use the cache.
+    const bridge = new DevinCliBridge();
+    const caps = await bridge.ensureCapabilities();
+
+    const exportPath = join(tmpdir(), `devin-${Date.now()}-${Math.round(performance.now())}.json`);
+    const cwd = request.workingDirectory?.trim() || process.cwd();
+
+    // ── Build the declarative agent config when supported (Phase 1) ──
+    // Replaces the HARNESS_SYSTEM_NOTE prompt-body hack: the system prompt +
+    // harness note + Kory provenance go into system_instructions, and the
+    // SandboxPolicy is translated into permission scopes. The user messages
+    // become the prompt body (no system note stuffed in).
+    let agentConfigPath: string | null = null;
+    let devinHome: string | null = null;
+    const bridgeCtx = {
+      provider: 'devin' as const,
+      role: request.harnessRole ?? 'manager',
+      sandbox: request.sandbox,
+      workingDirectory: cwd,
+      sessionId: request.sessionId,
+      systemPrompt: request.systemPrompt,
+      tools: request.tools ?? [],
+      promptManifestHash: request.promptManifestHash,
+      taskContractHash: request.taskContractHash,
+    };
+    if (caps.supportsAgentConfig) {
+      const agentConfig = bridge.buildAgentConfig(bridgeCtx);
+      if (agentConfig) {
+        agentConfigPath = bridge.writeAgentConfigFile(agentConfig, request.sessionId);
+        // Set up the per-session isolated devin home (rules/skills/hooks/MCP).
+        devinHome = getKoryphaiosDevinHome(request.sessionId);
+      }
+    }
+
+    // The prompt body is the user messages only when agent-config carries the
+    // system prompt; otherwise fall back to the legacy buildPrompt (system
+    // note + messages in the body).
+    const prompt = agentConfigPath
+      ? buildPromptBodyOnly(request.messages)
+      : buildPrompt(request.systemPrompt, request.messages);
     if (!prompt.trim()) {
       yield { type: 'error', error: 'Devin: empty prompt' };
       return;
     }
 
-    const exportPath = join(tmpdir(), `devin-${Date.now()}-${Math.round(performance.now())}.json`);
-    const args = [
+    const args: string[] = [
       '-p',
       prompt,
-      // Non-interactive: auto-approve so a headless run never blocks. Koryphaios
-      // remains the permission/orchestration owner.
+      // Non-interactive: auto-approve so a headless run never blocks. With
+      // --agent-config the permission scopes govern; the mode is the coarse
+      // fallback. Critic → plan (read-only); manager/worker → accept-edits.
       '--permission-mode',
-      request.harnessRole === 'critic' ? 'auto' : 'dangerous',
-      ...(request.harnessRole === 'critic' ? ['--sandbox'] : []),
+      caps.supportsPermissionMode
+        ? (request.harnessRole === 'critic' ? 'plan' : 'accept-edits')
+        : (request.harnessRole === 'critic' ? 'auto' : 'dangerous'),
+      ...(request.harnessRole === 'critic' && caps.supportsSandbox ? ['--sandbox'] : []),
       '--export',
       exportPath,
     ];
-    const cliModel = this.resolveCliModel(request.model);
+    if (agentConfigPath) args.push('--agent-config', agentConfigPath);
+    const cliModel = this.resolveCliModel(
+      resolveDevinReasoningModel(request.model, request.reasoningLevel),
+    );
     if (cliModel) args.push('--model', cliModel);
 
-    const cwd = request.workingDirectory?.trim() || process.cwd();
     const jail = request.sandbox ? buildSoftJail(process.env, [join(homedir(), '.devin')]) : null;
     const wrapped = request.sandbox
       ? wrapCommand(bin, args, { cwd, policy: request.sandbox })
       : { command: bin, args };
+    const env: NodeJS.ProcessEnv = { ...process.env };
+    // Point the CLI at the isolated per-session home so our rules/skills/hooks
+    // and session transcripts stay separate from the user's interactive runs.
+    if (devinHome) {
+      env.DEVIN_CONFIG_DIR = devinHome;
+      env.XDG_CONFIG_HOME = devinHome;
+    }
     const child = spawn(wrapped.command, wrapped.args, {
       cwd,
       stdio: ['ignore', 'pipe', 'pipe'],
-      env: jail?.env ?? { ...process.env },
+      env: jail?.env ?? env,
     });
 
     const onAbort = () => {
@@ -247,37 +326,24 @@ export class DevinProvider implements Provider {
 
   private *drainExport(exportPath: string): Generator<ProviderEvent> {
     if (!existsSync(exportPath)) return;
-    let data: DevinExport;
+    // Use the full ATIF-v1.7 parser from the bridge (Phase 2): it extracts
+    // reasoning, tool calls, the real resolved model, tool definitions, and
+    // final metrics — superset of the legacy DevinExport parsing.
+    let raw: string;
     try {
-      data = JSON.parse(readFileSync(exportPath, 'utf-8')) as DevinExport;
+      raw = readFileSync(exportPath, 'utf-8');
     } catch {
       return;
     }
-    for (const step of data.steps ?? []) {
-      if (step.source !== 'agent') continue;
-      if (step.reasoning_content?.trim()) {
-        yield { type: 'thinking_delta', thinking: step.reasoning_content };
-      }
-      for (const call of step.tool_calls ?? []) {
-        const outputs = step.observation?.results?.map((r) => r.content ?? '').join('\n') ?? '';
-        yield {
-          type: 'tool_executed',
-          toolName: call.function_name ?? 'tool',
-          toolInput: JSON.stringify(call.arguments ?? {}),
-          toolOutput: outputs.slice(0, 8_000),
-        };
-      }
+    const bridge = new DevinCliBridge();
+    const { trajectory, events } = bridge.parseTrajectory(raw);
+    if (trajectory.modelName) {
+      providerLog.debug(
+        { provider: 'devin', resolvedModel: trajectory.modelName, schema: trajectory.schemaVersion },
+        'Devin ATIF trajectory parsed',
+      );
     }
-    const m = data.final_metrics;
-    if (m && (m.total_prompt_tokens || m.total_completion_tokens)) {
-      yield {
-        type: 'usage_update',
-        // prompt tokens INCLUDE cached (total_cached_tokens is a breakdown) —
-        // no separate tokensCache, so billing counts the real total once.
-        tokensIn: m.total_prompt_tokens ?? 0,
-        tokensOut: m.total_completion_tokens ?? 0,
-      };
-    }
+    yield* events;
   }
 
   private cleanup(exportPath: string): void {

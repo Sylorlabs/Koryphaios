@@ -16,6 +16,7 @@ import {
   type StreamRequest,
 } from './types';
 import { providerLog } from '../logger';
+import { getCliBridge } from './cli-bridges';
 
 const CODEX_TIMEOUT_MS = 300_000;
 const CODEX_MODEL_LIST_TIMEOUT_MS = 15_000;
@@ -176,17 +177,32 @@ function buildPrompt(
       return `${label}: ${text}`;
     })
     .filter(Boolean);
+  // Use the CodexCliBridge to build the harness note + tool whitelist
+  // consistently with the other CLI providers (Phase 1 deep-integration).
+  // The <KORY_TOOL_CALL> envelope protocol stays as the bridge mechanism.
+  const codexBridge = getCliBridge('codex');
+  const bridgeConfig = codexBridge?.buildAgentConfig({
+    provider: 'codex',
+    role: harnessRole ?? 'manager',
+    sandbox: undefined,
+    workingDirectory: process.cwd(),
+    systemPrompt: systemPrompt ?? '',
+    tools: tools ?? [],
+  });
+  const harnessNote = bridgeConfig?.systemInstructions?.[1] ??
+    'You are running inside Koryphaios. Follow its supplied instructions and finish every turn with a concise user-facing answer. Do not delegate to native subagents or leave background tasks awaiting a later notification.';
+  const allowedToolNames = bridgeConfig?.allowedTools ?? tools?.map((t) => t.name) ?? [];
   const toolProtocol =
     harnessRole === 'manager' && tools?.length
       ? [
           'Kory control-plane tools are available. When you need one, emit exactly one final line and nothing after it:',
           `${KORY_TOOL_OPEN}{"name":"tool_name","input":{}}${KORY_TOOL_CLOSE}`,
-          `Only use: ${tools.map((tool) => tool.name).join(', ')}. Do not claim a Kory tool ran unless you emitted that envelope.`,
+          `Only use: ${allowedToolNames.join(', ')}. Do not claim a Kory tool ran unless you emitted that envelope.`,
         ].join('\n')
       : '';
   return [
     systemPrompt?.trim(),
-    'You are running inside Koryphaios. Follow its supplied instructions and finish every turn with a concise user-facing answer. Do not delegate to native subagents or leave background tasks awaiting a later notification.',
+    harnessNote,
     toolProtocol,
     ...turns,
   ]

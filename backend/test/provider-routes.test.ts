@@ -87,6 +87,22 @@ mock.module('../src/providers/kimicode-auth', () => ({
   createKimiCodeAuthMarker: createKimiCodeAuthMarkerMock,
   isKimiCodeAuthMarker: (value: string | null | undefined) =>
     typeof value === 'string' && value.startsWith('oauth:kimicode:'),
+  createKimiCodeCliMarker: (profileDir: string) =>
+    `cli:kimicode:${Buffer.from(profileDir).toString('base64url')}`,
+  isKimiCodeCliMarker: (value: string | null | undefined) =>
+    typeof value === 'string' && value.startsWith('cli:kimicode:'),
+  isKimiCodeMarker: (value: string | null | undefined) =>
+    typeof value === 'string' && (value.startsWith('oauth:kimicode:') || value.startsWith('cli:kimicode:')),
+  kimiCodeMarkerProfileDir: (value: string) => {
+    if (typeof value !== 'string') return null;
+    if (value.startsWith('oauth:kimicode:')) return '/tmp/kory-kimi-home';
+    if (value.startsWith('cli:kimicode:')) {
+      try {
+        return Buffer.from(value.slice('cli:kimicode:'.length), 'base64url').toString('utf-8') || null;
+      } catch { return null; }
+    }
+    return null;
+  },
   loadKimiCodeAuthState: () => null,
   resolveKimiCodeAccessToken: async (value: string | null | undefined) => value ?? null,
 }));
@@ -148,6 +164,7 @@ mock.module('../src/providers/auth-utils', () => ({
   detectClineCLILogin: () => false,
   createClineCLIAuthMarker: () => 'cline-cli-session',
   isClineCLIAuthMarker: (value: string | null | undefined) => value === 'cline-cli-session',
+  detectKimiCodeCLILogin: () => false,
   clearCachedToken: () => {},
   clearTokenCache: () => {},
   getKoryCodexHome: () => '/tmp/codex-home',

@@ -47,6 +47,12 @@
     insertPromptTemplate,
   } from '$lib/utils/projectManager';
   import { getModelConfigurationWarning } from '$lib/utils/model-config';
+  import {
+    nativeCommandsStore,
+    providerFromModel,
+    NATIVE_CLI_PROVIDERS,
+    type NativeSlashCommand,
+  } from '$lib/stores/native-commands.svelte';
 
   let showSettings = $state(false);
   let showAgents = $state(false);
@@ -168,6 +174,42 @@
     { command: 'zen', label: 'Toggle Zen', description: 'Enter or exit zen mode.' },
     { command: 'goal', label: 'Goal Mode', description: 'Create, open, or ask Kory to advance a verified goal.' },
   ];
+
+  // Active composer model (bound from CommandInput) so we can surface the
+  // active CLI provider's own /commands in the slash picker.
+  let activeComposerModel = $state<string>('');
+  let nativeCommands = $state<{ label: string; commands: NativeSlashCommand[] } | null>(null);
+
+  // Fetch native commands whenever the active provider is a CLI harness.
+  $effect(() => {
+    const provider = providerFromModel(activeComposerModel);
+    if (!provider || !NATIVE_CLI_PROVIDERS.has(provider)) {
+      nativeCommands = null;
+      return;
+    }
+    let cancelled = false;
+    void nativeCommandsStore.load(provider).then((result) => {
+      if (!cancelled) nativeCommands = result;
+    });
+    return () => {
+      cancelled = true;
+    };
+  });
+
+  // Merge Kory's built-in slash commands with the active CLI provider's native
+  // commands. Native commands are labeled with the provider name so the user
+  // can tell them apart (e.g. "Claude Code · /status").
+  let composerSlashCommandList = $derived.by(() => {
+    const base = composerSlashCommands;
+    if (!nativeCommands || nativeCommands.commands.length === 0) return base;
+    const label = nativeCommands.label;
+    const native = nativeCommands.commands.map((c) => ({
+      command: c.command,
+      label: `${label} · /${c.command}`,
+      description: c.description,
+    }));
+    return [...base, ...native];
+  });
 
   const LAYOUT_PREFS_KEY = 'koryphaios-layout-prefs';
 
@@ -554,6 +596,24 @@ RULES:
       goalDisplayStore.update({ sidebar: true });
       queueMicrotask(() => window.dispatchEvent(new CustomEvent('kory:goal-action', { detail: parts.length > 1 ? 'goal_create' : 'goal_open' })));
       return true;
+    }
+
+    // Native CLI provider /command (e.g. Claude Code's /status, Devin's
+    // /models): dispatch to the backend, which runs a real headless
+    // equivalent (or surfaces an attributed note) and streams the reply back
+    // as a native.command event labeled with the provider's name.
+    const provider = providerFromModel(activeComposerModel);
+    if (provider && NATIVE_CLI_PROVIDERS.has(provider) && nativeCommands) {
+      const match = nativeCommands.commands.find(
+        (c) => c.command === root || (c.aliases?.includes(root) ?? false),
+      );
+      if (match) {
+        const sid = sessionStore.activeSessionId;
+        if (sid) {
+          void nativeCommandsStore.run(sid, command, activeComposerModel || undefined);
+        }
+        return true;
+      }
     }
 
     // Unknown slash input: fall through and send it to the model as a
@@ -1491,12 +1551,13 @@ RULES:
           settingsInitialTab = section === 'advanced' ? 'experimental' : 'providers';
           showSettings = true;
         }}
-        slashCommands={composerSlashCommands}
+        slashCommands={composerSlashCommandList}
         fileMentions={composerFileMentions}
         onRefreshFileMentions={refreshComposerFileMentions}
         placeholder={agentRail.inputPlaceholder}
         initialModel={isDemoMode ? 'codex:gpt-5.6-sol' : ''}
         disableModelPreviewRequests={isDemoMode}
+        bind:selectedModel={activeComposerModel}
       />{/if}
   {/snippet}
 

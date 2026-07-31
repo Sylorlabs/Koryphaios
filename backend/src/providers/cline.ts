@@ -21,6 +21,7 @@ import {
   type ProviderMessage,
   type StreamRequest,
 } from './types';
+import { getCliBridge } from './cli-bridges';
 
 const CLINE_STREAM_TIMEOUT_MS = 300_000;
 const MODELS_CACHE_TTL_MS = 5 * 60_000;
@@ -33,7 +34,18 @@ const HARNESS_SYSTEM_NOTE =
 function buildPrompt(systemPrompt: string | undefined, messages: ProviderMessage[]): string {
   const lines: string[] = [];
   const sys = systemPrompt?.trim();
-  lines.push(sys ? `${sys}\n\n${HARNESS_SYSTEM_NOTE}` : HARNESS_SYSTEM_NOTE, '');
+  // Use the ClineCliBridge's harness note for consistency (Phase 1).
+  const clineBridge = getCliBridge('cline');
+  const bridgeConfig = clineBridge?.buildAgentConfig({
+    provider: 'cline',
+    role: 'manager',
+    sandbox: undefined,
+    workingDirectory: process.cwd(),
+    systemPrompt: systemPrompt ?? '',
+    tools: [],
+  });
+  const harnessNote = bridgeConfig?.systemInstructions?.[1] ?? HARNESS_SYSTEM_NOTE;
+  lines.push(sys ? `${sys}\n\n${harnessNote}` : harnessNote, '');
   for (const m of messages) {
     const content =
       typeof m.content === 'string'

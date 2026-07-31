@@ -15,6 +15,7 @@ import {
 import { withRetry, withTimeoutSignal } from './utils';
 import { createUsageInterceptingFetch } from '../credit-accountant';
 import { providerLog } from '../logger';
+import { applyModelsDevMetadata, refreshModelsDevCache } from './models-dev';
 import {
   isModelListCacheFresh,
   mergeModelLists,
@@ -59,11 +60,11 @@ export class AnthropicProvider implements Provider {
   private fetchInProgress = false;
 
   listModels(): ModelDef[] {
-    const fallback = getModelsForProvider(this.name);
+    const fallback = applyModelsDevMetadata(this.name, getModelsForProvider(this.name));
     if (!this.isAvailable()) return [];
     if (this.cachedModels && isModelListCacheFresh(this.lastFetch)) return this.cachedModels;
     this.refreshModelsInBackground(fallback);
-    return this.cachedModels ?? [];
+    return this.cachedModels ?? fallback;
   }
 
   private refreshModelsInBackground(fallback: ModelDef[]) {
@@ -72,6 +73,9 @@ export class AnthropicProvider implements Provider {
 
     void (async () => {
       try {
+        // Kick models.dev refresh early so enrichment has data by the time
+        // discovery completes (non-blocking, idempotent within TTL).
+        refreshModelsDevCache();
         const response = await withRetry(() => this.client.models.list());
         const discovered: ModelDef[] = [];
         for (const model of response.data) {
@@ -80,7 +84,7 @@ export class AnthropicProvider implements Provider {
           discovered.push(modelFromRemoteId(id, this.name, fallback));
         }
         if (discovered.length > 0) {
-          this.cachedModels = mergeModelLists(fallback, discovered);
+          this.cachedModels = applyModelsDevMetadata(this.name, mergeModelLists(fallback, discovered));
           providerLog.debug(
             { provider: this.name, count: this.cachedModels.length },
             'Model list refreshed from provider API',

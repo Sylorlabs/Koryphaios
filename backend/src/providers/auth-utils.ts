@@ -363,3 +363,22 @@ export function detectAntigravityCLILogin(): boolean {
   if (!home) return false;
   return existsSync(join(home, '.gemini', 'antigravity-cli', 'settings.json'));
 }
+
+// ─── Kimi Code CLI login detection ──────────────────────────────────────────
+// The official `kimi` CLI stores its OAuth device-flow credentials at
+// ~/.kimi/credentials/kimi-code.json. Koryphaios can read that session and
+// call api.kimi.com/coding/v1 directly with the stored access token (refreshing
+// it as needed), so a user who already ran `kimi login` gets the provider
+// without a second sign-in. This is a login-signal check only — the token
+// itself stays on disk and is read lazily at request time.
+
+/**
+ * Detects whether the official `kimi` CLI is logged in: a KIMI_CODE_AUTH_TOKEN
+ * in the environment or stored OAuth credentials at ~/.kimi/credentials/kimi-code.json.
+ */
+export function detectKimiCodeCLILogin(): boolean {
+  const envToken = process.env.KIMI_CODE_AUTH_TOKEN?.trim();
+  if (envToken) return true;
+  const home = homeDir();
+  return !!home && existsSync(join(home, '.kimi', 'credentials', 'kimi-code.json'));
+}

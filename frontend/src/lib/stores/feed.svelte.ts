@@ -56,6 +56,13 @@ function rebuildGroupedFeedCache(): void {
   lastGroupedFeed = getGroupedEntries(feed);
 }
 
+/** Normalize message text for dedup comparisons. Collapses whitespace so a
+ *  streamed turn and its persisted counterpart match even when the provider
+ *  emits deltas with slightly different spacing. */
+function normalizeFeedText(text: string): string {
+  return (text ?? '').trim().replace(/\s+/g, ' ');
+}
+
 function cloneEntries(entries: FeedEntry[]): FeedEntry[] {
   return entries.map((entry) => ({
     ...entry,
@@ -534,9 +541,39 @@ async function loadSessionMessages(
       ghostHash: undefined,
     };
   });
+  // The live tail holds the turn we just watched stream in (the user's
+  // message via addUserMessage + Kory's reply via accumulateFeedEntry). By
+  // the time we reload, that turn is persisted and present in `history`
+  // above — keeping both would render the user's text and Kory's reply
+  // twice. Drop the now-persisted text rows from the live tail, but keep
+  // ephemeral rows (thinking, tool calls, tool results, system markers)
+  // that aren't part of message history. Worker content is also kept:
+  // only the manager's turns are persisted as session messages.
+  const persistedTextKeys = new Set<string>();
+  const persistedAssistantTexts: string[] = [];
+  for (const m of messages) {
+    if (m.variantGroupId && (m.variantIndex ?? 0) !== 0) continue;
+    persistedTextKeys.add(`${m.role}\u0000${normalizeFeedText(m.content)}`);
+    if (m.role === 'assistant') persistedAssistantTexts.push(normalizeFeedText(m.content));
+  }
+  const dedupedLiveTail = liveTailAtLoad.filter((entry) => {
+    if (entry.type === 'user_message') {
+      return !persistedTextKeys.has(`user\u0000${normalizeFeedText(entry.text)}`);
+    }
+    if (entry.type === 'content' && entry.agentId === 'kory-manager') {
+      // A streamed reply may be split across several content entries when
+      // tool calls interleave. Each segment is contained within the
+      // persisted assistant message, so match by containment rather than
+      // exact equality. Empty fragments never count as a match.
+      const text = normalizeFeedText(entry.text);
+      if (!text) return true;
+      return !persistedAssistantTexts.some((p) => p.includes(text));
+    }
+    return true;
+  });
   // Text history is the critical path. Commit it immediately; timeline hashes
   // and archived tool proof enrich the same isolated session afterward.
-  feed = [...history, ...liveTailAtLoad];
+  feed = [...history, ...dedupedLiveTail];
   loadingSessionId = '';
   feedTransitionBaseLength = history.length;
   sessionFeedCache.set(sessionId, cloneEntries(feed));

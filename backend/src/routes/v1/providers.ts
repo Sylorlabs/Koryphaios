@@ -26,6 +26,8 @@ import { discoverCliAccounts, getDiscoveredCliAccount } from '../../providers/cl
 import {
   clearKimiCodeAuthState,
   createKimiCodeAuthMarker,
+  createKimiCodeCliMarker,
+  isKimiCodeAuthMarker,
   pollKimiCodeDeviceAuth,
   saveKimiCodeAuthState,
   startKimiCodeDeviceAuth,
@@ -914,24 +916,30 @@ export const providerRoutes = new Elysia({ prefix: '/api/providers' })
 
     const discovered = getDiscoveredCliAccount(params.accountId);
     if (discovered && discovered.provider === params.name) {
-      // Codex runs its installed CLI directly and that CLI chooses its active
-      // local account. Koryphaios deliberately does not copy profile tokens.
-      const values = null;
-      if (!values) {
-        set.status = 400;
-        return {
-          ok: false,
-          error: `${params.name} exposes this CLI identity, but its harness does not provide a safe profile-selection mechanism yet.`,
-        };
+      // Kimi Code stores its OAuth session as a file under the profile dir.
+      // Selecting a profile is safe: we store only a CLI marker that points
+      // at the profile dir, and the token is read lazily at request time.
+      // (Codex's CLI harness has no equivalent profile-selection mechanism,
+      // so its discovered accounts remain non-activatable.)
+      if (params.name === 'kimicode') {
+        const values = { authToken: createKimiCodeCliMarker(discovered.profileDir) };
+        const { providers } = getContext();
+        const result = await providers.setCredentials(params.name as ProviderName, values);
+        if (!result.success) {
+          set.status = 400;
+          return { ok: false, error: result.error ?? 'Failed to activate detected Kimi Code account' };
+        }
+        syncProviderConfigsSafely(providers);
+        return { ok: true, data: { account: discovered, activated: true } };
       }
-      const { providers } = getContext();
-      const result = await providers.setCredentials(params.name as ProviderName, values);
-      if (!result.success) {
-        set.status = 400;
-        return { ok: false, error: result.error ?? 'Failed to activate detected CLI account' };
-      }
-      syncProviderConfigsSafely(providers);
-      return { ok: true, data: { account: discovered, activated: true } };
+      // Other CLI harness providers (codex, claude, grok, …) run their CLI
+      // directly and that CLI chooses its active local account. Koryphaios
+      // deliberately does not copy profile tokens.
+      set.status = 400;
+      return {
+        ok: false,
+        error: `${params.name} exposes this CLI identity, but its harness does not provide a safe profile-selection mechanism yet.`,
+      };
     }
 
     const bundle = await getStoredAccountBundle(params.name, params.accountId);
@@ -1080,10 +1088,18 @@ export const providerRoutes = new Elysia({ prefix: '/api/providers' })
       // The managed app-server, not Koryphaios, persists ChatGPT OAuth tokens.
       await getManagedCodexAppServer().logout();
     }
-    providers.removeApiKey(name as ProviderName);
+    // For Kimi Code, only clear the MANAGED session's credentials (the device
+    // flow at KORY_KIMI_HOME). CLI-profile markers just unset the config
+    // authToken — the user's `kimi login` credentials stay on disk so the
+    // provider can be re-activated without another login.
     if (name === 'kimicode') {
-      clearKimiCodeAuthState();
+      const config = providers.getConfigs()[name];
+      const authToken = config?.authToken?.trim();
+      if (!authToken || isKimiCodeAuthMarker(authToken)) {
+        clearKimiCodeAuthState();
+      }
     }
+    providers.removeApiKey(name as ProviderName);
     syncProviderConfigsSafely(providers);
     return { ok: true };
   });

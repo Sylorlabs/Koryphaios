@@ -295,3 +295,29 @@ export interface RateLimitPayload {
   attempt: number;
   maxRetries: number;
 }
+
+/**
+ * Native CLI slash command output, attributed to the CLI provider harness
+ * the user is driving as the manager (e.g. Claude Code, Devin, Grok Build).
+ * Emitted by the backend when a user invokes a provider's own `/command` from
+ * the Koryphaios composer; the frontend renders it as a feed entry labeled
+ * with the provider's display name so the user can see the harness's reply.
+ */
+export interface NativeCommandPayload {
+  /** Koryphaios provider id (claude, codex, devin, grok, cursor, cline, antigravity, kimicode). */
+  provider: string;
+  /** Display name of the provider harness (e.g. "Claude Code"). */
+  providerLabel: string;
+  /** Slash command name without the leading slash (e.g. "models", "status"). */
+  command: string;
+  /** Raw command line the user typed, including args (e.g. "/diff --stat"). */
+  rawCommand: string;
+  /** Output text for this chunk. Multiple chunks stream into one feed entry. */
+  text: string;
+  /** True for intermediate streaming chunks; absent/false on the final chunk. */
+  isPartial?: boolean;
+  /** True when the command could not run (e.g. binary missing, non-headless). */
+  isError?: boolean;
+  /** Stable id so the frontend can accumulate streaming chunks into one entry. */
+  messageId: string;
+}

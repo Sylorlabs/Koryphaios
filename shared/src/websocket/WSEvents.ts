@@ -52,7 +52,9 @@ export type WSEventType =
   // Notes network
   | 'notes.updated'
   // Goal mode
-  | 'goals.updated';
+  | 'goals.updated'
+  // Native CLI slash command output (attributed to a CLI provider harness)
+  | 'native.command';
 
 export interface WSMessage<T = unknown> {
   type: WSEventType;

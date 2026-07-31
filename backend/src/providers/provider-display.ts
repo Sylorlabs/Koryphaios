@@ -53,17 +53,11 @@ export const PROVIDER_DISPLAY: Partial<Record<ProviderName, ProviderDisplayMeta>
       'Direct Google Gemini API. Uses only GOOGLE_API_KEY; it does not use AI Studio, Vertex AI, gcloud, or Jules credentials.',
   },
   kimicode: {
-    label: 'Kimi Code (CLI)',
+    label: 'Kimi Code',
     iconPath: '/provider-icons/lobehub/kimi-color.svg',
     deployment: 'local',
     description:
-      'Legacy CLI-backed subscription mode for Kimi Code. Koryphaios connects through device-auth session markers.',
-  },
-  'kimicode-auth': {
-    label: 'Kimi Code (Auth)',
-    iconPath: '/provider-icons/lobehub/kimi-color.svg',
-    deployment: 'api',
-    description: 'OpenAI-compatible mode. Provide a Kimi API key and call Kimi endpoints directly.',
+      'Sign in with your Kimi account via the official OAuth device flow. Koryphaios stores only a local session marker and refreshes tokens automatically — no API key entry.',
   },
   grok: {
     label: 'Grok Build',
