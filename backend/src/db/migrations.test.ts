@@ -10,6 +10,46 @@ afterEach(() => {
 });
 
 describe('database migration repairs', () => {
+  test('records durability migrations when their columns already exist', async () => {
+    const database = new Database(':memory:');
+    openDatabases.push(database);
+    database.exec(`
+      CREATE TABLE _migrations (
+        version TEXT PRIMARY KEY,
+        description TEXT NOT NULL,
+        applied_at INTEGER NOT NULL,
+        checksum TEXT NOT NULL
+      );
+      CREATE TABLE sessions (id TEXT PRIMARY KEY, conversation_revision INTEGER DEFAULT 0);
+      CREATE TABLE messages (
+        id TEXT PRIMARY KEY,
+        session_id TEXT NOT NULL,
+        created_at INTEGER NOT NULL,
+        context_revision INTEGER NOT NULL DEFAULT 0
+      );
+    `);
+    for (const migration of MIGRATIONS.filter(
+      ({ version }) => version !== '0022' && version !== '0023',
+    )) {
+      database.run(
+        'INSERT INTO _migrations (version, description, applied_at, checksum) VALUES (?, ?, ?, ?)',
+        [migration.version, migration.description, Date.now(), 'already-applied'],
+      );
+    }
+
+    expect(await new MigrationRunner(database).migrate()).toBe(2);
+    expect(
+      database.query("SELECT version FROM _migrations WHERE version IN ('0022', '0023')").all(),
+    ).toHaveLength(2);
+    expect(
+      database
+        .query(
+          "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'session_compactions'",
+        )
+        .get(),
+    ).toBeTruthy();
+  });
+
   test('repairs an early 0018 database before ordered events are initialized', async () => {
     const database = new Database(':memory:');
     openDatabases.push(database);
@@ -63,9 +103,10 @@ describe('database migration repairs', () => {
     expect(event.sequence).toBe(1);
     expect(
       database
-        .query<{ name: string }, []>(
-          "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'session_event_causes'",
-        )
+        .query<
+          { name: string },
+          []
+        >("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'session_event_causes'")
         .get()?.name,
     ).toBe('session_event_causes');
   });

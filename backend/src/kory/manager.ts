@@ -1828,16 +1828,29 @@ export class KoryManager {
           const multiRequired =
             interactionMode !== 'plan' &&
             runSettings.agentExecutionMode === 'multi' &&
-            supportsKoryControlPlaneTools(provider.name) &&
             requiresMultiAgentDelegation(userMessage);
-          if (multiRequired && delegatedWorkerCount === 0 && !multiModeRetryIssued) {
-            multiModeRetryIssued = true;
+          if (multiRequired && delegatedWorkerCount === 0) {
+            if (!supportsKoryControlPlaneTools(provider.name)) {
+              messages.push({
+                role: 'assistant',
+                content: `MULTI-AGENT BLOCKED: ${provider.name} cannot invoke Kory's managed delegation tools in this build. The host refused to silently complete this non-trivial task as a single agent. Choose a control-plane-capable manager provider or switch Agent Mode.`,
+              });
+              break;
+            }
+            if (!multiModeRetryIssued) {
+              multiModeRetryIssued = true;
+              messages.push({
+                role: 'system',
+                content:
+                  'HOST ENFORCEMENT: Multi-Agent mode requires delegation for this non-trivial task. Decompose it into independent workstreams and call delegate_to_worker now. When two or more workstreams are independent, issue those delegate_to_worker calls together so Kory can execute them concurrently. Do not provide a final answer until at least one worker result has been synthesized.',
+              });
+              continue;
+            }
             messages.push({
-              role: 'system',
+              role: 'assistant',
               content:
-                'HOST ENFORCEMENT: Multi-Agent mode requires delegation for this non-trivial task. Decompose it into independent workstreams and call delegate_to_worker now. When two or more workstreams are independent, issue those delegate_to_worker calls together so Kory can execute them concurrently. Do not provide a final answer until at least one worker result has been synthesized.',
+                'MULTI-AGENT BLOCKED: The manager did not delegate after a host enforcement retry. Kory refused to report single-agent work as a Multi-Agent completion.',
             });
-            continue;
           }
           break;
         }
@@ -1867,12 +1880,27 @@ export class KoryManager {
               break;
             }
           }
-          for (const tc of completedToolCalls) {
-            if (abort.signal.aborted) {
-              stoppedByUser = true;
-              break;
-            }
-            const toolResult = await this.executeManagerToolCall(sessionId, tc, managerCtx);
+          const runTool = async (tc: CompletedToolCall) => ({
+            tc,
+            toolResult: await this.executeManagerToolCall(sessionId, tc, managerCtx),
+          });
+          const parallelDelegations =
+            completedToolCalls.length > 1 &&
+            completedToolCalls.every((tc) => tc.name === 'delegate_to_worker');
+          // Independent worker calls emitted together are safe to run concurrently:
+          // WorkerPipelineService gives each task its own isolated worktree and
+          // reconciles the results before returning them to the manager.
+          const executedCalls = parallelDelegations
+            ? await Promise.all(completedToolCalls.map(runTool))
+            : await (async () => {
+                const sequential: Array<Awaited<ReturnType<typeof runTool>>> = [];
+                for (const tc of completedToolCalls) {
+                  if (abort.signal.aborted) break;
+                  sequential.push(await runTool(tc));
+                }
+                return sequential;
+              })();
+          for (const { tc, toolResult } of executedCalls) {
             if (tc.name === 'delegate_to_worker' && !toolResult.isError) delegatedWorkerCount++;
             // Archive the full output locally so pruning never loses anything —
             // fetch_context can recover the exact content by this id.
@@ -1904,6 +1932,7 @@ export class KoryManager {
             const visionMsg = this.buildViewImageMessage(toolResult);
             if (visionMsg) messages.push(visionMsg);
           }
+          if (abort.signal.aborted) stoppedByUser = true;
         }
       }
 
