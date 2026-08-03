@@ -23,6 +23,7 @@ import type {
   Session,
   NotificationPayload,
   NativeCommandPayload,
+  KoryAskUserPayload,
 } from '@koryphaios/shared';
 import { sessionStore } from './sessions.svelte';
 import { authStore } from './auth.svelte';
@@ -36,6 +37,7 @@ import { feedStore } from './feed.svelte';
 import { agentStore } from './agents.svelte';
 import { notesStore } from './notes.svelte';
 import { goalStore } from './goals.svelte';
+import { goalDisplayStore } from './goal-display.svelte';
 import { isDemoMode } from '$lib/demo-flags';
 
 export type { FeedEntry };
@@ -56,10 +58,28 @@ let pendingPermissions = $state<PermissionRequest[]>([]);
 // Questions are per-session: a background chat's ask_user must survive
 // until the user switches back to it, and answering must target the
 // session that asked — not whichever chat happens to be open.
-let pendingQuestions = $state<
-  Map<string, { question: string; options: string[]; allowOther: boolean }>
->(new Map());
+let pendingQuestions = $state<Map<string, KoryAskUserPayload>>(new Map());
 let sessionChanges = $state<Map<string, ChangeSummary[]>>(new Map());
+export interface RewindPreview {
+  sessionId: string;
+  currentHash: string;
+  targetHash: string;
+  description: string;
+  evidence: {
+    model?: string;
+    cost?: number;
+    tokensIn?: number;
+    tokensOut?: number;
+    promptHash?: string;
+    timestamp: number;
+  };
+  filesChanged: Array<{ path: string; operation: 'create' | 'edit' | 'delete' }>;
+  diff: string;
+  message: string;
+}
+let rewindPreview = $state<RewindPreview | null>(null);
+let rewindApplying = $state(false);
+let rewindPreviewLoadingHash = $state<string | null>(null);
 
 interface DetectedContextFile {
   path: string;
@@ -181,9 +201,33 @@ function isWSMessageLike(value: unknown): value is WSMessage {
   return typeof candidate.type === 'string' && typeof candidate.timestamp === 'number';
 }
 
+function orderedEventMetadata(msg: WSMessage): Record<string, unknown> {
+  return {
+    ...(msg.sessionId ? { sessionId: msg.sessionId } : {}),
+    ...(msg.eventId ? { eventId: msg.eventId } : {}),
+    ...(Number.isSafeInteger(msg.epoch) ? { eventEpoch: msg.epoch } : {}),
+    ...(Number.isSafeInteger(msg.sequence)
+      ? { sequenceStart: msg.sequence, sequenceEnd: msg.sequence }
+      : {}),
+    ...(Number.isSafeInteger(msg.parentSequence) ? { parentSequence: msg.parentSequence } : {}),
+    ...(msg.replayed ? { replayed: true } : {}),
+  };
+}
+
 // ─── Message Handler ───────────────────────────────────────────────────────
 
 function handleMessage(msg: WSMessage) {
+  const eventEpoch = msg.epoch;
+  const eventSequence = msg.sequence;
+  if (
+    msg.sessionId &&
+    Number.isSafeInteger(eventEpoch) &&
+    Number.isSafeInteger(eventSequence)
+  ) {
+    const prior = realtimeCursors.get(msg.sessionId);
+    if (prior && prior.epoch === eventEpoch && eventSequence! <= prior.sequence) return;
+    realtimeCursors.set(msg.sessionId, { epoch: eventEpoch!, sequence: eventSequence! });
+  }
   const activeSessionId = sessionStore.activeSessionId;
   // Feed-affecting realtime events must carry an exact session identity.
   // Unscoped events are global control/catalog events only; treating them as
@@ -330,7 +374,11 @@ function handleMessage(msg: WSMessage) {
       // Answer text starting = the provider is done reasoning: freeze timers.
       if (isForActiveSession) feedStore.finalizeThinking(p.agentId, msg.timestamp);
       agentStore.appendAgentContent(p.agentId, p.content, msg.sessionId ?? undefined);
-      if (isForActiveSession) {
+      const alreadyPersisted =
+        msg.replayed &&
+        p.agentId === 'kory-manager' &&
+        feedStore.hasPersistedAssistantContaining(p.content, msg.timestamp);
+      if (isForActiveSession && !alreadyPersisted) {
         feedStore.removeAnalyzingThoughtEntries();
         feedStore.accumulateFeedEntry({
           timestamp: msg.timestamp,
@@ -339,6 +387,7 @@ function handleMessage(msg: WSMessage) {
           agentName: agents.get(p.agentId)?.identity.name ?? 'Worker',
           glowClass: feedStore.resolveGlowClass(agents.get(p.agentId)?.identity),
           text: p.content,
+          metadata: orderedEventMetadata(msg),
         });
       }
       if (msg.sessionId) {
@@ -349,7 +398,7 @@ function handleMessage(msg: WSMessage) {
           agentName: agentStore.getAgentFeedLabel(p.agentId),
           glowClass: feedStore.resolveGlowClass(agents.get(p.agentId)?.identity),
           text: p.content,
-          metadata: { sessionId: msg.sessionId },
+          metadata: { ...orderedEventMetadata(msg), sessionId: msg.sessionId },
         });
       }
       break;
@@ -379,8 +428,10 @@ function handleMessage(msg: WSMessage) {
           glowClass: feedStore.resolveGlowClass(agents.get(p.agentId)?.identity),
           text: p.thinking,
           thinkingStartedAt: feedStore.getThinkingStart(p.agentId, msg.timestamp),
-          metadata:
-            typeof p.thinkingTokens === 'number' ? { thinkingTokens: p.thinkingTokens } : {},
+          metadata: {
+            ...orderedEventMetadata(msg),
+            ...(typeof p.thinkingTokens === 'number' ? { thinkingTokens: p.thinkingTokens } : {}),
+          },
         });
       }
       if (msg.sessionId) {
@@ -392,7 +443,7 @@ function handleMessage(msg: WSMessage) {
           glowClass: feedStore.resolveGlowClass(agents.get(p.agentId)?.identity),
           text: p.thinking,
           thinkingStartedAt: feedStore.getThinkingStart(p.agentId, msg.timestamp),
-          metadata: { sessionId: msg.sessionId },
+          metadata: { ...orderedEventMetadata(msg), sessionId: msg.sessionId },
         });
       }
       break;
@@ -414,7 +465,11 @@ function handleMessage(msg: WSMessage) {
             agentName: agents.get(p.agentId)?.identity.name ?? 'Worker',
             glowClass: feedStore.resolveGlowClass(agents.get(p.agentId)?.identity),
             text: `Calling tool: ${p.toolCall.name}`,
-            metadata: { toolCall: p.toolCall, sourceProvider: p.sourceProvider },
+            metadata: {
+              ...orderedEventMetadata(msg),
+              toolCall: p.toolCall,
+              sourceProvider: p.sourceProvider,
+            },
           });
       }
       if (msg.sessionId) {
@@ -493,7 +548,11 @@ function handleMessage(msg: WSMessage) {
           agentName: agents.get(p.agentId)?.identity.name ?? 'Worker',
           glowClass: feedStore.resolveGlowClass(agents.get(p.agentId)?.identity),
           text: resultText,
-          metadata: { toolResult: p.toolResult, sourceProvider: p.sourceProvider },
+          metadata: {
+            ...orderedEventMetadata(msg),
+            toolResult: p.toolResult,
+            sourceProvider: p.sourceProvider,
+          },
         });
       }
       if (msg.sessionId) {
@@ -613,7 +672,7 @@ function handleMessage(msg: WSMessage) {
     }
 
     case 'kory.ask_user': {
-      const p = msg.payload as { question: string; options: string[]; allowOther: boolean };
+      const p = msg.payload as KoryAskUserPayload;
       const sid = msg.sessionId ?? activeSessionId;
       if (sid) {
         const next = new Map(pendingQuestions);
@@ -621,6 +680,8 @@ function handleMessage(msg: WSMessage) {
           question: p.question,
           options: p.options,
           allowOther: p.allowOther,
+          allowKeepChatting: p.allowKeepChatting,
+          questionId: p.questionId,
         });
         pendingQuestions = next;
       }
@@ -648,7 +709,23 @@ function handleMessage(msg: WSMessage) {
     }
 
     case 'goals.updated': {
-      goalStore.handleUpdated(msg.payload as { goal?: import('@koryphaios/shared').Goal; deletedId?: string });
+      const payload = msg.payload as {
+        goal?: import('@koryphaios/shared').Goal;
+        deletedId?: string;
+      };
+      const update = goalStore.handleUpdated(payload);
+      if (update.managerCreated && payload.goal) {
+        goalStore.selectedGoalId = payload.goal.id;
+        goalDisplayStore.update({ sidebar: true });
+        toastStore.success('Kory started a durable goal');
+        queueMicrotask(() =>
+          window.dispatchEvent(
+            new CustomEvent('kory:goal-action', {
+              detail: { action: 'goal_open', source: 'manager' },
+            }),
+          ),
+        );
+      }
       break;
     }
 
@@ -932,6 +1009,7 @@ function scheduleReconnect(url?: string) {
 // Sessions this client has subscribed to during this app run. Used to
 // restore server-side subscriptions after a reconnect.
 const subscribedSessions = new Set<string>();
+const realtimeCursors = new Map<string, { epoch: number; sequence: number }>();
 // Tracks what was actually sent on the current socket. This is distinct from
 // subscribedSessions, which is the desired set restored after reconnects.
 const sentSessionSubscriptions = new Set<string>();
@@ -942,8 +1020,15 @@ function subscribeToSession(sessionId: string) {
   if (wsConnection?.readyState !== WebSocket.OPEN) return;
   if (sentSessionSubscriptions.has(sessionId)) return;
   sentSessionSubscriptions.add(sessionId);
+  const cursor = realtimeCursors.get(sessionId);
   wsConnection.send(
-    JSON.stringify({ type: 'subscribe_session', sessionId, timestamp: Date.now() }),
+    JSON.stringify({
+      type: 'subscribe_session',
+      sessionId,
+      timestamp: Date.now(),
+      epoch: cursor?.epoch,
+      sequence: cursor?.sequence,
+    }),
   );
 }
 
@@ -1051,6 +1136,7 @@ function sendUserInput(sessionId: string, selection: string, text?: string) {
           sessionId,
           selection,
           text,
+          questionId: pendingQuestions.get(sessionId)?.questionId,
           timestamp: Date.now(),
         }),
       );
@@ -1143,24 +1229,68 @@ async function loadSessionMessages(
 
 async function rewind(hash: string) {
   const sessionId = sessionStore.activeSessionId;
-  if (!sessionId) return;
+  if (!sessionId || rewindPreviewLoadingHash) return;
+  if (busySessions.has(sessionId) || agentStore.isSessionRunning(sessionId)) {
+    toastStore.info('Stop the active run before rewinding this session');
+    return;
+  }
 
+  rewindPreviewLoadingHash = hash;
   try {
-    const res = await apiFetch(apiUrl(`/api/sessions/${sessionId}/rewind`), {
+    const res = await apiFetch(apiUrl(`/api/sessions/${sessionId}/rewind/preview`), {
       method: 'POST',
       body: JSON.stringify({ hash }),
     });
-    const data = await parseJsonResponse<{ ok?: boolean; message?: string }>(res);
-    if (data.ok) {
-      toastStore.success('Rewound successfully');
-      const messages = await sessionStore.fetchMessages(sessionId);
-      await loadSessionMessages(sessionId, messages);
-    } else {
-      toastStore.error(`Rewind failed: ${data.message}`);
-    }
+    const data = await parseJsonResponse<{
+      ok?: boolean;
+      data?: Omit<RewindPreview, 'sessionId'>;
+      message?: string;
+    }>(res);
+    if (!data.ok || !data.data)
+      throw new Error(data.message ?? 'Checkpoint cannot be safely restored');
+    rewindPreview = { ...data.data, sessionId };
   } catch (err) {
     console.error('Rewind failed:', err);
-    toastStore.error('Rewind failed');
+    toastStore.error(err instanceof Error ? err.message : 'Rewind preview failed');
+  } finally {
+    rewindPreviewLoadingHash = null;
+  }
+}
+
+function cancelRewind() {
+  if (!rewindApplying) rewindPreview = null;
+}
+
+async function confirmRewind() {
+  const preview = rewindPreview;
+  if (!preview || rewindApplying) return;
+  const sessionId = preview.sessionId;
+  if (sessionStore.activeSessionId !== sessionId) {
+    rewindPreview = null;
+    toastStore.error('The active session changed. Open the rewind preview again.');
+    return;
+  }
+  rewindApplying = true;
+  try {
+    const res = await apiFetch(apiUrl(`/api/sessions/${sessionId}/rewind`), {
+      method: 'POST',
+      body: JSON.stringify({
+        hash: preview.targetHash,
+        expectedCurrentHash: preview.currentHash,
+        confirmed: true,
+      }),
+    });
+    const data = await parseJsonResponse<{ ok?: boolean; message?: string }>(res);
+    if (!data.ok) throw new Error(data.message ?? 'Rewind failed');
+    rewindPreview = null;
+    toastStore.success('Session rewound successfully');
+    const messages = await sessionStore.fetchMessages(sessionId);
+    await loadSessionMessages(sessionId, messages);
+    window.dispatchEvent(new CustomEvent('kory:rewind-applied', { detail: { sessionId } }));
+  } catch (err) {
+    toastStore.error(err instanceof Error ? err.message : 'Rewind failed');
+  } finally {
+    rewindApplying = false;
   }
 }
 
@@ -1232,6 +1362,15 @@ export const wsStore = {
   get sessionChanges() {
     return sessionChanges;
   },
+  get rewindPreview() {
+    return rewindPreview;
+  },
+  get rewindApplying() {
+    return rewindApplying;
+  },
+  get rewindPreviewLoadingHash() {
+    return rewindPreviewLoadingHash;
+  },
   get activeFileEdits() {
     return activeFileEdits;
   },
@@ -1277,6 +1416,8 @@ export const wsStore = {
   clearFeed,
   activateSessionFeed,
   rewind,
+  confirmRewind,
+  cancelRewind,
   toggleYolo,
   setYoloMode,
   loadProvidersFromApi,

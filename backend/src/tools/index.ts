@@ -26,5 +26,7 @@ export { AskUserTool, AskManagerTool, DelegateToWorkerTool } from './interaction
 export { DelegateToJulesTool } from './jules';
 export { MCPDetectErrorsTool, MCPAnalyzeErrorTool, MCPSuggestFixesTool } from './mcp';
 export { FetchContextTool, PruneContextTool } from './context';
-export { CreateGoalTool } from './goals';
+export { CreateGoalTool, UpdateGoalTool } from './goals';
+export { LoadSkillDetailTool } from './skills';
+export { StartWorkflowTool, UpdateWorkflowTool } from './workflows';
 export { registerGitTools } from './git';

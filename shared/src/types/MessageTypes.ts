@@ -12,6 +12,16 @@ export interface ContentBlock {
   toolCall?: ToolCall;
   toolResult?: ToolResult;
   imageUrl?: string;
+  data?: string;
+  name?: string;
+  mimeType?: string;
+}
+
+export interface MessageAttachment {
+  type: 'image' | 'file';
+  data: string;
+  name: string;
+  mimeType?: string;
 }
 
 export interface Message {
@@ -26,6 +36,7 @@ export interface Message {
   cost?: number;
   variantGroupId?: string;
   variantIndex?: number;
+  attachments?: MessageAttachment[];
   createdAt: number;
 }
 

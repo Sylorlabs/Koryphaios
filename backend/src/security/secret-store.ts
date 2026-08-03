@@ -9,9 +9,10 @@
 // permissions and location. (The old XOR-with-'dev-key' "encryption" in
 // user-credentials.ts is theater — do not route secrets through it.)
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync, renameSync, chmodSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync, renameSync, chmodSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { serverLog } from '../logger';
+import { ensureSecureDir } from './fs-permissions';
 
 export const SECRET_FIELDS = ['apiKey', 'authToken'] as const;
 type SecretField = (typeof SECRET_FIELDS)[number];
@@ -34,7 +35,7 @@ export function loadProviderSecrets(projectRoot: string): ProviderSecrets {
 
 export function saveProviderSecrets(projectRoot: string, secrets: ProviderSecrets): void {
   const path = secretsPath(projectRoot);
-  mkdirSync(dirname(path), { recursive: true });
+  ensureSecureDir(dirname(path));
   const tmp = `${path}.${process.pid}.tmp`;
   writeFileSync(tmp, JSON.stringify(secrets, null, 2), { encoding: 'utf-8', mode: 0o600 });
   renameSync(tmp, path);

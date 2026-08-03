@@ -61,14 +61,14 @@ const config = parseArgs(process.argv);
 // to a tool registered in backend/src/tools/. The backend's /api/v1/mcp-bridge/execute
 // endpoint dispatches by name through the ToolRegistry.
 
-interface KoryToolDef {
+export interface KoryToolDef {
   name: string;
   description: string;
   inputSchema: Record<string, unknown>;
   role: 'manager' | 'worker' | 'critic' | 'any';
 }
 
-const KORY_TOOLS: KoryToolDef[] = [
+export const KORY_TOOLS: KoryToolDef[] = [
   // ── Filesystem tools ──
   { name: 'kory__read_file', description: 'Read a file from the working directory.', inputSchema: { type: 'object', properties: { path: { type: 'string' } }, required: ['path'] }, role: 'any' },
   { name: 'kory__write_file', description: 'Write content to a file (create or overwrite).', inputSchema: { type: 'object', properties: { path: { type: 'string' }, content: { type: 'string' } }, required: ['path', 'content'] }, role: 'worker' },
@@ -117,7 +117,20 @@ const KORY_TOOLS: KoryToolDef[] = [
   { name: 'kory__delegate_to_jules', description: 'Delegate a task to Google Jules (cloud async agent).', inputSchema: { type: 'object', properties: { task: { type: 'string' }, createPr: { type: 'boolean' }, branch: { type: 'string' } }, required: ['task'] }, role: 'manager' },
 
   // ── Goals ──
-  { name: 'kory__create_goal', description: 'Create a scoped goal for the current session.', inputSchema: { type: 'object', properties: { title: { type: 'string' }, description: { type: 'string' } }, required: ['title', 'description'] }, role: 'manager' },
+  { name: 'kory__create_goal', description: 'Create a durable Goal Mode goal only when the user explicitly asks to create, track, or turn work into a goal.', inputSchema: { type: 'object', properties: { objective: { type: 'string' }, scope: { type: 'string', enum: ['workspace', 'project', 'session'] }, planningDepth: { type: 'string', enum: ['minimal', 'adaptive', 'structured'] } }, required: ['objective'] }, role: 'manager' },
+  { name: 'kory__update_goal', description: 'Update a goal (status, checklist evidence, verification).', inputSchema: { type: 'object', properties: { goalId: { type: 'string' }, status: { type: 'string' }, checklistItemId: { type: 'string' }, evidence: { type: 'string' } }, required: ['goalId'] }, role: 'manager' },
+
+  // ── Workflows ──
+  { name: 'kory__start_workflow', description: 'Start a registered host-owned task workflow when the user explicitly asks or safe automatic selection is clearly relevant. Workflows cannot grant tools, create Goals, or change permissions.', inputSchema: { type: 'object', properties: { workflowId: { type: 'string', enum: ['design-quality'] }, task: { type: 'string' }, goalId: { type: 'string' } }, required: ['workflowId', 'task'] }, role: 'manager' },
+  { name: 'kory__update_workflow', description: 'Record stage evidence or a genuine blocker for a workflow run. The host advances stages; this does not complete a Goal.', inputSchema: { type: 'object', properties: { runId: { type: 'string' }, evidence: { type: 'string' }, status: { type: 'string', enum: ['evidence', 'blocked'] } }, required: ['runId', 'evidence', 'status'] }, role: 'manager' },
+
+  // ── Skills ──
+  { name: 'kory__load_skill_detail', description: 'Load the full instructions for an active local Koryphaios skill when the compact system-prompt representation omitted detail needed for the current task.', inputSchema: { type: 'object', properties: { name: { type: 'string' }, source: { type: 'string', enum: ['personal', 'project'] } }, required: ['name'] }, role: 'any' },
+
+  // ── MCP diagnostics ──
+  { name: 'kory__detect_errors', description: 'Detect MCP server errors from logs or runtime state.', inputSchema: { type: 'object', properties: { serverName: { type: 'string' } }, required: [] }, role: 'any' },
+  { name: 'kory__analyze_error', description: 'Analyze an MCP error and return a structured diagnosis.', inputSchema: { type: 'object', properties: { error: { type: 'string' }, serverName: { type: 'string' } }, required: ['error'] }, role: 'any' },
+  { name: 'kory__suggest_fixes', description: 'Suggest fixes for a detected MCP error.', inputSchema: { type: 'object', properties: { error: { type: 'string' }, diagnosis: { type: 'string' } }, required: ['error'] }, role: 'any' },
 
   // ── Git ──
   { name: 'kory__git_status', description: 'Get git status of the working directory.', inputSchema: { type: 'object', properties: {} }, role: 'any' },
@@ -130,7 +143,7 @@ const KORY_TOOLS: KoryToolDef[] = [
 ];
 
 /** Filter tools by role. Critic gets read-only; worker gets build tools; manager gets all. */
-function toolsForRole(role: string): KoryToolDef[] {
+export function toolsForRole(role: string): KoryToolDef[] {
   const r = role === 'coder' ? 'worker' : role;
   return KORY_TOOLS.filter((t) => {
     const tr = t.role as string | undefined;

@@ -8,7 +8,7 @@
 
 import type { ModelDef, ProviderConfig } from '@koryphaios/shared';
 import { spawn } from 'node:child_process';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { whichBinary } from './cli-detection';
 import { detectClineCLILogin } from './auth-utils';
 import { providerLog } from '../logger';
@@ -21,7 +21,7 @@ import {
   type ProviderMessage,
   type StreamRequest,
 } from './types';
-import { getCliBridge } from './cli-bridges';
+import { getCliBridge, getKoryphaiosClineHome } from './cli-bridges';
 
 const CLINE_STREAM_TIMEOUT_MS = 300_000;
 const MODELS_CACHE_TTL_MS = 5 * 60_000;
@@ -322,6 +322,51 @@ export class ClineProvider implements Provider {
       return;
     }
 
+    // ── Wire kory MCP server + rules into the isolated cline home ──────────
+    // Cline reads MCP servers from cline_mcp_settings.json and .clinerules as
+    // always-on rules. Writing these before each turn ensures the CLI
+    // discovers the kory__ tool catalog and Kory's session rules on startup.
+    const clineBridge = getCliBridge('cline');
+    const bridgeCtx = {
+      provider: 'cline' as const,
+      role: request.harnessRole ?? 'manager',
+      sandbox: request.sandbox,
+      workingDirectory: request.workingDirectory?.trim() || process.cwd(),
+      sessionId: request.sessionId,
+      systemPrompt: request.systemPrompt ?? '',
+      tools: request.tools ?? [],
+    };
+    const clineHome = getKoryphaiosClineHome();
+    try {
+      // MCP: write cline_mcp_settings.json with the kory server.
+      const mcpConfigs = clineBridge?.buildMcpConfig(bridgeCtx);
+      if (mcpConfigs && mcpConfigs.length > 0) {
+        const mcpConfigPath = join(clineHome, 'cline_mcp_settings.json');
+        const existing = existsSync(mcpConfigPath)
+          ? JSON.parse(readFileSync(mcpConfigPath, 'utf-8'))
+          : {};
+        existing.mcpServers = existing.mcpServers ?? {};
+        for (const srv of mcpConfigs) {
+          existing.mcpServers[srv.name] = {
+            command: srv.command,
+            args: srv.args,
+            env: srv.env,
+          };
+        }
+        writeFileSync(mcpConfigPath, JSON.stringify(existing, null, 2));
+      }
+      // Rules: write .clinerules with the Kory session rules.
+      const ruleFiles = clineBridge?.buildRules(bridgeCtx);
+      if (ruleFiles) {
+        for (const rule of ruleFiles) {
+          mkdirSync(clineHome, { recursive: true });
+          writeFileSync(rule.path, rule.content);
+        }
+      }
+    } catch (wiringErr) {
+      providerLog.warn({ err: wiringErr, provider: 'cline' }, 'Failed to wire kory MCP/rules for Cline');
+    }
+
     const args = [
       ...(request.harnessRole === 'critic' ? ['--plan'] : []),
       '--auto-approve',
@@ -343,10 +388,14 @@ export class ClineProvider implements Provider {
     const wrapped = request.sandbox
       ? wrapCommand(bin, args, { cwd, policy: request.sandbox })
       : { command: bin, args };
+    // Point the CLI at the isolated home so it discovers the kory MCP server
+    // and .clinerules we just wrote.
+    const clineEnv = { ...(jail?.env ?? { ...process.env }) };
+    clineEnv.CLINE_HOME = clineHome;
     const child = spawn(wrapped.command, wrapped.args, {
       cwd,
       stdio: ['ignore', 'pipe', 'pipe'],
-      env: jail?.env ?? { ...process.env },
+      env: clineEnv,
     });
 
     const onAbort = () => {

@@ -62,6 +62,13 @@ export interface WSMessage<T = unknown> {
   timestamp: number;
   sessionId?: string;
   agentId?: string;
+  /** Durable per-session ordering metadata. Present on replayable session events. */
+  eventId?: string;
+  epoch?: number;
+  sequence?: number;
+  parentSequence?: number;
+  /** True when the server is replaying a previously persisted event. */
+  replayed?: boolean;
 }
 
 export type WSMessagePayload =

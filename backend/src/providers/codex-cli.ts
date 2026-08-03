@@ -6,6 +6,8 @@
 import type { ModelDef, ProviderConfig } from '@koryphaios/shared';
 import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
+import { mkdirSync, writeFileSync } from 'node:fs';
+import { dirname } from 'node:path';
 import { whichBinary } from './cli-detection';
 import { discoverCliAccounts, type DiscoveredCliAccount } from './cli-accounts';
 import {
@@ -16,7 +18,7 @@ import {
   type StreamRequest,
 } from './types';
 import { providerLog } from '../logger';
-import { getCliBridge } from './cli-bridges';
+import { getCliBridge, getKoryphaiosCodexHome } from './cli-bridges';
 
 const CODEX_TIMEOUT_MS = 300_000;
 const CODEX_MODEL_LIST_TIMEOUT_MS = 15_000;
@@ -301,6 +303,33 @@ export class CodexCliProvider implements Provider {
 
     const prompt = buildPrompt(request.systemPrompt, request.messages, request.tools, request.harnessRole);
     const sandbox = request.harnessRole === 'critic' ? 'read-only' : 'workspace-write';
+
+    // ── Wire rules (AGENTS.md) into the isolated codex home ────────────────
+    // Codex has no MCP support, so the <KORY_TOOL_CALL> envelope in the prompt
+    // is the bridge mechanism. But Codex DOES read AGENTS.md as always-on
+    // rules — writing it ensures the CLI follows Kory's session conventions.
+    const codexBridge = getCliBridge('codex');
+    const bridgeCtx = {
+      provider: 'codex' as const,
+      role: request.harnessRole ?? 'manager',
+      sandbox: request.sandbox,
+      workingDirectory: request.workingDirectory?.trim() || process.cwd(),
+      sessionId: request.sessionId,
+      systemPrompt: request.systemPrompt ?? '',
+      tools: request.tools ?? [],
+    };
+    try {
+      const ruleFiles = codexBridge?.buildRules(bridgeCtx);
+      if (ruleFiles) {
+        for (const rule of ruleFiles) {
+          mkdirSync(dirname(rule.path), { recursive: true });
+          writeFileSync(rule.path, rule.content);
+        }
+      }
+    } catch (wiringErr) {
+      providerLog.warn({ err: wiringErr, provider: 'codex' }, 'Failed to write rules file for Codex');
+    }
+
     const args = [
       '--ask-for-approval',
       'never',

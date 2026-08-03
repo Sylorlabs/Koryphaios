@@ -6,6 +6,11 @@ import { toolLog } from '../logger';
 
 export interface ToolContext {
   sessionId: string;
+  activeProvider?: string;
+  activeModel?: string;
+  reasoningLevel?: string;
+  goalId?: string;
+  goalItemId?: string;
   /** Optional agent identifier for backward compatibility in tests and callsites. */
   agentId?: string;
   workingDirectory: string;

@@ -43,8 +43,17 @@
 
   onMount(() => {
     void refresh();
-    const timer = setInterval(() => void refresh(), 2500);
-    return () => clearInterval(timer);
+    // Only poll while background shells exist — avoids 1,440 idle HTTP
+    // requests per hour when no shells are running.
+    let timer: ReturnType<typeof setInterval> | null = null;
+    $effect(() => {
+      if (shells.length > 0) {
+        if (!timer) timer = setInterval(() => void refresh(), 2500);
+      } else {
+        if (timer) { clearInterval(timer); timer = null; }
+      }
+    });
+    return () => { if (timer) clearInterval(timer); };
   });
 </script>
 

@@ -7,7 +7,7 @@
 // chat feed via /api/workspace/raw.
 
 import { existsSync, statSync } from 'node:fs';
-import { join, extname } from 'node:path';
+import { join, extname, isAbsolute } from 'node:path';
 import { validatePathAccess } from '../security';
 import type { Tool, ToolContext, ToolCallInput, ToolCallOutput } from './registry';
 
@@ -47,7 +47,7 @@ export class ViewImageTool implements Tool {
 
   async run(ctx: ToolContext, call: ToolCallInput): Promise<ToolCallOutput> {
     const rel = String(call.input.path ?? '');
-    const absPath = rel.startsWith('/') ? rel : join(ctx.workingDirectory, rel);
+    const absPath = isAbsolute(rel) ? rel : join(ctx.workingDirectory, rel);
     const fail = (output: string): ToolCallOutput => ({
       callId: call.id,
       name: this.name,

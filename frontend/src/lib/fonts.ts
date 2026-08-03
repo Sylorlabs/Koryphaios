@@ -1,60 +1,67 @@
-import '@fontsource/dm-sans/300.css';
-import '@fontsource/dm-sans/400.css';
-import '@fontsource/dm-sans/500.css';
-import '@fontsource/dm-sans/600.css';
-import '@fontsource/dm-sans/700.css';
-import '@fontsource/fira-code/400.css';
-import '@fontsource/fira-code/500.css';
-import '@fontsource/fira-code/600.css';
-import '@fontsource/fira-code/700.css';
-import '@fontsource/ibm-plex-mono/400.css';
-import '@fontsource/ibm-plex-mono/500.css';
-import '@fontsource/ibm-plex-mono/600.css';
-import '@fontsource/ibm-plex-mono/700.css';
-import '@fontsource/inter/300.css';
-import '@fontsource/inter/400.css';
-import '@fontsource/inter/500.css';
-import '@fontsource/inter/600.css';
-import '@fontsource/inter/700.css';
-import '@fontsource/jetbrains-mono/400.css';
-import '@fontsource/jetbrains-mono/500.css';
-import '@fontsource/jetbrains-mono/600.css';
-import '@fontsource/jetbrains-mono/700.css';
-import '@fontsource/outfit/300.css';
-import '@fontsource/outfit/400.css';
-import '@fontsource/outfit/500.css';
-import '@fontsource/outfit/600.css';
-import '@fontsource/outfit/700.css';
-import '@fontsource/plus-jakarta-sans/300.css';
-import '@fontsource/plus-jakarta-sans/400.css';
-import '@fontsource/plus-jakarta-sans/500.css';
-import '@fontsource/plus-jakarta-sans/600.css';
-import '@fontsource/plus-jakarta-sans/700.css';
-import '@fontsource/roboto/300.css';
-import '@fontsource/roboto/400.css';
-import '@fontsource/roboto/500.css';
-import '@fontsource/roboto/700.css';
-import '@fontsource/source-code-pro/400.css';
-import '@fontsource/source-code-pro/500.css';
-import '@fontsource/source-code-pro/600.css';
-import '@fontsource/source-code-pro/700.css';
-import '@fontsource/space-grotesk/300.css';
-import '@fontsource/space-grotesk/400.css';
-import '@fontsource/space-grotesk/500.css';
-import '@fontsource/space-grotesk/600.css';
-import '@fontsource/space-grotesk/700.css';
-import '@fontsource/geist-sans/300.css';
-import '@fontsource/geist-sans/400.css';
-import '@fontsource/geist-sans/500.css';
-import '@fontsource/geist-sans/600.css';
-import '@fontsource/geist-sans/700.css';
-// Serif + slab — genuinely distinct from the sans/mono options.
-import '@fontsource/source-serif-4/400.css';
-import '@fontsource/source-serif-4/500.css';
-import '@fontsource/source-serif-4/600.css';
-import '@fontsource/source-serif-4/700.css';
-import '@fontsource/roboto-slab/300.css';
-import '@fontsource/roboto-slab/400.css';
-import '@fontsource/roboto-slab/500.css';
-import '@fontsource/roboto-slab/600.css';
-import '@fontsource/roboto-slab/700.css';
+// Lazy font loading — only loads the CSS for the selected UI font plus the
+// fixed mono font (JetBrains Mono, used for code blocks regardless of the UI
+// font selection). This replaces the old eager import of all 13 font packages
+// × 4-5 weights (60 CSS files), which Vite had to process and the browser had
+// to parse on every page load.
+//
+// The font picker preview in SettingsDrawer needs all fonts visible, so
+// `loadAllFontsForPicker()` is called when the settings drawer opens. This
+// keeps the common case (settings closed) light while preserving the preview.
+
+import type { FontFamily } from './stores/theme.svelte';
+
+// Map each FontFamily id to its @fontsource package name.
+// berkeley-mono has no @fontsource package — it falls back to JetBrains Mono.
+const FONT_PACKAGE: Partial<Record<FontFamily, string>> = {
+  inter: 'inter',
+  geist: 'geist-sans',
+  jetbrains: 'jetbrains-mono',
+  roboto: 'roboto',
+  outfit: 'outfit',
+  'space-grotesk': 'space-grotesk',
+  'dm-sans': 'dm-sans',
+  'plus-jakarta': 'plus-jakarta-sans',
+  'source-code-pro': 'source-code-pro',
+  'ibm-plex-mono': 'ibm-plex-mono',
+  'fira-code': 'fira-code',
+  'source-serif': 'source-serif-4',
+  'roboto-slab': 'roboto-slab',
+};
+
+const WEIGHTS = ['300', '400', '500', '600', '700'];
+
+// Track which fonts have been loaded so we don't re-import.
+const loaded = new Set<string>();
+
+/** Dynamically import all CSS weights for a single @fontsource package. */
+async function loadPackage(pkg: string): Promise<void> {
+  if (loaded.has(pkg)) return;
+  loaded.add(pkg);
+  await Promise.all(
+    WEIGHTS.map((w) =>
+      import(`@fontsource/${pkg}/${w}.css`).catch(() => {
+        // Some packages don't ship all weights — silently skip.
+        loaded.delete(pkg);
+      }),
+    ),
+  );
+}
+
+/** Load the CSS for the selected UI font. Safe to call repeatedly. */
+export async function loadFont(id: FontFamily): Promise<void> {
+  const pkg = FONT_PACKAGE[id];
+  if (!pkg) return; // berkeley-mono etc. — falls back via CSS font stack
+  await loadPackage(pkg);
+}
+
+/** Load JetBrains Mono (used for code blocks, --font-mono, regardless of UI font). */
+export async function loadMonoFont(): Promise<void> {
+  await loadPackage('jetbrains-mono');
+}
+
+/** Load every font package — used by the SettingsDrawer font picker so each
+ *  preview renders in its own typeface. */
+export async function loadAllFontsForPicker(): Promise<void> {
+  const packages = [...new Set(Object.values(FONT_PACKAGE))];
+  await Promise.all(packages.map((pkg) => loadPackage(pkg)));
+}

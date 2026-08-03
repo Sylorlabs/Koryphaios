@@ -18,7 +18,9 @@
     Target,
     Pause,
     Play,
-    ArrowUp
+    ArrowUp,
+    Square,
+    RotateCcw,
   } from 'lucide-svelte';
   import { getModKeyName } from '$lib/utils/platform';
   import { modeStore } from '$lib/stores/mode.svelte';
@@ -56,6 +58,7 @@
     { id: 'open_project_file', label: 'Import Project', description: 'Load project from a local file', icon: FileCode, category: 'Project' },
     { id: 'open_project_folder', label: 'Open Project From Folder', description: 'Load project from a folder on your computer', icon: FolderOpen, category: 'Project' },
     { id: 'session_compact', label: 'Compact Session', description: 'Request an implementation-focused session summary', icon: FileCode, category: 'Session' },
+    { id: 'open_time_travel', label: 'Time Travel', description: 'Inspect and restore recorded states from this session', icon: RotateCcw, category: 'Session' },
     { id: 'toggle_sidebar', label: 'Toggle Sidebar', description: 'Show or hide the session sidebar', icon: Sidebar, shortcut: 'B', category: 'View' },
     { id: 'toggle_zen_mode', label: 'Toggle Zen Mode', description: 'Focus on the conversation', icon: Layout, shortcut: 'Shift+Z', category: 'View' },
     { id: 'toggle_theme', label: 'Switch Theme', description: 'Open quick theme preset picker', icon: SunMoon, category: 'View' },
@@ -68,6 +71,7 @@
     { id: 'goal_invoke', label: 'Ask Manager to Advance Goal', description: 'Dispatch the selected ready checklist item through the manager', icon: Play, category: 'Goals' },
     { id: 'goal_pause', label: 'Pause Active Goal', description: 'Pause the selected goal', icon: Pause, category: 'Goals' },
     { id: 'goal_resume', label: 'Resume Active Goal', description: 'Resume the selected paused goal', icon: Play, category: 'Goals' },
+    { id: 'goal_stop', label: 'Stop Active Goal', description: 'Permanently stop the selected goal after confirmation', icon: Square, category: 'Goals' },
     { id: 'goal_prioritize', label: 'Prioritize Active Goal', description: 'Move the selected goal ahead of other eligible work', icon: ArrowUp, category: 'Goals' },
     // Mode switches — each only shows in the OTHER mode
     { id: 'mode_advanced', label: 'Switch to Advanced Mode', description: 'Full controls: git panel, agents, cost tracking', icon: Command, category: 'System', mode: 'beginner' },

@@ -1,5 +1,6 @@
 <script lang="ts">
-  import { untrack } from 'svelte';
+  import { onMount, untrack } from 'svelte';
+  import { useNow } from '$lib/utils/now-signal.svelte';
   import { sessionStore } from '$lib/stores/sessions.svelte';
   import { wsStore } from '$lib/stores/websocket.svelte';
   import { toastStore } from '$lib/stores/toast.svelte';
@@ -20,11 +21,15 @@
     LogOut,
     UserPlus,
     ShieldAlert,
+    Target,
   } from 'lucide-svelte';
   import AnimatedStatusIcon from './AnimatedStatusIcon.svelte';
   import ConfirmDialog from './ConfirmDialog.svelte';
   import ActiveGoals from './ActiveGoals.svelte';
   import { goalDisplayStore } from '$lib/stores/goal-display.svelte';
+  import { goalStore } from '$lib/stores/goals.svelte';
+  import { formatGoalRuntime, isActiveGoal } from '$lib/utils/goal-actions';
+  import { goalProgress } from '@koryphaios/shared';
 
   interface Props {
     currentSessionId?: string;
@@ -38,8 +43,27 @@
   let showConfirmDialog = $state<boolean>(false);
   let sessionToDeleteId = $state<string>('');
   let creating = $state(false);
+  let goalClock = $state(Date.now());
+  const nowClock = useNow();
+  $effect(() => { goalClock = nowClock.now; });
   // Track which session we last loaded feed for, so we load when active changes (e.g. new session from +)
   let lastLoadedSessionId = $state<string>('');
+
+  onMount(() => {
+    void goalStore.refresh();
+    return () => nowClock.unsubscribe();
+  });
+
+  const goalsForSession = (sessionId: string) => goalStore.goals.filter((goal) =>
+    isActiveGoal(goal) && goal.execution?.sessionId === sessionId
+  );
+
+  function openSessionGoal(sessionId: string, goalId: string) {
+    void selectSession(sessionId);
+    goalStore.selectedGoalId = goalId;
+    goalDisplayStore.update({ sidebar: true });
+    queueMicrotask(() => window.dispatchEvent(new CustomEvent('kory:goal-action', { detail: 'goal_open' })));
+  }
 
   $effect(() => {
     // Keep currentSessionId in sync if needed by other parts of the sidebar
@@ -323,6 +347,8 @@
           {group.label}
         </div>
         {#each group.sessions as session (session.id)}
+          {@const sessionGoals = goalsForSession(session.id)}
+          {@const primaryGoal = sessionGoals[0]}
           <div
             role="button"
             tabindex="0"
@@ -401,6 +427,14 @@
                     phase={wsStore.koryPhase}
                   />
                 </div>
+              {:else if primaryGoal}
+                <div
+                  class="shrink-0 flex items-center justify-center rounded-lg"
+                  style="width: 18px; height: 18px; background: color-mix(in srgb, var(--color-accent) 14%, transparent);"
+                  title="This chat is assigned to an active goal"
+                >
+                  <Target size={12} style="color: var(--color-accent);" />
+                </div>
               {:else}
                 <div
                   class="shrink-0 flex items-center justify-center rounded-lg"
@@ -420,6 +454,20 @@
                       style="font-size: 9px; color: var(--color-accent); background: color-mix(in srgb, var(--color-accent) 14%, transparent);"
                       aria-label="Currently open chat"
                     >Open</span>
+                  {/if}
+                  {#if primaryGoal}
+                    <button
+                      type="button"
+                      class="inline-flex max-w-[170px] items-center gap-1 rounded-full px-1.5 py-0.5 font-semibold"
+                      style="font-size: 9px; color: var(--color-accent); background: color-mix(in srgb, var(--color-accent) 14%, transparent);"
+                      title={sessionGoals.map((goal) => goal.objective).join('\n')}
+                      aria-label={`${sessionGoals.length > 1 ? `${sessionGoals.length} goals assigned to this chat` : `Goal ${primaryGoal.status}: ${primaryGoal.objective}`}. Active time ${formatGoalRuntime(primaryGoal, goalClock)}`}
+                      onclick={(event) => { event.stopPropagation(); openSessionGoal(session.id, primaryGoal.id); }}
+                    >
+                      <Target size={9} class="shrink-0" />
+                      <span class="truncate">{sessionGoals.length > 1 ? `${sessionGoals.length} goals` : primaryGoal.status === 'blocked' ? 'Goal blocked' : primaryGoal.status === 'paused' ? 'Goal paused' : `Goal ${goalProgress(primaryGoal)}%`}</span>
+                      <span class="shrink-0 opacity-70">· {formatGoalRuntime(primaryGoal, goalClock)}</span>
+                    </button>
                   {/if}
                   {#if wsStore.pendingPermissions.some((p) => p.sessionId === session.id) && sessionStore.activeSessionId !== session.id}
                     <!-- A backgrounded session stalled on an approval must never

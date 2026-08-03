@@ -1,9 +1,10 @@
 // Local Authentication Manager - Zero-Trust Local Architecture
 import { timingSafeEqual, randomBytes, createHmac, scryptSync } from 'crypto';
-import { readFileSync, writeFileSync, existsSync, mkdirSync, chmodSync } from 'fs';
+import { readFileSync, writeFileSync, existsSync, chmodSync } from 'fs';
 import { join } from 'path';
 import { serverLog } from '../logger';
 import { PROJECT_ROOT } from '../runtime/paths';
+import { ensureSecureDir } from '../security/fs-permissions';
 
 export interface SessionToken {
   readonly id: string;
@@ -42,9 +43,9 @@ export class LocalAuthManager {
     const tokenDir = join(PROJECT_ROOT, LocalAuthManager.TOKEN_DIR);
     const tokenPath = join(tokenDir, LocalAuthManager.TOKEN_FILE);
 
-    if (!existsSync(tokenDir)) {
-      mkdirSync(tokenDir, { recursive: true, mode: 0o700 });
-    }
+    // Always ensure 0o700, even if the dir already exists from an older build
+    // that created it with a looser umask.
+    ensureSecureDir(tokenDir);
 
     if (existsSync(tokenPath)) {
       try {

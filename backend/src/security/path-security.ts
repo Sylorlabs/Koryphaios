@@ -79,8 +79,13 @@ export function validatePathAccess(
   // We use normalize first to clean up the path
   const normalizedPath = normalize(pathToValidate);
 
-  // After normalization, check again for traversal (catches tricky cases)
-  if (normalizedPath.startsWith('..') || normalizedPath.includes('/../')) {
+  // After normalization, check again for traversal (catches tricky cases).
+  // Check both Unix (/) and Windows (\) separators.
+  if (
+    normalizedPath.startsWith('..') ||
+    normalizedPath.includes('/../') ||
+    normalizedPath.includes('\\..\\')
+  ) {
     return { allowed: false, reason: 'Path resolves outside allowed directory' };
   }
 

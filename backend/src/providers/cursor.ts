@@ -8,6 +8,7 @@
 
 import type { ModelDef, ProviderConfig } from '@koryphaios/shared';
 import { spawn } from 'node:child_process';
+import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { whichBinary } from './cli-detection';
 import { detectCursorCLILogin } from './auth-utils';
 import { providerLog } from '../logger';
@@ -20,7 +21,7 @@ import {
   type ProviderMessage,
   type StreamRequest,
 } from './types';
-import { getCliBridge } from './cli-bridges';
+import { getCliBridge, getKoryphaiosCursorHome } from './cli-bridges';
 
 const CURSOR_STREAM_TIMEOUT_MS = 300_000;
 const MODELS_CACHE_TTL_MS = 5 * 60_000;
@@ -328,6 +329,51 @@ export class CursorProvider implements Provider {
       return;
     }
 
+    // ── Wire kory MCP server + rules into the isolated cursor home ─────────
+    // Cursor reads MCP servers from its config and .cursorrules as always-on
+    // rules. Writing these before each turn ensures the CLI discovers the
+    // kory__ tool catalog and Kory's session rules on startup.
+    const cursorBridge = getCliBridge('cursor');
+    const bridgeCtx = {
+      provider: 'cursor' as const,
+      role: request.harnessRole ?? 'manager',
+      sandbox: request.sandbox,
+      workingDirectory: request.workingDirectory?.trim() || process.cwd(),
+      sessionId: request.sessionId,
+      systemPrompt: request.systemPrompt ?? '',
+      tools: request.tools ?? [],
+    };
+    const cursorHome = getKoryphaiosCursorHome();
+    try {
+      // MCP: write the kory server config so the CLI gets kory__ tools.
+      const mcpConfigs = cursorBridge?.buildMcpConfig(bridgeCtx);
+      if (mcpConfigs && mcpConfigs.length > 0) {
+        const mcpConfigPath = join(cursorHome, 'mcp.json');
+        const existing = existsSync(mcpConfigPath)
+          ? JSON.parse(readFileSync(mcpConfigPath, 'utf-8'))
+          : {};
+        existing.mcpServers = existing.mcpServers ?? {};
+        for (const srv of mcpConfigs) {
+          existing.mcpServers[srv.name] = {
+            command: srv.command,
+            args: srv.args,
+            env: srv.env,
+          };
+        }
+        writeFileSync(mcpConfigPath, JSON.stringify(existing, null, 2));
+      }
+      // Rules: write .cursorrules with the Kory session rules.
+      const ruleFiles = cursorBridge?.buildRules(bridgeCtx);
+      if (ruleFiles) {
+        for (const rule of ruleFiles) {
+          mkdirSync(cursorHome, { recursive: true });
+          writeFileSync(rule.path, rule.content);
+        }
+      }
+    } catch (wiringErr) {
+      providerLog.warn({ err: wiringErr, provider: 'cursor' }, 'Failed to wire kory MCP/rules for Cursor');
+    }
+
     const args = [
       '-p',
       prompt,
@@ -347,10 +393,14 @@ export class CursorProvider implements Provider {
     const wrapped = request.sandbox
       ? wrapCommand(bin, args, { cwd, policy: request.sandbox })
       : { command: bin, args };
+    // Point the CLI at the isolated home so it discovers the kory MCP server
+    // and .cursorrules we just wrote.
+    const cursorEnv = { ...(jail?.env ?? { ...process.env }) };
+    cursorEnv.CURSOR_CONFIG_DIR = cursorHome;
     const child = spawn(wrapped.command, wrapped.args, {
       cwd,
       stdio: ['ignore', 'pipe', 'pipe'],
-      env: jail?.env ?? { ...process.env },
+      env: cursorEnv,
     });
 
     const onAbort = () => {

@@ -12,6 +12,11 @@ export interface Session {
   /** Absolute path of the project folder this chat belongs to. Sessions without
    *  one are "global" (created before project scoping, or with no folder open). */
   workingDirectory?: string;
+  /** Persisted per-conversation capability mode. Plan mode is read-only apart
+   * from its dedicated planning note and explicit durable-preference writes. */
+  interactionMode?: 'act' | 'plan';
+  /** Stable note owned by this planning conversation. */
+  planNoteId?: string;
   messageCount: number;
   totalTokensIn: number;
   totalTokensOut: number;

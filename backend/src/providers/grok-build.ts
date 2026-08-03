@@ -16,7 +16,7 @@
 import type { ProviderConfig, ModelDef } from '@koryphaios/shared';
 import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { existsSync, readFileSync, statSync } from 'node:fs';
+import { existsSync, readFileSync, statSync, writeFileSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { homedir, tmpdir } from 'node:os';
 import { buildSoftJail, wrapCommand } from '../collaboration/sandbox-runner';
@@ -33,7 +33,7 @@ import { detectGrokCLILogin } from './auth-utils';
 import { whichBinary } from './cli-detection';
 import { providerLog } from '../logger';
 import { isModelListCacheFresh } from './model-list-cache';
-import { getCliBridge } from './cli-bridges';
+import { getCliBridge, getKoryphaiosGrokHome } from './cli-bridges';
 
 const GROK_STREAM_TIMEOUT_MS = 300_000;
 const DEFAULT_CLI_MODEL = GrokModels[0]?.apiModelId ?? 'grok-composer-2.5-fast';
@@ -96,6 +96,52 @@ export class GrokBuildProvider implements Provider {
 
     const cliModel = this.resolveCliModel(request.model);
     const grokSessionId = randomUUID();
+
+    // ── Wire kory MCP server + rules into the isolated grok home ───────────
+    // Grok reads MCP servers from its config and .grokrules as always-on
+    // rules. Writing these before each turn ensures the CLI discovers the
+    // kory__ tool catalog and Kory's session rules on startup.
+    const grokBridge = getCliBridge('grok');
+    const bridgeCtx = {
+      provider: 'grok' as const,
+      role: request.harnessRole ?? 'manager',
+      sandbox: request.sandbox,
+      workingDirectory: request.workingDirectory?.trim() || process.cwd(),
+      sessionId: request.sessionId,
+      systemPrompt: request.systemPrompt ?? '',
+      tools: request.tools ?? [],
+    };
+    const grokHome = getKoryphaiosGrokHome();
+    try {
+      // MCP: write the kory server config so the CLI gets kory__ tools.
+      const mcpConfigs = grokBridge?.buildMcpConfig(bridgeCtx);
+      if (mcpConfigs && mcpConfigs.length > 0) {
+        const mcpConfigPath = join(grokHome, 'mcp.json');
+        const existing = existsSync(mcpConfigPath)
+          ? JSON.parse(readFileSync(mcpConfigPath, 'utf-8'))
+          : {};
+        existing.mcpServers = existing.mcpServers ?? {};
+        for (const srv of mcpConfigs) {
+          existing.mcpServers[srv.name] = {
+            command: srv.command,
+            args: srv.args,
+            env: srv.env,
+          };
+        }
+        writeFileSync(mcpConfigPath, JSON.stringify(existing, null, 2));
+      }
+      // Rules: write .grokrules with the Kory session rules.
+      const ruleFiles = grokBridge?.buildRules(bridgeCtx);
+      if (ruleFiles) {
+        for (const rule of ruleFiles) {
+          mkdirSync(grokHome, { recursive: true });
+          writeFileSync(rule.path, rule.content);
+        }
+      }
+    } catch (wiringErr) {
+      providerLog.warn({ err: wiringErr, provider: 'grok' }, 'Failed to wire kory MCP/rules for Grok');
+    }
+
     const args = [
       '-p',
       prompt,
@@ -168,10 +214,14 @@ export class GrokBuildProvider implements Provider {
     const wrapped = request.sandbox
       ? wrapCommand(bin, args, { cwd, policy: request.sandbox })
       : { command: bin, args };
+    // Point the CLI at the isolated home so it discovers the kory MCP server
+    // and .grokrules we just wrote.
+    const grokEnv = { ...(jail?.env ?? { ...process.env }) };
+    grokEnv.GROK_HOME = grokHome;
     const child = spawn(wrapped.command, wrapped.args, {
       cwd,
       stdio: ['ignore', 'pipe', 'pipe'],
-      env: jail?.env ?? { ...process.env },
+      env: grokEnv,
     });
 
     const onAbort = () => {

@@ -661,6 +661,12 @@ export const MIGRATIONS: Migration[] = [
     `,
     down: `DROP INDEX IF EXISTS idx_goals_scope_status; DROP TABLE IF EXISTS goals;`,
   },
+  {
+    version: '0021',
+    description: 'Persist durable Goal Mode execution routing',
+    up: `ALTER TABLE goals ADD COLUMN execution TEXT;`,
+    down: ``,
+  },
 ];
 
 // ─── Migration Runner ────────────────────────────────────────────────────────

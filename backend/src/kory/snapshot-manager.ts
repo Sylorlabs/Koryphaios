@@ -1,5 +1,5 @@
 import { mkdirSync, existsSync, readdirSync, rmSync, statSync } from 'node:fs';
-import { join, relative, dirname } from 'node:path';
+import { join, relative, dirname, isAbsolute } from 'node:path';
 import { koryLog } from '../logger';
 
 export class SnapshotManager {
@@ -28,7 +28,7 @@ export class SnapshotManager {
     }
 
     for (const filePath of filePaths) {
-      const absPath = filePath.startsWith('/') ? filePath : join(workingDirectory, filePath);
+      const absPath = isAbsolute(filePath) ? filePath : join(workingDirectory, filePath);
       if (existsSync(absPath) && statSync(absPath).isFile()) {
         // preserve directory structure inside snapshot
         const relPath = relative(workingDirectory, absPath);

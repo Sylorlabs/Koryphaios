@@ -9,6 +9,12 @@ const { readFileSync, existsSync } = await import('node:fs');
 const { resolve } = await import('node:path');
 const net = await import('node:net');
 
+// On Windows, `spawn('bun', ...)` fails with ENOENT because Node/Bun's spawn
+// doesn't consult PATHEXT — the binary on disk is `bun.exe`. Using `shell: true`
+// on Windows lets the shell resolve the extension; on Unix it's unnecessary
+// (and would interfere with signal handling), so we only enable it there.
+const SPAWN_SHELL = process.platform === 'win32' ? true : false;
+
 type Child = ReturnType<typeof spawn>;
 
 type AppConfig = {
@@ -322,6 +328,7 @@ async function main() {
       cwd: BACKEND_DIR,
       env: sharedEnv,
       stdio: ['ignore', 'pipe', 'pipe'],
+      shell: SPAWN_SHELL,
     });
     track('backend', backend);
     pipeLogs('backend', backend.stdout, colors.dim);
@@ -357,6 +364,7 @@ async function main() {
           VITE_BACKEND_WS_URL: websocketUrl,
         },
         stdio: ['ignore', 'pipe', 'pipe'],
+        shell: SPAWN_SHELL,
       },
     );
     track('frontend', frontend);
@@ -374,6 +382,7 @@ async function main() {
     cwd: DESKTOP_DIR,
     env: sharedEnv,
     stdio: 'inherit',
+    shell: SPAWN_SHELL,
   });
   track('tauri', tauri);
 

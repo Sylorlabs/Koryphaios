@@ -10,6 +10,7 @@ import type { KoryManager } from '../kory/manager';
 import type { ProviderRegistry } from '../providers';
 import { validateSessionId } from '../security';
 import { serverLog } from '../logger';
+import { getPendingQuestion } from '../stores/pending-question-store';
 
 // ─── Types ─────────────────────────────────────────────────────────────────────
 
@@ -91,7 +92,21 @@ export async function handleWSMessage(
       case 'subscribe_session': {
         const sessionId = msg.sessionId;
         if (sessionId && validateSessionId(sessionId) && (await sessions.get(sessionId))) {
-          wsManager.subscribeClientToSession(ws.data.id, sessionId);
+          wsManager.subscribeClientToSession(ws.data.id, sessionId, {
+            epoch: Number.isSafeInteger(msg.epoch) ? msg.epoch : undefined,
+            sequence: Number.isSafeInteger(msg.sequence) ? msg.sequence : undefined,
+          });
+          const pending = await getPendingQuestion(sessionId);
+          if (pending) {
+            ws.send(
+              JSON.stringify({
+                type: 'kory.ask_user',
+                sessionId,
+                payload: pending,
+                timestamp: Date.now(),
+              } satisfies WSMessage),
+            );
+          }
           serverLog.debug({ clientId: ws.data.id, sessionId }, 'Client subscribed to session');
         }
         break;
@@ -99,9 +114,12 @@ export async function handleWSMessage(
 
       case 'user_input':
         if (await assertSessionAccess(msg.sessionId)) {
-          kory.handleUserInput(msg.sessionId, msg.selection, msg.text);
+          await kory.handleUserInput(msg.sessionId, msg.selection, msg.text, msg.questionId);
         } else {
-          serverLog.warn({ sessionId: msg.sessionId, clientId: ws.data.id }, 'Unauthorized user_input attempt');
+          serverLog.warn(
+            { sessionId: msg.sessionId, clientId: ws.data.id },
+            'Unauthorized user_input attempt',
+          );
         }
         break;
 

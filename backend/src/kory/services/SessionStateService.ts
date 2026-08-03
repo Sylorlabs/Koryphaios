@@ -121,10 +121,12 @@ export class SessionStateService {
       session.pendingInputResolver = settle;
 
       // Auto-resolve after timeout to prevent indefinite hangs
-      const timer = setTimeout(() => {
-        settle('__timeout__');
-      }, timeoutMs);
-      this.pendingInputTimers.set(sessionId, timer);
+      if (timeoutMs > 0) {
+        const timer = setTimeout(() => {
+          settle('__timeout__');
+        }, timeoutMs);
+        this.pendingInputTimers.set(sessionId, timer);
+      }
     });
   }
 

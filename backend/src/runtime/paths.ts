@@ -1,5 +1,6 @@
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
+import { ensureSecureDir } from '../security/fs-permissions';
 
 export function detectProjectRoot(): string {
   // Packaged desktop app: the Tauri shell passes its per-user data dir — all
@@ -8,8 +9,9 @@ export function detectProjectRoot(): string {
   const dataDir = process.env.KORYPHAIOS_DATA_DIR?.trim();
   if (dataDir) {
     try {
-      const { mkdirSync } = require('node:fs') as typeof import('node:fs');
-      mkdirSync(dataDir, { recursive: true });
+      // The data dir holds credentials.json, master keys, and SQLite DBs —
+      // tighten it to 0o700 so other local users can't traverse into it.
+      ensureSecureDir(dataDir);
       return dataDir;
     } catch {
       /* fall through to cwd detection */

@@ -5,18 +5,23 @@
 
 import { Database } from 'bun:sqlite';
 import { join } from 'node:path';
-import { mkdirSync } from 'node:fs';
 import { serverLog } from '../logger';
+import { ensureSecureDir, hardenFilePermissions } from '../security/fs-permissions';
 
 let db: Database | null = null;
 
 export function initCreditDb(dataDir: string): void {
   if (db) return;
-  mkdirSync(dataDir, { recursive: true });
+  ensureSecureDir(dataDir);
   const dbPath = join(dataDir, 'sylorlabs.db');
   db = new Database(dbPath);
   db.exec('PRAGMA journal_mode = WAL;');
   db.exec('PRAGMA foreign_keys = ON;');
+  // sylorlabs.db holds token-usage / cost attribution rows; tighten the DB
+  // and its WAL/SHM sidecars to 0o600 so other local users can't read them.
+  hardenFilePermissions(dbPath);
+  hardenFilePermissions(`${dbPath}-wal`);
+  hardenFilePermissions(`${dbPath}-shm`);
 
   db.exec(`
     CREATE TABLE IF NOT EXISTS credit_usage (
