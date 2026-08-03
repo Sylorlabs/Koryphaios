@@ -79,7 +79,9 @@
   let showTimeTravel = $state(false);
   let showWorkflows = $state(false);
   let workflowTask = $state('');
-  let activeWorkflow = $state<{ name: string; stage: string; status: string; task: string } | undefined>();
+  let activeWorkflow = $state<
+    { name: string; stage: string; status: string; task: string } | undefined
+  >();
   let lastIdleEscapeAt = 0;
   let zenMode = $state(false);
   let settingsInitialTab = $state<'providers' | 'experimental'>('providers');
@@ -167,18 +169,37 @@
 
   async function refreshActiveWorkflow() {
     const sessionId = sessionStore.activeSessionId;
-    if (!sessionId || isDemoMode) { activeWorkflow = undefined; return; }
+    if (!sessionId || isDemoMode) {
+      activeWorkflow = undefined;
+      return;
+    }
     try {
-      const res = await apiFetch(apiUrl(`/api/agent/workflows?sessionId=${encodeURIComponent(sessionId)}`));
+      const res = await apiFetch(
+        apiUrl(`/api/agent/workflows?sessionId=${encodeURIComponent(sessionId)}`),
+      );
       const data = await res.json();
-      const run = data?.data?.runs?.find((item: any) => item.status === 'running' || item.status === 'blocked');
+      const run = data?.data?.runs?.find(
+        (item: any) => item.status === 'running' || item.status === 'blocked',
+      );
       const definition = data?.data?.definitions?.find((item: any) => item.id === run?.workflowId);
       const stage = definition?.stages?.[run?.stageIndex];
-      activeWorkflow = run && definition ? { name: definition.name, stage: stage?.label ?? 'Complete', status: run.status, task: run.task } : undefined;
-    } catch { activeWorkflow = undefined; }
+      activeWorkflow =
+        run && definition
+          ? {
+              name: definition.name,
+              stage: stage?.label ?? 'Complete',
+              status: run.status,
+              task: run.task,
+            }
+          : undefined;
+    } catch {
+      activeWorkflow = undefined;
+    }
   }
 
-  $effect(() => { void refreshActiveWorkflow(); });
+  $effect(() => {
+    void refreshActiveWorkflow();
+  });
 
   useSessionSync({
     // Both demo variants are served by the in-memory API shim. This keeps the
@@ -217,8 +238,16 @@
     { command: 'sidebar', label: 'Toggle Sidebar', description: 'Show or hide the sidebar.' },
     { command: 'zen', label: 'Toggle Zen', description: 'Enter or exit zen mode.' },
     { command: 'goal', label: 'Goal Mode', description: 'Open durable goals and their progress.' },
-    { command: 'workflow', label: 'Workflows', description: 'Attach a host-owned workflow to the current task.' },
-    { command: 'agents', label: 'Toggle subagents', description: 'Show or hide the current worker and critic agents above the chat.' },
+    {
+      command: 'workflow',
+      label: 'Workflows',
+      description: 'Attach a host-owned workflow to the current task.',
+    },
+    {
+      command: 'agents',
+      label: 'Toggle subagents',
+      description: 'Show or hide the current worker and critic agents above the chat.',
+    },
     {
       command: 'goal create',
       label: 'Create Goal',
@@ -479,93 +508,27 @@
     }
   }
 
-  function requestSessionCompact() {
+  async function requestSessionCompact() {
     const sessionId = sessionStore.activeSessionId;
     if (!sessionId) {
       toastStore.error('No active session to compact');
       return;
     }
 
-    wsStore.sendMessage(
-      sessionId,
-      `🎯 SESSION COMPACTION — CONTEXT PRESERVATION PROTOCOL
-
-Create a hyper-dense, information-rich summary that preserves ALL critical context while eliminating redundancy. This summary will replace the full conversation history, so completeness is paramount.
-
-## 📄 SESSION MEMORY FILE
-
-This session has a persistent memory file at:
-\`.koryphaios/sessions/${sessionId}/memory.md\`
-
-**CRITICAL: You MUST update this memory file during compaction.**
-
-### Memory File Purpose
-- Survives compactions (unlike chat history which gets replaced)
-- Stores long-term context: project goals, key decisions, gotchas, references
-- Acts as a "source of truth" that persists across the entire session lifecycle
-- Automatically deleted when the session is deleted
-
-### How to Update the Memory File
-Use the \`write_file\` tool to update the memory file with structured information:
-- Path: \`.koryphaios/sessions/${sessionId}/memory.md\`
-- Content: Organized markdown with sections for project context, learnings, decisions, gotchas
-
----
-
-## OUTPUT FORMAT (Strictly follow this structure)
-
-### 📋 PROJECT BRIEF
-One sentence: What we're building and why it matters.
-
-### 🏗️ ARCHITECTURE & KEY DECISIONS
-- Decision: [What was decided]
-  - Rationale: [Why]
-  - Impact: [What it affects]
-  - Status: [Implemented/Pending/Abandoned]
-[Repeat for each significant decision]
-
-### 📁 FILES & CODE STATE
-| File | Status | Key Implementation Details |
-|------|--------|---------------------------|
-| [path] | [modified/created/deleted] | [Critical: functions, classes, APIs, config values] |
-
-### ✅ COMPLETED WORK
-- [Specific achievement with technical details]
-- [Include verification steps if applicable]
-
-### 🚧 ACTIVE WORK (In Progress)
-- [What's being worked on right now]
-- [Current blockers or dependencies]
-- [Next immediate step]
-
-### ⚠️ OPEN ISSUES & TECH DEBT
-- [Issue]: [Severity: Critical/High/Medium/Low] — [One-line description] — [Proposed fix or investigation path]
-
-### 🎯 NEXT ACTIONS (Priority Ordered)
-1. [ ] [Specific, actionable task] — [Estimated effort] — [Success criteria]
-2. [ ] [Next task...]
-
-### 🔗 CRITICAL CONTEXT TO PRESERVE
-- [Any non-obvious context, gotchas, or tribal knowledge that would be lost]
-- [Environment-specific details, API keys, config flags]
-- [Links to external resources, docs, or references]
-
-### 📊 CONFIDENCE & RISK
-- Overall confidence: [High/Medium/Low]
-- Biggest risk: [What could derail this]
-- Mitigation: [How we're addressing it]
-
----
-RULES:
-- NO fluff, filler, or conversational language
-- EVERY sentence must contain actionable information
-- Preserve SPECIFIC values: file paths, function names, config keys, error messages
-- Flag UNCERTAINTY explicitly: "UNCERTAIN: [what needs verification]"
-- Include CODE SNIPPETS only if critical and brief (< 5 lines)
-- **MANDATORY: Update the memory file with key learnings and decisions**
-- **MANDATORY: Reference the memory file path in your response so the user knows it exists**`,
-    );
-    toastStore.info('Session compaction in progress...');
+    if (!activeComposerModel) {
+      toastStore.error('Select a model before compacting');
+      return;
+    }
+    try {
+      const response = await apiFetch(apiUrl(`/api/sessions/${sessionId}/compact`), {
+        method: 'POST',
+        body: JSON.stringify({ model: activeComposerModel }),
+      });
+      const data = await response.json().catch(() => null);
+      if (!response.ok || data?.ok === false) throw new Error(data?.error ?? 'Compaction failed');
+    } catch (error) {
+      toastStore.error(error instanceof Error ? error.message : 'Compaction failed');
+    }
   }
 
   function loadSuggestionIntoComposer(prompt: string) {
@@ -670,7 +633,7 @@ RULES:
     }
 
     if (root === 'compact') {
-      requestSessionCompact();
+      await requestSessionCompact();
       return true;
     }
 
@@ -1239,7 +1202,13 @@ RULES:
       projectStore.setProject(data.data);
       await resumeOrCreateSession(data.data);
       toastStore.warning('Running in your home folder — no project scoping');
-      handleSend(pending.message, pending.model, pending.reasoningLevel, pending.attachments, pending.fastMode);
+      handleSend(
+        pending.message,
+        pending.model,
+        pending.reasoningLevel,
+        pending.attachments,
+        pending.fastMode,
+      );
     } catch {
       toastStore.error('Could not resolve your home folder — open a project instead');
     }
@@ -1265,7 +1234,13 @@ RULES:
     if (!p) return;
     agenticConsent = new Set([...agenticConsent, p.provider]);
     agenticConsentPrompt = null;
-    handleSend(p.pending.message, p.pending.model, p.pending.reasoningLevel, p.pending.attachments, p.pending.fastMode);
+    handleSend(
+      p.pending.message,
+      p.pending.model,
+      p.pending.reasoningLevel,
+      p.pending.attachments,
+      p.pending.fastMode,
+    );
   }
 
   function handleSend(
@@ -1327,7 +1302,14 @@ RULES:
       );
       return;
     }
-    wsStore.sendMessage(sessionStore.activeSessionId, message, model, reasoningLevel, attachments, fastMode);
+    wsStore.sendMessage(
+      sessionStore.activeSessionId,
+      message,
+      model,
+      reasoningLevel,
+      attachments,
+      fastMode,
+    );
   }
 
   function handleStop() {
@@ -1716,7 +1698,10 @@ RULES:
           settingsInitialTab = section === 'advanced' ? 'experimental' : 'providers';
           showSettings = true;
         }}
-        onOpenWorkflows={() => { workflowTask = composerDraft; showWorkflows = true; }}
+        onOpenWorkflows={() => {
+          workflowTask = composerDraft;
+          showWorkflows = true;
+        }}
         workflowStatus={activeWorkflow}
         slashCommands={composerSlashCommandList}
         fileMentions={composerFileMentions}
@@ -1760,7 +1745,13 @@ RULES:
 <PermissionDialog />
 <QuestionDialog />
 <TimeTravelPanel bind:open={showTimeTravel} />
-<WorkflowPanel open={showWorkflows} sessionId={sessionStore.activeSessionId} initialTask={workflowTask} onclose={() => (showWorkflows = false)} onchange={() => void refreshActiveWorkflow()} />
+<WorkflowPanel
+  open={showWorkflows}
+  sessionId={sessionStore.activeSessionId}
+  initialTask={workflowTask}
+  onclose={() => (showWorkflows = false)}
+  onchange={() => void refreshActiveWorkflow()}
+/>
 <RewindDialog />
 <ChangesSummary />
 <ThemePickerModal open={showThemeQuickMenu} onClose={() => (showThemeQuickMenu = false)} />

@@ -7,7 +7,7 @@ import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { getProviderHarnessCapabilities } from '../../providers/provider-harness';
 import { resolveSkills, type SkillResolverResult } from '../skills';
 
-export const PROMPT_VERSION = 'kory-workflow-v3-skills';
+export const PROMPT_VERSION = 'kory-workflow-v4-goals-parallel';
 
 export type TaskKind =
   | 'question'
@@ -148,6 +148,13 @@ export function classifyTask(goal: string, domain?: WorkerDomain): TaskKind {
   return 'question';
 }
 
+/** Tasks where Multi-Agent mode must use at least one worker. Small questions and
+ * mechanical edits stay direct because delegation would add coordination without
+ * creating an independent workstream. */
+export function requiresMultiAgentDelegation(goal: string, domain?: WorkerDomain): boolean {
+  return !['question', 'mechanical-edit'].includes(classifyTask(goal, domain));
+}
+
 export function createTaskContract(
   goal: string,
   options: Partial<Omit<TaskContract, 'goal' | 'taskKind'>> & { taskKind?: TaskKind } = {},
@@ -266,6 +273,7 @@ const UNIVERSAL_CORE = `## Non-negotiable execution contract
 - Never hard-code a narrow domain assumption into a universal workflow. Domain expertise belongs in a conditional quality profile or separately versioned skill. UI guidance is medium-neutral: native, terminal, embedded, game, spatial, mobile, and web interfaces must follow their own toolkit and repository rules.
 - Do not disguise stubs, uncertainty, skipped checks, unavailable evidence, or partial work. Never claim completion without exact evidence.
 - Publishing is separate from implementation. Do not commit, push, or open a pull request unless the user or an explicit workspace policy requested it.
+- Notice when the work would benefit from durable Goal Mode or a reusable workflow. Suggest Goal Mode for long-running, multi-session, dependency-heavy, or evidence-tracked outcomes. Suggest a workflow when the same ordered procedure is likely to recur. Make the suggestion briefly and at a natural boundary; do not interrupt active work, repeatedly ask, or suggest either for ordinary questions, one-off fixes, or small edits. Never create a goal or workflow without the user's explicit approval.
 - Work autonomously inside the granted project jail. Do not ask for routine edits, shell commands, tests, installs, network access, or delegation. Ask only immediately before catastrophic broad destruction such as recursively deleting a home/root directory, formatting a disk, destructive raw-device writes, or powering down the host.`;
 
 function providerAdapter(provider: ProviderName | string): string {

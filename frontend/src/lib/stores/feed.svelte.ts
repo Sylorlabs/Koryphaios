@@ -2,6 +2,7 @@
 // Split from the monolithic websocket.svelte.ts for better separation of concerns
 
 import type { AgentIdentity } from '@koryphaios/shared';
+import type { CompactionProgressPayload } from '@koryphaios/shared';
 import type { FeedEntry, FeedEntryType } from '$lib/types';
 import { sessionStore } from './sessions.svelte';
 import { apiUrl } from '$lib/utils/api-url';
@@ -153,11 +154,16 @@ let groupedFeed = $derived.by(() => {
 /** Reverse of resolveGlowClass, for entries that only carry a glow class. */
 function glowToDomain(glow: string): string {
   switch (glow) {
-    case 'glow-codex': return 'frontend';
-    case 'glow-google': return 'backend';
-    case 'glow-test': return 'test';
-    case 'glow-claude': return 'general';
-    default: return 'general';
+    case 'glow-codex':
+      return 'frontend';
+    case 'glow-google':
+      return 'backend';
+    case 'glow-test':
+      return 'test';
+    case 'glow-claude':
+      return 'general';
+    default:
+      return 'general';
   }
 }
 
@@ -187,7 +193,10 @@ function nextFeedId(prefix: string): string {
 
 function addFeedEntry(entry: Omit<FeedEntry, 'id'>) {
   const newEntry: FeedEntry = { ...entry, id: nextFeedId('fe') };
-  if (newEntry.type === 'thought' && (newEntry.metadata as { phase?: string })?.phase === 'analyzing') {
+  if (
+    newEntry.type === 'thought' &&
+    (newEntry.metadata as { phase?: string })?.phase === 'analyzing'
+  ) {
     analyzingThoughtId = newEntry.id;
   }
   feed.push(newEntry);
@@ -216,7 +225,8 @@ function accumulateFeedEntry(entry: Omit<FeedEntry, 'id'>) {
     // arrive out of order; the display must never count down).
     if (entry.metadata && Object.keys(entry.metadata).length > 0) {
       const merged = { ...last.metadata, ...entry.metadata } as Record<string, unknown>;
-      const prevTok = (last.metadata as { thinkingTokens?: number } | undefined)?.thinkingTokens ?? 0;
+      const prevTok =
+        (last.metadata as { thinkingTokens?: number } | undefined)?.thinkingTokens ?? 0;
       const nextTok = (entry.metadata as { thinkingTokens?: number }).thinkingTokens ?? 0;
       if (prevTok || nextTok) merged.thinkingTokens = Math.max(prevTok, nextTok);
       const priorSequence = Number(last.metadata?.sequenceStart);
@@ -298,6 +308,32 @@ function addClientError(text: string) {
   });
 }
 
+function upsertCompaction(payload: CompactionProgressPayload) {
+  if (!ownsFeed(payload.sessionId)) return;
+  const existing = feed.find(
+    (entry) => entry.type === 'compaction' && entry.metadata?.compactionId === payload.compactionId,
+  );
+  const metadata = { ...payload } as unknown as Record<string, unknown>;
+  if (existing) {
+    existing.text = payload.message;
+    existing.timestamp = Date.now();
+    existing.metadata = metadata;
+    patchGroupedFeedEntry(existing.id, existing.text, existing.timestamp, { metadata });
+    streamingRevision++;
+    return;
+  }
+  addFeedEntry({
+    timestamp: Date.now(),
+    type: 'compaction',
+    agentId: 'kory-manager',
+    agentName: 'Kory',
+    glowClass: 'glow-kory',
+    text: payload.message,
+    isCollapsed: true,
+    metadata,
+  });
+}
+
 function hasPersistedAssistantContaining(text: string, eventTimestamp: number): boolean {
   const needle = normalizeFeedText(text);
   if (!needle) return false;
@@ -335,10 +371,15 @@ function finalizeThinking(agentId?: string, endedAt = Date.now()) {
 /** A tool starts before its JSON input is completely streamed. Patch that
  * existing card once the backend has the final arguments rather than adding a
  * second, duplicate "Calling tool" row. */
-function updateToolCall(toolCall: { id: string; name: string; input: Record<string, unknown> }, timestamp: number) {
-  const entry = feed.findLast((candidate) =>
-    candidate.type === 'tool_call' &&
-    (candidate.metadata as { toolCall?: { id?: string } } | undefined)?.toolCall?.id === toolCall.id,
+function updateToolCall(
+  toolCall: { id: string; name: string; input: Record<string, unknown> },
+  timestamp: number,
+) {
+  const entry = feed.findLast(
+    (candidate) =>
+      candidate.type === 'tool_call' &&
+      (candidate.metadata as { toolCall?: { id?: string } } | undefined)?.toolCall?.id ===
+        toolCall.id,
   );
   if (!entry) return false;
   entry.timestamp = timestamp;
@@ -511,14 +552,32 @@ async function loadSessionMessages(
 
   let timeline: Array<{ messageId?: string; hash?: string }> = [];
   let contextData: {
-    lastUsage?: { used: number; max: number; contextKnown: boolean; breakdown?: { system: number; memory: number; tools: number; chat: number } } | null;
-    data?: Array<{ id: string; ts: number; kind: string; label: string; content: string; prunedForAgent: boolean }>;
+    lastUsage?: {
+      used: number;
+      max: number;
+      contextKnown: boolean;
+      breakdown?: { system: number; memory: number; tools: number; chat: number };
+    } | null;
+    data?: Array<{
+      id: string;
+      ts: number;
+      kind: string;
+      label: string;
+      content: string;
+      prunedForAgent: boolean;
+    }>;
   } = {};
   const ancillary = Promise.allSettled([
-    apiFetch(apiUrl(`/api/sessions/${sessionId}/timetravel`), { signal: options.signal })
-      .then((res) => parseJsonResponse<{ ok?: boolean; data?: { timeline?: typeof timeline } }>(res)),
-    apiFetch(apiUrl(`/api/sessions/${sessionId}/context`), { signal: options.signal })
-      .then((res) => parseJsonResponse<{ ok?: boolean; lastUsage?: typeof contextData.lastUsage; data?: typeof contextData.data }>(res)),
+    apiFetch(apiUrl(`/api/sessions/${sessionId}/timetravel`), { signal: options.signal }).then(
+      (res) => parseJsonResponse<{ ok?: boolean; data?: { timeline?: typeof timeline } }>(res),
+    ),
+    apiFetch(apiUrl(`/api/sessions/${sessionId}/context`), { signal: options.signal }).then((res) =>
+      parseJsonResponse<{
+        ok?: boolean;
+        lastUsage?: typeof contextData.lastUsage;
+        data?: typeof contextData.data;
+      }>(res),
+    ),
   ]);
 
   // The user may have switched to another session while the timeline
@@ -534,42 +593,72 @@ async function loadSessionMessages(
     variantsByGroup.set(message.variantGroupId, variants);
   }
 
-  const history = messages.filter((m) => !m.variantGroupId || (m.variantIndex ?? 0) === 0).map((m) => {
-    return {
-      id: `hist-${m.id}`,
-      timestamp: m.createdAt,
-      // System rows are plain markers ("Stopped by user.") — not Kory speech.
-      type:
-        m.role === 'user'
-          ? ('user_message' as const)
-          : m.role === 'system'
-            ? ('system' as const)
-            : ('content' as const),
-      agentId: m.role === 'user' ? 'user' : m.role === 'system' ? 'system' : 'kory-manager',
-      agentName: m.role === 'user' ? 'You' : m.role === 'system' ? '' : 'Kory',
-      glowClass: m.role === 'user' || m.role === 'system' ? '' : 'glow-kory',
-      text: m.content,
-      metadata: {
-        sessionId,
-        model: m.model,
-        cost: m.cost,
-        messageId: m.id,
-        variantGroupId: m.variantGroupId,
-        responseVariants: m.variantGroupId
-          ? (variantsByGroup.get(m.variantGroupId) ?? [])
-              .sort((a, b) => (a.variantIndex ?? 0) - (b.variantIndex ?? 0))
-              .map((variant) => ({
-                id: variant.id,
-                content: variant.content,
-                model: variant.model,
-                index: variant.variantIndex ?? 0,
-              }))
-          : [{ id: m.id, content: m.content, model: m.model, index: 0 }],
-        attachments: m.attachments,
-      },
-      ghostHash: undefined,
-    };
-  });
+  const history = messages
+    .filter((m) => !m.variantGroupId || (m.variantIndex ?? 0) === 0)
+    .map((m) => {
+      const isCompaction = m.role === 'system' && m.content.startsWith('[KORY_COMPACTION]');
+      return {
+        id: `hist-${m.id}`,
+        timestamp: m.createdAt,
+        // System rows are plain markers ("Stopped by user.") — not Kory speech.
+        type: isCompaction
+          ? ('compaction' as const)
+          : m.role === 'user'
+            ? ('user_message' as const)
+            : m.role === 'system'
+              ? ('system' as const)
+              : ('content' as const),
+        agentId: isCompaction
+          ? 'kory-manager'
+          : m.role === 'user'
+            ? 'user'
+            : m.role === 'system'
+              ? 'system'
+              : 'kory-manager',
+        agentName: isCompaction
+          ? 'Kory'
+          : m.role === 'user'
+            ? 'You'
+            : m.role === 'system'
+              ? ''
+              : 'Kory',
+        glowClass: isCompaction
+          ? 'glow-kory'
+          : m.role === 'user' || m.role === 'system'
+            ? ''
+            : 'glow-kory',
+        text: isCompaction ? m.content.replace(/^\[KORY_COMPACTION\]\n?/, '') : m.content,
+        isCollapsed: isCompaction,
+        metadata: {
+          sessionId,
+          model: m.model,
+          cost: m.cost,
+          messageId: m.id,
+          variantGroupId: m.variantGroupId,
+          responseVariants: m.variantGroupId
+            ? (variantsByGroup.get(m.variantGroupId) ?? [])
+                .sort((a, b) => (a.variantIndex ?? 0) - (b.variantIndex ?? 0))
+                .map((variant) => ({
+                  id: variant.id,
+                  content: variant.content,
+                  model: variant.model,
+                  index: variant.variantIndex ?? 0,
+                }))
+            : [{ id: m.id, content: m.content, model: m.model, index: 0 }],
+          attachments: m.attachments,
+          ...(isCompaction
+            ? {
+                compactionId: m.id.replace(/^compact-/, ''),
+                phase: 'complete',
+                progress: 100,
+                message: 'Compaction complete',
+                model: m.model,
+              }
+            : {}),
+        },
+        ghostHash: undefined,
+      };
+    });
   // The live tail holds the turn we just watched stream in (the user's
   // message via addUserMessage + Kory's reply via accumulateFeedEntry). By
   // the time we reload, that turn is persisted and present in `history`
@@ -660,11 +749,7 @@ async function loadSessionMessages(
   }));
   const liveOperational = operationalEntriesForReload(feed.slice(feedTransitionBaseLength));
   const archivedWithoutLiveDuplicates = omitArchivedToolDuplicates(toolHistory, liveOperational);
-  const merged = mergeFeedTimeline(
-    enrichedHistory,
-    archivedWithoutLiveDuplicates,
-    liveOperational,
-  );
+  const merged = mergeFeedTimeline(enrichedHistory, archivedWithoutLiveDuplicates, liveOperational);
   // Anything pushed onto the feed while we awaited (live stream events for
   // this session) belongs after history — everything before
   // feedLengthAtStart is stale (either the old session's content, on a
@@ -707,6 +792,7 @@ export const feedStore = {
   addUserMessage,
   removeAnalyzingThoughtEntries,
   addClientError,
+  upsertCompaction,
   hasPersistedAssistantContaining,
   removeEntries,
   setEntryVisibility,

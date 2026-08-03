@@ -14,7 +14,7 @@ import { isCatastrophicBashCommand } from '../src/tools/bash';
 import { AskUserTool, AskManagerTool, DelegateToWorkerTool } from '../src/tools/interaction';
 import type { Session, AgentIdentity, WSMessage } from '@koryphaios/shared';
 import { DOMAIN } from '../src/constants';
-import { compilePrompt, createTaskContract, loadRepositoryInstructions } from '../src/kory/prompts';
+import { compilePrompt, createTaskContract, loadRepositoryInstructions, requiresMultiAgentDelegation } from '../src/kory/prompts';
 import { buildIntentDiscoveryBatch } from '../src/kory/clarification-gate';
 import {
   buildEvalRunPlan,
@@ -98,6 +98,27 @@ describe('KoryManager Orchestration', () => {
     expect(names).toContain('delegate_to_worker');
     expect(names).toContain('ask_user');
     expect(managerDefs.some((d) => d.name === 'delegate_to_worker')).toBe(true);
+  });
+
+  test('multi-agent enforcement excludes only questions and tiny mechanical edits', () => {
+    expect(requiresMultiAgentDelegation('What does this function do?')).toBe(false);
+    expect(requiresMultiAgentDelegation('Rename this variable mechanically')).toBe(false);
+    expect(requiresMultiAgentDelegation('Fix the broken settings persistence')).toBe(true);
+    expect(requiresMultiAgentDelegation('Build a settings dashboard')).toBe(true);
+    expect(requiresMultiAgentDelegation('Research and compare provider behavior')).toBe(true);
+  });
+
+  test('compiled prompts selectively suggest goals and reusable workflows', () => {
+    const compiled = compilePrompt({
+      role: 'manager',
+      mode: 'advanced',
+      provider: 'openai',
+      workingDirectory: '/tmp',
+      taskContract: createTaskContract('Explain the architecture'),
+    });
+    expect(compiled.systemPrompt).toContain('Suggest Goal Mode for long-running');
+    expect(compiled.systemPrompt).toContain('Never create a goal or workflow without');
+    expect(compiled.systemPrompt).toContain('ordinary questions, one-off fixes, or small edits');
   });
 
   test('critic role is limited to read-only filesystem tools', () => {

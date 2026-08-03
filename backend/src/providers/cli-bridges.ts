@@ -63,35 +63,79 @@ export const KORY_HARNESS_NOTE_EXTENDED =
 // in kory-mcp-bridge.ts. The critic role is restricted to the read-only subset.
 
 export const KORY_TOOL_WHITELIST: string[] = [
-  'kory__read_file', 'kory__write_file', 'kory__edit_file', 'kory__batch_edit',
-  'kory__delete_file', 'kory__move_file', 'kory__diff', 'kory__patch',
-  'kory__grep', 'kory__glob', 'kory__ls', 'kory__bash', 'kory__shell_manage',
-  'kory__web_search', 'kory__web_fetch',
-  'kory__create_note', 'kory__read_note', 'kory__update_note', 'kory__delete_note',
-  'kory__link_notes', 'kory__unlink_notes', 'kory__recall_notes', 'kory__search_notes',
-  'kory__list_notes', 'kory__get_note_backlinks', 'kory__get_note_graph_summary', 'kory__render_note',
-  'kory__fetch_context', 'kory__prune_context',
-  'kory__ask_user', 'kory__ask_manager',
-  'kory__delegate_to_worker', 'kory__delegate_to_jules',
-  'kory__create_goal', 'kory__update_goal',
-  'kory__start_workflow', 'kory__update_workflow',
+  'kory__read_file',
+  'kory__write_file',
+  'kory__edit_file',
+  'kory__batch_edit',
+  'kory__delete_file',
+  'kory__move_file',
+  'kory__diff',
+  'kory__patch',
+  'kory__grep',
+  'kory__glob',
+  'kory__ls',
+  'kory__bash',
+  'kory__shell_manage',
+  'kory__web_search',
+  'kory__web_fetch',
+  'kory__create_note',
+  'kory__read_note',
+  'kory__update_note',
+  'kory__delete_note',
+  'kory__link_notes',
+  'kory__unlink_notes',
+  'kory__recall_notes',
+  'kory__search_notes',
+  'kory__list_notes',
+  'kory__get_note_backlinks',
+  'kory__get_note_graph_summary',
+  'kory__render_note',
+  'kory__fetch_context',
+  'kory__prune_context',
+  'kory__ask_user',
+  'kory__ask_manager',
+  'kory__delegate_to_worker',
+  'kory__delegate_to_jules',
+  'kory__create_goal',
+  'kory__update_goal',
+  'kory__start_workflow',
+  'kory__update_workflow',
   'kory__get_resource_budget',
   'kory__load_skill_detail',
-  'kory__detect_errors', 'kory__analyze_error', 'kory__suggest_fixes',
-  'kory__git_status', 'kory__git_diff', 'kory__git_commit', 'kory__commit_and_create_pr',
+  'kory__detect_errors',
+  'kory__analyze_error',
+  'kory__suggest_fixes',
+  'kory__git_status',
+  'kory__git_diff',
+  'kory__git_commit',
+  'kory__commit_and_create_pr',
   'kory__view_image',
 ];
 
 export const KORY_CRITIC_TOOL_WHITELIST: string[] = [
-  'kory__read_file', 'kory__grep', 'kory__glob', 'kory__ls', 'kory__diff',
-  'kory__web_search', 'kory__web_fetch',
-  'kory__search_notes', 'kory__recall_notes', 'kory__list_notes',
-  'kory__read_note', 'kory__get_note_backlinks', 'kory__get_note_graph_summary',
-  'kory__fetch_context', 'kory__ask_user',
+  'kory__read_file',
+  'kory__grep',
+  'kory__glob',
+  'kory__ls',
+  'kory__diff',
+  'kory__web_search',
+  'kory__web_fetch',
+  'kory__search_notes',
+  'kory__recall_notes',
+  'kory__list_notes',
+  'kory__read_note',
+  'kory__get_note_backlinks',
+  'kory__get_note_graph_summary',
+  'kory__fetch_context',
+  'kory__ask_user',
   'kory__get_resource_budget',
   'kory__load_skill_detail',
-  'kory__detect_errors', 'kory__analyze_error', 'kory__suggest_fixes',
-  'kory__git_status', 'kory__git_diff', 'kory__view_image',
+  'kory__detect_errors',
+  'kory__analyze_error',
+  'kory__suggest_fixes',
+  'kory__git_status',
+  'kory__git_diff',
+  'kory__view_image',
 ];
 
 /** Build the kory MCP server config for a CLI harness. Uses the env vars set
@@ -126,11 +170,7 @@ export function buildKoryHookConfigs(ctx: CliBridgeContext): CliHookConfig[] | n
 
 // ─── Session-isolated homes ────────────────────────────────────────────────
 
-function makeIsolatedHome(
-  dirName: string,
-  realHome: string,
-  symlinkFiles: string[],
-): string {
+function makeIsolatedHome(dirName: string, realHome: string, symlinkFiles: string[]): string {
   const dir = join(homedir(), '.koryphaios', dirName);
   try {
     mkdirSync(dir, { recursive: true });
@@ -205,8 +245,19 @@ export class ClaudeCodeCliBridge extends ManagedCliBridge implements CliBridge {
     // and force the CLI to use kory__ MCP tools instead. The only native tool
     // we keep is TodoWrite (harmless planning aid, no side effects).
     const deny = [
-      'Read', 'Edit', 'Write', 'MultiEdit', 'NotebookEdit', 'Bash', 'Glob', 'Grep', 'LS',
-      'WebFetch', 'WebSearch', 'Task', 'Agent',
+      'Read',
+      'Edit',
+      'Write',
+      'MultiEdit',
+      'NotebookEdit',
+      'Bash',
+      'Glob',
+      'Grep',
+      'LS',
+      'WebFetch',
+      'WebSearch',
+      'Task',
+      'Agent',
     ];
     // Allow only the kory MCP tools + TodoWrite (planning only).
     // Claude Code prefixes MCP tools with mcp__<server>__.
@@ -259,7 +310,10 @@ export class ClaudeCodeCliBridge extends ManagedCliBridge implements CliBridge {
   }
 
   serializeHooks(hooks: CliHookConfig[]): string {
-    const payload: Record<string, Array<{ matcher: string; hooks: Array<{ type: 'command'; command: string }> }>> = {};
+    const payload: Record<
+      string,
+      Array<{ matcher: string; hooks: Array<{ type: 'command'; command: string }> }>
+    > = {};
     for (const hook of hooks) {
       for (const event of hook.events) {
         payload[event] = payload[event] ?? [];
@@ -336,9 +390,15 @@ export class CodexCliBridge extends ManagedCliBridge implements CliBridge {
     // whitelist so the provider can build the envelope protocol.
     // The envelope tells Codex to emit kory__ tool calls instead of using
     // its native command_execution tool.
+    // This configuration advertises the Kory-owned capability surface. The
+    // Codex provider renders the current request's role-filtered, unprefixed
+    // ToolRegistry names into its envelope protocol.
     const allowedTools = ctx.role === 'critic' ? KORY_CRITIC_TOOL_WHITELIST : KORY_TOOL_WHITELIST;
     return {
-      systemInstructions: [ctx.systemPrompt?.trim() ?? '', KORY_HARNESS_NOTE],
+      systemInstructions: [
+        ctx.systemPrompt?.trim() ?? '',
+        'You are running inside Koryphaios. Native tools are not authority. Use only the host-supplied Kory tool names through the KORY_TOOL_CALL envelope protocol; Koryphaios enforces permissions and executes them.',
+      ],
       allowedTools,
       permissions: this.buildPermissionScopes(ctx),
       extensions: koryProvenanceExtensions(ctx),
@@ -563,7 +623,10 @@ export class AntigravityCliBridge extends ManagedCliBridge implements CliBridge 
   }
 
   serializeHooks(hooks: CliHookConfig[]): string {
-    const payload: Record<string, Array<{ matcher: string; hooks: Array<{ type: 'command'; command: string }> }>> = {};
+    const payload: Record<
+      string,
+      Array<{ matcher: string; hooks: Array<{ type: 'command'; command: string }> }>
+    > = {};
     for (const hook of hooks) {
       for (const event of hook.events) {
         payload[event] = payload[event] ?? [];
@@ -699,10 +762,7 @@ export class KimiCodeCliBridge extends ManagedCliBridge implements CliBridge {
     // sent in the API request. Package them so the provider can inject.
     const allowedTools = ctx.role === 'critic' ? KORY_CRITIC_TOOL_WHITELIST : KORY_TOOL_WHITELIST;
     return {
-      systemInstructions: [
-        ctx.systemPrompt?.trim() ?? '',
-        KORY_HARNESS_NOTE,
-      ].filter(Boolean),
+      systemInstructions: [ctx.systemPrompt?.trim() ?? '', KORY_HARNESS_NOTE].filter(Boolean),
       allowedTools,
       permissions: this.buildPermissionScopes(ctx),
       extensions: koryProvenanceExtensions(ctx),
