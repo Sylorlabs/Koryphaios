@@ -61,4 +61,23 @@ describe('ProviderRegistry credential verification', () => {
       true,
     );
   });
+
+  it('accepts a Poe API key and verifies it against Poe\'s public API gateway', async () => {
+    let requestUrl = '';
+    globalThis.fetch = mock((input: RequestInfo | URL) => {
+      requestUrl = String(input);
+      return Promise.resolve(new Response(JSON.stringify({ data: [] }), { status: 200 }));
+    }) as typeof fetch;
+
+    const registry = new ProviderRegistry(mockConfig);
+    const result = await registry.setCredentials('poe', { apiKey: 'poe-test-key' });
+
+    expect(result.success).toBe(true);
+    expect(requestUrl).toBe('https://api.poe.com/v1/models');
+    expect(registry.getStatus().find((provider) => provider.name === 'poe')).toMatchObject({
+      supportsApiKey: true,
+      enabled: true,
+      authenticated: true,
+    });
+  });
 });
