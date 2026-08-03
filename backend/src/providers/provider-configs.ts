@@ -561,7 +561,7 @@ export const PROVIDER_CONFIGS: ProviderConfig[] = [
   },
   {
     name: 'moark',
-    baseUrl: 'https://moark.com/v1',
+    baseUrl: 'https://api.moark.ai/v1',
     authMode: 'api_key',
     envKeys: ['MOARK_API_KEY'],
   },

@@ -935,7 +935,12 @@ import { apiFetch, parseJsonResponse } from '$lib/api.svelte';
                   {:else}
                     <div class="space-y-2">
                       {#if caps.supportsApiKey}
-                        <label class="text-[10px] text-[var(--color-text-muted)] font-medium uppercase tracking-wider" for={`provider-key-${prov.key}`}>API Key</label>
+                        <div class="flex items-center justify-between gap-3">
+                          <label class="text-[10px] text-[var(--color-text-muted)] font-medium uppercase tracking-wider" for={`provider-key-${prov.key}`}>{prov.key === 'poe' ? 'Poe API key' : 'API key'}</label>
+                          {#if prov.key === 'poe'}
+                            <a class="text-[10px] text-[var(--color-accent)] hover:underline" href="https://poe.com/api/keys" target="_blank" rel="noreferrer">Create a Poe key</a>
+                          {/if}
+                        </div>
                         <div class="relative">
                           <input id={`provider-key-${prov.key}`} type={secretInputType(`provider-key-${prov.key}`)} placeholder={prov.placeholder} bind:value={providersStore.keyInputs[prov.key]} class="input w-full text-xs" style="padding-right: 2.75rem;" onkeydown={(e) => e.key === 'Enter' && handleConnectProvider(prov.key)} />
                           <button type="button" class="secret-visibility absolute inset-y-0 right-1 my-auto z-10" onclick={() => toggleSecretVisibility(`provider-key-${prov.key}`)} aria-label={visibleSecrets[`provider-key-${prov.key}`] ? 'Hide API key' : 'Show API key'} title={visibleSecrets[`provider-key-${prov.key}`] ? 'Hide API key' : 'Show API key'}>
