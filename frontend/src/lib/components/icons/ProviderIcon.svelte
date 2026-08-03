@@ -109,6 +109,7 @@
     'cursor',
     'cline',
     'cerebras',
+    'poe',
   ]);
 
   // A small set of official remote favicons are monochrome marks rather than
