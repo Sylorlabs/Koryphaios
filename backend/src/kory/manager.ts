@@ -100,6 +100,7 @@ import {
   saveAgentSettings,
 } from '../agent-settings';
 import { assembleMemoryContext, formatMemoryForContext } from '../memory/unified-memory';
+import { readSessionMemory, writeSessionMemory } from '../memory/unified-memory';
 import {
   answerPendingQuestion,
   createPendingQuestion,
@@ -261,6 +262,7 @@ export class KoryManager {
     string,
     { model: string; provider: ProviderName | undefined }
   >();
+  private compactingSessions = new Map<string, AbortController>();
   /** Goal state is immutable task context, not a conversational suggestion. */
   private goalContextBySession = new Map<
     string,
@@ -467,6 +469,106 @@ export class KoryManager {
 
   private async updateWorkflowState(sessionId: string, state: string) {
     await db.update(sessions).set({ workflowState: state }).where(eq(sessions.id, sessionId));
+  }
+
+  /**
+   * Build and atomically install a new conversation root. The compactor uses a
+   * unique provider session id, so CLI/API continuation caches cannot inherit
+   * the manager's prior context.
+   */
+  async compactSession(input: {
+    sessionId: string;
+    selectedModel: string;
+    reasoningLevel?: string;
+    automatic?: boolean;
+  }): Promise<{ compactionId: string; sourceMessages: number; checkpointTokens: number }> {
+    if (!this.messages) throw new Error('Message store unavailable');
+    if (this.isSessionRunning(input.sessionId) || this.compactingSessions.has(input.sessionId)) {
+      throw new Error('This session is already running');
+    }
+    const separator = input.selectedModel.indexOf(':');
+    if (separator < 1) throw new Error('Select a model before compacting');
+    const providerName = input.selectedModel.slice(0, separator) as ProviderName;
+    const model = input.selectedModel.slice(separator + 1);
+    const status = this.providers.getStatus().find((item) => item.name === providerName);
+    if (!status?.authenticated || !status.models.includes(model)) {
+      throw new Error('The selected model is no longer available. Select another model.');
+    }
+    const provider = await this.providers.resolveProvider(model, providerName);
+    if (!provider) throw new Error('The selected model provider is unavailable');
+
+    const compactionId = nanoid(12);
+    const automatic = input.automatic === true;
+    const abort = new AbortController();
+    this.compactingSessions.set(input.sessionId, abort);
+    const emit = (phase: 'preparing' | 'summarizing' | 'validating' | 'committing' | 'complete' | 'failed', progress: number, message: string, extra: Record<string, unknown> = {}) =>
+      this.emitWSMessage(input.sessionId, phase === 'preparing' ? 'compaction.started' : phase === 'complete' ? 'compaction.completed' : phase === 'failed' ? 'compaction.failed' : 'compaction.progress', {
+        compactionId, sessionId: input.sessionId, phase, progress, provider: providerName,
+        model, automatic, message, ...extra,
+      });
+
+    await this.updateWorkflowState(input.sessionId, 'compacting');
+    try {
+      emit('preparing', 10, 'Preparing the current conversation revision');
+      const source = await this.messages.getContextMessages(input.sessionId, 1000);
+      const conversational = source.filter((message) => message.role !== 'system' || message.content.startsWith('[KORY_COMPACTION]'));
+      if (conversational.length < 2) throw new Error('There is not enough conversation to compact');
+      const transcript = conversational.map((message) => `${message.role.toUpperCase()}: ${message.content}`).join('\n\n');
+      const sourceTokens = Math.ceil(transcript.length / 4);
+      emit('summarizing', 30, 'Summarizing with a fresh selected-model context', { sourceMessages: conversational.length, sourceTokens });
+
+      const projectRoot = await this.resolveSessionWorkingDirectory(input.sessionId);
+      const priorMemory = readSessionMemory(projectRoot, input.sessionId).content;
+      const prompt = `Return one JSON object and nothing else. Preserve concrete truth; never invent completion or verification.\n\nRequired keys:\nprojectBrief (string)\ndecisions (string[])\nfilesAndCodeState (string[])\ncompletedWork (string[])\nactiveWork (string[])\nopenIssues (string[])\nnextActions (string[])\ncriticalContext (string[])\nconfidenceAndRisk (string)\ndurableMemory (string)\n\nEXISTING SESSION MEMORY:\n${priorMemory || '[none]'}\n\nTRANSCRIPT TO COMPACT:\n${transcript}`;
+      let raw = '';
+      let tokensIn = sourceTokens;
+      let tokensOut = 0;
+      const stream = provider.streamResponse({
+        model,
+        systemPrompt: 'You are a loss-averse conversation compactor. Produce valid JSON only. This is a fresh, read-only context boundary.',
+        messages: [{ role: 'user', content: prompt }],
+        maxTokens: 8192,
+        reasoningLevel: input.reasoningLevel,
+        signal: abort.signal,
+        workingDirectory: projectRoot,
+        sessionId: `${input.sessionId}:compaction:${compactionId}`,
+        harnessRole: 'manager',
+        sandbox: SANDBOX_PRESETS.readonly,
+      });
+      for await (const event of stream) {
+        if (event.type === 'error') throw new Error(event.error ?? 'Compaction model failed');
+        if (event.type === 'content_delta') raw += event.content ?? '';
+        if (event.type === 'usage_update') {
+          tokensIn = Math.max(tokensIn, (event.tokensIn ?? 0) + (event.tokensCache ?? 0));
+          tokensOut = Math.max(tokensOut, event.tokensOut ?? 0);
+        }
+      }
+
+      emit('validating', 75, 'Validating the continuation checkpoint', { sourceMessages: conversational.length, sourceTokens });
+      const jsonText = raw.trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '');
+      const parsed = JSON.parse(jsonText) as Record<string, unknown>;
+      const requiredArrays = ['decisions', 'filesAndCodeState', 'completedWork', 'activeWork', 'openIssues', 'nextActions', 'criticalContext'];
+      if (typeof parsed.projectBrief !== 'string' || typeof parsed.confidenceAndRisk !== 'string' || typeof parsed.durableMemory !== 'string' || requiredArrays.some((key) => !Array.isArray(parsed[key]))) {
+        throw new Error('The compactor returned an invalid checkpoint; original history was preserved');
+      }
+      const section = (title: string, values: unknown) => `## ${title}\n${(values as unknown[]).map((value) => `- ${String(value)}`).join('\n') || '- None recorded'}`;
+      const summary = [`# Compacted Session Checkpoint`, String(parsed.projectBrief), section('Decisions', parsed.decisions), section('Files and Code State', parsed.filesAndCodeState), section('Completed Work', parsed.completedWork), section('Active Work', parsed.activeWork), section('Open Issues', parsed.openIssues), section('Next Actions', parsed.nextActions), section('Critical Context', parsed.criticalContext), `## Confidence and Risk\n${String(parsed.confidenceAndRisk)}`].join('\n\n');
+      if (summary.length < 200) throw new Error('The compaction checkpoint was too small; original history was preserved');
+
+      emit('committing', 90, 'Committing the new context revision', { sourceMessages: conversational.length, sourceTokens });
+      await this.messages.commitCompaction({ id: compactionId, sessionId: input.sessionId, provider: String(providerName), model, automatic, summary, sourceMessageCount: conversational.length, sourceTokens: tokensIn, checkpointTokens: tokensOut || Math.ceil(summary.length / 4) });
+      writeSessionMemory(projectRoot, input.sessionId, String(parsed.durableMemory));
+      const checkpointTokens = tokensOut || Math.ceil(summary.length / 4);
+      emit('complete', 100, 'Compaction complete — the next manager turn starts from this checkpoint', { sourceMessages: conversational.length, sourceTokens: tokensIn, checkpointTokens });
+      return { compactionId, sourceMessages: conversational.length, checkpointTokens };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      emit('failed', 100, 'Compaction failed; the original conversation remains active', { error: message });
+      throw error;
+    } finally {
+      this.compactingSessions.delete(input.sessionId);
+      await this.updateWorkflowState(input.sessionId, 'idle');
+    }
   }
 
   async handleUserInput(sessionId: string, selection: string, text?: string, questionId?: string) {
@@ -2949,14 +3051,14 @@ export class KoryManager {
 
   private async loadHistory(sessionId: string): Promise<InternalMessage[]> {
     return (
-      (await this.messages?.getRecent(sessionId, 10))
+      (await this.messages?.getContextMessages(sessionId, 1000))
         // System rows are UI markers (e.g. "Stopped by user.") — never part of
         // the conversation sent back to the model.
-        ?.filter((m) => m.role !== 'system')
+        ?.filter((m) => m.role !== 'system' || m.content.startsWith('[KORY_COMPACTION]'))
         .map((m) => {
           const images = m.attachments?.filter((attachment) => attachment.type === 'image') ?? [];
           return {
-            role: m.role as InternalMessage['role'],
+            role: (m.role === 'system' ? 'user' : m.role) as InternalMessage['role'],
             content:
               m.role === 'user' && images.length > 0
                 ? [
@@ -2967,7 +3069,7 @@ export class KoryManager {
                       imageMimeType: attachment.mimeType ?? 'image/png',
                     })),
                   ]
-                : m.content,
+                : m.content.replace(/^\[KORY_COMPACTION\]\n?/, 'Authoritative compacted context:\n'),
           };
         }) || []
     );

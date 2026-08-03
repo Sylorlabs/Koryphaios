@@ -67,7 +67,7 @@ export class GrokBuildProvider implements Provider {
     // Read it synchronously so context limits do not wait behind the slower
     // `grok models` process or reasoning-level probe.
     const cliCachedModels = modelsFromGrokCliCache(readGrokCliModelsCache());
-    return cachedModels ?? cliCachedModels;
+    return cachedModels ?? cliCachedModels ?? GrokModels;
   }
 
   private resolveCliModel(modelId: string): string {
@@ -139,7 +139,10 @@ export class GrokBuildProvider implements Provider {
         }
       }
     } catch (wiringErr) {
-      providerLog.warn({ err: wiringErr, provider: 'grok' }, 'Failed to wire kory MCP/rules for Grok');
+      providerLog.warn(
+        { err: wiringErr, provider: 'grok' },
+        'Failed to wire kory MCP/rules for Grok',
+      );
     }
 
     const args = [
@@ -876,10 +879,7 @@ function buildPrompt(systemPrompt: string | undefined, messages: ProviderMessage
     tools: [],
   });
   const harnessNote = bridgeConfig?.systemInstructions?.[1] ?? HARNESS_SYSTEM_NOTE;
-  lines.push(
-    systemPrompt?.trim() ? `${systemPrompt.trim()}\n\n${harnessNote}` : harnessNote,
-    '',
-  );
+  lines.push(systemPrompt?.trim() ? `${systemPrompt.trim()}\n\n${harnessNote}` : harnessNote, '');
   const turns = messages.filter((m) => m.role !== 'system');
 
   // Single user turn → send its text verbatim after any system prompt.

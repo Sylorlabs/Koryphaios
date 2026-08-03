@@ -29,6 +29,7 @@
   $effect(() => { now = nowClock.now; });
   let activeGoals = $derived(goalStore.goals.filter(isActiveGoal));
   let selected = $derived(goalStore.selectedGoal);
+  let selectedWorkflow = $derived(selected?.activity.filter((event) => event.type === 'workflow_linked' || event.type === 'workflow_evidence').at(-1));
   let sections = $derived(groupGoals(goalStore.goals, projectStore.currentPath ?? undefined, sessionStore.activeSessionId ?? undefined));
 
   const chatTitle = (id?: string) => id ? sessionStore.sessions.find((session) => session.id === id)?.title ?? 'Unknown chat' : 'Not assigned';
@@ -139,6 +140,7 @@
             <p>{scopeDescription(selected)}</p>
             <div class="flex items-center justify-between gap-2"><span>{executionDescription(selected)}</span>{#if selected.execution?.sessionId && selected.execution.sessionId !== sessionStore.activeSessionId}<button type="button" class="shrink-0 font-medium text-[var(--color-accent)] hover:underline" onclick={() => openExecutionChat(selected)}>Open chat</button>{/if}</div>
             <p>Active time · {formatGoalRuntime(selected, now)}</p>
+            {#if selectedWorkflow}<p>Workflow · {selectedWorkflow.type === 'workflow_evidence' ? 'evidence complete' : 'active'} · {activityMessage(selectedWorkflow.message)}</p>{/if}
           </div>
           {#if selected.status === 'running'}<p class="mb-2 rounded bg-[var(--color-surface-2)] px-2 py-1.5 text-[10px] text-[var(--color-text-secondary)]">{agentSettingsStore.criticActive ? 'Manager is working. The Critic will quality-gate completion and blocker claims.' : 'Manager is working. Critic is off, so producer evidence controls completion.'}</p>{/if}
           <div aria-label="Goal checklist">

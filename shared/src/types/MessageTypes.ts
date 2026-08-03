@@ -54,5 +54,7 @@ export interface StoredMessage {
   variantGroupId?: string;
   variantIndex?: number;
   attachments?: MessageAttachment[];
+  /** Conversation generation used for manager context. Older revisions remain visible/auditable. */
+  contextRevision?: number;
   createdAt: number;
 }

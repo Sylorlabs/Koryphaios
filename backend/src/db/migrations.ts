@@ -667,6 +667,57 @@ export const MIGRATIONS: Migration[] = [
     up: `ALTER TABLE goals ADD COLUMN execution TEXT;`,
     down: ``,
   },
+  {
+    version: '0020',
+    description: 'Ordered session event log with per-session cursors and causality tracking',
+    up: `
+      CREATE TABLE IF NOT EXISTS session_event_cursors (
+        session_id TEXT PRIMARY KEY,
+        epoch INTEGER NOT NULL DEFAULT 1,
+        next_sequence INTEGER NOT NULL DEFAULT 1,
+        updated_at INTEGER NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS ordered_session_events (
+        event_id TEXT PRIMARY KEY,
+        session_id TEXT NOT NULL,
+        epoch INTEGER NOT NULL,
+        sequence INTEGER NOT NULL,
+        timestamp INTEGER NOT NULL,
+        type TEXT NOT NULL,
+        agent_id TEXT,
+        parent_sequence INTEGER,
+        payload TEXT NOT NULL,
+        dispatched INTEGER NOT NULL DEFAULT 0,
+        created_at INTEGER NOT NULL,
+        UNIQUE(session_id, epoch, sequence)
+      );
+
+      CREATE TABLE IF NOT EXISTS session_event_causes (
+        session_id TEXT NOT NULL,
+        epoch INTEGER NOT NULL,
+        cause_key TEXT NOT NULL,
+        sequence INTEGER NOT NULL,
+        PRIMARY KEY(session_id, epoch, cause_key)
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_ordered_events_session ON ordered_session_events(session_id, epoch, sequence);
+      CREATE INDEX IF NOT EXISTS idx_ordered_events_dispatched ON ordered_session_events(dispatched);
+    `,
+    down: `
+      DROP INDEX IF EXISTS idx_ordered_events_dispatched;
+      DROP INDEX IF EXISTS idx_ordered_events_session;
+      DROP TABLE IF EXISTS session_event_causes;
+      DROP TABLE IF EXISTS ordered_session_events;
+      DROP TABLE IF EXISTS session_event_cursors;
+    `,
+  },
+  {
+    version: '0022',
+    description: 'Add conversation_revision counter to sessions for CLI session state',
+    up: `ALTER TABLE sessions ADD COLUMN conversation_revision INTEGER DEFAULT 0;`,
+    down: ``,
+  },
 ];
 
 // ─── Migration Runner ────────────────────────────────────────────────────────
