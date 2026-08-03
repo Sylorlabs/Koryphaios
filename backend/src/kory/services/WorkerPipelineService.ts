@@ -16,7 +16,7 @@ import type { WorkspaceManager } from '../workspace-manager';
 import type { SnapshotManager } from '../snapshot-manager';
 import type { ITaskStore } from '../../stores/task-store';
 import { formatMessagesForCritic } from '../critic-util';
-import { classifyTask, createTaskContract, type TaskContract } from '../prompts';
+import { classifyTask, createTaskContract, type TaskContract, type TaskKind } from '../prompts';
 import { getProviderHarnessCapabilities } from '../../providers/provider-harness';
 import { computeCostUsd } from '../../pricing';
 
@@ -24,6 +24,30 @@ import { computeCostUsd } from '../../pricing';
 // worker context and must not be narrowed to text merely to cross the service
 // boundary back into KoryManager.
 type InternalMessage = ProviderMessage;
+
+/** Task kinds that mutate the repository and therefore cannot skip the
+ *  completion-blocking critic review, regardless of user policy. */
+const ALWAYS_STRICT: ReadonlySet<TaskKind> = new Set([
+  'bug',
+  'mechanical-edit',
+  'refactor',
+  'feature',
+  'ui',
+  'security-infra',
+]);
+
+/**
+ * Resolve the effective gate strictness for a task kind given the user's
+ * configured policy. Repository-mutating tasks are always strict; answer and
+ * research tasks honor the user's setting.
+ */
+export function resolveGateStrictness(
+  kind: TaskKind,
+  configured: 'strict' | 'advisory' | 'off',
+): 'strict' | 'advisory' | 'off' {
+  if (ALWAYS_STRICT.has(kind)) return 'strict';
+  return configured;
+}
 
 interface WorkerPipelineResult {
   success: boolean;

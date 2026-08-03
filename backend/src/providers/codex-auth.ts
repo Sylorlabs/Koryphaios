@@ -42,18 +42,32 @@ function modelDefinition(model: any): ModelDef | null {
       .map((entry: any) => entry?.reasoningEffort)
       .filter((level: unknown): level is string => typeof level === 'string' && level.length > 0)
     : [];
+  const contextWindow = [
+    model?.modelContextWindow,
+    model?.contextWindow,
+    model?.context_window,
+    model?.maxContextWindow,
+    model?.max_context_window,
+  ].find((value): value is number => typeof value === 'number' && Number.isFinite(value) && value >= 1024);
+  const maxOutputTokens = [
+    model?.maxOutputTokens,
+    model?.max_output_tokens,
+  ].find((value): value is number => typeof value === 'number' && Number.isFinite(value) && value >= 1);
   return {
     id,
     apiModelId: id,
     name: typeof model?.displayName === 'string' && model.displayName.trim() ? model.displayName : id,
     provider: 'codex-auth',
-    contextWindow: 0,
-    contextVerified: false,
-    maxOutputTokens: 0,
+    contextWindow: contextWindow ?? 0,
+    contextVerified: contextWindow !== undefined,
+    maxOutputTokens: maxOutputTokens ?? 0,
     costPerMInputTokens: 0,
     costPerMOutputTokens: 0,
     canReason: reasoningLevels.length > 0,
     reasoningLevels,
+    supportsFastMode: Array.isArray(model?.supportedServiceTiers)
+      ? model.supportedServiceTiers.includes('fast')
+      : /^gpt-5\.(4|5|6)(?:[-.]|$)/.test(id.toLowerCase()),
     supportsAttachments: model?.inputModalities?.includes?.('image') === true,
     supportsStreaming: true,
     tier: model?.isDefault ? 'flagship' : undefined,
@@ -108,7 +122,10 @@ export class CodexAuthProvider implements Provider {
     const child = spawn(binary, [
       '--ask-for-approval', 'never', 'exec', '--json', '--ephemeral', '--skip-git-repo-check',
       '--color', 'never', '--sandbox', request.harnessRole === 'critic' ? 'read-only' : 'workspace-write',
-      '--model', request.model, prompt(request.systemPrompt, request.messages),
+      '--model', request.model,
+      ...(request.fastMode ? ['--config', 'service_tier="fast"'] : []),
+      ...(request.reasoningLevel ? ['--config', `model_reasoning_effort=${JSON.stringify(request.reasoningLevel)}`] : []),
+      prompt(request.systemPrompt, request.messages),
     ], {
       cwd: request.workingDirectory?.trim() || process.cwd(),
       stdio: ['ignore', 'pipe', 'pipe'],

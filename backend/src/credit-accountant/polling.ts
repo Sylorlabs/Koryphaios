@@ -9,6 +9,9 @@ import { saveCloudSnapshot } from './db';
 const POLL_INTERVAL_MS = 15 * 60 * 1000;
 const OPENAI_CREDIT_GRANTS_URL = 'https://api.openai.com/v1/dashboard/billing/credit_grants';
 const GITHUB_COPILOT_METRICS_PATH = '/enterprises/{id}/copilot/metrics/reports/users-1-day';
+// Skip polling when no usage has been recorded in the last 30 minutes —
+// avoids hitting OpenAI/GitHub APIs when nobody is chatting.
+const IDLE_THRESHOLD_MS = 30 * 60 * 1000;
 
 export interface PollingConfig {
   /** OpenAI API key for GET /v1/dashboard/billing/credit_grants */
@@ -20,6 +23,13 @@ export interface PollingConfig {
 }
 
 let pollTimer: ReturnType<typeof setInterval> | null = null;
+let lastUsageAt = Date.now();
+
+/** Mark that token usage was recorded (called from recordUsage). Resets the
+ *  idle timer so the next poll interval will fire. */
+export function markCreditUsage(): void {
+  lastUsageAt = Date.now();
+}
 
 async function fetchOpenAICreditGrants(apiKey: string): Promise<void> {
   try {
@@ -73,6 +83,8 @@ export function startCreditPolling(config: PollingConfig): void {
   if (pollTimer) return;
 
   const run = async () => {
+    // Skip when idle — no token usage in the last 30 minutes.
+    if (Date.now() - lastUsageAt > IDLE_THRESHOLD_MS) return;
     if (config.openaiApiKey) await fetchOpenAICreditGrants(config.openaiApiKey);
     if (config.githubEnterpriseId && config.githubToken) {
       await fetchGitHubCopilotMetrics(config.githubEnterpriseId, config.githubToken);

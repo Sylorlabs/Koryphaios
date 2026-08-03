@@ -39,6 +39,8 @@ export interface ProviderEvent {
   // tokensIn + tokensCache to get real context occupancy. Providers whose
   // prompt count already includes cached tokens (OpenAI-style) must omit this.
   tokensCache?: number;
+  /** Account selected by Koryphaios for this provider-emitted usage event. */
+  accountId?: string;
   finishReason?: 'end_turn' | 'tool_use' | 'max_tokens' | 'stop';
   error?: string;
   // file_edit (agentic providers): a file the agent just created/edited.
@@ -100,6 +102,9 @@ export interface StreamRequest {
   temperature?: number;
   /** For reasoning models — never restrict this. Can be "low"|"medium"|"high" or provider-specific like "8192" */
   reasoningLevel?: string;
+  /** Request accelerated processing when the selected route actually supports it.
+   * Providers must translate this into their own documented service-tier control. */
+  fastMode?: boolean;
   /** Signal to abort the stream */
   signal?: AbortSignal;
   /** Project working directory — agentic CLI providers (claude-code) run + edit files here. */
@@ -133,7 +138,7 @@ export interface Provider {
   listModels(): ModelDef[];
 
   /** Optional provider-level model refresh hook for cache reset/refresh control. */
-  refreshModels?: (forceRefresh?: boolean) => void;
+  refreshModels?: (forceRefresh?: boolean) => void | Promise<unknown>;
 }
 
 // ─── Provider factory ───────────────────────────────────────────────────────

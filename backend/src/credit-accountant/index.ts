@@ -8,7 +8,7 @@
  * - API: expose local estimate vs cloud reality and highlight drift > 5%.
  */
 
-import { computeCost2026 } from './models';
+import { computeCostUsd, SUBSCRIPTION_PROVIDERS } from '../pricing';
 import {
   initCreditDb,
   getCreditDb,
@@ -16,13 +16,14 @@ import {
   getLocalTotals,
   getLocalTotalsByProvider,
   getLatestCloudSnapshots,
+  getKoryAccountUsage,
 } from './db';
-import { startCreditPolling, stopCreditPolling, type PollingConfig } from './polling';
+import { startCreditPolling, stopCreditPolling, markCreditUsage, type PollingConfig } from './polling';
 
 const DRIFT_THRESHOLD_PERCENT = 5;
 
 export { getModelCost2026, computeCost2026 } from './models';
-export { initCreditDb, getLocalTotals, getLocalTotalsByProvider, getLatestCloudSnapshots } from './db';
+export { initCreditDb, getLocalTotals, getLocalTotalsByProvider, getLatestCloudSnapshots, getKoryAccountUsage } from './db';
 export { startCreditPolling, stopCreditPolling, type PollingConfig } from './polling';
 export { createUsageInterceptingFetch } from './usage-interceptor';
 
@@ -35,9 +36,17 @@ export function recordUsage(
   provider: string,
   tokensIn: number,
   tokensOut: number,
+  attribution?: { accountId?: string; sessionId?: string },
 ): void {
-  const costUsd = computeCost2026(model, tokensIn ?? 0, tokensOut ?? 0);
-  dbRecordUsage(model, provider, tokensIn ?? 0, tokensOut ?? 0, costUsd);
+  if (!model.trim() || !provider.trim() || (tokensIn <= 0 && tokensOut <= 0)) return;
+  // Real prices: models.dev live catalog → static ModelDef catalog. Unpriced
+  // models record cost 0 and are surfaced as "unpriced" by the billing route.
+  // Subscription/auth harness usage is real usage but not metered API spend.
+  const priced = SUBSCRIPTION_PROVIDERS.has(provider)
+    ? null
+    : computeCostUsd(provider, model, tokensIn ?? 0, tokensOut ?? 0);
+  const costUsd = priced?.costUsd ?? 0;
+  dbRecordUsage(model, provider, tokensIn ?? 0, tokensOut ?? 0, costUsd, attribution);
 }
 
 /**
@@ -51,6 +60,47 @@ export function initCreditAccountant(dataDir: string, pollingConfig?: PollingCon
   ) {
     startCreditPolling(pollingConfig);
   }
+}
+
+// ─── Subscription quota tracking ────────────────────────────────────────────
+// Subscription providers (Claude Code, Codex, Copilot, …) are flat-rate: there is
+// no per-token dollar "remaining balance" to report. Instead they expose rate-limit
+// windows. We keep the latest window in memory so the billing route can surface real
+// quota status for these providers instead of meaningless $0 balances.
+
+export interface SubscriptionStatus {
+  provider: string;
+  /** e.g. "allowed" | "allowed_warning" | "rejected" */
+  status?: string;
+  /** e.g. "five_hour" */
+  rateLimitType?: string;
+  /** epoch seconds when the current window resets */
+  resetsAt?: number;
+  /** epoch ms when this status was last observed */
+  updatedAt: number;
+}
+
+const subscriptionStatuses = new Map<string, SubscriptionStatus>();
+
+/** Record a Claude Code rate-limit window observed from the CLI harness stream. */
+export function recordClaudeCodeRateLimit(info: {
+  status?: string;
+  resetsAt?: number;
+  rateLimitType?: string;
+  overageStatus?: string;
+}): void {
+  subscriptionStatuses.set('claude', {
+    provider: 'claude',
+    status: info.status,
+    rateLimitType: info.rateLimitType,
+    resetsAt: info.resetsAt,
+    updatedAt: Date.now(),
+  });
+}
+
+/** Latest known subscription quota windows, for the billing/subscription route. */
+export function getSubscriptionStatuses(): SubscriptionStatus[] {
+  return [...subscriptionStatuses.values()];
 }
 
 /**

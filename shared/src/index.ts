@@ -125,6 +125,7 @@ export type {
   StreamToolResultPayload,
   SessionCreatedPayload,
   SessionUpdatedPayload,
+  SessionIdlePayload,
   ChangeSummary,
   ChangeSummaryPayload,
   KorySessionChangesPayload,
@@ -176,7 +177,16 @@ export {
   STANDARD_REASONING_OPTIONS,
   buildReasoningConfigFromLevels,
 } from './reasoning/ReasoningFunctions';
-export type { Goal, GoalScope, GoalStatus, GoalItemStatus, GoalChecklistItem, GoalEvidence, GoalActivity, GoalExecutionConfig } from './types/GoalTypes';
+export type {
+  Goal,
+  GoalScope,
+  GoalStatus,
+  GoalItemStatus,
+  GoalChecklistItem,
+  GoalEvidence,
+  GoalActivity,
+  GoalExecutionConfig,
+} from './types/GoalTypes';
 export { goalProgress } from './types/GoalTypes';
 
 export type {
@@ -221,6 +231,9 @@ export {
 
 // ============== Notes Network ==============
 export * from './types/NoteTypes';
+
+// ============== Voice Types ==============
+export type { VoiceSettings, VoiceProviderDescriptor, SynthesisRequest } from './types/VoiceTypes';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Backward Compatibility Re-exports

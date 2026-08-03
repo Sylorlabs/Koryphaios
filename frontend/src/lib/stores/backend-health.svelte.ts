@@ -23,7 +23,9 @@ import { setApiHalted } from '$lib/api.svelte';
 export type BackendHealthStatus =
   | 'unknown' // haven't checked yet (initial)
   | 'healthy' // last check ok and contract matched
+  | 'recovering' // development backend is restarting; keep the existing UI usable
   | 'unhealthy' // last N checks failed
+  | 'recovering' // backend was unhealthy but is attempting to reconnect
   | 'mismatch'; // backend up but contract (version/hash) rejected us
 
 export type BackendHealthReason =
@@ -116,15 +118,25 @@ let _backendMinFrontend = $state<string | null>(null);
 let _backendCurrentFrontend = $state<string | null>(null);
 let _backendBundleHash = $state<string | null>(null);
 let _consecutiveFailures = $state(0);
+let backendStartedAt: number | null = null;
 
 // ─── Tunables ───────────────────────────────────────────────────────────────
 
 /** Poll cadence for the health sentinel. Exported so the overlay can drive a
  *  live "retrying in N…" countdown that stays in sync with the actual poll. */
-export const POLL_INTERVAL_MS = 5_000;
+const isDevMode = import.meta.env.DEV;
+export const POLL_INTERVAL_MS = isDevMode ? 2_000 : 5_000;
+// In desktop development, Bun's watcher intentionally replaces the backend
+// while source files change. Boot includes provider/MCP discovery and can take
+// tens of seconds, so a few refused health checks are not an application
+// outage. Keep the current UI interactive for a bounded recovery window; a
+// real failure still escalates to the normal blocking overlay afterwards.
+const DEV_RECOVERY_WINDOW_MS = 60_000;
 // Need this many consecutive failed checks before flipping to 'unhealthy'.
-// At a 5s cadence, 3 failures ~= 15s of sustained regression.
-const UNHEALTHY_FAIL_THRESHOLD = 3;
+// Production: 3 checks ~= 15s. Development: allow one watched reboot to warm.
+const UNHEALTHY_FAIL_THRESHOLD = isDevMode
+  ? Math.ceil(DEV_RECOVERY_WINDOW_MS / POLL_INTERVAL_MS)
+  : 3;
 const HEALTH_TIMEOUT_MS = 4_000;
 
 // ─── Internals ──────────────────────────────────────────────────────────────
@@ -279,12 +291,23 @@ function publish(
     networkError?: string | null;
   } = {},
 ) {
+  const previousPid = _backendPid;
+  const previousStartedAt = backendStartedAt;
+  const nextPid = body?.data?.pid;
+  const nextStartedAt = body?.data?.compat?.serverStartedAt;
+  const backendRestarted =
+    outcome.status === 'healthy' &&
+    previousPid !== null &&
+    ((typeof nextPid === 'number' && nextPid !== previousPid) ||
+      (typeof nextStartedAt === 'number' && previousStartedAt !== null && nextStartedAt !== previousStartedAt));
+
   _lastCheckedAt = Date.now();
   _backendVersion = body?.data?.version ?? _backendVersion;
   _backendPid = body?.data?.pid ?? _backendPid;
   _backendMinFrontend = body?.data?.compat?.minFrontend ?? _backendMinFrontend;
   _backendCurrentFrontend = body?.data?.compat?.currentFrontend ?? _backendCurrentFrontend;
   _backendBundleHash = body?.data?.compat?.bundleHash ?? _backendBundleHash;
+  backendStartedAt = typeof nextStartedAt === 'number' ? nextStartedAt : backendStartedAt;
 
   if (outcome.status === 'healthy') {
     _consecutiveFailures = 0;
@@ -303,6 +326,19 @@ function publish(
       });
     }
     setApiHalted(false);
+    if (backendRestarted && browser) {
+      console.info('[Koryphaios] Backend identity changed — restoring live connection', {
+        previousPid,
+        backendPid: nextPid,
+        previousStartedAt,
+        backendStartedAt,
+      });
+      window.dispatchEvent(
+        new CustomEvent('kory:backend-restarted', {
+          detail: { previousPid, backendPid: nextPid, previousStartedAt, backendStartedAt },
+        }),
+      );
+    }
   } else if (outcome.status === 'mismatch') {
     _consecutiveFailures = 0; // mismatch isn't a flaky-network signal
     _failureDetail = null;
@@ -330,18 +366,33 @@ function publish(
     _healthUrl = diagnostics.healthUrl ?? _healthUrl;
     _httpStatus = diagnostics.httpStatus ?? null;
     _networkError = diagnostics.networkError ?? null;
-    // Don't flap to 'unhealthy' on a single blip — stay 'healthy' until
-    // the threshold is reached.
-    if (_consecutiveFailures < UNHEALTHY_FAIL_THRESHOLD && _status === 'healthy') {
-      console.warn('[Koryphaios] Backend health check failed (transient)', {
+    // Don't turn an intentional dev-watch reboot into a modal outage. The
+    // compact recovery notice remains visible, requests fail naturally, and
+    // the full overlay appears only after the bounded recovery window.
+    if (_consecutiveFailures < UNHEALTHY_FAIL_THRESHOLD) {
+      if (isDevMode) {
+        setApiHalted(false);
+        _status = 'recovering';
+        _reason = outcome.reason;
+        console.info('[Koryphaios] Development backend is restarting', {
+          reason: outcome.reason,
+          detail: failureDetail,
+          consecutiveFailures: _consecutiveFailures,
+          recoveryWindowMs: DEV_RECOVERY_WINDOW_MS,
+        });
+        return;
+      }
+      if (_status === 'healthy') {
+        console.warn('[Koryphaios] Backend health check failed (transient)', {
         reason: outcome.reason,
         detail: failureDetail,
         healthUrl: _healthUrl,
         httpStatus: _httpStatus,
         networkError: _networkError,
         consecutiveFailures: _consecutiveFailures,
-      });
-      return;
+        });
+        return;
+      }
     }
     if (_consecutiveFailures >= UNHEALTHY_FAIL_THRESHOLD) {
       setApiHalted(true);
@@ -363,13 +414,14 @@ function publish(
 }
 
 async function tick() {
-  // After several consecutive failures, the backend may have restarted on a
-  // different port. Refresh the URL discovery so we don't keep polling a
-  // dead port forever.
-  if (_consecutiveFailures > 0 && _consecutiveFailures % 5 === 0) {
+  let result = await fetchHealth();
+  // A backend restart can replace its port descriptor before the next normal
+  // health interval. Re-read it and retry once before counting this as a
+  // failure, so a healthy replacement never produces a blocking overlay.
+  if (result.reason === 'unreachable') {
     await refreshUrls();
+    result = await fetchHealth();
   }
-  const result = await fetchHealth();
   publish(evaluate(result.body, result.reason), result.body, result.detail, {
     healthUrl: result.healthUrl,
     httpStatus: result.httpStatus,
@@ -399,8 +451,9 @@ async function attachTauriListeners() {
     const unDown = await listen<BackendDownPayload>('backend://down', (event) => {
       const payload = event.payload;
       _lastCheckedAt = Date.now();
-      _consecutiveFailures++;
-      _status = 'unhealthy';
+      // The supervisor normally restarts the backend immediately. Preserve the
+      // diagnostic, but let the health sentinel confirm sustained failure
+      // before blocking the UI.
       _reason = 'supervisor';
       _supervisorReason = payload?.reason ?? null;
       _supervisorMessage = payload?.message ?? null;
@@ -412,7 +465,7 @@ async function attachTauriListeners() {
         pid: _backendPid,
         consecutiveFailures: _consecutiveFailures,
       });
-      setApiHalted(true);
+      void refreshUrls().then(() => tick());
     });
     const unReady = await listen('backend://ready', () => {
       // The backend may have restarted on a different port (EADDRINUSE

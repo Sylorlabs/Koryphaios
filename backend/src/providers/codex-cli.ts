@@ -42,6 +42,16 @@ type CodexCliModel = {
   modelContextWindow?: number;
 };
 
+function supportsCodexFastTier(model: CodexCliModel): boolean {
+  const advertised = model.supportedServiceTiers;
+  if (Array.isArray(advertised)) return advertised.includes('fast');
+  // The official Codex documentation currently names GPT-5.4, 5.5, and 5.6
+  // as Fast-mode-capable. Keep this conservative fallback for older
+  // app-server catalogs which do not yet expose service tiers.
+  const id = String(model.model ?? model.id ?? '').toLowerCase();
+  return /^gpt-5\.(4|5|6)(?:[-.]|$)/.test(id);
+}
+
 function modelDefinition(model: CodexCliModel, account: DiscoveredCliAccount): ModelDef | null {
   const cliModel = typeof model.model === 'string' ? model.model : model.id;
   if (!cliModel) return null;
@@ -70,6 +80,7 @@ function modelDefinition(model: CodexCliModel, account: DiscoveredCliAccount): M
     costPerMOutputTokens: 0,
     canReason: reasoningLevels.length > 0,
     reasoningLevels,
+    supportsFastMode: supportsCodexFastTier(model),
     supportsAttachments: model.inputModalities?.includes('image') === true,
     supportsStreaming: true,
     tier: model.isDefault ? 'flagship' : undefined,

@@ -284,6 +284,16 @@ class InMemoryRedis {
     return Array.from(this.data.keys()).filter((k) => regex.test(k));
   }
 
+  async scan(cursor: string, ...args: (string | number)[]): Promise<[string, string[]]> {
+    // In-memory SCAN: ignore cursor semantics (always returns all matches in one batch).
+    // Args: 'MATCH', pattern, 'COUNT', count
+    const matchIdx = args.indexOf('MATCH');
+    const pattern = matchIdx >= 0 ? String(args[matchIdx + 1]) : '*';
+    const regex = new RegExp(pattern.replace('*', '.*').replace('?', '.'));
+    const matched = Array.from(this.data.keys()).filter((k) => regex.test(k));
+    return ['0', matched];
+  }
+
   async flushall(): Promise<'OK'> {
     this.data.clear();
     this.expirations.clear();
@@ -494,6 +504,10 @@ class RedisManager {
         }
       }
     }, 5000);
+    // Don't keep the process alive just for reconnection attempts.
+    if (this.reconnectTimer && typeof this.reconnectTimer.unref === 'function') {
+      this.reconnectTimer.unref();
+    }
   }
 
   private startHealthChecks(): void {
@@ -507,6 +521,10 @@ class RedisManager {
         this.isConnected = false;
       }
     }, 30000);
+    // Don't keep the process alive just for health checks.
+    if (typeof this.healthCheckInterval.unref === 'function') {
+      this.healthCheckInterval.unref();
+    }
   }
 
   private stopHealthChecks(): void {

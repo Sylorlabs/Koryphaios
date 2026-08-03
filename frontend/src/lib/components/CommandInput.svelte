@@ -21,7 +21,7 @@
   export type Attachment = { type: 'image' | 'file'; data: string; name: string; mimeType?: string };
 
   interface Props {
-    onSend: (message: string, model?: string, reasoningLevel?: string, attachments?: Attachment[]) => void;
+    onSend: (message: string, model?: string, reasoningLevel?: string, attachments?: Attachment[], fastMode?: boolean) => void;
     onExecuteCommand?: (command: string) => Promise<boolean> | boolean;
     /** When true, show Stop instead of Send; clicking stops manager and workers for the session. */
     isRunning?: boolean;
@@ -217,10 +217,10 @@
   /** A model's own live-reported effort levels (e.g. Codex's supported_reasoning_levels) take
    *  priority over the static ReasoningConfig tables, which can go stale as providers ship
    *  new models/levels. */
-  function findModelDef(provider: string, model: string | undefined): { reasoningLevels?: string[]; canReason?: boolean } | undefined {
+  function findModelDef(provider: string, model: string | undefined): { reasoningLevels?: string[]; canReason?: boolean; supportsFastMode?: boolean } | undefined {
     if (!model) return undefined;
     const p = wsStore.providers.find((p) => p.name === provider);
-    const catalog = (p as any)?.allAvailableModels as Array<{ id: string; reasoningLevels?: string[]; canReason?: boolean }> | undefined;
+    const catalog = (p as any)?.allAvailableModels as Array<{ id: string; reasoningLevels?: string[]; canReason?: boolean; supportsFastMode?: boolean }> | undefined;
     return catalog?.find((m) => m.id === model);
   }
 
@@ -240,6 +240,21 @@
 
   let reasoningConfig = $derived(!selectedModel ? null : effectiveReasoningConfig(currentProvider, currentModel));
   let reasoningSupported = $derived(!!selectedModel && !!reasoningConfig && reasoningConfig.options.length > 0);
+  let fastMode = $state(false);
+  let fastModeSupported = $derived(
+    !!selectedModel && (
+      currentProvider === 'openai' ||
+      ((currentProvider === 'codex' || currentProvider === 'codex-auth') && findModelDef(currentProvider, currentModel)?.supportsFastMode === true)
+    ),
+  );
+  let fastModeLabel = $derived(currentProvider === 'openai' ? 'Priority' : 'Fast');
+  let fastModeHint = $derived(currentProvider === 'openai'
+    ? 'API Priority processing. Requires Priority access on this OpenAI project.'
+    : '1.5× faster Codex service tier; uses ChatGPT credits at a higher rate.');
+
+  $effect(() => {
+    if (!fastModeSupported) fastMode = false;
+  });
 
   let showPermissionMenu = $state(false);
 
@@ -523,6 +538,20 @@
   async function executeSlashIfNeeded(): Promise<boolean> {
     const trimmed = value.trim();
     if (!trimmed.startsWith('/')) return false;
+    const fast = trimmed.match(/^\/fast(?:\s+(on|off|status))?$/i);
+    if (fast) {
+      if (!fastModeSupported) {
+        toastStore.error('Fast mode is only available for Fast-capable ChatGPT Codex models or OpenAI API Priority processing.');
+      } else if (fast[1]?.toLowerCase() === 'status') {
+        toastStore.info(`${fastModeLabel} is ${fastMode ? 'on' : 'off'}. ${fastModeHint}`);
+      } else {
+        fastMode = fast[1] ? fast[1].toLowerCase() === 'on' : !fastMode;
+        toastStore.info(`${fastModeLabel} ${fastMode ? 'enabled' : 'disabled'}. ${fastModeHint}`);
+      }
+      value = '';
+      resizeToMin();
+      return true;
+    }
     const handled = await onExecuteCommand?.(trimmed);
     if (handled) {
       value = '';
@@ -620,7 +649,7 @@
     const now = Date.now();
     if (now - lastSendAt < SEND_COOLDOWN_MS) return; // debounce duplicate sends
     lastSendAt = now;
-    onSend(trimmed, selectedModel, reasoningLevel, attachments.length > 0 ? [...attachments] : undefined);
+    onSend(trimmed, selectedModel, reasoningLevel, attachments.length > 0 ? [...attachments] : undefined, fastMode);
     value = '';
     attachments = [];
     resizeToMin();

@@ -166,9 +166,11 @@ function interactiveNote(
 // ─── Per-provider command definitions ───────────────────────────────────────
 //
 // Commands that Koryphaios already owns as built-ins (new, resume, compact,
-// clear, help, yolo, settings, theme, sidebar, zen, goal, beginner, advanced)
+// clear, help, settings, theme, sidebar, zen, goal, beginner, advanced)
 // are intentionally excluded — Kory's handler resolves those first, so listing
-// them here would only duplicate the picker.
+// them here would only duplicate the picker. Permission modes (yolo, guarded,
+// edits, ask, plan, custom) are switched via Shift+Tab in the composer, not
+// via slash commands.
 
 const CLAUDE_COMMANDS: NativeCommandDefinition[] = [
   {
@@ -266,7 +268,7 @@ const CLAUDE_COMMANDS: NativeCommandDefinition[] = [
           'claude',
           'review',
           'reviews the current diff for correctness bugs and cleanups',
-          'open the Git panel to review changes, or ask Kory to review the diff',
+          'ask Kory to review the current diff',
         ),
         ctx,
       ),
@@ -392,9 +394,9 @@ const CODEX_COMMANDS: NativeCommandDefinition[] = [
   },
   {
     command: 'model',
-    aliases: ['models', 'fast'],
+    aliases: ['models'],
     argsHint: '[model]',
-    description: 'Switch the active Codex model or toggle fast mode.',
+    description: 'Switch the active Codex model.',
     category: 'Models',
     execute: (ctx) =>
       note(
@@ -577,7 +579,7 @@ const GROK_COMMANDS: NativeCommandDefinition[] = [
           'grok',
           'always-approve',
           'toggles auto-approve mode',
-          'use /yolo in the composer (a Koryphaios built-in) to toggle YOLO mode',
+          'press Shift+Tab in the composer to cycle to the YOLO permission mode',
         ),
         ctx,
       ),
