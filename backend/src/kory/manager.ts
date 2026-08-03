@@ -615,6 +615,7 @@ export class KoryManager {
         section('Next Actions', parsed.nextActions),
         section('Critical Context', parsed.criticalContext),
         `## Confidence and Risk\n${String(parsed.confidenceAndRisk)}`,
+        `## Durable Session Memory\n${String(parsed.durableMemory)}`,
       ].join('\n\n');
       if (summary.length < 200)
         throw new Error('The compaction checkpoint was too small; original history was preserved');
@@ -634,7 +635,15 @@ export class KoryManager {
         sourceTokens: tokensIn,
         checkpointTokens: tokensOut || Math.ceil(summary.length / 4),
       });
-      writeSessionMemory(projectRoot, input.sessionId, String(parsed.durableMemory));
+      // The authoritative durable memory is inside the atomically committed
+      // checkpoint above. Keep memory.md as a convenient mirror; a filesystem
+      // issue cannot retroactively turn a committed context revision into a
+      // reported failure.
+      try {
+        writeSessionMemory(projectRoot, input.sessionId, String(parsed.durableMemory));
+      } catch (error) {
+        koryLog.warn({ error, sessionId: input.sessionId }, 'Compaction memory mirror could not be updated');
+      }
       const checkpointTokens = tokensOut || Math.ceil(summary.length / 4);
       emit(
         'complete',
