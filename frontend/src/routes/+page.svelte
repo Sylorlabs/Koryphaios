@@ -104,6 +104,7 @@
     model?: string;
     reasoningLevel?: string;
     attachments?: Array<{ type: string; data: string; name: string }>;
+    fastMode?: boolean;
   } | null>(null);
 
   // Segmented context bar: what's occupying the window (system prompt, memory
@@ -1238,7 +1239,7 @@ RULES:
       projectStore.setProject(data.data);
       await resumeOrCreateSession(data.data);
       toastStore.warning('Running in your home folder — no project scoping');
-      handleSend(pending.message, pending.model, pending.reasoningLevel, pending.attachments);
+      handleSend(pending.message, pending.model, pending.reasoningLevel, pending.attachments, pending.fastMode);
     } catch {
       toastStore.error('Could not resolve your home folder — open a project instead');
     }
@@ -1255,6 +1256,7 @@ RULES:
       model?: string;
       reasoningLevel?: string;
       attachments?: Array<{ type: string; data: string; name: string }>;
+      fastMode?: boolean;
     };
   } | null>(null);
 
@@ -1263,7 +1265,7 @@ RULES:
     if (!p) return;
     agenticConsent = new Set([...agenticConsent, p.provider]);
     agenticConsentPrompt = null;
-    handleSend(p.pending.message, p.pending.model, p.pending.reasoningLevel, p.pending.attachments);
+    handleSend(p.pending.message, p.pending.model, p.pending.reasoningLevel, p.pending.attachments, p.pending.fastMode);
   }
 
   function handleSend(
@@ -1271,6 +1273,7 @@ RULES:
     model?: string,
     reasoningLevel?: string,
     attachments?: Array<{ type: string; data: string; name: string }>,
+    fastMode?: boolean,
   ) {
     if (isDemoMode) {
       composerDraft = '';
@@ -1284,7 +1287,7 @@ RULES:
     if (!projectStore.currentPath) {
       // Don't hard-block: warn and let the user pick a project, or knowingly
       // run a quick task scoped to their home folder.
-      noProjectPrompt = { message, model, reasoningLevel, attachments };
+      noProjectPrompt = { message, model, reasoningLevel, attachments, fastMode };
       return;
     }
     const configurationWarning = getModelConfigurationWarning(wsStore.providers, model);
@@ -1303,7 +1306,7 @@ RULES:
       agenticConsentPrompt = {
         provider: providerName,
         hostName: remoteProvider.remoteHostName ?? remoteProvider.label ?? 'the host',
-        pending: { message, model, reasoningLevel, attachments },
+        pending: { message, model, reasoningLevel, attachments, fastMode },
       };
       return;
     }
@@ -1324,7 +1327,7 @@ RULES:
       );
       return;
     }
-    wsStore.sendMessage(sessionStore.activeSessionId, message, model, reasoningLevel, attachments);
+    wsStore.sendMessage(sessionStore.activeSessionId, message, model, reasoningLevel, attachments, fastMode);
   }
 
   function handleStop() {

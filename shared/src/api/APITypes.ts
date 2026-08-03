@@ -16,6 +16,9 @@ export interface SendMessageRequest {
   attachments?: Array<{ type: 'image' | 'file'; data: string; name: string }>;
   model?: string;
   reasoningLevel?: string;
+  /** Route-aware acceleration chosen in the composer. Codex uses its Fast tier;
+   * OpenAI API uses Priority processing. */
+  fastMode?: boolean;
 }
 
 export interface CreateSessionRequest {

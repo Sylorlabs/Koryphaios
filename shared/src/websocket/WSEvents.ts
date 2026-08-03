@@ -27,6 +27,8 @@ export type WSEventType =
   | 'session.deleted'
   | 'session.changes'
   | 'session.accept_changes'
+  | 'session.user_message'
+  | 'session.idle'
   // Permission events
   | 'permission.request'
   | 'permission.response'
@@ -75,6 +77,7 @@ export type WSMessagePayload =
   // Session payloads
   | SessionCreatedPayload
   | SessionUpdatedPayload
+  | SessionIdlePayload
   | ChangeSummaryPayload
   | KorySessionChangesPayload
   | StreamUsagePayload
@@ -105,6 +108,7 @@ import type {
   StreamUsage,
   SessionCreatedPayload,
   SessionUpdatedPayload,
+  SessionIdlePayload,
   ChangeSummaryPayload,
   StreamUsagePayload,
   MessagePendingPayload,

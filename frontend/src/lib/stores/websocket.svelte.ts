@@ -1057,6 +1057,7 @@ function sendMessage(
   model?: string,
   reasoningLevel?: string,
   attachments?: Array<{ type: string; data: string; name: string }>,
+  fastMode?: boolean,
 ) {
   feedStore.addUserMessage(sessionId, content, attachments);
   markSessionBusy(sessionId);
@@ -1064,7 +1065,7 @@ function sendMessage(
   void apiFetch(apiUrl('/api/messages'), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ sessionId, content, model, reasoningLevel, attachments }),
+    body: JSON.stringify({ sessionId, content, model, reasoningLevel, attachments, fastMode }),
   })
     .then(async (res) => {
       const data = await parseJsonResponse<{ ok?: boolean; error?: string }>(res);
