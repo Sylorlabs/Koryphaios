@@ -50,6 +50,49 @@ describe('database migration repairs', () => {
     ).toBeTruthy();
   });
 
+  test('repairs the missing causal parent column without rebuilding event history', async () => {
+    const database = new Database(':memory:');
+    openDatabases.push(database);
+    database.exec(`
+      CREATE TABLE _migrations (
+        version TEXT PRIMARY KEY,
+        description TEXT NOT NULL,
+        applied_at INTEGER NOT NULL,
+        checksum TEXT NOT NULL
+      );
+      CREATE TABLE ordered_session_events (
+        event_id TEXT PRIMARY KEY,
+        session_id TEXT NOT NULL,
+        epoch INTEGER NOT NULL,
+        sequence INTEGER NOT NULL,
+        timestamp INTEGER NOT NULL,
+        type TEXT NOT NULL,
+        agent_id TEXT,
+        payload TEXT NOT NULL,
+        dispatched INTEGER NOT NULL DEFAULT 0,
+        created_at INTEGER NOT NULL
+      );
+    `);
+    database.run(
+      `INSERT INTO ordered_session_events(event_id, session_id, epoch, sequence, timestamp, type, payload, created_at)
+       VALUES ('event-1', 'session-1', 1, 1, 1, 'stream.content', '{}', 1)`,
+    );
+    for (const migration of MIGRATIONS.filter(({ version }) => version !== '0025')) {
+      database.run(
+        'INSERT INTO _migrations (version, description, applied_at, checksum) VALUES (?, ?, ?, ?)',
+        [migration.version, migration.description, Date.now(), 'already-applied'],
+      );
+    }
+
+    expect(await new MigrationRunner(database).migrate()).toBe(1);
+    expect(
+      (database.query('PRAGMA table_info(ordered_session_events)').all() as Array<{ name: string }>).some(
+        (column) => column.name === 'parent_sequence',
+      ),
+    ).toBe(true);
+    expect(database.query('SELECT event_id FROM ordered_session_events').get()).toEqual({ event_id: 'event-1' });
+  });
+
   test('repairs an early 0018 database before ordered events are initialized', async () => {
     const database = new Database(':memory:');
     openDatabases.push(database);
