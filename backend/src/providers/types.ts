@@ -102,6 +102,9 @@ export interface StreamRequest {
   temperature?: number;
   /** For reasoning models — never restrict this. Can be "low"|"medium"|"high" or provider-specific like "8192" */
   reasoningLevel?: string;
+  /** Request accelerated processing when the selected route actually supports it.
+   * Providers must translate this into their own documented service-tier control. */
+  fastMode?: boolean;
   /** Signal to abort the stream */
   signal?: AbortSignal;
   /** Project working directory — agentic CLI providers (claude-code) run + edit files here. */

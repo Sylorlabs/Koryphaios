@@ -81,6 +81,7 @@ export type WSMessagePayload =
   // Session payloads
   | SessionCreatedPayload
   | SessionUpdatedPayload
+  | SessionIdlePayload
   | ChangeSummaryPayload
   | KorySessionChangesPayload
   | StreamUsagePayload
@@ -112,6 +113,7 @@ import type {
   StreamUsage,
   SessionCreatedPayload,
   SessionUpdatedPayload,
+  SessionIdlePayload,
   ChangeSummaryPayload,
   StreamUsagePayload,
   MessagePendingPayload,

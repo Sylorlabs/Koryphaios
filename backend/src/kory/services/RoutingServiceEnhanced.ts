@@ -16,6 +16,19 @@ export interface RoutingDecision {
   provider: ProviderName | undefined;
 }
 
+/**
+ * Split a `provider:model` string on the first colon only, preserving colons
+ * in the model part (e.g. `codex:codex-account:YWNjb3VudA:gpt-5.6-sol`).
+ */
+export function splitProviderModel(value: string): { provider: ProviderName; model: string } {
+  const idx = value.indexOf(':');
+  if (idx < 0) return { provider: value as ProviderName, model: value };
+  return {
+    provider: value.slice(0, idx) as ProviderName,
+    model: value.slice(idx + 1),
+  };
+}
+
 export interface RoutingServiceEnhancedConfig {
   config: KoryphaiosConfig;
   providers?: ProviderRegistry;

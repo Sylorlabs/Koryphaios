@@ -582,17 +582,20 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
   })),
 }));
 
-server.setRequestHandler(CallToolRequestSchema, async (req) => {
-  const { name, arguments: args } = req.params;
-  if (!name?.startsWith('kory__')) {
-    throw new McpError(ErrorCode.MethodNotFound, `Unknown tool: ${name}`);
-  }
-  const result = await proxyToolCall(name, (args ?? {}) as Record<string, unknown>);
-  return {
-    content: [{ type: 'text', text: result.content }],
-    isError: result.isError,
-  };
-});
+server.setRequestHandler(
+  CallToolRequestSchema,
+  async (req: { params: { name: string; arguments?: Record<string, unknown> } }) => {
+    const { name, arguments: args } = req.params;
+    if (!name?.startsWith('kory__')) {
+      throw new McpError(ErrorCode.MethodNotFound, `Unknown tool: ${name}`);
+    }
+    const result = await proxyToolCall(name, (args ?? {}) as Record<string, unknown>);
+    return {
+      content: [{ type: 'text', text: result.content }],
+      isError: result.isError,
+    };
+  },
+);
 
 // ─── Main ──────────────────────────────────────────────────────────────────
 

@@ -725,6 +725,7 @@ export class KoryManager {
     responseVariant?: { groupId: string; index: number },
     goalContext?: import('./prompts').TaskContract['goalContext'],
     interactionMode?: 'act' | 'plan',
+    fastMode?: boolean,
   ): Promise<void> {
     interactionMode = interactionMode ?? (await this.sessions?.get(sessionId))?.interactionMode ?? 'act';
     await this.sessionState.transition(sessionId, 'processing');
@@ -838,6 +839,7 @@ export class KoryManager {
           attachments,
           responseVariant,
           interactionMode,
+          fastMode,
         );
       } finally {
         clearTimeout(processTimeout);
@@ -1759,6 +1761,7 @@ export class KoryManager {
             abort.signal,
             reasoningLevel,
             interactionMode,
+            fastMode,
           );
           koryLog.debug(
             {
@@ -2101,6 +2104,7 @@ export class KoryManager {
     signal?: AbortSignal,
     reasoningLevel?: string,
     interactionMode: 'act' | 'plan' = 'act',
+    fastMode?: boolean,
   ): Promise<LLMTurnResult> {
     if (signal?.aborted) throw new DOMException('Manager run aborted', 'AbortError');
 
@@ -2368,6 +2372,7 @@ export class KoryManager {
         maxTokens: 16384,
         signal: streamSignal,
         ...(normalizedReasoning !== undefined && { reasoningLevel: normalizedReasoning }),
+        ...(fastMode === true && { fastMode: true }),
         // Agentic CLI providers (claude-code) run + edit files in the session's project directory.
         workingDirectory: await this.resolveSessionWorkingDirectory(sessionId),
         sessionId,

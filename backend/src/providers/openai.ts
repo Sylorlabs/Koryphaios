@@ -238,6 +238,13 @@ export class OpenAIProvider implements Provider {
       ...(tools?.length && { tools }),
     };
 
+    // This is deliberately API Priority, not Codex Fast mode. Fast is a
+    // ChatGPT-credit feature; API projects use the documented `priority`
+    // service tier when the customer has enabled it for their project.
+    if (this.name === 'openai' && request.fastMode) {
+      (params as any).service_tier = 'priority';
+    }
+
     // Only send reasoning_effort if model + selected level supports it.
     if (canReason && reasoningEffort && supportedEfforts.includes(reasoningEffort)) {
       if (this.name === 'deepseek') {

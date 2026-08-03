@@ -65,6 +65,9 @@ function modelDefinition(model: any): ModelDef | null {
     costPerMOutputTokens: 0,
     canReason: reasoningLevels.length > 0,
     reasoningLevels,
+    supportsFastMode: Array.isArray(model?.supportedServiceTiers)
+      ? model.supportedServiceTiers.includes('fast')
+      : /^gpt-5\.(4|5|6)(?:[-.]|$)/.test(id.toLowerCase()),
     supportsAttachments: model?.inputModalities?.includes?.('image') === true,
     supportsStreaming: true,
     tier: model?.isDefault ? 'flagship' : undefined,
@@ -119,7 +122,10 @@ export class CodexAuthProvider implements Provider {
     const child = spawn(binary, [
       '--ask-for-approval', 'never', 'exec', '--json', '--ephemeral', '--skip-git-repo-check',
       '--color', 'never', '--sandbox', request.harnessRole === 'critic' ? 'read-only' : 'workspace-write',
-      '--model', request.model, prompt(request.systemPrompt, request.messages),
+      '--model', request.model,
+      ...(request.fastMode ? ['--config', 'service_tier="fast"'] : []),
+      ...(request.reasoningLevel ? ['--config', `model_reasoning_effort=${JSON.stringify(request.reasoningLevel)}`] : []),
+      prompt(request.systemPrompt, request.messages),
     ], {
       cwd: request.workingDirectory?.trim() || process.cwd(),
       stdio: ['ignore', 'pipe', 'pipe'],

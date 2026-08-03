@@ -394,9 +394,9 @@ const CODEX_COMMANDS: NativeCommandDefinition[] = [
   },
   {
     command: 'model',
-    aliases: ['models', 'fast'],
+    aliases: ['models'],
     argsHint: '[model]',
-    description: 'Switch the active Codex model or toggle fast mode.',
+    description: 'Switch the active Codex model.',
     category: 'Models',
     execute: (ctx) =>
       note(

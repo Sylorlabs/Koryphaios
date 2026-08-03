@@ -1204,7 +1204,7 @@
       projectStore.setProject(data.data);
       await resumeOrCreateSession(data.data);
       toastStore.warning('Running in your home folder — no project scoping');
-      handleSend(pending.message, pending.model, pending.reasoningLevel, pending.attachments);
+      handleSend(pending.message, pending.model, pending.reasoningLevel, pending.attachments, pending.fastMode);
     } catch {
       toastStore.error('Could not resolve your home folder — open a project instead');
     }
@@ -1224,7 +1224,7 @@
     if (!p) return;
     agenticConsent = new Set([...agenticConsent, p.provider]);
     agenticConsentPrompt = null;
-    handleSend(p.pending.message, p.pending.model, p.pending.reasoningLevel, p.pending.attachments);
+    handleSend(p.pending.message, p.pending.model, p.pending.reasoningLevel, p.pending.attachments, p.pending.fastMode);
   }
 
   function handleSend(
@@ -1242,7 +1242,7 @@
     if (!projectStore.currentPath) {
       // Don't hard-block: warn and let the user pick a project, or knowingly
       // run a quick task scoped to their home folder.
-      noProjectPrompt = { message, model, reasoningLevel, attachments };
+      noProjectPrompt = { message, model, reasoningLevel, attachments, fastMode };
       return;
     }
     const configurationWarning = getModelConfigurationWarning(wsStore.providers, model);
@@ -1261,7 +1261,7 @@
       agenticConsentPrompt = {
         provider: providerName,
         hostName: remoteProvider.remoteHostName ?? remoteProvider.label ?? 'the host',
-        pending: { message, model, reasoningLevel, attachments },
+        pending: { message, model, reasoningLevel, attachments, fastMode },
       };
       return;
     }

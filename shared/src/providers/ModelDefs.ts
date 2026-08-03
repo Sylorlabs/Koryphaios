@@ -27,6 +27,9 @@ export interface ModelDef {
   /** Real effort levels this model supports (e.g. ['low','medium','high','xhigh']), when the
    *  provider reports them live. Falls back to static ReasoningConfig tables when absent. */
   reasoningLevels?: string[];
+  /** True when this exact model is known to support Codex's ChatGPT Fast tier.
+   * This is intentionally separate from reasoning effort and API priority. */
+  supportsFastMode?: boolean;
   supportsAttachments?: boolean;
   supportsStreaming?: boolean;
   tier?: ModelTier;

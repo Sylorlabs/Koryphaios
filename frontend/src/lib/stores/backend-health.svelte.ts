@@ -25,6 +25,7 @@ export type BackendHealthStatus =
   | 'healthy' // last check ok and contract matched
   | 'recovering' // development backend is restarting; keep the existing UI usable
   | 'unhealthy' // last N checks failed
+  | 'recovering' // backend was unhealthy but is attempting to reconnect
   | 'mismatch'; // backend up but contract (version/hash) rejected us
 
 export type BackendHealthReason =

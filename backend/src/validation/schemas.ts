@@ -117,6 +117,7 @@ export const SendMessageRequestSchema = z.object({
   content: ContentSchema,
   model: z.string().optional(),
   reasoningLevel: z.string().optional(),
+  fastMode: z.boolean().optional(),
   attachments: z
     .array(
       z.object({

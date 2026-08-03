@@ -18,7 +18,7 @@ import {
   getLatestCloudSnapshots,
   getKoryAccountUsage,
 } from './db';
-import { startCreditPolling, stopCreditPolling, type PollingConfig } from './polling';
+import { startCreditPolling, stopCreditPolling, markCreditUsage, type PollingConfig } from './polling';
 
 const DRIFT_THRESHOLD_PERCENT = 5;
 

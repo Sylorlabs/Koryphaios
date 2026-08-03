@@ -43,6 +43,15 @@ export type SessionRuntimeState =
 
 export type SessionStatus = 'active' | 'archived' | 'deleted';
 
+/** Per-session runtime state machine states. */
+export type SessionRuntimeState =
+  | 'idle'
+  | 'processing'
+  | 'compacting'
+  | 'waiting'
+  | 'error'
+  | 'paused';
+
 export interface JulesSessionLink {
   sessionId: string;
   url?: string;
