@@ -111,6 +111,7 @@
     'cline',
     'devin',
     'cerebras',
+    'poe',
   ]);
 
   // Cortecs does not publish an icon through the bundled LobeHub set. Use the
