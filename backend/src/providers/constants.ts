@@ -100,6 +100,7 @@ export const OPENCODE_DEFAULT_BASE_URL: Partial<Record<string, string>> = {
   elevenlabs: 'https://api.elevenlabs.io/v1',
   abacus: 'https://routellm.abacus.ai/v1',
   llama: 'https://api.llama.com/compat/v1',
+  poe: 'https://api.poe.com/v1',
 };
 
 export const LLAMACPP_DEFAULT = 'http://127.0.0.1:8080/v1';

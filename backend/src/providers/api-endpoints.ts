@@ -23,6 +23,7 @@ export const PROVIDER_BASE_URLS: Partial<Record<ProviderName, string>> = {
   moonshot: 'https://api.moonshot.ai/v1',
   groq: 'https://api.groq.com/openai/v1',
   openrouter: 'https://openrouter.ai/api/v1',
+  poe: 'https://api.poe.com/v1',
   xai: 'https://api.x.ai/v1',
 };
 
@@ -84,6 +85,7 @@ export function buildAuthHeaders(
     case 'groq':
     case 'xai':
     case 'openrouter':
+    case 'poe':
     case 'deepseek':
     case 'moonshot':
     case 'mistral':
@@ -129,6 +131,7 @@ export function getVerifyUrl(
     case 'groq':
     case 'xai':
     case 'openrouter':
+    case 'poe':
     case 'deepseek':
     case 'moonshot':
     case 'mistral':

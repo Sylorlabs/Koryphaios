@@ -159,6 +159,13 @@ export const PROVIDER_DISPLAY: Partial<Record<ProviderName, ProviderDisplayMeta>
       'Cloud async coding agent (API only). Tasks run on remote Google VMs and land on GitHub first — pull or checkout PRs to sync locally.',
     managerHint: JULES_SYNC_INSTRUCTIONS,
   },
+  poe: {
+    label: 'Poe',
+    iconPath: '/provider-icons/lobehub/poe-color.svg',
+    deployment: 'api',
+    description:
+      'Poe API gateway. Paste an API key from poe.com/api/keys; Koryphaios sends it only to https://api.poe.com/v1.',
+  },
 };
 
 export function getProviderDisplay(name: ProviderName): ProviderDisplayMeta | undefined {
