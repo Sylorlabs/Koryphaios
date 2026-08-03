@@ -23,6 +23,8 @@ export interface WorkflowRun {
   workflowId: string;
   sessionId: string;
   goalId?: string;
+  /** Checklist item owned by Goal Mode when the workflow was started in a Goal turn. */
+  goalItemId?: string;
   task: string;
   requestedBy: 'human' | 'agent';
   status: WorkflowRunStatus;
@@ -76,11 +78,15 @@ export const getWorkflowDefinition = (id: string) => DEFINITIONS.find((item) => 
 export const listWorkflowRuns = (root: string, sessionId?: string): WorkflowRun[] =>
   readRuns(root).filter((run) => !sessionId || run.sessionId === sessionId).sort((left, right) => right.updatedAt - left.updatedAt);
 
-export function startWorkflow(root: string, input: Pick<WorkflowRun, 'workflowId' | 'sessionId' | 'task' | 'requestedBy'> & Pick<WorkflowRun, 'goalId'>): WorkflowRun {
+export function startWorkflow(
+  root: string,
+  input: Pick<WorkflowRun, 'workflowId' | 'sessionId' | 'task' | 'requestedBy'> &
+    Pick<WorkflowRun, 'goalId' | 'goalItemId'>,
+): WorkflowRun {
   if (!getWorkflowDefinition(input.workflowId)) throw new Error('Unknown workflow');
   if (!input.task.trim()) throw new Error('Workflow task is required');
   const now = Date.now();
-  const run: WorkflowRun = { id: crypto.randomUUID(), workflowId: input.workflowId, sessionId: input.sessionId, goalId: input.goalId, task: input.task.trim(), requestedBy: input.requestedBy, status: 'running', stageIndex: 0, evidence: [], createdAt: now, updatedAt: now };
+  const run: WorkflowRun = { id: crypto.randomUUID(), workflowId: input.workflowId, sessionId: input.sessionId, goalId: input.goalId, goalItemId: input.goalItemId, task: input.task.trim(), requestedBy: input.requestedBy, status: 'running', stageIndex: 0, evidence: [], createdAt: now, updatedAt: now };
   const runs = readRuns(root);
   writeRuns(root, [run, ...runs]);
   return run;

@@ -28,7 +28,13 @@ export const sessions = sqliteTable('sessions', {
   tokensIn: integer('tokens_in').default(0),
   tokensOut: integer('tokens_out').default(0),
   totalCost: real('total_cost').default(0),
+  // Single source of truth for the session runtime state machine:
+  // idle | processing | compacting | waiting | error | paused
   workflowState: text('workflow_state').default('idle'),
+  // Monotonic counter bumped every time the conversation is rewritten
+  // (message edit, time-travel rewind, compaction). Stateful CLI adapters
+  // compare this to decide whether their cached conversation is stale.
+  conversationRevision: integer('conversation_revision').default(0),
   workingDirectory: text('working_directory'), // project folder this chat is scoped to
   metadata: text('metadata'), // JSON string
   tags: text('tags'), // JSON string
@@ -39,7 +45,9 @@ export const sessions = sqliteTable('sessions', {
 
 export const messages = sqliteTable('messages', {
   id: text('id').primaryKey(),
-  sessionId: text('session_id').notNull().references(() => sessions.id, { onDelete: 'cascade' }),
+  sessionId: text('session_id')
+    .notNull()
+    .references(() => sessions.id, { onDelete: 'cascade' }),
   role: text('role', { enum: ['user', 'assistant', 'system'] }).notNull(),
   content: text('content').notNull(), // JSON string of ContentBlock[]
   model: text('model'),
@@ -49,12 +57,31 @@ export const messages = sqliteTable('messages', {
   cost: real('cost').default(0),
   variantGroupId: text('variant_group_id'),
   variantIndex: integer('variant_index').default(0),
+  contextRevision: integer('context_revision').notNull().default(0),
+  createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
+});
+
+export const sessionCompactions = sqliteTable('session_compactions', {
+  id: text('id').primaryKey(),
+  sessionId: text('session_id').notNull().references(() => sessions.id, { onDelete: 'cascade' }),
+  sourceRevision: integer('source_revision').notNull(),
+  targetRevision: integer('target_revision').notNull(),
+  provider: text('provider').notNull(),
+  model: text('model').notNull(),
+  automatic: integer('automatic', { mode: 'boolean' }).notNull().default(false),
+  sourceMessageCount: integer('source_message_count').notNull(),
+  sourceTokens: integer('source_tokens').notNull().default(0),
+  checkpointTokens: integer('checkpoint_tokens').notNull().default(0),
+  summaryHash: text('summary_hash').notNull(),
+  summary: text('summary').notNull(),
   createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
 });
 
 export const tasks = sqliteTable('tasks', {
   id: text('id').primaryKey(),
-  sessionId: text('session_id').notNull().references(() => sessions.id, { onDelete: 'cascade' }),
+  sessionId: text('session_id')
+    .notNull()
+    .references(() => sessions.id, { onDelete: 'cascade' }),
   description: text('description').notNull(),
   domain: text('domain'),
   status: text('status', { enum: ['pending', 'active', 'done', 'failed'] }).default('pending'),
@@ -69,13 +96,24 @@ export const tasks = sqliteTable('tasks', {
 });
 
 export const goals = sqliteTable('goals', {
-  id: text('id').primaryKey(), userId: text('user_id'), objective: text('objective').notNull(),
-  scope: text('scope').notNull(), projectPath: text('project_path'), sessionId: text('session_id'),
-  priority: integer('priority').notNull().default(0), sortOrder: integer('sort_order').notNull().default(0),
-  status: text('status').notNull().default('queued'), checklist: text('checklist').notNull().default('[]'),
-  linkedSessionIds: text('linked_session_ids').notNull().default('[]'), activity: text('activity').notNull().default('[]'),
-  blocker: text('blocker'), activeDurationMs: integer('active_duration_ms').notNull().default(0),
-  activeStartedAt: integer('active_started_at', { mode: 'timestamp' }), createdAt: integer('created_at', { mode: 'timestamp' }).notNull(), updatedAt: integer('updated_at', { mode: 'timestamp' }).notNull(),
+  id: text('id').primaryKey(),
+  userId: text('user_id'),
+  objective: text('objective').notNull(),
+  scope: text('scope').notNull(),
+  projectPath: text('project_path'),
+  sessionId: text('session_id'),
+  priority: integer('priority').notNull().default(0),
+  sortOrder: integer('sort_order').notNull().default(0),
+  status: text('status').notNull().default('queued'),
+  checklist: text('checklist').notNull().default('[]'),
+  linkedSessionIds: text('linked_session_ids').notNull().default('[]'),
+  activity: text('activity').notNull().default('[]'),
+  blocker: text('blocker'),
+  execution: text('execution'),
+  activeDurationMs: integer('active_duration_ms').notNull().default(0),
+  activeStartedAt: integer('active_started_at', { mode: 'timestamp' }),
+  createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
+  updatedAt: integer('updated_at', { mode: 'timestamp' }).notNull(),
 });
 
 // ============================================================================
@@ -84,7 +122,9 @@ export const goals = sqliteTable('goals', {
 
 export const refreshTokens = sqliteTable('refresh_tokens', {
   token: text('token').primaryKey(),
-  userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  userId: text('user_id')
+    .notNull()
+    .references(() => users.id, { onDelete: 'cascade' }),
   expiresAt: integer('expires_at', { mode: 'timestamp' }).notNull(),
   createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
   revoked: integer('revoked').default(0),
@@ -92,7 +132,9 @@ export const refreshTokens = sqliteTable('refresh_tokens', {
 
 export const apiKeys = sqliteTable('api_keys', {
   id: text('id').primaryKey(),
-  userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  userId: text('user_id')
+    .notNull()
+    .references(() => users.id, { onDelete: 'cascade' }),
   name: text('name').notNull(),
   prefix: text('prefix').notNull(),
   hashedKey: text('hashed_key').notNull(),
@@ -198,7 +240,9 @@ export const authSessions = sqliteTable('sessions_auth', {
 
 export const activeWorkers = sqliteTable('active_workers', {
   taskId: text('task_id').primaryKey(),
-  sessionId: text('session_id').notNull().references(() => sessions.id, { onDelete: 'cascade' }),
+  sessionId: text('session_id')
+    .notNull()
+    .references(() => sessions.id, { onDelete: 'cascade' }),
   taskData: text('task_data').notNull(), // JSON string
   startTime: integer('start_time', { mode: 'timestamp' }).notNull(),
   status: text('status').notNull().default('running'),
@@ -327,6 +371,50 @@ export const replayEvents = sqliteTable(
   }),
 );
 
+// Canonical hot-path ordering log for everything delivered to a session feed.
+// This is deliberately separate from replayEvents, whose payloads are a
+// higher-level agent replay model rather than the live WebSocket protocol.
+export const sessionEventCursors = sqliteTable('session_event_cursors', {
+  sessionId: text('session_id').primaryKey(),
+  epoch: integer('epoch').notNull().default(1),
+  nextSequence: integer('next_sequence').notNull().default(1),
+  updatedAt: integer('updated_at').notNull(),
+});
+
+export const orderedSessionEvents = sqliteTable(
+  'ordered_session_events',
+  {
+    eventId: text('event_id').primaryKey(),
+    sessionId: text('session_id').notNull(),
+    epoch: integer('epoch').notNull(),
+    sequence: integer('sequence').notNull(),
+    timestamp: integer('timestamp').notNull(),
+    type: text('type').notNull(),
+    agentId: text('agent_id'),
+    parentSequence: integer('parent_sequence'),
+    payload: text('payload').notNull(),
+    dispatched: integer('dispatched', { mode: 'boolean' }).notNull().default(false),
+    createdAt: integer('created_at').notNull(),
+  },
+  (t) => ({
+    sessionSequence: unique().on(t.sessionId, t.epoch, t.sequence),
+    sessionEventId: unique().on(t.sessionId, t.eventId),
+  }),
+);
+
+export const sessionEventCauses = sqliteTable(
+  'session_event_causes',
+  {
+    sessionId: text('session_id').notNull(),
+    epoch: integer('epoch').notNull(),
+    causeKey: text('cause_key').notNull(),
+    sequence: integer('sequence').notNull(),
+  },
+  (t) => ({
+    identity: unique().on(t.sessionId, t.epoch, t.causeKey),
+  }),
+);
+
 // ============================================================================
 // Process Supervisor Tables
 // ============================================================================
@@ -425,8 +513,8 @@ export const notes = sqliteTable('notes', {
   title: text('title').notNull(),
   content: text('content').notNull().default(''),
   folderPath: text('folder_path').notNull().default('/'),
-  tags: text('tags').notNull().default('[]'),           // JSON string array
-  pinned: integer('pinned').notNull().default(0),       // boolean 0/1
+  tags: text('tags').notNull().default('[]'), // JSON string array
+  pinned: integer('pinned').notNull().default(0), // boolean 0/1
   includeInContext: integer('include_in_context').notNull().default(0), // auto-inject into agent context
   format: text('format').notNull().default('markdown'), // 'markdown' | 'html' — html renders in the sandboxed preview
   userId: text('user_id').references(() => users.id, { onDelete: 'cascade' }),
@@ -435,21 +523,31 @@ export const notes = sqliteTable('notes', {
 });
 
 // Wiki-link graph edges
-export const noteLinks = sqliteTable('note_links', {
-  fromNoteId: text('from_note_id').notNull().references(() => notes.id, { onDelete: 'cascade' }),
-  toNoteId: text('to_note_id').notNull().references(() => notes.id, { onDelete: 'cascade' }),
-}, (t) => ({
-  pk: primaryKey({ columns: [t.fromNoteId, t.toNoteId] }),
-}));
+export const noteLinks = sqliteTable(
+  'note_links',
+  {
+    fromNoteId: text('from_note_id')
+      .notNull()
+      .references(() => notes.id, { onDelete: 'cascade' }),
+    toNoteId: text('to_note_id')
+      .notNull()
+      .references(() => notes.id, { onDelete: 'cascade' }),
+  },
+  (t) => ({
+    pk: primaryKey({ columns: [t.fromNoteId, t.toNoteId] }),
+  }),
+);
 
 // File attachments for notes
 export const noteAttachments = sqliteTable('note_attachments', {
   id: text('id').primaryKey(),
-  noteId: text('note_id').notNull().references(() => notes.id, { onDelete: 'cascade' }),
+  noteId: text('note_id')
+    .notNull()
+    .references(() => notes.id, { onDelete: 'cascade' }),
   filename: text('filename').notNull(),
   mimeType: text('mime_type').notNull(),
   size: integer('size').notNull(),
-  storagePath: text('storage_path').notNull(),          // absolute path on disk
+  storagePath: text('storage_path').notNull(), // absolute path on disk
   createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
 });
 

@@ -135,11 +135,22 @@ export interface AgentSettings {
   /** Give the agent a live context-usage report each turn so it can decide to prune/compact on its own. */
   contextSelfAwareness: boolean;
 
+  /** Automatically compact after a completed turn reaches the safe context threshold. */
+  autoCompactEnabled: boolean;
+
   /** Show complete reasoning blocks expanded in the chat feed by default. */
   reasoningExpandedByDefault: boolean;
 
   /** Persisted default source selection when both personal and project revisions exist. */
   skillCollisionChoices: Record<string, 'personal' | 'project'>;
+
+  /** Composer permission mode: guarded asks before destructive actions, ask
+   *  always confirms, plan is read-only until approved. */
+  permissionMode: 'guarded' | 'ask' | 'plan';
+
+  /** When true, approval thresholds (files/lines) are enforced before
+   *  destructive tool calls. When false, the agent is unconstrained. */
+  autonomyLimitsEnabled: boolean;
 
   /** Timestamp of last update for synchronization */
   updatedAt?: number;
@@ -181,6 +192,8 @@ export const DEFAULT_AGENT_SETTINGS: AgentSettings = {
   contextSelfAwareness: true,
   reasoningExpandedByDefault: false,
   skillCollisionChoices: {},
+  permissionMode: 'guarded',
+  autonomyLimitsEnabled: false,
 };
 
 // Helper to load koryphaios.json
@@ -450,6 +463,7 @@ const SETTING_ENUMS: Partial<Record<keyof AgentSettings, readonly string[]>> = {
   feedbackSharing: ['local', 'sanitized-opt-in'],
   skillLearningMode: ['human-only', 'propose-then-verify', 'automatic'],
   localWebSearch: ['off', 'on', 'fallback'],
+  permissionMode: ['guarded', 'ask', 'plan'],
 };
 
 /** Strip unknown or ill-typed API fields rather than persisting arbitrary configuration. */

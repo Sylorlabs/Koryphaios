@@ -1,11 +1,13 @@
 // Tool system — abstract base and registry.
 // Ported from OpenCode's tools/tools.go pattern.
 
-import type { ChangeSummary } from '@koryphaios/shared';
+import type { ChangeSummary, KoryQuestionPresentation } from '@koryphaios/shared';
 import { toolLog } from '../logger';
 
 export interface ToolContext {
   sessionId: string;
+  /** Immutable Goal Mode execution identity for manager tools. */
+  goalContext?: { goalId: string; itemId: string; objective: string; itemTitle: string };
   /** Optional agent identifier for backward compatibility in tests and callsites. */
   agentId?: string;
   workingDirectory: string;
@@ -14,12 +16,17 @@ export interface ToolContext {
   allowedPaths?: string[];
   /** Whether the tool execution should be strictly sandboxed */
   isSandboxed?: boolean;
+  /** Explicit user-selected unrestricted mode. This intentionally suppresses
+   * confirmation prompts, including destructive shell commands. */
+  yoloMode?: boolean;
   /** Optional callback for streaming file edit deltas to the UI */
   emitFileEdit?: (event: {
     path: string;
     delta: string;
     totalLength: number;
     operation: 'create' | 'edit';
+    /** For edits: the original text being replaced, sent once on the first delta (enables a live diff). */
+    oldStr?: string;
   }) => void;
   emitFileComplete?: (event: {
     path: string;
@@ -27,11 +34,38 @@ export interface ToolContext {
     operation: 'create' | 'edit';
   }) => void;
   /** Optional callback to request user input (blocking) */
-  waitForUserInput?: (question: string, options: string[]) => Promise<string>;
+  waitForUserInput?: (
+    question: string,
+    options: string[],
+    presentation?: KoryQuestionPresentation,
+  ) => Promise<string>;
   /** Optional callback to record code changes for summary and keep/reject */
   recordChange?: (change: ChangeSummary) => void;
+  /** Optional preflight for file-mutating tools. Returning false prevents the edit. */
+  preflightFileChange?: (
+    proposal: FileChangeProposal,
+  ) => Promise<{ allowed: boolean; reason?: string }>;
   /** Optional: manager-only. When the manager calls delegate_to_worker, this runs the worker pipeline and returns a summary. */
   delegateToWorker?: (task: string, domain?: string) => Promise<string>;
+  /** Optional: manager-only. Delegates to Google Jules (cloud async agent, API only). */
+  delegateToJules?: (
+    task: string,
+    options?: { createPr?: boolean; branch?: string },
+  ) => Promise<string>;
+  /** Optional preflight hook called before a file-mutating tool runs. If the
+   *  callback returns `{ allowed: false }`, the tool is blocked and its result
+   *  is replaced with the reason. Used by autonomy limits to enforce approval
+   *  thresholds before large changes. */
+  preflightFileChange?: (proposal: {
+    paths: string[];
+    linesChanged: number;
+  }) => Promise<{ allowed: boolean; reason?: string }>;
+}
+
+export interface FileChangeProposal {
+  paths: string[];
+  /** Added plus removed lines in the requested edit. */
+  linesChanged: number;
 }
 
 export interface ToolCallInput {
@@ -64,7 +98,7 @@ type ToolExecutionRole = 'manager' | 'worker' | 'critic' | 'coder';
 const CRITIC_READ_ONLY_TOOLS = new Set(['read_file', 'grep', 'glob', 'ls']);
 
 /** Role filter: manager gets manager+worker+any (full); worker gets worker+any; critic gets critic+any (read-only only). */
-function roleIncludesTool(
+export function roleIncludesTool(
   toolName: string,
   role: ToolExecutionRole,
   toolRole?: 'manager' | 'worker' | 'critic' | 'any',
@@ -73,12 +107,25 @@ function roleIncludesTool(
   const r = toolRole as string | undefined;
 
   if (normalizedRole === 'critic') {
-    return CRITIC_READ_ONLY_TOOLS.has(toolName) || r === 'critic' || r === 'any' || !r;
+    // Critic is read-only: the read-only filesystem tools, tools explicitly roled 'critic',
+    // or tools the author explicitly marked 'any' (safe for all roles). Crucially, do NOT
+    // fall through to NO-role/default tools — that is how bash/write_file leaked to the critic.
+    return CRITIC_READ_ONLY_TOOLS.has(toolName) || r === 'critic' || r === 'any';
   }
   if (!r || r === 'any') return true;
   if (normalizedRole === 'manager') return r === 'manager' || r === 'worker';
   return r === normalizedRole;
 }
+
+/** Tools that mutate files and are subject to preflight approval checks. */
+const FILE_MUTATING_TOOLS = new Set([
+  'write_file',
+  'edit_file',
+  'batch_edit',
+  'patch',
+  'delete_file',
+  'move_file',
+]);
 
 export class ToolRegistry {
   private tools = new Map<string, Tool>();
@@ -106,6 +153,11 @@ export class ToolRegistry {
       }));
   }
 
+  isAllowedForRole(name: string, role: ToolExecutionRole): boolean {
+    const tool = this.tools.get(name);
+    return Boolean(tool && roleIncludesTool(tool.name, role, tool.role));
+  }
+
   async execute(ctx: ToolContext, call: ToolCallInput): Promise<ToolCallOutput> {
     const tool = this.tools.get(call.name);
     if (!tool) {
@@ -118,7 +170,51 @@ export class ToolRegistry {
       };
     }
 
+    const proposal = estimateFileChange(call);
+    if (proposal && ctx.preflightFileChange) {
+      const decision = await ctx.preflightFileChange(proposal);
+      if (!decision.allowed) {
+        return {
+          callId: call.id,
+          name: call.name,
+          output: decision.reason ?? 'Edit blocked by the configured autonomy limits.',
+          isError: true,
+          durationMs: 0,
+        };
+      }
+    }
+
     const start = performance.now();
+
+    // Preflight check for file-mutating tools when autonomy limits are active.
+    if (ctx.preflightFileChange && FILE_MUTATING_TOOLS.has(call.name)) {
+      const input = call.input as Record<string, unknown>;
+      const paths: string[] = typeof input.path === 'string' ? [input.path] : [];
+      const content = typeof input.content === 'string' ? input.content : '';
+      const linesChanged = content ? content.split('\n').length : 0;
+      try {
+        const verdict = await ctx.preflightFileChange({ paths, linesChanged });
+        if (!verdict.allowed) {
+          return {
+            callId: call.id,
+            name: call.name,
+            output: verdict.reason ?? 'Approval required.',
+            isError: true,
+            durationMs: performance.now() - start,
+          };
+        }
+      } catch {
+        // If the preflight hook throws, fail closed (block the tool).
+        return {
+          callId: call.id,
+          name: call.name,
+          output: 'Preflight check failed — tool blocked for safety.',
+          isError: true,
+          durationMs: performance.now() - start,
+        };
+      }
+    }
+
     try {
       const result = await tool.run(ctx, call);
       result.durationMs = performance.now() - start;
@@ -146,4 +242,45 @@ export class ToolRegistry {
       };
     }
   }
+}
+
+function lineCount(value: unknown): number {
+  return typeof value === 'string' ? value.split('\n').length : 0;
+}
+
+/** Estimate Kory-owned file tool impact before the tool mutates the workspace. */
+function estimateFileChange(call: ToolCallInput): FileChangeProposal | null {
+  const input = call.input;
+  if (call.name === 'write_file' && typeof input.path === 'string') {
+    return { paths: [input.path], linesChanged: lineCount(input.content) };
+  }
+
+  if ((call.name === 'edit_file' || call.name === 'patch') && typeof input.path === 'string') {
+    const edits = call.name === 'patch' && Array.isArray(input.edits) ? input.edits : [input];
+    const linesChanged = edits.reduce((total, edit) => {
+      if (!edit || typeof edit !== 'object') return total;
+      const change = edit as Record<string, unknown>;
+      return total + lineCount(change.old_str) + lineCount(change.new_str);
+    }, 0);
+    return { paths: [input.path], linesChanged };
+  }
+
+  if (call.name === 'batch_edit' && Array.isArray(input.files)) {
+    const paths: string[] = [];
+    let linesChanged = 0;
+    for (const file of input.files) {
+      if (!file || typeof file !== 'object') continue;
+      const entry = file as Record<string, unknown>;
+      if (typeof entry.path === 'string') paths.push(entry.path);
+      if (!Array.isArray(entry.edits)) continue;
+      for (const edit of entry.edits) {
+        if (!edit || typeof edit !== 'object') continue;
+        const change = edit as Record<string, unknown>;
+        linesChanged += lineCount(change.old_str) + lineCount(change.new_str);
+      }
+    }
+    return paths.length > 0 ? { paths, linesChanged } : null;
+  }
+
+  return null;
 }

@@ -32,6 +32,10 @@ export type WSEventType =
   | 'session.replay'
   | 'session.integrity_error'
   | 'session.idle'
+  | 'compaction.started'
+  | 'compaction.progress'
+  | 'compaction.completed'
+  | 'compaction.failed'
   // Permission events
   | 'permission.request'
   | 'permission.response'
