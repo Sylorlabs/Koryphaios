@@ -64,7 +64,10 @@ let probeInFlight: Promise<DevinCapabilities> | null = null;
 const PROBE_TIMEOUT_MS = 12_000;
 const MODELS_TIMEOUT_MS = 15_000;
 
-function runCli(args: string[], timeoutMs: number): Promise<{ stdout: string; stderr: string; code: number }> {
+function runCli(
+  args: string[],
+  timeoutMs: number,
+): Promise<{ stdout: string; stderr: string; code: number }> {
   return new Promise((resolve) => {
     const bin = whichBinary('devin');
     if (!bin) {
@@ -123,11 +126,15 @@ function parseSubcommands(help: string): {
   // Subcommands are listed in the Commands: block of the top-level help.
   return {
     supportsAcp: /^acp\b/m.test(help) || /\bacp\s+Run as an ACP/.test(help),
-    supportsMcp: /^mcp\b/m.test(help) || /\bmcp\s+Connect and log in to Model Context Protocol/.test(help),
+    supportsMcp:
+      /^mcp\b/m.test(help) || /\bmcp\s+Connect and log in to Model Context Protocol/.test(help),
     supportsRules: /^rules\b/m.test(help) || /\brules\s+Manage agent rules/.test(help),
     supportsSkills: /^skills\b/m.test(help) || /\bskills\s+Manage agent skills/.test(help),
     // Hooks are detected via the --help flags list or the hooks.v1.json mention.
-    supportsHooks: /--hooks\b/i.test(help) || /hooks\.v1\.json/i.test(help) || /PreToolUse|PostToolUse/i.test(help),
+    supportsHooks:
+      /--hooks\b/i.test(help) ||
+      /hooks\.v1\.json/i.test(help) ||
+      /PreToolUse|PostToolUse/i.test(help),
   };
 }
 
@@ -344,5 +351,45 @@ export function defaultDevinRulesDirs(projectRoot?: string): string[] {
   const dirs: string[] = [];
   if (projectRoot) dirs.push(join(projectRoot, 'AGENTS.md'));
   dirs.push(join(homedir(), '.config', 'devin', 'AGENTS.md'));
-  return dirs.filter((p) => p.endsWith('.md') ? existsSync(p) : existsSync(p));
+  return dirs.filter((p) => (p.endsWith('.md') ? existsSync(p) : existsSync(p)));
+}
+
+/**
+ * Parse `devin models list` output into structured model entries.
+ *
+ * The CLI prints model families as headings (e.g. "Claude Opus 5 (claude-opus-5)")
+ * followed by indented rows with an id, display name, and optional context/price
+ * metadata. Alias lines ("  aliases: opus") and help text are excluded.
+ */
+export function parseDevinModelsOutput(output: string): DevinModelEntry[] {
+  const lines = output.split('\n');
+  const models: DevinModelEntry[] = [];
+
+  // Help text (not a catalog) starts with "List the models" or "Usage:".
+  if (/^Usage:|^\s*Commands:/m.test(output) || /^List the models/m.test(output)) {
+    return [];
+  }
+
+  for (const line of lines) {
+    // Model rows are indented and contain an id followed by a display name.
+    // Format: "  <id>  <Display Name>  [Nk context, ...]"
+    const match = line.match(
+      /^\s{2,}(\S+)\s{2,}(.+?)(?:\s*\[(\d+(?:[._]\d+)*)\s*([KkMm]?)\s*context[^\]]*\])?\s*$/,
+    );
+    if (match) {
+      const id = match[1];
+      const name = match[2].trim();
+      let contextWindow: number | undefined;
+      if (match[3]) {
+        const num = parseInt(match[3].replace(/[._]/g, ''), 10);
+        const suffix = match[4]?.toUpperCase();
+        if (suffix === 'M') contextWindow = num * 1_000_000;
+        else if (suffix === 'K') contextWindow = num * 1_000;
+        else contextWindow = num;
+      }
+      models.push({ id, name, contextWindow });
+    }
+  }
+
+  return models;
 }

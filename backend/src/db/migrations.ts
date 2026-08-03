@@ -844,6 +844,12 @@ export const MIGRATIONS: Migration[] = [
     `,
     down: ``,
   },
+  {
+    version: '0025',
+    description: 'Repair ordered event parent sequence on early durability databases',
+    up: `ALTER TABLE ordered_session_events ADD COLUMN parent_sequence INTEGER;`,
+    down: ``,
+  },
 ];
 
 // ─── Migration Runner ────────────────────────────────────────────────────────
@@ -942,6 +948,16 @@ export class MigrationRunner {
             '',
           ),
         );
+      } else if (migration.version === '0025') {
+        const table = this.db
+          .query("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'ordered_session_events'")
+          .get();
+        if (table) {
+          const columns = this.db.query(`PRAGMA table_info(ordered_session_events)`).all() as Array<{ name: string }>;
+          if (!columns.some((column) => column.name === 'parent_sequence')) {
+            this.db.exec(migration.up);
+          }
+        }
       } else {
         this.db.exec(migration.up);
       }
