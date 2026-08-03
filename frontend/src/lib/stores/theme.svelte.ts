@@ -1,5 +1,7 @@
 // Theme system — multiple presets, accent colors, fonts, Svelte 5 runes
 
+import { loadFont } from '$lib/fonts';
+
 export type ThemePreset =
   | 'kintsugi'
   | 'midnight'
@@ -338,6 +340,9 @@ function createThemeStore() {
     // rgba(var(--color-accent-rgb), 0.12) for alpha-blended backgrounds,
     // borders, and shadows that follow the user's selected accent color.
     root.style.setProperty('--color-accent-rgb', hexToRgb(accentVars.main));
+    // Same for the hover variant — enables rgba(var(--color-accent-hover-rgb), N)
+    // in hover-state styles that need alpha blending with the user's hover color.
+    root.style.setProperty('--color-accent-hover-rgb', hexToRgb(accentVars.hover));
     root.style.setProperty('--font-sans', FONT_FAMILIES[font]);
 
     const isLight = resolvedPreset === 'light';
@@ -396,6 +401,8 @@ function createThemeStore() {
     setFont(f: FontFamily) {
       font = f;
       save();
+      // Lazy-load the newly selected font's CSS.
+      void loadFont(f);
     },
 
     get presets(): Array<{ id: ThemePreset; label: string }> {

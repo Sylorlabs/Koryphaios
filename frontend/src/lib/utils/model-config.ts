@@ -26,6 +26,18 @@ export function parseProviderModelSelection(value?: string): { provider?: string
   };
 }
 
+/**
+ * A manual selection is valid only while the provider reports that exact model
+ * as enabled.  Keep this separate from Auto: Auto is resolved by the backend,
+ * while a manual choice must never silently point at a disabled model.
+ */
+export function isEnabledModelSelection(providers: ProviderInfo[], value?: string): boolean {
+  const { provider, model } = parseProviderModelSelection(value);
+  if (!provider || !model) return false;
+  const selectedProvider = providers.find((item) => item.name === provider);
+  return !!selectedProvider?.authenticated && selectedProvider.models.includes(model);
+}
+
 export function getModelConfigurationWarning(
   providers: ProviderInfo[],
   preferredModel?: string,
@@ -39,10 +51,10 @@ export function getModelConfigurationWarning(
   if (provider && model) {
     const selectedProvider = authenticatedProviders.find((item) => item.name === provider);
     if (!selectedProvider) {
-      return `${formatProviderName(provider)} is not configured. Open Settings and connect it, or switch back to Auto.`;
+      return `${formatProviderName(provider)} is not configured. Open Settings and connect it.`;
     }
     if (!selectedProvider.models.includes(model)) {
-      return `${model} is not enabled for ${formatProviderName(provider)}. Open Settings -> Manage Models and enable it, or switch back to Auto.`;
+      return `${model} is not enabled for ${formatProviderName(provider)}. Open Settings -> Manage Models and enable it.`;
     }
   }
 

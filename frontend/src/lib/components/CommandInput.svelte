@@ -1,12 +1,13 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { Send, ChevronDown, Sparkles, Square, Users, User, ShieldCheck, ShieldAlert, Circle, Paperclip, Clipboard, X, Check, Search, Plus, Target, Settings } from 'lucide-svelte';
+  import { Send, ChevronDown, Sparkles, Square, Users, User, ShieldCheck, ShieldAlert, Circle, Paperclip, Clipboard, X, Check, Search, Plus, Target, Settings, Zap, Pencil, MessageCircleQuestion, SlidersHorizontal, ZoomIn, ZoomOut, RotateCcw, ClipboardList, Play, Mic } from 'lucide-svelte';
   import { wsStore } from '$lib/stores/websocket.svelte';
   import { shortcutStore } from '$lib/stores/shortcuts.svelte';
   import { experimentalStore } from '$lib/stores/experimental.svelte';
   import { agentSettingsStore } from '$lib/stores/agent-settings.svelte';
   import { getReasoningConfig, buildReasoningConfigFromLevels } from '@koryphaios/shared';
   import BrainIcon from '$lib/components/icons/BrainIcon.svelte';
+  import ProviderIcon from '$lib/components/icons/ProviderIcon.svelte';
   import { getModelConfigurationWarning } from '$lib/utils/model-config';
   import { invoke } from '@tauri-apps/api/core';
   import { toastStore } from '$lib/stores/toast.svelte';
@@ -15,8 +16,9 @@
   import { apiUrl } from '$lib/utils/api-url';
   import { goalStore } from '$lib/stores/goals.svelte';
   import { goalDisplayStore } from '$lib/stores/goal-display.svelte';
+  import { formatGoalRuntime, isActiveGoal } from '$lib/utils/goal-actions';
 
-  export type Attachment = { type: 'image' | 'file'; data: string; name: string };
+  export type Attachment = { type: 'image' | 'file'; data: string; name: string; mimeType?: string };
 
   interface Props {
     onSend: (message: string, model?: string, reasoningLevel?: string, attachments?: Attachment[]) => void;
@@ -29,7 +31,7 @@
     /** What Kory is waiting on, e.g. "background terminal: dev-server". */
     waitingReason?: string;
     onStop?: () => void;
-    onOpenSettings?: (section?: 'advanced') => void;
+    onOpenSettings?: (section?: 'experimental' | 'agent', agentSection?: 'permissions') => void;
     inputRef?: HTMLTextAreaElement;
     value?: string;
     slashCommands?: Array<{ command: string; label: string; description: string }>;
@@ -43,10 +45,19 @@
     initialModel?: string;
     /** Keep context preview entirely client-side on static surfaces with no backend. */
     disableModelPreviewRequests?: boolean;
+    interactionMode?: 'act' | 'plan';
+    planReady?: boolean;
+    planTransitioning?: boolean;
+    onInteractionModeChange?: (mode: 'act' | 'plan') => void | Promise<void>;
+    onPlanAction?: (action: 'implement' | 'clear-implement' | 'clear-goal' | 'exit') => void | Promise<void>;
     /** Bindable mirror of the composer's selected model (e.g. "claude:sonnet")
      *  so the parent can react to provider changes (e.g. to surface that CLI
      *  provider's native /commands in the slash picker). */
     selectedModel?: string;
+    interactionMode?: 'act' | 'plan';
+    onInteractionModeChange?: (mode: 'act' | 'plan') => void;
+    planReady?: boolean;
+    onApprovePlan?: () => void;
   }
 
   let {
@@ -57,6 +68,8 @@
     waitingReason = '',
     onStop,
     onOpenSettings,
+    onOpenWorkflows,
+    workflowStatus,
     inputRef = $bindable(),
     value = $bindable(''),
     slashCommands = [],
@@ -67,7 +80,16 @@
     placeholder = 'Ask Koryphaios to inspect, explain, or change this project...',
     initialModel = '',
     disableModelPreviewRequests = false,
+    interactionMode = 'act',
+    planReady = false,
+    planTransitioning = false,
+    onInteractionModeChange,
+    onPlanAction,
     selectedModel = $bindable(''),
+    interactionMode = 'act',
+    onInteractionModeChange,
+    planReady = false,
+    onApprovePlan,
   }: Props = $props();
   let actionPanelRef = $state<HTMLDivElement>();
   let showModelPicker = $state(false);
@@ -82,11 +104,76 @@
   let lastContextPreviewKey = $state('');
   let selectedPickerIndex = $state(0);
   let attachments = $state<Attachment[]>([]);
+  let pendingAttachmentReads = $state(0);
+  const attachmentReadTasks = new Set<Promise<void>>();
+  let previewAttachment = $state<Attachment | null>(null);
+  let previewZoom = $state(1);
+  let previewOffsetX = $state(0);
+  let previewOffsetY = $state(0);
+  let previewDragging = $state(false);
+  let previewDragX = 0;
+  let previewDragY = 0;
   let referenceFileInputRef = $state<HTMLInputElement>();
   let referenceFolderInputRef = $state<HTMLInputElement>();
   let showReferenceMenu = $state(false);
   let showGoalActions = $state(false);
+  let voiceRecorder = $state<MediaRecorder | null>(null);
+  let voiceRecording = $state(false);
+  let voiceStartedAt = 0;
+  let voiceChunks: Blob[] = [];
+  let voiceRecognition: any = null;
+  let voiceBaseBefore = '';
+  let voiceBaseAfter = '';
+  let voiceTranscript = '';
   let liveFileMentions = $state<string[]>([]);
+
+  function insertTranscript(text: string) {
+    const start = inputRef?.selectionStart ?? value.length;
+    const end = inputRef?.selectionEnd ?? start;
+    value = `${value.slice(0, start)}${text}${value.slice(end)}`;
+    queueMicrotask(() => { inputRef?.focus(); inputRef?.setSelectionRange(start + text.length, start + text.length); });
+  }
+
+  async function toggleVoiceRecording() {
+    if (voiceRecording) { if (voiceRecognition) voiceRecognition.stop(); else voiceRecorder?.stop(); return; }
+    if (disableModelPreviewRequests || !navigator.mediaDevices?.getUserMedia) { toastStore.error('Microphone recording is available in the desktop app'); return; }
+    try {
+      const settingsResult = await apiFetch(apiUrl('/api/voice/settings')).then(response => response.json());
+      const settings = settingsResult.data;
+      if (!settings?.voiceModeEnabled) { toastStore.error('Voice controls are turned off in Voice settings'); return; }
+      if (settings.input.provider === 'local') { toastStore.error('English Dictation is not installed yet. Open Settings → Voice to install the approximately 124 MB pack.'); return; }
+      if (settings.input.provider === 'system') {
+        const Recognition = (window as any).SpeechRecognition ?? (window as any).webkitSpeechRecognition;
+        if (!Recognition) throw new Error('System live dictation is not available in this webview');
+        const start = inputRef?.selectionStart ?? value.length; const end = inputRef?.selectionEnd ?? start;
+        voiceBaseBefore = value.slice(0, start); voiceBaseAfter = value.slice(end); voiceTranscript = '';
+        const recognition = new Recognition(); voiceRecognition = recognition;
+        recognition.lang = settings.input.language || 'en-US'; recognition.continuous = true; recognition.interimResults = settings.liveTranscription;
+        recognition.onresult = (event: any) => {
+          let complete = ''; for (let i = 0; i < event.results.length; i++) complete += event.results[i][0].transcript;
+          voiceTranscript = complete.trimStart(); value = `${voiceBaseBefore}${voiceTranscript}${voiceBaseAfter}`;
+          queueMicrotask(() => inputRef?.setSelectionRange(voiceBaseBefore.length + voiceTranscript.length, voiceBaseBefore.length + voiceTranscript.length));
+        };
+        recognition.onerror = (event: any) => toastStore.error(event.error === 'not-allowed' ? 'Microphone permission denied' : `Dictation failed: ${event.error}`);
+        recognition.onend = () => { voiceRecording = false; voiceRecognition = null; inputRef?.focus(); };
+        voiceRecording = true; recognition.start(); window.setTimeout(() => { if (voiceRecognition === recognition) recognition.stop(); }, 5 * 60 * 1000); return;
+      }
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true } });
+      voiceChunks = []; voiceStartedAt = Date.now();
+      const recorder = new MediaRecorder(stream);
+      recorder.ondataavailable = e => { if (e.data.size) voiceChunks.push(e.data); };
+      recorder.onstop = async () => {
+        voiceRecording = false; stream.getTracks().forEach(track => track.stop());
+        const blob = new Blob(voiceChunks, { type: recorder.mimeType });
+        try {
+          const response = await apiFetch(apiUrl('/api/voice/transcribe'), { method: 'POST', headers: { 'content-type': blob.type || 'application/octet-stream', 'x-voice-duration-ms': String(Date.now() - voiceStartedAt) }, body: blob });
+          const result = await response.json(); if (!response.ok) throw new Error(result.error); insertTranscript(result.data.text);
+        } catch (e) { toastStore.error(e instanceof Error ? e.message : 'Transcription failed'); }
+      };
+      voiceRecorder = recorder; voiceRecording = true; recorder.start(250);
+      window.setTimeout(() => { if (recorder.state === 'recording') recorder.stop(); }, 5 * 60 * 1000);
+    } catch (e) { toastStore.error(e instanceof Error ? e.message : 'Microphone permission denied'); }
+  }
 
   $effect(() => {
     if (!selectedModel && initialModel) selectedModel = initialModel;
@@ -119,23 +206,13 @@
   let reasoningLevel = $state('medium');
   let showReasoningMenu = $state(false);
 
-  function parseModelSelection(value: string): { provider?: string; model?: string } {
-    if (value === 'auto') return {};
-    const separator = value.indexOf(':');
-    if (separator === -1) return {};
-    return {
-      provider: value.slice(0, separator),
-      model: value.slice(separator + 1),
-    };
-  }
-
   let fallbackProvider = $derived.by(() => {
     const preferred = wsStore.providers.find((p) => p.enabled && p.authenticated);
     return preferred?.name ?? 'anthropic';
   });
 
-  let currentProvider = $derived(!selectedModel ? fallbackProvider : (parseModelSelection(selectedModel).provider ?? fallbackProvider));
-  let currentModel = $derived(parseModelSelection(selectedModel).model);
+  let currentProvider = $derived(!selectedModel ? fallbackProvider : (parseProviderModelSelection(selectedModel).provider ?? fallbackProvider));
+  let currentModel = $derived(parseProviderModelSelection(selectedModel).model);
 
   /** A model's own live-reported effort levels (e.g. Codex's supported_reasoning_levels) take
    *  priority over the static ReasoningConfig tables, which can go stale as providers ship
@@ -155,18 +232,43 @@
     if (Array.isArray(def?.reasoningLevels)) {
       return buildReasoningConfigFromLevels(def.reasoningLevels);
     }
-    return (
-      // 2. Static per-provider/model rules.
-      getReasoningConfig(provider, model) ??
-      // 3. Universal fallback: any reasoning-capable model gets at least the
-      //    standard effort tiers — providers map/guard what's actually sent,
-      //    so no provider is silently excluded from the picker.
-      (def?.canReason ? buildReasoningConfigFromLevels(['low', 'medium', 'high']) : null)
-    );
+    // Static rules are retained only for providers with a documented wire
+    // parameter. `canReason` alone describes model behavior, not a selectable
+    // effort control, so it must never manufacture Low/Medium/High options.
+    return getReasoningConfig(provider, model);
   }
 
   let reasoningConfig = $derived(!selectedModel ? null : effectiveReasoningConfig(currentProvider, currentModel));
   let reasoningSupported = $derived(!!selectedModel && !!reasoningConfig && reasoningConfig.options.length > 0);
+
+  let showPermissionMenu = $state(false);
+
+  const PERMISSION_OPTIONS = [
+    { value: 'yolo', label: 'YOLO', description: 'Run every action without Kory approval or risk checks, including destructive commands.', icon: Zap, tone: 'text-amber-300' },
+    { value: 'guarded', label: 'Guarded', description: 'Default. Accept routine work; block risky commands and ask before destructive ones.', icon: ShieldCheck, tone: 'text-emerald-300' },
+    { value: 'edits', label: 'Accept edits', description: 'Apply file edits automatically; ask before other actions.', icon: Pencil, tone: 'text-sky-300' },
+    { value: 'ask', label: 'Ask', description: 'Ask before every action.', icon: MessageCircleQuestion, tone: 'text-[var(--color-text-secondary)]' },
+    { value: 'custom', label: 'Custom', description: 'Use the detailed approval rules from Settings.', icon: SlidersHorizontal, tone: 'text-violet-300' },
+  ] as const;
+
+  type PermissionMode = (typeof PERMISSION_OPTIONS)[number]['value'];
+
+  let permissionMode = $derived((agentSettingsStore.settings.permissionMode === 'plan' ? 'guarded' : agentSettingsStore.settings.permissionMode ?? 'guarded') as PermissionMode);
+  let permissionModeMeta = $derived(PERMISSION_OPTIONS.find((option) => option.value === permissionMode) ?? PERMISSION_OPTIONS[1]);
+
+  // Keep the legacy live YOLO bridge aligned when a saved workspace policy is
+  // loaded, rather than only after the picker is touched.
+  $effect(() => {
+    wsStore.setYoloMode(permissionMode === 'yolo');
+  });
+
+  function selectPermissionMode(next: PermissionMode) {
+    showPermissionMenu = false;
+    if (permissionMode !== next) {
+      void agentSettingsStore.saveSettings({ ...agentSettingsStore.settings, permissionMode: next }, { quietSuccess: true });
+    }
+    if (next === 'custom') onOpenSettings?.('agent', 'permissions');
+  }
 
   const configurationWarning = $derived(
     disabled ? null : getModelConfigurationWarning(wsStore.providers, selectedModel),
@@ -213,6 +315,19 @@
     return models;
   });
 
+  // The catalog is the authority. A manually chosen model can disappear when
+  // its provider or model is turned off in Settings; do not retain that stale
+  // localStorage value and then offer an impossible Manage Models error.
+  $effect(() => {
+    const value = selectedModel;
+    const providers = wsStore.providers;
+    if (!value || value === 'auto' || providers.length === 0) return;
+    const { provider, model } = parseProviderModelSelection(value);
+    if (!provider || !model || isEnabledModelSelection(providers, value)) return;
+    selectedModel = '';
+    if (typeof localStorage !== 'undefined') localStorage.removeItem(MODEL_STORAGE_KEY);
+  });
+
   let filteredQuickModels = $derived.by(() => {
     const query = modelSearchQuery.trim().toLowerCase();
     if (!query) return availableModels;
@@ -223,7 +338,7 @@
 
   let selectedModelLabel = $derived.by(() => {
     if (!selectedModel) return 'Select model';
-    const parsed = parseModelSelection(selectedModel);
+    const parsed = parseProviderModelSelection(selectedModel);
     if (!parsed.model || !parsed.provider) return selectedModel;
     const provider = wsStore.providers.find(p => p.name === parsed.provider);
     const catalog = (provider as any)?.allAvailableModels as Array<{ id: string; name: string }> | undefined;
@@ -241,7 +356,7 @@
     const target = availableModels.find((m) => m.value === value);
     wsStore.setManagerContextWindow(sid, target?.contextWindow);
     if (disableModelPreviewRequests) return;
-    const { provider, model } = parseModelSelection(value);
+    const { provider, model } = parseProviderModelSelection(value);
     if (provider && model) {
       // listModels() starts provider/CLI discovery in the background. Recheck
       // a few times so a live limit replaces the catalog fallback as soon as
@@ -419,6 +534,12 @@
 
   function handleKeydown(e: KeyboardEvent) {
     if (e.repeat) return; // ignore key repeat (e.g. holding Enter)
+    // Shift+Tab cycles permission modes — handled globally in +page.svelte so it
+    // works whether or not the composer is focused. Let it bubble by not calling
+    // preventDefault here; the global handler will preventDefault when appropriate.
+    if (e.key === 'Tab' && e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey && !pickerOpen) {
+      return;
+    }
     if (pickerOpen && pickerItems.length > 0) {
       if (e.key === 'ArrowDown') {
         e.preventDefault();
@@ -441,13 +562,25 @@
         return;
       }
     }
-    // Ctrl+Shift+V / Cmd+Shift+V → force paste image from clipboard
-    if (
-      (e.ctrlKey || e.metaKey) &&
-      e.shiftKey &&
-      (e.key === 'v' || e.key === 'V')
-    ) {
+    const pasteTextMatches = shortcutStore.matches('paste_text', e);
+    const pasteImageMatches = shortcutStore.matches('paste_image', e);
+    if (pasteTextMatches && pasteImageMatches) {
+      // Windows and macOS intentionally use the native shared paste binding.
+      // Let the regular paste event choose an image when present, otherwise text.
+      e.stopPropagation();
+      return;
+    }
+
+    if (pasteTextMatches) {
       e.preventDefault();
+      e.stopPropagation();
+      void pasteTextFromClipboard();
+      return;
+    }
+
+    if (pasteImageMatches) {
+      e.preventDefault();
+      e.stopPropagation();
       void pasteImageFromClipboard();
       return;
     }
@@ -478,18 +611,15 @@
       return;
     }
     if (await executeSlashIfNeeded()) return;
+    // Clipboard files are converted asynchronously. Wait for an in-flight
+    // conversion so pressing Enter immediately after Ctrl/Cmd+V cannot send a
+    // text-only message and silently discard the image.
+    if (attachmentReadTasks.size > 0) await Promise.all([...attachmentReadTasks]);
     const trimmed = value.trim();
     if (!trimmed && attachments.length === 0) return;
     const now = Date.now();
     if (now - lastSendAt < SEND_COOLDOWN_MS) return; // debounce duplicate sends
     lastSendAt = now;
-    const goal = goalStore.selectedGoal;
-    if (goal) {
-      void goalStore.drive(goal.id, { model: selectedModel, reasoningLevel, instructions: trimmed }).catch((error) => toastStore.error(error instanceof Error ? error.message : String(error)));
-      value = '';
-      attachments = [];
-      return;
-    }
     onSend(trimmed, selectedModel, reasoningLevel, attachments.length > 0 ? [...attachments] : undefined);
     value = '';
     attachments = [];
@@ -503,6 +633,7 @@
   const BASE_MIN_HEIGHT_PX = 88;
   const MAX_HEIGHT_PX = 280;
   let minHeightPx = $state(BASE_MIN_HEIGHT_PX);
+  let composerResizeFrame: number | null = null;
 
   function syncComposerMinHeight() {
     if (typeof window === 'undefined') return;
@@ -526,6 +657,15 @@
     inputRef.style.height = Math.max(minHeightPx, Math.min(h, MAX_HEIGHT_PX)) + 'px';
   }
 
+  function scheduleComposerResize() {
+    if (composerResizeFrame !== null) return;
+    composerResizeFrame = requestAnimationFrame(() => {
+      composerResizeFrame = null;
+      syncComposerMinHeight();
+      autoResize();
+    });
+  }
+
   onMount(() => {
     if (typeof window === "undefined") return;
 
@@ -542,10 +682,19 @@
       }
     };
     window.addEventListener("keydown", handleGlobalEsc);
+    const handlePasteImageShortcut = () => void pasteImageFromClipboard();
+    const handlePreferredPasteShortcut = () => void (async () => {
+      if (await tryPasteImageFromClipboard()) return;
+      await pasteTextFromClipboard();
+    })();
+    window.addEventListener('koryphaios:paste-image', handlePasteImageShortcut);
+    window.addEventListener('koryphaios:paste-preferred', handlePreferredPasteShortcut);
 
     const resizeObserver = new ResizeObserver(() => {
-      syncComposerMinHeight();
-      autoResize();
+      // Writing textarea height while ResizeObserver delivers can retrigger
+      // layout in the same notification cycle. Coalesce the write to the next
+      // frame instead, after the browser completes its observation pass.
+      scheduleComposerResize();
     });
 
     if (actionPanelRef) {
@@ -558,15 +707,16 @@
     };
 
     window.addEventListener("resize", handleWindowResize);
-    requestAnimationFrame(() => {
-      syncComposerMinHeight();
-      autoResize();
-    });
+    scheduleComposerResize();
 
     return () => {
       resizeObserver.disconnect();
+      if (composerResizeFrame !== null) cancelAnimationFrame(composerResizeFrame);
+      composerResizeFrame = null;
       window.removeEventListener("resize", handleWindowResize);
       window.removeEventListener("keydown", handleGlobalEsc);
+      window.removeEventListener('koryphaios:paste-image', handlePasteImageShortcut);
+      window.removeEventListener('koryphaios:paste-preferred', handlePreferredPasteShortcut);
     };
   });
 
@@ -681,11 +831,12 @@
     const target = e.target as HTMLElement;
     if (!target.closest('.model-picker')) showModelPicker = false;
     if (!target.closest('.reasoning-picker')) showReasoningMenu = false;
+    if (!target.closest('.permission-picker')) showPermissionMenu = false;
     if (!target.closest('.reference-picker')) showReferenceMenu = false;
     if (!target.closest('.agent-mode-picker')) showAgentModeMenu = false;
   }
 
-  let canSend = $derived(!disabled && !configurationWarning && (value.trim().length > 0 || attachments.length > 0));
+  let canSend = $derived(!disabled && !configurationWarning && (value.trim().length > 0 || attachments.length > 0 || pendingAttachmentReads > 0));
 
   // Dropdown, not a blind cycle button — all three modes stay visible and
   // pickable without clicking through the others.
@@ -811,8 +962,123 @@
     attachments = attachments.filter((_, i) => i !== index);
   }
 
-  /** Force-paste image from OS clipboard (bypasses text). Used by Ctrl+Shift+V and the paste-image button. */
-  async function pasteImageFromClipboard() {
+  function clampPreviewZoom(value: number): number {
+    return Math.min(6, Math.max(0.5, value));
+  }
+
+  function resetAttachmentPreview() {
+    previewZoom = 1;
+    previewOffsetX = 0;
+    previewOffsetY = 0;
+  }
+
+  function openAttachmentPreview(attachment: Attachment) {
+    previewAttachment = attachment;
+    resetAttachmentPreview();
+  }
+
+  function closeAttachmentPreview() {
+    previewAttachment = null;
+    previewDragging = false;
+  }
+
+  function zoomAttachmentPreview(delta: number) {
+    previewZoom = clampPreviewZoom(previewZoom + delta);
+  }
+
+  function handlePreviewWheel(event: WheelEvent) {
+    event.preventDefault();
+    zoomAttachmentPreview(event.deltaY < 0 ? 0.2 : -0.2);
+  }
+
+  function startPreviewDrag(event: PointerEvent) {
+    previewDragging = true;
+    previewDragX = event.clientX - previewOffsetX;
+    previewDragY = event.clientY - previewOffsetY;
+    (event.currentTarget as HTMLElement).setPointerCapture(event.pointerId);
+  }
+
+  function movePreviewDrag(event: PointerEvent) {
+    if (!previewDragging) return;
+    previewOffsetX = event.clientX - previewDragX;
+    previewOffsetY = event.clientY - previewDragY;
+  }
+
+  function imageExtension(mimeType: string): string {
+    return mimeType === 'image/jpeg' ? 'jpg'
+      : mimeType === 'image/gif' ? 'gif'
+      : mimeType === 'image/webp' ? 'webp'
+      : mimeType === 'image/avif' ? 'avif'
+      : 'png';
+  }
+
+  function imageAttachmentFromBlob(blob: Blob, name?: string): Promise<Attachment> {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const result = reader.result;
+        if (typeof result !== 'string') return reject(new Error('Could not read clipboard image'));
+        const mimeType = blob.type || 'image/png';
+        resolve({
+          type: 'image',
+          data: result.split(',', 2)[1] ?? '',
+          name: name || `clipboard-image.${imageExtension(mimeType)}`,
+          mimeType,
+        });
+      };
+      reader.onerror = () => reject(reader.error ?? new Error('Could not read clipboard image'));
+      reader.readAsDataURL(blob);
+    });
+  }
+
+  function addClipboardImage(blob: Blob, name?: string): Promise<void> {
+    pendingAttachmentReads++;
+    let task: Promise<void>;
+    task = imageAttachmentFromBlob(blob, name)
+      .then((attachment) => {
+        attachments = [...attachments, attachment];
+      })
+      .catch((error) => {
+        console.error('[CommandInput] clipboard image read failed:', error);
+        toastStore.error('Could not attach the clipboard image');
+      })
+      .finally(() => {
+        pendingAttachmentReads--;
+        attachmentReadTasks.delete(task);
+      });
+    attachmentReadTasks.add(task);
+    return task;
+  }
+
+  async function tauriClipboardImageBlob(): Promise<Blob | null> {
+    if (typeof window === 'undefined' || !('__TAURI_INTERNALS__' in window)) return null;
+    const { readImage } = await import('@tauri-apps/plugin-clipboard-manager');
+    const image = await readImage();
+    try {
+      const [rgba, size] = await Promise.all([image.rgba(), image.size()]);
+      if (!size.width || !size.height || rgba.length === 0) return null;
+      const canvas = document.createElement('canvas');
+      canvas.width = size.width;
+      canvas.height = size.height;
+      const context = canvas.getContext('2d');
+      if (!context) throw new Error('Image canvas is unavailable');
+      context.putImageData(
+        new ImageData(new Uint8ClampedArray(rgba), size.width, size.height),
+        0,
+        0,
+      );
+      return await new Promise<Blob>((resolve, reject) => {
+        canvas.toBlob(
+          (blob) => blob ? resolve(blob) : reject(new Error('Could not encode clipboard image')),
+          'image/png',
+        );
+      });
+    } finally {
+      await image.close();
+    }
+  }
+
+  async function tryPasteImageFromClipboard(): Promise<boolean> {
     // Try browser clipboard first (works for images copied from web pages)
     try {
       const clipboardItems = await navigator.clipboard.read();
@@ -820,15 +1086,8 @@
         for (const type of item.types) {
           if (type.startsWith('image/')) {
             const blob = await item.getType(type);
-            const reader = new FileReader();
-            const loaded = await new Promise<string>((resolve) => {
-              reader.onload = (e) => resolve(e.target?.result as string);
-              reader.readAsDataURL(blob);
-            });
-            const data = loaded.split(',')[1];
-            const ext = type === 'image/png' ? 'png' : type === 'image/jpeg' ? 'jpg' : type === 'image/gif' ? 'gif' : type === 'image/webp' ? 'webp' : 'png';
-            attachments = [...attachments, { type: 'image', data, name: `clipboard-image.${ext}` }];
-            return;
+            await addClipboardImage(blob, `clipboard-image.${imageExtension(type)}`);
+            return true;
           }
         }
       }
@@ -837,65 +1096,70 @@
     }
 
     // Tauri native clipboard (for OS-level screenshot tools)
-    if (typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window) {
-      try {
-        const { readImage } = await import('@tauri-apps/plugin-clipboard-manager');
-        const image = await readImage();
-        if (image) {
-          // Tauri's Image exposes png() at runtime but it isn't in the published types.
-          const pngData = await (image as unknown as { png: () => Promise<BlobPart> }).png();
-          const blob = new Blob([pngData], { type: 'image/png' });
-          const reader = new FileReader();
-          const loaded = await new Promise<string>((resolve) => {
-            reader.onload = (ev) => resolve(ev.target?.result as string);
-            reader.readAsDataURL(blob);
-          });
-          const base64 = loaded.split(',')[1];
-          attachments = [...attachments, { type: 'image', data: base64, name: 'clipboard-image.png' }];
-          return;
-        }
-      } catch (err: any) {
-        toastStore.error("Clipboard error: " + err.message);
-        return;
+    try {
+      const blob = await tauriClipboardImageBlob();
+      if (blob) {
+        await addClipboardImage(blob, 'clipboard-image.png');
+        return true;
       }
+    } catch {
+      // The clipboard may contain text rather than an image.
     }
 
-    toastStore.error("No image found in clipboard");
+    return false;
   }
 
-  // Track whether we already handled this paste event (prevents double-fire
-  // from the container + textarea both seeing the same bubbling event).
+  /** Force-paste image from OS clipboard (bypasses text). */
+  async function pasteImageFromClipboard() {
+    if (!(await tryPasteImageFromClipboard())) toastStore.error('No image found in clipboard');
+  }
+
+  async function pasteTextFromClipboard() {
+    const text = await navigator.clipboard.readText().catch(() => '');
+    if (!text || !inputRef) return;
+    const start = inputRef.selectionStart ?? value.length;
+    const end = inputRef.selectionEnd ?? value.length;
+    value = value.slice(0, start) + text + value.slice(end);
+    requestAnimationFrame(() => {
+      if (!inputRef) return;
+      const newPos = start + text.length;
+      inputRef.selectionStart = newPos;
+      inputRef.selectionEnd = newPos;
+      inputRef.focus();
+    });
+  }
+
+  // Guards against a browser delivering the same ClipboardEvent twice.
   let lastPasteEvent: ClipboardEvent | null = null;
 
   /** Ctrl+V / Cmd+V → paste image if available, else text. */
   function handlePaste(e: ClipboardEvent) {
-    // If this exact event was already handled (container + textarea both fire), skip.
+    // If this exact event was already handled, skip.
     if (lastPasteEvent === e) return;
     lastPasteEvent = e;
 
-    let hasImage = false;
     const items = e.clipboardData?.items;
+    const imageFiles: File[] = [];
     if (items) {
       for (const item of items) {
         if (item.type.startsWith('image/')) {
-          hasImage = true;
-          e.preventDefault();
           const file = item.getAsFile();
-          if (file) {
-            const reader = new FileReader();
-            reader.onload = (ev) => {
-              const data = (ev.target?.result as string).split(',')[1];
-              const ext = item.type === 'image/png' ? 'png' : item.type === 'image/jpeg' ? 'jpg' : item.type === 'image/gif' ? 'gif' : item.type === 'image/webp' ? 'webp' : 'png';
-              attachments = [...attachments, { type: 'image', data, name: `clipboard-image.${ext}` }];
-            };
-            reader.readAsDataURL(file);
-          }
-          break;
+          if (file) imageFiles.push(file);
         }
       }
     }
 
-    if (hasImage) {
+    // WebKit/Tauri can expose pasted images only through clipboardData.files.
+    // Use it as a fallback, without duplicating files we already got from items.
+    if (imageFiles.length === 0) {
+      for (const file of Array.from(e.clipboardData?.files ?? [])) {
+        if (file.type.startsWith('image/')) imageFiles.push(file);
+      }
+    }
+
+    if (imageFiles.length > 0) {
+      e.preventDefault();
+      for (const file of imageFiles) void addClipboardImage(file, file.name || undefined);
       requestAnimationFrame(() => { lastPasteEvent = null; });
       return;
     }
@@ -905,8 +1169,11 @@
     // Focus the input if we're not already there
     inputRef?.focus();
 
-    // Read TEXT only from the clipboard.
-    void navigator.clipboard.readText().then((text) => {
+    // Some Linux WebKit/Tauri builds omit image files from ClipboardEvent.
+    // Check the native image clipboard before falling back to text.
+    void (async () => {
+      if (await tryPasteImageFromClipboard()) return;
+      const text = await navigator.clipboard.readText().catch(() => '');
       if (text && inputRef) {
         const start = inputRef.selectionStart ?? value.length;
         const end = inputRef.selectionEnd ?? value.length;
@@ -920,7 +1187,7 @@
           }
         });
       }
-    }).catch(() => {});
+    })();
 
     // Clear the guard after a tick so a new paste works
     requestAnimationFrame(() => {
@@ -931,7 +1198,7 @@
 
 <svelte:window onclick={handleClickOutside} />
 
-<div class="command-input px-4 py-3" onpaste={handlePaste}>
+<div class="command-input px-4 py-3">
   <!-- No project: show error -->
   {#if disabled}
     <div class="mb-4 px-4 py-3 rounded-xl text-sm font-medium flex items-center gap-2" style="background: rgba(245, 158, 11, 0.12); border: 1px solid rgba(245, 158, 11, 0.35); color: var(--color-text-primary);">
@@ -957,7 +1224,29 @@
     </div>
   {/if}
 
-  <div class="rounded-[20px] border px-5 py-3" style="background: rgba(12, 10, 9, 0.2); border-color: var(--color-border);">
+  <div class="composer-shell rounded-[20px] px-5 py-3" style="background: rgba(12, 10, 9, 0.2);">
+    {#if interactionMode === 'plan'}
+      <section class="mb-3 rounded-xl border border-cyan-400/25 bg-cyan-400/[0.06] p-3" aria-label="Plan mode">
+        <div class="flex flex-wrap items-start justify-between gap-3">
+          <div class="min-w-0">
+            <div class="flex items-center gap-2 text-sm font-semibold text-cyan-200"><ClipboardList size={16} /> Plan mode</div>
+            <p class="mt-1 max-w-3xl text-xs leading-relaxed text-[var(--color-text-secondary)]">
+              Kory will inspect deeply, resolve consequential questions, keep the plan in Notes, and cannot edit, run shell commands, commit, or delegate.
+            </p>
+          </div>
+          <button type="button" class="rounded-lg px-2.5 py-1.5 text-xs text-[var(--color-text-muted)] transition-colors hover:bg-[var(--color-surface-3)] hover:text-[var(--color-text-primary)]" disabled={planTransitioning} onclick={() => onPlanAction?.('exit')}>Exit plan mode</button>
+        </div>
+        {#if planReady}
+          <div class="mt-3 flex flex-wrap gap-2 border-t border-cyan-400/15 pt-3">
+            <button type="button" class="flex items-center gap-1.5 rounded-lg bg-cyan-300 px-3 py-2 text-xs font-semibold text-slate-950 transition-opacity hover:opacity-90 disabled:opacity-50" disabled={planTransitioning || isRunning} onclick={() => onPlanAction?.('implement')}><Play size={13} /> Approve & implement</button>
+            <button type="button" class="rounded-lg border border-cyan-400/25 px-3 py-2 text-xs font-medium text-cyan-100 transition-colors hover:bg-cyan-400/10 disabled:opacity-50" disabled={planTransitioning || isRunning} onclick={() => onPlanAction?.('clear-implement')}><RotateCcw size={13} class="mr-1 inline" /> Clear context & implement</button>
+            <button type="button" class="rounded-lg border border-cyan-400/25 px-3 py-2 text-xs font-medium text-cyan-100 transition-colors hover:bg-cyan-400/10 disabled:opacity-50" disabled={planTransitioning || isRunning} onclick={() => onPlanAction?.('clear-goal')}><Target size={13} class="mr-1 inline" /> Clear context & create goal</button>
+          </div>
+        {:else}
+          <p class="mt-2 text-[11px] text-[var(--color-text-muted)]">Handoff actions unlock only after Kory resolves material questions and completes the plan, risks, acceptance criteria, and verification strategy.</p>
+        {/if}
+      </section>
+    {/if}
     <!-- Controls row: Model picker + Reasoning toggle -->
     <div class="mb-3 flex flex-wrap items-center gap-3">
       <!-- Model selector -->
@@ -971,6 +1260,9 @@
             if (showModelPicker) modelSearchQuery = '';
           }}
         >
+          {#if selectedModel}
+            <ProviderIcon provider={currentProvider} size={16} class="shrink-0" />
+          {/if}
           <span>{selectedModelLabel}</span>
           <ChevronDown size={14} class="text-text-muted" />
         </button>
@@ -1009,13 +1301,14 @@
             {:else if filteredQuickModels.length === 0}
               <div class="px-4 py-5 text-center text-xs" style="color: var(--color-text-muted);">No models match “{modelSearchQuery}”.</div>
             {:else}
-              {#each filteredQuickModels as model}
+              {#each filteredQuickModels as model (model.value)}
                 <button
                   type="button"
                   class="w-full text-left px-4 py-3 text-sm transition-colors hover:bg-[var(--color-surface-3)] flex items-center gap-2 {selectedModel === model.value ? 'text-[var(--color-accent)]' : ''}"
                   style="color: {selectedModel === model.value ? 'var(--color-accent)' : 'var(--color-text-secondary)'};"
                   onclick={() => selectModel(model.value)}
                 >
+                  <ProviderIcon provider={model.provider} size={16} class="shrink-0" />
                   <span class="flex-1 min-w-0 truncate">{model.label}</span>
                 </button>
               {/each}
@@ -1049,7 +1342,7 @@
                 {`${modelDisplayName} · ${reasoningLabel(reasoningLevel)}`}
               </div>
               <div class="py-1">
-                {#each reasoningConfig.options as opt}
+                {#each reasoningConfig.options as opt (opt.value)}
                   <button
                     type="button"
                     class="w-full text-left px-4 py-3 transition-all hover:bg-[var(--color-surface-3)] group"
@@ -1073,7 +1366,99 @@
           {/if}
         </div>
       {/if}
+
+      <button
+        type="button"
+        class="flex h-10 items-center gap-2 rounded-xl border px-3.5 text-sm font-medium transition-all hover:brightness-110 active:scale-[0.98] {interactionMode === 'plan' ? 'border-cyan-400/40 bg-cyan-400/10 text-cyan-200' : 'border-[var(--color-border)] bg-[var(--color-surface-3)] text-[var(--color-text-primary)]'}"
+        aria-pressed={interactionMode === 'plan'}
+        title={interactionMode === 'plan' ? 'Plan mode is active for this chat' : 'Enter thorough Plan mode for this chat'}
+        onclick={() => onInteractionModeChange?.(interactionMode === 'plan' ? 'act' : 'plan')}
+      >
+        <ClipboardList size={17} />
+        <span>{interactionMode === 'plan' ? 'Planning' : 'Plan'}</span>
+      </button>
+
+      <div class="relative permission-picker">
+        <button
+          type="button"
+          class="flex items-center gap-2 px-3.5 h-10 rounded-xl text-sm font-medium transition-all hover:brightness-110 active:scale-[0.98]"
+          style="background: var(--color-surface-3); color: var(--color-text-primary); border: 1px solid var(--color-border);"
+          onclick={() => (showPermissionMenu = !showPermissionMenu)}
+          title={`Permissions: ${permissionModeMeta.label}`}
+          aria-haspopup="menu"
+          aria-expanded={showPermissionMenu}
+        >
+          <permissionModeMeta.icon size={17} class={permissionModeMeta.tone} />
+          <span>{permissionModeMeta.label}</span>
+          <ChevronDown size={14} class="text-text-muted" />
+        </button>
+
+        {#if showPermissionMenu}
+          <div
+            class="absolute bottom-full left-0 mb-2 w-80 rounded-xl border shadow-2xl z-50 overflow-hidden backdrop-blur-md"
+            style="background: var(--color-surface-2-alpha, rgba(30, 30, 35, 0.9)); border-color: var(--color-border);"
+            role="menu"
+            aria-label="Permission mode"
+          >
+            <div class="flex items-center justify-between gap-3 px-4 py-3" style="border-bottom: 1px solid var(--color-border); background: rgba(255,255,255,0.03);">
+              <span class="text-xs font-bold uppercase tracking-widest opacity-70" style="color: var(--color-text-muted);">Permissions</span>
+              <button
+                type="button"
+                class="flex items-center gap-1 rounded-md px-1.5 py-1 text-[11px] transition-colors hover:bg-[var(--color-surface-3)]"
+                style="color: var(--color-text-secondary);"
+                onclick={() => { showPermissionMenu = false; onOpenSettings?.('agent', 'permissions'); }}
+                title="Open custom permission rules"
+              ><Settings size={13} /> Settings</button>
+            </div>
+            <div class="py-1">
+              {#each PERMISSION_OPTIONS as option (option.value)}
+                {@const active = permissionMode === option.value}
+                <button
+                  type="button"
+                  role="menuitemradio"
+                  aria-checked={active}
+                  class="w-full flex items-start gap-3 px-4 py-2.5 text-left transition-all hover:bg-[var(--color-surface-3)]"
+                  onclick={() => selectPermissionMode(option.value)}
+                >
+                  <option.icon size={16} class="mt-0.5 shrink-0 {option.tone}" />
+                  <span class="min-w-0 flex-1">
+                    <span class="block text-sm font-semibold" style="color: {active ? 'var(--color-accent)' : 'var(--color-text-primary)'};">{option.label}</span>
+                    <span class="block text-[11px] leading-relaxed" style="color: var(--color-text-muted);">{option.description}</span>
+                  </span>
+                  {#if active}<Check size={14} class="mt-1 shrink-0" style="color: var(--color-accent);" />{/if}
+                </button>
+              {/each}
+            </div>
+          </div>
+        {/if}
+      </div>
     </div>
+
+    {#if goalDisplayStore.composer && activeChatGoal}
+      <button
+        type="button"
+        class="mb-3 flex w-full items-center gap-2 rounded-xl border px-3 py-2 text-left transition-colors hover:bg-[var(--color-surface-3)]"
+        style="border-color: color-mix(in srgb, var(--color-accent) 35%, var(--color-border)); background: color-mix(in srgb, var(--color-accent) 8%, transparent);"
+        onclick={() => { goalStore.selectedGoalId = activeChatGoal!.id; goalDisplayStore.update({ sidebar: true }); queueMicrotask(() => window.dispatchEvent(new CustomEvent('kory:goal-action', { detail: 'goal_open' }))); }}
+        aria-label={`Open active goal in this chat: ${activeChatGoal.objective}`}
+      >
+        <Target size={14} class="shrink-0 text-[var(--color-accent)]" />
+        <span class="min-w-0 flex-1"><span class="block truncate text-xs font-semibold text-[var(--color-text-primary)]">Goal in this chat · {activeChatGoal.objective}</span><span class="block text-[10px] text-[var(--color-text-muted)]">{activeChatGoal.status} · active {formatGoalRuntime(activeChatGoal, goalClock)}</span></span>
+      </button>
+    {/if}
+
+    {#if workflowStatus}
+      <button
+        type="button"
+        class="mb-3 flex w-full items-center gap-2 rounded-xl border px-3 py-2 text-left transition-colors hover:bg-[var(--color-surface-3)]"
+        style="border-color: color-mix(in srgb, var(--color-info) 35%, var(--color-border)); background: color-mix(in srgb, var(--color-info) 7%, transparent);"
+        onclick={() => onOpenWorkflows?.()}
+        aria-label={`Open active workflow: ${workflowStatus.name}`}
+      >
+        <Workflow size={14} class="shrink-0 text-[var(--color-info)]" />
+        <span class="min-w-0 flex-1"><span class="block truncate text-xs font-semibold text-[var(--color-text-primary)]">{workflowStatus.name} · {workflowStatus.stage}</span><span class="block truncate text-[10px] text-[var(--color-text-muted)]">{workflowStatus.status} · {workflowStatus.task}</span></span>
+      </button>
+    {/if}
 
     <!-- Input area -->
     <div class="flex flex-col gap-3 xl:flex-row xl:items-start">
@@ -1116,10 +1501,17 @@
         <!-- Attachments Preview -->
         {#if attachments.length > 0}
           <div class="mb-3 flex flex-wrap gap-2">
-            {#each attachments as attachment, i}
+            {#each attachments as attachment, i (i)}
               <div class="relative group rounded-lg overflow-hidden border" style="border-color: var(--color-border); width: 64px; height: 64px;">
                 {#if attachment.type === 'image'}
-                  <img src={`data:image/png;base64,${attachment.data}`} alt={attachment.name} class="w-full h-full object-cover" />
+                  <button
+                    type="button"
+                    class="block h-full w-full cursor-zoom-in"
+                    onclick={() => openAttachmentPreview(attachment)}
+                    aria-label={`Preview ${attachment.name}`}
+                  >
+                    <img src={`data:${attachment.mimeType ?? 'image/png'};base64,${attachment.data}`} alt={attachment.name} class="w-full h-full object-cover" />
+                  </button>
                 {/if}
                 <button
                   type="button"
@@ -1143,11 +1535,11 @@
             placeholder={disabled ? disabledMessage : placeholder}
             rows="1"
             class="input w-full"
-            class:yolo-active={wsStore.isYoloMode}
             disabled={disabled || !!configurationWarning}
-            style="resize: none; min-height: {minHeightPx}px; max-height: 280px; font-size: 15px; line-height: 1.6; box-sizing: border-box; padding: 10px 88px 10px 12px; background: transparent; border: none; box-shadow: none; {disabled || configurationWarning ? 'opacity: 0.6; cursor: not-allowed;' : ''}"
+            style="resize: none; min-height: {minHeightPx}px; max-height: 280px; font-size: 15px; line-height: 1.6; box-sizing: border-box; padding: 10px 164px 10px 12px; background: transparent; border: none; box-shadow: none; {disabled || configurationWarning ? 'opacity: 0.6; cursor: not-allowed;' : ''}"
           ></textarea>
           <div class="absolute bottom-2 right-1 flex items-center gap-0.5 reference-picker">
+            <button type="button" class="flex h-8 w-8 items-center justify-center rounded-lg transition-colors disabled:cursor-not-allowed disabled:opacity-40 {voiceRecording ? 'bg-red-500/15 text-red-400' : 'text-[var(--color-text-muted)] hover:bg-[var(--color-surface-3)]'}" onclick={toggleVoiceRecording} disabled={disabled || !!configurationWarning} aria-label={voiceRecording ? 'Stop dictation' : 'Start dictation'} aria-pressed={voiceRecording} title={voiceRecording ? 'Stop and keep transcript' : 'Talk to Koryphaios'}><Mic size={16}/></button>
             <input
               type="file"
               multiple
@@ -1176,7 +1568,7 @@
               {#if showGoalActions}
                 <div class="absolute bottom-full right-0 mb-1 w-48 rounded-lg border shadow-xl z-50 overflow-hidden" style="background: var(--color-surface-2); border-color: var(--color-border);">
                   <button type="button" class="flex w-full items-center gap-2 px-3 py-2 text-left text-xs hover:bg-[var(--color-surface-3)]" style="color: var(--color-text-primary);" onclick={() => { showGoalActions = false; goalDisplayStore.update({ sidebar: true }); queueMicrotask(() => window.dispatchEvent(new CustomEvent('kory:goal-action', { detail: 'goal_create' }))); }}><Target size={14} /> Create verified goal</button>
-                  <button type="button" class="flex w-full items-center gap-2 px-3 py-2 text-left text-xs hover:bg-[var(--color-surface-3)]" style="color: var(--color-text-primary);" onclick={() => { showGoalActions = false; onOpenSettings?.('advanced'); }}><Settings size={14} /> Goal settings</button>
+                  <button type="button" class="flex w-full items-center gap-2 px-3 py-2 text-left text-xs hover:bg-[var(--color-surface-3)]" style="color: var(--color-text-primary);" onclick={() => { showGoalActions = false; onOpenSettings?.('experimental'); }}><Settings size={14} /> Goal settings</button>
                 </div>
               {/if}
             </div>
@@ -1235,6 +1627,15 @@
           style="background: rgba(12, 10, 9, 0.34); border-color: var(--color-border);"
         >
           <div class="flex flex-wrap items-center gap-2 xl:justify-end">
+            <button
+              type="button"
+              class="flex items-center gap-1.5 text-[11px] font-medium px-2.5 py-1.5 rounded-md border transition-colors {interactionMode === 'plan' ? 'border-cyan-400/40 bg-cyan-400/15 text-cyan-200' : 'border-[var(--color-border)] bg-[var(--color-surface-3)] text-[var(--color-text-muted)]'}"
+              aria-pressed={interactionMode === 'plan'}
+              onclick={() => onInteractionModeChange?.(interactionMode === 'plan' ? 'act' : 'plan')}
+              title="Plan mode is read-only and keeps a restart-safe planning note"
+            >
+              <ClipboardList size={12} /> {interactionMode === 'plan' ? 'Planning' : 'Plan'}
+            </button>
             <div class="agent-mode-picker relative">
               <button
                 type="button"
@@ -1295,6 +1696,13 @@
               {/if}
             </button>
           </div>
+          {#if interactionMode === 'plan' && planReady}
+            <button
+              type="button"
+              class="rounded-lg bg-cyan-300 px-3 py-2 text-xs font-semibold text-slate-950 hover:opacity-90"
+              onclick={() => onApprovePlan?.()}
+            >Approve plan & implement</button>
+          {/if}
 
           <button
             type="button"
@@ -1331,7 +1739,7 @@
       {#if configurationWarning}
         Configure a provider to enable sending.
       {:else}
-        Enter to send · Shift+Enter for new line · Ctrl+V paste text · Ctrl+Shift+V paste image
+        Enter to send · Shift+Enter for new line · Shift+Tab cycle permissions · Ctrl+V paste text or image · Ctrl+Shift+V paste image
       {/if}
     </span>
     {#if value.length > 0}
@@ -1339,6 +1747,51 @@
     {/if}
   </div>
 </div>
+
+{#if previewAttachment}
+  <div
+    class="fixed inset-0 z-[110] flex flex-col bg-black/85 backdrop-blur-sm"
+    role="dialog"
+    aria-modal="true"
+    aria-label={`Preview ${previewAttachment.name}`}
+  >
+    <div
+      class="relative z-10 flex items-center justify-between gap-3 border-b px-4 py-3"
+      style="background: var(--color-surface-1); border-color: var(--color-border);"
+    >
+      <div class="min-w-0">
+        <div class="truncate text-sm font-medium" style="color: var(--color-text-primary);">{previewAttachment.name}</div>
+        <div class="text-xs" style="color: var(--color-text-muted);">Scroll to zoom · drag to inspect an area · double-click to reset</div>
+      </div>
+      <div class="flex shrink-0 items-center gap-1">
+        <button type="button" class="rounded-lg p-2 hover:bg-[var(--color-surface-3)]" style="color: var(--color-text-secondary);" onclick={() => zoomAttachmentPreview(-0.25)} aria-label="Zoom out"><ZoomOut size={17} /></button>
+        <span class="w-12 text-center text-xs tabular-nums" style="color: var(--color-text-secondary);">{Math.round(previewZoom * 100)}%</span>
+        <button type="button" class="rounded-lg p-2 hover:bg-[var(--color-surface-3)]" style="color: var(--color-text-secondary);" onclick={() => zoomAttachmentPreview(0.25)} aria-label="Zoom in"><ZoomIn size={17} /></button>
+        <button type="button" class="rounded-lg p-2 hover:bg-[var(--color-surface-3)]" style="color: var(--color-text-secondary);" onclick={resetAttachmentPreview} aria-label="Reset preview"><RotateCcw size={17} /></button>
+        <button type="button" class="ml-2 rounded-lg p-2 hover:bg-[var(--color-surface-3)]" style="color: var(--color-text-secondary);" onclick={closeAttachmentPreview} aria-label="Close preview"><X size={18} /></button>
+      </div>
+    </div>
+    <div
+      class="relative flex min-h-0 flex-1 touch-none select-none items-center justify-center overflow-hidden {previewDragging ? 'cursor-grabbing' : 'cursor-grab'}"
+      role="group"
+      aria-label="Zoomable image preview"
+      onwheel={handlePreviewWheel}
+      onpointerdown={startPreviewDrag}
+      onpointermove={movePreviewDrag}
+      onpointerup={() => (previewDragging = false)}
+      onpointercancel={() => (previewDragging = false)}
+      ondblclick={resetAttachmentPreview}
+    >
+      <img
+        src={`data:${previewAttachment.mimeType ?? 'image/png'};base64,${previewAttachment.data}`}
+        alt={previewAttachment.name}
+        draggable="false"
+        class="max-h-[82vh] max-w-[92vw] rounded-lg object-contain shadow-2xl will-change-transform"
+        style={`transform: translate(${previewOffsetX}px, ${previewOffsetY}px) scale(${previewZoom});`}
+      />
+    </div>
+  </div>
+{/if}
 
 
 
@@ -1407,11 +1860,6 @@
 {/if}
 
 <style>
-  .yolo-active {
-    border-color: #ef4444 !important;
-    box-shadow: 0 0 0 1px #ef4444;
-  }
-
   /* Waiting button — Kory is parked on something external (background
      terminal, user input). Amber, calm slow pulse: alive but not burning. */
   :global(.waiting-btn) {

@@ -1,6 +1,7 @@
 import type { ServerWebSocket } from 'bun';
 import type { WSMessage } from '@koryphaios/shared';
 import { serverLog } from '../logger';
+import { getOrderedEventLog } from './ordered-event-log';
 
 interface WSClientData {
   id: string;
@@ -90,13 +91,42 @@ export class WSManager {
     }
   }
 
-  subscribeClientToSession(clientId: string, sessionId: string) {
+  subscribeClientToSession(
+    clientId: string,
+    sessionId: string,
+    cursor?: { epoch?: number; sequence?: number },
+  ) {
     const client = this.clients.get(clientId);
-    if (client) client.subscribedSessions.add(sessionId);
+    if (!client) return;
+    client.subscribedSessions.add(sessionId);
+
+    // Reconnects and full page refreshes recover every event that was durably
+    // appended before publication. A fresh renderer starts at sequence zero;
+    // an in-app reconnect resumes from its last applied sequence.
+    const log = getOrderedEventLog();
+    const current = log.getCursor(sessionId);
+    const epoch = current.epoch;
+    let after = cursor?.epoch === current.epoch ? Math.max(0, cursor?.sequence ?? 0) : 0;
+    while (after < current.latestSequence) {
+      const events = log.getAfter(sessionId, epoch, after, 2_048);
+      if (events.length === 0) break;
+      for (const event of events) {
+        if (client.ws.readyState !== 1) return;
+        client.ws.send(JSON.stringify({ ...event, replayed: true } satisfies WSMessage));
+        after = event.sequence ?? after;
+      }
+    }
+  }
+
+  private persist(message: WSMessage): WSMessage {
+    return message.sessionId ? getOrderedEventLog().append(message) : message;
   }
 
   broadcast(message: WSMessage) {
-    const data = JSON.stringify(message);
+    const outgoing = message.sessionId
+      ? getOrderedEventLog().append({ ...message, timestamp: message.timestamp ?? Date.now() })
+      : message;
+    const data = JSON.stringify(outgoing);
     let successCount = 0;
     let failCount = 0;
 
@@ -115,14 +145,20 @@ export class WSManager {
     if (failCount > 0) {
       serverLog.debug({ successCount, failCount }, 'Broadcast complete with failures');
     }
+    if (outgoing.sessionId) getOrderedEventLog().markDispatched(outgoing.eventId);
   }
 
   broadcastToSession(sessionId: string, message: WSMessage) {
-    const data = JSON.stringify(message);
+    const outgoing = getOrderedEventLog().append({
+      ...message,
+      sessionId,
+      timestamp: message.timestamp ?? Date.now(),
+    });
+    const data = JSON.stringify(outgoing);
     let targetCount = 0;
 
     for (const [, client] of this.clients) {
-      if (client.subscribedSessions.has(sessionId) || client.subscribedSessions.size === 0) {
+      if (client.subscribedSessions.has(sessionId)) {
         try {
           if (client.ws.readyState === 1) {
             client.ws.send(data);
@@ -137,6 +173,7 @@ export class WSManager {
       }
     }
 
+    getOrderedEventLog().markDispatched(outgoing.eventId);
     serverLog.debug({ sessionId, targetCount }, 'Session broadcast complete');
   }
 

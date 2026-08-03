@@ -1,5 +1,5 @@
 import { spawnSync } from 'bun';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync, rmSync } from 'node:fs';
 import { resolve, relative } from 'node:path';
 import { koryLog } from '../logger';
 import { gitMutex } from './git-mutex';
@@ -133,9 +133,9 @@ export class GitManager {
   /** Resolve path under repo root; return null if outside (path traversal). */
   resolvePathUnderRepo(filePath: string): string | null {
     const root = resolve(this.workingDirectory);
-    const abs = filePath.startsWith('/') ? resolve(filePath) : resolve(root, filePath);
+    const abs = isAbsolute(filePath) ? resolve(filePath) : resolve(root, filePath);
     const rel = relative(root, abs);
-    if (rel.startsWith('..') || rel.startsWith('/')) return null;
+    if (rel.startsWith('..') || isAbsolute(rel)) return null;
     return abs;
   }
 
@@ -264,15 +264,47 @@ export class GitManager {
     return null;
   }
 
-  /** Hard reset to a specific commit hash */
-  async rollback(hash: string): Promise<boolean> {
-    const result = await this.runGit(['reset', '--hard', hash]);
-    if (result.success) {
-      await this.runGit(['clean', '-fd']);
-      koryLog.info({ hash }, 'Rolled back to commit');
-      return true;
+  /** Capture the current tracked worktree without changing files or the index. */
+  async createWorktreeCheckpoint(): Promise<string | null> {
+    const snapshot = await this.runGit(['stash', 'create', 'Kory session checkpoint']);
+    const hash = snapshot.output.trim();
+    if (snapshot.success && /^[0-9a-f]{40,64}$/i.test(hash)) return hash;
+    return this.getCurrentHash();
+  }
+
+  /** Restore only files recorded for one session. Never reset or clean the repository. */
+  async rollbackFiles(
+    hash: string,
+    changes: Array<{ path: string; operation: 'create' | 'edit' | 'delete' }>,
+  ): Promise<boolean> {
+    if (!/^[0-9a-f]{40,64}$/i.test(hash)) return false;
+    const root = resolve(this.workingDirectory);
+    const unique = new Map(changes.map((change) => [change.path, change.operation]));
+    let success = true;
+
+    for (const [path, operation] of unique) {
+      const absolutePath = resolve(root, path);
+      const relativePath = relative(root, absolutePath);
+      if (!relativePath || relativePath === '..' || relativePath.startsWith(`..${process.platform === 'win32' ? '\\' : '/'}`)) {
+        koryLog.warn({ path }, 'Refused to roll back a path outside the workspace');
+        success = false;
+        continue;
+      }
+
+      const existedAtCheckpoint = await this.runGit(['cat-file', '-e', `${hash}:${relativePath}`]);
+      if (existedAtCheckpoint.success) {
+        const restored = await this.runGit(['restore', '--source', hash, '--worktree', '--', relativePath]);
+        success = restored.success && success;
+      } else if (operation === 'create') {
+        if (existsSync(absolutePath)) rmSync(absolutePath, { force: true });
+      } else {
+        koryLog.warn({ hash, path }, 'Session rollback could not find the original file');
+        success = false;
+      }
     }
-    return false;
+
+    koryLog.info({ hash, files: unique.size, success }, 'Rolled back session files');
+    return success;
   }
 
   /** Get the current HEAD hash */

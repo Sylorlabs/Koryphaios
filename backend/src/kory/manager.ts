@@ -10,6 +10,9 @@ import type {
   ProviderName,
   KoryphaiosConfig,
   KoryAskUserPayload,
+  KoryQuestionPresentation,
+  KoryQuestionChart,
+  KoryQuestionSlider,
   ChangeSummary,
   StreamUsagePayload,
   StreamThinkingPayload,
@@ -33,12 +36,20 @@ import type { ProviderMessage } from '../providers/types';
 import { detectJulesApiKey } from '../providers/auth-utils';
 import { runJulesTask } from '../providers/jules-runner';
 import { JULES_SYNC_INSTRUCTIONS, getProviderDisplay } from '../providers/provider-display';
-import { ToolRegistry, type ToolCallInput, type ToolContext, type ToolCallOutput } from '../tools';
+import { markCliConversationRewritten } from '../providers/cli-session-state';
+import { getSessionRuntimeStateService } from './services/SessionRuntimeStateService';
+import {
+  ToolRegistry,
+  type FileChangeProposal,
+  type ToolCallInput,
+  type ToolContext,
+  type ToolCallOutput,
+} from '../tools';
 import { wsBroker } from '../pubsub';
 import { koryLog } from '../logger';
 import { initContextArchive, getContextArchive } from './context-archive';
 import { nanoid } from 'nanoid';
-import { sanitizeForPrompt } from '../security';
+import { defenseInDepthPromptSanitizer } from '../security';
 import {
   checkNoteToolPermission,
   filterToolDefsForNotesPermissions,
@@ -76,8 +87,11 @@ import {
 } from './services';
 import type { WorkflowHook, WorkflowHookEvent } from './services/EventEmitterService';
 import { TimeTravelService } from '../services';
+import { computeCostUsd } from '../pricing';
 import { RoutingServiceEnhanced } from './services/RoutingServiceEnhanced';
 import {
+  deriveCriticBudget,
+  deriveSkillEvidenceCriteria,
   parseCriticVerdict,
   formatMessagesForCritic as formatMessagesForCriticUtil,
 } from './critic-util';
@@ -92,7 +106,19 @@ import {
 } from '../providers/provider-harness';
 import { buildIntentDiscoveryBatch } from './clarification-gate';
 import { collaborationManager } from '../collaboration/manager';
-import { loadAgentSettings, saveAgentSettings } from '../agent-settings';
+import {
+  assembleAgentContext,
+  loadAgentSettings,
+  rememberExplicitPreference,
+  saveAgentSettings,
+} from '../agent-settings';
+import { assembleMemoryContext, formatMemoryForContext } from '../memory/unified-memory';
+import {
+  answerPendingQuestion,
+  createPendingQuestion,
+  getPendingQuestion,
+} from '../stores/pending-question-store';
+import { ensurePlanNote, syncPlanNote } from './plan-mode';
 import { resolveSkills } from './skills';
 import { rankHarnessCandidates, type QualificationRole } from './skill-qualifications';
 import {
@@ -161,6 +187,66 @@ interface AgentThreadState {
 const AGENT_THREAD_IDLE_TTL_MS = 30 * 60 * 1000;
 const MAX_COMPLETED_AGENT_THREADS_PER_SESSION = 24;
 
+function normalizeQuestionPresentation(
+  presentation?: KoryQuestionPresentation,
+): Required<Pick<KoryQuestionPresentation, 'allowKeepChatting'>> &
+  Pick<KoryQuestionPresentation, 'chart' | 'sliders'> {
+  const normalized: {
+    allowKeepChatting: boolean;
+    chart?: KoryQuestionChart;
+    sliders?: KoryQuestionSlider[];
+  } = {
+    allowKeepChatting: true,
+  };
+
+  const chart = presentation?.chart;
+  if (chart && ['bar', 'line', 'pie'].includes(chart.type) && Array.isArray(chart.labels)) {
+    const labels = chart.labels.map(String).map((label) => label.slice(0, 80)).slice(0, 24);
+    const datasets = Array.isArray(chart.datasets)
+      ? chart.datasets.slice(0, 6).flatMap((dataset) => {
+          if (!dataset || !Array.isArray(dataset.data)) return [];
+          const data = dataset.data
+            .slice(0, labels.length)
+            .map(Number)
+            .filter((value) => Number.isFinite(value));
+          if (data.length !== labels.length || data.length === 0) return [];
+          return [{ label: dataset.label ? String(dataset.label).slice(0, 80) : undefined, data }];
+        })
+      : [];
+    if (labels.length > 0 && datasets.length > 0) {
+      normalized.chart = {
+        type: chart.type,
+        title: chart.title ? String(chart.title).slice(0, 160) : undefined,
+        labels,
+        datasets,
+      };
+    }
+  }
+
+  if (Array.isArray(presentation?.sliders)) {
+    const sliders = presentation.sliders.slice(0, 6).flatMap((slider, index) => {
+      const min = Number(slider?.min);
+      const max = Number(slider?.max);
+      const step = Number(slider?.step);
+      const initial = Number(slider?.value);
+      if (![min, max, step, initial].every(Number.isFinite) || max <= min || step <= 0) return [];
+      return [{
+        id: String(slider.id || `value-${index + 1}`).replace(/[^a-zA-Z0-9_-]/g, '-').slice(0, 64),
+        label: String(slider.label || `Value ${index + 1}`).slice(0, 120),
+        min,
+        max,
+        step,
+        value: Math.min(max, Math.max(min, initial)),
+        unit: slider.unit ? String(slider.unit).slice(0, 24) : undefined,
+        description: slider.description ? String(slider.description).slice(0, 240) : undefined,
+      }];
+    });
+    if (sliders.length > 0) normalized.sliders = sliders;
+  }
+
+  return normalized;
+}
+
 // ─── Default Model Assignments per Domain ───────────────────────────────────
 
 for (const [domain, modelId] of Object.entries(DOMAIN.DEFAULT_MODELS)) {
@@ -217,13 +303,17 @@ export interface KoryTask {
 
 export class KoryManager {
   private memoryDir: string;
-  private isProcessing = false;
+  private readonly sessionState = getSessionRuntimeStateService();
   private isYoloMode = false;
   private snapshotManager: SnapshotManager;
   public readonly git: GitManager;
   private workspaceManager: WorkspaceManager | null = null;
   /** AbortController for the current manager run per session (so cancelSessionWorkers can abort manager too). */
   private managerAbortBySession = new Map<string, AbortController>();
+  /** Tracks whether the compaction flow successfully wrote a summary.
+   *  This is a result flag, not a state — the state machine lives in
+   *  SessionStateService. Cleared in the compactSession finally block. */
+  private compactionSucceeded = new Map<string, boolean>();
   /** In-memory worker/critic chat threads keyed by agentId. */
   private agentThreads = new Map<string, AgentThreadState>();
   /** Services */
@@ -248,8 +338,13 @@ export class KoryManager {
     string,
     { model: string; provider: ProviderName | undefined }
   >();
+  /** A CLI mutation invalidates this latch until deterministic checks and a critic pass. */
+  private cliMutationVerifiedBySession = new Map<string, boolean>();
   /** Goal state is immutable task context, not a conversational suggestion. */
-  private goalContextBySession = new Map<string, NonNullable<import('./prompts').TaskContract['goalContext']>>();
+  private goalContextBySession = new Map<
+    string,
+    NonNullable<import('./prompts').TaskContract['goalContext']>
+  >();
 
   /** Extend lifecycle policy without embedding provider-specific behavior in prompts. */
   public registerWorkflowHook(event: WorkflowHookEvent, hook: WorkflowHook): () => void {
@@ -450,11 +545,42 @@ export class KoryManager {
   }
 
   private async updateWorkflowState(sessionId: string, state: string) {
-    await db.update(sessions).set({ workflowState: state }).where(eq(sessions.id, sessionId));
+    // Route through the SessionStateService for transition validation and
+    // in-memory cache sync. Legacy callers pass string states; cast to the
+    // union type. Unknown states are passed through as-is (the service logs
+    // a warning for invalid transitions but does not throw).
+    await this.sessionState.transition(sessionId, state as 'idle' | 'processing' | 'compacting' | 'waiting' | 'error' | 'paused');
   }
 
-  handleUserInput(sessionId: string, selection: string, text?: string) {
-    this.state.resolveUserInput(sessionId, text || selection);
+  async handleUserInput(sessionId: string, selection: string, text?: string, questionId?: string) {
+    const answer = text || selection;
+    const question = await answerPendingQuestion(sessionId, answer, 'answered', questionId);
+    if (questionId && !question) return;
+    if (this.state.resolveUserInput(sessionId, answer)) return;
+    // A backend restart loses the suspended provider stack, but not the
+    // decision. Resume as a new durable turn containing both sides.
+    if (!question || !this.sessions || !this.messages) return;
+    const session = await this.sessions.get(sessionId);
+    if (!session) return;
+    const content = `Resume after restart. Pending question: ${question.question}\nUser answer: ${answer}`;
+    await this.messages.add(sessionId, {
+      id: nanoid(12),
+      sessionId,
+      role: 'user',
+      content,
+      createdAt: Date.now(),
+    });
+    void this.processTask(
+      sessionId,
+      content,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      session.interactionMode ?? 'act',
+    );
   }
 
   async handleSessionResponse(sessionId: string, accepted: boolean) {
@@ -463,8 +589,9 @@ export class KoryManager {
     } else {
       this.emitThought(sessionId, 'synthesizing', 'User rejected changes. Rolling back...');
       const prevHash = this.state.getCheckpoint(sessionId);
+      const changes = this.state.getChanges(sessionId);
       if (prevHash && this.git.isGitRepo()) {
-        this.git.rollback(prevHash);
+        await this.git.rollbackFiles(prevHash, changes);
       } else {
         await this.snapshotManager.restoreSnapshot(sessionId, 'latest', this.workingDirectory);
       }
@@ -535,11 +662,18 @@ export class KoryManager {
     sessionId: string,
     question: string,
     options: string[],
+    presentation?: KoryQuestionPresentation,
   ): Promise<string> {
+    const normalized = normalizeQuestionPresentation(presentation);
     this.emitWSMessage(sessionId, 'kory.ask_user', {
-      question,
-      options,
+      question: String(question || 'What would you like to do next?').slice(0, 2_000),
+      options: Array.isArray(options)
+        ? options.map(String).map((option) => option.trim()).filter(Boolean).slice(0, 5)
+        : [],
       allowOther: true,
+      allowKeepChatting: normalized.allowKeepChatting,
+      chart: normalized.chart,
+      sliders: normalized.sliders,
     } satisfies KoryAskUserPayload);
     return this.state.requestUserInput(sessionId, AGENT.USER_INPUT_TIMEOUT_MS);
   }
@@ -586,19 +720,39 @@ export class KoryManager {
     userMessage: string,
     preferredModel?: string,
     reasoningLevel?: string,
-    attachments?: Array<{ type: string; data: string; name: string }>,
+    attachments?: Array<{ type: string; data: string; name: string; mimeType?: string }>,
     collaborationToolPolicy?: CollaborationToolPolicy,
     responseVariant?: { groupId: string; index: number },
     goalContext?: import('./prompts').TaskContract['goalContext'],
+    interactionMode?: 'act' | 'plan',
   ): Promise<void> {
-    this.isProcessing = true;
+    interactionMode = interactionMode ?? (await this.sessions?.get(sessionId))?.interactionMode ?? 'act';
+    await this.sessionState.transition(sessionId, 'processing');
     this.state.clearChanges(sessionId);
-    userMessage = sanitizeForPrompt(userMessage);
+    this.state.clearCheckpoint(sessionId);
+    if (interactionMode !== 'plan' && this.git.isGitRepo()) {
+      const checkpoint = await this.git.createWorktreeCheckpoint();
+      if (checkpoint) this.state.saveCheckpoint(sessionId, checkpoint);
+    }
+    userMessage = defenseInDepthPromptSanitizer(userMessage);
 
-    const workflowSettings = loadAgentSettings(this.workingDirectory);
+    const sessionRoot = await this.resolveSessionWorkingDirectory(sessionId);
+    const workflowSettings = loadAgentSettings(sessionRoot);
+    const remembered = rememberExplicitPreference(sessionRoot, userMessage);
+    if (remembered) {
+      this.emitWSMessage(sessionId, 'system.info', {
+        message: `Remembered as a project preference: ${remembered}`,
+      });
+    }
+    if (interactionMode === 'plan') {
+      const planNote = await ensurePlanNote(sessionId, userMessage);
+      await this.sessions?.update(sessionId, { planNoteId: planNote.id });
+    }
     const configuredCollisionChoices = workflowSettings.skillCollisionChoices ?? {};
     if (goalContext) this.goalContextBySession.set(sessionId, goalContext);
-    const initialContract = createTaskContract(userMessage, { goalContext: goalContext ?? this.goalContextBySession.get(sessionId) });
+    const initialContract = createTaskContract(userMessage, {
+      goalContext: goalContext ?? this.goalContextBySession.get(sessionId),
+    });
     const discoveryQuestions = buildIntentDiscoveryBatch(
       userMessage,
       initialContract.taskKind,
@@ -639,7 +793,7 @@ export class KoryManager {
     if (!provider) {
       await this.updateWorkflowState(sessionId, 'idle');
       this.emitError(sessionId, this.getModelConfigurationError(preferredModel));
-      this.isProcessing = false;
+      await this.sessionState.transition(sessionId, 'idle');
       return;
     }
     this.managerRoutingBySession.set(sessionId, {
@@ -655,7 +809,7 @@ export class KoryManager {
     // Broadcast the user message to relay guests
     collaborationManager.broadcastEvent({ type: 'chat', from: 'human', content: userMessage });
 
-    await this.updateWorkflowState(sessionId, 'analyzing');
+    await this.updateWorkflowState(sessionId, 'processing');
     if (collaborationToolPolicy) setCollaborationToolPolicy(sessionId, collaborationToolPolicy);
     try {
       koryLog.debug({ sessionId }, 'Calling handleDirectly');
@@ -683,6 +837,7 @@ export class KoryManager {
           preferredModel,
           attachments,
           responseVariant,
+          interactionMode,
         );
       } finally {
         clearTimeout(processTimeout);
@@ -694,17 +849,24 @@ export class KoryManager {
       const changes = this.state.getChanges(sessionId);
       if (changes.length > 0) this.emitWSMessage(sessionId, 'session.changes', { changes });
     } catch (err) {
-      const errDetail = err instanceof Error
-        ? { message: err.message, name: err.name, stack: err.stack, cause: err.cause }
-        : { raw: String(err), typeof: typeof err };
+      const errDetail =
+        err instanceof Error
+          ? { message: err.message, name: err.name, stack: err.stack, cause: err.cause }
+          : { raw: String(err), typeof: typeof err };
       koryLog.error({ sessionId, err, errDetail }, 'Error in processTask');
       await this.updateWorkflowState(sessionId, 'error');
       this.emitError(sessionId, `Error: ${String(err)}`);
+      // Emit session.idle on error too — the session is no longer processing.
+      this.emitWSMessage(sessionId, 'session.idle', { sessionId });
     } finally {
       if (collaborationToolPolicy) clearCollaborationToolPolicy(sessionId);
       this.skillCollisionChoicesBySession.delete(sessionId);
       this.goalContextBySession.delete(sessionId);
-      this.isProcessing = false;
+      // Only transition to idle if we're still processing/compacting — if an
+      // error already moved us to 'error' state, don't clobber it.
+      if (this.sessionState.isProcessing(sessionId)) {
+        await this.sessionState.transition(sessionId, 'idle');
+      }
     }
   }
 
@@ -832,14 +994,16 @@ export class KoryManager {
     }
 
     if (preferredModel && preferredModel !== 'auto' && preferredModel.includes(':')) {
-      const [providerName, modelId] = preferredModel.split(':');
+      const separator = preferredModel.indexOf(':');
+      const providerName = preferredModel.slice(0, separator);
+      const modelId = preferredModel.slice(separator + 1);
       if (providerName && modelId) {
         const selectedProvider = authenticated.find((provider) => provider.name === providerName);
         if (!selectedProvider) {
-          return `${this.formatProviderName(providerName)} is not configured. Open Settings and connect it, or switch back to Auto.`;
+          return `${this.formatProviderName(providerName)} is not configured. Open Settings and connect it.`;
         }
         if (!selectedProvider.models.includes(modelId)) {
-          return `${modelId} is not enabled for ${this.formatProviderName(providerName)}. Open Settings -> Manage Models and enable it, or switch back to Auto.`;
+          return `${modelId} is not enabled for ${this.formatProviderName(providerName)}. Open Settings -> Manage Models and enable it.`;
         }
       }
     }
@@ -1047,7 +1211,7 @@ export class KoryManager {
     }
 
     this.emitThought(sessionId, 'executing', 'Jules cloud agent working…');
-    await this.updateWorkflowState(sessionId, 'executing');
+    await this.updateWorkflowState(sessionId, 'processing');
 
     let summary = '';
     const automationMode = options?.createPr === false ? undefined : 'AUTO_CREATE_PR';
@@ -1131,7 +1295,13 @@ export class KoryManager {
     preferredModel?: string,
     task?: string,
     reviewDirectory = this.workingDirectory,
-  ): Promise<{ passed: boolean; feedback?: string }> {
+  ): Promise<{ passed: boolean; feedback?: string; skipped?: boolean }> {
+    // The dashboard Critic toggle is the global source of truth. Every critic
+    // entry point (workers, direct manager edits, CLI stop hooks, and Goal
+    // Mode) funnels through this method so Off truly means off everywhere.
+    if (!loadAgentSettings(this.workingDirectory).criticGateEnabled) {
+      return { passed: true, skipped: true, feedback: 'Critic disabled by user.' };
+    }
     const beforeCritic = await this.events.runWorkflowHooks('before-critic', sessionId, {
       task: task ?? 'Review delegated work',
       reviewDirectory,
@@ -1144,6 +1314,40 @@ export class KoryManager {
     }
     const hardCheckResult = await this.runHardChecks(sessionId, reviewDirectory);
     if (!hardCheckResult.passed) return { passed: false, feedback: hardCheckResult.output };
+
+    const baseTaskContract = createTaskContract(task ?? 'Review delegated work');
+    const skillResolution = resolveSkills(
+      reviewDirectory,
+      baseTaskContract.goal,
+      baseTaskContract,
+      { collisionChoices: this.skillCollisionChoicesBySession.get(sessionId) },
+    );
+    if (skillResolution.blocked) {
+      return {
+        passed: false,
+        feedback: 'Critic could not establish the required skill contract because skill resolution is blocked.',
+      };
+    }
+    const skillEvidence = deriveSkillEvidenceCriteria(
+      skillResolution.selected.map(({ skill }) => ({
+        name: skill.name,
+        evidence: skill.metadata.evidence,
+      })),
+    );
+    const taskContract = {
+      ...baseTaskContract,
+      acceptanceCriteria: [...baseTaskContract.acceptanceCriteria, ...skillEvidence],
+      requiredEvidence: [...new Set([...baseTaskContract.requiredEvidence, ...skillEvidence])],
+    };
+    const recordedChanges = this.state.getChanges(sessionId);
+    const criticBudget = deriveCriticBudget({
+      risk: taskContract.risk,
+      changedFiles: new Set(recordedChanges.map((change) => change.path)).size,
+      changedLines: recordedChanges.reduce(
+        (total, change) => total + change.linesAdded + change.linesDeleted,
+        0,
+      ),
+    });
 
     const producerRouting = preferredModel
       ? this.resolveActiveRouting(preferredModel, 'general')
@@ -1164,6 +1368,12 @@ export class KoryManager {
     if (!criticRouting.model) {
       return { passed: false, feedback: 'Critic unavailable; result is unverified.' };
     }
+    if (!routing && taskContract.risk === 'high') {
+      return {
+        passed: false,
+        feedback: 'High-risk work requires a critic independent from the producer and manager; no eligible independent critic is configured.',
+      };
+    }
     if (!routing) {
       this.emitThought(
         sessionId,
@@ -1180,24 +1390,40 @@ export class KoryManager {
       role: 'critic',
       mode: getModeManager().getMode(),
       provider: provider.name,
+      model: criticRouting.model,
       workingDirectory: reviewDirectory,
-      taskContract: createTaskContract(task ?? 'Review delegated work'),
+      occupiedContextChars: JSON.stringify(workerMessages ?? []).length,
+      taskContract,
       contextPaths: this.config.contextPaths,
       skillSelection: {
         collisionChoices: this.skillCollisionChoicesBySession.get(sessionId),
       },
     });
+    const criticGuidance = assembleAgentContext(
+      reviewDirectory,
+      loadAgentSettings(reviewDirectory),
+    );
+    const criticMemory = formatMemoryForContext(assembleMemoryContext(reviewDirectory, sessionId));
+    const criticSystemPrompt =
+      criticCompilation.systemPrompt +
+      (criticGuidance.preferences.trim()
+        ? `\n\n## Durable user preferences\n${criticGuidance.preferences.trim()}`
+        : '') +
+      (criticMemory ? `\n\n${criticMemory.slice(0, 8_000)}` : '');
 
-    const transcriptText = formatMessagesForCriticUtil(workerMessages ?? [], 12_000);
+    const transcriptText = formatMessagesForCriticUtil(
+      workerMessages ?? [],
+      criticBudget.transcriptChars,
+    );
     // The critic is a FRESH-context agent — it never shares the manager's
     // conversation. The manager briefs it here: the original objective plus
     // what to scrutinize, so the review judges fitness-for-purpose instead of
     // vibing over an anonymous transcript.
     const objective = task?.trim()
-      ? `THE OBJECTIVE (what the worker was asked to accomplish):\n${task.trim().slice(0, 2_000)}\n\n`
+      ? `THE OBJECTIVE (what the worker was asked to accomplish):\n${task.trim().slice(0, criticBudget.objectiveChars)}\n\n`
       : '';
     const criticPrompt =
-      `${objective}Worker transcript to review:\n\n${transcriptText}\n\n` +
+      `${objective}Acceptance criteria (cover each exact string in criterionCoverage):\n${taskContract.acceptanceCriteria.map((criterion) => `- ${criterion}`).join('\n')}\n\nDeterministic checks executed by the gate:\n${hardCheckResult.output}\n\nWorker transcript to review:\n\n${transcriptText}\n\n` +
       `Critique against the objective: (1) does the work actually accomplish it, ` +
       `(2) is the implementation correct (verify claims by reading the real files — do not trust the transcript), ` +
       `(3) did it break or regress anything nearby, (4) is anything incomplete or stubbed. ` +
@@ -1257,12 +1483,12 @@ export class KoryManager {
       status: 'thinking',
       providerName: provider.name,
       modelId: criticRouting.model,
-      systemPrompt: criticCompilation.systemPrompt,
+      systemPrompt: criticSystemPrompt,
       promptManifestHash: criticCompilation.manifest.hash,
       taskContractHash: criticCompilation.manifest.taskContractHash,
       toolRole: 'critic',
-      maxTurns: 5,
-      maxTokens: 2048,
+      maxTurns: criticBudget.maxTurns,
+      maxTokens: criticBudget.maxTokens,
       messages: [{ role: 'user', content: criticPrompt }],
       threadEntries: [],
       ctx: criticCtx,
@@ -1283,7 +1509,7 @@ export class KoryManager {
     const lastContent =
       [...thread.threadEntries].reverse().find((entry) => entry.role === 'assistant')?.content ??
       '';
-    const passed = parseCriticVerdict(lastContent);
+    const passed = parseCriticVerdict(lastContent, taskContract.acceptanceCriteria);
     rmSync(criticSessionWd, { recursive: true, force: true });
     const afterCritic = await this.events.runWorkflowHooks('after-critic', sessionId, {
       task: task ?? 'Review delegated work',
@@ -1297,6 +1523,51 @@ export class KoryManager {
       };
     }
     return { passed, feedback: lastContent.trim() };
+  }
+
+  /** Goal Mode completion claims pass through the same global Critic switch and quality gate. */
+  async verifyGoalItem(
+    sessionId: string,
+    objective: string,
+    itemTitle: string,
+    preferredModel?: string,
+  ): Promise<{ passed: boolean; skipped?: boolean; feedback?: string }> {
+    const session = await this.sessions?.get(sessionId);
+    return this.runCriticGate(
+      sessionId,
+      [
+        {
+          role: 'user',
+          content: `Goal objective: ${objective}\nChecklist item claimed complete: ${itemTitle}\nInspect the actual workspace and verify this item is genuinely complete.`,
+        },
+      ],
+      preferredModel,
+      `Verify Goal Mode checklist item: ${itemTitle}`,
+      session?.workingDirectory ?? this.workingDirectory,
+    );
+  }
+
+  /** A repeated blocker is terminal only after the enabled Critic accepts that it is real. */
+  async verifyGoalBlocker(
+    sessionId: string,
+    objective: string,
+    itemTitle: string,
+    blocker: string,
+    preferredModel?: string,
+  ): Promise<{ passed: boolean; skipped?: boolean; feedback?: string }> {
+    const session = await this.sessions?.get(sessionId);
+    return this.runCriticGate(
+      sessionId,
+      [
+        {
+          role: 'user',
+          content: `Goal objective: ${objective}\nActive item: ${itemTitle}\nProposed blocker after repeated attempts: ${blocker}\nVerify whether this is a genuine blocker that requires the goal to stop.`,
+        },
+      ],
+      preferredModel,
+      `Adjudicate Goal Mode blocker: ${blocker}`,
+      session?.workingDirectory ?? this.workingDirectory,
+    );
   }
 
   private async runHardChecks(
@@ -1341,9 +1612,11 @@ export class KoryManager {
     userMessage: string,
     reasoningLevel?: string,
     preferredModel?: string,
-    attachments?: Array<{ type: string; data: string; name: string }>,
+    attachments?: Array<{ type: string; data: string; name: string; mimeType?: string }>,
     responseVariant?: { groupId: string; index: number },
+    interactionMode?: 'act' | 'plan',
   ): Promise<void> {
+    interactionMode = interactionMode ?? (await this.sessions?.get(sessionId))?.interactionMode ?? 'act';
     koryLog.debug({ sessionId, reasoningLevel, preferredModel }, 'Entering handleDirectly');
     let routing = this.resolveActiveRouting(preferredModel, 'general', true, userMessage);
     let provider = await this.providers.resolveProvider(routing.model, routing.provider);
@@ -1384,12 +1657,14 @@ export class KoryManager {
 
       const managerCtx: ToolContext = {
         sessionId,
+        goalContext: this.goalContextBySession.get(sessionId),
         workingDirectory: await this.resolveSessionWorkingDirectory(sessionId),
         allowedPaths: [],
         isSandboxed: false,
+        yoloMode: this.isYoloMode,
         signal: abort.signal,
-        waitForUserInput: (question: string, options: string[]) =>
-          this.waitForUserInputInternal(sessionId, question, options),
+        waitForUserInput: (question: string, options: string[], presentation) =>
+          this.waitForUserInputInternal(sessionId, question, options, presentation),
         emitFileEdit: (e) =>
           this.emitWSMessage(sessionId, 'stream.file_delta', { agentId: KORY_IDENTITY.id, ...e }),
         emitFileComplete: (e) =>
@@ -1400,6 +1675,7 @@ export class KoryManager {
         recordChange: (c) => {
           this.state.recordChange(sessionId, c);
         },
+        preflightFileChange: (proposal) => this.enforceAutonomyLimits(sessionId, proposal),
         delegateToWorker: (task: string, domainHint?: string) =>
           this.runWorkerPipeline(
             sessionId,
@@ -1412,6 +1688,19 @@ export class KoryManager {
       };
 
       const history = await this.loadHistory(sessionId);
+      // /api/messages persists the user's turn before starting the manager so
+      // reloads are durable. Do not send that same turn twice to the model;
+      // the multimodal finalContent below is the authoritative current copy.
+      const persistedCurrent = history.at(-1);
+      const persistedCurrentText = Array.isArray(persistedCurrent?.content)
+        ? persistedCurrent.content
+            .filter((block) => block.type === 'text')
+            .map((block) => block.text ?? '')
+            .join('')
+        : persistedCurrent?.content;
+      if (persistedCurrent?.role === 'user' && persistedCurrentText === userMessage) {
+        history.pop();
+      }
       koryLog.debug({ historyCount: history.length }, 'Loaded history');
 
       let finalContent: string | import('../providers/types').ProviderContentBlock[] = userMessage;
@@ -1421,7 +1710,7 @@ export class KoryManager {
           finalContent = [
             { type: 'text', text: userMessage },
             ...imageAttachments.map((att) => {
-              let mime = 'image/png';
+              let mime = att.mimeType || 'image/png';
               const lowerName = att.name.toLowerCase();
               if (lowerName.endsWith('.jpg') || lowerName.endsWith('.jpeg')) mime = 'image/jpeg';
               if (lowerName.endsWith('.webp')) mime = 'image/webp';
@@ -1469,6 +1758,7 @@ export class KoryManager {
             managerCtx,
             abort.signal,
             reasoningLevel,
+            interactionMode,
           );
           koryLog.debug(
             {
@@ -1479,9 +1769,10 @@ export class KoryManager {
             'Turn completed',
           );
         } catch (err: unknown) {
-          const errDetail = err instanceof Error
-            ? { message: err.message, name: err.name, stack: err.stack, cause: err.cause }
-            : { raw: String(err), typeof: typeof err };
+          const errDetail =
+            err instanceof Error
+              ? { message: err.message, name: err.name, stack: err.stack, cause: err.cause }
+              : { raw: String(err), typeof: typeof err };
           koryLog.error({ err, errDetail }, 'Error in processManagerTurn');
           if (err instanceof DOMException && err.name === 'AbortError') {
             stoppedByUser = true;
@@ -1574,56 +1865,47 @@ export class KoryManager {
       // self-assessment cannot become the authoritative completion state.
       const directChanges = this.state.getChanges(sessionId);
       if (!stoppedByUser && directChanges.length > 0) {
-        const settingsForGate = loadAgentSettings(this.workingDirectory);
-        const hardBoundaryTask = createTaskContract(userMessage).taskKind === 'security-infra';
-        const strictness = hardBoundaryTask
-          ? 'strict'
-          : settingsForGate.criticGateEnabled
-            ? settingsForGate.gateStrictness
-            : 'off';
-        if (strictness === 'off') {
+        // Every observed repository mutation is completion-blocking. User gate
+        // preferences may relax answer/research review, but cannot turn an
+        // edited workspace into verified success without deterministic checks
+        // and a valid critic report.
+        const diffSections = await Promise.all(
+          directChanges.map(async (change) => {
+            const diff = await this.git.getDiff(change.path);
+            return `FILE: ${change.path}\n${diff || '[No Git diff available; inspect the file directly.]'}`;
+          }),
+        );
+        const directEvidence: InternalMessage[] = [
+          {
+            role: 'user',
+            content: `Direct manager change set:\n${JSON.stringify(directChanges, null, 2)}\n\nACTUAL DIFF:\n${diffSections.join('\n\n')}`,
+          },
+        ];
+        const gate = await this.runCriticGate(
+          sessionId,
+          directEvidence,
+          preferredModel,
+          userMessage,
+          managerCtx.workingDirectory,
+        );
+        if (gate.skipped) {
           messages.push({
             role: 'assistant',
-            content:
-              'UNVERIFIED: The requested edits were applied, but quality gates are disabled. No verified-success claim can be made.',
+            content: 'UNVERIFIED: The user disabled the Critic quality gate. The changes remain available for review.',
+          });
+        } else if (!gate.passed) {
+          messages.push({
+            role: 'assistant',
+            content: `QUALITY GATE FAILED: The edits remain available for inspection, but the task is not complete.\n\n${gate.feedback ?? 'Verification failed without usable evidence.'}`,
           });
         } else {
-          const diffSections = await Promise.all(
-            directChanges.map(async (change) => {
-              const diff = await this.git.getDiff(change.path);
-              return `FILE: ${change.path}\n${diff || '[No Git diff available; inspect the file directly.]'}`;
-            }),
-          );
-          const directEvidence: InternalMessage[] = [
-            {
-              role: 'user',
-              content: `Direct manager change set:\n${JSON.stringify(directChanges, null, 2)}\n\nACTUAL DIFF:\n${diffSections.join('\n\n')}`,
-            },
-          ];
-          const gate = await this.runCriticGate(
-            sessionId,
-            directEvidence,
-            preferredModel,
-            userMessage,
-            managerCtx.workingDirectory,
-          );
-          if (!gate.passed) {
-            messages.push({
-              role: 'assistant',
-              content:
-                strictness === 'strict'
-                  ? `QUALITY GATE FAILED: The edits remain available for inspection, but the task is not complete.\n\n${gate.feedback ?? 'Verification failed without usable evidence.'}`
-                  : `UNVERIFIED: Advisory quality checks found issues.\n\n${gate.feedback ?? 'Verification failed without usable evidence.'}`,
-            });
-          } else {
-            const harness = getProviderHarnessCapabilities(providerName);
-            messages.push({
-              role: 'assistant',
-              content: harness.verificationEligible
-                ? 'VERIFIED: The harness ran repository-derived deterministic checks and a fresh read-only critic against the actual change set. The persisted completion state is verified.'
-                : `UNVERIFIED: Checks and criticism passed, but the ${providerName} native harness ran without OS filesystem isolation. Role capability remains available; verified-success is withheld.`,
-            });
-          }
+          const harness = getProviderHarnessCapabilities(providerName);
+          messages.push({
+            role: 'assistant',
+            content: harness.verificationEligible
+              ? 'VERIFIED: The harness ran repository-derived deterministic checks and a fresh read-only critic against the actual change set. The persisted completion state is verified.'
+              : `UNVERIFIED: Checks and criticism passed, but the ${providerName} native harness ran without OS filesystem isolation. Role capability remains available; verified-success is withheld.`,
+          });
         }
       }
 
@@ -1662,6 +1944,7 @@ export class KoryManager {
       if (missingFinalResponse) {
         this.emitWSMessage(sessionId, 'system.info', {
           message: EMPTY_NOTICE,
+          kind: 'empty_response',
         });
         this.emitWSMessage(sessionId, 'stream.delta', {
           agentId: KORY_IDENTITY.id,
@@ -1693,16 +1976,40 @@ export class KoryManager {
         });
         koryLog.debug('Assistant message persisted');
       }
+      if (interactionMode === 'plan') {
+        try {
+          const noteId = await syncPlanNote(sessionId, userMessage, toPersist);
+          await this.sessions?.update(sessionId, { planNoteId: noteId });
+        } catch (err) {
+          koryLog.warn({ err, sessionId }, 'Failed to synchronize durable Plan note');
+        }
+      }
       if (this.messages && stoppedByUser) {
         await this.messages.add(sessionId, {
           id: nanoid(12),
           sessionId,
           role: 'system',
           content: 'Stopped by user.',
+          kind: 'cancelled',
           model: routing.model,
           provider: providerName,
           createdAt: Date.now(),
         });
+      }
+      if (this.messages && this.sessionState.isCompacting(sessionId) && !stoppedByUser && content) {
+        const removedMessages = await this.messages.replaceSessionWithSummary(
+          sessionId,
+          content,
+          routing.model,
+          providerName,
+        );
+        await this.sessions?.update(sessionId, { messageCount: 1 });
+        await markCliConversationRewritten(sessionId);
+        this.emitWSMessage(sessionId, 'system.info', {
+          message: `Session compacted: replaced ${removedMessages} messages with one durable summary.`,
+          kind: 'compacted',
+        });
+        this.compactionSucceeded.set(sessionId, true);
       }
       this.emitWSMessage(sessionId, 'agent.status', {
         agentId: KORY_IDENTITY.id,
@@ -1710,17 +2017,31 @@ export class KoryManager {
         // not done; the composer button shows "Waiting…" and the exit event
         // wakes the agent back up.
         status: processSupervisor.hasRunningForSession(sessionId) ? 'waiting' : 'done',
+        // Include the persisted message id so the frontend can tag live feed
+        // entries before reloading, enabling ID-based dedup instead of text.
+        messageId: finalMessageId,
       });
+      // Emit a definitive session.idle event when the session is truly done
+      // (no background processes still running). The frontend uses this to
+      // clear the busy indicator without polling the runtime-status endpoint.
+      if (!processSupervisor.hasRunningForSession(sessionId)) {
+        this.emitWSMessage(sessionId, 'session.idle', {
+          sessionId,
+          messageId: finalMessageId,
+        });
+      }
 
       // Create rewind point after final response
-      if (finalMessageId) {
+      if (finalMessageId && interactionMode !== 'plan') {
         await this.createRewindCheckpoint(
           sessionId,
+          providerName,
           routing.model,
           userMessage,
           finalMessageId,
           tokensIn,
           tokensOut,
+          this.state.getChanges(sessionId),
         );
       }
 
@@ -1737,22 +2058,25 @@ export class KoryManager {
 
   private async createRewindCheckpoint(
     sessionId: string,
+    provider: string,
     model: string,
     prompt: string,
     messageId: string,
     tokensIn = 0,
     tokensOut = 0,
+    changedFiles: Array<{ path: string; operation: 'create' | 'edit' | 'delete' }> = [],
   ) {
     try {
       const metadata = {
         agentId: sessionId,
         model,
-        prompt: prompt.slice(0, 200),
+        prompt,
         tokensIn,
         tokensOut,
-        cost: 0,
+        cost: computeCostUsd(provider, model, tokensIn, tokensOut)?.costUsd,
         messageId,
         checkpointType: 'turn_end' as const,
+        changedFiles,
       };
       if (this.timeTravel) {
         await this.timeTravel.checkpoint(prompt.slice(0, 72), metadata);
@@ -1776,12 +2100,14 @@ export class KoryManager {
     ctx: ToolContext,
     signal?: AbortSignal,
     reasoningLevel?: string,
+    interactionMode: 'act' | 'plan' = 'act',
   ): Promise<LLMTurnResult> {
     if (signal?.aborted) throw new DOMException('Manager run aborted', 'AbortError');
 
     // Load agent settings to apply experimental overrides
     const { loadAgentSettings } = await import('../agent-settings');
-    const settings = loadAgentSettings(this.workingDirectory);
+    const promptRoot = await this.resolveSessionWorkingDirectory(sessionId);
+    const settings = loadAgentSettings(promptRoot);
 
     const latestUserMessage = [...messages].reverse().find((message) => message.role === 'user');
     const taskGoal =
@@ -1792,11 +2118,16 @@ export class KoryManager {
       role: 'manager',
       mode: getModeManager().getMode(),
       provider: provider.name,
+      model: modelId,
       workingDirectory: await this.resolveSessionWorkingDirectory(sessionId),
-      taskContract: createTaskContract(taskGoal, { goalContext: this.goalContextBySession.get(sessionId) }),
+      occupiedContextChars: JSON.stringify(messages).length,
+      taskContract: createTaskContract(taskGoal, {
+        goalContext: this.goalContextBySession.get(sessionId),
+      }),
       contextPaths: this.config.contextPaths,
       skillSelection: {
         collisionChoices: this.skillCollisionChoicesBySession.get(sessionId),
+        ...(interactionMode === 'plan' ? { pins: ['plan-mode'] } : {}),
       },
     });
     let systemPrompt = managerCompilation.systemPrompt;
@@ -1819,6 +2150,7 @@ export class KoryManager {
         'Prompt manifest applied',
       );
     }
+    const beforeMemoryContext = systemPrompt.length;
     const notesEntries = Object.entries(settings.managerNotes ?? {}).filter(([, v]) => v?.trim());
     if (notesEntries.length > 0) {
       const notesSections = notesEntries
@@ -1826,22 +2158,31 @@ export class KoryManager {
         .join('\n\n');
       systemPrompt += `\n\n## User Notes (standing guidance)\n${notesSections}`;
     }
+    const agentContext = assembleAgentContext(promptRoot, settings);
+    if (agentContext.preferences.trim()) {
+      systemPrompt += `\n\n## Durable user preferences\n${agentContext.preferences.trim()}`;
+    }
+    const memoryContext = assembleMemoryContext(promptRoot, sessionId);
+    if (memoryContext.settings.autoIncludeInContext) {
+      const formatted = formatMemoryForContext(memoryContext);
+      if (formatted) {
+        const maxChars = Math.max(400, memoryContext.settings.maxContextTokens * 4);
+        systemPrompt += `\n\n${formatted.slice(0, maxChars)}`;
+      }
+    }
     // Chars contributed by injected memory/notes — tracked separately so the
     // context-usage bar can show memory as its own segment.
-    let memoryChars = 0;
-
-    if (hasAnyVisibleNoteTools(this.workingDirectory)) {
-      const beforeNotes = systemPrompt.length;
-      const hint = buildNotesNetworkSystemHint(this.workingDirectory);
+    if (hasAnyVisibleNoteTools(promptRoot)) {
+      const hint = buildNotesNetworkSystemHint(promptRoot);
       if (hint) systemPrompt += `\n\n${hint}`;
       try {
         const { buildNotesNetworkPrompt } = await import('../memory/unified-memory');
-        systemPrompt += await buildNotesNetworkPrompt(2500, this.workingDirectory);
+        systemPrompt += await buildNotesNetworkPrompt(2500, promptRoot);
       } catch {
         // Notes DB may be unavailable — continue without network context
       }
-      memoryChars = systemPrompt.length - beforeNotes;
     }
+    const memoryChars = systemPrompt.length - beforeMemoryContext;
 
     // Multi-source research instruction
     if (settings.multiSourceResearch) {
@@ -1852,10 +2193,45 @@ export class KoryManager {
     // Filter tools based on local web search setting
     let tools = filterToolDefsForNotesPermissions(
       this.tools.getToolDefsForRole('manager'),
-      this.workingDirectory,
+      promptRoot,
     );
     if (settings.localWebSearch === 'off') {
       tools = tools.filter((t) => t.name !== 'web_search');
+    }
+    if (interactionMode === 'plan') {
+      const allowed = new Set([
+        'read_file',
+        'grep',
+        'glob',
+        'ls',
+        'diff',
+        'web_search',
+        'web_fetch',
+        'view_image',
+        'ask_user',
+        'search_notes',
+        'recall_notes',
+        'list_notes',
+        'get_note_backlinks',
+        'get_note_graph_summary',
+        'render_note',
+        'fetch_context',
+        'load_skill_detail',
+      ]);
+      tools = tools.filter((tool) => allowed.has(tool.name));
+      systemPrompt +=
+        '\n\nPLAN MODE IS ENFORCED BY THE HOST. You cannot edit project files, run shell commands, commit, create pull requests, delegate, or write arbitrary Notes. Koryphaios synchronizes the dedicated Plan note after each turn.';
+    }
+
+    if (interactionMode === 'plan') {
+      const planTools = new Set([
+        'read_file', 'grep', 'glob', 'ls', 'diff', 'web_search', 'web_fetch', 'view_image',
+        'ask_user', 'create_note', 'update_note', 'search_notes', 'recall_notes', 'list_notes',
+        'get_note_backlinks', 'get_note_graph_summary', 'render_note', 'fetch_context', 'load_skill_detail',
+      ]);
+      tools = tools.filter((tool) => planTools.has(tool.name));
+      systemPrompt +=
+        '\n\n• PLAN MODE: Do not modify files, run shell commands, commit, create pull requests, or delegate implementation. Ask decision-changing questions, inspect evidence, and update the living plan Note at every meaningful checkpoint. Update durable memory only with stable reusable facts or confirmed decisions. Obtain explicit user approval before leaving Plan mode or performing a write-capable project action.';
     }
 
     if (!this.isJulesAvailable()) {
@@ -1998,7 +2374,7 @@ export class KoryManager {
         harnessRole: 'manager',
         promptManifestHash: managerCompilation.manifest.hash,
         taskContractHash: managerCompilation.manifest.taskContractHash,
-        sandbox: SANDBOX_PRESETS.balanced,
+        sandbox: interactionMode === 'plan' ? SANDBOX_PRESETS.readonly : SANDBOX_PRESETS.balanced,
       },
       provider.name,
     );
@@ -2413,7 +2789,11 @@ export class KoryManager {
     if (tc.name === 'ask_user') {
       const question = (tc.input?.question as string) ?? 'Proceed?';
       const options = (tc.input?.options as string[]) ?? ['Yes', 'No'];
-      const selection = await this.waitForUserInputInternal(sessionId, question, options);
+      const selection = await this.waitForUserInputInternal(sessionId, question, options, {
+        chart: tc.input?.chart as KoryQuestionChart | undefined,
+        sliders: tc.input?.sliders as KoryQuestionSlider[] | undefined,
+        allowKeepChatting: true,
+      });
       return {
         callId: tc.id,
         name: tc.name,
@@ -2448,7 +2828,12 @@ export class KoryManager {
     allowedPaths: string[],
     isSandboxed: boolean,
     taskContract?: import('./prompts').TaskContract,
-  ): Promise<{ success: boolean; error?: string; workerMessages?: InternalMessage[] }> {
+  ): Promise<{
+    success: boolean;
+    error?: string;
+    workerMessages?: InternalMessage[];
+    usage?: { tokensIn: number; tokensOut: number };
+  }> {
     const workerId = `worker-${nanoid(8)}`;
     const abort = new AbortController();
     const workerWorkingDirectory =
@@ -2496,13 +2881,15 @@ export class KoryManager {
       signal: abort.signal,
       allowedPaths,
       isSandboxed,
+      yoloMode: this.isYoloMode,
       emitFileEdit: (e) =>
         this.emitWSMessage(sessionId, 'stream.file_delta', { agentId: workerId, ...e }),
       emitFileComplete: (e) =>
         this.emitWSMessage(sessionId, 'stream.file_complete', { agentId: workerId, ...e }),
       recordChange: (c) => this.state.recordChange(sessionId, c),
-      waitForUserInput: (question, options) =>
-        this.waitForUserInputInternal(sessionId, question, options),
+      preflightFileChange: (proposal) => this.enforceAutonomyLimits(sessionId, proposal),
+      waitForUserInput: (question, options, presentation) =>
+        this.waitForUserInputInternal(sessionId, question, options, presentation),
     };
     const history = await this.loadHistory(sessionId);
     const messages: InternalMessage[] = [...history, { role: 'user', content: userMessage }];
@@ -2512,12 +2899,15 @@ export class KoryManager {
       role: 'worker',
       mode: getModeManager().getMode(),
       provider: provider.name,
+      model: modelId,
       workingDirectory: workerWorkingDirectory,
+      occupiedContextChars: JSON.stringify(messages).length,
       taskContract: {
-        ...(taskContract ?? createTaskContract(userMessage, {
-          scope: allowedPaths,
-          constraints: isSandboxed ? ['Stay within the granted filesystem paths'] : [],
-        })),
+        ...(taskContract ??
+          createTaskContract(userMessage, {
+            scope: allowedPaths,
+            constraints: isSandboxed ? ['Stay within the granted filesystem paths'] : [],
+          })),
         goalContext: this.goalContextBySession.get(sessionId) ?? taskContract?.goalContext,
       },
       contextPaths: this.config.contextPaths,
@@ -2526,6 +2916,17 @@ export class KoryManager {
       },
     });
     let workerSystemPrompt = workerCompilation.systemPrompt;
+    const workerSettings = loadAgentSettings(workerWorkingDirectory);
+    const workerGuidance = assembleAgentContext(workerWorkingDirectory, workerSettings);
+    if (workerGuidance.preferences.trim()) {
+      workerSystemPrompt += `\n\n## Durable user preferences\n${workerGuidance.preferences.trim()}`;
+    }
+    const workerMemory = assembleMemoryContext(workerWorkingDirectory, sessionId);
+    if (workerMemory.settings.autoIncludeInContext) {
+      const formatted = formatMemoryForContext(workerMemory);
+      if (formatted)
+        workerSystemPrompt += `\n\n${formatted.slice(0, Math.max(400, workerMemory.settings.maxContextTokens * 4))}`;
+    }
     if (hasAnyVisibleNoteTools(this.workingDirectory)) {
       const hint = buildNotesNetworkSystemHint(this.workingDirectory);
       if (hint) workerSystemPrompt += `\n\n${hint}`;
@@ -2559,11 +2960,24 @@ export class KoryManager {
       updatedAt: Date.now(),
     };
     this.agentThreads.set(workerId, thread);
-    this.appendAgentThreadEntry(thread, 'manager', userMessage);
+    // Make the worker transcript self-contained: reviewers can see the
+    // original user outcome, the manager's scoped assignment, and then the
+    // worker's own progress. This is especially important when opening a
+    // worker card after the manager feed has moved on.
+    const originalUserMessage = [...history].reverse().find((message) => message.role === 'user');
+    const originalUserRequest =
+      typeof originalUserMessage?.content === 'string' ? originalUserMessage.content : undefined;
+    if (originalUserRequest) this.appendAgentThreadEntry(thread, 'user', originalUserRequest);
+    this.appendAgentThreadEntry(thread, 'manager', `Assigned work: ${userMessage}`);
 
     try {
       await this.runAgentThread(workerId, provider);
-      return { success: true, workerMessages: [...thread.messages] };
+      const usage = this.workers.getUsage(workerId);
+      return {
+        success: true,
+        workerMessages: [...thread.messages],
+        usage: usage ? { tokensIn: usage.tokensIn, tokensOut: usage.tokensOut } : undefined,
+      };
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err);
       return { success: false, error: message };
@@ -2706,15 +3120,50 @@ export class KoryManager {
     };
   }
 
+  /** Summarize the current history, then replace it only after a successful result. */
+  async compactSession(
+    sessionId: string,
+    preferredModel?: string,
+    reasoningLevel?: string,
+  ): Promise<void> {
+    if (!this.messages) throw new Error('Message storage is unavailable.');
+    if (this.isSessionRunning(sessionId)) throw new Error('Stop the active run before compacting.');
+    if ((await this.messages.getAll(sessionId)).length < 2) {
+      throw new Error('There is not enough conversation to compact yet.');
+    }
+    await this.sessionState.transition(sessionId, 'compacting');
+    this.compactionSucceeded.set(sessionId, false);
+    try {
+      await this.processTask(
+        sessionId,
+        'Create a precise, self-contained session summary for future work. Preserve active goals, decisions, changed files, verification, blockers, and next actions. Do not use tools, do not delegate, and return only the compacted summary.',
+        preferredModel,
+        reasoningLevel,
+      );
+      if (!this.compactionSucceeded.get(sessionId)) {
+        throw new Error(
+          'The provider did not return a usable summary; the original conversation was kept.',
+        );
+      }
+    } finally {
+      this.compactionSucceeded.delete(sessionId);
+      // Transition back to idle — processTask's finally block may have already
+      // done this, but calling transition is idempotent (no-op if already idle).
+      await this.sessionState.transition(sessionId, 'idle');
+    }
+  }
+
   cancelSessionWorkers(sessionId: string) {
     this.abortManagerRun(sessionId);
     this.workers.cancelSessionWorkers(sessionId);
   }
 
-  /** True if the session has an active manager run or any worker. */
+  /** True if the session has an active manager run, any worker, or a
+   *  non-idle runtime state. */
   isSessionRunning(sessionId: string): boolean {
     if (this.managerAbortBySession.has(sessionId)) return true;
-    return this.workers.hasSessionWorkers(sessionId);
+    if (this.workers.hasSessionWorkers(sessionId)) return true;
+    return this.sessionState.isRunning(sessionId);
   }
 
   getStatus() {
@@ -2730,8 +3179,9 @@ export class KoryManager {
     this.managerAbortBySession.clear();
     for (const sid of sessionIds) {
       this.emitWSMessage(sid, 'agent.status', { agentId: KORY_IDENTITY.id, status: 'done' });
+      this.emitWSMessage(sid, 'session.idle', { sessionId: sid });
+      void this.sessionState.transition(sid, 'idle');
     }
-    this.isProcessing = false;
     koryLog.info('All workers cancelled via global cancel');
   }
 
@@ -2741,10 +3191,23 @@ export class KoryManager {
         // System rows are UI markers (e.g. "Stopped by user.") — never part of
         // the conversation sent back to the model.
         ?.filter((m) => m.role !== 'system')
-        .map((m) => ({
-          role: m.role as InternalMessage['role'],
-          content: m.content,
-        })) || []
+        .map((m) => {
+          const images = (m.attachments ?? []).filter((attachment) => attachment.type === 'image');
+          return {
+            role: m.role as InternalMessage['role'],
+            content:
+              images.length > 0
+                ? [
+                    { type: 'text' as const, text: m.content },
+                    ...images.map((attachment) => ({
+                      type: 'image' as const,
+                      imageData: attachment.data,
+                      imageMimeType: attachment.mimeType ?? 'image/png',
+                    })),
+                  ]
+                : m.content,
+          };
+        }) || []
     );
   }
 
@@ -2947,14 +3410,19 @@ export class KoryManager {
         throw new Error(event.error ?? 'LLM stream error');
       }
       if (event.type === 'content_delta') {
-        assistantContent += event.content ?? '';
-        thread.status = 'streaming';
-        thread.updatedAt = Date.now();
-        this.emitWSMessage(thread.sessionId, 'stream.delta', {
-          agentId: thread.identity.id,
-          content: event.content,
-          model: thread.modelId,
-        });
+        const delta = event.content ?? '';
+        assistantContent += delta;
+        // Empty content deltas are provider framing, not a response chunk.
+        // Do not turn them into a blank manager/worker card in the feed.
+        if (delta) {
+          thread.status = 'streaming';
+          thread.updatedAt = Date.now();
+          this.emitWSMessage(thread.sessionId, 'stream.delta', {
+            agentId: thread.identity.id,
+            content: delta,
+            model: thread.modelId,
+          });
+        }
       } else if (event.type === 'thinking_delta') {
         // Workers reason too — without this branch their thinking text was
         // silently dropped and never reached the agent thread feed.
@@ -3066,8 +3534,13 @@ export class KoryManager {
       role: 'worker',
       mode: getModeManager().getMode(),
       provider: provider.name,
+      model: modelId,
       workingDirectory: ctx.workingDirectory,
-      taskContract: createTaskContract(workerGoal, { scope: ctx.allowedPaths ?? [], goalContext: this.goalContextBySession.get(sessionId) }),
+      occupiedContextChars: JSON.stringify(messages).length,
+      taskContract: createTaskContract(workerGoal, {
+        scope: ctx.allowedPaths ?? [],
+        goalContext: this.goalContextBySession.get(sessionId),
+      }),
       contextPaths: this.config.contextPaths,
       skillSelection: {
         collisionChoices: this.skillCollisionChoicesBySession.get(sessionId),
@@ -3320,11 +3793,63 @@ export class KoryManager {
 
   /** Check if the critic gate allows the CLI to stop. Called by the Stop hook.
    *  Returns false if the critic has not verified the work as complete. */
-  async criticGateMayStop(_sessionId: string): Promise<boolean> {
-    // The critic gate is checked during the normal Kory orchestration loop.
-    // For CLI-driven sessions, we allow stopping by default — the critic gate
-    // is enforced when Kory drives the session, not when a CLI harness does.
-    return true;
+  async criticGateMayStop(sessionId: string): Promise<boolean> {
+    const changes = this.state.getChanges(sessionId);
+    if (changes.length === 0) return true;
+    if (this.cliMutationVerifiedBySession.get(sessionId) === true) return true;
+
+    const gate = await this.runCriticGate(
+      sessionId,
+      [{
+        role: 'user',
+        content: `CLI-authored change set requiring verification:\n${JSON.stringify(changes, null, 2)}`,
+      }],
+      undefined,
+      'Fix and verify the CLI-authored repository changes without hidden scope expansion',
+      await this.resolveSessionWorkingDirectory(sessionId),
+    );
+    this.cliMutationVerifiedBySession.set(sessionId, gate.passed);
+    return gate.passed;
+  }
+
+  /** Goal Mode completion is adjudicated by a fresh critic, never by the producer alone. */
+  async verifyGoalItem(
+    sessionId: string,
+    objective: string,
+    itemTitle: string,
+    preferredModel?: string,
+  ): Promise<{ passed: boolean; feedback?: string; skipped?: boolean }> {
+    const recent = (await this.messages?.getRecent(sessionId, 20)) ?? [];
+    const transcript = recent.map((message) => ({
+      role: message.role,
+      content: message.content,
+    })) as InternalMessage[];
+    return this.runCriticGate(
+      sessionId,
+      transcript,
+      preferredModel,
+      `Goal objective: ${objective}\nChecklist item: ${itemTitle}\nVerify this item is actually complete with concrete evidence.`,
+      await this.resolveSessionWorkingDirectory(sessionId),
+    );
+  }
+
+  /** A producer may propose a blocker, but an enabled Critic decides whether it is real. */
+  async verifyGoalBlocker(
+    sessionId: string,
+    objective: string,
+    itemTitle: string,
+    blocker: string,
+    preferredModel?: string,
+  ): Promise<{ passed: boolean; feedback?: string; skipped?: boolean }> {
+    const recent = (await this.messages?.getRecent(sessionId, 20)) ?? [];
+    const transcript = recent.map((message) => ({ role: message.role, content: message.content })) as InternalMessage[];
+    return this.runCriticGate(
+      sessionId,
+      transcript,
+      preferredModel,
+      `Goal objective: ${objective}\nChecklist item: ${itemTitle}\nProposed blocker: ${blocker}\nDecide whether this is a genuine blocker after safe alternatives were exhausted. PASS only if continued autonomous work is not currently possible.`,
+      await this.resolveSessionWorkingDirectory(sessionId),
+    );
   }
 
   /** Record a file change from a CLI tool execution. Called by the MCP bridge
@@ -3332,11 +3857,46 @@ export class KoryManager {
   recordChange(sessionId: string, change: any): void {
     try {
       this.state.recordChange(sessionId, change);
+      this.cliMutationVerifiedBySession.set(sessionId, false);
     } catch {
       // best effort — the state may not exist for CLI-only sessions
     }
   }
 
+  /** Enforce enabled file/line limits before a Kory-owned file tool mutates the workspace. */
+  async enforceAutonomyLimits(
+    sessionId: string,
+    proposal: FileChangeProposal,
+  ): Promise<{ allowed: boolean; reason?: string }> {
+    const settings = loadAgentSettings(await this.resolveSessionWorkingDirectory(sessionId));
+    if (!settings.autonomyLimitsEnabled) return { allowed: true };
+
+    const recordedChanges = this.state.getChanges(sessionId);
+    const filesChanged = new Set([
+      ...recordedChanges.map((change) => change.path),
+      ...proposal.paths,
+    ]).size;
+    const linesChanged =
+      recordedChanges.reduce(
+        (total, change) => total + change.linesAdded + change.linesDeleted,
+        0,
+      ) + proposal.linesChanged;
+
+    if (
+      filesChanged <= settings.approvalThresholdFiles &&
+      linesChanged <= settings.approvalThresholdLines
+    ) {
+      return { allowed: true };
+    }
+
+    const response = await this.waitForUserInputInternal(
+      sessionId,
+      `Autonomy limits are active. This edit would reach ${filesChanged} files and ${linesChanged} changed lines (limits: ${settings.approvalThresholdFiles} files / ${settings.approvalThresholdLines} lines). Apply it?`,
+      ['Apply this edit', 'Keep limits on — do not apply'],
+    );
+    if (response === 'Apply this edit') return { allowed: true };
+    return { allowed: false, reason: 'Edit was not approved under the active autonomy limits.' };
+  }
 
   private emitUsageUpdate(
     sessionId: string,

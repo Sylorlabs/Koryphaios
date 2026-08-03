@@ -1,27 +1,26 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { fade, fly } from 'svelte/transition';
-  import { 
-    Search, 
-    Zap, 
-    Plus, 
-    Settings, 
-    Sidebar, 
-    Layout, 
-    SunMoon, 
+  import {
+    Search,
+    Plus,
+    Settings,
+    Sidebar,
+    Layout,
+    SunMoon,
     Trash2,
     FileCode,
     FolderOpen,
     Command,
-    GitBranch,
     Activity,
     Target,
     Pause,
     Play,
-    ArrowUp
+    ArrowUp,
+    Undo as UndoIcon,
+    Redo as RedoIcon
   } from 'lucide-svelte';
   import { getModKeyName } from '$lib/utils/platform';
-  import { modeStore } from '$lib/stores/mode.svelte';
   import { notesStore } from '$lib/stores/notes.svelte';
 
   const frontendVersion = __KORYPHAIOS_FRONTEND_VERSION__ ?? '0.1.0';
@@ -45,7 +44,6 @@
     icon: any;
     shortcut?: string;
     category: string;
-    mode?: 'beginner' | 'advanced'; // If set, only show in that mode
   };
 
   const allActions: Action[] = [
@@ -56,31 +54,28 @@
     { id: 'open_project_file', label: 'Import Project', description: 'Load project from a local file', icon: FileCode, category: 'Project' },
     { id: 'open_project_folder', label: 'Open Project From Folder', description: 'Load project from a folder on your computer', icon: FolderOpen, category: 'Project' },
     { id: 'session_compact', label: 'Compact Session', description: 'Request an implementation-focused session summary', icon: FileCode, category: 'Session' },
+    { id: 'open_time_travel', label: 'Time Travel', description: 'Inspect and restore recorded states from this session', icon: RotateCcw, category: 'Session' },
     { id: 'toggle_sidebar', label: 'Toggle Sidebar', description: 'Show or hide the session sidebar', icon: Sidebar, shortcut: 'B', category: 'View' },
     { id: 'toggle_zen_mode', label: 'Toggle Zen Mode', description: 'Focus on the conversation', icon: Layout, shortcut: 'Shift+Z', category: 'View' },
     { id: 'toggle_theme', label: 'Switch Theme', description: 'Open quick theme preset picker', icon: SunMoon, category: 'View' },
-    { id: 'toggle_yolo', label: 'Toggle YOLO Mode', description: 'Bypass all confirmation dialogs', icon: Zap, shortcut: 'Y', category: 'System' },
+    { id: 'undo', label: 'Undo', description: 'Revert to the previous saved state', icon: UndoIcon, shortcut: 'Z', category: 'System' },
+    { id: 'redo', label: 'Redo', description: 'Restore the next saved state', icon: RedoIcon, shortcut: 'Y', category: 'System' },
     { id: 'open_settings', label: 'Settings', description: 'Configure providers and preferences', icon: Settings, shortcut: ',', category: 'System' },
     { id: 'clear_feed', label: 'Clear Feed', description: 'Remove all messages from view', icon: Trash2, category: 'System' },
     { id: 'toggle_notes', label: 'Toggle Notes', description: 'Show or hide the project notes panel', icon: FileCode, shortcut: 'Shift+N', category: 'View' },
     { id: 'goal_create', label: 'Create Goal', description: 'Create a workspace, project, or chat goal', icon: Target, category: 'Goals' },
     { id: 'goal_open', label: 'Open Active Goal', description: 'Open the selected goal checklist and activity', icon: Target, category: 'Goals' },
-    { id: 'goal_invoke', label: 'Ask Manager to Advance Goal', description: 'Dispatch the selected ready checklist item through the manager', icon: Play, category: 'Goals' },
+    { id: 'goal_invoke', label: 'Start Goal', description: 'Run continuously until complete, paused, stopped, or genuinely blocked', icon: Play, category: 'Goals' },
     { id: 'goal_pause', label: 'Pause Active Goal', description: 'Pause the selected goal', icon: Pause, category: 'Goals' },
     { id: 'goal_resume', label: 'Resume Active Goal', description: 'Resume the selected paused goal', icon: Play, category: 'Goals' },
+    { id: 'goal_stop', label: 'Stop Active Goal', description: 'Permanently stop the selected goal after confirmation', icon: Square, category: 'Goals' },
     { id: 'goal_prioritize', label: 'Prioritize Active Goal', description: 'Move the selected goal ahead of other eligible work', icon: ArrowUp, category: 'Goals' },
-    // Mode switches — each only shows in the OTHER mode
-    { id: 'mode_advanced', label: 'Switch to Advanced Mode', description: 'Full controls: git panel, agents, cost tracking', icon: Command, category: 'System', mode: 'beginner' },
-    { id: 'mode_beginner', label: 'Switch to Beginner Mode', description: 'Simplified UI with fewer controls', icon: Command, category: 'System', mode: 'advanced' },
-    // Advanced only
-    { id: 'toggle_git', label: 'Toggle Source Control', description: 'Show or hide the Git panel', icon: GitBranch, category: 'View', mode: 'advanced' },
-    { id: 'toggle_agents', label: 'Toggle Active Agents', description: 'Show or hide the agents panel', icon: Activity, category: 'View', mode: 'advanced' },
+    { id: 'toggle_agents', label: 'Toggle Active Agents', description: 'Show or hide the agents panel', icon: Activity, category: 'View' },
   ];
 
   // Filter actions based on current mode and search query
   let filteredActions = $derived(
     allActions
-      .filter(a => !a.mode || a.mode === modeStore.mode)
       .filter(a => a.id !== 'toggle_notes' || notesStore.settings.enabled)
       .filter(a => 
         a.label.toLowerCase().includes(query.toLowerCase()) || 
@@ -160,9 +155,9 @@
           </div>
         {:else}
           {@const categories = [...new Set(filteredActions.map(a => a.category))]}
-          {#each categories as category}
+          {#each categories as category (category)}
             <div class="px-2 py-1.5 text-[10px] uppercase font-bold tracking-wider" style="color: var(--color-text-muted);">{category}</div>
-            {#each filteredActions.filter(a => a.category === category) as action, i}
+            {#each filteredActions.filter(a => a.category === category) as action (action.id)}
               {@const isSelected = filteredActions.indexOf(action) === selectedIndex}
               {@const Icon = action.icon}
               <button
@@ -185,7 +180,7 @@
                 {#if action.shortcut}
                   <div class="flex items-center gap-0.5 shrink-0 opacity-40 group-hover:opacity-100 transition-opacity">
                     <span class="text-[10px] px-1 py-0.5 rounded border" style="background: var(--color-surface-2); border-color: var(--color-border); color: var(--color-text-muted);">{getModKeyName()}</span>
-                    {#each action.shortcut.split('+') as part}
+                    {#each action.shortcut.split('+') as part (part)}
                       <span class="text-[10px] px-1 py-0.5 rounded border" style="background: var(--color-surface-2); border-color: var(--color-border); color: var(--color-text-muted);">{part}</span>
                     {/each}
                   </div>

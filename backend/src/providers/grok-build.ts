@@ -14,9 +14,9 @@
 // the harness keeps working if a future CLI version changes the surface.
 
 import type { ProviderConfig, ModelDef } from '@koryphaios/shared';
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { existsSync, readFileSync, statSync } from 'node:fs';
+import { existsSync, readFileSync, statSync, writeFileSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { homedir, tmpdir } from 'node:os';
 import { buildSoftJail, wrapCommand } from '../collaboration/sandbox-runner';
@@ -28,12 +28,13 @@ import {
   type StreamRequest,
   getModelsForProvider,
 } from './types';
+import { hasImageContent } from './cli-attachments';
 import { GrokModels } from './models/grok';
 import { detectGrokCLILogin } from './auth-utils';
 import { whichBinary } from './cli-detection';
 import { providerLog } from '../logger';
 import { isModelListCacheFresh } from './model-list-cache';
-import { getCliBridge } from './cli-bridges';
+import { getCliBridge, getKoryphaiosGrokHome } from './cli-bridges';
 
 const GROK_STREAM_TIMEOUT_MS = 300_000;
 const DEFAULT_CLI_MODEL = GrokModels[0]?.apiModelId ?? 'grok-composer-2.5-fast';
@@ -96,9 +97,55 @@ export class GrokBuildProvider implements Provider {
 
     const cliModel = this.resolveCliModel(request.model);
     const grokSessionId = randomUUID();
+    const grokHome = getKoryphaiosGrokHome();
+    const baseEnv: NodeJS.ProcessEnv = { ...process.env, HOME: join(grokHome, '..') };
+    const leaderSocket = join(tmpdir(), 'koryphaios-grok-leader.sock');
+    const bridge = getCliBridge('grok');
+    const mcpServers = bridge?.buildMcpConfig({
+      provider: 'grok',
+      role: request.harnessRole ?? 'manager',
+      sandbox: request.sandbox,
+      workingDirectory: request.workingDirectory?.trim() || process.cwd(),
+      sessionId: request.sessionId,
+      systemPrompt: request.systemPrompt,
+      tools: request.tools ?? [],
+      promptManifestHash: request.promptManifestHash,
+      taskContractHash: request.taskContractHash,
+    });
+    if (mcpServers?.length) {
+      const server = mcpServers[0];
+      const envArgs = Object.entries(server.env ?? {}).flatMap(([key, value]) => [
+        '-e',
+        `${key}=${value}`,
+      ]);
+      const configured = spawnSync(
+        bin,
+        [
+          'mcp',
+          'add',
+          '--leader-socket',
+          leaderSocket,
+          ...envArgs,
+          server.name,
+          '--',
+          server.command,
+          ...server.args,
+        ],
+        { cwd: request.workingDirectory?.trim() || tmpdir(), env: baseEnv, timeout: 5_000 },
+      );
+      if (configured.status !== 0) {
+        yield {
+          type: 'error',
+          error: 'Grok Build could not install the isolated Koryphaios MCP bridge for this turn.',
+        };
+        return;
+      }
+    }
+    const promptJson = hasImageContent(request.messages)
+      ? buildGrokPromptJson(request.systemPrompt, request.messages)
+      : null;
     const args = [
-      '-p',
-      prompt,
+      ...(promptJson ? ['--prompt-json', promptJson] : ['-p', prompt]),
       '--model',
       cliModel,
       // streaming-json streams live 'thought' (reasoning) + 'text' tokens as
@@ -109,10 +156,13 @@ export class GrokBuildProvider implements Provider {
       'streaming-json',
       '--no-alt-screen',
       // Headless: never block on an interactive tool-approval prompt.
-      ...(request.harnessRole === 'critic' ? ['--permission-mode', 'plan'] : ['--always-approve']),
+      ...(request.harnessRole === 'critic' || (request.sandbox && (!request.sandbox.allowEdits || !request.sandbox.allowShell))
+        ? ['--permission-mode', 'plan']
+        : ['--always-approve']),
       // Delegation is Koryphaios's job (manager → workers → critic) — never let
       // the CLI spawn its own native subagents outside our orchestration/UI.
       '--no-subagents',
+      '--no-memory',
       // Run in the session's project directory when one is set so the CLI sees
       // the real workspace; fall back to a neutral temp dir otherwise.
       '--cwd',
@@ -128,7 +178,7 @@ export class GrokBuildProvider implements Provider {
       // and state. A dedicated Koryphaios leader socket keeps the two worlds
       // completely separate; Koryphaios must never touch the user's sessions.
       '--leader-socket',
-      join(tmpdir(), 'koryphaios-grok-leader.sock'),
+      leaderSocket,
     ];
 
     // Web search + web fetch are ON by default (the model runs them internally
@@ -164,14 +214,15 @@ export class GrokBuildProvider implements Provider {
     }
 
     const cwd = request.workingDirectory?.trim() || tmpdir();
-    const jail = request.sandbox ? buildSoftJail(process.env, [join(homedir(), '.grok')]) : null;
+    const jail = request.sandbox ? buildSoftJail(baseEnv, [grokHome]) : null;
     const wrapped = request.sandbox
-      ? wrapCommand(bin, args, { cwd, policy: request.sandbox })
+      ? wrapCommand(bin, args, { cwd, configDirs: [grokHome], policy: request.sandbox })
       : { command: bin, args };
+    const env = jail?.env ?? baseEnv;
     const child = spawn(wrapped.command, wrapped.args, {
       cwd,
       stdio: ['ignore', 'pipe', 'pipe'],
-      env: jail?.env ?? { ...process.env },
+      env,
     });
 
     const onAbort = () => {
@@ -544,7 +595,11 @@ function grokCliIdToDisplayName(cliId: string): string {
 function modelDefFromGrokCliId(cliId: string, isDefault = false): ModelDef {
   const existing = GrokModels.find((m) => m.apiModelId === cliId || m.id === cliId);
   if (existing) {
-    return isDefault ? { ...existing, name: `${existing.name} (default)` } : existing;
+    return {
+      ...existing,
+      name: isDefault ? `${existing.name} (default)` : existing.name,
+      supportsAttachments: true,
+    };
   }
 
   const isFast = /fast|mini|flash/i.test(cliId);
@@ -559,7 +614,7 @@ function modelDefFromGrokCliId(cliId: string, isDefault = false): ModelDef {
     contextWindow: 256_000,
     maxOutputTokens: 50_000,
     canReason: isBuild || isReasoning || /composer/i.test(cliId),
-    supportsAttachments: false,
+    supportsAttachments: true,
     supportsStreaming: true,
     tier: isReasoning ? 'reasoning' : isFast ? 'fast' : isBuild ? 'flagship' : 'fast',
   };
@@ -708,7 +763,7 @@ export function parseGrokOutput(raw: string): {
 // with name, rawInput file paths, kind, status). We tail it so every file
 // read/write/edit and other tool run shows up in the app, live.
 
-const GROK_SESSIONS_DIR = join(homedir(), '.grok', 'sessions');
+const GROK_SESSIONS_DIR = join(getKoryphaiosGrokHome(), 'sessions');
 
 // grok encodes the cwd as a single path segment: %2F for '/', %2E for '.', etc.
 function encodeGrokCwd(cwd: string): string {
@@ -826,10 +881,7 @@ function buildPrompt(systemPrompt: string | undefined, messages: ProviderMessage
     tools: [],
   });
   const harnessNote = bridgeConfig?.systemInstructions?.[1] ?? HARNESS_SYSTEM_NOTE;
-  lines.push(
-    systemPrompt?.trim() ? `${systemPrompt.trim()}\n\n${harnessNote}` : harnessNote,
-    '',
-  );
+  lines.push(systemPrompt?.trim() ? `${systemPrompt.trim()}\n\n${harnessNote}` : harnessNote, '');
   const turns = messages.filter((m) => m.role !== 'system');
 
   // Single user turn → send its text verbatim after any system prompt.
@@ -856,8 +908,58 @@ function flattenContent(content: string | ProviderContentBlock[]): string {
         `[tool call: ${block.toolName ?? 'tool'} ${JSON.stringify(block.toolInput ?? {})}]`,
       );
     else if (block.type === 'tool_result') parts.push(`[tool result: ${block.toolOutput ?? ''}]`);
-    else if (block.type === 'image')
-      parts.push('[image attachment omitted — Grok Build harness is text-only]');
+    // Images use the CLI's native ACP --prompt-json transport and are omitted
+    // from the parallel text serialization to avoid duplicate placeholders.
   }
   return parts.join('\n');
+}
+
+/** Grok Build accepts native ACP content blocks through --prompt-json. Keep
+ *  conversation labels in text blocks and preserve image data as image blocks
+ *  instead of degrading it to a filesystem hint. */
+export function buildGrokPromptJson(
+  systemPrompt: string | undefined,
+  messages: ProviderMessage[],
+): string {
+  const blocks: Array<Record<string, string>> = [];
+  const grokBridge = getCliBridge('grok');
+  const bridgeConfig = grokBridge?.buildAgentConfig({
+    provider: 'grok',
+    role: 'manager',
+    sandbox: undefined,
+    workingDirectory: process.cwd(),
+    systemPrompt: systemPrompt ?? '',
+    tools: [],
+  });
+  const harnessNote = bridgeConfig?.systemInstructions?.[1] ?? HARNESS_SYSTEM_NOTE;
+  blocks.push({
+    type: 'text',
+    text: systemPrompt?.trim() ? `${systemPrompt.trim()}\n\n${harnessNote}` : harnessNote,
+  });
+  for (const message of messages) {
+    if (message.role === 'system') continue;
+    const label =
+      message.role === 'assistant' ? 'Assistant' : message.role === 'tool' ? 'Tool result' : 'User';
+    if (typeof message.content === 'string') {
+      if (message.content.trim())
+        blocks.push({ type: 'text', text: `${label}: ${message.content}` });
+      continue;
+    }
+    let needsLabel = true;
+    for (const block of message.content) {
+      if (block.type === 'image' && block.imageData) {
+        blocks.push({
+          type: 'image',
+          data: block.imageData,
+          mimeType: block.imageMimeType ?? 'image/png',
+        });
+        continue;
+      }
+      const text = flattenContent([block]);
+      if (!text.trim()) continue;
+      blocks.push({ type: 'text', text: `${needsLabel ? `${label}: ` : ''}${text}` });
+      needsLabel = false;
+    }
+  }
+  return JSON.stringify(blocks);
 }

@@ -2,7 +2,7 @@
 // Automatically figures out what files to include based on imports, errors, recent changes
 
 import { readFileSync, existsSync } from 'fs';
-import { join, dirname, extname, relative } from 'path';
+import { join, dirname, extname, relative, isAbsolute } from 'path';
 import { PROJECT_ROOT } from '../runtime/paths';
 import { serverLog } from '../logger';
 import { execSync } from 'child_process';
@@ -247,7 +247,7 @@ export class SmartContextDetector {
   }
 
   private resolvePath(file: string, basePath: string): string | null {
-    if (file.startsWith('/')) {
+    if (isAbsolute(file)) {
       return existsSync(file) ? file : null;
     }
 

@@ -14,9 +14,15 @@
 
 import { koryLog } from '../logger';
 import { gitMutex } from './git-mutex';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, relative, resolve } from 'node:path';
+import { createHash } from 'node:crypto';
+
+export interface CheckpointFileChange {
+  path: string;
+  operation: 'create' | 'edit' | 'delete';
+}
 
 export interface GhostCommitMetadata {
   /** Unique ID for this ghost commit */
@@ -24,7 +30,10 @@ export interface GhostCommitMetadata {
   /** Model name used (e.g., "claude-sonnet-4-5") */
   model?: string;
   /** The prompt/task that generated these changes */
+  /** @deprecated New checkpoints retain only promptHash. */
   prompt?: string;
+  /** SHA-256 of the complete prompt/task. */
+  promptHash?: string;
   /** Cost in USD for this operation */
   cost?: number;
   /** Tokens consumed */
@@ -36,7 +45,9 @@ export interface GhostCommitMetadata {
   /** The ID of the last session message when this checkpoint was created */
   messageId?: string;
   /** The type of checkpoint (e.g., 'turn_end', 'user_manual') */
-  checkpointType?: 'turn_end' | 'user_manual' | 'auto_save';
+  checkpointType?: 'turn_end' | 'user_manual' | 'auto_save' | 'recovery_backup';
+  /** Files owned by this session at this checkpoint, stored repo-relative. */
+  changedFiles?: CheckpointFileChange[];
   /** Timestamp */
   timestamp: number;
 }
@@ -79,6 +90,7 @@ export class ShadowLogger {
   private readonly GHOST_PREFIX = '[GHOST]';
   private readonly NOTES_REF = 'refs/notes/shadow-logger';
   private readonly CHECKPOINT_REF_ROOT = 'refs/kory/checkpoints';
+  private readonly CURSOR_REF_ROOT = 'refs/kory/cursors';
 
   constructor(protected workingDirectory: string) {}
 
@@ -125,8 +137,13 @@ export class ShadowLogger {
       return null;
     }
     const parent = parentResult.output.trim();
+    const { prompt, changedFiles, ...metadataWithoutPrompt } = metadata ?? {};
     const checkpointMetadata: GhostCommitMetadata = {
-      ...metadata,
+      ...metadataWithoutPrompt,
+      promptHash: prompt
+        ? createHash('sha256').update(prompt).digest('hex')
+        : metadataWithoutPrompt.promptHash,
+      changedFiles: this.normalizeChangedFiles(changedFiles),
       id: this.generateId(),
       timestamp: Date.now(),
     };
@@ -177,10 +194,41 @@ export class ShadowLogger {
       koryLog.error({ checkpointRef, output: refResult.output }, 'Failed to retain checkpoint ref');
       return null;
     }
+    await this.setCursor(metadata?.agentId, ghostHash);
 
     koryLog.info({ ghostHash, checkpointRef, message }, 'Checkpoint created');
 
     return ghostHash;
+  }
+
+  async getCursor(agentId: string): Promise<string | null> {
+    const result = await this.runGit([
+      'rev-parse',
+      '--verify',
+      `${this.CURSOR_REF_ROOT}/${this.sanitizeRefPart(agentId)}`,
+    ]);
+    return result.success ? result.output.trim() : null;
+  }
+
+  async setCursor(agentId: string | undefined, hash: string): Promise<boolean> {
+    if (!agentId) return false;
+    const result = await this.runGit([
+      'update-ref',
+      `${this.CURSOR_REF_ROOT}/${this.sanitizeRefPart(agentId)}`,
+      hash,
+    ]);
+    return result.success;
+  }
+
+  async isOwnedCheckpoint(hash: string, agentId: string): Promise<boolean> {
+    const metadata = await this.getMetadata(hash);
+    if (metadata?.agentId !== agentId) return false;
+    const result = await this.runGit([
+      'for-each-ref',
+      '--format=%(objectname)',
+      `${this.CHECKPOINT_REF_ROOT}/${this.sanitizeRefPart(agentId)}`,
+    ]);
+    return result.success && result.output.split('\n').includes(hash);
   }
 
   /**
@@ -255,7 +303,6 @@ export class ShadowLogger {
           messageId: metadata?.messageId,
           checkpointType: metadata?.checkpointType,
         });
-        if (entries.length >= limit) return entries;
       }
     }
 
@@ -301,7 +348,7 @@ export class ShadowLogger {
       if (entries.length >= limit) break;
     }
 
-    return entries;
+    return entries.sort((a, b) => b.timestamp - a.timestamp).slice(0, limit);
   }
 
   /**
@@ -363,6 +410,7 @@ export class ShadowLogger {
    */
   async recover(
     ghostHash: string,
+    options: { agentId: string; changedFiles: CheckpointFileChange[] },
   ): Promise<{ success: boolean; message: string; previousHash?: string }> {
     // Verify the ghost commit exists
     const ghost = await this.getGhostCommit(ghostHash);
@@ -370,41 +418,69 @@ export class ShadowLogger {
       return { success: false, message: 'Ghost commit not found' };
     }
 
-    // Get current HEAD before recovery (for undo capability)
-    const currentResult = await this.runGit(['rev-parse', 'HEAD']);
-    const previousHash = currentResult.success ? currentResult.output.trim() : undefined;
+    if (!(await this.isOwnedCheckpoint(ghostHash, options.agentId))) {
+      return { success: false, message: 'Checkpoint does not belong to this session' };
+    }
+    const previousCursor = (await this.getCursor(options.agentId)) ?? undefined;
+    const paths = (this.normalizeChangedFiles(options.changedFiles) ?? []).map(
+      (change) => change.path,
+    );
+    if (paths.length === 0) {
+      await this.setCursor(options.agentId, ghostHash);
+      return {
+        success: true,
+        message: `Recovered conversation checkpoint: ${ghost.message.slice(0, 50)}`,
+        previousHash: previousCursor,
+      };
+    }
 
     // Create a recovery point before we reset (safety net)
-    if (previousHash) {
-      await this.createGhostCommit('Auto-save before recovery', {
+    let recoveryBackup: string | undefined;
+    if (previousCursor) {
+      recoveryBackup =
+        (await this.createGhostCommit('Auto-save before recovery', {
+        agentId: options.agentId,
         prompt: 'Automatic checkpoint before time travel recovery',
-      });
+        changedFiles: options.changedFiles,
+        checkpointType: 'recovery_backup',
+        })) ?? undefined;
     }
 
-    const resetResult = await this.runGit([
-      'restore',
-      '--source',
-      ghostHash,
-      '--staged',
-      '--worktree',
-      '--',
-      '.',
-    ]);
-
-    if (!resetResult.success) {
-      koryLog.error({ ghostHash, output: resetResult.output }, 'Recovery failed');
-      return { success: false, message: 'Reset failed: ' + resetResult.output };
+    const existingAtTarget: string[] = [];
+    const absentAtTarget: string[] = [];
+    for (const path of paths) {
+      const exists = await this.runGit(['cat-file', '-e', `${ghostHash}:${path}`]);
+      (exists.success ? existingAtTarget : absentAtTarget).push(path);
     }
+    if (existingAtTarget.length > 0) {
+      const restoreResult = await this.runGit([
+        'restore',
+        '--source',
+        ghostHash,
+        '--staged',
+        '--worktree',
+        '--',
+        ...existingAtTarget,
+      ]);
+      if (!restoreResult.success) {
+        koryLog.error({ ghostHash, output: restoreResult.output }, 'Recovery failed');
+        return { success: false, message: 'Restore failed: ' + restoreResult.output };
+      }
+    }
+    for (const path of absentAtTarget) {
+      await this.runGit(['rm', '-f', '--ignore-unmatch', '--', path]);
+      const absolute = resolve(this.workingDirectory, path);
+      const rel = relative(resolve(this.workingDirectory), absolute);
+      if (rel && !rel.startsWith('..')) rmSync(absolute, { force: true });
+    }
+    await this.setCursor(options.agentId, ghostHash);
 
-    // Clean any untracked files that might remain
-    await this.runGit(['clean', '-fd']);
-
-    koryLog.info({ ghostHash, previousHash }, 'Recovered checkpoint without moving HEAD');
+    koryLog.info({ ghostHash, previousHash: recoveryBackup }, 'Recovered checkpoint without moving HEAD');
 
     return {
       success: true,
       message: `Recovered to state: ${ghost.message.slice(0, 50)}`,
-      previousHash,
+      previousHash: recoveryBackup,
     };
   }
 
@@ -498,6 +574,21 @@ export class ShadowLogger {
       .replace(/\.\.+/g, '.')
       .slice(0, 80);
     return sanitized || 'unscoped';
+  }
+
+  private normalizeChangedFiles(
+    changes?: CheckpointFileChange[],
+  ): CheckpointFileChange[] | undefined {
+    if (!changes) return undefined;
+    const root = resolve(this.workingDirectory);
+    const normalized = new Map<string, CheckpointFileChange['operation']>();
+    for (const change of changes) {
+      const absolute = resolve(root, change.path);
+      const path = relative(root, absolute).replaceAll('\\', '/');
+      if (!path || path === '..' || path.startsWith('../')) continue;
+      normalized.set(path, change.operation);
+    }
+    return Array.from(normalized, ([path, operation]) => ({ path, operation }));
   }
 
   private formatDescription(subject: string, metadata?: GhostCommitMetadata): string {

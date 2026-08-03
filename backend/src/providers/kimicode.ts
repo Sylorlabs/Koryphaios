@@ -2,7 +2,7 @@ import OpenAI from 'openai';
 import type { ProviderConfig } from '@koryphaios/shared';
 import { createUsageInterceptingFetch } from '../credit-accountant';
 import { OpenAIProvider } from './openai';
-import type { ProviderEvent, StreamRequest } from './types';
+import type { ProviderEvent, StreamRequest, ProviderToolDef } from './types';
 import { discoverCliAccounts, type DiscoveredCliAccount } from './cli-accounts';
 import {
   createKimiCodeCliMarker,
@@ -13,8 +13,9 @@ import {
   loadKimiCodeAuthState,
   resolveKimiCodeAccessToken,
 } from './kimicode-auth';
-import { getCliBridge } from './cli-bridges';
+import { getCliBridge, KORY_TOOL_WHITELIST, KORY_CRITIC_TOOL_WHITELIST } from './cli-bridges';
 import { KORY_HARNESS_NOTE } from './cli-bridges';
+import { KORY_TOOLS, toolsForRole, type KoryToolDef } from './kory-mcp-bridge';
 
 const KIMICODE_BASE_URL = 'https://api.kimi.com/coding/v1';
 
@@ -98,6 +99,16 @@ export class KimiCodeProvider extends OpenAIProvider {
       systemPrompt: request.systemPrompt ?? '',
       tools: request.tools ?? [],
     });
+    // Inject the full kory__ tool catalog as function-calling tools so the
+    // KimiCode model can call them via the standard OpenAI tool-calling
+    // protocol. The tools are filtered by role (critic gets read-only).
+    const role = request.harnessRole ?? 'manager';
+    const koryTools = toolsForRole(role);
+    const koryProviderTools: ProviderToolDef[] = koryTools.map((t: KoryToolDef) => ({
+      name: t.name,
+      description: t.description,
+      inputSchema: t.inputSchema,
+    }));
     const augmentedRequest: StreamRequest = {
       ...request,
       systemPrompt: bridgeConfig?.systemInstructions?.length
@@ -105,6 +116,7 @@ export class KimiCodeProvider extends OpenAIProvider {
         : request.systemPrompt?.trim()
           ? `${request.systemPrompt}\n\n${KORY_HARNESS_NOTE}`
           : KORY_HARNESS_NOTE,
+      tools: koryProviderTools,
     };
     yield* super.streamResponse(augmentedRequest);
   }

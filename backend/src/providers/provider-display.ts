@@ -164,7 +164,7 @@ export const PROVIDER_DISPLAY: Partial<Record<ProviderName, ProviderDisplayMeta>
     iconPath: '/provider-icons/lobehub/poe-color.svg',
     deployment: 'api',
     description:
-      'Poe API gateway. Paste an API key from poe.com/api/keys; Koryphaios sends it only to https://api.poe.com/v1.',
+      'Poe API gateway. Paste an API key from poe.com/api_key; Koryphaios sends it only to https://api.poe.com/v1.',
   },
 };
 

@@ -17,11 +17,11 @@ import {
 } from '../../agent-settings';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { requireLocalRouteAuth } from '../../auth/local-route-auth';
 import {
   activateSkill,
   applyDefaultUpdate,
   compareSkillRevisions,
+  createSkillDraft,
   listSkills,
   resolveSkills,
   saveSkillDraft,
@@ -40,12 +40,50 @@ import {
   listSkillEvaluationRuns,
   recordSkillEvaluationRun,
 } from '../../kory/skill-evaluations';
+import {
+  advanceWorkflow,
+  listWorkflowDefinitions,
+  listWorkflowRuns,
+  startWorkflow,
+  stopWorkflow,
+} from '../../kory/workflows';
 
 export const agentSettingsRoutes = new Elysia({ prefix: '/api/agent' })
+  .get('/workflows', ({ request, query, set }) => {
+    if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
+    const root = getRequestProjectRoot(request);
+    return { ok: true, data: { definitions: listWorkflowDefinitions(), runs: listWorkflowRuns(root, query.sessionId) } };
+  }, { query: t.Object({ sessionId: t.Optional(t.String()) }) })
+  .post('/workflows/start', ({ request, body, set }) => {
+    if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
+    try {
+      return { ok: true, data: startWorkflow(getRequestProjectRoot(request), { ...body, requestedBy: 'human' }) };
+    } catch (error: any) {
+      set.status = 400;
+      return { ok: false, error: error?.message ?? 'Unable to start workflow' };
+    }
+  }, { body: t.Object({ workflowId: t.String(), sessionId: t.String(), task: t.String({ minLength: 1 }), goalId: t.Optional(t.String()) }) })
+  .post('/workflows/:id/advance', ({ request, params, body, set }) => {
+    if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
+    try {
+      return { ok: true, data: advanceWorkflow(getRequestProjectRoot(request), params.id, body) };
+    } catch (error: any) {
+      set.status = 400;
+      return { ok: false, error: error?.message ?? 'Unable to advance workflow' };
+    }
+  }, { body: t.Object({ evidence: t.String(), block: t.Optional(t.Boolean()) }) })
+  .post('/workflows/:id/stop', ({ request, params, set }) => {
+    if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
+    try {
+      return { ok: true, data: stopWorkflow(getRequestProjectRoot(request), params.id) };
+    } catch (error: any) {
+      set.status = 400;
+      return { ok: false, error: error?.message ?? 'Unable to stop workflow' };
+    }
+  })
   .post(
     '/delegate',
-    async ({ request, body, set }) => {
-      if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
+    async ({ body, set }) => {
       const { sessions, kory } = getContext();
       if (!(await sessions.get(body.sessionId))) {
         set.status = 404;
@@ -82,8 +120,7 @@ export const agentSettingsRoutes = new Elysia({ prefix: '/api/agent' })
   )
   .get(
     '/skills/evaluations',
-    ({ request, query, set }) => {
-      if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
+    ({ request, query }) => {
       return {
         ok: true,
         data: listSkillEvaluationRuns(getRequestProjectRoot(request), query.skill),
@@ -94,7 +131,6 @@ export const agentSettingsRoutes = new Elysia({ prefix: '/api/agent' })
   .post(
     '/skills/evaluations',
     ({ request, body, set }) => {
-      if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
       try {
         const root = getRequestProjectRoot(request);
         const run = recordSkillEvaluationRun(root, body);
@@ -155,7 +191,6 @@ export const agentSettingsRoutes = new Elysia({ prefix: '/api/agent' })
   .get(
     '/skills/:name/evaluation-card',
     ({ request, params: { name }, query, set }) => {
-      if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
       const skill = listSkills(getRequestProjectRoot(request)).find(
         (item) => item.name === name && item.source === query.source && item.state === query.state,
       );
@@ -176,14 +211,12 @@ export const agentSettingsRoutes = new Elysia({ prefix: '/api/agent' })
       }),
     },
   )
-  .get('/skills/qualifications', ({ request, set }) => {
-    if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
+  .get('/skills/qualifications', ({ request }) => {
     return { ok: true, data: listHarnessQualifications(getRequestProjectRoot(request)) };
   })
   .post(
     '/skills/qualifications',
     ({ request, body, set }) => {
-      if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
       try {
         return { ok: true, data: saveHarnessQualification(getRequestProjectRoot(request), body) };
       } catch (error: any) {
@@ -208,14 +241,41 @@ export const agentSettingsRoutes = new Elysia({ prefix: '/api/agent' })
       }),
     },
   )
-  .get('/skills', ({ request, set }) => {
-    if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
+  .get('/skills', ({ request }) => {
     return { ok: true, data: listSkills(getRequestProjectRoot(request)) };
   })
   .post(
-    '/skills/validate',
+    '/skills',
     ({ request, body, set }) => {
-      if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
+      try {
+        const root = getRequestProjectRoot(request);
+        enforceSkillLearningPolicy(loadAgentSettings(root).skillLearningMode, 'human', 'save-draft');
+        return {
+          ok: true,
+          data: createSkillDraft(root, body.source as SkillSource, body),
+        };
+      } catch (error: any) {
+        set.status = 400;
+        return { ok: false, error: error?.message ?? 'Failed to create skill draft' };
+      }
+    },
+    {
+      body: t.Object({
+        source: t.Union([t.Literal('personal'), t.Literal('project')]),
+        name: t.String({ minLength: 2, maxLength: 64 }),
+        description: t.String({ minLength: 12, maxLength: 500 }),
+        instructions: t.String({ minLength: 40, maxLength: 20_000 }),
+        domains: t.Optional(t.Array(t.String({ maxLength: 80 }), { maxItems: 20 })),
+        activation: t.Optional(t.Array(t.String({ maxLength: 160 }), { maxItems: 20 })),
+        shouldTrigger: t.Array(t.String({ maxLength: 500 }), { minItems: 2, maxItems: 20 }),
+        shouldNotTrigger: t.Array(t.String({ maxLength: 500 }), { minItems: 2, maxItems: 20 }),
+        evidence: t.Optional(t.Array(t.String({ maxLength: 200 }), { maxItems: 20 })),
+      }),
+    },
+  )
+  .post(
+    '/skills/validate',
+    ({ body }) => {
       return { ok: true, data: validateSkillContent(body.content) };
     },
     { body: t.Object({ content: t.String() }) },
@@ -223,7 +283,6 @@ export const agentSettingsRoutes = new Elysia({ prefix: '/api/agent' })
   .put(
     '/skills/:name/draft',
     ({ request, params: { name }, body, set }) => {
-      if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
       try {
         const root = getRequestProjectRoot(request);
         enforceSkillLearningPolicy(
@@ -256,7 +315,6 @@ export const agentSettingsRoutes = new Elysia({ prefix: '/api/agent' })
   .post(
     '/skills/:name/test',
     ({ request, params: { name }, body, set }) => {
-      if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
       const skill = listSkills(getRequestProjectRoot(request)).find(
         (item) =>
           item.name === name &&
@@ -279,7 +337,6 @@ export const agentSettingsRoutes = new Elysia({ prefix: '/api/agent' })
   .post(
     '/skills/:name/activate',
     ({ request, params: { name }, body, set }) => {
-      if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
       try {
         const root = getRequestProjectRoot(request);
         const draft = listSkills(root).find(
@@ -313,7 +370,6 @@ export const agentSettingsRoutes = new Elysia({ prefix: '/api/agent' })
   .post(
     '/skills/:name/update-default',
     ({ request, params: { name }, body, set }) => {
-      if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
       try {
         return {
           ok: true,
@@ -332,8 +388,7 @@ export const agentSettingsRoutes = new Elysia({ prefix: '/api/agent' })
   )
   .post(
     '/skills/resolve',
-    ({ request, body, set }) => {
-      if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
+    ({ request, body }) => {
       const contract = createTaskContract(body.prompt);
       return {
         ok: true,
@@ -365,7 +420,6 @@ export const agentSettingsRoutes = new Elysia({ prefix: '/api/agent' })
   .get(
     '/skills/:name/compare',
     ({ request, params: { name }, query, set }) => {
-      if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
       const revisions = listSkills(getRequestProjectRoot(request)).filter(
         (item) => item.name === name && item.source === query.source,
       );
@@ -379,8 +433,7 @@ export const agentSettingsRoutes = new Elysia({ prefix: '/api/agent' })
     },
     { query: t.Object({ source: t.Union([t.Literal('personal'), t.Literal('project')]) }) },
   )
-  .get('/threads/:sessionId', async ({ request, params: { sessionId }, set }) => {
-    if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
+  .get('/threads/:sessionId', async ({ params: { sessionId }, set }) => {
     const { sessions, kory } = getContext();
     const session = await sessions.get(sessionId);
     if (!session) {
@@ -391,8 +444,7 @@ export const agentSettingsRoutes = new Elysia({ prefix: '/api/agent' })
   })
   .get(
     '/:agentId/thread',
-    async ({ request, params: { agentId }, query, set }) => {
-      if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
+    async ({ params: { agentId }, query, set }) => {
       const sessionId = String(query.sessionId ?? '');
       if (!sessionId) {
         set.status = 400;
@@ -414,8 +466,7 @@ export const agentSettingsRoutes = new Elysia({ prefix: '/api/agent' })
   )
   .post(
     '/:agentId/message',
-    async ({ request, params: { agentId }, body, set }) => {
-      if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
+    async ({ params: { agentId }, body, set }) => {
       const { sessions, kory } = getContext();
       const session = await sessions.get(body.sessionId);
       if (!session) {
@@ -443,14 +494,12 @@ export const agentSettingsRoutes = new Elysia({ prefix: '/api/agent' })
       }),
     },
   )
-  .post('/:agentId/cancel', async ({ request, params: { agentId }, set }) => {
-    if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
+  .post('/:agentId/cancel', async ({ params: { agentId } }) => {
     const { kory } = getContext();
     kory.cancelWorker(agentId);
     return { ok: true, message: 'Agent cancelled' };
   })
-  .get('/settings', async ({ request, set }) => {
-    if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
+  .get('/settings', async ({ request }) => {
     const settings = loadAgentSettings(getRequestProjectRoot(request));
     return {
       ok: true,
@@ -459,7 +508,6 @@ export const agentSettingsRoutes = new Elysia({ prefix: '/api/agent' })
     };
   })
   .put('/settings', async ({ request, body, set }) => {
-    if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
     try {
       const root = getRequestProjectRoot(request);
       const currentSettings = loadAgentSettings(root);
@@ -475,8 +523,7 @@ export const agentSettingsRoutes = new Elysia({ prefix: '/api/agent' })
       return { ok: false, error: err.message ?? 'Failed to save agent settings' };
     }
   })
-  .post('/settings/reset', async ({ request, set }) => {
-    if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
+  .post('/settings/reset', async ({ request }) => {
     const settings = resetAgentSettings(getRequestProjectRoot(request));
     return {
       ok: true,
@@ -484,15 +531,13 @@ export const agentSettingsRoutes = new Elysia({ prefix: '/api/agent' })
       message: 'Agent settings reset to defaults. Rules still enforced.',
     };
   })
-  .get('/preferences', async ({ request, set }) => {
-    if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
+  .get('/preferences', async ({ request }) => {
     const prefs = readPreferences(getRequestProjectRoot(request));
     return { ok: true, data: prefs };
   })
   .put(
     '/preferences',
     async ({ request, body, set }) => {
-      if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
       try {
         writePreferences(getRequestProjectRoot(request), body.content);
         return { ok: true, message: 'Preferences updated. Critic will enforce new rules.' };
@@ -507,8 +552,7 @@ export const agentSettingsRoutes = new Elysia({ prefix: '/api/agent' })
       }),
     },
   )
-  .post('/preferences/init', async ({ request, set }) => {
-    if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
+  .post('/preferences/init', async ({ request }) => {
     const prefs = initializePreferences(getRequestProjectRoot(request));
     return {
       ok: true,
@@ -516,8 +560,7 @@ export const agentSettingsRoutes = new Elysia({ prefix: '/api/agent' })
       message: 'Preferences initialized with comprehensive template.',
     };
   })
-  .get('/context', async ({ request, set }) => {
-    if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
+  .get('/context', async ({ request }) => {
     const root = getRequestProjectRoot(request);
     const settings = loadAgentSettings(root);
     const context = assembleAgentContext(root, settings);
@@ -526,7 +569,6 @@ export const agentSettingsRoutes = new Elysia({ prefix: '/api/agent' })
   .post(
     '/enforce',
     async ({ request, body, set }) => {
-      if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
       try {
         const root = getRequestProjectRoot(request);
         const settings = loadAgentSettings(root);
@@ -553,7 +595,6 @@ export const agentSettingsRoutes = new Elysia({ prefix: '/api/agent' })
   .post(
     '/critic-review',
     async ({ request, body, set }) => {
-      if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
       try {
         const root = getRequestProjectRoot(request);
         const settings = loadAgentSettings(root);
@@ -586,13 +627,11 @@ export const agentSettingsRoutes = new Elysia({ prefix: '/api/agent' })
       }),
     },
   )
-  .get('/stats', async ({ request, set }) => {
-    if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
+  .get('/stats', async ({ request }) => {
     const stats = getAgentSettingsStats(getRequestProjectRoot(request));
     return { ok: true, data: stats };
   })
-  .get('/defaults', async ({ request, set }) => {
-    if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
+  .get('/defaults', async () => {
     return {
       ok: true,
       data: DEFAULT_AGENT_SETTINGS,

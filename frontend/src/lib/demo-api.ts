@@ -12,6 +12,16 @@ import type { ChangeSummary } from '@koryphaios/shared';
 
 const now = Date.now();
 
+function demoDailyUsage(total: number) {
+  const shape = [0.36, 0.48, 0.22, 0.66, 0.54, 0.78, 0.42, 0.6, 0.86, 0.51, 0.72, 0.91, 0.57, 0.69];
+  const today = new Date(now);
+  const endDay = Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate());
+  return shape.map((weight, index) => ({
+    date: new Date(endDay - (shape.length - index - 1) * 86_400_000).toISOString().slice(0, 10),
+    tokens: Math.round(total * weight),
+  }));
+}
+
 // ─── In-memory session table ────────────────────────────────────────────────
 
 const demoSessions = new Map<string, Session>();
@@ -33,26 +43,42 @@ let messageCounter = 0;
 type VirtualFile = { original: string | null; content: string | null; staged: boolean };
 
 const virtualFiles = new Map<string, VirtualFile>([
-  ['README.md', {
-    original: '# Starter project\n\nA small revenue dashboard used by the Koryphaios browser trial.\n',
-    content: '# Starter project\n\nA small revenue dashboard used by the Koryphaios browser trial.\n',
-    staged: false,
-  }],
-  ['src/app.ts', {
-    original: "export const appName = 'Starter project';\n",
-    content: "export const appName = 'Starter project';\n",
-    staged: false,
-  }],
-  ['src/lib/formatCurrency.ts', {
-    original: "export const formatCurrency = (value: number) => `$${value.toFixed(2)}`;\n",
-    content: "export const formatCurrency = (value: number) => `$${value.toFixed(2)}`;\n",
-    staged: false,
-  }],
-  ['tests/formatCurrency.test.ts', {
-    original: "import { formatCurrency } from '../src/lib/formatCurrency';\n\nexport const smokeTest = () => formatCurrency(12) === '$12.00';\n",
-    content: "import { formatCurrency } from '../src/lib/formatCurrency';\n\nexport const smokeTest = () => formatCurrency(12) === '$12.00';\n",
-    staged: false,
-  }],
+  [
+    'README.md',
+    {
+      original:
+        '# Starter project\n\nA small revenue dashboard used by the Koryphaios browser trial.\n',
+      content:
+        '# Starter project\n\nA small revenue dashboard used by the Koryphaios browser trial.\n',
+      staged: false,
+    },
+  ],
+  [
+    'src/app.ts',
+    {
+      original: "export const appName = 'Starter project';\n",
+      content: "export const appName = 'Starter project';\n",
+      staged: false,
+    },
+  ],
+  [
+    'src/lib/formatCurrency.ts',
+    {
+      original: 'export const formatCurrency = (value: number) => `$${value.toFixed(2)}`;\n',
+      content: 'export const formatCurrency = (value: number) => `$${value.toFixed(2)}`;\n',
+      staged: false,
+    },
+  ],
+  [
+    'tests/formatCurrency.test.ts',
+    {
+      original:
+        "import { formatCurrency } from '../src/lib/formatCurrency';\n\nexport const smokeTest = () => formatCurrency(12) === '$12.00';\n",
+      content:
+        "import { formatCurrency } from '../src/lib/formatCurrency';\n\nexport const smokeTest = () => formatCurrency(12) === '$12.00';\n",
+      staged: false,
+    },
+  ],
 ]);
 
 let virtualBranch = 'trial/main';
@@ -83,15 +109,19 @@ function demoDiff(path: string): string {
   if (!file || file.original === file.content) return '';
   const before = file.original?.trimEnd().split('\n') ?? [];
   const after = file.content?.trimEnd().split('\n') ?? [];
-  return [
-    `diff --git a/${path} b/${path}`,
-    file.original === null ? 'new file mode 100644' : '',
-    `--- ${file.original === null ? '/dev/null' : `a/${path}`}`,
-    `+++ ${file.content === null ? '/dev/null' : `b/${path}`}`,
-    '@@ browser-trial simulated diff @@',
-    ...before.map((line) => `-${line}`),
-    ...after.map((line) => `+${line}`),
-  ].filter(Boolean).join('\n') + '\n';
+  return (
+    [
+      `diff --git a/${path} b/${path}`,
+      file.original === null ? 'new file mode 100644' : '',
+      `--- ${file.original === null ? '/dev/null' : `a/${path}`}`,
+      `+++ ${file.content === null ? '/dev/null' : `b/${path}`}`,
+      '@@ browser-trial simulated diff @@',
+      ...before.map((line) => `-${line}`),
+      ...after.map((line) => `+${line}`),
+    ]
+      .filter(Boolean)
+      .join('\n') + '\n'
+  );
 }
 
 function reviewChanges(): ChangeSummary[] {
@@ -130,7 +160,7 @@ export function applyDemoRunArtifacts(prompt: string, sessionId?: string): Chang
     content: [
       "import { trialPlan, reviewChecklist } from '../src/lib/trialPlan';",
       '',
-      "export const trialPlanTest = () => trialPlan.length > 0 && reviewChecklist.length === 3;",
+      'export const trialPlanTest = () => trialPlan.length > 0 && reviewChecklist.length === 3;',
       '',
     ].join('\n'),
   });
@@ -175,16 +205,40 @@ let goalCounter = 0;
 function goalItems(): GoalChecklistItem[] {
   const timestamp = Date.now();
   return [
-    { id: `trial-check-${goalCounter}-1`, title: 'Inspect the virtual workspace', status: 'running', order: 0, dependsOn: [], evidence: [], startedAt: timestamp },
-    { id: `trial-check-${goalCounter}-2`, title: 'Review the proposed diff', status: 'pending', order: 1, dependsOn: [], evidence: [] },
-    { id: `trial-check-${goalCounter}-3`, title: 'Record test evidence', status: 'pending', order: 2, dependsOn: [], evidence: [] },
+    {
+      id: `trial-check-${goalCounter}-1`,
+      title: 'Inspect the virtual workspace',
+      status: 'running',
+      order: 0,
+      dependsOn: [],
+      evidence: [],
+      startedAt: timestamp,
+    },
+    {
+      id: `trial-check-${goalCounter}-2`,
+      title: 'Review the proposed diff',
+      status: 'pending',
+      order: 1,
+      dependsOn: [],
+      evidence: [],
+    },
+    {
+      id: `trial-check-${goalCounter}-3`,
+      title: 'Record test evidence',
+      status: 'pending',
+      order: 2,
+      dependsOn: [],
+      evidence: [],
+    },
   ];
 }
 
 function createDemoGoal(body: Record<string, unknown>): Goal {
   const createdAt = Date.now();
   const id = `trial-goal-${++goalCounter}`;
-  const scope = (body.scope === 'project' || body.scope === 'session' ? body.scope : 'workspace') as GoalScope;
+  const scope = (
+    body.scope === 'project' || body.scope === 'session' ? body.scope : 'workspace'
+  ) as GoalScope;
   const goal: Goal = {
     id,
     objective: typeof body.objective === 'string' ? body.objective : 'Improve the starter project',
@@ -196,7 +250,14 @@ function createDemoGoal(body: Record<string, unknown>): Goal {
     status: 'running',
     checklist: goalItems(),
     linkedSessionIds: typeof body.sessionId === 'string' ? [body.sessionId] : [],
-    activity: [{ id: `${id}-created`, type: 'created', message: 'Browser trial goal created with an inspectable checklist.', createdAt }],
+    activity: [
+      {
+        id: `${id}-created`,
+        type: 'created',
+        message: 'Browser trial goal created with an inspectable checklist.',
+        createdAt,
+      },
+    ],
     activeDurationMs: 0,
     activeStartedAt: createdAt,
     createdAt,
@@ -327,7 +388,7 @@ let demoAgentSettings = {
   contextKeepRecentTurns: 3,
   contextPruneMinChars: 600,
   contextSelfAwareness: true,
-  reasoningExpandedByDefault: true,
+  reasoningExpandedByDefault: false,
 };
 
 const AGENT_PREFERENCES = {
@@ -341,26 +402,9 @@ const AGENT_PREFERENCES = {
 `,
 };
 
-const MODE_CONFIG = {
-  hideGitPanel: false,
-  autoCommit: false,
-  simplifiedPrompts: false,
-  maxWorkers: 8,
-  requireConfirmations: true,
-  toolAccess: 'full',
-  explanations: 'minimal',
-  enableShadowLoggerUI: true,
-  enableWorktrees: true,
-  enableCriticGate: true,
-  showAgentDetails: true,
-  showCostTracking: true,
-};
-
 const BILLING_CREDITS = {
   ok: true,
   totalSpendCents: 412,
-  subscriptionInferenceCents: 2350,
-  allSpendCents: 2762,
   remainingCents: 1888,
   cliUsage: [
     {
@@ -371,23 +415,22 @@ const BILLING_CREDITS = {
         { label: 'Weekly', usedPercent: 58, resetsAt: now + 4 * 86_400_000 },
       ],
       windows: [
-        { period: '1h', tokensIn: 42_000, tokensOut: 9_800, inferenceValueUsd: 0.62 },
-        { period: '24h', tokensIn: 512_000, tokensOut: 118_000, inferenceValueUsd: 7.4 },
-        { period: '7d', tokensIn: 2_940_000, tokensOut: 655_000, inferenceValueUsd: 41.2 },
-        { period: '30d', tokensIn: 9_100_000, tokensOut: 2_020_000, inferenceValueUsd: 128.5 },
+        { period: '1h', tokensIn: 42_000, tokensOut: 9_800 },
+        { period: '24h', tokensIn: 512_000, tokensOut: 118_000 },
+        { period: '7d', tokensIn: 2_940_000, tokensOut: 655_000 },
+        { period: '30d', tokensIn: 9_100_000, tokensOut: 2_020_000 },
       ],
+      dailyUsage: demoDailyUsage(142_000),
       byModel: [
         {
           model: 'claude-code-sonnet',
           tokensIn: 7_800_000,
           tokensOut: 1_700_000,
-          inferenceValueUsd: 96.1,
         },
         {
           model: 'claude-haiku-4-5',
           tokensIn: 1_300_000,
           tokensOut: 320_000,
-          inferenceValueUsd: 12.4,
         },
       ],
     },
@@ -396,37 +439,21 @@ const BILLING_CREDITS = {
       planType: 'Pro',
       quotas: [{ label: 'Weekly', usedPercent: 22, resetsAt: now + 5 * 86_400_000 }],
       windows: [
-        { period: '1h', tokensIn: 12_000, tokensOut: 3_100, inferenceValueUsd: 0.21 },
-        { period: '24h', tokensIn: 210_000, tokensOut: 44_000, inferenceValueUsd: 2.9 },
-        { period: '7d', tokensIn: 1_120_000, tokensOut: 260_000, inferenceValueUsd: 15.8 },
-        { period: '30d', tokensIn: 3_400_000, tokensOut: 810_000, inferenceValueUsd: 47.3 },
+        { period: '1h', tokensIn: 12_000, tokensOut: 3_100 },
+        { period: '24h', tokensIn: 210_000, tokensOut: 44_000 },
+        { period: '7d', tokensIn: 1_120_000, tokensOut: 260_000 },
+        { period: '30d', tokensIn: 3_400_000, tokensOut: 810_000 },
       ],
+      dailyUsage: demoDailyUsage(61_000),
       byModel: [
-        { model: 'gpt-5.6-terra', tokensIn: 850_000, tokensOut: 180_000, inferenceValueUsd: 13.2 },
-        { model: 'gpt-5.6-sol', tokensIn: 2_100_000, tokensOut: 510_000, inferenceValueUsd: 30.6 },
-        { model: 'gpt-5.6-luna', tokensIn: 450_000, tokensOut: 120_000, inferenceValueUsd: 5.1 },
+        { model: 'gpt-5.3-codex', tokensIn: 3_400_000, tokensOut: 810_000 },
       ],
     },
   ],
   balances: [
-    { provider: 'codex', availableUsd: 12.4 },
     { provider: 'google', availableUsd: 6.48 },
   ],
   byProvider: [
-    {
-      name: 'codex',
-      tokensIn: 3_400_000,
-      tokensOut: 810_000,
-      spendCents: 212,
-      subscription: false,
-    },
-    {
-      name: 'claude',
-      tokensIn: 9_100_000,
-      tokensOut: 2_020_000,
-      spendCents: 0,
-      subscription: true,
-    },
     {
       name: 'google',
       tokensIn: 1_150_000,
@@ -462,6 +489,10 @@ function parseBody(init: RequestInit): Record<string, unknown> {
 // ─── Router ─────────────────────────────────────────────────────────────────
 
 /** Answer an API request entirely in memory. Always returns a Response. */
+function isReadOnlyDemoRequest(method: string): boolean {
+  return method === 'GET';
+}
+
 export function demoFetch(url: string, init: RequestInit = {}): Response {
   const method = (init.method ?? 'GET').toUpperCase();
   let path: string;
@@ -469,6 +500,12 @@ export function demoFetch(url: string, init: RequestInit = {}): Response {
     path = new URL(url, 'http://demo.local').pathname;
   } catch {
     path = url;
+  }
+
+  // This public preview is inspectable, never a mutable workspace. Keeping
+  // this in the API shim prevents DevTools from turning it into a stuck state.
+  if (!isReadOnlyDemoRequest(method)) {
+    return json({ ok: false, error: 'The guided demo is read-only. Download Koryphaios to run a workspace.' }, 403);
   }
 
   // Health: always green so no sentinel/overlay can ever fire in the demo.
@@ -516,21 +553,16 @@ export function demoFetch(url: string, init: RequestInit = {}): Response {
     return ok(demoMessages.get(sessionId) ?? []);
   }
   if (/^\/api\/sessions\/[^/]+\/(cancel|compact)$/.test(path)) return ok(true);
-  if (/^\/api\/sessions\/[^/]+\/timetravel$/.test(path)) return ok({ checkpoints: [] });
-  if (/^\/api\/sessions\/[^/]+\/context$/.test(path)) return json({ ok: true, lastUsage: null });
-
-  // Mode (flat response shape, matching the mode store's expectations).
-  if (path === '/api/mode') {
-    const mode = method === 'PUT' ? (parseBody(init).mode ?? 'advanced') : 'advanced';
-    return json({
-      ok: true,
-      mode,
-      config: MODE_CONFIG,
-      context: { mode, config: MODE_CONFIG },
-      shouldWarnNoGit: false,
-      noGitWarning: '',
+  if (/^\/api\/sessions\/[^/]+\/timetravel$/.test(path)) {
+    return ok({
+      currentHash: '',
+      timeline: [],
+      canUndo: false,
+      canRedo: false,
+      stats: { totalStates: 0, totalCost: 0, modelsUsed: [] },
     });
   }
+  if (/^\/api\/sessions\/[^/]+\/context$/.test(path)) return json({ ok: true, lastUsage: null });
 
   // Memory tab.
   if (path === '/api/memory/documents') {
@@ -563,7 +595,16 @@ export function demoFetch(url: string, init: RequestInit = {}): Response {
   }
   if (path === '/api/memory/settings' || path === '/api/memory/settings/reset') {
     if (path.endsWith('/reset')) {
-      demoMemorySettings = { ...demoMemorySettings, universalMemoryEnabled: true, projectMemoryEnabled: true, sessionMemoryEnabled: true, agentMemoryEnabled: true, rulesEnabled: true, autoIncludeInContext: true, maxContextTokens: 2000 };
+      demoMemorySettings = {
+        ...demoMemorySettings,
+        universalMemoryEnabled: true,
+        projectMemoryEnabled: true,
+        sessionMemoryEnabled: true,
+        agentMemoryEnabled: true,
+        rulesEnabled: true,
+        autoIncludeInContext: true,
+        maxContextTokens: 2000,
+      };
     } else if (method === 'PUT') {
       demoMemorySettings = { ...demoMemorySettings, ...parseBody(init) };
     }
@@ -573,7 +614,13 @@ export function demoFetch(url: string, init: RequestInit = {}): Response {
   // Agent tab.
   if (path === '/api/agent/settings' || path === '/api/agent/settings/reset') {
     if (path.endsWith('/reset')) {
-      demoAgentSettings = { ...demoAgentSettings, ruleEnforcementLevel: 'strict', agentExecutionMode: 'auto', criticGateEnabled: true, autoRunTools: true };
+      demoAgentSettings = {
+        ...demoAgentSettings,
+        ruleEnforcementLevel: 'strict',
+        agentExecutionMode: 'auto',
+        criticGateEnabled: true,
+        autoRunTools: true,
+      };
     } else if (method === 'PUT') {
       demoAgentSettings = { ...demoAgentSettings, ...parseBody(init) };
     }
@@ -606,17 +653,22 @@ export function demoFetch(url: string, init: RequestInit = {}): Response {
   // shapes so mentions and file previews are meaningful.
   if (path === '/api/workspace/files') {
     const query = new URL(url, 'http://demo.local').searchParams.get('q')?.toLowerCase() ?? '';
-    return ok([...virtualFiles.entries()]
-      .filter(([file, value]) => value.content !== null && file.toLowerCase().includes(query))
-      .map(([file]) => file)
-      .sort());
+    return ok(
+      [...virtualFiles.entries()]
+        .filter(([file, value]) => value.content !== null && file.toLowerCase().includes(query))
+        .map(([file]) => file)
+        .sort(),
+    );
   }
   if (path === '/api/workspace/raw') {
     const file = new URL(url, 'http://demo.local').searchParams.get('path') ?? '';
     const value = virtualFiles.get(file)?.content;
     return value === null || value === undefined
       ? json({ ok: false, error: 'Virtual file not found' }, 404)
-      : new Response(value, { status: 200, headers: { 'Content-Type': 'text/plain; charset=utf-8' } });
+      : new Response(value, {
+          status: 200,
+          headers: { 'Content-Type': 'text/plain; charset=utf-8' },
+        });
   }
   if (path === '/api/workspace/register') return ok({ path: '/demo/starter-project', trial: true });
 
@@ -624,7 +676,13 @@ export function demoFetch(url: string, init: RequestInit = {}): Response {
   // inspect, stage, restore, commit, and branch operations all mutate only the
   // browser-trial repository.
   if (path === '/api/git/status') {
-    return ok({ isRepo: true, status: gitStatus(), branch: virtualBranch, ahead: virtualAhead, behind: 0 });
+    return ok({
+      isRepo: true,
+      status: gitStatus(),
+      branch: virtualBranch,
+      ahead: virtualAhead,
+      behind: 0,
+    });
   }
   if (path === '/api/git/branches') return ok({ branches: virtualBranches });
   if (path === '/api/git/diff') {
@@ -639,21 +697,28 @@ export function demoFetch(url: string, init: RequestInit = {}): Response {
       : ok({ content });
   }
   if (path === '/api/git/stage' && method === 'POST') {
-    const file = typeof parseBody(init).file === 'string' ? parseBody(init).file as string : '';
+    const file = typeof parseBody(init).file === 'string' ? (parseBody(init).file as string) : '';
     const entry = virtualFiles.get(file);
     if (entry) entry.staged = !parseBody(init).unstage;
     return ok(true);
   }
   if (path === '/api/git/restore' && method === 'POST') {
-    const file = typeof parseBody(init).file === 'string' ? parseBody(init).file as string : '';
+    const file = typeof parseBody(init).file === 'string' ? (parseBody(init).file as string) : '';
     const entry = virtualFiles.get(file);
-    if (entry) { entry.content = entry.original; entry.staged = false; }
+    if (entry) {
+      entry.content = entry.original;
+      entry.staged = false;
+    }
     return ok(true);
   }
   if (path === '/api/git/commit' && method === 'POST') {
     const staged = changedFiles().filter(([, file]) => file.staged);
-    if (!staged.length) return json({ ok: false, error: 'Stage a browser-trial change before committing.' }, 400);
-    for (const [, file] of staged) { file.original = file.content; file.staged = false; }
+    if (!staged.length)
+      return json({ ok: false, error: 'Stage a browser-trial change before committing.' }, 400);
+    for (const [, file] of staged) {
+      file.original = file.content;
+      file.staged = false;
+    }
     virtualAhead += 1;
     virtualCommitCount += 1;
     return ok({ id: `trial-${virtualCommitCount}`, branch: virtualBranch });
@@ -665,10 +730,12 @@ export function demoFetch(url: string, init: RequestInit = {}): Response {
     virtualBranch = branch;
     return ok({ branch });
   }
-  if (path === '/api/git/merge' || path === '/api/git/push' || path === '/api/git/pull') return ok({ hasConflicts: false });
+  if (path === '/api/git/merge' || path === '/api/git/push' || path === '/api/git/pull')
+    return ok({ hasConflicts: false });
 
-  // Durable trial goals are deliberately small but fully stateful: visitors
-  // can create, drive, attach evidence to, pause, and finalize them.
+  // Durable trial goals are deliberately small but fully stateful. The
+  // browser trial simulates the backend-owned continuation loop; it never
+  // implies that a browser can execute desktop tools.
   if (path === '/api/goals') {
     if (method === 'POST') return ok(createDemoGoal(parseBody(init)));
     return ok([...demoGoals.values()].sort((a, b) => a.sortOrder - b.sortOrder));
@@ -684,10 +751,45 @@ export function demoFetch(url: string, init: RequestInit = {}): Response {
       return ok(goal);
     }
     if (action === 'drive' && method === 'POST') {
-      const next = goal.checklist.find((item) => item.status === 'pending');
-      if (next) { next.status = 'running'; next.startedAt = Date.now(); }
-      goal.status = 'running';
-      goal.activity.push({ id: `${id}-drive-${Date.now()}`, type: 'drive', message: 'Manager simulated the next checklist step in the browser trial.', createdAt: Date.now(), sessionId: typeof body.sessionId === 'string' ? body.sessionId : undefined });
+      for (const item of goal.checklist) {
+        item.status = 'completed';
+        item.startedAt ??= Date.now();
+        item.completedAt = Date.now();
+        item.evidence.push({
+          id: `${item.id}-trial`,
+          kind: 'check',
+          value: 'Browser trial simulated evidence; desktop execution is required for real work.',
+          verified: true,
+          createdAt: Date.now(),
+        });
+      }
+      goal.status = 'completed';
+      goal.activity.push({
+        id: `${id}-drive-${Date.now()}`,
+        type: 'completed',
+        message:
+          'Browser trial simulated the durable manager loop and completion gate. Real execution remains desktop-only.',
+        createdAt: Date.now(),
+        sessionId: typeof body.sessionId === 'string' ? body.sessionId : undefined,
+      });
+      goal.updatedAt = Date.now();
+      return ok(goal);
+    }
+    if (action === 'pause' && method === 'POST') {
+      goal.status = 'paused';
+      goal.blocker = 'Paused by user';
+      goal.updatedAt = Date.now();
+      return ok(goal);
+    }
+    if (action === 'resume' && method === 'POST') {
+      goal.status = 'queued';
+      goal.blocker = undefined;
+      goal.updatedAt = Date.now();
+      return ok(goal);
+    }
+    if (action === 'stop' && method === 'POST') {
+      goal.status = 'cancelled';
+      goal.blocker = 'Stopped by user';
       goal.updatedAt = Date.now();
       return ok(goal);
     }
@@ -697,28 +799,60 @@ export function demoFetch(url: string, init: RequestInit = {}): Response {
       if (!item) return json({ ok: false, error: 'Checklist item not found.' }, 404);
       const value = typeof body.value === 'string' ? body.value.trim() : '';
       if (!value) return json({ ok: false, error: 'Verification evidence is required.' }, 400);
-      item.status = 'completed'; item.completedAt = Date.now();
-      item.evidence.push({ id: `${item.id}-e${item.evidence.length + 1}`, kind: 'check', value, verified: true, createdAt: Date.now() });
+      item.status = 'completed';
+      item.completedAt = Date.now();
+      item.evidence.push({
+        id: `${item.id}-e${item.evidence.length + 1}`,
+        kind: 'check',
+        value,
+        verified: true,
+        createdAt: Date.now(),
+      });
       const next = goal.checklist.find((entry) => entry.status === 'pending');
-      if (next) { next.status = 'running'; next.startedAt = Date.now(); }
+      if (next) {
+        next.status = 'running';
+        next.startedAt = Date.now();
+      }
       goal.updatedAt = Date.now();
       return ok(goal);
     }
     if (action === 'finalize' && method === 'POST') {
-      if (goal.checklist.some((item) => item.status !== 'completed')) return json({ ok: false, error: 'Complete each checklist item with evidence first.' }, 400);
-      goal.status = 'completed'; goal.updatedAt = Date.now();
-      goal.activity.push({ id: `${id}-finalized`, type: 'finalized', message: 'Goal finalized with visitor-supplied verification evidence.', createdAt: Date.now() });
+      if (goal.checklist.some((item) => item.status !== 'completed'))
+        return json({ ok: false, error: 'Complete each checklist item with evidence first.' }, 400);
+      goal.status = 'completed';
+      goal.updatedAt = Date.now();
+      goal.activity.push({
+        id: `${id}-finalized`,
+        type: 'finalized',
+        message: 'Goal finalized with visitor-supplied verification evidence.',
+        createdAt: Date.now(),
+      });
       return ok(goal);
     }
   }
 
   // The skills surface has enough state to explore qualification and selection
   // without pretending that a browser can execute a local SKILL.md toolchain.
-  if (path === '/api/agent/skills') return ok([
-    { name: 'code-review', description: 'Review a diff in the virtual workspace.', enabled: true, source: 'browser-trial' },
-    { name: 'test-plan', description: 'Plan and record test evidence for a trial change.', enabled: true, source: 'browser-trial' },
-  ]);
-  if (path === '/api/agent/skills/qualifications') return ok({ verified: ['code-review', 'test-plan'], note: 'Browser-trial skills are simulated and cannot access local executables.' });
+  if (path === '/api/agent/skills')
+    return ok([
+      {
+        name: 'code-review',
+        description: 'Review a diff in the virtual workspace.',
+        enabled: true,
+        source: 'browser-trial',
+      },
+      {
+        name: 'test-plan',
+        description: 'Plan and record test evidence for a trial change.',
+        enabled: true,
+        source: 'browser-trial',
+      },
+    ]);
+  if (path === '/api/agent/skills/qualifications')
+    return ok({
+      verified: ['code-review', 'test-plan'],
+      note: 'Browser-trial skills are simulated and cannot access local executables.',
+    });
 
   // Notes endpoints the notes store doesn't already demo-guard.
   if (path.startsWith('/api/notes')) return ok([]);

@@ -23,6 +23,8 @@ import type {
   Session,
   NotificationPayload,
   NativeCommandPayload,
+  KoryAskUserPayload,
+  SessionIdlePayload,
 } from '@koryphaios/shared';
 import { sessionStore } from './sessions.svelte';
 import { authStore } from './auth.svelte';
@@ -36,7 +38,15 @@ import { feedStore } from './feed.svelte';
 import { agentStore } from './agents.svelte';
 import { notesStore } from './notes.svelte';
 import { goalStore } from './goals.svelte';
+import { goalDisplayStore } from './goal-display.svelte';
 import { isDemoMode } from '$lib/demo-flags';
+import {
+  isInternalEventTypeDump,
+  notifyAgentFinished,
+  notifyDesktop,
+  notifyNeedsAttention,
+} from '$lib/utils/desktop-notifications';
+import { OrderedEventBuffer } from '$lib/utils/ordered-event-buffer';
 
 export type { FeedEntry };
 export { feedStore } from './feed.svelte';
@@ -56,10 +66,28 @@ let pendingPermissions = $state<PermissionRequest[]>([]);
 // Questions are per-session: a background chat's ask_user must survive
 // until the user switches back to it, and answering must target the
 // session that asked — not whichever chat happens to be open.
-let pendingQuestions = $state<
-  Map<string, { question: string; options: string[]; allowOther: boolean }>
->(new Map());
+let pendingQuestions = $state<Map<string, KoryAskUserPayload>>(new Map());
 let sessionChanges = $state<Map<string, ChangeSummary[]>>(new Map());
+export interface RewindPreview {
+  sessionId: string;
+  currentHash: string;
+  targetHash: string;
+  description: string;
+  evidence: {
+    model?: string;
+    cost?: number;
+    tokensIn?: number;
+    tokensOut?: number;
+    promptHash?: string;
+    timestamp: number;
+  };
+  filesChanged: Array<{ path: string; operation: 'create' | 'edit' | 'delete' }>;
+  diff: string;
+  message: string;
+}
+let rewindPreview = $state<RewindPreview | null>(null);
+let rewindApplying = $state(false);
+let rewindPreviewLoadingHash = $state<string | null>(null);
 
 interface DetectedContextFile {
   path: string;
@@ -85,6 +113,20 @@ let activeFileEdits = $state<Map<string, ActiveFileEdit>>(new Map());
 
 let hasShownMalformedWsMessage = false;
 let fileEditTimers = new Map<string, ReturnType<typeof setTimeout>>();
+let notesRefreshTimer: ReturnType<typeof setTimeout> | null = null;
+
+function scheduleNotesRefresh() {
+  if (!notesStore.settings.enabled) return;
+  if (notesRefreshTimer) clearTimeout(notesRefreshTimer);
+  notesRefreshTimer = setTimeout(() => {
+    notesRefreshTimer = null;
+    void Promise.all([
+      notesStore.fetchNotes(),
+      notesStore.fetchGraph(),
+      notesStore.fetchFolderTree(),
+    ]);
+  }, 200);
+}
 
 // ─── Session Busy Bridge ─────────────────────────────────────────────────────
 
@@ -110,11 +152,12 @@ function maybeClearBusy(sessionId: string | undefined) {
   if (!agentStore.isSessionRunning(sessionId)) clearSessionBusy(sessionId);
 }
 
-// Watchdog: if a session is marked busy but goes SILENT (no stream activity)
-// for this long, the agent is gone and a terminal event was dropped — force
-// the busy/Stop state off so the composer never gets stuck. Any stream event
-// for the session resets its timer.
-const BUSY_WATCHDOG_MS = 45_000;
+// A silent provider/tool phase can legitimately last well beyond this delay.
+// Ask the backend before changing UI state; a lack of stream events is not
+// evidence that the work has stopped. Now that the backend emits a
+// definitive session.idle event, this watchdog is a fallback for lost WS
+// events only — the interval is doubled to 90s to reduce unnecessary polling.
+const BUSY_WATCHDOG_MS = 90_000;
 const busyWatchdogs = new Map<string, ReturnType<typeof setTimeout>>();
 
 function kickBusyWatchdog(sessionId: string | undefined) {
@@ -124,11 +167,24 @@ function kickBusyWatchdog(sessionId: string | undefined) {
   if (!busySessions.has(sessionId)) return;
   busyWatchdogs.set(
     sessionId,
-    setTimeout(() => {
+    setTimeout(async () => {
       busyWatchdogs.delete(sessionId);
-      // Silent too long — the run ended without a terminal event reaching us.
-      markSessionAgentsStopped(sessionId);
-      clearSessionBusy(sessionId);
+      try {
+        const response = await apiFetch(apiUrl(`/api/sessions/${sessionId}/runtime-status`));
+        const result = (await response.json()) as { ok?: boolean; running?: boolean };
+        if (result.ok && result.running) {
+          kickBusyWatchdog(sessionId);
+          return;
+        }
+        if (result.ok) {
+          markSessionAgentsStopped(sessionId);
+          clearSessionBusy(sessionId);
+          return;
+        }
+      } catch {
+        // A transient health/auth failure is never evidence that work stopped.
+      }
+      kickBusyWatchdog(sessionId);
     }, BUSY_WATCHDOG_MS),
   );
 }
@@ -181,21 +237,253 @@ function isWSMessageLike(value: unknown): value is WSMessage {
   return typeof candidate.type === 'string' && typeof candidate.timestamp === 'number';
 }
 
+interface OrderedSessionState {
+  buffer: OrderedEventBuffer<WSMessage & { epoch: number; sequence: number }>;
+  replayRequested: boolean;
+}
+
+const MAX_PENDING_ORDERED_EVENTS = 4_096;
+const orderedSessions = new Map<string, OrderedSessionState>();
+const replayApplyingSessions = new Set<string>();
+let timelineSyncingSessions = $state<Set<string>>(new Set());
+
+function setTimelineSyncing(sessionId: string, syncing: boolean): void {
+  const has = timelineSyncingSessions.has(sessionId);
+  if (has === syncing) return;
+  const next = new Set(timelineSyncingSessions);
+  if (syncing) next.add(sessionId);
+  else next.delete(sessionId);
+  timelineSyncingSessions = next;
+}
+
+function requestOrderedReplay(sessionId: string, state: OrderedSessionState): void {
+  if (state.replayRequested || wsConnection?.readyState !== WebSocket.OPEN) return;
+  state.replayRequested = true;
+  wsConnection.send(
+    JSON.stringify({
+      type: 'subscribe_session',
+      sessionId,
+      epoch: state.buffer.epoch,
+      afterSequence: state.buffer.lastApplied,
+      timestamp: Date.now(),
+    }),
+  );
+}
+
+function ingestOrderedEvent(message: WSMessage): void {
+  const sessionId = message.sessionId;
+  const sequence = message.sequence;
+  const epoch = message.epoch;
+  if (!sessionId || sequence === undefined || epoch === undefined) {
+    handleMessage(message);
+    return;
+  }
+
+  let state = orderedSessions.get(sessionId);
+  if (!state) {
+    state = {
+      buffer: new OrderedEventBuffer(epoch, 0, false, MAX_PENDING_ORDERED_EVENTS),
+      replayRequested: false,
+    };
+    orderedSessions.set(sessionId, state);
+  }
+  const result = state.buffer.ingest(message as WSMessage & { epoch: number; sequence: number });
+  if (result.kind === 'epoch_mismatch') {
+    setTimelineSyncing(sessionId, true);
+    state.replayRequested = false;
+    requestOrderedReplay(sessionId, state);
+    return;
+  }
+  if (result.kind === 'duplicate') return;
+  if (result.kind === 'overflow') {
+    setTimelineSyncing(sessionId, true);
+    toastStore.error('Activity synchronization paused: the ordered-event buffer is full.');
+    return;
+  }
+  for (const ready of result.events) handleMessage(ready);
+  if (result.kind === 'gap') {
+    setTimelineSyncing(sessionId, true);
+    requestOrderedReplay(sessionId, state);
+    return;
+  }
+  if (!replayApplyingSessions.has(sessionId)) setTimelineSyncing(sessionId, false);
+}
+
+function reconcileVisibleTimeline(
+  sessionId: string,
+  state: OrderedSessionState,
+  latestSequence: number,
+): void {
+  if (state.buffer.lastApplied < latestSequence) {
+    setTimelineSyncing(sessionId, true);
+    toastStore.error('Transcript integrity check failed: a required event is unavailable.');
+    return;
+  }
+  if (sessionStore.activeSessionId !== sessionId) {
+    setTimelineSyncing(sessionId, false);
+    return;
+  }
+  // Keep the feed covered until persisted chat rows and replayed operational
+  // rows have been merged into one canonical sequence. This prevents a fresh
+  // open from ever painting a timestamp-sorted intermediate transcript.
+  void sessionStore
+    .fetchMessages(sessionId)
+    .then((messages) => loadSessionMessages(sessionId, messages))
+    .then(() => setTimelineSyncing(sessionId, false))
+    .catch(() => {
+      toastStore.error('Canonical session history could not be reconciled.');
+    });
+}
+
+function handleOrderedProtocolMessage(message: WSMessage): boolean {
+  const sessionId = message.sessionId;
+  if (!sessionId) return false;
+  if (message.type === 'session.cursor') {
+    const cursor = message.payload as { epoch: number; latestSequence: number };
+    const existing = orderedSessions.get(sessionId);
+    const state: OrderedSessionState =
+      existing?.buffer.epoch === cursor.epoch
+        ? existing
+        : {
+            buffer: new OrderedEventBuffer(cursor.epoch, cursor.latestSequence, true),
+            replayRequested: false,
+          };
+    const ready = state.buffer.establishCursor(cursor.epoch, cursor.latestSequence);
+    state.replayRequested = false;
+    orderedSessions.set(sessionId, state);
+    for (const event of ready) handleMessage(event);
+    setTimelineSyncing(sessionId, state.buffer.isWaitingForGap);
+    return true;
+  }
+  if (message.type === 'session.replay') {
+    const replay = message.payload as {
+      epoch: number;
+      events: WSMessage[];
+      latestSequence: number;
+      complete: boolean;
+    };
+    setTimelineSyncing(sessionId, true);
+    replayApplyingSessions.add(sessionId);
+    let state = orderedSessions.get(sessionId);
+    if (!state || state.buffer.epoch !== replay.epoch) {
+      state = {
+        buffer: new OrderedEventBuffer(replay.epoch, 0, true),
+        replayRequested: false,
+      };
+      orderedSessions.set(sessionId, state);
+    }
+    try {
+      for (const event of replay.events) ingestOrderedEvent(event);
+      state.replayRequested = false;
+    } finally {
+      replayApplyingSessions.delete(sessionId);
+    }
+    if (replay.complete) reconcileVisibleTimeline(sessionId, state, replay.latestSequence);
+    return true;
+  }
+  if (message.type === 'session.integrity_error') {
+    setTimelineSyncing(sessionId, true);
+    toastStore.error('Transcript cursor mismatch. Reloading canonical session history.');
+    const cursor = (message.payload as { cursor?: { epoch: number; latestSequence: number } })
+      .cursor;
+    void sessionStore
+      .fetchMessages(sessionId)
+      .then(async (messages) => {
+        await loadSessionMessages(sessionId, messages);
+        if (cursor) {
+          orderedSessions.set(sessionId, {
+            buffer: new OrderedEventBuffer(cursor.epoch, cursor.latestSequence, true),
+            replayRequested: false,
+          });
+        }
+        setTimelineSyncing(sessionId, false);
+      })
+      .catch(() => {
+        toastStore.error('Canonical session history could not be restored.');
+      });
+    return true;
+  }
+  return false;
+}
+
 // ─── Message Handler ───────────────────────────────────────────────────────
 
+import { wsHandlers } from './ws-handler-registry';
+import { registerSessionHandlers } from './ws-handlers/session-handlers';
+
+// Register extracted handlers. This is incremental — handlers here take
+// precedence over the switch below. As more cases are extracted, the switch
+// shrinks and the registry grows.
+registerSessionHandlers();
+
 function handleMessage(msg: WSMessage) {
+  const eventEpoch = msg.epoch;
+  const eventSequence = msg.sequence;
+  if (
+    msg.sessionId &&
+    Number.isSafeInteger(eventEpoch) &&
+    Number.isSafeInteger(eventSequence)
+  ) {
+    const prior = realtimeCursors.get(msg.sessionId);
+    if (prior && prior.epoch === eventEpoch && eventSequence! <= prior.sequence) return;
+    realtimeCursors.set(msg.sessionId, { epoch: eventEpoch!, sequence: eventSequence! });
+  }
   const activeSessionId = sessionStore.activeSessionId;
   // Feed-affecting realtime events must carry an exact session identity.
   // Unscoped events are global control/catalog events only; treating them as
   // belonging to "whatever is open now" is a cross-chat data leak.
   const isForActiveSession = !!msg.sessionId && msg.sessionId === activeSessionId;
   const agents = agentStore.agents;
+  const orderedMetadata = (metadata: Record<string, unknown> = {}) => ({
+    ...metadata,
+    eventEpoch: msg.epoch,
+    sequenceStart: msg.sequence,
+    sequenceEnd: msg.sequence,
+  });
 
   // Any activity for a busy session proves the run is alive — reset its
   // silence watchdog. (Terminal events clear busy entirely below.)
   if (msg.sessionId && msg.type.startsWith('stream.')) kickBusyWatchdog(msg.sessionId);
 
+  // Registry-based dispatch: if a handler is registered for this event type,
+  // invoke it with the shared context. This replaces the switch for
+  // extracted handlers.
+  const registryHandler = wsHandlers.get(msg.type);
+  if (registryHandler) {
+    registryHandler({
+      msg,
+      activeSessionId,
+      isForActiveSession,
+      orderedMetadata,
+      kickBusyWatchdog,
+      clearSessionBusy,
+      markSessionAgentsStopped,
+      maybeClearBusy,
+      feedStore,
+      agentStore,
+      sessionStore,
+      toastStore,
+    });
+    return;
+  }
+
   switch (msg.type) {
+    case 'session.user_message': {
+      const p = msg.payload as {
+        messageId: string;
+        content: string;
+        attachments?: Array<{ type: string; data: string; name: string; mimeType?: string }>;
+      };
+      if (isForActiveSession) {
+        feedStore.addUserMessage(msg.sessionId!, p.content, p.attachments, {
+          messageId: p.messageId,
+          createdAt: msg.timestamp,
+          epoch: msg.epoch,
+          sequence: msg.sequence,
+        });
+      }
+      break;
+    }
     case 'agent.spawned': {
       const p = msg.payload as AgentSpawnedPayload;
       agentStore.spawnAgent(p.agent, p.task, msg.sessionId ?? '');
@@ -245,7 +533,7 @@ function handleMessage(msg: WSMessage) {
               ? 'glow-kory'
               : '',
         text: p.entry.content,
-        metadata: { sessionId, sourceAgentId: p.agentId, threadRole: role },
+        metadata: orderedMetadata({ sessionId, sourceAgentId: p.agentId, threadRole: role }),
       });
       break;
     }
@@ -257,6 +545,9 @@ function handleMessage(msg: WSMessage) {
         if (p.status === 'thinking') feedStore.beginThinking(p.agentId, msg.timestamp);
         else feedStore.finalizeThinking(p.agentId, msg.timestamp);
       }
+      if (msg.sessionId && p.status !== 'thinking') {
+        agentStore.finalizeAgentThreadThinking(msg.sessionId, p.agentId, msg.timestamp);
+      }
       if (p.status === 'done' || p.status === 'idle' || p.status === 'waiting') {
         maybeClearBusy(msg.sessionId ?? agents.get(p.agentId)?.sessionId);
         const completedSessionId = msg.sessionId ?? agents.get(p.agentId)?.sessionId;
@@ -265,6 +556,10 @@ function handleMessage(msg: WSMessage) {
           completedSessionId &&
           completedSessionId === sessionStore.activeSessionId
         ) {
+          // Tag live manager content entries with the persisted message id
+          // before reloading, so the dedup in loadSessionMessages can match
+          // by ID instead of falling back to text comparison.
+          if (p.messageId) feedStore.tagManagerMessageId(p.messageId);
           void sessionStore
             .fetchMessages(completedSessionId)
             .then((messages) => loadSessionMessages(completedSessionId, messages));
@@ -276,13 +571,17 @@ function handleMessage(msg: WSMessage) {
     case 'system.info': {
       // Cancel notification → live stop marker as plain system text, not a
       // Kory message. The backend persists a matching system row for reloads.
-      const info = msg.payload as { message?: string };
+      const info = msg.payload as { message?: string; kind?: string };
       // Prompt-manifest provenance is available in diagnostics, but dumping its
       // full filesystem paths, hashes, and skill list into the human feed makes
       // every turn noisy and expensive to render.
-      const isPromptDiagnostic =
-        info?.message?.startsWith('Prompt ') && info.message.includes('Instructions:');
-      if (isPromptDiagnostic) break;
+      if (info?.kind === 'prompt_diagnostic') break;
+      if (
+        !info?.kind &&
+        info?.message?.startsWith('Prompt ') &&
+        info.message.includes('Instructions:')
+      )
+        break;
       if (isForActiveSession && info?.message) {
         feedStore.removeAnalyzingThoughtEntries();
         feedStore.addFeedEntry({
@@ -291,7 +590,8 @@ function handleMessage(msg: WSMessage) {
           agentId: 'system',
           agentName: '',
           glowClass: '',
-          text: info.message === 'Session cancelled' ? 'Stopped by user.' : info.message,
+          text: info.kind === 'cancelled' ? 'Stopped by user.' : info.message,
+          metadata: orderedMetadata(info.kind ? { kind: info.kind } : {}),
         });
       }
       break;
@@ -304,6 +604,11 @@ function handleMessage(msg: WSMessage) {
       agentStore.completeAgent(p.agentId, msg.sessionId ?? undefined);
       if (isForActiveSession) feedStore.removeAnalyzingThoughtEntries();
       maybeClearBusy(msg.sessionId ?? agents.get(p.agentId)?.sessionId);
+      // Desktop alert only for the manager finishing a turn the user may have
+      // stepped away from — never for every internal worker/stream event.
+      if (msg.type === 'agent.completed' && p.agentId === 'kory-manager') {
+        notifyAgentFinished();
+      }
       break;
     }
 
@@ -319,7 +624,7 @@ function handleMessage(msg: WSMessage) {
           agentName: agents.get(p.agentId ?? '')?.identity.name ?? 'Unknown',
           glowClass: '',
           text: p.error ?? 'Unknown error',
-          metadata: { source: 'agent', sessionId: msg.sessionId },
+          metadata: orderedMetadata({ source: 'agent', sessionId: msg.sessionId }),
         });
       }
       break;
@@ -327,9 +632,16 @@ function handleMessage(msg: WSMessage) {
 
     case 'stream.delta': {
       const p = msg.payload as StreamDeltaPayload;
+      // Some provider adapters send an empty content_delta as a boundary
+      // marker. It is not user-visible output; rendering it created blank
+      // "Kory" cards with response controls.
+      if (typeof p?.content !== 'string' || p.content.length === 0) break;
       // Answer text starting = the provider is done reasoning: freeze timers.
       if (isForActiveSession) feedStore.finalizeThinking(p.agentId, msg.timestamp);
       agentStore.appendAgentContent(p.agentId, p.content, msg.sessionId ?? undefined);
+      if (msg.sessionId) {
+        agentStore.finalizeAgentThreadThinking(msg.sessionId, p.agentId, msg.timestamp);
+      }
       if (isForActiveSession) {
         feedStore.removeAnalyzingThoughtEntries();
         feedStore.accumulateFeedEntry({
@@ -339,6 +651,7 @@ function handleMessage(msg: WSMessage) {
           agentName: agents.get(p.agentId)?.identity.name ?? 'Worker',
           glowClass: feedStore.resolveGlowClass(agents.get(p.agentId)?.identity),
           text: p.content,
+          metadata: orderedMetadata(),
         });
       }
       if (msg.sessionId) {
@@ -349,7 +662,7 @@ function handleMessage(msg: WSMessage) {
           agentName: agentStore.getAgentFeedLabel(p.agentId),
           glowClass: feedStore.resolveGlowClass(agents.get(p.agentId)?.identity),
           text: p.content,
-          metadata: { sessionId: msg.sessionId },
+          metadata: orderedMetadata({ sessionId: msg.sessionId }),
         });
       }
       break;
@@ -379,8 +692,9 @@ function handleMessage(msg: WSMessage) {
           glowClass: feedStore.resolveGlowClass(agents.get(p.agentId)?.identity),
           text: p.thinking,
           thinkingStartedAt: feedStore.getThinkingStart(p.agentId, msg.timestamp),
-          metadata:
+          metadata: orderedMetadata(
             typeof p.thinkingTokens === 'number' ? { thinkingTokens: p.thinkingTokens } : {},
+          ),
         });
       }
       if (msg.sessionId) {
@@ -392,7 +706,7 @@ function handleMessage(msg: WSMessage) {
           glowClass: feedStore.resolveGlowClass(agents.get(p.agentId)?.identity),
           text: p.thinking,
           thinkingStartedAt: feedStore.getThinkingStart(p.agentId, msg.timestamp),
-          metadata: { sessionId: msg.sessionId },
+          metadata: orderedMetadata({ sessionId: msg.sessionId }),
         });
       }
       break;
@@ -401,10 +715,18 @@ function handleMessage(msg: WSMessage) {
     case 'stream.tool_call': {
       const p = msg.payload as StreamToolCallPayload;
       if (isForActiveSession) feedStore.finalizeThinking(p.agentId, msg.timestamp);
+      if (msg.sessionId) {
+        agentStore.finalizeAgentThreadThinking(msg.sessionId, p.agentId, msg.timestamp);
+      }
       const existingToolCall =
         isForActiveSession && feedStore.updateToolCall(p.toolCall, msg.timestamp);
       if (!existingToolCall)
-        agentStore.addToolCall(p.agentId, p.toolCall.name, msg.sessionId ?? undefined);
+        agentStore.addToolCall(
+          p.agentId,
+          p.toolCall.id,
+          p.toolCall.name,
+          msg.sessionId ?? undefined,
+        );
       if (isForActiveSession) {
         if (!existingToolCall)
           feedStore.addFeedEntry({
@@ -414,7 +736,10 @@ function handleMessage(msg: WSMessage) {
             agentName: agents.get(p.agentId)?.identity.name ?? 'Worker',
             glowClass: feedStore.resolveGlowClass(agents.get(p.agentId)?.identity),
             text: `Calling tool: ${p.toolCall.name}`,
-            metadata: { toolCall: p.toolCall, sourceProvider: p.sourceProvider },
+            metadata: orderedMetadata({
+              toolCall: p.toolCall,
+              sourceProvider: p.sourceProvider,
+            }),
           });
       }
       if (msg.sessionId) {
@@ -425,11 +750,11 @@ function handleMessage(msg: WSMessage) {
           agentName: agentStore.getAgentFeedLabel(p.agentId),
           glowClass: feedStore.resolveGlowClass(agents.get(p.agentId)?.identity),
           text: `Calling tool: ${p.toolCall.name}`,
-          metadata: {
+          metadata: orderedMetadata({
             toolCall: p.toolCall,
             sessionId: msg.sessionId,
             sourceProvider: p.sourceProvider,
-          },
+          }),
         });
       }
       break;
@@ -464,7 +789,7 @@ function handleMessage(msg: WSMessage) {
           agentName: 'Kory',
           glowClass: '',
           text,
-          metadata: {
+          metadata: orderedMetadata({
             toolResult: {
               callId: p.id,
               name: 'bash',
@@ -472,7 +797,7 @@ function handleMessage(msg: WSMessage) {
               isError: !started && p.status === 'crashed',
               durationMs: 0,
             },
-          },
+          }),
         });
       }
       break;
@@ -486,29 +811,42 @@ function handleMessage(msg: WSMessage) {
           ? `Tool result (${p.toolResult.durationMs.toFixed(0)}ms): ${p.toolResult.output}`
           : `Tool result (time not reported by provider): ${p.toolResult.output}`;
       if (isForActiveSession) {
-        feedStore.addFeedEntry({
-          timestamp: msg.timestamp,
-          type: 'tool_result',
-          agentId: p.agentId,
-          agentName: agents.get(p.agentId)?.identity.name ?? 'Worker',
-          glowClass: feedStore.resolveGlowClass(agents.get(p.agentId)?.identity),
-          text: resultText,
-          metadata: { toolResult: p.toolResult, sourceProvider: p.sourceProvider },
+        const metadata = orderedMetadata({
+          toolResult: p.toolResult,
+          sourceProvider: p.sourceProvider,
         });
+        const replacedLiveCall = feedStore.completeToolCall(
+          p.toolResult,
+          resultText,
+          msg.timestamp,
+          metadata,
+        );
+        if (!replacedLiveCall) {
+          feedStore.addFeedEntry({
+            timestamp: msg.timestamp,
+            type: 'tool_result',
+            agentId: p.agentId,
+            agentName: agents.get(p.agentId)?.identity.name ?? 'Worker',
+            glowClass: feedStore.resolveGlowClass(agents.get(p.agentId)?.identity),
+            text: resultText,
+            metadata,
+          });
+        }
       }
+      agentStore.completeToolCall(p.agentId, p.toolResult.callId, msg.sessionId ?? undefined);
       if (msg.sessionId) {
-        agentStore.upsertAgentThreadEntry(msg.sessionId, p.agentId, {
+        agentStore.completeAgentThreadToolCall(msg.sessionId, p.agentId, p.toolResult.callId, {
           timestamp: msg.timestamp,
           type: 'tool_result',
           agentId: p.agentId,
           agentName: agentStore.getAgentFeedLabel(p.agentId),
           glowClass: feedStore.resolveGlowClass(agents.get(p.agentId)?.identity),
           text: resultText,
-          metadata: {
+          metadata: orderedMetadata({
             toolResult: p.toolResult,
             sessionId: msg.sessionId,
             sourceProvider: p.sourceProvider,
-          },
+          }),
         });
       }
       break;
@@ -523,6 +861,7 @@ function handleMessage(msg: WSMessage) {
     case 'stream.file_delta': {
       const p = msg.payload as StreamFileDeltaPayload;
       if (isForActiveSession) {
+        const timerKey = `${msg.sessionId}:${p.path}`;
         const prior = activeFileEdits.get(p.path);
         const existing = prior && !prior.done ? prior : undefined;
         if (existing) {
@@ -533,10 +872,10 @@ function handleMessage(msg: WSMessage) {
           next.set(p.path, { ...existing, content: existing.content + p.delta });
           activeFileEdits = next;
         } else {
-          const t = fileEditTimers.get(p.path);
+          const t = fileEditTimers.get(timerKey);
           if (t) {
             clearTimeout(t);
-            fileEditTimers.delete(p.path);
+            fileEditTimers.delete(timerKey);
           }
           const next = new Map(activeFileEdits);
           next.set(p.path, {
@@ -557,26 +896,31 @@ function handleMessage(msg: WSMessage) {
     case 'stream.file_complete': {
       const p = msg.payload as StreamFileCompletePayload;
       if (isForActiveSession) {
+        const timerKey = `${msg.sessionId}:${p.path}`;
         const edit = activeFileEdits.get(p.path);
         if (edit) {
           edit.done = true;
           activeFileEdits = new Map(activeFileEdits);
         }
-        const existingTimer = fileEditTimers.get(p.path);
+        const existingTimer = fileEditTimers.get(timerKey);
         if (existingTimer) clearTimeout(existingTimer);
+        const capturedSessionId = msg.sessionId;
         const timer = setTimeout(() => {
-          const next = new Map(activeFileEdits);
-          next.delete(p.path);
-          activeFileEdits = next;
-          fileEditTimers.delete(p.path);
+          if (sessionStore.activeSessionId === capturedSessionId) {
+            const next = new Map(activeFileEdits);
+            next.delete(p.path);
+            activeFileEdits = next;
+          }
+          fileEditTimers.delete(timerKey);
         }, 4000);
-        fileEditTimers.set(p.path, timer);
+        fileEditTimers.set(timerKey, timer);
       }
       break;
     }
 
     case 'kory.thought': {
       const p = msg.payload as KoryThoughtPayload;
+      if (typeof p?.thought !== 'string' || p.thought.length === 0) break;
       if (msg.sessionId) agentStore.setManagerSessionId(msg.sessionId);
       if (isForActiveSession) {
         koryThought = p.thought;
@@ -589,7 +933,7 @@ function handleMessage(msg: WSMessage) {
           agentName: 'Kory',
           glowClass: 'glow-kory',
           text: p.thought,
-          metadata: { phase: p.phase },
+          metadata: orderedMetadata({ phase: p.phase }),
         });
       }
       break;
@@ -597,6 +941,7 @@ function handleMessage(msg: WSMessage) {
 
     case 'kory.routing': {
       const p = msg.payload as KoryRoutingPayload;
+      if (typeof p?.reasoning !== 'string' || p.reasoning.length === 0) break;
       if (isForActiveSession) {
         feedStore.removeAnalyzingThoughtEntries();
         feedStore.addFeedEntry({
@@ -606,21 +951,28 @@ function handleMessage(msg: WSMessage) {
           agentName: 'Kory',
           glowClass: 'glow-kory',
           text: p.reasoning,
-          metadata: { domain: p.domain, model: p.selectedModel, provider: p.selectedProvider },
+          metadata: orderedMetadata({
+            domain: p.domain,
+            model: p.selectedModel,
+            provider: p.selectedProvider,
+          }),
         });
       }
       break;
     }
 
     case 'kory.ask_user': {
-      const p = msg.payload as { question: string; options: string[]; allowOther: boolean };
+      const p = msg.payload as Partial<KoryAskUserPayload>;
       const sid = msg.sessionId ?? activeSessionId;
-      if (sid) {
+      if (sid && typeof p.question === 'string') {
         const next = new Map(pendingQuestions);
         next.set(sid, {
           question: p.question,
-          options: p.options,
-          allowOther: p.allowOther,
+          options: Array.isArray(p.options) ? p.options.map(String) : [],
+          allowOther: p.allowOther !== false,
+          allowKeepChatting: p.allowKeepChatting !== false,
+          chart: p.chart,
+          sliders: Array.isArray(p.sliders) ? p.sliders : undefined,
         });
         pendingQuestions = next;
       }
@@ -638,9 +990,7 @@ function handleMessage(msg: WSMessage) {
 
     case 'notes.updated': {
       const p = msg.payload as { action?: string; noteId?: string };
-      void notesStore.fetchNotes();
-      void notesStore.fetchGraph();
-      void notesStore.fetchFolderTree();
+      scheduleNotesRefresh();
       if (p.noteId && notesStore.currentNote?.id === p.noteId) {
         void notesStore.fetchNote(p.noteId);
       }
@@ -648,7 +998,9 @@ function handleMessage(msg: WSMessage) {
     }
 
     case 'goals.updated': {
-      goalStore.handleUpdated(msg.payload as { goal?: import('@koryphaios/shared').Goal; deletedId?: string });
+      goalStore.handleUpdated(
+        msg.payload as { goal?: import('@koryphaios/shared').Goal; deletedId?: string },
+      );
       break;
     }
 
@@ -667,12 +1019,12 @@ function handleMessage(msg: WSMessage) {
           agentName: p.providerLabel,
           glowClass: '',
           text: p.text,
-          metadata: {
+          metadata: orderedMetadata({
             sourceProvider: p.provider,
             nativeCommand: p.command,
             rawCommand: p.rawCommand,
             isError: p.isError,
-          },
+          }),
         });
       }
       break;
@@ -687,6 +1039,22 @@ function handleMessage(msg: WSMessage) {
     case 'session.deleted': {
       const p = msg.payload as { sessionId: string };
       if (p.sessionId) sessionStore.handleSessionDeleted(p.sessionId);
+      break;
+    }
+
+    case 'session.idle': {
+      // Definitive "session is done working" signal from the backend.
+      // Replaces the 45-second polling watchdog for the common case.
+      // The watchdog remains as a fallback for lost WS events.
+      const p = msg.payload as SessionIdlePayload;
+      if (p.sessionId) {
+        // Tag live manager content entries with the persisted message id
+        // before clearing busy, so the dedup in loadSessionMessages can match
+        // by ID instead of falling back to text comparison.
+        if (p.messageId) feedStore.tagManagerMessageId(p.messageId);
+        markSessionAgentsStopped(p.sessionId);
+        clearSessionBusy(p.sessionId);
+      }
       break;
     }
 
@@ -717,6 +1085,11 @@ function handleMessage(msg: WSMessage) {
       // left those chats hanging on an approval nobody ever saw.
       if (!pendingPermissions.some((perm) => perm.id === p.id)) {
         pendingPermissions = [...pendingPermissions, p];
+        const tool =
+          (p as { toolName?: string; name?: string }).toolName ??
+          (p as { name?: string }).name ??
+          'a tool';
+        notifyNeedsAttention(`Kory wants to run ${tool}.`);
       }
       break;
     }
@@ -741,7 +1114,7 @@ function handleMessage(msg: WSMessage) {
             .slice(0, 3)
             .map((f) => f.path.split('/').pop())
             .join(', ')}${p.files.length > 3 ? ` and ${p.files.length - 3} more` : ''}`,
-          metadata: { contextFiles: p.files },
+          metadata: orderedMetadata({ contextFiles: p.files }),
         });
       }
       break;
@@ -761,7 +1134,7 @@ function handleMessage(msg: WSMessage) {
           agentName: '',
           glowClass: '',
           text: errorText,
-          metadata: { source: 'backend', sessionId: msg.sessionId },
+          metadata: orderedMetadata({ source: 'backend', sessionId: msg.sessionId }),
         });
       }
       break;
@@ -771,9 +1144,19 @@ function handleMessage(msg: WSMessage) {
       const p = msg.payload as Partial<NotificationPayload>;
       if (!isForActiveSession) break;
       const notificationType = p.type ?? 'info';
-      const text = p.title
-        ? `${p.title}: ${p.message ?? ''}`.trim()
-        : (p.message ?? 'Notification');
+      const title = (p.title ?? '').trim();
+      const message = (p.message ?? '').trim();
+      const text = title ? `${title}: ${message}`.trim().replace(/:$/, '') : message;
+      // Drop wire-protocol dumps (e.g. "agent.completed, stream.complete") —
+      // those belong in logs, never in the toast or OS notification center.
+      if (
+        !text ||
+        isInternalEventTypeDump(text) ||
+        isInternalEventTypeDump(title) ||
+        isInternalEventTypeDump(message)
+      ) {
+        break;
+      }
       pushToast(notificationType, text);
       feedStore.addFeedEntry({
         timestamp: msg.timestamp,
@@ -782,7 +1165,12 @@ function handleMessage(msg: WSMessage) {
         agentName: '',
         glowClass: '',
         text,
-        metadata: { notificationType },
+        metadata: orderedMetadata({ notificationType }),
+      });
+      void notifyDesktop({
+        title: title || 'Koryphaios',
+        body: message || text,
+        key: `system:${text}`,
       });
       break;
     }
@@ -816,28 +1204,29 @@ function buildWsCandidates(preferredUrl?: string): string[] {
 
 function connect(url?: string) {
   if (!browser) return;
-  console.log(
-    '[WS] connect() called, current state:',
-    wsConnection?.readyState,
-    'status:',
-    connectionStatus,
-  );
+  if (import.meta.env.DEV)
+    console.log(
+      '[WS] connect() called, current state:',
+      wsConnection?.readyState,
+      'status:',
+      connectionStatus,
+    );
   if (
     wsConnection?.readyState === WebSocket.OPEN ||
     wsConnection?.readyState === WebSocket.CONNECTING
   ) {
-    console.log('[WS] Already connected or connecting, skipping');
+    if (import.meta.env.DEV) console.log('[WS] Already connected or connecting, skipping');
     return;
   }
 
   if (url || wsCandidates.length === 0) {
     wsCandidates = buildWsCandidates(url);
     wsCandidateIndex = 0;
-    console.log('[WS] Built candidates:', wsCandidates);
+    if (import.meta.env.DEV) console.log('[WS] Built candidates:', wsCandidates);
   }
 
   const wsUrl = wsCandidates[wsCandidateIndex];
-  console.log('[WS] Trying URL:', wsUrl, 'index:', wsCandidateIndex);
+  if (import.meta.env.DEV) console.log('[WS] Trying URL:', wsUrl, 'index:', wsCandidateIndex);
   if (!wsUrl) {
     wsCandidateIndex = 0;
     scheduleReconnect();
@@ -854,11 +1243,11 @@ function connect(url?: string) {
       finalWsUrl = `${finalWsUrl}${sep}auth=${encodeURIComponent(authStore.token)}`;
     }
 
-    console.log('[WS] Creating WebSocket connection to:', finalWsUrl);
+    if (import.meta.env.DEV) console.log('[WS] Creating WebSocket connection to:', finalWsUrl);
     const ws = new WebSocket(finalWsUrl, protocols);
 
     ws.onopen = () => {
-      console.log('[WS] Connection opened successfully');
+      if (import.meta.env.DEV) console.log('[WS] Connection opened successfully');
       connectionStatus = 'connected';
       reconnectAttempts = 0;
       hasShownMalformedWsMessage = false;
@@ -870,7 +1259,23 @@ function connect(url?: string) {
       // background chats that are still running.
       const activeSid = sessionStore.activeSessionId;
       if (activeSid) subscribedSessions.add(activeSid);
-      for (const sid of subscribedSessions) subscribeToSession(sid);
+      const liveStatuses = new Set([
+        'thinking',
+        'streaming',
+        'tool_calling',
+        'waiting',
+        'waiting_user',
+      ]);
+      for (const sid of subscribedSessions) {
+        if (sid === activeSid) {
+          subscribeToSession(sid);
+          continue;
+        }
+        const hasLiveAgent = Array.from(agentStore.agents.values()).some(
+          (a) => a.sessionId === sid && liveStatuses.has(a.status),
+        );
+        if (hasLiveAgent) subscribeToSession(sid);
+      }
     };
 
     ws.onmessage = (event) => {
@@ -884,7 +1289,12 @@ function connect(url?: string) {
           if (import.meta.env.DEV) console.warn('Discarded malformed websocket payload', parsed);
           return;
         }
-        handleMessage(parsed);
+        if (handleOrderedProtocolMessage(parsed)) return;
+        if (parsed.sessionId && parsed.sequence !== undefined && parsed.epoch !== undefined) {
+          ingestOrderedEvent(parsed);
+        } else {
+          handleMessage(parsed);
+        }
       } catch (error) {
         if (!hasShownMalformedWsMessage) {
           hasShownMalformedWsMessage = true;
@@ -895,14 +1305,15 @@ function connect(url?: string) {
     };
 
     ws.onclose = (event) => {
-      console.log('[WS] Connection closed:', event.code, event.reason);
+      if (import.meta.env.DEV) console.log('[WS] Connection closed:', event.code, event.reason);
       connectionStatus = 'disconnected';
       wsConnection = null;
       sentSessionSubscriptions.clear();
 
       if (wsCandidateIndex < wsCandidates.length - 1) {
         wsCandidateIndex++;
-        console.log('[WS] Trying next candidate, index:', wsCandidateIndex);
+        if (import.meta.env.DEV)
+          console.log('[WS] Trying next candidate, index:', wsCandidateIndex);
         if (candidateRetryTimer) clearTimeout(candidateRetryTimer);
         candidateRetryTimer = setTimeout(() => connect(), 200);
       } else {
@@ -932,6 +1343,7 @@ function scheduleReconnect(url?: string) {
 // Sessions this client has subscribed to during this app run. Used to
 // restore server-side subscriptions after a reconnect.
 const subscribedSessions = new Set<string>();
+const realtimeCursors = new Map<string, { epoch: number; sequence: number }>();
 // Tracks what was actually sent on the current socket. This is distinct from
 // subscribedSessions, which is the desired set restored after reconnects.
 const sentSessionSubscriptions = new Set<string>();
@@ -942,8 +1354,16 @@ function subscribeToSession(sessionId: string) {
   if (wsConnection?.readyState !== WebSocket.OPEN) return;
   if (sentSessionSubscriptions.has(sessionId)) return;
   sentSessionSubscriptions.add(sessionId);
+  const ordered = orderedSessions.get(sessionId);
   wsConnection.send(
-    JSON.stringify({ type: 'subscribe_session', sessionId, timestamp: Date.now() }),
+    JSON.stringify({
+      type: 'subscribe_session',
+      sessionId,
+      ...(ordered?.buffer.initialized
+        ? { epoch: ordered.buffer.epoch, afterSequence: ordered.buffer.lastApplied }
+        : {}),
+      timestamp: Date.now(),
+    }),
   );
 }
 
@@ -971,15 +1391,22 @@ function sendMessage(
   content: string,
   model?: string,
   reasoningLevel?: string,
-  attachments?: Array<{ type: string; data: string; name: string }>,
+  attachments?: Array<{ type: string; data: string; name: string; mimeType?: string }>,
+  interactionMode: 'act' | 'plan' = 'act',
 ) {
-  feedStore.addUserMessage(sessionId, content, attachments);
   markSessionBusy(sessionId);
   detectedContext = [];
   void apiFetch(apiUrl('/api/messages'), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ sessionId, content, model, reasoningLevel, attachments }),
+    body: JSON.stringify({
+      sessionId,
+      content,
+      model,
+      reasoningLevel,
+      attachments,
+      interactionMode,
+    }),
   })
     .then(async (res) => {
       const data = await parseJsonResponse<{ ok?: boolean; error?: string }>(res);
@@ -1051,6 +1478,7 @@ function sendUserInput(sessionId: string, selection: string, text?: string) {
           sessionId,
           selection,
           text,
+          questionId: pendingQuestions.get(sessionId)?.questionId,
           timestamp: Date.now(),
         }),
       );
@@ -1120,9 +1548,11 @@ async function loadSessionMessages(
     content: string;
     createdAt: number;
     model?: string;
+    provider?: string;
     cost?: number;
     variantGroupId?: string;
     variantIndex?: number;
+    kind?: string;
   }>,
   options: { generation?: number; signal?: AbortSignal } = {},
 ) {
@@ -1143,25 +1573,102 @@ async function loadSessionMessages(
 
 async function rewind(hash: string) {
   const sessionId = sessionStore.activeSessionId;
-  if (!sessionId) return;
+  if (!sessionId || rewindPreviewLoadingHash) return;
+  if (busySessions.has(sessionId) || agentStore.isSessionRunning(sessionId)) {
+    toastStore.info('Stop the active run before rewinding this session');
+    return;
+  }
 
+  rewindPreviewLoadingHash = hash;
   try {
-    const res = await apiFetch(apiUrl(`/api/sessions/${sessionId}/rewind`), {
+    const res = await apiFetch(apiUrl(`/api/sessions/${sessionId}/rewind/preview`), {
       method: 'POST',
       body: JSON.stringify({ hash }),
     });
+    const data = await parseJsonResponse<{
+      ok?: boolean;
+      data?: Omit<RewindPreview, 'sessionId'>;
+      message?: string;
+    }>(res);
+    if (!data.ok || !data.data)
+      throw new Error(data.message ?? 'Checkpoint cannot be safely restored');
+    rewindPreview = { ...data.data, sessionId };
+  } catch (err) {
+    console.error('Rewind failed:', err);
+    toastStore.error(err instanceof Error ? err.message : 'Rewind preview failed');
+  } finally {
+    rewindPreviewLoadingHash = null;
+  }
+}
+
+function cancelRewind() {
+  if (!rewindApplying) rewindPreview = null;
+}
+
+async function confirmRewind() {
+  const preview = rewindPreview;
+  if (!preview || rewindApplying) return;
+  const sessionId = preview.sessionId;
+  if (sessionStore.activeSessionId !== sessionId) {
+    rewindPreview = null;
+    toastStore.error('The active session changed. Open the rewind preview again.');
+    return;
+  }
+  rewindApplying = true;
+  try {
+    const res = await apiFetch(apiUrl(`/api/sessions/${sessionId}/rewind`), {
+      method: 'POST',
+      body: JSON.stringify({
+        hash: preview.targetHash,
+        expectedCurrentHash: preview.currentHash,
+        confirmed: true,
+      }),
+    });
+    const data = await parseJsonResponse<{ ok?: boolean; message?: string }>(res);
+    if (!data.ok) throw new Error(data.message ?? 'Rewind failed');
+    rewindPreview = null;
+    toastStore.success('Session rewound successfully');
+    const messages = await sessionStore.fetchMessages(sessionId);
+    await loadSessionMessages(sessionId, messages);
+    window.dispatchEvent(new CustomEvent('kory:rewind-applied', { detail: { sessionId } }));
+  } catch (err) {
+    toastStore.error(err instanceof Error ? err.message : 'Rewind failed');
+  } finally {
+    rewindApplying = false;
+  }
+}
+
+async function timeTravelAction(endpoint: 'undo' | 'redo', successLabel: string) {
+  const sessionId = sessionStore.activeSessionId;
+  if (!sessionId) {
+    toastStore.error('No active session');
+    return;
+  }
+
+  try {
+    const res = await apiFetch(apiUrl(`/api/sessions/${sessionId}/${endpoint}`), {
+      method: 'POST',
+    });
     const data = await parseJsonResponse<{ ok?: boolean; message?: string }>(res);
     if (data.ok) {
-      toastStore.success('Rewound successfully');
+      toastStore.success(successLabel);
       const messages = await sessionStore.fetchMessages(sessionId);
       await loadSessionMessages(sessionId, messages);
     } else {
-      toastStore.error(`Rewind failed: ${data.message}`);
+      toastStore.error(data.message ?? 'Nothing to do');
     }
   } catch (err) {
-    console.error('Rewind failed:', err);
-    toastStore.error('Rewind failed');
+    console.error(`${endpoint} failed:`, err);
+    toastStore.error(`${endpoint} failed`);
   }
+}
+
+async function undo() {
+  await timeTravelAction('undo', 'Undone');
+}
+
+async function redo() {
+  await timeTravelAction('redo', 'Redone');
 }
 
 function toggleYolo() {
@@ -1208,6 +1715,10 @@ export const wsStore = {
   get isLoadingSession() {
     return feedStore.isLoadingSession;
   },
+  get isTimelineSyncing() {
+    const sessionId = sessionStore.activeSessionId;
+    return !!sessionId && timelineSyncingSessions.has(sessionId);
+  },
   get agentThreadVersion() {
     return agentStore.agentThreadVersion;
   },
@@ -1232,11 +1743,32 @@ export const wsStore = {
   get sessionChanges() {
     return sessionChanges;
   },
+  get rewindPreview() {
+    return rewindPreview;
+  },
+  get rewindApplying() {
+    return rewindApplying;
+  },
+  get rewindPreviewLoadingHash() {
+    return rewindPreviewLoadingHash;
+  },
   get activeFileEdits() {
     return activeFileEdits;
   },
   get managerStatus() {
     return agentStore.getManagerStatus();
+  },
+  /** Exact activity state for one session. Never use the shared manager's
+   * last event as a proxy here: another chat may still be running. */
+  getSessionStatus: (sessionId: string | null | undefined) => {
+    if (!sessionId) return 'idle';
+    if (agentStore.isSessionWaiting(sessionId)) return 'waiting';
+    if (agentStore.isSessionRunning(sessionId)) {
+      return sessionId === sessionStore.activeSessionId && agentStore.getManagerStatus() !== 'idle'
+        ? agentStore.getManagerStatus()
+        : 'thinking';
+    }
+    return busySessions.has(sessionId) ? 'thinking' : 'idle';
   },
   get contextUsage() {
     return agentStore.getContextUsage();
@@ -1254,6 +1786,7 @@ export const wsStore = {
   markSessionAgentsStopped,
   markAgentStopped: agentStore.markAgentStopped,
   clearSessionBusy,
+  stopBusyWatchdog,
   clearAnalyzing: feedStore.removeAnalyzingThoughtEntries,
   addClientError: feedStore.addClientError,
   finishSessionLoad: feedStore.finishSessionLoad,
@@ -1277,6 +1810,8 @@ export const wsStore = {
   clearFeed,
   activateSessionFeed,
   rewind,
+  undo,
+  redo,
   toggleYolo,
   setYoloMode,
   loadProvidersFromApi,
