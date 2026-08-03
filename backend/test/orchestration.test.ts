@@ -14,7 +14,7 @@ import { isCatastrophicBashCommand, requiresCatastrophicConfirmation } from '../
 import { AskUserTool, AskManagerTool, DelegateToWorkerTool } from '../src/tools/interaction';
 import type { Session, AgentIdentity, WSMessage } from '@koryphaios/shared';
 import { DOMAIN } from '../src/constants';
-import { compilePrompt, createTaskContract, loadRepositoryInstructions } from '../src/kory/prompts';
+import { compilePrompt, createTaskContract, loadRepositoryInstructions, requiresMultiAgentDelegation } from '../src/kory/prompts';
 import { buildIntentDiscoveryBatch } from '../src/kory/clarification-gate';
 import {
   buildEvalRunPlan,

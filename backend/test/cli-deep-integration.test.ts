@@ -257,6 +257,9 @@ describe('Rules & skills mirroring', () => {
     expect(orchSkill!.body).toContain('Manager');
     expect(orchSkill!.body).toContain('Worker');
     expect(orchSkill!.body).toContain('Critic');
+    expect(orchSkill!.body).toContain('Suggest Goal Mode');
+    expect(orchSkill!.body).toContain('reusable workflow');
+    expect(orchSkill!.body).toContain('explicit user approval');
   });
 
   test('writeAllCliRulesAndSkills writes rules files for all CLIs', () => {

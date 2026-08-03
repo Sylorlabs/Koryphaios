@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'bun:test';
-import { db, sessions } from '../db';
+import { db, sessions, sessionCompactions } from '../db';
+import { eq } from 'drizzle-orm';
 import { MessageStore } from './message-store';
 
 describe('MessageStore history editing', () => {
@@ -75,5 +76,65 @@ describe('MessageStore history editing', () => {
       content: 'inspect this edited version',
       attachments: [{ type: 'image', name: 'screen.png', mimeType: 'image/png' }],
     });
+  });
+
+  it('atomically advances context while preserving the original revision as local history', async () => {
+    const suffix = `${Date.now()}-${Math.random()}`;
+    const sessionId = `compact-${suffix}`;
+    await db
+      .insert(sessions)
+      .values({
+        id: sessionId,
+        title: 'Compaction test',
+        createdAt: new Date(1_000),
+        updatedAt: new Date(1_000),
+      });
+    const store = new MessageStore();
+    await store.add(sessionId, {
+      id: `u-${suffix}`,
+      sessionId,
+      role: 'user',
+      content: 'Original request',
+      createdAt: 2_000,
+    });
+    await store.add(sessionId, {
+      id: `a-${suffix}`,
+      sessionId,
+      role: 'assistant',
+      content: 'Original answer',
+      createdAt: 3_000,
+    });
+
+    await store.commitCompaction({
+      id: `c-${suffix}`,
+      sessionId,
+      provider: 'codex',
+      model: 'gpt-test',
+      automatic: false,
+      summary: '# Compacted Session Checkpoint\n\nA sufficiently detailed continuation checkpoint.',
+      sourceMessageCount: 2,
+      sourceTokens: 100,
+      checkpointTokens: 20,
+    });
+
+    expect(await store.getAll(sessionId)).toHaveLength(3);
+    expect(await store.getContextMessages(sessionId)).toMatchObject([
+      { role: 'system', contextRevision: 1, content: expect.stringContaining('[KORY_COMPACTION]') },
+    ]);
+    await store.add(sessionId, {
+      id: `next-${suffix}`,
+      sessionId,
+      role: 'user',
+      content: 'Continue',
+      createdAt: 4_000,
+    });
+    const activeContents = (await store.getContextMessages(sessionId)).map(
+      (message) => message.content,
+    );
+    expect(activeContents).toContain('Continue');
+    expect(activeContents.some((content) => content.includes('[KORY_COMPACTION]'))).toBe(true);
+    expect(
+      await db.select().from(sessionCompactions).where(eq(sessionCompactions.sessionId, sessionId)),
+    ).toHaveLength(1);
   });
 });

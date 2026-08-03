@@ -8,6 +8,7 @@ export type FeedEntryType =
   | 'routing'
   | 'error'
   | 'system'
+  | 'compaction'
   | 'tool_group'
   | 'agent_group';
 

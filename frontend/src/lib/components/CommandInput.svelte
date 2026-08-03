@@ -874,7 +874,7 @@
   const AGENT_MODE_OPTIONS = [
     { value: 'auto', label: 'Auto', description: 'Kory decides per task', icon: Sparkles },
     { value: 'single', label: 'Single Agent', description: 'One agent handles everything', icon: User },
-    { value: 'multi', label: 'Multi-Agent', description: 'Always delegate to specialist workers', icon: Users },
+    { value: 'multi', label: 'Multi-Agent', description: 'Enforce workers and parallelize when useful', icon: Users },
   ] as const;
 
   function setAgentExecutionMode(next: 'auto' | 'single' | 'multi') {
