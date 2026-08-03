@@ -178,7 +178,26 @@
   // Active composer model (bound from CommandInput) so we can surface the
   // active CLI provider's own /commands in the slash picker.
   let activeComposerModel = $state<string>('');
+  let lastComposerTarget = $state('');
   let nativeCommands = $state<{ label: string; commands: NativeSlashCommand[] } | null>(null);
+
+  // A worker tab is a direct conversation with that worker. Keep the composer
+  // identity truthful when the tab changes so a Gemini/Claude worker never
+  // appears to be running the manager's Codex model. A manual model choice is
+  // preserved until the user changes tabs again.
+  $effect(() => {
+    const agent = agentRail.selectedAgent;
+    const target = agent
+      ? `agent:${agent.identity.id}:${agent.identity.provider}:${agent.identity.model}`
+      : 'manager';
+    if (target === lastComposerTarget) return;
+    lastComposerTarget = target;
+    activeComposerModel = agent
+      ? `${agent.identity.provider}:${agent.identity.model}`
+      : isDemoMode
+        ? 'codex:gpt-5.6-sol'
+        : '';
+  });
 
   // Fetch native commands whenever the active provider is a CLI harness.
   $effect(() => {
