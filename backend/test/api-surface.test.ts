@@ -15,7 +15,6 @@ const { authRoutes } = await import('../src/routes/v1/auth');
 const { agentSettingsRoutes } = await import('../src/routes/v1/agent-settings');
 const { gitRoutes } = await import('../src/routes/v1/git');
 const { memoryRoutes } = await import('../src/routes/v1/memory');
-const { modeRoutes } = await import('../src/routes/v1/mode');
 const { spendRoutes } = await import('../src/routes/v1/spend');
 const { spendCapsRoutes } = await import('../src/routes/v1/spend-caps');
 const { billingRoutes } = await import('../src/routes/v1/billing');
@@ -44,7 +43,6 @@ const app = new Elysia()
   .use(agentSettingsRoutes)
   .use(gitRoutes)
   .use(memoryRoutes)
-  .use(modeRoutes)
   .use(spendRoutes)
   .use(spendCapsRoutes)
   .use(billingRoutes)
@@ -125,6 +123,10 @@ const protectedRoutes: RouteCheck[] = [
   { method: 'POST', path: '/api/git/merge', body: { branch: 'main' } },
   { method: 'POST', path: '/api/git/push' },
   { method: 'POST', path: '/api/git/pull' },
+  { method: 'GET', path: '/api/memory/documents' },
+  { method: 'POST', path: '/api/memory/documents', body: { name: 'decisions', kind: 'memory' } },
+  { method: 'GET', path: '/api/memory/documents/memory/decisions.md' },
+  { method: 'PUT', path: '/api/memory/documents/memory/decisions.md', body: { content: '# Decisions' } },
   { method: 'GET', path: '/api/memory/universal' },
   { method: 'PUT', path: '/api/memory/universal', body: { content: 'Universal memory' } },
   { method: 'POST', path: '/api/memory/universal/init' },
@@ -143,9 +145,6 @@ const protectedRoutes: RouteCheck[] = [
   { method: 'POST', path: '/api/memory/settings/reset' },
   { method: 'GET', path: '/api/memory/context?sessionId=s1' },
   { method: 'GET', path: '/api/memory/stats?sessionId=s1' },
-  { method: 'GET', path: '/api/mode' },
-  { method: 'PUT', path: '/api/mode', body: { mode: 'advanced' } },
-  { method: 'POST', path: '/api/mode/toggle' },
   { method: 'GET', path: '/api/spend/status?sessionId=s1' },
   { method: 'POST', path: '/api/spend/reset-session', body: { sessionId: 's1' } },
   { method: 'GET', path: '/api/spend-caps/config' },

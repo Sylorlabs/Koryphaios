@@ -16,13 +16,14 @@ import {
   getLocalTotals,
   getLocalTotalsByProvider,
   getLatestCloudSnapshots,
+  getKoryAccountUsage,
 } from './db';
 import { startCreditPolling, stopCreditPolling, type PollingConfig } from './polling';
 
 const DRIFT_THRESHOLD_PERCENT = 5;
 
 export { getModelCost2026, computeCost2026 } from './models';
-export { initCreditDb, getLocalTotals, getLocalTotalsByProvider, getLatestCloudSnapshots } from './db';
+export { initCreditDb, getLocalTotals, getLocalTotalsByProvider, getLatestCloudSnapshots, getKoryAccountUsage } from './db';
 export { startCreditPolling, stopCreditPolling, type PollingConfig } from './polling';
 export { createUsageInterceptingFetch } from './usage-interceptor';
 
@@ -35,6 +36,7 @@ export function recordUsage(
   provider: string,
   tokensIn: number,
   tokensOut: number,
+  attribution?: { accountId?: string; sessionId?: string },
 ): void {
   if (!model.trim() || !provider.trim() || (tokensIn <= 0 && tokensOut <= 0)) return;
   // Real prices: models.dev live catalog → static ModelDef catalog. Unpriced
@@ -44,7 +46,7 @@ export function recordUsage(
     ? null
     : computeCostUsd(provider, model, tokensIn ?? 0, tokensOut ?? 0);
   const costUsd = priced?.costUsd ?? 0;
-  dbRecordUsage(model, provider, tokensIn ?? 0, tokensOut ?? 0, costUsd);
+  dbRecordUsage(model, provider, tokensIn ?? 0, tokensOut ?? 0, costUsd, attribution);
 }
 
 /**

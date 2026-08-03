@@ -5,6 +5,21 @@ import type { ModelDef } from '@koryphaios/shared';
  */
 export const CodexModels: ModelDef[] = [
   {
+    id: 'gpt-5.6-sol',
+    name: 'GPT-5.6 Sol',
+    provider: 'codex',
+    apiModelId: 'gpt-5.6-sol',
+    contextWindow: 1_050_000,
+    maxOutputTokens: 128_000,
+    costPerMInputTokens: 0,
+    costPerMOutputTokens: 0,
+    canReason: true,
+    reasoningLevels: ['none', 'low', 'medium', 'high', 'xhigh', 'max'],
+    supportsAttachments: true,
+    supportsStreaming: true,
+    tier: 'flagship',
+  },
+  {
     id: 'gpt-5.5',
     name: 'GPT 5.5',
     provider: 'codex',

@@ -8,13 +8,14 @@ import { browser } from '$app/environment';
 import { friendlyHttpError } from '$lib/utils/http-error';
 import { apiUrl } from '$lib/utils/api-url';
 import { apiFetch } from '$lib/api.svelte';
+import { wsStore } from './websocket.svelte';
 
 const LAST_SESSION_KEY = 'koryphaios-last-session';
 const NEW_CHAT_BEHAVIOR_KEY = 'koryphaios-new-chat-behavior';
 
 export type NewChatBehavior = 'always-create';
 
-let sessions = $state<Session[]>([]);
+let sessions = $state.raw<Session[]>([]);
 let activeSessionId = $state<string>('');
 let searchQuery = $state<string>('');
 let loading = $state<boolean>(false);
@@ -108,6 +109,9 @@ async function fetchSessions(): Promise<boolean> {
       // reconnects. Only the newest response may alter selection or the list.
       if (myGeneration !== fetchGeneration) return true;
       sessions = data.data;
+      // The DB is now the source of truth — clear the deleted-session guard
+      // so legitimate new sessions (e.g. created in another tab) can appear.
+      deletedSessionIds.clear();
       const lastSessionId = hasRestoredInitialSession ? '' : loadLastSession();
       hasRestoredInitialSession = true;
 
@@ -175,7 +179,7 @@ async function newChat(_opts: { shift?: boolean } = {}): Promise<string | null> 
 }
 
 async function createSession(
-  opts: { workingDirectory?: string | null } = {},
+  opts: { workingDirectory?: string | null; title?: string } = {},
 ): Promise<string | null> {
   if (createSessionPromise) return createSessionPromise;
   createSessionPromise = createSessionRequest(opts);
@@ -187,7 +191,7 @@ async function createSession(
 }
 
 async function createSessionRequest(
-  opts: { workingDirectory?: string | null } = {},
+  opts: { workingDirectory?: string | null; title?: string } = {},
 ): Promise<string | null> {
   try {
     const workingDirectory = opts.workingDirectory ?? null;
@@ -197,7 +201,7 @@ async function createSessionRequest(
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        title: 'New Session',
+        title: opts.title?.trim() || 'New Session',
         ...(workingDirectory ? { workingDirectory } : {}),
       }),
     });
@@ -233,6 +237,23 @@ async function createSessionRequest(
     toastStore.error('Failed to create session');
   }
   return null;
+}
+
+async function setInteractionMode(id: string, interactionMode: 'act' | 'plan'): Promise<boolean> {
+  try {
+    const res = await apiFetch(apiUrl(`/api/sessions/${id}`), {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ interactionMode }),
+    });
+    const data = await res.json();
+    if (!res.ok || !data?.ok || !data.data) throw new Error(data?.error ?? 'Mode update failed');
+    sessions = sessions.map((session) => session.id === id ? data.data : session);
+    return true;
+  } catch {
+    toastStore.error('Could not change the conversation mode');
+    return false;
+  }
 }
 
 async function renameSession(id: string, title: string) {
@@ -271,6 +292,7 @@ async function deleteSession(id: string) {
       toastStore.error(detail || friendlyHttpError(res.status, 'delete session'));
       return;
     }
+    deletedSessionIds.add(id);
     sessions = sessions.filter((s) => s.id !== id);
     if (activeSessionId === id) {
       activeSessionId = sessions[0]?.id ?? '';
@@ -290,6 +312,7 @@ async function fetchMessages(sessionId: string, signal?: AbortSignal): Promise<
     content: string;
     createdAt: number;
     model?: string;
+    provider?: string;
     cost?: number;
     variantGroupId?: string;
     variantIndex?: number;
@@ -344,8 +367,17 @@ function groupByDate(sessionList: Session[]): SessionGroup[] {
     .map(([label, list]) => ({ label, sessions: list }));
 }
 
+// Track sessions deleted during this app run so a late `session.updated`
+// WebSocket event can't silently re-add them to the sidebar before the next
+// full refetch reconciles with the DB.
+const deletedSessionIds = new Set<string>();
+
 // Handle WebSocket updates to sessions
 function handleSessionUpdate(session: Session) {
+  // Never re-add a session the user just deleted — a pending title-generation
+  // or spend-cap broadcast can arrive after the DELETE resolves and would
+  // otherwise resurrect the row in the sidebar until the next manual refresh.
+  if (deletedSessionIds.has(session.id)) return;
   const existingIndex = sessions.findIndex((s) => s.id === session.id);
   if (existingIndex >= 0) {
     // Update existing session
@@ -357,6 +389,9 @@ function handleSessionUpdate(session: Session) {
 }
 
 function handleSessionDeleted(sessionId: string) {
+  wsStore.stopBusyWatchdog(sessionId);
+  wsStore.clearSessionBusy(sessionId);
+  deletedSessionIds.add(sessionId);
   sessions = sessions.filter((s) => s.id !== sessionId);
   if (activeSessionId === sessionId) {
     activeSessionId = sessions[0]?.id ?? '';
@@ -425,6 +460,7 @@ export const sessionStore = {
   renameSession,
   deleteSession,
   fetchMessages,
+  setInteractionMode,
   handleSessionUpdate,
   handleSessionDeleted,
 };

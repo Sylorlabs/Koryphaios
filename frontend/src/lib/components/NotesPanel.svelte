@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount, onDestroy, tick } from 'svelte';
+  import { onMount, tick } from 'svelte';
   import {
     Search,
     Plus,
@@ -29,7 +29,6 @@
   import { toastStore } from '$lib/stores/toast.svelte';
   import { apiUrl } from '$lib/utils/api-url';
   import { authStore } from '$lib/stores/auth.svelte';
-  import { projectStore } from '$lib/stores/project.svelte';
   import NotesGraph from './NotesGraph.svelte';
   import NotesCanvas from './NotesCanvas.svelte';
   import VirtualList from './VirtualList.svelte';
@@ -105,9 +104,7 @@
   let tags = $state<string[]>([]);
   let showTagMenu = $state(false);
   let availableTags = $derived(
-    [...new Set(notesStore.notes.flatMap((note) => note.tags ?? []))]
-      .filter((tag) => !tags.includes(tag))
-      .slice(0, 8),
+    notesStore.allTags.filter((tag) => !tags.includes(tag)).slice(0, 8),
   );
   let pinned = $state(false);
   let includeInContext = $state(false);
@@ -271,10 +268,20 @@
 
   // ── Load on mount ─────────────────────────────────────────────────────────
   onMount(() => {
+    notesStore.isPanelOpen = true;
     window.addEventListener('keydown', handleGlobalKeydown);
     window.addEventListener('open-notes-graph', handleOpenGraphEvent);
     updateNarrow();
     window.addEventListener('resize', updateNarrow);
+    return () => {
+      notesStore.isPanelOpen = false;
+      window.removeEventListener('keydown', handleGlobalKeydown);
+      window.removeEventListener('open-notes-graph', handleOpenGraphEvent);
+      window.removeEventListener('resize', updateNarrow);
+      if (autosaveTimer) clearTimeout(autosaveTimer);
+      if (searchDebounceTimer) clearTimeout(searchDebounceTimer);
+      if (previewRenderTimer) clearTimeout(previewRenderTimer);
+    };
   });
 
   // "Open Graph View" (Settings → Notes) must land ON the graph, not the editor.
@@ -282,25 +289,6 @@
     activeView = 'graph';
     void notesStore.fetchGraph();
   }
-
-  onDestroy(() => {
-    window.removeEventListener('keydown', handleGlobalKeydown);
-    window.removeEventListener('open-notes-graph', handleOpenGraphEvent);
-    window.removeEventListener('resize', updateNarrow);
-    if (autosaveTimer) clearTimeout(autosaveTimer);
-    if (searchDebounceTimer) clearTimeout(searchDebounceTimer);
-    if (previewRenderTimer) clearTimeout(previewRenderTimer);
-  });
-
-  $effect(() => {
-    const projectPath = projectStore.currentPath;
-    if (projectPath)
-      void Promise.all([
-        notesStore.fetchNotes(),
-        notesStore.fetchFolderTree(),
-        notesStore.fetchGraph(),
-      ]);
-  });
 
   // ── Mermaid diagrams ──────────────────────────────────────────────────────
   // marked emits <div.mermaid-block data-mermaid="base64src">; after the preview
@@ -424,8 +412,6 @@
       includeInContext,
     });
     isDirty = false;
-    // Refresh graph if in graph view
-    if (activeView === 'graph') await notesStore.fetchGraph();
   }
 
   async function deleteCurrentNote() {

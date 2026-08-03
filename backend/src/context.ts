@@ -14,7 +14,7 @@ export interface AppContext {
   config: AppConfig;
   providers: ProviderRegistry;
   tools: ToolRegistry;
-  mcpManager: MCPManager;
+  mcpManagerPromise: Promise<MCPManager>;
   sessions: SessionStore;
   messages: MessageStore;
   tasks: TaskStore;

@@ -83,7 +83,7 @@
 
         {#if !showOther}
           <div class="space-y-2">
-            {#each pendingQuestion.options as option}
+            {#each pendingQuestion.options as option (option)}
               <button
                 class="w-full flex items-center justify-between px-4 py-3 text-left text-sm rounded-xl transition-all border border-[var(--color-border)] bg-[var(--color-surface-2)] hover:bg-[var(--color-surface-3)] hover:border-amber-500/50 group"
                 onclick={() => select(option)}

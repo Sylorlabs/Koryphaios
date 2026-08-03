@@ -1,6 +1,7 @@
 <script lang="ts">
   import { EXISTING_PROVIDER_ICON_PATHS } from './provider-icon-assets';
   import { base } from '$app/paths';
+  import { Laptop } from 'lucide-svelte';
 
   interface Props {
     provider: string;
@@ -61,7 +62,6 @@
     opencodezen: ['opencode'],
     opencodego: ['opencode'],
     copilot: ['githubcopilot'],
-    github: ['github'],
     gitlab: ['gitlab'],
     v0: ['v0'],
     local: ['local', 'lmstudio'],
@@ -74,7 +74,6 @@
     blackforestlabs: ['bfl'],
     'novita-ai': ['novita'],
     llama: ['meta', 'meta-brand'],
-    'github-models': ['github'],
     cline: ['cline'],
     cerebras: ['cerebras'],
     klingai: ['kling'],
@@ -113,6 +112,12 @@
     'cerebras',
   ]);
 
+  // A small set of official remote favicons are monochrome marks rather than
+  // brand-color artwork. They need the same dark/light treatment as bundled
+  // currentColor SVGs; applying it to every remote asset would distort colored
+  // provider identities.
+  const themeAdaptiveOfficialProviders = new Set(['moark', 'prodia']);
+
   // Cortecs does not publish an icon through the bundled LobeHub set. Use the
   // avatar from its verified Hugging Face organization instead of a fabricated
   // fallback mark.
@@ -130,10 +135,12 @@
     // marks keep a configured card from degrading into a generic placeholder.
     modal: 'https://modal.com/assets/favicon.svg',
     portkey: 'https://framerusercontent.com/images/pkFK3AGXHirogqiN67JGtlnMVM.png',
+    // The vendors provide their own compact marks. Keep them as direct image
+    // candidates so a missing secondary asset cannot turn the provider into a
+    // generic placeholder; `referrerpolicy` below also avoids hotlink checks.
     gladia: 'https://gladia.io/favicon.svg',
-    lmnt: 'https://lmnt.com/lmnt.svg',
+    lmnt: 'https://lmnt.com/icon.svg',
     mem0: 'https://framerusercontent.com/images/2ys67ADJdvcyGmQnhp8vKWSq8.svg',
-    letta: 'https://www.letta.com/assets/images/webclip.png',
     mixedbread: 'https://www.mixedbread.com/favicon.ico',
     siliconflow: 'https://siliconflow.cn/favicon.ico',
     abacus: 'https://abacus.ai/favicon.ico',
@@ -178,7 +185,8 @@
     };
 
     const officialIcon = officialProviderIcons[normalized];
-    if (officialIcon) pushCandidate(officialIcon, false, true);
+    if (officialIcon)
+      pushCandidate(officialIcon, themeAdaptiveOfficialProviders.has(normalized), true);
 
     const pushColorCandidates = () => {
       for (const slug of slugs) {
@@ -261,6 +269,14 @@
       fill="currentColor"
     />
   </svg>
+{:else if provider.toLowerCase() === 'local'}
+  <Laptop
+    width={size}
+    height={size}
+    stroke-width={1.7}
+    class={`provider-icon local-provider-icon ${className}`}
+    aria-label="Local agent"
+  />
 {:else if provider.toLowerCase() === 'digitalocean'}
   <svg width={size} height={size} viewBox="0 0 24 24" class={`provider-icon ${className}`} role="img" aria-label="DigitalOcean logo">
     <circle cx="12" cy="12" r="10" fill="#0080ff" />
@@ -283,6 +299,7 @@
     class={`provider-icon ${currentCandidate.themeAdaptive ? 'theme-adaptive' : ''} ${className}`}
     loading="lazy"
     decoding="async"
+    referrerpolicy="no-referrer"
     onerror={() => {
       if (candidateIndex < iconCandidates.length - 1) {
         candidateIndex += 1;
@@ -317,6 +334,10 @@
 
   .cerebras-icon {
     color: var(--color-text-primary);
+  }
+
+  .local-provider-icon {
+    color: var(--color-accent);
   }
 
   :global(:root[data-theme='dark']) .theme-adaptive {

@@ -79,6 +79,8 @@ export interface AgentSettings {
   approvalThresholdFiles: number;
   /** Require human approval for changes >N lines */
   approvalThresholdLines: number;
+  /** Apply the configured file/line approval thresholds. @default false */
+  autonomyLimitsEnabled?: boolean;
   /** Experimental: Local Web Search (DuckDuckGo) */
   localWebSearch?: 'off' | 'on' | 'fallback';
   /** Experimental: Multi-source research requirements */

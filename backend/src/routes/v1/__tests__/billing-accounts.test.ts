@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import type { UserCredential } from '../../../services';
-import { configuredAccounts, withDetectedCliAccounts } from '../billing';
+import { configuredAccounts, summarizeProviderBalances, withDetectedCliAccounts } from '../billing';
+import { codexAttributionNote, codexSessionAttribution } from '../../../billing/cli-usage';
 
 function credential(overrides: Partial<UserCredential>): UserCredential {
   return {
@@ -16,6 +17,35 @@ function credential(overrides: Partial<UserCredential>): UserCredential {
 }
 
 describe('billing configured accounts', () => {
+  test('quarantines a profile that shares another Codex profile session history', () => {
+    const attribution = codexSessionAttribution([
+      { id: 'plus', label: 'codex', profileDir: '/profiles/plus' },
+      { id: 'pro', label: 'codex 2', profileDir: '/profiles/pro' },
+    ], (profileDir) => profileDir === '/profiles/pro' ? '/sessions/shared' : '/sessions/shared');
+    expect(attribution.get('plus')).toBeUndefined();
+    expect(attribution.get('pro')).toBe('Shares local session history with codex');
+  });
+
+  test('quarantines a session root whose reported plan conflicts with its login profile', () => {
+    expect(codexAttributionNote(undefined, 'plus', 'pro')).toBe(
+      'Session history reports a PRO plan, but this profile is PLUS',
+    );
+  });
+
+  test('uses successful live provider probes for the balance headline', () => {
+    expect(summarizeProviderBalances([
+      { provider: 'openrouter', availableUsd: 12.345, fetchedAt: 1 },
+      { provider: 'deepseek', availableUsd: null, fetchedAt: 1 },
+      { provider: 'moonshot', availableUsd: 3.21, fetchedAt: 1 },
+    ])).toEqual({ availableCents: 1556, providers: ['openrouter', 'moonshot'] });
+  });
+
+  test('does not invent a balance when every probe is unavailable', () => {
+    expect(summarizeProviderBalances([
+      { provider: 'openrouter', availableUsd: null, fetchedAt: 1 },
+    ])).toEqual({ availableCents: null, providers: [] });
+  });
+
   test('groups multiple credential fields into one labeled subscription account', () => {
     const metadata = JSON.stringify({ accountId: 'account-1', label: 'Work Codex' });
     const accounts = configuredAccounts([

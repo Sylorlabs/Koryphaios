@@ -4,7 +4,6 @@
 import type { UIModeConfig, ModeConfig } from '../types/ModeTypes';
 
 export const DEFAULT_BEGINNER_CONFIG: ModeConfig = {
-  hideGitPanel: true,
   autoCommit: true,
   simplifiedPrompts: true,
   maxWorkers: 2,
@@ -19,7 +18,6 @@ export const DEFAULT_BEGINNER_CONFIG: ModeConfig = {
 };
 
 export const DEFAULT_ADVANCED_CONFIG: ModeConfig = {
-  hideGitPanel: false,
   autoCommit: false,
   simplifiedPrompts: false,
   maxWorkers: 8,
@@ -34,7 +32,9 @@ export const DEFAULT_ADVANCED_CONFIG: ModeConfig = {
 };
 
 export const DEFAULT_UI_MODE_CONFIG: UIModeConfig = {
-  mode: 'beginner',
+  // Legacy configuration remains readable, but the application always starts
+  // with its autonomous, full-capability baseline.
+  mode: 'advanced',
   adaptiveThreshold: 10,
   beginner: DEFAULT_BEGINNER_CONFIG,
   advanced: DEFAULT_ADVANCED_CONFIG,

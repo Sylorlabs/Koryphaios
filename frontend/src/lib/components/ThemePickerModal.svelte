@@ -41,7 +41,7 @@
       <div class="p-3">
         <div class="text-[10px] uppercase tracking-wider mb-2" style="color: var(--color-text-muted);">Theme Preset</div>
         <div class="grid grid-cols-2 gap-1.5">
-          {#each theme.presets as preset}
+          {#each theme.presets as preset (preset.id)}
             <button
               class="flex items-center justify-between gap-2 px-3 py-2 rounded-lg text-xs transition-all border
                      {theme.preset === preset.id

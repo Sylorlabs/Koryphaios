@@ -39,6 +39,8 @@ export interface ProviderEvent {
   // tokensIn + tokensCache to get real context occupancy. Providers whose
   // prompt count already includes cached tokens (OpenAI-style) must omit this.
   tokensCache?: number;
+  /** Account selected by Koryphaios for this provider-emitted usage event. */
+  accountId?: string;
   finishReason?: 'end_turn' | 'tool_use' | 'max_tokens' | 'stop';
   error?: string;
   // file_edit (agentic providers): a file the agent just created/edited.
@@ -133,7 +135,7 @@ export interface Provider {
   listModels(): ModelDef[];
 
   /** Optional provider-level model refresh hook for cache reset/refresh control. */
-  refreshModels?: (forceRefresh?: boolean) => void;
+  refreshModels?: (forceRefresh?: boolean) => void | Promise<unknown>;
 }
 
 // ─── Provider factory ───────────────────────────────────────────────────────

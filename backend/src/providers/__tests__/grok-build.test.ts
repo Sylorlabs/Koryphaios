@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'bun:test';
 import {
   GrokBuildProvider,
+  buildGrokPromptJson,
   parseGrokCliModelsCache,
   parseGrokModelsOutput,
   parseGrokOutput,
@@ -131,6 +132,27 @@ describe('GrokBuildProvider', () => {
       | undefined;
     expect(err).toBeTruthy();
     expect(err!.error).toMatch(/not found|install|grok login/i);
+  });
+});
+
+describe('Grok Build multimodal prompt transport', () => {
+  it('preserves images as native ACP blocks for --prompt-json', () => {
+    const encoded = Buffer.from('png-bytes').toString('base64');
+    const blocks = JSON.parse(
+      buildGrokPromptJson('system', [
+        {
+          role: 'user',
+          content: [
+            { type: 'text', text: 'inspect' },
+            { type: 'image', imageData: encoded, imageMimeType: 'image/png' },
+          ],
+        },
+      ]),
+    );
+    expect(blocks).toContainEqual({ type: 'image', data: encoded, mimeType: 'image/png' });
+    expect(blocks.some((block: { text?: string }) => block.text?.includes('User: inspect'))).toBe(
+      true,
+    );
   });
 });
 

@@ -1,604 +1,335 @@
 <script lang="ts">
-  import { memoryStore, type MemoryFile, DEFAULT_SETTINGS } from "$lib/stores/memory.svelte";
-  import { agentSettingsStore } from "$lib/stores/agent-settings.svelte";
-  import { sessionStore } from "$lib/stores/sessions.svelte";
-  import SettingsSwitch from "$lib/components/SettingsSwitch.svelte";
-  import NumberStepper from "$lib/components/NumberStepper.svelte";
-  import SettingsPageIntro from "$lib/components/SettingsPageIntro.svelte";
-  import { 
-    Brain, 
-    FileText, 
-    MessageSquare, 
-    Settings2, 
+  import { marked } from 'marked';
+  import DOMPurify from 'dompurify';
+  import {
+    Brain,
     BookOpen,
-    Save,
-    RotateCcw,
+    ChevronDown,
+    ChevronRight,
+    FilePlus2,
+    FileText,
+    FolderOpen,
+    MessageSquare,
+    Pencil,
     Plus,
-    AlertCircle,
-    Check,
-    X
-  } from "lucide-svelte";
+    RotateCcw,
+    Save,
+    Search,
+    SlidersHorizontal,
+    Sparkles,
+    X,
+  } from 'lucide-svelte';
+  import { memoryStore, type MemoryFile, type ProjectMemoryDocument } from '$lib/stores/memory.svelte';
+  import { agentSettingsStore } from '$lib/stores/agent-settings.svelte';
+  import { sessionStore } from '$lib/stores/sessions.svelte';
+  import SettingsSwitch from '$lib/components/SettingsSwitch.svelte';
+  import NumberStepper from '$lib/components/NumberStepper.svelte';
 
-  // Props
-  interface Props {
-    onClose?: () => void;
-  }
+  type BuiltInId = 'universal' | 'project' | 'session' | 'rules';
+  type CustomDocument = ProjectMemoryDocument;
 
-  let { onClose }: Props = $props();
+  const builtInDocuments: Array<{
+    id: BuiltInId;
+    title: string;
+    description: string;
+    icon: typeof Brain;
+  }> = [
+    { id: 'project', title: 'Project memory', description: 'Shared memory for this workspace', icon: FolderOpen },
+    { id: 'rules', title: 'Project rules', description: 'Instructions and conventions', icon: BookOpen },
+    { id: 'session', title: 'Session memory', description: 'Memory for this conversation', icon: MessageSquare },
+    { id: 'universal', title: 'Universal memory', description: 'Memory shared across workspaces', icon: Brain },
+  ];
 
-  // Local state for editing
-  let universalContent = $state(memoryStore.universal?.content ?? "");
-  let projectContent = $state(memoryStore.project?.content ?? "");
-  let sessionContent = $state(memoryStore.session?.content ?? "");
-  let rulesContent = $state(memoryStore.rules?.content ?? "");
-  let newDocumentName = $state("");
-  let newDocumentKind = $state<'memory' | 'rules'>('memory');
+  let selectedBuiltIn = $state<BuiltInId>('project');
+  let selectedCustom = $state<CustomDocument | null>(null);
+  let customFile = $state<MemoryFile | null>(null);
+  let content = $state('');
+  let savedContent = $state('');
+  let editMode = $state(false);
+  let loadingDocument = $state(false);
+  let query = $state('');
+  let showPolicy = $state(false);
   let showNewDocument = $state(false);
-  
-  // Track dirty state
-  let dirty = $state({
-    universal: false,
-    project: false,
-    session: false,
-    rules: false,
-  });
+  let newDocumentName = $state('');
+  let newDocumentKind = $state<'memory' | 'rules'>('memory');
+  let memoryGroupOpen = $state(true);
+  let rulesGroupOpen = $state(true);
+  let isDirty = $derived(content !== savedContent);
+  let renderedContent = $derived(DOMPurify.sanitize(marked.parse(content || '*Nothing has been written here yet.*', { async: false }) as string));
+  let customMemoryDocuments = $derived(memoryStore.documents.filter((document) => document.kind === 'memory' && document.name !== 'project.md'));
+  let customRuleDocuments = $derived(memoryStore.documents.filter((document) => document.kind === 'rules' && document.name !== 'rules.md'));
 
-  // Sync local state when store updates
-  $effect(() => {
-    if (memoryStore.universal && !dirty.universal) {
-      universalContent = memoryStore.universal.content;
+  function getBuiltInFile(id: BuiltInId): MemoryFile | null {
+    if (id === 'universal') return memoryStore.universal;
+    if (id === 'project') return memoryStore.project;
+    if (id === 'session') return memoryStore.session;
+    return memoryStore.rules;
+  }
+
+  function getBuiltInDefinition(id: BuiltInId) {
+    return builtInDocuments.find((document) => document.id === id)!;
+  }
+
+  function currentFile(): MemoryFile | null {
+    return selectedCustom ? customFile : getBuiltInFile(selectedBuiltIn);
+  }
+
+  function currentTitle(): string {
+    return selectedCustom?.name.replace(/\.md$/i, '') ?? getBuiltInDefinition(selectedBuiltIn).title;
+  }
+
+  function currentDescription(): string {
+    return selectedCustom
+      ? selectedCustom.kind === 'memory' ? 'Project memory document' : 'Project rules document'
+      : getBuiltInDefinition(selectedBuiltIn).description;
+  }
+
+  function isSelectedBuiltIn(id: BuiltInId) {
+    return !selectedCustom && selectedBuiltIn === id;
+  }
+
+  function matches(document: { name?: string; title?: string; description?: string }) {
+    const term = query.trim().toLowerCase();
+    if (!term) return true;
+    return [document.name, document.title, document.description].filter(Boolean).some((value) => value!.toLowerCase().includes(term));
+  }
+
+  function applyBuiltInDocument(id: BuiltInId) {
+    const file = getBuiltInFile(id);
+    selectedBuiltIn = id;
+    selectedCustom = null;
+    customFile = null;
+    content = file?.content ?? '';
+    savedContent = file?.content ?? '';
+    editMode = false;
+    memoryStore.setActiveTab(id);
+  }
+
+  async function selectCustomDocument(document: CustomDocument) {
+    if (selectedCustom?.name === document.name && selectedCustom.kind === document.kind) return;
+    loadingDocument = true;
+    const file = await memoryStore.loadDocument(document.name, document.kind);
+    loadingDocument = false;
+    if (!file) return;
+    selectedCustom = document;
+    customFile = file;
+    content = file.content;
+    savedContent = file.content;
+    editMode = false;
+  }
+
+  async function initializeCurrentDocument() {
+    if (selectedCustom) return;
+    if (selectedBuiltIn === 'universal') await memoryStore.initializeUniversalMemory();
+    if (selectedBuiltIn === 'project') await memoryStore.initializeProjectMemory();
+    if (selectedBuiltIn === 'rules') await memoryStore.initializeRules();
+    if (selectedBuiltIn === 'session' && sessionStore.activeSessionId) await memoryStore.initializeSessionMemory(sessionStore.activeSessionId);
+    const file = getBuiltInFile(selectedBuiltIn);
+    content = file?.content ?? '';
+    savedContent = file?.content ?? '';
+  }
+
+  async function saveCurrentDocument() {
+    let success = false;
+    if (selectedCustom) {
+      const file = await memoryStore.saveDocument(selectedCustom.name, selectedCustom.kind, content);
+      if (file) {
+        customFile = file;
+        success = true;
+      }
+    } else if (selectedBuiltIn === 'universal') {
+      success = await memoryStore.saveUniversalMemory(content);
+    } else if (selectedBuiltIn === 'project') {
+      success = await memoryStore.saveProjectMemory(content);
+    } else if (selectedBuiltIn === 'rules') {
+      success = await memoryStore.saveRules(content);
+    } else if (sessionStore.activeSessionId) {
+      success = await memoryStore.saveSessionMemory(sessionStore.activeSessionId, content);
     }
-  });
-
-  $effect(() => {
-    if (memoryStore.project && !dirty.project) {
-      projectContent = memoryStore.project.content;
-    }
-  });
-
-  $effect(() => {
-    if (memoryStore.session && !dirty.session) {
-      sessionContent = memoryStore.session.content;
-    }
-  });
-
-  $effect(() => {
-    if (memoryStore.rules && !dirty.rules) {
-      rulesContent = memoryStore.rules.content;
-    }
-  });
-
-  // Handlers
-  async function handleSaveUniversal() {
-    if (await memoryStore.saveUniversalMemory(universalContent)) {
-      dirty.universal = false;
+    if (success) {
+      savedContent = content;
+      editMode = false;
     }
   }
 
-  async function handleSaveProject() {
-    if (await memoryStore.saveProjectMemory(projectContent)) {
-      dirty.project = false;
-    }
-  }
-
-  async function handleSaveSession() {
-    const sessionId = sessionStore.activeSessionId;
-    if (!sessionId) return;
-    if (await memoryStore.saveSessionMemory(sessionId, sessionContent)) {
-      dirty.session = false;
-    }
-  }
-
-  async function handleSaveRules() {
-    if (await memoryStore.saveRules(rulesContent)) {
-      dirty.rules = false;
-    }
+  function discardChanges() {
+    content = savedContent;
+    editMode = false;
   }
 
   async function createDocument() {
     if (!newDocumentName.trim()) return;
+    const name = newDocumentName.trim().replace(/\.md$/i, '') + '.md';
     if (await memoryStore.createDocument(newDocumentName, newDocumentKind)) {
+      const document = memoryStore.documents.find((item) => item.name === name && item.kind === newDocumentKind);
       newDocumentName = '';
       showNewDocument = false;
+      if (document) await selectCustomDocument(document);
     }
   }
 
-  function handleContentChange(type: keyof typeof dirty, value: string) {
-    switch (type) {
-      case "universal":
-        universalContent = value;
-        break;
-      case "project":
-        projectContent = value;
-        break;
-      case "session":
-        sessionContent = value;
-        break;
-      case "rules":
-        rulesContent = value;
-        break;
-    }
-    dirty[type] = true;
-  }
-
-  async function handleReset(type: keyof typeof dirty) {
-    switch (type) {
-      case "universal":
-        universalContent = memoryStore.universal?.content ?? "";
-        break;
-      case "project":
-        projectContent = memoryStore.project?.content ?? "";
-        break;
-      case "session":
-        sessionContent = memoryStore.session?.content ?? "";
-        break;
-      case "rules":
-        rulesContent = memoryStore.rules?.content ?? "";
-        break;
-    }
-    dirty[type] = false;
-  }
-
-  // Settings handlers
-  async function toggleSetting(key: keyof typeof DEFAULT_SETTINGS) {
+  function toggleSetting(key: 'universalMemoryEnabled' | 'projectMemoryEnabled' | 'sessionMemoryEnabled' | 'rulesEnabled' | 'autoIncludeInContext') {
     if (!memoryStore.settings) return;
-    const current = memoryStore.settings[key];
-    await memoryStore.saveSettings({ [key]: !current });
+    void memoryStore.saveSettings({ [key]: !memoryStore.settings[key] });
   }
 
-  function handleMaxTokensChange(value: number) {
-    void memoryStore.saveSettings({ maxContextTokens: value });
+  function formatDate(value: number | null | undefined) {
+    if (!value) return 'Not saved yet';
+    return new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' }).format(value);
   }
 
-  // Helper to format file info
-  function getFileInfo(file: MemoryFile | null) {
-    if (!file?.exists) {
-      return { exists: false, sizeKb: 0, date: "", path: file?.path ?? "" };
+  $effect(() => {
+    if (!selectedCustom && !isDirty) {
+      const file = getBuiltInFile(selectedBuiltIn);
+      if (file) {
+        content = file.content;
+        savedContent = file.content;
+      }
     }
-    return {
-      exists: true,
-      sizeKb: (file.size / 1024).toFixed(1),
-      date: file.lastModified ? new Date(file.lastModified).toLocaleDateString() : "Unknown",
-      path: file.path,
-    };
-  }
+  });
 </script>
 
-<div class="flex h-full min-h-0 min-w-0 flex-col">
-  <!-- Content -->
-  <div class="flex-1 min-h-0 overflow-hidden">
-    {#if memoryStore.isLoading}
-      <div class="flex items-center justify-center h-full">
-        <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-[var(--color-accent)]"></div>
+<div class="flex h-full min-h-0 min-w-0 flex-col bg-[var(--color-surface-0)]">
+  <header class="flex shrink-0 flex-wrap items-center justify-between gap-3 border-b border-[var(--color-border)] px-5 py-3.5">
+    <div>
+      <div class="flex items-center gap-2">
+        <Brain size={18} class="text-[var(--color-accent)]" />
+        <h3 class="text-base font-semibold text-[var(--color-text-primary)]">Memory</h3>
       </div>
-    {:else if memoryStore.activeTab === "universal"}
-      {@const info = getFileInfo(memoryStore.universal)}
-      <div class="flex h-full min-h-0 flex-col">
-        <div class="px-4 py-2 bg-[var(--color-surface-2)] border-b border-[var(--color-border)]">
-          <div class="flex items-center justify-between">
-            <div class="flex-1 min-w-0">
-              {#if !info.exists}
-                <div class="flex items-center gap-2 text-xs text-yellow-500">
-                  <AlertCircle size={14} />
-                  <span>Universal memory not initialized</span>
-                </div>
-              {:else}
-                <div class="flex items-center gap-4 text-xs text-gray-400">
-                  <span class="flex items-center gap-1">
-                    <Check size={12} class="text-green-500" />
-                    {info.sizeKb} KB
-                  </span>
-                  <span>Modified: {info.date}</span>
-                  <span class="text-gray-600 truncate max-w-[300px]" title={info.path}>
-                    {info.path}
-                  </span>
-                </div>
-              {/if}
-            </div>
-            <div class="flex items-center gap-2 ml-4">
-              <button type="button" onclick={() => memoryStore.setActiveTab('settings')} class="px-2 py-1 text-xs text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)]">Overview</button>
-              {#if !info.exists}
-                <button
-                  onclick={() => memoryStore.initializeUniversalMemory()}
-                  class="flex items-center gap-1 px-2 py-1 text-xs bg-purple-500/20 text-purple-400 rounded hover:bg-purple-500/30"
-                >
-                  <Plus size={12} />
-                  Initialize
-                </button>
-              {:else}
-                <button
-                  onclick={() => handleReset("universal")}
-                  disabled={!dirty.universal}
-                  class="flex items-center gap-1 px-2 py-1 text-xs rounded disabled:opacity-50
-                    {dirty.universal ? 'bg-yellow-500/20 text-yellow-400 hover:bg-yellow-500/30' : 'bg-[var(--color-surface-3)] text-[var(--color-text-muted)]'}"
-                >
-                  <RotateCcw size={12} />
-                  Reset
-                </button>
-                <button
-                  onclick={handleSaveUniversal}
-                  disabled={!dirty.universal}
-                  class="flex items-center gap-1 px-2 py-1 text-xs bg-green-500/20 text-green-400 rounded hover:bg-green-500/30 disabled:opacity-50"
-                >
-                  <Save size={12} />
-                  Save
-                </button>
-              {/if}
-            </div>
-          </div>
-        </div>
-        <textarea
-          bind:value={universalContent}
-          oninput={(e) => handleContentChange("universal", e.currentTarget.value)}
-          disabled={!info.exists}
-          placeholder={info.exists ? "Enter universal memory..." : "Initialize universal memory to start editing..."}
-          class="min-h-0 flex-1 w-full p-4 text-sm font-mono bg-[var(--color-surface-0)] text-[var(--color-text-primary)] resize-none focus:outline-none disabled:opacity-50"
-          spellcheck="false"
-        ></textarea>
+      <p class="mt-0.5 text-sm text-[var(--color-text-muted)]">Your memories, rules, and working context in one place.</p>
+    </div>
+    <div class="flex items-center gap-2">
+      <span class="hidden text-xs text-[var(--color-text-muted)] sm:inline">{[memoryStore.settings?.universalMemoryEnabled, memoryStore.settings?.projectMemoryEnabled, memoryStore.settings?.sessionMemoryEnabled, memoryStore.settings?.rulesEnabled].filter(Boolean).length} sources active</span>
+      <button type="button" class:!bg-[var(--color-surface-3)]={showPolicy} class="inline-flex items-center gap-2 rounded-lg border border-[var(--color-border)] px-3 py-2 text-xs font-medium text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-surface-2)]" onclick={() => showPolicy = !showPolicy} aria-expanded={showPolicy}>
+        <SlidersHorizontal size={14} /> Context policy
+      </button>
+      <button type="button" class="btn btn-primary inline-flex items-center gap-2 px-3 py-2 text-xs" onclick={() => showNewDocument = !showNewDocument}>
+        <Plus size={15} /> New document
+      </button>
+    </div>
+  </header>
+
+  <div class="flex min-h-0 flex-1">
+    <aside class="flex w-64 shrink-0 flex-col border-r border-[var(--color-border)] bg-[var(--color-surface-1)]">
+      <div class="p-3">
+        <label class="relative block">
+          <Search size={14} class="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[var(--color-text-muted)]" />
+          <input class="input h-9 w-full text-sm" style="padding-left: 2.5rem;" placeholder="Search memory" bind:value={query} aria-label="Search memory" />
+        </label>
       </div>
 
-    {:else if memoryStore.activeTab === "project"}
-      {@const info = getFileInfo(memoryStore.project)}
-      <div class="flex h-full min-h-0 flex-col">
-        <div class="px-4 py-2 bg-[var(--color-surface-2)] border-b border-[var(--color-border)]">
-          <div class="flex items-center justify-between">
-            <div class="flex-1 min-w-0">
-              {#if !info.exists}
-                <div class="flex items-center gap-2 text-xs text-yellow-500">
-                  <AlertCircle size={14} />
-                  <span>Project memory not initialized</span>
-                </div>
-              {:else}
-                <div class="flex items-center gap-4 text-xs text-gray-400">
-                  <span class="flex items-center gap-1">
-                    <Check size={12} class="text-green-500" />
-                    {info.sizeKb} KB
-                  </span>
-                  <span>Modified: {info.date}</span>
-                  <span class="text-gray-600 truncate max-w-[300px]" title={info.path}>
-                    {info.path}
-                  </span>
-                </div>
-              {/if}
-            </div>
-            <div class="flex items-center gap-2 ml-4">
-              <button type="button" onclick={() => memoryStore.setActiveTab('settings')} class="px-2 py-1 text-xs text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)]">Overview</button>
-              {#if !info.exists}
-                <button
-                  onclick={() => memoryStore.initializeProjectMemory()}
-                  class="flex items-center gap-1 px-2 py-1 text-xs bg-blue-500/20 text-blue-400 rounded hover:bg-blue-500/30"
-                >
-                  <Plus size={12} />
-                  Initialize
-                </button>
-              {:else}
-                <button
-                  onclick={() => handleReset("project")}
-                  disabled={!dirty.project}
-                  class="flex items-center gap-1 px-2 py-1 text-xs rounded disabled:opacity-50
-                    {dirty.project ? 'bg-yellow-500/20 text-yellow-400 hover:bg-yellow-500/30' : 'bg-[var(--color-surface-3)] text-[var(--color-text-muted)]'}"
-                >
-                  <RotateCcw size={12} />
-                  Reset
-                </button>
-                <button
-                  onclick={handleSaveProject}
-                  disabled={!dirty.project}
-                  class="flex items-center gap-1 px-2 py-1 text-xs bg-green-500/20 text-green-400 rounded hover:bg-green-500/30 disabled:opacity-50"
-                >
-                  <Save size={12} />
-                  Save
-                </button>
-              {/if}
-            </div>
-          </div>
-        </div>
-        <textarea
-          bind:value={projectContent}
-          oninput={(e) => handleContentChange("project", e.currentTarget.value)}
-          disabled={!info.exists}
-          placeholder={info.exists ? "Enter project memory..." : "Initialize project memory to start editing..."}
-          class="min-h-0 flex-1 w-full p-4 text-sm font-mono bg-[var(--color-surface-0)] text-[var(--color-text-primary)] resize-none focus:outline-none disabled:opacity-50"
-          spellcheck="false"
-        ></textarea>
-      </div>
-
-    {:else if memoryStore.activeTab === "session"}
-      {@const info = getFileInfo(memoryStore.session)}
-      <div class="flex h-full min-h-0 flex-col">
-        <div class="px-4 py-2 bg-[var(--color-surface-2)] border-b border-[var(--color-border)]">
-          <div class="flex items-center justify-between">
-            <div class="flex-1 min-w-0">
-              {#if !info.exists}
-                <div class="flex items-center gap-2 text-xs text-yellow-500">
-                  <AlertCircle size={14} />
-                  <span>Session memory not initialized</span>
-                </div>
-              {:else}
-                <div class="flex items-center gap-4 text-xs text-gray-400">
-                  <span class="flex items-center gap-1">
-                    <Check size={12} class="text-green-500" />
-                    {info.sizeKb} KB
-                  </span>
-                  <span>Modified: {info.date}</span>
-                  <span class="text-gray-600 truncate max-w-[300px]" title={info.path}>
-                    {info.path}
-                  </span>
-                </div>
-              {/if}
-            </div>
-            <div class="flex items-center gap-2 ml-4">
-              <button type="button" onclick={() => memoryStore.setActiveTab('settings')} class="px-2 py-1 text-xs text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)]">Overview</button>
-              {#if !info.exists}
-                <button
-                  onclick={() => {
-                    const sessionId = sessionStore.activeSessionId;
-                    if (sessionId) memoryStore.initializeSessionMemory(sessionId);
-                  }}
-                  disabled={!sessionStore.activeSessionId}
-                  class="flex items-center gap-1 px-2 py-1 text-xs bg-green-500/20 text-green-400 rounded hover:bg-green-500/30 disabled:opacity-50"
-                >
-                  <Plus size={12} />
-                  Initialize
-                </button>
-              {:else}
-                <button
-                  onclick={() => handleReset("session")}
-                  disabled={!dirty.session}
-                  class="flex items-center gap-1 px-2 py-1 text-xs rounded disabled:opacity-50
-                    {dirty.session ? 'bg-yellow-500/20 text-yellow-400 hover:bg-yellow-500/30' : 'bg-[var(--color-surface-3)] text-[var(--color-text-muted)]'}"
-                >
-                  <RotateCcw size={12} />
-                  Reset
-                </button>
-                <button
-                  onclick={handleSaveSession}
-                  disabled={!dirty.session}
-                  class="flex items-center gap-1 px-2 py-1 text-xs bg-green-500/20 text-green-400 rounded hover:bg-green-500/30 disabled:opacity-50"
-                >
-                  <Save size={12} />
-                  Save
-                </button>
-              {/if}
-            </div>
-          </div>
-        </div>
-        {#if !sessionStore.activeSessionId}
-          <div class="flex-1 flex items-center justify-center text-[var(--color-text-muted)]">
-            <div class="text-center">
-              <MessageSquare size={48} class="mx-auto mb-4 opacity-50" />
-              <p class="text-sm">No active session</p>
-              <p class="text-xs mt-1 opacity-70">Start a chat to manage session memory</p>
-            </div>
-          </div>
-        {:else}
-          <textarea
-            bind:value={sessionContent}
-            oninput={(e) => handleContentChange("session", e.currentTarget.value)}
-            disabled={!info.exists}
-            placeholder={info.exists ? "Enter session memory..." : "Initialize session memory to start editing..."}
-            class="min-h-0 flex-1 w-full p-4 text-sm font-mono bg-[var(--color-surface-0)] text-[var(--color-text-primary)] resize-none focus:outline-none disabled:opacity-50"
-            spellcheck="false"
-          ></textarea>
-        {/if}
-      </div>
-
-    {:else if memoryStore.activeTab === "rules"}
-      {@const info = getFileInfo(memoryStore.rules)}
-      <div class="flex h-full min-h-0 flex-col">
-        <div class="px-4 py-2 bg-[var(--color-surface-2)] border-b border-[var(--color-border)]">
-          <div class="flex items-center justify-between">
-            <div class="flex-1 min-w-0">
-              {#if !info.exists}
-                <div class="flex items-center gap-2 text-xs text-yellow-500">
-                  <AlertCircle size={14} />
-                  <span>Rules file not initialized</span>
-                </div>
-              {:else}
-                <div class="flex items-center gap-4 text-xs text-gray-400">
-                  <span class="flex items-center gap-1">
-                    <Check size={12} class="text-green-500" />
-                    {info.sizeKb} KB
-                  </span>
-                  <span>Modified: {info.date}</span>
-                  <span class="text-gray-600 truncate max-w-[300px]" title={info.path}>
-                    {info.path}
-                  </span>
-                </div>
-              {/if}
-            </div>
-            <div class="flex items-center gap-2 ml-4">
-              <button type="button" onclick={() => memoryStore.setActiveTab('settings')} class="px-2 py-1 text-xs text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)]">Overview</button>
-              {#if !info.exists}
-                <button
-                  onclick={() => memoryStore.initializeRules()}
-                  class="flex items-center gap-1 px-2 py-1 text-xs bg-orange-500/20 text-orange-400 rounded hover:bg-orange-500/30"
-                >
-                  <Plus size={12} />
-                  Initialize
-                </button>
-              {:else}
-                <button
-                  onclick={() => handleReset("rules")}
-                  disabled={!dirty.rules}
-                  class="flex items-center gap-1 px-2 py-1 text-xs rounded disabled:opacity-50
-                    {dirty.rules ? 'bg-yellow-500/20 text-yellow-400 hover:bg-yellow-500/30' : 'bg-[var(--color-surface-3)] text-[var(--color-text-muted)]'}"
-                >
-                  <RotateCcw size={12} />
-                  Reset
-                </button>
-                <button
-                  onclick={handleSaveRules}
-                  disabled={!dirty.rules}
-                  class="flex items-center gap-1 px-2 py-1 text-xs bg-green-500/20 text-green-400 rounded hover:bg-green-500/30 disabled:opacity-50"
-                >
-                  <Save size={12} />
-                  Save
-                </button>
-              {/if}
-            </div>
-          </div>
-        </div>
-        <textarea
-          bind:value={rulesContent}
-          oninput={(e) => handleContentChange("rules", e.currentTarget.value)}
-          disabled={!info.exists}
-          placeholder={info.exists ? "Enter rules..." : "Initialize rules to start editing..."}
-          class="min-h-0 flex-1 w-full p-4 text-sm font-mono bg-[var(--color-surface-0)] text-[var(--color-text-primary)] resize-none focus:outline-none disabled:opacity-50"
-          spellcheck="false"
-        ></textarea>
-      </div>
-
-    {:else if memoryStore.activeTab === "settings"}
-      <div class="flex h-full min-h-0 flex-col overflow-hidden">
-        <SettingsPageIntro title="Memory context" description="Decide what enters an agent’s working context and who can maintain it.">
-          <span class="rounded-full bg-[var(--color-surface-3)] px-2.5 py-1 text-[10px] text-[var(--color-text-muted)]">
-            {[
-              memoryStore.settings?.universalMemoryEnabled ?? true,
-              memoryStore.settings?.projectMemoryEnabled ?? true,
-              memoryStore.settings?.sessionMemoryEnabled ?? true,
-              memoryStore.settings?.rulesEnabled ?? true,
-            ].filter(Boolean).length} of 4 sources active
-          </span>
-          <button type="button" class="rounded-lg border border-[var(--color-border)] px-3 py-1.5 text-xs text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-surface-3)]" onclick={() => showNewDocument = !showNewDocument}>
-            <span class="inline-flex items-center gap-1.5"><Plus size={13} /> New document</span>
+      <nav class="min-h-0 flex-1 overflow-y-auto px-2 pb-4" aria-label="Memory documents">
+        <p class="px-2 pb-2 pt-1 text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--color-text-muted)]">Memory sources</p>
+        {#each builtInDocuments.filter(matches) as document (document.id)}
+          {@const Icon = document.icon}
+          <button type="button" class="mb-1 flex w-full items-start gap-2.5 rounded-lg px-2.5 py-2.5 text-left transition-colors {isSelectedBuiltIn(document.id) ? 'bg-[var(--color-surface-3)] text-[var(--color-text-primary)]' : 'text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-2)]'}" onclick={() => applyBuiltInDocument(document.id)}>
+            <Icon size={16} class="mt-0.5 shrink-0 {isSelectedBuiltIn(document.id) ? 'text-[var(--color-accent)]' : 'text-[var(--color-text-muted)]'}" />
+            <span class="min-w-0 flex-1"><span class="block truncate text-sm font-medium">{document.title}</span><span class="mt-0.5 block truncate text-xs text-[var(--color-text-muted)]">{document.description}</span></span>
           </button>
-        </SettingsPageIntro>
-        <div class="h-full overflow-y-auto p-5">
-          <div class="mx-auto max-w-5xl space-y-5">
-            {#if showNewDocument}
-              <section class="flex flex-wrap items-center gap-2 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-1)] p-3">
-                <input class="input h-8 min-w-48 flex-1 text-xs" placeholder="document-name" bind:value={newDocumentName} onkeydown={(event) => { if (event.key === 'Enter') void createDocument(); }} />
-                <div class="flex rounded-lg border p-0.5" style="border-color: var(--color-border);">
-                  {#each ['memory', 'rules'] as kind (kind)}
-                    <button type="button" class="rounded-md px-2 py-1 text-[10px]" style="background: {newDocumentKind === kind ? 'var(--color-surface-4)' : 'transparent'}; color: var(--color-text-primary);" onclick={() => newDocumentKind = kind as 'memory' | 'rules'}>{kind}</button>
-                  {/each}
-                </div>
-                <button type="button" class="btn btn-primary h-8 px-3 text-xs" onclick={() => void createDocument()}>Create</button>
-              </section>
+        {/each}
+
+        <div class="mt-4">
+          <button type="button" class="flex w-full items-center gap-1.5 px-2 py-2 text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)]" onclick={() => memoryGroupOpen = !memoryGroupOpen} aria-expanded={memoryGroupOpen}>
+            {#if memoryGroupOpen}<ChevronDown size={14} />{:else}<ChevronRight size={14} />{/if} Memory documents <span class="ml-auto normal-case tracking-normal">{customMemoryDocuments.length}</span>
+          </button>
+          {#if memoryGroupOpen}
+            {#if customMemoryDocuments.filter(matches).length}
+              {#each customMemoryDocuments.filter(matches) as document (document.path)}
+                <button type="button" class="mb-1 flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm transition-colors {selectedCustom?.path === document.path ? 'bg-[var(--color-surface-3)] text-[var(--color-text-primary)]' : 'text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-2)]'}" onclick={() => void selectCustomDocument(document)}>
+                  <FileText size={15} class="shrink-0 text-[var(--color-text-muted)]" /><span class="truncate">{document.name.replace(/\.md$/i, '')}</span>
+                </button>
+              {/each}
+            {:else if !query}
+              <p class="px-2.5 py-1 text-xs text-[var(--color-text-muted)]">No extra memory documents</p>
             {/if}
-            <section class="border-b border-[var(--color-border)] pb-5">
-              <div class="space-y-1">
-                <h4 class="flex items-center gap-2 text-sm font-semibold text-[var(--color-text-primary)]">
-                  <Settings2 size={16} />
-                  What enters context
-                </h4>
-                <p class="text-xs text-[var(--color-text-muted)]">
-                  Select sources, automatic inclusion, and the context budget in one policy.
-                </p>
-              </div>
+          {/if}
+        </div>
 
-              <div class="mt-4 divide-y divide-[var(--color-border)] rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-1)] px-4">
-                <SettingsSwitch
-                  checked={memoryStore.settings?.universalMemoryEnabled ?? true}
-                  label="Universal Memory"
-                  description="Global across all projects in `~/.koryphaios/`."
-                  onchange={() => toggleSetting("universalMemoryEnabled")}
-                  compact
-                />
-                <SettingsSwitch
-                  checked={memoryStore.settings?.projectMemoryEnabled ?? true}
-                  label="Project Memory"
-                  description="Project-specific context in `.koryphaios/memory/`."
-                  onchange={() => toggleSetting("projectMemoryEnabled")}
-                  compact
-                />
-                <SettingsSwitch
-                  checked={memoryStore.settings?.sessionMemoryEnabled ?? true}
-                  label="Session Memory"
-                  description="Persistent storage scoped to the active chat."
-                  onchange={() => toggleSetting("sessionMemoryEnabled")}
-                  compact
-                />
-                <SettingsSwitch
-                  checked={memoryStore.settings?.rulesEnabled ?? true}
-                  label="Project Rules"
-                  description="Behavior rules and conventions added to context."
-                  onchange={() => toggleSetting("rulesEnabled")}
-                  compact
-                />
-                <SettingsSwitch
-                  checked={memoryStore.settings?.autoIncludeInContext ?? true}
-                  label="Auto-include in Context"
-                  description="Add selected sources to the agent context automatically."
-                  onchange={() => toggleSetting("autoIncludeInContext")}
-                  compact
-                />
-                <div class="flex flex-wrap items-center justify-between gap-4 py-3">
-                  <div>
-                    <div class="text-sm font-medium text-[var(--color-text-primary)]">Memory token budget</div>
-                    <p class="mt-1 text-xs text-[var(--color-text-muted)]">Limit injected memory to preserve room for the task.</p>
-                  </div>
-                  <div class="w-full sm:w-72">
-                    <NumberStepper value={memoryStore.settings?.maxContextTokens ?? 2000} min={500} max={8000} step={100} label="Memory context tokens" onchange={handleMaxTokensChange} />
-                  </div>
-                </div>
-              </div>
-            </section>
+        <div class="mt-3">
+          <button type="button" class="flex w-full items-center gap-1.5 px-2 py-2 text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)]" onclick={() => rulesGroupOpen = !rulesGroupOpen} aria-expanded={rulesGroupOpen}>
+            {#if rulesGroupOpen}<ChevronDown size={14} />{:else}<ChevronRight size={14} />{/if} Rule documents <span class="ml-auto normal-case tracking-normal">{customRuleDocuments.length}</span>
+          </button>
+          {#if rulesGroupOpen}
+            {#if customRuleDocuments.filter(matches).length}
+              {#each customRuleDocuments.filter(matches) as document (document.path)}
+                <button type="button" class="mb-1 flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm transition-colors {selectedCustom?.path === document.path ? 'bg-[var(--color-surface-3)] text-[var(--color-text-primary)]' : 'text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-2)]'}" onclick={() => void selectCustomDocument(document)}>
+                  <FileText size={15} class="shrink-0 text-[var(--color-text-muted)]" /><span class="truncate">{document.name.replace(/\.md$/i, '')}</span>
+                </button>
+              {/each}
+            {:else if !query}
+              <p class="px-2.5 py-1 text-xs text-[var(--color-text-muted)]">No extra rule documents</p>
+            {/if}
+          {/if}
+        </div>
+      </nav>
+    </aside>
 
-            <section class="border-b border-[var(--color-border)] pb-5">
-              <div class="space-y-1">
-                <h4 class="text-sm font-semibold text-[var(--color-text-primary)]">Write permission</h4>
-                <p class="text-xs text-[var(--color-text-muted)]">
-                  A linked policy shared with Agent settings.
-                </p>
-              </div>
-
-              <div class="mt-4 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-1)] px-4">
-                <!-- Same setting as "Agent Can Update Memory" in the Agent tab —
-                     one source of truth (agent settings), mirrored here so the
-                     two tabs can never disagree. -->
-                <SettingsSwitch
-                  checked={agentSettingsStore.settings.agentMemoryEnabled}
-                  label="Agent can update memory"
-                  description="Linked to Agent settings — changing either control updates the same policy."
-                  onchange={() => {
-                    void agentSettingsStore.saveSettings(
-                      { agentMemoryEnabled: !agentSettingsStore.settings.agentMemoryEnabled },
-                      { quietSuccess: true },
-                    );
-                  }}
-                  compact
-                />
-              </div>
-            </section>
-            <section class="flex flex-wrap items-center justify-between gap-3">
-              <div class="text-xs text-[var(--color-text-muted)]">
-                Context: {memoryStore.settings?.maxContextTokens ?? 2000} tokens · writes {agentSettingsStore.settings.agentMemoryEnabled ? 'allowed' : 'blocked'} · {memoryStore.settings?.autoIncludeInContext ?? true ? 'automatic' : 'manual'} inclusion
-              </div>
-              <button
-                onclick={() => memoryStore.resetSettings()}
-                class="flex items-center gap-2 rounded-lg px-3 py-2 text-xs text-[var(--color-text-muted)] transition-colors hover:bg-red-500/10 hover:text-red-400"
-              >
-                <RotateCcw size={16} />
-                Reset to Defaults
-              </button>
-            </section>
-            <section>
-              <div class="mb-3 flex items-center justify-between gap-3">
-                <div>
-                  <h4 class="text-sm font-semibold text-[var(--color-text-primary)]">Memory files</h4>
-                  <p class="mt-1 text-xs text-[var(--color-text-muted)]">Open a file when you want to read or edit its saved instructions.</p>
-                </div>
-                <span class="text-[10px] text-[var(--color-text-muted)]">{memoryStore.documents.length} project documents</span>
-              </div>
-              <div class="grid gap-3 sm:grid-cols-2">
-                {#each [
-                  { id: 'project' as const, label: 'Project memory', description: 'Shared context for this workspace.', icon: FileText },
-                  { id: 'universal' as const, label: 'Universal memory', description: 'Context shared across workspaces.', icon: Brain },
-                  { id: 'session' as const, label: 'Session memory', description: 'Context for the active conversation.', icon: MessageSquare },
-                  { id: 'rules' as const, label: 'Project rules', description: 'Instructions and conventions for this workspace.', icon: BookOpen },
-                ] as document}
-                  <button type="button" onclick={() => memoryStore.setActiveTab(document.id)} class="flex items-start gap-3 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-1)] p-4 text-left transition-colors hover:bg-[var(--color-surface-2)]">
-                    <document.icon size={16} class="mt-0.5 text-[var(--color-accent)]" />
-                    <span><span class="block text-sm font-medium text-[var(--color-text-primary)]">{document.label}</span><span class="mt-1 block text-xs text-[var(--color-text-muted)]">{document.description}</span></span>
-                  </button>
-                {/each}
-              </div>
-            </section>
+    <main class="flex min-w-0 flex-1 flex-col">
+      {#if showNewDocument}
+        <div class="border-b border-[var(--color-border)] bg-[var(--color-surface-1)] px-5 py-3">
+          <div class="mx-auto flex max-w-4xl flex-wrap items-center gap-2">
+            <FilePlus2 size={16} class="text-[var(--color-accent)]" />
+            <input class="input h-9 min-w-48 flex-1 text-sm" placeholder="Name this document" bind:value={newDocumentName} onkeydown={(event) => { if (event.key === 'Enter') void createDocument(); }} />
+            <div class="flex rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-0)] p-0.5" aria-label="Document type">
+              {#each ['memory', 'rules'] as kind (kind)}
+                <button type="button" class="rounded-md px-2.5 py-1.5 text-xs font-medium transition-colors {newDocumentKind === kind ? 'bg-[var(--color-surface-3)] text-[var(--color-text-primary)]' : 'text-[var(--color-text-muted)]'}" onclick={() => newDocumentKind = kind as 'memory' | 'rules'}>{kind === 'memory' ? 'Memory' : 'Rule'}</button>
+              {/each}
+            </div>
+            <button type="button" class="btn btn-primary h-9 px-3 text-xs" onclick={() => void createDocument()}>Create</button>
+            <button type="button" class="rounded-lg p-2 text-[var(--color-text-muted)] hover:bg-[var(--color-surface-3)]" onclick={() => showNewDocument = false} aria-label="Close new document"><X size={16} /></button>
           </div>
         </div>
+      {/if}
+
+      <div class="flex shrink-0 items-center justify-between gap-3 border-b border-[var(--color-border)] px-5 py-3">
+        <div class="min-w-0">
+          <div class="flex items-center gap-2"><h4 class="truncate text-base font-semibold text-[var(--color-text-primary)]">{currentTitle()}</h4>{#if selectedCustom}<span class="rounded-md bg-[var(--color-surface-3)] px-1.5 py-0.5 text-[10px] font-medium text-[var(--color-text-muted)]">{selectedCustom.kind}</span>{/if}</div>
+          <p class="mt-0.5 truncate text-xs text-[var(--color-text-muted)]">{currentDescription()} · {formatDate(currentFile()?.lastModified)}</p>
+        </div>
+        <div class="flex shrink-0 items-center gap-2">
+          {#if isDirty}<span class="hidden text-xs text-amber-400 sm:inline">Unsaved changes</span>{/if}
+          {#if editMode}
+            <button type="button" class="rounded-lg px-3 py-2 text-xs font-medium text-[var(--color-text-muted)] hover:bg-[var(--color-surface-2)]" onclick={discardChanges}>Cancel</button>
+            <button type="button" class="btn btn-primary inline-flex items-center gap-1.5 px-3 py-2 text-xs" onclick={() => void saveCurrentDocument()}><Save size={14} /> Save</button>
+          {:else}
+            <button type="button" class="inline-flex items-center gap-1.5 rounded-lg border border-[var(--color-border)] px-3 py-2 text-xs font-medium text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-surface-2)]" onclick={() => editMode = true} disabled={!currentFile()?.exists && !selectedCustom}><Pencil size={14} /> Edit</button>
+          {/if}
+        </div>
       </div>
+
+      {#if loadingDocument}
+        <div class="flex flex-1 items-center justify-center text-sm text-[var(--color-text-muted)]">Opening document…</div>
+      {:else if !currentFile()?.exists && !selectedCustom}
+        <div class="flex flex-1 items-center justify-center p-8">
+          <div class="max-w-sm text-center"><Sparkles size={28} class="mx-auto mb-3 text-[var(--color-accent)]" /><h5 class="text-base font-semibold text-[var(--color-text-primary)]">Start this memory</h5><p class="mt-2 text-sm leading-6 text-[var(--color-text-muted)]">Create a guided Markdown file, then make it your own.</p><button type="button" class="btn btn-primary mt-5 inline-flex items-center gap-2 px-4 py-2 text-sm" onclick={() => void initializeCurrentDocument()} disabled={selectedBuiltIn === 'session' && !sessionStore.activeSessionId}><Plus size={15} /> Initialize</button></div>
+        </div>
+      {:else if editMode}
+        <textarea bind:value={content} class="min-h-0 flex-1 resize-none bg-[var(--color-surface-0)] px-6 py-5 font-mono text-sm leading-6 text-[var(--color-text-primary)] outline-none" spellcheck="false" aria-label={`Edit ${currentTitle()}`}></textarea>
+      {:else}
+        <article class="min-h-0 flex-1 overflow-y-auto px-6 py-7">
+          <div class="kory-markdown max-w-5xl text-[15px] leading-7 text-[var(--color-text-secondary)]">{@html renderedContent}</div>
+        </article>
+      {/if}
+    </main>
+
+    {#if showPolicy}
+      <aside class="w-80 shrink-0 overflow-y-auto border-l border-[var(--color-border)] bg-[var(--color-surface-1)] p-4">
+        <div class="flex items-start justify-between gap-3"><div><h4 class="text-sm font-semibold text-[var(--color-text-primary)]">Context policy</h4><p class="mt-1 text-xs leading-5 text-[var(--color-text-muted)]">Choose what agents receive automatically.</p></div><button type="button" class="rounded-lg p-1 text-[var(--color-text-muted)] hover:bg-[var(--color-surface-3)]" onclick={() => showPolicy = false} aria-label="Close context policy"><X size={16} /></button></div>
+        <div class="mt-5 divide-y divide-[var(--color-border)] border-y border-[var(--color-border)]">
+          <SettingsSwitch checked={memoryStore.settings?.projectMemoryEnabled ?? true} label="Project memory" description="Shared workspace context" onchange={() => toggleSetting('projectMemoryEnabled')} flat />
+          <SettingsSwitch checked={memoryStore.settings?.rulesEnabled ?? true} label="Project rules" description="Instructions and conventions" onchange={() => toggleSetting('rulesEnabled')} flat />
+          <SettingsSwitch checked={memoryStore.settings?.sessionMemoryEnabled ?? true} label="Session memory" description="This conversation only" onchange={() => toggleSetting('sessionMemoryEnabled')} flat />
+          <SettingsSwitch checked={memoryStore.settings?.universalMemoryEnabled ?? true} label="Universal memory" description="Across all workspaces" onchange={() => toggleSetting('universalMemoryEnabled')} flat />
+          <SettingsSwitch checked={memoryStore.settings?.autoIncludeInContext ?? true} label="Include automatically" description="Add enabled sources to agent context" onchange={() => toggleSetting('autoIncludeInContext')} flat />
+        </div>
+        <section class="mt-5 border-b border-[var(--color-border)] pb-5">
+          <h5 class="text-sm font-medium text-[var(--color-text-primary)]">Memory token budget</h5>
+          <p class="mt-1 text-xs leading-5 text-[var(--color-text-muted)]">Leave room for the task while retaining useful memory.</p>
+          <div class="mt-3"><NumberStepper value={memoryStore.settings?.maxContextTokens ?? 2000} min={500} max={8000} step={100} label="Memory token budget" onchange={(value) => void memoryStore.saveSettings({ maxContextTokens: value })} /></div>
+        </section>
+        <div class="border-b border-[var(--color-border)]"><SettingsSwitch checked={agentSettingsStore.settings.agentMemoryEnabled} label="Agent can update memory" description="Shared with Agent settings" onchange={() => void agentSettingsStore.saveSettings({ agentMemoryEnabled: !agentSettingsStore.settings.agentMemoryEnabled }, { quietSuccess: true })} flat /></div>
+        <button type="button" class="mt-4 inline-flex items-center gap-2 rounded-lg px-2 py-2 text-xs text-[var(--color-text-muted)] hover:bg-red-500/10 hover:text-red-400" onclick={() => void memoryStore.resetSettings()}><RotateCcw size={14} /> Reset policy</button>
+      </aside>
     {/if}
   </div>
 </div>

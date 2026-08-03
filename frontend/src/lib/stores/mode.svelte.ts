@@ -2,13 +2,11 @@
  * Mode Store - Beginner vs Advanced mode management
  *
  * Beginner Mode:
- * - Git panel completely hidden
  * - Friendly, non-technical language
  * - Auto-commit enabled
  * - Simplified UI
  *
  * Advanced Mode:
- * - Full Git panel with shadow logger
  * - Technical terminology
  * - Manual commit control
  * - Full feature access
@@ -18,7 +16,7 @@ import type { UIMode, ModeConfig, ModeContext } from '@koryphaios/shared';
 import { MODE_DISPLAY_NAMES, MODE_DESCRIPTIONS } from '@koryphaios/shared';
 import { apiUrl } from '$lib/utils/api-url';
 import { toastStore } from './toast.svelte';
-import { apiFetch } from '$lib/api.svelte';
+import { apiFetch, parseJsonResponse } from '$lib/api.svelte';
 
 const STORAGE_KEY = 'koryphaios-mode';
 
@@ -29,6 +27,22 @@ interface ModeState {
   shouldWarnNoGit: boolean;
   noGitWarning: string | null;
   isLoading: boolean;
+}
+
+type ModeResponse = {
+  ok: boolean;
+  data?: {
+    mode: UIMode;
+    config: ModeConfig;
+    context?: ModeContext;
+    shouldWarnNoGit?: boolean;
+    noGitWarning?: string | null;
+  };
+  error?: string;
+};
+
+function modeRequestError(response: Response, payload?: ModeResponse): Error {
+  return new Error(payload?.error || `Mode settings request failed (HTTP ${response.status})`);
 }
 
 function createModeStore() {
@@ -60,7 +74,6 @@ function createModeStore() {
   function getDefaultConfig(mode: UIMode): ModeConfig {
     if (mode === 'beginner') {
       return {
-        hideGitPanel: true,
         autoCommit: true,
         simplifiedPrompts: true,
         maxWorkers: 2,
@@ -75,7 +88,6 @@ function createModeStore() {
       };
     }
     return {
-      hideGitPanel: false,
       autoCommit: false,
       simplifiedPrompts: false,
       maxWorkers: 8,
@@ -93,16 +105,24 @@ function createModeStore() {
   async function fetchMode(): Promise<void> {
     try {
       const res = await apiFetch(apiUrl('/api/mode'));
+      const payload = await parseJsonResponse<ModeResponse>(res);
+      if (!res.ok || !payload.ok || !payload.data) throw modeRequestError(res, payload);
 
-      if (res.ok) {
-        const data = await res.json();
-        state.mode = data.mode;
-        state.config = data.config;
-        state.context = data.context;
-        state.shouldWarnNoGit = data.shouldWarnNoGit;
-        state.noGitWarning = data.noGitWarning;
-      }
+      const data = payload.data;
+      state.mode = data.mode;
+      state.config = data.config;
+      state.context = data.context ?? {
+        ...state.context,
+        mode: data.mode,
+        config: data.config,
+      };
+      state.shouldWarnNoGit = data.shouldWarnNoGit ?? false;
+      state.noGitWarning = data.noGitWarning ?? null;
     } catch (err) {
+      const message = err instanceof Error ? err.message : 'Unknown error';
+      toastStore.error(`Could not load workspace mode: ${message}`, {
+        onRetry: () => void fetchMode(),
+      });
       console.error('Failed to fetch mode:', err);
     }
   }
@@ -119,8 +139,9 @@ function createModeStore() {
         body: JSON.stringify({ mode }),
       });
 
-      if (res.ok) {
-        const data = await res.json();
+      const payload = await parseJsonResponse<ModeResponse>(res);
+      if (res.ok && payload.ok && payload.data) {
+        const data = payload.data;
         state.mode = data.mode;
         state.config = data.config;
 
@@ -138,7 +159,7 @@ function createModeStore() {
 
         toastStore.success(`Switched to ${MODE_DISPLAY_NAMES[mode]} mode`);
       } else {
-        throw new Error('Failed to switch mode');
+        throw modeRequestError(res, payload);
       }
     } catch (err) {
       toastStore.error('Failed to switch mode');
@@ -190,9 +211,6 @@ function createModeStore() {
     },
 
     // Computed helpers - with safety checks for undefined state
-    get showGitPanel() {
-      return !state.config?.hideGitPanel;
-    },
     get showAgentDetails() {
       return state.config?.showAgentDetails ?? false;
     },

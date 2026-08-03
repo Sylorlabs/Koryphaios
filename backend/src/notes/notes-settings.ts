@@ -90,11 +90,14 @@ export function saveNotesSettings(
       ...current.graphPhysics,
       ...(partial.graphPhysics ?? {}),
     },
-    maxContextTokens: Math.min(
-      5000,
-      Math.max(100, partial.maxContextTokens ?? current.maxContextTokens),
-    ),
   };
+  // Only clamp maxContextTokens when it's explicitly being set.
+  if (partial.maxContextTokens !== undefined) {
+    merged.maxContextTokens = Math.min(
+      5000,
+      Math.max(100, partial.maxContextTokens),
+    );
+  }
   config.notesSettings = merged;
   saveKoryphaiosConfig(projectRoot, config);
   return merged;

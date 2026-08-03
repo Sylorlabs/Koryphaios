@@ -338,6 +338,9 @@ function createThemeStore() {
     // rgba(var(--color-accent-rgb), 0.12) for alpha-blended backgrounds,
     // borders, and shadows that follow the user's selected accent color.
     root.style.setProperty('--color-accent-rgb', hexToRgb(accentVars.main));
+    // Same for the hover variant — enables rgba(var(--color-accent-hover-rgb), N)
+    // in hover-state styles that need alpha blending with the user's hover color.
+    root.style.setProperty('--color-accent-hover-rgb', hexToRgb(accentVars.hover));
     root.style.setProperty('--font-sans', FONT_FAMILIES[font]);
 
     const isLight = resolvedPreset === 'light';

@@ -165,7 +165,6 @@ function generateProviderLabel(name: string): string {
     synthetic: 'Synthetic',
     inference: 'Inference.net',
     requesty: 'Requesty',
-    'github-models': 'GitHub Models',
     vultr: 'Vultr',
     abacus: 'Abacus',
     llama: 'Meta Llama',
@@ -669,6 +668,7 @@ class ProviderRegistry {
         let hasContent = false;
         let accTokensIn = 0;
         let accTokensOut = 0;
+        let usageAccountId: string | undefined;
         const stream = provider.streamResponse({ ...request, model: currentModel });
 
         for await (const event of stream) {
@@ -676,13 +676,17 @@ class ProviderRegistry {
           if (event.type === 'usage_update') {
             if (typeof event.tokensIn === 'number') accTokensIn = event.tokensIn;
             if (typeof event.tokensOut === 'number') accTokensOut = event.tokensOut;
+            if (event.accountId) usageAccountId = event.accountId;
           }
           yield event;
         }
 
         if (hasContent) {
           if (accTokensIn > 0 || accTokensOut > 0) {
-            creditRecordUsage(currentModel, provider.name, accTokensIn, accTokensOut);
+            creditRecordUsage(currentModel, provider.name, accTokensIn, accTokensOut, {
+              accountId: usageAccountId,
+              sessionId: request.sessionId,
+            });
           }
           this.recordSuccess(provider.name);
           return;

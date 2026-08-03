@@ -436,7 +436,7 @@ export const recallNotesTool: Tool = {
     const input = call.input as Record<string, unknown>;
     const start = Date.now();
     try {
-      await notesService.syncProjectDocuments(ctx.workingDirectory);
+      void notesService.ensureProjectSync(ctx.workingDirectory);
       const recalled = await notesService.recallNotes({
         query: input.query as string | undefined,
         titles: input.titles as string[] | undefined,
@@ -506,7 +506,7 @@ export const searchNotesTool: Tool = {
     const input = call.input as Record<string, unknown>;
     const start = Date.now();
     try {
-      await notesService.syncProjectDocuments(ctx.workingDirectory);
+      void notesService.ensureProjectSync(ctx.workingDirectory);
       const results = await notesService.searchNotes(String(input.query));
       if (!results.length) {
         return {
@@ -749,7 +749,7 @@ export const renderNoteTool: Tool = {
     const input = call.input as Record<string, unknown>;
     const start = Date.now();
     try {
-      await notesService.syncProjectDocuments(ctx.workingDirectory);
+      void notesService.ensureProjectSync(ctx.workingDirectory);
       const id = await resolveId({
         id: input.id as string | undefined,
         title: input.title as string | undefined,

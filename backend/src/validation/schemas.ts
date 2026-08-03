@@ -90,7 +90,6 @@ export const ProviderNameSchema = z
     'vultr',
     'wandb',
     'poe',
-    'github-models',
     'requesty',
     'inference',
     'submodel',

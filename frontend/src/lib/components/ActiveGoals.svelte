@@ -21,6 +21,7 @@
   let scope = $state<GoalScope>('workspace');
   let composer = $state<HTMLInputElement>();
   let expanded = $state(false);
+  let activeGoals = $derived(goalStore.goals.filter((goal) => ['queued', 'planning', 'running', 'paused', 'blocked'].includes(goal.status)));
 
   async function create() {
     try {
@@ -59,7 +60,7 @@
 <section class="shrink-0 border-t border-[var(--color-border)] p-3 {expanded ? 'flex min-h-[260px] max-h-[42%] flex-col' : ''}" aria-label="Active Goals">
   <div class="flex items-center gap-1">
     <button type="button" class="flex min-w-0 flex-1 items-center gap-2 text-left text-xs font-semibold text-[var(--color-text-secondary)]" aria-expanded={expanded} onclick={() => expanded = !expanded}>
-      <Target size={14} /> Goals <span class="text-[10px] font-normal text-[var(--color-text-muted)]">{goalStore.goals.filter((goal) => ['queued', 'planning', 'running', 'paused', 'blocked'].includes(goal.status)).length || ''}</span><span class="ml-auto">{#if expanded}<ChevronDown size={14} />{:else}<ChevronRight size={14} />{/if}</span>
+      <Target size={14} /> Goals <span class="text-[10px] font-normal text-[var(--color-text-muted)]">{activeGoals.length || ''}</span><span class="ml-auto">{#if expanded}<ChevronDown size={14} />{:else}<ChevronRight size={14} />{/if}</span>
     </button>
     <button
       type="button"
@@ -74,14 +75,14 @@
     <input bind:this={composer} aria-label="New goal" class="min-w-0 w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-1)] px-2 py-1.5 text-xs text-[var(--color-text-primary)]" placeholder="What should Koryphaios accomplish?" bind:value={objective} onkeydown={(event) => { if (event.key === 'Enter') void create(); }} />
     <div class="flex gap-1"><div class="min-w-0 flex-1"><KorySelect compact value={scope} label="Goal scope" options={scopeOptions} onchange={(value) => scope = value as GoalScope} /></div><button type="button" class="rounded-lg border border-[var(--color-border)] px-2 text-[var(--color-text-primary)] hover:bg-[var(--color-surface-3)]" onclick={() => void create()} aria-label="Create goal"><Plus size={13} /></button></div>
   </div>
-  {#each goalStore.goals.filter((goal) => ['queued', 'planning', 'running', 'paused', 'blocked'].includes(goal.status)) as goal (goal.id)}
+  {#each activeGoals as goal (goal.id)}
     <button type="button" class="w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-2)] p-2 text-left hover:bg-[var(--color-surface-3)]" aria-label={`Open goal: ${goal.objective}`} aria-pressed={goalStore.selectedGoalId === goal.id} onclick={() => goalStore.selectedGoalId = goal.id}>
       <div class="flex justify-between gap-2 text-xs"><span class="truncate font-medium text-[var(--color-text-primary)]">{goal.objective}</span><span class="capitalize text-[var(--color-text-muted)]">{goal.scope}</span></div>
       <div class="mt-2 h-1.5 overflow-hidden rounded bg-[var(--color-surface-3)]"><div class="h-full bg-[var(--color-accent)]" style={`width: ${goalProgress(goal)}%`}></div></div>
       <div class="mt-1 flex justify-between text-[10px] text-[var(--color-text-muted)]"><span>{goalProgress(goal)}% · {goal.status}</span><span>{elapsed(goal.activeDurationMs)}</span></div>
     </button>
   {/each}
-  {#if goalStore.loaded && goalStore.goals.filter((goal) => ['queued', 'planning', 'running', 'paused', 'blocked'].includes(goal.status)).length === 0}<p class="text-xs text-[var(--color-text-muted)]">No active goals yet.</p>{/if}
+  {#if goalStore.loaded && activeGoals.length === 0}<p class="text-xs text-[var(--color-text-muted)]">No active goals yet.</p>{/if}
   {#if goalStore.selectedGoal}
     <div class="max-h-72 overflow-y-auto rounded-lg border border-[var(--color-border)] p-2 text-xs">
       <div class="mb-2 flex items-center justify-between gap-2"><div class="font-medium text-[var(--color-text-primary)]">Goal checklist</div><div class="flex gap-1"><button type="button" class="rounded border border-[var(--color-border)] p-1" aria-label="Increase goal priority" onclick={() => void updatePriority(1)}><ArrowUp size={12} /></button><button type="button" class="rounded border border-[var(--color-border)] p-1" aria-label="Move goal later" onclick={() => void reorder(1)}><ArrowDown size={12} /></button></div></div>

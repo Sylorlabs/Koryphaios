@@ -51,7 +51,6 @@ export class ErrorDetectorManager extends EventEmitter {
   private proactiveCoordinator: ProactiveMonitoringCoordinator | null = null;
   private diagnosticEngine: HeuristicDiagnosticEngine;
   private startTimings: Record<string, number> = {};
-  private lastStartTime = 0;
   private startupMetrics = {
     totalStartTime: 0,
     detectorStartTimes: {} as Record<string, number>,
@@ -102,17 +101,17 @@ export class ErrorDetectorManager extends EventEmitter {
         watchedProcesses: this.config.watchedProcesses || [],
         logFiles: this.config.logFiles || [],
         errorPatterns: [
-          /error/i, 
-          /exception/i, 
-          /failed/i, 
-          /fatal/i, 
+          /error/i,
+          /exception/i,
+          /failed/i,
+          /fatal/i,
           /critical/i,
-          /panic/i,           // Bun panics
-          /unhandled/i,       // Unhandled rejections/exceptions
-          /sqlite3/i,         // Database errors
-          /tauri/i,           // Tauri bridge errors
-          /auth/i,            // Authentication failures
-          /permission/i       // Permission denied issues
+          /panic/i, // Bun panics
+          /unhandled/i, // Unhandled rejections/exceptions
+          /sqlite3/i, // Database errors
+          /tauri/i, // Tauri bridge errors
+          /auth/i, // Authentication failures
+          /permission/i, // Permission denied issues
         ],
         excludePatterns: [/debug/i, /info/i, /trace/i],
       });
@@ -122,7 +121,7 @@ export class ErrorDetectorManager extends EventEmitter {
     // Initialize build detector
     if (this.config.sources.build) {
       const buildDetector = new BuildErrorDetector(detectorOptions, {
-        projectRoot: this.workspaceRoot
+        projectRoot: this.workspaceRoot,
       } as any);
       this.registerDetector('build', buildDetector);
     }
@@ -130,7 +129,7 @@ export class ErrorDetectorManager extends EventEmitter {
     // Initialize linter detector
     if (this.config.sources.linter) {
       const linterDetector = new LinterErrorDetector(detectorOptions, {
-        workspaceRoot: this.workspaceRoot
+        workspaceRoot: this.workspaceRoot,
       } as any);
       this.registerDetector('linter', linterDetector);
     }
@@ -144,7 +143,7 @@ export class ErrorDetectorManager extends EventEmitter {
     // Initialize static analysis detector
     if (this.config.sources.staticAnalysis) {
       const staticAnalysisDetector = new StaticAnalysisDetector(detectorOptions, {
-        workspaceRoot: this.workspaceRoot
+        workspaceRoot: this.workspaceRoot,
       });
       this.registerDetector('staticAnalysis', staticAnalysisDetector);
     }
@@ -197,8 +196,11 @@ export class ErrorDetectorManager extends EventEmitter {
       multiLanguage: { ...baseDetectorConfig },
     };
 
-    (this.config as ErrorDetectionConfig & { detectors?: Record<string, CompatibilityDetectorConfig> }).detectors =
-      legacyDetectors;
+    (
+      this.config as ErrorDetectionConfig & {
+        detectors?: Record<string, CompatibilityDetectorConfig>;
+      }
+    ).detectors = legacyDetectors;
   }
 
   private registerDetector(name: string, detector: BaseErrorDetector): void {
@@ -243,7 +245,6 @@ export class ErrorDetectorManager extends EventEmitter {
 
     this._isRunning = true;
     this.startupInProgress = true;
-    this.lastStartTime = startTime;
 
     // Start all enabled detectors, but avoid blocking startup on slow detectors
     const enabledDetectors: string[] = [];
@@ -267,7 +268,7 @@ export class ErrorDetectorManager extends EventEmitter {
     const startupTimeoutMs = 3000;
     await Promise.race([
       Promise.all(startupPromises),
-      new Promise<void>((resolve, reject) =>
+      new Promise<void>((_resolve, reject) =>
         setTimeout(() => reject(new Error('detector-startup-timeout')), startupTimeoutMs)
       ),
     ]).catch(error => {
@@ -360,7 +361,7 @@ export class ErrorDetectorManager extends EventEmitter {
     }
 
     try {
-      if (source) {
+      if (normalizedSource) {
         // Detect errors from specific source
         const detector = this.detectors.get(normalizedSource);
         if (detector) {

@@ -64,14 +64,48 @@ export const sessionRoutes = new Elysia({ prefix: '/api/sessions' })
           totalTokensIn: t.Number(),
           totalTokensOut: t.Number(),
           totalCost: t.Number(),
+          interactionMode: t.Union([t.Literal('act'), t.Literal('plan')]),
         }),
       ),
     },
   )
   .delete('/:id', async ({ request, params: { id }, set }) => {
     if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
-    const { sessions } = getContext();
+    const { sessions, kory, wsManager } = getContext();
+    // Cancel any running workers, abort the manager thread, and clear
+    // in-memory session state BEFORE removing the DB row so pending
+    // operations can't fire a `session.updated` event that re-adds the
+    // deleted session on the frontend.
+    try {
+      kory.cleanupSession(id);
+    } catch (err) {
+      serverLog.warn({ err, sessionId: id }, 'Failed to clean up session resources during delete');
+    }
+    // Cancel any queued LLM jobs for this session.
+    try {
+      const { cancelLLMJobsForSession } = await import('../../queue/workers/llm-worker');
+      await cancelLLMJobsForSession(id);
+    } catch (err) {
+      serverLog.warn({ err, sessionId: id }, 'Failed to cancel LLM jobs during delete');
+    }
+    // Purge replay events so a future fork/replay can't resurrect the chat.
+    try {
+      const { getReplayBuffer } = await import('../../replay/buffer');
+      await getReplayBuffer().deleteSession(id);
+    } catch (err) {
+      serverLog.warn({ err, sessionId: id }, 'Failed to purge replay events during delete');
+    }
     await sessions.delete(id);
+    // Broadcast deletion to ALL clients so every open tab/window removes
+    // the session from its local state — not just the one that triggered
+    // the delete. Without this, a WebSocket reconnect or a pending
+    // `session.updated` event can silently re-add the deleted session.
+    wsManager.broadcast({
+      type: 'session.deleted',
+      payload: { sessionId: id },
+      timestamp: Date.now(),
+      sessionId: id,
+    });
     return { ok: true };
   })
   .get('/:id/processes', async ({ request, params: { id }, set }) => {
@@ -100,6 +134,27 @@ export const sessionRoutes = new Elysia({ prefix: '/api/sessions' })
       sessionId: id,
     });
     return { ok: true, message: 'Session cancelled' };
+  })
+  .get('/:id/runtime-status', async ({ request, params: { id }, set }) => {
+    if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
+    const { kory } = getContext();
+    return { ok: true, running: kory.isSessionRunning(id) || processSupervisor.hasRunningForSession(id) };
+  })
+  .post('/:id/compact', async ({ request, params: { id }, body, set }) => {
+    if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
+    const { kory, sessions } = getContext();
+    if (!(await sessions.get(id))) {
+      set.status = 404;
+      return { ok: false, error: 'Session not found' };
+    }
+    try {
+      const compactBody = body as { model?: string; reasoningLevel?: string } | undefined;
+      await kory.compactSession(id, compactBody?.model, compactBody?.reasoningLevel);
+      return { ok: true };
+    } catch (error) {
+      set.status = 409;
+      return { ok: false, error: error instanceof Error ? error.message : String(error) };
+    }
   })
   .get('/:id/context', async ({ request, params: { id }, set }) => {
     if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
@@ -158,6 +213,18 @@ export const sessionRoutes = new Elysia({ prefix: '/api/sessions' })
       }),
     },
   )
+  .post('/:id/undo', async ({ request, params: { id }, set }) => {
+    if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
+    const { timeTravel } = getContext();
+    const result = await timeTravel.undo(id);
+    return { ok: result.success, message: result.message };
+  })
+  .post('/:id/redo', async ({ request, params: { id }, set }) => {
+    if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
+    const { timeTravel } = getContext();
+    const result = await timeTravel.redo(id);
+    return { ok: result.success, message: result.message };
+  })
   .get('/:id/timetravel', async ({ request, params: { id }, set }) => {
     if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
     try {

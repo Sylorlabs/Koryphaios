@@ -12,6 +12,16 @@ import type { ChangeSummary } from '@koryphaios/shared';
 
 const now = Date.now();
 
+function demoDailyUsage(total: number) {
+  const shape = [0.36, 0.48, 0.22, 0.66, 0.54, 0.78, 0.42, 0.6, 0.86, 0.51, 0.72, 0.91, 0.57, 0.69];
+  const today = new Date(now);
+  const endDay = Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate());
+  return shape.map((weight, index) => ({
+    date: new Date(endDay - (shape.length - index - 1) * 86_400_000).toISOString().slice(0, 10),
+    tokens: Math.round(total * weight),
+  }));
+}
+
 // ─── In-memory session table ────────────────────────────────────────────────
 
 const demoSessions = new Map<string, Session>();
@@ -327,7 +337,7 @@ let demoAgentSettings = {
   contextKeepRecentTurns: 3,
   contextPruneMinChars: 600,
   contextSelfAwareness: true,
-  reasoningExpandedByDefault: true,
+  reasoningExpandedByDefault: false,
 };
 
 const AGENT_PREFERENCES = {
@@ -341,26 +351,9 @@ const AGENT_PREFERENCES = {
 `,
 };
 
-const MODE_CONFIG = {
-  hideGitPanel: false,
-  autoCommit: false,
-  simplifiedPrompts: false,
-  maxWorkers: 8,
-  requireConfirmations: true,
-  toolAccess: 'full',
-  explanations: 'minimal',
-  enableShadowLoggerUI: true,
-  enableWorktrees: true,
-  enableCriticGate: true,
-  showAgentDetails: true,
-  showCostTracking: true,
-};
-
 const BILLING_CREDITS = {
   ok: true,
   totalSpendCents: 412,
-  subscriptionInferenceCents: 2350,
-  allSpendCents: 2762,
   remainingCents: 1888,
   cliUsage: [
     {
@@ -371,23 +364,22 @@ const BILLING_CREDITS = {
         { label: 'Weekly', usedPercent: 58, resetsAt: now + 4 * 86_400_000 },
       ],
       windows: [
-        { period: '1h', tokensIn: 42_000, tokensOut: 9_800, inferenceValueUsd: 0.62 },
-        { period: '24h', tokensIn: 512_000, tokensOut: 118_000, inferenceValueUsd: 7.4 },
-        { period: '7d', tokensIn: 2_940_000, tokensOut: 655_000, inferenceValueUsd: 41.2 },
-        { period: '30d', tokensIn: 9_100_000, tokensOut: 2_020_000, inferenceValueUsd: 128.5 },
+        { period: '1h', tokensIn: 42_000, tokensOut: 9_800 },
+        { period: '24h', tokensIn: 512_000, tokensOut: 118_000 },
+        { period: '7d', tokensIn: 2_940_000, tokensOut: 655_000 },
+        { period: '30d', tokensIn: 9_100_000, tokensOut: 2_020_000 },
       ],
+      dailyUsage: demoDailyUsage(142_000),
       byModel: [
         {
           model: 'claude-code-sonnet',
           tokensIn: 7_800_000,
           tokensOut: 1_700_000,
-          inferenceValueUsd: 96.1,
         },
         {
           model: 'claude-haiku-4-5',
           tokensIn: 1_300_000,
           tokensOut: 320_000,
-          inferenceValueUsd: 12.4,
         },
       ],
     },
@@ -396,37 +388,23 @@ const BILLING_CREDITS = {
       planType: 'Pro',
       quotas: [{ label: 'Weekly', usedPercent: 22, resetsAt: now + 5 * 86_400_000 }],
       windows: [
-        { period: '1h', tokensIn: 12_000, tokensOut: 3_100, inferenceValueUsd: 0.21 },
-        { period: '24h', tokensIn: 210_000, tokensOut: 44_000, inferenceValueUsd: 2.9 },
-        { period: '7d', tokensIn: 1_120_000, tokensOut: 260_000, inferenceValueUsd: 15.8 },
-        { period: '30d', tokensIn: 3_400_000, tokensOut: 810_000, inferenceValueUsd: 47.3 },
+        { period: '1h', tokensIn: 12_000, tokensOut: 3_100 },
+        { period: '24h', tokensIn: 210_000, tokensOut: 44_000 },
+        { period: '7d', tokensIn: 1_120_000, tokensOut: 260_000 },
+        { period: '30d', tokensIn: 3_400_000, tokensOut: 810_000 },
       ],
+      dailyUsage: demoDailyUsage(61_000),
       byModel: [
-        { model: 'gpt-5.6-terra', tokensIn: 850_000, tokensOut: 180_000, inferenceValueUsd: 13.2 },
-        { model: 'gpt-5.6-sol', tokensIn: 2_100_000, tokensOut: 510_000, inferenceValueUsd: 30.6 },
-        { model: 'gpt-5.6-luna', tokensIn: 450_000, tokensOut: 120_000, inferenceValueUsd: 5.1 },
+        { model: 'gpt-5.6-terra', tokensIn: 850_000, tokensOut: 180_000 },
+        { model: 'gpt-5.6-sol', tokensIn: 2_100_000, tokensOut: 510_000 },
+        { model: 'gpt-5.6-luna', tokensIn: 450_000, tokensOut: 120_000 },
       ],
     },
   ],
   balances: [
-    { provider: 'codex', availableUsd: 12.4 },
     { provider: 'google', availableUsd: 6.48 },
   ],
   byProvider: [
-    {
-      name: 'codex',
-      tokensIn: 3_400_000,
-      tokensOut: 810_000,
-      spendCents: 212,
-      subscription: false,
-    },
-    {
-      name: 'claude',
-      tokensIn: 9_100_000,
-      tokensOut: 2_020_000,
-      spendCents: 0,
-      subscription: true,
-    },
     {
       name: 'google',
       tokensIn: 1_150_000,
@@ -462,6 +440,10 @@ function parseBody(init: RequestInit): Record<string, unknown> {
 // ─── Router ─────────────────────────────────────────────────────────────────
 
 /** Answer an API request entirely in memory. Always returns a Response. */
+function isReadOnlyDemoRequest(method: string): boolean {
+  return method === 'GET';
+}
+
 export function demoFetch(url: string, init: RequestInit = {}): Response {
   const method = (init.method ?? 'GET').toUpperCase();
   let path: string;
@@ -469,6 +451,12 @@ export function demoFetch(url: string, init: RequestInit = {}): Response {
     path = new URL(url, 'http://demo.local').pathname;
   } catch {
     path = url;
+  }
+
+  // This public preview is inspectable, never a mutable workspace. Keeping
+  // this in the API shim prevents DevTools from turning it into a stuck state.
+  if (!isReadOnlyDemoRequest(method)) {
+    return json({ ok: false, error: 'The guided demo is read-only. Download Koryphaios to run a workspace.' }, 403);
   }
 
   // Health: always green so no sentinel/overlay can ever fire in the demo.
@@ -518,19 +506,6 @@ export function demoFetch(url: string, init: RequestInit = {}): Response {
   if (/^\/api\/sessions\/[^/]+\/(cancel|compact)$/.test(path)) return ok(true);
   if (/^\/api\/sessions\/[^/]+\/timetravel$/.test(path)) return ok({ checkpoints: [] });
   if (/^\/api\/sessions\/[^/]+\/context$/.test(path)) return json({ ok: true, lastUsage: null });
-
-  // Mode (flat response shape, matching the mode store's expectations).
-  if (path === '/api/mode') {
-    const mode = method === 'PUT' ? (parseBody(init).mode ?? 'advanced') : 'advanced';
-    return json({
-      ok: true,
-      mode,
-      config: MODE_CONFIG,
-      context: { mode, config: MODE_CONFIG },
-      shouldWarnNoGit: false,
-      noGitWarning: '',
-    });
-  }
 
   // Memory tab.
   if (path === '/api/memory/documents') {

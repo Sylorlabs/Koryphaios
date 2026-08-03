@@ -24,12 +24,23 @@ export function initCreditDb(dataDir: string): void {
       ts INTEGER NOT NULL,
       model TEXT NOT NULL,
       provider TEXT NOT NULL,
+      account_id TEXT,
+      session_id TEXT,
       tokens_in INTEGER NOT NULL DEFAULT 0,
       tokens_out INTEGER NOT NULL DEFAULT 0,
       cost_usd REAL NOT NULL DEFAULT 0
     );
     CREATE INDEX IF NOT EXISTS idx_credit_usage_ts ON credit_usage(ts);
   `);
+  // Existing installations predate account-scoped attribution. These are
+  // additive and preserve every old aggregate record as unattributed.
+  for (const sql of [
+    'ALTER TABLE credit_usage ADD COLUMN account_id TEXT',
+    'ALTER TABLE credit_usage ADD COLUMN session_id TEXT',
+  ]) {
+    try { db.exec(sql); } catch { /* column already exists */ }
+  }
+  db.exec('CREATE INDEX IF NOT EXISTS idx_credit_usage_account_ts ON credit_usage(account_id, ts);');
 
   db.exec(`
     CREATE TABLE IF NOT EXISTS cloud_snapshots (
@@ -59,12 +70,23 @@ export function recordUsage(
   tokensIn: number,
   tokensOut: number,
   costUsd: number,
+  attribution?: { accountId?: string; sessionId?: string },
 ): void {
   const d = getCreditDb();
   d.run(
-    `INSERT INTO credit_usage (ts, model, provider, tokens_in, tokens_out, cost_usd) VALUES (?, ?, ?, ?, ?, ?)`,
-    [Date.now(), model, provider, tokensIn, tokensOut, costUsd],
+    `INSERT INTO credit_usage (ts, model, provider, account_id, session_id, tokens_in, tokens_out, cost_usd) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    [Date.now(), model, provider, attribution?.accountId ?? null, attribution?.sessionId ?? null, tokensIn, tokensOut, costUsd],
   );
+}
+
+export function getKoryAccountUsage(since = Date.now() - 30 * 24 * 60 * 60 * 1000): Array<{
+  accountId: string; provider: string; tokensIn: number; tokensOut: number; costUsd: number;
+}> {
+  const d = getCreditDb();
+  return d.query<{ account_id: string; provider: string; tokens_in: number; tokens_out: number; cost_usd: number }, [number]>(
+    `SELECT account_id, provider, SUM(tokens_in) AS tokens_in, SUM(tokens_out) AS tokens_out, SUM(cost_usd) AS cost_usd
+     FROM credit_usage WHERE account_id IS NOT NULL AND ts >= ? GROUP BY account_id, provider`,
+  ).all(since).map((row) => ({ accountId: row.account_id, provider: row.provider, tokensIn: row.tokens_in, tokensOut: row.tokens_out, costUsd: row.cost_usd }));
 }
 
 export function getLocalTotals(): {

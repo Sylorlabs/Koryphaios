@@ -114,7 +114,7 @@
         {#if filteredModels.length === 0}
           <p class="px-3 py-8 text-center text-xs" style="color: var(--color-text-muted);">{emptyMessage ?? 'No provider-reported models are available.'}</p>
         {:else}
-        {#each filteredModels as model}
+        {#each filteredModels as model (model.id)}
           <button 
             class="w-full flex items-center justify-between p-3 rounded-xl transition-all border
                    {selectedModelIds.has(model.id) ? 'bg-[var(--color-accent)]/5 border-[var(--color-accent)]/30' : 'bg-transparent border-transparent hover:bg-[var(--color-surface-2)]'}"

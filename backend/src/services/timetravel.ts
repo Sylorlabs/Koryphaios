@@ -12,6 +12,7 @@ import { ShadowLogger, type TimelineEntry, type GhostCommit } from '../kory/shad
 import { GitManager } from '../kory/git-manager';
 import { serverLog } from '../logger';
 import type { IMessageStore } from '../stores/message-store';
+import { markCliConversationRewritten } from '../providers/cli-session-state';
 
 export interface TimeTravelState {
   /** Current position in the timeline (HEAD) */
@@ -209,6 +210,7 @@ export class TimeTravelService {
       if (sessionId && ghost.metadata?.messageId) {
         try {
           await this.messageStore.truncateAfter(sessionId, ghost.metadata.messageId);
+          markCliConversationRewritten(sessionId);
           serverLog.info({ sessionId, messageId: ghost.metadata.messageId }, 'Session history truncated after rewind');
         } catch (err) {
           serverLog.error({ err, sessionId }, 'Failed to truncate session history during rewind');

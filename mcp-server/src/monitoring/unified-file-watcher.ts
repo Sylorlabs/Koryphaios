@@ -163,7 +163,6 @@ export class UnifiedFileWatcher extends EventEmitter {
       persistent: true,
       ignoreInitial: true,
       followSymlinks: false,
-      dot: true,
       usePolling: false,
       ignorePermissionErrors: true,
       awaitWriteFinish: {

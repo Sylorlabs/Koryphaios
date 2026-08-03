@@ -5,7 +5,7 @@
   import { toastStore } from '$lib/stores/toast.svelte';
   import { projectStore, projectDisplayName } from '$lib/stores/project.svelte';
   import { collaborationStore } from '$lib/stores/collaboration.svelte';
-  import { isFullDemo, isGuidedDemo } from '$lib/demo-flags';
+  import { isGuidedDemo } from '$lib/demo-flags';
   import {
     Plus,
     Search,
@@ -163,7 +163,7 @@
       style="color: var(--color-text-secondary);"
       disabled={creating || isGuidedDemo}
       onclick={(e) => handleCreateSession(e)}
-      title={isGuidedDemo ? 'Sample sessions are read-only in the guided demo' : isFullDemo ? 'New ephemeral session' : 'New session (Ctrl+N; Shift-click forces a new chat)'}
+      title={isGuidedDemo ? 'Sample sessions are read-only in the guided demo' : 'New session (Ctrl+N; Shift-click forces a new chat)'}
       aria-label="New session"
     >
       {#if creating}
@@ -389,13 +389,13 @@
                 {/if}
               </div>
             {:else}
-              {#if sessionStore.activeSessionId === session.id && wsStore.managerStatus !== 'idle'}
+              {#if sessionStore.activeSessionId === session.id && wsStore.isSessionBusy(session.id)}
                 <div
                   class="shrink-0 flex items-center justify-center rounded-lg"
                   style="width: 18px; height: 18px; background: rgba(var(--color-accent-rgb), 0.08);"
                 >
                   <AnimatedStatusIcon
-                    status={wsStore.managerStatus}
+                    status={wsStore.getSessionStatus(session.id)}
                     size={14}
                     isManager={true}
                     phase={wsStore.koryPhase}
@@ -414,13 +414,6 @@
                   {session.title}
                 </div>
                 <div class="flex items-center gap-2.5 flex-wrap" style="margin-top: 6px;">
-                  {#if sessionStore.activeSessionId === session.id && !collaborationStore.activeJoinedSession}
-                    <span
-                      class="inline-flex items-center rounded-full px-1.5 py-0.5 font-bold uppercase tracking-wider"
-                      style="font-size: 9px; color: var(--color-accent); background: color-mix(in srgb, var(--color-accent) 14%, transparent);"
-                      aria-label="Currently open chat"
-                    >Open</span>
-                  {/if}
                   {#if wsStore.pendingPermissions.some((p) => p.sessionId === session.id) && sessionStore.activeSessionId !== session.id}
                     <!-- A backgrounded session stalled on an approval must never
                          look like it's just "still running". -->
@@ -435,15 +428,16 @@
                   <span style="font-size: var(--text-xs); color: var(--color-text-muted);"
                     >{formatTime(session.updatedAt)}</span
                   >
-                  {#if projectStore.scope === 'all' && session.workingDirectory}
+                  {#if session.workingDirectory}
+                    {@const folderName = projectDisplayName(session.workingDirectory)}
                     <span
-                      class="inline-flex items-center gap-1 px-1.5 rounded truncate"
-                      style="font-size: var(--text-xs); max-width: 120px; color: var(--color-accent); background: var(--color-surface-3);"
-                      title={session.workingDirectory}
+                      class="inline-flex items-center gap-1 px-1.5 rounded min-w-0 max-w-full"
+                      style="font-size: var(--text-xs); color: var(--color-accent); background: var(--color-surface-3);"
+                      title={folderName}
+                      aria-label={`Working folder: ${folderName}`}
                     >
-                      <FolderOpen size={9} class="shrink-0" />{projectDisplayName(
-                        session.workingDirectory,
-                      )}
+                      <FolderOpen size={9} class="shrink-0" />
+                      <span class="truncate">{folderName}</span>
                     </span>
                   {/if}
                   {#if session.messageCount > 0}

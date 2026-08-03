@@ -10,7 +10,7 @@ import {
   GlobTool,
   LsTool,
 } from '../src/tools';
-import { isCatastrophicBashCommand } from '../src/tools/bash';
+import { isCatastrophicBashCommand, requiresCatastrophicConfirmation } from '../src/tools/bash';
 import { AskUserTool, AskManagerTool, DelegateToWorkerTool } from '../src/tools/interaction';
 import type { Session, AgentIdentity, WSMessage } from '@koryphaios/shared';
 import { DOMAIN } from '../src/constants';
@@ -332,6 +332,8 @@ describe('KoryManager Orchestration', () => {
     expect(isCatastrophicBashCommand('rm -rf ./dist')).toBe(false);
     expect(isCatastrophicBashCommand('rm -rf $HOME')).toBe(true);
     expect(isCatastrophicBashCommand('dd if=/dev/zero of=/dev/sda')).toBe(true);
+    expect(requiresCatastrophicConfirmation('rm -rf $HOME')).toBe(true);
+    expect(requiresCatastrophicConfirmation('rm -rf $HOME', true)).toBe(false);
 
     const questions: string[] = [];
     const bash = new BashTool();

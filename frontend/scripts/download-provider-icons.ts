@@ -95,7 +95,6 @@ const providers = [
   'vultr',
   'wandb',
   'poe',
-  'github-models',
   'submodel',
   'synthetic',
   'moark',

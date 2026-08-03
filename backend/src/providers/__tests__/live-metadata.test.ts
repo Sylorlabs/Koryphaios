@@ -110,6 +110,18 @@ describe('trusted context metadata', () => {
     expect(resolveTrustedContextWindow('gpt-5.3-codex', 'codex').contextKnown).toBe(false);
   });
 
+  test('uses the provider-scoped fallback for an account-scoped Codex model ID', async () => {
+    const { resolveTrustedContextWindow, registerLiveModelResolver } = await import('../models');
+    registerLiveModelResolver(() => undefined);
+    expect(
+      resolveTrustedContextWindow('codex-account:account:gpt-5.6-sol', 'codex'),
+    ).toEqual({
+      contextWindow: 1_050_000,
+      contextKnown: true,
+      contextSource: 'catalog',
+    });
+  });
+
   test('uses built-in context metadata for providers outside the old allowlist', async () => {
     const { resolveTrustedContextWindow, registerLiveModelResolver } = await import('../models');
     registerLiveModelResolver(() => undefined);

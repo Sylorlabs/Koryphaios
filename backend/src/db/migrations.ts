@@ -661,6 +661,18 @@ export const MIGRATIONS: Migration[] = [
     `,
     down: `DROP INDEX IF EXISTS idx_goals_scope_status; DROP TABLE IF EXISTS goals;`,
   },
+  {
+    version: '0017',
+    description: 'Add notes indexes on updated_at and include_in_context',
+    up: `
+      CREATE INDEX IF NOT EXISTS idx_notes_updated_at ON notes(updated_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_notes_include_in_context ON notes(include_in_context);
+    `,
+    down: `
+      DROP INDEX IF EXISTS idx_notes_include_in_context;
+      DROP INDEX IF EXISTS idx_notes_updated_at;
+    `,
+  },
 ];
 
 // ─── Migration Runner ────────────────────────────────────────────────────────

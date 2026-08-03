@@ -19,9 +19,17 @@ export function useAgentRail() {
       }),
   );
 
-  let selectedAgent = $derived(
-    selectedAgentId ? (wsStore.agents.get(selectedAgentId) ?? null) : null,
-  );
+  let managerAgent = $derived(wsStore.agents.get('kory-manager') ?? null);
+
+  // Agent ids are global, while the rail is session-scoped.  A chat switch
+  // schedules selection cleanup, but this derived guard is deliberately
+  // synchronous: for the render between the switch and that cleanup, an old
+  // worker must never lend its Stop state or controls to the new chat.
+  let selectedAgent = $derived.by(() => {
+    if (!selectedAgentId) return null;
+    const agent = wsStore.agents.get(selectedAgentId) ?? null;
+    return agent?.sessionId === sessionStore.activeSessionId ? agent : null;
+  });
 
   let selectedAgentFeed = $derived.by(() => {
     const _version = wsStore.agentThreadVersion;
@@ -79,6 +87,9 @@ export function useAgentRail() {
     },
     get sessionAgentChats() {
       return sessionAgentChats;
+    },
+    get managerAgent() {
+      return managerAgent;
     },
     get selectedAgent() {
       return selectedAgent;

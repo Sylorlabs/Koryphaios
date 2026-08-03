@@ -84,7 +84,7 @@ export class LinterErrorDetector extends BaseErrorDetector {
         await this.verifyLinterAvailable();
       } catch (error) {
         this.isLinterAvailable = false;
-        this.logger.warn(
+        console.warn(
           `${this.config.linterCommand} not available; linter checks will be skipped`,
           error instanceof Error ? error.message : error
         );

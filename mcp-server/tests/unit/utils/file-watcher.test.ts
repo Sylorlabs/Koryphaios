@@ -11,6 +11,7 @@ const mockWatcher = {
   add: vi.fn(),
   unwatch: vi.fn(),
   close: vi.fn(),
+  once: vi.fn(),
   on: vi.fn(),
 };
 
@@ -38,6 +39,7 @@ describe('FileWatcher', () => {
     mockWatcher.add.mockClear();
     mockWatcher.unwatch.mockClear();
     mockWatcher.close.mockClear();
+    mockWatcher.once.mockClear();
     mockWatcher.on.mockClear();
     fileWatcher = new FileWatcher();
   });

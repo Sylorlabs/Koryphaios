@@ -12,6 +12,7 @@ import { sessionStore } from './sessions.svelte';
 import { apiUrl } from '$lib/utils/api-url';
 import { apiFetch, parseJsonResponse } from '$lib/api.svelte';
 import { feedStore, getGroupedEntries } from './feed.svelte';
+import { finalizeThinkingEntries } from '$lib/utils/feed-timeline';
 
 // ─── Agent State ────────────────────────────────────────────────────────────
 
@@ -20,7 +21,7 @@ export interface AgentState {
   status: AgentStatus;
   content: string;
   thinking: string;
-  toolCalls: Array<{ name: string; status: string }>;
+  toolCalls: Array<{ id: string; name: string; status: string }>;
   task: string;
   tokensUsed: number;
   contextMax: number;
@@ -34,7 +35,7 @@ export interface AgentState {
 // ─── Reactive State ──────────────────────────────────────────────────────────
 
 const initialAgents = new Map<string, AgentState>();
-initialAgents.set('kory-manager', {
+const initialManager = $state<AgentState>({
   identity: {
     id: 'kory-manager',
     name: 'Kory',
@@ -55,6 +56,7 @@ initialAgents.set('kory-manager', {
   hasUsageData: false,
   sessionId: '',
 });
+initialAgents.set('kory-manager', initialManager);
 
 let agents = $state<Map<string, AgentState>>(initialAgents);
 let agentThreadFeeds = $state<Map<string, FeedEntry[]>>(new Map());
@@ -66,10 +68,16 @@ let agentThreadVersion = $state(0);
 // other's busy/running indicators.
 let managerStatusBySession = $state<Map<string, AgentStatus>>(new Map());
 
-// Svelte 5's $state does not proxy Map contents or the plain objects
-// stored in them — mutating an AgentState in place is invisible to the
-// UI. Every mutation must go through commitAgents() to publish a new
-// Map reference.
+// Svelte runes may only appear in a variable initializer. Keeping this
+// factory at that boundary lets map values remain deeply reactive.
+function createReactiveAgent(state: AgentState): AgentState {
+  const agent = $state<AgentState>(state);
+  return agent;
+}
+
+// Svelte 5's $state does not proxy Map contents, so adding/removing
+// entries still requires reassigning the Map via commitAgents(). Agent
+// values are deeply reactive, so their properties can be updated in place.
 function commitAgents() {
   agents = new Map(agents);
 }
@@ -83,6 +91,12 @@ function setManagerStatusForSession(sessionId: string | undefined, status: Agent
 }
 
 const MAX_THREAD_ENTRIES = 2000;
+const MAX_THREAD_SESSIONS = 8;
+
+// LRU bookkeeping for agentThreadFeeds: sessionId → last-touched timestamp.
+// Plain (non-reactive) Map — updated on every read/write so pruneAgentThreadFeeds
+// can evict the least-recently-used session's threads when the cap is exceeded.
+let agentThreadSessionRecency = new Map<string, number>();
 
 // ─── Agent Thread Helpers ───────────────────────────────────────────────────
 
@@ -90,8 +104,37 @@ function getAgentThreadKey(sessionId: string, agentId: string): string {
   return `${sessionId}:${agentId}`;
 }
 
+function touchAgentThreadSession(sessionId: string) {
+  agentThreadSessionRecency.set(sessionId, Date.now());
+}
+
+function pruneAgentThreadFeeds() {
+  while (agentThreadSessionRecency.size > MAX_THREAD_SESSIONS) {
+    let lruKey: string | null = null;
+    let lruTime = Infinity;
+    for (const [sid, t] of agentThreadSessionRecency) {
+      if (t < lruTime) {
+        lruTime = t;
+        lruKey = sid;
+      }
+    }
+    if (!lruKey) break;
+    agentThreadSessionRecency.delete(lruKey);
+    const prefix = `${lruKey}:`;
+    const next = new Map<string, FeedEntry[]>();
+    for (const [k, v] of agentThreadFeeds) {
+      if (!k.startsWith(prefix)) next.set(k, v);
+    }
+    agentThreadFeeds = next;
+  }
+}
+
 function setAgentThreadFeed(sessionId: string, agentId: string, entries: FeedEntry[]) {
-  agentThreadFeeds.set(getAgentThreadKey(sessionId, agentId), entries);
+  const next = new Map(agentThreadFeeds);
+  next.set(getAgentThreadKey(sessionId, agentId), entries);
+  agentThreadFeeds = next;
+  touchAgentThreadSession(sessionId);
+  pruneAgentThreadFeeds();
   agentThreadVersion++;
 }
 
@@ -106,6 +149,30 @@ function upsertAgentThreadEntry(sessionId: string, agentId: string, entry: Omit<
   setAgentThreadFeed(sessionId, agentId, next);
 }
 
+/** A result supersedes its live call in the worker transcript. */
+function completeAgentThreadToolCall(
+  sessionId: string,
+  agentId: string,
+  callId: string,
+  entry: Omit<FeedEntry, 'id'>,
+): boolean {
+  const key = getAgentThreadKey(sessionId, agentId);
+  const current = agentThreadFeeds.get(key) ?? [];
+  const index = current.findLastIndex(
+    (candidate) =>
+      candidate.type === 'tool_call' &&
+      (candidate.metadata as { toolCall?: { id?: string } } | undefined)?.toolCall?.id === callId,
+  );
+  if (index < 0) {
+    upsertAgentThreadEntry(sessionId, agentId, entry);
+    return false;
+  }
+  const next = [...current];
+  next[index] = { ...entry, id: current[index].id };
+  setAgentThreadFeed(sessionId, agentId, next);
+  return true;
+}
+
 function accumulateAgentThreadEntry(
   sessionId: string,
   agentId: string,
@@ -117,14 +184,19 @@ function accumulateAgentThreadEntry(
   const last = lastIdx >= 0 ? current[lastIdx] : null;
 
   if (last && last.type === entry.type && last.agentId === entry.agentId) {
-    last.text += entry.text;
-    last.timestamp = entry.timestamp;
+    const updated: FeedEntry = {
+      ...last,
+      text: last.text + entry.text,
+      timestamp: entry.timestamp,
+    };
     if (last.type === 'thinking' && last.thinkingStartedAt) {
-      last.durationMs = entry.timestamp - last.thinkingStartedAt;
+      updated.durationMs = entry.timestamp - last.thinkingStartedAt;
     } else if (last.type === 'thinking' && !last.thinkingStartedAt) {
-      last.thinkingStartedAt = entry.timestamp;
+      updated.thinkingStartedAt = entry.timestamp;
     }
-    agentThreadVersion++;
+    const next = [...current];
+    next[lastIdx] = updated;
+    setAgentThreadFeed(sessionId, agentId, next);
     return;
   }
 
@@ -136,7 +208,9 @@ function getAgentFeedLabel(agentId: string, fallback = 'Agent'): string {
 }
 
 function getAgentThreadEntries(sessionId: string, agentId: string): FeedEntry[] {
-  return agentThreadFeeds.get(getAgentThreadKey(sessionId, agentId)) ?? [];
+  const entries = agentThreadFeeds.get(getAgentThreadKey(sessionId, agentId));
+  if (entries) touchAgentThreadSession(sessionId);
+  return entries ?? [];
 }
 
 function getAgentThreadFeed(sessionId: string, agentId: string): FeedEntry[] {
@@ -150,22 +224,33 @@ function ensureAgentThreadFeed(sessionId: string, agentId: string) {
   }
 }
 
+function finalizeAgentThreadThinking(sessionId: string, agentId: string, endedAt: number) {
+  const entries = getAgentThreadEntries(sessionId, agentId);
+  const next = finalizeThinkingEntries(entries, agentId, endedAt);
+  if (next.some((entry, index) => entry !== entries[index])) {
+    setAgentThreadFeed(sessionId, agentId, next);
+  }
+}
+
 // ─── Agent Actions ──────────────────────────────────────────────────────────
 
 export function spawnAgent(identity: AgentIdentity, task: string, sessionId: string) {
-  agents.set(identity.id, {
-    identity,
-    status: 'thinking',
-    content: '',
-    thinking: '',
-    toolCalls: [],
-    task,
-    tokensUsed: 0,
-    contextMax: 0,
-    contextKnown: false,
-    hasUsageData: false,
-    sessionId,
-  });
+  agents.set(
+    identity.id,
+    createReactiveAgent({
+      identity,
+      status: 'thinking',
+      content: '',
+      thinking: '',
+      toolCalls: [],
+      task,
+      tokensUsed: 0,
+      contextMax: 0,
+      contextKnown: false,
+      hasUsageData: false,
+      sessionId,
+    }),
+  );
   agents = new Map(agents);
 }
 
@@ -175,7 +260,6 @@ export function updateAgentStatus(agentId: string, status: AgentStatus, sessionI
     agent.status = status;
     if (sessionId) agent.sessionId = sessionId;
     if (agentId === 'kory-manager') setManagerStatusForSession(sessionId, status);
-    commitAgents();
   }
 }
 
@@ -186,7 +270,6 @@ export function appendAgentContent(agentId: string, content: string, sessionId?:
     agent.status = 'streaming';
     if (sessionId) agent.sessionId = sessionId;
     if (agentId === 'kory-manager') setManagerStatusForSession(sessionId, 'streaming');
-    commitAgents();
   }
 }
 
@@ -196,19 +279,26 @@ export function appendAgentThinking(agentId: string, thinking: string, sessionId
     agent.thinking += thinking;
     if (sessionId) agent.sessionId = sessionId;
     if (agentId === 'kory-manager') setManagerStatusForSession(sessionId, 'thinking');
-    commitAgents();
   }
 }
 
-export function addToolCall(agentId: string, name: string, sessionId?: string) {
+export function addToolCall(agentId: string, id: string, name: string, sessionId?: string) {
   const agent = agents.get(agentId);
   if (agent) {
-    agent.toolCalls.push({ name, status: 'running' });
+    agent.toolCalls.push({ id, name, status: 'running' });
     agent.status = 'tool_calling';
     if (sessionId) agent.sessionId = sessionId;
     if (agentId === 'kory-manager') setManagerStatusForSession(sessionId, 'tool_calling');
-    commitAgents();
   }
+}
+
+/** Retire a completed tool from the compact worker-card activity list. */
+export function completeToolCall(agentId: string, callId: string, sessionId?: string) {
+  const agent = agents.get(agentId);
+  if (!agent) return;
+  const index = agent.toolCalls.findLastIndex((tool) => tool.id === callId);
+  if (index >= 0) agent.toolCalls.splice(index, 1);
+  if (sessionId) agent.sessionId = sessionId;
 }
 
 export function updateUsage(agentId: string, payload: StreamUsagePayload, sessionId?: string) {
@@ -222,7 +312,6 @@ export function updateUsage(agentId: string, payload: StreamUsagePayload, sessio
     agent.hasUsageData = !!payload.usageKnown;
     if (payload.breakdown) agent.contextBreakdown = payload.breakdown;
     if (sessionId) agent.sessionId = sessionId;
-    commitAgents();
   }
 }
 
@@ -245,7 +334,6 @@ export function seedManagerUsage(
   agent.hasUsageData = true;
   if (usage.breakdown) agent.contextBreakdown = usage.breakdown;
   agent.sessionId = sessionId;
-  commitAgents();
 }
 
 /** Update the manager's context window immediately when the user switches
@@ -270,7 +358,6 @@ export function setManagerContextWindow(sessionId: string, contextWindow?: numbe
     agent.contextKnown = false;
     agent.contextMax = 0;
   }
-  commitAgents();
 }
 
 export function completeAgent(agentId: string, sessionId?: string) {
@@ -279,7 +366,6 @@ export function completeAgent(agentId: string, sessionId?: string) {
     agent.status = 'done';
     if (sessionId) agent.sessionId = sessionId;
     if (agentId === 'kory-manager') setManagerStatusForSession(sessionId, 'done');
-    commitAgents();
   }
 }
 
@@ -289,7 +375,6 @@ export function clearAgentContent(agentId: string) {
     agent.content = '';
     agent.thinking = '';
     agent.toolCalls = [];
-    commitAgents();
   }
 }
 
@@ -300,7 +385,6 @@ export function clearAgentStreamingState(agentId: string, sessionId?: string) {
     agent.status = 'idle';
     if (sessionId) agent.sessionId = sessionId;
     if (agentId === 'kory-manager') setManagerStatusForSession(sessionId, 'idle');
-    commitAgents();
   }
 }
 
@@ -308,7 +392,6 @@ export function setManagerSessionId(sessionId: string) {
   const manager = agents.get('kory-manager');
   if (manager && manager.sessionId !== sessionId) {
     manager.sessionId = sessionId;
-    commitAgents();
   }
 }
 
@@ -322,7 +405,7 @@ export function clearNonManagerAgents() {
   const next = new Map<string, AgentState>();
   for (const [id, a] of agents) {
     if (id === 'kory-manager') {
-      next.set(id, { ...a, content: '', thinking: '', toolCalls: [] });
+      next.set(id, createReactiveAgent({ ...a, content: '', thinking: '', toolCalls: [] }));
     } else if (isActiveStatus(a.status)) {
       // Keep workers that are still running — this is called on every
       // chat switch, and wiping another session's live agents would kill
@@ -335,15 +418,12 @@ export function clearNonManagerAgents() {
 
 /** Mark all agents for this session as done (optimistic UI when user clicks Stop). */
 export function markSessionAgentsStopped(sessionId: string) {
-  let changed = false;
   for (const a of agents.values()) {
     if (a.sessionId === sessionId && a.status !== 'idle' && a.status !== 'done') {
       a.status = 'done';
-      changed = true;
     }
   }
   setManagerStatusForSession(sessionId, 'done');
-  if (changed) commitAgents();
 }
 
 /** Mark a single agent as done (optimistic UI when user cancels one worker). */
@@ -351,7 +431,6 @@ export function markAgentStopped(agentId: string) {
   const agent = agents.get(agentId);
   if (agent && agent.status !== 'idle' && agent.status !== 'done') {
     agent.status = 'done';
-    agents = new Map(agents);
   }
 }
 
@@ -483,19 +562,22 @@ async function loadAgentThreads(sessionId: string): Promise<void> {
 
     for (const thread of data.data) {
       const existing = agents.get(thread.agent.id);
-      agents.set(thread.agent.id, {
-        identity: thread.agent,
-        status: thread.status,
-        content: existing?.content ?? '',
-        thinking: existing?.thinking ?? '',
-        toolCalls: existing?.toolCalls ?? [],
-        task: existing?.task ?? '',
-        tokensUsed: existing?.tokensUsed ?? 0,
-        contextMax: existing?.contextMax ?? 0,
-        contextKnown: existing?.contextKnown ?? false,
-        hasUsageData: existing?.hasUsageData ?? false,
-        sessionId,
-      });
+      agents.set(
+        thread.agent.id,
+        createReactiveAgent({
+          identity: thread.agent,
+          status: thread.status,
+          content: existing?.content ?? '',
+          thinking: existing?.thinking ?? '',
+          toolCalls: existing?.toolCalls ?? [],
+          task: existing?.task ?? '',
+          tokensUsed: existing?.tokensUsed ?? 0,
+          contextMax: existing?.contextMax ?? 0,
+          contextKnown: existing?.contextKnown ?? false,
+          hasUsageData: existing?.hasUsageData ?? false,
+          sessionId,
+        }),
+      );
       const key = getAgentThreadKey(sessionId, thread.agent.id);
       if (!agentThreadFeeds.has(key)) {
         setAgentThreadFeed(sessionId, thread.agent.id, []);
@@ -571,6 +653,7 @@ export const agentStore = {
   appendAgentContent,
   appendAgentThinking,
   addToolCall,
+  completeToolCall,
   updateUsage,
   completeAgent,
   clearAgentContent,
@@ -585,11 +668,13 @@ export const agentStore = {
   getAgentThreadKey,
   setAgentThreadFeed,
   upsertAgentThreadEntry,
+  completeAgentThreadToolCall,
   accumulateAgentThreadEntry,
   getAgentFeedLabel,
   getAgentThreadEntries,
   getAgentThreadFeed,
   ensureAgentThreadFeed,
+  finalizeAgentThreadThinking,
   loadAgentThreads,
   loadAgentThreadMessages,
 };

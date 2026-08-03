@@ -100,8 +100,11 @@ export async function bootstrap(): Promise<AppContext> {
 
   const tools = await initTools();
 
-  // MCP Connections
-  const mcpManager = await initMCP(config, tools);
+  // MCP Connections — kicked off without awaiting so the HTTP server can
+  // bind and serve /api/health immediately. MCP servers (notably
+  // @playwright/mcp) can take 5-30s to initialize; the promise is stored in
+  // the AppContext for any consumer that needs the resolved MCPManager.
+  const mcpManagerPromise = initMCP(config, tools);
 
   // Stores & Core
   const sessions = new SessionStore();
@@ -130,7 +133,7 @@ export async function bootstrap(): Promise<AppContext> {
     config,
     providers,
     tools,
-    mcpManager,
+    mcpManagerPromise,
     sessions,
     messages,
     tasks,
@@ -166,6 +169,7 @@ async function initEncryption() {
 
 import { registerGitTools } from './tools';
 import { CreateGoalTool } from './tools/goals';
+import { LoadSkillDetailTool } from './tools/skills';
 import { noteTools } from './tools/notes';
 
 async function initTools() {
@@ -197,6 +201,7 @@ async function initTools() {
     new FetchContextTool(),
     new PruneContextTool(),
     new CreateGoalTool(),
+    new LoadSkillDetailTool(),
   ];
 
   for (const tool of defaultTools) {

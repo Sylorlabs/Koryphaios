@@ -218,6 +218,15 @@ describe('Session Management', () => {
     const session = await sessions.create('test-user', 'Test Session');
     expect(session.id).toBeDefined();
     expect(session.title).toBe('Test Session');
+    expect(session.interactionMode).toBe('act');
+  });
+
+  test('persists Plan mode per session without changing another chat', async () => {
+    const planning = await sessions.create('user1', 'Planning chat');
+    const acting = await sessions.create('user1', 'Acting chat');
+    await sessions.update(planning.id, { interactionMode: 'plan' });
+    expect((await sessions.get(planning.id))?.interactionMode).toBe('plan');
+    expect((await sessions.get(acting.id))?.interactionMode).toBe('act');
   });
 
   test('should list sessions for a user', async () => {

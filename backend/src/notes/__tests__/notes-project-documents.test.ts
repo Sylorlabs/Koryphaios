@@ -4,12 +4,15 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { initDb } from '../../db';
 import {
+  createNote,
   deleteNote,
   getNote,
+  importMemoryAsNotes,
   listNotes,
   syncProjectDocuments,
   updateNote,
 } from '../notes-service';
+import { writeProjectMemory } from '../../memory/unified-memory';
 
 let fixtureRoot = '';
 let firstProject = '';
@@ -57,5 +60,34 @@ describe('project documents', () => {
     await deleteNote(note!.id);
     expect(existsSync(join(secondProject, 'plan.md'))).toBe(false);
     expect(existsSync(join(firstProject, 'plan.md'))).toBe(true);
+  });
+
+  test('imports every project memory document without overwriting same-titled notes', async () => {
+    const memoryRoot = join(fixtureRoot, 'memory-import-project');
+    mkdirSync(join(memoryRoot, '.koryphaios', 'memory'), { recursive: true });
+    writeProjectMemory(memoryRoot, '# Project memory\n\nFirst version.\n');
+    writeFileSync(join(memoryRoot, '.koryphaios', 'memory', 'decisions.md'), '# Decisions\n\nUse local-first storage.\n');
+
+    const unrelated = await createNote({ title: 'Project Memory', content: 'Do not replace this note.' });
+    const imported = await importMemoryAsNotes(memoryRoot);
+    const projectTag = `koryphaios-memory-import:project:${join(memoryRoot, '.koryphaios', 'memory', 'project.md')}`;
+    const decisionTag = `koryphaios-memory-import:project:${join(memoryRoot, '.koryphaios', 'memory', 'decisions.md')}`;
+    const importedProject = imported.find((note) => note.tags.includes(projectTag));
+    const importedDecisions = imported.find((note) => note.tags.includes(decisionTag));
+
+    expect(importedProject?.content).toContain('First version');
+    expect(importedDecisions?.content).toContain('local-first storage');
+    expect((await getNote(unrelated.id))?.content).toBe('Do not replace this note.');
+
+    writeProjectMemory(memoryRoot, '# Project memory\n\nUpdated version.\n');
+    const reimported = await importMemoryAsNotes(memoryRoot);
+    const updatedProject = reimported.find((note) => note.tags.includes(projectTag));
+    expect(updatedProject?.id).toBe(importedProject?.id);
+    expect(updatedProject?.content).toContain('Updated version');
+
+    await Promise.all([
+      unrelated,
+      ...reimported.filter((note) => note.tags.includes(projectTag) || note.tags.includes(decisionTag)),
+    ].map((note) => deleteNote(note.id)));
   });
 });

@@ -35,7 +35,7 @@
   </div>
   
   <div class="p-4 overflow-auto max-h-[500px] whitespace-pre-wrap break-all leading-relaxed">
-    {#each diffs as [op, text]}
+    {#each diffs as [op, text], i (i)}
       {#if op === 1}
         <span class="bg-green-900/40 text-green-300">{text}</span>
       {:else if op === -1}

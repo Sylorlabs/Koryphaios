@@ -35,6 +35,15 @@ export interface StoredMessage {
   sessionId: string;
   role: 'user' | 'assistant' | 'system';
   content: string; // JSON string of ContentBlock[] or raw text
+  /** Durable user-supplied attachments. The database stores these alongside
+   *  the text blocks so a reload, regeneration, or edited-history replay does
+   *  not silently turn a multimodal message into text-only context. */
+  attachments?: Array<{
+    type: 'image' | 'file';
+    data: string;
+    name: string;
+    mimeType?: string;
+  }>;
   model?: string;
   provider?: ProviderName;
   tokensIn?: number;

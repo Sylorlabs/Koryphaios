@@ -36,6 +36,7 @@ import {
 import { getDevinCapabilitiesAsync, type DevinCapabilities } from './devin-capabilities';
 import type { ProviderEvent } from './types';
 import { providerLog } from '../logger';
+import { buildKoryCliMcpConfig } from './kory-cli-mcp-config';
 
 const HARNESS_SYSTEM_NOTE =
   'You are running inside the Koryphaios orchestrator. Koryphaios owns ALL tool execution, ' +
@@ -100,28 +101,66 @@ export class DevinCliBridge extends ManagedCliBridge implements CliBridge {
     // exposed via the .devin/config.json mcpServers. We list the kory__ tool
     // names as allowed_tools so Devin's agent-config parser pre-approves them.
     const koryToolNames = [
-      'kory__read_file', 'kory__write_file', 'kory__edit_file', 'kory__batch_edit',
-      'kory__delete_file', 'kory__move_file', 'kory__diff', 'kory__patch',
-      'kory__grep', 'kory__glob', 'kory__ls', 'kory__bash', 'kory__shell_manage',
-      'kory__web_search', 'kory__web_fetch',
-      'kory__create_note', 'kory__read_note', 'kory__update_note', 'kory__delete_note',
-      'kory__link_notes', 'kory__unlink_notes', 'kory__recall_notes', 'kory__search_notes',
-      'kory__list_notes', 'kory__get_note_backlinks', 'kory__get_note_graph_summary', 'kory__render_note',
-      'kory__fetch_context', 'kory__prune_context',
-      'kory__ask_user', 'kory__ask_manager',
-      'kory__delegate_to_worker', 'kory__delegate_to_jules',
+      'kory__read_file',
+      'kory__write_file',
+      'kory__edit_file',
+      'kory__batch_edit',
+      'kory__delete_file',
+      'kory__move_file',
+      'kory__diff',
+      'kory__patch',
+      'kory__grep',
+      'kory__glob',
+      'kory__ls',
+      'kory__bash',
+      'kory__shell_manage',
+      'kory__web_search',
+      'kory__web_fetch',
+      'kory__create_note',
+      'kory__read_note',
+      'kory__update_note',
+      'kory__delete_note',
+      'kory__link_notes',
+      'kory__unlink_notes',
+      'kory__recall_notes',
+      'kory__search_notes',
+      'kory__list_notes',
+      'kory__get_note_backlinks',
+      'kory__get_note_graph_summary',
+      'kory__render_note',
+      'kory__fetch_context',
+      'kory__prune_context',
+      'kory__ask_user',
+      'kory__ask_manager',
+      'kory__delegate_to_worker',
+      'kory__delegate_to_jules',
       'kory__create_goal',
-      'kory__git_status', 'kory__git_diff', 'kory__git_commit', 'kory__commit_and_create_pr',
+      'kory__git_status',
+      'kory__git_diff',
+      'kory__git_commit',
+      'kory__commit_and_create_pr',
       'kory__view_image',
     ];
     // Critic role: restrict to read-only kory tools.
     const criticTools = [
-      'kory__read_file', 'kory__grep', 'kory__glob', 'kory__ls', 'kory__diff',
-      'kory__web_search', 'kory__web_fetch',
-      'kory__search_notes', 'kory__recall_notes', 'kory__list_notes',
-      'kory__read_note', 'kory__get_note_backlinks', 'kory__get_note_graph_summary',
-      'kory__fetch_context', 'kory__ask_user',
-      'kory__git_status', 'kory__git_diff', 'kory__view_image',
+      'kory__read_file',
+      'kory__grep',
+      'kory__glob',
+      'kory__ls',
+      'kory__diff',
+      'kory__web_search',
+      'kory__web_fetch',
+      'kory__search_notes',
+      'kory__recall_notes',
+      'kory__list_notes',
+      'kory__read_note',
+      'kory__get_note_backlinks',
+      'kory__get_note_graph_summary',
+      'kory__fetch_context',
+      'kory__ask_user',
+      'kory__git_status',
+      'kory__git_diff',
+      'kory__view_image',
     ];
     const allowedTools = ctx.role === 'critic' ? criticTools : koryToolNames;
 
@@ -187,7 +226,10 @@ export class DevinCliBridge extends ManagedCliBridge implements CliBridge {
 
   serializeHooks(hooks: CliHookConfig[]): string {
     // .devin/hooks.v1.json format: { "<Event>": [{ matcher, hooks: [{ type, command }] }] }
-    const payload: Record<string, Array<{ matcher: string; hooks: Array<{ type: 'command'; command: string }> }>> = {};
+    const payload: Record<
+      string,
+      Array<{ matcher: string; hooks: Array<{ type: 'command'; command: string }> }>
+    > = {};
     for (const hook of hooks) {
       for (const event of hook.events) {
         payload[event] = payload[event] ?? [];
@@ -204,20 +246,7 @@ export class DevinCliBridge extends ManagedCliBridge implements CliBridge {
     // Always configure the kory MCP server — this is how Devin accesses
     // Koryphaios tools instead of its own native tools.
     if (!this.cached?.supportsMcp) return null;
-    const bridgeCommand = process.env.KORY_MCP_BRIDGE_COMMAND ?? 'node';
-    const bridgeScript = process.env.KORY_MCP_BRIDGE_SCRIPT;
-    const args = bridgeScript
-      ? [bridgeScript, '--session-id', ctx.sessionId ?? '', '--role', ctx.role, '--provider', 'devin']
-      : ['--session-id', ctx.sessionId ?? '', '--role', ctx.role, '--provider', 'devin'];
-    return [
-      {
-        name: 'kory',
-        command: bridgeCommand,
-        args,
-        env: { KORY_BACKEND_URL: process.env.KORY_BACKEND_URL ?? 'http://127.0.0.1:3001' },
-        transport: 'stdio',
-      },
-    ];
+    return buildKoryCliMcpConfig(ctx, 'devin');
   }
 
   /** Write MCP servers to the per-session .devin/config.json (the shape the
@@ -240,7 +269,10 @@ export class DevinCliBridge extends ManagedCliBridge implements CliBridge {
         /* overwrite */
       }
     }
-    existing.mcpServers = { ...(existing.mcpServers as Record<string, unknown> ?? {}), ...mcpServers };
+    existing.mcpServers = {
+      ...((existing.mcpServers as Record<string, unknown>) ?? {}),
+      ...mcpServers,
+    };
     mkdirSync(dirname(configPath), { recursive: true });
     writeFileSync(configPath, JSON.stringify(existing, null, 2), 'utf8');
   }
@@ -395,7 +427,8 @@ export function resolveDevinReasoningModel(
   const lvl = reasoningLevel.toLowerCase();
   // SWE family: fast = low/minimal, slow = high/max.
   if (/swe-1\.6/i.test(modelId)) {
-    if (lvl === 'none' || lvl === 'minimal' || lvl === 'low') return modelId.replace(/slow/i, 'fast');
+    if (lvl === 'none' || lvl === 'minimal' || lvl === 'low')
+      return modelId.replace(/slow/i, 'fast');
     if (lvl === 'high' || lvl === 'xhigh' || lvl === 'max') return modelId.replace(/fast/i, 'slow');
   }
   return modelId;

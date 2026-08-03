@@ -14,6 +14,9 @@ export interface ToolContext {
   allowedPaths?: string[];
   /** Whether the tool execution should be strictly sandboxed */
   isSandboxed?: boolean;
+  /** Explicit user-selected unrestricted mode. This intentionally suppresses
+   * confirmation prompts, including destructive shell commands. */
+  yoloMode?: boolean;
   /** Optional callback for streaming file edit deltas to the UI */
   emitFileEdit?: (event: {
     path: string;
@@ -32,6 +35,10 @@ export interface ToolContext {
   waitForUserInput?: (question: string, options: string[]) => Promise<string>;
   /** Optional callback to record code changes for summary and keep/reject */
   recordChange?: (change: ChangeSummary) => void;
+  /** Optional preflight for file-mutating tools. Returning false prevents the edit. */
+  preflightFileChange?: (
+    proposal: FileChangeProposal,
+  ) => Promise<{ allowed: boolean; reason?: string }>;
   /** Optional: manager-only. When the manager calls delegate_to_worker, this runs the worker pipeline and returns a summary. */
   delegateToWorker?: (task: string, domain?: string) => Promise<string>;
   /** Optional: manager-only. Delegates to Google Jules (cloud async agent, API only). */
@@ -39,6 +46,12 @@ export interface ToolContext {
     task: string,
     options?: { createPr?: boolean; branch?: string },
   ) => Promise<string>;
+}
+
+export interface FileChangeProposal {
+  paths: string[];
+  /** Added plus removed lines in the requested edit. */
+  linesChanged: number;
 }
 
 export interface ToolCallInput {
@@ -128,6 +141,20 @@ export class ToolRegistry {
       };
     }
 
+    const proposal = estimateFileChange(call);
+    if (proposal && ctx.preflightFileChange) {
+      const decision = await ctx.preflightFileChange(proposal);
+      if (!decision.allowed) {
+        return {
+          callId: call.id,
+          name: call.name,
+          output: decision.reason ?? 'Edit blocked by the configured autonomy limits.',
+          isError: true,
+          durationMs: 0,
+        };
+      }
+    }
+
     const start = performance.now();
     try {
       const result = await tool.run(ctx, call);
@@ -156,4 +183,45 @@ export class ToolRegistry {
       };
     }
   }
+}
+
+function lineCount(value: unknown): number {
+  return typeof value === 'string' ? value.split('\n').length : 0;
+}
+
+/** Estimate Kory-owned file tool impact before the tool mutates the workspace. */
+function estimateFileChange(call: ToolCallInput): FileChangeProposal | null {
+  const input = call.input;
+  if (call.name === 'write_file' && typeof input.path === 'string') {
+    return { paths: [input.path], linesChanged: lineCount(input.content) };
+  }
+
+  if ((call.name === 'edit_file' || call.name === 'patch') && typeof input.path === 'string') {
+    const edits = call.name === 'patch' && Array.isArray(input.edits) ? input.edits : [input];
+    const linesChanged = edits.reduce((total, edit) => {
+      if (!edit || typeof edit !== 'object') return total;
+      const change = edit as Record<string, unknown>;
+      return total + lineCount(change.old_str) + lineCount(change.new_str);
+    }, 0);
+    return { paths: [input.path], linesChanged };
+  }
+
+  if (call.name === 'batch_edit' && Array.isArray(input.files)) {
+    const paths: string[] = [];
+    let linesChanged = 0;
+    for (const file of input.files) {
+      if (!file || typeof file !== 'object') continue;
+      const entry = file as Record<string, unknown>;
+      if (typeof entry.path === 'string') paths.push(entry.path);
+      if (!Array.isArray(entry.edits)) continue;
+      for (const edit of entry.edits) {
+        if (!edit || typeof edit !== 'object') continue;
+        const change = edit as Record<string, unknown>;
+        linesChanged += lineCount(change.old_str) + lineCount(change.new_str);
+      }
+    }
+    return paths.length > 0 ? { paths, linesChanged } : null;
+  }
+
+  return null;
 }

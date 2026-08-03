@@ -24,6 +24,7 @@ import {
 import { readFileSync, existsSync } from 'fs';
 import { PROJECT_ROOT } from '../../runtime/paths';
 import { getRequestProjectRoot } from '../../runtime/request-project';
+import { traceBlockingOp } from '../../monitoring/event-loop-monitor';
 
 export const notesRoutes = new Elysia({ prefix: '/api/notes' })
 
@@ -53,7 +54,9 @@ export const notesRoutes = new Elysia({ prefix: '/api/notes' })
     if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
     try {
       const url = new URL(request.url);
-      const result = await notesService.syncProjectDocuments(url.searchParams.get('projectRoot') || PROJECT_ROOT);
+      const result = await traceBlockingOp('syncProjectDocuments', () =>
+        notesService.syncProjectDocuments(url.searchParams.get('projectRoot') || PROJECT_ROOT),
+      );
       broadcastNotesNetworkUpdate('update');
       return { ok: true, data: result };
     } catch (err: unknown) {
@@ -115,6 +118,7 @@ export const notesRoutes = new Elysia({ prefix: '/api/notes' })
       body: t.Object({
         enabled: t.Optional(t.Boolean()),
         autoIncludeInContext: t.Optional(t.Boolean()),
+        maxContextTokensEnabled: t.Optional(t.Boolean()),
         maxContextTokens: t.Optional(t.Number()),
         defaultFolderPath: t.Optional(t.String()),
         graphPhysics: t.Optional(
@@ -181,14 +185,18 @@ export const notesRoutes = new Elysia({ prefix: '/api/notes' })
   // ── Graph data ────────────────────────────────────────────────────────────
   .get('/graph', async ({ request, query, set }) => {
     if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
-    const graph = await notesService.getGraphData(query.projectRoot as string | undefined);
+    const graph = await traceBlockingOp('getGraphData', () =>
+      notesService.getGraphData(query.projectRoot as string | undefined),
+    );
     return { ok: true, data: graph };
   })
 
   // ── Folder tree ───────────────────────────────────────────────────────────
   .get('/folders', async ({ request, query, set }) => {
     if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
-    const tree = await notesService.getFolderTree(query.projectRoot as string | undefined);
+    const tree = await traceBlockingOp('getFolderTree', () =>
+      notesService.getFolderTree(query.projectRoot as string | undefined),
+    );
     return { ok: true, data: tree };
   })
 
@@ -203,7 +211,9 @@ export const notesRoutes = new Elysia({ prefix: '/api/notes' })
   .post('/import-memory', async ({ request, set }) => {
     if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
     try {
-      const notes = await notesService.importMemoryAsNotes(getRequestProjectRoot(request));
+      const notes = await traceBlockingOp('importMemoryAsNotes', () =>
+        notesService.importMemoryAsNotes(getRequestProjectRoot(request)),
+      );
       broadcastNotesNetworkUpdate('update');
       return { ok: true, data: notes };
     } catch (err: any) {

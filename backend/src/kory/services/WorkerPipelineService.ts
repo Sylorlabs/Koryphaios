@@ -282,8 +282,8 @@ export class WorkerPipelineService {
     const workingDirectory = this.config.getWorkingDirectory();
     const effectivePaths = allowedPaths.length > 0 ? allowedPaths : [workingDirectory];
 
-    if (this.git.isGitRepo()) {
-      const hash = await this.git.getCurrentHash();
+    if (this.git.isGitRepo() && !this.state.getCheckpoint(sessionId)) {
+      const hash = await this.git.createWorktreeCheckpoint();
       if (hash) this.state.saveCheckpoint(sessionId, hash);
     } else {
       await this.snapshotManager.createSnapshot(

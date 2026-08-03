@@ -182,6 +182,15 @@ export function getRulesPath(projectRoot: string): string {
 
 export interface ProjectMemoryDocument { name: string; path: string; kind: 'memory' | 'rules' }
 
+function getProjectMemoryDocumentPath(projectRoot: string, name: string, kind: 'memory' | 'rules'): string {
+  const safeName = basename(name);
+  if (!safeName.toLowerCase().endsWith('.md') || safeName !== name || !/^[a-zA-Z0-9._-]+\.md$/i.test(safeName)) {
+    throw new Error('Invalid document name');
+  }
+  const base = kind === 'rules' ? projectRoot : resolveMemoryRoot(projectRoot);
+  return join(base, `.koryphaios/${kind}`, safeName);
+}
+
 export function listProjectMemoryDocuments(projectRoot: string): ProjectMemoryDocument[] {
   const roots = [
     // Memory is workspace-shared; rules stay with the working folder.
@@ -205,6 +214,33 @@ export function createProjectMemoryDocument(projectRoot: string, name: string, k
   const path = join(dir, `${safe}.md`);
   if (!existsSync(path)) writeFileSync(path, '', 'utf8');
   return { name: `${safe}.md`, path, kind };
+}
+
+/** Read a user-created memory or rules document. The path is resolved from a
+ * validated filename, never trusted from the client. */
+export function readProjectMemoryDocument(projectRoot: string, name: string, kind: 'memory' | 'rules'): MemoryFile {
+  const path = getProjectMemoryDocumentPath(projectRoot, name, kind);
+  if (!existsSync(path)) throw new Error('Document not found');
+  const content = readFileSync(path, 'utf-8');
+  const stats = statSync(path);
+  return { path, content, exists: true, lastModified: stats.mtimeMs, size: stats.size };
+}
+
+/** Write a user-created memory or rules document without letting a client
+ * choose an arbitrary filesystem path. */
+export function writeProjectMemoryDocument(
+  projectRoot: string,
+  name: string,
+  kind: 'memory' | 'rules',
+  content: string,
+): MemoryFile {
+  if (content.length > MEMORY_CONFIG.MAX_MEMORY_SIZE) {
+    throw new Error(`Memory file exceeds maximum size of ${MEMORY_CONFIG.MAX_MEMORY_SIZE} bytes`);
+  }
+  const path = getProjectMemoryDocumentPath(projectRoot, name, kind);
+  if (!existsSync(path)) throw new Error('Document not found');
+  writeFileSync(path, content, 'utf-8');
+  return { path, content, exists: true, lastModified: Date.now(), size: content.length };
 }
 
 // ============================================================================
@@ -1103,7 +1139,11 @@ export async function buildNotesNetworkPrompt(
     const settings = loadNotesSettings(projectRoot);
     if (!settings.enabled) return '';
     autoInclude = settings.autoIncludeInContext;
-    effectiveMaxTokens = settings.maxContextTokens;
+    // When the token budget toggle is off, use a generous default instead of
+    // the user's capped value — they've explicitly disabled the limit.
+    effectiveMaxTokens = settings.maxContextTokensEnabled
+      ? settings.maxContextTokens
+      : 100_000;
     visibleTools = getVisibleNoteToolNames(projectRoot);
     if (!visibleTools.length) return '';
   }

@@ -33,7 +33,14 @@ import type { ProviderMessage } from '../providers/types';
 import { detectJulesApiKey } from '../providers/auth-utils';
 import { runJulesTask } from '../providers/jules-runner';
 import { JULES_SYNC_INSTRUCTIONS, getProviderDisplay } from '../providers/provider-display';
-import { ToolRegistry, type ToolCallInput, type ToolContext, type ToolCallOutput } from '../tools';
+import { markCliConversationRewritten } from '../providers/cli-session-state';
+import {
+  ToolRegistry,
+  type FileChangeProposal,
+  type ToolCallInput,
+  type ToolContext,
+  type ToolCallOutput,
+} from '../tools';
 import { wsBroker } from '../pubsub';
 import { koryLog } from '../logger';
 import { initContextArchive, getContextArchive } from './context-archive';
@@ -224,6 +231,9 @@ export class KoryManager {
   private workspaceManager: WorkspaceManager | null = null;
   /** AbortController for the current manager run per session (so cancelSessionWorkers can abort manager too). */
   private managerAbortBySession = new Map<string, AbortController>();
+  /** Sessions currently running the dedicated, history-replacing compaction flow. */
+  private compactingSessions = new Set<string>();
+  private compactionCompleted = new Map<string, boolean>();
   /** In-memory worker/critic chat threads keyed by agentId. */
   private agentThreads = new Map<string, AgentThreadState>();
   /** Services */
@@ -249,7 +259,10 @@ export class KoryManager {
     { model: string; provider: ProviderName | undefined }
   >();
   /** Goal state is immutable task context, not a conversational suggestion. */
-  private goalContextBySession = new Map<string, NonNullable<import('./prompts').TaskContract['goalContext']>>();
+  private goalContextBySession = new Map<
+    string,
+    NonNullable<import('./prompts').TaskContract['goalContext']>
+  >();
 
   /** Extend lifecycle policy without embedding provider-specific behavior in prompts. */
   public registerWorkflowHook(event: WorkflowHookEvent, hook: WorkflowHook): () => void {
@@ -463,8 +476,9 @@ export class KoryManager {
     } else {
       this.emitThought(sessionId, 'synthesizing', 'User rejected changes. Rolling back...');
       const prevHash = this.state.getCheckpoint(sessionId);
+      const changes = this.state.getChanges(sessionId);
       if (prevHash && this.git.isGitRepo()) {
-        this.git.rollback(prevHash);
+        await this.git.rollbackFiles(prevHash, changes);
       } else {
         await this.snapshotManager.restoreSnapshot(sessionId, 'latest', this.workingDirectory);
       }
@@ -586,19 +600,28 @@ export class KoryManager {
     userMessage: string,
     preferredModel?: string,
     reasoningLevel?: string,
-    attachments?: Array<{ type: string; data: string; name: string }>,
+    attachments?: Array<{ type: string; data: string; name: string; mimeType?: string }>,
     collaborationToolPolicy?: CollaborationToolPolicy,
     responseVariant?: { groupId: string; index: number },
     goalContext?: import('./prompts').TaskContract['goalContext'],
+    interactionMode?: 'act' | 'plan',
   ): Promise<void> {
+    interactionMode = interactionMode ?? (await this.sessions?.get(sessionId))?.interactionMode ?? 'act';
     this.isProcessing = true;
     this.state.clearChanges(sessionId);
+    this.state.clearCheckpoint(sessionId);
+    if (interactionMode !== 'plan' && this.git.isGitRepo()) {
+      const checkpoint = await this.git.createWorktreeCheckpoint();
+      if (checkpoint) this.state.saveCheckpoint(sessionId, checkpoint);
+    }
     userMessage = sanitizeForPrompt(userMessage);
 
     const workflowSettings = loadAgentSettings(this.workingDirectory);
     const configuredCollisionChoices = workflowSettings.skillCollisionChoices ?? {};
     if (goalContext) this.goalContextBySession.set(sessionId, goalContext);
-    const initialContract = createTaskContract(userMessage, { goalContext: goalContext ?? this.goalContextBySession.get(sessionId) });
+    const initialContract = createTaskContract(userMessage, {
+      goalContext: goalContext ?? this.goalContextBySession.get(sessionId),
+    });
     const discoveryQuestions = buildIntentDiscoveryBatch(
       userMessage,
       initialContract.taskKind,
@@ -683,6 +706,7 @@ export class KoryManager {
           preferredModel,
           attachments,
           responseVariant,
+          interactionMode,
         );
       } finally {
         clearTimeout(processTimeout);
@@ -694,9 +718,10 @@ export class KoryManager {
       const changes = this.state.getChanges(sessionId);
       if (changes.length > 0) this.emitWSMessage(sessionId, 'session.changes', { changes });
     } catch (err) {
-      const errDetail = err instanceof Error
-        ? { message: err.message, name: err.name, stack: err.stack, cause: err.cause }
-        : { raw: String(err), typeof: typeof err };
+      const errDetail =
+        err instanceof Error
+          ? { message: err.message, name: err.name, stack: err.stack, cause: err.cause }
+          : { raw: String(err), typeof: typeof err };
       koryLog.error({ sessionId, err, errDetail }, 'Error in processTask');
       await this.updateWorkflowState(sessionId, 'error');
       this.emitError(sessionId, `Error: ${String(err)}`);
@@ -832,14 +857,16 @@ export class KoryManager {
     }
 
     if (preferredModel && preferredModel !== 'auto' && preferredModel.includes(':')) {
-      const [providerName, modelId] = preferredModel.split(':');
+      const separator = preferredModel.indexOf(':');
+      const providerName = preferredModel.slice(0, separator);
+      const modelId = preferredModel.slice(separator + 1);
       if (providerName && modelId) {
         const selectedProvider = authenticated.find((provider) => provider.name === providerName);
         if (!selectedProvider) {
-          return `${this.formatProviderName(providerName)} is not configured. Open Settings and connect it, or switch back to Auto.`;
+          return `${this.formatProviderName(providerName)} is not configured. Open Settings and connect it.`;
         }
         if (!selectedProvider.models.includes(modelId)) {
-          return `${modelId} is not enabled for ${this.formatProviderName(providerName)}. Open Settings -> Manage Models and enable it, or switch back to Auto.`;
+          return `${modelId} is not enabled for ${this.formatProviderName(providerName)}. Open Settings -> Manage Models and enable it.`;
         }
       }
     }
@@ -1180,7 +1207,9 @@ export class KoryManager {
       role: 'critic',
       mode: getModeManager().getMode(),
       provider: provider.name,
+      model: criticRouting.model,
       workingDirectory: reviewDirectory,
+      occupiedContextChars: JSON.stringify(workerMessages ?? []).length,
       taskContract: createTaskContract(task ?? 'Review delegated work'),
       contextPaths: this.config.contextPaths,
       skillSelection: {
@@ -1341,9 +1370,11 @@ export class KoryManager {
     userMessage: string,
     reasoningLevel?: string,
     preferredModel?: string,
-    attachments?: Array<{ type: string; data: string; name: string }>,
+    attachments?: Array<{ type: string; data: string; name: string; mimeType?: string }>,
     responseVariant?: { groupId: string; index: number },
+    interactionMode?: 'act' | 'plan',
   ): Promise<void> {
+    interactionMode = interactionMode ?? (await this.sessions?.get(sessionId))?.interactionMode ?? 'act';
     koryLog.debug({ sessionId, reasoningLevel, preferredModel }, 'Entering handleDirectly');
     let routing = this.resolveActiveRouting(preferredModel, 'general', true, userMessage);
     let provider = await this.providers.resolveProvider(routing.model, routing.provider);
@@ -1387,6 +1418,7 @@ export class KoryManager {
         workingDirectory: await this.resolveSessionWorkingDirectory(sessionId),
         allowedPaths: [],
         isSandboxed: false,
+        yoloMode: this.isYoloMode,
         signal: abort.signal,
         waitForUserInput: (question: string, options: string[]) =>
           this.waitForUserInputInternal(sessionId, question, options),
@@ -1400,6 +1432,7 @@ export class KoryManager {
         recordChange: (c) => {
           this.state.recordChange(sessionId, c);
         },
+        preflightFileChange: (proposal) => this.enforceAutonomyLimits(sessionId, proposal),
         delegateToWorker: (task: string, domainHint?: string) =>
           this.runWorkerPipeline(
             sessionId,
@@ -1412,6 +1445,19 @@ export class KoryManager {
       };
 
       const history = await this.loadHistory(sessionId);
+      // /api/messages persists the user's turn before starting the manager so
+      // reloads are durable. Do not send that same turn twice to the model;
+      // the multimodal finalContent below is the authoritative current copy.
+      const persistedCurrent = history.at(-1);
+      const persistedCurrentText = Array.isArray(persistedCurrent?.content)
+        ? persistedCurrent.content
+            .filter((block) => block.type === 'text')
+            .map((block) => block.text ?? '')
+            .join('')
+        : persistedCurrent?.content;
+      if (persistedCurrent?.role === 'user' && persistedCurrentText === userMessage) {
+        history.pop();
+      }
       koryLog.debug({ historyCount: history.length }, 'Loaded history');
 
       let finalContent: string | import('../providers/types').ProviderContentBlock[] = userMessage;
@@ -1421,7 +1467,7 @@ export class KoryManager {
           finalContent = [
             { type: 'text', text: userMessage },
             ...imageAttachments.map((att) => {
-              let mime = 'image/png';
+              let mime = att.mimeType || 'image/png';
               const lowerName = att.name.toLowerCase();
               if (lowerName.endsWith('.jpg') || lowerName.endsWith('.jpeg')) mime = 'image/jpeg';
               if (lowerName.endsWith('.webp')) mime = 'image/webp';
@@ -1469,6 +1515,7 @@ export class KoryManager {
             managerCtx,
             abort.signal,
             reasoningLevel,
+            interactionMode,
           );
           koryLog.debug(
             {
@@ -1479,9 +1526,10 @@ export class KoryManager {
             'Turn completed',
           );
         } catch (err: unknown) {
-          const errDetail = err instanceof Error
-            ? { message: err.message, name: err.name, stack: err.stack, cause: err.cause }
-            : { raw: String(err), typeof: typeof err };
+          const errDetail =
+            err instanceof Error
+              ? { message: err.message, name: err.name, stack: err.stack, cause: err.cause }
+              : { raw: String(err), typeof: typeof err };
           koryLog.error({ err, errDetail }, 'Error in processManagerTurn');
           if (err instanceof DOMException && err.name === 'AbortError') {
             stoppedByUser = true;
@@ -1704,6 +1752,20 @@ export class KoryManager {
           createdAt: Date.now(),
         });
       }
+      if (this.messages && this.compactingSessions.has(sessionId) && !stoppedByUser && content) {
+        const removedMessages = await this.messages.replaceSessionWithSummary(
+          sessionId,
+          content,
+          routing.model,
+          providerName,
+        );
+        await this.sessions?.update(sessionId, { messageCount: 1 });
+        markCliConversationRewritten(sessionId);
+        this.emitWSMessage(sessionId, 'system.info', {
+          message: `Session compacted: replaced ${removedMessages} messages with one durable summary.`,
+        });
+        this.compactionCompleted.set(sessionId, true);
+      }
       this.emitWSMessage(sessionId, 'agent.status', {
         agentId: KORY_IDENTITY.id,
         // Background terminals still running → the agent is waiting on them,
@@ -1713,7 +1775,7 @@ export class KoryManager {
       });
 
       // Create rewind point after final response
-      if (finalMessageId) {
+      if (finalMessageId && interactionMode !== 'plan') {
         await this.createRewindCheckpoint(
           sessionId,
           routing.model,
@@ -1776,6 +1838,7 @@ export class KoryManager {
     ctx: ToolContext,
     signal?: AbortSignal,
     reasoningLevel?: string,
+    interactionMode: 'act' | 'plan' = 'act',
   ): Promise<LLMTurnResult> {
     if (signal?.aborted) throw new DOMException('Manager run aborted', 'AbortError');
 
@@ -1792,11 +1855,16 @@ export class KoryManager {
       role: 'manager',
       mode: getModeManager().getMode(),
       provider: provider.name,
+      model: modelId,
       workingDirectory: await this.resolveSessionWorkingDirectory(sessionId),
-      taskContract: createTaskContract(taskGoal, { goalContext: this.goalContextBySession.get(sessionId) }),
+      occupiedContextChars: JSON.stringify(messages).length,
+      taskContract: createTaskContract(taskGoal, {
+        goalContext: this.goalContextBySession.get(sessionId),
+      }),
       contextPaths: this.config.contextPaths,
       skillSelection: {
         collisionChoices: this.skillCollisionChoicesBySession.get(sessionId),
+        ...(interactionMode === 'plan' ? { pins: ['plan-mode'] } : {}),
       },
     });
     let systemPrompt = managerCompilation.systemPrompt;
@@ -1856,6 +1924,17 @@ export class KoryManager {
     );
     if (settings.localWebSearch === 'off') {
       tools = tools.filter((t) => t.name !== 'web_search');
+    }
+
+    if (interactionMode === 'plan') {
+      const planTools = new Set([
+        'read_file', 'grep', 'glob', 'ls', 'diff', 'web_search', 'web_fetch', 'view_image',
+        'ask_user', 'create_note', 'update_note', 'search_notes', 'recall_notes', 'list_notes',
+        'get_note_backlinks', 'get_note_graph_summary', 'render_note', 'fetch_context', 'load_skill_detail',
+      ]);
+      tools = tools.filter((tool) => planTools.has(tool.name));
+      systemPrompt +=
+        '\n\n• PLAN MODE: Do not modify files, run shell commands, commit, create pull requests, or delegate implementation. Ask decision-changing questions, inspect evidence, and update the living plan Note at every meaningful checkpoint. Update durable memory only with stable reusable facts or confirmed decisions. Obtain explicit user approval before leaving Plan mode or performing a write-capable project action.';
     }
 
     if (!this.isJulesAvailable()) {
@@ -1998,7 +2077,7 @@ export class KoryManager {
         harnessRole: 'manager',
         promptManifestHash: managerCompilation.manifest.hash,
         taskContractHash: managerCompilation.manifest.taskContractHash,
-        sandbox: SANDBOX_PRESETS.balanced,
+        sandbox: interactionMode === 'plan' ? SANDBOX_PRESETS.readonly : SANDBOX_PRESETS.balanced,
       },
       provider.name,
     );
@@ -2496,11 +2575,13 @@ export class KoryManager {
       signal: abort.signal,
       allowedPaths,
       isSandboxed,
+      yoloMode: this.isYoloMode,
       emitFileEdit: (e) =>
         this.emitWSMessage(sessionId, 'stream.file_delta', { agentId: workerId, ...e }),
       emitFileComplete: (e) =>
         this.emitWSMessage(sessionId, 'stream.file_complete', { agentId: workerId, ...e }),
       recordChange: (c) => this.state.recordChange(sessionId, c),
+      preflightFileChange: (proposal) => this.enforceAutonomyLimits(sessionId, proposal),
       waitForUserInput: (question, options) =>
         this.waitForUserInputInternal(sessionId, question, options),
     };
@@ -2512,12 +2593,15 @@ export class KoryManager {
       role: 'worker',
       mode: getModeManager().getMode(),
       provider: provider.name,
+      model: modelId,
       workingDirectory: workerWorkingDirectory,
+      occupiedContextChars: JSON.stringify(messages).length,
       taskContract: {
-        ...(taskContract ?? createTaskContract(userMessage, {
-          scope: allowedPaths,
-          constraints: isSandboxed ? ['Stay within the granted filesystem paths'] : [],
-        })),
+        ...(taskContract ??
+          createTaskContract(userMessage, {
+            scope: allowedPaths,
+            constraints: isSandboxed ? ['Stay within the granted filesystem paths'] : [],
+          })),
         goalContext: this.goalContextBySession.get(sessionId) ?? taskContract?.goalContext,
       },
       contextPaths: this.config.contextPaths,
@@ -2559,7 +2643,15 @@ export class KoryManager {
       updatedAt: Date.now(),
     };
     this.agentThreads.set(workerId, thread);
-    this.appendAgentThreadEntry(thread, 'manager', userMessage);
+    // Make the worker transcript self-contained: reviewers can see the
+    // original user outcome, the manager's scoped assignment, and then the
+    // worker's own progress. This is especially important when opening a
+    // worker card after the manager feed has moved on.
+    const originalUserMessage = [...history].reverse().find((message) => message.role === 'user');
+    const originalUserRequest =
+      typeof originalUserMessage?.content === 'string' ? originalUserMessage.content : undefined;
+    if (originalUserRequest) this.appendAgentThreadEntry(thread, 'user', originalUserRequest);
+    this.appendAgentThreadEntry(thread, 'manager', `Assigned work: ${userMessage}`);
 
     try {
       await this.runAgentThread(workerId, provider);
@@ -2706,6 +2798,37 @@ export class KoryManager {
     };
   }
 
+  /** Summarize the current history, then replace it only after a successful result. */
+  async compactSession(
+    sessionId: string,
+    preferredModel?: string,
+    reasoningLevel?: string,
+  ): Promise<void> {
+    if (!this.messages) throw new Error('Message storage is unavailable.');
+    if (this.isSessionRunning(sessionId)) throw new Error('Stop the active run before compacting.');
+    if ((await this.messages.getAll(sessionId)).length < 2) {
+      throw new Error('There is not enough conversation to compact yet.');
+    }
+    this.compactingSessions.add(sessionId);
+    this.compactionCompleted.set(sessionId, false);
+    try {
+      await this.processTask(
+        sessionId,
+        'Create a precise, self-contained session summary for future work. Preserve active goals, decisions, changed files, verification, blockers, and next actions. Do not use tools, do not delegate, and return only the compacted summary.',
+        preferredModel,
+        reasoningLevel,
+      );
+      if (!this.compactionCompleted.get(sessionId)) {
+        throw new Error(
+          'The provider did not return a usable summary; the original conversation was kept.',
+        );
+      }
+    } finally {
+      this.compactingSessions.delete(sessionId);
+      this.compactionCompleted.delete(sessionId);
+    }
+  }
+
   cancelSessionWorkers(sessionId: string) {
     this.abortManagerRun(sessionId);
     this.workers.cancelSessionWorkers(sessionId);
@@ -2741,10 +2864,23 @@ export class KoryManager {
         // System rows are UI markers (e.g. "Stopped by user.") — never part of
         // the conversation sent back to the model.
         ?.filter((m) => m.role !== 'system')
-        .map((m) => ({
-          role: m.role as InternalMessage['role'],
-          content: m.content,
-        })) || []
+        .map((m) => {
+          const images = (m.attachments ?? []).filter((attachment) => attachment.type === 'image');
+          return {
+            role: m.role as InternalMessage['role'],
+            content:
+              images.length > 0
+                ? [
+                    { type: 'text' as const, text: m.content },
+                    ...images.map((attachment) => ({
+                      type: 'image' as const,
+                      imageData: attachment.data,
+                      imageMimeType: attachment.mimeType ?? 'image/png',
+                    })),
+                  ]
+                : m.content,
+          };
+        }) || []
     );
   }
 
@@ -3066,8 +3202,13 @@ export class KoryManager {
       role: 'worker',
       mode: getModeManager().getMode(),
       provider: provider.name,
+      model: modelId,
       workingDirectory: ctx.workingDirectory,
-      taskContract: createTaskContract(workerGoal, { scope: ctx.allowedPaths ?? [], goalContext: this.goalContextBySession.get(sessionId) }),
+      occupiedContextChars: JSON.stringify(messages).length,
+      taskContract: createTaskContract(workerGoal, {
+        scope: ctx.allowedPaths ?? [],
+        goalContext: this.goalContextBySession.get(sessionId),
+      }),
       contextPaths: this.config.contextPaths,
       skillSelection: {
         collisionChoices: this.skillCollisionChoicesBySession.get(sessionId),
@@ -3337,6 +3478,40 @@ export class KoryManager {
     }
   }
 
+  /** Enforce enabled file/line limits before a Kory-owned file tool mutates the workspace. */
+  async enforceAutonomyLimits(
+    sessionId: string,
+    proposal: FileChangeProposal,
+  ): Promise<{ allowed: boolean; reason?: string }> {
+    const settings = loadAgentSettings(await this.resolveSessionWorkingDirectory(sessionId));
+    if (!settings.autonomyLimitsEnabled) return { allowed: true };
+
+    const recordedChanges = this.state.getChanges(sessionId);
+    const filesChanged = new Set([
+      ...recordedChanges.map((change) => change.path),
+      ...proposal.paths,
+    ]).size;
+    const linesChanged =
+      recordedChanges.reduce(
+        (total, change) => total + change.linesAdded + change.linesDeleted,
+        0,
+      ) + proposal.linesChanged;
+
+    if (
+      filesChanged <= settings.approvalThresholdFiles &&
+      linesChanged <= settings.approvalThresholdLines
+    ) {
+      return { allowed: true };
+    }
+
+    const response = await this.waitForUserInputInternal(
+      sessionId,
+      `Autonomy limits are active. This edit would reach ${filesChanged} files and ${linesChanged} changed lines (limits: ${settings.approvalThresholdFiles} files / ${settings.approvalThresholdLines} lines). Apply it?`,
+      ['Apply this edit', 'Keep limits on — do not apply'],
+    );
+    if (response === 'Apply this edit') return { allowed: true };
+    return { allowed: false, reason: 'Edit was not approved under the active autonomy limits.' };
+  }
 
   private emitUsageUpdate(
     sessionId: string,

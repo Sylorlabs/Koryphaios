@@ -21,6 +21,7 @@ import type { ProviderConfig, ModelDef } from '@koryphaios/shared';
 import { spawn } from 'node:child_process';
 import {
   readFileSync,
+  mkdirSync,
   writeFileSync,
   unlinkSync,
   readdirSync,
@@ -32,7 +33,7 @@ import {
   fstatSync,
 } from 'node:fs';
 import { join } from 'node:path';
-import { tmpdir, homedir } from 'node:os';
+import { tmpdir } from 'node:os';
 import {
   type Provider,
   type ProviderContentBlock,
@@ -46,7 +47,10 @@ import { whichBinary } from './cli-detection';
 import { providerLog } from '../logger';
 import { buildSoftJail, wrapCommand } from '../collaboration/sandbox-runner';
 import { AntigravityModels } from './models/antigravity';
-import { getCliBridge } from './cli-bridges';
+import { getCliBridge, getKoryphaiosAntigravityHome } from './cli-bridges';
+import { getCliConversationRevision } from './cli-session-state';
+import { renderCliContent } from './cli-attachments';
+import { serializeKoryMcpServers } from './kory-cli-mcp-config';
 
 const AGY_TIMEOUT_MS = 300_000;
 const MODELS_CACHE_TTL_MS = 5 * 60_000;
@@ -59,7 +63,7 @@ const DEFAULT_CLI_MODEL = 'Gemini 3.5 Flash (Medium)';
 // tool runs before the answer). We map each Koryphaios session to the agy
 // conversation it created on its first turn and resume it afterwards, sending
 // only the NEW turn — agy keeps its own history.
-const sessionConversations = new Map<string, string>();
+const sessionConversations = new Map<string, { id: string; revision: number }>();
 
 /** Snapshot conversation ids currently on disk. */
 function listConversationIds(): Set<string> {
@@ -314,7 +318,14 @@ export class AntigravityProvider implements Provider {
     // Resume the agy conversation tied to this Koryphaios session when we have
     // one — then only the NEW turn is sent (agy holds the prior history), which
     // avoids a fresh agentic session re-exploring the workspace every message.
-    let convId = request.sessionId ? sessionConversations.get(request.sessionId) : undefined;
+    const currentRevision = getCliConversationRevision(request.sessionId);
+    const savedConversation = request.sessionId
+      ? sessionConversations.get(request.sessionId)
+      : undefined;
+    let convId = savedConversation?.revision === currentRevision ? savedConversation.id : undefined;
+    if (request.sessionId && savedConversation && !convId) {
+      sessionConversations.delete(request.sessionId);
+    }
     if (convId && !existsSync(join(AGY_CONV_DIR, `${convId}.db`))) {
       // agy pruned it — start a fresh conversation with full history.
       if (request.sessionId) sessionConversations.delete(request.sessionId);
@@ -338,12 +349,34 @@ export class AntigravityProvider implements Provider {
     // The manager and worker roles always get accept-edits — never guess
     // read-only from the user's message text. A question like "what tools
     // do you have?" should not silently strip the agent's write capability.
+    const antigravityHome = getKoryphaiosAntigravityHome();
+    const bridge = getCliBridge('antigravity');
+    const mcpServers = bridge?.buildMcpConfig({
+      provider: 'antigravity',
+      role: request.harnessRole ?? 'manager',
+      sandbox: request.sandbox,
+      workingDirectory: cwd || process.cwd(),
+      sessionId: request.sessionId,
+      systemPrompt: request.systemPrompt,
+      tools: request.tools ?? [],
+      promptManifestHash: request.promptManifestHash,
+      taskContractHash: request.taskContractHash,
+    });
+    if (mcpServers?.length) {
+      mkdirSync(antigravityHome, { recursive: true });
+      writeFileSync(
+        join(antigravityHome, '.claude.json'),
+        JSON.stringify(serializeKoryMcpServers(mcpServers), null, 2),
+        { mode: 0o600 },
+      );
+    }
+
     const args = [
       '--print',
       prompt,
       '--model',
       cliModel,
-      ...(request.harnessRole === 'critic'
+      ...(request.harnessRole === 'critic' || (request.sandbox && (!request.sandbox.allowEdits || !request.sandbox.allowShell))
         ? ['--mode', 'plan', '--sandbox']
         : ['--mode', 'accept-edits', '--dangerously-skip-permissions']),
       '--log-file',
@@ -356,16 +389,21 @@ export class AntigravityProvider implements Provider {
 
     // Run in the session's project directory when one is set so the CLI sees
     // the real workspace; fall back to a neutral temp dir otherwise.
-    const jail = request.sandbox
-      ? buildSoftJail(process.env, [join(homedir(), '.gemini'), join(homedir(), '.antigravity')])
-      : null;
+    const antigravityConfig = join(antigravityHome, '.gemini');
+    const baseEnv: NodeJS.ProcessEnv = { ...process.env, HOME: antigravityHome };
+    const jail = request.sandbox ? buildSoftJail(baseEnv, [antigravityConfig]) : null;
     const wrapped = request.sandbox
-      ? wrapCommand(bin, args, { cwd: cwd || tmpdir(), policy: request.sandbox })
+      ? wrapCommand(bin, args, {
+          cwd: cwd || tmpdir(),
+          configDirs: [antigravityConfig],
+          policy: request.sandbox,
+        })
       : { command: bin, args };
+    const env = jail?.env ?? baseEnv;
     const child = spawn(wrapped.command, wrapped.args, {
       cwd: request.workingDirectory?.trim() || tmpdir(),
       stdio: ['ignore', 'pipe', 'pipe'],
-      env: jail?.env ?? { ...process.env },
+      env,
     });
 
     const onAbort = () => {
@@ -418,7 +456,12 @@ export class AntigravityProvider implements Provider {
       const found = detectNewConversation(convsBefore);
       if (found) {
         convId = found;
-        if (request.sessionId) sessionConversations.set(request.sessionId, found);
+        if (request.sessionId) {
+          sessionConversations.set(request.sessionId, {
+            id: found,
+            revision: getCliConversationRevision(request.sessionId),
+          });
+        }
         // Focus the tailers on the discovered conversation.
         transcriptTail.convId = found;
         trajectoryTail.convId = found;
@@ -558,8 +601,13 @@ function* chunkText(text: string): Generator<ProviderEvent> {
 // Koryphaios the same real-time visibility the Antigravity app has, from the
 // CLI's own artifacts (no API access, no auth games).
 
-const AGY_BRAIN_DIR = join(homedir(), '.gemini', 'antigravity-cli', 'brain');
-const AGY_CONV_DIR = join(homedir(), '.gemini', 'antigravity-cli', 'conversations');
+const AGY_BRAIN_DIR = join(getKoryphaiosAntigravityHome(), '.gemini', 'antigravity-cli', 'brain');
+const AGY_CONV_DIR = join(
+  getKoryphaiosAntigravityHome(),
+  '.gemini',
+  'antigravity-cli',
+  'conversations',
+);
 
 // ── Trajectory thinking extraction ──────────────────────────────────────────
 // The reasoning text ("collapsible thinking" in the Antigravity app) is NOT in
@@ -901,10 +949,7 @@ function buildPrompt(systemPrompt: string | undefined, messages: ProviderMessage
     tools: [],
   });
   const harnessNote = bridgeConfig?.systemInstructions?.[1] ?? HARNESS_SYSTEM_NOTE;
-  lines.push(
-    systemPrompt?.trim() ? `${systemPrompt.trim()}\n\n${harnessNote}` : harnessNote,
-    '',
-  );
+  lines.push(systemPrompt?.trim() ? `${systemPrompt.trim()}\n\n${harnessNote}` : harnessNote, '');
   const turns = messages.filter((m) => m.role !== 'system');
 
   if (turns.length === 1 && turns[0].role === 'user' && lines.length === 0) {
@@ -946,37 +991,6 @@ function buildTurnPrompt(messages: ProviderMessage[]): string {
 
 /** Persist a pasted image to a temp file so the CLI's own tools can view it —
  *  the piped prompt is text-only, but the agent has file access. */
-function imageBlockToTempFile(imageData: string | undefined, mime: string | undefined): string {
-  if (!imageData) return '[image attachment omitted — no data]';
-  try {
-    const ext =
-      mime === 'image/jpeg'
-        ? 'jpg'
-        : mime === 'image/webp'
-          ? 'webp'
-          : mime === 'image/gif'
-            ? 'gif'
-            : 'png';
-    const file = join(tmpdir(), `kory-attach-${Math.random().toString(36).slice(2, 10)}.${ext}`);
-    writeFileSync(file, Buffer.from(imageData, 'base64'));
-    return `[image attached — saved to ${file}; use your image/file viewing tool to look at it]`;
-  } catch {
-    return '[image attachment omitted — could not persist to disk]';
-  }
-}
-
 function flattenContent(content: string | ProviderContentBlock[]): string {
-  if (typeof content === 'string') return content;
-  const parts: string[] = [];
-  for (const block of content) {
-    if (block.type === 'text' && block.text) parts.push(block.text);
-    else if (block.type === 'tool_use')
-      parts.push(
-        `[tool call: ${block.toolName ?? 'tool'} ${JSON.stringify(block.toolInput ?? {})}]`,
-      );
-    else if (block.type === 'tool_result') parts.push(`[tool result: ${block.toolOutput ?? ''}]`);
-    else if (block.type === 'image')
-      parts.push(imageBlockToTempFile(block.imageData, block.imageMimeType));
-  }
-  return parts.join('\n');
+  return renderCliContent(content);
 }

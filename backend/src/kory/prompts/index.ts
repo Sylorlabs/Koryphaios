@@ -5,9 +5,10 @@ import { createHash } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { getProviderHarnessCapabilities } from '../../providers/provider-harness';
+import { resolveTrustedContextWindow } from '../../providers/models';
 import { resolveSkills, type SkillResolverResult } from '../skills';
 
-export const PROMPT_VERSION = 'kory-workflow-v3-skills';
+export const PROMPT_VERSION = 'kory-workflow-v4-progressive-skills';
 
 export type TaskKind =
   | 'question'
@@ -71,9 +72,19 @@ export interface PromptManifest {
     source: string;
     hash: string;
     reason: string;
+    representation: 'full' | 'compact' | 'minimal';
     contextCost: number;
+    fullContextCost: number;
+    omittedDetailChars: number;
   }>;
   skillManifestHash: string;
+  skillContext: {
+    budgetChars: number;
+    modelContextTokens?: number;
+    contextKnown: boolean;
+    occupiedContextChars: number;
+    compressed: string[];
+  };
   conflicts: string[];
   taskContractHash: string;
 }
@@ -330,18 +341,48 @@ function renderForProvider(adapter: string, sections: string[]): string {
   return sections.join('\n\n');
 }
 
+export function deriveSkillContextBudget(input: {
+  contextWindowTokens?: number;
+  occupiedContextChars?: number;
+  fixedPromptChars?: number;
+  explicitBudgetChars?: number;
+}): number {
+  if (input.explicitBudgetChars !== undefined)
+    return Math.max(1, Math.floor(input.explicitBudgetChars));
+  if (!input.contextWindowTokens) {
+    // Unknown model limits must not disable pressure handling. Treat 120k
+    // characters as the conservative skill envelope and spend it down with
+    // context Kory can actually observe.
+    const occupied = Math.max(0, input.occupiedContextChars ?? 0);
+    const fixed = Math.max(0, input.fixedPromptChars ?? 0);
+    return Math.max(1, 120_000 - occupied - fixed);
+  }
+
+  const totalChars = input.contextWindowTokens * 4;
+  const outputReserveChars = Math.max(16_000, Math.floor(totalChars * 0.2));
+  const occupied = Math.max(0, input.occupiedContextChars ?? 0);
+  const fixed = Math.max(0, input.fixedPromptChars ?? 0);
+  const safelyAvailable = Math.max(1, totalChars - outputReserveChars - occupied - fixed);
+  // Skills may use at most 35% of the remaining input capacity. This leaves room
+  // for repository evidence, tool schemas/results, memory, and the active task.
+  return Math.max(1, Math.min(120_000, Math.floor(safelyAvailable * 0.35)));
+}
+
 export function compilePrompt(input: {
   role: PromptRole;
   mode: UIMode;
   provider: ProviderName | string;
+  model?: string;
   workingDirectory: string;
   taskContract: TaskContract;
+  occupiedContextChars?: number;
   contextPaths?: string[];
   skillSelection?: {
     pins?: string[];
     remove?: string[];
     collisionChoices?: Record<string, 'personal' | 'project'>;
     targetMedium?: string;
+    contextBudget?: number;
   };
 }): CompiledPrompt {
   const instructionState = inspectInstructionSources(input.workingDirectory, input.contextPaths);
@@ -359,9 +400,7 @@ export function compilePrompt(input: {
       ? 'Return JSON only with this exact shape: {"verdict":"PASS|FAIL","findings":[{"severity":"critical|major|minor","evidence":"file, line, artifact, or check","criterion":"affected acceptance criterion","finding":"actionable defect"}],"checksReviewed":["exact check or artifact"],"unmetCriteria":["criterion"]}. PASS requires no critical or major findings. Malformed output fails closed.'
       : '';
   const style =
-    input.mode === 'beginner'
-      ? 'Explain outcomes in plain, respectful language without weakening technical rigor or hiding failures.'
-      : 'Communicate concisely and technically. Lead with outcomes and exact evidence.';
+    'Act with informed autonomy: make routine implementation decisions, manage context and delegation yourself, and ask only when a decision materially changes authority, safety, or the requested outcome. Communicate concisely and technically. Lead with outcomes and exact evidence.';
   const instructionText = sources.length
     ? sources
         .map(
@@ -374,11 +413,28 @@ export function compilePrompt(input: {
     capabilityProfile.mode === 'native-passthrough'
       ? 'This provider uses a native harness wrapped by Kory role policy and verification. Filesystem isolation is guaranteed only when the runtime capability manifest reports it active; otherwise label it unavailable. Provider-specific quality measurements may influence recommendations but never remove role capability.'
       : 'This is Kory-managed execution. Tool and filesystem policy are enforced by the harness; do not attempt to bypass them.';
+  const trustedContext = input.model
+    ? resolveTrustedContextWindow(input.model, input.provider as ProviderName)
+    : { contextKnown: false as const };
+  const fixedPromptChars =
+    roleRules.length +
+    criticOutputContract.length +
+    style.length +
+    UNIVERSAL_CORE.length +
+    renderTaskContract(input.taskContract).length +
+    providerRules.length +
+    instructionText.length;
+  const skillContextBudget = deriveSkillContextBudget({
+    contextWindowTokens: trustedContext.contextWindow,
+    occupiedContextChars: input.occupiedContextChars,
+    fixedPromptChars,
+    explicitBudgetChars: input.skillSelection?.contextBudget,
+  });
   const skillResolution: SkillResolverResult = resolveSkills(
     input.workingDirectory,
     input.taskContract.goal,
     input.taskContract,
-    input.skillSelection,
+    { ...input.skillSelection, contextBudget: skillContextBudget },
   );
   if (skillResolution.blocked) {
     const conflicts = [
@@ -388,24 +444,31 @@ export function compilePrompt(input: {
       ...(skillResolution.omittedByBudget.length
         ? [`bundle exceeds context limit: ${skillResolution.omittedByBudget.join(', ')}`]
         : []),
+      ...(skillResolution.totalContextCost > skillContextBudget
+        ? [
+            `even emergency skill contracts require ${skillResolution.totalContextCost} characters but only ${skillContextBudget} are safely available`,
+          ]
+        : []),
     ];
-    throw new Error(
-      `Skill collision requires a user choice before work starts: ${conflicts.join(', ')}`,
-    );
+    throw new Error(`Skill resolution blocked before work starts: ${conflicts.join(', ')}`);
   }
-  const skillManifest = skillResolution.selected.map(({ skill, reason, contextCost }) => ({
+  const skillManifest = skillResolution.selected.map(
+    ({ skill, reason, representation, contextCost, fullContextCost, omittedDetailChars }) => ({
     name: skill.name,
     version: skill.metadata.version,
     source: skill.source,
     hash: skill.hash,
     reason,
+    representation,
     contextCost,
+    fullContextCost,
+    omittedDetailChars,
   }));
   const skillText = skillResolution.selected.length
     ? skillResolution.selected
         .map(
-          ({ skill, reason, contextCost }) =>
-            `### ${skill.name} v${skill.metadata.version} (${skill.source}; ${contextCost} chars)\nReason: ${reason}\n${skill.instructions}`,
+          ({ skill, reason, renderedInstructions, representation, contextCost, fullContextCost }) =>
+            `### ${skill.name} v${skill.metadata.version} (${skill.source}; ${representation}; ${contextCost}/${fullContextCost} chars)\nReason: ${reason}\n${representation === 'full' ? '' : `Context disclosure: Koryphaios selected the ${representation} representation because the full playbook did not fit the safe skill budget. If a later task decision genuinely needs omitted detail and load_skill_detail is available, load this exact skill by name and source; do not load it speculatively.\n`}${renderedInstructions}`,
         )
         .join('\n\n')
     : 'No local skills were selected.';
@@ -429,6 +492,17 @@ export function compilePrompt(input: {
     capabilityProfile,
     skills: skillManifest,
     skillManifestHash: skillResolution.manifestHash,
+    skillContext: {
+      budgetChars: skillContextBudget,
+      ...(trustedContext.contextWindow
+        ? { modelContextTokens: trustedContext.contextWindow }
+        : {}),
+      contextKnown: trustedContext.contextKnown,
+      occupiedContextChars: Math.max(0, input.occupiedContextChars ?? 0),
+      compressed: skillResolution.compressedByBudget.map(
+        (item) => `${item.name}:${item.representation}`,
+      ),
+    },
     conflicts: instructionState.conflicts,
     taskContractHash: sha256(JSON.stringify(input.taskContract)),
   };

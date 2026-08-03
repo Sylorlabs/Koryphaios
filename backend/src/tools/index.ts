@@ -4,6 +4,7 @@ export {
   type ToolContext,
   type ToolCallInput,
   type ToolCallOutput,
+  type FileChangeProposal,
 } from './registry';
 export { BashTool } from './bash';
 export { ShellManageTool } from './shell-manage';
@@ -27,4 +28,5 @@ export { DelegateToJulesTool } from './jules';
 export { MCPDetectErrorsTool, MCPAnalyzeErrorTool, MCPSuggestFixesTool } from './mcp';
 export { FetchContextTool, PruneContextTool } from './context';
 export { CreateGoalTool } from './goals';
+export { LoadSkillDetailTool } from './skills';
 export { registerGitTools } from './git';

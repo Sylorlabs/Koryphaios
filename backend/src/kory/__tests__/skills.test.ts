@@ -5,7 +5,9 @@ import { join } from 'node:path';
 import {
   activateSkill,
   applyDefaultUpdate,
+  createSkillDraft,
   listSkills,
+  renderSkillInstructions,
   resolveSkills,
   saveSkillDraft,
   testSkill,
@@ -13,6 +15,7 @@ import {
   enforceSkillLearningPolicy,
 } from '../skills';
 import { compilePrompt, createTaskContract } from '../prompts';
+import { LoadSkillDetailTool } from '../../tools/skills';
 import {
   listHarnessQualifications,
   rankHarnessCandidates,
@@ -28,6 +31,41 @@ import { PROFESSIONAL_SKILL_DEFINITIONS } from '../professional-skill-definition
 
 let root = '';
 let skillsHome = '';
+
+const BASELINE_SKILL_WORD_COUNTS: Record<string, number> = {
+  'accessibility-practice': 308, 'distributed-backend': 100, 'functional-verification': 173,
+  'interface-usability-testing': 105, 'developer-experience': 301, 'visual-verification': 323,
+  'reliability-verification': 180, 'concurrency-debugging': 180, 'release-planning': 197,
+  'in-process-backend': 102, 'experimental-analysis': 241, 'operational-data-analysis': 255,
+  'novel-ui-toolkit': 172, debugging: 182, research: 153, implementation: 198,
+  'backend-engineering': 128, 'skill-authoring-evaluation': 202,
+  'performance-verification': 185, 'instructional-communication': 194,
+  'human-experience': 313, 'user-research': 308, 'interaction-design': 301,
+  'terminal-interface': 128, 'security-review': 150, 'reference-communication': 198,
+  'game-spatial-interface': 190, 'testing-engineering': 141,
+  'visual-interface-design': 566, 'architecture-planning': 211,
+  'integration-fault-testing': 87, 'deterministic-debugging': 179,
+  'infrastructure-security': 269, 'integration-implementation': 195,
+  'property-fuzz-differential-testing': 84, 'authorization-security': 255,
+  'refactor-implementation': 202, 'hardware-runtime-debugging': 195,
+  'migration-planning': 201, 'market-competitive-research': 251, verification: 179,
+  'information-architecture': 292, 'performance-debugging': 191,
+  'literature-research': 253, 'security-verification': 186, 'task-routing': 136,
+  'web-interface': 241, 'language-runtime-security': 251,
+  'accessibility-verification': 187, 'content-error-design': 309,
+  'deterministic-contract-testing': 86, 'repository-environment-discovery': 142,
+  'repository-research': 249, 'local-service-backend': 100,
+  'simulation-device-testing': 93, 'documents-communication': 195,
+  'application-security': 256, 'supply-chain-security': 253,
+  'embedded-device-security': 254, 'embedded-interface': 180, 'factual-research': 252,
+  'usability-evaluation': 290, 'data-visualization': 245, 'privacy-engineering': 249,
+  'feature-implementation': 205, 'data-analysis': 145, 'statistical-inference': 243,
+  'ml-evaluation': 254, 'performance-testing': 87, planning: 195, 'plan-mode': 180,
+  'executive-communication': 200, 'compiler-runtime-backend': 103,
+  'frontend-engineering': 205, 'network-service-backend': 98,
+  'technical-communication': 193, 'exploratory-data-analysis': 250,
+  'distributed-debugging': 180, 'native-interface': 157,
+};
 
 beforeEach(() => {
   root = mkdtempSync(join(tmpdir(), 'kory-skills-project-'));
@@ -57,9 +95,103 @@ describe('local Koryphaios skills', () => {
   });
   test('seeds the complete instruction-only default library', () => {
     const active = listSkills(root).filter((skill) => skill.state === 'active');
-    expect(active).toHaveLength(78);
+    expect(active).toHaveLength(79);
     expect(active.every((skill) => skill.validation.valid)).toBe(true);
     expect(active.every((skill) => skill.metadata.sourceScope === 'local-only')).toBe(true);
+  });
+
+  test('keeps every bundled skill at least three times deeper than the audited baseline', () => {
+    const active = listSkills(root).filter((skill) => skill.state === 'active');
+    expect(Object.keys(BASELINE_SKILL_WORD_COUNTS)).toHaveLength(active.length);
+    for (const skill of active) {
+      const words = skill.instructions.trim().split(/\s+/).length;
+      expect(words).toBeGreaterThanOrEqual(BASELINE_SKILL_WORD_COUNTS[skill.name] * 3);
+      expect(skill.metadata.version).toBe('3.0.0');
+      expect(skill.metadata.contextBudget).toBe(16_000);
+    }
+  });
+
+  test('migrates exact pre-hash bundled skills but preserves human-edited legacy copies', () => {
+    const legacy = `---
+name: planning
+description: Create bounded, acceptance-driven implementation plans.
+metadata:
+  koryphaios:
+    version: 1.0.0
+    baseVersion: 1.0.0
+    domains: ["planning"]
+    targetMedia: ["any"]
+    shouldTrigger: ["plan and implement a feature"]
+    shouldNotTrigger: ["what is this variable"]
+    evidence: ["Acceptance criteria"]
+    contextBudget: 1200
+    sourceScope: local-only
+---
+# planning
+
+Translate the task contract into coherent dependency-ordered work with explicit acceptance criteria, risks, and verification.
+`;
+    const planningDir = join(skillsHome, 'planning');
+    mkdirSync(planningDir, { recursive: true });
+    writeFileSync(join(planningDir, 'SKILL.md'), legacy);
+    let planning = listSkills(root).find((skill) => skill.name === 'planning')!;
+    expect(planning.metadata.version).toBe('3.0.0');
+    expect(planning.instructions.split(/\s+/).length).toBeGreaterThanOrEqual(585);
+
+    writeFileSync(join(planningDir, 'SKILL.md'), legacy.replace('coherent', 'human-customized'));
+    planning = listSkills(root).find((skill) => skill.name === 'planning')!;
+    expect(planning.metadata.version).toBe('1.0.0');
+    expect(planning.instructions).toContain('human-customized');
+  });
+
+  test('keeps foundational skills concise but operationally complete', () => {
+    const skills = listSkills(root);
+    for (const name of [
+      'task-routing',
+      'repository-environment-discovery',
+      'research',
+      'security-review',
+      'data-analysis',
+      'skill-authoring-evaluation',
+    ]) {
+      const skill = skills.find((item) => item.name === name && item.state === 'active')!;
+      expect(skill.instructions.split(/\s+/).length).toBeGreaterThan(90);
+    }
+  });
+
+  test('creates valid user-authored skills as inactive local drafts', () => {
+    const draft = createSkillDraft(root, 'project', {
+      name: 'release-notes-review',
+      description: 'Review release notes when preparing a user-facing product release.',
+      instructions:
+        'Inspect the actual change set and audience. Map every consequential change to accurate user impact, migration guidance, compatibility limits, and reproducible verification before approving the notes.',
+      domains: ['release', 'communication'],
+      activation: ['release notes'],
+      shouldTrigger: [
+        'Review these release notes before launch',
+        'Check this changelog for missing migration guidance',
+      ],
+      shouldNotTrigger: ['Fix this runtime crash', 'Design a settings screen'],
+      evidence: ['Change-to-note traceability', 'Rendered notes reviewed'],
+    });
+
+    expect(draft.state).toBe('draft');
+    expect(draft.source).toBe('project');
+    expect(draft.validation.valid).toBe(true);
+    expect(testSkill(draft).passed).toBe(true);
+    expect(listSkills(root).some((skill) => skill.name === draft.name && skill.state === 'active')).toBe(
+      false,
+    );
+    expect(() =>
+      createSkillDraft(root, 'project', {
+        name: 'release-notes-review',
+        description: 'Review release notes when preparing a user-facing product release.',
+        instructions:
+          'Inspect the actual change set and verify every consequential statement before approving the release notes.',
+        shouldTrigger: ['Review these release notes', 'Audit this changelog'],
+        shouldNotTrigger: ['Fix this runtime crash', 'Design a settings screen'],
+      }),
+    ).toThrow('already exists');
   });
 
   test('loads professional playbooks only with their selected skill revision', () => {
@@ -162,12 +294,33 @@ describe('local Koryphaios skills', () => {
     );
   });
 
+  test('rejects path identity drift and hierarchy cycles before activation', () => {
+    const planning = listSkills(root).find((skill) => skill.name === 'planning')!;
+    expect(() =>
+      saveSkillDraft(
+        root,
+        'personal',
+        'planning',
+        planning.content.replace('name: planning', 'name: renamed-planning'),
+      ),
+    ).toThrow('must match its path name');
+
+    const web = listSkills(root).find((skill) => skill.name === 'web-interface')!;
+    saveSkillDraft(
+      root,
+      'personal',
+      'web-interface',
+      web.content.replace('parent: frontend-engineering', 'parent: web-interface'),
+    );
+    expect(() => activateSkill(root, 'personal', 'web-interface')).toThrow('cannot depend on itself');
+  });
+
   test('selects small relevant bundles and blocks unresolved personal/project collisions', () => {
     const contract = createTaskContract('Fix the native settings crash');
     const result = resolveSkills(root, contract.goal, contract, { targetMedium: 'native' });
     expect(result.blocked).toBe(false);
     expect(result.selected.map((item) => item.skill.name)).toContain('debugging');
-    expect(result.totalContextCost).toBeLessThanOrEqual(30_000);
+    expect(result.totalContextCost).toBeLessThanOrEqual(120_000);
 
     const personal = listSkills(root).find((skill) => skill.name === 'debugging')!;
     const directory = join(root, '.koryphaios', 'skills', 'debugging');
@@ -307,7 +460,7 @@ describe('local Koryphaios skills', () => {
     ]);
   });
 
-  test('fails closed on missing hierarchy dependencies instead of silently flattening them', () => {
+  test('rejects missing hierarchy dependencies before activation', () => {
     const web = listSkills(root).find((skill) => skill.name === 'web-interface')!;
     saveSkillDraft(
       root,
@@ -315,15 +468,8 @@ describe('local Koryphaios skills', () => {
       'web-interface',
       web.content.replace('parent: frontend-engineering', 'parent: missing-frontend-parent'),
     );
-    activateSkill(root, 'personal', 'web-interface');
-    const result = resolveSkills(
-      root,
-      'Build a web interface',
-      createTaskContract('Build a web interface'),
-    );
-    expect(result.blocked).toBe(true);
-    expect(result.hierarchyErrors).toContain(
-      'web-interface references missing parent missing-frontend-parent',
+    expect(() => activateSkill(root, 'personal', 'web-interface')).toThrow(
+      'requires missing skill missing-frontend-parent',
     );
   });
 
@@ -355,6 +501,22 @@ describe('local Koryphaios skills', () => {
     expect(first.manifest.skills.length).toBeGreaterThan(0);
   });
 
+  test('records context-aware skill compression in the prompt manifest', () => {
+    const compiled = compilePrompt({
+      role: 'worker',
+      mode: 'advanced',
+      provider: 'openai',
+      workingDirectory: root,
+      taskContract: createTaskContract('Build a professional accessible web interface'),
+      skillSelection: { contextBudget: 10_000 },
+    });
+    expect(compiled.manifest.skillContext.budgetChars).toBe(10_000);
+    expect(compiled.manifest.skillContext.compressed.length).toBeGreaterThan(0);
+    expect(compiled.manifest.skills.some((skill) => skill.representation !== 'full')).toBe(true);
+    expect(compiled.systemPrompt).toContain('load_skill_detail');
+    expect(compiled.systemPrompt).toContain('Context disclosure:');
+  });
+
   test('collects repository and declared-medium evidence without turning the repository stack into a default', () => {
     writeFileSync(join(root, 'package.json'), '{"dependencies":{"react":"latest"}}');
     const custom = createTaskContract('Build a native UI toolkit for a custom language');
@@ -366,14 +528,20 @@ describe('local Koryphaios skills', () => {
     expect(result.selected.map((item) => item.skill.name)).not.toContain('web-interface');
   });
 
-  test('uses a dependency-aware context budget and only blocks mandatory overflow', () => {
+  test('compresses required skills before blocking under context pressure', () => {
     const contract = createTaskContract('Build a professional accessible web interface');
-    const optional = resolveSkills(root, contract.goal, contract, { contextBudget: 2_500 });
-    expect(optional.omittedByBudget.length).toBeGreaterThan(0);
-    expect(optional.blocked).toBe(false);
-    const names = new Set(optional.selected.map((item) => item.skill.name));
-    for (const item of optional.selected) {
+    const compressed = resolveSkills(root, contract.goal, contract, { contextBudget: 10_000 });
+    expect(compressed.omittedByBudget).toEqual([]);
+    expect(compressed.compressedByBudget.length).toBeGreaterThan(0);
+    expect(compressed.blocked).toBe(false);
+    expect(compressed.totalContextCost).toBeLessThanOrEqual(10_000);
+    const names = new Set(compressed.selected.map((item) => item.skill.name));
+    for (const item of compressed.selected) {
       if (item.skill.metadata.parent) expect(names.has(item.skill.metadata.parent)).toBe(true);
+      if (item.representation !== 'full') {
+        expect(item.renderedInstructions).toContain('Compact');
+        expect(item.omittedDetailChars).toBeGreaterThan(0);
+      }
     }
     const pinned = resolveSkills(root, contract.goal, contract, {
       contextBudget: 1,
@@ -381,6 +549,41 @@ describe('local Koryphaios skills', () => {
     });
     expect(pinned.blocked).toBe(true);
     expect(pinned.totalContextCost).toBeGreaterThan(1);
+  });
+
+  test('pins the detailed Plan mode skill independently of request wording', () => {
+    const contract = createTaskContract('Rename this local variable');
+    const result = resolveSkills(root, contract.goal, contract, { pins: ['plan-mode'] });
+    const planMode = result.selected.find((item) => item.skill.name === 'plan-mode');
+    expect(planMode).toBeDefined();
+    expect(planMode?.renderedInstructions).toContain('Ask useful questions early and throughout');
+    expect(planMode?.renderedInstructions).toContain('living planning record');
+    expect(planMode?.renderedInstructions).toContain('KORY_PLAN_READY');
+  });
+
+  test('never emits a partial executable block in a shortened skill', () => {
+    const skill = listSkills(root).find((item) => item.name === 'planning')!;
+    const scripted = {
+      ...skill,
+      instructions: `${skill.instructions}\n\n\`\`\`bash\nprintf dangerous-partial\n\`\`\``,
+    };
+    const compact = renderSkillInstructions(scripted, 'compact');
+    expect(compact).not.toContain('printf dangerous-partial');
+    expect(compact).not.toContain('```');
+    expect(compact).toContain('Required completion evidence');
+  });
+
+  test('recovers full skill detail on demand without granting authority', async () => {
+    const skill = listSkills(root).find((item) => item.name === 'planning')!;
+    const tool = new LoadSkillDetailTool();
+    const result = await tool.run(
+      { sessionId: 'skill-detail-test', workingDirectory: root },
+      { id: 'call-1', name: tool.name, input: { name: skill.name, source: skill.source } },
+    );
+    expect(result.isError).toBe(false);
+    expect(result.output).toContain(skill.hash);
+    expect(result.output).toContain('dependency-ordered');
+    expect(tool.description).toContain('never grants tools');
   });
 
   test('ranks only measured eligible harness candidates and preserves unknown order', () => {
@@ -438,7 +641,7 @@ describe('local Koryphaios skills', () => {
         skill: skill.name,
         revisionHash: skill.hash,
         caseId: card.cases[index].id,
-        provider: 'test-provider',
+        provider: index === 0 ? 'test-provider-a' : 'test-provider-b',
         model: `test-model-${index}`,
         harnessVersion: 'test',
         role: 'worker',

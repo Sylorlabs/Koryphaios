@@ -21,6 +21,15 @@ export interface RoutingServiceEnhancedConfig {
   providers?: ProviderRegistry;
 }
 
+export function splitProviderModel(value: string): { provider: ProviderName; model: string } | null {
+  const separator = value.indexOf(':');
+  if (separator <= 0 || separator === value.length - 1) return null;
+  return {
+    provider: value.slice(0, separator) as ProviderName,
+    model: value.slice(separator + 1),
+  };
+}
+
 /**
  * Enhanced routing service that handles model/provider selection.
  * Extracted from KoryManager to reduce its line count.
@@ -82,16 +91,16 @@ export class RoutingServiceEnhanced {
     let out: RoutingDecision;
 
     if (preferredModel && preferredModel.includes(':')) {
-      const [p, m] = preferredModel.split(':');
-      out = { provider: p as ProviderName, model: m! };
+      const parsed = splitProviderModel(preferredModel)!;
+      out = { provider: parsed.provider, model: parsed.model };
     } else if (preferredModel && preferredModel !== 'auto' && resolveModel(preferredModel)) {
       const def = resolveModel(preferredModel)!;
       out = { model: preferredModel, provider: def.provider };
     } else {
       const assignment = this.config.assignments?.[domain];
       if (assignment && assignment.includes(':')) {
-        const [p, m] = assignment.split(':');
-        out = { provider: p as ProviderName, model: m! };
+        const parsed = splitProviderModel(assignment)!;
+        out = { provider: parsed.provider, model: parsed.model };
       } else if (this.smartRouter) {
         // Task-aware selection from live catalog
         const decision = this.smartRouter.route({ prompt, domain, preferCheap });
@@ -124,9 +133,7 @@ export class RoutingServiceEnhanced {
    * Parse a provider:model string into components.
    */
   parseProviderModel(providerModel: string): { provider: ProviderName; model: string } | null {
-    if (!providerModel.includes(':')) return null;
-    const [provider, model] = providerModel.split(':');
-    return { provider: provider as ProviderName, model: model! };
+    return splitProviderModel(providerModel);
   }
 
   /**

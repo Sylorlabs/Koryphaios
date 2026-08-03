@@ -21,7 +21,9 @@ function normalizeChecked(checked: string[]): { modelId: string; provider: Provi
   const out: { modelId: string; provider: ProviderName }[] = [];
   for (const s of checked) {
     if (s.includes(':')) {
-      const [provider, modelId] = s.split(':');
+      const separator = s.indexOf(':');
+      const provider = s.slice(0, separator);
+      const modelId = s.slice(separator + 1);
       if (provider && modelId)
         out.push({ modelId: modelId.trim(), provider: provider.trim() as ProviderName });
     } else {

@@ -23,7 +23,7 @@
   }
 
   // Auto-scroll each still-streaming code container to the bottom as content grows.
-  $effect(() => {
+  $effect.pre(() => {
     void edits.map((e) => e.content.length + (e.done ? 1 : 0));
     tick().then(() => {
       for (const e of edits) {
@@ -31,6 +31,14 @@
         if (el && !e.done) el.scrollTop = el.scrollHeight;
       }
     });
+  });
+
+  // Drop codeContainers refs for edits that are no longer present.
+  $effect(() => {
+    const current = new Set(edits.map((e) => e.path));
+    for (const path of Object.keys(codeContainers)) {
+      if (!current.has(path)) delete codeContainers[path];
+    }
   });
 
   function getFileName(path: string): string {
@@ -84,8 +92,14 @@
       })
       .join('');
   }
-  function bodyHtml(edit: { operation: string; content: string; oldContent?: string; path: string }): string {
-    if (edit.operation === 'edit' && edit.oldContent !== undefined) {
+  function bodyHtml(edit: {
+    operation: string;
+    content: string;
+    oldContent?: string;
+    path: string;
+    done?: boolean;
+  }): string {
+    if (edit.done && edit.operation === 'edit' && edit.oldContent !== undefined) {
       return diffHtml(edit.oldContent, edit.content);
     }
     return highlight(edit.content, edit.path);
@@ -94,11 +108,16 @@
     return content.split('\n').length;
   }
   // Cursor-style +N −M line stats.
-  function diffStats(edit: { operation: string; content: string; oldContent?: string }): {
+  function diffStats(edit: {
+    operation: string;
+    content: string;
+    oldContent?: string;
+    done?: boolean;
+  }): {
     added: number;
     removed: number;
   } {
-    if (edit.operation !== 'edit' || edit.oldContent === undefined) {
+    if (!edit.done || edit.operation !== 'edit' || edit.oldContent === undefined) {
       return { added: lineCount(edit.content), removed: 0 };
     }
     const diffs = dmp.diff_main(edit.oldContent, edit.content);

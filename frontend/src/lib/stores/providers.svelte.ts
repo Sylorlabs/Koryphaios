@@ -188,9 +188,9 @@ function dismissCliAccountNotice(fingerprint: string): void {
 // ============================================================================
 
 function createProvidersStore() {
-  let statusList = $state<ProviderInfo[]>([]);
+  let statusList = $state.raw<ProviderInfo[]>([]);
   let availableProviderTypes = $state<Array<{ name: string; authMode: string }>>([]);
-  let detectedClis = $state<DetectedCli[]>([]);
+  let detectedClis = $state.raw<DetectedCli[]>([]);
   let cliAccountSelectionRequired = $state<string[]>([]);
   let cliAccountNoticeShown = false;
 
@@ -933,7 +933,6 @@ function createProvidersStore() {
     name: string,
     options: { saveAccount?: boolean } = {},
   ): Promise<BrowserAuthStartResult> {
-    void options;
     browserAuthBusy = name;
     browserAuthMessages[name] = '';
     try {
@@ -1193,7 +1192,10 @@ function createProvidersStore() {
         accountKeyInputs[name] = '';
         accountTokenInputs[name] = '';
         accountUrlInputs[name] = '';
-        await loadProviderAccounts(name, true);
+        await Promise.all([
+          loadProviderAccounts(name, true),
+          activate ? loadProvidersFromApi() : Promise.resolve(),
+        ]);
         const newAccountId = data.data?.account?.id;
         if (newAccountId) {
           const currentOrder = fallbackOrders[name] ?? [];
@@ -1203,7 +1205,6 @@ function createProvidersStore() {
             void saveFallbackOrder(name, [...currentOrder, ...missing]);
           }
         }
-        if (activate) await loadProvidersFromApi();
         toastStore.success(activate ? 'Account saved and activated' : 'Account saved');
       } else {
         toastStore.error(data.error ?? 'Failed to save account');
@@ -1224,8 +1225,7 @@ function createProvidersStore() {
       });
       const data = await parseJsonResponse<{ ok?: boolean; error?: string }>(res);
       if (data.ok) {
-        await loadProvidersFromApi();
-        await loadProviderAccounts(name, true);
+        await Promise.all([loadProvidersFromApi(), loadProviderAccounts(name, true)]);
         toastStore.success('Saved account activated');
       } else {
         toastStore.error(data.error ?? 'Failed to activate account');
@@ -1303,8 +1303,7 @@ function createProvidersStore() {
       const data = await parseJsonResponse<{ ok?: boolean; error?: string }>(res);
       if (data?.ok) {
         toastStore.success(`Custom provider "${label}" added ✓`);
-        await loadAvailableProviders();
-        await loadProvidersFromApi();
+        await Promise.all([loadAvailableProviders(), loadProvidersFromApi()]);
         return true;
       }
       toastStore.error(data?.error ?? 'Failed to add custom provider');
@@ -1326,8 +1325,7 @@ function createProvidersStore() {
       const data = await parseJsonResponse<{ ok?: boolean; error?: string }>(res);
       if (data?.ok) {
         toastStore.info('Custom provider removed');
-        await loadAvailableProviders();
-        await loadProvidersFromApi();
+        await Promise.all([loadAvailableProviders(), loadProvidersFromApi()]);
         return true;
       }
       toastStore.error(data?.error ?? 'Failed to remove custom provider');

@@ -37,6 +37,12 @@ import { agentStore } from './agents.svelte';
 import { notesStore } from './notes.svelte';
 import { goalStore } from './goals.svelte';
 import { isDemoMode } from '$lib/demo-flags';
+import {
+  isInternalEventTypeDump,
+  notifyAgentFinished,
+  notifyDesktop,
+  notifyNeedsAttention,
+} from '$lib/utils/desktop-notifications';
 
 export type { FeedEntry };
 export { feedStore } from './feed.svelte';
@@ -85,6 +91,20 @@ let activeFileEdits = $state<Map<string, ActiveFileEdit>>(new Map());
 
 let hasShownMalformedWsMessage = false;
 let fileEditTimers = new Map<string, ReturnType<typeof setTimeout>>();
+let notesRefreshTimer: ReturnType<typeof setTimeout> | null = null;
+
+function scheduleNotesRefresh() {
+  if (!notesStore.settings.enabled) return;
+  if (notesRefreshTimer) clearTimeout(notesRefreshTimer);
+  notesRefreshTimer = setTimeout(() => {
+    notesRefreshTimer = null;
+    void Promise.all([
+      notesStore.fetchNotes(),
+      notesStore.fetchGraph(),
+      notesStore.fetchFolderTree(),
+    ]);
+  }, 200);
+}
 
 // ─── Session Busy Bridge ─────────────────────────────────────────────────────
 
@@ -110,10 +130,9 @@ function maybeClearBusy(sessionId: string | undefined) {
   if (!agentStore.isSessionRunning(sessionId)) clearSessionBusy(sessionId);
 }
 
-// Watchdog: if a session is marked busy but goes SILENT (no stream activity)
-// for this long, the agent is gone and a terminal event was dropped — force
-// the busy/Stop state off so the composer never gets stuck. Any stream event
-// for the session resets its timer.
+// A silent provider/tool phase can legitimately last well beyond this delay.
+// Ask the backend before changing UI state; a lack of stream events is not
+// evidence that the work has stopped.
 const BUSY_WATCHDOG_MS = 45_000;
 const busyWatchdogs = new Map<string, ReturnType<typeof setTimeout>>();
 
@@ -124,11 +143,24 @@ function kickBusyWatchdog(sessionId: string | undefined) {
   if (!busySessions.has(sessionId)) return;
   busyWatchdogs.set(
     sessionId,
-    setTimeout(() => {
+    setTimeout(async () => {
       busyWatchdogs.delete(sessionId);
-      // Silent too long — the run ended without a terminal event reaching us.
-      markSessionAgentsStopped(sessionId);
-      clearSessionBusy(sessionId);
+      try {
+        const response = await apiFetch(apiUrl(`/api/sessions/${sessionId}/runtime-status`));
+        const result = await response.json() as { ok?: boolean; running?: boolean };
+        if (result.ok && result.running) {
+          kickBusyWatchdog(sessionId);
+          return;
+        }
+        if (result.ok) {
+          markSessionAgentsStopped(sessionId);
+          clearSessionBusy(sessionId);
+          return;
+        }
+      } catch {
+        // A transient health/auth failure is never evidence that work stopped.
+      }
+      kickBusyWatchdog(sessionId);
     }, BUSY_WATCHDOG_MS),
   );
 }
@@ -257,6 +289,9 @@ function handleMessage(msg: WSMessage) {
         if (p.status === 'thinking') feedStore.beginThinking(p.agentId, msg.timestamp);
         else feedStore.finalizeThinking(p.agentId, msg.timestamp);
       }
+      if (msg.sessionId && p.status !== 'thinking') {
+        agentStore.finalizeAgentThreadThinking(msg.sessionId, p.agentId, msg.timestamp);
+      }
       if (p.status === 'done' || p.status === 'idle' || p.status === 'waiting') {
         maybeClearBusy(msg.sessionId ?? agents.get(p.agentId)?.sessionId);
         const completedSessionId = msg.sessionId ?? agents.get(p.agentId)?.sessionId;
@@ -304,6 +339,11 @@ function handleMessage(msg: WSMessage) {
       agentStore.completeAgent(p.agentId, msg.sessionId ?? undefined);
       if (isForActiveSession) feedStore.removeAnalyzingThoughtEntries();
       maybeClearBusy(msg.sessionId ?? agents.get(p.agentId)?.sessionId);
+      // Desktop alert only for the manager finishing a turn the user may have
+      // stepped away from — never for every internal worker/stream event.
+      if (msg.type === 'agent.completed' && p.agentId === 'kory-manager') {
+        notifyAgentFinished();
+      }
       break;
     }
 
@@ -330,6 +370,9 @@ function handleMessage(msg: WSMessage) {
       // Answer text starting = the provider is done reasoning: freeze timers.
       if (isForActiveSession) feedStore.finalizeThinking(p.agentId, msg.timestamp);
       agentStore.appendAgentContent(p.agentId, p.content, msg.sessionId ?? undefined);
+      if (msg.sessionId) {
+        agentStore.finalizeAgentThreadThinking(msg.sessionId, p.agentId, msg.timestamp);
+      }
       if (isForActiveSession) {
         feedStore.removeAnalyzingThoughtEntries();
         feedStore.accumulateFeedEntry({
@@ -401,10 +444,13 @@ function handleMessage(msg: WSMessage) {
     case 'stream.tool_call': {
       const p = msg.payload as StreamToolCallPayload;
       if (isForActiveSession) feedStore.finalizeThinking(p.agentId, msg.timestamp);
+      if (msg.sessionId) {
+        agentStore.finalizeAgentThreadThinking(msg.sessionId, p.agentId, msg.timestamp);
+      }
       const existingToolCall =
         isForActiveSession && feedStore.updateToolCall(p.toolCall, msg.timestamp);
       if (!existingToolCall)
-        agentStore.addToolCall(p.agentId, p.toolCall.name, msg.sessionId ?? undefined);
+        agentStore.addToolCall(p.agentId, p.toolCall.id, p.toolCall.name, msg.sessionId ?? undefined);
       if (isForActiveSession) {
         if (!existingToolCall)
           feedStore.addFeedEntry({
@@ -486,18 +532,23 @@ function handleMessage(msg: WSMessage) {
           ? `Tool result (${p.toolResult.durationMs.toFixed(0)}ms): ${p.toolResult.output}`
           : `Tool result (time not reported by provider): ${p.toolResult.output}`;
       if (isForActiveSession) {
-        feedStore.addFeedEntry({
-          timestamp: msg.timestamp,
-          type: 'tool_result',
-          agentId: p.agentId,
-          agentName: agents.get(p.agentId)?.identity.name ?? 'Worker',
-          glowClass: feedStore.resolveGlowClass(agents.get(p.agentId)?.identity),
-          text: resultText,
-          metadata: { toolResult: p.toolResult, sourceProvider: p.sourceProvider },
-        });
+        const metadata = { toolResult: p.toolResult, sourceProvider: p.sourceProvider };
+        const replacedLiveCall = feedStore.completeToolCall(p.toolResult, resultText, msg.timestamp, metadata);
+        if (!replacedLiveCall) {
+          feedStore.addFeedEntry({
+            timestamp: msg.timestamp,
+            type: 'tool_result',
+            agentId: p.agentId,
+            agentName: agents.get(p.agentId)?.identity.name ?? 'Worker',
+            glowClass: feedStore.resolveGlowClass(agents.get(p.agentId)?.identity),
+            text: resultText,
+            metadata,
+          });
+        }
       }
+      agentStore.completeToolCall(p.agentId, p.toolResult.callId, msg.sessionId ?? undefined);
       if (msg.sessionId) {
-        agentStore.upsertAgentThreadEntry(msg.sessionId, p.agentId, {
+        agentStore.completeAgentThreadToolCall(msg.sessionId, p.agentId, p.toolResult.callId, {
           timestamp: msg.timestamp,
           type: 'tool_result',
           agentId: p.agentId,
@@ -523,6 +574,7 @@ function handleMessage(msg: WSMessage) {
     case 'stream.file_delta': {
       const p = msg.payload as StreamFileDeltaPayload;
       if (isForActiveSession) {
+        const timerKey = `${msg.sessionId}:${p.path}`;
         const prior = activeFileEdits.get(p.path);
         const existing = prior && !prior.done ? prior : undefined;
         if (existing) {
@@ -533,10 +585,10 @@ function handleMessage(msg: WSMessage) {
           next.set(p.path, { ...existing, content: existing.content + p.delta });
           activeFileEdits = next;
         } else {
-          const t = fileEditTimers.get(p.path);
+          const t = fileEditTimers.get(timerKey);
           if (t) {
             clearTimeout(t);
-            fileEditTimers.delete(p.path);
+            fileEditTimers.delete(timerKey);
           }
           const next = new Map(activeFileEdits);
           next.set(p.path, {
@@ -557,20 +609,24 @@ function handleMessage(msg: WSMessage) {
     case 'stream.file_complete': {
       const p = msg.payload as StreamFileCompletePayload;
       if (isForActiveSession) {
+        const timerKey = `${msg.sessionId}:${p.path}`;
         const edit = activeFileEdits.get(p.path);
         if (edit) {
           edit.done = true;
           activeFileEdits = new Map(activeFileEdits);
         }
-        const existingTimer = fileEditTimers.get(p.path);
+        const existingTimer = fileEditTimers.get(timerKey);
         if (existingTimer) clearTimeout(existingTimer);
+        const capturedSessionId = msg.sessionId;
         const timer = setTimeout(() => {
-          const next = new Map(activeFileEdits);
-          next.delete(p.path);
-          activeFileEdits = next;
-          fileEditTimers.delete(p.path);
+          if (sessionStore.activeSessionId === capturedSessionId) {
+            const next = new Map(activeFileEdits);
+            next.delete(p.path);
+            activeFileEdits = next;
+          }
+          fileEditTimers.delete(timerKey);
         }, 4000);
-        fileEditTimers.set(p.path, timer);
+        fileEditTimers.set(timerKey, timer);
       }
       break;
     }
@@ -638,9 +694,7 @@ function handleMessage(msg: WSMessage) {
 
     case 'notes.updated': {
       const p = msg.payload as { action?: string; noteId?: string };
-      void notesStore.fetchNotes();
-      void notesStore.fetchGraph();
-      void notesStore.fetchFolderTree();
+      scheduleNotesRefresh();
       if (p.noteId && notesStore.currentNote?.id === p.noteId) {
         void notesStore.fetchNote(p.noteId);
       }
@@ -717,6 +771,10 @@ function handleMessage(msg: WSMessage) {
       // left those chats hanging on an approval nobody ever saw.
       if (!pendingPermissions.some((perm) => perm.id === p.id)) {
         pendingPermissions = [...pendingPermissions, p];
+        const tool = (p as { toolName?: string; name?: string }).toolName
+          ?? (p as { name?: string }).name
+          ?? 'a tool';
+        notifyNeedsAttention(`Kory wants to run ${tool}.`);
       }
       break;
     }
@@ -771,9 +829,14 @@ function handleMessage(msg: WSMessage) {
       const p = msg.payload as Partial<NotificationPayload>;
       if (!isForActiveSession) break;
       const notificationType = p.type ?? 'info';
-      const text = p.title
-        ? `${p.title}: ${p.message ?? ''}`.trim()
-        : (p.message ?? 'Notification');
+      const title = (p.title ?? '').trim();
+      const message = (p.message ?? '').trim();
+      const text = title ? `${title}: ${message}`.trim().replace(/:$/, '') : message;
+      // Drop wire-protocol dumps (e.g. "agent.completed, stream.complete") —
+      // those belong in logs, never in the toast or OS notification center.
+      if (!text || isInternalEventTypeDump(text) || isInternalEventTypeDump(title) || isInternalEventTypeDump(message)) {
+        break;
+      }
       pushToast(notificationType, text);
       feedStore.addFeedEntry({
         timestamp: msg.timestamp,
@@ -783,6 +846,11 @@ function handleMessage(msg: WSMessage) {
         glowClass: '',
         text,
         metadata: { notificationType },
+      });
+      void notifyDesktop({
+        title: title || 'Koryphaios',
+        body: message || text,
+        key: `system:${text}`,
       });
       break;
     }
@@ -816,28 +884,29 @@ function buildWsCandidates(preferredUrl?: string): string[] {
 
 function connect(url?: string) {
   if (!browser) return;
-  console.log(
-    '[WS] connect() called, current state:',
-    wsConnection?.readyState,
-    'status:',
-    connectionStatus,
-  );
+  if (import.meta.env.DEV)
+    console.log(
+      '[WS] connect() called, current state:',
+      wsConnection?.readyState,
+      'status:',
+      connectionStatus,
+    );
   if (
     wsConnection?.readyState === WebSocket.OPEN ||
     wsConnection?.readyState === WebSocket.CONNECTING
   ) {
-    console.log('[WS] Already connected or connecting, skipping');
+    if (import.meta.env.DEV) console.log('[WS] Already connected or connecting, skipping');
     return;
   }
 
   if (url || wsCandidates.length === 0) {
     wsCandidates = buildWsCandidates(url);
     wsCandidateIndex = 0;
-    console.log('[WS] Built candidates:', wsCandidates);
+    if (import.meta.env.DEV) console.log('[WS] Built candidates:', wsCandidates);
   }
 
   const wsUrl = wsCandidates[wsCandidateIndex];
-  console.log('[WS] Trying URL:', wsUrl, 'index:', wsCandidateIndex);
+  if (import.meta.env.DEV) console.log('[WS] Trying URL:', wsUrl, 'index:', wsCandidateIndex);
   if (!wsUrl) {
     wsCandidateIndex = 0;
     scheduleReconnect();
@@ -854,11 +923,11 @@ function connect(url?: string) {
       finalWsUrl = `${finalWsUrl}${sep}auth=${encodeURIComponent(authStore.token)}`;
     }
 
-    console.log('[WS] Creating WebSocket connection to:', finalWsUrl);
+    if (import.meta.env.DEV) console.log('[WS] Creating WebSocket connection to:', finalWsUrl);
     const ws = new WebSocket(finalWsUrl, protocols);
 
     ws.onopen = () => {
-      console.log('[WS] Connection opened successfully');
+      if (import.meta.env.DEV) console.log('[WS] Connection opened successfully');
       connectionStatus = 'connected';
       reconnectAttempts = 0;
       hasShownMalformedWsMessage = false;
@@ -870,7 +939,23 @@ function connect(url?: string) {
       // background chats that are still running.
       const activeSid = sessionStore.activeSessionId;
       if (activeSid) subscribedSessions.add(activeSid);
-      for (const sid of subscribedSessions) subscribeToSession(sid);
+      const liveStatuses = new Set([
+        'thinking',
+        'streaming',
+        'tool_calling',
+        'waiting',
+        'waiting_user',
+      ]);
+      for (const sid of subscribedSessions) {
+        if (sid === activeSid) {
+          subscribeToSession(sid);
+          continue;
+        }
+        const hasLiveAgent = Array.from(agentStore.agents.values()).some(
+          (a) => a.sessionId === sid && liveStatuses.has(a.status),
+        );
+        if (hasLiveAgent) subscribeToSession(sid);
+      }
     };
 
     ws.onmessage = (event) => {
@@ -895,14 +980,14 @@ function connect(url?: string) {
     };
 
     ws.onclose = (event) => {
-      console.log('[WS] Connection closed:', event.code, event.reason);
+      if (import.meta.env.DEV) console.log('[WS] Connection closed:', event.code, event.reason);
       connectionStatus = 'disconnected';
       wsConnection = null;
       sentSessionSubscriptions.clear();
 
       if (wsCandidateIndex < wsCandidates.length - 1) {
         wsCandidateIndex++;
-        console.log('[WS] Trying next candidate, index:', wsCandidateIndex);
+        if (import.meta.env.DEV) console.log('[WS] Trying next candidate, index:', wsCandidateIndex);
         if (candidateRetryTimer) clearTimeout(candidateRetryTimer);
         candidateRetryTimer = setTimeout(() => connect(), 200);
       } else {
@@ -971,7 +1056,8 @@ function sendMessage(
   content: string,
   model?: string,
   reasoningLevel?: string,
-  attachments?: Array<{ type: string; data: string; name: string }>,
+  attachments?: Array<{ type: string; data: string; name: string; mimeType?: string }>,
+  interactionMode: 'act' | 'plan' = 'act',
 ) {
   feedStore.addUserMessage(sessionId, content, attachments);
   markSessionBusy(sessionId);
@@ -979,7 +1065,7 @@ function sendMessage(
   void apiFetch(apiUrl('/api/messages'), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ sessionId, content, model, reasoningLevel, attachments }),
+    body: JSON.stringify({ sessionId, content, model, reasoningLevel, attachments, interactionMode }),
   })
     .then(async (res) => {
       const data = await parseJsonResponse<{ ok?: boolean; error?: string }>(res);
@@ -1120,6 +1206,7 @@ async function loadSessionMessages(
     content: string;
     createdAt: number;
     model?: string;
+    provider?: string;
     cost?: number;
     variantGroupId?: string;
     variantIndex?: number;
@@ -1162,6 +1249,39 @@ async function rewind(hash: string) {
     console.error('Rewind failed:', err);
     toastStore.error('Rewind failed');
   }
+}
+
+async function timeTravelAction(endpoint: 'undo' | 'redo', successLabel: string) {
+  const sessionId = sessionStore.activeSessionId;
+  if (!sessionId) {
+    toastStore.error('No active session');
+    return;
+  }
+
+  try {
+    const res = await apiFetch(apiUrl(`/api/sessions/${sessionId}/${endpoint}`), {
+      method: 'POST',
+    });
+    const data = await parseJsonResponse<{ ok?: boolean; message?: string }>(res);
+    if (data.ok) {
+      toastStore.success(successLabel);
+      const messages = await sessionStore.fetchMessages(sessionId);
+      await loadSessionMessages(sessionId, messages);
+    } else {
+      toastStore.error(data.message ?? 'Nothing to do');
+    }
+  } catch (err) {
+    console.error(`${endpoint} failed:`, err);
+    toastStore.error(`${endpoint} failed`);
+  }
+}
+
+async function undo() {
+  await timeTravelAction('undo', 'Undone');
+}
+
+async function redo() {
+  await timeTravelAction('redo', 'Redone');
 }
 
 function toggleYolo() {
@@ -1238,6 +1358,18 @@ export const wsStore = {
   get managerStatus() {
     return agentStore.getManagerStatus();
   },
+  /** Exact activity state for one session. Never use the shared manager's
+   * last event as a proxy here: another chat may still be running. */
+  getSessionStatus: (sessionId: string | null | undefined) => {
+    if (!sessionId) return 'idle';
+    if (agentStore.isSessionWaiting(sessionId)) return 'waiting';
+    if (agentStore.isSessionRunning(sessionId)) {
+      return sessionId === sessionStore.activeSessionId && agentStore.getManagerStatus() !== 'idle'
+        ? agentStore.getManagerStatus()
+        : 'thinking';
+    }
+    return busySessions.has(sessionId) ? 'thinking' : 'idle';
+  },
   get contextUsage() {
     return agentStore.getContextUsage();
   },
@@ -1254,6 +1386,7 @@ export const wsStore = {
   markSessionAgentsStopped,
   markAgentStopped: agentStore.markAgentStopped,
   clearSessionBusy,
+  stopBusyWatchdog,
   clearAnalyzing: feedStore.removeAnalyzingThoughtEntries,
   addClientError: feedStore.addClientError,
   finishSessionLoad: feedStore.finishSessionLoad,
@@ -1277,6 +1410,8 @@ export const wsStore = {
   clearFeed,
   activateSessionFeed,
   rewind,
+  undo,
+  redo,
   toggleYolo,
   setYoloMode,
   loadProvidersFromApi,

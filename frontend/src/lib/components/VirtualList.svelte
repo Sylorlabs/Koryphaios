@@ -2,7 +2,7 @@
     // Variable-height Virtual List Component
     // Handles items with dynamic heights (markdown, code blocks, tool results)
     
-    import { onMount } from 'svelte';
+    import { onMount, untrack } from 'svelte';
     import type { Snippet } from 'svelte';
     
     interface Props {
@@ -27,30 +27,43 @@
     
     // Measured heights cache
     let heightCache = $state<Map<string, number>>(new Map());
+    let heightVersion = $state(0);
+    let positionIndex = new Map<string, { top: number; height: number }>();
+    let itemIndex = new Map<string, number>();
+    let rowObserver: ResizeObserver | null = null;
+    let rowResizeFrame: number | null = null;
+    const pendingRowResizes = new Map<Element, ResizeObserverEntry>();
+    const elementToId = new Map<Element, string>();
     
     // Scroll state
     let scrollTop = $state(0);
     let clientHeight = $state(800);
 
-    // Initialize scrollTop based on follow prop
     $effect(() => {
-        if (follow) {
-            scrollTop = Number.MAX_SAFE_INTEGER;
-        }
+        void items.length;
+        itemIndex = new Map();
+        positionIndex = new Map();
+        let top = 0;
+        untrack(() => {
+            for (let i = 0; i < items.length; i++) {
+                const item = items[i];
+                itemIndex.set(item.id, i);
+                const height = heightCache.get(item.id) ?? estimateHeight(item);
+                positionIndex.set(item.id, { top, height });
+                top += height;
+            }
+        });
+        // This layout effect invalidates derived positions after rebuilding
+        // the index. Read the prior version untracked: `heightVersion++`
+        // otherwise subscribes the effect to the very state it writes and can
+        // recurse forever as soon as the first feed row appears.
+        heightVersion = untrack(() => heightVersion + 1);
     });
     
     // Computed positions
     let positions = $derived.by(() => {
-        const result: { id: string; top: number; height: number }[] = [];
-        let top = 0;
-        
-        for (const item of items) {
-            const height = heightCache.get(item.id) ?? estimateHeight(item);
-            result.push({ id: item.id, top, height });
-            top += height;
-        }
-        
-        return result;
+        void heightVersion;
+        return items.map((item) => positionIndex.get(item.id) ?? { id: item.id, top: 0, height: estimateHeight(item) });
     });
     
     let totalHeight = $derived(
@@ -148,57 +161,79 @@
     // we always reach the actual bottom, while still reacting to totalHeight
     // changes as heights converge for rows not yet rendered. Only pins while
     // `follow` is on (user hasn't scrolled up), so it can never fight the user.
-    $effect(() => {
+    $effect.pre(() => {
         // Track the signals that move the bottom.
         void totalHeight;
         void items.length;
         if (!follow || !containerEl) return;
-        // rAF: let padding/layout settle this frame, then pin.
-        requestAnimationFrame(() => {
-            if (!follow || !containerEl) return;
-            const target = Math.max(totalHeight, containerEl.scrollHeight);
-            if (Math.abs(containerEl.scrollTop + containerEl.clientHeight - target) > 1) {
-                containerEl.scrollTop = target;
-            }
-        });
+        // Pin synchronously; the autoscroll controller's coalesced rAF
+        // (fired by the per-token signal) is the authoritative pin.
+        const target = Math.max(totalHeight, containerEl.scrollHeight);
+        if (Math.abs(containerEl.scrollTop + containerEl.clientHeight - target) > 1) {
+            containerEl.scrollTop = target;
+        }
     });
 
     // Measure item heights after render
     // FIX: Use ResizeObserver to batch updates instead of one-by-one state triggers
-    function measureItem(element: HTMLElement, id: string) {
-        let currentId = id;
-        const ro = new ResizeObserver((entries) => {
-            let changed = false;
-            for (const entry of entries) {
-                const height = entry.borderBoxSize[0]?.blockSize ?? entry.contentRect.height;
-                const currentItem = items.find((item) => item.id === currentId);
-                const previousHeight = heightCache.get(currentId) ?? (currentItem ? estimateHeight(currentItem) : height);
-                if (height > 0 && previousHeight !== height) {
-                    // Rows are initially estimated, then measured after they
-                    // mount. If a tall rich response above the reader grows
-                    // from its estimate, compensate by the same delta so the
-                    // visible message stays put instead of jumping. Native
-                    // scroll anchoring is disabled below to avoid applying
-                    // this correction twice.
-                    const position = positions.find((item) => item.id === currentId);
-                    if (!follow && containerEl && position && position.top < containerEl.scrollTop) {
-                        containerEl.scrollTop += height - previousHeight;
-                    }
-                    heightCache.set(currentId, height);
-                    changed = true;
-                }
+    function applyRowResizes(entries: ResizeObserverEntry[]) {
+        let changed = false;
+        for (const entry of entries) {
+            const id = elementToId.get(entry.target);
+            if (!id) continue;
+            const height = entry.borderBoxSize[0]?.blockSize ?? entry.contentRect.height;
+            if (height <= 0) continue;
+            const idx = itemIndex.get(id);
+            if (idx === undefined) continue;
+            const pos = positionIndex.get(id);
+            const previousHeight = pos?.height ?? heightCache.get(id) ?? estimateHeight(items[idx]);
+            if (previousHeight === height) continue;
+            // Rows are initially estimated, then measured after they
+            // mount. If a tall rich response above the reader grows
+            // from its estimate, compensate by the same delta so the
+            // visible message stays put instead of jumping. Native
+            // scroll anchoring is disabled below to avoid applying
+            // this correction twice.
+            if (!follow && containerEl && pos && pos.top < containerEl.scrollTop) {
+                containerEl.scrollTop += height - previousHeight;
             }
-            if (changed) {
-                heightCache = new Map(heightCache); // Trigger reactivity once per batch
+            const delta = height - previousHeight;
+            positionIndex.set(id, { top: pos?.top ?? 0, height });
+            for (let i = idx + 1; i < items.length; i++) {
+                const p = positionIndex.get(items[i].id);
+                if (p) positionIndex.set(items[i].id, { top: p.top + delta, height: p.height });
             }
+            heightCache.set(id, height);
+            changed = true;
+        }
+        if (changed) heightVersion++;
+    }
+
+    function onRowResize(entries: ResizeObserverEntry[]) {
+        // A row-height update changes the virtual spacer and can resize other
+        // observed rows. Defer that reactive write until this observer cycle
+        // has completed to avoid browser ResizeObserver loop warnings.
+        for (const entry of entries) pendingRowResizes.set(entry.target, entry);
+        if (rowResizeFrame !== null) return;
+        rowResizeFrame = requestAnimationFrame(() => {
+            rowResizeFrame = null;
+            const pending = [...pendingRowResizes.values()];
+            pendingRowResizes.clear();
+            applyRowResizes(pending);
         });
-        ro.observe(element);
+    }
+
+    function measureItem(element: HTMLElement, id: string) {
+        if (!rowObserver) rowObserver = new ResizeObserver(onRowResize);
+        elementToId.set(element, id);
+        rowObserver.observe(element);
         return {
             update(nextId: string) {
-                currentId = nextId;
+                elementToId.set(element, nextId);
             },
             destroy() {
-                ro.disconnect();
+                if (rowObserver) rowObserver.unobserve(element);
+                elementToId.delete(element);
             },
         };
     }
@@ -217,7 +252,16 @@
         });
         ro.observe(containerEl);
         
-        return () => ro.disconnect();
+        return () => {
+            ro.disconnect();
+            if (rowObserver) {
+                rowObserver.disconnect();
+                rowObserver = null;
+            }
+            if (rowResizeFrame !== null) cancelAnimationFrame(rowResizeFrame);
+            rowResizeFrame = null;
+            pendingRowResizes.clear();
+        };
     });
     
     // Expose methods

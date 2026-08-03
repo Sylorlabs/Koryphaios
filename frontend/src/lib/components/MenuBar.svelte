@@ -3,9 +3,7 @@
     Settings,
     Activity,
     ChevronDown,
-    GitBranch,
     Download,
-    Zap,
     Search,
     Minus,
     Square,
@@ -17,7 +15,6 @@
   import { getModKeyName } from '$lib/utils/platform';
   import { formatRecentDate, promptTemplates } from '$lib/utils/projectManager';
   import type { RecentProject } from '$lib/utils/projectManager';
-  import { modeStore } from '$lib/stores/mode.svelte';
   import { onMount } from 'svelte';
   import { browser } from '$app/environment';
   import { invoke } from '@tauri-apps/api/core';
@@ -29,13 +26,11 @@
 
   interface Props {
     showSidebar: boolean;
-    showGit: boolean;
     showAgents: boolean;
     showNotes?: boolean;
     notesEnabled?: boolean;
     zenMode: boolean;
     projectName: string | null | undefined;
-    isYoloMode: boolean;
     activeAgents: Array<{ identity: { id: string } }>;
     recentProjects: RecentProject[];
     onAction: (action: string) => void;
@@ -43,13 +38,11 @@
 
   let {
     showSidebar,
-    showGit,
     showAgents,
     showNotes = false,
     notesEnabled = true,
     zenMode,
     projectName,
-    isYoloMode,
     activeAgents,
     recentProjects,
     onAction,
@@ -59,6 +52,7 @@
   let isMaximized = $state(false);
   let inTauri = $state(false);
   let feedbackOpen = $state(false);
+  const guidedViewActions = new Set(['toggle_sidebar', 'toggle_zen_mode', 'toggle_agents', 'toggle_theme']);
 
   async function minimizeWindow() {
     if (!browser || !inTauri) return;
@@ -149,11 +143,19 @@
   }
 
   function toggleMenu(menu: 'file' | 'edit' | 'view') {
+    if (isDemoMode && menu !== 'view') {
+      openMenu = null;
+      return;
+    }
     openMenu = openMenu === menu ? null : menu;
   }
 
   function action(name: string) {
     openMenu = null;
+    if (isDemoMode && !guidedViewActions.has(name)) {
+      toastStore.info('This guided preview is read-only. Download Koryphaios to change a workspace.');
+      return;
+    }
     onAction(name);
   }
 
@@ -184,6 +186,8 @@
             style="color: var(--color-text-secondary);"
             onclick={() => toggleMenu('file')}
             data-tauri-drag-region="false"
+            disabled={isDemoMode}
+            title={isDemoMode ? 'Read-only guided preview' : 'File'}
           >
             File
           </button>
@@ -265,6 +269,8 @@
             style="color: var(--color-text-secondary);"
             onclick={() => toggleMenu('edit')}
             data-tauri-drag-region="false"
+            disabled={isDemoMode}
+            title={isDemoMode ? 'Read-only guided preview' : 'Edit'}
           >
             Edit
           </button>
@@ -307,6 +313,7 @@
             style="color: var(--color-text-secondary);"
             onclick={() => toggleMenu('view')}
             data-tauri-drag-region="false"
+            title="View"
           >
             View
           </button>
@@ -329,24 +336,13 @@
                 onclick={() => action('toggle_zen_mode')}
                 >{zenMode ? 'Disable' : 'Enable'} Zen Mode</button
               >
-              {#if modeStore.showAgentDetails}
-                <button
-                  type="button"
-                  class="w-full text-left px-2.5 py-1.5 text-xs hover:bg-[var(--color-surface-3)]"
-                  style="color: var(--color-text-primary);"
-                  onclick={() => action('toggle_agents')}
-                  >{showAgents ? 'Hide' : 'Show'} Active Agents</button
-                >
-              {/if}
-              {#if modeStore.showGitPanel}
-                <button
-                  type="button"
-                  class="w-full text-left px-2.5 py-1.5 text-xs hover:bg-[var(--color-surface-3)]"
-                  style="color: var(--color-text-primary);"
-                  onclick={() => action('toggle_git')}
-                  >{showGit ? 'Hide' : 'Show'} Source Control</button
-                >
-              {/if}
+              <button
+                type="button"
+                class="w-full text-left px-2.5 py-1.5 text-xs hover:bg-[var(--color-surface-3)]"
+                style="color: var(--color-text-primary);"
+                onclick={() => action('toggle_agents')}
+                >{showAgents ? 'Hide' : 'Show'} Active Agents</button
+              >
               <button
                 type="button"
                 class="w-full text-left px-2.5 py-1.5 text-xs hover:bg-[var(--color-surface-3)]"
@@ -357,7 +353,9 @@
                 type="button"
                 class="w-full text-left px-2.5 py-1.5 text-xs hover:bg-[var(--color-surface-3)]"
                 style="color: var(--color-text-primary);"
-                onclick={() => action('open_settings')}>Open Settings</button
+                onclick={() => action('open_settings')}
+                disabled={isDemoMode}
+                title={isDemoMode ? 'Settings are locked in the guided preview' : 'Open Settings'}>Open Settings</button
               >
               {#if inTauri}
                 <div class="h-px my-1" style="background: var(--color-border);"></div>
@@ -368,12 +366,6 @@
         </div>
       </div>
 
-      {#if isYoloMode}
-        <span class="flex items-center gap-1.5 px-1 py-2 text-red-400">
-          <Zap size={12} fill="currentColor" />
-          <span class="text-xs font-semibold">YOLO</span>
-        </span>
-      {/if}
     </div>
 
     <div class="flex-1 flex items-center justify-center h-full" data-tauri-drag-region>
@@ -421,29 +413,19 @@
           >
         </button>
       {/if}
-      {#if modeStore.showGitPanel}
-        <button
-          type="button"
-          class="flex items-center gap-1.5 px-3 py-2 rounded-lg transition-colors hover:bg-[var(--color-surface-2)]"
-          style="color: {showGit ? 'var(--color-accent)' : 'var(--color-text-secondary)'};"
-          onclick={() => action('toggle_git')}
-          data-tauri-drag-region="false"
-        >
-          <GitBranch size={14} />
-          <span class="text-xs font-medium">{showGit ? 'Git open' : 'Git'}</span>
-        </button>
-      {/if}
       {#if notesEnabled}
-      <button
+      {#if !isDemoMode}
+      {#if !isDemoMode}<button
         type="button"
         class="group flex items-center gap-1.5 rounded-lg px-3 py-2 text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-surface-2)]"
         data-tauri-drag-region="false"
-        title="Send feedback to micah.cooley@sylorlabs.com"
+        title="Open a public GitHub issue"
         onclick={sendFeedback}
       >
         <Flag size={14} class="transition-colors group-hover:text-red-400" />
         <span class="text-xs font-medium">Feedback</span>
       </button>
+      {/if}
       <button
         type="button"
         class="flex items-center gap-1.5 px-3 py-2 rounded-lg transition-colors hover:bg-[var(--color-surface-2)]"
@@ -467,7 +449,7 @@
         <Search size={14} />
         <span class="text-xs font-medium">Commands</span>
         <kbd class="kbd opacity-80">{getModKeyName()}K</kbd>
-      </button>
+      </button>{/if}
 
       {#if activeAgents.length > 0}
         <button
@@ -493,9 +475,10 @@
         class="p-2.5 rounded-lg transition-colors hover:bg-[var(--color-surface-2)] flex items-center justify-center"
         style="color: var(--color-text-secondary);"
         onclick={() => action('open_settings')}
-        title="Settings ({getModKeyName()},)"
+        title={isDemoMode ? 'Read-only guided preview' : `Settings (${getModKeyName()},)`}
         aria-label="Open settings"
         data-tauri-drag-region="false"
+        disabled={isDemoMode}
       >
         <Settings size={18} />
       </button>

@@ -8,6 +8,7 @@
 
 import type { ModelDef, ProviderConfig } from '@koryphaios/shared';
 import { spawn } from 'node:child_process';
+import { mkdirSync, writeFileSync } from 'node:fs';
 import { whichBinary } from './cli-detection';
 import { detectCursorCLILogin } from './auth-utils';
 import { providerLog } from '../logger';
@@ -20,7 +21,9 @@ import {
   type ProviderMessage,
   type StreamRequest,
 } from './types';
-import { getCliBridge } from './cli-bridges';
+import { getCliBridge, getKoryphaiosCursorHome } from './cli-bridges';
+import { renderCliContent } from './cli-attachments';
+import { serializeKoryMcpServers } from './kory-cli-mcp-config';
 
 const CURSOR_STREAM_TIMEOUT_MS = 300_000;
 const MODELS_CACHE_TTL_MS = 5 * 60_000;
@@ -94,15 +97,7 @@ function buildPrompt(systemPrompt: string | undefined, messages: ProviderMessage
   const harnessNote = bridgeConfig?.systemInstructions?.[1] ?? HARNESS_SYSTEM_NOTE;
   lines.push(sys ? `${sys}\n\n${harnessNote}` : harnessNote, '');
   for (const m of messages) {
-    const content =
-      typeof m.content === 'string'
-        ? m.content
-        : m.content
-            .map((b) =>
-              b.type === 'text' ? b.text : b.type === 'image' ? '[image attachment]' : '',
-            )
-            .filter(Boolean)
-            .join('\n');
+    const content = renderCliContent(m.content);
     if (!content.trim()) continue;
     if (m.role === 'user') lines.push(`User: ${content}`);
     else if (m.role === 'assistant') lines.push(`Assistant: ${content}`);
@@ -133,7 +128,10 @@ interface CursorStreamLine {
 export function parseCursorModelList(output: string): ModelDef[] {
   const models: ModelDef[] = [];
   if (/No models available for this account/i.test(output)) return [];
-  const lines = output.replace(/\r\n/g, '\n').split('\n').map((line) => line.trim());
+  const lines = output
+    .replace(/\r\n/g, '\n')
+    .split('\n')
+    .map((line) => line.trim());
 
   try {
     const jsonValue = JSON.parse(output);
@@ -201,7 +199,9 @@ export function parseCursorModelList(output: string): ModelDef[] {
 
 function buildModelFromId(modelId: string, displayName?: string): ModelDef {
   const trimmed = modelId.trim();
-  const humanName = (displayName || trimmed).replace(/\s+\((?:current|active|default)\)\s*$/i, '').trim();
+  const humanName = (displayName || trimmed)
+    .replace(/\s+\((?:current|active|default)\)\s*$/i, '')
+    .trim();
   const fallbackName = humanName || trimmed;
 
   return {
@@ -328,6 +328,28 @@ export class CursorProvider implements Provider {
       return;
     }
 
+    const cursorHome = getKoryphaiosCursorHome();
+    const bridge = getCliBridge('cursor');
+    const mcpServers = bridge?.buildMcpConfig({
+      provider: 'cursor',
+      role: request.harnessRole ?? 'manager',
+      sandbox: request.sandbox,
+      workingDirectory: request.workingDirectory?.trim() || process.cwd(),
+      sessionId: request.sessionId,
+      systemPrompt: request.systemPrompt,
+      tools: request.tools ?? [],
+      promptManifestHash: request.promptManifestHash,
+      taskContractHash: request.taskContractHash,
+    });
+    if (mcpServers?.length) {
+      mkdirSync(cursorHome, { recursive: true });
+      writeFileSync(
+        join(cursorHome, 'mcp.json'),
+        JSON.stringify(serializeKoryMcpServers(mcpServers), null, 2),
+        { mode: 0o600 },
+      );
+    }
+
     const args = [
       '-p',
       prompt,
@@ -335,7 +357,8 @@ export class CursorProvider implements Provider {
       'stream-json',
       '--stream-partial-output',
       '--trust',
-      ...(request.harnessRole === 'critic'
+      ...(mcpServers?.length ? ['--approve-mcps'] : []),
+      ...(request.harnessRole === 'critic' || (request.sandbox && (!request.sandbox.allowEdits || !request.sandbox.allowShell))
         ? ['--mode', 'ask', '--sandbox', 'enabled']
         : ['--force']),
     ];
@@ -343,14 +366,16 @@ export class CursorProvider implements Provider {
     if (cliModel && cliModel !== 'auto') args.push('--model', cliModel);
 
     const cwd = request.workingDirectory?.trim() || process.cwd();
-    const jail = request.sandbox ? buildSoftJail(process.env, [join(homedir(), '.cursor')]) : null;
+    const baseEnv: NodeJS.ProcessEnv = { ...process.env, HOME: join(cursorHome, '..') };
+    const jail = request.sandbox ? buildSoftJail(baseEnv, [cursorHome]) : null;
     const wrapped = request.sandbox
-      ? wrapCommand(bin, args, { cwd, policy: request.sandbox })
+      ? wrapCommand(bin, args, { cwd, configDirs: [cursorHome], policy: request.sandbox })
       : { command: bin, args };
+    const env = jail?.env ?? baseEnv;
     const child = spawn(wrapped.command, wrapped.args, {
       cwd,
       stdio: ['ignore', 'pipe', 'pipe'],
-      env: jail?.env ?? { ...process.env },
+      env,
     });
 
     const onAbort = () => {

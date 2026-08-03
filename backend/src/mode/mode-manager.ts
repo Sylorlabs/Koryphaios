@@ -14,7 +14,9 @@ import type { GitManager } from '../kory/git-manager';
 import { syncModeToConfig } from '../runtime/config';
 
 export class ModeManager {
-  private currentMode: UIMode = 'beginner';
+  // Compatibility seam for saved project configuration and prompt compilation.
+  // The product no longer exposes a user-selectable mode.
+  private currentMode: UIMode = 'advanced';
   private config: UIModeConfig;
   private gitManager: GitManager | null = null;
   private projectRoot: string;
@@ -117,13 +119,6 @@ export class ModeManager {
     }
 
     return tools.filter((t) => BEGINNER_TOOL_WHITELIST.includes(t.name));
-  }
-
-  /**
-   * Check if Git panel should be hidden
-   */
-  shouldHideGitPanel(): boolean {
-    return this.getModeConfig().hideGitPanel;
   }
 
   /**

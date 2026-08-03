@@ -22,6 +22,8 @@ import {
   DEFAULT_MEMORY_SETTINGS,
   listProjectMemoryDocuments,
   createProjectMemoryDocument,
+  readProjectMemoryDocument,
+  writeProjectMemoryDocument,
 } from '../../memory/unified-memory';
 import { getRequestProjectRoot } from '../../runtime/request-project';
 import { requireLocalRouteAuth } from '../../auth/local-route-auth';
@@ -36,6 +38,27 @@ export const memoryRoutes = new Elysia({ prefix: '/api/memory' })
     try { return { ok: true, data: createProjectMemoryDocument(getRequestProjectRoot(request), body.name, body.kind) }; }
     catch (err) { set.status = 400; return { ok: false, error: err instanceof Error ? err.message : 'Failed to create document' }; }
   }, { body: t.Object({ name: t.String(), kind: t.Union([t.Literal('memory'), t.Literal('rules')]) }) })
+  .get('/documents/:kind/:name', async ({ request, params, set }) => {
+    if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
+    try {
+      return { ok: true, data: readProjectMemoryDocument(getRequestProjectRoot(request), params.name, params.kind) };
+    } catch (err) {
+      set.status = 404;
+      return { ok: false, error: err instanceof Error ? err.message : 'Failed to read document' };
+    }
+  }, { params: t.Object({ kind: t.Union([t.Literal('memory'), t.Literal('rules')]), name: t.String() }) })
+  .put('/documents/:kind/:name', async ({ request, params, body, set }) => {
+    if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
+    try {
+      return { ok: true, data: writeProjectMemoryDocument(getRequestProjectRoot(request), params.name, params.kind, body.content) };
+    } catch (err) {
+      set.status = 400;
+      return { ok: false, error: err instanceof Error ? err.message : 'Failed to write document' };
+    }
+  }, {
+    params: t.Object({ kind: t.Union([t.Literal('memory'), t.Literal('rules')]), name: t.String() }),
+    body: t.Object({ content: t.String() }),
+  })
   // Universal Memory
   .get('/universal', async ({ request, set }) => {
     if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };

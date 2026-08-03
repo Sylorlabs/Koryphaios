@@ -530,12 +530,6 @@ export const PROVIDER_CONFIGS: ProviderConfig[] = [
   },
   { name: 'poe', baseUrl: 'https://api.poe.com/v1', authMode: 'api_key', envKeys: ['POE_API_KEY'] },
   {
-    name: 'github-models',
-    baseUrl: 'https://models.github.ai/inference',
-    authMode: 'api_key',
-    envKeys: ['GITHUB_TOKEN'],
-  },
-  {
     name: 'requesty',
     baseUrl: 'https://router.requesty.ai/v1',
     authMode: 'api_key',

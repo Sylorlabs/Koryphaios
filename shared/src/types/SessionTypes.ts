@@ -12,6 +12,9 @@ export interface Session {
   /** Absolute path of the project folder this chat belongs to. Sessions without
    *  one are "global" (created before project scoping, or with no folder open). */
   workingDirectory?: string;
+  /** Conversation workflow. Plan is deliberately separate from the workspace
+   * permission preset so one planning chat cannot change every other chat. */
+  interactionMode?: 'act' | 'plan';
   messageCount: number;
   totalTokensIn: number;
   totalTokensOut: number;

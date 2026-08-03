@@ -21,7 +21,7 @@ export const goalRoutes = new Elysia({ prefix: '/api/goals' })
       return { ok: true, data: sendUpdate(await getContext().goals.create(body)) };
     }
     catch (error) { set.status = 400; return { ok: false, error: error instanceof Error ? error.message : 'Invalid goal' }; }
-  }, { body: t.Object({ objective: t.String({ minLength: 1, maxLength: 2000 }), scope: t.Union(scopes.map((value) => t.Literal(value))), projectPath: t.Optional(t.String()), sessionId: t.Optional(t.String()), priority: t.Optional(t.Number()), planningDepth: t.Optional(t.Union([t.Literal('minimal'), t.Literal('adaptive'), t.Literal('structured')])), checklist: t.Optional(t.Array(t.Any())) }) })
+  }, { body: t.Object({ objective: t.String({ minLength: 1, maxLength: 2000 }), scope: t.Union(scopes.map((value) => t.Literal(value))), projectPath: t.Optional(t.String()), sessionId: t.Optional(t.String()), linkedSessionIds: t.Optional(t.Array(t.String())), priority: t.Optional(t.Number()), planningDepth: t.Optional(t.Union([t.Literal('minimal'), t.Literal('adaptive'), t.Literal('structured')])), checklist: t.Optional(t.Array(t.Any())) }) })
   .patch('/:id', async ({ request, params, body, set }) => {
     if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
     const prior = await getContext().goals.get(params.id);

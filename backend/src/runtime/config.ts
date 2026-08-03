@@ -120,7 +120,9 @@ export function loadConfig(projectRoot: string): BackendConfig {
       worktreeDir: fileConfig.workspace?.worktreeDir ?? WORKSPACE.DEFAULT_WORKTREE_DIR,
       copyEnvFiles: fileConfig.workspace?.copyEnvFiles ?? WORKSPACE.DEFAULT_COPY_ENV_FILES,
     },
-    mode: fileConfig.mode ?? (process.env.KORYPHAIOS_MODE as any) ?? 'beginner',
+    // The single product baseline is autonomous. Legacy mode fields no longer
+    // change runtime behavior.
+    mode: 'advanced',
     enableCritic: fileConfig.enableCritic,
     agentSettings: fileConfig.agentSettings,
   };

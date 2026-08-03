@@ -128,17 +128,9 @@ export class IDEErrorDetector extends BaseErrorDetector {
     return this.getBufferedErrors();
   }
 
-  private isVSCodeEnvironment(): boolean {
-    // Check if we're running in VS Code extension context
-    return (
-      (typeof globalThis !== 'undefined' && 'vscode' in globalThis) ||
-      process.env['VSCODE_PID'] !== undefined ||
-      process.env['TERM_PROGRAM'] === 'vscode'
-    );
-  }
-
   private async initializeVSCodeIntegration(): Promise<void> {
     try {
+      if (!this.isVSCodeEnvironment()) return;
       // This would be implemented when running as a VS Code extension
       // For now, we'll simulate IDE integration by checking common diagnostic sources
       // In a real VS Code extension, you would:
@@ -149,6 +141,14 @@ export class IDEErrorDetector extends BaseErrorDetector {
     } catch (error) {
       throw new Error(`Failed to initialize VS Code integration: ${error}`);
     }
+  }
+
+  private isVSCodeEnvironment(): boolean {
+    return (
+      (typeof globalThis !== 'undefined' && 'vscode' in globalThis) ||
+      process.env['VSCODE_PID'] !== undefined ||
+      process.env['TERM_PROGRAM'] === 'vscode'
+    );
   }
 
   private startPolling(): void {

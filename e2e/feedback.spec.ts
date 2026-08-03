@@ -1,5 +1,20 @@
 import { expect, test } from '@playwright/test';
 
+async function captureExternalOpen(page: import('@playwright/test').Page) {
+  await page.addInitScript(() => {
+    (window as Window & { __koryphaiosOpenedUrl?: string }).open = (url?: string | URL) => {
+      (window as Window & { __koryphaiosOpenedUrl?: string }).__koryphaiosOpenedUrl = String(url);
+      return null;
+    };
+  });
+}
+
+async function openedUrl(page: import('@playwright/test').Page): Promise<string> {
+  return page.evaluate(
+    () => (window as Window & { __koryphaiosOpenedUrl?: string }).__koryphaiosOpenedUrl ?? '',
+  );
+}
+
 async function mockAppApi(
   page: import('@playwright/test').Page,
   feedback: (body: unknown) => {
@@ -56,48 +71,46 @@ async function mockAppApi(
   });
 }
 
-test('submits anonymous feedback without opening a mail client', async ({ page }) => {
-  let submitted: Record<string, unknown> | null = null;
-  await mockAppApi(page, (body) => {
-    submitted = body as Record<string, unknown>;
-    return { status: 200, body: { ok: true, id: 'feedback_test' } };
-  });
+test('opens a reviewable public GitHub issue draft without posting feedback from the app', async ({
+  page,
+}) => {
+  await captureExternalOpen(page);
+  await mockAppApi(page, () => ({ status: 500, body: { ok: false } }));
 
   await page.goto('/');
   await page.getByRole('button', { name: /Feedback/ }).click();
   await page.getByRole('button', { name: 'Idea' }).click();
+  await page.getByPlaceholder('A concise summary').fill('Team activity digest');
   await page
     .getByPlaceholder('Share the details that would help us act on this.')
     .fill('Add a compact team activity digest.');
-  await page.getByRole('button', { name: 'Send feedback' }).click();
+  await page.getByRole('button', { name: 'Open GitHub issue' }).click();
 
-  await expect(page.getByText('Feedback delivered')).toBeVisible();
-  expect(submitted).toMatchObject({
-    category: 'idea',
-    message: 'Add a compact team activity digest.',
-  });
-  expect(submitted).not.toHaveProperty('email');
+  await expect(page.getByText('GitHub issue draft opened')).toBeVisible();
+  const url = await openedUrl(page);
+  expect(url).toContain('github.com/Sylorlabs/Koryphaios/issues/new');
+  const issue = new URL(url);
+  expect(issue.searchParams.get('title')).toBe('[idea] Team activity digest');
+  const body = issue.searchParams.get('body') ?? '';
+  expect(body).toContain('Add a compact team activity digest.');
+  expect(body).toMatch(/## App context\n- Koryphaios version: (?!Unknown$).+/m);
+  expect(body).toMatch(/- Platform: .+/);
 });
 
-test('honors diagnostic consent and presents delivery errors in-app', async ({ page }) => {
-  let submitted: Record<string, unknown> | null = null;
-  await mockAppApi(page, (body) => {
-    submitted = body as Record<string, unknown>;
-    return {
-      status: 429,
-      body: { ok: false, error: 'Too many feedback reports. Please try again later.' },
-    };
-  });
+test('requires a title and report before opening the public issue draft', async ({ page }) => {
+  await captureExternalOpen(page);
+  await mockAppApi(page, () => ({ status: 500, body: { ok: false } }));
 
   await page.goto('/');
   await page.getByRole('button', { name: /Feedback/ }).click();
-  const send = page.getByRole('button', { name: 'Send feedback' });
+  const send = page.getByRole('button', { name: 'Open GitHub issue' });
   await expect(send).toBeDisabled();
-  await page.getByRole('switch', { name: /Include basic diagnostics/ }).click();
+  await page.getByPlaceholder('A concise summary').fill('Rate limit test');
   await page.getByRole('textbox', { name: 'What should we know?' }).fill('Rate limit test');
   await send.click();
 
-  await expect(page.getByRole('alert')).toContainText('Too many feedback reports');
-  expect(submitted).not.toHaveProperty('platform');
-  expect(submitted).not.toHaveProperty('context');
+  await expect(page.getByText('GitHub issue draft opened')).toBeVisible();
+  const issue = new URL(await openedUrl(page));
+  expect(issue.searchParams.get('body')).toContain('Rate limit test');
+  expect(issue.searchParams.get('body')).toContain('Do not include private project details');
 });

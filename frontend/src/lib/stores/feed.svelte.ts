@@ -6,6 +6,7 @@ import type { FeedEntry, FeedEntryType } from '$lib/types';
 import { sessionStore } from './sessions.svelte';
 import { apiUrl } from '$lib/utils/api-url';
 import { apiFetch, parseJsonResponse } from '$lib/api.svelte';
+import { mergeFeedTimeline, omitArchivedToolDuplicates } from '$lib/utils/feed-timeline';
 
 export type { FeedEntry, FeedEntryType };
 
@@ -29,6 +30,7 @@ const EPHEMERAL_TOOLS = new Set([
   'recall_notes',
 ]);
 const MAX_FEED_ENTRIES = 2000;
+const MAX_CACHED_SESSION_FEEDS = 8;
 let feedIdCounter = 0;
 
 // ─── Reactive State ──────────────────────────────────────────────────────────
@@ -37,8 +39,11 @@ let feed = $state<FeedEntry[]>([]);
 let feedSessionId = $state('');
 let loadingSessionId = $state('');
 let feedTransitionGeneration = 0;
+let feedLoadGeneration = 0;
 let feedTransitionBaseLength = 0;
+let feedIsShared = false;
 const sessionFeedCache = new Map<string, FeedEntry[]>();
+const sessionFeedRecency = new Map<string, number>();
 
 // Cache for grouped feed — rebuild only on structural changes, not per token
 let lastGroupedFeed = $state<FeedEntry[]>([]);
@@ -54,6 +59,41 @@ const activeThinkingStartedAt = new Map<string, number>();
 
 function rebuildGroupedFeedCache(): void {
   lastGroupedFeed = getGroupedEntries(feed);
+}
+
+function pruneSessionFeedCache(): void {
+  while (sessionFeedCache.size > MAX_CACHED_SESSION_FEEDS) {
+    let oldestId: string | null = null;
+    let oldestTs = Infinity;
+    for (const [id, ts] of sessionFeedRecency) {
+      if (ts < oldestTs) {
+        oldestTs = ts;
+        oldestId = id;
+      }
+    }
+    if (oldestId === null) break;
+    sessionFeedCache.delete(oldestId);
+    sessionFeedRecency.delete(oldestId);
+  }
+}
+
+function getCachedFeed(sessionId: string): FeedEntry[] | undefined {
+  const entries = sessionFeedCache.get(sessionId);
+  if (entries !== undefined) sessionFeedRecency.set(sessionId, Date.now());
+  return entries;
+}
+
+function setCachedFeed(sessionId: string, entries: FeedEntry[]): void {
+  sessionFeedCache.set(sessionId, entries);
+  sessionFeedRecency.set(sessionId, Date.now());
+  pruneSessionFeedCache();
+}
+
+function detachFeedIfShared(): void {
+  if (feedIsShared) {
+    feed = [...feed];
+    feedIsShared = false;
+  }
 }
 
 /** Normalize message text for dedup comparisons. Collapses whitespace so a
@@ -78,11 +118,14 @@ function cloneEntries(entries: FeedEntry[]): FeedEntry[] {
  */
 function activateSessionFeed(sessionId: string): number {
   if (feedSessionId === sessionId) return feedTransitionGeneration;
-  if (feedSessionId) sessionFeedCache.set(feedSessionId, cloneEntries(feed));
+  if (feedSessionId) setCachedFeed(feedSessionId, feed);
   feedTransitionGeneration++;
+  feedLoadGeneration++;
   feedSessionId = sessionId;
   const hasSnapshot = sessionId ? sessionFeedCache.has(sessionId) : true;
-  feed = sessionId ? cloneEntries(sessionFeedCache.get(sessionId) ?? []) : [];
+  const cached = sessionId ? getCachedFeed(sessionId) : undefined;
+  feed = cached ?? [];
+  feedIsShared = !!cached;
   loadingSessionId = sessionId && !hasSnapshot ? sessionId : '';
   feedTransitionBaseLength = feed.length;
   streamingRevision = 0;
@@ -123,12 +166,14 @@ function patchGroupedFeedEntry(
       return;
     }
     if (grouped.entries?.length) {
-      const sub = grouped.entries[grouped.entries.length - 1];
-      if (sub?.id === entryId) {
-        sub.text = text;
-        sub.timestamp = timestamp;
-        if (extra) Object.assign(sub, extra);
-        return;
+      for (let j = 0; j < grouped.entries.length; j++) {
+        const sub = grouped.entries[j];
+        if (sub.id === entryId) {
+          sub.text = text;
+          sub.timestamp = timestamp;
+          if (extra) Object.assign(sub, extra);
+          return;
+        }
       }
     }
   }
@@ -181,6 +226,7 @@ function nextFeedId(prefix: string): string {
 // ─── Feed Actions ────────────────────────────────────────────────────────────
 
 function addFeedEntry(entry: Omit<FeedEntry, 'id'>) {
+  detachFeedIfShared();
   const newEntry: FeedEntry = { ...entry, id: nextFeedId('fe') };
   if (newEntry.type === 'thought' && (newEntry.metadata as { phase?: string })?.phase === 'analyzing') {
     analyzingThoughtId = newEntry.id;
@@ -192,6 +238,7 @@ function addFeedEntry(entry: Omit<FeedEntry, 'id'>) {
 }
 
 function accumulateFeedEntry(entry: Omit<FeedEntry, 'id'>) {
+  detachFeedIfShared();
   const lastIdx = feed.length - 1;
   const last = lastIdx >= 0 ? feed[lastIdx] : null;
 
@@ -239,9 +286,10 @@ function getThinkingStart(agentId: string, fallbackTimestamp: number): number {
 function addUserMessage(
   sessionId: string,
   content: string,
-  attachments?: Array<{ type: string; data: string; name: string }>,
+  attachments?: Array<{ type: string; data: string; name: string; mimeType?: string }>,
 ) {
   if (!ownsFeed(sessionId)) return;
+  detachFeedIfShared();
   const userEntry: FeedEntry = {
     id: nextFeedId('user'),
     timestamp: Date.now(),
@@ -261,6 +309,7 @@ function addUserMessage(
 /** Efficiently remove the ephemeral analyzing thought. */
 function removeAnalyzingThoughtEntries() {
   if (!analyzingThoughtId) return;
+  detachFeedIfShared();
   const idx = feed.findIndex((e) => e.id === analyzingThoughtId);
   if (idx !== -1) {
     feed.splice(idx, 1);
@@ -288,6 +337,7 @@ function addClientError(text: string) {
  * freeze matching live blocks at their server-timestamp duration. */
 function finalizeThinking(agentId?: string, endedAt = Date.now()) {
   let changed = false;
+  detachFeedIfShared();
   for (const e of feed) {
     if (e.type === 'thinking' && !e.thinkingFinalized && (!agentId || e.agentId === agentId)) {
       const startedAt = e.thinkingStartedAt ?? activeThinkingStartedAt.get(e.agentId);
@@ -309,6 +359,7 @@ function finalizeThinking(agentId?: string, endedAt = Date.now()) {
  * existing card once the backend has the final arguments rather than adding a
  * second, duplicate "Calling tool" row. */
 function updateToolCall(toolCall: { id: string; name: string; input: Record<string, unknown> }, timestamp: number) {
+  detachFeedIfShared();
   const entry = feed.findLast((candidate) =>
     candidate.type === 'tool_call' &&
     (candidate.metadata as { toolCall?: { id?: string } } | undefined)?.toolCall?.id === toolCall.id,
@@ -321,8 +372,40 @@ function updateToolCall(toolCall: { id: string; name: string; input: Record<stri
   return true;
 }
 
+/** Replace the live tool-call row as soon as its matching result arrives.
+ * Keeping both rows made finished work look as though it were still running. */
+function completeToolCall(
+  toolResult: {
+    callId: string;
+    name: string;
+    output: string;
+    isError: boolean;
+    durationMs: number;
+  },
+  text: string,
+  timestamp: number,
+  extraMetadata: Record<string, unknown> = {},
+): boolean {
+  detachFeedIfShared();
+  const entry = feed.findLast((candidate) =>
+    candidate.type === 'tool_call' &&
+    (candidate.metadata as { toolCall?: { id?: string } } | undefined)?.toolCall?.id ===
+      toolResult.callId,
+  );
+  if (!entry) return false;
+
+  entry.type = 'tool_result';
+  entry.text = text;
+  entry.timestamp = timestamp;
+  entry.metadata = { ...extraMetadata, toolResult };
+  feedVersion++;
+  rebuildGroupedFeedCache();
+  return true;
+}
+
 /** Toggle entry visibility flags (user-hide is UI-only; agent-hide is set after the API call). */
 function setEntryVisibility(id: string, patch: { userHidden?: boolean; agentHidden?: boolean }) {
+  detachFeedIfShared();
   const entry = feed.find((e) => e.id === id);
   if (!entry) return;
   if (patch.userHidden !== undefined) entry.userHidden = patch.userHidden;
@@ -335,6 +418,7 @@ function setEntryVisibility(id: string, patch: { userHidden?: boolean; agentHidd
 function removeEntries(ids: Set<string>) {
   if (ids.size === 0) return;
   feed = feed.filter((e) => !ids.has(e.id));
+  feedIsShared = false;
   feedVersion++;
   rebuildGroupedFeedCache();
 }
@@ -357,6 +441,7 @@ function removeContentEntriesForAgent(agentId: string) {
 
 function clearFeed() {
   feed = [];
+  feedIsShared = false;
   feedVersion++;
   streamingRevision = 0;
   analyzingThoughtId = null;
@@ -387,32 +472,14 @@ export function getGroupedEntries(entries: FeedEntry[]): FeedEntry[] {
   let agentGroup: FeedEntry | null = null;
 
   for (const entry of entries) {
-    // Sub-agent entries get a clear, expanded-by-default grouping so spawned
-    // workers never look like stray manager output.
+    // Keep worker events as individual, inspectable feed rows. A synthetic
+    // "frontend — 1 step" wrapper hid the actual assignment and progress,
+    // which made a live worker look like opaque background activity.
     const isSubAgent = !TOP_LEVEL_AGENTS.has(entry.agentId) && entry.type !== 'user_message';
     if (isSubAgent) {
       currentGroup = null;
-      if (agentGroup && agentGroup.agentId === entry.agentId) {
-        agentGroup.entries!.push(entry);
-        agentGroup.timestamp = entry.timestamp;
-        agentGroup.text = `${entry.agentName} — ${agentGroup.entries!.length} steps`;
-      } else {
-        const domain =
-          (entry.metadata?.domain as string | undefined) ?? glowToDomain(entry.glowClass);
-        agentGroup = {
-          id: `agent-group-${entry.id}`,
-          timestamp: entry.timestamp,
-          type: 'agent_group',
-          agentId: entry.agentId,
-          agentName: entry.agentName,
-          glowClass: entry.glowClass,
-          text: `${entry.agentName} — 1 step`,
-          entries: [entry],
-          isCollapsed: false,
-          metadata: { domain },
-        };
-        result.push(agentGroup);
-      }
+      agentGroup = null;
+      result.push(entry);
       continue;
     }
     agentGroup = null;
@@ -460,6 +527,7 @@ async function loadSessionMessages(
     content: string;
     createdAt: number;
     model?: string;
+    provider?: string;
     cost?: number;
     variantGroupId?: string;
     variantIndex?: number;
@@ -476,6 +544,7 @@ async function loadSessionMessages(
   } = {},
 ) {
   if (!ownsFeed(sessionId, options.generation)) return false;
+  const loadGeneration = ++feedLoadGeneration;
   // Don't wipe the feed up front — that leaves a visible blank flash for the
   // whole round trip below. Instead remember where "new" entries begin and
   // swap everything in atomically once the fetched history is ready.
@@ -506,7 +575,14 @@ async function loadSessionMessages(
     variantsByGroup.set(message.variantGroupId, variants);
   }
 
-  const history = messages.filter((m) => !m.variantGroupId || (m.variantIndex ?? 0) === 0).map((m) => {
+  const baseMessages = messages.filter((m) => !m.variantGroupId || (m.variantIndex ?? 0) === 0);
+  const history = baseMessages.map((m, messageIndex) => {
+    const followingAssistant = m.role === 'user'
+      ? baseMessages.slice(messageIndex + 1).find((candidate) => candidate.role === 'assistant')
+      : undefined;
+    const replayModel = followingAssistant?.provider && followingAssistant.model
+      ? `${followingAssistant.provider}:${followingAssistant.model}`
+      : followingAssistant?.model;
     return {
       id: `hist-${m.id}`,
       timestamp: m.createdAt,
@@ -523,7 +599,7 @@ async function loadSessionMessages(
       text: m.content,
       metadata: {
         sessionId,
-        model: m.model,
+        model: m.model ?? replayModel,
         cost: m.cost,
         messageId: m.id,
         variantGroupId: m.variantGroupId,
@@ -551,10 +627,15 @@ async function loadSessionMessages(
   // only the manager's turns are persisted as session messages.
   const persistedTextKeys = new Set<string>();
   const persistedAssistantTexts: string[] = [];
+  const persistedAssistantTextSet = new Set<string>();
   for (const m of messages) {
     if (m.variantGroupId && (m.variantIndex ?? 0) !== 0) continue;
     persistedTextKeys.add(`${m.role}\u0000${normalizeFeedText(m.content)}`);
-    if (m.role === 'assistant') persistedAssistantTexts.push(normalizeFeedText(m.content));
+    if (m.role === 'assistant') {
+      const normalized = normalizeFeedText(m.content);
+      persistedAssistantTexts.push(normalized);
+      persistedAssistantTextSet.add(normalized);
+    }
   }
   const dedupedLiveTail = liveTailAtLoad.filter((entry) => {
     if (entry.type === 'user_message') {
@@ -567,23 +648,34 @@ async function loadSessionMessages(
       // exact equality. Empty fragments never count as a match.
       const text = normalizeFeedText(entry.text);
       if (!text) return true;
+      if (persistedAssistantTextSet.has(text)) return false;
       return !persistedAssistantTexts.some((p) => p.includes(text));
     }
     return true;
   });
   // Text history is the critical path. Commit it immediately; timeline hashes
   // and archived tool proof enrich the same isolated session afterward.
-  feed = [...history, ...dedupedLiveTail];
+  // Persisted text and live operational events are separate storage lanes,
+  // not separate visual sections. Rebuild one causal timeline so reasoning
+  // and tools cannot jump below the answer that followed them.
+  feed = mergeFeedTimeline(history, dedupedLiveTail);
+  feedIsShared = false;
   loadingSessionId = '';
-  feedTransitionBaseLength = history.length;
-  sessionFeedCache.set(sessionId, cloneEntries(feed));
+  // Events appended after this point arrived while ancillary history was
+  // loading. The already-retained live tail is carried explicitly below.
+  feedTransitionBaseLength = feed.length;
+  setCachedFeed(sessionId, feed);
   feedVersion++;
   streamingRevision = 0;
   analyzingThoughtId = null;
   rebuildGroupedFeedCache();
 
   const [timelineResult, contextResult] = await ancillary;
-  if (options.signal?.aborted || !ownsFeed(sessionId, options.generation)) return true;
+  if (
+    options.signal?.aborted ||
+    loadGeneration !== feedLoadGeneration ||
+    !ownsFeed(sessionId, options.generation)
+  ) return true;
   if (timelineResult.status === 'fulfilled' && timelineResult.value.ok) {
     timeline = timelineResult.value.data?.timeline ?? [];
   }
@@ -594,7 +686,11 @@ async function loadSessionMessages(
   // without this, reopening a chat silently dropped all proof-of-work).
   let toolHistory: FeedEntry[] = [];
   try {
-    if (contextData.lastUsage && ownsFeed(sessionId, options.generation)) {
+    if (
+      contextData.lastUsage &&
+      loadGeneration === feedLoadGeneration &&
+      ownsFeed(sessionId, options.generation)
+    ) {
       options.onUsage?.(contextData.lastUsage);
     }
     if (Array.isArray(contextData.data)) {
@@ -623,22 +719,27 @@ async function loadSessionMessages(
   } catch {
     /* archive unavailable — text history still loads */
   }
-  if (!ownsFeed(sessionId, options.generation)) return false;
+  if (loadGeneration !== feedLoadGeneration || !ownsFeed(sessionId, options.generation)) {
+    return false;
+  }
 
   const enrichedHistory = history.map((entry) => ({
     ...entry,
     ghostHash: timeline.find((item) => item.messageId === entry.metadata?.messageId)?.hash,
   }));
-  const merged = [...enrichedHistory, ...toolHistory].sort((a, b) => a.timestamp - b.timestamp);
+  const eventsSinceImmediateCommit = feed.slice(feedTransitionBaseLength);
+  const retainedLiveEvents = [...dedupedLiveTail, ...eventsSinceImmediateCommit];
+  const uniqueToolHistory = omitArchivedToolDuplicates(toolHistory, retainedLiveEvents);
   // Anything pushed onto the feed while we awaited (live stream events for
   // this session) belongs after history — everything before
   // feedLengthAtStart is stale (either the old session's content, on a
   // switch, or this same session's now-persisted turn) and gets replaced.
   // Preserve only events that arrived after the immediate text-history commit.
   // Cached pre-switch rows were replaced above and can never leak back in.
-  feed = [...merged, ...feed.slice(feedTransitionBaseLength)];
-  feedTransitionBaseLength = merged.length;
-  sessionFeedCache.set(sessionId, cloneEntries(feed));
+  feed = mergeFeedTimeline(enrichedHistory, uniqueToolHistory, retainedLiveEvents);
+  feedIsShared = false;
+  feedTransitionBaseLength = feed.length;
+  setCachedFeed(sessionId, feed);
   feedVersion++;
   streamingRevision = 0;
   analyzingThoughtId = null;
@@ -678,6 +779,7 @@ export const feedStore = {
   beginThinking,
   getThinkingStart,
   updateToolCall,
+  completeToolCall,
   removeContentEntriesForAgent,
   clearFeed,
   activateSessionFeed,

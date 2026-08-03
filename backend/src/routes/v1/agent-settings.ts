@@ -22,6 +22,7 @@ import {
   activateSkill,
   applyDefaultUpdate,
   compareSkillRevisions,
+  createSkillDraft,
   listSkills,
   resolveSkills,
   saveSkillDraft,
@@ -212,6 +213,36 @@ export const agentSettingsRoutes = new Elysia({ prefix: '/api/agent' })
     if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
     return { ok: true, data: listSkills(getRequestProjectRoot(request)) };
   })
+  .post(
+    '/skills',
+    ({ request, body, set }) => {
+      if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
+      try {
+        const root = getRequestProjectRoot(request);
+        enforceSkillLearningPolicy(loadAgentSettings(root).skillLearningMode, 'human', 'save-draft');
+        return {
+          ok: true,
+          data: createSkillDraft(root, body.source as SkillSource, body),
+        };
+      } catch (error: any) {
+        set.status = 400;
+        return { ok: false, error: error?.message ?? 'Failed to create skill draft' };
+      }
+    },
+    {
+      body: t.Object({
+        source: t.Union([t.Literal('personal'), t.Literal('project')]),
+        name: t.String({ minLength: 2, maxLength: 64 }),
+        description: t.String({ minLength: 12, maxLength: 500 }),
+        instructions: t.String({ minLength: 40, maxLength: 20_000 }),
+        domains: t.Optional(t.Array(t.String({ maxLength: 80 }), { maxItems: 20 })),
+        activation: t.Optional(t.Array(t.String({ maxLength: 160 }), { maxItems: 20 })),
+        shouldTrigger: t.Array(t.String({ maxLength: 500 }), { minItems: 2, maxItems: 20 }),
+        shouldNotTrigger: t.Array(t.String({ maxLength: 500 }), { minItems: 2, maxItems: 20 }),
+        evidence: t.Optional(t.Array(t.String({ maxLength: 200 }), { maxItems: 20 })),
+      }),
+    },
+  )
   .post(
     '/skills/validate',
     ({ request, body, set }) => {

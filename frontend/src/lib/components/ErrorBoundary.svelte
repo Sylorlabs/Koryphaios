@@ -14,6 +14,11 @@
 
     // Global error handler
     function handleError(event: ErrorEvent) {
+        if (/ResizeObserver loop (completed with undelivered notifications|limit exceeded)/i.test(event.message)) {
+            // Browser layout-warning, not a failed application operation.
+            event.preventDefault();
+            return;
+        }
         error = event.error;
         errorStack = event.error?.stack || null;
         console.error('Error caught by boundary:', event.error);

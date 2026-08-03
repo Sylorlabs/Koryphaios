@@ -1,6 +1,11 @@
 // Koryphaios Backend Server — Bun HTTP + WebSocket server.
 // Main entry point via ElysiaJS.
 
+// Some bundled dependencies initialise tsyringe at module load. In a compiled
+// desktop backend this must run before any application import, otherwise the
+// sidecar exits before it can serve its health endpoint.
+import 'reflect-metadata';
+
 import { Elysia, t } from 'elysia';
 import { cors } from '@elysiajs/cors';
 import { nanoid } from 'nanoid';
@@ -21,6 +26,7 @@ import { validateLocalBearerToken } from './auth/local-route-auth';
 import { serveMcp } from './mcp/koryphaios-mcp-endpoint';
 import { getDb } from './db';
 import { shutdownAllBrokers } from './pubsub';
+import { startEventLoopMonitor, stopEventLoopMonitor } from './monitoring/event-loop-monitor';
 
 // Routes
 import { sessionRoutes } from './routes/v1/sessions';
@@ -31,7 +37,6 @@ import { authRoutes } from './routes/v1/auth';
 import { agentSettingsRoutes } from './routes/v1/agent-settings';
 import { gitRoutes } from './routes/v1/git';
 import { memoryRoutes } from './routes/v1/memory';
-import { modeRoutes } from './routes/v1/mode';
 import { spendRoutes } from './routes/v1/spend';
 import { spendCapsRoutes } from './routes/v1/spend-caps';
 import { billingRoutes } from './routes/v1/billing';
@@ -84,7 +89,6 @@ const baseApp = new Elysia()
   .use(agentSettingsRoutes)
   .use(gitRoutes)
   .use(memoryRoutes)
-  .use(modeRoutes)
   .use(spendRoutes)
   .use(spendCapsRoutes)
   .use(billingRoutes)
@@ -309,6 +313,10 @@ async function main() {
 
   serverLog.info({ host: serverConfig.host, port: actualPort }, 'Server running');
 
+  // Start the event-loop block detector so future hangs leave a heartbeat
+  // gap in the direct file log, pinpointing when the synchronous block began.
+  startEventLoopMonitor();
+
   function clearActivePortFile() {
     try {
       const active = JSON.parse(readFileSync(activePortPath, 'utf-8')) as { pid?: number };
@@ -322,6 +330,7 @@ async function main() {
   // ─── Graceful Shutdown ──────────────────────────────────────────────────
   async function gracefulShutdown(signal: string) {
     serverLog.info({ signal }, 'Graceful shutdown');
+    stopEventLoopMonitor();
     server.stop(true);
     clearActivePortFile();
     kory.cancel();
@@ -336,6 +345,16 @@ async function main() {
 
   process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
   process.on('SIGINT', () => gracefulShutdown('SIGINT'));
+
+  // Log uncaught errors so backend crashes leave a trace instead of dying
+  // silently (the Bun VM "NeedDebuggerBreak trap" crashes produced zero log
+  // output before this handler existed).
+  process.on('uncaughtException', (err) => {
+    serverLog.fatal(err, 'Uncaught exception — backend may be in an inconsistent state');
+  });
+  process.on('unhandledRejection', (reason) => {
+    serverLog.fatal({ reason }, 'Unhandled promise rejection');
+  });
 }
 
 main().catch((err) => {

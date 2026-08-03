@@ -169808,7 +169808,6 @@ function determineAutoReasoningLevel(taskDescription) {
 }
 // ../shared/src/config/ModeConfig.ts
 var DEFAULT_BEGINNER_CONFIG = {
-  hideGitPanel: true,
   autoCommit: true,
   simplifiedPrompts: true,
   maxWorkers: 2,
@@ -169822,7 +169821,6 @@ var DEFAULT_BEGINNER_CONFIG = {
   showCostTracking: false,
 };
 var DEFAULT_ADVANCED_CONFIG = {
-  hideGitPanel: false,
   autoCommit: false,
   simplifiedPrompts: false,
   maxWorkers: 8,
@@ -184528,9 +184526,6 @@ class ModeManager {
       return tools;
     }
     return tools.filter((t) => BEGINNER_TOOL_WHITELIST.includes(t.name));
-  }
-  shouldHideGitPanel() {
-    return this.getModeConfig().hideGitPanel;
   }
   shouldAutoCommit() {
     return this.getModeConfig().autoCommit;
