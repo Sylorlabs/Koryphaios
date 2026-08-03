@@ -1,13 +1,15 @@
 <script lang="ts">
   import { Target, Pause, Play, Square, Plus, ArrowUp, ArrowDown, X, Link2, ChevronDown, ChevronRight } from 'lucide-svelte';
   import { goalStore } from '$lib/stores/goals.svelte';
-  import { goalProgress, type GoalScope } from '@koryphaios/shared';
-  import { projectStore } from '$lib/stores/project.svelte';
+  import { goalProgress, type Goal, type GoalScope } from '@koryphaios/shared';
+  import { projectStore, projectDisplayName } from '$lib/stores/project.svelte';
   import { sessionStore } from '$lib/stores/sessions.svelte';
   import { agentSettingsStore } from '$lib/stores/agent-settings.svelte';
   import { goalDisplayStore } from '$lib/stores/goal-display.svelte';
+  import { formatGoalRuntime, groupGoals, isActiveGoal, pickGoalForAction, type GoalActionRequest } from '$lib/utils/goal-actions';
   import KorySelect from './KorySelect.svelte';
   import { onMount } from 'svelte';
+  import { useNow } from '$lib/utils/now-signal.svelte';
 
   const scopeOptions = [
     { value: 'workspace', label: 'Workspace', description: 'Available from every chat' },
@@ -28,12 +30,13 @@
       error = '';
       if (!objective.trim()) { composer?.focus(); return; }
       if (scope === 'project' && !projectStore.currentPath) throw new Error('Open a project before creating a project goal');
-      if (scope === 'session' && !sessionStore.activeSessionId) throw new Error('Open a chat before creating a session goal');
+      if (scope === 'session' && !sessionStore.activeSessionId) throw new Error('Open a chat before creating a chat goal');
       const goal = await goalStore.create({ objective: objective.trim(), scope, projectPath: scope === 'project' ? projectStore.currentPath ?? undefined : undefined, sessionId: scope === 'session' ? sessionStore.activeSessionId ?? undefined : undefined, planningDepth: agentSettingsStore.settings.goalPlanningDepth ?? 'adaptive' });
       objective = '';
       if (sessionStore.activeSessionId && localStorage.getItem('koryphaios-selected-model')) await drive(goal.id);
     } catch (err) { error = err instanceof Error ? err.message : String(err); }
   }
+
   async function drive(goalId: string) { try { error = ''; await goalStore.drive(goalId); } catch (err) { error = err instanceof Error ? err.message : String(err); } }
   async function updatePriority(delta: number) { const goal = goalStore.selectedGoal; if (!goal) return; try { await goalStore.patch(goal.id, { priority: goal.priority + delta }); } catch (err) { error = err instanceof Error ? err.message : String(err); } }
   async function reorder(delta: number) { const goal = goalStore.selectedGoal; if (!goal) return; try { await goalStore.patch(goal.id, { sortOrder: goal.sortOrder + delta }); } catch (err) { error = err instanceof Error ? err.message : String(err); } }
@@ -43,32 +46,29 @@
   onMount(() => {
     void goalStore.refresh();
     const command = (event: Event) => {
-      const action = (event as CustomEvent<string>).detail;
-      const goal = goalStore.selectedGoal;
-      if (action === 'goal_create') { expanded = true; setTimeout(() => composer?.focus(), 0); }
-      if (action === 'goal_open') { if (!goalStore.selectedGoalId) goalStore.selectedGoalId = goalStore.goals[0]?.id ?? ''; expanded = true; }
-      if (action === 'goal_pause' && goal && goal.status !== 'paused') void pauseOrResume();
-      if (action === 'goal_resume' && goal?.status === 'paused') void pauseOrResume();
-      if (action === 'goal_prioritize') void updatePriority(1);
-      if (action === 'goal_invoke' && goal) void drive(goal.id);
+      const detail = (event as CustomEvent<string | GoalActionRequest>).detail;
+      const request: GoalActionRequest = typeof detail === 'string' ? { action: detail as GoalActionRequest['action'] } : detail;
+      expanded = true; error = '';
+      if (request.action === 'goal_create') { objective = request.objective ?? objective; setTimeout(() => composer?.focus(), 0); return; }
+      const goal = target(request);
+      if (!goal) { error = request.action === 'goal_resume' ? 'No paused or blocked goal is available in this context.' : 'No eligible active goal is available in this context.'; return; }
+      if (request.action === 'goal_pause') void pause(goal);
+      if (request.action === 'goal_resume') void resume(goal);
+      if (request.action === 'goal_prioritize') void updatePriority(goal, 1);
+      if (request.action === 'goal_invoke') void (goal.status === 'paused' || goal.status === 'blocked' ? resume(goal) : drive(goal.id));
+      if (request.action === 'goal_stop') void stop(goal, request.source === 'slash');
     };
     window.addEventListener('kory:goal-action', command);
-    return () => window.removeEventListener('kory:goal-action', command);
+    return () => { nowClock.unsubscribe(); window.removeEventListener('kory:goal-action', command); };
   });
 </script>
 
-<section class="shrink-0 border-t border-[var(--color-border)] p-3 {expanded ? 'flex min-h-[260px] max-h-[42%] flex-col' : ''}" aria-label="Active Goals">
+<section class="shrink-0 border-t border-[var(--color-border)] p-3 {expanded ? 'flex min-h-[280px] max-h-[52%] flex-col' : ''}" aria-label="Active Goals">
   <div class="flex items-center gap-1">
     <button type="button" class="flex min-w-0 flex-1 items-center gap-2 text-left text-xs font-semibold text-[var(--color-text-secondary)]" aria-expanded={expanded} onclick={() => expanded = !expanded}>
       <Target size={14} /> Goals <span class="text-[10px] font-normal text-[var(--color-text-muted)]">{activeGoals.length || ''}</span><span class="ml-auto">{#if expanded}<ChevronDown size={14} />{:else}<ChevronRight size={14} />{/if}</span>
     </button>
-    <button
-      type="button"
-      class="rounded p-1 text-[var(--color-text-muted)] transition-colors hover:bg-[var(--color-surface-3)] hover:text-[var(--color-text-primary)]"
-      aria-label="Hide Goals panel"
-      title="Hide Goals panel"
-      onclick={() => goalDisplayStore.update({ sidebar: false })}
-    ><X size={13} /></button>
+    <button type="button" class="rounded p-1 text-[var(--color-text-muted)] hover:bg-[var(--color-surface-3)] hover:text-[var(--color-text-primary)]" aria-label="Hide Goals panel" title="Hide Goals panel" onclick={() => goalDisplayStore.update({ sidebar: false })}><X size={13} /></button>
   </div>
   {#if expanded}<div class="mt-2 min-h-0 flex-1 space-y-2 overflow-y-auto pr-1">
   <div class="space-y-1.5">
@@ -102,6 +102,4 @@
       {#if goalStore.selectedGoal.blocker}<p class="mt-2 text-amber-400">{goalStore.selectedGoal.status === 'paused' ? 'Paused: ' : 'Blocked: '}{goalStore.selectedGoal.blocker}</p>{/if}
     </div>
   {/if}
-  {#if error}<p class="text-xs text-red-400" role="alert">{error}</p>{/if}
-  </div>{/if}
 </section>

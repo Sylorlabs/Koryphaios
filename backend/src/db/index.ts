@@ -36,6 +36,10 @@ sqlite.exec('PRAGMA wal_autocheckpoint = 1000;');
 hardenFilePermissions(`${dbPath}-wal`);
 hardenFilePermissions(`${dbPath}-shm`);
 
+// Harden the WAL/SHM sidecars that WAL mode just created.
+hardenFilePermissions(`${dbPath}-wal`);
+hardenFilePermissions(`${dbPath}-shm`);
+
 // Create and export drizzle instance
 export const db = drizzle(sqlite, { schema });
 

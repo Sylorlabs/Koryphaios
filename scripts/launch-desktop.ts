@@ -538,6 +538,7 @@ async function main() {
           VITE_BACKEND_WS_URL: websocketUrl,
         },
         stdio: ['ignore', 'pipe', 'pipe'],
+        shell: SPAWN_SHELL,
       },
     );
     track('frontend', frontend);
@@ -555,6 +556,7 @@ async function main() {
     cwd: DESKTOP_DIR,
     env: sharedEnv,
     stdio: 'inherit',
+    shell: SPAWN_SHELL,
   });
   track('tauri', tauri);
 

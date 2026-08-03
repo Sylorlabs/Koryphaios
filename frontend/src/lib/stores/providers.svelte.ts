@@ -148,6 +148,7 @@ const TOKEN_PLACEHOLDERS: Record<string, string> = {
   copilot: 'GitHub token or Copilot auth token',
   google: 'Gemini API key',
   aistudio: 'Gemini API key (AI Studio)',
+  poe: 'Poe API key (poe.com/api_key)',
   kimicode: 'Auth with Kimi Code',
   azure: 'Bearer token',
 };

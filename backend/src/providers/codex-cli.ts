@@ -19,7 +19,7 @@ import {
   type StreamRequest,
 } from './types';
 import { providerLog } from '../logger';
-import { getCliBridge } from './cli-bridges';
+import { getCliBridge, getKoryphaiosCodexHome } from './cli-bridges';
 
 const CODEX_TIMEOUT_MS = 300_000;
 const CODEX_MODEL_LIST_TIMEOUT_MS = 15_000;

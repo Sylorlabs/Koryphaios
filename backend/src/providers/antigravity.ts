@@ -31,6 +31,7 @@ import {
   readSync,
   closeSync,
   fstatSync,
+  mkdirSync,
 } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -343,6 +344,60 @@ export class AntigravityProvider implements Provider {
 
     const cliModel = this.resolveCliModel(request.model);
     const logPath = join(tmpdir(), `agy-${Date.now()}.log`);
+
+    // ── Wire kory MCP server, hooks, and rules into the isolated agy home ──
+    // Antigravity imports .claude/ config (mcpServers, hooks) and reads
+    // AGENTS.md as always-on rules. Writing these before each turn ensures the
+    // CLI discovers the kory__ tool catalog, the PreToolUse enforcement
+    // layer, and Kory's session rules on startup.
+    const agyBridge = getCliBridge('antigravity');
+    const bridgeCtx = {
+      provider: 'antigravity' as const,
+      role: request.harnessRole ?? 'manager',
+      sandbox: request.sandbox,
+      workingDirectory: request.workingDirectory?.trim() || process.cwd(),
+      sessionId: request.sessionId,
+      systemPrompt: request.systemPrompt ?? '',
+      tools: request.tools ?? [],
+    };
+    const agyHome = getKoryphaiosAntigravityHome();
+    try {
+      // MCP: write .claude.json with the kory server so the CLI gets kory__ tools.
+      const mcpConfigs = agyBridge?.buildMcpConfig(bridgeCtx);
+      if (mcpConfigs && mcpConfigs.length > 0) {
+        const mcpConfigPath = join(agyHome, '.claude.json');
+        const existing = existsSync(mcpConfigPath)
+          ? JSON.parse(readFileSync(mcpConfigPath, 'utf-8'))
+          : {};
+        existing.mcpServers = existing.mcpServers ?? {};
+        for (const srv of mcpConfigs) {
+          existing.mcpServers[srv.name] = {
+            command: srv.command,
+            args: srv.args,
+            env: srv.env,
+          };
+        }
+        writeFileSync(mcpConfigPath, JSON.stringify(existing, null, 2));
+      }
+      // Hooks: write .claude/hooks.json for PreToolUse enforcement.
+      const hookConfigs = agyBridge?.buildHooks(bridgeCtx);
+      if (hookConfigs && hookConfigs.length > 0 && agyBridge) {
+        const hooksJson = agyBridge.serializeHooks(hookConfigs);
+        const hooksDir = join(agyHome, '.claude');
+        mkdirSync(hooksDir, { recursive: true });
+        writeFileSync(join(hooksDir, 'hooks.json'), hooksJson);
+      }
+      // Rules: write AGENTS.md with the Kory session rules.
+      const ruleFiles = agyBridge?.buildRules(bridgeCtx);
+      if (ruleFiles) {
+        for (const rule of ruleFiles) {
+          mkdirSync(dirname(rule.path), { recursive: true });
+          writeFileSync(rule.path, rule.content);
+        }
+      }
+    } catch (wiringErr) {
+      providerLog.warn({ err: wiringErr, provider: 'antigravity' }, 'Failed to wire kory MCP/hooks/rules for Antigravity');
+    }
 
     const cwd = request.workingDirectory?.trim();
     // Mode selection: only the critic role uses planning (read-only) mode.

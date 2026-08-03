@@ -1,6 +1,6 @@
-import type { StoredMessage } from '@koryphaios/shared';
+import type { MessageAttachment, StoredMessage } from '@koryphaios/shared';
 import { db, messages, type Message as DbMessage } from '../db';
-import { eq, asc, desc, sql, and, gt } from 'drizzle-orm';
+import { eq, asc, desc, and, gt } from 'drizzle-orm';
 
 export interface IMessageStore {
   add(sessionId: string, msg: StoredMessage): Promise<void>;
@@ -15,6 +15,50 @@ export interface IMessageStore {
     provider?: string,
   ): Promise<number>;
   assignVariantGroup(messageId: string, groupId: string, index: number): Promise<void>;
+  replaceAndTruncate(sessionId: string, messageId: string, content: string): Promise<number>;
+}
+
+function parseStoredContent(raw: string): { text: string; attachments: MessageAttachment[] } {
+  try {
+    const blocks = JSON.parse(raw);
+    if (!Array.isArray(blocks)) return { text: raw, attachments: [] };
+    const attachments = blocks.filter(
+      (block): block is MessageAttachment =>
+        block &&
+        (block.type === 'image' || block.type === 'file') &&
+        typeof block.data === 'string' &&
+        typeof block.name === 'string',
+    );
+    return {
+      text: blocks
+        .filter((block) => block?.type === 'text' || typeof block?.text === 'string')
+        .map((block) => block.text ?? '')
+        .join(''),
+      attachments,
+    };
+  } catch {
+    return { text: raw, attachments: [] };
+  }
+}
+
+function serializeStoredContent(content: string, attachments: MessageAttachment[] = []): string {
+  return JSON.stringify([
+    { type: 'text', text: content },
+    ...attachments.map((attachment) => {
+      if (attachment.mimeType) return attachment;
+      const name = attachment.name.toLowerCase();
+      const mimeType = name.endsWith('.jpg') || name.endsWith('.jpeg')
+        ? 'image/jpeg'
+        : name.endsWith('.webp')
+          ? 'image/webp'
+          : name.endsWith('.gif')
+            ? 'image/gif'
+            : attachment.type === 'image'
+              ? 'image/png'
+              : 'application/octet-stream';
+      return { ...attachment, mimeType };
+    }),
+  ]);
 }
 
 function toStoredMessage(m: DbMessage): StoredMessage {
@@ -208,6 +252,31 @@ export class MessageStore implements IMessageStore {
         .where(and(eq(messages.sessionId, sessionId), gt(messages.createdAt, pivot.createdAt)))
         .run();
       return Number(later?.count ?? 0);
+    });
+  }
+
+  async replaceAndTruncate(
+    sessionId: string,
+    messageId: string,
+    content: string,
+  ): Promise<number> {
+    return db.transaction(async (tx) => {
+      const [pivot] = await tx
+        .select({ createdAt: messages.createdAt, content: messages.content, role: messages.role })
+        .from(messages)
+        .where(and(eq(messages.id, messageId), eq(messages.sessionId, sessionId)))
+        .limit(1);
+      if (!pivot || pivot.role !== 'user') throw new Error('Editable user message not found');
+      const stored = parseStoredContent(pivot.content);
+      await tx
+        .update(messages)
+        .set({ content: serializeStoredContent(content, stored.attachments) })
+        .where(and(eq(messages.id, messageId), eq(messages.sessionId, sessionId)));
+      const removed = await tx
+        .delete(messages)
+        .where(and(eq(messages.sessionId, sessionId), gt(messages.createdAt, pivot.createdAt)))
+        .returning({ id: messages.id });
+      return removed.length;
     });
   }
 }

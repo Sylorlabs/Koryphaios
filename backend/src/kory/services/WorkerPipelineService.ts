@@ -18,6 +18,7 @@ import type { ITaskStore } from '../../stores/task-store';
 import { formatMessagesForCritic } from '../critic-util';
 import { classifyTask, createTaskContract, type TaskContract } from '../prompts';
 import { getProviderHarnessCapabilities } from '../../providers/provider-harness';
+import { computeCostUsd } from '../../pricing';
 
 // Keep the provider-native block form intact. Image/tool blocks are valid
 // worker context and must not be narrowed to text merely to cross the service
@@ -29,6 +30,10 @@ interface WorkerPipelineResult {
   verification?: 'verified' | 'unverified';
   workerTranscript?: string;
   criticFeedback?: string;
+  provider?: string;
+  model?: string;
+  tokensIn?: number;
+  tokensOut?: number;
 }
 
 export function resolveGateStrictness(
@@ -67,7 +72,12 @@ export interface WorkerPipelineConfig {
     allowedPaths: string[],
     isSandboxed: boolean,
     taskContract?: TaskContract,
-  ) => Promise<{ success: boolean; error?: string; workerMessages?: InternalMessage[] }>;
+  ) => Promise<{
+    success: boolean;
+    error?: string;
+    workerMessages?: InternalMessage[];
+    usage?: { tokensIn: number; tokensOut: number };
+  }>;
   runCriticGate: (
     sessionId: string,
     workerMessages: InternalMessage[] | undefined,
@@ -209,10 +219,21 @@ export class WorkerPipelineService {
               const shadowLogger = new ShadowLogger(this.config.getWorkingDirectory());
               await shadowLogger.createGhostCommit(task.slice(0, 72), {
                 agentId: sessionId,
-                model: preferredModel ?? 'unknown',
-                prompt: task.slice(0, 200),
-                cost: 0,
+                model: result.model ?? preferredModel ?? 'unknown',
+                prompt: task,
+                tokensIn: result.tokensIn,
+                tokensOut: result.tokensOut,
+                cost:
+                  result.provider && result.model
+                    ? computeCostUsd(
+                        result.provider,
+                        result.model,
+                        result.tokensIn ?? 0,
+                        result.tokensOut ?? 0,
+                      )?.costUsd
+                    : undefined,
                 checkpointType: 'auto_save',
+                changedFiles: this.state.getChanges(sessionId),
               });
             } catch {
               // Shadow logging is non-critical; don't fail the task if it errors
@@ -345,6 +366,10 @@ export class WorkerPipelineService {
           if (gateStrictness === 'off') {
             return {
               success: true,
+              provider: alt.name,
+              model: routing.model,
+              tokensIn: res.usage?.tokensIn,
+              tokensOut: res.usage?.tokensOut,
               verification: 'unverified',
               workerTranscript: formatMessagesForCritic(res.workerMessages ?? []),
               criticFeedback: 'UNVERIFIED: Quality gates were disabled for this run.',
@@ -361,6 +386,10 @@ export class WorkerPipelineService {
             const harness = getProviderHarnessCapabilities(alt.name);
             return {
               success: true,
+              provider: alt.name,
+              model: routing.model,
+              tokensIn: res.usage?.tokensIn,
+              tokensOut: res.usage?.tokensOut,
               verification: harness.verificationEligible ? 'verified' : 'unverified',
               workerTranscript: formatMessagesForCritic(res.workerMessages ?? []),
               criticFeedback: harness.verificationEligible
@@ -371,6 +400,10 @@ export class WorkerPipelineService {
           if (gateStrictness === 'advisory') {
             return {
               success: true,
+              provider: alt.name,
+              model: routing.model,
+              tokensIn: res.usage?.tokensIn,
+              tokensOut: res.usage?.tokensOut,
               verification: 'unverified',
               workerTranscript: formatMessagesForCritic(res.workerMessages ?? []),
               criticFeedback: `UNVERIFIED: Advisory gate findings:\n${criticResult.feedback ?? 'Review failed without structured findings.'}`,
@@ -397,6 +430,10 @@ export class WorkerPipelineService {
         if (gateStrictness === 'off') {
           return {
             success: true,
+            provider: provider.name,
+            model: routing.model,
+            tokensIn: result.usage?.tokensIn,
+            tokensOut: result.usage?.tokensOut,
             verification: 'unverified',
             workerTranscript: formatMessagesForCritic(result.workerMessages ?? []),
             criticFeedback: 'UNVERIFIED: Quality gates were disabled for this run.',
@@ -413,6 +450,10 @@ export class WorkerPipelineService {
           const harness = getProviderHarnessCapabilities(provider.name);
           return {
             success: true,
+            provider: provider.name,
+            model: routing.model,
+            tokensIn: result.usage?.tokensIn,
+            tokensOut: result.usage?.tokensOut,
             verification: harness.verificationEligible ? 'verified' : 'unverified',
             workerTranscript: formatMessagesForCritic(result.workerMessages ?? []),
             criticFeedback: harness.verificationEligible
@@ -423,6 +464,10 @@ export class WorkerPipelineService {
         if (gateStrictness === 'advisory') {
           return {
             success: true,
+            provider: provider.name,
+            model: routing.model,
+            tokensIn: result.usage?.tokensIn,
+            tokensOut: result.usage?.tokensOut,
             verification: 'unverified',
             workerTranscript: formatMessagesForCritic(result.workerMessages ?? []),
             criticFeedback: `UNVERIFIED: Advisory gate findings:\n${criticResult.feedback ?? 'Review failed without structured findings.'}`,

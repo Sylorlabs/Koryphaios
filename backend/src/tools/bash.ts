@@ -17,6 +17,7 @@ import {
   validateResourceRequest,
   AGENT_RESOURCE_LIMITS,
 } from '../security/resource-limits';
+import { requireBash } from '../runtime/shell';
 
 const MAX_OUTPUT_BYTES = 512_000; // 512KB output limit per command
 
@@ -290,7 +291,8 @@ Network access via curl/wget is blocked unless explicitly authorized.`;
     const limitedCommand = buildCommandWithLimits(command, AGENT_RESOURCE_LIMITS);
 
     try {
-      const proc = Bun.spawn(['bash', '-c', limitedCommand], {
+      const shell = requireBash();
+      const proc = Bun.spawn([shell.command, ...shell.args, limitedCommand], {
         cwd: requestedCwd,
         stdout: 'pipe',
         stderr: 'pipe',

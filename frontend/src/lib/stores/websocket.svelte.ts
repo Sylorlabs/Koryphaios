@@ -38,6 +38,7 @@ import { feedStore } from './feed.svelte';
 import { agentStore } from './agents.svelte';
 import { notesStore } from './notes.svelte';
 import { goalStore } from './goals.svelte';
+import { goalDisplayStore } from './goal-display.svelte';
 import { isDemoMode } from '$lib/demo-flags';
 import {
   isInternalEventTypeDump,
@@ -67,6 +68,26 @@ let pendingPermissions = $state<PermissionRequest[]>([]);
 // session that asked — not whichever chat happens to be open.
 let pendingQuestions = $state<Map<string, KoryAskUserPayload>>(new Map());
 let sessionChanges = $state<Map<string, ChangeSummary[]>>(new Map());
+export interface RewindPreview {
+  sessionId: string;
+  currentHash: string;
+  targetHash: string;
+  description: string;
+  evidence: {
+    model?: string;
+    cost?: number;
+    tokensIn?: number;
+    tokensOut?: number;
+    promptHash?: string;
+    timestamp: number;
+  };
+  filesChanged: Array<{ path: string; operation: 'create' | 'edit' | 'delete' }>;
+  diff: string;
+  message: string;
+}
+let rewindPreview = $state<RewindPreview | null>(null);
+let rewindApplying = $state(false);
+let rewindPreviewLoadingHash = $state<string | null>(null);
 
 interface DetectedContextFile {
   path: string;
@@ -396,6 +417,17 @@ import { registerSessionHandlers } from './ws-handlers/session-handlers';
 registerSessionHandlers();
 
 function handleMessage(msg: WSMessage) {
+  const eventEpoch = msg.epoch;
+  const eventSequence = msg.sequence;
+  if (
+    msg.sessionId &&
+    Number.isSafeInteger(eventEpoch) &&
+    Number.isSafeInteger(eventSequence)
+  ) {
+    const prior = realtimeCursors.get(msg.sessionId);
+    if (prior && prior.epoch === eventEpoch && eventSequence! <= prior.sequence) return;
+    realtimeCursors.set(msg.sessionId, { epoch: eventEpoch!, sequence: eventSequence! });
+  }
   const activeSessionId = sessionStore.activeSessionId;
   // Feed-affecting realtime events must carry an exact session identity.
   // Unscoped events are global control/catalog events only; treating them as
@@ -1311,6 +1343,7 @@ function scheduleReconnect(url?: string) {
 // Sessions this client has subscribed to during this app run. Used to
 // restore server-side subscriptions after a reconnect.
 const subscribedSessions = new Set<string>();
+const realtimeCursors = new Map<string, { epoch: number; sequence: number }>();
 // Tracks what was actually sent on the current socket. This is distinct from
 // subscribedSessions, which is the desired set restored after reconnects.
 const sentSessionSubscriptions = new Set<string>();
@@ -1445,6 +1478,7 @@ function sendUserInput(sessionId: string, selection: string, text?: string) {
           sessionId,
           selection,
           text,
+          questionId: pendingQuestions.get(sessionId)?.questionId,
           timestamp: Date.now(),
         }),
       );
@@ -1539,24 +1573,68 @@ async function loadSessionMessages(
 
 async function rewind(hash: string) {
   const sessionId = sessionStore.activeSessionId;
-  if (!sessionId) return;
+  if (!sessionId || rewindPreviewLoadingHash) return;
+  if (busySessions.has(sessionId) || agentStore.isSessionRunning(sessionId)) {
+    toastStore.info('Stop the active run before rewinding this session');
+    return;
+  }
 
+  rewindPreviewLoadingHash = hash;
   try {
-    const res = await apiFetch(apiUrl(`/api/sessions/${sessionId}/rewind`), {
+    const res = await apiFetch(apiUrl(`/api/sessions/${sessionId}/rewind/preview`), {
       method: 'POST',
       body: JSON.stringify({ hash }),
     });
-    const data = await parseJsonResponse<{ ok?: boolean; message?: string }>(res);
-    if (data.ok) {
-      toastStore.success('Rewound successfully');
-      const messages = await sessionStore.fetchMessages(sessionId);
-      await loadSessionMessages(sessionId, messages);
-    } else {
-      toastStore.error(`Rewind failed: ${data.message}`);
-    }
+    const data = await parseJsonResponse<{
+      ok?: boolean;
+      data?: Omit<RewindPreview, 'sessionId'>;
+      message?: string;
+    }>(res);
+    if (!data.ok || !data.data)
+      throw new Error(data.message ?? 'Checkpoint cannot be safely restored');
+    rewindPreview = { ...data.data, sessionId };
   } catch (err) {
     console.error('Rewind failed:', err);
-    toastStore.error('Rewind failed');
+    toastStore.error(err instanceof Error ? err.message : 'Rewind preview failed');
+  } finally {
+    rewindPreviewLoadingHash = null;
+  }
+}
+
+function cancelRewind() {
+  if (!rewindApplying) rewindPreview = null;
+}
+
+async function confirmRewind() {
+  const preview = rewindPreview;
+  if (!preview || rewindApplying) return;
+  const sessionId = preview.sessionId;
+  if (sessionStore.activeSessionId !== sessionId) {
+    rewindPreview = null;
+    toastStore.error('The active session changed. Open the rewind preview again.');
+    return;
+  }
+  rewindApplying = true;
+  try {
+    const res = await apiFetch(apiUrl(`/api/sessions/${sessionId}/rewind`), {
+      method: 'POST',
+      body: JSON.stringify({
+        hash: preview.targetHash,
+        expectedCurrentHash: preview.currentHash,
+        confirmed: true,
+      }),
+    });
+    const data = await parseJsonResponse<{ ok?: boolean; message?: string }>(res);
+    if (!data.ok) throw new Error(data.message ?? 'Rewind failed');
+    rewindPreview = null;
+    toastStore.success('Session rewound successfully');
+    const messages = await sessionStore.fetchMessages(sessionId);
+    await loadSessionMessages(sessionId, messages);
+    window.dispatchEvent(new CustomEvent('kory:rewind-applied', { detail: { sessionId } }));
+  } catch (err) {
+    toastStore.error(err instanceof Error ? err.message : 'Rewind failed');
+  } finally {
+    rewindApplying = false;
   }
 }
 
@@ -1664,6 +1742,15 @@ export const wsStore = {
   },
   get sessionChanges() {
     return sessionChanges;
+  },
+  get rewindPreview() {
+    return rewindPreview;
+  },
+  get rewindApplying() {
+    return rewindApplying;
+  },
+  get rewindPreviewLoadingHash() {
+    return rewindPreviewLoadingHash;
   },
   get activeFileEdits() {
     return activeFileEdits;

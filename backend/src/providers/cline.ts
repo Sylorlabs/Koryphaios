@@ -375,10 +375,14 @@ export class ClineProvider implements Provider {
     const wrapped = request.sandbox
       ? wrapCommand(bin, args, { cwd, configDirs: [clineHome], policy: request.sandbox })
       : { command: bin, args };
+    // Point the CLI at the isolated home so it discovers the kory MCP server
+    // and .clinerules we just wrote.
+    const clineEnv = { ...(jail?.env ?? { ...process.env }) };
+    clineEnv.CLINE_HOME = clineHome;
     const child = spawn(wrapped.command, wrapped.args, {
       cwd,
       stdio: ['ignore', 'pipe', 'pipe'],
-      env: jail?.env ?? { ...process.env },
+      env: clineEnv,
     });
 
     const onAbort = () => {

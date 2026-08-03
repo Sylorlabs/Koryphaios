@@ -1,5 +1,6 @@
 import { toolLog } from '../logger';
 import { nanoid } from 'nanoid';
+import { requireBash } from '../runtime/shell';
 
 export interface BackgroundProcess {
   id: string;
@@ -33,7 +34,8 @@ export class ShellManager {
   startProcess(name: string, command: string, cwd: string): BackgroundProcess {
     const id = nanoid(8);
 
-    const proc = Bun.spawn(['bash', '-c', command], {
+    const shell = requireBash();
+    const proc = Bun.spawn([shell.command, ...shell.args, command], {
       cwd,
       stdout: 'pipe',
       stderr: 'pipe',

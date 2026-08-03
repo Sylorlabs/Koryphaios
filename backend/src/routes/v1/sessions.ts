@@ -3,6 +3,7 @@ import { getContext } from '../../context';
 import { processSupervisor } from '../../process-supervisor/supervisor';
 import { serializeProcess } from '../../process-supervisor/serialize';
 import { serverLog } from '../../logger';
+import { writeAllCliRulesAndSkills } from '../../providers/cli-rules-skills';
 
 export const sessionRoutes = new Elysia({ prefix: '/api/sessions' })
   .get('/', async () => {
@@ -20,6 +21,14 @@ export const sessionRoutes = new Elysia({ prefix: '/api/sessions' })
         body.parentId,
         body.workingDirectory,
       );
+      // Write Koryphaios rules + skills files to every CLI's isolated home so
+      // the native CLIs (claude, codex, devin, grok, cursor, cline, antigravity)
+      // discover Kory's tool-usage + orchestration conventions on startup.
+      try {
+        writeAllCliRulesAndSkills(session.id, '');
+      } catch (err) {
+        serverLog.warn({ err, sessionId: session.id }, 'Failed to write CLI rules + skills');
+      }
       return { ok: true, data: session };
     },
     {
@@ -115,6 +124,7 @@ export const sessionRoutes = new Elysia({ prefix: '/api/sessions' })
     // silently launch another turn after the session abort completes.
     await goalDriver.pauseForSession(id);
     // Cancel all workers for this session
+    await getContext().goalDriver.pauseForSession(id);
     kory.cancelSessionWorkers(id);
     // Abort manager thread for this session
     kory.abortManagerRun(id);
@@ -193,12 +203,14 @@ export const sessionRoutes = new Elysia({ prefix: '/api/sessions' })
     '/:id/rewind',
     async ({ params: { id }, body }) => {
       const { timeTravel } = getContext();
-      const result = await timeTravel.travelTo(body.hash, id);
+      const result = await timeTravel.travelTo(body.hash, id, body.expectedCurrentHash);
       return { ok: result.success, message: result.message };
     },
     {
       body: t.Object({
         hash: t.String(),
+        confirmed: t.Literal(true),
+        expectedCurrentHash: t.String(),
       }),
     },
   )

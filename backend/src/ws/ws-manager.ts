@@ -91,9 +91,35 @@ export class WSManager {
     }
   }
 
-  subscribeClientToSession(clientId: string, sessionId: string) {
+  subscribeClientToSession(
+    clientId: string,
+    sessionId: string,
+    cursor?: { epoch?: number; sequence?: number },
+  ) {
     const client = this.clients.get(clientId);
-    if (client) client.subscribedSessions.add(sessionId);
+    if (!client) return;
+    client.subscribedSessions.add(sessionId);
+
+    // Reconnects and full page refreshes recover every event that was durably
+    // appended before publication. A fresh renderer starts at sequence zero;
+    // an in-app reconnect resumes from its last applied sequence.
+    const log = getOrderedEventLog();
+    const current = log.getCursor(sessionId);
+    const epoch = current.epoch;
+    let after = cursor?.epoch === current.epoch ? Math.max(0, cursor?.sequence ?? 0) : 0;
+    while (after < current.latestSequence) {
+      const events = log.getAfter(sessionId, epoch, after, 2_048);
+      if (events.length === 0) break;
+      for (const event of events) {
+        if (client.ws.readyState !== 1) return;
+        client.ws.send(JSON.stringify({ ...event, replayed: true } satisfies WSMessage));
+        after = event.sequence ?? after;
+      }
+    }
+  }
+
+  private persist(message: WSMessage): WSMessage {
+    return message.sessionId ? getOrderedEventLog().append(message) : message;
   }
 
   broadcast(message: WSMessage) {

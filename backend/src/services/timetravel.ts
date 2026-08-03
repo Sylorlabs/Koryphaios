@@ -201,7 +201,6 @@ export class TimeTravelService {
     sessionId: string,
     expectedCurrentHash?: string | null,
   ): Promise<{ success: boolean; message: string; newHash?: string }> {
-    // Verify this is a valid ghost commit
     const ghost = await this.shadowLogger.getGhostCommit(ghostHash);
     if (!ghost || !(await this.shadowLogger.isOwnedCheckpoint(ghostHash, sessionId))) {
       return { success: false, message: 'Invalid or unknown state' };
@@ -353,28 +352,129 @@ export class TimeTravelService {
    */
   async previewLegacyTravel(ghostHash: string): Promise<{
     canTravel: boolean;
+    currentHash: string;
+    targetHash: string;
+    description: string;
+    evidence: {
+      model?: string;
+      cost?: number;
+      tokensIn?: number;
+      tokensOut?: number;
+      promptHash?: string;
+      timestamp: number;
+    };
     diff: string;
-    filesChanged: Array<{ path: string; status: string }>;
+    filesChanged: CheckpointFileChange[];
     message: string;
   }> {
     const ghost = await this.shadowLogger.getGhostCommit(ghostHash);
-    if (!ghost) {
+    const plan = await this.buildTravelPlan(ghostHash, sessionId);
+    if (!ghost || !plan.success) {
       return {
         canTravel: false,
+        currentHash: plan.currentHash,
+        targetHash: ghostHash,
+        description: '',
+        evidence: { timestamp: 0 },
         diff: '',
         filesChanged: [],
-        message: 'Invalid state',
+        message: plan.message,
       };
     }
-
-    const diff = await this.shadowLogger.compareWithGhost(ghostHash);
+    const paths = plan.changedFiles.map((change) => change.path);
+    const diff = paths.length
+      ? (
+          await this.gitManager.runGit([
+            'diff',
+            '--stat',
+            plan.currentHash,
+            ghostHash,
+            '--',
+            ...paths,
+          ])
+        ).output
+      : '';
 
     return {
       canTravel: true,
+      currentHash: plan.currentHash,
+      targetHash: ghostHash,
+      description: ghost.message.replace(/^\[GHOST\]\s*/, ''),
+      evidence: {
+        model: ghost.metadata?.model,
+        cost: ghost.metadata?.cost,
+        tokensIn: ghost.metadata?.tokensIn,
+        tokensOut: ghost.metadata?.tokensOut,
+        promptHash: ghost.metadata?.promptHash,
+        timestamp: ghost.metadata?.timestamp ?? ghost.date.getTime(),
+      },
       diff,
-      filesChanged: ghost.filesChanged || [],
-      message: ghost.message,
+      filesChanged: plan.changedFiles,
+      message: paths.length
+        ? `${paths.length} session-owned file${paths.length === 1 ? '' : 's'} will be restored.`
+        : 'Only the conversation timeline will be rewound.',
     };
+  }
+
+  private async buildTravelPlan(
+    targetHash: string,
+    sessionId: string,
+  ): Promise<
+    | { success: true; currentHash: string; changedFiles: CheckpointFileChange[]; message: string }
+    | { success: false; currentHash: string; message: string }
+  > {
+    if (!(await this.shadowLogger.isOwnedCheckpoint(targetHash, sessionId))) {
+      return {
+        success: false,
+        currentHash: '',
+        message: 'Checkpoint does not belong to this session',
+      };
+    }
+    const timeline = await this.shadowLogger.getTimeline(1000, sessionId);
+    const currentHash = (await this.shadowLogger.getCursor(sessionId)) ?? timeline[0]?.hash ?? '';
+    const currentIndex = timeline.findIndex((entry) => entry.hash === currentHash);
+    const targetIndex = timeline.findIndex((entry) => entry.hash === targetHash);
+    if (currentIndex < 0 || targetIndex < 0) {
+      return {
+        success: false,
+        currentHash,
+        message: 'Checkpoint is outside this session timeline',
+      };
+    }
+    const changes = new Map<string, CheckpointFileChange['operation']>();
+    const start = Math.min(currentIndex, targetIndex);
+    const end = Math.max(currentIndex, targetIndex);
+    for (const entry of timeline.slice(start, end)) {
+      const metadata = await this.shadowLogger.getMetadata(entry.hash);
+      for (const change of metadata?.changedFiles ?? []) changes.set(change.path, change.operation);
+    }
+    const changedFiles = Array.from(changes, ([path, operation]) => ({ path, operation }));
+    const workspaceConflicts: string[] = [];
+    for (const change of changedFiles) {
+      const matchesCursor = await this.shadowLogger.worktreePathMatches(currentHash, change.path);
+      if (!matchesCursor) workspaceConflicts.push(change.path);
+    }
+    if (workspaceConflicts.length > 0) {
+      return {
+        success: false,
+        currentHash,
+        message: `Workspace changed after the latest session checkpoint: ${workspaceConflicts.join(', ')}. Finish or checkpoint those edits before rewinding.`,
+      };
+    }
+    if (currentHash !== targetHash && changedFiles.length === 0) {
+      const noCodeDifference = (
+        await this.gitManager.runGit(['diff', '--quiet', currentHash, targetHash])
+      ).success;
+      if (!noCodeDifference) {
+        return {
+          success: false,
+          currentHash,
+          message:
+            'This legacy checkpoint lacks a session-owned file manifest and cannot be safely restored.',
+        };
+      }
+    }
+    return { success: true, currentHash, changedFiles, message: 'Ready' };
   }
 
   /**

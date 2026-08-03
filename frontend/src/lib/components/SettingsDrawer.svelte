@@ -2,6 +2,7 @@
   import { onDestroy, onMount, tick } from 'svelte';
   import { providersStore } from '$lib/stores/providers.svelte';
   import { theme, type ThemePreset, type AccentColor, type FontFamily } from '$lib/stores/theme.svelte';
+  import { loadAllFontsForPicker } from '$lib/fonts';
   import { shortcutStore } from '$lib/stores/shortcuts.svelte';
 import { defaultShortcuts as globalDefaultShortcuts } from '$lib/stores/shortcuts.svelte';
 import { toastStore } from '$lib/stores/toast.svelte';
@@ -114,6 +115,10 @@ import { apiFetch, parseJsonResponse } from '$lib/api.svelte';
       // row of navigation under Settings.
       memoryStore.setActiveTab('settings');
       agentSettingsStore.setActiveTab('settings');
+      // Lazy-load all font packages so the font picker previews render in
+      // their own typeface. In the common case (settings closed) only the
+      // selected UI font + JetBrains Mono are loaded.
+      void loadAllFontsForPicker();
     }
     wasOpen = open;
   });

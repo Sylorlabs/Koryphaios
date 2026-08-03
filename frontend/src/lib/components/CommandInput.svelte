@@ -16,6 +16,7 @@
   import { apiUrl } from '$lib/utils/api-url';
   import { goalStore } from '$lib/stores/goals.svelte';
   import { goalDisplayStore } from '$lib/stores/goal-display.svelte';
+  import { formatGoalRuntime, isActiveGoal } from '$lib/utils/goal-actions';
 
   export type Attachment = { type: 'image' | 'file'; data: string; name: string; mimeType?: string };
 
@@ -53,6 +54,10 @@
      *  so the parent can react to provider changes (e.g. to surface that CLI
      *  provider's native /commands in the slash picker). */
     selectedModel?: string;
+    interactionMode?: 'act' | 'plan';
+    onInteractionModeChange?: (mode: 'act' | 'plan') => void;
+    planReady?: boolean;
+    onApprovePlan?: () => void;
   }
 
   let {
@@ -63,6 +68,8 @@
     waitingReason = '',
     onStop,
     onOpenSettings,
+    onOpenWorkflows,
+    workflowStatus,
     inputRef = $bindable(),
     value = $bindable(''),
     slashCommands = [],
@@ -79,6 +86,10 @@
     onInteractionModeChange,
     onPlanAction,
     selectedModel = $bindable(''),
+    interactionMode = 'act',
+    onInteractionModeChange,
+    planReady = false,
+    onApprovePlan,
   }: Props = $props();
   let actionPanelRef = $state<HTMLDivElement>();
   let showModelPicker = $state(false);
@@ -195,23 +206,13 @@
   let reasoningLevel = $state('medium');
   let showReasoningMenu = $state(false);
 
-  function parseModelSelection(value: string): { provider?: string; model?: string } {
-    if (value === 'auto') return {};
-    const separator = value.indexOf(':');
-    if (separator === -1) return {};
-    return {
-      provider: value.slice(0, separator),
-      model: value.slice(separator + 1),
-    };
-  }
-
   let fallbackProvider = $derived.by(() => {
     const preferred = wsStore.providers.find((p) => p.enabled && p.authenticated);
     return preferred?.name ?? 'anthropic';
   });
 
-  let currentProvider = $derived(!selectedModel ? fallbackProvider : (parseModelSelection(selectedModel).provider ?? fallbackProvider));
-  let currentModel = $derived(parseModelSelection(selectedModel).model);
+  let currentProvider = $derived(!selectedModel ? fallbackProvider : (parseProviderModelSelection(selectedModel).provider ?? fallbackProvider));
+  let currentModel = $derived(parseProviderModelSelection(selectedModel).model);
 
   /** A model's own live-reported effort levels (e.g. Codex's supported_reasoning_levels) take
    *  priority over the static ReasoningConfig tables, which can go stale as providers ship
@@ -314,6 +315,19 @@
     return models;
   });
 
+  // The catalog is the authority. A manually chosen model can disappear when
+  // its provider or model is turned off in Settings; do not retain that stale
+  // localStorage value and then offer an impossible Manage Models error.
+  $effect(() => {
+    const value = selectedModel;
+    const providers = wsStore.providers;
+    if (!value || value === 'auto' || providers.length === 0) return;
+    const { provider, model } = parseProviderModelSelection(value);
+    if (!provider || !model || isEnabledModelSelection(providers, value)) return;
+    selectedModel = '';
+    if (typeof localStorage !== 'undefined') localStorage.removeItem(MODEL_STORAGE_KEY);
+  });
+
   let filteredQuickModels = $derived.by(() => {
     const query = modelSearchQuery.trim().toLowerCase();
     if (!query) return availableModels;
@@ -324,7 +338,7 @@
 
   let selectedModelLabel = $derived.by(() => {
     if (!selectedModel) return 'Select model';
-    const parsed = parseModelSelection(selectedModel);
+    const parsed = parseProviderModelSelection(selectedModel);
     if (!parsed.model || !parsed.provider) return selectedModel;
     const provider = wsStore.providers.find(p => p.name === parsed.provider);
     const catalog = (provider as any)?.allAvailableModels as Array<{ id: string; name: string }> | undefined;
@@ -342,7 +356,7 @@
     const target = availableModels.find((m) => m.value === value);
     wsStore.setManagerContextWindow(sid, target?.contextWindow);
     if (disableModelPreviewRequests) return;
-    const { provider, model } = parseModelSelection(value);
+    const { provider, model } = parseProviderModelSelection(value);
     if (provider && model) {
       // listModels() starts provider/CLI discovery in the background. Recheck
       // a few times so a live limit replaces the catalog fallback as soon as
@@ -606,13 +620,6 @@
     const now = Date.now();
     if (now - lastSendAt < SEND_COOLDOWN_MS) return; // debounce duplicate sends
     lastSendAt = now;
-    const goal = goalStore.selectedGoal;
-    if (goal) {
-      void goalStore.drive(goal.id, { model: selectedModel, reasoningLevel, instructions: trimmed }).catch((error) => toastStore.error(error instanceof Error ? error.message : String(error)));
-      value = '';
-      attachments = [];
-      return;
-    }
     onSend(trimmed, selectedModel, reasoningLevel, attachments.length > 0 ? [...attachments] : undefined);
     value = '';
     attachments = [];
@@ -1427,6 +1434,32 @@
       </div>
     </div>
 
+    {#if goalDisplayStore.composer && activeChatGoal}
+      <button
+        type="button"
+        class="mb-3 flex w-full items-center gap-2 rounded-xl border px-3 py-2 text-left transition-colors hover:bg-[var(--color-surface-3)]"
+        style="border-color: color-mix(in srgb, var(--color-accent) 35%, var(--color-border)); background: color-mix(in srgb, var(--color-accent) 8%, transparent);"
+        onclick={() => { goalStore.selectedGoalId = activeChatGoal!.id; goalDisplayStore.update({ sidebar: true }); queueMicrotask(() => window.dispatchEvent(new CustomEvent('kory:goal-action', { detail: 'goal_open' }))); }}
+        aria-label={`Open active goal in this chat: ${activeChatGoal.objective}`}
+      >
+        <Target size={14} class="shrink-0 text-[var(--color-accent)]" />
+        <span class="min-w-0 flex-1"><span class="block truncate text-xs font-semibold text-[var(--color-text-primary)]">Goal in this chat · {activeChatGoal.objective}</span><span class="block text-[10px] text-[var(--color-text-muted)]">{activeChatGoal.status} · active {formatGoalRuntime(activeChatGoal, goalClock)}</span></span>
+      </button>
+    {/if}
+
+    {#if workflowStatus}
+      <button
+        type="button"
+        class="mb-3 flex w-full items-center gap-2 rounded-xl border px-3 py-2 text-left transition-colors hover:bg-[var(--color-surface-3)]"
+        style="border-color: color-mix(in srgb, var(--color-info) 35%, var(--color-border)); background: color-mix(in srgb, var(--color-info) 7%, transparent);"
+        onclick={() => onOpenWorkflows?.()}
+        aria-label={`Open active workflow: ${workflowStatus.name}`}
+      >
+        <Workflow size={14} class="shrink-0 text-[var(--color-info)]" />
+        <span class="min-w-0 flex-1"><span class="block truncate text-xs font-semibold text-[var(--color-text-primary)]">{workflowStatus.name} · {workflowStatus.stage}</span><span class="block truncate text-[10px] text-[var(--color-text-muted)]">{workflowStatus.status} · {workflowStatus.task}</span></span>
+      </button>
+    {/if}
+
     <!-- Input area -->
     <div class="flex flex-col gap-3 xl:flex-row xl:items-start">
       <div class="min-w-0 flex-1">
@@ -1594,6 +1627,15 @@
           style="background: rgba(12, 10, 9, 0.34); border-color: var(--color-border);"
         >
           <div class="flex flex-wrap items-center gap-2 xl:justify-end">
+            <button
+              type="button"
+              class="flex items-center gap-1.5 text-[11px] font-medium px-2.5 py-1.5 rounded-md border transition-colors {interactionMode === 'plan' ? 'border-cyan-400/40 bg-cyan-400/15 text-cyan-200' : 'border-[var(--color-border)] bg-[var(--color-surface-3)] text-[var(--color-text-muted)]'}"
+              aria-pressed={interactionMode === 'plan'}
+              onclick={() => onInteractionModeChange?.(interactionMode === 'plan' ? 'act' : 'plan')}
+              title="Plan mode is read-only and keeps a restart-safe planning note"
+            >
+              <ClipboardList size={12} /> {interactionMode === 'plan' ? 'Planning' : 'Plan'}
+            </button>
             <div class="agent-mode-picker relative">
               <button
                 type="button"
@@ -1654,6 +1696,13 @@
               {/if}
             </button>
           </div>
+          {#if interactionMode === 'plan' && planReady}
+            <button
+              type="button"
+              class="rounded-lg bg-cyan-300 px-3 py-2 text-xs font-semibold text-slate-950 hover:opacity-90"
+              onclick={() => onApprovePlan?.()}
+            >Approve plan & implement</button>
+          {/if}
 
           <button
             type="button"

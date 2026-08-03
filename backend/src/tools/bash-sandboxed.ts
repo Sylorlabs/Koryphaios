@@ -7,6 +7,7 @@ import { auditBashDenylist } from '../security';
 import { toolLog } from '../logger';
 import { shellManager } from './shell-manager';
 import { raspEngine } from '../security/rasp';
+import { requireBash } from '../runtime/shell';
 
 const MAX_OUTPUT_BYTES = 512_000; // 512KB output limit
 const DEFAULT_TIMEOUT_MS = 120_000; // 2 minutes
@@ -18,25 +19,47 @@ function isWithinRoot(root: string, target: string): boolean {
 }
 
 /**
- * Simple timeout wrapper for command execution
+ * Execute a command with a programmatic timeout.
+ *
+ * Uses a JS-level timer to kill the process after timeoutMs, instead of
+ * shelling out to the GNU `timeout` command (which doesn't exist on macOS
+ * or Windows by default). This keeps behavior consistent across platforms.
  */
 function execWithTimeout(
   command: string,
   cwd: string,
   timeoutMs: number,
 ): Promise<{ stdout: string; stderr: string; exitCode: number; killed: boolean }> {
-  return new Promise((resolve) => {
-    const startTime = Date.now();
+  return new Promise((resolvePromise) => {
     let killed = false;
+    let settled = false;
 
-    // Use timeout command for basic time limiting
-    const wrappedCommand = `timeout ${Math.ceil(timeoutMs / 1000)} bash -c ${JSON.stringify(command)}`;
-
-    const proc = spawn('bash', ['-c', wrappedCommand], {
+    const shell = requireBash();
+    const proc = spawn(shell.command, [...shell.args, command], {
       stdio: ['ignore', 'pipe', 'pipe'],
       cwd,
-      // Resource limits via ulimit would go here if needed
+      // On Windows, resolve bash.exe via PATH (shell: true would wrap in
+      // cmd.exe which mangles quoting). requireBash already returned an
+      // absolute path, so shell: false is correct.
+      shell: false,
     });
+
+    const timer = setTimeout(() => {
+      killed = true;
+      try {
+        proc.kill('SIGTERM');
+      } catch {
+        // process may have already exited
+      }
+      // Force-kill after a grace period if SIGTERM didn't take.
+      setTimeout(() => {
+        try {
+          proc.kill('SIGKILL');
+        } catch {
+          // ignore
+        }
+      }, 3_000);
+    }, timeoutMs);
 
     let stdout = '';
     let stderr = '';
@@ -58,18 +81,22 @@ function execWithTimeout(
     });
 
     proc.on('close', (code) => {
-      // timeout command exits 124 if timed out
-      const wasKilled = code === 124 || killed;
-      resolve({
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolvePromise({
         stdout,
-        stderr: wasKilled ? stderr + '\n[TIMEOUT: Command exceeded time limit]' : stderr,
-        exitCode: wasKilled ? 124 : (code ?? 1),
-        killed: wasKilled,
+        stderr: killed ? stderr + '\n[TIMEOUT: Command exceeded time limit]' : stderr,
+        exitCode: killed ? 124 : (code ?? 1),
+        killed,
       });
     });
 
     proc.on('error', (err) => {
-      resolve({
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolvePromise({
         stdout,
         stderr: `Execution error: ${err.message}`,
         exitCode: 1,

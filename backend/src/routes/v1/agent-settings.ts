@@ -40,8 +40,47 @@ import {
   listSkillEvaluationRuns,
   recordSkillEvaluationRun,
 } from '../../kory/skill-evaluations';
+import {
+  advanceWorkflow,
+  listWorkflowDefinitions,
+  listWorkflowRuns,
+  startWorkflow,
+  stopWorkflow,
+} from '../../kory/workflows';
 
 export const agentSettingsRoutes = new Elysia({ prefix: '/api/agent' })
+  .get('/workflows', ({ request, query, set }) => {
+    if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
+    const root = getRequestProjectRoot(request);
+    return { ok: true, data: { definitions: listWorkflowDefinitions(), runs: listWorkflowRuns(root, query.sessionId) } };
+  }, { query: t.Object({ sessionId: t.Optional(t.String()) }) })
+  .post('/workflows/start', ({ request, body, set }) => {
+    if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
+    try {
+      return { ok: true, data: startWorkflow(getRequestProjectRoot(request), { ...body, requestedBy: 'human' }) };
+    } catch (error: any) {
+      set.status = 400;
+      return { ok: false, error: error?.message ?? 'Unable to start workflow' };
+    }
+  }, { body: t.Object({ workflowId: t.String(), sessionId: t.String(), task: t.String({ minLength: 1 }), goalId: t.Optional(t.String()) }) })
+  .post('/workflows/:id/advance', ({ request, params, body, set }) => {
+    if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
+    try {
+      return { ok: true, data: advanceWorkflow(getRequestProjectRoot(request), params.id, body) };
+    } catch (error: any) {
+      set.status = 400;
+      return { ok: false, error: error?.message ?? 'Unable to advance workflow' };
+    }
+  }, { body: t.Object({ evidence: t.String(), block: t.Optional(t.Boolean()) }) })
+  .post('/workflows/:id/stop', ({ request, params, set }) => {
+    if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
+    try {
+      return { ok: true, data: stopWorkflow(getRequestProjectRoot(request), params.id) };
+    } catch (error: any) {
+      set.status = 400;
+      return { ok: false, error: error?.message ?? 'Unable to stop workflow' };
+    }
+  })
   .post(
     '/delegate',
     async ({ body, set }) => {

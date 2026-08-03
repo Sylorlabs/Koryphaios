@@ -65,14 +65,14 @@ const config = parseArgs(process.argv);
 // to a tool registered in backend/src/tools/. The backend's /api/v1/mcp-bridge/execute
 // endpoint dispatches by name through the ToolRegistry.
 
-interface KoryToolDef {
+export interface KoryToolDef {
   name: string;
   description: string;
   inputSchema: Record<string, unknown>;
   role: 'manager' | 'worker' | 'critic' | 'any';
 }
 
-const KORY_TOOLS: KoryToolDef[] = [
+export const KORY_TOOLS: KoryToolDef[] = [
   // ── Filesystem tools ──
   {
     name: 'kory__read_file',
@@ -512,7 +512,7 @@ const KORY_TOOLS: KoryToolDef[] = [
 ];
 
 /** Filter tools by role. Critic gets read-only; worker gets build tools; manager gets all. */
-function toolsForRole(role: string): KoryToolDef[] {
+export function toolsForRole(role: string): KoryToolDef[] {
   const r = role === 'coder' ? 'worker' : role;
   return KORY_TOOLS.filter((t) => {
     const tr = t.role as string | undefined;

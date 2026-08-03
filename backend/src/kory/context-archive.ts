@@ -42,8 +42,6 @@ interface SessionState {
   lastUsage?: UsageSnapshot;
 }
 
-const MAX_CONTENT_CHARS = 200_000; // per entry cap so a runaway output can't bloat the file
-
 export class ContextArchiveService {
   private sessions = new Map<string, SessionState>();
 
@@ -128,7 +126,10 @@ export class ContextArchiveService {
       ts: Date.now(),
       kind,
       label: label.slice(0, 200),
-      content: content.slice(0, MAX_CONTENT_CHARS),
+      // Context injection is capped separately. The durable archive keeps the
+      // exact output so a refresh or later fetch_context call cannot discover
+      // that the tail was silently discarded.
+      content,
     };
     s.entries.push(entry);
     s.byId.set(id, entry);
@@ -171,6 +172,25 @@ export class ContextArchiveService {
   async getLastUsage(sessionId: string): Promise<UsageSnapshot | undefined> {
     const s = await this.ensureLoaded(sessionId);
     return s.lastUsage;
+  }
+
+  /** Remove operational context created after a conversation rewind point. */
+  async truncateAfter(sessionId: string, timestamp: number): Promise<number> {
+    const s = await this.ensureLoaded(sessionId);
+    const kept = s.entries.filter((entry) => entry.ts <= timestamp);
+    const removed = s.entries.length - kept.length;
+    if (removed === 0) return 0;
+
+    s.entries = kept;
+    s.byId = new Map(kept.map((entry) => [entry.id, entry]));
+    await mkdir(this.dir(sessionId), { recursive: true });
+    const persistedRows: string[] = kept.map((entry) => JSON.stringify(entry));
+    if (s.lastUsage) persistedRows.push(JSON.stringify({ type: 'usage', usage: s.lastUsage }));
+    const target = this.file(sessionId);
+    const temporary = `${target}.${crypto.randomUUID()}.tmp`;
+    await writeFile(temporary, persistedRows.length ? `${persistedRows.join('\n')}\n` : '', 'utf8');
+    await rename(temporary, target);
+    return removed;
   }
 
   async setPrunedForAgent(sessionId: string, id: string, pruned: boolean): Promise<boolean> {

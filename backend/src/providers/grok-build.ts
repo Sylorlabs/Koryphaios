@@ -16,7 +16,7 @@
 import type { ProviderConfig, ModelDef } from '@koryphaios/shared';
 import { spawn, spawnSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { existsSync, readFileSync, statSync } from 'node:fs';
+import { existsSync, readFileSync, statSync, writeFileSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { homedir, tmpdir } from 'node:os';
 import { buildSoftJail, wrapCommand } from '../collaboration/sandbox-runner';

@@ -11,9 +11,20 @@ export class CreateGoalTool implements Tool {
   readonly inputSchema = {
     type: 'object',
     properties: {
-      objective: { type: 'string', description: 'Concrete objective the user explicitly requested as a goal' },
-      scope: { type: 'string', enum: ['workspace', 'project', 'session'], description: 'Goal ownership scope; default workspace' },
-      planningDepth: { type: 'string', enum: ['minimal', 'adaptive', 'structured'], description: 'Optional checklist planning depth' },
+      objective: {
+        type: 'string',
+        description: 'Concrete objective the user explicitly requested as a goal',
+      },
+      scope: {
+        type: 'string',
+        enum: ['workspace', 'project', 'session'],
+        description: 'Goal ownership scope; default workspace',
+      },
+      planningDepth: {
+        type: 'string',
+        enum: ['minimal', 'adaptive', 'structured'],
+        description: 'Optional checklist planning depth',
+      },
     },
     required: ['objective'],
   };

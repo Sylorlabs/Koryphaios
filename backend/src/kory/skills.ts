@@ -123,7 +123,9 @@ export function enforceSkillLearningPolicy(
     throw new Error('Agent-authored skill changes are disabled in Human only mode');
   }
   if (action === 'activate' && mode === 'propose-then-verify') {
-    throw new Error('Agent-authored skills require explicit human activation in Propose then verify mode');
+    throw new Error(
+      'Agent-authored skills require explicit human activation in Propose then verify mode',
+    );
   }
   if (action === 'activate' && !promotionReady) {
     throw new Error('Automatic activation requires a ready promotion evidence gate');

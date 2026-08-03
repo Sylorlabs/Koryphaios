@@ -1,6 +1,7 @@
 <script lang="ts">
 	import '../app.css';
-	import '$lib/fonts';
+	import { loadFont, loadMonoFont } from '$lib/fonts';
+	import { theme } from '$lib/stores/theme.svelte';
 	import { onMount } from 'svelte';
 	import { loadProvidersFromApi } from '$lib/stores/providers.svelte';
 	import { wsStore } from '$lib/stores/websocket.svelte';
@@ -32,6 +33,11 @@
 			const el = document.querySelector('.initial-load');
 			if (el) (el as HTMLElement).style.display = 'none';
 		};
+
+		// Lazy-load only the selected UI font + JetBrains Mono (for code blocks).
+		// Previously all 13 font packages (60 CSS files) were eagerly imported.
+		void loadMonoFont();
+		void loadFont(theme.font);
 
 		import('$lib/utils/error-monitor').then((m) => m.initErrorMonitoring()).catch(() => {});
 

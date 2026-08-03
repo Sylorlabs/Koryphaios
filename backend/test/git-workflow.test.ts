@@ -6,6 +6,8 @@ import { WorkspaceManager } from '../src/kory/workspace-manager';
 import { GitManager } from '../src/kory/git-manager';
 import { AutoCommitService } from '../src/kory/auto-commit-service';
 import { ShadowLogger } from '../src/kory/shadow-logger';
+import { TimeTravelService } from '../src/services/timetravel';
+import type { IMessageStore } from '../src/stores/message-store';
 import { SnapshotManager } from '../src/kory/snapshot-manager';
 import { join } from 'node:path';
 import { mkdirSync, rmSync, existsSync, writeFileSync, readFileSync } from 'node:fs';
@@ -308,6 +310,7 @@ describe('Git Workflow Integration Tests', () => {
         prompt: 'Test prompt',
         cost: 0.02,
         agentId: 'test-agent',
+        changedFiles: [{ path: 'ghost-test.txt', operation: 'create' }],
       });
 
       expect(hash).toBeDefined();
@@ -319,6 +322,10 @@ describe('Git Workflow Integration Tests', () => {
       expect(gitOutput('for-each-ref', '--format=%(refname)', 'refs/kory/checkpoints')).toContain(
         'refs/kory/checkpoints/test-agent/',
       );
+      const metadata = await shadowLogger.getMetadata(hash!);
+      expect(metadata?.prompt).toBeUndefined();
+      expect(metadata?.promptHash).toHaveLength(64);
+      expect(await shadowLogger.getCursor('test-agent')).toBe(hash);
     });
 
     test('should get timeline', async () => {
@@ -336,18 +343,86 @@ describe('Git Workflow Integration Tests', () => {
       const headBefore = gitOutput('rev-parse', 'HEAD');
       const branchBefore = gitOutput('branch', '--show-current');
 
-      // Create a new file
-      writeFileSync(join(TEST_DIR, 'post-ghost.txt'), 'This should be removed');
+      writeFileSync(join(TEST_DIR, 'ghost-test.txt'), 'Later session content');
+      writeFileSync(join(TEST_DIR, 'post-ghost.txt'), 'Unrelated user content');
       expect(existsSync(join(TEST_DIR, 'post-ghost.txt'))).toBe(true);
 
-      // Recover to ghost state
-      const result = await shadowLogger.recover(targetHash);
+      const result = await shadowLogger.recover(targetHash, {
+        agentId: 'test-agent',
+        changedFiles: [{ path: 'ghost-test.txt', operation: 'create' }],
+      });
       expect(result.success).toBe(true);
       expect(gitOutput('rev-parse', 'HEAD')).toBe(headBefore);
       expect(gitOutput('branch', '--show-current')).toBe(branchBefore);
 
-      // File should be gone
-      expect(existsSync(join(TEST_DIR, 'post-ghost.txt'))).toBe(false);
+      expect(readFileSync(join(TEST_DIR, 'ghost-test.txt'), 'utf8')).toBe('Ghost content');
+      expect(readFileSync(join(TEST_DIR, 'post-ghost.txt'), 'utf8')).toBe('Unrelated user content');
+
+      const otherSession = await shadowLogger.recover(targetHash, {
+        agentId: 'different-session',
+        changedFiles: [{ path: 'ghost-test.txt', operation: 'edit' }],
+      });
+      expect(otherSession.success).toBe(false);
+    });
+  });
+
+  describe('TimeTravelService session isolation', () => {
+    const messageStore = {
+      add: async () => {},
+      getAll: async () => [],
+      getRecent: async () => [],
+      truncateAfter: async () => {},
+      assignVariantGroup: async () => {},
+    } satisfies IMessageStore;
+
+    test('uses a session cursor and restores only the session file manifest', async () => {
+      const service = new TimeTravelService(TEST_DIR, messageStore);
+      writeFileSync(join(TEST_DIR, 'session-owned.txt'), 'version one');
+      const first = await service.checkpoint('First state', {
+        agentId: 'isolated-session',
+        prompt: 'make version one',
+        checkpointType: 'turn_end',
+        changedFiles: [{ path: 'session-owned.txt', operation: 'create' }],
+      });
+      expect(first.success).toBe(true);
+
+      writeFileSync(join(TEST_DIR, 'session-owned.txt'), 'version two');
+      const second = await service.checkpoint('Second state', {
+        agentId: 'isolated-session',
+        prompt: 'make version two',
+        checkpointType: 'turn_end',
+        changedFiles: [{ path: 'session-owned.txt', operation: 'edit' }],
+      });
+      expect(second.success).toBe(true);
+      writeFileSync(join(TEST_DIR, 'other-session.txt'), 'preserve me');
+
+      const state = await service.getState('isolated-session');
+      expect(state.currentHash).toBe(second.hash);
+      expect(state.canUndo).toBe(true);
+      const preview = await service.previewTravel(first.hash!, 'isolated-session');
+      expect(preview.canTravel).toBe(true);
+      expect(preview.filesChanged.map((file) => file.path)).toEqual(['session-owned.txt']);
+      expect(preview.evidence.promptHash).toHaveLength(64);
+
+      const restored = await service.travelTo(first.hash!, 'isolated-session', second.hash);
+      expect(restored.success).toBe(true);
+      expect(readFileSync(join(TEST_DIR, 'session-owned.txt'), 'utf8')).toBe('version one');
+      expect(readFileSync(join(TEST_DIR, 'other-session.txt'), 'utf8')).toBe('preserve me');
+      expect((await service.getState('isolated-session')).canRedo).toBe(true);
+
+      const redone = await service.redo('isolated-session');
+      expect(redone.success).toBe(true);
+      expect(readFileSync(join(TEST_DIR, 'session-owned.txt'), 'utf8')).toBe('version two');
+      expect(readFileSync(join(TEST_DIR, 'other-session.txt'), 'utf8')).toBe('preserve me');
+
+      writeFileSync(join(TEST_DIR, 'session-owned.txt'), 'manual edit after checkpoint');
+      const driftedPreview = await service.previewTravel(first.hash!, 'isolated-session');
+      expect(driftedPreview.canTravel).toBe(false);
+      expect(driftedPreview.message).toContain('changed after the latest session checkpoint');
+      writeFileSync(join(TEST_DIR, 'session-owned.txt'), 'version two');
+
+      const crossSession = await service.travelTo(first.hash!, 'another-session');
+      expect(crossSession.success).toBe(false);
     });
   });
 

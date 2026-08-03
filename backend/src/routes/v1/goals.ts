@@ -1,12 +1,29 @@
 import { Elysia, t } from 'elysia';
 import { getContext } from '../../context';
 import type { Goal, GoalStatus } from '@koryphaios/shared';
-import { GoalRunner, goalProviderPolicy } from '../../kory/goal-runner';
+import { GoalRunner } from '../../kory/goal-runner';
 
-const statuses = ['queued', 'planning', 'running', 'paused', 'blocked', 'completed', 'cancelled'] as const;
+const statuses = [
+  'queued',
+  'planning',
+  'running',
+  'paused',
+  'blocked',
+  'completed',
+  'cancelled',
+] as const;
 const scopes = ['workspace', 'project', 'session'] as const;
 const terminal = new Set<GoalStatus>(['completed', 'cancelled']);
-const sendUpdate = (goal: Goal | undefined) => { if (goal) getContext().wsManager.broadcast({ type: 'goals.updated', payload: { goal }, timestamp: Date.now(), sessionId: goal.sessionId }); return goal; };
+const sendUpdate = (goal: Goal | undefined) => {
+  if (goal)
+    getContext().wsManager.broadcast({
+      type: 'goals.updated',
+      payload: { goal },
+      timestamp: Date.now(),
+      sessionId: goal.sessionId,
+    });
+  return goal;
+};
 
 export const goalRoutes = new Elysia({ prefix: '/api/goals' })
   .get('/', async () => {
@@ -14,8 +31,10 @@ export const goalRoutes = new Elysia({ prefix: '/api/goals' })
   })
   .post('/', async ({ body, set }) => {
     try {
-      if (body.scope === 'session' && !(await getContext().sessions.get(body.sessionId!))) throw new Error('Session goals require an existing owning chat');
-      return { ok: true, data: sendUpdate(await getContext().goals.create(body)) };
+      return { ok: true, data: await getContext().goalDriver.pause(params.id) };
+    } catch (error) {
+      set.status = 409;
+      return { ok: false, error: error instanceof Error ? error.message : String(error) };
     }
     catch (error) { set.status = 400; return { ok: false, error: error instanceof Error ? error.message : 'Invalid goal' }; }
   }, { body: t.Object({ objective: t.String({ minLength: 1, maxLength: 2000 }), scope: t.Union(scopes.map((value) => t.Literal(value))), projectPath: t.Optional(t.String()), sessionId: t.Optional(t.String()), linkedSessionIds: t.Optional(t.Array(t.String())), priority: t.Optional(t.Number()), planningDepth: t.Optional(t.Union([t.Literal('minimal'), t.Literal('adaptive'), t.Literal('structured')])), checklist: t.Optional(t.Array(t.Any())) }) })
@@ -67,7 +86,10 @@ export const goalRoutes = new Elysia({ prefix: '/api/goals' })
   }, { body: t.Object({ value: t.String(), kind: t.Union([t.Literal('check'), t.Literal('artifact'), t.Literal('note')]) }) })
   .post('/:id/finalize', async ({ params, set }) => {
     const result = await new GoalRunner(getContext().goals).finalize(params.id);
-    if (result.blocked) { set.status = 409; return { ok: false, error: result.blocked, data: sendUpdate(result.goal) }; }
+    if (result.blocked) {
+      set.status = 409;
+      return { ok: false, error: result.blocked, data: sendUpdate(result.goal) };
+    }
     return { ok: true, data: sendUpdate(result.goal) };
   })
   .post('/:id/pause', async ({ params, set }) => {

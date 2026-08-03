@@ -66,6 +66,86 @@ export const KORY_HARNESS_NOTE_EXTENDED =
   ' Do not start background tasks that require a later notification: complete the requested ' +
   'work in this turn and always finish with a concise user-facing answer.';
 
+// ─── Shared kory tool whitelist ────────────────────────────────────────────
+// The full set of kory__ MCP tools every CLI harness gets. Mirrors the catalog
+// in kory-mcp-bridge.ts. The critic role is restricted to the read-only subset.
+
+export const KORY_TOOL_WHITELIST: string[] = [
+  'kory__read_file', 'kory__write_file', 'kory__edit_file', 'kory__batch_edit',
+  'kory__delete_file', 'kory__move_file', 'kory__diff', 'kory__patch',
+  'kory__grep', 'kory__glob', 'kory__ls', 'kory__bash', 'kory__shell_manage',
+  'kory__web_search', 'kory__web_fetch',
+  'kory__create_note', 'kory__read_note', 'kory__update_note', 'kory__delete_note',
+  'kory__link_notes', 'kory__unlink_notes', 'kory__recall_notes', 'kory__search_notes',
+  'kory__list_notes', 'kory__get_note_backlinks', 'kory__get_note_graph_summary', 'kory__render_note',
+  'kory__fetch_context', 'kory__prune_context',
+  'kory__ask_user', 'kory__ask_manager',
+  'kory__delegate_to_worker', 'kory__delegate_to_jules',
+  'kory__create_goal', 'kory__update_goal',
+  'kory__start_workflow', 'kory__update_workflow',
+  'kory__load_skill_detail',
+  'kory__detect_errors', 'kory__analyze_error', 'kory__suggest_fixes',
+  'kory__git_status', 'kory__git_diff', 'kory__git_commit', 'kory__commit_and_create_pr',
+  'kory__view_image',
+];
+
+export const KORY_CRITIC_TOOL_WHITELIST: string[] = [
+  'kory__read_file', 'kory__grep', 'kory__glob', 'kory__ls', 'kory__diff',
+  'kory__web_search', 'kory__web_fetch',
+  'kory__search_notes', 'kory__recall_notes', 'kory__list_notes',
+  'kory__read_note', 'kory__get_note_backlinks', 'kory__get_note_graph_summary',
+  'kory__fetch_context', 'kory__ask_user',
+  'kory__load_skill_detail',
+  'kory__detect_errors', 'kory__analyze_error', 'kory__suggest_fixes',
+  'kory__git_status', 'kory__git_diff', 'kory__view_image',
+];
+
+/** Build the kory MCP server config for a CLI harness. Uses the env vars set
+ *  in bootstrap (KORY_MCP_BRIDGE_SCRIPT / KORY_MCP_BRIDGE_COMMAND) so the
+ *  bundled bridge script is auto-discovered. */
+export function buildKoryMcpServerConfig(
+  ctx: CliBridgeContext,
+  provider: ProviderName,
+): CliMcpServerConfig | null {
+  const bridgeCommand = process.env.KORY_MCP_BRIDGE_COMMAND ?? 'node';
+  const bridgeScript = process.env.KORY_MCP_BRIDGE_SCRIPT;
+  if (!bridgeScript) return null;
+  const args = [
+    bridgeScript,
+    '--session-id', ctx.sessionId ?? '',
+    '--role', ctx.role,
+    '--provider', String(provider),
+    '--working-dir', ctx.workingDirectory,
+  ];
+  return {
+    name: 'kory',
+    command: bridgeCommand,
+    args,
+    env: { KORY_BACKEND_URL: process.env.KORY_BACKEND_URL ?? 'http://127.0.0.1:3001' },
+    transport: 'stdio',
+  };
+}
+
+/** Build lifecycle hooks for a CLI harness. Uses KORY_HOOK_BRIDGE_SCRIPT. */
+export function buildKoryHookConfigs(ctx: CliBridgeContext): CliHookConfig[] | null {
+  const hookScript = process.env.KORY_HOOK_BRIDGE_SCRIPT;
+  if (!hookScript) return null;
+  const cmd = `node ${hookScript} --event PreToolUse --session-id ${ctx.sessionId ?? ''}`;
+  const stopCmd = `node ${hookScript} --event Stop --session-id ${ctx.sessionId ?? ''}`;
+  return [
+    {
+      events: ['PreToolUse', 'PostToolUse', 'UserPromptSubmit'],
+      command: cmd,
+      matcher: '',
+    },
+    {
+      events: ['Stop'],
+      command: stopCmd,
+      matcher: '',
+    },
+  ];
+}
+
 // ─── Session-isolated homes ────────────────────────────────────────────────
 
 function makeIsolatedHome(dirName: string, realHome: string, symlinkFiles: string[]): string {
@@ -196,6 +276,7 @@ export class ClaudeCodeCliBridge extends ManagedCliBridge implements CliBridge {
       'Agent',
     ];
     // Allow only the kory MCP tools + TodoWrite (planning only).
+    // Claude Code prefixes MCP tools with mcp__<server>__.
     const allow = [
       'mcp__kory__read_file',
       'mcp__kory__write_file',
@@ -296,22 +377,7 @@ export class ClaudeCodeCliBridge extends ManagedCliBridge implements CliBridge {
     // Always wire hooks — this is the enforcement layer that blocks native
     // tool calls even if the CLI somehow tries to use them. The hook script
     // calls the Kory backend which returns block/approve.
-    const hookScript = process.env.KORY_HOOK_BRIDGE_SCRIPT;
-    if (!hookScript) return null;
-    const cmd = `node ${hookScript} --event PreToolUse --session-id ${ctx.sessionId ?? ''}`;
-    const stopCmd = `node ${hookScript} --event Stop --session-id ${ctx.sessionId ?? ''}`;
-    return [
-      {
-        events: ['PreToolUse', 'PostToolUse', 'UserPromptSubmit'],
-        command: cmd,
-        matcher: '',
-      },
-      {
-        events: ['Stop'],
-        command: stopCmd,
-        matcher: '',
-      },
-    ];
+    return buildKoryHookConfigs(ctx);
   }
 
   serializeHooks(hooks: CliHookConfig[]): string {
@@ -475,11 +541,18 @@ export class CodexCliBridge extends ManagedCliBridge implements CliBridge {
   }
 
   buildMcpConfig(_ctx: CliBridgeContext): CliMcpServerConfig[] | null {
-    return null; // Codex has no MCP yet
+    return null; // Codex has no MCP yet — uses the <KORY_TOOL_CALL> envelope
   }
 
-  buildRules(_ctx: CliBridgeContext): CliRuleFile[] | null {
-    return null;
+  buildRules(ctx: CliBridgeContext): CliRuleFile[] | null {
+    // Codex reads AGENTS.md if present in its working directory / home.
+    const home = getKoryphaiosCodexHome();
+    return [
+      {
+        path: join(home, 'AGENTS.md'),
+        content: `# Koryphaios Session Rules\n\n${ctx.systemPrompt.trim()}\n`,
+      },
+    ];
   }
 
   buildSkills(_ctx: CliBridgeContext): CliSkillFile[] | null {
@@ -529,7 +602,7 @@ export class ClineCliBridge extends ManagedCliBridge implements CliBridge {
   }
 
   buildHooks(_ctx: CliBridgeContext): CliHookConfig[] | null {
-    return null; // Cline has no hooks (probe needed)
+    return null; // Cline has no hooks system
   }
 
   serializeHooks(_hooks: CliHookConfig[]): string {
@@ -540,8 +613,15 @@ export class ClineCliBridge extends ManagedCliBridge implements CliBridge {
     return buildKoryCliMcpConfig(ctx, 'cline');
   }
 
-  buildRules(_ctx: CliBridgeContext): CliRuleFile[] | null {
-    return null;
+  buildRules(ctx: CliBridgeContext): CliRuleFile[] | null {
+    // Cline reads .clinerules as always-on rules.
+    const home = getKoryphaiosClineHome();
+    return [
+      {
+        path: join(home, '.clinerules'),
+        content: `# Koryphaios Session Rules\n\n${ctx.systemPrompt.trim()}\n`,
+      },
+    ];
   }
 
   buildSkills(_ctx: CliBridgeContext): CliSkillFile[] | null {
@@ -568,7 +648,7 @@ export class CursorCliBridge extends ManagedCliBridge implements CliBridge {
       supportsPermissionMode: true, // --mode ask/agent
       supportsAcp: false,
       supportsMcp: true, // cursor-agent supports MCP servers
-      supportsRules: false,
+      supportsRules: true, // .cursorrules
       supportsSkills: false,
       supportsHooks: false,
       version: null,
@@ -600,8 +680,15 @@ export class CursorCliBridge extends ManagedCliBridge implements CliBridge {
     return buildKoryCliMcpConfig(ctx, 'cursor');
   }
 
-  buildRules(_ctx: CliBridgeContext): CliRuleFile[] | null {
-    return null;
+  buildRules(ctx: CliBridgeContext): CliRuleFile[] | null {
+    // Cursor reads .cursorrules as always-on rules.
+    const home = getKoryphaiosCursorHome();
+    return [
+      {
+        path: join(home, '.cursorrules'),
+        content: `# Koryphaios Session Rules\n\n${ctx.systemPrompt.trim()}\n`,
+      },
+    ];
   }
 
   buildSkills(_ctx: CliBridgeContext): CliSkillFile[] | null {
@@ -651,22 +738,7 @@ export class AntigravityCliBridge extends ManagedCliBridge implements CliBridge 
   buildHooks(ctx: CliBridgeContext): CliHookConfig[] | null {
     // Antigravity imports .claude/hooks — same format as Claude Code.
     // Always wire hooks to block native tool calls.
-    const hookScript = process.env.KORY_HOOK_BRIDGE_SCRIPT;
-    if (!hookScript) return null;
-    const cmd = `node ${hookScript} --event PreToolUse --session-id ${ctx.sessionId ?? ''}`;
-    const stopCmd = `node ${hookScript} --event Stop --session-id ${ctx.sessionId ?? ''}`;
-    return [
-      {
-        events: ['PreToolUse', 'PostToolUse', 'UserPromptSubmit'],
-        command: cmd,
-        matcher: '',
-      },
-      {
-        events: ['Stop'],
-        command: stopCmd,
-        matcher: '',
-      },
-    ];
+    return buildKoryHookConfigs(ctx);
   }
 
   serializeHooks(hooks: CliHookConfig[]): string {
@@ -701,7 +773,8 @@ export class AntigravityCliBridge extends ManagedCliBridge implements CliBridge 
   }
 
   buildSkills(_ctx: CliBridgeContext): CliSkillFile[] | null {
-    return null; // Phase 6: mirror Kory skills as .claude/skills/
+    // Phase 6: mirror Kory skills as .claude/skills/ — pending skill extraction.
+    return null;
   }
 
   parseTrajectory(_raw: string): { trajectory: CliTrajectory; events: ProviderEvent[] } {
@@ -745,7 +818,7 @@ export class GrokCliBridge extends ManagedCliBridge implements CliBridge {
   }
 
   buildHooks(_ctx: CliBridgeContext): CliHookConfig[] | null {
-    return null;
+    return null; // Grok CLI has no hooks system
   }
 
   serializeHooks(_hooks: CliHookConfig[]): string {
@@ -756,8 +829,15 @@ export class GrokCliBridge extends ManagedCliBridge implements CliBridge {
     return buildKoryCliMcpConfig(ctx, 'grok');
   }
 
-  buildRules(_ctx: CliBridgeContext): CliRuleFile[] | null {
-    return null;
+  buildRules(ctx: CliBridgeContext): CliRuleFile[] | null {
+    // Grok reads .grokrules as always-on rules.
+    const home = getKoryphaiosGrokHome();
+    return [
+      {
+        path: join(home, '.grokrules'),
+        content: `# Koryphaios Session Rules\n\n${ctx.systemPrompt.trim()}\n`,
+      },
+    ];
   }
 
   buildSkills(_ctx: CliBridgeContext): CliSkillFile[] | null {
@@ -795,6 +875,7 @@ export class KimiCodeCliBridge extends ManagedCliBridge implements CliBridge {
   buildAgentConfig(ctx: CliBridgeContext): CliAgentConfig | null {
     // For API providers, the "agent config" is the system prompt + tool defs
     // sent in the API request. Package them so the provider can inject.
+    const allowedTools = ctx.role === 'critic' ? KORY_CRITIC_TOOL_WHITELIST : KORY_TOOL_WHITELIST;
     return {
       systemInstructions: [ctx.systemPrompt?.trim() ?? '', KORY_HARNESS_NOTE].filter(Boolean),
       allowedTools: ctx.tools.map((t) => t.name),

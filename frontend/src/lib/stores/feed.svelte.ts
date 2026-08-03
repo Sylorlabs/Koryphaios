@@ -279,6 +279,15 @@ function accumulateFeedEntry(entry: Omit<FeedEntry, 'id'>) {
         (last.metadata as { thinkingTokens?: number } | undefined)?.thinkingTokens ?? 0;
       const nextTok = (entry.metadata as { thinkingTokens?: number }).thinkingTokens ?? 0;
       if (prevTok || nextTok) merged.thinkingTokens = Math.max(prevTok, nextTok);
+      const priorSequence = Number(last.metadata?.sequenceStart);
+      const nextSequence = Number(entry.metadata.sequenceStart);
+      if (Number.isSafeInteger(priorSequence) && Number.isSafeInteger(nextSequence)) {
+        merged.sequenceStart = Math.min(priorSequence, nextSequence);
+        merged.sequenceEnd = Math.max(
+          Number(last.metadata?.sequenceEnd ?? priorSequence),
+          Number(entry.metadata.sequenceEnd ?? nextSequence),
+        );
+      }
       updates.metadata = merged;
     }
 
@@ -385,6 +394,19 @@ function addClientError(text: string) {
     text,
     metadata: { sessionId: activeSessionId, source: 'client' },
   });
+}
+
+function hasPersistedAssistantContaining(text: string, eventTimestamp: number): boolean {
+  const needle = normalizeFeedText(text);
+  if (!needle) return false;
+  return feed.some(
+    (entry) =>
+      entry.type === 'content' &&
+      entry.agentId === 'kory-manager' &&
+      typeof entry.metadata?.messageId === 'string' &&
+      entry.timestamp >= eventTimestamp &&
+      normalizeFeedText(entry.text).includes(needle),
+  );
 }
 
 /** Provider signalled reasoning is over (content started / turn completed):
@@ -714,6 +736,7 @@ async function loadSessionMessages(
                 index: variant.variantIndex ?? 0,
               }))
           : [{ id: m.id, content: m.content, model: m.model, index: 0 }],
+        attachments: m.attachments,
       },
       ghostHash: undefined,
     };
@@ -925,6 +948,7 @@ export const feedStore = {
   addUserMessage,
   removeAnalyzingThoughtEntries,
   addClientError,
+  hasPersistedAssistantContaining,
   removeEntries,
   setEntryVisibility,
   finalizeThinking,

@@ -14,7 +14,7 @@
 
 import { koryLog } from '../logger';
 import { gitMutex } from './git-mutex';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, relative, resolve } from 'node:path';
 import { createHash } from 'node:crypto';
@@ -303,7 +303,6 @@ export class ShadowLogger {
           messageId: metadata?.messageId,
           checkpointType: metadata?.checkpointType,
         });
-        if (entries.length >= limit) return entries;
       }
     }
 
@@ -349,7 +348,7 @@ export class ShadowLogger {
       if (entries.length >= limit) break;
     }
 
-    return entries;
+    return entries.sort((a, b) => b.timestamp - a.timestamp).slice(0, limit);
   }
 
   /**

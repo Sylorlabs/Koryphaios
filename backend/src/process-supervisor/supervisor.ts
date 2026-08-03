@@ -5,6 +5,7 @@
 import { nanoid } from 'nanoid';
 import { serverLog } from '../logger';
 import { wsManager } from '../ws/ws-manager';
+import { requireBash } from '../runtime/shell';
 import {
   initProcessSupervisorTables,
   persistProcess,
@@ -87,7 +88,11 @@ export class ProcessSupervisor {
 
   private emitLifecycle(e: ProcessLifecycleEvent): void {
     for (const cb of this.lifecycleListeners) {
-      try { cb(e); } catch { /* listener errors must not kill supervision */ }
+      try {
+        cb(e);
+      } catch {
+        /* listener errors must not kill supervision */
+      }
     }
   }
 
@@ -132,7 +137,8 @@ export class ProcessSupervisor {
     };
     await persistProcess(persisted);
     await logProcessEvent(id, 'start_requested', { command: options.command });
-    const proc = Bun.spawn(['bash', '-c', options.command], {
+    const shell = requireBash();
+    const proc = Bun.spawn([shell.command, ...shell.args, options.command], {
       cwd: options.cwd,
       stdin: 'pipe',
       stdout: 'pipe',
@@ -349,7 +355,11 @@ export class ProcessSupervisor {
   ): Promise<void> {
     const wasKilled = proc.status === 'killed';
     const isCrash = !wasKilled && code !== 0 && code !== null;
-    const status: PersistedProcess['status'] = wasKilled ? 'killed' : isCrash ? 'crashed' : 'exited';
+    const status: PersistedProcess['status'] = wasKilled
+      ? 'killed'
+      : isCrash
+        ? 'crashed'
+        : 'exited';
     proc.status = status;
     proc.exitCode = code ?? undefined;
     proc.endedAt = Date.now();

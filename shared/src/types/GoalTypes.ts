@@ -1,6 +1,13 @@
 /** Durable, chat-independent goal and checklist contracts. */
 export type GoalScope = 'workspace' | 'project' | 'session';
-export type GoalStatus = 'queued' | 'planning' | 'running' | 'paused' | 'blocked' | 'completed' | 'cancelled';
+export type GoalStatus =
+  | 'queued'
+  | 'planning'
+  | 'running'
+  | 'paused'
+  | 'blocked'
+  | 'completed'
+  | 'cancelled';
 export type GoalItemStatus = 'pending' | 'running' | 'completed' | 'blocked' | 'skipped';
 
 export interface GoalEvidence { id: string; kind: 'check' | 'artifact' | 'note'; value: string; verified: boolean; createdAt: number; }
@@ -31,5 +38,9 @@ export interface GoalExecutionRecord {
 
 export const goalProgress = (goal: Pick<Goal, 'checklist'>): number => {
   const total = goal.checklist.length;
-  return total === 0 ? 0 : Math.round((goal.checklist.filter((item) => item.status === 'completed').length / total) * 100);
+  return total === 0
+    ? 0
+    : Math.round(
+        (goal.checklist.filter((item) => item.status === 'completed').length / total) * 100,
+      );
 };

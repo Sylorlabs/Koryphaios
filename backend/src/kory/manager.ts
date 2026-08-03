@@ -87,6 +87,7 @@ import {
 } from './services';
 import type { WorkflowHook, WorkflowHookEvent } from './services/EventEmitterService';
 import { TimeTravelService } from '../services';
+import { computeCostUsd } from '../pricing';
 import { RoutingServiceEnhanced } from './services/RoutingServiceEnhanced';
 import {
   deriveCriticBudget,
@@ -105,7 +106,19 @@ import {
 } from '../providers/provider-harness';
 import { buildIntentDiscoveryBatch } from './clarification-gate';
 import { collaborationManager } from '../collaboration/manager';
-import { loadAgentSettings, saveAgentSettings } from '../agent-settings';
+import {
+  assembleAgentContext,
+  loadAgentSettings,
+  rememberExplicitPreference,
+  saveAgentSettings,
+} from '../agent-settings';
+import { assembleMemoryContext, formatMemoryForContext } from '../memory/unified-memory';
+import {
+  answerPendingQuestion,
+  createPendingQuestion,
+  getPendingQuestion,
+} from '../stores/pending-question-store';
+import { ensurePlanNote, syncPlanNote } from './plan-mode';
 import { resolveSkills } from './skills';
 import { rankHarnessCandidates, type QualificationRole } from './skill-qualifications';
 import {
@@ -539,8 +552,35 @@ export class KoryManager {
     await this.sessionState.transition(sessionId, state as 'idle' | 'processing' | 'compacting' | 'waiting' | 'error' | 'paused');
   }
 
-  handleUserInput(sessionId: string, selection: string, text?: string) {
-    this.state.resolveUserInput(sessionId, text || selection);
+  async handleUserInput(sessionId: string, selection: string, text?: string, questionId?: string) {
+    const answer = text || selection;
+    const question = await answerPendingQuestion(sessionId, answer, 'answered', questionId);
+    if (questionId && !question) return;
+    if (this.state.resolveUserInput(sessionId, answer)) return;
+    // A backend restart loses the suspended provider stack, but not the
+    // decision. Resume as a new durable turn containing both sides.
+    if (!question || !this.sessions || !this.messages) return;
+    const session = await this.sessions.get(sessionId);
+    if (!session) return;
+    const content = `Resume after restart. Pending question: ${question.question}\nUser answer: ${answer}`;
+    await this.messages.add(sessionId, {
+      id: nanoid(12),
+      sessionId,
+      role: 'user',
+      content,
+      createdAt: Date.now(),
+    });
+    void this.processTask(
+      sessionId,
+      content,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      session.interactionMode ?? 'act',
+    );
   }
 
   async handleSessionResponse(sessionId: string, accepted: boolean) {
@@ -696,7 +736,18 @@ export class KoryManager {
     }
     userMessage = defenseInDepthPromptSanitizer(userMessage);
 
-    const workflowSettings = loadAgentSettings(this.workingDirectory);
+    const sessionRoot = await this.resolveSessionWorkingDirectory(sessionId);
+    const workflowSettings = loadAgentSettings(sessionRoot);
+    const remembered = rememberExplicitPreference(sessionRoot, userMessage);
+    if (remembered) {
+      this.emitWSMessage(sessionId, 'system.info', {
+        message: `Remembered as a project preference: ${remembered}`,
+      });
+    }
+    if (interactionMode === 'plan') {
+      const planNote = await ensurePlanNote(sessionId, userMessage);
+      await this.sessions?.update(sessionId, { planNoteId: planNote.id });
+    }
     const configuredCollisionChoices = workflowSettings.skillCollisionChoices ?? {};
     if (goalContext) this.goalContextBySession.set(sessionId, goalContext);
     const initialContract = createTaskContract(userMessage, {
@@ -1348,6 +1399,17 @@ export class KoryManager {
         collisionChoices: this.skillCollisionChoicesBySession.get(sessionId),
       },
     });
+    const criticGuidance = assembleAgentContext(
+      reviewDirectory,
+      loadAgentSettings(reviewDirectory),
+    );
+    const criticMemory = formatMemoryForContext(assembleMemoryContext(reviewDirectory, sessionId));
+    const criticSystemPrompt =
+      criticCompilation.systemPrompt +
+      (criticGuidance.preferences.trim()
+        ? `\n\n## Durable user preferences\n${criticGuidance.preferences.trim()}`
+        : '') +
+      (criticMemory ? `\n\n${criticMemory.slice(0, 8_000)}` : '');
 
     const transcriptText = formatMessagesForCriticUtil(
       workerMessages ?? [],
@@ -1421,7 +1483,7 @@ export class KoryManager {
       status: 'thinking',
       providerName: provider.name,
       modelId: criticRouting.model,
-      systemPrompt: criticCompilation.systemPrompt,
+      systemPrompt: criticSystemPrompt,
       promptManifestHash: criticCompilation.manifest.hash,
       taskContractHash: criticCompilation.manifest.taskContractHash,
       toolRole: 'critic',
@@ -1461,6 +1523,51 @@ export class KoryManager {
       };
     }
     return { passed, feedback: lastContent.trim() };
+  }
+
+  /** Goal Mode completion claims pass through the same global Critic switch and quality gate. */
+  async verifyGoalItem(
+    sessionId: string,
+    objective: string,
+    itemTitle: string,
+    preferredModel?: string,
+  ): Promise<{ passed: boolean; skipped?: boolean; feedback?: string }> {
+    const session = await this.sessions?.get(sessionId);
+    return this.runCriticGate(
+      sessionId,
+      [
+        {
+          role: 'user',
+          content: `Goal objective: ${objective}\nChecklist item claimed complete: ${itemTitle}\nInspect the actual workspace and verify this item is genuinely complete.`,
+        },
+      ],
+      preferredModel,
+      `Verify Goal Mode checklist item: ${itemTitle}`,
+      session?.workingDirectory ?? this.workingDirectory,
+    );
+  }
+
+  /** A repeated blocker is terminal only after the enabled Critic accepts that it is real. */
+  async verifyGoalBlocker(
+    sessionId: string,
+    objective: string,
+    itemTitle: string,
+    blocker: string,
+    preferredModel?: string,
+  ): Promise<{ passed: boolean; skipped?: boolean; feedback?: string }> {
+    const session = await this.sessions?.get(sessionId);
+    return this.runCriticGate(
+      sessionId,
+      [
+        {
+          role: 'user',
+          content: `Goal objective: ${objective}\nActive item: ${itemTitle}\nProposed blocker after repeated attempts: ${blocker}\nVerify whether this is a genuine blocker that requires the goal to stop.`,
+        },
+      ],
+      preferredModel,
+      `Adjudicate Goal Mode blocker: ${blocker}`,
+      session?.workingDirectory ?? this.workingDirectory,
+    );
   }
 
   private async runHardChecks(
@@ -1869,6 +1976,14 @@ export class KoryManager {
         });
         koryLog.debug('Assistant message persisted');
       }
+      if (interactionMode === 'plan') {
+        try {
+          const noteId = await syncPlanNote(sessionId, userMessage, toPersist);
+          await this.sessions?.update(sessionId, { planNoteId: noteId });
+        } catch (err) {
+          koryLog.warn({ err, sessionId }, 'Failed to synchronize durable Plan note');
+        }
+      }
       if (this.messages && stoppedByUser) {
         await this.messages.add(sessionId, {
           id: nanoid(12),
@@ -1920,11 +2035,13 @@ export class KoryManager {
       if (finalMessageId && interactionMode !== 'plan') {
         await this.createRewindCheckpoint(
           sessionId,
+          providerName,
           routing.model,
           userMessage,
           finalMessageId,
           tokensIn,
           tokensOut,
+          this.state.getChanges(sessionId),
         );
       }
 
@@ -1941,22 +2058,25 @@ export class KoryManager {
 
   private async createRewindCheckpoint(
     sessionId: string,
+    provider: string,
     model: string,
     prompt: string,
     messageId: string,
     tokensIn = 0,
     tokensOut = 0,
+    changedFiles: Array<{ path: string; operation: 'create' | 'edit' | 'delete' }> = [],
   ) {
     try {
       const metadata = {
         agentId: sessionId,
         model,
-        prompt: prompt.slice(0, 200),
+        prompt,
         tokensIn,
         tokensOut,
-        cost: 0,
+        cost: computeCostUsd(provider, model, tokensIn, tokensOut)?.costUsd,
         messageId,
         checkpointType: 'turn_end' as const,
+        changedFiles,
       };
       if (this.timeTravel) {
         await this.timeTravel.checkpoint(prompt.slice(0, 72), metadata);
@@ -1986,7 +2106,8 @@ export class KoryManager {
 
     // Load agent settings to apply experimental overrides
     const { loadAgentSettings } = await import('../agent-settings');
-    const settings = loadAgentSettings(this.workingDirectory);
+    const promptRoot = await this.resolveSessionWorkingDirectory(sessionId);
+    const settings = loadAgentSettings(promptRoot);
 
     const latestUserMessage = [...messages].reverse().find((message) => message.role === 'user');
     const taskGoal =
@@ -2029,6 +2150,7 @@ export class KoryManager {
         'Prompt manifest applied',
       );
     }
+    const beforeMemoryContext = systemPrompt.length;
     const notesEntries = Object.entries(settings.managerNotes ?? {}).filter(([, v]) => v?.trim());
     if (notesEntries.length > 0) {
       const notesSections = notesEntries
@@ -2036,22 +2158,31 @@ export class KoryManager {
         .join('\n\n');
       systemPrompt += `\n\n## User Notes (standing guidance)\n${notesSections}`;
     }
+    const agentContext = assembleAgentContext(promptRoot, settings);
+    if (agentContext.preferences.trim()) {
+      systemPrompt += `\n\n## Durable user preferences\n${agentContext.preferences.trim()}`;
+    }
+    const memoryContext = assembleMemoryContext(promptRoot, sessionId);
+    if (memoryContext.settings.autoIncludeInContext) {
+      const formatted = formatMemoryForContext(memoryContext);
+      if (formatted) {
+        const maxChars = Math.max(400, memoryContext.settings.maxContextTokens * 4);
+        systemPrompt += `\n\n${formatted.slice(0, maxChars)}`;
+      }
+    }
     // Chars contributed by injected memory/notes — tracked separately so the
     // context-usage bar can show memory as its own segment.
-    let memoryChars = 0;
-
-    if (hasAnyVisibleNoteTools(this.workingDirectory)) {
-      const beforeNotes = systemPrompt.length;
-      const hint = buildNotesNetworkSystemHint(this.workingDirectory);
+    if (hasAnyVisibleNoteTools(promptRoot)) {
+      const hint = buildNotesNetworkSystemHint(promptRoot);
       if (hint) systemPrompt += `\n\n${hint}`;
       try {
         const { buildNotesNetworkPrompt } = await import('../memory/unified-memory');
-        systemPrompt += await buildNotesNetworkPrompt(2500, this.workingDirectory);
+        systemPrompt += await buildNotesNetworkPrompt(2500, promptRoot);
       } catch {
         // Notes DB may be unavailable — continue without network context
       }
-      memoryChars = systemPrompt.length - beforeNotes;
     }
+    const memoryChars = systemPrompt.length - beforeMemoryContext;
 
     // Multi-source research instruction
     if (settings.multiSourceResearch) {
@@ -2062,10 +2193,34 @@ export class KoryManager {
     // Filter tools based on local web search setting
     let tools = filterToolDefsForNotesPermissions(
       this.tools.getToolDefsForRole('manager'),
-      this.workingDirectory,
+      promptRoot,
     );
     if (settings.localWebSearch === 'off') {
       tools = tools.filter((t) => t.name !== 'web_search');
+    }
+    if (interactionMode === 'plan') {
+      const allowed = new Set([
+        'read_file',
+        'grep',
+        'glob',
+        'ls',
+        'diff',
+        'web_search',
+        'web_fetch',
+        'view_image',
+        'ask_user',
+        'search_notes',
+        'recall_notes',
+        'list_notes',
+        'get_note_backlinks',
+        'get_note_graph_summary',
+        'render_note',
+        'fetch_context',
+        'load_skill_detail',
+      ]);
+      tools = tools.filter((tool) => allowed.has(tool.name));
+      systemPrompt +=
+        '\n\nPLAN MODE IS ENFORCED BY THE HOST. You cannot edit project files, run shell commands, commit, create pull requests, delegate, or write arbitrary Notes. Koryphaios synchronizes the dedicated Plan note after each turn.';
     }
 
     if (interactionMode === 'plan') {
@@ -2673,7 +2828,12 @@ export class KoryManager {
     allowedPaths: string[],
     isSandboxed: boolean,
     taskContract?: import('./prompts').TaskContract,
-  ): Promise<{ success: boolean; error?: string; workerMessages?: InternalMessage[] }> {
+  ): Promise<{
+    success: boolean;
+    error?: string;
+    workerMessages?: InternalMessage[];
+    usage?: { tokensIn: number; tokensOut: number };
+  }> {
     const workerId = `worker-${nanoid(8)}`;
     const abort = new AbortController();
     const workerWorkingDirectory =
@@ -2756,6 +2916,17 @@ export class KoryManager {
       },
     });
     let workerSystemPrompt = workerCompilation.systemPrompt;
+    const workerSettings = loadAgentSettings(workerWorkingDirectory);
+    const workerGuidance = assembleAgentContext(workerWorkingDirectory, workerSettings);
+    if (workerGuidance.preferences.trim()) {
+      workerSystemPrompt += `\n\n## Durable user preferences\n${workerGuidance.preferences.trim()}`;
+    }
+    const workerMemory = assembleMemoryContext(workerWorkingDirectory, sessionId);
+    if (workerMemory.settings.autoIncludeInContext) {
+      const formatted = formatMemoryForContext(workerMemory);
+      if (formatted)
+        workerSystemPrompt += `\n\n${formatted.slice(0, Math.max(400, workerMemory.settings.maxContextTokens * 4))}`;
+    }
     if (hasAnyVisibleNoteTools(this.workingDirectory)) {
       const hint = buildNotesNetworkSystemHint(this.workingDirectory);
       if (hint) workerSystemPrompt += `\n\n${hint}`;
@@ -2801,7 +2972,12 @@ export class KoryManager {
 
     try {
       await this.runAgentThread(workerId, provider);
-      return { success: true, workerMessages: [...thread.messages] };
+      const usage = this.workers.getUsage(workerId);
+      return {
+        success: true,
+        workerMessages: [...thread.messages],
+        usage: usage ? { tokensIn: usage.tokensIn, tokensOut: usage.tokensOut } : undefined,
+      };
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err);
       return { success: false, error: message };

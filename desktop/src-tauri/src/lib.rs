@@ -657,7 +657,11 @@ fn read_folder_contents(folder_path: String) -> Result<FolderContents, String> {
                         Ok(text) => {
                             let max_len = 8000;
                             if text.len() > max_len {
-                                Some(text[..max_len].to_string() + "\n... (truncated)")
+                                // Truncate by CHAR boundary, not byte boundary —
+                                // slicing at an arbitrary byte index panics if
+                                // it lands inside a multi-byte UTF-8 sequence.
+                                let truncated: String = text.chars().take(max_len).collect();
+                                Some(truncated + "\n... (truncated)")
                             } else {
                                 Some(text)
                             }

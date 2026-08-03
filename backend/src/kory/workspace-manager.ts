@@ -81,8 +81,9 @@ export class WorkspaceManager {
       if (absoluteWtPath.startsWith(worktreeBaseDir)) {
         const taskId = relative(worktreeBaseDir, absoluteWtPath);
 
-        // Simple validation of taskId (should be what we used in spawn)
-        if (taskId && !taskId.includes('/') && !taskId.includes('..')) {
+        // Simple validation of taskId (should be what we used in spawn).
+        // Reject path separators on both Unix (/) and Windows (\).
+        if (taskId && !taskId.includes('/') && !taskId.includes('\\') && !taskId.includes('..')) {
           this.worktrees.set(taskId, {
             id: taskId,
             taskName: 'Recovered Task', // We don't know the original name without a DB

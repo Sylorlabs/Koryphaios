@@ -1,5 +1,7 @@
 // Theme system — multiple presets, accent colors, fonts, Svelte 5 runes
 
+import { loadFont } from '$lib/fonts';
+
 export type ThemePreset =
   | 'kintsugi'
   | 'midnight'
@@ -399,6 +401,8 @@ function createThemeStore() {
     setFont(f: FontFamily) {
       font = f;
       save();
+      // Lazy-load the newly selected font's CSS.
+      void loadFont(f);
     },
 
     get presets(): Array<{ id: ThemePreset; label: string }> {

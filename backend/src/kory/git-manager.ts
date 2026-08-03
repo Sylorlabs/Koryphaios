@@ -133,9 +133,9 @@ export class GitManager {
   /** Resolve path under repo root; return null if outside (path traversal). */
   resolvePathUnderRepo(filePath: string): string | null {
     const root = resolve(this.workingDirectory);
-    const abs = filePath.startsWith('/') ? resolve(filePath) : resolve(root, filePath);
+    const abs = isAbsolute(filePath) ? resolve(filePath) : resolve(root, filePath);
     const rel = relative(root, abs);
-    if (rel.startsWith('..') || rel.startsWith('/')) return null;
+    if (rel.startsWith('..') || isAbsolute(rel)) return null;
     return abs;
   }
 

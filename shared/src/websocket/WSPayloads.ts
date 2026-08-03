@@ -259,6 +259,7 @@ export interface KoryTaskBreakdownPayload {
 }
 
 export interface KoryAskUserPayload {
+  questionId?: string;
   question: string;
   options: string[];
   allowOther: boolean;

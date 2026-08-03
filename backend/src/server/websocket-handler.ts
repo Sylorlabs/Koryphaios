@@ -148,7 +148,7 @@ export async function handleWSMessage(
 
       case 'user_input':
         if (await assertSessionAccess(msg.sessionId)) {
-          kory.handleUserInput(msg.sessionId, msg.selection, msg.text);
+          await kory.handleUserInput(msg.sessionId, msg.selection, msg.text, msg.questionId);
         } else {
           serverLog.warn(
             { sessionId: msg.sessionId, clientId: ws.data.id },

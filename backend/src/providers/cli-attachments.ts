@@ -1,0 +1,90 @@
+import { createHash } from 'node:crypto';
+import { chmodSync, mkdirSync, readdirSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
+import type { ProviderContentBlock } from './types';
+
+const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
+const CACHE_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+const CACHE_DIR = join(tmpdir(), 'koryphaios-cli-attachments');
+
+function extensionForMime(mime: string | undefined): string {
+  if (mime === 'image/jpeg') return 'jpg';
+  if (mime === 'image/webp') return 'webp';
+  if (mime === 'image/gif') return 'gif';
+  if (mime === 'image/bmp') return 'bmp';
+  return 'png';
+}
+
+function pruneStaleCache(now = Date.now()): void {
+  try {
+    for (const name of readdirSync(CACHE_DIR)) {
+      const path = join(CACHE_DIR, name);
+      try {
+        if (now - statSync(path).mtimeMs > CACHE_MAX_AGE_MS) unlinkSync(path);
+      } catch {
+        // A concurrent invocation may already have removed the file.
+      }
+    }
+  } catch {
+    // Cache cleanup is best effort; attachment creation still reports failures.
+  }
+}
+
+/** Materialize an image for text-only CLI prompt transports. Content-addressed
+ *  names avoid writing another copy on every history replay. */
+export function materializeCliImage(
+  imageData: string | undefined,
+  mimeType: string | undefined,
+): string | null {
+  if (!imageData) return null;
+  try {
+    const bytes = Buffer.from(imageData, 'base64');
+    if (bytes.length === 0 || bytes.length > MAX_IMAGE_BYTES) return null;
+    mkdirSync(CACHE_DIR, { recursive: true, mode: 0o700 });
+    chmodSync(CACHE_DIR, 0o700);
+    pruneStaleCache();
+    const digest = createHash('sha256').update(bytes).digest('hex').slice(0, 24);
+    const path = join(CACHE_DIR, `${digest}.${extensionForMime(mimeType)}`);
+    try {
+      statSync(path);
+    } catch {
+      writeFileSync(path, bytes, { mode: 0o600, flag: 'wx' });
+    }
+    return path;
+  } catch {
+    return null;
+  }
+}
+
+export function renderCliContent(content: string | ProviderContentBlock[]): string {
+  if (typeof content === 'string') return content;
+  const parts: string[] = [];
+  for (const block of content) {
+    if (block.type === 'text' && block.text) parts.push(block.text);
+    else if (block.type === 'tool_use') {
+      parts.push(
+        `[tool call: ${block.toolName ?? 'tool'} ${JSON.stringify(block.toolInput ?? {})}]`,
+      );
+    } else if (block.type === 'tool_result') {
+      parts.push(`[tool result: ${block.toolOutput ?? ''}]`);
+    } else if (block.type === 'image') {
+      const path = materializeCliImage(block.imageData, block.imageMimeType);
+      parts.push(
+        path
+          ? `[Image attachment: ${path}. Inspect this image with your available image/file tool before answering.]`
+          : '[Image attachment unavailable: missing, invalid, or larger than 10 MB.]',
+      );
+    }
+  }
+  return parts.join('\n');
+}
+
+export function hasImageContent(
+  messages: Array<{ content: string | ProviderContentBlock[] }>,
+): boolean {
+  return messages.some(
+    (message) =>
+      Array.isArray(message.content) && message.content.some((block) => block.type === 'image'),
+  );
+}

@@ -33,6 +33,7 @@ import {
   roleToPermissionMode,
   sandboxToScopes,
 } from './cli-bridge';
+import { KORY_TOOL_WHITELIST, KORY_CRITIC_TOOL_WHITELIST } from './cli-bridges';
 import { getDevinCapabilitiesAsync, type DevinCapabilities } from './devin-capabilities';
 import type { ProviderEvent } from './types';
 import { providerLog } from '../logger';
@@ -291,11 +292,27 @@ export class DevinCliBridge extends ManagedCliBridge implements CliBridge {
     ];
   }
 
-  buildSkills(_ctx: CliBridgeContext): CliSkillFile[] | null {
-    // Phase 6: mirror Kory skills as .devin/skills/<name>/SKILL.md. Pending
-    // the skill-definition extraction from kory/skills.ts.
+  buildSkills(ctx: CliBridgeContext): CliSkillFile[] | null {
+    // Mirror Kory's active skills as .devin/skills/<name>/SKILL.md so the
+    // Devin CLI discovers them as agent-invocable skills. Each skill's full
+    // instructions are rendered from the Kory skill system.
     if (!this.cached?.supportsSkills) return null;
-    return null;
+    try {
+      // Lazy import to avoid a circular dependency at module load time.
+      const { listSkills } = require('../kory/skills');
+      const homeDir = getKoryphaiosDevinHome(ctx.sessionId);
+      const skills = listSkills(ctx.workingDirectory).filter((s: any) => s.state === 'active');
+      return skills.map((skill: any) => ({
+        path: join(homeDir, '.devin', 'skills', skill.name, 'SKILL.md'),
+        // SkillRevision carries `instructions` (rendered full-text) and
+        // `content` (raw SKILL.md source). Prefer the rendered instructions;
+        // fall back to raw content if instructions are empty.
+        content: skill.instructions?.trim() || skill.content || '',
+      }));
+    } catch (err) {
+      providerLog.warn({ err }, 'Devin bridge: failed to mirror Kory skills');
+      return null;
+    }
   }
 
   parseTrajectory(raw: string): { trajectory: CliTrajectory; events: ProviderEvent[] } {
