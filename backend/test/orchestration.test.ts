@@ -14,7 +14,12 @@ import { isCatastrophicBashCommand, requiresCatastrophicConfirmation } from '../
 import { AskUserTool, AskManagerTool, DelegateToWorkerTool } from '../src/tools/interaction';
 import type { Session, AgentIdentity, WSMessage } from '@koryphaios/shared';
 import { DOMAIN } from '../src/constants';
-import { compilePrompt, createTaskContract, loadRepositoryInstructions, requiresMultiAgentDelegation } from '../src/kory/prompts';
+import {
+  compilePrompt,
+  createTaskContract,
+  loadRepositoryInstructions,
+  requiresMultiAgentDelegation,
+} from '../src/kory/prompts';
 import { buildIntentDiscoveryBatch } from '../src/kory/clarification-gate';
 import {
   buildEvalRunPlan,
@@ -72,7 +77,7 @@ describe('KoryManager Orchestration', () => {
       '/tmp',
       mockConfig as any,
       {} as any,
-      { getRecent: () => [], add: () => {} } as any,
+      { getRecent: () => [], add: () => {}, getContextMessages: () => [] } as any,
     );
   });
 
@@ -213,8 +218,8 @@ describe('KoryManager Orchestration', () => {
 
   test('material delegation reuses the manager when it is the only user-enabled model', async () => {
     manager['resolveIndependentRouting'] = mock(() => null);
-    manager['workerPipeline']['runWorkerPipeline'] = mock(async (...args: any[]) =>
-      `worker:${args[2]}`,
+    manager['workerPipeline']['runWorkerPipeline'] = mock(
+      async (...args: any[]) => `worker:${args[2]}`,
     );
     const result = await manager.runWorkerPipeline(
       'session-independent',

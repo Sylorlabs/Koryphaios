@@ -60,7 +60,7 @@ export class GrokBuildProvider implements Provider {
   }
 
   listModels(): ModelDef[] {
-    if (cachedModels && isModelListCacheFresh(cachedModelsAt)) {
+    if (cachedModels && cachedModels.length > 0 && isModelListCacheFresh(cachedModelsAt)) {
       return cachedModels;
     }
     refreshModelsInBackground();
@@ -68,7 +68,11 @@ export class GrokBuildProvider implements Provider {
     // Read it synchronously so context limits do not wait behind the slower
     // `grok models` process or reasoning-level probe.
     const cliCachedModels = modelsFromGrokCliCache(readGrokCliModelsCache());
-    return cachedModels ?? cliCachedModels ?? GrokModels;
+    return cachedModels && cachedModels.length > 0
+      ? cachedModels
+      : cliCachedModels && cliCachedModels.length > 0
+        ? cliCachedModels
+        : GrokModels;
   }
 
   private resolveCliModel(modelId: string): string {
