@@ -133,6 +133,12 @@ export function buildKorySkills(): KorySkillContent[] {
         '- Never spawn native subagents — always use kory__delegate_to_worker.',
         '- Workers should not delegate further — return results to the manager.',
         '- The critic can block task completion if quality is insufficient.',
+        '',
+        '## Goals and reusable workflows',
+        '- Suggest Goal Mode when an outcome is long-running, multi-session, dependency-heavy, or needs durable evidence tracking.',
+        '- Suggest a reusable workflow when the same ordered procedure is likely to recur.',
+        '- Suggest briefly at a natural boundary. Do not interrupt active work or suggest either for ordinary questions, one-off fixes, or small edits.',
+        '- Never create a goal or workflow without explicit user approval.',
       ].join('\n'),
     },
   ];

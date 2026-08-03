@@ -7,6 +7,7 @@ import { discoverVerificationChecks } from '../verification';
 import { CORE_WORKFLOW_EVALS, runProviderHarnessEval, runWorkflowEvals } from '../workflow-evals';
 import { EventEmitterService } from '../services/EventEmitterService';
 import { getProviderHarnessCapabilities } from '../../providers/provider-harness';
+import { getCliBridge } from '../../providers/cli-bridges';
 import { KORY_TOOL_WHITELIST, KORY_CRITIC_TOOL_WHITELIST } from '../../providers/cli-bridges';
 import { KORY_TOOLS, toolsForRole } from '../../providers/kory-mcp-bridge';
 import { ToolRegistry } from '../../tools/registry';
@@ -161,7 +162,9 @@ describe('workflow architecture', () => {
   });
 
   test('every native CLI role receives truthful resource data while workflow mutation remains manager-owned', () => {
-    expect(KORY_TOOLS.some((tool) => tool.name === 'kory__get_resource_budget' && tool.role === 'any')).toBe(true);
+    expect(
+      KORY_TOOLS.some((tool) => tool.name === 'kory__get_resource_budget' && tool.role === 'any'),
+    ).toBe(true);
     expect(KORY_TOOL_WHITELIST).toContain('kory__get_resource_budget');
     expect(KORY_CRITIC_TOOL_WHITELIST).toContain('kory__get_resource_budget');
     expect(toolsForRole('manager').map((tool) => tool.name)).toContain('kory__start_workflow');
@@ -174,5 +177,14 @@ describe('workflow architecture', () => {
     const registry = new ToolRegistry();
     registry.register(new GetResourceBudgetTool({ getConfigs: () => ({}) } as any));
     expect(registry.isAllowedForRole('get_resource_budget', 'critic')).toBe(true);
+
+    const codexCritic = getCliBridge('codex')?.buildAgentConfig({
+      provider: 'codex',
+      role: 'critic',
+      workingDirectory: '/tmp',
+      systemPrompt: '',
+      tools: [{ name: 'get_resource_budget', description: 'budget', inputSchema: {} }],
+    });
+    expect(codexCritic?.allowedTools).toContain('kory__get_resource_budget');
   });
 });

@@ -16,6 +16,15 @@ describe('Codex CLI Kory control-plane bridge', () => {
     });
   });
 
+  it('allows the role-filtered resource budget tool through the envelope', () => {
+    expect(
+      extractKoryToolEnvelope(
+        '<KORY_TOOL_CALL>{"name":"get_resource_budget","input":{}}</KORY_TOOL_CALL>',
+        ['get_resource_budget'],
+      ).tool,
+    ).toEqual({ name: 'get_resource_budget', input: {} });
+  });
+
   it('does not turn malformed or unauthorized text into a Kory tool call', () => {
     expect(
       extractKoryToolEnvelope(
@@ -24,7 +33,8 @@ describe('Codex CLI Kory control-plane bridge', () => {
       ).tool,
     ).toBeUndefined();
     expect(
-      extractKoryToolEnvelope('<KORY_TOOL_CALL>not-json</KORY_TOOL_CALL>', ['delegate_to_worker']).tool,
+      extractKoryToolEnvelope('<KORY_TOOL_CALL>not-json</KORY_TOOL_CALL>', ['delegate_to_worker'])
+        .tool,
     ).toBeUndefined();
   });
 

@@ -231,12 +231,13 @@
       ? responseVariants[selectedVariant].content
       : entry.text,
   );
+  let compactionExpanded = $state(false);
   // Some CLI harnesses return their worker transcript as a final assistant
   // message. It is operational telemetry, not a human answer, and it was the
   // source of the giant “Task … finished with output” blocks in the feed.
   let rawTaskTranscript = $derived(
-    /^Task\s+[\w-]+\/task-\d+\s+finished with output:/i.test(currentText.trim())
-      || /^Created At:.*(?:Task:|Task logs are available)/ims.test(currentText.trim()),
+    /^Task\s+[\w-]+\/task-\d+\s+finished with output:/i.test(currentText.trim()) ||
+      /^Created At:.*(?:Task:|Task logs are available)/ims.test(currentText.trim()),
   );
 
   function toolDetailText(subEntry: FeedEntryLocal): string {
@@ -289,7 +290,7 @@
     await navigator.clipboard.writeText(selectedEntryText() ?? currentText);
     copied = true;
     contextMenu = null;
-    setTimeout(() => copied = false, 2000);
+    setTimeout(() => (copied = false), 2000);
   }
 
   $effect(() => {
@@ -466,7 +467,9 @@
   }
 
   function renderedMarkdown(content: string): string {
-    return expandHtmlSandboxes(DOMPurify.sanitize(marked.parse(content, { async: false }) as string));
+    return expandHtmlSandboxes(
+      DOMPurify.sanitize(marked.parse(content, { async: false }) as string),
+    );
   }
 
   let parsedHtml = $derived.by(() => {
@@ -476,7 +479,9 @@
       const withoutRenderDirectives = debouncedText
         .replace(/\{\{render_note:[^}\s]+\}\}/g, '')
         .trim();
-      return expandHtmlSandboxes(DOMPurify.sanitize(marked.parse(withoutRenderDirectives, { async: false }) as string));
+      return expandHtmlSandboxes(
+        DOMPurify.sanitize(marked.parse(withoutRenderDirectives, { async: false }) as string),
+      );
     } catch {
       return debouncedText;
     }
@@ -832,10 +837,7 @@
   }
 </script>
 
-<div
-  bind:this={entryElement}
-  class="flex flex-col group"
->
+<div bind:this={entryElement} class="flex flex-col group">
   {#if entry.userHidden}
     <button
       type="button"
@@ -931,7 +933,86 @@
             {entry.agentName}
           </span>
         {/if}
-        {#if entry.type === 'thinking'}
+        {#if entry.type === 'compaction'}
+          {@const compaction = entry.metadata as
+            | {
+                phase?: string;
+                progress?: number;
+                provider?: string;
+                model?: string;
+                automatic?: boolean;
+                sourceMessages?: number;
+                sourceTokens?: number;
+                checkpointTokens?: number;
+                error?: string;
+              }
+            | undefined}
+          <div
+            class="w-full rounded-xl border px-3 py-2"
+            style="border-color: color-mix(in srgb, var(--color-accent) 35%, var(--color-border)); background: color-mix(in srgb, var(--color-accent) 6%, transparent);"
+          >
+            <button
+              type="button"
+              class="flex w-full items-center gap-2 text-left"
+              onclick={(event) => {
+                event.stopPropagation();
+                compactionExpanded = !compactionExpanded;
+              }}
+              aria-expanded={compactionExpanded}
+            >
+              {#if compactionExpanded}<ChevronDown
+                  size={14}
+                  class="text-[var(--color-accent)]"
+                />{:else}<ChevronRight size={14} class="text-[var(--color-accent)]" />{/if}
+              <span class="flex-1 text-xs font-semibold text-[var(--color-text-primary)]"
+                >{compaction?.phase === 'failed'
+                  ? 'Compaction failed'
+                  : compaction?.phase === 'complete'
+                    ? 'Context compacted'
+                    : 'Compacting context…'}</span
+              >
+              <span class="text-[10px] tabular-nums text-[var(--color-text-muted)]"
+                >{Math.max(0, Math.min(100, compaction?.progress ?? 100))}%</span
+              >
+            </button>
+            <div
+              class="mt-2 h-1.5 overflow-hidden rounded-full bg-[var(--color-surface-3)]"
+              role="progressbar"
+              aria-label="Compaction progress"
+              aria-valuemin="0"
+              aria-valuemax="100"
+              aria-valuenow={Math.max(0, Math.min(100, compaction?.progress ?? 100))}
+            >
+              <div
+                class="h-full rounded-full transition-all duration-500"
+                style="width: {Math.max(
+                  0,
+                  Math.min(100, compaction?.progress ?? 100),
+                )}%; background: var(--color-accent);"
+              ></div>
+            </div>
+            {#if compactionExpanded}
+              <div
+                class="mt-3 space-y-2 text-[11px] leading-relaxed text-[var(--color-text-muted)]"
+              >
+                <div>{currentText}</div>
+                {#if compaction?.model}<div>
+                    Model: {compaction.provider
+                      ? `${compaction.provider}:`
+                      : ''}{compaction.model}{compaction.automatic ? ' · automatic' : ''}
+                  </div>{/if}
+                {#if compaction?.sourceMessages}<div>
+                    {compaction.sourceMessages} source messages{compaction.sourceTokens
+                      ? ` · ${compaction.sourceTokens} source tokens`
+                      : ''}{compaction.checkpointTokens
+                      ? ` → ${compaction.checkpointTokens} checkpoint tokens`
+                      : ''}
+                  </div>{/if}
+                {#if compaction?.error}<div class="text-red-300">{compaction.error}</div>{/if}
+              </div>
+            {/if}
+          </div>
+        {:else if entry.type === 'thinking'}
           <ThinkingBlock
             text={currentText}
             durationMs={entry.durationMs}
@@ -1032,45 +1113,71 @@
           {:else}
             <div class="mt-0.5 flex min-w-0 items-center gap-2 text-[11px]">
               {#if toolCat === 'bash'}<Terminal size={12} class={toolDisplay.colorClass} />{/if}
-              <span class="font-medium {toolDisplay.colorClass}">{entry.type === 'tool_call' ? toolDisplay.label : 'Completed'}</span>
+              <span class="font-medium {toolDisplay.colorClass}"
+                >{entry.type === 'tool_call' ? toolDisplay.label : 'Completed'}</span
+              >
               {#if entry.type === 'tool_call' && getBashCommand(entry.metadata)}
-                <span class="min-w-0 truncate font-mono text-[var(--color-text-muted)]">$ {getBashCommand(entry.metadata)}</span>
+                <span class="min-w-0 truncate font-mono text-[var(--color-text-muted)]"
+                  >$ {getBashCommand(entry.metadata)}</span
+                >
               {:else}
-                <span class="min-w-0 truncate text-[var(--color-text-muted)]">{getToolNameFromMeta(entry.metadata) || toolDisplay.resultLabel}</span>
+                <span class="min-w-0 truncate text-[var(--color-text-muted)]"
+                  >{getToolNameFromMeta(entry.metadata) || toolDisplay.resultLabel}</span
+                >
               {/if}
-              <button type="button" class="ml-auto shrink-0 rounded px-1.5 py-0.5 text-[10px] text-[var(--color-text-muted)] hover:bg-[var(--color-surface-3)] hover:text-[var(--color-text-primary)]" onclick={(event) => { event.stopPropagation(); toolDetailsOpen = true; }}>Details</button>
+              <button
+                type="button"
+                class="ml-auto shrink-0 rounded px-1.5 py-0.5 text-[10px] text-[var(--color-text-muted)] hover:bg-[var(--color-surface-3)] hover:text-[var(--color-text-primary)]"
+                onclick={(event) => {
+                  event.stopPropagation();
+                  toolDetailsOpen = true;
+                }}>Details</button
+              >
             </div>
           {/if}
         {:else if entry.type === 'user_message' || entry.type === 'content' || entry.type === 'thought'}
           {#if rawTaskTranscript}
-            <div class="mt-1 flex items-center gap-2 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-2)] px-3 py-2 text-[11px]">
+            <div
+              class="mt-1 flex items-center gap-2 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-2)] px-3 py-2 text-[11px]"
+            >
               <Terminal size={13} class="text-emerald-400" />
-              <span class="font-medium text-[var(--color-text-secondary)]">Background task completed</span>
-              <span class="min-w-0 truncate text-[var(--color-text-muted)]">Internal command output is hidden from the conversation.</span>
-              <button type="button" class="ml-auto shrink-0 rounded px-1.5 py-0.5 text-[10px] text-[var(--color-text-muted)] hover:bg-[var(--color-surface-3)] hover:text-[var(--color-text-primary)]" onclick={(event) => { event.stopPropagation(); toolDetailsOpen = true; }}>Details</button>
+              <span class="font-medium text-[var(--color-text-secondary)]"
+                >Background task completed</span
+              >
+              <span class="min-w-0 truncate text-[var(--color-text-muted)]"
+                >Internal command output is hidden from the conversation.</span
+              >
+              <button
+                type="button"
+                class="ml-auto shrink-0 rounded px-1.5 py-0.5 text-[10px] text-[var(--color-text-muted)] hover:bg-[var(--color-surface-3)] hover:text-[var(--color-text-primary)]"
+                onclick={(event) => {
+                  event.stopPropagation();
+                  toolDetailsOpen = true;
+                }}>Details</button
+              >
             </div>
           {:else}<div class="{getEntryColor(entry.type)} break-words mt-1 markdown-content">
-            {#if isStreaming && entry.type === 'content'}
-              {#if streamingSegments.length > 0}
-                {#each streamingSegments as seg (seg.id)}
-                  {#if seg.kind === 'block'}
-                    {@html seg.html}
-                  {:else}
-                    <span class="whitespace-pre-wrap stream-chunk">{seg.text}</span>
-                  {/if}
-                {/each}
+              {#if isStreaming && entry.type === 'content'}
+                {#if streamingSegments.length > 0}
+                  {#each streamingSegments as seg (seg.id)}
+                    {#if seg.kind === 'block'}
+                      {@html seg.html}
+                    {:else}
+                      <span class="whitespace-pre-wrap stream-chunk">{seg.text}</span>
+                    {/if}
+                  {/each}
+                {:else}
+                  <span class="whitespace-pre-wrap"
+                    >{#each streamChunks as c (c.id)}<span class="stream-chunk">{c.text}</span
+                      >{/each}</span
+                  >
+                {/if}
+              {:else if isStreaming}
+                {currentText}
               {:else}
-                <span class="whitespace-pre-wrap"
-                  >{#each streamChunks as c (c.id)}<span class="stream-chunk">{c.text}</span
-                    >{/each}</span
-                >
+                {@html parsedHtml}
               {/if}
-            {:else if isStreaming}
-              {currentText}
-            {:else}
-              {@html parsedHtml}
-            {/if}
-          </div>{/if}
+            </div>{/if}
 
           {#if !isStreaming && noteRenderIds.length > 0}
             <div class="mt-3 space-y-3">
@@ -1226,7 +1333,8 @@
                     e.stopPropagation();
                     void wsStore.rewind(entry.ghostHash!);
                   }}
-                  disabled={!!wsStore.rewindPreviewLoadingHash || wsStore.isSessionBusy(sessionStore.activeSessionId)}
+                  disabled={!!wsStore.rewindPreviewLoadingHash ||
+                    wsStore.isSessionBusy(sessionStore.activeSessionId)}
                   title="Preview restoring this session to this point"
                 >
                   {#if wsStore.rewindPreviewLoadingHash === entry.ghostHash}
@@ -1336,18 +1444,61 @@
       {/each}
     </div>
   {/if}
-
 </div>
 
 {#if contextMenu}
-  <button type="button" class="fixed inset-0 z-[150] cursor-default" aria-label="Close message actions" onclick={() => contextMenu = null} oncontextmenu={(event) => { event.preventDefault(); contextMenu = null; }}></button>
-  <div class="fixed z-[151] w-52 overflow-hidden rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-2)] p-1.5 shadow-2xl shadow-black/50" style={`left:${contextMenu.x}px;top:${contextMenu.y}px;`} role="menu" aria-label="Message actions" tabindex="-1">
-    <button type="button" role="menuitem" class="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-xs text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-3)] hover:text-[var(--color-text-primary)]" onclick={() => void copyEntryText()}><Copy size={13} /> Copy</button>
+  <button
+    type="button"
+    class="fixed inset-0 z-[150] cursor-default"
+    aria-label="Close message actions"
+    onclick={() => (contextMenu = null)}
+    oncontextmenu={(event) => {
+      event.preventDefault();
+      contextMenu = null;
+    }}
+  ></button>
+  <div
+    class="fixed z-[151] w-52 overflow-hidden rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-2)] p-1.5 shadow-2xl shadow-black/50"
+    style={`left:${contextMenu.x}px;top:${contextMenu.y}px;`}
+    role="menu"
+    aria-label="Message actions"
+    tabindex="-1"
+  >
+    <button
+      type="button"
+      role="menuitem"
+      class="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-xs text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-3)] hover:text-[var(--color-text-primary)]"
+      onclick={() => void copyEntryText()}><Copy size={13} /> Copy</button
+    >
     {#if entry.type === 'tool_call' || entry.type === 'tool_result' || rawTaskTranscript}
-      <button type="button" role="menuitem" class="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-xs text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-3)] hover:text-[var(--color-text-primary)]" onclick={() => { toolDetailsOpen = true; contextMenu = null; }}><Terminal size={13} /> View details</button>
+      <button
+        type="button"
+        role="menuitem"
+        class="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-xs text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-3)] hover:text-[var(--color-text-primary)]"
+        onclick={() => {
+          toolDetailsOpen = true;
+          contextMenu = null;
+        }}><Terminal size={13} /> View details</button
+      >
     {/if}
-    <button type="button" role="menuitem" class="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-xs text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-3)] hover:text-[var(--color-text-primary)]" onclick={() => { hideEntryFromUser(); contextMenu = null; }}><EyeOff size={13} /> Hide from me</button>
-    <button type="button" role="menuitem" class="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-xs text-red-300 hover:bg-red-500/10 hover:text-red-200" onclick={(event) => { contextMenu = null; onDelete(event); }}><Trash2 size={13} /> Delete</button>
+    <button
+      type="button"
+      role="menuitem"
+      class="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-xs text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-3)] hover:text-[var(--color-text-primary)]"
+      onclick={() => {
+        hideEntryFromUser();
+        contextMenu = null;
+      }}><EyeOff size={13} /> Hide from me</button
+    >
+    <button
+      type="button"
+      role="menuitem"
+      class="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-xs text-red-300 hover:bg-red-500/10 hover:text-red-200"
+      onclick={(event) => {
+        contextMenu = null;
+        onDelete(event);
+      }}><Trash2 size={13} /> Delete</button
+    >
   </div>
 {/if}
 
@@ -1368,26 +1519,50 @@
         if (event.key === 'Escape') toolDetailsOpen = false;
       }}
     >
-      <header class="flex items-center justify-between gap-4 border-b border-[var(--color-border)] px-4 py-3">
+      <header
+        class="flex items-center justify-between gap-4 border-b border-[var(--color-border)] px-4 py-3"
+      >
         <div>
-          <h2 class="text-sm font-semibold text-[var(--color-text-primary)]">{entry.type === 'tool_group' ? 'Inspection details' : rawTaskTranscript ? 'Background task details' : 'Tool details'}</h2>
-          <p class="mt-0.5 text-[11px] text-[var(--color-text-muted)]">{entry.type === 'tool_group' ? `${entry.entries?.length ?? 0} routine actions` : 'Raw output is available on request only.'}</p>
+          <h2 class="text-sm font-semibold text-[var(--color-text-primary)]">
+            {entry.type === 'tool_group'
+              ? 'Inspection details'
+              : rawTaskTranscript
+                ? 'Background task details'
+                : 'Tool details'}
+          </h2>
+          <p class="mt-0.5 text-[11px] text-[var(--color-text-muted)]">
+            {entry.type === 'tool_group'
+              ? `${entry.entries?.length ?? 0} routine actions`
+              : 'Raw output is available on request only.'}
+          </p>
         </div>
-        <button type="button" class="rounded-lg p-2 text-[var(--color-text-muted)] hover:bg-[var(--color-surface-3)] hover:text-[var(--color-text-primary)]" onclick={() => (toolDetailsOpen = false)} aria-label="Close inspection details">
+        <button
+          type="button"
+          class="rounded-lg p-2 text-[var(--color-text-muted)] hover:bg-[var(--color-surface-3)] hover:text-[var(--color-text-primary)]"
+          onclick={() => (toolDetailsOpen = false)}
+          aria-label="Close inspection details"
+        >
           <X size={16} />
         </button>
       </header>
       <div class="max-h-[58vh] space-y-3 overflow-y-auto p-4">
         {#if entry.type === 'tool_group'}{#each entry.entries || [] as subEntry (subEntry.id)}
-          {@const detail = clippedToolDetail(subEntry)}
-          <article class="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-0)] p-3">
-            <p class="text-xs font-medium {getEntryColor(subEntry.type)}">{subEntry.text.replace(/^Calling tool: /, '')}</p>
-            {#if detail}
-              <pre class="mt-2 max-h-48 overflow-auto whitespace-pre-wrap break-words rounded-lg bg-black/20 p-2 text-[10px] leading-relaxed text-[var(--color-text-secondary)]">{detail}</pre>
-            {/if}
-          </article>
-        {/each}{:else}
-          <pre class="max-h-[52vh] overflow-auto whitespace-pre-wrap break-words rounded-xl bg-black/20 p-3 text-[11px] leading-relaxed text-[var(--color-text-secondary)]">{detailText() || 'No output was reported.'}</pre>
+            {@const detail = clippedToolDetail(subEntry)}
+            <article
+              class="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-0)] p-3"
+            >
+              <p class="text-xs font-medium {getEntryColor(subEntry.type)}">
+                {subEntry.text.replace(/^Calling tool: /, '')}
+              </p>
+              {#if detail}
+                <pre
+                  class="mt-2 max-h-48 overflow-auto whitespace-pre-wrap break-words rounded-lg bg-black/20 p-2 text-[10px] leading-relaxed text-[var(--color-text-secondary)]">{detail}</pre>
+              {/if}
+            </article>
+          {/each}{:else}
+          <pre
+            class="max-h-[52vh] overflow-auto whitespace-pre-wrap break-words rounded-xl bg-black/20 p-3 text-[11px] leading-relaxed text-[var(--color-text-secondary)]">{detailText() ||
+              'No output was reported.'}</pre>
         {/if}
       </div>
     </div>

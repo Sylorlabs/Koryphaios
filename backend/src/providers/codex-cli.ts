@@ -44,8 +44,7 @@ function supportsCodexFastTier(model: CodexCliModel): boolean {
   // as Fast-mode-capable. Keep this conservative fallback for older
   // app-server catalogs which do not yet expose service tiers.
   const id = String(model.model ?? model.id ?? '').toLowerCase();
-  return /^gpt-5\.(4|5|6)(?:[-.]|$)/.test(id)
-    && !/(?:^|-)mini(?:$|-)|codex-spark/.test(id);
+  return /^gpt-5\.(4|5|6)(?:[-.]|$)/.test(id) && !/(?:^|-)mini(?:$|-)|codex-spark/.test(id);
 }
 
 function modelDefinition(model: CodexCliModel, account: DiscoveredCliAccount): ModelDef | null {
@@ -78,7 +77,10 @@ function modelDefinition(model: CodexCliModel, account: DiscoveredCliAccount): M
 
 /** Query the official local app-server protocol. This returns exactly the
  * models the installed, authenticated Codex CLI makes available to this user. */
-async function queryCliModels(binary: string, account: DiscoveredCliAccount): Promise<CodexCliModel[]> {
+async function queryCliModels(
+  binary: string,
+  account: DiscoveredCliAccount,
+): Promise<CodexCliModel[]> {
   return await new Promise((resolve, reject) => {
     const child = spawn(binary, ['app-server', '--stdio'], {
       stdio: ['pipe', 'pipe', 'pipe'],
@@ -93,7 +95,11 @@ async function queryCliModels(binary: string, account: DiscoveredCliAccount): Pr
       if (settled) return;
       settled = true;
       clearTimeout(timeout);
-      try { child.kill('SIGTERM'); } catch { /* already exited */ }
+      try {
+        child.kill('SIGTERM');
+      } catch {
+        /* already exited */
+      }
       error ? reject(error) : resolve(result ?? []);
     };
     const send = (id: number, method: string, params: Record<string, unknown>) =>
@@ -106,7 +112,11 @@ async function queryCliModels(binary: string, account: DiscoveredCliAccount): Pr
     child.stderr?.on('data', (chunk: Buffer) => (stderr += chunk.toString()));
     child.once('error', (error) => finish(undefined, error));
     child.once('exit', (code) => {
-      if (!settled) finish(undefined, new Error((stderr.trim() || `Codex app-server exited with status ${code}`).slice(0, 500)));
+      if (!settled)
+        finish(
+          undefined,
+          new Error((stderr.trim() || `Codex app-server exited with status ${code}`).slice(0, 500)),
+        );
     });
     child.stdout?.on('data', (chunk: Buffer) => {
       buffer += chunk.toString();
@@ -114,12 +124,22 @@ async function queryCliModels(binary: string, account: DiscoveredCliAccount): Pr
       buffer = lines.pop() ?? '';
       for (const line of lines) {
         try {
-          const message = JSON.parse(line) as { id?: number; result?: Record<string, unknown>; error?: { message?: string } };
+          const message = JSON.parse(line) as {
+            id?: number;
+            result?: Record<string, unknown>;
+            error?: { message?: string };
+          };
           if (message.id === 1) {
             send(2, 'model/list', { limit: 100, includeHidden: false });
           } else if (message.id === 2) {
-            if (message.error) return finish(undefined, new Error(message.error.message ?? 'Codex model discovery failed'));
-            const data = Array.isArray(message.result?.data) ? message.result.data as CodexCliModel[] : [];
+            if (message.error)
+              return finish(
+                undefined,
+                new Error(message.error.message ?? 'Codex model discovery failed'),
+              );
+            const data = Array.isArray(message.result?.data)
+              ? (message.result.data as CodexCliModel[])
+              : [];
             return finish(data.filter((model) => !model.hidden));
           }
         } catch {
@@ -127,7 +147,10 @@ async function queryCliModels(binary: string, account: DiscoveredCliAccount): Pr
         }
       }
     });
-    send(1, 'initialize', { clientInfo: { name: 'Koryphaios', version: '1.0' }, capabilities: null });
+    send(1, 'initialize', {
+      clientInfo: { name: 'Koryphaios', version: '1.0' },
+      capabilities: null,
+    });
   });
 }
 
@@ -188,7 +211,12 @@ function buildPrompt(
     .map((message) => {
       const text = flatten(message.content).trim();
       if (!text) return '';
-      const label = message.role === 'assistant' ? 'Assistant' : message.role === 'tool' ? 'Tool result' : 'User';
+      const label =
+        message.role === 'assistant'
+          ? 'Assistant'
+          : message.role === 'tool'
+            ? 'Tool result'
+            : 'User';
       return `${label}: ${text}`;
     })
     .filter(Boolean);
@@ -204,31 +232,22 @@ function buildPrompt(
     systemPrompt: systemPrompt ?? '',
     tools: tools ?? [],
   });
-  const harnessNote = bridgeConfig?.systemInstructions?.[1] ??
+  const harnessNote =
+    bridgeConfig?.systemInstructions?.[1] ??
     'You are running inside Koryphaios. Follow its supplied instructions and finish every turn with a concise user-facing answer. Do not delegate to native subagents or leave background tasks awaiting a later notification.';
-  const allowedToolNames = bridgeConfig?.allowedTools ?? tools?.map((t) => t.name) ?? [];
-  const toolProtocol =
-    harnessRole === 'manager' && tools?.length
-      ? [
-          'Kory control-plane tools are available. When you need one, emit exactly one final line and nothing after it:',
-          `${KORY_TOOL_OPEN}{"name":"tool_name","input":{}}${KORY_TOOL_CLOSE}`,
-          `Only use: ${allowedToolNames.join(', ')}. Do not claim a Kory tool ran unless you emitted that envelope.`,
-        ].join('\n')
-      : '';
-  return [
-    systemPrompt?.trim(),
-    harnessNote,
-    toolProtocol,
-    ...turns,
-  ]
-    .filter(Boolean)
-    .join('\n\n');
+  const allowedToolNames = tools?.map((tool) => tool.name) ?? [];
+  const toolProtocol = tools?.length
+    ? [
+        'Kory control-plane tools are available. When you need one, emit exactly one final line and nothing after it:',
+        `${KORY_TOOL_OPEN}{"name":"tool_name","input":{}}${KORY_TOOL_CLOSE}`,
+        `Only use: ${allowedToolNames.join(', ')}. Do not claim a Kory tool ran unless you emitted that envelope.`,
+      ].join('\n')
+    : '';
+  return [systemPrompt?.trim(), harnessNote, toolProtocol, ...turns].filter(Boolean).join('\n\n');
 }
 
 function resolveCliModel(modelId: string, models: ModelDef[]): string {
-  const match = models.find(
-    (model) => model.id === modelId || model.apiModelId === modelId,
-  );
+  const match = models.find((model) => model.id === modelId || model.apiModelId === modelId);
   return match?.apiModelId ?? modelId;
 }
 
@@ -258,7 +277,9 @@ export class CodexCliProvider implements Provider {
     const byId = new Map(discovered.map((account) => [account.id, account]));
     // Once the user has selected profiles, only those profiles may be used;
     // their saved order is the stable priority for model discovery and runs.
-    return selectedOrder.map((id) => byId.get(id)).filter((account): account is DiscoveredCliAccount => !!account);
+    return selectedOrder
+      .map((id) => byId.get(id))
+      .filter((account): account is DiscoveredCliAccount => !!account);
   }
 
   listModels(): ModelDef[] {
@@ -273,15 +294,24 @@ export class CodexCliProvider implements Provider {
     const binary = whichBinary('codex');
     const accounts = this.accounts();
     if (!binary || accounts.length === 0) return [];
-    this.refreshInFlight = Promise.allSettled(accounts.map(async (account) => ({
-      account,
-      models: await queryCliModels(binary, account),
-    })))
+    this.refreshInFlight = Promise.allSettled(
+      accounts.map(async (account) => ({
+        account,
+        models: await queryCliModels(binary, account),
+      })),
+    )
       .then((results) => {
         const accountByModelId = new Map<string, DiscoveredCliAccount>();
         const models = results.flatMap((result) => {
           if (result.status === 'rejected') {
-            providerLog.warn({ provider: 'codex', error: result.reason instanceof Error ? result.reason.message : String(result.reason) }, 'Could not load models for one Codex CLI account');
+            providerLog.warn(
+              {
+                provider: 'codex',
+                error:
+                  result.reason instanceof Error ? result.reason.message : String(result.reason),
+              },
+              'Could not load models for one Codex CLI account',
+            );
             return [];
           }
           return result.value.models
@@ -295,26 +325,48 @@ export class CodexCliProvider implements Provider {
         this.accountByModelId = accountByModelId;
         this.models = models;
         this.modelsAt = Date.now();
-        providerLog.info({ provider: 'codex', models: models.map((model) => ({ model: model.apiModelId, account: this.accountByModelId.get(model.id)?.label })) }, 'Loaded provider-reported Codex CLI models');
+        providerLog.info(
+          {
+            provider: 'codex',
+            models: models.map((model) => ({
+              model: model.apiModelId,
+              account: this.accountByModelId.get(model.id)?.label,
+            })),
+          },
+          'Loaded provider-reported Codex CLI models',
+        );
         return models;
       })
-      .finally(() => { this.refreshInFlight = null; });
+      .finally(() => {
+        this.refreshInFlight = null;
+      });
     return this.refreshInFlight;
   }
 
   async *streamResponse(request: StreamRequest): AsyncGenerator<ProviderEvent> {
     const binary = whichBinary('codex');
     if (!binary) {
-      yield { type: 'error', error: 'Codex CLI was not found on PATH. Install `codex`, then reconnect.' };
+      yield {
+        type: 'error',
+        error: 'Codex CLI was not found on PATH. Install `codex`, then reconnect.',
+      };
       return;
     }
     const account = this.accountByModelId.get(request.model) ?? this.accounts()[0];
     if (!account) {
-      yield { type: 'error', error: 'Codex CLI is not signed in. Run `codex login` in your terminal, then reconnect.' };
+      yield {
+        type: 'error',
+        error: 'Codex CLI is not signed in. Run `codex login` in your terminal, then reconnect.',
+      };
       return;
     }
 
-    const prompt = buildPrompt(request.systemPrompt, request.messages, request.tools, request.harnessRole);
+    const prompt = buildPrompt(
+      request.systemPrompt,
+      request.messages,
+      request.tools,
+      request.harnessRole,
+    );
     const sandbox = request.harnessRole === 'critic' ? 'read-only' : 'workspace-write';
 
     // ── Wire rules (AGENTS.md) into the isolated codex home ────────────────
@@ -340,7 +392,10 @@ export class CodexCliProvider implements Provider {
         }
       }
     } catch (wiringErr) {
-      providerLog.warn({ err: wiringErr, provider: 'codex' }, 'Failed to write rules file for Codex');
+      providerLog.warn(
+        { err: wiringErr, provider: 'codex' },
+        'Failed to write rules file for Codex',
+      );
     }
 
     const args = [
@@ -360,7 +415,9 @@ export class CodexCliProvider implements Provider {
       // reasoning effort as a fake substitute: it changes model work rather
       // than requesting the supported accelerated tier.
       ...(request.fastMode ? ['--config', 'service_tier="fast"'] : []),
-      ...(request.reasoningLevel ? ['--config', `model_reasoning_effort=${JSON.stringify(request.reasoningLevel)}`] : []),
+      ...(request.reasoningLevel
+        ? ['--config', `model_reasoning_effort=${JSON.stringify(request.reasoningLevel)}`]
+        : []),
       prompt,
     ];
     const child = spawn(binary, args, {
@@ -371,9 +428,7 @@ export class CodexCliProvider implements Provider {
     let stderr = '';
     let stdoutBuffer = '';
     let completed = false;
-    const allowedToolNames = request.harnessRole === 'manager'
-      ? (request.tools ?? []).map((tool) => tool.name)
-      : [];
+    const allowedToolNames = (request.tools ?? []).map((tool) => tool.name);
     const onAbort = () => child.kill('SIGTERM');
     request.signal?.addEventListener('abort', onAbort, { once: true });
     const timeout = setTimeout(() => child.kill('SIGTERM'), CODEX_TIMEOUT_MS);
@@ -393,8 +448,18 @@ export class CodexCliProvider implements Provider {
             const toolCallId = `codex-kory-${randomUUID()}`;
             const input = JSON.stringify(extracted.tool.input);
             queue.push({ type: 'tool_use_start', toolCallId, toolName: extracted.tool.name });
-            queue.push({ type: 'tool_use_delta', toolCallId, toolName: extracted.tool.name, toolInput: input });
-            queue.push({ type: 'tool_use_stop', toolCallId, toolName: extracted.tool.name, toolInput: input });
+            queue.push({
+              type: 'tool_use_delta',
+              toolCallId,
+              toolName: extracted.tool.name,
+              toolInput: input,
+            });
+            queue.push({
+              type: 'tool_use_stop',
+              toolCallId,
+              toolName: extracted.tool.name,
+              toolInput: input,
+            });
           }
         } else if (event.type === 'item.completed' && item?.type === 'reasoning' && item.text) {
           queue.push({ type: 'thinking_delta', thinking: String(item.text) });
@@ -409,7 +474,11 @@ export class CodexCliProvider implements Provider {
         } else if (event.type === 'turn.completed') {
           const usage = event.usage as Record<string, unknown> | undefined;
           if (typeof usage?.input_tokens === 'number' || typeof usage?.output_tokens === 'number') {
-            queue.push({ type: 'usage_update', tokensIn: usage.input_tokens as number | undefined, tokensOut: usage.output_tokens as number | undefined });
+            queue.push({
+              type: 'usage_update',
+              tokensIn: usage.input_tokens as number | undefined,
+              tokensOut: usage.output_tokens as number | undefined,
+            });
           }
           completed = true;
         }
@@ -436,10 +505,14 @@ export class CodexCliProvider implements Provider {
     while (queue.length) yield queue.shift()!;
     if (request.signal?.aborted) return;
     if (exitCode !== 0) {
-      yield { type: 'error', error: `Codex CLI failed: ${(stderr.trim() || `exit status ${exitCode}`).slice(0, 500)}` };
+      yield {
+        type: 'error',
+        error: `Codex CLI failed: ${(stderr.trim() || `exit status ${exitCode}`).slice(0, 500)}`,
+      };
       return;
     }
-    if (!completed) providerLog.warn({ provider: 'codex' }, 'Codex CLI exited without a turn.completed event');
+    if (!completed)
+      providerLog.warn({ provider: 'codex' }, 'Codex CLI exited without a turn.completed event');
     yield { type: 'complete', finishReason: 'end_turn' };
   }
 }

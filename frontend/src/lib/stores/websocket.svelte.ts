@@ -24,6 +24,7 @@ import type {
   NotificationPayload,
   NativeCommandPayload,
   KoryAskUserPayload,
+  CompactionProgressPayload,
 } from '@koryphaios/shared';
 import { sessionStore } from './sessions.svelte';
 import { authStore } from './auth.svelte';
@@ -219,11 +220,7 @@ function orderedEventMetadata(msg: WSMessage): Record<string, unknown> {
 function handleMessage(msg: WSMessage) {
   const eventEpoch = msg.epoch;
   const eventSequence = msg.sequence;
-  if (
-    msg.sessionId &&
-    Number.isSafeInteger(eventEpoch) &&
-    Number.isSafeInteger(eventSequence)
-  ) {
+  if (msg.sessionId && Number.isSafeInteger(eventEpoch) && Number.isSafeInteger(eventSequence)) {
     const prior = realtimeCursors.get(msg.sessionId);
     if (prior && prior.epoch === eventEpoch && eventSequence! <= prior.sequence) return;
     realtimeCursors.set(msg.sessionId, { epoch: eventEpoch!, sequence: eventSequence! });
@@ -312,6 +309,9 @@ function handleMessage(msg: WSMessage) {
           void sessionStore
             .fetchMessages(completedSessionId)
             .then((messages) => loadSessionMessages(completedSessionId, messages));
+          // Refresh the session list so the sidebar's message count and cost
+          // reflect the turn that just completed.
+          void sessionStore.fetchSessions();
         }
       }
       break;
@@ -697,6 +697,24 @@ function handleMessage(msg: WSMessage) {
       break;
     }
 
+    case 'compaction.started':
+    case 'compaction.progress':
+    case 'compaction.completed':
+    case 'compaction.failed': {
+      const payload = msg.payload as CompactionProgressPayload;
+      feedStore.upsertCompaction(payload);
+      if (msg.type === 'compaction.completed') {
+        clearSessionBusy(payload.sessionId);
+        toastStore.success('Context compacted — the manager will start fresh on the next turn');
+      } else if (msg.type === 'compaction.failed') {
+        clearSessionBusy(payload.sessionId);
+        toastStore.error(payload.error ?? 'Compaction failed');
+      } else {
+        markSessionBusy(payload.sessionId);
+      }
+      break;
+    }
+
     case 'notes.updated': {
       const p = msg.payload as { action?: string; noteId?: string };
       void notesStore.fetchNotes();
@@ -1072,6 +1090,9 @@ function sendMessage(
       if (!res.ok || data?.ok === false) {
         throw new Error(data?.error || `Request failed: ${res.status} ${res.statusText}`);
       }
+      // Refresh the session list so the sidebar's message count updates
+      // immediately after the user's message is persisted.
+      void sessionStore.fetchSessions();
     })
     .catch((error) => {
       if (import.meta.env.DEV) console.warn('Failed to send message', error);
