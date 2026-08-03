@@ -36,6 +36,7 @@ import {
 import { KORY_TOOL_WHITELIST, KORY_CRITIC_TOOL_WHITELIST } from './cli-bridges';
 import { getDevinCapabilitiesAsync, type DevinCapabilities } from './devin-capabilities';
 import type { ProviderEvent } from './types';
+import { buildKoryCliMcpConfig } from './kory-cli-mcp-config';
 import { providerLog } from '../logger';
 
 const HARNESS_SYSTEM_NOTE =
@@ -181,20 +182,7 @@ export class DevinCliBridge extends ManagedCliBridge implements CliBridge {
     // Always configure the kory MCP server — this is how Devin accesses
     // Koryphaios tools instead of its own native tools.
     if (!this.cached?.supportsMcp) return null;
-    const bridgeCommand = process.env.KORY_MCP_BRIDGE_COMMAND ?? 'node';
-    const bridgeScript = process.env.KORY_MCP_BRIDGE_SCRIPT;
-    const args = bridgeScript
-      ? [bridgeScript, '--session-id', ctx.sessionId ?? '', '--role', ctx.role, '--provider', 'devin']
-      : ['--session-id', ctx.sessionId ?? '', '--role', ctx.role, '--provider', 'devin'];
-    return [
-      {
-        name: 'kory',
-        command: bridgeCommand,
-        args,
-        env: { KORY_BACKEND_URL: process.env.KORY_BACKEND_URL ?? 'http://127.0.0.1:3001' },
-        transport: 'stdio',
-      },
-    ];
+    return buildKoryCliMcpConfig(ctx, 'devin');
   }
 
   /** Write MCP servers to the per-session .devin/config.json (the shape the

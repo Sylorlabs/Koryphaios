@@ -16,6 +16,7 @@
 
 import { Elysia, t } from 'elysia';
 import { requireLocalRouteAuth } from '../../auth/local-route-auth';
+import { localAuth } from '../../auth/local-auth';
 import { getContext } from '../../context';
 import { providerLog } from '../../logger';
 import type { ToolContext } from '../../tools/registry';
@@ -24,7 +25,8 @@ export const mcpBridgeRoutes = new Elysia({ prefix: '/api/v1/mcp-bridge' })
 
   // ── Execute a Kory tool by name (called by the MCP bridge server) ────────
   .post('/execute', async ({ request, body, set }) => {
-    if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
+    const auth = requireLocalRouteAuth(request, set);
+    if (!auth) return { ok: false, error: 'Unauthorized' };
     const { sessionId, toolName, input, role, workingDirectory } = body as {
       sessionId: string;
       toolName: string;
@@ -37,14 +39,35 @@ export const mcpBridgeRoutes = new Elysia({ prefix: '/api/v1/mcp-bridge' })
       return { ok: false, error: 'sessionId and toolName are required' };
     }
     try {
-      const { tools, sessions, kory } = getContext();
+      const { tools, sessions, goals, kory } = getContext();
       const session = await sessions.get(sessionId);
       if (!session) {
         set.status = 404;
         return { ok: false, error: `Session ${sessionId} not found` };
       }
+      if (role !== 'manager' && role !== 'worker' && role !== 'critic' && role !== 'coder') {
+        set.status = 400;
+        return { ok: false, error: 'A valid CLI role is required' };
+      }
+      if (!localAuth.hasPermission(auth, `mcp:${sessionId}:${role}`)) {
+        set.status = 403;
+        return { ok: false, error: 'The CLI bearer is not scoped to this session and role' };
+      }
+      const normalizedRole = role;
+      if (!tools.isAllowedForRole(toolName, normalizedRole)) {
+        set.status = 403;
+        return { ok: false, error: `${normalizedRole} is not allowed to call ${toolName}` };
+      }
+      const activeGoal = (await goals.list()).find(
+        (goal) =>
+          goal.execution?.sessionId === sessionId &&
+          (goal.status === 'queued' || goal.status === 'planning' || goal.status === 'running'),
+      );
+      const activeGoalItem = activeGoal?.checklist.find((item) => item.status === 'running');
       const ctx: ToolContext = {
         sessionId,
+        ...(activeGoal ? { goalId: activeGoal.id } : {}),
+        ...(activeGoalItem ? { goalItemId: activeGoalItem.id } : {}),
         workingDirectory: workingDirectory || (session as any).workingDirectory || process.cwd(),
         signal: undefined,
         isSandboxed: false,

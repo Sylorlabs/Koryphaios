@@ -7,6 +7,10 @@ import { discoverVerificationChecks } from '../verification';
 import { CORE_WORKFLOW_EVALS, runProviderHarnessEval, runWorkflowEvals } from '../workflow-evals';
 import { EventEmitterService } from '../services/EventEmitterService';
 import { getProviderHarnessCapabilities } from '../../providers/provider-harness';
+import { KORY_TOOL_WHITELIST, KORY_CRITIC_TOOL_WHITELIST } from '../../providers/cli-bridges';
+import { KORY_TOOLS, toolsForRole } from '../../providers/kory-mcp-bridge';
+import { ToolRegistry } from '../../tools/registry';
+import { GetResourceBudgetTool } from '../../tools/resource-budget';
 
 describe('workflow architecture', () => {
   test('instruction overrides replace the broader same-scope file', () => {
@@ -154,5 +158,21 @@ describe('workflow architecture', () => {
     expect(
       (await events.runWorkflowHooks('before-tool', 's', { tool: 'read_file' })).decision,
     ).toBe('allow');
+  });
+
+  test('every native CLI role receives truthful resource data while workflow mutation remains manager-owned', () => {
+    expect(KORY_TOOLS.some((tool) => tool.name === 'kory__get_resource_budget' && tool.role === 'any')).toBe(true);
+    expect(KORY_TOOL_WHITELIST).toContain('kory__get_resource_budget');
+    expect(KORY_CRITIC_TOOL_WHITELIST).toContain('kory__get_resource_budget');
+    expect(toolsForRole('manager').map((tool) => tool.name)).toContain('kory__start_workflow');
+    expect(toolsForRole('worker').map((tool) => tool.name)).not.toContain('kory__start_workflow');
+    expect(toolsForRole('critic').map((tool) => tool.name)).not.toContain('kory__update_workflow');
+    for (const role of ['manager', 'worker', 'critic'] as const) {
+      expect(toolsForRole(role).map((tool) => tool.name)).toContain('kory__get_resource_budget');
+    }
+
+    const registry = new ToolRegistry();
+    registry.register(new GetResourceBudgetTool({ getConfigs: () => ({}) } as any));
+    expect(registry.isAllowedForRole('get_resource_budget', 'critic')).toBe(true);
   });
 });

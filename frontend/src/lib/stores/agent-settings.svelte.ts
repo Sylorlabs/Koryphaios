@@ -51,6 +51,8 @@ export interface AgentSettings {
   contextPruneMinChars: number;
   /** Live context-usage report injected each turn so the agent self-manages */
   contextSelfAwareness: boolean;
+  /** Automatically compact completed conversations before the model window is exhausted. */
+  autoCompactEnabled: boolean;
   /** Show complete reasoning blocks expanded in the chat feed by default */
   reasoningExpandedByDefault: boolean;
 }
@@ -215,6 +217,7 @@ export const DEFAULT_AGENT_SETTINGS: AgentSettings = {
   contextKeepRecentTurns: 3,
   contextPruneMinChars: 600,
   contextSelfAwareness: true,
+  autoCompactEnabled: true,
   reasoningExpandedByDefault: true,
 };
 

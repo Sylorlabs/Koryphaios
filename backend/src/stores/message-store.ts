@@ -1,14 +1,29 @@
 import type { MessageAttachment, StoredMessage } from '@koryphaios/shared';
-import { db, messages, type Message as DbMessage } from '../db';
+import { db, messages, sessions, sessionCompactions, type Message as DbMessage } from '../db';
 import { eq, asc, desc, and, gt } from 'drizzle-orm';
+import { createHash } from 'node:crypto';
 
 export interface IMessageStore {
   add(sessionId: string, msg: StoredMessage): Promise<void>;
   getAll(sessionId: string, limit?: number): Promise<StoredMessage[]>;
   getRecent(sessionId: string, limit?: number): Promise<StoredMessage[]>;
+  getContextMessages(sessionId: string, limit?: number): Promise<StoredMessage[]>;
+  commitCompaction(input: CompactionCommit): Promise<{ sourceRevision: number; targetRevision: number }>;
   truncateAfter(sessionId: string, messageId: string): Promise<void>;
   assignVariantGroup(messageId: string, groupId: string, index: number): Promise<void>;
   replaceAndTruncate(sessionId: string, messageId: string, content: string): Promise<number>;
+}
+
+export interface CompactionCommit {
+  id: string;
+  sessionId: string;
+  provider: string;
+  model: string;
+  automatic: boolean;
+  summary: string;
+  sourceMessageCount: number;
+  sourceTokens: number;
+  checkpointTokens: number;
 }
 
 function parseStoredContent(raw: string): { text: string; attachments: MessageAttachment[] } {
@@ -70,6 +85,7 @@ function toStoredMessage(m: DbMessage): StoredMessage {
     cost: m.cost ?? 0,
     variantGroupId: m.variantGroupId ?? undefined,
     variantIndex: m.variantIndex ?? 0,
+    contextRevision: m.contextRevision ?? 0,
     createdAt: m.createdAt.getTime(),
   };
 }
@@ -79,6 +95,7 @@ export class MessageStore implements IMessageStore {
     await db.update(messages).set({ variantGroupId: groupId, variantIndex: index }).where(eq(messages.id, messageId));
   }
   async add(sessionId: string, msg: StoredMessage): Promise<void> {
+    const [session] = await db.select({ revision: sessions.conversationRevision }).from(sessions).where(eq(sessions.id, sessionId)).limit(1);
     await db.insert(messages).values({
       id: msg.id,
       sessionId,
@@ -91,6 +108,7 @@ export class MessageStore implements IMessageStore {
       cost: msg.cost ?? 0,
       variantGroupId: msg.variantGroupId ?? null,
       variantIndex: msg.variantIndex ?? 0,
+      contextRevision: msg.contextRevision ?? session?.revision ?? 0,
       createdAt: new Date(msg.createdAt),
     });
   }
@@ -113,6 +131,41 @@ export class MessageStore implements IMessageStore {
       .orderBy(desc(messages.createdAt))
       .limit(limit);
     return results.map(toStoredMessage).reverse();
+  }
+
+  async getContextMessages(sessionId: string, limit = 1000): Promise<StoredMessage[]> {
+    const [session] = await db.select({ revision: sessions.conversationRevision }).from(sessions).where(eq(sessions.id, sessionId)).limit(1);
+    if (!session) return [];
+    const results = await db.select().from(messages)
+      .where(and(eq(messages.sessionId, sessionId), eq(messages.contextRevision, session.revision ?? 0)))
+      .orderBy(asc(messages.createdAt)).limit(limit);
+    return results.map(toStoredMessage);
+  }
+
+  async commitCompaction(input: CompactionCommit): Promise<{ sourceRevision: number; targetRevision: number }> {
+    return db.transaction(async (tx) => {
+      const [session] = await tx.select({ revision: sessions.conversationRevision }).from(sessions).where(eq(sessions.id, input.sessionId)).limit(1);
+      if (!session) throw new Error('Session not found');
+      const sourceRevision = session.revision ?? 0;
+      const targetRevision = sourceRevision + 1;
+      const createdAt = new Date();
+      const summaryHash = createHash('sha256').update(input.summary).digest('hex');
+      await tx.insert(sessionCompactions).values({
+        id: input.id, sessionId: input.sessionId, sourceRevision, targetRevision,
+        provider: input.provider, model: input.model, automatic: input.automatic,
+        sourceMessageCount: input.sourceMessageCount, sourceTokens: input.sourceTokens,
+        checkpointTokens: input.checkpointTokens, summaryHash, summary: input.summary, createdAt,
+      });
+      await tx.update(sessions).set({ conversationRevision: targetRevision, updatedAt: createdAt }).where(eq(sessions.id, input.sessionId));
+      await tx.insert(messages).values({
+        id: `compact-${input.id}`, sessionId: input.sessionId, role: 'system',
+        content: serializeStoredContent(`[KORY_COMPACTION]\n${input.summary}`),
+        model: input.model, provider: input.provider, tokensIn: input.sourceTokens,
+        tokensOut: input.checkpointTokens, cost: 0, variantGroupId: null, variantIndex: 0,
+        contextRevision: targetRevision, createdAt,
+      });
+      return { sourceRevision, targetRevision };
+    });
   }
 
   async truncateAfter(sessionId: string, messageId: string): Promise<void> {

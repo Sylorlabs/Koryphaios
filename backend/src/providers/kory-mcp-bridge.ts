@@ -475,6 +475,15 @@ export const KORY_TOOLS: KoryToolDef[] = [
     role: 'manager',
   },
 
+  // ── Resource capacity ──
+  {
+    name: 'kory__get_resource_budget',
+    description:
+      'Read provider-reported API balances and subscription quota windows. Missing data is unknown, never zero; no subscription dollar balance is inferred.',
+    inputSchema: { type: 'object', properties: {} },
+    role: 'any',
+  },
+
   // ── Skills ──
   {
     name: 'kory__load_skill_detail',
@@ -599,7 +608,10 @@ async function proxyToolCall(
   try {
     const resp = await fetch(`${config.backendUrl}/api/v1/mcp-bridge/execute`, {
       method: 'POST',
-      headers: { 'content-type': 'application/json' },
+      headers: {
+        'content-type': 'application/json',
+        ...(process.env.KORY_LOCAL_AUTH ? { authorization: process.env.KORY_LOCAL_AUTH } : {}),
+      },
       body: JSON.stringify({
         sessionId: config.sessionId,
         toolName: koryName,

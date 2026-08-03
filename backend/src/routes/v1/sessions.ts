@@ -112,6 +112,25 @@ export const sessionRoutes = new Elysia({ prefix: '/api/sessions' })
     });
     return { ok: true, message: 'Session cancelled' };
   })
+  .post(
+    '/:id/compact',
+    async ({ request, params: { id }, body, set }) => {
+      if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
+      try {
+        const result = await getContext().kory.compactSession({
+          sessionId: id,
+          selectedModel: body.model,
+          reasoningLevel: body.reasoningLevel,
+          automatic: body.automatic,
+        });
+        return { ok: true, data: result };
+      } catch (error) {
+        set.status = 409;
+        return { ok: false, error: error instanceof Error ? error.message : String(error) };
+      }
+    },
+    { body: t.Object({ model: t.String(), reasoningLevel: t.Optional(t.String()), automatic: t.Optional(t.Boolean()) }) },
+  )
   .get('/:id/context', async ({ request, params: { id }, set }) => {
     if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
     // Archived tool activity for this session — used to restore tool entries

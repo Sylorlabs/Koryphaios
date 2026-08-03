@@ -49,6 +49,7 @@ import {
   LoadSkillDetailTool,
   StartWorkflowTool,
   UpdateWorkflowTool,
+  GetResourceBudgetTool,
 } from './tools';
 import { initMCP } from './mcp/client';
 import { serverLog } from './logger';
@@ -133,7 +134,7 @@ export async function bootstrap(): Promise<AppContext> {
     }
   });
 
-  const tools = await initTools();
+  const tools = await initTools(providers);
 
   // MCP Connections
   const mcpManager = await initMCP(config, tools);
@@ -206,7 +207,7 @@ import { registerGitTools } from './tools';
 import { CreateGoalTool, UpdateGoalTool } from './tools/goals';
 import { noteTools } from './tools/notes';
 
-async function initTools() {
+async function initTools(providers: ProviderRegistry) {
   const tools = new ToolRegistry();
   const defaultTools = [
     new BashTool(),
@@ -239,6 +240,7 @@ async function initTools() {
     new LoadSkillDetailTool(),
     new StartWorkflowTool(),
     new UpdateWorkflowTool(),
+    new GetResourceBudgetTool(providers),
   ];
 
   for (const tool of defaultTools) {

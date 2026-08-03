@@ -597,6 +597,13 @@
                 />
 
                 <SettingsSwitch
+                  checked={agentSettingsStore.settings.autoCompactEnabled ?? true}
+                  label="Automatic Context Compaction"
+                  description="Create a verified fresh-context checkpoint after a completed turn reaches 80% of the selected model's reported window. On by default."
+                  onchange={() => toggleSetting('autoCompactEnabled')}
+                />
+
+                <SettingsSwitch
                   checked={agentSettingsStore.settings.reasoningExpandedByDefault ?? true}
                   label="Expand Full Reasoning by Default"
                   description="Show reasoning automatically while keeping every block individually collapsible."

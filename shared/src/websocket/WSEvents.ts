@@ -29,6 +29,10 @@ export type WSEventType =
   | 'session.accept_changes'
   | 'session.user_message'
   | 'session.idle'
+  | 'compaction.started'
+  | 'compaction.progress'
+  | 'compaction.completed'
+  | 'compaction.failed'
   // Permission events
   | 'permission.request'
   | 'permission.response'

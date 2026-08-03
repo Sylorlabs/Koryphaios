@@ -64,6 +64,7 @@ describe('detectAgentClis', () => {
       'cursor',
       'devin',
       'grok',
+      'kimi',
     ]);
     const byId = Object.fromEntries(list.map((c) => [c.id, c]));
     expect(byId.claude.provider).toBe('claude');
@@ -164,8 +165,10 @@ describe('login detectors (deterministic via temp HOME)', () => {
     writeFileSync(
       join(tmpHome, '.cline', 'data', 'secrets.json'),
       JSON.stringify({
-        providers: { cline: { settings: { model: 'gpt-4o' } },
-        auth: { apiKey: 'sk-long-api-key-like-value-for-testing-1234567890' } },
+        providers: {
+          cline: { settings: { model: 'gpt-4o' } },
+          auth: { apiKey: 'sk-long-api-key-like-value-for-testing-1234567890' },
+        },
       }),
     );
     expect(detectClineCLILogin()).toBe(true);

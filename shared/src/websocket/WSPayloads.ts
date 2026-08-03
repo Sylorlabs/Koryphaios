@@ -164,6 +164,21 @@ export interface SessionIdlePayload {
   updatedAt: number;
 }
 
+export interface CompactionProgressPayload {
+  compactionId: string;
+  sessionId: string;
+  phase: 'preparing' | 'summarizing' | 'validating' | 'committing' | 'complete' | 'failed';
+  progress: number;
+  provider: string;
+  model: string;
+  automatic: boolean;
+  message: string;
+  sourceMessages?: number;
+  sourceTokens?: number;
+  checkpointTokens?: number;
+  error?: string;
+}
+
 export interface ChangeSummaryPayload {
   sessionId: string;
   changes: ChangeSummary[];
