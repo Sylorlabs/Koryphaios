@@ -69,6 +69,7 @@ export const ProviderName = {
   Vercel: 'vercel',
   ZAI: 'zai',
   ZenMux: 'zenmux',
+  Poe: 'poe',
 } as const;
 
 export type ProviderName = (typeof ProviderName)[keyof typeof ProviderName] | string;
@@ -126,6 +127,7 @@ export const IMPLEMENTED_PROVIDERS: ProviderName[] = [
   'vercel',
   'zai',
   'zenmux',
+  'poe',
 ];
 
 export type ModelTier = 'flagship' | 'fast' | 'cheap' | 'reasoning';
@@ -226,6 +228,7 @@ export const PROVIDER_AUTH_MODES: Record<ProviderName, ProviderAuthMode> = {
   vercel: 'api_key',
   zai: 'api_key',
   zenmux: 'api_key',
+  poe: 'api_key',
 };
 
 /** Environment variable mappings for providers */
@@ -283,4 +286,5 @@ export const PROVIDER_ENV_VARS: Record<
   vercel: { apiKey: 'VERCEL_AI_API_KEY' },
   zai: { apiKey: 'ZAI_API_KEY' },
   zenmux: { apiKey: 'ZENMUX_API_KEY' },
+  poe: { apiKey: 'POE_API_KEY' },
 };

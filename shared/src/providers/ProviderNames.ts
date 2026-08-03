@@ -71,6 +71,7 @@ export const ProviderName = {
   Vercel: 'vercel',
   ZAI: 'zai',
   ZenMux: 'zenmux',
+  Poe: 'poe',
 } as const;
 
 export type ProviderName = (typeof ProviderName)[keyof typeof ProviderName] | string;

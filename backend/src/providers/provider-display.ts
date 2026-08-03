@@ -9,6 +9,8 @@ export interface ProviderDisplayMeta {
   iconPath: string;
   deployment?: ProviderDeployment;
   description?: string;
+  /** Official page where the user creates the credential this adapter expects. */
+  credentialUrl?: string;
   /** Injected into manager system prompts when this provider is relevant. */
   managerHint?: string;
 }
@@ -101,6 +103,40 @@ export const PROVIDER_DISPLAY: Partial<Record<ProviderName, ProviderDisplayMeta>
     description:
       'Google AI Studio — paste your Gemini API key (aistudio.google.com/apikey). Direct Gemini API, no gcloud sign-in.',
   },
+  poe: {
+    label: 'Poe',
+    iconPath: '/provider-icons/lobehub/poe.svg',
+    deployment: 'api',
+    description:
+      'Official Poe OpenAI-compatible API. Create the required key at poe.com/api/keys (an active Poe subscription is required).',
+    credentialUrl: 'https://poe.com/api/keys',
+  },
+  cloudflare: {
+    label: 'Cloudflare AI Gateway',
+    iconPath: '/provider-icons/lobehub/cloudflare.svg',
+    deployment: 'api',
+    description:
+      'Enter an AI Gateway API token and the account-scoped OpenAI-compatible base URL ending in /ai/v1.',
+  },
+  modal: {
+    label: 'Modal Endpoint',
+    iconPath: '/provider-icons/lobehub/modal.svg',
+    deployment: 'api',
+    description:
+      'Connect a Modal model endpoint you deployed. Enter its /v1 endpoint URL and the combined Modal proxy token; a normal Modal API key alone is not an inference credential.',
+  },
+  vercel: {
+    label: 'Vercel AI Gateway',
+    iconPath: '/provider-icons/lobehub/vercel.svg',
+    deployment: 'api',
+    description: 'Official AI Gateway. Uses AI_GATEWAY_API_KEY or VERCEL_OIDC_TOKEN, not a general Vercel account token.',
+  },
+  helicone: {
+    label: 'Helicone AI Gateway',
+    iconPath: '/provider-icons/helicone-color.ico',
+    deployment: 'api',
+    description: 'Official Helicone unified AI Gateway using a Helicone API key.',
+  },
   vertexai: {
     label: 'Vertex AI',
     iconPath: '/provider-icons/lobehub/vertexai.svg',
@@ -122,6 +158,13 @@ export const PROVIDER_DISPLAY: Partial<Record<ProviderName, ProviderDisplayMeta>
     description:
       'Cloud async coding agent (API only). Tasks run on remote Google VMs and land on GitHub first — pull or checkout PRs to sync locally.',
     managerHint: JULES_SYNC_INSTRUCTIONS,
+  },
+  poe: {
+    label: 'Poe',
+    iconPath: '/provider-icons/lobehub/poe-color.svg',
+    deployment: 'api',
+    description:
+      'Poe API gateway. Paste an API key from poe.com/api/keys; Koryphaios sends it only to https://api.poe.com/v1.',
   },
 };
 
