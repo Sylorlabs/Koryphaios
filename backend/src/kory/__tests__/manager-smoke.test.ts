@@ -54,9 +54,9 @@ describe('KoryManager - Method Signatures', () => {
     expect(descriptor?.value?.length).toBe(1); // Takes enabled: boolean
   });
 
-  it('handleUserInput should accept sessionId, selection, and optional text', () => {
+  it('handleUserInput should accept sessionId, selection, optional text, and optional questionId', () => {
     const descriptor = Object.getOwnPropertyDescriptor(KoryManager.prototype, 'handleUserInput');
-    expect(descriptor?.value?.length).toBe(3); // sessionId, selection, text?
+    expect(descriptor?.value?.length).toBe(4); // sessionId, selection, text?, questionId?
   });
 
   it('processTask should accept sessionId, message, and optional parameters', () => {

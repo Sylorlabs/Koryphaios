@@ -36,6 +36,7 @@ import {
 import { KORY_TOOL_WHITELIST, KORY_CRITIC_TOOL_WHITELIST } from './cli-bridges';
 import { getDevinCapabilitiesAsync, type DevinCapabilities } from './devin-capabilities';
 import type { ProviderEvent } from './types';
+import { buildKoryCliMcpConfig } from './kory-cli-mcp-config';
 import { providerLog } from '../logger';
 import { buildKoryCliMcpConfig } from './kory-cli-mcp-config';
 

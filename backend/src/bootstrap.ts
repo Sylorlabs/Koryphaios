@@ -49,6 +49,7 @@ import {
   LoadSkillDetailTool,
   StartWorkflowTool,
   UpdateWorkflowTool,
+  GetResourceBudgetTool,
 } from './tools';
 import { initMCP } from './mcp/client';
 import { serverLog } from './logger';
@@ -133,7 +134,7 @@ export async function bootstrap(): Promise<AppContext> {
     }
   });
 
-  const tools = await initTools();
+  const tools = await initTools(providers);
 
   // MCP Connections — kicked off without awaiting so the HTTP server can
   // bind and serve /api/health immediately. MCP servers (notably
@@ -217,7 +218,7 @@ import { CreateGoalTool, UpdateGoalTool } from './tools/goals';
 import { LoadSkillDetailTool } from './tools/skills';
 import { noteTools } from './tools/notes';
 
-async function initTools() {
+async function initTools(providers: ProviderRegistry) {
   const tools = new ToolRegistry();
   const defaultTools = [
     new BashTool(),

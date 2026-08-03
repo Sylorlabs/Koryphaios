@@ -1,6 +1,10 @@
 import { describe, expect, test } from 'bun:test';
 import type { Goal, GoalChecklistItem } from '@koryphaios/shared';
 import { GoalDriveService } from './goal-drive-service';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { advanceWorkflow, getWorkflowDefinition, startWorkflow } from './workflows';
 
 const waitFor = async (predicate: () => boolean) => {
   const deadline = Date.now() + 2_000;
@@ -9,7 +13,7 @@ const waitFor = async (predicate: () => boolean) => {
   expect(predicate()).toBe(true);
 };
 
-function harness(criticSkipped = false) {
+function harness(criticSkipped = false, workflowRoot?: string) {
   const checklist: GoalChecklistItem[] = [
     { id: 'one', title: 'First', status: 'pending', order: 0, dependsOn: [], evidence: [] },
     { id: 'two', title: 'Second', status: 'pending', order: 1, dependsOn: ['one'], evidence: [] },
@@ -92,6 +96,20 @@ function harness(criticSkipped = false) {
     async processTask() {
       turns += 1;
       const running = goal.checklist.find((item) => item.status === 'running')!;
+      if (workflowRoot && running.id === 'one') {
+        let workflow = startWorkflow(workflowRoot, {
+          workflowId: 'design-quality',
+          sessionId: 'session',
+          goalId: goal.id,
+          goalItemId: running.id,
+          task: running.title,
+          requestedBy: 'agent',
+        });
+        for (const stage of getWorkflowDefinition('design-quality')!.stages) {
+          workflow = advanceWorkflow(workflowRoot, workflow.id, { evidence: `${stage.id} proof` });
+        }
+        return;
+      }
       await store.addActivity(
         goal.id,
         'evidence_candidate',
@@ -112,7 +130,7 @@ function harness(criticSkipped = false) {
   };
   const driver = new GoalDriveService(
     store as never,
-    { get: async () => ({ id: 'session' }) } as never,
+    { get: async () => ({ id: 'session', workingDirectory: workflowRoot }) } as never,
     kory as never,
     { broadcast: () => {} } as never,
   );
@@ -169,5 +187,22 @@ describe('durable Goal Mode driver', () => {
     await waitFor(() => state.goal.status === 'completed');
     expect(state.turns).toBe(2);
     expect(state.goal.activity.some((event) => event.type === 'item_retry')).toBe(true);
+  });
+
+  test('promotes completed linked workflow evidence through the Goal critic gate', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'kory-goal-workflow-'));
+    try {
+      const state = harness(false, root);
+      await state.driver.start('goal', {
+        sessionId: 'session',
+        provider: 'openai',
+        model: 'openai:test',
+      });
+      await waitFor(() => state.goal.status === 'completed');
+      expect(state.goal.activity.some((event) => event.type === 'workflow_evidence')).toBe(true);
+      expect(state.goal.checklist[0]?.evidence[0]?.value).toContain('Completed linked workflow');
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 });

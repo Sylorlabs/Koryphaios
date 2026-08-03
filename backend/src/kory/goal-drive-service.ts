@@ -5,6 +5,7 @@ import type { WSManager } from '../ws/ws-manager';
 import type { KoryManager } from './manager';
 import { GoalRunner, goalProviderPolicy } from './goal-runner';
 import { koryLog } from '../logger';
+import { getWorkflowDefinition, listWorkflowRuns, workflowNextInstruction } from './workflows';
 
 const ACTIVE_STATUSES = new Set(['queued', 'planning', 'running']);
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
@@ -224,7 +225,8 @@ export class GoalDriveService {
       if (!goal || !ACTIVE_STATUSES.has(goal.status)) return;
       const execution = goal.execution;
       if (!execution) return;
-      if (!(await this.sessions.get(execution.sessionId))) {
+      const session = await this.sessions.get(execution.sessionId);
+      if (!session) {
         const blocked = await this.goals.update(goalId, {
           status: 'blocked',
           blocker: 'The execution chat no longer exists. Choose another chat to resume.',
@@ -261,15 +263,27 @@ export class GoalDriveService {
         this.publish(goal);
       }
 
-      const prompt = `[GOAL MODE — durable autonomous goal ${goal.id}]
-Objective: ${goal.objective}
-Active checklist item: ${item.title}
+      if (!goal || !item) return;
+      const currentGoal = goal;
+      const currentItem = item;
+
+      const workflowRoot =
+        (session as { workingDirectory?: string }).workingDirectory ??
+        currentGoal.projectPath ??
+        process.cwd();
+      const linkedBefore = listWorkflowRuns(workflowRoot, execution.sessionId).filter(
+        (run) => run.goalId === currentGoal.id && run.goalItemId === currentItem.id,
+      );
+      const activeWorkflow = linkedBefore.find((run) => run.status === 'running');
+      const prompt = `[GOAL MODE — durable autonomous goal ${currentGoal.id}]
+Objective: ${currentGoal.objective}
+Active checklist item: ${currentItem.title}
 Provider verification status: ${policy.verification}.
 ${execution.instructions?.trim() ? `User direction for this goal: ${execution.instructions.trim()}\n` : ''}
-Continue until this checklist item is genuinely complete. Record concrete checks/artifacts with update_goal. Do not end merely because progress was made. Report a blocker only after exhausting safe alternatives; a blocker must be authorization, required human input, safety, unavailable external state, or an impossible environment dependency.${verificationFeedback ? `\nPrevious independent verification failed. Fix these findings before reporting completion:\n${verificationFeedback}` : ''}`;
+Continue until this checklist item is genuinely complete. You may invoke a registered workflow when it is relevant; the host links it to this Goal item and requires its evidence gates before accepting completion. Record concrete checks/artifacts with update_goal. Use get_resource_budget when provider capacity or cost affects a decision; missing balance data is unknown, never zero. Do not end merely because progress was made. Report a blocker only after exhausting safe alternatives; a blocker must be authorization, required human input, safety, unavailable external state, or an impossible environment dependency.${activeWorkflow ? `\nContinue the already-linked workflow run ${activeWorkflow.id}: ${workflowNextInstruction(activeWorkflow)}` : ''}${verificationFeedback ? `\nPrevious independent verification failed. Fix these findings before reporting completion:\n${verificationFeedback}` : ''}`;
 
-      const blockerCountBefore = this.blockerCandidates(goal, item.id).length;
-      const evidenceCountBefore = this.evidenceCandidates(goal, item.id).length;
+      const blockerCountBefore = this.blockerCandidates(currentGoal, currentItem.id).length;
+      const evidenceCountBefore = this.evidenceCandidates(currentGoal, currentItem.id).length;
       await this.goals.addActivity(
         goalId,
         'provider_dispatched',
@@ -285,16 +299,76 @@ Continue until this checklist item is genuinely complete. Record concrete checks
         undefined,
         undefined,
         {
-          goalId: goal.id,
-          objective: goal.objective,
-          itemId: item.id,
-          itemTitle: item.title,
+          goalId: currentGoal.id,
+          objective: currentGoal.objective,
+          itemId: currentItem.id,
+          itemTitle: currentItem.title,
           verification: policy.verification,
         },
       );
 
       goal = await this.goals.get(goalId);
       if (!goal || !ACTIVE_STATUSES.has(goal.status)) return;
+      const linkedAfter = listWorkflowRuns(workflowRoot, execution.sessionId).filter(
+        (run) => run.goalId === goal!.id && run.goalItemId === currentItem.id,
+      );
+      const blockedWorkflow = linkedAfter.find((run) => run.status === 'blocked');
+      if (blockedWorkflow) {
+        const candidate = `Workflow ${blockedWorkflow.id} blocked: ${blockedWorkflow.blocker ?? 'No concrete blocker was recorded'}`;
+        await this.goals.addActivity(
+          goalId,
+          'blocker_candidate',
+          `${item.id}|${candidate}`,
+          execution.sessionId,
+        );
+        goal = (await this.goals.get(goalId)) ?? goal;
+      }
+      const runningWorkflow = linkedAfter.find((run) => run.status === 'running');
+      if (runningWorkflow) {
+        if (
+          !goal.activity.some(
+            (event) =>
+              event.type === 'workflow_linked' &&
+              event.message.startsWith(`${runningWorkflow.id}|`),
+          )
+        ) {
+          await this.goals.addActivity(
+            goalId,
+            'workflow_linked',
+            `${runningWorkflow.id}|${getWorkflowDefinition(runningWorkflow.workflowId)?.name ?? runningWorkflow.workflowId}`,
+            execution.sessionId,
+          );
+        }
+        verificationFeedback = `The linked ${getWorkflowDefinition(runningWorkflow.workflowId)?.name ?? 'workflow'} is not complete. ${workflowNextInstruction(runningWorkflow)}`;
+        const retrying = await this.goals.resetItem(goalId, item.id, verificationFeedback);
+        this.publish(retrying);
+        await sleep(1_000);
+        continue;
+      }
+      for (const completedWorkflow of linkedAfter.filter((run) => run.status === 'completed')) {
+        const alreadyPromoted = goal.activity.some(
+          (event) =>
+            event.type === 'workflow_evidence' &&
+            event.message.startsWith(`${completedWorkflow.id}|`),
+        );
+        if (alreadyPromoted) continue;
+        const evidence = completedWorkflow.evidence
+          .map((entry) => `${entry.stageId}: ${entry.value}`)
+          .join('\n');
+        await this.goals.addActivity(
+          goalId,
+          'workflow_evidence',
+          `${completedWorkflow.id}|${completedWorkflow.workflowId}|${completedWorkflow.evidence.length} stages`,
+          execution.sessionId,
+        );
+        await this.goals.addActivity(
+          goalId,
+          'evidence_candidate',
+          `${item.id}|Completed linked workflow ${completedWorkflow.id}:\n${evidence}`,
+          execution.sessionId,
+        );
+        goal = (await this.goals.get(goalId)) ?? goal;
+      }
       const blocker = this.repeatedBlocker(goal, item.id);
       if (blocker) {
         const adjudication = await this.kory.verifyGoalBlocker(

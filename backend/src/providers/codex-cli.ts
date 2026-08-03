@@ -49,7 +49,8 @@ function supportsCodexFastTier(model: CodexCliModel): boolean {
   // as Fast-mode-capable. Keep this conservative fallback for older
   // app-server catalogs which do not yet expose service tiers.
   const id = String(model.model ?? model.id ?? '').toLowerCase();
-  return /^gpt-5\.(4|5|6)(?:[-.]|$)/.test(id);
+  return /^gpt-5\.(4|5|6)(?:[-.]|$)/.test(id)
+    && !/(?:^|-)mini(?:$|-)|codex-spark/.test(id);
 }
 
 function modelDefinition(model: CodexCliModel, account: DiscoveredCliAccount): ModelDef | null {

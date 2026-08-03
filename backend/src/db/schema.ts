@@ -57,6 +57,23 @@ export const messages = sqliteTable('messages', {
   cost: real('cost').default(0),
   variantGroupId: text('variant_group_id'),
   variantIndex: integer('variant_index').default(0),
+  contextRevision: integer('context_revision').notNull().default(0),
+  createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
+});
+
+export const sessionCompactions = sqliteTable('session_compactions', {
+  id: text('id').primaryKey(),
+  sessionId: text('session_id').notNull().references(() => sessions.id, { onDelete: 'cascade' }),
+  sourceRevision: integer('source_revision').notNull(),
+  targetRevision: integer('target_revision').notNull(),
+  provider: text('provider').notNull(),
+  model: text('model').notNull(),
+  automatic: integer('automatic', { mode: 'boolean' }).notNull().default(false),
+  sourceMessageCount: integer('source_message_count').notNull(),
+  sourceTokens: integer('source_tokens').notNull().default(0),
+  checkpointTokens: integer('checkpoint_tokens').notNull().default(0),
+  summaryHash: text('summary_hash').notNull(),
+  summary: text('summary').notNull(),
   createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
 });
 

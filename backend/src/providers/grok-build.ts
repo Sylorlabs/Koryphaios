@@ -68,7 +68,7 @@ export class GrokBuildProvider implements Provider {
     // Read it synchronously so context limits do not wait behind the slower
     // `grok models` process or reasoning-level probe.
     const cliCachedModels = modelsFromGrokCliCache(readGrokCliModelsCache());
-    return cachedModels ?? cliCachedModels;
+    return cachedModels ?? cliCachedModels ?? GrokModels;
   }
 
   private resolveCliModel(modelId: string): string {

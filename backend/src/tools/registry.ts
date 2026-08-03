@@ -52,6 +52,14 @@ export interface ToolContext {
     task: string,
     options?: { createPr?: boolean; branch?: string },
   ) => Promise<string>;
+  /** Optional preflight hook called before a file-mutating tool runs. If the
+   *  callback returns `{ allowed: false }`, the tool is blocked and its result
+   *  is replaced with the reason. Used by autonomy limits to enforce approval
+   *  thresholds before large changes. */
+  preflightFileChange?: (proposal: {
+    paths: string[];
+    linesChanged: number;
+  }) => Promise<{ allowed: boolean; reason?: string }>;
 }
 
 export interface FileChangeProposal {
@@ -90,7 +98,7 @@ type ToolExecutionRole = 'manager' | 'worker' | 'critic' | 'coder';
 const CRITIC_READ_ONLY_TOOLS = new Set(['read_file', 'grep', 'glob', 'ls']);
 
 /** Role filter: manager gets manager+worker+any (full); worker gets worker+any; critic gets critic+any (read-only only). */
-function roleIncludesTool(
+export function roleIncludesTool(
   toolName: string,
   role: ToolExecutionRole,
   toolRole?: 'manager' | 'worker' | 'critic' | 'any',
@@ -108,6 +116,16 @@ function roleIncludesTool(
   if (normalizedRole === 'manager') return r === 'manager' || r === 'worker';
   return r === normalizedRole;
 }
+
+/** Tools that mutate files and are subject to preflight approval checks. */
+const FILE_MUTATING_TOOLS = new Set([
+  'write_file',
+  'edit_file',
+  'batch_edit',
+  'patch',
+  'delete_file',
+  'move_file',
+]);
 
 export class ToolRegistry {
   private tools = new Map<string, Tool>();
@@ -133,6 +151,11 @@ export class ToolRegistry {
         description: t.description,
         inputSchema: t.inputSchema,
       }));
+  }
+
+  isAllowedForRole(name: string, role: ToolExecutionRole): boolean {
+    const tool = this.tools.get(name);
+    return Boolean(tool && roleIncludesTool(tool.name, role, tool.role));
   }
 
   async execute(ctx: ToolContext, call: ToolCallInput): Promise<ToolCallOutput> {
@@ -162,6 +185,36 @@ export class ToolRegistry {
     }
 
     const start = performance.now();
+
+    // Preflight check for file-mutating tools when autonomy limits are active.
+    if (ctx.preflightFileChange && FILE_MUTATING_TOOLS.has(call.name)) {
+      const input = call.input as Record<string, unknown>;
+      const paths: string[] = typeof input.path === 'string' ? [input.path] : [];
+      const content = typeof input.content === 'string' ? input.content : '';
+      const linesChanged = content ? content.split('\n').length : 0;
+      try {
+        const verdict = await ctx.preflightFileChange({ paths, linesChanged });
+        if (!verdict.allowed) {
+          return {
+            callId: call.id,
+            name: call.name,
+            output: verdict.reason ?? 'Approval required.',
+            isError: true,
+            durationMs: performance.now() - start,
+          };
+        }
+      } catch {
+        // If the preflight hook throws, fail closed (block the tool).
+        return {
+          callId: call.id,
+          name: call.name,
+          output: 'Preflight check failed — tool blocked for safety.',
+          isError: true,
+          durationMs: performance.now() - start,
+        };
+      }
+    }
+
     try {
       const result = await tool.run(ctx, call);
       result.durationMs = performance.now() - start;

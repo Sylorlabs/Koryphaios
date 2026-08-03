@@ -67,7 +67,8 @@ function modelDefinition(model: any): ModelDef | null {
     reasoningLevels,
     supportsFastMode: Array.isArray(model?.supportedServiceTiers)
       ? model.supportedServiceTiers.includes('fast')
-      : /^gpt-5\.(4|5|6)(?:[-.]|$)/.test(id.toLowerCase()),
+      : /^gpt-5\.(4|5|6)(?:[-.]|$)/.test(id.toLowerCase())
+        && !/(?:^|-)mini(?:$|-)|codex-spark/.test(id.toLowerCase()),
     supportsAttachments: model?.inputModalities?.includes?.('image') === true,
     supportsStreaming: true,
     tier: model?.isDefault ? 'flagship' : undefined,

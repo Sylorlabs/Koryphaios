@@ -56,7 +56,7 @@ export const KORY_HARNESS_NOTE =
   'permissions, and orchestration. Do NOT use your native built-in tools (Read, Edit, Write, ' +
   'Bash, Grep, Glob, etc.) — they are disabled. Instead, use the kory__ MCP tools exposed by ' +
   'the "kory" MCP server (kory__read_file, kory__edit_file, kory__write_file, kory__bash, ' +
-  'kory__grep, kory__glob, kory__ls, kory__web_search, kory__web_fetch, kory__create_note, ' +
+  'kory__grep, kory__glob, kory__ls, kory__web_search, kory__web_fetch, kory__get_resource_budget, kory__create_note, ' +
   'kory__search_notes, kory__delegate_to_worker, etc.). Every kory__ tool call goes through ' +
   'Koryphaios permission + sandbox policy. Never spawn subagents or delegate to other agents ' +
   'yourself; use kory__delegate_to_worker and Koryphaios will dispatch its own worker agents.';
@@ -83,6 +83,7 @@ export const KORY_TOOL_WHITELIST: string[] = [
   'kory__delegate_to_worker', 'kory__delegate_to_jules',
   'kory__create_goal', 'kory__update_goal',
   'kory__start_workflow', 'kory__update_workflow',
+  'kory__get_resource_budget',
   'kory__load_skill_detail',
   'kory__detect_errors', 'kory__analyze_error', 'kory__suggest_fixes',
   'kory__git_status', 'kory__git_diff', 'kory__git_commit', 'kory__commit_and_create_pr',
@@ -95,6 +96,7 @@ export const KORY_CRITIC_TOOL_WHITELIST: string[] = [
   'kory__search_notes', 'kory__recall_notes', 'kory__list_notes',
   'kory__read_note', 'kory__get_note_backlinks', 'kory__get_note_graph_summary',
   'kory__fetch_context', 'kory__ask_user',
+  'kory__get_resource_budget',
   'kory__load_skill_detail',
   'kory__detect_errors', 'kory__analyze_error', 'kory__suggest_fixes',
   'kory__git_status', 'kory__git_diff', 'kory__view_image',
@@ -107,23 +109,7 @@ export function buildKoryMcpServerConfig(
   ctx: CliBridgeContext,
   provider: ProviderName,
 ): CliMcpServerConfig | null {
-  const bridgeCommand = process.env.KORY_MCP_BRIDGE_COMMAND ?? 'node';
-  const bridgeScript = process.env.KORY_MCP_BRIDGE_SCRIPT;
-  if (!bridgeScript) return null;
-  const args = [
-    bridgeScript,
-    '--session-id', ctx.sessionId ?? '',
-    '--role', ctx.role,
-    '--provider', String(provider),
-    '--working-dir', ctx.workingDirectory,
-  ];
-  return {
-    name: 'kory',
-    command: bridgeCommand,
-    args,
-    env: { KORY_BACKEND_URL: process.env.KORY_BACKEND_URL ?? 'http://127.0.0.1:3001' },
-    transport: 'stdio',
-  };
+  return buildKoryCliMcpConfig(ctx, provider)?.[0] ?? null;
 }
 
 /** Build lifecycle hooks for a CLI harness. Uses KORY_HOOK_BRIDGE_SCRIPT. */

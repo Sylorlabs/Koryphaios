@@ -10,6 +10,7 @@ import {
   stopWorkflow,
   workflowNextInstruction,
 } from './workflows';
+import { StartWorkflowTool, UpdateWorkflowTool } from '../tools/workflows';
 
 const roots: string[] = [];
 const root = () => {
@@ -39,5 +40,34 @@ describe('host-owned workflows', () => {
     expect(() => advanceWorkflow(project, run.id, { evidence: '' })).toThrow('Evidence is required');
     expect(stopWorkflow(project, run.id).status).toBe('stopped');
     expect(() => advanceWorkflow(project, run.id, { evidence: 'later' })).toThrow('Workflow is not running');
+  });
+
+  test('managed and CLI tool contexts bind workflows to the host-owned Goal item', async () => {
+    const project = root();
+    const ctx = {
+      sessionId: 'session-1',
+      workingDirectory: project,
+      goalId: 'goal-1',
+      goalItemId: 'item-1',
+    };
+    const start = new StartWorkflowTool();
+    const result = await start.run(ctx, {
+      id: 'start-1',
+      name: start.name,
+      input: { workflowId: 'design-quality', task: 'Polish Goal Mode' },
+    });
+    expect(result.isError).toBe(false);
+    const run = listWorkflowRuns(project, 'session-1')[0]!;
+    expect(run.goalId).toBe('goal-1');
+    expect(run.goalItemId).toBe('item-1');
+
+    const update = new UpdateWorkflowTool();
+    const wrongItem = await update.run({ ...ctx, goalItemId: 'item-2' }, {
+      id: 'update-1',
+      name: update.name,
+      input: { runId: run.id, evidence: 'real inspection', status: 'evidence' },
+    });
+    expect(wrongItem.isError).toBe(true);
+    expect(wrongItem.output).toContain('active Goal item');
   });
 });
