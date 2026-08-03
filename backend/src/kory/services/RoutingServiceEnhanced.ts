@@ -16,6 +16,19 @@ export interface RoutingDecision {
   provider: ProviderName | undefined;
 }
 
+/**
+ * Split a `provider:model` string on the first colon only, preserving colons
+ * in the model part (e.g. `codex:codex-account:YWNjb3VudA:gpt-5.6-sol`).
+ */
+export function splitProviderModel(value: string): { provider: ProviderName; model: string } {
+  const idx = value.indexOf(':');
+  if (idx < 0) return { provider: value as ProviderName, model: value };
+  return {
+    provider: value.slice(0, idx) as ProviderName,
+    model: value.slice(idx + 1),
+  };
+}
+
 export interface RoutingServiceEnhancedConfig {
   config: KoryphaiosConfig;
   providers?: ProviderRegistry;
@@ -82,8 +95,8 @@ export class RoutingServiceEnhanced {
     let out: RoutingDecision;
 
     if (preferredModel && preferredModel.includes(':')) {
-      const [p, m] = preferredModel.split(':');
-      out = { provider: p as ProviderName, model: m! };
+      const { provider: p, model: m } = splitProviderModel(preferredModel);
+      out = { provider: p, model: m };
     } else if (preferredModel && preferredModel !== 'auto' && resolveModel(preferredModel)) {
       const def = resolveModel(preferredModel)!;
       out = { model: preferredModel, provider: def.provider };
@@ -125,8 +138,7 @@ export class RoutingServiceEnhanced {
    */
   parseProviderModel(providerModel: string): { provider: ProviderName; model: string } | null {
     if (!providerModel.includes(':')) return null;
-    const [provider, model] = providerModel.split(':');
-    return { provider: provider as ProviderName, model: model! };
+    return splitProviderModel(providerModel);
   }
 
   /**

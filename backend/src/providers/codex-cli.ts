@@ -34,7 +34,18 @@ type CodexCliModel = {
   supportedReasoningEfforts?: Array<{ reasoningEffort?: string }>;
   defaultReasoningEffort?: string;
   inputModalities?: string[];
+  supportedServiceTiers?: string[];
 };
+
+function supportsCodexFastTier(model: CodexCliModel): boolean {
+  const advertised = model.supportedServiceTiers;
+  if (Array.isArray(advertised)) return advertised.includes('fast');
+  // The official Codex documentation currently names GPT-5.4, 5.5, and 5.6
+  // as Fast-mode-capable. Keep this conservative fallback for older
+  // app-server catalogs which do not yet expose service tiers.
+  const id = String(model.model ?? model.id ?? '').toLowerCase();
+  return /^gpt-5\.(4|5|6)(?:[-.]|$)/.test(id);
+}
 
 function modelDefinition(model: CodexCliModel, account: DiscoveredCliAccount): ModelDef | null {
   const cliModel = typeof model.model === 'string' ? model.model : model.id;
@@ -57,6 +68,7 @@ function modelDefinition(model: CodexCliModel, account: DiscoveredCliAccount): M
     costPerMOutputTokens: 0,
     canReason: reasoningLevels.length > 0,
     reasoningLevels,
+    supportsFastMode: supportsCodexFastTier(model),
     supportsAttachments: model.inputModalities?.includes('image') === true,
     supportsStreaming: true,
     tier: model.isDefault ? 'flagship' : undefined,
@@ -343,6 +355,11 @@ export class CodexCliProvider implements Provider {
       sandbox,
       '--model',
       resolveCliModel(request.model, this.models),
+      // The official CLI maps service_tier="fast" to Fast mode. Do not use
+      // reasoning effort as a fake substitute: it changes model work rather
+      // than requesting the supported accelerated tier.
+      ...(request.fastMode ? ['--config', 'service_tier="fast"'] : []),
+      ...(request.reasoningLevel ? ['--config', `model_reasoning_effort=${JSON.stringify(request.reasoningLevel)}`] : []),
       prompt,
     ];
     const child = spawn(binary, args, {

@@ -29,6 +29,7 @@ export const sessions = sqliteTable('sessions', {
   tokensOut: integer('tokens_out').default(0),
   totalCost: real('total_cost').default(0),
   workflowState: text('workflow_state').default('idle'),
+  conversationRevision: integer('conversation_revision').default(0),
   workingDirectory: text('working_directory'), // project folder this chat is scoped to
   metadata: text('metadata'), // JSON string
   tags: text('tags'), // JSON string
@@ -39,7 +40,9 @@ export const sessions = sqliteTable('sessions', {
 
 export const messages = sqliteTable('messages', {
   id: text('id').primaryKey(),
-  sessionId: text('session_id').notNull().references(() => sessions.id, { onDelete: 'cascade' }),
+  sessionId: text('session_id')
+    .notNull()
+    .references(() => sessions.id, { onDelete: 'cascade' }),
   role: text('role', { enum: ['user', 'assistant', 'system'] }).notNull(),
   content: text('content').notNull(), // JSON string of ContentBlock[]
   model: text('model'),
@@ -54,7 +57,9 @@ export const messages = sqliteTable('messages', {
 
 export const tasks = sqliteTable('tasks', {
   id: text('id').primaryKey(),
-  sessionId: text('session_id').notNull().references(() => sessions.id, { onDelete: 'cascade' }),
+  sessionId: text('session_id')
+    .notNull()
+    .references(() => sessions.id, { onDelete: 'cascade' }),
   description: text('description').notNull(),
   domain: text('domain'),
   status: text('status', { enum: ['pending', 'active', 'done', 'failed'] }).default('pending'),
@@ -69,13 +74,24 @@ export const tasks = sqliteTable('tasks', {
 });
 
 export const goals = sqliteTable('goals', {
-  id: text('id').primaryKey(), userId: text('user_id'), objective: text('objective').notNull(),
-  scope: text('scope').notNull(), projectPath: text('project_path'), sessionId: text('session_id'),
-  priority: integer('priority').notNull().default(0), sortOrder: integer('sort_order').notNull().default(0),
-  status: text('status').notNull().default('queued'), checklist: text('checklist').notNull().default('[]'),
-  linkedSessionIds: text('linked_session_ids').notNull().default('[]'), activity: text('activity').notNull().default('[]'),
-  blocker: text('blocker'), execution: text('execution'), activeDurationMs: integer('active_duration_ms').notNull().default(0),
-  activeStartedAt: integer('active_started_at', { mode: 'timestamp' }), createdAt: integer('created_at', { mode: 'timestamp' }).notNull(), updatedAt: integer('updated_at', { mode: 'timestamp' }).notNull(),
+  id: text('id').primaryKey(),
+  userId: text('user_id'),
+  objective: text('objective').notNull(),
+  scope: text('scope').notNull(),
+  projectPath: text('project_path'),
+  sessionId: text('session_id'),
+  priority: integer('priority').notNull().default(0),
+  sortOrder: integer('sort_order').notNull().default(0),
+  status: text('status').notNull().default('queued'),
+  checklist: text('checklist').notNull().default('[]'),
+  linkedSessionIds: text('linked_session_ids').notNull().default('[]'),
+  activity: text('activity').notNull().default('[]'),
+  blocker: text('blocker'),
+  execution: text('execution'),
+  activeDurationMs: integer('active_duration_ms').notNull().default(0),
+  activeStartedAt: integer('active_started_at', { mode: 'timestamp' }),
+  createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
+  updatedAt: integer('updated_at', { mode: 'timestamp' }).notNull(),
 });
 
 // ============================================================================
@@ -84,7 +100,9 @@ export const goals = sqliteTable('goals', {
 
 export const refreshTokens = sqliteTable('refresh_tokens', {
   token: text('token').primaryKey(),
-  userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  userId: text('user_id')
+    .notNull()
+    .references(() => users.id, { onDelete: 'cascade' }),
   expiresAt: integer('expires_at', { mode: 'timestamp' }).notNull(),
   createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
   revoked: integer('revoked').default(0),
@@ -92,7 +110,9 @@ export const refreshTokens = sqliteTable('refresh_tokens', {
 
 export const apiKeys = sqliteTable('api_keys', {
   id: text('id').primaryKey(),
-  userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  userId: text('user_id')
+    .notNull()
+    .references(() => users.id, { onDelete: 'cascade' }),
   name: text('name').notNull(),
   prefix: text('prefix').notNull(),
   hashedKey: text('hashed_key').notNull(),
@@ -198,7 +218,9 @@ export const authSessions = sqliteTable('sessions_auth', {
 
 export const activeWorkers = sqliteTable('active_workers', {
   taskId: text('task_id').primaryKey(),
-  sessionId: text('session_id').notNull().references(() => sessions.id, { onDelete: 'cascade' }),
+  sessionId: text('session_id')
+    .notNull()
+    .references(() => sessions.id, { onDelete: 'cascade' }),
   taskData: text('task_data').notNull(), // JSON string
   startTime: integer('start_time', { mode: 'timestamp' }).notNull(),
   status: text('status').notNull().default('running'),
@@ -425,8 +447,8 @@ export const notes = sqliteTable('notes', {
   title: text('title').notNull(),
   content: text('content').notNull().default(''),
   folderPath: text('folder_path').notNull().default('/'),
-  tags: text('tags').notNull().default('[]'),           // JSON string array
-  pinned: integer('pinned').notNull().default(0),       // boolean 0/1
+  tags: text('tags').notNull().default('[]'), // JSON string array
+  pinned: integer('pinned').notNull().default(0), // boolean 0/1
   includeInContext: integer('include_in_context').notNull().default(0), // auto-inject into agent context
   format: text('format').notNull().default('markdown'), // 'markdown' | 'html' — html renders in the sandboxed preview
   userId: text('user_id').references(() => users.id, { onDelete: 'cascade' }),
@@ -435,21 +457,31 @@ export const notes = sqliteTable('notes', {
 });
 
 // Wiki-link graph edges
-export const noteLinks = sqliteTable('note_links', {
-  fromNoteId: text('from_note_id').notNull().references(() => notes.id, { onDelete: 'cascade' }),
-  toNoteId: text('to_note_id').notNull().references(() => notes.id, { onDelete: 'cascade' }),
-}, (t) => ({
-  pk: primaryKey({ columns: [t.fromNoteId, t.toNoteId] }),
-}));
+export const noteLinks = sqliteTable(
+  'note_links',
+  {
+    fromNoteId: text('from_note_id')
+      .notNull()
+      .references(() => notes.id, { onDelete: 'cascade' }),
+    toNoteId: text('to_note_id')
+      .notNull()
+      .references(() => notes.id, { onDelete: 'cascade' }),
+  },
+  (t) => ({
+    pk: primaryKey({ columns: [t.fromNoteId, t.toNoteId] }),
+  }),
+);
 
 // File attachments for notes
 export const noteAttachments = sqliteTable('note_attachments', {
   id: text('id').primaryKey(),
-  noteId: text('note_id').notNull().references(() => notes.id, { onDelete: 'cascade' }),
+  noteId: text('note_id')
+    .notNull()
+    .references(() => notes.id, { onDelete: 'cascade' }),
   filename: text('filename').notNull(),
   mimeType: text('mime_type').notNull(),
   size: integer('size').notNull(),
-  storagePath: text('storage_path').notNull(),          // absolute path on disk
+  storagePath: text('storage_path').notNull(), // absolute path on disk
   createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
 });
 

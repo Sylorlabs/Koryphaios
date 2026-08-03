@@ -494,6 +494,10 @@ class RedisManager {
         }
       }
     }, 5000);
+    // Don't keep the process alive just for reconnection attempts.
+    if (this.reconnectTimer && typeof this.reconnectTimer.unref === 'function') {
+      this.reconnectTimer.unref();
+    }
   }
 
   private startHealthChecks(): void {
@@ -507,6 +511,10 @@ class RedisManager {
         this.isConnected = false;
       }
     }, 30000);
+    // Don't keep the process alive just for health checks.
+    if (typeof this.healthCheckInterval.unref === 'function') {
+      this.healthCheckInterval.unref();
+    }
   }
 
   private stopHealthChecks(): void {

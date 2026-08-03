@@ -53,6 +53,7 @@ export const messageRoutes = new Elysia({ prefix: '/api/messages' })
           undefined,
           undefined,
           session.interactionMode ?? 'act',
+          body.fastMode,
         )
         .catch((err) => {
           wsManager.broadcast({
@@ -71,11 +72,12 @@ export const messageRoutes = new Elysia({ prefix: '/api/messages' })
         content: t.String(),
         model: t.Optional(t.String()),
         reasoningLevel: t.Optional(t.String()),
+        fastMode: t.Optional(t.Boolean()),
         interactionMode: t.Optional(t.Union([t.Literal('act'), t.Literal('plan')])),
         attachments: t.Optional(
           t.Array(
             t.Object({
-              type: t.String(),
+              type: t.Union([t.Literal('image'), t.Literal('file')]),
               data: t.String(),
               name: t.String(),
             }),

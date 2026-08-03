@@ -17,13 +17,13 @@ import {
   getLocalTotalsByProvider,
   getLatestCloudSnapshots,
 } from './db';
-import { startCreditPolling, stopCreditPolling, type PollingConfig } from './polling';
+import { startCreditPolling, stopCreditPolling, markCreditUsage, type PollingConfig } from './polling';
 
 const DRIFT_THRESHOLD_PERCENT = 5;
 
 export { getModelCost2026, computeCost2026 } from './models';
 export { initCreditDb, getLocalTotals, getLocalTotalsByProvider, getLatestCloudSnapshots } from './db';
-export { startCreditPolling, stopCreditPolling, type PollingConfig } from './polling';
+export { startCreditPolling, stopCreditPolling, markCreditUsage, type PollingConfig } from './polling';
 export { createUsageInterceptingFetch } from './usage-interceptor';
 
 /**
@@ -45,6 +45,7 @@ export function recordUsage(
     : computeCostUsd(provider, model, tokensIn ?? 0, tokensOut ?? 0);
   const costUsd = priced?.costUsd ?? 0;
   dbRecordUsage(model, provider, tokensIn ?? 0, tokensOut ?? 0, costUsd);
+  markCreditUsage();
 }
 
 /**

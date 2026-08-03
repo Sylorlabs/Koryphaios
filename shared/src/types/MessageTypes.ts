@@ -53,5 +53,6 @@ export interface StoredMessage {
   cost?: number;
   variantGroupId?: string;
   variantIndex?: number;
+  attachments?: MessageAttachment[];
   createdAt: number;
 }

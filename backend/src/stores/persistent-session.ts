@@ -43,10 +43,22 @@ export interface MessageRecord {
 export class PersistentSessionStore {
   private cache = new Map<string, PersistentSession>();
   private dirtySessions = new Set<string>();
-  private saveInterval: Timer | null = null;
+  // Debounced flush: only schedule a timer when a session is marked dirty.
+  // When the dirty set is empty, no timer runs — avoids waking the event
+  // loop every 10s when nobody is chatting.
+  private flushTimer: Timer | null = null;
+  private static readonly FLUSH_DELAY_MS = 10_000;
 
-  constructor() {
-    this.saveInterval = setInterval(() => this.flushDirtySessions(), 10000);
+  constructor() {}
+
+  /** Schedule a debounced flush. If a flush is already scheduled, this is a
+   *  no-op (the existing timer will handle it). */
+  private scheduleFlush(): void {
+    if (this.flushTimer) return;
+    this.flushTimer = setTimeout(() => {
+      this.flushTimer = null;
+      void this.flushDirtySessions();
+    }, PersistentSessionStore.FLUSH_DELAY_MS);
   }
 
   async createSession(
@@ -67,6 +79,7 @@ export class PersistentSessionStore {
     };
     this.cache.set(id, session);
     this.dirtySessions.add(id);
+    this.scheduleFlush();
     await this.saveSession(session);
     return session;
   }
@@ -165,7 +178,7 @@ export class PersistentSessionStore {
   }
 
   async shutdown(): Promise<void> {
-    if (this.saveInterval) clearInterval(this.saveInterval);
+    if (this.flushTimer) { clearTimeout(this.flushTimer); this.flushTimer = null; }
     await this.flushDirtySessions();
   }
 }

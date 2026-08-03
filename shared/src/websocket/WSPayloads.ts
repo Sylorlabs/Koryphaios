@@ -157,6 +157,13 @@ export interface SessionUpdatedPayload {
   updatedAt: number;
 }
 
+export interface SessionIdlePayload {
+  sessionId: string;
+  state: string;
+  messageId?: string;
+  updatedAt: number;
+}
+
 export interface ChangeSummaryPayload {
   sessionId: string;
   changes: ChangeSummary[];

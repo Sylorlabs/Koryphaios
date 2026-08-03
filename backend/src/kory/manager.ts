@@ -638,6 +638,7 @@ export class KoryManager {
     responseVariant?: { groupId: string; index: number },
     goalContext?: import('./prompts').TaskContract['goalContext'],
     interactionMode?: 'act' | 'plan',
+    fastMode?: boolean,
   ): Promise<void> {
     const session = await this.sessions?.get(sessionId);
     interactionMode = interactionMode ?? session?.interactionMode ?? 'act';
@@ -747,6 +748,7 @@ export class KoryManager {
           attachments,
           responseVariant,
           interactionMode,
+          fastMode,
         );
       } finally {
         clearTimeout(processTimeout);
@@ -1465,8 +1467,12 @@ export class KoryManager {
     attachments?: Array<{ type: string; data: string; name: string }>,
     responseVariant?: { groupId: string; index: number },
     interactionMode: 'act' | 'plan' = 'act',
+    fastMode?: boolean,
   ): Promise<void> {
-    koryLog.debug({ sessionId, reasoningLevel, preferredModel }, 'Entering handleDirectly');
+    koryLog.debug(
+      { sessionId, reasoningLevel, preferredModel, fastMode },
+      'Entering handleDirectly',
+    );
     let routing = this.resolveActiveRouting(preferredModel, 'general', true, userMessage);
     let provider = await this.providers.resolveProvider(routing.model, routing.provider);
     // Mirror processTask's fallback: for "auto" (or no model), if the routed model has no
@@ -1597,6 +1603,7 @@ export class KoryManager {
             abort.signal,
             reasoningLevel,
             interactionMode,
+            fastMode,
           );
           koryLog.debug(
             {
@@ -1919,6 +1926,7 @@ export class KoryManager {
     signal?: AbortSignal,
     reasoningLevel?: string,
     interactionMode: 'act' | 'plan' = 'act',
+    fastMode?: boolean,
   ): Promise<LLMTurnResult> {
     if (signal?.aborted) throw new DOMException('Manager run aborted', 'AbortError');
 
@@ -2173,6 +2181,7 @@ export class KoryManager {
         maxTokens: 16384,
         signal: streamSignal,
         ...(normalizedReasoning !== undefined && { reasoningLevel: normalizedReasoning }),
+        ...(fastMode === true && { fastMode: true }),
         // Agentic CLI providers (claude-code) run + edit files in the session's project directory.
         workingDirectory: await this.resolveSessionWorkingDirectory(sessionId),
         sessionId,

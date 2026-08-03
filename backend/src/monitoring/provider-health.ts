@@ -27,6 +27,10 @@ export interface ProviderTestResult {
 
 const HEALTH_CHECK_INTERVAL = 300_000; // 5 minutes
 const HEALTH_CHECK_TIMEOUT = 10_000; // 10 seconds
+// Idle threshold: if no provider has been used in the last 10 minutes, skip
+// health checks until activity resumes. This avoids polling provider APIs
+// when nobody is chatting.
+const IDLE_THRESHOLD_MS = 10 * 60 * 1000;
 
 /**
  * Provider Health Monitor
@@ -36,17 +40,31 @@ export class ProviderHealthMonitor {
   private readonly healthStatus = new Map<ProviderName, ProviderHealthStatus>();
   private readonly testResults = new Map<ProviderName, ProviderTestResult[]>();
   private checkInterval?: ReturnType<typeof setInterval>;
+  private lastActivityAt = Date.now();
 
   constructor(private readonly providers: Map<ProviderName, Provider>) {
     // Start periodic health checks
     this.startPeriodicChecks();
   }
 
+  /** Mark that a provider was used (e.g. a chat message was sent). Resets the
+   *  idle timer so the next health-check interval will fire. */
+  markActivity(): void {
+    this.lastActivityAt = Date.now();
+  }
+
+  private isIdle(): boolean {
+    return Date.now() - this.lastActivityAt > IDLE_THRESHOLD_MS;
+  }
+
   /**
    * Start periodic health checks for all providers.
+   * Skips the actual check when the system has been idle (no provider usage)
+   * to avoid polling provider APIs when nobody is chatting.
    */
   private startPeriodicChecks(): void {
     this.checkInterval = setInterval(() => {
+      if (this.isIdle()) return;
       this.checkAllProviders().catch((err) => {
         serverLog.error({ err }, 'Provider health check failed');
       });
