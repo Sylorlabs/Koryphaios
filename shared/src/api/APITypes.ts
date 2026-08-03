@@ -13,9 +13,10 @@ export interface APIResponse<T = unknown> {
 export interface SendMessageRequest {
   sessionId: string;
   content: string;
-  attachments?: Array<{ type: 'image' | 'file'; data: string; name: string }>;
+  attachments?: Array<{ type: 'image' | 'file'; data: string; name: string; mimeType?: string }>;
   model?: string;
   reasoningLevel?: string;
+  interactionMode?: 'act' | 'plan';
 }
 
 export interface CreateSessionRequest {

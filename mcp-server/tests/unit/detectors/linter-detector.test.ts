@@ -228,13 +228,14 @@ describe('LinterErrorDetector', () => {
       expect(detector.isRunning).toBe(true);
     });
 
-    it('should handle start errors gracefully', async () => {
+    it('should enter limited mode when the linter is unavailable', async () => {
       vi.spyOn(detector as any, 'verifyLinterAvailable').mockRejectedValue(
         new Error('ESLint not found')
       );
 
-      await expect(detector.start()).rejects.toThrow('ESLint not found');
-      expect(detector.isRunning).toBe(false);
+      await detector.start();
+      expect(detector.isRunning).toBe(true);
+      expect((detector as any).isLinterAvailable).toBe(false);
     });
   });
 
@@ -297,17 +298,17 @@ describe('LinterErrorDetector', () => {
       await stoppedPromise;
     });
 
-    it('should emit detector-error event on errors', async () => {
+    it('should enter limited mode without emitting an error when the linter is unavailable', async () => {
       const testError = new Error('Test error');
       vi.spyOn(detector as any, 'verifyLinterAvailable').mockRejectedValue(testError);
 
-      const errorPromise = new Promise<Error>(resolve => {
-        detector.once('detector-error', resolve);
-      });
+      const errorHandler = vi.fn();
+      detector.on('detector-error', errorHandler);
 
-      await expect(detector.start()).rejects.toThrow('Test error');
-      const emittedError = await errorPromise;
-      expect(emittedError).toBe(testError);
+      await detector.start();
+      expect(detector.isRunning).toBe(true);
+      expect((detector as any).isLinterAvailable).toBe(false);
+      expect(errorHandler).not.toHaveBeenCalled();
     });
   });
 });

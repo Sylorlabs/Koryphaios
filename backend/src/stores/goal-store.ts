@@ -32,7 +32,7 @@ function validateChecklist(checklist: GoalChecklistItem[]) {
 }
 function model(row: typeof goals.$inferSelect): Goal {
   const now = Date.now(); const accrued = row.activeDurationMs + (row.status === 'running' && row.activeStartedAt ? now - row.activeStartedAt.getTime() : 0);
-  return { id: row.id, objective: row.objective, scope: row.scope as GoalScope, projectPath: row.projectPath ?? undefined, sessionId: row.sessionId ?? undefined, priority: row.priority, sortOrder: row.sortOrder, status: row.status as GoalStatus, checklist: parse(row.checklist, []), linkedSessionIds: parse(row.linkedSessionIds, []), activity: parse(row.activity, []), blocker: row.blocker ?? undefined, activeDurationMs: accrued, activeStartedAt: row.activeStartedAt?.getTime(), createdAt: row.createdAt.getTime(), updatedAt: row.updatedAt.getTime() };
+  return { id: row.id, objective: row.objective, scope: row.scope as GoalScope, projectPath: row.projectPath ?? undefined, sessionId: row.sessionId ?? undefined, priority: row.priority, sortOrder: row.sortOrder, status: row.status as GoalStatus, checklist: parse(row.checklist, []), linkedSessionIds: parse(row.linkedSessionIds, []), activity: parse(row.activity, []), blocker: row.blocker ?? undefined, execution: parse(row.execution, undefined), activeDurationMs: accrued, activeStartedAt: row.activeStartedAt?.getTime(), createdAt: row.createdAt.getTime(), updatedAt: row.updatedAt.getTime() };
 }
 export class GoalStore {
   async list(): Promise<Goal[]> { return (await db.select().from(goals).orderBy(desc(goals.priority), asc(goals.sortOrder))).map(model); }
@@ -57,13 +57,13 @@ export class GoalStore {
       { id: third, title: 'Verify the success criteria', status: 'pending' as const, order: 2, dependsOn: [second], evidence: [] },
     ];
     validateChecklist(checklist);
-    const [row] = await db.insert(goals).values({ id, objective: input.objective.trim(), scope: input.scope, projectPath: input.projectPath ?? null, sessionId: input.sessionId ?? null, priority: input.priority ?? 0, sortOrder: input.sortOrder ?? now.getTime(), status: input.status ?? 'queued', checklist: JSON.stringify(checklist), linkedSessionIds: JSON.stringify(input.linkedSessionIds ?? (input.sessionId ? [input.sessionId] : [])), activity: JSON.stringify([{ id: nanoid(), type: 'created', message: 'Goal created', createdAt: now.getTime() }]), activeDurationMs: 0, createdAt: now, updatedAt: now }).returning(); return model(row);
+    const [row] = await db.insert(goals).values({ id, objective: input.objective.trim(), scope: input.scope, projectPath: input.projectPath ?? null, sessionId: input.sessionId ?? null, priority: input.priority ?? 0, sortOrder: input.sortOrder ?? now.getTime(), status: input.status ?? 'queued', checklist: JSON.stringify(checklist), linkedSessionIds: JSON.stringify(input.linkedSessionIds ?? (input.sessionId ? [input.sessionId] : [])), activity: JSON.stringify([{ id: nanoid(), type: 'created', message: 'Goal created', createdAt: now.getTime() }]), execution: input.execution ? JSON.stringify(input.execution) : null, activeDurationMs: 0, createdAt: now, updatedAt: now }).returning(); return model(row);
   }
   async update(id: string, patch: Partial<Goal>): Promise<Goal | undefined> {
     const prior = await this.get(id); if (!prior) return undefined;
     const now = Date.now(); const status = patch.status ?? prior.status; const wasActive = active(prior.status); const isActive = active(status);
     const duration = prior.activeDurationMs + (wasActive && prior.activeStartedAt ? now - prior.activeStartedAt : 0);
-    const [row] = await db.update(goals).set({ objective: patch.objective?.trim(), priority: patch.priority, sortOrder: patch.sortOrder, status, checklist: patch.checklist ? JSON.stringify(patch.checklist) : undefined, linkedSessionIds: patch.linkedSessionIds ? JSON.stringify(patch.linkedSessionIds) : undefined, activity: patch.activity ? JSON.stringify(patch.activity) : undefined, blocker: patch.blocker === undefined ? prior.blocker ?? null : patch.blocker ?? null, activeDurationMs: duration, activeStartedAt: isActive ? new Date(wasActive ? prior.activeStartedAt ?? now : now) : null, updatedAt: new Date(now) }).where(eq(goals.id, id)).returning(); return row ? model(row) : undefined;
+    const [row] = await db.update(goals).set({ objective: patch.objective?.trim(), priority: patch.priority, sortOrder: patch.sortOrder, status, checklist: patch.checklist ? JSON.stringify(patch.checklist) : undefined, linkedSessionIds: patch.linkedSessionIds ? JSON.stringify(patch.linkedSessionIds) : undefined, activity: patch.activity ? JSON.stringify(patch.activity) : undefined, blocker: patch.blocker === undefined ? prior.blocker ?? null : patch.blocker ?? null, execution: patch.execution ? JSON.stringify(patch.execution) : undefined, activeDurationMs: duration, activeStartedAt: isActive ? new Date(wasActive ? prior.activeStartedAt ?? now : now) : null, updatedAt: new Date(now) }).where(eq(goals.id, id)).returning(); return row ? model(row) : undefined;
   }
   async delete(id: string) { await db.delete(goals).where(eq(goals.id, id)); }
   async addActivity(id: string, type: string, message: string, sessionId?: string) { const goal = await this.get(id); if (!goal) return undefined; return this.update(id, { activity: [...goal.activity, { id: nanoid(), type, message, sessionId, createdAt: Date.now() }] }); }
@@ -75,6 +75,19 @@ export class GoalStore {
     if (item.dependsOn.some((dependency) => goal.checklist.find((entry) => entry.id === dependency)?.status !== 'completed')) throw new Error('Complete dependencies before this checklist item');
     const checklist = goal.checklist.map((entry) => entry.id === itemId ? { ...entry, status: 'completed' as const, completedAt: Date.now(), evidence: [...entry.evidence, { id: nanoid(), ...evidence, verified: true, createdAt: Date.now() }] } : entry);
     return this.update(id, { checklist, activity: [...goal.activity, { id: nanoid(), type: 'item_completed', message: `Verified: ${item.title}`, createdAt: Date.now() }] });
+  }
+  async addItemEvidence(id: string, itemId: string, evidence: { kind: 'check' | 'artifact' | 'note'; value: string }): Promise<Goal | undefined> {
+    const goal = await this.get(id); const item = goal?.checklist.find((entry) => entry.id === itemId);
+    if (!goal || !item) return undefined;
+    if (item.status !== 'running') throw new Error('Evidence can only be attached to the running checklist item');
+    const checklist = goal.checklist.map((entry) => entry.id === itemId ? { ...entry, evidence: [...entry.evidence, { id: nanoid(), ...evidence, verified: false, createdAt: Date.now() }] } : entry);
+    return this.update(id, { checklist });
+  }
+  async resetItem(id: string, itemId: string, feedback: string): Promise<Goal | undefined> {
+    const goal = await this.get(id); const item = goal?.checklist.find((entry) => entry.id === itemId);
+    if (!goal || !item) return undefined;
+    const checklist = goal.checklist.map((entry) => entry.id === itemId ? { ...entry, status: 'pending' as const, startedAt: undefined } : entry);
+    return this.update(id, { status: 'running', checklist, blocker: undefined, activity: [...goal.activity, { id: nanoid(), type: 'verification_retry', message: feedback, createdAt: Date.now() }] });
   }
   async finalize(id: string): Promise<Goal | undefined> {
     const goal = await this.get(id); if (!goal) return undefined;

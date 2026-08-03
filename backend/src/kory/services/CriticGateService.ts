@@ -41,7 +41,7 @@ export interface CriticGateServiceDependencies {
   workingDirectory: string;
 }
 
-const CRITIC_SYSTEM_PROMPT = `You are a read-only Critic agent. Inspect actual files using only read_file, grep, glob, and ls. Return JSON only: {"verdict":"PASS|FAIL","findings":[{"severity":"critical|major|minor","evidence":"file, line, artifact, or check","criterion":"affected acceptance criterion","finding":"actionable defect"}],"checksReviewed":["exact check or artifact"],"unmetCriteria":["criterion"]}. Missing evidence or malformed output fails closed.`;
+const CRITIC_SYSTEM_PROMPT = `You are a read-only Critic agent. Inspect actual files using only read_file, grep, glob, and ls. Return JSON only: {"verdict":"PASS|FAIL","findings":[{"severity":"critical|major|minor","evidence":"file, line, artifact, or check","criterion":"affected acceptance criterion","finding":"actionable defect"}],"checksReviewed":["exact check or artifact"],"criterionCoverage":[{"criterion":"exact acceptance criterion","evidence":"independently inspected artifact or observation","status":"verified|unmet"}],"unmetCriteria":["criterion"]}. PASS requires nonempty reviewed evidence, verified coverage, and no unmet criteria. Missing evidence or malformed output fails closed.`;
 
 export class CriticGateService {
   private providers: ProviderRegistry;

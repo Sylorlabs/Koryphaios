@@ -10,6 +10,7 @@ import type { KoryManager } from '../kory/manager';
 import type { ProviderRegistry } from '../providers';
 import { validateSessionId } from '../security';
 import { serverLog } from '../logger';
+import { getOrderedEventLog } from '../ws/ordered-event-log';
 
 // ─── Types ─────────────────────────────────────────────────────────────────────
 
@@ -92,6 +93,54 @@ export async function handleWSMessage(
         const sessionId = msg.sessionId;
         if (sessionId && validateSessionId(sessionId) && (await sessions.get(sessionId))) {
           wsManager.subscribeClientToSession(ws.data.id, sessionId);
+          const eventLog = getOrderedEventLog();
+          const cursor = eventLog.getCursor(sessionId);
+          const requestedEpoch = Number.isSafeInteger(msg.epoch) ? Number(msg.epoch) : undefined;
+          const requestedAfter = Number.isSafeInteger(msg.afterSequence)
+            ? Math.max(0, Number(msg.afterSequence))
+            : undefined;
+
+          // A newly opened frontend has no local cursor. It still needs the
+          // operational transcript (thinking, tools, and partial output), not
+          // merely the persisted chat messages, after a renderer crash or
+          // reload. Start that client from the beginning of the current epoch.
+          const replayEpoch = requestedEpoch ?? cursor.epoch;
+          const replayAfter = requestedAfter ?? 0;
+          if (replayEpoch !== cursor.epoch || replayAfter > cursor.latestSequence) {
+            ws.send(
+              JSON.stringify({
+                type: 'session.integrity_error',
+                sessionId,
+                timestamp: Date.now(),
+                payload: {
+                  code: replayEpoch !== cursor.epoch ? 'EPOCH_MISMATCH' : 'CURSOR_AHEAD',
+                  cursor,
+                },
+              } satisfies WSMessage),
+            );
+          } else {
+            let after = replayAfter;
+            do {
+              const events = eventLog.getAfter(sessionId, cursor.epoch, after);
+              if (events.length > 0) after = events.at(-1)!.sequence!;
+              const complete = after >= cursor.latestSequence || events.length === 0;
+              ws.send(
+                JSON.stringify({
+                  type: 'session.replay',
+                  sessionId,
+                  timestamp: Date.now(),
+                  payload: {
+                    epoch: cursor.epoch,
+                    events,
+                    throughSequence: after,
+                    latestSequence: cursor.latestSequence,
+                    complete,
+                  },
+                } satisfies WSMessage),
+              );
+              if (complete) break;
+            } while (true);
+          }
           serverLog.debug({ clientId: ws.data.id, sessionId }, 'Client subscribed to session');
         }
         break;
@@ -101,7 +150,10 @@ export async function handleWSMessage(
         if (await assertSessionAccess(msg.sessionId)) {
           kory.handleUserInput(msg.sessionId, msg.selection, msg.text);
         } else {
-          serverLog.warn({ sessionId: msg.sessionId, clientId: ws.data.id }, 'Unauthorized user_input attempt');
+          serverLog.warn(
+            { sessionId: msg.sessionId, clientId: ws.data.id },
+            'Unauthorized user_input attempt',
+          );
         }
         break;
 

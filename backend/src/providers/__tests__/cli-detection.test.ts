@@ -64,6 +64,7 @@ describe('detectAgentClis', () => {
       'cursor',
       'devin',
       'grok',
+      'kimi',
     ]);
     const byId = Object.fromEntries(list.map((c) => [c.id, c]));
     expect(byId.claude.provider).toBe('claude');
@@ -74,6 +75,7 @@ describe('detectAgentClis', () => {
     expect(byId.cursor.provider).toBe('cursor'); // Cursor CLI harness provider
     expect(byId.devin.provider).toBe('devin'); // Devin CLI harness provider
     expect(byId.cline.provider).toBe('cline'); // Cline CLI harness provider
+    expect(byId.kimi.provider).toBe('kimicode'); // Kimi CLI harness provider
   });
 
   it('every entry carries a binary path when installed, and a human note', () => {
@@ -164,8 +166,10 @@ describe('login detectors (deterministic via temp HOME)', () => {
     writeFileSync(
       join(tmpHome, '.cline', 'data', 'secrets.json'),
       JSON.stringify({
-        providers: { cline: { settings: { model: 'gpt-4o' } },
-        auth: { apiKey: 'sk-long-api-key-like-value-for-testing-1234567890' } },
+        providers: {
+          cline: { settings: { model: 'gpt-4o' } },
+          auth: { apiKey: 'sk-long-api-key-like-value-for-testing-1234567890' },
+        },
       }),
     );
     expect(detectClineCLILogin()).toBe(true);

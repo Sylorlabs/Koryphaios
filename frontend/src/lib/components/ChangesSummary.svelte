@@ -70,7 +70,7 @@
       <!-- Change list -->
       {#if expanded}
         <div transition:slide={{ duration: 200 }} class="max-h-60 overflow-y-auto border-t border-[var(--color-border)] p-2 space-y-1 bg-[var(--color-surface-1)]">
-          {#each changes as change}
+          {#each changes as change (change.path)}
             <div class="flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-[var(--color-surface-2)] transition-colors">
               {#if change.operation === 'create'}
                 <Plus size={12} class="text-emerald-400" />

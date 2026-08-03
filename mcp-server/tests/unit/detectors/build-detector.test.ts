@@ -237,7 +237,7 @@ src/utils.ts(25,12): warning TS6133: 'unused' is declared but its value is never
       await stoppedPromise;
     });
 
-    it('should emit detector-error event on errors', async () => {
+    it('should keep running when an on-demand build check fails', async () => {
       // Test that detector handles errors gracefully during operation
       vi.spyOn(detector as any, 'verifyTypeScriptAvailable').mockResolvedValue(undefined);
       vi.spyOn(detector as any, 'runBuildCheck').mockResolvedValue(undefined);
@@ -247,18 +247,18 @@ src/utils.ts(25,12): warning TS6133: 'unused' is declared but its value is never
 
       // Now simulate an error during operation
       const testError = new Error('Build check error');
-      const errorPromise = new Promise<Error>(resolve => {
-        detector.once('detector-error', resolve);
-      });
+      const errorHandler = vi.fn();
+      detector.on('detector-error', errorHandler);
 
       // Trigger an error by calling runBuildCheck directly with a mock that throws
       vi.spyOn(detector as any, 'runBuildCheck').mockRejectedValue(testError);
+      vi.spyOn(detector as any, 'runStaticAnalysis').mockResolvedValue([]);
 
       // Trigger the error by calling detectErrors which will call runBuildCheck
       await detector.detectErrors();
 
-      const emittedError = await errorPromise;
-      expect(emittedError).toBe(testError);
+      expect(detector.isRunning).toBe(true);
+      expect(errorHandler).toHaveBeenCalledWith(testError);
     });
   });
 });

@@ -1,6 +1,7 @@
 import type { ServerWebSocket } from 'bun';
 import type { WSMessage } from '@koryphaios/shared';
 import { serverLog } from '../logger';
+import { getOrderedEventLog } from './ordered-event-log';
 
 interface WSClientData {
   id: string;
@@ -96,7 +97,10 @@ export class WSManager {
   }
 
   broadcast(message: WSMessage) {
-    const data = JSON.stringify(message);
+    const outgoing = message.sessionId
+      ? getOrderedEventLog().append({ ...message, timestamp: message.timestamp ?? Date.now() })
+      : message;
+    const data = JSON.stringify(outgoing);
     let successCount = 0;
     let failCount = 0;
 
@@ -115,10 +119,16 @@ export class WSManager {
     if (failCount > 0) {
       serverLog.debug({ successCount, failCount }, 'Broadcast complete with failures');
     }
+    if (outgoing.sessionId) getOrderedEventLog().markDispatched(outgoing.eventId);
   }
 
   broadcastToSession(sessionId: string, message: WSMessage) {
-    const data = JSON.stringify(message);
+    const outgoing = getOrderedEventLog().append({
+      ...message,
+      sessionId,
+      timestamp: message.timestamp ?? Date.now(),
+    });
+    const data = JSON.stringify(outgoing);
     let targetCount = 0;
 
     for (const [, client] of this.clients) {
@@ -137,6 +147,7 @@ export class WSManager {
       }
     }
 
+    getOrderedEventLog().markDispatched(outgoing.eventId);
     serverLog.debug({ sessionId, targetCount }, 'Session broadcast complete');
   }
 

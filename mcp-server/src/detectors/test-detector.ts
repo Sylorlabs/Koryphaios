@@ -193,14 +193,14 @@ export class TestErrorDetector extends BaseErrorDetector {
     this.fileWatcher.on('error', (error: Error) => {
       const fsError = error as NodeJS.ErrnoException;
       if (fsError.code === 'EACCES' || fsError.code === 'EPERM') {
-        this.logger.warn('Ignoring file watcher permission error', {
+        console.warn('Ignoring file watcher permission error', {
           code: fsError.code,
           path: fsError.path,
         });
         return;
       }
 
-      this.logger.error('File watcher error', error);
+      console.error('File watcher error', error);
       this.emit('detector-error', error);
     });
   }

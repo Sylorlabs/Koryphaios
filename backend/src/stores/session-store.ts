@@ -26,16 +26,25 @@ export interface ISessionStore {
 }
 
 function toSharedSession(s: DbSession): SharedSession {
+  let metadata: { interactionMode?: 'act' | 'plan' } = {};
+  try {
+    metadata = s.metadata ? JSON.parse(s.metadata) : {};
+  } catch {
+    metadata = {};
+  }
   return {
     id: s.id,
     title: s.title,
     parentSessionId: s.parentId ?? undefined,
     workingDirectory: s.workingDirectory ?? undefined,
+    interactionMode: metadata.interactionMode === 'plan' ? 'plan' : 'act',
     messageCount: s.messageCount ?? 0,
     totalTokensIn: s.tokensIn ?? 0,
     totalTokensOut: s.tokensOut ?? 0,
     totalCost: s.totalCost ?? 0,
     version: s.version ?? 1,
+    conversationRevision: s.conversationRevision ?? 0,
+    runtimeState: (s.workflowState ?? 'idle') as SharedSession['runtimeState'],
     createdAt: s.createdAt.getTime(),
     updatedAt: s.updatedAt.getTime(),
   };
@@ -120,6 +129,16 @@ export class SessionStore implements ISessionStore {
     if (updates.totalCost !== undefined) drizzleUpdates.totalCost = updates.totalCost;
     if (updates.workingDirectory !== undefined)
       drizzleUpdates.workingDirectory = updates.workingDirectory || null;
+    if (updates.interactionMode !== undefined) {
+      const prior = await db.query.sessions.findFirst({ where: eq(sessions.id, id) });
+      let metadata: Record<string, unknown> = {};
+      try {
+        metadata = prior?.metadata ? JSON.parse(prior.metadata) : {};
+      } catch {
+        metadata = {};
+      }
+      drizzleUpdates.metadata = JSON.stringify({ ...metadata, interactionMode: updates.interactionMode });
+    }
 
     const whereClause = expectedVersion
       ? and(eq(sessions.id, id), eq(sessions.version, expectedVersion))

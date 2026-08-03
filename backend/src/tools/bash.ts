@@ -54,6 +54,12 @@ export function isCatastrophicBashCommand(command: string): boolean {
   return CATASTROPHIC_COMMAND_PATTERNS.some((pattern) => pattern.test(command));
 }
 
+/** YOLO is deliberately unrestricted; Guarded and every other mode retain the
+ * final human confirmation for broad destructive shell commands. */
+export function requiresCatastrophicConfirmation(command: string, yoloMode = false): boolean {
+  return isCatastrophicBashCommand(command) && !yoloMode;
+}
+
 function isWithinRoot(root: string, target: string): boolean {
   const rel = relative(root, target);
   return rel === '' || (!rel.startsWith('..') && !isAbsolute(rel));
@@ -176,7 +182,7 @@ Network access via curl/wget is blocked unless explicitly authorized.`;
     }
 
     const catastrophic = isCatastrophicBashCommand(command);
-    if (catastrophic) {
+    if (requiresCatastrophicConfirmation(command, ctx.yoloMode)) {
       if (!ctx.waitForUserInput) {
         return {
           callId: call.id,
@@ -231,7 +237,10 @@ Network access via curl/wget is blocked unless explicitly authorized.`;
       reason: validation.reason,
     });
 
-    if (!validation.safe && !catastrophic) {
+    // YOLO is a deliberate opt-in to run commands without Kory's local
+    // approval/security classifier. OS permissions, the project jail, and any
+    // collaboration access policy remain independent boundaries.
+    if (!validation.safe && !ctx.yoloMode) {
       return {
         callId: call.id,
         name: this.name,

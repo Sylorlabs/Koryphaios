@@ -36,12 +36,25 @@ export type {
   SessionMetadata,
   SessionSnapshot,
   SessionState,
+  SessionRuntimeState,
   AgentInfo,
   TaskInfo,
 } from './types/SessionTypes';
 
 // ============== Task Types ==============
 export type { WorkerTask } from './types/TaskTypes';
+export type {
+  VoiceCapability,
+  VoiceModelFamily,
+  VoiceSettings,
+  VoiceProviderDescriptor,
+  VoiceModelDescriptor,
+  VoicePackManifest,
+  VoicePackStatus,
+  TranscriptionResult,
+  SynthesisRequest,
+  SynthesisResult,
+} from './types/VoiceTypes';
 
 // ============== Provider & Model Definitions ==============
 export { ProviderName } from './providers/ProviderNames';
@@ -121,11 +134,15 @@ export type {
   KoryRoutingPayload,
   KoryTaskBreakdownPayload,
   KoryAskUserPayload,
+  KoryQuestionChart,
+  KoryQuestionSlider,
+  KoryQuestionPresentation,
   KoryVerificationPayload,
   ProviderStatusPayload,
   ProviderInfo,
   RateLimitPayload,
   NativeCommandPayload,
+  SessionIdlePayload,
 } from './websocket/WSPayloads';
 
 // ============== REST API Types ==============
@@ -153,7 +170,7 @@ export {
   STANDARD_REASONING_OPTIONS,
   buildReasoningConfigFromLevels,
 } from './reasoning/ReasoningFunctions';
-export type { Goal, GoalScope, GoalStatus, GoalItemStatus, GoalChecklistItem, GoalEvidence, GoalActivity } from './types/GoalTypes';
+export type { Goal, GoalScope, GoalStatus, GoalItemStatus, GoalChecklistItem, GoalEvidence, GoalActivity, GoalExecutionConfig } from './types/GoalTypes';
 export { goalProgress } from './types/GoalTypes';
 
 export type {

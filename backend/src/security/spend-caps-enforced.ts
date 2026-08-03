@@ -157,7 +157,7 @@ export async function setEnforcedCaps(
       });
     wsManager?.broadcast({
       type: 'system.info',
-      payload: { message: 'Spend caps updated', config: updated },
+      payload: { message: 'Spend caps updated', config: updated, kind: 'spend_caps' },
       timestamp: Date.now(),
     });
   } catch (err) {

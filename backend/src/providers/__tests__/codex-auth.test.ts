@@ -5,7 +5,13 @@ const account = mock(async () => ({
   account: { type: 'chatgpt', planType: 'pro' },
   requiresOpenaiAuth: true,
 }));
-const listModels = mock(async () => [{ model: 'gpt-5.6-sol', displayName: 'GPT-5.6 Sol', isDefault: true }]);
+const listModels = mock(async () => [{
+  model: 'gpt-5.3-codex',
+  displayName: 'GPT-5.3-Codex',
+  isDefault: true,
+  contextWindow: 400_000,
+  maxOutputTokens: 128_000,
+}]);
 
 // A successful browser callback reaches setCredentials before a provider
 // instance exists. This mock proves the registry validates that path directly
@@ -21,9 +27,9 @@ function config(): KoryphaiosConfig {
   return {
     providers: {},
     agents: {
-      manager: { model: 'gpt-5.6-sol' },
-      coder: { model: 'gpt-5.6-sol' },
-      task: { model: 'gpt-5.6-sol' },
+      manager: { model: 'gpt-5.3-codex' },
+      coder: { model: 'gpt-5.3-codex' },
+      task: { model: 'gpt-5.3-codex' },
     },
     server: { port: 3000, host: 'localhost' },
     dataDirectory: '.koryphaios-test',
@@ -48,7 +54,11 @@ describe('OpenAI Codex managed ChatGPT auth', () => {
     expect(result).toEqual({ success: true });
     expect(account).toHaveBeenCalledWith(true);
     expect(registry.get('codex-auth')?.isAvailable()).toBe(true);
-    expect(registry.get('codex-auth')?.listModels().map((model) => model.apiModelId)).toEqual(['gpt-5.6-sol']);
+    const model = registry.get('codex-auth')?.listModels()[0];
+    expect(model?.apiModelId).toBe('gpt-5.3-codex');
+    expect(model?.contextWindow).toBe(400_000);
+    expect(model?.contextVerified).toBe(true);
+    expect(model?.maxOutputTokens).toBe(128_000);
   });
 });
 

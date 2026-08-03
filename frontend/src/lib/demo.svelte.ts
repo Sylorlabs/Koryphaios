@@ -1,12 +1,10 @@
-// Demo mode — embedded on koryphaios.com via ?demo=1 (guided) or ?demo=full.
+// Guided public preview — embedded on koryphaios.com via ?demo=1.
 //
 // Guided: renders the REAL UI and plays a scripted session on a loop so the
 // site shows an example user doing work — Koryphaios *in action*.
 //
-// Full: the real app frontend with a stateful, tab-scoped virtual workspace.
-// Core browser-safe workflows (sessions, settings, notes, goals, files, diffs,
-// and review) run against demo-api.ts; agent execution is explicitly simulated.
-// Nothing is saved anywhere and native/provider operations stay desktop-only.
+// It is intentionally read-only: no provider, terminal, local file, or mutable
+// browser workspace is exposed from the public site.
 
 import { authStore } from '$lib/stores/auth.svelte';
 import { sessionStore } from '$lib/stores/sessions.svelte';
@@ -14,12 +12,12 @@ import { projectStore } from '$lib/stores/project.svelte';
 import { feedStore } from '$lib/stores/feed.svelte';
 import { agentStore } from '$lib/stores/agents.svelte';
 import { providersStore } from '$lib/stores/providers.svelte';
-import { wsStore } from '$lib/stores/websocket.svelte';
-import { applyDemoRunArtifacts, getDemoSession, registerDemoSessions, recordDemoMessage } from '$lib/demo-api';
-import { isDemoMode, isGuidedDemo, isFullDemo, demoVariant } from '$lib/demo-flags';
+import { registerDemoSessions, recordDemoMessage } from '$lib/demo-api';
+import { isDemoMode, isGuidedDemo, demoVariant } from '$lib/demo-flags';
 import type { Session } from '@koryphaios/shared';
 
-export { isDemoMode, isGuidedDemo, isFullDemo, demoVariant };
+export { isDemoMode, isGuidedDemo, demoVariant };
+
 
 const now = Date.now();
 
@@ -49,7 +47,7 @@ const WORKERS = [
     id: 'w-fe',
     name: 'frontend',
     domain: 'ui',
-    model: 'gpt-5.6-sol',
+    model: 'gpt-5.3-codex',
     provider: 'codex',
     glow: 'rgba(0,255,255,0.5)',
   },
@@ -57,8 +55,8 @@ const WORKERS = [
     id: 'w-be',
     name: 'backend',
     domain: 'backend',
-    model: 'jules-gemini-3.1-pro',
-    provider: 'jules',
+    model: 'gemini-3.1-pro',
+    provider: 'google',
     glow: 'rgba(66,133,244,0.5)',
   },
   {
@@ -92,7 +90,6 @@ const AVAILABLE_DEMO_PROVIDERS = [
   ['cursor', 'Cursor', 'auth_only'],
   ['devin', 'Devin', 'auth_only'],
   ['cline', 'Cline', 'auth_only'],
-  ['jules', 'Google Jules', 'api_key'],
   ['azure', 'Azure OpenAI', 'api_key_or_auth'],
   ['bedrock', 'AWS Bedrock', 'env_auth'],
   ['vertexai', 'Vertex AI', 'env_auth'],
@@ -116,7 +113,6 @@ const AVAILABLE_DEMO_PROVIDERS = [
   ['ionet', 'IO.net', 'api_key'],
   ['hyperbolic', 'Hyperbolic', 'api_key'],
   ['huggingface', 'HuggingFace', 'api_key'],
-  ['replicate', 'Replicate', 'api_key'],
   ['modal', 'Modal', 'api_key'],
   ['cloudflare', 'Cloudflare', 'api_key'],
   ['vercel', 'Vercel', 'api_key'],
@@ -137,22 +133,8 @@ const AVAILABLE_DEMO_PROVIDERS = [
   ['mistral', 'Mistral AI', 'api_key'],
   ['cohere', 'Cohere', 'api_key'],
   ['perplexity', 'Perplexity', 'api_key'],
-  ['luma', 'Luma', 'api_key'],
-  ['fal', 'Fal', 'api_key'],
-  ['elevenlabs', 'ElevenLabs', 'api_key'],
-  ['deepgram', 'Deepgram', 'api_key'],
-  ['gladia', 'Gladia', 'api_key'],
-  ['assemblyai', 'AssemblyAI', 'api_key'],
-  ['lmnt', 'LMNT', 'api_key'],
   ['nvidia', 'NVIDIA', 'api_key'],
   ['friendli', 'Friendli', 'api_key'],
-  ['voyageai', 'Voyage AI', 'api_key'],
-  ['mixedbread', 'Mixedbread', 'api_key'],
-  ['mem0', 'Mem0', 'api_key'],
-  ['letta', 'Letta', 'api_key'],
-  ['blackforestlabs', 'Black Forest Labs', 'api_key'],
-  ['klingai', 'Kling AI', 'api_key'],
-  ['prodia', 'Prodia', 'api_key'],
   ['novita-ai', 'Novita AI', 'api_key'],
   ['upstage', 'Upstage', 'api_key'],
   ['siliconflow', 'SiliconFlow', 'api_key'],
@@ -161,7 +143,6 @@ const AVAILABLE_DEMO_PROVIDERS = [
   ['vultr', 'Vultr', 'api_key'],
   ['wandb', 'Weights & Biases', 'api_key'],
   ['poe', 'Poe', 'api_key'],
-  ['github-models', 'GitHub Models', 'api_key'],
   ['requesty', 'Requesty', 'api_key'],
   ['inference', 'Inference.net', 'api_key'],
   ['submodel', 'SubModel', 'api_key'],
@@ -169,7 +150,6 @@ const AVAILABLE_DEMO_PROVIDERS = [
   ['moark', 'Moark', 'api_key'],
   ['azurecognitive', 'Azure Cognitive', 'api_key'],
   ['sapai', 'SAP AI', 'api_key'],
-  ['gitlab', 'GitLab', 'api_key'],
 ] as const;
 
 // These are clearly marked demo connections. Their model IDs and display
@@ -182,49 +162,19 @@ const CONNECTED_DEMO_PROVIDERS = [
     enabled: true,
     authenticated: true,
     authSource: 'Demo CLI session',
-    models: ['gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna', 'gpt-5.5', 'gpt-5.4', 'gpt-5.4-mini'],
-    selectedModels: ['gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna', 'gpt-5.5', 'gpt-5.4', 'gpt-5.4-mini'],
+    models: ['gpt-5.3-codex'],
+    selectedModels: ['gpt-5.3-codex'],
     allAvailableModels: [
       {
-        id: 'gpt-5.6-sol',
-        name: 'GPT-5.6-Sol',
-        provider: 'codex',
-        contextWindow: 1_050_000,
-        maxOutputTokens: 128_000,
-        contextVerified: true,
-        canReason: true,
-        reasoningLevels: ['none', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra'],
-      },
-      {
-        id: 'gpt-5.6-terra',
-        name: 'GPT-5.6-Terra',
-        provider: 'codex',
-        contextWindow: 1_050_000,
-        maxOutputTokens: 128_000,
-        contextVerified: true,
-        canReason: true,
-        reasoningLevels: ['none', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra'],
-      },
-      {
-        id: 'gpt-5.6-luna',
-        name: 'GPT-5.6-Luna',
-        provider: 'codex',
-        contextWindow: 1_050_000,
-        maxOutputTokens: 128_000,
-        contextVerified: true,
-        canReason: true,
-        reasoningLevels: ['none', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra'],
-      },
-      ...['gpt-5.5', 'gpt-5.4', 'gpt-5.4-mini'].map((id) => ({
-        id,
-        name: id.replace('gpt-', 'GPT-').replace('-mini', '-Mini'),
+        id: 'gpt-5.3-codex',
+        name: 'GPT-5.3-Codex',
         provider: 'codex',
         contextWindow: 400_000,
         maxOutputTokens: 128_000,
         contextVerified: true,
         canReason: true,
-        reasoningLevels: ['none', 'low', 'medium', 'high', 'xhigh'],
-      })),
+        reasoningLevels: ['low', 'medium', 'high', 'xhigh'],
+      },
     ],
     hideModelSelector: false,
     authMode: 'auth_only',
@@ -237,14 +187,11 @@ const CONNECTED_DEMO_PROVIDERS = [
     label: 'OpenAI Codex',
     enabled: true,
     authenticated: true,
-    authSource: 'Demo ChatGPT sign-in',
-    models: ['gpt-5.6-terra', 'gpt-5.6-luna', 'gpt-5.5', 'gpt-5.4-mini'],
-    selectedModels: ['gpt-5.6-terra', 'gpt-5.6-luna', 'gpt-5.5', 'gpt-5.4-mini'],
+    authSource: 'Demo ChatGPT subscription sign-in',
+    models: ['gpt-5.3-codex'],
+    selectedModels: ['gpt-5.3-codex'],
     allAvailableModels: [
-      ['gpt-5.6-terra', 'GPT-5.6-Terra'],
-      ['gpt-5.6-luna', 'GPT-5.6-Luna'],
-      ['gpt-5.5', 'GPT-5.5'],
-      ['gpt-5.4-mini', 'GPT-5.4-Mini'],
+      ['gpt-5.3-codex', 'GPT-5.3-Codex'],
     ].map(([id, name]) => ({
       id,
       name,
@@ -253,7 +200,7 @@ const CONNECTED_DEMO_PROVIDERS = [
       maxOutputTokens: 128_000,
       contextVerified: true,
       canReason: true,
-      reasoningLevels: ['none', 'low', 'medium', 'high', 'xhigh'],
+      reasoningLevels: ['low', 'medium', 'high', 'xhigh'],
     })),
     hideModelSelector: false,
     authMode: 'auth_only',
@@ -271,14 +218,14 @@ const CONNECTED_DEMO_PROVIDERS = [
     selectedModels: ['claude-code-fable', 'claude-code-opus', 'claude-code-sonnet', 'claude-code-haiku'],
     allAvailableModels: [
       ['claude-code-fable', 'Claude Fable 5'],
-      ['claude-code-opus', 'Claude Opus 4.8'],
+      ['claude-code-opus', 'Claude Opus 5'],
       ['claude-code-sonnet', 'Claude Sonnet 5'],
       ['claude-code-haiku', 'Claude Haiku 4.5'],
     ].map(([id, name]) => ({
       id,
       name,
       provider: 'claude',
-      contextWindow: 200_000,
+      contextWindow: 1_000_000,
       maxOutputTokens: 32_000,
       contextVerified: true,
       canReason: true,
@@ -291,33 +238,33 @@ const CONNECTED_DEMO_PROVIDERS = [
     requiresBaseUrl: false,
   },
   {
-    name: 'jules',
-    label: 'Google Jules',
+    name: 'google',
+    label: 'Google',
     enabled: true,
     authenticated: true,
-    authSource: 'Demo cloud connection',
-    models: ['jules-gemini-3-flash', 'jules-gemini-3.1-pro'],
-    selectedModels: ['jules-gemini-3-flash', 'jules-gemini-3.1-pro'],
+    authSource: 'Demo Gemini API connection',
+    models: ['gemini-3.6-flash', 'gemini-3.1-pro'],
+    selectedModels: ['gemini-3.6-flash', 'gemini-3.1-pro'],
     allAvailableModels: [
       {
-        id: 'jules-gemini-3-flash',
-        name: 'Jules · Gemini 3 Flash (cloud)',
-        provider: 'jules',
+        id: 'gemini-3.6-flash',
+        name: 'Gemini 3.6 Flash',
+        provider: 'google',
         contextWindow: 1_000_000,
         maxOutputTokens: 64_000,
         contextVerified: true,
         canReason: true,
-        reasoningLevels: [],
+        reasoningLevels: ['low', 'medium', 'high'],
       },
       {
-        id: 'jules-gemini-3.1-pro',
-        name: 'Jules · Gemini 3.1 Pro (cloud)',
-        provider: 'jules',
+        id: 'gemini-3.1-pro',
+        name: 'Gemini 3.1 Pro',
+        provider: 'google',
         contextWindow: 1_000_000,
-        maxOutputTokens: 128_000,
+        maxOutputTokens: 64_000,
         contextVerified: true,
         canReason: true,
-        reasoningLevels: [],
+        reasoningLevels: ['low', 'medium', 'high', 'xhigh'],
       },
     ],
     hideModelSelector: false,
@@ -360,11 +307,6 @@ const REPLY =
   'building the API routes and query layer, and the testing agent is writing coverage. Once they ' +
   "report back I'll run the critic gate and synthesize the final result.";
 
-function trialReply(prompt: string): string {
-  const request = prompt.trim().replace(/\s+/g, ' ');
-  return `I turned “${request}” into a tab-scoped trial plan. The manager routed frontend, backend, and test work; the critic simulated the matching test and marked it passed. The virtual workspace now contains an inspectable implementation plan, a matching test, and a README note. Review the generated diff, keep or reject it, then record evidence in Goal Mode. This is a simulated browser run—no provider, terminal, or local project was contacted.`;
-}
-
 let timers: ReturnType<typeof setTimeout>[] = [];
 function at(ms: number, fn: () => void) {
   timers.push(setTimeout(fn, ms));
@@ -374,11 +316,6 @@ function clearTimers() {
   timers = [];
 }
 
-// Full demo: session the current simulated turn belongs to, until its reply
-// has been recorded. Lets a mid-turn session switch finalize the turn instead
-// of leaking streamed text into the newly opened session.
-let pendingReplySid: string | null = null;
-let pendingReplyContent: string | null = null;
 let guidedPlaybackSessionId: string | null = null;
 
 function activeSessionId(): string {
@@ -400,39 +337,75 @@ function spawnWorkers(sessionId: string) {
       `${w.domain} work`,
       sessionId,
     );
-    agentStore.updateAgentStatus(w.id, 'idle', sessionId);
+    const usage = w.id === 'w-fe'
+      ? { tokensUsed: 84_200, contextWindow: 400_000, breakdown: { system: 8_400, memory: 6_800, tools: 41_100, chat: 27_900 } }
+      : w.id === 'w-be'
+        ? { tokensUsed: 112_600, contextWindow: 400_000, breakdown: { system: 7_900, memory: 9_200, tools: 63_500, chat: 32_000 } }
+        : { tokensUsed: 46_800, contextWindow: 400_000, breakdown: { system: 6_100, memory: 4_700, tools: 18_600, chat: 17_400 } };
+    agentStore.updateUsage(w.id, { ...usage, agentId: w.id, model: w.model, provider: w.provider as never, tokensIn: usage.tokensUsed, tokensOut: 0, usageKnown: true, contextKnown: true }, sessionId);
+    agentStore.setAgentThreadFeed(sessionId, w.id, [
+      {
+        id: `demo-${w.id}-request`,
+        timestamp: Date.now() - 1_800,
+        type: 'user_message',
+        agentId: 'user',
+        agentName: 'You',
+        glowClass: '',
+        text: SCRIPT_PROMPT,
+      },
+      {
+        id: `demo-${w.id}-brief`,
+        timestamp: Date.now() - 1_400,
+        type: 'content',
+        agentId: 'kory-manager',
+        agentName: 'Manager',
+        glowClass: 'glow-kory',
+        text: w.id === 'w-fe'
+          ? 'Build the responsive analytics chart and preserve the existing visual language.'
+          : w.id === 'w-be'
+            ? 'Implement the metrics query route, cache results, and return typed errors.'
+            : 'Add coverage for the dashboard data states and verify the main workflow.',
+      },
+      {
+        id: `demo-${w.id}-activity`,
+        timestamp: Date.now() - 700,
+        type: 'tool_result',
+        agentId: w.id,
+        agentName: w.name,
+        glowClass: w.id === 'w-fe' ? 'glow-codex' : w.id === 'w-be' ? 'glow-google' : 'glow-test',
+        text: w.id === 'w-fe'
+          ? 'Editing src/components/RevenueChart.tsx · inspecting the chart data contract.'
+          : w.id === 'w-be'
+            ? 'Editing src/api/metrics.ts · tracing the cache and query boundary.'
+            : 'Running dashboard.integration.test.ts · checking empty, loading, and error states.',
+      },
+    ]);
   }
 }
 
-/** One simulated manager turn. In the guided demo it loops forever; in the
- *  full demo it plays once per user prompt (and echoes the user's own text). */
+/** One read-only, looping sample manager turn. */
 function playTurn(prompt: string, opts: { loop: boolean; clear: boolean }) {
   clearTimers();
   const sid = activeSessionId();
   if (opts.loop) guidedPlaybackSessionId = sid;
-  const reply = isFullDemo ? trialReply(prompt) : REPLY;
-  if (isFullDemo) {
-    pendingReplySid = sid;
-    pendingReplyContent = reply;
+  const reply = REPLY;
+  // Only reset on the first pass. Clearing before a delayed first event made
+  // the embedded demo visibly empty between loops, which looked frozen.
+  if (opts.clear) {
+    feedStore.clearFeed();
+    agentStore.clearNonManagerAgents();
   }
-  if (opts.clear) feedStore.clearFeed();
-  // Remove the workers so they visibly fly back in from the top when Kory
-  // routes — mirrors the real spawn animation each turn.
-  agentStore.clearNonManagerAgents();
   agentStore.updateAgentStatus('kory-manager', 'idle', sid);
 
-  at(600, () => {
-    feedStore.addFeedEntry({
-      timestamp: Date.now(),
-      type: 'user_message',
-      agentId: 'user',
-      agentName: 'You',
-      glowClass: '',
-      text: prompt,
-    });
-    // Recorded at the same moment it's echoed so the session-switch history
-    // fetch can never race it into a duplicate.
-    if (isFullDemo) recordDemoMessage(sid, 'user', prompt);
+  // Always keep a visible event on screen. The rest of the playback still
+  // stages in, but a loop transition is never a blank workspace.
+  feedStore.addFeedEntry({
+    timestamp: Date.now(),
+    type: 'user_message',
+    agentId: 'user',
+    agentName: 'You',
+    glowClass: '',
+    text: prompt,
   });
 
   at(1600, () => {
@@ -456,51 +429,40 @@ function playTurn(prompt: string, opts: { loop: boolean; clear: boolean }) {
       agentId: 'kory-manager',
       agentName: 'Kory',
       glowClass: 'glow-kory',
-      text: 'Routing: frontend → Codex CLI / GPT-5.6-Sol · backend → Google Jules / Gemini 3.1 Pro · tests → Claude Code / Claude Sonnet 5',
+      text: 'Routing: frontend → Codex CLI / GPT-5.6-Sol · backend → Google / Gemini 3.1 Pro · tests → Claude Code / Claude Sonnet 5',
       metadata: { phase: 'routing' },
     });
     // Workers spawn now — they fly in from the top of the agent rail.
     spawnWorkers(sid);
     at(250, () => {
       agentStore.updateAgentStatus('w-fe', 'writing', sid);
-      agentStore.updateAgentStatus('w-be', 'thinking', sid);
-      agentStore.updateAgentStatus('w-test', 'thinking', sid);
+      agentStore.updateAgentStatus('w-be', 'writing', sid);
+      agentStore.updateAgentStatus('w-test', 'verifying', sid);
+      agentStore.addToolCall('w-fe', 'demo-edit-file', 'edit_file', sid);
+      agentStore.addToolCall('w-be', 'demo-read-file', 'read_file', sid);
+      agentStore.addToolCall('w-test', 'demo-run-tests', 'run_tests', sid);
     });
   });
 
   at(4600, () => {
-    const changes = isFullDemo ? applyDemoRunArtifacts(prompt, sid) : [];
-    if (isFullDemo) {
-      wsStore.setDemoSessionChanges(sid, changes);
-      const updatedSession = getDemoSession(sid);
-      if (updatedSession) sessionStore.handleSessionUpdate(updatedSession);
-      // Keep an already-open Source Control panel truthful as the simulated
-      // manager creates files; it should never say “working tree clean” while
-      // the review tray is offering those same changes.
-      void import('$lib/stores/git.svelte').then(({ gitStore }) => gitStore.refreshStatus());
-    }
     feedStore.addFeedEntry({
       timestamp: Date.now(),
       type: 'tool_result',
       agentId: 'kory-manager',
       agentName: 'Kory',
       glowClass: '',
-      text: isFullDemo
-        ? 'Prepared an inspectable browser-trial change set: plan, test, and README update.'
-        : 'Created src/components/RevenueChart.tsx, src/api/metrics.ts',
+      text: 'Created src/components/RevenueChart.tsx, src/api/metrics.ts',
       metadata: {
         toolResult: {
           callId: 'demo-1',
           name: 'batch_edit',
-          output: isFullDemo
-            ? 'Created src/lib/trialPlan.ts\nCreated tests/trialPlan.test.ts\nUpdated README.md\n\nOpen the review tray to inspect, keep, or reject these tab-scoped changes.'
-            : 'Created src/components/RevenueChart.tsx (+142)\nCreated src/api/metrics.ts (+88)',
+          output: 'Created src/components/RevenueChart.tsx (+142)\nCreated src/api/metrics.ts (+88)',
           isError: false,
           durationMs: 0,
         },
       },
     });
-    agentStore.updateAgentStatus('w-be', 'tool_calling', sid);
+    agentStore.updateAgentStatus('w-be', 'writing', sid);
   });
 
   at(5400, () => {
@@ -544,51 +506,54 @@ function playTurn(prompt: string, opts: { loop: boolean; clear: boolean }) {
     at(doneAt, () => {
       agentStore.updateAgentStatus('kory-manager', 'done', sid);
       for (const w of WORKERS) agentStore.updateAgentStatus(w.id, 'done', sid);
-      // Full demo: persist the finished turn in the tab-scoped shim so
-      // switching sessions and back restores the conversation.
-      if (isFullDemo && pendingReplySid === sid) {
-        recordDemoMessage(sid, 'assistant', reply, 'gpt-5.6-sol');
-        const completedSession = getDemoSession(sid);
-        if (completedSession) sessionStore.handleSessionUpdate(completedSession);
-        pendingReplySid = null;
-        pendingReplyContent = null;
-      }
     });
     // Hold, then loop (guided demo only).
     if (opts.loop) {
-      at(doneAt + 4500, () => playTurn(SCRIPT_PROMPT, { loop: true, clear: true }));
+      at(doneAt + 4500, () => playTurn(SCRIPT_PROMPT, { loop: true, clear: false }));
     }
   });
 }
 
-/** Seed static state + start playback (guided) or hand control over (full). */
+/** Seed the public preview and start its repeatable playback. */
 export function seedDemo(): void {
   authStore.setUser({ id: 'demo', email: 'demo@koryphaios.com', name: 'Demo' } as never);
   providersStore.setProviderStatusList(DEMO_PROVIDERS as never);
-  // The trial deliberately opens the desktop app's advanced controls. A
-  // visitor needs Source Control, agent detail, and review surfaces to judge
-  // Koryphaios; hiding them behind the beginner-mode default defeats the trial.
-  if (isFullDemo) {
-    void import('$lib/stores/mode.svelte').then(({ modeStore }) => modeStore.setMode('advanced'));
-  }
-  projectStore.setProject(isFullDemo ? '/demo/starter-project' : '/demo/analytics-dashboard');
-  // Guided mode is a repeatable story. Full mode is a genuinely fresh
-  // tab-scoped instance: one empty chat, no canned history, no inherited cost.
-  const sessions = isFullDemo
-    ? [mkSession('s1', 'New session', 0, 0, 0, '/demo/starter-project')]
-    : [
-        mkSession('s1', 'Analytics Dashboard', 0, 0.08, 12),
-        mkSession('s2', 'Auth refactor', 3_600_000, 0.21, 34),
-        mkSession('s3', 'CI pipeline fixes', 7_200_000, 0.14, 18),
-        mkSession('s4', 'API v2 migration', 90_000_000, 0.37, 45),
-      ];
+  projectStore.setProject('/demo/analytics-dashboard');
+  agentStore.spawnAgent(
+    {
+      id: 'kory-manager',
+      name: 'Kory',
+      role: 'manager',
+      model: 'gpt-5.3-codex',
+      provider: 'codex',
+      domain: 'general',
+      glowColor: 'rgba(255,215,0,0.6)',
+    },
+    'Decomposing the dashboard request and reviewing worker results.',
+    's1',
+  );
+  agentStore.updateUsage('kory-manager', {
+    agentId: 'kory-manager',
+    model: 'gpt-5.3-codex',
+    provider: 'codex',
+    tokensIn: 156_400,
+    tokensOut: 8_600,
+    tokensUsed: 165_000,
+    usageKnown: true,
+    contextWindow: 400_000,
+    contextKnown: true,
+    breakdown: { system: 9_600, memory: 15_200, tools: 74_400, chat: 65_800 },
+  }, 's1');
+  const sessions = [
+    mkSession('s1', 'Analytics Dashboard', 0, 0.08, 12),
+    mkSession('s2', 'Auth refactor', 3_600_000, 0.21, 34),
+    mkSession('s3', 'CI pipeline fixes', 7_200_000, 0.14, 18),
+    mkSession('s4', 'API v2 migration', 90_000_000, 0.37, 45),
+  ];
   registerDemoSessions(sessions);
   sessionStore.seedDemoSessions(sessions, 's1');
-  if (isGuidedDemo) {
-    // Guided demo only: canned example conversations + the scripted loop.
-    // Each visible chat is a real, independently seeded workflow. Selecting a
-    // session loads its own conversation instead of reusing the analytics run.
-    const seededChats = {
+  // Each sample session has its own canned conversation.
+  const seededChats = {
       s1: [
         ['user', SCRIPT_PROMPT],
         ['assistant', REPLY],
@@ -605,16 +570,13 @@ export function seedDemo(): void {
         ['user', 'Migrate the public API to v2 without breaking existing integrations.'],
         ['assistant', 'The v2 routes use explicit versioned schemas, translate v1 payloads during the deprecation window, and include contract tests for both response shapes.'],
       ],
-    } as const;
-    for (const [sessionId, messages] of Object.entries(seededChats)) {
-      for (const [role, content] of messages) {
-        recordDemoMessage(sessionId, role, content, role === 'assistant' ? 'gpt-5.6-sol' : undefined);
-      }
+  } as const;
+  for (const [sessionId, messages] of Object.entries(seededChats)) {
+    for (const [role, content] of messages) {
+      recordDemoMessage(sessionId, role, content, role === 'assistant' ? 'gpt-5.3-codex' : undefined);
     }
-    playTurn(SCRIPT_PROMPT, { loop: true, clear: true });
   }
-  // Full demo: the protected workspace starts without canned feed content;
-  // prompts and generated virtual-repository changes remain tab-scoped.
+  playTurn(SCRIPT_PROMPT, { loop: true, clear: true });
 }
 
 /** Guided demo: replay the scripted turn when the user hits Send. */
@@ -622,31 +584,12 @@ export function replayDemo(): void {
   playTurn(SCRIPT_PROMPT, { loop: true, clear: true });
 }
 
-/** Full demo: simulate one manager turn for the user's own prompt. */
-export async function demoSend(message: string): Promise<void> {
-  const text = message.trim();
-  if (!text) return;
-  // Like the real app: sending without a session starts one.
-  if (!sessionStore.activeSessionId) {
-    await sessionStore.createSession({ workingDirectory: '/demo/analytics-dashboard' });
-  }
-  playTurn(text, { loop: false, clear: false });
-}
-
-/** Stop the current simulated run without dead-ending the UI. */
+/** Recover the fixed sample immediately if a stale UI control calls stop. */
 export function demoStop(): void {
-  clearTimers();
-  pendingReplySid = null; // user cancelled — the unfinished reply is not saved
-  pendingReplyContent = null;
-  const sid = activeSessionId();
-  agentStore.updateAgentStatus('kory-manager', 'done', sid);
-  for (const w of WORKERS) agentStore.updateAgentStatus(w.id, 'done', sid);
+  playTurn(SCRIPT_PROMPT, { loop: true, clear: true });
 }
 
-/** Full demo: switching AWAY from a session mid-run finalizes the in-flight
- *  turn — the reply persists in its own session instead of streaming into the
- *  newly opened one. A turn running in the still-active session is left alone
- *  (this also fires right after demoSend auto-creates a session). */
+/** Keep a session switch from leaking the previous sample's timers. */
 export function demoOnSessionSwitch(): void {
   // Guided mode has four independent canned chats. Stop the animated run
   // before its stale timers can write analytics events into the newly selected
@@ -658,14 +601,4 @@ export function demoOnSessionSwitch(): void {
     agentStore.updateAgentStatus('kory-manager', 'done', previousSessionId);
     return;
   }
-  if (!isFullDemo || !pendingReplySid) return;
-  if (sessionStore.activeSessionId === pendingReplySid) return;
-  clearTimers();
-  recordDemoMessage(pendingReplySid, 'assistant', pendingReplyContent ?? REPLY, 'gpt-5.6-sol');
-  const completedSession = getDemoSession(pendingReplySid);
-  if (completedSession) sessionStore.handleSessionUpdate(completedSession);
-  agentStore.updateAgentStatus('kory-manager', 'done', pendingReplySid);
-  for (const w of WORKERS) agentStore.updateAgentStatus(w.id, 'done', pendingReplySid);
-  pendingReplySid = null;
-  pendingReplyContent = null;
 }

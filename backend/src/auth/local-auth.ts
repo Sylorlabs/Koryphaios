@@ -1,9 +1,10 @@
-// Local Authentication Manager - Zero-Trust Local Architecture
+// Local Authentication Manager - Local HMAC Authentication
 import { timingSafeEqual, randomBytes, createHmac, scryptSync } from 'crypto';
-import { readFileSync, writeFileSync, existsSync, mkdirSync, chmodSync } from 'fs';
+import { readFileSync, writeFileSync, existsSync, chmodSync } from 'fs';
 import { join } from 'path';
 import { serverLog } from '../logger';
 import { PROJECT_ROOT } from '../runtime/paths';
+import { ensureSecureDir } from '../security/fs-permissions';
 
 export interface SessionToken {
   readonly id: string;
@@ -22,9 +23,14 @@ const DEFAULT_CONFIG: AuthConfig = {
   maxSessions: 10,
 };
 
+/**
+ * Local HMAC authentication manager.
+ * Trust boundary: anyone with read access to PROJECT_ROOT/.koryphaios/ can forge session tokens.
+ */
 export class LocalAuthManager {
   private static readonly TOKEN_DIR = '.koryphaios';
   private static readonly TOKEN_FILE = '.master-auth';
+  private static readonly SESSION_FILE = '.sessions.json';
 
   private masterKey: Buffer;
   private sessions = new Map<string, SessionToken>();
@@ -34,6 +40,7 @@ export class LocalAuthManager {
   constructor(config: Partial<AuthConfig> = {}) {
     this.config = { ...DEFAULT_CONFIG, ...config };
     this.masterKey = this.loadOrGenerateMasterKey();
+    this.loadSessions();
     this.initialized = true;
     setInterval(() => this.cleanupExpiredSessions(), 60 * 60 * 1000);
   }
@@ -42,9 +49,9 @@ export class LocalAuthManager {
     const tokenDir = join(PROJECT_ROOT, LocalAuthManager.TOKEN_DIR);
     const tokenPath = join(tokenDir, LocalAuthManager.TOKEN_FILE);
 
-    if (!existsSync(tokenDir)) {
-      mkdirSync(tokenDir, { recursive: true, mode: 0o700 });
-    }
+    // Always ensure 0o700, even if the dir already exists from an older build
+    // that created it with a looser umask.
+    ensureSecureDir(tokenDir);
 
     if (existsSync(tokenPath)) {
       try {
@@ -76,13 +83,49 @@ export class LocalAuthManager {
     writeFileSync(tokenPath, JSON.stringify(keyData, null, 2), { mode: 0o600 });
     chmodSync(tokenPath, 0o600);
 
-    serverLog.warn(
-      'New auth key generated! Save: ' + keyMaterial.slice(0, 16).toString('base64') + '...',
-    );
     return masterKey;
   }
 
-  createSession(permissions: string[] = ['*']): { sessionId: string; signature: string } {
+  private loadSessions(): void {
+    const sessionPath = join(PROJECT_ROOT, LocalAuthManager.TOKEN_DIR, LocalAuthManager.SESSION_FILE);
+    if (!existsSync(sessionPath)) return;
+    try {
+      const raw = readFileSync(sessionPath, 'utf-8');
+      const data = JSON.parse(raw);
+      if (!Array.isArray(data)) return;
+      const now = Date.now();
+      for (const entry of data) {
+        if (!entry || typeof entry.id !== 'string') continue;
+        if (typeof entry.expiresAt !== 'number' || now > entry.expiresAt) continue;
+        this.sessions.set(entry.id, {
+          id: entry.id,
+          created: entry.created,
+          expiresAt: entry.expiresAt,
+          permissions: Array.isArray(entry.permissions) ? entry.permissions : [],
+        });
+      }
+    } catch (err) {
+      serverLog.warn({ err }, 'Failed to load persisted sessions, starting fresh');
+    }
+  }
+
+  private persistSessions(): void {
+    const sessionPath = join(PROJECT_ROOT, LocalAuthManager.TOKEN_DIR, LocalAuthManager.SESSION_FILE);
+    try {
+      const serialized = [...this.sessions.values()].map((s) => ({
+        id: s.id,
+        created: s.created,
+        expiresAt: s.expiresAt,
+        permissions: s.permissions,
+      }));
+      writeFileSync(sessionPath, JSON.stringify(serialized, null, 2), { mode: 0o600 });
+      chmodSync(sessionPath, 0o600);
+    } catch (err) {
+      serverLog.warn({ err }, 'Failed to persist sessions');
+    }
+  }
+
+  createSession(permissions: string[] = ['*']): { sessionId: string; signature: string; expiresAt: number; permissions: string[] } {
     if (this.sessions.size >= this.config.maxSessions) {
       this.cleanupOldestSession();
     }
@@ -98,9 +141,16 @@ export class LocalAuthManager {
     };
 
     this.sessions.set(sessionId, session);
+    this.persistSessions();
     const signature = this.generateSignature(sessionId);
 
-    return { sessionId, signature };
+    return { sessionId, signature, expiresAt: session.expiresAt, permissions: session.permissions };
+  }
+
+  getSessionMetadata(sessionId: string): { expiresAt: number; permissions: string[] } | null {
+    const session = this.sessions.get(sessionId);
+    if (!session) return null;
+    return { expiresAt: session.expiresAt, permissions: session.permissions };
   }
 
   validateRequest(authHeader: string | null): {
@@ -142,7 +192,9 @@ export class LocalAuthManager {
   }
 
   revokeSession(sessionId: string): boolean {
-    return this.sessions.delete(sessionId);
+    const deleted = this.sessions.delete(sessionId);
+    if (deleted) this.persistSessions();
+    return deleted;
   }
 
   private generateSignature(sessionId: string): string {
@@ -151,11 +203,14 @@ export class LocalAuthManager {
 
   private cleanupExpiredSessions(): void {
     const now = Date.now();
+    let changed = false;
     for (const [id, session] of this.sessions) {
       if (now > session.expiresAt) {
         this.sessions.delete(id);
+        changed = true;
       }
     }
+    if (changed) this.persistSessions();
   }
 
   private cleanupOldestSession(): void {
@@ -167,7 +222,10 @@ export class LocalAuthManager {
         oldestId = id;
       }
     }
-    if (oldestId) this.sessions.delete(oldestId);
+    if (oldestId) {
+      this.sessions.delete(oldestId);
+      this.persistSessions();
+    }
   }
 
   getSetupToken(): string {

@@ -22,6 +22,9 @@
   import VirtualList from './VirtualList.svelte';
   import type { FeedEntryLocal } from '$lib/types';
   import { createAutoScroll } from '$lib/utils/autoscroll.svelte';
+  import { playVoiceResponse } from '$lib/utils/voice-playback';
+  import { apiFetch } from '$lib/api.svelte';
+  import { apiUrl } from '$lib/utils/api-url';
 
   let feedContainer = $state<HTMLDivElement>();
   let virtualList = $state<VirtualList<FeedEntryLocal>>();
@@ -54,6 +57,17 @@
   let isManagerStreaming = $derived(
     wsStore.managerStatus === 'streaming' || wsStore.managerStatus === 'thinking',
   );
+  let wasVoiceStreaming = false;
+  $effect(() => {
+    const streaming = isManagerStreaming;
+    const last = filteredFeed.at(-1);
+    if (wasVoiceStreaming && !streaming && last?.type === 'content' && last.text) {
+      void apiFetch(apiUrl('/api/voice/settings')).then(r => r.json()).then(result => {
+        if (result.data?.voiceModeEnabled && result.data?.autoReadFinalReplies) return playVoiceResponse(last.id, last.text);
+      }).catch(() => undefined);
+    }
+    wasVoiceStreaming = streaming;
+  });
 
   // -- Autoscroll ----------------------------------------------------------
   // Container ref: the empty-state div in the empty branch, the
@@ -174,11 +188,34 @@
       <MessageSquare size={16} />
       Agent feed
     </span>
-    <div class="flex items-center gap-2"></div>
+    <div class="flex items-center gap-2">
+      {#if wsStore.isTimelineSyncing}
+        <span
+          class="inline-flex items-center gap-1.5 rounded-full border border-[var(--color-border)] bg-[var(--color-surface-2)] px-2.5 py-1 text-[10px] font-medium text-[var(--color-text-secondary)]"
+          role="status"
+          aria-live="polite"
+        >
+          <LoaderCircle size={11} class="animate-spin text-[var(--color-accent)]" />
+          Synchronizing activity…
+        </span>
+      {/if}
+    </div>
   </div>
 
   <div class="relative flex-1 min-h-0 overflow-hidden">
-    {#if wsStore.isLoadingSession && filteredFeed.length === 0}
+    {#if wsStore.isTimelineSyncing}
+      <div
+        bind:this={feedContainer}
+        class="absolute inset-0 flex items-center justify-center p-6 feed-scroll"
+        role="status"
+        aria-live="polite"
+      >
+        <div class="flex items-center gap-3 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-raised)] px-4 py-3 text-sm text-[var(--color-text-secondary)] shadow-lg">
+          <LoaderCircle size={18} class="animate-spin text-[var(--color-accent)]" />
+          <span>Rebuilding the verified timeline…</span>
+        </div>
+      </div>
+    {:else if wsStore.isLoadingSession && filteredFeed.length === 0}
       <div
         bind:this={feedContainer}
         class="absolute inset-0 flex items-center justify-center p-6 feed-scroll"
@@ -199,11 +236,6 @@
         <div class="flex gap-5 animate-in fade-in slide-in-from-bottom-4 duration-700">
           <div class="flex-1 space-y-6 min-w-0">
             <div class="rounded-[28px] border p-8 shadow-2xl backdrop-blur-sm" style="background: linear-gradient(165deg, rgba(var(--color-accent-rgb), 0.12), rgba(12, 10, 9, 0.4)); border-color: rgba(var(--color-accent-rgb), 0.24);">
-              <div class="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full border mb-6" style="background: rgba(0, 0, 0, 0.2); border-color: rgba(var(--color-accent-rgb), 0.15); color: var(--color-text-secondary);">
-                <div class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></div>
-                <span class="text-[10px] font-bold uppercase tracking-[0.2em] opacity-70">Workspace Analyzed</span>
-              </div>
-              
               <h2 class="text-3xl font-semibold leading-tight mb-4 tracking-tight" style="color: var(--color-text-primary);">
                 What should Koryphaios do with your project?
               </h2>
@@ -326,7 +358,7 @@
                  <div class="space-y-4">
                     {#each [
                       'Use composer below for direct tasks.',
-                      'Open Git panel for change review.'
+                      'Ask Kory to review the current changes.'
                     ] as tip}
                       <div class="flex items-start gap-3">
                         <div class="w-1.5 h-1.5 rounded-full mt-1.5 shrink-0 bg-blue-500/40"></div>
@@ -419,12 +451,94 @@
     margin: 1em 0;
   }
   :global(.markdown-content a) { color: var(--color-accent); text-decoration: underline; text-underline-offset: 2px; }
-  :global(.markdown-content h1, :global(.markdown-content h2), :global(.markdown-content h3)) { 
-    font-weight: 600; 
-    margin-top: 1.5em; 
-    margin-bottom: 0.75em; 
+
+  /* Emphasis: bold and italic spans use theme tokens so they stay legible on
+     both light and dark surfaces instead of relying on browser defaults that
+     wash out on dark backgrounds. Bold gets the primary text color and a
+     heavier weight; italic keeps the secondary text color so it reads as a
+     softer aside. Strikethrough is muted to show deletion without shouting. */
+  :global(.markdown-content strong) {
+    font-weight: 700;
     color: var(--color-text-primary);
   }
+  :global(.markdown-content em) {
+    font-style: italic;
+    color: var(--color-text-secondary);
+  }
+  :global(.markdown-content del) {
+    color: var(--color-text-muted);
+    text-decoration: line-through;
+  }
+  /* When bold and italic combine, keep the primary color so the emphasis
+     still reads as important rather than dropping to secondary. */
+  :global(.markdown-content strong em),
+  :global(.markdown-content em strong) {
+    color: var(--color-text-primary);
+    font-weight: 700;
+    font-style: italic;
+  }
+
+  /* Heading hierarchy for agent responses. Each level has a distinct size,
+     weight, and treatment so structured answers read as sections/sub-sections
+     instead of a flat wall of equally-weighted text. The first heading in a
+     message drops its top margin so the response doesn't start with a gap. */
+  :global(.markdown-content h1) {
+    font-size: 1.3rem;
+    font-weight: 700;
+    line-height: 1.25;
+    margin: 1.4em 0 0.6em;
+    padding-bottom: 0.3em;
+    color: var(--color-text-primary);
+    border-bottom: 1px solid var(--color-border);
+  }
+  :global(.markdown-content h2) {
+    font-size: 1.12rem;
+    font-weight: 700;
+    line-height: 1.3;
+    margin: 1.3em 0 0.5em;
+    color: var(--color-text-primary);
+  }
+  :global(.markdown-content h3) {
+    font-size: 1rem;
+    font-weight: 600;
+    line-height: 1.35;
+    margin: 1.15em 0 0.45em;
+    color: var(--color-text-primary);
+  }
+  :global(.markdown-content h4) {
+    font-size: 0.92rem;
+    font-weight: 600;
+    line-height: 1.4;
+    margin: 1em 0 0.4em;
+    color: var(--color-text-primary);
+  }
+  :global(.markdown-content h5) {
+    font-size: 0.85rem;
+    font-weight: 600;
+    line-height: 1.4;
+    margin: 0.9em 0 0.35em;
+    color: var(--color-text-secondary);
+  }
+  :global(.markdown-content h6) {
+    font-size: 0.8rem;
+    font-weight: 600;
+    line-height: 1.4;
+    margin: 0.8em 0 0.3em;
+    color: var(--color-text-muted);
+  }
+  :global(.markdown-content h1:first-child),
+  :global(.markdown-content h2:first-child),
+  :global(.markdown-content h3:first-child),
+  :global(.markdown-content h4:first-child),
+  :global(.markdown-content h5:first-child),
+  :global(.markdown-content h6:first-child) { margin-top: 0; }
+  /* Tighten the gap when a heading directly follows another heading so
+     nested sub-headers sit close to their parent section title. */
+  :global(.markdown-content h1 + h2),
+  :global(.markdown-content h2 + h3),
+  :global(.markdown-content h3 + h4),
+  :global(.markdown-content h4 + h5),
+  :global(.markdown-content h5 + h6) { margin-top: 0.4em; }
   .feed-scroll {
     overscroll-behavior: contain;
   }

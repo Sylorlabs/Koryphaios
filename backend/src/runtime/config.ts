@@ -15,15 +15,31 @@ import {
   removeProviderSecrets,
 } from '../security/secret-store';
 
-/** Merge file corsOrigins with CORS_ORIGINS env (comma-separated). Production can set CORS_ORIGINS=https://app.example.com */
-function mergeCorsOrigins(fromFile: string[], envValue?: string): string[] {
+/** Merge explicit CORS origins with the exact loopback frontend owned by the
+ * desktop dev launcher. Production remains fail-closed: no wildcard or local
+ * origin is added unless KORYPHAIOS_DESKTOP_DEV=1. */
+export function mergeCorsOrigins(
+  fromFile: string[],
+  envValue?: string,
+  desktopDevOrigin?: string,
+): string[] {
   const fromEnv = envValue
     ? envValue
         .split(',')
         .map((s) => s.trim())
         .filter(Boolean)
     : [];
-  return [...fromFile, ...fromEnv];
+  return [...new Set([...fromFile, ...fromEnv, ...(desktopDevOrigin ? [desktopDevOrigin] : [])])];
+}
+
+export function getDesktopDevCorsOrigin(env: NodeJS.ProcessEnv = process.env): string | undefined {
+  if (env.KORYPHAIOS_DESKTOP_DEV !== '1') return undefined;
+  const host = env.KORYPHAIOS_FRONTEND_HOST ?? '127.0.0.1';
+  if (!['127.0.0.1', 'localhost', '::1'].includes(host)) return undefined;
+  const port = Number(env.KORYPHAIOS_FRONTEND_PORT ?? 3003);
+  if (!Number.isInteger(port) || port < 1 || port > 65_535) return undefined;
+  const urlHost = host === '::1' ? '[::1]' : host;
+  return `http://${urlHost}:${port}`;
 }
 
 /**
@@ -108,7 +124,11 @@ export function loadConfig(projectRoot: string): BackendConfig {
     contextPaths: fileConfig.contextPaths ?? DEFAULT_CONTEXT_PATHS,
     dataDirectory: fileConfig.dataDirectory ?? FS.DEFAULT_DATA_DIR,
     fallbacks: fileConfig.fallbacks ?? AGENT.DEFAULT_FALLBACKS,
-    corsOrigins: mergeCorsOrigins(fileConfig.corsOrigins ?? [], process.env.CORS_ORIGINS),
+    corsOrigins: mergeCorsOrigins(
+      fileConfig.corsOrigins ?? [],
+      process.env.CORS_ORIGINS,
+      getDesktopDevCorsOrigin(),
+    ),
     assignments: fileConfig.assignments,
     safety: {
       maxTokensPerTurn: fileConfig.safety?.maxTokensPerTurn ?? 4096,
@@ -120,7 +140,9 @@ export function loadConfig(projectRoot: string): BackendConfig {
       worktreeDir: fileConfig.workspace?.worktreeDir ?? WORKSPACE.DEFAULT_WORKTREE_DIR,
       copyEnvFiles: fileConfig.workspace?.copyEnvFiles ?? WORKSPACE.DEFAULT_COPY_ENV_FILES,
     },
-    mode: fileConfig.mode ?? (process.env.KORYPHAIOS_MODE as any) ?? 'beginner',
+    // The single product baseline is autonomous. Legacy mode fields no longer
+    // change runtime behavior.
+    mode: 'advanced',
     enableCritic: fileConfig.enableCritic,
     agentSettings: fileConfig.agentSettings,
   };

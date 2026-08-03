@@ -10,10 +10,16 @@ type Pending = {
 };
 
 function coalesceKey(message: WSMessage): string | null {
+  const scope = coalesceScope(message);
+  if (!scope) return null;
+  return `${scope}:${message.type}`;
+}
+
+function coalesceScope(message: WSMessage): string | null {
   if (!message.sessionId || !COALESCE_TYPES.has(message.type)) return null;
   const payload = message.payload as { agentId?: string };
   if (!payload?.agentId) return null;
-  return `${message.sessionId}:${message.type}:${payload.agentId}`;
+  return `${message.sessionId}:${payload.agentId}`;
 }
 
 function mergePayload(
@@ -71,6 +77,16 @@ export class StreamCoalescer {
       this.flushAll();
       this.publish(sanitized);
       return;
+    }
+
+    // Reasoning and answer text are different causal phases for the same
+    // agent. Never let their independent debounce timers overtake each other:
+    // flush the prior phase before buffering the next one.
+    const scope = coalesceScope(sanitized)!;
+    for (const pendingKey of [...this.pending.keys()]) {
+      if (pendingKey !== key && pendingKey.startsWith(`${scope}:`)) {
+        this.flush(pendingKey);
+      }
     }
 
     const existing = this.pending.get(key);

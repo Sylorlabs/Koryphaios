@@ -18,7 +18,7 @@ import { loadEnvFromProject, validateEnvironment } from './runtime/env';
 import { initDb } from './db';
 import { processSupervisor } from './process-supervisor/supervisor';
 import { initCreditAccountant } from './credit-accountant';
-import { initializeEncryption } from './security';
+import { initializeEncryption, markEncryptionFailed } from './security';
 import {
   BashTool,
   ShellManageTool,
@@ -56,6 +56,7 @@ import { setContext, type AppContext } from './context';
 import { getModeManager } from './mode';
 import { TimeTravelService } from './services/timetravel';
 import { startBackgroundCleanup } from './memory/background-cleanup';
+import { GoalDriveService } from './kory/goal-drive-service';
 
 export async function bootstrap(): Promise<AppContext> {
   // Load environment and validate
@@ -100,8 +101,14 @@ export async function bootstrap(): Promise<AppContext> {
 
   const tools = await initTools();
 
-  // MCP Connections
-  const mcpManager = await initMCP(config, tools);
+  // MCP Connections — kicked off without awaiting so the HTTP server can
+  // bind and serve /api/health immediately. MCP servers (notably
+  // @playwright/mcp) can take 5-30s to initialize; the promise is stored in
+  // the AppContext for any consumer that needs the resolved MCPManager.
+  const mcpManagerPromise = initMCP(config, tools).catch((err) => {
+    serverLog.error({ err }, 'MCP initialization failed');
+    throw err; // re-throw so any consumer that awaits mcpManagerPromise also sees the failure
+  });
 
   // Stores & Core
   const sessions = new SessionStore();
@@ -126,21 +133,24 @@ export async function bootstrap(): Promise<AppContext> {
   setWsManager(wsManager);
   initWSBroker(wsManager);
 
+  const goalDriver = new GoalDriveService(goals, sessions, kory, wsManager);
   const context: AppContext = {
     config,
     providers,
     tools,
-    mcpManager,
+    mcpManagerPromise,
     sessions,
     messages,
     tasks,
     goals,
+    goalDriver,
     kory,
     wsManager,
     timeTravel,
   };
 
   setContext(context);
+  void goalDriver.recover();
   startBackgroundCleanup(kory, wsManager);
   return context;
 }
@@ -157,15 +167,19 @@ async function initEncryption() {
         `Encryption initialization failed: ${message}. Set up an external KMS provider.`,
       );
     }
+    // Mark encryption as permanently failed so encryptForStorage fails fast with
+    // a clear message on the first key-write instead of retrying the broken config.
+    markEncryptionFailed();
     serverLog.warn(
       { err: message },
-      'Envelope encryption unavailable; API keys will use legacy encryption',
+      'Envelope encryption unavailable; encrypted credential writes will fail until the KMS configuration is fixed and the server restarted',
     );
   }
 }
 
 import { registerGitTools } from './tools';
-import { CreateGoalTool } from './tools/goals';
+import { CreateGoalTool, UpdateGoalTool } from './tools/goals';
+import { LoadSkillDetailTool } from './tools/skills';
 import { noteTools } from './tools/notes';
 
 async function initTools() {
@@ -197,6 +211,8 @@ async function initTools() {
     new FetchContextTool(),
     new PruneContextTool(),
     new CreateGoalTool(),
+    new UpdateGoalTool(),
+    new LoadSkillDetailTool(),
   ];
 
   for (const tool of defaultTools) {

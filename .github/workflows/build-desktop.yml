@@ -11,6 +11,11 @@ on:
     paths:
       - 'desktop/**'
       - 'frontend/**'
+      - 'backend/**'
+      - 'e2e/**'
+      - 'playwright.config.ts'
+      - 'package.json'
+      - 'bun.lock'
       - '.github/workflows/build-desktop.yml'
   workflow_dispatch:
     inputs:
@@ -24,6 +29,50 @@ on:
           - debug
 
 jobs:
+  # Exercise the same browser-facing behavior on every desktop OS. Packaging
+  # below compiles the native shell per target; this job catches platform
+  # differences in the frontend/backend contract before a release is cut.
+  behavior-smoke:
+    name: Browser behavior (${{ matrix.name }})
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Windows
+            runner: blacksmith-2vcpu-windows-2025
+            platform: windows
+          - name: macOS
+            runner: blacksmith-6vcpu-macos-latest
+            platform: macos
+          - name: Linux
+            runner: blacksmith-2vcpu-ubuntu-2404
+            platform: linux
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Install Playwright Chromium and Linux dependencies
+        if: matrix.platform == 'linux'
+        run: bunx playwright install --with-deps chromium
+
+      - name: Install Playwright Chromium
+        if: matrix.platform != 'linux'
+        run: bunx playwright install chromium
+
+      - name: Run browser end-to-end tests
+        run: bun run test:e2e
+
   # Build for Windows
   build-windows:
     runs-on: blacksmith-2vcpu-windows-2025
@@ -49,6 +98,9 @@ jobs:
       - name: Install frontend dependencies
         working-directory: ./frontend
         run: bun install
+
+      - name: Write release compatibility hash
+        run: bun run write-compat-hash
 
       - name: Build frontend
         working-directory: ./frontend
@@ -133,6 +185,9 @@ jobs:
       - name: Install frontend dependencies
         working-directory: ./frontend
         run: bun install
+
+      - name: Write release compatibility hash
+        run: bun run write-compat-hash
 
       - name: Build frontend
         working-directory: ./frontend
@@ -221,6 +276,9 @@ jobs:
       - name: Install frontend dependencies
         working-directory: ./frontend
         run: bun install
+
+      - name: Write release compatibility hash
+        run: bun run write-compat-hash
 
       - name: Build frontend
         working-directory: ./frontend
@@ -315,6 +373,9 @@ jobs:
         working-directory: ./frontend
         run: bun install
 
+      - name: Write release compatibility hash
+        run: bun run write-compat-hash
+
       - name: Build frontend
         working-directory: ./frontend
         run: bun run build
@@ -362,7 +423,7 @@ jobs:
   # Summary job
   build-summary:
     runs-on: blacksmith-2vcpu-ubuntu-2404
-    needs: [build-windows, build-macos, build-linux]
+    needs: [behavior-smoke, build-windows, build-macos, build-linux]
     if: always()
 
     steps:
@@ -370,11 +431,13 @@ jobs:
         run: |
           echo "Build Status Summary:"
           echo "===================="
+          echo "Browser behavior: ${{ needs.behavior-smoke.result }}"
           echo "Windows: ${{ needs.build-windows.result }}"
           echo "macOS: ${{ needs.build-macos.result }}"
           echo "Linux: ${{ needs.build-linux.result }}"
 
-          if [ "${{ needs.build-windows.result }}" = "success" ] && \
+          if [ "${{ needs.behavior-smoke.result }}" = "success" ] && \
+             [ "${{ needs.build-windows.result }}" = "success" ] && \
              [ "${{ needs.build-macos.result }}" = "success" ] && \
              [ "${{ needs.build-linux.result }}" = "success" ]; then
             echo "All builds succeeded!"

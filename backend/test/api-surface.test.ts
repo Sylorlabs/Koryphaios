@@ -15,11 +15,12 @@ const { authRoutes } = await import('../src/routes/v1/auth');
 const { agentSettingsRoutes } = await import('../src/routes/v1/agent-settings');
 const { gitRoutes } = await import('../src/routes/v1/git');
 const { memoryRoutes } = await import('../src/routes/v1/memory');
-const { modeRoutes } = await import('../src/routes/v1/mode');
 const { spendRoutes } = await import('../src/routes/v1/spend');
 const { spendCapsRoutes } = await import('../src/routes/v1/spend-caps');
 const { billingRoutes } = await import('../src/routes/v1/billing');
 const { processRoutes } = await import('../src/routes/v1/processes');
+const { applyAuthGuard } = await import('../src/auth/elysia-auth-guard');
+const { validateLocalBearerToken } = await import('../src/auth/local-route-auth');
 
 const app = new Elysia()
   .get('/api/health', () => ({
@@ -36,15 +37,28 @@ const app = new Elysia()
     },
   }))
   .post('/api/debug/log-error', () => ({ ok: true }))
+  .use(authRoutes)
+  .derive(({ request }) => ({
+    session: validateLocalBearerToken(request.headers.get('authorization')) as any,
+  }))
+  .guard({
+    beforeHandle: ({ request, set, session }: any) => {
+      const url = new URL(request.url);
+      const UNAUTHED_PATHS = new Set(['/api/health', '/api/auth/login', '/api/auth/status', '/api/auth/me']);
+      if (UNAUTHED_PATHS.has(url.pathname)) return;
+      if (!session) {
+        set.status = 401;
+        return { ok: false, error: 'Unauthorized' };
+      }
+    },
+  })
   .use(sessionRoutes)
   .use(messageRoutes)
   .use(providerRoutes)
   .use(collaborationRoutes)
-  .use(authRoutes)
   .use(agentSettingsRoutes)
   .use(gitRoutes)
   .use(memoryRoutes)
-  .use(modeRoutes)
   .use(spendRoutes)
   .use(spendCapsRoutes)
   .use(billingRoutes)
@@ -125,6 +139,10 @@ const protectedRoutes: RouteCheck[] = [
   { method: 'POST', path: '/api/git/merge', body: { branch: 'main' } },
   { method: 'POST', path: '/api/git/push' },
   { method: 'POST', path: '/api/git/pull' },
+  { method: 'GET', path: '/api/memory/documents' },
+  { method: 'POST', path: '/api/memory/documents', body: { name: 'decisions', kind: 'memory' } },
+  { method: 'GET', path: '/api/memory/documents/memory/decisions.md' },
+  { method: 'PUT', path: '/api/memory/documents/memory/decisions.md', body: { content: '# Decisions' } },
   { method: 'GET', path: '/api/memory/universal' },
   { method: 'PUT', path: '/api/memory/universal', body: { content: 'Universal memory' } },
   { method: 'POST', path: '/api/memory/universal/init' },
@@ -143,9 +161,6 @@ const protectedRoutes: RouteCheck[] = [
   { method: 'POST', path: '/api/memory/settings/reset' },
   { method: 'GET', path: '/api/memory/context?sessionId=s1' },
   { method: 'GET', path: '/api/memory/stats?sessionId=s1' },
-  { method: 'GET', path: '/api/mode' },
-  { method: 'PUT', path: '/api/mode', body: { mode: 'advanced' } },
-  { method: 'POST', path: '/api/mode/toggle' },
   { method: 'GET', path: '/api/spend/status?sessionId=s1' },
   { method: 'POST', path: '/api/spend/reset-session', body: { sessionId: 's1' } },
   { method: 'GET', path: '/api/spend-caps/config' },
@@ -209,9 +224,20 @@ describe('API surface verification', () => {
   test('every protected live endpoint rejects missing auth with 401', async () => {
     for (const check of protectedRoutes) {
       const response = await request(check);
-      const body = await jsonResponse(response);
+      let body: any;
+      try {
+        body = await jsonResponse(response);
+      } catch (error) {
+        throw new Error(
+          `${check.method} ${check.path} returned a non-JSON protected-route response: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
 
-      expect(response.status).toBe(401);
+      if (response.status !== 401) {
+        throw new Error(
+          `${check.method} ${check.path} returned ${response.status} instead of 401: ${JSON.stringify(body)}`,
+        );
+      }
       expect(body).toEqual({ ok: false, error: 'Unauthorized' });
     }
   });

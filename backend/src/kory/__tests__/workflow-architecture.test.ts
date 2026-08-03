@@ -2,13 +2,35 @@ import { describe, expect, test } from 'bun:test';
 import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { compilePrompt, createTaskContract } from '../prompts';
+import { compilePrompt, createTaskContract, deriveSkillContextBudget } from '../prompts';
 import { discoverVerificationChecks } from '../verification';
 import { CORE_WORKFLOW_EVALS, runProviderHarnessEval, runWorkflowEvals } from '../workflow-evals';
 import { EventEmitterService } from '../services/EventEmitterService';
 import { getProviderHarnessCapabilities } from '../../providers/provider-harness';
 
 describe('workflow architecture', () => {
+  test('shrinks the skill allocation as trusted model context fills', () => {
+    const roomy = deriveSkillContextBudget({ contextWindowTokens: 128_000 });
+    const pressured = deriveSkillContextBudget({
+      contextWindowTokens: 16_000,
+      occupiedContextChars: 36_000,
+      fixedPromptChars: 8_000,
+    });
+    expect(roomy).toBe(120_000);
+    expect(pressured).toBeLessThan(10_000);
+    expect(pressured).toBeGreaterThan(0);
+  });
+
+  test('still detects context pressure when a model limit is unknown', () => {
+    const roomy = deriveSkillContextBudget({});
+    const pressured = deriveSkillContextBudget({
+      occupiedContextChars: 100_000,
+      fixedPromptChars: 8_000,
+    });
+    expect(roomy).toBe(120_000);
+    expect(pressured).toBe(12_000);
+  });
+
   test('instruction overrides replace the broader same-scope file', () => {
     const root = mkdtempSync(join(tmpdir(), 'kory-prompt-'));
     mkdirSync(join(root, '.git'));
@@ -23,7 +45,7 @@ describe('workflow architecture', () => {
     });
     expect(compiled.systemPrompt).toContain('override-only-marker');
     expect(compiled.systemPrompt).not.toContain('broad-only-marker');
-    expect(compiled.manifest.version).toBe('kory-workflow-v3-skills');
+    expect(compiled.manifest.version).toBe('kory-workflow-v4-progressive-skills');
   });
 
   test('verification prefers repository CI and core gates', () => {

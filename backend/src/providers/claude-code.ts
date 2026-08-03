@@ -25,6 +25,7 @@ import { homedir, tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { whichBinary } from './cli-detection';
 import { getCliBridge } from './cli-bridges';
+import { renderCliContent } from './cli-attachments';
 import { ClaudeCodeCliBridge } from './cli-bridges';
 import {
   type Provider,
@@ -541,10 +542,16 @@ export function getKoryphaiosClaudeConfigDir(): string {
     const { mkdirSync, symlinkSync, rmSync, lstatSync } =
       require('node:fs') as typeof import('node:fs');
     mkdirSync(dir, { recursive: true });
-    // Share auth (and settings) with the user's real ~/.claude via symlinks —
-    // isolation is about SESSIONS, not credentials.
+    // Share only auth with the user's real ~/.claude. User settings can contain
+    // hooks/plugins and must not execute inside a Koryphaios-managed turn.
     const realHome = join(homedir(), '.claude');
-    for (const file of ['.credentials.json', 'settings.json']) {
+    try {
+      const legacySettings = join(dir, 'settings.json');
+      if (lstatSync(legacySettings).isSymbolicLink()) rmSync(legacySettings, { force: true });
+    } catch {
+      // No legacy user-settings symlink to remove.
+    }
+    for (const file of ['.credentials.json']) {
       const src = join(realHome, file);
       const dst = join(dir, file);
       if (!existsSync(src)) continue;
@@ -561,8 +568,9 @@ export function getKoryphaiosClaudeConfigDir(): string {
       }
     }
   } catch {
-    /* fall back to default ~/.claude if we can't build the isolated dir */
-    return join(homedir(), '.claude');
+    // Fail closed. Falling back to ~/.claude would execute user hooks/plugins
+    // and expose user sessions inside a Koryphaios-managed turn.
+    return dir;
   }
   cachedClaudeConfigDir = dir;
   return dir;
@@ -694,15 +702,16 @@ export class ClaudeCodeProvider implements Provider {
     };
     const bridgeScopes = claudeBridge?.buildPermissionScopes(bridgeCtx);
     const bridgeConfig = claudeBridge?.buildAgentConfig(bridgeCtx);
-    const disallowed = bridgeScopes?.deny ?? (() => {
-      // Fallback to the inline computation if the bridge isn't available.
-      const d = ['Task', 'Agent'];
-      if (sandbox && !sandbox.allowEdits)
-        d.push('Edit', 'Write', 'MultiEdit', 'NotebookEdit');
-      if (sandbox && !sandbox.allowShell) d.push('Bash');
-      if (sandbox && !sandbox.allowWebSearch) d.push('WebFetch', 'WebSearch');
-      return d;
-    })();
+    const disallowed =
+      bridgeScopes?.deny ??
+      (() => {
+        // Fallback to the inline computation if the bridge isn't available.
+        const d = ['Task', 'Agent'];
+        if (sandbox && !sandbox.allowEdits) d.push('Edit', 'Write', 'MultiEdit', 'NotebookEdit');
+        if (sandbox && !sandbox.allowShell) d.push('Bash');
+        if (sandbox && !sandbox.allowWebSearch) d.push('WebFetch', 'WebSearch');
+        return d;
+      })();
     const allowedTools = bridgeScopes?.allow?.join(',') ?? ALLOWED_TOOLS;
 
     const args = [
@@ -711,12 +720,15 @@ export class ClaudeCodeProvider implements Provider {
       'stream-json',
       '--include-partial-messages',
       '--verbose',
+      '--no-session-persistence',
       '--model',
       cliModel,
       // Agentic, non-interactive: auto-approve edits + the pre-approved toolset so a
       // headless run never hangs waiting for a permission prompt.
       '--permission-mode',
-      request.harnessRole === 'critic' ? 'plan' : 'acceptEdits',
+      request.harnessRole === 'critic' || (sandbox && (!sandbox.allowEdits || !sandbox.allowShell))
+        ? 'plan'
+        : 'acceptEdits',
       '--allowedTools',
       allowedTools,
       '--disallowedTools',
@@ -785,7 +797,9 @@ export class ClaudeCodeProvider implements Provider {
         const existing = existsSync(mcpConfigPath)
           ? JSON.parse(readFileSync(mcpConfigPath, 'utf-8'))
           : {};
-        existing.mcpServers = existing.mcpServers ?? {};
+        // Exact allow-list: stale or user-imported MCP entries must not leak
+        // into a Koryphaios-managed turn.
+        existing.mcpServers = {};
         for (const srv of mcpConfigs) {
           existing.mcpServers[srv.name] = {
             command: srv.command,
@@ -794,6 +808,7 @@ export class ClaudeCodeProvider implements Provider {
           };
         }
         writeFileSync(mcpConfigPath, JSON.stringify(existing, null, 2));
+        args.push('--mcp-config', mcpConfigPath, '--strict-mcp-config');
       } catch (mcpErr) {
         providerLog.warn({ err: mcpErr }, 'Failed to write kory MCP config for Claude Code');
       }
@@ -1149,40 +1164,6 @@ function buildPrompt(messages: ProviderMessage[]): string {
 
 /** Persist a pasted image to a temp file so the CLI's own tools can view it —
  *  the piped prompt is text-only, but the agent has file access. */
-function imageBlockToTempFile(imageData: string | undefined, mime: string | undefined): string {
-  if (!imageData) return '[image attachment omitted — no data]';
-  try {
-    const ext =
-      mime === 'image/jpeg'
-        ? 'jpg'
-        : mime === 'image/webp'
-          ? 'webp'
-          : mime === 'image/gif'
-            ? 'gif'
-            : 'png';
-    const file = join(tmpdir(), `kory-attach-${Math.random().toString(36).slice(2, 10)}.${ext}`);
-    writeFileSync(file, Buffer.from(imageData, 'base64'));
-    return `[image attached — saved to ${file}; use your image/file viewing tool to look at it]`;
-  } catch {
-    return '[image attachment omitted — could not persist to disk]';
-  }
-}
-
 function flattenContent(content: string | ProviderContentBlock[]): string {
-  if (typeof content === 'string') return content;
-  const parts: string[] = [];
-  for (const block of content) {
-    if (block.type === 'text' && block.text) {
-      parts.push(block.text);
-    } else if (block.type === 'tool_use') {
-      parts.push(
-        `[tool call: ${block.toolName ?? 'tool'} ${JSON.stringify(block.toolInput ?? {})}]`,
-      );
-    } else if (block.type === 'tool_result') {
-      parts.push(`[tool result: ${block.toolOutput ?? ''}]`);
-    } else if (block.type === 'image') {
-      parts.push(imageBlockToTempFile(block.imageData, block.imageMimeType));
-    }
-  }
-  return parts.join('\n');
+  return renderCliContent(content);
 }

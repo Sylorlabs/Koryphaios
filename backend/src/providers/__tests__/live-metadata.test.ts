@@ -85,7 +85,7 @@ describe('trusted context metadata', () => {
     registerLiveModelResolver(() =>
       def({ provider: 'codex', contextWindow: 300_000, contextVerified: true }),
     );
-    expect(resolveTrustedContextWindow('gpt-5.5', 'codex')).toEqual({
+    expect(resolveTrustedContextWindow('gpt-5.3-codex', 'codex')).toEqual({
       contextWindow: 300_000,
       contextKnown: true,
       contextSource: 'live',
@@ -96,9 +96,9 @@ describe('trusted context metadata', () => {
   test('rejects a boolean-like live window and falls back to the provider catalog', async () => {
     const { resolveTrustedContextWindow, registerLiveModelResolver } = await import('../models');
     registerLiveModelResolver(() => def({ provider: 'codex', contextWindow: 1, contextVerified: true }));
-    const resolved = resolveTrustedContextWindow('gpt-5.5', 'codex');
+    const resolved = resolveTrustedContextWindow('gpt-5.3-codex', 'codex');
     expect(resolved.contextKnown).toBe(true);
-    expect(resolved.contextWindow).toBe(272_000);
+    expect(resolved.contextWindow).toBe(400_000);
     expect(resolved.contextSource).toBe('catalog');
     registerLiveModelResolver(() => undefined);
   });
@@ -107,7 +107,19 @@ describe('trusted context metadata', () => {
     const { resolveTrustedContextWindow, registerLiveModelResolver } = await import('../models');
     registerLiveModelResolver(() => undefined);
     expect(resolveTrustedContextWindow('gpt-5.3-codex', 'openai').contextWindow).toBe(500_000);
-    expect(resolveTrustedContextWindow('gpt-5.3-codex', 'codex').contextKnown).toBe(false);
+    expect(resolveTrustedContextWindow('gpt-5.3-codex', 'codex').contextKnown).toBe(true);
+  });
+
+  test('uses the provider-scoped fallback for an account-scoped Codex model ID', async () => {
+    const { resolveTrustedContextWindow, registerLiveModelResolver } = await import('../models');
+    registerLiveModelResolver(() => undefined);
+    expect(
+      resolveTrustedContextWindow('codex-account:account:gpt-5.3-codex', 'codex'),
+    ).toEqual({
+      contextWindow: 400_000,
+      contextKnown: true,
+      contextSource: 'catalog',
+    });
   });
 
   test('uses built-in context metadata for providers outside the old allowlist', async () => {

@@ -23,6 +23,24 @@ export type CodexManagedAuthStatus = {
   requiresOpenaiAuth: boolean;
 };
 
+export type CodexAccountUsage = {
+  summary?: {
+    lifetimeTokens?: number | null;
+    peakDailyTokens?: number | null;
+    currentStreakDays?: number | null;
+  };
+  dailyUsageBuckets?: Array<{ startDate?: string; tokens?: number }> | null;
+};
+
+export type CodexRateLimits = {
+  rateLimits?: {
+    planType?: string | null;
+    primary?: { usedPercent?: number; windowMinutes?: number; resetsAt?: number } | null;
+    secondary?: { usedPercent?: number; windowMinutes?: number; resetsAt?: number } | null;
+    credits?: { hasCredits?: boolean; unlimited?: boolean; balance?: string | null } | null;
+  } | null;
+};
+
 type LoginCompletion = {
   loginId: string | null;
   success: boolean;
@@ -51,12 +69,24 @@ export class CodexAppServer {
   private idleShutdown: ReturnType<typeof setTimeout> | null = null;
   private loginWaiters = 0;
 
+  constructor(private readonly codexHome = getKoryCodexHome()) {}
+
   async account(refreshToken = false): Promise<CodexManagedAuthStatus> {
     const result = await this.request('account/read', { refreshToken });
     return {
       account: result?.account ?? null,
       requiresOpenaiAuth: result?.requiresOpenaiAuth === true,
     };
+  }
+
+  /** Read the official CLI's account-wide usage surface without creating a turn. */
+  async usage(): Promise<CodexAccountUsage> {
+    return await this.request('account/usage/read', {});
+  }
+
+  /** Read the official CLI's live quota/credit snapshot without spending a credit. */
+  async rateLimits(): Promise<CodexRateLimits> {
+    return await this.request('account/rateLimits/read', {});
   }
 
   async startChatgptLogin(): Promise<{ loginId: string; authUrl: string }> {
@@ -149,7 +179,7 @@ export class CodexAppServer {
     if (!binary) throw new Error('Codex CLI (codex) was not found on PATH');
 
     this.started = new Promise<void>((resolve, reject) => {
-      const codexHome = getKoryCodexHome();
+      const codexHome = this.codexHome;
       try {
         mkdirSync(codexHome, { recursive: true });
       } catch (error) {

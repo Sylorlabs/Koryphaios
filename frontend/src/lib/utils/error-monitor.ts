@@ -103,6 +103,33 @@ function logError(error: ErrorLog) {
   scheduleFlush();
 }
 
+// Surface uncaught errors to the user instead of letting them fail silently
+// behind the scenes. Debounced per-message so a burst of the same error
+// (e.g. a stuck retry loop) doesn't spam the UI with duplicate toasts.
+const _recentlyToasted = new Set<string>();
+const RESIZE_OBSERVER_LOOP_WARNING = /ResizeObserver loop (completed with undelivered notifications|limit exceeded)/i;
+function notifyUser(message: string) {
+  if (typeof window === 'undefined') return;
+  if (_recentlyToasted.has(message)) return;
+  _recentlyToasted.add(message);
+  setTimeout(() => _recentlyToasted.delete(message), 10_000);
+  import('$lib/stores/toast.svelte')
+    .then(({ toastStore }) => toastStore.error(`Unexpected error: ${message}`))
+    .catch(() => {});
+}
+
+/** Report a crash caught by a component error boundary (e.g. <svelte:boundary>). */
+export function reportCrash(error: unknown) {
+  const message = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
+  logError({
+    timestamp: Date.now(),
+    type: 'error',
+    message: `[boundary] ${message}`,
+    stack: error instanceof Error ? error.stack : undefined,
+    userAgent: typeof navigator !== 'undefined' ? navigator.userAgent : undefined,
+  });
+}
+
 export function initErrorMonitoring() {
   if (typeof window === 'undefined') return;
   // Guard against double-initialization (e.g. HMR re-mounting the layout).
@@ -159,6 +186,10 @@ export function initErrorMonitoring() {
 
   // Capture window errors
   window.addEventListener('error', (event) => {
+    // This browser warning is non-fatal and can occur during a frame while
+    // layout settles. Observer callbacks are deferred where possible, but do
+    // not present an intermittent engine warning as an application failure.
+    if (RESIZE_OBSERVER_LOOP_WARNING.test(event.message)) return;
     errorBuffer.push({
       timestamp: Date.now(),
       type: 'error',
@@ -170,10 +201,12 @@ export function initErrorMonitoring() {
       userAgent: navigator.userAgent,
     });
     scheduleFlush();
+    notifyUser(event.message);
   });
 
   // Capture unhandled promise rejections
   window.addEventListener('unhandledrejection', (event) => {
+    const reasonMessage = event.reason instanceof Error ? event.reason.message : String(event.reason);
     errorBuffer.push({
       timestamp: Date.now(),
       type: 'unhandledrejection',
@@ -182,5 +215,6 @@ export function initErrorMonitoring() {
       userAgent: navigator.userAgent,
     });
     scheduleFlush();
+    notifyUser(reasonMessage);
   });
 }

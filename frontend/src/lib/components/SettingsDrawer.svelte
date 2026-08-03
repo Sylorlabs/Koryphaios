@@ -5,6 +5,7 @@
   import { shortcutStore } from '$lib/stores/shortcuts.svelte';
 import { defaultShortcuts as globalDefaultShortcuts } from '$lib/stores/shortcuts.svelte';
 import { toastStore } from '$lib/stores/toast.svelte';
+import { formatKey } from '$lib/utils/platform';
   import {
     Key,
     Palette,
@@ -37,6 +38,8 @@ import { toastStore } from '$lib/stores/toast.svelte';
     RefreshCw,
     Eye,
     EyeOff,
+    AudioLines,
+    Image as ImageIcon,
   } from 'lucide-svelte';
   import MemoryEditor from './MemoryEditor.svelte';
   import AgentSettings from './AgentSettings.svelte';
@@ -46,7 +49,6 @@ import { toastStore } from '$lib/stores/toast.svelte';
   import { agentSettingsStore } from '$lib/stores/agent-settings.svelte';
   import { experimentalStore } from '$lib/stores/experimental.svelte';
   import { collaborationStore } from '$lib/stores/collaboration.svelte';
-  import { modeStore } from '$lib/stores/mode.svelte';
   import { notesStore } from '$lib/stores/notes.svelte';
   import { projectStore } from '$lib/stores/project.svelte';
   import { sessionStore } from '$lib/stores/sessions.svelte';
@@ -56,7 +58,6 @@ import { toastStore } from '$lib/stores/toast.svelte';
     type NotesPermissionPreset,
   } from '@koryphaios/shared';
   import ModelSelectionDialog from './ModelSelectionDialog.svelte';
-  import ModeToggle from './ModeToggle.svelte';
   import TeamAccessProfiles from './TeamAccessProfiles.svelte';
   import ColorPickerModal from './ColorPickerModal.svelte';
   import ConfirmDialog from './ConfirmDialog.svelte';
@@ -64,6 +65,8 @@ import { toastStore } from '$lib/stores/toast.svelte';
   import NumberStepper from './NumberStepper.svelte';
   import SettingsSwitch from './SettingsSwitch.svelte';
   import KorySelect from './KorySelect.svelte';
+  import VoiceSettings from './VoiceSettings.svelte';
+  import ImageSettings from './ImageSettings.svelte';
   import { apiUrl } from '$lib/utils/api-url';
 import { apiFetch, parseJsonResponse } from '$lib/api.svelte';
   import { dndzone } from 'svelte-dnd-action';
@@ -72,12 +75,13 @@ import { apiFetch, parseJsonResponse } from '$lib/api.svelte';
   interface Props {
     open?: boolean;
     initialTab?: SettingsTab;
+    initialAgentSection?: 'permissions';
     onClose?: () => void;
   }
 
-  type SettingsTab = 'providers' | 'appearance' | 'shortcuts' | 'billing' | 'memory' | 'agent' | 'experimental' | 'teams' | 'notes';
+  type SettingsTab = 'providers' | 'voice' | 'images' | 'appearance' | 'shortcuts' | 'billing' | 'memory' | 'agent' | 'experimental' | 'teams' | 'notes';
 
-  let { open = false, initialTab = 'providers', onClose }: Props = $props();
+  let { open = false, initialTab = 'providers', initialAgentSection, onClose }: Props = $props();
   let activeTab = $state<SettingsTab>('providers');
   let wasOpen = $state(false);
 
@@ -124,7 +128,17 @@ import { apiFetch, parseJsonResponse } from '$lib/api.svelte';
       }
     };
     window.addEventListener('open-provider-account-settings', openProviderAccounts);
-    return () => window.removeEventListener('open-provider-account-settings', openProviderAccounts);
+    // Capture before the page-level shortcut handler. Otherwise assigning a
+    // binding such as Ctrl+K can trigger the old global action before this
+    // drawer has a chance to save the newly captured binding.
+    const captureShortcutAssignment = (event: KeyboardEvent) => {
+      if (editingShortcutId) handleShortcutKeydown(event);
+    };
+    window.addEventListener('keydown', captureShortcutAssignment, { capture: true });
+    return () => {
+      window.removeEventListener('open-provider-account-settings', openProviderAccounts);
+      window.removeEventListener('keydown', captureShortcutAssignment, { capture: true });
+    };
   });
 
   function secretInputType(id: string): 'text' | 'password' {
@@ -200,7 +214,7 @@ import { apiFetch, parseJsonResponse } from '$lib/api.svelte';
     }
     if (open && activeTab === 'memory' && loadedMemoryProject !== projectPath) {
       loadedMemoryProject = projectPath;
-      void memoryStore.loadAllMemory();
+      void memoryStore.loadAllMemory(sessionStore.activeSessionId ?? undefined);
     }
     if (open && activeTab === 'agent' && loadedAgentProject !== projectPath) {
       loadedAgentProject = projectPath;
@@ -344,7 +358,7 @@ import { apiFetch, parseJsonResponse } from '$lib/api.svelte';
   const PROVIDER_CATEGORIES: Array<{ id: ProviderCategory; label: string }> = [
     { id: 'all', label: 'All' },
     { id: 'ready', label: 'Ready now' },
-    { id: 'auth', label: 'ChatGPT auth' },
+    { id: 'auth', label: 'ChatGPT subscription' },
     { id: 'subscriptions', label: 'CLI subscriptions' },
     { id: 'api', label: 'API' },
     { id: 'local', label: 'Local' },
@@ -367,6 +381,7 @@ import { apiFetch, parseJsonResponse } from '$lib/api.svelte';
     'copilot',
   ]);
   const LOCAL_ENDPOINT_PROVIDER_KEYS = new Set(['local', 'ollama', 'lmstudio', 'llamacpp']);
+  const CAPABILITY_ONLY_PROVIDER_KEYS = new Set(['elevenlabs', 'deepgram', 'gladia', 'assemblyai', 'lmnt', 'blackforestlabs', 'fal', 'replicate', 'stabilityai']);
   const isCliExecutionProvider = (providerKey: string): boolean =>
     CLI_SUBSCRIPTION_PROVIDER_KEYS.has(providerKey) && !LOCAL_ENDPOINT_PROVIDER_KEYS.has(providerKey);
   const providerCategoryFor = (provider: { key: string }): Exclude<ProviderCategory, 'all' | 'ready'> => {
@@ -378,9 +393,12 @@ import { apiFetch, parseJsonResponse } from '$lib/api.svelte';
     }
     return 'api';
   };
+  const installedClis = $derived(providersStore.detectedClis.filter((c) => c.installed));
+  const fontCategories = $derived([...new Set(theme.fonts.map(f => f.category))]);
   const filteredProviderList = $derived.by(() => {
     const q = providerSearchQuery.trim().toLowerCase();
     return providersStore.providerList
+      .filter((provider) => !CAPABILITY_ONLY_PROVIDER_KEYS.has(provider.key))
       .filter((provider) => {
         const status = getProviderStatus(provider.key);
         if (providerCategory === 'ready') return Boolean(status?.authenticated);
@@ -403,7 +421,7 @@ import { apiFetch, parseJsonResponse } from '$lib/api.svelte';
     deployment: 'cloud' | 'api' | 'local' | 'hybrid' | undefined | null,
     providerKey: string,
   ): string | null {
-    if (CHATGPT_AUTH_PROVIDER_KEYS.has(providerKey)) return 'ChatGPT auth';
+    if (CHATGPT_AUTH_PROVIDER_KEYS.has(providerKey)) return 'ChatGPT subscription';
     if (deployment === 'cloud') return 'Cloud agent';
     if (deployment === 'local') return isCliExecutionProvider(providerKey) ? 'CLI' : 'Local endpoint';
     return null;
@@ -413,7 +431,7 @@ import { apiFetch, parseJsonResponse } from '$lib/api.svelte';
     deployment: 'cloud' | 'api' | 'local' | 'hybrid' | undefined | null,
     providerKey: string,
   ): string | null {
-    if (CHATGPT_AUTH_PROVIDER_KEYS.has(providerKey)) return 'ChatGPT OAuth · managed by local Codex app-server';
+    if (CHATGPT_AUTH_PROVIDER_KEYS.has(providerKey)) return 'ChatGPT subscription sign-in · managed by local Codex app-server';
     if (deployment === 'cloud') {
       return 'Cloud agent · sync via git pull / gh pr checkout';
     }
@@ -567,7 +585,7 @@ import { apiFetch, parseJsonResponse } from '$lib/api.svelte';
 
   function startEditShortcut(id: string) { editingShortcutId = id; capturedKeys = []; }
   function handleShortcutKeydown(e: KeyboardEvent) {
-    if (!editingShortcutId) return; e.preventDefault(); e.stopPropagation();
+    if (!editingShortcutId) return; e.preventDefault(); e.stopImmediatePropagation();
     const keys: string[] = []; if (e.ctrlKey) keys.push('Ctrl'); if (e.shiftKey) keys.push('Shift'); if (e.altKey) keys.push('Alt'); if (e.metaKey) keys.push('Meta');
     const key = e.key; if (!['Control', 'Shift', 'Alt', 'Meta'].includes(key)) keys.push(key.length === 1 ? key.toUpperCase() : key);
     if (keys.length === 0) return; capturedKeys = keys;
@@ -584,20 +602,10 @@ import { apiFetch, parseJsonResponse } from '$lib/api.svelte';
   let billingLoading = $state(false);
   let billingCredits = $state<any>(null);
   let billingError = $state<string | null>(null);
-  let billingSpendView = $state<'api' | 'subscription' | 'all'>('api');
-  let billingCodexAccount = $state('all');
-
-  const billingSpendOptions = [
-    { value: 'api', label: 'API spend', description: 'Metered API-key provider charges' },
-    { value: 'subscription', label: 'Subscription spend', description: '30-day API-equivalent inference value' },
-    { value: 'all', label: 'All', description: 'API spend plus subscription inference value' },
-  ];
-
-  function selectedSpendCents(): number {
-    if (billingSpendView === 'subscription') return billingCredits?.subscriptionInferenceCents ?? 0;
-    if (billingSpendView === 'all') return billingCredits?.allSpendCents ?? 0;
-    return billingCredits?.totalSpendCents ?? 0;
-  }
+  let billingRefreshTimer: ReturnType<typeof setTimeout> | null = null;
+  let expandedSubscriptionTrends = $state<Record<string, boolean>>({});
+  let subscriptionTrendRanges = $state<Record<string, number>>({});
+  let activeSubscriptionTrendPoints = $state<Record<string, number | undefined>>({});
 
   function formatTokens(n: number): string {
     if (!Number.isFinite(n) || n <= 0) return '0';
@@ -607,34 +615,74 @@ import { apiFetch, parseJsonResponse } from '$lib/api.svelte';
     return String(n);
   }
 
-  function codexBillingAccountOptions() {
-    const accounts = (billingCredits?.cliUsage ?? []).filter((cli: any) => cli.provider === 'codex' && cli.accountId);
-    return [
-      { value: 'all', label: 'All Codex CLI accounts', description: 'Combined view of every detected Codex profile' },
-      ...accounts.map((cli: any) => ({
-        value: cli.accountId as string,
-        label: cli.accountLabel || 'codex',
-        description: cli.accountEmail || 'Codex CLI profile',
-      })),
-    ];
+  function subscriptionTrendKey(cli: { provider?: string; accountId?: string }) {
+    return `${cli.provider ?? 'cli'}:${cli.accountId ?? 'aggregate'}`;
   }
 
-  function visibleCliUsage() {
-    const entries = billingCredits?.cliUsage ?? [];
-    if (billingCodexAccount === 'all') return entries;
-    return entries.filter((cli: any) => cli.provider !== 'codex' || cli.accountId === billingCodexAccount);
+  function shownUsageTrend(cli: {
+    provider?: string;
+    accountId?: string;
+    dailyUsage?: Array<{ date?: string; tokens?: number }>;
+  }) {
+    const key = subscriptionTrendKey(cli);
+    return (cli.dailyUsage ?? []).slice(-(subscriptionTrendRanges[key] ?? 14));
+  }
+
+  function usageTrendPoints(
+    dailyUsage: Array<{ date?: string; tokens?: number }> | undefined,
+    height = 64,
+  ): string {
+    const values = dailyUsage?.map((entry) => Math.max(0, entry.tokens ?? 0)) ?? [];
+    if (!values.length) return '';
+    const max = Math.max(...values, 1);
+    const width = 280;
+    return values
+      .map((value, index) => {
+        const x = values.length === 1 ? width / 2 : (index / (values.length - 1)) * width;
+        const y = height - (value / max) * (height - 4) - 2;
+        return `${x.toFixed(1)},${y.toFixed(1)}`;
+      })
+      .join(' ');
+  }
+
+  function formatUsageTrendDate(date: string | undefined): string {
+    if (!date) return '';
+    return new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric', timeZone: 'UTC' }).format(
+      new Date(`${date}T00:00:00Z`),
+    );
+  }
+
+  function updateUsageTrendPoint(
+    event: PointerEvent,
+    key: string,
+    dailyUsage: Array<{ date?: string; tokens?: number }>,
+  ) {
+    const bounds = (event.currentTarget as SVGSVGElement).getBoundingClientRect();
+    const ratio = Math.max(0, Math.min(1, (event.clientX - bounds.left) / bounds.width));
+    const nextIndex = Math.min(
+      dailyUsage.length - 1,
+      Math.round(ratio * (dailyUsage.length - 1)),
+    );
+    // Pointer events arrive far more often than the selected day can change.
+    // Avoid invalidating the whole settings drawer for identical points.
+    if (activeSubscriptionTrendPoints[key] === nextIndex) return;
+    activeSubscriptionTrendPoints[key] = nextIndex;
   }
 
   async function loadBillingCredits(forceRefresh = false) {
+    if (billingRefreshTimer) {
+      clearTimeout(billingRefreshTimer);
+      billingRefreshTimer = null;
+    }
     billingLoading = true; billingError = null;
     try {
       const requestUrl = `/api/billing/credits${forceRefresh ? '?refresh=1' : ''}`;
-      let res = await apiFetch(apiUrl(requestUrl), {}, 60_000);
+      let res = await apiFetch(apiUrl(requestUrl), {}, 3_000);
       if (!res.ok) {
-        if (res.status === 500 && forceRefresh) {
+        if ((res.status === 500 || res.status === 408) && forceRefresh) {
           // Some environments stall during refresh work (provider APIs, heavy log
           // scans); drop to cached mode and keep the UI usable.
-          res = await apiFetch(apiUrl('/api/billing/credits'), {}, 60_000);
+          res = await apiFetch(apiUrl('/api/billing/credits'), {}, 3_000);
         }
         if (!res.ok) {
           const text = await res.text().catch(() => '');
@@ -649,9 +697,30 @@ import { apiFetch, parseJsonResponse } from '$lib/api.svelte';
         return;
       }
       billingCredits = data;
+      // Slow CLI scans and provider balances complete in the background. Keep
+      // the drawer interactive, then replace the provisional snapshot once.
+      if (data?.refreshing) {
+        billingRefreshTimer = setTimeout(() => {
+          billingRefreshTimer = null;
+          if (open && activeTab === 'billing') void loadBillingCredits();
+        }, 1_500);
+      }
     } catch (e: any) { billingError = e.message; }
     finally { billingLoading = false; }
   }
+
+  // The drawer can be opened directly on Billing (for example from a shortcut),
+  // which bypasses the sidebar click handler. Load once in that case too; the
+  // explicit Refresh button remains the only forced network refresh.
+  $effect(() => {
+    if (open && activeTab === 'billing' && !billingCredits && !billingLoading) {
+      void loadBillingCredits();
+    }
+  });
+
+  onDestroy(() => {
+    if (billingRefreshTimer) clearTimeout(billingRefreshTimer);
+  });
 </script>
 
 <svelte:window onkeydown={(e) => { if (editingShortcutId) handleShortcutKeydown(e); else handleKeydown(e); }} />
@@ -669,22 +738,24 @@ import { apiFetch, parseJsonResponse } from '$lib/api.svelte';
     <!-- Tab bar -->
     <div class="flex gap-1 px-4 py-2 border-b shrink-0 overflow-x-auto no-scrollbar" style="background: var(--color-surface-0); border-color: var(--color-border);">
       {#each [
-        { id: 'providers', label: 'Providers', icon: Key },
+        { id: 'providers', label: 'AI Models', icon: Key },
+        { id: 'voice', label: 'Voice', icon: AudioLines },
+        { id: 'images', label: 'Images', icon: ImageIcon },
         { id: 'appearance', label: 'Appearance', icon: Palette },
         { id: 'shortcuts', label: 'Shortcuts', icon: Keyboard },
-        { id: 'billing', label: 'Billing', icon: CreditCard, action: () => loadBillingCredits(true) },
+        { id: 'billing', label: 'Billing', icon: CreditCard },
         { id: 'memory', label: 'Memory', icon: Brain },
         { id: 'agent', label: 'Agent', icon: Bot },
         { id: 'experimental', label: 'Advanced', icon: FlaskConical },
         { id: 'teams', label: 'Teams', icon: Users },
         { id: 'notes', label: 'Notes', icon: StickyNote },
-      ] as tab}
+      ] as tab (tab.id)}
         {@const Icon = tab.icon}
         <button
           type="button"
           class="flex-1 min-w-[100px] flex items-center justify-center gap-1.5 py-2 text-xs rounded-md transition-colors whitespace-nowrap
                  {activeTab === tab.id ? 'bg-[var(--color-surface-3)] text-[var(--color-text-primary)] font-medium' : 'text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)]'}"
-          onclick={() => { activeTab = tab.id as any; if (tab.action) tab.action(); }}
+          onclick={() => { activeTab = tab.id as SettingsTab; }}
         >
           <Icon size={13} /> {tab.label}
         </button>
@@ -745,7 +816,7 @@ import { apiFetch, parseJsonResponse } from '$lib/api.svelte';
               </div>
             </div>
             <div class="space-y-2.5">
-              {#each providersStore.detectedClis.filter((c) => c.installed) as cli (cli.id)}
+              {#each installedClis as cli (cli.id)}
                 <div class="flex items-start gap-3">
                   <span
                     class="mt-1.5 h-2 w-2 rounded-full flex-shrink-0"
@@ -935,7 +1006,12 @@ import { apiFetch, parseJsonResponse } from '$lib/api.svelte';
                   {:else}
                     <div class="space-y-2">
                       {#if caps.supportsApiKey}
-                        <label class="text-[10px] text-[var(--color-text-muted)] font-medium uppercase tracking-wider" for={`provider-key-${prov.key}`}>API Key</label>
+                        <div class="flex items-center justify-between gap-3">
+                          <label class="text-[10px] text-[var(--color-text-muted)] font-medium uppercase tracking-wider" for={`provider-key-${prov.key}`}>API Key</label>
+                          {#if status?.credentialUrl}
+                            <a href={status.credentialUrl} target="_blank" rel="noreferrer" class="text-[10px] text-[var(--color-accent)] hover:underline">Get API key</a>
+                          {/if}
+                        </div>
                         <div class="relative">
                           <input id={`provider-key-${prov.key}`} type={secretInputType(`provider-key-${prov.key}`)} placeholder={prov.placeholder} bind:value={providersStore.keyInputs[prov.key]} class="input w-full text-xs" style="padding-right: 2.75rem;" onkeydown={(e) => e.key === 'Enter' && handleConnectProvider(prov.key)} />
                           <button type="button" class="secret-visibility absolute inset-y-0 right-1 my-auto z-10" onclick={() => toggleSecretVisibility(`provider-key-${prov.key}`)} aria-label={visibleSecrets[`provider-key-${prov.key}`] ? 'Hide API key' : 'Show API key'} title={visibleSecrets[`provider-key-${prov.key}`] ? 'Hide API key' : 'Show API key'}>
@@ -1278,6 +1354,9 @@ import { apiFetch, parseJsonResponse } from '$lib/api.svelte';
       </div>
 
       <!-- Appearance Tab -->
+      <div class={activeTab === 'voice' ? 'flex-1 min-h-0 overflow-y-auto' : 'hidden'}><VoiceSettings /></div>
+      <div class={activeTab === 'images' ? 'flex-1 min-h-0 overflow-y-auto' : 'hidden'}><ImageSettings /></div>
+
       <div class={activeTab === 'appearance' ? 'flex-1 overflow-y-auto px-6 py-5 space-y-10 w-full max-w-7xl mx-auto' : 'hidden'}>
         <section>
           <div class="flex items-center gap-3 mb-6">
@@ -1289,7 +1368,7 @@ import { apiFetch, parseJsonResponse } from '$lib/api.svelte';
           </div>
           <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-4">
             <!-- Static per-theme preview colors so each card shows its actual palette -->
-          {#each theme.presets as t}
+          {#each theme.presets as t (t.id)}
             {@const previewColors: Record<string, { bg: string; s1: string; s2: string; border: string; accent: string }> = {
               kintsugi:    { bg: '#0D0B0A', s1: '#141210', s2: '#1C1917', border: 'rgba(213, 178, 97, 0.16)', accent: '#D5B261' },
               midnight:    { bg: '#0a0a0b', s1: '#111113', s2: '#1a1a1e', border: '#2a2a30', accent: '#6366f1' },
@@ -1356,7 +1435,7 @@ import { apiFetch, parseJsonResponse } from '$lib/api.svelte';
             </div>
           </div>
           <div class="flex flex-wrap gap-4 p-4 rounded-2xl bg-[var(--color-surface-2)] border border-[var(--color-border)]">
-            {#each theme.accents as color}
+            {#each theme.accents as color (color.id)}
               <button 
                 type="button"
                 class="group relative w-12 h-12 rounded-xl transition-all hover:scale-110 active:scale-95 shadow-md
@@ -1405,11 +1484,11 @@ import { apiFetch, parseJsonResponse } from '$lib/api.svelte';
               <p class="text-xs text-[var(--color-text-muted)]">Choose the font family for the interface</p>
             </div>
           </div>
-          {#each [...new Set(theme.fonts.map(f => f.category))] as category}
+          {#each fontCategories as category (category)}
             <div class="mb-6">
               <p class="text-[10px] font-bold uppercase tracking-[0.2em] text-[var(--color-text-muted)] mb-3">{category}</p>
               <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
-                {#each theme.fonts.filter(f => f.category === category) as f}
+                {#each theme.fonts.filter(f => f.category === category) as f (f.id)}
                   <button 
                     type="button"
                     class="flex flex-col gap-2 p-4 rounded-xl border transition-all text-left
@@ -1444,7 +1523,7 @@ import { apiFetch, parseJsonResponse } from '$lib/api.svelte';
           </button>
         </div>
         <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
-          {#each shortcutStore.list as shortcut}
+          {#each shortcutStore.list as shortcut (shortcut.id)}
             <div class="group flex items-center justify-between p-4 bg-[var(--color-surface-2)] rounded-xl border border-[var(--color-border)] transition-colors hover:border-[var(--color-text-muted)]">
               <div>
                 <div class="text-sm font-semibold text-[var(--color-text-primary)]">{shortcut.action}</div>
@@ -1459,8 +1538,8 @@ import { apiFetch, parseJsonResponse } from '$lib/api.svelte';
                 {#if editingShortcutId === shortcut.id}
                   <span class="animate-pulse">Waiting for keys...</span>
                 {:else}
-                  {#each shortcut.keys as key, i}
-                    <span>{key}</span>
+                  {#each shortcut.keys as key, i (i)}
+                    <span>{formatKey(key)}</span>
                     {#if i < shortcut.keys.length - 1}<span class="opacity-30 mx-0.5">+</span>{/if}
                   {/each}
                 {/if}
@@ -1499,36 +1578,21 @@ import { apiFetch, parseJsonResponse } from '$lib/api.svelte';
             <div class="absolute -top-4 -right-4 w-24 h-24 bg-[var(--color-accent)]/5 rounded-full blur-3xl"></div>
             <div class="relative mb-3 flex items-start justify-between gap-4">
               <div>
-                <div class="text-[10px] text-[var(--color-text-muted)] uppercase tracking-widest font-bold">
-                  {billingSpendView === 'api' ? 'API Spend' : billingSpendView === 'subscription' ? 'Subscription Spend' : 'All Spend'}
-                </div>
+                <div class="text-[10px] text-[var(--color-text-muted)] uppercase tracking-widest font-bold">API Spend</div>
                 <div class="mt-1 text-[9px] text-[var(--color-text-muted)]">
-                  {billingSpendView === 'api' ? 'Metered keys' : billingSpendView === 'subscription' ? '30-day API-equivalent value' : 'Metered plus 30-day inference value'}
+                  Metered API-key providers only
                 </div>
-              </div>
-              <div class="w-52 shrink-0">
-                <KorySelect
-                  compact
-                  value={billingSpendView}
-                  label="Spend type"
-                  options={billingSpendOptions}
-                  onchange={(value) => billingSpendView = value as 'api' | 'subscription' | 'all'}
-                />
               </div>
             </div>
             <div class="text-4xl font-black text-[var(--color-text-primary)] flex items-baseline gap-1">
               {#if billingLoading && !billingCredits}
                 <div class="h-10 w-32 bg-[var(--color-surface-3)] animate-pulse rounded-lg"></div>
               {:else}
-                <span class="text-2xl opacity-50">$</span>{(selectedSpendCents() / 100).toFixed(2)}
+                <span class="text-2xl opacity-50">$</span>{((billingCredits?.totalSpendCents ?? 0) / 100).toFixed(2)}
               {/if}
             </div>
             <p class="text-[10px] text-[var(--color-text-muted)] mt-4">
-              {billingSpendView === 'subscription'
-                ? 'Inference value is not an amount charged by subscription providers'
-                : billingSpendView === 'all'
-                  ? 'Combined comparison value; subscription inference is not an amount charged'
-                  : 'Computed from recorded metered tokens at verified model prices'}
+              Computed from recorded metered tokens at verified model prices
             </p>
           </div>
 
@@ -1545,34 +1609,23 @@ import { apiFetch, parseJsonResponse } from '$lib/api.svelte';
             </div>
             <p class="text-[10px] text-[var(--color-text-muted)] mt-4">
               {typeof billingCredits?.remainingCents === 'number'
-                ? 'Live balance from your provider account'
-                : 'Your configured providers do not expose a queryable balance'}
+                ? `Live available balance${billingCredits?.balanceProviders?.length > 1 ? ` across ${billingCredits.balanceProviders.length} providers` : ' from your reporting provider'}`
+                : 'No configured API-key provider returned a queryable balance'}
             </p>
           </div>
         </div>
 
-        <!-- CLI subscriptions: real local usage + quota burn -->
+        <!-- CLI subscriptions: account-separated local usage + quota burn -->
         {#if billingCredits?.cliUsage?.length}
           <div class="space-y-4">
             <div class="ml-1 flex flex-wrap items-end justify-between gap-3">
               <div>
-                <h3 class="text-sm font-bold text-[var(--color-text-primary)]">CLI Subscriptions — real usage</h3>
-                <p class="mt-1 text-[10px] text-[var(--color-text-muted)]">Each Codex profile runs and reports separately; account names match the CLI command context.</p>
+                <h3 class="text-sm font-bold text-[var(--color-text-primary)]">CLI subscriptions</h3>
+                <p class="mt-1 text-[10px] text-[var(--color-text-muted)]">Each detected profile is shown separately. These plans report usage and quota, not API charges or balances.</p>
               </div>
-              {#if codexBillingAccountOptions().length > 2}
-                <div class="w-64 max-w-full">
-                  <KorySelect
-                    compact
-                    value={billingCodexAccount}
-                    label="Codex CLI account"
-                    options={codexBillingAccountOptions()}
-                    onchange={(value) => billingCodexAccount = value}
-                  />
-                </div>
-              {/if}
             </div>
             <div class="grid grid-cols-1 xl:grid-cols-2 gap-4">
-              {#each visibleCliUsage() as cli (`${cli.provider}:${cli.accountId ?? 'aggregate'}`)}
+              {#each billingCredits.cliUsage as cli (`${cli.provider}:${cli.accountId ?? 'aggregate'}`)}
                 <div class="p-5 bg-[var(--color-surface-2)] rounded-2xl border border-[var(--color-border)] space-y-4">
                   <div class="flex items-center justify-between">
                     <div class="flex items-center gap-3">
@@ -1589,9 +1642,20 @@ import { apiFetch, parseJsonResponse } from '$lib/api.svelte';
                         <span class="px-2 py-0.5 rounded-full text-[9px] uppercase tracking-wider font-bold bg-[var(--color-surface-3)] text-[var(--color-text-muted)]">{cli.planType}</span>
                       {/if}
                     </div>
-                    <span class="text-[10px] text-[var(--color-text-muted)]">from the CLI's own logs</span>
+                    <span class="text-[10px] text-[var(--color-text-muted)]">{cli.usageSource === 'codex-app-server' ? 'live Codex account data' : "from the CLI's own logs"}</span>
                   </div>
 
+                  {#if cli.attribution === 'unavailable'}
+                    <div class="rounded-xl border border-amber-400/30 bg-amber-400/5 px-3 py-2 text-[11px] text-[var(--color-text-secondary)]">
+                      Usage unavailable for this account: {cli.attributionNote}. Point this CLI profile at its own session directory to enable account-separated usage.
+                    </div>
+                  {:else}
+                  {#if cli.creditBalance != null}
+                    <div class="flex items-center justify-between rounded-xl bg-[var(--color-surface-1)] px-3 py-2 text-[11px]">
+                      <span class="text-[var(--color-text-secondary)]">Codex credits</span>
+                      <span class="font-mono font-semibold text-[var(--color-text-primary)]">{cli.creditBalance}</span>
+                    </div>
+                  {/if}
                   {#each cli.quotas as q (q.label)}
                     <div>
                       <div class="flex items-center justify-between text-[11px] mb-1">
@@ -1612,13 +1676,78 @@ import { apiFetch, parseJsonResponse } from '$lib/api.svelte';
                         <div class="text-[9px] uppercase tracking-wider text-[var(--color-text-muted)] font-bold">{w.period}</div>
                         <div class="mt-1 text-xs font-mono font-bold text-[var(--color-text-primary)]">{formatTokens(w.tokensIn + w.tokensOut)}</div>
                         <div class="text-[9px] text-[var(--color-text-muted)]">tokens</div>
-                        <div class="mt-1 text-[10px] font-mono" style="color: var(--color-accent);">
-                          {w.inferenceValueUsd != null ? `$${w.inferenceValueUsd.toFixed(2)}` : '—'}
-                        </div>
-                        <div class="text-[9px] text-[var(--color-text-muted)]">inference value</div>
                       </div>
                     {/each}
                   </div>
+
+                  {#if cli.dailyUsage?.length}
+                    {@const trendKey = subscriptionTrendKey(cli)}
+                    {@const trendExpanded = expandedSubscriptionTrends[trendKey] ?? false}
+                    {@const trend = shownUsageTrend(cli)}
+                    {@const activeTrendIndex = activeSubscriptionTrendPoints[trendKey]}
+                    {@const activeTrendPoint = activeTrendIndex == null ? undefined : trend[activeTrendIndex]}
+                    <div class="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-1)] p-3">
+                      <div class="flex items-center justify-between gap-3 text-[10px]">
+                        <span class="font-semibold text-[var(--color-text-secondary)]">Usage trend</span>
+                        <div class="flex items-center gap-1.5">
+                          {#each [7, 14, 30] as days (days)}
+                            <button
+                              type="button"
+                              class="rounded-md border px-1.5 py-0.5 font-mono transition-colors"
+                              class:border-[var(--color-accent)]={(subscriptionTrendRanges[trendKey] ?? 14) === days}
+                              class:text-[var(--color-accent)]={(subscriptionTrendRanges[trendKey] ?? 14) === days}
+                              class:border-[var(--color-border)]={(subscriptionTrendRanges[trendKey] ?? 14) !== days}
+                              class:text-[var(--color-text-muted)]={(subscriptionTrendRanges[trendKey] ?? 14) !== days}
+                              aria-pressed={(subscriptionTrendRanges[trendKey] ?? 14) === days}
+                              onclick={() => {
+                                subscriptionTrendRanges[trendKey] = days;
+                                activeSubscriptionTrendPoints[trendKey] = undefined;
+                              }}
+                            >{days}d</button>
+                          {/each}
+                          <button
+                            type="button"
+                            class="ml-1 rounded-md border border-[var(--color-border)] px-1.5 py-0.5 font-medium text-[var(--color-text-secondary)] transition-colors hover:border-[var(--color-accent)] hover:text-[var(--color-accent)]"
+                            aria-expanded={trendExpanded}
+                            onclick={() => (expandedSubscriptionTrends[trendKey] = !trendExpanded)}
+                          >{trendExpanded ? 'Collapse' : 'Expand'}</button>
+                        </div>
+                      </div>
+                      <!-- Reserve this row so showing a hover value never moves the SVG out
+                           from under the pointer (which used to produce a leave/re-enter loop). -->
+                      <div class="mt-2 h-6">
+                      {#if activeTrendPoint}
+                        <div class="flex items-center justify-between rounded-md bg-[var(--color-surface-2)] px-2 py-1 text-[10px]">
+                          <span class="text-[var(--color-text-secondary)]">{formatUsageTrendDate(activeTrendPoint.date)}</span>
+                          <span class="font-mono font-semibold text-[var(--color-text-primary)]">{formatTokens(activeTrendPoint.tokens ?? 0)} tokens</span>
+                        </div>
+                      {/if}
+                      </div>
+                      <svg
+                        class="w-full overflow-visible {trendExpanded ? 'h-32' : 'h-16'}"
+                        viewBox={trendExpanded ? '0 0 280 128' : '0 0 280 64'}
+                        preserveAspectRatio="none"
+                        role="img"
+                        aria-label={`Daily token usage from ${formatUsageTrendDate(trend[0]?.date)} to ${formatUsageTrendDate(trend[trend.length - 1]?.date)}`}
+                        onpointermove={(event) => updateUsageTrendPoint(event, trendKey, trend)}
+                        onpointerleave={() => (activeSubscriptionTrendPoints[trendKey] = undefined)}
+                      >
+                        <line x1="0" y1={trendExpanded ? 127 : 63} x2="280" y2={trendExpanded ? 127 : 63} stroke="var(--color-border)" stroke-width="1" />
+                        <polyline
+                          points={usageTrendPoints(trend, trendExpanded ? 128 : 64)}
+                          fill="none"
+                          stroke="var(--color-accent)"
+                          stroke-width="2.5"
+                          stroke-linecap="round"
+                          stroke-linejoin="round"
+                        />
+                      </svg>
+                      <div class="mt-1 flex justify-between text-[9px] text-[var(--color-text-muted)]">
+                        <span>{formatUsageTrendDate(trend[0]?.date)}</span>
+                        <span>{formatUsageTrendDate(trend[trend.length - 1]?.date)}</span>
+                      </div>
+                    </div>
+                  {/if}
 
                   {#if cli.byModel?.length}
                     <div class="space-y-1">
@@ -1626,11 +1755,12 @@ import { apiFetch, parseJsonResponse } from '$lib/api.svelte';
                         <div class="flex items-center justify-between text-[11px]">
                           <span class="font-mono text-[var(--color-text-secondary)] truncate">{m.model}</span>
                           <span class="font-mono text-[var(--color-text-muted)] shrink-0 ml-3">
-                            {formatTokens(m.tokensIn + m.tokensOut)} · {m.inferenceValueUsd != null ? `$${m.inferenceValueUsd.toFixed(2)}` : 'unpriced'}
+                            {formatTokens(m.tokensIn + m.tokensOut)} tokens
                           </span>
                         </div>
                       {/each}
                     </div>
+                  {/if}
                   {/if}
                 </div>
               {/each}
@@ -1638,51 +1768,9 @@ import { apiFetch, parseJsonResponse } from '$lib/api.svelte';
           </div>
         {/if}
 
-        <!-- Saved provider accounts are credential inventory, not a claim of
-             account-level spend. Usage is currently recorded per provider. -->
-        {#if billingCredits?.accounts?.length}
-          <div class="space-y-4">
-          <div class="ml-1 flex items-end justify-between gap-4">
-            <div>
-              <h3 class="text-sm font-bold text-[var(--color-text-primary)]">Configured Accounts</h3>
-              <p class="mt-1 text-[10px] text-[var(--color-text-muted)]">Every active account saved in Providers. Usage totals remain provider-level unless the provider reports account attribution.</p>
-            </div>
-            <span class="shrink-0 text-[10px] font-mono text-[var(--color-text-muted)]">{billingCredits.accounts.length} account{billingCredits.accounts.length === 1 ? '' : 's'}</span>
-          </div>
-          <div class="grid grid-cols-1 xl:grid-cols-2 gap-3">
-              {#each billingCredits.accounts as account (`${account.provider}:${account.id}`)}
-                <div class="flex items-center gap-3 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-2)] p-4">
-                  <div class="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-[var(--color-surface-3)] p-2">
-                    <ProviderIcon provider={account.provider} size={20} class="h-full w-full" />
-                  </div>
-                  <div class="min-w-0 flex-1">
-                    <div class="flex items-center gap-2">
-                      <span class="truncate text-xs font-semibold text-[var(--color-text-primary)]">{account.label}</span>
-                      <span class="shrink-0 rounded-full px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider" style="color: {account.subscription ? 'var(--color-accent)' : 'var(--color-text-secondary)'}; background: var(--color-surface-3);">{account.subscription ? 'Subscription-backed' : 'Metered API'}</span>
-                    </div>
-                    <div class="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-[10px] text-[var(--color-text-muted)]">
-                      <span>{getProviderDisplayLabel(account.provider)}</span>
-                      <span>·</span>
-                      <span>{account.credentialTypes.map((type: string) => type === 'apiKey' ? 'API key' : type === 'authToken' ? 'Auth token' : type === 'cliProfile' ? 'Detected CLI profile' : 'Endpoint URL').join(' + ')}</span>
-                      {#if account.email}<span>· {account.email}</span>{/if}
-                      {#if account.plan}<span>· {String(account.plan).toUpperCase()} plan</span>{/if}
-                      {#if account.health === 'expired'}<span class="text-amber-400">· Login expired</span>{/if}
-                      {#if account.lastUsedAt}<span>· Last used {new Date(account.lastUsedAt).toLocaleString()}</span>{/if}
-                    </div>
-                  </div>
-                  <div class="shrink-0 text-right">
-                    <div class="text-[10px] font-bold uppercase tracking-wider text-[var(--color-text-muted)]">Usage</div>
-                    <div class="mt-1 text-[10px] text-[var(--color-text-secondary)]">Provider aggregate</div>
-                  </div>
-                </div>
-              {/each}
-          </div>
-        </div>
-        {/if}
-
         {#if billingCredits?.balances?.length}
           <div class="space-y-4">
-            <h3 class="text-sm font-bold text-[var(--color-text-primary)] ml-1">Live Account Balances</h3>
+            <h3 class="text-sm font-bold text-[var(--color-text-primary)] ml-1">API account balances</h3>
             <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
               {#each billingCredits.balances as bal (bal.provider)}
                 <div class="p-4 bg-[var(--color-surface-2)] rounded-xl border border-[var(--color-border)] text-center">
@@ -1716,7 +1804,7 @@ import { apiFetch, parseJsonResponse } from '$lib/api.svelte';
                   </div>
                   <div class="text-right">
                     <div class="text-xs font-mono font-bold text-[var(--color-text-secondary)]">
-                      {prov.subscription ? 'subscription' : `$${((prov.spendCents ?? 0) / 100).toFixed(3)} spent`}
+                      ${((prov.spendCents ?? 0) / 100).toFixed(3)} spent
                     </div>
                     {#if billingCredits?.balances?.find((b: any) => b.provider === prov.name)?.availableUsd != null}
                       <div class="text-[10px] font-mono text-emerald-400">
@@ -1742,7 +1830,7 @@ import { apiFetch, parseJsonResponse } from '$lib/api.svelte';
 
       <!-- Agent Tab -->
       <div class={activeTab === 'agent' ? 'flex-1 min-h-0 min-w-0 overflow-hidden flex flex-col' : 'hidden'}>
-        <AgentSettings />
+        <AgentSettings focusPermissions={open && activeTab === 'agent' && initialAgentSection === 'permissions'} />
       </div>
 
       <!-- Experimental Tab -->
@@ -1751,8 +1839,8 @@ import { apiFetch, parseJsonResponse } from '$lib/api.svelte';
       </div>
 
       <!-- Teams Tab -->
-      <div class={activeTab === 'teams' ? 'flex-1 overflow-y-auto px-6 py-5 flex flex-col w-full max-w-7xl mx-auto' : 'hidden'}>
-        <div class="flex-1 py-10">
+      <div class={activeTab === 'teams' ? 'flex-1 overflow-y-auto px-6 py-5 flex flex-col' : 'hidden'}>
+        <div class="flex-1 w-full max-w-7xl mx-auto py-10">
           <div class="text-center mb-12">
             <div class="w-20 h-20 bg-[var(--color-accent)]/10 text-[var(--color-accent)] rounded-3xl flex items-center justify-center mx-auto mb-6 shadow-xl shadow-[var(--color-accent)]/5">
               <Users size={40} />
@@ -1778,7 +1866,7 @@ import { apiFetch, parseJsonResponse } from '$lib/api.svelte';
                       { role: 'viewer', label: 'Viewer · Tier 1', desc: 'Read-only session feed. Cannot submit prompts or run models.', color: 'text-blue-400', bg: 'bg-blue-500/10' },
                       { role: 'collaborator', label: 'Collaborator · Tier 2', desc: 'Can submit prompts when enabled. Host approval remains authoritative.', color: 'text-amber-400', bg: 'bg-amber-500/10' },
                       { role: 'yolo', label: 'YOLO · Tier 3', desc: 'Unrestricted auto-execution, tools, models, and filesystem. Trusted users only.', color: 'text-red-400', bg: 'bg-red-500/10' },
-                    ] as r}
+                    ] as r (r.role)}
                       <div class="flex items-center gap-4 rounded-2xl bg-[var(--color-surface-1)] p-4">
                         <div class="flex-1">
                           <div class="flex items-center gap-2 mb-0.5">
@@ -1883,17 +1971,17 @@ import { apiFetch, parseJsonResponse } from '$lib/api.svelte';
                 <div class="space-y-2">{#each collaborationStore.joinedSessions as team (team.sessionId)}<div class="flex items-center gap-3 rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-1)] p-4"><div class="min-w-0 flex-1"><div class="truncate text-xs font-bold text-[var(--color-text-primary)]">{team.sessionName}</div><div class="mt-1 text-[10px] text-[var(--color-text-muted)]">Access: {team.tierId} · Team workspace</div></div><button type="button" onclick={() => collaborationStore.openJoinedSession(team.sessionId)} class="rounded-xl bg-[var(--color-accent)]/10 px-4 py-2 text-xs font-bold text-[var(--color-accent)]">Open</button><button type="button" onclick={() => collaborationStore.leaveJoinedSession(team.sessionId)} class="rounded-xl px-3 py-2 text-xs text-red-400 hover:bg-red-500/10">Leave</button></div>{/each}</div>
               </div>
             {/if}
-            <div class="grid grid-cols-1 md:grid-cols-2 gap-8 max-w-4xl mx-auto">
-              <div class="p-8 rounded-3xl bg-[var(--color-surface-2)] border border-[var(--color-border)] hover:border-[var(--color-accent)]/30 transition-all flex flex-col text-center">
-                <div class="w-12 h-12 bg-emerald-500/10 text-emerald-400 rounded-2xl flex items-center justify-center mx-auto mb-6">
+            <div class="grid w-full max-w-4xl grid-cols-1 gap-6 mx-auto md:grid-cols-2">
+              <div class="flex flex-col rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-2)] p-6 text-center transition-all hover:border-[var(--color-accent)]/30">
+                <div class="mx-auto mb-4 flex h-10 w-10 items-center justify-center rounded-xl bg-emerald-500/10 text-emerald-400">
                   <Zap size={24} />
                 </div>
-                <h4 class="text-lg font-bold mb-2">Host a Session</h4>
-                <p class="text-xs text-[var(--color-text-muted)] mb-8">
+                <h4 class="mb-2 text-base font-bold">Team session</h4>
+                <p class="mb-5 text-xs text-[var(--color-text-muted)]">
                   Generate invite links for teammates to watch or co-pilot your active AI session in real time.
                 </p>
 
-                <div class="mb-6 flex-1 rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-1)] p-4 text-left">
+                <div class="mb-5 flex-1 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-1)] p-4 text-left">
                   <div class="mb-3 flex items-center justify-between gap-3">
                     <div>
                       <div class="text-xs font-bold text-[var(--color-text-primary)]">Working in</div>
@@ -1952,12 +2040,12 @@ import { apiFetch, parseJsonResponse } from '$lib/api.svelte';
                 </button>
               </div>
 
-              <div class="p-8 rounded-3xl bg-[var(--color-surface-2)] border border-[var(--color-border)] hover:border-[var(--color-accent)]/30 transition-all flex flex-col text-center">
-                <div class="w-12 h-12 bg-blue-500/10 text-blue-400 rounded-2xl flex items-center justify-center mx-auto mb-6">
+              <div class="flex flex-col rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-2)] p-6 text-center transition-all hover:border-[var(--color-accent)]/30">
+                <div class="mx-auto mb-4 flex h-10 w-10 items-center justify-center rounded-xl bg-blue-500/10 text-blue-400">
                   <Keyboard size={24} />
                 </div>
-                <h4 class="text-lg font-bold mb-2">Join in Koryphaios</h4>
-                <p class="text-xs text-[var(--color-text-muted)] mb-8">
+                <h4 class="mb-2 text-base font-bold">Connect to a team</h4>
+                <p class="mb-5 text-xs text-[var(--color-text-muted)]">
                   Enter the host's eight-character code. The host's join policy decides whether you are admitted automatically and which access profile you receive.
                 </p>
                 <div class="space-y-3 text-left">
@@ -1972,27 +2060,27 @@ import { apiFetch, parseJsonResponse } from '$lib/api.svelte';
 
           <!-- ── SECOND SECTION: Share Models ── separate from collaboration;
                its own models-only invite link so it never grants session access. -->
-          <div class="mx-auto max-w-4xl mt-16 pt-12 border-t border-[var(--color-border)]">
+          <div class="mx-auto mt-8 w-full max-w-4xl border-t border-[var(--color-border)] pt-8">
             <ModelSharingPanel />
           </div>
         </div>
       </div>
 
       <!-- Notes Tab -->
-      <div class={activeTab === 'notes' ? 'flex-1 overflow-y-auto px-6 py-5 space-y-6 w-full max-w-7xl mx-auto' : 'hidden'}>
+      <div class={activeTab === 'notes' ? 'flex-1 overflow-y-auto px-6 py-5 space-y-8 w-full max-w-7xl mx-auto' : 'hidden'}>
         <div>
           <h3 class="text-base font-semibold mb-1" style="color: var(--color-text-primary);">Note Network</h3>
           <p class="text-xs" style="color: var(--color-text-muted);">Obsidian-style note network — link notes with [[wikilinks]], visualise connections, and include pinned notes in agent context.</p>
         </div>
 
         <!-- Enable / disable -->
-        <div class="space-y-3">
+        <div class="space-y-5">
           <div class="text-[10px] font-semibold uppercase tracking-[0.14em]" style="color: var(--color-text-muted);">General</div>
 
-          <label class="flex items-center justify-between gap-4 py-2 cursor-pointer">
+          <label class="flex items-center justify-between gap-4 cursor-pointer">
             <div>
               <div class="text-sm font-medium" style="color: var(--color-text-primary);">Enable Notes</div>
-              <div class="text-xs mt-0.5" style="color: var(--color-text-muted);">Show the Notes panel button and enable note creation.</div>
+              <div class="text-xs mt-1" style="color: var(--color-text-muted);">Show the Notes panel button and enable note creation.</div>
             </div>
             <button
               type="button"
@@ -2010,10 +2098,10 @@ import { apiFetch, parseJsonResponse } from '$lib/api.svelte';
             </button>
           </label>
 
-          <label class="flex items-center justify-between gap-4 py-2 cursor-pointer">
+          <label class="flex items-center justify-between gap-4 cursor-pointer">
             <div>
               <div class="text-sm font-medium" style="color: var(--color-text-primary);">Auto-include pinned notes in agent context</div>
-              <div class="text-xs mt-0.5" style="color: var(--color-text-muted);">Pinned notes are automatically injected into the agent's system context.</div>
+              <div class="text-xs mt-1" style="color: var(--color-text-muted);">Pinned notes are automatically injected into the agent's system context.</div>
             </div>
             <button
               type="button"
@@ -2031,27 +2119,52 @@ import { apiFetch, parseJsonResponse } from '$lib/api.svelte';
             </button>
           </label>
 
-          <div class="flex items-center justify-between gap-4 py-2">
-            <div>
-              <div class="text-sm font-medium" style="color: var(--color-text-primary);">Max context tokens</div>
-              <div class="text-xs mt-0.5" style="color: var(--color-text-muted);">Maximum tokens used by notes included in agent context (100–5000).</div>
+          <!-- Max context tokens with enable/disable toggle -->
+          <div class="flex items-center justify-between gap-4">
+            <div class="flex-1">
+              <div class="flex items-center gap-2">
+                <div class="text-sm font-medium" style="color: var(--color-text-primary);">Max context tokens</div>
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={notesStore.settings.maxContextTokensEnabled ?? true}
+                  aria-label="Toggle token budget limit"
+                  class="relative inline-flex h-4 w-7 items-center rounded-full transition-colors shrink-0"
+                  style="background: {(notesStore.settings.maxContextTokensEnabled ?? true) ? 'var(--color-accent)' : 'var(--color-surface-4)'};"
+                  onclick={() => notesStore.updateSettings({ maxContextTokensEnabled: !(notesStore.settings.maxContextTokensEnabled ?? true) })}
+                >
+                  <span
+                    class="inline-block h-3 w-3 rounded-full bg-white shadow transition-transform"
+                    style="transform: translateX({(notesStore.settings.maxContextTokensEnabled ?? true) ? '14px' : '2px'});"
+                  ></span>
+                </button>
+              </div>
+              <div class="text-xs mt-1" style="color: var(--color-text-muted);">
+                {#if notesStore.settings.maxContextTokensEnabled ?? true}
+                  Maximum tokens used by notes in agent context (100–5000). Click the number to type a custom value.
+                {:else}
+                  No token limit — all pinned notes are included regardless of size.
+                {/if}
+              </div>
             </div>
-            <div class="w-52 shrink-0">
-              <NumberStepper
-                value={notesStore.settings.maxContextTokens}
-                min={100}
-                max={5000}
-                step={100}
-                label="Maximum note context tokens"
-                onchange={(value) => notesStore.updateSettings({ maxContextTokens: value })}
-              />
-            </div>
+            {#if notesStore.settings.maxContextTokensEnabled ?? true}
+              <div class="w-52 shrink-0">
+                <NumberStepper
+                  value={notesStore.settings.maxContextTokens}
+                  min={100}
+                  max={5000}
+                  step={100}
+                  label="Maximum note context tokens"
+                  onchange={(value) => notesStore.updateSettings({ maxContextTokens: value })}
+                />
+              </div>
+            {/if}
           </div>
 
-          <div class="flex items-center justify-between gap-4 py-2">
+          <div class="flex items-center justify-between gap-4">
             <div>
               <div class="text-sm font-medium" style="color: var(--color-text-primary);">Default folder path</div>
-              <div class="text-xs mt-0.5" style="color: var(--color-text-muted);">New notes are created here by default.</div>
+              <div class="text-xs mt-1" style="color: var(--color-text-muted);">New notes are created here by default.</div>
             </div>
             <input
               type="text"
@@ -2067,7 +2180,7 @@ import { apiFetch, parseJsonResponse } from '$lib/api.svelte';
         <div class="border-t" style="border-color: var(--color-border);"></div>
 
         <!-- Agent permissions -->
-        <div class="space-y-4">
+        <div class="space-y-5">
           <div class="flex items-start justify-between gap-4">
             <div>
               <div class="flex items-center gap-2">

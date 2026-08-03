@@ -661,6 +661,96 @@ export const MIGRATIONS: Migration[] = [
     `,
     down: `DROP INDEX IF EXISTS idx_goals_scope_status; DROP TABLE IF EXISTS goals;`,
   },
+  {
+    version: '0017',
+    description: 'Add notes indexes on updated_at and include_in_context',
+    up: `
+      CREATE INDEX IF NOT EXISTS idx_notes_updated_at ON notes(updated_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_notes_include_in_context ON notes(include_in_context);
+    `,
+    down: `
+      DROP INDEX IF EXISTS idx_notes_include_in_context;
+      DROP INDEX IF EXISTS idx_notes_updated_at;
+    `,
+  },
+  {
+    version: '0018',
+    description: 'Add strictly ordered durable session event log',
+    up: `
+      CREATE TABLE IF NOT EXISTS session_event_cursors (
+        session_id TEXT PRIMARY KEY,
+        epoch INTEGER NOT NULL DEFAULT 1,
+        next_sequence INTEGER NOT NULL DEFAULT 1,
+        updated_at INTEGER NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS ordered_session_events (
+        event_id TEXT PRIMARY KEY,
+        session_id TEXT NOT NULL,
+        epoch INTEGER NOT NULL,
+        sequence INTEGER NOT NULL,
+        timestamp INTEGER NOT NULL,
+        type TEXT NOT NULL,
+        agent_id TEXT,
+        parent_sequence INTEGER,
+        payload TEXT NOT NULL,
+        dispatched INTEGER NOT NULL DEFAULT 0,
+        created_at INTEGER NOT NULL,
+        UNIQUE(session_id, epoch, sequence),
+        UNIQUE(session_id, event_id)
+      );
+      CREATE TABLE IF NOT EXISTS session_event_causes (
+        session_id TEXT NOT NULL,
+        epoch INTEGER NOT NULL,
+        cause_key TEXT NOT NULL,
+        sequence INTEGER NOT NULL,
+        PRIMARY KEY(session_id, epoch, cause_key)
+      );
+      CREATE INDEX IF NOT EXISTS idx_ordered_session_events_replay
+        ON ordered_session_events(session_id, epoch, sequence);
+      CREATE INDEX IF NOT EXISTS idx_ordered_session_events_outbox
+        ON ordered_session_events(dispatched, created_at) WHERE dispatched = 0;
+    `,
+    down: `
+      DROP INDEX IF EXISTS idx_ordered_session_events_outbox;
+      DROP INDEX IF EXISTS idx_ordered_session_events_replay;
+      DROP TABLE IF EXISTS ordered_session_events;
+      DROP TABLE IF EXISTS session_event_causes;
+      DROP TABLE IF EXISTS session_event_cursors;
+    `,
+  },
+  {
+    version: '0019',
+    description: 'Add conversation_revision column to sessions for durable CLI revision tracking',
+    up: `
+      ALTER TABLE sessions ADD COLUMN conversation_revision INTEGER NOT NULL DEFAULT 0;
+    `,
+    down: `
+      -- SQLite does not support DROP COLUMN before 3.35.0; create a temp table instead.
+      CREATE TABLE sessions_temp AS SELECT id, user_id, title, parent_id, message_count, tokens_in, tokens_out, total_cost, workflow_state, working_directory, metadata, tags, version, created_at, updated_at FROM sessions;
+      DROP TABLE sessions;
+      ALTER TABLE sessions_temp RENAME TO sessions;
+    `,
+  },
+  {
+    version: '0020',
+    description: 'Repair ordered event cause tracking on databases upgraded through early 0018',
+    up: `
+      CREATE TABLE IF NOT EXISTS session_event_causes (
+        session_id TEXT NOT NULL,
+        epoch INTEGER NOT NULL,
+        cause_key TEXT NOT NULL,
+        sequence INTEGER NOT NULL,
+        PRIMARY KEY(session_id, epoch, cause_key)
+      );
+    `,
+    down: `DROP TABLE IF EXISTS session_event_causes;`,
+  },
+  {
+    version: '0021',
+    description: 'Persist Goal Mode execution routing for durable continuation',
+    up: `ALTER TABLE goals ADD COLUMN execution TEXT;`,
+    down: ``,
+  },
 ];
 
 // ─── Migration Runner ────────────────────────────────────────────────────────

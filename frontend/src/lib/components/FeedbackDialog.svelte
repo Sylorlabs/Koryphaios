@@ -1,13 +1,8 @@
 <script lang="ts">
   import { tick } from 'svelte';
-  import { Bug, CheckCircle2, Flag, HelpCircle, Lightbulb, LoaderCircle, X } from 'lucide-svelte';
-  import { apiFetch, parseJsonResponse } from '$lib/api.svelte';
-  import { apiUrl } from '$lib/utils/api-url';
-  import KorySelect from '$lib/components/KorySelect.svelte';
-  import Turnstile from '$lib/components/Turnstile.svelte';
+  import { Bug, CheckCircle2, ExternalLink, Flag, HelpCircle, Lightbulb, X } from 'lucide-svelte';
 
   type FeedbackCategory = 'bug' | 'idea' | 'question' | 'other';
-  type FeedbackVisibility = 'private' | 'public';
 
   interface Props {
     open?: boolean;
@@ -16,17 +11,14 @@
 
   let { open = false, onClose }: Props = $props();
   let category = $state<FeedbackCategory>('idea');
-  let visibility = $state<FeedbackVisibility>('private');
+  let title = $state('');
   let message = $state('');
-  let email = $state('');
-  let includeDiagnostics = $state(true);
-  let submitting = $state(false);
-  let sent = $state(false);
-  let error = $state('');
-  let appVersion = $state<string | undefined>();
+  let reproduction = $state('');
+  let opened = $state(false);
+  let appVersion = $state('Unknown');
+  let platform = $state('Unknown');
+  let issueContextReady: Promise<void> | null = null;
   let messageInput = $state<HTMLTextAreaElement | null>(null);
-  let turnstile = $state<Turnstile | null>(null);
-  let turnstileSiteKey = $state(import.meta.env.VITE_TURNSTILE_SITE_KEY?.trim() || '');
 
   const categories: Array<{ id: FeedbackCategory; label: string; icon: typeof Flag }> = [
     { id: 'bug', label: 'Bug', icon: Bug },
@@ -37,29 +29,47 @@
 
   $effect(() => {
     if (!open) return;
-    sent = false;
-    error = '';
+    opened = false;
     void tick().then(() => messageInput?.focus());
-    if (typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window) {
-      void import('@tauri-apps/api/app')
-        .then(({ getVersion }) => getVersion())
-        .then((version) => {
-          appVersion = version;
-        })
-        .catch(() => {});
-    }
-    if (!turnstileSiteKey) {
-      void fetch('https://koryphaios.com/api/feedback')
-        .then((response) => (response.ok ? response.json() : null))
-        .then((config: { turnstileSiteKey?: unknown } | null) => {
-          if (typeof config?.turnstileSiteKey === 'string') turnstileSiteKey = config.turnstileSiteKey;
-        })
-        .catch(() => {});
-    }
+    issueContextReady = loadIssueContext();
   });
 
+  function detectedPlatform() {
+    if (typeof navigator === 'undefined') return 'Unknown';
+    const userAgentData = navigator as Navigator & {
+      userAgentData?: { platform?: string };
+    };
+    return userAgentData.userAgentData?.platform || navigator.platform || navigator.userAgent || 'Unknown';
+  }
+
+  async function loadIssueContext() {
+    platform = detectedPlatform();
+    appVersion = __KORYPHAIOS_FRONTEND_VERSION__ ?? 'Unknown';
+    const inTauri =
+      typeof window !== 'undefined' && ('__TAURI_INTERNALS__' in window || '__TAURI__' in window);
+
+    if (inTauri) {
+      try {
+        const { invoke } = await import('@tauri-apps/api/core');
+        appVersion = await invoke<string>('get_app_version');
+        return;
+      } catch {
+        // Fall through to the packaged app configuration below.
+      }
+    }
+
+    try {
+      const response = await fetch('/app.config.json');
+      const config = (await response.json()) as { app?: { version?: unknown } };
+      if (response.ok && typeof config.app?.version === 'string' && config.app.version.trim()) {
+        appVersion = config.app.version.trim();
+      }
+    } catch {
+      // The build-time version above remains a useful fallback for development.
+    }
+  }
+
   function close() {
-    if (submitting) return;
     onClose?.();
   }
 
@@ -67,59 +77,52 @@
     if (open && event.key === 'Escape') close();
   }
 
-  async function submit() {
+  function issueUrl() {
+    const cleanTitle = title.trim() || `${category[0].toUpperCase()}${category.slice(1)} feedback`;
     const trimmed = message.trim();
-    if (!trimmed) {
-      error = 'Tell us what happened before sending.';
+    const steps = reproduction.trim() || 'Not provided.';
+    const body = [
+      `**Category:** ${category}`,
+      '',
+      '## What happened',
+      trimmed,
+      '',
+      '## Steps to reproduce',
+      steps,
+      '',
+      '## App context',
+      `- Koryphaios version: ${appVersion ?? 'Unknown'}`,
+      `- Platform: ${platform}`,
+      '',
+      '> Do not include private project details, prompts, source code, secrets, or API keys.',
+    ].join('\n');
+    return `https://github.com/Sylorlabs/Koryphaios/issues/new?${new URLSearchParams({
+      title: `[${category}] ${cleanTitle}`,
+      body,
+    }).toString()}`;
+  }
+
+  async function submit() {
+    if (!message.trim()) {
       messageInput?.focus();
       return;
     }
-
-    submitting = true;
-    error = '';
-    try {
-      const diagnostics = includeDiagnostics
-        ? {
-            platform: typeof navigator !== 'undefined' ? navigator.platform : undefined,
-            context:
-              typeof window !== 'undefined' ? { route: window.location.pathname } : undefined,
-          }
-        : {};
-      const isPublic = visibility === 'public';
-      // Invisible for normal users; Cloudflare only shows a challenge when risk warrants it.
-      const turnstileToken = await turnstile?.execute();
-      const response = await apiFetch(
-        apiUrl('/api/feedback'),
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            category,
-            visibility,
-            message: trimmed,
-            ...(turnstileToken ? { turnstileToken } : {}),
-            ...(!isPublic ? diagnostics : {}),
-            ...(!isPublic && email.trim() ? { email: email.trim() } : {}),
-            ...(appVersion ? { appVersion } : {}),
-          }),
-        },
-        15_000,
-      );
-      const result = await parseJsonResponse<{ ok?: boolean; error?: string }>(response);
-      if (!response.ok || !result.ok)
-        throw new Error(result.error || 'Feedback could not be delivered right now');
-      sent = true;
-      turnstile?.reset();
-      message = '';
-      email = '';
-    } catch (submitError) {
-      error =
-        submitError instanceof Error
-          ? submitError.message
-          : 'Feedback could not be delivered right now';
-    } finally {
-      submitting = false;
+    await issueContextReady;
+    const url = issueUrl();
+    const inTauri =
+      typeof window !== 'undefined' && ('__TAURI_INTERNALS__' in window || '__TAURI__' in window);
+    if (inTauri) {
+      try {
+        const { open } = await import('@tauri-apps/plugin-shell');
+        await open(url);
+      } catch (openError) {
+        console.error('Failed to open GitHub issue form:', openError);
+        window.open(url, '_blank', 'noopener,noreferrer');
+      }
+    } else {
+      window.open(url, '_blank', 'noopener,noreferrer');
     }
+    opened = true;
   }
 </script>
 
@@ -132,7 +135,7 @@
     onclick={(event) => event.currentTarget === event.target && close()}
   >
     <div
-      class="w-full max-w-xl overflow-hidden rounded-3xl border border-[var(--color-border)] bg-[var(--color-surface-1)] shadow-2xl"
+      class="max-h-[calc(100vh-2rem)] w-full max-w-xl overflow-y-auto rounded-3xl border border-[var(--color-border)] bg-[var(--color-surface-1)] shadow-2xl"
       role="dialog"
       aria-modal="true"
       aria-labelledby="feedback-title"
@@ -146,13 +149,13 @@
             <div
               class="mb-2 flex items-center gap-2 text-[11px] font-bold uppercase tracking-[0.16em] text-[var(--color-accent)]"
             >
-              <Flag size={13} /> Direct feedback
+              <Flag size={13} /> Public feedback
             </div>
             <h2 id="feedback-title" class="text-lg font-semibold text-[var(--color-text-primary)]">
-              Help shape Koryphaios
+              Open a GitHub issue
             </h2>
             <p class="mt-1 text-xs leading-5 text-[var(--color-text-muted)]">
-              Stored locally by default. It never changes production prompts automatically.
+              Your report is drafted here, then opened in GitHub for you to review and submit publicly.
             </p>
           </div>
           <button
@@ -164,7 +167,7 @@
         </div>
       </div>
 
-      {#if sent}
+      {#if opened}
         <div class="flex flex-col items-center px-8 py-12 text-center">
           <div
             class="mb-4 grid size-14 place-items-center rounded-2xl bg-emerald-500/12 text-emerald-400"
@@ -172,11 +175,11 @@
             <CheckCircle2 size={28} />
           </div>
           <h3 class="text-base font-semibold text-[var(--color-text-primary)]">
-            Feedback delivered
+            GitHub issue draft opened
           </h3>
           <p class="mt-2 max-w-sm text-xs leading-5 text-[var(--color-text-muted)]">
-            Thanks. Your report is in the team inbox and includes no identity unless you added a
-            reply address.
+            Review the prefilled issue in GitHub, then submit it when it is ready. Nothing was sent
+            from Koryphaios.
           </p>
           <button
             type="button"
@@ -216,30 +219,14 @@
           <label class="block">
             <span
               class="mb-2 block text-[11px] font-bold uppercase tracking-wider text-[var(--color-text-muted)]"
-              >Who should see this?</span
+              >Issue title</span
             >
-            <KorySelect
-              value={visibility}
-              label="Feedback visibility"
-              options={[
-                {
-                  value: 'private',
-                  label: 'Private feedback',
-                  description: 'Sent only to the Koryphaios team inbox.',
-                },
-                {
-                  value: 'public',
-                  label: 'Public feedback',
-                  description: 'Published as a public community report on koryphaios.com. Never includes your email or diagnostics.',
-                },
-              ]}
-              onchange={(value) => {
-                visibility = value as FeedbackVisibility;
-                if (visibility === 'public') {
-                  email = '';
-                  includeDiagnostics = false;
-                }
-              }}
+            <input
+              bind:value={title}
+              maxlength="160"
+              required
+              placeholder="A concise summary"
+              class="w-full rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-2)] px-4 py-2.5 text-sm text-[var(--color-text-primary)] outline-none transition focus:border-[var(--color-accent)] focus:ring-2 focus:ring-[var(--color-accent)]/15"
             />
           </label>
 
@@ -265,64 +252,26 @@
           <label class="block">
             <span
               class="mb-2 block text-[11px] font-bold uppercase tracking-wider text-[var(--color-text-muted)]"
-              >Reply email <span class="normal-case tracking-normal">(optional)</span></span
+              >Steps to reproduce <span class="normal-case tracking-normal">(optional)</span></span
             >
-            <input
-              type="email"
-              bind:value={email}
-              maxlength="254"
-              autocomplete="email"
-              placeholder="Leave blank to stay anonymous"
-              class="w-full rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-2)] px-4 py-2.5 text-xs text-[var(--color-text-primary)] outline-none transition focus:border-[var(--color-accent)] focus:ring-2 focus:ring-[var(--color-accent)]/15"
-            />
+            <textarea
+              bind:value={reproduction}
+              maxlength="4000"
+              rows="3"
+              placeholder="1. Open …&#10;2. Click …&#10;3. Notice …"
+              class="w-full resize-y rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-2)] px-4 py-3 text-sm leading-6 text-[var(--color-text-primary)] outline-none transition focus:border-[var(--color-accent)] focus:ring-2 focus:ring-[var(--color-accent)]/15"
+            ></textarea>
           </label>
 
-          {#if visibility === 'private'}<button
-            type="button"
-            role="switch"
-            aria-checked={includeDiagnostics}
-            class="flex w-full items-center justify-between gap-4 rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-2)] px-4 py-3 text-left"
-            onclick={() => (includeDiagnostics = !includeDiagnostics)}
-          >
-            <span
-              ><span class="block text-xs font-semibold text-[var(--color-text-primary)]"
-                >Include basic diagnostics</span
-              ><span class="mt-0.5 block text-[10px] text-[var(--color-text-muted)]"
-                >App version, platform, and current app route. Never prompts, files, or API keys.</span
-              ></span
-            >
-            <span
-              class="relative h-5 w-9 shrink-0 rounded-full transition-colors {includeDiagnostics
-                ? 'bg-[var(--color-accent)]'
-                : 'bg-[var(--color-surface-4)]'}"
-              ><span
-                class="absolute top-0.5 size-4 rounded-full bg-white shadow transition-transform {includeDiagnostics
-                  ? 'translate-x-[18px]'
-                  : 'translate-x-0.5'}"
-              ></span></span
-            >
-          </button>{:else}<p
-              class="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-2)] px-4 py-3 text-[10px] leading-5 text-[var(--color-text-muted)]"
-            >
-              Public reports include only the category, message, and optional app version. Do not include private project details, secrets, or contact information.
-            </p>{/if}
-
-          {#if error}<p
-              role="alert"
-              class="rounded-xl border border-red-500/25 bg-red-500/10 px-3 py-2.5 text-xs text-red-300"
-            >
-              {error}
-            </p>{/if}
-
-          {#if turnstileSiteKey}
-            <Turnstile bind:this={turnstile} siteKey={turnstileSiteKey} />
-          {/if}
+          <aside class="border-t border-[var(--color-border)] pt-5">
+            <p class="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-2)] px-4 py-3 text-[10px] leading-5 text-[var(--color-text-muted)]">
+              This always creates a public GitHub issue draft. It includes the category, report, steps, app version, and platform—never project files, prompts, screenshots, secrets, or API keys.
+            </p>
+          </aside>
 
           <div class="flex items-center justify-between gap-4 pt-1">
             <p class="text-[10px] leading-4 text-[var(--color-text-muted)]">
-              {visibility === 'public'
-                ? 'Public reports are published without email, diagnostics, source, prompts, screenshots, or API keys.'
-                : 'We never upload source, prompts, screenshots, or API keys.'}
+              GitHub opens next. You choose whether to submit the issue.
             </p>
             <div class="flex gap-2">
               <button
@@ -332,11 +281,10 @@
               >
               <button
                 type="submit"
-                disabled={submitting || !message.trim()}
+                disabled={!message.trim() || !title.trim()}
                 class="flex min-w-28 items-center justify-center gap-2 rounded-xl bg-[var(--color-accent)] px-5 py-2.5 text-xs font-bold text-white shadow-lg shadow-[var(--color-accent)]/15 transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-45"
               >
-                {#if submitting}<LoaderCircle size={14} class="animate-spin" />Sending{:else}Send
-                  feedback{/if}
+                <ExternalLink size={14} />Open GitHub issue
               </button>
             </div>
           </div>

@@ -14,6 +14,7 @@ describe('parseCursorModelList', () => {
         supportsStreaming: true,
         supportsAttachments: false,
         canReason: false,
+        reasoningLevels: [],
       },
       {
         id: 'cursor-gpt-5-codex',
@@ -25,6 +26,7 @@ describe('parseCursorModelList', () => {
         supportsStreaming: true,
         supportsAttachments: false,
         canReason: false,
+        reasoningLevels: [],
       },
     ]);
   });
@@ -50,6 +52,7 @@ describe('parseCursorModelList', () => {
         supportsStreaming: true,
         supportsAttachments: false,
         canReason: false,
+        reasoningLevels: [],
       },
       {
         id: 'cursor-cursor-mini',
@@ -61,6 +64,7 @@ describe('parseCursorModelList', () => {
         supportsStreaming: true,
         supportsAttachments: false,
         canReason: false,
+        reasoningLevels: [],
       },
     ]);
   });
@@ -89,5 +93,19 @@ describe('parseCursorModelList', () => {
 
   it('returns empty list for CLI no-model message', () => {
     expect(parseCursorModelList('No models available for this account.')).toEqual([]);
+  });
+
+  it('does not infer reasoning controls from Cursor model names', () => {
+    const models = parseCursorModelList(['auto', 'thinking', 'claude-high'].join('\n'));
+
+    expect(models.map(({ apiModelId, canReason, reasoningLevels }) => ({
+      apiModelId,
+      canReason,
+      reasoningLevels,
+    }))).toEqual([
+      { apiModelId: 'auto', canReason: false, reasoningLevels: [] },
+      { apiModelId: 'thinking', canReason: false, reasoningLevels: [] },
+      { apiModelId: 'claude-high', canReason: false, reasoningLevels: [] },
+    ]);
   });
 });

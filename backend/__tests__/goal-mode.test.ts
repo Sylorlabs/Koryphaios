@@ -12,6 +12,7 @@ import { setContext } from '../src/context';
 import { localAuth } from '../src/auth/local-auth';
 import { buildLocalBearerToken } from '../src/auth/local-route-auth';
 import { CreateGoalTool } from '../src/tools/goals';
+import { GoalDriveService } from '../src/kory/goal-drive-service';
 
 const store = new GoalStore();
 beforeAll(async () => { await initDb(); });
@@ -82,16 +83,31 @@ describe('Goal Mode checklist invariants', () => {
     expect(result.isError).toBe(false);
     expect((await store.list())[0]).toMatchObject({ objective: 'Track the release', scope: 'project', status: 'queued' });
   });
+
+  test('manager-created goals inherit the active routing and start autonomously', async () => {
+    const starts: Array<{ id: string; execution: { sessionId: string; provider: string; model: string } }> = [];
+    setContext({
+      goals: store,
+      kory: { getLastManagerRouting: () => ({ provider: 'openai', model: 'openai:gpt-test' }) },
+      goalDriver: { start: async (id: string, execution: { sessionId: string; provider: string; model: string }) => { starts.push({ id, execution }); return (await store.get(id))!; } },
+    } as any);
+    const result = await new CreateGoalTool().run({ sessionId: 'chat-1', workingDirectory: '/tmp/project' }, { id: 'call-2', name: 'create_goal', input: { objective: 'Keep going', scope: 'workspace' } });
+    expect(result.isError).toBe(false);
+    expect(starts).toHaveLength(1);
+    expect(starts[0]?.execution).toEqual({ sessionId: 'chat-1', provider: 'openai', model: 'openai:gpt-test' });
+  });
 });
 
 describe('Goal Mode HTTP user flow', () => {
   test('creates, drives, evidences, and finalizes through the guarded API', async () => {
     const emitted: unknown[] = [];
-    const dispatched: unknown[][] = [];
+    const starts: unknown[] = [];
+    const runner = new GoalRunner(store);
     setContext({
       goals: store,
       sessions: { get: async () => ({ id: 'chat-1', workingDirectory: undefined }) },
-      kory: { processTask: async (...args: unknown[]) => { dispatched.push(args); } },
+      kory: { verifyGoalItem: async () => ({ passed: true }) },
+      goalDriver: { start: async (id: string, execution: unknown) => { starts.push(execution); await store.update(id, { execution: execution as never }); await runner.startNext(id); return (await store.get(id))!; } },
       wsManager: { broadcast: (message: unknown) => emitted.push(message) },
     } as any);
     const app = new Elysia().use(goalRoutes);
@@ -109,7 +125,109 @@ describe('Goal Mode HTTP user flow', () => {
     expect(finalized.status).toBe(200);
     expect((await finalized.json() as { data: { status: string } }).data.status).toBe('completed');
     expect(emitted.length).toBeGreaterThan(3);
-    expect(String(dispatched[0]?.[1])).toContain('User direction for this item');
-    expect((dispatched[0]?.[7] as { goalId?: string })?.goalId).toBe(goal.id);
+    expect(starts).toHaveLength(goal.checklist.length);
+    expect(starts[0]).toMatchObject({ sessionId: 'chat-1', provider: 'openai', model: 'openai:gpt-test' });
+  });
+});
+
+describe('Goal Mode durable continuation', () => {
+  const waitFor = async (predicate: () => Promise<boolean>, timeoutMs = 3000) => {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      if (await predicate()) return;
+      await Bun.sleep(10);
+    }
+    throw new Error('Timed out waiting for Goal Mode state');
+  };
+
+  test('keeps dispatching across checklist items and finalizes without browser drive calls', async () => {
+    const goal = await store.create({ objective: 'Finish every item', scope: 'workspace' });
+    let dispatches = 0;
+    const service = new GoalDriveService(
+      store,
+      { get: async () => ({ id: 'chat-1' }) } as any,
+      {
+        isSessionRunning: () => false,
+        processTask: async () => { dispatches += 1; },
+        verifyGoalItem: async () => ({ passed: true, skipped: true }),
+        cancelSessionWorkers: () => {},
+      } as any,
+      { broadcast: () => {} } as any,
+    );
+    await service.start(goal.id, { sessionId: 'chat-1', provider: 'openai', model: 'openai:gpt-test' });
+    await waitFor(async () => (await store.get(goal.id))?.status === 'completed');
+    expect(dispatches).toBe(goal.checklist.length);
+    expect((await store.get(goal.id))?.checklist.every((item) => item.evidence.some((proof) => proof.verified))).toBe(true);
+    expect((await store.get(goal.id))?.checklist.every((item) => item.evidence.some((proof) => proof.value.includes('Critic disabled by user')))).toBe(true);
+  });
+
+  test('a human pause interrupts the active run and prevents the next dispatch', async () => {
+    const goal = await store.create({ objective: 'Pause safely', scope: 'workspace' });
+    let release!: () => void;
+    const pending = new Promise<void>((resolve) => { release = resolve; });
+    let dispatches = 0;
+    const service = new GoalDriveService(
+      store,
+      { get: async () => ({ id: 'chat-1' }) } as any,
+      {
+        isSessionRunning: () => false,
+        processTask: async () => { dispatches += 1; await pending; },
+        verifyGoalItem: async () => ({ passed: true }),
+        cancelSessionWorkers: () => { release(); },
+      } as any,
+      { broadcast: () => {} } as any,
+    );
+    await service.start(goal.id, { sessionId: 'chat-1', provider: 'openai', model: 'openai:gpt-test' });
+    await waitFor(async () => dispatches === 1);
+    await service.pause(goal.id);
+    await Bun.sleep(30);
+    expect((await store.get(goal.id))?.status).toBe('paused');
+    expect(dispatches).toBe(1);
+  });
+
+  test('stops only after the same concrete blocker recurs three times', async () => {
+    const goal = await store.create({ objective: 'Exhaust alternatives', scope: 'workspace' });
+    let dispatches = 0;
+    const service = new GoalDriveService(
+      store,
+      { get: async () => ({ id: 'chat-1' }) } as any,
+      {
+        isSessionRunning: () => false,
+        processTask: async () => {
+          dispatches += 1;
+          const current = (await store.get(goal.id))!;
+          const item = current.checklist.find((entry) => entry.status === 'running')!;
+          await store.addActivity(goal.id, 'blocker_candidate', `${item.id}|authorization: Missing required deployment credential`, 'chat-1');
+        },
+        verifyGoalItem: async () => ({ passed: false, feedback: 'Credential is still unavailable' }),
+        verifyGoalBlocker: async () => ({ passed: true }),
+        cancelSessionWorkers: () => {},
+      } as any,
+      { broadcast: () => {} } as any,
+    );
+    await service.start(goal.id, { sessionId: 'chat-1', provider: 'openai', model: 'openai:gpt-test' });
+    await waitFor(async () => (await store.get(goal.id))?.status === 'blocked', 5000);
+    expect(dispatches).toBe(3);
+    expect((await store.get(goal.id))?.blocker).toContain('Critic confirmed after 3 attempts');
+  });
+
+  test('recovers a persisted in-flight item after a backend restart', async () => {
+    const goal = await store.create({ objective: 'Survive restart', scope: 'workspace', execution: { sessionId: 'chat-1', provider: 'openai', model: 'openai:gpt-test' } });
+    await new GoalRunner(store).startNext(goal.id);
+    let dispatches = 0;
+    const service = new GoalDriveService(
+      store,
+      { get: async () => ({ id: 'chat-1' }) } as any,
+      {
+        isSessionRunning: () => false,
+        processTask: async () => { dispatches += 1; },
+        verifyGoalItem: async () => ({ passed: true }),
+        cancelSessionWorkers: () => {},
+      } as any,
+      { broadcast: () => {} } as any,
+    );
+    await service.recover();
+    await waitFor(async () => (await store.get(goal.id))?.status === 'completed');
+    expect(dispatches).toBe(goal.checklist.length);
   });
 });

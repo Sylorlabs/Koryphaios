@@ -8,10 +8,17 @@
  * Built on top of ShadowLogger (git reflog recorder).
  */
 
-import { ShadowLogger, type TimelineEntry, type GhostCommit } from '../kory/shadow-logger';
+import {
+  ShadowLogger,
+  type TimelineEntry,
+  type GhostCommit,
+  type CheckpointFileChange,
+} from '../kory/shadow-logger';
 import { GitManager } from '../kory/git-manager';
 import { serverLog } from '../logger';
 import type { IMessageStore } from '../stores/message-store';
+import { markCliConversationRewritten } from '../providers/cli-session-state';
+import { getOrderedEventLog } from '../ws/ordered-event-log';
 
 export interface TimeTravelState {
   /** Current position in the timeline (HEAD) */
@@ -45,7 +52,11 @@ export class TimeTravelService {
   private messageStore: IMessageStore;
   private options: Required<TimeTravelOptions>;
 
-  constructor(workingDirectory: string, messageStore: IMessageStore, options: TimeTravelOptions = {}) {
+  constructor(
+    workingDirectory: string,
+    messageStore: IMessageStore,
+    options: TimeTravelOptions = {},
+  ) {
     this.shadowLogger = new ShadowLogger(workingDirectory);
     this.gitManager = new GitManager(workingDirectory);
     this.messageStore = messageStore;
@@ -60,13 +71,14 @@ export class TimeTravelService {
    * Get the current time travel state for UI display
    */
   async getState(sessionId?: string): Promise<TimeTravelState> {
-    const currentHash = await this.gitManager.getCurrentHash() || '';
+    const currentHash = sessionId
+      ? ((await this.shadowLogger.getCursor(sessionId)) ?? '')
+      : '';
     const timeline = await this.shadowLogger.getTimeline(this.options.timelineLimit, sessionId);
-    const stats = await this.shadowLogger.getStats();
 
     // Determine if we can undo/redo
     const currentIndex = timeline.findIndex((t) => t.hash === currentHash);
-    const canUndo = timeline.length > 1 && currentIndex < timeline.length - 1;
+    const canUndo = currentIndex >= 0 && currentIndex < timeline.length - 1;
     const canRedo = currentIndex > 0;
 
     return {
@@ -75,9 +87,9 @@ export class TimeTravelService {
       canUndo,
       canRedo,
       stats: {
-        totalStates: stats.totalGhosts,
-        totalCost: stats.totalCost,
-        modelsUsed: stats.modelsUsed,
+        totalStates: timeline.length,
+        totalCost: timeline.reduce((total, entry) => total + (entry.cost ?? 0), 0),
+        modelsUsed: [...new Set(timeline.map((entry) => entry.model).filter(Boolean) as string[])],
       },
     };
   }
@@ -98,12 +110,13 @@ export class TimeTravelService {
       agentId?: string;
       messageId?: string;
       checkpointType?: 'turn_end' | 'user_manual' | 'auto_save';
+      changedFiles?: CheckpointFileChange[];
     },
   ): Promise<{ success: boolean; hash?: string; message: string }> {
     // Only checkpoint if there are actual changes OR it's a final response point
     const statusResult = await this.gitManager.runGit(['status', '--porcelain']);
     const status = statusResult.output.trim();
-    
+
     const isFinalResponse = metadata.checkpointType === 'turn_end';
 
     if (!status && !isFinalResponse) {
@@ -136,13 +149,13 @@ export class TimeTravelService {
    *
    * This finds the next ghost commit in the timeline and recovers to it.
    */
-  async undo(sessionId?: string): Promise<{ success: boolean; message: string; newHash?: string }> {
-    const currentHash = await this.gitManager.getCurrentHash();
+  async undo(sessionId: string): Promise<{ success: boolean; message: string; newHash?: string }> {
+    const currentHash = await this.shadowLogger.getCursor(sessionId);
     if (!currentHash) {
       return { success: false, message: 'Cannot determine current state' };
     }
 
-    const timeline = await this.shadowLogger.getTimeline(this.options.timelineLimit);
+    const timeline = await this.shadowLogger.getTimeline(this.options.timelineLimit, sessionId);
     const currentIndex = timeline.findIndex((t) => t.hash === currentHash);
 
     if (currentIndex === -1 || currentIndex >= timeline.length - 1) {
@@ -151,7 +164,7 @@ export class TimeTravelService {
 
     // Get the next state (older in timeline)
     const targetState = timeline[currentIndex + 1];
-    return this.travelTo(targetState.hash, sessionId);
+    return this.travelTo(targetState.hash, sessionId, currentHash);
   }
 
   /**
@@ -159,13 +172,13 @@ export class TimeTravelService {
    *
    * This finds the previous ghost commit in the timeline and recovers to it.
    */
-  async redo(sessionId?: string): Promise<{ success: boolean; message: string; newHash?: string }> {
-    const currentHash = await this.gitManager.getCurrentHash();
+  async redo(sessionId: string): Promise<{ success: boolean; message: string; newHash?: string }> {
+    const currentHash = await this.shadowLogger.getCursor(sessionId);
     if (!currentHash) {
       return { success: false, message: 'Cannot determine current state' };
     }
 
-    const timeline = await this.shadowLogger.getTimeline(this.options.timelineLimit);
+    const timeline = await this.shadowLogger.getTimeline(this.options.timelineLimit, sessionId);
     const currentIndex = timeline.findIndex((t) => t.hash === currentHash);
 
     if (currentIndex <= 0) {
@@ -174,7 +187,7 @@ export class TimeTravelService {
 
     // Get the previous state (newer in timeline)
     const targetState = timeline[currentIndex - 1];
-    return this.travelTo(targetState.hash, sessionId);
+    return this.travelTo(targetState.hash, sessionId, currentHash);
   }
 
   /**
@@ -185,12 +198,18 @@ export class TimeTravelService {
    */
   async travelTo(
     ghostHash: string,
-    sessionId?: string,
+    sessionId: string,
+    expectedCurrentHash?: string | null,
   ): Promise<{ success: boolean; message: string; newHash?: string }> {
     // Verify this is a valid ghost commit
     const ghost = await this.shadowLogger.getGhostCommit(ghostHash);
-    if (!ghost) {
+    if (!ghost || !(await this.shadowLogger.isOwnedCheckpoint(ghostHash, sessionId))) {
       return { success: false, message: 'Invalid or unknown state' };
+    }
+    const plan = await this.buildTravelPlan(ghostHash, sessionId);
+    if (!plan.success) return { success: false, message: plan.message };
+    if (expectedCurrentHash && plan.currentHash !== expectedCurrentHash) {
+      return { success: false, message: 'The session changed after the rewind preview. Review it again.' };
     }
 
     serverLog.info(
@@ -202,17 +221,32 @@ export class TimeTravelService {
       'Time travel initiated',
     );
 
-    const result = await this.shadowLogger.recover(ghostHash);
+    const result = await this.shadowLogger.recover(ghostHash, {
+      agentId: sessionId,
+      changedFiles: plan.changedFiles,
+    });
 
     if (result.success) {
       // If we have a sessionId and the ghost commit has a messageId, truncate history
-      if (sessionId && ghost.metadata?.messageId) {
+      if (ghost.metadata?.messageId) {
         try {
           await this.messageStore.truncateAfter(sessionId, ghost.metadata.messageId);
-          serverLog.info({ sessionId, messageId: ghost.metadata.messageId }, 'Session history truncated after rewind');
+          serverLog.info(
+            { sessionId, messageId: ghost.metadata.messageId },
+            'Session history truncated after rewind',
+          );
         } catch (err) {
           serverLog.error({ err, sessionId }, 'Failed to truncate session history during rewind');
+          if (result.previousHash) {
+            await this.shadowLogger.recover(result.previousHash, {
+              agentId: sessionId,
+              changedFiles: plan.changedFiles,
+            });
+          }
+          return { success: false, message: 'Conversation rewind failed; workspace changes were restored.' };
         }
+        await markCliConversationRewritten(sessionId);
+        getOrderedEventLog().resetEpoch(sessionId);
       }
 
       return {
@@ -225,12 +259,99 @@ export class TimeTravelService {
     return result;
   }
 
+  async previewTravel(ghostHash: string, sessionId: string): Promise<{
+    canTravel: boolean;
+    currentHash: string;
+    targetHash: string;
+    description: string;
+    filesChanged: CheckpointFileChange[];
+    diff: string;
+    message: string;
+  }> {
+    const ghost = await this.shadowLogger.getGhostCommit(ghostHash);
+    const plan = await this.buildTravelPlan(ghostHash, sessionId);
+    if (!ghost || !plan.success) {
+      return {
+        canTravel: false,
+        currentHash: plan.currentHash,
+        targetHash: ghostHash,
+        description: '',
+        filesChanged: [],
+        diff: '',
+        message: plan.message,
+      };
+    }
+    const paths = plan.changedFiles.map((change) => change.path);
+    const diff = paths.length
+      ? (
+          await this.gitManager.runGit([
+            'diff',
+            '--stat',
+            plan.currentHash,
+            ghostHash,
+            '--',
+            ...paths,
+          ])
+        ).output
+      : '';
+    return {
+      canTravel: true,
+      currentHash: plan.currentHash,
+      targetHash: ghostHash,
+      description: ghost.message.replace(/^\[GHOST\]\s*/, ''),
+      filesChanged: plan.changedFiles,
+      diff,
+      message:
+        paths.length > 0
+          ? `${paths.length} session-owned file${paths.length === 1 ? '' : 's'} will be restored.`
+          : 'Only the conversation timeline will be rewound.',
+    };
+  }
+
+  private async buildTravelPlan(
+    targetHash: string,
+    sessionId: string,
+  ): Promise<
+    | { success: true; currentHash: string; changedFiles: CheckpointFileChange[]; message: string }
+    | { success: false; currentHash: string; message: string }
+  > {
+    if (!(await this.shadowLogger.isOwnedCheckpoint(targetHash, sessionId))) {
+      return { success: false, currentHash: '', message: 'Checkpoint does not belong to this session' };
+    }
+    const timeline = await this.shadowLogger.getTimeline(1000, sessionId);
+    const currentHash = (await this.shadowLogger.getCursor(sessionId)) ?? timeline[0]?.hash ?? '';
+    const currentIndex = timeline.findIndex((entry) => entry.hash === currentHash);
+    const targetIndex = timeline.findIndex((entry) => entry.hash === targetHash);
+    if (currentIndex < 0 || targetIndex < 0) {
+      return { success: false, currentHash, message: 'Checkpoint is outside this session timeline' };
+    }
+    const changes = new Map<string, CheckpointFileChange['operation']>();
+    const start = Math.min(currentIndex, targetIndex);
+    const end = Math.max(currentIndex, targetIndex);
+    for (const entry of timeline.slice(start, end)) {
+      const metadata = await this.shadowLogger.getMetadata(entry.hash);
+      for (const change of metadata?.changedFiles ?? []) changes.set(change.path, change.operation);
+    }
+    const changedFiles = Array.from(changes, ([path, operation]) => ({ path, operation }));
+    if (currentHash !== targetHash && changedFiles.length === 0) {
+      const codeDiff = await this.gitManager.runGit(['diff', '--quiet', currentHash, targetHash]);
+      if (!codeDiff.success) {
+        return {
+          success: false,
+          currentHash,
+          message: 'This legacy checkpoint lacks a session-owned file manifest and cannot be safely restored.',
+        };
+      }
+    }
+    return { success: true, currentHash, changedFiles, message: 'Ready' };
+  }
+
   /**
    * Preview what would change if we traveled to a state
    *
    * Returns a diff showing the changes that would be applied.
    */
-  async previewTravel(ghostHash: string): Promise<{
+  async previewLegacyTravel(ghostHash: string): Promise<{
     canTravel: boolean;
     diff: string;
     filesChanged: Array<{ path: string; status: string }>;

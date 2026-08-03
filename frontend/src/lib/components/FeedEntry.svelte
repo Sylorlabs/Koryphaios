@@ -25,6 +25,9 @@
     FlaskConical,
     Layers,
     AlertTriangle,
+    Pencil,
+    Volume2,
+    VolumeX,
   } from 'lucide-svelte';
   import { fly, fade } from 'svelte/transition';
   import { wsStore } from '$lib/stores/websocket.svelte';
@@ -37,45 +40,39 @@
   import { marked } from 'marked';
   import DOMPurify from 'dompurify';
   import hljs from 'highlight.js/lib/core';
-  import bash from 'highlight.js/lib/languages/bash';
-  import cpp from 'highlight.js/lib/languages/cpp';
-  import css from 'highlight.js/lib/languages/css';
-  import diff from 'highlight.js/lib/languages/diff';
-  import go from 'highlight.js/lib/languages/go';
-  import java from 'highlight.js/lib/languages/java';
-  import javascript from 'highlight.js/lib/languages/javascript';
-  import json from 'highlight.js/lib/languages/json';
-  import markdown from 'highlight.js/lib/languages/markdown';
-  import python from 'highlight.js/lib/languages/python';
-  import rust from 'highlight.js/lib/languages/rust';
-  import scss from 'highlight.js/lib/languages/scss';
-  import sql from 'highlight.js/lib/languages/sql';
-  import typescript from 'highlight.js/lib/languages/typescript';
-  import xml from 'highlight.js/lib/languages/xml';
-  import yaml from 'highlight.js/lib/languages/yaml';
   import 'highlight.js/styles/atom-one-dark.css';
   import type { FeedEntryLocal, FeedEntryType } from '$lib/types';
   import type { Note } from '@koryphaios/shared';
   import { apiFetch } from '$lib/api.svelte';
   import { apiUrl } from '$lib/utils/api-url';
   import { renderKoryChart } from '$lib/utils/chart-renderer';
+  import { toastStore } from '$lib/stores/toast.svelte';
+  import { setActiveClipboardImage } from '$lib/utils/clipboard-shortcuts';
+  import { playVoiceResponse, stopVoicePlayback } from '$lib/utils/voice-playback';
 
-  hljs.registerLanguage('bash', bash);
-  hljs.registerLanguage('cpp', cpp);
-  hljs.registerLanguage('css', css);
-  hljs.registerLanguage('diff', diff);
-  hljs.registerLanguage('go', go);
-  hljs.registerLanguage('java', java);
-  hljs.registerLanguage('javascript', javascript);
-  hljs.registerLanguage('json', json);
-  hljs.registerLanguage('markdown', markdown);
-  hljs.registerLanguage('python', python);
-  hljs.registerLanguage('rust', rust);
-  hljs.registerLanguage('scss', scss);
-  hljs.registerLanguage('sql', sql);
-  hljs.registerLanguage('typescript', typescript);
-  hljs.registerLanguage('xml', xml);
-  hljs.registerLanguage('yaml', yaml);
+  // Lazy highlight.js language registration: languages are imported on
+  // demand so the 16 synchronous module loads don't block initial parse.
+  // Common languages are pre-registered (fire-and-forget) at module load;
+  // rare languages fall back to highlightAuto until their import resolves.
+  const registeredLanguages = new Map<string, Promise<void>>();
+  const COMMON_LANGUAGES = ['typescript', 'javascript', 'markdown', 'json', 'bash'];
+
+  function loadLanguage(lang: string): Promise<void> {
+    const existing = registeredLanguages.get(lang);
+    if (existing) return existing;
+    if (hljs.getLanguage(lang)) return Promise.resolve();
+    const promise = import(`highlight.js/lib/languages/${lang}`)
+      .then((mod) => {
+        hljs.registerLanguage(lang, mod.default);
+      })
+      .catch(() => {
+        registeredLanguages.delete(lang);
+      });
+    registeredLanguages.set(lang, promise);
+    return promise;
+  }
+
+  for (const lang of COMMON_LANGUAGES) void loadLanguage(lang);
 
   const languageAliases: Record<string, string> = {
     c: 'cpp',
@@ -136,11 +133,20 @@
       const chart = renderKoryChart(text);
       if (chart) return chart;
     }
-    const language = requestedLanguage
-      ? hljs.getLanguage(requestedLanguage)
-        ? requestedLanguage
-        : languageAliases[requestedLanguage]
-      : undefined;
+    let language: string | undefined;
+    if (requestedLanguage) {
+      if (hljs.getLanguage(requestedLanguage)) {
+        language = requestedLanguage;
+      } else {
+        const aliased = languageAliases[requestedLanguage];
+        if (aliased) {
+          if (hljs.getLanguage(aliased)) language = aliased;
+          else void loadLanguage(aliased);
+        } else {
+          void loadLanguage(requestedLanguage);
+        }
+      }
+    }
     const highlighted = language
       ? hljs.highlight(text, { language }).value
       : hljs.highlightAuto(text).value;
@@ -196,12 +202,29 @@
   }>();
 
   let copied = $state(false);
+  let speaking = $state(false);
+  $effect(() => {
+    const handler = (event: Event) => { speaking = (event as CustomEvent<string | null>).detail === entry.id; };
+    window.addEventListener('kory:voice-playback', handler);
+    return () => window.removeEventListener('kory:voice-playback', handler);
+  });
   let entryElement = $state<HTMLDivElement>();
   let regenerating = $state(false);
+  // Aborted on entry change / unmount to cancel any in-flight regeneration
+  // observation loop so it never resolves for a stale entry.
+  let regenerateAbort: AbortController | null = null;
   let selectedVariant = $state(-1);
-  let toolDetailsOpen = $state(false);
+  // Tool details expand inline in the feed — never in a modal/popup.
+  let toolDetailsExpanded = $state(false);
+  // Per-step raw-output expansion within the inline tool details.
+  let expandedStepIds = $state<Set<string>>(new Set());
+  let compactionExpanded = $state(false);
   let contextMenu = $state<{ x: number; y: number } | null>(null);
+  let editingMessage = $state(false);
+  let editedMessageText = $state('');
+  let savingMessageEdit = $state(false);
   let zoomedImage = $state<string | null>(null);
+  let zoomedImageMimeType = $state('image/png');
   // Zoom for backend-served images (view_image results) — a URL, not base64.
   let zoomedRawImage = $state<string | null>(null);
   let renderedNotes = $state<Record<string, Note | null>>({});
@@ -216,6 +239,88 @@
       ? responseVariants[selectedVariant].content
       : entry.text,
   );
+  function toggleSpeech(event: MouseEvent) {
+    event.stopPropagation();
+    if (speaking) { stopVoicePlayback(); return; }
+    void playVoiceResponse(entry.id, currentText).catch(error => toastStore.error(error instanceof Error ? error.message : 'Speech playback failed'));
+  }
+  let entryKind = $derived(entry.metadata?.kind as string | undefined);
+  let isCompactionSummary = $derived(
+    entry.type === 'system' &&
+      (entryKind === 'compacted' || /^Session summary:\s*/i.test(currentText)),
+  );
+  let compactionSummaryText = $derived(
+    entryKind === 'compacted' ? currentText : currentText.replace(/^Session summary:\s*/i, ''),
+  );
+  let persistedMessageId = $derived(entry.metadata?.messageId as string | undefined);
+  let persistedSessionId = $derived(entry.metadata?.sessionId as string | undefined);
+  let laterPersistedMessages = $derived.by(() => {
+    if (!persistedMessageId || entry.type !== 'user_message') return 0;
+    const pivot = wsStore.feed.find((candidate) => candidate.metadata?.messageId === persistedMessageId);
+    if (!pivot) return 0;
+    return wsStore.feed.filter(
+      (candidate) =>
+        typeof candidate.metadata?.messageId === 'string' && candidate.timestamp > pivot.timestamp,
+    ).length;
+  });
+  let isLatestUserMessage = $derived.by(() => {
+    if (!persistedMessageId || entry.type !== 'user_message') return false;
+    const userMessages = wsStore.feed.filter(
+      (candidate) => candidate.type === 'user_message' && typeof candidate.metadata?.messageId === 'string',
+    );
+    return userMessages.at(-1)?.metadata?.messageId === persistedMessageId;
+  });
+  // A response is "locked" once the user has sent a follow-up message after
+  // it. When locked, the variant arrows and regenerate button are hidden so
+  // the user can no longer cycle between or create new variants — they've
+  // committed to the conversation continuing from the displayed response.
+  let hasLaterUserMessage = $derived.by(() => {
+    if (entry.type !== 'content') return false;
+    const feed = wsStore.feed;
+    const idx = feed.findIndex((e) => e.id === entry.id);
+    if (idx < 0) return false;
+    return feed.slice(idx + 1).some((e) => e.type === 'user_message');
+  });
+
+  function startMessageEdit(event: MouseEvent) {
+    event.stopPropagation();
+    if (!persistedMessageId || !persistedSessionId || wsStore.isSessionBusy(persistedSessionId)) return;
+    editedMessageText = currentText;
+    editingMessage = true;
+  }
+
+  function cancelMessageEdit() {
+    editingMessage = false;
+    editedMessageText = '';
+  }
+
+  async function saveMessageEdit() {
+    const content = editedMessageText.trim();
+    if (!persistedMessageId || !persistedSessionId || !content || savingMessageEdit) return;
+    savingMessageEdit = true;
+    try {
+      const response = await apiFetch(apiUrl('/api/messages/edit'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          sessionId: persistedSessionId,
+          messageId: persistedMessageId,
+          content,
+          model: entry.metadata?.model,
+        }),
+      });
+      const result = await response.json() as { ok?: boolean; error?: string };
+      if (!response.ok || !result.ok) throw new Error(result.error || 'Message edit failed');
+      editingMessage = false;
+      const messages = await sessionStore.fetchMessages(persistedSessionId);
+      await wsStore.loadSessionMessages(persistedSessionId, messages);
+      toastStore.success(isLatestUserMessage ? 'Message updated and resent' : 'History pruned, message updated, and resent');
+    } catch (error) {
+      toastStore.error(error instanceof Error ? error.message : String(error));
+    } finally {
+      savingMessageEdit = false;
+    }
+  }
   // Some CLI harnesses return their worker transcript as a final assistant
   // message. It is operational telemetry, not a human answer, and it was the
   // source of the giant “Task … finished with output” blocks in the feed.
@@ -245,6 +350,74 @@
   function clippedToolDetail(subEntry: FeedEntryLocal): string {
     const detail = toolDetailText(subEntry);
     return detail.length > 4_000 ? `${detail.slice(0, 4_000)}\n\n…output clipped` : detail;
+  }
+
+  /**
+   * Strip harness boilerplate that adds no signal: Created/Completed At
+   * timestamps, file:// URL prefixes, Total Lines/Bytes/Showing lines
+   * metadata, the "modified to include a line number" notice, and
+   * sizeBytes JSON from list_directory.
+   */
+  function cleanToolOutput(raw: string): string {
+    if (!raw) return '';
+    return raw
+      .replace(/^[ \t]*Created At:.*$\n?/gim, '')
+      .replace(/^[ \t]*Completed At:.*$\n?/gim, '')
+      .replace(/^[ \t]*Updated At:.*$\n?/gim, '')
+      .replace(/^[ \t]*Task logs are available.*$\n?/gim, '')
+      .replace(/file:\/\/\//gi, '')
+      .replace(/^[ \t]*Total (Lines|Bytes):.*$\n?/gim, '')
+      .replace(/^[ \t]*Showing lines.*$\n?/gim, '')
+      .replace(/^[ \t]*The following code has been modified to include a line number.*$\n?/gim, '')
+      .replace(/^[ \t]*Showing first.*$\n?/gim, '')
+      .replace(/^[ \t]*\{"name":"[^"]*","sizeBytes":"[^"]*"\},?\s*\n?/gim, '')
+      .replace(/\n{3,}/g, '\n\n')
+      .trim();
+  }
+
+  /**
+   * One short result stat per tool — "10 matches", "735 lines", "12 files".
+   * Falls back to '' when nothing useful can be derived.
+   */
+  function toolResultStat(subEntry: FeedEntryLocal): string {
+    if (subEntry.type !== 'tool_result') return '';
+    if (isToolError(subEntry.metadata)) return 'failed';
+    const name = getToolNameFromMeta(subEntry.metadata);
+    const raw = toolDetailText(subEntry);
+    const cleaned = cleanToolOutput(raw);
+    const countLines = (s: string) => {
+      const t = s.trim();
+      return t ? t.split('\n').length : 0;
+    };
+    if (name === 'grep' || name === 'grep_search') {
+      const m = cleaned.match(/(\d+)\s+matches?/i);
+      if (m) return `${m[1]} matches`;
+      const n = countLines(cleaned);
+      return n > 0 ? `${n} matches` : '';
+    }
+    if (name === 'glob' || name === 'glob_search') {
+      const n = countLines(cleaned);
+      return n > 0 ? `${n} files` : '';
+    }
+    if (name === 'ls' || name === 'list_directory' || name === 'find') {
+      const n = countLines(cleaned);
+      return n > 0 ? `${n} entries` : '';
+    }
+    if (name === 'read_file' || name === 'read' || name === 'view_file') {
+      const m = raw.match(/Total Lines:\s*(\d+)/i);
+      if (m) return `${m[1]} lines`;
+      const n = countLines(cleaned);
+      return n > 0 ? `${n} lines` : '';
+    }
+    if (name === 'write_file' || name === 'write' || name === 'edit_file' || name === 'edit' || name === 'str_replace') {
+      return 'applied';
+    }
+    if (name === 'batch_edit' || name === 'multi_replace_file_content') {
+      const input = (subEntry.metadata as { toolCall?: { input?: Record<string, unknown> } })?.toolCall?.input;
+      const files = (input?.files ?? []) as Array<{ path?: string }>;
+      return files.length > 0 ? `${files.length} files` : 'applied';
+    }
+    return '';
   }
 
   function detailText(): string {
@@ -279,8 +452,21 @@
 
   $effect(() => {
     if (entry.type === 'content' && selectedVariant < 0 && responseVariants.length > 0) {
-      selectedVariant = responseVariants.length - 1;
+      // When the response is locked (user has continued the conversation),
+      // default to variant 0 — the variant the conversation actually
+      // continued from in the backend. Otherwise, show the latest variant
+      // (e.g., the freshly regenerated one).
+      selectedVariant = hasLaterUserMessage ? 0 : responseVariants.length - 1;
     }
+  });
+
+  // Cancel any in-flight regeneration wait when the entry changes or the
+  // component unmounts, so a stale observation never resolves for the wrong row.
+  $effect(() => {
+    void entry;
+    return () => {
+      regenerateAbort?.abort();
+    };
   });
 
   async function regenerateResponse() {
@@ -289,6 +475,11 @@
     if (!sessionId || !messageId || regenerating) return;
     regenerating = true;
     const startedAt = Date.now();
+    regenerateAbort?.abort();
+    const abort = new AbortController();
+    regenerateAbort = abort;
+    const emptyText =
+      'The model returned an empty response. Please resend or rephrase your request.';
     try {
       const response = await apiFetch(apiUrl('/api/messages/regenerate'), {
         method: 'POST',
@@ -302,31 +493,62 @@
       };
       if (!response.ok || !result.ok || !result.data)
         throw new Error(result.error || 'Regeneration failed');
-      for (let attempt = 0; attempt < 180; attempt++) {
-        await new Promise((resolve) => setTimeout(resolve, 1000));
-        const messages = await sessionStore.fetchMessages(sessionId);
-        const completed = messages.some(
-          (message) =>
-            message.variantGroupId === result.data!.groupId &&
-            message.variantIndex === result.data!.index,
-        );
-        const returnedEmpty = messages.some(
-          (message) =>
-            message.role === 'system' &&
-            message.createdAt >= startedAt &&
-            message.content ===
-              'The model returned an empty response. Please resend or rephrase your request.',
-        );
-        if (completed || returnedEmpty) {
-          await wsStore.loadSessionMessages(sessionId, messages);
-          return;
-        }
+      const { groupId, index } = result.data;
+      // Observe the in-memory feed (kept up to date by WS stream events)
+      // instead of polling the API. Resolves when the new variant appears,
+      // a system empty-response marker lands, or the 3-minute fallback fires.
+      await new Promise<void>((resolve, reject) => {
+        let poll: ReturnType<typeof setTimeout>;
+        const timeout = setTimeout(() => {
+          clearTimeout(poll);
+          reject(new Error('Regeneration timed out'));
+        }, 180_000);
+        const tick = () => {
+          if (abort.signal.aborted) {
+            clearTimeout(timeout);
+            resolve();
+            return;
+          }
+          const feed = wsStore.feed;
+          const completed = feed.some(
+            (e) => {
+              const meta = e.metadata as
+                | { variantGroupId?: string; responseVariants?: Array<{ index: number }> }
+                | undefined;
+              return (
+                meta?.variantGroupId === groupId &&
+                !!meta?.responseVariants?.some((v) => v.index === index)
+              );
+            },
+          );
+          const returnedEmpty = feed.some(
+            (e) => e.type === 'system' && e.timestamp >= startedAt && e.text === emptyText,
+          );
+          if (completed || returnedEmpty) {
+            clearTimeout(timeout);
+            resolve();
+            return;
+          }
+          poll = setTimeout(tick, 250);
+        };
+        poll = setTimeout(tick, 250);
+      });
+      // Select the freshly generated variant so the new response is shown
+      // immediately. If the component was recreated by a feed reload, the
+      // $effect already selected the latest variant; this is a no-op then.
+      // If the component was reused (same entry id), this ensures we don't
+      // leave the user looking at the old variant.
+      if (!abort.signal.aborted) {
+        const matchIndex = responseVariants.findIndex((v) => v.index === index);
+        if (matchIndex >= 0) selectedVariant = matchIndex;
       }
-      throw new Error('Regeneration timed out');
     } catch (error) {
-      console.error('Failed to regenerate response:', error);
+      if (!abort.signal.aborted) {
+        console.error('Failed to regenerate response:', error);
+      }
     } finally {
-      regenerating = false;
+      if (!abort.signal.aborted) regenerating = false;
+      if (regenerateAbort === abort) regenerateAbort = null;
     }
   }
 
@@ -376,14 +598,20 @@
 
   // ── Streaming text: render arriving tokens as chunks that fade from
   // translucent to full opacity — text "settles" as it lands. ──
+  // Cap the chunk array (~8 recent deltas) and merge older tokens into a
+  // settled prefix string so a long stream never grows unbounded arrays/DOM
+  // while preserving the fade-in effect on the newest tokens.
   let streamChunks = $state<Array<{ id: number; text: string }>>([]);
   let chunkCounter = 0;
   let lastStreamText = '';
+  let settledText = $state('');
+  const STREAM_CHUNK_CAP = 8;
 
   $effect(() => {
     if (!(isStreaming && entry.type === 'content')) {
-      if (streamChunks.length) {
+      if (streamChunks.length || settledText) {
         streamChunks = [];
+        settledText = '';
         lastStreamText = '';
       }
       return;
@@ -392,8 +620,18 @@
     if (t === lastStreamText) return;
     if (t.startsWith(lastStreamText)) {
       const delta = t.slice(lastStreamText.length);
-      if (delta) streamChunks = [...streamChunks, { id: chunkCounter++, text: delta }];
+      if (delta) {
+        let next = [...streamChunks, { id: chunkCounter++, text: delta }];
+        let merged = settledText;
+        while (next.length > STREAM_CHUNK_CAP) {
+          merged += next[0].text;
+          next = next.slice(1);
+        }
+        settledText = merged;
+        streamChunks = next;
+      }
     } else {
+      settledText = '';
       streamChunks = [{ id: chunkCounter++, text: t }];
     }
     lastStreamText = t;
@@ -456,7 +694,6 @@
 
   let parsedHtml = $derived.by(() => {
     if (!debouncedText) return '';
-    if (isStreaming) return '';
     try {
       const withoutRenderDirectives = debouncedText
         .replace(/\{\{render_note:[^}\s]+\}\}/g, '')
@@ -649,6 +886,19 @@
     }
   }
 
+  function getToolPathLabel(meta?: Record<string, unknown>): string {
+    const input = (
+      meta as { toolCall?: { input?: Record<string, unknown> } } | undefined
+    )?.toolCall?.input;
+    const rawPath = input?.path ?? input?.file_path ?? input?.filepath ?? input?.target_file;
+    if (typeof rawPath !== 'string' || !rawPath.trim()) return '';
+    const normalized = rawPath.replace(/\\/g, '/');
+    const projectPath = (projectStore.currentPath ?? '').replace(/\\/g, '/').replace(/\/$/, '');
+    return projectPath && normalized.startsWith(`${projectPath}/`)
+      ? normalized.slice(projectPath.length + 1)
+      : normalized;
+  }
+
   function getToolVerb(meta?: Record<string, unknown>): string {
     const m = meta as { toolCall?: { name?: string }; toolResult?: { name?: string } } | undefined;
     const name = (m?.toolCall?.name ?? m?.toolResult?.name ?? '').toLowerCase();
@@ -698,6 +948,88 @@
     if (/glob|find/i.test(name)) return 'find';
     if (/search/i.test(name)) return 'search';
     return name || 'tool';
+  }
+
+  /** One human-readable line for a routine tool step (no raw JSON dumps). */
+  function humanToolStepLabel(subEntry: FeedEntryLocal): string {
+    const verb = getToolVerb(subEntry.metadata);
+    const target = getToolShortLabel(subEntry.metadata);
+    if (subEntry.type === 'tool_result') {
+      if (isToolError(subEntry.metadata)) {
+        return target ? `Failed: ${verb} ${target}` : `Failed: ${verb}`;
+      }
+      return target ? `${verb} ${target}` : verb;
+    }
+    if (target) return `${verb} ${target}`;
+    const stripped = subEntry.text.replace(/^Calling tool:\s*/i, '').trim();
+    return stripped || verb || 'Looked at the project';
+  }
+
+  function inspectionSummary(group: FeedEntryLocal): {
+    title: string;
+    subtitle: string;
+    steps: Array<{ id: string; label: string; stat: string; raw: string }>;
+  } {
+    const entries = group.entries ?? [];
+    const collapsed: Array<{ id: string; label: string; stat: string; raw: string }> = [];
+    const callsById = new Map<string, number>();
+    for (const e of entries) {
+      if (e.type !== 'tool_call' && e.type !== 'tool_result') continue;
+      const metadata = e.metadata as
+        | {
+            toolCall?: { id?: string };
+            toolResult?: { callId?: string };
+          }
+        | undefined;
+      const callId = metadata?.toolCall?.id;
+      const resultCallId = metadata?.toolResult?.callId;
+      if (e.type === 'tool_call') {
+        const verb = getToolVerb(e.metadata);
+        const target = getToolPathLabel(e.metadata) || getToolShortLabel(e.metadata);
+        const index = collapsed.push({
+          id: e.id,
+          label: target ? `${verb} ${target}` : humanToolStepLabel(e),
+          stat: '',
+          raw: cleanToolOutput(clippedToolDetail(e)),
+        }) - 1;
+        if (callId) callsById.set(callId, index);
+        continue;
+      }
+
+      const matchingIndex = resultCallId ? callsById.get(resultCallId) : undefined;
+      if (matchingIndex !== undefined) {
+        const prior = collapsed[matchingIndex];
+        collapsed[matchingIndex] = {
+          ...prior,
+          id: e.id,
+          label: isToolError(e.metadata) ? `Failed: ${prior.label}` : prior.label,
+          stat: toolResultStat(e),
+          raw: cleanToolOutput(clippedToolDetail(e)) || prior.raw,
+        };
+      } else {
+        const verb = getToolVerb(e.metadata);
+        const target = getToolPathLabel(e.metadata) || getToolShortLabel(e.metadata);
+        collapsed.push({
+          id: e.id,
+          label: target
+            ? `${isToolError(e.metadata) ? 'Failed: ' : ''}${verb} ${target}`
+            : humanToolStepLabel(e),
+          stat: toolResultStat(e),
+          raw: cleanToolOutput(clippedToolDetail(e)),
+        });
+      }
+    }
+    const n = collapsed.length || Math.ceil(entries.length / 2) || entries.length;
+    return {
+      title: 'What Kory looked at',
+      subtitle:
+        n === 0
+          ? 'No routine project inspection steps were recorded.'
+          : n === 1
+            ? '1 quick look while working on your request.'
+            : `${n} quick looks while working on your request.`,
+      steps: collapsed,
+    };
   }
 
   const DOMAIN_STYLES: Record<string, { color: string; label: string }> = {
@@ -830,14 +1162,14 @@
         : 'hover:bg-surface-2/30'}"
       onclick={(e) =>
         entry.type === 'tool_group'
-          ? (toolDetailsOpen = true)
+          ? (toolDetailsExpanded = !toolDetailsExpanded)
           : entry.type === 'agent_group'
             ? onToggleGroup()
             : onSelect(e)}
       onkeydown={(e) => {
         if (e.key === 'Enter' || e.key === ' ')
           entry.type === 'tool_group'
-            ? (toolDetailsOpen = true)
+            ? (toolDetailsExpanded = !toolDetailsExpanded)
             : entry.type === 'agent_group'
               ? onToggleGroup()
               : onSelect(e as unknown as MouseEvent);
@@ -846,7 +1178,7 @@
       role="row"
       tabindex="0"
     >
-      <span class="text-xs text-text-muted shrink-0 w-16 leading-6 tabular-nums">
+      <span class="text-xs text-text-muted shrink-0 w-[5.75rem] whitespace-nowrap leading-6 tabular-nums">
         {new Date(entry.timestamp).toLocaleTimeString([], {
           hour: '2-digit',
           minute: '2-digit',
@@ -860,7 +1192,11 @@
         </div>
       {:else if entry.type === 'tool_group'}
         <div class="shrink-0 flex items-center justify-center w-5 h-6">
-          <ChevronRight size={14} class="text-blue-400" />
+          {#if toolDetailsExpanded}
+            <ChevronDown size={14} class="text-blue-400" />
+          {:else}
+            <ChevronRight size={14} class="text-blue-400" />
+          {/if}
         </div>
       {:else if entry.type === 'agent_group'}
         {@const ds = domainStyle(entry.metadata)}
@@ -905,6 +1241,22 @@
           >
             {entry.agentName}
           </span>
+          {#if entry.type === 'user_message' && persistedMessageId}
+            <button
+              type="button"
+              class="ml-1 inline-flex rounded-md p-1 align-middle text-[var(--color-text-muted)] transition-colors hover:bg-[var(--color-surface-3)] hover:text-[var(--color-text-primary)] disabled:cursor-not-allowed disabled:opacity-30"
+              onclick={startMessageEdit}
+              disabled={!!persistedSessionId && wsStore.isSessionBusy(persistedSessionId)}
+              aria-label="Edit message"
+              title={persistedSessionId && wsStore.isSessionBusy(persistedSessionId)
+                ? 'Stop the active run before editing history'
+                : isLatestUserMessage
+                  ? 'Edit and resend this message'
+                  : 'Edit this message, prune later context, and resend'}
+            >
+              <Pencil size={11} />
+            </button>
+          {/if}
         {/if}
         {#if entry.type === 'thinking'}
           <ThinkingBlock
@@ -912,7 +1264,7 @@
             durationMs={entry.durationMs}
             thinkingStartedAt={entry.thinkingStartedAt}
             agentName={entry.agentName}
-            defaultExpanded={agentSettingsStore.settings.reasoningExpandedByDefault ?? true}
+            defaultExpanded={agentSettingsStore.settings.reasoningExpandedByDefault ?? false}
             finalized={entry.thinkingFinalized ?? false}
           />
         {:else if entry.type === 'tool_result' && viewImagePath(entry.metadata)}
@@ -931,6 +1283,7 @@
               onclick={(e) => {
                 e.stopPropagation();
                 zoomedRawImage = imgPath;
+                setActiveClipboardImage(rawImageUrl(imgPath));
               }}
             >
               <img
@@ -1013,21 +1366,57 @@
               {:else}
                 <span class="min-w-0 truncate text-[var(--color-text-muted)]">{getToolNameFromMeta(entry.metadata) || toolDisplay.resultLabel}</span>
               {/if}
-              <button type="button" class="ml-auto shrink-0 rounded px-1.5 py-0.5 text-[10px] text-[var(--color-text-muted)] hover:bg-[var(--color-surface-3)] hover:text-[var(--color-text-primary)]" onclick={(event) => { event.stopPropagation(); toolDetailsOpen = true; }}>Details</button>
+              <button type="button" class="ml-auto shrink-0 inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] text-[var(--color-text-muted)] hover:bg-[var(--color-surface-3)] hover:text-[var(--color-text-primary)]" onclick={(event) => { event.stopPropagation(); toolDetailsExpanded = !toolDetailsExpanded; }}>
+                {#if toolDetailsExpanded}<ChevronDown size={11} />{:else}<ChevronRight size={11} />{/if}
+                Details
+              </button>
             </div>
           {/if}
         {:else if entry.type === 'user_message' || entry.type === 'content' || entry.type === 'thought'}
-          {#if rawTaskTranscript}
+          {#if entry.type === 'user_message' && editingMessage}
+            <div class="mt-2 rounded-xl border p-3" style="background: var(--color-surface-1); border-color: var(--color-border);">
+              <textarea
+                bind:value={editedMessageText}
+                rows="4"
+                class="w-full resize-y rounded-lg border px-3 py-2 text-sm leading-relaxed outline-none focus:border-[var(--color-accent)]"
+                style="min-height: 96px; max-height: 320px; background: var(--color-surface-2); border-color: var(--color-border); color: var(--color-text-primary);"
+                aria-label="Edit previous message"
+                onkeydown={(event) => {
+                  if (event.key === 'Escape') cancelMessageEdit();
+                  if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) {
+                    event.preventDefault();
+                    void saveMessageEdit();
+                  }
+                }}
+              ></textarea>
+              <p class="mt-2 text-[11px] leading-relaxed" style="color: var(--color-text-muted);">
+                {#if isLatestUserMessage}
+                  The existing response will be removed and regenerated. File changes already made on disk are not undone.
+                {:else}
+                  {laterPersistedMessages} later conversation {laterPersistedMessages === 1 ? 'message' : 'messages'} and their archived tool context will be pruned before this is resent. File changes already made on disk are not undone.
+                {/if}
+              </p>
+              <div class="mt-3 flex justify-end gap-2">
+                <button type="button" class="rounded-lg px-3 py-1.5 text-xs hover:bg-[var(--color-surface-3)]" style="color: var(--color-text-secondary);" onclick={cancelMessageEdit} disabled={savingMessageEdit}>Cancel</button>
+                <button type="button" class="rounded-lg px-3 py-1.5 text-xs font-semibold disabled:cursor-not-allowed disabled:opacity-40" style="background: var(--color-accent); color: var(--color-surface-0);" onclick={() => void saveMessageEdit()} disabled={!editedMessageText.trim() || savingMessageEdit}>
+                  {savingMessageEdit ? 'Saving…' : 'Save and resend'}
+                </button>
+              </div>
+            </div>
+          {:else if rawTaskTranscript}
             <div class="mt-1 flex items-center gap-2 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-2)] px-3 py-2 text-[11px]">
               <Terminal size={13} class="text-emerald-400" />
               <span class="font-medium text-[var(--color-text-secondary)]">Background task completed</span>
               <span class="min-w-0 truncate text-[var(--color-text-muted)]">Internal command output is hidden from the conversation.</span>
-              <button type="button" class="ml-auto shrink-0 rounded px-1.5 py-0.5 text-[10px] text-[var(--color-text-muted)] hover:bg-[var(--color-surface-3)] hover:text-[var(--color-text-primary)]" onclick={(event) => { event.stopPropagation(); toolDetailsOpen = true; }}>Details</button>
+              <button type="button" class="ml-auto shrink-0 inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] text-[var(--color-text-muted)] hover:bg-[var(--color-surface-3)] hover:text-[var(--color-text-primary)]" onclick={(event) => { event.stopPropagation(); toolDetailsExpanded = !toolDetailsExpanded; }}>
+                {#if toolDetailsExpanded}<ChevronDown size={11} />{:else}<ChevronRight size={11} />{/if}
+                Details
+              </button>
             </div>
           {:else}<div class="{getEntryColor(entry.type)} break-words mt-1 markdown-content">
             {#if isStreaming && entry.type === 'content'}
               <span class="whitespace-pre-wrap"
-                >{#each streamChunks as c (c.id)}<span class="stream-chunk">{c.text}</span
+                >{settledText}{#each streamChunks as c (c.id)}<span class="stream-chunk">{c.text}</span
                   >{/each}</span
               >
             {:else if isStreaming}
@@ -1089,7 +1478,7 @@
 
           {#if entry.metadata?.attachments && Array.isArray(entry.metadata.attachments) && entry.metadata.attachments.length > 0}
             <div class="mt-3 flex flex-wrap gap-2">
-              {#each entry.metadata.attachments as attachment}
+              {#each entry.metadata.attachments as attachment, i (attachment.id || attachment.url || i)}
                 {#if attachment.type === 'image'}
                   <button
                     type="button"
@@ -1098,10 +1487,12 @@
                     onclick={(e) => {
                       e.stopPropagation();
                       zoomedImage = attachment.data;
+                      zoomedImageMimeType = attachment.mimeType ?? 'image/png';
+                      setActiveClipboardImage(`data:${attachment.mimeType ?? 'image/png'};base64,${attachment.data}`);
                     }}
                   >
                     <img
-                      src={`data:image/png;base64,${attachment.data}`}
+                      src={`data:${attachment.mimeType ?? 'image/png'};base64,${attachment.data}`}
                       alt={attachment.name}
                       class="w-full h-full object-cover"
                     />
@@ -1113,6 +1504,7 @@
 
           {#if entry.type === 'content' && !isStreaming && currentText}
             <div class="mt-2 flex items-center gap-2" in:fade>
+              <button type="button" class="flex items-center gap-1.5 rounded-md bg-[var(--color-surface-3)] px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-[var(--color-text-muted)] transition-all hover:bg-[var(--color-border)] hover:text-[var(--color-text-primary)]" onclick={toggleSpeech} aria-label={speaking ? 'Stop reading response' : 'Read response aloud'}>{#if speaking}<VolumeX size={10}/> Stop{:else}<Volume2 size={10}/> Play{/if}</button>
               <button
                 type="button"
                 class="flex items-center gap-1.5 px-2 py-1 rounded-md text-[10px] font-bold uppercase tracking-wider transition-all
@@ -1133,7 +1525,7 @@
                 {/if}
               </button>
 
-              {#if entry.metadata?.messageId}
+              {#if entry.metadata?.messageId && !hasLaterUserMessage}
                 <button
                   type="button"
                   class="flex items-center gap-1.5 rounded-md bg-[var(--color-surface-3)] px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-[var(--color-text-muted)] transition-all hover:bg-[var(--color-border)] hover:text-[var(--color-text-primary)] disabled:opacity-40"
@@ -1149,7 +1541,7 @@
                 </button>
               {/if}
 
-              {#if responseVariants.length > 1}
+              {#if responseVariants.length > 1 && !hasLaterUserMessage}
                 <div
                   class="flex items-center rounded-md bg-[var(--color-surface-3)] text-[var(--color-text-muted)]"
                 >
@@ -1218,6 +1610,47 @@
               class="max-h-80 overflow-auto whitespace-pre-wrap break-words px-3 py-2 font-mono text-[12px] leading-relaxed text-red-200">{currentText ||
                 'No error details were provided.'}</pre>
           </section>
+        {:else if isCompactionSummary}
+          <section
+            class="mt-1 overflow-hidden rounded-xl border"
+            style="border-color: color-mix(in srgb, var(--color-accent) 38%, var(--color-border)); background: color-mix(in srgb, var(--color-accent) 6%, var(--color-surface-1));"
+          >
+            <button
+              type="button"
+              class="flex w-full items-center gap-3 px-3 py-2.5 text-left hover:bg-[var(--color-surface-2)]/50"
+              aria-expanded={compactionExpanded}
+              onclick={(event) => {
+                event.stopPropagation();
+                compactionExpanded = !compactionExpanded;
+              }}
+            >
+              <Layers size={14} class="shrink-0 text-[var(--color-accent)]" />
+              <span class="min-w-0 flex-1">
+                <span class="block text-[11px] font-semibold text-[var(--color-text-primary)]"
+                  >Session compacted</span
+                >
+                <span class="block text-[10px] text-[var(--color-text-muted)]"
+                  >Earlier context is preserved in a durable summary.</span
+                >
+              </span>
+              <span class="text-[10px] font-medium text-[var(--color-text-muted)]"
+                >{compactionExpanded ? 'Collapse' : 'View summary'}</span
+              >
+              {#if compactionExpanded}
+                <ChevronDown size={14} class="shrink-0 text-[var(--color-text-muted)]" />
+              {:else}
+                <ChevronRight size={14} class="shrink-0 text-[var(--color-text-muted)]" />
+              {/if}
+            </button>
+            <div class="mx-3 h-1 overflow-hidden rounded-full bg-[var(--color-surface-3)]">
+              <div class="h-full w-full rounded-full bg-[var(--color-accent)] opacity-80"></div>
+            </div>
+            {#if compactionExpanded}
+              <div class="markdown-content border-t border-[var(--color-border)] px-4 py-3 text-xs leading-relaxed text-[var(--color-text-secondary)]">
+                {@html renderedMarkdown(compactionSummaryText)}
+              </div>
+            {/if}
+          </section>
         {:else}
           <div class="{getEntryColor(entry.type)} break-words mt-1">
             {currentText}
@@ -1226,7 +1659,7 @@
       </div>
 
       <div
-        class="shrink-0 flex items-center gap-0.5 opacity-0 group-hover:opacity-60 hover:!opacity-100 transition-opacity"
+        class="w-[88px] shrink-0 flex items-center justify-end gap-0.5 opacity-0 group-hover:opacity-60 hover:!opacity-100 transition-opacity"
       >
         {#if archiveId}
           <button
@@ -1266,6 +1699,59 @@
     </div>
   {/if}
 
+  {#if toolDetailsExpanded && (entry.type === 'tool_group' || entry.type === 'tool_call' || entry.type === 'tool_result' || rawTaskTranscript)}
+    {@const summary = entry.type === 'tool_group' ? inspectionSummary(entry) : null}
+    {@const singleRaw = entry.type !== 'tool_group' ? cleanToolOutput(clippedToolDetail(entry)) : ''}
+    <!-- Inline, in-feed details — deliberately not a modal. Compact rows by
+         default; click a row to reveal its cleaned raw output. -->
+    <div
+      class="ml-20 my-1 space-y-1 border-l-2 py-2 pl-4"
+      style="border-color: var(--color-border);"
+      transition:fly={{ y: -10, duration: 200 }}
+    >
+      <div class="flex items-center justify-between gap-3 pr-1">
+        <span class="text-[10px] font-bold uppercase tracking-widest text-[var(--color-text-muted)]">
+          {summary?.title ?? (rawTaskTranscript ? 'Background task details' : 'Tool details')}
+        </span>
+        <button
+          type="button"
+          class="shrink-0 rounded px-1.5 py-0.5 text-[10px] text-[var(--color-text-muted)] hover:bg-[var(--color-surface-3)] hover:text-[var(--color-text-primary)]"
+          onclick={(event) => { event.stopPropagation(); toolDetailsExpanded = false; expandedStepIds = new Set(); }}>Collapse</button
+        >
+      </div>
+      {#if summary}
+        <p class="text-[11px] text-[var(--color-text-muted)] pr-1">{summary.subtitle}</p>
+        {#if summary.steps.length > 0}
+          {#each summary.steps as step (step.id)}
+            {@const open = expandedStepIds.has(step.id)}
+            <article class="border-b last:border-b-0" style="border-color: var(--color-border);">
+              <button
+                type="button"
+                class="flex w-full items-center gap-2 px-1 py-2 text-left text-xs hover:bg-[var(--color-surface-2)]/50"
+                onclick={(event) => {
+                  event.stopPropagation();
+                  const next = new Set(expandedStepIds);
+                  if (next.has(step.id)) next.delete(step.id);
+                  else next.add(step.id);
+                  expandedStepIds = next;
+                }}
+              >
+                {#if open}<ChevronDown size={11} class="shrink-0 text-[var(--color-text-muted)]" />{:else}<ChevronRight size={11} class="shrink-0 text-[var(--color-text-muted)]" />{/if}
+                <span class="min-w-0 flex-1 truncate font-mono text-[11px] text-[var(--color-text-primary)]" title={step.label}>{step.label}</span>
+                {#if step.stat}<span class="shrink-0 text-[10px] text-[var(--color-text-muted)]">{step.stat}</span>{/if}
+              </button>
+              {#if open && step.raw}
+                <pre class="max-h-60 overflow-auto whitespace-pre-wrap break-words border-t px-5 py-2 text-[10px] leading-relaxed text-[var(--color-text-secondary)]" style="border-color: var(--color-border);">{step.raw}</pre>
+              {/if}
+            </article>
+          {/each}
+        {/if}
+      {:else}
+        <pre class="max-h-96 overflow-auto whitespace-pre-wrap break-words rounded-xl bg-black/20 p-3 text-[11px] leading-relaxed text-[var(--color-text-secondary)]">{singleRaw || detailText() || 'No output was reported.'}</pre>
+      {/if}
+    </div>
+  {/if}
+
   {#if entry.type === 'agent_group' && isExpanded}
     <!-- Sub-agent activity: clearly grouped by domain, expanded by default -->
     {@const bds = domainStyle(entry.metadata)}
@@ -1281,7 +1767,7 @@
         <div
           class="flex items-start gap-2 text-[12px] opacity-85 hover:opacity-100 transition-opacity"
         >
-          <span class="text-[var(--color-text-muted)] w-12 shrink-0">
+          <span class="text-[var(--color-text-muted)] w-[5.75rem] shrink-0 whitespace-nowrap">
             {new Date(subEntry.timestamp).toLocaleTimeString([], {
               hour: '2-digit',
               minute: '2-digit',
@@ -1303,53 +1789,10 @@
   <div class="fixed z-[151] w-52 overflow-hidden rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-2)] p-1.5 shadow-2xl shadow-black/50" style={`left:${contextMenu.x}px;top:${contextMenu.y}px;`} role="menu" aria-label="Message actions" tabindex="-1">
     <button type="button" role="menuitem" class="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-xs text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-3)] hover:text-[var(--color-text-primary)]" onclick={() => void copyEntryText()}><Copy size={13} /> Copy</button>
     {#if entry.type === 'tool_call' || entry.type === 'tool_result' || rawTaskTranscript}
-      <button type="button" role="menuitem" class="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-xs text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-3)] hover:text-[var(--color-text-primary)]" onclick={() => { toolDetailsOpen = true; contextMenu = null; }}><Terminal size={13} /> View details</button>
+      <button type="button" role="menuitem" class="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-xs text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-3)] hover:text-[var(--color-text-primary)]" onclick={() => { toolDetailsExpanded = !toolDetailsExpanded; contextMenu = null; }}><Terminal size={13} /> {toolDetailsExpanded ? 'Hide details' : 'View details'}</button>
     {/if}
     <button type="button" role="menuitem" class="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-xs text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-3)] hover:text-[var(--color-text-primary)]" onclick={() => { hideEntryFromUser(); contextMenu = null; }}><EyeOff size={13} /> Hide from me</button>
     <button type="button" role="menuitem" class="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-xs text-red-300 hover:bg-red-500/10 hover:text-red-200" onclick={(event) => { contextMenu = null; onDelete(event); }}><Trash2 size={13} /> Delete</button>
-  </div>
-{/if}
-
-{#if toolDetailsOpen && (entry.type === 'tool_group' || entry.type === 'tool_call' || entry.type === 'tool_result' || rawTaskTranscript)}
-  <div
-    class="fixed inset-0 z-[80] flex items-center justify-center bg-black/55 p-4 backdrop-blur-sm"
-    role="presentation"
-    onclick={() => (toolDetailsOpen = false)}
-  >
-    <div
-      class="w-full max-w-2xl overflow-hidden rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-1)] shadow-2xl"
-      role="dialog"
-      aria-modal="true"
-      aria-label={entry.type === 'tool_group' ? 'Inspection details' : 'Task details'}
-      tabindex="-1"
-      onclick={(event) => event.stopPropagation()}
-      onkeydown={(event) => {
-        if (event.key === 'Escape') toolDetailsOpen = false;
-      }}
-    >
-      <header class="flex items-center justify-between gap-4 border-b border-[var(--color-border)] px-4 py-3">
-        <div>
-          <h2 class="text-sm font-semibold text-[var(--color-text-primary)]">{entry.type === 'tool_group' ? 'Inspection details' : rawTaskTranscript ? 'Background task details' : 'Tool details'}</h2>
-          <p class="mt-0.5 text-[11px] text-[var(--color-text-muted)]">{entry.type === 'tool_group' ? `${entry.entries?.length ?? 0} routine actions` : 'Raw output is available on request only.'}</p>
-        </div>
-        <button type="button" class="rounded-lg p-2 text-[var(--color-text-muted)] hover:bg-[var(--color-surface-3)] hover:text-[var(--color-text-primary)]" onclick={() => (toolDetailsOpen = false)} aria-label="Close inspection details">
-          <X size={16} />
-        </button>
-      </header>
-      <div class="max-h-[58vh] space-y-3 overflow-y-auto p-4">
-        {#if entry.type === 'tool_group'}{#each entry.entries || [] as subEntry (subEntry.id)}
-          {@const detail = clippedToolDetail(subEntry)}
-          <article class="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-0)] p-3">
-            <p class="text-xs font-medium {getEntryColor(subEntry.type)}">{subEntry.text.replace(/^Calling tool: /, '')}</p>
-            {#if detail}
-              <pre class="mt-2 max-h-48 overflow-auto whitespace-pre-wrap break-words rounded-lg bg-black/20 p-2 text-[10px] leading-relaxed text-[var(--color-text-secondary)]">{detail}</pre>
-            {/if}
-          </article>
-        {/each}{:else}
-          <pre class="max-h-[52vh] overflow-auto whitespace-pre-wrap break-words rounded-xl bg-black/20 p-3 text-[11px] leading-relaxed text-[var(--color-text-secondary)]">{detailText() || 'No output was reported.'}</pre>
-        {/if}
-      </div>
-    </div>
   </div>
 {/if}
 
@@ -1379,7 +1822,7 @@
     <!-- svelte-ignore a11y_no_static_element_interactions -->
     <div class="max-w-full max-h-full" onclick={(e) => e.stopPropagation()}>
       <img
-        src={zoomedRawImage ? rawImageUrl(zoomedRawImage) : `data:image/png;base64,${zoomedImage}`}
+        src={zoomedRawImage ? rawImageUrl(zoomedRawImage) : `data:${zoomedImageMimeType};base64,${zoomedImage}`}
         alt="Zoomed attachment"
         class="max-w-full max-h-full object-contain rounded shadow-2xl"
       />

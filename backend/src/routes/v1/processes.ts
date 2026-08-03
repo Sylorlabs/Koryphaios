@@ -1,6 +1,6 @@
 import { Elysia, t } from 'elysia';
 import { requireLocalRouteAuth } from '../../auth/local-route-auth';
-import { validateBashCommand } from '../../security';
+import { auditBashDenylist } from '../../security';
 import { processSupervisor } from '../../process-supervisor/supervisor';
 import {
   cleanupOldProcesses,
@@ -53,7 +53,7 @@ export const processRoutes = new Elysia({ prefix: '/api/processes' })
     '/',
     async ({ request, body, set }) => {
       if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
-      const validation = validateBashCommand(body.command);
+      const validation = auditBashDenylist(body.command);
       if (!validation.safe) {
         if (set) set.status = 400;
         return { ok: false, error: `Unsafe command: ${validation.reason}` };

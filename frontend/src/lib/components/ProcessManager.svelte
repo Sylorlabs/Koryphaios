@@ -115,7 +115,7 @@
     <!-- Status Filter -->
     <div class="flex items-center gap-1 p-1 rounded-lg" style="background: var(--color-surface-0);">
       <Filter size={12} class="ml-1" style="color: var(--color-text-muted);" />
-      {#each statusFilters as filter}
+      {#each statusFilters as filter (filter)}
         <button
           class="px-2 py-1 text-[10px] rounded transition-colors"
           style="background: {processStore.filterStatus === filter.value ? 'var(--color-surface-3)' : 'transparent'};
@@ -405,7 +405,7 @@
             <p class="text-center py-8" style="color: var(--color-text-muted);">No events recorded</p>
           {:else}
             <div class="space-y-2">
-              {#each processStore.processEvents as event}
+              {#each processStore.processEvents as event (event.id)}
                 <div class="flex gap-3 text-[10px]">
                   <span class="shrink-0" style="color: var(--color-text-muted);">
                     {formatTime(event.timestamp)}

@@ -108,7 +108,7 @@
 
         {#if noteBlocks.length > 0}
           <div class="notes">
-            {#each noteBlocks as block}
+            {#each noteBlocks as block, i (i)}
               {#if block.kind === 'heading'}
                 <h3 class="note-heading">{inline(block.text)}</h3>
               {:else if block.kind === 'bullet'}

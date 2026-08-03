@@ -3,6 +3,7 @@
   // thinking until its next action. This includes providers that buffer all
   // reasoning into one event, while avoiding an inaccurate client stopwatch.
   import { slide } from 'svelte/transition';
+  import { subscribeNow, getNow } from '$lib/utils/now-signal.svelte';
 
   interface Props {
     text: string;
@@ -28,18 +29,15 @@
   $effect(() => {
     if ((durationMs ?? 0) > peakMs) peakMs = durationMs ?? 0;
   });
-  let now = $state(Date.now());
   $effect(() => {
     if (finalized || !thinkingStartedAt) return;
-    now = Date.now();
-    const timer = setInterval(() => (now = Date.now()), 100);
-    return () => clearInterval(timer);
+    return subscribeNow();
   });
   // Keep the live counter moving even when a provider buffers its reasoning
   // into a single event. The final server event replaces this with the exact
   // timestamp-to-timestamp duration when the next action arrives.
   let displayMs = $derived(
-    Math.max(peakMs, durationMs ?? 0, !finalized && thinkingStartedAt ? now - thinkingStartedAt : 0),
+    Math.max(peakMs, durationMs ?? 0, !finalized && thinkingStartedAt ? getNow() - thinkingStartedAt : 0),
   );
 
   // Live = provider hasn't finalized yet. Safety valve: if no new duration
@@ -63,7 +61,7 @@
   }
 
   // Auto-follow the reasoning stream when peeking live.
-  $effect(() => {
+  $effect.pre(() => {
     void text.length;
     if (expanded && isLive && panelEl) {
       panelEl.scrollTop = panelEl.scrollHeight;

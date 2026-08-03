@@ -22,29 +22,45 @@ import {
   DEFAULT_MEMORY_SETTINGS,
   listProjectMemoryDocuments,
   createProjectMemoryDocument,
+  readProjectMemoryDocument,
+  writeProjectMemoryDocument,
 } from '../../memory/unified-memory';
 import { getRequestProjectRoot } from '../../runtime/request-project';
-import { requireLocalRouteAuth } from '../../auth/local-route-auth';
 
 export const memoryRoutes = new Elysia({ prefix: '/api/memory' })
-  .get('/documents', async ({ request, set }) => {
-    if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
+  .get('/documents', async ({ request }) => {
     return { ok: true, data: listProjectMemoryDocuments(getRequestProjectRoot(request)) };
   })
   .post('/documents', async ({ request, body, set }) => {
-    if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
     try { return { ok: true, data: createProjectMemoryDocument(getRequestProjectRoot(request), body.name, body.kind) }; }
     catch (err) { set.status = 400; return { ok: false, error: err instanceof Error ? err.message : 'Failed to create document' }; }
   }, { body: t.Object({ name: t.String(), kind: t.Union([t.Literal('memory'), t.Literal('rules')]) }) })
+  .get('/documents/:kind/:name', async ({ request, params, set }) => {
+    try {
+      return { ok: true, data: readProjectMemoryDocument(getRequestProjectRoot(request), params.name, params.kind) };
+    } catch (err) {
+      set.status = 404;
+      return { ok: false, error: err instanceof Error ? err.message : 'Failed to read document' };
+    }
+  }, { params: t.Object({ kind: t.Union([t.Literal('memory'), t.Literal('rules')]), name: t.String() }) })
+  .put('/documents/:kind/:name', async ({ request, params, body, set }) => {
+    try {
+      return { ok: true, data: writeProjectMemoryDocument(getRequestProjectRoot(request), params.name, params.kind, body.content) };
+    } catch (err) {
+      set.status = 400;
+      return { ok: false, error: err instanceof Error ? err.message : 'Failed to write document' };
+    }
+  }, {
+    params: t.Object({ kind: t.Union([t.Literal('memory'), t.Literal('rules')]), name: t.String() }),
+    body: t.Object({ content: t.String() }),
+  })
   // Universal Memory
-  .get('/universal', async ({ request, set }) => {
-    if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
+  .get('/universal', async () => {
     return { ok: true, data: readUniversalMemory() };
   })
   .put(
     '/universal',
-    async ({ request, body, set }) => {
-      if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
+    async ({ body, set }) => {
       try {
         const memory = writeUniversalMemory(body.content);
         return { ok: true, data: memory };
@@ -55,20 +71,17 @@ export const memoryRoutes = new Elysia({ prefix: '/api/memory' })
     },
     { body: t.Object({ content: t.String() }) },
   )
-  .post('/universal/init', async ({ request, set }) => {
-    if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
+  .post('/universal/init', async () => {
     return { ok: true, data: initializeUniversalMemory() };
   })
 
   // Project Memory
-  .get('/project', async ({ request, set }) => {
-    if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
+  .get('/project', async ({ request }) => {
     return { ok: true, data: readProjectMemory(getRequestProjectRoot(request)) };
   })
   .put(
     '/project',
     async ({ request, body, set }) => {
-      if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
       try {
         const memory = writeProjectMemory(getRequestProjectRoot(request), body.content);
         return { ok: true, data: memory };
@@ -79,14 +92,12 @@ export const memoryRoutes = new Elysia({ prefix: '/api/memory' })
     },
     { body: t.Object({ content: t.String() }) },
   )
-  .post('/project/init', async ({ request, set }) => {
-    if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
+  .post('/project/init', async ({ request }) => {
     return { ok: true, data: initializeProjectMemory(getRequestProjectRoot(request)) };
   })
 
   // Session Memory
   .get('/sessions/:id', async ({ request, params: { id }, set }) => {
-    if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
     const validatedId = validateSessionId(id);
     if (!validatedId) {
       set.status = 400;
@@ -97,7 +108,6 @@ export const memoryRoutes = new Elysia({ prefix: '/api/memory' })
   .put(
     '/sessions/:id',
     async ({ request, params: { id }, body, set }) => {
-      if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
       const validatedId = validateSessionId(id);
       if (!validatedId) {
         set.status = 400;
@@ -114,7 +124,6 @@ export const memoryRoutes = new Elysia({ prefix: '/api/memory' })
     { body: t.Object({ content: t.String() }) },
   )
   .post('/sessions/:id/init', async ({ request, params: { id }, set }) => {
-    if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
     const validatedId = validateSessionId(id);
     if (!validatedId) {
       set.status = 400;
@@ -123,7 +132,6 @@ export const memoryRoutes = new Elysia({ prefix: '/api/memory' })
     return { ok: true, data: initializeSessionMemory(getRequestProjectRoot(request), validatedId) };
   })
   .delete('/sessions/:id', async ({ request, params: { id }, set }) => {
-    if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
     const validatedId = validateSessionId(id);
     if (!validatedId) {
       set.status = 400;
@@ -135,14 +143,12 @@ export const memoryRoutes = new Elysia({ prefix: '/api/memory' })
   })
 
   // Rules
-  .get('/rules', async ({ request, set }) => {
-    if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
+  .get('/rules', async ({ request }) => {
     return { ok: true, data: readRules(getRequestProjectRoot(request)) };
   })
   .put(
     '/rules',
     async ({ request, body, set }) => {
-      if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
       try {
         const rules = writeRules(getRequestProjectRoot(request), body.content);
         return { ok: true, data: rules };
@@ -153,18 +159,15 @@ export const memoryRoutes = new Elysia({ prefix: '/api/memory' })
     },
     { body: t.Object({ content: t.String() }) },
   )
-  .post('/rules/init', async ({ request, set }) => {
-    if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
+  .post('/rules/init', async ({ request }) => {
     return { ok: true, data: initializeRules(getRequestProjectRoot(request)) };
   })
 
   // Settings
-  .get('/settings', async ({ request, set }) => {
-    if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
+  .get('/settings', async ({ request }) => {
     return { ok: true, data: loadMemorySettings(getRequestProjectRoot(request)) };
   })
   .put('/settings', async ({ request, body, set }) => {
-    if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
     try {
       const root = getRequestProjectRoot(request);
       const currentSettings = loadMemorySettings(root);
@@ -176,8 +179,7 @@ export const memoryRoutes = new Elysia({ prefix: '/api/memory' })
       return { ok: false, error: err.message ?? 'Failed to save settings' };
     }
   })
-  .post('/settings/reset', async ({ request, set }) => {
-    if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
+  .post('/settings/reset', async ({ request }) => {
     saveMemorySettings(getRequestProjectRoot(request), DEFAULT_MEMORY_SETTINGS);
     return { ok: true, data: DEFAULT_MEMORY_SETTINGS };
   })
@@ -185,8 +187,7 @@ export const memoryRoutes = new Elysia({ prefix: '/api/memory' })
   // Context & Stats
   .get(
     '/context',
-    async ({ request, query, set }) => {
-      if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
+    async ({ request, query }) => {
       const context = assembleMemoryContext(getRequestProjectRoot(request), query.sessionId ?? null);
       const formatted = formatMemoryForContext(context);
       return {
@@ -206,8 +207,7 @@ export const memoryRoutes = new Elysia({ prefix: '/api/memory' })
   )
   .get(
     '/stats',
-    async ({ request, query, set }) => {
-      if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
+    async ({ request, query }) => {
       return { ok: true, data: getMemoryStats(getRequestProjectRoot(request), query.sessionId ?? undefined) };
     },
     {

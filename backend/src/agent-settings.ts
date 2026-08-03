@@ -35,6 +35,9 @@ export interface AgentSettings {
   /** Agent orchestration mode preference. Auto lets Kory decide when to delegate. */
   agentExecutionMode: 'auto' | 'single' | 'multi';
 
+  /** Default approval behavior selected from the composer. */
+  permissionMode: 'yolo' | 'guarded' | 'edits' | 'ask' | 'plan' | 'custom';
+
   /** Whether to use preferences.md for workflow guidance */
   preferencesEnabled: boolean;
 
@@ -52,10 +55,10 @@ export interface AgentSettings {
    *  standing guidance keyed by category (general, frontend, backend, etc.). */
   managerNotes: Record<string, string>;
 
-  /** Critic gate enabled - critic reviews all changes */
+  /** Enables additional critic review for non-mutating work. Mutations are always gated. */
   criticGateEnabled: boolean;
 
-  /** Strict blocks completion, advisory reports failures, off marks results unverified. */
+  /** Answer/research policy. Repository mutations always use strict completion gating. */
   gateStrictness: 'strict' | 'advisory' | 'off';
 
   /** How aggressively Kory resolves material ambiguity before implementation. */
@@ -111,6 +114,9 @@ export interface AgentSettings {
   /** Require human approval for changes >N lines */
   approvalThresholdLines: number;
 
+  /** Apply the configured file/line edit thresholds to agent runs. Off by default. */
+  autonomyLimitsEnabled: boolean;
+
   /** Experimental: Local Web Search (DuckDuckGo) */
   localWebSearch: 'off' | 'on' | 'fallback';
 
@@ -142,17 +148,18 @@ export interface AgentSettings {
 export const DEFAULT_AGENT_SETTINGS: AgentSettings = {
   ruleEnforcementLevel: 'strict',
   agentExecutionMode: 'auto',
+  permissionMode: 'guarded',
   preferencesEnabled: true,
   allowExternalPaths: false,
   managerModelAccess: {},
   managerNotes: {},
   criticGateEnabled: true,
   gateStrictness: 'strict',
-  intentInterview: 'adaptive',
+  intentInterview: 'off',
   goalPlanningDepth: 'adaptive',
   automaticGoalDriving: true,
-  designDiscovery: true,
-  planApproval: 'material',
+  designDiscovery: false,
+  planApproval: 'never',
   modelQualification: 'enforce',
   feedbackSharing: 'local',
   skillLearningMode: 'propose-then-verify',
@@ -165,13 +172,14 @@ export const DEFAULT_AGENT_SETTINGS: AgentSettings = {
   maxCriticIterations: 3,
   approvalThresholdFiles: 5,
   approvalThresholdLines: 100,
+  autonomyLimitsEnabled: false,
   localWebSearch: 'fallback',
   multiSourceResearch: true,
   contextPruningEnabled: true,
   contextKeepRecentTurns: 3,
   contextPruneMinChars: 600,
   contextSelfAwareness: true,
-  reasoningExpandedByDefault: true,
+  reasoningExpandedByDefault: false,
   skillCollisionChoices: {},
 };
 
@@ -396,6 +404,11 @@ export function loadAgentSettings(projectRoot: string): AgentSettings {
     ...DEFAULT_AGENT_SETTINGS,
     ...(enableCritic !== undefined && { criticGateEnabled: enableCritic }),
     ...persistedSettings,
+    // Plan was previously stored as a workspace-wide permission preset. It is
+    // now a session interaction mode; map legacy configs to the safe default.
+    permissionMode: persistedSettings?.permissionMode === 'plan'
+      ? 'guarded'
+      : persistedSettings?.permissionMode ?? DEFAULT_AGENT_SETTINGS.permissionMode,
   };
 }
 
@@ -428,6 +441,7 @@ export function resolveAgentSettingsLayers(
 const SETTING_ENUMS: Partial<Record<keyof AgentSettings, readonly string[]>> = {
   ruleEnforcementLevel: ['strict', 'moderate', 'lenient'],
   agentExecutionMode: ['auto', 'single', 'multi'],
+  permissionMode: ['yolo', 'guarded', 'edits', 'ask', 'plan', 'custom'],
   gateStrictness: ['strict', 'advisory', 'off'],
   intentInterview: ['off', 'adaptive', 'deep'],
   goalPlanningDepth: ['minimal', 'adaptive', 'structured'],
@@ -872,6 +886,12 @@ function generateEnforcementMessage(settings: AgentSettings): string {
 
   if (settings.ruleEnforcementLevel === 'strict') {
     messages.push('5. STRICT MODE: Any rule violation blocks the change');
+  }
+
+  if (settings.autonomyLimitsEnabled) {
+    messages.push(
+      `6. AUTONOMY LIMITS: Before applying a change expected to exceed ${settings.approvalThresholdFiles} files or ${settings.approvalThresholdLines} lines, stop and request explicit human approval.`,
+    );
   }
 
   messages.push('');

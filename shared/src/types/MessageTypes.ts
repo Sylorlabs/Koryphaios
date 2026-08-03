@@ -35,6 +35,15 @@ export interface StoredMessage {
   sessionId: string;
   role: 'user' | 'assistant' | 'system';
   content: string; // JSON string of ContentBlock[] or raw text
+  /** Durable user-supplied attachments. The database stores these alongside
+   *  the text blocks so a reload, regeneration, or edited-history replay does
+   *  not silently turn a multimodal message into text-only context. */
+  attachments?: Array<{
+    type: 'image' | 'file';
+    data: string;
+    name: string;
+    mimeType?: string;
+  }>;
   model?: string;
   provider?: ProviderName;
   tokensIn?: number;
@@ -42,5 +51,10 @@ export interface StoredMessage {
   cost?: number;
   variantGroupId?: string;
   variantIndex?: number;
+  /** Typed classifier for system messages (e.g. 'cancelled', 'compacted').
+   *  Stored inside the first content block's `kind` field so no DB migration
+   *  is needed. Lets the frontend render system rows by type instead of
+   *  pattern-matching their text. */
+  kind?: string;
   createdAt: number;
 }

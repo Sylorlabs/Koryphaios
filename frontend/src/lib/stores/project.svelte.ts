@@ -1,3 +1,7 @@
+import { projectDisplayName } from '$lib/utils/project-path';
+
+export { projectDisplayName } from '$lib/utils/project-path';
+
 const PROJECT_KEY = 'koryphaios-current-project';
 const PROJECTS_KEY = 'koryphaios-open-projects';
 const WORKSPACE_KEY = 'koryphaios-workspace-root';
@@ -25,12 +29,6 @@ let currentPath = $state<string | null>(initialCurrentPath);
 let openProjects = $state<string[]>(initialCurrentPath && !initialOpenProjects.includes(initialCurrentPath) ? [initialCurrentPath, ...initialOpenProjects] : initialOpenProjects);
 let workspaceRoot = $state<string | null>(readString(WORKSPACE_KEY));
 let scope = $state<SessionScope>(readString(SCOPE_KEY) === 'all' ? 'all' : 'project');
-
-export function projectDisplayName(path: string | null | undefined): string {
-  if (!path) return '';
-  const parts = path.replace(/[/\\]+$/, '').split(/[/\\]/);
-  return parts[parts.length - 1] || path;
-}
 
 export const projectStore = {
   get currentPath() { return currentPath; },

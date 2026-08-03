@@ -3,9 +3,10 @@
 // Stores the master key in a file with strict permissions (0o600)
 
 import { randomBytes, createCipheriv, createDecipheriv, scryptSync, createHash } from 'node:crypto';
-import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
+import { readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { serverLog } from '../../logger';
+import { ensureSecureDir } from '../../security/fs-permissions';
 import type { KMSProvider } from '../types';
 
 const KEY_FILE = '.master-key';
@@ -78,8 +79,9 @@ export class LocalKMSProvider implements KMSProvider {
       );
     }
 
-    // Ensure data directory exists
-    mkdirSync(this.config.dataDir, { recursive: true, mode: 0o700 });
+    // Ensure data directory exists and is tightened to 0o700 (heals existing
+    // dirs created by older builds with a looser umask).
+    ensureSecureDir(this.config.dataDir);
 
     if (existsSync(this.keyFilePath)) {
       await this.loadMasterKey();

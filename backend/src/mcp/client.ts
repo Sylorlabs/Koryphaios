@@ -486,17 +486,28 @@ export async function initMCP(config: any, tools: any): Promise<MCPManager> {
   const manager = new MCPManager(process.cwd());
   const servers = config.mcpServers || {};
 
-  for (const [name, serverConfig] of Object.entries(servers)) {
-    try {
+  const entries = Object.entries(servers);
+  const results = await Promise.allSettled(
+    entries.map(([name, serverConfig]) => {
       const cfg = serverConfig as any;
-      await manager.connectServer({
+      return manager.connectServer({
         name,
         ...cfg,
         // Normalize "type" field to "transport" (config files use "type")
         transport: cfg.transport ?? cfg.type ?? 'stdio',
       });
-    } catch (err: any) {
-      mcpLog.error({ server: name, err: err.message }, 'Failed to connect to MCP server');
+    }),
+  );
+
+  for (let i = 0; i < results.length; i++) {
+    const result = results[i];
+    if (result.status === 'rejected') {
+      const name = entries[i][0];
+      const reason = result.reason;
+      mcpLog.error(
+        { server: name, err: reason instanceof Error ? reason.message : String(reason) },
+        'Failed to connect to MCP server',
+      );
     }
   }
 

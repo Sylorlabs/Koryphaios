@@ -10,7 +10,7 @@ import {
   GlobTool,
   LsTool,
 } from '../src/tools';
-import { isCatastrophicBashCommand } from '../src/tools/bash';
+import { isCatastrophicBashCommand, requiresCatastrophicConfirmation } from '../src/tools/bash';
 import { AskUserTool, AskManagerTool, DelegateToWorkerTool } from '../src/tools/interaction';
 import type { Session, AgentIdentity, WSMessage } from '@koryphaios/shared';
 import { DOMAIN } from '../src/constants';
@@ -98,6 +98,46 @@ describe('KoryManager Orchestration', () => {
     expect(names).toContain('delegate_to_worker');
     expect(names).toContain('ask_user');
     expect(managerDefs.some((d) => d.name === 'delegate_to_worker')).toBe(true);
+  });
+
+  test('ask_user forwards decision charts and sliders to the UI contract', async () => {
+    let observed: unknown;
+    const result = await new AskUserTool().run(
+      {
+        sessionId: 'question-test',
+        workingDirectory: '/tmp',
+        waitForUserInput: async (_question, _options, presentation) => {
+          observed = presentation;
+          return 'Keep chatting';
+        },
+      },
+      {
+        id: 'ask-1',
+        name: 'ask_user',
+        input: {
+          question: 'Which tradeoff fits?',
+          options: ['Fast', 'Thorough'],
+          allowKeepChatting: true,
+          chart: {
+            type: 'bar',
+            labels: ['Fast', 'Thorough'],
+            datasets: [{ label: 'Confidence', data: [55, 90] }],
+          },
+          sliders: [{ id: 'depth', label: 'Depth', min: 1, max: 10, step: 1, value: 8 }],
+        },
+      },
+    );
+
+    expect(result.output).toContain('Keep chatting');
+    expect(observed).toEqual({
+      allowKeepChatting: true,
+      chart: {
+        type: 'bar',
+        labels: ['Fast', 'Thorough'],
+        datasets: [{ label: 'Confidence', data: [55, 90] }],
+      },
+      sliders: [{ id: 'depth', label: 'Depth', min: 1, max: 10, step: 1, value: 8 }],
+    });
   });
 
   test('critic role is limited to read-only filesystem tools', () => {
@@ -297,7 +337,7 @@ describe('KoryManager Orchestration', () => {
     expect(parseCriticVerdict('This might pass, but evidence is missing.')).toBe(false);
     expect(
       parseCriticReport(
-        '{"verdict":"PASS","findings":[],"checksReviewed":["bun test"],"unmetCriteria":[]}',
+        '{"verdict":"PASS","findings":[],"checksReviewed":["bun test"],"criterionCoverage":[{"criterion":"Relevant checks pass","evidence":"bun test","status":"verified"}],"unmetCriteria":[]}',
       )?.verdict,
     ).toBe('PASS');
     expect(
@@ -332,6 +372,8 @@ describe('KoryManager Orchestration', () => {
     expect(isCatastrophicBashCommand('rm -rf ./dist')).toBe(false);
     expect(isCatastrophicBashCommand('rm -rf $HOME')).toBe(true);
     expect(isCatastrophicBashCommand('dd if=/dev/zero of=/dev/sda')).toBe(true);
+    expect(requiresCatastrophicConfirmation('rm -rf $HOME')).toBe(true);
+    expect(requiresCatastrophicConfirmation('rm -rf $HOME', true)).toBe(false);
 
     const questions: string[] = [];
     const bash = new BashTool();

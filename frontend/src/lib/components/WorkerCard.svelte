@@ -34,6 +34,7 @@
     if (provider === 'codex') return 'Codex CLI';
     if (provider === 'codex-auth') return 'OpenAI Codex';
     if (provider === 'anthropic') return 'Anthropic';
+    if (provider === 'claude') return 'Claude Code';
     if (provider === 'google') return 'Google';
     if (provider === 'aistudio') return 'Google AI Studio';
     if (provider === 'xai') return 'xAI';
@@ -43,6 +44,11 @@
     if (provider === 'kimicode') return 'Kimi Code';
     if (provider === 'jules') return 'Jules (cloud)';
     return provider.charAt(0).toUpperCase() + provider.slice(1);
+  }
+
+  function modelLabel(model: string): string {
+    if (model === 'claude-code-sonnet') return 'Claude Sonnet 5';
+    return model;
   }
 
   let glowClass = $derived(
@@ -102,11 +108,16 @@
 >
   <!-- Header -->
   <div class="flex items-start justify-between {isActive ? 'mb-[var(--space-sm)]' : 'mb-0'}">
-    <div class="flex items-center gap-1.5">
+    <div class="flex min-w-0 items-start gap-1.5">
       <div class="flex items-center pt-0.5">
         <AnimatedStatusIcon status={agent.status} size={isActive ? 16 : 14} {isManager} isStatic={!isActive} />
       </div>
-      <span class="text-xs font-medium {isActive ? 'opacity-100' : 'opacity-70'}" style="color: var(--color-text-primary);">{agent.identity.name}</span>
+      <div class="min-w-0">
+        <div class="truncate text-xs font-medium {isActive ? 'opacity-100' : 'opacity-70'}" style="color: var(--color-text-primary);">{agent.identity.name}</div>
+        <div class="mt-0.5 truncate text-[10px] font-semibold" style="color: var(--color-text-secondary);">
+          ({providerLabel(agent.identity.provider)}) {modelLabel(agent.identity.model)}
+        </div>
+      </div>
     </div>
     <div class="flex items-center gap-1">
       {#if isActive}
@@ -140,21 +151,7 @@
       <span class="text-[11px]" style="color: {agent.status === 'done' ? 'var(--color-success)' : agent.status === 'error' ? 'var(--color-error)' : 'var(--color-text-secondary)'};">
         {statusText}
       </span>
-      <span class="text-[10px]" style="color: var(--color-text-muted);">({providerLabel(agent.identity.provider)}) {agent.identity.model}</span>
     </div>
-
-    <!-- Context window bar -->
-    {#if agent.tokensUsed > 0 && agent.contextKnown && agent.contextMax > 0}
-      <div class="mb-[var(--space-sm)]">
-        <div class="flex items-center justify-between mb-[var(--space-xs)]">
-          <span class="text-[9px]" style="color: var(--color-text-muted);">Context</span>
-          <span class="text-[9px]" style="color: var(--color-text-muted);">{Math.round(agent.tokensUsed / 1000)}k / {Math.round(agent.contextMax / 1000)}k</span>
-        </div>
-        <div class="h-1 rounded-full overflow-hidden" style="background: var(--color-surface-4);">
-          <div class="h-full rounded-full transition-all {contextColor}" style="width: {contextPercent}%;"></div>
-        </div>
-      </div>
-    {/if}
 
     <!-- Recent tools -->
     {#if agent.toolCalls.length > 0}
@@ -164,6 +161,24 @@
         {/each}
       </div>
     {/if}
+  {:else}
+    <div class="flex items-center justify-between mb-[var(--space-sm)]">
+      <span class="text-[11px]" style="color: var(--color-text-secondary);">{statusText}</span>
+    </div>
+  {/if}
+
+  <!-- Context stays visible after an agent completes so each card remains an
+       inspectable record of its separate model window, not an empty tile. -->
+  {#if agent.tokensUsed > 0 && agent.contextKnown && agent.contextMax > 0}
+    <div class="mb-[var(--space-sm)]">
+      <div class="flex items-center justify-between mb-[var(--space-xs)]">
+        <span class="text-[9px]" style="color: var(--color-text-muted);">Context</span>
+        <span class="text-[9px]" style="color: var(--color-text-muted);">{Math.round(agent.tokensUsed / 1000)}k / {Math.round(agent.contextMax / 1000)}k</span>
+      </div>
+      <div class="h-1 rounded-full overflow-hidden" style="background: var(--color-surface-4);">
+        <div class="h-full rounded-full transition-all {contextColor}" style="width: {contextPercent}%;"></div>
+      </div>
+    </div>
   {/if}
 
   {#if agent.task}

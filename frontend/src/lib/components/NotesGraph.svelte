@@ -1,6 +1,6 @@
 <script lang="ts">
   import * as d3 from 'd3';
-  import { onMount, onDestroy } from 'svelte';
+  import { onMount } from 'svelte';
   import { notesStore } from '$lib/stores/notes.svelte';
   import type { GraphNode, GraphEdge } from '@koryphaios/shared';
 
@@ -62,12 +62,18 @@
     return neighbors;
   }
 
+  let cachedNeighbors: Set<string> | null = null;
+  let cachedFocusId: string | null = null;
+  let cachedEdgesRef: GraphEdge[] | null = null;
+
   // ── Canvas render state ─────────────────────────────────────────────────────
   // Canvas 2D scales to thousands of nodes where an equivalent SVG DOM janks, so
   // there is no node cap — the whole vault renders. World↔screen is a manual
   // affine transform (scale + translate) we also use for hit-testing.
   let simNodes: SimNode[] = [];
   let simLinks: SimLink[] = [];
+  const GRID_CELL = 50;
+  let spatialGrid = new Map<number, SimNode[]>();
   let scale = 1;
   let tx = 0;
   let ty = 0;
@@ -91,15 +97,35 @@
     return { nodes, edges };
   }
 
+  function buildSpatialGrid() {
+    spatialGrid = new Map<number, SimNode[]>();
+    for (const n of simNodes) {
+      const cx = Math.floor(n.x / GRID_CELL);
+      const cy = Math.floor(n.y / GRID_CELL);
+      const key = cx * 1000 + cy;
+      const bucket = spatialGrid.get(key);
+      if (bucket) bucket.push(n);
+      else spatialGrid.set(key, [n]);
+    }
+  }
+
   function nodeAt(sx: number, sy: number): SimNode | null {
     const [wx, wy] = toWorld(sx, sy);
-    // Search nearest within its radius; iterate in reverse so topmost wins.
-    for (let i = simNodes.length - 1; i >= 0; i--) {
-      const n = simNodes[i];
-      const r = getNodeRadius(n.linkCount, n.includeInContext) + 3;
-      const dx = n.x - wx;
-      const dy = n.y - wy;
-      if (dx * dx + dy * dy <= r * r) return n;
+    const ccx = Math.floor(wx / GRID_CELL);
+    const ccy = Math.floor(wy / GRID_CELL);
+    // Iterate cells in reverse render order so topmost wins within a bucket.
+    for (let gx = ccx + 1; gx >= ccx - 1; gx--) {
+      for (let gy = ccy + 1; gy >= ccy - 1; gy--) {
+        const bucket = spatialGrid.get(gx * 1000 + gy);
+        if (!bucket) continue;
+        for (let i = bucket.length - 1; i >= 0; i--) {
+          const n = bucket[i];
+          const r = getNodeRadius(n.linkCount, n.includeInContext) + 3;
+          const dx = n.x - wx;
+          const dy = n.y - wy;
+          if (dx * dx + dy * dy <= r * r) return n;
+        }
+      }
     }
     return null;
   }
@@ -118,7 +144,12 @@
 
     const edges = notesStore.graphData.edges;
     const focusId = hoveredNodeId ?? selectedNodeId;
-    const neighbors = getNeighborSet(focusId, edges);
+    if (focusId !== cachedFocusId || edges !== cachedEdgesRef) {
+      cachedNeighbors = getNeighborSet(focusId, edges);
+      cachedFocusId = focusId;
+      cachedEdgesRef = edges;
+    }
+    const neighbors = cachedNeighbors!;
     const q = searchQuery.trim().toLowerCase();
 
     // Links
@@ -202,8 +233,6 @@
 
   function buildGraph() {
     if (!canvasEl || !containerEl) return;
-    folderColorMap.clear();
-    colorIndex = 0;
     simulation?.stop();
     resize();
 
@@ -211,6 +240,7 @@
     if (!nodes.length) {
       simNodes = [];
       simLinks = [];
+      buildSpatialGrid();
       draw();
       return;
     }
@@ -261,6 +291,7 @@
           node.vy = 0;
         });
       });
+      buildSpatialGrid();
       draw();
       return;
     }
@@ -292,7 +323,8 @@
         d3.forceCollide<SimNode>().radius((d) => getNodeRadius(d.linkCount, d.includeInContext) + 10),
       );
     }
-    simulation.on('tick', draw);
+    buildSpatialGrid();
+    simulation.on('tick', () => { buildSpatialGrid(); draw(); });
   }
 
   // ── Pointer interaction (pan / zoom / node drag / hover) ────────────────────
@@ -334,7 +366,7 @@
       dragNode.fy = wy;
       dragNode.x = wx;
       dragNode.y = wy;
-      if (performanceLayout) draw();
+      if (performanceLayout) { buildSpatialGrid(); draw(); }
       return;
     }
     if (panning) {
@@ -399,8 +431,6 @@
     draw();
   }
 
-  let resizeObserver: ResizeObserver | null = null;
-
   $effect(() => {
     // Redraw when label/search toggles change (no rebuild needed).
     void showLabels;
@@ -411,21 +441,27 @@
   $effect(() => {
     void notesStore.graphData;
     void localGraph;
-    void selectedNodeId;
     requestAnimationFrame(() => buildGraph());
+  });
+
+  $effect(() => {
+    void selectedNodeId;
+    draw();
   });
 
   onMount(() => {
     void notesStore.fetchGraph().then(() => buildGraph());
-    if (containerEl && 'ResizeObserver' in globalThis) {
-      resizeObserver = new ResizeObserver(() => resize());
-      resizeObserver.observe(containerEl);
-    }
+    return () => {
+      simulation?.stop();
+    };
   });
 
-  onDestroy(() => {
-    simulation?.stop();
-    resizeObserver?.disconnect();
+  $effect(() => {
+    const container = containerEl;
+    if (!container || !('ResizeObserver' in globalThis)) return;
+    const observer = new ResizeObserver(() => resize());
+    observer.observe(container);
+    return () => observer.disconnect();
   });
 
   function resetView() {

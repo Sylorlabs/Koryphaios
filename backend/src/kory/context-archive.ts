@@ -7,7 +7,7 @@
 // Storage: `.koryphaios/sessions/<id>/context-archive.jsonl` — one JSON row per
 // event, plus `prune`/`unprune` marker rows so visibility survives restarts.
 
-import { appendFile, mkdir, readFile } from 'node:fs/promises';
+import { appendFile, mkdir, readFile, writeFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { koryLog } from '../logger';
@@ -185,6 +185,24 @@ export class ContextArchiveService {
   async isPrunedForAgent(sessionId: string, id: string): Promise<boolean> {
     const s = await this.ensureLoaded(sessionId);
     return s.byId.get(id)?.prunedForAgent === true;
+  }
+
+  /** Remove archived tool/file/terminal context newer than a conversation
+   * pivot. Editing history must not leave later tool output recallable by the
+   * model or visible as if it still belonged to the rewritten branch. */
+  async truncateAfter(sessionId: string, timestamp: number): Promise<number> {
+    const s = await this.ensureLoaded(sessionId);
+    const kept = s.entries.filter((entry) => entry.ts <= timestamp);
+    const removed = s.entries.length - kept.length;
+    if (removed === 0 && !s.lastUsage) return 0;
+
+    await mkdir(this.dir(sessionId), { recursive: true });
+    const body = kept.map((entry) => JSON.stringify(entry)).join('\n');
+    await writeFile(this.file(sessionId), body ? `${body}\n` : '', 'utf8');
+    s.entries = kept;
+    s.byId = new Map(kept.map((entry) => [entry.id, entry]));
+    s.lastUsage = undefined;
+    return removed;
   }
 }
 

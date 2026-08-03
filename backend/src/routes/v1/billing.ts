@@ -3,20 +3,55 @@ import {
   getLocalTotalsByProvider,
   getReconciliation,
   getSubscriptionStatuses,
+  getKoryAccountUsage,
 } from '../../credit-accountant';
 import { getLocalTotals } from '../../credit-accountant/db';
 import { getCliUsageReports } from '../../billing/cli-usage';
 import { getProviderBalances } from '../../billing/provider-balances';
+import type { ProviderBalance } from '../../billing/provider-balances';
 import { getContext } from '../../context';
 import { resolvePricing, SUBSCRIPTION_PROVIDERS } from '../../pricing';
-import { warmModelsDevCache } from '../../providers/models-dev';
+import { refreshModelsDevCache } from '../../providers/models-dev';
 import { discoverCliAccounts } from '../../providers/cli-accounts';
-import { requireLocalRouteAuth } from '../../auth/local-route-auth';
 import { createUserCredentialsService, type UserCredential } from '../../services';
 import { serverLog } from '../../logger';
 
 const LOCAL_USER_ID = 'local-user';
 const credentialsService = createUserCredentialsService();
+// The settings drawer must be useful immediately. Local CLI logs can be large
+// and balance endpoints are outside our control, so do not let either make a
+// navigation request hang indefinitely. Their work continues and is picked up
+// by the next short client poll.
+const LIVE_BILLING_BUDGET_MS = 2_400;
+
+function withinBillingBudget<T>(work: Promise<T>, fallback: T): Promise<{ value: T; refreshing: boolean }> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const budget = new Promise<{ value: T; refreshing: boolean }>((resolve) => {
+    timer = setTimeout(() => resolve({ value: fallback, refreshing: true }), LIVE_BILLING_BUDGET_MS);
+  });
+  return Promise.race([
+    work.then((value) => ({ value, refreshing: false })),
+    budget,
+  ]).finally(() => {
+    if (timer) clearTimeout(timer);
+  });
+}
+
+/**
+ * The dashboard headline is deliberately derived from the same live provider
+ * probes shown below it.  The previous implementation only used a separately
+ * polled OpenAI snapshot, so a successfully fetched OpenRouter (or other
+ * supported provider) balance still appeared as "Not reported".
+ */
+export function summarizeProviderBalances(balances: ProviderBalance[]) {
+  const reported = balances.filter((balance) => balance.availableUsd != null);
+  return {
+    availableCents: reported.length
+      ? Math.max(0, Math.round(reported.reduce((sum, balance) => sum + balance.availableUsd!, 0) * 100))
+      : null,
+    providers: reported.map((balance) => balance.provider),
+  };
+}
 
 function credentialMetadata(credential: UserCredential): { accountId?: string; label?: string } {
   if (credential.metadata && typeof credential.metadata === 'object') {
@@ -102,8 +137,7 @@ export function withDetectedCliAccounts(
 
 export const billingRoutes = new Elysia({ prefix: '/api/billing' }).get(
   '/credits',
-  async ({ request, set }) => {
-    if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
+  async ({ request }) => {
     const forceRefresh = new URL(request.url).searchParams.get('refresh') === '1';
     const safeResult = async <T>(name: string, work: () => Promise<T>, fallback: T): Promise<T> => {
       try {
@@ -113,9 +147,9 @@ export const billingRoutes = new Elysia({ prefix: '/api/billing' }).get(
         return fallback;
       }
     };
-    // Prices come from the live models.dev catalog — make sure it is loaded
-    // before computing anything (bounded to ~5s; falls back to static catalog).
-    await safeResult('models cache', () => warmModelsDevCache(), undefined);
+    // Pricing reads the last known catalog synchronously. Refresh it for a
+    // later visit, rather than blocking Billing on an unrelated network call.
+    refreshModelsDevCache();
 
     const reconciliation = await safeResult('reconciliation', async () => getReconciliation(), {
       localEstimate: { totalCostUsd: 0, tokensIn: 0, tokensOut: 0, byModel: [] },
@@ -137,12 +171,13 @@ export const billingRoutes = new Elysia({ prefix: '/api/billing' }).get(
       async () => getLocalTotalsByProvider(),
       [],
     )).filter((entry) => entry.provider !== 'gemini');
-    const byProvider = providerTotals.map((entry) => ({
+    const byProvider = providerTotals
+      .filter((entry) => !SUBSCRIPTION_PROVIDERS.has(entry.provider))
+      .map((entry) => ({
       name: entry.provider,
       spendCents: Math.round(entry.costUsd * 100),
       tokensIn: entry.tokensIn,
       tokensOut: entry.tokensOut,
-      subscription: SUBSCRIPTION_PROVIDERS.has(entry.provider),
     }));
     const meteredSpendUsd = providerTotals
       .filter((entry) => !SUBSCRIPTION_PROVIDERS.has(entry.provider))
@@ -156,31 +191,27 @@ export const billingRoutes = new Elysia({ prefix: '/api/billing' }).get(
       unpriced: m.costUsd === 0 && (m.tokensIn > 0 || m.tokensOut > 0) && resolvePricing('', m.model) == null,
     }));
 
-    const latestCloud = reconciliation.cloudReality.find((entry) => entry.totalAvailableUsd != null);
-    const remainingCents =
-      latestCloud?.totalAvailableUsd != null
-        ? Math.max(0, Math.round(latestCloud.totalAvailableUsd * 100))
-        : null;
-
     // Live balances for the providers that expose one to a normal API key.
     const configs = await safeResult('providerConfig', async () => getContext().providers.getConfigs(), {});
     const keys: Record<string, string | undefined> = {};
     for (const [name, cfg] of Object.entries(configs)) keys[name] = (cfg as { apiKey?: string }).apiKey;
-    const [cliUsage, balances, savedCredentials] = await Promise.all([
-      getCliUsageReports({
+    const cliUsageWork = safeResult(
+      'cliUsage',
+      () => getCliUsageReports({
         githubToken: (configs as Record<string, { authToken?: string }>).copilot?.authToken,
         forceRefresh,
       }),
-      safeResult('providerBalances', () => getProviderBalances(keys, { forceRefresh }), []),
+      [],
+    );
+    const balanceWork = safeResult('providerBalances', () => getProviderBalances(keys, { forceRefresh }), []);
+    const [cliUsageResult, balancesResult, savedCredentials] = await Promise.all([
+      withinBillingBudget(cliUsageWork, []),
+      withinBillingBudget(balanceWork, []),
       safeResult('savedCredentials', () => credentialsService.list(LOCAL_USER_ID, { isActive: true }), []),
     ]);
-    const subscriptionInferenceCents = Math.round(
-      cliUsage.reduce((sum, report) => {
-        const month = report.windows.find((window) => window.period === 'month');
-        return sum + (month?.inferenceValueUsd ?? 0);
-      }, 0) * 100,
-    );
-
+    const cliUsage = cliUsageResult.value;
+    const balances = balancesResult.value;
+    const providerBalance = summarizeProviderBalances(balances);
     const subscriptions = getSubscriptionStatuses().map((s) => ({
       provider: s.provider,
       status: s.status,
@@ -193,18 +224,30 @@ export const billingRoutes = new Elysia({ prefix: '/api/billing' }).get(
     return {
       ok: true,
       totalSpendCents: Math.round(meteredSpendUsd * 100),
-      subscriptionInferenceCents,
-      allSpendCents: Math.round(meteredSpendUsd * 100) + subscriptionInferenceCents,
-      remainingCents,
+      // This is an aggregate only across providers that returned a current,
+      // queryable API-key balance on this request. Subscription OAuth/CLI
+      // accounts are intentionally excluded: they do not publish a reliable
+      // dollar balance through these credentials.
+      remainingCents: providerBalance.availableCents,
+      balanceProviders: providerBalance.providers,
       byProvider,
       byModel,
       subscriptions,
       // Real local usage parsed from each CLI's own session logs: token
-      // windows (hour/day/week/month), quota % + resets, inference value.
+      // windows (hour/day/week/month) and quota % + resets. Subscription
+      // tokens are never converted into a made-up dollar charge.
       cliUsage,
       balances,
+      // Koryphaios-owned, future-only attribution. This never reads or writes
+      // external CLI histories and is the only safe per-account usage source
+      // when a user shares CODEX_HOME session storage.
+      koryAccountUsage: getKoryAccountUsage(),
       accounts: withDetectedCliAccounts(configuredAccounts(savedCredentials)),
       reconciliation,
+      // Signals the desktop client to make a lightweight follow-up request.
+      // This keeps initial navigation under three seconds without pretending
+      // an unfinished provider probe is a current balance.
+      refreshing: cliUsageResult.refreshing || balancesResult.refreshing,
     };
   },
 );

@@ -160,14 +160,21 @@
 		}
 	}
 
-	// Restart the entire desktop app (kills + relaunches the Tauri shell, which
-	// in turn respawns the embedded backend). Uses @tauri-apps/plugin-process
-	// relaunch() which is registered in the Tauri builder. In a plain browser
-	// there's no equivalent — fall back to reloading the page.
+	// Release builds own their embedded backend, so relaunching the Tauri app is
+	// the right recovery action. In desktop development the outer launcher owns
+	// the backend and Vite server; relaunching only the Tauri child disconnects
+	// it from that lifecycle and can reopen to a refused 127.0.0.1 connection.
+	// Keep the dev launcher alive and let its recovery watchdog restore the
+	// backend while this webview reloads.
 	let restarting = $state(false);
 	async function restartApp() {
 		if (restarting) return;
 		restarting = true;
+		if (import.meta.env.DEV) {
+			console.info('[Koryphaios] Reloading development webview; launcher retains backend recovery');
+			window.location.reload();
+			return;
+		}
 		const inTauri =
 			typeof window !== 'undefined' &&
 			('__TAURI_INTERNALS__' in window || '__TAURI__' in window);

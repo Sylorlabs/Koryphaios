@@ -147,22 +147,39 @@ function parsePathsOutput(output: string): string[] {
   return dirs;
 }
 
-/** Parse `devin models` output into model entries. The CLI prints a
- *  human-readable list; we extract id + display name heuristically. */
-function parseModelsOutput(output: string): DevinModelEntry[] {
+/** Parse `devin models list` output into model entries.
+ *
+ * The CLI groups entries under unindented family headings. Only indented rows
+ * are selectable model IDs; accepting every line accidentally turned family
+ * names, aliases, and even `devin models` help text into fake models.
+ */
+export function parseDevinModelsOutput(output: string): DevinModelEntry[] {
+  // `devin models` (without `list`) prints command help whose indented
+  // subcommands resemble model rows. The list command identifies its catalog
+  // explicitly; fail closed if that marker is absent.
+  if (!/^Available models \(\d+ families\)\s*$/mi.test(output)) return [];
   const models: DevinModelEntry[] = [];
   const seen = new Set<string>();
   for (const raw of output.split('\n')) {
+    // Entries are indented. Headings such as "Claude Opus 5 (...)" are not.
+    if (!/^\s+\S/.test(raw)) continue;
     const line = raw.trim();
-    if (!line) continue;
-    // Common forms: "  swe-1.6-slow   SWE-1.6 Slow" or "  • opus (Claude Opus …)".
-    // Pull the first token as the id and the rest as the name.
-    const m = line.match(/^[-*•]?\s*([A-Za-z0-9][A-Za-z0-9._-]*)\s*(.*)$/);
+    if (!line || /^aliases:\s*/i.test(line)) continue;
+    // Rows look like: "gpt-5-6-sol-medium  GPT-5.6 Sol Medium [1M context]".
+    // The CLI also exposes stable uppercase enum IDs for older model families.
+    const m = line.match(/^([A-Za-z0-9][A-Za-z0-9._-]*)\s{2,}(.+?)(?:\s{2,}\[(.*)\])?\s*$/);
     if (!m) continue;
     const id = m[1];
     if (seen.has(id) || id.length > 80) continue;
     seen.add(id);
-    models.push({ id, name: (m[2] || id).trim() });
+    const context = m[3]?.match(/([\d.]+)\s*([kKmM])?\s+context/i);
+    const amount = context ? Number(context[1]) : undefined;
+    const multiplier = context?.[2]?.toLowerCase() === 'm' ? 1_000_000 : context?.[2]?.toLowerCase() === 'k' ? 1_000 : 1;
+    models.push({
+      id,
+      name: (m[2] || id).trim(),
+      ...(amount && Number.isFinite(amount) ? { contextWindow: Math.round(amount * multiplier) } : {}),
+    });
   }
   return models;
 }
@@ -210,7 +227,7 @@ async function probeCapabilities(): Promise<DevinCapabilities> {
   const [rulesResult, skillsResult, modelsResult] = await Promise.all([
     subs.supportsRules ? runCli(['rules', 'paths'], PROBE_TIMEOUT_MS) : Promise.resolve({ stdout: '', stderr: '', code: -1 }),
     subs.supportsSkills ? runCli(['skills', 'paths'], PROBE_TIMEOUT_MS) : Promise.resolve({ stdout: '', stderr: '', code: -1 }),
-    runCli(['models'], MODELS_TIMEOUT_MS),
+    runCli(['models', 'list'], MODELS_TIMEOUT_MS),
   ]);
 
   const caps: DevinCapabilities = {
@@ -221,7 +238,7 @@ async function probeCapabilities(): Promise<DevinCapabilities> {
     ...subs,
     rulesDirs: parsePathsOutput(rulesResult.stdout),
     skillsDirs: parsePathsOutput(skillsResult.stdout),
-    models: parseModelsOutput(modelsResult.stdout),
+    models: parseDevinModelsOutput(modelsResult.stdout),
     probedAt: Date.now(),
   };
   providerLog.info(

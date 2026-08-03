@@ -6,10 +6,18 @@ export type GoalItemStatus = 'pending' | 'running' | 'completed' | 'blocked' | '
 export interface GoalEvidence { id: string; kind: 'check' | 'artifact' | 'note'; value: string; verified: boolean; createdAt: number; }
 export interface GoalChecklistItem { id: string; title: string; status: GoalItemStatus; order: number; dependsOn: string[]; evidence: GoalEvidence[]; startedAt?: number; completedAt?: number; }
 export interface GoalActivity { id: string; type: string; message: string; createdAt: number; sessionId?: string; }
+export interface GoalExecutionConfig {
+  sessionId: string;
+  provider: string;
+  model: string;
+  reasoningLevel?: string;
+  remotePlanApproved?: boolean;
+}
 export interface Goal {
   id: string; objective: string; scope: GoalScope; projectPath?: string; sessionId?: string;
   priority: number; sortOrder: number; status: GoalStatus; checklist: GoalChecklistItem[];
   linkedSessionIds: string[]; activity: GoalActivity[]; blocker?: string;
+  execution?: GoalExecutionConfig;
   activeDurationMs: number; activeStartedAt?: number; createdAt: number; updatedAt: number;
 }
 

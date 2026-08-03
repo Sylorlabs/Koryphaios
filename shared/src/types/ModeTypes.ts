@@ -5,8 +5,6 @@
 export type UIMode = 'beginner' | 'advanced';
 
 export interface ModeConfig {
-  /** Hide all Git UI elements */
-  hideGitPanel: boolean;
   /** Automatically commit changes (beginner) or manual (advanced) */
   autoCommit: boolean;
   /** Use simplified, friendly prompts */

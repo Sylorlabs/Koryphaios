@@ -14,6 +14,7 @@ export interface ProviderBalance {
 }
 
 const cache = new Map<string, { at: number; value: ProviderBalance | null }>();
+const inFlight = new Map<string, Promise<ProviderBalance | null>>();
 const CACHE_TTL_MS = 5 * 60_000;
 const TIMEOUT_MS = 6_000;
 
@@ -93,14 +94,23 @@ export async function getProviderBalances(
     .map(async ([name, fetcher]) => {
       const hit = cache.get(name);
       if (!opts?.forceRefresh && hit && Date.now() - hit.at < CACHE_TTL_MS) return hit.value;
-      try {
-        const value = await fetcher(keys[name]!);
-        cache.set(name, { at: Date.now(), value });
-        return value;
-      } catch {
-        cache.set(name, { at: Date.now(), value: null });
-        return null;
+      let request = inFlight.get(name);
+      if (!request) {
+        request = fetcher(keys[name]!)
+          .then((value) => {
+            cache.set(name, { at: Date.now(), value });
+            return value;
+          })
+          .catch(() => {
+            cache.set(name, { at: Date.now(), value: null });
+            return null;
+          })
+          .finally(() => {
+            inFlight.delete(name);
+          });
+        inFlight.set(name, request);
       }
+      return request;
     });
   return (await Promise.all(jobs)).filter((b): b is ProviderBalance => b != null);
 }

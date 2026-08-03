@@ -41,10 +41,24 @@
     }
   }
 
+  function hasExpandedShell() {
+    return Object.values(expanded).some(Boolean);
+  }
+
   onMount(() => {
     void refresh();
-    const timer = setInterval(() => void refresh(), 2500);
-    return () => clearInterval(timer);
+    const onVisibility = () => {
+      if (!document.hidden) void refresh();
+    };
+    const timer = setInterval(() => {
+      if (document.hidden || !hasExpandedShell()) return;
+      void refresh();
+    }, 2500);
+    document.addEventListener('visibilitychange', onVisibility);
+    return () => {
+      clearInterval(timer);
+      document.removeEventListener('visibilitychange', onVisibility);
+    };
   });
 </script>
 

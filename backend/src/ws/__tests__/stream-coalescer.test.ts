@@ -12,6 +12,16 @@ function delta(sessionId: string, agentId: string, content: string): WSMessage {
   };
 }
 
+function thinking(sessionId: string, agentId: string, text: string): WSMessage {
+  return {
+    type: 'stream.thinking',
+    sessionId,
+    agentId: 'kory-manager',
+    timestamp: Date.now(),
+    payload: { agentId, thinking: text },
+  };
+}
+
 describe('StreamCoalescer', () => {
   test('coalesces stream.delta chunks for the same agent', async () => {
     const published: WSMessage[] = [];
@@ -30,22 +40,33 @@ describe('StreamCoalescer', () => {
     const published: WSMessage[] = [];
     const coalescer = new StreamCoalescer((msg) => published.push(msg));
 
-    const thinking = (text: string): WSMessage => ({
-      type: 'stream.thinking',
-      sessionId: 's1',
-      agentId: 'kory-manager',
-      timestamp: Date.now(),
-      payload: { agentId: 'a1', thinking: text },
-    });
-
-    coalescer.enqueue(thinking('Let me '));
-    coalescer.enqueue(thinking('think about this'));
+    coalescer.enqueue(thinking('s1', 'a1', 'Let me '));
+    coalescer.enqueue(thinking('s1', 'a1', 'think about this'));
     coalescer.flushAll();
 
     expect(published.length).toBe(1);
     const payload = published[0].payload as { thinking: string; content?: string };
     expect(payload.thinking).toBe('Let me think about this');
     expect(payload.content).toBeUndefined();
+  });
+
+  test('flushes each reasoning/content phase before the next phase can overtake it', () => {
+    const published: WSMessage[] = [];
+    const coalescer = new StreamCoalescer((msg) => published.push(msg));
+
+    coalescer.enqueue(thinking('s1', 'a1', 'reasoning'));
+    coalescer.enqueue(delta('s1', 'a1', 'answer'));
+    expect(published.map((message) => message.type)).toEqual(['stream.thinking']);
+
+    coalescer.enqueue(thinking('s1', 'a1', 'more reasoning'));
+    expect(published.map((message) => message.type)).toEqual(['stream.thinking', 'stream.delta']);
+
+    coalescer.flushAll();
+    expect(published.map((message) => message.type)).toEqual([
+      'stream.thinking',
+      'stream.delta',
+      'stream.thinking',
+    ]);
   });
 
   test('does not merge chunks across different sessions', () => {

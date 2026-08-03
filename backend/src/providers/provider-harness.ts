@@ -33,18 +33,11 @@ const NATIVE_PROVIDERS = new Set([
   'kimicode',
 ]);
 
-// These harnesses execute their own CLI tools. They can report completed native
-// actions, but cannot receive or return Kory's structured tool protocol. Do not
-// offer Kory control-plane tools (especially delegation) until an adapter adds a
-// real bridge like the Codex CLI envelope bridge.
+// These harnesses execute their own CLI tools but do not yet have either a
+// Kory MCP server or a structured callback envelope. Providers wired through
+// buildKoryCliMcpServer() are deliberately absent from this deny-list.
 const NATIVE_PROVIDERS_WITHOUT_KORY_TOOL_BRIDGE = new Set([
-  'claude',
-  'grok',
-  'antigravity',
   'gemini-cli',
-  'cursor',
-  'devin',
-  'cline',
 ]);
 
 export function supportsKoryControlPlaneTools(provider: ProviderName | string): boolean {

@@ -3,16 +3,12 @@
   import { onMount } from 'svelte';
   import { ChevronLeft, ChevronRight, StickyNote } from 'lucide-svelte';
   import SessionSidebar from '$lib/components/SessionSidebar.svelte';
-  import NoGitWarning from '$lib/components/NoGitWarning.svelte';
   import FileEditPreview from '$lib/components/FileEditPreview.svelte';
   import NotesPanel from '$lib/components/NotesPanel.svelte';
-  import SourceControlPanel from '$lib/components/SourceControlPanel.svelte';
-  import { modeStore } from '$lib/stores/mode.svelte';
 
   let {
     showSidebar = true,
     zenMode = false,
-    showGit = false,
     showNotes = false,
     activeSessionId = null,
     connectionDot = 'bg-red-500',
@@ -32,7 +28,6 @@
   }: {
     showSidebar?: boolean;
     zenMode?: boolean;
-    showGit?: boolean;
     showNotes?: boolean;
     activeSessionId?: string | null | undefined;
     connectionDot?: string;
@@ -142,7 +137,6 @@
         </button>
       </div>
 
-      <NoGitWarning />
 
       <div class="flex-1 min-h-0 overflow-hidden">
         <SessionSidebar currentSessionId={activeSessionId ?? undefined} />
@@ -251,19 +245,5 @@
       </div>
     </div>
 
-    {#if !zenMode && showGit && modeStore.showGitPanel}
-      <aside
-        class="border-l shrink-0 min-h-0"
-        style="
-          width: var(--git-panel-width);
-          max-width: var(--git-panel-max-width);
-          min-width: var(--git-panel-min-width);
-          border-color: var(--color-border);
-          background: var(--color-surface-1);
-        "
-      >
-        <SourceControlPanel />
-      </aside>
-    {/if}
   </div>
 </div>

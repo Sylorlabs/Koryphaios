@@ -118,12 +118,16 @@ export class FileWatcher extends EventEmitter {
   }
 
   async close(): Promise<void> {
-    if (this.watcher) {
-      await this.watcher.close();
-      this.watcher = null;
-      this.watchedPaths.clear();
-      this.createReadyPromise();
-    }
+    const watcher = this.watcher;
+    if (!watcher) return;
+
+    // Make the public state immediately truthful. Callers often close a
+    // watcher during shutdown without awaiting the I/O cleanup; keeping the
+    // old watcher visible in that interval permits accidental re-use.
+    this.watcher = null;
+    this.watchedPaths.clear();
+    this.createReadyPromise();
+    await watcher.close();
   }
 
   getWatchedPaths(): string[] {

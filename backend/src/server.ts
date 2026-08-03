@@ -1,6 +1,11 @@
 // Koryphaios Backend Server — Bun HTTP + WebSocket server.
 // Main entry point via ElysiaJS.
 
+// Some bundled dependencies initialise tsyringe at module load. In a compiled
+// desktop backend this must run before any application import, otherwise the
+// sidecar exits before it can serve its health endpoint.
+import 'reflect-metadata';
+
 import { Elysia, t } from 'elysia';
 import { cors } from '@elysiajs/cors';
 import { nanoid } from 'nanoid';
@@ -21,6 +26,7 @@ import { validateLocalBearerToken } from './auth/local-route-auth';
 import { serveMcp } from './mcp/koryphaios-mcp-endpoint';
 import { getDb } from './db';
 import { shutdownAllBrokers } from './pubsub';
+import { startEventLoopMonitor, stopEventLoopMonitor } from './monitoring/event-loop-monitor';
 
 // Routes
 import { sessionRoutes } from './routes/v1/sessions';
@@ -28,10 +34,10 @@ import { messageRoutes } from './routes/v1/messages';
 import { providerRoutes } from './routes/v1/providers';
 import { collaborationRoutes } from './routes/collaboration';
 import { authRoutes } from './routes/v1/auth';
+import { applyAuthGuard } from './auth/elysia-auth-guard';
 import { agentSettingsRoutes } from './routes/v1/agent-settings';
 import { gitRoutes } from './routes/v1/git';
 import { memoryRoutes } from './routes/v1/memory';
-import { modeRoutes } from './routes/v1/mode';
 import { spendRoutes } from './routes/v1/spend';
 import { spendCapsRoutes } from './routes/v1/spend-caps';
 import { billingRoutes } from './routes/v1/billing';
@@ -76,15 +82,35 @@ const baseApp = new Elysia()
     return { ok: true, data: { projectName } };
   })
   .post('/api/debug/log-error', () => ({ ok: true }))
+  // Auth routes must be registered BEFORE the auth guard so they're
+  // accessible without authentication (login, status, etc.).
+  .use(authRoutes)
+  // The auth guard authenticates every request in the routes below.
+  // Individual routes no longer need `requireLocalRouteAuth` checks.
+  // IMPORTANT: Elysia 1.4.x does NOT short-circuit when `.guard()` is in a
+  // `.use()`d plugin, so the guard MUST be applied inline via `applyAuthGuard`.
+  .derive(({ request }) => ({
+    session: validateLocalBearerToken(request.headers.get('authorization')) as import('./auth/local-auth').SessionToken | null,
+  }))
+  .guard({
+    beforeHandle: ({ request, set, session }: any) => {
+      const url = new URL(request.url);
+      // Skip auth for health checks and auth endpoints.
+      const UNAUTHED_PATHS = new Set(['/api/health', '/api/auth/login', '/api/auth/status', '/api/auth/me']);
+      if (UNAUTHED_PATHS.has(url.pathname)) return;
+      if (!session) {
+        set.status = 401;
+        return { ok: false, error: 'Unauthorized' };
+      }
+    },
+  })
   .use(sessionRoutes)
   .use(messageRoutes)
   .use(providerRoutes)
   .use(collaborationRoutes)
-  .use(authRoutes)
   .use(agentSettingsRoutes)
   .use(gitRoutes)
   .use(memoryRoutes)
-  .use(modeRoutes)
   .use(spendRoutes)
   .use(spendCapsRoutes)
   .use(billingRoutes)
@@ -132,7 +158,7 @@ async function main() {
   const runningApp = new Elysia()
     .use(
       cors({
-        origin: config.corsOrigins?.length ? config.corsOrigins : undefined,
+        origin: config.corsOrigins?.length ? config.corsOrigins : false,
       }),
     )
     .onRequest(({ request, set }) => {
@@ -168,121 +194,142 @@ async function main() {
 
   // ─── Start Server ───────────────────────────────────────────────────────────
 
-  // Try the requested port; if it's already in use (EADDRINUSE), automatically
-  // scan upward for a free port. This prevents the backend from crashing when
-  // a stale process is still holding the default port — the desktop app and
-  // frontend discover the actual port via .active-port.json.
+  // Try the requested port; if it's already in use (EADDRINUSE), retry with
+  // the next port. This prevents the backend from crashing when a stale
+  // process is still holding the default port — the desktop app and frontend
+  // discover the actual port via .active-port.json.
   //
-  // Bun.serve() throws EADDRINUSE asynchronously (outside any try/catch), so
-  // we pre-check the port with a TCP probe using node:net before binding.
-  const { createServer: createTcpServer } = await import('node:net');
+  // Binding directly with Bun.serve and catching EADDRINUSE avoids the
+  // TOCTOU race of a separate TCP probe: the probe can pass and the real
+  // bind can still fail. A bounded retry (10 attempts) keeps startup fast.
+  const MAX_PORT_ATTEMPTS = 10;
+  let actualPort = serverConfig.port;
+  let server: Server<WSClientData>;
+  let lastError: unknown;
+  for (let attempt = 0; attempt < MAX_PORT_ATTEMPTS; attempt++) {
+    try {
+      server = Bun.serve<WSClientData>({
+        port: actualPort,
+        hostname: serverConfig.host,
+        async fetch(req, srv) {
+          const url = new URL(req.url);
 
-  function isPortFree(port: number, host: string): Promise<boolean> {
-    return new Promise((resolve) => {
-      const tester = createTcpServer();
-      tester.once('error', () => resolve(false));
-      tester.once('listening', () => {
-        tester.close(() => resolve(true));
-      });
-      tester.listen(port, host);
-    });
-  }
+          // 1. WebSocket upgrade
+          if (url.pathname === '/ws') {
+            const rateLimited = checkRateLimit(req);
+            if (rateLimited) return rateLimited;
 
-  async function findFreePort(startPort: number, host: string): Promise<number> {
-    for (let p = startPort; p <= 65_535; p++) {
-      if (await isPortFree(p, host)) return p;
-    }
-    return startPort; // give up; let Bun.serve throw the real error
-  }
+            const protocols =
+              req.headers
+                .get('sec-websocket-protocol')
+                ?.split(',')
+                .map((s) => s.trim()) || [];
+            // First protocol is usually 'koryphaios', second is the token.
+            // The token must come from the subprotocol header, never the
+            // query string — query strings land in proxy logs, browser
+            // history, and referrer headers.
+            const authToken = protocols.length > 1 ? protocols[1] : null;
 
-  const actualPort = await findFreePort(serverConfig.port, serverConfig.host);
-  if (actualPort !== serverConfig.port) {
-    serverLog.warn(
-      { requestedPort: serverConfig.port, actualPort },
-      'Requested port in use, using next available port',
-    );
-  }
-
-  const server = Bun.serve<WSClientData>({
-    port: actualPort,
-    hostname: serverConfig.host,
-    async fetch(req, srv) {
-      const url = new URL(req.url);
-
-      // 1. WebSocket upgrade
-      if (url.pathname === '/ws') {
-        const protocols =
-          req.headers
-            .get('sec-websocket-protocol')
-            ?.split(',')
-            .map((s) => s.trim()) || [];
-        // First protocol is usually 'koryphaios', second is the token
-        const authToken = protocols.length > 1 ? protocols[1] : url.searchParams.get('auth');
-
-        const authSession = validateLocalBearerToken(authToken);
-        if (!authSession) {
-          return new Response(
-            JSON.stringify({ ok: false, error: 'Unauthorized WebSocket request' }),
-            {
-              status: 401,
+            const authSession = validateLocalBearerToken(authToken);
+            if (!authSession) {
+              return new Response(
+                JSON.stringify({ ok: false, error: 'Unauthorized WebSocket request' }),
+                {
+                  status: 401,
+                  headers: { 'Content-Type': 'application/json' },
+                },
+              );
+            }
+            const upgraded = srv.upgrade(req, {
+              data: { id: nanoid(ID.WS_CLIENT_ID_LENGTH), userId: authSession.id },
+            });
+            if (upgraded) return undefined;
+            return new Response(JSON.stringify({ ok: false, error: 'WebSocket upgrade failed' }), {
+              status: 400,
               headers: { 'Content-Type': 'application/json' },
-            },
+            });
+          }
+
+          // 1b. MCP endpoint — Koryphaios's own tools (notes/memory) for any
+          // MCP-capable CLI harness (grok, claude-code, codex…).
+          if (url.pathname === '/mcp') {
+            const rateLimited = checkRateLimit(req);
+            if (rateLimited) return rateLimited;
+
+            return serveMcp(req, PROJECT_ROOT, (t) => !!validateLocalBearerToken(t));
+          }
+
+          // 2. API Routes
+          if (url.pathname.startsWith('/api')) {
+            return runningApp.handle(req);
+          }
+
+          // 3. Static Frontend Files — packaged app ships the build as a Tauri
+          // resource and points KORYPHAIOS_FRONTEND_DIST at it; dev serves the
+          // repo's build output. Same server either way: one app, one origin.
+          const frontendBuildDir = resolve(
+            process.env.KORYPHAIOS_FRONTEND_DIST?.trim() ||
+              join(PROJECT_ROOT, 'frontend', 'build', 'client'),
           );
-        }
-        const upgraded = srv.upgrade(req, {
-          data: { id: nanoid(ID.WS_CLIENT_ID_LENGTH), userId: authSession.id },
-        });
-        if (upgraded) return undefined;
-        return new Response(JSON.stringify({ ok: false, error: 'WebSocket upgrade failed' }), {
-          status: 400,
-          headers: { 'Content-Type': 'application/json' },
-        });
-      }
+          let filePath = resolve(join(frontendBuildDir, url.pathname));
 
-      // 1b. MCP endpoint — Koryphaios's own tools (notes/memory) for any
-      // MCP-capable CLI harness (grok, claude-code, codex…).
-      if (url.pathname === '/mcp') {
-        return serveMcp(req, PROJECT_ROOT, (t) => !!validateLocalBearerToken(t));
-      }
+          if (url.pathname === '/' || url.pathname.endsWith('/')) {
+            filePath = join(frontendBuildDir, 'index.html');
+          }
 
-      // 2. API Routes
-      if (url.pathname.startsWith('/api')) {
-        return runningApp.handle(req);
-      }
+          if (!filePath.startsWith(frontendBuildDir)) {
+            return new Response('Forbidden', { status: 403 });
+          }
 
-      // 3. Static Frontend Files — packaged app ships the build as a Tauri
-      // resource and points KORYPHAIOS_FRONTEND_DIST at it; dev serves the
-      // repo's build output. Same server either way: one app, one origin.
-      const frontendBuildDir = resolve(
-        process.env.KORYPHAIOS_FRONTEND_DIST?.trim() ||
-          join(PROJECT_ROOT, 'frontend', 'build', 'client'),
+          let file = Bun.file(filePath);
+          if (await file.exists()) {
+            return new Response(file);
+          }
+
+          // 4. SPA Fallback (Routing handled by frontend)
+          const indexHtml = Bun.file(join(frontendBuildDir, 'index.html'));
+          if (await indexHtml.exists()) {
+            return new Response(indexHtml);
+          }
+
+          // 5. Final Fallback
+          return new Response('Not Found', { status: 404 });
+        },
+        websocket: createWebSocketHandlers({ wsManager, sessions, kory, providers }),
+      });
+      lastError = null;
+      break;
+    } catch (err) {
+      lastError = err;
+      const code = (err as { code?: string } | null)?.code;
+      const message = err instanceof Error ? err.message : String(err);
+      const isAddrInUse = code === 'EADDRINUSE' || /EADDRINUSE/i.test(message);
+      if (!isAddrInUse || attempt === MAX_PORT_ATTEMPTS - 1) throw err;
+      serverLog.warn(
+        { port: actualPort, attempt: attempt + 1 },
+        'Port in use, retrying with next port',
       );
-      let filePath = resolve(join(frontendBuildDir, url.pathname));
+      actualPort++;
+    }
+  }
+  if (lastError) throw lastError;
 
-      if (url.pathname === '/' || url.pathname.endsWith('/')) {
-        filePath = join(frontendBuildDir, 'index.html');
-      }
-
-      if (!filePath.startsWith(frontendBuildDir)) {
-        return new Response('Forbidden', { status: 403 });
-      }
-
-      let file = Bun.file(filePath);
-      if (await file.exists()) {
-        return new Response(file);
-      }
-
-      // 4. SPA Fallback (Routing handled by frontend)
-      const indexHtml = Bun.file(join(frontendBuildDir, 'index.html'));
-      if (await indexHtml.exists()) {
-        return new Response(indexHtml);
-      }
-
-      // 5. Final Fallback
-      return new Response('Not Found', { status: 404 });
-    },
-    websocket: createWebSocketHandlers({ wsManager, sessions, kory, providers }),
-  });
+  // Returns a 429 Response when the caller exceeds the rate limit, or null
+  // when the request is allowed. Mirrors the onRequest handler's logic so
+  // /ws and /mcp — which bypass runningApp — are throttled the same way.
+  function checkRateLimit(req: Request): Response | null {
+    const forwardedFor = req.headers.get('x-forwarded-for');
+    if (isLoopbackServer && !forwardedFor) return null;
+    const clientIp = (forwardedFor ?? 'local').split(',')[0].trim();
+    const rateCheck = rateLimiter.check(clientIp);
+    if (!rateCheck.allowed) {
+      return new Response(JSON.stringify({ ok: false, error: 'Rate limit exceeded' }), {
+        status: 429,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
+    return null;
+  }
 
   const clientHost = serverConfig.host === '0.0.0.0' ? '127.0.0.1' : serverConfig.host;
   const activePortPath = join(PROJECT_ROOT, '.koryphaios', '.active-port.json');
@@ -309,6 +356,10 @@ async function main() {
 
   serverLog.info({ host: serverConfig.host, port: actualPort }, 'Server running');
 
+  // Start the event-loop block detector so future hangs leave a heartbeat
+  // gap in the direct file log, pinpointing when the synchronous block began.
+  startEventLoopMonitor();
+
   function clearActivePortFile() {
     try {
       const active = JSON.parse(readFileSync(activePortPath, 'utf-8')) as { pid?: number };
@@ -322,7 +373,13 @@ async function main() {
   // ─── Graceful Shutdown ──────────────────────────────────────────────────
   async function gracefulShutdown(signal: string) {
     serverLog.info({ signal }, 'Graceful shutdown');
-    server.stop(true);
+    stopEventLoopMonitor();
+    // Two-phase shutdown: stop accepting new connections and let in-flight
+    // requests finish, but force-close after a deadline so a stuck client
+    // can't hang shutdown indefinitely.
+    const forceTimer = setTimeout(() => server.stop(true), 5000);
+    server.stop(false);
+    clearTimeout(forceTimer);
     clearActivePortFile();
     kory.cancel();
     shutdownAllBrokers();
@@ -336,6 +393,20 @@ async function main() {
 
   process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
   process.on('SIGINT', () => gracefulShutdown('SIGINT'));
+
+  // Log uncaught errors so backend crashes leave a trace instead of dying
+  // silently (the Bun VM "NeedDebuggerBreak trap" crashes produced zero log
+  // output before this handler existed). A stateful backend with open DB
+  // handles and in-memory session maps cannot safely continue after an
+  // uncaught exception, so exit and let the desktop supervisor restart it.
+  process.on('uncaughtException', (err) => {
+    serverLog.fatal(err, 'Uncaught exception — backend may be in an inconsistent state');
+    process.exit(1);
+  });
+  process.on('unhandledRejection', (reason) => {
+    serverLog.fatal({ reason }, 'Unhandled promise rejection');
+    process.exit(1);
+  });
 }
 
 main().catch((err) => {

@@ -1,5 +1,6 @@
 import { DELIVERY_SKILL_PLAYBOOKS } from './skill-playbook-delivery';
 import { EXPERIENCE_SKILL_PLAYBOOKS } from './skill-playbook-experience';
+import { FOUNDATION_SKILL_PLAYBOOKS } from './skill-playbook-foundations';
 import { RESEARCH_RISK_SKILL_PLAYBOOKS } from './skill-playbook-research-risk';
 
 /**
@@ -7,6 +8,12 @@ import { RESEARCH_RISK_SKILL_PLAYBOOKS } from './skill-playbook-research-risk';
  * resolver loads only the chosen skill's playbook, never an entire discipline.
  */
 export const SKILL_PLAYBOOKS: Readonly<Record<string, string>> = {
+  ...Object.fromEntries(
+    Object.entries(FOUNDATION_SKILL_PLAYBOOKS).map(([name, content]) => [
+      name,
+      `## Professional practice\n\n${content}`,
+    ]),
+  ),
   ...Object.fromEntries(
     Object.entries(EXPERIENCE_SKILL_PLAYBOOKS).map(([name, playbook]) => [
       name,

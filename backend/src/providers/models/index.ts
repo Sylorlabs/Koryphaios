@@ -125,6 +125,15 @@ export function getModelsForProvider(providerName: ProviderName): ModelDef[] {
       provider: 'aistudio' as ProviderName,
     }));
   }
+  // ChatGPT-managed Codex and the installed Codex CLI access the same Codex
+  // model family. Authentication and allowance are separate, but model
+  // metadata must not disagree between the two connection surfaces.
+  if (providerName === 'codex-auth') {
+    return CodexModels.map((model) => ({
+      ...model,
+      provider: 'codex-auth' as ProviderName,
+    }));
+  }
   return ALL_MODELS.filter((m) => m.provider === providerName);
 }
 
@@ -191,7 +200,18 @@ export function resolveTrustedContextWindow(
     return { contextWindow: live.contextWindow, contextKnown: true, contextSource: 'live' };
   }
 
-  const model = resolveModelForProvider(modelId, provider);
+  // CLI providers can expose account-scoped IDs while preserving the real ID
+  // in apiModelId (for example codex-account:<account>:gpt-5.6-sol). Keep the
+  // fallback provider-scoped: a shared ID must never borrow another provider's
+  // context metadata.
+  const providerModels = getModelsForProvider(provider);
+  const model =
+    resolveModelForProvider(modelId, provider) ??
+    providerModels.find(
+      (candidate) =>
+        candidate.apiModelId === modelId ||
+        (provider === 'codex' && !!candidate.apiModelId && modelId.endsWith(`:${candidate.apiModelId}`)),
+    );
   if (!model) return { contextKnown: false };
   if (model.isGeneric) return { contextKnown: false };
 

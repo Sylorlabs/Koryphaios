@@ -27,6 +27,11 @@ export type WSEventType =
   | 'session.deleted'
   | 'session.changes'
   | 'session.accept_changes'
+  | 'session.user_message'
+  | 'session.cursor'
+  | 'session.replay'
+  | 'session.integrity_error'
+  | 'session.idle'
   // Permission events
   | 'permission.request'
   | 'permission.response'
@@ -62,6 +67,14 @@ export interface WSMessage<T = unknown> {
   timestamp: number;
   sessionId?: string;
   agentId?: string;
+  /** Durable total order within one session epoch. Unscoped control events omit it. */
+  sequence?: number;
+  /** Changes only when a session timeline is explicitly rewritten. */
+  epoch?: number;
+  /** Stable idempotency key for duplicate delivery/replay. */
+  eventId?: string;
+  /** Sequence of the prerequisite event, for causally dependent events. */
+  parentSequence?: number;
 }
 
 export type WSMessagePayload =
@@ -90,7 +103,8 @@ export type WSMessagePayload =
 
   // System payloads
   | ErrorPayload
-  | NotificationPayload;
+  | NotificationPayload
+  | SystemInfoPayload;
 
 // Re-export commonly used payload types
 import type {
@@ -111,6 +125,7 @@ import type {
   StreamToolResultPayload,
   ErrorPayload,
   NotificationPayload,
+  SystemInfoPayload,
   KorySessionChangesPayload,
   RateLimitPayload,
 } from './WSPayloads';

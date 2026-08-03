@@ -98,27 +98,29 @@ describe('Git Workflow Integration Tests', () => {
       expect(status.length).toBe(0); // No uncommitted changes
     });
 
-    test('should rollback to previous hash', async () => {
+    test('should reject only session files while preserving pre-existing and unrelated work', async () => {
       const git = new GitManager(TEST_DIR);
+      const readmePath = join(TEST_DIR, 'README.md');
+      const originalReadme = readFileSync(readmePath, 'utf8');
+      writeFileSync(readmePath, '# User work before session');
+      const checkpoint = await git.createWorktreeCheckpoint();
+      expect(checkpoint).toBeDefined();
 
-      // Get current hash (getCurrentHash is async — must await, else a Promise leaks into rollback)
-      const originalHash = await git.getCurrentHash();
-      expect(originalHash).toBeDefined();
+      writeFileSync(readmePath, '# Agent edit');
+      writeFileSync(join(TEST_DIR, 'session-created.txt'), 'agent file');
+      writeFileSync(join(TEST_DIR, 'unrelated-current.txt'), 'keep me');
 
-      // Create and commit a new file
-      writeFileSync(join(TEST_DIR, 'rollback-test.txt'), 'This will be rolled back');
-      await git.stageFile('rollback-test.txt');
-      await git.commit('Add file to rollback');
-
-      // Verify file exists
-      expect(existsSync(join(TEST_DIR, 'rollback-test.txt'))).toBe(true);
-
-      // Rollback
-      const rolledBack = await git.rollback(originalHash!);
+      const rolledBack = await git.rollbackFiles(checkpoint!, [
+        { path: readmePath, operation: 'edit' },
+        { path: join(TEST_DIR, 'session-created.txt'), operation: 'create' },
+      ]);
       expect(rolledBack).toBe(true);
+      expect(readFileSync(readmePath, 'utf8')).toBe('# User work before session');
+      expect(existsSync(join(TEST_DIR, 'session-created.txt'))).toBe(false);
+      expect(readFileSync(join(TEST_DIR, 'unrelated-current.txt'), 'utf8')).toBe('keep me');
 
-      // Verify file is gone
-      expect(existsSync(join(TEST_DIR, 'rollback-test.txt'))).toBe(false);
+      writeFileSync(readmePath, originalReadme);
+      rmSync(join(TEST_DIR, 'unrelated-current.txt'), { force: true });
     });
   });
 

@@ -15,7 +15,8 @@
     "notification:default",
     "process:default",
     "process:allow-restart",
-    "clipboard-manager:default"
+    "clipboard-manager:default",
+    "clipboard-manager:allow-read-image"
   ],
   "remote": {
     "urls": [

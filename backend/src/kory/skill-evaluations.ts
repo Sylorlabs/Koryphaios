@@ -35,6 +35,8 @@ export interface SkillPromotionGate {
   status: 'unmeasured' | 'insufficient-evidence' | 'blocked' | 'ready';
   candidateRuns: number;
   distinctHarnesses: number;
+  distinctProviders: number;
+  distinctModels: number;
   humanBlindReviews: number;
   passRate: number | null;
   quality: number | null;
@@ -142,6 +144,8 @@ export function evaluateSkillPromotion(
       status: 'unmeasured',
       candidateRuns: 0,
       distinctHarnesses: 0,
+      distinctProviders: 0,
+      distinctModels: 0,
       humanBlindReviews: 0,
       passRate: null,
       quality: null,
@@ -157,6 +161,8 @@ export function evaluateSkillPromotion(
   const distinctHarnesses = new Set(
     runs.map((run) => `${run.provider}:${run.model}:${run.harnessVersion}`),
   ).size;
+  const distinctProviders = new Set(runs.map((run) => run.provider)).size;
+  const distinctModels = new Set(runs.map((run) => `${run.provider}:${run.model}`)).size;
   const baseline = baselineHash ? allRuns.filter((run) => run.revisionHash === baselineHash) : [];
   const baselineScore = baseline.length
     ? mean(
@@ -171,6 +177,10 @@ export function evaluateSkillPromotion(
   if (runs.some((run) => run.integrityFailure))
     reasons.push('At least one run recorded an integrity failure.');
   if (runs.length < 3) reasons.push('At least three observed runs are required.');
+  if (distinctProviders < 2)
+    reasons.push('At least two provider families are required for cross-model evidence.');
+  if (distinctModels < 2)
+    reasons.push('At least two distinct provider/model combinations are required.');
   if (!humanBlindReviews) reasons.push('At least one blinded human review is required.');
   if (passRate < 0.8) reasons.push('Observed pass rate is below 80%.');
   if (verification < 0.8) reasons.push('Observed verification score is below 80%.');
@@ -183,6 +193,8 @@ export function evaluateSkillPromotion(
     status: ready ? 'ready' : blocked ? 'blocked' : 'insufficient-evidence',
     candidateRuns: runs.length,
     distinctHarnesses,
+    distinctProviders,
+    distinctModels,
     humanBlindReviews,
     passRate,
     quality,

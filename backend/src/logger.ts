@@ -2,10 +2,43 @@
 // Replaces all console.log/warn/error with pino in dev, uses simple console in compiled binaries.
 
 import pino from 'pino';
-import { join } from 'path';
+import { join, resolve } from 'path';
+import { createWriteStream, mkdirSync, type WriteStream } from 'node:fs';
 
 const isProduction = process.env.NODE_ENV === 'production';
 const logDir = process.env.LOG_DIR ?? '.koryphaios/logs';
+
+// ─── Direct file logging ───────────────────────────────────────────────────
+// The launcher pipes backend stdout to data/logs/backend-dev.log, but if the
+// launcher dies the pipe breaks and all subsequent logs are lost — exactly the
+// scenario that made the 2026-08-03 event-loop hang impossible to debug. This
+// direct file stream is owned by the backend process itself, so it survives
+// launcher death and always leaves a postmortem.
+let directFileLog: WriteStream | null = null;
+function openDirectFileLog(): WriteStream | null {
+  try {
+    // Resolve the log directory relative to the project root (cwd is backend/
+    // in dev, or the data dir in packaged mode). Walk up to find koryphaios.json.
+    let root = process.cwd();
+    for (let i = 0; i < 4; i++) {
+      try {
+        if (require('node:fs').existsSync(join(root, 'koryphaios.json'))) break;
+      } catch { /* ignore */ }
+      root = resolve(root, '..');
+    }
+    const dir = process.env.LOG_DIR
+      ? resolve(root, process.env.LOG_DIR)
+      : join(root, 'data', 'logs');
+    mkdirSync(dir, { recursive: true });
+    const stream = createWriteStream(join(dir, 'backend-direct.log'), { flags: 'a' });
+    stream.on('error', () => { directFileLog = null; });
+    return stream;
+  } catch {
+    return null;
+  }
+}
+directFileLog = openDirectFileLog();
+const DIRECT_LOG_PID = process.pid;
 
 // Detect if we're running as a compiled binary
 // Bun compile sets process.execPath to the compiled binary path
@@ -46,12 +79,26 @@ function createSimpleLogger(moduleName: string): Logger {
     return `[${time}] ${level.padEnd(5)} [${moduleName}] ${msg}${extraStr}`;
   };
 
+  const writeToFile = (line: string) => {
+    if (!directFileLog) return;
+    try {
+      directFileLog.write(`[pid:${DIRECT_LOG_PID}] ${line}\n`);
+    } catch {
+      // File logging is best-effort; never let it crash the server.
+    }
+  };
+
   const makeLogger = (level: string, consoleFn: (...args: unknown[]) => void) => {
     return (arg1: string | Record<string, unknown>, arg2?: string) => {
-      if (typeof arg1 === 'string') {
-        consoleFn(formatMessage(level, arg1));
-      } else if (arg2) {
-        consoleFn(formatMessage(level, arg2, arg1));
+      const formatted =
+        typeof arg1 === 'string'
+          ? formatMessage(level, arg1)
+          : arg2
+            ? formatMessage(level, arg2, arg1)
+            : null;
+      if (formatted) {
+        consoleFn(formatted);
+        writeToFile(formatted);
       }
     };
   };

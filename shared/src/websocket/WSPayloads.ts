@@ -60,6 +60,10 @@ export interface AgentStatusPayload {
   agentId: string;
   status: AgentStatus;
   detail?: string;
+  /** When the manager finishes a turn, this is the persisted assistant message
+   *  id. The frontend uses it to tag live feed entries so reload dedup can
+   *  match by ID instead of text comparison. */
+  messageId?: string;
 }
 
 export interface AgentThreadMessagePayload {
@@ -157,6 +161,16 @@ export interface SessionUpdatedPayload {
   updatedAt: number;
 }
 
+/** Emitted by the backend when a session transitions to the idle state.
+ *  This is the definitive "the session is done working" signal — the
+ *  frontend uses it to clear the busy indicator without polling. */
+export interface SessionIdlePayload {
+  sessionId: string;
+  /** The persisted message id of the final assistant response, if any.
+   *  Used by the frontend to tag live feed entries for ID-based dedup. */
+  messageId?: string;
+}
+
 export interface ChangeSummaryPayload {
   sessionId: string;
   changes: ChangeSummary[];
@@ -206,6 +220,21 @@ export interface NotificationPayload {
   };
 }
 
+/** Structured system.info payload. `kind` classifies the event so the
+ *  frontend doesn't have to parse the human-readable `message` to decide
+ *  how to render it. */
+export interface SystemInfoPayload {
+  message: string;
+  /** Typed classifier for the system event. */
+  kind?:
+    | 'cancelled'
+    | 'compacted'
+    | 'empty_response'
+    | 'spend_caps'
+    | 'prompt_diagnostic';
+  [key: string]: unknown;
+}
+
 // Kory-specific payloads
 export interface KoryThoughtPayload {
   thought: string;
@@ -233,6 +262,33 @@ export interface KoryAskUserPayload {
   question: string;
   options: string[];
   allowOther: boolean;
+  allowKeepChatting: boolean;
+  chart?: KoryQuestionChart;
+  sliders?: KoryQuestionSlider[];
+}
+
+export interface KoryQuestionChart {
+  type: 'bar' | 'line' | 'pie';
+  title?: string;
+  labels: string[];
+  datasets: Array<{ label?: string; data: number[] }>;
+}
+
+export interface KoryQuestionSlider {
+  id: string;
+  label: string;
+  min: number;
+  max: number;
+  step: number;
+  value: number;
+  unit?: string;
+  description?: string;
+}
+
+export interface KoryQuestionPresentation {
+  chart?: KoryQuestionChart;
+  sliders?: KoryQuestionSlider[];
+  allowKeepChatting?: boolean;
 }
 
 export interface KoryVerificationPayload {
@@ -274,6 +330,8 @@ export interface ProviderInfo {
   deployment?: 'cloud' | 'api' | 'local' | 'hybrid';
   /** Short UI description of provider behavior */
   description?: string;
+  /** Official page where this provider issues the expected credential. */
+  credentialUrl?: string;
   /** True for a REMOTE provider served by another machine (id `remote-*`). */
   remote?: boolean;
   /** Remote CLI harness: using it copies the client's project to the host and

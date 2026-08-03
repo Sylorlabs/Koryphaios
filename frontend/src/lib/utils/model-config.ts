@@ -39,10 +39,10 @@ export function getModelConfigurationWarning(
   if (provider && model) {
     const selectedProvider = authenticatedProviders.find((item) => item.name === provider);
     if (!selectedProvider) {
-      return `${formatProviderName(provider)} is not configured. Open Settings and connect it, or switch back to Auto.`;
+      return `${formatProviderName(provider)} is not configured. Open Settings and connect it.`;
     }
     if (!selectedProvider.models.includes(model)) {
-      return `${model} is not enabled for ${formatProviderName(provider)}. Open Settings -> Manage Models and enable it, or switch back to Auto.`;
+      return `${model} is not enabled for ${formatProviderName(provider)}. Open Settings -> Manage Models and enable it.`;
     }
   }
 

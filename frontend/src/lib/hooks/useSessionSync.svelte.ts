@@ -51,10 +51,6 @@ export function useSessionSync(options: SessionSyncOptions = {}) {
     const controller = new AbortController();
     activeLoadController = controller;
 
-    if (wsStore.status === 'connected') {
-      wsStore.subscribeToSession(activeId);
-    }
-
     queueMicrotask(async () => {
       if (
         controller.signal.aborted ||
@@ -65,6 +61,12 @@ export function useSessionSync(options: SessionSyncOptions = {}) {
       // Atomically restore this session's isolated snapshot before its fresh
       // history request begins, without mutating state during effect evaluation.
       const feedGeneration = wsStore.activateSessionFeed(activeId);
+      // Subscribe only after the target feed owns the active session. A replay
+      // delivered before activation is otherwise correctly acknowledged by the
+      // ordered protocol but discarded as belonging to no visible session.
+      if (wsStore.status === 'connected') {
+        wsStore.subscribeToSession(activeId);
+      }
       try {
         const messages = await sessionStore.fetchMessages(activeId, controller.signal);
         // A newer switch has happened — drop this stale result.

@@ -39,7 +39,8 @@ export interface AutoScrollOptions {
   threshold?: number;
   /** When true, the action installs its own MutationObserver as a fallback
    *  for cases where the caller can't trigger `requestPin()` reliably.
-   *  Default true. */
+   *  Default false; callers that drive `requestPin()` per token do not need
+   *  the extra observer (it triples rAF traffic during streaming). */
   observeMutations?: boolean;
 }
 
@@ -89,7 +90,7 @@ export function createAutoScroll(
   options: AutoScrollOptions = {},
 ): AutoScrollHandle {
   const threshold = options.threshold ?? DEFAULT_THRESHOLD;
-  const observeMutations = options.observeMutations ?? true;
+  const observeMutations = options.observeMutations ?? false;
 
   let follow = $state(true);
   let unseenCount = $state(0);

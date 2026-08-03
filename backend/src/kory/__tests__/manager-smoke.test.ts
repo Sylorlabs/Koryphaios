@@ -61,7 +61,7 @@ describe('KoryManager - Method Signatures', () => {
 
   it('processTask should accept sessionId, message, and optional parameters', () => {
     const descriptor = Object.getOwnPropertyDescriptor(KoryManager.prototype, 'processTask');
-    expect(descriptor?.value?.length).toBe(8); // sessionId, content, model?, reasoningLevel?, attachments?, collabPolicy?, responseVariant?, immutable goal context?
+    expect(descriptor?.value?.length).toBe(9); // sessionId, content, model?, reasoningLevel?, attachments?, collabPolicy?, responseVariant?, immutable goal context?, interaction mode?
   });
 });
 

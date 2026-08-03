@@ -1,6 +1,5 @@
 <script lang="ts">
   import WorkerCard from '$lib/components/WorkerCard.svelte';
-  import { modeStore } from '$lib/stores/mode.svelte';
   import { fly } from 'svelte/transition';
   import { cubicOut } from 'svelte/easing';
   import type { AgentRailState } from './useAgentRail.svelte';
@@ -50,6 +49,11 @@
         Main chat
       </div>
       <div class="mt-2 text-sm font-semibold">Manager feed</div>
+      {#if rail.managerAgent}
+        <div class="mt-1 text-[10px] font-semibold" style="color: var(--color-text-secondary);">
+          {rail.managerAgent.identity.provider === 'codex' ? 'Codex CLI' : rail.managerAgent.identity.provider} · {rail.managerAgent.identity.model}
+        </div>
+      {/if}
       <div class="mt-1 text-xs" style="color: var(--color-text-secondary);">
         Talk to Kory and review the full session.
       </div>
@@ -67,7 +71,7 @@
       </div>
     {/each}
   </div>
-{:else if visible && modeStore.showAgentDetails}
+{:else if visible}
   <div
     class="px-4 py-2 border-b flex items-center justify-center shrink-0"
     style="border-color: var(--color-border); background: var(--color-surface-1);"

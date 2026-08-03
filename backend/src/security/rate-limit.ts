@@ -117,6 +117,7 @@ export class RateLimiter {
  * to prevent DoS when external services fail.
  */
 export class SlidingWindowRateLimiter {
+  // SECURITY NOTE: When Redis is unavailable, each instance maintains its own in-memory fallback. In multi-instance deployments, the effective rate limit is multiplied by the number of instances. This is a deliberate fail-closed tradeoff: we prefer over-limiting accuracy to fail-open DoS.
   private fallbackLimiters = new Map<string, RateLimiter>();
   private lastFailure = 0;
   private FAILURE_BACKOFF_MS = 60_000; // Wait 1 minute before retrying Redis after failure
@@ -229,6 +230,7 @@ export class SlidingWindowRateLimiter {
  * to prevent DoS when external services fail.
  */
 export class TokenBucketRateLimiter {
+  // SECURITY NOTE: When Redis is unavailable, each instance maintains its own in-memory fallback. In multi-instance deployments, the effective rate limit is multiplied by the number of instances. This is a deliberate fail-closed tradeoff: we prefer over-limiting accuracy to fail-open DoS.
   private fallbackLimiters = new Map<string, RateLimiter>();
 
   constructor(
@@ -370,6 +372,7 @@ export class TokenBucketRateLimiter {
  * to prevent DoS when external services fail.
  */
 export class FixedWindowRateLimiter {
+  // SECURITY NOTE: When Redis is unavailable, each instance maintains its own in-memory fallback. In multi-instance deployments, the effective rate limit is multiplied by the number of instances. This is a deliberate fail-closed tradeoff: we prefer over-limiting accuracy to fail-open DoS.
   private fallbackLimiters = new Map<string, RateLimiter>();
 
   constructor(private config: RateLimitConfig) {}
@@ -450,10 +453,12 @@ export class FixedWindowRateLimiter {
       const redis = getRedisClient();
       // Clear all windows for this identifier
       const pattern = `${this.config.keyPrefix || 'ratelimit'}:fixed:${identifier}:*`;
-      const keys = await redis.keys(pattern);
-      if (keys.length > 0) {
-        await redis.del(...keys);
-      }
+      let cursor = '0';
+      do {
+        const [nextCursor, batch] = await redis.scan(cursor, 'MATCH', pattern, 'COUNT', 100);
+        cursor = nextCursor;
+        if (batch.length > 0) await redis.del(...batch);
+      } while (cursor !== '0');
     } catch (err) {
       serverLog.error({ err, identifier }, 'Failed to reset rate limit');
     }
@@ -576,11 +581,9 @@ export class TieredRateLimiter {
    * Reset rate limits for a specific identifier
    */
   async reset(identifier: string, tier?: string): Promise<void> {
-    const keys = tier ? [`${tier}:${identifier}`] : Array.from(this.limiters.keys());
-
-    for (const key of keys) {
-      // Reset logic would go here
-      // For now, we rely on Redis TTL
+    for (const [limiterKey, limiter] of this.limiters) {
+      if (tier && !limiterKey.startsWith(`${tier}:`)) continue;
+      await limiter.reset(identifier);
     }
   }
 }
@@ -607,7 +610,7 @@ export class ProgressiveBackoffRateLimiter {
 
   async check(identifier: string): Promise<{
     allowed: boolean;
-    retryAfter?: number;
+    retryAfter?: number; // seconds
     attempt: number;
   }> {
     const redis = getRedisClient();
@@ -633,11 +636,10 @@ export class ProgressiveBackoffRateLimiter {
       // Check if max attempts exceeded
       if (effectiveAttempts >= this.config.maxAttempts) {
         const backoffIndex = Math.min(effectiveAttempts, this.backoffMultipliers.length - 1);
-        const retryAfter = this.backoffMultipliers[backoffIndex] * this.baseDelayMs;
 
         return {
           allowed: false,
-          retryAfter,
+          retryAfter: Math.ceil((this.backoffMultipliers[backoffIndex] * this.baseDelayMs) / 1000),
           attempt: effectiveAttempts,
         };
       }

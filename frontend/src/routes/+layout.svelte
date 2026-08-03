@@ -3,13 +3,18 @@
 	import '$lib/fonts';
 	import { onMount } from 'svelte';
 	import { loadProvidersFromApi } from '$lib/stores/providers.svelte';
+	import { wsStore } from '$lib/stores/websocket.svelte';
+	import { toastStore } from '$lib/stores/toast.svelte';
 	import { authStore } from '$lib/stores/auth.svelte';
 	import { isDemoMode } from '$lib/demo.svelte';
 	import { initUrls } from '$lib/utils/api-url';
 	import { startBackendHealthSentinel, waitForBackendHealthy } from '$lib/stores/backend-health.svelte';
 	import BackendDownOverlay from '$lib/components/BackendDownOverlay.svelte';
+	import BackendRecoveryNotice from '$lib/components/BackendRecoveryNotice.svelte';
+	import ErrorBoundary from '$lib/components/ErrorBoundary.svelte';
 	import UpdateBanner from '$lib/components/UpdateBanner.svelte';
 	import UpdateDialog from '$lib/components/UpdateDialog.svelte';
+	import { reportCrash } from '$lib/utils/error-monitor';
 
 	let { children } = $props();
 	let showInitialLoad = $state(true);
@@ -17,6 +22,7 @@
 	let loadError = $state<string | null>(null);
 	let appReady = $state(false);
 	let retrying = $state(false);
+	let crash = $state<{ message: string } | null>(null);
 
 	onMount(() => {
 		// Direct DOM fallback for hiding loading screen
@@ -78,6 +84,24 @@
 		window.addEventListener('offline', goOffline);
 		window.addEventListener('online', goOnline);
 
+		const recoverBackendRestart = async () => {
+			try {
+				// A restarted backend loses its websocket subscriptions and may have
+				// a refreshed local auth/session state. Restore both before letting
+				// normal work continue.
+				const authReady = await authStore.initialize();
+				if (!authReady) throw new Error('Backend authentication did not initialize.');
+				const providersReady = await loadProvidersFromApi();
+				if (!providersReady) throw new Error('Backend provider catalog failed to load.');
+				wsStore.disconnect();
+				wsStore.connect();
+				toastStore.info('Backend restarted — reconnected.');
+			} catch (error) {
+				console.warn('[Koryphaios] Backend restart recovery was incomplete', error);
+			}
+		};
+		window.addEventListener('kory:backend-restarted', recoverBackendRestart);
+
 		// Global link interceptor to open external links in default browser when in Tauri
 		const handleExternalLinks = async (e: MouseEvent) => {
 			const target = e.target as HTMLElement | null;
@@ -112,6 +136,7 @@
 		return () => {
 			window.removeEventListener('offline', goOffline);
 			window.removeEventListener('online', goOnline);
+			window.removeEventListener('kory:backend-restarted', recoverBackendRestart);
 			window.removeEventListener('click', handleExternalLinks);
 		};
 	});
@@ -158,13 +183,16 @@
 			{/if}
 		</div>
 	{/if}
-	<main id="main-content">
-		{#if appReady}{@render children()}{/if}
-	</main>
+	<ErrorBoundary>
+		<main id="main-content">
+			{#if appReady}{@render children()}{/if}
+		</main>
+	</ErrorBoundary>
 
 	<!-- Backend unavailable / version-skew overlay. Mounted only when the
 	     backend is sustained-unhealthy or rejects this frontend build. -->
 	<BackendDownOverlay />
+	<BackendRecoveryNotice />
 
 	<!-- Update Banner - shows at top when update is available -->
 	<UpdateBanner />
@@ -208,6 +236,7 @@
 		0%, 100% { opacity: 1; }
 		50% { opacity: 0.4; }
 	}
+	main#main-content { position: relative; min-height: 100%; }
 	.offline-banner {
 		position: sticky;
 		top: 0;

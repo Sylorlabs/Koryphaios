@@ -1,5 +1,8 @@
 // Security module exports
 
+// Filesystem permission hardening
+export { ensureSecureDir, hardenFilePermissions } from './fs-permissions';
+
 // Core security functions
 export {
   sanitizeString,

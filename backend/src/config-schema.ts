@@ -69,7 +69,7 @@ export function validateConfig(config: Partial<KoryphaiosConfig>): void {
         errors.push(`assignments.${domain} must be a string in "provider:model" format`);
         continue;
       }
-      const [, modelId] = assignment.split(':');
+      const modelId = assignment.slice(assignment.indexOf(':') + 1);
       const modelDef = resolveModel(modelId);
       if (!modelDef) {
         errors.push(

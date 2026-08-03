@@ -8,7 +8,7 @@
 
 import type { ModelDef, ProviderConfig } from '@koryphaios/shared';
 import { spawn } from 'node:child_process';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { whichBinary } from './cli-detection';
 import { detectClineCLILogin } from './auth-utils';
 import { providerLog } from '../logger';
@@ -21,7 +21,9 @@ import {
   type ProviderMessage,
   type StreamRequest,
 } from './types';
-import { getCliBridge } from './cli-bridges';
+import { getCliBridge, getKoryphaiosClineHome } from './cli-bridges';
+import { renderCliContent } from './cli-attachments';
+import { serializeKoryMcpServers } from './kory-cli-mcp-config';
 
 const CLINE_STREAM_TIMEOUT_MS = 300_000;
 const MODELS_CACHE_TTL_MS = 5 * 60_000;
@@ -47,15 +49,7 @@ function buildPrompt(systemPrompt: string | undefined, messages: ProviderMessage
   const harnessNote = bridgeConfig?.systemInstructions?.[1] ?? HARNESS_SYSTEM_NOTE;
   lines.push(sys ? `${sys}\n\n${harnessNote}` : harnessNote, '');
   for (const m of messages) {
-    const content =
-      typeof m.content === 'string'
-        ? m.content
-        : m.content
-            .map((b) =>
-              b.type === 'text' ? b.text : b.type === 'image' ? '[image attachment]' : '',
-            )
-            .filter(Boolean)
-            .join('\n');
+    const content = renderCliContent(m.content);
     if (!content.trim()) continue;
     if (m.role === 'user') lines.push(`User: ${content}`);
     else if (m.role === 'assistant') lines.push(`Assistant: ${content}`);
@@ -150,18 +144,21 @@ function readConfiguredClineModels(): ModelDef[] {
     }
   }
 
-  return [...modelIds].map((modelId) => ({
-    id: `cline-${modelId}`,
-    name: modelId,
-    provider: 'cline',
-    apiModelId: modelId,
-    contextWindow: 200_000,
-    maxOutputTokens: 32_000,
-    supportsStreaming: true,
-    supportsAttachments: false,
-    canReason: true,
-    reasoningLevels: ['none', 'low', 'medium', 'high', 'xhigh'],
-  } as ModelDef));
+  return [...modelIds].map(
+    (modelId) =>
+      ({
+        id: `cline-${modelId}`,
+        name: modelId,
+        provider: 'cline',
+        apiModelId: modelId,
+        contextWindow: 200_000,
+        maxOutputTokens: 32_000,
+        supportsStreaming: true,
+        supportsAttachments: false,
+        canReason: true,
+        reasoningLevels: ['none', 'low', 'medium', 'high', 'xhigh'],
+      }) as ModelDef,
+  );
 }
 
 interface ClineEvent {
@@ -232,7 +229,12 @@ export class ClineProvider implements Provider {
   }
 
   refreshModels(forceRefresh = false): void {
-    if (!forceRefresh && this.modelsFetchedAt > 0 && !this.modelsInFlight && this.cachedModels?.length) {
+    if (
+      !forceRefresh &&
+      this.modelsFetchedAt > 0 &&
+      !this.modelsInFlight &&
+      this.cachedModels?.length
+    ) {
       return;
     }
     if (this.modelsInFlight) return;
@@ -243,7 +245,10 @@ export class ClineProvider implements Provider {
       this.modelsFetchedAt = Date.now();
       this.modelsInFlight = false;
       if (models.length) {
-        providerLog.debug({ provider: 'cline', count: models.length }, 'Cline model list refreshed');
+        providerLog.debug(
+          { provider: 'cline', count: models.length },
+          'Cline model list refreshed',
+        );
       }
     };
 
@@ -322,26 +327,53 @@ export class ClineProvider implements Provider {
       return;
     }
 
+    const clineHome = getKoryphaiosClineHome();
+    const bridge = getCliBridge('cline');
+    const mcpServers = bridge?.buildMcpConfig({
+      provider: 'cline',
+      role: request.harnessRole ?? 'manager',
+      sandbox: request.sandbox,
+      workingDirectory: request.workingDirectory?.trim() || process.cwd(),
+      sessionId: request.sessionId,
+      systemPrompt: request.systemPrompt,
+      tools: request.tools ?? [],
+      promptManifestHash: request.promptManifestHash,
+      taskContractHash: request.taskContractHash,
+    });
+    if (mcpServers?.length) {
+      const mcpPath = join(clineHome, 'data', 'settings', 'cline_mcp_settings.json');
+      mkdirSync(join(clineHome, 'data', 'settings'), { recursive: true });
+      writeFileSync(mcpPath, JSON.stringify(serializeKoryMcpServers(mcpServers, true), null, 2), {
+        mode: 0o600,
+      });
+    }
+
     const args = [
       ...(request.harnessRole === 'critic' ? ['--plan'] : []),
       '--auto-approve',
       'true',
       '--json',
+      '--config',
+      clineHome,
+      '--data-dir',
+      join(clineHome, 'data'),
+      '--hooks-dir',
+      join(clineHome, 'hooks'),
       prompt,
     ];
     if (request.reasoningLevel && request.reasoningLevel !== 'auto') {
       const lvl = request.reasoningLevel.toLowerCase();
       if (['none', 'low', 'medium', 'high', 'xhigh'].includes(lvl)) {
-        args.push('--reasoning-effort', lvl);
+        args.push('--thinking', lvl);
       }
     }
     const cliModel = request.model?.replace(/^cline-/, '');
     if (cliModel && cliModel !== 'default') args.push('--model', cliModel);
 
     const cwd = request.workingDirectory?.trim() || process.cwd();
-    const jail = request.sandbox ? buildSoftJail(process.env, [join(homedir(), '.cline')]) : null;
+    const jail = request.sandbox ? buildSoftJail(process.env, [clineHome]) : null;
     const wrapped = request.sandbox
-      ? wrapCommand(bin, args, { cwd, policy: request.sandbox })
+      ? wrapCommand(bin, args, { cwd, configDirs: [clineHome], policy: request.sandbox })
       : { command: bin, args };
     const child = spawn(wrapped.command, wrapped.args, {
       cwd,

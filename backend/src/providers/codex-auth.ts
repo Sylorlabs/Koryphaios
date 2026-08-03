@@ -42,14 +42,25 @@ function modelDefinition(model: any): ModelDef | null {
       .map((entry: any) => entry?.reasoningEffort)
       .filter((level: unknown): level is string => typeof level === 'string' && level.length > 0)
     : [];
+  const contextWindow = [
+    model?.modelContextWindow,
+    model?.contextWindow,
+    model?.context_window,
+    model?.maxContextWindow,
+    model?.max_context_window,
+  ].find((value): value is number => typeof value === 'number' && Number.isFinite(value) && value >= 1024);
+  const maxOutputTokens = [
+    model?.maxOutputTokens,
+    model?.max_output_tokens,
+  ].find((value): value is number => typeof value === 'number' && Number.isFinite(value) && value >= 1);
   return {
     id,
     apiModelId: id,
     name: typeof model?.displayName === 'string' && model.displayName.trim() ? model.displayName : id,
     provider: 'codex-auth',
-    contextWindow: 0,
-    contextVerified: false,
-    maxOutputTokens: 0,
+    contextWindow: contextWindow ?? 0,
+    contextVerified: contextWindow !== undefined,
+    maxOutputTokens: maxOutputTokens ?? 0,
     costPerMInputTokens: 0,
     costPerMOutputTokens: 0,
     canReason: reasoningLevels.length > 0,

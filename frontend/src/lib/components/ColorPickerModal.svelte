@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount, onDestroy } from 'svelte';
+  import { onMount } from 'svelte';
   import { theme, type CustomAccent } from '$lib/stores/theme.svelte';
   import { X, Check, Pipette, RotateCcw } from 'lucide-svelte';
 
@@ -18,6 +18,11 @@
   let hexInput = $state('#D5B261');
   let hoverHex = $state('#F3DDB0');
   let hoverAuto = $state(true); // when true, hover is auto-derived from main
+  // Which color the wheel is currently editing — 'primary' (main) or 'hover'.
+  let editTarget = $state<'primary' | 'hover'>('primary');
+  // Committed main color (stored separately so we can switch the wheel to hover
+  // and back without losing the main value).
+  let mainHex = $state('#D5B261');
 
   // Canvas refs
   let wheelCanvas: HTMLCanvasElement | null = $state(null);
@@ -28,6 +33,7 @@
 
   let draggingWheel = false;
   let draggingBar = false;
+  let previewHovering = $state(false);
 
   // ---- Color math helpers ----
   function hsvToRgb(h: number, s: number, v: number): [number, number, number] {
@@ -121,7 +127,14 @@
     return rgbToHex(mixed[0], mixed[1], mixed[2]);
   }
 
-  let effectiveHover = $derived(hoverAuto ? deriveHover(currentHex) : hoverHex);
+  let effectiveHover = $derived(
+    editTarget === 'hover'
+      ? currentHex
+      : (hoverAuto ? deriveHover(mainHex) : hoverHex),
+  );
+  // The effective main color — when editing primary, it's the wheel output;
+  // when editing hover, it's the last committed main value.
+  let effectiveMain = $derived(editTarget === 'primary' ? currentHex : mainHex);
 
   // Contrast against current surface background tokens
   let surfaceBg = $derived(
@@ -134,8 +147,8 @@
       .getPropertyValue('--color-text-primary')
       .trim() || '#F6EFE2',
   );
-  let contrastOnBg = $derived(contrastRatio(currentHex, surfaceBg).toFixed(2));
-  let contrastOnAccent = $derived(contrastRatio(textPrimary, currentHex).toFixed(2));
+  let contrastOnBg = $derived(contrastRatio(effectiveMain, surfaceBg).toFixed(2));
+  let contrastOnAccent = $derived(contrastRatio(textPrimary, effectiveMain).toFixed(2));
   let contrastHoverOnBg = $derived(contrastRatio(effectiveHover, surfaceBg).toFixed(2));
 
   // ---- Canvas drawing ----
@@ -213,20 +226,27 @@
   }
 
   function handleWheelPointer(e: PointerEvent) {
+    e.preventDefault();
+    e.stopPropagation();
     draggingWheel = true;
     (e.target as Element).setPointerCapture?.(e.pointerId);
     updateFromWheel(e.clientX, e.clientY);
   }
   function handleBarPointer(e: PointerEvent) {
+    e.preventDefault();
+    e.stopPropagation();
     draggingBar = true;
     (e.target as Element).setPointerCapture?.(e.pointerId);
     updateFromBar(e.clientY);
   }
   function handlePointerMove(e: PointerEvent) {
+    e.preventDefault();
+    e.stopPropagation();
     if (draggingWheel) updateFromWheel(e.clientX, e.clientY);
     else if (draggingBar) updateFromBar(e.clientY);
   }
   function handlePointerUp(e: PointerEvent) {
+    e.stopPropagation();
     draggingWheel = false;
     draggingBar = false;
     (e.target as Element).releasePointerCapture?.(e.pointerId);
@@ -239,7 +259,13 @@
     // track currentHex
     currentHex;
     if (!typingHex) hexInput = currentHex;
-    if (hoverAuto) hoverHex = deriveHover(currentHex);
+    // Commit the wheel output to whichever target we're editing.
+    if (editTarget === 'primary') {
+      mainHex = currentHex;
+      if (hoverAuto) hoverHex = deriveHover(currentHex);
+    } else {
+      hoverHex = currentHex;
+    }
   });
 
   function commitHexInput() {
@@ -253,7 +279,39 @@
   }
   function commitHoverHex() {
     const rgb = hexToRgb(hoverHex);
-    if (!rgb) hoverHex = effectiveHover;
+    if (!rgb) {
+      hoverHex = effectiveHover;
+      return;
+    }
+    hoverAuto = false;
+    // If currently editing hover via the wheel, sync the wheel to match.
+    if (editTarget === 'hover') {
+      const [h, s, v] = rgbToHsv(rgb[0], rgb[1], rgb[2]);
+      hue = h; sat = s; val = v;
+      hexInput = hoverHex.toUpperCase();
+    }
+  }
+
+  // Switch the wheel between editing the primary (main) and hover colors.
+  // Loads the target's current hex into the wheel's HSV state.
+  function switchTarget(target: 'primary' | 'hover') {
+    if (target === editTarget) return;
+    let hex: string;
+    if (target === 'primary') {
+      hex = mainHex;
+    } else {
+      // Load the current hover value (auto-derived if auto is on).
+      hex = hoverAuto ? deriveHover(mainHex) : hoverHex;
+      // Editing hover is always manual — auto-derive would be overwritten.
+      hoverAuto = false;
+    }
+    const rgb = hexToRgb(hex);
+    if (rgb) {
+      const [h, s, v] = rgbToHsv(rgb[0], rgb[1], rgb[2]);
+      hue = h; sat = s; val = v;
+    }
+    hexInput = hex.toUpperCase();
+    editTarget = target;
   }
 
   // Eyedropper (where supported)
@@ -280,9 +338,11 @@
       const [h, s, v] = rgbToHsv(rgb[0], rgb[1], rgb[2]);
       hue = h; sat = s; val = v;
     }
+    mainHex = cur.main.toUpperCase();
     hexInput = cur.main.toUpperCase();
     hoverHex = cur.hover.toUpperCase();
     hoverAuto = false; // preserve their existing hover unless they toggle auto
+    editTarget = 'primary';
   });
 
   // Redraw whenever HSV changes
@@ -292,7 +352,7 @@
   });
 
   function apply() {
-    const custom: CustomAccent = { main: currentHex, hover: effectiveHover };
+    const custom: CustomAccent = { main: effectiveMain, hover: effectiveHover };
     theme.setCustomAccent(custom);
     onClose();
   }
@@ -305,9 +365,11 @@
       const [h, s, v] = rgbToHsv(rgb[0], rgb[1], rgb[2]);
       hue = h; sat = s; val = v;
     }
+    mainHex = defaultAccent.color.toUpperCase();
     hexInput = defaultAccent.color.toUpperCase();
     hoverAuto = true;
     hoverHex = deriveHover(defaultAccent.color).toUpperCase();
+    editTarget = 'primary';
   }
 
   function handleKey(e: KeyboardEvent) {
@@ -316,9 +378,9 @@
 
   onMount(() => {
     window.addEventListener('keydown', handleKey);
-  });
-  onDestroy(() => {
-    window.removeEventListener('keydown', handleKey);
+    return () => {
+      window.removeEventListener('keydown', handleKey);
+    };
   });
 
   // Pointer position indicator on the wheel
@@ -338,14 +400,16 @@
 {#if open}
   <div
     class="fixed inset-0 z-[120] flex items-start justify-center pt-[8vh] px-4 backdrop-blur-sm"
-    style="background: rgba(0,0,0,0.5);"
+    style="background: rgba(0,0,0,0.5); -webkit-app-region: no-drag;"
     onmousedown={onClose}
+    onpointerdown={(event) => event.stopPropagation()}
     role="presentation"
   >
     <div
       class="w-full max-w-lg rounded-2xl border shadow-2xl overflow-hidden"
-      style="background: var(--color-surface-1); border-color: var(--color-border);"
+      style="background: var(--color-surface-1); border-color: var(--color-border); -webkit-app-region: no-drag;"
       onmousedown={e => e.stopPropagation()}
+      onpointerdown={(event) => event.stopPropagation()}
       role="presentation"
     >
       <!-- Header -->
@@ -369,6 +433,42 @@
 
       <!-- Body -->
       <div class="p-5 space-y-5">
+        <!-- Target selector: Primary / Hover tabs -->
+        <div class="flex gap-2">
+          <button
+            type="button"
+            class="flex-1 flex items-center gap-2.5 rounded-xl border px-3 py-2.5 transition-all"
+            style="border-color: {editTarget === 'primary' ? 'var(--color-accent)' : 'var(--color-border)'}; background: {editTarget === 'primary' ? 'rgba(var(--color-accent-rgb), 0.12)' : 'var(--color-surface-2)'};"
+            onclick={() => switchTarget('primary')}
+            aria-pressed={editTarget === 'primary'}
+          >
+            <div class="w-5 h-5 rounded-md border shrink-0" style="background:{effectiveMain};border-color: var(--color-border);"></div>
+            <div class="flex flex-col items-start min-w-0">
+              <span class="text-xs font-bold" style="color: {editTarget === 'primary' ? 'var(--color-accent)' : 'var(--color-text-primary)'};">Primary</span>
+              <span class="text-[10px] font-mono truncate" style="color: var(--color-text-muted);">{effectiveMain}</span>
+            </div>
+            {#if editTarget === 'primary'}
+              <Check size={14} strokeWidth={3} class="ml-auto shrink-0" style="color: var(--color-accent);" />
+            {/if}
+          </button>
+          <button
+            type="button"
+            class="flex-1 flex items-center gap-2.5 rounded-xl border px-3 py-2.5 transition-all"
+            style="border-color: {editTarget === 'hover' ? 'var(--color-accent)' : 'var(--color-border)'}; background: {editTarget === 'hover' ? 'rgba(var(--color-accent-rgb), 0.12)' : 'var(--color-surface-2)'};"
+            onclick={() => switchTarget('hover')}
+            aria-pressed={editTarget === 'hover'}
+          >
+            <div class="w-5 h-5 rounded-md border shrink-0" style="background:{effectiveHover};border-color: var(--color-border);"></div>
+            <div class="flex flex-col items-start min-w-0">
+              <span class="text-xs font-bold" style="color: {editTarget === 'hover' ? 'var(--color-accent)' : 'var(--color-text-primary)'};">Hover</span>
+              <span class="text-[10px] font-mono truncate" style="color: var(--color-text-muted);">{effectiveHover}</span>
+            </div>
+            {#if editTarget === 'hover'}
+              <Check size={14} strokeWidth={3} class="ml-auto shrink-0" style="color: var(--color-accent);" />
+            {/if}
+          </button>
+        </div>
+
         <!-- Wheel + value bar -->
         <div class="flex gap-4 items-start justify-center">
           <div class="relative" style={wheelStyle}>
@@ -381,6 +481,7 @@
               onpointerdown={handleWheelPointer}
               onpointermove={handlePointerMove}
               onpointerup={handlePointerUp}
+              onpointercancel={handlePointerUp}
             ></canvas>
             <!-- Indicator -->
             <div
@@ -398,6 +499,7 @@
               onpointerdown={handleBarPointer}
               onpointermove={handlePointerMove}
               onpointerup={handlePointerUp}
+              onpointercancel={handlePointerUp}
             ></canvas>
             <div
               class="absolute pointer-events-none w-full h-1 -translate-y-1/2 rounded-full border border-white shadow"
@@ -409,7 +511,7 @@
         <!-- Hex + eyedropper -->
         <div class="flex items-center gap-3">
           <div class="flex-1">
-            <label for="cp-hex" class="block text-[10px] font-bold uppercase tracking-wider mb-1.5" style="color: var(--color-text-muted);">Hex</label>
+            <label for="cp-hex" class="block text-[10px] font-bold uppercase tracking-wider mb-1.5" style="color: var(--color-text-muted);">{editTarget === 'primary' ? 'Primary Hex' : 'Hover Hex'}</label>
             <div class="flex items-center gap-2">
               <input
                 type="text"
@@ -480,22 +582,43 @@
           </div>
         </div>
 
-        <!-- Hover color -->
+        <!-- Hover color quick-edit -->
         <div class="pt-3 border-t" style="border-color: var(--color-border);">
           <div class="flex items-center justify-between mb-2">
             <span class="text-[10px] font-bold uppercase tracking-wider" style="color: var(--color-text-muted);">Hover Color</span>
-            <button
-              type="button"
-              class="text-[10px] px-2 py-1 rounded-md border transition-colors flex items-center gap-1"
-              style="background: var(--color-surface-2); border-color: var(--color-border); color: {hoverAuto ? 'var(--color-accent)' : 'var(--color-text-secondary)'};"
-              onclick={() => {
-                hoverAuto = !hoverAuto;
-                if (hoverAuto) hoverHex = deriveHover(currentHex).toUpperCase();
-              }}
-              title="Toggle auto-derive from main color"
-            >
-              {hoverAuto ? 'Auto' : 'Manual'}
-            </button>
+            <div class="flex items-center gap-2">
+              <button
+                type="button"
+                class="text-[10px] px-2 py-1 rounded-md border transition-colors flex items-center gap-1"
+                style="background: var(--color-surface-2); border-color: var(--color-border); color: {hoverAuto ? 'var(--color-accent)' : 'var(--color-text-secondary)'};"
+                onclick={() => {
+                  hoverAuto = !hoverAuto;
+                  if (hoverAuto) {
+                    hoverHex = deriveHover(mainHex).toUpperCase();
+                    if (editTarget === 'hover') {
+                      const rgb = hexToRgb(hoverHex);
+                      if (rgb) {
+                        const [h, s, v] = rgbToHsv(rgb[0], rgb[1], rgb[2]);
+                        hue = h; sat = s; val = v;
+                      }
+                      hexInput = hoverHex;
+                    }
+                  }
+                }}
+                title="Toggle auto-derive from main color"
+              >
+                {hoverAuto ? 'Auto' : 'Manual'}
+              </button>
+              <button
+                type="button"
+                class="text-[10px] px-2 py-1 rounded-md border transition-colors"
+                style="background: var(--color-surface-2); border-color: {editTarget === 'hover' ? 'var(--color-accent)' : 'var(--color-border)'}; color: {editTarget === 'hover' ? 'var(--color-accent)' : 'var(--color-text-secondary)'};"
+                onclick={() => switchTarget('hover')}
+                title="Edit hover with the color wheel"
+              >
+                Edit in wheel
+              </button>
+            </div>
           </div>
           <div class="flex items-center gap-3">
             <div class="w-10 h-10 rounded-lg border shadow-inner shrink-0" style="background:{effectiveHover};border-color: var(--color-border);"></div>
@@ -512,7 +635,7 @@
             />
           </div>
           {#if hoverAuto}
-            <p class="text-[10px] mt-1.5" style="color: var(--color-text-muted);">Auto-derived from main (+35% toward white). Click the hex field or toggle to Manual to customize.</p>
+            <p class="text-[10px] mt-1.5" style="color: var(--color-text-muted);">Auto-derived from primary (+35% toward white). Click the hex field, toggle to Manual, or use the wheel to customize.</p>
           {/if}
         </div>
 
@@ -537,10 +660,22 @@
             </div>
           </div>
           <!-- Live preview -->
-          <div class="mt-3 rounded-lg p-3 flex items-center gap-3" style="background: var(--color-surface-0);">
-            <button type="button" class="px-3 py-1.5 rounded-lg text-xs font-bold" style="background:{currentHex};color:{Number(contrastOnAccent) >= 3 ? 'var(--color-surface-0)' : 'var(--color-text-primary)'};">Primary</button>
-            <button type="button" class="px-3 py-1.5 rounded-lg text-xs font-bold" style="background:{effectiveHover};color:{Number(contrastHoverOnBg) >= 3 ? 'var(--color-surface-0)' : 'var(--color-text-primary)'};">Hover</button>
-            <span class="text-xs ml-auto" style="color: var(--color-text-secondary);">Preview</span>
+          <div class="mt-3 rounded-lg p-3" style="background: var(--color-surface-0);">
+            <div class="flex items-center justify-between gap-3">
+              <span class="text-xs font-medium" style="color: var(--color-text-secondary);">Interactive preview</span>
+              <span class="text-[10px] font-mono" style="color: var(--color-text-muted);">{previewHovering ? 'Hover color' : 'Primary color'}</span>
+            </div>
+            <button
+              type="button"
+              class="mt-2 w-full rounded-lg px-3 py-2 text-xs font-bold transition-colors"
+              style="background:{previewHovering ? effectiveHover : effectiveMain};color:{Number(previewHovering ? contrastHoverOnBg : contrastOnAccent) >= 3 ? 'var(--color-surface-0)' : 'var(--color-text-primary)'};"
+              onmouseenter={() => (previewHovering = true)}
+              onmouseleave={() => (previewHovering = false)}
+              onfocus={() => (previewHovering = true)}
+              onblur={() => (previewHovering = false)}
+            >
+              Hover this button
+            </button>
           </div>
         </div>
       </div>
@@ -567,7 +702,7 @@
           <button
             type="button"
             class="flex items-center gap-1.5 px-4 py-2 rounded-lg text-xs font-bold transition-transform active:scale-95"
-            style="background:{currentHex};color:{Number(contrastOnAccent) >= 3 ? 'var(--color-surface-0)' : 'var(--color-text-primary)'};"
+            style="background:{effectiveMain};color:{Number(contrastOnAccent) >= 3 ? 'var(--color-surface-0)' : 'var(--color-text-primary)'};"
             onclick={apply}
           >
             <Check size={13} strokeWidth={3} /> Apply

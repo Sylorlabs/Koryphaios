@@ -137,7 +137,10 @@ export function validateConfig(config: unknown): ConfigValidationResult {
     const result = ServerConfigSchema.safeParse(config);
     if (!result.success) {
       // Convert Zod errors to our format
-      result.error.errors.forEach(error => {
+      // Zod 4 exposes validation details as `issues` (Zod 3 also supports
+      // it). Using the stable field keeps invalid configuration actionable
+      // instead of returning a false-negative empty error list.
+      result.error.issues.forEach(error => {
         errors.push({
           path: error.path.join('.'),
           message: error.message,
@@ -211,7 +214,8 @@ export function validateConfig(config: unknown): ConfigValidationResult {
         errors.push({
           path: issue.path.join('.'),
           message: issue.message,
-          value: issue.code === 'invalid_type' ? issue.received : undefined,
+          value:
+            issue.code === 'invalid_type' ? (issue as { received?: unknown }).received : undefined,
         });
       }
     } else {

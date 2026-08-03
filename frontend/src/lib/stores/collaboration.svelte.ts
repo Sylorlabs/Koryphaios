@@ -52,27 +52,43 @@ let joinedSessions = $state<JoinedTeamSession[]>([]);
 let activeJoinedSessionId = $state<string | null>(null);
 let settingsRequest = $state(0);
 let pollInterval: ReturnType<typeof setInterval> | null = null;
+let visibilityHandler: (() => void) | null = null;
 let policyRevision = 0;
+
+async function refreshPending(sessionId: string) {
+  try {
+    const res = await apiFetch(apiUrl(`/api/collab/${sessionId}/pending`));
+    const data = await parseJsonResponse(res);
+    if (data.ok) {
+      pendingPrompts = data.data?.prompts ?? [];
+      pendingJoins = data.data?.joins ?? [];
+      participants = data.data?.participants ?? [];
+    }
+  } catch {}
+}
 
 function startPollingPending(sessionId: string) {
   stopPollingPending();
-  pollInterval = setInterval(async () => {
-    try {
-      const res = await apiFetch(apiUrl(`/api/collab/${sessionId}/pending`));
-      const data = await parseJsonResponse(res);
-      if (data.ok) {
-        pendingPrompts = data.data?.prompts ?? [];
-        pendingJoins = data.data?.joins ?? [];
-        participants = data.data?.participants ?? [];
-      }
-    } catch {}
+  pollInterval = setInterval(() => {
+    if (typeof document !== 'undefined' && document.hidden) return;
+    refreshPending(sessionId);
   }, 3000);
+  visibilityHandler = () => {
+    if (typeof document !== 'undefined' && !document.hidden) refreshPending(sessionId);
+  };
+  if (typeof document !== 'undefined') {
+    document.addEventListener('visibilitychange', visibilityHandler);
+  }
 }
 
 function stopPollingPending() {
   if (pollInterval) {
     clearInterval(pollInterval);
     pollInterval = null;
+  }
+  if (visibilityHandler && typeof document !== 'undefined') {
+    document.removeEventListener('visibilitychange', visibilityHandler);
+    visibilityHandler = null;
   }
   pendingPrompts = [];
   pendingJoins = [];

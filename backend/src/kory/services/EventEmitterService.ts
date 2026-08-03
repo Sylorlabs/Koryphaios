@@ -100,6 +100,7 @@ export class EventEmitterService {
       question,
       options,
       allowOther,
+      allowKeepChatting: true,
     } satisfies KoryAskUserPayload);
   }
 

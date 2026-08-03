@@ -45,6 +45,10 @@ export interface MemoryState {
   activeTab: 'universal' | 'project' | 'session' | 'rules' | 'settings';
 }
 export interface ProjectMemoryDocument { name: string; path: string; kind: 'memory' | 'rules' }
+export interface ProjectMemoryDocumentFile extends MemoryFile {
+  name: string;
+  kind: 'memory' | 'rules';
+}
 
 // ============================================================================
 // Default Settings
@@ -88,6 +92,37 @@ function createMemoryStore() {
     await loadDocuments();
     toastStore.success('Markdown document created');
     return true;
+  }
+
+  async function loadDocument(name: string, kind: 'memory' | 'rules'): Promise<ProjectMemoryDocumentFile | null> {
+    try {
+      const res = await apiFetch(apiUrl(`/api/memory/documents/${kind}/${encodeURIComponent(name)}`));
+      if (!res.ok) throw new Error('Failed to load document');
+      const data = await res.json();
+      return data.ok ? { ...data.data, name, kind } : null;
+    } catch (err) {
+      toastStore.error('Failed to load document');
+      return null;
+    }
+  }
+
+  async function saveDocument(name: string, kind: 'memory' | 'rules', content: string): Promise<ProjectMemoryDocumentFile | null> {
+    try {
+      const res = await apiFetch(apiUrl(`/api/memory/documents/${kind}/${encodeURIComponent(name)}`), {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ content }),
+      });
+      if (!res.ok) throw new Error('Failed to save document');
+      const data = await res.json();
+      if (!data.ok) return null;
+      const document = { ...data.data, name, kind } as ProjectMemoryDocumentFile;
+      toastStore.success('Document saved');
+      return document;
+    } catch (err) {
+      toastStore.error('Failed to save document');
+      return null;
+    }
   }
 
   // ========================================================================
@@ -538,6 +573,8 @@ function createMemoryStore() {
     setActiveTab,
     loadDocuments,
     createDocument,
+    loadDocument,
+    saveDocument,
   };
 }
 

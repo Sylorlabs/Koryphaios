@@ -8,6 +8,7 @@ export const EXISTING_PROVIDER_ICON_PATHS = new Set<string>([
   '/provider-icons/ionet-color.svg',
   '/provider-icons/jules-color.svg',
   '/provider-icons/jules.svg',
+  '/provider-icons/letta.svg',
   '/provider-icons/llamacpp-color.svg',
   '/provider-icons/lobehub/ace-text.svg',
   '/provider-icons/lobehub/ace.svg',

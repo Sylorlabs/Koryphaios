@@ -246,33 +246,33 @@ export const PROVIDER_CONFIGS: ProviderConfig[] = [
     envKeys: ['HUGGINGFACE_API_KEY', 'HF_TOKEN'],
   },
   {
-    name: 'replicate',
-    baseUrl: 'https://api.replicate.com/v1',
-    authMode: 'api_key',
-    envKeys: ['REPLICATE_API_KEY'],
-  },
-  {
     name: 'modal',
-    baseUrl: 'https://api.modal.com/v1',
+    // Modal serves OpenAI-compatible models from a user-created endpoint URL;
+    // api.modal.com is the control plane, not an inference endpoint.
+    baseUrl: '',
     authMode: 'api_key',
-    envKeys: ['MODAL_API_KEY'],
+    envKeys: ['MODAL_PROXY_TOKEN', 'MODAL_API_KEY'],
+    envUrlKey: 'MODAL_ENDPOINT_URL',
   },
 
   // AI Gateways
   {
     name: 'cloudflare',
-    baseUrl: 'https://api.cloudflare.com/client/v4/accounts',
+    // The account id is part of the OpenAI-compatible inference URL:
+    // https://api.cloudflare.com/client/v4/accounts/<account>/ai/v1
+    baseUrl: '',
     authMode: 'api_key',
     envKeys: ['CLOUDFLARE_API_TOKEN'],
+    envUrlKey: 'CLOUDFLARE_AI_BASE_URL',
   },
   // Note: Vercel AI Gateway is a routing service, not a direct LLM provider
   // Base URL for AI Gateway: https://ai-gateway.vercel.sh/v1 (requires separate setup)
   // Vercel AI SDK is a framework that works with other providers
   {
     name: 'vercel',
-    baseUrl: 'https://ai-gateway.vercel.sh',
+    baseUrl: 'https://ai-gateway.vercel.sh/v1',
     authMode: 'api_key',
-    envKeys: ['VERCEL_API_TOKEN'],
+    envKeys: ['AI_GATEWAY_API_KEY', 'VERCEL_OIDC_TOKEN'],
   },
   {
     name: 'baseten',
@@ -282,7 +282,7 @@ export const PROVIDER_CONFIGS: ProviderConfig[] = [
   },
   {
     name: 'helicone',
-    baseUrl: 'https://api.helicone.ai/v1',
+    baseUrl: 'https://ai-gateway.helicone.ai/v1',
     authMode: 'api_key',
     envKeys: ['HELICONE_API_KEY'],
   },
@@ -388,43 +388,6 @@ export const PROVIDER_CONFIGS: ProviderConfig[] = [
     authMode: 'api_key',
     envKeys: ['PERPLEXITY_API_KEY'],
   },
-  // Note: Luma AI (lu.ma) is for event management - not an LLM API
-  // For Luma Dream Machine (video generation), use fal.ai provider
-  { name: 'luma', baseUrl: 'https://api.luma.ai', authMode: 'api_key', envKeys: ['LUMA_API_KEY'] },
-  { name: 'fal', baseUrl: 'https://queue.fal.run', authMode: 'api_key', envKeys: ['FAL_API_KEY'] },
-
-  // Audio/Speech
-  {
-    name: 'elevenlabs',
-    baseUrl: 'https://api.elevenlabs.io/v1',
-    authMode: 'api_key',
-    envKeys: ['ELEVENLABS_API_KEY'],
-  },
-  {
-    name: 'deepgram',
-    baseUrl: 'https://api.deepgram.com/v1',
-    authMode: 'api_key',
-    envKeys: ['DEEPGRAM_API_KEY'],
-  },
-  {
-    name: 'gladia',
-    baseUrl: 'https://api.gladia.io/v2',
-    authMode: 'api_key',
-    envKeys: ['GLADIA_API_KEY'],
-  },
-  {
-    name: 'assemblyai',
-    baseUrl: 'https://api.assemblyai.com/v2',
-    authMode: 'api_key',
-    envKeys: ['ASSEMBLYAI_API_KEY'],
-  },
-  {
-    name: 'lmnt',
-    baseUrl: 'https://api.lmnt.com/v1',
-    authMode: 'api_key',
-    envKeys: ['LMNT_API_KEY'],
-  },
-
   // Other
   {
     name: 'nvidia',
@@ -439,49 +402,6 @@ export const PROVIDER_CONFIGS: ProviderConfig[] = [
     authMode: 'api_key',
     envKeys: ['FRIENDLI_API_KEY', 'FRIENDLI_TOKEN'],
   },
-  {
-    name: 'voyageai',
-    baseUrl: 'https://api.voyageai.com/v1',
-    authMode: 'api_key',
-    envKeys: ['VOYAGE_API_KEY'],
-  },
-  {
-    name: 'mixedbread',
-    baseUrl: 'https://api.mixedbread.ai/v1',
-    authMode: 'api_key',
-    envKeys: ['MIXEDBREAD_API_KEY'],
-  },
-  {
-    name: 'mem0',
-    baseUrl: 'https://api.mem0.ai/v1',
-    authMode: 'api_key',
-    envKeys: ['MEM0_API_KEY'],
-  },
-  {
-    name: 'letta',
-    baseUrl: 'https://api.letta.com/v1',
-    authMode: 'api_key',
-    envKeys: ['LETTA_API_KEY'],
-  },
-  {
-    name: 'blackforestlabs',
-    baseUrl: 'https://api.blackforestlabs.ai/v1',
-    authMode: 'api_key',
-    envKeys: ['BLACKFORESTLABS_API_KEY'],
-  },
-  {
-    name: 'klingai',
-    baseUrl: 'https://api.klingai.com/v1',
-    authMode: 'api_key',
-    envKeys: ['KLINGAI_API_KEY'],
-  },
-  {
-    name: 'prodia',
-    baseUrl: 'https://api.prodia.com/v1',
-    authMode: 'api_key',
-    envKeys: ['PRODIA_API_KEY'],
-  },
-
   // Additional providers
   {
     name: 'novita-ai',
@@ -530,12 +450,6 @@ export const PROVIDER_CONFIGS: ProviderConfig[] = [
   },
   { name: 'poe', baseUrl: 'https://api.poe.com/v1', authMode: 'api_key', envKeys: ['POE_API_KEY'] },
   {
-    name: 'github-models',
-    baseUrl: 'https://models.github.ai/inference',
-    authMode: 'api_key',
-    envKeys: ['GITHUB_TOKEN'],
-  },
-  {
     name: 'requesty',
     baseUrl: 'https://router.requesty.ai/v1',
     authMode: 'api_key',
@@ -568,7 +482,9 @@ export const PROVIDER_CONFIGS: ProviderConfig[] = [
   // Legacy/enterprise providers kept for backward compatibility with existing configs.
   { name: 'azurecognitive', baseUrl: '', authMode: 'api_key', envKeys: ['AZURE_COGNITIVE_API_KEY'], envUrlKey: 'AZURE_COGNITIVE_RESOURCE_URL' },
   { name: 'sapai', baseUrl: '', authMode: 'api_key', envKeys: ['AICORE_SERVICE_KEY'] },
-  { name: 'gitlab', baseUrl: 'https://gitlab.com/api/v4', authMode: 'api_key', envKeys: ['GITLAB_API_KEY'] },
+  // GitLab Duo's chat REST endpoint is internal-only on GitLab.com and restricted
+  // to GitLab team members/self-managed feature flags, so it is not a public
+  // bring-your-own-key provider connection.
   // Note: Amazon Nova models are accessed through AWS Bedrock, not a separate API
   // Use 'bedrock' provider with nova models instead
 ];

@@ -31,6 +31,13 @@ interface WorkerPipelineResult {
   criticFeedback?: string;
 }
 
+export function resolveGateStrictness(
+  taskKind: ReturnType<typeof classifyTask>,
+  configured: 'strict' | 'advisory' | 'off',
+): 'strict' | 'advisory' | 'off' {
+  return taskKind === 'question' || taskKind === 'research-docs' ? configured : 'strict';
+}
+
 export interface WorkerPipelineConfig {
   getIsYoloMode: () => boolean;
   getWorkingDirectory: () => string;
@@ -123,7 +130,10 @@ export class WorkerPipelineService {
       'Running delegated work inside the configured project jail.',
     );
 
-    await this.config.updateWorkflowState(sessionId, 'executing');
+    // UI phases use "executing", but the durable runtime state machine uses
+    // the canonical "processing" state. Never persist presentation labels as
+    // runtime states.
+    await this.config.updateWorkflowState(sessionId, 'processing');
 
     const domainOverride =
       domainHint && ['general', 'ui', 'backend', 'test', 'review'].includes(domainHint)
@@ -282,8 +292,8 @@ export class WorkerPipelineService {
     const workingDirectory = this.config.getWorkingDirectory();
     const effectivePaths = allowedPaths.length > 0 ? allowedPaths : [workingDirectory];
 
-    if (this.git.isGitRepo()) {
-      const hash = await this.git.getCurrentHash();
+    if (this.git.isGitRepo() && !this.state.getCheckpoint(sessionId)) {
+      const hash = await this.git.createWorktreeCheckpoint();
       if (hash) this.state.saveCheckpoint(sessionId, hash);
     } else {
       await this.snapshotManager.createSnapshot(
@@ -308,8 +318,8 @@ export class WorkerPipelineService {
 
     let attempts = 0;
     const configuredPolicy = this.config.getQualityPolicy();
-    const hardBoundaryTask = classifyTask(userMessage, domain) === 'security-infra';
-    const gateStrictness = hardBoundaryTask ? 'strict' : configuredPolicy.gateStrictness;
+    const taskKind = classifyTask(userMessage, domain);
+    const gateStrictness = resolveGateStrictness(taskKind, configuredPolicy.gateStrictness);
     const maxAttempts = Math.max(1, Math.min(10, configuredPolicy.maxCriticIterations));
     while (attempts < maxAttempts) {
       attempts++;

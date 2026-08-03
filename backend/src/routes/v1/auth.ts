@@ -2,6 +2,14 @@ import { Elysia } from 'elysia';
 import { localAuth } from '../../auth/local-auth';
 import { buildLocalBearerToken } from '../../auth/local-route-auth';
 
+const LOOPBACK_HOSTS = new Set(['127.0.0.1', '::1', 'localhost']);
+
+function isLoopbackServer(): boolean {
+  const host = process.env.KORYPHAIOS_HOST;
+  if (!host) return true;
+  return LOOPBACK_HOSTS.has(host);
+}
+
 export const authRoutes = new Elysia({ prefix: '/api/auth' })
   .get('/me', async ({ request }) => {
     const authHeader = request.headers.get('authorization');
@@ -42,17 +50,14 @@ export const authRoutes = new Elysia({ prefix: '/api/auth' })
   })
   .post(
     '/session',
-    async ({ request, set }) => {
-      const clientIp = (request.headers.get('x-forwarded-for') ?? '127.0.0.1').split(',')[0].trim();
-      const isLocal = clientIp === '127.0.0.1' || clientIp === '::1' || clientIp === 'local' || clientIp.startsWith('192.168.') || clientIp.startsWith('10.') || clientIp.startsWith('172.');
-      if (!isLocal) {
-        if (set) set.status = 403;
-        return { ok: false, error: 'Session creation is restricted to local network.' };
+    async ({ set }) => {
+      if (!isLoopbackServer()) {
+        set.status = 403;
+        return { ok: false, error: 'Session creation is restricted to loopback-only servers. Use the setup token flow instead.' };
       }
 
       const permissions = ['*'];
       const session = localAuth.createSession(permissions);
-      const sessionData = localAuth['sessions'].get(session.sessionId);
       const bearerToken = buildLocalBearerToken(session);
 
       return {
@@ -61,7 +66,7 @@ export const authRoutes = new Elysia({ prefix: '/api/auth' })
           bearerToken,
           sessionId: session.sessionId,
           signature: session.signature,
-          expiresAt: sessionData?.expiresAt,
+          expiresAt: session.expiresAt,
         },
       };
     },

@@ -22,7 +22,12 @@ import { join, resolve } from 'node:path';
 import { toolLog } from './logger';
 import { SECURITY } from './constants';
 
-// ─── Bash Command Sandboxing ────────────────────────────────────────────────
+// ─── Bash Command Denylist (defense-in-depth, NOT a sandbox) ────────────────
+// This is a denylist of known-dangerous patterns, NOT a sandbox. It provides
+// defense-in-depth but cannot prevent all command injection. Real sandboxing
+// requires OS-level isolation (see ./security/bash-sandbox for the sandbox
+// validator used by the Bash tool, which enforces a command whitelist and
+// blocks shell metacharacters in sandboxed mode).
 
 const BLOCKED_PATTERNS = [
   /\brm\s+(-[a-zA-Z]*f[a-zA-Z]*\s+)?\/\s*$/, // rm -rf /
@@ -34,7 +39,9 @@ const BLOCKED_PATTERNS = [
   /\bchown\s+(-R\s+)?.*\s+\//, // chown at root
   />\s*\/dev\/sd[a-z]/, // write to raw disk
   /\bcurl\b.*\|\s*\bbash\b/, // curl | bash
-  /\bwget\b.*\|\s*\bbash\b/,
+  /\bwget\b.*\|\s*\bbash\b/, // wget | bash
+  /\bcurl\b.*\|\s*\bsh\b/, // curl | sh
+  /\bwget\b.*\|\s*\bsh\b/, // wget | sh
   /\beval\b.*\$\(/, // eval with command substitution
   /\/etc\/passwd/,
   /\/etc\/shadow/,
@@ -53,6 +60,7 @@ const BLOCKED_PATTERNS = [
   /\$\(/, // command substitution $(...)
   /`[^`]*`/, // backtick command substitution
   /\bpython[23]?\s+-c\b/, // python -c (arbitrary code execution)
+  /\bpython[23]?\s*<</, // python heredoc (arbitrary code execution)
   /\bperl\s+-e\b/, // perl -e (arbitrary code execution)
   /\bruby\s+-e\b/, // ruby -e (arbitrary code execution)
   /\bnc\b.*-[elp]/, // netcat listeners
@@ -60,6 +68,12 @@ const BLOCKED_PATTERNS = [
   /\bsocat\b/, // socat
   /\bcrontab\b/, // crontab modification
   /\bat\b\s+/, // at command (scheduled execution)
+  /\bbash\s+-c\b/, // bash -c (arbitrary code execution)
+  /\bsh\s+-c\b/, // sh -c (arbitrary code execution)
+  /\benv\s+-i\b/, // env -i (strips environment, used to evade restrictions)
+  /\bexec\b/, // exec (replaces shell process)
+  /\bsource\b/, // source (executes a file in the current shell)
+  /\b\.\s+\//, // dot-sourcing ./script (executes in current shell)
 ];
 
 const BLOCKED_EXACT = new Set([
@@ -71,7 +85,16 @@ const BLOCKED_EXACT = new Set([
   'yes | rm -r /',
 ]);
 
-export function validateBashCommand(command: string): { safe: boolean; reason?: string } {
+/**
+ * Audit a bash command against a denylist of known-dangerous patterns.
+ *
+ * WARNING: This is a denylist of known-dangerous patterns, NOT a sandbox. It
+ * provides defense-in-depth but cannot prevent all command injection. Real
+ * sandboxing requires OS-level isolation. For the actual sandbox validator
+ * (command whitelist + shell-metacharacter blocking), use `validateBashCommand`
+ * from ./security/bash-sandbox.
+ */
+export function auditBashDenylist(command: string): { safe: boolean; reason?: string } {
   const trimmed = command.trim();
 
   if (BLOCKED_EXACT.has(trimmed)) {
@@ -104,6 +127,7 @@ export function validateBashCommand(command: string): { safe: boolean; reason?: 
 // Maps hostname -> { ips: string[], timestamp: number }
 const validatedHostCache = new Map<string, { ips: string[]; timestamp: number }>();
 const DNS_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
+const MAX_CACHE_SIZE = 1000; // bound the cache to prevent unbounded memory growth
 
 /**
  * Validate a URL is safe to fetch — blocks SSRF, file://, and private network access.
@@ -148,47 +172,35 @@ export async function validateUrl(url: string): Promise<{
     return { safe: false, reason: 'Blocked: localhost is a restricted address' };
   }
 
-  // Block cloud provider metadata service hostnames
-  // These endpoints expose cloud instance metadata and credentials
-  const CLOUD_METADATA_HOSTNAMES = [
-    // AWS
+  // Cloud provider metadata service hostnames expose instance credentials.
+  // Deduplicated: 169.254.169.254 appeared once per provider — kept once here.
+  const CLOUD_METADATA_HOSTNAMES = new Set<string>([
+    // AWS / Azure / DigitalOcean / Linode / Vultr / Oracle / IBM (shared IP)
     '169.254.169.254',
     'metadata.ec2.internal',
     'instance-data.ec2.internal',
     // GCP
     'metadata.google.internal',
     'metadata.google',
-    // Azure
-    '169.254.169.254',
     'management.azure',
     'management.core.windows.net',
-    // DigitalOcean
-    '169.254.169.254',
     'digitalocean-metadata',
     // Packet/Equinix
     'metadata.packet.net',
     'metadata.equinix.com',
-    // Linode
-    '169.254.169.254',
     'metadata.linode.com',
-    // Vultr
-    '169.254.169.254',
     'metadata.vultr.com',
-    // Oracle Cloud
-    '169.254.169.254',
     'compute.metadata.oracle.com',
     // Alibaba Cloud
     '100.100.100.200',
     'meta.taobao.ali.com',
-    // IBM Cloud
-    '169.254.169.254',
     'metadata.service.softlayer.com',
     // OVHcloud
     '100.64.0.1',
     'metadata.ovh.net',
-  ];
+  ]);
 
-  if (CLOUD_METADATA_HOSTNAMES.includes(hostname)) {
+  if (CLOUD_METADATA_HOSTNAMES.has(hostname)) {
     return {
       safe: false,
       reason: 'Blocked: cloud metadata service is restricted (SSRF protection)',
@@ -259,8 +271,13 @@ export async function validateUrl(url: string): Promise<{
       }
     }
 
-    // Cache the validated IPs
+    // Cache the validated IPs (FIFO eviction when the cache is full)
     const allIps = [...addresses, ...addresses6];
+    if (validatedHostCache.size >= MAX_CACHE_SIZE) {
+      // Evict the oldest entry (Map preserves insertion order)
+      const oldest = validatedHostCache.keys().next().value;
+      if (oldest !== undefined) validatedHostCache.delete(oldest);
+    }
     validatedHostCache.set(hostname, { ips: allIps, timestamp: now });
 
     return {
@@ -281,6 +298,43 @@ export async function validateUrl(url: string): Promise<{
  */
 export function clearValidateUrlCache(): void {
   validatedHostCache.clear();
+}
+
+/**
+ * Fetch a URL with SSRF protection that pins the resolved IP at request time.
+ *
+ * This prevents DNS-rebinding TOCTOU attacks: validateUrl resolves and checks
+ * the IPs, then safeFetch rewrites the URL hostname to the validated IP and
+ * sets the Host header to the original hostname (preserving virtual hosting).
+ *
+ * Callers MUST use safeFetch instead of raw fetch for any user-controlled URL.
+ */
+export async function safeFetch(url: string, init?: RequestInit): Promise<Response> {
+  const validation = await validateUrl(url);
+  if (!validation.safe) {
+    throw new Error(`SSRF protection blocked fetch: ${validation.reason}`);
+  }
+
+  const parsed = new URL(url);
+  const originalHostname = validation.validatedHostname ?? parsed.hostname;
+  const validatedIp = validation.validatedIps?.[0];
+
+  // Build headers, preserving any caller-supplied headers and setting Host.
+  const headers = new Headers(init?.headers);
+  // Only set Host if we are rewriting the hostname to an IP (not already a literal).
+  let fetchUrl = url;
+  if (validatedIp && !/^\d{1,3}(\.\d{1,3}){3}$/.test(parsed.hostname) && !parsed.hostname.startsWith('[')) {
+    // Rewrite hostname to the pinned IP; bracket IPv6 literals.
+    const ipHost = validatedIp.includes(':') ? `[${validatedIp}]` : validatedIp;
+    parsed.hostname = ipHost;
+    fetchUrl = parsed.toString();
+    // Preserve original hostname for virtual hosting (do not overwrite if caller set it).
+    if (!headers.has('Host')) {
+      headers.set('Host', originalHostname);
+    }
+  }
+
+  return fetch(fetchUrl, { ...init, headers });
 }
 
 function isPrivateIPv4(ip: string): boolean {
@@ -306,41 +360,73 @@ function isPrivateIPv4(ip: string): boolean {
   );
 }
 
-function isPrivateIPv6(ip: string): boolean {
+/**
+ * Parse an IPv6 address string into a 128-bit BigInt.
+ * Handles :: expansion and leading-zero omission per RFC 4291.
+ * Returns null for malformed addresses.
+ */
+function parseIPv6ToBigInt(ip: string): bigint | null {
   const lower = ip.toLowerCase();
+  const doubleColonCount = (lower.match(/::/g) ?? []).length;
+  if (doubleColonCount > 1) return null;
+
+  let working = lower;
+  const groups: string[] = working.split('::');
+  if (groups.length === 2) {
+    const [head, tail] = groups;
+    const headParts = head ? head.split(':') : [];
+    const tailParts = tail ? tail.split(':') : [];
+    const missing = 8 - headParts.length - tailParts.length;
+    if (missing < 0) return null;
+    working = [...headParts, ...Array(missing).fill('0'), ...tailParts].join(':');
+  }
+
+  const parts = working.split(':');
+  if (parts.length !== 8) return null;
+
+  let value = 0n;
+  for (const part of parts) {
+    if (!/^[0-9a-f]{1,4}$/.test(part)) return null;
+    value = (value << 16n) | BigInt(parseInt(part, 16));
+  }
+  return value;
+}
+
+/** Check whether a BigInt falls within a CIDR range (address & mask === network). */
+function ipv6InRange(addr: bigint, network: bigint, mask: bigint): boolean {
+  return (addr & mask) === network;
+}
+
+const IPV6_LOOPBACK = 1n; // ::1
+const IPV6_UNSPECIFIED = 0n; // ::
+// fc00::/7 — Unique Local Addresses
+const ULA_NETWORK = BigInt('0xfc000000000000000000000000000000');
+const ULA_MASK = BigInt('0xfe000000000000000000000000000000');
+// fe80::/10 — Link-Local
+const LINKLOCAL_NETWORK = BigInt('0xfe800000000000000000000000000000');
+const LINKLOCAL_MASK = BigInt('0xffc00000000000000000000000000000');
+// ::ffff:0:0/96 — IPv4-mapped
+const V4MAPPED_NETWORK = BigInt('0x00000000000000000000ffff00000000');
+const V4MAPPED_MASK = BigInt('0xffffffffffffffffffffffff00000000');
+// 64:ff9b::/96 — IPv4-IPv6 translation (NAT64)
+const NAT64_NETWORK = BigInt('0x0064ff9b000000000000000000000000');
+const NAT64_MASK = BigInt('0xffffffffffffffffffffffff00000000');
+// ff00::/8 — Multicast
+const MULTICAST_NETWORK = BigInt('0xff000000000000000000000000000000');
+const MULTICAST_MASK = BigInt('0xff000000000000000000000000000000');
+
+function isPrivateIPv6(ip: string): boolean {
+  const addr = parseIPv6ToBigInt(ip);
+  if (addr === null) return false;
 
   return (
-    lower === '::1' || // loopback
-    lower === '::' || // unspecified
-    lower.startsWith('fc') || // fc00::/7 (unique local)
-    lower.startsWith('fd') || // fd00::/8 (unique local)
-    lower.startsWith('fe8') || // fe80::/10 (link-local)
-    lower.startsWith('fe9') || // fe90::/10 (link-local)
-    lower.startsWith('fea') || // fea0::/10 (link-local)
-    lower.startsWith('feb') || // feb0::/10 (link-local)
-    lower.startsWith('::ffff:') || // IPv4-mapped IPv6 (::ffff:0:0/96)
-    lower.startsWith('64:ff9b:') || // IPv4-IPv6 translation (64:ff9b::/96)
-    lower.startsWith('fd00') || // ULA
-    lower.startsWith('fd01') || // ULA
-    lower.startsWith('fd02') || // ULA
-    lower.startsWith('fd03') || // ULA
-    lower.startsWith('fd04') || // ULA
-    lower.startsWith('fd05') || // ULA
-    lower.startsWith('fd06') || // ULA
-    lower.startsWith('fd07') || // ULA
-    lower.startsWith('fd08') || // ULA
-    lower.startsWith('fd09') || // ULA
-    lower.startsWith('fd0a') || // ULA
-    lower.startsWith('fd0b') || // ULA
-    lower.startsWith('fd0c') || // ULA
-    lower.startsWith('fd0d') || // ULA
-    lower.startsWith('fd0e') || // ULA
-    lower.startsWith('fd0f') || // ULA
-    lower.startsWith('fd1') ||
-    lower.startsWith('fd2') ||
-    lower.startsWith('fd3') || // More ULA
-    lower.startsWith('fe') || // Reserved for IETF
-    lower.startsWith('ff') // Multicast
+    addr === IPV6_LOOPBACK || // ::1 (loopback)
+    addr === IPV6_UNSPECIFIED || // :: (unspecified)
+    ipv6InRange(addr, ULA_NETWORK, ULA_MASK) || // fc00::/7 (ULA)
+    ipv6InRange(addr, LINKLOCAL_NETWORK, LINKLOCAL_MASK) || // fe80::/10 (link-local)
+    ipv6InRange(addr, V4MAPPED_NETWORK, V4MAPPED_MASK) || // ::ffff:0:0/96 (IPv4-mapped)
+    ipv6InRange(addr, NAT64_NETWORK, NAT64_MASK) || // 64:ff9b::/96 (NAT64)
+    ipv6InRange(addr, MULTICAST_NETWORK, MULTICAST_MASK) // ff00::/8 (multicast)
   );
 }
 
@@ -352,15 +438,19 @@ export function sanitizeString(input: unknown, maxLength = 10_000): string {
 }
 
 /**
- * Sanitize user input before interpolating it into LLM system/user prompts.
+ * WARNING: This function provides minimal defense-in-depth only. It CANNOT
+ * prevent prompt injection. User content MUST be passed as a `user` role
+ * message, never interpolated into system prompts. This function exists as a
+ * legacy compatibility shim only.
  *
- * Defense-in-depth: strips common prompt injection patterns such as
- * instruction overrides, role impersonation markers, and system prompt
- * leak attempts. This does NOT make arbitrary interpolation safe on its
- * own — prefer passing user content as a `user` message rather than
- * embedding it in `systemPrompt` when possible.
+ * Defense-in-depth: strips a handful of common prompt-injection patterns
+ * (instruction overrides, role impersonation markers, system-prompt leak
+ * attempts). The trailing replaceAll for `\`, backtick, and `\$` escapes
+ * characters so the result is safe to interpolate inside a JS template
+ * literal; this is intentional and correct for that use case (it escapes the
+ * already-cleaned string, not the raw input).
  */
-export function sanitizeForPrompt(input: string, maxLength = 10_000): string {
+export function defenseInDepthPromptSanitizer(input: string, maxLength = 10_000): string {
   let cleaned = input.slice(0, maxLength).trim();
 
   const injectionPatterns: RegExp[] = [
@@ -495,6 +585,16 @@ import { EnvelopeEncryption, createKMSProviderFromEnv } from './crypto';
 
 let envelopeEncryption: EnvelopeEncryption | null = null;
 
+// Set by markEncryptionFailed() when startup initialization fails in non-prod.
+// encryptForStorage checks this to fail fast with a clear message instead of
+// retrying the same broken configuration on the first key-write.
+let encryptionInitFailed = false;
+
+/** Mark envelope encryption as permanently failed (called by bootstrap on init error). */
+export function markEncryptionFailed(): void {
+  encryptionInitFailed = true;
+}
+
 /**
  * Initialize the envelope encryption system
  * Call this during server startup
@@ -568,6 +668,11 @@ export function isUsingSecureEncryption(): boolean {
  * In production, envelope encryption is required; in development, falls back to legacy with a warning.
  */
 export async function encryptForStorage(plaintext: string): Promise<string> {
+  if (encryptionInitFailed) {
+    throw new Error(
+      'Envelope encryption initialization failed at startup and is disabled. Fix the KMS configuration and restart the server before writing encrypted credentials.',
+    );
+  }
   if (!envelopeEncryption) {
     if (process.env.NODE_ENV === 'production') {
       throw new Error(

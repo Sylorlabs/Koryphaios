@@ -5,9 +5,11 @@
  */
 
 const { spawn } = await import('node:child_process');
-const { readFileSync, existsSync } = await import('node:fs');
+const { readFileSync, existsSync, createWriteStream, mkdirSync } = await import('node:fs');
 const { resolve } = await import('node:path');
 const net = await import('node:net');
+
+process.env.KORYPHAIOS_DESKTOP_DEV = process.env.KORYPHAIOS_DESKTOP_DEV ?? '1';
 
 type Child = ReturnType<typeof spawn>;
 
@@ -31,21 +33,39 @@ const DESKTOP_DIR = resolve(PROJECT_ROOT, 'desktop');
 const APP_CONFIG_PATH = resolve(PROJECT_ROOT, 'config', 'app.config.json');
 const ACTIVE_PORT_PATH = resolve(PROJECT_ROOT, '.koryphaios', '.active-port.json');
 const KORYPHAIOS_BACKEND_ID = 'koryphaios';
+const BACKEND_LOG_DIR = resolve(PROJECT_ROOT, 'data', 'logs');
+// Backend restart backoff: start fast (the user wants recovery ASAP), grow
+// exponentially, cap at 10s so a crash-looping backend doesn't hammer the CPU.
+const BACKEND_RESTART_INITIAL_BACKOFF_MS = 500;
+const BACKEND_RESTART_MAX_BACKOFF_MS = 10_000;
+// Keep the native app's backend stable while agents/editors are changing the
+// worktree. Bun's --watch stops the healthy server before it knows whether the
+// replacement source parses, so an atomic-looking save can strand the desktop
+// UI on its backend-down overlay. Live backend reload remains available as an
+// explicit opt-in for developers who accept that interruption.
+const BACKEND_WATCH_ENABLED = process.env.KORYPHAIOS_BACKEND_WATCH === '1';
 
 const BACKEND_READY_TIMEOUT_MS = Number(process.env.KORYPHAIOS_BACKEND_READY_TIMEOUT_MS ?? 120_000);
+// A restarted backend doesn't need to re-initialise MCP servers from scratch
+// (they're already cached), so we can use a tighter timeout than the initial
+// 120s cold-start window.
+const BACKEND_RESTART_READY_TIMEOUT_MS = Number(
+  process.env.KORYPHAIOS_BACKEND_RESTART_READY_TIMEOUT_MS ?? 30_000,
+);
 const FRONTEND_READY_TIMEOUT_MS = Number(
   process.env.KORYPHAIOS_FRONTEND_READY_TIMEOUT_MS ?? 60_000,
 );
 const POLL_INTERVAL_MS = 500;
 const PROGRESS_INTERVAL_MS = 5_000;
 // Post-start watchdog: how often to poll /api/health after everything is up.
+const isDesktopDev = process.env.KORYPHAIOS_DESKTOP_DEV === '1';
 const BACKEND_WATCHDOG_INTERVAL_MS = Number(
-  process.env.KORYPHAIOS_BACKEND_WATCHDOG_INTERVAL_MS ?? 3_000,
+  process.env.KORYPHAIOS_BACKEND_WATCHDOG_INTERVAL_MS ?? (isDesktopDev ? 1_000 : 3_000),
 );
 // Consecutive failed health checks before tearing the whole workflow down.
 // At 3s cadence, 5 failures ~= 15s of sustained regression.
 const BACKEND_WATCHDOG_FAIL_THRESHOLD = Number(
-  process.env.KORYPHAIOS_BACKEND_WATCHDOG_FAIL_THRESHOLD ?? 5,
+  process.env.KORYPHAIOS_BACKEND_WATCHDOG_FAIL_THRESHOLD ?? (isDesktopDev ? 3 : 5),
 );
 
 const colors = {
@@ -101,17 +121,38 @@ const sharedEnv = {
 
 const children: ManagedChild[] = [];
 let shuttingDown = false;
+let ownedBackend: Child | null = null;
+let backendRecoveryInFlight = false;
+let backendRestartTimer: ReturnType<typeof setTimeout> | null = null;
+let backendRestartBackoffMs = BACKEND_RESTART_INITIAL_BACKOFF_MS;
 
-function track(name: string, proc: Child, owned = true) {
+/** Remove all tracked children matching `name` so cleanup() doesn't signal an
+ *  already-exited process after a restartable death. */
+function untrack(name: string) {
+  for (let i = children.length - 1; i >= 0; i--) {
+    if (children[i].name === name) children.splice(i, 1);
+  }
+}
+
+function track(name: string, proc: Child, owned = true, onExit?: () => void) {
   children.push({ name, proc, owned });
   proc.on('exit', (code, signal) => {
     if (shuttingDown) return;
+    if (onExit) {
+      log(`\n${name} exited (code=${code}, signal=${signal}) — recovering...`, colors.yellow);
+      onExit();
+      return;
+    }
     log(`\n${name} exited unexpectedly (code=${code}, signal=${signal})`, colors.red);
     void cleanup(code ?? 1);
   });
   proc.on('error', (err: Error) => {
     if (shuttingDown) return;
     log(`\n${name} failed: ${err.message}`, colors.red);
+    if (onExit) {
+      onExit();
+      return;
+    }
     void cleanup(1);
   });
 }
@@ -119,6 +160,12 @@ function track(name: string, proc: Child, owned = true) {
 async function cleanup(exitCode = 0) {
   if (shuttingDown) return;
   shuttingDown = true;
+  // Cancel any pending backend restart so it doesn't fire after we've begun
+  // tearing down — that would spawn a fresh backend into a dying workflow.
+  if (backendRestartTimer) {
+    clearTimeout(backendRestartTimer);
+    backendRestartTimer = null;
+  }
   log('\nShutting down desktop workflow...', colors.yellow);
   for (const { name, proc, owned } of [...children].reverse()) {
     if (!owned || proc.killed) continue;
@@ -150,6 +197,43 @@ function pipeLogs(
     for (const line of lines) {
       if (!line.trim()) continue;
       log(`[${name}] ${line}`, color);
+    }
+  });
+}
+
+// ─── Backend file logging ───────────────────────────────────────────────────
+// In dev mode the backend's stdout/stderr go to the terminal via pipeLogs, but
+// if the terminal closes (or the user backgrounds the launcher) the crash
+// trace is lost forever. Mirror backend output to data/logs/ so a crashed
+// backend always leaves a postmortem — same convention as the production
+// Tauri supervisor (app_data_dir/logs/backend.log).
+let backendFileOut: ReturnType<typeof createWriteStream> | null = null;
+let backendFileErr: ReturnType<typeof createWriteStream> | null = null;
+
+function openBackendFileLogs() {
+  try {
+    mkdirSync(BACKEND_LOG_DIR, { recursive: true });
+    backendFileOut = createWriteStream(resolve(BACKEND_LOG_DIR, 'backend-dev.log'), {
+      flags: 'a',
+    });
+    backendFileErr = createWriteStream(resolve(BACKEND_LOG_DIR, 'backend-dev.err.log'), {
+      flags: 'a',
+    });
+  } catch {
+    // File logging is best-effort; don't block startup if the dir is read-only.
+  }
+}
+
+function pipeBackendToFile(
+  stream: NodeJS.ReadableStream | null | undefined,
+  fileStream: ReturnType<typeof createWriteStream> | null,
+) {
+  if (!stream || !fileStream) return;
+  stream.on('data', (chunk: Buffer | string) => {
+    try {
+      fileStream.write(chunk);
+    } catch {
+      // ignore — file logging is best-effort
     }
   });
 }
@@ -254,6 +338,7 @@ async function resolvePortState(
       activePort?.host === backendClientHost &&
       activePort.port === backendPort &&
       activePort.pid === health?.data?.pid &&
+      typeof activePort.pid === 'number' &&
       isProcessAlive(activePort.pid);
     if (!markerMatches) {
       throw new Error(
@@ -297,6 +382,104 @@ async function waitForReady(
   throw new Error(`${label} did not become ready within ${timeoutMs}ms`);
 }
 
+function startOwnedBackend(): Child {
+  const backendArgs = BACKEND_WATCH_ENABLED
+    ? ['run', '--watch', 'src/server.ts']
+    : ['run', 'src/server.ts'];
+  const backend = spawn('bun', backendArgs, {
+    cwd: BACKEND_DIR,
+    env: sharedEnv,
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  untrack('backend');
+  ownedBackend = backend;
+  // The backend is restartable: when it exits, schedule a restart instead of
+  // tearing down Vite/Tauri. A working UI without a working backend is the
+  // exact failure mode we're preventing — but killing the frontend on every
+  // transient backend crash is the opposite extreme.
+  track('backend', backend, true, () => scheduleBackendRestart('process exited'));
+  pipeLogs('backend', backend.stdout, colors.dim);
+  pipeLogs('backend', backend.stderr, colors.yellow);
+  // Mirror to files so a crashed backend leaves a postmortem even if the
+  // terminal that launched `bun run dev` is already closed.
+  pipeBackendToFile(backend.stdout, backendFileOut);
+  pipeBackendToFile(backend.stderr, backendFileErr);
+  return backend;
+}
+
+/** Schedule a backend restart with exponential backoff. Debounces rapid
+ *  exit/error events so a crash-looping backend doesn't spawn dozens of
+ *  processes per second. Safe to call from the exit handler, the error
+ *  handler, or the watchdog — only one restart is ever in-flight at a time. */
+function scheduleBackendRestart(reason: string): void {
+  if (shuttingDown) return;
+  if (backendRecoveryInFlight) {
+    // A recovery is already running (waitForReady is polling). When it fails
+    // it will schedule its own follow-up restart, so don't queue a duplicate.
+    return;
+  }
+  if (backendRestartTimer) return; // already scheduled
+  const delay = backendRestartBackoffMs;
+  backendRestartBackoffMs = Math.min(
+    backendRestartBackoffMs * 2,
+    BACKEND_RESTART_MAX_BACKOFF_MS,
+  );
+  log(
+    `Backend restart scheduled in ${Math.round(delay / 100) / 10}s (${reason})`,
+    colors.yellow,
+  );
+  backendRestartTimer = setTimeout(() => {
+    backendRestartTimer = null;
+    void performBackendRestart();
+  }, delay);
+}
+
+async function performBackendRestart(): Promise<void> {
+  if (shuttingDown || backendRecoveryInFlight) return;
+  backendRecoveryInFlight = true;
+  let success = false;
+  try {
+    // Kill any lingering backend process before spawning a replacement.
+    if (ownedBackend && !ownedBackend.killed) {
+      try { ownedBackend.kill('SIGTERM'); } catch {}
+      await new Promise((r) => setTimeout(r, 200));
+      // Force kill if still alive
+      try {
+        if (ownedBackend.exitCode === null && ownedBackend.signalCode === null) {
+          ownedBackend.kill('SIGKILL');
+        }
+      } catch {}
+    }
+    untrack('backend');
+    log('Spawning new backend process...', colors.blue);
+    startOwnedBackend();
+    await waitForReady(
+      'restarted backend',
+      isBackendHealthy,
+      BACKEND_RESTART_READY_TIMEOUT_MS,
+    );
+    log('Backend recovered', colors.green);
+    // Reset backoff after a successful recovery so the next crash restarts
+    // immediately instead of waiting for the exponential backoff to decay.
+    backendRestartBackoffMs = BACKEND_RESTART_INITIAL_BACKOFF_MS;
+    success = true;
+  } catch (error) {
+    log(
+      `Backend recovery failed: ${error instanceof Error ? error.message : String(error)}`,
+      colors.red,
+    );
+  } finally {
+    backendRecoveryInFlight = false;
+  }
+  // Schedule a follow-up restart AFTER clearing backendRecoveryInFlight so
+  // the guard in scheduleBackendRestart doesn't reject it. The new backend's
+  // exit handler will also fire if the process died, but if it's hanging
+  // (alive but unhealthy) this is the only path to recovery.
+  if (!success && !shuttingDown) {
+    scheduleBackendRestart('health-check timeout');
+  }
+}
+
 async function main() {
   if (!existsSync(BACKEND_DIR) || !existsSync(FRONTEND_DIR) || !existsSync(DESKTOP_DIR)) {
     throw new Error('Expected backend, frontend, and desktop workspaces to exist.');
@@ -307,6 +490,10 @@ async function main() {
   log(`Backend:  ${backendUrl}`, colors.dim);
   log(`Frontend: ${frontendUrl} (internal dev server for Tauri)`, colors.dim);
   log(`Socket:   ${websocketUrl}`, colors.dim);
+  log(
+    `Reload:   ${BACKEND_WATCH_ENABLED ? 'watching backend source (interruptible)' : 'stable backend process'}`,
+    colors.dim,
+  );
   log('Open the native Koryphaios window — no browser required.', colors.dim);
   log('', colors.reset);
 
@@ -318,14 +505,8 @@ async function main() {
   );
 
   if (backendState === 'free') {
-    const backend = spawn('bun', ['run', 'src/server.ts'], {
-      cwd: BACKEND_DIR,
-      env: sharedEnv,
-      stdio: ['ignore', 'pipe', 'pipe'],
-    });
-    track('backend', backend);
-    pipeLogs('backend', backend.stdout, colors.dim);
-    pipeLogs('backend', backend.stderr, colors.yellow);
+    openBackendFileLogs();
+    startOwnedBackend();
 
     log('Waiting for backend health...', colors.blue);
     await waitForReady(
@@ -381,11 +562,9 @@ async function main() {
   log('Native desktop app is running.', colors.green);
   log('Press Ctrl+C to stop all processes.', colors.dim);
 
-  // Post-start watchdog: the launcher already exits on raw process death,
-  // but a backend can hang or stop responding while still alive. Poll health
-  // continuously and tear down EVERYTHING (frontend + Tauri) when the backend
-  // is sustained-unhealthy — a working UI without a working backend is the
-  // exact failure mode we're preventing.
+  // Post-start watchdog: keep an owned backend recoverable without tearing
+  // down the desktop shell. A reused external backend remains fail-closed:
+  // the launcher cannot safely kill or replace a process it does not own.
   let consecutiveFailures = 0;
   (async () => {
     while (!shuttingDown) {
@@ -402,12 +581,19 @@ async function main() {
         colors.yellow,
       );
       if (consecutiveFailures >= BACKEND_WATCHDOG_FAIL_THRESHOLD) {
-        log(
-          `Backend stayed unhealthy for ~${consecutiveFailures * Math.round(BACKEND_WATCHDOG_INTERVAL_MS / 1000)}s — shutting down frontend + Tauri. A stale UI without a working backend is not allowed.`,
-          colors.red,
-        );
-        void cleanup(1);
-        return;
+        if (ownedBackend) {
+          // scheduleBackendRestart handles backoff and deduplication; the
+          // exit handler also calls it so we don't double-restart.
+          scheduleBackendRestart('health regression');
+          consecutiveFailures = 0; // reset; the restart cycle owns the countdown
+        } else {
+          log(
+            'The reused backend stayed unhealthy and is not launcher-owned — shutting down desktop workflow.',
+            colors.red,
+          );
+          void cleanup(1);
+          return;
+        }
       }
     }
   })();

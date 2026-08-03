@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test';
+import { Elysia } from 'elysia';
 import { authRoutes } from '../src/routes/v1/auth';
 import { sessionRoutes } from '../src/routes/v1/sessions';
 import {
@@ -12,6 +13,29 @@ type JsonResponse = Record<string, any>;
 
 async function readJson(response: Response): Promise<JsonResponse> {
   return (await response.json()) as JsonResponse;
+}
+
+// Build a test app with the inline auth guard (mirrors server.ts setup).
+// Elysia 1.4.x does NOT short-circuit when `.guard()` is in a `.use()`d
+// plugin, so the guard must be applied inline on the main app instance.
+function buildGuardedApp() {
+  return new Elysia()
+    .use(authRoutes)
+    .derive(({ request }) => ({
+      session: validateLocalBearerToken(request.headers.get('authorization')) as any,
+    }))
+    .guard({
+      beforeHandle: ({ request, set, session }: any) => {
+        const url = new URL(request.url);
+        const UNAUTHED_PATHS = new Set(['/api/health', '/api/auth/login', '/api/auth/status', '/api/auth/me']);
+        if (UNAUTHED_PATHS.has(url.pathname)) return;
+        if (!session) {
+          set.status = 401;
+          return { ok: false, error: 'Unauthorized' };
+        }
+      },
+    })
+    .use(sessionRoutes);
 }
 
 describe('local route auth guard', () => {
@@ -52,7 +76,8 @@ describe('local route auth guard', () => {
   });
 
   test('protected routes return 401 before touching app context', async () => {
-    const response = await sessionRoutes.handle(new Request('http://localhost/api/sessions'));
+    const app = buildGuardedApp();
+    const response = await app.handle(new Request('http://localhost/api/sessions'));
     const body = await readJson(response);
 
     expect(response.status).toBe(401);

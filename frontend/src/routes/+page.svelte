@@ -1,20 +1,19 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
+	import { onMount } from 'svelte';
   import { wsStore } from '$lib/stores/websocket.svelte';
   import { theme } from '$lib/stores/theme.svelte';
   import { sessionStore } from '$lib/stores/sessions.svelte';
   import { projectStore, projectDisplayName } from '$lib/stores/project.svelte';
   import { authStore } from '$lib/stores/auth.svelte';
-  import { isDemoMode, isFullDemo, isGuidedDemo } from '$lib/demo.svelte';
+  import { isDemoMode, isGuidedDemo } from '$lib/demo.svelte';
   import { appStore } from '$lib/stores/app.svelte';
   import { toastStore } from '$lib/stores/toast.svelte';
-  import { modeStore } from '$lib/stores/mode.svelte';
+  import { agentSettingsStore } from '$lib/stores/agent-settings.svelte';
   import { apiFetch } from '$lib/api.svelte';
   import { apiUrl } from '$lib/utils/api-url';
   import ManagerFeed from '$lib/components/ManagerFeed.svelte';
   import AgentThreadFeed from '$lib/components/AgentThreadFeed.svelte';
   import CommandInput from '$lib/components/CommandInput.svelte';
-  import DiffEditor from '$lib/components/DiffEditor.svelte';
   import PermissionDialog from '$lib/components/PermissionDialog.svelte';
   import QuestionDialog from '$lib/components/QuestionDialog.svelte';
   import ChangesSummary from '$lib/components/ChangesSummary.svelte';
@@ -22,6 +21,7 @@
   import ToastContainer from '$lib/components/ToastContainer.svelte';
   import CommandPalette from '$lib/components/CommandPalette.svelte';
   import { goalDisplayStore } from '$lib/stores/goal-display.svelte';
+  import { goalStore } from '$lib/stores/goals.svelte';
   import MenuBar from '$lib/components/MenuBar.svelte';
   import ThemePickerModal from '$lib/components/ThemePickerModal.svelte';
   import BackgroundShells from '$lib/components/BackgroundShells.svelte';
@@ -30,9 +30,11 @@
   import { useAgentRail } from '$lib/components/shell/useAgentRail.svelte';
   import { useSessionSync } from '$lib/hooks/useSessionSync.svelte';
   import { shortcutStore } from '$lib/stores/shortcuts.svelte';
-  import { gitStore } from '$lib/stores/git.svelte';
+  import { copyActiveClipboardImage } from '$lib/utils/clipboard-shortcuts';
   import { notesStore } from '$lib/stores/notes.svelte';
   import { collaborationStore } from '$lib/stores/collaboration.svelte';
+  import { feedStore } from '$lib/stores/feed.svelte';
+  import { checklistFromPlan, implementationPrompt, latestPlanText, originalPlanRequest } from '$lib/utils/plan-handoff';
   import { FolderOpen, FolderPlus, Clock } from 'lucide-svelte';
   import TeamWorkspace from '$lib/components/TeamWorkspace.svelte';
   import { invoke } from '@tauri-apps/api/core';
@@ -57,30 +59,33 @@
   let showSettings = $state(false);
   let showAgents = $state(false);
   let showSidebar = $state(true);
-  let showGit = $state(false);
   let showNotes = $state(false);
   let showSidebarBeforeZen = $state(true);
   let showAgentsBeforeZen = $state(false);
-  let showGitBeforeZen = $state(false);
   let showCommandPalette = $state(false);
   let showThemeQuickMenu = $state(false);
   let zenMode = $state(false);
-  let settingsInitialTab = $state<'providers' | 'experimental'>('providers');
+  let settingsInitialTab = $state<'providers' | 'agent' | 'experimental'>('providers');
+  let settingsInitialAgentSection = $state<'permissions' | undefined>(undefined);
   let inputRef = $state<HTMLTextAreaElement>();
   let projectFileInput = $state<HTMLInputElement>();
   let projectFolderInput = $state<HTMLInputElement>();
   let recentProjects = $state<RecentProject[]>([]);
   let composerDraft = $state('');
+  let planTransitioning = $state(false);
   let currentProjectContent = $state('');
   let composerProjectFiles = $state<string[]>([]);
   let contextBarHover = $state(false);
+  let activeSession = $derived(sessionStore.sessions.find((session) => session.id === sessionStore.activeSessionId));
+  let interactionMode = $derived(activeSession?.interactionMode ?? 'act');
+  let currentPlanText = $derived(feedStore.sessionId === sessionStore.activeSessionId ? latestPlanText(feedStore.feed) : '');
   // Set when the user tries to send without a project open — holds the pending
   // message so it can be dispatched after they pick a project or opt into home.
   let noProjectPrompt = $state<{
     message: string;
     model?: string;
     reasoningLevel?: string;
-    attachments?: Array<{ type: string; data: string; name: string }>;
+    attachments?: Array<{ type: string; data: string; name: string; mimeType?: string }>;
   } | null>(null);
 
   // Segmented context bar: what's occupying the window (system prompt, memory
@@ -164,9 +169,6 @@
       label: 'Compact Session',
       description: 'Summarize and compact the current session.',
     },
-    { command: 'yolo', label: 'Toggle YOLO', description: 'Toggle YOLO mode on or off.' },
-    { command: 'beginner', label: 'Beginner Mode', description: 'Switch to beginner UI mode.' },
-    { command: 'advanced', label: 'Advanced Mode', description: 'Switch to advanced UI mode.' },
     { command: 'clear', label: 'Clear Feed', description: 'Clear the current visible feed.' },
     { command: 'settings', label: 'Open Settings', description: 'Open the settings drawer.' },
     { command: 'theme', label: 'Theme Picker', description: 'Open theme selection.' },
@@ -218,7 +220,6 @@
     if (!isDemoMode) {
       appStore.initialize(authStore, sessionStore).then(() => {
         if (authStore.isAuthenticated) {
-          modeStore.fetchMode();
           wsStore.connect();
         }
         if (projectStore.currentPath) {
@@ -227,10 +228,7 @@
       });
       void notesStore.fetchSettings();
     } else {
-      // The browser trial intentionally has no desktop app bootstrap or
-      // websocket. It still loads the advanced-mode controls and virtual
-      // workspace mentions so Git review and Goal Mode are discoverable.
-      void modeStore.fetchMode();
+      // The browser trial intentionally has no desktop app bootstrap or websocket.
       void refreshComposerFileMentions();
       void notesStore.fetchSettings();
     }
@@ -274,7 +272,6 @@
       window.removeEventListener('open-notes-graph', handleOpenNotesGraph);
       window.removeEventListener('open-team-settings', handleOpenTeamSettings);
       window.removeEventListener('open-provider-account-settings', handleOpenProviderAccountSettings);
-      window.removeEventListener('open-team-settings', handleOpenTeamSettings);
       window.removeEventListener('kory:focus-input', handleFocusInput);
     };
   });
@@ -308,14 +305,70 @@
     }
   }
 
+  const PERMISSION_MODE_ORDER = ['yolo', 'guarded', 'edits', 'ask', 'custom'] as const;
+  const PERMISSION_MODE_LABELS: Record<string, string> = {
+    yolo: 'YOLO',
+    guarded: 'Guarded',
+    edits: 'Accept edits',
+    ask: 'Ask',
+    custom: 'Custom',
+  };
+
+  /** Shift+Tab cycles through permission modes without opening the settings drawer. */
+  function cyclePermissionMode() {
+    const current = agentSettingsStore.settings.permissionMode ?? 'guarded';
+    const currentIndex = PERMISSION_MODE_ORDER.indexOf(current as (typeof PERMISSION_MODE_ORDER)[number]);
+    const next = PERMISSION_MODE_ORDER[(currentIndex + 1) % PERMISSION_MODE_ORDER.length];
+    if (current !== next) {
+      void agentSettingsStore.saveSettings(
+        { ...agentSettingsStore.settings, permissionMode: next },
+        { quietSuccess: true },
+      );
+    }
+    toastStore.info(`Permission mode: ${PERMISSION_MODE_LABELS[next] ?? next}`);
+  }
+
   function handleGlobalKeydown(e: KeyboardEvent) {
     if (e.key === 'Escape' && showThemeQuickMenu) {
       showThemeQuickMenu = false;
       return;
     }
 
+    // Shift+Tab cycles through permission modes (yolo → guarded → edits → ask → plan → custom).
+    // Handled here at the window level (not in the composer) so it works whether or not the
+    // composer is focused. Guarded against open dialogs/modals and non-composer form fields.
+    if (
+      !e.defaultPrevented &&
+      e.key === 'Tab' &&
+      e.shiftKey &&
+      !e.ctrlKey &&
+      !e.metaKey &&
+      !e.altKey &&
+      !showSettings &&
+      !showCommandPalette &&
+      !showThemeQuickMenu &&
+      !newProjectPrompt &&
+      !noProjectPrompt &&
+      !agenticConsentPrompt
+    ) {
+      const active = document.activeElement;
+      const inFormField =
+        active instanceof HTMLInputElement ||
+        active instanceof HTMLTextAreaElement ||
+        active instanceof HTMLSelectElement ||
+        (active instanceof HTMLElement && active.isContentEditable);
+      // Only steal Shift+Tab from the page when the composer itself is focused,
+      // or nothing editable is focused — never break form navigation inside dialogs.
+      if (active === inputRef || !inFormField) {
+        e.preventDefault();
+        cyclePermissionMode();
+        return;
+      }
+    }
+
     if (shortcutStore.matches('toggle_palette', e)) {
       e.preventDefault();
+      if (isDemoMode) return;
       showCommandPalette = !showCommandPalette;
       return;
     }
@@ -326,9 +379,71 @@
       return;
     }
 
-    if (shortcutStore.matches('toggle_yolo', e)) {
+    if (shortcutStore.matches('undo', e)) {
       e.preventDefault();
-      setYoloMode(!wsStore.isYoloMode);
+      void wsStore.undo();
+      return;
+    }
+
+    if (shortcutStore.matches('redo', e)) {
+      e.preventDefault();
+      void wsStore.redo();
+      return;
+    }
+
+    const activeElement = document.activeElement;
+    const inputSelection = activeElement instanceof HTMLTextAreaElement || activeElement instanceof HTMLInputElement
+      ? activeElement.value.slice(activeElement.selectionStart ?? 0, activeElement.selectionEnd ?? 0)
+      : '';
+    const copyTextMatches = shortcutStore.matches('copy_text', e);
+    const copyImageMatches = shortcutStore.matches('copy_image', e);
+    if (copyTextMatches || copyImageMatches) {
+      const text = (inputSelection || window.getSelection()?.toString() || '').trim();
+      e.preventDefault();
+      if (copyTextMatches && text) {
+        void navigator.clipboard.writeText(text)
+          .then(() => toastStore.success('Text copied to clipboard'))
+          .catch(() => toastStore.error('Could not copy the selected text'));
+        return;
+      }
+      if (copyImageMatches) {
+        void copyActiveClipboardImage();
+        return;
+      }
+      if (!text) {
+        toastStore.error('Select text to copy');
+        return;
+      }
+    }
+
+    const pasteTextMatches = shortcutStore.matches('paste_text', e);
+    const pasteImageMatches = shortcutStore.matches('paste_image', e);
+    if (pasteTextMatches && pasteImageMatches) {
+      e.preventDefault();
+      inputRef?.focus();
+      window.dispatchEvent(new Event('koryphaios:paste-preferred'));
+      return;
+    }
+
+    if (pasteTextMatches) {
+      e.preventDefault();
+      const textArea = inputRef;
+      if (!textArea) return;
+      void navigator.clipboard.readText().then((text) => {
+        if (!text) return;
+        const start = textArea.selectionStart ?? textArea.value.length;
+        const end = textArea.selectionEnd ?? textArea.value.length;
+        textArea.setRangeText(text, start, end, 'end');
+        textArea.dispatchEvent(new Event('input', { bubbles: true }));
+        textArea.focus();
+      }).catch(() => toastStore.error('Could not read clipboard text'));
+      return;
+    }
+
+    if (pasteImageMatches) {
+      e.preventDefault();
+      inputRef?.focus();
+      window.dispatchEvent(new Event('koryphaios:paste-image'));
       return;
     }
 
@@ -353,102 +468,26 @@
     }
   }
 
-  function setYoloMode(enabled: boolean) {
-    wsStore.setYoloMode(enabled);
-    if (enabled) {
-      toastStore.warning('YOLO Mode Active');
-    } else {
-      toastStore.success('YOLO Mode Disabled');
-    }
-  }
-
-  function requestSessionCompact() {
+  async function requestSessionCompact() {
     const sessionId = sessionStore.activeSessionId;
     if (!sessionId) {
       toastStore.error('No active session to compact');
       return;
     }
 
-    wsStore.sendMessage(
-      sessionId,
-      `🎯 SESSION COMPACTION — CONTEXT PRESERVATION PROTOCOL
-
-Create a hyper-dense, information-rich summary that preserves ALL critical context while eliminating redundancy. This summary will replace the full conversation history, so completeness is paramount.
-
-## 📄 SESSION MEMORY FILE
-
-This session has a persistent memory file at:
-\`.koryphaios/sessions/${sessionId}/memory.md\`
-
-**CRITICAL: You MUST update this memory file during compaction.**
-
-### Memory File Purpose
-- Survives compactions (unlike chat history which gets replaced)
-- Stores long-term context: project goals, key decisions, gotchas, references
-- Acts as a "source of truth" that persists across the entire session lifecycle
-- Automatically deleted when the session is deleted
-
-### How to Update the Memory File
-Use the \`write_file\` tool to update the memory file with structured information:
-- Path: \`.koryphaios/sessions/${sessionId}/memory.md\`
-- Content: Organized markdown with sections for project context, learnings, decisions, gotchas
-
----
-
-## OUTPUT FORMAT (Strictly follow this structure)
-
-### 📋 PROJECT BRIEF
-One sentence: What we're building and why it matters.
-
-### 🏗️ ARCHITECTURE & KEY DECISIONS
-- Decision: [What was decided]
-  - Rationale: [Why]
-  - Impact: [What it affects]
-  - Status: [Implemented/Pending/Abandoned]
-[Repeat for each significant decision]
-
-### 📁 FILES & CODE STATE
-| File | Status | Key Implementation Details |
-|------|--------|---------------------------|
-| [path] | [modified/created/deleted] | [Critical: functions, classes, APIs, config values] |
-
-### ✅ COMPLETED WORK
-- [Specific achievement with technical details]
-- [Include verification steps if applicable]
-
-### 🚧 ACTIVE WORK (In Progress)
-- [What's being worked on right now]
-- [Current blockers or dependencies]
-- [Next immediate step]
-
-### ⚠️ OPEN ISSUES & TECH DEBT
-- [Issue]: [Severity: Critical/High/Medium/Low] — [One-line description] — [Proposed fix or investigation path]
-
-### 🎯 NEXT ACTIONS (Priority Ordered)
-1. [ ] [Specific, actionable task] — [Estimated effort] — [Success criteria]
-2. [ ] [Next task...]
-
-### 🔗 CRITICAL CONTEXT TO PRESERVE
-- [Any non-obvious context, gotchas, or tribal knowledge that would be lost]
-- [Environment-specific details, API keys, config flags]
-- [Links to external resources, docs, or references]
-
-### 📊 CONFIDENCE & RISK
-- Overall confidence: [High/Medium/Low]
-- Biggest risk: [What could derail this]
-- Mitigation: [How we're addressing it]
-
----
-RULES:
-- NO fluff, filler, or conversational language
-- EVERY sentence must contain actionable information
-- Preserve SPECIFIC values: file paths, function names, config keys, error messages
-- Flag UNCERTAINTY explicitly: "UNCERTAIN: [what needs verification]"
-- Include CODE SNIPPETS only if critical and brief (< 5 lines)
-- **MANDATORY: Update the memory file with key learnings and decisions**
-- **MANDATORY: Reference the memory file path in your response so the user knows it exists**`,
-    );
-    toastStore.info('Session compaction in progress...');
+    toastStore.info('Compacting session…');
+    try {
+      const response = await apiFetch(apiUrl(`/api/sessions/${sessionId}/compact`), {
+        method: 'POST',
+        body: JSON.stringify({ model: activeComposerModel || undefined }),
+      });
+      const result = await response.json() as { ok?: boolean; error?: string };
+      if (!response.ok || !result.ok) throw new Error(result.error ?? 'Compaction failed');
+      await wsStore.loadSessionMessages(sessionId, await sessionStore.fetchMessages(sessionId));
+      toastStore.success('Session compacted. Earlier turns are now preserved in one summary.');
+    } catch (error) {
+      toastStore.error(error instanceof Error ? error.message : 'Session compaction failed');
+    }
   }
 
   function loadSuggestionIntoComposer(prompt: string) {
@@ -526,7 +565,7 @@ RULES:
 
     if (root === 'help') {
       toastStore.info(
-        'Commands: /new, /resume, /compact, /goal, /yolo, /beginner, /advanced, /clear, /settings, /theme, /sidebar, /zen',
+        'Commands: /new, /resume, /compact, /goal, /clear, /settings, /theme, /sidebar, /zen',
       );
       return true;
     }
@@ -544,25 +583,6 @@ RULES:
 
     if (root === 'compact') {
       requestSessionCompact();
-      return true;
-    }
-
-    if (root === 'yolo') {
-      if (parts.length > 1) {
-        toastStore.error('Usage: /yolo');
-      } else {
-        setYoloMode(!wsStore.isYoloMode);
-      }
-      return true;
-    }
-
-    if (root === 'beginner') {
-      await modeStore.setMode('beginner');
-      return true;
-    }
-
-    if (root === 'advanced') {
-      await modeStore.setMode('advanced');
       return true;
     }
 
@@ -633,7 +653,6 @@ RULES:
       const maybe = parsed as Record<string, unknown>;
       if (typeof maybe.showSidebar === 'boolean') showSidebar = maybe.showSidebar;
       if (typeof maybe.showAgents === 'boolean') showAgents = maybe.showAgents;
-      if (typeof maybe.showGit === 'boolean') showGit = maybe.showGit;
     } catch {
       // Ignore malformed local prefs and fall back to defaults.
     }
@@ -646,7 +665,6 @@ RULES:
       JSON.stringify({
         showSidebar,
         showAgents,
-        showGit,
       }),
     );
   });
@@ -884,6 +902,12 @@ RULES:
   }
 
   async function handleMenuAction(action: string) {
+    const guidedViewActions = new Set(['toggle_sidebar', 'toggle_zen_mode', 'toggle_agents', 'toggle_theme']);
+    if (isDemoMode && !guidedViewActions.has(action)) {
+      showCommandPalette = false;
+      toastStore.info('This guided preview is read-only. Download Koryphaios to change a workspace.');
+      return;
+    }
     if (action.startsWith('goal_')) {
       if (action === 'goal_open') {
         goalDisplayStore.update({ sidebar: true });
@@ -990,12 +1014,6 @@ RULES:
       case 'resume_chat':
         resumePreviousChat();
         break;
-      case 'mode_beginner':
-        await modeStore.setMode('beginner');
-        break;
-      case 'mode_advanced':
-        await modeStore.setMode('advanced');
-        break;
       case 'focus_input':
         inputRef?.focus();
         break;
@@ -1006,17 +1024,17 @@ RULES:
       case 'toggle_agents':
         showAgents = !showAgents;
         break;
-      case 'toggle_git':
-        showGit = !showGit;
-        break;
       case 'toggle_notes':
         if (notesStore.settings.enabled) showNotes = !showNotes;
         break;
       case 'toggle_theme':
         showThemeQuickMenu = true;
         break;
-      case 'toggle_yolo':
-        setYoloMode(!wsStore.isYoloMode);
+      case 'undo':
+        void wsStore.undo();
+        break;
+      case 'redo':
+        void wsStore.redo();
         break;
       case 'session_compact':
         requestSessionCompact();
@@ -1028,16 +1046,13 @@ RULES:
         if (!zenMode) {
           showSidebarBeforeZen = showSidebar;
           showAgentsBeforeZen = showAgents;
-          showGitBeforeZen = showGit;
           showSidebar = false;
           showAgents = false;
-          showGit = false;
           zenMode = true;
         } else {
           zenMode = false;
           showSidebar = showSidebarBeforeZen;
           showAgents = showAgentsBeforeZen;
-          showGit = showGitBeforeZen;
         }
         break;
       case 'open_settings':
@@ -1096,7 +1111,7 @@ RULES:
   let agenticConsentPrompt = $state<{
     provider: string;
     hostName: string;
-    pending: { message: string; model?: string; reasoningLevel?: string; attachments?: Array<{ type: string; data: string; name: string }> };
+    pending: { message: string; model?: string; reasoningLevel?: string; attachments?: Array<{ type: string; data: string; name: string; mimeType?: string }> };
   } | null>(null);
 
   function confirmAgenticConsent() {
@@ -1111,15 +1126,12 @@ RULES:
     message: string,
     model?: string,
     reasoningLevel?: string,
-    attachments?: Array<{ type: string; data: string; name: string }>,
+    attachments?: Array<{ type: string; data: string; name: string; mimeType?: string }>,
   ) {
     if (isDemoMode) {
       composerDraft = '';
-      // Full demo: simulate a manager turn for the user's own prompt.
-      // Guided demo: replay the scripted example turn.
-      void import('$lib/demo.svelte').then((m) =>
-        isFullDemo ? m.demoSend(message) : m.replayDemo(),
-      );
+      // The public preview is read-only. Its scripted example owns the feed.
+      void import('$lib/demo.svelte').then((m) => m.replayDemo());
       return;
     }
     if (!projectStore.currentPath) {
@@ -1163,7 +1175,73 @@ RULES:
       );
       return;
     }
-    wsStore.sendMessage(sessionStore.activeSessionId, message, model, reasoningLevel, attachments);
+    wsStore.sendMessage(sessionStore.activeSessionId, message, model, reasoningLevel, attachments, interactionMode);
+  }
+
+  async function changeInteractionMode(mode: 'act' | 'plan') {
+    const sessionId = sessionStore.activeSessionId;
+    if (!sessionId) return;
+    if (agentRail.selectedAgentId) {
+      toastStore.info('Plan mode belongs to the main Kory conversation');
+      return;
+    }
+    if (await sessionStore.setInteractionMode(sessionId, mode)) {
+      toastStore.info(mode === 'plan' ? 'Plan mode active for this chat' : 'Plan mode closed');
+      queueMicrotask(() => inputRef?.focus());
+    }
+  }
+
+  async function handlePlanAction(action: 'implement' | 'clear-implement' | 'clear-goal' | 'exit') {
+    const sourceSession = activeSession;
+    if (!sourceSession || planTransitioning) return;
+    if (action === 'exit') {
+      await changeInteractionMode('act');
+      return;
+    }
+    const plan = currentPlanText.trim();
+    if (!plan) {
+      toastStore.info('Ask Kory to finish the plan before handing it off');
+      return;
+    }
+    const objective = originalPlanRequest(feedStore.feed, sourceSession.title).slice(0, 2000);
+    planTransitioning = true;
+    try {
+      if (action === 'implement') {
+        if (!(await sessionStore.setInteractionMode(sourceSession.id, 'act'))) return;
+        handleSend(implementationPrompt(objective, plan), activeComposerModel || undefined);
+        return;
+      }
+
+      const nextSessionId = await sessionStore.createSession({
+        workingDirectory: sourceSession.workingDirectory ?? projectStore.currentPath,
+        title: `${action === 'clear-goal' ? 'Goal' : 'Implement'}: ${sourceSession.title}`.slice(0, 120),
+      });
+      if (!nextSessionId) throw new Error('Could not create a clean handoff chat');
+
+      if (action === 'clear-implement') {
+        wsStore.sendMessage(nextSessionId, implementationPrompt(objective, plan), activeComposerModel || undefined, undefined, undefined, 'act');
+        toastStore.success('Started implementation with clean context');
+        return;
+      }
+
+      const goal = await goalStore.create({
+        objective,
+        scope: projectStore.currentPath ? 'project' : 'session',
+        projectPath: projectStore.currentPath ?? undefined,
+        sessionId: projectStore.currentPath ? undefined : nextSessionId,
+        linkedSessionIds: [nextSessionId],
+        checklist: checklistFromPlan(plan),
+        planningDepth: 'structured',
+      });
+      goalStore.selectedGoalId = goal.id;
+      goalDisplayStore.update({ sidebar: true });
+      queueMicrotask(() => window.dispatchEvent(new CustomEvent('kory:goal-action', { detail: 'goal_open' })));
+      toastStore.success('Created a goal from the approved plan with clean context');
+    } catch (error) {
+      toastStore.error(error instanceof Error ? error.message : 'Plan handoff failed');
+    } finally {
+      planTransitioning = false;
+    }
   }
 
   function handleStop() {
@@ -1236,7 +1314,6 @@ RULES:
 <AppShell
   {showSidebar}
   {zenMode}
-  showGit={showGit && !collaborationStore.activeJoinedSession}
   showNotes={notesStore.settings.enabled && showNotes && !collaborationStore.activeJoinedSession}
   activeSessionId={sessionStore.activeSessionId}
   {connectionDot}
@@ -1250,13 +1327,11 @@ RULES:
   {#snippet menubar()}
     <MenuBar
       {showSidebar}
-      {showGit}
       {showAgents}
       {showNotes}
       notesEnabled={notesStore.settings.enabled}
       {zenMode}
       projectName={collaborationStore.activeJoinedSession?.sessionName ?? projectStore.displayName}
-      isYoloMode={wsStore.isYoloMode}
       {activeAgents}
       {recentProjects}
       onAction={handleMenuAction}
@@ -1409,8 +1484,6 @@ RULES:
           {/if}
         </div>
       </div>
-    {:else if gitStore.state.activeDiff}
-      <DiffEditor />
     {:else if agentRail.selectedAgent}
       <AgentThreadFeed
         agent={agentRail.selectedAgent}
@@ -1508,6 +1581,14 @@ RULES:
         </div>
         {#if contextSegments && contextBarHover}
           <div class="flex items-center gap-4 flex-wrap" style="padding-top: var(--space-2);">
+            <span style="font-size: var(--text-xs); color: var(--color-text-secondary);">
+              {activeComposerModel ? `Model ${activeComposerModel}` : 'Manager model'}
+            </span>
+            <span style="font-size: var(--text-xs); color: var(--color-text-muted);">
+              {isDemoMode
+                ? 'Demo catalog snapshot · provider context limit'
+                : 'Provider-reported usage · dispatch-time composition'}
+            </span>
             {#each contextSegments as seg (seg.key)}
               <span
                 class="flex items-center gap-1.5"
@@ -1547,17 +1628,25 @@ RULES:
           ? 'background terminal'
           : ''}
         onStop={handleStop}
-        onOpenSettings={(section) => {
-          settingsInitialTab = section === 'advanced' ? 'experimental' : 'providers';
+        onOpenSettings={(section, agentSection) => {
+          settingsInitialTab = section === 'experimental' ? 'experimental' : section === 'agent' ? 'agent' : 'providers';
+          settingsInitialAgentSection = agentSection;
           showSettings = true;
         }}
         slashCommands={composerSlashCommandList}
         fileMentions={composerFileMentions}
         onRefreshFileMentions={refreshComposerFileMentions}
         placeholder={agentRail.inputPlaceholder}
-        initialModel={isDemoMode ? 'codex:gpt-5.6-sol' : ''}
+        disabled={isDemoMode}
+        disabledMessage="This guided preview is read-only. Download Koryphaios to run a workspace."
+        initialModel={isDemoMode ? 'codex:gpt-5.3-codex' : ''}
         disableModelPreviewRequests={isDemoMode}
         bind:selectedModel={activeComposerModel}
+        {interactionMode}
+        planReady={interactionMode === 'plan' && currentPlanText.includes('<!-- KORY_PLAN_READY -->')}
+        {planTransitioning}
+        onInteractionModeChange={changeInteractionMode}
+        onPlanAction={handlePlanAction}
       />{/if}
   {/snippet}
 
@@ -1717,6 +1806,6 @@ RULES:
   </div>
 {/if}
 
-<SettingsDrawer open={showSettings} initialTab={settingsInitialTab} onClose={() => (showSettings = false)} />
-<CommandPalette bind:open={showCommandPalette} onAction={handleMenuAction} />
+<SettingsDrawer open={showSettings} initialTab={settingsInitialTab} initialAgentSection={settingsInitialAgentSection} onClose={() => (showSettings = false)} />
+{#if !isDemoMode}<CommandPalette bind:open={showCommandPalette} onAction={handleMenuAction} />{/if}
 <ToastContainer />

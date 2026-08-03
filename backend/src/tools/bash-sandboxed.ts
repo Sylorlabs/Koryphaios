@@ -3,7 +3,7 @@
 import { resolve, relative, isAbsolute } from 'path';
 import { spawn } from 'child_process';
 import type { Tool, ToolContext, ToolCallInput, ToolCallOutput } from './registry';
-import { validateBashCommand } from '../security';
+import { auditBashDenylist } from '../security';
 import { toolLog } from '../logger';
 import { shellManager } from './shell-manager';
 import { raspEngine } from '../security/rasp';
@@ -149,7 +149,7 @@ Resource limits: 512KB output, 2 minute timeout (configurable).`;
     }
 
     // Validate command content
-    const validation = validateBashCommand(command);
+    const validation = auditBashDenylist(command);
     if (!validation.safe) {
       toolLog.warn(
         { command: command.slice(0, 100), reason: validation.reason },

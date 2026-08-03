@@ -1,6 +1,5 @@
 import { Elysia, t } from 'elysia';
 import { collaborationManager } from '../collaboration/manager';
-import { requireLocalRouteAuth } from '../auth/local-route-auth';
 import { relayAvailable } from '../collaboration/relay-client';
 import { getContext } from '../context';
 
@@ -10,8 +9,7 @@ export const collaborationRoutes = new Elysia({ prefix: '/api/collab' })
   // avoids route ambiguity and gives host configuration a stable contract.
   .post(
     '/host/start',
-    async ({ request, body, set }) => {
-      if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
+    async ({ body, set }) => {
       const input = body as { sessionId: string; ownerId?: string; workspacePaths?: string[] };
       try {
         const result = await collaborationManager.hostSession(
@@ -37,8 +35,7 @@ export const collaborationRoutes = new Elysia({ prefix: '/api/collab' })
   // Start hosting — returns session info + invite links
   .post(
     '/:id/start',
-    async ({ request, params: { id }, body, set }) => {
-      if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
+    async ({ params: { id }, body, set }) => {
       const ownerId = (body as any)?.ownerId || 'local-user';
       try {
         const result = await collaborationManager.hostSession(
@@ -65,8 +62,7 @@ export const collaborationRoutes = new Elysia({ prefix: '/api/collab' })
   // Join via legacy 6-char code (fallback for local network use)
   .post(
     '/join',
-    async ({ request, body, set }) => {
-      if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
+    async ({ body, set }) => {
       try {
         if (!relayAvailable) throw new Error('WAN collaboration relay is not configured');
         const session = await collaborationManager.joinRelaySession((body as any).joinCode);
@@ -88,8 +84,7 @@ export const collaborationRoutes = new Elysia({ prefix: '/api/collab' })
 
   .patch(
     '/:id/policy',
-    async ({ request, params: { id }, body, set }) => {
-      if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
+    async ({ params: { id }, body, set }) => {
       try {
         return { ok: true, data: await collaborationManager.updatePolicy(id, body as any) };
       } catch (err: any) {
@@ -116,8 +111,7 @@ export const collaborationRoutes = new Elysia({ prefix: '/api/collab' })
   )
 
   // Get pending guest prompts waiting for host approval
-  .get('/:id/pending', async ({ request, set }) => {
-    if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
+  .get('/:id/pending', async () => {
     return {
       ok: true,
       data: {
@@ -131,8 +125,7 @@ export const collaborationRoutes = new Elysia({ prefix: '/api/collab' })
   // Host approves or rejects a guest prompt
   .post(
     '/:id/approve',
-    async ({ request, params: { id }, body, set }) => {
-      if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
+    async ({ params: { id }, body }) => {
       const { promptId, approved } = body as any;
       const prompt = collaborationManager.resolveGuestPrompt(promptId, approved);
       if (approved && prompt) {
@@ -157,8 +150,7 @@ export const collaborationRoutes = new Elysia({ prefix: '/api/collab' })
 
   .post(
     '/:id/join-decision',
-    async ({ request, body, set }) => {
-      if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
+    async ({ body }) => {
       const { guestId, approved, tierId } = body as any;
       return { ok: true, data: collaborationManager.resolveJoin(guestId, approved, tierId) };
     },
@@ -173,8 +165,7 @@ export const collaborationRoutes = new Elysia({ prefix: '/api/collab' })
 
   .post(
     '/:id/assign-tier',
-    async ({ request, body, set }) => {
-      if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
+    async ({ body }) => {
       collaborationManager.assignParticipantTier((body as any).guestId, (body as any).tierId);
       return { ok: true };
     },
@@ -183,8 +174,7 @@ export const collaborationRoutes = new Elysia({ prefix: '/api/collab' })
 
   .post(
     '/:id/invite',
-    async ({ request, body, set }) => {
-      if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
+    async ({ body, set }) => {
       try {
         return {
           ok: true,
@@ -202,8 +192,7 @@ export const collaborationRoutes = new Elysia({ prefix: '/api/collab' })
   )
 
   // Get session state
-  .get('/:id/state', async ({ request, params: { id }, set }) => {
-    if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
+  .get('/:id/state', async ({ params: { id }, set }) => {
     try {
       const state = await collaborationManager.getSessionState(id);
       if (!state) {
@@ -218,8 +207,7 @@ export const collaborationRoutes = new Elysia({ prefix: '/api/collab' })
   })
 
   // End session
-  .post('/:id/end', async ({ request, params: { id }, set }) => {
-    if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
+  .post('/:id/end', async ({ params: { id }, set }) => {
     try {
       await collaborationManager.endSession(id);
       return { ok: true };
@@ -230,8 +218,7 @@ export const collaborationRoutes = new Elysia({ prefix: '/api/collab' })
   })
 
   // ─── Shared providers (host side): which providers to serve remotely ──────
-  .get('/providers/shared', async ({ request, set }) => {
-    if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
+  .get('/providers/shared', async () => {
     const { getSharedProviders, getSharedModels, isAgenticProvider } =
       await import('../collaboration/remote-provider-host');
     // Attach the risk classification for the UI's compliance gating.
@@ -261,8 +248,7 @@ export const collaborationRoutes = new Elysia({ prefix: '/api/collab' })
   })
   .post(
     '/providers/shared',
-    async ({ request, body, set }) => {
-      if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
+    async ({ body }) => {
       const { setSharedProviders } = await import('../collaboration/remote-provider-host');
       const input = body as { providers: string[]; models?: Record<string, string[]> };
       setSharedProviders(input.providers ?? [], input.models ?? {});
@@ -272,16 +258,14 @@ export const collaborationRoutes = new Elysia({ prefix: '/api/collab' })
   )
 
   // ─── Sandbox policy (host side): how remote CLI turns are confined ────────
-  .get('/providers/sandbox', async ({ request, set }) => {
-    if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
+  .get('/providers/sandbox', async () => {
     const { getSandboxPolicy } = await import('../collaboration/remote-provider-host');
     const { sandboxCapabilities } = await import('../collaboration/sandbox-runner');
     return { ok: true, data: { policy: getSandboxPolicy(), capabilities: sandboxCapabilities() } };
   })
   .post(
     '/providers/sandbox',
-    async ({ request, body, set }) => {
-      if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
+    async ({ body }) => {
       const { setSandboxPolicy } = await import('../collaboration/remote-provider-host');
       setSandboxPolicy((body as any)?.policy);
       return { ok: true };
@@ -305,8 +289,7 @@ export const collaborationRoutes = new Elysia({ prefix: '/api/collab' })
   // ─── Remote providers (client side): consume a host's shared providers ────
   .post(
     '/providers/connect',
-    async ({ request, body, set }) => {
-      if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
+    async ({ body, set }) => {
       try {
         const { connectToProviderHost } = await import('../collaboration/remote-provider-client');
         const input = body as { joinCode: string; name?: string };
@@ -322,14 +305,12 @@ export const collaborationRoutes = new Elysia({ prefix: '/api/collab' })
     },
     { body: t.Object({ joinCode: t.String(), name: t.Optional(t.String()) }) },
   )
-  .post('/providers/disconnect', async ({ request, set }) => {
-    if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
+  .post('/providers/disconnect', async () => {
     const { disconnectFromProviderHost } = await import('../collaboration/remote-provider-client');
     disconnectFromProviderHost();
     return { ok: true };
   })
-  .get('/providers/remote-status', async ({ request, set }) => {
-    if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
+  .get('/providers/remote-status', async () => {
     const { remoteProviderStatus } = await import('../collaboration/remote-provider-client');
     return { ok: true, data: remoteProviderStatus() };
   });

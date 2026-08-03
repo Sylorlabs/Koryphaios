@@ -1,17 +1,27 @@
 import { describe, test, expect } from 'bun:test';
-import { parseCriticVerdict, formatMessagesForCritic } from '../src/kory/critic-util';
+import { deriveCriticBudget, deriveSkillEvidenceCriteria, parseCriticVerdict, formatMessagesForCritic } from '../src/kory/critic-util';
 
 describe('parseCriticVerdict', () => {
-  test('returns true when last non-empty line starts with PASS', () => {
-    expect(parseCriticVerdict('Some feedback.\nPASS')).toBe(true);
-    expect(parseCriticVerdict('PASS')).toBe(true);
-    expect(parseCriticVerdict('Review done.\n\nPASS')).toBe(true);
+  test('accepts only a structured pass with reviewed evidence and complete coverage', () => {
+    const criterion = 'Relevant checks pass';
+    const report = JSON.stringify({
+      verdict: 'PASS', findings: [], checksReviewed: ['bun test: 12 pass'],
+      criterionCoverage: [{ criterion, evidence: 'bun test: 12 pass', status: 'verified' }],
+      unmetCriteria: [],
+    });
+    expect(parseCriticVerdict(report, [criterion])).toBe(true);
   });
 
   test('returns false when last non-empty line starts with FAIL', () => {
     expect(parseCriticVerdict('Issues found.\nFAIL')).toBe(false);
     expect(parseCriticVerdict('FAIL: missing tests')).toBe(false);
     expect(parseCriticVerdict('Review.\n\nFAIL: lint errors')).toBe(false);
+  });
+
+  test('rejects empty evidence, unmet criteria, and incomplete coverage', () => {
+    expect(parseCriticVerdict(JSON.stringify({ verdict: 'PASS', findings: [], checksReviewed: [], criterionCoverage: [], unmetCriteria: [] }))).toBe(false);
+    expect(parseCriticVerdict(JSON.stringify({ verdict: 'PASS', findings: [], checksReviewed: ['test'], criterionCoverage: [{ criterion: 'A', evidence: 'test', status: 'unmet' }], unmetCriteria: ['A'] }), ['A'])).toBe(false);
+    expect(parseCriticVerdict(JSON.stringify({ verdict: 'PASS', findings: [], checksReviewed: ['test'], criterionCoverage: [{ criterion: 'A', evidence: 'test', status: 'verified' }], unmetCriteria: [] }), ['A', 'B'])).toBe(false);
   });
 
   test('returns false when content says does not PASS (last line is FAIL)', () => {
@@ -27,6 +37,27 @@ describe('parseCriticVerdict', () => {
     expect(parseCriticVerdict('')).toBe(false);
     expect(parseCriticVerdict('   \n  ')).toBe(false);
   });
+});
+
+describe('deriveCriticBudget', () => {
+  test('scales inspection depth with risk and change size', () => {
+    const low = deriveCriticBudget({ risk: 'low' });
+    const high = deriveCriticBudget({ risk: 'high', changedFiles: 12, changedLines: 900 });
+    expect(high.maxTurns).toBeGreaterThan(low.maxTurns);
+    expect(high.maxTokens).toBeGreaterThan(low.maxTokens);
+    expect(high.transcriptChars).toBeGreaterThan(low.transcriptChars);
+  });
+});
+
+test('selected skill evidence becomes exact critic coverage criteria', () => {
+  expect(deriveSkillEvidenceCriteria([
+    { name: 'debugging', evidence: ['Reproduction', 'Regression check'] },
+    { name: 'verification', evidence: ['Regression check'] },
+  ])).toEqual([
+    'Skill evidence [debugging]: Reproduction',
+    'Skill evidence [debugging]: Regression check',
+    'Skill evidence [verification]: Regression check',
+  ]);
 });
 
 describe('formatMessagesForCritic', () => {

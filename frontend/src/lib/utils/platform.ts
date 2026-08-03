@@ -37,10 +37,14 @@ export function getModKeyLabel(): string {
 /** Formats a key string for display based on the platform */
 export function formatKey(key: string): string {
   if (key === 'Mod') {
-    return isMac() ? '⌘' : 'Ctrl';
+    if (isMac()) return '⌘';
+    if (isWindows()) return 'Ctrl';
+    return 'Ctrl'; // Linux: Ctrl is the standard modifier for app shortcuts
   }
   if (key === 'Meta') {
-    return isMac() ? '⌘' : 'Win';
+    if (isMac()) return '⌘';
+    if (isWindows()) return '⊞';
+    return 'Super'; // Linux: the Meta key is the Super key
   }
   return key;
 }

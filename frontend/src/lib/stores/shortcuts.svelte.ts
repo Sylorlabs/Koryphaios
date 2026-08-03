@@ -1,6 +1,6 @@
 // Keyboard shortcuts — editable, persisted to localStorage, Svelte 5 runes
 
-import { isMac } from '$lib/utils/platform';
+import { isLinux, isMac } from '$lib/utils/platform';
 
 export interface Shortcut {
   id: string;
@@ -11,11 +11,29 @@ export interface Shortcut {
 
 const STORAGE_KEY = 'koryphaios-shortcuts';
 
+/** Shortcut IDs that have been removed from defaults and should be pruned from stored configs */
+const RETIRED_SHORTCUT_IDS = new Set<string>(['toggle_yolo']);
+
+const clipboardShortcuts: Shortcut[] = isLinux()
+  ? [
+      { id: 'copy_text', keys: ['Mod', 'Shift', 'C'], action: 'Copy text', description: 'Selected text' },
+      { id: 'copy_image', keys: ['Mod', 'C'], action: 'Copy image', description: 'Opened image' },
+      { id: 'paste_text', keys: ['Mod', 'Shift', 'V'], action: 'Paste text', description: 'Into composer' },
+      { id: 'paste_image', keys: ['Mod', 'V'], action: 'Paste image', description: 'Into composer' },
+    ]
+  : [
+      { id: 'copy_text', keys: ['Mod', 'C'], action: 'Copy text', description: 'Selected text' },
+      { id: 'copy_image', keys: ['Mod', 'C'], action: 'Copy image', description: 'Opened image' },
+      { id: 'paste_text', keys: ['Mod', 'V'], action: 'Paste text', description: 'Into composer' },
+      { id: 'paste_image', keys: ['Mod', 'V'], action: 'Paste image', description: 'Into composer' },
+    ];
+
 const defaultShortcuts: Shortcut[] = [
   { id: 'send', keys: ['Mod', 'Enter'], action: 'Send message', description: 'Submit task' },
   { id: 'settings', keys: ['Mod', ','], action: 'Open settings', description: 'Preferences' },
   { id: 'new_session', keys: ['Mod', 'N'], action: 'New session', description: 'Clear' },
   { id: 'focus_input', keys: ['Mod', 'Shift', 'K'], action: 'Focus input', description: 'Jump' },
+  ...clipboardShortcuts,
   {
     id: 'toggle_palette',
     keys: ['Mod', 'K'],
@@ -29,10 +47,16 @@ const defaultShortcuts: Shortcut[] = [
     description: 'Focus',
   },
   {
-    id: 'toggle_yolo',
+    id: 'undo',
+    keys: ['Mod', 'Z'],
+    action: 'Undo',
+    description: 'Revert to previous state',
+  },
+  {
+    id: 'redo',
     keys: ['Mod', 'Y'],
-    action: 'Toggle YOLO mode',
-    description: 'Bypass confirmations',
+    action: 'Redo',
+    description: 'Restore next state',
   },
   { id: 'close', keys: ['Esc'], action: 'Close dialogs', description: 'Back' },
 ];
@@ -50,6 +74,25 @@ function loadShortcuts(): Shortcut[] {
         ...s,
         keys: s.keys.map((k) => (k === 'Ctrl' ? 'Mod' : k)),
       }));
+
+      // Remove retired shortcuts (e.g. toggle_yolo, replaced by undo/redo)
+      parsed = parsed.filter((s) => !RETIRED_SHORTCUT_IDS.has(s.id));
+
+      // The first clipboard shortcuts used Kory-specific bindings. Upgrade only
+      // those original values; intentionally customized bindings are preserved.
+      const oldClipboardKeys: Record<string, string[]> = {
+        copy_text: ['Mod', 'Shift', 'C'],
+        copy_image: ['Mod', 'Shift', 'I'],
+        paste_text: ['Mod', 'Shift', 'V'],
+        paste_image: ['Mod', 'Alt', 'V'],
+      };
+      for (const shortcut of parsed) {
+        const previous = oldClipboardKeys[shortcut.id];
+        const replacement = clipboardShortcuts.find((candidate) => candidate.id === shortcut.id);
+        if (previous && replacement && JSON.stringify(shortcut.keys) === JSON.stringify(previous)) {
+          shortcut.keys = [...replacement.keys];
+        }
+      }
 
       // Merge in missing default shortcuts
       for (const def of defaultShortcuts) {

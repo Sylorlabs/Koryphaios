@@ -1,4 +1,5 @@
 import type { Tool, ToolContext, ToolCallInput, ToolCallOutput } from './registry';
+import type { KoryQuestionChart, KoryQuestionSlider } from '@koryphaios/shared';
 
 /**
  * Tool for the Manager to ask the user a question with predefined options.
@@ -8,7 +9,7 @@ export class AskUserTool implements Tool {
   readonly name = 'ask_user';
   readonly role = 'manager' as const;
   readonly description =
-    "Ask the user a question and provide multiple options for them to choose from. Use this when you need user guidance, approval, or clarification on how to proceed. Always include an 'Other' option.";
+    'Ask the user a focused question with suggested choices. Koryphaios always adds Custom response and Keep chatting actions. When quantities or comparisons materially improve the decision, you may also provide sliders and one relevant bar, line, or pie chart. Do not add decorative charts.';
   readonly inputSchema = {
     type: 'object',
     properties: {
@@ -17,14 +18,53 @@ export class AskUserTool implements Tool {
         type: 'array',
         items: { type: 'string' },
         description:
-          "List of options for the user to choose from (e.g. ['Apply changes', 'Discard changes', 'Other...'])",
+          "Two to five concise suggested choices (e.g. ['Apply changes', 'Discard changes']). Do not add Other or Custom; the UI provides it.",
+      },
+      chart: {
+        type: 'object',
+        description: 'Optional evidence chart that directly informs the question.',
+        properties: {
+          type: { type: 'string', enum: ['bar', 'line', 'pie'] },
+          title: { type: 'string' },
+          labels: { type: 'array', items: { type: 'string' } },
+          datasets: {
+            type: 'array',
+            items: {
+              type: 'object',
+              properties: {
+                label: { type: 'string' },
+                data: { type: 'array', items: { type: 'number' } },
+              },
+              required: ['data'],
+            },
+          },
+        },
+        required: ['type', 'labels', 'datasets'],
+      },
+      sliders: {
+        type: 'array',
+        description: 'Optional quantitative inputs. Use only when the user is choosing numeric values.',
+        items: {
+          type: 'object',
+          properties: {
+            id: { type: 'string' },
+            label: { type: 'string' },
+            min: { type: 'number' },
+            max: { type: 'number' },
+            step: { type: 'number' },
+            value: { type: 'number' },
+            unit: { type: 'string' },
+            description: { type: 'string' },
+          },
+          required: ['id', 'label', 'min', 'max', 'step', 'value'],
+        },
       },
     },
     required: ['question', 'options'],
   };
 
   async run(ctx: ToolContext, call: ToolCallInput): Promise<ToolCallOutput> {
-    const { question, options } = call.input as { question: string; options: string[] };
+    const { question, options, chart, sliders } = call.input;
 
     if (!ctx.waitForUserInput) {
       return {
@@ -37,7 +77,11 @@ export class AskUserTool implements Tool {
     }
 
     try {
-      const selection = await ctx.waitForUserInput(question, options);
+      const selection = await ctx.waitForUserInput(question as string, options as string[], {
+        chart: chart as KoryQuestionChart | undefined,
+        sliders: sliders as KoryQuestionSlider[] | undefined,
+        allowKeepChatting: true,
+      });
       return {
         callId: call.id,
         name: this.name,

@@ -27,29 +27,15 @@ import {
   type StreamRequest,
 } from './types';
 import { DevinCliBridge, getKoryphaiosDevinHome, resolveDevinReasoningModel } from './devin-bridge';
-import { getDevinCapabilitiesAsync, getDevinCapabilities as getDevinCapabilitiesSync } from './devin-capabilities';
+import {
+  getDevinCapabilitiesAsync,
+  getDevinCapabilities as getDevinCapabilitiesSync,
+  invalidateDevinCapabilities,
+} from './devin-capabilities';
+import { renderCliContent } from './cli-attachments';
 
 const DEVIN_STREAM_TIMEOUT_MS = 300_000;
 const EXPORT_POLL_MS = 250;
-
-// Verified live from `devin -p "hi" --model <bad>` → "Available: …".
-const DEVIN_MODELS: Array<{ id: string; name: string; ctx?: number }> = [
-  { id: 'swe-1.6', name: 'SWE-1.6' },
-  { id: 'swe-1.6-fast', name: 'SWE-1.6 Fast' },
-  { id: 'swe-1.6-slow', name: 'SWE-1.6 Slow' },
-  { id: 'swe-1.5', name: 'SWE-1.5' },
-  { id: 'claude-sonnet-5', name: 'Claude Sonnet 5', ctx: 1_000_000 },
-  { id: 'claude-sonnet-4.5', name: 'Claude Sonnet 4.5', ctx: 200_000 },
-  { id: 'claude-opus-4.8', name: 'Claude Opus 4.8', ctx: 1_000_000 },
-  { id: 'claude-opus-4.5', name: 'Claude Opus 4.5', ctx: 200_000 },
-  { id: 'claude-fable-5', name: 'Claude Fable 5', ctx: 1_000_000 },
-  { id: 'claude-haiku-4.5', name: 'Claude Haiku 4.5', ctx: 200_000 },
-  { id: 'gpt-5.5', name: 'GPT-5.5' },
-  { id: 'gpt-5.2', name: 'GPT-5.2' },
-  { id: 'gemini-3-flash', name: 'Gemini 3 Flash', ctx: 1_000_000 },
-  { id: 'glm-5.2', name: 'GLM-5.2' },
-  { id: 'kimi-k2.7', name: 'Kimi K2.7' },
-];
 
 const HARNESS_SYSTEM_NOTE =
   'You are running inside the Koryphaios orchestrator. Never spawn subagents or delegate to ' +
@@ -61,15 +47,7 @@ function buildPrompt(systemPrompt: string | undefined, messages: ProviderMessage
   const sys = systemPrompt?.trim();
   lines.push(sys ? `${sys}\n\n${HARNESS_SYSTEM_NOTE}` : HARNESS_SYSTEM_NOTE, '');
   for (const m of messages) {
-    const content =
-      typeof m.content === 'string'
-        ? m.content
-        : m.content
-            .map((b) =>
-              b.type === 'text' ? b.text : b.type === 'image' ? '[image attachment]' : '',
-            )
-            .filter(Boolean)
-            .join('\n');
+    const content = renderCliContent(m.content);
     if (!content.trim()) continue;
     if (m.role === 'user') lines.push(`User: ${content}`);
     else if (m.role === 'assistant') lines.push(`Assistant: ${content}`);
@@ -86,15 +64,7 @@ function buildPromptBodyOnly(messages: ProviderMessage[]): string {
   const lines: string[] = [];
   for (const m of messages) {
     if (m.role === 'system') continue;
-    const content =
-      typeof m.content === 'string'
-        ? m.content
-        : m.content
-            .map((b) =>
-              b.type === 'text' ? b.text : b.type === 'image' ? '[image attachment]' : '',
-            )
-            .filter(Boolean)
-            .join('\n');
+    const content = renderCliContent(m.content);
     if (!content.trim()) continue;
     if (m.role === 'user') lines.push(`User: ${content}`);
     else if (m.role === 'assistant') lines.push(`Assistant: ${content}`);
@@ -114,11 +84,10 @@ export class DevinProvider implements Provider {
   }
 
   listModels(): ModelDef[] {
-    // Prefer the live account-available models from `devin models` (Phase 0
-    // capability probe), falling back to the static DEVIN_MODELS table when
-    // the probe hasn't settled or the CLI doesn't report a catalog.
+    // `devin models list` is account-scoped. Never merge in a static catalog:
+    // doing so advertised models that the user's Devin account had not enabled.
     const caps = getDevinCapabilitiesSync();
-    const live: ModelDef[] = caps.models.map((m) => ({
+    return caps.models.map((m) => ({
       id: m.id,
       name: m.name,
       provider: 'devin' as const,
@@ -126,16 +95,11 @@ export class DevinProvider implements Provider {
       contextWindow: m.contextWindow ?? 200_000,
       maxOutputTokens: 64_000,
     }));
-    const seen = new Set(live.map((m) => m.id));
-    const fallback: ModelDef[] = DEVIN_MODELS.filter((m) => !seen.has(m.id)).map((m) => ({
-      id: m.id,
-      name: m.name,
-      provider: 'devin' as const,
-      apiModelId: m.id,
-      contextWindow: m.ctx ?? 200_000,
-      maxOutputTokens: 64_000,
-    }));
-    return [...live, ...fallback];
+  }
+
+  async refreshModels(): Promise<void> {
+    invalidateDevinCapabilities();
+    await getDevinCapabilitiesAsync();
   }
 
   private resolveCliModel(modelId: string | undefined): string | undefined {
@@ -212,29 +176,44 @@ export class DevinProvider implements Provider {
       // fallback. Critic → plan (read-only); manager/worker → accept-edits.
       '--permission-mode',
       caps.supportsPermissionMode
-        ? (request.harnessRole === 'critic' ? 'plan' : 'accept-edits')
-        : (request.harnessRole === 'critic' ? 'auto' : 'dangerous'),
+        ? request.harnessRole === 'critic'
+          ? 'plan'
+          : 'accept-edits'
+        : request.harnessRole === 'critic'
+          ? 'auto'
+          : 'dangerous',
       ...(request.harnessRole === 'critic' && caps.supportsSandbox ? ['--sandbox'] : []),
       '--export',
       exportPath,
     ];
     if (agentConfigPath) args.push('--agent-config', agentConfigPath);
+    if (devinHome) {
+      const mcpServers = bridge.buildMcpConfig(bridgeCtx) ?? [];
+      bridge.writeMcpConfig(mcpServers, devinHome);
+      args.push('--config', join(devinHome, '.devin', 'config.json'));
+    }
     const cliModel = this.resolveCliModel(
       resolveDevinReasoningModel(request.model, request.reasoningLevel),
     );
     if (cliModel) args.push('--model', cliModel);
 
-    const jail = request.sandbox ? buildSoftJail(process.env, [join(homedir(), '.devin')]) : null;
-    const wrapped = request.sandbox
-      ? wrapCommand(bin, args, { cwd, policy: request.sandbox })
-      : { command: bin, args };
     const env: NodeJS.ProcessEnv = { ...process.env };
-    // Point the CLI at the isolated per-session home so our rules/skills/hooks
-    // and session transcripts stay separate from the user's interactive runs.
     if (devinHome) {
-      env.DEVIN_CONFIG_DIR = devinHome;
-      env.XDG_CONFIG_HOME = devinHome;
+      env.HOME = devinHome;
+      env.USERPROFILE = devinHome;
+      env.XDG_CONFIG_HOME = join(devinHome, '.config');
+      env.XDG_DATA_HOME = join(devinHome, '.local', 'share');
     }
+    const jail = request.sandbox
+      ? buildSoftJail(env, devinHome ? [devinHome] : [join(homedir(), '.devin')])
+      : null;
+    const wrapped = request.sandbox
+      ? wrapCommand(bin, args, {
+          cwd,
+          configDirs: devinHome ? [devinHome] : undefined,
+          policy: request.sandbox,
+        })
+      : { command: bin, args };
     const child = spawn(wrapped.command, wrapped.args, {
       cwd,
       stdio: ['ignore', 'pipe', 'pipe'],
@@ -339,7 +318,11 @@ export class DevinProvider implements Provider {
     const { trajectory, events } = bridge.parseTrajectory(raw);
     if (trajectory.modelName) {
       providerLog.debug(
-        { provider: 'devin', resolvedModel: trajectory.modelName, schema: trajectory.schemaVersion },
+        {
+          provider: 'devin',
+          resolvedModel: trajectory.modelName,
+          schema: trajectory.schemaVersion,
+        },
         'Devin ATIF trajectory parsed',
       );
     }

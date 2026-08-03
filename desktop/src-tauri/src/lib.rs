@@ -23,6 +23,40 @@ const UPDATE_DOWNLOAD_TIMEOUT_SECS: u64 = 120;
 static BACKEND_PROCESS: Mutex<Option<Arc<std::sync::Mutex<std::process::Child>>>> =
     Mutex::new(None);
 
+// Voice commands deliberately fail closed until the release bundles the pinned
+// sherpa-onnx artifacts. They establish a stable desktop API without silently
+// routing local requests to a cloud service.
+#[tauri::command]
+fn voice_list_packs() -> Vec<serde_json::Value> { Vec::new() }
+
+#[tauri::command]
+fn voice_download_pack(_pack_id: String) -> Result<(), String> {
+    Err("The native voice pack catalog is not included in this build".into())
+}
+
+#[tauri::command]
+fn voice_uninstall_pack(_pack_id: String) -> Result<(), String> {
+    Err("The requested voice pack is not installed".into())
+}
+
+#[tauri::command]
+fn voice_import_pack(_path: String) -> Result<(), String> {
+    Err("The secure .koryvoice importer is not included in this build".into())
+}
+
+#[tauri::command]
+fn voice_transcribe_local(_pcm: Vec<i16>, _sample_rate: u32) -> Result<serde_json::Value, String> {
+    Err("Local STT is unavailable. Install its pack; Koryphaios will not use cloud fallback.".into())
+}
+
+#[tauri::command]
+fn voice_synthesize_local(_request: serde_json::Value) -> Result<serde_json::Value, String> {
+    Err("Local TTS runtime is not included in this build; cloud fallback is disabled.".into())
+}
+
+#[tauri::command]
+fn voice_cancel_job() -> bool { false }
+
 include!(concat!(env!("OUT_DIR"), "/embedded_backend.rs"));
 
 mod config;
@@ -1275,6 +1309,13 @@ pub fn run() {
             indexer::search_codebase,
             check_for_updates,
             install_update,
+            voice_list_packs,
+            voice_download_pack,
+            voice_uninstall_pack,
+            voice_import_pack,
+            voice_transcribe_local,
+            voice_synthesize_local,
+            voice_cancel_job,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Koryphaios desktop app");

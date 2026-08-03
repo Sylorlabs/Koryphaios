@@ -284,6 +284,16 @@ class InMemoryRedis {
     return Array.from(this.data.keys()).filter((k) => regex.test(k));
   }
 
+  async scan(cursor: string, ...args: (string | number)[]): Promise<[string, string[]]> {
+    // In-memory SCAN: ignore cursor semantics (always returns all matches in one batch).
+    // Args: 'MATCH', pattern, 'COUNT', count
+    const matchIdx = args.indexOf('MATCH');
+    const pattern = matchIdx >= 0 ? String(args[matchIdx + 1]) : '*';
+    const regex = new RegExp(pattern.replace('*', '.*').replace('?', '.'));
+    const matched = Array.from(this.data.keys()).filter((k) => regex.test(k));
+    return ['0', matched];
+  }
+
   async flushall(): Promise<'OK'> {
     this.data.clear();
     this.expirations.clear();

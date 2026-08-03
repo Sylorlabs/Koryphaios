@@ -3,9 +3,12 @@
 // Koryphaios never copies, refreshes, or sends the CLI's ChatGPT credential.
 // The installed, logged-in CLI owns authentication and performs each turn.
 
-import type { ModelDef, ProviderConfig } from '@koryphaios/shared';
+import type { ModelDef, ProviderConfig, SandboxPolicy } from '@koryphaios/shared';
 import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { whichBinary } from './cli-detection';
 import { discoverCliAccounts, type DiscoveredCliAccount } from './cli-accounts';
 import {
@@ -32,6 +35,11 @@ type CodexCliModel = {
   supportedReasoningEfforts?: Array<{ reasoningEffort?: string }>;
   defaultReasoningEffort?: string;
   inputModalities?: string[];
+  contextWindow?: number;
+  context_window?: number;
+  maxContextWindow?: number;
+  max_context_window?: number;
+  modelContextWindow?: number;
 };
 
 function modelDefinition(model: CodexCliModel, account: DiscoveredCliAccount): ModelDef | null {
@@ -40,6 +48,13 @@ function modelDefinition(model: CodexCliModel, account: DiscoveredCliAccount): M
   const reasoningLevels = (model.supportedReasoningEfforts ?? [])
     .map((entry) => entry.reasoningEffort)
     .filter((level): level is string => typeof level === 'string' && level.length > 0);
+  const reportedContextWindow = [
+    model.modelContextWindow,
+    model.contextWindow,
+    model.context_window,
+    model.maxContextWindow,
+    model.max_context_window,
+  ].find((value): value is number => typeof value === 'number' && Number.isFinite(value) && value >= 1024);
   return {
     // The provider model is account-scoped. The real model name stays in
     // apiModelId and is the only value passed to `codex --model`.
@@ -48,8 +63,8 @@ function modelDefinition(model: CodexCliModel, account: DiscoveredCliAccount): M
     accountId: account.id,
     name: `${model.displayName?.trim() || cliModel} · ${account.label}`,
     provider: 'codex',
-    contextWindow: 0,
-    contextVerified: false,
+    contextWindow: reportedContextWindow ?? 0,
+    contextVerified: reportedContextWindow !== undefined,
     maxOutputTokens: 0,
     costPerMInputTokens: 0,
     costPerMOutputTokens: 0,
@@ -124,6 +139,54 @@ function flatten(content: string | ProviderContentBlock[]): string {
     .join('\n');
 }
 
+function imageExtension(mimeType: string | undefined): string {
+  if (mimeType === 'image/jpeg') return 'jpg';
+  if (mimeType === 'image/webp') return 'webp';
+  if (mimeType === 'image/gif') return 'gif';
+  if (mimeType === 'image/avif') return 'avif';
+  return 'png';
+}
+
+/** Materialize image blocks for the official CLI's repeatable `--image` flag.
+ * The directory is invocation-scoped and removed after the child exits. */
+function materializeImages(messages: ProviderMessage[]): { directory?: string; paths: string[] } {
+  const images = messages.flatMap((message) =>
+    Array.isArray(message.content)
+      ? message.content.filter(
+          (block): block is ProviderContentBlock & { imageData: string } =>
+            block.type === 'image' && typeof block.imageData === 'string' && block.imageData.length > 0,
+        )
+      : [],
+  );
+  if (images.length === 0) return { paths: [] };
+
+  const directory = mkdtempSync(join(tmpdir(), 'koryphaios-codex-images-'));
+  const paths = images.map((image, index) => {
+    const path = join(directory, `attachment-${index + 1}.${imageExtension(image.imageMimeType)}`);
+    writeFileSync(path, Buffer.from(image.imageData, 'base64'), { mode: 0o600 });
+    return path;
+  });
+  return { directory, paths };
+}
+
+export function codexInvocationIsolationArgs(): string[] {
+  // Authentication still comes from CODEX_HOME, but personal MCP servers,
+  // hooks, and unrelated defaults must not be able to break a Koryphaios run.
+  return ['--ignore-user-config'];
+}
+
+export function codexImageArgs(paths: readonly string[]): string[] {
+  return paths.flatMap((path) => ['--image', path]);
+}
+
+export function formatCodexCliError(stderr: string, exitCode: number): string {
+  const detail = stderr.trim();
+  if (/AuthRequired|invalid_token/i.test(detail) && /mcp|oauth-protected-resource/i.test(detail)) {
+    return 'An external MCP server in the selected Codex profile requires sign-in. Koryphaios isolates new Codex CLI turns from profile MCP configuration; retry this turn.';
+  }
+  return (detail || `exit status ${exitCode}`).slice(0, 500);
+}
+
 type KoryToolEnvelope = {
   name: string;
   input: Record<string, unknown>;
@@ -162,11 +225,34 @@ export function extractKoryToolEnvelope(
   }
 }
 
+/** Resolve the Codex `--sandbox` flag from the harness role + host-imposed
+ *  SandboxPolicy. Codex only exposes `read-only` and `workspace-write` (no
+ *  edits-but-no-shell middle ground), so we collapse to the stricter mode
+ *  whenever the policy disables edits OR shell. This mirrors the
+ *  `roleToPermissionMode` mapping in cli-bridge.ts (readonly/hardened →
+ *  read-only) and ensures a host's readonly/hardened sandbox is never
+ *  silently downgraded to workspace-write for a manager/worker turn. */
+export function resolveCodexSandbox(
+  role: StreamRequest['harnessRole'],
+  policy: SandboxPolicy | undefined,
+): 'read-only' | 'workspace-write' {
+  // Critic is always read-only regardless of sandbox.
+  if (role === 'critic') return 'read-only';
+  if (policy) {
+    if (policy.preset === 'readonly' || policy.preset === 'hardened') return 'read-only';
+    // Custom or balanced/trusted: collapse to read-only if edits or shell
+    // are disabled, since Codex's workspace-write grants both.
+    if (!policy.allowEdits || !policy.allowShell) return 'read-only';
+  }
+  return 'workspace-write';
+}
+
 function buildPrompt(
   systemPrompt: string | undefined,
   messages: ProviderMessage[],
   tools: StreamRequest['tools'],
   harnessRole: StreamRequest['harnessRole'],
+  sandbox: SandboxPolicy | undefined,
 ): string {
   const turns = messages
     .filter((message) => message.role !== 'system')
@@ -180,11 +266,13 @@ function buildPrompt(
   // Use the CodexCliBridge to build the harness note + tool whitelist
   // consistently with the other CLI providers (Phase 1 deep-integration).
   // The <KORY_TOOL_CALL> envelope protocol stays as the bridge mechanism.
+  // Forward the real sandbox so sandboxToScopes emits the correct deny list
+  // (passing undefined here would silently drop all scope restrictions).
   const codexBridge = getCliBridge('codex');
   const bridgeConfig = codexBridge?.buildAgentConfig({
     provider: 'codex',
     role: harnessRole ?? 'manager',
-    sandbox: undefined,
+    sandbox,
     workingDirectory: process.cwd(),
     systemPrompt: systemPrompt ?? '',
     tools: tools ?? [],
@@ -299,12 +387,23 @@ export class CodexCliProvider implements Provider {
       return;
     }
 
-    const prompt = buildPrompt(request.systemPrompt, request.messages, request.tools, request.harnessRole);
-    const sandbox = request.harnessRole === 'critic' ? 'read-only' : 'workspace-write';
+    const prompt = buildPrompt(request.systemPrompt, request.messages, request.tools, request.harnessRole, request.sandbox);
+    const sandbox = resolveCodexSandbox(request.harnessRole, request.sandbox);
+    let invocationImages: { directory?: string; paths: string[] } = { paths: [] };
+    try {
+      invocationImages = materializeImages(request.messages);
+    } catch (error) {
+      yield {
+        type: 'error',
+        error: `Could not prepare image attachment for Codex CLI: ${error instanceof Error ? error.message : String(error)}`,
+      };
+      return;
+    }
     const args = [
       '--ask-for-approval',
       'never',
       'exec',
+      ...codexInvocationIsolationArgs(),
       '--json',
       '--ephemeral',
       '--skip-git-repo-check',
@@ -314,6 +413,7 @@ export class CodexCliProvider implements Provider {
       sandbox,
       '--model',
       resolveCliModel(request.model, this.models),
+      ...codexImageArgs(invocationImages.paths),
       prompt,
     ];
     const child = spawn(binary, args, {
@@ -362,7 +462,7 @@ export class CodexCliProvider implements Provider {
         } else if (event.type === 'turn.completed') {
           const usage = event.usage as Record<string, unknown> | undefined;
           if (typeof usage?.input_tokens === 'number' || typeof usage?.output_tokens === 'number') {
-            queue.push({ type: 'usage_update', tokensIn: usage.input_tokens as number | undefined, tokensOut: usage.output_tokens as number | undefined });
+            queue.push({ type: 'usage_update', tokensIn: usage.input_tokens as number | undefined, tokensOut: usage.output_tokens as number | undefined, accountId: account.id });
           }
           completed = true;
         }
@@ -385,11 +485,14 @@ export class CodexCliProvider implements Provider {
     });
     clearTimeout(timeout);
     request.signal?.removeEventListener('abort', onAbort);
+    if (invocationImages.directory) {
+      try { rmSync(invocationImages.directory, { recursive: true, force: true }); } catch { /* best-effort cleanup */ }
+    }
     consumeLine(stdoutBuffer);
     while (queue.length) yield queue.shift()!;
     if (request.signal?.aborted) return;
     if (exitCode !== 0) {
-      yield { type: 'error', error: `Codex CLI failed: ${(stderr.trim() || `exit status ${exitCode}`).slice(0, 500)}` };
+      yield { type: 'error', error: `Codex CLI failed: ${formatCodexCliError(stderr, exitCode)}` };
       return;
     }
     if (!completed) providerLog.warn({ provider: 'codex' }, 'Codex CLI exited without a turn.completed event');

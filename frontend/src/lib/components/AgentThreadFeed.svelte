@@ -98,6 +98,7 @@
     if (provider === 'codex') return 'Codex CLI';
     if (provider === 'codex-auth') return 'OpenAI Codex';
     if (provider === 'anthropic') return 'Anthropic';
+    if (provider === 'claude') return 'Claude Code';
     if (provider === 'google') return 'Google';
     if (provider === 'aistudio') return 'Google AI Studio';
     if (provider === 'xai') return 'xAI';
@@ -106,6 +107,11 @@
     if (provider === 'copilot') return 'Copilot';
     if (provider === 'kimicode') return 'Kimi Code';
     return provider.charAt(0).toUpperCase() + provider.slice(1);
+  }
+
+  function modelLabel(model: string): string {
+    if (model === 'claude-code-sonnet') return 'Claude Sonnet 5';
+    return model;
   }
 </script>
 
@@ -119,7 +125,7 @@
           <span class="truncate">{agent.identity.name}</span>
         </div>
         <div class="text-xs mt-1" style="color: var(--color-text-muted);">
-          {providerLabel(agent.identity.provider)} · {agent.identity.model} · {agent.identity.domain}
+          ({providerLabel(agent.identity.provider)}) {modelLabel(agent.identity.model)} · {agent.identity.domain}
         </div>
       </div>
     </div>

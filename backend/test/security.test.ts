@@ -1,18 +1,18 @@
 // Tests for security utilities
 import { describe, test, expect } from 'bun:test';
 import {
-  validateBashCommand,
+  auditBashDenylist,
   sanitizeString,
   validateSessionId,
   validateProviderName,
 } from '../src/security';
 import { RateLimiter } from '../src/security/rate-limit';
 
-describe('validateBashCommand', () => {
+describe('auditBashDenylist', () => {
   test('allows safe commands', () => {
-    expect(validateBashCommand('ls -la')).toEqual({ safe: true });
-    expect(validateBashCommand('git status')).toEqual({ safe: true });
-    expect(validateBashCommand('echo hello')).toEqual({ safe: true });
+    expect(auditBashDenylist('ls -la')).toEqual({ safe: true });
+    expect(auditBashDenylist('git status')).toEqual({ safe: true });
+    expect(auditBashDenylist('echo hello')).toEqual({ safe: true });
   });
 
   test('blocks dangerous commands', () => {
@@ -26,7 +26,7 @@ describe('validateBashCommand', () => {
     ];
 
     for (const cmd of dangerous) {
-      const result = validateBashCommand(cmd);
+      const result = auditBashDenylist(cmd);
       expect(result.safe).toBe(false);
       expect(result.reason).toBeDefined();
     }
