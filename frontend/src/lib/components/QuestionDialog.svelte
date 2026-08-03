@@ -1,7 +1,7 @@
 <script lang="ts">
   import { wsStore } from "$lib/stores/websocket.svelte";
   import { sessionStore } from "$lib/stores/sessions.svelte";
-  import { MessageSquare, ArrowRight, CornerDownRight } from "lucide-svelte";
+  import { MessageSquare, ArrowRight, CornerDownRight, MessagesSquare } from "lucide-svelte";
 
   let otherValue = $state("");
   let showOther = $state(false);
@@ -12,7 +12,7 @@
   $effect(() => {
     if (pendingQuestion && dialogEl) {
       const focusable = dialogEl.querySelectorAll<HTMLElement>(
-        'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
+        'button, [href], input, textarea, [tabindex]:not([tabindex="-1"])'
       );
       const first = focusable[0];
       const last = focusable[focusable.length - 1];
@@ -92,6 +92,22 @@
                 <ArrowRight size={14} class="text-[var(--color-text-muted)] group-hover:text-amber-400 group-hover:translate-x-0.5 transition-all" />
               </button>
             {/each}
+            {#if pendingQuestion.allowOther}
+              <button
+                class="w-full flex items-center justify-center gap-2 px-4 py-3 text-sm rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-2)] hover:bg-[var(--color-surface-3)]"
+                onclick={() => (showOther = true)}
+              >
+                <CornerDownRight size={15} /> Custom response
+              </button>
+            {/if}
+            {#if pendingQuestion.allowKeepChatting !== false}
+              <button
+                class="w-full flex items-center justify-center gap-2 px-4 py-3 text-sm rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-2)] hover:bg-[var(--color-surface-3)]"
+                onclick={() => submit('Keep chatting — I am not choosing an option yet. Ask a narrower follow-up or continue discovery.')}
+              >
+                <MessagesSquare size={15} /> Keep chatting
+              </button>
+            {/if}
           </div>
         {:else}
           <div class="space-y-4">

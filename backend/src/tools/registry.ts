@@ -6,6 +6,11 @@ import { toolLog } from '../logger';
 
 export interface ToolContext {
   sessionId: string;
+  activeProvider?: string;
+  activeModel?: string;
+  reasoningLevel?: string;
+  goalId?: string;
+  goalItemId?: string;
   /** Optional agent identifier for backward compatibility in tests and callsites. */
   agentId?: string;
   workingDirectory: string;
@@ -20,6 +25,8 @@ export interface ToolContext {
     delta: string;
     totalLength: number;
     operation: 'create' | 'edit';
+    /** For edits: the original text being replaced, sent once on the first delta (enables a live diff). */
+    oldStr?: string;
   }) => void;
   emitFileComplete?: (event: {
     path: string;
@@ -32,6 +39,11 @@ export interface ToolContext {
   recordChange?: (change: ChangeSummary) => void;
   /** Optional: manager-only. When the manager calls delegate_to_worker, this runs the worker pipeline and returns a summary. */
   delegateToWorker?: (task: string, domain?: string) => Promise<string>;
+  /** Optional: manager-only. Delegates to Google Jules (cloud async agent, API only). */
+  delegateToJules?: (
+    task: string,
+    options?: { createPr?: boolean; branch?: string },
+  ) => Promise<string>;
 }
 
 export interface ToolCallInput {
@@ -73,7 +85,10 @@ function roleIncludesTool(
   const r = toolRole as string | undefined;
 
   if (normalizedRole === 'critic') {
-    return CRITIC_READ_ONLY_TOOLS.has(toolName) || r === 'critic' || r === 'any' || !r;
+    // Critic is read-only: the read-only filesystem tools, tools explicitly roled 'critic',
+    // or tools the author explicitly marked 'any' (safe for all roles). Crucially, do NOT
+    // fall through to NO-role/default tools — that is how bash/write_file leaked to the critic.
+    return CRITIC_READ_ONLY_TOOLS.has(toolName) || r === 'critic' || r === 'any';
   }
   if (!r || r === 'any') return true;
   if (normalizedRole === 'manager') return r === 'manager' || r === 'worker';

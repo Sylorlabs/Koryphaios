@@ -17,11 +17,15 @@
   import DiffEditor from '$lib/components/DiffEditor.svelte';
   import PermissionDialog from '$lib/components/PermissionDialog.svelte';
   import QuestionDialog from '$lib/components/QuestionDialog.svelte';
+  import RewindDialog from '$lib/components/RewindDialog.svelte';
+  import TimeTravelPanel from '$lib/components/TimeTravelPanel.svelte';
   import ChangesSummary from '$lib/components/ChangesSummary.svelte';
   import SettingsDrawer from '$lib/components/SettingsDrawer.svelte';
   import ToastContainer from '$lib/components/ToastContainer.svelte';
   import CommandPalette from '$lib/components/CommandPalette.svelte';
+  import WorkflowPanel from '$lib/components/WorkflowPanel.svelte';
   import { goalDisplayStore } from '$lib/stores/goal-display.svelte';
+  import { parseGoalSlashCommand, type GoalActionRequest } from '$lib/utils/goal-actions';
   import MenuBar from '$lib/components/MenuBar.svelte';
   import ThemePickerModal from '$lib/components/ThemePickerModal.svelte';
   import BackgroundShells from '$lib/components/BackgroundShells.svelte';
@@ -47,6 +51,13 @@
     insertPromptTemplate,
   } from '$lib/utils/projectManager';
   import { getModelConfigurationWarning } from '$lib/utils/model-config';
+  import { registerEligibleEscape } from '$lib/utils/double-escape';
+  import {
+    implementationPrompt,
+    latestPlanText,
+    originalPlanRequest,
+    validatePlanReadiness,
+  } from '$lib/utils/plan-handoff';
   import {
     nativeCommandsStore,
     providerFromModel,
@@ -56,6 +67,7 @@
 
   let showSettings = $state(false);
   let showAgents = $state(false);
+  let agentsDismissed = $state(false);
   let showSidebar = $state(true);
   let showGit = $state(false);
   let showNotes = $state(false);
@@ -64,6 +76,11 @@
   let showGitBeforeZen = $state(false);
   let showCommandPalette = $state(false);
   let showThemeQuickMenu = $state(false);
+  let showTimeTravel = $state(false);
+  let showWorkflows = $state(false);
+  let workflowTask = $state('');
+  let activeWorkflow = $state<{ name: string; stage: string; status: string; task: string } | undefined>();
+  let lastIdleEscapeAt = 0;
   let zenMode = $state(false);
   let settingsInitialTab = $state<'providers' | 'experimental'>('providers');
   let inputRef = $state<HTMLTextAreaElement>();
@@ -71,6 +88,12 @@
   let projectFolderInput = $state<HTMLInputElement>();
   let recentProjects = $state<RecentProject[]>([]);
   let composerDraft = $state('');
+  let interactionMode = $derived(
+    sessionStore.sessions.find((session) => session.id === sessionStore.activeSessionId)
+      ?.interactionMode ?? 'act',
+  );
+  let currentPlanText = $derived(latestPlanText(wsStore.feed));
+  let planReady = $derived(validatePlanReadiness(currentPlanText).ready);
   let currentProjectContent = $state('');
   let composerProjectFiles = $state<string[]>([]);
   let contextBarHover = $state(false);
@@ -141,6 +164,21 @@
 
   const agentRail = useAgentRail();
 
+  async function refreshActiveWorkflow() {
+    const sessionId = sessionStore.activeSessionId;
+    if (!sessionId || isDemoMode) { activeWorkflow = undefined; return; }
+    try {
+      const res = await apiFetch(apiUrl(`/api/agent/workflows?sessionId=${encodeURIComponent(sessionId)}`));
+      const data = await res.json();
+      const run = data?.data?.runs?.find((item: any) => item.status === 'running' || item.status === 'blocked');
+      const definition = data?.data?.definitions?.find((item: any) => item.id === run?.workflowId);
+      const stage = definition?.stages?.[run?.stageIndex];
+      activeWorkflow = run && definition ? { name: definition.name, stage: stage?.label ?? 'Complete', status: run.status, task: run.task } : undefined;
+    } catch { activeWorkflow = undefined; }
+  }
+
+  $effect(() => { void refreshActiveWorkflow(); });
+
   useSessionSync({
     // Both demo variants are served by the in-memory API shim. This keeps the
     // guided sample's four workflows independently navigable.
@@ -164,6 +202,11 @@
       label: 'Compact Session',
       description: 'Summarize and compact the current session.',
     },
+    {
+      command: 'rewind',
+      label: 'Time Travel',
+      description: 'Inspect and restore recorded states from this session.',
+    },
     { command: 'yolo', label: 'Toggle YOLO', description: 'Toggle YOLO mode on or off.' },
     { command: 'beginner', label: 'Beginner Mode', description: 'Switch to beginner UI mode.' },
     { command: 'advanced', label: 'Advanced Mode', description: 'Switch to advanced UI mode.' },
@@ -172,7 +215,30 @@
     { command: 'theme', label: 'Theme Picker', description: 'Open theme selection.' },
     { command: 'sidebar', label: 'Toggle Sidebar', description: 'Show or hide the sidebar.' },
     { command: 'zen', label: 'Toggle Zen', description: 'Enter or exit zen mode.' },
-    { command: 'goal', label: 'Goal Mode', description: 'Create, open, or ask Kory to advance a verified goal.' },
+    { command: 'goal', label: 'Goal Mode', description: 'Open durable goals and their progress.' },
+    { command: 'workflow', label: 'Workflows', description: 'Attach a host-owned workflow to the current task.' },
+    { command: 'agents', label: 'Toggle subagents', description: 'Show or hide the current worker and critic agents above the chat.' },
+    {
+      command: 'goal create',
+      label: 'Create Goal',
+      description: 'Create a durable goal; add the objective after this command.',
+    },
+    {
+      command: 'goal start',
+      label: 'Start Goal',
+      description: 'Start the selected goal and continue autonomously.',
+    },
+    { command: 'goal pause', label: 'Pause Goal', description: 'Pause the selected running goal.' },
+    {
+      command: 'goal resume',
+      label: 'Resume Goal',
+      description: 'Resume a paused or blocked goal.',
+    },
+    {
+      command: 'goal stop',
+      label: 'Stop Goal',
+      description: 'Permanently stop the selected active goal.',
+    },
   ];
 
   // Active composer model (bound from CommandInput) so we can surface the
@@ -292,7 +358,10 @@
       window.removeEventListener('open-note', handleOpenNote);
       window.removeEventListener('open-notes-graph', handleOpenNotesGraph);
       window.removeEventListener('open-team-settings', handleOpenTeamSettings);
-      window.removeEventListener('open-provider-account-settings', handleOpenProviderAccountSettings);
+      window.removeEventListener(
+        'open-provider-account-settings',
+        handleOpenProviderAccountSettings,
+      );
       window.removeEventListener('open-team-settings', handleOpenTeamSettings);
       window.removeEventListener('kory:focus-input', handleFocusInput);
     };
@@ -331,6 +400,34 @@
     if (e.key === 'Escape' && showThemeQuickMenu) {
       showThemeQuickMenu = false;
       return;
+    }
+
+    if (e.key !== 'Escape') {
+      lastIdleEscapeAt = 0;
+    } else if (
+      !e.repeat &&
+      !e.defaultPrevented &&
+      !e.ctrlKey &&
+      !e.metaKey &&
+      !e.altKey &&
+      !e.shiftKey &&
+      !!sessionStore.activeSessionId &&
+      !wsStore.isSessionBusy(sessionStore.activeSessionId) &&
+      !showTimeTravel &&
+      !showCommandPalette &&
+      !showSettings &&
+      !showThemeQuickMenu &&
+      !document.querySelector('[aria-modal="true"], [role="menu"]')
+    ) {
+      const gesture = registerEligibleEscape(lastIdleEscapeAt, performance.now());
+      lastIdleEscapeAt = gesture.nextAt;
+      if (gesture.open) {
+        e.preventDefault();
+        showTimeTravel = true;
+        return;
+      }
+    } else if (e.key === 'Escape') {
+      lastIdleEscapeAt = 0;
     }
 
     if (shortcutStore.matches('toggle_palette', e)) {
@@ -537,6 +634,16 @@ RULES:
     else toastStore.info('No previous chat is available for this project');
   }
 
+  function toggleAgentRail() {
+    if (showAgents && !agentsDismissed) {
+      showAgents = false;
+      agentsDismissed = true;
+    } else {
+      showAgents = true;
+      agentsDismissed = false;
+    }
+  }
+
   async function handleSlashCommand(command: string): Promise<boolean> {
     const parts = command.trim().slice(1).split(/\s+/).filter(Boolean);
     const root = parts[0]?.toLowerCase();
@@ -545,7 +652,7 @@ RULES:
 
     if (root === 'help') {
       toastStore.info(
-        'Commands: /new, /resume, /compact, /goal, /yolo, /beginner, /advanced, /clear, /settings, /theme, /sidebar, /zen',
+        'Commands: /new, /resume, /compact, /rewind, /agents, /workflow, /goal, /yolo, /beginner, /advanced, /clear, /settings, /theme, /sidebar, /zen',
       );
       return true;
     }
@@ -563,6 +670,12 @@ RULES:
 
     if (root === 'compact') {
       requestSessionCompact();
+      return true;
+    }
+
+    if (root === 'rewind') {
+      if (parts.length > 1) toastStore.error('Usage: /rewind');
+      else showTimeTravel = true;
       return true;
     }
 
@@ -611,9 +724,29 @@ RULES:
       return true;
     }
 
+    if (root === 'agents') {
+      if (parts.length > 1) {
+        toastStore.error('Usage: /agents');
+      } else {
+        toggleAgentRail();
+      }
+      return true;
+    }
+
     if (root === 'goal') {
       goalDisplayStore.update({ sidebar: true });
-      queueMicrotask(() => window.dispatchEvent(new CustomEvent('kory:goal-action', { detail: parts.length > 1 ? 'goal_create' : 'goal_open' })));
+      const request = parseGoalSlashCommand(parts.slice(1));
+      queueMicrotask(() =>
+        window.dispatchEvent(
+          new CustomEvent<GoalActionRequest>('kory:goal-action', { detail: request }),
+        ),
+      );
+      return true;
+    }
+
+    if (root === 'workflow' || root === 'workflows') {
+      workflowTask = parts.slice(1).join(' ') || composerDraft;
+      showWorkflows = true;
       return true;
     }
 
@@ -670,9 +803,7 @@ RULES:
     );
   });
 
-  async function readFolderFromTauri(
-    folderPath: string,
-  ): Promise<{
+  async function readFolderFromTauri(folderPath: string): Promise<{
     title: string;
     text: string;
     folderName: string;
@@ -904,14 +1035,15 @@ RULES:
 
   async function handleMenuAction(action: string) {
     if (action.startsWith('goal_')) {
-      if (action === 'goal_open') {
-        goalDisplayStore.update({ sidebar: true });
-        // The Goal panel is conditionally mounted; dispatch after Svelte has
-        // committed the visibility change so its onMount listener receives it.
-        queueMicrotask(() => window.dispatchEvent(new CustomEvent('kory:goal-action', { detail: action })));
-      } else {
-        window.dispatchEvent(new CustomEvent('kory:goal-action', { detail: action }));
-      }
+      goalDisplayStore.update({ sidebar: true });
+      // The Goal panel is conditionally mounted; dispatch after Svelte commits it.
+      queueMicrotask(() =>
+        window.dispatchEvent(
+          new CustomEvent<GoalActionRequest>('kory:goal-action', {
+            detail: { action: action as GoalActionRequest['action'], source: 'palette' },
+          }),
+        ),
+      );
       return;
     }
     switch (action) {
@@ -1023,7 +1155,7 @@ RULES:
         toastStore.success('Current feed cleared');
         break;
       case 'toggle_agents':
-        showAgents = !showAgents;
+        toggleAgentRail();
         break;
       case 'toggle_git':
         showGit = !showGit;
@@ -1039,6 +1171,9 @@ RULES:
         break;
       case 'session_compact':
         requestSessionCompact();
+        break;
+      case 'open_time_travel':
+        showTimeTravel = true;
         break;
       case 'toggle_sidebar':
         showSidebar = !showSidebar;
@@ -1115,7 +1250,12 @@ RULES:
   let agenticConsentPrompt = $state<{
     provider: string;
     hostName: string;
-    pending: { message: string; model?: string; reasoningLevel?: string; attachments?: Array<{ type: string; data: string; name: string }> };
+    pending: {
+      message: string;
+      model?: string;
+      reasoningLevel?: string;
+      attachments?: Array<{ type: string; data: string; name: string }>;
+    };
   } | null>(null);
 
   function confirmAgenticConsent() {
@@ -1156,7 +1296,9 @@ RULES:
     // Remote CLI model: copies this project to the host to run there. Confirm
     // once per session so the client always knows their files are leaving.
     const providerName = model?.includes(':') ? model.split(':')[0] : '';
-    const remoteProvider = providerName ? wsStore.providers.find((p) => p.name === providerName) : undefined;
+    const remoteProvider = providerName
+      ? wsStore.providers.find((p) => p.name === providerName)
+      : undefined;
     if (remoteProvider?.remoteAgentic && !agenticConsent.has(providerName)) {
       agenticConsentPrompt = {
         provider: providerName,
@@ -1304,6 +1446,7 @@ RULES:
     {#if !collaborationStore.activeJoinedSession}<AgentRail
         rail={agentRail}
         visible={showAgents}
+        forceHidden={agentsDismissed}
       />{/if}
   {/snippet}
 
@@ -1570,6 +1713,8 @@ RULES:
           settingsInitialTab = section === 'advanced' ? 'experimental' : 'providers';
           showSettings = true;
         }}
+        onOpenWorkflows={() => { workflowTask = composerDraft; showWorkflows = true; }}
+        workflowStatus={activeWorkflow}
         slashCommands={composerSlashCommandList}
         fileMentions={composerFileMentions}
         onRefreshFileMentions={refreshComposerFileMentions}
@@ -1577,6 +1722,28 @@ RULES:
         initialModel={isDemoMode ? 'codex:gpt-5.6-sol' : ''}
         disableModelPreviewRequests={isDemoMode}
         bind:selectedModel={activeComposerModel}
+        {interactionMode}
+        {planReady}
+        onInteractionModeChange={async (mode) => {
+          if (!sessionStore.activeSessionId) return;
+          if (await sessionStore.setInteractionMode(sessionStore.activeSessionId, mode)) {
+            toastStore.info(
+              mode === 'plan' ? 'Plan mode active — project writes are blocked' : 'Act mode active',
+            );
+          }
+        }}
+        onApprovePlan={async () => {
+          const session = sessionStore.sessions.find(
+            (item) => item.id === sessionStore.activeSessionId,
+          );
+          if (!session || !planReady) return;
+          if (!(await sessionStore.setInteractionMode(session.id, 'act'))) return;
+          const objective = originalPlanRequest(wsStore.feed, session.title);
+          handleSend(
+            implementationPrompt(objective, currentPlanText),
+            activeComposerModel || undefined,
+          );
+        }}
       />{/if}
   {/snippet}
 
@@ -1589,6 +1756,9 @@ RULES:
 
 <PermissionDialog />
 <QuestionDialog />
+<TimeTravelPanel bind:open={showTimeTravel} />
+<WorkflowPanel open={showWorkflows} sessionId={sessionStore.activeSessionId} initialTask={workflowTask} onclose={() => (showWorkflows = false)} onchange={() => void refreshActiveWorkflow()} />
+<RewindDialog />
 <ChangesSummary />
 <ThemePickerModal open={showThemeQuickMenu} onClose={() => (showThemeQuickMenu = false)} />
 
@@ -1647,7 +1817,9 @@ RULES:
 {/if}
 
 {#if newProjectPrompt}
-  <div class="fixed inset-0 z-[90] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
+  <div
+    class="fixed inset-0 z-[90] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm"
+  >
     <div
       class="w-full max-w-md rounded-2xl border p-6 shadow-2xl"
       style="background: var(--color-surface-2); border-color: var(--color-border);"
@@ -1695,7 +1867,9 @@ RULES:
 {/if}
 
 {#if agenticConsentPrompt}
-  <div class="fixed inset-0 z-[90] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
+  <div
+    class="fixed inset-0 z-[90] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm"
+  >
     <div
       class="w-full max-w-md rounded-2xl border p-6 shadow-2xl"
       style="background: var(--color-surface-2); border-color: var(--color-border);"
@@ -1707,8 +1881,8 @@ RULES:
       </h3>
       <p class="text-sm mb-3 leading-relaxed" style="color: var(--color-text-secondary);">
         It's a CLI tool, so it runs on the host's computer — not yours. To do that,
-        <strong>your project files are copied to a temporary folder on the host</strong> each turn,
-        the CLI edits them there, and the changes are written back to your project here.
+        <strong>your project files are copied to a temporary folder on the host</strong> each turn, the
+        CLI edits them there, and the changes are written back to your project here.
       </p>
       <p class="text-xs mb-5 leading-relaxed" style="color: var(--color-text-muted);">
         Only text files are sent (node_modules, .git, and build output are skipped). Regular API
@@ -1736,6 +1910,10 @@ RULES:
   </div>
 {/if}
 
-<SettingsDrawer open={showSettings} initialTab={settingsInitialTab} onClose={() => (showSettings = false)} />
+<SettingsDrawer
+  open={showSettings}
+  initialTab={settingsInitialTab}
+  onClose={() => (showSettings = false)}
+/>
 <CommandPalette bind:open={showCommandPalette} onAction={handleMenuAction} />
 <ToastContainer />

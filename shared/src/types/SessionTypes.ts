@@ -9,6 +9,14 @@ export interface Session {
   userId?: string;
   title: string;
   parentSessionId?: string;
+  /** Absolute path of the project folder this chat belongs to. Sessions without
+   *  one are "global" (created before project scoping, or with no folder open). */
+  workingDirectory?: string;
+  /** Persisted per-conversation capability mode. Plan mode is read-only apart
+   * from its dedicated planning note and explicit durable-preference writes. */
+  interactionMode?: 'act' | 'plan';
+  /** Stable note owned by this planning conversation. */
+  planNoteId?: string;
   messageCount: number;
   totalTokensIn: number;
   totalTokensOut: number;
@@ -20,6 +28,12 @@ export interface Session {
 
 export type SessionStatus = 'active' | 'archived' | 'deleted';
 
+export interface JulesSessionLink {
+  sessionId: string;
+  url?: string;
+  updatedAt: number;
+}
+
 export interface SessionMetadata {
   agentCount?: number;
   messageCount?: number;
@@ -27,6 +41,8 @@ export interface SessionMetadata {
   totalCost?: number;
   providerUsage?: Record<string, number>;
   lastActivityAt?: number;
+  /** Active Google Jules cloud session for continuity across turns */
+  jules?: JulesSessionLink;
 }
 
 export interface SessionSnapshot {

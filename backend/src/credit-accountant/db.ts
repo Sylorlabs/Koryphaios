@@ -5,18 +5,23 @@
 
 import { Database } from 'bun:sqlite';
 import { join } from 'node:path';
-import { mkdirSync } from 'node:fs';
 import { serverLog } from '../logger';
+import { ensureSecureDir, hardenFilePermissions } from '../security/fs-permissions';
 
 let db: Database | null = null;
 
 export function initCreditDb(dataDir: string): void {
   if (db) return;
-  mkdirSync(dataDir, { recursive: true });
+  ensureSecureDir(dataDir);
   const dbPath = join(dataDir, 'sylorlabs.db');
   db = new Database(dbPath);
   db.exec('PRAGMA journal_mode = WAL;');
   db.exec('PRAGMA foreign_keys = ON;');
+  // sylorlabs.db holds token-usage / cost attribution rows; tighten the DB
+  // and its WAL/SHM sidecars to 0o600 so other local users can't read them.
+  hardenFilePermissions(dbPath);
+  hardenFilePermissions(`${dbPath}-wal`);
+  hardenFilePermissions(`${dbPath}-shm`);
 
   db.exec(`
     CREATE TABLE IF NOT EXISTS credit_usage (
@@ -77,7 +82,9 @@ export function getLocalTotals(): {
   const rows = d
     .query<{ model: string; cost_usd: number; tokens_in: number; tokens_out: number }, []>(
       `SELECT model, SUM(cost_usd) as cost_usd, SUM(tokens_in) as tokens_in, SUM(tokens_out) as tokens_out
-     FROM credit_usage GROUP BY model`,
+     FROM credit_usage
+     GROUP BY model
+     HAVING SUM(tokens_in) > 0 OR SUM(tokens_out) > 0`,
     )
     .all();
 
@@ -112,7 +119,10 @@ export function getLocalTotalsByProvider(): Array<{
   const rows = d
     .query<{ provider: string; cost_usd: number; tokens_in: number; tokens_out: number }, []>(
       `SELECT provider, SUM(cost_usd) as cost_usd, SUM(tokens_in) as tokens_in, SUM(tokens_out) as tokens_out
-       FROM credit_usage GROUP BY provider ORDER BY cost_usd DESC`,
+       FROM credit_usage
+       GROUP BY provider
+       HAVING SUM(tokens_in) > 0 OR SUM(tokens_out) > 0
+       ORDER BY cost_usd DESC`,
     )
     .all();
 

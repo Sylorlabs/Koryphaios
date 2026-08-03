@@ -4,6 +4,7 @@ import { requireLocalRouteAuth } from '../../auth/local-route-auth';
 import { processSupervisor } from '../../process-supervisor/supervisor';
 import { serializeProcess } from '../../process-supervisor/serialize';
 import { serverLog } from '../../logger';
+import { writeAllCliRulesAndSkills } from '../../providers/cli-rules-skills';
 
 export const sessionRoutes = new Elysia({ prefix: '/api/sessions' })
   .get('/', async ({ request, set }) => {
@@ -23,6 +24,14 @@ export const sessionRoutes = new Elysia({ prefix: '/api/sessions' })
         body.parentId,
         body.workingDirectory,
       );
+      // Write Koryphaios rules + skills files to every CLI's isolated home so
+      // the native CLIs (claude, codex, devin, grok, cursor, cline, antigravity)
+      // discover Kory's tool-usage + orchestration conventions on startup.
+      try {
+        writeAllCliRulesAndSkills(session.id, '');
+      } catch (err) {
+        serverLog.warn({ err, sessionId: session.id }, 'Failed to write CLI rules + skills');
+      }
       return { ok: true, data: session };
     },
     {
@@ -64,6 +73,7 @@ export const sessionRoutes = new Elysia({ prefix: '/api/sessions' })
           totalTokensIn: t.Number(),
           totalTokensOut: t.Number(),
           totalCost: t.Number(),
+          interactionMode: t.Union([t.Literal('act'), t.Literal('plan')]),
         }),
       ),
     },
@@ -86,6 +96,7 @@ export const sessionRoutes = new Elysia({ prefix: '/api/sessions' })
     if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
     const { kory, wsManager } = getContext();
     // Cancel all workers for this session
+    await getContext().goalDriver.pauseForSession(id);
     kory.cancelSessionWorkers(id);
     // Abort manager thread for this session
     kory.abortManagerRun(id);
@@ -133,28 +144,43 @@ export const sessionRoutes = new Elysia({ prefix: '/api/sessions' })
     const usage = await kory.previewModelContext(id, b.model, b.provider as never);
     return { ok: true, usage };
   })
-  .post('/:id/context/:archiveId/visibility', async ({ request, params: { id, archiveId }, body, set }) => {
-    if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
-    // User-driven "hide from agent": stubs this entry out of the model's
-    // context on the next turn. Content stays archived and recoverable.
-    const { getContextArchive } = await import('../../kory/context-archive');
-    const archive = getContextArchive();
-    if (!archive) return { ok: false, error: 'Context archive unavailable' };
-    const hidden = (body as { hiddenFromAgent?: boolean } | undefined)?.hiddenFromAgent === true;
-    const changed = await archive.setPrunedForAgent(id, archiveId, hidden);
-    return changed ? { ok: true } : { ok: false, error: 'Unknown archive entry' };
-  })
+  .post(
+    '/:id/context/:archiveId/visibility',
+    async ({ request, params: { id, archiveId }, body, set }) => {
+      if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
+      // User-driven "hide from agent": stubs this entry out of the model's
+      // context on the next turn. Content stays archived and recoverable.
+      const { getContextArchive } = await import('../../kory/context-archive');
+      const archive = getContextArchive();
+      if (!archive) return { ok: false, error: 'Context archive unavailable' };
+      const hidden = (body as { hiddenFromAgent?: boolean } | undefined)?.hiddenFromAgent === true;
+      const changed = await archive.setPrunedForAgent(id, archiveId, hidden);
+      return changed ? { ok: true } : { ok: false, error: 'Unknown archive entry' };
+    },
+  )
+  .post(
+    '/:id/rewind/preview',
+    async ({ request, params: { id }, body, set }) => {
+      if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
+      const { timeTravel } = getContext();
+      const preview = await timeTravel.previewTravel(body.hash, id);
+      return { ok: preview.canTravel, data: preview, message: preview.message };
+    },
+    { body: t.Object({ hash: t.String() }) },
+  )
   .post(
     '/:id/rewind',
     async ({ request, params: { id }, body, set }) => {
       if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
       const { timeTravel } = getContext();
-      const result = await timeTravel.travelTo(body.hash, id);
+      const result = await timeTravel.travelTo(body.hash, id, body.expectedCurrentHash);
       return { ok: result.success, message: result.message };
     },
     {
       body: t.Object({
         hash: t.String(),
+        confirmed: t.Literal(true),
+        expectedCurrentHash: t.String(),
       }),
     },
   )

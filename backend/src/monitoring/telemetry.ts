@@ -1,5 +1,12 @@
 // OpenTelemetry monitoring and observability.
 // Provides distributed tracing, metrics, and logging integration.
+//
+// The heavy SDK packages (sdk-trace-node, resources, semantic-conventions,
+// instrumentation-http, exporter-trace-otlp-grpc, instrumentation) are
+// lazy-loaded inside initTelemetry so they're only imported when tracing is
+// actually enabled. The @opentelemetry/api package is lightweight and
+// provides no-op tracers when no provider is registered, so metrics/timers
+// work without loading the SDK.
 
 import {
   trace,
@@ -9,17 +16,6 @@ import {
   type Attributes,
   type Span,
 } from '@opentelemetry/api';
-import { NodeTracerProvider } from '@opentelemetry/sdk-trace-node';
-import { Resource } from '@opentelemetry/resources';
-import {
-  SEMRESATTRS_SERVICE_NAME,
-  SEMRESATTRS_SERVICE_VERSION,
-  SEMRESATTRS_DEPLOYMENT_ENVIRONMENT,
-} from '@opentelemetry/semantic-conventions';
-
-import { HttpInstrumentation } from '@opentelemetry/instrumentation-http';
-import { OTLPTraceExporter } from '@opentelemetry/exporter-trace-otlp-grpc';
-import { registerInstrumentations } from '@opentelemetry/instrumentation';
 import { VERSION } from '../constants';
 import { serverLog } from '../logger';
 
@@ -28,13 +24,17 @@ let tracerInitialized = false;
 /**
  * Initialize OpenTelemetry tracing.
  * Call this during application startup.
+ *
+ * Heavy SDK modules are dynamically imported only when enabled=true, so the
+ * common case (tracing disabled) avoids loading ~50 MB of OpenTelemetry SDK
+ * packages.
  */
-export function initTelemetry(config: {
+export async function initTelemetry(config: {
   enabled: boolean;
   serviceName?: string;
   environment?: string;
   otlpEndpoint?: string;
-}): void {
+}): Promise<void> {
   if (!config.enabled) {
     serverLog.info('OpenTelemetry disabled');
     return;
@@ -46,11 +46,22 @@ export function initTelemetry(config: {
   }
 
   try {
+    // Lazy-load heavy SDK packages only when tracing is enabled.
+    const [{ NodeTracerProvider, BatchSpanProcessor }, { Resource }, semconv, { HttpInstrumentation }, { OTLPTraceExporter }, { registerInstrumentations }] =
+      await Promise.all([
+        import('@opentelemetry/sdk-trace-node'),
+        import('@opentelemetry/resources'),
+        import('@opentelemetry/semantic-conventions'),
+        import('@opentelemetry/instrumentation-http'),
+        import('@opentelemetry/exporter-trace-otlp-grpc'),
+        import('@opentelemetry/instrumentation'),
+      ]);
+
     const resource = Resource.default().merge(
       new Resource({
-        [SEMRESATTRS_SERVICE_NAME]: config.serviceName || 'koryphaios',
-        [SEMRESATTRS_SERVICE_VERSION]: process.env.npm_package_version || VERSION,
-        [SEMRESATTRS_DEPLOYMENT_ENVIRONMENT]:
+        [semconv.SEMRESATTRS_SERVICE_NAME]: config.serviceName || 'koryphaios',
+        [semconv.SEMRESATTRS_SERVICE_VERSION]: process.env.npm_package_version || VERSION,
+        [semconv.SEMRESATTRS_DEPLOYMENT_ENVIRONMENT]:
           config.environment || process.env.NODE_ENV || 'production',
       }),
     );
@@ -72,9 +83,7 @@ export function initTelemetry(config: {
     }
 
     if (exporter) {
-      provider.addSpanProcessor(
-        new (require('@opentelemetry/sdk-trace-node').BatchSpanProcessor)(exporter),
-      );
+      provider.addSpanProcessor(new BatchSpanProcessor(exporter));
     }
 
     provider.register();

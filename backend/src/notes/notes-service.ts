@@ -32,7 +32,7 @@ import {
   statSync,
 } from 'fs';
 import { readdir, readFile, stat } from 'fs/promises';
-import { basename, dirname, extname, join, relative, resolve, sep } from 'path';
+import { basename, dirname, extname, join, relative, resolve, sep, isAbsolute } from 'path';
 import { PROJECT_ROOT } from '../runtime/paths';
 
 // ============================================================================
@@ -68,7 +68,7 @@ function projectDocumentIdentity(
     const [projectRoot, path] = JSON.parse(
       Buffer.from(id.slice(PROJECT_DOCUMENT_PREFIX.length), 'base64url').toString('utf8'),
     ) as [string, string];
-    if (!path || path.startsWith('/') || path.split(/[\\/]/).includes('..')) return undefined;
+    if (!path || isAbsolute(path) || path.split(/[\\/]/).includes('..')) return undefined;
     if (!projectRoot) return undefined;
     return { projectRoot: resolve(projectRoot), sourcePath: path };
   } catch {
@@ -405,7 +405,10 @@ export async function syncProjectDocuments(
     try {
       entries = await readdir(directory, { withFileTypes: true });
     } catch (err) {
-      console.error(`[notesService] Failed to read directory during project sync: ${directory}`, err);
+      console.error(
+        `[notesService] Failed to read directory during project sync: ${directory}`,
+        err,
+      );
       return;
     }
 
@@ -521,7 +524,10 @@ export async function syncProjectDocuments(
     try {
       await db.insert(notes).values(batch).onConflictDoNothing();
     } catch (err) {
-      console.error('[notesService] Bulk note insert failed during project sync; retrying row-by-row', err);
+      console.error(
+        '[notesService] Bulk note insert failed during project sync; retrying row-by-row',
+        err,
+      );
       for (const row of batch) {
         try {
           await db.insert(notes).values(row).onConflictDoNothing();

@@ -9,8 +9,10 @@ import {
   unlinkSync,
   renameSync,
   copyFileSync,
+  readFileSync,
 } from 'fs';
-import { join, relative, dirname, basename, resolve } from 'path';
+import type { Dirent } from 'fs';
+import { join, relative, dirname, basename, resolve, isAbsolute, sep } from 'path';
 import type { Tool, ToolContext, ToolCallInput, ToolCallOutput } from './registry';
 import { validatePathAccess } from '../security';
 
@@ -19,6 +21,40 @@ import { validatePathAccess } from '../security';
 function getAllowedRoots(ctx: ToolContext): string[] {
   if (ctx.allowedPaths?.length) return ctx.allowedPaths;
   return [resolve(ctx.workingDirectory)];
+}
+
+/**
+ * Stream file content to the UI in chunks with a capped "typing" animation (Cursor-style live
+ * preview). Emits at most MAX_FRAMES WS events per file; large files use bigger chunks and
+ * skip per-chunk delay. For edits, the original text is sent once on the first delta.
+ */
+async function streamFileToUI(
+  emit: NonNullable<ToolContext['emitFileEdit']>,
+  path: string,
+  content: string,
+  operation: 'create' | 'edit',
+  oldStr?: string,
+): Promise<void> {
+  const MAX_FRAMES = 40;
+  const TARGET_CHUNK = 768;
+  const chunkSize = Math.max(TARGET_CHUNK, Math.ceil(content.length / MAX_FRAMES));
+  const totalFrames = Math.max(1, Math.ceil(content.length / chunkSize));
+  const delayMs = content.length > 8_000 ? 0 : Math.min(14, Math.floor(2500 / totalFrames));
+  let sent = 0;
+  let first = true;
+  while (sent < content.length) {
+    const piece = content.slice(sent, sent + chunkSize);
+    sent += piece.length;
+    emit({
+      path,
+      delta: piece,
+      totalLength: sent,
+      operation,
+      ...(first && operation === 'edit' && oldStr !== undefined ? { oldStr } : {}),
+    });
+    first = false;
+    if (delayMs > 0) await new Promise((r) => setTimeout(r, delayMs));
+  }
 }
 
 // ─── Read File ──────────────────────────────────────────────────────────────
@@ -48,7 +84,7 @@ export class ReadFileTool implements Tool {
       endLine?: number;
     };
 
-    const absPath = filePath.startsWith('/') ? filePath : join(ctx.workingDirectory, filePath);
+    const absPath = isAbsolute(filePath) ? filePath : join(ctx.workingDirectory, filePath);
     const allowedRoots = getAllowedRoots(ctx);
     const access = validatePathAccess(absPath, allowedRoots);
 
@@ -121,7 +157,7 @@ export class WriteFileTool implements Tool {
 
   async run(ctx: ToolContext, call: ToolCallInput): Promise<ToolCallOutput> {
     const { path: filePath, content } = call.input as { path: string; content: string };
-    const absPath = filePath.startsWith('/') ? filePath : join(ctx.workingDirectory, filePath);
+    const absPath = isAbsolute(filePath) ? filePath : join(ctx.workingDirectory, filePath);
     const allowedRoots = getAllowedRoots(ctx);
     const access = validatePathAccess(absPath, allowedRoots);
 
@@ -138,19 +174,9 @@ export class WriteFileTool implements Tool {
     try {
       mkdirSync(dirname(absPath), { recursive: true });
 
-      // Stream content to UI in chunks for Cursor-style live preview
+      // Stream content to UI in chunks for Cursor-style live preview.
       if (ctx.emitFileEdit) {
-        const CHUNK_SIZE = 80; // ~80 chars per emit for smooth animation
-        let sent = 0;
-        while (sent < content.length) {
-          const chunk = content.slice(sent, sent + CHUNK_SIZE);
-          sent += chunk.length;
-          ctx.emitFileEdit({ path: absPath, delta: chunk, totalLength: sent, operation: 'create' });
-          // Yield to event loop every few chunks for smooth streaming
-          if (sent % (CHUNK_SIZE * 5) === 0) {
-            await new Promise((r) => setTimeout(r, 0));
-          }
-        }
+        await streamFileToUI(ctx.emitFileEdit, absPath, content, 'create');
       }
 
       await Bun.write(absPath, content);
@@ -214,7 +240,7 @@ export class EditFileTool implements Tool {
       old_str: string;
       new_str: string;
     };
-    const absPath = filePath.startsWith('/') ? filePath : join(ctx.workingDirectory, filePath);
+    const absPath = isAbsolute(filePath) ? filePath : join(ctx.workingDirectory, filePath);
     const allowedRoots = getAllowedRoots(ctx);
     const access = validatePathAccess(absPath, allowedRoots);
 
@@ -263,18 +289,9 @@ export class EditFileTool implements Tool {
 
       const newContent = content.replace(old_str, new_str);
 
-      // Stream the replacement region to UI
+      // Stream the replacement region to UI, carrying the old text so the UI can show a diff.
       if (ctx.emitFileEdit && new_str.length > 0) {
-        const CHUNK_SIZE = 80;
-        let sent = 0;
-        while (sent < new_str.length) {
-          const chunk = new_str.slice(sent, sent + CHUNK_SIZE);
-          sent += chunk.length;
-          ctx.emitFileEdit({ path: absPath, delta: chunk, totalLength: sent, operation: 'edit' });
-          if (sent % (CHUNK_SIZE * 5) === 0) {
-            await new Promise((r) => setTimeout(r, 0));
-          }
-        }
+        await streamFileToUI(ctx.emitFileEdit, absPath, new_str, 'edit', old_str);
       }
 
       await Bun.write(absPath, newContent);
@@ -315,11 +332,260 @@ export class EditFileTool implements Tool {
   }
 }
 
-// ─── Grep (ripgrep wrapper) ─────────────────────────────────────────────────
+// ─── Batch edit: atomic multi-site edits with full diff visibility ───────────
+
+export class BatchEditTool implements Tool {
+  readonly name = 'batch_edit';
+  readonly description =
+    'Apply MANY exact string replacements across one or more files in a single atomic operation: ' +
+    'every edit is validated first (each old_str must exist, and be unique unless replace_all), and ' +
+    'if ANY edit fails to match, NOTHING is written. Prefer this over repeated edit_file calls when ' +
+    'making several coordinated changes — it is faster and cannot leave files half-edited. ' +
+    'Each touched file still produces a full diff for the user.';
+
+  readonly inputSchema = {
+    type: 'object',
+    properties: {
+      files: {
+        type: 'array',
+        description: 'Files to edit, each with its ordered list of replacements.',
+        items: {
+          type: 'object',
+          properties: {
+            path: { type: 'string', description: 'Path to the file to edit.' },
+            edits: {
+              type: 'array',
+              items: {
+                type: 'object',
+                properties: {
+                  old_str: { type: 'string', description: 'Exact string to find.' },
+                  new_str: { type: 'string', description: 'Replacement string.' },
+                  replace_all: {
+                    type: 'boolean',
+                    description: 'Replace every occurrence (default: must be unique).',
+                  },
+                },
+                required: ['old_str', 'new_str'],
+              },
+            },
+          },
+          required: ['path', 'edits'],
+        },
+      },
+    },
+    required: ['files'],
+  };
+
+  async run(ctx: ToolContext, call: ToolCallInput): Promise<ToolCallOutput> {
+    const files = (call.input.files ?? []) as Array<{
+      path: string;
+      edits: Array<{ old_str: string; new_str: string; replace_all?: boolean }>;
+    }>;
+    const fail = (output: string): ToolCallOutput => ({
+      callId: call.id,
+      name: this.name,
+      output,
+      isError: true,
+      durationMs: 0,
+    });
+    if (!Array.isArray(files) || files.length === 0) return fail('No files given.');
+
+    // ── Phase 1: validate EVERYTHING before touching anything. ──
+    const allowedRoots = getAllowedRoots(ctx);
+    const staged: Array<{
+      absPath: string;
+      oldContent: string;
+      newContent: string;
+      replacements: number;
+    }> = [];
+    const errors: string[] = [];
+
+    for (const f of files) {
+      const absPath = isAbsolute(f.path) ? f.path : join(ctx.workingDirectory, f.path);
+      const access = validatePathAccess(absPath, allowedRoots);
+      if (!access.allowed) {
+        errors.push(`${f.path}: access denied (${access.reason})`);
+        continue;
+      }
+      if (!existsSync(absPath)) {
+        errors.push(`${f.path}: file not found`);
+        continue;
+      }
+      const oldContent = await Bun.file(absPath).text();
+      let working = oldContent;
+      let replacements = 0;
+      for (const [i, e] of (f.edits ?? []).entries()) {
+        const occurrences = working.split(e.old_str).length - 1;
+        if (occurrences === 0) {
+          errors.push(`${f.path} edit #${i + 1}: old_str not found`);
+          continue;
+        }
+        if (occurrences > 1 && !e.replace_all) {
+          errors.push(
+            `${f.path} edit #${i + 1}: old_str matches ${occurrences} times — add context or set replace_all`,
+          );
+          continue;
+        }
+        working = e.replace_all
+          ? working.split(e.old_str).join(e.new_str)
+          : working.replace(e.old_str, e.new_str);
+        replacements += e.replace_all ? occurrences : 1;
+      }
+      staged.push({ absPath, oldContent, newContent: working, replacements });
+    }
+
+    if (errors.length > 0) {
+      return fail(
+        `Atomic batch aborted — nothing was written. Fix these and retry:\n${errors.join('\n')}`,
+      );
+    }
+
+    // ── Phase 2: apply + stream a full-file diff per file for the live preview. ──
+    const summary: string[] = [];
+    for (const st of staged) {
+      if (ctx.emitFileEdit) {
+        await streamFileToUI(ctx.emitFileEdit, st.absPath, st.newContent, 'edit', st.oldContent);
+      }
+      await Bun.write(st.absPath, st.newContent);
+      ctx.emitFileComplete?.({
+        path: st.absPath,
+        totalLines: st.newContent.split('\n').length,
+        operation: 'edit',
+      });
+      ctx.recordChange?.({
+        path: st.absPath,
+        linesAdded: st.newContent.split('\n').length,
+        linesDeleted: st.oldContent.split('\n').length,
+        operation: 'edit',
+      });
+      summary.push(
+        `${st.absPath}: ${st.replacements} replacement${st.replacements === 1 ? '' : 's'}`,
+      );
+    }
+
+    return {
+      callId: call.id,
+      name: this.name,
+      output: `Batch edit applied atomically:\n${summary.join('\n')}`,
+      isError: false,
+      durationMs: 0,
+    };
+  }
+}
+
+// ─── Grep (ripgrep wrapper with JS fallback) ────────────────────────────────
+
+/**
+ * JS-based grep fallback used when ripgrep (`rg`) is not on PATH (e.g. stock
+ * Windows or macOS without Homebrew). Walks the search directory recursively,
+ * applies a glob filter, and searches file contents with a RegExp.
+ */
+function jsGrep(
+  searchPath: string,
+  pattern: string,
+  opts: {
+    glob?: string;
+    contextLines?: number;
+    caseSensitive?: boolean;
+    maxResults?: number;
+  },
+): string[] {
+  const flags = opts.caseSensitive === false ? 'gi' : 'g';
+  let regex: RegExp;
+  try {
+    regex = new RegExp(pattern, flags);
+  } catch {
+    // If the pattern is invalid regex, treat it as a literal string.
+    regex = new RegExp(pattern.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), flags);
+  }
+
+  const globMatcher = opts.glob ? new Bun.Glob(opts.glob) : null;
+  const max = opts.maxResults ?? 50;
+  const context = opts.contextLines ?? 0;
+  const results: string[] = [];
+
+  // Directories to skip (mirrors ripgrep's default ignore behavior).
+  const SKIP_DIRS = new Set(['.git', 'node_modules', '.next', 'dist', 'build', '.trees']);
+
+  function walk(dir: string): void {
+    if (results.length >= max) return;
+    let entries: Dirent[];
+    try {
+      entries = readdirSync(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const entry of entries) {
+      if (results.length >= max) return;
+      const full = join(dir, entry.name);
+      if (entry.isDirectory()) {
+        if (SKIP_DIRS.has(entry.name)) continue;
+        walk(full);
+      } else if (entry.isFile()) {
+        if (globMatcher && !globMatcher.match(entry.name)) continue;
+        try {
+          const content = readFileSync(full, 'utf8');
+          const lines = content.split('\n');
+          for (let i = 0; i < lines.length; i++) {
+            regex.lastIndex = 0;
+            if (regex.test(lines[i])) {
+              const relPath = relative(searchPath, full).split(sep).join('/');
+              if (context > 0) {
+                const start = Math.max(0, i - context);
+                const end = Math.min(lines.length - 1, i + context);
+                for (let c = start; c <= end; c++) {
+                  const prefix = c === i ? '' : '-';
+                  results.push(`${relPath}-${c + 1}${prefix} ${lines[c]}`);
+                }
+              } else {
+                results.push(`${relPath}:${i + 1} ${lines[i]}`);
+              }
+              if (results.length >= max) return;
+            }
+          }
+        } catch {
+          // binary or unreadable file — skip
+        }
+      }
+    }
+  }
+
+  // If searchPath is a file, search it directly.
+  try {
+    const st = statSync(searchPath);
+    if (st.isFile()) {
+      const content = readFileSync(searchPath, 'utf8');
+      const lines = content.split('\n');
+      const fileName = basename(searchPath);
+      for (let i = 0; i < lines.length; i++) {
+        regex.lastIndex = 0;
+        if (regex.test(lines[i])) {
+          if (context > 0) {
+            const start = Math.max(0, i - context);
+            const end = Math.min(lines.length - 1, i + context);
+            for (let c = start; c <= end; c++) {
+              const prefix = c === i ? '' : '-';
+              results.push(`${fileName}-${c + 1}${prefix} ${lines[c]}`);
+            }
+          } else {
+            results.push(`${fileName}:${i + 1} ${lines[i]}`);
+          }
+          if (results.length >= max) return results;
+        }
+      }
+    } else {
+      walk(searchPath);
+    }
+  } catch {
+    // searchPath doesn't exist — return empty
+  }
+
+  return results;
+}
 
 export class GrepTool implements Tool {
   readonly name = 'grep';
-  readonly description = `Search for a pattern in file contents using ripgrep (rg). Returns matching file paths and lines. Fast parallel search across large codebases.`;
+  readonly description = `Search for a pattern in file contents. Uses ripgrep (rg) when available, falls back to a built-in JS search on systems without rg (e.g. stock Windows/macOS). Returns matching file paths and lines.`;
 
   readonly inputSchema = {
     type: 'object',
@@ -405,13 +671,40 @@ export class GrepTool implements Tool {
         await Promise.race([proc.exited, new Promise((r) => setTimeout(r, 2000))]);
       }
     } catch {
-      return {
-        callId: call.id,
-        name: this.name,
-        output: 'ripgrep (rg) not found or timed out. Install with: apt install ripgrep',
-        isError: true,
-        durationMs: 0,
-      };
+      // rg not found (ENOENT) — fall back to JS-based search so the tool works
+      // on systems without ripgrep installed (stock Windows, minimal macOS).
+      try {
+        const results = jsGrep(searchPath, pattern, {
+          glob,
+          contextLines,
+          caseSensitive,
+          maxResults,
+        });
+        if (results.length === 0) {
+          return {
+            callId: call.id,
+            name: this.name,
+            output: 'No matches found.',
+            isError: false,
+            durationMs: 0,
+          };
+        }
+        return {
+          callId: call.id,
+          name: this.name,
+          output: results.join('\n'),
+          isError: false,
+          durationMs: 0,
+        };
+      } catch (fallbackErr) {
+        return {
+          callId: call.id,
+          name: this.name,
+          output: `Search failed: ${fallbackErr instanceof Error ? fallbackErr.message : String(fallbackErr)}`,
+          isError: true,
+          durationMs: 0,
+        };
+      }
     }
   }
 }
@@ -499,7 +792,7 @@ export class LsTool implements Tool {
   async run(ctx: ToolContext, call: ToolCallInput): Promise<ToolCallOutput> {
     const { path: dirPath, depth } = call.input as { path?: string; depth?: number };
     const absPath = dirPath
-      ? dirPath.startsWith('/')
+      ? isAbsolute(dirPath)
         ? dirPath
         : join(ctx.workingDirectory, dirPath)
       : ctx.workingDirectory;
@@ -585,7 +878,7 @@ export class DeleteFileTool implements Tool {
 
   async run(ctx: ToolContext, call: ToolCallInput): Promise<ToolCallOutput> {
     const { path: filePath } = call.input as { path: string };
-    const absPath = filePath.startsWith('/') ? filePath : join(ctx.workingDirectory, filePath);
+    const absPath = isAbsolute(filePath) ? filePath : join(ctx.workingDirectory, filePath);
     const allowedRoots = getAllowedRoots(ctx);
     const access = validatePathAccess(absPath, allowedRoots);
 
@@ -683,10 +976,8 @@ export class MoveFileTool implements Tool {
 
   async run(ctx: ToolContext, call: ToolCallInput): Promise<ToolCallOutput> {
     const { source, destination } = call.input as { source: string; destination: string };
-    const absSrc = source.startsWith('/') ? source : join(ctx.workingDirectory, source);
-    const absDest = destination.startsWith('/')
-      ? destination
-      : join(ctx.workingDirectory, destination);
+    const absSrc = isAbsolute(source) ? source : join(ctx.workingDirectory, source);
+    const absDest = isAbsolute(destination) ? destination : join(ctx.workingDirectory, destination);
 
     const accessSrc = validatePathAccess(absSrc, getAllowedRoots(ctx));
     const accessDest = validatePathAccess(absDest, getAllowedRoots(ctx));
@@ -807,7 +1098,7 @@ export class DiffTool implements Tool {
       new_content?: string;
     };
 
-    const absA = path_a.startsWith('/') ? path_a : join(ctx.workingDirectory, path_a);
+    const absA = isAbsolute(path_a) ? path_a : join(ctx.workingDirectory, path_a);
     // Note: Diff is read-only, but still check scope for security
     const accessA = validatePathAccess(absA, getAllowedRoots(ctx));
     if (!accessA.allowed)
@@ -832,7 +1123,7 @@ export class DiffTool implements Tool {
     try {
       if (path_b) {
         // Diff two files using system diff
-        const absB = path_b.startsWith('/') ? path_b : join(ctx.workingDirectory, path_b);
+        const absB = isAbsolute(path_b) ? path_b : join(ctx.workingDirectory, path_b);
         const accessB = validatePathAccess(absB, getAllowedRoots(ctx));
         if (!accessB.allowed)
           return {
@@ -853,46 +1144,62 @@ export class DiffTool implements Tool {
           };
         }
 
-        const proc = Bun.spawn(['diff', '-u', '--label', path_a, '--label', path_b, absA, absB], {
-          stdout: 'pipe',
-          stderr: 'pipe',
-        });
-        const SUBPROC_TIMEOUT_MS = 15_000;
-        const timeoutId = setTimeout(() => {
-          try {
-            proc.kill();
-          } catch {
-            // already exited
-          }
-        }, SUBPROC_TIMEOUT_MS);
+        // Try system diff first; fall back to the built-in JS diff generator
+        // when `diff` isn't on PATH (stock Windows doesn't ship it).
         try {
-          const stdout = await new Response(proc.stdout).text();
-          const exitCode = await proc.exited;
-          clearTimeout(timeoutId);
-          if (exitCode === 0) {
+          const proc = Bun.spawn(['diff', '-u', '--label', path_a, '--label', path_b, absA, absB], {
+            stdout: 'pipe',
+            stderr: 'pipe',
+          });
+          const SUBPROC_TIMEOUT_MS = 15_000;
+          const timeoutId = setTimeout(() => {
+            try {
+              proc.kill();
+            } catch {
+              // already exited
+            }
+          }, SUBPROC_TIMEOUT_MS);
+          try {
+            const stdout = await new Response(proc.stdout).text();
+            const exitCode = await proc.exited;
+            clearTimeout(timeoutId);
+            if (exitCode === 0) {
+              return {
+                callId: call.id,
+                name: this.name,
+                output: 'Files are identical.',
+                isError: false,
+                durationMs: 0,
+              };
+            }
             return {
               callId: call.id,
               name: this.name,
-              output: 'Files are identical.',
+              output: stdout,
               isError: false,
               durationMs: 0,
             };
+          } finally {
+            clearTimeout(timeoutId);
+            try {
+              proc.kill();
+            } catch {
+              // already exited
+            }
+            await Promise.race([proc.exited, new Promise((r) => setTimeout(r, 2000))]);
           }
+        } catch {
+          // diff not found (ENOENT) — use the built-in JS unified diff.
+          const contentA = await Bun.file(absA).text();
+          const contentB = await Bun.file(absB).text();
+          const diff = generateUnifiedDiff(path_a, contentA.split('\n'), contentB.split('\n'));
           return {
             callId: call.id,
             name: this.name,
-            output: stdout,
+            output: diff ?? 'Files are identical.',
             isError: false,
             durationMs: 0,
           };
-        } finally {
-          clearTimeout(timeoutId);
-          try {
-            proc.kill();
-          } catch {
-            // already exited
-          }
-          await Promise.race([proc.exited, new Promise((r) => setTimeout(r, 2000))]);
         }
       } else if (new_content !== undefined) {
         // Diff file content vs new content using a temp approach
@@ -965,7 +1272,7 @@ export class PatchTool implements Tool {
       edits: Array<{ old_str: string; new_str: string }>;
     };
 
-    const absPath = filePath.startsWith('/') ? filePath : join(ctx.workingDirectory, filePath);
+    const absPath = isAbsolute(filePath) ? filePath : join(ctx.workingDirectory, filePath);
     const allowedRoots = getAllowedRoots(ctx);
     const access = validatePathAccess(absPath, allowedRoots);
 

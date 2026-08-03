@@ -57,9 +57,17 @@ describe('local Koryphaios skills', () => {
   });
   test('seeds the complete instruction-only default library', () => {
     const active = listSkills(root).filter((skill) => skill.state === 'active');
-    expect(active).toHaveLength(78);
+    expect(active).toHaveLength(79);
     expect(active.every((skill) => skill.validation.valid)).toBe(true);
     expect(active.every((skill) => skill.metadata.sourceScope === 'local-only')).toBe(true);
+  });
+
+  test('pins the host-enforced Plan mode contract independently of wording', () => {
+    const contract = createTaskContract('Rename this local variable');
+    const result = resolveSkills(root, contract.goal, contract, { pins: ['plan-mode'] });
+    const planMode = result.selected.find((item) => item.skill.name === 'plan-mode');
+    expect(planMode?.skill.instructions).toContain('Ask useful questions early and throughout');
+    expect(planMode?.skill.instructions).toContain('KORY_PLAN_READY');
   });
 
   test('loads professional playbooks only with their selected skill revision', () => {

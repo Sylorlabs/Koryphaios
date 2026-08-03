@@ -9,6 +9,7 @@ import { WSManager } from './ws/ws-manager';
 import { MCPManager } from './mcp/client';
 import { TimeTravelService } from './services/timetravel';
 import type { AppConfig } from './config-schema';
+import type { GoalDriveService } from './kory/goal-drive-service';
 
 export interface AppContext {
   config: AppConfig;
@@ -19,6 +20,7 @@ export interface AppContext {
   messages: MessageStore;
   tasks: TaskStore;
   goals: GoalStore;
+  goalDriver: GoalDriveService;
   kory: KoryManager;
   wsManager: WSManager;
   timeTravel: TimeTravelService;

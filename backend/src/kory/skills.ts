@@ -12,6 +12,7 @@ import { dirname, join, resolve } from 'node:path';
 import type { TaskContract, TaskKind } from './prompts';
 import { PROFESSIONAL_SKILL_DEFINITIONS } from './professional-skill-definitions';
 import { skillPlaybook } from './skill-playbooks';
+import { PLAN_MODE_SKILL_INSTRUCTIONS } from './plan-mode-skill';
 
 export type SkillSource = 'personal' | 'project';
 export type SkillState = 'active' | 'draft';
@@ -109,7 +110,9 @@ export function enforceSkillLearningPolicy(
     throw new Error('Agent-authored skill changes are disabled in Human only mode');
   }
   if (action === 'activate' && mode === 'propose-then-verify') {
-    throw new Error('Agent-authored skills require explicit human activation in Propose then verify mode');
+    throw new Error(
+      'Agent-authored skills require explicit human activation in Propose then verify mode',
+    );
   }
   if (action === 'activate' && !promotionReady) {
     throw new Error('Automatic activation requires a ready promotion evidence gate');
@@ -267,6 +270,16 @@ const DEFINITIONS: SkillDefinition[] = [
     should: ['plan and implement a feature'],
     shouldNot: ['what is this variable'],
     evidence: ['Acceptance criteria'],
+  },
+  {
+    name: 'plan-mode',
+    description: 'Run a question-led, Notes-backed planning engagement before implementation.',
+    domains: ['planning'],
+    activation: ['plan mode'],
+    instructions: PLAN_MODE_SKILL_INSTRUCTIONS,
+    should: ['use Plan mode', 'create a durable implementation plan'],
+    shouldNot: ['implement the approved plan', 'make this small edit now'],
+    evidence: ['Durable plan note', 'Resolved material decisions', 'Validated readiness record'],
   },
   {
     name: 'implementation',

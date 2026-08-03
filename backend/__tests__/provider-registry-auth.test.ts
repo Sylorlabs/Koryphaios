@@ -74,10 +74,7 @@ describe('ProviderRegistry credential verification', () => {
 
     expect(result.success).toBe(true);
     expect(requestUrl).toBe('https://api.poe.com/v1/models');
-    expect(registry.getStatus().find((provider) => provider.name === 'poe')).toMatchObject({
-      supportsApiKey: true,
-      enabled: true,
-      authenticated: true,
-    });
+    const status = registry.getStatus().find((provider) => provider.name === 'poe');
+    expect(status).toMatchObject({ supportsApiKey: true, enabled: true, authenticated: true });
   });
 });

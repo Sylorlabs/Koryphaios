@@ -4,6 +4,7 @@
  */
 
 import { join } from 'node:path';
+import { existsSync } from 'node:fs';
 import { ProviderRegistry } from './providers';
 import { registerLiveModelResolver } from './providers/models';
 import { ToolRegistry } from './tools';
@@ -45,6 +46,9 @@ import {
   MCPSuggestFixesTool,
   FetchContextTool,
   PruneContextTool,
+  LoadSkillDetailTool,
+  StartWorkflowTool,
+  UpdateWorkflowTool,
 } from './tools';
 import { initMCP } from './mcp/client';
 import { serverLog } from './logger';
@@ -56,11 +60,42 @@ import { setContext, type AppContext } from './context';
 import { getModeManager } from './mode';
 import { TimeTravelService } from './services/timetravel';
 import { startBackgroundCleanup } from './memory/background-cleanup';
+import { GoalDriveService } from './kory/goal-drive-service';
 
 export async function bootstrap(): Promise<AppContext> {
   // Load environment and validate
   loadEnvFromProject(PROJECT_ROOT);
   validateEnvironment();
+
+  // ── Wire CLI deep-integration bridge scripts ────────────────────────────
+  // The CLI bridges (cli-bridges.ts, devin-bridge.ts) read these env vars to
+  // spawn the kory MCP server + hook bridge as subprocesses of each native CLI
+  // (claude, codex, devin, grok, cursor, cline, antigravity). Without them,
+  // MCP/hooks wiring silently no-ops and CLIs lose access to kory__ tools.
+  // Resolve the bundled scripts relative to this module so they work in both
+  // dev (ts) and packaged (compiled) layouts.
+  if (!process.env.KORY_MCP_BRIDGE_SCRIPT) {
+    const devScript = join(import.meta.dir, 'providers', 'kory-mcp-bridge.ts');
+    const builtScript = join(import.meta.dir, 'providers', 'kory-mcp-bridge.js');
+    process.env.KORY_MCP_BRIDGE_SCRIPT = existsSync(devScript)
+      ? devScript
+      : existsSync(builtScript)
+        ? builtScript
+        : '';
+  }
+  if (!process.env.KORY_HOOK_BRIDGE_SCRIPT) {
+    const devScript = join(import.meta.dir, 'providers', 'kory-hook-bridge.ts');
+    const builtScript = join(import.meta.dir, 'providers', 'kory-hook-bridge.js');
+    process.env.KORY_HOOK_BRIDGE_SCRIPT = existsSync(devScript)
+      ? devScript
+      : existsSync(builtScript)
+        ? builtScript
+        : '';
+  }
+  // The MCP bridge spawns via `node <script>`; ensure the command is set.
+  if (!process.env.KORY_MCP_BRIDGE_COMMAND) {
+    process.env.KORY_MCP_BRIDGE_COMMAND = process.execPath;
+  }
 
   const config = loadConfig(PROJECT_ROOT);
 
@@ -125,6 +160,7 @@ export async function bootstrap(): Promise<AppContext> {
   const wsManager = new WSManager();
   setWsManager(wsManager);
   initWSBroker(wsManager);
+  const goalDriver = new GoalDriveService(goals, sessions, kory, wsManager);
 
   const context: AppContext = {
     config,
@@ -135,12 +171,14 @@ export async function bootstrap(): Promise<AppContext> {
     messages,
     tasks,
     goals,
+    goalDriver,
     kory,
     wsManager,
     timeTravel,
   };
 
   setContext(context);
+  await goalDriver.recover();
   startBackgroundCleanup(kory, wsManager);
   return context;
 }
@@ -165,7 +203,7 @@ async function initEncryption() {
 }
 
 import { registerGitTools } from './tools';
-import { CreateGoalTool } from './tools/goals';
+import { CreateGoalTool, UpdateGoalTool } from './tools/goals';
 import { noteTools } from './tools/notes';
 
 async function initTools() {
@@ -197,6 +235,10 @@ async function initTools() {
     new FetchContextTool(),
     new PruneContextTool(),
     new CreateGoalTool(),
+    new UpdateGoalTool(),
+    new LoadSkillDetailTool(),
+    new StartWorkflowTool(),
+    new UpdateWorkflowTool(),
   ];
 
   for (const tool of defaultTools) {

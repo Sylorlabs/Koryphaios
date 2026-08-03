@@ -9,6 +9,7 @@ export interface ISessionStore {
     titleOrUserId?: string,
     titleOrParentId?: string,
     parentId?: string,
+    workingDirectory?: string,
   ): Promise<SharedSession>;
   get(id: string): Promise<SharedSession | undefined>;
   list(): Promise<SharedSession[]>;
@@ -25,10 +26,19 @@ export interface ISessionStore {
 }
 
 function toSharedSession(s: DbSession): SharedSession {
+  let metadata: { interactionMode?: 'act' | 'plan'; planNoteId?: string } = {};
+  try {
+    metadata = s.metadata ? JSON.parse(s.metadata) : {};
+  } catch {
+    metadata = {};
+  }
   return {
     id: s.id,
     title: s.title,
     parentSessionId: s.parentId ?? undefined,
+    workingDirectory: s.workingDirectory ?? undefined,
+    interactionMode: metadata.interactionMode === 'plan' ? 'plan' : 'act',
+    planNoteId: typeof metadata.planNoteId === 'string' ? metadata.planNoteId : undefined,
     messageCount: s.messageCount ?? 0,
     totalTokensIn: s.tokensIn ?? 0,
     totalTokensOut: s.tokensOut ?? 0,
@@ -44,6 +54,7 @@ export class SessionStore implements ISessionStore {
     titleOrUserId?: string,
     titleOrTitle?: string,
     parentId?: string,
+    workingDirectory?: string,
   ): Promise<SharedSession> {
     const argc = arguments.length;
     const userId = argc >= 1 ? (titleOrUserId ?? null) : null;
@@ -63,6 +74,7 @@ export class SessionStore implements ISessionStore {
         userId: userId ?? null,
         title: title ?? SESSION.DEFAULT_TITLE,
         parentId: parent || null,
+        workingDirectory: workingDirectory || null,
         createdAt: now,
         updatedAt: now,
         version: 1,
@@ -114,6 +126,20 @@ export class SessionStore implements ISessionStore {
     if (updates.totalTokensIn !== undefined) drizzleUpdates.tokensIn = updates.totalTokensIn;
     if (updates.totalTokensOut !== undefined) drizzleUpdates.tokensOut = updates.totalTokensOut;
     if (updates.totalCost !== undefined) drizzleUpdates.totalCost = updates.totalCost;
+    if (updates.workingDirectory !== undefined)
+      drizzleUpdates.workingDirectory = updates.workingDirectory || null;
+    if (updates.interactionMode !== undefined || updates.planNoteId !== undefined) {
+      const prior = await db.query.sessions.findFirst({ where: eq(sessions.id, id) });
+      let metadata: Record<string, unknown> = {};
+      try {
+        metadata = prior?.metadata ? JSON.parse(prior.metadata) : {};
+      } catch {
+        metadata = {};
+      }
+      if (updates.interactionMode !== undefined) metadata.interactionMode = updates.interactionMode;
+      if (updates.planNoteId !== undefined) metadata.planNoteId = updates.planNoteId;
+      drizzleUpdates.metadata = JSON.stringify(metadata);
+    }
 
     const whereClause = expectedVersion
       ? and(eq(sessions.id, id), eq(sessions.version, expectedVersion))

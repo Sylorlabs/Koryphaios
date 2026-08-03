@@ -29,6 +29,7 @@ export const messageRoutes = new Elysia({ prefix: '/api/messages' })
         sessionId: body.sessionId,
         role: 'user' as const,
         content: body.content,
+        attachments: body.attachments,
         createdAt: Date.now(),
       };
 
@@ -48,6 +49,10 @@ export const messageRoutes = new Elysia({ prefix: '/api/messages' })
           body.model,
           body.reasoningLevel,
           body.attachments,
+          undefined,
+          undefined,
+          undefined,
+          session.interactionMode ?? 'act',
         )
         .catch((err) => {
           wsManager.broadcast({
@@ -66,6 +71,7 @@ export const messageRoutes = new Elysia({ prefix: '/api/messages' })
         content: t.String(),
         model: t.Optional(t.String()),
         reasoningLevel: t.Optional(t.String()),
+        interactionMode: t.Optional(t.Union([t.Literal('act'), t.Literal('plan')])),
         attachments: t.Optional(
           t.Array(
             t.Object({
@@ -116,7 +122,7 @@ export const messageRoutes = new Elysia({ prefix: '/api/messages' })
           prompt.content,
           body.model ?? target.model,
           body.reasoningLevel,
-          undefined,
+          prompt.attachments,
           undefined,
           { groupId, index: nextIndex },
         )

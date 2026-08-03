@@ -440,12 +440,6 @@
                     )}
                 />
                 <KorySelect
-                  label="Goal planning"
-                  value={agentSettingsStore.settings.goalPlanningDepth ?? 'adaptive'}
-                  options={[{ value: 'minimal', label: 'Minimal' }, { value: 'adaptive', label: 'Adaptive' }, { value: 'structured', label: 'Structured' }]}
-                  onchange={(value) => agentSettingsStore.saveSettings({ goalPlanningDepth: value as 'minimal' | 'adaptive' | 'structured' }, { quietSuccess: true })}
-                />
-                <KorySelect
                   label="Skill learning"
                   value={agentSettingsStore.settings.skillLearningMode ?? 'propose-then-verify'}
                   options={[
@@ -471,22 +465,43 @@
                 description="Resolve audience, medium, hierarchy, accessibility, references, and dislikes before ambiguous interface work."
                 onchange={() => toggleSetting('designDiscovery')}
               />
+            </section>
+
+            <section
+              class="space-y-4 rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-1)] p-5"
+            >
+              <div class="space-y-1">
+                <h4 class="text-sm font-semibold text-[var(--color-text-primary)]">Goal Mode</h4>
+                <p class="text-xs text-[var(--color-text-muted)]">
+                  Control autonomous goal execution and where cross-chat goal context appears. Chats assigned to active goals always keep a compact status badge in the session list.
+                </p>
+              </div>
+              <KorySelect
+                label="Checklist planning depth"
+                value={agentSettingsStore.settings.goalPlanningDepth ?? 'adaptive'}
+                options={[
+                  { value: 'minimal', label: 'Minimal', description: 'A short execution and verification checklist' },
+                  { value: 'adaptive', label: 'Adaptive', description: 'Enough discovery and verification for the objective' },
+                  { value: 'structured', label: 'Structured', description: 'A deeper plan for uncertain or consequential work' },
+                ]}
+                onchange={(value) => agentSettingsStore.saveSettings({ goalPlanningDepth: value as 'minimal' | 'adaptive' | 'structured' }, { quietSuccess: true })}
+              />
               <SettingsSwitch
                 checked={agentSettingsStore.settings.automaticGoalDriving ?? true}
-                label="Automatic Goal Driving"
-                description="Advance one ready checklist item at a time and pause on a real blocker."
+                label="Start new goals automatically"
+                description="Use the selected composer model and keep advancing until completion, a human pause or stop, or a confirmed real blocker."
                 onchange={() => toggleSetting('automaticGoalDriving')}
               />
               <SettingsSwitch
                 checked={goalDisplayStore.sidebar}
-                label="Show Active Goals in sidebar"
-                description="Keep the compact cross-chat goal list visible in the session sidebar."
+                label="Keep Goals panel open"
+                description="Keep the cross-chat Goals panel visible at the bottom of the session sidebar. You can still open it with /goal when this is off."
                 onchange={() => goalDisplayStore.update({ sidebar: !goalDisplayStore.sidebar })}
               />
               <SettingsSwitch
                 checked={goalDisplayStore.composer}
                 label="Show goal context in composer"
-                description="Place the optional goal selector to the right of model and reasoning controls."
+                description="Show the active goal assigned to the current chat and Goal Mode actions in the composer menu."
                 onchange={() => goalDisplayStore.update({ composer: !goalDisplayStore.composer })}
               />
             </section>

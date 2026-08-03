@@ -545,6 +545,42 @@ export function writePreferences(projectRoot: string, content: string): void {
   writeFileSync(filePath, content, 'utf-8');
 }
 
+/** Persist only an explicit, bounded user request to remember a stable rule.
+ * This is intentionally deterministic: ordinary conversational statements do
+ * not silently become durable preferences. */
+export function rememberExplicitPreference(
+  projectRoot: string,
+  userMessage: string,
+): string | null {
+  const normalized = userMessage.replace(/\s+/g, ' ').trim();
+  const explicit =
+    /\b(?:remember (?:that )?|this should be remembered:?\s*)(.+)$/i.exec(normalized)?.[1] ??
+    /^(.+?)\s+(?:that'?s|is|are) something that should be remembered\b/i.exec(normalized)?.[1];
+  if (!explicit) return null;
+  const preference = explicit
+    .trim()
+    .replace(/[\u0000-\u001f]/g, ' ')
+    .slice(0, 500);
+  if (
+    preference.length < 8 ||
+    /(?:api[_ -]?key|password|secret|bearer\s+[a-z0-9._-]+)/i.test(preference)
+  ) {
+    return null;
+  }
+  const current = readPreferences(projectRoot);
+  const bullet = `- ${preference}`;
+  if (current.content.toLocaleLowerCase().includes(bullet.toLocaleLowerCase())) return preference;
+  const base =
+    current.exists && current.content.trim()
+      ? current.content.trimEnd()
+      : '# Koryphaios Preferences\n';
+  const heading = /(?:^|\n)## Learned preferences\s*(?:\n|$)/i.test(base)
+    ? ''
+    : '\n\n## Learned preferences\n';
+  writePreferences(projectRoot, `${base}${heading}\n${bullet}\n`);
+  return preference;
+}
+
 // ============================================================================
 // Rule Enforcement
 // ============================================================================

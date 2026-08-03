@@ -366,12 +366,13 @@ export class SecureKeyStorage {
 
   // Fallback file-based storage (encrypted)
   private async storeFallback(key: string, data: string): Promise<void> {
-    const { writeFileSync, mkdirSync, chmodSync } = await import('fs');
+    const { writeFileSync, chmodSync } = await import('fs');
     const { join } = await import('path');
     const { PROJECT_ROOT } = await import('../runtime/paths');
 
     const keyDir = join(PROJECT_ROOT, '.koryphaios', 'keys');
-    mkdirSync(keyDir, { recursive: true, mode: 0o700 });
+    const { ensureSecureDir } = await import('../security/fs-permissions');
+    ensureSecureDir(keyDir);
 
     const keyPath = join(keyDir, `${key}.enc`);
 

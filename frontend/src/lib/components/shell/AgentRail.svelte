@@ -8,9 +8,12 @@
   let {
     rail,
     visible = false,
+    forceHidden = false,
   }: {
     rail: AgentRailState;
     visible?: boolean;
+    /** A deliberate user hide must override automatic activity reveals. */
+    forceHidden?: boolean;
   } = $props();
 
   let autoRevealed = $state(false);
@@ -27,7 +30,7 @@
   });
 </script>
 
-{#if (visible || autoRevealed || hasActiveAgents) && rail.sessionAgentChats.length > 0}
+{#if !forceHidden && (visible || autoRevealed || hasActiveAgents) && rail.sessionAgentChats.length > 0}
   <div
     class="px-4 py-2 border-b flex gap-2 overflow-x-auto shrink-0 items-stretch"
     style="border-color: var(--color-border); background: var(--color-surface-1);"
@@ -67,7 +70,7 @@
       </div>
     {/each}
   </div>
-{:else if visible && modeStore.showAgentDetails}
+{:else if !forceHidden && visible && modeStore.showAgentDetails}
   <div
     class="px-4 py-2 border-b flex items-center justify-center shrink-0"
     style="border-color: var(--color-border); background: var(--color-surface-1);"

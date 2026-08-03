@@ -13,8 +13,8 @@
 
 import type { ModelDef, ProviderConfig } from '@koryphaios/shared';
 import { spawn } from 'node:child_process';
-import { readFileSync, existsSync, unlinkSync } from 'node:fs';
-import { join } from 'node:path';
+import { readFileSync, existsSync, unlinkSync, mkdirSync, writeFileSync } from 'node:fs';
+import { join, dirname } from 'node:path';
 import { tmpdir, homedir } from 'node:os';
 import { whichBinary } from './cli-detection';
 import { detectDevinCLILogin } from './auth-utils';
@@ -190,6 +190,57 @@ export class DevinProvider implements Provider {
         agentConfigPath = bridge.writeAgentConfigFile(agentConfig, request.sessionId);
         // Set up the per-session isolated devin home (rules/skills/hooks/MCP).
         devinHome = getKoryphaiosDevinHome(request.sessionId);
+
+        // ── Wire MCP server (kory__ tools) ───────────────────────────────
+        // Write the kory MCP server to .devin/config.json so the CLI discovers
+        // it on startup and gets access to all kory__ tools.
+        const mcpConfigs = bridge.buildMcpConfig(bridgeCtx);
+        if (mcpConfigs && mcpConfigs.length > 0) {
+          try {
+            bridge.writeMcpConfig(mcpConfigs, devinHome);
+          } catch (mcpErr) {
+            providerLog.warn({ err: mcpErr }, 'Failed to write kory MCP config for Devin');
+          }
+        }
+
+        // ── Wire hooks (PreToolUse enforcement layer) ────────────────────
+        const hookConfigs = bridge.buildHooks(bridgeCtx);
+        if (hookConfigs && hookConfigs.length > 0) {
+          try {
+            const hooksJson = bridge.serializeHooks(hookConfigs);
+            const hooksPath = join(devinHome, '.devin', 'hooks.v1.json');
+            mkdirSync(dirname(hooksPath), { recursive: true });
+            writeFileSync(hooksPath, hooksJson);
+          } catch (hookErr) {
+            providerLog.warn({ err: hookErr }, 'Failed to write hooks config for Devin');
+          }
+        }
+
+        // ── Wire rules (AGENTS.md) ───────────────────────────────────────
+        const ruleFiles = bridge.buildRules(bridgeCtx);
+        if (ruleFiles) {
+          for (const rule of ruleFiles) {
+            try {
+              mkdirSync(dirname(rule.path), { recursive: true });
+              writeFileSync(rule.path, rule.content);
+            } catch (ruleErr) {
+              providerLog.warn({ err: ruleErr }, 'Failed to write rules file for Devin');
+            }
+          }
+        }
+
+        // ── Wire skills (.devin/skills/<name>/SKILL.md) ──────────────────
+        const skillFiles = bridge.buildSkills(bridgeCtx);
+        if (skillFiles) {
+          for (const skill of skillFiles) {
+            try {
+              mkdirSync(dirname(skill.path), { recursive: true });
+              writeFileSync(skill.path, skill.content);
+            } catch (skillErr) {
+              providerLog.warn({ err: skillErr }, 'Failed to write skill file for Devin');
+            }
+          }
+        }
       }
     }
 

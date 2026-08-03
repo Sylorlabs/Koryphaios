@@ -254,6 +254,23 @@ async function renameSession(id: string, title: string) {
   }
 }
 
+async function setInteractionMode(id: string, interactionMode: 'act' | 'plan'): Promise<boolean> {
+  try {
+    const res = await apiFetch(apiUrl(`/api/sessions/${id}`), {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ interactionMode }),
+    });
+    const data = await res.json();
+    if (!res.ok || !data?.ok || !data.data) throw new Error('Mode update failed');
+    sessions = sessions.map((session) => (session.id === id ? data.data : session));
+    return true;
+  } catch {
+    toastStore.error('Could not change the conversation mode');
+    return false;
+  }
+}
+
 async function deleteSession(id: string) {
   try {
     const res = await apiFetch(apiUrl(`/api/sessions/${id}`), {
@@ -283,7 +300,10 @@ async function deleteSession(id: string) {
   }
 }
 
-async function fetchMessages(sessionId: string, signal?: AbortSignal): Promise<
+async function fetchMessages(
+  sessionId: string,
+  signal?: AbortSignal,
+): Promise<
   Array<{
     id: string;
     role: string;
@@ -423,6 +443,7 @@ export const sessionStore = {
   createSession,
   newChat,
   renameSession,
+  setInteractionMode,
   deleteSession,
   fetchMessages,
   handleSessionUpdate,

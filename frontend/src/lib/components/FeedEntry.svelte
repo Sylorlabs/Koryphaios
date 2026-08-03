@@ -25,6 +25,7 @@
     FlaskConical,
     Layers,
     AlertTriangle,
+    LoaderCircle,
   } from 'lucide-svelte';
   import { fly, fade } from 'svelte/transition';
   import { wsStore } from '$lib/stores/websocket.svelte';
@@ -59,6 +60,9 @@
   import { apiFetch } from '$lib/api.svelte';
   import { apiUrl } from '$lib/utils/api-url';
   import { renderKoryChart } from '$lib/utils/chart-renderer';
+  import { renderKoryColors } from '$lib/utils/color-renderer';
+  import { htmlSandboxPlaceholder, expandHtmlSandboxes } from '$lib/utils/html-sandbox';
+  import { computeStreamingSegments } from '$lib/utils/streaming-segments';
 
   hljs.registerLanguage('bash', bash);
   hljs.registerLanguage('cpp', cpp);
@@ -135,6 +139,17 @@
     if (requestedLanguage === 'chart' || requestedLanguage === 'kory-chart') {
       const chart = renderKoryChart(text);
       if (chart) return chart;
+    }
+    if (requestedLanguage === 'color' || requestedLanguage === 'kory-color') {
+      const colors = renderKoryColors(text);
+      if (colors) return colors;
+    }
+    if (
+      requestedLanguage === 'html' ||
+      requestedLanguage === 'kory-html' ||
+      requestedLanguage === 'html-sandbox'
+    ) {
+      return htmlSandboxPlaceholder(text);
     }
     const language = requestedLanguage
       ? hljs.getLanguage(requestedLanguage)
@@ -451,7 +466,7 @@
   }
 
   function renderedMarkdown(content: string): string {
-    return DOMPurify.sanitize(marked.parse(content, { async: false }) as string);
+    return expandHtmlSandboxes(DOMPurify.sanitize(marked.parse(content, { async: false }) as string));
   }
 
   let parsedHtml = $derived.by(() => {
@@ -461,10 +476,20 @@
       const withoutRenderDirectives = debouncedText
         .replace(/\{\{render_note:[^}\s]+\}\}/g, '')
         .trim();
-      return DOMPurify.sanitize(marked.parse(withoutRenderDirectives, { async: false }) as string);
+      return expandHtmlSandboxes(DOMPurify.sanitize(marked.parse(withoutRenderDirectives, { async: false }) as string));
     } catch {
       return debouncedText;
     }
+  });
+
+  // Streaming segments: split the live text into completed rich blocks
+  // (rendered immediately as HTML) and raw text (everything else, including
+  // incomplete fences). This lets color/chart/html blocks render the moment
+  // their closing fence arrives — mid-stream — instead of waiting for the
+  // full response to complete.
+  let streamingSegments = $derived.by(() => {
+    if (!(isStreaming && entry.type === 'content')) return [];
+    return computeStreamingSegments(currentText);
   });
 
   function getEntryColor(type: FeedEntryType): string {
@@ -1026,10 +1051,20 @@
             </div>
           {:else}<div class="{getEntryColor(entry.type)} break-words mt-1 markdown-content">
             {#if isStreaming && entry.type === 'content'}
-              <span class="whitespace-pre-wrap"
-                >{#each streamChunks as c (c.id)}<span class="stream-chunk">{c.text}</span
-                  >{/each}</span
-              >
+              {#if streamingSegments.length > 0}
+                {#each streamingSegments as seg (seg.id)}
+                  {#if seg.kind === 'block'}
+                    {@html seg.html}
+                  {:else}
+                    <span class="whitespace-pre-wrap stream-chunk">{seg.text}</span>
+                  {/if}
+                {/each}
+              {:else}
+                <span class="whitespace-pre-wrap"
+                  >{#each streamChunks as c (c.id)}<span class="stream-chunk">{c.text}</span
+                    >{/each}</span
+                >
+              {/if}
             {:else if isStreaming}
               {currentText}
             {:else}
@@ -1101,7 +1136,7 @@
                     }}
                   >
                     <img
-                      src={`data:image/png;base64,${attachment.data}`}
+                      src={`data:${attachment.mimeType ?? 'image/png'};base64,${attachment.data}`}
                       alt={attachment.name}
                       class="w-full h-full object-cover"
                     />
@@ -1189,12 +1224,18 @@
                   class="flex items-center gap-1.5 px-2 py-1 rounded-md text-[10px] font-bold uppercase tracking-wider transition-all bg-[var(--color-surface-3)] text-[var(--color-text-muted)] hover:text-amber-400 hover:bg-amber-400/10"
                   onclick={(e) => {
                     e.stopPropagation();
-                    wsStore.rewind(entry.ghostHash!);
+                    void wsStore.rewind(entry.ghostHash!);
                   }}
-                  title="Rollback everything to this point"
+                  disabled={!!wsStore.rewindPreviewLoadingHash || wsStore.isSessionBusy(sessionStore.activeSessionId)}
+                  title="Preview restoring this session to this point"
                 >
-                  <Undo size={10} />
-                  Rewind to Here
+                  {#if wsStore.rewindPreviewLoadingHash === entry.ghostHash}
+                    <LoaderCircle size={10} class="animate-spin" />
+                    Loading preview
+                  {:else}
+                    <Undo size={10} />
+                    Rewind to Here
+                  {/if}
                 </button>
               {/if}
             </div>
@@ -1517,6 +1558,66 @@
     margin: 0;
   }
 
+  /* Color swatch grid (fenced `color` / `kory-color` blocks). */
+  :global(.markdown-content .kory-color) {
+    margin: 1rem 0;
+  }
+  :global(.markdown-content .kory-color-grid) {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+    gap: 10px;
+  }
+  :global(.markdown-content .kory-color-chip) {
+    display: flex;
+    flex-direction: column;
+    justify-content: flex-end;
+    min-height: 84px;
+    padding: 10px 12px;
+    border-radius: 12px;
+    border: 1px solid var(--color-border);
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.18);
+    overflow: hidden;
+    transition: transform 120ms ease;
+  }
+  :global(.markdown-content .kory-color-chip:hover) {
+    transform: translateY(-2px);
+  }
+  :global(.markdown-content .kory-color-chip-label) {
+    font-size: 12px;
+    font-weight: 700;
+    line-height: 1.2;
+    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.18);
+  }
+  :global(.markdown-content .kory-color-chip-value) {
+    margin-top: 2px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    opacity: 0.85;
+    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.18);
+  }
+
+  /* Sandboxed HTML iframe (fenced `html` / `kory-html` blocks). */
+  :global(.markdown-content .kory-html-frame) {
+    display: block;
+    width: 100%;
+    height: 360px;
+    min-height: 160px;
+    margin: 1rem 0;
+    border: 1px solid var(--color-border);
+    border-radius: 14px;
+    background: var(--color-surface-1);
+    resize: vertical;
+    overflow: auto;
+  }
+  :global(.markdown-content .kory-html-error) {
+    margin: 1rem 0;
+    padding: 10px 12px;
+    border: 1px solid var(--color-border);
+    border-radius: 10px;
+    color: var(--color-danger, #ef4444);
+    font-size: 12px;
+  }
+
   /* Streaming text: each arriving chunk starts translucent and settles to
      full opacity — the newest words read as "landing" smoothly. */
   .stream-chunk {
@@ -1546,6 +1647,12 @@
     :global(.markdown-content .kory-chart-pie-legend) {
       flex-direction: row;
       margin-top: 8px;
+    }
+    :global(.markdown-content .kory-color-grid) {
+      grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+    }
+    :global(.markdown-content .kory-html-frame) {
+      height: 280px;
     }
   }
 </style>

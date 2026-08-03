@@ -6,6 +6,11 @@ import type { FeedEntry, FeedEntryType } from '$lib/types';
 import { sessionStore } from './sessions.svelte';
 import { apiUrl } from '$lib/utils/api-url';
 import { apiFetch, parseJsonResponse } from '$lib/api.svelte';
+import {
+  mergeFeedTimeline,
+  omitArchivedToolDuplicates,
+  operationalEntriesForReload,
+} from '$lib/utils/feed-timeline';
 
 export type { FeedEntry, FeedEntryType };
 
@@ -214,6 +219,15 @@ function accumulateFeedEntry(entry: Omit<FeedEntry, 'id'>) {
       const prevTok = (last.metadata as { thinkingTokens?: number } | undefined)?.thinkingTokens ?? 0;
       const nextTok = (entry.metadata as { thinkingTokens?: number }).thinkingTokens ?? 0;
       if (prevTok || nextTok) merged.thinkingTokens = Math.max(prevTok, nextTok);
+      const priorSequence = Number(last.metadata?.sequenceStart);
+      const nextSequence = Number(entry.metadata.sequenceStart);
+      if (Number.isSafeInteger(priorSequence) && Number.isSafeInteger(nextSequence)) {
+        merged.sequenceStart = Math.min(priorSequence, nextSequence);
+        merged.sequenceEnd = Math.max(
+          Number(last.metadata?.sequenceEnd ?? priorSequence),
+          Number(entry.metadata.sequenceEnd ?? nextSequence),
+        );
+      }
       updates.metadata = merged;
     }
 
@@ -282,6 +296,19 @@ function addClientError(text: string) {
     text,
     metadata: { sessionId: activeSessionId, source: 'client' },
   });
+}
+
+function hasPersistedAssistantContaining(text: string, eventTimestamp: number): boolean {
+  const needle = normalizeFeedText(text);
+  if (!needle) return false;
+  return feed.some(
+    (entry) =>
+      entry.type === 'content' &&
+      entry.agentId === 'kory-manager' &&
+      typeof entry.metadata?.messageId === 'string' &&
+      entry.timestamp >= eventTimestamp &&
+      normalizeFeedText(entry.text).includes(needle),
+  );
 }
 
 /** Provider signalled reasoning is over (content started / turn completed):
@@ -463,6 +490,7 @@ async function loadSessionMessages(
     cost?: number;
     variantGroupId?: string;
     variantIndex?: number;
+    attachments?: Array<{ type: 'image' | 'file'; data: string; name: string; mimeType?: string }>;
   }>,
   options: {
     generation?: number;
@@ -537,6 +565,7 @@ async function loadSessionMessages(
                 index: variant.variantIndex ?? 0,
               }))
           : [{ id: m.id, content: m.content, model: m.model, index: 0 }],
+        attachments: m.attachments,
       },
       ghostHash: undefined,
     };
@@ -629,7 +658,13 @@ async function loadSessionMessages(
     ...entry,
     ghostHash: timeline.find((item) => item.messageId === entry.metadata?.messageId)?.hash,
   }));
-  const merged = [...enrichedHistory, ...toolHistory].sort((a, b) => a.timestamp - b.timestamp);
+  const liveOperational = operationalEntriesForReload(feed.slice(feedTransitionBaseLength));
+  const archivedWithoutLiveDuplicates = omitArchivedToolDuplicates(toolHistory, liveOperational);
+  const merged = mergeFeedTimeline(
+    enrichedHistory,
+    archivedWithoutLiveDuplicates,
+    liveOperational,
+  );
   // Anything pushed onto the feed while we awaited (live stream events for
   // this session) belongs after history — everything before
   // feedLengthAtStart is stale (either the old session's content, on a
@@ -672,6 +707,7 @@ export const feedStore = {
   addUserMessage,
   removeAnalyzingThoughtEntries,
   addClientError,
+  hasPersistedAssistantContaining,
   removeEntries,
   setEntryVisibility,
   finalizeThinking,
