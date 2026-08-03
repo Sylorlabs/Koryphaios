@@ -831,8 +831,36 @@ export class MigrationRunner {
     );
 
     try {
-      // Execute the migration SQL
-      this.db.exec(migration.up);
+      // SQLite has no portable `ADD COLUMN IF NOT EXISTS`. These durability
+      // migrations may encounter databases where Drizzle/bootstrap created
+      // the column before the migration ledger was introduced, so inspect the
+      // real schema and apply only the missing part. This preserves existing
+      // data and still records the unchanged migration/checksum.
+      if (migration.version === '0022') {
+        const columns = this.db.query(`PRAGMA table_info(sessions)`).all() as Array<{
+          name: string;
+        }>;
+        if (!columns.some((column) => column.name === 'conversation_revision')) {
+          this.db.exec(migration.up);
+        }
+      } else if (migration.version === '0023') {
+        const columns = this.db.query(`PRAGMA table_info(messages)`).all() as Array<{
+          name: string;
+        }>;
+        if (!columns.some((column) => column.name === 'context_revision')) {
+          this.db.exec(
+            'ALTER TABLE messages ADD COLUMN context_revision INTEGER NOT NULL DEFAULT 0;',
+          );
+        }
+        this.db.exec(
+          migration.up.replace(
+            'ALTER TABLE messages ADD COLUMN context_revision INTEGER NOT NULL DEFAULT 0;',
+            '',
+          ),
+        );
+      } else {
+        this.db.exec(migration.up);
+      }
 
       // Record the migration
       this.db.run(
