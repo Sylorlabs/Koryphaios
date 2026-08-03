@@ -2,6 +2,7 @@
 // Split from the monolithic websocket.svelte.ts for better separation of concerns
 
 import type { AgentIdentity } from '@koryphaios/shared';
+import type { CompactionProgressPayload } from '@koryphaios/shared';
 import type { FeedEntry, FeedEntryType } from '$lib/types';
 import { sessionStore } from './sessions.svelte';
 import { apiUrl } from '$lib/utils/api-url';
@@ -393,6 +394,32 @@ function addClientError(text: string) {
     glowClass: '',
     text,
     metadata: { sessionId: activeSessionId, source: 'client' },
+  });
+}
+
+function upsertCompaction(payload: CompactionProgressPayload) {
+  if (!ownsFeed(payload.sessionId)) return;
+  const existing = feed.find(
+    (entry) => entry.type === 'compaction' && entry.metadata?.compactionId === payload.compactionId,
+  );
+  const metadata = { ...payload } as unknown as Record<string, unknown>;
+  if (existing) {
+    existing.text = payload.message;
+    existing.timestamp = Date.now();
+    existing.metadata = metadata;
+    patchGroupedFeedEntry(existing.id, existing.text, existing.timestamp, { metadata });
+    streamingRevision++;
+    return;
+  }
+  addFeedEntry({
+    timestamp: Date.now(),
+    type: 'compaction',
+    agentId: 'kory-manager',
+    agentName: 'Kory',
+    glowClass: 'glow-kory',
+    text: payload.message,
+    isCollapsed: true,
+    metadata,
   });
 }
 
@@ -948,6 +975,7 @@ export const feedStore = {
   addUserMessage,
   removeAnalyzingThoughtEntries,
   addClientError,
+  upsertCompaction,
   hasPersistedAssistantContaining,
   removeEntries,
   setEntryVisibility,

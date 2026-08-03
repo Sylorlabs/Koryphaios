@@ -98,7 +98,7 @@ import {
 import { getModeManager } from '../mode';
 import type { WorkerPipelineConfig } from './services/WorkerPipelineService';
 import type { UIMode } from '@koryphaios/shared';
-import { compilePrompt, createTaskContract } from './prompts';
+import { compilePrompt, createTaskContract, requiresMultiAgentDelegation } from './prompts';
 import { discoverVerificationChecks, emptyQualityGateReport } from './verification';
 import {
   getProviderHarnessCapabilities,
@@ -583,21 +583,50 @@ export class KoryManager {
     const automatic = input.automatic === true;
     const abort = new AbortController();
     this.compactingSessions.set(input.sessionId, abort);
-    const emit = (phase: 'preparing' | 'summarizing' | 'validating' | 'committing' | 'complete' | 'failed', progress: number, message: string, extra: Record<string, unknown> = {}) =>
-      this.emitWSMessage(input.sessionId, phase === 'preparing' ? 'compaction.started' : phase === 'complete' ? 'compaction.completed' : phase === 'failed' ? 'compaction.failed' : 'compaction.progress', {
-        compactionId, sessionId: input.sessionId, phase, progress, provider: providerName,
-        model, automatic, message, ...extra,
-      });
+    const emit = (
+      phase: 'preparing' | 'summarizing' | 'validating' | 'committing' | 'complete' | 'failed',
+      progress: number,
+      message: string,
+      extra: Record<string, unknown> = {},
+    ) =>
+      this.emitWSMessage(
+        input.sessionId,
+        phase === 'preparing'
+          ? 'compaction.started'
+          : phase === 'complete'
+            ? 'compaction.completed'
+            : phase === 'failed'
+              ? 'compaction.failed'
+              : 'compaction.progress',
+        {
+          compactionId,
+          sessionId: input.sessionId,
+          phase,
+          progress,
+          provider: providerName,
+          model,
+          automatic,
+          message,
+          ...extra,
+        },
+      );
 
     await this.updateWorkflowState(input.sessionId, 'compacting');
     try {
       emit('preparing', 10, 'Preparing the current conversation revision');
       const source = await this.messages.getContextMessages(input.sessionId, 1000);
-      const conversational = source.filter((message) => message.role !== 'system' || message.content.startsWith('[KORY_COMPACTION]'));
+      const conversational = source.filter(
+        (message) => message.role !== 'system' || message.content.startsWith('[KORY_COMPACTION]'),
+      );
       if (conversational.length < 2) throw new Error('There is not enough conversation to compact');
-      const transcript = conversational.map((message) => `${message.role.toUpperCase()}: ${message.content}`).join('\n\n');
+      const transcript = conversational
+        .map((message) => `${message.role.toUpperCase()}: ${message.content}`)
+        .join('\n\n');
       const sourceTokens = Math.ceil(transcript.length / 4);
-      emit('summarizing', 30, 'Summarizing with a fresh selected-model context', { sourceMessages: conversational.length, sourceTokens });
+      emit('summarizing', 30, 'Summarizing with a fresh selected-model context', {
+        sourceMessages: conversational.length,
+        sourceTokens,
+      });
 
       const projectRoot = await this.resolveSessionWorkingDirectory(input.sessionId);
       const priorMemory = readSessionMemory(projectRoot, input.sessionId).content;
@@ -607,7 +636,8 @@ export class KoryManager {
       let tokensOut = 0;
       const stream = provider.streamResponse({
         model,
-        systemPrompt: 'You are a loss-averse conversation compactor. Produce valid JSON only. This is a fresh, read-only context boundary.',
+        systemPrompt:
+          'You are a loss-averse conversation compactor. Produce valid JSON only. This is a fresh, read-only context boundary.',
         messages: [{ role: 'user', content: prompt }],
         maxTokens: 8192,
         reasoningLevel: input.reasoningLevel,
@@ -626,26 +656,80 @@ export class KoryManager {
         }
       }
 
-      emit('validating', 75, 'Validating the continuation checkpoint', { sourceMessages: conversational.length, sourceTokens });
-      const jsonText = raw.trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '');
+      emit('validating', 75, 'Validating the continuation checkpoint', {
+        sourceMessages: conversational.length,
+        sourceTokens,
+      });
+      const jsonText = raw
+        .trim()
+        .replace(/^```(?:json)?\s*/i, '')
+        .replace(/\s*```$/, '');
       const parsed = JSON.parse(jsonText) as Record<string, unknown>;
-      const requiredArrays = ['decisions', 'filesAndCodeState', 'completedWork', 'activeWork', 'openIssues', 'nextActions', 'criticalContext'];
-      if (typeof parsed.projectBrief !== 'string' || typeof parsed.confidenceAndRisk !== 'string' || typeof parsed.durableMemory !== 'string' || requiredArrays.some((key) => !Array.isArray(parsed[key]))) {
-        throw new Error('The compactor returned an invalid checkpoint; original history was preserved');
+      const requiredArrays = [
+        'decisions',
+        'filesAndCodeState',
+        'completedWork',
+        'activeWork',
+        'openIssues',
+        'nextActions',
+        'criticalContext',
+      ];
+      if (
+        typeof parsed.projectBrief !== 'string' ||
+        typeof parsed.confidenceAndRisk !== 'string' ||
+        typeof parsed.durableMemory !== 'string' ||
+        requiredArrays.some((key) => !Array.isArray(parsed[key]))
+      ) {
+        throw new Error(
+          'The compactor returned an invalid checkpoint; original history was preserved',
+        );
       }
-      const section = (title: string, values: unknown) => `## ${title}\n${(values as unknown[]).map((value) => `- ${String(value)}`).join('\n') || '- None recorded'}`;
-      const summary = [`# Compacted Session Checkpoint`, String(parsed.projectBrief), section('Decisions', parsed.decisions), section('Files and Code State', parsed.filesAndCodeState), section('Completed Work', parsed.completedWork), section('Active Work', parsed.activeWork), section('Open Issues', parsed.openIssues), section('Next Actions', parsed.nextActions), section('Critical Context', parsed.criticalContext), `## Confidence and Risk\n${String(parsed.confidenceAndRisk)}`].join('\n\n');
-      if (summary.length < 200) throw new Error('The compaction checkpoint was too small; original history was preserved');
+      const section = (title: string, values: unknown) =>
+        `## ${title}\n${(values as unknown[]).map((value) => `- ${String(value)}`).join('\n') || '- None recorded'}`;
+      const summary = [
+        `# Compacted Session Checkpoint`,
+        String(parsed.projectBrief),
+        section('Decisions', parsed.decisions),
+        section('Files and Code State', parsed.filesAndCodeState),
+        section('Completed Work', parsed.completedWork),
+        section('Active Work', parsed.activeWork),
+        section('Open Issues', parsed.openIssues),
+        section('Next Actions', parsed.nextActions),
+        section('Critical Context', parsed.criticalContext),
+        `## Confidence and Risk\n${String(parsed.confidenceAndRisk)}`,
+      ].join('\n\n');
+      if (summary.length < 200)
+        throw new Error('The compaction checkpoint was too small; original history was preserved');
 
-      emit('committing', 90, 'Committing the new context revision', { sourceMessages: conversational.length, sourceTokens });
-      await this.messages.commitCompaction({ id: compactionId, sessionId: input.sessionId, provider: String(providerName), model, automatic, summary, sourceMessageCount: conversational.length, sourceTokens: tokensIn, checkpointTokens: tokensOut || Math.ceil(summary.length / 4) });
+      emit('committing', 90, 'Committing the new context revision', {
+        sourceMessages: conversational.length,
+        sourceTokens,
+      });
+      await this.messages.commitCompaction({
+        id: compactionId,
+        sessionId: input.sessionId,
+        provider: String(providerName),
+        model,
+        automatic,
+        summary,
+        sourceMessageCount: conversational.length,
+        sourceTokens: tokensIn,
+        checkpointTokens: tokensOut || Math.ceil(summary.length / 4),
+      });
       writeSessionMemory(projectRoot, input.sessionId, String(parsed.durableMemory));
       const checkpointTokens = tokensOut || Math.ceil(summary.length / 4);
-      emit('complete', 100, 'Compaction complete — the next manager turn starts from this checkpoint', { sourceMessages: conversational.length, sourceTokens: tokensIn, checkpointTokens });
+      emit(
+        'complete',
+        100,
+        'Compaction complete — the next manager turn starts from this checkpoint',
+        { sourceMessages: conversational.length, sourceTokens: tokensIn, checkpointTokens },
+      );
       return { compactionId, sourceMessages: conversational.length, checkpointTokens };
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      emit('failed', 100, 'Compaction failed; the original conversation remains active', { error: message });
+      emit('failed', 100, 'Compaction failed; the original conversation remains active', {
+        error: message,
+      });
       throw error;
     } finally {
       this.compactingSessions.delete(input.sessionId);
@@ -1840,6 +1924,8 @@ export class KoryManager {
       // surfaces a clear message instead of a silent "weird stop".
       let streamedAnyContent = false;
       let observedNativeTool = false;
+      let delegatedWorkerCount = 0;
+      let multiModeRetryIssued = false;
 
       while (turnCount < 25) {
         if (abort.signal.aborted) {
@@ -1894,7 +1980,24 @@ export class KoryManager {
         if (!result.success) break;
 
         const { completedToolCalls } = result;
-        if (!completedToolCalls || completedToolCalls.length === 0) break;
+        if (!completedToolCalls || completedToolCalls.length === 0) {
+          const runSettings = loadAgentSettings(this.workingDirectory);
+          const multiRequired =
+            interactionMode !== 'plan' &&
+            runSettings.agentExecutionMode === 'multi' &&
+            supportsKoryControlPlaneTools(provider.name) &&
+            requiresMultiAgentDelegation(userMessage);
+          if (multiRequired && delegatedWorkerCount === 0 && !multiModeRetryIssued) {
+            multiModeRetryIssued = true;
+            messages.push({
+              role: 'system',
+              content:
+                'HOST ENFORCEMENT: Multi-Agent mode requires delegation for this non-trivial task. Decompose it into independent workstreams and call delegate_to_worker now. When two or more workstreams are independent, issue those delegate_to_worker calls together so Kory can execute them concurrently. Do not provide a final answer until at least one worker result has been synthesized.',
+            });
+            continue;
+          }
+          break;
+        }
 
         if (completedToolCalls && completedToolCalls.length > 0) {
           if (!autoRunTools && !this.isYoloMode && firstAskForDirectTools) {
@@ -1927,6 +2030,7 @@ export class KoryManager {
               break;
             }
             const toolResult = await this.executeManagerToolCall(sessionId, tc, managerCtx);
+            if (tc.name === 'delegate_to_worker' && !toolResult.isError) delegatedWorkerCount++;
             // Archive the full output locally so pruning never loses anything —
             // fetch_context can recover the exact content by this id.
             const archiveId = await this.archiveToolResult(sessionId, tc, toolResult);
@@ -2067,6 +2171,12 @@ export class KoryManager {
       let finalMessageId: string | undefined;
       if (this.messages && toPersist) {
         finalMessageId = nanoid(12);
+        // Persist the provider-reported token usage and computed cost with the
+        // assistant message so the session counters (messageCount / totalCost)
+        // reflect real spend — not just in the demo.
+        const assistantCost = usageKnown
+          ? (computeCostUsd(providerName, routing.model, tokensIn, tokensOut)?.costUsd ?? 0)
+          : 0;
         await this.messages.add(sessionId, {
           id: finalMessageId,
           sessionId,
@@ -2076,6 +2186,9 @@ export class KoryManager {
           provider: providerName,
           variantGroupId: responseVariant?.groupId,
           variantIndex: responseVariant?.index,
+          tokensIn: usageKnown ? tokensIn : 0,
+          tokensOut: usageKnown ? tokensOut : 0,
+          cost: assistantCost,
           createdAt: Date.now(),
         });
         koryLog.debug('Assistant message persisted');
@@ -2152,6 +2265,31 @@ export class KoryManager {
       const changes = this.state.getChanges(sessionId);
       if (changes.length > 0) {
         this.emitWSMessage(sessionId, 'session.changes', { changes });
+      }
+
+      // Auto-compaction is intentionally post-turn: never replace context while
+      // the manager or its tools are still using it. Only a provider-reported
+      // input count and a trusted model window can trigger it.
+      const autoSettings = loadAgentSettings(managerCtx.workingDirectory);
+      const trustedWindow = resolveTrustedContextWindow(routing.model, providerName);
+      if (
+        autoSettings.autoCompactEnabled !== false &&
+        tokensIn > 0 &&
+        trustedWindow.contextKnown &&
+        trustedWindow.contextWindow &&
+        tokensIn / trustedWindow.contextWindow >= 0.8
+      ) {
+        const selectedModel = `${providerName}:${routing.model}`;
+        setTimeout(() => {
+          void this.compactSession({
+            sessionId,
+            selectedModel,
+            reasoningLevel,
+            automatic: true,
+          }).catch((error) =>
+            koryLog.warn({ error, sessionId }, 'Automatic compaction did not complete'),
+          );
+        }, 0);
       }
     } finally {
       this.managerAbortBySession.delete(sessionId);
@@ -2372,7 +2510,7 @@ export class KoryManager {
         '\n\n• AGENT MODE: SOLO — Do NOT delegate. Complete the entire task yourself; delegate_to_worker and delegate_to_jules are unavailable this turn.';
     } else if (execMode === 'multi') {
       systemPrompt +=
-        '\n\n• AGENT MODE: MULTI-AGENT — The user explicitly wants a coordinated team. Prefer delegating substantial implementation, refactoring, or multi-step coding to specialist workers via delegate_to_worker, and synthesize their results. Still answer trivial questions yourself.';
+        '\n\n• AGENT MODE: MULTI-AGENT — Host-enforced for non-trivial work. Decompose the task into independent workstreams and delegate them to specialist workers. Issue multiple delegate_to_worker calls in the same turn whenever at least two workstreams can proceed independently, then synthesize the results. Questions and genuinely tiny mechanical edits may stay direct; all other work must use at least one worker.';
     }
     // If "fallback", we keep it in the list. The model can choose to use it if its native search fails or is unavailable.
 
@@ -3261,6 +3399,7 @@ export class KoryManager {
 
   cancelSessionWorkers(sessionId: string) {
     this.abortManagerRun(sessionId);
+    this.abortCompaction(sessionId);
     this.workers.cancelSessionWorkers(sessionId);
   }
 
@@ -3311,7 +3450,10 @@ export class KoryManager {
                       imageMimeType: attachment.mimeType ?? 'image/png',
                     })),
                   ]
-                : m.content.replace(/^\[KORY_COMPACTION\]\n?/, 'Authoritative compacted context:\n'),
+                : m.content.replace(
+                    /^\[KORY_COMPACTION\]\n?/,
+                    'Authoritative compacted context:\n',
+                  ),
           };
         }) || []
     );
@@ -3702,6 +3844,13 @@ export class KoryManager {
     }
   }
 
+  private abortCompaction(sessionId: string): void {
+    const controller = this.compactingSessions.get(sessionId);
+    if (!controller) return;
+    controller.abort();
+    koryLog.info({ sessionId }, 'Compaction aborted');
+  }
+
   // ─── Memory Management & Cleanup ────────────────────────────────────────────────
 
   /**
@@ -3714,6 +3863,7 @@ export class KoryManager {
 
     // Abort any ongoing manager run
     this.abortManagerRun(sessionId);
+    this.abortCompaction(sessionId);
 
     // Clear pending user inputs (reject with abort error)
     if (this.state.hasPendingInput(sessionId)) {

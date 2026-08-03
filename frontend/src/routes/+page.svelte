@@ -78,7 +78,9 @@
   let showTimeTravel = $state(false);
   let showWorkflows = $state(false);
   let workflowTask = $state('');
-  let activeWorkflow = $state<{ name: string; stage: string; status: string; task: string } | undefined>();
+  let activeWorkflow = $state<
+    { name: string; stage: string; status: string; task: string } | undefined
+  >();
   let lastIdleEscapeAt = 0;
   let zenMode = $state(false);
   let settingsInitialTab = $state<'providers' | 'agent' | 'experimental'>('providers');
@@ -164,18 +166,37 @@
 
   async function refreshActiveWorkflow() {
     const sessionId = sessionStore.activeSessionId;
-    if (!sessionId || isDemoMode) { activeWorkflow = undefined; return; }
+    if (!sessionId || isDemoMode) {
+      activeWorkflow = undefined;
+      return;
+    }
     try {
-      const res = await apiFetch(apiUrl(`/api/agent/workflows?sessionId=${encodeURIComponent(sessionId)}`));
+      const res = await apiFetch(
+        apiUrl(`/api/agent/workflows?sessionId=${encodeURIComponent(sessionId)}`),
+      );
       const data = await res.json();
-      const run = data?.data?.runs?.find((item: any) => item.status === 'running' || item.status === 'blocked');
+      const run = data?.data?.runs?.find(
+        (item: any) => item.status === 'running' || item.status === 'blocked',
+      );
       const definition = data?.data?.definitions?.find((item: any) => item.id === run?.workflowId);
       const stage = definition?.stages?.[run?.stageIndex];
-      activeWorkflow = run && definition ? { name: definition.name, stage: stage?.label ?? 'Complete', status: run.status, task: run.task } : undefined;
-    } catch { activeWorkflow = undefined; }
+      activeWorkflow =
+        run && definition
+          ? {
+              name: definition.name,
+              stage: stage?.label ?? 'Complete',
+              status: run.status,
+              task: run.task,
+            }
+          : undefined;
+    } catch {
+      activeWorkflow = undefined;
+    }
   }
 
-  $effect(() => { void refreshActiveWorkflow(); });
+  $effect(() => {
+    void refreshActiveWorkflow();
+  });
 
   useSessionSync({
     // Both demo variants are served by the in-memory API shim. This keeps the
@@ -206,8 +227,16 @@
     { command: 'sidebar', label: 'Toggle Sidebar', description: 'Show or hide the sidebar.' },
     { command: 'zen', label: 'Toggle Zen', description: 'Enter or exit zen mode.' },
     { command: 'goal', label: 'Goal Mode', description: 'Open durable goals and their progress.' },
-    { command: 'workflow', label: 'Workflows', description: 'Attach a host-owned workflow to the current task.' },
-    { command: 'agents', label: 'Toggle subagents', description: 'Show or hide the current worker and critic agents above the chat.' },
+    {
+      command: 'workflow',
+      label: 'Workflows',
+      description: 'Attach a host-owned workflow to the current task.',
+    },
+    {
+      command: 'agents',
+      label: 'Toggle subagents',
+      description: 'Show or hide the current worker and critic agents above the chat.',
+    },
     {
       command: 'goal create',
       label: 'Create Goal',
@@ -665,7 +694,7 @@
     }
 
     if (root === 'compact') {
-      requestSessionCompact();
+      await requestSessionCompact();
       return true;
     }
 
@@ -1204,7 +1233,13 @@
       projectStore.setProject(data.data);
       await resumeOrCreateSession(data.data);
       toastStore.warning('Running in your home folder — no project scoping');
-      handleSend(pending.message, pending.model, pending.reasoningLevel, pending.attachments, pending.fastMode);
+      handleSend(
+        pending.message,
+        pending.model,
+        pending.reasoningLevel,
+        pending.attachments,
+        pending.fastMode,
+      );
     } catch {
       toastStore.error('Could not resolve your home folder — open a project instead');
     }
@@ -1224,7 +1259,13 @@
     if (!p) return;
     agenticConsent = new Set([...agenticConsent, p.provider]);
     agenticConsentPrompt = null;
-    handleSend(p.pending.message, p.pending.model, p.pending.reasoningLevel, p.pending.attachments, p.pending.fastMode);
+    handleSend(
+      p.pending.message,
+      p.pending.model,
+      p.pending.reasoningLevel,
+      p.pending.attachments,
+      p.pending.fastMode,
+    );
   }
 
   function handleSend(
@@ -1741,7 +1782,10 @@
           settingsInitialAgentSection = agentSection;
           showSettings = true;
         }}
-        onOpenWorkflows={() => { workflowTask = composerDraft; showWorkflows = true; }}
+        onOpenWorkflows={() => {
+          workflowTask = composerDraft;
+          showWorkflows = true;
+        }}
         workflowStatus={activeWorkflow}
         slashCommands={composerSlashCommandList}
         fileMentions={composerFileMentions}
@@ -1770,7 +1814,13 @@
 <PermissionDialog />
 <QuestionDialog />
 <TimeTravelPanel bind:open={showTimeTravel} />
-<WorkflowPanel open={showWorkflows} sessionId={sessionStore.activeSessionId} initialTask={workflowTask} onclose={() => (showWorkflows = false)} onchange={() => void refreshActiveWorkflow()} />
+<WorkflowPanel
+  open={showWorkflows}
+  sessionId={sessionStore.activeSessionId}
+  initialTask={workflowTask}
+  onclose={() => (showWorkflows = false)}
+  onchange={() => void refreshActiveWorkflow()}
+/>
 <RewindDialog />
 <ChangesSummary />
 <ThemePickerModal open={showThemeQuickMenu} onClose={() => (showThemeQuickMenu = false)} />

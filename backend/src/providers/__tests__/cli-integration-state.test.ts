@@ -6,6 +6,7 @@ import {
 } from '../cli-session-state';
 import { materializeCliImage, renderCliContent } from '../cli-attachments';
 import { buildKoryCliMcpConfig } from '../kory-cli-mcp-config';
+import { buildKoryMcpServerConfig } from '../cli-bridges';
 import { validateLocalBearerToken } from '../../auth/local-route-auth';
 import { localAuth } from '../../auth/local-auth';
 
@@ -75,5 +76,18 @@ describe('native CLI integration state', () => {
     expect(localAuth.hasPermission(auth!, 'mcp:mcp-session:critic')).toBe(true);
     expect(localAuth.hasPermission(auth!, 'mcp:another-session:critic')).toBe(false);
     expect(config?.[0]?.args.some((arg) => arg.endsWith('kory-mcp-bridge.ts'))).toBe(true);
+    const bridged = buildKoryMcpServerConfig(
+      {
+        provider: 'claude',
+        role: 'critic',
+        sandbox: undefined,
+        workingDirectory: '/tmp/workspace',
+        sessionId: 'mcp-session',
+        systemPrompt: 'test',
+        tools: [],
+      },
+      'claude',
+    );
+    expect(bridged?.env?.KORY_LOCAL_AUTH).toBe(bearer);
   });
 });
