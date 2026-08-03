@@ -68,7 +68,7 @@ async function probe(url: string, init?: RequestInit, timeoutMs = 7000): Promise
   try {
     const headers = new Headers(init?.headers ?? {});
     if (!headers.has('User-Agent')) headers.set('User-Agent', 'Koryphaios/1.0');
-    if (!headers.has('Authorization')) headers.set('Authorization', 'Bearer koryphaios-reachability-probe');
+    if (!headers.has('Authorization')) headers.set('Authorization', 'Bearer kory-probe');
     const res = await fetch(url, { method: init?.method ?? 'GET', ...init, headers, signal: controller.signal });
     const text = await res.text().catch(() => '');
     return { status: res.status, ok: res.ok, body: text.slice(0, 160) };
