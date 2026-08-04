@@ -19,10 +19,6 @@ import { spawnSync } from 'node:child_process';
 const PROJECT_ROOT = join(import.meta.dir, '..');
 const BACKEND_DIR = join(PROJECT_ROOT, 'backend');
 
-// On Windows, `spawnSync('bun', ...)` needs `shell: true` to resolve `bun.exe`
-// via PATHEXT.
-const SPAWN_SHELL = process.platform === 'win32';
-
 function gatherTestFiles(dir: string, acc: string[] = []): string[] {
   for (const entry of readdirSync(dir)) {
     const full = join(dir, entry);
@@ -74,13 +70,12 @@ function main() {
       const dbUrl = `sqlite:${join(testDbDir, `${testIndex}.db`)}`;
 
       const result = spawnSync(
-        'bun',
+        process.execPath,
         ['test', '--preload', './backend/test/setup-db.ts', testFile],
         {
           cwd: PROJECT_ROOT,
           env: { ...env, DATABASE_URL: dbUrl },
           stdio: 'inherit',
-          shell: SPAWN_SHELL,
         },
       );
 
