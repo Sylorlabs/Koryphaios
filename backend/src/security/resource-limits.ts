@@ -35,7 +35,16 @@ export const AGENT_RESOURCE_LIMITS: ResourceLimits = {
 
 /**
  * Build a command with resource limits applied.
- * Uses Linux `prlimit` command when available, falls back to `ulimit`.
+ *
+ * Platform support:
+ *   - Linux   → `prlimit` (per-process rlimits via the kernel)
+ *   - macOS   → `ulimit` (bash builtin; enforced by the kernel for -t/-f/-n/-u)
+ *   - Windows → no native per-process rlimit CLI; proceeds with a warning
+ *
+ * On macOS, `ulimit -v` (virtual memory) and `-m` (resident set) are accepted
+ * by bash but NOT enforced by the kernel, so they are intentionally omitted to
+ * avoid implying a memory cap that does not actually bind. CPU time (-t), file
+ * size (-f), open fds/sockets (-n), and process count (-u) ARE enforced.
  */
 export function buildCommandWithLimits(
   command: string,
@@ -43,60 +52,84 @@ export function buildCommandWithLimits(
 ): string {
   const finalLimits = { ...DEFAULT_RESOURCE_LIMITS, ...limits };
 
-  // Check if we're on Linux and have prlimit
-  const hasPrlimit = process.platform === 'linux';
+  // ─── Linux: prlimit ──────────────────────────────────────────────────────
+  if (process.platform === 'linux') {
+    const limitCommands: string[] = [];
 
-  if (!hasPrlimit) {
-    // On non-Linux systems, just return the command with a warning
-    serverLog.warn(
-      { platform: process.platform },
-      'Resource limits require Linux; proceeding without limits',
-    );
-    return command;
+    if (finalLimits.maxCpuTimeMs) {
+      const cpuSec = Math.floor(finalLimits.maxCpuTimeMs / 1000);
+      limitCommands.push(`prlimit --cpu=${cpuSec}`);
+    }
+    if (finalLimits.maxMemoryMB) {
+      const memBytes = finalLimits.maxMemoryMB * 1024 * 1024;
+      limitCommands.push(`prlimit --as=${memBytes}`);
+    }
+    if (finalLimits.maxFileSize) {
+      limitCommands.push(`prlimit --fsize=${finalLimits.maxFileSize}`);
+    }
+    if (finalLimits.maxProcesses) {
+      limitCommands.push(`prlimit --nproc=${finalLimits.maxProcesses}`);
+    }
+    if (finalLimits.maxNetworkSockets) {
+      limitCommands.push(`prlimit --nofile=${finalLimits.maxNetworkSockets}`);
+    }
+
+    if (limitCommands.length === 0) return command;
+
+    // Wrap the command with all limit commands
+    // We use bash -c to chain the prlimit commands and then execute the actual command
+    return `${limitCommands.join(' ')} -- bash -c ${JSON.stringify(command)}`;
   }
 
-  const limitCommands: string[] = [];
+  // ─── macOS: ulimit (bash builtin) ────────────────────────────────────────
+  if (process.platform === 'darwin') {
+    // ulimit settings apply to the current shell and its children. Since
+    // bash.ts spawns `bash -c <limitedCommand>`, we prepend ulimit calls that
+    // take effect before the user command runs in the same shell.
+    const ulimitCalls: string[] = [];
 
-  // CPU time limit (seconds)
-  if (finalLimits.maxCpuTimeMs) {
-    const cpuSec = Math.floor(finalLimits.maxCpuTimeMs / 1000);
-    limitCommands.push(`prlimit --cpu=${cpuSec}`);
+    if (finalLimits.maxCpuTimeMs) {
+      const cpuSec = Math.floor(finalLimits.maxCpuTimeMs / 1000);
+      ulimitCalls.push(`ulimit -t ${cpuSec}`);
+    }
+    // ulimit -f is in 512-byte blocks on macOS
+    if (finalLimits.maxFileSize) {
+      const fileBlocks = Math.ceil(finalLimits.maxFileSize / 512);
+      ulimitCalls.push(`ulimit -f ${fileBlocks}`);
+    }
+    if (finalLimits.maxProcesses) {
+      ulimitCalls.push(`ulimit -u ${finalLimits.maxProcesses}`);
+    }
+    // open fds covers network sockets too
+    if (finalLimits.maxNetworkSockets) {
+      ulimitCalls.push(`ulimit -n ${finalLimits.maxNetworkSockets}`);
+    }
+    // NOTE: maxMemoryMB is intentionally skipped — macOS does not enforce
+    // ulimit -v/-m. Logging at debug so the gap is discoverable without noise.
+    if (finalLimits.maxMemoryMB) {
+      serverLog.debug(
+        { maxMemoryMB: finalLimits.maxMemoryMB },
+        'macOS does not enforce ulimit -v/-m; memory limit not applied',
+      );
+    }
+
+    if (ulimitCalls.length === 0) return command;
+
+    return `${ulimitCalls.join('; ')}; ${command}`;
   }
 
-  // Memory limit (bytes)
-  if (finalLimits.maxMemoryMB) {
-    const memBytes = finalLimits.maxMemoryMB * 1024 * 1024;
-    limitCommands.push(`prlimit --as=${memBytes}`);
-  }
-
-  // File size limit (bytes)
-  if (finalLimits.maxFileSize) {
-    limitCommands.push(`prlimit --fsize=${finalLimits.maxFileSize}`);
-  }
-
-  // Number of processes
-  if (finalLimits.maxProcesses) {
-    limitCommands.push(`prlimit --nproc=${finalLimits.maxProcesses}`);
-  }
-
-  // Number of file descriptors (includes network sockets)
-  if (finalLimits.maxNetworkSockets) {
-    limitCommands.push(`prlimit --nofile=${finalLimits.maxNetworkSockets}`);
-  }
-
-  // If no limits to apply, return original command
-  if (limitCommands.length === 0) {
-    return command;
-  }
-
-  // Wrap the command with all limit commands
-  // We use bash -c to chain the prlimit commands and then execute the actual command
-  return `${limitCommands.join(' ')} -- bash -c ${JSON.stringify(command)}`;
+  // ─── Other platforms (Windows, etc.) ─────────────────────────────────────
+  serverLog.warn(
+    { platform: process.platform },
+    'Resource limits not supported on this platform; proceeding without limits',
+  );
+  return command;
 }
 
 /**
  * Validate that a command doesn't exceed resource limits before execution.
- * This is a lightweight check; actual enforcement happens via prlimit.
+ * This is a lightweight check; actual enforcement happens via prlimit (Linux)
+ * or ulimit (macOS).
  */
 export function validateResourceRequest(limits: Partial<ResourceLimits> = {}): {
   allowed: boolean;
