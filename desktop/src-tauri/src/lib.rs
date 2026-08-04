@@ -946,6 +946,50 @@ fn setup_file_drop_handler(window: &WebviewWindow) {
     });
 }
 
+/// A downloaded AppImage is a portable executable, not a system package, so a
+/// browser download alone cannot add it to GNOME/KDE search. Register a user
+/// launcher on every AppImage launch; if the user later moves the AppImage and
+/// runs it again, the launcher follows the new location.
+#[cfg(target_os = "linux")]
+fn register_appimage_launcher() -> Result<(), String> {
+    let appimage = match std::env::var("APPIMAGE") {
+        Ok(path) if !path.is_empty() => std::path::PathBuf::from(path),
+        _ => return Ok(()),
+    };
+
+    if !appimage.is_file() {
+        return Ok(());
+    }
+
+    let data_home = std::env::var_os("XDG_DATA_HOME")
+        .map(std::path::PathBuf::from)
+        .or_else(|| {
+            std::env::var_os("HOME").map(|home| std::path::PathBuf::from(home).join(".local/share"))
+        })
+        .ok_or_else(|| {
+            "Could not determine the user data directory for the app launcher".to_string()
+        })?;
+    let applications_dir = data_home.join("applications");
+    std::fs::create_dir_all(&applications_dir)
+        .map_err(|error| format!("Could not create the app launcher directory: {error}"))?;
+
+    let executable = appimage
+        .to_string_lossy()
+        .replace('\\', "\\\\")
+        .replace('"', "\\\"")
+        .replace('%', "%%");
+    let desktop_entry = format!(
+        "[Desktop Entry]\nType=Application\nName=Koryphaios\nGenericName=AI workspace\nComment=Coordinate AI agents and providers in a local desktop workspace\nExec=\"{executable}\"\nTerminal=false\nCategories=Development;Utility;\nStartupNotify=true\n"
+    );
+    std::fs::write(
+        applications_dir.join("com.sylorlabs.koryphaios.desktop"),
+        desktop_entry,
+    )
+    .map_err(|error| format!("Could not write the Koryphaios app launcher: {error}"))?;
+
+    Ok(())
+}
+
 pub fn run() {
     #[cfg(target_os = "linux")]
     {
@@ -953,6 +997,9 @@ pub fn run() {
         // This is a known workaround for Tauri v2 / GTK issues on certain window managers
         if std::env::var("GDK_BACKEND").is_err() {
             std::env::set_var("GDK_BACKEND", "x11");
+        }
+        if let Err(error) = register_appimage_launcher() {
+            eprintln!("[Koryphaios] Could not register AppImage launcher: {error}");
         }
     }
 

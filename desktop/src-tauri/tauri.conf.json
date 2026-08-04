@@ -72,7 +72,7 @@
     "macOS": {
       "frameworks": [],
       "minimumSystemVersion": "10.13",
-      "signingIdentity": null,
+      "signingIdentity": "-",
       "entitlements": null
     },
     "linux": {
