@@ -15,7 +15,6 @@ export const ProviderNameSchema = z
     'anthropic',
     'openai',
     'google',
-    'gemini',
     'copilot',
     'codex',
     'openrouter',
@@ -97,8 +96,7 @@ export const ProviderNameSchema = z
     'synthetic',
     'moark',
     'nova',
-  ])
-  .transform((val) => (val === 'gemini' ? 'google' : val));
+  ]);
 
 export const ContentSchema = z
   .string()
