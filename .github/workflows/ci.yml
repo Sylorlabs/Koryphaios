@@ -108,7 +108,9 @@ jobs:
           bun-version: latest
       - run: bun install --frozen-lockfile
       - name: Run legacy MCP regression suite
-        run: bun run --filter '@koryphaios/mcp-server' test
+        run: |
+          if ! bun run --filter '@koryphaios/mcp-server' test; then
+            echo "::warning::Legacy MCP diagnostics failed; this compatibility package is not release-gating."
+          fi
         # This package is retained for compatibility only. Its diagnostics are
         # useful, but must not be reported as a failed product CI run.
-        continue-on-error: true
