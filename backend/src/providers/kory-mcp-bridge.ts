@@ -451,11 +451,25 @@ export const KORY_TOOLS: KoryToolDef[] = [
     inputSchema: {
       type: 'object',
       properties: {
-        workflowId: { type: 'string', enum: ['design-quality'] },
+        workflowId: { type: 'string' },
         task: { type: 'string' },
         goalId: { type: 'string' },
       },
       required: ['workflowId', 'task'],
+    },
+    role: 'manager',
+  },
+  {
+    name: 'kory__create_workflow_draft',
+    description: 'Inside an active Goal item, create an inactive declarative workflow draft for explicit human review and activation.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        name: { type: 'string' },
+        description: { type: 'string' },
+        stages: { type: 'array', items: { type: 'object', properties: { label: { type: 'string' }, description: { type: 'string' } }, required: ['label', 'description'] } },
+      },
+      required: ['name', 'description', 'stages'],
     },
     role: 'manager',
   },

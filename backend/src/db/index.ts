@@ -5,8 +5,14 @@ import path from 'path';
 import { runMigrations } from './migrations';
 import { ensureSecureDir, hardenFilePermissions } from '../security/fs-permissions';
 
-// Get database path from env or default to data/ directory
-const dbPath = process.env.DATABASE_URL?.replace('sqlite://', '') || 'data/koryphaios.db';
+// Get database path from env or default to data/ directory.
+// Handle both `sqlite://path` (URL form) and `sqlite:path` (test-runner form).
+// On Windows, the path after `sqlite:` is a drive path like `C:\Users\...`
+// which does not start with `/`, so `sqlite://` won't match — strip any
+// `sqlite:` prefix instead.
+const dbPath =
+  process.env.DATABASE_URL?.replace(/^sqlite:\/\//, '').replace(/^sqlite:/, '') ||
+  'data/koryphaios.db';
 // First run (packaged app: cwd = per-user data dir): the data/ folder does not
 // exist yet and SQLite refuses to create intermediate directories itself.
 // The DB and its WAL/SHM sidecars contain sessions, notes, and billing data —
@@ -14,7 +20,9 @@ const dbPath = process.env.DATABASE_URL?.replace('sqlite://', '') || 'data/koryp
 try {
   const { dirname } = require('node:path') as typeof import('node:path');
   if (dirname(dbPath) !== '.') ensureSecureDir(dirname(dbPath));
-} catch { /* open below will surface real permission problems */ }
+} catch {
+  /* open below will surface real permission problems */
+}
 
 // Create bun:sqlite database instance
 const sqlite = new Database(dbPath);

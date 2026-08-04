@@ -28,6 +28,6 @@ export { MCPDetectErrorsTool, MCPAnalyzeErrorTool, MCPSuggestFixesTool } from '.
 export { FetchContextTool, PruneContextTool } from './context';
 export { CreateGoalTool, UpdateGoalTool } from './goals';
 export { LoadSkillDetailTool } from './skills';
-export { StartWorkflowTool, UpdateWorkflowTool } from './workflows';
+export { StartWorkflowTool, UpdateWorkflowTool, CreateWorkflowDraftTool } from './workflows';
 export { GetResourceBudgetTool } from './resource-budget';
 export { registerGitTools } from './git';

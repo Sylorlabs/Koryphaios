@@ -1,10 +1,12 @@
 import { describe, expect, test } from 'bun:test';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
 
 process.env.NODE_ENV = 'test';
 process.env.SESSION_TOKEN_SECRET =
   process.env.SESSION_TOKEN_SECRET ?? 'test_only_not_for_production_aaaaaaaaaa';
 process.env.DATABASE_URL =
-  process.env.DATABASE_URL ?? `sqlite:///tmp/koryphaios-api-surface.sqlite`;
+  process.env.DATABASE_URL ?? `sqlite://${join(tmpdir(), 'koryphaios-api-surface.sqlite')}`;
 
 const { Elysia } = await import('elysia');
 const { sessionRoutes } = await import('../src/routes/v1/sessions');

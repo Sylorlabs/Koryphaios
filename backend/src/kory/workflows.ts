@@ -1,5 +1,6 @@
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
+import { homedir } from 'node:os';
 
 export type WorkflowRunStatus = 'running' | 'blocked' | 'completed' | 'stopped';
 
@@ -16,6 +17,16 @@ export interface WorkflowDefinition {
   description: string;
   autoStartSafe: boolean;
   stages: WorkflowStage[];
+}
+
+export type WorkflowScope = 'project' | 'personal';
+export interface WorkflowDraft extends WorkflowDefinition {
+  goalId: string;
+  goalItemId: string;
+  status: 'draft' | 'activated';
+  activatedScope?: WorkflowScope;
+  createdAt: number;
+  updatedAt: number;
 }
 
 export interface WorkflowRun {
@@ -52,7 +63,28 @@ const DEFINITIONS: WorkflowDefinition[] = [
   },
 ];
 
-const runPath = (root: string) => join(resolve(root), '.koryphaios', 'workflows', 'runs.json');
+const workflowRoot = (root: string) => join(resolve(root), '.koryphaios', 'workflows');
+const runPath = (root: string) => join(workflowRoot(root), 'runs.json');
+const draftPath = (root: string) => join(workflowRoot(root), 'drafts.json');
+const projectDefinitionsPath = (root: string) => join(workflowRoot(root), 'definitions.json');
+const personalDefinitionsPath = () => join(homedir(), '.koryphaios', 'workflows', 'definitions.json');
+const readArray = <T>(path: string, guard: (value: unknown) => value is T): T[] => {
+  try {
+    const parsed = JSON.parse(readFileSync(path, 'utf8'));
+    return Array.isArray(parsed) ? parsed.filter(guard) : [];
+  } catch { return []; }
+};
+const writeArray = (path: string, values: unknown[]) => {
+  mkdirSync(dirname(path), { recursive: true });
+  const temporary = `${path}.tmp-${process.pid}`;
+  writeFileSync(temporary, `${JSON.stringify(values, null, 2)}\n`, { mode: 0o600 });
+  renameSync(temporary, path);
+};
+const validDefinition = (value: unknown): value is WorkflowDefinition => {
+  const item = value as WorkflowDefinition;
+  return Boolean(item && typeof item.id === 'string' && typeof item.name === 'string' && typeof item.description === 'string' && Array.isArray(item.stages) && item.stages.length >= 2 && item.stages.every((stage) => stage && typeof stage.id === 'string' && typeof stage.label === 'string' && typeof stage.description === 'string' && stage.requiresEvidence === true));
+};
+const validDraft = (value: unknown): value is WorkflowDraft => validDefinition(value) && typeof (value as WorkflowDraft).goalId === 'string' && typeof (value as WorkflowDraft).goalItemId === 'string' && ['draft', 'activated'].includes((value as WorkflowDraft).status);
 const readRuns = (root: string): WorkflowRun[] => {
   try {
     const parsed = JSON.parse(readFileSync(runPath(root), 'utf8'));
@@ -73,8 +105,43 @@ const writeRuns = (root: string, runs: WorkflowRun[]) => {
   renameSync(temporary, path);
 };
 
-export const listWorkflowDefinitions = (): WorkflowDefinition[] => DEFINITIONS;
-export const getWorkflowDefinition = (id: string) => DEFINITIONS.find((item) => item.id === id);
+export const listWorkflowDefinitions = (root?: string): WorkflowDefinition[] => {
+  const custom = root ? [...readArray(projectDefinitionsPath(root), validDefinition), ...readArray(personalDefinitionsPath(), validDefinition)] : [];
+  return [...DEFINITIONS, ...custom].filter((item, index, all) => all.findIndex((other) => other.id === item.id) === index);
+};
+export const getWorkflowDefinition = (id: string, root?: string) => listWorkflowDefinitions(root).find((item) => item.id === id);
+export const listWorkflowDrafts = (root: string): WorkflowDraft[] => readArray(draftPath(root), validDraft).sort((a, b) => b.updatedAt - a.updatedAt);
+
+export function createWorkflowDraft(root: string, input: { name: string; description: string; goalId: string; goalItemId: string; stages: Array<{ label: string; description: string }> }): WorkflowDraft {
+  const name = input.name.trim();
+  const description = input.description.trim();
+  if (!name || !description || !input.goalId || !input.goalItemId) throw new Error('Workflow drafts require an active Goal item, name, and description');
+  if (input.stages.length < 2 || input.stages.length > 12) throw new Error('Workflow drafts require 2 to 12 stages');
+  const normalizedStages = input.stages.map((stage, index) => ({ id: `stage-${index + 1}`, label: stage.label.trim(), description: stage.description.trim(), requiresEvidence: true }));
+  if (normalizedStages.some((stage) => !stage.label || !stage.description)) throw new Error('Every workflow stage requires a label and description');
+  const unsafe = [name, description, ...normalizedStages.flatMap((stage) => [stage.label, stage.description])].join(' ').toLowerCase();
+  if (/```|(?:&&|\|\||;\s*(?:sudo|bash|sh)\b)|\bsudo\s|\bchmod\s|\bapi[_ -]?keys?\b|\bsecret tokens?\b|\bgrant\b.{0,32}\bpermissions?\b|\bdisable\b.{0,32}\bcritic\b/.test(unsafe)) throw new Error('Workflow drafts are declarative and cannot contain executable code, credentials, or authority changes');
+  const now = Date.now();
+  const draft: WorkflowDraft = { id: `draft-${crypto.randomUUID()}`, name, description, autoStartSafe: false, stages: normalizedStages, goalId: input.goalId, goalItemId: input.goalItemId, status: 'draft', createdAt: now, updatedAt: now };
+  const drafts = listWorkflowDrafts(root);
+  writeArray(draftPath(root), [draft, ...drafts]);
+  return draft;
+}
+
+export function activateWorkflowDraft(root: string, draftId: string, scope: WorkflowScope): WorkflowDraft {
+  const drafts = listWorkflowDrafts(root);
+  const index = drafts.findIndex((draft) => draft.id === draftId);
+  if (index < 0) throw new Error('Workflow draft not found');
+  const draft = drafts[index];
+  if (draft.status !== 'draft') throw new Error('Workflow draft is already activated');
+  const definition: WorkflowDefinition = { id: `custom-${crypto.randomUUID()}`, name: draft.name, description: draft.description, autoStartSafe: false, stages: draft.stages };
+  const path = scope === 'personal' ? personalDefinitionsPath() : projectDefinitionsPath(root);
+  writeArray(path, [definition, ...readArray(path, validDefinition)]);
+  const activated = { ...draft, status: 'activated' as const, activatedScope: scope, updatedAt: Date.now() };
+  drafts[index] = activated;
+  writeArray(draftPath(root), drafts);
+  return activated;
+}
 export const listWorkflowRuns = (root: string, sessionId?: string): WorkflowRun[] =>
   readRuns(root).filter((run) => !sessionId || run.sessionId === sessionId).sort((left, right) => right.updatedAt - left.updatedAt);
 
@@ -83,7 +150,7 @@ export function startWorkflow(
   input: Pick<WorkflowRun, 'workflowId' | 'sessionId' | 'task' | 'requestedBy'> &
     Pick<WorkflowRun, 'goalId' | 'goalItemId'>,
 ): WorkflowRun {
-  if (!getWorkflowDefinition(input.workflowId)) throw new Error('Unknown workflow');
+  if (!getWorkflowDefinition(input.workflowId, root)) throw new Error('Unknown workflow');
   if (!input.task.trim()) throw new Error('Workflow task is required');
   const now = Date.now();
   const run: WorkflowRun = { id: crypto.randomUUID(), workflowId: input.workflowId, sessionId: input.sessionId, goalId: input.goalId, goalItemId: input.goalItemId, task: input.task.trim(), requestedBy: input.requestedBy, status: 'running', stageIndex: 0, evidence: [], createdAt: now, updatedAt: now };
@@ -97,7 +164,7 @@ export function advanceWorkflow(root: string, runId: string, input: { evidence: 
   const index = runs.findIndex((run) => run.id === runId);
   if (index < 0) throw new Error('Workflow run not found');
   const current = runs[index];
-  const definition = getWorkflowDefinition(current.workflowId);
+  const definition = getWorkflowDefinition(current.workflowId, root);
   if (!definition || current.status !== 'running') throw new Error('Workflow is not running');
   const stage = definition.stages[current.stageIndex];
   const evidence = input.evidence.trim();
@@ -128,8 +195,8 @@ export function stopWorkflow(root: string, runId: string): WorkflowRun {
   return next;
 }
 
-export function workflowNextInstruction(run: WorkflowRun): string {
-  const definition = getWorkflowDefinition(run.workflowId);
+export function workflowNextInstruction(run: WorkflowRun, root?: string): string {
+  const definition = getWorkflowDefinition(run.workflowId, root);
   const stage = definition?.stages[run.stageIndex];
   return stage ? `${definition!.name} · ${stage.label}: ${stage.description}` : `${definition?.name ?? 'Workflow'} is complete.`;
 }

@@ -9,6 +9,10 @@ import {
   startWorkflow,
   stopWorkflow,
   workflowNextInstruction,
+  createWorkflowDraft,
+  activateWorkflowDraft,
+  listWorkflowDrafts,
+  listWorkflowDefinitions,
 } from './workflows';
 import { StartWorkflowTool, UpdateWorkflowTool } from '../tools/workflows';
 
@@ -69,5 +73,35 @@ describe('host-owned workflows', () => {
     });
     expect(wrongItem.isError).toBe(true);
     expect(wrongItem.output).toContain('active Goal item');
+  });
+
+  test('Goal drafts remain inactive until explicit scoped activation', () => {
+    const project = root();
+    const draft = createWorkflowDraft(project, {
+      name: 'Release evidence loop',
+      description: 'Repeatable release review',
+      goalId: 'goal-1',
+      goalItemId: 'item-1',
+      stages: [
+        { label: 'Inspect', description: 'Inspect release inputs' },
+        { label: 'Verify', description: 'Record release evidence' },
+      ],
+    });
+    expect(listWorkflowDefinitions(project).some((item) => item.name === draft.name)).toBe(false);
+    expect(listWorkflowDrafts(project)[0]?.status).toBe('draft');
+    const active = activateWorkflowDraft(project, draft.id, 'project');
+    expect(active.activatedScope).toBe('project');
+    expect(listWorkflowDefinitions(project).some((item) => item.name === draft.name)).toBe(true);
+  });
+
+  test('workflow drafts reject executable or authority-bearing content', () => {
+    const project = root();
+    expect(() => createWorkflowDraft(project, {
+      name: 'Unsafe shell workflow',
+      description: 'Run a command automatically',
+      goalId: 'goal-1',
+      goalItemId: 'item-1',
+      stages: [{ label: 'One', description: 'Use sudo' }, { label: 'Two', description: 'Finish' }],
+    })).toThrow('declarative');
   });
 });
