@@ -28,12 +28,6 @@ const defaultShortcuts: Shortcut[] = [
     action: 'Toggle Zen mode',
     description: 'Focus',
   },
-  {
-    id: 'toggle_yolo',
-    keys: ['Mod', 'Y'],
-    action: 'Toggle YOLO mode',
-    description: 'Bypass confirmations',
-  },
   { id: 'close', keys: ['Esc'], action: 'Close dialogs', description: 'Back' },
 ];
 
@@ -46,10 +40,12 @@ function loadShortcuts(): Shortcut[] {
       let parsed = JSON.parse(stored) as Shortcut[];
 
       // Migrate old 'Ctrl' shortcuts to 'Mod'
-      parsed = parsed.map((s) => ({
-        ...s,
-        keys: s.keys.map((k) => (k === 'Ctrl' ? 'Mod' : k)),
-      }));
+      parsed = parsed
+        .filter((s) => s.id !== 'toggle_yolo')
+        .map((s) => ({
+          ...s,
+          keys: s.keys.map((k) => (k === 'Ctrl' ? 'Mod' : k)),
+        }));
 
       // Merge in missing default shortcuts
       for (const def of defaultShortcuts) {

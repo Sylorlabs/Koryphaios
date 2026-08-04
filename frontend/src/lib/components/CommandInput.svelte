@@ -13,13 +13,19 @@
   import { invoke } from '@tauri-apps/api/core';
   import { toastStore } from '$lib/stores/toast.svelte';
   import { sessionStore } from '$lib/stores/sessions.svelte';
+  import { projectStore } from '$lib/stores/project.svelte';
   import { apiFetch } from '$lib/api.svelte';
   import { apiUrl } from '$lib/utils/api-url';
   import { goalStore } from '$lib/stores/goals.svelte';
   import { goalDisplayStore } from '$lib/stores/goal-display.svelte';
   import { formatGoalRuntime, isActiveGoal } from '$lib/utils/goal-actions';
 
-  export type Attachment = { type: 'image' | 'file'; data: string; name: string };
+  export type Attachment = {
+    type: 'image' | 'file';
+    data: string;
+    name: string;
+    mimeType?: string;
+  };
 
   interface Props {
     onSend: (message: string, model?: string, reasoningLevel?: string, attachments?: Attachment[], fastMode?: boolean) => void;
@@ -97,6 +103,11 @@
   let lastContextPreviewKey = $state('');
   let selectedPickerIndex = $state(0);
   let attachments = $state<Attachment[]>([]);
+  let previewAttachment = $state<Attachment | null>(null);
+  let previewDialogRef = $state<HTMLDivElement>();
+  let previewTriggerRef: HTMLButtonElement | null = null;
+  let isReadingClipboard = $state(false);
+  const pendingAttachmentReads = new Set<Promise<void>>();
   let referenceFileInputRef = $state<HTMLInputElement>();
   let referenceFolderInputRef = $state<HTMLInputElement>();
   let showReferenceMenu = $state(false);
@@ -109,6 +120,18 @@
 
   $effect(() => {
     if (!selectedModel && initialModel) selectedModel = initialModel;
+  });
+
+  // Permission presets are workspace settings. Load them for the composer
+  // itself (not only after Settings is opened) and refresh on project changes.
+  $effect(() => {
+    projectStore.currentPath;
+    void agentSettingsStore.loadSettings();
+  });
+
+  $effect(() => {
+    if (!previewAttachment || !previewDialogRef) return;
+    previewDialogRef.querySelector<HTMLButtonElement>('button')?.focus();
   });
 
   type ComposerPickerItem =
@@ -564,6 +587,9 @@
       onOpenSettings?.();
       return;
     }
+    if (pendingAttachmentReads.size > 0) {
+      await Promise.all([...pendingAttachmentReads]);
+    }
     if (await executeSlashIfNeeded()) return;
     const trimmed = value.trim();
     if (!trimmed && attachments.length === 0) return;
@@ -890,64 +916,159 @@
   }
 
   function removeAttachment(index: number) {
+    if (previewAttachment === attachments[index]) {
+      previewAttachment = null;
+      previewTriggerRef = null;
+    }
     attachments = attachments.filter((_, i) => i !== index);
+  }
+
+  function openAttachmentPreview(attachment: Attachment, trigger: HTMLButtonElement) {
+    previewTriggerRef = trigger;
+    previewAttachment = attachment;
+  }
+
+  function closeAttachmentPreview() {
+    previewAttachment = null;
+    const trigger = previewTriggerRef;
+    previewTriggerRef = null;
+    requestAnimationFrame(() => trigger?.focus());
+  }
+
+  function imageExtension(mimeType: string): string {
+    if (mimeType === 'image/jpeg') return 'jpg';
+    if (mimeType === 'image/gif') return 'gif';
+    if (mimeType === 'image/webp') return 'webp';
+    if (mimeType === 'image/avif') return 'avif';
+    return 'png';
+  }
+
+  function readClipboardBlob(blob: Blob, name?: string): Promise<Attachment> {
+    const mimeType = blob.type.startsWith('image/') ? blob.type : 'image/png';
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onerror = () => reject(reader.error ?? new Error('Could not read clipboard image'));
+      reader.onload = () => {
+        const loaded = typeof reader.result === 'string' ? reader.result : '';
+        const comma = loaded.indexOf(',');
+        if (comma < 0 || comma === loaded.length - 1) {
+          reject(new Error('Clipboard image was empty'));
+          return;
+        }
+        resolve({
+          type: 'image',
+          data: loaded.slice(comma + 1),
+          name: name || `clipboard-image.${imageExtension(mimeType)}`,
+          mimeType,
+        });
+      };
+      reader.readAsDataURL(blob);
+    });
+  }
+
+  function addClipboardBlob(blob: Blob, name?: string): Promise<void> {
+    let pending: Promise<void>;
+    pending = readClipboardBlob(blob, name)
+      .then((attachment) => {
+        attachments = [...attachments, attachment];
+      })
+      .catch((error) => {
+        toastStore.error(error instanceof Error ? error.message : 'Could not read clipboard image');
+      })
+      .finally(() => pendingAttachmentReads.delete(pending));
+    pendingAttachmentReads.add(pending);
+    return pending;
+  }
+
+  async function addTauriClipboardImage() {
+    const { readImage } = await import('@tauri-apps/plugin-clipboard-manager');
+    const image = await readImage();
+    const [{ width, height }, rgba] = await Promise.all([image.size(), image.rgba()]);
+    if (!width || !height || rgba.length !== width * height * 4) {
+      throw new Error('Clipboard returned an invalid image');
+    }
+
+    const canvas = document.createElement('canvas');
+    canvas.width = width;
+    canvas.height = height;
+    const context = canvas.getContext('2d');
+    if (!context) throw new Error('Could not prepare clipboard image');
+    context.putImageData(new ImageData(new Uint8ClampedArray(rgba), width, height), 0, 0);
+    const blob = await new Promise<Blob>((resolve, reject) => {
+      canvas.toBlob(
+        (encoded) => encoded ? resolve(encoded) : reject(new Error('Could not encode clipboard image')),
+        'image/png',
+      );
+    });
+    await addClipboardBlob(blob, 'clipboard-image.png');
   }
 
   /** Force-paste image from OS clipboard (bypasses text). Used by Ctrl+Shift+V and the paste-image button. */
   async function pasteImageFromClipboard() {
-    // Try browser clipboard first (works for images copied from web pages)
+    if (isReadingClipboard) return;
+    isReadingClipboard = true;
     try {
-      const clipboardItems = await navigator.clipboard.read();
-      for (const item of clipboardItems) {
-        for (const type of item.types) {
-          if (type.startsWith('image/')) {
-            const blob = await item.getType(type);
-            const reader = new FileReader();
-            const loaded = await new Promise<string>((resolve) => {
-              reader.onload = (e) => resolve(e.target?.result as string);
-              reader.readAsDataURL(blob);
-            });
-            const data = loaded.split(',')[1];
-            const ext = type === 'image/png' ? 'png' : type === 'image/jpeg' ? 'jpg' : type === 'image/gif' ? 'gif' : type === 'image/webp' ? 'webp' : 'png';
-            attachments = [...attachments, { type: 'image', data, name: `clipboard-image.${ext}` }];
+      // Prefer the browser API when available. It preserves the original image format.
+      try {
+        if (navigator.clipboard?.read) {
+          const clipboardItems = await navigator.clipboard.read();
+          for (const item of clipboardItems) {
+            const type = item.types.find((candidate) => candidate.startsWith('image/'));
+            if (type) {
+              await addClipboardBlob(await item.getType(type));
+              return;
+            }
+          }
+        }
+      } catch {
+        // Browser clipboard access is commonly blocked in a webview; use the native API below.
+      }
+
+      // Native clipboard handles screenshots and images copied outside the webview.
+      if (typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window) {
+        try {
+          await addTauriClipboardImage();
+          return;
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          if (!message.toLowerCase().includes('clipboard') && !message.toLowerCase().includes('image')) {
+            toastStore.error(`Clipboard error: ${message}`);
             return;
           }
         }
       }
-    } catch (_) {
-      // navigator.clipboard.read() may fail if permission denied — fall through to Tauri
-    }
 
-    // Tauri native clipboard (for OS-level screenshot tools)
-    if (typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window) {
-      try {
-        const { readImage } = await import('@tauri-apps/plugin-clipboard-manager');
-        const image = await readImage();
-        if (image) {
-          // Tauri's Image exposes png() at runtime but it isn't in the published types.
-          const pngData = await (image as unknown as { png: () => Promise<BlobPart> }).png();
-          const blob = new Blob([pngData], { type: 'image/png' });
-          const reader = new FileReader();
-          const loaded = await new Promise<string>((resolve) => {
-            reader.onload = (ev) => resolve(ev.target?.result as string);
-            reader.readAsDataURL(blob);
-          });
-          const base64 = loaded.split(',')[1];
-          attachments = [...attachments, { type: 'image', data: base64, name: 'clipboard-image.png' }];
-          return;
-        }
-      } catch (err: any) {
-        toastStore.error("Clipboard error: " + err.message);
-        return;
-      }
+      toastStore.error('No image found in clipboard');
+    } finally {
+      isReadingClipboard = false;
     }
-
-    toastStore.error("No image found in clipboard");
   }
 
   // Track whether we already handled this paste event (prevents double-fire
   // from the container + textarea both seeing the same bubbling event).
   let lastPasteEvent: ClipboardEvent | null = null;
+
+  function clipboardImageFiles(data: DataTransfer | null): File[] {
+    if (!data) return [];
+    const files: File[] = [];
+    const seen = new Set<File>();
+    for (const item of Array.from(data.items ?? [])) {
+      if (!item.type.startsWith('image/')) continue;
+      const file = item.getAsFile();
+      if (file && !seen.has(file)) {
+        seen.add(file);
+        files.push(file);
+      }
+    }
+    // WebKitGTK can expose screenshot clipboard data only through files.
+    for (const file of Array.from(data.files ?? [])) {
+      if (file.type.startsWith('image/') && !seen.has(file)) {
+        seen.add(file);
+        files.push(file);
+      }
+    }
+    return files;
+  }
 
   /** Ctrl+V / Cmd+V → paste image if available, else text. */
   function handlePaste(e: ClipboardEvent) {
@@ -955,54 +1076,24 @@
     if (lastPasteEvent === e) return;
     lastPasteEvent = e;
 
-    let hasImage = false;
-    const items = e.clipboardData?.items;
-    if (items) {
-      for (const item of items) {
-        if (item.type.startsWith('image/')) {
-          hasImage = true;
-          e.preventDefault();
-          const file = item.getAsFile();
-          if (file) {
-            const reader = new FileReader();
-            reader.onload = (ev) => {
-              const data = (ev.target?.result as string).split(',')[1];
-              const ext = item.type === 'image/png' ? 'png' : item.type === 'image/jpeg' ? 'jpg' : item.type === 'image/gif' ? 'gif' : item.type === 'image/webp' ? 'webp' : 'png';
-              attachments = [...attachments, { type: 'image', data, name: `clipboard-image.${ext}` }];
-            };
-            reader.readAsDataURL(file);
-          }
-          break;
-        }
-      }
-    }
-
-    if (hasImage) {
+    const imageFiles = clipboardImageFiles(e.clipboardData);
+    if (imageFiles.length > 0) {
+      e.preventDefault();
+      for (const file of imageFiles) void addClipboardBlob(file, file.name || undefined);
       requestAnimationFrame(() => { lastPasteEvent = null; });
       return;
     }
 
-    e.preventDefault();
-
-    // Focus the input if we're not already there
-    inputRef?.focus();
-
-    // Read TEXT only from the clipboard.
-    void navigator.clipboard.readText().then((text) => {
-      if (text && inputRef) {
-        const start = inputRef.selectionStart ?? value.length;
-        const end = inputRef.selectionEnd ?? value.length;
-        value = value.slice(0, start) + text + value.slice(end);
-        requestAnimationFrame(() => {
-          if (inputRef) {
-            const newPos = start + text.length;
-            inputRef.selectionStart = newPos;
-            inputRef.selectionEnd = newPos;
-            inputRef.focus();
-          }
-        });
-      }
-    }).catch(() => {});
+    const hasText = Array.from(e.clipboardData?.types ?? []).some((type) =>
+      type.startsWith('text/'),
+    );
+    if (!hasText && typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window) {
+      // Some WebKitGTK builds omit images from the paste event. Fall back to
+      // the Tauri clipboard path for ordinary Ctrl+V as well.
+      e.preventDefault();
+      void pasteImageFromClipboard();
+    }
+    // Preserve the textarea's native text paste, selection, input, and undo.
 
     // Clear the guard after a tick so a new paste works
     requestAnimationFrame(() => {
@@ -1173,6 +1264,69 @@
           <span>{fastModeLabel}</span>
         </button>
       {/if}
+
+      <button
+        type="button"
+        class="flex h-10 items-center gap-2 rounded-xl border px-3.5 text-sm font-medium transition-all hover:brightness-110 active:scale-[0.98] {interactionMode === 'plan' ? 'border-cyan-400/40 bg-cyan-400/10 text-cyan-200' : 'border-[var(--color-border)] bg-[var(--color-surface-3)] text-[var(--color-text-primary)]'}"
+        aria-pressed={interactionMode === 'plan'}
+        onclick={() => onInteractionModeChange?.(interactionMode === 'plan' ? 'act' : 'plan')}
+        title="Plan mode is read-only and keeps a restart-safe planning note"
+      >
+        <ClipboardList size={17} />
+        <span>{interactionMode === 'plan' ? 'Planning' : 'Plan'}</span>
+      </button>
+
+      <div class="permission-picker relative">
+        <button
+          type="button"
+          class="flex h-10 items-center gap-2 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-3)] px-3.5 text-sm font-medium text-[var(--color-text-primary)] transition-all hover:brightness-110 active:scale-[0.98]"
+          onclick={() => (showPermissionMenu = !showPermissionMenu)}
+          title={`Permissions: ${permissionModeMeta.label}`}
+          aria-haspopup="menu"
+          aria-expanded={showPermissionMenu}
+        >
+          <permissionModeMeta.icon size={17} class={permissionModeMeta.tone} />
+          <span>{permissionModeMeta.label}</span>
+          <ChevronDown size={14} class="text-text-muted" />
+        </button>
+        {#if showPermissionMenu}
+          <div
+            class="absolute bottom-full left-0 z-50 mb-2 w-80 overflow-hidden rounded-xl border shadow-2xl"
+            style="background: var(--color-surface-2); border-color: var(--color-border);"
+            role="menu"
+            aria-label="Permission mode"
+          >
+            <div class="flex items-center justify-between gap-3 border-b border-[var(--color-border)] px-4 py-3">
+              <span class="text-xs font-bold uppercase tracking-widest text-[var(--color-text-muted)]">Permissions</span>
+              <button
+                type="button"
+                class="flex items-center gap-1 rounded-md px-1.5 py-1 text-[11px] text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-surface-3)]"
+                onclick={() => { showPermissionMenu = false; onOpenSettings?.('agent', 'permissions'); }}
+                title="Open permission settings"
+              ><Settings size={13} /> Settings</button>
+            </div>
+            <div class="py-1">
+              {#each PERMISSION_OPTIONS as option (option.value)}
+                {@const active = permissionMode === option.value}
+                <button
+                  type="button"
+                  role="menuitemradio"
+                  aria-checked={active}
+                  class="flex w-full items-start gap-3 px-4 py-2.5 text-left transition-colors hover:bg-[var(--color-surface-3)]"
+                  onclick={() => selectPermissionMode(option.value)}
+                >
+                  <option.icon size={16} class="mt-0.5 shrink-0 {option.tone}" />
+                  <span class="min-w-0 flex-1">
+                    <span class="block text-sm font-semibold" style="color: {active ? 'var(--color-accent)' : 'var(--color-text-primary)'};">{option.label}</span>
+                    <span class="block text-[11px] leading-relaxed text-[var(--color-text-muted)]">{option.description}</span>
+                  </span>
+                  {#if active}<Check size={14} class="mt-1 shrink-0 text-[var(--color-accent)]" />{/if}
+                </button>
+              {/each}
+            </div>
+          </div>
+        {/if}
+      </div>
     </div>
 
     {#if goalDisplayStore.composer && activeChatGoal}
@@ -1245,12 +1399,21 @@
             {#each attachments as attachment, i}
               <div class="relative group rounded-lg overflow-hidden border" style="border-color: var(--color-border); width: 64px; height: 64px;">
                 {#if attachment.type === 'image'}
-                  <img src={`data:image/png;base64,${attachment.data}`} alt={attachment.name} class="w-full h-full object-cover" />
+                  <button
+                    type="button"
+                    class="block h-full w-full cursor-zoom-in overflow-hidden bg-[var(--color-surface-2)] outline-none transition-all hover:brightness-110 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--color-accent)]"
+                    aria-label={`Open ${attachment.name} preview`}
+                    aria-haspopup="dialog"
+                    onclick={(event) => openAttachmentPreview(attachment, event.currentTarget)}
+                  >
+                    <img src={`data:${attachment.mimeType ?? 'image/png'};base64,${attachment.data}`} alt={attachment.name} class="h-full w-full object-cover transition-transform duration-200 group-hover:scale-105" />
+                  </button>
                 {/if}
                 <button
                   type="button"
-                  class="absolute top-1 right-1 p-0.5 rounded-full bg-black/60 text-white opacity-0 group-hover:opacity-100 transition-opacity hover:bg-black/80"
+                  class="absolute right-1 top-1 rounded-full bg-black/70 p-0.5 text-white opacity-0 shadow-md transition-opacity hover:bg-black/90 focus:opacity-100 group-hover:opacity-100"
                   onclick={() => removeAttachment(i)}
+                  aria-label={`Remove ${attachment.name}`}
                 >
                   <X size={12} />
                 </button>
@@ -1269,7 +1432,6 @@
             placeholder={disabled ? disabledMessage : placeholder}
             rows="1"
             class="input w-full"
-            class:yolo-active={wsStore.isYoloMode}
             disabled={disabled || !!configurationWarning}
             style="resize: none; min-height: {minHeightPx}px; max-height: 280px; font-size: 15px; line-height: 1.6; box-sizing: border-box; padding: 10px 88px 10px 12px; background: transparent; border: none; box-shadow: none; {disabled || configurationWarning ? 'opacity: 0.6; cursor: not-allowed;' : ''}"
           ></textarea>
@@ -1346,8 +1508,9 @@
               type="button"
               class="flex items-center justify-center w-8 h-8 rounded-lg transition-colors hover:bg-[var(--color-surface-3)] disabled:opacity-40 disabled:cursor-not-allowed"
               style="color: var(--color-text-muted);"
-              onclick={() => pasteImageFromClipboard()}
-              disabled={disabled || !!configurationWarning}
+              onclick={() => void pasteImageFromClipboard()}
+              disabled={disabled || !!configurationWarning || isReadingClipboard}
+              aria-label={isReadingClipboard ? 'Reading image from clipboard' : 'Paste image from clipboard'}
               title="Paste image from clipboard (Ctrl+Shift+V)"
             >
               <Clipboard size={16} />
@@ -1362,66 +1525,6 @@
           style="background: rgba(12, 10, 9, 0.34); border-color: var(--color-border);"
         >
           <div class="flex flex-wrap items-center gap-2 xl:justify-end">
-            <button
-              type="button"
-              class="flex items-center gap-1.5 text-[11px] font-medium px-2.5 py-1.5 rounded-md border transition-colors {interactionMode === 'plan' ? 'border-cyan-400/40 bg-cyan-400/15 text-cyan-200' : 'border-[var(--color-border)] bg-[var(--color-surface-3)] text-[var(--color-text-muted)]'}"
-              aria-pressed={interactionMode === 'plan'}
-              onclick={() => onInteractionModeChange?.(interactionMode === 'plan' ? 'act' : 'plan')}
-              title="Plan mode is read-only and keeps a restart-safe planning note"
-            >
-              <ClipboardList size={12} /> {interactionMode === 'plan' ? 'Planning' : 'Plan'}
-            </button>
-            <div class="permission-picker relative">
-              <button
-                type="button"
-                class="flex items-center gap-1.5 rounded-md border border-[var(--color-border)] bg-[var(--color-surface-3)] px-2.5 py-1.5 text-[11px] font-medium text-[var(--color-text-muted)] transition-colors hover:brightness-110"
-                onclick={() => (showPermissionMenu = !showPermissionMenu)}
-                title={`Permissions: ${permissionModeMeta.label}`}
-                aria-haspopup="menu"
-                aria-expanded={showPermissionMenu}
-              >
-                <permissionModeMeta.icon size={12} class={permissionModeMeta.tone} />
-                <span>{permissionModeMeta.label}</span>
-                <ChevronDown size={10} class="opacity-60" />
-              </button>
-              {#if showPermissionMenu}
-                <div
-                  class="absolute bottom-full right-0 z-30 mb-1.5 w-72 overflow-hidden rounded-xl border shadow-xl"
-                  style="background: var(--color-surface-2); border-color: var(--color-border);"
-                  role="menu"
-                  aria-label="Permission mode"
-                >
-                  <div class="flex items-center justify-between gap-3 border-b border-[var(--color-border)] px-3 py-2">
-                    <span class="text-[10px] font-semibold uppercase tracking-[0.14em] text-[var(--color-text-muted)]">Permissions</span>
-                    <button
-                      type="button"
-                      class="flex items-center gap-1 rounded-md px-1.5 py-1 text-[10px] text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-surface-3)]"
-                      onclick={() => { showPermissionMenu = false; onOpenSettings?.('agent', 'permissions'); }}
-                      title="Open permission settings"
-                    ><Settings size={12} /> Settings</button>
-                  </div>
-                  <div class="py-1">
-                    {#each PERMISSION_OPTIONS as option (option.value)}
-                      {@const active = permissionMode === option.value}
-                      <button
-                        type="button"
-                        role="menuitemradio"
-                        aria-checked={active}
-                        class="flex w-full items-start gap-2.5 px-3 py-2 text-left transition-colors hover:bg-[var(--color-surface-3)]"
-                        onclick={() => selectPermissionMode(option.value)}
-                      >
-                        <option.icon size={13} class="mt-0.5 shrink-0 {option.tone}" />
-                        <span class="min-w-0 flex-1">
-                          <span class="block text-[11px] font-medium" style="color: {active ? 'var(--color-accent)' : 'var(--color-text-primary)'};">{option.label}</span>
-                          <span class="block text-[10px] leading-relaxed text-[var(--color-text-muted)]">{option.description}</span>
-                        </span>
-                        {#if active}<Check size={12} class="mt-0.5 shrink-0 text-[var(--color-accent)]" />{/if}
-                      </button>
-                    {/each}
-                  </div>
-                </div>
-              {/if}
-            </div>
             <div class="agent-mode-picker relative">
               <button
                 type="button"
@@ -1534,6 +1637,57 @@
   </div>
 </div>
 
+{#if previewAttachment}
+  <div
+    class="fixed inset-0 z-[120] flex items-center justify-center bg-black/80 p-4 backdrop-blur-md sm:p-8"
+    role="presentation"
+    onmousedown={(event) => {
+      if (event.target === event.currentTarget) closeAttachmentPreview();
+    }}
+  >
+    <div
+      bind:this={previewDialogRef}
+      class="flex max-h-[calc(100vh-2rem)] max-w-[min(96vw,1440px)] flex-col overflow-hidden rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-1)] shadow-2xl shadow-black/70 sm:max-h-[calc(100vh-4rem)]"
+      role="dialog"
+      aria-modal="true"
+      aria-label={`Image preview: ${previewAttachment.name}`}
+      tabindex="-1"
+      onkeydown={(event) => {
+        if (event.key === 'Escape') {
+          event.preventDefault();
+          closeAttachmentPreview();
+        } else if (event.key === 'Tab') {
+          event.preventDefault();
+          previewDialogRef?.querySelector<HTMLButtonElement>('button')?.focus();
+        }
+      }}
+    >
+      <header class="flex min-h-12 items-center gap-3 border-b border-[var(--color-border)] bg-[var(--color-surface-2)] px-4 py-2.5">
+        <div class="min-w-0 flex-1">
+          <p class="truncate text-sm font-medium text-[var(--color-text-primary)]">{previewAttachment.name}</p>
+          <p class="text-[10px] uppercase tracking-[0.12em] text-[var(--color-text-muted)]">Image preview</p>
+        </div>
+        <span class="hidden text-[10px] text-[var(--color-text-muted)] sm:block">Esc to close</span>
+        <button
+          type="button"
+          class="rounded-lg p-2 text-[var(--color-text-muted)] outline-none transition-colors hover:bg-[var(--color-surface-3)] hover:text-[var(--color-text-primary)] focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]"
+          aria-label="Close image preview"
+          onclick={closeAttachmentPreview}
+        >
+          <X size={18} />
+        </button>
+      </header>
+      <div class="flex min-h-0 flex-1 items-center justify-center overflow-auto bg-black/30 p-3 sm:p-5">
+        <img
+          src={`data:${previewAttachment.mimeType ?? 'image/png'};base64,${previewAttachment.data}`}
+          alt={previewAttachment.name}
+          class="block max-h-[calc(100vh-8rem)] max-w-full rounded-lg object-contain shadow-2xl shadow-black/50"
+        />
+      </div>
+    </div>
+  </div>
+{/if}
+
 
 
 {#if overflowWarning}
@@ -1601,11 +1755,6 @@
 {/if}
 
 <style>
-  .yolo-active {
-    border-color: #ef4444 !important;
-    box-shadow: 0 0 0 1px #ef4444;
-  }
-
   /* Waiting button — Kory is parked on something external (background
      terminal, user input). Amber, calm slow pulse: alive but not burning. */
   :global(.waiting-btn) {

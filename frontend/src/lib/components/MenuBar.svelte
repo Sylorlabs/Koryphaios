@@ -4,7 +4,6 @@
     Activity,
     ChevronDown,
     Download,
-    Zap,
     Search,
     Minus,
     Square,
@@ -32,7 +31,6 @@
     notesEnabled?: boolean;
     zenMode: boolean;
     projectName: string | null | undefined;
-    isYoloMode: boolean;
     activeAgents: Array<{ identity: { id: string } }>;
     recentProjects: RecentProject[];
     onAction: (action: string) => void;
@@ -45,7 +43,6 @@
     notesEnabled = true,
     zenMode,
     projectName,
-    isYoloMode,
     activeAgents,
     recentProjects,
     onAction,
@@ -353,12 +350,6 @@
         </div>
       </div>
 
-      {#if isYoloMode}
-        <span class="flex items-center gap-1.5 px-1 py-2 text-red-400">
-          <Zap size={12} fill="currentColor" />
-          <span class="text-xs font-semibold">YOLO</span>
-        </span>
-      {/if}
     </div>
 
     <div class="flex-1 flex items-center justify-center h-full" data-tauri-drag-region>

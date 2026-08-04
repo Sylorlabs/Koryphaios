@@ -14,8 +14,9 @@ import { ToolRegistry, type Tool } from '../tools';
 describe('autonomy limits', () => {
   it('persists only recognized composer permission modes', () => {
     expect(DEFAULT_AGENT_SETTINGS.permissionMode).toBe('guarded');
-    expect(mergeAgentSettings(DEFAULT_AGENT_SETTINGS, { permissionMode: 'ask' }).permissionMode).toBe('ask');
-    expect(mergeAgentSettings(DEFAULT_AGENT_SETTINGS, { permissionMode: 'plan' }).permissionMode).toBe('plan');
+    for (const permissionMode of ['yolo', 'guarded', 'edits', 'ask', 'plan', 'custom'] as const) {
+      expect(mergeAgentSettings(DEFAULT_AGENT_SETTINGS, { permissionMode }).permissionMode).toBe(permissionMode);
+    }
     expect(mergeAgentSettings(DEFAULT_AGENT_SETTINGS, { permissionMode: 'unsafe-value' }).permissionMode).toBe('guarded');
   });
 

@@ -465,12 +465,6 @@
       return;
     }
 
-    if (shortcutStore.matches('toggle_yolo', e)) {
-      e.preventDefault();
-      setYoloMode(!wsStore.isYoloMode);
-      return;
-    }
-
     if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === 'N') {
       e.preventDefault();
       if (notesStore.settings.enabled) showNotes = !showNotes;
@@ -489,15 +483,6 @@
       inputRef?.focus();
     } else if (shortcutStore.matches('close', e) && showSettings) {
       showSettings = false;
-    }
-  }
-
-  function setYoloMode(enabled: boolean) {
-    wsStore.setYoloMode(enabled);
-    if (enabled) {
-      toastStore.warning('YOLO Mode Active');
-    } else {
-      toastStore.success('YOLO Mode Disabled');
     }
   }
 
@@ -1093,9 +1078,6 @@
       case 'toggle_theme':
         showThemeQuickMenu = true;
         break;
-      case 'toggle_yolo':
-        setYoloMode(!wsStore.isYoloMode);
-        break;
       case 'session_compact':
         requestSessionCompact();
         break;
@@ -1360,7 +1342,6 @@
       notesEnabled={notesStore.settings.enabled}
       {zenMode}
       projectName={collaborationStore.activeJoinedSession?.sessionName ?? projectStore.displayName}
-      isYoloMode={wsStore.isYoloMode}
       {activeAgents}
       {recentProjects}
       onAction={handleMenuAction}

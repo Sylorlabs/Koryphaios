@@ -16,6 +16,8 @@ import { apiFetch } from '$lib/api.svelte';
 export interface AgentSettings {
   ruleEnforcementLevel: 'strict' | 'moderate' | 'lenient';
   agentExecutionMode: 'auto' | 'single' | 'multi';
+  /** Default approval behavior exposed in the composer permission picker. */
+  permissionMode: 'yolo' | 'guarded' | 'edits' | 'ask' | 'plan' | 'custom';
   preferencesEnabled: boolean;
   criticGateEnabled: boolean;
   gateStrictness: 'strict' | 'advisory' | 'off';
@@ -39,6 +41,8 @@ export interface AgentSettings {
   maxCriticIterations: number;
   approvalThresholdFiles: number;
   approvalThresholdLines: number;
+  /** Apply the configured file/line approval thresholds. Off by default. */
+  autonomyLimitsEnabled: boolean;
   /** Experimental: Local Web Search (DuckDuckGo) */
   localWebSearch: 'off' | 'on' | 'fallback';
   /** Experimental: Multi-source research requirements */
@@ -51,8 +55,6 @@ export interface AgentSettings {
   contextPruneMinChars: number;
   /** Live context-usage report injected each turn so the agent self-manages */
   contextSelfAwareness: boolean;
-  /** Automatically compact completed conversations before the model window is exhausted. */
-  autoCompactEnabled: boolean;
   /** Show complete reasoning blocks expanded in the chat feed by default */
   reasoningExpandedByDefault: boolean;
 }
@@ -132,6 +134,8 @@ export interface SkillPromotionGate {
   status: 'unmeasured' | 'insufficient-evidence' | 'blocked' | 'ready';
   candidateRuns: number;
   distinctHarnesses: number;
+  distinctProviders: number;
+  distinctModels: number;
   humanBlindReviews: number;
   passRate: number | null;
   quality: number | null;
@@ -172,11 +176,25 @@ export interface SkillRevisionComparison {
 }
 
 export interface SkillResolutionPreview {
-  selected: Array<{ skill: SkillRevision; reason: string; contextCost: number }>;
+  selected: Array<{
+    skill: SkillRevision;
+    reason: string;
+    representation: 'full' | 'compact' | 'minimal';
+    contextCost: number;
+    fullContextCost: number;
+    omittedDetailChars: number;
+  }>;
   collisions: Array<{ name: string; personalHash: string; projectHash: string }>;
   selectionConflicts: Array<{ left: string; right: string }>;
   hierarchyErrors: string[];
   omittedByBudget: string[];
+  compressedByBudget: Array<{
+    name: string;
+    representation: 'compact' | 'minimal';
+    fullContextCost: number;
+    contextCost: number;
+    omittedDetailChars: number;
+  }>;
   blocked: boolean;
   totalContextCost: number;
 }
@@ -188,14 +206,15 @@ export interface SkillResolutionPreview {
 export const DEFAULT_AGENT_SETTINGS: AgentSettings = {
   ruleEnforcementLevel: 'strict',
   agentExecutionMode: 'auto',
+  permissionMode: 'guarded',
   preferencesEnabled: true,
   criticGateEnabled: true,
   gateStrictness: 'strict',
-  intentInterview: 'adaptive',
+  intentInterview: 'off',
   goalPlanningDepth: 'adaptive',
   automaticGoalDriving: true,
-  designDiscovery: true,
-  planApproval: 'material',
+  designDiscovery: false,
+  planApproval: 'never',
   modelQualification: 'enforce',
   feedbackSharing: 'local',
   skillLearningMode: 'propose-then-verify',
@@ -211,14 +230,14 @@ export const DEFAULT_AGENT_SETTINGS: AgentSettings = {
   maxCriticIterations: 3,
   approvalThresholdFiles: 5,
   approvalThresholdLines: 100,
+  autonomyLimitsEnabled: false,
   localWebSearch: 'fallback',
   multiSourceResearch: true,
   contextPruningEnabled: true,
   contextKeepRecentTurns: 3,
   contextPruneMinChars: 600,
   contextSelfAwareness: true,
-  autoCompactEnabled: true,
-  reasoningExpandedByDefault: true,
+  reasoningExpandedByDefault: false,
 };
 
 // ============================================================================
@@ -236,13 +255,16 @@ function createAgentSettingsStore() {
   let skillComparison = $state<SkillRevisionComparison | null>(null);
   let skillResolutionPreview = $state<SkillResolutionPreview | null>(null);
   let lastCriticResult = $state<CriticReviewResult | null>(null);
-  let settingsSaveRevision = 0;
+  // Loads and saves share one revision so a slow initial/project load can
+  // never overwrite a newer optimistic permission or settings change.
+  let settingsRequestRevision = 0;
 
   // ========================================================================
   // Settings
   // ========================================================================
 
   async function loadSettings(): Promise<void> {
+    const revision = ++settingsRequestRevision;
     isLoading = true;
     try {
       const res = await apiFetch(apiUrl('/api/agent/settings'));
@@ -250,7 +272,7 @@ function createAgentSettingsStore() {
       if (res.ok) {
         const data = await res.json();
         if (data.ok) {
-          settings = data.data;
+          if (revision === settingsRequestRevision) settings = data.data;
         }
       }
     } catch (err) {
@@ -264,7 +286,7 @@ function createAgentSettingsStore() {
     newSettings: Partial<AgentSettings>,
     options?: { quietSuccess?: boolean },
   ): Promise<boolean> {
-    const revision = ++settingsSaveRevision;
+    const revision = ++settingsRequestRevision;
     const previousSettings = settings;
     // Keep controls stationary and responsive while the write happens. The
     // server response remains authoritative, but saving no longer blanks the
@@ -280,7 +302,7 @@ function createAgentSettingsStore() {
       if (res.ok) {
         const data = await res.json();
         if (data.ok) {
-          if (revision === settingsSaveRevision) settings = data.data;
+          if (revision === settingsRequestRevision) settings = data.data;
           if (!options?.quietSuccess) {
             toastStore.success('Agent settings saved');
           }
@@ -289,7 +311,7 @@ function createAgentSettingsStore() {
       }
       throw new Error('Failed to save');
     } catch (err) {
-      if (revision === settingsSaveRevision) settings = previousSettings;
+      if (revision === settingsRequestRevision) settings = previousSettings;
       toastStore.error('Failed to save agent settings');
       return false;
     }
@@ -407,6 +429,34 @@ function createAgentSettingsStore() {
       if (res.ok && data.ok) skillEvaluationCards = { ...skillEvaluationCards, [key]: data.data };
     } catch (err) {
       console.error('Failed to load skill evaluation card:', err);
+    }
+  }
+
+  async function createSkillDraft(input: {
+    source: 'personal' | 'project';
+    name: string;
+    description: string;
+    instructions: string;
+    domains: string[];
+    activation: string[];
+    shouldTrigger: string[];
+    shouldNotTrigger: string[];
+    evidence: string[];
+  }): Promise<SkillRevision | null> {
+    try {
+      const res = await apiFetch(apiUrl('/api/agent/skills'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(input),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.ok) throw new Error(data.error);
+      await loadSkills();
+      toastStore.success('Skill draft created');
+      return data.data as SkillRevision;
+    } catch (err: any) {
+      toastStore.error(err?.message ?? 'Failed to create skill draft');
+      return null;
     }
   }
 
@@ -646,6 +696,7 @@ function createAgentSettingsStore() {
     loadSkills,
     loadSkillQualifications,
     loadSkillEvaluationCard,
+    createSkillDraft,
     saveSkillDraft,
     testAndActivateSkill,
     compareSkillDraft,

@@ -217,6 +217,7 @@
   let toolDetailsOpen = $state(false);
   let contextMenu = $state<{ x: number; y: number } | null>(null);
   let zoomedImage = $state<string | null>(null);
+  let zoomedImageMimeType = $state('image/png');
   // Zoom for backend-served images (view_image results) — a URL, not base64.
   let zoomedRawImage = $state<string | null>(null);
   let renderedNotes = $state<Record<string, Note | null>>({});
@@ -1240,6 +1241,7 @@
                     onclick={(e) => {
                       e.stopPropagation();
                       zoomedImage = attachment.data;
+                      zoomedImageMimeType = attachment.mimeType ?? 'image/png';
                     }}
                   >
                     <img
@@ -1595,7 +1597,7 @@
     <!-- svelte-ignore a11y_no_static_element_interactions -->
     <div class="max-w-full max-h-full" onclick={(e) => e.stopPropagation()}>
       <img
-        src={zoomedRawImage ? rawImageUrl(zoomedRawImage) : `data:image/png;base64,${zoomedImage}`}
+        src={zoomedRawImage ? rawImageUrl(zoomedRawImage) : `data:${zoomedImageMimeType};base64,${zoomedImage}`}
         alt="Zoomed attachment"
         class="max-w-full max-h-full object-contain rounded shadow-2xl"
       />
