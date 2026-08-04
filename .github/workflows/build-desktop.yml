@@ -95,9 +95,16 @@ jobs:
             if ($installer.Length -lt 1MB) {
               throw "Installer is unexpectedly small: $($installer.FullName)"
             }
-            $header = [System.IO.File]::ReadAllBytes($installer.FullName)[0..1]
-            if ($header[0] -ne 0x4D -or $header[1] -ne 0x5A) {
-              throw "Installer is not a valid Windows PE file: $($installer.FullName)"
+            $header = [System.IO.File]::ReadAllBytes($installer.FullName)[0..7]
+            $isMsi = $installer.Extension -eq '.msi'
+            $isValid = if ($isMsi) {
+              # MSI uses the Compound File Binary header, not the PE `MZ` header.
+              ($header[0..7] -join ',') -eq '208,207,17,224,161,177,26,225'
+            } else {
+              $header[0] -eq 0x4D -and $header[1] -eq 0x5A
+            }
+            if (-not $isValid) {
+              throw "Installer header is invalid: $($installer.FullName)"
             }
             Write-Host "Validated $($installer.Name) ($($installer.Length) bytes)"
           }
@@ -303,9 +310,12 @@ jobs:
 
           test "$(dpkg-deb -f "$DEB" Package)" = "koryphaios"
           test "$(dpkg-deb -f "$DEB" Architecture)" = "amd64"
-          dpkg-deb --fsys-tarfile "$DEB" | tar -tf - | grep -qx 'usr/bin/koryphaios-desktop'
-          dpkg-deb --fsys-tarfile "$DEB" | tar -tf - | grep -qx 'usr/share/applications/Koryphaios.desktop'
-          dpkg-deb --fsys-tarfile "$DEB" | tar -tf - | grep -q '^usr/share/icons/.*/apps/koryphaios-desktop\.png$'
+          # Do not pipe package listings directly into grep: with `pipefail`,
+          # grep may exit early and make dpkg-deb report a broken pipe.
+          dpkg-deb --fsys-tarfile "$DEB" | tar -tf - > deb-contents.txt
+          grep -qx 'usr/bin/koryphaios-desktop' deb-contents.txt
+          grep -qx 'usr/share/applications/Koryphaios.desktop' deb-contents.txt
+          grep -q '^usr/share/icons/.*/apps/koryphaios-desktop\.png$' deb-contents.txt
           dpkg-deb --fsys-tarfile "$DEB" | tar -xOf - usr/share/applications/Koryphaios.desktop > Koryphaios.desktop
           desktop-file-validate Koryphaios.desktop
           grep -qx 'Exec=koryphaios-desktop' Koryphaios.desktop
