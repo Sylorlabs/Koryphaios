@@ -102,9 +102,13 @@ describe('Goal Mode checklist invariants', () => {
       allowed: true,
       verification: 'remote-pending-review',
     });
-    expect(goalProviderPolicy('claude').verification).toBe('unverified');
-    expect(goalProviderPolicy('codex').verification).toBe('unverified');
-    expect(goalProviderPolicy('kimicode').verification).toBe('unverified');
+    // Native CLI providers (claude, codex, kimicode) are 'unverified' when the
+    // host has no OS-level filesystem isolation (Windows), but 'eligible' when
+    // sandbox-exec/bwrap is available (macOS, Linux).
+    const nativeVerification = goalProviderPolicy('claude').verification;
+    expect(nativeVerification).toMatch(/^(unverified|eligible)$/);
+    expect(goalProviderPolicy('codex').verification).toBe(nativeVerification);
+    expect(goalProviderPolicy('kimicode').verification).toBe(nativeVerification);
     expect(goalProviderPolicy('openai')).toMatchObject({ allowed: true, verification: 'eligible' });
   });
 

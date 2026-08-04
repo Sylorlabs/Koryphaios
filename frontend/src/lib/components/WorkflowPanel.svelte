@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { CheckCircle2, Circle, Play, Square, Workflow, X } from 'lucide-svelte';
+  import { CheckCircle2, Circle, Play, ShieldCheck, Square, Workflow, X } from 'lucide-svelte';
   import { apiFetch } from '$lib/api.svelte';
   import { apiUrl } from '$lib/utils/api-url';
   import { toastStore } from '$lib/stores/toast.svelte';
@@ -8,11 +8,13 @@
   type Stage = { id: string; label: string; description: string; requiresEvidence: boolean };
   type Definition = { id: string; name: string; description: string; autoStartSafe: boolean; stages: Stage[] };
   type Run = { id: string; workflowId: string; sessionId: string; task: string; status: 'running' | 'blocked' | 'completed' | 'stopped'; stageIndex: number; evidence: Array<{ stageId: string; value: string; createdAt: number }>; blocker?: string };
+  type Draft = Definition & { goalId: string; goalItemId: string; status: 'draft' | 'activated'; activatedScope?: 'project' | 'personal' };
 
   interface Props { open: boolean; sessionId?: string; initialTask?: string; onclose: () => void; onchange?: () => void; }
   let { open, sessionId, initialTask = '', onclose, onchange }: Props = $props();
   let definitions = $state<Definition[]>([]);
   let runs = $state<Run[]>([]);
+  let drafts = $state<Draft[]>([]);
   let selectedId = $state('design-quality');
   let task = $state('');
   let evidence = $state('');
@@ -28,6 +30,7 @@
       const data = await res.json();
       if (!res.ok || !data.ok) throw new Error(data.error ?? 'Unable to load workflows');
       definitions = data.data.definitions;
+      drafts = data.data.drafts ?? [];
       runs = data.data.runs;
       if (!selectedId && definitions[0]) selectedId = definitions[0].id;
     } catch (error) {
@@ -67,6 +70,14 @@
     await refresh();
     onchange?.();
   }
+
+  async function activate(draft: Draft, scope: 'project' | 'personal') {
+    const res = await apiFetch(apiUrl(`/api/agent/workflows/drafts/${draft.id}/activate`), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ scope }) });
+    const data = await res.json();
+    if (!res.ok || !data.ok) return toastStore.error(data.error ?? 'Unable to activate workflow draft');
+    await refresh();
+    toastStore.success(`Workflow activated for ${scope === 'project' ? 'this project' : 'your personal library'}`);
+  }
 </script>
 
 {#if open}
@@ -78,6 +89,16 @@
         <button type="button" class="rounded-lg p-2 text-[var(--color-text-muted)] hover:bg-[var(--color-surface-3)]" onclick={onclose} aria-label="Close workflows"><X size={16} /></button>
       </header>
       <div class="min-h-0 overflow-y-auto p-5">
+        {#if drafts.some((draft) => draft.status === 'draft')}
+          <section class="mb-4 rounded-xl border border-[var(--color-warning)]/35 bg-[var(--color-warning)]/[0.06] p-4" aria-labelledby="workflow-drafts-title">
+            <div class="flex items-start gap-2"><ShieldCheck size={16} class="mt-0.5 shrink-0 text-[var(--color-warning)]" /><div><h3 id="workflow-drafts-title" class="text-xs font-semibold text-[var(--color-text-primary)]">Goal-created workflow drafts</h3><p class="mt-1 text-[11px] text-[var(--color-text-muted)]">Inactive until you approve a scope. Activation never adds permissions or executable commands.</p></div></div>
+            <div class="mt-3 space-y-2">
+              {#each drafts.filter((draft) => draft.status === 'draft') as draft (draft.id)}
+                <div class="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-2)] p-3"><div class="text-xs font-semibold text-[var(--color-text-primary)]">{draft.name}</div><p class="mt-1 text-[11px] text-[var(--color-text-muted)]">{draft.description} · {draft.stages.length} evidence-gated stages</p><div class="mt-3 flex flex-wrap gap-2"><button type="button" class="rounded-lg bg-[var(--color-accent)] px-3 py-2 text-[11px] font-medium text-white" onclick={() => void activate(draft, 'project')}>Activate for project</button><button type="button" class="rounded-lg border border-[var(--color-border)] px-3 py-2 text-[11px] font-medium text-[var(--color-text-primary)] hover:bg-[var(--color-surface-3)]" onclick={() => void activate(draft, 'personal')}>Activate personally</button></div></div>
+              {/each}
+            </div>
+          </section>
+        {/if}
         {#if selectedRun}
           {@const definition = definitions.find((item) => item.id === selectedRun.workflowId)}
           {@const stage = definition?.stages[selectedRun.stageIndex]}

@@ -108,6 +108,7 @@ export const KORY_TOOL_WHITELIST: string[] = [
   'kory__update_goal',
   'kory__start_workflow',
   'kory__update_workflow',
+  'kory__create_workflow_draft',
   'kory__get_resource_budget',
   'kory__load_skill_detail',
   'kory__detect_errors',

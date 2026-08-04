@@ -1,6 +1,7 @@
 import { describe, test, expect, beforeEach, afterEach } from 'bun:test';
 import { writeFileSync, unlinkSync, mkdirSync, readFileSync, existsSync, rmSync } from 'fs';
 import { join } from 'path';
+import { tmpdir } from 'os';
 import {
   ReadFileTool,
   WriteFileTool,
@@ -13,7 +14,7 @@ import {
   PatchTool,
 } from '../src/tools/files';
 
-const TEST_DIR = '/tmp/koryphaios-file-test';
+const TEST_DIR = join(tmpdir(), 'koryphaios-file-test');
 
 function createMockContext(overrides: any = {}) {
   return {

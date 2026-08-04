@@ -3,7 +3,7 @@ import { writeFileSync, unlinkSync, mkdirSync, rmSync, existsSync } from 'fs';
 import { join } from 'path';
 import { getDesktopDevCorsOrigin, loadConfig, mergeCorsOrigins } from '../src/runtime/config';
 
-const BASE_TEST_DIR = '/tmp/koryphaios-config-test';
+const BASE_TEST_DIR = join(tmpdir(), 'koryphaios-config-test');
 let testDirCounter = 0;
 
 function getTestDir() {
