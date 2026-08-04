@@ -1,4 +1,5 @@
 import { describe, test, expect } from 'bun:test';
+import { homedir } from 'node:os';
 import {
   ClaudeCodeCliBridge,
   CodexCliBridge,
@@ -7,7 +8,11 @@ import {
   KORY_HARNESS_NOTE,
 } from '../src/providers/cli-bridges';
 import { DevinCliBridge } from '../src/providers/devin-bridge';
-import { buildKoryRules, buildKorySkills, writeAllCliRulesAndSkills } from '../src/providers/cli-rules-skills';
+import {
+  buildKoryRules,
+  buildKorySkills,
+  writeAllCliRulesAndSkills,
+} from '../src/providers/cli-rules-skills';
 import { existsSync, readFileSync, rmSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -49,7 +54,9 @@ describe('Native tool blocking (Claude Code)', () => {
     expect(scopes.allow).toContain('mcp__kory__delegate_to_worker');
     expect(scopes.allow).toContain('TodoWrite');
     // No native tools in allow list (except TodoWrite)
-    const nativeInAllow = scopes.allow.filter((t) => !t.startsWith('mcp__kory__') && t !== 'TodoWrite');
+    const nativeInAllow = scopes.allow.filter(
+      (t) => !t.startsWith('mcp__kory__') && t !== 'TodoWrite',
+    );
     expect(nativeInAllow).toEqual([]);
   });
 
@@ -108,11 +115,22 @@ describe('Native tool blocking (Devin)', () => {
   test('critic role restricts to read-only kory tools', () => {
     const bridge = new DevinCliBridge();
     (bridge as any).cached = {
-      supportsAgentConfig: true, supportsHooks: true, supportsMcp: true,
-      supportsAcp: false, supportsSandbox: false, supportsExport: true,
-      supportsPermissionMode: true, supportsRules: true, supportsSkills: true,
-      version: '3000.3.22', binaryPath: '/usr/bin/devin', binaryMtimeMs: 0,
-      rulesDirs: [], skillsDirs: [], models: [], probedAt: Date.now(),
+      supportsAgentConfig: true,
+      supportsHooks: true,
+      supportsMcp: true,
+      supportsAcp: false,
+      supportsSandbox: false,
+      supportsExport: true,
+      supportsPermissionMode: true,
+      supportsRules: true,
+      supportsSkills: true,
+      version: '3000.3.22',
+      binaryPath: '/usr/bin/devin',
+      binaryMtimeMs: 0,
+      rulesDirs: [],
+      skillsDirs: [],
+      models: [],
+      probedAt: Date.now(),
     };
     const config = bridge.buildAgentConfig({
       provider: 'devin',
@@ -267,7 +285,7 @@ describe('Rules & skills mirroring', () => {
     // Clean up the test session dir afterward.
     const testSessionId = `test-rules-${Date.now()}`;
     writeAllCliRulesAndSkills(testSessionId, 'Test system prompt');
-    const home = process.env.HOME || process.env.HOMEPATH || '';
+    const home = homedir();
     try {
       // Check that rules files were written for each CLI
       const expected = [
@@ -285,14 +303,34 @@ describe('Rules & skills mirroring', () => {
         expect(content).toContain('kory__');
       }
       // Check skills were written for Devin
-      const devinSkill = join(home, '.koryphaios', 'devin-home', testSessionId, '.devin', 'skills', 'kory-tool-usage', 'SKILL.md');
+      const devinSkill = join(
+        home,
+        '.koryphaios',
+        'devin-home',
+        testSessionId,
+        '.devin',
+        'skills',
+        'kory-tool-usage',
+        'SKILL.md',
+      );
       expect(existsSync(devinSkill)).toBe(true);
       // Check skills were written for Antigravity
-      const agySkill = join(home, '.koryphaios', 'antigravity-home', '.claude', 'skills', 'kory-tool-usage', 'SKILL.md');
+      const agySkill = join(
+        home,
+        '.koryphaios',
+        'antigravity-home',
+        '.claude',
+        'skills',
+        'kory-tool-usage',
+        'SKILL.md',
+      );
       expect(existsSync(agySkill)).toBe(true);
     } finally {
       // Clean up the test session dir
-      rmSync(join(home, '.koryphaios', 'devin-home', testSessionId), { recursive: true, force: true });
+      rmSync(join(home, '.koryphaios', 'devin-home', testSessionId), {
+        recursive: true,
+        force: true,
+      });
     }
   });
 });
