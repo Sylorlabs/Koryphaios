@@ -11,6 +11,8 @@ import { getContext } from '../context';
 import type { ToolContext } from '../tools/registry';
 import { mcpLog } from '../logger';
 import { VERSION } from '../constants';
+import { loadAgentSettings } from '../agent-settings';
+import { resolveToolPermissionPolicy } from '../tools/permission-policy';
 
 // Only Koryphaios's KNOWLEDGE tools are exposed over MCP — file edits and shell
 // stay with each CLI's native tools (their strength); this is purely so CLIs
@@ -85,6 +87,8 @@ export async function handleMcpRequest(
           workingDirectory,
           allowedPaths: [workingDirectory],
           isSandboxed: false,
+          permissionPolicy: resolveToolPermissionPolicy(loadAgentSettings(workingDirectory), 'act'),
+          approvedToolCallIds: new Set(),
           signal: new AbortController().signal,
         };
         const result = await registry.execute(ctx, { id: `mcp-${Date.now()}`, name, input: args });

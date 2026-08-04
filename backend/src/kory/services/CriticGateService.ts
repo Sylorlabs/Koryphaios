@@ -15,6 +15,8 @@ import { withTimeoutSignal } from '../../providers';
 import { koryLog } from '../../logger';
 import { parseCriticVerdict, formatMessagesForCritic } from '../critic-util';
 import type { EventEmitterService } from './EventEmitterService';
+import { loadAgentSettings } from '../../agent-settings';
+import { resolveToolPermissionPolicy } from '../../tools/permission-policy';
 
 interface CompletedToolCall {
   id: string;
@@ -79,6 +81,7 @@ export class CriticGateService {
       workingDirectory: this.workingDirectory,
       allowedPaths: [this.workingDirectory],
       isSandboxed: true,
+      permissionPolicy: resolveToolPermissionPolicy(loadAgentSettings(this.workingDirectory), 'plan'),
     };
 
     const messages: InternalMessage[] = [
