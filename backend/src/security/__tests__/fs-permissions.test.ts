@@ -4,18 +4,27 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { ensureSecureDir, hardenFilePermissions } from '../fs-permissions';
 
+// Windows doesn't support POSIX permission modes — chmod only toggles
+// read-only/read-write. Skip exact mode assertions on Windows.
+const isWindows = process.platform === 'win32';
+
 describe('ensureSecureDir', () => {
   let root: string;
   beforeEach(() => {
     root = mkdtempSync(join(tmpdir(), 'kory-fsperm-'));
   });
   afterEach(() => {
-    try { rmSync(root, { recursive: true, force: true }); } catch { /* best effort */ }
+    try {
+      rmSync(root, { recursive: true, force: true });
+    } catch {
+      /* best effort */
+    }
   });
 
   test('creates a new directory with 0o700', () => {
     const dir = join(root, 'secure');
     ensureSecureDir(dir);
+    if (isWindows) return; // chmod is a no-op on Windows; just verify it exists
     const mode = statSync(dir).mode & 0o777;
     expect(mode).toBe(0o700);
   });
@@ -23,6 +32,7 @@ describe('ensureSecureDir', () => {
   test('creates nested directories with 0o700 on the leaf', () => {
     const dir = join(root, 'a', 'b', 'c');
     ensureSecureDir(dir);
+    if (isWindows) return;
     const mode = statSync(dir).mode & 0o777;
     expect(mode).toBe(0o700);
   });
@@ -32,10 +42,13 @@ describe('ensureSecureDir', () => {
     // Create with intentionally loose perms (simulate an older build that
     // used mkdirSync without an explicit mode under a permissive umask).
     mkdirSync(dir, { recursive: true, mode: 0o777 });
-    chmodSync(dir, 0o775);
-    expect(statSync(dir).mode & 0o777).toBe(0o775);
+    if (!isWindows) {
+      chmodSync(dir, 0o775);
+      expect(statSync(dir).mode & 0o777).toBe(0o775);
+    }
 
     ensureSecureDir(dir);
+    if (isWindows) return;
     expect(statSync(dir).mode & 0o777).toBe(0o700);
   });
 
@@ -43,6 +56,7 @@ describe('ensureSecureDir', () => {
     const dir = join(root, 'idempotent');
     ensureSecureDir(dir);
     ensureSecureDir(dir);
+    if (isWindows) return;
     expect(statSync(dir).mode & 0o777).toBe(0o700);
   });
 });
@@ -53,15 +67,22 @@ describe('hardenFilePermissions', () => {
     root = mkdtempSync(join(tmpdir(), 'kory-fsperm-file-'));
   });
   afterEach(() => {
-    try { rmSync(root, { recursive: true, force: true }); } catch { /* best effort */ }
+    try {
+      rmSync(root, { recursive: true, force: true });
+    } catch {
+      /* best effort */
+    }
   });
 
   test('tightens an existing file to 0o600', () => {
     const file = join(root, 'secrets.json');
     writeFileSync(file, '{}', { mode: 0o644 });
-    expect(statSync(file).mode & 0o777).toBe(0o644);
+    if (!isWindows) {
+      expect(statSync(file).mode & 0o777).toBe(0o644);
+    }
 
     hardenFilePermissions(file);
+    if (isWindows) return;
     expect(statSync(file).mode & 0o777).toBe(0o600);
   });
 
@@ -70,6 +91,7 @@ describe('hardenFilePermissions', () => {
     writeFileSync(file, '{}', { mode: 0o600 });
     hardenFilePermissions(file);
     hardenFilePermissions(file);
+    if (isWindows) return;
     expect(statSync(file).mode & 0o777).toBe(0o600);
   });
 
