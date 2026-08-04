@@ -368,7 +368,7 @@
               <div class="mt-1 text-[10px] text-[var(--color-text-muted)]">Critic review</div>
             </div>
             <div class="rounded-xl bg-[var(--color-surface-2)] px-3 py-2.5">
-              <div class="text-sm font-semibold text-[var(--color-success)]">Auto-saved</div>
+              <div class="text-sm font-semibold text-[var(--color-success)]">Available</div>
               <div class="mt-1 text-[10px] text-[var(--color-text-muted)]">Workspace settings</div>
             </div>
           </section>
