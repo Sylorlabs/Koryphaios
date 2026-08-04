@@ -27,6 +27,10 @@ hardenFilePermissions(dbPath);
 
 // Enable WAL mode for better concurrent performance
 sqlite.exec('PRAGMA journal_mode = WAL;');
+// Foreign-key enforcement is connection-local in SQLite. A migration-time
+// PRAGMA does not survive process restart, so enable it for every live DB
+// connection before Drizzle performs any writes.
+sqlite.exec('PRAGMA foreign_keys = ON;');
 
 // Harden the WAL/SHM sidecars that WAL mode just created.
 hardenFilePermissions(`${dbPath}-wal`);
