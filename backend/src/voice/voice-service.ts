@@ -1,6 +1,7 @@
-import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
+import { createHash, randomUUID } from 'node:crypto';
+import { mkdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import type { SynthesisRequest, VoiceProviderDescriptor, VoiceSettings } from '@koryphaios/shared';
+import type { SynthesisRequest, VoicePackManifest, VoicePackStatus, VoiceProviderDescriptor, VoiceSettings } from '@koryphaios/shared';
 import { PROJECT_ROOT } from '../runtime/paths';
 import { createUserCredentialsService } from '../services';
 
@@ -14,6 +15,89 @@ export const DEFAULT_VOICE_SETTINGS: VoiceSettings = {
 
 const SETTINGS_DIR = process.env.KORYPHAIOS_DATA_DIR ?? join(PROJECT_ROOT, '.koryphaios');
 const SETTINGS_PATH = join(SETTINGS_DIR, 'voice-settings.json');
+const VOICE_PACKS_DIR = join(SETTINGS_DIR, 'voice-packs');
+
+type DownloadableVoicePack = {
+  manifest: VoicePackManifest;
+  baseUrl: string;
+};
+
+const ENGLISH_DICTATION_PACK: DownloadableVoicePack = {
+  manifest: {
+    schemaVersion: 1,
+    id: 'moonshine-tiny-en-int8',
+    version: '2026-08-01',
+    name: 'English Dictation',
+    family: 'moonshine',
+    capabilities: ['stt'],
+    languages: ['en'],
+    license: { name: 'MIT', file: 'https://github.com/moonshine-ai/moonshine/blob/main/LICENSE' },
+    sizeBytes: 43_943_830,
+    files: [
+      { path: 'encoder_model.ort', sizeBytes: 13_281_600, sha256: '94e90a4654fc45cdfedb77c4c08e1739f48862998e58fada384b25118134f221' },
+      { path: 'decoder_model_merged.ort', sizeBytes: 30_412_256, sha256: 'cf524c4862d36e9e5ab032eddc73637efd822d70e868ac575cf1a46e1e4708a0' },
+      { path: 'tokenizer.bin', sizeBytes: 249_974, sha256: '6884b35fd6377d4c4d32336a0bc152f36b64d1e45b6503683cdc238250a8472d' },
+    ],
+  },
+  baseUrl: 'https://download.moonshine.ai/model/tiny-en/quantized/tiny-en',
+};
+
+const VOICE_PACKS = new Map([[ENGLISH_DICTATION_PACK.manifest.id, ENGLISH_DICTATION_PACK]]);
+const voicePackDownloads = new Map<string, Promise<VoicePackStatus>>();
+
+async function packIsInstalled(pack: DownloadableVoicePack): Promise<boolean> {
+  const root = join(VOICE_PACKS_DIR, pack.manifest.id);
+  try {
+    const sizes = await Promise.all(pack.manifest.files.map((file) => stat(join(root, file.path)).then((value) => value.size)));
+    return sizes.every((size, index) => size === pack.manifest.files[index].sizeBytes);
+  } catch {
+    return false;
+  }
+}
+
+export async function listVoicePacks(): Promise<VoicePackStatus[]> {
+  return Promise.all([...VOICE_PACKS.values()].map(async (pack) => ({
+    manifest: pack.manifest,
+    state: await packIsInstalled(pack) ? 'installed' as const : voicePackDownloads.has(pack.manifest.id) ? 'downloading' as const : 'available' as const,
+  })));
+}
+
+async function downloadVoicePackFile(url: string, destination: string, sizeBytes: number, sha256: string): Promise<void> {
+  const response = await fetch(url, { signal: AbortSignal.timeout(120_000) });
+  if (!response.ok) throw new Error(`Model host returned HTTP ${response.status}`);
+  const bytes = new Uint8Array(await response.arrayBuffer());
+  if (bytes.byteLength !== sizeBytes) throw new Error(`Downloaded file has the wrong size (${bytes.byteLength} bytes)`);
+  const digest = createHash('sha256').update(bytes).digest('hex');
+  if (digest !== sha256) throw new Error('Downloaded file failed checksum verification');
+  await writeFile(destination, bytes, { mode: 0o600 });
+}
+
+export function downloadVoicePack(id: string): Promise<VoicePackStatus> {
+  const pack = VOICE_PACKS.get(id);
+  if (!pack) return Promise.reject(new Error('Unknown voice pack'));
+  const existing = voicePackDownloads.get(id);
+  if (existing) return existing;
+
+  const work = (async () => {
+    if (await packIsInstalled(pack)) return { manifest: pack.manifest, state: 'installed' as const };
+    await mkdir(VOICE_PACKS_DIR, { recursive: true });
+    const stage = join(VOICE_PACKS_DIR, `.${id}.partial-${randomUUID()}`);
+    try {
+      await mkdir(stage, { recursive: false, mode: 0o700 });
+      for (const file of pack.manifest.files) {
+        await downloadVoicePackFile(`${pack.baseUrl}/${file.path}`, join(stage, file.path), file.sizeBytes, file.sha256);
+      }
+      await rename(stage, join(VOICE_PACKS_DIR, id));
+      return { manifest: pack.manifest, state: 'installed' as const };
+    } catch (error) {
+      await rm(stage, { recursive: true, force: true }).catch(() => undefined);
+      throw error;
+    }
+  })().finally(() => voicePackDownloads.delete(id));
+
+  voicePackDownloads.set(id, work);
+  return work;
+}
 const PROVIDERS: Array<Omit<VoiceProviderDescriptor, 'configured'>> = [
   { id: 'local', name: 'On device', capabilities: ['stt', 'tts'], local: true, supportsDiscovery: false },
   { id: 'system', name: 'System voice', capabilities: ['stt', 'tts'], local: false, supportsDiscovery: true },

@@ -22,6 +22,7 @@ const { spendRoutes } = await import('../src/routes/v1/spend');
 const { spendCapsRoutes } = await import('../src/routes/v1/spend-caps');
 const { billingRoutes } = await import('../src/routes/v1/billing');
 const { processRoutes } = await import('../src/routes/v1/processes');
+const { voiceRoutes } = await import('../src/routes/v1/voice');
 
 const app = new Elysia()
   .get('/api/health', () => ({
@@ -50,7 +51,8 @@ const app = new Elysia()
   .use(spendRoutes)
   .use(spendCapsRoutes)
   .use(billingRoutes)
-  .use(processRoutes);
+  .use(processRoutes)
+  .use(voiceRoutes);
 
 type RouteCheck = {
   method: string;
@@ -162,6 +164,11 @@ const protectedRoutes: RouteCheck[] = [
     body: { sessionId: 's1', estimatedCostCents: 1 },
   },
   { method: 'GET', path: '/api/billing/credits' },
+  { method: 'GET', path: '/api/voice/settings' },
+  { method: 'PUT', path: '/api/voice/settings', body: {} },
+  { method: 'GET', path: '/api/voice/providers' },
+  { method: 'GET', path: '/api/voice/packs' },
+  { method: 'POST', path: '/api/voice/packs/moonshine-tiny-en-int8/download' },
   { method: 'GET', path: '/api/processes?includeInactive=true&limit=100' },
   {
     method: 'POST',

@@ -199,11 +199,6 @@
         <div class="flex gap-5 animate-in fade-in slide-in-from-bottom-4 duration-700">
           <div class="flex-1 space-y-6 min-w-0">
             <div class="rounded-[28px] border p-8 shadow-2xl backdrop-blur-sm" style="background: linear-gradient(165deg, rgba(var(--color-accent-rgb), 0.12), rgba(12, 10, 9, 0.4)); border-color: rgba(var(--color-accent-rgb), 0.24);">
-              <div class="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full border mb-6" style="background: rgba(0, 0, 0, 0.2); border-color: rgba(var(--color-accent-rgb), 0.15); color: var(--color-text-secondary);">
-                <div class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></div>
-                <span class="text-[10px] font-bold uppercase tracking-[0.2em] opacity-70">Workspace Analyzed</span>
-              </div>
-              
               <h2 class="text-3xl font-semibold leading-tight mb-4 tracking-tight" style="color: var(--color-text-primary);">
                 What should Koryphaios do with your project?
               </h2>

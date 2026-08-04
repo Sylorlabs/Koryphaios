@@ -42,6 +42,7 @@ import { feedbackRoutes } from './routes/v1/feedback';
 import { goalRoutes } from './routes/v1/goals';
 import { nativeCommandRoutes } from './routes/v1/native-commands';
 import { mcpBridgeRoutes } from './routes/v1/mcp-bridge';
+import { voiceRoutes } from './routes/v1/voice';
 
 const SERVER_STARTED_AT = Date.now();
 const BACKEND_SERVICE_ID = 'koryphaios';
@@ -94,7 +95,8 @@ const baseApp = new Elysia()
   .use(feedbackRoutes)
   .use(goalRoutes)
   .use(nativeCommandRoutes)
-  .use(mcpBridgeRoutes);
+  .use(mcpBridgeRoutes)
+  .use(voiceRoutes);
 
 export type App = typeof baseApp;
 

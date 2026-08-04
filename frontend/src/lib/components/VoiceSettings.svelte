@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { Download, Mic, RefreshCw, Upload, Volume2 } from 'lucide-svelte';
-  import type { VoiceProviderDescriptor, VoiceSettings } from '@koryphaios/shared';
+  import { Check, Download, LoaderCircle, Mic, RefreshCw, Volume2 } from 'lucide-svelte';
+  import type { VoicePackStatus, VoiceProviderDescriptor, VoiceSettings } from '@koryphaios/shared';
   import KorySelect from './KorySelect.svelte';
   import SettingsSwitch from './SettingsSwitch.svelte';
   import ProviderConnectionCard from './ProviderConnectionCard.svelte';
@@ -25,6 +25,9 @@
   let settings = $state<VoiceSettings>({ input: { provider: 'local', modelId: 'moonshine-tiny-en-int8', language: 'en' }, output: { provider: 'local', modelId: 'kitten-tts-0.8-micro', voiceId: 'expr-voice-2-m', speed: 1 }, autoReadFinalReplies: false, voiceModeEnabled: true, liveTranscription: true });
   let providers = $state<VoiceProviderDescriptor[]>(DEFAULT_PROVIDERS);
   let loading = $state(true); let saving = $state(false);
+  let voicePacks = $state<VoicePackStatus[]>([]);
+  let downloadingPack = $state<string | null>(null);
+  let englishDictation = $derived(voicePacks.find(pack => pack.manifest.id === 'moonshine-tiny-en-int8'));
   let inputProviders = $derived(providers.filter(p => p.capabilities.includes('stt')).map(p => ({ value: p.id, label: `${p.name}${p.configured ? '' : ' — key required'}` })));
   let outputProviders = $derived(providers.filter(p => p.capabilities.includes('tts')).map(p => ({ value: p.id, label: `${p.name}${p.configured ? '' : ' — key required'}` })));
   const voices = [1,2,3,4,5,6,7,8].map((n) => ({ value: `expr-voice-${n}-${n % 2 ? 'm' : 'f'}`, label: `Kitten voice ${n}` }));
@@ -35,14 +38,31 @@
   }
   async function load() {
     loading = true;
-    const [settingsResult, providerResult] = await Promise.allSettled([
+    const [settingsResult, providerResult, packResult] = await Promise.allSettled([
       apiFetch(apiUrl('/api/voice/settings')).then(r => r.json()),
       apiFetch(apiUrl('/api/voice/providers')).then(r => r.json()),
+      apiFetch(apiUrl('/api/voice/packs')).then(r => r.json()),
     ]);
     if (settingsResult.status === 'fulfilled' && settingsResult.value.data) settings = settingsResult.value.data;
     const catalog = providerResult.status === 'fulfilled' && Array.isArray(providerResult.value.data) && providerResult.value.data.length ? providerResult.value.data : DEFAULT_PROVIDERS;
     providers = await Promise.all(catalog.map(withSavedConnection));
+    if (packResult.status === 'fulfilled' && Array.isArray(packResult.value.data)) voicePacks = packResult.value.data;
     loading = false;
+  }
+  async function downloadPack(id: string) {
+    if (downloadingPack) return;
+    downloadingPack = id;
+    try {
+      const response = await apiFetch(apiUrl(`/api/voice/packs/${encodeURIComponent(id)}/download`), { method: 'POST' }, 130_000);
+      const data = await response.json();
+      if (!response.ok || !data.ok) throw new Error(data.error || 'Download failed');
+      voicePacks = voicePacks.map((pack) => pack.manifest.id === id ? data.data : pack);
+      toastStore.success('English dictation installed');
+    } catch (error) {
+      toastStore.error(error instanceof Error ? error.message : 'Could not download English dictation');
+    } finally {
+      downloadingPack = null;
+    }
   }
   async function save() { saving = true; try { const r = await apiFetch(apiUrl('/api/voice/settings'), { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify(settings) }); const data = await r.json(); if (!r.ok) throw new Error(data.error); toastStore.success('Voice settings saved'); } catch (e) { toastStore.error(e instanceof Error ? e.message : 'Could not save voice settings'); } finally { saving = false; } }
   onMount(load);
@@ -72,9 +92,8 @@
     <section class="space-y-3"><div><h4 class="font-medium text-[var(--color-text-primary)]">Cloud voice connections</h4><p class="text-xs text-[var(--color-text-muted)]">Connect here once. The same encrypted credential is reused anywhere this provider is available.</p></div><div class="grid gap-3 md:grid-cols-2">{#each providers.filter(provider => !provider.local && provider.id !== 'system') as provider (provider.id)}<ProviderConnectionCard id={provider.id} name={provider.name} configured={provider.configured} description={providerDescriptions[provider.id] ?? provider.capabilities.join(' and ')} onconnected={load}/>{/each}</div></section>
     <section class="space-y-3"><h4 class="font-medium text-[var(--color-text-primary)]">Local language packs</h4>
       <div class="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-2)] p-4"><div class="flex items-center justify-between"><div><div class="font-medium">English speech output <span class="ml-2 rounded-full bg-[var(--color-surface-3)] px-2 py-0.5 text-[10px]">Built in</span></div><div class="text-xs text-[var(--color-text-muted)]">KittenTTS 0.8 Micro · ~41 MB · Apache-2.0 · 8 voices</div></div></div></div>
-      <div class="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-2)] p-4"><div class="flex items-center justify-between gap-4"><div><div class="font-medium">English Dictation</div><div class="text-xs text-[var(--color-text-muted)]">Moonshine Tiny INT8 · ~124 MB · downloads on first use</div></div><button class="btn" disabled title="Native pack catalog is not included in this build"><Download size={14}/> Download</button></div></div>
+      <div class="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-2)] p-4"><div class="flex items-center justify-between gap-4"><div><div class="font-medium">English Dictation {#if englishDictation?.state === 'installed'}<span class="ml-2 inline-flex items-center gap-1 rounded-full bg-emerald-500/10 px-2 py-0.5 text-[10px] text-emerald-400"><Check size={10}/> Installed</span>{/if}</div><div class="text-xs text-[var(--color-text-muted)]">Moonshine Tiny INT8 · ~42 MB · downloaded from Moonshine AI and checksum verified</div></div>{#if englishDictation?.state !== 'installed'}<button class="btn" disabled={downloadingPack !== null} onclick={() => downloadPack('moonshine-tiny-en-int8')}>{#if downloadingPack === 'moonshine-tiny-en-int8'}<LoaderCircle size={14} class="animate-spin"/> Downloading…{:else}<Download size={14}/> Download{/if}</button>{/if}</div></div>
       <p class="text-xs text-[var(--color-text-muted)]">System voice works immediately where the operating system or webview exposes speech services. Those services may use the operating-system vendor's cloud; select it explicitly only if that is acceptable.</p>
-      <button class="btn" disabled title="Desktop .koryvoice importer is not included in this build"><Upload size={14}/> Import .koryvoice</button>
     </section>
     <div class="flex justify-end gap-2"><button class="btn" onclick={load}><RefreshCw size={14}/> Reload</button><button class="btn btn-primary" disabled={saving} onclick={save}>{saving ? 'Saving…' : 'Save voice settings'}</button></div>
   {/if}

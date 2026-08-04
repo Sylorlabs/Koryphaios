@@ -1573,6 +1573,12 @@ import { apiFetch, parseJsonResponse } from '$lib/api.svelte';
             {billingLoading ? 'Refreshing…' : 'Refresh'}
           </button>
         </div>
+        {#if billingCredits?.refreshing}
+          <div class="flex items-center gap-2 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-2)] px-4 py-3 text-xs text-[var(--color-text-secondary)]" role="status">
+            <RefreshCw size={13} class="animate-spin text-[var(--color-accent)]" />
+            Updating subscription usage and provider balances in the background. Recorded API usage remains available while this finishes.
+          </div>
+        {/if}
         <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
           <div class="p-6 rounded-2xl bg-gradient-to-br from-[var(--color-surface-2)] to-[var(--color-surface-1)] border border-[var(--color-border)] shadow-xl relative">
             <div class="absolute -top-4 -right-4 w-24 h-24 bg-[var(--color-accent)]/5 rounded-full blur-3xl"></div>
@@ -1587,6 +1593,8 @@ import { apiFetch, parseJsonResponse } from '$lib/api.svelte';
             <div class="text-4xl font-black text-[var(--color-text-primary)] flex items-baseline gap-1">
               {#if billingLoading && !billingCredits}
                 <div class="h-10 w-32 bg-[var(--color-surface-3)] animate-pulse rounded-lg"></div>
+              {:else if billingCredits?.refreshing && !(billingCredits?.byProvider?.length)}
+                <span class="text-xl text-[var(--color-text-muted)] font-semibold">Calculating…</span>
               {:else}
                 <span class="text-2xl opacity-50">$</span>{((billingCredits?.totalSpendCents ?? 0) / 100).toFixed(2)}
               {/if}
@@ -1603,6 +1611,8 @@ import { apiFetch, parseJsonResponse } from '$lib/api.svelte';
                 <div class="h-10 w-32 bg-[var(--color-surface-3)] animate-pulse rounded-lg"></div>
               {:else if typeof billingCredits?.remainingCents === 'number'}
                 <span class="text-2xl opacity-50">$</span>{(billingCredits.remainingCents / 100).toFixed(2)}
+              {:else if billingCredits?.refreshing && !(billingCredits?.balances?.length)}
+                <span class="text-xl text-[var(--color-text-muted)] font-semibold">Checking…</span>
               {:else}
                 <span class="text-2xl text-[var(--color-text-muted)] font-semibold">Not reported</span>
               {/if}
@@ -1762,6 +1772,27 @@ import { apiFetch, parseJsonResponse } from '$lib/api.svelte';
                     </div>
                   {/if}
                   {/if}
+                </div>
+              {/each}
+            </div>
+          </div>
+        {:else if billingCredits?.refreshing && billingCredits?.accounts?.some((account: any) => account.subscription)}
+          <div class="space-y-4">
+            <div>
+              <h3 class="text-sm font-bold text-[var(--color-text-primary)]">CLI subscriptions</h3>
+              <p class="mt-1 text-[10px] text-[var(--color-text-muted)]">Detected accounts are ready; their local usage history is still being indexed.</p>
+            </div>
+            <div class="grid grid-cols-1 xl:grid-cols-2 gap-4">
+              {#each billingCredits.accounts.filter((account: any) => account.subscription) as account (`${account.provider}:${account.id}`)}
+                <div class="flex items-center gap-3 rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-2)] p-5">
+                  <div class="flex h-9 w-9 items-center justify-center rounded-lg bg-[var(--color-surface-3)] p-2">
+                    <ProviderIcon provider={account.provider} size={20} />
+                  </div>
+                  <div class="min-w-0 flex-1">
+                    <div class="truncate text-sm font-semibold text-[var(--color-text-primary)]">{account.email || account.label}</div>
+                    <div class="text-[10px] text-[var(--color-text-muted)]">{account.plan ? `${account.plan.toUpperCase()} plan · ` : ''}Indexing usage…</div>
+                  </div>
+                  <RefreshCw size={14} class="animate-spin text-[var(--color-accent)]" />
                 </div>
               {/each}
             </div>
