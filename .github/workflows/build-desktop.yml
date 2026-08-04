@@ -307,6 +307,7 @@ jobs:
           DEB=$(find "$BUNDLE_DIR/deb" -name "*.deb" -print -quit)
           RPM=$(find "$BUNDLE_DIR/rpm" -name "*.rpm" -print -quit)
           APPIMAGE=$(find "$BUNDLE_DIR/appimage" -name "*.AppImage" -print -quit)
+          APPIMAGE=$(realpath "$APPIMAGE")
 
           test "$(dpkg-deb -f "$DEB" Package)" = "koryphaios"
           test "$(dpkg-deb -f "$DEB" Architecture)" = "amd64"
@@ -320,13 +321,17 @@ jobs:
           desktop-file-validate Koryphaios.desktop
           grep -qx 'Exec=koryphaios-desktop' Koryphaios.desktop
 
-          rpm -qlp "$RPM" | grep -qx '/usr/bin/koryphaios-desktop'
-          rpm -qlp "$RPM" | grep -qx '/usr/share/applications/Koryphaios.desktop'
-          rpm -qlp "$RPM" | grep -q '^/usr/share/icons/.*/apps/koryphaios-desktop\.png$'
+          rpm -qlp "$RPM" > rpm-contents.txt
+          grep -qx '/usr/bin/koryphaios-desktop' rpm-contents.txt
+          grep -qx '/usr/share/applications/Koryphaios.desktop' rpm-contents.txt
+          grep -q '^/usr/share/icons/.*/apps/koryphaios-desktop\.png$' rpm-contents.txt
 
           EXTRACT_DIR=$(mktemp -d)
           (
             cd "$EXTRACT_DIR"
+            # Downloaded AppImages commonly lose their executable bit; the
+            # curl installer restores it before launch, so mirror that path.
+            chmod 755 "$APPIMAGE"
             "$APPIMAGE" --appimage-extract >/dev/null
           )
           test -x "$EXTRACT_DIR/squashfs-root/usr/bin/koryphaios-desktop"
