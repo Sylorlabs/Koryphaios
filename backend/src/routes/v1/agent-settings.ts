@@ -44,6 +44,8 @@ import {
   advanceWorkflow,
   listWorkflowDefinitions,
   listWorkflowRuns,
+  listWorkflowDrafts,
+  activateWorkflowDraft,
   startWorkflow,
   stopWorkflow,
 } from '../../kory/workflows';
@@ -52,7 +54,7 @@ export const agentSettingsRoutes = new Elysia({ prefix: '/api/agent' })
   .get('/workflows', ({ request, query, set }) => {
     if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
     const root = getRequestProjectRoot(request);
-    return { ok: true, data: { definitions: listWorkflowDefinitions(), runs: listWorkflowRuns(root, query.sessionId) } };
+    return { ok: true, data: { definitions: listWorkflowDefinitions(root), drafts: listWorkflowDrafts(root), runs: listWorkflowRuns(root, query.sessionId) } };
   }, { query: t.Object({ sessionId: t.Optional(t.String()) }) })
   .post('/workflows/start', ({ request, body, set }) => {
     if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
@@ -81,6 +83,21 @@ export const agentSettingsRoutes = new Elysia({ prefix: '/api/agent' })
       return { ok: false, error: error?.message ?? 'Unable to stop workflow' };
     }
   })
+  .post('/workflows/drafts/:id/activate', async ({ request, params, body, set }) => {
+    if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
+    try {
+      const root = getRequestProjectRoot(request);
+      const draft = listWorkflowDrafts(root).find((item) => item.id === params.id);
+      if (!draft) throw new Error('Workflow draft not found');
+      const goal = await getContext().goals.get(draft.goalId);
+      const sourceItem = goal?.checklist.find((item) => item.id === draft.goalItemId);
+      if (!sourceItem?.evidence.some((proof) => proof.verified)) throw new Error('Finish and verify the source Goal item before activating this workflow');
+      const activated = activateWorkflowDraft(root, params.id, body.scope);
+      await getContext().goals.addActivity(draft.goalId, 'workflow_activated', `${draft.id}|${body.scope}|${draft.name}`);
+      return { ok: true, data: activated };
+    }
+    catch (error: any) { set.status = 400; return { ok: false, error: error?.message ?? 'Unable to activate workflow draft' }; }
+  }, { body: t.Object({ scope: t.Union([t.Literal('project'), t.Literal('personal')]) }) })
   .post(
     '/delegate',
     async ({ body, set }) => {

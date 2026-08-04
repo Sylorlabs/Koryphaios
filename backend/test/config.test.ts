@@ -1,9 +1,9 @@
 import { describe, test, expect, beforeEach, afterEach } from 'bun:test';
 import { writeFileSync, unlinkSync, mkdirSync, rmSync, existsSync } from 'fs';
 import { join } from 'path';
-import { loadConfig } from '../src/runtime/config';
+import { getDesktopDevCorsOrigin, loadConfig, mergeCorsOrigins } from '../src/runtime/config';
 
-const BASE_TEST_DIR = '/tmp/koryphaios-config-test';
+const BASE_TEST_DIR = join(tmpdir(), 'koryphaios-config-test');
 let testDirCounter = 0;
 
 function getTestDir() {
@@ -164,6 +164,45 @@ describe('Config Loading', () => {
     } finally {
       rmSync(dir, { recursive: true });
     }
+  });
+});
+
+describe('Desktop development CORS', () => {
+  test('allows only the launcher-owned loopback frontend origin', () => {
+    const origin = getDesktopDevCorsOrigin({
+      KORYPHAIOS_DESKTOP_DEV: '1',
+      KORYPHAIOS_FRONTEND_HOST: '127.0.0.1',
+      KORYPHAIOS_FRONTEND_PORT: '3003',
+    });
+
+    expect(origin).toBe('http://127.0.0.1:3003');
+    expect(mergeCorsOrigins([], undefined, origin)).toEqual(['http://127.0.0.1:3003']);
+  });
+
+  test('does not trust non-loopback or non-desktop origins implicitly', () => {
+    expect(
+      getDesktopDevCorsOrigin({
+        KORYPHAIOS_DESKTOP_DEV: '1',
+        KORYPHAIOS_FRONTEND_HOST: '192.168.1.20',
+        KORYPHAIOS_FRONTEND_PORT: '3003',
+      }),
+    ).toBeUndefined();
+    expect(
+      getDesktopDevCorsOrigin({
+        KORYPHAIOS_FRONTEND_HOST: '127.0.0.1',
+        KORYPHAIOS_FRONTEND_PORT: '3003',
+      }),
+    ).toBeUndefined();
+  });
+
+  test('deduplicates explicit and launcher-derived origins', () => {
+    expect(
+      mergeCorsOrigins(
+        ['https://app.example.com'],
+        'https://app.example.com,http://127.0.0.1:3003',
+        'http://127.0.0.1:3003',
+      ),
+    ).toEqual(['https://app.example.com', 'http://127.0.0.1:3003']);
   });
 });
 

@@ -1,7 +1,10 @@
 import { describe, expect, test } from 'bun:test';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
 
 process.env.NODE_ENV = 'test';
-process.env.DATABASE_URL = process.env.DATABASE_URL ?? 'sqlite:///tmp/koryphaios-process-supervisor.sqlite';
+process.env.DATABASE_URL =
+  process.env.DATABASE_URL ?? `sqlite://${join(tmpdir(), 'koryphaios-process-supervisor.sqlite')}`;
 
 const { processSupervisor } = await import('../src/process-supervisor/supervisor');
 const { getProcessById } = await import('../src/process-supervisor/database');

@@ -1,5 +1,7 @@
 import { afterAll, beforeAll, describe, expect, mock, test } from 'bun:test';
 import { existsSync, rmSync } from 'node:fs';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
 // Real model catalogs (these module paths are NOT mocked) so the stub Provider classes
 // below expose the true catalogs — bun applies mock.module process-wide, so other test
 // files (copilot-models, provider-conformance) would otherwise see empty model lists.
@@ -10,7 +12,7 @@ process.env.NODE_ENV = 'test';
 process.env.SESSION_TOKEN_SECRET =
   process.env.SESSION_TOKEN_SECRET ?? 'test_only_not_for_production_aaaaaaaaaa';
 
-const dbPath = `/tmp/koryphaios-provider-routes-${process.pid}.sqlite`;
+const dbPath = join(tmpdir(), `koryphaios-provider-routes-${process.pid}.sqlite`);
 process.env.DATABASE_URL = `sqlite://${dbPath}`;
 
 const startCopilotDeviceAuthMock = mock(async () => ({
@@ -92,14 +94,19 @@ mock.module('../src/providers/kimicode-auth', () => ({
   isKimiCodeCliMarker: (value: string | null | undefined) =>
     typeof value === 'string' && value.startsWith('cli:kimicode:'),
   isKimiCodeMarker: (value: string | null | undefined) =>
-    typeof value === 'string' && (value.startsWith('oauth:kimicode:') || value.startsWith('cli:kimicode:')),
+    typeof value === 'string' &&
+    (value.startsWith('oauth:kimicode:') || value.startsWith('cli:kimicode:')),
   kimiCodeMarkerProfileDir: (value: string) => {
     if (typeof value !== 'string') return null;
     if (value.startsWith('oauth:kimicode:')) return '/tmp/kory-kimi-home';
     if (value.startsWith('cli:kimicode:')) {
       try {
-        return Buffer.from(value.slice('cli:kimicode:'.length), 'base64url').toString('utf-8') || null;
-      } catch { return null; }
+        return (
+          Buffer.from(value.slice('cli:kimicode:'.length), 'base64url').toString('utf-8') || null
+        );
+      } catch {
+        return null;
+      }
     }
     return null;
   },
