@@ -1,11 +1,10 @@
 <script lang="ts">
   import { tick } from 'svelte';
-  import { Bug, CheckCircle2, Flag, HelpCircle, Lightbulb, LoaderCircle, X } from 'lucide-svelte';
-  import { apiFetch, parseJsonResponse } from '$lib/api.svelte';
-  import { apiUrl } from '$lib/utils/api-url';
-  import Turnstile from '$lib/components/Turnstile.svelte';
+  import { ArrowUpRight, Bug, CheckCircle2, Flag, HelpCircle, Lightbulb, LoaderCircle, X } from 'lucide-svelte';
 
   type FeedbackCategory = 'bug' | 'idea' | 'question' | 'other';
+
+  const ISSUE_URL = 'https://github.com/Sylorlabs/Koryphaios/issues/new';
 
   interface Props {
     open?: boolean;
@@ -15,13 +14,11 @@
   let { open = false, onClose }: Props = $props();
   let category = $state<FeedbackCategory>('idea');
   let message = $state('');
-  let submitting = $state(false);
   let sent = $state(false);
+  let submitting = $state(false);
   let error = $state('');
   let appVersion = $state<string | undefined>();
   let messageInput = $state<HTMLTextAreaElement | null>(null);
-  let turnstile = $state<Turnstile | null>(null);
-  let turnstileSiteKey = $state(import.meta.env.VITE_TURNSTILE_SITE_KEY?.trim() || '');
 
   const categories: Array<{ id: FeedbackCategory; label: string; icon: typeof Flag }> = [
     { id: 'bug', label: 'Bug', icon: Bug },
@@ -43,18 +40,9 @@
         })
         .catch(() => {});
     }
-    if (!turnstileSiteKey) {
-      void fetch('https://koryphaios.com/api/feedback')
-        .then((response) => (response.ok ? response.json() : null))
-        .then((config: { turnstileSiteKey?: unknown } | null) => {
-          if (typeof config?.turnstileSiteKey === 'string') turnstileSiteKey = config.turnstileSiteKey;
-        })
-        .catch(() => {});
-    }
   });
 
   function close() {
-    if (submitting) return;
     onClose?.();
   }
 
@@ -62,45 +50,50 @@
     if (open && event.key === 'Escape') close();
   }
 
+  async function openIssue(url: string): Promise<boolean> {
+    const inTauri =
+      typeof window !== 'undefined' &&
+      ('__TAURI_INTERNALS__' in window || '__TAURI__' in window);
+    if (inTauri) {
+      try {
+        const { open } = await import('@tauri-apps/plugin-shell');
+        await open(url);
+        return true;
+      } catch (err) {
+        console.error('[Koryphaios] Failed to open issue page via shell:', err);
+      }
+    }
+    try {
+      return window.open(url, '_blank', 'noopener,noreferrer') !== null;
+    } catch (err) {
+      console.error('[Koryphaios] Failed to open issue page:', err);
+      return false;
+    }
+    return false;
+  }
+
   async function submit() {
     const trimmed = message.trim();
     if (!trimmed) {
-      error = 'Tell us what happened before sending.';
       messageInput?.focus();
       return;
     }
 
     submitting = true;
     error = '';
+    const type = categories.find((option) => option.id === category)?.label.toLowerCase() ?? 'feedback';
+    const title = `[${type}] ${trimmed.slice(0, 80)}`;
+    const body = [trimmed, ...(appVersion ? [``, `**App version:** ${appVersion}`] : [])].join(
+      '\n',
+    );
     try {
-      // Invisible for normal users; Cloudflare only shows a challenge when risk warrants it.
-      const turnstileToken = await turnstile?.execute();
-      const response = await apiFetch(
-        apiUrl('/api/feedback'),
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            category,
-            visibility: 'public',
-            message: trimmed,
-            ...(turnstileToken ? { turnstileToken } : {}),
-            ...(appVersion ? { appVersion } : {}),
-          }),
-        },
-        15_000,
-      );
-      const result = await parseJsonResponse<{ ok?: boolean; error?: string }>(response);
-      if (!response.ok || !result.ok)
-        throw new Error(result.error || 'Feedback could not be delivered right now');
+      const opened = await openIssue(`${ISSUE_URL}?title=${encodeURIComponent(title)}&body=${encodeURIComponent(body)}`);
+      if (!opened) {
+        error = 'Could not open GitHub to create the report. Check your connection and try again.';
+        return;
+      }
       sent = true;
-      turnstile?.reset();
       message = '';
-    } catch (submitError) {
-      error =
-        submitError instanceof Error
-          ? submitError.message
-          : 'Feedback could not be delivered right now';
     } finally {
       submitting = false;
     }
@@ -136,7 +129,7 @@
               Help shape Koryphaios
             </h2>
             <p class="mt-1 text-xs leading-5 text-[var(--color-text-muted)]">
-              Public feedback never changes production prompts automatically.
+              Submitting opens a GitHub issue in the Koryphaios repository.
             </p>
           </div>
           <button
@@ -159,8 +152,7 @@
             Feedback delivered
           </h3>
           <p class="mt-2 max-w-sm text-xs leading-5 text-[var(--color-text-muted)]">
-            Thanks. Your report is in the team inbox and includes no identity unless you added a
-            reply address.
+            GitHub opened with your report filled in. Review it there and submit when ready.
           </p>
           <button
             type="button"
@@ -229,10 +221,6 @@
               {error}
             </p>{/if}
 
-          {#if turnstileSiteKey}
-            <Turnstile bind:this={turnstile} siteKey={turnstileSiteKey} />
-          {/if}
-
           <div class="flex items-center justify-between gap-4 pt-1">
             <p class="text-[10px] leading-4 text-[var(--color-text-muted)]">
               Public reports never include diagnostics, source, prompts, screenshots, or API keys.
@@ -248,8 +236,7 @@
                 disabled={submitting || !message.trim()}
                 class="flex min-w-28 items-center justify-center gap-2 rounded-xl bg-[var(--color-accent)] px-5 py-2.5 text-xs font-bold text-white shadow-lg shadow-[var(--color-accent)]/15 transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-45"
               >
-                {#if submitting}<LoaderCircle size={14} class="animate-spin" />Sending{:else}Send
-                  feedback{/if}
+                {#if submitting}<LoaderCircle size={14} class="animate-spin" />Opening GitHub{:else}<ArrowUpRight size={14} />Create issue{/if}
               </button>
             </div>
           </div>
