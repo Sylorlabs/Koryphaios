@@ -166,7 +166,7 @@ function interactiveNote(
 // ─── Per-provider command definitions ───────────────────────────────────────
 //
 // Commands that Koryphaios already owns as built-ins (new, resume, compact,
-// clear, help, yolo, settings, theme, sidebar, zen, goal)
+// clear, help, settings, theme, sidebar, zen, goal)
 // are intentionally excluded — Kory's handler resolves those first, so listing
 // them here would only duplicate the picker.
 
@@ -568,7 +568,6 @@ const GROK_COMMANDS: NativeCommandDefinition[] = [
   },
   {
     command: 'always-approve',
-    aliases: ['yolo'],
     description: 'Toggle always-approve (yolo) mode.',
     category: 'Config',
     execute: (ctx) =>
@@ -577,7 +576,7 @@ const GROK_COMMANDS: NativeCommandDefinition[] = [
           'grok',
           'always-approve',
           'toggles auto-approve mode',
-          'use /yolo in the composer (a Koryphaios built-in) to toggle YOLO mode',
+          'use the YOLO control in the composer to toggle YOLO mode',
         ),
         ctx,
       ),
