@@ -163,6 +163,19 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
 
+      # `-` is Tauri's explicit ad-hoc signing identity. It is not an Apple
+      # Developer ID and still requires a one-time Gatekeeper override, but it
+      # keeps a browser-downloaded Apple Silicon app from being labelled
+      # "damaged" solely because it has no code signature. A future
+      # APPLE_SIGNING_IDENTITY secret overrides this value for full signing.
+      - name: Verify macOS bundle code signature
+        shell: bash
+        run: |
+          APP="desktop/src-tauri/target/${{ matrix.target }}/release/bundle/macos/Koryphaios.app"
+          test -d "$APP"
+          codesign --verify --deep --strict --verbose=2 "$APP"
+          codesign --display --verbose=4 "$APP"
+
       - name: Upload macOS artifacts
         uses: actions/upload-artifact@v7
         with:
@@ -260,8 +273,8 @@ jobs:
           RPM_COUNT=$(find "$BUNDLE_DIR/rpm" -name "*.rpm" 2>/dev/null | wc -l)
           APPIMAGE_COUNT=$(find "$BUNDLE_DIR/appimage" -name "*.AppImage" 2>/dev/null | wc -l)
           echo "Artifacts: deb=$DEB_COUNT rpm=$RPM_COUNT appimage=$APPIMAGE_COUNT"
-          if [ "$APPIMAGE_COUNT" -eq 0 ]; then
-            echo "ERROR: No AppImage produced"
+          if [ "$DEB_COUNT" -eq 0 ] || [ "$RPM_COUNT" -eq 0 ] || [ "$APPIMAGE_COUNT" -eq 0 ]; then
+            echo "ERROR: Linux release requires DEB, RPM, and AppImage artifacts"
             exit 1
           fi
 

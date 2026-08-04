@@ -31,7 +31,12 @@ curl.exe -fsSL https://koryphaios.com/install.ps1 | powershell.exe -NoProfile -E
 
 These commands select the latest complete native build for your OS and
 architecture. macOS receives a DMG, Windows receives the setup executable, and
-Linux x64 receives an AppImage. You can inspect the
+Linux x64 receives an AppImage and the installer adds it to your application
+launcher. The macOS curl installer copies the app into your user Applications
+folder; for a downloaded DMG, drag Koryphaios into Applications so it appears
+in Spotlight. The macOS build is ad-hoc signed, so macOS may require a one-time
+Finder control-click → Open confirmation until it is Developer ID signed and
+notarized. Windows runs the setup installer, which adds a Start-menu entry. You can inspect the
 [macOS/Linux](https://koryphaios.com/install) or
 [Windows](https://koryphaios.com/install.ps1) script before running it.
 

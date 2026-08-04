@@ -8,39 +8,35 @@ All notable Koryphaios changes are recorded here. Release automation prepends a 
 
 ### ✨ Features
 
-- native CLI slash-command bridge + Devin capability probing
+- Koryphaios 0.1.0 is the first public native desktop release for Windows x64, macOS Intel, macOS Apple Silicon, and Linux x64.
+- A local embedded backend, native Tauri shell, persistent sessions, project workspaces, notes, memory, and provider configuration are packaged together so the workspace can run without a hosted Koryphaios account.
+- Multi-provider agent workflows, real-time reasoning and tool activity, project-scoped work, MCP support, and CLI bridges ship in the desktop application.
+- The release includes the native updater and signed updater metadata, so later compatible releases can be discovered from inside the app.
 
-### 🐛 Bug Fixes
+### 🚀 Improvements — installation and platform experience
 
-- validate workspace paths on Windows
-- cross-platform test failures round 2
-- cross-platform test failures on Windows and macOS
-- start backend in playwright e2e config
-- implement parseDevinModelsOutput for devin-capabilities test
-- resolve remaining 4 CI test failures
-- commit remaining in-progress feature changes for CI
-- commit migration 0023/0024 and message-store changes for CI
-- resolve CI test failures from in-progress feature work
-- replace vitest import with bun:test in speech-text test
-- resolve CI typecheck errors from in-progress feature work
-- shorten bearer probe token to avoid CI secret scanner false positive
-- cross-platform consistency for macOS and Windows
-- all UI elements now adapt to selected accent color
-- remove read-only heuristic that stripped agent write capabilities
-- Tauri supervisor discovers backend's actual port after EADDRINUSE fallback
-- dynamic port fallback prevents backend crashes on EADDRINUSE
-- unknown slash commands fall through to model + notes sync dedup
+- Windows uses the normal setup executable and creates a Start-menu entry.
+- macOS ships Intel and Apple Silicon DMGs; the curl installer copies Koryphaios into the user Applications folder, while a downloaded DMG installs by dragging the app into Applications.
+- Linux ships Debian, RPM, and portable AppImage packages. The curl installer creates a desktop launcher, and an AppImage creates or refreshes its launcher when it runs.
+- Packaged state is stored in each operating system’s per-user application-data directory rather than beside an installer, AppImage, or source checkout.
 
-### 🚀 Improvements
+### 🐛 Fixes and hardening
 
-- ci: restore MCP dependencies and Windows test runner
-- test: isolate browser release checks
-- ci: publish exact signed updater releases
-- recover billing and memory import overhaul
-- index on master: 60655b5 fix: cross-platform test failures round 2
-- Add contributor credits and product media
-- ci: add cross-platform test matrix for Windows and macOS
-- test: skip shortcuts e2e in CI (requires interactive session)
-- Match composer model to selected agent
-- Adapt Poe icon to app theme
-- Add Poe API key provider setup
+- Restored a coherent desktop/backend startup contract, including dynamic local-port recovery when the default port is already occupied.
+- Added embedded-backend supervision so a failed backend surfaces a recovery state instead of leaving a misleading live-looking window.
+- Aligned desktop data placement so SQLite state, sessions, local credentials, memory, and keys stay in the app data directory.
+- Added application-search integration for Linux installs and explicit completion status for the Windows installer.
+- Added explicit macOS ad-hoc signing for browser-downloaded builds, preventing unsigned Apple Silicon bundles from being labelled damaged solely because they lack a code signature. macOS may still require a one-time Finder control-click → Open confirmation.
+- Kept bundle and backend compatibility checks fail-closed so a stale frontend cannot silently attach to a newer backend.
+
+### 🚀 Improvements — release quality
+
+- The desktop build now requires Debian, RPM, and AppImage artifacts; Linux packaging cannot silently ship only one format.
+- macOS CI verifies the generated app bundle with `codesign --verify --deep --strict` before publishing it.
+- Version metadata is aligned at 0.1.0 across the native package, website release, and frontend configuration.
+- Core type checking and frontend diagnostics pass for this release candidate.
+
+### Known platform notes
+
+- Windows code signing and Apple Developer ID notarization are not included in 0.1.0. Windows may show SmartScreen reputation warnings, and macOS uses ad-hoc signing with a one-time user approval path.
+- Linux x64 is supported. ARM Linux is not published in this release.
