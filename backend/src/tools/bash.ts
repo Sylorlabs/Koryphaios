@@ -18,6 +18,7 @@ import {
   AGENT_RESOURCE_LIMITS,
 } from '../security/resource-limits';
 import { requireBash } from '../runtime/shell';
+import { bypassLocalRiskPrompts } from './permission-policy';
 
 const MAX_OUTPUT_BYTES = 512_000; // 512KB output limit per command
 
@@ -176,8 +177,10 @@ Network access via curl/wget is blocked unless explicitly authorized.`;
       }
     }
 
+    const approvedByPreset = ctx.approvedToolCallIds?.has(call.id) === true;
+    const bypassRiskPrompts = bypassLocalRiskPrompts(ctx.permissionPolicy);
     const catastrophic = isCatastrophicBashCommand(command);
-    if (catastrophic) {
+    if (catastrophic && !approvedByPreset && !bypassRiskPrompts) {
       if (!ctx.waitForUserInput) {
         return {
           callId: call.id,
@@ -232,14 +235,29 @@ Network access via curl/wget is blocked unless explicitly authorized.`;
       reason: validation.reason,
     });
 
-    if (!validation.safe && !catastrophic) {
-      return {
-        callId: call.id,
-        name: this.name,
-        output: `Command blocked by security policy: ${validation.reason}${validation.requiresUnsandboxed ? '\n\nThis command requires unsandboxed mode. The Manager can run it with full permissions.' : ''}`,
-        isError: true,
-        durationMs: 0,
-      };
+    if (!validation.safe && !catastrophic && !approvedByPreset && !bypassRiskPrompts) {
+      if (!ctx.waitForUserInput) {
+        return {
+          callId: call.id,
+          name: this.name,
+          output: `Risky command requires approval, but no human approval channel is available: ${validation.reason}`,
+          isError: true,
+          durationMs: 0,
+        };
+      }
+      const selection = await ctx.waitForUserInput(
+        `This command triggered a safety check (${validation.reason}):\n\n${command}\n\nRun it anyway?`,
+        ['Cancel (Recommended)', 'Run risky command'],
+      );
+      if (selection !== 'Run risky command') {
+        return {
+          callId: call.id,
+          name: this.name,
+          output: 'Risky command cancelled by the user.',
+          isError: true,
+          durationMs: 0,
+        };
+      }
     }
 
     // 4. Background Execution (using Process Supervisor)

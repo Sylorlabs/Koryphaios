@@ -33,7 +33,14 @@ import type { ProviderMessage } from '../providers/types';
 import { detectJulesApiKey } from '../providers/auth-utils';
 import { runJulesTask } from '../providers/jules-runner';
 import { JULES_SYNC_INSTRUCTIONS, getProviderDisplay } from '../providers/provider-display';
-import { ToolRegistry, type ToolCallInput, type ToolContext, type ToolCallOutput } from '../tools';
+import {
+  ToolRegistry,
+  decideToolPermission,
+  resolveToolPermissionPolicy,
+  type ToolCallInput,
+  type ToolContext,
+  type ToolCallOutput,
+} from '../tools';
 import { wsBroker } from '../pubsub';
 import { koryLog } from '../logger';
 import { initContextArchive, getContextArchive } from './context-archive';
@@ -1295,16 +1302,6 @@ export class KoryManager {
       return 'Jules is not configured. Add JULES_API_KEY in Settings (https://jules.google.com/settings#api).';
     }
 
-    if (!this.isYoloMode) {
-      const selection = await this.waitForUserInputInternal(
-        sessionId,
-        'Delegate this task to Jules (cloud agent — runs remotely, may take minutes)?',
-        ['Yes, send to Jules', 'Cancel'],
-      );
-      if (selection === '__timeout__') return 'Timed out waiting for user response.';
-      if (selection.includes('Cancel')) return 'Jules delegation cancelled by user.';
-    }
-
     this.emitThought(sessionId, 'executing', 'Jules cloud agent working…');
     await this.updateWorkflowState(sessionId, 'executing');
 
@@ -1705,6 +1702,8 @@ export class KoryManager {
         usageKnown,
       );
 
+      const directWorkingDirectory = await this.resolveSessionWorkingDirectory(sessionId);
+      const directSettings = loadAgentSettings(directWorkingDirectory);
       const managerCtx: ToolContext = {
         sessionId,
         activeProvider: providerName,
@@ -1712,9 +1711,11 @@ export class KoryManager {
         reasoningLevel,
         goalId: this.goalContextBySession.get(sessionId)?.goalId,
         goalItemId: this.goalContextBySession.get(sessionId)?.itemId,
-        workingDirectory: await this.resolveSessionWorkingDirectory(sessionId),
+        workingDirectory: directWorkingDirectory,
         allowedPaths: [],
         isSandboxed: interactionMode === 'plan',
+        permissionPolicy: resolveToolPermissionPolicy(directSettings, interactionMode),
+        approvedToolCallIds: new Set(),
         signal: abort.signal,
         waitForUserInput: (question: string, options: string[]) =>
           this.waitForUserInputInternal(sessionId, question, options),
@@ -1765,12 +1766,7 @@ export class KoryManager {
       }
 
       const messages: InternalMessage[] = [...history, { role: 'user', content: finalContent }];
-      // Auto-run tools by default so the app "just works" on launch (changes stay reviewable
-      // after the fact + Critic-gated). Set autoRunTools:false to confirm before each run.
-      const { loadAgentSettings: loadAgentSettingsForRun } = await import('../agent-settings');
-      const autoRunTools = loadAgentSettingsForRun(this.workingDirectory).autoRunTools !== false;
       let turnCount = 0;
-      let firstAskForDirectTools = true;
       let stoppedByUser = false;
       // Track whether the run produced anything user-visible — so an empty LLM response
       // surfaces a clear message instead of a silent "weird stop".
@@ -1865,30 +1861,6 @@ export class KoryManager {
         }
 
         if (completedToolCalls && completedToolCalls.length > 0) {
-          if (!autoRunTools && !this.isYoloMode && firstAskForDirectTools) {
-            const selection = await this.waitForUserInputInternal(
-              sessionId,
-              'Manager will run tools to complete this task. Proceed?',
-              ['Yes, proceed', 'Cancel'],
-            );
-            firstAskForDirectTools = false;
-            if (selection === '__timeout__' || selection.includes('Cancel')) {
-              if (this.messages)
-                await this.messages.add(sessionId, {
-                  id: nanoid(12),
-                  sessionId,
-                  role: 'assistant',
-                  content:
-                    selection === '__timeout__'
-                      ? '[Timed out waiting for user response.]'
-                      : '[Cancelled by user.]',
-                  model: routing.model,
-                  provider: providerName,
-                  createdAt: Date.now(),
-                });
-              break;
-            }
-          }
           const runTool = async (tc: CompletedToolCall) => ({
             tc,
             toolResult: await this.executeManagerToolCall(sessionId, tc, managerCtx),
@@ -2448,6 +2420,7 @@ export class KoryManager {
           )
         : reasoningLevel;
     const normalizedReasoning = normalizeReasoningLevel(provider.name, modelId, resolvedReasoning);
+    const permissionPolicy = resolveToolPermissionPolicy(settings, interactionMode);
 
     const streamSignal = withTimeoutSignal(signal, AGENT.LLM_STREAM_TIMEOUT_MS);
     const stream = this.providers.executeWithRetry(
@@ -2464,9 +2437,10 @@ export class KoryManager {
         workingDirectory: await this.resolveSessionWorkingDirectory(sessionId),
         sessionId,
         harnessRole: 'manager',
+        permissionMode: permissionPolicy.mode,
         promptManifestHash: managerCompilation.manifest.hash,
         taskContractHash: managerCompilation.manifest.taskContractHash,
-        sandbox: interactionMode === 'plan' ? SANDBOX_PRESETS.readonly : SANDBOX_PRESETS.balanced,
+        sandbox: permissionPolicy.mode === 'yolo' ? SANDBOX_PRESETS.trusted : SANDBOX_PRESETS.readonly,
       },
       provider.name,
     );
@@ -2727,11 +2701,12 @@ export class KoryManager {
   private async gateNoteToolCall(
     sessionId: string,
     tc: CompletedToolCall,
+    ctx: ToolContext,
   ): Promise<ToolCallOutput | null> {
     if (!isNoteToolName(tc.name)) return null;
 
-    const check = checkNoteToolPermission(tc.name, this.workingDirectory, {
-      yoloMode: this.isYoloMode,
+    const check = checkNoteToolPermission(tc.name, ctx.workingDirectory, {
+      yoloMode: ctx.permissionPolicy?.mode === 'yolo',
     });
 
     if (!check.allowed) {
@@ -2745,7 +2720,10 @@ export class KoryManager {
       };
     }
 
-    if (check.requiresApproval) {
+    // If the active preset already asks for this tool, let the central tool
+    // gate issue the single approval prompt instead of double-prompting.
+    const presetDecision = decideToolPermission(ctx.permissionPolicy, tc.name);
+    if (check.requiresApproval && presetDecision.action !== 'ask') {
       const summary = formatNoteToolApprovalSummary(
         tc.name,
         (tc.input ?? {}) as Record<string, unknown>,
@@ -2890,7 +2868,7 @@ export class KoryManager {
         durationMs: 0,
       };
     }
-    const gated = await this.gateNoteToolCall(sessionId, tc);
+    const gated = await this.gateNoteToolCall(sessionId, tc, ctx);
     if (gated) return gated;
     const result = await this.tools.execute(ctx, { id: tc.id, name: tc.name, input: tc.input });
     await this.events.runWorkflowHooks('after-tool', sessionId, {
@@ -3001,6 +2979,8 @@ export class KoryManager {
     });
     let workerSystemPrompt = workerCompilation.systemPrompt;
     const workerSettings = loadAgentSettings(workerWorkingDirectory);
+    ctx.permissionPolicy = resolveToolPermissionPolicy(workerSettings, 'act');
+    ctx.approvedToolCallIds = new Set();
     const workerGuidance = assembleAgentContext(workerWorkingDirectory, workerSettings);
     if (workerGuidance.preferences.trim()) {
       workerSystemPrompt += `\n\n## Durable user preferences\n${workerGuidance.preferences.trim()}`;
@@ -3147,7 +3127,7 @@ export class KoryManager {
       );
       return { callId: tc.id, name: tc.name, output: ans, isError: false, durationMs: 0 };
     }
-    const gated = await this.gateNoteToolCall(sessionId, tc);
+    const gated = await this.gateNoteToolCall(sessionId, tc, ctx);
     if (gated) return gated;
     const result = await this.tools.execute(ctx, { id: tc.id, name: tc.name, input: tc.input });
     await this.events.runWorkflowHooks('after-tool', sessionId, {
@@ -3437,8 +3417,14 @@ export class KoryManager {
         signal: streamSignal,
         workingDirectory: thread.ctx.workingDirectory,
         sessionId: thread.sessionId,
-        sandbox: thread.toolRole === 'critic' ? SANDBOX_PRESETS.readonly : SANDBOX_PRESETS.balanced,
+        sandbox:
+          thread.toolRole === 'critic'
+            ? SANDBOX_PRESETS.readonly
+            : thread.ctx.permissionPolicy?.mode === 'yolo'
+              ? SANDBOX_PRESETS.trusted
+              : SANDBOX_PRESETS.readonly,
         harnessRole: thread.toolRole,
+        permissionMode: thread.toolRole === 'critic' ? 'plan' : thread.ctx.permissionPolicy?.mode,
         promptManifestHash: thread.promptManifestHash,
         taskContractHash: thread.taskContractHash,
         ...(normalizedReasoning !== undefined && { reasoningLevel: normalizedReasoning }),
