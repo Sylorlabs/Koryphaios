@@ -3,7 +3,6 @@
     Settings,
     Activity,
     ChevronDown,
-    GitBranch,
     Download,
     Zap,
     Search,
@@ -17,7 +16,6 @@
   import { getModKeyName } from '$lib/utils/platform';
   import { formatRecentDate, promptTemplates } from '$lib/utils/projectManager';
   import type { RecentProject } from '$lib/utils/projectManager';
-  import { modeStore } from '$lib/stores/mode.svelte';
   import { onMount } from 'svelte';
   import { browser } from '$app/environment';
   import { invoke } from '@tauri-apps/api/core';
@@ -29,7 +27,6 @@
 
   interface Props {
     showSidebar: boolean;
-    showGit: boolean;
     showAgents: boolean;
     showNotes?: boolean;
     notesEnabled?: boolean;
@@ -43,7 +40,6 @@
 
   let {
     showSidebar,
-    showGit,
     showAgents,
     showNotes = false,
     notesEnabled = true,
@@ -329,24 +325,13 @@
                 onclick={() => action('toggle_zen_mode')}
                 >{zenMode ? 'Disable' : 'Enable'} Zen Mode</button
               >
-              {#if modeStore.showAgentDetails}
-                <button
-                  type="button"
-                  class="w-full text-left px-2.5 py-1.5 text-xs hover:bg-[var(--color-surface-3)]"
-                  style="color: var(--color-text-primary);"
-                  onclick={() => action('toggle_agents')}
-                  >{showAgents ? 'Hide' : 'Show'} Active Agents</button
-                >
-              {/if}
-              {#if modeStore.showGitPanel}
-                <button
-                  type="button"
-                  class="w-full text-left px-2.5 py-1.5 text-xs hover:bg-[var(--color-surface-3)]"
-                  style="color: var(--color-text-primary);"
-                  onclick={() => action('toggle_git')}
-                  >{showGit ? 'Hide' : 'Show'} Source Control</button
-                >
-              {/if}
+              <button
+                type="button"
+                class="w-full text-left px-2.5 py-1.5 text-xs hover:bg-[var(--color-surface-3)]"
+                style="color: var(--color-text-primary);"
+                onclick={() => action('toggle_agents')}
+                >{showAgents ? 'Hide' : 'Show'} Active Agents</button
+              >
               <button
                 type="button"
                 class="w-full text-left px-2.5 py-1.5 text-xs hover:bg-[var(--color-surface-3)]"
@@ -419,18 +404,6 @@
           <span class="text-xs font-semibold"
             >Update{updater.updateInfo?.version ? ` v${updater.updateInfo.version}` : ''}</span
           >
-        </button>
-      {/if}
-      {#if modeStore.showGitPanel}
-        <button
-          type="button"
-          class="flex items-center gap-1.5 px-3 py-2 rounded-lg transition-colors hover:bg-[var(--color-surface-2)]"
-          style="color: {showGit ? 'var(--color-accent)' : 'var(--color-text-secondary)'};"
-          onclick={() => action('toggle_git')}
-          data-tauri-drag-region="false"
-        >
-          <GitBranch size={14} />
-          <span class="text-xs font-medium">{showGit ? 'Git open' : 'Git'}</span>
         </button>
       {/if}
       {#if notesEnabled}

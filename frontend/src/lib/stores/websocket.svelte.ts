@@ -90,6 +90,10 @@ interface DetectedContextFile {
 let detectedContext = $state<DetectedContextFile[]>([]);
 
 let busySessions = $state<Set<string>>(new Set());
+// Stop is optimistic: the backend may still have buffered stream/thought
+// events in flight. Keep those events from resurrecting a run in the UI until
+// the next user message explicitly starts a new turn for that session.
+const userStoppedSessions = new Set<string>();
 // Bumped on process.started/exited so the background-terminals strip refetches.
 let processEventTick = $state(0);
 
@@ -110,6 +114,7 @@ let fileEditTimers = new Map<string, ReturnType<typeof setTimeout>>();
 // ─── Session Busy Bridge ─────────────────────────────────────────────────────
 
 function markSessionBusy(sessionId: string) {
+  userStoppedSessions.delete(sessionId);
   if (busySessions.has(sessionId)) {
     kickBusyWatchdog(sessionId);
     return;
@@ -232,6 +237,21 @@ function handleMessage(msg: WSMessage) {
   const isForActiveSession = !!msg.sessionId && msg.sessionId === activeSessionId;
   const agents = agentStore.agents;
 
+  if (
+    msg.sessionId &&
+    userStoppedSessions.has(msg.sessionId) &&
+    (msg.type === 'kory.thought' ||
+      msg.type === 'kory.routing' ||
+      msg.type === 'stream.delta' ||
+      msg.type === 'stream.thinking' ||
+      msg.type === 'stream.tool_call' ||
+      msg.type === 'stream.tool_result' ||
+      msg.type === 'stream.file_delta' ||
+      msg.type === 'stream.file_complete')
+  ) {
+    return;
+  }
+
   // Any activity for a busy session proves the run is alive — reset its
   // silence watchdog. (Terminal events clear busy entirely below.)
   if (msg.sessionId && msg.type.startsWith('stream.')) kickBusyWatchdog(msg.sessionId);
@@ -293,6 +313,13 @@ function handleMessage(msg: WSMessage) {
 
     case 'agent.status': {
       const p = msg.payload as AgentStatusPayload;
+      if (
+        msg.sessionId &&
+        userStoppedSessions.has(msg.sessionId) &&
+        !['done', 'idle', 'waiting'].includes(p.status)
+      ) {
+        break;
+      }
       agentStore.updateAgentStatus(p.agentId, p.status, msg.sessionId ?? undefined);
       if (isForActiveSession) {
         if (p.status === 'thinking') feedStore.beginThinking(p.agentId, msg.timestamp);
@@ -328,6 +355,10 @@ function handleMessage(msg: WSMessage) {
         info?.message?.startsWith('Prompt ') && info.message.includes('Instructions:');
       if (isPromptDiagnostic) break;
       if (isForActiveSession && info?.message) {
+        if (info.message === 'Session cancelled' && msg.sessionId) {
+          userStoppedSessions.add(msg.sessionId);
+          clearSessionBusy(msg.sessionId);
+        }
         feedStore.removeAnalyzingThoughtEntries();
         feedStore.addFeedEntry({
           timestamp: msg.timestamp,
@@ -1335,8 +1366,10 @@ function setYoloMode(enabled: boolean) {
 }
 
 function markSessionAgentsStopped(sessionId: string) {
+  userStoppedSessions.add(sessionId);
   clearSessionBusy(sessionId);
   agentStore.markSessionAgentsStopped(sessionId);
+  if (sessionId === sessionStore.activeSessionId) feedStore.removeAnalyzingThoughtEntries();
 }
 
 // ─── Exported Store ─────────────────────────────────────────────────────────

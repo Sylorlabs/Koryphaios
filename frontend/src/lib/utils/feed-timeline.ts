@@ -12,7 +12,18 @@ import type { FeedEntryLocal } from '$lib/types';
 export function mergeFeedTimeline(
   ...lanes: ReadonlyArray<ReadonlyArray<FeedEntryLocal>>
 ): FeedEntryLocal[] {
-  return lanes.flat().sort((a, b) => {
+  // A history refresh can observe the same live row in both its initial
+  // snapshot and the events that arrived while ancillary context was loading.
+  // Feed IDs are canonical, so collapse those overlaps before Svelte receives
+  // them; duplicate keyed rows otherwise crash the entire virtualized feed.
+  const seenIds = new Set<string>();
+  const merged = lanes.flat().filter((entry) => {
+    if (seenIds.has(entry.id)) return false;
+    seenIds.add(entry.id);
+    return true;
+  });
+
+  return merged.sort((a, b) => {
     const aOrder = canonicalOrder(a);
     const bOrder = canonicalOrder(b);
     if (aOrder && bOrder && aOrder.epoch === bOrder.epoch) {
@@ -75,6 +86,22 @@ export function operationalEntriesForReload(
     (entry) =>
       Number.isSafeInteger(entry.metadata?.sequenceStart) ||
       typeof entry.metadata?.messageId !== 'string',
+  );
+}
+
+/** Remove the transient manager-analysis row even when a history refresh has
+ * replaced its original client ID while Stop was in flight. */
+export function withoutAnalyzingThoughts(
+  entries: ReadonlyArray<FeedEntryLocal>,
+  trackedId: string | null,
+): FeedEntryLocal[] {
+  return entries.filter(
+    (entry) =>
+      entry.id !== trackedId &&
+      !(
+        entry.type === 'thought' &&
+        (entry.metadata as { phase?: string } | undefined)?.phase === 'analyzing'
+      ),
   );
 }
 

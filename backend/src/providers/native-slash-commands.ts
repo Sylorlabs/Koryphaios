@@ -166,7 +166,7 @@ function interactiveNote(
 // ─── Per-provider command definitions ───────────────────────────────────────
 //
 // Commands that Koryphaios already owns as built-ins (new, resume, compact,
-// clear, help, yolo, settings, theme, sidebar, zen, goal, beginner, advanced)
+// clear, help, yolo, settings, theme, sidebar, zen, goal)
 // are intentionally excluded — Kory's handler resolves those first, so listing
 // them here would only duplicate the picker.
 
@@ -387,8 +387,7 @@ const CODEX_COMMANDS: NativeCommandDefinition[] = [
     argsHint: '[instructions]',
     description: 'Run a non-interactive code review of the working tree.',
     category: 'Review',
-    execute: (ctx) =>
-      runCli('codex', ['review', ...ctx.args], ctx.workingDirectory, ctx),
+    execute: (ctx) => runCli('codex', ['review', ...ctx.args], ctx.workingDirectory, ctx),
   },
   {
     command: 'model',
@@ -470,14 +469,16 @@ const DEVIN_COMMANDS: NativeCommandDefinition[] = [
     description: 'Show estimated credit/ACU usage for the session.',
     category: 'Usage',
     execute: (ctx) =>
-      note(interactiveNote('devin', 'usage', 'shows estimated credit/ACU usage for the session'), ctx),
+      note(
+        interactiveNote('devin', 'usage', 'shows estimated credit/ACU usage for the session'),
+        ctx,
+      ),
   },
   {
     command: 'context',
     description: 'Show context window usage.',
     category: 'Usage',
-    execute: (ctx) =>
-      note(interactiveNote('devin', 'context', 'shows context window usage'), ctx),
+    execute: (ctx) => note(interactiveNote('devin', 'context', 'shows context window usage'), ctx),
   },
   {
     command: 'steps',
@@ -542,8 +543,7 @@ const GROK_COMMANDS: NativeCommandDefinition[] = [
     command: 'usage',
     description: 'Show token and credit usage.',
     category: 'Usage',
-    execute: (ctx) =>
-      note(interactiveNote('grok', 'usage', 'shows token and credit usage'), ctx),
+    execute: (ctx) => note(interactiveNote('grok', 'usage', 'shows token and credit usage'), ctx),
   },
   {
     command: 'context',
@@ -653,8 +653,7 @@ const CURSOR_COMMANDS: NativeCommandDefinition[] = [
     command: 'plan',
     description: 'Switch to Plan mode.',
     category: 'Config',
-    execute: (ctx) =>
-      note(interactiveNote('cursor', 'plan', 'switches to Plan mode'), ctx),
+    execute: (ctx) => note(interactiveNote('cursor', 'plan', 'switches to Plan mode'), ctx),
   },
   {
     command: 'ask',
@@ -875,15 +874,10 @@ export function getNativeSlashCommands(provider: ProviderName | string): NativeS
 }
 
 /** Look up a command (including aliases) for a provider. */
-function resolveCommand(
-  provider: string,
-  name: string,
-): NativeCommandDefinition | undefined {
+function resolveCommand(provider: string, name: string): NativeCommandDefinition | undefined {
   const defs = REGISTRY[provider];
   if (!defs) return undefined;
-  return defs.find(
-    (d) => d.command === name || (d.aliases?.includes(name) ?? false),
-  );
+  return defs.find((d) => d.command === name || (d.aliases?.includes(name) ?? false));
 }
 
 /**
@@ -892,9 +886,7 @@ function resolveCommand(
  * recognized and executed (even if it only emitted a note), false if the
  * provider has no such command (so the caller can fall through to the model).
  */
-export async function executeNativeSlashCommand(
-  ctx: NativeCommandExecContext,
-): Promise<boolean> {
+export async function executeNativeSlashCommand(ctx: NativeCommandExecContext): Promise<boolean> {
   const def = resolveCommand(ctx.provider, ctx.command);
   if (!def) return false;
   await def.execute(ctx);
@@ -902,9 +894,7 @@ export async function executeNativeSlashCommand(
 }
 
 /** Parse a raw `/command args...` line into a command name + args. */
-export function parseNativeCommandLine(
-  raw: string,
-): { command: string; args: string[] } | null {
+export function parseNativeCommandLine(raw: string): { command: string; args: string[] } | null {
   const trimmed = raw.trim();
   if (!trimmed.startsWith('/')) return null;
   const parts = trimmed.slice(1).split(/\s+/).filter(Boolean);

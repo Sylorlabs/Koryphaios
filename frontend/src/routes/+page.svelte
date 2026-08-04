@@ -8,7 +8,6 @@
   import { isDemoMode, isFullDemo, isGuidedDemo } from '$lib/demo.svelte';
   import { appStore } from '$lib/stores/app.svelte';
   import { toastStore } from '$lib/stores/toast.svelte';
-  import { modeStore } from '$lib/stores/mode.svelte';
   import { apiFetch } from '$lib/api.svelte';
   import { apiUrl } from '$lib/utils/api-url';
   import ManagerFeed from '$lib/components/ManagerFeed.svelte';
@@ -69,11 +68,9 @@
   let showAgents = $state(false);
   let agentsDismissed = $state(false);
   let showSidebar = $state(true);
-  let showGit = $state(false);
   let showNotes = $state(false);
   let showSidebarBeforeZen = $state(true);
   let showAgentsBeforeZen = $state(false);
-  let showGitBeforeZen = $state(false);
   let showCommandPalette = $state(false);
   let showThemeQuickMenu = $state(false);
   let showTimeTravel = $state(false);
@@ -230,8 +227,6 @@
       description: 'Inspect and restore recorded states from this session.',
     },
     { command: 'yolo', label: 'Toggle YOLO', description: 'Toggle YOLO mode on or off.' },
-    { command: 'beginner', label: 'Beginner Mode', description: 'Switch to beginner UI mode.' },
-    { command: 'advanced', label: 'Advanced Mode', description: 'Switch to advanced UI mode.' },
     { command: 'clear', label: 'Clear Feed', description: 'Clear the current visible feed.' },
     { command: 'settings', label: 'Open Settings', description: 'Open the settings drawer.' },
     { command: 'theme', label: 'Theme Picker', description: 'Open theme selection.' },
@@ -333,7 +328,6 @@
     if (!isDemoMode) {
       appStore.initialize(authStore, sessionStore).then(() => {
         if (authStore.isAuthenticated) {
-          modeStore.fetchMode();
           wsStore.connect();
         }
         if (projectStore.currentPath) {
@@ -343,9 +337,8 @@
       void notesStore.fetchSettings();
     } else {
       // The browser trial intentionally has no desktop app bootstrap or
-      // websocket. It still loads the advanced-mode controls and virtual
-      // workspace mentions so Git review and Goal Mode are discoverable.
-      void modeStore.fetchMode();
+      // websocket. It still loads virtual workspace mentions so Goal Mode is
+      // discoverable.
       void refreshComposerFileMentions();
       void notesStore.fetchSettings();
     }
@@ -616,7 +609,7 @@
 
     if (root === 'help') {
       toastStore.info(
-        'Commands: /new, /resume, /compact, /rewind, /agents, /workflow, /goal, /yolo, /beginner, /advanced, /clear, /settings, /theme, /sidebar, /zen',
+        'Commands: /new, /resume, /compact, /rewind, /agents, /workflow, /goal, /yolo, /clear, /settings, /theme, /sidebar, /zen',
       );
       return true;
     }
@@ -649,16 +642,6 @@
       } else {
         setYoloMode(!wsStore.isYoloMode);
       }
-      return true;
-    }
-
-    if (root === 'beginner') {
-      await modeStore.setMode('beginner');
-      return true;
-    }
-
-    if (root === 'advanced') {
-      await modeStore.setMode('advanced');
       return true;
     }
 
@@ -749,7 +732,6 @@
       const maybe = parsed as Record<string, unknown>;
       if (typeof maybe.showSidebar === 'boolean') showSidebar = maybe.showSidebar;
       if (typeof maybe.showAgents === 'boolean') showAgents = maybe.showAgents;
-      if (typeof maybe.showGit === 'boolean') showGit = maybe.showGit;
     } catch {
       // Ignore malformed local prefs and fall back to defaults.
     }
@@ -762,7 +744,6 @@
       JSON.stringify({
         showSidebar,
         showAgents,
-        showGit,
       }),
     );
   });
@@ -1105,12 +1086,6 @@
       case 'resume_chat':
         resumePreviousChat();
         break;
-      case 'mode_beginner':
-        await modeStore.setMode('beginner');
-        break;
-      case 'mode_advanced':
-        await modeStore.setMode('advanced');
-        break;
       case 'focus_input':
         inputRef?.focus();
         break;
@@ -1120,9 +1095,6 @@
         break;
       case 'toggle_agents':
         toggleAgentRail();
-        break;
-      case 'toggle_git':
-        showGit = !showGit;
         break;
       case 'toggle_notes':
         if (notesStore.settings.enabled) showNotes = !showNotes;
@@ -1146,16 +1118,13 @@
         if (!zenMode) {
           showSidebarBeforeZen = showSidebar;
           showAgentsBeforeZen = showAgents;
-          showGitBeforeZen = showGit;
           showSidebar = false;
           showAgents = false;
-          showGit = false;
           zenMode = true;
         } else {
           zenMode = false;
           showSidebar = showSidebarBeforeZen;
           showAgents = showAgentsBeforeZen;
-          showGit = showGitBeforeZen;
         }
         break;
       case 'open_settings':
@@ -1382,7 +1351,6 @@
 <AppShell
   {showSidebar}
   {zenMode}
-  showGit={showGit && !collaborationStore.activeJoinedSession}
   showNotes={notesStore.settings.enabled && showNotes && !collaborationStore.activeJoinedSession}
   activeSessionId={sessionStore.activeSessionId}
   {connectionDot}
@@ -1396,7 +1364,6 @@
   {#snippet menubar()}
     <MenuBar
       {showSidebar}
-      {showGit}
       {showAgents}
       {showNotes}
       notesEnabled={notesStore.settings.enabled}

@@ -474,10 +474,6 @@ function playTurn(prompt: string, opts: { loop: boolean; clear: boolean }) {
       wsStore.setDemoSessionChanges(sid, changes);
       const updatedSession = getDemoSession(sid);
       if (updatedSession) sessionStore.handleSessionUpdate(updatedSession);
-      // Keep an already-open Source Control panel truthful as the simulated
-      // manager creates files; it should never say “working tree clean” while
-      // the review tray is offering those same changes.
-      void import('$lib/stores/git.svelte').then(({ gitStore }) => gitStore.refreshStatus());
     }
     feedStore.addFeedEntry({
       timestamp: Date.now(),
@@ -565,12 +561,6 @@ function playTurn(prompt: string, opts: { loop: boolean; clear: boolean }) {
 export function seedDemo(): void {
   authStore.setUser({ id: 'demo', email: 'demo@koryphaios.com', name: 'Demo' } as never);
   providersStore.setProviderStatusList(DEMO_PROVIDERS as never);
-  // The trial deliberately opens the desktop app's advanced controls. A
-  // visitor needs Source Control, agent detail, and review surfaces to judge
-  // Koryphaios; hiding them behind the beginner-mode default defeats the trial.
-  if (isFullDemo) {
-    void import('$lib/stores/mode.svelte').then(({ modeStore }) => modeStore.setMode('advanced'));
-  }
   projectStore.setProject(isFullDemo ? '/demo/starter-project' : '/demo/analytics-dashboard');
   // Guided mode is a repeatable story. Full mode is a genuinely fresh
   // tab-scoped instance: one empty chat, no canned history, no inherited cost.

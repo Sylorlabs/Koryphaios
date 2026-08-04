@@ -11,6 +11,7 @@ import {
   mergeFeedTimeline,
   omitArchivedToolDuplicates,
   operationalEntriesForReload,
+  withoutAnalyzingThoughts,
 } from '$lib/utils/feed-timeline';
 
 export type { FeedEntry, FeedEntryType };
@@ -282,12 +283,16 @@ function addUserMessage(
   rebuildGroupedFeedCache();
 }
 
-/** Efficiently remove the ephemeral analyzing thought. */
+/** Remove every ephemeral analyzing thought.
+ *
+ * A session-history refresh can replace the tracked row while a cancellation
+ * is in flight. Filtering by phase as well as the remembered ID makes Stop
+ * authoritative even across that race.
+ */
 function removeAnalyzingThoughtEntries() {
-  if (!analyzingThoughtId) return;
-  const idx = feed.findIndex((e) => e.id === analyzingThoughtId);
-  if (idx !== -1) {
-    feed.splice(idx, 1);
+  const next = withoutAnalyzingThoughts(feed, analyzingThoughtId);
+  if (next.length !== feed.length) {
+    feed = next;
     feedVersion++;
     rebuildGroupedFeedCache();
   }
