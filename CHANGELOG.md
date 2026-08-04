@@ -7,9 +7,11 @@ All notable Koryphaios changes are recorded here. Release automation prepends a 
 ## [0.1.0] - 2026-08-04
 
 ### ✨ Features
+
 - native CLI slash-command bridge + Devin capability probing
 
 ### 🐛 Bug Fixes
+
 - validate workspace paths on Windows
 - cross-platform test failures round 2
 - cross-platform test failures on Windows and macOS
@@ -30,6 +32,7 @@ All notable Koryphaios changes are recorded here. Release automation prepends a 
 - unknown slash commands fall through to model + notes sync dedup
 
 ### 🚀 Improvements
+
 - ci: restore MCP dependencies and Windows test runner
 - test: isolate browser release checks
 - ci: publish exact signed updater releases
@@ -41,4 +44,3 @@ All notable Koryphaios changes are recorded here. Release automation prepends a 
 - Match composer model to selected agent
 - Adapt Poe icon to app theme
 - Add Poe API key provider setup
-
