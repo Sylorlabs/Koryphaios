@@ -13,8 +13,10 @@ describe('agent resource budget snapshot', () => {
           {
             provider: 'codex',
             available: true,
+            attribution: 'account',
             planType: 'plus',
             windows: [],
+            dailyUsage: [],
             quotas: [{ label: 'five hour', usedPercent: 91, resetsAt: 500, windowMinutes: 300 }],
             byModel: [],
             updatedAt: 200,

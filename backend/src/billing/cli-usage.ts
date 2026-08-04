@@ -4,19 +4,17 @@
 //   • token usage over hourly / daily / weekly / monthly windows
 //   • the provider's OWN quota state (% burned + reset time) where the CLI
 //     records it locally (Codex writes rate_limits into every session log)
-//   • "inference value": what those tokens would have cost at API prices
-//     (resolved via the pricing hub — never invented).
 //
 // Sources verified on-disk:
 //   claude  ~/.claude/projects/**/*.jsonl        message.usage + message.model
 //   codex   ~/.codex/sessions/**/*.jsonl         token_count events + rate_limits
 
-import { readdirSync, statSync, readFileSync, existsSync } from 'node:fs';
+import { readdirSync, statSync, readFileSync, existsSync, realpathSync } from 'node:fs';
 import { readdir, stat, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
-import { computeCostUsd } from '../pricing';
 import { discoverCliAccounts, type DiscoveredCliAccount } from '../providers/cli-accounts';
+import { CodexAppServer } from '../providers/codex-app-server';
 
 export interface UsageWindow {
   /** 'hour' | 'day' | 'week' | 'month' */
@@ -24,8 +22,6 @@ export interface UsageWindow {
   tokensIn: number;
   tokensOut: number;
   cacheRead: number;
-  /** Equivalent API cost of these tokens, USD; null if no model was priceable. */
-  inferenceValueUsd: number | null;
 }
 
 export interface QuotaWindow {
@@ -41,10 +37,19 @@ export interface CliUsageReport {
   accountLabel?: string;
   accountEmail?: string;
   available: boolean;
+  /** Whether the local session files can be attributed to this exact profile. */
+  attribution: 'account' | 'unavailable';
+  attributionNote?: string;
   planType?: string;
+  /** Current account-wide credit balance when the official Codex CLI reports one. */
+  creditBalance?: string | null;
+  /** Provenance for the activity time series. */
+  usageSource?: 'local-session-history' | 'codex-app-server';
   windows: UsageWindow[];
+  /** Calendar-day token totals from the same local CLI session records. */
+  dailyUsage: Array<{ date: string; tokens: number }>;
   quotas: QuotaWindow[];
-  byModel: Array<{ model: string; tokensIn: number; tokensOut: number; inferenceValueUsd: number | null }>;
+  byModel: Array<{ model: string; tokensIn: number; tokensOut: number }>;
   updatedAt: number;
 }
 
@@ -55,6 +60,7 @@ const WINDOWS_MS: Array<[string, number]> = [
   ['month', 30 * 24 * 60 * 60 * 1000],
 ];
 const SCAN_HORIZON_MS = 31 * 24 * 60 * 60 * 1000;
+const DAY_MS = 24 * 60 * 60 * 1000;
 
 interface UsageSample {
   ts: number;
@@ -76,6 +82,7 @@ function hasReportedUsage(samples: UsageSample[]): boolean {
 }
 
 let cached: { at: number; reports: CliUsageReport[] } | null = null;
+let inFlight: Promise<CliUsageReport[]> | null = null;
 const CACHE_TTL_MS = 60_000;
 
 async function* walkJsonlAsync(root: string, newerThan: number): AsyncGenerator<string> {
@@ -123,23 +130,43 @@ function windowsFromSamples(samples: UsageSample[], now: number): UsageWindow[] 
     let tokensIn = 0,
       tokensOut = 0,
       cacheRead = 0;
-    const perModel = new Map<string, { in: number; out: number }>();
     for (const s of samples) {
       if (now - s.ts > ms || !isReportedModel(s.model)) continue;
       tokensIn += s.tokensIn;
       tokensOut += s.tokensOut;
       cacheRead += s.cacheRead;
-      const m = perModel.get(s.model) ?? { in: 0, out: 0 };
-      m.in += s.tokensIn;
-      m.out += s.tokensOut;
-      perModel.set(s.model, m);
     }
-    let value: number | null = null;
-    for (const [model, t] of perModel) {
-      const c = computeCostUsd(currentCliProvider, model, t.in, t.out);
-      if (c) value = (value ?? 0) + c.costUsd;
-    }
-    return { period, tokensIn, tokensOut, cacheRead, inferenceValueUsd: value };
+    return { period, tokensIn, tokensOut, cacheRead };
+  });
+}
+
+function dailyUsageFromSamples(samples: UsageSample[], now: number, days = 30): CliUsageReport['dailyUsage'] {
+  const end = new Date(now);
+  const endDay = Date.UTC(end.getUTCFullYear(), end.getUTCMonth(), end.getUTCDate());
+  const startDay = endDay - (days - 1) * DAY_MS;
+  const totals = new Map<string, number>();
+  for (const sample of samples) {
+    if (!isReportedModel(sample.model) || sample.ts < startDay || sample.ts >= endDay + DAY_MS) continue;
+    const date = new Date(sample.ts).toISOString().slice(0, 10);
+    totals.set(date, (totals.get(date) ?? 0) + sample.tokensIn + sample.tokensOut);
+  }
+  return Array.from({ length: days }, (_, index) => {
+    const date = new Date(startDay + index * DAY_MS).toISOString().slice(0, 10);
+    return { date, tokens: totals.get(date) ?? 0 };
+  });
+}
+
+function windowsFromDailyUsage(
+  dailyUsage: Array<{ date: string; tokens: number }>,
+  now: number,
+): UsageWindow[] {
+  const today = new Date(now).toISOString().slice(0, 10);
+  return WINDOWS_MS.map(([period, ms]) => {
+    const cutoff = new Date(now - ms).toISOString().slice(0, 10);
+    const tokens = dailyUsage
+      .filter((entry) => entry.date >= cutoff && entry.date <= today)
+      .reduce((sum, entry) => sum + entry.tokens, 0);
+    return { period, tokensIn: tokens, tokensOut: 0, cacheRead: 0 };
   });
 }
 
@@ -157,15 +184,9 @@ function byModelFromSamples(samples: UsageSample[], now: number): CliUsageReport
       model,
       tokensIn: t.in,
       tokensOut: t.out,
-      inferenceValueUsd: computeCostUsd(currentCliProvider, model, t.in, t.out)?.costUsd ?? null,
     }))
     .sort((a, b) => b.tokensIn + b.tokensOut - (a.tokensIn + a.tokensOut));
 }
-
-// Set around each reader so pricing resolves against the right provider's
-// equivalence rules without threading it through every helper.
-let currentCliProvider = 'claude';
-
 
 // ── Per-file sample cache ─────────────────────────────────────────────────────
 // The claude tree alone is hundreds of MB of JSONL; parse each file once per
@@ -237,7 +258,6 @@ function parseClaudeLine(line: string, now: number): UsageSample | null {
 // ── Claude Code ───────────────────────────────────────────────────────────────
 
 async function readClaude(now: number): Promise<CliUsageReport> {
-  currentCliProvider = 'claude';
   // Scan BOTH the user's ~/.claude AND Koryphaios's isolated claude-home so
   // the billing view reflects TOTAL subscription burn (theirs + ours).
   const roots = [
@@ -262,7 +282,9 @@ async function readClaude(now: number): Promise<CliUsageReport> {
   return {
     provider: 'claude',
     available: hasReportedUsage(samples),
+    attribution: 'account',
     windows: windowsFromSamples(samples, now),
+    dailyUsage: dailyUsageFromSamples(samples, now),
     quotas: [],
     byModel: byModelFromSamples(samples, now),
     updatedAt: now,
@@ -271,8 +293,58 @@ async function readClaude(now: number): Promise<CliUsageReport> {
 
 // ── Codex ─────────────────────────────────────────────────────────────────────
 
-async function readCodex(now: number, account?: DiscoveredCliAccount): Promise<CliUsageReport> {
-  currentCliProvider = 'codex';
+function codexSessionRoot(profileDir: string): string {
+  const root = join(profileDir, 'sessions');
+  try {
+    return realpathSync(root);
+  } catch {
+    return root;
+  }
+}
+
+export function codexSessionAttribution(
+  accounts: Array<Pick<DiscoveredCliAccount, 'id' | 'label' | 'profileDir'>>,
+  resolveRoot: (profileDir: string) => string = codexSessionRoot,
+): Map<string, string | undefined> {
+  const owners = new Map<string, Pick<DiscoveredCliAccount, 'id' | 'label' | 'profileDir'>>();
+  const notes = new Map<string, string | undefined>();
+  for (const account of accounts) {
+    const root = resolveRoot(account.profileDir);
+    const owner = owners.get(root);
+    if (owner) {
+      notes.set(account.id, `Shares local session history with ${owner.label}`);
+    } else {
+      owners.set(root, account);
+      notes.set(account.id, undefined);
+    }
+  }
+  return notes;
+}
+
+function normalizedPlan(plan?: string | null): string | null {
+  const value = plan?.trim().toLowerCase();
+  return value || null;
+}
+
+export function codexAttributionNote(
+  sharedHistoryNote: string | undefined,
+  profilePlan: string | null | undefined,
+  sessionPlan: string | undefined,
+): string | undefined {
+  if (sharedHistoryNote) return sharedHistoryNote;
+  const expected = normalizedPlan(profilePlan);
+  const observed = normalizedPlan(sessionPlan);
+  if (expected && observed && expected !== observed) {
+    return `Session history reports a ${observed.toUpperCase()} plan, but this profile is ${expected.toUpperCase()}`;
+  }
+  return undefined;
+}
+
+async function readCodex(
+  now: number,
+  account?: DiscoveredCliAccount,
+  attributionNote?: string,
+): Promise<CliUsageReport> {
   const root = join(account?.profileDir ?? join(homedir(), '.codex'), 'sessions');
   const samples: UsageSample[] = [];
   let latestLimits: {
@@ -282,7 +354,7 @@ async function readCodex(now: number, account?: DiscoveredCliAccount): Promise<C
     secondary?: { used_percent?: number; window_minutes?: number; resets_at?: number };
   } | null = null;
 
-  if (existsSync(root)) {
+  if (!attributionNote && existsSync(root)) {
     for await (const file of walkJsonlAsync(root, now - SCAN_HORIZON_MS)) {
       let text: string;
       try {
@@ -361,6 +433,49 @@ async function readCodex(now: number, account?: DiscoveredCliAccount): Promise<C
   describe(latestLimits?.primary);
   describe(latestLimits?.secondary);
 
+  // The official app-server has read-only account/usage/read and
+  // account/rateLimits/read methods. These are account-scoped by CODEX_HOME,
+  // unlike local session files, so they remain correct even when two profiles
+  // intentionally share a sessions directory.
+  let liveUsage: Awaited<ReturnType<CodexAppServer['usage']>> | null = null;
+  let liveLimits: Awaited<ReturnType<CodexAppServer['rateLimits']>> | null = null;
+  if (account) {
+    const appServer = new CodexAppServer(account.profileDir);
+    try {
+      const [usageResult, limitsResult] = await Promise.allSettled([
+        appServer.usage(),
+        appServer.rateLimits(),
+      ]);
+      if (usageResult.status === 'fulfilled') liveUsage = usageResult.value;
+      if (limitsResult.status === 'fulfilled') liveLimits = limitsResult.value;
+    } catch {
+      // The installed CLI may predate these read-only methods or be offline.
+      // Preserve the verified session-log fallback rather than inventing data.
+    } finally {
+      appServer.close();
+    }
+  }
+
+  const liveSnapshot = liveLimits?.rateLimits ?? null;
+  const resolvedAttributionNote = codexAttributionNote(attributionNote, account?.plan, liveSnapshot?.planType ?? latestLimits?.plan);
+  const attributedSamples = resolvedAttributionNote ? [] : samples;
+  const liveQuotas: QuotaWindow[] = [];
+  const appendLiveQuota = (label: string, window?: { usedPercent?: number; windowMinutes?: number; resetsAt?: number } | null) => {
+    if (!window || typeof window.usedPercent !== 'number') return;
+    liveQuotas.push({
+      label,
+      usedPercent: window.usedPercent,
+      windowMinutes: window.windowMinutes ?? null,
+      resetsAt: window.resetsAt != null ? window.resetsAt * 1000 : null,
+    });
+  };
+  appendLiveQuota('primary', liveSnapshot?.primary);
+  appendLiveQuota('secondary', liveSnapshot?.secondary);
+  const attributedQuotas = liveQuotas.length > 0 ? liveQuotas : (resolvedAttributionNote ? [] : quotas);
+  const liveDaily = (liveUsage?.dailyUsageBuckets ?? [])
+    .filter((bucket) => typeof bucket.startDate === 'string' && typeof bucket.tokens === 'number')
+    .map((bucket) => ({ date: bucket.startDate!.slice(0, 10), tokens: bucket.tokens! }));
+  const activityIsLive = liveDaily.length > 0;
   return {
     provider: 'codex',
     ...(account ? {
@@ -368,11 +483,16 @@ async function readCodex(now: number, account?: DiscoveredCliAccount): Promise<C
       accountLabel: account.label,
       ...(account.email ? { accountEmail: account.email } : {}),
     } : {}),
-    available: hasReportedUsage(samples),
-    planType: latestLimits?.plan,
-    windows: windowsFromSamples(samples, now),
-    quotas,
-    byModel: byModelFromSamples(samples, now),
+    available: activityIsLive || hasReportedUsage(attributedSamples),
+    attribution: (resolvedAttributionNote && !activityIsLive) ? 'unavailable' : 'account',
+    ...((resolvedAttributionNote && !activityIsLive) ? { attributionNote: resolvedAttributionNote } : {}),
+    planType: liveSnapshot?.planType ?? account?.plan ?? latestLimits?.plan,
+    creditBalance: liveSnapshot?.credits?.balance ?? null,
+    usageSource: activityIsLive ? 'codex-app-server' : 'local-session-history',
+    windows: activityIsLive ? windowsFromDailyUsage(liveDaily, now) : windowsFromSamples(attributedSamples, now),
+    dailyUsage: activityIsLive ? liveDaily : dailyUsageFromSamples(attributedSamples, now),
+    quotas: attributedQuotas,
+    byModel: byModelFromSamples(attributedSamples, now),
     updatedAt: now,
   };
 }
@@ -383,7 +503,6 @@ async function readCodex(now: number, account?: DiscoveredCliAccount): Promise<C
 // data.modelMetrics[model].usage token totals for the whole session.
 
 function readCopilot(now: number): CliUsageReport {
-  currentCliProvider = 'copilot';
   const root = join(homedir(), '.copilot', 'session-state');
   const samples: UsageSample[] = [];
   if (existsSync(root)) {
@@ -432,7 +551,9 @@ function readCopilot(now: number): CliUsageReport {
   return {
     provider: 'copilot',
     available: hasReportedUsage(samples),
+    attribution: 'account',
     windows: windowsFromSamples(samples, now),
+    dailyUsage: dailyUsageFromSamples(samples, now),
     quotas: [],
     byModel: byModelFromSamples(samples, now),
     updatedAt: now,
@@ -444,7 +565,6 @@ function readCopilot(now: number): CliUsageReport {
 // totals + models used. Coarser than per-turn logs but real.
 
 function readGrok(now: number): CliUsageReport {
-  currentCliProvider = 'grok';
   const root = join(homedir(), '.grok', 'sessions');
   const samples: UsageSample[] = [];
   if (existsSync(root)) {
@@ -488,7 +608,9 @@ function readGrok(now: number): CliUsageReport {
   return {
     provider: 'grok',
     available: hasReportedUsage(samples),
+    attribution: 'account',
     windows: windowsFromSamples(samples, now),
+    dailyUsage: dailyUsageFromSamples(samples, now),
     quotas: [],
     byModel: byModelFromSamples(samples, now),
     updatedAt: now,
@@ -583,7 +705,7 @@ async function fetchCopilotQuota(ghToken: string | undefined): Promise<void> {
 
 // ── Public API ────────────────────────────────────────────────────────────────
 
-export async function getCliUsageReports(opts?: {
+async function collectCliUsageReports(opts?: {
   githubToken?: string;
   forceRefresh?: boolean;
 }): Promise<CliUsageReport[]> {
@@ -595,20 +717,26 @@ export async function getCliUsageReports(opts?: {
 
   const reports: CliUsageReport[] = [];
   const codexAccounts = discoverCliAccounts().filter((account) => account.provider === 'codex');
+  const codexAttribution = codexSessionAttribution(codexAccounts);
+  const codexReaders = (codexAccounts.length > 0 ? codexAccounts : [undefined]).map((account) => {
+    if (!account) return (at: number) => readCodex(at);
+    // A symlinked/shared sessions directory cannot tell us which subscription
+    // performed a turn. Never copy the owner's usage or quota onto another
+    // login just because the auth homes are separate.
+    return (at: number) => readCodex(at, account, codexAttribution.get(account.id));
+  });
   const readers: Array<(now: number) => CliUsageReport | Promise<CliUsageReport>> = [
     readClaude,
-    ...(codexAccounts.length > 0
-      ? codexAccounts.map((account) => (at: number) => readCodex(at, account))
-      : [readCodex]),
+    ...codexReaders,
     readCopilot,
     readGrok,
   ];
-  for (const reader of readers) {
-    try {
-      const r = await reader(now);
-      if (r.available) reports.push(r);
-    } catch {
-      /* a broken store must not kill billing */
+  const results = await Promise.allSettled(readers.map((reader) => reader(now)));
+  for (const result of results) {
+    if (result.status === 'fulfilled' && (
+      result.value.available || result.value.quotas.length > 0 || result.value.attribution === 'unavailable'
+    )) {
+      reports.push(result.value);
     }
   }
   await quotaJobs;
@@ -621,4 +749,24 @@ export async function getCliUsageReports(opts?: {
   }
   cached = { at: now, reports };
   return reports;
+}
+
+/**
+ * Billing polls while an expensive first local-history scan is still running.
+ * Coalesce those requests so opening the drawer never starts several scans of
+ * the same CLI histories at once.
+ */
+export function getCliUsageReports(opts?: {
+  githubToken?: string;
+  forceRefresh?: boolean;
+}): Promise<CliUsageReport[]> {
+  if (!opts?.forceRefresh && cached && Date.now() - cached.at < CACHE_TTL_MS) {
+    return Promise.resolve(cached.reports);
+  }
+  if (!inFlight) {
+    inFlight = collectCliUsageReports(opts).finally(() => {
+      inFlight = null;
+    });
+  }
+  return inFlight;
 }

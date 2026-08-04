@@ -32,7 +32,7 @@ import {
   statSync,
 } from 'fs';
 import { readdir, readFile, stat } from 'fs/promises';
-import { basename, dirname, extname, join, relative, resolve, sep, isAbsolute } from 'path';
+import { basename, dirname, extname, join, relative, resolve, sep } from 'path';
 import { PROJECT_ROOT } from '../runtime/paths';
 
 // ============================================================================
@@ -51,6 +51,15 @@ const IGNORED_DOCUMENT_DIRS = new Set([
   '.svelte-kit',
   '.next',
   'coverage',
+  // Koryphaios internal directories — contain thousands of plugin/skill .md
+  // files that are not user notes and must not be synced into the notes graph.
+  // Syncing them caused the backend to crash (Bun VM trap from 3000+ synchronous
+  // SQLite writes blocking the event loop).
+  '.koryphaios',
+  '.claude',
+  '.devin',
+  '.trees',
+  '.agents',
 ]);
 
 function projectDocumentId(projectRoot: string, sourcePath: string): string {
@@ -68,7 +77,7 @@ function projectDocumentIdentity(
     const [projectRoot, path] = JSON.parse(
       Buffer.from(id.slice(PROJECT_DOCUMENT_PREFIX.length), 'base64url').toString('utf8'),
     ) as [string, string];
-    if (!path || isAbsolute(path) || path.split(/[\\/]/).includes('..')) return undefined;
+    if (!path || path.startsWith('/') || path.split(/[\\/]/).includes('..')) return undefined;
     if (!projectRoot) return undefined;
     return { projectRoot: resolve(projectRoot), sourcePath: path };
   } catch {
@@ -281,6 +290,48 @@ function rowToNote(row: typeof notes.$inferSelect): Note {
   };
 }
 
+function rowToNoteMeta(row: {
+  id: string;
+  title: string;
+  folderPath: string;
+  tags: string;
+  pinned: number;
+  includeInContext: number;
+  format: string | null;
+  userId: string | null;
+  createdAt: Date | number;
+  updatedAt: Date | number;
+}): Note {
+  const sourcePath = projectDocumentIdentity(row.id)?.sourcePath;
+  const extension = sourcePath ? extname(sourcePath).toLowerCase() : '';
+  return {
+    id: row.id,
+    title: row.title,
+    content: '',
+    folderPath: row.folderPath,
+    tags: (() => {
+      try {
+        return JSON.parse(row.tags || '[]');
+      } catch {
+        return [];
+      }
+    })(),
+    pinned: Boolean(row.pinned),
+    includeInContext: Boolean(row.includeInContext),
+    userId: row.userId ?? undefined,
+    createdAt:
+      row.createdAt instanceof Date ? row.createdAt : new Date((row.createdAt as number) * 1000),
+    updatedAt:
+      row.updatedAt instanceof Date ? row.updatedAt : new Date((row.updatedAt as number) * 1000),
+    sourcePath,
+    format: sourcePath
+      ? extension === '.html' || extension === '.htm'
+        ? 'html'
+        : 'markdown'
+      : ((row.format as 'markdown' | 'html' | undefined) ?? 'markdown'),
+  };
+}
+
 // ============================================================================
 // CRUD — Notes
 // ============================================================================
@@ -396,23 +447,28 @@ export async function syncProjectDocuments(
   const root = resolve(projectRoot);
   const files: string[] = [];
 
+  // Safety limit: cap the number of files we'll scan/insert to prevent
+  // runaway syncs from crashing the backend (Bun VM trap from too many
+  // synchronous SQLite writes). 1000 is generous for real project docs
+  // while excluding the thousands of plugin/skill files in internal dirs.
+  const MAX_FILES = 1000;
+
   // Use async readdir so the event loop stays responsive during the
   // recursive directory walk. The synchronous readdirSync would block
   // for 10+ seconds on large projects, making the backend unresponsive
   // to health checks and other API calls.
   async function walk(directory: string): Promise<void> {
+    if (files.length >= MAX_FILES) return;
     let entries;
     try {
       entries = await readdir(directory, { withFileTypes: true });
     } catch (err) {
-      console.error(
-        `[notesService] Failed to read directory during project sync: ${directory}`,
-        err,
-      );
+      console.error(`[notesService] Failed to read directory during project sync: ${directory}`, err);
       return;
     }
 
     for (const entry of entries) {
+      if (files.length >= MAX_FILES) return;
       if (entry.isSymbolicLink()) continue;
       if (entry.isDirectory()) {
         if (!IGNORED_DOCUMENT_DIRS.has(entry.name)) await walk(join(directory, entry.name));
@@ -427,7 +483,19 @@ export async function syncProjectDocuments(
   await walk(root);
   const foundIds = new Set<string>();
   const changed: Array<{ id: string; content: string; sourcePath: string; existed: boolean }> = [];
-  const existingProjectRows = (await db.select().from(notes)).filter(
+  // Limit the scan of existing rows to prevent loading the entire notes table.
+  // Project-document IDs are prefixed, so we filter on that prefix.
+  const existingProjectRows = (await db
+    .select({
+      id: notes.id,
+      content: notes.content,
+      title: notes.title,
+      folderPath: notes.folderPath,
+    })
+    .from(notes)
+    .where(like(notes.id, PROJECT_DOCUMENT_PREFIX + '%'))
+    .limit(5000)
+  ).filter(
     (row) => projectDocumentIdentity(row.id)?.projectRoot === root,
   );
   const existingById = new Map(existingProjectRows.map((row) => [row.id, row]));
@@ -524,10 +592,7 @@ export async function syncProjectDocuments(
     try {
       await db.insert(notes).values(batch).onConflictDoNothing();
     } catch (err) {
-      console.error(
-        '[notesService] Bulk note insert failed during project sync; retrying row-by-row',
-        err,
-      );
+      console.error('[notesService] Bulk note insert failed during project sync; retrying row-by-row', err);
       for (const row of batch) {
         try {
           await db.insert(notes).values(row).onConflictDoNothing();
@@ -620,7 +685,21 @@ export async function listNotes(
     return out.slice(start, filters.limit ? start + filters.limit : undefined).map(rowToNote);
   }
 
-  let q = db.select().from(notes).$dynamic();
+  let q = db
+    .select({
+      id: notes.id,
+      title: notes.title,
+      folderPath: notes.folderPath,
+      tags: notes.tags,
+      pinned: notes.pinned,
+      includeInContext: notes.includeInContext,
+      format: notes.format,
+      userId: notes.userId,
+      createdAt: notes.createdAt,
+      updatedAt: notes.updatedAt,
+    })
+    .from(notes)
+    .$dynamic();
   if (filters?.folderPath && filters.folderPath !== '/') {
     q = q.where(like(notes.folderPath, filters.folderPath + '%'));
   }
@@ -629,7 +708,7 @@ export async function listNotes(
   if (filters?.offset) q = q.offset(filters.offset);
 
   const rows = await q;
-  return rows.filter((row) => isProjectVisible(row.id)).map(rowToNote);
+  return rows.filter((row) => isProjectVisible(row.id)).map(rowToNoteMeta);
 }
 
 // ============================================================================
@@ -787,7 +866,7 @@ export async function getNotesCatalog(projectRoot?: string): Promise<NoteCatalog
   }
   const graph = await getGraphData(projectRoot);
   const linkCountById = new Map(graph.nodes.map((n) => [n.id, n.linkCount]));
-  const rows = await db.select().from(notes).orderBy(notes.updatedAt);
+  const rows = await db.select().from(notes).orderBy(notes.updatedAt).limit(5000);
   return rows
     .filter((row) => {
       const identity = projectDocumentIdentity(row.id);
@@ -820,17 +899,13 @@ export async function recallNotes(options: RecallNotesOptions): Promise<NoteWith
   const found = new Map<string, Note>();
 
   if (options.ids?.length) {
-    for (const id of options.ids) {
-      const note = await getNote(id);
-      if (note) found.set(note.id, note);
-    }
+    const rows = await db.select().from(notes).where(inArray(notes.id, options.ids));
+    for (const row of rows) found.set(row.id, rowToNote(row));
   }
 
   if (options.titles?.length) {
-    for (const title of options.titles) {
-      const note = await getNoteByTitle(title);
-      if (note) found.set(note.id, note);
-    }
+    const rows = await db.select().from(notes).where(inArray(notes.title, options.titles));
+    for (const row of rows) found.set(row.id, rowToNote(row));
   }
 
   if (options.query?.trim()) {
@@ -847,11 +922,52 @@ export async function recallNotes(options: RecallNotesOptions): Promise<NoteWith
     }
   }
 
+  const candidates = [...found.values()].slice(0, limit);
+  if (candidates.length === 0) return [];
+  const candidateIds = candidates.map((n) => n.id);
+
+  const [outLinks, inLinks, attRows] = await Promise.all([
+    db.select().from(noteLinks).where(inArray(noteLinks.fromNoteId, candidateIds)),
+    db.select().from(noteLinks).where(inArray(noteLinks.toNoteId, candidateIds)),
+    db.select().from(noteAttachments).where(inArray(noteAttachments.noteId, candidateIds)),
+  ]);
+
+  const outlinksById = new Map<string, string[]>();
+  for (const l of outLinks) {
+    const arr = outlinksById.get(l.fromNoteId);
+    if (arr) arr.push(l.toNoteId);
+    else outlinksById.set(l.fromNoteId, [l.toNoteId]);
+  }
+  const backlinksById = new Map<string, string[]>();
+  for (const l of inLinks) {
+    const arr = backlinksById.get(l.toNoteId);
+    if (arr) arr.push(l.fromNoteId);
+    else backlinksById.set(l.toNoteId, [l.fromNoteId]);
+  }
+  const attachmentsById = new Map<string, typeof attRows>();
+  for (const a of attRows) {
+    const arr = attachmentsById.get(a.noteId);
+    if (arr) arr.push(a);
+    else attachmentsById.set(a.noteId, [a]);
+  }
+
   const results: NoteWithLinks[] = [];
-  for (const note of found.values()) {
-    if (results.length >= limit) break;
-    const withLinks = await getNoteWithLinks(note.id);
-    if (withLinks) results.push(withLinks);
+  for (const note of candidates) {
+    results.push({
+      ...note,
+      outlinks: outlinksById.get(note.id) ?? [],
+      backlinks: backlinksById.get(note.id) ?? [],
+      attachments: (attachmentsById.get(note.id) ?? []).map((a) => ({
+        id: a.id,
+        noteId: a.noteId,
+        filename: a.filename,
+        mimeType: a.mimeType,
+        size: a.size,
+        storagePath: a.storagePath,
+        createdAt:
+          a.createdAt instanceof Date ? a.createdAt : new Date((a.createdAt as number) * 1000),
+      })),
+    });
   }
   return results;
 }
@@ -897,8 +1013,17 @@ export async function getGraphData(projectRoot?: string): Promise<GraphData> {
   const cached = graphCache.get(cacheKey);
   if (cached) return cached;
 
-  const allRows = await db.select().from(notes);
-  const allNotes = allRows.filter((row) => {
+  // Safety limit: loading unbounded notes into memory can crash the Bun VM
+  // (the notes table previously had 134K test seed notes). Cap at 5000 —
+  // more than enough for real usage, prevents OOM on pathological datasets.
+  const GRAPH_MAX_NODES = 5000;
+  const allRows = await db.select().from(notes).limit(GRAPH_MAX_NODES + 1);
+  if (allRows.length > GRAPH_MAX_NODES) {
+    console.warn(
+      `[notesService] Graph data truncated to ${GRAPH_MAX_NODES} nodes (table has more rows)`,
+    );
+  }
+  const allNotes = allRows.slice(0, GRAPH_MAX_NODES).filter((row) => {
     const identity = projectDocumentIdentity(row.id);
     return !identity || !projectRoot || identity.projectRoot === resolve(projectRoot);
   });
@@ -969,7 +1094,7 @@ export async function getGraphData(projectRoot?: string): Promise<GraphData> {
 // ============================================================================
 
 export async function getFolderTree(projectRoot?: string): Promise<FolderNode[]> {
-  const allNotes = (await db.select().from(notes))
+  const allNotes = (await db.select({ id: notes.id, folderPath: notes.folderPath }).from(notes).limit(5000))
     .filter((row) => {
       const identity = projectDocumentIdentity(row.id);
       return !identity || !projectRoot || identity.projectRoot === resolve(projectRoot);
@@ -1062,9 +1187,12 @@ export async function searchNotes(query: string, limit = 50): Promise<Note[]> {
 /** Lowercased title|alias → note id. Cached; invalidated on any note change. */
 async function getResolveIndex(): Promise<Map<string, string>> {
   if (resolveIndexCache) return resolveIndexCache;
+  // Limit to prevent OOM on pathological datasets (134K test seed notes
+  // previously crashed the Bun VM here). 5000 is generous for real usage.
   const rows = await db
     .select({ id: notes.id, title: notes.title, content: notes.content })
-    .from(notes);
+    .from(notes)
+    .limit(5000);
   const map = new Map<string, string>();
   for (const r of rows) {
     map.set(r.title.toLowerCase(), r.id);
@@ -1156,40 +1284,78 @@ export async function deleteAttachment(id: string): Promise<void> {
 // Memory Import
 // ============================================================================
 
+const MEMORY_IMPORT_TAG_PREFIX = 'koryphaios-memory-import:';
+
 /**
- * Import universal and project memory files as notes.
- * Creates a note for each non-empty memory file, or updates an existing one
- * with the same title so repeated calls are idempotent.
+ * Import universal memory plus every Markdown document in the active project's
+ * memory folder. Imported notes carry an internal source tag, so re-importing
+ * updates only the note created for that source — never an unrelated note with
+ * a coincidentally matching title.
  */
 export async function importMemoryAsNotes(projectRoot: string): Promise<Note[]> {
-  const { readUniversalMemory, readProjectMemory } = await import('../memory/unified-memory');
-
+  const { listProjectMemoryDocuments, readUniversalMemory } = await import('../memory/unified-memory');
+  const projectDocuments = listProjectMemoryDocuments(projectRoot)
+    .filter((document) => document.kind === 'memory')
+    .map((document) => ({
+      title: document.name === 'project.md' ? 'Project Memory' : `Memory: ${basename(document.name, '.md')}`,
+      content: readFileSync(document.path, 'utf8'),
+      folderPath: '/Memory/Project',
+      importKey: `project:${resolve(document.path)}`,
+    }));
   const candidates = [
-    { title: 'Universal Memory', content: readUniversalMemory().content },
-    { title: 'Project Memory', content: readProjectMemory(projectRoot).content },
+    {
+      title: 'Universal Memory',
+      content: readUniversalMemory().content,
+      folderPath: '/Memory/Universal',
+      importKey: 'universal',
+    },
+    ...projectDocuments,
   ];
 
-  const created: Note[] = [];
+  const imported: Note[] = [];
 
-  for (const { title, content } of candidates) {
+  for (const { title, content, folderPath, importKey } of candidates) {
     if (!content.trim()) continue;
 
-    const existing = await getNoteByTitle(title);
-    if (existing) {
-      const updated = await updateNote(existing.id, { content });
-      created.push(updated);
+    const importTag = MEMORY_IMPORT_TAG_PREFIX + importKey;
+    // The Notes database can be very large. Narrow by the stable title/folder
+    // pair first instead of wildcard-scanning every tags payload, then confirm
+    // the exact source identity from the internal import tag.
+    const matchingRows = await db
+      .select()
+      .from(notes)
+      .where(and(eq(notes.title, title), eq(notes.folderPath, folderPath)))
+      .limit(100);
+    const existingRow = matchingRows.find((row) => {
+      try {
+        return JSON.parse(row.tags || '[]').includes(importTag);
+      } catch {
+        return false;
+      }
+    });
+
+    if (existingRow) {
+      const existing = rowToNote(existingRow);
+      // Avoid touching timestamps, graph caches, or the database when nothing
+      // changed. This also makes repeated button presses genuinely idempotent.
+      if (existing.content === content && existing.title === title && existing.folderPath === folderPath) {
+        imported.push(existing);
+      } else {
+        imported.push(await updateNote(existing.id, { title, content, folderPath }));
+      }
     } else {
       const note = await createNote({
         title,
         content,
-        folderPath: '/Memory',
+        folderPath,
         includeInContext: true,
+        tags: ['memory-import', importTag],
       });
-      created.push(note);
+      imported.push(note);
     }
   }
 
-  return created;
+  return imported;
 }
 
 // ============================================================================

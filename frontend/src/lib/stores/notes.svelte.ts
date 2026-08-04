@@ -48,10 +48,10 @@ const NOTES_SETTINGS_KEY = 'koryphaios-notes-settings';
 // State
 // ============================================================================
 
-let _notes = $state<Note[]>([]);
+let _notes = $state.raw<Note[]>([]);
 let _currentNote = $state<NoteWithLinks | null>(null);
-let _graphData = $state<GraphData>({ nodes: [], edges: [] });
-let _folderTree = $state<FolderNode[]>([]);
+let _graphData = $state.raw<GraphData>({ nodes: [], edges: [] });
+let _folderTree = $state.raw<FolderNode[]>([]);
 let _isLoading = $state(false);
 let _isSaving = $state(false);
 let _searchQuery = $state('');
@@ -60,6 +60,11 @@ let _settings = $state<NotesSettings>(loadSettingsFromStorage());
 let _agentPermissions = $state<NotesAgentPermissions>({ ...DEFAULT_NOTES_AGENT_PERMISSIONS });
 let _agentPermissionsLoaded = $state(false);
 let _agentPermissionsSaving = $state(false);
+let _isPanelOpen = $state(false);
+
+let allTags = $derived(
+  Array.from(new Set(_notes.flatMap((note) => note.tags ?? []))),
+);
 
 // ============================================================================
 // Helpers
@@ -275,6 +280,20 @@ async function fetchNotes(folder?: string, query?: string): Promise<void> {
   } finally {
     _isLoading = false;
   }
+}
+
+/** Load the note-panel data when the panel opens or its project changes.
+ *
+ * This deliberately lives behind an explicit store action. `$effect` is only
+ * valid while a Svelte component is initializing; registering one at this
+ * module's top level made the static, read-only demo crash before it mounted.
+ */
+async function refreshOpenPanel(): Promise<void> {
+  if (!_isPanelOpen || !projectStore.currentPath) return;
+  // The graph is derived from the current note list, so populate notes first.
+  // This also avoids racing a freshly selected project against its old graph.
+  await fetchNotes();
+  await Promise.all([fetchFolderTree(), fetchGraph()]);
 }
 
 /** Fetch a single note by ID (includes links and attachments) */
@@ -596,10 +615,49 @@ async function importMemoryAsNotes(): Promise<void> {
     if (res.ok) {
       const data = await res.json();
       if (data.ok) {
-        toastStore.success('Memory imported as notes');
-        await fetchNotes();
-        await fetchGraph();
-        await fetchFolderTree();
+        const imported = Array.isArray(data.data) ? (data.data as Note[]) : [];
+        const count = imported.length;
+
+        // The import response already contains the authoritative notes. Merge
+        // just those records into the visible state; refetching the entire
+        // notes table, graph, and folder tree can freeze large local vaults.
+        const importedIds = new Set(imported.map((note) => note.id));
+        _notes = [...imported, ..._notes.filter((note) => !importedIds.has(note.id))];
+
+        const graphNodes = new Map(_graphData.nodes.map((node) => [node.id, node]));
+        for (const note of imported) {
+          graphNodes.set(note.id, {
+            id: note.id,
+            title: note.title,
+            folderPath: note.folderPath,
+            tags: note.tags ?? [],
+            linkCount: graphNodes.get(note.id)?.linkCount ?? 0,
+            includeInContext: note.includeInContext,
+          });
+        }
+        _graphData = { ..._graphData, nodes: [...graphNodes.values()] };
+
+        const ensureFolderPath = (nodes: FolderNode[], folderPath: string): FolderNode[] => {
+          const segments = folderPath.split('/').filter(Boolean);
+          let currentPath = '';
+          let currentNodes = nodes;
+          for (const segment of segments) {
+            currentPath += `/${segment}`;
+            let node = currentNodes.find((candidate) => candidate.path === currentPath);
+            if (!node) {
+              node = { path: currentPath, name: segment, noteCount: 0, children: [] };
+              currentNodes.push(node);
+              currentNodes.sort((a, b) => a.name.localeCompare(b.name));
+            }
+            currentNodes = node.children;
+          }
+          return nodes;
+        };
+        const nextFolderTree = structuredClone(_folderTree);
+        for (const note of imported) ensureFolderPath(nextFolderTree, note.folderPath);
+        _folderTree = nextFolderTree;
+
+        toastStore.success(count === 1 ? 'Imported 1 memory note' : `Imported ${count} memory notes`);
       } else {
         toastStore.error(data.error ?? 'Failed to import memory');
       }
@@ -819,6 +877,9 @@ export const notesStore = {
   get isSaving() {
     return _isSaving;
   },
+  get isPanelOpen() {
+    return _isPanelOpen;
+  },
   get searchQuery() {
     return _searchQuery;
   },
@@ -837,14 +898,22 @@ export const notesStore = {
   get agentPermissionsSaving() {
     return _agentPermissionsSaving;
   },
+  get allTags() {
+    return allTags;
+  },
 
   // Setters
   set currentNote(note: NoteWithLinks | null) {
     _currentNote = note;
   },
+  set isPanelOpen(value: boolean) {
+    _isPanelOpen = value;
+    if (value) void refreshOpenPanel();
+  },
 
   // Functions
   fetchNotes,
+  refreshOpenPanel,
   fetchNote,
   openNoteByTitle,
   createNote,

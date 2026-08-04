@@ -5,7 +5,7 @@
  * - Universal Memory: Global across all projects
  * - Project Memory: Specific to current project
  * - Session Memory: Per-chat persistent storage
- * - Cursor-style Rules: .koryrules file support
+ * - Project rules stored as Markdown under .koryphaios/rules/
  *
  * All files are stored relative to the project for portability.
  */
@@ -27,19 +27,66 @@ import { notes } from '../db/schema';
 import { eq } from 'drizzle-orm';
 
 // ============================================================================
+// Workspace-shared memory root
+// ============================================================================
+// When a project lives inside an opened workspace (marked by
+// .koryphaios/workspace.json at the workspace root), memory/rules/preferences
+// are stored ONCE at the workspace root and shared by all its projects —
+// instead of sprouting a duplicate .koryphaios folder per project.
+
+export const WORKSPACE_MARKER = '.koryphaios/workspace.json';
+
+const memoryRootCache = new Map<string, { root: string; at: number }>();
+const MEMORY_ROOT_CACHE_TTL_MS = 30_000;
+
+/** Resolve where a project's .koryphaios data lives: the nearest ancestor
+ *  workspace root if one is marked, otherwise the project itself. A project
+ *  that already has its own .koryphaios keeps it (no silent migration). */
+export function resolveMemoryRoot(projectRoot: string): string {
+  const cached = memoryRootCache.get(projectRoot);
+  if (cached && Date.now() - cached.at < MEMORY_ROOT_CACHE_TTL_MS) return cached.root;
+
+  let resolved = projectRoot;
+  if (!existsSync(join(projectRoot, '.koryphaios'))) {
+    const home = homedir();
+    let dir = dirname(projectRoot);
+    for (let hops = 0; hops < 8; hops++) {
+      if (!dir || dir === '/' || dir === home || dir === dirname(dir)) break;
+      if (existsSync(join(dir, WORKSPACE_MARKER))) {
+        resolved = dir;
+        break;
+      }
+      dir = dirname(dir);
+    }
+  }
+  memoryRootCache.set(projectRoot, { root: resolved, at: Date.now() });
+  return resolved;
+}
+
+/** Mark a folder as a workspace root so child projects share its memory. */
+export function registerWorkspaceRoot(root: string): void {
+  const markerPath = join(root, WORKSPACE_MARKER);
+  mkdirSync(dirname(markerPath), { recursive: true });
+  if (!existsSync(markerPath)) {
+    writeFileSync(markerPath, JSON.stringify({ workspace: true, createdAt: Date.now() }, null, 2), 'utf8');
+  }
+  memoryRootCache.clear();
+}
+
+// ============================================================================
 // Configuration
 // ============================================================================
 
 export const MEMORY_CONFIG = {
   // Directory names (relative to project root or home)
   UNIVERSAL_MEMORY_DIR: '.koryphaios/universal-memory',
-  PROJECT_MEMORY_DIR: '.koryphaios/project-memory',
+  PROJECT_MEMORY_DIR: '.koryphaios/memory',
   SESSIONS_DIR: '.koryphaios/sessions',
-  RULES_FILE: '.koryrules',
+  RULES_FILE: '.koryphaios/rules/rules.md',
 
   // File names
   UNIVERSAL_MEMORY_FILE: 'universal-memory.md',
-  PROJECT_MEMORY_FILE: 'project-memory.md',
+  PROJECT_MEMORY_FILE: 'project.md',
   SESSION_MEMORY_FILE: 'memory.md',
 
   // Settings
@@ -68,7 +115,7 @@ export interface MemorySettings {
   sessionMemoryEnabled: boolean;
   /** Enable agent-added memories */
   agentMemoryEnabled: boolean;
-  /** Enable .koryrules file */
+  /** Enable project rules files */
   rulesEnabled: boolean;
   /** Auto-include memories in agent context */
   autoIncludeInContext: boolean;
@@ -109,7 +156,7 @@ export function getUniversalMemoryPath(): string {
  * Get project memory path
  */
 export function getProjectMemoryPath(projectRoot: string): string {
-  return join(projectRoot, MEMORY_CONFIG.PROJECT_MEMORY_DIR, MEMORY_CONFIG.PROJECT_MEMORY_FILE);
+  return join(resolveMemoryRoot(projectRoot), MEMORY_CONFIG.PROJECT_MEMORY_DIR, MEMORY_CONFIG.PROJECT_MEMORY_FILE);
 }
 
 /**
@@ -117,7 +164,7 @@ export function getProjectMemoryPath(projectRoot: string): string {
  */
 export function getSessionMemoryPath(projectRoot: string, sessionId: string): string {
   return join(
-    projectRoot,
+    resolveMemoryRoot(projectRoot),
     MEMORY_CONFIG.SESSIONS_DIR,
     sessionId,
     MEMORY_CONFIG.SESSION_MEMORY_FILE,
@@ -125,10 +172,75 @@ export function getSessionMemoryPath(projectRoot: string, sessionId: string): st
 }
 
 /**
- * Get .koryrules path
+ * Get the primary project-rules path
  */
 export function getRulesPath(projectRoot: string): string {
+  // Rules always live in the selected working folder itself — they are scoped
+  // to the code the agent runs against, not shared across a workspace.
   return join(projectRoot, MEMORY_CONFIG.RULES_FILE);
+}
+
+export interface ProjectMemoryDocument { name: string; path: string; kind: 'memory' | 'rules' }
+
+function getProjectMemoryDocumentPath(projectRoot: string, name: string, kind: 'memory' | 'rules'): string {
+  const safeName = basename(name);
+  if (!safeName.toLowerCase().endsWith('.md') || safeName !== name || !/^[a-zA-Z0-9._-]+\.md$/i.test(safeName)) {
+    throw new Error('Invalid document name');
+  }
+  const base = kind === 'rules' ? projectRoot : resolveMemoryRoot(projectRoot);
+  return join(base, `.koryphaios/${kind}`, safeName);
+}
+
+export function listProjectMemoryDocuments(projectRoot: string): ProjectMemoryDocument[] {
+  const roots = [
+    // Memory is workspace-shared; rules stay with the working folder.
+    { dir: join(resolveMemoryRoot(projectRoot), '.koryphaios/memory'), kind: 'memory' as const },
+    { dir: join(projectRoot, '.koryphaios/rules'), kind: 'rules' as const },
+  ];
+  return roots.flatMap(({ dir, kind }) => {
+    if (!existsSync(dir)) return [];
+    return readdirSync(dir, { withFileTypes: true })
+      .filter((entry) => entry.isFile() && entry.name.toLowerCase().endsWith('.md'))
+      .map((entry) => ({ name: entry.name, path: join(dir, entry.name), kind }));
+  });
+}
+
+export function createProjectMemoryDocument(projectRoot: string, name: string, kind: 'memory' | 'rules'): ProjectMemoryDocument {
+  const safe = name.trim().replace(/\.md$/i, '').replace(/[^a-zA-Z0-9._-]+/g, '-').replace(/^[-.]+|[-.]+$/g, '');
+  if (!safe) throw new Error('A valid document name is required');
+  const base = kind === 'rules' ? projectRoot : resolveMemoryRoot(projectRoot);
+  const dir = join(base, `.koryphaios/${kind}`);
+  mkdirSync(dir, { recursive: true });
+  const path = join(dir, `${safe}.md`);
+  if (!existsSync(path)) writeFileSync(path, '', 'utf8');
+  return { name: `${safe}.md`, path, kind };
+}
+
+/** Read a user-created memory or rules document. The path is resolved from a
+ * validated filename, never trusted from the client. */
+export function readProjectMemoryDocument(projectRoot: string, name: string, kind: 'memory' | 'rules'): MemoryFile {
+  const path = getProjectMemoryDocumentPath(projectRoot, name, kind);
+  if (!existsSync(path)) throw new Error('Document not found');
+  const content = readFileSync(path, 'utf-8');
+  const stats = statSync(path);
+  return { path, content, exists: true, lastModified: stats.mtimeMs, size: stats.size };
+}
+
+/** Write a user-created memory or rules document without letting a client
+ * choose an arbitrary filesystem path. */
+export function writeProjectMemoryDocument(
+  projectRoot: string,
+  name: string,
+  kind: 'memory' | 'rules',
+  content: string,
+): MemoryFile {
+  if (content.length > MEMORY_CONFIG.MAX_MEMORY_SIZE) {
+    throw new Error(`Memory file exceeds maximum size of ${MEMORY_CONFIG.MAX_MEMORY_SIZE} bytes`);
+  }
+  const path = getProjectMemoryDocumentPath(projectRoot, name, kind);
+  if (!existsSync(path)) throw new Error('Document not found');
+  writeFileSync(path, content, 'utf-8');
+  return { path, content, exists: true, lastModified: Date.now(), size: content.length };
 }
 
 // ============================================================================
@@ -218,13 +330,7 @@ export function readUniversalMemory(): MemoryFile {
   const filePath = getUniversalMemoryPath();
 
   if (!existsSync(filePath)) {
-    return {
-      path: filePath,
-      content: '',
-      exists: false,
-      lastModified: null,
-      size: 0,
-    };
+    return { path: filePath, content: '', exists: false, lastModified: null, size: 0 };
   }
 
   try {
@@ -374,7 +480,7 @@ project-root/
 - 
 
 ---
-*This file is stored in: .koryphaios/project-memory/project-memory.md*
+*This file is stored in: .koryphaios/memory/project.md*
 *Last updated: {timestamp}*
 `;
 
@@ -407,13 +513,7 @@ export function readProjectMemory(projectRoot: string): MemoryFile {
   const filePath = getProjectMemoryPath(projectRoot);
 
   if (!existsSync(filePath)) {
-    return {
-      path: filePath,
-      content: '',
-      exists: false,
-      lastModified: null,
-      size: 0,
-    };
+    return writeProjectMemory(projectRoot, '');
   }
 
   try {
@@ -643,13 +743,13 @@ export function deleteSessionMemory(projectRoot: string, sessionId: string): boo
 }
 
 // ============================================================================
-// Rules (.koryrules)
+// Project rules
 // ============================================================================
 
 const DEFAULT_RULES_TEMPLATE = `# Koryphaios Rules
 
 > This file defines rules and conventions for AI assistance in this project.
-> Similar to .koryrules, these instructions guide the AI's behavior.
+> These project rules guide the AI's behavior.
 
 ## 🎯 General Principles
 
@@ -744,8 +844,7 @@ const DEFAULT_RULES_TEMPLATE = `# Koryphaios Rules
 - Keep setup instructions current
 
 ---
-*Place this file at: .koryrules (project root)*
-*Or at: .koryphaios/rules.md*
+*Stored at: .koryphaios/rules/rules.md*
 `;
 
 export function initializeRules(projectRoot: string): MemoryFile {
@@ -770,13 +869,7 @@ export function readRules(projectRoot: string): MemoryFile {
   const filePath = getRulesPath(projectRoot);
 
   if (!existsSync(filePath)) {
-    return {
-      path: filePath,
-      content: '',
-      exists: false,
-      lastModified: null,
-      size: 0,
-    };
+    return writeRules(projectRoot, '');
   }
 
   try {
@@ -804,6 +897,8 @@ export function readRules(projectRoot: string): MemoryFile {
 
 export function writeRules(projectRoot: string, content: string): MemoryFile {
   const filePath = getRulesPath(projectRoot);
+  const dir = dirname(filePath);
+  if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
 
   if (content.length > MEMORY_CONFIG.MAX_RULES_SIZE) {
     throw new Error(`Rules file exceeds maximum size of ${MEMORY_CONFIG.MAX_RULES_SIZE} bytes`);
@@ -893,7 +988,7 @@ export function formatMemoryForContext(context: MemoryContext): string {
   const parts: string[] = [];
 
   if (context.rules?.exists && context.rules.content) {
-    parts.push(`## Project Rules (.koryrules)\n\n${context.rules.content}`);
+    parts.push(`## Project Rules\n\n${context.rules.content}`);
   }
 
   if (context.universal?.exists && context.universal.content) {
@@ -921,7 +1016,7 @@ export function formatMemoryForContext(context: MemoryContext): string {
 function buildNotesCatalogUsageHint(visibleTools: Set<string>): string {
   const hints: string[] = [];
   if (visibleTools.has('recall_notes') || visibleTools.has('read_note')) {
-    hints.push('Use recall_notes or read_note to load full note content.');
+    hints.push('Use read_note or recall_notes only when the full body is required.');
   }
   if (visibleTools.has('search_notes') || visibleTools.has('list_notes')) {
     hints.push('Use search_notes or list_notes to discover notes.');
@@ -929,16 +1024,21 @@ function buildNotesCatalogUsageHint(visibleTools: Set<string>): string {
   if (visibleTools.has('link_notes') || visibleTools.has('unlink_notes')) {
     hints.push('Use link_notes / unlink_notes to edit the graph; [[wikilinks]] in content also create edges.');
   }
+  if (visibleTools.has('render_note')) {
+    hints.unshift('Default to render_note mode="excerpt" with query/heading and a small maxChars; mode="document" renders an HTML/Markdown artifact in chat without copying its source.');
+  }
+  hints.push('Retrieve and quote only the minimum context needed; do not recommend loading an entire document by default.');
   return hints.join('\n');
 }
 
 export async function getNotesCatalogPrompt(
   maxEntries: number = 150,
   visibleToolNames?: string[],
+  projectRoot?: string,
 ): Promise<string> {
   try {
     const { getNotesCatalog } = await import('../notes/notes-service');
-    const catalog = await getNotesCatalog();
+    const catalog = await getNotesCatalog(projectRoot);
     if (!catalog.length) return '';
 
     const visible = new Set(visibleToolNames ?? []);
@@ -1039,7 +1139,11 @@ export async function buildNotesNetworkPrompt(
     const settings = loadNotesSettings(projectRoot);
     if (!settings.enabled) return '';
     autoInclude = settings.autoIncludeInContext;
-    effectiveMaxTokens = settings.maxContextTokens;
+    // When the token budget toggle is off, use a generous default instead of
+    // the user's capped value — they've explicitly disabled the limit.
+    effectiveMaxTokens = settings.maxContextTokensEnabled
+      ? settings.maxContextTokens
+      : 100_000;
     visibleTools = getVisibleNoteToolNames(projectRoot);
     if (!visibleTools.length) return '';
   }
@@ -1051,7 +1155,7 @@ export async function buildNotesNetworkPrompt(
       visibleTools.includes('recall_notes'));
 
   const [catalog, pinned] = await Promise.all([
-    getNotesCatalogPrompt(150, visibleTools),
+    getNotesCatalogPrompt(150, visibleTools, projectRoot),
     includePinned ? getNotesContext(effectiveMaxTokens) : Promise.resolve(''),
   ]);
   if (!catalog && !pinned) return '';
