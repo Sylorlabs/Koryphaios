@@ -6,6 +6,7 @@
  */
 
 import { apiUrl } from '$lib/utils/api-url';
+import { filterAdvancedSettings } from '$lib/utils/advanced-settings';
 import { toastStore } from './toast.svelte';
 import { apiFetch } from '$lib/api.svelte';
 
@@ -157,51 +158,93 @@ export interface FeatureMetadata {
   key: keyof ExperimentalFeatures;
   label: string;
   description: string;
-  category: string;
+  category: FeatureCategory;
   status: 'stable' | 'beta' | 'alpha' | 'coming-soon';
+  keywords: string[];
+  impact: string;
   requiresRestart?: boolean;
 }
+
+export type FeatureCategory =
+  | 'Agents & intelligence'
+  | 'Cost & safety'
+  | 'Runtime & recovery'
+  | 'Data & performance';
+
+export interface FeatureCategoryMetadata {
+  id: FeatureCategory;
+  description: string;
+}
+
+export const FEATURE_CATEGORIES: FeatureCategoryMetadata[] = [
+  {
+    id: 'Agents & intelligence',
+    description: 'How Kory reasons, delegates, and coordinates work.',
+  },
+  {
+    id: 'Cost & safety',
+    description: 'Limits that contain spend and protect active sessions.',
+  },
+  {
+    id: 'Runtime & recovery',
+    description: 'Background process resilience and automatic recovery.',
+  },
+  {
+    id: 'Data & performance',
+    description: 'Storage and worker behavior for demanding workloads.',
+  },
+];
 
 export const FEATURE_METADATA: FeatureMetadata[] = [
   // Spend Caps & Billing
   {
     key: 'hardSpendCaps',
     label: 'Hard Spend Caps',
-    description: 'Actually PAUSE agents when spend limits are reached. Prevents runaway costs.',
-    category: 'Billing',
+    description: 'Pause agents when configured spend limits are reached.',
+    category: 'Cost & safety',
     status: 'beta',
+    keywords: ['billing', 'budget', 'limits', 'pause', 'runaway costs'],
+    impact: 'Applies the session and global caps configured in Billing before additional agent work can continue.',
   },
 
   // Database & Persistence
   {
     key: 'sqliteConnectionPool',
     label: 'SQLite Connection Pool',
-    description: "Multiple read connections with write queue. Reduces 'database is locked' errors.",
-    category: 'Database',
+    description: 'Use multiple read connections with a serialized write queue.',
+    category: 'Data & performance',
     status: 'beta',
+    keywords: ['database', 'storage', 'connection', 'locked', 'queue'],
+    impact: "Reduces database contention during concurrent reads while keeping writes ordered.",
   },
 
   // Process Management
   {
     key: 'processSupervisor',
     label: 'Process Supervisor',
-    description: 'Automatic crash detection, restart, and orphan cleanup for background processes.',
-    category: 'Processes',
+    description: 'Monitor background processes for crashes and lifecycle changes.',
+    category: 'Runtime & recovery',
     status: 'stable',
+    keywords: ['process', 'background', 'crash', 'monitor', 'lifecycle'],
+    impact: 'Keeps a lifecycle record for supervised commands and makes recovery controls available.',
   },
   {
     key: 'processAutoRestart',
     label: 'Process Auto-Restart',
     description: 'Automatically restart crashed background processes with exponential backoff.',
-    category: 'Processes',
+    category: 'Runtime & recovery',
     status: 'stable',
+    keywords: ['process', 'background', 'crash', 'restart', 'backoff'],
+    impact: 'Retries eligible supervised processes after a crash while spacing repeated attempts.',
   },
   {
     key: 'orphanProcessCleanup',
     label: 'Orphan Process Cleanup',
-    description: 'Kill leftover processes on server startup. Keeps system clean.',
-    category: 'Processes',
+    description: 'Clean up leftover supervised processes when the server starts.',
+    category: 'Runtime & recovery',
     status: 'stable',
+    keywords: ['process', 'background', 'orphan', 'cleanup', 'startup'],
+    impact: 'Prevents stale supervised work from surviving into a new Koryphaios runtime.',
   },
 
   // Performance
@@ -209,8 +252,10 @@ export const FEATURE_METADATA: FeatureMetadata[] = [
     key: 'workerPool',
     label: 'Worker Pool',
     description: 'Pool of pre-warmed workers for faster agent spawning.',
-    category: 'Performance',
+    category: 'Data & performance',
     status: 'alpha',
+    keywords: ['performance', 'agent', 'workers', 'spawn', 'warm'],
+    impact: 'Keeps workers ready between tasks to reduce startup latency at the cost of additional idle resources.',
   },
   // AI & Agents
   {
@@ -218,19 +263,21 @@ export const FEATURE_METADATA: FeatureMetadata[] = [
     label: 'Multi-Agent Coordination',
     description:
       'Let Kory delegate to specialist workers. Engages only when you pick Multi-Agent in the composer, or when Auto decides a task needs it — never for simple chat.',
-    category: 'AI',
+    category: 'Agents & intelligence',
     status: 'stable',
+    keywords: ['ai', 'agents', 'delegation', 'coordination', 'multi-agent', 'auto'],
+    impact: 'Allows complex work to be divided among specialist agents while keeping simple conversations single-agent.',
   },
   {
     key: 'reasoningModeConfig',
     label: 'Reasoning Mode Configuration',
     description: 'Configure thinking effort per model (low/medium/high/max).',
-    category: 'AI',
+    category: 'Agents & intelligence',
     status: 'stable',
+    keywords: ['ai', 'reasoning', 'thinking', 'effort', 'model'],
+    impact: 'Shows reasoning-effort controls for compatible models in the composer and agent workflow.',
   },
 ];
-
-export const FEATURE_CATEGORIES = [...new Set(FEATURE_METADATA.map((f) => f.category))];
 
 // ============================================================================
 // Store Factory
@@ -245,7 +292,7 @@ function createExperimentalStore() {
         return { ...DEFAULT_EXPERIMENTAL_FEATURES, ...JSON.parse(stored) };
       }
     } catch {}
-    return DEFAULT_EXPERIMENTAL_FEATURES;
+    return { ...DEFAULT_EXPERIMENTAL_FEATURES };
   };
 
   let features = $state<ExperimentalFeatures>(loadFromStorage());
@@ -407,7 +454,7 @@ function createExperimentalStore() {
   }
 
   function resetToDefaults(): void {
-    features = DEFAULT_EXPERIMENTAL_FEATURES;
+    features = { ...DEFAULT_EXPERIMENTAL_FEATURES };
     saveToStorage();
     toastStore.info('Experimental features reset to defaults');
   }
@@ -450,22 +497,7 @@ function createExperimentalStore() {
 
     // Computed
     get filteredFeatures() {
-      return FEATURE_METADATA.filter((feature) => {
-        // Category filter
-        if (selectedCategory !== 'All' && feature.category !== selectedCategory) {
-          return false;
-        }
-        // Search filter
-        if (searchQuery.trim()) {
-          const q = searchQuery.toLowerCase();
-          return (
-            feature.label.toLowerCase().includes(q) ||
-            feature.description.toLowerCase().includes(q) ||
-            feature.category.toLowerCase().includes(q)
-          );
-        }
-        return true;
-      });
+      return filterAdvancedSettings(FEATURE_METADATA, selectedCategory, searchQuery);
     },
 
     get enabledCount() {

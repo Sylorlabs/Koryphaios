@@ -90,6 +90,8 @@ export interface FolderNode {
 export interface NotesSettings {
   enabled: boolean;
   autoIncludeInContext: boolean;
+  /** When false, no token limit is applied to notes in agent context. */
+  maxContextTokensEnabled: boolean;
   maxContextTokens: number;
   graphPhysics: {
     gravity: number;
@@ -102,6 +104,7 @@ export interface NotesSettings {
 export const DEFAULT_NOTES_SETTINGS: NotesSettings = {
   enabled: true,
   autoIncludeInContext: true,
+  maxContextTokensEnabled: true,
   maxContextTokens: 2000,
   graphPhysics: {
     gravity: -30,

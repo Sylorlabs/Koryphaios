@@ -298,6 +298,8 @@ export interface ProviderInfo {
   deployment?: 'cloud' | 'api' | 'local' | 'hybrid';
   /** Short UI description of provider behavior */
   description?: string;
+  /** Official page where this provider issues the expected credential. */
+  credentialUrl?: string;
   /** True for a REMOTE provider served by another machine (id `remote-*`). */
   remote?: boolean;
   /** Remote CLI harness: using it copies the client's project to the host and

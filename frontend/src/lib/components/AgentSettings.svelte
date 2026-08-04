@@ -25,14 +25,37 @@
     ChevronRight,
     StickyNote,
     Wrench,
+    LockKeyhole,
+    GitBranch,
+    Brain,
+    Route,
+    Search,
   } from 'lucide-svelte';
 
   // Props
   interface Props {
     onClose?: () => void;
+    focusPermissions?: boolean;
   }
 
-  let { onClose }: Props = $props();
+  let { onClose, focusPermissions = false }: Props = $props();
+
+  type ControlSection = 'permissions' | 'quality' | 'workflow' | 'context' | 'research' | 'routing';
+  let selectedControlSection = $state<ControlSection>('permissions');
+
+  const CONTROL_SECTIONS = [
+    { id: 'permissions', label: 'Permissions & autonomy', description: 'Approvals and change limits', icon: LockKeyhole },
+    { id: 'quality', label: 'Quality & Critic', description: 'Review and verification', icon: Gavel },
+    { id: 'workflow', label: 'Workflow', description: 'Planning and learning', icon: GitBranch },
+    { id: 'context', label: 'Context & memory', description: 'Context and persistence', icon: Brain },
+    { id: 'research', label: 'Research', description: 'Search and source policy', icon: Search },
+    { id: 'routing', label: 'Routing & guidance', description: 'Models and manager notes', icon: Route },
+  ] as const;
+
+  $effect(() => {
+    if (!focusPermissions) return;
+    selectedControlSection = 'permissions';
+  });
 
   // Local state for preferences editing
   let preferencesContent = $state(agentSettingsStore.preferences?.content ?? '');
@@ -43,7 +66,58 @@
   let skillPreviewPrompt = $state('');
   let skillCollisionChoices = $state<Record<string, 'personal' | 'project'>>({});
   let showSkillComparison = $state(false);
+  let showSkillCreator = $state(false);
+  let newSkillSource = $state<'personal' | 'project'>('personal');
+  let newSkillName = $state('');
+  let newSkillDescription = $state('');
+  let newSkillDomains = $state('');
+  let newSkillTriggers = $state('');
+  let newSkillPositiveExample = $state('');
+  let newSkillNegativeExample = $state('');
+  let newSkillEvidence = $state('');
+  let newSkillInstructions = $state('');
   let showModelAccess = $state(false);
+
+  const splitSkillLines = (value: string) =>
+    value
+      .split(/\r?\n/)
+      .map((item) => item.trim())
+      .filter(Boolean);
+
+  function normalizeSkillName(value: string) {
+    return value
+      .toLowerCase()
+      .trim()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '')
+      .slice(0, 64);
+  }
+
+  async function createSkill() {
+    const created = await agentSettingsStore.createSkillDraft({
+      source: newSkillSource,
+      name: normalizeSkillName(newSkillName),
+      description: newSkillDescription.trim(),
+      instructions: newSkillInstructions.trim(),
+      domains: splitSkillLines(newSkillDomains),
+      activation: splitSkillLines(newSkillTriggers),
+      shouldTrigger: splitSkillLines(newSkillPositiveExample),
+      shouldNotTrigger: splitSkillLines(newSkillNegativeExample),
+      evidence: splitSkillLines(newSkillEvidence),
+    });
+    if (!created) return;
+    selectedSkillKey = `${created.source}:${created.name}:${created.state}`;
+    skillDraftDirty = false;
+    showSkillCreator = false;
+    newSkillName = '';
+    newSkillDescription = '';
+    newSkillDomains = '';
+    newSkillTriggers = '';
+    newSkillPositiveExample = '';
+    newSkillNegativeExample = '';
+    newSkillEvidence = '';
+    newSkillInstructions = '';
+  }
 
   async function runSkillPreview() {
     if (!skillPreviewPrompt.trim()) return;
@@ -85,6 +159,9 @@
         ]
       : undefined,
   );
+  const activeSkillCount = $derived(
+    agentSettingsStore.skills.filter((skill) => skill.state === 'active').length,
+  );
   $effect(() => {
     if (selectedSkill && !skillDraftDirty && skillDraftContent !== selectedSkill.content)
       skillDraftContent = selectedSkill.content;
@@ -102,12 +179,36 @@
 
   // ── Manager model access ────────────────────────────────────────────────
   const MODEL_ACCESS_CATEGORIES = [
-    { id: 'general', label: 'General chat & orchestration' },
-    { id: 'frontend', label: 'Frontend work' },
-    { id: 'backend', label: 'Backend work' },
-    { id: 'review', label: 'Review' },
-    { id: 'test', label: 'Testing' },
-    { id: 'critic', label: 'Critic' },
+    {
+      id: 'general',
+      label: 'General chat & orchestration',
+      notesPlaceholder: 'e.g. State the plan for multi-step work. Keep the manager informed of real blockers.',
+    },
+    {
+      id: 'frontend',
+      label: 'Frontend work',
+      notesPlaceholder: 'e.g. Reuse Koryphaios components and theme tokens. Check keyboard and narrow-window states.',
+    },
+    {
+      id: 'backend',
+      label: 'Backend work',
+      notesPlaceholder: 'e.g. Preserve API contracts. Add focused route tests and fail closed on missing authorization.',
+    },
+    {
+      id: 'review',
+      label: 'Review',
+      notesPlaceholder: 'e.g. Prioritize correctness, regressions, and security. Report findings with paths and severity.',
+    },
+    {
+      id: 'test',
+      label: 'Testing',
+      notesPlaceholder: 'e.g. Run focused tests first, then the relevant integration gate. Cover failure states too.',
+    },
+    {
+      id: 'critic',
+      label: 'Critic',
+      notesPlaceholder: 'e.g. Challenge unsupported claims and missing evidence. Pass only proven acceptance criteria.',
+    },
   ];
   const availableModels = $derived.by(() =>
     providersStore.statusList
@@ -245,7 +346,7 @@
       </div>
     {:else if agentSettingsStore.activeTab === 'settings'}
       <div class="flex h-full min-h-0 flex-col overflow-hidden">
-        <SettingsPageIntro title="Agent control center" description="Guardrails, workflow, autonomy, context, research, and routing for every run.">
+        <SettingsPageIntro title="Agent settings" description="Choose one area at a time. Changes are saved to this workspace as soon as you make them.">
           <span class="rounded-full bg-[var(--color-surface-3)] px-2.5 py-1 text-[10px] text-[var(--color-text-muted)]">
             {agentSettingsStore.settings.agentExecutionMode} execution
           </span>
@@ -255,9 +356,127 @@
           <button type="button" class="rounded-lg border border-[var(--color-border)] px-3 py-1.5 text-xs text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-surface-3)]" onclick={() => agentSettingsStore.setActiveTab('preferences')}>Preferences</button>
           <button type="button" class="rounded-lg border border-[var(--color-border)] px-3 py-1.5 text-xs text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-surface-3)]" onclick={() => agentSettingsStore.setActiveTab('skills')}>Skills</button>
         </SettingsPageIntro>
-        <div class="h-full min-h-0 overflow-y-auto p-5">
-        <div class="mx-auto grid max-w-6xl gap-5 xl:grid-cols-[minmax(0,1.15fr)_minmax(320px,0.85fr)]">
+        <div class="h-full min-h-0 overflow-y-auto p-4 sm:p-6">
+        <div class="mx-auto max-w-7xl space-y-5">
+          <section class="grid gap-2 rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-1)] p-4 sm:grid-cols-3">
+            <div class="rounded-xl bg-[var(--color-surface-2)] px-3 py-2.5">
+              <div class="text-sm font-semibold capitalize text-[var(--color-text-primary)]">{agentSettingsStore.settings.permissionMode === 'plan' ? 'guarded' : agentSettingsStore.settings.permissionMode ?? 'guarded'}</div>
+              <div class="mt-1 text-[10px] text-[var(--color-text-muted)]">Permission mode</div>
+            </div>
+            <div class="rounded-xl bg-[var(--color-surface-2)] px-3 py-2.5">
+              <div class="text-sm font-semibold text-[var(--color-text-primary)]">{agentSettingsStore.settings.criticGateEnabled ? 'Enabled' : 'Disabled'}</div>
+              <div class="mt-1 text-[10px] text-[var(--color-text-muted)]">Critic review</div>
+            </div>
+            <div class="rounded-xl bg-[var(--color-surface-2)] px-3 py-2.5">
+              <div class="text-sm font-semibold text-[var(--color-success)]">Auto-saved</div>
+              <div class="mt-1 text-[10px] text-[var(--color-text-muted)]">Workspace settings</div>
+            </div>
+          </section>
+
+          <div class="grid min-w-0 gap-5 lg:grid-cols-[230px_minmax(0,1fr)]">
+            <aside class="min-w-0" aria-label="Agent settings categories">
+              <div class="flex gap-2 overflow-x-auto pb-1 lg:sticky lg:top-0 lg:block lg:space-y-1 lg:overflow-visible lg:pb-0">
+                {#each CONTROL_SECTIONS as section (section.id)}
+                  <button
+                    type="button"
+                    aria-pressed={selectedControlSection === section.id}
+                    onclick={() => (selectedControlSection = section.id)}
+                    class="flex min-h-12 shrink-0 items-center gap-3 rounded-xl px-3 text-left transition-colors lg:w-full {selectedControlSection === section.id ? 'bg-[var(--color-surface-3)] text-[var(--color-text-primary)]' : 'text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-2)]'}"
+                  >
+                    <section.icon size={16} class="shrink-0" />
+                    <span class="min-w-0">
+                      <span class="block text-xs font-medium">{section.label}</span>
+                      <span class="mt-0.5 hidden text-[10px] text-[var(--color-text-muted)] lg:block">{section.description}</span>
+                    </span>
+                  </button>
+                {/each}
+                <div class="hidden border-t border-[var(--color-border)] pt-3 lg:mt-4 lg:block">
+                  <button
+                    type="button"
+                    onclick={() => agentSettingsStore.resetSettings()}
+                    class="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-xs text-[var(--color-text-muted)] transition-colors hover:bg-red-500/10 hover:text-red-400"
+                  >
+                    <RotateCcw size={14} /> Reset agent settings
+                  </button>
+                </div>
+              </div>
+            </aside>
+            <main class="min-w-0">
+        <div class="grid gap-5">
           <div class="space-y-6">
+            {#if selectedControlSection === 'permissions'}
+              <section class="space-y-5 rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-1)] p-5">
+                <div>
+                  <div class="flex items-center gap-2">
+                    <LockKeyhole size={17} class="text-[var(--color-accent)]" />
+                    <h4 class="text-sm font-semibold text-[var(--color-text-primary)]">Permissions & autonomy</h4>
+                  </div>
+                  <p class="mt-1 text-xs leading-relaxed text-[var(--color-text-muted)]">Choose a preset or build a custom approval policy for this workspace.</p>
+                </div>
+
+                <div class="grid gap-2 sm:grid-cols-2 xl:grid-cols-6" role="radiogroup" aria-label="Permission mode">
+                  {#each [
+                    { value: 'guarded', label: 'Guarded', description: 'Ask only when risk is high' },
+                    { value: 'edits', label: 'Accept edits', description: 'Apply edits; ask for other actions' },
+                    { value: 'ask', label: 'Ask', description: 'Confirm every action' },
+                    { value: 'custom', label: 'Custom', description: 'Use the rules below' },
+                    { value: 'yolo', label: 'YOLO', description: 'No approval or risk checks' },
+                  ] as mode (mode.value)}
+                    {@const active = (agentSettingsStore.settings.permissionMode === 'plan' ? 'guarded' : agentSettingsStore.settings.permissionMode ?? 'guarded') === mode.value}
+                    <button
+                      type="button"
+                      role="radio"
+                      aria-checked={active}
+                      onclick={() => agentSettingsStore.saveSettings({ permissionMode: mode.value as 'yolo' | 'guarded' | 'edits' | 'ask' | 'plan' | 'custom' }, { quietSuccess: true })}
+                      class="min-h-24 rounded-xl border p-3 text-left transition-colors {active ? 'border-[var(--color-accent)] bg-[var(--color-surface-3)]' : 'border-[var(--color-border)] bg-[var(--color-surface-2)] hover:border-[var(--color-border-bright)]'}"
+                    >
+                      <span class="flex items-center justify-between gap-2 text-xs font-semibold text-[var(--color-text-primary)]">
+                        {mode.label}
+                        {#if active}<CheckCircle size={14} class="text-[var(--color-accent)]" />{/if}
+                      </span>
+                      <span class="mt-2 block text-[10px] leading-relaxed text-[var(--color-text-muted)]">{mode.description}</span>
+                    </button>
+                  {/each}
+                </div>
+
+                {#if agentSettingsStore.settings.permissionMode === 'custom'}
+                  <div class="space-y-3 border-t border-[var(--color-border)] pt-4">
+                    <div>
+                      <h5 class="text-xs font-semibold text-[var(--color-text-primary)]">Custom approval rules</h5>
+                      <p class="mt-1 text-[10px] text-[var(--color-text-muted)]">Fine-tune when Kory continues and when it pauses for you.</p>
+                    </div>
+                    <div class="grid gap-3 sm:grid-cols-2">
+                      <SettingsSwitch
+                        checked={agentSettingsStore.settings.autoRunTools}
+                        label="Start routine work automatically"
+                        description="Begin normal tool-using work without an upfront proceed prompt."
+                        onchange={() => toggleSetting('autoRunTools')}
+                      />
+                      <SettingsSwitch
+                        checked={agentSettingsStore.settings.autoApplySafeFixes}
+                        label="Apply safe file edits"
+                        description="Apply low-risk file changes without a separate confirmation."
+                        onchange={() => toggleSetting('autoApplySafeFixes')}
+                      />
+                      <SettingsSwitch
+                        checked={agentSettingsStore.settings.confirmRuleViolations}
+                        label="Ask before risky overrides"
+                        description="Require confirmation before an action may break workspace rules."
+                        onchange={() => toggleSetting('confirmRuleViolations')}
+                      />
+                      <SettingsSwitch
+                        checked={agentSettingsStore.settings.agentMemoryEnabled}
+                        label="Allow memory updates"
+                        description="Let agents update the project memory files they use between runs."
+                        onchange={() => toggleSetting('agentMemoryEnabled')}
+                      />
+                    </div>
+                  </div>
+                {/if}
+              </section>
+            {/if}
+
+            {#if selectedControlSection === 'quality'}
             <section
               class="space-y-4 rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-1)] p-5"
             >
@@ -274,7 +493,7 @@
               </div>
 
               <div class="grid gap-3 lg:grid-cols-3">
-                {#each enforcementLevels as level}
+                {#each enforcementLevels as level (level.value)}
                   <button
                     onclick={() =>
                       agentSettingsStore.saveSettings({ ruleEnforcementLevel: level.value })}
@@ -307,7 +526,9 @@
                 {/each}
               </div>
             </section>
+            {/if}
 
+            {#if selectedControlSection === 'quality'}
             <section
               class="space-y-4 rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-1)] p-5"
             >
@@ -319,15 +540,15 @@
                   Guardrail workflow
                 </h4>
                 <p class="text-xs text-[var(--color-text-muted)]">
-                  Review behavior and auto-apply controls for the Critic.
+                  Repository mutations always fail closed. These controls tune additional review for non-mutating work.
                 </p>
               </div>
 
               <div class="grid gap-3 sm:grid-cols-2">
                 <SettingsSwitch
                   checked={agentSettingsStore.settings.criticGateEnabled}
-                  label="Enable Critic Gate"
-                  description="Critic reviews all changes before application."
+                  label="Review Non-Mutating Work"
+                  description="Also run Critic review for answers and research. Code and file changes are always gated."
                   onchange={() => toggleSetting('criticGateEnabled')}
                 />
 
@@ -338,29 +559,16 @@
                   onchange={() => toggleSetting('criticEnforcesPreferences')}
                 />
 
-                <SettingsSwitch
-                  checked={agentSettingsStore.settings.autoApplySafeFixes}
-                  label="Auto-Apply Safe Fixes"
-                  description="Apply low-risk changes without manual confirmation."
-                  onchange={() => toggleSetting('autoApplySafeFixes')}
-                />
-
-                <SettingsSwitch
-                  checked={agentSettingsStore.settings.confirmRuleViolations}
-                  label="Confirm Rule Violations"
-                  description="Require human approval before applying risky overrides."
-                  onchange={() => toggleSetting('confirmRuleViolations')}
-                />
               </div>
 
               <div class="grid gap-3 sm:grid-cols-2">
                 <KorySelect
-                  label="Quality gate strictness"
+                  label="Answer/research strictness"
                   value={agentSettingsStore.settings.gateStrictness ?? 'strict'}
                   options={[
                     { value: 'strict', label: 'Fail closed' },
                     { value: 'advisory', label: 'Advisory' },
-                    { value: 'off', label: 'Off — unverified' },
+                    { value: 'off', label: 'Off — mutations still gated' },
                   ]}
                   onchange={(value) =>
                     agentSettingsStore.saveSettings(
@@ -384,7 +592,9 @@
                 />
               </div>
             </section>
+            {/if}
 
+            {#if selectedControlSection === 'workflow'}
             <section
               class="space-y-4 rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-1)] p-5"
             >
@@ -440,6 +650,12 @@
                     )}
                 />
                 <KorySelect
+                  label="Goal planning"
+                  value={agentSettingsStore.settings.goalPlanningDepth ?? 'adaptive'}
+                  options={[{ value: 'minimal', label: 'Minimal' }, { value: 'adaptive', label: 'Adaptive' }, { value: 'structured', label: 'Structured' }]}
+                  onchange={(value) => agentSettingsStore.saveSettings({ goalPlanningDepth: value as 'minimal' | 'adaptive' | 'structured' }, { quietSuccess: true })}
+                />
+                <KorySelect
                   label="Skill learning"
                   value={agentSettingsStore.settings.skillLearningMode ?? 'propose-then-verify'}
                   options={[
@@ -465,47 +681,22 @@
                 description="Resolve audience, medium, hierarchy, accessibility, references, and dislikes before ambiguous interface work."
                 onchange={() => toggleSetting('designDiscovery')}
               />
-            </section>
-
-            <section
-              class="space-y-4 rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-1)] p-5"
-            >
-              <div class="space-y-1">
-                <h4 class="text-sm font-semibold text-[var(--color-text-primary)]">Goal Mode</h4>
-                <p class="text-xs text-[var(--color-text-muted)]">
-                  Control autonomous goal execution and where cross-chat goal context appears. Chats assigned to active goals always keep a compact status badge in the session list.
-                </p>
-              </div>
-              <KorySelect
-                label="Checklist planning depth"
-                value={agentSettingsStore.settings.goalPlanningDepth ?? 'adaptive'}
-                options={[
-                  { value: 'minimal', label: 'Minimal', description: 'A short execution and verification checklist' },
-                  { value: 'adaptive', label: 'Adaptive', description: 'Enough discovery and verification for the objective' },
-                  { value: 'structured', label: 'Structured', description: 'A deeper plan for uncertain or consequential work' },
-                ]}
-                onchange={(value) => agentSettingsStore.saveSettings({ goalPlanningDepth: value as 'minimal' | 'adaptive' | 'structured' }, { quietSuccess: true })}
-              />
-              <SettingsSwitch
-                checked={agentSettingsStore.settings.automaticGoalDriving ?? true}
-                label="Start new goals automatically"
-                description="Use the selected composer model and keep advancing until completion, a human pause or stop, or a confirmed real blocker."
-                onchange={() => toggleSetting('automaticGoalDriving')}
-              />
               <SettingsSwitch
                 checked={goalDisplayStore.sidebar}
-                label="Keep Goals panel open"
-                description="Keep the cross-chat Goals panel visible at the bottom of the session sidebar. You can still open it with /goal when this is off."
+                label="Show Active Goals in sidebar"
+                description="Keep the compact cross-chat goal list visible in the session sidebar."
                 onchange={() => goalDisplayStore.update({ sidebar: !goalDisplayStore.sidebar })}
               />
               <SettingsSwitch
                 checked={goalDisplayStore.composer}
                 label="Show goal context in composer"
-                description="Show the active goal assigned to the current chat and Goal Mode actions in the composer menu."
+                description="Place the optional goal selector to the right of model and reasoning controls."
                 onchange={() => goalDisplayStore.update({ composer: !goalDisplayStore.composer })}
               />
             </section>
+            {/if}
 
+            {#if selectedControlSection === 'permissions'}
             <section
               class="space-y-4 rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-1)] p-5"
             >
@@ -514,9 +705,18 @@
                   Autonomy limits
                 </h4>
                 <p class="text-xs text-[var(--color-text-muted)]">
-                  Escalate larger edits before the agent applies them.
+                  Keep thresholds ready, then explicitly turn them on for runs that need an approval boundary.
                 </p>
               </div>
+
+              <SettingsSwitch
+                checked={agentSettingsStore.settings.autonomyLimitsEnabled}
+                label="Enable autonomy limits"
+                description={agentSettingsStore.settings.autonomyLimitsEnabled
+                  ? `Active: approval is required before edits exceeding ${agentSettingsStore.settings.approvalThresholdFiles} files or ${agentSettingsStore.settings.approvalThresholdLines} lines.`
+                  : 'Off by default. The values below are saved but do not constrain runs until you enable this switch.'}
+                onchange={() => toggleSetting('autonomyLimitsEnabled')}
+              />
 
               <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
                 <div class="rounded-xl bg-[var(--color-surface-2)] p-4">
@@ -535,7 +735,7 @@
                       )}
                   />
                   <p class="mt-2 text-[10px] text-[var(--color-text-muted)]">
-                    Require approval if more than this many files change.
+                    Used only while autonomy limits are enabled.
                   </p>
                 </div>
 
@@ -556,12 +756,14 @@
                       )}
                   />
                   <p class="mt-2 text-[10px] text-[var(--color-text-muted)]">
-                    Require approval if more than this many lines change.
+                    Used only while autonomy limits are enabled.
                   </p>
                 </div>
               </div>
             </section>
+            {/if}
 
+            {#if selectedControlSection === 'context'}
             <section
               class="space-y-4 rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-1)] p-5"
             >
@@ -597,14 +799,7 @@
                 />
 
                 <SettingsSwitch
-                  checked={agentSettingsStore.settings.autoCompactEnabled ?? true}
-                  label="Automatic Context Compaction"
-                  description="Create a verified fresh-context checkpoint after a completed turn reaches 80% of the selected model's reported window. On by default."
-                  onchange={() => toggleSetting('autoCompactEnabled')}
-                />
-
-                <SettingsSwitch
-                  checked={agentSettingsStore.settings.reasoningExpandedByDefault ?? true}
+                  checked={agentSettingsStore.settings.reasoningExpandedByDefault ?? false}
                   label="Expand Full Reasoning by Default"
                   description="Show reasoning automatically while keeping every block individually collapsible."
                   onchange={() => toggleSetting('reasoningExpandedByDefault')}
@@ -656,9 +851,11 @@
                 </div>
               </div>
             </section>
+            {/if}
           </div>
 
           <div class="space-y-6">
+            {#if selectedControlSection === 'context'}
             <section
               class="space-y-4 rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-1)] p-5"
             >
@@ -685,7 +882,9 @@
                 />
               </div>
             </section>
+            {/if}
 
+            {#if selectedControlSection === 'research'}
             <section
               class="space-y-4 rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-1)] p-5"
             >
@@ -713,7 +912,7 @@
                       role="group"
                       aria-label="Local web search mode"
                     >
-                      {#each [{ value: 'off', label: 'Off' }, { value: 'fallback', label: 'Fallback' }, { value: 'on', label: 'On' }] as option}
+                      {#each [{ value: 'off', label: 'Off' }, { value: 'fallback', label: 'Fallback' }, { value: 'on', label: 'On' }] as option (option.value)}
                         <button
                           type="button"
                           aria-pressed={agentSettingsStore.settings.localWebSearch === option.value}
@@ -742,18 +941,10 @@
                 />
               </div>
             </section>
-
-            <section class="flex justify-end border-t border-[var(--color-border)] pt-4">
-              <button
-                onclick={() => agentSettingsStore.resetSettings()}
-                class="flex items-center gap-2 rounded-lg px-3 py-2 text-xs text-[var(--color-text-muted)] transition-colors hover:bg-red-500/10 hover:text-red-400"
-              >
-                <RotateCcw size={16} />
-                Reset to Defaults
-              </button>
-            </section>
+            {/if}
 
             <!-- Manager model access: checkbox grid per category -->
+            {#if selectedControlSection === 'routing'}
             <section
               class="rounded-2xl p-5"
               style="background: var(--color-surface-2); border: 1px solid var(--color-border);"
@@ -879,7 +1070,7 @@
                         <textarea
                           class="w-full min-h-[100px] rounded-lg p-3 text-xs font-mono resize-y focus:outline-none"
                           style="background: var(--color-surface-2); color: var(--color-text-primary); border: 1px solid var(--color-border);"
-                          placeholder="e.g. Prefer bun over npm. Never touch the legacy/ folder."
+                          placeholder={cat.notesPlaceholder}
                           value={draft.text}
                           oninput={(e) => {
                             notesDrafts[cat.id] = { text: e.currentTarget.value, dirty: true };
@@ -905,6 +1096,10 @@
                 {/each}
               </div>
             </section>
+            {/if}
+          </div>
+        </div>
+            </main>
           </div>
         </div>
         </div>
@@ -913,9 +1108,92 @@
       <div class="flex h-full min-h-0 flex-col">
         <section class="border-b border-[var(--color-border)] bg-[var(--color-surface-2)] p-3">
           <div class="mb-3 flex items-center justify-between gap-3">
-            <div><h3 class="text-sm font-semibold text-[var(--color-text-primary)]">Skills</h3><p class="mt-1 text-xs text-[var(--color-text-muted)]">Manage and test the local instructions available to the agent.</p></div>
-            <button type="button" onclick={() => agentSettingsStore.setActiveTab('settings')} class="rounded-lg px-3 py-1.5 text-xs text-[var(--color-text-muted)] hover:bg-[var(--color-surface-3)]">Back to controls</button>
+            <div><h3 class="text-sm font-semibold text-[var(--color-text-primary)]">Skills</h3><p class="mt-1 text-xs text-[var(--color-text-muted)]">Manage, test, and create local instructions available to the agent.</p></div>
+            <div class="flex items-center gap-2">
+              <button
+                type="button"
+                onclick={() => (showSkillCreator = !showSkillCreator)}
+                aria-expanded={showSkillCreator}
+                aria-label="Create a new skill"
+                class="inline-flex items-center gap-1.5 rounded-lg bg-[var(--color-accent)] px-3 py-1.5 text-xs font-semibold text-white hover:opacity-90"
+              >
+                <Plus size={14} strokeWidth={2.5} />
+                New skill
+              </button>
+              <button type="button" onclick={() => agentSettingsStore.setActiveTab('settings')} class="rounded-lg px-3 py-1.5 text-xs text-[var(--color-text-muted)] hover:bg-[var(--color-surface-3)]">Back to controls</button>
+            </div>
           </div>
+          {#if showSkillCreator}
+            <div class="mb-3 rounded-xl border border-[var(--color-accent)]/40 bg-[var(--color-surface-1)] p-3">
+              <div class="mb-3 flex items-start justify-between gap-3">
+                <div>
+                  <h4 class="text-xs font-semibold text-[var(--color-text-primary)]">Create a skill draft</h4>
+                  <p class="mt-1 text-[10px] leading-relaxed text-[var(--color-text-muted)]">Start with concrete triggers, non-triggers, a real workflow, and evidence. The draft stays inactive until its trigger tests pass and you activate it.</p>
+                </div>
+                <button type="button" onclick={() => (showSkillCreator = false)} class="rounded-md px-2 py-1 text-[10px] text-[var(--color-text-muted)] hover:bg-[var(--color-surface-3)]">Close</button>
+              </div>
+              <div class="grid gap-3 lg:grid-cols-2">
+                <label class="text-[10px] font-medium text-[var(--color-text-secondary)]">
+                  Skill name
+                  <input
+                    value={newSkillName}
+                    oninput={(event) => (newSkillName = normalizeSkillName(event.currentTarget.value))}
+                    placeholder="release-notes-review"
+                    class="mt-1 w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-0)] px-3 py-2 text-xs text-[var(--color-text-primary)] focus:border-[var(--color-accent)] focus:outline-none"
+                  />
+                </label>
+                <div class="text-[10px] font-medium text-[var(--color-text-secondary)]">
+                  Save for
+                  <div class="mt-1 flex rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-0)] p-1">
+                    {#each ['personal', 'project'] as source (source)}
+                      <button
+                        type="button"
+                        onclick={() => (newSkillSource = source as 'personal' | 'project')}
+                        class="flex-1 rounded-md px-3 py-1.5 text-xs capitalize transition-colors {newSkillSource === source ? 'bg-[var(--color-accent)] text-white' : 'text-[var(--color-text-muted)] hover:bg-[var(--color-surface-3)]'}"
+                      >{source}</button>
+                    {/each}
+                  </div>
+                </div>
+                <label class="text-[10px] font-medium text-[var(--color-text-secondary)] lg:col-span-2">
+                  What it does and when to use it
+                  <input bind:value={newSkillDescription} placeholder="Review release notes for accuracy, user impact, and missing migration guidance." class="mt-1 w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-0)] px-3 py-2 text-xs text-[var(--color-text-primary)] focus:border-[var(--color-accent)] focus:outline-none" />
+                </label>
+                <label class="text-[10px] font-medium text-[var(--color-text-secondary)]">
+                  Trigger phrases <span class="font-normal text-[var(--color-text-muted)]">· one per line</span>
+                  <textarea bind:value={newSkillTriggers} rows="2" placeholder={'release notes\nchangelog review'} class="mt-1 w-full resize-none rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-0)] px-3 py-2 text-xs text-[var(--color-text-primary)] focus:border-[var(--color-accent)] focus:outline-none"></textarea>
+                </label>
+                <label class="text-[10px] font-medium text-[var(--color-text-secondary)]">
+                  Domains <span class="font-normal text-[var(--color-text-muted)]">· one per line</span>
+                  <textarea bind:value={newSkillDomains} rows="2" placeholder={'release\ncommunication'} class="mt-1 w-full resize-none rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-0)] px-3 py-2 text-xs text-[var(--color-text-primary)] focus:border-[var(--color-accent)] focus:outline-none"></textarea>
+                </label>
+                <label class="text-[10px] font-medium text-[var(--color-text-secondary)]">
+                  Should trigger <span class="font-normal text-[var(--color-text-muted)]">· at least two, one per line</span>
+                  <textarea bind:value={newSkillPositiveExample} rows="3" placeholder={'Review these release notes before launch\nCheck this changelog for missing migration guidance'} class="mt-1 w-full resize-none rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-0)] px-3 py-2 text-xs text-[var(--color-text-primary)] focus:border-[var(--color-accent)] focus:outline-none"></textarea>
+                </label>
+                <label class="text-[10px] font-medium text-[var(--color-text-secondary)]">
+                  Should not trigger <span class="font-normal text-[var(--color-text-muted)]">· at least two, one per line</span>
+                  <textarea bind:value={newSkillNegativeExample} rows="3" placeholder={'Fix this runtime crash\nDesign a settings screen'} class="mt-1 w-full resize-none rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-0)] px-3 py-2 text-xs text-[var(--color-text-primary)] focus:border-[var(--color-accent)] focus:outline-none"></textarea>
+                </label>
+                <label class="text-[10px] font-medium text-[var(--color-text-secondary)] lg:col-span-2">
+                  Instructions
+                  <textarea bind:value={newSkillInstructions} rows="5" placeholder={'Describe the workflow in order. Include decisions, constraints, failure and recovery behavior, and what must be verified before completion.'} class="mt-1 w-full resize-y rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-0)] px-3 py-2 font-mono text-xs leading-relaxed text-[var(--color-text-primary)] focus:border-[var(--color-accent)] focus:outline-none"></textarea>
+                </label>
+                <label class="text-[10px] font-medium text-[var(--color-text-secondary)] lg:col-span-2">
+                  Completion evidence <span class="font-normal text-[var(--color-text-muted)]">· one item per line</span>
+                  <textarea bind:value={newSkillEvidence} rows="2" placeholder={'Factual review complete\nRendered output verified'} class="mt-1 w-full resize-none rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-0)] px-3 py-2 text-xs text-[var(--color-text-primary)] focus:border-[var(--color-accent)] focus:outline-none"></textarea>
+                </label>
+              </div>
+              <div class="mt-3 flex items-center justify-between gap-3">
+                <p class="text-[10px] text-[var(--color-text-muted)]">Personal skills follow you. Project skills live with this workspace.</p>
+                <button
+                  type="button"
+                  onclick={() => void createSkill()}
+                  disabled={!normalizeSkillName(newSkillName) || newSkillDescription.trim().length < 12 || newSkillInstructions.trim().length < 40 || splitSkillLines(newSkillPositiveExample).length < 2 || splitSkillLines(newSkillNegativeExample).length < 2 || (!newSkillTriggers.trim() && !newSkillPositiveExample.trim())}
+                  class="rounded-lg bg-[var(--color-accent)] px-4 py-2 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:opacity-40"
+                >Create draft</button>
+              </div>
+            </div>
+          {/if}
           <div class="flex gap-2">
             <input
               bind:value={skillPreviewPrompt}
@@ -940,23 +1218,29 @@
             </div>
             {#if preview.selected.length}
               <div class="mt-2 flex flex-wrap gap-1.5">
-                {#each preview.selected as item}
+                {#each preview.selected as item (item.skill.hash)}
                   <span
-                    title={item.reason}
-                    class="rounded bg-[var(--color-accent)]/10 px-2 py-1 text-[10px] text-[var(--color-accent)]"
-                    >{item.skill.name} · {item.contextCost}</span
+                    title={`${item.reason}${item.representation === 'full' ? '' : ` · ${item.omittedDetailChars} detailed characters omitted to fit context`}`}
+                    class="rounded px-2 py-1 text-[10px] {item.representation === 'full' ? 'bg-[var(--color-accent)]/10 text-[var(--color-accent)]' : 'bg-[var(--color-warning)]/10 text-[var(--color-warning)]'}"
+                    >{item.skill.name} · {item.representation} · {item.contextCost}</span
                   >
                 {/each}
               </div>
             {/if}
-            {#each preview.collisions as collision}
+            {#if preview.compressedByBudget.length}
+              <div class="mt-2 rounded-lg border border-[var(--color-warning)]/30 bg-[var(--color-warning)]/5 p-2 text-[10px] leading-relaxed text-[var(--color-text-secondary)]">
+                Context-aware compression is active. Koryphaios retained each affected skill’s operating contract, safety boundaries, and completion evidence while omitting extended rationale and examples:
+                {preview.compressedByBudget.map((item) => `${item.name} (${item.representation}, ${item.contextCost}/${item.fullContextCost} chars)`).join(' · ')}
+              </div>
+            {/if}
+            {#each preview.collisions as collision (collision.name)}
               <div
                 class="mt-2 flex flex-wrap items-center gap-2 rounded-lg border border-[var(--color-warning)]/40 bg-[var(--color-warning)]/5 p-2 text-[10px]"
               >
                 <span class="text-[var(--color-text-secondary)]"
                   >Choose {collision.name} for this preview:</span
                 >
-                {#each ['project', 'personal'] as source}
+                {#each ['project', 'personal'] as source (source)}
                   <button
                     type="button"
                     onclick={() => {
@@ -994,8 +1278,7 @@
             <div
               class="px-2 py-2 text-[10px] font-semibold uppercase tracking-wide text-[var(--color-text-muted)]"
             >
-              Local library · {agentSettingsStore.skills.filter((skill) => skill.state === 'active')
-                .length} active
+              Local library · {activeSkillCount} active
             </div>
             {#each agentSettingsStore.skills as skill (`${skill.source}:${skill.name}:${skill.state}`)}
               <button
@@ -1076,17 +1359,17 @@
                     class="rounded bg-[var(--color-accent)]/10 px-1.5 py-0.5 text-[var(--color-accent)]"
                     >parent: {selectedSkill.metadata.parent}</span
                   >{/if}
-                {#each selectedSkill.metadata.domains as domain}<span
+                {#each selectedSkill.metadata.domains as domain (domain)}<span
                     class="rounded bg-[var(--color-surface-3)] px-1.5 py-0.5">{domain}</span
                   >{/each}
-                {#each selectedSkill.metadata.activation as term}<span
+                {#each selectedSkill.metadata.activation as term (term)}<span
                     class="rounded bg-[var(--color-surface-3)] px-1.5 py-0.5">trigger: {term}</span
                   >{/each}
-                {#each selectedSkill.metadata.requires as requirement}<span
+                {#each selectedSkill.metadata.requires as requirement (requirement)}<span
                     class="rounded bg-[var(--color-info)]/10 px-1.5 py-0.5 text-[var(--color-info)]"
                     >requires: {requirement}</span
                   >{/each}
-                {#each selectedSkill.metadata.conflicts as conflict}<span
+                {#each selectedSkill.metadata.conflicts as conflict (conflict)}<span
                     class="rounded bg-[var(--color-warning)]/10 px-1.5 py-0.5 text-[var(--color-warning)]"
                     >conflicts: {conflict}</span
                   >{/each}
@@ -1105,7 +1388,7 @@
                   <span class="font-semibold text-[var(--color-text-secondary)]"
                     >Measured harness evidence:</span
                   >
-                  {#each selectedSkillQualifications as record}
+                  {#each selectedSkillQualifications as record, i (i)}
                     <span class="ml-2"
                       >{record.provider}:{record.model} · {record.role} · {record.successes}/{record.sampleSize}
                       pass · quality {Math.round(record.quality * 100)}%</span
@@ -1133,7 +1416,7 @@
                     >{gate.status}</span
                   >
                   <span class="ml-2"
-                    >{gate.candidateRuns} observed runs · {gate.humanBlindReviews} blinded review{gate.humanBlindReviews ===
+                    >{gate.candidateRuns} observed runs · {gate.distinctProviders} providers · {gate.distinctModels} models · {gate.humanBlindReviews} blinded review{gate.humanBlindReviews ===
                     1
                       ? ''
                       : 's'}</span

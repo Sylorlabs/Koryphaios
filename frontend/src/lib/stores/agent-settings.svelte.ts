@@ -16,6 +16,8 @@ import { apiFetch } from '$lib/api.svelte';
 export interface AgentSettings {
   ruleEnforcementLevel: 'strict' | 'moderate' | 'lenient';
   agentExecutionMode: 'auto' | 'single' | 'multi';
+  /** Default approval behavior exposed in the composer permission picker. */
+  permissionMode: 'yolo' | 'guarded' | 'edits' | 'ask' | 'plan' | 'custom';
   preferencesEnabled: boolean;
   criticGateEnabled: boolean;
   gateStrictness: 'strict' | 'advisory' | 'off';
@@ -39,6 +41,8 @@ export interface AgentSettings {
   maxCriticIterations: number;
   approvalThresholdFiles: number;
   approvalThresholdLines: number;
+  /** Apply the configured file/line approval thresholds. Off by default. */
+  autonomyLimitsEnabled: boolean;
   /** Experimental: Local Web Search (DuckDuckGo) */
   localWebSearch: 'off' | 'on' | 'fallback';
   /** Experimental: Multi-source research requirements */
@@ -51,8 +55,6 @@ export interface AgentSettings {
   contextPruneMinChars: number;
   /** Live context-usage report injected each turn so the agent self-manages */
   contextSelfAwareness: boolean;
-  /** Automatically compact completed conversations before the model window is exhausted. */
-  autoCompactEnabled: boolean;
   /** Show complete reasoning blocks expanded in the chat feed by default */
   reasoningExpandedByDefault: boolean;
 }
@@ -132,6 +134,8 @@ export interface SkillPromotionGate {
   status: 'unmeasured' | 'insufficient-evidence' | 'blocked' | 'ready';
   candidateRuns: number;
   distinctHarnesses: number;
+  distinctProviders: number;
+  distinctModels: number;
   humanBlindReviews: number;
   passRate: number | null;
   quality: number | null;
@@ -172,11 +176,25 @@ export interface SkillRevisionComparison {
 }
 
 export interface SkillResolutionPreview {
-  selected: Array<{ skill: SkillRevision; reason: string; contextCost: number }>;
+  selected: Array<{
+    skill: SkillRevision;
+    reason: string;
+    representation: 'full' | 'compact' | 'minimal';
+    contextCost: number;
+    fullContextCost: number;
+    omittedDetailChars: number;
+  }>;
   collisions: Array<{ name: string; personalHash: string; projectHash: string }>;
   selectionConflicts: Array<{ left: string; right: string }>;
   hierarchyErrors: string[];
   omittedByBudget: string[];
+  compressedByBudget: Array<{
+    name: string;
+    representation: 'compact' | 'minimal';
+    fullContextCost: number;
+    contextCost: number;
+    omittedDetailChars: number;
+  }>;
   blocked: boolean;
   totalContextCost: number;
 }
@@ -188,14 +206,15 @@ export interface SkillResolutionPreview {
 export const DEFAULT_AGENT_SETTINGS: AgentSettings = {
   ruleEnforcementLevel: 'strict',
   agentExecutionMode: 'auto',
+  permissionMode: 'guarded',
   preferencesEnabled: true,
   criticGateEnabled: true,
   gateStrictness: 'strict',
-  intentInterview: 'adaptive',
+  intentInterview: 'off',
   goalPlanningDepth: 'adaptive',
   automaticGoalDriving: true,
-  designDiscovery: true,
-  planApproval: 'material',
+  designDiscovery: false,
+  planApproval: 'never',
   modelQualification: 'enforce',
   feedbackSharing: 'local',
   skillLearningMode: 'propose-then-verify',
@@ -211,14 +230,14 @@ export const DEFAULT_AGENT_SETTINGS: AgentSettings = {
   maxCriticIterations: 3,
   approvalThresholdFiles: 5,
   approvalThresholdLines: 100,
+  autonomyLimitsEnabled: false,
   localWebSearch: 'fallback',
   multiSourceResearch: true,
   contextPruningEnabled: true,
   contextKeepRecentTurns: 3,
   contextPruneMinChars: 600,
   contextSelfAwareness: true,
-  autoCompactEnabled: true,
-  reasoningExpandedByDefault: true,
+  reasoningExpandedByDefault: false,
 };
 
 // ============================================================================
@@ -407,6 +426,34 @@ function createAgentSettingsStore() {
       if (res.ok && data.ok) skillEvaluationCards = { ...skillEvaluationCards, [key]: data.data };
     } catch (err) {
       console.error('Failed to load skill evaluation card:', err);
+    }
+  }
+
+  async function createSkillDraft(input: {
+    source: 'personal' | 'project';
+    name: string;
+    description: string;
+    instructions: string;
+    domains: string[];
+    activation: string[];
+    shouldTrigger: string[];
+    shouldNotTrigger: string[];
+    evidence: string[];
+  }): Promise<SkillRevision | null> {
+    try {
+      const res = await apiFetch(apiUrl('/api/agent/skills'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(input),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.ok) throw new Error(data.error);
+      await loadSkills();
+      toastStore.success('Skill draft created');
+      return data.data as SkillRevision;
+    } catch (err: any) {
+      toastStore.error(err?.message ?? 'Failed to create skill draft');
+      return null;
     }
   }
 
@@ -646,6 +693,7 @@ function createAgentSettingsStore() {
     loadSkills,
     loadSkillQualifications,
     loadSkillEvaluationCard,
+    createSkillDraft,
     saveSkillDraft,
     testAndActivateSkill,
     compareSkillDraft,

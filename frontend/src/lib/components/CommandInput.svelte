@@ -8,6 +8,7 @@
   import { agentSettingsStore } from '$lib/stores/agent-settings.svelte';
   import { getReasoningConfig, buildReasoningConfigFromLevels } from '@koryphaios/shared';
   import BrainIcon from '$lib/components/icons/BrainIcon.svelte';
+  import ProviderIcon from '$lib/components/icons/ProviderIcon.svelte';
   import { getModelConfigurationWarning, isEnabledModelSelection, parseProviderModelSelection } from '$lib/utils/model-config';
   import { invoke } from '@tauri-apps/api/core';
   import { toastStore } from '$lib/stores/toast.svelte';
@@ -1015,6 +1016,9 @@
             if (showModelPicker) modelSearchQuery = '';
           }}
         >
+          {#if selectedModel}
+            <ProviderIcon provider={currentProvider} size={16} class="shrink-0" />
+          {/if}
           <span>{selectedModelLabel}</span>
           <ChevronDown size={14} class="text-text-muted" />
         </button>
@@ -1060,6 +1064,7 @@
                   style="color: {selectedModel === model.value ? 'var(--color-accent)' : 'var(--color-text-secondary)'};"
                   onclick={() => selectModel(model.value)}
                 >
+                  <ProviderIcon provider={model.provider} size={16} class="shrink-0" />
                   <span class="flex-1 min-w-0 truncate">{model.label}</span>
                 </button>
               {/each}
