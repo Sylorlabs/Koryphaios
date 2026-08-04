@@ -49,6 +49,7 @@ import {
   LoadSkillDetailTool,
   StartWorkflowTool,
   UpdateWorkflowTool,
+  CreateWorkflowDraftTool,
   GetResourceBudgetTool,
 } from './tools';
 import { initMCP } from './mcp/client';
@@ -240,6 +241,7 @@ async function initTools(providers: ProviderRegistry) {
     new LoadSkillDetailTool(),
     new StartWorkflowTool(),
     new UpdateWorkflowTool(),
+    new CreateWorkflowDraftTool(),
     new GetResourceBudgetTool(providers),
   ];
 

@@ -44,7 +44,8 @@ describe('sandbox runner (bwrap wrap)', () => {
 
   test('capability report matches platform', () => {
     expect(caps.platform).toBe(process.platform);
-    if (process.platform !== 'linux') expect(caps.osIsolation).toBe(false);
+    // macOS has sandbox-exec (Seatbelt); only Windows lacks OS-level isolation.
+    if (process.platform === 'win32') expect(caps.osIsolation).toBe(false);
   });
 
   test('non-isolating policy passes the command through unchanged', () => {
