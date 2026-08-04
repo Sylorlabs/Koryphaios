@@ -80,7 +80,8 @@ export const mcpBridgeRoutes = new Elysia({ prefix: '/api/v1/mcp-bridge' })
           (goal.status === 'queued' || goal.status === 'planning' || goal.status === 'running'),
       );
       const activeGoalItem = activeGoal?.checklist.find((item) => item.status === 'running');
-      const root = workingDirectory || (session as any).workingDirectory || process.cwd();
+      // The authenticated session owns the workspace and its saved policy.
+      const root = (session as any).workingDirectory || workingDirectory || process.cwd();
       const ctx: ToolContext = {
         sessionId,
         ...(activeGoal ? { goalId: activeGoal.id } : {}),

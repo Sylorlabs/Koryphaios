@@ -1527,6 +1527,7 @@ export class KoryManager {
       workingDirectory: criticSessionWd,
       allowedPaths: [criticSessionWd],
       isSandboxed: true,
+      permissionPolicy: resolveToolPermissionPolicy(loadAgentSettings(criticSessionWd), 'plan'),
       signal: criticAbort.signal,
     };
 
