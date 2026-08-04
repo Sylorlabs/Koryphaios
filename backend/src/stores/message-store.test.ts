@@ -136,5 +136,11 @@ describe('MessageStore history editing', () => {
     expect(
       await db.select().from(sessionCompactions).where(eq(sessionCompactions.sessionId, sessionId)),
     ).toHaveLength(1);
+
+    await db.delete(sessions).where(eq(sessions.id, sessionId));
+    expect(await store.getAll(sessionId)).toHaveLength(0);
+    expect(
+      await db.select().from(sessionCompactions).where(eq(sessionCompactions.sessionId, sessionId)),
+    ).toHaveLength(0);
   });
 });
