@@ -150,13 +150,16 @@ describe('Git Workflow Integration Tests', () => {
       // Verify worktree directory exists
       expect(existsSync(worktree!.path)).toBe(true);
 
-      // Verify it's a valid worktree
+      // Verify it's a valid worktree. Git on Windows outputs forward slashes
+      // in worktree list, while path.join uses backslashes — normalize both.
       const result = spawnSync(['git', 'worktree', 'list'], {
         cwd: TEST_DIR,
         stdout: 'pipe',
         stderr: 'pipe',
       });
-      expect(result.stdout.toString()).toContain(worktree!.path);
+      const gitOutput = result.stdout.toString().replace(/\\/g, '/');
+      const worktreePath = worktree!.path.replace(/\\/g, '/');
+      expect(gitOutput).toContain(worktreePath);
     });
 
     test('should track active worktrees', () => {

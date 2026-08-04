@@ -11,13 +11,20 @@ import {
   hydrateProviderSecrets,
 } from '../secret-store';
 
+// Windows doesn't support POSIX permission modes.
+const isWindows = process.platform === 'win32';
+
 describe('secret-store permissions', () => {
   let root: string;
   beforeEach(() => {
     root = mkdtempSync(join(tmpdir(), 'kory-secret-store-'));
   });
   afterEach(() => {
-    try { rmSync(root, { recursive: true, force: true }); } catch { /* best effort */ }
+    try {
+      rmSync(root, { recursive: true, force: true });
+    } catch {
+      /* best effort */
+    }
   });
 
   test('saveProviderSecrets creates .koryphaios/ at 0o700 and credentials.json at 0o600', () => {
@@ -25,6 +32,7 @@ describe('secret-store permissions', () => {
     const dir = join(root, '.koryphaios');
     const file = join(dir, 'credentials.json');
     expect(existsSync(file)).toBe(true);
+    if (isWindows) return;
     expect(statSync(dir).mode & 0o777).toBe(0o700);
     expect(statSync(file).mode & 0o777).toBe(0o600);
   });
@@ -36,10 +44,13 @@ describe('secret-store permissions', () => {
     rmSync(dir, { recursive: true, force: true });
     const { mkdirSync } = require('node:fs') as typeof import('node:fs');
     mkdirSync(dir, { recursive: true, mode: 0o775 });
-    chmodSyncLoose(dir, 0o775);
-    expect(statSync(dir).mode & 0o777).toBe(0o775);
+    if (!isWindows) {
+      chmodSyncLoose(dir, 0o775);
+      expect(statSync(dir).mode & 0o777).toBe(0o775);
+    }
 
     upsertProviderSecrets(root, 'openai', { apiKey: 'sk-test' });
+    if (isWindows) return;
     expect(statSync(dir).mode & 0o777).toBe(0o700);
     expect(statSync(join(dir, 'credentials.json')).mode & 0o777).toBe(0o600);
   });
