@@ -78,7 +78,7 @@ describe('Tool Execution', () => {
       { id: '1', name: 'read_file', input: { path: 'test.txt' } },
     );
 
-    expect(result.isError).toBe(false);
+    expect(result.isError, `read_file output: ${result.output}`).toBe(false);
     expect(result.output).toContain('Hello, World!');
   });
 
@@ -88,7 +88,7 @@ describe('Tool Execution', () => {
       { id: '2', name: 'write_file', input: { path: 'new.txt', content: 'New content' } },
     );
 
-    expect(result.isError).toBe(false);
+    expect(result.isError, `write_file output: ${result.output}`).toBe(false);
 
     // Verify file was created
     const content = readFileSync(join(TEST_DIR, 'new.txt'), 'utf-8');
@@ -236,8 +236,10 @@ describe('Message Store', () => {
   test('should add messages to a session', async () => {
     const session = await sessions.create('user1', 'Test');
 
+    // Use a per-session-unique id: the messages table persists across test runs, so a
+    // hardcoded id collides on the PRIMARY KEY on the second run.
     await messages.add(session.id, {
-      id: 'msg1',
+      id: `msg-${session.id}`,
       sessionId: session.id,
       role: 'user',
       content: 'Hello',

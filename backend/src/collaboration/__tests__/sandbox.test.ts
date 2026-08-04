@@ -58,24 +58,27 @@ describe('sandbox runner (bwrap wrap)', () => {
     expect(r.isolated).toBe(false);
   });
 
-  test('isolating policy either wraps in bwrap or (no bwrap) passes through', () => {
+  test('isolating policy either wraps in bwrap/seatbelt or (no sandbox) passes through', () => {
     const r = wrapCommand('claude', ['-p', '--model', 'x'], {
       cwd: '/tmp/proj',
       configDirs: ['/tmp/cfg'],
       policy: { ...SANDBOX_PRESETS.balanced },
     });
     if (caps.osIsolation) {
-      // bwrap available: the real command is jailed.
-      expect(r.command).toContain('bwrap');
+      // OS sandbox available: the real command is jailed.
       expect(r.isolated).toBe(true);
-      expect(r.args).toContain('--');
-      // The project is bound and set as cwd; network is allowed (no --unshare-net).
-      expect(r.args).toContain('--bind');
-      expect(r.args).toContain('/tmp/proj');
-      expect(r.args).not.toContain('--unshare-net');
-      // The wrapped program is still claude with its args after `--`.
-      const dash = r.args.indexOf('--');
-      expect(r.args.slice(dash + 1)).toEqual(['claude', '-p', '--model', 'x']);
+      if (caps.mechanism === 'bubblewrap') {
+        expect(r.command).toContain('bwrap');
+        expect(r.args).toContain('--');
+        expect(r.args).toContain('--bind');
+        expect(r.args).toContain('/tmp/proj');
+        expect(r.args).not.toContain('--unshare-net');
+        const dash = r.args.indexOf('--');
+        expect(r.args.slice(dash + 1)).toEqual(['claude', '-p', '--model', 'x']);
+      } else if (caps.mechanism === 'seatbelt') {
+        // macOS sandbox-exec wraps the command differently.
+        expect(r.command).toContain('sandbox-exec');
+      }
     } else {
       // No OS sandbox: graceful passthrough (tool-level gating still applies).
       expect(r.command).toBe('claude');
