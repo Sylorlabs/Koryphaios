@@ -1,7 +1,8 @@
 <script lang="ts">
-  import { X, Search, Check, Info, Sparkles } from 'lucide-svelte';
+  import { X, Search, Check, Sparkles } from 'lucide-svelte';
   import { fade, scale } from 'svelte/transition';
   import type { ProviderName, ModelDef } from '@koryphaios/shared';
+  import Switch from './ui/Switch.svelte';
 
   interface Props {
     providerName: ProviderName;
@@ -17,9 +18,10 @@
   let localSelected = $state<string[]>([]);
   let dontAskAgain = $state(false);
 
-  // Initialize local selection - only when dialog opens
+  // The dialog is mounted only while it is open, so initialize from the
+  // provider's current preference exactly once for this mount.
   $effect(() => {
-    if (open && availableModels.length > 0 && localSelected.length === 0) {
+    if (availableModels.length > 0 && localSelected.length === 0) {
       localSelected = selectedModels.length > 0 ? [...selectedModels] : availableModels.map(m => m.id);
     }
   });
@@ -60,16 +62,24 @@
   }
 </script>
 
-<div class="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/70 backdrop-blur-md" transition:fade={{ duration: 200 }}>
+<div
+  class="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/70 backdrop-blur-md"
+  transition:fade={{ duration: 200 }}
+  onkeydown={(event) => event.key === 'Escape' && onClose()}
+  role="presentation"
+>
   <div 
     class="relative w-full max-w-lg max-h-[80vh] flex flex-col rounded-2xl shadow-2xl overflow-hidden border"
     style="background: var(--color-surface-1); border-color: var(--color-border-bright);"
     transition:scale={{ duration: 200, start: 0.95 }}
+    role="dialog"
+    aria-modal="true"
+    aria-labelledby="model-dialog-title"
   >
     <!-- Header -->
     <div class="px-6 py-4 border-b flex items-center justify-between" style="border-color: var(--color-border);">
       <div>
-        <h3 class="text-lg font-bold capitalize" style="color: var(--color-text-primary);">{providerName} Models</h3>
+        <h3 id="model-dialog-title" class="text-lg font-bold capitalize" style="color: var(--color-text-primary);">{providerName} Models</h3>
         <p class="text-[11px]" style="color: var(--color-text-muted);">Select which models you want to enable for this provider.</p>
       </div>
       <button class="p-2 rounded-full hover:bg-[var(--color-surface-3)] transition-colors" onclick={onClose}>
@@ -144,16 +154,12 @@
     <!-- Footer -->
     <div class="px-6 py-4 border-t bg-[var(--color-surface-0)] flex flex-col gap-4" style="border-color: var(--color-border);">
       <div class="flex items-center justify-between">
-        <label class="flex items-center gap-2 cursor-pointer group">
-          <input type="checkbox" bind:checked={dontAskAgain} class="hidden" />
-          <div class="w-4 h-4 rounded border flex items-center justify-center transition-colors
-                      {dontAskAgain ? 'bg-[var(--color-text-muted)] border-[var(--color-text-muted)]' : 'border-white/10 group-hover:border-white/20'}">
-            {#if dontAskAgain}
-              <Check size={10} class="text-white" />
-            {/if}
-          </div>
-          <span class="text-xs select-none" style="color: var(--color-text-muted);">Don't ask again for this provider</span>
-        </label>
+        <div class="flex items-center gap-2">
+          <Switch id="hide-model-selector" ariaLabel="Don't ask again for this provider" bind:checked={dontAskAgain} />
+          <label for="hide-model-selector" class="text-xs select-none cursor-pointer" style="color: var(--color-text-muted);">
+            Don't ask again for this provider
+          </label>
+        </div>
         
         <button class="text-xs font-semibold opacity-60 hover:opacity-100 transition-opacity" onclick={skip}>
           Skip & Enable All

@@ -8,6 +8,8 @@
   import { memoryStore } from '$lib/stores/memory.svelte';
   import { agentSettingsStore } from '$lib/stores/agent-settings.svelte';
   import { apiFetch, parseJsonResponse } from '$lib/api.svelte';
+  import type { ProviderInfo } from '@koryphaios/shared';
+  import type { ThemePreset } from '$lib/stores/theme.svelte';
 
   // Refresh providers from API when settings drawer opens
   $effect(() => {
@@ -55,7 +57,7 @@
   let availableProviderTypes = $state<Array<{ name: string; authMode: string }>>([]);
   let expandedProvider = $state<string | null>(null);
   let showModelSelector = $state(false);
-  let selectorTarget = $state<any>(null);
+  let selectorTarget = $state<ProviderInfo | null>(null);
   let keyInputs: Record<string, string> = $state({});
   let saving = $state<string | null>(null);
 
@@ -122,6 +124,11 @@
         expandedProvider = null;
         // Force refresh providers from API
         await wsStore.loadProvidersFromApi();
+        const status = getProviderStatus(name);
+        if (status && !status.hideModelSelector && status.allAvailableModels.length > 0) {
+          selectorTarget = status;
+          showModelSelector = true;
+        }
       } else {
         throw new Error(data?.error || 'Connection failed');
       }
@@ -134,6 +141,32 @@
 
   function getProviderStatus(name: string) {
     return wsStore.providers.find((p: any) => p.name === name);
+  }
+
+  function manageModels(provider: ProviderInfo) {
+    selectorTarget = provider;
+    showModelSelector = true;
+  }
+
+  async function saveSelectedModels(selectedModels: string[], hideModelSelector: boolean) {
+    if (!selectorTarget) return;
+
+    try {
+      const res = await apiFetch(`/api/providers/${encodeURIComponent(selectorTarget.name)}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ selectedModels, hideModelSelector })
+      });
+      const data = await parseJsonResponse(res);
+      if (!data?.ok) throw new Error(data?.error || 'Failed to update models');
+
+      showModelSelector = false;
+      selectorTarget = null;
+      await wsStore.loadProvidersFromApi();
+      toastStore.success('Models updated');
+    } catch (err) {
+      toastStore.error(err instanceof Error ? err.message : 'Failed to update models');
+    }
   }
 
   // Click outside to close
@@ -149,7 +182,7 @@
   <div
     class="fixed inset-0 bg-black/50 z-40 backdrop-blur-sm"
     onclick={handleBackdropClick}
-    onkeydown={(e) => e.key === 'Escape' && handleBackdropClick()}
+    onkeydown={(e) => e.key === 'Escape' && onClose?.()}
     transition:fade={{ duration: 150 }}
     role="button"
     tabindex="-1"
@@ -326,18 +359,29 @@
                   {#if expandedProvider === prov.key}
                     <div class="px-4 pb-4 border-t" style="border-color: var(--color-border);" transition:slide={{ duration: 200 }}>
                       {#if status?.authenticated}
-                        <div class="pt-4 flex items-center justify-between">
+                        <div class="pt-4 flex items-center justify-between gap-3">
                           <div class="flex items-center gap-2">
                             <Check size={16} style="color: var(--color-success);" />
                             <span class="text-sm" style="color: var(--color-success);">Connected</span>
                             <span class="text-xs" style="color: var(--color-text-muted);">({status.models?.length || 0} models)</span>
                           </div>
-                          <button
-                            onclick={() => {/* disconnect */}}
-                            class="text-xs px-3 py-1.5 rounded-lg text-red-400 hover:bg-red-400/10 transition-colors"
-                          >
-                            Disconnect
-                          </button>
+                          <div class="flex items-center gap-2">
+                            {#if status.allAvailableModels.length > 0}
+                              <button
+                                onclick={() => manageModels(status)}
+                                class="text-xs px-3 py-1.5 rounded-lg transition-colors"
+                                style="background: var(--color-surface-2); color: var(--color-text-secondary);"
+                              >
+                                Manage models
+                              </button>
+                            {/if}
+                            <button
+                              onclick={() => {/* disconnect */}}
+                              class="text-xs px-3 py-1.5 rounded-lg text-red-400 hover:bg-red-400/10 transition-colors"
+                            >
+                              Disconnect
+                            </button>
+                          </div>
                         </div>
                       {:else}
                         <div class="pt-4 space-y-3">
@@ -378,14 +422,18 @@
               >
                 <span class="block text-sm font-medium mb-3" style="color: var(--color-text-primary);">Theme</span>
                 <div class="grid grid-cols-3 gap-2">
-                  {#each ['light', 'dark', 'system'] as t}
+                  {#each [
+                    { id: 'light' as ThemePreset, label: 'Light' },
+                    { id: 'kintsugi' as ThemePreset, label: 'Dark' },
+                    { id: 'system' as ThemePreset, label: 'System' }
+                  ] as option}
                     <button
                       class="px-4 py-2 rounded-lg text-sm border transition-all"
-                      class:active={theme.current === t}
-                      style="border-color: {theme.current === t ? 'var(--color-accent)' : 'var(--color-border)'}; background: {theme.current === t ? 'var(--color-accent)/10' : 'var(--color-surface-0)'};"
-                      onclick={() => theme.set(t as any)}
+                      class:active={theme.preset === option.id}
+                      style="border-color: {theme.preset === option.id ? 'var(--color-accent)' : 'var(--color-border)'}; background: {theme.preset === option.id ? 'var(--color-surface-3)' : 'var(--color-surface-0)'};"
+                      onclick={() => theme.setPreset(option.id)}
                     >
-                      {t.charAt(0).toUpperCase() + t.slice(1)}
+                      {option.label}
                     </button>
                   {/each}
                 </div>
@@ -443,14 +491,20 @@
   </div>
 {/if}
 
-<ModelSelectionDialog bind:open={showModelSelector} target={selectorTarget} />
+{#if showModelSelector && selectorTarget}
+  <ModelSelectionDialog
+    providerName={selectorTarget.name}
+    availableModels={selectorTarget.allAvailableModels}
+    selectedModels={selectorTarget.selectedModels}
+    onSave={saveSelectedModels}
+    onClose={() => {
+      showModelSelector = false;
+      selectorTarget = null;
+    }}
+  />
+{/if}
 
 <style>
-  /* Fixed size drawer - doesn't grow beyond viewport */
-  :global(.fixed.inset-y-4.right-4) {
-    /* Drawer is positioned with fixed margins and max-height */
-  }
-  
   button.active {
     background: var(--color-surface-3);
     color: var(--color-text-primary);
