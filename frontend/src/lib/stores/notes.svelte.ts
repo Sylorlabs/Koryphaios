@@ -615,9 +615,65 @@ async function importMemoryAsNotes(): Promise<void> {
     if (res.ok) {
       const data = await res.json();
       if (data.ok) {
-        const count = Array.isArray(data.data) ? data.data.length : 0;
+        const imported = Array.isArray(data.data) ? (data.data as Note[]) : [];
+        const count = imported.length;
+        const previousById = new Map(_notes.map((note) => [note.id, note]));
+        const importedById = new Map(imported.map((note) => [note.id, note]));
+
+        // The import response already contains the authoritative notes. Merge
+        // it locally instead of immediately reloading the entire notes table,
+        // graph, and folder tree. On a large library those three synchronous
+        // SQLite reads can block the backend watchdog even though the import
+        // itself succeeded.
+        _notes = [
+          ...imported,
+          ..._notes.filter((note) => !importedById.has(note.id)),
+        ];
+
+        const graphNodes = new Map(_graphData.nodes.map((node) => [node.id, node]));
+        for (const note of imported) {
+          const existingNode = graphNodes.get(note.id);
+          graphNodes.set(note.id, {
+            id: note.id,
+            title: note.title,
+            folderPath: note.folderPath,
+            tags: note.tags ?? [],
+            linkCount: existingNode?.linkCount ?? 0,
+            includeInContext: note.includeInContext,
+          });
+        }
+        _graphData = { ..._graphData, nodes: [...graphNodes.values()] };
+
+        // Folder counts only change for newly-created imports or when an
+        // existing imported note moves between folders. A later explicit
+        // Notes refresh still rebuilds the complete graph and folder tree.
+        const adjustFolderCount = (folderPath: string, delta: number) => {
+          const parts = folderPath.split('/').filter(Boolean);
+          let nodes = _folderTree;
+          let path = '';
+          for (const part of parts) {
+            path += `/${part}`;
+            let node = nodes.find((candidate) => candidate.path === path);
+            if (!node) {
+              node = { path, name: part, noteCount: 0, children: [] };
+              nodes.push(node);
+              nodes.sort((a, b) => a.name.localeCompare(b.name));
+            }
+            if (path === folderPath) node.noteCount = Math.max(0, node.noteCount + delta);
+            nodes = node.children;
+          }
+        };
+        _folderTree = structuredClone(_folderTree);
+        for (const note of imported) {
+          const previous = previousById.get(note.id);
+          if (!previous) adjustFolderCount(note.folderPath, 1);
+          else if (previous.folderPath !== note.folderPath) {
+            adjustFolderCount(previous.folderPath, -1);
+            adjustFolderCount(note.folderPath, 1);
+          }
+        }
+
         toastStore.success(count === 1 ? 'Imported 1 memory note' : `Imported ${count} memory notes`);
-        await Promise.all([fetchNotes(), fetchGraph(), fetchFolderTree()]);
       } else {
         toastStore.error(data.error ?? 'Failed to import memory');
       }

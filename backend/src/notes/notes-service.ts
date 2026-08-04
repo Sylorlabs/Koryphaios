@@ -1319,16 +1319,20 @@ export async function importMemoryAsNotes(projectRoot: string): Promise<Note[]> 
   ];
 
   const imported: Note[] = [];
-  const existingNotes = await db
-    .select()
-    .from(notes)
-    .where(like(notes.tags, '%' + MEMORY_IMPORT_TAG_PREFIX + '%'));
 
   for (const { title, content, folderPath, importKey } of candidates) {
     if (!content.trim()) continue;
 
     const importTag = MEMORY_IMPORT_TAG_PREFIX + importKey;
-    const existingRow = existingNotes.find((row) => {
+    // Title is indexed. Narrow the lookup before parsing the source tag so a
+    // large Notes library does not scan and deserialize every note merely to
+    // import a handful of memory documents.
+    const matchingRows = await db
+      .select()
+      .from(notes)
+      .where(and(eq(notes.title, title), eq(notes.folderPath, folderPath)))
+      .limit(100);
+    const existingRow = matchingRows.find((row) => {
       try {
         return JSON.parse(row.tags || '[]').includes(importTag);
       } catch {

@@ -49,12 +49,8 @@ export function getModelConfigurationWarning(
 
   const { provider, model } = parseProviderModelSelection(preferredModel);
   if (provider && model) {
-    const selectedProvider = authenticatedProviders.find((item) => item.name === provider);
-    if (!selectedProvider) {
-      return `${formatProviderName(provider)} is not configured. Open Settings and connect it.`;
-    }
-    if (!selectedProvider.models.includes(model)) {
-      return `${model} is not enabled for ${formatProviderName(provider)}. Open Settings -> Manage Models and enable it.`;
+    if (!isEnabledModelSelection(providers, preferredModel)) {
+      return `${model} is no longer available for ${formatProviderName(provider)}. Select another model in the composer.`;
     }
   }
 
