@@ -1012,19 +1012,12 @@ pub fn run() {
                                 return;
                             }
                             Ok(actual_port) => {
-                                // Backend is up and serving the bundled frontend —
-                                // navigate the window there so the ENTIRE app runs
-                                // from one origin (API, WS, images: all same-origin).
-                                // Use actual_port (may differ from config port if
-                                // the backend fell back due to EADDRINUSE).
-                                if let Some(window) = nav_handle.get_webview_window("main") {
-                                    let url = format!("http://{}:{}/", nav_host, actual_port);
-                                    if let Ok(parsed) = url.parse() {
-                                        if let Err(e) = window.navigate(parsed) {
-                                            eprintln!("[Koryphaios] Failed to navigate to backend: {}", e);
-                                        }
-                                    }
-                                }
+                                // Keep the packaged UI on Tauri's local app origin.
+                                // Navigating a native app to localhost makes macOS
+                                // Screen Time treat it as a web site, so web limits
+                                // can block Koryphaios rather than the app appearing
+                                // under its own name. The frontend already obtains the
+                                // local API/WS URLs through Tauri commands.
                                 emit_backend_ready(&ready_handle, process_pid, nav_host.clone(), actual_port);
                             }
                         }
@@ -1078,14 +1071,9 @@ pub fn run() {
                                     .await;
                                     match ready {
                                         Ok(actual_port) => {
-                                            if let Some(window) =
-                                                watch_handle.get_webview_window("main")
-                                            {
-                                                let url = format!("http://{}:{}/", watch_host, actual_port);
-                                                if let Ok(parsed) = url.parse() {
-                                                    let _ = window.navigate(parsed);
-                                                }
-                                            }
+                                            // Do not navigate the packaged WebView
+                                            // to localhost on backend recovery; its
+                                            // health sentinel resumes API traffic.
                                             emit_backend_ready(
                                                 &watch_handle,
                                                 new_pid,
@@ -1227,23 +1215,32 @@ pub fn run() {
                 // Set up file drop handler
                 setup_file_drop_handler(&window);
 
-                // Set up window event handler for state persistence
-                let app_handle = app.handle().clone();
-                window.on_window_event(move |event| {
-                    match event {
-                        WindowEvent::Resized(_) | WindowEvent::Moved(_) => {
-                            if let Some(window) = app_handle.get_webview_window("main") {
-                                // Don't save state if maximized
-                                if let Ok(false) = window.is_maximized() {
-                                    if let Ok(state) = window_state(&window) {
-                                        let _ = save_window_state(&app_handle, state);
+                // Persisting geometry on macOS queries `is_maximized()` from a
+                // resize callback. On current macOS releases that query can
+                // itself trigger another resize/style update, creating a tight
+                // AppKit event loop before the WebView gets a chance to load.
+                // Keep persistence on the other platforms; macOS can safely
+                // use its normal initial window geometry until this is fixed
+                // upstream in tao/wry.
+                #[cfg(not(target_os = "macos"))]
+                {
+                    let app_handle = app.handle().clone();
+                    window.on_window_event(move |event| {
+                        match event {
+                            WindowEvent::Resized(_) | WindowEvent::Moved(_) => {
+                                if let Some(window) = app_handle.get_webview_window("main") {
+                                    // Don't save state if maximized
+                                    if let Ok(false) = window.is_maximized() {
+                                        if let Ok(state) = window_state(&window) {
+                                            let _ = save_window_state(&app_handle, state);
+                                        }
                                     }
                                 }
                             }
+                            _ => {}
                         }
-                        _ => {}
-                    }
-                });
+                    });
+                }
             }
 
             // Set up exit handler to kill backend
