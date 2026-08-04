@@ -81,7 +81,8 @@
   >();
   let lastIdleEscapeAt = 0;
   let zenMode = $state(false);
-  let settingsInitialTab = $state<'providers' | 'experimental'>('providers');
+  let settingsInitialTab = $state<'providers' | 'agent' | 'experimental'>('providers');
+  let settingsInitialAgentSection = $state<'permissions' | undefined>(undefined);
   let inputRef = $state<HTMLTextAreaElement>();
   let projectFileInput = $state<HTMLInputElement>();
   let projectFolderInput = $state<HTMLInputElement>();
@@ -1651,8 +1652,9 @@
           ? 'background terminal'
           : ''}
         onStop={handleStop}
-        onOpenSettings={(section) => {
-          settingsInitialTab = section === 'advanced' ? 'experimental' : 'providers';
+        onOpenSettings={(section, agentSection) => {
+          settingsInitialTab = section === 'advanced' ? 'experimental' : section === 'agent' ? 'agent' : 'providers';
+          settingsInitialAgentSection = agentSection;
           showSettings = true;
         }}
         onOpenWorkflows={() => {
@@ -1864,6 +1866,7 @@
 <SettingsDrawer
   open={showSettings}
   initialTab={settingsInitialTab}
+  initialAgentSection={settingsInitialAgentSection}
   onClose={() => (showSettings = false)}
 />
 <CommandPalette bind:open={showCommandPalette} onAction={handleMenuAction} />

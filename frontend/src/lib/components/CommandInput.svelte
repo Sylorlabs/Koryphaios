@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { useNow } from '$lib/utils/now-signal.svelte';
-  import { Send, ChevronDown, Sparkles, Square, Users, User, ShieldCheck, ShieldAlert, Circle, Paperclip, Clipboard, ClipboardList, X, Check, Search, Plus, Target, Settings, Workflow, Zap } from 'lucide-svelte';
+  import { Send, ChevronDown, Sparkles, Square, Users, User, ShieldCheck, ShieldAlert, Circle, Paperclip, Clipboard, ClipboardList, X, Check, Search, Plus, Target, Settings, Workflow, Zap, Pencil, MessageCircleQuestion, SlidersHorizontal } from 'lucide-svelte';
   import { wsStore } from '$lib/stores/websocket.svelte';
   import { shortcutStore } from '$lib/stores/shortcuts.svelte';
   import { experimentalStore } from '$lib/stores/experimental.svelte';
@@ -32,7 +32,7 @@
     /** What Kory is waiting on, e.g. "background terminal: dev-server". */
     waitingReason?: string;
     onStop?: () => void;
-    onOpenSettings?: (section?: 'advanced') => void;
+    onOpenSettings?: (section?: 'advanced' | 'agent', agentSection?: 'permissions') => void;
     onOpenWorkflows?: () => void;
     workflowStatus?: { name: string; stage: string; status: string; task: string };
     inputRef?: HTMLTextAreaElement;
@@ -191,6 +191,42 @@
   $effect(() => {
     if (!fastModeSupported) fastMode = false;
   });
+
+  let showPermissionMenu = $state(false);
+
+  const PERMISSION_OPTIONS = [
+    { value: 'yolo', label: 'YOLO', description: 'Run actions without approval prompts or risk checks.', icon: Zap, tone: 'text-amber-300' },
+    { value: 'guarded', label: 'Guarded', description: 'Handle routine work and ask before risky actions.', icon: ShieldCheck, tone: 'text-emerald-300' },
+    { value: 'edits', label: 'Accept edits', description: 'Apply file edits automatically; ask before other actions.', icon: Pencil, tone: 'text-sky-300' },
+    { value: 'ask', label: 'Ask', description: 'Ask before every action.', icon: MessageCircleQuestion, tone: 'text-[var(--color-text-secondary)]' },
+    { value: 'custom', label: 'Custom', description: 'Use the detailed approval rules from Settings.', icon: SlidersHorizontal, tone: 'text-violet-300' },
+  ] as const;
+
+  type PermissionMode = (typeof PERMISSION_OPTIONS)[number]['value'];
+
+  let permissionMode = $derived(
+    (agentSettingsStore.settings.permissionMode === 'plan'
+      ? 'guarded'
+      : agentSettingsStore.settings.permissionMode ?? 'guarded') as PermissionMode,
+  );
+  let permissionModeMeta = $derived(
+    PERMISSION_OPTIONS.find((option) => option.value === permissionMode) ?? PERMISSION_OPTIONS[1],
+  );
+
+  $effect(() => {
+    wsStore.setYoloMode(permissionMode === 'yolo');
+  });
+
+  function selectPermissionMode(next: PermissionMode) {
+    showPermissionMenu = false;
+    if (permissionMode !== next) {
+      void agentSettingsStore.saveSettings(
+        { ...agentSettingsStore.settings, permissionMode: next },
+        { quietSuccess: true },
+      );
+    }
+    if (next === 'custom') onOpenSettings?.('agent', 'permissions');
+  }
 
   const configurationWarning = $derived(
     disabled ? null : getModelConfigurationWarning(wsStore.providers, selectedModel),
@@ -727,6 +763,7 @@
     if (!target.closest('.model-picker')) showModelPicker = false;
     if (!target.closest('.reasoning-picker')) showReasoningMenu = false;
     if (!target.closest('.reference-picker')) showReferenceMenu = false;
+    if (!target.closest('.permission-picker')) showPermissionMenu = false;
     if (!target.closest('.agent-mode-picker')) showAgentModeMenu = false;
   }
 
@@ -1334,6 +1371,57 @@
             >
               <ClipboardList size={12} /> {interactionMode === 'plan' ? 'Planning' : 'Plan'}
             </button>
+            <div class="permission-picker relative">
+              <button
+                type="button"
+                class="flex items-center gap-1.5 rounded-md border border-[var(--color-border)] bg-[var(--color-surface-3)] px-2.5 py-1.5 text-[11px] font-medium text-[var(--color-text-muted)] transition-colors hover:brightness-110"
+                onclick={() => (showPermissionMenu = !showPermissionMenu)}
+                title={`Permissions: ${permissionModeMeta.label}`}
+                aria-haspopup="menu"
+                aria-expanded={showPermissionMenu}
+              >
+                <permissionModeMeta.icon size={12} class={permissionModeMeta.tone} />
+                <span>{permissionModeMeta.label}</span>
+                <ChevronDown size={10} class="opacity-60" />
+              </button>
+              {#if showPermissionMenu}
+                <div
+                  class="absolute bottom-full right-0 z-30 mb-1.5 w-72 overflow-hidden rounded-xl border shadow-xl"
+                  style="background: var(--color-surface-2); border-color: var(--color-border);"
+                  role="menu"
+                  aria-label="Permission mode"
+                >
+                  <div class="flex items-center justify-between gap-3 border-b border-[var(--color-border)] px-3 py-2">
+                    <span class="text-[10px] font-semibold uppercase tracking-[0.14em] text-[var(--color-text-muted)]">Permissions</span>
+                    <button
+                      type="button"
+                      class="flex items-center gap-1 rounded-md px-1.5 py-1 text-[10px] text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-surface-3)]"
+                      onclick={() => { showPermissionMenu = false; onOpenSettings?.('agent', 'permissions'); }}
+                      title="Open permission settings"
+                    ><Settings size={12} /> Settings</button>
+                  </div>
+                  <div class="py-1">
+                    {#each PERMISSION_OPTIONS as option (option.value)}
+                      {@const active = permissionMode === option.value}
+                      <button
+                        type="button"
+                        role="menuitemradio"
+                        aria-checked={active}
+                        class="flex w-full items-start gap-2.5 px-3 py-2 text-left transition-colors hover:bg-[var(--color-surface-3)]"
+                        onclick={() => selectPermissionMode(option.value)}
+                      >
+                        <option.icon size={13} class="mt-0.5 shrink-0 {option.tone}" />
+                        <span class="min-w-0 flex-1">
+                          <span class="block text-[11px] font-medium" style="color: {active ? 'var(--color-accent)' : 'var(--color-text-primary)'};">{option.label}</span>
+                          <span class="block text-[10px] leading-relaxed text-[var(--color-text-muted)]">{option.description}</span>
+                        </span>
+                        {#if active}<Check size={12} class="mt-0.5 shrink-0 text-[var(--color-accent)]" />{/if}
+                      </button>
+                    {/each}
+                  </div>
+                </div>
+              {/if}
+            </div>
             <div class="agent-mode-picker relative">
               <button
                 type="button"
