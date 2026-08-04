@@ -181,6 +181,22 @@ export async function createProjectSession(title: string, text: string): Promise
 }
 
 /** Reads and parses a single project file. Returns parsed data or null on error. */
+export async function readProjectFile(
+  file: File,
+): Promise<{ title: string; text: string; fileName: string; truncated: boolean } | null> {
+  try {
+    const raw = await file.text();
+    const maxChars = 12000;
+    const trimmed = raw.length > maxChars ? raw.slice(0, maxChars) : raw;
+    const baseTitle = file.name.replace(/\.[^/.]+$/, '').trim();
+    const title = (baseTitle ? `Project: ${baseTitle}` : 'Imported Project').slice(0, 64);
+
+    return { title, text: trimmed, fileName: file.name, truncated: raw.length > maxChars };
+  } catch {
+    return null;
+  }
+}
+
 /** Reads and parses a project folder. Returns parsed data or null on error. */
 export async function readProjectFolder(
   files: FileList,

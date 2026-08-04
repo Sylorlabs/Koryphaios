@@ -21,7 +21,8 @@ export type ProviderEventType =
   | 'file_edit'
   | 'tool_executed'
   | 'complete'
-  | 'error';
+  | 'error'
+  | 'cli_commands';
 
 export interface ProviderEvent {
   type: ProviderEventType;
@@ -51,6 +52,14 @@ export interface ProviderEvent {
   // tool_executed (agentic providers): a non-file tool the agent already ran.
   toolOutput?: string;
   isError?: boolean;
+  /** Commands discovered from a native CLI session initialization event. */
+  cliCommands?: CliCommand[];
+}
+
+export interface CliCommand {
+  name: string;
+  description?: string;
+  category?: 'builtin' | 'skill' | 'plugin' | 'custom';
 }
 
 // ─── Tool definition for provider calls ─────────────────────────────────────
@@ -139,6 +148,9 @@ export interface Provider {
 
   /** Optional provider-level model refresh hook for cache reset/refresh control. */
   refreshModels?: (forceRefresh?: boolean) => void | Promise<unknown>;
+
+  /** Native CLI commands exposed by this provider when available. */
+  getCliCommands?: () => CliCommand[];
 }
 
 // ─── Provider factory ───────────────────────────────────────────────────────
