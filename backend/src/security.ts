@@ -18,7 +18,7 @@ export {
 
 import { randomBytes, timingSafeEqual } from 'node:crypto';
 import { mkdirSync, writeFileSync, realpathSync } from 'node:fs';
-import { join, resolve } from 'node:path';
+import { isAbsolute, join, relative, resolve } from 'node:path';
 import { toolLog } from './logger';
 import { SECURITY } from './constants';
 
@@ -480,11 +480,15 @@ export function validatePathAccess(
     return { allowed: false, reason: 'Invalid path' };
   }
 
-  const normalized = resolve(resolved) + (resolved.endsWith('/') ? '' : '');
   for (const root of allowedRoots) {
     const rootResolved = resolve(root);
-    const rootNorm = rootResolved + (rootResolved.endsWith('/') ? '' : '/');
-    if (normalized === rootResolved || normalized.startsWith(rootNorm)) return { allowed: true };
+    const pathFromRoot = relative(rootResolved, resolved);
+    // `relative()` is separator-aware, unlike comparing a Windows path with
+    // a slash-appended root string. A relative result without `..` remains
+    // under the root on every supported platform.
+    if (pathFromRoot === '' || (!pathFromRoot.startsWith('..') && !isAbsolute(pathFromRoot))) {
+      return { allowed: true };
+    }
   }
   return { allowed: false, reason: 'Path is outside allowed directories' };
 }
@@ -824,19 +828,14 @@ export async function migrateCLIAuthTokens(
 ): Promise<number> {
   let migrated = 0;
 
-  const cliTokenPatterns = [
-    { key: 'CODEX_AUTH_TOKEN', providers: ['codex'] as CLIAuthProvider[] },
-  ];
+  const cliTokenPatterns = [{ key: 'CODEX_AUTH_TOKEN', providers: ['codex'] as CLIAuthProvider[] }];
 
   for (const { key, providers } of cliTokenPatterns) {
     const value = envVars[key];
     if (!value) continue;
 
     // Check if it's a legacy plaintext token
-    if (
-      value.startsWith('cli:') &&
-      !value.startsWith('cli:codex:')
-    ) {
+    if (value.startsWith('cli:') && !value.startsWith('cli:codex:')) {
       // This is a legacy format token, migrate it
       const provider = value.split(':')[1] as CLIAuthProvider;
       if (providers.includes(provider)) {
