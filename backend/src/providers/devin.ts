@@ -263,9 +263,9 @@ export class DevinProvider implements Provider {
       // fallback. Critic → plan (read-only); manager/worker → accept-edits.
       '--permission-mode',
       caps.supportsPermissionMode
-        ? (request.harnessRole === 'critic' ? 'plan' : 'accept-edits')
-        : (request.harnessRole === 'critic' ? 'auto' : 'dangerous'),
-      ...(request.harnessRole === 'critic' && caps.supportsSandbox ? ['--sandbox'] : []),
+        ? (request.permissionMode === 'yolo' && request.harnessRole !== 'critic' ? 'dangerous' : 'plan')
+        : (request.permissionMode === 'yolo' && request.harnessRole !== 'critic' ? 'dangerous' : 'auto'),
+      ...(request.permissionMode !== 'yolo' && caps.supportsSandbox ? ['--sandbox'] : []),
       '--export',
       exportPath,
     ];

@@ -398,9 +398,9 @@ export class AntigravityProvider implements Provider {
       prompt,
       '--model',
       cliModel,
-      ...(request.harnessRole === 'critic'
-        ? ['--mode', 'plan', '--sandbox']
-        : ['--mode', 'accept-edits', '--dangerously-skip-permissions']),
+      ...(request.permissionMode === 'yolo' && request.harnessRole !== 'critic'
+        ? ['--mode', 'accept-edits', '--dangerously-skip-permissions']
+        : ['--mode', 'plan', '--sandbox']),
       '--log-file',
       logPath,
       ...(convId ? ['--conversation', convId] : []),

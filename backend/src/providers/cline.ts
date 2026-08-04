@@ -368,7 +368,7 @@ export class ClineProvider implements Provider {
     }
 
     const args = [
-      ...(request.harnessRole === 'critic' ? ['--plan'] : []),
+      ...(request.permissionMode === 'yolo' && request.harnessRole !== 'critic' ? [] : ['--plan']),
       '--auto-approve',
       'true',
       '--json',
