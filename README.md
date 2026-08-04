@@ -7,7 +7,7 @@ agents and model providers you already use. It keeps serious attempts isolated,
 makes changes and costs inspectable, and gives you a clean path back when an
 agent gets it wrong.
 
-[Website](https://koryphaios.com) · [Documentation](https://koryphaios.com/docs) · [Download](https://koryphaios.com/download)
+[Website](https://koryphaios.com) · [Documentation](https://koryphaios.com/docs) · [Download](https://koryphaios.com/download) · [Contributors](./CONTRIBUTORS.md)
 
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](./LICENSE)
 [![Bun](https://img.shields.io/badge/runtime-Bun-orange.svg)](https://bun.sh)
@@ -34,6 +34,13 @@ architecture. macOS receives a DMG, Windows receives the setup executable, and
 Linux x64 receives an AppImage. You can inspect the
 [macOS/Linux](https://koryphaios.com/install) or
 [Windows](https://koryphaios.com/install.ps1) script before running it.
+
+## See it in action
+
+[![Koryphaios coordinating an analytics dashboard project](https://koryphaios.com/media/koryphaios-workspace.png)](https://koryphaios.com/#demo-media)
+
+[Watch the short product demo](https://koryphaios.com/media/koryphaios-demo.mp4) ·
+[Open the second interface capture](https://koryphaios.com/media/koryphaios-auth-review.png)
 
 ## What Koryphaios is
 
