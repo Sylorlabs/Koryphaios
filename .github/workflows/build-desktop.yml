@@ -23,6 +23,9 @@ on:
           - release
           - debug
 
+permissions:
+  contents: write
+
 jobs:
   # Build for Windows
   build-windows:
