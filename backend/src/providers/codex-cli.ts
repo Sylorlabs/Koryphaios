@@ -367,7 +367,9 @@ export class CodexCliProvider implements Provider {
       request.tools,
       request.harnessRole,
     );
-    const sandbox = request.harnessRole === 'critic' ? 'read-only' : 'workspace-write';
+    const sandbox = request.permissionMode === 'yolo' && request.harnessRole !== 'critic'
+      ? 'danger-full-access'
+      : 'read-only';
 
     // ── Wire rules (AGENTS.md) into the isolated codex home ────────────────
     // Codex has no MCP support, so the <KORY_TOOL_CALL> envelope in the prompt

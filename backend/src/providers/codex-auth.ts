@@ -111,7 +111,7 @@ export class CodexAuthProvider implements Provider {
     }
     const child = spawn(binary, [
       '--ask-for-approval', 'never', 'exec', '--json', '--ephemeral', '--skip-git-repo-check',
-      '--color', 'never', '--sandbox', request.harnessRole === 'critic' ? 'read-only' : 'workspace-write',
+      '--color', 'never', '--sandbox', request.permissionMode === 'yolo' && request.harnessRole !== 'critic' ? 'danger-full-access' : 'read-only',
       '--model', request.model,
       ...(request.fastMode ? ['--config', 'service_tier="fast"'] : []),
       ...(request.reasoningLevel ? ['--config', `model_reasoning_effort=${JSON.stringify(request.reasoningLevel)}`] : []),
