@@ -59,6 +59,45 @@ jobs:
       - name: Build
         run: bun run build:ci
 
+  # Cross-platform unit tests: verify the test suite passes on Windows and macOS,
+  # not just Linux. Catches platform-specific issues with path separators, spawn
+  # behavior, SQLite sidecars, and shell resolution that Linux-only CI would miss.
+  cross-platform-test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [blacksmith-2vcpu-windows-2025, blacksmith-6vcpu-macos-latest]
+        include:
+          - os: blacksmith-2vcpu-windows-2025
+            platform: windows
+          - os: blacksmith-6vcpu-macos-latest
+            platform: macos
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Type check
+        run: bun run typecheck:ci
+
+      - name: Run backend tests
+        run: bun run test:backend:isolated
+
+      - name: Run frontend tests
+        run: bun run --filter frontend test
+
   legacy-mcp-tests:
     runs-on: blacksmith-2vcpu-ubuntu-2404
     timeout-minutes: 15
