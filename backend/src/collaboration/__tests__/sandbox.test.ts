@@ -39,13 +39,24 @@ describe('sandbox policy', () => {
   });
 });
 
-describe('sandbox runner (bwrap wrap)', () => {
+describe('sandbox runner (native OS wrap)', () => {
   const caps = sandboxCapabilities();
 
   test('capability report matches platform', () => {
     expect(caps.platform).toBe(process.platform);
-    // macOS has sandbox-exec (Seatbelt); only Windows lacks OS-level isolation.
-    if (process.platform === 'win32') expect(caps.osIsolation).toBe(false);
+    // OS isolation is available on Linux (bwrap) and macOS (sandbox-exec).
+    // Windows and any platform without a sandbox tool report none.
+    if (process.platform === 'linux') {
+      // bwrap may or may not be installed; either is valid.
+      expect(['bubblewrap', 'none']).toContain(caps.mechanism);
+    } else if (process.platform === 'darwin') {
+      // sandbox-exec ships with macOS at /usr/bin/sandbox-exec.
+      expect(['seatbelt', 'none']).toContain(caps.mechanism);
+    } else {
+      expect(caps.osIsolation).toBe(false);
+      expect(caps.mechanism).toBe('none');
+    }
+    expect(caps.osIsolation).toBe(caps.mechanism !== 'none');
   });
 
   test('non-isolating policy passes the command through unchanged', () => {
@@ -58,27 +69,40 @@ describe('sandbox runner (bwrap wrap)', () => {
     expect(r.isolated).toBe(false);
   });
 
-  test('isolating policy either wraps in bwrap/seatbelt or (no sandbox) passes through', () => {
+  test('isolating policy wraps in the native sandbox or passes through', () => {
     const r = wrapCommand('claude', ['-p', '--model', 'x'], {
       cwd: '/tmp/proj',
       configDirs: ['/tmp/cfg'],
       policy: { ...SANDBOX_PRESETS.balanced },
     });
-    if (caps.osIsolation) {
-      // OS sandbox available: the real command is jailed.
+    if (caps.mechanism === 'bubblewrap') {
+      // bwrap available: the real command is jailed.
+      expect(r.command).toContain('bwrap');
       expect(r.isolated).toBe(true);
-      if (caps.mechanism === 'bubblewrap') {
-        expect(r.command).toContain('bwrap');
-        expect(r.args).toContain('--');
-        expect(r.args).toContain('--bind');
-        expect(r.args).toContain('/tmp/proj');
-        expect(r.args).not.toContain('--unshare-net');
-        const dash = r.args.indexOf('--');
-        expect(r.args.slice(dash + 1)).toEqual(['claude', '-p', '--model', 'x']);
-      } else if (caps.mechanism === 'seatbelt') {
-        // macOS sandbox-exec wraps the command differently.
-        expect(r.command).toContain('sandbox-exec');
-      }
+      expect(r.args).toContain('--');
+      // The project is bound and set as cwd; network is allowed (no --unshare-net).
+      expect(r.args).toContain('--bind');
+      expect(r.args).toContain('/tmp/proj');
+      expect(r.args).not.toContain('--unshare-net');
+      // The wrapped program is still claude with its args after `--`.
+      const dash = r.args.indexOf('--');
+      expect(r.args.slice(dash + 1)).toEqual(['claude', '-p', '--model', 'x']);
+    } else if (caps.mechanism === 'seatbelt') {
+      // sandbox-exec: -p '<profile>' -- bin ...args  (no literal -- separator;
+      // the profile string is arg[1] and the bin follows it directly).
+      expect(r.command).toContain('sandbox-exec');
+      expect(r.isolated).toBe(true);
+      expect(r.mechanism).toBe('seatbelt');
+      expect(r.args[0]).toBe('-p');
+      // The profile confines writes to the project and allows network (balanced).
+      const profile = r.args[1] as string;
+      expect(profile).toContain('(version 1)');
+      expect(profile).toContain('/tmp/proj'); // project writable
+      expect(profile).not.toContain('(deny network*)'); // balanced allows net
+      // The wrapped program is claude with its args after the profile.
+      const binIdx = r.args.indexOf('claude');
+      expect(binIdx).toBe(2);
+      expect(r.args.slice(binIdx)).toEqual(['claude', '-p', '--model', 'x']);
     } else {
       // No OS sandbox: graceful passthrough (tool-level gating still applies).
       expect(r.command).toBe('claude');
@@ -86,10 +110,13 @@ describe('sandbox runner (bwrap wrap)', () => {
     }
   });
 
-  test('network block adds --unshare-net when isolated (bwrap)', () => {
+  test('network block cuts network when isolated', () => {
     const r = wrapCommand('claude', [], { cwd: '/tmp/p', policy: { ...SANDBOX_PRESETS.hardened } });
     if (caps.mechanism === 'bubblewrap') {
       expect(r.args).toContain('--unshare-net');
+    } else if (caps.mechanism === 'seatbelt') {
+      const profile = r.args[1] as string;
+      expect(profile).toContain('(deny network*)'); // hardened cuts net
     }
   });
 
@@ -101,6 +128,10 @@ describe('sandbox runner (bwrap wrap)', () => {
     if (r.isolated && r.mechanism === 'bubblewrap') {
       expect(r.args.join(' ')).toContain('--ro-bind /tmp/p /tmp/p');
       expect(r.args.join(' ')).not.toContain('--bind /tmp/p /tmp/p');
+    } else if (r.isolated && r.mechanism === 'seatbelt') {
+      // readonly → allowEdits is false → project is NOT in the writable list.
+      const profile = r.args[1] as string;
+      expect(profile).not.toContain('/tmp/p');
     }
   });
 });
