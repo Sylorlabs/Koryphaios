@@ -284,7 +284,8 @@ describe('File Tools', () => {
       });
 
       expect(result.isError).toBe(false);
-      expect(result.output).toContain('src/app.ts');
+      // GlobTool uses the platform's path separator in output.
+      expect(result.output).toContain(join('src', 'app.ts'));
     });
 
     test('returns empty for no matches', async () => {
