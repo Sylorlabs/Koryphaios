@@ -5,6 +5,7 @@ import {
   mergeFeedTimeline,
   omitArchivedToolDuplicates,
   operationalEntriesForReload,
+  withoutAnalyzingThoughts,
 } from './feed-timeline';
 
 function entry(
@@ -69,6 +70,14 @@ describe('feed timeline reconciliation', () => {
     expect(mergeFeedTimeline([answer], [tool]).map((item) => item.id)).toEqual(['tool', 'answer']);
   });
 
+  test('collapses a live row observed in more than one refresh lane', () => {
+    const liveThought = entry('thought-1', 200, 'thought');
+
+    expect(mergeFeedTimeline([liveThought], [liveThought]).map((item) => item.id)).toEqual([
+      'thought-1',
+    ]);
+  });
+
   test('prefers a richer live tool result over its archived reload fallback', () => {
     const archived = [
       entry('arch-a', 200, 'tool_result', 'archive-a'),
@@ -103,6 +112,18 @@ describe('feed timeline reconciliation', () => {
 
     expect(operationalEntriesForReload([replayed, persisted]).map((item) => item.id)).toEqual([
       'live-answer',
+    ]);
+  });
+
+  test('removes stale analyzing rows after cancellation even when their tracked id was lost', () => {
+    const stale = {
+      ...entry('stale-analysis', 200, 'thought'),
+      metadata: { phase: 'analyzing' },
+    };
+    const stopped = entry('stopped', 300, 'system');
+
+    expect(withoutAnalyzingThoughts([stale, stopped], null).map((item) => item.id)).toEqual([
+      'stopped',
     ]);
   });
 

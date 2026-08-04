@@ -13,7 +13,6 @@
     FileCode,
     FolderOpen,
     Command,
-    GitBranch,
     Activity,
     Target,
     Pause,
@@ -23,7 +22,6 @@
     RotateCcw,
   } from 'lucide-svelte';
   import { getModKeyName } from '$lib/utils/platform';
-  import { modeStore } from '$lib/stores/mode.svelte';
   import { notesStore } from '$lib/stores/notes.svelte';
 
   const frontendVersion = __KORYPHAIOS_FRONTEND_VERSION__ ?? '0.1.0';
@@ -47,7 +45,6 @@
     icon: any;
     shortcut?: string;
     category: string;
-    mode?: 'beginner' | 'advanced'; // If set, only show in that mode
   };
 
   const allActions: Action[] = [
@@ -73,18 +70,12 @@
     { id: 'goal_resume', label: 'Resume Active Goal', description: 'Resume the selected paused goal', icon: Play, category: 'Goals' },
     { id: 'goal_stop', label: 'Stop Active Goal', description: 'Permanently stop the selected goal after confirmation', icon: Square, category: 'Goals' },
     { id: 'goal_prioritize', label: 'Prioritize Active Goal', description: 'Move the selected goal ahead of other eligible work', icon: ArrowUp, category: 'Goals' },
-    // Mode switches — each only shows in the OTHER mode
-    { id: 'mode_advanced', label: 'Switch to Advanced Mode', description: 'Full controls: git panel, agents, cost tracking', icon: Command, category: 'System', mode: 'beginner' },
-    { id: 'mode_beginner', label: 'Switch to Beginner Mode', description: 'Simplified UI with fewer controls', icon: Command, category: 'System', mode: 'advanced' },
-    // Advanced only
-    { id: 'toggle_git', label: 'Toggle Source Control', description: 'Show or hide the Git panel', icon: GitBranch, category: 'View', mode: 'advanced' },
-    { id: 'toggle_agents', label: 'Toggle Active Agents', description: 'Show or hide the agents panel', icon: Activity, category: 'View', mode: 'advanced' },
+    { id: 'toggle_agents', label: 'Toggle Active Agents', description: 'Show or hide the agents panel', icon: Activity, category: 'View' },
   ];
 
-  // Filter actions based on current mode and search query
+  // Filter actions based on availability and search query.
   let filteredActions = $derived(
     allActions
-      .filter(a => !a.mode || a.mode === modeStore.mode)
       .filter(a => a.id !== 'toggle_notes' || notesStore.settings.enabled)
       .filter(a => 
         a.label.toLowerCase().includes(query.toLowerCase()) || 

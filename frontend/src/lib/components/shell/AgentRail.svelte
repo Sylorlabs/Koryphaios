@@ -1,6 +1,5 @@
 <script lang="ts">
   import WorkerCard from '$lib/components/WorkerCard.svelte';
-  import { modeStore } from '$lib/stores/mode.svelte';
   import { fly } from 'svelte/transition';
   import { cubicOut } from 'svelte/easing';
   import type { AgentRailState } from './useAgentRail.svelte';
@@ -70,7 +69,7 @@
       </div>
     {/each}
   </div>
-{:else if !forceHidden && visible && modeStore.showAgentDetails}
+{:else if !forceHidden && visible}
   <div
     class="px-4 py-2 border-b flex items-center justify-center shrink-0"
     style="border-color: var(--color-border); background: var(--color-surface-1);"
