@@ -1,9 +1,12 @@
 import { expect, test } from '@playwright/test';
 
-// Skipped in CI: requires a fully authenticated app session with providers
-// configured to render the keyboard shortcuts dialog.
-test.skip(Boolean(process.env.CI), 'requires interactive app session');
-test('a reassigned shortcut takes effect immediately and replaces its old binding', async ({ page }) => {
+// This covers user-customized settings and therefore needs an explicitly
+// provisioned interactive account. The normal isolated suite has no providers
+// or persisted user preferences to exercise.
+test.skip(!process.env.KORY_E2E_AUTHENTICATED, 'requires a provisioned interactive app session');
+test('a reassigned shortcut takes effect immediately and replaces its old binding', async ({
+  page,
+}) => {
   await page.goto('/');
   await expect(page.locator('#main-content')).not.toBeEmpty({ timeout: 30_000 });
 
