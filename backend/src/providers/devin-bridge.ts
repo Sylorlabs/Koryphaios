@@ -36,6 +36,7 @@ import {
 import { KORY_TOOL_WHITELIST, KORY_CRITIC_TOOL_WHITELIST } from './cli-bridges';
 import { getDevinCapabilitiesAsync, type DevinCapabilities } from './devin-capabilities';
 import type { ProviderEvent } from './types';
+import { getKoryCliBearer } from './kory-cli-mcp-config';
 import { buildKoryCliMcpConfig } from './kory-cli-mcp-config';
 import { providerLog } from '../logger';
 
@@ -147,19 +148,14 @@ export class DevinCliBridge extends ManagedCliBridge implements CliBridge {
     if (!this.cached?.supportsHooks) return null;
     const hookScript = process.env.KORY_HOOK_BRIDGE_SCRIPT;
     if (!hookScript) return null;
-    const cmd = `node ${hookScript} --event PreToolUse --session-id ${ctx.sessionId ?? ''}`;
-    const stopCmd = `node ${hookScript} --event Stop --session-id ${ctx.sessionId ?? ''}`;
+    if (!ctx.sessionId) return null;
+    const bearer = getKoryCliBearer(ctx.sessionId, ctx.role);
+    const base = `node ${JSON.stringify(hookScript)} --session-id ${JSON.stringify(ctx.sessionId)} --auth ${JSON.stringify(bearer)}`;
     return [
-      {
-        events: ['PreToolUse', 'PostToolUse', 'PermissionRequest', 'UserPromptSubmit'],
-        command: cmd,
-        matcher: '',
-      },
-      {
-        events: ['Stop'],
-        command: stopCmd,
-        matcher: '',
-      },
+      ...(['PreToolUse', 'PostToolUse', 'PermissionRequest', 'UserPromptSubmit'] as const).map((event) => ({
+        events: [event], command: `${base} --event ${event}`, matcher: '',
+      })),
+      { events: ['Stop'], command: `${base} --event Stop`, matcher: '' },
     ];
   }
 

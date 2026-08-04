@@ -20,6 +20,22 @@ import { localAuth } from '../../auth/local-auth';
 import { getContext } from '../../context';
 import { providerLog } from '../../logger';
 import type { ToolContext } from '../../tools/registry';
+import { loadAgentSettings } from '../../agent-settings';
+import { resolveToolPermissionPolicy } from '../../tools/permission-policy';
+
+const NATIVE_TO_KORY: Record<string, string> = {
+  read: 'kory__read_file', edit: 'kory__edit_file', write: 'kory__write_file', exec: 'kory__bash',
+  Read: 'kory__read_file', Edit: 'kory__edit_file', Write: 'kory__write_file', MultiEdit: 'kory__batch_edit',
+  Bash: 'kory__bash', Glob: 'kory__glob', Grep: 'kory__grep', LS: 'kory__ls',
+  WebFetch: 'kory__web_fetch', WebSearch: 'kory__web_search', codex_command: 'kory__bash',
+  antigravity_exec: 'kory__bash', cursor_tool: 'kory__bash',
+};
+
+function scopedCliRole(auth: { permissions: string[] }, sessionId: string): string | null {
+  const prefix = `mcp:${sessionId}:`;
+  return auth.permissions.find((permission) => permission.startsWith(prefix))?.slice(prefix.length) ??
+    (auth.permissions.includes('*') ? 'manager' : null);
+}
 
 export const mcpBridgeRoutes = new Elysia({ prefix: '/api/v1/mcp-bridge' })
 
@@ -64,13 +80,20 @@ export const mcpBridgeRoutes = new Elysia({ prefix: '/api/v1/mcp-bridge' })
           (goal.status === 'queued' || goal.status === 'planning' || goal.status === 'running'),
       );
       const activeGoalItem = activeGoal?.checklist.find((item) => item.status === 'running');
+      const root = workingDirectory || (session as any).workingDirectory || process.cwd();
       const ctx: ToolContext = {
         sessionId,
         ...(activeGoal ? { goalId: activeGoal.id } : {}),
         ...(activeGoalItem ? { goalItemId: activeGoalItem.id } : {}),
-        workingDirectory: workingDirectory || (session as any).workingDirectory || process.cwd(),
+        workingDirectory: root,
         signal: undefined,
-        isSandboxed: false,
+        isSandboxed: normalizedRole === 'critic',
+        permissionPolicy: resolveToolPermissionPolicy(
+          loadAgentSettings(root),
+          normalizedRole === 'critic' ? 'plan' : 'act',
+        ),
+        approvedToolCallIds: new Set(),
+        waitForUserInput: (question, options) => kory.requestToolApproval(sessionId, question, options),
         recordChange: (change) => {
           kory.recordChange?.(sessionId, change);
         },
@@ -90,7 +113,8 @@ export const mcpBridgeRoutes = new Elysia({ prefix: '/api/v1/mcp-bridge' })
 
   // ── PreToolUse hook: approve/block/rewrite a CLI tool call ──────────────
   .post('/hooks/pre-tool', async ({ request, body, set }) => {
-    if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
+    const auth = requireLocalRouteAuth(request, set);
+    if (!auth) return { ok: false, error: 'Unauthorized' };
     const { session_id, tool_name, tool_input } = body as {
       session_id: string;
       tool_name: string;
@@ -99,37 +123,18 @@ export const mcpBridgeRoutes = new Elysia({ prefix: '/api/v1/mcp-bridge' })
     try {
       const { kory, sessions } = getContext();
       const session = await sessions.get(session_id);
-      if (!session) {
-        return { decision: 'approve' as const, reason: 'session not found — allowing' };
+      if (!session) return { decision: 'block' as const, reason: 'Kory session not found' };
+      const role = scopedCliRole(auth, session_id);
+      if (!role) return { decision: 'block' as const, reason: 'CLI bearer is not scoped to this session' };
+      const root = (session as any).workingDirectory || process.cwd();
+      const permissionMode = role === 'critic' ? 'plan' : loadAgentSettings(root).permissionMode;
+      if (permissionMode === 'yolo') {
+        return { decision: 'approve' as const, reason: 'Authenticated YOLO turn permits native tools' };
       }
       // Route native CLI tool calls through Kory's permission system.
       // If the tool is one Kory can handle (read, write, exec, etc.), block
       // the native call and tell the CLI to use the kory__ equivalent instead.
-      const nativeToKory: Record<string, string> = {
-        // Devin native tools
-        read: 'kory__read_file',
-        edit: 'kory__edit_file',
-        write: 'kory__write_file',
-        exec: 'kory__bash',
-        // Claude Code native tools
-        Read: 'kory__read_file',
-        Edit: 'kory__edit_file',
-        Write: 'kory__write_file',
-        MultiEdit: 'kory__batch_edit',
-        Bash: 'kory__bash',
-        Glob: 'kory__glob',
-        Grep: 'kory__grep',
-        LS: 'kory__ls',
-        WebFetch: 'kory__web_fetch',
-        WebSearch: 'kory__web_search',
-        // Codex
-        codex_command: 'kory__bash',
-        // Antigravity
-        antigravity_exec: 'kory__bash',
-        // Cursor
-        cursor_tool: 'kory__bash',
-      };
-      const koryEquivalent = nativeToKory[tool_name];
+      const koryEquivalent = NATIVE_TO_KORY[tool_name];
       if (koryEquivalent) {
         return {
           decision: 'block' as const,
@@ -152,7 +157,7 @@ export const mcpBridgeRoutes = new Elysia({ prefix: '/api/v1/mcp-bridge' })
       return { decision: 'approve' as const };
     } catch (err: any) {
       providerLog.error({ err }, 'PreToolUse hook failed');
-      return { decision: 'approve' as const };
+      return { decision: 'block' as const, reason: 'Kory permission check failed closed' };
     }
   }, { body: t.Object({ session_id: t.String(), tool_name: t.String(), tool_input: t.Record(t.String(), t.Unknown()) }) })
 
@@ -177,18 +182,23 @@ export const mcpBridgeRoutes = new Elysia({ prefix: '/api/v1/mcp-bridge' })
 
   // ── PermissionRequest hook: route to Kory's permission system ───────────
   .post('/hooks/permission', async ({ request, body, set }) => {
-    if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
+    const auth = requireLocalRouteAuth(request, set);
+    if (!auth) return { ok: false, error: 'Unauthorized' };
     const { session_id, tool_name, tool_input } = body as {
       session_id: string;
       tool_name: string;
       tool_input: Record<string, unknown>;
     };
-    // Same logic as PreToolUse: block native tools that have Kory equivalents.
-    const nativeToKory: Record<string, string> = {
-      read: 'kory__read_file', edit: 'kory__edit_file', write: 'kory__write_file', exec: 'kory__bash',
-      Read: 'kory__read_file', Edit: 'kory__edit_file', Write: 'kory__write_file', Bash: 'kory__bash',
-    };
-    const koryEquivalent = nativeToKory[tool_name];
+    const { sessions } = getContext();
+    const session = await sessions.get(session_id);
+    if (!session) return { decision: 'block' as const, reason: 'Kory session not found' };
+    const role = scopedCliRole(auth, session_id);
+    if (!role) return { decision: 'block' as const, reason: 'CLI bearer is not scoped to this session' };
+    const root = (session as any).workingDirectory || process.cwd();
+    if (role !== 'critic' && loadAgentSettings(root).permissionMode === 'yolo') {
+      return { decision: 'approve' as const, reason: 'Authenticated YOLO turn permits native tools' };
+    }
+    const koryEquivalent = NATIVE_TO_KORY[tool_name];
     if (koryEquivalent) {
       return { decision: 'block' as const, reason: `Use ${koryEquivalent} instead.` };
     }

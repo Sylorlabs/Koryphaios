@@ -162,7 +162,9 @@ export class GrokBuildProvider implements Provider {
       'streaming-json',
       '--no-alt-screen',
       // Headless: never block on an interactive tool-approval prompt.
-      ...(request.harnessRole === 'critic' ? ['--permission-mode', 'plan'] : ['--always-approve']),
+      ...(request.harnessRole === 'critic' || request.permissionMode !== 'yolo'
+        ? ['--permission-mode', 'plan']
+        : ['--always-approve']),
       // Delegation is Koryphaios's job (manager → workers → critic) — never let
       // the CLI spawn its own native subagents outside our orchestration/UI.
       '--no-subagents',

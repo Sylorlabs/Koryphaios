@@ -217,15 +217,19 @@ describe('Hooks config generation', () => {
     tools: [],
   };
 
-  test('Claude Code generates PreToolUse + Stop hooks when script is set', () => {
+  test('Claude Code generates authenticated event-specific hooks when script is set', () => {
     const bridge = new ClaudeCodeCliBridge();
     process.env.KORY_HOOK_BRIDGE_SCRIPT = '/path/to/hook-bridge.js';
     const hooks = bridge.buildHooks(ctx);
     expect(hooks).not.toBeNull();
-    expect(hooks!.length).toBe(2);
-    expect(hooks![0].events).toContain('PreToolUse');
-    expect(hooks![0].events).toContain('PostToolUse');
-    expect(hooks![1].events).toContain('Stop');
+    expect(hooks!.length).toBe(4);
+    expect(hooks!.map((hook) => hook.events[0])).toEqual([
+      'PreToolUse', 'PostToolUse', 'UserPromptSubmit', 'Stop',
+    ]);
+    for (const hook of hooks!) {
+      expect(hook.command).toContain('--auth "Bearer ');
+      expect(hook.command).toContain(`--event ${hook.events[0]}`);
+    }
     delete process.env.KORY_HOOK_BRIDGE_SCRIPT;
   });
 

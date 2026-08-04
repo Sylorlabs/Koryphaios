@@ -793,6 +793,16 @@ export class KoryManager {
     return this.state.requestUserInput(sessionId, 0);
   }
 
+  /** Surface an authenticated CLI bridge approval through the same durable UI
+   *  question and resume path used by first-party manager and worker tools. */
+  requestToolApproval(
+    sessionId: string,
+    question: string,
+    options: string[],
+  ): Promise<string> {
+    return this.waitForUserInputInternal(sessionId, question, options);
+  }
+
   private async resolveSkillCollisionsForTask(
     sessionId: string,
     workingDirectory: string,
