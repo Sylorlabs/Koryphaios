@@ -1,9 +1,15 @@
-name: Auto Release on /update
+name: Release Koryphaios
 
 on:
   push:
     branches:
       - master
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Exact version to publish (for example 0.1.0). Leave empty only for an /update patch release.'
+        required: false
+        type: string
 
 jobs:
   check-update-trigger:
@@ -21,33 +27,51 @@ jobs:
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Check for /update in commit message
+      - name: Select release trigger
         id: check
         # Pass the message via env — inlining ${{ }} into the script executes
         # backticks/$() from commit messages as shell commands (broke on `agy`).
         env:
+          EVENT_NAME: ${{ github.event_name }}
           COMMIT_MSG: ${{ github.event.head_commit.message }}
         run: |
-          if echo "$COMMIT_MSG" | grep -q "/update"; then
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            echo "should_release=true" >> $GITHUB_OUTPUT
+          elif echo "$COMMIT_MSG" | grep -q "/update"; then
             echo "should_release=true" >> $GITHUB_OUTPUT
           else
             echo "should_release=false" >> $GITHUB_OUTPUT
           fi
 
-      - name: Bump version
+      - name: Select release version
         id: bump
         if: steps.check.outputs.should_release == 'true'
+        env:
+          REQUESTED_VERSION: ${{ inputs.version }}
         run: |
           CURRENT=$(jq -r .version package.json)
-          IFS='.' read -r MAJOR MINOR PATCH <<< "$CURRENT"
-          NEW_VERSION="$MAJOR.$MINOR.$((PATCH + 1))"
+          if [ -n "$REQUESTED_VERSION" ]; then
+            if ! echo "$REQUESTED_VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+              echo "Requested version must be MAJOR.MINOR.PATCH" >&2
+              exit 1
+            fi
+            if [ "$CURRENT" != "$REQUESTED_VERSION" ]; then
+              echo "package.json is $CURRENT, not requested release $REQUESTED_VERSION" >&2
+              exit 1
+            fi
+            NEW_VERSION="$REQUESTED_VERSION"
+          else
+            IFS='.' read -r MAJOR MINOR PATCH <<< "$CURRENT"
+            NEW_VERSION="$MAJOR.$MINOR.$((PATCH + 1))"
+          fi
           echo "new_version=$NEW_VERSION" >> $GITHUB_OUTPUT
 
-          jq ".version = \"$NEW_VERSION\"" package.json > package.json.tmp && mv package.json.tmp package.json
-          # Update Cargo.toml — find whatever version is currently there and replace it
-          CARGO_CURRENT=$(grep -m1 '^version = ' desktop/src-tauri/Cargo.toml | sed 's/version = "\(.*\)"/\1/')
-          sed -i "s/^version = \"$CARGO_CURRENT\"/version = \"$NEW_VERSION\"/" desktop/src-tauri/Cargo.toml
-          jq ".version = \"$NEW_VERSION\"" desktop/src-tauri/tauri.conf.json > tauri.conf.json.tmp && mv tauri.conf.json.tmp desktop/src-tauri/tauri.conf.json
+          if [ "$CURRENT" != "$NEW_VERSION" ]; then
+            jq ".version = \"$NEW_VERSION\"" package.json > package.json.tmp && mv package.json.tmp package.json
+            CARGO_CURRENT=$(grep -m1 '^version = ' desktop/src-tauri/Cargo.toml | sed 's/version = "\(.*\)"/\1/')
+            sed -i "s/^version = \"$CARGO_CURRENT\"/version = \"$NEW_VERSION\"/" desktop/src-tauri/Cargo.toml
+            jq ".version = \"$NEW_VERSION\"" desktop/src-tauri/tauri.conf.json > tauri.conf.json.tmp && mv tauri.conf.json.tmp desktop/src-tauri/tauri.conf.json
+          fi
 
       - name: Generate changelog
         id: changelog
@@ -145,15 +169,17 @@ jobs:
             echo "${DELIMITER}"
           } >> $GITHUB_OUTPUT
 
-      - name: Commit version bump
+      - name: Commit release metadata
         id: commit
         if: steps.check.outputs.should_release == 'true'
         run: |
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
           git add package.json desktop/src-tauri/Cargo.toml desktop/src-tauri/tauri.conf.json CHANGELOG.md
-          git commit -m "chore: bump version to ${{ steps.bump.outputs.new_version }} [skip ci]"
-          git push
+          if ! git diff --cached --quiet; then
+            git commit -m "chore: prepare v${{ steps.bump.outputs.new_version }} release [skip ci]"
+            git push
+          fi
           echo "version_commit=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
   build-and-release:
