@@ -218,7 +218,13 @@ export {
 export * from './types/NoteTypes';
 
 // ============== Voice Types ==============
-export type { VoiceSettings, VoiceProviderDescriptor, SynthesisRequest } from './types/VoiceTypes';
+export type {
+  VoiceSettings,
+  VoiceProviderDescriptor,
+  VoicePackManifest,
+  VoicePackStatus,
+  SynthesisRequest,
+} from './types/VoiceTypes';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Backward Compatibility Re-exports

@@ -72,6 +72,7 @@
     cortecs: ['cortecs'],
     // Catalog keys whose public asset uses a different brand slug.
     blackforestlabs: ['bfl'],
+    stabilityai: ['stability'],
     'novita-ai': ['novita'],
     llama: ['meta', 'meta-brand'],
     'github-models': ['github'],
@@ -132,7 +133,9 @@
     modal: 'https://modal.com/assets/favicon.svg',
     portkey: 'https://framerusercontent.com/images/pkFK3AGXHirogqiN67JGtlnMVM.png',
     gladia: 'https://gladia.io/favicon.svg',
-    lmnt: 'https://lmnt.com/lmnt.svg',
+    // LMNT's /lmnt.svg is a wide wordmark and becomes unreadably tiny in the
+    // square provider badge. Their first-party site icon is the compact mark.
+    lmnt: 'https://lmnt.com/icon.svg?icon.0f4f-dd3neeo5.svg',
     mem0: 'https://framerusercontent.com/images/2ys67ADJdvcyGmQnhp8vKWSq8.svg',
     letta: 'https://www.letta.com/assets/images/webclip.png',
     mixedbread: 'https://www.mixedbread.com/favicon.ico',

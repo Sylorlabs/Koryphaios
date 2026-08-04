@@ -1,326 +1,95 @@
-name: Release Koryphaios
+name: Auto Release
+
+# Trigger a release by including "/update" in a commit message pushed to main/master.
+# This workflow bumps the patch version (sourced from tauri.conf.json — the version
+# the Tauri updater compares against), commits the bump, and pushes a v* tag.
+# It then dispatches build-desktop.yml on that tag, which builds, signs, and
+# publishes the release with latest.json (the Tauri updater manifest).
+#
+# NOTE: Pushes made with GITHUB_TOKEN do not trigger other workflow runs, so we
+# explicitly dispatch build-desktop.yml via workflow_dispatch after tagging.
 
 on:
   push:
     branches:
       - master
-  workflow_dispatch:
-    inputs:
-      version:
-        description: 'Exact version to publish (for example 0.1.0). Leave empty only for an /update patch release.'
-        required: false
-        type: string
+      - main
 
 jobs:
-  check-update-trigger:
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+  check-and-tag:
+    runs-on: ubuntu-latest
     permissions:
       contents: write
-    outputs:
-      should_release: ${{ steps.check.outputs.should_release }}
-      new_version: ${{ steps.bump.outputs.new_version }}
-      release_body: ${{ steps.changelog.outputs.release_body }}
-      version_commit: ${{ steps.commit.outputs.version_commit }}
+      actions: write
     steps:
-      - uses: actions/checkout@v6
+      - name: Checkout repository
+        uses: actions/checkout@v6
         with:
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Select release trigger
+      - name: Check for /update in commit message
         id: check
-        # Pass the message via env — inlining ${{ }} into the script executes
-        # backticks/$() from commit messages as shell commands (broke on `agy`).
-        env:
-          EVENT_NAME: ${{ github.event_name }}
-          COMMIT_MSG: ${{ github.event.head_commit.message }}
         run: |
-          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+          COMMIT_MSG="${{ github.event.head_commit.message }}"
+          echo "Commit message: $COMMIT_MSG"
+
+          if echo "$COMMIT_MSG" | grep -q "/update"; then
             echo "should_release=true" >> $GITHUB_OUTPUT
-          elif echo "$COMMIT_MSG" | grep -q "/update"; then
-            echo "should_release=true" >> $GITHUB_OUTPUT
+            echo "🚀 /update trigger detected — will create release"
           else
             echo "should_release=false" >> $GITHUB_OUTPUT
+            echo "No /update trigger found — skipping release"
           fi
 
-      - name: Select release version
-        id: bump
+      - name: Bump version and push tag
         if: steps.check.outputs.should_release == 'true'
-        env:
-          REQUESTED_VERSION: ${{ inputs.version }}
         run: |
-          CURRENT=$(jq -r .version package.json)
-          if [ -n "$REQUESTED_VERSION" ]; then
-            if ! echo "$REQUESTED_VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
-              echo "Requested version must be MAJOR.MINOR.PATCH" >&2
-              exit 1
-            fi
-            if [ "$CURRENT" != "$REQUESTED_VERSION" ]; then
-              echo "package.json is $CURRENT, not requested release $REQUESTED_VERSION" >&2
-              exit 1
-            fi
-            NEW_VERSION="$REQUESTED_VERSION"
-          else
-            IFS='.' read -r MAJOR MINOR PATCH <<< "$CURRENT"
-            NEW_VERSION="$MAJOR.$MINOR.$((PATCH + 1))"
-          fi
-          echo "new_version=$NEW_VERSION" >> $GITHUB_OUTPUT
+          # tauri.conf.json is the source of truth for the version the updater
+          # compares against. Bump its patch version and sync to all version files.
+          CURRENT=$(jq -r .version desktop/src-tauri/tauri.conf.json)
+          echo "Current version: $CURRENT"
 
-          if [ "$CURRENT" != "$NEW_VERSION" ]; then
-            jq ".version = \"$NEW_VERSION\"" package.json > package.json.tmp && mv package.json.tmp package.json
-            CARGO_CURRENT=$(grep -m1 '^version = ' desktop/src-tauri/Cargo.toml | sed 's/version = "\(.*\)"/\1/')
-            sed -i "s/^version = \"$CARGO_CURRENT\"/version = \"$NEW_VERSION\"/" desktop/src-tauri/Cargo.toml
-            jq ".version = \"$NEW_VERSION\"" desktop/src-tauri/tauri.conf.json > tauri.conf.json.tmp && mv tauri.conf.json.tmp desktop/src-tauri/tauri.conf.json
-          fi
+          IFS='.' read -r MAJOR MINOR PATCH <<< "$CURRENT"
+          NEW_VERSION="$MAJOR.$MINOR.$((PATCH + 1))"
+          echo "New version: $NEW_VERSION"
 
-      - name: Generate changelog
-        id: changelog
+          # tauri.conf.json
+          jq ".version = \"$NEW_VERSION\"" desktop/src-tauri/tauri.conf.json > tauri.conf.json.tmp
+          mv tauri.conf.json.tmp desktop/src-tauri/tauri.conf.json
+
+          # Cargo.toml (only the package version line)
+          sed -i "s/^version = \"$CURRENT\"/version = \"$NEW_VERSION\"/" desktop/src-tauri/Cargo.toml
+
+          # Root package.json
+          jq ".version = \"$NEW_VERSION\"" package.json > package.json.tmp
+          mv package.json.tmp package.json
+
+          # desktop/package.json
+          jq ".version = \"$NEW_VERSION\"" desktop/package.json > desktop-pkg.tmp
+          mv desktop-pkg.tmp desktop/package.json
+
+          # Commit and tag
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          git add package.json desktop/package.json desktop/src-tauri/Cargo.toml desktop/src-tauri/tauri.conf.json
+          git commit -m "chore: bump version to $NEW_VERSION [skip ci]"
+          git tag "v$NEW_VERSION"
+          git push origin "v$NEW_VERSION"
+          git push
+
+          # Save the new version for the dispatch step
+          echo "NEW_VERSION=$NEW_VERSION" >> $GITHUB_ENV
+
+      - name: Dispatch build-desktop.yml on the new tag
         if: steps.check.outputs.should_release == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          NEW_VERSION: ${{ steps.bump.outputs.new_version }}
         run: |
-          # Get last release tag
-          LAST_TAG=$(gh release list --limit 1 --json tagName --jq '.[0].tagName' 2>/dev/null || echo "")
-          RANGE="${LAST_TAG:+$LAST_TAG..HEAD}"
-          [ -z "$RANGE" ] && RANGE="HEAD~30..HEAD"
-
-          node -e "
-          const { execSync } = require('child_process');
-          const { existsSync, readFileSync, writeFileSync } = require('fs');
-
-          const raw = execSync('git log $RANGE --pretty=format:\"%s\" --no-merges 2>/dev/null || echo \"\"').toString();
-          const commits = raw.split('\n').filter(Boolean);
-
-          const features = [], fixes = [], improvements = [];
-          const changesJson = [];
-
-          for (const c of commits) {
-            if (/^\[GHOST\]|^chore:|^\[skip ci\]/i.test(c)) continue;
-            if (/^feat(\(.*?\))?:/i.test(c)) {
-              const d = c.replace(/^feat(\(.*?\))?:\s*/i, '');
-              features.push(d);
-              changesJson.push({ type: 'feature', description: d });
-            } else if (/^fix(\(.*?\))?:/i.test(c)) {
-              const d = c.replace(/^fix(\(.*?\))?:\s*/i, '');
-              fixes.push(d);
-              changesJson.push({ type: 'fix', description: d });
-            } else if (/^perf|^refactor|^improve/i.test(c)) {
-              const d = c.replace(/^(perf|refactor|improve)(\(.*?\))?:\s*/i, '');
-              improvements.push(d);
-              changesJson.push({ type: 'improvement', description: d });
-            } else {
-              improvements.push(c);
-              changesJson.push({ type: 'improvement', description: c });
-            }
-          }
-
-          if (!changesJson.length) {
-            improvements.push('Minor updates and stability improvements');
-            changesJson.push({ type: 'improvement', description: 'Minor updates and stability improvements' });
-          }
-
-          let md = '';
-          if (features.length) md += '### ✨ Features\n' + features.map(f => '- ' + f).join('\n') + '\n\n';
-          if (fixes.length)    md += '### 🐛 Bug Fixes\n' + fixes.map(f => '- ' + f).join('\n') + '\n\n';
-          if (improvements.length) md += '### 🚀 Improvements\n' + improvements.map(i => '- ' + i).join('\n') + '\n\n';
-
-          const date = new Date().toISOString().slice(0, 10);
-          const version = process.env.NEW_VERSION;
-          const existing = existsSync('CHANGELOG.md')
-            ? readFileSync('CHANGELOG.md', 'utf8')
-            : '# Changelog\n\n## Unreleased\n';
-          const marker = '## Unreleased';
-          let versioned;
-          if (existing.includes(marker)) {
-            const markerEnd = existing.indexOf(marker) + marker.length;
-            const afterMarker = existing.slice(markerEnd);
-            const priorVersionOffset = afterMarker.search(/\n## \[/);
-            const unreleased = (priorVersionOffset >= 0
-              ? afterMarker.slice(0, priorVersionOffset)
-              : afterMarker).trim();
-            const priorVersions = priorVersionOffset >= 0
-              ? afterMarker.slice(priorVersionOffset).trimStart()
-              : '';
-            const releaseContent = unreleased || md.trim();
-            versioned = existing.slice(0, markerEnd) + '\n\n## [' + version + '] - ' + date +
-              '\n\n' + releaseContent +
-              (priorVersions ? '\n\n' + priorVersions : '') + '\n';
-          } else {
-            versioned = '# Changelog\n\n## Unreleased\n\n## [' + version + '] - ' + date +
-              '\n\n' + md.trim() + '\n\n' + existing.trimStart();
-          }
-          writeFileSync('CHANGELOG.md', versioned);
-
-          md += '---\n\n';
-          md += '**macOS** · **Windows** · **Linux** — download below or update automatically on next launch.\n\n';
-          md += '<!-- CHANGES_JSON\n' + JSON.stringify(changesJson) + '\n-->';
-
-          writeFileSync('release-notes.md', md);
-          console.log('Changelog generated with', changesJson.length, 'entries');
-          "
-
-          # Output as multiline (GitHub requires delimiter not in content)
-          DELIMITER="KORY_RELEASE_$(head -c 8 /dev/urandom | xxd -p)"
-          {
-            echo "release_body<<${DELIMITER}"
-            cat release-notes.md
-            echo ""
-            echo "${DELIMITER}"
-          } >> $GITHUB_OUTPUT
-
-      - name: Commit release metadata
-        id: commit
-        if: steps.check.outputs.should_release == 'true'
-        run: |
-          git config --local user.email "action@github.com"
-          git config --local user.name "GitHub Action"
-          git add package.json desktop/src-tauri/Cargo.toml desktop/src-tauri/tauri.conf.json CHANGELOG.md
-          if ! git diff --cached --quiet; then
-            git commit -m "chore: prepare v${{ steps.bump.outputs.new_version }} release [skip ci]"
-            git push
-          fi
-          echo "version_commit=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
-
-  build-and-release:
-    needs: check-update-trigger
-    if: needs.check-update-trigger.outputs.should_release == 'true'
-    permissions:
-      contents: write
-    strategy:
-      fail-fast: false
-      # Serialize: each job fully builds + merges its platform into the shared
-      # latest.json before the next starts, so parallel uploads never collide
-      # ("latest.json already exists").
-      max-parallel: 1
-      matrix:
-        include:
-          - platform: 'macos-latest'
-            runner: 'blacksmith-12vcpu-macos-latest'
-            args: '--target aarch64-apple-darwin --bundles app,dmg'
-            bun-target: 'bun-darwin-arm64'
-            backend-target: 'aarch64-apple-darwin'
-          - platform: 'macos-latest'
-            runner: 'blacksmith-12vcpu-macos-latest'
-            args: '--target x86_64-apple-darwin --bundles app,dmg'
-            bun-target: 'bun-darwin-x64'
-            backend-target: 'x86_64-apple-darwin'
-          - platform: 'windows-latest'
-            runner: 'blacksmith-8vcpu-windows-2025'
-            args: '--bundles msi,nsis'
-            bun-target: 'bun-windows-x64'
-            backend-target: 'x86_64-pc-windows-msvc'
-          - platform: 'ubuntu-22.04'
-            runner: 'blacksmith-8vcpu-ubuntu-2204'
-            args: '--bundles deb,appimage'
-            bun-target: 'bun-linux-x64'
-            backend-target: 'x86_64-unknown-linux-gnu'
-
-    runs-on: ${{ matrix.runner }}
-    steps:
-      - uses: actions/checkout@v6
-        with:
-          ref: ${{ needs.check-update-trigger.outputs.version_commit }}
-          fetch-depth: 0
-
-      - name: Verify release version source
-        shell: bash
-        env:
-          EXPECTED_VERSION: ${{ needs.check-update-trigger.outputs.new_version }}
-        run: |
-          PACKAGE_VERSION=$(jq -r .version package.json)
-          CARGO_VERSION=$(sed -n 's/^version = "\([^"]*\)"/\1/p' desktop/src-tauri/Cargo.toml | head -1)
-          TAURI_VERSION=$(jq -r .version desktop/src-tauri/tauri.conf.json)
-          test "$PACKAGE_VERSION" = "$EXPECTED_VERSION"
-          test "$CARGO_VERSION" = "$EXPECTED_VERSION"
-          test "$TAURI_VERSION" = "$EXPECTED_VERSION"
-          echo "Building verified Koryphaios v$EXPECTED_VERSION from $(git rev-parse --short HEAD)"
-
-      - name: Setup Bun
-        uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: latest
-
-      - name: Install Rust stable
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: ${{ matrix.platform == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
-
-      - name: Install dependencies (ubuntu only)
-        if: matrix.platform == 'ubuntu-22.04'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev librsvg2-dev patchelf libgtk-3-dev libayatana-appindicator3-dev
-
-      - name: Install workspace dependencies
-        run: bun install
-
-      - name: Compile embedded backend payload
-        shell: bash
-        env:
-          RELAY_URL: ${{ secrets.RELAY_URL }}
-        run: |
-          EXT=""
-          if [[ "${{ matrix.backend-target }}" == *"windows"* ]]; then EXT=".exe"; fi
-          OUTFILE="$(pwd)/desktop/src-tauri/embedded-backend/koryphaios-backend-${{ matrix.backend-target }}${EXT}"
-          # Bake the collaboration relay endpoint so shipped/released builds can
-          # host/join out of the box (endpoint only — the host secret stays
-          # runtime). Without this, model-sharing is disabled in the release.
-          DEFINE=()
-          [ -n "$RELAY_URL" ] && DEFINE+=(--define "process.env.RELAY_URL=\"$RELAY_URL\"")
-          bun build --compile \
-            --target=${{ matrix.bun-target }} \
-            "${DEFINE[@]}" \
-            backend/src/server.ts \
-            --outfile="$OUTFILE"
-
-      - name: Build frontend
-        working-directory: ./frontend
-        run: bun run build
-        env:
-          BUILD_MODE: static
-          NODE_ENV: production
-
-      - name: Inject signing public key
-        shell: bash
-        run: |
-          jq --arg key "$TAURI_SIGNING_PUBLIC_KEY" \
-            '.plugins.updater.pubkey = $key' \
-            desktop/src-tauri/tauri.conf.json > tauri.conf.json.tmp
-          mv tauri.conf.json.tmp desktop/src-tauri/tauri.conf.json
-        env:
-          TAURI_SIGNING_PUBLIC_KEY: ${{ secrets.TAURI_SIGNING_PUBLIC_KEY }}
-
-      - name: Build Tauri app
-        uses: tauri-apps/tauri-action@v0
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-          TAURI_SIGNING_PUBLIC_KEY: ${{ secrets.TAURI_SIGNING_PUBLIC_KEY }}
-        with:
-          projectPath: ./desktop
-          args: ${{ matrix.args }}
-          includeUpdaterJson: true
-          updaterJsonPreferNsis: true
-          tagName: v${{ needs.check-update-trigger.outputs.new_version }}
-          releaseName: 'Koryphaios v${{ needs.check-update-trigger.outputs.new_version }}'
-          releaseBody: ${{ needs.check-update-trigger.outputs.release_body }}
-          releaseDraft: false
-          prerelease: false
-
-  notify-website:
-    needs: [check-update-trigger, build-and-release]
-    if: needs.check-update-trigger.outputs.should_release == 'true'
-    runs-on: blacksmith-2vcpu-ubuntu-2404
-    steps:
-      - name: Trigger Koryphaios.com rebuild
-        run: |
-          curl -s -X POST \
-            -H "Accept: application/vnd.github+json" \
-            -H "Authorization: Bearer $GH_TOKEN" \
-            "https://api.github.com/repos/Sylorlabs/Koryphaios.com/dispatches" \
-            -d '{"event_type":"new_release","client_payload":{"version":"${{ needs.check-update-trigger.outputs.new_version }}"}}'
-          echo "Website rebuild triggered for v${{ needs.check-update-trigger.outputs.new_version }}"
-        env:
-          GH_TOKEN: ${{ secrets.CROSS_REPO_TOKEN }}
+          # GITHUB_TOKEN pushes don't trigger other workflows, so dispatch explicitly.
+          # build-desktop.yml has workflow_dispatch in its triggers and will build,
+          # sign, upload to the release, and generate latest.json.
+          echo "Dispatching build-desktop.yml on tag v${NEW_VERSION}..."
+          gh workflow run build-desktop.yml --ref "v${NEW_VERSION}"
+          echo "Build workflow dispatched. Monitor at:"
+          echo "https://github.com/Sylorlabs/Koryphaios/actions/workflows/build-desktop.yml"

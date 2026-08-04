@@ -7,6 +7,7 @@ import {
 } from '../../credit-accountant';
 import { getLocalTotals } from '../../credit-accountant/db';
 import { getCliUsageReports } from '../../billing/cli-usage';
+import type { CliUsageReport } from '../../billing/cli-usage';
 import { getProviderBalances } from '../../billing/provider-balances';
 import type { ProviderBalance } from '../../billing/provider-balances';
 import { getContext } from '../../context';
@@ -24,6 +25,8 @@ const credentialsService = createUserCredentialsService();
 // navigation request hang indefinitely. Their work continues and is picked up
 // by the next short client poll.
 const LIVE_BILLING_BUDGET_MS = 2_400;
+let latestCliUsage: CliUsageReport[] = [];
+let latestBalances: ProviderBalance[] = [];
 
 function withinBillingBudget<T>(work: Promise<T>, fallback: T): Promise<{ value: T; refreshing: boolean }> {
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -203,12 +206,19 @@ export const billingRoutes = new Elysia({ prefix: '/api/billing' }).get(
         githubToken: (configs as Record<string, { authToken?: string }>).copilot?.authToken,
         forceRefresh,
       }),
-      [],
-    );
-    const balanceWork = safeResult('providerBalances', () => getProviderBalances(keys, { forceRefresh }), []);
+      latestCliUsage,
+    ).then((value) => {
+      latestCliUsage = value;
+      return value;
+    });
+    const balanceWork = safeResult('providerBalances', () => getProviderBalances(keys, { forceRefresh }), latestBalances)
+      .then((value) => {
+        latestBalances = value;
+        return value;
+      });
     const [cliUsageResult, balancesResult, savedCredentials, koryAccountUsage] = await Promise.all([
-      withinBillingBudget(cliUsageWork, []),
-      withinBillingBudget(balanceWork, []),
+      withinBillingBudget(cliUsageWork, latestCliUsage),
+      withinBillingBudget(balanceWork, latestBalances),
       safeResult('savedCredentials', () => credentialsService.list(LOCAL_USER_ID, { isActive: true }), []),
       safeResult('koryAccountUsage', async () => getKoryAccountUsage(), []),
     ]);
