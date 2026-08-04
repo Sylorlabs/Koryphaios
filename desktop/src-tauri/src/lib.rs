@@ -1249,8 +1249,13 @@ pub fn run() {
 
             // Get main window and ensure visibility
             if let Some(window) = app.get_webview_window("main") {
-                // Startup default is always full-screen (maximized) regardless
-                // of the saved window state — the user can resize afterwards.
+                // Linux/Windows maximize to the usable desktop area. macOS's
+                // `maximize` only performs AppKit "zoom", which can leave a
+                // large border around the workspace; enter a real fullscreen
+                // space there so startup fills the display consistently.
+                #[cfg(target_os = "macos")]
+                let _ = window.set_fullscreen(true);
+                #[cfg(not(target_os = "macos"))]
                 let _ = window.maximize();
 
                 // CRITICAL: Always force show, focus, and unminimize to ensure window is visible on launch
