@@ -189,7 +189,7 @@ final result: passed
 ## Evidence
 
 - Source visual truth: `/tmp/codex-clipboard-xU1mNx.png`.
-- Native implementation screenshot: `/tmp/koryphaios-yolo-cleanup-qa/implementation.png`.
+- Native implementation screenshot: `/tmp/koryphaios-yolo-cleanup-qa/final-master.png`.
 - Source pixels: 2560 × 1440. Implementation pixels: 2560 × 1408. Both show the maximized native desktop app in dark theme with YOLO permission selected.
 - Full-view comparison: the source and implementation were inspected at original resolution with the same dashboard and composer state.
 - Focused comparison was unnecessary because the two requested artifacts occupy distinct, clearly readable regions in the full-resolution captures: top menu bar and composer input border.
@@ -203,7 +203,7 @@ final result: passed
 
 ## Interaction and verification
 
-- Native desktop implementation captured after Vite HMR from current source.
+- Native desktop implementation captured after the complete branch-history merge from current `master`.
 - Frontend Svelte check: 0 errors and 0 warnings.
 - Repository typecheck passed.
 - Core backend suite and frontend suite passed; frontend reported 96 passed and 0 failed.
