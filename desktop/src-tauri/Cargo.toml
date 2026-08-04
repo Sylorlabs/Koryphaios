@@ -10,7 +10,7 @@ name = "koryphaios_desktop_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [[bin]]
-name = "koryphaios-desktop"
+name = "Koryphaios"
 path = "src/main.rs"
 
 [build-dependencies]

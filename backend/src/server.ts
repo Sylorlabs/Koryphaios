@@ -1,6 +1,7 @@
 // Koryphaios Backend Server — Bun HTTP + WebSocket server.
 // Main entry point via ElysiaJS.
 
+import 'reflect-metadata';
 import { Elysia, t } from 'elysia';
 import { cors } from '@elysiajs/cors';
 import { nanoid } from 'nanoid';
