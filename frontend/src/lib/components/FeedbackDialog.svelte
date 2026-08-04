@@ -3,11 +3,9 @@
   import { Bug, CheckCircle2, Flag, HelpCircle, Lightbulb, LoaderCircle, X } from 'lucide-svelte';
   import { apiFetch, parseJsonResponse } from '$lib/api.svelte';
   import { apiUrl } from '$lib/utils/api-url';
-  import KorySelect from '$lib/components/KorySelect.svelte';
   import Turnstile from '$lib/components/Turnstile.svelte';
 
   type FeedbackCategory = 'bug' | 'idea' | 'question' | 'other';
-  type FeedbackVisibility = 'private' | 'public';
 
   interface Props {
     open?: boolean;
@@ -16,10 +14,7 @@
 
   let { open = false, onClose }: Props = $props();
   let category = $state<FeedbackCategory>('idea');
-  let visibility = $state<FeedbackVisibility>('private');
   let message = $state('');
-  let email = $state('');
-  let includeDiagnostics = $state(true);
   let submitting = $state(false);
   let sent = $state(false);
   let error = $state('');
@@ -78,14 +73,6 @@
     submitting = true;
     error = '';
     try {
-      const diagnostics = includeDiagnostics
-        ? {
-            platform: typeof navigator !== 'undefined' ? navigator.platform : undefined,
-            context:
-              typeof window !== 'undefined' ? { route: window.location.pathname } : undefined,
-          }
-        : {};
-      const isPublic = visibility === 'public';
       // Invisible for normal users; Cloudflare only shows a challenge when risk warrants it.
       const turnstileToken = await turnstile?.execute();
       const response = await apiFetch(
@@ -95,11 +82,9 @@
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             category,
-            visibility,
+            visibility: 'public',
             message: trimmed,
             ...(turnstileToken ? { turnstileToken } : {}),
-            ...(!isPublic ? diagnostics : {}),
-            ...(!isPublic && email.trim() ? { email: email.trim() } : {}),
             ...(appVersion ? { appVersion } : {}),
           }),
         },
@@ -111,7 +96,6 @@
       sent = true;
       turnstile?.reset();
       message = '';
-      email = '';
     } catch (submitError) {
       error =
         submitError instanceof Error
@@ -152,7 +136,7 @@
               Help shape Koryphaios
             </h2>
             <p class="mt-1 text-xs leading-5 text-[var(--color-text-muted)]">
-              Stored locally by default. It never changes production prompts automatically.
+              Public feedback never changes production prompts automatically.
             </p>
           </div>
           <button
@@ -216,36 +200,6 @@
           <label class="block">
             <span
               class="mb-2 block text-[11px] font-bold uppercase tracking-wider text-[var(--color-text-muted)]"
-              >Who should see this?</span
-            >
-            <KorySelect
-              value={visibility}
-              label="Feedback visibility"
-              options={[
-                {
-                  value: 'private',
-                  label: 'Private feedback',
-                  description: 'Sent only to the Koryphaios team inbox.',
-                },
-                {
-                  value: 'public',
-                  label: 'Public feedback',
-                  description: 'Published as a public community report on koryphaios.com. Never includes your email or diagnostics.',
-                },
-              ]}
-              onchange={(value) => {
-                visibility = value as FeedbackVisibility;
-                if (visibility === 'public') {
-                  email = '';
-                  includeDiagnostics = false;
-                }
-              }}
-            />
-          </label>
-
-          <label class="block">
-            <span
-              class="mb-2 block text-[11px] font-bold uppercase tracking-wider text-[var(--color-text-muted)]"
               >What should we know?</span
             >
             <textarea
@@ -262,50 +216,11 @@
             >
           </label>
 
-          <label class="block">
-            <span
-              class="mb-2 block text-[11px] font-bold uppercase tracking-wider text-[var(--color-text-muted)]"
-              >Reply email <span class="normal-case tracking-normal">(optional)</span></span
-            >
-            <input
-              type="email"
-              bind:value={email}
-              maxlength="254"
-              autocomplete="email"
-              placeholder="Leave blank to stay anonymous"
-              class="w-full rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-2)] px-4 py-2.5 text-xs text-[var(--color-text-primary)] outline-none transition focus:border-[var(--color-accent)] focus:ring-2 focus:ring-[var(--color-accent)]/15"
-            />
-          </label>
-
-          {#if visibility === 'private'}<button
-            type="button"
-            role="switch"
-            aria-checked={includeDiagnostics}
-            class="flex w-full items-center justify-between gap-4 rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-2)] px-4 py-3 text-left"
-            onclick={() => (includeDiagnostics = !includeDiagnostics)}
+          <p
+            class="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-2)] px-4 py-3 text-[10px] leading-5 text-[var(--color-text-muted)]"
           >
-            <span
-              ><span class="block text-xs font-semibold text-[var(--color-text-primary)]"
-                >Include basic diagnostics</span
-              ><span class="mt-0.5 block text-[10px] text-[var(--color-text-muted)]"
-                >App version, platform, and current app route. Never prompts, files, or API keys.</span
-              ></span
-            >
-            <span
-              class="relative h-5 w-9 shrink-0 rounded-full transition-colors {includeDiagnostics
-                ? 'bg-[var(--color-accent)]'
-                : 'bg-[var(--color-surface-4)]'}"
-              ><span
-                class="absolute top-0.5 size-4 rounded-full bg-white shadow transition-transform {includeDiagnostics
-                  ? 'translate-x-[18px]'
-                  : 'translate-x-0.5'}"
-              ></span></span
-            >
-          </button>{:else}<p
-              class="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-2)] px-4 py-3 text-[10px] leading-5 text-[var(--color-text-muted)]"
-            >
-              Public reports include only the category, message, and optional app version. Do not include private project details, secrets, or contact information.
-            </p>{/if}
+            Feedback is public. It includes only the category, message, and optional app version. Do not include private project details, secrets, or contact information.
+          </p>
 
           {#if error}<p
               role="alert"
@@ -320,9 +235,7 @@
 
           <div class="flex items-center justify-between gap-4 pt-1">
             <p class="text-[10px] leading-4 text-[var(--color-text-muted)]">
-              {visibility === 'public'
-                ? 'Public reports are published without email, diagnostics, source, prompts, screenshots, or API keys.'
-                : 'We never upload source, prompts, screenshots, or API keys.'}
+              Public reports never include diagnostics, source, prompts, screenshots, or API keys.
             </p>
             <div class="flex gap-2">
               <button

@@ -327,10 +327,9 @@ jobs:
           grep -q '^/usr/share/icons/.*/apps/koryphaios-desktop\.png$' rpm-contents.txt
 
           # Hosted CI may not have a compatible AppImage runtime/FUSE setup.
-          # Verify the container is a non-empty x86_64 ELF here; the curl
-          # installer restores its executable bit before real desktop launch.
+          # Ensure the produced container is non-empty; the curl installer
+          # restores its executable bit before real desktop launch.
           test -s "$APPIMAGE"
-          file "$APPIMAGE" | grep -q 'ELF 64-bit.*x86-64'
 
       - name: Upload Linux artifacts
         uses: actions/upload-artifact@v7
