@@ -448,8 +448,8 @@
                     <div class="grid gap-3 sm:grid-cols-2">
                       <SettingsSwitch
                         checked={agentSettingsStore.settings.autoRunTools}
-                        label="Start routine work automatically"
-                        description="Begin normal tool-using work without an upfront proceed prompt."
+                        label="Allow routine tools"
+                        description="When off, ask once before each routine tool action."
                         onchange={() => toggleSetting('autoRunTools')}
                       />
                       <SettingsSwitch

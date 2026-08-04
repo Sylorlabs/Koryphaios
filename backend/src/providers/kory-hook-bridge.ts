@@ -18,6 +18,7 @@ function parseArgs(argv: string[]): {
   event: string;
   sessionId: string;
   backendUrl: string;
+  auth: string;
 } {
   const args: Record<string, string> = {};
   for (let i = 2; i < argv.length; i++) {
@@ -32,6 +33,7 @@ function parseArgs(argv: string[]): {
     event: args['event'] || args.event || '',
     sessionId: args['session-id'] || args.sessionId || process.env.KORY_SESSION_ID || '',
     backendUrl: args['backend-url'] || args.backendUrl || process.env.KORY_BACKEND_URL || 'http://127.0.0.1:3001',
+    auth: args.auth || process.env.KORY_LOCAL_AUTH || '',
   };
 }
 
@@ -80,25 +82,30 @@ async function main(): Promise<void> {
   try {
     const resp = await fetch(`${config.backendUrl}/api/v1/mcp-bridge/hooks/${endpoint}`, {
       method: 'POST',
-      headers: { 'content-type': 'application/json' },
+      headers: {
+        'content-type': 'application/json',
+        ...(config.auth ? { authorization: config.auth } : {}),
+      },
       body: JSON.stringify(body),
     });
-    const data = await resp.json().catch(() => ({ decision: 'approve' }));
+    const data = await resp.json().catch(() => ({ decision: 'block', reason: `Kory hook returned HTTP ${resp.status}` }));
     // The hook endpoints return { decision, reason, ... } or { ok, ... }.
     // Normalize to the format CLIs expect.
     if ('decision' in data) {
       process.stdout.write(JSON.stringify(data));
     } else {
-      process.stdout.write(JSON.stringify({ decision: 'approve', ...data }));
+      process.stdout.write(resp.ok
+        ? JSON.stringify({ decision: 'approve', ...data })
+        : JSON.stringify({ decision: 'block', reason: data.error ?? `Kory hook returned HTTP ${resp.status}` }));
     }
   } catch (err: any) {
-    // Backend unreachable — approve by default (fail open for non-critical hooks).
+    // Native tools must never gain authority just because the host gate is unavailable.
     process.stderr.write(`[kory-hook-bridge] backend unreachable: ${err?.message}\n`);
-    process.stdout.write(JSON.stringify({ decision: 'approve' }));
+    process.stdout.write(JSON.stringify({ decision: 'block', reason: 'Kory permission host is unavailable' }));
   }
 }
 
 main().catch((err) => {
   process.stderr.write(`[kory-hook-bridge] fatal: ${err}\n`);
-  process.stdout.write(JSON.stringify({ decision: 'approve' }));
+  process.stdout.write(JSON.stringify({ decision: 'block', reason: 'Kory permission hook failed' }));
 });

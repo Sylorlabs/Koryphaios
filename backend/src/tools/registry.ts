@@ -169,13 +169,28 @@ export class ToolRegistry {
     const start = performance.now();
 
     const input = call.input as Record<string, unknown>;
-    const paths = [input.path, input.oldPath, input.newPath]
+    const files = Array.isArray(input.files) ? input.files as Array<Record<string, unknown>> : [];
+    const edits = Array.isArray(input.edits) ? input.edits as Array<Record<string, unknown>> : [];
+    const paths = [input.path, input.oldPath, input.newPath, input.source, input.destination]
       .filter((value): value is string => typeof value === 'string' && value.length > 0);
+    for (const file of files) {
+      if (typeof file.path === 'string') paths.push(file.path);
+    }
     const operations = Array.isArray(input.operations) ? input.operations as Array<Record<string, unknown>> : [];
     for (const operation of operations) {
       if (typeof operation.path === 'string') paths.push(operation.path);
     }
-    const lineSources = [input.content, input.newStr, ...operations.map((operation) => operation.content)]
+    const nestedEdits = [
+      ...edits,
+      ...files.flatMap((file) => Array.isArray(file.edits) ? file.edits as Array<Record<string, unknown>> : []),
+    ];
+    const lineSources = [
+      input.content,
+      input.newStr,
+      input.new_str,
+      ...operations.flatMap((operation) => [operation.content, operation.newStr, operation.new_str]),
+      ...nestedEdits.map((edit) => edit.new_str),
+    ]
       .filter((value): value is string => typeof value === 'string');
     const change = {
       fileCount: new Set(paths).size,

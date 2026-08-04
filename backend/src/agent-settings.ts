@@ -89,11 +89,7 @@ export interface AgentSettings {
   /** Require confirmation for rule violations */
   confirmRuleViolations: boolean;
 
-  /**
-   * Run the manager's tools automatically without an upfront "proceed?" prompt. On by
-   * default so the app just works on launch — changes are still reviewable after the fact
-   * (keep/reject + time-travel) and gated by the Critic. Turn off to confirm before each run.
-   */
+  /** In Custom mode, allow routine non-edit tools without a per-action prompt. */
   autoRunTools: boolean;
 
   /** Agent memory - allow agents to update memory files */

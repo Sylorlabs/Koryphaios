@@ -6,7 +6,7 @@ import {
 } from '../cli-session-state';
 import { materializeCliImage, renderCliContent } from '../cli-attachments';
 import { buildKoryCliMcpConfig } from '../kory-cli-mcp-config';
-import { buildKoryMcpServerConfig } from '../cli-bridges';
+import { buildKoryHookConfigs, buildKoryMcpServerConfig } from '../cli-bridges';
 import { validateLocalBearerToken } from '../../auth/local-route-auth';
 import { localAuth } from '../../auth/local-auth';
 
@@ -89,5 +89,27 @@ describe('native CLI integration state', () => {
       'claude',
     );
     expect(bridged?.env?.KORY_LOCAL_AUTH).toBe(bearer);
+  });
+
+  it('authenticates each native CLI lifecycle hook and preserves its real event', () => {
+    const previous = process.env.KORY_HOOK_BRIDGE_SCRIPT;
+    process.env.KORY_HOOK_BRIDGE_SCRIPT = '/tmp/kory hook bridge.js';
+    try {
+      const hooks = buildKoryHookConfigs({
+        provider: 'claude', role: 'worker', sandbox: undefined,
+        workingDirectory: '/tmp/workspace', sessionId: 'hook-session', systemPrompt: '', tools: [],
+      });
+      expect(hooks?.map((hook) => hook.events[0])).toEqual([
+        'PreToolUse', 'PostToolUse', 'UserPromptSubmit', 'Stop',
+      ]);
+      for (const hook of hooks ?? []) {
+        expect(hook.command).toContain('--auth "Bearer ');
+        expect(hook.command).toContain(`--event ${hook.events[0]}`);
+        expect(hook.command).toContain('"/tmp/kory hook bridge.js"');
+      }
+    } finally {
+      if (previous === undefined) delete process.env.KORY_HOOK_BRIDGE_SCRIPT;
+      else process.env.KORY_HOOK_BRIDGE_SCRIPT = previous;
+    }
   });
 });

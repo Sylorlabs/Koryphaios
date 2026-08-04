@@ -8,7 +8,7 @@ import type { CliBridgeContext, CliMcpServerConfig } from './cli-bridge';
 const BRIDGE_AUTH_MAX_AGE_MS = 23 * 60 * 60 * 1000;
 const bridgeAuth = new Map<string, { bearer: string; createdAt: number }>();
 
-function scopedBearer(sessionId: string, role: string): string {
+export function getKoryCliBearer(sessionId: string, role: string): string {
   const key = `${sessionId}:${role}`;
   const cached = bridgeAuth.get(key);
   if (cached && Date.now() - cached.createdAt < BRIDGE_AUTH_MAX_AGE_MS) return cached.bearer;
@@ -49,7 +49,7 @@ export function buildKoryCliMcpConfig(
       ],
       env: {
         KORY_BACKEND_URL: `http://${host}:${port}`,
-        KORY_LOCAL_AUTH: scopedBearer(ctx.sessionId, ctx.role),
+        KORY_LOCAL_AUTH: getKoryCliBearer(ctx.sessionId, ctx.role),
       },
       transport: 'stdio',
     },
