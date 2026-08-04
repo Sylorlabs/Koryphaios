@@ -828,7 +828,7 @@ export class KoryManager {
     userMessage: string,
     preferredModel?: string,
     reasoningLevel?: string,
-    attachments?: Array<{ type: string; data: string; name: string }>,
+    attachments?: Array<{ type: string; data: string; name: string; mimeType?: string }>,
     collaborationToolPolicy?: CollaborationToolPolicy,
     responseVariant?: { groupId: string; index: number },
     goalContext?: import('./prompts').TaskContract['goalContext'],
@@ -1659,7 +1659,7 @@ export class KoryManager {
     userMessage: string,
     reasoningLevel?: string,
     preferredModel?: string,
-    attachments?: Array<{ type: string; data: string; name: string }>,
+    attachments?: Array<{ type: string; data: string; name: string; mimeType?: string }>,
     responseVariant?: { groupId: string; index: number },
     interactionMode: 'act' | 'plan' = 'act',
     fastMode?: boolean,
@@ -1749,7 +1749,7 @@ export class KoryManager {
           finalContent = [
             { type: 'text', text: userMessage },
             ...imageAttachments.map((att) => {
-              let mime = 'image/png';
+              let mime = att.mimeType ?? 'image/png';
               const lowerName = att.name.toLowerCase();
               if (lowerName.endsWith('.jpg') || lowerName.endsWith('.jpeg')) mime = 'image/jpeg';
               if (lowerName.endsWith('.webp')) mime = 'image/webp';

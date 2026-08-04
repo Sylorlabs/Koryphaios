@@ -65,6 +65,7 @@ const protectedRoutes: RouteCheck[] = [
   { method: 'POST', path: '/api/sessions', body: { title: 'Test Session' } },
   { method: 'GET', path: '/api/sessions/s1' },
   { method: 'PATCH', path: '/api/sessions/s1', body: { title: 'Renamed' } },
+  { method: 'DELETE', path: '/api/sessions' },
   { method: 'DELETE', path: '/api/sessions/s1' },
   { method: 'GET', path: '/api/sessions/s1/processes' },
   { method: 'POST', path: '/api/sessions/s1/cancel' },

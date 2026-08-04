@@ -125,6 +125,7 @@ export const SendMessageRequestSchema = z.object({
         type: z.enum(['image', 'file']),
         data: z.string(),
         name: z.string(),
+        mimeType: z.string().optional(),
       }),
     )
     .optional(),

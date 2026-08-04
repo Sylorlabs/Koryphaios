@@ -255,13 +255,16 @@ function createAgentSettingsStore() {
   let skillComparison = $state<SkillRevisionComparison | null>(null);
   let skillResolutionPreview = $state<SkillResolutionPreview | null>(null);
   let lastCriticResult = $state<CriticReviewResult | null>(null);
-  let settingsSaveRevision = 0;
+  // Loads and saves share one revision so a slow initial/project load can
+  // never overwrite a newer optimistic permission or settings change.
+  let settingsRequestRevision = 0;
 
   // ========================================================================
   // Settings
   // ========================================================================
 
   async function loadSettings(): Promise<void> {
+    const revision = ++settingsRequestRevision;
     isLoading = true;
     try {
       const res = await apiFetch(apiUrl('/api/agent/settings'));
@@ -269,7 +272,7 @@ function createAgentSettingsStore() {
       if (res.ok) {
         const data = await res.json();
         if (data.ok) {
-          settings = data.data;
+          if (revision === settingsRequestRevision) settings = data.data;
         }
       }
     } catch (err) {
@@ -283,7 +286,7 @@ function createAgentSettingsStore() {
     newSettings: Partial<AgentSettings>,
     options?: { quietSuccess?: boolean },
   ): Promise<boolean> {
-    const revision = ++settingsSaveRevision;
+    const revision = ++settingsRequestRevision;
     const previousSettings = settings;
     // Keep controls stationary and responsive while the write happens. The
     // server response remains authoritative, but saving no longer blanks the
@@ -299,7 +302,7 @@ function createAgentSettingsStore() {
       if (res.ok) {
         const data = await res.json();
         if (data.ok) {
-          if (revision === settingsSaveRevision) settings = data.data;
+          if (revision === settingsRequestRevision) settings = data.data;
           if (!options?.quietSuccess) {
             toastStore.success('Agent settings saved');
           }
@@ -308,7 +311,7 @@ function createAgentSettingsStore() {
       }
       throw new Error('Failed to save');
     } catch (err) {
-      if (revision === settingsSaveRevision) settings = previousSettings;
+      if (revision === settingsRequestRevision) settings = previousSettings;
       toastStore.error('Failed to save agent settings');
       return false;
     }

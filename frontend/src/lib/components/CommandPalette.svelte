@@ -3,7 +3,6 @@
   import { fade, fly } from 'svelte/transition';
   import { 
     Search, 
-    Zap, 
     Plus, 
     Settings, 
     Sidebar, 
@@ -59,7 +58,6 @@
     { id: 'toggle_sidebar', label: 'Toggle Sidebar', description: 'Show or hide the session sidebar', icon: Sidebar, shortcut: 'B', category: 'View' },
     { id: 'toggle_zen_mode', label: 'Toggle Zen Mode', description: 'Focus on the conversation', icon: Layout, shortcut: 'Shift+Z', category: 'View' },
     { id: 'toggle_theme', label: 'Switch Theme', description: 'Open quick theme preset picker', icon: SunMoon, category: 'View' },
-    { id: 'toggle_yolo', label: 'Toggle YOLO Mode', description: 'Bypass all confirmation dialogs', icon: Zap, shortcut: 'Y', category: 'System' },
     { id: 'open_settings', label: 'Settings', description: 'Configure providers and preferences', icon: Settings, shortcut: ',', category: 'System' },
     { id: 'clear_feed', label: 'Clear Feed', description: 'Remove all messages from view', icon: Trash2, category: 'System' },
     { id: 'toggle_notes', label: 'Toggle Notes', description: 'Show or hide the project notes panel', icon: FileCode, shortcut: 'Shift+N', category: 'View' },

@@ -43,6 +43,24 @@ export const sessionRoutes = new Elysia({ prefix: '/api/sessions' })
       }),
     },
   )
+  .delete('/', async ({ request, set }) => {
+    if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
+    const { sessions, kory, goalDriver } = getContext();
+    const existingSessions = await sessions.list();
+    const { cancelLLMJobsForSession } = await import('../../queue/workers/llm-worker');
+
+    // A bulk delete must not leave work running for conversations that no
+    // longer exist. Stop every session before removing their persisted data.
+    for (const session of existingSessions) {
+      await goalDriver.pauseForSession(session.id);
+      kory.cancelSessionWorkers(session.id);
+      kory.abortManagerRun(session.id);
+      await cancelLLMJobsForSession(session.id);
+    }
+
+    await sessions.clear();
+    return { ok: true, deleted: existingSessions.length };
+  })
   .get('/:id', async ({ request, params: { id }, set }) => {
     if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
     const { sessions } = getContext();

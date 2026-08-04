@@ -1105,7 +1105,7 @@ function sendMessage(
   content: string,
   model?: string,
   reasoningLevel?: string,
-  attachments?: Array<{ type: string; data: string; name: string }>,
+  attachments?: Array<{ type: string; data: string; name: string; mimeType?: string }>,
   fastMode?: boolean,
 ) {
   feedStore.addUserMessage(sessionId, content, attachments);

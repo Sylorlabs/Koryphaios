@@ -264,7 +264,7 @@ function getThinkingStart(agentId: string, fallbackTimestamp: number): number {
 function addUserMessage(
   sessionId: string,
   content: string,
-  attachments?: Array<{ type: string; data: string; name: string }>,
+  attachments?: Array<{ type: string; data: string; name: string; mimeType?: string }>,
 ) {
   if (!ownsFeed(sessionId)) return;
   const userEntry: FeedEntry = {

@@ -41,6 +41,7 @@
   let editTitle = $state<string>('');
   let editError = $state<boolean>(false);
   let showConfirmDialog = $state<boolean>(false);
+  let showDeleteAllDialog = $state<boolean>(false);
   let sessionToDeleteId = $state<string>('');
   let creating = $state(false);
   let goalClock = $state(Date.now());
@@ -155,6 +156,20 @@
   function handleCancelDelete() {
     sessionToDeleteId = '';
     showConfirmDialog = false;
+  }
+
+  function requestDeleteAll() {
+    if (isGuidedDemo) {
+      toastStore.info('Sample sessions are protected in the demo.');
+      return;
+    }
+    if (sessionStore.sessions.length === 0) return;
+    showDeleteAllDialog = true;
+  }
+
+  async function handleConfirmDeleteAll() {
+    showDeleteAllDialog = false;
+    await sessionStore.deleteAllSessions();
   }
 
   function formatTime(ts: number): string {
@@ -332,11 +347,23 @@
       </div>
       <div class="mx-3 mb-3 border-t" style="border-color:var(--color-border)"></div>
     {/if}
-    <div
-      class="px-3 py-2 text-xs font-semibold uppercase tracking-[0.14em]"
-      style="color:var(--color-text-muted)"
-    >
-      Personal sessions
+    <div class="flex items-center justify-between gap-2 px-3 py-2">
+      <span
+        class="min-w-0 text-[10px] font-semibold uppercase tracking-[0.12em]"
+        style="color:var(--color-text-muted)"
+      >Personal sessions</span>
+      <button
+        type="button"
+        class="inline-flex shrink-0 items-center gap-1 rounded-md px-1.5 py-1 text-[9px] font-semibold transition-colors hover:bg-red-500/10 disabled:cursor-not-allowed disabled:opacity-35"
+        style="color:var(--color-error)"
+        onclick={requestDeleteAll}
+        disabled={sessionStore.sessions.length === 0}
+        aria-label="Delete all sessions"
+        title="Delete all sessions"
+      >
+        <Trash2 size={10} />
+        Delete all sessions
+      </button>
     </div>
     {#each sessionStore.groupedSessions as group (group.label)}
       <div class="mb-2">
@@ -572,4 +599,15 @@
   variant="danger"
   onConfirm={handleConfirmDelete}
   onCancel={handleCancelDelete}
+/>
+
+<ConfirmDialog
+  open={showDeleteAllDialog}
+  title="Delete All Sessions?"
+  message={`This permanently deletes all ${sessionStore.sessions.length} personal sessions and their message history. Any running work will be stopped. Are you sure?`}
+  confirmLabel="Delete All Sessions"
+  cancelLabel="Cancel"
+  variant="danger"
+  onConfirm={handleConfirmDeleteAll}
+  onCancel={() => (showDeleteAllDialog = false)}
 />

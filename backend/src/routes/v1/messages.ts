@@ -80,6 +80,7 @@ export const messageRoutes = new Elysia({ prefix: '/api/messages' })
               type: t.Union([t.Literal('image'), t.Literal('file')]),
               data: t.String(),
               name: t.String(),
+              mimeType: t.Optional(t.String()),
             }),
           ),
         ),

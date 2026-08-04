@@ -138,9 +138,9 @@ export interface AgentSettings {
   /** Persisted default source selection when both personal and project revisions exist. */
   skillCollisionChoices: Record<string, 'personal' | 'project'>;
 
-  /** Composer permission mode: guarded asks before destructive actions, ask
-   *  always confirms, plan is read-only until approved. */
-  permissionMode: 'guarded' | 'ask' | 'plan';
+  /** Composer permission preset. Plan remains supported for persisted legacy
+   *  sessions even though the composer exposes planning as a separate mode. */
+  permissionMode: 'yolo' | 'guarded' | 'edits' | 'ask' | 'plan' | 'custom';
 
   /** When true, approval thresholds (files/lines) are enforced before
    *  destructive tool calls. When false, the agent is unconstrained. */
@@ -450,7 +450,7 @@ const SETTING_ENUMS: Partial<Record<keyof AgentSettings, readonly string[]>> = {
   feedbackSharing: ['local', 'sanitized-opt-in'],
   skillLearningMode: ['human-only', 'propose-then-verify', 'automatic'],
   localWebSearch: ['off', 'on', 'fallback'],
-  permissionMode: ['guarded', 'ask', 'plan'],
+  permissionMode: ['yolo', 'guarded', 'edits', 'ask', 'plan', 'custom'],
 };
 
 /** Strip unknown or ill-typed API fields rather than persisting arbitrary configuration. */

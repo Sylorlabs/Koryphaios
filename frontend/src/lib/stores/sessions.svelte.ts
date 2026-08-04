@@ -300,6 +300,35 @@ async function deleteSession(id: string) {
   }
 }
 
+async function deleteAllSessions(): Promise<boolean> {
+  try {
+    const res = await apiFetch(apiUrl('/api/sessions'), { method: 'DELETE' });
+    const text = await res.text();
+    let data: { ok?: boolean; error?: string; deleted?: number } = {};
+    try {
+      data = text ? JSON.parse(text) : {};
+    } catch {
+      /* The status-based fallback below remains actionable. */
+    }
+    if (!res.ok || !data.ok) {
+      toastStore.error(data.error || friendlyHttpError(res.status, 'delete all sessions'));
+      return false;
+    }
+
+    sessions = [];
+    activeSessionId = '';
+    saveLastSession('');
+    toastStore.success(
+      data.deleted === 1 ? '1 session deleted' : `${data.deleted ?? 0} sessions deleted`,
+    );
+    return true;
+  } catch (err) {
+    if (import.meta.env.DEV) console.error('deleteAllSessions exception:', err);
+    toastStore.error('Failed to delete all sessions');
+    return false;
+  }
+}
+
 async function fetchMessages(
   sessionId: string,
   signal?: AbortSignal,
@@ -445,6 +474,7 @@ export const sessionStore = {
   renameSession,
   setInteractionMode,
   deleteSession,
+  deleteAllSessions,
   fetchMessages,
   handleSessionUpdate,
   handleSessionDeleted,
