@@ -439,9 +439,18 @@ function parseBody(init: RequestInit): Record<string, unknown> {
 
 // ─── Router ─────────────────────────────────────────────────────────────────
 
-/** Answer an API request entirely in memory. Always returns a Response. */
-function isReadOnlyDemoRequest(method: string): boolean {
-  return method === 'GET';
+/**
+ * The guided preview never touches a visitor's workspace or a provider, but
+ * small settings changes may be reflected in the tab's in-memory state. This
+ * lets visitors inspect the controls without producing a misleading save
+ * failure for an API that deliberately does not exist in the public site.
+ */
+function canUpdateDemoState(path: string, method: string): boolean {
+  if (method === 'GET') return true;
+  return (
+    (method === 'PUT' && (path === '/api/agent/settings' || path === '/api/memory/settings')) ||
+    (method === 'POST' && (path === '/api/agent/settings/reset' || path === '/api/memory/settings/reset'))
+  );
 }
 
 export function demoFetch(url: string, init: RequestInit = {}): Response {
@@ -453,9 +462,10 @@ export function demoFetch(url: string, init: RequestInit = {}): Response {
     path = url;
   }
 
-  // This public preview is inspectable, never a mutable workspace. Keeping
-  // this in the API shim prevents DevTools from turning it into a stuck state.
-  if (!isReadOnlyDemoRequest(method)) {
+  // This public preview is inspectable, never a mutable workspace. Only
+  // temporary display preferences above may change; every other mutation is
+  // rejected before it can resemble a real desktop action.
+  if (!canUpdateDemoState(path, method)) {
     return json({ ok: false, error: 'The guided demo is read-only. Download Koryphaios to run a workspace.' }, 403);
   }
 
