@@ -478,6 +478,7 @@ export class CodexCliProvider implements Provider {
               type: 'usage_update',
               tokensIn: usage.input_tokens as number | undefined,
               tokensOut: usage.output_tokens as number | undefined,
+              accountId: account.id,
             });
           }
           completed = true;

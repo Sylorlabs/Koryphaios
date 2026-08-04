@@ -9,6 +9,8 @@ export interface ProviderDisplayMeta {
   iconPath: string;
   deployment?: ProviderDeployment;
   description?: string;
+  /** Official page where the user creates the credential this adapter expects. */
+  credentialUrl?: string;
   /** Injected into manager system prompts when this provider is relevant. */
   managerHint?: string;
 }

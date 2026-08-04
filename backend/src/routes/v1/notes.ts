@@ -201,7 +201,9 @@ export const notesRoutes = new Elysia({ prefix: '/api/notes' })
       const notes = await traceBlockingOp('importMemoryAsNotes', () =>
         notesService.importMemoryAsNotes(getRequestProjectRoot(request)),
       );
-      broadcastNotesNetworkUpdate('update');
+      // The caller receives every imported note and merges them directly.
+      // Broadcasting the generic mutation event would make that same client
+      // reload the entire vault, graph, and folder tree a second time.
       return { ok: true, data: notes };
     } catch (err: any) {
       set.status = 500;

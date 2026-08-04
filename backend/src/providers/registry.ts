@@ -65,6 +65,7 @@ import {
   type ProviderEvent,
   type Provider,
 } from './types';
+import { CapabilityRegistry } from './CapabilityRegistry';
 import { withRetry } from './utils';
 import { recordUsage as creditRecordUsage } from '../credit-accountant';
 import {
@@ -77,6 +78,7 @@ import {
   BASE_URL_PLACEHOLDERS,
   PROVIDER_AUTH_MODE,
 } from './constants';
+import { PROVIDER_CONFIG_MAP } from './provider-configs';
 
 const CLI_HARNESS_PROVIDERS = new Set<ProviderName>([
   'claude',
@@ -165,7 +167,6 @@ function generateProviderLabel(name: string): string {
     synthetic: 'Synthetic',
     inference: 'Inference.net',
     requesty: 'Requesty',
-    'github-models': 'GitHub Models',
     vultr: 'Vultr',
     abacus: 'Abacus',
     llama: 'Meta Llama',
@@ -245,6 +246,8 @@ class ProviderRegistry {
   private circuitStates = new Map<ProviderName, CircuitState>();
   /** IDs of user-defined custom providers (e.g. "custom:my-llm"). */
   private customProviderIds = new Set<ProviderName>();
+  /** Capability-based model selection — replaces blind first-match fallback. */
+  private capabilityRegistry: CapabilityRegistry | undefined;
 
   constructor(private config?: KoryphaiosConfig) {
     this.initializeAll();
@@ -261,6 +264,9 @@ class ProviderRegistry {
         return undefined;
       }
     });
+    // Initialize capability-based model selection (lazy import to avoid
+    // circular dependency — CapabilityRegistry imports from this file).
+    this.capabilityRegistry = new CapabilityRegistry(this);
   }
 
   private getVisibleProviderNames(): ProviderName[] {
@@ -359,6 +365,7 @@ class ProviderRegistry {
     iconPath?: string;
     deployment?: 'cloud' | 'api' | 'local' | 'hybrid';
     description?: string;
+    credentialUrl?: string;
   }> {
     const names = this.getVisibleProviderNames();
     const result: Array<{
@@ -382,6 +389,7 @@ class ProviderRegistry {
       iconPath?: string;
     deployment?: 'cloud' | 'api' | 'local' | 'hybrid';
       description?: string;
+      credentialUrl?: string;
     }> = [];
 
     for (const name of names) {
@@ -416,6 +424,8 @@ class ProviderRegistry {
       const requiresBaseUrl =
         isCustom ||
         authMode === 'base_url_only' ||
+        name === 'cloudflare' ||
+        name === 'modal' ||
         name === 'azure' ||
         name === 'azurecognitive' ||
         name === 'sapai' ||
@@ -459,6 +469,7 @@ class ProviderRegistry {
         ...(display?.iconPath && { iconPath: display.iconPath }),
         deployment: inferredDeployment,
         ...(display?.description && { description: display.description }),
+        ...(display?.credentialUrl && { credentialUrl: display.credentialUrl }),
         ...(baseUrlPlaceholder && { baseUrlPlaceholder }),
         // Remote providers (served by another machine) carry an agentic flag so
         // the composer can confirm the "your files go to the host" CLI flow.
@@ -623,8 +634,19 @@ class ProviderRegistry {
     return this.findProviderForModel(modelId);
   }
 
-  /** Return the first available provider and one of its non-legacy models for "auto" fallback. */
+  /** Return the best available model for "auto" fallback, using
+   *  capability-based scoring instead of blind first-match. Falls back to
+   *  the original first-match behavior if the capability registry returns
+   *  nothing (e.g. all providers have open circuit breakers). */
   getFirstAvailableRouting(): { model: string; provider: ProviderName } | undefined {
+    // Try capability-based selection first — picks the best model by tier,
+    // context window, and capabilities rather than insertion order.
+    const capability = this.capabilityRegistry?.findBestModel({
+      preferredTier: 'flagship',
+    });
+    if (capability) return capability;
+    // Fallback: original blind first-match for edge cases where the
+    // capability registry has no candidates (e.g. all legacy models).
     for (const provider of this.getAvailable()) {
       if (provider.name === 'vertexai' || this.isCircuitOpen(provider.name)) continue;
       const models = provider.listModels().filter((m) => !isLegacyModel(m));
@@ -669,6 +691,7 @@ class ProviderRegistry {
         let hasContent = false;
         let accTokensIn = 0;
         let accTokensOut = 0;
+        let usageAccountId: string | undefined;
         const stream = provider.streamResponse({ ...request, model: currentModel });
 
         for await (const event of stream) {
@@ -676,13 +699,17 @@ class ProviderRegistry {
           if (event.type === 'usage_update') {
             if (typeof event.tokensIn === 'number') accTokensIn = event.tokensIn;
             if (typeof event.tokensOut === 'number') accTokensOut = event.tokensOut;
+            if (event.accountId) usageAccountId = event.accountId;
           }
           yield event;
         }
 
         if (hasContent) {
           if (accTokensIn > 0 || accTokensOut > 0) {
-            creditRecordUsage(currentModel, provider.name, accTokensIn, accTokensOut);
+            creditRecordUsage(currentModel, provider.name, accTokensIn, accTokensOut, {
+              accountId: usageAccountId,
+              sessionId: request.sessionId,
+            });
           }
           this.recordSuccess(provider.name);
           return;
@@ -1330,7 +1357,15 @@ class ProviderRegistry {
         autoCli?.authToken ??
         (isDisabled ? undefined : this.detectEnvAuthToken(name)) ??
         undefined,
-      baseUrl: userConfig?.baseUrl ?? this.detectEnvUrl(name) ?? undefined,
+      // The canonical registry URL must reach the runtime config. Previously
+      // only providers duplicated in OPENCODE_DEFAULT_BASE_URL received their
+      // endpoint, leaving valid entries visible in Settings but impossible to
+      // instantiate after a key was entered.
+      baseUrl:
+        userConfig?.baseUrl ??
+        this.detectEnvUrl(name) ??
+        PROVIDER_CONFIG_MAP.get(name)?.baseUrl ??
+        undefined,
       selectedModels: userConfig?.selectedModels ?? [],
       hideModelSelector: userConfig?.hideModelSelector ?? false,
       disabled: isDisabled,

@@ -615,9 +615,49 @@ async function importMemoryAsNotes(): Promise<void> {
     if (res.ok) {
       const data = await res.json();
       if (data.ok) {
-        const count = Array.isArray(data.data) ? data.data.length : 0;
+        const imported = Array.isArray(data.data) ? (data.data as Note[]) : [];
+        const count = imported.length;
+
+        // The import response already contains the authoritative notes. Merge
+        // just those records into the visible state; refetching the entire
+        // notes table, graph, and folder tree can freeze large local vaults.
+        const importedIds = new Set(imported.map((note) => note.id));
+        _notes = [...imported, ..._notes.filter((note) => !importedIds.has(note.id))];
+
+        const graphNodes = new Map(_graphData.nodes.map((node) => [node.id, node]));
+        for (const note of imported) {
+          graphNodes.set(note.id, {
+            id: note.id,
+            title: note.title,
+            folderPath: note.folderPath,
+            tags: note.tags ?? [],
+            linkCount: graphNodes.get(note.id)?.linkCount ?? 0,
+            includeInContext: note.includeInContext,
+          });
+        }
+        _graphData = { ..._graphData, nodes: [...graphNodes.values()] };
+
+        const ensureFolderPath = (nodes: FolderNode[], folderPath: string): FolderNode[] => {
+          const segments = folderPath.split('/').filter(Boolean);
+          let currentPath = '';
+          let currentNodes = nodes;
+          for (const segment of segments) {
+            currentPath += `/${segment}`;
+            let node = currentNodes.find((candidate) => candidate.path === currentPath);
+            if (!node) {
+              node = { path: currentPath, name: segment, noteCount: 0, children: [] };
+              currentNodes.push(node);
+              currentNodes.sort((a, b) => a.name.localeCompare(b.name));
+            }
+            currentNodes = node.children;
+          }
+          return nodes;
+        };
+        const nextFolderTree = structuredClone(_folderTree);
+        for (const note of imported) ensureFolderPath(nextFolderTree, note.folderPath);
+        _folderTree = nextFolderTree;
+
         toastStore.success(count === 1 ? 'Imported 1 memory note' : `Imported ${count} memory notes`);
-        await Promise.all([fetchNotes(), fetchGraph(), fetchFolderTree()]);
       } else {
         toastStore.error(data.error ?? 'Failed to import memory');
       }
