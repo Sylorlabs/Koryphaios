@@ -126,6 +126,10 @@ export interface StreamRequest {
   sandbox?: import('@koryphaios/shared').SandboxPolicy;
   /** Harness-owned role. Native providers translate this into real CLI tool policy. */
   harnessRole?: 'manager' | 'worker' | 'critic';
+  /** Host-owned permission preset. Native CLI harnesses must not silently
+   *  execute outside this policy. Non-YOLO turns run native tools read-only
+   *  and route mutations through Kory's approval-gated tool bridge. */
+  permissionMode?: 'yolo' | 'guarded' | 'edits' | 'ask' | 'plan' | 'custom';
   /** Versioned prompt/task provenance; providers transport but never invent these values. */
   promptManifestHash?: string;
   taskContractHash?: string;

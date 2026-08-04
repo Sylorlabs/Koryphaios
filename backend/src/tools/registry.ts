@@ -3,6 +3,10 @@
 
 import type { ChangeSummary } from '@koryphaios/shared';
 import { toolLog } from '../logger';
+import {
+  decideToolPermission,
+  type ToolPermissionPolicy,
+} from './permission-policy';
 
 export interface ToolContext {
   sessionId: string;
@@ -35,6 +39,12 @@ export interface ToolContext {
   }) => void;
   /** Optional callback to request user input (blocking) */
   waitForUserInput?: (question: string, options: string[]) => Promise<string>;
+  /** Host-owned approval policy. Every Kory tool execution, including worker
+   *  tools, passes through this policy before the tool can run. */
+  permissionPolicy?: ToolPermissionPolicy;
+  /** Calls approved by the host policy do not prompt a second time inside a
+   *  tool-specific risk check such as catastrophic bash detection. */
+  approvedToolCallIds?: Set<string>;
   /** Optional callback to record code changes for summary and keep/reject */
   recordChange?: (change: ChangeSummary) => void;
   /** Optional: manager-only. When the manager calls delegate_to_worker, this runs the worker pipeline and returns a summary. */
@@ -158,9 +168,57 @@ export class ToolRegistry {
 
     const start = performance.now();
 
+    const input = call.input as Record<string, unknown>;
+    const paths = [input.path, input.oldPath, input.newPath]
+      .filter((value): value is string => typeof value === 'string' && value.length > 0);
+    const operations = Array.isArray(input.operations) ? input.operations as Array<Record<string, unknown>> : [];
+    for (const operation of operations) {
+      if (typeof operation.path === 'string') paths.push(operation.path);
+    }
+    const lineSources = [input.content, input.newStr, ...operations.map((operation) => operation.content)]
+      .filter((value): value is string => typeof value === 'string');
+    const change = {
+      fileCount: new Set(paths).size,
+      linesChanged: lineSources.reduce((total, value) => total + value.split('\n').length, 0),
+    };
+    const permission = decideToolPermission(ctx.permissionPolicy, call.name, change);
+    if (permission.action === 'deny') {
+      return {
+        callId: call.id,
+        name: call.name,
+        output: permission.reason,
+        isError: true,
+        durationMs: performance.now() - start,
+      };
+    }
+    if (permission.action === 'ask') {
+      if (!ctx.waitForUserInput) {
+        return {
+          callId: call.id,
+          name: call.name,
+          output: `${permission.reason}, but no human approval channel is available.`,
+          isError: true,
+          durationMs: performance.now() - start,
+        };
+      }
+      const selection = await ctx.waitForUserInput(
+        `${permission.reason}. Allow ${call.name} once?`,
+        ['Allow once', 'Deny'],
+      );
+      if (selection !== 'Allow once') {
+        return {
+          callId: call.id,
+          name: call.name,
+          output: selection === '__timeout__' ? 'Approval timed out; tool was not run.' : 'Tool denied by user.',
+          isError: true,
+          durationMs: performance.now() - start,
+        };
+      }
+      (ctx.approvedToolCallIds ??= new Set()).add(call.id);
+    }
+
     // Preflight check for file-mutating tools when autonomy limits are active.
     if (ctx.preflightFileChange && FILE_MUTATING_TOOLS.has(call.name)) {
-      const input = call.input as Record<string, unknown>;
       const paths: string[] = typeof input.path === 'string' ? [input.path] : [];
       const content = typeof input.content === 'string' ? input.content : '';
       const linesChanged = content ? content.split('\n').length : 0;

@@ -520,7 +520,11 @@ function parseBody(init: RequestInit): Record<string, unknown> {
  */
 function canUpdateDemoState(path: string, method: string): boolean {
   if (method === 'GET') return true;
+  const isGoalMutation =
+    (path === '/api/goals' && method === 'POST') ||
+    (/^\/api\/goals\/[^/]+(?:\/.*)?$/.test(path) && (method === 'POST' || method === 'PATCH'));
   return (
+    isGoalMutation ||
     (method === 'PUT' && (path === '/api/agent/settings' || path === '/api/memory/settings')) ||
     (method === 'POST' && (path === '/api/agent/settings/reset' || path === '/api/memory/settings/reset'))
   );
@@ -536,9 +540,10 @@ export function demoFetch(url: string, init: RequestInit = {}): Response {
     path = url;
   }
 
-  // This public preview is inspectable, never a mutable workspace. Only
-  // temporary display preferences above may change; every other mutation is
-  // rejected before it can resemble a real desktop action.
+  // This public preview is inspectable, never a mutable workspace. Temporary
+  // display preferences and the explicitly simulated Goal flow may change
+  // in-memory state; every other mutation is rejected before it can resemble
+  // a real desktop action.
   if (!canUpdateDemoState(path, method)) {
     return json({ ok: false, error: 'The guided demo is read-only. Download Koryphaios to run a workspace.' }, 403);
   }
