@@ -1,12 +1,39 @@
 # Koryphaios
 
-> A free native desktop AI workspace that makes your life easier. Built with Tauri, Bun, and SvelteKit.
+**Use the right AI agents in parallel. Ship work that survives evidence.**
+
+Koryphaios is a free, local-first native desktop workspace that coordinates the
+agents and model providers you already use. It keeps serious attempts isolated,
+makes changes and costs inspectable, and gives you a clean path back when an
+agent gets it wrong.
+
+[Website](https://koryphaios.com) · [Documentation](https://koryphaios.com/docs) · [Download](https://koryphaios.com/download)
 
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](./LICENSE)
 [![Bun](https://img.shields.io/badge/runtime-Bun-orange.svg)](https://bun.sh)
 [![TypeScript](https://img.shields.io/badge/language-TypeScript-blue.svg)](https://www.typescriptlang.org/)
 
 ---
+
+## Install Koryphaios
+
+macOS and Linux:
+
+```bash
+curl -fsSL https://koryphaios.com/install | sh
+```
+
+Windows PowerShell:
+
+```powershell
+curl.exe -fsSL https://koryphaios.com/install.ps1 | powershell.exe -NoProfile -ExecutionPolicy Bypass -Command -
+```
+
+These commands select the latest complete native build for your OS and
+architecture. macOS receives a DMG, Windows receives the setup executable, and
+Linux x64 receives an AppImage. You can inspect the
+[macOS/Linux](https://koryphaios.com/install) or
+[Windows](https://koryphaios.com/install.ps1) script before running it.
 
 ## What Koryphaios is
 
@@ -80,37 +107,19 @@ Koryphaios is free, open, and genuinely useful, and it is also still growing. Th
 
 None of these block normal use and all of them are fair game for the in app feedback reporter. The fastest way to make the rough edges smaller is for people to actually use the tool and tell us what they hit.
 
-## Getting started
-
-### Installation
+## Develop from source
 
 ```bash
-# Clone the repository
-git clone <repository-url>
+git clone https://github.com/Sylorlabs/Koryphaios.git
 cd Koryphaios
-
-# Install dependencies for all workspaces
 bun install
-
-# Copy environment template
-cp .env.example .env
-
-# Edit .env and add your API keys
-```
-
-### Development and launching
-
-Koryphaios is a native Tauri app. The supported development entrypoint is:
-
-```bash
-# Install workspace dependencies
-bun install
-
-# Launch the native desktop app
 bun run dev
 ```
 
-`bun run dev` is an alias for `bun run dev:desktop`. The launcher in `scripts/launch-desktop.ts` starts the local backend on the configured app port, starts the internal frontend dev server on a separate port for the Tauri webview, waits for both services to be healthy, and launches the native Tauri shell.
+The supported development entrypoint is `bun run dev` (an alias for
+`bun run dev:desktop`). The launcher in `scripts/launch-desktop.ts` starts the
+local backend and frontend, waits for both to become healthy, and then launches
+the native Tauri shell.
 
 The localhost dev server is an implementation detail of Tauri development, not the supported user facing runtime.
 
