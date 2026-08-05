@@ -20,7 +20,6 @@ import { normalizeReasoningLevel, determineAutoReasoningLevel } from '@koryphaio
 import { AGENT, DOMAIN, SESSION } from '../constants';
 import {
   ProviderRegistry,
-  resolveModel,
   resolveTrustedContextWindow,
   isLegacyModel,
   getNonLegacyModels,
@@ -183,13 +182,10 @@ const AGENT_THREAD_IDLE_TTL_MS = 30 * 60 * 1000;
 const MAX_COMPLETED_AGENT_THREADS_PER_SESSION = 24;
 
 // ─── Default Model Assignments per Domain ───────────────────────────────────
-
-for (const [domain, modelId] of Object.entries(DOMAIN.DEFAULT_MODELS)) {
-  const def = resolveModel(modelId);
-  if (!def) {
-    throw new Error(`DOMAIN.DEFAULT_MODELS["${domain}"] references unknown model: "${modelId}".`);
-  }
-}
+// Model definitions are now resolved at runtime via live provider discovery,
+// not from a static catalog. The DEFAULT_MODELS entries are validated lazily
+// when a domain actually requests its model — a provider may not be connected
+// at startup, so eager validation would reject every default.
 
 // ─── Clarification Gate ─────────────────────────────────────────────────────
 
