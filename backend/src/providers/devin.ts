@@ -6,10 +6,11 @@
 // (per-step reasoning, tool calls with output, and exact token usage) is
 // written to an `--export` JSON file which we tail for tools + usage.
 //
-// Model list + reasoning: Devin exposes a fixed set of named models (SWE-1.6,
+// Model list: Devin exposes a fixed set of named models (SWE-1.6,
 // Claude, GPT, Gemini, GLM, Kimi families) selected via --model. There is NO
 // separate reasoning-effort flag — the tier is part of the model name
-// (e.g. swe-1.6-fast / swe-1.6-slow), so we surface models only.
+// (e.g. swe-1.6-fast / swe-1.6-slow), so we surface models only and never
+// show a reasoning picker.
 
 import type { ModelDef, ProviderConfig } from '@koryphaios/shared';
 import { spawn } from 'node:child_process';
@@ -26,7 +27,7 @@ import {
   type ProviderMessage,
   type StreamRequest,
 } from './types';
-import { DevinCliBridge, getKoryphaiosDevinHome, resolveDevinReasoningModel } from './devin-bridge';
+import { DevinCliBridge, getKoryphaiosDevinHome } from './devin-bridge';
 import { getDevinCapabilitiesAsync, getDevinCapabilities as getDevinCapabilitiesSync } from './devin-capabilities';
 
 const DEVIN_STREAM_TIMEOUT_MS = 300_000;
@@ -241,9 +242,7 @@ export class DevinProvider implements Provider {
       exportPath,
     ];
     if (agentConfigPath) args.push('--agent-config', agentConfigPath);
-    const cliModel = this.resolveCliModel(
-      resolveDevinReasoningModel(request.model, request.reasoningLevel),
-    );
+    const cliModel = this.resolveCliModel(request.model);
     if (cliModel) args.push('--model', cliModel);
 
     const jail = request.sandbox ? buildSoftJail(process.env, [join(homedir(), '.devin')]) : null;

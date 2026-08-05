@@ -214,7 +214,6 @@ function buildModelFromId(modelId: string, displayName?: string): ModelDef {
     maxOutputTokens: 32_000,
     supportsStreaming: true,
     supportsAttachments: false,
-    canReason: /think|high|low|max|auto/i.test(trimmed),
   } as ModelDef;
 }
 

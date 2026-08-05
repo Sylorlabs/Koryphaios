@@ -1,46 +1,38 @@
 // Reasoning Configuration Functions
 // Domain: Helper functions to query and normalize reasoning settings
+//
+// There are no static per-provider reasoning tables. Reasoning config is built
+// at runtime from each model's live-reported reasoningLevels via
+// buildReasoningConfigFromLevels(). These helpers remain for compatibility but
+// always return null/default since the static rule table is empty.
 
 import type { ReasoningConfig } from './ReasoningTypes';
 import { DEFAULT_REASONING_RULES } from './ReasoningConfig';
 
 /**
  * Get reasoning configuration for a specific provider/model combination.
- * @param provider - Provider name (e.g., "anthropic", "openai")
- * @param model - Model ID (e.g., "claude-opus-4-6", "gpt-5")
- * @returns ReasoningConfig or null if reasoning is not supported
+ * Always returns null — reasoning config is now built from live model metadata
+ * (reasoningLevels) via buildReasoningConfigFromLevels(), not static rules.
  */
-export function getReasoningConfig(provider?: string, model?: string): ReasoningConfig | null {
-  const normalizedProvider = provider || 'auto';
-
-  for (const rule of DEFAULT_REASONING_RULES) {
-    if (rule.provider !== normalizedProvider) continue;
-    if (rule.modelPattern && !rule.modelPattern.test(model ?? '')) continue;
-    return rule.config;
-  }
+export function getReasoningConfig(_provider?: string, _model?: string): ReasoningConfig | null {
   return null;
 }
 
 /**
  * Check if a provider/model combination supports reasoning.
- * @param provider - Provider name
- * @param model - Model ID
- * @returns true if reasoning is supported with at least one option
+ * Always false — use the model's live reasoningLevels array instead.
  */
-export function hasReasoningSupport(provider?: string, model?: string): boolean {
-  const config = getReasoningConfig(provider, model);
-  return config !== null && config.options && config.options.length > 0;
+export function hasReasoningSupport(_provider?: string, _model?: string): boolean {
+  return false;
 }
 
 /**
  * Get the default reasoning level for a provider/model.
- * @param provider - Provider name
- * @param model - Model ID
- * @returns Default reasoning level string
+ * Always returns 'medium' — the actual default comes from the live
+ * reasoningLevels array via buildReasoningConfigFromLevels().
  */
-export function getDefaultReasoning(provider?: string, model?: string): string {
-  const config = getReasoningConfig(provider, model);
-  return config?.defaultValue ?? 'medium';
+export function getDefaultReasoning(_provider?: string, _model?: string): string {
+  return 'medium';
 }
 
 /**
@@ -60,7 +52,6 @@ export function normalizeReasoningLevel(
 ): string | undefined {
   if (!reasoningLevel) return undefined;
 
-  // Adaptive means let the model decide
   const normalizedLevel = reasoningLevel.toLowerCase().trim();
 
   // Antigravity exposes Low/Medium/High as separate model entries. It has no
@@ -77,106 +68,11 @@ export function normalizeReasoningLevel(
     return 'auto';
   }
 
-  // If provider is specified, map standardized level to provider's native value
-  if (provider && provider !== 'auto') {
-    const level = normalizedLevel;
-
-    // Gemini (Budget-based)
-    if (provider === 'google' || provider === 'aistudio' || provider === 'vertexai') {
-      const isGemini3 = model ? /gemini-3/i.test(model) : false;
-      if (isGemini3) {
-        if (level === 'none') return 'low';
-        if (['low', 'medium', 'high', 'xhigh'].includes(level)) {
-          return level === 'xhigh' ? 'high' : level;
-        }
-      } else {
-        // Budget-based mapping
-        if (level === 'none') return '0';
-        if (level === 'low') return '1024';
-        if (level === 'medium') return '8192';
-        if (level === 'high') return '24576';
-        if (level === 'xhigh') return '65536';
-      }
-    }
-
-    // Copilot-specific handling for budget-based models
-    if (provider === 'copilot') {
-      // Gemini 2.5 Pro uses budget-based thinking
-      if (model && /gemini-2\.5-pro/i.test(model)) {
-        if (level === 'none') return '0';
-        if (level === 'low') return '1024';
-        if (level === 'medium') return '8192';
-        if (level === 'high') return '24576';
-        if (level === 'xhigh') return '65536';
-      }
-      // Gemini 3.x uses thinking levels
-      if (model && /gemini-3/i.test(model)) {
-        if (level === 'none') return 'low';
-        if (['low', 'medium', 'high', 'xhigh'].includes(level)) {
-          return level === 'xhigh' ? 'high' : level;
-        }
-      }
-      // Claude Haiku 4.5 uses budget tokens
-      if (model && /claude-haiku-4\.5/i.test(model)) {
-        if (level === 'none') return '0';
-        if (level === 'low') return '1024';
-        if (level === 'medium') return '8192';
-        if (level === 'high') return '24576';
-        if (level === 'xhigh') return '24576'; // Max for Haiku
-      }
-    }
-
-    // CLI harnesses (claude-code, codex, grok): pass the level
-    // through untouched — the harness clamps to the CLI/model's real
-    // capability (incl. xhigh/max). Dropping it here silently ran every chat
-    // at the CLI default.
-    if (['claude', 'codex', 'grok'].includes(provider)) {
-      return level;
-    }
-
-    // OpenCode Zen / Go: effort tiers come from models.dev per-model metadata
-    // (may include 'max'); the picker only offers levels the model declares,
-    // so pass through untouched.
-    if (provider === 'opencodezen' || provider === 'opencodego') {
-      return level;
-    }
-
-    // Gateway / hosted providers enriched via models.dev (togetherai, fireworks,
-    // cerebras, deepinfra, etc.): reasoning tiers come from per-model metadata.
-    // The picker only offers levels the model declares, so pass through
-    // untouched — the OpenAIProvider clamps to the model's real capability.
-    // Bedrock uses the Anthropic wire format and is handled by AnthropicProvider.
-    const MODEL_DEV_ENRICHED_PROVIDERS = [
-      'togetherai', 'cerebras', 'fireworks', 'huggingface', 'baseten',
-      'cloudflare', 'vercel', 'ollama', 'ollamacloud', 'minimax', 'moonshot',
-      'nebius', 'venice', 'deepinfra', 'scaleway', 'ovhcloud', 'stackit',
-      'zai', 'zenmux', 'gitlab', 'mistralai', 'cohere', 'perplexity',
-      'hyperbolic', 'stepfun', 'alibaba', 'helicone', 'nvidia', 'friendliai',
-      'requesty', 'aihubmix', '302ai', 'bedrock',
-    ];
-    if (MODEL_DEV_ENRICHED_PROVIDERS.includes(provider)) {
-      return level;
-    }
-
-    // OpenAI / Anthropic / Groq / xAI / Azure / OpenRouter / Copilot (Effort-based)
-    if (
-      ['openai', 'anthropic', 'groq', 'xai', 'azure', 'openrouter', 'copilot', 'kimicode'].includes(provider)
-    ) {
-      if (level === 'none') return 'none';
-      if (level === 'xhigh') return 'high'; // Map xhigh to high for effort-based APIs
-      // Preserve low, medium, high, max (max is valid for Anthropic Opus 4.6 only)
-      return level;
-    }
-  }
-
-  // Fallback: search in config options
-  const config = getReasoningConfig(provider, model);
-  if (!config || config.options.length === 0) return undefined;
-
-  const value = reasoningLevel.trim().toLowerCase();
-  const option = config.options.find((opt) => opt.value.toLowerCase() === value);
-  if (!option) return config.defaultValue;
-  return option.value;
+  // Pass the level through unchanged. The reasoning picker only offers levels
+  // the model itself reported via reasoningLevels, so the value is already in
+  // the provider's native format. Each provider's backend code handles any
+  // API-specific mapping (e.g. OpenAI maps budget tokens to effort strings).
+  return normalizedLevel;
 }
 
 /**

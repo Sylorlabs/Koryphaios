@@ -205,28 +205,6 @@ describe('DevinCliBridge.buildAgentConfig', () => {
   });
 });
 
-// ─── Devin reasoning model resolver ────────────────────────────────────────
-
-describe('resolveDevinReasoningModel', () => {
-  const { resolveDevinReasoningModel } = require('../src/providers/devin-bridge');
-
-  test('auto level returns model unchanged', () => {
-    expect(resolveDevinReasoningModel('swe-1.6-fast', 'auto')).toBe('swe-1.6-fast');
-  });
-
-  test('low level on swe-1.6-slow → swe-1.6-fast', () => {
-    expect(resolveDevinReasoningModel('swe-1.6-slow', 'low')).toBe('swe-1.6-fast');
-  });
-
-  test('high level on swe-1.6-fast → swe-1.6-slow', () => {
-    expect(resolveDevinReasoningModel('swe-1.6-fast', 'high')).toBe('swe-1.6-slow');
-  });
-
-  test('non-swe model returns unchanged', () => {
-    expect(resolveDevinReasoningModel('claude-sonnet-4', 'high')).toBe('claude-sonnet-4');
-  });
-});
-
 // ─── Claude Code bridge ────────────────────────────────────────────────────
 
 describe('ClaudeCodeCliBridge', () => {

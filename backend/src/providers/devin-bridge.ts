@@ -361,21 +361,4 @@ export function resetKoryphaiosDevinHome(): void {
   cachedDevinHome = null;
 }
 
-/** Resolve a Kory reasoning level into a Devin model selection. Devin encodes
- *  the reasoning tier in the model name (swe-1.6-fast / swe-1.6-slow) rather
- *  than a separate flag, so the composer pill controls it via model choice. */
-export function resolveDevinReasoningModel(
-  modelId: string,
-  reasoningLevel: string | undefined,
-): string {
-  if (!reasoningLevel || reasoningLevel === 'auto') return modelId;
-  const lvl = reasoningLevel.toLowerCase();
-  // SWE family: fast = low/minimal, slow = high/max.
-  if (/swe-1\.6/i.test(modelId)) {
-    if (lvl === 'none' || lvl === 'minimal' || lvl === 'low') return modelId.replace(/slow/i, 'fast');
-    if (lvl === 'high' || lvl === 'xhigh' || lvl === 'max') return modelId.replace(/fast/i, 'slow');
-  }
-  return modelId;
-}
-
 export { roleToPermissionMode };

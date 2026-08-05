@@ -159,8 +159,6 @@ function readConfiguredClineModels(): ModelDef[] {
     maxOutputTokens: 32_000,
     supportsStreaming: true,
     supportsAttachments: false,
-    canReason: true,
-    reasoningLevels: ['none', 'low', 'medium', 'high', 'xhigh'],
   } as ModelDef));
 }
 
@@ -219,8 +217,6 @@ export class ClineProvider implements Provider {
         maxOutputTokens: 32_000,
         supportsStreaming: true,
         supportsAttachments: false,
-        canReason: true,
-        reasoningLevels: ['none', 'low', 'medium', 'high', 'xhigh'],
       } as ModelDef);
     }
 

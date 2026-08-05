@@ -108,6 +108,13 @@ interface ActiveFileEdit {
 }
 let activeFileEdits = $state<Map<string, ActiveFileEdit>>(new Map());
 
+/** A feed item is a worker only after the backend emitted `agent.spawned`. */
+function isSpawnedSubAgent(agentId: string | undefined): boolean {
+  if (!agentId) return false;
+  const identity = agentStore.agents.get(agentId)?.identity;
+  return !!identity && identity.role !== 'manager';
+}
+
 let hasShownMalformedWsMessage = false;
 let fileEditTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
@@ -384,17 +391,18 @@ function handleMessage(msg: WSMessage) {
 
     case 'agent.error': {
       const p = msg.payload as { agentId?: string; error?: string };
+      const isSubAgent = isSpawnedSubAgent(p.agentId);
       clearSessionBusy(msg.sessionId ?? agents.get(p.agentId ?? '')?.sessionId ?? '');
       if (isForActiveSession) {
         feedStore.removeAnalyzingThoughtEntries();
         feedStore.addFeedEntry({
           timestamp: msg.timestamp,
           type: 'error',
-          agentId: p.agentId ?? '',
-          agentName: agents.get(p.agentId ?? '')?.identity.name ?? 'Unknown',
+          agentId: isSubAgent ? p.agentId! : 'kory-manager',
+          agentName: isSubAgent ? agents.get(p.agentId!)?.identity.name ?? 'Worker' : 'Kory',
           glowClass: '',
           text: p.error ?? 'Unknown error',
-          metadata: { source: 'agent', sessionId: msg.sessionId },
+          metadata: { source: 'agent', sessionId: msg.sessionId, ...(isSubAgent && { isSubAgent: true }) },
         });
       }
       break;
@@ -402,6 +410,7 @@ function handleMessage(msg: WSMessage) {
 
     case 'stream.delta': {
       const p = msg.payload as StreamDeltaPayload;
+      const isSubAgent = isSpawnedSubAgent(p.agentId);
       // Answer text starting = the provider is done reasoning: freeze timers.
       if (isForActiveSession) feedStore.finalizeThinking(p.agentId, msg.timestamp);
       agentStore.appendAgentContent(p.agentId, p.content, msg.sessionId ?? undefined);
@@ -418,7 +427,7 @@ function handleMessage(msg: WSMessage) {
           agentName: agents.get(p.agentId)?.identity.name ?? 'Worker',
           glowClass: feedStore.resolveGlowClass(agents.get(p.agentId)?.identity),
           text: p.content,
-          metadata: orderedEventMetadata(msg),
+          metadata: { ...orderedEventMetadata(msg), ...(isSubAgent && { isSubAgent: true }) },
         });
       }
       if (msg.sessionId) {
@@ -446,6 +455,7 @@ function handleMessage(msg: WSMessage) {
 
     case 'stream.thinking': {
       const p = msg.payload as StreamThinkingPayload;
+      const isSubAgent = isSpawnedSubAgent(p.agentId);
       agentStore.appendAgentThinking(p.agentId, p.thinking, msg.sessionId ?? undefined);
       if (isForActiveSession) {
         // The ephemeral "Analyzing…" row must clear as soon as real
@@ -461,6 +471,7 @@ function handleMessage(msg: WSMessage) {
           thinkingStartedAt: feedStore.getThinkingStart(p.agentId, msg.timestamp),
           metadata: {
             ...orderedEventMetadata(msg),
+            ...(isSubAgent && { isSubAgent: true }),
             ...(typeof p.thinkingTokens === 'number' ? { thinkingTokens: p.thinkingTokens } : {}),
           },
         });
@@ -482,6 +493,7 @@ function handleMessage(msg: WSMessage) {
 
     case 'stream.tool_call': {
       const p = msg.payload as StreamToolCallPayload;
+      const isSubAgent = isSpawnedSubAgent(p.agentId);
       if (isForActiveSession) feedStore.finalizeThinking(p.agentId, msg.timestamp);
       const existingToolCall =
         isForActiveSession && feedStore.updateToolCall(p.toolCall, msg.timestamp);
@@ -498,6 +510,7 @@ function handleMessage(msg: WSMessage) {
             text: `Calling tool: ${p.toolCall.name}`,
             metadata: {
               ...orderedEventMetadata(msg),
+              ...(isSubAgent && { isSubAgent: true }),
               toolCall: p.toolCall,
               sourceProvider: p.sourceProvider,
             },
@@ -566,6 +579,7 @@ function handleMessage(msg: WSMessage) {
 
     case 'stream.tool_result': {
       const p = msg.payload as StreamToolResultPayload;
+      const isSubAgent = isSpawnedSubAgent(p.agentId);
       const resultText = p.toolResult.isError
         ? `Tool error: ${p.toolResult.output}`
         : p.toolResult.durationMs > 0
@@ -581,6 +595,7 @@ function handleMessage(msg: WSMessage) {
           text: resultText,
           metadata: {
             ...orderedEventMetadata(msg),
+            ...(isSubAgent && { isSubAgent: true }),
             toolResult: p.toolResult,
             sourceProvider: p.sourceProvider,
           },

@@ -14,8 +14,17 @@ const CACHE_TTL_MS = 24 * 60 * 60 * 1000;
  *  Used for capability enrichment (reasoning tiers, real context windows).
  *  Only providers whose /models endpoint returns bare ids (or no /models at
  *  all) need this — the rest get context/vision from enrichFromRemoteMetadata
- *  and reasoning from their own static ReasoningConfig tables. */
+ *  and reasoning from models.dev per-model metadata. */
 const PROVIDER_KEY: Record<string, string> = {
+  // Major API providers — models.dev provides per-model reasoning support
+  // and context windows so we don't need static reasoning tables.
+  openai: 'openai',
+  anthropic: 'anthropic',
+  google: 'google',
+  gemini: 'google',
+  xai: 'xai',
+  deepseek: 'deepseek',
+  groq: 'groq',
   // OpenCode providers — /models returns bare ids only
   opencodezen: 'opencode',
   opencodego: 'opencode-go',

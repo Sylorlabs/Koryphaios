@@ -6,7 +6,7 @@
   import { shortcutStore } from '$lib/stores/shortcuts.svelte';
   import { experimentalStore } from '$lib/stores/experimental.svelte';
   import { agentSettingsStore } from '$lib/stores/agent-settings.svelte';
-  import { getReasoningConfig, buildReasoningConfigFromLevels } from '@koryphaios/shared';
+  import { buildReasoningConfigFromLevels } from '@koryphaios/shared';
   import BrainIcon from '$lib/components/icons/BrainIcon.svelte';
   import ProviderIcon from '$lib/components/icons/ProviderIcon.svelte';
   import { getModelConfigurationWarning, isEnabledModelSelection, parseProviderModelSelection } from '$lib/utils/model-config';
@@ -169,9 +169,9 @@
   let currentProvider = $derived(!selectedModel ? fallbackProvider : (parseProviderModelSelection(selectedModel).provider ?? fallbackProvider));
   let currentModel = $derived(parseProviderModelSelection(selectedModel).model);
 
-  /** A model's own live-reported effort levels (e.g. Codex's supported_reasoning_levels) take
-   *  priority over the static ReasoningConfig tables, which can go stale as providers ship
-   *  new models/levels. */
+  /** A model's own live-reported effort levels (e.g. Codex's supported_reasoning_levels)
+   *  are the sole source of reasoning config. There are no static fallback tables —
+   *  if the provider doesn't report reasoningLevels for a model, the picker is not shown. */
   function findModelDef(provider: string, model: string | undefined): { reasoningLevels?: string[]; canReason?: boolean; supportsFastMode?: boolean } | undefined {
     if (!model) return undefined;
     const p = wsStore.providers.find((p) => p.name === provider);
@@ -181,20 +181,13 @@
 
   function effectiveReasoningConfig(provider: string, model: string | undefined) {
     const def = findModelDef(provider, model);
-    // 1. Levels the provider/CLI reported for this exact model are authoritative —
-    //    including an explicit [] meaning "this model has NO effort control"
-    //    (e.g. Claude Code's Haiku 4.5). Only an ABSENT array falls through.
+    // Levels the provider/CLI/models.dev reported for this exact model are
+    // authoritative — including an explicit [] meaning "this model has NO
+    // effort control". No static fallback; no canReason guess.
     if (Array.isArray(def?.reasoningLevels)) {
       return buildReasoningConfigFromLevels(def.reasoningLevels);
     }
-    return (
-      // 2. Static per-provider/model rules.
-      getReasoningConfig(provider, model) ??
-      // 3. Universal fallback: any reasoning-capable model gets at least the
-      //    standard effort tiers — providers map/guard what's actually sent,
-      //    so no provider is silently excluded from the picker.
-      (def?.canReason ? buildReasoningConfigFromLevels(['low', 'medium', 'high']) : null)
-    );
+    return null;
   }
 
   let reasoningConfig = $derived(!selectedModel ? null : effectiveReasoningConfig(currentProvider, currentModel));

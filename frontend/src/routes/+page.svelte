@@ -1185,7 +1185,7 @@
     );
   }
 
-  function handleSend(
+  async function handleSend(
     message: string,
     model?: string,
     reasoningLevel?: string,
@@ -1227,11 +1227,15 @@
       };
       return;
     }
-    if (
-      !sessionStore.activeSessionId ||
-      (!message.trim() && !(attachments && attachments.length > 0))
-    )
-      return;
+    if (!message.trim() && !(attachments && attachments.length > 0)) return;
+
+    // The welcome screen deliberately has a usable composer. Its first send
+    // creates a correctly scoped chat and continues immediately—requiring a
+    // separate click on "+" made the primary action look broken.
+    if (!sessionStore.activeSessionId) {
+      const createdSessionId = await sessionStore.newChat();
+      if (!createdSessionId) return;
+    }
     if (agentRail.selectedAgentId) {
       // Sub-agents get the same controls as the manager: the composer's model
       // and reasoning pickers apply to the selected agent's next turn.

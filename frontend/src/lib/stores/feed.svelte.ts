@@ -451,18 +451,16 @@ function getToolName(entry: FeedEntry): string {
   return metadata?.toolCall?.name ?? metadata?.toolResult?.name ?? '';
 }
 
-/** Agent ids that are NOT sub-agents (they render at top level). */
-const TOP_LEVEL_AGENTS = new Set(['kory-manager', 'kory', 'user', 'system']);
-
 export function getGroupedEntries(entries: FeedEntry[]): FeedEntry[] {
   const result: FeedEntry[] = [];
   let currentGroup: FeedEntry | null = null;
   let agentGroup: FeedEntry | null = null;
 
   for (const entry of entries) {
-    // Sub-agent entries get a clear, expanded-by-default grouping so spawned
-    // workers never look like stray manager output.
-    const isSubAgent = !TOP_LEVEL_AGENTS.has(entry.agentId) && entry.type !== 'user_message';
+    // Only an actual `agent.spawned` worker may be rendered as a sub-agent.
+    // Provider names, stale IDs, and ordinary manager errors must never gain
+    // worker UI merely because their id differs from `kory-manager`.
+    const isSubAgent = entry.metadata?.isSubAgent === true && entry.type !== 'user_message';
     if (isSubAgent) {
       currentGroup = null;
       if (agentGroup && agentGroup.agentId === entry.agentId) {
