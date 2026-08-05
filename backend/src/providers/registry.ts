@@ -58,7 +58,6 @@ import { resolveKimiCodeAccessToken } from './kimicode-auth';
 import { secureDecrypt, isUsingSecureEncryption } from '../security';
 import {
   resolveModel,
-  getModelsForProvider,
   isLegacyModel,
   registerLiveModelResolver,
   type StreamRequest,
@@ -403,18 +402,21 @@ class ProviderRegistry {
       const isEnabled = config ? !config.disabled : false;
       let allModels = [] as ReturnType<Provider['listModels']>;
       if (isEnabled) {
-        if (!provider) {
-          allModels = getModelsForProvider(name);
-        } else {
+        if (provider) {
           if (options.refreshModels) {
             provider.refreshModels?.(true);
           }
-          allModels = provider.listModels() ?? getModelsForProvider(name);
+          allModels = provider.listModels();
         }
       }
 
       const selectedModels = config?.selectedModels ?? [];
       const hideModelSelector = config?.hideModelSelector ?? false;
+      const modelDiscoveryError =
+        provider?.getModelDiscoveryError?.() ??
+        (isEnabled && isProviderAvailable && !hideModelSelector && allModels.length === 0
+          ? 'No models were reported by this connected provider. Refresh discovery or check its account and CLI/API authentication.'
+          : undefined);
 
       const enabledModels =
         selectedModels.length > 0
@@ -460,6 +462,7 @@ class ProviderRegistry {
         supportsAuthToken: authMode === 'auth_only' || authMode === 'api_key_or_auth',
         requiresBaseUrl,
         circuitOpen,
+        ...(modelDiscoveryError && { error: modelDiscoveryError }),
         ...(isCustom && { custom: true, label: config?.label ?? String(name) }),
         ...(display?.label && !isCustom && { label: display.label }),
         // Auto-generate a human-readable label for providers without a display entry.

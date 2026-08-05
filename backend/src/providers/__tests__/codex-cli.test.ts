@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import { extractKoryToolEnvelope } from '../codex-cli';
+import { codexJsonEvents, codexReasoningArgs, extractKoryToolEnvelope } from '../codex-cli';
 import { supportsKoryControlPlaneTools } from '../provider-harness';
 
 describe('Codex CLI Kory control-plane bridge', () => {
@@ -43,5 +43,30 @@ describe('Codex CLI Kory control-plane bridge', () => {
     for (const provider of ['claude', 'grok', 'antigravity', 'cursor', 'cline']) {
       expect(supportsKoryControlPlaneTools(provider)).toBe(false);
     }
+  });
+
+  it('requests and surfaces the official Codex reasoning summary', () => {
+    expect(codexReasoningArgs('high')).toEqual([
+      '--config',
+      'model_reasoning_effort="high"',
+      '--config',
+      'model_reasoning_summary="detailed"',
+    ]);
+    expect(codexReasoningArgs(undefined)).toEqual([]);
+
+    const translated = codexJsonEvents(
+      {
+        type: 'item.completed',
+        item: { type: 'reasoning', text: '**Checking the workflow contract**' },
+      },
+      [],
+    );
+    expect(translated.events).toEqual([
+      { type: 'thinking_delta', thinking: '**Checking the workflow contract**' },
+    ]);
+  });
+
+  it('does not pretend private reasoning is visible when reasoning is disabled', () => {
+    expect(codexReasoningArgs('none')).toEqual(['--config', 'model_reasoning_effort="none"']);
   });
 });

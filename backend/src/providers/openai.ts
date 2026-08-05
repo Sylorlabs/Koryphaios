@@ -9,7 +9,6 @@ import {
   type ProviderEvent,
   type StreamRequest,
   type ProviderContentBlock,
-  getModelsForProvider,
   resolveModel,
 } from './types';
 import { withRetry, withTimeoutSignal } from './utils';
@@ -54,11 +53,9 @@ export class OpenAIProvider implements Provider {
     return available;
   }
 
-  /** Static catalog used until live discovery succeeds. Subclasses may override. */
+  /** Discovery has no bundled fallback: a picker entry needs provider proof. */
   protected getModelCatalogFallback(): ModelDef[] {
-    // Enrich with models.dev capability data (reasoning tiers, real context
-    // windows) for providers in PROVIDER_KEY — no-op for unmapped providers.
-    return applyModelsDevMetadata(this.name, getModelsForProvider(this.name));
+    return [];
   }
 
   /** Optional async prep (OAuth exchange, etc.) before hitting /models. */
@@ -80,7 +77,7 @@ export class OpenAIProvider implements Provider {
     if (!this.isAvailable()) return [];
     if (this.cachedModels && isModelListCacheFresh(this.lastFetch)) return this.cachedModels;
     void this.refreshModelsInBackground(fallback);
-    return this.cachedModels ?? fallback;
+    return this.cachedModels ?? [];
   }
 
   /**

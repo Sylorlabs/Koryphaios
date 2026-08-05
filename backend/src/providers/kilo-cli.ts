@@ -21,7 +21,6 @@ import {
   type ProviderContentBlock,
   type StreamRequest,
   type CliCommand,
-  getModelsForProvider,
 } from './types';
 import { whichBinary } from './cli-detection';
 import { providerLog } from '../logger';
@@ -68,7 +67,10 @@ export class KiloCodeCLIProvider implements Provider {
   }
 
   listModels(): ModelDef[] {
-    return getModelsForProvider('kilocode');
+    // The CLI currently has no documented machine-readable model listing.
+    // Keeping this empty is preferable to claiming account availability from
+    // an embedded list.
+    return [];
   }
 
   async *streamResponse(request: StreamRequest): AsyncGenerator<ProviderEvent> {

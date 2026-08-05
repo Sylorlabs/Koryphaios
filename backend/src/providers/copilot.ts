@@ -1,10 +1,9 @@
 // Copilot provider — uses GitHub Copilot's chat completions API.
 // Auth flow uses only Koryphaios-managed or explicitly supplied tokens.
 
-import type { ModelDef, ProviderConfig } from '@koryphaios/shared';
+import type { ProviderConfig } from '@koryphaios/shared';
 import { OpenAIProvider } from './openai';
 import OpenAI from 'openai';
-import { CopilotModels } from './models/copilot';
 import { createUsageInterceptingFetch } from '../credit-accountant';
 import { providerLog } from '../logger';
 
@@ -48,10 +47,6 @@ export class CopilotProvider extends OpenAIProvider {
     );
 
     this.githubToken = ghToken;
-  }
-
-  protected override getModelCatalogFallback(): ModelDef[] {
-    return CopilotModels;
   }
 
   protected override async prepareForModelDiscovery(): Promise<void> {

@@ -9,7 +9,6 @@ import { AGENT } from '../../constants';
 import type { ProviderRegistry } from '../../providers';
 import type { Provider, ProviderEvent } from '../../providers/types';
 import type { ProviderMessage } from '../../providers/types';
-import { getModelsForProvider } from '../../providers/types';
 import { ToolRegistry, type ToolContext } from '../../tools';
 import { withTimeoutSignal } from '../../providers';
 import { koryLog } from '../../logger';
@@ -176,7 +175,7 @@ export class CriticGateService {
     if (preferredModel && preferredModel !== 'auto') {
       const available = this.providers.getAvailable();
       for (const provider of available) {
-        const models = getModelsForProvider(provider.name);
+        const models = provider.listModels();
         if (models.some((m) => m.id === preferredModel)) {
           return { model: preferredModel, provider: provider.name as ProviderName };
         }
@@ -187,13 +186,13 @@ export class CriticGateService {
     const available = this.providers.getAvailable();
     if (available.length > 0) {
       const first = available[0]!;
-      const models = getModelsForProvider(first.name);
+      const models = first.listModels();
       if (models.length > 0) {
         return { model: models[0]!.id, provider: first.name as ProviderName };
       }
     }
 
-    return { model: 'claude-sonnet-4-5', provider: undefined };
+    return { model: '', provider: undefined };
   }
 
   private buildFallbackChain(startModelId: string): string[] {
@@ -201,7 +200,7 @@ export class CriticGateService {
     const available = this.providers.getAvailable();
 
     for (const provider of available) {
-      const models = getModelsForProvider(provider.name);
+      const models = provider.listModels();
       for (const model of models) {
         if (model.id !== startModelId && !model.deprecated) {
           chain.push(model.id);

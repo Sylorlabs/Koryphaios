@@ -33,14 +33,11 @@ import {
   type ProviderMessage,
   type StreamRequest,
   type CliCommand,
-  getModelsForProvider,
-  resolveModel,
 } from './types';
 import { detectClaudeCodeLogin } from './auth-utils';
 import { wrapCommand, buildSoftJail } from '../collaboration/sandbox-runner';
 import { providerLog } from '../logger';
 import { recordClaudeCodeRateLimit } from '../credit-accountant';
-import { ClaudeCodeModels } from './models/claude-code';
 
 const CLAUDE_STREAM_TIMEOUT_MS = 300_000;
 const DEFAULT_CLI_MODEL = 'sonnet';
@@ -430,31 +427,9 @@ function refreshModelsInBackground(): void {
   if (refreshInProgress) return;
   refreshInProgress = true;
 
-  const aliases = ClaudeCodeModels.map((m) => m.apiModelId!);
-
-  Promise.all([Promise.all(aliases.map((alias) => probeAlias(alias))), detectEffortLevels()])
-    .then(([results, effortLevels]) => {
-      const base: ModelDef[] = ClaudeCodeModels.map((def, i) => {
-        const realId = results[i];
-        if (!realId) return def;
-        // The probe confirmed which real Anthropic model the alias resolves to —
-        // inherit that model's documented context window, output limit, and
-        // reasoning capability instead of the wrapper's hardcoded guesses.
-        const real = resolveModel(realId);
-        const realTrusted = !!real && !real.isGeneric && real.provider === 'anthropic';
-        return {
-          ...def,
-          realModelId: realId,
-          name: realIdToName(realId),
-          ...(realTrusted && real.contextWindow > 0
-            ? { contextWindow: real.contextWindow, contextVerified: true }
-            : {}),
-          ...(realTrusted && real.maxOutputTokens > 0
-            ? { maxOutputTokens: real.maxOutputTokens }
-            : {}),
-          ...(realTrusted && real.canReason !== undefined ? { canReason: real.canReason } : {}),
-        };
-      });
+  Promise.all([detectEffortLevels()])
+    .then(([effortLevels]) => {
+      const base = readCliExtraModels();
       // Server-driven extras from the CLI's own cache (skip any that duplicate a
       // model an alias already resolved to).
       const extras = readCliExtraModels().filter(
@@ -698,19 +673,7 @@ export class ClaudeCodeProvider implements Provider {
     }
     refreshModelsInBackground();
     if (cachedModels) return cachedModels;
-    // The CLI catalog is the authority. Never show a static menu while it is
-    // unavailable, because account/plan availability is not inferable.
-    const fallback = getModelsForProvider('claude');
-    if (!cachedCatalog) return [];
-    return fallback.flatMap((m) => {
-      const entry = catalogEntryFor(m.realModelId ?? m.apiModelId, cachedCatalog);
-      if (!entry) return [];
-      const ctx =
-        entry.contextWindow && entry.contextWindow > 0
-          ? { contextWindow: entry.contextWindow, contextVerified: true }
-          : {};
-      return [{ ...m, reasoningLevels: capabilitiesToLevels(entry.capabilities), ...ctx }];
-    });
+    return [];
   }
 
   private resolveCliModel(modelId: string): string {

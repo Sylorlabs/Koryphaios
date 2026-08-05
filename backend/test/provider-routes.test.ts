@@ -2,11 +2,9 @@ import { afterAll, beforeAll, describe, expect, mock, test } from 'bun:test';
 import { existsSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-// Real model catalogs (these module paths are NOT mocked) so the stub Provider classes
-// below expose the true catalogs — bun applies mock.module process-wide, so other test
-// files (copilot-models, provider-conformance) would otherwise see empty model lists.
-import { CopilotModels } from '../src/providers/models/copilot';
-import { CodexModels } from '../src/providers/models/codex';
+// Test fixtures represent provider-reported discovery; product code ships no list.
+const discoveredCopilotModels = [{ id: 'copilot-test', name: 'Copilot test', provider: 'copilot' as const, contextWindow: 0, maxOutputTokens: 4096 }];
+const discoveredCodexModels = [{ id: 'codex-test', name: 'Codex test', provider: 'codex' as const, contextWindow: 0, maxOutputTokens: 4096 }];
 
 process.env.NODE_ENV = 'test';
 process.env.SESSION_TOKEN_SECRET =
@@ -72,7 +70,7 @@ mock.module('../src/providers/copilot', () => ({
       return !!this.config && !this.config.disabled;
     }
     listModels() {
-      return CopilotModels;
+      return discoveredCopilotModels;
     }
     async *streamResponse() {}
   },
@@ -125,7 +123,7 @@ mock.module('../src/providers/codex', () => ({
       return !!this.config && !this.config.disabled;
     }
     listModels() {
-      return CodexModels;
+      return discoveredCodexModels;
     }
     async *streamResponse() {}
   },

@@ -14,7 +14,7 @@ import {
   listWorkflowDrafts,
   listWorkflowDefinitions,
 } from './workflows';
-import { StartWorkflowTool, UpdateWorkflowTool } from '../tools/workflows';
+import { ListWorkflowsTool, StartWorkflowTool, UpdateWorkflowTool } from '../tools/workflows';
 
 const roots: string[] = [];
 const root = () => {
@@ -22,12 +22,19 @@ const root = () => {
   roots.push(value);
   return value;
 };
-afterEach(() => roots.splice(0).forEach((value) => rmSync(value, { recursive: true, force: true })));
+afterEach(() =>
+  roots.splice(0).forEach((value) => rmSync(value, { recursive: true, force: true })),
+);
 
 describe('host-owned workflows', () => {
   test('starts a design-quality run and persists each evidence-gated stage', () => {
     const project = root();
-    const run = startWorkflow(project, { workflowId: 'design-quality', sessionId: 'session-1', task: 'Improve the settings screen', requestedBy: 'human' });
+    const run = startWorkflow(project, {
+      workflowId: 'design-quality',
+      sessionId: 'session-1',
+      task: 'Improve the settings screen',
+      requestedBy: 'human',
+    });
     expect(workflowNextInstruction(run)).toContain('Inspect');
     let current = run;
     for (const stage of getWorkflowDefinition('design-quality')!.stages) {
@@ -40,10 +47,19 @@ describe('host-owned workflows', () => {
 
   test('cannot skip evidence or confuse a stopped workflow with a Goal', () => {
     const project = root();
-    const run = startWorkflow(project, { workflowId: 'design-quality', sessionId: 'session-1', task: 'Improve the settings screen', requestedBy: 'agent' });
-    expect(() => advanceWorkflow(project, run.id, { evidence: '' })).toThrow('Evidence is required');
+    const run = startWorkflow(project, {
+      workflowId: 'design-quality',
+      sessionId: 'session-1',
+      task: 'Improve the settings screen',
+      requestedBy: 'agent',
+    });
+    expect(() => advanceWorkflow(project, run.id, { evidence: '' })).toThrow(
+      'Evidence is required',
+    );
     expect(stopWorkflow(project, run.id).status).toBe('stopped');
-    expect(() => advanceWorkflow(project, run.id, { evidence: 'later' })).toThrow('Workflow is not running');
+    expect(() => advanceWorkflow(project, run.id, { evidence: 'later' })).toThrow(
+      'Workflow is not running',
+    );
   });
 
   test('managed and CLI tool contexts bind workflows to the host-owned Goal item', async () => {
@@ -66,13 +82,60 @@ describe('host-owned workflows', () => {
     expect(run.goalItemId).toBe('item-1');
 
     const update = new UpdateWorkflowTool();
-    const wrongItem = await update.run({ ...ctx, goalItemId: 'item-2' }, {
-      id: 'update-1',
-      name: update.name,
-      input: { runId: run.id, evidence: 'real inspection', status: 'evidence' },
-    });
+    const wrongItem = await update.run(
+      { ...ctx, goalItemId: 'item-2' },
+      {
+        id: 'update-1',
+        name: update.name,
+        input: { runId: run.id, evidence: 'real inspection', status: 'evidence' },
+      },
+    );
     expect(wrongItem.isError).toBe(true);
     expect(wrongItem.output).toContain('active Goal item');
+  });
+
+  test('agents can discover workflows and start one by its exact display name', async () => {
+    const project = root();
+    const ctx = { sessionId: 'session-1', workingDirectory: project };
+    const list = await new ListWorkflowsTool().run(ctx, {
+      id: 'list-1',
+      name: 'list_workflows',
+      input: {},
+    });
+    expect(list.isError).toBe(false);
+    expect(list.output).toContain('Design Quality Loop (design-quality)');
+
+    const start = await new StartWorkflowTool().run(ctx, {
+      id: 'start-by-name',
+      name: 'start_workflow',
+      input: { name: 'Design Quality Loop', task: 'Polish workflow feedback' },
+    });
+    expect(start.isError).toBe(false);
+    expect(listWorkflowRuns(project, 'session-1')[0]?.workflowId).toBe('design-quality');
+
+    const aliased = await new StartWorkflowTool().run(ctx, {
+      id: 'start-by-common-alias',
+      name: 'start_workflow',
+      input: { workflow: 'design-quality', task: 'Verify the compatibility alias' },
+    });
+    expect(aliased.isError).toBe(false);
+  });
+
+  test('invalid workflow calls return actionable registered choices', async () => {
+    const project = root();
+    const tool = new StartWorkflowTool();
+    const unknown = await tool.run(
+      { sessionId: 'session-1', workingDirectory: project },
+      {
+        id: 'unknown',
+        name: tool.name,
+        input: { name: 'test', task: 'test' },
+      },
+    );
+    expect(unknown.isError).toBe(true);
+    expect(unknown.output).toContain('no registered workflow matches "test"');
+    expect(unknown.output).toContain('Design Quality Loop (design-quality)');
+    expect(unknown.output).toContain('list_workflows');
   });
 
   test('Goal drafts remain inactive until explicit scoped activation', () => {
@@ -96,12 +159,17 @@ describe('host-owned workflows', () => {
 
   test('workflow drafts reject executable or authority-bearing content', () => {
     const project = root();
-    expect(() => createWorkflowDraft(project, {
-      name: 'Unsafe shell workflow',
-      description: 'Run a command automatically',
-      goalId: 'goal-1',
-      goalItemId: 'item-1',
-      stages: [{ label: 'One', description: 'Use sudo' }, { label: 'Two', description: 'Finish' }],
-    })).toThrow('declarative');
+    expect(() =>
+      createWorkflowDraft(project, {
+        name: 'Unsafe shell workflow',
+        description: 'Run a command automatically',
+        goalId: 'goal-1',
+        goalItemId: 'item-1',
+        stages: [
+          { label: 'One', description: 'Use sudo' },
+          { label: 'Two', description: 'Finish' },
+        ],
+      }),
+    ).toThrow('declarative');
   });
 });

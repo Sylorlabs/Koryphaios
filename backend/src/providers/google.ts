@@ -7,7 +7,6 @@ import {
   type Provider,
   type ProviderEvent,
   type StreamRequest,
-  getModelsForProvider,
   resolveModel,
 } from './types';
 import { GEMINI_V1BETA_BASE } from './api-endpoints';
@@ -38,7 +37,7 @@ export class GoogleProvider implements Provider {
   isAvailable(): boolean {
     const available = !this.config.disabled && !!this.config.apiKey;
     if (available && this.isAiStudio && !isModelListCacheFresh(this.lastFetch)) {
-      this.refreshModelsInBackground(getModelsForProvider(this.name));
+      this.refreshModelsInBackground([]);
     }
     return available;
   }
@@ -48,7 +47,7 @@ export class GoogleProvider implements Provider {
   private fetchInProgress = false;
 
   listModels(): ModelDef[] {
-    const fallback = getModelsForProvider(this.name);
+    const fallback: ModelDef[] = [];
     if (!this.isAiStudio) return [];
     if (!this.isAvailable()) return [];
     if (this.cachedModels && isModelListCacheFresh(this.lastFetch)) return this.cachedModels;

@@ -98,6 +98,7 @@ export const KORY_TOOL_WHITELIST: string[] = [
   'kory__delegate_to_jules',
   'kory__create_goal',
   'kory__update_goal',
+  'kory__list_workflows',
   'kory__start_workflow',
   'kory__update_workflow',
   'kory__create_workflow_draft',
@@ -158,7 +159,9 @@ export function buildKoryHookConfigs(ctx: CliBridgeContext): CliHookConfig[] | n
   const base = `node ${JSON.stringify(hookScript)} --session-id ${JSON.stringify(ctx.sessionId)} --auth ${JSON.stringify(bearer)}`;
   return [
     ...(['PreToolUse', 'PostToolUse', 'UserPromptSubmit'] as const).map((event) => ({
-      events: [event], command: `${base} --event ${event}`, matcher: '',
+      events: [event],
+      command: `${base} --event ${event}`,
+      matcher: '',
     })),
     { events: ['Stop'], command: `${base} --event Stop`, matcher: '' },
   ];

@@ -402,7 +402,7 @@
         type="button"
         class="group flex items-center gap-1.5 rounded-lg px-3 py-2 text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-surface-2)]"
         data-tauri-drag-region="false"
-        title="Send feedback to micah.cooley@sylorlabs.com"
+        title="Report feedback via a GitHub issue"
         onclick={sendFeedback}
       >
         <Flag size={14} class="transition-colors group-hover:text-red-400" />

@@ -9,7 +9,6 @@ import {
   type ProviderEvent,
   type StreamRequest,
   type ProviderContentBlock,
-  getModelsForProvider,
   resolveModel,
 } from './types';
 import { withRetry, withTimeoutSignal } from './utils';
@@ -50,7 +49,7 @@ export class AnthropicProvider implements Provider {
   isAvailable(): boolean {
     const available = !this.config.disabled && !!(this.config.apiKey || this.config.authToken);
     if (available && !isModelListCacheFresh(this.lastFetch)) {
-      this.refreshModelsInBackground(getModelsForProvider(this.name));
+      this.refreshModelsInBackground([]);
     }
     return available;
   }
@@ -60,11 +59,11 @@ export class AnthropicProvider implements Provider {
   private fetchInProgress = false;
 
   listModels(): ModelDef[] {
-    const fallback = applyModelsDevMetadata(this.name, getModelsForProvider(this.name));
+    const fallback: ModelDef[] = [];
     if (!this.isAvailable()) return [];
     if (this.cachedModels && isModelListCacheFresh(this.lastFetch)) return this.cachedModels;
     this.refreshModelsInBackground(fallback);
-    return this.cachedModels ?? fallback;
+    return this.cachedModels ?? [];
   }
 
   private refreshModelsInBackground(fallback: ModelDef[]) {

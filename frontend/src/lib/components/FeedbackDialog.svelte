@@ -149,10 +149,11 @@
             <CheckCircle2 size={28} />
           </div>
           <h3 class="text-base font-semibold text-[var(--color-text-primary)]">
-            Feedback delivered
+            Opening GitHub issue
           </h3>
           <p class="mt-2 max-w-sm text-xs leading-5 text-[var(--color-text-muted)]">
-            GitHub opened with your report filled in. Review it there and submit when ready.
+            GitHub opened with your report filled in. Review it there and submit when ready — no
+            reply email is needed.
           </p>
           <button
             type="button"
@@ -211,7 +212,8 @@
           <p
             class="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-2)] px-4 py-3 text-[10px] leading-5 text-[var(--color-text-muted)]"
           >
-            Feedback is public. It includes only the category, message, and optional app version. Do not include private project details, secrets, or contact information.
+            The report is created on GitHub. It includes only the category, message, and optional
+            app version. Do not include private project details, secrets, or contact information.
           </p>
 
           {#if error}<p
@@ -223,7 +225,7 @@
 
           <div class="flex items-center justify-between gap-4 pt-1">
             <p class="text-[10px] leading-4 text-[var(--color-text-muted)]">
-              Public reports never include diagnostics, source, prompts, screenshots, or API keys.
+              Reports never include diagnostics, source, prompts, screenshots, or API keys.
             </p>
             <div class="flex gap-2">
               <button
