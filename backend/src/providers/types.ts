@@ -153,6 +153,9 @@ export interface Provider {
   /** Optional provider-level model refresh hook for cache reset/refresh control. */
   refreshModels?: (forceRefresh?: boolean) => void | Promise<unknown>;
 
+  /** Why live model discovery is unavailable. Never substitute guessed models. */
+  getModelDiscoveryError?: () => string | undefined;
+
   /** Native CLI commands exposed by this provider when available. */
   getCliCommands?: () => CliCommand[];
 }

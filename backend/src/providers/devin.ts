@@ -32,25 +32,6 @@ import { getDevinCapabilitiesAsync, getDevinCapabilities as getDevinCapabilities
 const DEVIN_STREAM_TIMEOUT_MS = 300_000;
 const EXPORT_POLL_MS = 250;
 
-// Verified live from `devin -p "hi" --model <bad>` → "Available: …".
-const DEVIN_MODELS: Array<{ id: string; name: string; ctx?: number }> = [
-  { id: 'swe-1.6', name: 'SWE-1.6' },
-  { id: 'swe-1.6-fast', name: 'SWE-1.6 Fast' },
-  { id: 'swe-1.6-slow', name: 'SWE-1.6 Slow' },
-  { id: 'swe-1.5', name: 'SWE-1.5' },
-  { id: 'claude-sonnet-5', name: 'Claude Sonnet 5', ctx: 1_000_000 },
-  { id: 'claude-sonnet-4.5', name: 'Claude Sonnet 4.5', ctx: 200_000 },
-  { id: 'claude-opus-4.8', name: 'Claude Opus 4.8', ctx: 1_000_000 },
-  { id: 'claude-opus-4.5', name: 'Claude Opus 4.5', ctx: 200_000 },
-  { id: 'claude-fable-5', name: 'Claude Fable 5', ctx: 1_000_000 },
-  { id: 'claude-haiku-4.5', name: 'Claude Haiku 4.5', ctx: 200_000 },
-  { id: 'gpt-5.5', name: 'GPT-5.5' },
-  { id: 'gpt-5.2', name: 'GPT-5.2' },
-  { id: 'gemini-3-flash', name: 'Gemini 3 Flash', ctx: 1_000_000 },
-  { id: 'glm-5.2', name: 'GLM-5.2' },
-  { id: 'kimi-k2.7', name: 'Kimi K2.7' },
-];
-
 const HARNESS_SYSTEM_NOTE =
   'You are running inside the Koryphaios orchestrator. Never spawn subagents or delegate to ' +
   'other agents yourself; if work should be parallelized or delegated, say so in your response ' +
@@ -114,28 +95,18 @@ export class DevinProvider implements Provider {
   }
 
   listModels(): ModelDef[] {
-    // Prefer the live account-available models from `devin models` (Phase 0
-    // capability probe), falling back to the static DEVIN_MODELS table when
-    // the probe hasn't settled or the CLI doesn't report a catalog.
+    // `devin models` is account-scoped; never synthesize a list before it
+    // reports one.
     const caps = getDevinCapabilitiesSync();
     const live: ModelDef[] = caps.models.map((m) => ({
       id: m.id,
       name: m.name,
       provider: 'devin' as const,
       apiModelId: m.id,
-      contextWindow: m.contextWindow ?? 200_000,
-      maxOutputTokens: 64_000,
+      contextWindow: m.contextWindow ?? 0,
+      maxOutputTokens: 4_096,
     }));
-    const seen = new Set(live.map((m) => m.id));
-    const fallback: ModelDef[] = DEVIN_MODELS.filter((m) => !seen.has(m.id)).map((m) => ({
-      id: m.id,
-      name: m.name,
-      provider: 'devin' as const,
-      apiModelId: m.id,
-      contextWindow: m.ctx ?? 200_000,
-      maxOutputTokens: 64_000,
-    }));
-    return [...live, ...fallback];
+    return live;
   }
 
   private resolveCliModel(modelId: string | undefined): string | undefined {

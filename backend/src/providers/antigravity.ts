@@ -40,13 +40,11 @@ import {
   type ProviderEvent,
   type ProviderMessage,
   type StreamRequest,
-  getModelsForProvider,
 } from './types';
 import { detectAntigravityCLILogin } from './auth-utils';
 import { whichBinary } from './cli-detection';
 import { providerLog } from '../logger';
 import { buildSoftJail, wrapCommand } from '../collaboration/sandbox-runner';
-import { AntigravityModels } from './models/antigravity';
 import { getCliBridge, getKoryphaiosAntigravityHome } from './cli-bridges';
 
 const AGY_TIMEOUT_MS = 300_000;
@@ -144,9 +142,6 @@ async function fetchAgyModels(bin: string): Promise<ModelDef[]> {
 }
 
 function modelDefFromCliName(cliName: string): ModelDef {
-  const existing = AntigravityModels.find((m) => m.apiModelId === cliName);
-  if (existing) return existing;
-
   const id = `antigravity-${cliName
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, '-')
@@ -161,8 +156,8 @@ function modelDefFromCliName(cliName: string): ModelDef {
     name: cliName,
     provider: 'antigravity',
     apiModelId: cliName,
-    contextWindow: isPro || isOpus ? 2_097_152 : 1_048_576,
-    maxOutputTokens: 65_536,
+    contextWindow: 0,
+    maxOutputTokens: 4_096,
     canReason: isHigh || isThinking,
     // Antigravity exposes effort choices as distinct model names, not a
     // separate reasoning parameter. An explicit empty list suppresses the

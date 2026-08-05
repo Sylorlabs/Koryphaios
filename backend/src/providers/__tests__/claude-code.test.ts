@@ -9,7 +9,6 @@
 import { describe, it, expect } from 'bun:test';
 import { ProviderRegistry } from '../registry';
 import { ClaudeCodeProvider } from '../claude-code';
-import { getModelsForProvider, MODEL_CATALOG } from '../models';
 import { PROVIDER_AUTH_MODE } from '../constants';
 import type { ProviderEvent } from '../types';
 
@@ -35,25 +34,19 @@ describe('Claude Code provider — plumbing', () => {
     expect(Object.keys(PROVIDER_AUTH_MODE)).toContain('claude');
   });
 
-  it('claude model catalog is present and does not collide with anthropic ids', () => {
-    const models = getModelsForProvider('claude');
-    expect(models.length).toBeGreaterThanOrEqual(3);
-    expect(models.every((m) => m.provider === 'claude')).toBe(true);
-    // IDs must be distinct from the API-key anthropic catalog (MODEL_CATALOG is keyed by id).
-    for (const m of models) {
-      expect(MODEL_CATALOG[m.id]?.provider).toBe('claude');
-      expect(m.apiModelId).toMatch(/^(opus|sonnet|haiku|fable)$/);
-    }
+  it('does not ship a Claude model catalog', () => {
+    const provider = new ClaudeCodeProvider({ name: 'claude', authToken: 'cli:claude:test' });
+    expect(provider.listModels()).toEqual([]);
   });
 
-  it('a model id selects the claude provider when available', () => {
+  it('an explicitly routed Claude model selects the Claude provider when available', () => {
     const registry = new ProviderRegistry();
     // Enable the claude provider with an opt-in marker (CLI owns the real token).
     (registry as unknown as { providers: Map<string, unknown> }).providers.set(
       'claude',
       new ClaudeCodeProvider({ name: 'claude', authToken: 'cli:claude:test', disabled: false }),
     );
-    const resolved = registry.resolveProvider('claude-code-sonnet', 'claude');
+    const resolved = registry.resolveProvider('sonnet', 'claude');
     expect(resolved?.name).toBe('claude');
   });
 

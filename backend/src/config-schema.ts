@@ -6,7 +6,6 @@ import { IMPLEMENTED_PROVIDERS } from '@koryphaios/shared';
 import { ConfigError } from './errors';
 import { serverLog } from './logger';
 import { PROVIDER_AUTH_MODE } from './providers/constants';
-import { resolveModel } from './providers/types';
 
 export type AppConfig = KoryphaiosConfig;
 
@@ -69,13 +68,8 @@ export function validateConfig(config: Partial<KoryphaiosConfig>): void {
         errors.push(`assignments.${domain} must be a string in "provider:model" format`);
         continue;
       }
-      const [, modelId] = assignment.split(':');
-      const modelDef = resolveModel(modelId);
-      if (!modelDef) {
-        errors.push(
-          `assignments.${domain} references unknown model "${modelId}" — check MODEL_CATALOG for valid IDs`,
-        );
-      }
+      // Availability is account-scoped and discovered after authentication.
+      // A config load must not pretend an embedded catalog can validate it.
     }
   }
 
@@ -85,11 +79,6 @@ export function validateConfig(config: Partial<KoryphaiosConfig>): void {
       errors.push('fallbacks must be an object mapping modelId -> array of modelIds');
     } else {
       for (const [fromModel, toModels] of Object.entries(config.fallbacks)) {
-        if (!resolveModel(fromModel)) {
-          errors.push(
-            `fallbacks key "${fromModel}" references unknown model — check MODEL_CATALOG`,
-          );
-        }
         if (!Array.isArray(toModels)) {
           errors.push(`fallbacks.${fromModel} must be an array of model ID strings`);
           continue;
@@ -97,10 +86,6 @@ export function validateConfig(config: Partial<KoryphaiosConfig>): void {
         for (const m of toModels) {
           if (typeof m !== 'string') {
             errors.push(`fallbacks.${fromModel} contains non-string value`);
-          } else if (!resolveModel(m)) {
-            errors.push(
-              `fallbacks.${fromModel} references unknown model "${m}" — check MODEL_CATALOG`,
-            );
           }
         }
       }

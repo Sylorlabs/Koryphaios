@@ -200,6 +200,75 @@ export function extractKoryToolEnvelope(
   }
 }
 
+/** Translate the public Codex CLI JSONL protocol into Kory events. Codex does
+ * not expose private chain-of-thought; with model_reasoning_summary enabled it
+ * emits a safe textual summary as a reasoning item, which we can show. */
+export function codexJsonEvents(
+  event: Record<string, any>,
+  allowedToolNames: readonly string[],
+  accountId?: string,
+): { events: ProviderEvent[]; completed: boolean } {
+  const events: ProviderEvent[] = [];
+  const item = event.item as Record<string, any> | undefined;
+  if (event.type === 'item.completed' && item?.type === 'agent_message' && item.text) {
+    const extracted = extractKoryToolEnvelope(String(item.text), allowedToolNames);
+    if (extracted.content) events.push({ type: 'content_delta', content: extracted.content });
+    if (extracted.tool) {
+      const toolCallId = `codex-kory-${randomUUID()}`;
+      const input = JSON.stringify(extracted.tool.input);
+      events.push({ type: 'tool_use_start', toolCallId, toolName: extracted.tool.name });
+      events.push({
+        type: 'tool_use_delta',
+        toolCallId,
+        toolName: extracted.tool.name,
+        toolInput: input,
+      });
+      events.push({
+        type: 'tool_use_stop',
+        toolCallId,
+        toolName: extracted.tool.name,
+        toolInput: input,
+      });
+    }
+  } else if (event.type === 'item.completed' && item?.type === 'reasoning' && item.text) {
+    events.push({ type: 'thinking_delta', thinking: String(item.text) });
+  } else if (event.type === 'item.completed' && item?.type === 'command_execution') {
+    events.push({
+      type: 'tool_executed',
+      toolName: 'codex_command',
+      toolInput: JSON.stringify({ command: item.command ?? '' }),
+      toolOutput: String(item.aggregated_output ?? item.output ?? '').slice(0, 4_000),
+      isError: item.exit_code != null && item.exit_code !== 0,
+    });
+  } else if (event.type === 'turn.completed') {
+    const usage = event.usage as Record<string, unknown> | undefined;
+    if (typeof usage?.input_tokens === 'number' || typeof usage?.output_tokens === 'number') {
+      events.push({
+        type: 'usage_update',
+        tokensIn: usage.input_tokens as number | undefined,
+        tokensOut: usage.output_tokens as number | undefined,
+        accountId,
+      });
+    }
+    return { events, completed: true };
+  }
+  return { events, completed: false };
+}
+
+export function codexReasoningArgs(reasoningLevel: string | undefined): string[] {
+  if (!reasoningLevel) return [];
+  const args = ['--config', `model_reasoning_effort=${JSON.stringify(reasoningLevel)}`];
+  if (!['none', 'off', 'disabled'].includes(reasoningLevel.toLowerCase())) {
+    args.push(
+      // Ask the official CLI for its safe reasoning summary. The CLI keeps
+      // private chain-of-thought encrypted and emits only the summary.
+      '--config',
+      'model_reasoning_summary="detailed"',
+    );
+  }
+  return args;
+}
+
 function buildPrompt(
   systemPrompt: string | undefined,
   messages: ProviderMessage[],
@@ -257,6 +326,7 @@ export class CodexCliProvider implements Provider {
   private modelsAt = 0;
   private refreshInFlight: Promise<ModelDef[]> | null = null;
   private accountByModelId = new Map<string, DiscoveredCliAccount>();
+  private modelDiscoveryError: string | undefined;
 
   constructor(readonly config: ProviderConfig) {
     if (this.isAvailable()) void this.refreshModels();
@@ -289,11 +359,21 @@ export class CodexCliProvider implements Provider {
     return this.models;
   }
 
+  getModelDiscoveryError(): string | undefined {
+    return this.modelDiscoveryError;
+  }
+
   async refreshModels(): Promise<ModelDef[]> {
     if (this.refreshInFlight) return this.refreshInFlight;
     const binary = whichBinary('codex');
     const accounts = this.accounts();
-    if (!binary || accounts.length === 0) return [];
+    if (!binary || accounts.length === 0) {
+      this.models = [];
+      this.modelDiscoveryError = !binary
+        ? 'Codex CLI was not found on PATH. Install `codex` and reconnect.'
+        : 'Codex CLI is not signed in. Run `codex login` and reconnect.';
+      return [];
+    }
     this.refreshInFlight = Promise.allSettled(
       accounts.map(async (account) => ({
         account,
@@ -302,6 +382,7 @@ export class CodexCliProvider implements Provider {
     )
       .then((results) => {
         const accountByModelId = new Map<string, DiscoveredCliAccount>();
+        const failures: string[] = [];
         const models = results.flatMap((result) => {
           if (result.status === 'rejected') {
             providerLog.warn(
@@ -312,6 +393,7 @@ export class CodexCliProvider implements Provider {
               },
               'Could not load models for one Codex CLI account',
             );
+            failures.push(result.reason instanceof Error ? result.reason.message : String(result.reason));
             return [];
           }
           return result.value.models
@@ -325,6 +407,11 @@ export class CodexCliProvider implements Provider {
         this.accountByModelId = accountByModelId;
         this.models = models;
         this.modelsAt = Date.now();
+        this.modelDiscoveryError = models.length > 0
+          ? undefined
+          : failures.length > 0
+            ? `Codex CLI model discovery failed: ${failures.join('; ').slice(0, 500)}`
+            : 'Codex CLI reported no models for the signed-in account.';
         providerLog.info(
           {
             provider: 'codex',
@@ -367,9 +454,10 @@ export class CodexCliProvider implements Provider {
       request.tools,
       request.harnessRole,
     );
-    const sandbox = request.permissionMode === 'yolo' && request.harnessRole !== 'critic'
-      ? 'danger-full-access'
-      : 'read-only';
+    const sandbox =
+      request.permissionMode === 'yolo' && request.harnessRole !== 'critic'
+        ? 'danger-full-access'
+        : 'read-only';
 
     // ── Wire rules (AGENTS.md) into the isolated codex home ────────────────
     // Codex has no MCP support, so the <KORY_TOOL_CALL> envelope in the prompt
@@ -417,9 +505,7 @@ export class CodexCliProvider implements Provider {
       // reasoning effort as a fake substitute: it changes model work rather
       // than requesting the supported accelerated tier.
       ...(request.fastMode ? ['--config', 'service_tier="fast"'] : []),
-      ...(request.reasoningLevel
-        ? ['--config', `model_reasoning_effort=${JSON.stringify(request.reasoningLevel)}`]
-        : []),
+      ...codexReasoningArgs(request.reasoningLevel),
       prompt,
     ];
     const child = spawn(binary, args, {
@@ -442,49 +528,9 @@ export class CodexCliProvider implements Provider {
       if (!line.trim()) return;
       try {
         const event = JSON.parse(line) as Record<string, any>;
-        const item = event.item as Record<string, any> | undefined;
-        if (event.type === 'item.completed' && item?.type === 'agent_message' && item.text) {
-          const extracted = extractKoryToolEnvelope(String(item.text), allowedToolNames);
-          if (extracted.content) queue.push({ type: 'content_delta', content: extracted.content });
-          if (extracted.tool) {
-            const toolCallId = `codex-kory-${randomUUID()}`;
-            const input = JSON.stringify(extracted.tool.input);
-            queue.push({ type: 'tool_use_start', toolCallId, toolName: extracted.tool.name });
-            queue.push({
-              type: 'tool_use_delta',
-              toolCallId,
-              toolName: extracted.tool.name,
-              toolInput: input,
-            });
-            queue.push({
-              type: 'tool_use_stop',
-              toolCallId,
-              toolName: extracted.tool.name,
-              toolInput: input,
-            });
-          }
-        } else if (event.type === 'item.completed' && item?.type === 'reasoning' && item.text) {
-          queue.push({ type: 'thinking_delta', thinking: String(item.text) });
-        } else if (event.type === 'item.completed' && item?.type === 'command_execution') {
-          queue.push({
-            type: 'tool_executed',
-            toolName: 'codex_command',
-            toolInput: JSON.stringify({ command: item.command ?? '' }),
-            toolOutput: String(item.aggregated_output ?? item.output ?? '').slice(0, 4_000),
-            isError: item.exit_code != null && item.exit_code !== 0,
-          });
-        } else if (event.type === 'turn.completed') {
-          const usage = event.usage as Record<string, unknown> | undefined;
-          if (typeof usage?.input_tokens === 'number' || typeof usage?.output_tokens === 'number') {
-            queue.push({
-              type: 'usage_update',
-              tokensIn: usage.input_tokens as number | undefined,
-              tokensOut: usage.output_tokens as number | undefined,
-              accountId: account.id,
-            });
-          }
-          completed = true;
-        }
+        const translated = codexJsonEvents(event, allowedToolNames, account.id);
+        queue.push(...translated.events);
+        if (translated.completed) completed = true;
       } catch {
         // Codex's JSON mode is JSONL; ignore a malformed partial line.
       }

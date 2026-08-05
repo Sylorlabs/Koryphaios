@@ -26,9 +26,7 @@ import {
   type ProviderEvent,
   type ProviderMessage,
   type StreamRequest,
-  getModelsForProvider,
 } from './types';
-import { GrokModels } from './models/grok';
 import { detectGrokCLILogin } from './auth-utils';
 import { whichBinary } from './cli-detection';
 import { providerLog } from '../logger';
@@ -36,7 +34,6 @@ import { isModelListCacheFresh } from './model-list-cache';
 import { getCliBridge, getKoryphaiosGrokHome } from './cli-bridges';
 
 const GROK_STREAM_TIMEOUT_MS = 300_000;
-const DEFAULT_CLI_MODEL = GrokModels[0]?.apiModelId ?? 'grok-composer-2.5-fast';
 
 let cachedModels: ModelDef[] | null = null;
 let cachedModelsAt = 0;
@@ -71,14 +68,14 @@ export class GrokBuildProvider implements Provider {
       ? cachedModels
       : cliCachedModels && cliCachedModels.length > 0
         ? cliCachedModels
-        : GrokModels;
+        : [];
   }
 
   private resolveCliModel(modelId: string): string {
     const model = this.listModels().find((m) => m.id === modelId || m.apiModelId === modelId);
     if (model?.apiModelId) return model.apiModelId;
     if (/^grok[-/]/i.test(modelId)) return modelId; // accept a full/bare grok id passed through
-    return DEFAULT_CLI_MODEL;
+    return modelId;
   }
 
   async *streamResponse(request: StreamRequest): AsyncGenerator<ProviderEvent> {
@@ -590,8 +587,6 @@ async function fetchGrokModels(bin: string): Promise<ModelDef[]> {
 }
 
 function grokCliIdToDisplayName(cliId: string): string {
-  const known = GrokModels.find((m) => m.apiModelId === cliId);
-  if (known) return known.name;
   const words = cliId
     .replace(/^grok[-/]?/i, '')
     .split(/[-._]+/)
@@ -601,11 +596,6 @@ function grokCliIdToDisplayName(cliId: string): string {
 }
 
 function modelDefFromGrokCliId(cliId: string, isDefault = false): ModelDef {
-  const existing = GrokModels.find((m) => m.apiModelId === cliId || m.id === cliId);
-  if (existing) {
-    return isDefault ? { ...existing, name: `${existing.name} (default)` } : existing;
-  }
-
   const isFast = /fast|mini|flash/i.test(cliId);
   const isReasoning = /reason|think/i.test(cliId);
   const isBuild = /build/i.test(cliId);
@@ -615,12 +605,12 @@ function modelDefFromGrokCliId(cliId: string, isDefault = false): ModelDef {
     name: grokCliIdToDisplayName(cliId) + (isDefault ? ' (default)' : ''),
     provider: 'grok',
     apiModelId: cliId,
-    contextWindow: 256_000,
-    maxOutputTokens: 50_000,
+    contextWindow: 0,
+    maxOutputTokens: 4_096,
     canReason: isBuild || isReasoning || /composer/i.test(cliId),
     supportsAttachments: false,
     supportsStreaming: true,
-    tier: isReasoning ? 'reasoning' : isFast ? 'fast' : isBuild ? 'flagship' : 'fast',
+    tier: isReasoning ? 'reasoning' : isFast ? 'fast' : isBuild ? 'flagship' : undefined,
   };
 }
 

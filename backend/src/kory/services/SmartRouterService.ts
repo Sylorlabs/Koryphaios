@@ -3,11 +3,10 @@
  *
  * Task-aware, pricing-aware model routing for Auto mode.
  * Replaces static DOMAIN.DEFAULT_MODELS fallback with scored candidate selection
- * derived from the live MODEL_CATALOG + authenticated ProviderRegistry state.
+ * derived from authenticated ProviderRegistry discovery state.
  */
 
 import type { WorkerDomain, ProviderName, ModelTier } from '@koryphaios/shared';
-import { MODEL_CATALOG } from '../../providers/models';
 import { DOMAIN } from '../../constants';
 import { koryLog } from '../../logger';
 import type { ProviderRegistry } from '../../providers/registry';
@@ -187,12 +186,11 @@ export class SmartRouterService {
     for (const status of statuses) {
       if (!status.authenticated || !status.enabled || status.circuitOpen) continue;
 
-      for (const modelId of status.models) {
-        const def = MODEL_CATALOG[modelId];
-        if (!def || def.deprecated) continue;
+      for (const def of status.allAvailableModels) {
+        if (!status.models.includes(def.id) || def.deprecated) continue;
 
         candidates.push({
-          modelId,
+          modelId: def.id,
           provider: status.name,
           tier: def.tier,
           canReason: def.canReason ?? false,

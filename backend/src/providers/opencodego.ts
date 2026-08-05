@@ -13,31 +13,11 @@ import type { ProviderConfig } from '@koryphaios/shared';
 import {
   type ProviderEvent,
   type StreamRequest,
-  resolveModel,
 } from './types';
 import { OpenAIProvider } from './openai';
-import { AnthropicProvider } from './anthropic';
 import { providerLog } from '../logger';
 
 const OPENCODE_GO_BASE = 'https://opencode.ai/zen/go/v1';
-
-/**
- * Models that must be routed through the Anthropic-compatible /v1/messages
- * endpoint. Verified against https://opencode.ai/docs/go/ (Endpoints table).
- */
-const ANTHROPIC_COMPATIBLE_MODELS = new Set<string>([
-  'minimax-m3',
-  'minimax-m2.7',
-  'minimax-m2.5',
-  'qwen3.7-max',
-  'qwen3.7-plus',
-  'qwen3.6-plus',
-]);
-
-function isAnthropicCompatible(modelId: string): boolean {
-  const apiModelId = resolveModel(modelId)?.apiModelId ?? modelId;
-  return ANTHROPIC_COMPATIBLE_MODELS.has(apiModelId);
-}
 
 /**
  * OpenCode Go dispatches per-model to either OpenAIProvider (default) or
@@ -45,22 +25,11 @@ function isAnthropicCompatible(modelId: string): boolean {
  * share the same base URL and API key; only the wire protocol differs.
  */
 export class OpenCodeGoProvider extends OpenAIProvider {
-  private readonly anthropic: AnthropicProvider;
-
   constructor(config: ProviderConfig, baseUrl: string = OPENCODE_GO_BASE) {
     super({ ...config, baseUrl }, 'opencodego', baseUrl);
-    this.anthropic = new AnthropicProvider({ ...config, baseUrl }, 'opencodego');
   }
 
   async *streamResponse(request: StreamRequest): AsyncGenerator<ProviderEvent> {
-    if (isAnthropicCompatible(request.model)) {
-      providerLog.debug(
-        { provider: this.name, model: request.model },
-        'Routing OpenCode Go request through Anthropic-compatible /v1/messages',
-      );
-      yield* this.anthropic.streamResponse(request);
-      return;
-    }
     providerLog.debug(
       { provider: this.name, model: request.model },
       'Routing OpenCode Go request through OpenAI-compatible /v1/chat/completions',

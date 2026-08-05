@@ -53,6 +53,43 @@ final result: passed
 
 ---
 
+# Design QA — Workflow and Codex reasoning repair
+
+## Evidence
+
+- User reference: `/tmp/codex-clipboard-tgYPWh.png`.
+- Native implementation: `/tmp/koryphaios-workflow-reasoning-qa/final-native-2560.png`.
+- Same-client comparison: `/tmp/koryphaios-workflow-reasoning-qa/comparison-client.png`.
+- Comparison viewport: 2560 × 1415 native client pixels. The 25 px desktop panel was cropped from the 2560 × 1440 reference before comparison.
+- Functional evidence: a live Codex CLI run emitted an official `item.completed` reasoning summary with `model_reasoning_summary="detailed"`; a live Koryphaios manager run discovered `Design Quality Loop (design-quality)` and started its host-owned Inspect stage.
+
+## Findings
+
+- No P0, P1, or P2 visual regression remains. The dashboard, feed, sidebar, and composer retain the existing Koryphaios hierarchy, spacing, type, tokens, and responsive behavior.
+- The Codex reasoning-effort control remains beside the selected model and continues to use provider-reported tiers. Both discovered Codex accounts expose their actual per-model levels.
+- Reasoning summaries use the existing reasoning feed treatment. Koryphaios does not expose or fabricate private chain-of-thought; it renders only the safe summary emitted by the official CLI.
+- Workflow errors retain the existing tool-result card styling. The repaired contract now prevents the generic failure shown in the reference by exposing workflow discovery and accepting the provider's common `workflowId`, `workflow`, or exact `name` fields.
+- No new image asset, icon, color, radius, or typography treatment was introduced.
+
+## Interaction and verification
+
+- Live native app relaunched from the current source with backend `127.0.0.1:3001`, frontend `127.0.0.1:3003`, and the Tauri window connected over WebSocket.
+- Live provider discovery returned 11 Codex models across two local accounts, all with provider-reported reasoning tiers.
+- Live workflow run: `list_workflows` returned Design Quality Loop, and `start_workflow` created a running host-owned workflow with the Inspect stage.
+- Focused workflow/Codex tests: 13 passed, 0 failed after the final compatibility alias.
+- Broader focused workflow/provider suite: 40 passed, 0 failed.
+- Repository typecheck: backend passed; Svelte check reported 0 errors and 0 warnings.
+- Core frontend suite: 96 passed, 0 failed. Full isolated backend core suite passed.
+- `git diff --check`: passed.
+
+## Follow-up polish
+
+- None required for this repair.
+
+final result: passed
+
+---
+
 # Design QA — Delete all sessions control
 
 ## Evidence

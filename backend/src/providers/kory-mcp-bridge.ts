@@ -445,29 +445,45 @@ export const KORY_TOOLS: KoryToolDef[] = [
 
   // ── Workflows ──
   {
+    name: 'kory__list_workflows',
+    description: 'List registered host-owned workflows before selecting one to start.',
+    inputSchema: { type: 'object', properties: {} },
+    role: 'manager',
+  },
+  {
     name: 'kory__start_workflow',
     description:
-      'Start a registered host-owned task workflow when the user explicitly asks or safe automatic selection is clearly relevant. Workflows cannot grant tools, create Goals, or change permissions.',
+      'Start a registered host-owned task workflow when the user explicitly asks or safe automatic selection is clearly relevant. Call list_workflows first when the exact ID or name is unknown. Workflows cannot grant tools, create Goals, or change permissions.',
     inputSchema: {
       type: 'object',
       properties: {
         workflowId: { type: 'string' },
+        workflow: { type: 'string' },
+        name: { type: 'string' },
         task: { type: 'string' },
         goalId: { type: 'string' },
       },
-      required: ['workflowId', 'task'],
+      required: ['task'],
     },
     role: 'manager',
   },
   {
     name: 'kory__create_workflow_draft',
-    description: 'Inside an active Goal item, create an inactive declarative workflow draft for explicit human review and activation.',
+    description:
+      'Inside an active Goal item, create an inactive declarative workflow draft for explicit human review and activation.',
     inputSchema: {
       type: 'object',
       properties: {
         name: { type: 'string' },
         description: { type: 'string' },
-        stages: { type: 'array', items: { type: 'object', properties: { label: { type: 'string' }, description: { type: 'string' } }, required: ['label', 'description'] } },
+        stages: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: { label: { type: 'string' }, description: { type: 'string' } },
+            required: ['label', 'description'],
+          },
+        },
       },
       required: ['name', 'description', 'stages'],
     },

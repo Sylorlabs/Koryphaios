@@ -27,7 +27,6 @@ import {
   ENV_API_KEY_MAP,
   ENV_AUTH_TOKEN_MAP,
 } from '../constants';
-import { getModelsForProvider } from '../models';
 import {
   detectAntigravityCLILogin,
   detectClaudeCodeLogin,
@@ -496,7 +495,7 @@ describe('Provider conformance (contract + optional live)', () => {
         result.evidence = 'isAvailable() false with test creds';
       } else {
         captured = [];
-        const model = getModelsForProvider(name)[0]?.id ?? 'test-model';
+        const model = 'test-model';
         try {
           const r = await drive(provider, model);
           // Bedrock returns AWS binary event-stream (decoded by @anthropic-ai/bedrock-sdk),
@@ -572,10 +571,7 @@ describe('Provider conformance (contract + optional live)', () => {
               baseUrl: buildConfig(name).baseUrl,
             } as ProviderConfig);
             if (liveProvider && liveProvider.isAvailable()) {
-              const model =
-                liveProvider.listModels()[0]?.id ??
-                getModelsForProvider(name)[0]?.id ??
-                'test-model';
+              const model = liveProvider.listModels()[0]?.id ?? 'test-model';
               const r = await drive(liveProvider, model, 60_000);
               if (r.ok && (r.completed || r.text.length > 0)) {
                 result.live = 'LIVE_PASS';
