@@ -5,6 +5,7 @@
     ChevronRight,
     ChevronLeft,
     ChevronDown,
+    ChevronUp,
     Trash2,
     EyeOff,
     Eye,
@@ -1135,8 +1136,8 @@
                 class="ml-auto shrink-0 rounded px-1.5 py-0.5 text-[10px] text-[var(--color-text-muted)] hover:bg-[var(--color-surface-3)] hover:text-[var(--color-text-primary)]"
                 onclick={(event) => {
                   event.stopPropagation();
-                  toolDetailsOpen = true;
-                }}>Details</button
+                  toolDetailsOpen = !toolDetailsOpen;
+                }}>{toolDetailsOpen ? 'Hide' : 'Details'}</button
               >
             </div>
           {/if}
@@ -1157,8 +1158,8 @@
                 class="ml-auto shrink-0 rounded px-1.5 py-0.5 text-[10px] text-[var(--color-text-muted)] hover:bg-[var(--color-surface-3)] hover:text-[var(--color-text-primary)]"
                 onclick={(event) => {
                   event.stopPropagation();
-                  toolDetailsOpen = true;
-                }}>Details</button
+                  toolDetailsOpen = !toolDetailsOpen;
+                }}>{toolDetailsOpen ? 'Hide' : 'Details'}</button
               >
             </div>
           {:else}<div class="{getEntryColor(entry.type)} break-words mt-1 markdown-content">
@@ -1484,9 +1485,9 @@
         role="menuitem"
         class="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-xs text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-3)] hover:text-[var(--color-text-primary)]"
         onclick={() => {
-          toolDetailsOpen = true;
+          toolDetailsOpen = !toolDetailsOpen;
           contextMenu = null;
-        }}><Terminal size={13} /> View details</button
+        }}><Terminal size={13} /> {toolDetailsOpen ? 'Hide details' : 'View details'}</button
       >
     {/if}
     <button
@@ -1512,67 +1513,49 @@
 
 {#if toolDetailsOpen && (entry.type === 'tool_group' || entry.type === 'tool_call' || entry.type === 'tool_result' || rawTaskTranscript)}
   <div
-    class="fixed inset-0 z-[80] flex items-center justify-center bg-black/55 p-4 backdrop-blur-sm"
-    role="presentation"
-    onclick={() => (toolDetailsOpen = false)}
+    class="mt-2 overflow-hidden rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-2)]"
+    transition:fade={{ duration: 120 }}
   >
-    <div
-      class="w-full max-w-2xl overflow-hidden rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-1)] shadow-2xl"
-      role="dialog"
-      aria-modal="true"
-      aria-label={entry.type === 'tool_group' ? 'Inspection details' : 'Task details'}
-      tabindex="-1"
-      onclick={(event) => event.stopPropagation()}
-      onkeydown={(event) => {
-        if (event.key === 'Escape') toolDetailsOpen = false;
-      }}
+    <header
+      class="flex items-center justify-between gap-2 border-b border-[var(--color-border)] px-3 py-2"
     >
-      <header
-        class="flex items-center justify-between gap-4 border-b border-[var(--color-border)] px-4 py-3"
+      <span class="text-[11px] font-semibold text-[var(--color-text-secondary)]">
+        {entry.type === 'tool_group'
+          ? `${entry.entries?.length ?? 0} routine actions`
+          : rawTaskTranscript
+            ? 'Background task output'
+            : 'Tool output'}
+      </span>
+      <button
+        type="button"
+        class="shrink-0 rounded p-1 text-[var(--color-text-muted)] hover:bg-[var(--color-surface-3)] hover:text-[var(--color-text-primary)]"
+        onclick={() => (toolDetailsOpen = false)}
+        aria-label="Collapse details"
       >
-        <div>
-          <h2 class="text-sm font-semibold text-[var(--color-text-primary)]">
-            {entry.type === 'tool_group'
-              ? 'Inspection details'
-              : rawTaskTranscript
-                ? 'Background task details'
-                : 'Tool details'}
-          </h2>
-          <p class="mt-0.5 text-[11px] text-[var(--color-text-muted)]">
-            {entry.type === 'tool_group'
-              ? `${entry.entries?.length ?? 0} routine actions`
-              : 'Raw output is available on request only.'}
-          </p>
-        </div>
-        <button
-          type="button"
-          class="rounded-lg p-2 text-[var(--color-text-muted)] hover:bg-[var(--color-surface-3)] hover:text-[var(--color-text-primary)]"
-          onclick={() => (toolDetailsOpen = false)}
-          aria-label="Close inspection details"
-        >
-          <X size={16} />
-        </button>
-      </header>
-      <div class="max-h-[58vh] space-y-3 overflow-y-auto p-4">
-        {#if entry.type === 'tool_group'}{#each entry.entries || [] as subEntry (subEntry.id)}
-            {@const detail = clippedToolDetail(subEntry)}
-            <article
-              class="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-0)] p-3"
-            >
-              <p class="text-xs font-medium {getEntryColor(subEntry.type)}">
-                {subEntry.text.replace(/^Calling tool: /, '')}
-              </p>
-              {#if detail}
-                <pre
-                  class="mt-2 max-h-48 overflow-auto whitespace-pre-wrap break-words rounded-lg bg-black/20 p-2 text-[10px] leading-relaxed text-[var(--color-text-secondary)]">{detail}</pre>
-              {/if}
-            </article>
-          {/each}{:else}
-          <pre
-            class="max-h-[52vh] overflow-auto whitespace-pre-wrap break-words rounded-xl bg-black/20 p-3 text-[11px] leading-relaxed text-[var(--color-text-secondary)]">{detailText() ||
-              'No output was reported.'}</pre>
-        {/if}
-      </div>
+        <ChevronUp size={14} />
+      </button>
+    </header>
+    <div class="max-h-72 space-y-2 overflow-y-auto p-3">
+      {#if entry.type === 'tool_group'}
+        {#each entry.entries || [] as subEntry (subEntry.id)}
+          {@const detail = clippedToolDetail(subEntry)}
+          <article
+            class="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-0)] p-2"
+          >
+            <p class="text-[11px] font-medium {getEntryColor(subEntry.type)}">
+              {subEntry.text.replace(/^Calling tool: /, '')}
+            </p>
+            {#if detail}
+              <pre
+                class="mt-1.5 max-h-40 overflow-auto whitespace-pre-wrap break-words rounded-lg bg-black/20 p-2 text-[10px] leading-relaxed text-[var(--color-text-secondary)]">{detail}</pre>
+            {/if}
+          </article>
+        {/each}
+      {:else}
+        <pre
+          class="max-h-64 overflow-auto whitespace-pre-wrap break-words rounded-lg bg-black/20 p-2 text-[11px] leading-relaxed text-[var(--color-text-secondary)]">{detailText() ||
+            'No output was reported.'}</pre>
+      {/if}
     </div>
   </div>
 {/if}

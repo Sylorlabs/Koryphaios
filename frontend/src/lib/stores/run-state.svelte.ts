@@ -112,18 +112,29 @@ export function phaseToAgentStatus(phase: RunPhase): AgentStatus {
 // If a session is active but goes SILENT (no events) for this long, a
 // terminal event was dropped — force the phase to done so the button
 // doesn't lie. ANY event for the session resets the timer, including
-// agent.status changes (the old watchdog only reset on stream.*, which
-// meant a long tool_calling phase with no stream events would trip it
-// mid-execution).
+// agent.heartbeat (emitted every 5s by the backend while a run is alive).
 //
-// 45s for now; Stage 4 adds a backend heartbeat and drops this to 15s.
-const BUSY_WATCHDOG_MS = 45_000;
+// 15s = 3 missed heartbeats. The old 45s watchdog was a confession that
+// terminal events get dropped; with the heartbeat, 15s is enough to declare
+// a run dead without lying to the user for 3/4 of a minute.
+//
+// SUSPENSION: while any agent for the session is in tool_calling, the
+// watchdog is suspended — a long bash command may emit no stream events for
+// minutes, and the heartbeat proves the backend is still alive. The watchdog
+// resumes when the tool returns (stream.tool_result) or the phase changes.
+const BUSY_WATCHDOG_MS = 15_000;
 const watchdogs = new Map<string, ReturnType<typeof setTimeout>>();
 
 function kickWatchdog(sessionId: string, state: SessionRunState): void {
   const existing = watchdogs.get(sessionId);
   if (existing) clearTimeout(existing);
   if (!isActivePhase(state.phase)) return;
+  // Suspend the watchdog during tool_calling — a long bash command may emit
+  // no stream events for minutes. The backend heartbeat (every 5s) still
+  // resets the watchdog via applyEvent, but we don't arm a new timeout while
+  // in tool_calling. The watchdog resumes when the phase changes away from
+  // tool_calling (stream.tool_result → streaming, or a terminal event).
+  if (state.phase === 'tool_calling') return;
   watchdogs.set(
     sessionId,
     setTimeout(() => {
@@ -170,14 +181,42 @@ function ensureState(sessionId: string): SessionRunState {
   return s;
 }
 
+const DONE_LINGER_MS = 1500;
+const doneTimers = new Map<string, ReturnType<typeof setTimeout>>();
+
 function setPhase(sessionId: string, phase: RunPhase, reason = ''): void {
   const s = ensureState(sessionId);
   if (s.phase === phase && s.waitingReason === reason) return;
   s.phase = phase;
   s.waitingReason = reason;
   s.lastActivityAt = Date.now();
-  if (isActivePhase(phase)) kickWatchdog(sessionId, s);
-  else stopWatchdog(sessionId);
+  if (isActivePhase(phase)) {
+    kickWatchdog(sessionId, s);
+  } else {
+    stopWatchdog(sessionId);
+  }
+  // When the run completes (done/error), briefly show the terminal icon
+  // (checkmark / alert) then auto-revert to idle so the sidebar icon
+  // doesn't linger on "done" forever.
+  const existingDone = doneTimers.get(sessionId);
+  if (existingDone) {
+    clearTimeout(existingDone);
+    doneTimers.delete(sessionId);
+  }
+  if (phase === 'done' || phase === 'error') {
+    doneTimers.set(
+      sessionId,
+      setTimeout(() => {
+        doneTimers.delete(sessionId);
+        const cur = states.get(sessionId);
+        if (cur && (cur.phase === 'done' || cur.phase === 'error')) {
+          cur.phase = 'idle';
+          cur.waitingReason = '';
+          commit();
+        }
+      }, DONE_LINGER_MS),
+    );
+  }
   commit();
 }
 
@@ -248,6 +287,23 @@ export function applyEvent(msg: WSMessage): void {
     // ── User sends a message → run starts ──
     // (Handled by startRun(), not an event — but stream.delta etc. below
     //  will keep it alive.)
+
+    case 'agent.heartbeat': {
+      // Backend says the run is still alive. Reset the watchdog (already
+      // done above in the "any event resets" block) and ensure the agent
+      // is tracked as active. Don't change the phase — the heartbeat's
+      // `phase` field is informational; real phase transitions come from
+      // stream.* / agent.status events.
+      if (!s || s.stoppedByUser) return;
+      const p = msg.payload as { agentId: string; phase: string };
+      addActiveAgent(sid, p.agentId);
+      // If the session somehow regressed to idle/done but heartbeats are
+      // still coming, the run is alive — bump it back to streaming.
+      if (s.phase === 'idle' || s.phase === 'done') {
+        setPhase(sid, 'streaming');
+      }
+      break;
+    }
 
     case 'stream.delta':
     case 'stream.file_delta':
@@ -410,6 +466,8 @@ export function clearUserStopped(sessionId: string): void {
 /** Reset a session to idle (e.g. on session switch / reload). */
 export function resetSession(sessionId: string): void {
   stopWatchdog(sessionId);
+  const dt = doneTimers.get(sessionId);
+  if (dt) { clearTimeout(dt); doneTimers.delete(sessionId); }
   const next = new Map(states);
   next.delete(sessionId);
   states = next;
@@ -418,6 +476,8 @@ export function resetSession(sessionId: string): void {
 /** Clear all sessions (e.g. on disconnect). */
 export function clearAll(): void {
   for (const sid of watchdogs.keys()) stopWatchdog(sid);
+  for (const sid of doneTimers.keys()) clearTimeout(doneTimers.get(sid)!);
+  doneTimers.clear();
   states = new Map();
 }
 
