@@ -108,6 +108,15 @@ let fetchedAt = 0;
 let inflight = false;
 let inflightPromise: Promise<void> | null = null;
 
+/** Reset the models.dev cache. Test-only — prevents state leakage between
+ *  test files that mock globalThis.fetch with different catalog payloads. */
+export function __resetModelsDevCacheForTesting(): void {
+  cache = null;
+  fetchedAt = 0;
+  inflight = false;
+  inflightPromise = null;
+}
+
 /** Await a fresh-enough catalog (max ~5s) — for callers that need prices NOW. */
 export async function warmModelsDevCache(): Promise<void> {
   kickRefresh();

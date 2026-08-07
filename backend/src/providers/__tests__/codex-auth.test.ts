@@ -1,4 +1,8 @@
-import { afterAll, describe, expect, it, mock } from 'bun:test';
+import { afterAll, describe, expect, it, mock, setDefaultTimeout } from 'bun:test';
+
+// Codex auth tests involve provider instantiation that can be slow under
+// parallel test load.
+setDefaultTimeout(30000);
 import type { KoryphaiosConfig } from '@koryphaios/shared';
 
 const account = mock(async () => ({

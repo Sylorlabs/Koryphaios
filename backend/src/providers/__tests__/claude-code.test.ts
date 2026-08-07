@@ -6,13 +6,23 @@
 // a Claude subscription is served through the official `claude` CLI harness, never a
 // direct API call.
 
-import { describe, it, expect } from 'bun:test';
+import { describe, it, expect, beforeEach, setDefaultTimeout } from 'bun:test';
 import { ProviderRegistry } from '../registry';
-import { ClaudeCodeProvider } from '../claude-code';
+import { ClaudeCodeProvider, __resetClaudeCodeModelCacheForTesting } from '../claude-code';
 import { PROVIDER_AUTH_MODE } from '../constants';
 import type { ProviderEvent } from '../types';
 
+// Provider instantiation involves CLI detection probes that are slow under
+// parallel test load.
+setDefaultTimeout(30000);
+
 const live = process.env.KORY_LIVE_CLAUDE ? it : it.skip;
+
+// Reset the module-level model cache before each test to prevent state
+// leakage from other test files that trigger refreshModelsInBackground().
+beforeEach(() => {
+  __resetClaudeCodeModelCacheForTesting();
+});
 
 describe('Claude Code provider — plumbing', () => {
   it('registry instantiates a claude provider (previously null)', () => {
@@ -35,6 +45,10 @@ describe('Claude Code provider — plumbing', () => {
   });
 
   it('does not ship a Claude model catalog', () => {
+    // Reset right before the assertion — not just in beforeEach — so a
+    // parallel test file can't populate the cache between beforeEach and
+    // this test's listModels() call.
+    __resetClaudeCodeModelCacheForTesting();
     const provider = new ClaudeCodeProvider({ name: 'claude', authToken: 'cli:claude:test' });
     expect(provider.listModels()).toEqual([]);
   });

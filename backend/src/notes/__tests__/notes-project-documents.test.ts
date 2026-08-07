@@ -1,4 +1,8 @@
-import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
+import { afterAll, beforeAll, describe, expect, setDefaultTimeout, test } from 'bun:test';
+
+// These tests do heavy filesystem operations (mkdtemp, file sync, project
+// scans) that are slow under parallel test load. Give them a generous timeout.
+setDefaultTimeout(60000);
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';

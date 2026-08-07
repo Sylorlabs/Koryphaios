@@ -85,8 +85,12 @@ function authHeaders(extra: Record<string, string> = {}): Record<string, string>
 }
 
 beforeAll(async () => {
-  const backendDir = join(dirname(import.meta.dir), 'src', '..');
-  serverProc = Bun.spawn(['bun', 'run', 'src/server.ts'], {
+  const backendDir = join(dirname(import.meta.dir), '..');
+  const serverPath = join(backendDir, 'src', 'server.ts');
+  if (!existsSync(serverPath)) {
+    throw new Error(`Server entry not found at ${serverPath}`);
+  }
+  serverProc = Bun.spawn(['bun', 'run', serverPath], {
     cwd: backendDir,
     env: {
       ...process.env,

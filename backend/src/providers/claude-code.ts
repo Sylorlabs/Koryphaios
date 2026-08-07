@@ -292,6 +292,14 @@ let cachedModels: ModelDef[] | null = null;
 let cachedModelsAt = 0;
 let refreshInProgress = false;
 
+/** Reset the module-level model cache. Test-only — prevents state leakage
+ *  between test files that trigger refreshModelsInBackground(). */
+export function __resetClaudeCodeModelCacheForTesting(): void {
+  cachedModels = null;
+  cachedModelsAt = 0;
+  refreshInProgress = false;
+}
+
 /**
  * Probe a single claude alias (e.g. 'opus') by spawning a headless run and
  * reading the `init` system event's `model` field — the CLI resolves the alias

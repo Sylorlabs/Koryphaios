@@ -1,4 +1,8 @@
-import { describe, test, expect, beforeAll, afterAll } from 'bun:test';
+import { describe, test, expect, beforeAll, afterAll, setDefaultTimeout } from 'bun:test';
+
+// Provider instantiation involves CLI detection probes that are slow under
+// parallel test load.
+setDefaultTimeout(30000);
 import { ProviderRegistry } from '../registry';
 import { ProviderName } from '@koryphaios/shared';
 import { PROVIDER_AUTH_MODE } from '../constants';

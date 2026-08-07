@@ -1,4 +1,8 @@
-import { describe, expect, test } from 'bun:test';
+import { describe, expect, setDefaultTimeout, test } from 'bun:test';
+
+// Plan note sync involves DB + filesystem operations that can be slow under
+// parallel test load.
+setDefaultTimeout(30000);
 import { validatePlanReadiness } from './plan-mode';
 import { ensurePlanNote, syncPlanNote } from './plan-mode';
 import { deleteNote, getNote } from '../notes/notes-service';

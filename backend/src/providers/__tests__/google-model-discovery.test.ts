@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it } from 'bun:test';
 import { formatGoogleProviderError, GoogleProvider, rejectsTemperatureConfiguration, rejectsThinkingConfiguration } from '../google';
+import { __resetModelsDevCacheForTesting } from '../models-dev';
 
 const originalFetch = globalThis.fetch;
 
@@ -30,6 +31,10 @@ describe('Google AI Studio model discovery', () => {
   });
 
   it('returns an awaitable model refresh for Settings instead of racing a background fetch', async () => {
+    // Reset the cache right before the test body — not just in beforeEach —
+    // so a parallel test file can't populate the cache between beforeEach
+    // and this test's refreshModels() call.
+    __resetModelsDevCacheForTesting();
     globalThis.fetch = (async (input) => {
       if (String(input) === 'https://models.dev/api.json') {
         return new Response(
@@ -87,6 +92,7 @@ describe('Google AI Studio model discovery', () => {
   });
 
   it('enriches Gemini 3 with its exact per-model thinking-level list', async () => {
+    __resetModelsDevCacheForTesting();
     globalThis.fetch = (async (input) => {
       if (String(input) === 'https://models.dev/api.json') {
         return new Response(
