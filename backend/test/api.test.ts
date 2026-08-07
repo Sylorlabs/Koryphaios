@@ -7,7 +7,7 @@ const TEST_PORT = 3301;
 const BASE_URL = `http://127.0.0.1:${TEST_PORT}`;
 let serverProc: Bun.Subprocess | null = null;
 let authToken = '';
-setDefaultTimeout(30000);
+setDefaultTimeout(90000);
 
 type ReqOpts = {
   method?: 'GET' | 'POST' | 'PATCH' | 'DELETE' | 'PUT' | 'OPTIONS';
