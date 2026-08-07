@@ -22,12 +22,17 @@ import {
   activateSkill,
   applyDefaultUpdate,
   compareSkillRevisions,
+  compareBundledSkill,
+  countBundledUpdates,
   listSkills,
   resolveSkills,
   saveSkillDraft,
   testSkill,
   validateSkillContent,
   enforceSkillLearningPolicy,
+  getBundledSkillContent,
+  saveAgentMergedSkillDraft,
+  personalRoot,
   type SkillSource,
 } from '../../kory/skills';
 import { createTaskContract } from '../../kory/prompts';
@@ -49,6 +54,13 @@ import {
   startWorkflow,
   stopWorkflow,
 } from '../../kory/workflows';
+import { serverLog } from '../../logger';
+import {
+  NotFoundError,
+  ValidationError,
+  ConflictError,
+  SessionNotFoundError,
+} from '../../errors/types';
 
 export const agentSettingsRoutes = new Elysia({ prefix: '/api/agent' })
   .get('/workflows', ({ request, query, set }) => {
@@ -58,45 +70,27 @@ export const agentSettingsRoutes = new Elysia({ prefix: '/api/agent' })
   }, { query: t.Object({ sessionId: t.Optional(t.String()) }) })
   .post('/workflows/start', ({ request, body, set }) => {
     if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
-    try {
-      return { ok: true, data: startWorkflow(getRequestProjectRoot(request), { ...body, requestedBy: 'human' }) };
-    } catch (error: any) {
-      set.status = 400;
-      return { ok: false, error: error?.message ?? 'Unable to start workflow' };
-    }
+    return { ok: true, data: startWorkflow(getRequestProjectRoot(request), { ...body, requestedBy: 'human' }) };
   }, { body: t.Object({ workflowId: t.String(), sessionId: t.String(), task: t.String({ minLength: 1 }), goalId: t.Optional(t.String()) }) })
   .post('/workflows/:id/advance', ({ request, params, body, set }) => {
     if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
-    try {
-      return { ok: true, data: advanceWorkflow(getRequestProjectRoot(request), params.id, body) };
-    } catch (error: any) {
-      set.status = 400;
-      return { ok: false, error: error?.message ?? 'Unable to advance workflow' };
-    }
+    return { ok: true, data: advanceWorkflow(getRequestProjectRoot(request), params.id, body) };
   }, { body: t.Object({ evidence: t.String(), block: t.Optional(t.Boolean()) }) })
   .post('/workflows/:id/stop', ({ request, params, set }) => {
     if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
-    try {
-      return { ok: true, data: stopWorkflow(getRequestProjectRoot(request), params.id) };
-    } catch (error: any) {
-      set.status = 400;
-      return { ok: false, error: error?.message ?? 'Unable to stop workflow' };
-    }
+    return { ok: true, data: stopWorkflow(getRequestProjectRoot(request), params.id) };
   })
   .post('/workflows/drafts/:id/activate', async ({ request, params, body, set }) => {
     if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
-    try {
-      const root = getRequestProjectRoot(request);
-      const draft = listWorkflowDrafts(root).find((item) => item.id === params.id);
-      if (!draft) throw new Error('Workflow draft not found');
-      const goal = await getContext().goals.get(draft.goalId);
-      const sourceItem = goal?.checklist.find((item) => item.id === draft.goalItemId);
-      if (!sourceItem?.evidence.some((proof) => proof.verified)) throw new Error('Finish and verify the source Goal item before activating this workflow');
-      const activated = activateWorkflowDraft(root, params.id, body.scope);
-      await getContext().goals.addActivity(draft.goalId, 'workflow_activated', `${draft.id}|${body.scope}|${draft.name}`);
-      return { ok: true, data: activated };
-    }
-    catch (error: any) { set.status = 400; return { ok: false, error: error?.message ?? 'Unable to activate workflow draft' }; }
+    const root = getRequestProjectRoot(request);
+    const draft = listWorkflowDrafts(root).find((item) => item.id === params.id);
+    if (!draft) throw new NotFoundError('Workflow draft', params.id);
+    const goal = await getContext().goals.get(draft.goalId);
+    const sourceItem = goal?.checklist.find((item) => item.id === draft.goalItemId);
+    if (!sourceItem?.evidence.some((proof) => proof.verified)) throw new ValidationError('Finish and verify the source Goal item before activating this workflow');
+    const activated = activateWorkflowDraft(root, params.id, body.scope);
+    await getContext().goals.addActivity(draft.goalId, 'workflow_activated', `${draft.id}|${body.scope}|${draft.name}`);
+    return { ok: true, data: activated };
   }, { body: t.Object({ scope: t.Union([t.Literal('project'), t.Literal('personal')]) }) })
   .post(
     '/delegate',
@@ -104,8 +98,7 @@ export const agentSettingsRoutes = new Elysia({ prefix: '/api/agent' })
       if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
       const { sessions, kory } = getContext();
       if (!(await sessions.get(body.sessionId))) {
-        set.status = 404;
-        return { ok: false, error: 'Session not found' };
+        throw new SessionNotFoundError(body.sessionId);
       }
       // This is the deterministic control-plane path for an explicit human
       // delegation. It does not depend on a provider translating a prose
@@ -151,36 +144,31 @@ export const agentSettingsRoutes = new Elysia({ prefix: '/api/agent' })
     '/skills/evaluations',
     ({ request, body, set }) => {
       if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
-      try {
-        const root = getRequestProjectRoot(request);
-        const run = recordSkillEvaluationRun(root, body);
-        const related = listSkillEvaluationRuns(root, run.skill).filter(
-          (item) =>
-            item.provider === run.provider &&
-            item.model === run.model &&
-            item.harnessVersion === run.harnessVersion &&
-            item.role === run.role &&
-            item.medium === run.medium,
-        );
-        saveHarnessQualification(root, {
-          provider: run.provider,
-          model: run.model,
-          harnessVersion: run.harnessVersion,
-          skill: run.skill,
-          role: run.role,
-          medium: run.medium,
-          sampleSize: related.length,
-          successes: related.filter((item) => item.passed && !item.integrityFailure).length,
-          quality: related.reduce((sum, item) => sum + item.quality, 0) / related.length,
-          verification: related.reduce((sum, item) => sum + item.verification, 0) / related.length,
-          updatedAt: run.recordedAt,
-          evidence: related.flatMap((item) => item.evidence).slice(-10),
-        });
-        return { ok: true, data: run };
-      } catch (error: any) {
-        set.status = 400;
-        return { ok: false, error: error?.message ?? 'Invalid evaluation run' };
-      }
+      const root = getRequestProjectRoot(request);
+      const run = recordSkillEvaluationRun(root, body);
+      const related = listSkillEvaluationRuns(root, run.skill).filter(
+        (item) =>
+          item.provider === run.provider &&
+          item.model === run.model &&
+          item.harnessVersion === run.harnessVersion &&
+          item.role === run.role &&
+          item.medium === run.medium,
+      );
+      saveHarnessQualification(root, {
+        provider: run.provider,
+        model: run.model,
+        harnessVersion: run.harnessVersion,
+        skill: run.skill,
+        role: run.role,
+        medium: run.medium,
+        sampleSize: related.length,
+        successes: related.filter((item) => item.passed && !item.integrityFailure).length,
+        quality: related.reduce((sum, item) => sum + item.quality, 0) / related.length,
+        verification: related.reduce((sum, item) => sum + item.verification, 0) / related.length,
+        updatedAt: run.recordedAt,
+        evidence: related.flatMap((item) => item.evidence).slice(-10),
+      });
+      return { ok: true, data: run };
     },
     {
       body: t.Object({
@@ -216,8 +204,7 @@ export const agentSettingsRoutes = new Elysia({ prefix: '/api/agent' })
         (item) => item.name === name && item.source === query.source && item.state === query.state,
       );
       if (!skill) {
-        set.status = 404;
-        return { ok: false, error: 'Skill revision not found' };
+        throw new NotFoundError('Skill revision', name);
       }
       return {
         ok: true,
@@ -240,12 +227,7 @@ export const agentSettingsRoutes = new Elysia({ prefix: '/api/agent' })
     '/skills/qualifications',
     ({ request, body, set }) => {
       if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
-      try {
-        return { ok: true, data: saveHarnessQualification(getRequestProjectRoot(request), body) };
-      } catch (error: any) {
-        set.status = 400;
-        return { ok: false, error: error?.message ?? 'Invalid qualification record' };
-      }
+      return { ok: true, data: saveHarnessQualification(getRequestProjectRoot(request), body) };
     },
     {
       body: t.Object({
@@ -280,26 +262,22 @@ export const agentSettingsRoutes = new Elysia({ prefix: '/api/agent' })
     '/skills/:name/draft',
     ({ request, params: { name }, body, set }) => {
       if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
-      try {
-        const root = getRequestProjectRoot(request);
-        enforceSkillLearningPolicy(
-          loadAgentSettings(root).skillLearningMode,
-          body.actor ?? 'human',
-          'save-draft',
-        );
-        return {
-          ok: true,
-          data: saveSkillDraft(
-            root,
-            body.source as SkillSource,
-            name,
-            body.content,
-          ),
-        };
-      } catch (error: any) {
-        set.status = 400;
-        return { ok: false, error: error?.message ?? 'Failed to save draft' };
-      }
+      const root = getRequestProjectRoot(request);
+      enforceSkillLearningPolicy(
+        loadAgentSettings(root).skillLearningMode,
+        body.actor ?? 'human',
+        'save-draft',
+      );
+      return {
+        ok: true,
+        data: saveSkillDraft(
+          root,
+          // body.source is validated by Elysia as 'personal' | 'project', which matches SkillSource.
+          body.source as SkillSource,
+          name,
+          body.content,
+        ),
+      };
     },
     {
       body: t.Object({
@@ -320,8 +298,7 @@ export const agentSettingsRoutes = new Elysia({ prefix: '/api/agent' })
           item.state === (body.state ?? 'draft'),
       );
       if (!skill) {
-        set.status = 404;
-        return { ok: false, error: 'Skill revision not found' };
+        throw new NotFoundError('Skill revision', name);
       }
       return { ok: true, data: testSkill(skill) };
     },
@@ -336,28 +313,23 @@ export const agentSettingsRoutes = new Elysia({ prefix: '/api/agent' })
     '/skills/:name/activate',
     ({ request, params: { name }, body, set }) => {
       if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
-      try {
-        const root = getRequestProjectRoot(request);
-        const draft = listSkills(root).find(
-          (item) => item.name === name && item.source === body.source && item.state === 'draft',
-        );
-        const promotionReady = draft
-          ? buildSkillEvaluationCard(root, draft).gate.status === 'ready'
-          : false;
-        enforceSkillLearningPolicy(
-          loadAgentSettings(root).skillLearningMode,
-          body.actor ?? 'human',
-          'activate',
-          promotionReady,
-        );
-        return {
-          ok: true,
-          data: activateSkill(root, body.source as SkillSource, name),
-        };
-      } catch (error: any) {
-        set.status = 400;
-        return { ok: false, error: error?.message ?? 'Failed to activate skill' };
-      }
+      const root = getRequestProjectRoot(request);
+      const draft = listSkills(root).find(
+        (item) => item.name === name && item.source === body.source && item.state === 'draft',
+      );
+      const promotionReady = draft
+        ? buildSkillEvaluationCard(root, draft).gate.status === 'ready'
+        : false;
+      enforceSkillLearningPolicy(
+        loadAgentSettings(root).skillLearningMode,
+        body.actor ?? 'human',
+        'activate',
+        promotionReady,
+      );
+      return {
+        ok: true,
+        data: activateSkill(root, body.source as SkillSource, name),
+      };
     },
     {
       body: t.Object({
@@ -368,24 +340,99 @@ export const agentSettingsRoutes = new Elysia({ prefix: '/api/agent' })
   )
   .post(
     '/skills/:name/update-default',
-    ({ request, params: { name }, body, set }) => {
+    async ({ request, params: { name }, body, set }) => {
       if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
-      try {
-        return {
-          ok: true,
-          data: applyDefaultUpdate(getRequestProjectRoot(request), name, body.choice),
-        };
-      } catch (error: any) {
-        set.status = 400;
-        return { ok: false, error: error?.message ?? 'Failed to update default' };
+      const projectRoot = getRequestProjectRoot(request);
+
+      // For merge-with-agent, call the LLM to intelligently merge the user's
+      // local edits with the new bundled version.
+      if (body.choice === 'merge-with-agent') {
+        const bundled = getBundledSkillContent(name);
+        if (!bundled) {
+          set.status = 404;
+          return { ok: false, error: 'Bundled skill not found' };
+        }
+        let local: string;
+        try {
+          local = readFileSync(join(personalRoot(), name, 'SKILL.md'), 'utf8');
+        } catch {
+          set.status = 404;
+          return { ok: false, error: 'Local skill not found' };
+        }
+
+        const ctx = getContext();
+        // Use the user's configured routing to pick the right model — this
+        // respects their provider preferences, model allowlists, and fallbacks
+        // instead of hardcoding specific model IDs.
+        const routing = ctx.kory.resolveActiveRouting(undefined, 'general', true);
+        const provider = ctx.providers.resolveProvider(routing.model, routing.provider);
+        if (!provider) {
+          set.status = 503;
+          return { ok: false, error: 'No model provider available for agent merge' };
+        }
+
+        const mergePrompt = buildSkillMergePrompt(name, local, bundled);
+        const stream = provider.streamResponse({
+          model: routing.model,
+          systemPrompt:
+            'You are an expert at merging skill instruction files. You preserve the user\'s customizations while incorporating the bundled improvements. Output ONLY the merged SKILL.md content — no explanation, no markdown fences.',
+          messages: [{ role: 'user', content: mergePrompt }],
+        });
+
+        let mergedContent = '';
+        for await (const event of stream) {
+          if (event.type === 'content_delta' && event.content) {
+            mergedContent += event.content;
+          }
+        }
+
+        // Strip markdown fences if the model wrapped the output
+        mergedContent = mergedContent
+          .replace(/^```(?:markdown|yaml|md)?\n?/m, '')
+          .replace(/\n?```\s*$/m, '')
+          .trim();
+
+        if (!mergedContent.startsWith('---')) {
+          set.status = 500;
+          return { ok: false, error: 'Agent merge produced invalid content (missing frontmatter)' };
+        }
+
+        const draft = saveAgentMergedSkillDraft(name, mergedContent);
+        return { ok: true, data: draft };
       }
+
+      return {
+        ok: true,
+        data: applyDefaultUpdate(projectRoot, name, body.choice),
+      };
     },
     {
       body: t.Object({
-        choice: t.Union([t.Literal('replace'), t.Literal('merge'), t.Literal('keep-local')]),
+        choice: t.Union([
+          t.Literal('replace'),
+          t.Literal('merge'),
+          t.Literal('keep-local'),
+          t.Literal('merge-with-agent'),
+        ]),
       }),
     },
   )
+  .get(
+    '/skills/:name/compare-bundled',
+    ({ request, params: { name }, set }) => {
+      if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
+      const comparison = compareBundledSkill(name);
+      if (!comparison) {
+        set.status = 404;
+        return { ok: false, error: 'No local skill or bundled version found' };
+      }
+      return { ok: true, data: comparison };
+    },
+  )
+  .get('/skills/bundled-updates/count', ({ request, set }) => {
+    if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
+    return { ok: true, data: { count: countBundledUpdates() } };
+  })
   .post(
     '/skills/resolve',
     ({ request, body, set }) => {
@@ -428,8 +475,7 @@ export const agentSettingsRoutes = new Elysia({ prefix: '/api/agent' })
       const active = revisions.find((item) => item.state === 'active');
       const draft = revisions.find((item) => item.state === 'draft');
       if (!active || !draft) {
-        set.status = 404;
-        return { ok: false, error: 'Active and draft revisions are required' };
+        throw new NotFoundError('Active and draft skill revisions', name);
       }
       return { ok: true, data: compareSkillRevisions(active, draft) };
     },
@@ -440,8 +486,7 @@ export const agentSettingsRoutes = new Elysia({ prefix: '/api/agent' })
     const { sessions, kory } = getContext();
     const session = await sessions.get(sessionId);
     if (!session) {
-      set.status = 404;
-      return { ok: false, error: 'Session not found' };
+      throw new SessionNotFoundError(sessionId);
     }
     return { ok: true, data: kory.getAgentThreadsForSession(sessionId) };
   })
@@ -451,14 +496,12 @@ export const agentSettingsRoutes = new Elysia({ prefix: '/api/agent' })
       if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
       const sessionId = String(query.sessionId ?? '');
       if (!sessionId) {
-        set.status = 400;
-        return { ok: false, error: 'sessionId is required' };
+        throw new ValidationError('sessionId is required');
       }
       const { sessions, kory } = getContext();
       const session = await sessions.get(sessionId);
       if (!session) {
-        set.status = 404;
-        return { ok: false, error: 'Session not found' };
+        throw new SessionNotFoundError(sessionId);
       }
       return { ok: true, data: kory.getAgentThreadEntries(sessionId, agentId) };
     },
@@ -475,8 +518,7 @@ export const agentSettingsRoutes = new Elysia({ prefix: '/api/agent' })
       const { sessions, kory } = getContext();
       const session = await sessions.get(body.sessionId);
       if (!session) {
-        set.status = 404;
-        return { ok: false, error: 'Session not found' };
+        throw new SessionNotFoundError(body.sessionId);
       }
       try {
         await kory.sendMessageToAgent(body.sessionId, agentId, body.content, {
@@ -484,10 +526,11 @@ export const agentSettingsRoutes = new Elysia({ prefix: '/api/agent' })
           reasoningLevel: body.reasoningLevel,
         });
         return { ok: true, data: { status: 'processing' } };
-      } catch (err: any) {
-        const message = err?.message ?? 'Failed to message agent';
-        set.status = message.includes('already working') ? 409 : 400;
-        return { ok: false, error: message };
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : String(err);
+        // "already working" is an operational conflict, not a bug.
+        if (message.includes('already working')) throw new ConflictError(message);
+        throw new ValidationError(message || 'Failed to message agent');
       }
     },
     {
@@ -516,20 +559,15 @@ export const agentSettingsRoutes = new Elysia({ prefix: '/api/agent' })
   })
   .put('/settings', async ({ request, body, set }) => {
     if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
-    try {
-      const root = getRequestProjectRoot(request);
-      const currentSettings = loadAgentSettings(root);
-      const newSettings = mergeAgentSettings(currentSettings, body);
-      saveAgentSettings(root, newSettings);
-      return {
-        ok: true,
-        data: newSettings,
-        message: 'Agent settings updated. Rules remain enforced.',
-      };
-    } catch (err: any) {
-      set.status = 500;
-      return { ok: false, error: err.message ?? 'Failed to save agent settings' };
-    }
+    const root = getRequestProjectRoot(request);
+    const currentSettings = loadAgentSettings(root);
+    const newSettings = mergeAgentSettings(currentSettings, body);
+    saveAgentSettings(root, newSettings);
+    return {
+      ok: true,
+      data: newSettings,
+      message: 'Agent settings updated. Rules remain enforced.',
+    };
   })
   .post('/settings/reset', async ({ request, set }) => {
     if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
@@ -549,13 +587,8 @@ export const agentSettingsRoutes = new Elysia({ prefix: '/api/agent' })
     '/preferences',
     async ({ request, body, set }) => {
       if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
-      try {
-        writePreferences(getRequestProjectRoot(request), body.content);
-        return { ok: true, message: 'Preferences updated. Critic will enforce new rules.' };
-      } catch (err: any) {
-        set.status = 500;
-        return { ok: false, error: err.message ?? 'Failed to save preferences' };
-      }
+      writePreferences(getRequestProjectRoot(request), body.content);
+      return { ok: true, message: 'Preferences updated. Critic will enforce new rules.' };
     },
     {
       body: t.Object({
@@ -583,21 +616,16 @@ export const agentSettingsRoutes = new Elysia({ prefix: '/api/agent' })
     '/enforce',
     async ({ request, body, set }) => {
       if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
-      try {
-        const root = getRequestProjectRoot(request);
-        const settings = loadAgentSettings(root);
-        const preferences = readPreferences(root).content;
-        const result = enforceRules(
-          body.code,
-          body.filePath,
-          preferences,
-          settings.ruleEnforcementLevel,
-        );
-        return { ok: true, data: result };
-      } catch (err: any) {
-        set.status = 500;
-        return { ok: false, error: err.message ?? 'Failed to enforce rules' };
-      }
+      const root = getRequestProjectRoot(request);
+      const settings = loadAgentSettings(root);
+      const preferences = readPreferences(root).content;
+      const result = enforceRules(
+        body.code,
+        body.filePath,
+        preferences,
+        settings.ruleEnforcementLevel,
+      );
+      return { ok: true, data: result };
     },
     {
       body: t.Object({
@@ -610,29 +638,27 @@ export const agentSettingsRoutes = new Elysia({ prefix: '/api/agent' })
     '/critic-review',
     async ({ request, body, set }) => {
       if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
+      const root = getRequestProjectRoot(request);
+      const settings = loadAgentSettings(root);
+      const preferences = readPreferences(root).content;
+      let rules = '';
       try {
-        const root = getRequestProjectRoot(request);
-        const settings = loadAgentSettings(root);
-        const preferences = readPreferences(root).content;
-        let rules = '';
-        try {
-          rules = readFileSync(join(root, '.koryphaios/rules/rules.md'), 'utf-8');
-        } catch {}
-
-        const result = criticReview({
-          code: body.code,
-          filePath: body.filePath,
-          changeDescription: body.changeDescription || 'Code change',
-          settings,
-          preferences,
-          rules,
-        });
-
-        return { ok: true, data: result };
-      } catch (err: any) {
-        set.status = 500;
-        return { ok: false, error: err.message ?? 'Critic review failed' };
+        rules = readFileSync(join(root, '.koryphaios/rules/rules.md'), 'utf-8');
+      } catch (err: unknown) {
+        // No rules file is the common case; critic review proceeds without custom rules.
+        serverLog.debug({ err: err instanceof Error ? err.message : String(err), root }, 'No rules.md found; critic review will use defaults');
       }
+
+      const result = criticReview({
+        code: body.code,
+        filePath: body.filePath,
+        changeDescription: body.changeDescription || 'Code change',
+        settings,
+        preferences,
+        rules,
+      });
+
+      return { ok: true, data: result };
     },
     {
       body: t.Object({
@@ -655,3 +681,28 @@ export const agentSettingsRoutes = new Elysia({ prefix: '/api/agent' })
       message: 'Default agent settings. Rules always enforced.',
     };
   });
+
+/** Build the prompt for LLM-based skill merge. */
+function buildSkillMergePrompt(skillName: string, localContent: string, bundledContent: string): string {
+  return `Merge these two versions of the "${skillName}" skill (SKILL.md).
+
+## Rules
+1. Start with the YAML frontmatter from the BUNDLED version (it has the correct metadata).
+2. Preserve ALL customizations the user made in the LOCAL version — their domain-specific additions, examples, anti-patterns, references, and any sections they added.
+3. Incorporate ALL improvements from the BUNDLED version — new sections, updated guidance, decision trees, tables, and structural improvements.
+4. When both versions cover the same topic, prefer the BUNDLED version's structure but keep the LOCAL version's specific examples or domain knowledge.
+5. Keep the merged result under 500 lines (excluding frontmatter).
+6. Output ONLY the merged SKILL.md content — no explanation.
+
+## LOCAL version (user's edits):
+---
+${localContent}
+---
+
+## BUNDLED version (new upstream):
+---
+${bundledContent}
+---
+
+Produce the merged SKILL.md now.`;
+}

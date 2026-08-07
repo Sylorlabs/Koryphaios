@@ -354,7 +354,8 @@ export class OpenAICompatiblePlugin implements ProviderPlugin {
 
     try {
       return JSON.parse(data);
-    } catch {
+    } catch (err: unknown) {
+      providerLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'OpenAI-compatible plugin: SSE data JSON parse failed');
       return null;
     }
   }

@@ -367,11 +367,12 @@ Network access via curl/wget is blocked unless explicitly authorized.`;
       })();
 
       return await Promise.race([outputPromise, timeoutPromise]);
-    } catch (err: any) {
+    } catch (err: unknown) {
+      toolLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'bash: command execution error');
       return {
         callId: call.id,
         name: this.name,
-        output: `Execution error: ${err.message}`,
+        output: `Execution error: ${err instanceof Error ? err.message : String(err)}`,
         isError: true,
         durationMs: 0,
       };

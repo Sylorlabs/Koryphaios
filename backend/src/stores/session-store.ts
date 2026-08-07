@@ -3,6 +3,7 @@ import { nanoid } from 'nanoid';
 import { ID, SESSION } from '../constants';
 import { db, sessions, type Session as DbSession } from '../db';
 import { eq, and, desc } from 'drizzle-orm';
+import { serverLog } from '../logger';
 
 export interface ISessionStore {
   create(
@@ -20,6 +21,10 @@ export interface ISessionStore {
     updates: Partial<SharedSession>,
     expectedVersion?: number,
   ): Promise<SharedSession | undefined>;
+  updateWithCurrentVersion(
+    id: string,
+    updates: Partial<SharedSession>,
+  ): Promise<SharedSession | undefined>;
   delete(id: string): Promise<void>;
   deleteForUser(id: string, userId: string): Promise<void>;
   clear(): Promise<void>;
@@ -29,7 +34,8 @@ function toSharedSession(s: DbSession): SharedSession {
   let metadata: { interactionMode?: 'act' | 'plan'; planNoteId?: string } = {};
   try {
     metadata = s.metadata ? JSON.parse(s.metadata) : {};
-  } catch {
+  } catch (err: unknown) {
+    serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'session metadata parse failed — using empty metadata');
     metadata = {};
   }
   return {
@@ -117,7 +123,7 @@ export class SessionStore implements ISessionStore {
     updates: Partial<SharedSession>,
     expectedVersion?: number,
   ): Promise<SharedSession | undefined> {
-    const drizzleUpdates: any = {
+    const drizzleUpdates: Record<string, unknown> = {
       updatedAt: new Date(),
     };
 
@@ -133,12 +139,26 @@ export class SessionStore implements ISessionStore {
       let metadata: Record<string, unknown> = {};
       try {
         metadata = prior?.metadata ? JSON.parse(prior.metadata) : {};
-      } catch {
+      } catch (err: unknown) {
+        serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'session metadata parse failed during update — using empty metadata');
         metadata = {};
       }
       if (updates.interactionMode !== undefined) metadata.interactionMode = updates.interactionMode;
       if (updates.planNoteId !== undefined) metadata.planNoteId = updates.planNoteId;
       drizzleUpdates.metadata = JSON.stringify(metadata);
+    }
+
+    // Optimistic locking: when expectedVersion is provided, the update only
+    // succeeds if the row's current version matches. On success, increment
+    // the version so stale readers fail on retry. When no expectedVersion is
+    // provided, increment unconditionally (no concurrency guard).
+    if (expectedVersion !== undefined) {
+      drizzleUpdates.version = expectedVersion + 1;
+    } else {
+      // Read current version and increment it.
+      const current = await db.query.sessions.findFirst({ where: eq(sessions.id, id) });
+      if (!current) return undefined;
+      drizzleUpdates.version = (current.version ?? 1) + 1;
     }
 
     const whereClause = expectedVersion
@@ -148,6 +168,21 @@ export class SessionStore implements ISessionStore {
     const [updated] = await db.update(sessions).set(drizzleUpdates).where(whereClause).returning();
 
     return updated ? toSharedSession(updated) : undefined;
+  }
+
+  /**
+   * Read the current version of the session, then update it with that version
+   * as the expectedVersion. This is a convenience wrapper for callers that
+   * don't have a specific version in hand but still want the optimistic-lock
+   * increment behavior.
+   */
+  async updateWithCurrentVersion(
+    id: string,
+    updates: Partial<SharedSession>,
+  ): Promise<SharedSession | undefined> {
+    const current = await this.get(id);
+    if (!current) return undefined;
+    return this.update(id, updates, current.version);
   }
 
   async delete(id: string): Promise<void> {

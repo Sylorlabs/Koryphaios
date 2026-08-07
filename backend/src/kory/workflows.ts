@@ -1,6 +1,7 @@
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { homedir } from 'node:os';
+import { serverLog } from '../logger';
 
 export type WorkflowRunStatus = 'running' | 'blocked' | 'completed' | 'stopped';
 
@@ -72,7 +73,7 @@ const readArray = <T>(path: string, guard: (value: unknown) => value is T): T[] 
   try {
     const parsed = JSON.parse(readFileSync(path, 'utf8'));
     return Array.isArray(parsed) ? parsed.filter(guard) : [];
-  } catch { return []; }
+  } catch (err: unknown) { serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'Failed to read workflow array file'); return []; }
 };
 const writeArray = (path: string, values: unknown[]) => {
   mkdirSync(dirname(path), { recursive: true });
@@ -89,7 +90,8 @@ const readRuns = (root: string): WorkflowRun[] => {
   try {
     const parsed = JSON.parse(readFileSync(runPath(root), 'utf8'));
     return Array.isArray(parsed) ? parsed.filter(validRun) : [];
-  } catch {
+  } catch (err: unknown) {
+    serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'Failed to read workflow runs file');
     return [];
   }
 };

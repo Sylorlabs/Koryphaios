@@ -117,6 +117,13 @@ export const PROVIDER_DISPLAY: Partial<Record<ProviderName, ProviderDisplayMeta>
     description:
       'CLI only. Runs the official cline CLI on your machine — Cline manages its own provider key (run "cline auth …"). No Koryphaios API key.',
   },
+  freebuff: {
+    label: 'Freebuff',
+    iconPath: '/provider-icons/lobehub/codebuff.svg',
+    deployment: 'local',
+    description:
+      'Free, ad-supported Codebuff build. Koryphaios reads your freebuff CLI login and calls the Codebuff backend via @codebuff/sdk — no subprocess, no ads, no API key needed.',
+  },
   jules: {
     label: 'Google Jules',
     iconPath: '/provider-icons/jules.svg',

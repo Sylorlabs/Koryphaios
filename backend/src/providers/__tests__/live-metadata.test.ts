@@ -78,3 +78,47 @@ describe('mergeModelLists live override', () => {
     expect(merged[0].name).toBe('Nice Name');
   });
 });
+
+describe('trusted context metadata', () => {
+  test('prefers a live provider or CLI context limit over the fallback catalog', async () => {
+    const { resolveTrustedContextWindow, registerLiveModelResolver } = await import('../models');
+    registerLiveModelResolver(() =>
+      def({ provider: 'codex', contextWindow: 300_000, contextVerified: true }),
+    );
+    expect(resolveTrustedContextWindow('gpt-5.5', 'codex')).toEqual({
+      contextWindow: 300_000,
+      contextKnown: true,
+      contextSource: 'live',
+    });
+    registerLiveModelResolver(() => undefined);
+  });
+
+  test('rejects a boolean-like live window and reports context as unknown', async () => {
+    const { resolveTrustedContextWindow, registerLiveModelResolver } = await import('../models');
+    registerLiveModelResolver(() => def({ provider: 'codex', contextWindow: 1, contextVerified: true }));
+    const resolved = resolveTrustedContextWindow('gpt-5.5', 'codex');
+    // A contextWindow of 1 is below the 1024 minimum, so it's rejected.
+    // With no static catalog fallback, context is reported as unknown.
+    expect(resolved.contextKnown).toBe(false);
+    expect(resolved.contextWindow).toBeUndefined();
+    registerLiveModelResolver(() => undefined);
+  });
+
+  test('never borrows context metadata from a different provider', async () => {
+    const { resolveTrustedContextWindow, registerLiveModelResolver } = await import('../models');
+    registerLiveModelResolver(() => undefined);
+    // With no static catalog, both providers report unknown context.
+    expect(resolveTrustedContextWindow('gpt-5.3-codex', 'openai').contextKnown).toBe(false);
+    expect(resolveTrustedContextWindow('gpt-5.3-codex', 'codex').contextKnown).toBe(false);
+  });
+
+  test('reports context as unknown for providers with no live resolver', async () => {
+    const { resolveTrustedContextWindow, registerLiveModelResolver } = await import('../models');
+    registerLiveModelResolver(() => undefined);
+    const resolved = resolveTrustedContextWindow('azure.gpt-4.1', 'azure');
+    // No static catalog — context is only known when the live provider reports it.
+    expect(resolved).toEqual({
+      contextKnown: false,
+    });
+  });
+});

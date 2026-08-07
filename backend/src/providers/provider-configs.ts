@@ -94,6 +94,7 @@ export const PROVIDER_CONFIGS: ProviderConfig[] = [
   { name: 'cursor', baseUrl: '', authMode: 'auth_only', envKeys: [] },
   { name: 'devin', baseUrl: '', authMode: 'auth_only', envKeys: [] },
   { name: 'cline', baseUrl: '', authMode: 'auth_only', envKeys: [] },
+  { name: 'freebuff', baseUrl: '', authMode: 'auth_only', envKeys: [] },
   {
     name: 'jules',
     baseUrl: 'https://jules.googleapis.com/v1alpha',

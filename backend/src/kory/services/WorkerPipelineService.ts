@@ -9,7 +9,7 @@ import { DOMAIN } from '../../constants';
 import type { ProviderRegistry, Provider } from '../../providers';
 import type { ProviderMessage } from '../../providers/types';
 import { nanoid } from 'nanoid';
-import { koryLog } from '../../logger';
+import { koryLog, serverLog } from '../../logger';
 import type { SessionStateService } from './SessionStateService';
 import type { GitManager } from '../git-manager';
 import type { WorkspaceManager } from '../workspace-manager';
@@ -60,25 +60,36 @@ interface WorkerPipelineResult {
   tokensOut?: number;
 }
 
-export interface WorkerPipelineConfig {
-  getIsYoloMode: () => boolean;
-  getWorkingDirectory: () => string;
-  getWorkerReasoningLevel: () => string;
-  getQualityPolicy: () => {
+/**
+ * The host contract the worker pipeline depends on.
+ *
+ * Previously this was a bag of 11 closures constructed inside KoryManager's
+ * constructor, each wrapping a private manager method. That duplicated every
+ * signature (once on the manager, once in the closure) and let the two files
+ * drift silently. As a real interface, KoryManager implements it directly and
+ * TypeScript verifies conformance at compile time. The service depends on the
+ * interface, not on KoryManager, so it can be tested with a stub host and
+ * reasoned about without reading the manager.
+ */
+export interface WorkerPipelineHost {
+  getIsYoloMode(): boolean;
+  getWorkingDirectory(): string;
+  getWorkerReasoningLevel(): string;
+  getQualityPolicy(): {
     gateStrictness: 'strict' | 'advisory' | 'off';
     maxCriticIterations: number;
   };
-  waitForUserInput: (sessionId: string, question: string, options: string[]) => Promise<string>;
-  emitThought: (sessionId: string, phase: string, thought: string) => void;
-  updateWorkflowState: (sessionId: string, state: string) => Promise<void>;
-  resolveActiveRouting: (
+  waitForUserInput(sessionId: string, question: string, options: string[]): Promise<string>;
+  emitThought(sessionId: string, phase: string, thought: string): void;
+  updateWorkflowState(sessionId: string, state: string): Promise<void>;
+  resolveActiveRouting(
     preferredModel?: string,
     domain?: WorkerDomain,
     avoidLegacy?: boolean,
     prompt?: string,
     preferCheap?: boolean,
-  ) => { model: string; provider: ProviderName | undefined };
-  executeWithProvider: (
+  ): { model: string; provider: ProviderName | undefined };
+  executeWithProvider(
     sessionId: string,
     provider: Provider,
     modelId: string,
@@ -89,23 +100,23 @@ export interface WorkerPipelineConfig {
     allowedPaths: string[],
     isSandboxed: boolean,
     taskContract?: TaskContract,
-  ) => Promise<{
+  ): Promise<{
     success: boolean;
     error?: string;
     workerMessages?: InternalMessage[];
     usage?: { tokensIn: number; tokensOut: number };
   }>;
-  runCriticGate: (
+  runCriticGate(
     sessionId: string,
     workerMessages: InternalMessage[] | undefined,
     preferredModel?: string,
     task?: string,
     reviewDirectory?: string,
-  ) => Promise<{ passed: boolean; feedback?: string }>;
-  runDestinationChecks: (
+  ): Promise<{ passed: boolean; feedback?: string }>;
+  runDestinationChecks(
     sessionId: string,
     workingDirectory: string,
-  ) => Promise<{ passed: boolean; output: string }>;
+  ): Promise<{ passed: boolean; output: string }>;
 }
 
 export interface WorkerPipelineServiceDependencies {
@@ -115,7 +126,7 @@ export interface WorkerPipelineServiceDependencies {
   workspaceManager: WorkspaceManager | null;
   snapshotManager: SnapshotManager;
   tasks?: ITaskStore;
-  config: WorkerPipelineConfig;
+  host: WorkerPipelineHost;
 }
 
 export class WorkerPipelineService {
@@ -125,7 +136,7 @@ export class WorkerPipelineService {
   workspaceManager: WorkspaceManager | null;
   private snapshotManager: SnapshotManager;
   private tasks?: ITaskStore;
-  private config: WorkerPipelineConfig;
+  private host: WorkerPipelineHost;
 
   constructor(deps: WorkerPipelineServiceDependencies) {
     this.providers = deps.providers;
@@ -134,7 +145,7 @@ export class WorkerPipelineService {
     this.workspaceManager = deps.workspaceManager;
     this.snapshotManager = deps.snapshotManager;
     this.tasks = deps.tasks;
-    this.config = deps.config;
+    this.host = deps.host;
   }
 
   /** @internal Used by orchestration tests to stub worker routing. */
@@ -151,13 +162,13 @@ export class WorkerPipelineService {
     reasoningLevel?: string,
     domainHint?: string,
   ): Promise<string> {
-    this.config.emitThought(
+    this.host.emitThought(
       sessionId,
       'executing',
       'Running delegated work inside the configured project jail.',
     );
 
-    await this.config.updateWorkflowState(sessionId, 'executing');
+    await this.host.updateWorkflowState(sessionId, 'executing');
 
     const domainOverride =
       domainHint && ['general', 'ui', 'backend', 'test', 'review'].includes(domainHint)
@@ -165,7 +176,7 @@ export class WorkerPipelineService {
         : undefined;
 
     const taskId = nanoid(12);
-    const routing = this.config.resolveActiveRouting(preferredModel, domainOverride || 'general');
+    const routing = this.host.resolveActiveRouting(preferredModel, domainOverride || 'general');
     if (this.tasks) {
       await this.tasks.create({
         id: taskId,
@@ -177,7 +188,7 @@ export class WorkerPipelineService {
       });
     }
 
-    let workerDir = this.config.getWorkingDirectory();
+    let workerDir = this.host.getWorkingDirectory();
     let worktreeSpawned = false;
     if (this.workspaceManager) {
       try {
@@ -215,9 +226,9 @@ export class WorkerPipelineService {
               criticFeedback: `Worktree reconcile failed: ${reconcileResult.message}`,
             };
           } else {
-            const destinationGate = await this.config.runDestinationChecks(
+            const destinationGate = await this.host.runDestinationChecks(
               sessionId,
-              this.config.getWorkingDirectory(),
+              this.host.getWorkingDirectory(),
             );
             if (!destinationGate.passed) {
               result = {
@@ -230,7 +241,7 @@ export class WorkerPipelineService {
             }
             try {
               const { ShadowLogger } = await import('../shadow-logger');
-              const shadowLogger = new ShadowLogger(this.config.getWorkingDirectory());
+              const shadowLogger = new ShadowLogger(this.host.getWorkingDirectory());
               await shadowLogger.createGhostCommit(task.slice(0, 72), {
                 agentId: sessionId,
                 model: result.model ?? preferredModel ?? 'unknown',
@@ -249,8 +260,8 @@ export class WorkerPipelineService {
                 checkpointType: 'auto_save',
                 changedFiles: this.state.getChanges(sessionId),
               });
-            } catch {
-              // Shadow logging is non-critical; don't fail the task if it errors
+            } catch (err: unknown) {
+              serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'Shadow logging is non-critical; do not fail the task if it errors');
             }
           }
         } else {
@@ -270,7 +281,7 @@ export class WorkerPipelineService {
       });
     }
 
-    await this.config.updateWorkflowState(sessionId, 'idle');
+    await this.host.updateWorkflowState(sessionId, 'idle');
 
     if (result.success) {
       return (
@@ -295,7 +306,7 @@ export class WorkerPipelineService {
         error: !result.success ? result.criticFeedback || 'Worker failed' : undefined,
       });
     }
-    await this.config.updateWorkflowState(sessionId, 'idle');
+    await this.host.updateWorkflowState(sessionId, 'idle');
     return result.success
       ? (result.criticFeedback ?? 'Done.')
       : result.workerTranscript
@@ -317,14 +328,15 @@ export class WorkerPipelineService {
     else
       try {
         domain = this.classifyDomainLLM(userMessage);
-      } catch {
+      } catch (err: unknown) {
+        serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'LLM domain classification failed, defaulting to general');
         domain = 'general';
       }
 
-    const isSandboxed = this.config.getIsYoloMode()
+    const isSandboxed = this.host.getIsYoloMode()
       ? false
       : !this.requiresSystemAccess(userMessage);
-    const workingDirectory = this.config.getWorkingDirectory();
+    const workingDirectory = this.host.getWorkingDirectory();
     const effectivePaths = allowedPaths.length > 0 ? allowedPaths : [workingDirectory];
 
     if (this.git.isGitRepo()) {
@@ -352,19 +364,19 @@ export class WorkerPipelineService {
     }
 
     let attempts = 0;
-    const configuredPolicy = this.config.getQualityPolicy();
+    const configuredPolicy = this.host.getQualityPolicy();
     const hardBoundaryTask = classifyTask(userMessage, domain) === 'security-infra';
     const gateStrictness = hardBoundaryTask ? 'strict' : configuredPolicy.gateStrictness;
     const maxAttempts = Math.max(1, Math.min(10, configuredPolicy.maxCriticIterations));
     while (attempts < maxAttempts) {
       attempts++;
-      this.config.emitThought(sessionId, 'delegating', `Delegating to ${domain} worker...`);
-      const routing = this.config.resolveActiveRouting(preferredModel, domain);
+      this.host.emitThought(sessionId, 'delegating', `Delegating to ${domain} worker...`);
+      const routing = this.host.resolveActiveRouting(preferredModel, domain);
       const provider = this.providers.getAvailable().find((p) => p.name === routing.provider);
       if (!provider) {
         const alt = this.providers.getAvailable()[0];
         if (!alt) return { success: false };
-        const res = await this.config.executeWithProvider(
+        const res = await this.host.executeWithProvider(
           sessionId,
           alt,
           routing.model,
@@ -389,7 +401,7 @@ export class WorkerPipelineService {
               criticFeedback: 'UNVERIFIED: Quality gates were disabled for this run.',
             };
           }
-          const criticResult = await this.config.runCriticGate(
+          const criticResult = await this.host.runCriticGate(
             sessionId,
             res.workerMessages,
             preferredModel,
@@ -428,7 +440,7 @@ export class WorkerPipelineService {
         continue;
       }
 
-      const result = await this.config.executeWithProvider(
+      const result = await this.host.executeWithProvider(
         sessionId,
         provider,
         routing.model,
@@ -453,7 +465,7 @@ export class WorkerPipelineService {
             criticFeedback: 'UNVERIFIED: Quality gates were disabled for this run.',
           };
         }
-        const criticResult = await this.config.runCriticGate(
+        const criticResult = await this.host.runCriticGate(
           sessionId,
           result.workerMessages,
           preferredModel,

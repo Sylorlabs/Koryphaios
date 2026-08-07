@@ -81,9 +81,9 @@ export class VaultKMSProvider implements KMSProvider {
         },
         'HashiCorp Vault KMS initialized',
       );
-    } catch (error: any) {
+    } catch (error: unknown) {
       serverLog.error({ error, address: this.config.address }, 'Failed to initialize Vault KMS');
-      throw new Error(`Vault KMS initialization failed: ${error.message}`);
+      throw new Error(`Vault KMS initialization failed: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 
@@ -121,9 +121,9 @@ export class VaultKMSProvider implements KMSProvider {
       const encrypted = data.data.ciphertext;
 
       return { plaintext, encrypted };
-    } catch (error: any) {
+    } catch (error: unknown) {
       serverLog.error({ error }, 'Vault generate data key failed');
-      throw new Error(`Failed to generate data key: ${error.message}`);
+      throw new Error(`Failed to generate data key: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 
@@ -157,9 +157,9 @@ export class VaultKMSProvider implements KMSProvider {
 
       // plaintext is base64-encoded DEK
       return Buffer.from(data.data.plaintext, 'base64');
-    } catch (error: any) {
+    } catch (error: unknown) {
       serverLog.error({ error }, 'Vault decrypt failed');
-      throw new Error(`Failed to decrypt data key: ${error.message}`);
+      throw new Error(`Failed to decrypt data key: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 
@@ -203,7 +203,7 @@ export class VaultKMSProvider implements KMSProvider {
       );
 
       return true;
-    } catch (error: any) {
+    } catch (error: unknown) {
       serverLog.error({ error }, 'Vault key rotation failed');
       return false;
     }
@@ -229,7 +229,8 @@ export class VaultKMSProvider implements KMSProvider {
       // 472 for data recovery mode replication secondary
       // 473 for performance standby
       return response.ok || response.status === 429 || response.status === 473;
-    } catch {
+    } catch (err: unknown) {
+      serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'Vault health check failed');
       return false;
     }
   }
@@ -307,7 +308,8 @@ export class VaultKMSProvider implements KMSProvider {
       try {
         const { readFileSync } = await import('node:fs');
         jwt = readFileSync('/var/run/secrets/kubernetes.io/serviceaccount/token', 'utf8');
-      } catch {
+      } catch (err: unknown) {
+        serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'Kubernetes service account token not available');
         throw new Error('Kubernetes JWT not provided and not running in pod');
       }
     }

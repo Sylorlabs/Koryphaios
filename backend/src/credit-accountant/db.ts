@@ -43,7 +43,7 @@ export function initCreditDb(dataDir: string): void {
     'ALTER TABLE credit_usage ADD COLUMN account_id TEXT',
     'ALTER TABLE credit_usage ADD COLUMN session_id TEXT',
   ]) {
-    try { db.exec(sql); } catch { /* column already exists */ }
+    try { db.exec(sql); } catch (err: unknown) { /* column already exists */ serverLog.debug({ err: err instanceof Error ? err.message : String(err), sql }, 'Column already exists in credit_usage table'); }
   }
   db.exec('CREATE INDEX IF NOT EXISTS idx_credit_usage_account_ts ON credit_usage(account_id, ts);');
 

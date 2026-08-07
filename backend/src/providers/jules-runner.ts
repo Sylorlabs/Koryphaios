@@ -340,8 +340,9 @@ export async function* runJulesTask(config: JulesRunConfig): AsyncGenerator<Prov
       if (session.state === 'AWAITING_PLAN_APPROVAL' && requirePlanApproval) {
         try {
           await client.approvePlan(julesSessionId!);
-        } catch {
+        } catch (err: unknown) {
           /* polled on next activity batch */
+          providerLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'Jules approvePlan failed — will retry on next poll');
         }
       }
 

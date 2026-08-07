@@ -6,7 +6,7 @@
  */
 
 import type { ProviderName } from '@koryphaios/shared';
-import { routingLog } from '../../logger';
+import { routingLog, serverLog } from '../../logger';
 
 // ─── Generator Configuration ────────────────────────────────────────────────
 
@@ -432,7 +432,7 @@ export async function generateProviderCLI(): Promise<void> {
   const args = process.argv.slice(2);
 
   if (args.length < 2) {
-    console.log('Usage: generate-provider <name> <baseUrl> [envVar]');
+    serverLog.info('Usage: generate-provider <name> <baseUrl> [envVar]');
     process.exit(1);
   }
 
@@ -453,10 +453,10 @@ export async function generateProviderCLI(): Promise<void> {
   for (const file of files) {
     await fs.mkdir(file.path.split('/').slice(0, -1).join('/'), { recursive: true });
     await fs.writeFile(file.path, file.content);
-    console.log(`✓ Generated: ${file.path}`);
+    serverLog.info({ path: file.path }, 'Generated');
   }
 
-  console.log('\n' + instructions.join('\n'));
+  serverLog.info({ instructions: instructions.join('\n') }, 'Next steps');
 }
 
 // ─── Singleton Export ───────────────────────────────────────────────────────

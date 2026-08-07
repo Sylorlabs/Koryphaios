@@ -4,6 +4,7 @@
  */
 
 import type { Subprocess } from 'bun';
+import { serverLog } from '../logger';
 
 const DEFAULT_TIMEOUT_MS = 60_000;
 
@@ -54,8 +55,8 @@ export async function runSafe(
     setTimeout(() => {
       try {
         proc.kill();
-      } catch {
-        // already exited
+      } catch (err: unknown) {
+        serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'Process already exited on timeout kill');
       }
       resolve({
         stdout: '',

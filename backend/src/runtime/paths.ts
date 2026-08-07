@@ -1,6 +1,7 @@
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { ensureSecureDir } from '../security/fs-permissions';
+import { serverLog } from '../logger';
 
 export function detectProjectRoot(): string {
   // Packaged desktop app: the Tauri shell passes its per-user data dir — all
@@ -13,8 +14,8 @@ export function detectProjectRoot(): string {
       // tighten it to 0o700 so other local users can't traverse into it.
       ensureSecureDir(dataDir);
       return dataDir;
-    } catch {
-      /* fall through to cwd detection */
+    } catch (err: unknown) {
+      serverLog.debug({ err: err instanceof Error ? err.message : String(err), dataDir }, 'Failed to secure data dir, falling through to cwd detection');
     }
   }
   const cwd = process.cwd();

@@ -267,7 +267,8 @@ export class DistributedSessionState {
       for (const [key, value] of Object.entries(hash)) {
         try {
           result[key] = JSON.parse(value as string);
-        } catch {
+        } catch (err: unknown) {
+          serverLog.debug({ err: err instanceof Error ? err.message : String(err), key }, 'Failed to parse Redis session state value as JSON');
           result[key] = value;
         }
       }

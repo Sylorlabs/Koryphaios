@@ -35,6 +35,7 @@ import {
   detectCursorCLILogin,
   detectDevinCLILogin,
   detectClineCLILogin,
+  detectFreebuffCLILogin,
 } from '../auth-utils';
 import type { Provider, ProviderEvent } from '../types';
 import type { ProviderConfig, ProviderName } from '@koryphaios/shared';
@@ -423,6 +424,14 @@ describe('Provider conformance (contract + optional live)', () => {
         continue;
       }
 
+      if (name === 'codex') {
+        result.evidence = 'CLI harness with account-scoped app-server model discovery';
+        result.live = detectCodexCLILogin() ? 'LIVE_PASS' : 'SKIP';
+        result.liveDetail = detectCodexCLILogin() ? 'codex CLI logged in' : 'no codex login';
+        results.push(result);
+        continue;
+      }
+
       if (name === 'grok') {
         // Grok Build subscription — `grok` CLI harness (subprocess, not fetch).
         const loggedIn = detectGrokCLILogin();
@@ -467,6 +476,20 @@ describe('Provider conformance (contract + optional live)', () => {
         result.liveDetail = detectAntigravityCLILogin()
           ? 'Antigravity CLI logged in'
           : 'no Antigravity login';
+        results.push(result);
+        continue;
+      }
+
+      if (name === 'freebuff') {
+        // Freebuff — @codebuff/sdk harness (no subprocess, no TUI, no ads).
+        // The SDK calls the Codebuff backend directly; contract is verified
+        // by the on-disk credentials check, not a mocked fetch.
+        const loggedIn = detectFreebuffCLILogin();
+        result.evidence = 'SDK harness (freebuff provider via @codebuff/sdk)';
+        result.live = loggedIn ? 'LIVE_PASS' : 'SKIP';
+        result.liveDetail = loggedIn
+          ? 'freebuff CLI logged in (~/.config/manicode/credentials.json)'
+          : 'no freebuff login';
         results.push(result);
         continue;
       }

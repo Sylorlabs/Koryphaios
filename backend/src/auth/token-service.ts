@@ -10,7 +10,7 @@ import {
   TokenExpiredError,
   InvalidTokenError,
 } from './types';
-import { authLog } from '../logger';
+import { authLog, serverLog } from '../logger';
 
 export class TokenService {
   private config: AuthConfig;
@@ -107,14 +107,16 @@ export class TokenService {
         issuedAt: payload.iat,
         expiresAt: payload.exp,
       };
-    } catch (error: any) {
-      if (error.name === 'TokenExpiredError') {
+    } catch (error: unknown) {
+      const errName = error instanceof Error ? error.name : String(error);
+      const errMsg = error instanceof Error ? error.message : String(error);
+      if (errName === 'TokenExpiredError') {
         throw new TokenExpiredError();
       }
-      if (error.name === 'JsonWebTokenError') {
-        throw new InvalidTokenError(error.message);
+      if (errName === 'JsonWebTokenError') {
+        throw new InvalidTokenError(errMsg);
       }
-      throw new InvalidTokenError(error.message);
+      throw new InvalidTokenError(errMsg);
     }
   }
 
@@ -133,14 +135,16 @@ export class TokenService {
         userId: payload.sub,
         sessionId: payload.sid,
       };
-    } catch (error: any) {
-      if (error.name === 'TokenExpiredError') {
+    } catch (error: unknown) {
+      const errName = error instanceof Error ? error.name : String(error);
+      const errMsg = error instanceof Error ? error.message : String(error);
+      if (errName === 'TokenExpiredError') {
         throw new TokenExpiredError();
       }
-      if (error.name === 'JsonWebTokenError') {
-        throw new InvalidTokenError(error.message);
+      if (errName === 'JsonWebTokenError') {
+        throw new InvalidTokenError(errMsg);
       }
-      throw new InvalidTokenError(error.message);
+      throw new InvalidTokenError(errMsg);
     }
   }
 
@@ -173,7 +177,8 @@ export class TokenService {
       }
 
       return result === 0;
-    } catch {
+    } catch (err: unknown) {
+      serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'API key validation failed');
       return false;
     }
   }
@@ -188,7 +193,8 @@ export class TokenService {
 
       const payload = JSON.parse(Buffer.from(parts[1], 'base64url').toString());
       return payload as JWTPayload;
-    } catch {
+    } catch (err: unknown) {
+      serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'Token decode failed');
       return null;
     }
   }

@@ -20,6 +20,9 @@ import {
   readdirSync,
   existsSync,
   writeFileSync,
+  mkdirSync,
+  mkdtempSync,
+  rmSync,
 } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -40,7 +43,6 @@ import { providerLog } from '../logger';
 import { recordClaudeCodeRateLimit } from '../credit-accountant';
 
 const CLAUDE_STREAM_TIMEOUT_MS = 300_000;
-const DEFAULT_CLI_MODEL = 'sonnet';
 const MODELS_CACHE_TTL_MS = 5 * 60_000;
 
 /** Map a UI reasoning level to a MAX_THINKING_TOKENS budget for the claude CLI.
@@ -101,8 +103,8 @@ function detectEffortLevels(): Promise<string[] | null> {
       setTimeout(() => {
         try {
           child.kill('SIGTERM');
-        } catch {
-          /* already gone */
+        } catch (err: unknown) {
+          providerLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'claude-code: effort probe child already gone on timeout kill');
         }
         finish();
       }, 10_000);
@@ -182,7 +184,8 @@ function findClaudeBinaries(): string[] {
         if (existsSync(bin)) candidates.push(bin);
       }
     }
-  } catch {
+  } catch (err: unknown) {
+    providerLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'claude-code: failed to scan platform dir for additional CLI binaries');
     candidates.push(found);
   }
   return candidates;
@@ -246,8 +249,9 @@ function getCliModelCatalog(): Map<string, CliCatalogEntry> | null {
         );
         return catalog;
       }
-    } catch {
+    } catch (err: unknown) {
       /* try next candidate */
+      providerLog.debug({ err: err instanceof Error ? err.message : String(err), path }, 'claude-code: failed to extract model catalog from CLI binary, trying next candidate');
     }
   }
   return null;
@@ -314,8 +318,8 @@ async function probeAlias(alias: string): Promise<string | null> {
       settled = true;
       try {
         child.kill('SIGTERM');
-      } catch {
-        /* already gone */
+      } catch (err: unknown) {
+        providerLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'claude-code: model probe child already gone on done');
       }
       resolve(id);
     };
@@ -340,8 +344,9 @@ async function probeAlias(alias: string): Promise<string | null> {
             done((d.message as Record<string, unknown>).model as string);
             return;
           }
-        } catch {
+        } catch (err: unknown) {
           /* skip non-JSON */
+          providerLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'claude-code: model probe skipping non-JSON line');
         }
       }
     });
@@ -393,7 +398,7 @@ function readCliExtraModels(): ModelDef[] {
     if (!Array.isArray(opts)) return [];
     return opts
       .filter(
-        (o): o is { value: string } =>
+        (o): o is { value: string; label?: unknown } =>
           typeof o?.value === 'string' && o.value.startsWith('claude-'),
       )
       .map((o) => {
@@ -401,24 +406,24 @@ function readCliExtraModels(): ModelDef[] {
         const oneM = /\[1m\]$/i.test(value);
         return {
           id: `claude-code-${value.replace(/[^a-z0-9]+/gi, '-').replace(/-+$/, '')}`,
-          name: realIdToName(value),
+          name: typeof o.label === 'string' && o.label.trim() ? o.label.trim() : value,
           provider: 'claude' as const,
           // The raw cache value (including any [1m] suffix) is exactly what the
           // CLI's own model picker passes to --model.
           apiModelId: value,
           realModelId: value.replace(/\[1m\]$/i, ''),
-          contextWindow: oneM ? 1_000_000 : 200_000,
+          contextWindow: oneM ? 1_000_000 : 0,
           contextVerified: oneM,
-          maxOutputTokens: 32_000,
+          maxOutputTokens: 0,
           costPerMInputTokens: 0,
           costPerMOutputTokens: 0,
-          canReason: true,
           supportsAttachments: true,
           supportsStreaming: true,
           tier: 'flagship' as const,
         };
       });
-  } catch {
+  } catch (err: unknown) {
+    providerLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'claude-code: failed to read CLI extra models');
     return [];
   }
 }
@@ -528,16 +533,19 @@ export function getKoryphaiosClaudeConfigDir(): string {
         // Refresh the link each boot in case the real path changed.
         try {
           if (lstatSync(dst)) rmSync(dst, { force: true });
-        } catch {
+        } catch (err: unknown) {
           /* no existing link */
+          providerLog.debug({ err: err instanceof Error ? err.message : String(err), file }, 'claude-code: no existing symlink to remove');
         }
         symlinkSync(src, dst);
-      } catch {
+      } catch (err: unknown) {
         /* symlink unsupported/exists — best effort */
+        providerLog.debug({ err: err instanceof Error ? err.message : String(err), file }, 'claude-code: symlink unsupported or exists — best effort');
       }
     }
-  } catch {
+  } catch (err: unknown) {
     /* fall back to default ~/.claude if we can't build the isolated dir */
+    providerLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'claude-code: failed to build isolated config dir, falling back to default ~/.claude');
     return join(homedir(), '.claude');
   }
   cachedClaudeConfigDir = dir;
@@ -676,16 +684,21 @@ export class ClaudeCodeProvider implements Provider {
     return [];
   }
 
-  private resolveCliModel(modelId: string): string {
+  private resolveCliModel(modelId: string): string | undefined {
     const model = this.listModels().find((m) => m.id === modelId || m.apiModelId === modelId);
     if (model?.apiModelId) return model.apiModelId;
     // Accept bare aliases / full ids passed through directly.
     if (/^(opus|sonnet|haiku)\b/i.test(modelId) || /^claude-/i.test(modelId)) return modelId;
-    return DEFAULT_CLI_MODEL;
+    return this.listModels()[0]?.apiModelId;
   }
 
   async *streamResponse(request: StreamRequest): AsyncGenerator<ProviderEvent> {
+    const researchOnly = request.capabilityProfile === 'research-only';
     const cliModel = this.resolveCliModel(request.model);
+    if (!cliModel) {
+      yield { type: 'error', error: 'Claude Code did not report an available model for this account.' };
+      return;
+    }
     const prompt = buildPrompt(request.messages);
 
     if (!prompt.trim()) {
@@ -712,7 +725,9 @@ export class ClaudeCodeProvider implements Provider {
     };
     const bridgeScopes = claudeBridge?.buildPermissionScopes(bridgeCtx);
     const bridgeConfig = claudeBridge?.buildAgentConfig(bridgeCtx);
-    const disallowed = bridgeScopes?.deny ?? (() => {
+    const disallowed = researchOnly
+      ? ['Bash', 'Read', 'Edit', 'Write', 'MultiEdit', 'NotebookEdit', 'Task', 'Agent']
+      : bridgeScopes?.deny ?? (() => {
       // Fallback to the inline computation if the bridge isn't available.
       const d = ['Task', 'Agent'];
       if (sandbox && !sandbox.allowEdits)
@@ -721,8 +736,9 @@ export class ClaudeCodeProvider implements Provider {
       if (sandbox && !sandbox.allowWebSearch) d.push('WebFetch', 'WebSearch');
       return d;
     })();
-    const allowedTools = bridgeScopes?.allow?.join(',') ?? ALLOWED_TOOLS;
+    const allowedTools = researchOnly ? 'WebSearch,WebFetch' : bridgeScopes?.allow?.join(',') ?? ALLOWED_TOOLS;
 
+    const researchRoot = researchOnly ? mkdtempSync(join(tmpdir(), 'kory-web-research-claude-')) : null;
     const args = [
       '-p',
       '--output-format',
@@ -736,16 +752,22 @@ export class ClaudeCodeProvider implements Provider {
       '--permission-mode',
       request.harnessRole === 'critic'
         ? 'plan'
-        : request.permissionMode === 'yolo'
-          ? 'bypassPermissions'
-          : 'acceptEdits',
+        : 'acceptEdits',
       '--allowedTools',
       allowedTools,
       '--disallowedTools',
       disallowed.join(','),
     ];
+    if (researchOnly) {
+      // --allowedTools only controls approval. --tools controls visibility and
+      // therefore prevents newly added native tools becoming a future escape.
+      args.push('--tools', 'WebSearch,WebFetch');
+      const emptyMcp = join(researchRoot!, 'mcp.json');
+      writeFileSync(emptyMcp, JSON.stringify({ mcpServers: {} }));
+      args.push('--strict-mcp-config', '--mcp-config', emptyMcp);
+    }
     // Run in the project directory so the CLI edits the real files (falls back to cwd).
-    const cwd = request.workingDirectory?.trim() || process.cwd();
+    const cwd = researchRoot ?? (request.workingDirectory?.trim() || process.cwd());
     // Reasoning: prefer the CLI's native --effort flag, clamped to the levels
     // THIS model supports (from the binary catalog — the CLI silently accepts
     // --effort on models that ignore it, so acceptance can't be trusted). Fall
@@ -753,7 +775,10 @@ export class ClaudeCodeProvider implements Provider {
     // ('none', numeric budgets) or for older CLIs without --effort.
     const env: NodeJS.ProcessEnv = { ...process.env };
     // Isolate Koryphaios's claude sessions from the user's interactive ones.
-    env.CLAUDE_CONFIG_DIR = getKoryphaiosClaudeConfigDir();
+    env.CLAUDE_CONFIG_DIR = researchOnly
+      ? join(getKoryphaiosClaudeConfigDir(), 'research-only')
+      : getKoryphaiosClaudeConfigDir();
+    mkdirSync(env.CLAUDE_CONFIG_DIR, { recursive: true });
     let appliedEffort: string | null = null;
     if (request.reasoningLevel) {
       const cliLevels = await detectEffortLevels();
@@ -800,7 +825,7 @@ export class ClaudeCodeProvider implements Provider {
 
     // Write the kory MCP server config to the isolated Claude home so the CLI
     // discovers it on startup. This is how the CLI gets access to kory__ tools.
-    const mcpConfigs = claudeBridge?.buildMcpConfig(bridgeCtx);
+    const mcpConfigs = researchOnly ? null : claudeBridge?.buildMcpConfig(bridgeCtx);
     if (mcpConfigs && mcpConfigs.length > 0) {
       try {
         const mcpConfigPath = join(env.CLAUDE_CONFIG_DIR!, '.claude.json');
@@ -823,7 +848,7 @@ export class ClaudeCodeProvider implements Provider {
 
     // Write hooks config to the isolated Claude home — this enforces native
     // tool blocking at the CLI level (defense in depth before the MCP layer).
-    const hookConfigs = claudeBridge?.buildHooks(bridgeCtx);
+    const hookConfigs = researchOnly ? null : claudeBridge?.buildHooks(bridgeCtx);
     if (hookConfigs && hookConfigs.length > 0 && claudeBridge) {
       try {
         const hooksJson = claudeBridge.serializeHooks(hookConfigs);
@@ -877,8 +902,8 @@ export class ClaudeCodeProvider implements Provider {
     const onAbort = () => {
       try {
         child.kill('SIGTERM');
-      } catch {
-        /* already gone */
+      } catch (err: unknown) {
+        providerLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'claude-code: harness child already gone on abort');
       }
     };
     request.signal?.addEventListener('abort', onAbort, { once: true });
@@ -926,7 +951,8 @@ export class ClaudeCodeProvider implements Provider {
           let envelope: ClaudeStreamEnvelope;
           try {
             envelope = JSON.parse(raw) as ClaudeStreamEnvelope;
-          } catch {
+          } catch (err: unknown) {
+            providerLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'claude-code: skipping non-JSON stream line');
             continue;
           }
           for (const event of this.mapEnvelope(envelope, pendingTools)) {
@@ -951,6 +977,7 @@ export class ClaudeCodeProvider implements Provider {
       clearTimeout(timeout);
       request.signal?.removeEventListener('abort', onAbort);
       softCleanup?.();
+      if (researchRoot) rmSync(researchRoot, { recursive: true, force: true });
       return;
     }
 
@@ -962,6 +989,7 @@ export class ClaudeCodeProvider implements Provider {
     clearTimeout(timeout);
     request.signal?.removeEventListener('abort', onAbort);
     softCleanup?.();
+    if (researchRoot) rmSync(researchRoot, { recursive: true, force: true });
 
     if (request.signal?.aborted) return;
 
@@ -1195,7 +1223,8 @@ function imageBlockToTempFile(imageData: string | undefined, mime: string | unde
     const file = join(tmpdir(), `kory-attach-${Math.random().toString(36).slice(2, 10)}.${ext}`);
     writeFileSync(file, Buffer.from(imageData, 'base64'));
     return `[image attached — saved to ${file}; use your image/file viewing tool to look at it]`;
-  } catch {
+  } catch (err: unknown) {
+    providerLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'claude-code: failed to persist image attachment to disk');
     return '[image attachment omitted — could not persist to disk]';
   }
 }

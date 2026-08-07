@@ -73,7 +73,8 @@ export function clearEnvVar(projectRoot: string, key: string) {
   let content = '';
   try {
     content = readFileSync(envPath, 'utf-8');
-  } catch {
+  } catch (err: unknown) {
+    serverLog.debug({ err: err instanceof Error ? err.message : String(err), key }, 'Env file not readable, clearing env var in memory only');
     delete process.env[key];
     return;
   }

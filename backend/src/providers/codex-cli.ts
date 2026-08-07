@@ -6,8 +6,9 @@
 import type { ModelDef, ProviderConfig } from '@koryphaios/shared';
 import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { mkdirSync, writeFileSync } from 'node:fs';
-import { dirname } from 'node:path';
+import { mkdirSync, writeFileSync, mkdtempSync, rmSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { tmpdir } from 'node:os';
 import { whichBinary } from './cli-detection';
 import { discoverCliAccounts, type DiscoveredCliAccount } from './cli-accounts';
 import {
@@ -19,6 +20,7 @@ import {
 } from './types';
 import { providerLog } from '../logger';
 import { getCliBridge, getKoryphaiosCodexHome } from './cli-bridges';
+import { buildSoftJail, wrapCommand } from '../collaboration/sandbox-runner';
 
 const CODEX_TIMEOUT_MS = 300_000;
 const CODEX_MODEL_LIST_TIMEOUT_MS = 15_000;
@@ -39,12 +41,7 @@ type CodexCliModel = {
 
 function supportsCodexFastTier(model: CodexCliModel): boolean {
   const advertised = model.supportedServiceTiers;
-  if (Array.isArray(advertised)) return advertised.includes('fast');
-  // The official Codex documentation currently names GPT-5.4, 5.5, and 5.6
-  // as Fast-mode-capable. Keep this conservative fallback for older
-  // app-server catalogs which do not yet expose service tiers.
-  const id = String(model.model ?? model.id ?? '').toLowerCase();
-  return /^gpt-5\.(4|5|6)(?:[-.]|$)/.test(id) && !/(?:^|-)mini(?:$|-)|codex-spark/.test(id);
+  return Array.isArray(advertised) && advertised.includes('fast');
 }
 
 function modelDefinition(model: CodexCliModel, account: DiscoveredCliAccount): ModelDef | null {
@@ -97,8 +94,8 @@ async function queryCliModels(
       clearTimeout(timeout);
       try {
         child.kill('SIGTERM');
-      } catch {
-        /* already exited */
+      } catch (err: unknown) {
+        providerLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'Codex CLI child already exited on finish');
       }
       error ? reject(error) : resolve(result ?? []);
     };
@@ -142,8 +139,9 @@ async function queryCliModels(
               : [];
             return finish(data.filter((model) => !model.hidden));
           }
-        } catch {
+        } catch (err: unknown) {
           // Ignore non-JSON diagnostics/partial lines from the CLI.
+          providerLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'Codex CLI skipping non-JSON diagnostics/partial line');
         }
       }
     });
@@ -195,7 +193,8 @@ export function extractKoryToolEnvelope(
       content: `${text.slice(0, start)}${text.slice(end + KORY_TOOL_CLOSE.length)}`.trim(),
       tool: { name: parsed.name, input: parsed.input as Record<string, unknown> },
     };
-  } catch {
+  } catch (err: unknown) {
+    providerLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'Codex tool tag parse failed — returning raw text');
     return { content: text };
   }
 }
@@ -448,16 +447,14 @@ export class CodexCliProvider implements Provider {
       return;
     }
 
+    const researchOnly = request.capabilityProfile === 'research-only';
     const prompt = buildPrompt(
       request.systemPrompt,
       request.messages,
       request.tools,
       request.harnessRole,
     );
-    const sandbox =
-      request.permissionMode === 'yolo' && request.harnessRole !== 'critic'
-        ? 'danger-full-access'
-        : 'read-only';
+    const sandbox = 'read-only';
 
     // ── Wire rules (AGENTS.md) into the isolated codex home ────────────────
     // Codex has no MCP support, so the <KORY_TOOL_CALL> envelope in the prompt
@@ -473,7 +470,7 @@ export class CodexCliProvider implements Provider {
       systemPrompt: request.systemPrompt ?? '',
       tools: request.tools ?? [],
     };
-    try {
+    if (!researchOnly) try {
       const ruleFiles = codexBridge?.buildRules(bridgeCtx);
       if (ruleFiles) {
         for (const rule of ruleFiles) {
@@ -488,9 +485,14 @@ export class CodexCliProvider implements Provider {
       );
     }
 
+    const researchRoot = researchOnly ? mkdtempSync(join(tmpdir(), 'kory-web-research-codex-')) : null;
+    const cwd = researchRoot ?? (request.workingDirectory?.trim() || process.cwd());
     const args = [
       '--ask-for-approval',
       'never',
+      '--config',
+      'mcp_servers={}',
+      ...(researchOnly ? ['--search'] : []),
       'exec',
       '--json',
       '--ephemeral',
@@ -508,10 +510,16 @@ export class CodexCliProvider implements Provider {
       ...codexReasoningArgs(request.reasoningLevel),
       prompt,
     ];
-    const child = spawn(binary, args, {
-      cwd: request.workingDirectory?.trim() || process.cwd(),
+    const codexHome = getKoryphaiosCodexHome(account.profileDir);
+    const baseEnv = { ...process.env, CODEX_HOME: codexHome };
+    const jail = request.sandbox ? buildSoftJail(baseEnv, [codexHome]) : null;
+    const wrapped = request.sandbox
+      ? wrapCommand(binary, args, { cwd, configDirs: [codexHome], policy: request.sandbox })
+      : { command: binary, args };
+    const child = spawn(wrapped.command, wrapped.args, {
+      cwd,
       stdio: ['ignore', 'pipe', 'pipe'],
-      env: { ...process.env, CODEX_HOME: account.profileDir },
+      env: jail?.env ?? baseEnv,
     });
     let stderr = '';
     let stdoutBuffer = '';
@@ -519,6 +527,10 @@ export class CodexCliProvider implements Provider {
     const allowedToolNames = (request.tools ?? []).map((tool) => tool.name);
     const onAbort = () => child.kill('SIGTERM');
     request.signal?.addEventListener('abort', onAbort, { once: true });
+    child.once('close', () => {
+      jail?.cleanup();
+      if (researchRoot) rmSync(researchRoot, { recursive: true, force: true });
+    });
     const timeout = setTimeout(() => child.kill('SIGTERM'), CODEX_TIMEOUT_MS);
     timeout.unref?.();
 
@@ -531,8 +543,9 @@ export class CodexCliProvider implements Provider {
         const translated = codexJsonEvents(event, allowedToolNames, account.id);
         queue.push(...translated.events);
         if (translated.completed) completed = true;
-      } catch {
+      } catch (err: unknown) {
         // Codex's JSON mode is JSONL; ignore a malformed partial line.
+        providerLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'Codex CLI skipping malformed JSONL partial line');
       }
     };
     child.stdout.on('data', (chunk: Buffer) => {

@@ -47,9 +47,10 @@ export function startEventLoopMonitor(): void {
     const dir = join(root, '.koryphaios');
     if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
     writeFileSync(join(dir, '.backend-pid'), String(process.pid));
-  } catch {
+  } catch (err: unknown) {
     // Best-effort — the external watchdog can still discover the PID via
     // the .active-port.json marker.
+    serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'failed to write backend PID file — watchdog will use .active-port.json marker');
   }
 
   // Allow any same-user process to attach a debugger (gdb/strace) even
@@ -67,11 +68,11 @@ export function startEventLoopMonitor(): void {
     } else {
       serverLog.warn({ rc }, 'prctl(PR_SET_PTRACER_ANY) returned non-zero — external debugger may not attach');
     }
-  } catch {
+  } catch (err: unknown) {
     // bun:ffi may not be available in all environments. The watchdog can
     // still function without native backtraces — the file logs and heartbeat
     // gaps are the primary diagnostic.
-    serverLog.warn('bun:ffi unavailable — external debugger attach may be blocked by ptrace_scope');
+    serverLog.warn({ err: err instanceof Error ? err.message : String(err) }, 'bun:ffi unavailable — external debugger attach may be blocked by ptrace_scope');
   }
 
   heartbeatTimer = setInterval(() => {
@@ -141,9 +142,9 @@ export async function traceBlockingOp<T>(
       serverLog[level]({ op: label, elapsedMs: elapsed }, 'BLOCKING_OP_END');
     }
     return result;
-  } catch (err) {
+  } catch (err: unknown) {
     const elapsed = Date.now() - start;
-    serverLog.error({ op: label, elapsedMs: elapsed, err }, 'BLOCKING_OP_ERROR');
+    serverLog.error({ op: label, elapsedMs: elapsed, err: err instanceof Error ? err.message : String(err) }, 'BLOCKING_OP_ERROR');
     throw err;
   }
 }

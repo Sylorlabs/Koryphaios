@@ -1,4 +1,5 @@
 import type { APIResponse } from '@koryphaios/shared';
+import { serverLog } from '../logger';
 
 export function json(
   data: APIResponse,
@@ -38,7 +39,8 @@ export async function parseJson<T>(
   try {
     const data = (await req.json()) as T;
     return { ok: true, data };
-  } catch {
+  } catch (err: unknown) {
+    serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'Failed to parse JSON request body');
     return {
       ok: false,
       res: json({ ok: false, error: 'Invalid or missing JSON body' }, 400, corsHeaders),

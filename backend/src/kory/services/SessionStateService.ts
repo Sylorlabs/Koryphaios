@@ -7,6 +7,7 @@
  */
 
 import type { ChangeSummary } from '@koryphaios/shared';
+import { serverLog } from '../../logger';
 
 export interface SessionState {
   abortController: AbortController;
@@ -211,8 +212,8 @@ export class SessionStateService {
         if (!session.abortController.signal.aborted) {
           session.abortController.abort();
         }
-      } catch {
-        // Ignore abort errors during cleanup
+      } catch (err: unknown) {
+        serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'Ignoring abort errors during cleanup');
       }
     }
     this.sessions.clear();

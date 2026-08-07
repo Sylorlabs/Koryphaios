@@ -1,6 +1,8 @@
 // Type-safe pub/sub event broker — ported from OpenCode's pubsub/broker.go.
 // Uses async generators for backpressure-friendly subscription.
 
+import { serverLog } from './logger';
+
 export type EventType = 'created' | 'updated' | 'deleted' | 'custom';
 
 export interface BrokerEvent<T> {
@@ -107,8 +109,8 @@ export class Broker<T> {
           // inside will handle the shutdown case.
         }
         sub.controller.close();
-      } catch {
-        /* Expected: controller may already be closed */
+      } catch (err: unknown) {
+        serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'Subscriber controller close failed');
       }
     }
     this.subscribers.delete(id);

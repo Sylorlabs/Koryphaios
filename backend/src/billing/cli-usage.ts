@@ -15,6 +15,7 @@ import { join } from 'node:path';
 import { homedir } from 'node:os';
 import { discoverCliAccounts, type DiscoveredCliAccount } from '../providers/cli-accounts';
 import { CodexAppServer } from '../providers/codex-app-server';
+import { serverLog } from '../logger';
 
 export interface UsageWindow {
   /** 'hour' | 'day' | 'week' | 'month' */
@@ -92,7 +93,10 @@ async function* walkJsonlAsync(root: string, newerThan: number): AsyncGenerator<
     let entries: import('node:fs').Dirent[];
     try {
       entries = await readdir(dir, { withFileTypes: true });
-    } catch {
+    } catch (err: unknown) {
+      // Expected: directory may vanish between existsSync and readdir, or be
+      // unreadable. Skipping it is safe — we just lose those session files.
+      serverLog.debug({ dir, err: err instanceof Error ? err.message : String(err) }, 'walkJsonlAsync: readdir skipped');
       continue;
     }
     for (const e of entries) {
@@ -101,8 +105,9 @@ async function* walkJsonlAsync(root: string, newerThan: number): AsyncGenerator<
       else if (e.name.endsWith('.jsonl')) {
         try {
           if ((await stat(full)).mtimeMs >= newerThan) yield full;
-        } catch {
-          /* raced */
+        } catch (err: unknown) {
+          // Expected: file was removed or renamed between readdir and stat.
+          serverLog.debug({ full, err: err instanceof Error ? err.message : String(err) }, 'walkJsonlAsync: stat skipped (raced)');
         }
       }
     }
@@ -114,12 +119,21 @@ function* walkJsonl(root: string, newerThan: number): Generator<string> {
   while (stack.length) {
     const dir = stack.pop()!;
     let entries: import('node:fs').Dirent[];
-    try { entries = readdirSync(dir, { withFileTypes: true }); } catch { continue; }
+    try {
+      entries = readdirSync(dir, { withFileTypes: true });
+    } catch (err: unknown) {
+      serverLog.debug({ dir, err: err instanceof Error ? err.message : String(err) }, 'walkJsonl: readdir skipped');
+      continue;
+    }
     for (const entry of entries) {
       const full = join(dir, entry.name);
       if (entry.isDirectory()) stack.push(full);
       else if (entry.name.endsWith('.jsonl')) {
-        try { if (statSync(full).mtimeMs >= newerThan) yield full; } catch { /* raced */ }
+        try {
+          if (statSync(full).mtimeMs >= newerThan) yield full;
+        } catch (err: unknown) {
+          serverLog.debug({ full, err: err instanceof Error ? err.message : String(err) }, 'walkJsonl: stat skipped (raced)');
+        }
       }
     }
   }
@@ -199,7 +213,9 @@ async function samplesFromFile(file: string, parse: LineParser, now: number): Pr
   let st: import('node:fs').Stats;
   try {
     st = await stat(file);
-  } catch {
+  } catch (err: unknown) {
+    // Expected: file removed between walk and read. No samples to extract.
+    serverLog.debug({ file, err: err instanceof Error ? err.message : String(err) }, 'samplesFromFile: stat failed, skipping');
     return [];
   }
   const hit = fileCache.get(file);
@@ -208,7 +224,9 @@ async function samplesFromFile(file: string, parse: LineParser, now: number): Pr
   let text: string;
   try {
     text = await readFile(file, 'utf8');
-  } catch {
+  } catch (err: unknown) {
+    // Expected: file removed or became unreadable between stat and read.
+    serverLog.debug({ file, err: err instanceof Error ? err.message : String(err) }, 'samplesFromFile: readFile failed, skipping');
     return [];
   }
   for (const line of text.split('\n')) {
@@ -250,7 +268,10 @@ function parseClaudeLine(line: string, now: number): UsageSample | null {
     };
     if (row.message?.id) sample.id = row.message.id;
     return sample;
-  } catch {
+  } catch (err: unknown) {
+    // Expected: malformed JSONL line in a session log. Skipping one line
+    // doesn't lose the rest of the file's samples.
+    serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'parseClaudeLine: skipped malformed line');
     return null;
   }
 }
@@ -297,7 +318,10 @@ function codexSessionRoot(profileDir: string): string {
   const root = join(profileDir, 'sessions');
   try {
     return realpathSync(root);
-  } catch {
+  } catch (err: unknown) {
+    // Expected: sessions dir doesn't exist yet. The unexpanded path is a
+    // safe fallback — it just won't match any files until it does exist.
+    serverLog.debug({ root, err: err instanceof Error ? err.message : String(err) }, 'codexSessionRoot: realpath failed, using literal path');
     return root;
   }
 }
@@ -359,7 +383,9 @@ async function readCodex(
       let text: string;
       try {
         text = await readFile(file, 'utf8');
-      } catch {
+      } catch (err: unknown) {
+        // Expected: file removed between walk and read.
+        serverLog.debug({ file, err: err instanceof Error ? err.message : String(err) }, 'readCodex: readFile skipped');
         continue;
       }
       // Session logs carry the selected model in turn_context records and
@@ -410,8 +436,10 @@ async function readCodex(
           if (rl && (!latestLimits || ts > latestLimits.ts)) {
             latestLimits = { ts, plan: rl.plan_type, primary: rl.primary, secondary: rl.secondary };
           }
-        } catch {
-          /* skip */
+        } catch (err: unknown) {
+          // Expected: malformed JSONL line. Skipping one line preserves the
+          // rest of the session's token_count events.
+          serverLog.debug({ file, err: err instanceof Error ? err.message : String(err) }, 'readCodex: skipped malformed line');
         }
       }
     }
@@ -448,9 +476,10 @@ async function readCodex(
       ]);
       if (usageResult.status === 'fulfilled') liveUsage = usageResult.value;
       if (limitsResult.status === 'fulfilled') liveLimits = limitsResult.value;
-    } catch {
+    } catch (err: unknown) {
       // The installed CLI may predate these read-only methods or be offline.
       // Preserve the verified session-log fallback rather than inventing data.
+      serverLog.debug({ err: err instanceof Error ? err.message : String(err), accountId: account?.id }, 'Codex app-server usage/rateLimits unavailable');
     } finally {
       appServer.close();
     }
@@ -511,13 +540,15 @@ function readCopilot(now: number): CliUsageReport {
       let st: import('node:fs').Stats;
       try {
         st = statSync(file);
-      } catch {
+      } catch (err: unknown) {
+        serverLog.debug({ err: err instanceof Error ? err.message : String(err), file }, 'Failed to stat copilot events file');
         continue;
       }
       let text: string;
       try {
         text = readFileSync(file, 'utf8');
-      } catch {
+      } catch (err: unknown) {
+        serverLog.debug({ err: err instanceof Error ? err.message : String(err), file }, 'Failed to read copilot events file');
         continue;
       }
       for (const line of text.split('\n')) {
@@ -542,8 +573,9 @@ function readCopilot(now: number): CliUsageReport {
               cacheRead: u.cacheReadTokens ?? 0,
             });
           }
-        } catch {
+        } catch (err: unknown) {
           /* skip */
+          serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'Failed to parse copilot events JSONL line');
         }
       }
     }
@@ -574,7 +606,8 @@ function readGrok(now: number): CliUsageReport {
       let entries: import('node:fs').Dirent[];
       try {
         entries = readdirSync(dir, { withFileTypes: true });
-      } catch {
+      } catch (err: unknown) {
+        serverLog.debug({ err: err instanceof Error ? err.message : String(err), dir }, 'Failed to read grok sessions directory');
         continue;
       }
       for (const e of entries) {
@@ -598,8 +631,9 @@ function readGrok(now: number): CliUsageReport {
                 cacheRead: 0,
               });
             }
-          } catch {
+          } catch (err: unknown) {
             /* skip */
+            serverLog.debug({ err: err instanceof Error ? err.message : String(err), file: full }, 'Failed to parse grok signals.json');
           }
         }
       }
@@ -664,8 +698,9 @@ async function fetchClaudeQuota(): Promise<void> {
     add('seven_day', 'weekly', 10080);
     add('seven_day_sonnet', 'weekly (Sonnet)', 10080);
     if (quotas.length) quotaCache.set('claude', { at: Date.now(), quotas });
-  } catch {
+  } catch (err: unknown) {
     /* endpoint is undocumented — degrade silently */
+    serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'Claude quota endpoint unavailable');
   }
 }
 
@@ -698,8 +733,9 @@ async function fetchCopilotQuota(ghToken: string | undefined): Promise<void> {
       });
     }
     if (quotas.length) quotaCache.set('copilot', { at: Date.now(), quotas, plan: j.copilot_plan });
-  } catch {
+  } catch (err: unknown) {
     /* internal endpoint — degrade silently */
+    serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'Copilot quota endpoint unavailable');
   }
 }
 

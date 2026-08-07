@@ -33,8 +33,8 @@ export async function registerMCPToolsInRegistry(
       registry.register(wrapper);
       registered++;
       mcpLog.info({ tool: wrapper.name }, 'Registered MCP tool via bridge');
-    } catch (err: any) {
-      mcpLog.error({ tool: toolDef.name, err: err.message }, 'Failed to register MCP tool');
+    } catch (err: unknown) {
+      mcpLog.error({ tool: toolDef.name, err: err instanceof Error ? err.message : String(err) }, 'Failed to register MCP tool');
     }
   }
 

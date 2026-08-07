@@ -3,6 +3,7 @@ import { getContext } from '../../context';
 import { nanoid } from 'nanoid';
 import { ID, MESSAGE } from '../../constants';
 import { requireLocalRouteAuth } from '../../auth/local-route-auth';
+import { serverLog } from '../../logger';
 
 export const messageRoutes = new Elysia({ prefix: '/api/messages' })
   .get('/:sessionId', async ({ request, params: { sessionId }, set }) => {
@@ -39,7 +40,9 @@ export const messageRoutes = new Elysia({ prefix: '/api/messages' })
       // user message of a session whose title is still the default — the
       // manager method is a no-op otherwise, so this is safe to call every
       // turn.
-      kory.generateSessionTitle(body.sessionId, body.content).catch(() => {});
+      kory.generateSessionTitle(body.sessionId, body.content).catch((err: unknown) => {
+        serverLog.debug({ err: err instanceof Error ? err.message : String(err), sessionId: body.sessionId }, 'Session title generation failed (non-critical, fire-and-forget)');
+      });
 
       // Trigger Kory processing
       kory

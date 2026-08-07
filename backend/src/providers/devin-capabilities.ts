@@ -91,8 +91,8 @@ function runCli(
     const timer = setTimeout(() => {
       try {
         child.kill('SIGTERM');
-      } catch {
-        /* gone */
+      } catch (err: unknown) {
+        providerLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'Devin capability probe child already gone on timeout');
       }
       finish(-1);
     }, timeoutMs);
@@ -199,7 +199,8 @@ async function probeCapabilities(): Promise<DevinCapabilities> {
   let stat: { mtimeMs: number };
   try {
     stat = statSync(bin);
-  } catch {
+  } catch (err: unknown) {
+    providerLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'Devin capability probe binary stat failed');
     return { ...empty, binaryPath: bin };
   }
 
@@ -221,7 +222,7 @@ async function probeCapabilities(): Promise<DevinCapabilities> {
     subs.supportsSkills
       ? runCli(['skills', 'paths'], PROBE_TIMEOUT_MS)
       : Promise.resolve({ stdout: '', stderr: '', code: -1 }),
-    runCli(['models'], MODELS_TIMEOUT_MS),
+    runCli(['models', 'list'], MODELS_TIMEOUT_MS),
   ]);
 
   const caps: DevinCapabilities = {
@@ -232,7 +233,7 @@ async function probeCapabilities(): Promise<DevinCapabilities> {
     ...subs,
     rulesDirs: parsePathsOutput(rulesResult.stdout),
     skillsDirs: parsePathsOutput(skillsResult.stdout),
-    models: parseModelsOutput(modelsResult.stdout),
+    models: parseDevinModelsOutput(modelsResult.stdout),
     probedAt: Date.now(),
   };
   providerLog.info(
@@ -279,8 +280,9 @@ export function getDevinCapabilities(): DevinCapabilities {
   let mtimeMs = 0;
   try {
     mtimeMs = statSync(bin).mtimeMs;
-  } catch {
+  } catch (err: unknown) {
     /* unreadable — fall through with stale cache */
+    providerLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'Devin capability probe binary stat unreadable — using stale cache');
   }
   const key = `${bin}:${mtimeMs}`;
   if (cached && cacheKey === key) return cached;

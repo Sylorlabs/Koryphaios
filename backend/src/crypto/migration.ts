@@ -50,8 +50,8 @@ export class EncryptionMigration {
       const newValue = `env:${this.encryption.serialize(envelope)}`;
 
       return { newValue, success: true };
-    } catch (error: any) {
-      return { newValue: encryptedValue, success: false, error: error.message };
+    } catch (error: unknown) {
+      return { newValue: encryptedValue, success: false, error: error instanceof Error ? error.message : String(error) };
     }
   }
 
@@ -164,11 +164,12 @@ export class EncryptionMigration {
             await updateCredential(cred.provider, updates);
             result.migrated++;
             serverLog.info({ provider: cred.provider }, 'Migrated credentials');
-          } catch (error: any) {
+          } catch (error: unknown) {
             result.failed++;
-            result.errors.push({ key: cred.provider, error: error.message });
+            const errorMsg = error instanceof Error ? error.message : String(error);
+            result.errors.push({ key: cred.provider, error: errorMsg });
             serverLog.error(
-              { provider: cred.provider, error: error.message },
+              { provider: cred.provider, error: errorMsg },
               'Failed to update migrated credentials',
             );
           }
@@ -176,10 +177,11 @@ export class EncryptionMigration {
       }
 
       result.success = result.failed === 0;
-    } catch (error: any) {
+    } catch (error: unknown) {
       result.success = false;
-      result.errors.push({ key: 'database', error: error.message });
-      serverLog.error({ error: error.message }, 'Database migration failed');
+      const errorMsg = error instanceof Error ? error.message : String(error);
+      result.errors.push({ key: 'database', error: errorMsg });
+      serverLog.error({ error: errorMsg }, 'Database migration failed');
     }
 
     return result;
@@ -218,9 +220,9 @@ export class EncryptionMigration {
         }
 
         result.verified++;
-      } catch (error: any) {
+      } catch (error: unknown) {
         result.failed++;
-        result.errors.push(`${key}: ${error.message}`);
+        result.errors.push(`${key}: ${error instanceof Error ? error.message : String(error)}`);
       }
     }
 

@@ -36,7 +36,8 @@ function detectKiloLogin(): boolean {
     if (result.status !== 0 || !result.stdout) return false;
     const profile = JSON.parse(result.stdout);
     return !!(profile.email || profile.name);
-  } catch {
+  } catch (err: unknown) {
+    providerLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'Kilo CLI login detection failed');
     return false;
   }
 }
@@ -103,12 +104,12 @@ export class KiloCodeCLIProvider implements Provider {
     });
 
     const onAbort = () => {
-      try { child.kill('SIGTERM'); } catch { /* already gone */ }
+      try { child.kill('SIGTERM'); } catch (err: unknown) { /* already gone */ providerLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'Kilo CLI abort kill failed (process already gone)'); }
     };
     request.signal?.addEventListener('abort', onAbort, { once: true });
     const timeout = setTimeout(() => {
       providerLog.warn({ provider: 'kilocode' }, 'Kilo CLI harness timed out — killing');
-      try { child.kill('SIGKILL'); } catch { /* noop */ }
+      try { child.kill('SIGKILL'); } catch (err: unknown) { providerLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'Kilo CLI child already gone on timeout kill'); }
     }, KILO_CLI_TIMEOUT_MS);
 
     let stderr = '';
@@ -126,7 +127,7 @@ export class KiloCodeCLIProvider implements Provider {
           if (!line || line[0] !== '{') continue;
 
           let ev: Record<string, unknown>;
-          try { ev = JSON.parse(line); } catch { continue; }
+          try { ev = JSON.parse(line); } catch (err: unknown) { providerLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'Kilo CLI skipping non-JSON line'); continue; }
 
           const part = ev.part as Record<string, unknown> | undefined;
           if (ev.type === 'text' && part && typeof part.text === 'string' && part.text) {

@@ -3,6 +3,7 @@
 
 import { resolve, normalize, relative, isAbsolute, join } from 'path';
 import { realpathSync, existsSync } from 'fs';
+import { serverLog } from '../logger';
 
 export interface PathValidationResult {
   allowed: boolean;
@@ -43,7 +44,8 @@ export function validatePathAccess(
   let decodedPath: string;
   try {
     decodedPath = decodeURIComponent(requestedPath);
-  } catch {
+  } catch (err: unknown) {
+    serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'Invalid URL encoding in path');
     return { allowed: false, reason: 'Invalid URL encoding in path' };
   }
 
@@ -51,7 +53,8 @@ export function validatePathAccess(
   let doubleDecodedPath: string;
   try {
     doubleDecodedPath = decodeURIComponent(decodedPath);
-  } catch {
+  } catch (err: unknown) {
+    serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'Double URL decode failed, using single-decoded path');
     doubleDecodedPath = decodedPath;
   }
 
@@ -116,8 +119,9 @@ export function validatePathAccess(
         if (realRelative.startsWith('..') || isAbsolute(realRelative)) {
           return { allowed: false, reason: 'Symbolic link traversal detected' };
         }
-      } catch {
+      } catch (err: unknown) {
         // If we can't resolve the symlink, deny access
+        serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'Cannot verify symlink safety, denying access');
         return { allowed: false, reason: 'Cannot verify symlink safety' };
       }
     }
@@ -220,7 +224,8 @@ export function validateApiPath(
   let decoded: string;
   try {
     decoded = decodeURIComponent(pathname);
-  } catch {
+  } catch (err: unknown) {
+    serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'Invalid URL encoding in API path');
     return new Response('Invalid URL encoding', { status: 400 });
   }
 
@@ -228,7 +233,8 @@ export function validateApiPath(
   let doubleDecoded: string;
   try {
     doubleDecoded = decodeURIComponent(decoded);
-  } catch {
+  } catch (err: unknown) {
+    serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'Double URL decode failed in API path, using single-decoded path');
     doubleDecoded = decoded;
   }
 

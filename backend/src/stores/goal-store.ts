@@ -1,9 +1,16 @@
 import { nanoid } from 'nanoid';
 import { asc, desc, eq } from 'drizzle-orm';
 import { db, goals } from '../db';
+import { serverLog } from '../logger';
 import type { Goal, GoalChecklistItem, GoalScope, GoalStatus } from '@koryphaios/shared';
 
-const parse = <T>(value: string | null | undefined, fallback: T): T => { try { return value ? JSON.parse(value) : fallback; } catch { return fallback; } };
+const parse = <T>(value: string | null | undefined, fallback: T): T => {
+  if (!value) return fallback;
+  try { return JSON.parse(value); } catch (err: unknown) {
+    serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'goal JSON parse failed — using fallback');
+    return fallback;
+  }
+};
 const active = (status: GoalStatus) => status === 'running';
 
 /** Reject malformed dependency graphs at the persistence boundary. */

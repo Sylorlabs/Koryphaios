@@ -4,6 +4,7 @@
 
 import { existsSync, readFileSync, writeFileSync, renameSync } from 'node:fs';
 import { join } from 'node:path';
+import { serverLog } from '../logger';
 import {
   DEFAULT_NOTES_AGENT_PERMISSIONS,
   DEFAULT_NOTES_SETTINGS,
@@ -29,7 +30,8 @@ function loadKoryphaiosConfig(projectRoot: string): Record<string, unknown> {
   if (!existsSync(configPath)) return {};
   try {
     return JSON.parse(readFileSync(configPath, 'utf-8')) as Record<string, unknown>;
-  } catch {
+  } catch (err: unknown) {
+    serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'koryphaios.json parse failed — returning empty config');
     return {};
   }
 }
@@ -90,11 +92,14 @@ export function saveNotesSettings(
       ...current.graphPhysics,
       ...(partial.graphPhysics ?? {}),
     },
-    maxContextTokens: Math.min(
-      5000,
-      Math.max(100, partial.maxContextTokens ?? current.maxContextTokens),
-    ),
   };
+  // Only clamp maxContextTokens when it's explicitly being set.
+  if (partial.maxContextTokens !== undefined) {
+    merged.maxContextTokens = Math.min(
+      5000,
+      Math.max(100, partial.maxContextTokens),
+    );
+  }
   config.notesSettings = merged;
   saveKoryphaiosConfig(projectRoot, config);
   return merged;

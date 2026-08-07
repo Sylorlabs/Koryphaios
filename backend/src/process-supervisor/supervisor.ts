@@ -3,8 +3,9 @@
  */
 
 import { nanoid } from 'nanoid';
+import { readFileSync, readlinkSync } from 'node:fs';
+import { basename, resolve } from 'node:path';
 import { serverLog } from '../logger';
-import { wsManager } from '../ws/ws-manager';
 import { requireBash } from '../runtime/shell';
 import {
   initProcessSupervisorTables,
@@ -38,6 +39,46 @@ export interface SupervisorConfig {
   logRetentionDays: number;
 }
 
+export function shouldKillRecoveredProcess(
+  persisted: Pick<PersistedProcess, 'pid' | 'command' | 'cwd'>,
+  observed: { cmdline: string; cwd: string } | null,
+  protectedPids: ReadonlySet<number>,
+): boolean {
+  if (persisted.pid <= 1 || protectedPids.has(persisted.pid) || !observed) return false;
+  if (resolve(observed.cwd) !== resolve(persisted.cwd)) return false;
+  const expectedBinary = basename(persisted.command.trim().split(/\s+/)[0] ?? '');
+  if (!expectedBinary) return false;
+  return observed.cmdline.split('\0').some((part) => basename(part) === expectedBinary);
+}
+
+function protectedProcessPids(): Set<number> {
+  const protectedPids = new Set<number>([process.pid]);
+  let pid = process.ppid;
+  while (pid > 1 && !protectedPids.has(pid)) {
+    protectedPids.add(pid);
+    try {
+      const stat = readFileSync(`/proc/${pid}/stat`, 'utf8');
+      const close = stat.lastIndexOf(')');
+      pid = Number(stat.slice(close + 2).split(' ')[1] ?? 0);
+    } catch {
+      break;
+    }
+  }
+  return protectedPids;
+}
+
+function observeProcess(pid: number): { cmdline: string; cwd: string } | null {
+  if (process.platform !== 'linux') return null;
+  try {
+    return {
+      cmdline: readFileSync(`/proc/${pid}/cmdline`, 'utf8'),
+      cwd: readlinkSync(`/proc/${pid}/cwd`),
+    };
+  } catch {
+    return null;
+  }
+}
+
 const DEFAULT_CONFIG: SupervisorConfig = {
   maxRestarts: 3,
   restartDelayMs: 5000,
@@ -48,7 +89,7 @@ const DEFAULT_CONFIG: SupervisorConfig = {
 };
 
 export interface ProcessLifecycleEvent {
-  type: 'started' | 'exited';
+  type: 'started' | 'exited' | 'degraded';
   id: string;
   name: string;
   command: string;
@@ -90,8 +131,8 @@ export class ProcessSupervisor {
     for (const cb of this.lifecycleListeners) {
       try {
         cb(e);
-      } catch {
-        /* listener errors must not kill supervision */
+      } catch (err: unknown) {
+        serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'Process lifecycle listener threw');
       }
     }
   }
@@ -237,8 +278,8 @@ export class ProcessSupervisor {
                 current.stdout = text.slice(-this.MAX_LOG_SIZE);
               }
             }
-          } catch {
-            /* file unreadable this tick */
+          } catch (err: unknown) {
+            serverLog.debug({ err: err instanceof Error ? err.message : String(err), id }, 'External process output file unreadable this tick');
           }
           if (Date.now() - current.lastOutputAt > EXTERNAL_QUIET_EXIT_MS) {
             current.status = 'exited';
@@ -278,7 +319,8 @@ export class ProcessSupervisor {
       this.cleanupTimers(proc);
       this.processes.delete(id);
       return true;
-    } catch {
+    } catch (err: unknown) {
+      serverLog.debug({ err: err instanceof Error ? err.message : String(err), id }, 'Failed to kill process');
       return false;
     }
   }
@@ -291,7 +333,8 @@ export class ProcessSupervisor {
       await supervised.proc.stdin.flush?.();
       await logProcessEvent(id, 'stdin_written', { bytes: Buffer.byteLength(input) });
       return true;
-    } catch {
+    } catch (err: unknown) {
+      serverLog.debug({ err: err instanceof Error ? err.message : String(err), id }, 'Failed to write input to process stdin');
       return false;
     }
   }
@@ -338,7 +381,22 @@ export class ProcessSupervisor {
         else proc.stderr = (proc.stderr + chunk).slice(-this.MAX_LOG_SIZE);
         proc.lastOutputAt = Date.now();
       }
-    } catch {}
+    } catch (err) {
+      // The stream reader throws when the child exits and the pipe closes.
+      // Expected on normal termination; log at debug in case of a real I/O error.
+      serverLog.debug({ err: err instanceof Error ? err.message : String(err), id, type }, 'Process output stream read ended');
+      // Emit a degraded lifecycle event so listeners can react to I/O failures
+      // without treating the process as exited (it may still be running).
+      this.emitLifecycle({
+        type: 'degraded',
+        id,
+        name: proc.name,
+        command: proc.command,
+        sessionId: proc.sessionId,
+        pid: proc.pid,
+        status: 'degraded',
+      });
+    }
   }
 
   private monitorExit(proc: SupervisedProcess): void {
@@ -393,10 +451,34 @@ export class ProcessSupervisor {
   }
 
   private scheduleRestart(proc: any): void {
-    setTimeout(async () => {
+    // Check if we've hit the max restart cap — if so, emit a gave_up event
+    // instead of scheduling another restart.
+    if (proc.restartCount >= proc.maxRestarts) {
+      this.emitLifecycle({
+        type: 'exited',
+        id: proc.id,
+        name: proc.name,
+        command: proc.command,
+        sessionId: proc.sessionId,
+        pid: proc.pid,
+        status: 'gave_up',
+        willRestart: false,
+      });
+      this.processes.delete(proc.id);
+      return;
+    }
+
+    // Exponential backoff: 5s, 10s, 20s, 40s, 60s (capped at 60s).
+    // Formula: delay = min(restartDelayMs * 2^restartCount, 60000)
+    const delay = Math.min(
+      this.config.restartDelayMs * Math.pow(2, proc.restartCount),
+      60_000,
+    );
+
+    proc.restartTimer = setTimeout(async () => {
       await incrementRestartCount(proc.id);
       await this.startProcess(proc);
-    }, 5000);
+    }, delay);
   }
 
   private startHealthChecks(id: string): void {
@@ -414,7 +496,8 @@ export class ProcessSupervisor {
     try {
       process.kill(proc.pid, 0);
       await updateHealthCheck(id, true);
-    } catch {
+    } catch (err: unknown) {
+      serverLog.debug({ err: err instanceof Error ? err.message : String(err), id }, 'Health check failed — process may have exited');
       await updateHealthCheck(id, false, 'Process not found');
       await this.handleProcessExit(proc, null, 'Process missing');
     }
@@ -427,12 +510,22 @@ export class ProcessSupervisor {
 
   private async cleanupOrphans(): Promise<void> {
     const activeFromDb = await getActiveProcesses();
+    const protectedPids = protectedProcessPids();
     for (const proc of activeFromDb) {
       try {
         process.kill(proc.pid, 0);
+        if (!shouldKillRecoveredProcess(proc, observeProcess(proc.pid), protectedPids)) {
+          serverLog.warn(
+            { processId: proc.id, pid: proc.pid },
+            'Refusing to kill unverified recovered PID; marking stale record orphaned',
+          );
+          await updateProcessStatus(proc.id, 'orphaned', { endedAt: Date.now() });
+          continue;
+        }
         process.kill(proc.pid, 'SIGKILL');
         await updateProcessStatus(proc.id, 'orphaned', { endedAt: Date.now() });
-      } catch {
+      } catch (err: unknown) {
+        serverLog.debug({ err: err instanceof Error ? err.message : String(err), pid: proc.pid }, 'Orphan process cleanup — process already exited');
         await updateProcessStatus(proc.id, 'exited', { endedAt: Date.now() });
       }
     }

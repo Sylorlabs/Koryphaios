@@ -112,9 +112,9 @@ export class AWSKMSProvider implements KMSProvider {
         { region: this.config.region, keyId: this.config.keyId },
         'AWS KMS initialized',
       );
-    } catch (error: any) {
+    } catch (error: unknown) {
       serverLog.error({ error, region: this.config.region }, 'Failed to initialize AWS KMS');
-      throw new Error(`AWS KMS initialization failed: ${error.message}`);
+      throw new Error(`AWS KMS initialization failed: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 
@@ -147,9 +147,9 @@ export class AWSKMSProvider implements KMSProvider {
       // Important: AWS SDK documentation says we don't need to clear the Uint8Array
       // as it's not stored in memory long-term, but we'll clear our Buffer copy
       return { plaintext, encrypted };
-    } catch (error: any) {
+    } catch (error: unknown) {
       serverLog.error({ error }, 'AWS KMS generate data key failed');
-      throw new Error(`Failed to generate data key: ${error.message}`);
+      throw new Error(`Failed to generate data key: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 
@@ -176,9 +176,9 @@ export class AWSKMSProvider implements KMSProvider {
       }
 
       return Buffer.from(response.Plaintext);
-    } catch (error: any) {
+    } catch (error: unknown) {
       serverLog.error({ error }, 'AWS KMS decrypt failed');
-      throw new Error(`Failed to decrypt data key: ${error.message}`);
+      throw new Error(`Failed to decrypt data key: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 
@@ -206,9 +206,9 @@ export class AWSKMSProvider implements KMSProvider {
         id: keyMetadata.KeyId || this.config.keyId,
         version: 1, // AWS handles rotation internally, we use the key ID as version
       };
-    } catch (error: any) {
+    } catch (error: unknown) {
       serverLog.error({ error }, 'AWS KMS describe key failed');
-      throw new Error(`Failed to get key metadata: ${error.message}`);
+      throw new Error(`Failed to get key metadata: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 
@@ -243,7 +243,7 @@ export class AWSKMSProvider implements KMSProvider {
       }
 
       return true;
-    } catch (error: any) {
+    } catch (error: unknown) {
       serverLog.error({ error }, 'AWS KMS rotation check failed');
       return false;
     }
@@ -265,7 +265,8 @@ export class AWSKMSProvider implements KMSProvider {
       );
 
       return true;
-    } catch {
+    } catch (err: unknown) {
+      serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'AWS KMS health check failed');
       return false;
     }
   }
@@ -289,7 +290,8 @@ export class AWSKMSProvider implements KMSProvider {
       );
 
       return response.KeyMetadata?.Arn;
-    } catch {
+    } catch (err: unknown) {
+      serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'AWS KMS get key ARN failed');
       return undefined;
     }
   }

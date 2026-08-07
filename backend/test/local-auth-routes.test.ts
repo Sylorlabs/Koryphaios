@@ -1,6 +1,8 @@
 import { describe, expect, test } from 'bun:test';
+import { Elysia } from 'elysia';
 import { authRoutes } from '../src/routes/v1/auth';
 import { sessionRoutes } from '../src/routes/v1/sessions';
+import { errorHandler } from '../src/middleware/error-handling';
 import {
   buildLocalBearerToken,
   requireLocalRouteAuth,
@@ -13,6 +15,12 @@ type JsonResponse = Record<string, any>;
 async function readJson(response: Response): Promise<JsonResponse> {
   return (await response.json()) as JsonResponse;
 }
+
+// Wrap route modules with the error handler so that KoryphaiosError subclasses
+// thrown by route handlers are formatted as JSON ({ ok: false, error, code,
+// correlationId }) instead of Elysia's default plain-text response.
+const appWithMiddleware = new Elysia().onError(errorHandler).use(sessionRoutes);
+const authAppWithMiddleware = new Elysia().onError(errorHandler).use(authRoutes);
 
 describe('local route auth guard', () => {
   test('rejects requests with no authorization header', () => {
@@ -52,11 +60,12 @@ describe('local route auth guard', () => {
   });
 
   test('protected routes return 401 before touching app context', async () => {
-    const response = await sessionRoutes.handle(new Request('http://localhost/api/sessions'));
+    const response = await appWithMiddleware.handle(new Request('http://localhost/api/sessions'));
     const body = await readJson(response);
 
     expect(response.status).toBe(401);
-    expect(body).toEqual({ ok: false, error: 'Unauthorized' });
+    expect(body.ok).toBe(false);
+    expect(body.error).toBe('Unauthorized');
   });
 });
 
@@ -144,7 +153,7 @@ describe('auth routes', () => {
   });
 
   test('DELETE /api/auth/session rejects invalid tokens', async () => {
-    const response = await authRoutes.handle(
+    const response = await authAppWithMiddleware.handle(
       new Request('http://localhost/api/auth/session', {
         method: 'DELETE',
         headers: { Authorization: 'Bearer invalid:token' },
@@ -153,7 +162,8 @@ describe('auth routes', () => {
     const body = await readJson(response);
 
     expect(response.status).toBe(401);
-    expect(body).toEqual({ ok: false, error: 'Unauthorized' });
+    expect(body.ok).toBe(false);
+    expect(body.error).toBe('Unauthorized');
   });
 
   test('DELETE /api/auth/session revokes a valid session', async () => {

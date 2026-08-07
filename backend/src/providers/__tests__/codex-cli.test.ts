@@ -39,10 +39,10 @@ describe('Codex CLI Kory control-plane bridge', () => {
   });
 
   it('only exposes Kory control-plane tools to CLI harnesses with a real bridge', () => {
-    expect(supportsKoryControlPlaneTools('codex')).toBe(true);
-    for (const provider of ['claude', 'grok', 'antigravity', 'cursor', 'cline']) {
-      expect(supportsKoryControlPlaneTools(provider)).toBe(false);
+    for (const provider of ['codex', 'claude', 'grok', 'antigravity', 'cursor', 'devin', 'cline']) {
+      expect(supportsKoryControlPlaneTools(provider)).toBe(true);
     }
+    expect(supportsKoryControlPlaneTools('gemini-cli')).toBe(false);
   });
 
   it('requests and surfaces the official Codex reasoning summary', () => {

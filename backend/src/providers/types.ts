@@ -133,6 +133,9 @@ export interface StreamRequest {
   /** Versioned prompt/task provenance; providers transport but never invent these values. */
   promptManifestHash?: string;
   taskContractHash?: string;
+  /** Narrow provider-native research subprocess. It receives no Kory MCP,
+   * workspace, or general agent authority and may only return cited text. */
+  capabilityProfile?: 'research-only';
 }
 
 // ─── Provider interface ─────────────────────────────────────────────────────

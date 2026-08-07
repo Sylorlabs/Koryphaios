@@ -7,6 +7,7 @@
 
 import type { AgentIdentity, AgentStatus, WorkerDomain, ProviderName } from '@koryphaios/shared';
 import type { EventEmitterService } from './EventEmitterService';
+import { serverLog } from '../../logger';
 
 export interface KoryTask {
   id: string;
@@ -205,8 +206,8 @@ export class WorkerLifecycleService {
     for (const worker of this.activeWorkers.values()) {
       try {
         worker.abort.abort();
-      } catch {
-        // Ignore abort errors during shutdown
+      } catch (err: unknown) {
+        serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'Ignoring abort errors during worker shutdown');
       }
     }
     this.activeWorkers.clear();

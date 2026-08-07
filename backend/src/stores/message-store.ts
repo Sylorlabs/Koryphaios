@@ -2,6 +2,7 @@ import type { MessageAttachment, StoredMessage } from '@koryphaios/shared';
 import { db, messages, sessions, sessionCompactions, type Message as DbMessage } from '../db';
 import { eq, asc, desc, and, gt, sql } from 'drizzle-orm';
 import { createHash } from 'node:crypto';
+import { serverLog } from '../logger';
 
 export interface IMessageStore {
   add(sessionId: string, msg: StoredMessage): Promise<void>;
@@ -46,7 +47,8 @@ function parseStoredContent(raw: string): { text: string; attachments: MessageAt
         .join(''),
       attachments,
     };
-  } catch {
+  } catch (err: unknown) {
+    serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'message content parse failed — returning raw text');
     return { text: raw, attachments: [] };
   }
 }

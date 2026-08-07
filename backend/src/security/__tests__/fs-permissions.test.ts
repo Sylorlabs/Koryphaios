@@ -16,8 +16,9 @@ describe('ensureSecureDir', () => {
   afterEach(() => {
     try {
       rmSync(root, { recursive: true, force: true });
-    } catch {
-      /* best effort */
+    } catch (err: unknown) {
+      // Best-effort temp dir cleanup — tests don't need serverLog.
+      console.debug('fs-permissions test cleanup failed:', err instanceof Error ? err.message : String(err));
     }
   });
 
@@ -69,8 +70,9 @@ describe('hardenFilePermissions', () => {
   afterEach(() => {
     try {
       rmSync(root, { recursive: true, force: true });
-    } catch {
-      /* best effort */
+    } catch (err: unknown) {
+      // Best-effort temp dir cleanup — tests don't need serverLog.
+      console.debug('fs-permissions test cleanup failed:', err instanceof Error ? err.message : String(err));
     }
   });
 

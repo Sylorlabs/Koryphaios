@@ -91,8 +91,8 @@ export class SnapshotManager {
       await restoreDir(snapshotDir);
       koryLog.info({ sessionId, snapshotId }, 'Restored snapshot');
       return { success: true };
-    } catch (err: any) {
-      return { success: false, error: err.message };
+    } catch (err: unknown) {
+      return { success: false, error: err instanceof Error ? err.message : String(err) };
     }
   }
 
@@ -127,8 +127,8 @@ export class SnapshotManager {
         restored.push(relPath);
       }
       return { success: true, restored, missing };
-    } catch (err: any) {
-      return { success: false, restored, missing, error: err.message };
+    } catch (err: unknown) {
+      return { success: false, restored, missing, error: err instanceof Error ? err.message : String(err) };
     }
   }
 

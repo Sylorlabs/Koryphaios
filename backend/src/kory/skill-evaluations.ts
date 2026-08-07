@@ -1,5 +1,6 @@
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
+import { serverLog } from '../logger';
 import type { SkillRevision } from './skills';
 
 /** Evidence ledger for skills. It stores observed results; it never calls a model or invents a score. */
@@ -86,7 +87,8 @@ export function listSkillEvaluationRuns(projectRoot: string, skill?: string): Sk
     const data = JSON.parse(readFileSync(ledgerPath(projectRoot), 'utf8'));
     const runs = Array.isArray(data) ? data.filter(validRun) : [];
     return skill ? runs.filter((run) => run.skill === skill) : runs;
-  } catch {
+  } catch (err: unknown) {
+    serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'Failed to read skill evaluation ledger');
     return [];
   }
 }

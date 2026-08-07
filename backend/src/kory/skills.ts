@@ -1,5 +1,7 @@
+import { serverLog } from '../logger';
 import { createHash } from 'node:crypto';
 import {
+  cpSync,
   existsSync,
   mkdirSync,
   readFileSync,
@@ -13,6 +15,7 @@ import type { TaskContract, TaskKind } from './prompts';
 import { PROFESSIONAL_SKILL_DEFINITIONS } from './professional-skill-definitions';
 import { skillPlaybook } from './skill-playbooks';
 import { PLAN_MODE_SKILL_INSTRUCTIONS } from './plan-mode-skill';
+import { PROJECT_ROOT } from '../runtime/paths';
 
 export type SkillSource = 'personal' | 'project';
 export type SkillState = 'active' | 'draft';
@@ -47,6 +50,8 @@ export interface SkillRevision {
   metadata: KorySkillMetadata;
   hash: string;
   validation: SkillValidationResult;
+  /** True when a newer bundled version exists and the local copy has user edits. */
+  bundledUpdateAvailable?: boolean;
 }
 
 export interface SkillValidationResult {
@@ -149,8 +154,8 @@ export function collectSkillEvidence(
   if (artifacts.includes('package.json')) {
     try {
       packageText = readFileSync(join(root, 'package.json'), 'utf8').toLowerCase();
-    } catch {
-      /* evidence is best effort */
+    } catch (err: unknown) {
+      serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'Failed to read package.json for skill evidence');
     }
   }
   const declaredMedia = unique([
@@ -717,7 +722,7 @@ function contentFingerprint(content: string): string {
   return sha256(content.replace(/^\s*baseHash:\s*.+$/m, '    baseHash: __BASE_HASH__'));
 }
 
-function personalRoot(): string {
+export function personalRoot(): string {
   return process.env.KORYPHAIOS_SKILLS_HOME || join(homedir(), '.koryphaios', 'skills');
 }
 
@@ -733,8 +738,13 @@ function writeSeedIfWritable(path: string, content: string): boolean {
   try {
     atomicWrite(path, content);
     return true;
-  } catch (error: any) {
-    if (error?.code === 'EROFS' || error?.code === 'EACCES' || error?.code === 'EPERM')
+  } catch (error: unknown) {
+    if (
+      error instanceof Error &&
+      ((error as NodeJS.ErrnoException).code === 'EROFS' ||
+        (error as NodeJS.ErrnoException).code === 'EACCES' ||
+        (error as NodeJS.ErrnoException).code === 'EPERM')
+    )
       return false;
     throw error;
   }
@@ -772,6 +782,125 @@ export function seedDefaultSkills(): void {
       writeSeedIfWritable(path, template(definition));
     }
   }
+  deployFileBasedSkills();
+}
+
+/** Directory in the tracked repo where file-based Koryphaios skills live. */
+const fileBasedSkillsRoot = (): string => join(PROJECT_ROOT, 'skills');
+
+/** Read the bundled SKILL.md content for a file-based skill. Returns null if not found. */
+function readBundledSkillContent(name: string): string | null {
+  const path = join(fileBasedSkillsRoot(), name, 'SKILL.md');
+  if (!existsSync(path)) return null;
+  return readFileSync(path, 'utf8');
+}
+
+/** Names of all file-based skills in the repo `skills/` directory. */
+function listFileBasedSkillNames(): string[] {
+  const root = fileBasedSkillsRoot();
+  if (!existsSync(root)) return [];
+  try {
+    return readdirSync(root, { withFileTypes: true })
+      .filter((entry) => entry.isDirectory() && !entry.name.startsWith('.'))
+      .map((entry) => entry.name)
+      .filter((name) => existsSync(join(root, name, 'SKILL.md')));
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Deploy file-based skills from the tracked repo `skills/` directory to the
+ * user's personal skills root (`~/.koryphaios/skills/`). These are
+ * Koryphaios-native skills that ship with the repo and are completely
+ * separated from Codex's `.system` skills and all 3rd party plugin skills.
+ *
+ * Each skill is a directory containing SKILL.md plus optional references/,
+ * scripts/, assets/, and agents/ subdirectories. The deployment copies the
+ * entire directory tree so bundled resources are available alongside the
+ * SKILL.md.
+ *
+ * If a skill directory already exists at the destination and its baseHash
+ * matches the source (i.e. it hasn't been user-edited), it is updated in
+ * place. User-edited copies are preserved — the user can merge or replace
+ * them through the explicit UI flow.
+ */
+function deployFileBasedSkills(): void {
+  const sourceRoot = fileBasedSkillsRoot();
+  if (!existsSync(sourceRoot)) {
+    serverLog.debug({ sourceRoot }, 'File-based skills source directory not found, skipping deployment');
+    return;
+  }
+
+  let entries: string[];
+  try {
+    entries = readdirSync(sourceRoot, { withFileTypes: true })
+      .filter((entry) => entry.isDirectory() && !entry.name.startsWith('.'))
+      .map((entry) => entry.name);
+  } catch (err: unknown) {
+    serverLog.debug({ err: err instanceof Error ? err.message : String(err), sourceRoot }, 'Failed to read file-based skills source directory');
+    return;
+  }
+
+  for (const skillName of entries) {
+    const sourceDir = join(sourceRoot, skillName);
+    const sourceSkillMd = join(sourceDir, 'SKILL.md');
+    if (!existsSync(sourceSkillMd)) continue;
+
+    const destDir = join(personalRoot(), skillName);
+    const destSkillMd = join(destDir, 'SKILL.md');
+
+    // Read source content and compute its fingerprint
+    const sourceContent = readFileSync(sourceSkillMd, 'utf8');
+    const sourceHash = contentFingerprint(sourceContent);
+
+    if (!existsSync(destSkillMd)) {
+      // Fresh deploy — copy the entire skill directory
+      try {
+        cpSync(sourceDir, destDir, { recursive: true });
+        serverLog.debug({ skillName, destDir }, 'Deployed file-based skill');
+      } catch (err: unknown) {
+        serverLog.debug({ err: err instanceof Error ? err.message : String(err), skillName }, 'Failed to deploy file-based skill');
+      }
+      continue;
+    }
+
+    // Check if the existing copy is untouched (content fingerprint matches source)
+    const local = readRevision(destSkillMd, 'personal', 'active');
+    const localFingerprint = local ? contentFingerprint(local.content) : null;
+    if (localFingerprint && localFingerprint === sourceHash) {
+      // Untouched — update in place by replacing the entire directory
+      try {
+        cpSync(sourceDir, destDir, { recursive: true, force: true });
+        serverLog.debug({ skillName, destDir }, 'Updated untouched file-based skill');
+      } catch (err: unknown) {
+        serverLog.debug({ err: err instanceof Error ? err.message : String(err), skillName }, 'Failed to update file-based skill');
+      }
+      continue;
+    }
+
+    // User has edited this skill — preserve their version and flag the update
+    serverLog.debug({ skillName }, 'Skipping user-edited file-based skill (update available)');
+  }
+}
+
+/**
+ * Check whether a deployed personal skill has a newer bundled version available.
+ * Returns true if the skill exists in the repo `skills/` directory AND the
+ * local copy's content fingerprint differs from the bundled copy's fingerprint
+ * (i.e. the user has edited it since it was deployed).
+ *
+ * Note: contentFingerprint normalizes the baseHash line before hashing, so
+ * two identical files with different baseHash values will still match.
+ */
+function isBundledUpdateAvailable(name: string, localContent: string): boolean {
+  const bundled = readBundledSkillContent(name);
+  if (!bundled) return false;
+  const bundledFingerprint = contentFingerprint(bundled);
+  const localFingerprint = contentFingerprint(localContent);
+  // If the fingerprints match, the local copy is identical to the bundled
+  // version — no update needed. If they differ, the user has edited it.
+  return localFingerprint !== bundledFingerprint;
 }
 
 function scalar(frontmatter: string, key: string): string {
@@ -783,7 +912,8 @@ function list(frontmatter: string, key: string): string[] {
   if (!raw) return [];
   try {
     return JSON.parse(raw);
-  } catch {
+  } catch (err: unknown) {
+    serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'Failed to parse frontmatter list as JSON, falling back to comma split');
     return raw
       .replace(/^\[|\]$/g, '')
       .split(',')
@@ -850,6 +980,8 @@ function readRevision(path: string, source: SkillSource, state: SkillState): Ski
       contextBudget: Number(scalar(frontmatter, 'contextBudget')) || 0,
       sourceScope: 'local-only',
     },
+    bundledUpdateAvailable:
+      source === 'personal' && state === 'active' && isBundledUpdateAvailable(scalar(frontmatter, 'name'), content),
   };
 }
 
@@ -1177,21 +1309,103 @@ export function compareSkillRevisions(
   };
 }
 
+/**
+ * Compare a user's local active skill against the bundled version. Unlike
+ * compareSkillRevisions, this does NOT require a draft to exist — it works
+ * whenever the user has an edited active skill and a newer bundled version
+ * is available.
+ */
+export function compareBundledSkill(
+  name: string,
+): { localHash: string; bundledHash: string; changed: boolean; local: string; bundled: string } | null {
+  const localPath = join(personalRoot(), name, 'SKILL.md');
+  if (!existsSync(localPath)) return null;
+  const localContent = readFileSync(localPath, 'utf8');
+  const bundledContent = getBundledSkillContent(name);
+  if (!bundledContent) return null;
+  return {
+    localHash: sha256(localContent),
+    bundledHash: sha256(bundledContent),
+    changed: sha256(localContent) !== sha256(bundledContent),
+    local: localContent,
+    bundled: bundledContent,
+  };
+}
+
+/**
+ * Count how many personal active skills have a newer bundled version available.
+ * Used for proactive update notifications.
+ */
+export function countBundledUpdates(): number {
+  const root = personalRoot();
+  if (!existsSync(root)) return 0;
+  let count = 0;
+  for (const skill of scan(root, 'personal').filter((s) => s.state === 'active')) {
+    if (skill.bundledUpdateAvailable) count += 1;
+  }
+  return count;
+}
+
+export type DefaultUpdateChoice = 'replace' | 'merge' | 'keep-local' | 'merge-with-agent';
+
 export function applyDefaultUpdate(
   projectRoot: string,
   name: string,
-  choice: 'replace' | 'merge' | 'keep-local',
+  choice: DefaultUpdateChoice,
 ): SkillRevision {
-  const definition = DEFINITIONS.find((item) => item.name === name);
-  if (!definition) throw new Error('Bundled default not found');
   const path = join(personalRoot(), name, 'SKILL.md');
   const local = readRevision(path, 'personal', 'active');
-  const bundled = template(definition);
-  if (!local || choice === 'replace') atomicWrite(path, bundled);
-  else if (choice === 'merge') {
+
+  // Resolve the bundled version: file-based skills take priority, then fall
+  // back to TypeScript DEFINITIONS (the original seeded skills).
+  const fileBasedBundled = readBundledSkillContent(name);
+  const definition = DEFINITIONS.find((item) => item.name === name);
+  const bundled = fileBasedBundled ?? (definition ? template(definition) : null);
+  if (!bundled) throw new Error('Bundled default not found');
+
+  if (!local || choice === 'replace') {
+    atomicWrite(path, bundled);
+    // Also refresh bundled resources (references/, scripts/, assets/) for file-based skills
+    if (fileBasedBundled) {
+      const sourceDir = join(fileBasedSkillsRoot(), name);
+      if (existsSync(sourceDir)) {
+        try {
+          cpSync(sourceDir, join(personalRoot(), name), { recursive: true, force: true });
+        } catch (err: unknown) {
+          serverLog.debug({ err: err instanceof Error ? err.message : String(err), name }, 'Failed to refresh bundled resources during replace');
+        }
+      }
+    }
+  } else if (choice === 'merge') {
     const merged = `${bundled.trim()}\n\n## Preserved local additions\n\n${local.instructions}\n`;
     atomicWrite(join(personalRoot(), name, 'DRAFT.md'), merged);
     return readRevision(join(personalRoot(), name, 'DRAFT.md'), 'personal', 'draft')!;
   }
+  // keep-local: do nothing, return the existing revision
+  // merge-with-agent: handled by the route handler which has provider access
   return readRevision(path, 'personal', 'active')!;
+}
+
+/**
+ * Produce an LLM-merged SKILL.md that combines the user's local edits with the
+ * new bundled version. The merged content is written as a DRAFT for review.
+ *
+ * @param name Skill name
+ * @param localContent The user's edited SKILL.md content
+ * @param bundledContent The new bundled SKILL.md content
+ * @param mergedContent The LLM-produced merged content
+ * @returns The draft revision
+ */
+export function saveAgentMergedSkillDraft(name: string, mergedContent: string): SkillRevision {
+  const draftPath = join(personalRoot(), name, 'DRAFT.md');
+  atomicWrite(draftPath, mergedContent);
+  return readRevision(draftPath, 'personal', 'draft')!;
+}
+
+/** Get the bundled SKILL.md content for a skill (file-based or TypeScript-defined). */
+export function getBundledSkillContent(name: string): string | null {
+  const fileBased = readBundledSkillContent(name);
+  if (fileBased) return fileBased;
+  const definition = DEFINITIONS.find((item) => item.name === name);
+  return definition ? template(definition) : null;
 }

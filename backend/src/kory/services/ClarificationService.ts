@@ -5,7 +5,7 @@
  */
 
 import { z } from 'zod';
-import { routingLog } from '../../logger';
+import { routingLog, serverLog } from '../../logger';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -138,7 +138,8 @@ export class ClarificationService {
       }
 
       return clarify.data;
-    } catch {
+    } catch (err: unknown) {
+      serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'Failed to parse clarification response');
       return null;
     }
   }

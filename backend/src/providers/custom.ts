@@ -7,6 +7,7 @@
 // the endpoint's /models discovery returns.
 
 import type { ProviderConfig, ModelDef, ProviderName } from '@koryphaios/shared';
+import { serverLog } from '../logger';
 import {
   type Provider,
   type ProviderEvent,
@@ -52,7 +53,8 @@ export class CustomProvider implements Provider {
     let live: ModelDef[] = [];
     try {
       live = this.inner.listModels();
-    } catch {
+    } catch (err: unknown) {
+      serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'Custom provider: live model list failed');
       live = [];
     }
     const seen = new Set<string>();

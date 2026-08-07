@@ -41,8 +41,9 @@ export function saveProviderSecrets(projectRoot: string, secrets: ProviderSecret
   renameSync(tmp, path);
   try {
     chmodSync(path, 0o600);
-  } catch {
+  } catch (err: unknown) {
     /* best effort on exotic filesystems */
+    serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'chmod 0o600 failed on credentials store, best effort');
   }
 }
 

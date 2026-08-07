@@ -8,30 +8,26 @@ import {
   getAllPausedSessions,
   resumeSession,
   getPauseHistory,
+  type EnforcedSpendCap,
 } from '../../security/spend-caps-enforced';
 import { getSessionUsage, getGlobalSpendStats } from '../../security/spend-caps';
 import { serverLog } from '../../logger';
 import { requireLocalRouteAuth } from '../../auth/local-route-auth';
+import { AuthenticationError, ValidationError, InternalError } from '../../errors/types';
 
 export const spendCapsRoutes = new Elysia({ prefix: '/api/spend-caps' })
   .get('/config', async ({ request, set }) => {
-    if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
+    if (!requireLocalRouteAuth(request, set)) throw new AuthenticationError('Unauthorized');
     const config = await getEnforcedCaps();
     return { ok: true, config };
   })
   .put(
     '/config',
     async ({ request, body, set }) => {
-      if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
-      try {
-        const updated = await setEnforcedCaps(body as any);
-        serverLog.info({ updates: body }, 'Spend caps updated via API');
-        return { ok: true, config: updated };
-      } catch (err) {
-        set.status = 400;
-        serverLog.error({ err }, 'Failed to update spend caps');
-        return { ok: false, error: 'Failed to update spend caps' };
-      }
+      if (!requireLocalRouteAuth(request, set)) throw new AuthenticationError('Unauthorized');
+      const updated = await setEnforcedCaps(body as Partial<EnforcedSpendCap>);
+      serverLog.info({ updates: body }, 'Spend caps updated via API');
+      return { ok: true, config: updated };
     },
     {
       body: t.Object({
@@ -47,14 +43,14 @@ export const spendCapsRoutes = new Elysia({ prefix: '/api/spend-caps' })
     },
   )
   .get('/status', async ({ request, set }) => {
-    if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
+    if (!requireLocalRouteAuth(request, set)) throw new AuthenticationError('Unauthorized');
     const caps = await getEnforcedCaps();
     const globalStats = {
       hour: await getGlobalSpendStats('hour'),
       day: await getGlobalSpendStats('day'),
       month: await getGlobalSpendStats('month'),
     };
-    const pausedSessions = await getAllPausedSessions();
+    const pausedSessions = getAllPausedSessions();
 
     return {
       ok: true,
@@ -65,10 +61,10 @@ export const spendCapsRoutes = new Elysia({ prefix: '/api/spend-caps' })
     };
   })
   .get('/sessions/:id', async ({ request, params: { id }, set }) => {
-    if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
+    if (!requireLocalRouteAuth(request, set)) throw new AuthenticationError('Unauthorized');
     const usage = await getSessionUsage(id);
-    const isPaused = await isSessionPaused(id);
-    const pauseRecord = isPaused ? await getSessionPauseRecord(id) : null;
+    const isPaused = isSessionPaused(id);
+    const pauseRecord = isPaused ? getSessionPauseRecord(id) : null;
 
     return {
       ok: true,
@@ -79,24 +75,21 @@ export const spendCapsRoutes = new Elysia({ prefix: '/api/spend-caps' })
     };
   })
   .post('/sessions/:id/resume', async ({ request, params: { id }, set }) => {
-    if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
-    if (!(await isSessionPaused(id))) {
-      set.status = 400;
-      return { ok: false, error: 'Session is not paused' };
+    if (!requireLocalRouteAuth(request, set)) throw new AuthenticationError('Unauthorized');
+    if (!isSessionPaused(id)) {
+      throw new ValidationError('Session is not paused');
     }
 
     const success = await resumeSession(id);
     if (success) {
       return { ok: true, message: 'Session resumed successfully', sessionId: id };
-    } else {
-      set.status = 500;
-      return { ok: false, error: 'Failed to resume session' };
     }
+    throw new InternalError('Failed to resume session');
   })
   .get(
     '/history',
     async ({ request, query, set }) => {
-      if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
+      if (!requireLocalRouteAuth(request, set)) throw new AuthenticationError('Unauthorized');
       const history = await getPauseHistory(query.sessionId, query.limit || 100);
       return {
         ok: true,
@@ -114,20 +107,14 @@ export const spendCapsRoutes = new Elysia({ prefix: '/api/spend-caps' })
   .post(
     '/check',
     async ({ request, body, set }) => {
-      if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
-      try {
-        const result = await checkAndEnforceCaps(body.sessionId, body.estimatedCostCents || 0);
-        return {
-          ok: true,
-          canProceed: result.canProceed,
-          reason: result.reason,
-          isPaused: result.paused,
-        };
-      } catch (err) {
-        set.status = 500;
-        serverLog.error({ err }, 'Failed to check spend caps');
-        return { ok: false, error: 'Failed to check spend caps' };
-      }
+      if (!requireLocalRouteAuth(request, set)) throw new AuthenticationError('Unauthorized');
+      const result = await checkAndEnforceCaps(body.sessionId, body.estimatedCostCents || 0);
+      return {
+        ok: true,
+        canProceed: result.canProceed,
+        reason: result.reason,
+        isPaused: result.paused,
+      };
     },
     {
       body: t.Object({

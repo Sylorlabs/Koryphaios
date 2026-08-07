@@ -17,6 +17,7 @@ import { discoverCliAccounts } from '../../providers/cli-accounts';
 import { requireLocalRouteAuth } from '../../auth/local-route-auth';
 import { createUserCredentialsService, type UserCredential } from '../../services';
 import { serverLog } from '../../logger';
+import { AuthenticationError } from '../../errors/types';
 
 const LOCAL_USER_ID = 'local-user';
 const credentialsService = createUserCredentialsService();
@@ -64,7 +65,9 @@ function credentialMetadata(credential: UserCredential): { accountId?: string; l
   if (typeof credential.metadata === 'string') {
     try {
       return JSON.parse(credential.metadata) as { accountId?: string; label?: string };
-    } catch {
+    } catch (err: unknown) {
+      // Metadata is not required to be JSON; non-JSON strings are expected.
+      serverLog.debug({ err }, 'Credential metadata is not valid JSON, returning empty');
       return {};
     }
   }
@@ -142,12 +145,12 @@ export function withDetectedCliAccounts(
 export const billingRoutes = new Elysia({ prefix: '/api/billing' }).get(
   '/credits',
   async ({ request, set }) => {
-    if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
+    if (!requireLocalRouteAuth(request, set)) throw new AuthenticationError('Unauthorized');
     const forceRefresh = new URL(request.url).searchParams.get('refresh') === '1';
     const safeResult = async <T>(name: string, work: () => Promise<T>, fallback: T): Promise<T> => {
       try {
         return await work();
-      } catch (err) {
+      } catch (err: unknown) {
         serverLog.error({ err }, `Billing route failed while collecting ${name}`);
         return fallback;
       }
@@ -216,6 +219,10 @@ export const billingRoutes = new Elysia({ prefix: '/api/billing' }).get(
         latestBalances = value;
         return value;
       });
+    // Discovery is local and synchronous. Return the complete inventory even
+    // while the slower usage readers are still running so the loading state
+    // and the settled state describe the same set of CLI profiles.
+    const detectedCliAccounts = discoverCliAccounts();
     const [cliUsageResult, balancesResult, savedCredentials, koryAccountUsage] = await Promise.all([
       withinBillingBudget(cliUsageWork, latestCliUsage),
       withinBillingBudget(balanceWork, latestBalances),
@@ -255,7 +262,8 @@ export const billingRoutes = new Elysia({ prefix: '/api/billing' }).get(
       // external CLI histories and is the only safe per-account usage source
       // when a user shares CODEX_HOME session storage.
       koryAccountUsage,
-      accounts: withDetectedCliAccounts(configuredAccounts(savedCredentials)),
+      accounts: withDetectedCliAccounts(configuredAccounts(savedCredentials), detectedCliAccounts),
+      detectedCliAccounts,
       reconciliation,
       // Signals the desktop client to make a lightweight follow-up request.
       // This keeps initial navigation under three seconds without pretending

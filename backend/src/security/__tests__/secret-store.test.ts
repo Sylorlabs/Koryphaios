@@ -22,8 +22,9 @@ describe('secret-store permissions', () => {
   afterEach(() => {
     try {
       rmSync(root, { recursive: true, force: true });
-    } catch {
-      /* best effort */
+    } catch (err: unknown) {
+      // Best-effort temp dir cleanup — tests don't need serverLog.
+      console.debug('secret-store test cleanup failed:', err instanceof Error ? err.message : String(err));
     }
   });
 
@@ -98,7 +99,8 @@ function chmodSyncLoose(path: string, mode: number): void {
   try {
     const { chmodSync } = require('node:fs') as typeof import('node:fs');
     chmodSync(path, mode);
-  } catch {
-    /* will surface in the assertion below */
+  } catch (err: unknown) {
+    // Filesystems that reject the mode will surface in the assertion below.
+    console.debug('chmodSyncLoose failed (will surface in assertion):', err instanceof Error ? err.message : String(err));
   }
 }

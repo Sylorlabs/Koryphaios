@@ -63,6 +63,7 @@ describe('detectAgentClis', () => {
       'codex',
       'cursor',
       'devin',
+      'freebuff',
       'grok',
       'kimi',
     ]);

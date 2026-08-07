@@ -7,7 +7,7 @@
 
 import { db, getDb, spendCapPauses, spendCapConfig } from '../db';
 import { serverLog } from '../logger';
-import { wsManager } from '../ws/ws-manager';
+import { getContext } from '../context';
 import { eq, and, desc, sql } from 'drizzle-orm';
 
 export interface EnforcedSpendCap {
@@ -155,7 +155,7 @@ export async function setEnforcedCaps(
           updatedAt: new Date(),
         },
       });
-    wsManager?.broadcast({
+    getContext().wsManager?.broadcast({
       type: 'system.info',
       payload: { message: 'Spend caps updated', config: updated },
       timestamp: Date.now(),
@@ -196,7 +196,7 @@ export async function pauseSession(
   } catch (err) {
     serverLog.error({ err, sessionId }, 'Failed to persist pause record');
   }
-  wsManager?.broadcast({
+  getContext().wsManager?.broadcast({
     type: 'session.updated',
     payload: {
       sessionId,
@@ -228,7 +228,7 @@ export async function resumeSession(sessionId: string, userId?: string): Promise
     serverLog.error({ err, sessionId }, 'Failed to update pause record');
   }
   notifiedThresholds.delete(sessionId);
-  wsManager?.broadcast({
+  getContext().wsManager?.broadcast({
     type: 'session.updated',
     payload: {
       sessionId,

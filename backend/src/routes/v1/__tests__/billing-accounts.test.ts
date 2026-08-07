@@ -72,4 +72,32 @@ describe('billing configured accounts', () => {
     expect(accounts.map((account) => account.email)).toEqual(['one@example.com', 'two@example.com']);
     expect(accounts.every((account) => account.credentialTypes[0] === 'cliProfile')).toBe(true);
   });
+
+  test('keeps the full detected inventory available to the billing loading state', () => {
+    const detected = (provider: string, id: string) => ({
+      id,
+      provider,
+      label: id,
+      email: `${id}@example.com`,
+      plan: null,
+      profileDir: `/tmp/${id}`,
+      authFile: `/tmp/${id}/auth.json`,
+      command: provider,
+      commandArgs: [],
+      health: 'ready' as const,
+      expiresAt: Date.now() + 1000,
+      source: 'cli-autodetect' as const,
+    });
+    const detectedAccounts = [
+      detected('claude', 'claude'),
+      detected('codex', 'codex'),
+      detected('codex', 'codex-2'),
+      detected('grok', 'grok'),
+    ];
+
+    // The configured-account view deliberately collapses single-profile
+    // providers, but the loading inventory must not use that lossy view.
+    expect(withDetectedCliAccounts([], detectedAccounts)).toHaveLength(2);
+    expect(detectedAccounts).toHaveLength(4);
+  });
 });

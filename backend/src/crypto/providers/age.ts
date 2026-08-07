@@ -172,7 +172,8 @@ export class AgeKMSProvider implements KMSProvider {
     try {
       await fs.access(path);
       return true;
-    } catch {
+    } catch (err: unknown) {
+      serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'Age identity file does not exist');
       return false;
     }
   }

@@ -55,8 +55,9 @@ class HybridPeerTransport {
         try {
           const message = JSON.parse(String(raw)) as Record<string, unknown>;
           this.receive({ ...message, guestId, tierId: peer.tierId, transport: 'p2p' });
-        } catch {
-          /* ignore malformed peer payloads */
+        } catch (err: unknown) {
+          // Malformed peer payloads can't be processed; relay fallback handles delivery.
+          log.debug({ err: err instanceof Error ? err.message : String(err), guestId }, 'Ignoring malformed peer payload');
         }
       });
     });
@@ -95,8 +96,9 @@ class HybridPeerTransport {
       try {
         peer.channel.send(encoded);
         delivered.push(guestId);
-      } catch {
-        /* relay fallback handles it */
+      } catch (err: unknown) {
+        // P2P send failed; the relay fallback will deliver this message.
+        log.debug({ err: err instanceof Error ? err.message : String(err), guestId }, 'P2P channel send failed; relay fallback will deliver');
       }
     }
     return delivered;
@@ -105,7 +107,10 @@ class HybridPeerTransport {
   async closePeer(guestId: string) {
     const peer = this.peers.get(guestId);
     this.peers.delete(guestId);
-    if (peer) await peer.pc.close().catch(() => {});
+    if (peer) await peer.pc.close().catch((err: unknown) => {
+      // RTCPeerConnection.close() can throw if already closed — safe to ignore.
+      serverLog.debug({ err: err instanceof Error ? err.message : String(err), guestId }, 'Peer connection close failed (may already be closed)');
+    });
   }
 
   async closeAll() {
@@ -184,7 +189,10 @@ export class RelayClient {
     this.handlers.forEach((h) => {
       try {
         h(msg);
-      } catch {}
+      } catch (err) {
+        // A single misbehaving handler must not break fan-out to the rest.
+        log.debug({ err: err instanceof Error ? err.message : String(err), msgType: msg.type }, 'Relay message handler threw; continuing to remaining handlers');
+      }
     });
   }
 
@@ -339,7 +347,10 @@ export class RelayClient {
           if (msg.type === 'guest-left' && msg.guestId)
             void this.peerTransport.closePeer(String(msg.guestId));
           this.dispatch(msg);
-        } catch {}
+        } catch (err) {
+          // Malformed relay frames must not tear down the signaling socket.
+          log.debug({ err: err instanceof Error ? err.message : String(err) }, 'Relay frame parse failed; skipping');
+        }
       });
 
       ws.addEventListener('close', (e) => {

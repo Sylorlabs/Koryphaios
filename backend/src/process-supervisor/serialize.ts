@@ -1,11 +1,13 @@
 import { getProcessHealthById, type PersistedProcess } from './database';
+import { serverLog } from '../logger';
 
 function parseMetadata(metadata?: string): Record<string, unknown> | undefined {
   if (!metadata) return undefined;
 
   try {
     return JSON.parse(metadata) as Record<string, unknown>;
-  } catch {
+  } catch (err: unknown) {
+    serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'Failed to parse process metadata JSON');
     return undefined;
   }
 }

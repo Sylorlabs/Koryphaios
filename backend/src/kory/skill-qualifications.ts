@@ -1,5 +1,6 @@
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
+import { serverLog } from '../logger';
 
 export type QualificationRole = 'worker' | 'critic';
 
@@ -25,7 +26,8 @@ export function listHarnessQualifications(projectRoot: string): HarnessQualifica
   try {
     const parsed = JSON.parse(readFileSync(qualificationPath(projectRoot), 'utf8'));
     return Array.isArray(parsed) ? parsed.filter(validRecord) : [];
-  } catch {
+  } catch (err: unknown) {
+    serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'Failed to read harness qualifications file');
     return [];
   }
 }

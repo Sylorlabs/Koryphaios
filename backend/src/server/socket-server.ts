@@ -86,5 +86,8 @@ export function cleanupSocket(projectRoot: string): void {
   try {
     const infoPath = join(projectRoot, '.koryphaios', '.socket-info.json');
     if (existsSync(infoPath)) unlinkSync(infoPath);
-  } catch {}
+  } catch (err) {
+    // Advisory metadata file; a concurrent remover or stale handle is harmless.
+    serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'Failed to remove socket-info.json; continuing');
+  }
 }

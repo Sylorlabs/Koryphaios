@@ -2,7 +2,7 @@
 // Supports connecting to MCP servers via stdio and SSE transports.
 // This allows Koryphaios to connect to external tool servers.
 
-import { mcpLog } from '../logger';
+import { mcpLog, serverLog } from '../logger';
 import type { Tool, ToolCallInput, ToolContext, ToolCallOutput } from '../tools/registry';
 import { VERSION } from '../constants';
 import { registerMCPToolsInRegistry } from './tool-bridge';
@@ -151,8 +151,8 @@ export class MCPClient {
           this.buffer += decoder.decode(value, { stream: true });
           this.processBuffer();
         }
-      } catch {
-        /* Expected: stream closed when process exits */
+      } catch (err: unknown) {
+        serverLog.debug({ err: err instanceof Error ? err.message : String(err), server: this.serverName }, 'MCP stdout stream closed');
       }
     })();
 
@@ -169,8 +169,8 @@ export class MCPClient {
             'MCP stderr',
           );
         }
-      } catch {
-        /* Expected: stream closed when process exits */
+      } catch (err: unknown) {
+        serverLog.debug({ err: err instanceof Error ? err.message : String(err), server: this.serverName }, 'MCP stderr stream closed');
       }
     })();
 
@@ -205,9 +205,9 @@ export class MCPClient {
       try {
         const toolsResult = await this.request('tools/list', {});
         this.tools = (toolsResult.result as any)?.tools ?? [];
-      } catch (err: any) {
+      } catch (err: unknown) {
         mcpLog.warn(
-          { server: this.serverName, err: err.message },
+          { server: this.serverName, err: err instanceof Error ? err.message : String(err) },
           'Failed to list tools despite capability',
         );
       }
@@ -439,11 +439,11 @@ export class MCPToolWrapper implements Tool {
         isError: !!result.isError,
         durationMs: performance.now() - start,
       };
-    } catch (err: any) {
+    } catch (err: unknown) {
       return {
         callId: input.id,
         name: this.name,
-        output: `MCP Tool Error: ${err.message}`,
+        output: `MCP Tool Error: ${err instanceof Error ? err.message : String(err)}`,
         isError: true,
         durationMs: performance.now() - start,
       };
@@ -495,8 +495,8 @@ export async function initMCP(config: any, tools: any): Promise<MCPManager> {
         // Normalize "type" field to "transport" (config files use "type")
         transport: cfg.transport ?? cfg.type ?? 'stdio',
       });
-    } catch (err: any) {
-      mcpLog.error({ server: name, err: err.message }, 'Failed to connect to MCP server');
+    } catch (err: unknown) {
+      mcpLog.error({ server: name, err: err instanceof Error ? err.message : String(err) }, 'Failed to connect to MCP server');
     }
   }
 

@@ -301,8 +301,9 @@ export class SecureKeyStorage {
     // Delete existing first
     try {
       await execAsync(`security delete-generic-password -s "${key}" 2>/dev/null`);
-    } catch {
+    } catch (err: unknown) {
       // Ignore if doesn't exist
+      serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'macOS keychain entry does not exist, ignoring');
     }
 
     await execAsync(
@@ -318,7 +319,8 @@ export class SecureKeyStorage {
     try {
       const { stdout } = await execAsync(`security find-generic-password -s "${key}" -w`);
       return Buffer.from(stdout.trim(), 'base64').toString('utf8');
-    } catch {
+    } catch (err: unknown) {
+      serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'macOS keychain entry not found');
       return null;
     }
   }
@@ -330,8 +332,9 @@ export class SecureKeyStorage {
 
     try {
       await execAsync(`security delete-generic-password -s "${key}"`);
-    } catch {
+    } catch (err: unknown) {
       // Ignore
+      serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'macOS keychain entry already removed, ignoring');
     }
   }
 
@@ -398,7 +401,8 @@ export class SecureKeyStorage {
       const { secureEncryption } = await import('./secure-encryption');
       const envelope = secureEncryption.parse(serialized);
       return await secureEncryption.decrypt(envelope);
-    } catch {
+    } catch (err: unknown) {
+      serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'Failed to read or decrypt fallback key');
       return null;
     }
   }

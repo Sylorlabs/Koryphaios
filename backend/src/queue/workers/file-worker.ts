@@ -134,11 +134,12 @@ async function processFileJob(
       default:
         throw new Error(`Unknown operation: ${operation}`);
     }
-  } catch (error: any) {
-    toolLog.error({ jobId: job.id, operation, path, error: error.message }, 'File operation error');
+  } catch (error: unknown) {
+    const errMsg = error instanceof Error ? error.message : String(error);
+    toolLog.error({ jobId: job.id, operation, path, error: errMsg }, 'File operation error');
     return {
       success: false,
-      error: error.message ?? 'Unknown error',
+      error: errMsg ?? 'Unknown error',
     };
   }
 }
@@ -185,11 +186,11 @@ async function handleWrite(
     // Clean up the test file
     try {
       unlinkSync(join(dir, '.mkdir-check'));
-    } catch {
-      // Ignore cleanup errors
+    } catch (err: unknown) {
+      serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'Failed to clean up mkdir check file');
     }
-  } catch {
-    // Directory might already exist
+  } catch (err: unknown) {
+    serverLog.debug({ err: err instanceof Error ? err.message : String(err), dir }, 'Directory might already exist');
   }
 
   await job.updateProgress(60);

@@ -12,7 +12,7 @@
  * - Human escalation for critical conflicts
  */
 
-import { koryLog } from '../../logger';
+import { koryLog, serverLog } from '../../logger';
 import type { ProviderRegistry } from '../../providers';
 import type { WorktreeInfo } from '../workspace-manager';
 
@@ -222,7 +222,8 @@ Respond with JSON:
             content: decision.content,
             reasoning: decision.reasoning,
           };
-        } catch {
+        } catch (err: unknown) {
+          serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'Failed to parse JSON response for conflict resolution');
           return { resolved: false, reasoning: 'Failed to parse JSON response' };
         }
       }

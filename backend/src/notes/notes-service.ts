@@ -9,7 +9,7 @@
 import { nanoid } from 'nanoid';
 import { db, getDb } from '../db';
 import { notes, noteLinks, noteAttachments } from '../db/schema';
-import { eq, like, and, or, inArray } from 'drizzle-orm';
+import { eq, like, and, or, inArray, sql } from 'drizzle-orm';
 import type {
   Note,
   NoteLink,
@@ -34,6 +34,7 @@ import {
 import { readdir, readFile, stat } from 'fs/promises';
 import { basename, dirname, extname, join, relative, resolve, sep } from 'path';
 import { PROJECT_ROOT } from '../runtime/paths';
+import { serverLog } from '../logger';
 
 // ============================================================================
 // Paths & Helpers
@@ -80,7 +81,8 @@ function projectDocumentIdentity(
     if (!path || path.startsWith('/') || path.split(/[\\/]/).includes('..')) return undefined;
     if (!projectRoot) return undefined;
     return { projectRoot: resolve(projectRoot), sourcePath: path };
-  } catch {
+  } catch (err: unknown) {
+    serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'project document identity decode failed — returning undefined');
     return undefined;
   }
 }
@@ -147,7 +149,7 @@ export async function ensureProjectSync(projectRoot: string): Promise<void> {
         initialSyncComplete.set(key, true);
       })
       .catch((err) => {
-        console.error(`[notesService] Initial project sync failed for ${key}`, err);
+        serverLog.error({ err, key }, 'Initial project sync failed');
         initialSyncComplete.set(key, true); // allow catalog reads even on failure
       });
     return;
@@ -155,7 +157,7 @@ export async function ensureProjectSync(projectRoot: string): Promise<void> {
   if (now - last >= SYNC_THROTTLE_MS) {
     lastSyncAt.set(key, now);
     void syncProjectDocuments(projectRoot).catch((err) => {
-      console.error(`[notesService] Background project sync failed for ${key}`, err);
+      serverLog.error({ err, key }, 'Background project sync failed');
     });
   }
 }
@@ -268,7 +270,8 @@ function rowToNote(row: typeof notes.$inferSelect): Note {
     tags: (() => {
       try {
         return JSON.parse(row.tags || '[]');
-      } catch {
+      } catch (err: unknown) {
+        serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'note tags parse failed in rowToNote — returning empty array');
         return [];
       }
     })(),
@@ -312,7 +315,8 @@ function rowToNoteMeta(row: {
     tags: (() => {
       try {
         return JSON.parse(row.tags || '[]');
-      } catch {
+      } catch (err: unknown) {
+        serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'note tags parse failed in rowToNoteMeta — returning empty array');
         return [];
       }
     })(),
@@ -422,8 +426,9 @@ export async function deleteNote(id: string): Promise<void> {
   for (const att of attachments) {
     try {
       unlinkSync(att.storagePath);
-    } catch {
+    } catch (err: unknown) {
       // Ignore missing files — DB row will still be removed via cascade
+      serverLog.debug({ err: err instanceof Error ? err.message : String(err), storagePath: att.storagePath }, 'note attachment file already gone during delete — continuing with DB cascade');
     }
   }
 
@@ -463,7 +468,7 @@ export async function syncProjectDocuments(
     try {
       entries = await readdir(directory, { withFileTypes: true });
     } catch (err) {
-      console.error(`[notesService] Failed to read directory during project sync: ${directory}`, err);
+      serverLog.error({ err, directory }, 'Failed to read directory during project sync');
       return;
     }
 
@@ -516,7 +521,7 @@ export async function syncProjectDocuments(
     try {
       fileStat = await stat(absolute);
     } catch (err) {
-      console.error(`[notesService] Failed to stat file during project sync: ${absolute}`, err);
+      serverLog.error({ err, file: absolute }, 'Failed to stat file during project sync');
       continue;
     }
     // Skip unchanged files entirely — no read, no DB write, no re-link.
@@ -526,7 +531,7 @@ export async function syncProjectDocuments(
     try {
       content = await readFile(absolute, 'utf8');
     } catch (err) {
-      console.error(`[notesService] Failed to read file during project sync: ${absolute}`, err);
+      serverLog.error({ err, file: absolute }, 'Failed to read file during project sync');
       continue;
     }
 
@@ -554,7 +559,7 @@ export async function syncProjectDocuments(
           updated++;
           synced = true;
         } catch (err) {
-          console.error(`[notesService] Failed to update synced note ${id}`, err);
+          serverLog.error({ err, noteId: id }, 'Failed to update synced note');
         }
       } else {
         synced = true;
@@ -592,13 +597,13 @@ export async function syncProjectDocuments(
     try {
       await db.insert(notes).values(batch).onConflictDoNothing();
     } catch (err) {
-      console.error('[notesService] Bulk note insert failed during project sync; retrying row-by-row', err);
+      serverLog.error({ err }, 'Bulk note insert failed during project sync; retrying row-by-row');
       for (const row of batch) {
         try {
           await db.insert(notes).values(row).onConflictDoNothing();
           await yieldBetweenBatches();
         } catch (rowErr) {
-          console.error(`[notesService] Failed to insert project document note ${row.id}`, rowErr);
+          serverLog.error({ err: rowErr, noteId: row.id }, 'Failed to insert project document note');
         }
       }
     }
@@ -613,8 +618,8 @@ export async function syncProjectDocuments(
         await db.delete(notes).where(eq(notes.id, row.id));
         removed++;
       } catch (err) {
-        console.error(`[notesService] Failed to remove orphaned project note ${row.id}`, err);
-      }
+          serverLog.error({ err, noteId: row.id }, 'Failed to remove orphaned project note');
+        }
     }
   }
 
@@ -633,7 +638,7 @@ export async function syncProjectDocuments(
         try {
           await parseAndSaveLinks(id, content, { index, skipInvalidate: true });
         } catch (err) {
-          console.error(`[notesService] Failed to sync wikilinks for note ${id}`, err);
+          serverLog.error({ err, noteId: id }, 'Failed to sync wikilinks for note');
         }
       }
       for (const targetPath of extractProjectDocumentLinks(sourcePath, content)) {
@@ -641,8 +646,9 @@ export async function syncProjectDocuments(
         if (targetId === id || !foundIds.has(targetId)) continue;
         try {
           await db.insert(noteLinks).values({ fromNoteId: id, toNoteId: targetId });
-        } catch {
+        } catch (err: unknown) {
           // Existing edge (a wikilink and a path link to the same document).
+          serverLog.debug({ err: err instanceof Error ? err.message : String(err), fromNoteId: id, toNoteId: targetId }, 'project document link edge already exists — skipping duplicate insert');
         }
       }
     }
@@ -764,8 +770,9 @@ export async function linkNotes(
 
   try {
     await db.insert(noteLinks).values({ fromNoteId: fromId, toNoteId: toId });
-  } catch {
+  } catch (err: unknown) {
     // Already linked
+    serverLog.debug({ err: err instanceof Error ? err.message : String(err), fromNoteId: fromId, toNoteId: toId }, 'note link edge already exists — skipping duplicate insert');
   }
   graphCache.clear();
 
@@ -990,14 +997,19 @@ export async function parseAndSaveLinks(
     const index = opts?.index ?? (await getResolveIndex());
     const targetIds = new Set<string>();
     for (const title of titles) {
-      const id = index.get(title.toLowerCase());
+      let id = index.get(title.toLowerCase());
+      if (!id) {
+        // Fallback: resolve via DB for notes beyond the 5000-row index cap.
+        id = await resolveNoteRef(title) ?? undefined;
+      }
       if (id && id !== noteId) targetIds.add(id);
     }
     for (const toId of targetIds) {
       try {
         await db.insert(noteLinks).values({ fromNoteId: noteId, toNoteId: toId });
-      } catch {
+      } catch (err: unknown) {
         // Ignore duplicate primary key (already linked)
+        serverLog.debug({ err: err instanceof Error ? err.message : String(err), fromNoteId: noteId, toNoteId: toId }, 'wikilink edge already exists — skipping duplicate insert');
       }
     }
   }
@@ -1019,8 +1031,9 @@ export async function getGraphData(projectRoot?: string): Promise<GraphData> {
   const GRAPH_MAX_NODES = 5000;
   const allRows = await db.select().from(notes).limit(GRAPH_MAX_NODES + 1);
   if (allRows.length > GRAPH_MAX_NODES) {
-    console.warn(
-      `[notesService] Graph data truncated to ${GRAPH_MAX_NODES} nodes (table has more rows)`,
+    serverLog.warn(
+      { maxNodes: GRAPH_MAX_NODES, totalRows: allRows.length },
+      'Graph data truncated to maximum nodes (table has more rows)',
     );
   }
   const allNotes = allRows.slice(0, GRAPH_MAX_NODES).filter((row) => {
@@ -1046,7 +1059,8 @@ export async function getGraphData(projectRoot?: string): Promise<GraphData> {
     tags: (() => {
       try {
         return JSON.parse(n.tags || '[]');
-      } catch {
+      } catch (err: unknown) {
+        serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'note tags parse failed in getGraphData — returning empty array');
         return [];
       }
     })(),
@@ -1158,7 +1172,8 @@ function ftsSearchIds(query: string, limit: number): string[] {
       )
       .all(match, limit) as Array<{ note_id: string }>;
     return rows.map((r) => r.note_id);
-  } catch {
+  } catch (err: unknown) {
+    serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'FTS5 search unavailable — falling back to bounded LIKE scan');
     const term = '%' + query + '%';
     const rows = raw
       .query('SELECT id FROM notes WHERE title LIKE ? OR content LIKE ? LIMIT ?')
@@ -1207,7 +1222,35 @@ async function getResolveIndex(): Promise<Map<string, string>> {
 
 /** Resolve a wikilink reference (title or alias) to a note id. */
 export async function resolveNoteRef(ref: string): Promise<string | null> {
-  return (await getResolveIndex()).get(ref.trim().toLowerCase()) ?? null;
+  const key = ref.trim().toLowerCase();
+  // Fast path: check the cached index first.
+  const cached = (await getResolveIndex()).get(key);
+  if (cached) return cached;
+  // Fallback: query the DB directly. This handles notes beyond the 5000-row
+  // in-memory index cap. Search by title first, then by content (for aliases
+  // embedded in frontmatter).
+  const titleRows = await db
+    .select({ id: notes.id, title: notes.title })
+    .from(notes)
+    .where(like(notes.title, ref.trim()));
+  for (const r of titleRows) {
+    if (r.title.toLowerCase() === key) return r.id;
+  }
+  // Search for aliases in note content using the FTS index (fast, indexed).
+  // Then parse frontmatter to confirm the exact alias match.
+  const candidateIds = ftsSearchIds(ref.trim(), 50);
+  if (candidateIds.length > 0) {
+    const candidateRows = await db
+      .select({ id: notes.id, content: notes.content })
+      .from(notes)
+      .where(inArray(notes.id, candidateIds));
+    for (const r of candidateRows) {
+      for (const alias of parseFrontmatter(r.content).aliases) {
+        if (alias.toLowerCase() === key) return r.id;
+      }
+    }
+  }
+  return null;
 }
 
 // ============================================================================
@@ -1273,8 +1316,9 @@ export async function deleteAttachment(id: string): Promise<void> {
 
   try {
     unlinkSync(att.storagePath);
-  } catch {
+  } catch (err: unknown) {
     // File may already be gone — DB row still needs removal
+    serverLog.debug({ err: err instanceof Error ? err.message : String(err), storagePath: att.storagePath }, 'attachment file already gone during delete — continuing with DB row removal');
   }
 
   await db.delete(noteAttachments).where(eq(noteAttachments.id, id));
@@ -1329,7 +1373,8 @@ export async function importMemoryAsNotes(projectRoot: string): Promise<Note[]> 
     const existingRow = matchingRows.find((row) => {
       try {
         return JSON.parse(row.tags || '[]').includes(importTag);
-      } catch {
+      } catch (err: unknown) {
+        serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'note tags parse failed during memory import match — treating as non-matching');
         return false;
       }
     });

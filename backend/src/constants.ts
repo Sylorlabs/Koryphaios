@@ -242,8 +242,8 @@ export const HEALTH = {
  * WebSocket
  */
 export const WS = {
-  /** Heartbeat interval (future use) */
-  HEARTBEAT_INTERVAL_MS: 30_000,
+  /** Heartbeat interval — stale-connection check. Separate from terminal-event retry. */
+  HEARTBEAT_INTERVAL_MS: 10_000,
   /** Max message size */
   MAX_MESSAGE_SIZE: 1_000_000, // 1MB
   /** Reconnect delay (client-side, for reference) */

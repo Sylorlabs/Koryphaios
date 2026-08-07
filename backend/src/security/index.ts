@@ -16,12 +16,7 @@ export {
 } from '../security';
 
 // Rate limiting
-export {
-  RateLimiter,
-  SlidingWindowRateLimiter,
-  TokenBucketRateLimiter,
-  FixedWindowRateLimiter,
-} from './rate-limit';
+export { RateLimiter } from './rate-limit';
 export type { RateLimitConfig, RateLimitOptions, RateLimitResult } from './rate-limit';
 
 // CSP and security headers

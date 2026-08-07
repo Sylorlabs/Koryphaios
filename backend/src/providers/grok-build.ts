@@ -16,7 +16,7 @@
 import type { ProviderConfig, ModelDef } from '@koryphaios/shared';
 import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { existsSync, readFileSync, statSync, writeFileSync, mkdirSync } from 'node:fs';
+import { existsSync, readFileSync, statSync, writeFileSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { homedir, tmpdir } from 'node:os';
 import { buildSoftJail, wrapCommand } from '../collaboration/sandbox-runner';
@@ -38,6 +38,16 @@ const GROK_STREAM_TIMEOUT_MS = 300_000;
 let cachedModels: ModelDef[] | null = null;
 let cachedModelsAt = 0;
 let modelsFetchInProgress = false;
+
+export function grokCapabilityBoundary(profile: StreamRequest['capabilityProfile']) {
+  const researchOnly = profile === 'research-only';
+  return {
+    researchOnly,
+    wireKoryMcp: !researchOnly,
+    exposeWorkspace: !researchOnly,
+    allowNativeWeb: researchOnly,
+  } as const;
+}
 
 export class GrokBuildProvider implements Provider {
   readonly name = 'grok' as const;
@@ -95,6 +105,8 @@ export class GrokBuildProvider implements Provider {
       return;
     }
 
+    const capabilityBoundary = grokCapabilityBoundary(request.capabilityProfile);
+    const researchOnly = capabilityBoundary.researchOnly;
     const cliModel = this.resolveCliModel(request.model);
     const grokSessionId = randomUUID();
 
@@ -112,8 +124,11 @@ export class GrokBuildProvider implements Provider {
       systemPrompt: request.systemPrompt ?? '',
       tools: request.tools ?? [],
     };
-    const grokHome = getKoryphaiosGrokHome();
-    try {
+    const grokHome = researchOnly
+      ? join(getKoryphaiosGrokHome(), 'research-only')
+      : getKoryphaiosGrokHome();
+    mkdirSync(grokHome, { recursive: true });
+    if (!researchOnly) try {
       // MCP: write the kory server config so the CLI gets kory__ tools.
       const mcpConfigs = grokBridge?.buildMcpConfig(bridgeCtx);
       if (mcpConfigs && mcpConfigs.length > 0) {
@@ -146,6 +161,8 @@ export class GrokBuildProvider implements Provider {
       );
     }
 
+    const researchRoot = researchOnly ? mkdtempSync(join(tmpdir(), 'kory-web-research-')) : null;
+    const effectiveCwd = researchRoot ?? (request.workingDirectory?.trim() || tmpdir());
     const args = [
       '-p',
       prompt,
@@ -159,16 +176,15 @@ export class GrokBuildProvider implements Provider {
       'streaming-json',
       '--no-alt-screen',
       // Headless: never block on an interactive tool-approval prompt.
-      ...(request.harnessRole === 'critic' || request.permissionMode !== 'yolo'
-        ? ['--permission-mode', 'plan']
-        : ['--always-approve']),
+      '--permission-mode', 'plan',
       // Delegation is Koryphaios's job (manager → workers → critic) — never let
       // the CLI spawn its own native subagents outside our orchestration/UI.
       '--no-subagents',
+      ...(researchOnly ? ['--tools', 'web_search,web_fetch', '--max-turns', '4', '--no-memory'] : []),
       // Run in the session's project directory when one is set so the CLI sees
       // the real workspace; fall back to a neutral temp dir otherwise.
       '--cwd',
-      request.workingDirectory?.trim() || tmpdir(),
+      effectiveCwd,
       // Deterministic session id → we know EXACTLY which session dir holds the
       // tool telemetry to tail (updates.jsonl), instead of guessing by mtime.
       '--session-id',
@@ -186,7 +202,7 @@ export class GrokBuildProvider implements Provider {
     // Web search + web fetch are ON by default (the model runs them internally
     // and folds citations into its answer). Honor the user's global web-search
     // setting: only disable when they explicitly turned it off.
-    if (request.harnessRole === 'critic') args.push('--disable-web-search');
+    if (request.harnessRole === 'critic' && !researchOnly) args.push('--disable-web-search');
     try {
       const cwd = request.workingDirectory?.trim();
       if (cwd) {
@@ -198,8 +214,9 @@ export class GrokBuildProvider implements Provider {
         )
           args.push('--disable-web-search');
       }
-    } catch {
+    } catch (err: unknown) {
       /* settings unavailable — keep web search on */
+      providerLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'grok-build: agent settings unavailable, keeping web search on');
     }
 
     // Only pass --reasoning-effort when the CLI's own metadata says this model
@@ -215,7 +232,7 @@ export class GrokBuildProvider implements Provider {
       }
     }
 
-    const cwd = request.workingDirectory?.trim() || tmpdir();
+    const cwd = effectiveCwd;
     const jail = request.sandbox ? buildSoftJail(process.env, [join(homedir(), '.grok')]) : null;
     const wrapped = request.sandbox
       ? wrapCommand(bin, args, { cwd, policy: request.sandbox })
@@ -233,12 +250,15 @@ export class GrokBuildProvider implements Provider {
     const onAbort = () => {
       try {
         child.kill('SIGTERM');
-      } catch {
-        /* already gone */
+      } catch (err: unknown) {
+        providerLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'grok-build: harness child already gone on abort');
       }
     };
     request.signal?.addEventListener('abort', onAbort, { once: true });
-    child.once('close', () => jail?.cleanup());
+    child.once('close', () => {
+      jail?.cleanup();
+      if (researchRoot) rmSync(researchRoot, { recursive: true, force: true });
+    });
 
     const timeout = setTimeout(() => {
       providerLog.warn({ provider: 'grok' }, 'Grok Build harness timed out — killing CLI');
@@ -309,8 +329,9 @@ export class GrokBuildProvider implements Provider {
         if (!line || line[0] !== '{') continue;
         try {
           handleEvent(JSON.parse(line) as Record<string, unknown>);
-        } catch {
+        } catch (err: unknown) {
           /* banner/progress */
+          providerLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'grok-build: skipping non-JSON stdout line (banner/progress)');
         }
       }
       wake();
@@ -336,7 +357,7 @@ export class GrokBuildProvider implements Provider {
     // it records every tool call (name, file path, diff, status) to its
     // session's updates.jsonl. Tail that to surface file reads/writes/edits and
     // other tool runs as real events, the same way the app shows every action.
-    const tailer = newGrokToolTailer(request.workingDirectory?.trim() || tmpdir(), grokSessionId);
+    const tailer = newGrokToolTailer(effectiveCwd, grokSessionId);
 
     // Drain the queue live until the process exits and the buffer is empty.
     while (true) {
@@ -357,8 +378,9 @@ export class GrokBuildProvider implements Provider {
     if (tail && tail[0] === '{') {
       try {
         handleEvent(JSON.parse(tail) as Record<string, unknown>);
-      } catch {
+      } catch (err: unknown) {
         /* ignore */
+        providerLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'grok-build: skipping non-JSON trailing line');
       }
     }
     while (queue.length) yield queue.shift()!;
@@ -458,7 +480,8 @@ function readGrokCliModelsCache(): Map<string, GrokCliModelMeta> | null {
   try {
     const path = `${homedir()}/.grok/models_cache.json`;
     return parseGrokCliModelsCache(readFileSync(path, 'utf8'));
-  } catch {
+  } catch (err: unknown) {
+    providerLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'grok-build: failed to read CLI models cache');
     return null;
   }
 }
@@ -488,7 +511,8 @@ export function parseGrokCliModelsCache(raw: string): Map<string, GrokCliModelMe
       });
     }
     return out;
-  } catch {
+  } catch (err: unknown) {
+    providerLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'grok-build: failed to parse CLI models cache JSON');
     return null;
   }
 }
@@ -550,8 +574,8 @@ async function probeGrokReasoningLevels(bin: string): Promise<string[] | null> {
     setTimeout(() => {
       try {
         child.kill('SIGTERM');
-      } catch {
-        /* already gone */
+      } catch (err: unknown) {
+        providerLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'grok-build: effort probe child already gone on timeout kill');
       }
       done(null);
     }, 8_000);
@@ -586,31 +610,16 @@ async function fetchGrokModels(bin: string): Promise<ModelDef[]> {
   });
 }
 
-function grokCliIdToDisplayName(cliId: string): string {
-  const words = cliId
-    .replace(/^grok[-/]?/i, '')
-    .split(/[-._]+/)
-    .filter(Boolean)
-    .map((part) => (/^\d/.test(part) ? part : part.charAt(0).toUpperCase() + part.slice(1)));
-  return words.length > 0 ? `Grok ${words.join(' ')}` : cliId;
-}
-
 function modelDefFromGrokCliId(cliId: string, isDefault = false): ModelDef {
-  const isFast = /fast|mini|flash/i.test(cliId);
-  const isReasoning = /reason|think/i.test(cliId);
-  const isBuild = /build/i.test(cliId);
-
   return {
     id: cliId,
-    name: grokCliIdToDisplayName(cliId) + (isDefault ? ' (default)' : ''),
+    name: cliId + (isDefault ? ' (default)' : ''),
     provider: 'grok',
     apiModelId: cliId,
     contextWindow: 0,
-    maxOutputTokens: 4_096,
-    canReason: isBuild || isReasoning || /composer/i.test(cliId),
+    maxOutputTokens: 0,
     supportsAttachments: false,
     supportsStreaming: true,
-    tier: isReasoning ? 'reasoning' : isFast ? 'fast' : isBuild ? 'flagship' : undefined,
   };
 }
 
@@ -716,8 +725,9 @@ export function parseGrokOutput(raw: string): {
         return { text, stopReason: stop };
       }
     }
-  } catch {
+  } catch (err: unknown) {
     /* not a single JSON object — fall through */
+    providerLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'grok-build: output is not a single JSON object, trying NDJSON');
   }
 
   // 2) NDJSON (--output-format streaming-json): accumulate text across events.
@@ -739,8 +749,9 @@ export function parseGrokOutput(raw: string): {
         acc += pickDelta(ev);
         const s = (ev.stopReason ?? ev.stop_reason) as string | undefined;
         if (s) stop = s;
-      } catch {
+      } catch (err: unknown) {
         /* skip non-JSON lines (banners, progress) */
+        providerLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'grok-build: skipping non-JSON NDJSON line');
       }
     }
     if (acc) return { text: acc, stopReason: stop };
@@ -789,7 +800,8 @@ function drainGrokToolTailer(state: GrokToolTailer): ProviderEvent[] {
     const size = statSync(state.updatesPath).size;
     if (size <= state.offset) return events;
     text = readFileSync(state.updatesPath, 'utf-8');
-  } catch {
+  } catch (err: unknown) {
+    providerLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'grok-build: tool tailer failed to read updates file');
     return events;
   }
   const fresh = text.slice(state.offset);
@@ -804,7 +816,8 @@ function drainGrokToolTailer(state: GrokToolTailer): ProviderEvent[] {
     try {
       const row = JSON.parse(trimmed) as { params?: { update?: Record<string, unknown> } };
       update = row.params?.update ?? {};
-    } catch {
+    } catch (err: unknown) {
+      providerLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'grok-build: tool tailer skipping non-JSON line');
       continue;
     }
     const kind = update.sessionUpdate as string | undefined;

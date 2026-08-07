@@ -150,7 +150,10 @@ async function applyProjectSync(
   }
   for (const del of sync.deletes) {
     if (isAbsolute(del) || del.includes('..')) continue;
-    await rm(join(root, del), { force: true }).catch(() => {});
+    await rm(join(root, del), { force: true }).catch((err: unknown) => {
+      // Best-effort cleanup of stale files — the sync continues regardless.
+      serverLog.debug({ err: err instanceof Error ? err.message : String(err), path: del }, 'Remote sandbox file delete failed (best-effort cleanup)');
+    });
   }
   for (const file of sync.files) {
     if (isAbsolute(file.path) || file.path.includes('..')) continue;
@@ -180,7 +183,10 @@ async function cleanupSandbox(guestId: string, provider: string): Promise<void> 
   const root = sandboxes.get(key);
   if (root) {
     sandboxes.delete(key);
-    await rm(root, { recursive: true, force: true }).catch(() => {});
+    await rm(root, { recursive: true, force: true }).catch((err: unknown) => {
+      // Best-effort sandbox teardown — the sandbox is already deregistered.
+      serverLog.debug({ err: err instanceof Error ? err.message : String(err), root }, 'Remote sandbox teardown failed (best-effort)');
+    });
   }
 }
 
@@ -314,7 +320,10 @@ export function startProviderHost(relay: RelayClient, hostName: string): () => v
     activeRequests.clear();
     // Remove every guest's project sandbox from disk.
     for (const [key, root] of sandboxes) {
-      void rm(root, { recursive: true, force: true }).catch(() => {});
+      void rm(root, { recursive: true, force: true }).catch((err: unknown) => {
+        // Best-effort cleanup during relay disconnect — sandboxes are already deregistered.
+        serverLog.debug({ err: err instanceof Error ? err.message : String(err), root }, 'Remote sandbox cleanup during disconnect failed (best-effort)');
+      });
       sandboxes.delete(key);
     }
     if (activeRelay === relay) activeRelay = null;

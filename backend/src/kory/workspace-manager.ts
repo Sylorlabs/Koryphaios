@@ -22,7 +22,7 @@ import {
   symlinkSync,
 } from 'node:fs';
 import { join, resolve, relative } from 'node:path';
-import { koryLog } from '../logger';
+import { koryLog, serverLog } from '../logger';
 import type { KoryphaiosConfig } from '@koryphaios/shared';
 
 export interface WorktreeInfo {
@@ -557,8 +557,8 @@ export class WorkspaceManager {
         if (entry.name === 'node_modules' || entry.name.startsWith('.')) continue;
         linkOne(entry.name);
       }
-    } catch {
-      // Best-effort enumeration; root link above is the important one.
+    } catch (err: unknown) {
+      serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'Best-effort directory enumeration failed; root link above is the important one');
     }
   }
 

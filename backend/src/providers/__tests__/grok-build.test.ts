@@ -1,10 +1,27 @@
 import { describe, it, expect } from 'bun:test';
 import {
   GrokBuildProvider,
+  grokCapabilityBoundary,
   parseGrokCliModelsCache,
   parseGrokModelsOutput,
   parseGrokOutput,
 } from '../grok-build';
+
+describe('Grok research-only capability boundary', () => {
+  it('does not inherit MCP or workspace authority', () => {
+    expect(grokCapabilityBoundary('research-only')).toEqual({
+      researchOnly: true,
+      wireKoryMcp: false,
+      exposeWorkspace: false,
+      allowNativeWeb: true,
+    });
+    expect(grokCapabilityBoundary(undefined)).toMatchObject({
+      researchOnly: false,
+      wireKoryMcp: true,
+      exposeWorkspace: true,
+    });
+  });
+});
 import type { ProviderConfig } from '@koryphaios/shared';
 import type { ProviderEvent, StreamRequest } from '../types';
 
@@ -139,7 +156,9 @@ function whichInstalled(): boolean {
     // Mirror the harness's own check without importing internals.
     const { whichBinary } = require('../cli-detection');
     return !!whichBinary('grok');
-  } catch {
+  } catch (err: unknown) {
+    // Feature detection — grok CLI not installed or not on PATH.
+    console.debug('grok CLI not detected:', err instanceof Error ? err.message : String(err));
     return false;
   }
 }

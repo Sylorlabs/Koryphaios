@@ -13,6 +13,7 @@
 // stdout: JSON object with { decision: "approve"|"block", reason: string, ... }
 
 import { readFileSync } from 'node:fs';
+import { serverLog } from '../logger';
 
 function parseArgs(argv: string[]): {
   event: string;
@@ -40,7 +41,8 @@ function parseArgs(argv: string[]): {
 async function readStdin(): Promise<string> {
   try {
     return readFileSync(0, 'utf-8');
-  } catch {
+  } catch (err: unknown) {
+    serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'kory-hook-bridge: stdin read failed');
     return '';
   }
 }
@@ -51,7 +53,8 @@ async function main(): Promise<void> {
   let payload: Record<string, unknown> = {};
   try {
     payload = stdinRaw.trim() ? JSON.parse(stdinRaw) : {};
-  } catch {
+  } catch (err: unknown) {
+    serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'kory-hook-bridge: stdin JSON parse failed');
     payload = {};
   }
 
@@ -98,9 +101,10 @@ async function main(): Promise<void> {
         ? JSON.stringify({ decision: 'approve', ...data })
         : JSON.stringify({ decision: 'block', reason: data.error ?? `Kory hook returned HTTP ${resp.status}` }));
     }
-  } catch (err: any) {
+  } catch (err: unknown) {
     // Native tools must never gain authority just because the host gate is unavailable.
-    process.stderr.write(`[kory-hook-bridge] backend unreachable: ${err?.message}\n`);
+    const msg = err instanceof Error ? err.message : String(err);
+    process.stderr.write(`[kory-hook-bridge] backend unreachable: ${msg}\n`);
     process.stdout.write(JSON.stringify({ decision: 'block', reason: 'Kory permission host is unavailable' }));
   }
 }

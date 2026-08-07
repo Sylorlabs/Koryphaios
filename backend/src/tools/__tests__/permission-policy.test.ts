@@ -32,7 +32,7 @@ describe('permission preset policy', () => {
     expect(decideToolPermission(yolo, 'write_file', { fileCount: 10, linesChanged: 1000 }).action).toBe('allow');
   });
 
-  it('makes Guarded ask for risky actions and oversized edits, not block them', () => {
+  it('makes Guarded allow every file edit and ask only for risky non-edit actions', () => {
     const guarded = policy('guarded', {
       autonomyLimitsEnabled: true,
       approvalThresholdFiles: 2,
@@ -40,7 +40,7 @@ describe('permission preset policy', () => {
     });
     expect(decideToolPermission(guarded, 'read_file').action).toBe('allow');
     expect(decideToolPermission(guarded, 'write_file', { fileCount: 1, linesChanged: 10 }).action).toBe('allow');
-    expect(decideToolPermission(guarded, 'write_file', { fileCount: 1, linesChanged: 30 }).action).toBe('ask');
+    expect(decideToolPermission(guarded, 'write_file', { fileCount: 10, linesChanged: 3000 }).action).toBe('allow');
     expect(decideToolPermission(guarded, 'delete_file').action).toBe('ask');
   });
 

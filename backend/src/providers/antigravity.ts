@@ -4,7 +4,7 @@
 // Koryphaios never holds the credential — it shells out to the locally installed CLI.
 //
 // Headless interface:
-//   agy --print "<prompt>" --model "<model>" --dangerously-skip-permissions --log-file <path>
+//   agy --print "<prompt>" --model "<model>" --mode accept-edits --sandbox --log-file <path>
 //
 // Streaming sources (agy ≥1.0.16 writes only glog server logs to --log-file, so
 // the SSE parser below is a legacy fallback for older builds):
@@ -31,6 +31,8 @@ import {
   closeSync,
   fstatSync,
   mkdirSync,
+  mkdtempSync,
+  rmSync,
 } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { tmpdir, homedir } from 'node:os';
@@ -50,7 +52,6 @@ import { getCliBridge, getKoryphaiosAntigravityHome } from './cli-bridges';
 const AGY_TIMEOUT_MS = 300_000;
 const MODELS_CACHE_TTL_MS = 5 * 60_000;
 const LOG_POLL_INTERVAL_MS = 150;
-const DEFAULT_CLI_MODEL = 'Gemini 3.5 Flash (Medium)';
 
 // ── Session → agy conversation continuity ────────────────────────────────────
 // agy supports `--conversation <id>` to resume. Without it every Koryphaios turn
@@ -68,7 +69,8 @@ function listConversationIds(): Set<string> {
         .filter((f) => f.endsWith('.db'))
         .map((f) => f.slice(0, -3)),
     );
-  } catch {
+  } catch (err: unknown) {
+    providerLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'failed to list agy conversation ids');
     return new Set();
   }
 }
@@ -88,7 +90,8 @@ function detectNewConversation(before: Set<string>): string | null {
         bestMtime = mt;
         best = id;
       }
-    } catch {
+    } catch (err: unknown) {
+      providerLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'raced away reading conversation mtime');
       /* raced away */
     }
   }
@@ -115,7 +118,7 @@ function refreshModelsInBackground(): void {
       }
     })
     .catch(() => {
-      /* best-effort; static list remains the fallback */
+      /* best-effort; an empty list truthfully represents unavailable discovery */
     })
     .finally(() => {
       modelsFetchInProgress = false;
@@ -141,31 +144,20 @@ async function fetchAgyModels(bin: string): Promise<ModelDef[]> {
   });
 }
 
-function modelDefFromCliName(cliName: string): ModelDef {
+export function modelDefFromCliName(cliName: string): ModelDef {
   const id = `antigravity-${cliName
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/-+$/, '')}`;
-  const isHigh = /\(high\)/i.test(cliName);
-  const isThinking = /thinking/i.test(cliName);
-  const isPro = /pro/i.test(cliName);
-  const isOpus = /opus/i.test(cliName);
-
   return {
     id,
     name: cliName,
     provider: 'antigravity',
     apiModelId: cliName,
     contextWindow: 0,
-    maxOutputTokens: 4_096,
-    canReason: isHigh || isThinking,
-    // Antigravity exposes effort choices as distinct model names, not a
-    // separate reasoning parameter. An explicit empty list suppresses the
-    // composer's reasoning picker for every dynamically discovered model.
-    reasoningLevels: [],
+    maxOutputTokens: 0,
     supportsAttachments: false,
     supportsStreaming: true,
-    tier: isHigh || isThinking ? 'reasoning' : isPro || isOpus ? 'flagship' : 'fast',
   };
 }
 
@@ -204,6 +196,59 @@ function tryEmitFileEdit(name: string, args: Record<string, unknown>): ProviderE
     fileContent,
     fileOperation: isCreate ? 'create' : 'edit',
   };
+}
+
+/** Translate one authoritative `agy --output-format stream-json` line into
+ * Koryphaios events. Keeping this parser independent makes fragmented stdout
+ * handling testable without launching the user's CLI. */
+export function parseAntigravityStreamLine(line: string): ProviderEvent[] {
+  const trimmed = line.trim();
+  if (!trimmed) return [];
+  try {
+    const envelope = JSON.parse(trimmed) as {
+      event?: string;
+      step_update?: {
+        step_type?: string;
+        text_delta?: string;
+      };
+      result?: {
+        status?: string;
+        usage?: {
+          input_tokens?: number;
+          output_tokens?: number;
+          cache_read_tokens?: number;
+        };
+      };
+    };
+    if (envelope.event === 'step_update') {
+      const step = envelope.step_update;
+      if (step?.step_type === 'agent_response' && step.text_delta) {
+        return [{ type: 'content_delta', content: step.text_delta }];
+      }
+      return [];
+    }
+    if (envelope.event === 'result') {
+      const usage = envelope.result?.usage;
+      const events: ProviderEvent[] = [];
+      if (usage && (usage.input_tokens != null || usage.output_tokens != null)) {
+        events.push({
+          type: 'usage_update',
+          tokensIn: Number(usage.input_tokens ?? 0),
+          tokensOut: Number(usage.output_tokens ?? 0),
+          tokensCache: Number(usage.cache_read_tokens ?? 0),
+        });
+      }
+      if (envelope.result?.status && envelope.result.status !== 'SUCCESS') {
+        events.push({ type: 'error', error: `Antigravity ended with status ${envelope.result.status}` });
+      }
+      return events;
+    }
+  } catch (err: unknown) {
+    providerLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'non-JSON line in stream-json mode');
+    // A non-JSON line is not response content in stream-json mode. Keep it out
+    // of chat; stderr/exit status below provides the actionable failure.
+  }
+  return [];
 }
 
 // ── SSE log parser ─────────────────────────────────────────────────────────────
@@ -259,7 +304,8 @@ function parseLogChunk(chunk: string, debug = false): ParsedLogEvents {
           }
         }
       }
-    } catch {
+    } catch (err: unknown) {
+      providerLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'malformed SSE log line — skip');
       // malformed SSE line — skip
     }
   }
@@ -291,13 +337,14 @@ export class AntigravityProvider implements Provider {
     return cachedModels ?? [];
   }
 
-  private resolveCliModel(modelId: string): string {
+  private resolveCliModel(modelId: string): string | undefined {
     const models = this.listModels();
     const model = models.find((m) => m.id === modelId || m.apiModelId === modelId);
-    return model?.apiModelId ?? DEFAULT_CLI_MODEL;
+    return model?.apiModelId ?? models[0]?.apiModelId;
   }
 
   async *streamResponse(request: StreamRequest): AsyncGenerator<ProviderEvent> {
+    const researchOnly = request.capabilityProfile === 'research-only';
     const bin = whichBinary('agy');
     if (!bin) {
       yield {
@@ -310,7 +357,7 @@ export class AntigravityProvider implements Provider {
     // Resume the agy conversation tied to this Koryphaios session when we have
     // one — then only the NEW turn is sent (agy holds the prior history), which
     // avoids a fresh agentic session re-exploring the workspace every message.
-    let convId = request.sessionId ? sessionConversations.get(request.sessionId) : undefined;
+    let convId = !researchOnly && request.sessionId ? sessionConversations.get(request.sessionId) : undefined;
     if (convId && !existsSync(join(AGY_CONV_DIR, `${convId}.db`))) {
       // agy pruned it — start a fresh conversation with full history.
       if (request.sessionId) sessionConversations.delete(request.sessionId);
@@ -327,6 +374,10 @@ export class AntigravityProvider implements Provider {
     }
 
     const cliModel = this.resolveCliModel(request.model);
+    if (!cliModel) {
+      yield { type: 'error', error: 'Antigravity did not report an available model for this account.' };
+      return;
+    }
     const logPath = join(tmpdir(), `agy-${Date.now()}.log`);
 
     // ── Wire kory MCP server, hooks, and rules into the isolated agy home ──
@@ -344,8 +395,11 @@ export class AntigravityProvider implements Provider {
       systemPrompt: request.systemPrompt ?? '',
       tools: request.tools ?? [],
     };
-    const agyHome = getKoryphaiosAntigravityHome();
-    try {
+    const agyHome = researchOnly
+      ? join(getKoryphaiosAntigravityHome(), 'research-only')
+      : getKoryphaiosAntigravityHome();
+    mkdirSync(agyHome, { recursive: true });
+    if (!researchOnly) try {
       // MCP: write .claude.json with the kory server so the CLI gets kory__ tools.
       const mcpConfigs = agyBridge?.buildMcpConfig(bridgeCtx);
       if (mcpConfigs && mcpConfigs.length > 0) {
@@ -383,7 +437,8 @@ export class AntigravityProvider implements Provider {
       providerLog.warn({ err: wiringErr, provider: 'antigravity' }, 'Failed to wire kory MCP/hooks/rules for Antigravity');
     }
 
-    const cwd = request.workingDirectory?.trim();
+    const researchRoot = researchOnly ? mkdtempSync(join(tmpdir(), 'kory-web-research-agy-')) : null;
+    const cwd = researchRoot ?? request.workingDirectory?.trim();
     // Mode selection: only the critic role uses planning (read-only) mode.
     // The manager and worker roles always get accept-edits — never guess
     // read-only from the user's message text. A question like "what tools
@@ -391,11 +446,16 @@ export class AntigravityProvider implements Provider {
     const args = [
       '--print',
       prompt,
+      // Current agy releases expose the live response and authoritative token
+      // totals directly. Do not wait for sidecar databases or treat a buffered
+      // plain-text stdout write as streaming.
+      '--output-format',
+      'stream-json',
       '--model',
       cliModel,
-      ...(request.permissionMode === 'yolo' && request.harnessRole !== 'critic'
-        ? ['--mode', 'accept-edits', '--dangerously-skip-permissions']
-        : ['--mode', 'plan', '--sandbox']),
+      ...(request.harnessRole === 'critic'
+        ? ['--mode', 'plan', '--sandbox']
+        : ['--mode', 'accept-edits', '--sandbox']),
       '--log-file',
       logPath,
       ...(convId ? ['--conversation', convId] : []),
@@ -418,7 +478,7 @@ export class AntigravityProvider implements Provider {
     const agyEnv = { ...(jail?.env ?? { ...process.env }) };
     agyEnv.HOME = agyHome;
     const child = spawn(wrapped.command, wrapped.args, {
-      cwd: request.workingDirectory?.trim() || tmpdir(),
+      cwd: cwd || tmpdir(),
       stdio: ['ignore', 'pipe', 'pipe'],
       env: agyEnv,
     });
@@ -426,12 +486,16 @@ export class AntigravityProvider implements Provider {
     const onAbort = () => {
       try {
         child.kill('SIGTERM');
-      } catch {
+      } catch (err: unknown) {
+        providerLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'child already gone on abort');
         /* already gone */
       }
     };
     request.signal?.addEventListener('abort', onAbort, { once: true });
-    child.once('close', () => jail?.cleanup());
+    child.once('close', () => {
+      jail?.cleanup();
+      if (researchRoot) rmSync(researchRoot, { recursive: true, force: true });
+    });
 
     const timeout = setTimeout(() => {
       providerLog.warn({ provider: 'antigravity' }, 'Antigravity harness timed out — killing CLI');
@@ -443,11 +507,11 @@ export class AntigravityProvider implements Provider {
     let stderr = '';
     // Live stdout queue: agy --print writes progressively — stream each chunk
     // the moment it lands instead of dumping the whole reply at exit.
-    const stdoutQueue: string[] = [];
+    let stdoutLineBuffer = '';
     child.stdout.on('data', (c: Buffer) => {
       const text = c.toString();
       stdout += text;
-      stdoutQueue.push(text);
+      stdoutLineBuffer += text;
     });
     child.stderr.on('data', (c: Buffer) => (stderr += c.toString()));
 
@@ -468,8 +532,20 @@ export class AntigravityProvider implements Provider {
     // db is the fallback — never mix both or reasoning shows twice/erratically.
     let sseThinkingEvents = 0;
 
+    const drainStdout = (final = false): ProviderEvent[] => {
+      const events: ProviderEvent[] = [];
+      const lines = stdoutLineBuffer.split('\n');
+      stdoutLineBuffer = final ? '' : (lines.pop() ?? '');
+      for (const line of lines) events.push(...parseAntigravityStreamLine(line));
+      if (final && stdoutLineBuffer.trim()) {
+        events.push(...parseAntigravityStreamLine(stdoutLineBuffer));
+        stdoutLineBuffer = '';
+      }
+      return events;
+    };
+
     const rememberConversation = () => {
-      if (convId || !convsBefore) return;
+      if (researchOnly || convId || !convsBefore) return;
       const found = detectNewConversation(convsBefore);
       if (found) {
         convId = found;
@@ -490,7 +566,8 @@ export class AntigravityProvider implements Provider {
         if (gotContent) totalContentEvents++;
         sseThinkingEvents += events.filter((e) => e.type === 'thinking_delta').length;
         return events;
-      } catch {
+      } catch (err: unknown) {
+        providerLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'failed to read/drain agy log file');
         return [];
       }
     };
@@ -505,6 +582,12 @@ export class AntigravityProvider implements Provider {
       ]);
 
       rememberConversation();
+      const stdoutEvents = drainStdout();
+      if (stdoutEvents.length > 0) emittedStdout = true;
+      for (const event of stdoutEvents) {
+        if (event.type === 'content_delta') totalContentEvents++;
+        yield event;
+      }
       for (const event of drainLog()) yield event;
       if (sseThinkingEvents === 0) {
         for (const event of drainTrajectoryThinking(trajectoryTail)) yield event;
@@ -514,19 +597,13 @@ export class AntigravityProvider implements Provider {
         yield event;
       }
 
-      // Stream stdout live — unless the transcript/SSE path is already
-      // delivering the response text (avoid double-emitting).
-      if (totalContentEvents === 0 && !transcriptTail.emittedContent) {
-        while (stdoutQueue.length > 0) {
-          const chunk = stdoutQueue.shift()!;
-          if (chunk) {
-            emittedStdout = true;
-            yield { type: 'content_delta', content: chunk };
-          }
-        }
-      }
-
       if (result.done) {
+        const finalStdoutEvents = drainStdout(true);
+        if (finalStdoutEvents.length > 0) emittedStdout = true;
+        for (const event of finalStdoutEvents) {
+          if (event.type === 'content_delta') totalContentEvents++;
+          yield event;
+        }
         // Drain any final log/transcript bytes written before shutdown.
         for (const event of drainLog()) yield event;
         // The transcript's final lines can land marginally after exit.
@@ -544,7 +621,8 @@ export class AntigravityProvider implements Provider {
 
         try {
           unlinkSync(logPath);
-        } catch {
+        } catch (err: unknown) {
+          providerLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'best-effort unlink of agy log file');
           /* best-effort */
         }
 
@@ -556,7 +634,7 @@ export class AntigravityProvider implements Provider {
         }
 
         const text = stdout.trim();
-        if (!text && result.code !== 0) {
+        if (result.code !== 0 && totalContentEvents === 0) {
           const hint = stderr.trim() || `agy exited with status ${result.code}`;
           const loginHint = /not.*logged in|unauthorized|login|authenticate|api key/i.test(hint)
             ? ' — run "agy auth" (or set ANTIGRAVITY_API_KEY) to authenticate.'
@@ -565,16 +643,6 @@ export class AntigravityProvider implements Provider {
           return;
         }
 
-        // Flush any stdout that arrived after the last poll tick.
-        if (totalContentEvents === 0 && !transcriptTail.emittedContent) {
-          while (stdoutQueue.length > 0) {
-            const chunk = stdoutQueue.shift()!;
-            if (chunk) {
-              emittedStdout = true;
-              yield { type: 'content_delta', content: chunk };
-            }
-          }
-        }
         // Last resort: nothing streamed at all but stdout has text (shouldn't
         // happen — kept as a safety net).
         if (totalContentEvents === 0 && !emittedStdout && text) {
@@ -642,7 +710,8 @@ function protoStrings(buf: Uint8Array, prefix = ''): Array<[string, string]> {
     let key: number;
     try {
       key = readVarint();
-    } catch {
+    } catch (err: unknown) {
+      providerLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'protobuf varint eof');
       break;
     }
     const field = Math.floor(key / 8);
@@ -663,7 +732,8 @@ function protoStrings(buf: Uint8Array, prefix = ''): Array<[string, string]> {
             // a nested message and recurse.
             const head = t.slice(0, 80);
             if (/^[\x20-\x7e\n\t\r]*$/.test(head)) asText = t;
-          } catch {
+          } catch (err: unknown) {
+            providerLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'protobuf field not utf-8');
             /* not utf-8 */
           }
         }
@@ -672,7 +742,8 @@ function protoStrings(buf: Uint8Array, prefix = ''): Array<[string, string]> {
       } else if (wire === 5) i += 4;
       else if (wire === 1) i += 8;
       else break;
-    } catch {
+    } catch (err: unknown) {
+      providerLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'protobuf wire parse error');
       break;
     }
   }
@@ -712,7 +783,8 @@ function newTrajectoryTail(convId?: string): TrajectoryTailState {
       } finally {
         db.close();
       }
-    } catch {
+    } catch (err: unknown) {
+      providerLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'db missing/locked seeding trajectory tail');
       /* db missing/locked — worst case we re-emit prior-turn thinking once */
     }
   }
@@ -747,11 +819,13 @@ function drainTrajectoryThinking(state: TrajectoryTailState): ProviderEvent[] {
           if (state.finalizedIdx.has(f)) return true;
           try {
             return statSync(f).mtimeMs >= state.spawnedAt - 2_000;
-          } catch {
+          } catch (err: unknown) {
+            providerLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'stat failed for conversation db');
             return false;
           }
         });
-    } catch {
+    } catch (err: unknown) {
+      providerLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'failed to list conversation dbs');
       return events;
     }
   }
@@ -784,7 +858,8 @@ function drainTrajectoryThinking(state: TrajectoryTailState): ProviderEvent[] {
       } finally {
         db.close();
       }
-    } catch {
+    } catch (err: unknown) {
+      providerLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'db busy/locked this tick — retry next poll');
       /* db busy/locked this tick — retry next poll */
     }
   }
@@ -833,7 +908,8 @@ function newTranscriptTail(stdoutSoFar: () => string, convId?: string): Transcri
     const f = transcriptPath(convId);
     try {
       state.offsets.set(f, statSync(f).size);
-    } catch {
+    } catch (err: unknown) {
+      providerLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'transcript not created yet');
       /* transcript not created yet */
     }
   }
@@ -852,11 +928,13 @@ function findLiveTranscripts(state: TranscriptTailState): string[] {
       const f = join(AGY_BRAIN_DIR, id, '.system_generated', 'logs', 'transcript_full.jsonl');
       try {
         if (state.offsets.has(f) || statSync(f).mtimeMs >= state.spawnedAt - 2_000) out.push(f);
-      } catch {
+      } catch (err: unknown) {
+        providerLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'no transcript in this brain dir');
         /* no transcript in this brain dir */
       }
     }
-  } catch {
+  } catch (err: unknown) {
+    providerLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'brain dir absent — older agy or different install');
     /* brain dir absent — older agy or different install */
   }
   return out;
@@ -923,11 +1001,13 @@ function drainTranscript(state: TranscriptTailState): ProviderEvent[] {
           }
           // USER_INPUT / EPHEMERAL_MESSAGE / SYSTEM_MESSAGE / CHECKPOINT /
           // CONVERSATION_HISTORY are prompt plumbing — not surfaced.
-        } catch {
+        } catch (err: unknown) {
+          providerLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'partial or non-JSON transcript line');
           /* partial or non-JSON line */
         }
       }
-    } catch {
+    } catch (err: unknown) {
+      providerLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'transcript file rotated/unreadable this tick');
       /* file rotated/unreadable this tick — retry next poll */
     }
   }
@@ -1015,7 +1095,8 @@ function imageBlockToTempFile(imageData: string | undefined, mime: string | unde
     const file = join(tmpdir(), `kory-attach-${Math.random().toString(36).slice(2, 10)}.${ext}`);
     writeFileSync(file, Buffer.from(imageData, 'base64'));
     return `[image attached — saved to ${file}; use your image/file viewing tool to look at it]`;
-  } catch {
+  } catch (err: unknown) {
+    providerLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'could not persist image attachment to disk');
     return '[image attachment omitted — could not persist to disk]';
   }
 }

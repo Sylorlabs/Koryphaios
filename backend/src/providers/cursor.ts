@@ -8,11 +8,11 @@
 
 import type { ModelDef, ProviderConfig } from '@koryphaios/shared';
 import { spawn } from 'node:child_process';
-import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { whichBinary } from './cli-detection';
 import { detectCursorCLILogin } from './auth-utils';
 import { providerLog } from '../logger';
-import { homedir } from 'node:os';
+import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { buildSoftJail, wrapCommand } from '../collaboration/sandbox-runner';
 import {
@@ -25,12 +25,29 @@ import { getCliBridge, getKoryphaiosCursorHome } from './cli-bridges';
 
 const CURSOR_STREAM_TIMEOUT_MS = 300_000;
 const MODELS_CACHE_TTL_MS = 5 * 60_000;
+// Startup and Settings both request a forced catalog refresh. Coalesce those
+// requests so UI remounts cannot turn model discovery into a CLI spawn loop.
+const MODELS_FORCE_REFRESH_COOLDOWN_MS = 10_000;
 const MODELS_LIST_PATTERNS: Array<RegExp> = [
   /\*?\s*([a-z0-9._\/+\+=-]+)\s+[-–—]\s+(.+?)(?:\s+\((?:current|active|default)\))?\s*$/i,
   /\s*[\u2022\-\*]?\s*([a-z0-9._\/+\+=-]+)\s*(?:\(?(?:current|active|default)\)?)\s*$/i,
   /^([a-z0-9._\/+\+=-]+)$/i,
 ];
 const CURSOR_MODEL_COMMANDS: string[][] = [['--list-models'], ['models']];
+
+export function shouldStartCursorModelRefresh(input: {
+  forceRefresh: boolean;
+  inFlight: boolean;
+  lastStartedAt: number;
+  now: number;
+}): boolean {
+  if (input.inFlight) return false;
+  return !(
+    input.forceRefresh &&
+    input.lastStartedAt > 0 &&
+    input.now - input.lastStartedAt < MODELS_FORCE_REFRESH_COOLDOWN_MS
+  );
+}
 
 function stripAnsi(value: string): string {
   return value.replace(/\x1b\[[0-9;]*m/g, '').trim();
@@ -139,8 +156,9 @@ export function parseCursorModelList(output: string): ModelDef[] {
   try {
     const jsonValue = JSON.parse(output);
     parseCursorModelJsonChunk(jsonValue, models);
-  } catch {
+  } catch (err: unknown) {
     /* not json */
+    providerLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'Cursor model list output is not JSON');
   }
 
   for (const line of lines) {
@@ -155,8 +173,9 @@ export function parseCursorModelList(output: string): ModelDef[] {
       try {
         parseCursorModelJsonChunk(JSON.parse(jsonLine), models);
         if (models.length > 0) continue;
-      } catch {
+      } catch (err: unknown) {
         /* not json */
+        providerLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'Cursor model list line is not JSON');
       }
     }
 
@@ -210,8 +229,10 @@ function buildModelFromId(modelId: string, displayName?: string): ModelDef {
     name: fallbackName,
     provider: 'cursor',
     apiModelId: trimmed,
-    contextWindow: 200_000,
-    maxOutputTokens: 32_000,
+    // Cursor's model listing does not report limits or a separate reasoning
+    // control. Unknown is represented as zero/absent instead of invented data.
+    contextWindow: 0,
+    maxOutputTokens: 0,
     supportsStreaming: true,
     supportsAttachments: false,
   } as ModelDef;
@@ -233,6 +254,7 @@ export class CursorProvider implements Provider {
   readonly name = 'cursor' as const;
   private cachedModels: ModelDef[] | null = null;
   private modelsFetchedAt = 0;
+  private modelsRefreshStartedAt = 0;
   private modelsInFlight = false;
 
   constructor(readonly config: ProviderConfig) {}
@@ -249,12 +271,20 @@ export class CursorProvider implements Provider {
   }
 
   refreshModels(forceRefresh = false): void {
+    // A forced refresh must not invalidate the in-flight lock. The provider
+    // routes intentionally issue a second startup poll after 700ms, and UI
+    // remounts can issue more; previously each one spawned another Cursor CLI.
+    if (!shouldStartCursorModelRefresh({
+      forceRefresh,
+      inFlight: this.modelsInFlight,
+      lastStartedAt: this.modelsRefreshStartedAt,
+      now: Date.now(),
+    })) return;
+
     if (forceRefresh) {
       this.cachedModels = null;
       this.modelsFetchedAt = 0;
-      this.modelsInFlight = false;
     }
-    if (this.modelsInFlight) return;
 
     const runCandidate = (index: number): void => {
       if (index >= CURSOR_MODEL_COMMANDS.length) {
@@ -291,13 +321,14 @@ export class CursorProvider implements Provider {
       setTimeout(() => {
         try {
           child.kill('SIGTERM');
-        } catch {
-          /* gone */
+        } catch (err: unknown) {
+          providerLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'Cursor model probe child already gone on timeout');
         }
       }, 20_000).unref?.();
     };
 
     this.modelsInFlight = true;
+    this.modelsRefreshStartedAt = Date.now();
     runCandidate(0);
   }
 
@@ -309,6 +340,7 @@ export class CursorProvider implements Provider {
   }
 
   async *streamResponse(request: StreamRequest): AsyncGenerator<ProviderEvent> {
+    const researchOnly = request.capabilityProfile === 'research-only';
     const bin = whichBinary('cursor-agent');
     if (!bin) {
       yield { type: 'error', error: 'Cursor CLI (cursor-agent) not found on PATH.' };
@@ -342,8 +374,11 @@ export class CursorProvider implements Provider {
       systemPrompt: request.systemPrompt ?? '',
       tools: request.tools ?? [],
     };
-    const cursorHome = getKoryphaiosCursorHome();
-    try {
+    const cursorHome = researchOnly
+      ? join(getKoryphaiosCursorHome(), 'research-only')
+      : getKoryphaiosCursorHome();
+    mkdirSync(cursorHome, { recursive: true });
+    if (!researchOnly) try {
       // MCP: write the kory server config so the CLI gets kory__ tools.
       const mcpConfigs = cursorBridge?.buildMcpConfig(bridgeCtx);
       if (mcpConfigs && mcpConfigs.length > 0) {
@@ -382,12 +417,13 @@ export class CursorProvider implements Provider {
       '--trust',
       ...(request.harnessRole === 'critic'
         ? ['--mode', 'ask', '--sandbox', 'enabled']
-        : ['--force']),
+        : ['--mode', 'ask', '--sandbox', 'enabled']),
     ];
     const cliModel = this.resolveCliModel(request.model);
     if (cliModel && cliModel !== 'auto') args.push('--model', cliModel);
 
-    const cwd = request.workingDirectory?.trim() || process.cwd();
+    const researchRoot = researchOnly ? mkdtempSync(join(tmpdir(), 'kory-web-research-cursor-')) : null;
+    const cwd = researchRoot ?? (request.workingDirectory?.trim() || process.cwd());
     const jail = request.sandbox ? buildSoftJail(process.env, [join(homedir(), '.cursor')]) : null;
     const wrapped = request.sandbox
       ? wrapCommand(bin, args, { cwd, policy: request.sandbox })
@@ -405,12 +441,15 @@ export class CursorProvider implements Provider {
     const onAbort = () => {
       try {
         child.kill('SIGTERM');
-      } catch {
-        /* gone */
+      } catch (err: unknown) {
+        providerLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'Cursor CLI child already gone on abort');
       }
     };
     request.signal?.addEventListener('abort', onAbort, { once: true });
-    child.once('close', () => jail?.cleanup());
+    child.once('close', () => {
+      jail?.cleanup();
+      if (researchRoot) rmSync(researchRoot, { recursive: true, force: true });
+    });
     const timeout = setTimeout(() => {
       providerLog.warn({ provider: 'cursor' }, 'Cursor harness timed out — killing CLI');
       onAbort();
@@ -437,7 +476,8 @@ export class CursorProvider implements Provider {
           let row: CursorStreamLine;
           try {
             row = JSON.parse(line) as CursorStreamLine;
-          } catch {
+          } catch (err: unknown) {
+            providerLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'Cursor skipping non-JSON stream line');
             continue;
           }
           for (const event of this.mapLine(row)) {
@@ -508,8 +548,9 @@ export class CursorProvider implements Provider {
         let output = '';
         try {
           output = JSON.stringify(payload?.result ?? '').slice(0, 8_000);
-        } catch {
+        } catch (err: unknown) {
           /* unstringifiable */
+          providerLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'Cursor tool result not stringifiable');
         }
         yield {
           type: 'tool_executed',

@@ -11,6 +11,7 @@ import { Elysia, t } from 'elysia';
 import { getContext } from '../../context';
 import { requireLocalRouteAuth } from '../../auth/local-route-auth';
 import { serverLog } from '../../logger';
+import { AuthenticationError, NotFoundError, ValidationError } from '../../errors/types';
 import { resolveModel } from '../../providers';
 import {
   executeNativeSlashCommand,
@@ -24,8 +25,8 @@ import {
 import type { NativeCommandPayload, WSMessage } from '@koryphaios/shared';
 
 export const nativeCommandRoutes = new Elysia({ prefix: '/api/native-commands' })
-  .get('/', async ({ request, query, set }) => {
-    if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
+  .get('/', async ({ request, query }) => {
+    if (!requireLocalRouteAuth(request)) throw new AuthenticationError('Unauthorized');
     const provider = (query.provider ?? '').toString();
     if (!provider || !isNativeCliProvider(provider)) {
       return { ok: true, data: { provider: provider || null, label: null, commands: [] } };
@@ -41,20 +42,18 @@ export const nativeCommandRoutes = new Elysia({ prefix: '/api/native-commands' }
   })
   .post(
     '/run',
-    async ({ request, body, set }) => {
-      if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
+    async ({ request, body }) => {
+      if (!requireLocalRouteAuth(request)) throw new AuthenticationError('Unauthorized');
       const { kory, sessions, providers, wsManager } = getContext();
 
       const session = await sessions.get(body.sessionId);
       if (!session) {
-        set.status = 404;
-        return { ok: false, error: 'Session not found' };
+        throw new NotFoundError('Session', body.sessionId);
       }
 
       const parsed = parseNativeCommandLine(body.command);
       if (!parsed) {
-        set.status = 400;
-        return { ok: false, error: 'Command must start with /' };
+        throw new ValidationError('Command must start with /');
       }
 
       // Resolve the active provider for this session: an explicit model pick
@@ -83,12 +82,9 @@ export const nativeCommandRoutes = new Elysia({ prefix: '/api/native-commands' }
         if (cliProvider) providerName = cliProvider.name;
       }
       if (!providerName || !isNativeCliProvider(providerName)) {
-        set.status = 400;
-        return {
-          ok: false,
-          error:
-            'No CLI provider is active. Select a CLI-backed provider (Claude Code, Codex, Devin, Grok, Cursor, Cline, Antigravity, Kimi Code) to use its /commands.',
-        };
+        throw new ValidationError(
+          'No CLI provider is active. Select a CLI-backed provider (Claude Code, Codex, Devin, Grok, Cursor, Cline, Antigravity, Kimi Code) to use its /commands.',
+        );
       }
 
       const workingDirectory =
@@ -137,7 +133,7 @@ export const nativeCommandRoutes = new Elysia({ prefix: '/api/native-commands' }
               isError: true,
             });
           }
-        } catch (err) {
+        } catch (err: unknown) {
           serverLog.warn({ err, providerName, command: body.command }, 'Native command failed');
           emit(
             `Failed to run /${parsed.command}: ${err instanceof Error ? err.message : String(err)}`,

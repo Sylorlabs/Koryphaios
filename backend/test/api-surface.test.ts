@@ -23,6 +23,7 @@ const { spendCapsRoutes } = await import('../src/routes/v1/spend-caps');
 const { billingRoutes } = await import('../src/routes/v1/billing');
 const { processRoutes } = await import('../src/routes/v1/processes');
 const { voiceRoutes } = await import('../src/routes/v1/voice');
+const { errorHandler } = await import('../src/middleware/error-handling');
 
 const app = new Elysia()
   .get('/api/health', () => ({
@@ -39,6 +40,7 @@ const app = new Elysia()
     },
   }))
   .post('/api/debug/log-error', () => ({ ok: true }))
+  .onError(errorHandler)
   .use(sessionRoutes)
   .use(messageRoutes)
   .use(providerRoutes)
@@ -222,7 +224,8 @@ describe('API surface verification', () => {
       const body = await jsonResponse(response);
 
       expect(response.status).toBe(401);
-      expect(body).toEqual({ ok: false, error: 'Unauthorized' });
+      expect(body.ok).toBe(false);
+      expect(body.error).toBe('Unauthorized');
     }
   });
 });

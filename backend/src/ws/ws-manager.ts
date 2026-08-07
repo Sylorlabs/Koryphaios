@@ -9,21 +9,52 @@ interface WSClientData {
   userId?: string;
 }
 
+// 64KB — when a client's outbound buffer exceeds this, treat it as overloaded:
+// skip non-critical messages and queue terminal events for retry. This keeps a
+// single slow client from blocking the event loop on broadcast.
+const BACKPRESSURE_THRESHOLD = 64 * 1024;
+
+// Terminal events must be delivered. If they are dropped (e.g. because the
+// client was overloaded at broadcast time), the frontend's busy/Stop state
+// gets stuck. These types are always queued per-client and retried on a
+// separate timer until they can be sent.
+const TERMINAL_EVENT_TYPES = new Set<string>([
+  'stream.complete',
+  'agent.completed',
+  'agent.error',
+  'process.exited',
+]);
+
+// Retry interval for queued terminal events. This is a separate timer from the
+// heartbeat — the heartbeat checks for stale connections; this timer drains
+// queued terminal events once backpressure clears.
+const TERMINAL_RETRY_MS = 2_000;
+
 interface WSClient {
   ws: ServerWebSocket<WSClientData>;
   subscribedSessions: Set<string>;
   isAlive: boolean;
+  // True while the client's outbound buffer is over BACKPRESSURE_THRESHOLD.
+  // Non-terminal messages are skipped and terminal events are queued.
+  overloaded: boolean;
+  // Terminal events that could not be sent due to backpressure. Drained by
+  // retryTerminalEvents() on the TERMINAL_RETRY_MS timer.
+  pendingTerminalEvents: WSMessage[];
 }
 
 export class WSManager {
   private clients = new Map<string, WSClient>();
   private readonly maxClients = 1000;
   private heartbeatInterval: Timer | null = null;
+  private terminalRetryInterval: Timer | null = null;
   private isShutdown = false;
 
   constructor() {
-    // Check for stale connections every 30 seconds
-    this.heartbeatInterval = setInterval(() => this.heartbeat(), 30000);
+    // Heartbeat checks for stale connections every 10s. This is a separate
+    // timer from the terminal-event retry — do not couple them.
+    this.heartbeatInterval = setInterval(() => this.heartbeat(), 10_000);
+    // Drain queued terminal events on a 2s timer, independent of the heartbeat.
+    this.terminalRetryInterval = setInterval(() => this.drainPendingTerminalEvents(), TERMINAL_RETRY_MS);
   }
 
   add(ws: ServerWebSocket<WSClientData>) {
@@ -36,7 +67,13 @@ export class WSManager {
       return;
     }
     const id = ws.data.id;
-    this.clients.set(id, { ws, subscribedSessions: new Set(), isAlive: true });
+    this.clients.set(id, {
+      ws,
+      subscribedSessions: new Set(),
+      isAlive: true,
+      overloaded: false,
+      pendingTerminalEvents: [],
+    });
     serverLog.debug({ clientId: id, totalClients: this.clients.size }, 'WebSocket client added');
   }
 
@@ -65,8 +102,9 @@ export class WSManager {
           serverLog.debug({ clientId: id }, 'Terminating inactive WebSocket client');
           try {
             client.ws.close();
-          } catch {
+          } catch (err: unknown) {
             /* Expected: socket may already be closed */
+            serverLog.debug({ clientId: id, err: err instanceof Error ? err.message : String(err) }, 'WebSocket close failed during inactive client termination');
           }
           this.clients.delete(id);
           continue;
@@ -81,8 +119,9 @@ export class WSManager {
           this.clients.delete(id);
           try {
             client.ws.close();
-          } catch {
+          } catch (err: unknown) {
             /* Expected: socket may already be closed */
+            serverLog.debug({ clientId: id, err: err instanceof Error ? err.message : String(err) }, 'WebSocket close failed after ping failure');
           }
         }
       }
@@ -122,27 +161,56 @@ export class WSManager {
     return message.sessionId ? getOrderedEventLog().append(message) : message;
   }
 
+  /**
+   * Check whether a client is currently over the backpressure threshold.
+   * The optional chaining handles test mocks and sockets that don't implement
+   * getBufferedAmount.
+   */
+  private isClientOverloaded(client: WSClient): boolean {
+    const buffered = client.ws.getBufferedAmount?.() ?? 0;
+    return buffered > BACKPRESSURE_THRESHOLD;
+  }
+
+  /**
+   * Attempt to deliver a single (already-serialized) message to one client,
+   * honoring backpressure. Returns true if the message was sent.
+   *
+   * - If the client is overloaded: terminal events are queued in
+   *   pendingTerminalEvents for retry; non-terminal events are skipped
+   *   (dropped for this client). Never block the event loop on a slow client.
+   * - If the client is not overloaded: send immediately.
+   */
+  private deliverToClient(client: WSClient, message: WSMessage, data: string): boolean {
+    if (client.ws.readyState !== 1) return false;
+
+    const overloaded = this.isClientOverloaded(client);
+    client.overloaded = overloaded;
+    if (overloaded) {
+      if (TERMINAL_EVENT_TYPES.has(message.type)) {
+        client.pendingTerminalEvents.push(message);
+      }
+      // Non-terminal events are intentionally dropped for overloaded clients.
+      return false;
+    }
+
+    try {
+      client.ws.send(data);
+      return true;
+    } catch (err) {
+      serverLog.warn({ error: String(err) }, 'Failed to send WebSocket message to client');
+      return false;
+    }
+  }
+
   broadcast(message: WSMessage) {
     const ordered = this.persist(message);
     const data = JSON.stringify(ordered);
     let successCount = 0;
-    let failCount = 0;
 
     for (const [, client] of this.clients) {
-      try {
-        if (client.ws.readyState === 1) {
-          client.ws.send(data);
-          successCount++;
-        }
-      } catch (err) {
-        failCount++;
-        serverLog.warn({ error: String(err) }, 'Failed to send WebSocket message to client');
-      }
+      if (this.deliverToClient(client, ordered, data)) successCount++;
     }
 
-    if (failCount > 0) {
-      serverLog.debug({ successCount, failCount }, 'Broadcast complete with failures');
-    }
     if (successCount > 0) getOrderedEventLog().markDispatched(ordered.eventId);
   }
 
@@ -153,23 +221,60 @@ export class WSManager {
 
     for (const [, client] of this.clients) {
       if (client.subscribedSessions.has(sessionId)) {
-        try {
-          if (client.ws.readyState === 1) {
-            client.ws.send(data);
-            targetCount++;
-          }
-        } catch (err) {
-          serverLog.warn(
-            { sessionId, error: String(err) },
-            'Failed to send session message to client',
-          );
-        }
+        if (this.deliverToClient(client, ordered, data)) targetCount++;
       }
     }
 
     if (targetCount > 0) getOrderedEventLog().markDispatched(ordered.eventId);
 
     serverLog.debug({ sessionId, targetCount }, 'Session broadcast complete');
+  }
+
+  /**
+   * Retry queued terminal events for a single client. Called by the
+   * TERMINAL_RETRY_MS timer for all clients, and exposed for direct use in
+   * tests. If backpressure has cleared, queued terminal events are sent in
+   * order; if still overloaded, they remain queued for the next tick.
+   */
+  retryTerminalEvents(clientId: string, client: WSClient): void {
+    if (client.pendingTerminalEvents.length === 0) {
+      // Still refresh the overloaded flag so callers observe current state.
+      client.overloaded = this.isClientOverloaded(client);
+      return;
+    }
+
+    const stillOverloaded = this.isClientOverloaded(client);
+    client.overloaded = stillOverloaded;
+    if (stillOverloaded) return;
+
+    const remaining: WSMessage[] = [];
+    for (const event of client.pendingTerminalEvents) {
+      if (client.ws.readyState !== 1) {
+        remaining.push(event);
+        continue;
+      }
+      try {
+        client.ws.send(JSON.stringify(event));
+      } catch (err) {
+        serverLog.warn(
+          { clientId, error: String(err), type: event.type },
+          'Failed to deliver queued terminal event',
+        );
+        remaining.push(event);
+      }
+    }
+    client.pendingTerminalEvents = remaining;
+  }
+
+  private drainPendingTerminalEvents(): void {
+    if (this.isShutdown) return;
+    for (const [id, client] of this.clients) {
+      try {
+        this.retryTerminalEvents(id, client);
+      } catch (err) {
+        serverLog.error({ clientId: id, error: String(err) }, 'Terminal-event retry loop error');
+      }
+    }
   }
 
   get clientCount() {
@@ -186,10 +291,14 @@ export class WSManager {
     serverLog.info({ clientCount: this.clients.size }, 'Shutting down WebSocket manager');
     this.isShutdown = true;
 
-    // Stop heartbeat
+    // Stop heartbeat and terminal-event retry timers.
     if (this.heartbeatInterval) {
       clearInterval(this.heartbeatInterval);
       this.heartbeatInterval = null;
+    }
+    if (this.terminalRetryInterval) {
+      clearInterval(this.terminalRetryInterval);
+      this.terminalRetryInterval = null;
     }
 
     // Close all connections

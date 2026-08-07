@@ -57,13 +57,15 @@ import { initMCP } from './mcp/client';
 import { serverLog } from './logger';
 import { applyModeIntegration } from './kory/manager-mode-integration';
 import { initWSBroker } from './ws/broker';
-import { WSManager, setWsManager } from './ws/ws-manager';
+import { WSManager } from './ws/ws-manager';
 import { loadPlugins } from './server/plugins';
 import { setContext, type AppContext } from './context';
 import { getModeManager } from './mode';
 import { TimeTravelService } from './services/timetravel';
 import { startBackgroundCleanup } from './memory/background-cleanup';
 import { GoalDriveService } from './kory/goal-drive-service';
+import { SANDBOX_PRESETS } from '@koryphaios/shared';
+import { cliResearchBoundary, hasResearchCitation } from './providers/cli-research';
 
 export async function bootstrap(): Promise<AppContext> {
   // Load environment and validate
@@ -131,7 +133,8 @@ export async function bootstrap(): Promise<AppContext> {
       return p
         .listModels()
         .find((m) => m.id === modelId || m.apiModelId === modelId || m.name === modelId);
-    } catch {
+    } catch (err: unknown) {
+      serverLog.debug({ provider: providerName, modelId, err: err instanceof Error ? err.message : String(err) }, 'Live model resolver lookup failed');
       return undefined;
     }
   });
@@ -161,7 +164,6 @@ export async function bootstrap(): Promise<AppContext> {
   applyModeIntegration(kory);
 
   const wsManager = new WSManager();
-  setWsManager(wsManager);
   initWSBroker(wsManager);
   const goalDriver = new GoalDriveService(goals, sessions, kory, wsManager);
 
@@ -226,7 +228,55 @@ async function initTools(providers: ProviderRegistry) {
     new GrepTool(),
     new GlobTool(),
     new LsTool(),
-    new WebSearchTool(),
+    new WebSearchTool(async ({ query, maxResults, context }) => {
+      const researchSandbox = {
+        ...SANDBOX_PRESETS.readonly,
+        allowNetwork: true,
+        allowWebSearch: true,
+      };
+      const supported = ['grok', 'claude', 'devin'] as const;
+      const preferred = context.activeProvider && supported.includes(context.activeProvider as typeof supported[number])
+        ? context.activeProvider as typeof supported[number]
+        : null;
+      const candidates = [...new Set([preferred, ...supported].filter(Boolean))] as Array<typeof supported[number]>;
+
+      for (const providerName of candidates) {
+        if (!cliResearchBoundary(providerName).eligible) continue;
+        const provider = providers.get(providerName);
+        if (!provider?.isAvailable()) continue;
+        await provider.refreshModels?.(true);
+        const model = provider.listModels()[0];
+        if (!model) continue;
+        let output = '';
+        let failed = false;
+        for await (const event of providers.executeWithRetry({
+          model: model.id,
+          systemPrompt: 'Perform web research only. Use the provider native web search/fetch capability. Do not inspect local files, run shell commands, modify anything, call MCP tools, or delegate. Return concise results with source URLs.',
+          messages: [{ role: 'user', content: `Search the web for: ${query}\nReturn at most ${maxResults} useful results with title, URL, and a short factual snippet.` }],
+          tools: [],
+          maxTokens: 4_000,
+          signal: context.signal,
+          sessionId: `${context.sessionId}:web-search:${providerName}`,
+          harnessRole: 'critic',
+          permissionMode: 'plan',
+          sandbox: researchSandbox,
+          capabilityProfile: 'research-only',
+        }, providerName)) {
+          if (event.type === 'content_delta') output += event.content ?? '';
+          if (event.type === 'error') {
+            failed = true;
+            serverLog.debug({ provider: providerName, error: event.error }, 'CLI web search candidate failed');
+          }
+        }
+        if (!failed && hasResearchCitation(output)) {
+          return `Provider: ${providerName}\n\n${output.trim()}`;
+        }
+        if (!failed && output.trim()) {
+          serverLog.debug({ provider: providerName }, 'CLI web search candidate returned no source URL');
+        }
+      }
+      return null;
+    }),
     new WebFetchTool(),
     new AskUserTool(),
     new AskManagerTool(),

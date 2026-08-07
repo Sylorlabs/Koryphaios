@@ -334,7 +334,10 @@ export class ModelDiscoveryService {
 
     // Schedule next refresh
     const timer = setTimeout(() => {
-      this.fetchModels(provider).catch(() => {});
+      this.fetchModels(provider).catch((err: unknown) => {
+        // Background refresh — the next scheduled tick will retry.
+        providerLog.debug({ err: err instanceof Error ? err.message : String(err), provider }, 'Background model discovery refresh failed (will retry on next tick)');
+      });
     }, this.config.refreshIntervalMs);
 
     this.refreshTimers.set(provider, timer);

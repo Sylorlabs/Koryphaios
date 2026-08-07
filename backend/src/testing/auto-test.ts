@@ -9,7 +9,7 @@
 import { spawn } from 'bun';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
-import { koryLog } from '../logger';
+import { koryLog, serverLog } from '../logger';
 
 export type TestFramework = 'jest' | 'vitest' | 'pytest' | 'cargo' | 'go' | 'bun' | 'unknown';
 
@@ -130,7 +130,8 @@ export class AutoTestRunner {
       result.durationMs = Date.now() - startTime;
       this.testHistory.push(result);
       return result;
-    } catch (err) {
+    } catch (err: unknown) {
+      serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'test runner error — returning failure result');
       const errorResult: TestResult = {
         success: false,
         framework,
@@ -221,8 +222,9 @@ export class AutoTestRunner {
               }
             }
           }
-        } catch {
+        } catch (err: unknown) {
           // Fallback to regex parsing
+          serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'test JSON parse failed — falling back to regex parsing');
           const match = output.match(/(\d+)\s+passing/);
           if (match) result.passed = parseInt(match[1]);
           const failMatch = output.match(/(\d+)\s+failing/);

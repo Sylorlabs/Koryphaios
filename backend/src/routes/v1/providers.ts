@@ -7,21 +7,23 @@ import { customProviderId } from '../../providers/custom';
 import type { ProviderName } from '@koryphaios/shared';
 import { serverLog } from '../../logger';
 import { requireLocalRouteAuth } from '../../auth/local-route-auth';
+import {
+  ValidationError,
+  InternalError,
+} from '../../errors/types';
 import { db, userCredentials } from '../../db';
 import { createUserCredentialsService, type UserCredential } from '../../services';
-import { pollCopilotDeviceAuth, startCopilotDeviceAuth } from '../../providers/copilot';
+import { pollCopilotDeviceAuth } from '../../providers/copilot';
 import {
-  detectClaudeCodeLogin,
-  createClaudeCLIAuthMarker,
-  clearCachedToken,
-  detectGrokCLILogin,
-  createGrokCLIAuthMarker,
-  detectAntigravityCLILogin,
-  createAntigravityCLIAuthMarker,
-} from '../../providers/auth-utils';
+  isBrowserAuthProvider,
+  startBrowserAuth,
+  completeBrowserAuth,
+  adoptManagedCodexSession,
+  type BrowserAuthProvider,
+} from '../../providers/browser-auth';
 import { detectAgentClis } from '../../providers/cli-detection';
+import { cliResearchBoundary } from '../../providers/cli-research';
 import { getManagedCodexAppServer } from '../../providers/codex-app-server';
-import { CODEX_MANAGED_AUTH_MARKER } from '../../providers/codex-auth';
 import { discoverCliAccounts, getDiscoveredCliAccount } from '../../providers/cli-accounts';
 import {
   clearKimiCodeAuthState,
@@ -30,7 +32,6 @@ import {
   isKimiCodeAuthMarker,
   pollKimiCodeDeviceAuth,
   saveKimiCodeAuthState,
-  startKimiCodeDeviceAuth,
 } from '../../providers/kimicode-auth';
 
 const LOCAL_USER_ID = 'local-user';
@@ -64,329 +65,6 @@ const providerConfigBody = t.Object({
   selectedModels: t.Optional(t.Array(t.String())),
   hideModelSelector: t.Optional(t.Boolean()),
 });
-
-type BrowserAuthProvider =
-  | 'copilot'
-  | 'codex-auth'
-  | 'kimicode'
-  | 'claude'
-  | 'grok'
-  | 'antigravity';
-
-function isBrowserAuthProvider(name: string): name is BrowserAuthProvider {
-  return (
-    name === 'copilot' ||
-    name === 'codex-auth' ||
-    name === 'kimicode' ||
-    name === 'claude' ||
-    name === 'grok' ||
-    name === 'antigravity'
-  );
-}
-
-async function startBrowserAuth(
-  name: BrowserAuthProvider,
-): Promise<{ ok: boolean; data?: Record<string, unknown>; error?: string }> {
-  try {
-    serverLog.info({ provider: name }, 'Starting browser auth flow');
-    switch (name) {
-      case 'copilot': {
-        const result = await startCopilotDeviceAuth();
-        serverLog.info(
-          {
-            provider: name,
-            deviceCode: result.deviceCode,
-            verificationUri: result.verificationUri,
-          },
-          'Browser auth flow started',
-        );
-        return {
-          ok: true,
-          data: {
-            provider: name,
-            ...result,
-          },
-        };
-      }
-      case 'codex-auth': {
-        const appServer = getManagedCodexAppServer();
-        const result = await appServer.startChatgptDeviceCodeLogin();
-        void appServer.waitForLoginCompletion(result.loginId)
-          .then(async (completion) => {
-            if (!completion.success) {
-              serverLog.warn({ provider: name, error: completion.error }, 'OpenAI Codex sign-in was not approved');
-              return;
-            }
-            const activation = await activateManagedCodexAuth();
-            if (!activation.ok) {
-              serverLog.error({ provider: name, error: activation.error }, 'OpenAI Codex sign-in completed but activation failed');
-              return;
-            }
-            serverLog.info({ provider: name }, 'OpenAI Codex signed in and activated automatically');
-          })
-          .catch((error) => {
-            serverLog.warn(
-              { provider: name, error: error instanceof Error ? error.message : String(error) },
-              'OpenAI Codex sign-in did not complete',
-            );
-          });
-        return {
-          ok: true,
-          data: {
-            provider: name,
-            // Device auth is intentionally UI-owned: it avoids the hosted
-            // success page attempting to open Codex's private `codex://` URI.
-            deviceCode: result.loginId,
-            userCode: result.userCode,
-            verificationUri: result.verificationUrl,
-            message: 'Open the verification page, enter this code, then confirm the sign-in here.',
-          },
-        };
-      }
-      case 'kimicode': {
-        clearKimiCodeAuthState();
-        const result = await startKimiCodeDeviceAuth();
-        serverLog.info(
-          {
-            provider: name,
-            userCode: result.userCode,
-            verificationUri: result.verificationUri,
-          },
-          'Browser auth flow started',
-        );
-        return {
-          ok: true,
-          data: {
-            provider: name,
-            ...result,
-          },
-        };
-      }
-      case 'claude': {
-        // Claude Code subscription connects through the official `claude` CLI harness.
-        // We never store the raw OAuth token — only an opt-in marker; the CLI owns auth.
-        if (detectClaudeCodeLogin()) {
-          const { providers } = getContext();
-          const setResult = await providers.setCredentials('claude', {
-            authToken: createClaudeCLIAuthMarker(),
-          });
-          if (!setResult.success) {
-            return { ok: false, error: setResult.error ?? 'Failed to activate Claude auth' };
-          }
-          syncProviderConfigsSafely(providers);
-          serverLog.info({ provider: name }, 'Claude Code connected via CLI subscription');
-          return {
-            ok: true,
-            data: {
-              status: 'connected',
-              provider: 'claude',
-              message: 'Claude Code connected via your Claude subscription (CLI harness)',
-            },
-          };
-        }
-        serverLog.info({ provider: name }, 'No Claude CLI login detected');
-        return {
-          ok: true,
-          data: {
-            provider: 'claude',
-            message: 'Run "claude login" in your terminal, then click Auth again to connect.',
-          },
-        };
-      }
-      case 'grok': {
-        // Grok Build subscription — the official `grok` CLI owns auth (no token entry in UI).
-        if (detectGrokCLILogin()) {
-          const { providers } = getContext();
-          const setResult = await providers.setCredentials('grok', {
-            authToken: createGrokCLIAuthMarker(),
-          });
-          if (!setResult.success) {
-            return { ok: false, error: setResult.error ?? 'Failed to activate Grok Build auth' };
-          }
-          syncProviderConfigsSafely(providers);
-          serverLog.info({ provider: name }, 'Grok Build connected via CLI subscription');
-          return {
-            ok: true,
-            data: {
-              status: 'connected',
-              provider: 'grok',
-              message: 'Grok Build connected via your local grok CLI (subscription or xAI key)',
-            },
-          };
-        }
-        serverLog.info({ provider: name }, 'No Grok Build CLI login detected');
-        return {
-          ok: true,
-          data: {
-            provider: 'grok',
-            message: 'Install the grok CLI and run "grok login", then click Auth again to connect.',
-          },
-        };
-      }
-      case 'antigravity': {
-        if (detectAntigravityCLILogin()) {
-          const { providers } = getContext();
-          const setResult = await providers.setCredentials('antigravity', {
-            authToken: createAntigravityCLIAuthMarker(),
-          });
-          if (!setResult.success) {
-            return { ok: false, error: setResult.error ?? 'Failed to activate Antigravity auth' };
-          }
-          syncProviderConfigsSafely(providers);
-          serverLog.info({ provider: name }, 'Antigravity connected via CLI');
-          return {
-            ok: true,
-            data: {
-              status: 'connected',
-              provider: 'antigravity',
-              message: 'Antigravity connected via your local agy CLI',
-            },
-          };
-        }
-        serverLog.info({ provider: name }, 'No Antigravity CLI login detected');
-        return {
-          ok: true,
-          data: {
-            provider: 'antigravity',
-            message: 'Install the agy CLI and run "agy login", then click Auth again to connect.',
-          },
-        };
-      }
-    }
-  } catch (error: any) {
-    serverLog.error(
-      { provider: name, error: error?.message ?? String(error) },
-      'Failed to start browser auth flow',
-    );
-    return { ok: false, error: error?.message ?? 'Failed to start auth flow' };
-  }
-}
-
-async function activateManagedCodexAuth(): Promise<{
-  ok: boolean;
-  data?: Record<string, unknown>;
-  error?: string;
-}> {
-  const { providers } = getContext();
-  const account = await getManagedCodexAppServer().account(true);
-  if (account.account?.type !== 'chatgpt') {
-    return { ok: false, error: 'ChatGPT sign-in is not complete yet.' };
-  }
-  // This is an activation marker only, never an OAuth access or refresh token.
-  const result = await providers.setCredentials('codex-auth', {
-    authToken: CODEX_MANAGED_AUTH_MARKER,
-  });
-  if (!result.success) {
-    return { ok: false, error: result.error ?? 'Failed to activate OpenAI Codex' };
-  }
-  await providers.get('codex-auth')?.refreshModels?.(true);
-  syncProviderConfigsSafely(providers);
-  return {
-    ok: true,
-    data: {
-      status: 'connected',
-      provider: 'codex-auth',
-      planType: account.account.planType ?? null,
-    },
-  };
-}
-
-/** Adopt an already-persisted app-server ChatGPT session during normal status refreshes. */
-async function adoptManagedCodexSession(): Promise<void> {
-  const { providers } = getContext();
-  const status = providers.getStatus().find((provider) => provider.name === 'codex-auth');
-  if (!status || status.authenticated) return;
-  try {
-    const account = await getManagedCodexAppServer().account(false);
-    if (account.account?.type !== 'chatgpt') return;
-    const activation = await activateManagedCodexAuth();
-    if (activation.ok) {
-      serverLog.info({ provider: 'codex-auth' }, 'Adopted existing OpenAI Codex ChatGPT session');
-    }
-  } catch (error) {
-    // Status polling must remain available when Codex is absent or its profile is not signed in.
-    serverLog.debug(
-      { provider: 'codex-auth', error: error instanceof Error ? error.message : String(error) },
-      'Could not adopt managed OpenAI Codex session during status refresh',
-    );
-  }
-}
-
-async function completeBrowserAuth(
-  name: BrowserAuthProvider,
-): Promise<{ ok: boolean; data?: Record<string, unknown>; error?: string }> {
-  const { providers } = getContext();
-
-  try {
-    serverLog.info({ provider: name }, 'Completing browser auth flow');
-    switch (name) {
-      case 'claude': {
-        clearCachedToken('claude-login');
-        if (!detectClaudeCodeLogin()) {
-          return {
-            ok: false,
-            error: 'Claude Code is not logged in. Run "claude login" in your terminal first.',
-          };
-        }
-        const claudeResult = await providers.setCredentials('claude', {
-          authToken: createClaudeCLIAuthMarker(),
-        });
-        if (!claudeResult.success) {
-          return { ok: false, error: claudeResult.error ?? 'Failed to activate Claude auth' };
-        }
-        syncProviderConfigsSafely(providers);
-        serverLog.info({ provider: name }, 'Claude Code auth completed');
-        return { ok: true, data: { status: 'connected', provider: 'claude' } };
-      }
-      case 'grok': {
-        if (!detectGrokCLILogin()) {
-          return {
-            ok: false,
-            error: 'Grok Build CLI is not logged in. Install grok and run "grok login" first.',
-          };
-        }
-        const grokResult = await providers.setCredentials('grok', {
-          authToken: createGrokCLIAuthMarker(),
-        });
-        if (!grokResult.success) {
-          return { ok: false, error: grokResult.error ?? 'Failed to activate Grok Build auth' };
-        }
-        syncProviderConfigsSafely(providers);
-        serverLog.info({ provider: name }, 'Grok Build auth completed');
-        return { ok: true, data: { status: 'connected', provider: 'grok' } };
-      }
-      case 'antigravity': {
-        if (!detectAntigravityCLILogin()) {
-          return {
-            ok: false,
-            error: 'Antigravity CLI is not logged in. Install agy and run "agy login" first.',
-          };
-        }
-        const agyResult = await providers.setCredentials('antigravity', {
-          authToken: createAntigravityCLIAuthMarker(),
-        });
-        if (!agyResult.success) {
-          return { ok: false, error: agyResult.error ?? 'Failed to activate Antigravity auth' };
-        }
-        syncProviderConfigsSafely(providers);
-        serverLog.info({ provider: name }, 'Antigravity auth completed');
-        return { ok: true, data: { status: 'connected', provider: 'antigravity' } };
-      }
-      case 'copilot':
-      case 'kimicode':
-        return { ok: false, error: `${name} auth completes automatically after browser approval` };
-      case 'codex-auth': {
-        return await activateManagedCodexAuth();
-      }
-    }
-  } catch (error: any) {
-    serverLog.error(
-      { provider: name, error: error?.message ?? String(error) },
-      'Failed to complete browser auth flow',
-    );
-    return { ok: false, error: error?.message ?? 'Failed to complete auth flow' };
-  }
-}
 
 function readStoredMetadata(credential: UserCredential): StoredAccountMetadata {
   if (credential.metadata && typeof credential.metadata === 'object') {
@@ -578,7 +256,12 @@ export const providerRoutes = new Elysia({ prefix: '/api/providers' })
     if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
     return {
       ok: true,
-      data: detectAgentClis(),
+      data: detectAgentClis().map((cli) => ({
+        ...cli,
+        nativeResearch: cli.provider
+          ? cliResearchBoundary(cli.provider)
+          : cliResearchBoundary(cli.id),
+      })),
     };
   })
   .post('/test-connected', async ({ request, set }) => {
@@ -607,12 +290,10 @@ export const providerRoutes = new Elysia({ prefix: '/api/providers' })
       const label = body.label?.trim();
       const baseUrl = body.baseUrl?.trim();
       if (!label) {
-        set.status = 400;
-        return { ok: false, error: 'A display name is required' };
+        throw new ValidationError('A display name is required');
       }
       if (!baseUrl) {
-        set.status = 400;
-        return { ok: false, error: 'A base URL is required (e.g. https://api.example.com/v1)' };
+        throw new ValidationError('A base URL is required (e.g. https://api.example.com/v1)');
       }
       const { providers } = getContext();
       const id = customProviderId(label);
@@ -627,8 +308,7 @@ export const providerRoutes = new Elysia({ prefix: '/api/providers' })
         models: body.models?.map((m) => m.trim()).filter(Boolean),
       });
       if (!result.success) {
-        set.status = 400;
-        return { ok: false, error: result.error ?? 'Failed to add custom provider' };
+        throw new ValidationError(result.error ?? 'Failed to add custom provider');
       }
       syncProviderConfigsSafely(providers);
       serverLog.info({ provider: id, kind: body.kind ?? 'openai' }, 'Custom provider added');
@@ -695,37 +375,31 @@ export const providerRoutes = new Elysia({ prefix: '/api/providers' })
     async ({ request, body, set }) => {
       if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
 
-      try {
-        const poll = await pollCopilotDeviceAuth(body.deviceCode);
-        if (poll.accessToken) {
-          const { providers } = getContext();
-          const result = await providers.setCredentials('copilot', { authToken: poll.accessToken });
-          if (!result.success) {
-            set.status = 400;
-            return { ok: false, error: result.error ?? 'Failed to activate Copilot auth' };
-          }
-          syncProviderConfigsSafely(providers);
-          return {
-            ok: true,
-            data: {
-              status: 'connected',
-              provider: 'copilot',
-            },
-          };
+      const poll = await pollCopilotDeviceAuth(body.deviceCode);
+      if (poll.accessToken) {
+        const { providers } = getContext();
+        const result = await providers.setCredentials('copilot', { authToken: poll.accessToken });
+        if (!result.success) {
+          throw new ValidationError(result.error ?? 'Failed to activate Copilot auth');
         }
-
+        syncProviderConfigsSafely(providers);
         return {
           ok: true,
           data: {
-            status: poll.error === 'authorization_pending' ? 'pending' : 'polling',
+            status: 'connected',
             provider: 'copilot',
-            ...poll,
           },
         };
-      } catch (error: any) {
-        set.status = 400;
-        return { ok: false, error: error?.message ?? 'Failed to poll Copilot auth' };
       }
+
+      return {
+        ok: true,
+        data: {
+          status: poll.error === 'authorization_pending' ? 'pending' : 'polling',
+          provider: 'copilot',
+          ...poll,
+        },
+      };
     },
     {
       body: t.Object({
@@ -752,48 +426,42 @@ export const providerRoutes = new Elysia({ prefix: '/api/providers' })
     async ({ request, body, set }) => {
       if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
 
-      try {
-        const poll = await pollKimiCodeDeviceAuth(body.deviceCode);
-        if (poll.accessToken && poll.refreshToken) {
-          const marker = createKimiCodeAuthMarker();
-          saveKimiCodeAuthState({
-            accessToken: poll.accessToken,
-            refreshToken: poll.refreshToken,
-            expiresAt: Date.now() + Math.max(1, poll.expiresIn ?? 3600) * 1000,
-            scope: poll.scope,
-            tokenType: poll.tokenType,
-            expiresIn: poll.expiresIn,
-          });
+      const poll = await pollKimiCodeDeviceAuth(body.deviceCode);
+      if (poll.accessToken && poll.refreshToken) {
+        const marker = createKimiCodeAuthMarker();
+        saveKimiCodeAuthState({
+          accessToken: poll.accessToken,
+          refreshToken: poll.refreshToken,
+          expiresAt: Date.now() + Math.max(1, poll.expiresIn ?? 3600) * 1000,
+          scope: poll.scope,
+          tokenType: poll.tokenType,
+          expiresIn: poll.expiresIn,
+        });
 
-          const { providers } = getContext();
-          const result = await providers.setCredentials('kimicode', { authToken: marker });
-          if (!result.success) {
-            clearKimiCodeAuthState();
-            set.status = 400;
-            return { ok: false, error: result.error ?? 'Failed to activate Kimi Code auth' };
-          }
-          syncProviderConfigsSafely(providers);
-          return {
-            ok: true,
-            data: {
-              status: 'connected',
-              provider: 'kimicode',
-            },
-          };
+        const { providers } = getContext();
+        const result = await providers.setCredentials('kimicode', { authToken: marker });
+        if (!result.success) {
+          clearKimiCodeAuthState();
+          throw new ValidationError(result.error ?? 'Failed to activate Kimi Code auth');
         }
-
+        syncProviderConfigsSafely(providers);
         return {
           ok: true,
           data: {
-            status: poll.error === 'authorization_pending' ? 'pending' : 'polling',
+            status: 'connected',
             provider: 'kimicode',
-            ...poll,
           },
         };
-      } catch (error: any) {
-        set.status = 400;
-        return { ok: false, error: error?.message ?? 'Failed to poll Kimi Code auth' };
       }
+
+      return {
+        ok: true,
+        data: {
+          status: poll.error === 'authorization_pending' ? 'pending' : 'polling',
+          provider: 'kimicode',
+          ...poll,
+        },
+      };
     },
     {
       body: t.Object({
@@ -852,8 +520,7 @@ export const providerRoutes = new Elysia({ prefix: '/api/providers' })
       };
 
       if (!values.apiKey && !values.authToken && !values.baseUrl) {
-        set.status = 400;
-        return { ok: false, error: 'Provide at least one account credential' };
+        throw new ValidationError('Provide at least one account credential');
       }
 
       const accountId = crypto.randomUUID();
@@ -879,8 +546,7 @@ export const providerRoutes = new Elysia({ prefix: '/api/providers' })
           const { providers } = getContext();
           const result = await providers.setCredentials(name as ProviderName, values);
           if (!result.success) {
-            set.status = 400;
-            return { ok: false, error: result.error ?? 'Failed to activate saved account' };
+            throw new ValidationError(result.error ?? 'Failed to activate saved account');
           }
           syncProviderConfigsSafely(providers);
         }
@@ -893,12 +559,11 @@ export const providerRoutes = new Elysia({ prefix: '/api/providers' })
             activated: body.activate === true,
           },
         };
-      } catch (error: any) {
+      } catch (error: unknown) {
         for (const id of createdIds) {
           await credentialsService.delete(LOCAL_USER_ID, id);
         }
-        set.status = 500;
-        return { ok: false, error: error?.message ?? 'Failed to save account' };
+        throw new InternalError(error instanceof Error ? error.message : 'Failed to save account');
       }
     },
     {

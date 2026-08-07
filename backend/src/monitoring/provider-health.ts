@@ -138,14 +138,14 @@ export class ProviderHealthMonitor {
       }
 
       return status;
-    } catch (error: any) {
+    } catch (error: unknown) {
       const latency = Date.now() - startTime;
       const status: ProviderHealthStatus = {
         provider: providerName,
         healthy: false,
         lastCheck: startTime,
         latency,
-        error: error.message || 'Unknown error',
+        error: error instanceof Error ? error.message : 'Unknown error',
       };
       this.healthStatus.set(providerName, status);
       metrics.record(`provider.${providerName}.error`, 1);
@@ -177,13 +177,13 @@ export class ProviderHealthMonitor {
         latency,
         modelsTested: models.length,
       };
-    } catch (error: any) {
+    } catch (error: unknown) {
       const latency = Date.now() - startTime;
       return {
         provider: provider.name,
         success: false,
         latency,
-        error: error.message || 'API test failed',
+        error: error instanceof Error ? error.message : 'API test failed',
       };
     } finally {
       timer.stop();

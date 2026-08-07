@@ -111,15 +111,17 @@ export class RoutingServiceEnhanced {
         if (decision) {
           out = { model: decision.model, provider: decision.provider };
         } else {
-          // SmartRouter returned nothing (no providers) — fall through to static default
+          // SmartRouter returned nothing (no providers) — fall through to static default.
+          // resolveModel may return undefined (no bundled catalog); provider is unknown
+          // until live discovery reports it.
           const modelId = DOMAIN.DEFAULT_MODELS[domain] ?? DOMAIN.DEFAULT_MODELS.general;
-          const def = resolveModel(modelId)!;
-          out = { model: modelId, provider: def.provider };
+          const def = resolveModel(modelId);
+          out = { model: modelId, provider: def?.provider };
         }
       } else {
         const modelId = DOMAIN.DEFAULT_MODELS[domain] ?? DOMAIN.DEFAULT_MODELS.general;
-        const def = resolveModel(modelId)!;
-        out = { model: modelId, provider: def.provider };
+        const def = resolveModel(modelId);
+        out = { model: modelId, provider: def?.provider };
       }
     }
 

@@ -1,6 +1,7 @@
 import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir, hostname, platform as osPlatform, release as osRelease, version as osVersion } from 'node:os';
 import { join } from 'node:path';
+import { serverLog } from '../logger';
 import { PROJECT_ROOT } from '../runtime/paths';
 
 const KIMICODE_AUTH_MARKER_PREFIX = 'oauth:kimicode:';
@@ -61,8 +62,9 @@ function kimiOAuthHost(): string {
 function ensurePrivatePath(path: string): void {
   try {
     chmodSync(path, 0o600);
-  } catch {
+  } catch (err: unknown) {
     // Ignore permission adjustment failures.
+    serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'kimicode-auth: permission adjustment failed');
   }
 }
 
@@ -177,7 +179,8 @@ export function kimiCodeCliMarkerProfileDir(value: string): string | null {
   try {
     const decoded = Buffer.from(value.slice(KIMICODE_CLI_MARKER_PREFIX.length), 'base64url').toString('utf-8');
     return decoded || null;
-  } catch {
+  } catch (err: unknown) {
+    serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'kimicode-auth: CLI marker decode failed');
     return null;
   }
 }
@@ -200,7 +203,8 @@ export function loadKimiCodeAuthState(profileDir: string = KORY_KIMI_HOME): Kimi
   if (!existsSync(path)) return null;
   try {
     return parseAuthState(JSON.parse(readFileSync(path, 'utf-8')));
-  } catch {
+  } catch (err: unknown) {
+    serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'kimicode-auth: auth state load/parse failed');
     return null;
   }
 }
@@ -215,8 +219,9 @@ export function saveKimiCodeAuthState(state: KimiCodeAuthState, profileDir: stri
 export function clearKimiCodeAuthState(profileDir: string = KORY_KIMI_HOME): void {
   try {
     rmSync(credentialsPathFor(profileDir), { force: true });
-  } catch {
+  } catch (err: unknown) {
     // Ignore cleanup failures; callers treat missing auth state as signed out.
+    serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'kimicode-auth: auth state cleanup failed');
   }
 }
 
@@ -249,8 +254,9 @@ async function postKimiOAuthForm(
     if (json && typeof json === 'object') {
       data = json as Record<string, unknown>;
     }
-  } catch {
+  } catch (err: unknown) {
     // Leave as empty object for callers to handle.
+    serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'kimicode-auth: token response JSON parse failed');
   }
 
   return { status: response.status, data };

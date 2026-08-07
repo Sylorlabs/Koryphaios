@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { chmodSync, mkdirSync, readdirSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
+import { serverLog } from '../logger';
 import type { ProviderContentBlock } from './types';
 
 const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
@@ -22,12 +23,14 @@ function pruneStaleCache(now = Date.now()): void {
       const path = join(CACHE_DIR, name);
       try {
         if (now - statSync(path).mtimeMs > CACHE_MAX_AGE_MS) unlinkSync(path);
-      } catch {
+      } catch (err: unknown) {
         // A concurrent invocation may already have removed the file.
+        serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'cli-attachments: stale cache entry already removed');
       }
     }
-  } catch {
+  } catch (err: unknown) {
     // Cache cleanup is best effort; attachment creation still reports failures.
+    serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'cli-attachments: cache cleanup best-effort failed');
   }
 }
 
@@ -48,11 +51,13 @@ export function materializeCliImage(
     const path = join(CACHE_DIR, `${digest}.${extensionForMime(mimeType)}`);
     try {
       statSync(path);
-    } catch {
+    } catch (err: unknown) {
+      serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'cli-attachments: cached file missing — writing new copy');
       writeFileSync(path, bytes, { mode: 0o600, flag: 'wx' });
     }
     return path;
-  } catch {
+  } catch (err: unknown) {
+    serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'cli-attachments: image materialization failed');
     return null;
   }
 }

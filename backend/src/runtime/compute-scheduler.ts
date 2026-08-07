@@ -160,7 +160,9 @@ class ComputeScheduler {
       fail = rej;
     });
     // Prevent an "unhandled rejection" when this job fails and no other caller shared it.
-    void jobPromise.catch(() => {});
+    void jobPromise.catch((err: unknown) => {
+      serverLog.debug({ err: err instanceof Error ? err.message : String(err), resource: opts.resource }, 'Compute scheduler job rejected (unhandled rejection guard)');
+    });
     if (opts.key) this.inflight.set(opts.key, jobPromise);
 
     const pool = this.pools[opts.resource] ?? this.pools.light;

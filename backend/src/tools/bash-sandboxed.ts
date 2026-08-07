@@ -48,15 +48,15 @@ function execWithTimeout(
       killed = true;
       try {
         proc.kill('SIGTERM');
-      } catch {
-        // process may have already exited
+      } catch (err: unknown) {
+        toolLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'bash-sandboxed: process may have already exited on SIGTERM');
       }
       // Force-kill after a grace period if SIGTERM didn't take.
       setTimeout(() => {
         try {
           proc.kill('SIGKILL');
-        } catch {
-          // ignore
+        } catch (err: unknown) {
+          toolLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'bash-sandboxed: process may have already exited on SIGKILL');
         }
       }, 3_000);
     }, timeoutMs);
@@ -263,13 +263,13 @@ Resource limits: 512KB output, 2 minute timeout (configurable).`;
         isError: result.exitCode !== 0,
         durationMs,
       };
-    } catch (err: any) {
-      toolLog.error({ err: err.message }, 'Command execution failed');
+    } catch (err: unknown) {
+      toolLog.error({ err: err instanceof Error ? err.message : String(err) }, 'Command execution failed');
 
       return {
         callId,
         name: this.name,
-        output: `Execution error: ${err.message}`,
+        output: `Execution error: ${err instanceof Error ? err.message : String(err)}`,
         isError: true,
         durationMs: Date.now() - startTime,
       };

@@ -145,7 +145,10 @@ function emitPendingPrompt(promptId: string, p: PendingPrompt) {
   approvalListeners.forEach((fn) => {
     try {
       fn({ ...p, promptId });
-    } catch {}
+    } catch (err) {
+      // A single misbehaving listener must not break fan-out to the rest.
+      log.debug({ err: err instanceof Error ? err.message : String(err), promptId }, 'Approval listener threw; continuing to remaining listeners');
+    }
   });
 }
 
@@ -305,8 +308,8 @@ export class CollaborationManager {
               pendingJoins.delete(String(msg.guestId));
             }
           });
-        } catch (err: any) {
-          log.error({ err: err.message }, 'Failed to start relay session');
+        } catch (err: unknown) {
+          log.error({ err: err instanceof Error ? err.message : String(err) }, 'Failed to start relay session');
         }
       }
 
@@ -348,9 +351,9 @@ export class CollaborationManager {
       try {
         await relayClient.updatePolicy(policy);
         relayReady = true;
-      } catch (err: any) {
+      } catch (err: unknown) {
         // Never expose guests through a relay that cannot enforce host policy.
-        log.error({ err: err.message }, 'WAN relay does not support required host policy');
+        log.error({ err: err instanceof Error ? err.message : String(err) }, 'WAN relay does not support required host policy');
         await relayClient.disconnect();
         relayReady = false;
         await db
@@ -369,8 +372,8 @@ export class CollaborationManager {
       for (const role of policy.accessTiers.map((t) => t.id)) {
         try {
           inviteLinks[role] = await relayClient.createInvite(role);
-        } catch (err: any) {
-          log.warn({ role, err: err.message }, 'Failed to create invite link');
+        } catch (err: unknown) {
+          log.warn({ role, err: err instanceof Error ? err.message : String(err) }, 'Failed to create invite link');
         }
       }
     }

@@ -659,8 +659,8 @@ async function proxyToolCall(
     }
     const data = (await resp.json()) as { output?: string; isError?: boolean };
     return { content: data.output ?? '', isError: data.isError ?? false };
-  } catch (err: any) {
-    return { content: `Kory backend unreachable: ${err?.message ?? String(err)}`, isError: true };
+  } catch (err: unknown) {
+    return { content: `Kory backend unreachable: ${err instanceof Error ? err.message : String(err)}`, isError: true };
   }
 }
 

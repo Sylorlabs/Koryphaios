@@ -1,7 +1,7 @@
 import { spawnSync } from 'bun';
 import { readFileSync } from 'node:fs';
 import { resolve, relative, isAbsolute } from 'node:path';
-import { koryLog } from '../logger';
+import { koryLog, serverLog } from '../logger';
 import { gitMutex } from './git-mutex';
 
 /** Branch names: alphanumeric, hyphen, underscore, slash (for refs/heads/foo). Max 255 chars. */
@@ -208,7 +208,8 @@ export class GitManager {
     if (!safePath) return null;
     try {
       return readFileSync(safePath, 'utf-8');
-    } catch {
+    } catch (err: unknown) {
+      serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'Failed to read file content in git manager');
       return null;
     }
   }

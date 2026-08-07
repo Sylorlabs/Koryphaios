@@ -1,6 +1,7 @@
 import { mkdirSync } from 'node:fs';
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { EventEmitter } from 'node:events';
+import { serverLog } from '../logger';
 import { getKoryCodexHome } from './auth-utils';
 import { whichBinary } from './cli-detection';
 
@@ -276,8 +277,9 @@ export class CodexAppServer {
         clearTimeout(pending.timeout);
         if (message.error) pending.reject(new Error(message.error.message ?? 'Codex app-server request failed'));
         else pending.resolve(message.result);
-      } catch {
+      } catch (err: unknown) {
         // The protocol is JSONL; ignore non-protocol diagnostics.
+        serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'Codex app-server: non-protocol JSONL line skipped');
       }
     }
   }

@@ -2,6 +2,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { mkdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { SynthesisRequest, VoicePackManifest, VoicePackStatus, VoiceProviderDescriptor, VoiceSettings } from '@koryphaios/shared';
+import { serverLog } from '../logger';
 import { PROJECT_ROOT } from '../runtime/paths';
 import { createUserCredentialsService } from '../services';
 
@@ -50,7 +51,9 @@ async function packIsInstalled(pack: DownloadableVoicePack): Promise<boolean> {
   try {
     const sizes = await Promise.all(pack.manifest.files.map((file) => stat(join(root, file.path)).then((value) => value.size)));
     return sizes.every((size, index) => size === pack.manifest.files[index].sizeBytes);
-  } catch {
+  } catch (err: unknown) {
+    // Missing or incomplete pack files mean it isn't installed yet.
+    serverLog.debug({ err: err instanceof Error ? err.message : String(err), packId: pack.manifest.id }, 'Voice pack not installed or incomplete');
     return false;
   }
 }
@@ -123,7 +126,7 @@ export function validateVoiceSettings(value: unknown): VoiceSettings {
 }
 
 export async function loadVoiceSettings(): Promise<VoiceSettings> {
-  try { return validateVoiceSettings(JSON.parse(await readFile(SETTINGS_PATH, 'utf8'))); } catch { return structuredClone(DEFAULT_VOICE_SETTINGS); }
+  try { return validateVoiceSettings(JSON.parse(await readFile(SETTINGS_PATH, 'utf8'))); } catch (err: unknown) { serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'Voice settings file missing or invalid; using defaults'); return structuredClone(DEFAULT_VOICE_SETTINGS); }
 }
 export async function saveVoiceSettings(value: unknown): Promise<VoiceSettings> {
   const valid = validateVoiceSettings(value); await mkdir(SETTINGS_DIR, { recursive: true });

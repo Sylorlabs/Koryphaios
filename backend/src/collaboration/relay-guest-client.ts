@@ -100,7 +100,8 @@ export class RelayGuestClient {
     let msg: Record<string, unknown>;
     try {
       msg = JSON.parse(raw);
-    } catch {
+    } catch (err: unknown) {
+      log.debug({ err: err instanceof Error ? err.message : String(err) }, 'Malformed relay guest frame; skipping');
       return;
     }
     switch (msg.type) {
@@ -109,8 +110,9 @@ export class RelayGuestClient {
         for (const fn of this.catalogListeners) {
           try {
             fn(this.catalog);
-          } catch {
-            /* listener error is not fatal */
+          } catch (err: unknown) {
+            // A single misbehaving catalog listener must not break fan-out.
+            log.debug({ err: err instanceof Error ? err.message : String(err) }, 'Catalog listener threw; continuing');
           }
         }
         return;
@@ -178,8 +180,9 @@ export class RelayGuestClient {
     const onAbort = () => {
       try {
         this.send({ type: 'inference-cancel', requestId });
-      } catch {
-        /* already gone */
+      } catch (err: unknown) {
+        // Connection already closed; the cancel can't be delivered.
+        log.debug({ err: err instanceof Error ? err.message : String(err), requestId }, 'Inference cancel send failed; connection already gone');
       }
       failure = 'Cancelled';
       finished = true;

@@ -193,11 +193,12 @@ abstract class BaseMCPTool implements Tool {
         isError: !!result.isError,
         durationMs: performance.now() - start,
       };
-    } catch (err: any) {
+    } catch (err: unknown) {
+      toolLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'mcp tool call failed');
       return {
         callId: call.id,
         name: this.name,
-        output: `MCP Error: ${err.message ?? String(err)}`,
+        output: `MCP Error: ${err instanceof Error ? err.message : String(err)}`,
         isError: true,
         durationMs: performance.now() - start,
       };

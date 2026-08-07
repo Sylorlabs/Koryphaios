@@ -1,6 +1,7 @@
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { basename, join } from 'node:path';
+import { serverLog } from '../logger';
 
 export type CliAccountHealth = 'ready' | 'expired' | 'unknown';
 
@@ -61,7 +62,8 @@ function decodeJwt(token: unknown): Record<string, any> | null {
   if (!part) return null;
   try {
     return JSON.parse(Buffer.from(part, 'base64url').toString('utf8'));
-  } catch {
+  } catch (err: unknown) {
+    serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'cli-accounts: JWT decode failed');
     return null;
   }
 }
@@ -76,7 +78,8 @@ function firstString(...values: unknown[]): string | null {
 function safeJson(path: string): Record<string, any> | null {
   try {
     return JSON.parse(readFileSync(path, 'utf8'));
-  } catch {
+  } catch (err: unknown) {
+    serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'cli-accounts: JSON file parse failed');
     return null;
   }
 }
@@ -123,9 +126,10 @@ function candidateDirectories(home: string, definition: ProfileDefinition): stri
       .filter((name) => name === definition.directoryPrefix || name.startsWith(`${definition.directoryPrefix}`))
       .map((name) => join(home, name))
       .filter((path) => {
-        try { return statSync(path).isDirectory(); } catch { return false; }
+        try { return statSync(path).isDirectory(); } catch (err: unknown) { serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'cli-accounts: statSync failed during directory filter'); return false; }
       });
-  } catch {
+  } catch (err: unknown) {
+    serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'cli-accounts: candidate directory scan failed');
     return [];
   }
 }

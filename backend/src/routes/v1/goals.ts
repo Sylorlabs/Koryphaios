@@ -3,6 +3,7 @@ import { getContext } from '../../context';
 import { requireLocalRouteAuth } from '../../auth/local-route-auth';
 import type { Goal, GoalStatus } from '@koryphaios/shared';
 import { GoalRunner } from '../../kory/goal-runner';
+import { AuthenticationError, ConflictError, NotFoundError, ValidationError } from '../../errors/types';
 
 const statuses = [
   'queued',
@@ -27,22 +28,17 @@ const sendUpdate = (goal: Goal | undefined) => {
 };
 
 export const goalRoutes = new Elysia({ prefix: '/api/goals' })
-  .get('/', async ({ request, set }) => {
-    if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
+  .get('/', async ({ request }) => {
+    if (!requireLocalRouteAuth(request)) throw new AuthenticationError('Unauthorized');
     return { ok: true, data: await getContext().goals.list() };
   })
   .post(
     '/',
-    async ({ request, body, set }) => {
-      if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
-      try {
-        if (body.scope === 'session' && !(await getContext().sessions.get(body.sessionId!)))
-          throw new Error('Session goals require an existing owning chat');
-        return { ok: true, data: sendUpdate(await getContext().goals.create(body)) };
-      } catch (error) {
-        set.status = 400;
-        return { ok: false, error: error instanceof Error ? error.message : 'Invalid goal' };
-      }
+    async ({ request, body }) => {
+      if (!requireLocalRouteAuth(request)) throw new AuthenticationError('Unauthorized');
+      if (body.scope === 'session' && !(await getContext().sessions.get(body.sessionId!)))
+        throw new ValidationError('Session goals require an existing owning chat');
+      return { ok: true, data: sendUpdate(await getContext().goals.create(body)) };
     },
     {
       body: t.Object({
@@ -59,21 +55,14 @@ export const goalRoutes = new Elysia({ prefix: '/api/goals' })
   )
   .patch(
     '/:id',
-    async ({ request, params, body, set }) => {
-      if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
+    async ({ request, params, body }) => {
+      if (!requireLocalRouteAuth(request)) throw new AuthenticationError('Unauthorized');
       const prior = await getContext().goals.get(params.id);
-      if (!prior) {
-        set.status = 404;
-        return { ok: false, error: 'Goal not found' };
-      }
-      if (body.status || body.checklist) {
-        set.status = 409;
-        return {
-          ok: false,
-          error:
-            'Use the Goal Mode lifecycle and evidence endpoints; status and checklist state cannot be patched directly.',
-        };
-      }
+      if (!prior) throw new NotFoundError('Goal', params.id);
+      if (body.status || body.checklist)
+        throw new ConflictError(
+          'Use the Goal Mode lifecycle and evidence endpoints; status and checklist state cannot be patched directly.',
+        );
       return {
         ok: true,
         data: sendUpdate(
@@ -98,41 +87,26 @@ export const goalRoutes = new Elysia({ prefix: '/api/goals' })
   )
   .post(
     '/:id/drive',
-    async ({ request, params, body, set }) => {
-      if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
+    async ({ request, params, body }) => {
+      if (!requireLocalRouteAuth(request)) throw new AuthenticationError('Unauthorized');
       const { goals, sessions, goalDriver } = getContext();
       const goal = await goals.get(params.id);
       const session = await sessions.get(body.sessionId);
-      if (!goal || !session) {
-        set.status = 404;
-        return { ok: false, error: !goal ? 'Goal not found' : 'Session not found' };
-      }
-      if (goal.scope === 'session' && goal.sessionId !== body.sessionId) {
-        set.status = 409;
-        return { ok: false, error: 'This session goal can only run in its owning chat.' };
-      }
-      if (goal.scope === 'project' && session.workingDirectory !== goal.projectPath) {
-        set.status = 409;
-        return { ok: false, error: 'This project goal must run in a chat scoped to its project.' };
-      }
-      try {
-        const started = await goalDriver.start(goal.id, {
-          sessionId: body.sessionId,
-          provider: body.provider,
-          model: body.model,
-          reasoningLevel: body.reasoningLevel,
-          instructions: body.instructions,
-          remotePlanApproved: body.remotePlanApproved,
-        });
-        return { ok: true, data: started };
-      } catch (error) {
-        set.status = 409;
-        return {
-          ok: false,
-          error: error instanceof Error ? error.message : String(error),
-          data: await goals.get(goal.id),
-        };
-      }
+      if (!goal) throw new NotFoundError('Goal', params.id);
+      if (!session) throw new NotFoundError('Session', body.sessionId);
+      if (goal.scope === 'session' && goal.sessionId !== body.sessionId)
+        throw new ConflictError('This session goal can only run in its owning chat.');
+      if (goal.scope === 'project' && session.workingDirectory !== goal.projectPath)
+        throw new ConflictError('This project goal must run in a chat scoped to its project.');
+      const started = await goalDriver.start(goal.id, {
+        sessionId: body.sessionId,
+        provider: body.provider,
+        model: body.model,
+        reasoningLevel: body.reasoningLevel,
+        instructions: body.instructions,
+        remotePlanApproved: body.remotePlanApproved,
+      });
+      return { ok: true, data: started };
     },
     {
       body: t.Object({
@@ -145,75 +119,47 @@ export const goalRoutes = new Elysia({ prefix: '/api/goals' })
       }),
     },
   )
-  .post('/:id/pause', async ({ request, params, set }) => {
-    if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
-    try {
-      return { ok: true, data: await getContext().goalDriver.pause(params.id) };
-    } catch (error) {
-      set.status = 409;
-      return { ok: false, error: error instanceof Error ? error.message : String(error) };
-    }
+  .post('/:id/pause', async ({ request, params }) => {
+    if (!requireLocalRouteAuth(request)) throw new AuthenticationError('Unauthorized');
+    return { ok: true, data: await getContext().goalDriver.pause(params.id) };
   })
-  .post('/:id/resume', async ({ request, params, set }) => {
-    if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
-    try {
-      return { ok: true, data: await getContext().goalDriver.resume(params.id) };
-    } catch (error) {
-      set.status = 409;
-      return { ok: false, error: error instanceof Error ? error.message : String(error) };
-    }
+  .post('/:id/resume', async ({ request, params }) => {
+    if (!requireLocalRouteAuth(request)) throw new AuthenticationError('Unauthorized');
+    return { ok: true, data: await getContext().goalDriver.resume(params.id) };
   })
-  .post('/:id/stop', async ({ request, params, set }) => {
-    if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
-    try {
-      return { ok: true, data: await getContext().goalDriver.stop(params.id) };
-    } catch (error) {
-      set.status = 409;
-      return { ok: false, error: error instanceof Error ? error.message : String(error) };
-    }
+  .post('/:id/stop', async ({ request, params }) => {
+    if (!requireLocalRouteAuth(request)) throw new AuthenticationError('Unauthorized');
+    return { ok: true, data: await getContext().goalDriver.stop(params.id) };
   })
   .post(
     '/:id/checklist/:itemId/complete',
-    async ({ request, params, body, set }) => {
-      if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
-      try {
-        const context = getContext();
-        const current = await context.goals.get(params.id);
-        const item = current?.checklist.find((entry) => entry.id === params.itemId);
-        if (!current || !item) {
-          set.status = 404;
-          return { ok: false, error: 'Checklist item not found' };
-        }
-        const sessionId = current.execution?.sessionId ?? current.sessionId;
-        if (!sessionId) {
-          set.status = 409;
-          return {
-            ok: false,
-            error: 'Start this goal in a chat before recording completion evidence',
-          };
-        }
-        const gate = await context.kory.verifyGoalItem(
-          sessionId,
-          current.objective,
-          item.title,
-          current.execution?.model,
+    async ({ request, params, body }) => {
+      if (!requireLocalRouteAuth(request)) throw new AuthenticationError('Unauthorized');
+      const context = getContext();
+      const current = await context.goals.get(params.id);
+      const item = current?.checklist.find((entry) => entry.id === params.itemId);
+      if (!current || !item) throw new NotFoundError('Checklist item', params.itemId);
+      const sessionId = current.execution?.sessionId ?? current.sessionId;
+      if (!sessionId)
+        throw new ConflictError(
+          'Start this goal in a chat before recording completion evidence',
         );
-        if (!gate.passed) {
-          set.status = 409;
-          return { ok: false, error: gate.feedback ?? 'Critic rejected the completion evidence' };
-        }
-        const value = gate.skipped
-          ? `Critic disabled by user; producer evidence: ${body.value}`
-          : `${body.value}\nCritic PASS: ${gate.feedback ?? 'verified'}`;
-        const goal = await context.goals.completeItem(params.id, params.itemId, {
-          kind: body.kind,
-          value,
-        });
-        return { ok: true, data: sendUpdate(goal) };
-      } catch (error) {
-        set.status = 409;
-        return { ok: false, error: error instanceof Error ? error.message : String(error) };
-      }
+      const gate = await context.kory.verifyGoalItem(
+        sessionId,
+        current.objective,
+        item.title,
+        current.execution?.model,
+      );
+      if (!gate.passed)
+        throw new ConflictError(gate.feedback ?? 'Critic rejected the completion evidence');
+      const value = gate.skipped
+        ? `Critic disabled by user; producer evidence: ${body.value}`
+        : `${body.value}\nCritic PASS: ${gate.feedback ?? 'verified'}`;
+      const goal = await context.goals.completeItem(params.id, params.itemId, {
+        kind: body.kind,
+        value,
+      });
+      return { ok: true, data: sendUpdate(goal) };
     },
     {
       body: t.Object({
@@ -222,17 +168,19 @@ export const goalRoutes = new Elysia({ prefix: '/api/goals' })
       }),
     },
   )
-  .post('/:id/finalize', async ({ request, params, set }) => {
-    if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
+  .post('/:id/finalize', async ({ request, params }) => {
+    if (!requireLocalRouteAuth(request)) throw new AuthenticationError('Unauthorized');
     const result = await new GoalRunner(getContext().goals).finalize(params.id);
     if (result.blocked) {
-      set.status = 409;
-      return { ok: false, error: result.blocked, data: sendUpdate(result.goal) };
+      // Broadcast the updated goal state (logic) before throwing so connected
+      // clients see the latest state; the error response is handled by middleware.
+      sendUpdate(result.goal);
+      throw new ConflictError(result.blocked);
     }
     return { ok: true, data: sendUpdate(result.goal) };
   })
-  .delete('/:id', async ({ request, params, set }) => {
-    if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
+  .delete('/:id', async ({ request, params }) => {
+    if (!requireLocalRouteAuth(request)) throw new AuthenticationError('Unauthorized');
     const goal = await getContext().goals.get(params.id);
     if (goal && !terminal.has(goal.status)) await getContext().goalDriver.stop(params.id);
     await getContext().goals.delete(params.id);

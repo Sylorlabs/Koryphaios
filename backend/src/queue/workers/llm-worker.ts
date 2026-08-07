@@ -231,14 +231,15 @@ async function processLLMJob(job: Job<LLMJobData>): Promise<LLMJobResult> {
       model,
       finishReason,
     };
-  } catch (error: any) {
-    providerLog.error({ jobId: job.id, model, provider, error: error.message }, 'LLM job error');
+  } catch (error: unknown) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    providerLog.error({ jobId: job.id, model, provider, error: errorMessage }, 'LLM job error');
 
     // Determine if this is a rate limit error
     if (
-      error.message?.includes('rate limit') ||
-      error.message?.includes('429') ||
-      error.message?.includes('too many requests')
+      errorMessage.includes('rate limit') ||
+      errorMessage.includes('429') ||
+      errorMessage.includes('too many requests')
     ) {
       // Let BullMQ handle the retry with backoff
       throw error;

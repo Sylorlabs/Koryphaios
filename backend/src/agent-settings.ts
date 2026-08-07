@@ -10,6 +10,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync, renameSync } from '
 import { join, dirname } from 'node:path';
 import { wsBroker } from './pubsub';
 import { resolveMemoryRoot } from './memory/unified-memory';
+import { serverLog } from './logger';
 
 // ============================================================================
 // Configuration
@@ -191,7 +192,8 @@ function loadKoryphaiosConfig(projectRoot: string): Record<string, unknown> {
   if (!existsSync(configPath)) return {};
   try {
     return JSON.parse(readFileSync(configPath, 'utf-8'));
-  } catch {
+  } catch (err: unknown) {
+    serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'Failed to parse koryphaios.json config');
     return {};
   }
 }
@@ -220,7 +222,7 @@ function saveKoryphaiosConfig(projectRoot: string, config: Record<string, unknow
       agentId: 'system',
     });
   } catch (err) {
-    console.error('Failed to save koryphaios.json atomically:', err);
+    serverLog.error({ err }, 'Failed to save koryphaios.json atomically');
     // Fallback to direct write if rename fails (e.g. cross-device)
     writeFileSync(configPath, JSON.stringify(config, null, 2), 'utf-8');
   }
@@ -540,7 +542,7 @@ export function readPreferences(projectRoot: string): {
     const content = readFileSync(filePath, 'utf-8');
     return { path: filePath, content, exists: true };
   } catch (err) {
-    console.error('Failed to read preferences:', err);
+    serverLog.error({ err }, 'Failed to read preferences');
     return { path: filePath, content: '', exists: false };
   }
 }

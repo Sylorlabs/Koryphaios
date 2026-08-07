@@ -11,7 +11,7 @@ import type { Provider, ProviderEvent } from '../../providers/types';
 import type { ProviderMessage } from '../../providers/types';
 import { ToolRegistry, type ToolContext } from '../../tools';
 import { withTimeoutSignal } from '../../providers';
-import { koryLog } from '../../logger';
+import { koryLog, serverLog } from '../../logger';
 import { parseCriticVerdict, formatMessagesForCritic } from '../critic-util';
 import type { EventEmitterService } from './EventEmitterService';
 import { loadAgentSettings } from '../../agent-settings';
@@ -132,8 +132,8 @@ export class CriticGateService {
             let parsedInput: Record<string, unknown> = {};
             try {
               parsedInput = JSON.parse(call.input || '{}') as Record<string, unknown>;
-            } catch {
-              /* Expected: malformed tool input JSON, defaults to {} */
+            } catch (err: unknown) {
+              serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'Malformed tool input JSON in critic gate, defaults to {}');
             }
             completedToolCalls.push({ id: event.toolCallId!, name: call.name, input: parsedInput });
             pendingToolCalls.delete(event.toolCallId!);

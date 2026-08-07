@@ -197,8 +197,9 @@ export class DevinCliBridge extends ManagedCliBridge implements CliBridge {
     if (existsSync(configPath)) {
       try {
         existing = JSON.parse(require('node:fs').readFileSync(configPath, 'utf8'));
-      } catch {
+      } catch (err: unknown) {
         /* overwrite */
+        providerLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'Devin bridge: existing config parse failed — will overwrite');
       }
     }
     existing.mcpServers = { ...(existing.mcpServers as Record<string, unknown> ?? {}), ...mcpServers };
@@ -247,7 +248,8 @@ export class DevinCliBridge extends ManagedCliBridge implements CliBridge {
     let data: any;
     try {
       data = JSON.parse(raw);
-    } catch {
+    } catch (err: unknown) {
+      providerLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'Devin bridge: trajectory JSON parse failed');
       return { trajectory: { steps: [] }, events: [] };
     }
     const trajectory: CliTrajectory = {
@@ -345,8 +347,9 @@ export function getKoryphaiosDevinHome(sessionId?: string): string {
       try {
         if (existsSync(link)) require('node:fs').rmSync(link, { force: true });
         require('node:fs').symlinkSync(realCreds, link);
-      } catch {
+      } catch (err: unknown) {
         /* symlink unsupported/exists — best effort */
+        providerLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'Devin bridge: credentials symlink best-effort failed');
       }
     }
   } catch (err) {

@@ -17,6 +17,7 @@ import { existsSync, mkdtempSync, mkdirSync, symlinkSync, rmSync } from 'node:fs
 import { execFileSync } from 'node:child_process';
 import { delimiter, join, basename } from 'node:path';
 import { homedir, tmpdir } from 'node:os';
+import { serverLog } from '../logger';
 import type { SandboxPolicy } from '@koryphaios/shared';
 
 function which(bin: string): string | null {
@@ -46,8 +47,9 @@ function detect(): { mechanism: SandboxMechanism; path: string | null } {
         execFileSync(bw, ['--ro-bind', '/usr', '/usr', 'true'], { timeout: 4000, stdio: 'ignore' });
         cached = { mechanism: 'bubblewrap', path: bw };
         return cached;
-      } catch {
-        /* namespaces unavailable */
+      } catch (err: unknown) {
+        // User namespaces unavailable on this kernel; fall back to no isolation.
+        serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'bubblewrap user namespaces unavailable; falling back');
       }
     }
   } else if (process.platform === 'darwin') {
@@ -237,17 +239,19 @@ export function buildSoftJail(base: NodeJS.ProcessEnv, configDirs: string[] = []
   const tmp = join(home, '.tmp');
   try {
     mkdirSync(tmp, { recursive: true });
-  } catch {
-    /* best-effort */
+  } catch (err: unknown) {
+    // Best-effort temp dir; the CLI can use the system temp if this fails.
+    serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'Soft-jail temp dir creation failed; best-effort');
   }
   // Expose ONLY the CLI's own config inside the fake home.
   for (const dir of configDirs) {
     if (!existsSync(dir)) continue;
     try {
       symlinkSync(dir, join(home, basename(dir)), 'dir');
-    } catch {
-      /* symlink may need privilege on Windows — the CLI usually reads its
-         config via an absolute env var anyway, so this is best-effort. */
+    } catch (err: unknown) {
+      // Symlink may need privilege on Windows — the CLI usually reads its
+      // config via an absolute env var anyway, so this is best-effort.
+      serverLog.debug({ err: err instanceof Error ? err.message : String(err), dir }, 'Soft-jail config symlink failed; best-effort');
     }
   }
 
@@ -271,8 +275,9 @@ export function buildSoftJail(base: NodeJS.ProcessEnv, configDirs: string[] = []
     cleanup: () => {
       try {
         rmSync(home, { recursive: true, force: true });
-      } catch {
-        /* ignore */
+      } catch (err: unknown) {
+        // Cleanup is best-effort; the OS temp reaper will remove it eventually.
+        serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'Soft-jail home cleanup failed; best-effort');
       }
     },
   };

@@ -9,7 +9,7 @@
 
 import { getContext } from '../context';
 import type { ToolContext } from '../tools/registry';
-import { mcpLog } from '../logger';
+import { mcpLog, serverLog } from '../logger';
 import { VERSION } from '../constants';
 import { loadAgentSettings } from '../agent-settings';
 import { resolveToolPermissionPolicy } from '../tools/permission-policy';
@@ -139,7 +139,8 @@ export async function serveMcp(
   let body: JsonRpcRequest;
   try {
     body = (await req.json()) as JsonRpcRequest;
-  } catch {
+  } catch (err: unknown) {
+    serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'MCP endpoint failed to parse request body');
     return new Response(JSON.stringify(rpcError(null, -32700, 'Parse error')), {
       status: 400,
       headers: { 'Content-Type': 'application/json' },

@@ -1,5 +1,6 @@
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { basename, join } from 'node:path';
+import { serverLog } from '../logger';
 import type { QualityGateReport } from './prompts';
 
 export interface VerificationCheck {
@@ -11,7 +12,8 @@ export interface VerificationCheck {
 const readJson = (path: string): Record<string, unknown> | null => {
   try {
     return JSON.parse(readFileSync(path, 'utf8')) as Record<string, unknown>;
-  } catch {
+  } catch (err: unknown) {
+    serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'Failed to read verification JSON file');
     return null;
   }
 };

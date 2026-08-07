@@ -370,16 +370,18 @@ export class OpenAIProvider implements Provider {
           };
         }
       }
-    } catch (err: any) {
-      if (err.name === 'AbortError' || err.name === 'AbortSignal') return;
+    } catch (err: unknown) {
+      if (err instanceof Error && (err.name === 'AbortError' || err.name === 'AbortSignal')) return;
 
-      // Log full error details for debugging
+      // OpenAI SDK errors carry status/code/type as extra own properties.
+      // Narrow via record access — no `as any` needed.
+      const extras = (err instanceof Error ? err : {}) as Record<string, unknown>;
       const errorDetail = {
-        message: err.message ?? String(err),
-        name: err.name,
-        status: err.status,
-        code: err.code,
-        type: err.type,
+        message: err instanceof Error ? err.message : String(err),
+        name: err instanceof Error ? err.name : undefined,
+        status: typeof extras.status === 'number' ? extras.status : undefined,
+        code: typeof extras.code === 'string' ? extras.code : undefined,
+        type: typeof extras.type === 'string' ? extras.type : undefined,
       };
       providerLog.error(
         { errorDetail, model: request.model, provider: this.name },

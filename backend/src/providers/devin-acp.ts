@@ -126,8 +126,9 @@ export class DevinAcpClient {
     if (this.sessionId) {
       try {
         await this.sendRequest('session/end', { sessionId: this.sessionId });
-      } catch {
+      } catch (err: unknown) {
         /* best effort */
+        providerLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'Devin ACP: session/end best-effort failed');
       }
     }
     this.child?.stdin?.end();
@@ -358,8 +359,9 @@ export class DevinAcpClient {
           // Notification (streaming event).
           this.handleNotification(msg as JsonRpcNotification);
         }
-      } catch {
+      } catch (err: unknown) {
         // Not valid JSON — ignore (could be a log line).
+        providerLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'Devin ACP: non-JSON line skipped');
       }
     }
   }

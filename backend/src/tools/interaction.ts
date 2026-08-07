@@ -1,4 +1,5 @@
 import type { Tool, ToolContext, ToolCallInput, ToolCallOutput } from './registry';
+import { serverLog } from '../logger';
 
 /**
  * Tool for the Manager to ask the user a question with predefined options.
@@ -45,11 +46,12 @@ export class AskUserTool implements Tool {
         isError: false,
         durationMs: 0,
       };
-    } catch (err: any) {
+    } catch (err: unknown) {
+      serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'ask_user: error waiting for user input');
       return {
         callId: call.id,
         name: this.name,
-        output: `Error waiting for user input: ${err.message}`,
+        output: `Error waiting for user input: ${err instanceof Error ? err.message : String(err)}`,
         isError: true,
         durationMs: 0,
       };
@@ -98,11 +100,12 @@ export class DelegateToWorkerTool implements Tool {
     try {
       const result = await ctx.delegateToWorker(task.trim(), domain);
       return { callId: call.id, name: this.name, output: result, isError: false, durationMs: 0 };
-    } catch (err: any) {
+    } catch (err: unknown) {
+      serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'delegate_to_worker: delegation failed');
       return {
         callId: call.id,
         name: this.name,
-        output: `Delegation failed: ${err.message ?? String(err)}`,
+        output: `Delegation failed: ${err instanceof Error ? err.message : String(err)}`,
         isError: true,
         durationMs: 0,
       };

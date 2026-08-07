@@ -4,6 +4,7 @@ import * as schema from './schema';
 import path from 'path';
 import { runMigrations } from './migrations';
 import { ensureSecureDir, hardenFilePermissions } from '../security/fs-permissions';
+import { serverLog } from '../logger';
 
 // Get database path from env or default to data/ directory.
 // Handle both `sqlite://path` (URL form) and `sqlite:path` (test-runner form).
@@ -20,8 +21,8 @@ const dbPath =
 try {
   const { dirname } = require('node:path') as typeof import('node:path');
   if (dirname(dbPath) !== '.') ensureSecureDir(dirname(dbPath));
-} catch {
-  /* open below will surface real permission problems */
+} catch (err: unknown) {
+  serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'Failed to secure database directory');
 }
 
 // Create bun:sqlite database instance

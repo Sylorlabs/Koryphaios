@@ -25,6 +25,7 @@ import { homedir } from 'node:os';
 import { db } from '../db';
 import { notes } from '../db/schema';
 import { eq } from 'drizzle-orm';
+import { serverLog } from '../logger';
 
 // ============================================================================
 // Workspace-shared memory root
@@ -345,7 +346,7 @@ export function readUniversalMemory(): MemoryFile {
       size: content.length,
     };
   } catch (err) {
-    console.error('Failed to read universal memory:', err);
+    serverLog.error({ err }, 'Failed to read universal memory');
     return {
       path: filePath,
       content: '',
@@ -528,7 +529,7 @@ export function readProjectMemory(projectRoot: string): MemoryFile {
       size: content.length,
     };
   } catch (err) {
-    console.error('Failed to read project memory:', err);
+    serverLog.error({ err }, 'Failed to read project memory');
     return {
       path: filePath,
       content: '',
@@ -675,7 +676,7 @@ export function readSessionMemory(projectRoot: string, sessionId: string): Memor
       size: content.length,
     };
   } catch (err) {
-    console.error(`Failed to read session memory for ${sessionId}:`, err);
+    serverLog.error({ err, sessionId }, 'Failed to read session memory');
     return {
       path: filePath,
       content: '',
@@ -731,13 +732,13 @@ export function deleteSessionMemory(projectRoot: string, sessionId: string): boo
           rmdirSync(dir);
         }
       }
-    } catch {
-      // Ignore cleanup errors
+    } catch (err: unknown) {
+      serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'Session memory directory cleanup failed');
     }
 
     return true;
   } catch (err) {
-    console.error(`Failed to delete session memory for ${sessionId}:`, err);
+    serverLog.error({ err, sessionId }, 'Failed to delete session memory');
     return false;
   }
 }
@@ -884,7 +885,7 @@ export function readRules(projectRoot: string): MemoryFile {
       size: content.length,
     };
   } catch (err) {
-    console.error('Failed to read rules:', err);
+    serverLog.error({ err }, 'Failed to read rules');
     return {
       path: filePath,
       content: '',
@@ -937,7 +938,7 @@ export function loadMemorySettings(projectRoot: string): MemorySettings {
     const parsed = JSON.parse(content);
     return { ...DEFAULT_MEMORY_SETTINGS, ...parsed };
   } catch (err) {
-    console.error('Failed to load memory settings:', err);
+    serverLog.error({ err }, 'Failed to load memory settings');
     return DEFAULT_MEMORY_SETTINGS;
   }
 }
@@ -1077,7 +1078,8 @@ export async function getNotesCatalogPrompt(
       lines.join('\n') +
       suffix
     );
-  } catch {
+  } catch (err: unknown) {
+    serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'Failed to build notes catalog context block');
     return '';
   }
 }
@@ -1090,8 +1092,8 @@ export async function getNotesContext(maxTokens: number = 2000): Promise<string>
   let contextNotes: (typeof notes.$inferSelect)[];
   try {
     contextNotes = await db.select().from(notes).where(eq(notes.includeInContext, 1));
-  } catch {
-    // DB may not be initialized yet in some code paths (tests, CLI) — degrade gracefully
+  } catch (err: unknown) {
+    serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'Notes DB not available for context, degrading gracefully');
     return '';
   }
 

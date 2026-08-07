@@ -74,6 +74,8 @@ export interface EmbeddingJobResult {
   embedding?: number[];
   dimensions?: number;
   error?: string;
+  /** True when the result came from the stub path (no real embedding provider). */
+  isStub?: boolean;
 }
 
 export type EmbeddingJob = Job<EmbeddingJobData, EmbeddingJobResult>;

@@ -31,13 +31,15 @@ import {
   detectClineCLILogin,
   createClineCLIAuthMarker,
   detectKimiCodeCLILogin,
+  detectFreebuffCLILogin,
+  createFreebuffCLIAuthMarker,
 } from './auth-utils';
 import { discoverCliAccounts } from './cli-accounts';
 import { createKimiCodeAuthMarker, createKimiCodeCliMarker } from './kimicode-auth';
 
 export interface AgentCliStatus {
   /** Stable id for the CLI. */
-  id: 'claude' | 'codex' | 'antigravity' | 'grok' | 'cursor' | 'devin' | 'cline' | 'kimi';
+  id: 'claude' | 'codex' | 'antigravity' | 'grok' | 'cursor' | 'devin' | 'cline' | 'kimi' | 'freebuff';
   displayName: string;
   /** Candidate binary names looked up on PATH. */
   binaries: string[];
@@ -130,6 +132,14 @@ export function canAutoEnable(provider: ProviderName): boolean {
       // intent signal, so we check it first.
       return detectKimiCodeCLILogin()
         || (!!whichBinary('kimi') && discoverCliAccounts().some((account) => account.provider === 'kimicode'));
+    case 'freebuff':
+      // Freebuff is the free, ad-supported build of Codebuff. Koryphaios
+      // reads the stored authToken from ~/.config/manicode/credentials.json
+      // and calls the Codebuff backend via @codebuff/sdk (no subprocess, no
+      // TUI, no ads). The CLI binary is optional — a prior `freebuff login`
+      // is enough — but its presence is the strongest intent signal.
+      return detectFreebuffCLILogin()
+        || (!!whichBinary('freebuff') && detectFreebuffCLILogin());
     default:
       return false;
   }
@@ -169,6 +179,11 @@ export function cliAutoEnableCreds(
       const account = discoverCliAccounts().find((a) => a.provider === 'kimicode');
       return { authToken: account ? createKimiCodeCliMarker(account.profileDir) : createKimiCodeAuthMarker() };
     }
+    case 'freebuff':
+      // The CLI owns the real token (read lazily from
+      // ~/.config/manicode/credentials.json); the marker just signals
+      // "use the Freebuff/Codebuff SDK harness".
+      return { authToken: createFreebuffCLIAuthMarker() };
     default:
       return null;
   }
@@ -302,7 +317,24 @@ export function detectAgentClis(): AgentCliStatus[] {
     docsUrl: 'https://kimi.com/docs/cli',
   });
 
-  return [claude, codex, antigravity, grok, cursor, devin, cline, kimi];
+  // ── Freebuff (free Codebuff build) → `freebuff` provider. Koryphaios reads
+  // the stored authToken from ~/.config/manicode/credentials.json and calls
+  // the Codebuff backend via @codebuff/sdk (no subprocess, no TUI, no ads).
+  // The CLI binary is optional — a prior `freebuff login` is enough — but its
+  // presence is the strongest intent signal. ──
+  const freebuffLogin = detectFreebuffCLILogin();
+  const freebuff = mk('freebuff', 'Freebuff CLI', ['freebuff'], 'freebuff', {
+    loggedIn: freebuffLogin,
+    authSource: freebuffLogin ? '~/.config/manicode/credentials.json' : null,
+    autoEnabled: canAutoEnable('freebuff'),
+    workingNote:
+      'Freebuff CLI detected and logged in — Koryphaios reads the stored auth token and calls the Codebuff backend via @codebuff/sdk (no subprocess, no ads).',
+    loggedOutNote:
+      'Freebuff CLI is not logged in — run "freebuff login", or sign in from Settings.',
+    docsUrl: 'https://github.com/CodebuffAI/codebuff',
+  });
+
+  return [claude, codex, antigravity, grok, cursor, devin, cline, kimi, freebuff];
 }
 
 function mk(

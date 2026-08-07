@@ -19,7 +19,7 @@ export {
 import { randomBytes, timingSafeEqual } from 'node:crypto';
 import { mkdirSync, writeFileSync, realpathSync } from 'node:fs';
 import { isAbsolute, join, relative, resolve } from 'node:path';
-import { toolLog } from './logger';
+import { toolLog, serverLog } from './logger';
 import { SECURITY } from './constants';
 
 // ─── Bash Command Sandboxing ────────────────────────────────────────────────
@@ -135,7 +135,8 @@ export async function validateUrl(url: string): Promise<{
   let parsed: URL;
   try {
     parsed = new URL(url);
-  } catch {
+  } catch (err: unknown) {
+    serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'Invalid URL format in validateUrl');
     return { safe: false, reason: 'Invalid URL format' };
   }
 
@@ -274,7 +275,8 @@ export async function validateUrl(url: string): Promise<{
       validatedHostname: hostname,
       validatedIps: allIps,
     };
-  } catch {
+  } catch (err: unknown) {
+    serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'DNS resolution failed in validateUrl');
     return {
       safe: false,
       reason: `Blocked: DNS resolution failed for "${hostname}" — fail-closed for safety`,
@@ -479,10 +481,12 @@ export function validatePathAccess(
     resolved = resolve(absolutePath);
     try {
       resolved = realpathSync(resolved);
-    } catch {
+    } catch (err: unknown) {
       // File may not exist yet (e.g. write); use resolved path
+      serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'realpathSync failed, file may not exist yet');
     }
-  } catch {
+  } catch (err: unknown) {
+    serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'Invalid path in validatePathAccess');
     return { allowed: false, reason: 'Invalid path' };
   }
 
@@ -690,7 +694,8 @@ export function validateCsrfToken(cookieToken: string | null, headerToken: strin
   if (cookieToken.length !== headerToken.length) return false;
   try {
     return timingSafeEqual(Buffer.from(cookieToken, 'hex'), Buffer.from(headerToken, 'hex'));
-  } catch {
+  } catch (err: unknown) {
+    serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'CSRF token comparison failed');
     return false;
   }
 }
@@ -797,7 +802,8 @@ export async function parseCLIAuthToken(
   if (storedValue.startsWith('env:')) {
     try {
       decrypted = await decryptFn(storedValue);
-    } catch {
+    } catch (err: unknown) {
+      serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'CLI auth token decryption failed');
       return null;
     }
   } else if (storedValue.startsWith('cli:')) {

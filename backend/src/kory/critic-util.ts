@@ -4,6 +4,7 @@
  */
 
 import { z } from 'zod';
+import { serverLog } from '../logger';
 
 export const CriticReportSchema = z.object({
   verdict: z.enum(['PASS', 'FAIL']),
@@ -37,7 +38,8 @@ export function parseCriticReport(content: string): CriticReport | null {
       return null;
     }
     return result.data;
-  } catch {
+  } catch (err: unknown) {
+    serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'Failed to parse critic report JSON');
     return null;
   }
 }

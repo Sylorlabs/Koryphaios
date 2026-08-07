@@ -86,8 +86,9 @@ function createPinoLogger(moduleName: string): Logger {
           maxFiles: 7,
         },
       };
-    } catch {
-      // Fallback to stdout
+    } catch (err: unknown) {
+      // Logger module itself — serverLog isn't available yet, use console.
+      console.warn('pino-roll transport setup failed, falling back to stdout:', err instanceof Error ? err.message : String(err));
     }
   } else if (isTTY) {
     try {
@@ -99,8 +100,9 @@ function createPinoLogger(moduleName: string): Logger {
           ignore: 'pid,hostname',
         },
       };
-    } catch {
-      // Fallback to stdout
+    } catch (err: unknown) {
+      // Logger module itself — serverLog isn't available yet, use console.
+      console.warn('pino-pretty transport setup failed, falling back to stdout:', err instanceof Error ? err.message : String(err));
     }
   }
 
@@ -122,9 +124,5 @@ export const providerLog = createLogger('providers');
 export const koryLog = createLogger('kory');
 export const toolLog = createLogger('tools');
 export const mcpLog = createLogger('mcp');
-export const telegramLog = createLogger('telegram');
-export const discordLog = createLogger('discord');
-export const slackLog = createLogger('slack');
-export const messagingLog = createLogger('messaging');
 export const authLog = createLogger('auth');
 export const routingLog = createLogger('routing');

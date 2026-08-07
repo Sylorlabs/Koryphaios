@@ -38,13 +38,7 @@ const NATIVE_PROVIDERS = new Set([
 // offer Kory control-plane tools (especially delegation) until an adapter adds a
 // real bridge like the Codex CLI envelope bridge.
 const NATIVE_PROVIDERS_WITHOUT_KORY_TOOL_BRIDGE = new Set([
-  'claude',
-  'grok',
-  'antigravity',
   'gemini-cli',
-  'cursor',
-  'devin',
-  'cline',
 ]);
 
 export function supportsKoryControlPlaneTools(provider: ProviderName | string): boolean {

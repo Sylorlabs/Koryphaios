@@ -46,16 +46,17 @@ async function fetchOpenAICreditGrants(apiKey: string): Promise<void> {
       totalUsed = data.total_used ?? data.total_used_amount;
       totalGranted = data.total_granted ?? data.total_granted_amount;
       totalAvailable = data.total_available ?? data.total_available_amount;
-    } catch {
+    } catch (err: unknown) {
       // keep raw payload
+      serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'OpenAI credit_grants JSON parse failed — keeping raw payload');
     }
     saveCloudSnapshot('openai', text, totalUsed, totalGranted, totalAvailable);
     serverLog.debug(
       { totalUsed, totalGranted, totalAvailable },
       'OpenAI credit_grants snapshot saved',
     );
-  } catch (err: any) {
-    serverLog.warn({ err: err?.message }, 'OpenAI credit_grants poll failed');
+  } catch (err: unknown) {
+    serverLog.warn({ err: err instanceof Error ? err.message : String(err) }, 'OpenAI credit_grants poll failed');
   }
 }
 
@@ -74,8 +75,8 @@ async function fetchGitHubCopilotMetrics(enterpriseId: string, token: string): P
     const text = await res.text();
     saveCloudSnapshot('github_copilot', text);
     serverLog.debug('GitHub Copilot metrics snapshot saved');
-  } catch (err: any) {
-    serverLog.warn({ err: err?.message }, 'GitHub Copilot metrics poll failed');
+  } catch (err: unknown) {
+    serverLog.warn({ err: err instanceof Error ? err.message : String(err) }, 'GitHub Copilot metrics poll failed');
   }
 }
 

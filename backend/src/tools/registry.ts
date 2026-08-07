@@ -248,8 +248,9 @@ export class ToolRegistry {
             durationMs: performance.now() - start,
           };
         }
-      } catch {
+      } catch (err: unknown) {
         // If the preflight hook throws, fail closed (block the tool).
+        toolLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'preflight check threw — blocking tool for safety');
         return {
           callId: call.id,
           name: call.name,
@@ -264,7 +265,7 @@ export class ToolRegistry {
       const result = await tool.run(ctx, call);
       result.durationMs = performance.now() - start;
       return result;
-    } catch (err: any) {
+    } catch (err: unknown) {
       // Log full error details for debugging
       toolLog.error(
         {
@@ -281,7 +282,7 @@ export class ToolRegistry {
       return {
         callId: call.id,
         name: call.name,
-        output: `Tool error: ${err.message ?? String(err)}`,
+        output: `Tool error: ${err instanceof Error ? err.message : String(err)}`,
         isError: true,
         durationMs: performance.now() - start,
       };

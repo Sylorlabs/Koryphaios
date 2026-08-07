@@ -109,6 +109,9 @@ export function decideToolPermission(
       : { action: 'ask', reason: 'Accept Edits requires approval for non-file actions' };
   }
   if (policy.mode === 'guarded') {
+    if (fileEdit) {
+      return { action: 'allow', reason: 'Guarded mode allows all file edits' };
+    }
     return risky || exceedsAutonomyLimits
       ? { action: 'ask', reason: 'Guarded mode requires approval for risky actions' }
       : { action: 'allow', reason: 'Routine action in Guarded mode' };

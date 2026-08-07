@@ -14,7 +14,7 @@
 
 import type { ModelDef, ProviderConfig } from '@koryphaios/shared';
 import { spawn } from 'node:child_process';
-import { readFileSync, existsSync, unlinkSync, mkdirSync, writeFileSync } from 'node:fs';
+import { readFileSync, existsSync, unlinkSync, mkdirSync, writeFileSync, mkdtempSync, rmSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { tmpdir, homedir } from 'node:os';
 import { whichBinary } from './cli-detection';
@@ -105,9 +105,13 @@ export class DevinProvider implements Provider {
       provider: 'devin' as const,
       apiModelId: m.id,
       contextWindow: m.contextWindow ?? 0,
-      maxOutputTokens: 4_096,
+      maxOutputTokens: 0,
     }));
     return live;
+  }
+
+  async refreshModels(): Promise<void> {
+    await getDevinCapabilitiesAsync();
   }
 
   private resolveCliModel(modelId: string | undefined): string | undefined {
@@ -117,6 +121,7 @@ export class DevinProvider implements Provider {
   }
 
   async *streamResponse(request: StreamRequest): AsyncGenerator<ProviderEvent> {
+    const researchOnly = request.capabilityProfile === 'research-only';
     const bin = whichBinary('devin');
     if (!bin) {
       yield { type: 'error', error: 'Devin CLI (devin) not found on PATH.' };
@@ -134,9 +139,17 @@ export class DevinProvider implements Provider {
     // the first turn pays the probe cost; subsequent turns use the cache.
     const bridge = new DevinCliBridge();
     const caps = await bridge.ensureCapabilities();
+    if (researchOnly && !caps.supportsAgentConfig) {
+      yield {
+        type: 'error',
+        error: 'Devin native research is unavailable: this CLI does not expose strict tool visibility.',
+      };
+      return;
+    }
 
     const exportPath = join(tmpdir(), `devin-${Date.now()}-${Math.round(performance.now())}.json`);
-    const cwd = request.workingDirectory?.trim() || process.cwd();
+    const researchRoot = researchOnly ? mkdtempSync(join(tmpdir(), 'kory-web-research-devin-')) : null;
+    const cwd = researchRoot ?? (request.workingDirectory?.trim() || process.cwd());
 
     // ── Build the declarative agent config when supported (Phase 1) ──
     // Replaces the HARNESS_SYSTEM_NOTE prompt-body hack: the system prompt +
@@ -159,6 +172,17 @@ export class DevinProvider implements Provider {
     if (caps.supportsAgentConfig) {
       const agentConfig = bridge.buildAgentConfig(bridgeCtx);
       if (agentConfig) {
+        if (researchOnly) {
+          agentConfig.systemInstructions = [
+            'Perform web research only. Use only the visible native web tools. Do not inspect local files, execute commands, modify state, call MCP tools, or delegate. Return concise findings with full source URLs.',
+          ];
+          agentConfig.allowedTools = ['WebSearch', 'WebFetch', 'Browser'];
+          agentConfig.permissions = {
+            allow: [],
+            deny: ['Read(**)', 'Write(**)', 'Exec(*)'],
+            ask: [],
+          };
+        }
         agentConfigPath = bridge.writeAgentConfigFile(agentConfig, request.sessionId);
         // Set up the per-session isolated devin home (rules/skills/hooks/MCP).
         devinHome = getKoryphaiosDevinHome(request.sessionId);
@@ -166,7 +190,7 @@ export class DevinProvider implements Provider {
         // ── Wire MCP server (kory__ tools) ───────────────────────────────
         // Write the kory MCP server to .devin/config.json so the CLI discovers
         // it on startup and gets access to all kory__ tools.
-        const mcpConfigs = bridge.buildMcpConfig(bridgeCtx);
+        const mcpConfigs = researchOnly ? null : bridge.buildMcpConfig(bridgeCtx);
         if (mcpConfigs && mcpConfigs.length > 0) {
           try {
             bridge.writeMcpConfig(mcpConfigs, devinHome);
@@ -176,7 +200,7 @@ export class DevinProvider implements Provider {
         }
 
         // ── Wire hooks (PreToolUse enforcement layer) ────────────────────
-        const hookConfigs = bridge.buildHooks(bridgeCtx);
+        const hookConfigs = researchOnly ? null : bridge.buildHooks(bridgeCtx);
         if (hookConfigs && hookConfigs.length > 0) {
           try {
             const hooksJson = bridge.serializeHooks(hookConfigs);
@@ -189,7 +213,7 @@ export class DevinProvider implements Provider {
         }
 
         // ── Wire rules (AGENTS.md) ───────────────────────────────────────
-        const ruleFiles = bridge.buildRules(bridgeCtx);
+        const ruleFiles = researchOnly ? null : bridge.buildRules(bridgeCtx);
         if (ruleFiles) {
           for (const rule of ruleFiles) {
             try {
@@ -202,7 +226,7 @@ export class DevinProvider implements Provider {
         }
 
         // ── Wire skills (.devin/skills/<name>/SKILL.md) ──────────────────
-        const skillFiles = bridge.buildSkills(bridgeCtx);
+        const skillFiles = researchOnly ? null : bridge.buildSkills(bridgeCtx);
         if (skillFiles) {
           for (const skill of skillFiles) {
             try {
@@ -232,12 +256,17 @@ export class DevinProvider implements Provider {
       prompt,
       // Non-interactive: auto-approve so a headless run never blocks. With
       // --agent-config the permission scopes govern; the mode is the coarse
-      // fallback. Critic → plan (read-only); manager/worker → accept-edits.
+      // fallback. Research uses the ordinary auto mode; strict agent-config
+      // removes every non-web tool from visibility and denies filesystem/exec.
+      // Do not require Devin's optional OS sandbox here: it has extra host
+      // dependencies and the exact visibility allowlist is the authority
+      // boundary. Devin does not have a "plan" permission-mode value.
       '--permission-mode',
       caps.supportsPermissionMode
-        ? (request.permissionMode === 'yolo' && request.harnessRole !== 'critic' ? 'dangerous' : 'plan')
-        : (request.permissionMode === 'yolo' && request.harnessRole !== 'critic' ? 'dangerous' : 'auto'),
-      ...(request.permissionMode !== 'yolo' && caps.supportsSandbox ? ['--sandbox'] : []),
+        ? (researchOnly ? 'auto' : request.harnessRole === 'critic' ? 'normal' : 'accept-edits')
+        : 'auto',
+      ...(!researchOnly && caps.supportsSandbox ? ['--sandbox'] : []),
+      ...(researchOnly ? ['--respect-workspace-trust', 'false'] : []),
       '--export',
       exportPath,
     ];
@@ -245,14 +274,14 @@ export class DevinProvider implements Provider {
     const cliModel = this.resolveCliModel(request.model);
     if (cliModel) args.push('--model', cliModel);
 
-    const jail = request.sandbox ? buildSoftJail(process.env, [join(homedir(), '.devin')]) : null;
-    const wrapped = request.sandbox
+    const jail = request.sandbox && !researchOnly ? buildSoftJail(process.env, [join(homedir(), '.devin')]) : null;
+    const wrapped = request.sandbox && !researchOnly
       ? wrapCommand(bin, args, { cwd, policy: request.sandbox })
       : { command: bin, args };
     const env: NodeJS.ProcessEnv = { ...process.env };
     // Point the CLI at the isolated per-session home so our rules/skills/hooks
     // and session transcripts stay separate from the user's interactive runs.
-    if (devinHome) {
+    if (devinHome && !researchOnly) {
       env.DEVIN_CONFIG_DIR = devinHome;
       env.XDG_CONFIG_HOME = devinHome;
     }
@@ -265,12 +294,15 @@ export class DevinProvider implements Provider {
     const onAbort = () => {
       try {
         child.kill('SIGTERM');
-      } catch {
-        /* gone */
+      } catch (err: unknown) {
+        providerLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'Devin CLI child already gone on abort');
       }
     };
     request.signal?.addEventListener('abort', onAbort, { once: true });
-    child.once('close', () => jail?.cleanup());
+    child.once('close', () => {
+      jail?.cleanup();
+      if (researchRoot) rmSync(researchRoot, { recursive: true, force: true });
+    });
     const timeout = setTimeout(() => {
       providerLog.warn({ provider: 'devin' }, 'Devin harness timed out — killing CLI');
       onAbort();
@@ -353,7 +385,8 @@ export class DevinProvider implements Provider {
     let raw: string;
     try {
       raw = readFileSync(exportPath, 'utf-8');
-    } catch {
+    } catch (err: unknown) {
+      providerLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'Devin export file not readable');
       return;
     }
     const bridge = new DevinCliBridge();
@@ -370,8 +403,8 @@ export class DevinProvider implements Provider {
   private cleanup(exportPath: string): void {
     try {
       if (existsSync(exportPath)) unlinkSync(exportPath);
-    } catch {
-      /* best-effort */
+    } catch (err: unknown) {
+      providerLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'Devin export cleanup best-effort failed');
     }
   }
 }

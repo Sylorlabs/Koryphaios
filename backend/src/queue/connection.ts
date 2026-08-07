@@ -86,7 +86,8 @@ export async function testRedisConnection(): Promise<boolean> {
 
     await conn.ping();
     return true;
-  } catch {
+  } catch (err: unknown) {
+    serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'Redis ping test failed');
     return false;
   }
 }

@@ -11,6 +11,7 @@
 
 import { readdir, readFile, stat } from 'node:fs/promises';
 import { join, relative, sep } from 'node:path';
+import { serverLog } from '../logger';
 import type { ProjectSync, ProjectSyncFile } from '@koryphaios/shared';
 
 // Directories never worth shipping — dependency trees, VCS, build artifacts.
@@ -124,8 +125,9 @@ async function loadGitignore(root: string): Promise<{ names: Set<string>; exts: 
       if (cleaned.startsWith('*.')) exts.add(cleaned.slice(2).toLowerCase());
       else if (!cleaned.includes('/') && !cleaned.includes('*')) names.add(cleaned);
     }
-  } catch {
-    /* no .gitignore */
+  } catch (err: unknown) {
+    // No .gitignore present; scan proceeds with built-in ignore lists only.
+    serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'No .gitignore found; using built-in ignore lists');
   }
   return { names, exts };
 }
@@ -146,7 +148,8 @@ export async function scanProject(root: string): Promise<ScannedFile[]> {
     let entries;
     try {
       entries = await readdir(dir, { withFileTypes: true });
-    } catch {
+    } catch (err: unknown) {
+      serverLog.debug({ err: err instanceof Error ? err.message : String(err), dir }, 'Directory unreadable; skipping');
       return;
     }
     for (const entry of entries) {
@@ -173,8 +176,9 @@ export async function scanProject(root: string): Promise<ScannedFile[]> {
             content: buf.toString('utf-8'),
             mtimeMs: info.mtimeMs,
           });
-        } catch {
-          /* unreadable — skip */
+        } catch (err: unknown) {
+          // Unreadable file — skip it rather than aborting the whole scan.
+          serverLog.debug({ err: err instanceof Error ? err.message : String(err), file: full }, 'Unreadable file; skipping');
         }
       }
     }

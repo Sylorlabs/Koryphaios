@@ -3,6 +3,8 @@ import { collaborationManager } from '../collaboration/manager';
 import { requireLocalRouteAuth } from '../auth/local-route-auth';
 import { relayAvailable } from '../collaboration/relay-client';
 import { getContext } from '../context';
+import { AuthenticationError, NotFoundError, ConfigurationError } from '../errors/types';
+import type { CollaborationAccessTier, SandboxPolicy } from '@koryphaios/shared';
 
 export const collaborationRoutes = new Elysia({ prefix: '/api/collab' })
 
@@ -10,20 +12,17 @@ export const collaborationRoutes = new Elysia({ prefix: '/api/collab' })
   // avoids route ambiguity and gives host configuration a stable contract.
   .post(
     '/host/start',
-    async ({ request, body, set }) => {
-      if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
+    async ({ request, body }) => {
+      if (!requireLocalRouteAuth(request)) throw new AuthenticationError('Unauthorized');
+      // Body shape is validated by the Elysia schema below; cast bridges the
+      // inferred route type to the local handler contract.
       const input = body as { sessionId: string; ownerId?: string; workspacePaths?: string[] };
-      try {
-        const result = await collaborationManager.hostSession(
-          input.sessionId,
-          input.ownerId || 'local-user',
-          input.workspacePaths || [],
-        );
-        return { ok: true, data: result };
-      } catch (err: any) {
-        set.status = 500;
-        return { ok: false, error: err.message };
-      }
+      const result = await collaborationManager.hostSession(
+        input.sessionId,
+        input.ownerId || 'local-user',
+        input.workspacePaths || [],
+      );
+      return { ok: true, data: result };
     },
     {
       body: t.Object({
@@ -37,20 +36,16 @@ export const collaborationRoutes = new Elysia({ prefix: '/api/collab' })
   // Start hosting — returns session info + invite links
   .post(
     '/:id/start',
-    async ({ request, params: { id }, body, set }) => {
-      if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
-      const ownerId = (body as any)?.ownerId || 'local-user';
-      try {
-        const result = await collaborationManager.hostSession(
-          id,
-          ownerId,
-          (body as any)?.workspacePaths || [],
-        );
-        return { ok: true, data: result };
-      } catch (err: any) {
-        set.status = 500;
-        return { ok: false, error: err.message };
-      }
+    async ({ request, params: { id }, body }) => {
+      if (!requireLocalRouteAuth(request)) throw new AuthenticationError('Unauthorized');
+      // Body shape is validated by the Elysia schema below.
+      const input = body as { ownerId?: string; workspacePaths?: string[] };
+      const result = await collaborationManager.hostSession(
+        id,
+        input.ownerId || 'local-user',
+        input.workspacePaths || [],
+      );
+      return { ok: true, data: result };
     },
     {
       body: t.Optional(
@@ -65,16 +60,13 @@ export const collaborationRoutes = new Elysia({ prefix: '/api/collab' })
   // Join via legacy 6-char code (fallback for local network use)
   .post(
     '/join',
-    async ({ request, body, set }) => {
-      if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
-      try {
-        if (!relayAvailable) throw new Error('WAN collaboration relay is not configured');
-        const session = await collaborationManager.joinRelaySession((body as any).joinCode);
-        return { ok: true, data: session };
-      } catch (err: any) {
-        set.status = 500;
-        return { ok: false, error: err.message };
-      }
+    async ({ request, body }) => {
+      if (!requireLocalRouteAuth(request)) throw new AuthenticationError('Unauthorized');
+      if (!relayAvailable) throw new ConfigurationError('WAN collaboration relay is not configured');
+      // Body shape is validated by the Elysia schema below.
+      const input = body as { joinCode: string };
+      const session = await collaborationManager.joinRelaySession(input.joinCode);
+      return { ok: true, data: session };
     },
     {
       body: t.Object({
@@ -88,14 +80,24 @@ export const collaborationRoutes = new Elysia({ prefix: '/api/collab' })
 
   .patch(
     '/:id/policy',
-    async ({ request, params: { id }, body, set }) => {
-      if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
-      try {
-        return { ok: true, data: await collaborationManager.updatePolicy(id, body as any) };
-      } catch (err: any) {
-        set.status = 400;
-        return { ok: false, error: err.message };
-      }
+    async ({ request, params: { id }, body }) => {
+      if (!requireLocalRouteAuth(request)) throw new AuthenticationError('Unauthorized');
+      // Body shape is validated by the Elysia schema below.
+      const input = body as {
+        allowedModels?: string[];
+        allowPrompts?: boolean;
+        requirePromptApproval?: boolean;
+        showDiffs?: boolean;
+        showAgentStatus?: boolean;
+        showParticipants?: boolean;
+        joinMode?: 'approval' | 'auto';
+        defaultTierId?: string;
+        accessTiers?: CollaborationAccessTier[];
+        modelCatalog?: Array<{ id: string; label: string; provider: string; reasoningLevels: string[] }>;
+        sessionName?: string;
+        workspacePaths?: string[];
+      };
+      return { ok: true, data: await collaborationManager.updatePolicy(id, input) };
     },
     {
       body: t.Object({
@@ -116,8 +118,8 @@ export const collaborationRoutes = new Elysia({ prefix: '/api/collab' })
   )
 
   // Get pending guest prompts waiting for host approval
-  .get('/:id/pending', async ({ request, set }) => {
-    if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
+  .get('/:id/pending', async ({ request }) => {
+    if (!requireLocalRouteAuth(request)) throw new AuthenticationError('Unauthorized');
     return {
       ok: true,
       data: {
@@ -131,9 +133,10 @@ export const collaborationRoutes = new Elysia({ prefix: '/api/collab' })
   // Host approves or rejects a guest prompt
   .post(
     '/:id/approve',
-    async ({ request, params: { id }, body, set }) => {
-      if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
-      const { promptId, approved } = body as any;
+    async ({ request, params: { id }, body }) => {
+      if (!requireLocalRouteAuth(request)) throw new AuthenticationError('Unauthorized');
+      // Body shape is validated by the Elysia schema below.
+      const { promptId, approved } = body as { promptId: string; approved: boolean };
       const prompt = collaborationManager.resolveGuestPrompt(promptId, approved);
       if (approved && prompt) {
         const state = await collaborationManager.getSessionState(id);
@@ -157,9 +160,14 @@ export const collaborationRoutes = new Elysia({ prefix: '/api/collab' })
 
   .post(
     '/:id/join-decision',
-    async ({ request, body, set }) => {
-      if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
-      const { guestId, approved, tierId } = body as any;
+    async ({ request, body }) => {
+      if (!requireLocalRouteAuth(request)) throw new AuthenticationError('Unauthorized');
+      // Body shape is validated by the Elysia schema below.
+      const { guestId, approved, tierId } = body as {
+        guestId: string;
+        approved: boolean;
+        tierId?: string;
+      };
       return { ok: true, data: collaborationManager.resolveJoin(guestId, approved, tierId) };
     },
     {
@@ -173,9 +181,11 @@ export const collaborationRoutes = new Elysia({ prefix: '/api/collab' })
 
   .post(
     '/:id/assign-tier',
-    async ({ request, body, set }) => {
-      if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
-      collaborationManager.assignParticipantTier((body as any).guestId, (body as any).tierId);
+    async ({ request, body }) => {
+      if (!requireLocalRouteAuth(request)) throw new AuthenticationError('Unauthorized');
+      // Body shape is validated by the Elysia schema below.
+      const { guestId, tierId } = body as { guestId: string; tierId: string };
+      collaborationManager.assignParticipantTier(guestId, tierId);
       return { ok: true };
     },
     { body: t.Object({ guestId: t.String(), tierId: t.String() }) },
@@ -183,55 +193,39 @@ export const collaborationRoutes = new Elysia({ prefix: '/api/collab' })
 
   .post(
     '/:id/invite',
-    async ({ request, body, set }) => {
-      if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
-      try {
-        return {
-          ok: true,
-          data: {
-            tierId: (body as any).tierId,
-            url: await collaborationManager.createInvite((body as any).tierId),
-          },
-        };
-      } catch (err: any) {
-        set.status = 400;
-        return { ok: false, error: err.message };
-      }
+    async ({ request, body }) => {
+      if (!requireLocalRouteAuth(request)) throw new AuthenticationError('Unauthorized');
+      // Body shape is validated by the Elysia schema below.
+      const { tierId } = body as { tierId: string };
+      return {
+        ok: true,
+        data: {
+          tierId,
+          url: await collaborationManager.createInvite(tierId),
+        },
+      };
     },
     { body: t.Object({ tierId: t.String() }) },
   )
 
   // Get session state
-  .get('/:id/state', async ({ request, params: { id }, set }) => {
-    if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
-    try {
-      const state = await collaborationManager.getSessionState(id);
-      if (!state) {
-        set.status = 404;
-        return { ok: false, error: 'Session not found' };
-      }
-      return { ok: true, data: state };
-    } catch (err: any) {
-      set.status = 500;
-      return { ok: false, error: err.message };
-    }
+  .get('/:id/state', async ({ request, params: { id } }) => {
+    if (!requireLocalRouteAuth(request)) throw new AuthenticationError('Unauthorized');
+    const state = await collaborationManager.getSessionState(id);
+    if (!state) throw new NotFoundError('Session', id);
+    return { ok: true, data: state };
   })
 
   // End session
-  .post('/:id/end', async ({ request, params: { id }, set }) => {
-    if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
-    try {
-      await collaborationManager.endSession(id);
-      return { ok: true };
-    } catch (err: any) {
-      set.status = 500;
-      return { ok: false, error: err.message };
-    }
+  .post('/:id/end', async ({ request, params: { id } }) => {
+    if (!requireLocalRouteAuth(request)) throw new AuthenticationError('Unauthorized');
+    await collaborationManager.endSession(id);
+    return { ok: true };
   })
 
   // ─── Shared providers (host side): which providers to serve remotely ──────
-  .get('/providers/shared', async ({ request, set }) => {
-    if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
+  .get('/providers/shared', async ({ request }) => {
+    if (!requireLocalRouteAuth(request)) throw new AuthenticationError('Unauthorized');
     const { getSharedProviders, getSharedModels, isAgenticProvider } =
       await import('../collaboration/remote-provider-host');
     // Attach the risk classification for the UI's compliance gating.
@@ -261,9 +255,10 @@ export const collaborationRoutes = new Elysia({ prefix: '/api/collab' })
   })
   .post(
     '/providers/shared',
-    async ({ request, body, set }) => {
-      if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
+    async ({ request, body }) => {
+      if (!requireLocalRouteAuth(request)) throw new AuthenticationError('Unauthorized');
       const { setSharedProviders } = await import('../collaboration/remote-provider-host');
+      // Body shape is validated by the Elysia schema below.
       const input = body as { providers: string[]; models?: Record<string, string[]> };
       setSharedProviders(input.providers ?? [], input.models ?? {});
       return { ok: true };
@@ -272,18 +267,20 @@ export const collaborationRoutes = new Elysia({ prefix: '/api/collab' })
   )
 
   // ─── Sandbox policy (host side): how remote CLI turns are confined ────────
-  .get('/providers/sandbox', async ({ request, set }) => {
-    if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
+  .get('/providers/sandbox', async ({ request }) => {
+    if (!requireLocalRouteAuth(request)) throw new AuthenticationError('Unauthorized');
     const { getSandboxPolicy } = await import('../collaboration/remote-provider-host');
     const { sandboxCapabilities } = await import('../collaboration/sandbox-runner');
     return { ok: true, data: { policy: getSandboxPolicy(), capabilities: sandboxCapabilities() } };
   })
   .post(
     '/providers/sandbox',
-    async ({ request, body, set }) => {
-      if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
+    async ({ request, body }) => {
+      if (!requireLocalRouteAuth(request)) throw new AuthenticationError('Unauthorized');
       const { setSandboxPolicy } = await import('../collaboration/remote-provider-host');
-      setSandboxPolicy((body as any)?.policy);
+      // Body shape is validated by the Elysia schema below.
+      const { policy } = body as { policy: SandboxPolicy };
+      setSandboxPolicy(policy);
       return { ok: true };
     },
     {
@@ -305,31 +302,27 @@ export const collaborationRoutes = new Elysia({ prefix: '/api/collab' })
   // ─── Remote providers (client side): consume a host's shared providers ────
   .post(
     '/providers/connect',
-    async ({ request, body, set }) => {
-      if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
-      try {
-        const { connectToProviderHost } = await import('../collaboration/remote-provider-client');
-        const input = body as { joinCode: string; name?: string };
-        const result = await connectToProviderHost(
-          input.joinCode,
-          input.name || 'Koryphaios client',
-        );
-        return { ok: true, data: result };
-      } catch (err: any) {
-        set.status = 500;
-        return { ok: false, error: err.message };
-      }
+    async ({ request, body }) => {
+      if (!requireLocalRouteAuth(request)) throw new AuthenticationError('Unauthorized');
+      const { connectToProviderHost } = await import('../collaboration/remote-provider-client');
+      // Body shape is validated by the Elysia schema below.
+      const input = body as { joinCode: string; name?: string };
+      const result = await connectToProviderHost(
+        input.joinCode,
+        input.name || 'Koryphaios client',
+      );
+      return { ok: true, data: result };
     },
     { body: t.Object({ joinCode: t.String(), name: t.Optional(t.String()) }) },
   )
-  .post('/providers/disconnect', async ({ request, set }) => {
-    if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
+  .post('/providers/disconnect', async ({ request }) => {
+    if (!requireLocalRouteAuth(request)) throw new AuthenticationError('Unauthorized');
     const { disconnectFromProviderHost } = await import('../collaboration/remote-provider-client');
     disconnectFromProviderHost();
     return { ok: true };
   })
-  .get('/providers/remote-status', async ({ request, set }) => {
-    if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
+  .get('/providers/remote-status', async ({ request }) => {
+    if (!requireLocalRouteAuth(request)) throw new AuthenticationError('Unauthorized');
     const { remoteProviderStatus } = await import('../collaboration/remote-provider-client');
     return { ok: true, data: remoteProviderStatus() };
   });

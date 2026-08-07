@@ -9,6 +9,7 @@ import {
   listProcesses,
 } from '../../process-supervisor/database';
 import { serializeProcess } from '../../process-supervisor/serialize';
+import { AuthenticationError, ConflictError, NotFoundError, ValidationError } from '../../errors/types';
 
 function buildLogs(processId: string, lines: number) {
   const live = processSupervisor.getProcess(processId);
@@ -31,8 +32,8 @@ function buildLogs(processId: string, lines: number) {
 export const processRoutes = new Elysia({ prefix: '/api/processes' })
   .get(
     '/',
-    async ({ request, query, set }) => {
-      if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
+    async ({ request, query }) => {
+      if (!requireLocalRouteAuth(request)) throw new AuthenticationError('Unauthorized');
       const includeInactive = query.includeInactive !== 'false';
       const limit = Number(query.limit ?? 100);
       const processes = await listProcesses(includeInactive, Number.isFinite(limit) ? limit : 100);
@@ -51,23 +52,17 @@ export const processRoutes = new Elysia({ prefix: '/api/processes' })
   )
   .post(
     '/',
-    async ({ request, body, set }) => {
-      if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
+    async ({ request, body }) => {
+      if (!requireLocalRouteAuth(request)) throw new AuthenticationError('Unauthorized');
       const validation = validateBashCommand(body.command);
       if (!validation.safe) {
-        if (set) set.status = 400;
-        return { ok: false, error: `Unsafe command: ${validation.reason}` };
+        throw new ValidationError(`Unsafe command: ${validation.reason}`);
       }
-      try {
-        const process = await processSupervisor.startProcess(body);
-        return {
-          ok: true,
-          process: await serializeProcess(process),
-        };
-      } catch (error: any) {
-        set.status = 500;
-        return { ok: false, error: error?.message ?? 'Failed to start process' };
-      }
+      const process = await processSupervisor.startProcess(body);
+      return {
+        ok: true,
+        process: await serializeProcess(process),
+      };
     },
     {
       body: t.Object({
@@ -82,8 +77,8 @@ export const processRoutes = new Elysia({ prefix: '/api/processes' })
   )
   .post(
     '/cleanup',
-    async ({ request, body, set }) => {
-      if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
+    async ({ request, body }) => {
+      if (!requireLocalRouteAuth(request)) throw new AuthenticationError('Unauthorized');
       const deleted = await cleanupOldProcesses(body.daysToKeep);
       return { ok: true, deleted };
     },
@@ -93,52 +88,54 @@ export const processRoutes = new Elysia({ prefix: '/api/processes' })
       }),
     },
   )
-  .get('/:id', async ({ request, params: { id }, set }) => {
-    if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
+  .get('/:id', async ({ request, params: { id } }) => {
+    if (!requireLocalRouteAuth(request)) throw new AuthenticationError('Unauthorized');
     const process = await getProcessById(id);
     if (!process) {
-      set.status = 404;
-      return { ok: false, error: 'Process not found' };
+      throw new NotFoundError('Process', id);
     }
     return { ok: true, process: await serializeProcess(process) };
   })
-  .delete('/:id', async ({ request, params: { id }, query, set }) => {
-    if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
+  .delete('/:id', async ({ request, params: { id }, query }) => {
+    if (!requireLocalRouteAuth(request)) throw new AuthenticationError('Unauthorized');
     const signal = query.signal ?? 'SIGTERM';
     const allowedSignals = ['SIGTERM', 'SIGKILL', 'SIGINT', 'SIGQUIT'];
     if (!allowedSignals.includes(signal)) {
-      if (set) set.status = 400;
-      return { ok: false, error: 'Invalid signal' };
+      throw new ValidationError('Invalid signal');
     }
     const success = await processSupervisor.killProcess(id, signal);
     if (!success) {
-      set.status = 404;
-      return { ok: false, error: 'Process not found' };
+      throw new NotFoundError('Process', id);
     }
     return { ok: true };
   })
-  .post('/:id/restart', async ({ request, params: { id }, set }) => {
-    if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
-    try {
-      const restarted = await processSupervisor.restartProcess(id);
-      if (!restarted) {
-        set.status = 404;
-        return { ok: false, error: 'Process not found' };
-      }
-      return { ok: true, process: await serializeProcess(restarted) };
-    } catch (error: any) {
-      set.status = 500;
-      return { ok: false, error: error?.message ?? 'Failed to restart process' };
+  .post('/:id/restart', async ({ request, params: { id } }) => {
+    if (!requireLocalRouteAuth(request)) throw new AuthenticationError('Unauthorized');
+    const restarted = await processSupervisor.restartProcess(id);
+    if (!restarted) {
+      throw new NotFoundError('Process', id);
     }
+    return { ok: true, process: await serializeProcess(restarted) };
   })
+  .post(
+    '/:id/input',
+    async ({ request, params: { id }, body }) => {
+      if (!requireLocalRouteAuth(request)) throw new AuthenticationError('Unauthorized');
+      const success = await processSupervisor.writeInput(id, body.input);
+      if (!success) {
+        throw new ConflictError('Process is not running or does not accept input');
+      }
+      return { ok: true };
+    },
+    { body: t.Object({ input: t.String({ maxLength: 16_384 }) }) },
+  )
   .get(
     '/:id/logs',
-    async ({ request, params: { id }, query, set }) => {
-      if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
+    async ({ request, params: { id }, query }) => {
+      if (!requireLocalRouteAuth(request)) throw new AuthenticationError('Unauthorized');
       const process = await getProcessById(id);
       if (!process) {
-        set.status = 404;
-        return { ok: false, error: 'Process not found' };
+        throw new NotFoundError('Process', id);
       }
       const lines = Number(query.lines ?? 100);
       return { ok: true, logs: buildLogs(id, Number.isFinite(lines) ? lines : 100) };
@@ -151,12 +148,11 @@ export const processRoutes = new Elysia({ prefix: '/api/processes' })
   )
   .get(
     '/:id/events',
-    async ({ request, params: { id }, query, set }) => {
-      if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
+    async ({ request, params: { id }, query }) => {
+      if (!requireLocalRouteAuth(request)) throw new AuthenticationError('Unauthorized');
       const process = await getProcessById(id);
       if (!process) {
-        set.status = 404;
-        return { ok: false, error: 'Process not found' };
+        throw new NotFoundError('Process', id);
       }
       const limit = Number(query.limit ?? 50);
       const events = await getProcessEventsById(id, Number.isFinite(limit) ? limit : 50);

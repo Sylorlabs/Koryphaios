@@ -275,8 +275,9 @@ export class LocalKMSProvider implements KMSProvider {
         try {
           const decipher = createDecipheriv('aes-256-cbc', key, iv);
           this.masterKey = Buffer.concat([decipher.update(encrypted), decipher.final()]);
-        } catch {
+        } catch (err: unknown) {
           // Try plaintext (very old format)
+          serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'Legacy key decryption failed, trying plaintext format');
           this.masterKey = encryptedKey;
         }
 
@@ -287,8 +288,8 @@ export class LocalKMSProvider implements KMSProvider {
         { keyId: this.keyData.keyId, version: this.keyData.version },
         'Master key loaded',
       );
-    } catch (error: any) {
-      throw new Error(`Failed to load master key: ${error.message}`);
+    } catch (error: unknown) {
+      throw new Error(`Failed to load master key: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 

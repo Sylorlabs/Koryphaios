@@ -111,7 +111,7 @@ export class CodexAuthProvider implements Provider {
     }
     const child = spawn(binary, [
       '--ask-for-approval', 'never', 'exec', '--json', '--ephemeral', '--skip-git-repo-check',
-      '--color', 'never', '--sandbox', request.permissionMode === 'yolo' && request.harnessRole !== 'critic' ? 'danger-full-access' : 'read-only',
+      '--color', 'never', '--sandbox', 'read-only',
       '--model', request.model,
       ...(request.fastMode ? ['--config', 'service_tier="fast"'] : []),
       ...(request.reasoningLevel ? ['--config', `model_reasoning_effort=${JSON.stringify(request.reasoningLevel)}`] : []),
@@ -141,7 +141,7 @@ export class CodexAuthProvider implements Provider {
             events.push({ type: 'usage_update', tokensIn: usage.input_tokens as number | undefined, tokensOut: usage.output_tokens as number | undefined });
           }
         }
-      } catch { /* JSONL partial/diagnostic */ }
+      } catch (err: unknown) { providerLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'Codex auth: JSONL partial/diagnostic line skipped'); }
     };
     child.stderr.on('data', (chunk: Buffer) => { stderr += chunk.toString(); });
     child.stdout.on('data', (chunk: Buffer) => {

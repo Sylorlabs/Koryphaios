@@ -5,7 +5,7 @@ import { AuthContext, AuthenticatedRequest, AuthMode } from './types';
 export type { AuthContext, AuthenticatedRequest } from './types';
 import { getTokenService } from './token-service';
 import { getSessionStore } from './session-store';
-import { authLog } from '../logger';
+import { authLog, serverLog } from '../logger';
 
 // Get auth mode from environment
 function getAuthMode(): AuthMode {
@@ -130,7 +130,8 @@ export async function requireAuth(req: Request): Promise<AuthenticatedRequest> {
 export async function optionalAuth(req: Request): Promise<AuthenticatedRequest | null> {
   try {
     return await requireAuth(req);
-  } catch {
+  } catch (err: unknown) {
+    serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'Optional auth check failed');
     return null;
   }
 }
@@ -162,13 +163,14 @@ export function createAuthMiddleware(
     try {
       const auth = options.requireAdmin ? await requireAdmin(req) : await requireAuth(req);
       return auth;
-    } catch (error: any) {
+    } catch (error: unknown) {
+      const errMsg = error instanceof Error ? error.message : String(error);
       if (options.optional) {
         return { sessionId: 'anonymous' };
       }
 
       authLog.warn(
-        { path: new URL(req.url).pathname, error: error.message },
+        { path: new URL(req.url).pathname, error: errMsg },
         'Authentication failed',
       );
 
@@ -176,7 +178,7 @@ export function createAuthMiddleware(
         JSON.stringify({
           ok: false,
           error: 'Authentication required',
-          message: error.message,
+          message: errMsg,
         }),
         {
           status: 401,

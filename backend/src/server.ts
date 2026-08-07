@@ -44,6 +44,7 @@ import { goalRoutes } from './routes/v1/goals';
 import { nativeCommandRoutes } from './routes/v1/native-commands';
 import { mcpBridgeRoutes } from './routes/v1/mcp-bridge';
 import { voiceRoutes } from './routes/v1/voice';
+import { errorHandlingMiddleware, errorHandler } from './middleware/error-handling';
 
 const SERVER_STARTED_AT = Date.now();
 const BACKEND_SERVICE_ID = 'koryphaios';
@@ -78,6 +79,7 @@ const baseApp = new Elysia()
     return { ok: true, data: { projectName } };
   })
   .post('/api/debug/log-error', () => ({ ok: true }))
+  .onError(errorHandler)
   .use(sessionRoutes)
   .use(messageRoutes)
   .use(providerRoutes)
@@ -317,8 +319,8 @@ async function main() {
       const active = JSON.parse(readFileSync(activePortPath, 'utf-8')) as { pid?: number };
       // Never remove a marker written by a replacement backend.
       if (active.pid === process.pid) rmSync(activePortPath, { force: true });
-    } catch {
-      // The marker is advisory; shutdown must still complete if it is absent or malformed.
+    } catch (err: unknown) {
+      serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'Failed to clear active port file on shutdown');
     }
   }
 

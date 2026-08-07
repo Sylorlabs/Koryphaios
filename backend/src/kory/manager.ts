@@ -41,7 +41,7 @@ import {
   type ToolCallOutput,
 } from '../tools';
 import { wsBroker } from '../pubsub';
-import { koryLog } from '../logger';
+import { koryLog, serverLog } from '../logger';
 import { initContextArchive, getContextArchive } from './context-archive';
 import { nanoid } from 'nanoid';
 import { sanitizeForPrompt } from '../security';
@@ -89,7 +89,7 @@ import {
   formatMessagesForCritic as formatMessagesForCriticUtil,
 } from './critic-util';
 import { getModeManager } from '../mode';
-import type { WorkerPipelineConfig } from './services/WorkerPipelineService';
+import type { WorkerPipelineHost } from './services/WorkerPipelineService';
 import type { UIMode } from '@koryphaios/shared';
 import { compilePrompt, createTaskContract, requiresMultiAgentDelegation } from './prompts';
 import { discoverVerificationChecks, emptyQualityGateReport } from './verification';
@@ -214,7 +214,8 @@ function safeParseJson(s?: string): Record<string, unknown> {
   try {
     const o = JSON.parse(s);
     return o && typeof o === 'object' && !Array.isArray(o) ? (o as Record<string, unknown>) : {};
-  } catch {
+  } catch (err: unknown) {
+    serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'Failed to parse JSON string in safeParseJson');
     return {};
   }
 }
@@ -232,7 +233,7 @@ export interface KoryTask {
   error?: string;
 }
 
-export class KoryManager {
+export class KoryManager implements WorkerPipelineHost {
   private memoryDir: string;
   private isProcessing = false;
   private isYoloMode = false;
@@ -299,7 +300,8 @@ export class KoryManager {
         this.workspaceManager = new WorkspaceManager(workingDirectory, config.workspace);
         koryLog.info('WorkspaceManager initialized for parallel agent isolation');
       }
-    } catch {
+    } catch (err: unknown) {
+      serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'WorkspaceManager initialization failed');
       koryLog.warn('WorkspaceManager unavailable — workers will share the main directory');
     }
 
@@ -346,55 +348,9 @@ export class KoryManager {
       }
     });
 
-    const pipelineConfig: WorkerPipelineConfig = {
-      getIsYoloMode: () => this.isYoloMode,
-      getWorkingDirectory: () => this.workingDirectory,
-      getWorkerReasoningLevel: () => this.getWorkerReasoningLevel(),
-      getQualityPolicy: () => {
-        const settings = loadAgentSettings(this.workingDirectory);
-        return {
-          gateStrictness: settings.criticGateEnabled
-            ? (settings.gateStrictness ?? 'strict')
-            : 'off',
-          maxCriticIterations: settings.maxCriticIterations,
-        };
-      },
-      waitForUserInput: (sessionId, question, options) =>
-        this.waitForUserInputInternal(sessionId, question, options),
-      emitThought: (sessionId, phase, thought) => this.emitThought(sessionId, phase, thought),
-      updateWorkflowState: (sessionId, state) => this.updateWorkflowState(sessionId, state),
-      resolveActiveRouting: (preferredModel, domain, avoidLegacy, prompt, preferCheap) =>
-        this.resolveActiveRouting(preferredModel, domain, avoidLegacy, prompt, preferCheap),
-      executeWithProvider: (
-        sessionId,
-        provider,
-        modelId,
-        userMessage,
-        domain,
-        reasoningLevel,
-        isAutoMode,
-        allowedPaths,
-        isSandboxed,
-        taskContract,
-      ) =>
-        this.executeWithProvider(
-          sessionId,
-          provider,
-          modelId,
-          userMessage,
-          domain,
-          reasoningLevel,
-          isAutoMode,
-          allowedPaths,
-          isSandboxed,
-          taskContract,
-        ),
-      runCriticGate: (sessionId, workerMessages, preferredModel, task, reviewDirectory) =>
-        this.runCriticGate(sessionId, workerMessages, preferredModel, task, reviewDirectory),
-      runDestinationChecks: (sessionId, workingDirectory) =>
-        this.runHardChecks(sessionId, workingDirectory),
-    };
-
+    // KoryManager implements WorkerPipelineHost directly — no closure bag.
+    // TypeScript verifies conformance; the service depends on the interface,
+    // not on KoryManager, so it stays testable in isolation.
     this.workerPipeline = new WorkerPipelineService({
       providers: this.providers,
       state: this.state,
@@ -402,7 +358,7 @@ export class KoryManager {
       workspaceManager: this.workspaceManager,
       snapshotManager: this.snapshotManager,
       tasks: this.tasks,
-      config: pipelineConfig,
+      host: this,
     });
 
     // Recover state from persistent stores
@@ -436,8 +392,40 @@ export class KoryManager {
     koryLog.info({ enabled }, 'YOLO mode state updated');
   }
 
+  // ─── WorkerPipelineHost accessors ────────────────────────────────────────
+  // These expose manager state/behavior to WorkerPipelineService via the
+  // WorkerPipelineHost interface, replacing the prior closure bag.
+  getIsYoloMode(): boolean {
+    return this.isYoloMode;
+  }
+
+  getWorkingDirectory(): string {
+    return this.workingDirectory;
+  }
+
+  getQualityPolicy(): {
+    gateStrictness: 'strict' | 'advisory' | 'off';
+    maxCriticIterations: number;
+  } {
+    const settings = loadAgentSettings(this.workingDirectory);
+    return {
+      gateStrictness: settings.criticGateEnabled
+        ? (settings.gateStrictness ?? 'strict')
+        : 'off',
+      maxCriticIterations: settings.maxCriticIterations,
+    };
+  }
+
+  /** Public alias for runHardChecks — the WorkerPipelineHost contract names it runDestinationChecks. */
+  runDestinationChecks(
+    sessionId: string,
+    workingDirectory: string,
+  ): Promise<{ passed: boolean; output: string }> {
+    return this.runHardChecks(sessionId, workingDirectory);
+  }
+
   /** Reasoning level the manager uses for delegated workers (from config). */
-  private getWorkerReasoningLevel(): string {
+  getWorkerReasoningLevel(): string {
     return (
       (this.config.agents?.manager as { reasoningLevel?: string } | undefined)?.reasoningLevel ??
       AGENT.DEFAULT_REASONING_LEVEL
@@ -465,12 +453,13 @@ export class KoryManager {
       for await (const event of stream)
         if (event.type === 'content_delta') result += event.content ?? '';
       return JSON.parse(result.trim().match(/\[.*\]/s)?.[0] || '[]');
-    } catch {
+    } catch (err: unknown) {
+      serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'Failed to parse affected paths from LLM response');
       return [];
     }
   }
 
-  private async updateWorkflowState(sessionId: string, state: string) {
+  async updateWorkflowState(sessionId: string, state: string) {
     await db.update(sessions).set({ workflowState: state }).where(eq(sessions.id, sessionId));
   }
 
@@ -751,8 +740,8 @@ export class KoryManager {
           try {
             const args = JSON.parse(event.toolInput || '{}');
             if (args.decision) decision = args.decision;
-          } catch {
-            /* default to ANSWER */
+          } catch (err: unknown) {
+            serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'Failed to parse route_inquiry tool input, defaulting to ANSWER');
           }
         }
       }
@@ -770,6 +759,11 @@ export class KoryManager {
       return `MANAGER ADVICE: ${searchResult.output}`;
     }
     return `MANAGER ANSWER: I recommend proceeding with the current task.`;
+  }
+
+  /** Public WorkerPipelineHost entry point — delegates to the internal impl. */
+  waitForUserInput(sessionId: string, question: string, options: string[]): Promise<string> {
+    return this.waitForUserInputInternal(sessionId, question, options);
   }
 
   private async waitForUserInputInternal(
@@ -987,7 +981,7 @@ export class KoryManager {
     return this.routing.buildFallbackChain(startModelId);
   }
 
-  private resolveActiveRouting(
+  resolveActiveRouting(
     preferredModel?: string,
     domain: WorkerDomain = 'general',
     avoidLegacy = false,
@@ -1020,8 +1014,8 @@ export class KoryManager {
             if (this.providers.resolveProvider(alt.model, alt.provider)) return alt;
           }
         }
-      } catch {
-        /* settings unavailable — use the routed default */
+      } catch (err: unknown) {
+        serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'Agent settings unavailable — using the routed default');
       }
     }
     return routed;
@@ -1063,8 +1057,8 @@ export class KoryManager {
         if (provider && !excluded) {
           resolved.push(route);
         }
-      } catch {
-        // Stale user-enabled model: skip it and continue through the pool.
+      } catch (err: unknown) {
+        serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'Stale user-enabled model: skip it and continue through the pool');
       }
     }
     const independent = resolved.filter((route) => route.provider !== avoidProvider);
@@ -1243,7 +1237,8 @@ export class KoryManager {
     let routing;
     try {
       routing = this.resolveActiveRouting(undefined, 'general', true, undefined, true);
-    } catch {
+    } catch (err: unknown) {
+      serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'Failed to resolve active routing for default model');
       return null;
     }
     const provider = await this.providers.resolveProvider(routing.model, routing.provider);
@@ -1387,7 +1382,7 @@ export class KoryManager {
   }
 
   /** Critic can only read files and grep. It sees the full worker transcript (truncated) and outputs PASS or FAIL with feedback. */
-  private async runCriticGate(
+  async runCriticGate(
     sessionId: string,
     workerMessages: InternalMessage[] | undefined,
     preferredModel?: string,
@@ -1552,7 +1547,8 @@ export class KoryManager {
 
     try {
       await this.runAgentThread(criticId, provider);
-    } catch {
+    } catch (err: unknown) {
+      serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'Critic failed to run');
       rmSync(criticSessionWd, { recursive: true, force: true });
       return { passed: false, feedback: 'Critic failed to run.' };
     }
@@ -2259,8 +2255,8 @@ export class KoryManager {
       try {
         const { buildNotesNetworkPrompt } = await import('../memory/unified-memory');
         systemPrompt += await buildNotesNetworkPrompt(2500, promptRoot);
-      } catch {
-        // Notes DB may be unavailable — continue without network context
+      } catch (err: unknown) {
+        serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'Notes DB may be unavailable — continuing without network context');
       }
     }
     const memoryChars = systemPrompt.length - beforeMemoryContext;
@@ -2447,7 +2443,7 @@ export class KoryManager {
         permissionMode: permissionPolicy.mode,
         promptManifestHash: managerCompilation.manifest.hash,
         taskContractHash: managerCompilation.manifest.taskContractHash,
-        sandbox: permissionPolicy.mode === 'yolo' ? SANDBOX_PRESETS.trusted : SANDBOX_PRESETS.readonly,
+        sandbox: SANDBOX_PRESETS.readonly,
       },
       provider.name,
     );
@@ -2525,8 +2521,8 @@ export class KoryManager {
             try {
               const input = JSON.parse(event.toolInput ?? '{}') as { command?: string };
               if (input.command) bgCommand = input.command;
-            } catch {
-              /* keep tool name */
+            } catch (err: unknown) {
+              serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'Failed to parse background command tool input, keeping tool name');
             }
             void processSupervisor
               .registerExternal({
@@ -2535,7 +2531,11 @@ export class KoryManager {
                 sessionId,
                 outputFile: bgMatch[2],
               })
-              .catch(() => {});
+              .catch((err: unknown) => {
+                // Background process registration is fire-and-forget — the command
+                // is already running; failure to track it doesn't affect the user.
+                serverLog.debug({ err: err instanceof Error ? err.message : String(err), command: bgCommand, sessionId }, 'Background process registration failed (non-critical)');
+              });
           }
           const agenticArchiveId = await getContextArchive()?.record(
             sessionId,
@@ -2596,8 +2596,8 @@ export class KoryManager {
             let parsedInput = {};
             try {
               parsedInput = JSON.parse(call.input || '{}');
-            } catch {
-              /* Expected: malformed tool input JSON, defaults to {} */
+            } catch (err: unknown) {
+              serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'Malformed tool input JSON, defaults to {}');
             }
             this.emitWSMessage(sessionId, 'stream.tool_call', {
               agentId: KORY_IDENTITY.id,
@@ -2775,8 +2775,8 @@ export class KoryManager {
       let inputSummary = '';
       try {
         inputSummary = JSON.stringify(tc.input ?? {}).slice(0, 140);
-      } catch {
-        /* unstringifiable input */
+      } catch (err: unknown) {
+        serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'Unstringifiable tool call input');
       }
       return await archive.record(
         sessionId,
@@ -2784,7 +2784,8 @@ export class KoryManager {
         `${tc.name} ${inputSummary}`,
         toolResult.output ?? '',
       );
-    } catch {
+    } catch (err: unknown) {
+      serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'Failed to record tool call in context archive');
       return undefined;
     }
   }
@@ -2830,8 +2831,8 @@ export class KoryManager {
       let original: Record<string, unknown> = {};
       try {
         original = JSON.parse(m.content) as Record<string, unknown>;
-      } catch {
-        /* keep empty shell */
+      } catch (err: unknown) {
+        serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'Failed to parse message content as JSON, keeping empty shell');
       }
       m.content = JSON.stringify({
         callId: original.callId ?? meta.tool_call_id,
@@ -2890,7 +2891,7 @@ export class KoryManager {
    * Runs a worker (sub-agent). Invoked by WorkerPipelineService when the manager calls delegate_to_worker.
    * The code never auto-spawns workers.
    */
-  private async executeWithProvider(
+  async executeWithProvider(
     sessionId: string,
     provider: Provider,
     modelId: string,
@@ -3004,8 +3005,8 @@ export class KoryManager {
       try {
         const { buildNotesNetworkPrompt } = await import('../memory/unified-memory');
         workerSystemPrompt += await buildNotesNetworkPrompt(2500, this.workingDirectory);
-      } catch {
-        // Notes DB may be unavailable
+      } catch (err: unknown) {
+        serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'Notes DB may be unavailable for worker system prompt');
       }
     }
 
@@ -3100,7 +3101,8 @@ export class KoryManager {
           { type: 'image', imageData, imageMimeType: mimeType },
         ],
       };
-    } catch {
+    } catch (err: unknown) {
+      serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'Failed to build image content block');
       return null;
     }
   }
@@ -3424,12 +3426,7 @@ export class KoryManager {
         signal: streamSignal,
         workingDirectory: thread.ctx.workingDirectory,
         sessionId: thread.sessionId,
-        sandbox:
-          thread.toolRole === 'critic'
-            ? SANDBOX_PRESETS.readonly
-            : thread.ctx.permissionPolicy?.mode === 'yolo'
-              ? SANDBOX_PRESETS.trusted
-              : SANDBOX_PRESETS.readonly,
+        sandbox: SANDBOX_PRESETS.readonly,
         harnessRole: thread.toolRole,
         permissionMode: thread.toolRole === 'critic' ? 'plan' : thread.ctx.permissionPolicy?.mode,
         promptManifestHash: thread.promptManifestHash,
@@ -3492,8 +3489,8 @@ export class KoryManager {
           let parsedInput = {};
           try {
             parsedInput = JSON.parse(call.input || '{}');
-          } catch {
-            /* Expected: malformed tool input JSON, defaults to {} */
+          } catch (err: unknown) {
+            serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'Malformed tool input JSON, defaults to {}');
           }
           this.emitWSMessage(thread.sessionId, 'stream.tool_call', {
             agentId: thread.identity.id,
@@ -3766,7 +3763,7 @@ export class KoryManager {
     koryLog.info('KoryManager shutdown complete');
   }
 
-  private emitThought(sessionId: string, phase: string, thought: string) {
+  emitThought(sessionId: string, phase: string, thought: string) {
     this.events.emitThought(sessionId, phase, thought);
   }
   private emitRouting(sessionId: string, d: WorkerDomain, m: string, p: string) {
@@ -3787,8 +3784,8 @@ export class KoryManager {
       const session = await this.sessions?.get(sessionId);
       const wd = session?.workingDirectory?.trim();
       if (wd && existsSync(wd)) resolved = wd;
-    } catch {
-      /* fall back to the global root */
+    } catch (err: unknown) {
+      serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'Failed to resolve session working directory, falling back to global root');
     }
     this.sessionWorkingDirs.set(sessionId, resolved);
     return resolved;
@@ -3825,7 +3822,8 @@ export class KoryManager {
         parts.push(`Active goal: ${goalCtx.objective} (item: ${goalCtx.itemTitle})`);
       }
       return parts.join('\n\n');
-    } catch {
+    } catch (err: unknown) {
+      serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'Failed to build goal context prompt');
       return '';
     }
   }
@@ -3844,8 +3842,8 @@ export class KoryManager {
   recordChange(sessionId: string, change: any): void {
     try {
       this.state.recordChange(sessionId, change);
-    } catch {
-      // best effort — the state may not exist for CLI-only sessions
+    } catch (err: unknown) {
+      serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'Best effort recordChange failed — state may not exist for CLI-only sessions');
     }
   }
 

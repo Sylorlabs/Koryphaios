@@ -1,6 +1,8 @@
 export type FeedbackCategory = 'bug' | 'idea' | 'question' | 'other';
 export type FeedbackVisibility = 'private' | 'public';
 
+import { serverLog } from '../logger';
+
 export interface FeedbackSubmission {
   category: FeedbackCategory;
   visibility?: FeedbackVisibility;
@@ -29,7 +31,8 @@ function validEndpoint(value: string): boolean {
       url.protocol === 'https:' ||
       (url.protocol === 'http:' && ['127.0.0.1', 'localhost'].includes(url.hostname))
     );
-  } catch {
+  } catch (err: unknown) {
+    serverLog.debug({ err: err instanceof Error ? err.message : String(err), value }, 'Invalid feedback endpoint URL');
     return false;
   }
 }

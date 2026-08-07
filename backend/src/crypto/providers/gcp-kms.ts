@@ -68,9 +68,9 @@ export class GCPKMSProvider implements KMSProvider {
         },
         'Google Cloud KMS initialized',
       );
-    } catch (error: any) {
+    } catch (error: unknown) {
       serverLog.error({ error, project: this.config.projectId }, 'Failed to initialize GCP KMS');
-      throw new Error(`GCP KMS initialization failed: ${error.message}`);
+      throw new Error(`GCP KMS initialization failed: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 
@@ -110,9 +110,9 @@ export class GCPKMSProvider implements KMSProvider {
         plaintext: dek,
         encrypted: data.ciphertext, // base64-encoded encrypted key
       };
-    } catch (error: any) {
+    } catch (error: unknown) {
       serverLog.error({ error }, 'GCP KMS encrypt failed');
-      throw new Error(`Failed to generate data key: ${error.message}`);
+      throw new Error(`Failed to generate data key: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 
@@ -145,9 +145,9 @@ export class GCPKMSProvider implements KMSProvider {
       const data = await response.json();
 
       return Buffer.from(data.plaintext, 'base64');
-    } catch (error: any) {
+    } catch (error: unknown) {
       serverLog.error({ error }, 'GCP KMS decrypt failed');
-      throw new Error(`Failed to decrypt data key: ${error.message}`);
+      throw new Error(`Failed to decrypt data key: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 
@@ -197,7 +197,7 @@ export class GCPKMSProvider implements KMSProvider {
       );
 
       return true;
-    } catch (error: any) {
+    } catch (error: unknown) {
       serverLog.error({ error }, 'GCP KMS key rotation failed');
       return false;
     }
@@ -212,7 +212,8 @@ export class GCPKMSProvider implements KMSProvider {
       // Try to get key info
       await this.refreshKeyInfo();
       return true;
-    } catch {
+    } catch (err: unknown) {
+      serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'GCP KMS health check failed');
       return false;
     }
   }

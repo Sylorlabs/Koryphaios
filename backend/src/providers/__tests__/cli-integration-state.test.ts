@@ -1,4 +1,4 @@
-import { describe, expect, it, mock } from 'bun:test';
+import { describe, expect, it, mock, beforeAll } from 'bun:test';
 import {
   getCliConversationRevision,
   markCliConversationRewritten,
@@ -9,22 +9,14 @@ import { buildKoryCliMcpConfig } from '../kory-cli-mcp-config';
 import { buildKoryHookConfigs, buildKoryMcpServerConfig } from '../cli-bridges';
 import { validateLocalBearerToken } from '../../auth/local-route-auth';
 import { localAuth } from '../../auth/local-auth';
+import { initDb } from '../../db';
 
-// Mock the DB so cli-session-state's async DB calls resolve without a real
-// database. The mock returns an empty row list (revision 0) and an empty
-// update result, letting us exercise the in-memory cache path.
-mock.module('../../db', () => ({
-  db: {
-    select: () => ({ from: () => ({ where: () => ({ limit: () => [] }) }) }),
-    update: () => ({
-      set: () => ({
-        where: () => ({
-          returning: () => ({ limit: () => [] }),
-        }),
-      }),
-    }),
-  },
-}));
+// Ensure the sessions table exists so cli-session-state's queries don't throw.
+// Do NOT mock the db module — mock.module is process-wide in Bun and would
+// break subsequent test files that need the real drizzle instance.
+beforeAll(async () => {
+  await initDb();
+});
 
 describe('native CLI integration state', () => {
   it('increments the rewrite revision used to invalidate native conversations', async () => {

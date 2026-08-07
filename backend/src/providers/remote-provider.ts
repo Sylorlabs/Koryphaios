@@ -54,7 +54,8 @@ export async function applyRemoteFileEdit(
     let current = '';
     try {
       current = await readFile(dest, 'utf-8');
-    } catch {
+    } catch (err: unknown) {
+      serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'Remote provider: local file not found for splice');
       return 'not-found'; // no local file to splice into
     }
     const oldStr = event.fileOldContent as string;

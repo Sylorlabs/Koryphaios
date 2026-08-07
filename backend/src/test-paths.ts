@@ -1,8 +1,9 @@
 import { PROJECT_ROOT } from './runtime/paths';
 import { getSocketPath } from './server/socket-server';
+import { serverLog } from './logger';
 
-console.log('PROJECT_ROOT:', PROJECT_ROOT);
-console.log('Type:', typeof PROJECT_ROOT);
+serverLog.info({ PROJECT_ROOT }, 'PROJECT_ROOT');
+serverLog.info({ type: typeof PROJECT_ROOT }, 'Type');
 
 const socketInfo = getSocketPath(PROJECT_ROOT);
-console.log('Socket info:', socketInfo);
+serverLog.info({ socketInfo }, 'Socket info');

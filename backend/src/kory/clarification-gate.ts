@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import type { TaskKind } from './prompts';
+import { serverLog } from '../logger';
 
 export const ClarificationDecisionSchema = z.object({
   action: z.enum(['proceed', 'clarify']),
@@ -108,7 +109,8 @@ export function validateClarificationDecision(
     }
 
     return result.data;
-  } catch {
+  } catch (err: unknown) {
+    serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'Failed to parse clarification gate decision');
     return null;
   }
 }

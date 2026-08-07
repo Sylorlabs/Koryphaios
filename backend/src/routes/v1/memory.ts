@@ -20,153 +20,131 @@ import {
   initializeSessionMemory,
   initializeRules,
   DEFAULT_MEMORY_SETTINGS,
+  listProjectMemoryDocuments,
+  createProjectMemoryDocument,
 } from '../../memory/unified-memory';
-import { PROJECT_ROOT } from '../../runtime/paths';
+import { getRequestProjectRoot } from '../../runtime/request-project';
 import { requireLocalRouteAuth } from '../../auth/local-route-auth';
+import { AuthenticationError, ValidationError, InternalError } from '../../errors/types';
+import type { MemorySettings } from '../../memory/unified-memory';
 
 export const memoryRoutes = new Elysia({ prefix: '/api/memory' })
+  .get('/documents', async ({ request, set }) => {
+    if (!requireLocalRouteAuth(request, set)) throw new AuthenticationError('Unauthorized');
+    return { ok: true, data: listProjectMemoryDocuments(getRequestProjectRoot(request)) };
+  })
+  .post('/documents', async ({ request, body, set }) => {
+    if (!requireLocalRouteAuth(request, set)) throw new AuthenticationError('Unauthorized');
+    return { ok: true, data: createProjectMemoryDocument(getRequestProjectRoot(request), body.name, body.kind) };
+  }, { body: t.Object({ name: t.String(), kind: t.Union([t.Literal('memory'), t.Literal('rules')]) }) })
   // Universal Memory
   .get('/universal', async ({ request, set }) => {
-    if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
+    if (!requireLocalRouteAuth(request, set)) throw new AuthenticationError('Unauthorized');
     return { ok: true, data: readUniversalMemory() };
   })
   .put(
     '/universal',
     async ({ request, body, set }) => {
-      if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
-      try {
-        const memory = writeUniversalMemory(body.content);
-        return { ok: true, data: memory };
-      } catch (err: any) {
-        set.status = 500;
-        return { ok: false, error: err.message ?? 'Failed to write universal memory' };
-      }
+      if (!requireLocalRouteAuth(request, set)) throw new AuthenticationError('Unauthorized');
+      const memory = writeUniversalMemory(body.content);
+      return { ok: true, data: memory };
     },
     { body: t.Object({ content: t.String() }) },
   )
   .post('/universal/init', async ({ request, set }) => {
-    if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
+    if (!requireLocalRouteAuth(request, set)) throw new AuthenticationError('Unauthorized');
     return { ok: true, data: initializeUniversalMemory() };
   })
 
   // Project Memory
   .get('/project', async ({ request, set }) => {
-    if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
-    return { ok: true, data: readProjectMemory(PROJECT_ROOT) };
+    if (!requireLocalRouteAuth(request, set)) throw new AuthenticationError('Unauthorized');
+    return { ok: true, data: readProjectMemory(getRequestProjectRoot(request)) };
   })
   .put(
     '/project',
     async ({ request, body, set }) => {
-      if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
-      try {
-        const memory = writeProjectMemory(PROJECT_ROOT, body.content);
-        return { ok: true, data: memory };
-      } catch (err: any) {
-        set.status = 500;
-        return { ok: false, error: err.message ?? 'Failed to write project memory' };
-      }
+      if (!requireLocalRouteAuth(request, set)) throw new AuthenticationError('Unauthorized');
+      const memory = writeProjectMemory(getRequestProjectRoot(request), body.content);
+      return { ok: true, data: memory };
     },
     { body: t.Object({ content: t.String() }) },
   )
   .post('/project/init', async ({ request, set }) => {
-    if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
-    return { ok: true, data: initializeProjectMemory(PROJECT_ROOT) };
+    if (!requireLocalRouteAuth(request, set)) throw new AuthenticationError('Unauthorized');
+    return { ok: true, data: initializeProjectMemory(getRequestProjectRoot(request)) };
   })
 
   // Session Memory
   .get('/sessions/:id', async ({ request, params: { id }, set }) => {
-    if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
+    if (!requireLocalRouteAuth(request, set)) throw new AuthenticationError('Unauthorized');
     const validatedId = validateSessionId(id);
-    if (!validatedId) {
-      set.status = 400;
-      return { ok: false, error: 'Invalid session ID' };
-    }
-    return { ok: true, data: readSessionMemory(PROJECT_ROOT, validatedId) };
+    if (!validatedId) throw new ValidationError('Invalid session ID');
+    return { ok: true, data: readSessionMemory(getRequestProjectRoot(request), validatedId) };
   })
   .put(
     '/sessions/:id',
     async ({ request, params: { id }, body, set }) => {
-      if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
+      if (!requireLocalRouteAuth(request, set)) throw new AuthenticationError('Unauthorized');
       const validatedId = validateSessionId(id);
-      if (!validatedId) {
-        set.status = 400;
-        return { ok: false, error: 'Invalid session ID' };
-      }
-      try {
-        const memory = writeSessionMemory(PROJECT_ROOT, validatedId, body.content);
-        return { ok: true, data: memory };
-      } catch (err: any) {
-        set.status = 500;
-        return { ok: false, error: err.message ?? 'Failed to write session memory' };
-      }
+      if (!validatedId) throw new ValidationError('Invalid session ID');
+      const memory = writeSessionMemory(getRequestProjectRoot(request), validatedId, body.content);
+      return { ok: true, data: memory };
     },
     { body: t.Object({ content: t.String() }) },
   )
   .post('/sessions/:id/init', async ({ request, params: { id }, set }) => {
-    if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
+    if (!requireLocalRouteAuth(request, set)) throw new AuthenticationError('Unauthorized');
     const validatedId = validateSessionId(id);
-    if (!validatedId) {
-      set.status = 400;
-      return { ok: false, error: 'Invalid session ID' };
-    }
-    return { ok: true, data: initializeSessionMemory(PROJECT_ROOT, validatedId) };
+    if (!validatedId) throw new ValidationError('Invalid session ID');
+    return { ok: true, data: initializeSessionMemory(getRequestProjectRoot(request), validatedId) };
   })
   .delete('/sessions/:id', async ({ request, params: { id }, set }) => {
-    if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
+    if (!requireLocalRouteAuth(request, set)) throw new AuthenticationError('Unauthorized');
     const validatedId = validateSessionId(id);
-    if (!validatedId) {
-      set.status = 400;
-      return { ok: false, error: 'Invalid session ID' };
-    }
-    const success = deleteSessionMemory(PROJECT_ROOT, validatedId);
-    if (!success) set.status = 500;
-    return { ok: success };
+    if (!validatedId) throw new ValidationError('Invalid session ID');
+    const success = deleteSessionMemory(getRequestProjectRoot(request), validatedId);
+    if (!success) throw new InternalError('Failed to delete session memory');
+    return { ok: true };
   })
 
   // Rules
   .get('/rules', async ({ request, set }) => {
-    if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
-    return { ok: true, data: readRules(PROJECT_ROOT) };
+    if (!requireLocalRouteAuth(request, set)) throw new AuthenticationError('Unauthorized');
+    return { ok: true, data: readRules(getRequestProjectRoot(request)) };
   })
   .put(
     '/rules',
     async ({ request, body, set }) => {
-      if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
-      try {
-        const rules = writeRules(PROJECT_ROOT, body.content);
-        return { ok: true, data: rules };
-      } catch (err: any) {
-        set.status = 500;
-        return { ok: false, error: err.message ?? 'Failed to write rules' };
-      }
+      if (!requireLocalRouteAuth(request, set)) throw new AuthenticationError('Unauthorized');
+      const rules = writeRules(getRequestProjectRoot(request), body.content);
+      return { ok: true, data: rules };
     },
     { body: t.Object({ content: t.String() }) },
   )
   .post('/rules/init', async ({ request, set }) => {
-    if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
-    return { ok: true, data: initializeRules(PROJECT_ROOT) };
+    if (!requireLocalRouteAuth(request, set)) throw new AuthenticationError('Unauthorized');
+    return { ok: true, data: initializeRules(getRequestProjectRoot(request)) };
   })
 
   // Settings
   .get('/settings', async ({ request, set }) => {
-    if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
-    return { ok: true, data: loadMemorySettings(PROJECT_ROOT) };
+    if (!requireLocalRouteAuth(request, set)) throw new AuthenticationError('Unauthorized');
+    return { ok: true, data: loadMemorySettings(getRequestProjectRoot(request)) };
   })
   .put('/settings', async ({ request, body, set }) => {
-    if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
-    try {
-      const currentSettings = loadMemorySettings(PROJECT_ROOT);
-      const newSettings = { ...currentSettings, ...(body as any) };
-      saveMemorySettings(PROJECT_ROOT, newSettings as any);
-      return { ok: true, data: newSettings };
-    } catch (err: any) {
-      set.status = 500;
-      return { ok: false, error: err.message ?? 'Failed to save settings' };
-    }
+    if (!requireLocalRouteAuth(request, set)) throw new AuthenticationError('Unauthorized');
+    const root = getRequestProjectRoot(request);
+    const currentSettings = loadMemorySettings(root);
+    // Body is a partial overlay of MemorySettings; no schema validator is
+    // applied on this route, so cast to the expected partial shape.
+    const newSettings: MemorySettings = { ...currentSettings, ...(body as Partial<MemorySettings>) };
+    saveMemorySettings(root, newSettings);
+    return { ok: true, data: newSettings };
   })
   .post('/settings/reset', async ({ request, set }) => {
-    if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
-    saveMemorySettings(PROJECT_ROOT, DEFAULT_MEMORY_SETTINGS);
+    if (!requireLocalRouteAuth(request, set)) throw new AuthenticationError('Unauthorized');
+    saveMemorySettings(getRequestProjectRoot(request), DEFAULT_MEMORY_SETTINGS);
     return { ok: true, data: DEFAULT_MEMORY_SETTINGS };
   })
 
@@ -174,8 +152,8 @@ export const memoryRoutes = new Elysia({ prefix: '/api/memory' })
   .get(
     '/context',
     async ({ request, query, set }) => {
-      if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
-      const context = assembleMemoryContext(PROJECT_ROOT, query.sessionId ?? null);
+      if (!requireLocalRouteAuth(request, set)) throw new AuthenticationError('Unauthorized');
+      const context = assembleMemoryContext(getRequestProjectRoot(request), query.sessionId ?? null);
       const formatted = formatMemoryForContext(context);
       return {
         ok: true,
@@ -195,8 +173,8 @@ export const memoryRoutes = new Elysia({ prefix: '/api/memory' })
   .get(
     '/stats',
     async ({ request, query, set }) => {
-      if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
-      return { ok: true, data: getMemoryStats(PROJECT_ROOT, query.sessionId ?? undefined) };
+      if (!requireLocalRouteAuth(request, set)) throw new AuthenticationError('Unauthorized');
+      return { ok: true, data: getMemoryStats(getRequestProjectRoot(request), query.sessionId ?? undefined) };
     },
     {
       query: t.Object({

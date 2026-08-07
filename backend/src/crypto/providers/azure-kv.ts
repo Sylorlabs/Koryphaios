@@ -60,12 +60,12 @@ export class AzureKMSProvider implements KMSProvider {
         },
         'Azure Key Vault initialized',
       );
-    } catch (error: any) {
+    } catch (error: unknown) {
       serverLog.error(
         { error, vault: this.config.vaultName },
         'Failed to initialize Azure Key Vault',
       );
-      throw new Error(`Azure Key Vault initialization failed: ${error.message}`);
+      throw new Error(`Azure Key Vault initialization failed: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 
@@ -105,9 +105,9 @@ export class AzureKMSProvider implements KMSProvider {
         plaintext: dek,
         encrypted: data.value, // base64-encoded wrapped key
       };
-    } catch (error: any) {
+    } catch (error: unknown) {
       serverLog.error({ error }, 'Azure Key Vault wrap key failed');
-      throw new Error(`Failed to generate data key: ${error.message}`);
+      throw new Error(`Failed to generate data key: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 
@@ -140,9 +140,9 @@ export class AzureKMSProvider implements KMSProvider {
       const data = await response.json();
 
       return Buffer.from(data.value, 'base64');
-    } catch (error: any) {
+    } catch (error: unknown) {
       serverLog.error({ error }, 'Azure Key Vault unwrap key failed');
-      throw new Error(`Failed to decrypt data key: ${error.message}`);
+      throw new Error(`Failed to decrypt data key: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 
@@ -188,7 +188,7 @@ export class AzureKMSProvider implements KMSProvider {
       );
 
       return true;
-    } catch (error: any) {
+    } catch (error: unknown) {
       serverLog.error({ error }, 'Azure Key Vault key rotation failed');
       return false;
     }
@@ -203,7 +203,8 @@ export class AzureKMSProvider implements KMSProvider {
       // Try to get key info
       await this.refreshKeyInfo();
       return true;
-    } catch {
+    } catch (err: unknown) {
+      serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'Azure Key Vault health check failed');
       return false;
     }
   }

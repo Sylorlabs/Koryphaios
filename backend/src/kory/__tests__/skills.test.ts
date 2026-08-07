@@ -1,16 +1,20 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readFileSync, rmSync, unlinkSync, writeFileSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
   activateSkill,
   applyDefaultUpdate,
+  compareBundledSkill,
+  countBundledUpdates,
   listSkills,
   resolveSkills,
   saveSkillDraft,
   testSkill,
   validateSkillContent,
   enforceSkillLearningPolicy,
+  seedDefaultSkills,
+  personalRoot,
 } from '../skills';
 import { compilePrompt, createTaskContract } from '../prompts';
 import {
@@ -57,7 +61,9 @@ describe('local Koryphaios skills', () => {
   });
   test('seeds the complete instruction-only default library', () => {
     const active = listSkills(root).filter((skill) => skill.state === 'active');
-    expect(active).toHaveLength(79);
+    // 79 TypeScript-defined skills + 6 file-based skills (skill-creator, skill-installer,
+    // review-agent, plugin-creator, imagegen, openai-docs) deployed from repo skills/
+    expect(active).toHaveLength(85);
     expect(active.every((skill) => skill.validation.valid)).toBe(true);
     expect(active.every((skill) => skill.metadata.sourceScope === 'local-only')).toBe(true);
   });
@@ -492,5 +498,80 @@ describe('local Koryphaios skills', () => {
     expect(applyDefaultUpdate(root, 'planning', 'keep-local').content).toContain('locally edited');
     expect(applyDefaultUpdate(root, 'planning', 'merge').state).toBe('draft');
     expect(applyDefaultUpdate(root, 'planning', 'replace').content).toContain('dependency-ordered');
+  });
+
+  test('compareBundledSkill returns local vs bundled without requiring a draft', () => {
+    // Deploy file-based skills so we have a local copy to compare
+    seedDefaultSkills();
+    const skillPath = join(personalRoot(), 'skill-creator', 'SKILL.md');
+
+    // Before editing: comparison exists but changed=false
+    const before = compareBundledSkill('skill-creator');
+    expect(before).not.toBeNull();
+    expect(before!.local).toBe(before!.bundled);
+    expect(before!.changed).toBe(false);
+
+    // After editing: comparison exists and changed=true
+    const local = before!.local;
+    const edited = local.replace('# Skill Creator', '# Skill Creator (Customized)');
+    writeFileSync(skillPath, edited);
+
+    const after = compareBundledSkill('skill-creator');
+    expect(after).not.toBeNull();
+    expect(after!.changed).toBe(true);
+    expect(after!.local).toContain('Customized');
+    expect(after!.bundled).not.toContain('Customized');
+
+    // Non-existent skill returns null
+    expect(compareBundledSkill('nonexistent-skill')).toBeNull();
+  });
+
+  test('countBundledUpdates reports zero on fresh deploy and positive after edits', () => {
+    // Fresh deploy — no edits, no updates
+    seedDefaultSkills();
+    expect(countBundledUpdates()).toBe(0);
+
+    // Edit one skill
+    const skillPath = join(personalRoot(), 'skill-installer', 'SKILL.md');
+    const content = readFileSync(skillPath, 'utf8');
+    writeFileSync(skillPath, content.replace('#', '# (Edited)'));
+
+    expect(countBundledUpdates()).toBe(1);
+
+    // Edit another
+    const skillPath2 = join(personalRoot(), 'review-agent', 'SKILL.md');
+    const content2 = readFileSync(skillPath2, 'utf8');
+    writeFileSync(skillPath2, content2.replace('#', '# (Edited)'));
+
+    expect(countBundledUpdates()).toBe(2);
+  });
+
+  test('applyDefaultUpdate merge-with-agent falls through to keep-local (LLM call is route-only)', () => {
+    // The merge-with-agent choice in applyDefaultUpdate should NOT create a
+    // placeholder draft — the route handler handles the LLM call separately.
+    // So it should behave like keep-local: return the active revision unchanged.
+    // First, replace to clear any leftover draft from prior tests
+    applyDefaultUpdate(root, 'planning', 'replace');
+    const original = listSkills(root).find(
+      (skill) => skill.name === 'planning' && skill.state === 'active',
+    )!;
+    saveSkillDraft(
+      root,
+      'personal',
+      'planning',
+      original.content.replace('dependency-ordered', 'locally edited'),
+    );
+    activateSkill(root, 'personal', 'planning');
+    // Remove the leftover DRAFT.md that activateSkill doesn't clean up
+    const draftPath = join(personalRoot(), 'planning', 'DRAFT.md');
+    if (existsSync(draftPath)) unlinkSync(draftPath);
+    const result = applyDefaultUpdate(root, 'planning', 'merge-with-agent');
+    expect(result.state).toBe('active');
+    expect(result.content).toContain('locally edited');
+    // No draft should have been created by merge-with-agent
+    const drafts = listSkills(root).filter(
+      (skill) => skill.name === 'planning' && skill.state === 'draft',
+    );
+    expect(drafts).toHaveLength(0);
   });
 });

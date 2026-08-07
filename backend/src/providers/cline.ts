@@ -8,11 +8,11 @@
 
 import type { ModelDef, ProviderConfig } from '@koryphaios/shared';
 import { spawn } from 'node:child_process';
-import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { whichBinary } from './cli-detection';
 import { detectClineCLILogin } from './auth-utils';
 import { providerLog } from '../logger';
-import { homedir } from 'node:os';
+import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { buildSoftJail, wrapCommand } from '../collaboration/sandbox-runner';
 import {
@@ -68,7 +68,8 @@ function buildPrompt(systemPrompt: string | undefined, messages: ProviderMessage
 function readJsonFile<T = unknown>(path: string): T | null {
   try {
     return JSON.parse(readFileSync(path, 'utf-8')) as T;
-  } catch {
+  } catch (err: unknown) {
+    providerLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'Cline JSON file read failed');
     return null;
   }
 }
@@ -155,8 +156,8 @@ function readConfiguredClineModels(): ModelDef[] {
     name: modelId,
     provider: 'cline',
     apiModelId: modelId,
-    contextWindow: 200_000,
-    maxOutputTokens: 32_000,
+    contextWindow: 0,
+    maxOutputTokens: 0,
     supportsStreaming: true,
     supportsAttachments: false,
   } as ModelDef));
@@ -213,8 +214,8 @@ export class ClineProvider implements Provider {
         name: normalized || modelId,
         provider: 'cline',
         apiModelId: modelId,
-        contextWindow: 200_000,
-        maxOutputTokens: 32_000,
+        contextWindow: 0,
+        maxOutputTokens: 0,
         supportsStreaming: true,
         supportsAttachments: false,
       } as ModelDef);
@@ -277,8 +278,8 @@ export class ClineProvider implements Provider {
       setTimeout(() => {
         try {
           child.kill('SIGTERM');
-        } catch {
-          /* gone */
+        } catch (err: unknown) {
+          providerLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'Cline model probe child already gone on timeout');
         }
       }, 12_000).unref?.();
     };
@@ -298,6 +299,7 @@ export class ClineProvider implements Provider {
   }
 
   async *streamResponse(request: StreamRequest): AsyncGenerator<ProviderEvent> {
+    const researchOnly = request.capabilityProfile === 'research-only';
     const bin = whichBinary('cline');
     if (!bin) {
       yield { type: 'error', error: 'Cline CLI (cline) not found on PATH.' };
@@ -332,8 +334,11 @@ export class ClineProvider implements Provider {
       systemPrompt: request.systemPrompt ?? '',
       tools: request.tools ?? [],
     };
-    const clineHome = getKoryphaiosClineHome();
-    try {
+    const clineHome = researchOnly
+      ? join(getKoryphaiosClineHome(), 'research-only')
+      : getKoryphaiosClineHome();
+    mkdirSync(clineHome, { recursive: true });
+    if (!researchOnly) try {
       // MCP: write cline_mcp_settings.json with the kory server.
       const mcpConfigs = clineBridge?.buildMcpConfig(bridgeCtx);
       if (mcpConfigs && mcpConfigs.length > 0) {
@@ -363,23 +368,31 @@ export class ClineProvider implements Provider {
       providerLog.warn({ err: wiringErr, provider: 'cline' }, 'Failed to wire kory MCP/rules for Cline');
     }
 
+    const researchRoot = researchOnly ? mkdtempSync(join(tmpdir(), 'kory-web-research-cline-')) : null;
+    const cwd = researchRoot ?? (request.workingDirectory?.trim() || process.cwd());
     const args = [
-      ...(request.permissionMode === 'yolo' && request.harnessRole !== 'critic' ? [] : ['--plan']),
+      '--plan',
       '--auto-approve',
       'true',
       '--json',
+      '--cwd', cwd,
+      '--config', clineHome,
+      '--data-dir', join(clineHome, 'data'),
+      '--hooks-dir', join(clineHome, 'hooks'),
       prompt,
     ];
     if (request.reasoningLevel && request.reasoningLevel !== 'auto') {
       const lvl = request.reasoningLevel.toLowerCase();
-      if (['none', 'low', 'medium', 'high', 'xhigh'].includes(lvl)) {
+      const modelDef = this.listModels().find(
+        (model) => model.id === request.model || model.apiModelId === request.model,
+      );
+      if (modelDef?.reasoningLevels?.includes(lvl)) {
         args.push('--reasoning-effort', lvl);
       }
     }
     const cliModel = request.model?.replace(/^cline-/, '');
     if (cliModel && cliModel !== 'default') args.push('--model', cliModel);
 
-    const cwd = request.workingDirectory?.trim() || process.cwd();
     const jail = request.sandbox ? buildSoftJail(process.env, [join(homedir(), '.cline')]) : null;
     const wrapped = request.sandbox
       ? wrapCommand(bin, args, { cwd, policy: request.sandbox })
@@ -397,12 +410,15 @@ export class ClineProvider implements Provider {
     const onAbort = () => {
       try {
         child.kill('SIGTERM');
-      } catch {
-        /* gone */
+      } catch (err: unknown) {
+        providerLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'Cline CLI child already gone on abort');
       }
     };
     request.signal?.addEventListener('abort', onAbort, { once: true });
-    child.once('close', () => jail?.cleanup());
+    child.once('close', () => {
+      jail?.cleanup();
+      if (researchRoot) rmSync(researchRoot, { recursive: true, force: true });
+    });
     const timeout = setTimeout(() => {
       providerLog.warn({ provider: 'cline' }, 'Cline harness timed out — killing CLI');
       onAbort();
@@ -429,7 +445,8 @@ export class ClineProvider implements Provider {
           let ev: ClineEvent;
           try {
             ev = JSON.parse(line) as ClineEvent;
-          } catch {
+          } catch (err: unknown) {
+            providerLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'Cline skipping non-JSON stream line');
             continue;
           }
           for (const out of this.mapEvent(

@@ -10,7 +10,7 @@
 import { appendFile, mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
-import { koryLog } from '../logger';
+import { koryLog, serverLog } from '../logger';
 
 export type ArchiveKind = 'tool_call' | 'tool_result' | 'file_edit' | 'terminal';
 
@@ -92,8 +92,8 @@ export class ContextArchiveService {
           s.byId.set(entry.id, entry);
           const n = Number(entry.id.replace(/^cx_/, ''));
           if (Number.isFinite(n) && n >= s.counter) s.counter = n + 1;
-        } catch {
-          /* skip corrupt line */
+        } catch (err: unknown) {
+          serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'Skipping corrupt context archive line');
         }
       }
     } catch (err) {

@@ -1,5 +1,6 @@
-import { readFileSync, existsSync } from 'node:fs';
-import { join } from 'node:path';
+import { readFileSync, existsSync, readdirSync, statSync } from 'node:fs';
+import { join, basename } from 'node:path';
+import { serverLog } from '../logger';
 import { PROJECT_ROOT } from '../runtime/paths';
 
 // Cache for token detection results to avoid repeated slow operations
@@ -121,8 +122,9 @@ export function detectClaudeCodeToken(): { token: string | null; baseUrl?: strin
           if (typeof token === 'string' && token.trim()) {
             return token.trim();
           }
-        } catch {
+        } catch (err: unknown) {
           // Ignore malformed config files
+          serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'auth-utils: malformed Claude config file');
         }
       }
 
@@ -184,8 +186,9 @@ export function detectClaudeCodeLogin(): boolean {
           try {
             const data = JSON.parse(readFileSync(claudeJson, 'utf-8'));
             if (data?.oauthAccount) return 'yes';
-          } catch {
+          } catch (err: unknown) {
             // Ignore malformed config
+            serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'auth-utils: malformed .claude.json config');
           }
         }
 
@@ -278,7 +281,8 @@ export function detectCodexCLILogin(): boolean {
   try {
     const data = JSON.parse(readFileSync(authPath, 'utf-8'));
     return !!(data?.tokens?.access_token || data?.OPENAI_API_KEY || data?.access_token);
-  } catch {
+  } catch (err: unknown) {
+    serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'auth-utils: Codex auth.json parse failed');
     return false;
   }
 }
@@ -311,7 +315,8 @@ export function detectClineCLILogin(): boolean {
   try {
     const data = JSON.parse(readFileSync(secrets, 'utf-8')) as Record<string, unknown>;
     return hasClineCLILoginSignal(data, 'secrets');
-  } catch {
+  } catch (err: unknown) {
+    serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'auth-utils: Cline secrets.json parse failed');
     return false;
   }
 }
@@ -336,6 +341,187 @@ export function createDevinCLIAuthMarker(): string {
   return 'devin-cli-session';
 }
 
+// ─── Freebuff (Codebuff free tier) CLI login detection ──────────────────────
+// Freebuff is the free, ad-supported build of Codebuff. Its CLI stores
+// credentials at ~/.config/manicode/credentials.json with an `authToken` field
+// that doubles as the API key for @codebuff/sdk's CodebuffClient. Koryphaios
+// reads that token and calls the Codebuff backend programmatically (no
+// subprocess, no TUI, no ads).
+
+const FREEBUFF_CLI_AUTH_PREFIX = 'cli:freebuff:';
+
+export function isFreebuffCLIAuthMarker(value: string | null | undefined): boolean {
+  return typeof value === 'string' && value.startsWith(FREEBUFF_CLI_AUTH_PREFIX);
+}
+export function createFreebuffCLIAuthMarker(): string {
+  return `${FREEBUFF_CLI_AUTH_PREFIX}${Date.now()}`;
+}
+
+/**
+ * Detects whether the Freebuff CLI is logged in: a credentials file at
+ * ~/.config/manicode/credentials.json with a valid authToken. The token stays
+ * on disk and is read lazily at request time — this is a login-signal check
+ * only.
+ */
+export function detectFreebuffCLILogin(): boolean {
+  const home = homeDir();
+  if (!home) return false;
+  const credPath = join(home, '.config', 'manicode', 'credentials.json');
+  if (!existsSync(credPath)) return false;
+  try {
+    const data = JSON.parse(readFileSync(credPath, 'utf-8')) as {
+      default?: { authToken?: string };
+    };
+    return !!data?.default?.authToken;
+  } catch (err: unknown) {
+    serverLog.debug(
+      { err: err instanceof Error ? err.message : String(err) },
+      'auth-utils: Freebuff credentials.json parse failed',
+    );
+    return false;
+  }
+}
+
+/**
+ * Reads the Freebuff CLI auth token from ~/.config/manicode/credentials.json.
+ * Returns null if not logged in or the file is malformed.
+ */
+export function readFreebuffAuthToken(): string | null {
+  const creds = readFreebuffCredentials();
+  return creds?.authToken ?? null;
+}
+
+/**
+ * Reads the full Freebuff CLI credentials (authToken + fingerprintId) from
+ * ~/.config/manicode/credentials.json. The @codebuff/sdk's CodebuffClient
+ * requires both an apiKey (the authToken) and a fingerprintId. Returns null
+ * if not logged in or the file is malformed.
+ */
+export function readFreebuffCredentials(): {
+  authToken: string;
+  fingerprintId: string;
+} | null {
+  const home = homeDir();
+  if (!home) return null;
+  const credPath = join(home, '.config', 'manicode', 'credentials.json');
+  if (!existsSync(credPath)) return null;
+  try {
+    const data = JSON.parse(readFileSync(credPath, 'utf-8')) as {
+      default?: { authToken?: string; fingerprintId?: string };
+    };
+    const token = data?.default?.authToken;
+    const fingerprint = data?.default?.fingerprintId;
+    if (!token || !fingerprint) return null;
+    return { authToken: token, fingerprintId: fingerprint };
+  } catch (err: unknown) {
+    serverLog.debug(
+      { err: err instanceof Error ? err.message : String(err) },
+      'auth-utils: Freebuff credentials.json read failed',
+    );
+    return null;
+  }
+}
+
+// ─── Multi-account Freebuff discovery ────────────────────────────────────────
+// Mirrors the codex CLI pattern: scan ~/.config/manicode, ~/.config/manicode2,
+// ~/.config/manicode3, etc. for sibling credential directories. Users with
+// multiple Codebuff/freebuff accounts can isolate them with wrappers like
+// FREEBUFF_HOME=~/.config/manicode2. Each discovered account gets its own
+// model list entry so the user can pick which account to use.
+
+export interface FreebuffAccount {
+  id: string;
+  label: string;
+  profileDir: string;
+  authToken: string;
+  fingerprintId: string;
+}
+
+/**
+ * Discovers all Freebuff/Codebuff CLI accounts on this machine by scanning
+ * ~/.config/manicode, ~/.config/manicode2, ~/.config/manicode3, etc.
+ * Each directory must contain a credentials.json with a valid authToken
+ * and fingerprintId to be included.
+ */
+export function discoverFreebuffAccounts(): FreebuffAccount[] {
+  const home = homeDir();
+  if (!home) return [];
+
+  const configDir = join(home, '.config');
+  if (!existsSync(configDir)) return [];
+
+  // Scan for manicode* directories (manicode, manicode2, manicode-work, etc.)
+  let candidateDirs: string[] = [];
+  try {
+    candidateDirs = readdirSync(configDir)
+      .filter((name) => name === 'manicode' || name.startsWith('manicode'))
+      .map((name) => join(configDir, name))
+      .filter((path) => {
+        try { return statSync(path).isDirectory(); } catch { return false; }
+      });
+  } catch (err: unknown) {
+    serverLog.debug(
+      { err: err instanceof Error ? err.message : String(err) },
+      'auth-utils: Freebuff account directory scan failed',
+    );
+    return [];
+  }
+
+  const accounts: FreebuffAccount[] = [];
+  for (const dir of candidateDirs) {
+    const credPath = join(dir, 'credentials.json');
+    if (!existsSync(credPath)) continue;
+    try {
+      const data = JSON.parse(readFileSync(credPath, 'utf-8')) as {
+        default?: { authToken?: string; fingerprintId?: string };
+      };
+      const token = data?.default?.authToken;
+      const fingerprint = data?.default?.fingerprintId;
+      if (!token || !fingerprint) continue;
+
+      const dirName = basename(dir);
+      const label = dirName === 'manicode' ? 'freebuff' : `freebuff ${dirName.replace(/^manicode[-_]?/, '')}`;
+
+      accounts.push({
+        id: `cli:freebuff:${Buffer.from(dir).toString('base64url')}`,
+        label: label.replace(/\s+/g, ' ').trim(),
+        profileDir: dir,
+        authToken: token,
+        fingerprintId: fingerprint,
+      });
+    } catch {
+      // Skip malformed credential files
+    }
+  }
+
+  return accounts.sort((a, b) => a.label.localeCompare(b.label));
+}
+
+/**
+ * Reads Freebuff credentials from a specific account directory (for multi-account
+ * support). Falls back to the default readFreebuffCredentials() if profileDir
+ * is not provided.
+ */
+export function readFreebuffCredentialsFrom(profileDir?: string): {
+  authToken: string;
+  fingerprintId: string;
+} | null {
+  if (!profileDir) return readFreebuffCredentials();
+  const credPath = join(profileDir, 'credentials.json');
+  if (!existsSync(credPath)) return null;
+  try {
+    const data = JSON.parse(readFileSync(credPath, 'utf-8')) as {
+      default?: { authToken?: string; fingerprintId?: string };
+    };
+    const token = data?.default?.authToken;
+    const fingerprint = data?.default?.fingerprintId;
+    if (!token || !fingerprint) return null;
+    return { authToken: token, fingerprintId: fingerprint };
+  } catch {
+    return null;
+  }
+}
+
 export function detectCursorCLILogin(): boolean {
   if (process.env.CURSOR_API_KEY?.trim()) return true;
   const home = homeDir();
@@ -345,7 +531,8 @@ export function detectCursorCLILogin(): boolean {
   try {
     const data = JSON.parse(readFileSync(cfg, 'utf-8'));
     return !!(data?.authInfo && Object.keys(data.authInfo).length > 0);
-  } catch {
+  } catch (err: unknown) {
+    serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'auth-utils: Cursor cli-config.json parse failed');
     return false;
   }
 }

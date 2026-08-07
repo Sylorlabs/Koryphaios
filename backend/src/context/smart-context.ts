@@ -267,7 +267,8 @@ export class SmartContextDetector {
   private readFileSafe(path: string): string | undefined {
     try {
       return readFileSync(path, 'utf-8');
-    } catch {
+    } catch (err: unknown) {
+      serverLog.debug({ err: err instanceof Error ? err.message : String(err), path }, 'Failed to read file for context');
       return undefined;
     }
   }
@@ -325,8 +326,8 @@ export class SmartContextDetector {
       if (lastCommit) {
         hints.lastCommitMessage = lastCommit;
       }
-    } catch {
-      // Git not available
+    } catch (err: unknown) {
+      serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'Git not available for context hints');
     }
 
     return hints;

@@ -12,6 +12,7 @@
 import { getEnabledModelIds } from '../model-settings';
 import type { TriageIntent, TriageResult } from './types';
 import { logRoutingDecision } from './audit';
+import { serverLog } from '../../logger';
 
 // Heuristic: keywords and length to approximate SMALL / MEDIUM / LARGE
 const LARGE_KEYWORDS = [
@@ -110,7 +111,8 @@ async function classifyWithGemma(input: string): Promise<TriageResult | null> {
     if (upper.includes('LARGE')) intent = 'LARGE';
     else if (upper.includes('SMALL')) intent = 'SMALL';
     return { intent, rawLabel: text.trim() };
-  } catch {
+  } catch (err: unknown) {
+    serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'SLM triage classification failed');
     return null;
   }
 }

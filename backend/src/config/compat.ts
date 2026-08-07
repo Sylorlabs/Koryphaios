@@ -14,6 +14,7 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { PROJECT_ROOT } from '../runtime/paths';
+import { serverLog } from '../logger';
 
 type CompatHashFile = { hash?: string };
 
@@ -37,8 +38,8 @@ export function resolveBundleHash(): string | null {
         cached = fromFile;
         return cached;
       }
-    } catch {
-      // ignore malformed file
+    } catch (err: unknown) {
+      serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'Malformed compat-hash.json ignored');
     }
   }
 

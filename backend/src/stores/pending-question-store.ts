@@ -2,6 +2,7 @@ import type { KoryAskUserPayload } from '@koryphaios/shared';
 import { and, desc, eq } from 'drizzle-orm';
 import { nanoid } from 'nanoid';
 import { db, userInputs } from '../db';
+import { serverLog } from '../logger';
 
 interface DurableQuestionRecord {
   kind: 'question';
@@ -15,7 +16,8 @@ function parse(inputData: string): DurableQuestionRecord | null {
   try {
     const value = JSON.parse(inputData) as DurableQuestionRecord;
     return value?.kind === 'question' ? value : null;
-  } catch {
+  } catch (err: unknown) {
+    serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'pending question record parse failed — returning null');
     return null;
   }
 }

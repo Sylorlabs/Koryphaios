@@ -119,7 +119,7 @@ export class MigrationRunner {
       try {
         this.runMigration(migration);
         serverLog.info({ version: migration.version, name: migration.name }, 'Migration applied');
-      } catch (error: any) {
+      } catch (error: unknown) {
         serverLog.error(
           { error, version: migration.version, name: migration.name },
           'Migration failed',
@@ -184,7 +184,7 @@ export class MigrationRunner {
       transaction();
 
       serverLog.info({ version: migration.version, name: migration.name }, 'Migration rolled back');
-    } catch (error: any) {
+    } catch (error: unknown) {
       serverLog.error(
         { error, version: migration.version, name: migration.name },
         'Rollback failed',
@@ -226,7 +226,7 @@ export class MigrationRunner {
         try {
           this.db.exec(migration.down);
           serverLog.info({ version: migration.version }, 'Rolled back');
-        } catch (error: any) {
+        } catch (error: unknown) {
           serverLog.error({ error, version: migration.version }, 'Rollback error');
         }
       }
@@ -256,17 +256,17 @@ export async function runMigrations(
       break;
     case 'status':
       const status = runner.getStatus();
-      console.log(`Current version: ${status.version}`);
-      console.log('\nMigrations:');
+      serverLog.info({ version: status.version }, 'Current version');
+      serverLog.info('Migrations:');
       for (const m of status.migrations) {
-        console.log(`  ${m.applied ? '✓' : '○'} ${m.version}: ${m.name}`);
+        serverLog.info({ applied: m.applied, version: m.version, name: m.name }, `  ${m.applied ? '✓' : '○'} ${m.version}: ${m.name}`);
       }
       break;
     case 'reset':
       await runner.reset();
       break;
     default:
-      console.log('Usage: migrate|rollback|status|reset');
+      serverLog.info('Usage: migrate|rollback|status|reset');
       process.exit(1);
   }
 }

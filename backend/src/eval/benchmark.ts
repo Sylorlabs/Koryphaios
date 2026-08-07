@@ -133,9 +133,9 @@ export class EphemeralHarness {
       // 3. Verification Phase
       result.success = await task.verify(workspaceDir);
 
-    } catch (err: any) {
+    } catch (err: unknown) {
       koryLog.error({ taskId: task.id, err }, 'Eval task threw an error');
-      result.error = err.message || String(err);
+      result.error = err instanceof Error ? err.message : String(err);
     } finally {
       // 4. Teardown Phase
       result.durationMs = Date.now() - startTime;

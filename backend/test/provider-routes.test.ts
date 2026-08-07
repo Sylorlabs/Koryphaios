@@ -3,7 +3,8 @@ import { existsSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 // Test fixtures represent provider-reported discovery; product code ships no list.
-const discoveredCopilotModels = [{ id: 'copilot-test', name: 'Copilot test', provider: 'copilot' as const, contextWindow: 0, maxOutputTokens: 4096 }];
+// discoveredCopilotModels was removed — the mock now returns [] to match
+// the real CopilotProvider behavior (no bundled models before discovery).
 const discoveredCodexModels = [{ id: 'codex-test', name: 'Codex test', provider: 'codex' as const, contextWindow: 0, maxOutputTokens: 4096 }];
 
 process.env.NODE_ENV = 'test';
@@ -70,7 +71,11 @@ mock.module('../src/providers/copilot', () => ({
       return !!this.config && !this.config.disabled;
     }
     listModels() {
-      return discoveredCopilotModels;
+      // Return [] by default to match the real CopilotProvider behavior
+      // (no bundled model list before authenticated discovery). The mock is
+      // process-wide in Bun, so returning discoveredCopilotModels here would
+      // leak into copilot-models.test.ts and break it.
+      return [];
     }
     async *streamResponse() {}
   },
@@ -146,6 +151,7 @@ mock.module('../src/providers/auth-utils', () => ({
   createCodexCLIProfileMarker: (profileDir: string) =>
     `cli:codex:${Buffer.from(profileDir).toString('base64url')}`,
   detectClaudeCodeLogin: () => true,
+  detectClaudeCodeToken: () => null,
   createClaudeCLIAuthMarker: () => `cli:claude:${Date.now()}`,
   isClaudeCLIAuthMarker: (value: string | null | undefined) =>
     typeof value === 'string' && value.startsWith('cli:claude:'),
@@ -159,6 +165,8 @@ mock.module('../src/providers/auth-utils', () => ({
   isAntigravityCLIAuthMarker: (value: string | null | undefined) =>
     typeof value === 'string' && value.startsWith('cli:antigravity:'),
   detectAntigravityApiKey: () => null,
+  isGeminiCLIAuthMarker: () => false,
+  createGeminiCLIAuthMarker: () => 'cli:gemini:test',
   detectCodexCLILogin: () => false,
   detectCursorCLILogin: () => false,
   createCursorCLIAuthMarker: () => 'cursor-cli-session',
@@ -169,6 +177,12 @@ mock.module('../src/providers/auth-utils', () => ({
   detectClineCLILogin: () => false,
   createClineCLIAuthMarker: () => 'cline-cli-session',
   isClineCLIAuthMarker: (value: string | null | undefined) => value === 'cline-cli-session',
+  detectFreebuffCLILogin: () => false,
+  createFreebuffCLIAuthMarker: () => 'cli:freebuff:test',
+  isFreebuffCLIAuthMarker: (value: string | null | undefined) => value === 'cli:freebuff:test',
+  readFreebuffAuthToken: () => null,
+  readFreebuffCredentials: () => null,
+  detectJulesApiKey: () => null,
   detectKimiCodeCLILogin: () => false,
   clearCachedToken: () => {},
   clearTokenCache: () => {},

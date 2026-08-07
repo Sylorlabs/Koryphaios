@@ -3,7 +3,7 @@
 import { getTokenService } from './token-service';
 import { getSessionStore } from './session-store';
 import { LoginCredentials, AuthError } from './types';
-import { authLog } from '../logger';
+import { authLog, serverLog } from '../logger';
 import { getClientIp, getUserAgent } from './middleware';
 
 // Simple in-memory user store (in production, use a real database)
@@ -120,8 +120,8 @@ export async function handleLogin(req: Request): Promise<Response> {
         },
       },
     );
-  } catch (error: any) {
-    authLog.error({ error: error.message }, 'Login error');
+  } catch (error: unknown) {
+    authLog.error({ error: error instanceof Error ? error.message : String(error) }, 'Login error');
     return new Response(JSON.stringify({ ok: false, error: 'Internal server error' }), {
       status: 500,
       headers: { 'Content-Type': 'application/json' },
@@ -146,8 +146,8 @@ export async function handleLogout(req: Request): Promise<Response> {
         try {
           const context = tokenService.validateAccessToken(token);
           sessionId = context.sessionId;
-        } catch {
-          // Token invalid/expired, still allow logout
+        } catch (err: unknown) {
+          serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'Token validation failed during logout');
         }
       }
     }
@@ -166,8 +166,8 @@ export async function handleLogout(req: Request): Promise<Response> {
         'Set-Cookie': `refresh_token=; HttpOnly; Secure; SameSite=Strict; Path=/api/auth/refresh; Max-Age=0`,
       },
     });
-  } catch (error: any) {
-    authLog.error({ error: error.message }, 'Logout error');
+  } catch (error: unknown) {
+    authLog.error({ error: error instanceof Error ? error.message : String(error) }, 'Logout error');
     return new Response(JSON.stringify({ ok: false, error: 'Internal server error' }), {
       status: 500,
       headers: { 'Content-Type': 'application/json' },
@@ -248,15 +248,17 @@ export async function handleRefresh(req: Request): Promise<Response> {
         },
       },
     );
-  } catch (error: any) {
-    if (error.name === 'TokenExpiredError') {
+  } catch (error: unknown) {
+    const errName = error instanceof Error ? error.name : String(error);
+    const errMsg = error instanceof Error ? error.message : String(error);
+    if (errName === 'TokenExpiredError') {
       return new Response(JSON.stringify({ ok: false, error: 'Refresh token expired' }), {
         status: 401,
         headers: { 'Content-Type': 'application/json' },
       });
     }
 
-    authLog.error({ error: error.message }, 'Token refresh error');
+    authLog.error({ error: errMsg }, 'Token refresh error');
     return new Response(JSON.stringify({ ok: false, error: 'Invalid refresh token' }), {
       status: 401,
       headers: { 'Content-Type': 'application/json' },
@@ -352,8 +354,8 @@ export async function handleChangePassword(
       status: 200,
       headers: { 'Content-Type': 'application/json' },
     });
-  } catch (error: any) {
-    authLog.error({ error: error.message }, 'Password change error');
+  } catch (error: unknown) {
+    authLog.error({ error: error instanceof Error ? error.message : String(error) }, 'Password change error');
     return new Response(JSON.stringify({ ok: false, error: 'Internal server error' }), {
       status: 500,
       headers: { 'Content-Type': 'application/json' },
@@ -394,8 +396,8 @@ export async function handleListSessions(
       }),
       { status: 200, headers: { 'Content-Type': 'application/json' } },
     );
-  } catch (error: any) {
-    authLog.error({ error: error.message }, 'List sessions error');
+  } catch (error: unknown) {
+    authLog.error({ error: error instanceof Error ? error.message : String(error) }, 'List sessions error');
     return new Response(JSON.stringify({ ok: false, error: 'Internal server error' }), {
       status: 500,
       headers: { 'Content-Type': 'application/json' },
@@ -446,8 +448,8 @@ export async function handleRevokeSession(
       status: 200,
       headers: { 'Content-Type': 'application/json' },
     });
-  } catch (error: any) {
-    authLog.error({ error: error.message }, 'Revoke session error');
+  } catch (error: unknown) {
+    authLog.error({ error: error instanceof Error ? error.message : String(error) }, 'Revoke session error');
     return new Response(JSON.stringify({ ok: false, error: 'Internal server error' }), {
       status: 500,
       headers: { 'Content-Type': 'application/json' },

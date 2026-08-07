@@ -36,7 +36,7 @@ export class EnvelopeEncryption {
         success: true,
         durationMs: Date.now() - startTime,
       });
-    } catch (error: any) {
+    } catch (error: unknown) {
       serverLog.error(
         { error, provider: this.provider.name },
         'Failed to initialize envelope encryption',
@@ -97,17 +97,17 @@ export class EnvelopeEncryption {
       });
 
       return envelope;
-    } catch (error: any) {
+    } catch (error: unknown) {
       this.logAudit({
         timestamp: Date.now(),
         operation: 'encrypt',
         kekId: kekMeta.id,
         kekVersion: kekMeta.version,
         success: false,
-        error: error.message,
+        error: error instanceof Error ? error.message : String(error),
         durationMs: Date.now() - startTime,
       });
-      throw new Error(`Encryption failed: ${error.message}`);
+      throw new Error(`Encryption failed: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 
@@ -166,17 +166,17 @@ export class EnvelopeEncryption {
           algorithm: envelope.algorithm,
         },
       };
-    } catch (error: any) {
+    } catch (error: unknown) {
       this.logAudit({
         timestamp: Date.now(),
         operation: 'decrypt',
         kekId: kekMeta.id,
         kekVersion: kekMeta.version,
         success: false,
-        error: error.message,
+        error: error instanceof Error ? error.message : String(error),
         durationMs: Date.now() - startTime,
       });
-      throw new Error(`Decryption failed: ${error.message}`);
+      throw new Error(`Decryption failed: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 
@@ -205,17 +205,17 @@ export class EnvelopeEncryption {
       });
 
       return newEnvelope;
-    } catch (error: any) {
+    } catch (error: unknown) {
       this.logAudit({
         timestamp: Date.now(),
         operation: 'rotate',
         kekId: kekMeta.id,
         kekVersion: kekMeta.version,
         success: false,
-        error: error.message,
+        error: error instanceof Error ? error.message : String(error),
         durationMs: Date.now() - startTime,
       });
-      throw new Error(`Rotation failed: ${error.message}`);
+      throw new Error(`Rotation failed: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 
@@ -242,8 +242,8 @@ export class EnvelopeEncryption {
       }
 
       return envelope;
-    } catch (error: any) {
-      throw new Error(`Failed to parse envelope: ${error.message}`);
+    } catch (error: unknown) {
+      throw new Error(`Failed to parse envelope: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 
@@ -260,7 +260,8 @@ export class EnvelopeEncryption {
   async healthCheck(): Promise<boolean> {
     try {
       return await this.provider.healthCheck();
-    } catch {
+    } catch (err: unknown) {
+      serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'Envelope encryption health check failed');
       return false;
     }
   }

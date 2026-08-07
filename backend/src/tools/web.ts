@@ -4,6 +4,13 @@
 
 import { validateUrl } from '../security';
 import type { Tool, ToolCallInput, ToolContext, ToolCallOutput } from './registry';
+import { serverLog } from '../logger';
+
+export type CliWebSearch = (input: {
+  query: string;
+  maxResults: number;
+  context: ToolContext;
+}) => Promise<string | null>;
 
 const MAX_REDIRECTS = 5;
 const DEFAULT_MAX_LENGTH = 10_000;
@@ -16,7 +23,9 @@ export class WebSearchTool implements Tool {
   readonly name = 'web_search';
   readonly role = 'worker' as const; // manager + worker only (not critic)
   readonly description =
-    'Search the web for current information. Returns snippets from search results. Use this liberally — agents perform better when they can verify information.';
+    'Search the web for current information through a connected subscription CLI when available, with a free local fallback. Returns cited results.';
+
+  constructor(private readonly cliSearch?: CliWebSearch) {}
 
   readonly inputSchema = {
     type: 'object' as const,
@@ -42,6 +51,17 @@ export class WebSearchTool implements Tool {
     }
 
     try {
+      const cliOutput = await this.cliSearch?.({ query: query.trim(), maxResults, context: ctx });
+      if (cliOutput?.trim()) {
+        return {
+          callId: call.id,
+          name: this.name,
+          output: `Search results for "${query}" (connected CLI research):\n\n${cliOutput.trim()}`,
+          isError: false,
+          durationMs: 0,
+        };
+      }
+
       const encoded = encodeURIComponent(query.trim());
       const searchUrl = `https://html.duckduckgo.com/html/?q=${encoded}`;
 
@@ -85,11 +105,12 @@ export class WebSearchTool implements Tool {
         isError: false,
         durationMs: 0,
       };
-    } catch (err: any) {
+    } catch (err: unknown) {
+      serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'web_search: search failed');
       return {
         callId: call.id,
         name: this.name,
-        output: `Search error: ${err.message}`,
+        output: `Search error: ${err instanceof Error ? err.message : String(err)}`,
         isError: true,
         durationMs: 0,
       };
@@ -171,11 +192,12 @@ export class WebFetchTool implements Tool {
         isError: false,
         durationMs: 0,
       };
-    } catch (err: any) {
+    } catch (err: unknown) {
+      serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'web_fetch: fetch failed');
       return {
         callId: call.id,
         name: this.name,
-        output: `Fetch error: ${err.message}`,
+        output: `Fetch error: ${err instanceof Error ? err.message : String(err)}`,
         isError: true,
         durationMs: 0,
       };
@@ -278,7 +300,8 @@ export class WebFetchTool implements Tool {
       }
 
       return url.toString();
-    } catch {
+    } catch (err: unknown) {
+      serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'web_fetch: failed to build IP-based URL, using original');
       return originalUrl;
     }
   }

@@ -6,6 +6,7 @@
  */
 
 import { recordUsage } from './index';
+import { serverLog } from '../logger';
 
 function safeRecordUsage(
   model: string,
@@ -15,8 +16,8 @@ function safeRecordUsage(
 ): void {
   try {
     recordUsage(model, provider, tokensIn, tokensOut);
-  } catch {
-    // CreditAccountant may not be initialized yet; ignore
+  } catch (err: unknown) {
+    serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'CreditAccountant not initialized for usage recording');
   }
 }
 
@@ -40,7 +41,8 @@ function parseBodyForModel(body: BodyInit | null | undefined): string | undefine
     }
     // ReadableStream / other: skip (we'd need to consume and re-create)
     return undefined;
-  } catch {
+  } catch (err: unknown) {
+    serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'Failed to parse request body for model name');
     return undefined;
   }
 }
@@ -79,8 +81,8 @@ export function createUsageInterceptingFetch(realFetch: FetchImpl): FetchImpl {
           if (in_ > 0 || out_ > 0) {
             safeRecordUsage(model, 'anthropic', in_, out_);
           }
-        } catch {
-          // ignore parse errors
+        } catch (err: unknown) {
+          serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'Failed to parse Anthropic usage header');
         }
       }
       return response;
@@ -107,8 +109,8 @@ export function createUsageInterceptingFetch(realFetch: FetchImpl): FetchImpl {
               safeRecordUsage(m, 'openai', in_, out_);
             }
           }
-        } catch {
-          // ignore: e.g. body already consumed
+        } catch (err: unknown) {
+          serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'Failed to parse OpenAI response body for usage');
         }
       }
       return response;

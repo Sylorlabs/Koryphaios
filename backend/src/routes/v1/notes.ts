@@ -3,6 +3,13 @@
  *
  * REST endpoints for the Obsidian-style note knowledge network.
  * Prefix: /api/notes
+ *
+ * Error handling: route handlers throw KoryphaiosError subclasses for
+ * operational errors (not found, unauthorized, bad input) and let unknown
+ * errors propagate to the global error-handling middleware
+ * (middleware/error-handling.ts), which logs with context and formats the
+ * response. Per AGENTS.md, route handlers do not try/catch just to format
+ * errors — that duplicates the middleware and swallows context.
  */
 
 import { Elysia, t } from 'elysia';
@@ -25,56 +32,38 @@ import { readFileSync, existsSync } from 'fs';
 import { PROJECT_ROOT } from '../../runtime/paths';
 import { getRequestProjectRoot } from '../../runtime/request-project';
 import { traceBlockingOp } from '../../monitoring/event-loop-monitor';
+import { AuthenticationError, NotFoundError, ValidationError } from '../../errors/types';
 
 export const notesRoutes = new Elysia({ prefix: '/api/notes' })
 
   // ── List all notes (supports ?search=, ?folder=) ─────────────────────────
-  .get('/', async ({ query, set }) => {
-    try {
-      const notesList = await notesService.listNotes(
-        {
-          folderPath: query.folder as string | undefined,
-          search: query.search as string | undefined,
-        },
-        (query.projectRoot as string | undefined) || PROJECT_ROOT,
-      );
-      return { ok: true, data: notesList };
-    } catch (err: unknown) {
-      set.status = 500;
-      console.error('[notesRoute] Failed to list notes:', err);
-      return {
-        ok: false,
-        error: err instanceof Error ? err.message : 'Failed to load notes',
-      };
-    }
+  .get('/', async ({ query }) => {
+    const notesList = await notesService.listNotes(
+      {
+        folderPath: query.folder as string | undefined,
+        search: query.search as string | undefined,
+      },
+      (query.projectRoot as string | undefined) || PROJECT_ROOT,
+    );
+    return { ok: true, data: notesList };
   })
 
-  .post('/sync-project', async ({ request, set }) => {
-    try {
-      const url = new URL(request.url);
-      const result = await traceBlockingOp('syncProjectDocuments', () =>
-        notesService.syncProjectDocuments(url.searchParams.get('projectRoot') || PROJECT_ROOT),
-      );
-      broadcastNotesNetworkUpdate('update');
-      return { ok: true, data: result };
-    } catch (err: unknown) {
-      set.status = 500;
-      return { ok: false, error: err instanceof Error ? err.message : 'Failed to sync project documents' };
-    }
+  .post('/sync-project', async ({ request }) => {
+    const url = new URL(request.url);
+    const result = await traceBlockingOp('syncProjectDocuments', () =>
+      notesService.syncProjectDocuments(url.searchParams.get('projectRoot') || PROJECT_ROOT),
+    );
+    broadcastNotesNetworkUpdate('update');
+    return { ok: true, data: result };
   })
 
   // ── Create note ───────────────────────────────────────────────────────────
   .post(
     '/',
-    async ({ body, set }) => {
-      try {
-        const note = await notesService.createNote(body as any);
-        broadcastNotesNetworkUpdate('create', note.id);
-        return { ok: true, data: note };
-      } catch (err: any) {
-        set.status = 500;
-        return { ok: false, error: err.message };
-      }
+    async ({ body }) => {
+      const note = await notesService.createNote(body);
+      broadcastNotesNetworkUpdate('create', note.id);
+      return { ok: true, data: note };
     },
     {
       body: t.Object({
@@ -97,17 +86,9 @@ export const notesRoutes = new Elysia({ prefix: '/api/notes' })
 
   .put(
     '/settings',
-    async ({ request, body, set }) => {
-      try {
-        const merged = saveNotesSettings(getRequestProjectRoot(request), body as Partial<NotesSettings>);
-        return { ok: true, data: merged };
-      } catch (err: unknown) {
-        set.status = 500;
-        return {
-          ok: false,
-          error: err instanceof Error ? err.message : 'Failed to save notes settings',
-        };
-      }
+    async ({ request, body }) => {
+      const merged = saveNotesSettings(getRequestProjectRoot(request), body as Partial<NotesSettings>);
+      return { ok: true, data: merged };
     },
     {
       body: t.Object({
@@ -134,20 +115,12 @@ export const notesRoutes = new Elysia({ prefix: '/api/notes' })
 
   .put(
     '/settings/agent-permissions',
-    async ({ request, body, set }) => {
-      try {
-        const merged = saveNotesAgentPermissions(
-          getRequestProjectRoot(request),
-          body as Partial<NotesAgentPermissions>,
-        );
-        return { ok: true, data: merged };
-      } catch (err: unknown) {
-        set.status = 500;
-        return {
-          ok: false,
-          error: err instanceof Error ? err.message : 'Failed to save permissions',
-        };
-      }
+    async ({ request, body }) => {
+      const merged = saveNotesAgentPermissions(
+        getRequestProjectRoot(request),
+        body as Partial<NotesAgentPermissions>,
+      );
+      return { ok: true, data: merged };
     },
     {
       body: t.Object({
@@ -196,19 +169,14 @@ export const notesRoutes = new Elysia({ prefix: '/api/notes' })
   })
 
   // ── Import memory files as notes (must come before /:id to avoid collision) ─
-  .post('/import-memory', async ({ request, set }) => {
-    try {
-      const notes = await traceBlockingOp('importMemoryAsNotes', () =>
-        notesService.importMemoryAsNotes(getRequestProjectRoot(request)),
-      );
-      // The caller receives every imported note and merges them directly.
-      // Broadcasting the generic mutation event would make that same client
-      // reload the entire vault, graph, and folder tree a second time.
-      return { ok: true, data: notes };
-    } catch (err: any) {
-      set.status = 500;
-      return { ok: false, error: err.message };
-    }
+  .post('/import-memory', async ({ request }) => {
+    const notes = await traceBlockingOp('importMemoryAsNotes', () =>
+      notesService.importMemoryAsNotes(getRequestProjectRoot(request)),
+    );
+    // The caller receives every imported note and merges them directly.
+    // Broadcasting the generic mutation event would make that same client
+    // reload the entire vault, graph, and folder tree a second time.
+    return { ok: true, data: notes };
   })
 
   // ── Serve attachment (must come before /:id to avoid path collision) ──────
@@ -218,27 +186,26 @@ export const notesRoutes = new Elysia({ prefix: '/api/notes' })
       requireLocalRouteAuth(request) ??
       validateLocalBearerToken(String((query as { auth?: string })?.auth ?? ''));
     if (!authed) {
-      set.status = 401;
-      return { ok: false, error: 'Unauthorized' };
+      throw new AuthenticationError('Unauthorized');
     }
     const att = await notesService.getAttachment(params.attachmentId);
     if (!att || !existsSync(att.storagePath)) {
-      set.status = 404;
-      return { ok: false, error: 'Not found' };
+      throw new NotFoundError('Attachment', params.attachmentId);
     }
     const data = readFileSync(att.storagePath);
-    (set.headers as Record<string, string>)['Content-Type'] = att.mimeType;
-    (set.headers as Record<string, string>)['Content-Disposition'] =
-      'inline; filename="' + att.filename + '"';
+    // Elysia's Set.headers type is a strict literal in some versions; cast to
+    // a writable record to set dynamic Content-Type/Disposition headers.
+    const headers = set.headers as Record<string, string>;
+    headers['Content-Type'] = att.mimeType;
+    headers['Content-Disposition'] = 'inline; filename="' + att.filename + '"';
     return data;
   })
 
   // ── Get single note with links ────────────────────────────────────────────
-  .get('/:id', async ({ params, set }) => {
+  .get('/:id', async ({ params }) => {
     const note = await notesService.getNoteWithLinks(params.id);
     if (!note) {
-      set.status = 404;
-      return { ok: false, error: 'Not found' };
+      throw new NotFoundError('Note', params.id);
     }
     return { ok: true, data: note };
   })
@@ -246,15 +213,10 @@ export const notesRoutes = new Elysia({ prefix: '/api/notes' })
   // ── Update note ───────────────────────────────────────────────────────────
   .put(
     '/:id',
-    async ({ params, body, set }) => {
-      try {
-        const note = await notesService.updateNote(params.id, body as any);
-        broadcastNotesNetworkUpdate('update', note.id);
-        return { ok: true, data: note };
-      } catch (err: any) {
-        set.status = 500;
-        return { ok: false, error: err.message };
-      }
+    async ({ params, body }) => {
+      const note = await notesService.updateNote(params.id, body);
+      broadcastNotesNetworkUpdate('update', note.id);
+      return { ok: true, data: note };
     },
     {
       body: t.Object({
@@ -283,35 +245,24 @@ export const notesRoutes = new Elysia({ prefix: '/api/notes' })
   })
 
   // ── Upload attachment (multipart form) ────────────────────────────────────
-  .post('/:id/attachments', async ({ request, params, set }) => {
-    try {
-      const formData = await request.formData();
-      const file = formData.get('file') as File | null;
-      if (!file) {
-        set.status = 400;
-        return { ok: false, error: 'No file provided' };
-      }
-      const buffer = Buffer.from(await file.arrayBuffer());
-      const attachment = await notesService.saveAttachment(
-        params.id,
-        file.name,
-        file.type || 'application/octet-stream',
-        buffer,
-      );
-      return { ok: true, data: attachment };
-    } catch (err: any) {
-      set.status = 500;
-      return { ok: false, error: err.message };
+  .post('/:id/attachments', async ({ request, params }) => {
+    const formData = await request.formData();
+    const file = formData.get('file') as File | null;
+    if (!file) {
+      throw new ValidationError('No file provided');
     }
+    const buffer = Buffer.from(await file.arrayBuffer());
+    const attachment = await notesService.saveAttachment(
+      params.id,
+      file.name,
+      file.type || 'application/octet-stream',
+      buffer,
+    );
+    return { ok: true, data: attachment };
   })
 
   // ── Delete attachment ─────────────────────────────────────────────────────
-  .delete('/:id/attachments/:attachmentId', async ({ params, set }) => {
-    try {
-      await notesService.deleteAttachment(params.attachmentId);
-      return { ok: true };
-    } catch (err: any) {
-      set.status = 500;
-      return { ok: false, error: err.message };
-    }
+  .delete('/:id/attachments/:attachmentId', async ({ params }) => {
+    await notesService.deleteAttachment(params.attachmentId);
+    return { ok: true };
   });

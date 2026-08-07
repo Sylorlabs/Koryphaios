@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { resolve } from 'node:path';
+import { serverLog } from '../../logger';
 import { DEFAULT_COLLABORATION_POLICY } from '@koryphaios/shared';
 import { BashTool } from '../../tools/bash';
 import { clearCollaborationToolPolicy, setCollaborationToolPolicy } from '../tool-policy';
@@ -13,8 +14,9 @@ async function waitForRelay() {
   for (let attempt = 0; attempt < 120; attempt++) {
     try {
       if ((await fetch(`${relayUrl}/health`)).ok) return;
-    } catch {
-      // Starting.
+    } catch (err: unknown) {
+      // Relay hasn't started yet; retry on next polling tick.
+      serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'Relay not yet up; retrying');
     }
     await Bun.sleep(25);
   }

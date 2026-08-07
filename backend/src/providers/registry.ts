@@ -6,7 +6,7 @@ import type {
   ProviderName,
   KoryphaiosConfig,
 } from '@koryphaios/shared';
-import { providerLog } from '../logger';
+import { providerLog, serverLog } from '../logger';
 import {
   buildAuthHeaders,
   getVerifyUrl,
@@ -32,6 +32,7 @@ import { CodexAuthProvider } from './codex-auth';
 import { getManagedCodexAppServer } from './codex-app-server';
 import { ClaudeCodeProvider } from './claude-code';
 import { GrokBuildProvider } from './grok-build';
+import { FreebuffProvider } from './freebuff';
 import { AntigravityProvider } from './antigravity';
 import { CursorProvider } from './cursor';
 import { DevinProvider } from './devin';
@@ -49,6 +50,8 @@ import {
   detectCursorCLILogin,
   detectDevinCLILogin,
   detectClineCLILogin,
+  detectFreebuffCLILogin,
+  readFreebuffAuthToken,
 } from './auth-utils';
 import { cliAutoEnableCreds, whichBinary } from './cli-detection';
 import { discoverCliAccounts } from './cli-accounts';
@@ -87,6 +90,7 @@ const CLI_HARNESS_PROVIDERS = new Set<ProviderName>([
   'cursor',
   'devin',
   'cline',
+  'freebuff',
 ]);
 
 const LOCAL_PROVIDER_KEYS = new Set<ProviderName>([
@@ -239,6 +243,77 @@ function generateProviderLabel(name: string): string {
 const CIRCUIT_THRESHOLD = 5;
 const CIRCUIT_TIMEOUT = 60_000; // 1 minute
 
+// ─── Provider factory registry ──────────────────────────────────────────────
+// Each built-in provider registers a factory here instead of being dispatched
+// from a central `switch (name)`. Adding a provider is now a single entry in
+// this map, not an edit to a switch in createProvider() AND a second switch in
+// the auth route. A factory returns null when the config lacks what the
+// provider needs (e.g. no API key / base URL), matching the prior switch's
+// per-case null returns.
+type ProviderFactory = (config: ProviderConfig) => Provider | null;
+
+const PROVIDER_FACTORIES: Partial<Record<ProviderName, ProviderFactory>> = {
+  anthropic: (c) => new AnthropicProvider(c),
+  // Claude Code subscription — runs the official `claude` CLI harness (no direct API calls).
+  claude: (c) => new ClaudeCodeProvider(c),
+  openai: (c) => new OpenAIProvider(c),
+  // Direct Google Gemini API only. It never consumes CLI OAuth, ADC, or any
+  // other Google provider's credentials.
+  google: (c) => (c.apiKey ? new GoogleProvider(c) : null),
+  // Google AI Studio — Gemini API key only (no gcloud OAuth).
+  aistudio: (c) => (c.apiKey ? new GoogleProvider({ ...c, name: 'aistudio' }) : null),
+  copilot: (c) => new CopilotProvider(c),
+  codex: (c) => new CodexCliProvider(c),
+  'codex-auth': (c) => new CodexAuthProvider(c),
+  // Grok Build subscription — runs the official `grok` CLI harness (no direct API calls).
+  grok: (c) => new GrokBuildProvider(c),
+  // Antigravity subscription — runs the official `agy` CLI harness (no direct API calls).
+  antigravity: (c) => new AntigravityProvider(c),
+  // Cursor subscription — runs the official `cursor-agent` CLI harness (no API key).
+  cursor: (c) => new CursorProvider(c),
+  // Devin subscription — runs Cognition's official `devin` CLI harness (no API key).
+  devin: (c) => new DevinProvider(c),
+  cline: (c) => new ClineProvider(c),
+  // Freebuff — free, ad-supported Codebuff build. Uses @codebuff/sdk's
+  // CodebuffClient (no subprocess, no TUI, no ads). Reads credentials from
+  // ~/.config/manicode/credentials.json.
+  freebuff: (c) => new FreebuffProvider(c),
+  // Google Jules — cloud async agent (REST API only, remote VMs + GitHub PRs).
+  jules: (c) => (c.disabled || !c.apiKey ? null : new JulesProvider(c)),
+  kimicode: (c) => new KimiCodeProvider(c),
+  openrouter: (c) => new OpenRouterProvider(c),
+  // OpenCode Go is dual-protocol — OpenCodeGoProvider dispatches per-model.
+  opencodego: (c) => new OpenCodeGoProvider(c),
+  groq: (c) => new GroqProvider(c),
+  xai: (c) => new XAIProvider(c),
+  azure: (c) => new AzureProvider(c),
+  // Azure Cognitive Services uses the same Azure OpenAI wire contract (api-key
+  // header + /openai/deployments/{deployment}?api-version), just a different host.
+  azurecognitive: (c) => (c.baseUrl ? new AzureProvider(c, 'azurecognitive') : null),
+  // Claude on Amazon Bedrock — SigV4-signed via the official AnthropicBedrock client.
+  bedrock: (c) => new BedrockProvider(c),
+  // GitLab Duo Chat — POST /api/v4/chat/completions ({content} body, Bearer PAT).
+  gitlab: (c) => (c.apiKey || c.authToken ? new GitLabProvider(c) : null),
+  // SAP AI Core — OAuth (service key) + /v2/inference/deployments/{id} + AI-Resource-Group.
+  sapai: (c) => (c.apiKey || c.authToken ? new SapAiProvider(c) : null),
+  // Requires explicit API key — never auto-enable from GCP environment variables.
+  vertexai: (c) => (c.disabled || !c.apiKey ? null : new GoogleProvider({ ...c, name: 'vertexai' })),
+  local: (c) => openaiCompatLocal('local', c),
+  ollama: (c) => openaiCompatLocal('ollama', c),
+  llamacpp: (c) => openaiCompatLocal('llamacpp', c),
+  lmstudio: (c) => openaiCompatLocal('lmstudio', c),
+};
+
+/** Shared factory for the OpenAI-compatible local providers (local/ollama/llamacpp/lmstudio). */
+function openaiCompatLocal(name: ProviderName, config: ProviderConfig): Provider | null {
+  const defaultBase =
+    name === 'llamacpp' ? LLAMACPP_DEFAULT : name === 'lmstudio' ? LMSTUDIO_DEFAULT : undefined;
+  if (config.baseUrl || defaultBase) {
+    return new OpenAIProvider(config, name, config.baseUrl ?? defaultBase);
+  }
+  return null;
+}
+
 class ProviderRegistry {
   private providers = new Map<ProviderName, Provider>();
   private providerConfigs = new Map<ProviderName, ProviderConfig>();
@@ -259,7 +334,8 @@ class ProviderRegistry {
         return p
           .listModels()
           .find((m) => m.id === modelId || m.apiModelId === modelId || m.realModelId === modelId);
-      } catch {
+      } catch (err: unknown) {
+        serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'Failed to resolve live model definition');
         return undefined;
       }
     });
@@ -503,7 +579,8 @@ class ProviderRegistry {
         if (result && typeof (result as Promise<unknown>).then === 'function') {
           refreshes.push(result);
         }
-      } catch {
+      } catch (err: unknown) {
+        serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'Provider model refresh failed (non-fatal)');
         // Refresh failures are non-fatal here; provider status can still render
         // with cached/fallback models and users can retry manually from settings.
       }
@@ -723,15 +800,15 @@ class ProviderRegistry {
           'Empty response, trying fallback',
         );
         this.recordFailure(provider.name);
-      } catch (err: any) {
+      } catch (err: unknown) {
         providerLog.error(
-          { model: currentModel, provider: provider.name, error: err.message },
+          { model: currentModel, provider: provider.name, error: err instanceof Error ? err.message : String(err) },
           'Provider error',
         );
         this.recordFailure(provider.name);
 
         if (i === chain.length - 1) {
-          yield { type: 'error', error: err.message || 'Unknown error' };
+          yield { type: 'error', error: (err instanceof Error ? err.message : String(err)) || 'Unknown error' };
           return;
         }
         providerLog.info('Trying next model in fallback chain');
@@ -835,6 +912,20 @@ class ProviderRegistry {
               'Cline CLI is not signed in. Install cline and run "cline auth --provider <p> --apikey <k>".',
           };
         }
+        case 'freebuff': {
+          // Freebuff is verified by confirming the on-disk credentials file
+          // at ~/.config/manicode/credentials.json has a valid authToken.
+          // The CLI binary is optional — Koryphaios calls the Codebuff
+          // backend via @codebuff/sdk, not via subprocess.
+          if (detectFreebuffCLILogin() || readFreebuffAuthToken()) {
+            return { success: true };
+          }
+          return {
+            success: false,
+            error:
+              'Freebuff CLI is not logged in. Run "freebuff login" in your terminal, then reconnect.',
+          };
+        }
         case 'kimicode': {
           // Kimi Code is verified by confirming the auth token resolves to a
           // live access token — either the managed device-flow session at
@@ -921,7 +1012,8 @@ class ProviderRegistry {
                     'INSERT OR REPLACE INTO provider_endpoint_override (provider, base_url, updated_at) VALUES (?, ?, ?)',
                   )
                   .run(name, GEMINI_V1_BASE, Date.now());
-              } catch {
+              } catch (err: unknown) {
+                serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'Failed to persist Gemini v1 endpoint override (DB not initialized)');
                 // DB not initialized
               }
               return { success: true };
@@ -1097,8 +1189,8 @@ class ProviderRegistry {
           return { success: false, error: `Unsupported provider: ${name}` };
         }
       }
-    } catch (err: any) {
-      return { success: false, error: err?.message ?? String(err) };
+    } catch (err: unknown) {
+      return { success: false, error: err instanceof Error ? err.message : String(err) };
     }
   }
 
@@ -1183,8 +1275,8 @@ class ProviderRegistry {
         return { success: true };
       }
       return { success: false, error: 'Failed to initialize provider' };
-    } catch (err: any) {
-      return { success: false, error: err.message };
+    } catch (err: unknown) {
+      return { success: false, error: err instanceof Error ? err.message : String(err) };
     }
   }
 
@@ -1253,8 +1345,8 @@ class ProviderRegistry {
       this.providers.set(name, provider);
       this.circuitStates.delete(name); // Reset circuit breaker on refresh
       return { success: true };
-    } catch (err: any) {
-      return { success: false, error: err.message ?? String(err) };
+    } catch (err: unknown) {
+      return { success: false, error: err instanceof Error ? err.message : String(err) };
     }
   }
 
@@ -1410,101 +1502,22 @@ class ProviderRegistry {
     if (config.custom || this.customProviderIds.has(name)) {
       return config.baseUrl ? new CustomProvider(config) : null;
     }
-    switch (name) {
-      case 'anthropic':
-        return new AnthropicProvider(config);
-      case 'claude':
-        // Claude Code subscription — runs the official `claude` CLI harness (no direct API calls).
-        return new ClaudeCodeProvider(config);
-      case 'openai':
-        return new OpenAIProvider(config);
-      case 'google':
-        // Direct Google Gemini API only. It never consumes CLI OAuth, ADC, or
-        // any other Google provider's credentials.
-        return config.apiKey ? new GoogleProvider(config) : null;
-      case 'aistudio':
-        // Google AI Studio — Gemini API key only (no gcloud OAuth).
-        return config.apiKey ? new GoogleProvider({ ...config, name: 'aistudio' }) : null;
-      case 'copilot':
-        return new CopilotProvider(config);
-      case 'codex':
-        return new CodexCliProvider(config);
-      case 'codex-auth':
-        return new CodexAuthProvider(config);
-      case 'grok':
-        // Grok Build subscription — runs the official `grok` CLI harness (no direct API calls).
-        return new GrokBuildProvider(config);
-      case 'antigravity':
-        // Antigravity subscription — runs the official `agy` CLI harness (no direct API calls).
-        return new AntigravityProvider(config);
-      case 'cursor':
-        // Cursor subscription — runs the official `cursor-agent` CLI harness (no API key).
-        return new CursorProvider(config);
-      case 'devin':
-        // Devin subscription — runs Cognition's official `devin` CLI harness (no API key).
-        return new DevinProvider(config);
-      case 'cline':
-        return new ClineProvider(config);
-      case 'jules':
-        // Google Jules — cloud async agent (REST API only, remote VMs + GitHub PRs).
-        if (config.disabled || !config.apiKey) return null;
-        return new JulesProvider(config);
-      case 'kimicode':
-        return new KimiCodeProvider(config);
-      case 'openrouter':
-        return new OpenRouterProvider(config);
-      case 'opencodego':
-        // OpenCode Go is dual-protocol — OpenCodeGoProvider dispatches per-model.
-        return new OpenCodeGoProvider(config);
-      case 'groq':
-        return new GroqProvider(config);
-      case 'xai':
-        return new XAIProvider(config);
-      case 'azure':
-        return new AzureProvider(config);
-      case 'azurecognitive':
-        // Azure Cognitive Services uses the same Azure OpenAI wire contract (api-key
-        // header + /openai/deployments/{deployment}?api-version), just a different host.
-        return config.baseUrl ? new AzureProvider(config, 'azurecognitive') : null;
-      case 'bedrock':
-        // Claude on Amazon Bedrock — SigV4-signed via the official AnthropicBedrock client.
-        return new BedrockProvider(config);
-      case 'gitlab':
-        // GitLab Duo Chat — POST /api/v4/chat/completions ({content} body, Bearer PAT).
-        return config.apiKey || config.authToken ? new GitLabProvider(config) : null;
-      case 'sapai':
-        // SAP AI Core — OAuth (service key) + /v2/inference/deployments/{id} + AI-Resource-Group.
-        return config.apiKey || config.authToken ? new SapAiProvider(config) : null;
-      case 'vertexai':
-        // Requires explicit API key — never auto-enable from GCP environment variables
-        if (config.disabled || !config.apiKey) return null;
-        return new GoogleProvider({ ...config, name: 'vertexai' });
-      case 'local':
-      case 'ollama':
-      case 'llamacpp':
-      case 'lmstudio': {
-        const defaultBase =
-          name === 'llamacpp'
-            ? LLAMACPP_DEFAULT
-            : name === 'lmstudio'
-              ? LMSTUDIO_DEFAULT
-              : undefined;
-        if (config.baseUrl || defaultBase) {
-          return new OpenAIProvider(config, name, config.baseUrl ?? defaultBase);
-        }
-        return null;
-      }
-      default: {
-        const defaultBase = OPENCODE_DEFAULT_BASE_URL[name];
-        if ((defaultBase || config.baseUrl) && (config.apiKey || config.authToken)) {
-          return new OpenAIProvider(config, name, config.baseUrl ?? defaultBase);
-        }
-        if (name === 'sapai' && config.apiKey && config.baseUrl) {
-          return new OpenAIProvider(config, 'sapai', config.baseUrl);
-        }
-        return null;
-      }
+    // Built-in providers with an explicit factory.
+    const factory = PROVIDER_FACTORIES[name];
+    if (factory) return factory(config);
+
+    // Unmapped names that still have a known OpenAI-compatible default base URL
+    // (302ai, deepseek, mistral, cohere, perplexity, novita, …) get a generic
+    // OpenAIProvider. This keeps BYO OpenAI-compatible endpoints working without
+    // requiring a per-name factory entry.
+    const defaultBase = OPENCODE_DEFAULT_BASE_URL[name];
+    if ((defaultBase || config.baseUrl) && (config.apiKey || config.authToken)) {
+      return new OpenAIProvider(config, name, config.baseUrl ?? defaultBase);
     }
+    if (name === 'sapai' && config.apiKey && config.baseUrl) {
+      return new OpenAIProvider(config, 'sapai', config.baseUrl);
+    }
+    return null;
   }
 
   private detectEnvKey(name: ProviderName): string | null {
@@ -1543,7 +1556,8 @@ class ProviderRegistry {
           try {
             apiKey = await secureDecrypt(val);
             break;
-          } catch {
+          } catch (err: unknown) {
+            serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'Failed to decrypt stored API key');
             providerLog.warn({ provider: name, envVar }, 'Failed to decrypt stored API key');
           }
         }
@@ -1554,7 +1568,8 @@ class ProviderRegistry {
           try {
             authToken = await secureDecrypt(val);
             break;
-          } catch {
+          } catch (err: unknown) {
+            serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'Failed to decrypt stored auth token');
             providerLog.warn({ provider: name, envVar }, 'Failed to decrypt stored auth token');
           }
         }
@@ -1651,7 +1666,8 @@ class ProviderRegistry {
         { provider: name, keyMask: maskApiKey(config?.apiKey ?? config?.authToken) },
         'API key marked invalid (401); update key in settings',
       );
-    } catch {
+    } catch (err: unknown) {
+      serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'Failed to mark key invalid (DB not initialized)');
       // DB not initialized (e.g. tests)
     }
   }
@@ -1661,7 +1677,8 @@ class ProviderRegistry {
     try {
       const { getDb } = require('../db');
       getDb().run('DELETE FROM provider_key_invalid WHERE provider = ?', name);
-    } catch {
+    } catch (err: unknown) {
+      serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'Failed to clear invalid key state (DB not initialized)');
       // DB not initialized
     }
   }
@@ -1674,7 +1691,8 @@ class ProviderRegistry {
         .query('SELECT provider FROM provider_key_invalid WHERE provider = ?')
         .get(name) as { provider?: string } | undefined;
       return !!row;
-    } catch {
+    } catch (err: unknown) {
+      serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'Failed to check invalid key state, assuming not invalid');
       return false;
     }
   }
@@ -1703,8 +1721,8 @@ class ProviderRegistry {
         status: response.status,
         error: `HTTP ${response.status}: ${body.slice(0, 300)}`,
       };
-    } catch (err: any) {
-      const msg = err?.message ?? String(err);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
       if (msg.includes('abort') || msg.includes('timeout')) {
         return { success: false, error: 'Request timeout (5s)' };
       }

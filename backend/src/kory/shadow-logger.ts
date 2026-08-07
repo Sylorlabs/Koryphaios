@@ -12,7 +12,7 @@
  * - Recovery: Hard reset to any ghost commit state
  */
 
-import { koryLog } from '../logger';
+import { koryLog, serverLog } from '../logger';
 import { gitMutex } from './git-mutex';
 import { existsSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -273,7 +273,8 @@ export class ShadowLogger {
 
     try {
       return JSON.parse(result.output) as GhostCommitMetadata;
-    } catch {
+    } catch (err: unknown) {
+      serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'Failed to parse ghost commit metadata from git notes');
       return undefined;
     }
   }
