@@ -23,11 +23,9 @@ export interface WSHandlerContext {
   activeSessionId: string;
   isForActiveSession: boolean;
   orderedMetadata: (metadata: Record<string, unknown>) => Record<string, unknown>;
-  // Helper functions from the websocket store
-  kickBusyWatchdog: (sessionId: string | undefined) => void;
-  clearSessionBusy: (sessionId: string) => void;
+  // Run-phase transitions are owned by runStateStore. Handlers that need to
+  // force a stop delegate through here.
   markSessionAgentsStopped: (sessionId: string) => void;
-  maybeClearBusy: (sessionId: string | undefined) => void;
   // Stores (typed as `any` to avoid circular imports with the stores that
   // import this registry. The actual stores are passed at dispatch time
   // from websocket.svelte.ts, which has the correct types.)

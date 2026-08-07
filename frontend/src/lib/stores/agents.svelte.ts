@@ -12,6 +12,7 @@ import { sessionStore } from './sessions.svelte';
 import { apiUrl } from '$lib/utils/api-url';
 import { apiFetch, parseJsonResponse } from '$lib/api.svelte';
 import { feedStore, getGroupedEntries } from './feed.svelte';
+import { runStateStore } from './run-state.svelte';
 
 // ─── Agent State ────────────────────────────────────────────────────────────
 
@@ -60,26 +61,12 @@ let agents = $state<Map<string, AgentState>>(initialAgents);
 let agentThreadFeeds = $state<Map<string, FeedEntry[]>>(new Map());
 let agentThreadVersion = $state(0);
 
-// The manager is a single agent shared by every session, so its
-// `sessionId` field flips to whichever session emitted an event last.
-// Track its status per session so concurrent chats don't clobber each
-// other's busy/running indicators.
-let managerStatusBySession = $state<Map<string, AgentStatus>>(new Map());
-
 // Svelte 5's $state does not proxy Map contents or the plain objects
 // stored in them — mutating an AgentState in place is invisible to the
 // UI. Every mutation must go through commitAgents() to publish a new
 // Map reference.
 function commitAgents() {
   agents = new Map(agents);
-}
-
-function setManagerStatusForSession(sessionId: string | undefined, status: AgentStatus) {
-  if (!sessionId) return;
-  if (managerStatusBySession.get(sessionId) === status) return;
-  const next = new Map(managerStatusBySession);
-  next.set(sessionId, status);
-  managerStatusBySession = next;
 }
 
 const MAX_THREAD_ENTRIES = 2000;
@@ -174,7 +161,6 @@ export function updateAgentStatus(agentId: string, status: AgentStatus, sessionI
   if (agent) {
     agent.status = status;
     if (sessionId) agent.sessionId = sessionId;
-    if (agentId === 'kory-manager') setManagerStatusForSession(sessionId, status);
     commitAgents();
   }
 }
@@ -185,7 +171,6 @@ export function appendAgentContent(agentId: string, content: string, sessionId?:
     agent.content += content;
     agent.status = 'streaming';
     if (sessionId) agent.sessionId = sessionId;
-    if (agentId === 'kory-manager') setManagerStatusForSession(sessionId, 'streaming');
     commitAgents();
   }
 }
@@ -195,7 +180,6 @@ export function appendAgentThinking(agentId: string, thinking: string, sessionId
   if (agent) {
     agent.thinking += thinking;
     if (sessionId) agent.sessionId = sessionId;
-    if (agentId === 'kory-manager') setManagerStatusForSession(sessionId, 'thinking');
     commitAgents();
   }
 }
@@ -206,7 +190,6 @@ export function addToolCall(agentId: string, name: string, sessionId?: string) {
     agent.toolCalls.push({ name, status: 'running' });
     agent.status = 'tool_calling';
     if (sessionId) agent.sessionId = sessionId;
-    if (agentId === 'kory-manager') setManagerStatusForSession(sessionId, 'tool_calling');
     commitAgents();
   }
 }
@@ -278,7 +261,6 @@ export function completeAgent(agentId: string, sessionId?: string) {
   if (agent) {
     agent.status = 'done';
     if (sessionId) agent.sessionId = sessionId;
-    if (agentId === 'kory-manager') setManagerStatusForSession(sessionId, 'done');
     commitAgents();
   }
 }
@@ -299,7 +281,6 @@ export function clearAgentStreamingState(agentId: string, sessionId?: string) {
     agent.content = '';
     agent.status = 'idle';
     if (sessionId) agent.sessionId = sessionId;
-    if (agentId === 'kory-manager') setManagerStatusForSession(sessionId, 'idle');
     commitAgents();
   }
 }
@@ -342,7 +323,6 @@ export function markSessionAgentsStopped(sessionId: string) {
       changed = true;
     }
   }
-  setManagerStatusForSession(sessionId, 'done');
   if (changed) commitAgents();
 }
 
@@ -364,75 +344,26 @@ function isActiveStatus(status: AgentStatus | undefined): boolean {
 }
 
 export function getManagerStatus(): AgentStatus {
-  const activeSessionId = sessionStore.activeSessionId;
-  const manager = agents.get('kory-manager');
-
-  // Per-session record wins: it is not clobbered when another session's
-  // manager event flips the shared entry's sessionId.
-  const perSession = activeSessionId ? managerStatusBySession.get(activeSessionId) : undefined;
-  if (isActiveStatus(perSession)) return perSession!;
-
-  if (
-    manager &&
-    isActiveStatus(manager.status) &&
-    (manager.sessionId === activeSessionId || !manager.sessionId)
-  ) {
-    return manager.status;
-  }
-
-  if (activeSessionId) {
-    for (const a of agents.values()) {
-      if (a.sessionId === activeSessionId && isActiveStatus(a.status)) {
-        return a.status;
-      }
-    }
-  }
-
-  return 'idle';
+  // Per-session status tracking is now owned by runStateStore. The shared
+  // manager entry's sessionId flips across chats, so we can't trust it.
+  return runStateStore.getAgentStatusForSession(sessionStore.activeSessionId);
 }
 
 /** Returns the manager status for a specific session (not just the active
  *  one). Used by the sidebar to show reasoning/thinking indicators on all
  *  sessions, not just the currently selected one. */
 export function getManagerStatusForSession(sessionId: string | null | undefined): AgentStatus {
-  if (!sessionId) return 'idle';
-  const perSession = managerStatusBySession.get(sessionId);
-  if (isActiveStatus(perSession)) return perSession!;
-  const manager = agents.get('kory-manager');
-  if (manager && isActiveStatus(manager.status) && manager.sessionId === sessionId) {
-    return manager.status;
-  }
-  for (const a of agents.values()) {
-    if (a.sessionId === sessionId && isActiveStatus(a.status)) {
-      return a.status;
-    }
-  }
-  return 'idle';
+  return runStateStore.getAgentStatusForSession(sessionId);
 }
 
 /** True when the session's manager is parked waiting (background terminal or
  *  a question to the user) — the composer shows the Waiting button state. */
 export function isSessionWaiting(sessionId: string | null | undefined): boolean {
-  if (!sessionId) return false;
-  const st = managerStatusBySession.get(sessionId);
-  if (st === 'waiting' || st === 'waiting_user') return true;
-  const manager = agents.get('kory-manager');
-  return !!manager && manager.sessionId === sessionId &&
-    (manager.status === 'waiting' || manager.status === 'waiting_user');
+  return runStateStore.isWaiting(sessionId);
 }
 
 export function isSessionRunning(sessionId: string): boolean {
-  if (isActiveStatus(managerStatusBySession.get(sessionId))) return true;
-  for (const a of agents.values()) {
-    if (a.sessionId === sessionId && isActiveStatus(a.status)) {
-      // The shared manager entry's sessionId flips to whichever session
-      // spoke last, so only trust it when the per-session record agrees
-      // it isn't finished.
-      if (a.identity.id === 'kory-manager' && managerStatusBySession.has(sessionId)) continue;
-      return true;
-    }
-  }
-  return false;
+  return runStateStore.isRunning(sessionId);
 }
 
 export function getContextUsage(): {

@@ -63,6 +63,7 @@
     NATIVE_CLI_PROVIDERS,
     type NativeSlashCommand,
   } from '$lib/stores/native-commands.svelte';
+  import { runStateStore } from '$lib/stores/run-state.svelte';
 
   let showSettings = $state(false);
   let showAgents = $state(false);
@@ -436,7 +437,7 @@
       !e.altKey &&
       !e.shiftKey &&
       !!sessionStore.activeSessionId &&
-      !wsStore.isSessionBusy(sessionStore.activeSessionId) &&
+      !runStateStore.isBusy(sessionStore.activeSessionId) &&
       !showTimeTravel &&
       !showCommandPalette &&
       !showSettings &&
@@ -1642,12 +1643,10 @@
         onExecuteCommand={handleSlashCommand}
         isRunning={agentRail.selectedAgent
           ? agentRail.selectedAgentIsRunning
-          : wsStore.isSessionBusy(sessionStore.activeSessionId)}
+          : runStateStore.isRunning(sessionStore.activeSessionId)}
         isWaiting={!agentRail.selectedAgent &&
-          wsStore.isSessionWaiting(sessionStore.activeSessionId)}
-        waitingReason={wsStore.isSessionWaiting(sessionStore.activeSessionId)
-          ? 'background terminal'
-          : ''}
+          runStateStore.isWaiting(sessionStore.activeSessionId)}
+        waitingReason={runStateStore.getWaitingReason(sessionStore.activeSessionId)}
         onStop={handleStop}
         onOpenSettings={(section, agentSection) => {
           settingsInitialTab = section === 'advanced' ? 'experimental' : section === 'agent' ? 'agent' : 'providers';
@@ -1669,6 +1668,10 @@
         {interactionMode}
         {planReady}
         onInteractionModeChange={async (mode) => {
+          if (isGuidedDemo) {
+            toastStore.info('Not available in this demo');
+            return;
+          }
           if (!sessionStore.activeSessionId) return;
           if (await sessionStore.setInteractionMode(sessionStore.activeSessionId, mode)) {
             toastStore.info(

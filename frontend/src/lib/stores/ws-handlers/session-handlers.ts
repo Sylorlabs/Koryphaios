@@ -7,7 +7,7 @@ import type { SessionIdlePayload, Session } from '@koryphaios/shared';
 
 /** session.idle — definitive "session is done working" signal from the backend. */
 export const handleSessionIdle: WSHandler = (ctx: WSHandlerContext) => {
-  const { msg, feedStore, markSessionAgentsStopped, clearSessionBusy } = ctx;
+  const { msg, feedStore, markSessionAgentsStopped } = ctx;
   const p = msg.payload as SessionIdlePayload;
   if (p.sessionId) {
     // Tag live manager content entries with the persisted message id
@@ -15,7 +15,6 @@ export const handleSessionIdle: WSHandler = (ctx: WSHandlerContext) => {
     // by ID instead of falling back to text comparison.
     if (p.messageId) feedStore.tagManagerMessageId(p.messageId);
     markSessionAgentsStopped(p.sessionId);
-    clearSessionBusy(p.sessionId);
   }
 };
 

@@ -16,6 +16,7 @@
   import { sessionStore } from '$lib/stores/sessions.svelte';
   import { toastStore } from '$lib/stores/toast.svelte';
   import { wsStore } from '$lib/stores/websocket.svelte';
+  import { runStateStore } from '$lib/stores/run-state.svelte';
 
   type TimelineEntry = {
     hash: string;
@@ -44,7 +45,7 @@
   let panelEl = $state<HTMLElement | null>(null);
   const activeSessionId = $derived(sessionStore.activeSessionId);
   const sessionBusy = $derived(
-    activeSessionId ? wsStore.isSessionBusy(activeSessionId) : false,
+    activeSessionId ? runStateStore.isBusy(activeSessionId) : false,
   );
 
   $effect(() => {

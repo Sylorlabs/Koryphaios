@@ -40,6 +40,7 @@ import { notesStore } from './notes.svelte';
 import { goalStore } from './goals.svelte';
 import { goalDisplayStore } from './goal-display.svelte';
 import { isDemoMode } from '$lib/demo-flags';
+import { runStateStore } from './run-state.svelte';
 
 export type { FeedEntry };
 export { feedStore } from './feed.svelte';
@@ -89,11 +90,10 @@ interface DetectedContextFile {
 }
 let detectedContext = $state<DetectedContextFile[]>([]);
 
-let busySessions = $state<Set<string>>(new Set());
-// Stop is optimistic: the backend may still have buffered stream/thought
-// events in flight. Keep those events from resurrecting a run in the UI until
-// the next user message explicitly starts a new turn for that session.
-const userStoppedSessions = new Set<string>();
+// Run-phase state (busy/running/waiting/stopped) is owned by runStateStore.
+// The old busySessions/userStoppedSessions Sets and the watchdog lived here,
+// but they were five overlapping signals that routinely disagreed. Now
+// runStateStore.applyEvent() is the single reducer for all phase transitions.
 // Bumped on process.started/exited so the background-terminals strip refetches.
 let processEventTick = $state(0);
 
@@ -117,63 +117,6 @@ function isSpawnedSubAgent(agentId: string | undefined): boolean {
 
 let hasShownMalformedWsMessage = false;
 let fileEditTimers = new Map<string, ReturnType<typeof setTimeout>>();
-
-// ─── Session Busy Bridge ─────────────────────────────────────────────────────
-
-function markSessionBusy(sessionId: string) {
-  userStoppedSessions.delete(sessionId);
-  if (busySessions.has(sessionId)) {
-    kickBusyWatchdog(sessionId);
-    return;
-  }
-  busySessions = new Set(busySessions).add(sessionId);
-  kickBusyWatchdog(sessionId);
-}
-
-function clearSessionBusy(sessionId: string) {
-  stopBusyWatchdog(sessionId);
-  if (!busySessions.has(sessionId)) return;
-  const next = new Set(busySessions);
-  next.delete(sessionId);
-  busySessions = next;
-}
-
-function maybeClearBusy(sessionId: string | undefined) {
-  if (!sessionId || !busySessions.has(sessionId)) return;
-  if (!agentStore.isSessionRunning(sessionId)) clearSessionBusy(sessionId);
-}
-
-// Watchdog: if a session is marked busy but goes SILENT (no stream activity)
-// for this long, the agent is gone and a terminal event was dropped — force
-// the busy/Stop state off so the composer never gets stuck. Any stream event
-// for the session resets its timer.
-const BUSY_WATCHDOG_MS = 45_000;
-const busyWatchdogs = new Map<string, ReturnType<typeof setTimeout>>();
-
-function kickBusyWatchdog(sessionId: string | undefined) {
-  if (!sessionId) return;
-  const existing = busyWatchdogs.get(sessionId);
-  if (existing) clearTimeout(existing);
-  if (!busySessions.has(sessionId)) return;
-  busyWatchdogs.set(
-    sessionId,
-    setTimeout(() => {
-      busyWatchdogs.delete(sessionId);
-      // Silent too long — the run ended without a terminal event reaching us.
-      markSessionAgentsStopped(sessionId);
-      clearSessionBusy(sessionId);
-    }, BUSY_WATCHDOG_MS),
-  );
-}
-
-function stopBusyWatchdog(sessionId: string | undefined) {
-  if (!sessionId) return;
-  const t = busyWatchdogs.get(sessionId);
-  if (t) {
-    clearTimeout(t);
-    busyWatchdogs.delete(sessionId);
-  }
-}
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -244,24 +187,11 @@ function handleMessage(msg: WSMessage) {
   const isForActiveSession = !!msg.sessionId && msg.sessionId === activeSessionId;
   const agents = agentStore.agents;
 
-  if (
-    msg.sessionId &&
-    userStoppedSessions.has(msg.sessionId) &&
-    (msg.type === 'kory.thought' ||
-      msg.type === 'kory.routing' ||
-      msg.type === 'stream.delta' ||
-      msg.type === 'stream.thinking' ||
-      msg.type === 'stream.tool_call' ||
-      msg.type === 'stream.tool_result' ||
-      msg.type === 'stream.file_delta' ||
-      msg.type === 'stream.file_complete')
-  ) {
-    return;
-  }
-
-  // Any activity for a busy session proves the run is alive — reset its
-  // silence watchdog. (Terminal events clear busy entirely below.)
-  if (msg.sessionId && msg.type.startsWith('stream.')) kickBusyWatchdog(msg.sessionId);
+  // Run-phase state is owned by runStateStore. applyEvent is the single
+  // reducer that handles suppression (stoppedByUser), watchdog resets, and
+  // phase transitions. It runs before the feed/agent handlers so the phase
+  // is current when they read it.
+  runStateStore.applyEvent(msg);
 
   switch (msg.type) {
     case 'agent.spawned': {
@@ -320,11 +250,12 @@ function handleMessage(msg: WSMessage) {
 
     case 'agent.status': {
       const p = msg.payload as AgentStatusPayload;
-      if (
-        msg.sessionId &&
-        userStoppedSessions.has(msg.sessionId) &&
-        !['done', 'idle', 'waiting'].includes(p.status)
-      ) {
+      // Suppression of active statuses after a user stop is handled by
+      // runStateStore.applyEvent above. Here we only need to check whether
+      // applyEvent suppressed it — if the session is stoppedByUser and this
+      // is an active status, skip the feed/agent update too.
+      const rs = msg.sessionId ? runStateStore.states.get(msg.sessionId) : undefined;
+      if (rs?.stoppedByUser && !['done', 'idle', 'waiting', 'waiting_user', 'error'].includes(p.status)) {
         break;
       }
       agentStore.updateAgentStatus(p.agentId, p.status, msg.sessionId ?? undefined);
@@ -333,7 +264,6 @@ function handleMessage(msg: WSMessage) {
         else feedStore.finalizeThinking(p.agentId, msg.timestamp);
       }
       if (p.status === 'done' || p.status === 'idle' || p.status === 'waiting') {
-        maybeClearBusy(msg.sessionId ?? agents.get(p.agentId)?.sessionId);
         const completedSessionId = msg.sessionId ?? agents.get(p.agentId)?.sessionId;
         if (
           p.agentId === 'kory-manager' &&
@@ -362,10 +292,8 @@ function handleMessage(msg: WSMessage) {
         info?.message?.startsWith('Prompt ') && info.message.includes('Instructions:');
       if (isPromptDiagnostic) break;
       if (isForActiveSession && info?.message) {
-        if (info.message === 'Session cancelled' && msg.sessionId) {
-          userStoppedSessions.add(msg.sessionId);
-          clearSessionBusy(msg.sessionId);
-        }
+        // applyEvent already handled the "Session cancelled" stop suppression
+        // and phase transition; here we just render the feed marker.
         feedStore.removeAnalyzingThoughtEntries();
         feedStore.addFeedEntry({
           timestamp: msg.timestamp,
@@ -385,14 +313,14 @@ function handleMessage(msg: WSMessage) {
       if (isForActiveSession) feedStore.finalizeThinking(p.agentId, msg.timestamp);
       agentStore.completeAgent(p.agentId, msg.sessionId ?? undefined);
       if (isForActiveSession) feedStore.removeAnalyzingThoughtEntries();
-      maybeClearBusy(msg.sessionId ?? agents.get(p.agentId)?.sessionId);
+      // Run-phase clearing is handled by applyEvent above.
       break;
     }
 
     case 'agent.error': {
       const p = msg.payload as { agentId?: string; error?: string };
       const isSubAgent = isSpawnedSubAgent(p.agentId);
-      clearSessionBusy(msg.sessionId ?? agents.get(p.agentId ?? '')?.sessionId ?? '');
+      // Run-phase error transition is handled by applyEvent above.
       if (isForActiveSession) {
         feedStore.removeAnalyzingThoughtEntries();
         feedStore.addFeedEntry({
@@ -749,14 +677,11 @@ function handleMessage(msg: WSMessage) {
     case 'compaction.failed': {
       const payload = msg.payload as CompactionProgressPayload;
       feedStore.upsertCompaction(payload);
+      // Run-phase transitions for compaction are handled by applyEvent above.
       if (msg.type === 'compaction.completed') {
-        clearSessionBusy(payload.sessionId);
         toastStore.success('Context compacted — the manager will start fresh on the next turn');
       } else if (msg.type === 'compaction.failed') {
-        clearSessionBusy(payload.sessionId);
         toastStore.error(payload.error ?? 'Compaction failed');
-      } else {
-        markSessionBusy(payload.sessionId);
       }
       break;
     }
@@ -1124,7 +1049,7 @@ function sendMessage(
   fastMode?: boolean,
 ) {
   feedStore.addUserMessage(sessionId, content, attachments);
-  markSessionBusy(sessionId);
+  runStateStore.startRun(sessionId);
   detectedContext = [];
   void apiFetch(apiUrl('/api/messages'), {
     method: 'POST',
@@ -1148,7 +1073,7 @@ function sendMessage(
           : 'Message send failed. Check your connection and retry.';
       toastStore.error(message);
       feedStore.addClientError(message);
-      clearSessionBusy(sessionId);
+      runStateStore.markUserStopped(sessionId);
     });
 }
 
@@ -1298,7 +1223,7 @@ async function loadSessionMessages(
 async function rewind(hash: string) {
   const sessionId = sessionStore.activeSessionId;
   if (!sessionId || rewindPreviewLoadingHash) return;
-  if (busySessions.has(sessionId) || agentStore.isSessionRunning(sessionId)) {
+  if (runStateStore.isBusy(sessionId)) {
     toastStore.info('Stop the active run before rewinding this session');
     return;
   }
@@ -1381,8 +1306,9 @@ function setYoloMode(enabled: boolean) {
 }
 
 function markSessionAgentsStopped(sessionId: string) {
-  userStoppedSessions.add(sessionId);
-  clearSessionBusy(sessionId);
+  // Run-phase stop is owned by runStateStore; agentStore still marks its
+  // agent entries done for content-streaming indicators (ManagerFeed etc.).
+  runStateStore.markUserStopped(sessionId);
   agentStore.markSessionAgentsStopped(sessionId);
   if (sessionId === sessionStore.activeSessionId) feedStore.removeAnalyzingThoughtEntries();
 }
@@ -1445,7 +1371,9 @@ export const wsStore = {
     return activeFileEdits;
   },
   get managerStatus() {
-    return agentStore.getManagerStatus();
+    // Derive from run-state for the active session — no longer reads the
+    // shared manager object's status, which was clobbered across chats.
+    return runStateStore.getAgentStatusForSession(sessionStore.activeSessionId);
   },
   get contextUsage() {
     return agentStore.getContextUsage();
@@ -1456,14 +1384,18 @@ export const wsStore = {
   get detectedContext() {
     return detectedContext;
   },
-  isSessionRunning: agentStore.isSessionRunning,
-  isSessionWaiting: agentStore.isSessionWaiting,
-  getManagerStatusForSession: agentStore.getManagerStatusForSession,
-  isSessionBusy: (sessionId: string | null | undefined) =>
-    !!sessionId && (busySessions.has(sessionId) || agentStore.isSessionRunning(sessionId)),
+  // Run-phase reads delegate to runStateStore — the single source of truth.
+  isSessionRunning: runStateStore.isRunning,
+  isSessionWaiting: runStateStore.isWaiting,
+  isSessionBusy: runStateStore.isBusy,
+  getManagerStatusForSession: runStateStore.getAgentStatusForSession,
   markSessionAgentsStopped,
-  markAgentStopped: agentStore.markAgentStopped,
-  clearSessionBusy,
+  markAgentStopped: (agentId: string) => {
+    // Single-agent cancel: find the session and delegate to runStateStore.
+    const agent = agentStore.agents.get(agentId);
+    if (agent?.sessionId) runStateStore.markAgentStopped(agent.sessionId, agentId);
+    agentStore.markAgentStopped(agentId);
+  },
   clearAnalyzing: feedStore.removeAnalyzingThoughtEntries,
   addClientError: feedStore.addClientError,
   finishSessionLoad: feedStore.finishSessionLoad,

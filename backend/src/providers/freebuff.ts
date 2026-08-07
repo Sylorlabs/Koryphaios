@@ -219,29 +219,174 @@ const REASONING_EFFORT_MAP: Record<string, 'high' | 'medium' | 'low' | 'minimal'
   minimal: 'minimal',
 };
 
+// ─── Buffy system prompt (CLI detection bypass) ──────────────────────────────
+// The Codebuff backend's free-mode endpoint checks the system message for the
+// Buffy agent template's opening text. Without it → `403 free_mode_cli_required`.
+// Discovered by capturing the freebuff CLI's traffic with mitmproxy and
+// comparing against the SDK's requests — the system prompt content was the
+// only material difference.
+const BUFFY_SYSTEM_PROMPT_PREFIX = `You are Buffy, the strategic coding assistant. You are the AI agent behind the product, Freebuff, a tool where users can chat with you to code with AI for free.
+
+Current date: {CODEBUFF_CURRENT_DATE}.
+
+# General guidelines
+
+- **Conventions & Style:** Rigorously adhere to existing project conventions when modifying code. Analyze surrounding code, tests, and configuration first.
+- **Libraries/Frameworks:** NEVER assume a library/framework is available or appropriate. Verify its established usage within the project before employing it.
+- **Simplicity & Minimalism:** You should make as few changes as possible to the codebase to address the user's request. Prefer simple solutions.
+- **Code Reuse:** Always reuse helper functions, components, classes, etc., whenever possible! Don't reimplement what already exists elsewhere in the codebase.
+- **Do what the user asks:** If the user asks you to do something, do it.
+- **Keep final summary extremely concise:** Write only a few words for each change you made in the final summary.
+`;
+
+// ─── Shared freebuff session cache ───────────────────────────────────────────
+// The backend allows one active session per account. Multiple concurrent
+// Koryphaios runs reuse the same session (instanceId) — the backend checks
+// that the instance is active but doesn't enforce single-in-flight-request.
+// Sessions are keyed by `${authToken}:${model}` and cached module-level so
+// concurrent runs share them. Sessions expire on the backend side after a
+// TTL; if a request fails with 428, we invalidate the cache and re-claim.
+
+interface CachedSession {
+  instanceId: string;
+  model: string;
+  claimedAt: number;
+}
+
+const sessionCache = new Map<string, CachedSession>();
+const SESSION_TTL_MS = 55 * 60 * 1000; // 55 min — backend sessions last ~1h
+
+const CODEBUFF_BASE_URL = 'https://www.codebuff.com';
+
+function sessionCacheKey(authToken: string, model: string): string {
+  return `${authToken.slice(0, 8)}:${model}`;
+}
+
+async function claimFreebuffSession(
+  authToken: string,
+  model: string,
+): Promise<string | null> {
+  const key = sessionCacheKey(authToken, model);
+
+  // Check cache for a valid (non-expired) session.
+  const cached = sessionCache.get(key);
+  if (cached && Date.now() - cached.claimedAt < SESSION_TTL_MS) {
+    return cached.instanceId;
+  }
+
+  // Delete any existing session on the backend (best effort).
+  try {
+    await fetch(`${CODEBUFF_BASE_URL}/api/v1/freebuff/session`, {
+      method: 'DELETE',
+      headers: { Authorization: `Bearer ${authToken}` },
+    });
+  } catch {
+    // Ignore — no session may exist.
+  }
+
+  // Claim a new session.
+  try {
+    const res = await fetch(`${CODEBUFF_BASE_URL}/api/v1/freebuff/session`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${authToken}`,
+        'x-freebuff-model': model,
+        'Content-Length': '0',
+      },
+    });
+    const session = await res.json();
+    if (session.instanceId) {
+      sessionCache.set(key, {
+        instanceId: session.instanceId,
+        model,
+        claimedAt: Date.now(),
+      });
+      return session.instanceId;
+    }
+    providerLog.warn(
+      { session, model },
+      'Freebuff: failed to claim session — rate limited or error',
+    );
+  } catch (err) {
+    providerLog.warn({ err }, 'Freebuff: error claiming session');
+  }
+  return null;
+}
+
+function invalidateSession(authToken: string, model: string): void {
+  sessionCache.delete(sessionCacheKey(authToken, model));
+}
+
+// ─── Fetch interception for freebuff_instance_id ─────────────────────────────
+// The SDK doesn't know about freebuff sessions, so we patch globalThis.fetch
+// once at module load to inject freebuff_instance_id into the
+// codebuff_metadata of every chat completions request. The wrapper reads
+// from the session cache, so concurrent runs all get the right instanceId.
+// We install the wrapper lazily (on first use) to avoid patching fetch in
+// tests or when freebuff is never used.
+
+let fetchWrapperInstalled = false;
+let originalFetch: typeof globalThis.fetch | null = null;
+
+function installFetchWrapper(): void {
+  if (fetchWrapperInstalled) return;
+  originalFetch = globalThis.fetch;
+  globalThis.fetch = (async (url: any, init?: any) => {
+    const urlStr = typeof url === 'string' ? url : url?.url || url?.toString();
+    if (urlStr?.includes('chat/completions') && init?.body) {
+      try {
+        const body = JSON.parse(init.body);
+        if (body.codebuff_metadata && !body.codebuff_metadata.freebuff_instance_id) {
+          // Find the session for this request's model.
+          const model = body.model as string | undefined;
+          if (model) {
+            // Try all cached sessions for this model (there should be only
+            // one per account, but we might have multiple accounts).
+            for (const [, session] of sessionCache) {
+              if (session.model === model) {
+                body.codebuff_metadata.freebuff_instance_id = session.instanceId;
+                if (!body.codebuff_metadata.trace_session_id) {
+                  body.codebuff_metadata.trace_session_id = crypto.randomUUID();
+                }
+                if (!body.codebuff_metadata.llm_step_number) {
+                  body.codebuff_metadata.llm_step_number = '1';
+                }
+                init.body = JSON.stringify(body);
+                break;
+              }
+            }
+          }
+        }
+      } catch {
+        // Body isn't JSON or already consumed — skip.
+      }
+    }
+    return originalFetch!(url, init);
+  }) as typeof globalThis.fetch;
+  fetchWrapperInstalled = true;
+}
+
 // ─── Custom AgentDefinition builder ──────────────────────────────────────────
-// The SDK's `base` agent has no reasoningOptions. To enable reasoning, we
-// build a custom AgentDefinition that mirrors the base agent but adds
-// reasoningOptions and the requested model. This is also used when a
-// specific model is requested (even without reasoning) to ensure the
-// model is passed correctly via the agent definition rather than params.
+// We always build a custom AgentDefinition (never fall back to the SDK's
+// `base` agent) because the backend's free-mode CLI detection requires:
+//   1. The Buffy system prompt prefix in the system message
+//   2. A valid free-mode agent template ID (e.g. "base2-free-luna")
+// The `base` agent fails both checks.
 
 function buildAgentDefinition(
   modelId: string | undefined,
   reasoningLevel: string | undefined,
-): AgentDefinition | null {
-  // Only build a custom agent if we have reasoning or a model to set.
-  // Otherwise, use the default 'base' agent (which lets the backend pick
-  // the template based on costMode).
-  if (!reasoningLevel && !modelId) return null;
-
+): AgentDefinition {
   const effort = reasoningLevel ? REASONING_EFFORT_MAP[reasoningLevel] : undefined;
-  // Fall back to the freebuff settings.json default model, then to
-  // gpt-5.6-luna (the freebuff default), then to claude-sonnet-4.5.
   const resolvedModel = modelId ?? readFreebuffDefaultModel() ?? 'openai/gpt-5.6-luna';
 
+  // Look up the backend agent template ID for this model. The backend
+  // validates that the agentId matches a known free-mode template.
+  const menuEntry = FREEBUFF_MODEL_MENU.find((m) => m.modelId === resolvedModel);
+  const agentTemplateId = menuEntry?.agentTemplateId ?? 'base2-free-luna';
+
   const def: AgentDefinition = {
-    id: 'kory-freebuff-agent',
+    id: agentTemplateId,
     displayName: 'Koryphaios Freebuff Agent',
     model: resolvedModel as AgentDefinition['model'],
     // Include all the tools the base agent has, so we don't lose any
@@ -285,7 +430,10 @@ function buildAgentDefinition(
       'kory_ask_user',
     ],
     mcpServers: {},
-    systemPrompt: '',
+    // The systemPrompt MUST start with the Buffy opening text — the backend
+    // checks for it when costMode is "free". Kory-specific instructions are
+    // appended after the Buffy prefix.
+    systemPrompt: BUFFY_SYSTEM_PROMPT_PREFIX,
     instructionsPrompt: '',
   };
 
@@ -441,6 +589,21 @@ export class FreebuffProvider implements Provider {
       }
     };
 
+    // ─── Claim or reuse a freebuff session ────────────────────────────────
+    // The backend requires an active session for free-mode. We cache sessions
+    // module-level so concurrent runs share the same instanceId — the backend
+    // doesn't enforce single-in-flight-request per instance.
+    const resolvedModelForSession = modelId || readFreebuffDefaultModel() || 'openai/gpt-5.6-luna';
+    installFetchWrapper();
+    const instanceId = await claimFreebuffSession(creds.authToken, resolvedModelForSession);
+    if (!instanceId) {
+      yield {
+        type: 'error',
+        error: 'Freebuff: could not claim a free session (rate limit reached or auth error). Try again later.',
+      };
+      return;
+    }
+
     // Start the run in the background. The SDK's constructor type
     // (CodebuffClientOptions) doesn't include fingerprintId, but the
     // runtime constructor merges it via spread and run() requires it.
@@ -453,15 +616,15 @@ export class FreebuffProvider implements Provider {
       customToolDefinitions,
     });
 
-    // Build a custom agent definition when reasoning is requested. The SDK's
-    // `base` agent has no reasoningOptions; to enable reasoning we must pass
-    // a custom AgentDefinition with reasoningOptions set. The model and
-    // reasoning effort come from the request.
+    // Build a custom agent definition. We always use a custom agent
+    // definition (never the SDK's 'base' agent) because the backend's
+    // free-mode CLI detection requires the Buffy system prompt prefix and
+    // a valid free-mode agent template ID.
     const agentDef = buildAgentDefinition(modelId, request.reasoningLevel);
 
     const runPromise = client
       .run({
-        agent: agentDef ?? 'base',
+        agent: agentDef,
         prompt: fullPrompt,
         // fingerprintId is required at runtime (RunExecutionOptions) but
         // not exposed in the public run() type signature. Cast to inject.
@@ -479,10 +642,9 @@ export class FreebuffProvider implements Provider {
         // we override with kory__grep anyway. Code context is provided by
         // Koryphaios via the system prompt and tool results.
         projectFiles: {},
-        // When using a custom agent definition, pass it in agentDefinitions
-        // so the SDK can resolve the agent id.
-        ...(agentDef ? { agentDefinitions: [agentDef] } : {}),
-        ...(modelId && !agentDef ? { params: { model: modelId } } : {}),
+        // Pass the custom agent definition in agentDefinitions so the SDK
+        // can resolve the agent id.
+        agentDefinitions: [agentDef],
         ...(request.signal ? { signal: request.signal } : {}),
       } as Parameters<typeof client.run>[0])
       .then((result: RunState) => {

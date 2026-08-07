@@ -32,6 +32,7 @@
   import { sessionStore } from '$lib/stores/sessions.svelte';
   import { projectStore } from '$lib/stores/project.svelte';
   import { authStore } from '$lib/stores/auth.svelte';
+  import { runStateStore } from '$lib/stores/run-state.svelte';
   import AnimatedStatusIcon from './AnimatedStatusIcon.svelte';
   import ThinkingBlock from './ThinkingBlock.svelte';
   import { agentSettingsStore } from '$lib/stores/agent-settings.svelte';
@@ -1341,7 +1342,7 @@
                     void wsStore.rewind(entry.ghostHash!);
                   }}
                   disabled={!!wsStore.rewindPreviewLoadingHash ||
-                    wsStore.isSessionBusy(sessionStore.activeSessionId)}
+                    runStateStore.isBusy(sessionStore.activeSessionId)}
                   title="Preview restoring this session to this point"
                 >
                   {#if wsStore.rewindPreviewLoadingHash === entry.ghostHash}

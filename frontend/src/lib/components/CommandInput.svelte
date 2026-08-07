@@ -12,6 +12,7 @@
   import { getModelConfigurationWarning, isEnabledModelSelection, parseProviderModelSelection } from '$lib/utils/model-config';
   import { invoke } from '@tauri-apps/api/core';
   import { toastStore } from '$lib/stores/toast.svelte';
+  import { isGuidedDemo } from '$lib/demo-flags';
   import { sessionStore } from '$lib/stores/sessions.svelte';
   import { projectStore } from '$lib/stores/project.svelte';
   import { apiFetch } from '$lib/api.svelte';
@@ -241,7 +242,7 @@
         { quietSuccess: true },
       );
     }
-    if (next === 'custom') onOpenSettings?.('agent', 'permissions');
+    if (next === 'custom' && !isGuidedDemo) onOpenSettings?.('agent', 'permissions');
   }
 
   const configurationWarning = $derived(
@@ -1264,13 +1265,14 @@
 
       <button
         type="button"
-        class="flex h-10 items-center gap-2 rounded-xl border px-3.5 text-sm font-medium transition-all hover:brightness-110 active:scale-[0.98] {interactionMode === 'plan' ? 'border-cyan-400/40 bg-cyan-400/10 text-cyan-200' : 'border-[var(--color-border)] bg-[var(--color-surface-3)] text-[var(--color-text-primary)]'}"
-        aria-pressed={interactionMode === 'plan'}
-        onclick={() => onInteractionModeChange?.(interactionMode === 'plan' ? 'act' : 'plan')}
-        title="Plan mode is read-only and keeps a restart-safe planning note"
+        class="flex h-10 items-center gap-2 rounded-xl border px-3.5 text-sm font-medium transition-all hover:brightness-110 active:scale-[0.98] {isGuidedDemo ? 'border-[var(--color-border)] bg-[var(--color-surface-3)] text-[var(--color-text-secondary)]' : interactionMode === 'plan' ? 'border-cyan-400/40 bg-cyan-400/10 text-cyan-200' : 'border-[var(--color-border)] bg-[var(--color-surface-3)] text-[var(--color-text-primary)]'}"
+        aria-pressed={!isGuidedDemo && interactionMode === 'plan'}
+        aria-disabled={isGuidedDemo}
+        onclick={() => isGuidedDemo ? toastStore.info('Not available in this demo') : onInteractionModeChange?.(interactionMode === 'plan' ? 'act' : 'plan')}
+        title={isGuidedDemo ? 'Not available in this demo' : 'Plan mode is read-only and keeps a restart-safe planning note'}
       >
         <ClipboardList size={17} />
-        <span>{interactionMode === 'plan' ? 'Planning' : 'Plan'}</span>
+        <span>{isGuidedDemo ? 'Not available in this demo' : interactionMode === 'plan' ? 'Planning' : 'Plan'}</span>
       </button>
 
       <div class="permission-picker relative">
