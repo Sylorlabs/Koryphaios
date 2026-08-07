@@ -422,8 +422,9 @@ async function attachTauriListeners() {
       void refreshUrls().then(() => tick());
     });
     tauriUnlistens.push(unDown, unReady);
-  } catch {
+  } catch (err: unknown) {
     // Not in Tauri or event plugin unavailable — fall back to polling only.
+    console.debug('Failed to attach Tauri listeners:', err instanceof Error ? err.message : String(err));
   }
 }
 
@@ -431,8 +432,9 @@ function detachTauriListeners() {
   for (const un of tauriUnlistens) {
     try {
       un();
-    } catch {
+    } catch (err: unknown) {
       /* ignore */
+      console.debug('Failed to detach Tauri listener:', err instanceof Error ? err.message : String(err));
     }
   }
   tauriUnlistens = [];

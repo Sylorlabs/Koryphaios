@@ -119,10 +119,14 @@
             event.stopPropagation();
             if (isManager && agent.sessionId) {
               wsStore.markSessionAgentsStopped(agent.sessionId);
-              apiFetch(`/api/sessions/${agent.sessionId}/cancel`, { method: 'POST' }).catch(() => {});
+              apiFetch(`/api/sessions/${agent.sessionId}/cancel`, { method: 'POST' }).catch((err: unknown) => {
+                console.warn('Session cancel failed:', err instanceof Error ? err.message : String(err));
+              });
             } else {
               wsStore.markAgentStopped(agent.identity.id);
-              apiFetch(`/api/agent/${agent.identity.id}/cancel`, { method: 'POST' }).catch(() => {});
+              apiFetch(`/api/agent/${agent.identity.id}/cancel`, { method: 'POST' }).catch((err: unknown) => {
+                console.warn('Agent cancel failed:', err instanceof Error ? err.message : String(err));
+              });
             }
           }}
         >

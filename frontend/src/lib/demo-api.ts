@@ -504,8 +504,9 @@ function ok(data: unknown): Response {
 function parseBody(init: RequestInit): Record<string, unknown> {
   try {
     if (typeof init.body === 'string') return JSON.parse(init.body);
-  } catch {
+  } catch (err: unknown) {
     /* ignore */
+    console.debug('Failed to parse demo request body:', err instanceof Error ? err.message : String(err));
   }
   return {};
 }
@@ -536,7 +537,8 @@ export function demoFetch(url: string, init: RequestInit = {}): Response {
   let path: string;
   try {
     path = new URL(url, 'http://demo.local').pathname;
-  } catch {
+  } catch (err: unknown) {
+    console.debug('Failed to parse demo URL, using raw path:', err instanceof Error ? err.message : String(err));
     path = url;
   }
 

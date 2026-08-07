@@ -1,0 +1,37 @@
+# ADR-004: Graceful degradation with disabledComponents tracking in bootstrap
+
+## Status
+
+Accepted
+
+## Context
+
+The prior `bootstrap()` function had no degradation strategy. Every component was initialized in sequence, and any failure would either:
+- Crash the entire startup (if the failure threw)
+- Be silently swallowed (if the failure was caught with `catch {}`)
+
+This meant a missing MCP server, a broken credit accountant, or a failed encryption init would prevent the entire backend from starting — even though the core (DB, providers, tools) was fine.
+
+There was also no way for downstream code to know which components were available. Code that depended on MCP or encryption would get a runtime surprise when it tried to use them.
+
+## Decision
+
+Classify each component as **critical** or **degradable**:
+
+- **Critical** (failure aborts startup): Environment validation, Database, Encryption (in production)
+- **Degradable** (failure logs a warning and continues): Process supervisor, Credit accountant, Encryption (in dev), MCP, Goal driver recovery, Background cleanup
+
+Track degraded components in `AppContext.disabledComponents: Set<string>`. Downstream code can check `ctx.disabledComponents.has('mcp')` before using MCP.
+
+## Consequences
+
+- **Positive**: The backend starts even when optional components fail.
+- **Positive**: Downstream code can check availability instead of guessing.
+- **Positive**: Operators see which components are degraded in the startup log.
+- **Negative**: Downstream code must check `disabledComponents` — forgetting to check leads to runtime errors when calling a disabled component.
+- **Negative**: Some features may be silently unavailable (e.g. no MCP tools if MCP failed to init). This is acceptable — the alternative (crashing) is worse.
+
+## Alternatives considered
+
+- **Fail fast on any component failure**: The prior behavior. Too fragile for a product with many optional integrations.
+- **Lazy initialization**: Initialize components on first use instead of at startup. More complex, and doesn't surface failures early.

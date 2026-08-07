@@ -49,6 +49,11 @@ export type DetectedCli = {
   authSource: string | null;
   note: string;
   docsUrl: string;
+  nativeResearch?: {
+    eligible: boolean;
+    nativeTools: string[];
+    reason: string;
+  };
 };
 
 export type ProviderListItem = {
@@ -169,7 +174,8 @@ function hasDismissedCliAccountNotice(fingerprint: string): boolean {
   try {
     const dismissed = JSON.parse(window.localStorage.getItem(CLI_ACCOUNT_NOTICE_DISMISSALS_KEY) ?? '[]');
     return Array.isArray(dismissed) && dismissed.includes(fingerprint);
-  } catch {
+  } catch (err: unknown) {
+    console.debug('Failed to read CLI account notice dismissals:', err instanceof Error ? err.message : String(err));
     return false;
   }
 }
@@ -179,8 +185,9 @@ function dismissCliAccountNotice(fingerprint: string): void {
     const dismissed = JSON.parse(window.localStorage.getItem(CLI_ACCOUNT_NOTICE_DISMISSALS_KEY) ?? '[]');
     const next = Array.isArray(dismissed) ? [...new Set([...dismissed, fingerprint])].slice(-20) : [fingerprint];
     window.localStorage.setItem(CLI_ACCOUNT_NOTICE_DISMISSALS_KEY, JSON.stringify(next));
-  } catch {
+  } catch (err: unknown) {
     // A private-storage failure must never block provider discovery.
+    console.debug('Failed to persist CLI account notice dismissal:', err instanceof Error ? err.message : String(err));
   }
 }
 
@@ -206,6 +213,7 @@ function createProvidersStore() {
   let accountsLoading = $state<Record<string, boolean>>({});
   let accountBusy = $state<string | null>(null);
   let fallbackOrders = $state<Record<string, string[]>>({});
+  let accountSelectionConfigured = $state<Record<string, boolean>>({});
   let fallbackEnabled = $state<Record<string, boolean>>({});
   let fallbackItems = $state<Record<string, StoredProviderAccount[]>>({});
   let fallbackSaving = $state<string | null>(null);
@@ -429,7 +437,8 @@ function createProvidersStore() {
           },
         );
       }
-    } catch {
+    } catch (err: unknown) {
+      console.warn('Failed to load CLI account ambiguity:', err instanceof Error ? err.message : String(err));
       cliAccountSelectionRequired = [];
     }
   }
@@ -444,7 +453,8 @@ function createProvidersStore() {
       if (data?.ok && Array.isArray(data.data)) {
         availableProviderTypes = data.data;
       }
-    } catch {
+    } catch (err: unknown) {
+      console.warn('Failed to load available providers:', err instanceof Error ? err.message : String(err));
       availableProviderTypes = [];
     }
   }
@@ -454,7 +464,8 @@ function createProvidersStore() {
       const res = await apiFetch(apiUrl('/api/providers/detect'));
       const data = await parseJsonResponse<{ ok?: boolean; data?: DetectedCli[] }>(res);
       if (data?.ok && Array.isArray(data.data)) detectedClis = data.data;
-    } catch {
+    } catch (err: unknown) {
+      console.warn('Failed to load detected CLIs:', err instanceof Error ? err.message : String(err));
       detectedClis = [];
     }
   }
@@ -558,8 +569,9 @@ function createProvidersStore() {
       }
       browserAuthMessages['codex-auth'] = `Waiting for ChatGPT approval.${deviceAuthCountdown(codexDeviceAuth?.expiresAt)}`;
       codexAuthPollTimer = setTimeout(() => void pollCodexAuth(), 1_500);
-    } catch {
+    } catch (err: unknown) {
       // Retain the code and retry; a transient status refresh must not lose the login.
+      console.debug('Codex auth poll failed, will retry:', err instanceof Error ? err.message : String(err));
       codexAuthPollTimer = setTimeout(() => void pollCodexAuth(), 1_500);
     }
   }
@@ -720,6 +732,7 @@ function createProvidersStore() {
         ok?: boolean;
         data?: StoredProviderAccount[];
         fallbackOrder?: string[];
+        accountSelectionConfigured?: boolean;
         fallbackEnabled?: boolean;
         error?: string;
       }>(res);
@@ -728,11 +741,13 @@ function createProvidersStore() {
         if (data.fallbackOrder) {
           fallbackOrders[name] = data.fallbackOrder;
         }
+        accountSelectionConfigured[name] = data.accountSelectionConfigured === true;
         fallbackEnabled[name] = data.fallbackEnabled === true;
       } else if (force) {
         providerAccounts[name] = [];
       }
-    } catch {
+    } catch (err: unknown) {
+      console.warn(`Failed to load provider accounts for ${name}:`, err instanceof Error ? err.message : String(err));
       if (force) providerAccounts[name] = [];
     } finally {
       accountsLoading[name] = false;
@@ -781,7 +796,9 @@ function createProvidersStore() {
       const data = await parseJsonResponse<{ ok?: boolean; error?: string }>(res);
       if (data.ok) {
         fallbackOrders[name] = order;
+        accountSelectionConfigured[name] = true;
         fallbackEnabled[name] = enabled;
+        await loadProvidersFromApi();
       } else {
         toastStore.error(data.error ?? 'Failed to save fallback order');
       }
@@ -1092,8 +1109,8 @@ function createProvidersStore() {
         await loadProvidersFromApi();
         toastStore.info(`${getProviderDisplayLabel(name)} disconnected`);
       }
-    } catch {
-      // ignore
+    } catch (err: unknown) {
+      console.warn(`Failed to disconnect provider ${name}:`, err instanceof Error ? err.message : String(err));
     }
   }
 
@@ -1447,6 +1464,9 @@ function createProvidersStore() {
     },
     get fallbackOrders() {
       return fallbackOrders;
+    },
+    get accountSelectionConfigured() {
+      return accountSelectionConfigured;
     },
     get fallbackEnabled() {
       return fallbackEnabled;

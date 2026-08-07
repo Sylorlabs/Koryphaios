@@ -1,0 +1,76 @@
+const PROJECT_KEY = 'koryphaios-current-project';
+const PROJECTS_KEY = 'koryphaios-open-projects';
+const WORKSPACE_KEY = 'koryphaios-workspace-root';
+const SCOPE_KEY = 'koryphaios-session-scope';
+
+export type SessionScope = 'project' | 'all';
+
+function readString(key: string): string | null {
+  try { return typeof localStorage === 'undefined' ? null : localStorage.getItem(key); } catch (err: unknown) { console.debug('Failed to read localStorage key:', err instanceof Error ? err.message : String(err)); return null; }
+}
+function readList(key: string): string[] {
+  try { return JSON.parse(readString(key) || '[]') as string[]; } catch (err: unknown) { console.debug('Failed to parse localStorage list:', err instanceof Error ? err.message : String(err)); return []; }
+}
+function persist(key: string, value: string | string[] | null) {
+  try {
+    if (typeof localStorage === 'undefined') return;
+    if (value === null) localStorage.removeItem(key);
+    else localStorage.setItem(key, Array.isArray(value) ? JSON.stringify(value) : value);
+  } catch (err: unknown) { /* private mode */ console.debug('Failed to persist to localStorage:', err instanceof Error ? err.message : String(err)); }
+}
+
+const initialCurrentPath = readString(PROJECT_KEY);
+const initialOpenProjects = readList(PROJECTS_KEY);
+let currentPath = $state<string | null>(initialCurrentPath);
+let openProjects = $state<string[]>(initialCurrentPath && !initialOpenProjects.includes(initialCurrentPath) ? [initialCurrentPath, ...initialOpenProjects] : initialOpenProjects);
+let workspaceRoot = $state<string | null>(readString(WORKSPACE_KEY));
+let scope = $state<SessionScope>(readString(SCOPE_KEY) === 'all' ? 'all' : 'project');
+
+export function projectDisplayName(path: string | null | undefined): string {
+  if (!path) return '';
+  const parts = path.replace(/[/\\]+$/, '').split(/[/\\]/);
+  return parts[parts.length - 1] || path;
+}
+
+export const projectStore = {
+  get currentPath() { return currentPath; },
+  get openProjects() { return openProjects; },
+  get workspaceRoot() { return workspaceRoot; },
+  get scope(): SessionScope { return currentPath ? scope : 'all'; },
+  get displayName() { return projectDisplayName(currentPath); },
+  setProject(path: string | null) {
+    currentPath = path?.trim() || null;
+    persist(PROJECT_KEY, currentPath);
+    if (currentPath) {
+      this.addProject(currentPath);
+      // Scope is a sticky user toggle — never auto-flip it here. Switching
+      // chats calls setProject(session.workingDirectory), so forcing 'project'
+      // would stomp a deliberate 'All' choice on every chat hop. The toggle
+      // (setScope) is the only thing that changes scope.
+    }
+  },
+  addProject(path: string) {
+    const clean = path.trim();
+    if (!clean) return;
+    openProjects = [clean, ...openProjects.filter((item) => item !== clean)];
+    persist(PROJECTS_KEY, openProjects);
+  },
+  removeProject(path: string) {
+    openProjects = openProjects.filter((item) => item !== path);
+    persist(PROJECTS_KEY, openProjects);
+    if (currentPath === path) this.setProject(null);
+  },
+  setWorkspace(root: string | null, projects: string[] = []) {
+    workspaceRoot = root?.trim() || null;
+    persist(WORKSPACE_KEY, workspaceRoot);
+    for (const project of projects) this.addProject(project);
+    // Workspaces restore without silently choosing an agent working directory.
+    this.setProject(null);
+  },
+  /** Exit workspace mode (e.g. File → Open Folder outside the workspace). */
+  clearWorkspace() {
+    workspaceRoot = null;
+    persist(WORKSPACE_KEY, null);
+  },
+  setScope(next: SessionScope) { scope = next; persist(SCOPE_KEY, next); },
+};

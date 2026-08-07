@@ -24,6 +24,7 @@ export const ProviderName = {
   CodexAuth: 'codex-auth',
   Cursor: 'cursor',
   Devin: 'devin',
+  Freebuff: 'freebuff',
   Grok: 'grok',
   Jules: 'jules',
 

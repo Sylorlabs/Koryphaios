@@ -21,13 +21,18 @@ let loading = $state<boolean>(false);
 let createSessionPromise: Promise<string | null> | null = null;
 let fetchGeneration = 0;
 let hasRestoredInitialSession = false;
+// A websocket update can already be in flight when a session is deleted.
+// Keep a short-lived tombstone until the next authoritative list confirms the
+// row is gone, rather than allowing that stale event to recreate it in the UI.
+const deletedSessionIds = new Set<string>();
 
 function loadNewChatBehavior(): NewChatBehavior {
   if (!browser) return 'always-create';
   try {
     localStorage.setItem(NEW_CHAT_BEHAVIOR_KEY, 'always-create');
     return 'always-create';
-  } catch {
+  } catch (err: unknown) {
+    console.debug('Failed to persist new chat behavior:', err instanceof Error ? err.message : String(err));
     return 'always-create';
   }
 }
@@ -39,8 +44,9 @@ function setNewChatBehavior(behavior: NewChatBehavior): void {
   if (!browser) return;
   try {
     localStorage.setItem(NEW_CHAT_BEHAVIOR_KEY, behavior);
-  } catch {
+  } catch (err: unknown) {
     // Keep the in-memory preference when storage is unavailable.
+    console.debug('Failed to persist new chat behavior:', err instanceof Error ? err.message : String(err));
   }
 }
 
@@ -50,7 +56,8 @@ function loadLastSession(): string {
   try {
     const stored = localStorage.getItem(LAST_SESSION_KEY);
     return stored || '';
-  } catch {
+  } catch (err: unknown) {
+    console.debug('Failed to read last session from localStorage:', err instanceof Error ? err.message : String(err));
     return '';
   }
 }
@@ -64,8 +71,9 @@ function saveLastSession(id: string): void {
     } else {
       localStorage.removeItem(LAST_SESSION_KEY);
     }
-  } catch {
+  } catch (err: unknown) {
     // Ignore localStorage errors
+    console.debug('Failed to save last session to localStorage:', err instanceof Error ? err.message : String(err));
   }
 }
 
@@ -84,8 +92,9 @@ async function fetchSessions(): Promise<boolean> {
         const body = text ? JSON.parse(text) : {};
         detail = body.detail ?? body.error ?? '';
         if (detail && import.meta.env.DEV) console.error('fetchSessions backend error:', detail);
-      } catch {
+      } catch (err: unknown) {
         /* ignore */
+        console.debug('Failed to parse fetchSessions error body:', err instanceof Error ? err.message : String(err));
       }
       if (!(res.status === 500 && !text.trim())) {
         if (import.meta.env.DEV)
@@ -100,14 +109,19 @@ async function fetchSessions(): Promise<boolean> {
     let data: { ok?: boolean; data?: Session[] };
     try {
       data = JSON.parse(text);
-    } catch {
+    } catch (err: unknown) {
+      console.debug('Failed to parse sessions response:', err instanceof Error ? err.message : String(err));
       return false;
     }
     if (data?.ok && Array.isArray(data.data)) {
       // Session refreshes can overlap during startup, workspace changes, and
       // reconnects. Only the newest response may alter selection or the list.
       if (myGeneration !== fetchGeneration) return true;
-      sessions = data.data;
+      const returnedIds = new Set(data.data.map((session) => session.id));
+      for (const id of deletedSessionIds) {
+        if (!returnedIds.has(id)) deletedSessionIds.delete(id);
+      }
+      sessions = data.data.filter((session) => !deletedSessionIds.has(session.id));
       const lastSessionId = hasRestoredInitialSession ? '' : loadLastSession();
       hasRestoredInitialSession = true;
 
@@ -209,7 +223,8 @@ async function createSessionRequest(
     let data: { ok?: boolean; data?: Session };
     try {
       data = text ? JSON.parse(text) : {};
-    } catch {
+    } catch (err: unknown) {
+      console.debug('Failed to parse create session response:', err instanceof Error ? err.message : String(err));
       return null;
     }
     if (data?.ok && data?.data) {
@@ -229,7 +244,8 @@ async function createSessionRequest(
       }
       return data.data.id;
     }
-  } catch {
+  } catch (err: unknown) {
+    console.warn('Failed to create session:', err instanceof Error ? err.message : String(err));
     toastStore.error('Failed to create session');
   }
   return null;
@@ -249,7 +265,8 @@ async function renameSession(id: string, title: string) {
       sessions = sessions.map((s) => (s.id === id ? data.data : s));
       toastStore.success('Session renamed');
     }
-  } catch {
+  } catch (err: unknown) {
+    console.warn('Failed to rename session:', err instanceof Error ? err.message : String(err));
     toastStore.error('Failed to rename session');
   }
 }
@@ -265,7 +282,8 @@ async function setInteractionMode(id: string, interactionMode: 'act' | 'plan'): 
     if (!res.ok || !data?.ok || !data.data) throw new Error('Mode update failed');
     sessions = sessions.map((session) => (session.id === id ? data.data : session));
     return true;
-  } catch {
+  } catch (err: unknown) {
+    console.warn('Failed to set interaction mode:', err instanceof Error ? err.message : String(err));
     toastStore.error('Could not change the conversation mode');
     return false;
   }
@@ -282,12 +300,14 @@ async function deleteSession(id: string) {
       try {
         const body = text ? JSON.parse(text) : {};
         detail = body.error ?? '';
-      } catch {
+      } catch (err: unknown) {
         /* ignore */
+        console.debug('Failed to parse delete session error body:', err instanceof Error ? err.message : String(err));
       }
       toastStore.error(detail || friendlyHttpError(res.status, 'delete session'));
       return;
     }
+    deletedSessionIds.add(id);
     sessions = sessions.filter((s) => s.id !== id);
     if (activeSessionId === id) {
       activeSessionId = sessions[0]?.id ?? '';
@@ -307,14 +327,16 @@ async function deleteAllSessions(): Promise<boolean> {
     let data: { ok?: boolean; error?: string; deleted?: number } = {};
     try {
       data = text ? JSON.parse(text) : {};
-    } catch {
+    } catch (err: unknown) {
       /* The status-based fallback below remains actionable. */
+      console.debug('Failed to parse delete all sessions response:', err instanceof Error ? err.message : String(err));
     }
     if (!res.ok || !data.ok) {
       toastStore.error(data.error || friendlyHttpError(res.status, 'delete all sessions'));
       return false;
     }
 
+    for (const session of sessions) deletedSessionIds.add(session.id);
     sessions = [];
     activeSessionId = '';
     saveLastSession('');
@@ -352,7 +374,8 @@ async function fetchMessages(
   let data: { ok?: boolean; data?: unknown; error?: string };
   try {
     data = text ? JSON.parse(text) : {};
-  } catch {
+  } catch (err: unknown) {
+    console.debug('Failed to parse messages response:', err instanceof Error ? err.message : String(err));
     throw new Error('Chat history returned an invalid response.');
   }
   if (!data.ok || !Array.isArray(data.data)) {
@@ -395,6 +418,7 @@ function groupByDate(sessionList: Session[]): SessionGroup[] {
 
 // Handle WebSocket updates to sessions
 function handleSessionUpdate(session: Session) {
+  if (deletedSessionIds.has(session.id)) return;
   const existingIndex = sessions.findIndex((s) => s.id === session.id);
   if (existingIndex >= 0) {
     // Update existing session
@@ -406,6 +430,7 @@ function handleSessionUpdate(session: Session) {
 }
 
 function handleSessionDeleted(sessionId: string) {
+  deletedSessionIds.add(sessionId);
   sessions = sessions.filter((s) => s.id !== sessionId);
   if (activeSessionId === sessionId) {
     activeSessionId = sessions[0]?.id ?? '';

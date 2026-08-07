@@ -84,7 +84,8 @@ function loadSettingsFromStorage(): NotesSettings {
         ...(parsed.graphPhysics ?? {}),
       },
     };
-  } catch {
+  } catch (err: unknown) {
+    console.debug('Failed to load notes settings from localStorage:', err instanceof Error ? err.message : String(err));
     return { ...DEFAULT_NOTES_SETTINGS };
   }
 }
@@ -93,8 +94,9 @@ function saveSettingsToStorage(s: NotesSettings): void {
   if (!browser) return;
   try {
     localStorage.setItem(NOTES_SETTINGS_KEY, JSON.stringify(s));
-  } catch {
+  } catch (err: unknown) {
     // Ignore
+    console.debug('Failed to save notes settings to localStorage:', err instanceof Error ? err.message : String(err));
   }
 }
 

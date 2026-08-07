@@ -73,12 +73,14 @@ function safeStringify(value: unknown): string {
   if (typeof value === 'object') {
     try {
       return JSON.stringify(value);
-    } catch {
+    } catch (err: unknown) {
       // Circular reference or other stringify failure — don't let this
       // throw out of console.error and trigger a cascading error loop.
+      console.debug('safeStringify: JSON.stringify failed:', err instanceof Error ? err.message : String(err));
       try {
         return Object.prototype.toString.call(value);
-      } catch {
+      } catch (err2: unknown) {
+        console.debug('safeStringify: Object.prototype.toString also failed:', err2 instanceof Error ? err2.message : String(err2));
         return '[Unserializable object]';
       }
     }

@@ -56,7 +56,10 @@ function loadShortcuts(): Shortcut[] {
 
       return parsed;
     }
-  } catch {}
+  } catch (err) {
+    // Corrupt or missing shortcuts file — fall back to defaults.
+    console.debug('Failed to load saved shortcuts:', err);
+  }
   return structuredClone(defaultShortcuts);
 }
 

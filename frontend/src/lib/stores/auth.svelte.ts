@@ -21,7 +21,8 @@ function loadStoredToken(): string | undefined {
   if (!browser) return undefined;
   try {
     return localStorage.getItem(LOCAL_AUTH_TOKEN_KEY) || undefined;
-  } catch {
+  } catch (err: unknown) {
+    console.debug('Failed to read auth token from localStorage:', err instanceof Error ? err.message : String(err));
     return undefined;
   }
 }
@@ -31,7 +32,8 @@ function persistToken(nextToken: string | undefined) {
   try {
     if (nextToken) localStorage.setItem(LOCAL_AUTH_TOKEN_KEY, nextToken);
     else localStorage.removeItem(LOCAL_AUTH_TOKEN_KEY);
-  } catch {
+  } catch (err: unknown) {
+    console.debug('Failed to persist auth token to localStorage:', err instanceof Error ? err.message : String(err));
     // Ignore localStorage failures.
   }
 }
@@ -47,7 +49,8 @@ async function validateToken(candidate: string): Promise<AuthUser | null> {
   try {
     const data = JSON.parse(text);
     return data?.ok && data?.data?.user ? (data.data.user as AuthUser) : null;
-  } catch {
+  } catch (err: unknown) {
+    console.debug('Failed to parse auth/me response as JSON:', err instanceof Error ? err.message : String(err));
     return null;
   }
 }
@@ -63,7 +66,8 @@ async function createLocalSession(): Promise<string | undefined> {
   try {
     const data = JSON.parse(text);
     return data?.ok ? data?.data?.bearerToken : undefined;
-  } catch {
+  } catch (err: unknown) {
+    console.debug('Failed to parse auth/session response as JSON:', err instanceof Error ? err.message : String(err));
     return undefined;
   }
 }
@@ -114,7 +118,8 @@ export const authStore = {
         user = resolvedUser;
         isInitialized = true;
         return !!resolvedUser;
-      } catch {
+      } catch (err: unknown) {
+        console.warn('Auth session validation failed:', err instanceof Error ? err.message : String(err));
         user = null;
         token = undefined;
         persistToken(undefined);
@@ -147,7 +152,8 @@ export const authStore = {
           credentials: 'include',
           headers: { Authorization: token },
         });
-      } catch {
+      } catch (err: unknown) {
+        console.warn('Logout request failed:', err instanceof Error ? err.message : String(err));
         // Ignore logout failures and clear local state.
       }
     }

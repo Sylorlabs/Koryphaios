@@ -124,7 +124,8 @@ export function parseRecentProjects(): RecentProject[] {
           typeof (entry as RecentProject).updatedAt === 'number',
       )
       .slice(0, MAX_RECENT_PROJECTS);
-  } catch {
+  } catch (err: unknown) {
+    console.debug('Failed to parse recent projects:', err instanceof Error ? err.message : String(err));
     return [];
   }
 }
@@ -192,7 +193,8 @@ export async function readProjectFile(
     const title = (baseTitle ? `Project: ${baseTitle}` : 'Imported Project').slice(0, 64);
 
     return { title, text: trimmed, fileName: file.name, truncated: raw.length > maxChars };
-  } catch {
+  } catch (err: unknown) {
+    console.warn('Failed to read project file:', err instanceof Error ? err.message : String(err));
     return null;
   }
 }
@@ -225,7 +227,9 @@ export async function readProjectFolder(
           text.length + total > MAX_TOTAL_CHARS ? text.slice(0, MAX_TOTAL_CHARS - total) : text;
         total += slice.length;
         parts.push(`--- ${path} ---\n${slice}`);
-      } catch (_) {}
+      } catch (err: unknown) {
+        console.debug(`Failed to read file ${path} during folder import:`, err instanceof Error ? err.message : String(err));
+      }
     }
 
     const maxList = 200;

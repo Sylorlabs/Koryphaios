@@ -74,7 +74,8 @@ export function expandHtmlSandboxes(html: string): string {
     let content: string;
     try {
       content = decodeBase64(encoded);
-    } catch {
+    } catch (err: unknown) {
+      console.debug('Failed to decode HTML sandbox content:', err instanceof Error ? err.message : String(err));
       return '<div class="kory-html-error">Unable to render HTML sandbox.</div>';
     }
     const srcdoc = escapeAttr(sandboxedHtml(content));

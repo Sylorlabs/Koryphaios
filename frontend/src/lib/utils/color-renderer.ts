@@ -159,7 +159,8 @@ function fromJson(source: string): ColorEntry[] | null {
   let raw: unknown;
   try {
     raw = JSON.parse(source);
-  } catch {
+  } catch (err: unknown) {
+    console.debug('Failed to parse color JSON:', err instanceof Error ? err.message : String(err));
     return null;
   }
   const MAX_DEPTH = 4;

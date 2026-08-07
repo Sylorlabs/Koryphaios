@@ -222,7 +222,8 @@
       tx = 0;
       ty = 0;
       dirty = false;
-    } catch {
+    } catch (err: unknown) {
+      console.debug('Failed to parse canvas JSON:', err instanceof Error ? err.message : String(err));
       toastStore.error('Could not parse this canvas');
     }
   }

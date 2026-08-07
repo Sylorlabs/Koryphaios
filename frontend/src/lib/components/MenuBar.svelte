@@ -98,7 +98,9 @@
               isMaximized = v;
             });
         })
-        .catch(() => {});
+        .catch((err: unknown) => {
+          console.warn('Window maximized state check failed:', err instanceof Error ? err.message : String(err));
+        });
     }
 
     function handleWindowClick(e: MouseEvent) {

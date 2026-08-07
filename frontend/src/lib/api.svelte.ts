@@ -94,7 +94,8 @@ async function apiFetchUntracked(
       const projectPath = localStorage.getItem('koryphaios-current-project');
       if (projectPath && !headers.has('X-Koryphaios-Project'))
         headers.set('X-Koryphaios-Project', projectPath);
-    } catch {
+    } catch (err: unknown) {
+      console.debug('Failed to read project path from localStorage:', err instanceof Error ? err.message : String(err));
       /* SSR/private storage */
     }
     const controller = new AbortController();
@@ -133,7 +134,8 @@ export async function parseJsonResponse<T = LooseApiResponse>(res: Response): Pr
   }
   try {
     return JSON.parse(text) as T;
-  } catch {
+  } catch (err: unknown) {
+    console.debug('Failed to parse JSON response:', err instanceof Error ? err.message : String(err));
     const message = res.ok
       ? 'Invalid JSON from server'
       : `Request failed: ${res.status} ${res.statusText}`;

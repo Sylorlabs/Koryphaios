@@ -741,8 +741,9 @@ async function loadSessionMessages(
         },
       }));
     }
-  } catch {
+  } catch (err: unknown) {
     /* archive unavailable — text history still loads */
+    console.debug('Failed to load archived tool history:', err instanceof Error ? err.message : String(err));
   }
   if (!ownsFeed(sessionId, options.generation)) return false;
 

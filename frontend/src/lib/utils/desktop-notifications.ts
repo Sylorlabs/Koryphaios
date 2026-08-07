@@ -24,7 +24,8 @@ function isWindowFocused(): boolean {
   if (!browser) return true;
   try {
     return document.visibilityState === 'visible' && document.hasFocus();
-  } catch {
+  } catch (err: unknown) {
+    console.debug('Failed to check window focus state:', err instanceof Error ? err.message : String(err));
     return true;
   }
 }
@@ -53,7 +54,8 @@ async function ensurePermission(): Promise<boolean> {
         } = await import('@tauri-apps/plugin-notification');
         if (await isPermissionGranted()) return true;
         return (await requestPermission()) === 'granted';
-      } catch {
+      } catch (err: unknown) {
+        console.debug('Failed to request notification permission:', err instanceof Error ? err.message : String(err));
         return false;
       }
     })();
@@ -96,8 +98,9 @@ export async function notifyDesktop(opts: DesktopNotifyOpts): Promise<void> {
     sendNotification({ title, body });
     lastSentKey = key;
     lastSentAt = now;
-  } catch {
+  } catch (err: unknown) {
     // Plugin unavailable or OS blocked the post — never surface as a toast.
+    console.debug('Failed to send desktop notification:', err instanceof Error ? err.message : String(err));
   }
 }
 

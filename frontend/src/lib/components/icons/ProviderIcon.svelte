@@ -110,7 +110,6 @@
     'grok',
     'cursor',
     'cline',
-    'devin',
     'cerebras',
     'poe',
   ]);

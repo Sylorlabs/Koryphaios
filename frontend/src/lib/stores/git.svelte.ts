@@ -74,7 +74,8 @@ async function refreshStatus() {
     };
     try {
       data = JSON.parse(text);
-    } catch {
+    } catch (err: unknown) {
+      console.debug('Failed to parse git status response:', err instanceof Error ? err.message : String(err));
       state.status = [];
       state.branch = '';
       state.isRepo = false;
@@ -90,7 +91,8 @@ async function refreshStatus() {
         await fetchBranches();
       }
     }
-  } catch {
+  } catch (err: unknown) {
+    console.warn('Failed to refresh git status:', err instanceof Error ? err.message : String(err));
     state.status = [];
     state.branch = '';
     state.isRepo = false;
@@ -107,7 +109,8 @@ async function fetchBranches() {
     if (!text.trim()) return;
     const data = JSON.parse(text);
     if (data.ok) state.branches = data.data?.branches ?? [];
-  } catch {
+  } catch (err: unknown) {
+    console.warn('Failed to fetch branches:', err instanceof Error ? err.message : String(err));
     state.branches = [];
   }
 }
@@ -126,7 +129,8 @@ async function checkout(branch: string, create = false) {
     } else {
       toastStore.error(`Failed to switch to ${branch}`);
     }
-  } catch {
+  } catch (err: unknown) {
+    console.warn('Checkout failed:', err instanceof Error ? err.message : String(err));
     toastStore.error('Checkout failed');
   } finally {
     state.loading = false;
@@ -152,7 +156,8 @@ async function merge(branch: string) {
       toastStore.error('Merge failed');
     }
     await refreshStatus();
-  } catch {
+  } catch (err: unknown) {
+    console.warn('Merge failed:', err instanceof Error ? err.message : String(err));
     toastStore.error('Merge failed');
   } finally {
     state.loading = false;

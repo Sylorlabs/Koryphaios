@@ -266,7 +266,8 @@
       const picked = String(result.sRGBHex).toUpperCase();
       hexInput = picked;
       commitHexInput();
-    } catch {
+    } catch (err: unknown) {
+      console.debug('EyeDropper cancelled or unavailable:', err instanceof Error ? err.message : String(err));
       /* user cancelled */
     }
   }

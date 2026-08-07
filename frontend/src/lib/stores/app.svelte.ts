@@ -22,7 +22,8 @@ function loadLastProject(): string {
   if (!browser) return '';
   try {
     return localStorage.getItem(LAST_PROJECT_KEY) || '';
-  } catch {
+  } catch (err: unknown) {
+    console.debug('Failed to read last project from localStorage:', err instanceof Error ? err.message : String(err));
     return '';
   }
 }
@@ -36,7 +37,8 @@ function saveLastProject(name: string): void {
     } else {
       localStorage.removeItem(LAST_PROJECT_KEY);
     }
-  } catch {
+  } catch (err: unknown) {
+    console.debug('Failed to persist last project to localStorage:', err instanceof Error ? err.message : String(err));
     // Ignore localStorage errors
   }
 }
@@ -121,7 +123,8 @@ export const appStore = {
           }
         }
       }
-    } catch {
+    } catch (err: unknown) {
+      console.warn('Failed to fetch project name:', err instanceof Error ? err.message : String(err));
       // Keep the localStorage value on error
     }
   },

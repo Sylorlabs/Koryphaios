@@ -212,7 +212,7 @@
 
   const PERMISSION_OPTIONS = [
     { value: 'yolo', label: 'YOLO', description: 'Run actions without approval prompts or risk checks.', icon: Zap, tone: 'text-amber-300' },
-    { value: 'guarded', label: 'Guarded', description: 'Handle routine work and ask before risky actions.', icon: ShieldCheck, tone: 'text-emerald-300' },
+    { value: 'guarded', label: 'Guarded', description: 'Run all edits and routine tools; ask only before risky actions.', icon: ShieldCheck, tone: 'text-emerald-300' },
     { value: 'edits', label: 'Accept edits', description: 'Apply file edits automatically; ask before other actions.', icon: Pencil, tone: 'text-sky-300' },
     { value: 'ask', label: 'Ask', description: 'Ask before every action.', icon: MessageCircleQuestion, tone: 'text-[var(--color-text-secondary)]' },
     { value: 'custom', label: 'Custom', description: 'Use the detailed approval rules from Settings.', icon: SlidersHorizontal, tone: 'text-violet-300' },
@@ -360,7 +360,8 @@
             result.usage?.contextKnown ? result.usage.contextWindow : undefined,
           );
           if (result.usage?.contextSource === 'live' || result.usage?.contextSource === 'alias') return;
-        } catch {
+        } catch (err: unknown) {
+          console.debug('Context preview request failed:', err instanceof Error ? err.message : String(err));
           // Keep the current value and allow the next discovery recheck.
         }
       }
@@ -886,7 +887,8 @@
           for (const path of selected) insertFileReference(path);
         }
         return;
-      } catch {
+      } catch (err: unknown) {
+        console.debug('Tauri file dialog failed:', err instanceof Error ? err.message : String(err));
         // Fall through to browser picker
       }
     }
@@ -901,7 +903,8 @@
         const selected = await invoke<string | null>('select_folder_dialog');
         if (selected) insertFileReference(selected.endsWith('/') ? selected : `${selected}/`);
         return;
-      } catch {
+      } catch (err: unknown) {
+        console.debug('Tauri folder dialog failed:', err instanceof Error ? err.message : String(err));
         // Fall through to browser picker
       }
     }
@@ -1013,7 +1016,8 @@
             }
           }
         }
-      } catch {
+      } catch (err: unknown) {
+        console.debug('Clipboard read blocked or unavailable:', err instanceof Error ? err.message : String(err));
         // Browser clipboard access is commonly blocked in a webview; use the native API below.
       }
 

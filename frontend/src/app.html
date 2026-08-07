@@ -84,7 +84,8 @@
 						try {
 							await navigator.clipboard.writeText(report);
 							copy.textContent = 'Copied';
-						} catch {
+						} catch (err) {
+							console.warn('Clipboard write failed:', err instanceof Error ? err.message : String(err));
 							details.open = true;
 							copy.textContent = 'Select details to copy';
 						}
@@ -133,8 +134,9 @@
 						configurable: true,
 						value: window.sessionStorage,
 					});
-				} catch {
-					/* Stores already tolerate unavailable browser storage. */
+				} catch (err) {
+					// Stores already tolerate unavailable browser storage.
+					console.debug('localStorage override failed:', err instanceof Error ? err.message : String(err));
 				}
 			}
 		</script>

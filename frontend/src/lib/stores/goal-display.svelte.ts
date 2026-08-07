@@ -6,7 +6,7 @@ type GoalDisplay = { sidebar: boolean; composer: boolean };
 const fallback: GoalDisplay = { sidebar: false, composer: true };
 function load(): GoalDisplay {
   if (!browser) return fallback;
-  try { return { ...fallback, ...JSON.parse(localStorage.getItem(KEY) ?? '{}') }; } catch { return fallback; }
+  try { return { ...fallback, ...JSON.parse(localStorage.getItem(KEY) ?? '{}') }; } catch (err: unknown) { console.debug('Failed to load goal display settings:', err instanceof Error ? err.message : String(err)); return fallback; }
 }
 let display = $state<GoalDisplay>(load());
 function update(patch: Partial<GoalDisplay>) { display = { ...display, ...patch }; if (browser) localStorage.setItem(KEY, JSON.stringify(display)); }

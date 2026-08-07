@@ -190,7 +190,8 @@
               task: run.task,
             }
           : undefined;
-    } catch {
+    } catch (err: unknown) {
+      console.warn('Failed to refresh active workflow:', err instanceof Error ? err.message : String(err));
       activeWorkflow = undefined;
     }
   }
@@ -528,7 +529,8 @@
           return composerProjectFiles;
         }
       }
-    } catch {
+    } catch (err: unknown) {
+      console.warn('Failed to fetch workspace file mentions:', err instanceof Error ? err.message : String(err));
       // Workspace listing unavailable — use imported project content only
     }
     composerProjectFiles = fromContent;
@@ -708,7 +710,8 @@
       const maybe = parsed as Record<string, unknown>;
       if (typeof maybe.showSidebar === 'boolean') showSidebar = maybe.showSidebar;
       if (typeof maybe.showAgents === 'boolean') showAgents = maybe.showAgents;
-    } catch {
+    } catch (err: unknown) {
+      console.debug('Failed to parse layout prefs from localStorage:', err instanceof Error ? err.message : String(err));
       // Ignore malformed local prefs and fall back to defaults.
     }
   }
@@ -869,7 +872,8 @@
       } else {
         toastStore.success(`Imported ${file.name} into a new project`);
       }
-    } catch {
+    } catch (err: unknown) {
+      console.warn('Failed to read selected project file:', err instanceof Error ? err.message : String(err));
       toastStore.error('Failed to read selected project file');
     } finally {
       input.value = '';
@@ -895,7 +899,8 @@
       toastStore.success(
         `Opened project from folder: ${result.folderName} (${result.fileCount} files)`,
       );
-    } catch {
+    } catch (err: unknown) {
+      console.warn('Failed to open project from folder:', err instanceof Error ? err.message : String(err));
       toastStore.error('Failed to open project from folder');
     } finally {
       input.value = '';
@@ -1045,7 +1050,9 @@
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ root: selectedPath }),
-          }).catch(() => {});
+          }).catch((err: unknown) => {
+            console.warn('Workspace register failed:', err instanceof Error ? err.message : String(err));
+          });
           sessionStore.activeSessionId = '';
           toastStore.success(
             `Opened workspace ${projectDisplayName(selectedPath)} with ${projects.length} project folders`,
@@ -1151,7 +1158,8 @@
         pending.attachments,
         pending.fastMode,
       );
-    } catch {
+    } catch (err: unknown) {
+      console.warn('Failed to resolve home folder:', err instanceof Error ? err.message : String(err));
       toastStore.error('Could not resolve your home folder — open a project instead');
     }
   }
@@ -1268,13 +1276,17 @@
     if (agentRail.selectedAgentId) {
       wsStore.markAgentStopped(agentRail.selectedAgentId);
       apiFetch(apiUrl(`/api/agent/${agentRail.selectedAgentId}/cancel`), { method: 'POST' }).catch(
-        () => {},
+        (err: unknown) => {
+          console.debug('Failed to cancel agent:', err instanceof Error ? err.message : String(err));
+        },
       );
       return;
     }
     wsStore.markSessionAgentsStopped(sid);
     wsStore.clearAnalyzing();
-    apiFetch(apiUrl(`/api/sessions/${sid}/cancel`), { method: 'POST' }).catch(() => {});
+    apiFetch(apiUrl(`/api/sessions/${sid}/cancel`), { method: 'POST' }).catch((err: unknown) => {
+      console.warn('Session cancel failed:', err instanceof Error ? err.message : String(err));
+    });
   }
 
   let activeAgents = $derived(

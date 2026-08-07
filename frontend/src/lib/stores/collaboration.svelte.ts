@@ -65,7 +65,10 @@ function startPollingPending(sessionId: string) {
         pendingJoins = data.data?.joins ?? [];
         participants = data.data?.participants ?? [];
       }
-    } catch {}
+    } catch (err) {
+      // Polling failures (network blip, backend restart) are expected; the next tick retries.
+      console.debug('Collaboration pending-poll failed:', err);
+    }
   }, 3000);
 }
 
@@ -143,8 +146,8 @@ export const collaborationStore = {
         toastStore.error(data.error || 'Failed to start session');
         return false;
       }
-    } catch (err: any) {
-      toastStore.error(err.message || 'Network error');
+    } catch (err: unknown) {
+      toastStore.error((err instanceof Error ? err.message : String(err)) || 'Network error');
       return false;
     } finally {
       loading = false;
@@ -166,8 +169,8 @@ export const collaborationStore = {
           toastStore.info(`Guest prompt queued: "${data.data.prompt.content.slice(0, 60)}..."`);
         }
       }
-    } catch (err: any) {
-      toastStore.error(err.message || 'Failed to respond to prompt');
+    } catch (err: unknown) {
+      toastStore.error((err instanceof Error ? err.message : String(err)) || 'Failed to respond to prompt');
     }
   },
 
@@ -203,9 +206,9 @@ export const collaborationStore = {
       if (!data.ok) throw new Error(data.error || 'Policy update failed');
       if (revision === policyRevision && activeCollab)
         activeCollab = { ...activeCollab, policy: data.data };
-    } catch (err: any) {
+    } catch (err: unknown) {
       if (revision === policyRevision) activeCollab = previous;
-      if (!quiet) toastStore.error(err.message || 'Policy update failed');
+      if (!quiet) toastStore.error((err instanceof Error ? err.message : String(err)) || 'Policy update failed');
     }
   },
 
@@ -287,8 +290,8 @@ export const collaborationStore = {
         toastStore.error(data.error || 'Failed to join session');
         return null;
       }
-    } catch (err: any) {
-      toastStore.error(err.message || 'Network error');
+    } catch (err: unknown) {
+      toastStore.error((err instanceof Error ? err.message : String(err)) || 'Network error');
       return null;
     } finally {
       loading = false;
@@ -303,8 +306,8 @@ export const collaborationStore = {
       activeCollab = null;
       stopPollingPending();
       toastStore.info('Collaboration ended');
-    } catch (err: any) {
-      toastStore.error(err.message || 'Network error');
+    } catch (err: unknown) {
+      toastStore.error((err instanceof Error ? err.message : String(err)) || 'Network error');
     } finally {
       loading = false;
     }

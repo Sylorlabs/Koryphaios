@@ -11,7 +11,16 @@
   let connected = $state(false); let expanded = $state(false); let key = $state(''); let visible = $state(false); let saving = $state(false);
   let accountId = $state<string | null>(null);
   $effect(() => { if (configured || providersStore.statusList.some(provider => provider.name === id && provider.authenticated)) connected = true; });
-  onMount(async () => { try { const result = await apiFetch(apiUrl(`/api/providers/${id}/accounts`)).then(response => response.json()); accountId = result.data?.[0]?.id ?? null; connected = connected || Boolean(accountId); } catch {} });
+  onMount(async () => {
+    try {
+      const result = await apiFetch(apiUrl(`/api/providers/${id}/accounts`)).then((response) => response.json());
+      accountId = result.data?.[0]?.id ?? null;
+      connected = connected || Boolean(accountId);
+    } catch (err) {
+      // Account lookup is best-effort; a 404/401 just means no account yet.
+      console.debug(`No existing account for ${id}:`, err);
+    }
+  });
   async function connect() {
     if (!key.trim()) return; saving = true;
     try {

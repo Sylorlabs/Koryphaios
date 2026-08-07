@@ -38,7 +38,9 @@
         .then((version) => {
           appVersion = version;
         })
-        .catch(() => {});
+        .catch((err: unknown) => {
+          console.warn('App version check failed:', err instanceof Error ? err.message : String(err));
+        });
     }
   });
 

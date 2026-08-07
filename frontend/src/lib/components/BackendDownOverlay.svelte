@@ -89,7 +89,8 @@
 		if (!ts) return '—';
 		try {
 			return new Date(ts).toLocaleString();
-		} catch {
+		} catch (err: unknown) {
+			console.debug('Failed to format timestamp:', err instanceof Error ? err.message : String(err));
 			return '—';
 		}
 	}
@@ -129,7 +130,8 @@
 		try {
 			await navigator.clipboard.writeText(diagnosticsText);
 			copyState = 'copied';
-		} catch {
+		} catch (err: unknown) {
+			console.warn('Failed to copy diagnostics to clipboard:', err instanceof Error ? err.message : String(err));
 			copyState = 'failed';
 		}
 		setTimeout(() => (copyState = 'idle'), 2000);

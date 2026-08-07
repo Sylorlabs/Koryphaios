@@ -55,7 +55,8 @@
         sharedSet = new Set(data.data.shared);
         sharedModels = data.data.sharedModels ?? {};
       }
-    } catch {
+    } catch (err: unknown) {
+      console.warn('Failed to load shared providers:', err instanceof Error ? err.message : String(err));
       /* backend offline — panel stays empty */
     } finally {
       loadingHost = false;
@@ -67,7 +68,8 @@
       const res = await apiFetch(apiUrl('/api/collab/providers/remote-status'));
       const data = await parseJsonResponse<{ ok?: boolean; data?: typeof remote }>(res);
       if (data.ok) remote = data.data ?? null;
-    } catch {
+    } catch (err: unknown) {
+      console.warn('Failed to load remote provider status:', err instanceof Error ? err.message : String(err));
       /* ignore */
     }
   }
@@ -80,7 +82,8 @@
         sandbox = data.data.policy;
         sandboxCaps = data.data.capabilities;
       }
-    } catch {
+    } catch (err: unknown) {
+      console.warn('Failed to load sandbox policy:', err instanceof Error ? err.message : String(err));
       /* ignore */
     }
   }
@@ -105,7 +108,8 @@
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ policy: sandbox }),
       });
-    } catch {
+    } catch (err: unknown) {
+      console.warn('Failed to save sandbox policy:', err instanceof Error ? err.message : String(err));
       toastStore.error('Could not save sandbox policy');
     } finally {
       savingSandbox = false;
@@ -169,7 +173,8 @@
       });
       if (res.ok) toastStore.success('Shared providers updated');
       else toastStore.error('Could not update shared providers');
-    } catch {
+    } catch (err: unknown) {
+      console.warn('Failed to save shared providers:', err instanceof Error ? err.message : String(err));
       toastStore.error('Could not update shared providers');
     } finally {
       savingHost = false;
@@ -195,8 +200,8 @@
       } else {
         toastStore.error(data.error || 'Could not connect to host');
       }
-    } catch (err: any) {
-      toastStore.error(err.message || 'Could not connect to host');
+    } catch (err: unknown) {
+      toastStore.error((err instanceof Error ? err.message : String(err)) || 'Could not connect to host');
     } finally {
       connecting = false;
     }
@@ -209,7 +214,8 @@
       await loadRemote();
       await loadProvidersFromApi();
       toastStore.info('Disconnected from host');
-    } catch {
+    } catch (err: unknown) {
+      console.warn('Failed to disconnect from host:', err instanceof Error ? err.message : String(err));
       toastStore.error('Could not disconnect');
     }
   }
@@ -233,26 +239,31 @@
       ? `${modelText} · CLI runs in a temporary sandbox on this computer.`
       : `${modelText} · ${candidate.reason}`;
   }
+
+  const remoteApiCount = $derived(remote?.catalog?.providers?.filter((p: any) => !p.agentic).length ?? 0);
+  const remoteCliCount = $derived(remote?.catalog?.providers?.filter((p: any) => p.agentic).length ?? 0);
 </script>
 
-<div class="space-y-8">
-  <div class="text-center">
-    <div class="w-16 h-16 mx-auto mb-4 rounded-3xl flex items-center justify-center" style="background: color-mix(in srgb, #a78bfa 12%, transparent); color: #a78bfa;">
-      <Share2 size={30} />
+<div class="space-y-6">
+  <div class="flex items-start gap-3">
+    <div class="mt-0.5 flex size-9 shrink-0 items-center justify-center rounded-xl" style="background: color-mix(in srgb, #a78bfa 12%, transparent); color: #a78bfa;">
+      <Share2 size={18} />
     </div>
-    <h3 class="text-2xl font-black text-[var(--color-text-primary)]">Share Models</h3>
-    <p class="text-sm text-[var(--color-text-muted)] mt-2">
-      Lend your providers for inference — or borrow someone else's. Each side keeps its own workspace and files; only the model call travels.
-    </p>
+    <div>
+      <h3 class="text-base font-semibold text-[var(--color-text-primary)]">Models you share</h3>
+      <p class="mt-1 max-w-2xl text-xs leading-5 text-[var(--color-text-muted)]">
+        Lend providers for inference without sharing your workspace or files. Only the model call travels.
+      </p>
+    </div>
   </div>
 
   <!-- ── HOST: share my providers ── -->
-  <section class="rounded-3xl border border-[var(--color-border)] bg-[var(--color-surface-2)] p-6">
-    <div class="flex items-center gap-3 mb-1">
+  <section class="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-2)] p-5">
+    <div class="flex items-center gap-3">
       <Share2 size={18} style="color: var(--color-accent);" />
       <h4 class="text-sm font-bold text-[var(--color-text-primary)]">Share my models</h4>
     </div>
-    <p class="text-[11px] text-[var(--color-text-muted)] mb-5">
+    <p class="ml-8 mt-1 text-[11px] text-[var(--color-text-muted)]">
       Every provider is listed here. Search by name, then enable the connected providers you want to lend.
     </p>
 
@@ -266,11 +277,11 @@
         <input bind:value={providerSearch} type="search" placeholder="Search all providers…" class="min-w-0 flex-1 bg-transparent text-xs text-[var(--color-text-primary)] outline-none placeholder:text-[var(--color-text-muted)]" aria-label="Search providers to share" />
         <span class="text-[10px] text-[var(--color-text-muted)]">{filteredCandidates.length}/{candidates.length}</span>
       </div>
-      <div class="max-h-[34rem] space-y-2 overflow-y-auto pr-1">
+      <div class="max-h-[30rem] space-y-2 overflow-y-auto pr-1">
         {#each filteredCandidates as c (c.provider)}
           {@const meta = riskMeta[c.risk]}
           {@const on = sharedSet.has(c.provider)}
-          <div class="rounded-2xl" style="background: {on && c.risk === 'prohibited' ? 'color-mix(in srgb, #ef4444 8%, var(--color-surface-1))' : 'transparent'};">
+          <div class="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-1)]" style="border-color: {on && c.risk === 'prohibited' ? 'color-mix(in srgb, #ef4444 45%, var(--color-border))' : 'var(--color-border)'};">
             <SettingsSwitch
               compact
               large
@@ -281,7 +292,7 @@
               onchange={() => toggleShare(c)}
             />
             {#if c.available && c.models.length > 0}
-              <div class="-mt-1 flex items-center justify-between gap-3 px-3 pb-2">
+              <div class="flex items-center justify-between gap-3 px-3 pb-2">
                 <span class="text-[10px] text-[var(--color-text-muted)]">{modelsFor(c).length} of {c.models.length} models shared</span>
                 <button type="button" onclick={() => expandedProvider = expandedProvider === c.provider ? null : c.provider} class="inline-flex items-center gap-1.5 rounded-lg border border-[var(--color-border)] px-2.5 py-1.5 text-[10px] font-medium text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-surface-3)]" aria-expanded={expandedProvider === c.provider}>
                   <SlidersHorizontal size={12} /> Choose models <ChevronDown size={12} class={expandedProvider === c.provider ? 'rotate-180' : ''} />
@@ -298,7 +309,7 @@
                 </div>
               {/if}
             {/if}
-            <div class="-mt-2 flex flex-wrap gap-1.5 px-3 pb-3">
+            <div class="flex flex-wrap gap-1.5 px-3 pb-3">
               <span class="inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[10px] font-medium" style="color: {meta.color}; background: color-mix(in srgb, {meta.color} 14%, transparent);"><meta.icon size={10} /> {meta.label}</span>
               {#if c.agentic}<span class="inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[10px] font-medium" style="color: #a78bfa; background: color-mix(in srgb, #a78bfa 14%, transparent);"><HardDrive size={10} /> CLI</span>{/if}
               {#if !c.available}<span class="rounded-full bg-[var(--color-surface-3)] px-1.5 py-0.5 text-[10px] text-[var(--color-text-muted)]">Not connected</span>{/if}
@@ -316,8 +327,9 @@
         </div>
       {/if}
 
-      <div class="mt-4 flex justify-end">
-        <button type="button" onclick={saveHost} disabled={savingHost} class="btn btn-primary text-xs px-5 py-2">
+      <div class="sticky bottom-0 -mx-5 -mb-5 mt-4 flex items-center justify-between gap-3 border-t border-[var(--color-border)] bg-[var(--color-surface-2)] px-5 py-3">
+        <span class="text-[10px] text-[var(--color-text-muted)]">Changes apply only after saving.</span>
+        <button type="button" onclick={saveHost} disabled={savingHost} class="btn btn-primary shrink-0 text-xs px-5 py-2">
           {savingHost ? 'Saving…' : 'Save shared providers'}
         </button>
       </div>
@@ -423,7 +435,7 @@
   </section>
 
   <!-- ── CLIENT: use a host's models ── -->
-  <section class="rounded-3xl border border-[var(--color-border)] bg-[var(--color-surface-2)] p-6">
+  <section class="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-2)] p-5">
     <div class="flex items-center gap-3 mb-1">
       <MonitorSmartphone size={18} style="color: var(--color-accent);" />
       <h4 class="text-sm font-bold text-[var(--color-text-primary)]">Use someone's models</h4>
@@ -434,8 +446,8 @@
     </p>
 
     {#if remote?.connected}
-      {@const apiCount = remote.catalog?.providers?.filter((p: any) => !p.agentic).length ?? 0}
-      {@const cliCount = remote.catalog?.providers?.filter((p: any) => p.agentic).length ?? 0}
+      {@const apiCount = remoteApiCount}
+      {@const cliCount = remoteCliCount}
       <div class="rounded-2xl border border-[var(--color-accent)]/30 bg-[var(--color-surface-1)] p-4">
         <div class="flex items-center justify-between gap-3">
           <div>

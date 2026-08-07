@@ -66,6 +66,7 @@
   let skillPreviewPrompt = $state('');
   let skillCollisionChoices = $state<Record<string, 'personal' | 'project'>>({});
   let showSkillComparison = $state(false);
+  let showBundledComparison = $state(false);
   let showSkillCreator = $state(false);
   let newSkillSource = $state<'personal' | 'project'>('personal');
   let newSkillName = $state('');
@@ -130,6 +131,11 @@
   async function compareSelectedSkill() {
     if (!selectedSkill) return;
     showSkillComparison = await agentSettingsStore.compareSkillDraft(selectedSkill);
+  }
+
+  async function compareSelectedSkillWithBundled() {
+    if (!selectedSkill) return;
+    showBundledComparison = await agentSettingsStore.compareBundledSkill(selectedSkill);
   }
 
   async function saveSelectedSkillDraft() {
@@ -416,7 +422,7 @@
 
                 <div class="grid gap-2 sm:grid-cols-2 xl:grid-cols-6" role="radiogroup" aria-label="Permission mode">
                   {#each [
-                    { value: 'guarded', label: 'Guarded', description: 'Ask only when risk is high' },
+                    { value: 'guarded', label: 'Guarded', description: 'All edits automatic; ask only for risky actions' },
                     { value: 'edits', label: 'Accept edits', description: 'Apply edits; ask for other actions' },
                     { value: 'ask', label: 'Ask', description: 'Confirm every action' },
                     { value: 'custom', label: 'Custom', description: 'Use the rules below' },
@@ -713,7 +719,9 @@
                 checked={agentSettingsStore.settings.autonomyLimitsEnabled}
                 label="Enable autonomy limits"
                 description={agentSettingsStore.settings.autonomyLimitsEnabled
-                  ? `Active: approval is required before edits exceeding ${agentSettingsStore.settings.approvalThresholdFiles} files or ${agentSettingsStore.settings.approvalThresholdLines} lines.`
+                  ? agentSettingsStore.settings.permissionMode === 'guarded'
+                    ? 'Active for risky non-edit actions. Guarded always applies file edits automatically.'
+                    : `Active: approval is required before edits exceeding ${agentSettingsStore.settings.approvalThresholdFiles} files or ${agentSettingsStore.settings.approvalThresholdLines} lines.`
                   : 'Off by default. The values below are saved but do not constrain runs until you enable this switch.'}
                 onchange={() => toggleSetting('autonomyLimitsEnabled')}
               />
@@ -1279,12 +1287,19 @@
               class="px-2 py-2 text-[10px] font-semibold uppercase tracking-wide text-[var(--color-text-muted)]"
             >
               Local library · {activeSkillCount} active
+              {#if agentSettingsStore.bundledUpdateCount > 0}
+                <span class="ml-1 rounded bg-[var(--color-accent)]/15 px-1.5 py-0.5 text-[var(--color-accent)]"
+                  >{agentSettingsStore.bundledUpdateCount} update{agentSettingsStore.bundledUpdateCount > 1 ? 's' : ''} available</span
+                >
+              {/if}
             </div>
             {#each agentSettingsStore.skills as skill (`${skill.source}:${skill.name}:${skill.state}`)}
               <button
                 onclick={() => {
                   selectedSkillKey = `${skill.source}:${skill.name}:${skill.state}`;
                   skillDraftDirty = false;
+                  showSkillComparison = false;
+                  showBundledComparison = false;
                 }}
                 class="mb-1 w-full rounded-lg border py-2 pr-2.5 text-left transition-colors {selectedSkill?.name ===
                   skill.name &&
@@ -1297,12 +1312,22 @@
                 <div class="flex items-center justify-between gap-2">
                   <span class="truncate text-xs font-medium text-[var(--color-text-primary)]"
                     >{skill.name}</span
-                  ><span
-                    class="rounded px-1.5 py-0.5 text-[9px] {skill.state === 'active'
-                      ? 'bg-[var(--color-success)]/15 text-[var(--color-success)]'
-                      : 'bg-[var(--color-warning)]/15 text-[var(--color-warning)]'}"
-                    >{skill.state}</span
                   >
+                  <div class="flex shrink-0 items-center gap-1">
+                    {#if skill.bundledUpdateAvailable}
+                      <span
+                        class="rounded bg-[var(--color-accent)]/15 px-1.5 py-0.5 text-[9px] text-[var(--color-accent)]"
+                        title="A newer bundled version is available. Use Compare to review and merge."
+                        >update</span
+                      >
+                    {/if}
+                    <span
+                      class="rounded px-1.5 py-0.5 text-[9px] {skill.state === 'active'
+                        ? 'bg-[var(--color-success)]/15 text-[var(--color-success)]'
+                        : 'bg-[var(--color-warning)]/15 text-[var(--color-warning)]'}"
+                      >{skill.state}</span
+                    >
+                  </div>
                 </div>
                 <div class="mt-1 text-[10px] text-[var(--color-text-muted)]">
                   {skill.source} · v{skill.metadata.version}
@@ -1330,6 +1355,13 @@
                     class="rounded-md border border-[var(--color-border)] px-2 py-1 text-xs text-[var(--color-text-secondary)]"
                     >Compare</button
                   >
+                  {#if selectedSkill.bundledUpdateAvailable}
+                    <button
+                      onclick={() => void compareSelectedSkillWithBundled()}
+                      class="rounded-md bg-[var(--color-accent)]/15 px-2 py-1 text-xs text-[var(--color-accent)]"
+                      >Compare with bundled</button
+                    >
+                  {/if}
                   <button
                     onclick={() => {
                       skillDraftContent = selectedSkill.content;
@@ -1446,38 +1478,12 @@
                     <span class="text-xs font-semibold text-[var(--color-text-primary)]"
                       >Active versus draft</span
                     >
-                    <div class="flex flex-wrap gap-1.5">
-                      <button
-                        type="button"
-                        onclick={() =>
-                          void agentSettingsStore.applyBundledSkillUpdate(
-                            selectedSkill,
-                            'keep-local',
-                          )}
-                        class="rounded bg-[var(--color-surface-3)] px-2 py-1 text-[10px] text-[var(--color-text-secondary)]"
-                        >Keep local</button
-                      >
-                      <button
-                        type="button"
-                        onclick={() =>
-                          void agentSettingsStore.applyBundledSkillUpdate(selectedSkill, 'merge')}
-                        class="rounded bg-[var(--color-warning)] px-2 py-1 text-[10px] text-white"
-                        >Merge to draft</button
-                      >
-                      <button
-                        type="button"
-                        onclick={() =>
-                          void agentSettingsStore.applyBundledSkillUpdate(selectedSkill, 'replace')}
-                        class="rounded bg-[var(--color-error)] px-2 py-1 text-[10px] text-white"
-                        >Replace with bundled</button
-                      >
-                      <button
-                        type="button"
-                        onclick={() => (showSkillComparison = false)}
-                        class="rounded border border-[var(--color-border)] px-2 py-1 text-[10px] text-[var(--color-text-secondary)]"
-                        >Close</button
-                      >
-                    </div>
+                    <button
+                      type="button"
+                      onclick={() => (showSkillComparison = false)}
+                      class="rounded border border-[var(--color-border)] px-2 py-1 text-[10px] text-[var(--color-text-secondary)]"
+                      >Close</button
+                    >
                   </div>
                   <div class="grid gap-2 xl:grid-cols-2">
                     <pre
@@ -1486,6 +1492,83 @@
                     <pre
                       class="overflow-auto whitespace-pre-wrap rounded bg-[var(--color-surface-0)] p-2 text-[9px] text-[var(--color-text-secondary)]">{agentSettingsStore
                         .skillComparison.draft}</pre>
+                  </div>
+                </div>
+              {/if}
+              {#if showBundledComparison && agentSettingsStore.bundledComparison}
+                <div
+                  class="max-h-[45%] overflow-auto border-t border-[var(--color-border)] bg-[var(--color-surface-1)] p-3"
+                >
+                  <div class="mb-2 flex flex-wrap items-center justify-between gap-2">
+                    <span class="text-xs font-semibold text-[var(--color-text-primary)]"
+                      >Your version versus bundled update</span
+                    >
+                    <div class="flex flex-wrap gap-1.5">
+                      <button
+                        type="button"
+                        onclick={() =>
+                          void agentSettingsStore.applyBundledSkillUpdate(
+                            selectedSkill,
+                            'keep-local',
+                          )}
+                        disabled={agentSettingsStore.isMergingSkill}
+                        class="rounded bg-[var(--color-surface-3)] px-2 py-1 text-[10px] text-[var(--color-text-secondary)] disabled:opacity-40"
+                        >Keep local</button
+                      >
+                      <button
+                        type="button"
+                        onclick={() =>
+                          void agentSettingsStore.applyBundledSkillUpdate(selectedSkill, 'merge')}
+                        disabled={agentSettingsStore.isMergingSkill}
+                        class="rounded bg-[var(--color-warning)] px-2 py-1 text-[10px] text-white disabled:opacity-40"
+                        >Merge to draft</button
+                      >
+                      <button
+                        type="button"
+                        onclick={() =>
+                          void agentSettingsStore.applyBundledSkillUpdate(
+                            selectedSkill,
+                            'merge-with-agent',
+                          )}
+                        disabled={agentSettingsStore.isMergingSkill}
+                        class="rounded bg-[var(--color-accent)] px-2 py-1 text-[10px] text-white disabled:opacity-40"
+                        >{agentSettingsStore.isMergingSkill ? 'Merging…' : 'Merge with agent'}</button
+                      >
+                      <button
+                        type="button"
+                        onclick={() =>
+                          void agentSettingsStore.applyBundledSkillUpdate(selectedSkill, 'replace')}
+                        disabled={agentSettingsStore.isMergingSkill}
+                        class="rounded bg-[var(--color-error)] px-2 py-1 text-[10px] text-white disabled:opacity-40"
+                        >Replace with bundled</button
+                      >
+                      <button
+                        type="button"
+                        onclick={() => (showBundledComparison = false)}
+                        disabled={agentSettingsStore.isMergingSkill}
+                        class="rounded border border-[var(--color-border)] px-2 py-1 text-[10px] text-[var(--color-text-secondary)] disabled:opacity-40"
+                        >Close</button
+                      >
+                    </div>
+                  </div>
+                  {#if agentSettingsStore.isMergingSkill}
+                    <div class="mb-2 rounded bg-[var(--color-accent)]/10 px-3 py-2 text-[10px] text-[var(--color-accent)]">
+                      The agent is reading both versions and producing a merged draft. This usually takes 10–30 seconds…
+                    </div>
+                  {/if}
+                  <div class="grid gap-2 xl:grid-cols-2">
+                    <div>
+                      <div class="mb-1 text-[9px] font-semibold uppercase tracking-wide text-[var(--color-text-muted)]">Your version</div>
+                      <pre
+                        class="overflow-auto whitespace-pre-wrap rounded bg-[var(--color-surface-0)] p-2 text-[9px] text-[var(--color-text-secondary)]">{agentSettingsStore
+                          .bundledComparison.local}</pre>
+                    </div>
+                    <div>
+                      <div class="mb-1 text-[9px] font-semibold uppercase tracking-wide text-[var(--color-text-muted)]">Bundled update</div>
+                      <pre
+                        class="overflow-auto whitespace-pre-wrap rounded bg-[var(--color-surface-0)] p-2 text-[9px] text-[var(--color-text-secondary)]">{agentSettingsStore
+                          .bundledComparison.bundled}</pre>
+                    </div>
                   </div>
                 </div>
               {/if}

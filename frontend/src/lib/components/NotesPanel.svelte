@@ -178,7 +178,8 @@
         ADD_ATTR: ['data-note-title', 'data-mermaid'],
         ADD_TAGS: ['foreignobject'],
       });
-    } catch {
+    } catch (err: unknown) {
+      console.debug('Markdown preview render failed:', err instanceof Error ? err.message : String(err));
       return '';
     }
   }
@@ -335,7 +336,8 @@
           let source = '';
           try {
             source = decodeURIComponent(escape(atob(b64)));
-          } catch {
+          } catch (err: unknown) {
+            console.debug('Failed to decode mermaid base64 source:', err instanceof Error ? err.message : String(err));
             source = '';
           }
           if (!source.trim()) continue;
@@ -346,7 +348,8 @@
             el.innerHTML = `<pre class="mermaid-error">${String((err as Error)?.message ?? err)}</pre>`;
           }
         }
-      } catch {
+      } catch (err: unknown) {
+        console.warn('Mermaid failed to load:', err instanceof Error ? err.message : String(err));
         /* mermaid failed to load; leave placeholders empty */
       }
     })();

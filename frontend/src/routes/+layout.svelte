@@ -33,7 +33,9 @@
 		void loadMonoFont();
 		void loadFont(theme.font);
 
-		import('$lib/utils/error-monitor').then((m) => m.initErrorMonitoring()).catch(() => {});
+		import('$lib/utils/error-monitor').then((m) => m.initErrorMonitoring()).catch((err: unknown) => {
+			console.warn('Error monitor init failed:', err instanceof Error ? err.message : String(err));
+		});
 
 		// Demo builds have no backend at all: skip the health sentinel (its
 		// overlay would block the whole demo after a few failed polls) and seed

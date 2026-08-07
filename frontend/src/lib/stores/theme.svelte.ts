@@ -308,7 +308,10 @@ function createThemeStore() {
     try {
       const stored = localStorage.getItem('koryphaios-theme');
       if (stored) savedConfig = { ...defaults, ...JSON.parse(stored) };
-    } catch {}
+    } catch (err) {
+      // Corrupt theme entry — fall back to defaults.
+      console.debug('Failed to parse saved theme:', err);
+    }
   }
 
   let preset = $state<ThemePreset>(savedConfig.preset);

@@ -6,6 +6,7 @@
  */
 
 import { apiUrl } from '$lib/utils/api-url';
+import { filterAdvancedSettings } from '$lib/utils/advanced-settings';
 import { toastStore } from './toast.svelte';
 import { apiFetch } from '$lib/api.svelte';
 
@@ -52,7 +53,6 @@ export interface ExperimentalFeatures {
   // Integrations
   vectorSearch: boolean;
   mcpServerV2: boolean;
-  telegramBotV2: boolean;
 
   // Security
   enhancedAuditLogs: boolean;
@@ -126,13 +126,12 @@ export const DEFAULT_EXPERIMENTAL_FEATURES: ExperimentalFeatures = {
 
   // AI & Agents
   agentMemoryV2: false,
-  multiAgentCoordination: false,
-  reasoningModeConfig: false,
+  multiAgentCoordination: true, // On: Kory delegates to specialist workers when a task warrants it.
+  reasoningModeConfig: true, // Stable + broadly wanted — on by default.
 
   // Integrations
   vectorSearch: false,
   mcpServerV2: false,
-  telegramBotV2: false,
 
   // Security
   enhancedAuditLogs: false,
@@ -159,88 +158,93 @@ export interface FeatureMetadata {
   key: keyof ExperimentalFeatures;
   label: string;
   description: string;
-  category: string;
+  category: FeatureCategory;
   status: 'stable' | 'beta' | 'alpha' | 'coming-soon';
+  keywords: string[];
+  impact: string;
   requiresRestart?: boolean;
 }
+
+export type FeatureCategory =
+  | 'Agents & intelligence'
+  | 'Cost & safety'
+  | 'Runtime & recovery'
+  | 'Data & performance';
+
+export interface FeatureCategoryMetadata {
+  id: FeatureCategory;
+  description: string;
+}
+
+export const FEATURE_CATEGORIES: FeatureCategoryMetadata[] = [
+  {
+    id: 'Agents & intelligence',
+    description: 'How Kory reasons, delegates, and coordinates work.',
+  },
+  {
+    id: 'Cost & safety',
+    description: 'Limits that contain spend and protect active sessions.',
+  },
+  {
+    id: 'Runtime & recovery',
+    description: 'Background process resilience and automatic recovery.',
+  },
+  {
+    id: 'Data & performance',
+    description: 'Storage and worker behavior for demanding workloads.',
+  },
+];
 
 export const FEATURE_METADATA: FeatureMetadata[] = [
   // Spend Caps & Billing
   {
     key: 'hardSpendCaps',
     label: 'Hard Spend Caps',
-    description: 'Actually PAUSE agents when spend limits are reached. Prevents runaway costs.',
-    category: 'Billing',
+    description: 'Pause agents when configured spend limits are reached.',
+    category: 'Cost & safety',
     status: 'beta',
+    keywords: ['billing', 'budget', 'limits', 'pause', 'runaway costs'],
+    impact: 'Applies the session and global caps configured in Billing before additional agent work can continue.',
   },
 
   // Database & Persistence
   {
     key: 'sqliteConnectionPool',
     label: 'SQLite Connection Pool',
-    description: "Multiple read connections with write queue. Reduces 'database is locked' errors.",
-    category: 'Database',
+    description: 'Use multiple read connections with a serialized write queue.',
+    category: 'Data & performance',
     status: 'beta',
-  },
-  {
-    key: 'postgresBackend',
-    label: 'PostgreSQL Backend',
-    description: 'Use PostgreSQL instead of SQLite for multi-user deployments.',
-    category: 'Database',
-    status: 'coming-soon',
-  },
-  {
-    key: 'redisJobQueue',
-    label: 'Redis Job Queue',
-    description: 'Durable job queue with Redis. Survive crashes without losing agent tasks.',
-    category: 'Database',
-    status: 'coming-soon',
-  },
-
-  // Sync & Reliability
-  {
-    key: 'messageReplayBuffer',
-    label: 'Message Replay Buffer',
-    description: 'Server-side message buffer for replay on reconnect. Never miss completions.',
-    category: 'Reliability',
-    status: 'coming-soon',
-  },
-  {
-    key: 'requestCorrelation',
-    label: 'Request Correlation IDs',
-    description: 'Track HTTP requests through to WebSocket responses for better debugging.',
-    category: 'Reliability',
-    status: 'coming-soon',
-  },
-  {
-    key: 'serverSideSessionFilter',
-    label: 'Server-Side Session Filter',
-    description: 'Only send session messages to subscribed clients. Reduces bandwidth 90%.',
-    category: 'Reliability',
-    status: 'coming-soon',
+    keywords: ['database', 'storage', 'connection', 'locked', 'queue'],
+    impact: "Reduces database contention during concurrent reads while keeping writes ordered.",
   },
 
   // Process Management
   {
     key: 'processSupervisor',
     label: 'Process Supervisor',
-    description: 'Automatic crash detection, restart, and orphan cleanup for background processes.',
-    category: 'Processes',
+    description: 'Monitor background processes for crashes and lifecycle changes.',
+    category: 'Runtime & recovery',
     status: 'stable',
+    keywords: ['process', 'background', 'crash', 'monitor', 'lifecycle'],
+    impact: 'Keeps a lifecycle record for supervised commands and makes recovery controls available.',
   },
   {
     key: 'processAutoRestart',
     label: 'Process Auto-Restart',
     description: 'Automatically restart crashed background processes with exponential backoff.',
-    category: 'Processes',
+    category: 'Runtime & recovery',
     status: 'stable',
+    keywords: ['process', 'background', 'crash', 'restart', 'backoff'],
+    impact: 'Retries eligible supervised processes after a crash while spacing repeated attempts.',
   },
   {
     key: 'orphanProcessCleanup',
     label: 'Orphan Process Cleanup',
-    description: 'Kill leftover processes on server startup. Keeps system clean.',
-    category: 'Processes',
+    description: 'Clean up leftover supervised processes when the server starts.',
+    category: 'Runtime & recovery',
     status: 'stable',
+    keywords: ['process', 'background', 'orphan', 'cleanup', 'startup'],
+    impact: 'Prevents stale supervised work from surviving into a new Koryphaios runtime.',
   },
 
   // Performance
@@ -248,125 +252,32 @@ export const FEATURE_METADATA: FeatureMetadata[] = [
     key: 'workerPool',
     label: 'Worker Pool',
     description: 'Pool of pre-warmed workers for faster agent spawning.',
-    category: 'Performance',
+    category: 'Data & performance',
     status: 'alpha',
+    keywords: ['performance', 'agent', 'workers', 'spawn', 'warm'],
+    impact: 'Keeps workers ready between tasks to reduce startup latency at the cost of additional idle resources.',
   },
-  {
-    key: 'connectionPooling',
-    label: 'HTTP Connection Pooling',
-    description: 'Reuse connections to LLM providers for lower latency.',
-    category: 'Performance',
-    status: 'coming-soon',
-  },
-  {
-    key: 'queryOptimization',
-    label: 'Query Optimization',
-    description: 'Optimized database queries with better indexes and caching.',
-    category: 'Performance',
-    status: 'coming-soon',
-  },
-
-  // UX & UI
-  {
-    key: 'commandPaletteV2',
-    label: 'Command Palette V2',
-    description: 'Fuzzy search, recent commands, customizable shortcuts.',
-    category: 'UX',
-    status: 'coming-soon',
-  },
-  {
-    key: 'inlineDiffPreview',
-    label: 'Inline Diff Preview',
-    description: 'See code changes inline as the agent makes them.',
-    category: 'UX',
-    status: 'coming-soon',
-  },
-  {
-    key: 'realTimeMetrics',
-    label: 'Real-Time Metrics',
-    description: 'Live performance charts and cost tracking in the UI.',
-    category: 'UX',
-    status: 'coming-soon',
-  },
-  {
-    key: 'advancedThemeEditor',
-    label: 'Advanced Theme Editor',
-    description: 'Fine-grained control over colors, fonts, and UI density.',
-    category: 'UX',
-    status: 'coming-soon',
-  },
-
   // AI & Agents
-  {
-    key: 'agentMemoryV2',
-    label: 'Agent Memory V2',
-    description: 'Long-term memory across sessions with semantic search.',
-    category: 'AI',
-    status: 'coming-soon',
-  },
   {
     key: 'multiAgentCoordination',
     label: 'Multi-Agent Coordination',
-    description: 'Advanced coordination between multiple agents with conflict resolution.',
-    category: 'AI',
-    status: 'alpha',
+    description:
+      'Let Kory delegate to specialist workers. Engages only when you pick Multi-Agent in the composer, or when Auto decides a task needs it — never for simple chat.',
+    category: 'Agents & intelligence',
+    status: 'stable',
+    keywords: ['ai', 'agents', 'delegation', 'coordination', 'multi-agent', 'auto'],
+    impact: 'Allows complex work to be divided among specialist agents while keeping simple conversations single-agent.',
   },
   {
     key: 'reasoningModeConfig',
     label: 'Reasoning Mode Configuration',
     description: 'Configure thinking effort per model (low/medium/high/max).',
-    category: 'AI',
-    status: 'beta',
-  },
-
-  // Integrations
-  {
-    key: 'vectorSearch',
-    label: 'Vector Search / RAG',
-    description: 'Index and search your codebase with embeddings. True context awareness.',
-    category: 'Integrations',
-    status: 'coming-soon',
-  },
-  {
-    key: 'mcpServerV2',
-    label: 'MCP Server V2',
-    description: 'Enhanced Model Context Protocol with better tool discovery.',
-    category: 'Integrations',
-    status: 'coming-soon',
-  },
-  {
-    key: 'telegramBotV2',
-    label: 'Telegram Bot V2',
-    description: 'Rich interactions with inline keyboards and file sharing.',
-    category: 'Integrations',
-    status: 'coming-soon',
-  },
-
-  // Security
-  {
-    key: 'enhancedAuditLogs',
-    label: 'Enhanced Audit Logs',
-    description: 'Detailed audit trail of all actions with export capabilities.',
-    category: 'Security',
-    status: 'coming-soon',
-  },
-  {
-    key: 'sessionRecording',
-    label: 'Session Recording',
-    description: 'Record and replay sessions for debugging and compliance.',
-    category: 'Security',
-    status: 'coming-soon',
-  },
-  {
-    key: 'ipRateLimiting',
-    label: 'IP-Based Rate Limiting',
-    description: 'Stricter rate limits per IP address with automatic blocking.',
-    category: 'Security',
-    status: 'coming-soon',
+    category: 'Agents & intelligence',
+    status: 'stable',
+    keywords: ['ai', 'reasoning', 'thinking', 'effort', 'model'],
+    impact: 'Shows reasoning-effort controls for compatible models in the composer and agent workflow.',
   },
 ];
-
-export const FEATURE_CATEGORIES = [...new Set(FEATURE_METADATA.map((f) => f.category))];
 
 // ============================================================================
 // Store Factory
@@ -380,8 +291,11 @@ function createExperimentalStore() {
       if (stored) {
         return { ...DEFAULT_EXPERIMENTAL_FEATURES, ...JSON.parse(stored) };
       }
-    } catch {}
-    return DEFAULT_EXPERIMENTAL_FEATURES;
+    } catch (err) {
+      // Corrupt or missing localStorage entry — fall back to defaults.
+      console.debug('Failed to parse experimental features from localStorage:', err);
+    }
+    return { ...DEFAULT_EXPERIMENTAL_FEATURES };
   };
 
   let features = $state<ExperimentalFeatures>(loadFromStorage());
@@ -399,7 +313,10 @@ function createExperimentalStore() {
   function saveToStorage() {
     try {
       localStorage.setItem('koryphaios-experimental', JSON.stringify(features));
-    } catch {}
+    } catch (err) {
+      // Quota exceeded or disabled storage — non-fatal, in-memory state persists.
+      console.debug('Failed to persist experimental features to localStorage:', err);
+    }
   }
 
   // ========================================================================
@@ -543,7 +460,7 @@ function createExperimentalStore() {
   }
 
   function resetToDefaults(): void {
-    features = DEFAULT_EXPERIMENTAL_FEATURES;
+    features = { ...DEFAULT_EXPERIMENTAL_FEATURES };
     saveToStorage();
     toastStore.info('Experimental features reset to defaults');
   }
@@ -586,22 +503,7 @@ function createExperimentalStore() {
 
     // Computed
     get filteredFeatures() {
-      return FEATURE_METADATA.filter((feature) => {
-        // Category filter
-        if (selectedCategory !== 'All' && feature.category !== selectedCategory) {
-          return false;
-        }
-        // Search filter
-        if (searchQuery.trim()) {
-          const q = searchQuery.toLowerCase();
-          return (
-            feature.label.toLowerCase().includes(q) ||
-            feature.description.toLowerCase().includes(q) ||
-            feature.category.toLowerCase().includes(q)
-          );
-        }
-        return true;
-      });
+      return filterAdvancedSettings(FEATURE_METADATA, selectedCategory, searchQuery);
     },
 
     get enabledCount() {

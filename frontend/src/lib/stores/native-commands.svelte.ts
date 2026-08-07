@@ -75,7 +75,8 @@ export const nativeCommandsStore = {
       };
       cache.set(provider, entry);
       return entry;
-    } catch {
+    } catch (err: unknown) {
+      console.warn(`Failed to load native commands for ${provider}:`, err instanceof Error ? err.message : String(err));
       return null;
     } finally {
       fetching.delete(provider);
@@ -93,7 +94,8 @@ export const nativeCommandsStore = {
       });
       const json = await parseJsonResponse<{ ok?: boolean; error?: string }>(res);
       return !!json.ok;
-    } catch {
+    } catch (err: unknown) {
+      console.warn('Failed to run native command:', err instanceof Error ? err.message : String(err));
       return false;
     }
   },

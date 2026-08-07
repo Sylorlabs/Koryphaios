@@ -71,7 +71,8 @@ export function connect(url?: string) {
       if (currentAttemptId !== connectionIdCounter) return;
       connectionStatus = 'error';
     };
-  } catch {
+  } catch (err: unknown) {
+    console.warn('WebSocket connection failed:', err instanceof Error ? err.message : String(err));
     if (currentAttemptId === connectionIdCounter) {
       connectionStatus = 'error';
       scheduleReconnect();

@@ -113,6 +113,8 @@ export interface SkillRevision {
     warnings: string[];
     ignoredAuthorityClaims: string[];
   };
+  /** True when a newer bundled version exists and the local copy has user edits. */
+  bundledUpdateAvailable?: boolean;
 }
 
 export interface HarnessQualificationRecord {
@@ -173,6 +175,14 @@ export interface SkillRevisionComparison {
   changed: boolean;
   active: string;
   draft: string;
+}
+
+export interface BundledSkillComparison {
+  localHash: string;
+  bundledHash: string;
+  changed: boolean;
+  local: string;
+  bundled: string;
 }
 
 export interface SkillResolutionPreview {
@@ -253,7 +263,10 @@ function createAgentSettingsStore() {
   let skillQualifications = $state<HarnessQualificationRecord[]>([]);
   let skillEvaluationCards = $state<Record<string, SkillEvaluationCard>>({});
   let skillComparison = $state<SkillRevisionComparison | null>(null);
+  let bundledComparison = $state<BundledSkillComparison | null>(null);
   let skillResolutionPreview = $state<SkillResolutionPreview | null>(null);
+  let isMergingSkill = $state(false);
+  let bundledUpdateCount = $state(0);
   let lastCriticResult = $state<CriticReviewResult | null>(null);
   // Loads and saves share one revision so a slow initial/project load can
   // never overwrite a newer optimistic permission or settings change.
@@ -402,8 +415,25 @@ function createAgentSettingsStore() {
       const res = await apiFetch(apiUrl('/api/agent/skills'));
       const data = await res.json();
       if (res.ok && data.ok) skills = data.data;
+      // Check for bundled updates and notify the user
+      await fetchBundledUpdateCount();
+      if (bundledUpdateCount > 0) {
+        toastStore.info(
+          `${bundledUpdateCount} skill${bundledUpdateCount > 1 ? 's have' : ' has'} a bundled update available. Open the Skills tab to review.`,
+        );
+      }
     } catch (err) {
       console.error('Failed to load skills:', err);
+    }
+  }
+
+  async function fetchBundledUpdateCount(): Promise<void> {
+    try {
+      const res = await apiFetch(apiUrl('/api/agent/skills/bundled-updates/count'));
+      const data = await res.json();
+      if (res.ok && data.ok) bundledUpdateCount = data.data.count;
+    } catch {
+      // Non-critical — silently ignore
     }
   }
 
@@ -454,8 +484,8 @@ function createAgentSettingsStore() {
       await loadSkills();
       toastStore.success('Skill draft created');
       return data.data as SkillRevision;
-    } catch (err: any) {
-      toastStore.error(err?.message ?? 'Failed to create skill draft');
+    } catch (err: unknown) {
+      toastStore.error((err instanceof Error ? err.message : String(err)) ?? 'Failed to create skill draft');
       return null;
     }
   }
@@ -472,8 +502,8 @@ function createAgentSettingsStore() {
       await loadSkills();
       toastStore.success('Skill saved as draft');
       return true;
-    } catch (err: any) {
-      toastStore.error(err?.message ?? 'Failed to save skill draft');
+    } catch (err: unknown) {
+      toastStore.error((err instanceof Error ? err.message : String(err)) ?? 'Failed to save skill draft');
       return false;
     }
   }
@@ -498,8 +528,8 @@ function createAgentSettingsStore() {
       await loadSkills();
       toastStore.success('Validated skill activated');
       return true;
-    } catch (err: any) {
-      toastStore.error(err?.message ?? 'Failed to activate skill');
+    } catch (err: unknown) {
+      toastStore.error((err instanceof Error ? err.message : String(err)) ?? 'Failed to activate skill');
       return false;
     }
   }
@@ -512,17 +542,32 @@ function createAgentSettingsStore() {
       if (!res.ok || !data.ok) throw new Error(data.error);
       skillComparison = data.data;
       return true;
-    } catch (err: any) {
+    } catch (err: unknown) {
       skillComparison = null;
-      toastStore.error(err?.message ?? 'Active and draft revisions are required');
+      toastStore.error((err instanceof Error ? err.message : String(err)) ?? 'Active and draft revisions are required');
+      return false;
+    }
+  }
+
+  async function compareBundledSkillFn(skill: SkillRevision): Promise<boolean> {
+    try {
+      const res = await apiFetch(apiUrl(`/api/agent/skills/${skill.name}/compare-bundled`));
+      const data = await res.json();
+      if (!res.ok || !data.ok) throw new Error(data.error);
+      bundledComparison = data.data;
+      return true;
+    } catch (err: unknown) {
+      bundledComparison = null;
+      toastStore.error((err instanceof Error ? err.message : String(err)) ?? 'Failed to compare with bundled version');
       return false;
     }
   }
 
   async function applyBundledSkillUpdate(
     skill: SkillRevision,
-    choice: 'replace' | 'merge' | 'keep-local',
+    choice: 'replace' | 'merge' | 'keep-local' | 'merge-with-agent',
   ): Promise<boolean> {
+    if (choice === 'merge-with-agent') isMergingSkill = true;
     try {
       const res = await apiFetch(apiUrl(`/api/agent/skills/${skill.name}/update-default`), {
         method: 'POST',
@@ -533,13 +578,20 @@ function createAgentSettingsStore() {
       if (!res.ok || !data.ok) throw new Error(data.error);
       await loadSkills();
       skillComparison = null;
-      toastStore.success(
-        choice === 'merge' ? 'Bundled update saved as a draft' : 'Skill update choice applied',
-      );
+      bundledComparison = null;
+      const messages: Record<typeof choice, string> = {
+        merge: 'Bundled update saved as a draft',
+        'merge-with-agent': 'Agent-merged draft saved — review and activate it',
+        replace: 'Skill replaced with bundled version',
+        'keep-local': 'Kept your local version',
+      };
+      toastStore.success(messages[choice] ?? 'Skill update choice applied');
       return true;
-    } catch (err: any) {
-      toastStore.error(err?.message ?? 'Failed to apply bundled update');
+    } catch (err: unknown) {
+      toastStore.error((err instanceof Error ? err.message : String(err)) ?? 'Failed to apply bundled update');
       return false;
+    } finally {
+      isMergingSkill = false;
     }
   }
 
@@ -557,9 +609,9 @@ function createAgentSettingsStore() {
       if (!res.ok || !data.ok) throw new Error(data.error);
       skillResolutionPreview = data.data;
       return true;
-    } catch (err: any) {
+    } catch (err: unknown) {
       skillResolutionPreview = null;
-      toastStore.error(err?.message ?? 'Failed to preview skill selection');
+      toastStore.error((err instanceof Error ? err.message : String(err)) ?? 'Failed to preview skill selection');
       return false;
     }
   }
@@ -669,8 +721,17 @@ function createAgentSettingsStore() {
     get skillComparison() {
       return skillComparison;
     },
+    get bundledComparison() {
+      return bundledComparison;
+    },
     get skillResolutionPreview() {
       return skillResolutionPreview;
+    },
+    get isMergingSkill() {
+      return isMergingSkill;
+    },
+    get bundledUpdateCount() {
+      return bundledUpdateCount;
     },
 
     // Rules are always enforced - no getter to disable
@@ -700,8 +761,10 @@ function createAgentSettingsStore() {
     saveSkillDraft,
     testAndActivateSkill,
     compareSkillDraft,
+    compareBundledSkill: compareBundledSkillFn,
     applyBundledSkillUpdate,
     previewSkillResolution,
+    fetchBundledUpdateCount,
 
     // Context & Enforcement
     loadContext,

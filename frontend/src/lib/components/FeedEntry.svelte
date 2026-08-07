@@ -170,7 +170,8 @@
     try {
       const parsed = JSON.parse(tr.output ?? '') as { path?: string };
       return parsed.path ?? null;
-    } catch {
+    } catch (err: unknown) {
+      console.debug('Failed to parse view_image tool result:', err instanceof Error ? err.message : String(err));
       return null;
     }
   }
@@ -254,7 +255,8 @@
     if (!input || Object.keys(input).length === 0) return '';
     try {
       return JSON.stringify(input, null, 2);
-    } catch {
+    } catch (err: unknown) {
+      console.debug('Failed to stringify tool call input:', err instanceof Error ? err.message : String(err));
       return '';
     }
   }
@@ -483,7 +485,8 @@
       return expandHtmlSandboxes(
         DOMPurify.sanitize(marked.parse(withoutRenderDirectives, { async: false }) as string),
       );
-    } catch {
+    } catch (err: unknown) {
+      console.debug('Markdown parse failed:', err instanceof Error ? err.message : String(err));
       return debouncedText;
     }
   });
@@ -786,7 +789,8 @@
     if (command) return `$ ${command}`;
     try {
       return JSON.stringify(input, null, 2);
-    } catch {
+    } catch (err: unknown) {
+      console.debug('Failed to stringify tool call input:', err instanceof Error ? err.message : String(err));
       return currentText;
     }
   }
